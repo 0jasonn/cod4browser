@@ -27,7 +27,7 @@
 
 #include <ode/config.h>
 
-#include <vadefs.h>
+#include <stdarg.h>
 
 #ifdef __cplusplus
 extern "C" {

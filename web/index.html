@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en" data-runtime-state="loading">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+        http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'">
+    <meta name="theme-color" content="#10110f">
+    <link rel="icon" href="data:,">
+    <title>KisakCOD Browser Port</title>
+    <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+    <div class="page-shell">
+        <header class="site-header">
+            <a class="wordmark" href="./" aria-label="KisakCOD browser port home">
+                <span class="wordmark-mark" aria-hidden="true">K</span>
+                <span>
+                    <strong>KisakCOD</strong>
+                    <small>Browser port</small>
+                </span>
+            </a>
+            <div class="build-tag">Milestone 10 / bounded multi-asset traversal</div>
+        </header>
+
+        <main>
+            <section class="hero" aria-labelledby="page-title">
+                <div class="hero-copy">
+                    <p class="eyebrow">Native engine, new platform</p>
+                    <h1 id="page-title">Your game files.<br>Your browser.</h1>
+                    <p class="lede">
+                        KisakCOD now decodes a freely generated Material-to-GfxWorld two-asset
+                        fastfile fixture and converts its bounded world surface into the indexed
+                        WebGL2 seam. Select
+                        files from a legally owned installation
+                        to enumerate and verify an engine archive; the current importer still reads
+                        only <code>localization.txt</code> and <code>main/iw_00.iwd</code>. Nothing
+                        is uploaded or bundled.
+                    </p>
+                    <div class="runtime-status" role="status" aria-live="polite">
+                        <span class="status-light" aria-hidden="true"></span>
+                        <span>
+                            <small id="runtime-label">Runtime loading</small>
+                            <strong id="runtime-message">Downloading the WebAssembly module</strong>
+                        </span>
+                    </div>
+                </div>
+
+                <div class="viewport-panel">
+                    <div class="viewport-header">
+                        <span>WebGL2 output</span>
+                        <span id="frame-counter">Frame &mdash;</span>
+                    </div>
+                    <div class="canvas-wrap">
+                        <canvas id="game-canvas" width="960" height="540" tabindex="0">
+                            A browser with canvas and WebGL2 support is required.
+                        </canvas>
+                        <div class="viewport-grid" aria-hidden="true"></div>
+                        <div class="corner-label" aria-hidden="true">WASM / GL2</div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="diagnostics" aria-label="Port diagnostics">
+                <article>
+                    <span class="diagnostic-index">01</span>
+                    <div>
+                        <small>Portable engine code</small>
+                        <strong id="physics-status">ODE + qcommon pending</strong>
+                    </div>
+                </article>
+                <article>
+                    <span class="diagnostic-index">02</span>
+                    <div>
+                        <small>Renderer seam</small>
+                        <strong id="renderer-status">WebGL2 pending</strong>
+                    </div>
+                </article>
+                <article>
+                    <span class="diagnostic-index">03</span>
+                    <div>
+                        <small>Browser system</small>
+                        <strong id="system-status">Timing + RAF pending</strong>
+                    </div>
+                </article>
+                <article>
+                    <span class="diagnostic-index">04</span>
+                    <div>
+                        <small>Canvas</small>
+                        <strong id="canvas-size">960 &times; 540</strong>
+                    </div>
+                </article>
+                <article>
+                    <span class="diagnostic-index">05</span>
+                    <div>
+                        <small>IWD archive</small>
+                        <strong id="archive-status">Waiting for local assets</strong>
+                    </div>
+                </article>
+                <article>
+                    <span class="diagnostic-index">06</span>
+                    <div>
+                        <small>Engine asset</small>
+                        <strong id="engine-asset-status">Waiting for mounted archive</strong>
+                    </div>
+                </article>
+            </section>
+
+            <section class="asset-panel" aria-labelledby="asset-title">
+                <div class="asset-copy">
+                    <p class="eyebrow">Local asset boundary</p>
+                    <h2 id="asset-title">Connect a legal installation</h2>
+                    <p>
+                        The importer reads only <code>localization.txt</code> and
+                        <code>main/iw_00.iwd</code> for this milestone. It copies those files
+                        into origin-private browser storage, then reopens them through the
+                        asynchronous WebAssembly archive reader. A bounded IWI member is validated;
+                        when it matches the initial format-1 slice, portable code converts it to
+                        RGBA8 and uploads it through a renderer seam. Other valid formats are deferred.
+                        Only bounded recovery pixels remain after a supported request completes.
+                        Your source folder stays untouched.
+                    </p>
+                    <p class="asset-legal">
+                        You must supply files from a legally owned Call of Duty 4 installation.
+                        Game data remains on this device and is never sent to the server.
+                    </p>
+                </div>
+                <div class="asset-control">
+                    <div class="asset-status" role="status" aria-live="polite">
+                        <span class="asset-status-mark" aria-hidden="true"></span>
+                        <div>
+                            <small id="asset-state-label">Checking browser storage</small>
+                            <strong id="asset-message">Waiting for the WebAssembly asset probe</strong>
+                        </div>
+                    </div>
+                    <progress id="asset-progress" max="1" value="0" hidden></progress>
+                    <dl id="asset-manifest" class="asset-manifest" hidden></dl>
+                    <p id="asset-retention" class="asset-retention" hidden>
+                        This browser did not grant durable storage. The local copy can be
+                        evicted automatically; keep the original installation available.
+                    </p>
+                    <div class="asset-actions">
+                        <button id="select-install-button" class="primary-action" type="button" disabled>
+                            Choose COD4 installation
+                        </button>
+                        <button id="clear-assets-button" class="secondary-action" type="button" hidden>
+                            Remove browser copy
+                        </button>
+                    </div>
+                    <input
+                        id="install-folder-input"
+                        type="file"
+                        webkitdirectory
+                        directory
+                        multiple
+                        hidden>
+                </div>
+            </section>
+
+            <section class="console-panel" aria-labelledby="console-title">
+                <div class="console-heading">
+                    <div>
+                        <p class="eyebrow">Engine output</p>
+                        <h2 id="console-title">Boot console</h2>
+                    </div>
+                    <span>Last 80 lines</span>
+                </div>
+                <pre id="boot-log" aria-live="polite"></pre>
+            </section>
+        </main>
+
+        <footer>
+            <span>KisakCOD source is GPL-3.0.</span>
+            <span>Call of Duty game data is not included.</span>
+        </footer>
+    </div>
+
+    <noscript>This bootstrap requires JavaScript to load WebAssembly.</noscript>
+    <script type="module" src="./launcher.mjs"></script>
+</body>
+</html>

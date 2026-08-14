@@ -1,0 +1,6 @@
+{
+  "emscripten": "6.0.6",
+  "emsdkCommit": "9981799f744be74ac67b1c1813ff172f63be0630",
+  "cmake": "4.2.0-rc3",
+  "ninja": "1.13.2"
+}

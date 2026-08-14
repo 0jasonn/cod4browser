@@ -1,0 +1,615 @@
+# Browser port status
+
+The browser port starts from KisakCOD upstream commit
+`1c03702cbe176e9274e486d295edcd035b3c2b5f` (7 August 2026). The local
+`web-port` branch retains upstream history and tracks `upstream/master`.
+
+## Milestone 0: browser bootstrap (complete)
+
+The `KisakCOD-web` target is deliberately separate from the existing SP, MP,
+dedicated-server, and Radiant targets. Those native targets currently include
+Win32, Direct3D 9, Winsock, Steam, Miles, and Bink before their platform seams
+are broad enough to replace safely.
+
+The bootstrap proves four things without requiring retail game files:
+
+1. C++20 builds and starts as WebAssembly.
+2. Existing ODE physics math from `src/physics/ode/odemath.cpp` runs correctly
+   in Wasm.
+3. Emscripten creates a WebGL2 context and a minimal shader pipeline.
+4. A non-blocking browser main loop renders frames and reports state to a
+   hand-authored launcher.
+
+This is a renderer/platform foothold, not yet a playable COD4 build.
+
+## Milestone 1: browser system and headless engine slice (complete)
+
+The bootstrap now has an explicit browser system boundary in
+`src/web/web_system.cpp`. It preserves the engine-facing monotonic
+`Sys_Milliseconds`/`Sys_MillisecondsRaw` and `Sys_Print` contracts while the
+web-owned frame pump schedules exactly one engine callback per browser
+`requestAnimationFrame`. It does not spin, sleep, enable Asyncify, or block the
+browser event loop.
+
+The Wasm target also compiles a deliberately narrow, platform-neutral slice of
+the existing command and dvar design:
+
+1. `src/qcommon/cmd_core.cpp` provides command registration, tokenization,
+   quoted strings and comments, the 64 KiB command buffer, case-insensitive
+   dispatch, and frame-based `wait` behavior through the existing `cmd.h` API.
+2. `src/universal/dvar_core.cpp` provides a fixed registry and owned string
+   values. It supports `set` and direct dvar query/set commands without storing
+   pointers in integer fields.
+3. Browser initialization executes quoted, escaped, commented, and
+   case-insensitive synthetic commands. A queued `wait` sequence completes on
+   RAF tick 2, proving that command-buffer work advances across browser frames.
+4. Structured system and engine events expose the monotonic clock, pump ticks,
+   and dvar results to the launcher and Playwright smoke test.
+
+This is not the full `qcommon` runtime. The upstream `cmd.cpp`, `dvar.cpp`, and
+`common.cpp` translation units still directly depend on Win32 synchronization,
+the native filesystem, database/fastfile loading, scripts, client/server code,
+and renderer integrations. Those dependencies were not hidden behind broad
+stubs. The current slice is single-threaded, asset-free, and intentionally has
+no `exec`, config persistence, client/server command forwarding, or arbitrary
+JavaScript command bridge.
+
+## Milestone 2: browser filesystem and legal asset import (complete)
+
+The launcher now lets the user select the root of a legally owned Call of Duty 4
+installation. It prefers the File System Access API and falls back to a portable
+directory input. The native picker requests only `localization.txt` and
+`main/iw_00.iwd`; the fallback normalizes relative paths, rejects absolute or
+traversing paths and case-folded duplicates, then retains only those two files.
+The application never receives or stores a host path.
+
+`web/asset_store.mjs` is the asynchronous browser filesystem boundary. It:
+
+1. streams the two allowlisted files into a randomly named staging directory in
+   origin-private file system (OPFS) storage instead of loading an IWD into
+   JavaScript or Wasm memory;
+2. keeps the schema-versioned active manifest in IndexedDB and swaps that pointer
+   only after both staged files have been closed, reopened, size-checked, and
+   probed;
+3. leaves an existing active import intact when a replacement fails and removes
+   obsolete or interrupted staging data during startup, replacement, and clear;
+4. exposes bounded `stat` and `read` operations for the next engine filesystem
+   slice; and
+5. restores and revalidates the active import on reload without reopening the
+   picker.
+
+Selected files receive the same bounded probes before the potentially large IWD
+copy and again after OPFS reopen. OPFS, IndexedDB, and Web Locks are all required
+so imports and clears are serialized safely across tabs; a `BroadcastChannel`
+refreshes launcher state in other open tabs. The launcher requests durable
+storage during the selection gesture and warns when the browser grants only
+best-effort, evictable storage.
+
+`src/web/web_asset_probe.cpp` is the C++/Wasm side of that boundary. The
+localization probe enforces the native 4 KiB buffer limit, valid UTF-8/control
+characters, a supported language marker, and a non-empty payload. The IWD probe
+receives only a 4 KiB head, the final 65,557 bytes, and a 4 KiB central-directory
+window. It independently validates a single-disk ZIP32 envelope, central-directory
+bounds, the first local/central entry pair, encryption flags, and compression
+method. A normal retail IWD of roughly 168 MB therefore never becomes a Wasm
+allocation.
+
+This selection-time IWD check remains deliberately structural. It is not a
+retail-file hash or ownership check, and it does not decompress a member. The
+complete bounded central-directory audit and representative-member CRC checks
+described below run only after a staged import has committed, so picker
+validation still never allocates the complete archive in Wasm.
+
+The launcher publishes `kisakcod:assets` state separately from engine/runtime
+state, so a missing, rejected, or evicted local import does not crash the
+asset-free frame loop. It also offers an explicit removal action that deletes
+only the browser copy; the selected Steam installation is always read-only.
+
+## Milestone 3: portable IWD reader and asynchronous Wasm I/O (complete)
+
+`src/web/web_filesystem.cpp` and `web/filesystem_bridge.mjs` now provide an
+explicit request/response seam between C++ and browser storage. C++ submits
+bounded `stat` or read requests through one of eight generation-safe slots; a
+read is limited to 64 KiB and its destination buffer is owned by that C++
+request. JavaScript opens an immutable source for the active OPFS import under a
+shared Web Lock, then revalidates the import identity and recorded size on every
+read. A clear or replacement makes an older source stale instead of silently
+mixing bytes from two imports.
+
+Browser Promises only queue completion metadata. `WebFs_PumpCompletions`
+delivers callbacks from a later animation frame, and cancellation retires the
+matching JavaScript operation token before its C++ buffer can be reused. The
+bridge also reacquires the current Wasm heap view after every `await`, which is
+required because memory growth may replace that view. The path does not use
+Asyncify, synchronous OPFS access, or a blocking engine call.
+
+`src/qcommon/iwd_archive.cpp` is the portable, storage-independent ZIP32/IWD
+reader on top of that seam. It locates a bounded terminal EOCD, walks every
+central-directory record, validates the corresponding local header, and
+incrementally verifies stored and raw-deflate members with exact compressed and
+uncompressed byte counts plus CRC-32. The default limits are 4,096 records, a
+512 KiB central directory, 255 bytes per path, 1 MiB of cumulative path data,
+32 MiB compressed and uncompressed per member, and 512 MiB total declared
+uncompressed data. Record and cumulative budgets include duplicate records, so
+duplicates cannot be used to evade them.
+
+The reader rejects multi-disk and ZIP64 archives, encryption, data descriptors,
+unsupported flags or compression methods, malformed extra fields, unsafe or
+traversing paths, size/range inconsistencies, incomplete streams, excess
+output, and CRC mismatches. Exact duplicate paths deterministically use the
+final central-directory record, while distinct names that collide under ASCII
+case-folding are rejected. Deflate uses Emscripten 6.0.6's pinned, maintained
+zlib 1.3.2 port through `-sUSE_ZLIB=1`; it does not link the repository's legacy
+native zlib copy.
+
+`src/web/web_archive_job.cpp` proves the complete path without blocking a frame.
+It reads the archive tail and central directory, then mounts the parsed index
+for the engine filesystem described below. Representative stored and deflated
+members are verified through that service in discard mode, so verification
+retains only one 64 KiB output scratch buffer. The final ready payload is
+assembled at no more than 64 archive entries per frame and dispatched as one
+unchanged `kisakcod:archive` event only after the complete index is present.
+
+## Milestone 4: bounded engine filesystem and one IWI asset (complete)
+
+`src/web/web_engine_filesystem.cpp` turns the validated `main/iw_00.iwd` index
+into a narrow, read-only engine service. It owns one immutable mount and accepts
+one explicit asynchronous request at a time. Verification discards decoded
+output, while a read-all request may retain at most 4 MiB plus a convenience NUL
+terminator. Local headers and compressed input are still fetched in chunks no
+larger than 64 KiB. Each frame performs at most one decoder call with no more
+than 64 KiB of input and 64 KiB of output, so a high-ratio deflate stream yields
+between decoded chunks instead of expanding its complete payload in one RAF.
+Completion is delivered from the browser frame pump, and the decoded byte cache
+is valid only for the synchronous callback; request state and retained capacity
+are released before any later engine or JavaScript event is published. The web
+target keeps Emscripten exception catching enabled so its bounded allocation
+guards produce explicit failure states instead of aborting the runtime.
+
+High-level request IDs are independent from the lower browser I/O slots. A
+successful cancellation suppresses the high-level callback, and a stale OPFS
+source invalidates the complete mount because its locator and index describe a
+single import generation. Each completion preserves both browser-filesystem
+and archive-decoder error codes. This is intentionally not a compatibility
+implementation of the historical synchronous `FS_*` API, a seekable handle,
+or a general extraction cache.
+
+`src/qcommon/iwi_image.cpp` is the portable parser used by the first engine
+asset consumer above that service. It parses the serialized 28-byte Call of
+Duty 4 IWI v6 header with explicit little-endian reads, validates the supported
+format range, signed dimension bounds, complete-file and selectable-picmip size
+metadata, ordering, and mip-count semantics, and never invokes the legacy
+Direct3D image loader. At Milestone 4 this stopped before raw pixel decode; the
+Milestone 5 boundary below adds a separate, narrow portable conversion. The
+browser job deterministically
+selects the ASCII-case-insensitive first bounded `images/*.iwi` member instead
+of hard-coding a proprietary filename. Its `kisakcod:engine-asset` result copies
+only parsed metadata and confirms that the request cache has been released;
+renderer recovery pixels are reported separately.
+
+Malformed or absent IWI data does not invalidate an otherwise valid archive.
+Automated fixtures cover stored and raw-deflate IWI members, delayed reads with
+continued animation frames, a maximum-size high-ratio stream spread over many
+frames, malformed IWI and local headers, missing and oversized members,
+cancellation, stale-mount recovery, import replacement, and the absence of late
+old-generation completion. `tests/fuzz/asset_parsers_fuzz.cpp` provides a
+native libFuzzer entry point for the IWD framing/streaming decoder and IWI
+parser; the portable unit suite also runs 10,000 deterministic synthetic parser
+mutations.
+
+## Milestone 5: renderer-owned IWI texture (complete)
+
+`src/qcommon/iwi_image.cpp` now exposes a deliberately narrow portable RGBA8
+decode boundary above the metadata parser. It accepts only CoD4 IWI v6 format 1
+(named ARGB by the engine and serialized as BGRA), exactly the no-mipmap flag,
+a two-dimensional depth of one, and one tightly packed mip. Width/height
+multiplication, the 28-byte header addition, the complete payload length, and
+the shared 4 MiB member ceiling are checked before allocation. Conversion
+swizzles BGRA to RGBA and replaces the caller's output only after the complete
+operation succeeds. Other valid IWI formats, flags, dimensions, and layouts
+produce explicit non-fatal renderer-texture states instead of reaching WebGL.
+
+`src/web/web_renderer.cpp` owns the WebGL2 context, shaders, backend vertex
+objects, texture objects, resize state, draw calls, and context callbacks behind the
+backend-neutral interface in `src/web/web_renderer.h`. Shared and engine-facing
+code passes only a bounded RGBA8 descriptor; no `GLuint`, Emscripten context
+handle, or Direct3D type crosses that interface. The renderer limits this first
+slice to WebGL2's guaranteed 2048-by-2048 floor, atomically uploads with nearest
+filtering, retains at most 4 MiB of CPU pixels, and releases the callback-scoped
+engine-filesystem copy. At this milestone the backend-owned bootstrap triangle
+sampled the uploaded image as the first visible texture consumer; Milestone 6
+below moves that geometry across the renderer boundary.
+
+On WebGL context loss every stale GPU handle is discarded. The shader pipeline,
+bootstrap geometry, and texture are recreated from renderer-owned CPU state after
+restoration, and `kisakcod:renderer-texture` reports residency, retained bytes,
+upload/resource generations, and recovery count without exposing pixel data or
+backend handles. A valid but currently unsupported IWI remains a successful
+`kisakcod:engine-asset` metadata result while its renderer-texture state is
+`unsupported`; malformed payload layout and backend upload failure are reported
+separately and do not invalidate the mounted archive or stop the RAF pump.
+
+Portable tests cover exact BGRA-to-RGBA conversion, aliased input/output,
+unsupported format/flag/dimension slices, layout and overflow limits, atomic
+failure, and the exact allocation boundary. Browser fixtures prove stored and
+deflated upload paths, continued RAF progress during asynchronous reads, exact
+synthetic framebuffer colors, graceful DXT1 and backend-dimension deferral,
+bounded recovery ownership without a second filesystem read, cancellation-safe
+synchronous event re-entry, and identical texture colors after context
+restoration. A forced initial shader failure also proves that a partial renderer
+cannot publish a false recovery after context loss. All fixtures remain synthetic
+and contain no retail data.
+
+## Milestone 6: engine-owned indexed surface (complete)
+
+This section records the Milestone 6 baseline. Milestone 7 below supersedes its
+three-vertex bootstrap fixture and exact 84-byte/6-byte upload counts with a
+converted four-vertex world-surface quad; the renderer ownership contract remains.
+
+`src/web/web_renderer_surface.h` defines the first backend-neutral surface
+contract: a fixed position-2/color-3/UV-2 vertex, 16-bit indices, one
+triangle-list draw range, and a neutral choice between vertex color and the
+validated engine-image binding. The public types contain no WebGL, Emscripten,
+or Direct3D objects. The callback-scoped descriptor is limited to 4096 vertices,
+12288 indices, and 139264 retained bytes. Portable validation rejects empty or
+over-limit arrays, unknown topology or texture intent, misaligned and overflowing
+draw ranges, non-finite vertex components, and every out-of-range index before
+the renderer copies or uploads data.
+
+`src/web/web_engine_surface.cpp` now owns the deterministic three-vertex,
+three-index synthetic surface and submits it before graphics initialization.
+`WebRenderer_SetSurface` validates and copies both arrays atomically into bounded
+renderer recovery storage, so no engine pointer survives the call and a failed
+replacement cannot disturb the active surface. The WebGL2 backend creates a
+private VAO, VBO, and element buffer from that copy, issues
+`glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_SHORT, 0)`, and samples the existing
+renderer-owned IWI texture only because the draw descriptor requests the neutral
+engine-image binding. The earlier shader-authored vertex wobble was removed, so
+the submitted engine coordinates determine the synthetic surface apart from
+viewport aspect correction.
+
+Surface lifetime is independent from archive and IWI generations. Cancelling or
+replacing an imported image releases only its texture recovery pixels; the
+engine surface remains resident and falls back to its vertex colors. On context
+loss the renderer invalidates every private handle, then recreates the shader,
+VAO/VBO/element buffer, and current texture from the latest renderer-owned
+descriptions before reporting the runtime as resumed. The
+`kisakcod:renderer-surface` event publishes only counts, bounded byte ownership,
+draw intent, residency, and submission/resource/recovery generations; it never exposes
+vertices, indices, pointers, or GPU handles.
+
+Portable tests cover the valid surface contract, null and empty descriptors,
+count ceilings, subtraction-safe draw ranges, topology and texture-binding
+validation, NaN/infinity rejection, index bounds, caller-independent copies,
+atomic invalid replacement, and result strings. Browser
+tests prove the exact 84-byte vertex and 6-byte index uploads, indexed draw
+parameters with no `drawArrays` fallback, continued rendering, resource
+recreation without an engine resubmission, and non-resumption after a forced
+element-buffer recovery failure. The existing synthetic IWI framebuffer test
+also proves all four exact texel colors before and after combined surface and
+texture recovery without another filesystem read.
+
+## Milestone 7: authentic engine-world surface conversion (complete)
+
+`src/web/web_engine_world_surface.h` introduces a D3D-free conversion boundary
+shaped after the geometry actually consumed by the upstream world renderer. Its
+`WebEngineWorldVertex` is layout-checked against the 44-byte `GfxWorldVertex`
+shape, including xyz, packed color, base texture coordinates, lightmap
+coordinates, and packed normal/tangent fields. `WebEngineWorldSurfaceRange` is
+the 16-byte `srfTriangles_t` shape, retaining signed `firstVertex` and
+`baseIndex` fields so malformed native descriptions are rejected before they
+become offsets. No Direct3D declaration, WebGL handle, raw array, or pointer is
+published through the browser lifecycle event.
+
+`WebEngine_ConvertWorldSurface` converts exactly one surface-local slice from
+the shared world vertex and 16-bit index arrays. It bounds-checks non-zero
+`firstVertex` and `baseIndex` ranges with subtraction-safe arithmetic, accepts
+only the upstream base/unlayered vertex format, and verifies every index against
+the selected surface's vertex count. Upstream indices remain local to
+`firstVertex`, so the converted renderer indices are copied unchanged instead
+of being incorrectly treated as global world-vertex indices. Conversion is
+atomic and retains the existing renderer ceilings of 4096 vertices and 12288
+indices.
+
+World xyz is reduced to the current renderer's two-dimensional clip position by
+an explicit two-row affine projection. This keeps projection on the engine side
+and avoids hiding a camera, perspective divide, or clipping policy inside the
+WebGL backend. Native `GfxColor` is decoded numerically as `0xAARRGGBB` using
+shifts, independent of host byte order; RGB and the base texture coordinates
+then populate the existing position-2/color-3/UV-2 renderer vertex. Layer data,
+lightmaps, packed normals/tangents, materials, and their shader techniques are
+not interpreted by this slice.
+
+`src/web/web_engine_surface.cpp` exercises that path with a freely generated
+GfxWorld-shaped fixture. Sentinel data surrounds a four-vertex, six-index quad,
+and both source slices begin at non-zero offsets, proving the surface-range and
+local-index conventions rather than feeding a pre-packed renderer array. The
+converted quad is submitted through the Milestone 6 surface seam and can sample
+the existing bounded engine image. Renderer-owned converted vertices, indices,
+and texture pixels survive WebGL context loss; restoration recreates private
+VAO, VBO, element-buffer, and texture resources without another conversion or
+filesystem read.
+
+Portable checks cover layout and range assumptions, non-zero source slices,
+local-index validation, packed-color and UV conversion, affine projection,
+base-only format gating, output limits, non-finite values, allocation-safe
+atomic failure, and result strings. Browser checks observe only scalar
+`kisakcod:engine-world-surface` metadata, verify the four-vertex/six-index
+conversion reaches the indexed draw, and retain the existing context-recovery
+and exact synthetic framebuffer coverage.
+
+At the Milestone 7 boundary this was an authentic representation conversion,
+not a fastfile extraction. Milestone 8 below supersedes that part with a strict
+synthetic `GfxWorld` decoder, but no `.d3dbsp`, retail surface, or retail
+material is loaded, and no visibility, lightmap, layered vertex, shader, or
+material-technique path is implemented. The legal importer remains deliberately
+limited to `localization.txt` and `main/iw_00.iwd`; all automated geometry and
+asset fixtures are freely generated synthetic data.
+
+## Milestone 8: fastfile/zone inventory and extraction contract (complete)
+
+Milestone 8 inventories and implements the first bounded fastfile extraction
+path. `src/web/web_fastfile_world_surface.cpp` reads an unauthenticated
+`IWffu100` version-5 prefix and zlib stream, validates `XFile`, its nine logical
+blocks, generated asset traversal and pointer fixups, and returns one owned
+`GfxWorld` surface plus its material name and source metadata. The complete
+evidence and serialized contract are in
+[`fastfile-zone-inventory.md`](fastfile-zone-inventory.md), with exact upstream
+file and line references.
+
+The inventory establishes that fastfile pointers are 32-bit little-endian wire
+tokens rather than portable pointers. It separates presence-only arrays, direct
+block offsets, inline assets, inserted alias slots, and alias lookups; records
+the alignment rule that advances a logical block without consuming compressed
+padding; and fixes the relevant 732-byte world, 44-byte vertex, 48-byte surface,
+16-byte triangle-range, eight-byte material-memory, and 80-byte minimal material
+layouts. The first boundary retains only a bounded material name/key. Material
+techniques, textures, shaders, lightmaps, visibility, and D3D runtime fields are
+not part of it.
+
+The resulting implementation is deliberately strict: one synthetic asset table
+containing one inline `GfxWorld`, one base/unlayered surface, one material record
+and alias, and nonzero storage only in blocks 0 and 4. Every unrelated nonzero
+pointer or count is rejected because it changes traversal order. Default limits
+are 4 MiB for the complete file; 8 MiB each for inflated bytes, an individual
+logical block, and cumulative logical blocks; 65536 world vertices; 262144 world
+indices; 4096 selected vertices; 12288 selected indices; and 255 material-name
+bytes before NUL. All arithmetic, cursor movement, fixups, strings, floats, and
+surface-local indices validate before the owned result replaces its destination.
+
+`src/web/web_engine_surface.cpp` constructs a complete freely generated
+fastfile, compresses it with zlib, calls the extractor, converts its result, and
+submits it through the existing renderer seam during browser boot. The fixture
+preserves the Milestone 7 offset quad: six shared vertices and twelve shared
+indices surround a selected four-vertex/six-index surface whose raw
+`firstVertex` is 1 and raw `baseIndex` is 3. Its block sizes are 812 and 372
+bytes, the shared material alias is block-4 offset 40 (`0x40000029`), the
+inflated stream is 1238 bytes, and declared zone memory is 1184 bytes. Browser
+lifecycle metadata reports the source framing, block sizes, raw surface range,
+material-reference kind/name, extraction generation, and converted counts.
+
+This is a completed synthetic implementation, not a general fastfile decoder.
+At the Milestone 8 boundary the extractor ran synchronously during boot. Although
+the complete `XAsset` table is available first, inline bodies and dependencies
+are interleaved afterward in generated-loader order and carry no generic byte
+length. A world following an unsupported asset cannot be located safely without
+traversing that earlier asset. General or user-owned fastfiles remain rejected;
+no retail `.ff` or `.d3dbsp` is read, no browser importer capability changed,
+and synthetic success must not be described as retail compatibility.
+
+## Milestone 9: resumable strict extraction (complete)
+
+Milestone 9 makes the Milestone 8 decoder resumable while deliberately retaining
+the same strict single-asset format. `WorldSurfaceExtractionJob::Begin` takes
+ownership of one complete source allocation. `Step` advances its inflate or
+traversal stage and reports only the work performed by that call. Each call is
+hard-capped at 64 KiB of compressed input, 64 KiB of inflated output or traversed
+bytes, and 64 completed semantic records; zero or over-limit caller budgets are
+rejected without consuming source or traversing a record and put the job in its
+failed terminal state.
+
+The browser runtime builds the same freely generated fixture, starts the job,
+and calls exactly one `Step` from `WebEngineSurface_Frame` for each RAF callback.
+It emits bounded per-step and cumulative progress before conversion and renderer
+submission, so `loading` and `ready` are distinct browser-frame states. The
+synchronous `ExtractWorldSurface` entry point remains available for portable
+callers but now drives the same job until it reaches a terminal state rather
+than maintaining a second parser.
+
+Parsing never writes caller output. After success, `TakeResult` performs one
+atomic move of the owned surface and can succeed only once; an early, failed, or
+repeated take leaves the destination untouched. The job owns its complete
+compressed source and inflated traversal staging while work is in progress and
+releases both when extraction succeeds, before result handoff. This is resumable
+CPU work; the runtime calls `Reset` to release a failed job's staging. It is not
+asynchronous browser-file streaming or authorization to feed the decoder
+user-owned files.
+
+The logical arena bookkeeping also now matches the upstream block-0 asymmetry.
+Every block has a checked current cursor and high-water mark. Popping a block-0
+loader frame restores its entry cursor because block 0 is temporary storage,
+while other blocks retain their advances. Declared sizes are reconciled against
+high-water use, not a stale assumption that every terminal cursor must equal its
+declared size. For Milestone 9's then-current single-asset fixture, block 0
+reaches an 812-byte high-water mark before rewinding and block 4 advances
+persistently through 372 bytes.
+
+This milestone does not add a second asset, a generic skip mechanism, delayed
+payload support, retail formats, or importer access. Its result is still exactly
+one bounded base/unlayered `GfxWorld` surface with one zero-dependency material.
+
+## Milestone 10: two-asset traversal and zone stream machine (complete)
+
+Milestone 10 replaces the current synthetic input contract while preserving the
+Milestone 8 and 9 history above. The accepted top-level table contains exactly
+two complete `XAsset` records and is staged in block 4 before either body is
+visited:
+
+1. `ASSET_TYPE_MATERIAL` (`0x04`) with inline-shared token `0xfffffffe`;
+2. `ASSET_TYPE_GFXWORLD` (`0x10`) with inline token `0xffffffff`.
+
+Dispatch remains table-ordered. The zero-dependency 80-byte material body and
+bounded name are parsed first. Before its block-0 frame rewinds, the decoder
+copies the name to job-owned storage, assigns one stable job-local material
+identity, and resolves the inserted alias cell at block-4 offset 16. The world
+then reuses block 0 from offset zero. Its `MaterialMemory` handle and selected
+surface both carry `0x40000011`, the one-based encoding of that block-4 cell,
+and must resolve to the same identity. No serialized or native pointer escapes
+the job, and this narrow identity mapping does not construct the native global
+asset registry.
+
+For `web/synthetic`, the current logical layout is exact:
+
+```text
+block 0: 732-byte declared/high-water extent, terminal cursor 0
+    [  0,  80) top-level Material, then rewind
+    [  0, 732) GfxWorld, then rewind
+
+block 4: 380-byte persistent extent
+    [  0,  16) XAsset[2]
+    [ 16,  20) material alias cell; no compressed bytes
+    [ 20,  34) "web/synthetic\0"
+    [ 34,  58) twelve u16 indices
+    [ 58,  60) alignment gap; no compressed bytes
+    [ 60,  68) MaterialMemory[1]
+    [ 68, 332) six GfxWorldVertex records
+    [332, 380) one GfxSurface
+```
+
+The inflated traversal order is `XFile` (44), `XAssetList` (16), `XAsset[2]`
+(16), `Material` (80), material name (14), `GfxWorld` (732), indices (24),
+`MaterialMemory` (8), vertices (264), and surface (48): 1246 bytes total. The
+active block extents are 732 and 380 bytes, so the fixture declares 1112 zone
+bytes. Alias reservation and the two-byte alignment gap affect arena extent but
+do not occur in the compressed stream.
+
+`web_fastfile_zone_stream.*` now owns the portable nine-block state machine.
+It models immediate reads in blocks 0 and 4 through 8, block-1 zero fill,
+block-0 frame rewind with a retained high-water mark, persistent cursors in the
+other blocks, checked alignment, and bounded push/pop frames. Delayed blocks 2
+and 3 are represented by checked `{block, offset, length}` spans and replayed
+FIFO. Because no checked-in generated loader selects those blocks, their replay
+contract is exercised by a separate synthetic stream-machine microfixture, not
+by inventing records in the two-asset zone.
+
+The 64 KiB and 64-record per-step ceilings remain. Limits now also cover total
+input, inflated output, cumulative and per-block arena bytes, two assets, stack
+depth, delayed span count and bytes, total string bytes, and alias count before
+allocation or publication. The accepted prefix remains deliberately exact:
+wrong order, a non-shared material, an undefined/duplicate/misaligned alias, an
+unsupported dependency or preceding type, a third asset, nonzero script
+strings, record truncation, or block-size disagreement fails atomically.
+
+This is still a freely generated synthetic contract. A read-only audit of a
+legally owned Steam installation established that its ordinary PC fastfiles use
+the expected unauthenticated version-5/zlib framing and that its IWI population
+includes compressed DXT formats. That observation proves framing only. No
+proprietary asset was copied into or committed to this repository, the importer
+does not accept `.ff` files, and Milestone 10 does not establish retail asset or
+map compatibility.
+
+## Build
+
+The toolchain is pinned in `tools/web_toolchain.json`. On Windows, the checked-in
+scripts install it locally without changing the permanent user environment:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\bootstrap_web_toolchain.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\build_web.ps1 -Configuration Release
+python .\tools\serve_web.py --directory .\build\web\site
+```
+
+Open `http://127.0.0.1:8000`. Do not open `index.html` through `file://`; Wasm
+must be served with the `application/wasm` MIME type. The server intentionally
+serves only the generated site directory, never the repository root. Keep that
+terminal open while using the page and press Ctrl+C to stop the server. After
+the first setup, only the build and serve commands are needed.
+
+Node 24.18.0 and npm 11.16.0 are pinned in `.node-version` and `package.json`.
+Install the test dependencies and Chromium with:
+
+```powershell
+npm.cmd ci
+npx.cmd playwright install chromium
+npm.cmd run test:browser
+```
+
+The portable archive, IWI, renderer-surface, engine-world conversion, fastfile
+traversal, and zone-stream unit tests can be built separately from the native
+game targets when a C++20 compiler and zlib development package are available:
+
+```powershell
+cmake -S . -B build/portable-tests -DKISAK_PORTABLE_TESTS_ONLY=ON
+cmake --build build/portable-tests
+ctest --test-dir build/portable-tests -C Debug --output-on-failure
+```
+
+Those unit tests exercise stored and deflated streams, ZIP framing and local
+header agreement, limits, duplicate-name policy, path validation, truncation,
+size mismatches, output bounds, incomplete streams, CRC failure, IWI header and
+dimension validation, file-size metadata, bounded RGBA8 layout and conversion,
+surface descriptor limits and index validation, bounded world-surface range and
+format conversion, exact two-asset traversal, nine-block cursor/delayed-replay
+semantics, and deterministic mutated inputs. The same test target can be
+configured with Emscripten and run under Node, in which case it uses the same
+pinned zlib port as the browser target.
+
+A native Clang/libFuzzer build is optional and separate from normal tests:
+
+```powershell
+cmake -S . -B build/fuzz -G Ninja -DCMAKE_CXX_COMPILER=clang++ `
+  -DKISAK_PORTABLE_TESTS_ONLY=ON -DKISAK_BUILD_FUZZERS=ON
+cmake --build build/fuzz --target asset_parsers_fuzz
+```
+
+The browser command checks command/dvar initialization, monotonic RAF progress,
+WebGL2 indexed-surface rendering and context recovery, Wasm delivery, both
+directory-selection paths, OPFS/IndexedDB commit and reload, immutable bounded
+sources, stale-source
+handling, cancellation without a late heap write, and frame progress while Blob
+reads are delayed. At boot it requires the synthetic fastfile extraction to
+remain `loading` while bounded work advances on distinct RAF callbacks and then
+become `ready`. It checks the 64 KiB/64-record published ceilings, per-step and
+cumulative work metrics, version, the exact two-asset count/order and stable
+material identity, inflated and declared-zone bytes, block sizes, raw nonzero
+surface offsets, material-reference kind/name, and extracted/converted counts.
+It also drives synthetic stored and deflated IWD members through the asynchronous
+archive job, checks CRC failure, then reads, parses, and uploads one bounded IWI
+through the engine cache and renderer seam. It covers
+all four exact synthetic framebuffer colors, renderer-owned recovery after
+context loss, failed-initialization cleanup, graceful unsupported-format handling,
+malformed selection and IWI
+inputs, size limits, cache release, cancellation and replacement generations,
+stale mount invalidation and recovery, incremental large-index publication,
+replacement failure, cross-tab synchronization, cleanup, metadata repair,
+storage-capability failures, the absence of retail files and asset network
+requests, and the missing-module path. Every automated asset is generated
+synthetic data. Set `KISAK_BROWSER_CHANNEL=msedge` to use an installed Microsoft
+Edge build.
+
+## Next boundary: Milestone 11
+
+Milestone 11 should create a stable multi-asset arena/alias/registry seam and a
+resumable source-streaming boundary. Arena allocation, alias-cell lifecycle,
+stable job-local registration, and reset/unload behavior should become reusable
+components rather than state embedded specifically in the two-record surface
+extractor. The extractor should be able to pause for bounded source chunks and
+resume without first owning one complete compressed input allocation, while
+retaining the existing per-step ceilings, cumulative limits, deterministic
+errors, and one-shot atomic result publication.
+
+Keep M11 synthetic-only and narrowly staged. It must not silently admit another
+asset type, scan past unknown records, mount a user-owned fastfile, or claim a
+retail map. Synthetic fixtures should establish stable identity across arena
+reuse and source starvation/resumption before broader generated-loader coverage
+is considered. General asset/dependency traversal and DXT1/DXT3/DXT5 IWI decode
+remain important later hurdles, but neither should be folded opportunistically
+into this seam milestone.
+
+An optional loose `.d3dbsp` path is not an implicit shortcut: pursue it only
+after an explicit design decision establishes that it is a supported legal
+input, inventories its BSP lumps and versioning, and separates its native D3D9
+allocation work from portable parsing. The importer remains limited to
+`localization.txt` and `main/iw_00.iwd`; there is no retail map load, general
+virtual filesystem, save-data path, audio/input integration, or playable game
+loop.

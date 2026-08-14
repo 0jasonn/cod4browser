@@ -38,6 +38,7 @@
 #include <time.h>
 #include <ctype.h>
 #include <cfloat> // FLT_MAX
+#include <climits>
 #include <cstdint>
 
 // this is the define for determining if we have an asm version of a C function

@@ -25,11 +25,14 @@
 
 #define USE_POOL_ALLOCATOR
 
-// make alloca happy
+// make alloca happy on both the original MSVC target and portable toolchains
+#if defined(_MSC_VER)
 #include <malloc.h>
-
 #ifndef alloca
 #define alloca _alloca
+#endif
+#else
+#include <alloca.h>
 #endif
 
 // used everywhere

@@ -2,14 +2,38 @@ cmake_minimum_required(VERSION 3.16)
 
 project(KisakCOD)
 
+option(KISAK_PORTABLE_TESTS_ONLY "Build only platform-neutral unit tests" OFF)
+if (KISAK_PORTABLE_TESTS_ONLY)
+    include(CTest)
+    add_subdirectory(tests/native)
+    return()
+endif()
+
 # Set the default C++ standard
 set(CMAKE_CXX_STANDARD 20)
 
 add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
 
-# Set this to match the folder name in scripts/platform
-# This will handle the path overrides if needed
-set(KISAK_PLATFORM win32)
+# Select a platform explicitly. Native builds keep the historical win32
+# default, while an Emscripten toolchain defaults to the isolated web target.
+set(_KISAK_PLATFORM_DEFAULT win32)
+if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    set(_KISAK_PLATFORM_DEFAULT web)
+endif()
+
+set(KISAK_PLATFORM "${_KISAK_PLATFORM_DEFAULT}" CACHE STRING "KisakCOD target platform")
+set_property(CACHE KISAK_PLATFORM PROPERTY STRINGS win32 web)
+unset(_KISAK_PLATFORM_DEFAULT)
+
+if (KISAK_PLATFORM STREQUAL "web")
+    if (NOT EMSCRIPTEN AND NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+        message(FATAL_ERROR "KISAK_PLATFORM=web requires the Emscripten toolchain")
+    endif()
+elseif (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    message(FATAL_ERROR "The Emscripten toolchain must be configured with KISAK_PLATFORM=web")
+elseif (NOT KISAK_PLATFORM STREQUAL "win32")
+    message(FATAL_ERROR "Unsupported KISAK_PLATFORM: ${KISAK_PLATFORM}")
+endif()
 
 # Set Address Sanitizer
 # NOTE: If you use this you will need to copy to the game's directory
@@ -40,8 +64,14 @@ include(${SCRIPTS_DIR}/platform_override.cmake)
 # Log out the KISAK_PLATFORM
 message("Building KISAK_PLATFORM: ${KISAK_PLATFORM}")
 
-# Include the subprojects
-add_subdirectory(${SCRIPTS_DIR}/mp)
-add_subdirectory(${SCRIPTS_DIR}/sp)
-add_subdirectory(${SCRIPTS_DIR}/dedi)
-add_subdirectory(${SCRIPTS_DIR}/radiant)
+# The browser milestones remain intentionally isolated from the monolithic
+# native targets. Those targets pull in Win32, Direct3D, Steam, Miles, and Bink
+# before a platform override can replace them.
+if (KISAK_PLATFORM STREQUAL "web")
+    add_subdirectory(${SCRIPTS_DIR}/web)
+else()
+    add_subdirectory(${SCRIPTS_DIR}/mp)
+    add_subdirectory(${SCRIPTS_DIR}/sp)
+    add_subdirectory(${SCRIPTS_DIR}/dedi)
+    add_subdirectory(${SCRIPTS_DIR}/radiant)
+endif()
