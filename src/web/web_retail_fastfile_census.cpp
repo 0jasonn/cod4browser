@@ -17,6 +17,7 @@
 #include <limits>
 #include <new>
 #include <span>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -80,6 +81,21 @@ constexpr std::uint32_t ASSET_TYPE_TECHNIQUE_SET = 5u;
 constexpr std::uint32_t ASSET_TYPE_IMAGE = 6u;
 constexpr std::uint32_t ASSET_TYPE_GFX_WORLD = 16u;
 constexpr std::uint32_t ASSET_TYPE_FX = 25u;
+
+static_assert(ASSET_TYPE_PHYS_PRESET ==
+    static_cast<std::uint32_t>(::ASSET_TYPE_PHYSPRESET));
+static_assert(ASSET_TYPE_XMODEL ==
+    static_cast<std::uint32_t>(::ASSET_TYPE_XMODEL));
+static_assert(ASSET_TYPE_MATERIAL ==
+    static_cast<std::uint32_t>(::ASSET_TYPE_MATERIAL));
+static_assert(ASSET_TYPE_TECHNIQUE_SET ==
+    static_cast<std::uint32_t>(::ASSET_TYPE_TECHNIQUE_SET));
+static_assert(ASSET_TYPE_IMAGE ==
+    static_cast<std::uint32_t>(::ASSET_TYPE_IMAGE));
+static_assert(ASSET_TYPE_GFX_WORLD ==
+    static_cast<std::uint32_t>(::ASSET_TYPE_GFXWORLD));
+static_assert(ASSET_TYPE_FX ==
+    static_cast<std::uint32_t>(::ASSET_TYPE_FX));
 
 struct WorldMaterialPassState
 {
@@ -259,7 +275,8 @@ bool ValidLimits(const RetailCensusLimits &limits) noexcept
         limits.maxXModelCollisionPayloadBytes != 0u &&
         limits.maxFxEffects != 0u && limits.maxFxElemDefs != 0u &&
         limits.maxFxVisuals != 0u && limits.maxFxSampleBytes != 0u &&
-        limits.maxFxTrailVertices != 0u && limits.maxFxTrailIndices != 0u;
+        limits.maxFxTrailVertices != 0u && limits.maxFxTrailIndices != 0u &&
+        limits.maxSemanticTraceEntries != 0u;
 }
 } // namespace
 
@@ -382,6 +399,8 @@ const char *RetailCensusErrorString(RetailCensusError error) noexcept
     case RetailCensusError::FxMaterialUnsupported: return "unsupported FX material dependency";
     case RetailCensusError::PostXModelAssetUnsupported:
         return "asset after the first XModel is not an inline technique set";
+    case RetailCensusError::SemanticTraceLimit:
+        return "database semantic trace entry limit exceeded";
     case RetailCensusError::AllocationFailed: return "allocation failed";
     }
     return "unknown retail census error";
@@ -647,6 +666,72 @@ struct RetailFastfileCensusJob::Impl
         return RetailCensusError::None;
     }
 
+    RetailCensusError AppendSemanticTrace(
+        kisak::database::SemanticTraceEventKind kind,
+        std::uint32_t assetType,
+        std::uint32_t tracedAssetIndex,
+        std::uint32_t identity,
+        std::uint32_t inflatedOffset,
+        const ZoneSpan &span,
+        std::string_view name = {},
+        const ZoneSpan &related = {}) noexcept
+    {
+        if (assetType >= RETAIL_CENSUS_ASSET_TYPE_COUNT)
+            return RetailCensusError::AssetTypeInvalid;
+        if (result.semanticTrace.size() >= limits.maxSemanticTraceEntries)
+            return RetailCensusError::SemanticTraceLimit;
+        try
+        {
+            kisak::database::SemanticTraceEntry entry;
+            entry.kind = kind;
+            entry.assetType = static_cast<XAssetType>(assetType);
+            entry.assetIndex = tracedAssetIndex;
+            entry.identity = identity;
+            entry.inflatedOffset = inflatedOffset;
+            entry.streamBlock = span.block;
+            entry.streamOffset = span.offset;
+            entry.relatedBlock = related.block;
+            entry.relatedOffset = related.offset;
+            entry.name.assign(name);
+            result.semanticTrace.push_back(std::move(entry));
+        }
+        catch (...) { return RetailCensusError::AllocationFailed; }
+        return RetailCensusError::None;
+    }
+
+    RetailCensusError EnsureBoundarySemanticTrace() noexcept
+    {
+        if (!result.stoppedBeforeDifferentWorldAssetType ||
+            result.nextBodyIndex >= worldAssetTypes.size())
+        {
+            return RetailCensusError::None;
+        }
+        if (!result.semanticTrace.empty())
+        {
+            const auto &last = result.semanticTrace.back();
+            if (last.kind == kisak::database::SemanticTraceEventKind::Boundary &&
+                last.assetIndex == result.nextBodyIndex)
+            {
+                return RetailCensusError::None;
+            }
+        }
+        const std::uint32_t block = arenas.ActiveBlock();
+        return AppendSemanticTrace(
+            kisak::database::SemanticTraceEventKind::Boundary,
+            result.nextBodyType,
+            result.nextBodyIndex,
+            0u,
+            static_cast<std::uint32_t>(cursor),
+            {block, arenas.Cursor(block), 0u},
+            {},
+            {
+                4u,
+                result.assetTableBlock4Offset +
+                    result.nextBodyIndex * ASSET_BYTES + 4u,
+                4u,
+            });
+    }
+
     RetailCensusError ValidatePrefix() noexcept
     {
         if (std::equal(AUTHENTICATED_MAGIC.begin(), AUTHENTICATED_MAGIC.end(), prefix.begin()))
@@ -700,6 +785,19 @@ struct RetailFastfileCensusJob::Impl
         RetailWorldTechniqueSet &entry = result.worldTechniqueSets.back();
         entry.assetIndex = worldBodyIndex;
         entry.block0Offset = span.offset;
+        if (const RetailCensusError error = AppendSemanticTrace(
+                kisak::database::SemanticTraceEventKind::AssetBegin,
+                ASSET_TYPE_TECHNIQUE_SET,
+                worldBodyIndex,
+                0u,
+                static_cast<std::uint32_t>(cursor),
+                span,
+                {},
+                worldTopLevelAliasSlot);
+            error != RetailCensusError::None)
+        {
+            return error;
+        }
         techniqueTokens.fill(0u);
         result.worldTechniqueSetBodiesEntered = static_cast<std::uint32_t>(
             result.worldTechniqueSets.size());
@@ -765,6 +863,19 @@ struct RetailFastfileCensusJob::Impl
         model.headerBlock0Offset = span.offset;
         model.rendererPayloadSelected = worldXModelIndex == 0u;
         model.topLevelAsset = true;
+        if (const RetailCensusError error = AppendSemanticTrace(
+                kisak::database::SemanticTraceEventKind::AssetBegin,
+                ASSET_TYPE_XMODEL,
+                assetIndex,
+                0u,
+                static_cast<std::uint32_t>(cursor),
+                span,
+                {},
+                worldXModelAliasSlot);
+            error != RetailCensusError::None)
+        {
+            return error;
+        }
         worldXModelNested = false;
         worldSurfaceIndex = 0u;
         retainedLodVertices = 0u;
@@ -871,6 +982,19 @@ struct RetailFastfileCensusJob::Impl
         RetailWorldFxEffectDef &effect = result.worldFxEffects.back();
         effect.assetIndex = assetIndex;
         effect.headerBlock0Offset = span.offset;
+        if (const RetailCensusError error = AppendSemanticTrace(
+                kisak::database::SemanticTraceEventKind::AssetBegin,
+                ASSET_TYPE_FX,
+                assetIndex,
+                0u,
+                static_cast<std::uint32_t>(cursor),
+                span,
+                {},
+                worldFxAliasSlot);
+            error != RetailCensusError::None)
+        {
+            return error;
+        }
         worldFxElemIndex = 0u;
         worldFxVisualIndex = 0u;
         worldFxElemPhase = WorldFxElemPhase::VelocitySamples;
@@ -1212,6 +1336,29 @@ struct RetailFastfileCensusJob::Impl
                 {
                     return BeginWorldFxEffect(index, nextStage);
                 }
+                const ZoneSpan current{
+                    arenas.ActiveBlock(),
+                    arenas.Cursor(arenas.ActiveBlock()),
+                    0u,
+                };
+                const ZoneSpan tableAlias{
+                    4u,
+                    result.assetTableBlock4Offset + index * ASSET_BYTES + 4u,
+                    4u,
+                };
+                if (const RetailCensusError error = AppendSemanticTrace(
+                        kisak::database::SemanticTraceEventKind::Boundary,
+                        result.nextBodyType,
+                        index,
+                        0u,
+                        static_cast<std::uint32_t>(cursor),
+                        current,
+                        {},
+                        tableAlias);
+                    error != RetailCensusError::None)
+                {
+                    return error;
+                }
                 result.stoppedBeforeDifferentWorldAssetType = true;
                 nextStage = RetailCensusStage::AssetBoundary;
                 complete = true;
@@ -1251,6 +1398,19 @@ struct RetailFastfileCensusJob::Impl
                 entry.published = true;
                 entry.boundaryInflatedOffset =
                     static_cast<std::uint32_t>(cursor);
+                if (const RetailCensusError error = AppendSemanticTrace(
+                        kisak::database::SemanticTraceEventKind::AssetPublish,
+                        ASSET_TYPE_TECHNIQUE_SET,
+                        entry.assetIndex,
+                        entry.identity,
+                        entry.boundaryInflatedOffset,
+                        {0u, entry.block0Offset, TECHNIQUE_SET_BYTES},
+                        entry.name,
+                        worldTopLevelAliasSlot);
+                    error != RetailCensusError::None)
+                {
+                    return error;
+                }
                 ++result.completedAssetCount;
                 if (entry.assetIndex ==
                     result.worldPostXModelTechniqueSetAssetIndex)
@@ -2097,6 +2257,19 @@ struct RetailFastfileCensusJob::Impl
                                 entry.identity));
                         error != RetailCensusError::None) return error;
                     entry.published = true;
+                    if (const RetailCensusError error = AppendSemanticTrace(
+                            kisak::database::SemanticTraceEventKind::AssetPublish,
+                            ASSET_TYPE_TECHNIQUE_SET,
+                            entry.assetIndex,
+                            entry.identity,
+                            entry.boundaryInflatedOffset,
+                            {0u, entry.block0Offset, TECHNIQUE_SET_BYTES},
+                            entry.name,
+                            worldTopLevelAliasSlot);
+                        error != RetailCensusError::None)
+                    {
+                        return error;
+                    }
                     ++result.completedAssetCount;
                     if (entry.assetIndex ==
                         result.worldPostXModelTechniqueSetAssetIndex)
@@ -3214,6 +3387,19 @@ struct RetailFastfileCensusJob::Impl
                     error != RetailCensusError::None) return error;
                 effect.published = true;
                 effect.boundaryInflatedOffset = static_cast<std::uint32_t>(cursor);
+                if (const RetailCensusError error = AppendSemanticTrace(
+                        kisak::database::SemanticTraceEventKind::AssetPublish,
+                        ASSET_TYPE_FX,
+                        effect.assetIndex,
+                        effect.identity,
+                        effect.boundaryInflatedOffset,
+                        {0u, effect.headerBlock0Offset, FX_EFFECT_DEF_BYTES},
+                        effect.name,
+                        worldFxAliasSlot);
+                    error != RetailCensusError::None)
+                {
+                    return error;
+                }
                 ++result.completedAssetCount;
                 result.block0HighWaterAtBoundary = arenas.HighWater(0u);
                 result.block4CursorAtBoundary = arenas.Cursor(4u);
@@ -5610,6 +5796,19 @@ struct RetailFastfileCensusJob::Impl
                     stage = RetailCensusStage::WorldFxElemVisuals;
                     continue;
                 }
+                if (const RetailCensusError error = AppendSemanticTrace(
+                        kisak::database::SemanticTraceEventKind::AssetPublish,
+                        ASSET_TYPE_XMODEL,
+                        model.assetIndex,
+                        model.identity,
+                        model.boundaryInflatedOffset,
+                        {0u, model.headerBlock0Offset, XMODEL_BYTES},
+                        model.name,
+                        worldXModelAliasSlot);
+                    error != RetailCensusError::None)
+                {
+                    return error;
+                }
                 ++result.completedAssetCount;
                 result.worldNextAssetIndex = model.assetIndex + 1u;
                 result.nextBodyIndex = result.worldNextAssetIndex;
@@ -6716,6 +6915,16 @@ RetailCensusStepReport RetailFastfileCensusJob::Step(
         {
             impl_->result.sourceBytesConsumed = impl_->source.TotalBytesConsumed();
             impl_->result.sourceFeedCount = impl_->source.FeedCount();
+            if (const RetailCensusError traceError =
+                    impl_->EnsureBoundarySemanticTrace();
+                traceError != RetailCensusError::None)
+            {
+                fail(traceError);
+                break;
+            }
+            impl_->result.semanticTraceHash =
+                kisak::database::SemanticTraceHash(
+                    impl_->result.semanticTrace);
             if (impl_->streamInitialized)
             {
                 inflateEnd(&impl_->stream);
@@ -6794,8 +7003,20 @@ RetailCensusStepReport RetailFastfileCensusJob::Step(
             {
                 impl_->result.sourceBytesConsumed = impl_->source.TotalBytesConsumed();
                 impl_->result.sourceFeedCount = impl_->source.FeedCount();
-                progress_ = RetailCensusProgress::Succeeded;
-                resultAvailable_ = true;
+                if (const RetailCensusError traceError =
+                        impl_->EnsureBoundarySemanticTrace();
+                    traceError != RetailCensusError::None)
+                {
+                    fail(traceError);
+                }
+                else
+                {
+                    impl_->result.semanticTraceHash =
+                        kisak::database::SemanticTraceHash(
+                            impl_->result.semanticTrace);
+                    progress_ = RetailCensusProgress::Succeeded;
+                    resultAvailable_ = true;
+                }
             }
             else if (parseBlocked) fail(RetailCensusError::RecordTruncated);
             break;

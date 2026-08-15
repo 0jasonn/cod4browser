@@ -45,6 +45,56 @@ Work in vertical milestones:
 
 Keep each milestone runnable. A small browser boot that is continuously tested is more useful than a large branch that only compiles after every native subsystem has been rewritten.
 
+## Engine convergence direction
+
+Treat upstream KisakCOD/IW3 structures and behavior as canonical. The browser
+port must converge toward the real database, asset, client, game, collision,
+animation, and script systems rather than grow a parallel browser-specific IW3
+engine.
+
+The target data flow is:
+
+```text
+COD4 fastfile
+     -> Kisak database/asset loader
+     -> Kisak XAsset / XModel / Material / GfxWorld
+     -> Kisak client and game systems
+     -> renderer frontend
+     -> portable draw commands
+     -> WebGL2 backend
+```
+
+- Keep `XModel` as `XModel`, `Material` as `Material`, and `GfxWorld` as
+  `GfxWorld`. Translate them only at a genuine platform boundary, such as the
+  renderer backend or browser storage API.
+- Treat the current `Retail*`, extracted-surface, census, and preview records as
+  temporary validation scaffolding. Do not make them the permanent engine
+  object model or add unrelated gameplay behavior to them.
+- Preserve native DB stream, allocation-block, pointer-alias, dependency-order,
+  and atomic-publication semantics wherever practical. Continue through every
+  required pre-world asset family; never seek directly to `GfxWorld` when
+  earlier stream state is required.
+- Once a correctly published `GfxWorld` can render enough real Killhouse
+  geometry to prove the frontend/backend seam, pause renderer expansion. Pivot
+  to compiling and integrating substantially more real Kisak runtime code,
+  prioritizing `Com_Init`, `DB_LoadXZone`, `CL_Init`, `CG_Init`, `SV_Init`,
+  `Scr_Init`, `CM_LoadMap`, game, cgame, xanim, collision, and the script VM.
+  Do not turn the bootstrap into a polished standalone asset viewer.
+- Browser asynchrony belongs at the platform boundary. Keep portable engine
+  operations synchronous-looking. The preferred long-term shape is a DOM and
+  file-picker host on the main thread with KisakCOD Wasm, a synchronous-style
+  filesystem, and OffscreenCanvas/WebGL2 in a dedicated Worker. Do not enable
+  pthreads without profiling evidence and a documented deployment decision.
+- Before adding a browser-only intermediate representation, identify the
+  genuine platform boundary that requires it and document its retirement or
+  ownership. If no such boundary exists, prefer compiling or adapting the
+  Kisak implementation.
+
+Maintain `docs/web-port-convergence.md` as a current inventory of shared,
+modified, platform, temporary, native-only, and uncompiled systems. Every
+substantial milestone should move at least one relevant system toward shared
+Kisak behavior or explain why a platform-owned implementation is permanent.
+
 ## Browser platform rules
 
 - Main loop: do not block the browser event loop. Use the Emscripten main-loop API or an equally explicit frame pump. Avoid Asyncify unless a measured, documented need justifies its cost.
@@ -75,6 +125,12 @@ Keep each milestone runnable. A small browser boot that is continuously tested i
 
 - Add host-native unit tests for portable parsers, serialization, math, command handling, and filesystem logic wherever they do not require the game runtime.
 - Add browser tests for boot, persistent storage, input events, audio lifecycle, WebGL/WebGPU capability failures, and useful error messages for invalid asset selections.
+- Expand differential tests between native Kisak and the web target. Feed the
+  same synthetic input to both paths where practical and compare semantic
+  traces such as asset type/name, stream position and block, pointer aliases,
+  dependency order, nested counts, surfaces, material references, and texture
+  metadata. Frame compatibility work as making the web result match native
+  Kisak rather than independently specifying IW3 behavior.
 - Test with synthetic malformed archives and network messages. Porting old native code into a browser increases the importance of fuzzing and strict bounds validation.
 - For rendering work, retain a deterministic small scene or capture and compare it deliberately; tolerate only documented platform variance.
 - Run the narrowest relevant checks while iterating, then the complete available suite before handing work off. Report exactly what ran and what could not run.

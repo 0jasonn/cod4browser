@@ -8,6 +8,7 @@ set(KISAK_WEB_SITE_DIR "${CMAKE_BINARY_DIR}/site")
 set(KISAK_WEB_SOURCE_DIR "${CMAKE_SOURCE_DIR}/web")
 
 add_executable(KisakCOD-web
+    "${SRC_DIR}/database/db_semantic_trace.cpp"
     # The first platform-neutral qcommon slice: command parsing/buffering and
     # an owned-string dvar registry with no filesystem or Win32 dependencies.
     "${SRC_DIR}/qcommon/cmd_core.cpp"

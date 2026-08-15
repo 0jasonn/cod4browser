@@ -1826,6 +1826,21 @@ void TestReusableWorldXModelLoader()
         result.stoppedBeforeDifferentWorldAssetType &&
         result.unsupportedOperation == nullptr,
         "the supported dispatcher resumes after every completed XModel");
+    Require(result.semanticTrace.size() == 15u &&
+        result.semanticTrace.front().kind ==
+            kisak::database::SemanticTraceEventKind::AssetBegin &&
+        result.semanticTrace.front().assetType == ASSET_TYPE_TECHNIQUE_SET &&
+        result.semanticTrace.front().assetIndex == 0u &&
+        result.semanticTrace[1u].kind ==
+            kisak::database::SemanticTraceEventKind::AssetPublish &&
+        result.semanticTrace[1u].name == ",web/mc_l_sm_r0c0s0" &&
+        result.semanticTrace.back().kind ==
+            kisak::database::SemanticTraceEventKind::Boundary &&
+        result.semanticTrace.back().assetType == ASSET_TYPE_GFXWORLD &&
+        result.semanticTrace.back().assetIndex == 7u &&
+        result.semanticTraceHash ==
+            kisak::database::SemanticTraceHash(result.semanticTrace),
+        "the reusable loader emits a normalized begin/publish/boundary trace");
     Require(std::any_of(result.worldXModels[0].surfaces.begin(),
                 result.worldXModels[0].surfaces.end(),
                 [](const RetailXSurface &surface) {
@@ -1905,6 +1920,22 @@ void TestReusableWorldXModelLoader()
                 return model.rendererPayloadAvailable;
             }),
         "the aggregate renderer-byte ceiling disables retention without rejecting inventory");
+
+    RetailCensusLimits traceLimits;
+    traceLimits.maxSemanticTraceEntries = 1u;
+    RetailFastfileCensusJob traceBounded;
+    Require(traceBounded.BeginStreaming(
+            RetailCensusMode::WorldXModelLoader, traceLimits) ==
+        RetailCensusError::None,
+        "the semantic-trace ceiling fixture starts");
+    Require(traceBounded.FeedSource(file, true) == RetailCensusError::None,
+        "the semantic-trace ceiling source is accepted");
+    while (traceBounded.Progress() == RetailCensusProgress::Running)
+        (void)traceBounded.Step();
+    RetailFastfileCensus traceUnavailable;
+    Require(traceBounded.Failure() == RetailCensusError::SemanticTraceLimit &&
+        !traceBounded.TakeResult(traceUnavailable),
+        "the semantic trace is bounded and unavailable after overflow");
 }
 
 void TestReusableWorldMaterialTechniqueLoader()

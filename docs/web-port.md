@@ -1544,6 +1544,44 @@ Reaching `GfxWorld` still requires typed loaders for every intervening inline
 asset class; geometry, lightmaps, visibility, and camera state remain separate
 later boundaries.
 
+The loader census and `Retail*` records are validation scaffolding, not the
+destination engine model. New loader work must inventory and match the native
+Kisak DB behavior, and the supported result must converge on canonical
+`XAsset`, `XModel`, `Material`, and `GfxWorld` ownership rather than growing a
+parallel browser scene format. See
+[web-port-convergence.md](web-port-convergence.md) for the current ownership
+inventory and retirement criteria.
+
+Once a correctly published `GfxWorld` renders enough real Killhouse geometry to
+prove the Kisak renderer-frontend to WebGL2-backend seam, renderer and viewer
+expansion pauses. The next phase is integration of substantially more real
+Kisak runtime code: `Com_Init`, `DB_LoadXZone`, `CM_LoadMap`, `CL_Init`,
+`CG_Init`, `SV_Init`, game, cgame, xanim, collision, and the script VM. Browser
+asynchrony remains at the host/platform boundary rather than becoming the
+portable engine execution model.
+
+## Convergence checkpoint 1: canonical asset ABI and semantic trace
+
+The first convergence change extracts canonical `RawFile`, `XAssetHeader`,
+`XAssetType`, and `XAsset` declarations from the dependency-heavy xanim header
+into `src/database/db_asset_types.h`. This is the same engine type definition
+for native and web code, not a browser wire mirror. Emscripten tests enforce the
+original 32-bit sizes: 12-byte `RawFile`, four-byte `XAssetHeader`, and
+eight-byte `XAsset`.
+
+`src/database/db_semantic_trace.*` defines an address-independent comparison
+record shared by future native and web DB producers. The reusable web loader
+now emits bounded top-level `asset-begin`, `asset-publish`, and `boundary`
+events with canonical `XAssetType`, asset index, logical identity, inflated
+offset, zone block/offset, alias-cell coordinates, and validated name. The
+trace has a deterministic hash, is included only in an atomically available
+successful result, and fails closed at an explicit entry ceiling.
+
+This checkpoint does not claim native/web differential execution yet. The next
+step is to hook the same format into the native generated loader, compare a
+shared synthetic trace, and then implement asset 395 using canonical
+`RawFile` publication and native `Load_RawFile` ordering.
+
 General generated-loader traversal and a real-map render remain later format
 milestones.
 

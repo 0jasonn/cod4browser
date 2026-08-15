@@ -1,5 +1,7 @@
 #pragma once
 
+#include <database/db_semantic_trace.h>
+
 #include <array>
 #include <cstdint>
 #include <memory>
@@ -61,6 +63,7 @@ struct RetailCensusLimits
     std::uint32_t maxFxSampleBytes = 64u * 1024u * 1024u;
     std::uint32_t maxFxTrailVertices = 65536u;
     std::uint32_t maxFxTrailIndices = 131072u;
+    std::uint32_t maxSemanticTraceEntries = 65536u;
 };
 
 enum class RetailCensusError : std::uint8_t
@@ -174,6 +177,7 @@ enum class RetailCensusError : std::uint8_t
     FxTrailInvalid,
     FxMaterialUnsupported,
     PostXModelAssetUnsupported,
+    SemanticTraceLimit,
     AllocationFailed,
 };
 
@@ -834,6 +838,8 @@ struct RetailFastfileCensus
     std::uint32_t block0HighWaterAtBoundary = 0u;
     std::uint32_t block4CursorAtBoundary = 0u;
     std::uint32_t completedAssetCount = 0u;
+    std::vector<kisak::database::SemanticTraceEntry> semanticTrace;
+    std::uint32_t semanticTraceHash = 2166136261u;
     bool techniqueSetPublished = false;
     bool vertexDeclarationPrepared = false;
     bool stoppedBeforeShaderCreation = false;

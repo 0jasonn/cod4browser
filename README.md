@@ -361,10 +361,21 @@ result contains 269 published XModels (four are nested FX built-ins), two FX
 effects, 395 completed top-level assets, and 1,289 published registry
 identities. There are 377 top-level records left before the first `GfxWorld`.
 
+The first convergence checkpoint moves canonical `RawFile`, `XAssetHeader`,
+`XAssetType`, and `XAsset` declarations into a renderer-free shared database
+header. The Wasm build now verifies their original 32-bit IW3 layout. The
+retail traversal emits a bounded, normalized semantic trace using those
+canonical asset types, including top-level begin, atomic publication, and next
+asset boundary events. A native DB producer for the same trace is the next
+compatibility step before the `RawFile` loader advances the owned boundary.
+
 See [docs/web-port.md](docs/web-port.md) for the pinned toolchain, build steps,
 current boundary and validation limits, and see
 [docs/fastfile-zone-inventory.md](docs/fastfile-zone-inventory.md) for the
-serialized evidence and strict subset. Original Call of Duty 4 data and native
+serialized evidence and strict subset. The system-by-system ownership,
+retirement criteria for temporary browser substitutes, and post-GfxWorld
+runtime pivot are tracked in
+[docs/web-port-convergence.md](docs/web-port-convergence.md). Original Call of Duty 4 data and native
 Bink, Miles, and Steam binaries are not part of the browser build or automated
 fixtures, and selected data is never uploaded.
 
