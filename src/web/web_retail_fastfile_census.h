@@ -63,6 +63,10 @@ struct RetailCensusLimits
     std::uint32_t maxFxSampleBytes = 64u * 1024u * 1024u;
     std::uint32_t maxFxTrailVertices = 65536u;
     std::uint32_t maxFxTrailIndices = 131072u;
+    std::uint32_t maxRawFiles = 4096u;
+    std::uint32_t maxRawFileNameBytes = 255u;
+    std::uint32_t maxRawFileBytes = 8u * 1024u * 1024u;
+    std::uint32_t maxRetainedRawFileBytes = 32u * 1024u * 1024u;
     std::uint32_t maxSemanticTraceEntries = 65536u;
 };
 
@@ -176,6 +180,12 @@ enum class RetailCensusError : std::uint8_t
     FxStringReferenceInvalid,
     FxTrailInvalid,
     FxMaterialUnsupported,
+    RawFileLayoutUnsupported,
+    RawFileNameInvalid,
+    RawFileNameTooLong,
+    RawFileSizeInvalid,
+    RawFilePayloadLimit,
+    RawFileCollectionLimit,
     PostXModelAssetUnsupported,
     SemanticTraceLimit,
     AllocationFailed,
@@ -328,6 +338,10 @@ enum class RetailCensusStage : std::uint8_t
     WorldFxMaterial,
     WorldFxMaterialName,
     WorldFxPublish,
+    WorldRawFile,
+    WorldRawFileName,
+    WorldRawFileBuffer,
+    WorldRawFilePublish,
     AssetBoundary,
     Failed,
 };
@@ -713,6 +727,28 @@ struct RetailWorldFxEffectDef
     bool published = false;
 };
 
+// Temporary ownership for a canonical RawFile published by the browser
+// database path. The shared storage keeps the canonical pointers valid when a
+// completed census result is moved or copied; gameplay-facing code sees the
+// real engine type through `asset`, not a parallel web asset definition.
+struct RetailWorldRawFile
+{
+    std::uint32_t assetIndex = 0u;
+    std::string name;
+    std::int32_t length = 0;
+    std::uint32_t nameReference = 0u;
+    std::uint32_t bufferReference = 0u;
+    std::uint32_t headerBlock0Offset = 0u;
+    std::uint32_t nameBlock4Offset = 0u;
+    std::uint32_t bufferBlock4Offset = 0u;
+    std::uint32_t identity = 0u;
+    std::uint32_t boundaryInflatedOffset = 0u;
+    std::shared_ptr<std::string> nameStorage;
+    std::shared_ptr<std::vector<char>> bufferStorage;
+    std::shared_ptr<RawFile> asset;
+    bool published = false;
+};
+
 struct RetailFastfileCensus
 {
     std::uint32_t version = 0u;
@@ -759,6 +795,7 @@ struct RetailFastfileCensus
     bool worldFirstTechniqueSetPublished = false;
     bool stoppedBeforeWorldTechniqueDependency = false;
     bool stoppedBeforeDifferentWorldAssetType = false;
+    bool stoppedAfterCanonicalRawFile = false;
     bool stoppedBeforeWorldXModelDependency = false;
     bool worldPostXModelTechniqueSetPublished = false;
     std::uint32_t inlineAssetReferences = 0u;
@@ -838,8 +875,10 @@ struct RetailFastfileCensus
     std::uint32_t block0HighWaterAtBoundary = 0u;
     std::uint32_t block4CursorAtBoundary = 0u;
     std::uint32_t completedAssetCount = 0u;
+    std::vector<RetailWorldRawFile> worldRawFiles;
     std::vector<kisak::database::SemanticTraceEntry> semanticTrace;
     std::uint32_t semanticTraceHash = 2166136261u;
+    std::uint32_t semanticTraceContractHash = 2166136261u;
     bool techniqueSetPublished = false;
     bool vertexDeclarationPrepared = false;
     bool stoppedBeforeShaderCreation = false;

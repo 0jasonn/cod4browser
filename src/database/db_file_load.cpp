@@ -1,5 +1,6 @@
 #include <universal/q_shared.h>
 #include "database.h"
+#include <database/db_semantic_trace.h>
 
 #include <qcommon/threads.h>
 #include <win32/win_local.h>
@@ -340,11 +341,15 @@ void __cdecl Load_XAssetArrayCustom(int32_t count)
     int32_t i; // [esp+4h] [ebp-4h]
 
     Load_Stream(1, (uint8_t *)varXAsset, 8 * count);
+    kisak::database::ResetNativeSemanticTraceContext();
     var = varXAsset;
     for (i = 0; i < count; ++i)
     {
         varXAsset = var;
+        kisak::database::EnterNativeSemanticTraceAsset(
+            static_cast<std::uint32_t>(i), varXAsset->type);
         Load_XAsset(0);
+        kisak::database::LeaveNativeSemanticTraceAsset();
         ++var;
     }
 }

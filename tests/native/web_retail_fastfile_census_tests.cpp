@@ -30,6 +30,13 @@ void Require(bool condition, const char *message)
     }
 }
 
+void CollectSemanticTrace(
+    const kisak::database::SemanticTraceEntry &entry, void *userData)
+{
+    static_cast<std::vector<kisak::database::SemanticTraceEntry> *>(userData)
+        ->push_back(entry);
+}
+
 void PutU32(std::vector<std::uint8_t> &bytes, std::uint32_t value)
 {
     bytes.push_back(static_cast<std::uint8_t>(value));
@@ -992,7 +999,34 @@ std::vector<std::uint8_t> BuildReusableWorldXModelLoaderInflated(
 }
 
 std::vector<std::uint8_t> BuildReusableWorldFxLoaderInflated(
-    bool invalidMaterial = false)
+    bool invalidMaterial = false);
+
+std::vector<std::uint8_t> BuildReusableWorldRawFileLoaderInflated()
+{
+    std::vector<std::uint8_t> bytes =
+        BuildReusableWorldFxLoaderInflated(false);
+    constexpr std::size_t assetTableOffset = 60u;
+    constexpr std::size_t rawFileAssetIndex = 2u;
+    SetU32(bytes, 52u, 4u);
+    const std::array<std::uint8_t, 8> rawFileEntry = {{
+        31u, 0u, 0u, 0u, 0xffu, 0xffu, 0xffu, 0xffu,
+    }};
+    bytes.insert(
+        bytes.begin() + static_cast<std::ptrdiff_t>(
+            assetTableOffset + rawFileAssetIndex * 8u),
+        rawFileEntry.begin(), rawFileEntry.end());
+
+    PutU32(bytes, 0xffffffffu);
+    PutU32(bytes, 4u);
+    PutU32(bytes, 1u);
+    AppendString(bytes, "scripts/web_rawfile.gsc");
+    const std::array<std::uint8_t, 5> payload = {{'t', 'e', 's', 't', 0u}};
+    bytes.insert(bytes.end(), payload.begin(), payload.end());
+    return bytes;
+}
+
+std::vector<std::uint8_t> BuildReusableWorldFxLoaderInflated(
+    bool invalidMaterial)
 {
     std::vector<std::uint8_t> bytes;
     PutU32(bytes, 4096u);
@@ -1938,6 +1972,87 @@ void TestReusableWorldXModelLoader()
         "the semantic trace is bounded and unavailable after overflow");
 }
 
+void TestReusableWorldRawFileLoader()
+{
+    using namespace kisak::fastfile;
+    using namespace kisak::database;
+    const auto file = BuildFile(BuildReusableWorldRawFileLoaderInflated());
+    const auto result = Run(
+        file,
+        7u, 2u, 3u, RetailCensusMode::WorldAssetLoader);
+
+    Require(result.worldRawFiles.size() == 1u,
+        "the reusable dispatcher reaches one canonical RawFile");
+    const RetailWorldRawFile &rawFile = result.worldRawFiles.front();
+    Require(rawFile.assetIndex == 2u && rawFile.published && rawFile.asset &&
+            rawFile.name == "scripts/web_rawfile.gsc" &&
+            rawFile.length == 4 && rawFile.bufferStorage &&
+            rawFile.bufferStorage->size() == 5u &&
+            std::string_view(rawFile.asset->name) == rawFile.name &&
+            rawFile.asset->name == rawFile.nameStorage->c_str() &&
+            rawFile.asset->len == 4 &&
+            rawFile.asset->buffer == rawFile.bufferStorage->data() &&
+            std::string_view(rawFile.asset->buffer, 4u) == "test",
+        "RawFile publication owns storage behind the canonical engine ABI");
+    Require(result.completedAssetCount == 3u &&
+            result.nextBodyIndex == 3u &&
+            result.nextBodyType == ASSET_TYPE_GFXWORLD &&
+            result.stoppedAfterCanonicalRawFile &&
+            result.stoppedBeforeDifferentWorldAssetType &&
+            result.semanticTrace.size() == 7u &&
+            result.semanticTrace[4u].kind ==
+                SemanticTraceEventKind::AssetBegin &&
+            result.semanticTrace[4u].assetType == ASSET_TYPE_RAWFILE &&
+            result.semanticTrace[5u].kind ==
+                SemanticTraceEventKind::AssetPublish &&
+            result.semanticTrace[5u].name == "scripts/web_rawfile.gsc" &&
+            result.semanticTrace.back().kind ==
+                SemanticTraceEventKind::Boundary &&
+            result.semanticTraceContractHash ==
+                SemanticTraceContractHash(result.semanticTrace),
+        "RawFile publish returns to the dispatcher and stops at GfxWorld");
+
+    std::vector<SemanticTraceEntry> nativeProjection;
+    SetSemanticTraceObserver(CollectSemanticTrace, &nativeProjection);
+    ResetNativeSemanticTraceContext();
+    EnterNativeSemanticTraceAsset(rawFile.assetIndex, ASSET_TYPE_RAWFILE);
+    for (const std::size_t index : {4u, 5u})
+    {
+        const SemanticTraceEntry &webEntry = result.semanticTrace[index];
+        EmitNativeSemanticTrace(
+            webEntry.kind,
+            0u,
+            0u,
+            webEntry.streamBlock,
+            webEntry.streamOffset,
+            webEntry.relatedBlock,
+            webEntry.relatedOffset,
+            webEntry.name);
+    }
+    LeaveNativeSemanticTraceAsset();
+    ClearSemanticTraceObserver();
+    const std::span<const SemanticTraceEntry> webProjection(
+        result.semanticTrace.data() + 4u, 2u);
+    Require(nativeProjection.size() == 2u &&
+            SemanticTraceContractHash(nativeProjection) ==
+                SemanticTraceContractHash(webProjection),
+        "native generated-loader observer and web RawFile trace share a contract");
+
+    RetailCensusLimits limits;
+    limits.maxRawFileBytes = 3u;
+    RetailFastfileCensusJob bounded;
+    Require(bounded.BeginStreaming(RetailCensusMode::WorldAssetLoader, limits) ==
+            RetailCensusError::None &&
+            bounded.FeedSource(file, true) == RetailCensusError::None,
+        "bounded RawFile fixture starts");
+    while (bounded.Progress() == RetailCensusProgress::Running)
+        (void)bounded.Step();
+    RetailFastfileCensus unavailable;
+    Require(bounded.Failure() == RetailCensusError::RawFilePayloadLimit &&
+            !bounded.TakeResult(unavailable),
+        "RawFile payloads are rejected atomically above the explicit ceiling");
+}
+
 void TestReusableWorldMaterialTechniqueLoader()
 {
     using namespace kisak::fastfile;
@@ -2525,18 +2640,26 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
             [](const RetailWorldXModel &entry) {
                 return !entry.topLevelAsset && entry.published &&
                     entry.name.starts_with(',') && entry.lodCount == 0;
-            }));
+             }));
+    Require(result.worldRawFiles.size() == 1u,
+        "owned traversal retains the first canonical RawFile");
+    const RetailWorldRawFile &firstRawFile = result.worldRawFiles.front();
+    std::cout << "  RawFile asset=" << firstRawFile.assetIndex
+              << " name=" << firstRawFile.name
+              << " identity=" << firstRawFile.identity
+              << " length=" << firstRawFile.length
+              << " boundary=" << firstRawFile.boundaryInflatedOffset << '\n';
     Require(sandbagIt != result.worldXModels.end() &&
         sandbagIt->name == "mil_sandbag_desert_single_flat" &&
         sandbagIt->published && sandbagIt->identity == 64u &&
         sandbagIt->physPresetTraversed && sandbagIt->physGeomsTraversed &&
         sandbagIt->physGeomCount != 0u &&
         sandbagIt->physGeomPayloadBytes != 0u &&
-        result.completedAssetCount == 395u &&
+        result.completedAssetCount == 396u &&
         result.worldXModels.size() == 269u && nestedBuiltinModels == 4u &&
-        result.registryAssetCount == 1289u &&
-        result.registryAliasCount == 1289u &&
-        result.registryDefinedAliasCount == 1289u &&
+        result.registryAssetCount == 1290u &&
+        result.registryAliasCount == 1290u &&
+        result.registryDefinedAliasCount == 1290u &&
         splatFx.assetIndex == 381u &&
         splatFx.name == "props/watermelon_splat" &&
         splatFx.identity == 1242u && splatFx.published &&
@@ -2557,9 +2680,14 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
         nextModel.assetIndex == 394u &&
         nextModel.name == "com_drop_rope_obj" &&
         nextModel.published &&
-        result.nextBodyIndex == 395u && result.nextBodyType == 31u &&
+        firstRawFile.assetIndex == 395u && firstRawFile.published &&
+        firstRawFile.identity == 1290u && firstRawFile.asset &&
+        firstRawFile.asset->name == firstRawFile.nameStorage->c_str() &&
+        firstRawFile.asset->len == firstRawFile.length &&
+        result.nextBodyIndex == 396u && result.nextBodyType == 31u &&
+        result.stoppedAfterCanonicalRawFile &&
         result.unsupportedOperation == nullptr,
-        "owned FX-family traversal reaches the first RawFile at asset 395");
+        "owned FX-family traversal publishes RawFile 395 and stops at 396");
     return;
     Require(model.published && model.identity == 19u &&
         model.rendererPayloadSelected && model.rendererPayloadAvailable &&
@@ -2918,6 +3046,7 @@ int main(int argc, char **argv)
     TestWorldSecondXModelDependenciesBoundary();
     TestWorldXModelCollectionBoundary();
     TestReusableWorldXModelLoader();
+    TestReusableWorldRawFileLoader();
     TestReusableWorldMaterialTechniqueLoader();
     TestReusableWorldFxLoader();
     TestMalformedPrefixRecords();

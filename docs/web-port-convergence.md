@@ -41,8 +41,8 @@ substitute as convergence.
 
 ## Snapshot
 
-Snapshot baseline: branch `web-port`, commit `97047fef`, plus convergence
-checkpoint 1 in the current working tree.
+Snapshot baseline: branch `web-port`, convergence checkpoint 1 at commit
+`66213ad1`, plus checkpoint 2 in the current working tree.
 
 The production web target contains 31 C/C++ translation units: six outside
 `src/web` and 25 inside it. The new non-web unit is the shared database semantic
@@ -51,10 +51,11 @@ a quality metric by itself because filesystem, lifecycle, and WebGL code should
 remain platform-owned.
 
 Current retail traversal of `killhouse.ff` completes top-level assets 0 through
-394 and stops before inline `RawFile` asset 395. It has 377 top-level records
+395 and stops before inline `RawFile` asset 396. It has 376 top-level records
 left before the first `GfxWorld` at asset 772. The retained result includes 269
-published XModels, two FX effects, and 1,289 registry identities. These are
-currently census/preview records, not canonical Kisak `XAsset` publications.
+published XModels, two FX effects, and 1,290 registry identities. RawFile 395 is
+published through the canonical Kisak type; the older XModel/material/FX
+results remain census/preview records rather than canonical publications.
 
 ## System inventory
 
@@ -74,7 +75,7 @@ currently census/preview records, not canonical Kisak `XAsset` publications.
 | IWI decoding | `MODIFIED KISAK` / partial | Bounded DXT decoding is reusable. Connect it to canonical `GfxImage` loading and renderer upload instead of browser material queues. |
 | Fastfile framing and zone stream machine | `TEMPORARY WEB SUBSTITUTE` | It accurately models blocks, rewind/high-water behavior, pointer classes, aliases, and bounded streaming. Use it as differential evidence and migrate reusable mechanics toward the Kisak DB loader. |
 | Asset registry | `TEMPORARY WEB SUBSTITUTE` | Stable typed identities prove alias behavior, but the destination is Kisak `XAsset` registration and native DB ownership. |
-| Retail loader dispatcher | `TEMPORARY WEB SUBSTITUTE` | `web_retail_fastfile_census.*` is the current pre-world traversal vehicle. It now reports canonical asset types through the shared semantic trace. Continue reusable families without turning `Retail*` results into the permanent object model. |
+| Retail loader dispatcher | `TEMPORARY WEB SUBSTITUTE` | `web_retail_fastfile_census.*` is the current pre-world traversal vehicle. It reports canonical asset types through the shared semantic trace and now publishes one canonical RawFile before an explicit boundary. Continue reusable families without turning other `Retail*` results into the permanent object model. |
 | `XModel` | `TEMPORARY WEB SUBSTITUTE`; canonical code `NOT COMPILED` | Retail data is retained as `RetailWorldXModel`. Converge loader output and publication on `XModel` from `src/xanim/xmodel.h`, then compile the consumers that require it. |
 | `Material` and techniques | `TEMPORARY WEB SUBSTITUTE`; canonical code `NOT COMPILED` | Current `RetailXModelMaterial` and compatibility records validate dependencies. Converge on `Material`, `MaterialTechniqueSet`, and related Kisak structures; translate only D3D shader/backend state. |
 | `GfxImage` | `TEMPORARY WEB SUBSTITUTE`; native backend `NATIVE ONLY` | Current metadata plus IWD lookup proves image selection. Publish canonical image assets while keeping GPU texture creation in the WebGL backend. |
@@ -95,8 +96,8 @@ currently census/preview records, not canonical Kisak `XAsset` publications.
 | Audio | `NOT COMPILED` / future `WEB PLATFORM IMPLEMENTATION` | Preserve Kisak sound semantics where possible and isolate autoplay/unlock and Web Audio/OpenAL integration. |
 | Networking | `NOT COMPILED` / future `WEB PLATFORM IMPLEMENTATION` | Offline single-player first. Any later multiplayer requires a framed WebSocket/WebTransport relay; browsers cannot use raw COD4 UDP. |
 | Bink cinematics, Miles, and Steam | `NATIVE ONLY` | Feature-gate them. Use browser-compatible video/audio/auth paths or graceful omission without shipping native proprietary binaries. |
-| Database semantic trace | `MODIFIED KISAK` / partial | A shared address-independent event format and deterministic hash now exist; the web loader emits bounded begin/publish/boundary events. Instrument the native generated loader next and compare the same fixture. |
-| Portable parser tests | `MODIFIED KISAK` / partial | Synthetic fixtures cover bounds and failure behavior. The Wasm suite now checks canonical asset ABI and web trace determinism/limits; native-vs-web trace comparison remains next. |
+| Database semantic trace | `MODIFIED KISAK` / partial | A shared address-independent event format, exact hash, and portable contract hash now exist. The web loader emits bounded events; the native asset-array/RawFile generated path has an inert-by-default observer hook. A full native executable comparison still requires the unavailable native toolchain. |
+| Portable parser tests | `MODIFIED KISAK` / partial | Synthetic fixtures cover bounds and failure behavior. The Wasm suite checks canonical ABI, trace determinism/limits, and a native-observer/web RawFile contract projection. Full generated native-loader execution remains a later environment-backed check. |
 | Playwright browser tests | `WEB PLATFORM IMPLEMENTATION` | Continue boot, storage, lifecycle, context-loss, and end-to-end boundary coverage with synthetic assets. |
 
 ## Convergence gates
@@ -110,12 +111,25 @@ currently census/preview records, not canonical Kisak `XAsset` publications.
 - The current loader emits normalized top-level begin, publication, and
   boundary events with an explicit ceiling and deterministic hash.
 - The trace intentionally contains no process addresses or graphics handles.
-- A native producer and actual differential assertion remain the next slice;
-  this checkpoint does not label a web-only trace as differential testing.
+- The native producer hook is present, but full native generated-loader
+  execution remains pending a usable native compiler and legally owned test
+  environment; portable observer projection is not mislabeled as that run.
+
+### Checkpoint 2: canonical RawFile publication (complete)
+
+- Native `Load_XAssetArrayCustom` establishes the top-level trace context and
+  `Load_RawFilePtr` emits logical block coordinates around atomic publication.
+- The web loader follows the same header/name/payload ordering and exposes a
+  canonical `RawFile` whose pointers have stable owned lifetime.
+- Explicit count, name, individual payload, aggregate retained-byte, and trace
+  ceilings keep failure atomic.
+- The synthetic contract test reaches a next-asset boundary, and the owned
+  Killhouse run publishes asset 395 / identity 1290 before RawFile asset 396.
 
 ### Gate 1: finish the pre-GfxWorld dependency graph
 
-- Implement `RawFile` and every remaining inline family in serialized order.
+- Reuse the bounded canonical `RawFile` operation from asset 396 onward, then
+  implement every remaining inline family in serialized order.
 - Preserve block cursors, high-water marks, insertion cells, aliases, dependency
   order, and atomic publication.
 - Do not seek directly to asset 772.

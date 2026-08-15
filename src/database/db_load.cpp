@@ -1,5 +1,6 @@
 #include <universal/q_shared.h>
 #include "database.h"
+#include <database/db_semantic_trace.h>
 
 #include <xanim/xanim.h>
 #include <xanim/xmodel.h>
@@ -6057,6 +6058,24 @@ void __cdecl Load_RawFilePtr(bool atStreamStart)
     const void **inserted; // [esp+0h] [ebp-Ch]
     uint32_t value; // [esp+4h] [ebp-8h]
 
+    const std::uint32_t referenceBlock = 4u;
+    std::uint32_t referenceOffset = 0u;
+    if (kisak::database::HasSemanticTraceObserver() &&
+        g_streamZoneMem && g_streamZoneMem->blocks[referenceBlock].data)
+    {
+        const std::uintptr_t blockBegin = reinterpret_cast<std::uintptr_t>(
+            g_streamZoneMem->blocks[referenceBlock].data);
+        const std::uintptr_t blockEnd = blockBegin +
+            g_streamZoneMem->blocks[referenceBlock].size;
+        const std::uintptr_t referenceAddress =
+            reinterpret_cast<std::uintptr_t>(varRawFilePtr);
+        if (referenceAddress >= blockBegin &&
+            referenceAddress + sizeof(*varRawFilePtr) <= blockEnd)
+        {
+            referenceOffset = static_cast<std::uint32_t>(
+                referenceAddress - blockBegin);
+        }
+    }
     Load_Stream(atStreamStart, (uint8_t *)varRawFilePtr, 4);
     DB_PushStreamPos(0);
     if (*varRawFilePtr)
@@ -6066,12 +6085,40 @@ void __cdecl Load_RawFilePtr(bool atStreamStart)
         {
             *varRawFilePtr = (RawFile *)AllocLoad_FxElemVisStateSample();
             varRawFile = *varRawFilePtr;
+            std::uint32_t rawFileOffset = 0u;
+            if (kisak::database::HasSemanticTraceObserver() &&
+                g_streamZoneMem && g_streamZoneMem->blocks[0].data)
+            {
+                const std::uintptr_t blockBegin = reinterpret_cast<std::uintptr_t>(
+                    g_streamZoneMem->blocks[0].data);
+                const std::uintptr_t blockEnd =
+                    blockBegin + g_streamZoneMem->blocks[0].size;
+                const std::uintptr_t rawFileAddress =
+                    reinterpret_cast<std::uintptr_t>(varRawFile);
+                if (rawFileAddress >= blockBegin &&
+                    rawFileAddress + sizeof(*varRawFile) <= blockEnd)
+                {
+                    rawFileOffset = static_cast<std::uint32_t>(
+                        rawFileAddress - blockBegin);
+                }
+            }
+            kisak::database::EmitNativeSemanticTrace(
+                kisak::database::SemanticTraceEventKind::AssetBegin,
+                0u, 0u, 0u, rawFileOffset,
+                referenceBlock, referenceOffset);
             if (value == -2)
                 inserted = DB_InsertPointer();
             else
                 inserted = 0;
             Load_RawFile(1);
             Load_RawFileAsset((XAssetHeader *)varRawFilePtr);
+            kisak::database::EmitNativeSemanticTrace(
+                kisak::database::SemanticTraceEventKind::AssetPublish,
+                0u, 0u, 0u, rawFileOffset,
+                referenceBlock, referenceOffset,
+                *varRawFilePtr && (*varRawFilePtr)->name
+                    ? (*varRawFilePtr)->name
+                    : "");
             if (inserted)
                 *inserted = *varRawFilePtr;
         }

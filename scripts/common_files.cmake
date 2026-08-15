@@ -96,12 +96,15 @@ set(COMMON
 
 set(DATABASE
     "${SRC_DIR}/database/database.h"
+    "${SRC_DIR}/database/db_asset_types.h"
     "${SRC_DIR}/database/db_assetnames.cpp"
     "${SRC_DIR}/database/db_auth.cpp"
     "${SRC_DIR}/database/db_file_load.cpp"
     "${SRC_DIR}/database/db_load.cpp"
     "${SRC_DIR}/database/db_memory.cpp"
     "${SRC_DIR}/database/db_registry.cpp"
+    "${SRC_DIR}/database/db_semantic_trace.cpp"
+    "${SRC_DIR}/database/db_semantic_trace.h"
     "${SRC_DIR}/database/db_stream.cpp"
     "${SRC_DIR}/database/db_stream_load.cpp"
     "${SRC_DIR}/database/db_stringtable_load.cpp"

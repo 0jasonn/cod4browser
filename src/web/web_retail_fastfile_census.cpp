@@ -74,6 +74,7 @@ constexpr std::uint32_t FX_VELOCITY_SAMPLE_BYTES = 96u;
 constexpr std::uint32_t FX_VISUAL_SAMPLE_BYTES = 48u;
 constexpr std::uint32_t FX_TRAIL_DEF_BYTES = 28u;
 constexpr std::uint32_t FX_TRAIL_VERTEX_BYTES = 20u;
+constexpr std::uint32_t RAWFILE_BYTES = 12u;
 constexpr std::uint32_t ASSET_TYPE_PHYS_PRESET = 1u;
 constexpr std::uint32_t ASSET_TYPE_XMODEL = 3u;
 constexpr std::uint32_t ASSET_TYPE_MATERIAL = 4u;
@@ -81,6 +82,7 @@ constexpr std::uint32_t ASSET_TYPE_TECHNIQUE_SET = 5u;
 constexpr std::uint32_t ASSET_TYPE_IMAGE = 6u;
 constexpr std::uint32_t ASSET_TYPE_GFX_WORLD = 16u;
 constexpr std::uint32_t ASSET_TYPE_FX = 25u;
+constexpr std::uint32_t ASSET_TYPE_RAW_FILE = 31u;
 
 static_assert(ASSET_TYPE_PHYS_PRESET ==
     static_cast<std::uint32_t>(::ASSET_TYPE_PHYSPRESET));
@@ -96,6 +98,8 @@ static_assert(ASSET_TYPE_GFX_WORLD ==
     static_cast<std::uint32_t>(::ASSET_TYPE_GFXWORLD));
 static_assert(ASSET_TYPE_FX ==
     static_cast<std::uint32_t>(::ASSET_TYPE_FX));
+static_assert(ASSET_TYPE_RAW_FILE ==
+    static_cast<std::uint32_t>(::ASSET_TYPE_RAWFILE));
 
 struct WorldMaterialPassState
 {
@@ -276,6 +280,8 @@ bool ValidLimits(const RetailCensusLimits &limits) noexcept
         limits.maxFxEffects != 0u && limits.maxFxElemDefs != 0u &&
         limits.maxFxVisuals != 0u && limits.maxFxSampleBytes != 0u &&
         limits.maxFxTrailVertices != 0u && limits.maxFxTrailIndices != 0u &&
+        limits.maxRawFiles != 0u && limits.maxRawFileNameBytes != 0u &&
+        limits.maxRawFileBytes != 0u && limits.maxRetainedRawFileBytes != 0u &&
         limits.maxSemanticTraceEntries != 0u;
 }
 } // namespace
@@ -397,6 +403,12 @@ const char *RetailCensusErrorString(RetailCensusError error) noexcept
     case RetailCensusError::FxStringReferenceInvalid: return "invalid FX string reference";
     case RetailCensusError::FxTrailInvalid: return "invalid FX trail definition";
     case RetailCensusError::FxMaterialUnsupported: return "unsupported FX material dependency";
+    case RetailCensusError::RawFileLayoutUnsupported: return "unsupported RawFile layout";
+    case RetailCensusError::RawFileNameInvalid: return "invalid RawFile name";
+    case RetailCensusError::RawFileNameTooLong: return "RawFile name exceeds limit";
+    case RetailCensusError::RawFileSizeInvalid: return "invalid RawFile size";
+    case RetailCensusError::RawFilePayloadLimit: return "RawFile payload exceeds limit";
+    case RetailCensusError::RawFileCollectionLimit: return "RawFile collection limit exceeded";
     case RetailCensusError::PostXModelAssetUnsupported:
         return "asset after the first XModel is not an inline technique set";
     case RetailCensusError::SemanticTraceLimit:
@@ -518,6 +530,10 @@ const char *RetailCensusStageString(RetailCensusStage stage) noexcept
     case RetailCensusStage::WorldFxMaterial: return "world-fx-material";
     case RetailCensusStage::WorldFxMaterialName: return "world-fx-material-name";
     case RetailCensusStage::WorldFxPublish: return "world-fx-publish";
+    case RetailCensusStage::WorldRawFile: return "world-rawfile";
+    case RetailCensusStage::WorldRawFileName: return "world-rawfile-name";
+    case RetailCensusStage::WorldRawFileBuffer: return "world-rawfile-buffer";
+    case RetailCensusStage::WorldRawFilePublish: return "world-rawfile-publish";
     case RetailCensusStage::AssetBoundary: return "asset-boundary";
     case RetailCensusStage::Failed: return "failed";
     }
@@ -590,6 +606,7 @@ struct RetailFastfileCensusJob::Impl
     std::vector<std::uint32_t> worldMaterialLiteralTokens;
     std::uint32_t worldMaterialLiteralIndex = 0u;
     ZoneSpan worldFxAliasSlot{};
+    ZoneSpan worldRawFileAliasSlot{};
     ZoneSpan worldFxMaterialAliasSlot{};
     std::size_t worldFxIndex = 0u;
     std::uint32_t worldFxElemIndex = 0u;
@@ -600,6 +617,7 @@ struct RetailFastfileCensusJob::Impl
     std::uint32_t worldFxTrailIndicesReference = 0u;
     std::uint32_t worldFxTrailVertexCount = 0u;
     std::uint32_t worldFxTrailIndexCount = 0u;
+    std::uint64_t retainedRawFileBytes = 0u;
     std::uint32_t materialPassBytes = 0u;
     std::uint32_t vertexShaderProgramBytes = 0u;
     std::uint32_t pixelShaderProgramBytes = 0u;
@@ -701,7 +719,8 @@ struct RetailFastfileCensusJob::Impl
 
     RetailCensusError EnsureBoundarySemanticTrace() noexcept
     {
-        if (!result.stoppedBeforeDifferentWorldAssetType ||
+        if ((!result.stoppedBeforeDifferentWorldAssetType &&
+             !result.stoppedAfterCanonicalRawFile) ||
             result.nextBodyIndex >= worldAssetTypes.size())
         {
             return RetailCensusError::None;
@@ -1003,6 +1022,61 @@ struct RetailFastfileCensusJob::Impl
         result.nextBodyType = ASSET_TYPE_FX;
         result.nextBodyReference = INLINE_POINTER;
         stage = RetailCensusStage::WorldFxEffect;
+        return RetailCensusError::None;
+    }
+
+    RetailCensusError BeginWorldRawFile(
+        std::uint32_t assetIndex,
+        RetailCensusStage &stage) noexcept
+    {
+        if (assetIndex >= worldAssetTypes.size() ||
+            worldAssetTypes[assetIndex] != ASSET_TYPE_RAW_FILE ||
+            worldAssetReferences[assetIndex] != INLINE_POINTER)
+        {
+            return RetailCensusError::RawFileLayoutUnsupported;
+        }
+        if (result.worldRawFiles.size() >= limits.maxRawFiles)
+            return RetailCensusError::RawFileCollectionLimit;
+        worldRawFileAliasSlot = {
+            4u,
+            result.assetTableBlock4Offset + assetIndex * ASSET_BYTES + 4u,
+            4u,
+        };
+        if (const RetailCensusError error = MapRegistryError(
+                registry.ReserveAlias(
+                    worldRawFileAliasSlot, ASSET_TYPE_RAW_FILE));
+            error != RetailCensusError::None)
+        {
+            return error;
+        }
+        if (const RetailCensusError error = Push(0u);
+            error != RetailCensusError::None) return error;
+        ZoneSpan span;
+        if (const RetailCensusError error = Plan(4u, RAWFILE_BYTES, &span);
+            error != RetailCensusError::None) return error;
+        try { result.worldRawFiles.emplace_back(); }
+        catch (...) { return RetailCensusError::AllocationFailed; }
+        RetailWorldRawFile &rawFile = result.worldRawFiles.back();
+        rawFile.assetIndex = assetIndex;
+        rawFile.headerBlock0Offset = span.offset;
+        if (const RetailCensusError error = AppendSemanticTrace(
+                kisak::database::SemanticTraceEventKind::AssetBegin,
+                ASSET_TYPE_RAW_FILE,
+                assetIndex,
+                0u,
+                static_cast<std::uint32_t>(cursor),
+                span,
+                {},
+                worldRawFileAliasSlot);
+            error != RetailCensusError::None)
+        {
+            return error;
+        }
+        result.worldNextAssetIndex = assetIndex;
+        result.nextBodyIndex = assetIndex;
+        result.nextBodyType = ASSET_TYPE_RAW_FILE;
+        result.nextBodyReference = INLINE_POINTER;
+        stage = RetailCensusStage::WorldRawFile;
         return RetailCensusError::None;
     }
 
@@ -1335,6 +1409,11 @@ struct RetailFastfileCensusJob::Impl
                     result.nextBodyType == ASSET_TYPE_FX)
                 {
                     return BeginWorldFxEffect(index, nextStage);
+                }
+                if (result.nextBodyReference == INLINE_POINTER &&
+                    result.nextBodyType == ASSET_TYPE_RAW_FILE)
+                {
+                    return BeginWorldRawFile(index, nextStage);
                 }
                 const ZoneSpan current{
                     arenas.ActiveBlock(),
@@ -2353,6 +2432,18 @@ struct RetailFastfileCensusJob::Impl
                                 }
                                 continue;
                             }
+                            if (mode == RetailCensusMode::WorldXModelLoader &&
+                                result.nextBodyType == ASSET_TYPE_RAW_FILE &&
+                                result.nextBodyReference == INLINE_POINTER)
+                            {
+                                if (const RetailCensusError error =
+                                        BeginWorldRawFile(nextIndex, stage);
+                                    error != RetailCensusError::None)
+                                {
+                                    return error;
+                                }
+                                continue;
+                            }
                             if (mode == RetailCensusMode::WorldXModelLoader)
                             {
                                 result.stoppedBeforeDifferentWorldAssetType = true;
@@ -2400,6 +2491,15 @@ struct RetailFastfileCensusJob::Impl
                             result.nextBodyReference == INLINE_POINTER)
                         {
                             if (const RetailCensusError error = BeginWorldFxEffect(
+                                    nextIndex, stage);
+                                error != RetailCensusError::None) return error;
+                            continue;
+                        }
+                        if (mode == RetailCensusMode::WorldXModelLoader &&
+                            result.nextBodyType == ASSET_TYPE_RAW_FILE &&
+                            result.nextBodyReference == INLINE_POINTER)
+                        {
+                            if (const RetailCensusError error = BeginWorldRawFile(
                                     nextIndex, stage);
                                 error != RetailCensusError::None) return error;
                             continue;
@@ -3413,6 +3513,180 @@ struct RetailFastfileCensusJob::Impl
                     error != RetailCensusError::None) return error;
                 if (complete) return RetailCensusError::None;
                 continue;
+            }
+            if (stage == RetailCensusStage::WorldRawFile)
+            {
+                const int visit = visitRecord(RAWFILE_BYTES);
+                if (visit <= 0) return RetailCensusError::None;
+                const std::uint8_t *record = inflated.data() + cursor;
+                RetailWorldRawFile &rawFile = result.worldRawFiles.back();
+                rawFile.nameReference = ReadU32(record);
+                rawFile.length = std::bit_cast<std::int32_t>(ReadU32(record + 4u));
+                rawFile.bufferReference = ReadU32(record + 8u);
+                if (rawFile.nameReference != INLINE_POINTER)
+                    return RetailCensusError::RawFileLayoutUnsupported;
+                if (rawFile.length < 0)
+                    return RetailCensusError::RawFileSizeInvalid;
+                if (static_cast<std::uint32_t>(rawFile.length) >
+                    limits.maxRawFileBytes)
+                {
+                    return RetailCensusError::RawFilePayloadLimit;
+                }
+                if (rawFile.bufferReference == 0u && rawFile.length != 0)
+                    return RetailCensusError::RawFileSizeInvalid;
+                cursor += RAWFILE_BYTES;
+                ++report.recordsProcessed;
+                if (const RetailCensusError error = Push(4u);
+                    error != RetailCensusError::None) return error;
+                stage = RetailCensusStage::WorldRawFileName;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldRawFileName)
+            {
+                RetailWorldRawFile &rawFile = result.worldRawFiles.back();
+                const auto begin = inflated.begin() +
+                    static_cast<std::ptrdiff_t>(cursor);
+                const auto terminator = std::find(begin, inflated.end(), 0u);
+                if (terminator == inflated.end())
+                {
+                    if (inflated.size() - cursor >= limits.maxRawFileNameBytes)
+                        return RetailCensusError::RawFileNameTooLong;
+                    blocked = true;
+                    return RetailCensusError::None;
+                }
+                const std::size_t bytes =
+                    static_cast<std::size_t>(terminator - begin) + 1u;
+                if (bytes <= 1u) return RetailCensusError::RawFileNameInvalid;
+                if (bytes > limits.maxRawFileNameBytes)
+                    return RetailCensusError::RawFileNameTooLong;
+                if (recordVisited == 0u)
+                {
+                    ZoneSpan span;
+                    if (const RetailCensusError error = Plan(1u, bytes, &span);
+                        error != RetailCensusError::None) return error;
+                    rawFile.nameBlock4Offset = span.offset;
+                }
+                const int visit = visitRecord(bytes);
+                if (visit <= 0) return RetailCensusError::None;
+                try
+                {
+                    rawFile.name.assign(
+                        reinterpret_cast<const char *>(inflated.data() + cursor),
+                        bytes - 1u);
+                }
+                catch (...) { return RetailCensusError::AllocationFailed; }
+                if (!ValidPublishedName(rawFile.name))
+                    return RetailCensusError::RawFileNameInvalid;
+                cursor += bytes;
+                ++report.recordsProcessed;
+                if (rawFile.bufferReference == 0u)
+                {
+                    stage = RetailCensusStage::WorldRawFilePublish;
+                    continue;
+                }
+                const std::uint64_t payloadBytes =
+                    static_cast<std::uint64_t>(rawFile.length) + 1u;
+                if (payloadBytes > limits.maxRawFileBytes + 1ull ||
+                    retainedRawFileBytes + payloadBytes >
+                        limits.maxRetainedRawFileBytes)
+                {
+                    return RetailCensusError::RawFilePayloadLimit;
+                }
+                ZoneSpan span;
+                if (const RetailCensusError error = Plan(1u, payloadBytes, &span);
+                    error != RetailCensusError::None) return error;
+                rawFile.bufferBlock4Offset = span.offset;
+                stage = RetailCensusStage::WorldRawFileBuffer;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldRawFileBuffer)
+            {
+                RetailWorldRawFile &rawFile = result.worldRawFiles.back();
+                const std::size_t payloadBytes =
+                    static_cast<std::size_t>(rawFile.length) + 1u;
+                const int visit = visitRecord(payloadBytes);
+                if (visit <= 0) return RetailCensusError::None;
+                try
+                {
+                    rawFile.bufferStorage =
+                        std::make_shared<std::vector<char>>(payloadBytes);
+                    std::memcpy(rawFile.bufferStorage->data(),
+                        inflated.data() + cursor, payloadBytes);
+                }
+                catch (...) { return RetailCensusError::AllocationFailed; }
+                retainedRawFileBytes += payloadBytes;
+                cursor += payloadBytes;
+                ++report.recordsProcessed;
+                stage = RetailCensusStage::WorldRawFilePublish;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldRawFilePublish)
+            {
+                RetailWorldRawFile &rawFile = result.worldRawFiles.back();
+                try
+                {
+                    rawFile.nameStorage =
+                        std::make_shared<std::string>(rawFile.name);
+                    rawFile.asset = std::make_shared<RawFile>();
+                }
+                catch (...) { return RetailCensusError::AllocationFailed; }
+                rawFile.asset->name = rawFile.nameStorage->c_str();
+                rawFile.asset->len = rawFile.length;
+                rawFile.asset->buffer = rawFile.bufferStorage
+                    ? rawFile.bufferStorage->data()
+                    : nullptr;
+                if (const RetailCensusError error = Pop();
+                    error != RetailCensusError::None) return error;
+                if (const RetailCensusError error = Pop();
+                    error != RetailCensusError::None) return error;
+                if (const RetailCensusError error = MapRegistryError(
+                        registry.RegisterAsset(
+                            ASSET_TYPE_RAW_FILE, rawFile.assetIndex,
+                            rawFile.name, rawFile.identity));
+                    error != RetailCensusError::None) return error;
+                if (const RetailCensusError error = MapRegistryError(
+                        registry.PublishAlias(
+                            worldRawFileAliasSlot, rawFile.identity));
+                    error != RetailCensusError::None) return error;
+                rawFile.published = true;
+                rawFile.boundaryInflatedOffset =
+                    static_cast<std::uint32_t>(cursor);
+                if (const RetailCensusError error = AppendSemanticTrace(
+                        kisak::database::SemanticTraceEventKind::AssetPublish,
+                        ASSET_TYPE_RAW_FILE,
+                        rawFile.assetIndex,
+                        rawFile.identity,
+                        rawFile.boundaryInflatedOffset,
+                        {0u, rawFile.headerBlock0Offset, RAWFILE_BYTES},
+                        rawFile.name,
+                        worldRawFileAliasSlot);
+                    error != RetailCensusError::None)
+                {
+                    return error;
+                }
+                ++result.completedAssetCount;
+                result.block0HighWaterAtBoundary = arenas.HighWater(0u);
+                result.block4CursorAtBoundary = arenas.Cursor(4u);
+                result.worldRegistryAliasCount = registry.AliasCount();
+                result.worldRegistryDefinedAliasCount =
+                    registry.DefinedAliasCount();
+                result.registryAssetCount = registry.AssetCount();
+                result.registryAliasCount = registry.AliasCount();
+                result.registryDefinedAliasCount = registry.DefinedAliasCount();
+                result.worldNextAssetIndex = rawFile.assetIndex + 1u;
+                result.nextBodyIndex = result.worldNextAssetIndex;
+                if (result.nextBodyIndex < worldAssetTypes.size())
+                {
+                    result.nextBodyType = worldAssetTypes[result.nextBodyIndex];
+                    result.nextBodyReference =
+                        worldAssetReferences[result.nextBodyIndex];
+                    result.stoppedAfterCanonicalRawFile = true;
+                    result.stoppedBeforeDifferentWorldAssetType =
+                        result.nextBodyType != ASSET_TYPE_RAW_FILE;
+                }
+                stage = RetailCensusStage::AssetBoundary;
+                complete = true;
+                return RetailCensusError::None;
             }
             if (stage == RetailCensusStage::WorldXModel)
             {
@@ -5835,24 +6109,22 @@ struct RetailFastfileCensusJob::Impl
                     complete = true;
                     return RetailCensusError::None;
                 }
-                if (mode == RetailCensusMode::WorldXModelLoader &&
-                    result.nextBodyIndex < worldAssetTypes.size() &&
-                    result.nextBodyType == ASSET_TYPE_XMODEL &&
-                    result.nextBodyReference == INLINE_POINTER)
+                if (mode == RetailCensusMode::WorldXModelLoader)
                 {
-                    if (const RetailCensusError error = BeginWorldXModel(
-                            result.nextBodyIndex, stage);
+                    if (const RetailCensusError error =
+                            dispatchSupportedWorldAsset(
+                                result.nextBodyIndex, stage);
                         error != RetailCensusError::None)
                     {
                         return error;
                     }
+                    if (complete) return RetailCensusError::None;
                     continue;
                 }
                 if ((mode == RetailCensusMode::WorldPostXModelTechniqueSet ||
                      mode == RetailCensusMode::WorldSecondXModelPrefix ||
                      mode == RetailCensusMode::WorldSecondXSurfacePrefix ||
-                     mode == RetailCensusMode::WorldSecondXModelDependencies ||
-                     mode == RetailCensusMode::WorldXModelLoader) &&
+                     mode == RetailCensusMode::WorldSecondXModelDependencies) &&
                     result.nextBodyIndex < worldAssetTypes.size() &&
                     result.nextBodyType == ASSET_TYPE_TECHNIQUE_SET &&
                     result.nextBodyReference == INLINE_POINTER)
@@ -5864,15 +6136,6 @@ struct RetailFastfileCensusJob::Impl
                         return error;
                     }
                     continue;
-                }
-                if (mode == RetailCensusMode::WorldXModelLoader)
-                {
-                    result.stoppedBeforeDifferentWorldAssetType =
-                        result.nextBodyIndex < worldAssetTypes.size();
-                    result.unsupportedOperation = nullptr;
-                    stage = RetailCensusStage::AssetBoundary;
-                    complete = true;
-                    return RetailCensusError::None;
                 }
                 if (mode == RetailCensusMode::WorldPostXModelTechniqueSet ||
                     mode == RetailCensusMode::WorldSecondXModelPrefix ||
@@ -6925,6 +7188,9 @@ RetailCensusStepReport RetailFastfileCensusJob::Step(
             impl_->result.semanticTraceHash =
                 kisak::database::SemanticTraceHash(
                     impl_->result.semanticTrace);
+            impl_->result.semanticTraceContractHash =
+                kisak::database::SemanticTraceContractHash(
+                    impl_->result.semanticTrace);
             if (impl_->streamInitialized)
             {
                 inflateEnd(&impl_->stream);
@@ -7013,6 +7279,9 @@ RetailCensusStepReport RetailFastfileCensusJob::Step(
                 {
                     impl_->result.semanticTraceHash =
                         kisak::database::SemanticTraceHash(
+                            impl_->result.semanticTrace);
+                    impl_->result.semanticTraceContractHash =
+                        kisak::database::SemanticTraceContractHash(
                             impl_->result.semanticTrace);
                     progress_ = RetailCensusProgress::Succeeded;
                     resultAvailable_ = true;

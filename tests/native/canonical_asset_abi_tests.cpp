@@ -117,6 +117,60 @@ void TestSemanticTraceContract()
     changed[1u].name.push_back('x');
     Require(kisak::database::SemanticTraceHash(changed) != hash,
         "semantic trace hash includes normalized asset names");
+
+    changed = trace;
+    changed[1u].identity += 17u;
+    changed[1u].inflatedOffset += 23u;
+    Require(kisak::database::SemanticTraceContractHash(changed) ==
+            kisak::database::SemanticTraceContractHash(trace),
+        "portable contract hash excludes backend identity and inflate diagnostics");
+    changed[1u].streamOffset += 1u;
+    Require(kisak::database::SemanticTraceContractHash(changed) !=
+            kisak::database::SemanticTraceContractHash(trace),
+        "portable contract hash includes logical stream coordinates");
+}
+
+void CollectSemanticTrace(
+    const kisak::database::SemanticTraceEntry &entry, void *userData)
+{
+    static_cast<std::vector<kisak::database::SemanticTraceEntry> *>(userData)
+        ->push_back(entry);
+}
+
+void TestNativeSemanticTraceObserver()
+{
+    using namespace kisak::database;
+    std::vector<SemanticTraceEntry> trace;
+
+    Require(!HasSemanticTraceObserver(),
+        "native semantic observer is disabled by default");
+    SetSemanticTraceObserver(CollectSemanticTrace, &trace);
+    ResetNativeSemanticTraceContext();
+    EnterNativeSemanticTraceAsset(395u, ASSET_TYPE_RAWFILE);
+    EmitNativeSemanticTrace(
+        SemanticTraceEventKind::AssetBegin,
+        0u, 0u, 0u, 220u, 4u, 999u);
+    EmitNativeSemanticTrace(
+        SemanticTraceEventKind::AssetPublish,
+        0u, 0u, 0u, 220u, 4u, 999u,
+        "maps/createart/killhouse_art.gsc");
+    LeaveNativeSemanticTraceAsset();
+    EmitNativeSemanticTrace(
+        SemanticTraceEventKind::Failure,
+        0u, 0u, 0u, 0u, 0u, 0u);
+    ClearSemanticTraceObserver();
+
+    Require(trace.size() == 2u &&
+            trace[0u].assetType == ASSET_TYPE_RAWFILE &&
+            trace[0u].assetIndex == 395u &&
+            trace[0u].streamBlock == 0u &&
+            trace[0u].streamOffset == 220u &&
+            trace[0u].relatedBlock == 4u &&
+            trace[0u].relatedOffset == 999u &&
+            trace[1u].name == "maps/createart/killhouse_art.gsc",
+        "native observer emits bounded logical RawFile events for active assets");
+    Require(!HasSemanticTraceObserver(),
+        "native semantic observer clears without retaining test state");
 }
 
 } // namespace
@@ -125,6 +179,7 @@ int main()
 {
     TestCanonicalAssetTypes();
     TestSemanticTraceContract();
+    TestNativeSemanticTraceObserver();
     std::cout << "canonical asset ABI tests passed\n";
     return 0;
 }

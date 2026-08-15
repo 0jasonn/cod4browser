@@ -1534,11 +1534,16 @@ and `props/watermelon` as asset 382 / identity 1250. The first has one mark
 element and four inline materials. The second has six sampled elements, three
 inline materials, prior aliases, and four nested engine-owned XModels. After
 returning from those dependencies, the dispatcher reuses its existing loaders
-through asset 394 and stops before the first inline `RawFile` at asset 395.
-The result has 395 completed top-level assets, 269 published XModels, two FX
-effects, and 1,289 registered assets with all 1,289 aliases defined. The
-bounded retained-inflate ceiling remains 64 MiB; 377 top-level records remain
-before the first `GfxWorld`.
+through asset 394. It now follows native `Load_RawFile` ordering for asset 395:
+the 12-byte canonical header is allocated in block 0, the name and `len + 1`
+payload are bounded in block 4, the canonical `RawFile` pointers are backed by
+owned stable storage, and publication occurs only after the full payload is
+available. The owned file publishes identity 1290 for
+`aitype/ally_blackkit_shtgn_winchester.gsc` with length 1,781, then stops at
+inline RawFile asset 396. The result has 396 completed top-level assets, 269
+published XModels, two FX effects, and 1,290 registered assets with all 1,290
+aliases defined. The bounded retained-inflate ceiling remains 64 MiB; 376
+top-level records remain before the first `GfxWorld`.
 
 Reaching `GfxWorld` still requires typed loaders for every intervening inline
 asset class; geometry, lightmaps, visibility, and camera state remain separate
@@ -1577,10 +1582,27 @@ offset, zone block/offset, alias-cell coordinates, and validated name. The
 trace has a deterministic hash, is included only in an atomically available
 successful result, and fails closed at an explicit entry ceiling.
 
-This checkpoint does not claim native/web differential execution yet. The next
-step is to hook the same format into the native generated loader, compare a
-shared synthetic trace, and then implement asset 395 using canonical
-`RawFile` publication and native `Load_RawFile` ordering.
+## Convergence checkpoint 2: native observer and canonical RawFile
+
+The generated native asset-array loop now supplies stable top-level indices to
+an opt-in semantic trace observer. `Load_RawFilePtr` emits begin/publication
+events using block-0 object and block-4 reference-cell coordinates. A null
+observer is the default and trace failures cannot change loader behavior. The
+full native target could not be compiled in this environment because its
+Visual Studio 2022 toolchain is unavailable, so this is source instrumentation,
+not a claim that a native executable was run.
+
+The Wasm suite drives the same observer contract against a mixed synthetic
+technique-set/FX/RawFile fixture. Its portable contract hash excludes registry
+identity and inflate read-ahead fields that are backend diagnostics, while
+retaining event kind, canonical type, asset index, logical block coordinates,
+alias coordinates, and validated name. Payload size and retained-byte ceilings
+fail atomically.
+
+The owned `killhouse.ff` run verifies canonical RawFile asset 395 and the exact
+asset-396 boundary. The next step is to inventory whether asset 396 can reuse
+the same RawFile operation without new pointer cases, then traverse the
+remaining serialized families in order.
 
 General generated-loader traversal and a real-map render remain later format
 milestones.

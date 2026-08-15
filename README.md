@@ -356,18 +356,22 @@ one run. The reusable `FxEffectDef` family now follows checked element headers,
 velocity/visual samples, mark and ordinary visuals, effect-name references,
 engine-owned materials, trails, and nested XModels. It publishes assets 381 and
 382, then returns to the existing XModel and technique-set loaders through
-asset 394. The current boundary is the first `RawFile`, asset 395. The owned
-result contains 269 published XModels (four are nested FX built-ins), two FX
-effects, 395 completed top-level assets, and 1,289 published registry
-identities. There are 377 top-level records left before the first `GfxWorld`.
+asset 394. The canonical `RawFile` path now publishes asset 395
+(`aitype/ally_blackkit_shtgn_winchester.gsc`, 1,781 payload bytes) and records
+the next boundary at inline `RawFile` asset 396. The owned result contains 269
+published XModels (four are nested FX built-ins), two FX effects, 396 completed
+top-level assets, and 1,290 published registry identities. There are 376
+top-level records left before the first `GfxWorld`.
 
 The first convergence checkpoint moves canonical `RawFile`, `XAssetHeader`,
 `XAssetType`, and `XAsset` declarations into a renderer-free shared database
 header. The Wasm build now verifies their original 32-bit IW3 layout. The
 retail traversal emits a bounded, normalized semantic trace using those
 canonical asset types, including top-level begin, atomic publication, and next
-asset boundary events. A native DB producer for the same trace is the next
-compatibility step before the `RawFile` loader advances the owned boundary.
+asset boundary events. The generated native DB path now has an opt-in observer
+at `Load_XAssetArrayCustom` and `Load_RawFilePtr`; a portable contract hash
+compares logical stream coordinates without native addresses or inflate
+read-ahead diagnostics. The next loader slice starts at RawFile asset 396.
 
 See [docs/web-port.md](docs/web-port.md) for the pinned toolchain, build steps,
 current boundary and validation limits, and see
