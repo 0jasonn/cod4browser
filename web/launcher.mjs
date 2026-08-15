@@ -294,12 +294,13 @@ globalThis.addEventListener("kisakcod:retail-census", (event) => {
                     `(type ${postXModelTechniqueSetRun?.nextBodyType ?? "unknown"}). `
                 : `The post-model technique-set run remains unpublished. `) +
             (secondXModel?.headerTraversed
-                ? `M33 traversed XModel ${secondXModel.name} at asset ` +
+                ? `M34 ${secondXModel.published ? "published" : "traversed"} ` +
+                    `XModel ${secondXModel.name} at asset ` +
                     `${secondXModel.assetIndex} ` +
                     `(${secondXModel.numBones} bones, ` +
                     `${secondXModel.surfaces?.length ?? 0}/` +
-                    `${secondXModel.surfaceCount} surfaces) and stopped at ` +
-                    `${secondXModel.unsupportedOperation || "its next dependency"}. `
+                    `${secondXModel.surfaceCount} surfaces, ` +
+                    `${secondXModel.materials?.length ?? 0} inline material(s)). `
                 : `The second XModel header remains untouched. `) +
             (firstXModel?.renderSurface?.state === "ready"
                 ? `WebGL2 is now drawing retail surface ` +

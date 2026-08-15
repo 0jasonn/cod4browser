@@ -1207,3 +1207,34 @@ This is shared XModel parser work, not a model viewer. The next boundary is to
 reuse the checked material and remaining dependency stages for the active model
 so asset 21 can publish, then turn the top-level XModel handling into a
 repeatable loader for the models that precede `GfxWorld`.
+
+## Milestone 34 complete second retail XModel dependencies (complete)
+
+The active-model seam now covers the remainder of `Load_XModel`. The owned
+asset-21 result is:
+
+| Boundary field | Owned F.N.G. value |
+| --- | --- |
+| Model / identity | `com_steel_ladder` / 32 |
+| Material / identity | `mc/mtl_steel_ladder` / 31 |
+| Material technique-set identity | 24 |
+| Material textures / constants / state bits | 3 / 2 / 7 |
+| Published image identities | 28, 29, 30 |
+| Collision surfaces / triangles | 1 / 296 |
+| Collision payload | 14,252 bytes |
+| Bone-info hash | `0x604bd5f6` |
+| Physics dependencies | null preset and geom list; complete |
+| Inflated publication boundary | 112,348 |
+| Block-4 cursor | 54,188 |
+| Registry assets / aliases | 32 / 33 reserved and defined |
+| Next body | inline `xmodel` asset 22 |
+
+All three material handles resolve to identity 31. The two repeated tokens are
+`0x40009af1`; owned traversal shows that this canonical material alias targets
+the published material's checked texture-table allocation. Resolution remains
+strictly typed and bounded, and malformed generated aliases publish no partial
+world result.
+
+No second-model geometry is retained or rendered. M35 should store completed
+models in a bounded collection and reuse this full dependency path for the
+consecutive XModels beginning at asset 22.

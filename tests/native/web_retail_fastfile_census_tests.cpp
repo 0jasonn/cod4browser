@@ -664,6 +664,8 @@ std::vector<std::uint8_t> BuildWorldSecondXModelPrefixInflated(
     SetF32(model, 40u, 1200.0f);
     PutU16At(model, 44u, 3u);
     SetU32(model, 48u, 0x80000000u);
+    SetU32(model, 152u, 0xffffffffu);
+    SetU32(model, 156u, 1u);
     SetU32(model, 164u, 0xffffffffu);
     SetF32(model, 168u, 20.0f);
     SetF32(model, 172u, invalidBounds ? 3.0f : -2.0f);
@@ -713,6 +715,57 @@ std::vector<std::uint8_t> BuildWorldSecondXModelPrefixInflated(
     }
     for (std::uint32_t index = 0u; index < 3u; ++index)
         PutU32(bytes, 0xffffffffu);
+    return bytes;
+}
+
+std::vector<std::uint8_t> BuildWorldSecondXModelDependenciesInflated(
+    bool invalidMaterialTechniqueAlias = false)
+{
+    std::vector<std::uint8_t> bytes =
+        BuildWorldSecondXModelPrefixInflated();
+    constexpr std::uint32_t secondMaterialHandleAlias = 0x400004f1u;
+    SetU32(bytes, bytes.size() - 8u, secondMaterialHandleAlias);
+    SetU32(bytes, bytes.size() - 4u, secondMaterialHandleAlias);
+
+    std::vector<std::uint8_t> material(80u, 0u);
+    SetU32(material, 0u, 0xffffffffu);
+    std::fill(material.begin() + 24u, material.begin() + 58u, 0xffu);
+    material[58u] = 1u;
+    SetU32(material, 64u,
+        invalidMaterialTechniqueAlias ? 0x40000001u : 0x40000015u);
+    SetU32(material, 68u, 0xffffffffu);
+    bytes.insert(bytes.end(), material.begin(), material.end());
+    AppendString(bytes, "web/material_second");
+    PutU32(bytes, 0x12345678u);
+    bytes.push_back('c');
+    bytes.push_back('p');
+    bytes.push_back(1u);
+    bytes.push_back(2u);
+    PutU32(bytes, 0x400002b1u);
+
+    std::vector<std::uint8_t> collision(44u, 0u);
+    SetU32(collision, 0u, 0xffffffffu);
+    SetU32(collision, 4u, 1u);
+    SetF32(collision, 8u, -1.0f);
+    SetF32(collision, 12u, -1.0f);
+    SetF32(collision, 16u, -1.0f);
+    SetF32(collision, 20u, 1.0f);
+    SetF32(collision, 24u, 1.0f);
+    SetF32(collision, 28u, 1.0f);
+    bytes.insert(bytes.end(), collision.begin(), collision.end());
+    for (std::size_t index = 0u; index < 12u; ++index)
+        PutU32(bytes, std::bit_cast<std::uint32_t>(
+            index == 0u ? 1.0f : 0.0f));
+
+    std::vector<std::uint8_t> boneInfo(40u, 0u);
+    SetF32(boneInfo, 0u, -1.0f);
+    SetF32(boneInfo, 4u, -1.0f);
+    SetF32(boneInfo, 8u, -1.0f);
+    SetF32(boneInfo, 12u, 1.0f);
+    SetF32(boneInfo, 16u, 1.0f);
+    SetF32(boneInfo, 20u, 1.0f);
+    SetF32(boneInfo, 36u, 3.0f);
+    bytes.insert(bytes.end(), boneInfo.begin(), boneInfo.end());
     return bytes;
 }
 
@@ -1231,6 +1284,55 @@ void TestWorldSecondXSurfacePrefixBoundary()
         "invalid second-XSurface layout exposes no partial public result");
 }
 
+void TestWorldSecondXModelDependenciesBoundary()
+{
+    using namespace kisak::fastfile;
+    const auto result = Run(
+        BuildFile(BuildWorldSecondXModelDependenciesInflated()),
+        7u, 2u, 3u, RetailCensusMode::WorldSecondXModelDependencies);
+    const RetailWorldXModel &first = result.worldFirstXModel;
+    const RetailWorldXModel &second = result.worldSecondXModel;
+    Require(first.published && first.identity == 6u &&
+        first.name == "web/xmodel_wall" && first.surfaces.size() == 6u,
+        "M34 preserves the first published XModel");
+    Require(second.published && second.identity == 10u &&
+        second.name == "web/xmodel_second" &&
+        second.materialsTraversed && second.materials.size() == 1u &&
+        second.materials[0].name == "web/material_second" &&
+        second.materials[0].identity == 9u &&
+        second.materialReferences == std::vector<std::uint32_t>{
+            0xffffffffu, 0x400004f1u, 0x400004f1u} &&
+        second.materialIdentities == std::vector<std::uint32_t>{9u, 9u, 9u} &&
+        second.collisionSurfacesTraversed &&
+        second.collisionSurfaces.size() == 1u &&
+        second.collisionTriangleCount == 1u &&
+        second.collisionPayloadBytes == 92u &&
+        second.boneInfoTraversed && second.boneInfoHash != 0u &&
+        second.physPresetTraversed && second.physGeomsTraversed &&
+        result.completedAssetCount == 6u &&
+        result.registryAssetCount == 10u &&
+        result.worldRegistryAliasCount == 11u &&
+        result.worldRegistryDefinedAliasCount == 11u &&
+        result.nextBodyIndex == 6u && result.nextBodyType == 16u &&
+        result.unsupportedOperation == nullptr,
+        "M34 publishes the complete second XModel dependency chain");
+
+    RetailFastfileCensusJob invalid;
+    Require(invalid.BeginStreaming(
+            RetailCensusMode::WorldSecondXModelDependencies) ==
+        RetailCensusError::None, "invalid M34 fixture starts");
+    const auto invalidFile = BuildFile(
+        BuildWorldSecondXModelDependenciesInflated(true));
+    Require(invalid.FeedSource(invalidFile, true) == RetailCensusError::None,
+        "invalid M34 source is accepted");
+    while (invalid.Progress() == RetailCensusProgress::Running)
+        (void)invalid.Step();
+    RetailFastfileCensus unavailable;
+    Require(invalid.Failure() == RetailCensusError::MaterialTechniqueSetInvalid &&
+        !invalid.TakeResult(unavailable),
+        "invalid second-model material alias exposes no partial result");
+}
+
 void TestPositiveIncrementalCensus()
 {
     const auto result = Run(BuildFile());
@@ -1476,8 +1578,8 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
     std::ifstream input(path, std::ios::binary);
     Require(input.good(), "owned world surface diagnostic opens fastfile");
     RetailFastfileCensusJob job;
-    Require(job.BeginStreaming(RetailCensusMode::WorldSecondXSurfacePrefix) ==
-        RetailCensusError::None, "owned M33 diagnostic starts");
+    Require(job.BeginStreaming(RetailCensusMode::WorldSecondXModelDependencies) ==
+        RetailCensusError::None, "owned M34 diagnostic starts");
     std::vector<std::uint8_t> chunk(RETAIL_CENSUS_MAX_STEP_BYTES);
     std::uint32_t steps = 0u;
     while (job.Progress() == RetailCensusProgress::Running && steps++ < 10000u)
@@ -1507,7 +1609,7 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
     const RetailWorldXModel &model = result.worldFirstXModel;
     const RetailWorldXModel &secondModel = result.worldSecondXModel;
     const auto &post = result.worldTechniqueSets.back();
-    std::cout << "owned M33 XSurface prefix: index=" << secondModel.assetIndex
+    std::cout << "owned M34 XModel dependencies: index=" << secondModel.assetIndex
               << " name=" << secondModel.name
               << " bones=" << static_cast<unsigned>(secondModel.numBones)
               << '/' << static_cast<unsigned>(secondModel.numRootBones)
@@ -1518,6 +1620,8 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
               << " rigid-lists=" << secondModel.totalRigidVertLists
               << " payload=" << secondModel.surfacePayloadBytes
               << " material-handles=" << secondModel.materialReferences.size()
+              << " surface-block4=" << secondModel.surfacesBlock4Offset
+              << " handles-block4=" << secondModel.materialHandlesBlock4Offset
               << " lods=" << secondModel.lodCount
               << " collision-surfaces=" << secondModel.collisionSurfaceCount
               << " radius=" << secondModel.radius
@@ -1548,6 +1652,33 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
               << " assets=" << result.registryAssetCount
               << " aliases=" << result.worldRegistryAliasCount
               << '/' << result.worldRegistryDefinedAliasCount << '\n';
+    std::cout << "owned M34 publication: model-identity="
+              << secondModel.identity
+              << " published=" << secondModel.published
+              << " materials=" << secondModel.materials.size()
+              << " material-identities=";
+    for (const std::uint32_t identity : secondModel.materialIdentities)
+        std::cout << identity << ',';
+    std::cout << " collision-triangles="
+              << secondModel.collisionTriangleCount
+              << " collision-payload=" << secondModel.collisionPayloadBytes
+              << " bone-hash=0x" << std::hex << secondModel.boneInfoHash
+              << std::dec
+              << " completed=" << result.completedAssetCount << '\n';
+    for (const RetailXModelMaterial &material : secondModel.materials)
+    {
+        std::cout << "  M34 material[" << material.handleIndex << "] name="
+                  << material.name << " identity=" << material.identity
+                  << " technique=" << material.techniqueSetIdentity
+                  << " textures=" << static_cast<unsigned>(material.textureCount)
+                  << " constants=" << static_cast<unsigned>(material.constantCount)
+                  << " state-bits=" << static_cast<unsigned>(material.stateBitsCount)
+                  << " images=" << material.images.size() << '\n';
+        for (const RetailXModelImage &image : material.images)
+            std::cout << "    image=" << image.name
+                      << " identity=" << image.identity
+                      << " published=" << image.published << '\n';
+    }
     Require(model.published && model.identity == 19u &&
         model.materials.size() == 2u &&
         model.materials[0].name == "mc/mtl_street_light_02" &&
@@ -1560,11 +1691,11 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
         model.collisionPayloadBytes == 4696u &&
         model.boundaryInflatedOffset == 67723u &&
         result.block0HighWaterAtBoundary == 352u &&
-        result.block4CursorAtBoundary == 39644u &&
-        result.registryAssetCount == 27u &&
-        result.worldRegistryAliasCount == 28u &&
-        result.worldRegistryDefinedAliasCount == 27u,
-        "owned M33 profile preserves the first XModel and technique-set run");
+        result.block4CursorAtBoundary == 54188u &&
+        result.registryAssetCount == 32u &&
+        result.worldRegistryAliasCount == 33u &&
+        result.worldRegistryDefinedAliasCount == 33u,
+        "owned M34 profile preserves the first XModel and technique-set run");
     Require(post.assetIndex == 20u &&
         post.name == ",mc_l_hsm_r0c0n0s0" &&
         post.nullTechniqueReferences == 34u &&
@@ -1574,17 +1705,18 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
         result.worldPostXModelTechniqueSetPublished &&
         result.worldPostXModelTechniqueSetBodiesEntered == 8u &&
         result.worldPostXModelTechniqueSetCompletedCount == 8u &&
-        result.nextBodyIndex == 21u && result.nextBodyType == 3u &&
+        result.nextBodyIndex == 22u && result.nextBodyType == 3u &&
         result.nextBodyReference == 0xffffffffu,
-        "owned M31 profile matches the consecutive post-XModel run boundary");
+        "owned M34 profile preserves the consecutive technique-set run");
     Require(secondModel.assetIndex == 21u &&
         secondModel.name == "com_steel_ladder" &&
         secondModel.headerTraversed && secondModel.skeletonPrefixTraversed &&
         secondModel.surfaceHeadersTraversed &&
         secondModel.surfaceDependenciesTraversed &&
         secondModel.materialHandlesTraversed &&
-        secondModel.stoppedBeforeMaterialDependency &&
-        !secondModel.stoppedBeforeSurfaceArray && !secondModel.published &&
+        !secondModel.stoppedBeforeMaterialDependency &&
+        !secondModel.stoppedBeforeSurfaceArray && secondModel.published &&
+        secondModel.identity == 32u &&
         secondModel.numBones == 1u && secondModel.numRootBones == 1u &&
         secondModel.surfaceCount == 3u && secondModel.lodCount == 3 &&
         secondModel.surfaces.size() == 3u &&
@@ -1593,6 +1725,22 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
         secondModel.totalRigidVertLists == 3u &&
         secondModel.surfacePayloadBytes == 28236u &&
         secondModel.materialReferences.size() == 3u &&
+        secondModel.materialReferences == std::vector<std::uint32_t>{
+            0xffffffffu, 0x40009af1u, 0x40009af1u} &&
+        secondModel.materialIdentities ==
+            std::vector<std::uint32_t>{31u, 31u, 31u} &&
+        secondModel.materialsTraversed && secondModel.materials.size() == 1u &&
+        secondModel.materials[0].name == "mc/mtl_steel_ladder" &&
+        secondModel.materials[0].identity == 31u &&
+        secondModel.materials[0].techniqueSetIdentity == 24u &&
+        secondModel.materials[0].images.size() == 3u &&
+        secondModel.collisionSurfacesTraversed &&
+        secondModel.collisionSurfaces.size() == 1u &&
+        secondModel.collisionTriangleCount == 296u &&
+        secondModel.collisionPayloadBytes == 14252u &&
+        secondModel.boneInfoTraversed &&
+        secondModel.boneInfoHash == 0x604bd5f6u &&
+        secondModel.physPresetTraversed && secondModel.physGeomsTraversed &&
         std::none_of(secondModel.surfaces.begin(), secondModel.surfaces.end(),
             [](const RetailXSurface &surface) {
                 return surface.renderPayloadRetained;
@@ -1600,20 +1748,21 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
         secondModel.collisionSurfaceCount == 1u &&
         secondModel.radius > 200.69f && secondModel.radius < 200.70f &&
         secondModel.memoryUsage == 24551u &&
-        secondModel.boundaryInflatedOffset == 97571u &&
+        secondModel.boundaryInflatedOffset == 112348u &&
         secondModel.nameBlock4Offset == 38268u &&
-        std::string(result.unsupportedOperation) == "Load_Material",
-        "owned M33 profile reaches the second XModel material boundary");
+        result.completedAssetCount == 22u &&
+        result.unsupportedOperation == nullptr,
+        "owned M34 profile publishes the complete second XModel");
     for (const RetailXSurface &surface : secondModel.surfaces)
     {
-        std::cout << "  M33 surface[" << surface.index << "] vertices="
+        std::cout << "  M34 surface[" << surface.index << "] vertices="
                   << surface.vertCount << " triangles=" << surface.triCount
                   << " lists=" << surface.rigidVertLists.size()
                   << " vertex-hash=0x" << std::hex << surface.verticesHash
                   << " index-hash=0x" << surface.indicesHash << std::dec
                   << '\n';
     }
-    std::cout << "  M33 material references:";
+    std::cout << "  M34 material references:";
     for (const std::uint32_t reference : secondModel.materialReferences)
         std::cout << " 0x" << std::hex << reference << std::dec;
     std::cout << '\n';
@@ -1747,6 +1896,7 @@ int main(int argc, char **argv)
     TestWorldPostXModelTechniqueSetBoundary();
     TestWorldSecondXModelPrefixBoundary();
     TestWorldSecondXSurfacePrefixBoundary();
+    TestWorldSecondXModelDependenciesBoundary();
     TestMalformedPrefixRecords();
     TestTechniqueTraversalFailures();
     TestEnvelopeAndAtomicity();

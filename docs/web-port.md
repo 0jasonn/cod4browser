@@ -1313,18 +1313,39 @@ ordering and fails atomically for an invalid second-XSurface pointer/count
 relationship. M33 therefore advances the shared XModel asset loader; it does
 not create a standalone model-viewer workflow.
 
-## Next boundary: Milestone 34
+## Milestone 34: complete second retail XModel dependencies (complete)
 
-M34 should generalize the already-checked material/image, collision-surface,
-bone-info, and null-physics dependency stages to the active XModel, complete
-asset 21, and publish its reserved alias. Once that path is shared, the next
-architectural step is a repeatable top-level XModel loop rather than a growing
-set of first/second special cases.
+The material/image, collision-surface, bone-info, and physics stages now use the
+active XModel just like the M33 surface stages. Asset 21 therefore completes the
+same checked dependency chain previously proven on asset 12, publishes its
+reserved table alias, and leaves the parser at the next top-level asset.
 
-Full XModel compatibility remains the intended loader direction: parse every
-supported serialized XModel dependency needed by the game and expose typed
-engine assets. Rendering any model is a separate consumer decision, and the
-map/world loader—not a model viewer—remains the product milestone.
+The owned `com_steel_ladder` publishes as identity 32 at inflated offset
+112,348. Its three material handles resolve to one inline material,
+`mc/mtl_steel_ladder` (identity 31), whose technique set is identity 24. The
+material has three textures, two constants, and seven state-bit records; its
+three inline images publish as identities 28–30. The model's one collision
+surface contains 296 triangles and 14,252 bounded collision bytes. Bone info
+hashes to `0x604bd5f6`; both null physics references complete normally.
+
+The final block-4 cursor is 54,188, all 33 reserved aliases are defined, and 32
+typed assets are registered. The owned material's repeated serialized aliases
+target its checked texture-table allocation rather than its raw handle slot;
+the registry now accepts that canonical typed target only after the material is
+published. A generated fixture exercises the same forward dependency-span alias
+and fails closed for an invalid technique-set alias.
+
+The first model's renderer-owned draw list and textures remain unchanged. The
+ladder's census contains hashes and typed dependencies only; it is neither
+retained for WebGL nor exposed as a viewer model.
+
+## Next boundary: Milestone 35
+
+Asset 22 is another inline XModel. M35 should replace the first/second result
+special cases with a bounded collection and loop the complete shared XModel
+loader across consecutive top-level model bodies, while preserving the first
+model as the only current renderer selection. This is the architectural step
+toward full XModel compatibility required before reaching `GfxWorld`.
 
 Reaching `GfxWorld` still requires typed loaders for every intervening inline
 asset class; geometry, lightmaps, visibility, and camera state remain separate

@@ -284,6 +284,15 @@ only renderer publication; second-model packed geometry is hashed, not retained
 or submitted. This is a step toward a reusable full XModel loader, not a model
 viewer.
 
+Milestone 34 completes asset 21 through the shared material/image,
+collision-surface, bone-info, and null-physics stages. The owned
+`com_steel_ladder` publishes as identity 32 at inflated offset 112,348; its
+single material `mc/mtl_steel_ladder` is identity 31 and resolves three images
+with identities 28–30. Its collision surface contributes 296 checked triangles
+and 14,252 bounded bytes. The first model remains the only renderer consumer.
+The next serialized body is inline XModel asset 22, making a repeatable XModel
+collection/loop the next boundary.
+
 See [docs/web-port.md](docs/web-port.md) for the pinned toolchain, build steps,
 current boundary, validation limits, and next milestone, and see
 [docs/fastfile-zone-inventory.md](docs/fastfile-zone-inventory.md) for the

@@ -158,6 +158,7 @@ enum class RetailCensusMode : std::uint8_t
     WorldPostXModelTechniqueSet,
     WorldSecondXModelPrefix,
     WorldSecondXSurfacePrefix,
+    WorldSecondXModelDependencies,
 };
 
 enum class RetailCensusStage : std::uint8_t
@@ -659,6 +660,8 @@ struct RetailFastfileCensus
 // XSurface payloads and material-handle ordering, stopping before an inline
 // material body. This reuses the engine-facing XModel parser rather than
 // introducing a standalone model-viewer path.
+// WorldSecondXModelDependencies completes that model's checked material/image,
+// collision, bone-info, and null-physics chain and publishes its reserved alias.
 // It retains serialized vertex/index bytes only for a renderer-bounded first
 // surface; decoding and graphics submission remain separate engine-side work.
 // Native D3D9 creation is never invoked.

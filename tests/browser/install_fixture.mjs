@@ -285,6 +285,7 @@ export function createSyntheticWorldInventoryFastfile({
     invalidSecondXModelBounds = false,
     unsupportedSecondXModelBoneNames = false,
     invalidSecondXSurfaceLayout = false,
+    invalidSecondXModelMaterialAlias = false,
     externalColorMap = true,
     colorMapName = "synthetic_engine_asset",
     secondExternalColorMap = false,
@@ -607,6 +608,8 @@ export function createSyntheticWorldInventoryFastfile({
     setF32(secondXModel, 40, 1200);
     setU16(secondXModel, 44, 3);
     setU32(secondXModel, 48, 0x8000_0000);
+    setU32(secondXModel, 152, 0xffff_ffff);
+    setU32(secondXModel, 156, 1);
     setU32(secondXModel, 164, 0xffff_ffff);
     setF32(secondXModel, 168, 20);
     setF32(secondXModel, 172, invalidSecondXModelBounds ? 3 : -2);
@@ -657,9 +660,46 @@ export function createSyntheticWorldInventoryFastfile({
         appendU16(inflated, 1);
         appendU16(inflated, 2);
     }
-    for (let index = 0; index < 3; ++index) {
-        appendU32(inflated, 0xffff_ffff);
+    appendU32(inflated, 0xffff_ffff);
+    appendU32(inflated, 0x4000_04f1);
+    appendU32(inflated, 0x4000_04f1);
+    const secondMaterial = new Array(80).fill(0);
+    setU32(secondMaterial, 0, 0xffff_ffff);
+    secondMaterial.fill(0xff, 24, 58);
+    secondMaterial[58] = 1;
+    setU32(secondMaterial, 64,
+        invalidSecondXModelMaterialAlias ? 0x4000_0001 : 0x4000_0015);
+    setU32(secondMaterial, 68, 0xffff_ffff);
+    inflated.push(
+        ...secondMaterial,
+        ...Buffer.from("web/material_second", "ascii"),
+        0,
+    );
+    appendU32(inflated, 0x1234_5678);
+    inflated.push("c".charCodeAt(0), "p".charCodeAt(0), 1, 2);
+    appendU32(inflated, 0x4000_02b1);
+    const secondCollisionSurface = new Array(44).fill(0);
+    setU32(secondCollisionSurface, 0, 0xffff_ffff);
+    setU32(secondCollisionSurface, 4, 1);
+    setF32(secondCollisionSurface, 8, -1);
+    setF32(secondCollisionSurface, 12, -1);
+    setF32(secondCollisionSurface, 16, -1);
+    setF32(secondCollisionSurface, 20, 1);
+    setF32(secondCollisionSurface, 24, 1);
+    setF32(secondCollisionSurface, 28, 1);
+    inflated.push(...secondCollisionSurface);
+    for (let index = 0; index < 12; ++index) {
+        appendU32(inflated, index === 0 ? 0x3f80_0000 : 0);
     }
+    const secondBoneInfo = new Array(40).fill(0);
+    setF32(secondBoneInfo, 0, -1);
+    setF32(secondBoneInfo, 4, -1);
+    setF32(secondBoneInfo, 8, -1);
+    setF32(secondBoneInfo, 12, 1);
+    setF32(secondBoneInfo, 16, 1);
+    setF32(secondBoneInfo, 20, 1);
+    setF32(secondBoneInfo, 36, 3);
+    inflated.push(...secondBoneInfo);
     const compressed = deflateSync(Uint8Array.from(inflated), { level: 9 });
     return Uint8Array.from([
         0x49, 0x57, 0x66, 0x66, 0x75, 0x31, 0x30, 0x30,
