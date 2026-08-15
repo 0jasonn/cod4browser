@@ -111,7 +111,7 @@ EM_JS(void, DispatchRetailCensusLoading,
             path: UTF8ToString(path),
             message: "Reading a bounded retail fastfile prefix through the browser VFS",
             maxSourceChunkBytes: 64 * 1024,
-            maxInflatedPrefixBytes: 256 * 1024,
+            maxInflatedPrefixBytes: 512 * 1024,
             maxStepBytes: 64 * 1024,
             maxStepRecords: 64,
             assetBodyTraversal: UTF8ToString(traversal)
@@ -173,7 +173,7 @@ EM_JS(
             stoppedBeforeAssetBody: false,
             assetBodiesEntered: 3,
             maxSourceChunkBytes: 64 * 1024,
-            maxInflatedPrefixBytes: 256 * 1024,
+            maxInflatedPrefixBytes: 512 * 1024,
             maxStepBytes: 64 * 1024,
             maxStepRecords: 64,
             blockSizes: [],
@@ -395,6 +395,7 @@ EM_JS(
      uint32_t materialTextureTableBlock4Offset,
      uint32_t imageBlock0Offset,
      uint32_t imageNameBlock4Offset,
+     uint32_t imageTextureInsertPointerBlock4Offset,
      uint32_t imageLoadDefBlock0Offset,
      uint32_t materialStateBitsBlock4Offset,
      int materialTechniqueSetPublished,
@@ -434,6 +435,8 @@ EM_JS(
             detail.materialTextureTableBlock4Offset = materialTextureTableBlock4Offset >>> 0;
             detail.imageBlock0Offset = imageBlock0Offset >>> 0;
             detail.imageNameBlock4Offset = imageNameBlock4Offset >>> 0;
+            detail.imageTextureInsertPointerBlock4Offset =
+                imageTextureInsertPointerBlock4Offset >>> 0;
             detail.imageLoadDefBlock0Offset = imageLoadDefBlock0Offset >>> 0;
             detail.materialStateBitsBlock4Offset = materialStateBitsBlock4Offset >>> 0;
             detail.materialTechniqueSetPublished = Boolean(materialTechniqueSetPublished);
@@ -669,6 +672,38 @@ EM_JS(
             },
             identity: identity >>> 0,
             published: Boolean(published),
+            techniques: [],
+        });
+    });
+
+EM_JS(
+    void,
+    AppendRetailWorldMaterialTechnique,
+    (uint32_t assetIndex, uint32_t slot, const char *name,
+     uint32_t flags, uint32_t passCount,
+     uint32_t headerBlock4Offset, uint32_t passArrayBlock4Offset,
+     uint32_t nameBlock4Offset, uint32_t argumentCount,
+     uint32_t vertexProgramDwords, uint32_t pixelProgramDwords,
+     uint32_t boundaryInflatedOffset, int completed),
+    {
+        const inventory = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory;
+        if (!inventory) return;
+        const set = inventory.techniqueSets.find(
+            (entry) => entry.assetIndex === (assetIndex >>> 0));
+        if (!set) return;
+        set.techniques.push({
+            slot: slot >>> 0,
+            name: UTF8ToString(name),
+            flags: flags >>> 0,
+            passCount: passCount >>> 0,
+            headerBlock4Offset: headerBlock4Offset >>> 0,
+            passArrayBlock4Offset: passArrayBlock4Offset >>> 0,
+            nameBlock4Offset: nameBlock4Offset >>> 0,
+            argumentCount: argumentCount >>> 0,
+            vertexProgramDwords: vertexProgramDwords >>> 0,
+            pixelProgramDwords: pixelProgramDwords >>> 0,
+            boundaryInflatedOffset: boundaryInflatedOffset >>> 0,
+            completed: Boolean(completed),
         });
     });
 
@@ -737,6 +772,8 @@ EM_JS(
             memoryUsage: memoryUsage >>> 0,
             flags: flags >>> 0,
             bad: Boolean(bad),
+            physPresetIdentity: 0,
+            physPreset: null,
             offsets: {
                 headerBlock0: headerBlock0Offset >>> 0,
                 nameBlock4: nameBlock4Offset >>> 0,
@@ -948,6 +985,52 @@ EM_JS(
 
 EM_JS(
     void,
+    SetRetailWorldXModelPhysPreset,
+    (int modelIndex, uint32_t identity, const char *name,
+     const char *soundAliasPrefix, int32_t type,
+     double mass, double bounce, double friction,
+     double bulletForceScale, double explosiveForceScale,
+     double piecesSpreadFraction, double piecesUpwardVelocity,
+     int tempDefaultToCylinder, uint32_t nameReference,
+     uint32_t soundAliasPrefixReference, uint32_t headerBlock0Offset,
+     uint32_t nameBlock4Offset, uint32_t soundAliasPrefixBlock4Offset,
+     uint32_t insertPointerBlock4Offset, int traversed, int published),
+    {
+        const inventory = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory;
+        const model = inventory?.xmodels?.[modelIndex >>> 0];
+        if (!model) return;
+        model.physPresetIdentity = identity >>> 0;
+        if ((identity >>> 0) === 0 && !traversed && !published) return;
+        model.physPreset = {
+            identity: identity >>> 0,
+            name: UTF8ToString(name),
+            soundAliasPrefix: UTF8ToString(soundAliasPrefix),
+            type,
+            mass,
+            bounce,
+            friction,
+            bulletForceScale,
+            explosiveForceScale,
+            piecesSpreadFraction,
+            piecesUpwardVelocity,
+            tempDefaultToCylinder: Boolean(tempDefaultToCylinder),
+            references: {
+                name: nameReference >>> 0,
+                soundAliasPrefix: soundAliasPrefixReference >>> 0,
+            },
+            offsets: {
+                headerBlock0: headerBlock0Offset >>> 0,
+                nameBlock4: nameBlock4Offset >>> 0,
+                soundAliasPrefixBlock4: soundAliasPrefixBlock4Offset >>> 0,
+                insertPointerBlock4: insertPointerBlock4Offset >>> 0,
+            },
+            traversed: Boolean(traversed),
+            published: Boolean(published),
+        };
+    });
+
+EM_JS(
+    void,
     AppendRetailWorldXModelRenderSurface,
     (const char *state, const char *message, uint32_t surfaceIndex,
      uint32_t materialIdentity, uint32_t vertexCount, uint32_t triangleCount,
@@ -1049,7 +1132,8 @@ EM_JS(
      uint32_t mapType, uint32_t textureReference, uint32_t width,
      uint32_t height, uint32_t depth, uint32_t format,
      uint32_t resourceBytes, uint32_t headerBlock0Offset,
-     uint32_t nameBlock4Offset, uint32_t loadDefBlock0Offset,
+     uint32_t nameBlock4Offset, uint32_t textureInsertPointerBlock4Offset,
+     uint32_t loadDefBlock0Offset,
      uint32_t identity, int loadDefTraversed, int published,
      int modelIndex),
     {
@@ -1068,6 +1152,8 @@ EM_JS(
             offsets: {
                 headerBlock0: headerBlock0Offset >>> 0,
                 nameBlock4: nameBlock4Offset >>> 0,
+                textureInsertPointerBlock4:
+                    textureInsertPointerBlock4Offset >>> 0,
                 loadDefBlock0: loadDefBlock0Offset >>> 0,
             },
             identity: identity >>> 0,
@@ -1733,6 +1819,7 @@ void PublishReady()
         result.materialTextureTableBlock4Offset,
         result.imageBlock0Offset,
         result.imageNameBlock4Offset,
+        result.imageTextureInsertPointerBlock4Offset,
         result.imageLoadDefBlock0Offset,
         result.materialStateBitsBlock4Offset,
         result.materialTechniqueSetPublished ? 1 : 0,
@@ -1800,6 +1887,23 @@ void PublishReady()
             techniqueSet.aliasTechniqueReferences,
             techniqueSet.identity,
             techniqueSet.published ? 1 : 0);
+        for (const auto &technique : techniqueSet.techniques)
+        {
+            AppendRetailWorldMaterialTechnique(
+                techniqueSet.assetIndex,
+                technique.slot,
+                technique.name.c_str(),
+                technique.flags,
+                technique.passCount,
+                technique.headerBlock4Offset,
+                technique.passArrayBlock4Offset,
+                technique.nameBlock4Offset,
+                technique.argumentCount,
+                technique.vertexProgramDwords,
+                technique.pixelProgramDwords,
+                technique.boundaryInflatedOffset,
+                technique.completed ? 1 : 0);
+        }
     }
     if (!world.worldXModels.empty())
     {
@@ -1882,6 +1986,28 @@ void PublishReady()
             xmodel.physGeomsTraversed ? 1 : 0,
             xmodel.published ? 1 : 0,
             0);
+        SetRetailWorldXModelPhysPreset(
+            0,
+            xmodel.physPresetIdentity,
+            xmodel.physPreset.name.c_str(),
+            xmodel.physPreset.soundAliasPrefix.c_str(),
+            xmodel.physPreset.type,
+            xmodel.physPreset.mass,
+            xmodel.physPreset.bounce,
+            xmodel.physPreset.friction,
+            xmodel.physPreset.bulletForceScale,
+            xmodel.physPreset.explosiveForceScale,
+            xmodel.physPreset.piecesSpreadFraction,
+            xmodel.physPreset.piecesUpwardVelocity,
+            xmodel.physPreset.tempDefaultToCylinder ? 1 : 0,
+            xmodel.physPreset.nameReference,
+            xmodel.physPreset.soundAliasPrefixReference,
+            xmodel.physPreset.headerBlock0Offset,
+            xmodel.physPreset.nameBlock4Offset,
+            xmodel.physPreset.soundAliasPrefixBlock4Offset,
+            xmodel.physPreset.insertPointerBlock4Offset,
+            xmodel.physPreset.traversed ? 1 : 0,
+            xmodel.physPreset.published ? 1 : 0);
         AppendRetailWorldXModelRenderSurface(
             renderSurface.state,
             renderSurface.message,
@@ -2077,6 +2203,7 @@ void PublishReady()
                     image.resourceBytes,
                     image.headerBlock0Offset,
                     image.nameBlock4Offset,
+                    image.textureInsertPointerBlock4Offset,
                     image.loadDefBlock0Offset,
                     image.identity,
                     image.loadDefTraversed ? 1 : 0,
@@ -2179,6 +2306,28 @@ void PublishReady()
             secondXModel.physGeomsTraversed ? 1 : 0,
             secondXModel.published ? 1 : 0,
             static_cast<int>(xmodelIndex));
+        SetRetailWorldXModelPhysPreset(
+            static_cast<int>(xmodelIndex),
+            secondXModel.physPresetIdentity,
+            secondXModel.physPreset.name.c_str(),
+            secondXModel.physPreset.soundAliasPrefix.c_str(),
+            secondXModel.physPreset.type,
+            secondXModel.physPreset.mass,
+            secondXModel.physPreset.bounce,
+            secondXModel.physPreset.friction,
+            secondXModel.physPreset.bulletForceScale,
+            secondXModel.physPreset.explosiveForceScale,
+            secondXModel.physPreset.piecesSpreadFraction,
+            secondXModel.physPreset.piecesUpwardVelocity,
+            secondXModel.physPreset.tempDefaultToCylinder ? 1 : 0,
+            secondXModel.physPreset.nameReference,
+            secondXModel.physPreset.soundAliasPrefixReference,
+            secondXModel.physPreset.headerBlock0Offset,
+            secondXModel.physPreset.nameBlock4Offset,
+            secondXModel.physPreset.soundAliasPrefixBlock4Offset,
+            secondXModel.physPreset.insertPointerBlock4Offset,
+            secondXModel.physPreset.traversed ? 1 : 0,
+            secondXModel.physPreset.published ? 1 : 0);
         for (std::size_t index = 0u; index < secondXModel.lods.size(); ++index)
         {
             const auto &lod = secondXModel.lods[index];
@@ -2320,6 +2469,7 @@ void PublishReady()
                     image.resourceBytes,
                     image.headerBlock0Offset,
                     image.nameBlock4Offset,
+                    image.textureInsertPointerBlock4Offset,
                     image.loadDefBlock0Offset,
                     image.identity,
                     image.loadDefTraversed ? 1 : 0,

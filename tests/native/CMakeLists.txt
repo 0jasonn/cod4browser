@@ -213,6 +213,7 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "-sUSE_ZLIB=1"
         "-sENVIRONMENT=node"
         "-sNODERAWFS=1"
+        "-sALLOW_MEMORY_GROWTH=1"
         "-sEXIT_RUNTIME=1"
         "-sNO_DISABLE_EXCEPTION_CATCHING"
     )

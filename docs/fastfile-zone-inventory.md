@@ -999,9 +999,9 @@ retained.
 The freely generated six-surface fixture proves two inline materials, four
 material aliases, an image alias, collision and bone-info traversal, and atomic
 XModel publication. Separate fixtures reject undefined aliases, invalid
-collision bounds, and invalid bone info. A non-null inline physics preset stops
-at `Load_PhysPreset` with the XModel alias still undefined. No retail payload is
-stored in the repository.
+collision bounds, and invalid bone info. At this historical M26 boundary, a
+non-null inline physics preset stopped before its body; M39 below supersedes
+that limitation. No retail payload is stored in the repository.
 
 ## Milestone 27 first rendered killhouse XSurface (complete)
 
@@ -1311,3 +1311,99 @@ dependency boundary. M37 should implement the reusable nested technique loader
 and return to the same top-level dispatcher. Full support for the 315 pre-world
 XModels cannot be claimed until the intervening asset classes can also be
 traversed to reach them.
+
+## Milestone 37 reusable MaterialTechnique dependencies (complete)
+
+The owned asset-23 dependency result is:
+
+| Field | Value |
+| --- | --- |
+| Parent / identity | `sm2/mc_unlit` / 34 |
+| Parent references | 16 null / 2 inline / 0 shared / 16 alias |
+| Slot 4 | `vertcol_simple_fog_dtex`, 1 pass, VS 201 DWORDs, PS 77 DWORDs, 5 arguments |
+| Slot 28 | `wireframe_solid_dtex`, 1 pass, VS 74 DWORDs, PS 29 DWORDs, 1 argument |
+| Dependency boundaries | 150,210 and 150,864 inflated bytes |
+| Parent publication boundary | 150,864 inflated bytes |
+
+The reusable operation then completes assets 24–32. Asset 32,
+`mc_effect_falloff_add_nofog`, publishes as identity 43 at inflated offset
+166,717. The dispatcher next enters XModel asset 33,
+`com_studio_light_on`; its 15 surface headers and bounded dependencies complete,
+but the current typed registry cannot yet resolve the first valid image alias
+reached by its material. The parser stops at `Load_GfxImage(alias)` with the
+fourth model unpublished. At this boundary 33 top-level assets are complete,
+the block-4 cursor is 89,360, and the registry contains 43 assets with 50
+aliases reserved / 48 defined.
+
+Automated fixtures contain only generated shader and structure bytes. They
+prove two-dependency completion, parent publication after the second dependency,
+dispatcher return, invalid-second-shader rejection, and fail-closed handling of
+incomplete dependency data.
+
+## Milestone 38 reusable GfxImage aliases (complete)
+
+M38 accounts for the four-byte block-4 insertion cell emitted by
+`DB_InsertPointer` for every shared `GfxImage` texture-load definition. This
+corrects the logical arena addresses used by later image aliases while keeping
+the registry type checked. The asset-33 alias at token `0x40015c45` now lands on
+the already published third texture pointer and resolves to
+`tripod_studio_light_col`, identity 46.
+
+The owned result after resuming the dispatcher is:
+
+| Field | Value |
+| --- | --- |
+| Asset 33 | `com_studio_light_on`, identity 54, five materials / five resolved images |
+| Asset 33 boundary | 257,898 inflated bytes |
+| Additional image variant | `floodlight_beam`, format `0x16`, zero inline resource bytes |
+| Asset 34 | `com_drop_rope`, identity 59, three resolved images |
+| Asset 34 boundary | 374,026 inflated bytes |
+| Next parent | asset 35, `mil_sandbag_desert_single_flat`, unpublished |
+| Stop | inline `Load_PhysPreset` |
+| Completed top-level assets | 35 |
+| Last published registry snapshot | 59 assets; 63 aliases reserved / 62 defined |
+| Block-4 cursor | 183,868 |
+
+The partial asset-35 prefix has three surfaces, 243 vertices, 334 triangles,
+one completed material with two images, 236 collision triangles, and completed
+bone info. Those child results do not publish the parent XModel. Generated
+fixtures verify both successful shared-image alias resolution and rejection of
+an undefined alias before publication.
+
+## Milestone 39 reusable PhysPreset dependencies (complete)
+
+The reusable XModel operation now follows the generated type-1 asset loader for
+inline and shared `PhysPreset` references. It accounts for the 44-byte block-0
+record, the optional shared-pointer insertion cell in block 4, and the two
+block-4 strings. The body must contain inline name and sound-prefix tokens,
+finite numeric fields, a canonical Boolean, and zero padding. Registration and
+both applicable pointer aliases occur only after the full record and strings
+complete.
+
+The owned result advances asset 35 to its next dependency:
+
+| Field | Value |
+| --- | --- |
+| Parent | asset 35, `mil_sandbag_desert_single_flat`, unpublished |
+| Preset / identity | `sandbag` / 63, published |
+| Sound alias prefix / type | empty / 0 |
+| Mass / bounce / friction | 20 / 0.01 / 0.3 |
+| Bullet / explosive force scale | 0.6 / 0.25 |
+| Body block-0 offset | 220 |
+| Name / sound block-4 offsets | 183,872 / 183,880 |
+| Inflated boundary | 397,206 |
+| Registry assets | 63 |
+| Registry aliases | 65 reserved / 64 defined |
+| Block-4 cursor | 183,881 |
+| Stop | inline `Load_PhysGeomList` |
+
+The first throughput batch subsequently traverses that geometry list and
+publishes asset 35 as XModel identity 64 at inflated offset 397,694. Its one
+brush-backed geom contains eight sides, eight planes, 40 adjacent-edge bytes,
+and 488 bytes of checked physics payload.
+
+Traversal no longer stops after each boundary. The same owned run publishes
+assets 35 through 113 and stops inside asset 114, `com_barrel_white`, at a
+prior-pointer bone-name array variant. At that boundary 114 top-level assets
+are complete, 53 XModels have been collected, and the registry contains 326
+assets with 327 aliases reserved / 326 defined.

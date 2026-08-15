@@ -319,8 +319,43 @@ alias technique references before stopping safely at the first nested
 with every one of the 315 pre-world retail XModels; reaching those still depends
 on loaders for the intervening top-level asset classes.
 
+Milestone 37 adds a bounded reusable `MaterialTechnique` dependency operation.
+It traverses each pass array, inline vertex declaration, vertex/pixel shader and
+bytecode payload, shader arguments, optional literal constants, and technique
+name without creating native D3D objects. Asset 23 publishes as identity 34 only
+after both inline techniques (`vertcol_simple_fog_dtex` and
+`wireframe_solid_dtex`) complete at inflated offset 150,864. The same operation
+then publishes technique-set assets 24–32 and returns to the shared dispatcher.
+The owned traversal reaches XModel asset 33, `com_studio_light_on`, and stops
+conservatively at its first unresolved image alias; no partial fourth XModel is
+published.
+
+Milestone 38 models the generated loader's block-4 `DB_InsertPointer` cells for
+shared `GfxImage` load definitions, so later image aliases resolve through the
+typed registry at their canonical serialized addresses. The owned traversal now
+publishes XModel asset 33, `com_studio_light_on`, and asset 34,
+`com_drop_rope`, then returns to the shared dispatcher. It stops safely inside
+asset 35, `mil_sandbag_desert_single_flat`, before its inline `PhysPreset`;
+that parent XModel remains unpublished. The bounded image metadata path also
+accepts the reached zero-resource `D3DFMT_X8R8G8B8` image without treating it
+as compressed pixel data.
+
+Milestone 39 adds the reusable bounded `PhysPreset` dependency loader. It
+validates the 44-byte body and both strings, publishes checked inline/shared
+type-1 aliases (including the shared insertion cell), and exposes typed preset
+metadata to the browser inventory. In the owned traversal, `sandbag` publishes
+as identity 63 at inflated offset 397,206. Asset 35 remains unpublished at its
+next inline dependency, `PhysGeomList`; that bounded loader is the M40 handoff.
+
+Active development now batches complete loader families instead of stopping at
+numbered boundaries. The first throughput batch completed `PhysGeomList`,
+published the sandbag as XModel identity 64, and continued the owned dispatcher
+through asset 113 in one run. The current boundary is asset 114,
+`com_barrel_white`, at a reusable prior-pointer bone-name array variant. The
+owned result now contains 53 XModels and 114 completed top-level assets.
+
 See [docs/web-port.md](docs/web-port.md) for the pinned toolchain, build steps,
-current boundary, validation limits, and next milestone, and see
+current boundary and validation limits, and see
 [docs/fastfile-zone-inventory.md](docs/fastfile-zone-inventory.md) for the
 serialized evidence and strict subset. Original Call of Duty 4 data and native
 Bink, Miles, and Steam binaries are not part of the browser build or automated

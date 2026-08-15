@@ -1091,9 +1091,9 @@ Only after that full chain succeeds does the registry assign XModel identity
 19 and publish asset-table alias 12. The boundary is inflated offset 67,723,
 block-4 cursor 38,112, with all 19 reserved aliases defined. Malformed material
 or image aliases, collision bounds, bone info, and resource limits fail without
-an externally available result. A non-null inline physics preset remains a
-conservative successful stop at `Load_PhysPreset`; the XModel alias stays
-undefined. Browser fixtures are freely generated and contain no retail bytes.
+an externally available result. At this historical M26 boundary, a non-null
+inline physics preset was a conservative stop; M39 below supersedes that
+limitation. Browser fixtures are freely generated and contain no retail bytes.
 
 ## Milestone 27: first retail XModel surface render (complete)
 
@@ -1405,12 +1405,117 @@ that all 315 XModels before `GfxWorld` have already been consumed. Proving the
 entire owned population still requires typed loaders for the intervening inline
 asset classes and any dependency variants they expose.
 
-## Next boundary: Milestone 37
+## Milestone 37: reusable MaterialTechnique dependency loader (complete)
 
-Resume inside asset 23 with a bounded reusable `MaterialTechnique` dependency
-loader, then return to the supported top-level dispatcher. Do not publish the
-technique set or its reserved alias until both inline technique dependencies
-complete.
+The world technique-set path now invokes a bounded reusable
+`MaterialTechnique` operation for each inline dependency. It validates the
+fixed header and pass ceiling, walks each pass's vertex declaration,
+vertex/pixel shader headers and bounded bytecode, shader arguments, optional
+literal constants, and inline or prior-arena names, and never creates a native
+D3D object. Pointer aliases must address an already allocated logical arena
+region. An incomplete or malformed second dependency fails closed without
+publishing the parent set.
+
+Owned asset 23, `sm2/mc_unlit`, completes two one-pass dependencies. Slot 4 is
+`vertcol_simple_fog_dtex` (201 vertex-program DWORDs, 77 pixel-program DWORDs,
+five arguments); slot 28 is `wireframe_solid_dtex` (74/29 DWORDs and one
+argument). The parent publishes as identity 34 only after both complete, at
+inflated offset 150,864. Its original 16 null, two inline, zero shared, and 16
+alias references remain intact.
+
+Returning to the supported top-level dispatcher reuses the same operation for
+assets 24 through 32. All ten dependency-bearing sets publish; asset 32 is
+identity 43 at inflated offset 166,717. Traversal then enters XModel asset 33,
+`com_studio_light_on`, and stops safely at `Load_GfxImage(alias)` after its
+bounded surface and material prefix. The fourth XModel remains unpublished;
+33 top-level assets are complete and the registry is 43 assets with 50 aliases
+reserved / 48 defined at the new boundary.
+
+Generated native and browser fixtures cover two successful inline dependencies,
+dispatcher resumption, an invalid second shader, and incomplete dependency
+input. Publication remains atomic in every failure case.
+
+## Milestone 38: reusable GfxImage alias resolution (complete)
+
+The image dependency path now models the generated loader's
+`DB_InsertPointer` side effect when a `GfxImage` contains a shared (`-2`)
+texture-load definition. Each insertion reserves one aligned four-byte cell in
+block 4 before the bounded load definition is consumed from block 0. This keeps
+all later logical arena addresses canonical, allowing image aliases to resolve
+through the existing typed registry rather than through a guessed nearby
+object. Undefined, forward, misaligned, and wrong-type aliases still fail
+closed. Browser inventory exposes the insertion-cell offset for verification.
+
+The alias in asset 33's `mc/mtl_tripodstudiolight_on` material now resolves to
+the previously published `tripod_studio_light_col` image, identity 46. The same
+model reaches a bounded `floodlight_beam` image whose serialized format is
+`D3DFMT_X8R8G8B8` (`0x16`) and whose inline resource length is zero; that exact
+metadata variant is accepted without decoding or creating a native texture.
+
+Asset 33, `com_studio_light_on`, publishes atomically as identity 54 at inflated
+offset 257,898 with five materials and five resolved images. The dispatcher then
+publishes asset 34, `com_drop_rope`, as identity 59 at offset 374,026. It enters
+asset 35, `mil_sandbag_desert_single_flat`, completes its bounded surface,
+material, image, collision, and bone-info dependencies, and stops before inline
+`Load_PhysPreset`. Asset 35 remains unpublished. At this boundary 35 top-level
+assets are complete, the last published registry snapshot contains 59 assets
+and 63 aliases reserved / 62 defined, and the block-4 cursor is 183,868. The
+inflated-prefix ceiling is now 512 KiB so this boundary remains runnable in the
+browser.
+
+Generated native and browser coverage proves successful shared-image alias
+resolution after insertion-pointer planning and rejects an undefined image
+alias before its material or XModel can publish.
+
+## Milestone 39: reusable PhysPreset dependencies (complete)
+
+The XModel dependency path now mirrors `Load_PhysPresetPtr` and
+`Load_PhysPreset` without creating native physics objects. It plans the aligned
+44-byte block-0 body, validates both block-4 `XString` fields, rejects
+non-finite numeric values and invalid Boolean/padding bytes, and registers the
+asset through the existing type-1 registry. Inline and shared pointer forms
+are supported; the shared form also reserves and publishes the exact aligned
+block-4 `DB_InsertPointer` cell. The XModel's block-0 pointer field remains
+undefined until the preset has been completely traversed and registered.
+
+In the owned file, asset 35's preset publishes as `sandbag`, identity 63. Its
+sound alias prefix is empty; mass/bounce/friction are 20/0.01/0.3, bullet and
+explosive force scales are 0.6/0.25, and its pieces fields are zero. The body is
+at block-0 offset 220, with the name and empty sound prefix at block-4 offsets
+183,872 and 183,880. Traversal reaches inflated offset 397,206 and block-4
+cursor 183,881. Only persistent block-4 insertion cells are retained as
+aliases; temporary block-0 XModel fields are deliberately excluded from the
+long-lived registry.
+
+Asset 35 remains unpublished because its following `PhysGeomList` reference is
+also inline. This is intentional atomicity: publishing the child preset does
+not publish its parent before the complete XModel physics chain. Generated
+native fixtures cover inline and shared success, including insertion-pointer
+publication; native and browser fixtures reject non-finite values and invalid
+sound prefixes without exposing a partial world result. The browser inventory
+now exposes the typed preset fields, references, logical offsets, identity, and
+publication state.
+
+## Active throughput strategy
+
+Development no longer stops at every newly reached pointer variant or assigns
+one milestone to each boundary. Loader work is batched by complete generated
+family, and the owned dispatcher continues until it reaches a genuinely
+different unsupported layout. Metadata not needed for rendering is validated
+and summarized rather than retained.
+
+The first throughput batch completed `PhysGeomList`, including geom records,
+brush wrappers, sides, individual or shared planes, and adjacent-edge bytes.
+Asset 35 now publishes as XModel identity 64 at inflated offset 397,694. Its
+physics summary is one geom, one brush, eight sides, eight planes, 40 edges,
+and 488 serialized bytes.
+
+The same run continued through asset 113. It now has 114 completed top-level
+assets, 53 collected XModels, 326 registered assets, and 327 aliases reserved /
+326 defined. The active boundary is XModel asset 114, `com_barrel_white`, whose
+bone-name array is a prior logical pointer rather than inline storage. That
+reusable array-alias variant is the next item in the current loader-family
+batch, not a standalone milestone.
 
 Reaching `GfxWorld` still requires typed loaders for every intervening inline
 asset class; geometry, lightmaps, visibility, and camera state remain separate

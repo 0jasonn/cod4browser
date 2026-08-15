@@ -18,7 +18,7 @@ struct RetailCensusLimits
 {
     std::uint32_t maxFileBytes = 16u * 1024u * 1024u;
     std::uint32_t maxSourceChunkBytes = RETAIL_CENSUS_MAX_STEP_BYTES;
-    std::uint32_t maxInflatedPrefixBytes = 256u * 1024u;
+    std::uint32_t maxInflatedPrefixBytes = 8u * 1024u * 1024u;
     std::uint32_t maxBlockBytes = 512u * 1024u * 1024u;
     std::uint64_t maxTotalBlockBytes = 1536ull * 1024ull * 1024ull;
     std::uint32_t maxScriptStrings = 4096u;
@@ -36,6 +36,8 @@ struct RetailCensusLimits
     std::uint32_t maxMaterialConstants = 64u;
     std::uint32_t maxMaterialStateBits = 64u;
     std::uint32_t maxXModelNameBytes = 255u;
+    std::uint32_t maxPhysPresetNameBytes = 255u;
+    std::uint32_t maxPhysPresetSoundAliasBytes = 255u;
     std::uint32_t maxWorldXModels = 4096u;
     std::uint32_t maxXModelCollisionSurfaces = 4096u;
     std::uint32_t maxXModelSurfaceVertices = 1024u * 1024u;
@@ -47,6 +49,10 @@ struct RetailCensusLimits
     std::uint32_t maxRetainedXModelRendererBytes = 16u * 1024u * 1024u;
     std::uint32_t maxXModelCollisionTriangles = 1024u * 1024u;
     std::uint32_t maxXModelCollisionPayloadBytes = 64u * 1024u * 1024u;
+    std::uint32_t maxXModelPhysGeoms = 4096u;
+    std::uint32_t maxPhysGeomBrushSides = 65536u;
+    std::uint32_t maxPhysGeomBrushEdges = 1024u * 1024u;
+    std::uint32_t maxPhysGeomPayloadBytes = 64u * 1024u * 1024u;
 };
 
 enum class RetailCensusError : std::uint8_t
@@ -130,10 +136,23 @@ enum class RetailCensusError : std::uint8_t
     XSurfacePayloadLimit,
     XSurfaceCollisionInvalid,
     XModelMaterialAliasInvalid,
+    XModelImageAliasInvalid,
     XModelCollisionInvalid,
     XModelCollisionPayloadLimit,
     XModelBoneInfoInvalid,
     XModelPhysicsUnsupported,
+    PhysPresetLayoutUnsupported,
+    PhysPresetNameInvalid,
+    PhysPresetNameTooLong,
+    PhysPresetSoundAliasInvalid,
+    PhysPresetSoundAliasTooLong,
+    PhysPresetValuesInvalid,
+    PhysPresetAliasInvalid,
+    PhysGeomLayoutUnsupported,
+    PhysGeomCountLimit,
+    PhysGeomValuesInvalid,
+    PhysGeomBrushInvalid,
+    PhysGeomPayloadLimit,
     PostXModelAssetUnsupported,
     AllocationFailed,
 };
@@ -244,7 +263,30 @@ enum class RetailCensusStage : std::uint8_t
     WorldXModelCollisionTriangles,
     WorldXModelBoneInfo,
     WorldXModelPhysPreset,
+    WorldPhysPreset,
+    WorldPhysPresetName,
+    WorldPhysPresetSoundAlias,
     WorldXModelPhysGeoms,
+    WorldPhysGeomList,
+    WorldPhysGeomInfos,
+    WorldPhysGeomBrush,
+    WorldPhysGeomBrushSides,
+    WorldPhysGeomBrushSidePlane,
+    WorldPhysGeomBrushAdjacent,
+    WorldPhysGeomBrushPlanes,
+    WorldXModelPublish,
+    WorldMaterialTechnique,
+    WorldMaterialPasses,
+    WorldMaterialVertexDeclaration,
+    WorldMaterialVertexShader,
+    WorldMaterialVertexShaderName,
+    WorldMaterialVertexShaderProgram,
+    WorldMaterialPixelShader,
+    WorldMaterialPixelShaderName,
+    WorldMaterialPixelShaderProgram,
+    WorldMaterialShaderArguments,
+    WorldMaterialLiteralConstant,
+    WorldMaterialTechniqueName,
     AssetBoundary,
     Failed,
 };
@@ -269,6 +311,22 @@ struct RetailCensusStepReport
     bool needsSource = false;
 };
 
+struct RetailWorldMaterialTechnique
+{
+    std::uint32_t slot = UINT32_MAX;
+    std::string name;
+    std::uint16_t flags = 0u;
+    std::uint16_t passCount = 0u;
+    std::uint32_t headerBlock4Offset = 0u;
+    std::uint32_t passArrayBlock4Offset = 0u;
+    std::uint32_t nameBlock4Offset = 0u;
+    std::uint32_t argumentCount = 0u;
+    std::uint32_t vertexProgramDwords = 0u;
+    std::uint32_t pixelProgramDwords = 0u;
+    std::uint32_t boundaryInflatedOffset = 0u;
+    bool completed = false;
+};
+
 struct RetailWorldTechniqueSet
 {
     std::uint32_t assetIndex = 0u;
@@ -285,6 +343,7 @@ struct RetailWorldTechniqueSet
     std::uint32_t sharedTechniqueReferences = 0u;
     std::uint32_t aliasTechniqueReferences = 0u;
     std::uint32_t identity = 0u;
+    std::vector<RetailWorldMaterialTechnique> techniques;
     bool published = false;
 };
 
@@ -372,6 +431,7 @@ struct RetailXModelImage
     std::uint32_t resourceBytes = 0u;
     std::uint32_t headerBlock0Offset = 0u;
     std::uint32_t nameBlock4Offset = 0u;
+    std::uint32_t textureInsertPointerBlock4Offset = UINT32_MAX;
     std::uint32_t loadDefBlock0Offset = 0u;
     std::uint32_t identity = 0u;
     bool loadDefTraversed = false;
@@ -427,6 +487,30 @@ struct RetailXModelCollisionSurface
     bool traversed = false;
 };
 
+struct RetailXModelPhysPreset
+{
+    std::string name;
+    std::string soundAliasPrefix;
+    std::int32_t type = 0;
+    float mass = 0.0f;
+    float bounce = 0.0f;
+    float friction = 0.0f;
+    float bulletForceScale = 0.0f;
+    float explosiveForceScale = 0.0f;
+    float piecesSpreadFraction = 0.0f;
+    float piecesUpwardVelocity = 0.0f;
+    bool tempDefaultToCylinder = false;
+    std::uint32_t nameReference = 0u;
+    std::uint32_t soundAliasPrefixReference = 0u;
+    std::uint32_t headerBlock0Offset = 0u;
+    std::uint32_t nameBlock4Offset = 0u;
+    std::uint32_t soundAliasPrefixBlock4Offset = 0u;
+    std::uint32_t insertPointerBlock4Offset = 0u;
+    std::uint32_t identity = 0u;
+    bool traversed = false;
+    bool published = false;
+};
+
 struct RetailWorldXModel
 {
     std::uint32_t assetIndex = 0u;
@@ -458,6 +542,16 @@ struct RetailWorldXModel
     bool bad = false;
     std::uint32_t physPresetReference = 0u;
     std::uint32_t physGeomsReference = 0u;
+    std::uint32_t physPresetIdentity = 0u;
+    RetailXModelPhysPreset physPreset;
+    std::uint32_t physGeomCount = 0u;
+    std::uint32_t physGeomHeaderBlock4Offset = 0u;
+    std::uint32_t physGeomInfosBlock4Offset = 0u;
+    std::uint32_t physGeomBrushCount = 0u;
+    std::uint32_t physGeomBrushSideCount = 0u;
+    std::uint32_t physGeomPlaneCount = 0u;
+    std::uint32_t physGeomEdgeCount = 0u;
+    std::uint32_t physGeomPayloadBytes = 0u;
     std::vector<std::uint16_t> boneNameScriptStringIndices;
     std::vector<std::string> boneNames;
     std::vector<std::uint8_t> parentList;
@@ -626,6 +720,7 @@ struct RetailFastfileCensus
     std::uint32_t materialTextureTableBlock4Offset = 0u;
     std::uint32_t imageBlock0Offset = 0u;
     std::uint32_t imageNameBlock4Offset = 0u;
+    std::uint32_t imageTextureInsertPointerBlock4Offset = UINT32_MAX;
     std::uint32_t imageLoadDefBlock0Offset = 0u;
     std::uint32_t materialStateBitsBlock4Offset = 0u;
     std::uint32_t compatibilityTechniqueSetIdentity = 0u;
@@ -683,6 +778,10 @@ struct RetailFastfileCensus
 // WorldXModelLoader stores each model in a bounded collection and invokes the
 // same complete dependency path whenever the supported top-level dispatcher
 // encounters an inline XModel, including after intervening technique-set runs.
+// It also completes bounded inline MaterialTechnique dependencies before
+// publishing their parent set, models shared GfxImage insertion-pointer cells
+// so typed image aliases resolve at canonical block-4 addresses, then returns
+// to that same dispatcher.
 // Renderer selection is explicit per model. Eligible first-LOD payloads share
 // an aggregate byte ceiling and may be switched without reparsing; decoding and
 // graphics submission remain separate engine-side work. WorldXModelCollection
