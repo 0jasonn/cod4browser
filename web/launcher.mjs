@@ -263,8 +263,11 @@ globalThis.addEventListener("kisakcod:retail-census", (event) => {
     runtime.retailCensus = structuredClone(event.detail);
     if (event.detail.state === "ready") {
         const firstXModel = event.detail.worldInventory.firstXModel;
+        const secondXModel = event.detail.worldInventory.secondXModel;
         const postXModelTechniqueSet =
             event.detail.worldInventory.postXModelTechniqueSet;
+        const postXModelTechniqueSetRun =
+            event.detail.worldInventory.postXModelTechniqueSetRun;
         const publishedTechniqueSets = event.detail.worldInventory.techniqueSets
             .filter((entry) => entry.published).length;
         appendLog(
@@ -283,10 +286,21 @@ globalThis.addEventListener("kisakcod:retail-census", (event) => {
             `${firstXModel?.totals?.collisionTriangles ?? 0} collision triangles) ` +
             `and published its checked dependency boundary. ` +
             (postXModelTechniqueSet?.published
-                ? `M30 also published post-model technique set ` +
+                ? `M31 published ${postXModelTechniqueSetRun?.completedCount ?? 1} ` +
+                    `post-model technique set(s), beginning with ` +
                     `${postXModelTechniqueSet.name} at asset ` +
-                    `${postXModelTechniqueSet.assetIndex}. `
-                : `The post-model technique set remains unpublished. `) +
+                    `${postXModelTechniqueSet.assetIndex}, and stopped at asset ` +
+                    `${postXModelTechniqueSetRun?.nextBodyIndex ?? "unknown"} ` +
+                    `(type ${postXModelTechniqueSetRun?.nextBodyType ?? "unknown"}). `
+                : `The post-model technique-set run remains unpublished. `) +
+            (secondXModel?.headerTraversed
+                ? `M33 traversed XModel ${secondXModel.name} at asset ` +
+                    `${secondXModel.assetIndex} ` +
+                    `(${secondXModel.numBones} bones, ` +
+                    `${secondXModel.surfaces?.length ?? 0}/` +
+                    `${secondXModel.surfaceCount} surfaces) and stopped at ` +
+                    `${secondXModel.unsupportedOperation || "its next dependency"}. `
+                : `The second XModel header remains untouched. `) +
             (firstXModel?.renderSurface?.state === "ready"
                 ? `WebGL2 is now drawing retail surface ` +
                     `${firstXModel.renderSurface.surfaceIndex} ` +

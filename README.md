@@ -259,6 +259,31 @@ stops before another inline technique set at asset 14. Malformed input exposes
 no partial result, and a dependency-bearing fixture stops before the nested
 `MaterialTechnique` with the new alias undefined.
 
+Milestone 31 generalizes that boundary across the consecutive post-XModel
+technique-set run. The owned profile publishes eight zero-dependency sets at
+assets 13–20 with identities 20–27, ending at inflated offset 69,063 with all
+27 registry aliases defined. The next untouched body is inline `XModel` asset
+21. Synthetic coverage proves a two-set run, a later dependency that preserves
+only the already published prefix, and a malformed later header that exposes
+no partial result. No second model body or new renderer payload is entered.
+
+Milestone 32 enters asset 21 without replacing the retained/rendered first
+model. The owned second XModel is `com_steel_ladder`: one root bone, three
+surfaces, three LODs, one collision surface, and a checked skeleton prefix
+ending at inflated offset 69,335. Its table alias is reserved but remains
+undefined while traversal stops before `Load_XSurfaceArray`. Malformed second
+headers expose no result, and an unsupported skeleton dependency preserves the
+published first model. No ladder geometry is retained or rendered yet.
+
+Milestone 33 reuses the checked XSurface loader for asset 21. All three
+`com_steel_ladder` surfaces now traverse in generated-loader order: 750
+vertices, 488 triangles, three rigid lists, and 28,236 bounded payload bytes.
+The three ordered material handles are retained and traversal stops before the
+first inline `Material` at inflated offset 97,571. The first model remains the
+only renderer publication; second-model packed geometry is hashed, not retained
+or submitted. This is a step toward a reusable full XModel loader, not a model
+viewer.
+
 See [docs/web-port.md](docs/web-port.md) for the pinned toolchain, build steps,
 current boundary, validation limits, and next milestone, and see
 [docs/fastfile-zone-inventory.md](docs/fastfile-zone-inventory.md) for the

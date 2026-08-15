@@ -492,7 +492,7 @@ EM_JS(
                 state: "ready",
                 stage: "asset-boundary",
                 path: "zone/english/killhouse.ff",
-                message: "Traversed the first XModel dependency chain and the next typed technique-set boundary",
+                message: "Traversed the first XModel, post-model technique sets, and second XModel prefix",
                 fileSize: fileSize >>> 0,
                 sourceBytesRead: sourceBytesRead >>> 0,
                 sourceBytesConsumed,
@@ -555,16 +555,33 @@ EM_JS(
 
 EM_JS(
     void,
-    FinalizeRetailPostXModelTechniqueSet,
-    (uint32_t xmodelAssetIndex),
+    FinalizeRetailPostXModelTechniqueSetRun,
+    (uint32_t xmodelAssetIndex,
+     uint32_t firstAssetIndex,
+     uint32_t bodiesEntered,
+     uint32_t completedCount),
     {
         const inventory = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory;
         if (!inventory) return;
-        const post = inventory.techniqueSets.find(
+        const post = inventory.techniqueSets.filter(
             (entry) => entry.assetIndex > (xmodelAssetIndex >>> 0));
-        inventory.postXModelTechniqueSet = post
-            ? {...post, source: "generated-loader-after-first-xmodel"}
+        inventory.postXModelTechniqueSets = post.map(
+            (entry) => ({...entry, source: "generated-loader-after-first-xmodel"}));
+        inventory.postXModelTechniqueSet = post.length !== 0
+            ? {...post[0], source: "generated-loader-after-first-xmodel"}
             : null;
+        inventory.postXModelTechniqueSetRun = {
+            firstAssetIndex: firstAssetIndex >>> 0,
+            bodiesEntered: bodiesEntered >>> 0,
+            completedCount: completedCount >>> 0,
+            nextBodyIndex: inventory.nextBodyIndex >>> 0,
+            nextBodyType: inventory.nextBodyType >>> 0,
+            nextBodyReference: inventory.nextBodyReference >>> 0,
+            stoppedBeforeDifferentAssetType: Boolean(
+                inventory.stoppedBeforeDifferentAssetType),
+            stoppedBeforeTechniqueDependency: Boolean(
+                inventory.stoppedBeforeTechniqueDependency),
+        };
     });
 
 EM_JS(
@@ -637,11 +654,12 @@ EM_JS(
      int headerTraversed, int skeletonPrefixTraversed,
      int surfaceHeadersTraversed, int surfaceDependenciesTraversed,
      int materialHandlesTraversed, int stoppedBeforeSurfaceArray,
-     int stoppedBeforeMaterialDependency, const char *unsupportedOperation),
+     int stoppedBeforeMaterialDependency, const char *unsupportedOperation,
+     int secondModel),
     {
         const inventory = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory;
         if (!inventory) return;
-        inventory.firstXModel = {
+        inventory[secondModel ? "secondXModel" : "firstXModel"] = {
             assetIndex: assetIndex >>> 0,
             name: UTF8ToString(name),
             numBones: numBones >>> 0,
@@ -693,6 +711,8 @@ EM_JS(
                 surfacePayloadBytes: surfacePayloadBytes >>> 0,
             },
             boundaryInflatedOffset: boundaryInflatedOffset >>> 0,
+            identity: 0,
+            published: false,
             headerTraversed: Boolean(headerTraversed),
             skeletonPrefixTraversed: Boolean(skeletonPrefixTraversed),
             surfaceHeadersTraversed: Boolean(surfaceHeadersTraversed),
@@ -714,9 +734,10 @@ EM_JS(
     (uint32_t index, double distance, uint32_t surfaceCount,
      uint32_t surfaceIndex, uint32_t partBits0, uint32_t partBits1,
      uint32_t partBits2, uint32_t partBits3, uint32_t lod,
-     uint32_t smcIndexPlusOne, uint32_t smcAllocBits),
+     uint32_t smcIndexPlusOne, uint32_t smcAllocBits, int secondModel),
     {
-        const model = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory?.firstXModel;
+        const inventory = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory;
+        const model = inventory?.[secondModel ? "secondXModel" : "firstXModel"];
         if (!model) return;
         model.lods.push({
             index: index >>> 0,
@@ -735,9 +756,10 @@ EM_JS(
     void,
     AppendRetailWorldXModelBone,
     (uint32_t index, uint32_t scriptStringIndex,
-     const char *name, uint32_t classification),
+     const char *name, uint32_t classification, int secondModel),
     {
-        const model = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory?.firstXModel;
+        const inventory = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory;
+        const model = inventory?.[secondModel ? "secondXModel" : "firstXModel"];
         if (!model) return;
         model.boneNames.push({
             index: index >>> 0,
@@ -758,9 +780,10 @@ EM_JS(
      uint32_t vertListReference, uint32_t blendWordCount,
      uint32_t verticesBlock7Offset, uint32_t vertListsBlock4Offset,
      uint32_t indicesBlock8Offset, uint32_t verticesHash,
-     uint32_t indicesHash, int dependenciesTraversed),
+     uint32_t indicesHash, int dependenciesTraversed, int secondModel),
     {
-        const model = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory?.firstXModel;
+        const inventory = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory;
+        const model = inventory?.[secondModel ? "secondXModel" : "firstXModel"];
         if (!model) return;
         model.surfaces.push({
             index: index >>> 0,
@@ -800,10 +823,12 @@ EM_JS(
      double scaleX, double scaleY, double scaleZ,
      uint32_t nodeCount, uint32_t nodesReference,
      uint32_t leafCount, uint32_t leafsReference,
-     uint32_t nodesHash, uint32_t leafsHash, int treeTraversed),
+     uint32_t nodesHash, uint32_t leafsHash, int treeTraversed,
+     int secondModel),
     {
-        const surface = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__
-            ?.worldInventory?.firstXModel?.surfaces?.[surfaceIndex >>> 0];
+        const inventory = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory;
+        const surface = inventory?.[secondModel ? "secondXModel" : "firstXModel"]
+            ?.surfaces?.[surfaceIndex >>> 0];
         if (!surface) return;
         surface.rigidVertLists.push({
             index: index >>> 0,
@@ -829,9 +854,10 @@ EM_JS(
 EM_JS(
     void,
     AppendRetailWorldXModelMaterialReference,
-    (uint32_t index, uint32_t reference, uint32_t identity),
+    (uint32_t index, uint32_t reference, uint32_t identity, int secondModel),
     {
-        const model = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory?.firstXModel;
+        const inventory = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory;
+        const model = inventory?.[secondModel ? "secondXModel" : "firstXModel"];
         if (!model) return;
         model.materialReferences.push({
             index: index >>> 0,
@@ -1549,7 +1575,11 @@ void PublishReady()
     const auto &xmodel = world.worldFirstXModel;
     if (xmodel.headerTraversed)
     {
-        FinalizeRetailPostXModelTechniqueSet(xmodel.assetIndex);
+        FinalizeRetailPostXModelTechniqueSetRun(
+            xmodel.assetIndex,
+            world.worldPostXModelTechniqueSetAssetIndex,
+            world.worldPostXModelTechniqueSetBodiesEntered,
+            world.worldPostXModelTechniqueSetCompletedCount);
         BeginRetailWorldXModel(
             xmodel.assetIndex,
             xmodel.name.c_str(),
@@ -1603,7 +1633,8 @@ void PublishReady()
             xmodel.materialHandlesTraversed ? 1 : 0,
             xmodel.stoppedBeforeSurfaceArray ? 1 : 0,
             xmodel.stoppedBeforeMaterialDependency ? 1 : 0,
-            world.unsupportedOperation ? world.unsupportedOperation : "");
+            world.unsupportedOperation ? world.unsupportedOperation : "",
+            0);
         CompleteRetailWorldXModelDependencies(
             xmodel.identity,
             xmodel.collisionSurfacesBlock4Offset,
@@ -1679,7 +1710,8 @@ void PublishReady()
                 lod.partBits[2], lod.partBits[3],
                 lod.lod,
                 lod.smcIndexPlusOne,
-                lod.smcAllocBits);
+                lod.smcAllocBits,
+                0);
         }
         for (std::size_t index = 0u; index < xmodel.boneNames.size(); ++index)
         {
@@ -1690,7 +1722,8 @@ void PublishReady()
                 static_cast<std::uint32_t>(index),
                 xmodel.boneNameScriptStringIndices[index],
                 xmodel.boneNames[index].c_str(),
-                classification);
+                classification,
+                0);
         }
         for (const auto &surface : xmodel.surfaces)
         {
@@ -1714,7 +1747,8 @@ void PublishReady()
                 surface.indicesBlock8Offset,
                 surface.verticesHash,
                 surface.indicesHash,
-                surface.dependenciesTraversed ? 1 : 0);
+                surface.dependenciesTraversed ? 1 : 0,
+                0);
             for (std::size_t index = 0u;
                  index < surface.rigidVertLists.size(); ++index)
             {
@@ -1736,7 +1770,8 @@ void PublishReady()
                     tree.leafsReference,
                     tree.nodesHash,
                     tree.leafsHash,
-                    tree.traversed ? 1 : 0);
+                    tree.traversed ? 1 : 0,
+                    0);
             }
         }
         for (std::size_t index = 0u;
@@ -1746,7 +1781,8 @@ void PublishReady()
                 static_cast<std::uint32_t>(index),
                 xmodel.materialReferences[index],
                 index < xmodel.materialIdentities.size()
-                    ? xmodel.materialIdentities[index] : 0u);
+                    ? xmodel.materialIdentities[index] : 0u,
+                0);
         }
         for (std::size_t materialIndex = 0u;
              materialIndex < xmodel.materials.size(); ++materialIndex)
@@ -1820,6 +1856,152 @@ void PublishReady()
                 surface.trianglesBlock4Offset,
                 surface.trianglesHash,
                 surface.traversed ? 1 : 0);
+        }
+    }
+    const auto &secondXModel = world.worldSecondXModel;
+    if (secondXModel.headerTraversed)
+    {
+        BeginRetailWorldXModel(
+            secondXModel.assetIndex,
+            secondXModel.name.c_str(),
+            secondXModel.numBones,
+            secondXModel.numRootBones,
+            secondXModel.surfaceCount,
+            secondXModel.lodRampType,
+            secondXModel.boneNamesReference,
+            secondXModel.parentListReference,
+            secondXModel.quatsReference,
+            secondXModel.transReference,
+            secondXModel.partClassificationReference,
+            secondXModel.baseMatReference,
+            secondXModel.surfacesReference,
+            secondXModel.materialHandlesReference,
+            secondXModel.collisionSurfacesReference,
+            secondXModel.collisionSurfaceCount,
+            secondXModel.contents,
+            secondXModel.boneInfoReference,
+            secondXModel.radius,
+            secondXModel.mins[0], secondXModel.mins[1], secondXModel.mins[2],
+            secondXModel.maxs[0], secondXModel.maxs[1], secondXModel.maxs[2],
+            secondXModel.lodCount,
+            secondXModel.collisionLod,
+            secondXModel.memoryUsage,
+            secondXModel.flags,
+            secondXModel.bad ? 1 : 0,
+            secondXModel.physPresetReference,
+            secondXModel.physGeomsReference,
+            secondXModel.headerBlock0Offset,
+            secondXModel.nameBlock4Offset,
+            secondXModel.boneNamesBlock4Offset,
+            secondXModel.parentListBlock4Offset,
+            secondXModel.quatsBlock4Offset,
+            secondXModel.transBlock4Offset,
+            secondXModel.partClassificationBlock4Offset,
+            secondXModel.baseMatBlock4Offset,
+            secondXModel.surfacesBlock4Offset,
+            secondXModel.materialHandlesBlock4Offset,
+            secondXModel.boundaryInflatedOffset,
+            secondXModel.totalVertices,
+            secondXModel.totalTriangles,
+            secondXModel.totalRigidVertLists,
+            secondXModel.totalCollisionNodes,
+            secondXModel.totalCollisionLeaves,
+            secondXModel.surfacePayloadBytes,
+            secondXModel.headerTraversed ? 1 : 0,
+            secondXModel.skeletonPrefixTraversed ? 1 : 0,
+            secondXModel.surfaceHeadersTraversed ? 1 : 0,
+            secondXModel.surfaceDependenciesTraversed ? 1 : 0,
+            secondXModel.materialHandlesTraversed ? 1 : 0,
+            secondXModel.stoppedBeforeSurfaceArray ? 1 : 0,
+            secondXModel.stoppedBeforeMaterialDependency ? 1 : 0,
+            world.unsupportedOperation ? world.unsupportedOperation : "",
+            1);
+        for (std::size_t index = 0u; index < secondXModel.lods.size(); ++index)
+        {
+            const auto &lod = secondXModel.lods[index];
+            AppendRetailWorldXModelLod(
+                static_cast<std::uint32_t>(index),
+                lod.distance,
+                lod.surfaceCount,
+                lod.surfaceIndex,
+                lod.partBits[0], lod.partBits[1],
+                lod.partBits[2], lod.partBits[3],
+                lod.lod,
+                lod.smcIndexPlusOne,
+                lod.smcAllocBits,
+                1);
+        }
+        for (std::size_t index = 0u;
+             index < secondXModel.boneNames.size(); ++index)
+        {
+            const std::uint8_t classification =
+                index < secondXModel.partClassification.size()
+                    ? secondXModel.partClassification[index] : 0u;
+            AppendRetailWorldXModelBone(
+                static_cast<std::uint32_t>(index),
+                secondXModel.boneNameScriptStringIndices[index],
+                secondXModel.boneNames[index].c_str(),
+                classification,
+                1);
+        }
+        for (const auto &surface : secondXModel.surfaces)
+        {
+            AppendRetailWorldXSurface(
+                surface.index,
+                surface.tileMode,
+                surface.deformed ? 1 : 0,
+                surface.vertCount,
+                surface.triCount,
+                surface.zoneHandle,
+                surface.baseTriIndex,
+                surface.baseVertIndex,
+                surface.triIndicesReference,
+                surface.vertsBlendReference,
+                surface.vertsReference,
+                surface.vertListCount,
+                surface.vertListReference,
+                surface.blendWordCount,
+                surface.verticesBlock7Offset,
+                surface.vertListsBlock4Offset,
+                surface.indicesBlock8Offset,
+                surface.verticesHash,
+                surface.indicesHash,
+                surface.dependenciesTraversed ? 1 : 0,
+                1);
+            for (std::size_t index = 0u;
+                 index < surface.rigidVertLists.size(); ++index)
+            {
+                const auto &list = surface.rigidVertLists[index];
+                const auto &tree = list.collisionTree;
+                AppendRetailWorldXSurfaceRigidList(
+                    surface.index,
+                    static_cast<std::uint32_t>(index),
+                    list.boneOffset,
+                    list.vertCount,
+                    list.triOffset,
+                    list.triCount,
+                    tree.reference,
+                    tree.translation[0], tree.translation[1], tree.translation[2],
+                    tree.scale[0], tree.scale[1], tree.scale[2],
+                    tree.nodeCount,
+                    tree.nodesReference,
+                    tree.leafCount,
+                    tree.leafsReference,
+                    tree.nodesHash,
+                    tree.leafsHash,
+                    tree.traversed ? 1 : 0,
+                    1);
+            }
+        }
+        for (std::size_t index = 0u;
+             index < secondXModel.materialReferences.size(); ++index)
+        {
+            AppendRetailWorldXModelMaterialReference(
+                static_cast<std::uint32_t>(index),
+                secondXModel.materialReferences[index],
+                index < secondXModel.materialIdentities.size()
+                    ? secondXModel.materialIdentities[index] : 0u,
+                1);
         }
     }
     for (std::uint32_t type = 0u; type < world.typeCounts.size(); ++type)
@@ -2009,7 +2191,7 @@ WebRetailCensusFrameResult WebRetailCensusJob_Frame()
                 g_runtime.completionStatus = WebFsStatus::Pending;
                 g_runtime.completionBytes.clear();
                 if (const auto error = g_runtime.parser.BeginStreaming(
-                        RetailCensusMode::WorldPostXModelTechniqueSet);
+                        RetailCensusMode::WorldSecondXSurfacePrefix);
                     error != RetailCensusError::None)
                 {
                     Fail("could not start world asset inventory", RetailCensusErrorString(error));

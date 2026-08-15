@@ -607,12 +607,15 @@ std::vector<std::uint8_t> BuildWorldXModelDependenciesInflated(
 
 std::vector<std::uint8_t> BuildWorldPostXModelTechniqueSetInflated(
     bool invalidHeader = false,
-    bool withTechniqueDependency = false)
+    bool withTechniqueDependency = false,
+    bool invalidLaterHeader = false,
+    bool withLaterTechniqueDependency = false)
 {
     std::vector<std::uint8_t> bytes = BuildWorldXModelDependenciesInflated();
     constexpr std::size_t assetTableOffset = 75u;
     constexpr std::size_t postXModelAssetIndex = 3u;
     SetU32(bytes, assetTableOffset + postXModelAssetIndex * 8u, 5u);
+    SetU32(bytes, assetTableOffset + (postXModelAssetIndex + 1u) * 8u, 5u);
 
     std::vector<std::uint8_t> techniqueSet(148u, 0u);
     SetU32(techniqueSet, 0u, 0xffffffffu);
@@ -621,6 +624,95 @@ std::vector<std::uint8_t> BuildWorldPostXModelTechniqueSetInflated(
         SetU32(techniqueSet, 12u + 4u * 4u, 0xffffffffu);
     bytes.insert(bytes.end(), techniqueSet.begin(), techniqueSet.end());
     AppendString(bytes, ",web/mc_l_sm_r0c0n0s0");
+    std::vector<std::uint8_t> laterTechniqueSet(148u, 0u);
+    SetU32(laterTechniqueSet, 0u, 0xffffffffu);
+    if (invalidLaterHeader) laterTechniqueSet[5u] = 1u;
+    if (withLaterTechniqueDependency)
+        SetU32(laterTechniqueSet, 12u + 7u * 4u, 0xffffffffu);
+    bytes.insert(bytes.end(), laterTechniqueSet.begin(), laterTechniqueSet.end());
+    AppendString(bytes, ",web/mc_l_sm_r0c0n0s1");
+    return bytes;
+}
+
+std::vector<std::uint8_t> BuildWorldSecondXModelPrefixInflated(
+    bool invalidBounds = false,
+    bool unsupportedBoneNames = false,
+    bool invalidSurfaceLayout = false)
+{
+    std::vector<std::uint8_t> bytes =
+        BuildWorldPostXModelTechniqueSetInflated();
+    constexpr std::size_t assetTableOffset = 75u;
+    constexpr std::size_t secondXModelAssetIndex = 5u;
+    SetU32(bytes, assetTableOffset + secondXModelAssetIndex * 8u, 3u);
+    SetU32(bytes, assetTableOffset + secondXModelAssetIndex * 8u + 4u,
+        0xffffffffu);
+    SetU32(bytes, assetTableOffset + (secondXModelAssetIndex + 1u) * 8u, 16u);
+    SetU32(bytes, assetTableOffset + (secondXModelAssetIndex + 1u) * 8u + 4u,
+        0xffffffffu);
+
+    std::vector<std::uint8_t> model(220u, 0u);
+    SetU32(model, 0u, 0xffffffffu);
+    model[4u] = 1u;
+    model[5u] = 1u;
+    model[6u] = 3u;
+    SetU32(model, 8u,
+        unsupportedBoneNames ? 0x40000001u : 0xffffffffu);
+    SetU32(model, 24u, 0xffffffffu);
+    SetU32(model, 28u, 0xffffffffu);
+    SetU32(model, 32u, 0xffffffffu);
+    SetU32(model, 36u, 0xffffffffu);
+    SetF32(model, 40u, 1200.0f);
+    PutU16At(model, 44u, 3u);
+    SetU32(model, 48u, 0x80000000u);
+    SetU32(model, 164u, 0xffffffffu);
+    SetF32(model, 168u, 20.0f);
+    SetF32(model, 172u, invalidBounds ? 3.0f : -2.0f);
+    SetF32(model, 176u, -3.0f);
+    SetF32(model, 180u, -4.0f);
+    SetF32(model, 184u, 2.0f);
+    SetF32(model, 188u, 3.0f);
+    SetF32(model, 192u, 4.0f);
+    PutU16At(model, 196u, 1u);
+    PutU16At(model, 198u, 0u);
+    SetU32(model, 204u, 512u);
+    bytes.insert(bytes.end(), model.begin(), model.end());
+    AppendString(bytes, "web/xmodel_second");
+    PutU16(bytes, 0u);
+    bytes.push_back(0u);
+    std::vector<std::uint8_t> baseMat(32u, 0u);
+    SetF32(baseMat, 12u, 1.0f);
+    SetF32(baseMat, 28u, 1.0f);
+    bytes.insert(bytes.end(), baseMat.begin(), baseMat.end());
+    for (std::uint32_t index = 0u; index < 3u; ++index)
+    {
+        std::vector<std::uint8_t> surface(56u, 0u);
+        PutU16At(surface, 2u, 3u);
+        PutU16At(surface, 4u, 1u);
+        PutU16At(surface, 8u, static_cast<std::uint16_t>(index));
+        PutU16At(surface, 10u, static_cast<std::uint16_t>(index * 3u));
+        SetU32(surface, 12u,
+            invalidSurfaceLayout && index == 0u ? 0u : 0xffffffffu);
+        SetU32(surface, 28u, 0xffffffffu);
+        SetU32(surface, 32u, 1u);
+        SetU32(surface, 36u, 0xffffffffu);
+        SetU32(surface, 40u, 0x80000000u);
+        bytes.insert(bytes.end(), surface.begin(), surface.end());
+    }
+    for (std::uint32_t index = 0u; index < 3u; ++index)
+    {
+        for (std::uint32_t byte = 0u; byte < 3u * 32u; ++byte)
+            bytes.push_back(static_cast<std::uint8_t>(0x80u + byte + index));
+        PutU16(bytes, 0u);
+        PutU16(bytes, 3u);
+        PutU16(bytes, 0u);
+        PutU16(bytes, 1u);
+        PutU32(bytes, 0u);
+        PutU16(bytes, 0u);
+        PutU16(bytes, 1u);
+        PutU16(bytes, 2u);
+    }
+    for (std::uint32_t index = 0u; index < 3u; ++index)
+        PutU32(bytes, 0xffffffffu);
     return bytes;
 }
 
@@ -942,30 +1034,38 @@ void TestWorldPostXModelTechniqueSetBoundary()
     Require(result.worldFirstXModel.published &&
         result.worldPostXModelTechniqueSetAssetIndex == 3u &&
         result.worldPostXModelTechniqueSetPublished &&
-        result.worldTechniqueSets.size() == 3u,
-        "M30 enters one typed technique set after the published XModel");
-    const RetailWorldTechniqueSet &post = result.worldTechniqueSets.back();
-    Require(post.assetIndex == 3u &&
-        post.name == ",web/mc_l_sm_r0c0n0s0" &&
-        post.nullTechniqueReferences == 34u &&
-        post.inlineTechniqueReferences == 0u &&
-        post.identity == 7u && post.published &&
-        result.completedAssetCount == 4u &&
-        result.registryAssetCount == 7u &&
-        result.worldRegistryAliasCount == 7u &&
-        result.worldRegistryDefinedAliasCount == 7u &&
-        result.nextBodyIndex == 4u && result.nextBodyType == 31u &&
+        result.worldPostXModelTechniqueSetBodiesEntered == 2u &&
+        result.worldPostXModelTechniqueSetCompletedCount == 2u &&
+        result.worldTechniqueSets.size() == 4u,
+        "M31 enters the consecutive typed technique-set run after the XModel");
+    const RetailWorldTechniqueSet &firstPost = result.worldTechniqueSets[2u];
+    const RetailWorldTechniqueSet &lastPost = result.worldTechniqueSets[3u];
+    Require(firstPost.assetIndex == 3u &&
+        firstPost.name == ",web/mc_l_sm_r0c0n0s0" &&
+        firstPost.identity == 7u && firstPost.published &&
+        lastPost.assetIndex == 4u &&
+        lastPost.name == ",web/mc_l_sm_r0c0n0s1" &&
+        lastPost.nullTechniqueReferences == 34u &&
+        lastPost.inlineTechniqueReferences == 0u &&
+        lastPost.identity == 8u && lastPost.published &&
+        result.completedAssetCount == 5u &&
+        result.registryAssetCount == 8u &&
+        result.worldRegistryAliasCount == 8u &&
+        result.worldRegistryDefinedAliasCount == 8u &&
+        result.nextBodyIndex == 5u && result.nextBodyType == 16u &&
         result.nextBodyReference == 0xffffffffu &&
-        result.unsupportedOperation == nullptr,
-        "M30 publishes the zero-dependency set atomically and stops before asset four");
+        result.stoppedBeforeDifferentWorldAssetType &&
+        std::string(result.unsupportedOperation) ==
+            "Load_XAssetHeader(non-technique-set)",
+        "M31 publishes the zero-dependency run and stops before the next asset class");
 
     RetailFastfileCensusJob malformed;
     Require(malformed.BeginStreaming(RetailCensusMode::WorldPostXModelTechniqueSet) ==
-        RetailCensusError::None, "malformed M30 fixture starts");
+        RetailCensusError::None, "malformed M31 fixture starts");
     const auto malformedFile = BuildFile(
         BuildWorldPostXModelTechniqueSetInflated(true));
     Require(malformed.FeedSource(malformedFile, true) == RetailCensusError::None,
-        "malformed M30 source is accepted");
+        "malformed M31 source is accepted");
     while (malformed.Progress() == RetailCensusProgress::Running)
         (void)malformed.Step();
     RetailFastfileCensus unavailable;
@@ -974,16 +1074,31 @@ void TestWorldPostXModelTechniqueSetBoundary()
         !malformed.TakeResult(unavailable) && unavailable.completedAssetCount == 99u,
         "malformed post-XModel set cannot expose the prior dependency prefix");
 
+    RetailFastfileCensusJob malformedLater;
+    Require(malformedLater.BeginStreaming(
+            RetailCensusMode::WorldPostXModelTechniqueSet) ==
+        RetailCensusError::None, "malformed later M31 fixture starts");
+    const auto malformedLaterFile = BuildFile(
+        BuildWorldPostXModelTechniqueSetInflated(false, false, true));
+    Require(malformedLater.FeedSource(malformedLaterFile, true) ==
+        RetailCensusError::None, "malformed later M31 source is accepted");
+    while (malformedLater.Progress() == RetailCensusProgress::Running)
+        (void)malformedLater.Step();
+    Require(malformedLater.Failure() ==
+            RetailCensusError::TechniqueSetLayoutUnsupported &&
+        !malformedLater.TakeResult(unavailable),
+        "malformed later post-XModel set exposes no partial run");
+
     RetailFastfileCensusJob wrongType;
     Require(wrongType.BeginStreaming(RetailCensusMode::WorldPostXModelTechniqueSet) ==
-        RetailCensusError::None, "wrong-type M30 fixture starts");
+        RetailCensusError::None, "wrong-type M31 fixture starts");
     const auto wrongTypeFile = BuildFile(BuildWorldXModelDependenciesInflated());
     Require(wrongType.FeedSource(wrongTypeFile, true) == RetailCensusError::None,
-        "wrong-type M30 source is accepted");
+        "wrong-type M31 source is accepted");
     while (wrongType.Progress() == RetailCensusProgress::Running)
         (void)wrongType.Step();
     Require(wrongType.Failure() == RetailCensusError::PostXModelAssetUnsupported,
-        "M30 rejects a non-technique-set body after the first XModel");
+        "M31 rejects a missing post-XModel technique-set run");
 
     const auto dependency = Run(
         BuildFile(BuildWorldPostXModelTechniqueSetInflated(false, true)),
@@ -996,7 +1111,124 @@ void TestWorldPostXModelTechniqueSetBoundary()
         dependency.worldRegistryAliasCount == 7u &&
         dependency.worldRegistryDefinedAliasCount == 6u &&
         std::string(dependency.unsupportedOperation) == "Load_MaterialTechnique",
-        "M30 stops conservatively before a nested technique body");
+        "M31 stops conservatively before a nested technique body");
+
+    const auto laterDependency = Run(
+        BuildFile(BuildWorldPostXModelTechniqueSetInflated(
+            false, false, false, true)),
+        7u, 2u, 3u, RetailCensusMode::WorldPostXModelTechniqueSet);
+    const RetailWorldTechniqueSet &laterBlocked =
+        laterDependency.worldTechniqueSets.back();
+    Require(laterDependency.worldTechniqueSets[2u].published &&
+        !laterBlocked.published && laterBlocked.assetIndex == 4u &&
+        laterBlocked.firstTechniqueSlot == 7u &&
+        laterDependency.worldPostXModelTechniqueSetBodiesEntered == 2u &&
+        laterDependency.worldPostXModelTechniqueSetCompletedCount == 1u &&
+        laterDependency.completedAssetCount == 4u &&
+        laterDependency.worldRegistryAliasCount == 8u &&
+        laterDependency.worldRegistryDefinedAliasCount == 7u &&
+        std::string(laterDependency.unsupportedOperation) ==
+            "Load_MaterialTechnique",
+        "M31 preserves the published prefix when a later set has a dependency");
+}
+
+void TestWorldSecondXModelPrefixBoundary()
+{
+    using namespace kisak::fastfile;
+    const auto result = Run(
+        BuildFile(BuildWorldSecondXModelPrefixInflated()),
+        7u, 2u, 3u, RetailCensusMode::WorldSecondXModelPrefix);
+    const RetailWorldXModel &first = result.worldFirstXModel;
+    const RetailWorldXModel &second = result.worldSecondXModel;
+    Require(first.published && first.name == "web/xmodel_wall" &&
+        first.identity == 6u && first.surfaces.size() == 6u,
+        "M32 preserves the complete first XModel result");
+    Require(second.assetIndex == 5u &&
+        second.name == "web/xmodel_second" &&
+        second.headerTraversed && second.skeletonPrefixTraversed &&
+        second.stoppedBeforeSurfaceArray && !second.published &&
+        second.numBones == 1u && second.numRootBones == 1u &&
+        second.surfaceCount == 3u && second.lodCount == 1 &&
+        second.boneNames == std::vector<std::string>{"tag_origin"} &&
+        result.block0HighWaterAtBoundary == 352u &&
+        result.block4CursorAtBoundary == 1028u &&
+        result.completedAssetCount == 5u &&
+        result.registryAssetCount == 8u &&
+        result.worldRegistryAliasCount == 9u &&
+        result.worldRegistryDefinedAliasCount == 8u &&
+        result.nextBodyIndex == 5u && result.nextBodyType == 3u &&
+        std::string(result.unsupportedOperation) == "Load_XSurfaceArray",
+        "M32 retains the second header and skeleton before XSurface traversal");
+
+    RetailFastfileCensusJob invalid;
+    Require(invalid.BeginStreaming(RetailCensusMode::WorldSecondXModelPrefix) ==
+        RetailCensusError::None, "invalid M32 fixture starts");
+    const auto invalidFile = BuildFile(
+        BuildWorldSecondXModelPrefixInflated(true));
+    Require(invalid.FeedSource(invalidFile, true) == RetailCensusError::None,
+        "invalid M32 source is accepted");
+    while (invalid.Progress() == RetailCensusProgress::Running)
+        (void)invalid.Step();
+    RetailFastfileCensus unavailable;
+    Require(invalid.Failure() == RetailCensusError::XModelBoundsInvalid &&
+        !invalid.TakeResult(unavailable),
+        "invalid second-XModel bounds expose no partial public result");
+
+    const auto unsupported = Run(
+        BuildFile(BuildWorldSecondXModelPrefixInflated(false, true)),
+        7u, 2u, 3u, RetailCensusMode::WorldSecondXModelPrefix);
+    Require(unsupported.worldFirstXModel.published &&
+        unsupported.worldSecondXModel.headerTraversed &&
+        !unsupported.worldSecondXModel.skeletonPrefixTraversed &&
+        std::string(unsupported.unsupportedOperation) ==
+            "Load_ScriptStringArray",
+        "unsupported second-XModel bone names preserve the first model");
+}
+
+void TestWorldSecondXSurfacePrefixBoundary()
+{
+    using namespace kisak::fastfile;
+    const auto result = Run(
+        BuildFile(BuildWorldSecondXModelPrefixInflated()),
+        7u, 2u, 3u, RetailCensusMode::WorldSecondXSurfacePrefix);
+    const RetailWorldXModel &first = result.worldFirstXModel;
+    const RetailWorldXModel &second = result.worldSecondXModel;
+    Require(first.published && first.name == "web/xmodel_wall" &&
+        first.surfaces.size() == 6u,
+        "M33 preserves the complete first XModel result");
+    Require(second.headerTraversed && second.skeletonPrefixTraversed &&
+        second.surfaceHeadersTraversed && second.surfaceDependenciesTraversed &&
+        second.materialHandlesTraversed &&
+        second.stoppedBeforeMaterialDependency &&
+        !second.stoppedBeforeSurfaceArray && !second.published &&
+        second.surfaces.size() == 3u &&
+        second.materialReferences == std::vector<std::uint32_t>(
+            3u, 0xffffffffu) &&
+        second.totalVertices == 9u && second.totalTriangles == 3u &&
+        second.totalRigidVertLists == 3u &&
+        std::all_of(second.surfaces.begin(), second.surfaces.end(),
+            [](const RetailXSurface &surface) {
+                return surface.vertCount == 3u && surface.triCount == 1u &&
+                    surface.rigidVertLists.size() == 1u &&
+                    surface.dependenciesTraversed &&
+                    !surface.renderPayloadRetained;
+            }) &&
+        std::string(result.unsupportedOperation) == "Load_Material",
+        "M33 traverses the second XSurface prefix through material handles");
+
+    RetailFastfileCensusJob invalid;
+    Require(invalid.BeginStreaming(RetailCensusMode::WorldSecondXSurfacePrefix) ==
+        RetailCensusError::None, "invalid M33 fixture starts");
+    const auto invalidFile = BuildFile(
+        BuildWorldSecondXModelPrefixInflated(false, false, true));
+    Require(invalid.FeedSource(invalidFile, true) == RetailCensusError::None,
+        "invalid M33 source is accepted");
+    while (invalid.Progress() == RetailCensusProgress::Running)
+        (void)invalid.Step();
+    RetailFastfileCensus unavailable;
+    Require(invalid.Failure() == RetailCensusError::XSurfaceLayoutUnsupported &&
+        !invalid.TakeResult(unavailable),
+        "invalid second-XSurface layout exposes no partial public result");
 }
 
 void TestPositiveIncrementalCensus()
@@ -1244,8 +1476,8 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
     std::ifstream input(path, std::ios::binary);
     Require(input.good(), "owned world surface diagnostic opens fastfile");
     RetailFastfileCensusJob job;
-    Require(job.BeginStreaming(RetailCensusMode::WorldPostXModelTechniqueSet) ==
-        RetailCensusError::None, "owned M30 diagnostic starts");
+    Require(job.BeginStreaming(RetailCensusMode::WorldSecondXSurfacePrefix) ==
+        RetailCensusError::None, "owned M33 diagnostic starts");
     std::vector<std::uint8_t> chunk(RETAIL_CENSUS_MAX_STEP_BYTES);
     std::uint32_t steps = 0u;
     while (job.Progress() == RetailCensusProgress::Running && steps++ < 10000u)
@@ -1273,8 +1505,29 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
     RetailFastfileCensus result;
     Require(job.TakeResult(result), "owned world surface result is available");
     const RetailWorldXModel &model = result.worldFirstXModel;
+    const RetailWorldXModel &secondModel = result.worldSecondXModel;
     const auto &post = result.worldTechniqueSets.back();
-    std::cout << "owned M30 technique set: index=" << post.assetIndex
+    std::cout << "owned M33 XSurface prefix: index=" << secondModel.assetIndex
+              << " name=" << secondModel.name
+              << " bones=" << static_cast<unsigned>(secondModel.numBones)
+              << '/' << static_cast<unsigned>(secondModel.numRootBones)
+              << " surfaces=" << static_cast<unsigned>(secondModel.surfaceCount)
+              << '/' << secondModel.surfaces.size()
+              << " vertices=" << secondModel.totalVertices
+              << " triangles=" << secondModel.totalTriangles
+              << " rigid-lists=" << secondModel.totalRigidVertLists
+              << " payload=" << secondModel.surfacePayloadBytes
+              << " material-handles=" << secondModel.materialReferences.size()
+              << " lods=" << secondModel.lodCount
+              << " collision-surfaces=" << secondModel.collisionSurfaceCount
+              << " radius=" << secondModel.radius
+              << " memory=" << secondModel.memoryUsage
+              << " boundary=" << secondModel.boundaryInflatedOffset
+              << " name-block4=" << secondModel.nameBlock4Offset
+              << " skeleton=" << secondModel.skeletonPrefixTraversed
+              << " stop=" << (result.unsupportedOperation
+                    ? result.unsupportedOperation : "complete") << '\n';
+    std::cout << "owned M31 final technique set: index=" << post.assetIndex
               << " name=" << post.name
               << " identity=" << post.identity
               << " published=" << post.published
@@ -1307,21 +1560,72 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
         model.collisionPayloadBytes == 4696u &&
         model.boundaryInflatedOffset == 67723u &&
         result.block0HighWaterAtBoundary == 352u &&
-        result.block4CursorAtBoundary == 38134u &&
-        result.registryAssetCount == 20u &&
-        result.worldRegistryAliasCount == 20u &&
-        result.worldRegistryDefinedAliasCount == 20u,
-        "owned M30 profile preserves the XModel and publishes the next technique set");
-    Require(post.assetIndex == 13u &&
-        post.name == ",sm2/mc_l_sm_r0c0n0s0" &&
+        result.block4CursorAtBoundary == 39644u &&
+        result.registryAssetCount == 27u &&
+        result.worldRegistryAliasCount == 28u &&
+        result.worldRegistryDefinedAliasCount == 27u,
+        "owned M33 profile preserves the first XModel and technique-set run");
+    Require(post.assetIndex == 20u &&
+        post.name == ",mc_l_hsm_r0c0n0s0" &&
         post.nullTechniqueReferences == 34u &&
-        post.identity == 20u && post.published &&
-        post.boundaryInflatedOffset == 67893u &&
+        post.identity == 27u && post.published &&
+        post.boundaryInflatedOffset == 69063u &&
         result.worldPostXModelTechniqueSetAssetIndex == 13u &&
         result.worldPostXModelTechniqueSetPublished &&
-        result.nextBodyIndex == 14u && result.nextBodyType == 5u &&
+        result.worldPostXModelTechniqueSetBodiesEntered == 8u &&
+        result.worldPostXModelTechniqueSetCompletedCount == 8u &&
+        result.nextBodyIndex == 21u && result.nextBodyType == 3u &&
         result.nextBodyReference == 0xffffffffu,
-        "owned M30 profile matches the first post-XModel typed boundary");
+        "owned M31 profile matches the consecutive post-XModel run boundary");
+    Require(secondModel.assetIndex == 21u &&
+        secondModel.name == "com_steel_ladder" &&
+        secondModel.headerTraversed && secondModel.skeletonPrefixTraversed &&
+        secondModel.surfaceHeadersTraversed &&
+        secondModel.surfaceDependenciesTraversed &&
+        secondModel.materialHandlesTraversed &&
+        secondModel.stoppedBeforeMaterialDependency &&
+        !secondModel.stoppedBeforeSurfaceArray && !secondModel.published &&
+        secondModel.numBones == 1u && secondModel.numRootBones == 1u &&
+        secondModel.surfaceCount == 3u && secondModel.lodCount == 3 &&
+        secondModel.surfaces.size() == 3u &&
+        secondModel.totalVertices == 750u &&
+        secondModel.totalTriangles == 488u &&
+        secondModel.totalRigidVertLists == 3u &&
+        secondModel.surfacePayloadBytes == 28236u &&
+        secondModel.materialReferences.size() == 3u &&
+        std::none_of(secondModel.surfaces.begin(), secondModel.surfaces.end(),
+            [](const RetailXSurface &surface) {
+                return surface.renderPayloadRetained;
+            }) &&
+        secondModel.collisionSurfaceCount == 1u &&
+        secondModel.radius > 200.69f && secondModel.radius < 200.70f &&
+        secondModel.memoryUsage == 24551u &&
+        secondModel.boundaryInflatedOffset == 97571u &&
+        secondModel.nameBlock4Offset == 38268u &&
+        std::string(result.unsupportedOperation) == "Load_Material",
+        "owned M33 profile reaches the second XModel material boundary");
+    for (const RetailXSurface &surface : secondModel.surfaces)
+    {
+        std::cout << "  M33 surface[" << surface.index << "] vertices="
+                  << surface.vertCount << " triangles=" << surface.triCount
+                  << " lists=" << surface.rigidVertLists.size()
+                  << " vertex-hash=0x" << std::hex << surface.verticesHash
+                  << " index-hash=0x" << surface.indicesHash << std::dec
+                  << '\n';
+    }
+    std::cout << "  M33 material references:";
+    for (const std::uint32_t reference : secondModel.materialReferences)
+        std::cout << " 0x" << std::hex << reference << std::dec;
+    std::cout << '\n';
+    for (const RetailWorldTechniqueSet &entry : result.worldTechniqueSets)
+    {
+        if (entry.assetIndex <= model.assetIndex) continue;
+        std::cout << "  M31 technique set: index=" << entry.assetIndex
+                  << " name=" << entry.name
+                  << " identity=" << entry.identity
+                  << " boundary=" << entry.boundaryInflatedOffset
+                  << " name-block4=" << entry.nameBlock4Offset << '\n';
+    }
     const RetailXSurface &renderCandidate = model.surfaces.front();
     WebEngineConvertedXModelSurface converted;
     Require(renderCandidate.renderPayloadRetained &&
@@ -1375,7 +1679,7 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
               << " indices=" << drawList.renderer.indices.size()
               << " axes=" << static_cast<unsigned>(drawList.horizontalAxis)
                << ',' << static_cast<unsigned>(drawList.verticalAxis) << '\n';
-    std::cout << "owned M30 next body: index=" << result.nextBodyIndex
+    std::cout << "owned M31 next body: index=" << result.nextBodyIndex
               << " type=" << result.nextBodyType
               << " (" << RetailAssetTypeName(result.nextBodyType) << ')'
               << " reference=0x" << std::hex << result.nextBodyReference
@@ -1441,6 +1745,8 @@ int main(int argc, char **argv)
     TestWorldXSurfacePrefixBoundary();
     TestWorldXModelDependenciesBoundary();
     TestWorldPostXModelTechniqueSetBoundary();
+    TestWorldSecondXModelPrefixBoundary();
+    TestWorldSecondXSurfacePrefixBoundary();
     TestMalformedPrefixRecords();
     TestTechniqueTraversalFailures();
     TestEnvelopeAndAtomicity();

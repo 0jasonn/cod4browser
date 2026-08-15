@@ -1235,13 +1235,96 @@ published but leaves the new alias undefined and stops before
 record separately from the leading run. No new renderer work, proprietary
 payload retention, or map claim is part of this milestone.
 
-## Next boundary: Milestone 31
+## Milestone 31: consecutive post-XModel technique sets (complete)
 
-M31 should enter asset 14 and generalize the checked post-XModel
-technique-set loader across the consecutive zero-dependency run, stopping at
-the first nested technique or different top-level type. It should record the
-exact owned run and next required inline asset class without turning the
-isolated XModel preview into a map renderer prematurely.
+The post-model mode now continues after asset 13 while the next table entry is
+an inline type-5 `MaterialTechniqueSet`. Each body receives a fresh bounded
+148-byte block-0 allocation, checked block-4 name, reserved table alias, and
+atomic registry publication. Traversal stops before the first nested
+`MaterialTechnique`, non-inline set, end of table, or different top-level asset
+type. The result separately records post-model bodies entered and completed,
+retains the complete ordered technique-set metadata, and reports the untouched
+next header.
+
+The owned F.N.G. run spans assets 13 through 20. All eight sets have 34 null
+technique pointers and publish as identities 20 through 27:
+
+| Asset | Name | Identity | Inflated boundary |
+| ---: | --- | ---: | ---: |
+| 13 | `,sm2/mc_l_sm_r0c0n0s0` | 20 | 67,893 |
+| 14 | `,sm2/mc_l_sm_r0c0n0` | 21 | 68,061 |
+| 15 | `,sm2/mc_l_hsm_r0c0n0` | 22 | 68,230 |
+| 16 | `,sm2/mc_l_hsm_r0c0n0s0` | 23 | 68,401 |
+| 17 | `,mc_l_sm_r0c0n0s0` | 24 | 68,567 |
+| 18 | `,mc_l_sm_r0c0n0` | 25 | 68,731 |
+| 19 | `,mc_l_hsm_r0c0n0` | 26 | 68,896 |
+| 20 | `,mc_l_hsm_r0c0n0s0` | 27 | 69,063 |
+
+Block-0 high-water remains 352 bytes, block 4 advances to 38,268, and all 27
+reserved aliases are defined. Asset 21 is an inline type-3 `XModel`, so M31
+stops before its header. The freely generated browser fixture publishes two
+post-model sets and stops before a different class; companion cases stop on a
+dependency in the later set and fail closed on a malformed later header. No
+retail bytes are stored in the repository.
+
+## Milestone 32: second retail XModel boundary (complete)
+
+The world reader now distinguishes the active XModel from the published first
+model. After the M31 technique-set run, it reserves the asset-21 table alias,
+pushes a fresh block-0 scope, validates the 220-byte `XModel` header, and walks
+the same bounded name and skeleton-prefix stages used by M24. All second-model
+state is retained separately; the first model's surfaces, materials, texture
+bindings, draw list, identity, and renderer publication remain unchanged.
+
+The owned asset is `com_steel_ladder`: one root bone, three surfaces, three
+LODs, one collision surface, radius approximately 200.696, and memory usage
+24,551 bytes. Its header and skeleton prefix finish at inflated offset 69,335.
+The name begins at block-4 offset 38,268 and the final block-4 cursor is 38,324;
+block-0 high-water remains 352 bytes. Registry identity count stays 27 while
+the reserved/defined alias counts become 28/27 because asset 21 is deliberately
+unpublished.
+
+Traversal stops before `Load_XSurfaceArray`. A freely generated fixture proves
+that the separate second record retains its bone name and LOD metadata without
+altering the first model's render state. Invalid second-model bounds fail
+without exposing any partial public result, while an unsupported bone-name
+dependency returns a conservative boundary with the published first model
+intact. No second-model vertex, index, material, collision, or renderer payload
+is retained.
+
+## Milestone 33: second retail XSurface prefix (complete)
+
+The XSurface stages now operate on the active XModel rather than being tied to
+the first retained model. After the M32 skeleton boundary, the parser validates
+all three 56-byte headers and follows their packed vertices, rigid lists,
+collision-tree references, and triangle indices in generated-loader order. It
+then retains the three material handles and stops before the first inline
+`Material` body.
+
+The owned `com_steel_ladder` profile contains 750 vertices, 488 triangles, and
+three rigid lists across its three surfaces. The bounded surface payload is
+28,236 bytes, the inflated boundary is 97,571, and block 4 ends at 39,644.
+The material references are one inline token followed by two aliases to that
+same material. The asset alias remains unpublished at 28 reserved / 27 defined.
+
+No ladder packed vertices or indices are retained for rendering, and no second
+draw list or WebGL submission is created. Synthetic coverage proves the same
+ordering and fails atomically for an invalid second-XSurface pointer/count
+relationship. M33 therefore advances the shared XModel asset loader; it does
+not create a standalone model-viewer workflow.
+
+## Next boundary: Milestone 34
+
+M34 should generalize the already-checked material/image, collision-surface,
+bone-info, and null-physics dependency stages to the active XModel, complete
+asset 21, and publish its reserved alias. Once that path is shared, the next
+architectural step is a repeatable top-level XModel loop rather than a growing
+set of first/second special cases.
+
+Full XModel compatibility remains the intended loader direction: parse every
+supported serialized XModel dependency needed by the game and expose typed
+engine assets. Rendering any model is a separate consumer decision, and the
+map/world loader—not a model viewer—remains the product milestone.
 
 Reaching `GfxWorld` still requires typed loaders for every intervening inline
 asset class; geometry, lightmaps, visibility, and camera state remain separate

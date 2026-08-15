@@ -262,8 +262,8 @@ export function createSyntheticRetailCensusFastfile()
     ]);
 }
 
-// Freely generated fixture for the M21 table inventory through the M30 first
-// post-XModel technique-set publication. It contains no retail bytes.
+// Freely generated fixture for the M21 table inventory through the M33 second
+// XModel surface prefix. It contains no retail bytes.
 export function createSyntheticWorldInventoryFastfile({
     includeWorld = true,
     invalidTechniqueSet = false,
@@ -280,6 +280,11 @@ export function createSyntheticWorldInventoryFastfile({
     unsupportedXModelPhysPreset = false,
     invalidPostXModelTechniqueSet = false,
     postXModelTechniqueDependency = false,
+    invalidLaterPostXModelTechniqueSet = false,
+    laterPostXModelTechniqueDependency = false,
+    invalidSecondXModelBounds = false,
+    unsupportedSecondXModelBoneNames = false,
+    invalidSecondXSurfaceLayout = false,
     externalColorMap = true,
     colorMapName = "synthetic_engine_asset",
     secondExternalColorMap = false,
@@ -299,9 +304,9 @@ export function createSyntheticWorldInventoryFastfile({
         [5, 0xffff_ffff],
         [3, 0xffff_ffff],
         [5, 0xffff_ffff],
-        [31, 0xffff_ffff],
-        [includeWorld ? 16 : 31, 0xffff_ffff],
-        [32, 0],
+        [5, 0xffff_ffff],
+        [3, 0xffff_ffff],
+        [includeWorld ? 16 : 32, includeWorld ? 0xffff_ffff : 0],
     ];
     appendU32(inflated, assets.length);
     appendU32(inflated, 0xffff_ffff);
@@ -575,6 +580,86 @@ export function createSyntheticWorldInventoryFastfile({
         ...Buffer.from(",web/mc_l_sm_r0c0n0s0", "ascii"),
         0,
     );
+    const laterPostXModelTechniqueSet = new Array(148).fill(0);
+    setU32(laterPostXModelTechniqueSet, 0, 0xffff_ffff);
+    if (invalidLaterPostXModelTechniqueSet) {
+        laterPostXModelTechniqueSet[5] = 1;
+    }
+    if (laterPostXModelTechniqueDependency) {
+        setU32(laterPostXModelTechniqueSet, 12 + 7 * 4, 0xffff_ffff);
+    }
+    inflated.push(
+        ...laterPostXModelTechniqueSet,
+        ...Buffer.from(",web/mc_l_sm_r0c0n0s1", "ascii"),
+        0,
+    );
+    const secondXModel = new Array(220).fill(0);
+    setU32(secondXModel, 0, 0xffff_ffff);
+    secondXModel[4] = 1;
+    secondXModel[5] = 1;
+    secondXModel[6] = 3;
+    setU32(secondXModel, 8,
+        unsupportedSecondXModelBoneNames ? 0x4000_0001 : 0xffff_ffff);
+    setU32(secondXModel, 24, 0xffff_ffff);
+    setU32(secondXModel, 28, 0xffff_ffff);
+    setU32(secondXModel, 32, 0xffff_ffff);
+    setU32(secondXModel, 36, 0xffff_ffff);
+    setF32(secondXModel, 40, 1200);
+    setU16(secondXModel, 44, 3);
+    setU32(secondXModel, 48, 0x8000_0000);
+    setU32(secondXModel, 164, 0xffff_ffff);
+    setF32(secondXModel, 168, 20);
+    setF32(secondXModel, 172, invalidSecondXModelBounds ? 3 : -2);
+    setF32(secondXModel, 176, -3);
+    setF32(secondXModel, 180, -4);
+    setF32(secondXModel, 184, 2);
+    setF32(secondXModel, 188, 3);
+    setF32(secondXModel, 192, 4);
+    setU16(secondXModel, 196, 1);
+    setU16(secondXModel, 198, 0);
+    setU32(secondXModel, 204, 512);
+    inflated.push(
+        ...secondXModel,
+        ...Buffer.from("web/xmodel_second", "ascii"),
+        0,
+    );
+    appendU16(inflated, 0);
+    inflated.push(0);
+    const secondBaseMat = new Array(32).fill(0);
+    setF32(secondBaseMat, 12, 1);
+    setF32(secondBaseMat, 28, 1);
+    inflated.push(...secondBaseMat);
+    for (let index = 0; index < 3; ++index) {
+        const surface = new Array(56).fill(0);
+        setU16(surface, 2, 3);
+        setU16(surface, 4, 1);
+        setU16(surface, 8, index);
+        setU16(surface, 10, index * 3);
+        setU32(surface, 12,
+            invalidSecondXSurfaceLayout && index === 0
+                ? 0 : 0xffff_ffff);
+        setU32(surface, 28, 0xffff_ffff);
+        setU32(surface, 32, 1);
+        setU32(surface, 36, 0xffff_ffff);
+        setU32(surface, 40, 0x8000_0000);
+        inflated.push(...surface);
+    }
+    for (let index = 0; index < 3; ++index) {
+        for (let byte = 0; byte < 3 * 32; ++byte) {
+            inflated.push((0x80 + byte + index) & 0xff);
+        }
+        appendU16(inflated, 0);
+        appendU16(inflated, 3);
+        appendU16(inflated, 0);
+        appendU16(inflated, 1);
+        appendU32(inflated, 0);
+        appendU16(inflated, 0);
+        appendU16(inflated, 1);
+        appendU16(inflated, 2);
+    }
+    for (let index = 0; index < 3; ++index) {
+        appendU32(inflated, 0xffff_ffff);
+    }
     const compressed = deflateSync(Uint8Array.from(inflated), { level: 9 });
     return Uint8Array.from([
         0x49, 0x57, 0x66, 0x66, 0x75, 0x31, 0x30, 0x30,

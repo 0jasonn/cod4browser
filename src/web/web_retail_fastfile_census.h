@@ -156,6 +156,8 @@ enum class RetailCensusMode : std::uint8_t
     WorldXSurfacePrefix,
     WorldXModelDependencies,
     WorldPostXModelTechniqueSet,
+    WorldSecondXModelPrefix,
+    WorldSecondXSurfacePrefix,
 };
 
 enum class RetailCensusStage : std::uint8_t
@@ -531,7 +533,10 @@ struct RetailFastfileCensus
     std::uint32_t worldTechniqueSetBodiesEntered = 0u;
     std::uint32_t worldNextAssetIndex = 0u;
     std::uint32_t worldPostXModelTechniqueSetAssetIndex = UINT32_MAX;
+    std::uint32_t worldPostXModelTechniqueSetBodiesEntered = 0u;
+    std::uint32_t worldPostXModelTechniqueSetCompletedCount = 0u;
     RetailWorldXModel worldFirstXModel;
+    RetailWorldXModel worldSecondXModel;
     bool worldFirstTechniqueSetHeaderTraversed = false;
     bool worldFirstTechniqueSetPublished = false;
     bool stoppedBeforeWorldTechniqueDependency = false;
@@ -644,8 +649,16 @@ struct RetailFastfileCensus
 // collision triangles, bone info, and the first model's null physics references,
 // publishing the XModel alias only after the complete dependency chain succeeds.
 // WorldPostXModelTechniqueSet resumes the generated top-level loader after that
-// publication, enters exactly one following inline MaterialTechniqueSet, and
-// stops before the next asset body or its first nested MaterialTechnique.
+// publication, enters the consecutive inline MaterialTechniqueSet run, and
+// stops before the first different top-level asset, non-inline set, or nested
+// MaterialTechnique.
+// WorldSecondXModelPrefix continues through that run, validates the next inline
+// XModel header and bounded skeleton prefix, then stops before its XSurface
+// dependency without replacing the published first-model result.
+// WorldSecondXSurfacePrefix additionally traverses that model's bounded
+// XSurface payloads and material-handle ordering, stopping before an inline
+// material body. This reuses the engine-facing XModel parser rather than
+// introducing a standalone model-viewer path.
 // It retains serialized vertex/index bytes only for a renderer-bounded first
 // surface; decoding and graphics submission remain separate engine-side work.
 // Native D3D9 creation is never invoked.

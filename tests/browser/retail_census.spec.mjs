@@ -388,26 +388,26 @@ test("publishes one retail material and binds its resolved image", async ({ page
             path: "zone/english/killhouse.ff",
             assetCount: 7,
             inflatedPrefixBytes: 131,
-            assetTableOrderHash: 0x32e4_9114,
-            firstGfxWorldAssetIndex: 5,
+            assetTableOrderHash: 0xd354_ab59,
+            firstGfxWorldAssetIndex: 6,
             firstGfxWorldReference: 0xffff_ffff,
-            assetsBeforeFirstGfxWorld: 5,
+            assetsBeforeFirstGfxWorld: 6,
             referencesBeforeFirstGfxWorld: {
-                inline: 5,
+                inline: 6,
                 shared: 0,
                 alias: 0,
                 null: 0,
             },
             firstBodyType: 5,
             firstBodyReference: 0xffff_ffff,
-            nextBodyIndex: 4,
-            nextBodyType: 31,
+            nextBodyIndex: 5,
+            nextBodyType: 3,
             nextBodyReference: 0xffff_ffff,
             block0HighWaterAtBoundary: 352,
-            block4CursorAtBoundary: 950,
+            block4CursorAtBoundary: 1244,
             stoppedBeforeAssetBody: false,
-            assetBodiesEntered: 3,
-            completedAssetCount: 4,
+            assetBodiesEntered: 4,
+            completedAssetCount: 5,
             stoppedBeforeDifferentAssetType: false,
             stoppedBeforeTechniqueDependency: false,
             techniqueSets: [
@@ -453,6 +453,36 @@ test("publishes one retail material and binds its resolved image", async ({ page
                     identity: 7,
                     published: true,
                 },
+                {
+                    assetIndex: 4,
+                    name: ",web/mc_l_sm_r0c0n0s1",
+                    worldVertFormat: 0,
+                    remapReference: 0,
+                    block0Offset: 0,
+                    nameBlock4Offset: 950,
+                    boundaryInflatedOffset: 2687,
+                    firstTechniqueSlot: 0xffff_ffff,
+                    firstTechniqueReference: 0,
+                    references: { null: 34, inline: 0, shared: 0, alias: 0 },
+                    identity: 8,
+                    published: true,
+                },
+            ],
+            postXModelTechniqueSets: [
+                {
+                    assetIndex: 3,
+                    name: ",web/mc_l_sm_r0c0n0s0",
+                    identity: 7,
+                    published: true,
+                    source: "generated-loader-after-first-xmodel",
+                },
+                {
+                    assetIndex: 4,
+                    name: ",web/mc_l_sm_r0c0n0s1",
+                    identity: 8,
+                    published: true,
+                    source: "generated-loader-after-first-xmodel",
+                },
             ],
             postXModelTechniqueSet: {
                 assetIndex: 3,
@@ -461,6 +491,16 @@ test("publishes one retail material and binds its resolved image", async ({ page
                 published: true,
                 references: { null: 34, inline: 0, shared: 0, alias: 0 },
                 source: "generated-loader-after-first-xmodel",
+            },
+            postXModelTechniqueSetRun: {
+                firstAssetIndex: 3,
+                bodiesEntered: 2,
+                completedCount: 2,
+                nextBodyIndex: 5,
+                nextBodyType: 3,
+                nextBodyReference: 0xffff_ffff,
+                stoppedBeforeDifferentAssetType: false,
+                stoppedBeforeTechniqueDependency: false,
             },
             firstTechniqueSet: {
                 name: ",web/mc_l_sm_r0c0s0",
@@ -473,11 +513,11 @@ test("publishes one retail material and binds its resolved image", async ({ page
                 firstTechniqueReference: 0,
                 references: { null: 34, inline: 0, shared: 0, alias: 0 },
                 identity: 1,
-                registryAliasCount: 7,
-                registryDefinedAliasCount: 7,
+                registryAliasCount: 9,
+                registryDefinedAliasCount: 8,
                 published: true,
                 stoppedBeforeDependency: false,
-                unsupportedOperation: "",
+                unsupportedOperation: "Load_Material",
             },
             firstXModel: {
                 assetIndex: 2,
@@ -521,7 +561,7 @@ test("publishes one retail material and binds its resolved image", async ({ page
                 identity: 6,
                 stoppedBeforeSurfaceArray: false,
                 stoppedBeforeMaterialDependency: false,
-                unsupportedOperation: "",
+                unsupportedOperation: "Load_Material",
                 renderSurface: {
                     state: "ready",
                     surfaceIndex: 0,
@@ -618,17 +658,48 @@ test("publishes one retail material and binds its resolved image", async ({ page
                     traversed: true,
                 }],
             },
+            secondXModel: {
+                assetIndex: 5,
+                name: "web/xmodel_second",
+                numBones: 1,
+                numRootBones: 1,
+                surfaceCount: 3,
+                lodCount: 1,
+                headerTraversed: true,
+                skeletonPrefixTraversed: true,
+                surfaceHeadersTraversed: true,
+                surfaceDependenciesTraversed: true,
+                materialHandlesTraversed: true,
+                stoppedBeforeSurfaceArray: false,
+                stoppedBeforeMaterialDependency: true,
+                unsupportedOperation: "Load_Material",
+                totals: {
+                    vertices: 9,
+                    triangles: 3,
+                    rigidVertLists: 3,
+                    collisionNodes: 0,
+                    collisionLeaves: 0,
+                },
+                boneNames: [{
+                    index: 0,
+                    scriptStringIndex: 0,
+                    name: "tag_origin",
+                    classification: 0,
+                }],
+                materialReferences: [
+                    { index: 0, reference: 0xffff_ffff, identity: 0 },
+                    { index: 1, reference: 0xffff_ffff, identity: 0 },
+                    { index: 2, reference: 0xffff_ffff, identity: 0 },
+                ],
+            },
             typeCounts: [
-                { type: 3, name: "xmodel", count: 1 },
-                { type: 5, name: "techset", count: 3 },
+                { type: 3, name: "xmodel", count: 2 },
+                { type: 5, name: "techset", count: 4 },
                 { type: 16, name: "gfx_map", count: 1 },
-                { type: 31, name: "rawfile", count: 1 },
-                { type: 32, name: "stringtable", count: 1 },
             ],
             typesBeforeFirstGfxWorld: [
-                { type: 3, name: "xmodel", count: 1 },
-                { type: 5, name: "techset", count: 3 },
-                { type: 31, name: "rawfile", count: 1 },
+                { type: 3, name: "xmodel", count: 2 },
+                { type: 5, name: "techset", count: 4 },
             ],
         },
     });
@@ -1591,8 +1662,8 @@ test("an invalid later map technique-set header exposes no partial prefix", asyn
     expect(census.worldInventory).toBeUndefined();
 });
 
-test("publishes the first typed technique set after the XModel", async ({ page }, testInfo) => {
-    await importInstall(page, testInfo, "m30-post-xmodel-techset");
+test("publishes the consecutive typed technique-set run after the XModel", async ({ page }, testInfo) => {
+    await importInstall(page, testInfo, "m31-post-xmodel-techset-run");
     await expect.poll(
         () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
         { timeout: 30_000 },
@@ -1603,9 +1674,24 @@ test("publishes the first typed technique set after the XModel", async ({ page }
         ),
     );
     expect(world).toMatchObject({
-        completedAssetCount: 4,
-        nextBodyIndex: 4,
-        nextBodyType: 31,
+        completedAssetCount: 5,
+        nextBodyIndex: 5,
+        nextBodyType: 3,
+        stoppedBeforeDifferentAssetType: false,
+        postXModelTechniqueSets: [
+            {
+                assetIndex: 3,
+                name: ",web/mc_l_sm_r0c0n0s0",
+                identity: 7,
+                published: true,
+            },
+            {
+                assetIndex: 4,
+                name: ",web/mc_l_sm_r0c0n0s1",
+                identity: 8,
+                published: true,
+            },
+        ],
         postXModelTechniqueSet: {
             assetIndex: 3,
             name: ",web/mc_l_sm_r0c0n0s0",
@@ -1615,7 +1701,168 @@ test("publishes the first typed technique set after the XModel", async ({ page }
             published: true,
             source: "generated-loader-after-first-xmodel",
         },
+        postXModelTechniqueSetRun: {
+            firstAssetIndex: 3,
+            bodiesEntered: 2,
+            completedCount: 2,
+            nextBodyIndex: 5,
+            nextBodyType: 3,
+            stoppedBeforeDifferentAssetType: false,
+            stoppedBeforeTechniqueDependency: false,
+        },
         firstXModel: { assetIndex: 2, identity: 6, published: true },
+    });
+});
+
+test("traverses the second XModel surfaces without replacing or rendering it", async ({ page }, testInfo) => {
+    await importInstall(page, testInfo, "m33-second-xsurface-prefix");
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
+        { timeout: 30_000 },
+    ).toBe("ready");
+    const world = await page.evaluate(
+        () => structuredClone(
+            globalThis.__KISAKCOD_WEB__.retailCensus.worldInventory,
+        ),
+    );
+    expect(world).toMatchObject({
+        completedAssetCount: 5,
+        nextBodyIndex: 5,
+        nextBodyType: 3,
+        firstXModel: {
+            assetIndex: 2,
+            name: "web/xmodel_wall",
+            identity: 6,
+            published: true,
+            renderSurface: { state: "ready", geometrySource: "retail-xmodel" },
+        },
+        secondXModel: {
+            assetIndex: 5,
+            name: "web/xmodel_second",
+            numBones: 1,
+            numRootBones: 1,
+            surfaceCount: 3,
+            headerTraversed: true,
+            skeletonPrefixTraversed: true,
+            surfaceHeadersTraversed: true,
+            surfaceDependenciesTraversed: true,
+            materialHandlesTraversed: true,
+            stoppedBeforeSurfaceArray: false,
+            stoppedBeforeMaterialDependency: true,
+            unsupportedOperation: "Load_Material",
+            totals: { vertices: 9, triangles: 3, rigidVertLists: 3 },
+            boneNames: [{ name: "tag_origin", scriptStringIndex: 0 }],
+            materialReferences: [
+                { index: 0, reference: 0xffff_ffff, identity: 0 },
+                { index: 1, reference: 0xffff_ffff, identity: 0 },
+                { index: 2, reference: 0xffff_ffff, identity: 0 },
+            ],
+        },
+        firstTechniqueSet: {
+            registryAliasCount: 9,
+            registryDefinedAliasCount: 8,
+            unsupportedOperation: "Load_Material",
+        },
+    });
+    expect(world.secondXModel.surfaces).toHaveLength(3);
+    expect(world.secondXModel.surfaces).toEqual(
+        expect.arrayContaining([
+            expect.objectContaining({
+                vertCount: 3,
+                triCount: 1,
+                dependenciesTraversed: true,
+                rigidVertLists: [expect.objectContaining({
+                    vertCount: 3,
+                    triCount: 1,
+                })],
+            }),
+        ]),
+    );
+    expect(world.secondXModel.renderSurface).toBeUndefined();
+});
+
+test("invalid second-XSurface layout exposes no partial public result", async ({ page }, testInfo) => {
+    const overrides = new Map([[
+        "zone/english/killhouse.ff",
+        createSyntheticWorldInventoryFastfile({
+            invalidSecondXSurfaceLayout: true,
+        }),
+    ]]);
+    await importInstall(page, testInfo, "m33-invalid-second-xsurface", {
+        overrides,
+    });
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
+        { timeout: 30_000 },
+    ).toBe("failed");
+    const census = await page.evaluate(
+        () => structuredClone(globalThis.__KISAKCOD_WEB__.retailCensus),
+    );
+    expect(census).toMatchObject({
+        state: "failed",
+        path: "zone/english/killhouse.ff",
+        error: "unsupported XSurface layout",
+        completedAssetCount: 0,
+        failClosed: true,
+    });
+    expect(census.worldInventory).toBeUndefined();
+});
+
+test("invalid second-XModel bounds expose no partial public result", async ({ page }, testInfo) => {
+    const overrides = new Map([[
+        "zone/english/killhouse.ff",
+        createSyntheticWorldInventoryFastfile({ invalidSecondXModelBounds: true }),
+    ]]);
+    await importInstall(page, testInfo, "m32-invalid-second-xmodel", { overrides });
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
+        { timeout: 30_000 },
+    ).toBe("failed");
+    const census = await page.evaluate(
+        () => structuredClone(globalThis.__KISAKCOD_WEB__.retailCensus),
+    );
+    expect(census).toMatchObject({
+        state: "failed",
+        path: "zone/english/killhouse.ff",
+        error: "invalid XModel bounds",
+        completedAssetCount: 0,
+        failClosed: true,
+    });
+    expect(census.worldInventory).toBeUndefined();
+});
+
+test("an unsupported second-XModel skeleton dependency preserves the first model", async ({ page }, testInfo) => {
+    const overrides = new Map([[
+        "zone/english/killhouse.ff",
+        createSyntheticWorldInventoryFastfile({
+            unsupportedSecondXModelBoneNames: true,
+        }),
+    ]]);
+    await importInstall(page, testInfo, "m32-unsupported-second-xmodel", {
+        overrides,
+    });
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
+        { timeout: 30_000 },
+    ).toBe("ready");
+    const world = await page.evaluate(
+        () => structuredClone(
+            globalThis.__KISAKCOD_WEB__.retailCensus.worldInventory,
+        ),
+    );
+    expect(world).toMatchObject({
+        firstXModel: { identity: 6, published: true },
+        secondXModel: {
+            assetIndex: 5,
+            headerTraversed: true,
+            skeletonPrefixTraversed: false,
+            unsupportedOperation: "Load_ScriptStringArray",
+        },
+        firstTechniqueSet: {
+            registryAliasCount: 9,
+            registryDefinedAliasCount: 8,
+            unsupportedOperation: "Load_ScriptStringArray",
+        },
     });
 });
 
@@ -1625,6 +1872,34 @@ test("a malformed post-XModel technique set fails without publishing the prior p
         createSyntheticWorldInventoryFastfile({ invalidPostXModelTechniqueSet: true }),
     ]]);
     await importInstall(page, testInfo, "m30-invalid-post-xmodel-techset", { overrides });
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
+        { timeout: 30_000 },
+    ).toBe("failed");
+    const census = await page.evaluate(
+        () => structuredClone(globalThis.__KISAKCOD_WEB__.retailCensus),
+    );
+    expect(census).toMatchObject({
+        state: "failed",
+        path: "zone/english/killhouse.ff",
+        stage: "failed",
+        error: "unsupported technique-set layout",
+        completedAssetCount: 0,
+        failClosed: true,
+    });
+    expect(census.worldInventory).toBeUndefined();
+});
+
+test("a malformed later post-XModel technique set exposes no partial run", async ({ page }, testInfo) => {
+    const overrides = new Map([[
+        "zone/english/killhouse.ff",
+        createSyntheticWorldInventoryFastfile({
+            invalidLaterPostXModelTechniqueSet: true,
+        }),
+    ]]);
+    await importInstall(page, testInfo, "m31-invalid-later-post-xmodel-techset", {
+        overrides,
+    });
     await expect.poll(
         () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
         { timeout: 30_000 },
@@ -1673,6 +1948,61 @@ test("a dependent post-XModel technique set stops before its nested technique", 
             published: false,
             firstTechniqueSlot: 4,
             references: { null: 33, inline: 1, shared: 0, alias: 0 },
+        },
+        firstXModel: { identity: 6, published: true },
+    });
+});
+
+test("a later dependent post-XModel set preserves the published run prefix", async ({ page }, testInfo) => {
+    const overrides = new Map([[
+        "zone/english/killhouse.ff",
+        createSyntheticWorldInventoryFastfile({
+            laterPostXModelTechniqueDependency: true,
+        }),
+    ]]);
+    await importInstall(page, testInfo, "m31-dependent-later-post-xmodel-techset", {
+        overrides,
+    });
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
+        { timeout: 30_000 },
+    ).toBe("ready");
+    const world = await page.evaluate(
+        () => structuredClone(
+            globalThis.__KISAKCOD_WEB__.retailCensus.worldInventory,
+        ),
+    );
+    expect(world).toMatchObject({
+        completedAssetCount: 4,
+        nextBodyIndex: 4,
+        nextBodyType: 5,
+        postXModelTechniqueSetRun: {
+            firstAssetIndex: 3,
+            bodiesEntered: 2,
+            completedCount: 1,
+            nextBodyIndex: 4,
+            nextBodyType: 5,
+            stoppedBeforeDifferentAssetType: false,
+            stoppedBeforeTechniqueDependency: true,
+        },
+        postXModelTechniqueSets: [
+            {
+                assetIndex: 3,
+                identity: 7,
+                published: true,
+            },
+            {
+                assetIndex: 4,
+                identity: 0,
+                published: false,
+                firstTechniqueSlot: 7,
+                references: { null: 33, inline: 1, shared: 0, alias: 0 },
+            },
+        ],
+        firstTechniqueSet: {
+            registryAliasCount: 8,
+            registryDefinedAliasCount: 7,
+            unsupportedOperation: "Load_MaterialTechnique",
         },
         firstXModel: { identity: 6, published: true },
     });

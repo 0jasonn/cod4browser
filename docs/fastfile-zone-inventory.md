@@ -1123,3 +1123,87 @@ unwind succeed. A malformed record makes the whole result unavailable. A
 synthetic set with one inline dependency stops before `Load_MaterialTechnique`,
 preserving the published XModel but leaving the asset-13 alias undefined. No
 retail body bytes or derived asset payload are stored in the repository.
+
+## Milestone 31 consecutive post-XModel technique sets (complete)
+
+The generated loader now continues from the M30 asset-13 publication through
+the consecutive inline type-5 run. Every set uses the existing bounded header,
+name, pointer classification, zone-stack unwind, registry, and alias rules.
+Publication remains per-body and atomic; a malformed later header makes the
+whole result unavailable, while a supported earlier set remains published when
+the next set stops before a nested `MaterialTechnique`.
+
+The read-only owned profile records this exact run:
+
+| Boundary field | Owned F.N.G. value |
+| --- | --- |
+| Asset range | 13–20 |
+| Bodies entered/completed | 8 / 8 |
+| Identities | 20–27 |
+| Final set | `,mc_l_hsm_r0c0n0s0` |
+| Final inflated boundary | 69,063 |
+| Block-0 high-water | 352 |
+| Block-4 cursor | 38,268 |
+| Registry publication | 27 aliases reserved; 27 defined |
+| Next body | inline `XModel` at asset index 21 |
+
+The eight names and body boundaries are recorded in `docs/web-port.md`. No
+asset-21 bytes are interpreted, no second XModel is retained or rendered, and
+no proprietary byte is added to source or fixtures.
+
+## Milestone 32 second retail XModel boundary (complete)
+
+The generated loader now enters inline type-3 asset 21 after completing the M31
+run. A distinct result record owns the second model's fixed header, bounded
+name, bone script-string resolutions, classification bytes, and base matrices;
+the published first XModel record is never reused or reset.
+
+| Boundary field | Owned F.N.G. value |
+| --- | --- |
+| Asset index / type | 21 / inline `xmodel` |
+| Name | `com_steel_ladder` |
+| Bones / roots | 1 / 1 |
+| Surfaces / LODs | 3 / 3 |
+| Collision surfaces | 1 |
+| Radius | approximately 200.696 |
+| Memory usage | 24,551 bytes |
+| Inflated boundary | 69,335 |
+| Name block-4 offset / final cursor | 38,268 / 38,324 |
+| Registry publication | 28 aliases reserved; 27 defined |
+| Stop | before `Load_XSurfaceArray` |
+
+The asset-21 alias remains undefined, no surface payload is consumed, and the
+first model retains identity 19 and its existing renderer-owned draw list. The
+repository contains only generated fixtures and metadata assertions, never
+owned model bytes.
+
+## Milestone 33 second retail XSurface prefix (complete)
+
+The generated loader now continues asset 21 through the shared XSurface stages
+without changing the first model's renderer publication.
+
+| Boundary field | Owned F.N.G. value |
+| --- | --- |
+| Asset index / name | 21 / `com_steel_ladder` |
+| Surface records | 3 / 3 traversed |
+| Vertices / triangles | 750 / 488 |
+| Rigid lists | 3 |
+| Surface payload | 28,236 bytes |
+| Per-surface vertices | 422, 200, 128 |
+| Per-surface triangles | 296, 128, 64 |
+| Material handles | 3 (`inline`, alias, alias) |
+| Inflated boundary | 97,571 |
+| Block-4 cursor | 39,644 |
+| Registry publication | 28 aliases reserved; 27 defined |
+| Stop | before `Load_Material` |
+
+Each packed vertex and index range is bounded and hashed as traversal evidence;
+none is retained as a renderer payload. The first material body and every later
+collision, bone-info, and physics dependency remain untouched. A freely
+generated three-surface fixture exercises the same ordering, and a mismatched
+second-surface pointer/count pair fails without exposing a partial result.
+
+This is shared XModel parser work, not a model viewer. The next boundary is to
+reuse the checked material and remaining dependency stages for the active model
+so asset 21 can publish, then turn the top-level XModel handling into a
+repeatable loader for the models that precede `GfxWorld`.
