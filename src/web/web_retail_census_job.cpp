@@ -2,6 +2,7 @@
 
 #include <web/web_filesystem.h>
 #include <web/web_engine_asset.h>
+#include <web/web_engine_xmodel_surface.h>
 #include <web/web_retail_fastfile_census.h>
 #include <web/web_renderer.h>
 #include <web/web_shader_compatibility.h>
@@ -10,6 +11,7 @@
 #include <emscripten.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <span>
@@ -60,6 +62,20 @@ struct RetailCensusRuntime
 
 RetailCensusRuntime g_runtime;
 
+struct RetailRenderSurfacePublication
+{
+    const char *state = "fallback";
+    const char *message = "No bounded retail XModel surface was available";
+    std::uint32_t surfaceIndex = 0u;
+    std::uint32_t materialIdentity = 0u;
+    std::uint32_t vertexCount = 0u;
+    std::uint32_t triangleCount = 0u;
+    std::uint8_t horizontalAxis = 0u;
+    std::uint8_t verticalAxis = 1u;
+    std::array<float, 3> mins{};
+    std::array<float, 3> maxs{};
+};
+
 const char *CurrentPath() noexcept
 {
     return g_runtime.dataset == Dataset::CodePostGfx
@@ -69,7 +85,7 @@ const char *CurrentPath() noexcept
 const char *CurrentTraversal() noexcept
 {
     return g_runtime.dataset == Dataset::CodePostGfx
-        ? "two-techsets-one-material" : "world-xsurface-prefix";
+        ? "two-techsets-one-material" : "world-xmodel-dependencies";
 }
 
 EM_JS(void, DispatchRetailCensusLoading,
@@ -698,13 +714,194 @@ EM_JS(
 EM_JS(
     void,
     AppendRetailWorldXModelMaterialReference,
-    (uint32_t index, uint32_t reference),
+    (uint32_t index, uint32_t reference, uint32_t identity),
     {
         const model = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory?.firstXModel;
         if (!model) return;
         model.materialReferences.push({
             index: index >>> 0,
             reference: reference >>> 0,
+            identity: identity >>> 0,
+        });
+    });
+
+EM_JS(
+    void,
+    CompleteRetailWorldXModelDependencies,
+    (uint32_t identity, uint32_t collisionSurfacesBlock4Offset,
+     uint32_t boneInfoBlock4Offset, uint32_t collisionTriangleCount,
+     uint32_t collisionPayloadBytes, uint32_t boneInfoHash,
+     int materialsTraversed, int collisionSurfacesTraversed,
+     int boneInfoTraversed, int physPresetTraversed,
+     int physGeomsTraversed, int published),
+    {
+        const model = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__
+            ?.worldInventory?.firstXModel;
+        if (!model) return;
+        model.identity = identity >>> 0;
+        model.offsets.collisionSurfacesBlock4 = collisionSurfacesBlock4Offset >>> 0;
+        model.offsets.boneInfoBlock4 = boneInfoBlock4Offset >>> 0;
+        model.totals.collisionTriangles = collisionTriangleCount >>> 0;
+        model.totals.collisionPayloadBytes = collisionPayloadBytes >>> 0;
+        model.boneInfoHash = boneInfoHash >>> 0;
+        model.materialsTraversed = Boolean(materialsTraversed);
+        model.collisionSurfacesTraversed = Boolean(collisionSurfacesTraversed);
+        model.boneInfoTraversed = Boolean(boneInfoTraversed);
+        model.physPresetTraversed = Boolean(physPresetTraversed);
+        model.physGeomsTraversed = Boolean(physGeomsTraversed);
+        model.published = Boolean(published);
+        model.materials = [];
+        model.collisionSurfaces = [];
+    });
+
+EM_JS(
+    void,
+    AppendRetailWorldXModelRenderSurface,
+    (const char *state, const char *message, uint32_t surfaceIndex,
+     uint32_t materialIdentity, uint32_t vertexCount, uint32_t triangleCount,
+     uint32_t horizontalAxis, uint32_t verticalAxis,
+     double minX, double minY, double minZ,
+     double maxX, double maxY, double maxZ),
+    {
+        const model = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__
+            ?.worldInventory?.firstXModel;
+        if (!model) return;
+        model.renderSurface = {
+            state: UTF8ToString(state),
+            message: UTF8ToString(message),
+            surfaceIndex: surfaceIndex >>> 0,
+            materialIdentity: materialIdentity >>> 0,
+            vertexCount: vertexCount >>> 0,
+            triangleCount: triangleCount >>> 0,
+            projection: "largest-axes-orthographic-fit",
+            horizontalAxis: horizontalAxis >>> 0,
+            verticalAxis: verticalAxis >>> 0,
+            mins: [minX, minY, minZ],
+            maxs: [maxX, maxY, maxZ],
+            geometrySource: "retail-xmodel",
+            fallbackPreserved: UTF8ToString(state) !== "ready",
+        };
+    });
+
+EM_JS(
+    void,
+    AppendRetailWorldXModelMaterial,
+    (uint32_t handleIndex, const char *name, uint32_t techniqueSetReference,
+     uint32_t techniqueSetIdentity, uint32_t textureCount,
+     uint32_t constantCount, uint32_t stateBitsCount,
+     uint32_t headerBlock0Offset, uint32_t nameBlock4Offset,
+     uint32_t textureTableBlock4Offset, uint32_t constantTableBlock4Offset,
+     uint32_t stateBitsTableBlock4Offset, uint32_t constantsHash,
+     uint32_t stateBitsHash, uint32_t identity, int published),
+    {
+        const model = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__
+            ?.worldInventory?.firstXModel;
+        if (!model) return;
+        model.materials.push({
+            handleIndex: handleIndex >>> 0,
+            name: UTF8ToString(name),
+            techniqueSetReference: techniqueSetReference >>> 0,
+            techniqueSetIdentity: techniqueSetIdentity >>> 0,
+            textureCount: textureCount >>> 0,
+            constantCount: constantCount >>> 0,
+            stateBitsCount: stateBitsCount >>> 0,
+            offsets: {
+                headerBlock0: headerBlock0Offset >>> 0,
+                nameBlock4: nameBlock4Offset >>> 0,
+                textureTableBlock4: textureTableBlock4Offset >>> 0,
+                constantTableBlock4: constantTableBlock4Offset >>> 0,
+                stateBitsTableBlock4: stateBitsTableBlock4Offset >>> 0,
+            },
+            constantsHash: constantsHash >>> 0,
+            stateBitsHash: stateBitsHash >>> 0,
+            identity: identity >>> 0,
+            published: Boolean(published),
+            textures: [],
+            images: [],
+        });
+    });
+
+EM_JS(
+    void,
+    AppendRetailWorldXModelMaterialTexture,
+    (uint32_t materialIndex, uint32_t index, uint32_t nameHash,
+     uint32_t nameStart, uint32_t nameEnd, uint32_t samplerState,
+     uint32_t semantic, uint32_t imageReference,
+     uint32_t imageIdentity, int resolved),
+    {
+        const material = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__
+            ?.worldInventory?.firstXModel?.materials?.[materialIndex >>> 0];
+        if (!material) return;
+        material.textures.push({
+            index: index >>> 0,
+            nameHash: nameHash >>> 0,
+            nameStart: nameStart >>> 0,
+            nameEnd: nameEnd >>> 0,
+            samplerState: samplerState >>> 0,
+            semantic: semantic >>> 0,
+            imageReference: imageReference >>> 0,
+            imageIdentity: imageIdentity >>> 0,
+            resolved: Boolean(resolved),
+        });
+    });
+
+EM_JS(
+    void,
+    AppendRetailWorldXModelImage,
+    (uint32_t materialIndex, uint32_t textureIndex, const char *name,
+     uint32_t mapType, uint32_t textureReference, uint32_t width,
+     uint32_t height, uint32_t depth, uint32_t format,
+     uint32_t resourceBytes, uint32_t headerBlock0Offset,
+     uint32_t nameBlock4Offset, uint32_t loadDefBlock0Offset,
+     uint32_t identity, int loadDefTraversed, int published),
+    {
+        const material = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__
+            ?.worldInventory?.firstXModel?.materials?.[materialIndex >>> 0];
+        if (!material) return;
+        material.images.push({
+            textureIndex: textureIndex >>> 0,
+            name: UTF8ToString(name),
+            mapType: mapType >>> 0,
+            textureReference: textureReference >>> 0,
+            dimensions: [width >>> 0, height >>> 0, depth >>> 0],
+            format: format >>> 0,
+            resourceBytes: resourceBytes >>> 0,
+            offsets: {
+                headerBlock0: headerBlock0Offset >>> 0,
+                nameBlock4: nameBlock4Offset >>> 0,
+                loadDefBlock0: loadDefBlock0Offset >>> 0,
+            },
+            identity: identity >>> 0,
+            loadDefTraversed: Boolean(loadDefTraversed),
+            published: Boolean(published),
+        });
+    });
+
+EM_JS(
+    void,
+    AppendRetailWorldXModelCollisionSurface,
+    (uint32_t index, uint32_t trianglesReference, uint32_t triangleCount,
+     double minX, double minY, double minZ,
+     double maxX, double maxY, double maxZ,
+     int32_t boneIndex, int32_t contents, int32_t surfaceFlags,
+     uint32_t trianglesBlock4Offset, uint32_t trianglesHash,
+     int traversed),
+    {
+        const model = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__
+            ?.worldInventory?.firstXModel;
+        if (!model) return;
+        model.collisionSurfaces.push({
+            index: index >>> 0,
+            trianglesReference: trianglesReference >>> 0,
+            triangleCount: triangleCount >>> 0,
+            mins: [minX, minY, minZ],
+            maxs: [maxX, maxY, maxZ],
+            boneIndex,
+            contents,
+            surfaceFlags,
+            trianglesBlock4Offset: trianglesBlock4Offset >>> 0,
+            trianglesHash: trianglesHash >>> 0,
+            traversed: Boolean(traversed),
         });
     });
 
@@ -863,6 +1060,111 @@ void Fail(const char *context, const char *reason)
     Web_Log(WebLogLevel::Error, "[kisakcod-web] Retail fastfile census failed: %s\n", message);
 }
 
+RetailRenderSurfacePublication PublishRetailXModelSurface(bool shaderReady)
+{
+    RetailRenderSurfacePublication publication;
+    const auto &model = g_runtime.worldInventory.worldFirstXModel;
+    if (!shaderReady)
+    {
+        publication.message =
+            "The retail shader binding was unavailable; the bootstrap surface remains active";
+        return publication;
+    }
+    if (!model.published || model.surfaces.empty() ||
+        model.materialIdentities.empty())
+    {
+        publication.message =
+            "The first XModel dependency chain was not fully published";
+        return publication;
+    }
+
+    const auto &surface = model.surfaces.front();
+    publication.surfaceIndex = surface.index;
+    publication.vertexCount = surface.vertCount;
+    publication.triangleCount = surface.triCount;
+    publication.materialIdentity = model.materialIdentities.front();
+    const bool materialResolved = publication.materialIdentity != 0u &&
+        std::any_of(model.materials.begin(), model.materials.end(),
+            [&](const kisak::fastfile::RetailXModelMaterial &material) {
+                return material.identity == publication.materialIdentity && material.published;
+            });
+    if (!surface.renderPayloadRetained ||
+        surface.retainedPackedVertices.empty() ||
+        surface.retainedPackedIndices.empty())
+    {
+        publication.message =
+            "The first XSurface was not available within the bounded render-retention slice";
+        return publication;
+    }
+    if (!materialResolved)
+    {
+        publication.message =
+            "The first XSurface material alias did not resolve to a published material";
+        return publication;
+    }
+
+    const WebEnginePackedXSurfaceView view{
+        surface.retainedPackedVertices.data(),
+        surface.retainedPackedVertices.size(),
+        surface.vertCount,
+        surface.retainedPackedIndices.data(),
+        surface.retainedPackedIndices.size(),
+        surface.triCount,
+        publication.materialIdentity,
+    };
+    WebEngineConvertedXModelSurface converted;
+    const WebEngineXModelSurfaceResult conversion =
+        WebEngine_ConvertPackedXModelSurface(view, converted);
+    if (conversion != WebEngineXModelSurfaceResult::Success)
+    {
+        publication.message = WebEngine_XModelSurfaceResultString(conversion);
+        Web_Log(
+            WebLogLevel::Info,
+            "[kisakcod-web] Retail XModel surface conversion skipped: %s; "
+            "the bootstrap surface remains active.\n",
+            publication.message);
+        return publication;
+    }
+
+    const auto &rendererSurface = converted.rendererSurface;
+    const WebRendererSurfaceDesc descriptor{
+        rendererSurface.vertices.data(),
+        static_cast<std::uint32_t>(rendererSurface.vertices.size()),
+        rendererSurface.indices.data(),
+        static_cast<std::uint32_t>(rendererSurface.indices.size()),
+    };
+    const WebRendererSurfaceResult submission =
+        WebRenderer_SetSurface(descriptor, rendererSurface.draw);
+    if (submission != WebRendererSurfaceResult::Success)
+    {
+        publication.message = WebRenderer_SurfaceResultString(submission);
+        Web_Log(
+            WebLogLevel::Info,
+            "[kisakcod-web] Retail XModel surface upload skipped: %s; "
+            "the bootstrap surface remains active.\n",
+            publication.message);
+        return publication;
+    }
+
+    publication.state = "ready";
+    publication.message =
+        "One user-owned retail XModel surface is resident through the WebGL2 renderer seam";
+    publication.mins = converted.mins;
+    publication.maxs = converted.maxs;
+    publication.horizontalAxis = converted.horizontalAxis;
+    publication.verticalAxis = converted.verticalAxis;
+    Web_Log(
+        WebLogLevel::Info,
+        "[kisakcod-web] Published retail XModel '%s' surface %u "
+        "(%u vertices, %u triangles, material identity %u).\n",
+        model.name.c_str(),
+        publication.surfaceIndex,
+        publication.vertexCount,
+        publication.triangleCount,
+        publication.materialIdentity);
+    return publication;
+}
+
 void PublishReady()
 {
     const auto &result = g_runtime.result;
@@ -876,6 +1178,7 @@ void PublishReady()
         Fail("could not publish retail material", "material image binding was rejected");
         return;
     }
+    bool shaderReady = false;
     kisak::web::WebGL2ShaderSubstitution substitution;
     if (!kisak::web::LookupWebGL2ShaderSubstitution(
             result.shaderSubstitutionId, substitution) ||
@@ -898,7 +1201,13 @@ void PublishReady()
                 substitution.id,
                 WebRenderer_ShaderResultString(shaderResult));
         }
+        else
+        {
+            shaderReady = true;
+        }
     }
+    const RetailRenderSurfacePublication renderSurface =
+        PublishRetailXModelSurface(shaderReady);
     BeginRetailCensusReady(
         g_runtime.generation,
         g_runtime.codePostFileSize,
@@ -1035,7 +1344,7 @@ void PublishReady()
         world.worldRegistryDefinedAliasCount,
         world.worldFirstTechniqueSetPublished ? 1 : 0,
         world.stoppedBeforeWorldTechniqueDependency ? 1 : 0,
-        world.unsupportedOperation ? world.unsupportedOperation : "unknown");
+        world.unsupportedOperation ? world.unsupportedOperation : "");
     for (const auto &techniqueSet : world.worldTechniqueSets)
     {
         AppendRetailWorldTechniqueSet(
@@ -1111,7 +1420,31 @@ void PublishReady()
             xmodel.materialHandlesTraversed ? 1 : 0,
             xmodel.stoppedBeforeSurfaceArray ? 1 : 0,
             xmodel.stoppedBeforeMaterialDependency ? 1 : 0,
-            world.unsupportedOperation ? world.unsupportedOperation : "unknown");
+            world.unsupportedOperation ? world.unsupportedOperation : "");
+        CompleteRetailWorldXModelDependencies(
+            xmodel.identity,
+            xmodel.collisionSurfacesBlock4Offset,
+            xmodel.boneInfoBlock4Offset,
+            xmodel.collisionTriangleCount,
+            xmodel.collisionPayloadBytes,
+            xmodel.boneInfoHash,
+            xmodel.materialsTraversed ? 1 : 0,
+            xmodel.collisionSurfacesTraversed ? 1 : 0,
+            xmodel.boneInfoTraversed ? 1 : 0,
+            xmodel.physPresetTraversed ? 1 : 0,
+            xmodel.physGeomsTraversed ? 1 : 0,
+            xmodel.published ? 1 : 0);
+        AppendRetailWorldXModelRenderSurface(
+            renderSurface.state,
+            renderSurface.message,
+            renderSurface.surfaceIndex,
+            renderSurface.materialIdentity,
+            renderSurface.vertexCount,
+            renderSurface.triangleCount,
+            renderSurface.horizontalAxis,
+            renderSurface.verticalAxis,
+            renderSurface.mins[0], renderSurface.mins[1], renderSurface.mins[2],
+            renderSurface.maxs[0], renderSurface.maxs[1], renderSurface.maxs[2]);
         for (std::size_t index = 0u; index < xmodel.lods.size(); ++index)
         {
             const auto &lod = xmodel.lods[index];
@@ -1189,7 +1522,82 @@ void PublishReady()
         {
             AppendRetailWorldXModelMaterialReference(
                 static_cast<std::uint32_t>(index),
-                xmodel.materialReferences[index]);
+                xmodel.materialReferences[index],
+                index < xmodel.materialIdentities.size()
+                    ? xmodel.materialIdentities[index] : 0u);
+        }
+        for (std::size_t materialIndex = 0u;
+             materialIndex < xmodel.materials.size(); ++materialIndex)
+        {
+            const auto &material = xmodel.materials[materialIndex];
+            AppendRetailWorldXModelMaterial(
+                material.handleIndex,
+                material.name.c_str(),
+                material.techniqueSetReference,
+                material.techniqueSetIdentity,
+                material.textureCount,
+                material.constantCount,
+                material.stateBitsCount,
+                material.headerBlock0Offset,
+                material.nameBlock4Offset,
+                material.textureTableBlock4Offset,
+                material.constantTableBlock4Offset,
+                material.stateBitsTableBlock4Offset,
+                material.constantsHash,
+                material.stateBitsHash,
+                material.identity,
+                material.published ? 1 : 0);
+            for (std::size_t textureIndex = 0u;
+                 textureIndex < material.textures.size(); ++textureIndex)
+            {
+                const auto &texture = material.textures[textureIndex];
+                AppendRetailWorldXModelMaterialTexture(
+                    static_cast<std::uint32_t>(materialIndex),
+                    static_cast<std::uint32_t>(textureIndex),
+                    texture.nameHash,
+                    texture.nameStart,
+                    texture.nameEnd,
+                    texture.samplerState,
+                    texture.semantic,
+                    texture.imageReference,
+                    texture.imageIdentity,
+                    texture.resolved ? 1 : 0);
+            }
+            for (const auto &image : material.images)
+            {
+                AppendRetailWorldXModelImage(
+                    static_cast<std::uint32_t>(materialIndex),
+                    image.textureIndex,
+                    image.name.c_str(),
+                    image.mapType,
+                    image.textureReference,
+                    image.width,
+                    image.height,
+                    image.depth,
+                    image.format,
+                    image.resourceBytes,
+                    image.headerBlock0Offset,
+                    image.nameBlock4Offset,
+                    image.loadDefBlock0Offset,
+                    image.identity,
+                    image.loadDefTraversed ? 1 : 0,
+                    image.published ? 1 : 0);
+            }
+        }
+        for (const auto &surface : xmodel.collisionSurfaces)
+        {
+            AppendRetailWorldXModelCollisionSurface(
+                surface.index,
+                surface.trianglesReference,
+                surface.triangleCount,
+                surface.mins[0], surface.mins[1], surface.mins[2],
+                surface.maxs[0], surface.maxs[1], surface.maxs[2],
+                surface.boneIndex,
+                surface.contents,
+                surface.surfaceFlags,
+                surface.trianglesBlock4Offset,
+                surface.trianglesHash,
+                surface.traversed ? 1 : 0);
         }
     }
     for (std::uint32_t type = 0u; type < world.typeCounts.size(); ++type)
@@ -1379,7 +1787,7 @@ WebRetailCensusFrameResult WebRetailCensusJob_Frame()
                 g_runtime.completionStatus = WebFsStatus::Pending;
                 g_runtime.completionBytes.clear();
                 if (const auto error = g_runtime.parser.BeginStreaming(
-                        RetailCensusMode::WorldXSurfacePrefix);
+                        RetailCensusMode::WorldXModelDependencies);
                     error != RetailCensusError::None)
                 {
                     Fail("could not start world asset inventory", RetailCensusErrorString(error));

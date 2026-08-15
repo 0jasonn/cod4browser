@@ -33,6 +33,8 @@ struct RetailCensusLimits
     std::uint32_t maxImageNameBytes = 255u;
     std::uint32_t maxMaterialTextures = 8u;
     std::uint32_t maxImageResourceBytes = 4u * 1024u * 1024u;
+    std::uint32_t maxMaterialConstants = 64u;
+    std::uint32_t maxMaterialStateBits = 64u;
     std::uint32_t maxXModelNameBytes = 255u;
     std::uint32_t maxXModelCollisionSurfaces = 4096u;
     std::uint32_t maxXModelSurfaceVertices = 1024u * 1024u;
@@ -41,6 +43,8 @@ struct RetailCensusLimits
     std::uint32_t maxXModelCollisionNodes = 1024u * 1024u;
     std::uint32_t maxXModelCollisionLeaves = 1024u * 1024u;
     std::uint32_t maxXModelSurfacePayloadBytes = 64u * 1024u * 1024u;
+    std::uint32_t maxXModelCollisionTriangles = 1024u * 1024u;
+    std::uint32_t maxXModelCollisionPayloadBytes = 64u * 1024u * 1024u;
 };
 
 enum class RetailCensusError : std::uint8_t
@@ -122,6 +126,11 @@ enum class RetailCensusError : std::uint8_t
     XSurfaceCountInvalid,
     XSurfacePayloadLimit,
     XSurfaceCollisionInvalid,
+    XModelMaterialAliasInvalid,
+    XModelCollisionInvalid,
+    XModelCollisionPayloadLimit,
+    XModelBoneInfoInvalid,
+    XModelPhysicsUnsupported,
     AllocationFailed,
 };
 
@@ -144,6 +153,7 @@ enum class RetailCensusMode : std::uint8_t
     WorldFirstTechniqueSet = WorldTechniqueSetPrefix,
     WorldXModelPrefix,
     WorldXSurfacePrefix,
+    WorldXModelDependencies,
 };
 
 enum class RetailCensusStage : std::uint8_t
@@ -207,6 +217,20 @@ enum class RetailCensusStage : std::uint8_t
     WorldXModelSurfaceCollisionLeaves,
     WorldXModelSurfaceIndices,
     WorldXModelMaterialHandles,
+    WorldXModelMaterial,
+    WorldXModelMaterialName,
+    WorldXModelMaterialTextures,
+    WorldXModelImage,
+    WorldXModelImageName,
+    WorldXModelImageLoadDef,
+    WorldXModelImageResource,
+    WorldXModelMaterialConstants,
+    WorldXModelMaterialStateBits,
+    WorldXModelCollisionSurfaces,
+    WorldXModelCollisionTriangles,
+    WorldXModelBoneInfo,
+    WorldXModelPhysPreset,
+    WorldXModelPhysGeoms,
     AssetBoundary,
     Failed,
 };
@@ -311,8 +335,82 @@ struct RetailXSurface
     std::uint32_t indicesBlock8Offset = 0u;
     std::uint32_t verticesHash = 2166136261u;
     std::uint32_t indicesHash = 2166136261u;
+    // M27 retains only the deliberately bounded first surface. These remain
+    // serialized bytes until the engine-side packed-vertex converter validates
+    // the complete model and its selected material dependency.
+    std::vector<std::uint8_t> retainedPackedVertices;
+    std::vector<std::uint8_t> retainedPackedIndices;
     std::vector<RetailXRigidVertList> rigidVertLists;
+    bool renderPayloadRetained = false;
     bool dependenciesTraversed = false;
+};
+
+struct RetailXModelImage
+{
+    std::uint32_t textureIndex = 0u;
+    std::string name;
+    std::uint32_t mapType = 0u;
+    std::uint32_t textureReference = 0u;
+    std::uint16_t width = 0u;
+    std::uint16_t height = 0u;
+    std::uint16_t depth = 0u;
+    std::uint32_t format = 0u;
+    std::uint32_t resourceBytes = 0u;
+    std::uint32_t headerBlock0Offset = 0u;
+    std::uint32_t nameBlock4Offset = 0u;
+    std::uint32_t loadDefBlock0Offset = 0u;
+    std::uint32_t identity = 0u;
+    bool loadDefTraversed = false;
+    bool published = false;
+};
+
+struct RetailXModelMaterialTexture
+{
+    std::uint32_t nameHash = 0u;
+    std::uint8_t nameStart = 0u;
+    std::uint8_t nameEnd = 0u;
+    std::uint8_t samplerState = 0u;
+    std::uint8_t semantic = 0u;
+    std::uint32_t imageReference = 0u;
+    std::uint32_t imageIdentity = 0u;
+    bool resolved = false;
+};
+
+struct RetailXModelMaterial
+{
+    std::uint32_t handleIndex = 0u;
+    std::string name;
+    std::uint32_t techniqueSetReference = 0u;
+    std::uint32_t techniqueSetIdentity = 0u;
+    std::uint8_t textureCount = 0u;
+    std::uint8_t constantCount = 0u;
+    std::uint8_t stateBitsCount = 0u;
+    std::uint32_t headerBlock0Offset = 0u;
+    std::uint32_t nameBlock4Offset = 0u;
+    std::uint32_t textureTableBlock4Offset = 0u;
+    std::uint32_t constantTableBlock4Offset = 0u;
+    std::uint32_t stateBitsTableBlock4Offset = 0u;
+    std::uint32_t constantsHash = 2166136261u;
+    std::uint32_t stateBitsHash = 2166136261u;
+    std::uint32_t identity = 0u;
+    std::vector<RetailXModelMaterialTexture> textures;
+    std::vector<RetailXModelImage> images;
+    bool published = false;
+};
+
+struct RetailXModelCollisionSurface
+{
+    std::uint32_t index = 0u;
+    std::uint32_t trianglesReference = 0u;
+    std::uint32_t triangleCount = 0u;
+    std::array<float, 3> mins{};
+    std::array<float, 3> maxs{};
+    std::int32_t boneIndex = 0;
+    std::int32_t contents = 0;
+    std::int32_t surfaceFlags = 0;
+    std::uint32_t trianglesBlock4Offset = 0u;
+    std::uint32_t trianglesHash = 2166136261u;
+    bool traversed = false;
 };
 
 struct RetailWorldXModel
@@ -352,6 +450,9 @@ struct RetailWorldXModel
     std::vector<std::uint8_t> partClassification;
     std::vector<RetailXSurface> surfaces;
     std::vector<std::uint32_t> materialReferences;
+    std::vector<std::uint32_t> materialIdentities;
+    std::vector<RetailXModelMaterial> materials;
+    std::vector<RetailXModelCollisionSurface> collisionSurfaces;
     std::uint32_t totalVertices = 0u;
     std::uint32_t totalTriangles = 0u;
     std::uint32_t totalRigidVertLists = 0u;
@@ -368,12 +469,24 @@ struct RetailWorldXModel
     std::uint32_t baseMatBlock4Offset = 0u;
     std::uint32_t surfacesBlock4Offset = 0u;
     std::uint32_t materialHandlesBlock4Offset = 0u;
+    std::uint32_t collisionSurfacesBlock4Offset = 0u;
+    std::uint32_t boneInfoBlock4Offset = 0u;
+    std::uint32_t collisionTriangleCount = 0u;
+    std::uint32_t collisionPayloadBytes = 0u;
+    std::uint32_t boneInfoHash = 2166136261u;
+    std::uint32_t identity = 0u;
     std::uint32_t boundaryInflatedOffset = 0u;
     bool headerTraversed = false;
     bool skeletonPrefixTraversed = false;
     bool surfaceHeadersTraversed = false;
     bool surfaceDependenciesTraversed = false;
     bool materialHandlesTraversed = false;
+    bool materialsTraversed = false;
+    bool collisionSurfacesTraversed = false;
+    bool boneInfoTraversed = false;
+    bool physPresetTraversed = false;
+    bool physGeomsTraversed = false;
+    bool published = false;
     bool stoppedBeforeSurfaceArray = false;
     bool stoppedBeforeMaterialDependency = false;
 };
@@ -523,6 +636,11 @@ struct RetailFastfileCensus
 // header and bounded skeleton prefix, then stops before XSurface traversal.
 // WorldXSurfacePrefix additionally walks bounded surface, rigid-list,
 // collision, vertex/index, and material-handle records in generated-loader order.
+// WorldXModelDependencies continues through checked material/image dependencies,
+// collision triangles, bone info, and the first model's null physics references,
+// publishing the XModel alias only after the complete dependency chain succeeds.
+// It retains serialized vertex/index bytes only for a renderer-bounded first
+// surface; decoding and graphics submission remain separate engine-side work.
 // Native D3D9 creation is never invoked.
 class RetailFastfileCensusJob
 {

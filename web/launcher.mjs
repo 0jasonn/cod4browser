@@ -172,9 +172,12 @@ function updateRendererMaterialBinding() {
         decodedFormat: runtime.rendererTexture.gpuFormat,
         compressedSource,
         recoveryBytes: runtime.rendererTexture.recoveryBytes,
-        geometrySource: runtime.engineWorldSurface?.state !== "ready"
-            ? "unknown"
-            : runtime.engineWorldSurface.synthetic ? "synthetic" : "retail",
+        geometrySource:
+            runtime.retailCensus?.worldInventory?.firstXModel?.renderSurface?.state === "ready"
+                ? "retail-xmodel"
+                : runtime.engineWorldSurface?.state !== "ready"
+                    ? "unknown"
+                    : runtime.engineWorldSurface.synthetic ? "synthetic" : "retail",
     };
     if (compressedSource) {
         rendererStatus.textContent = "WebGL2 + COD4 DXT texture binding ready";
@@ -258,8 +261,16 @@ globalThis.addEventListener("kisakcod:retail-census", (event) => {
             `map technique sets, then traversed XModel ${firstXModel?.name ?? "unknown"} ` +
             `(${firstXModel?.totals?.vertices ?? 0} vertices, ` +
             `${firstXModel?.totals?.triangles ?? 0} triangles, ` +
-            `${firstXModel?.surfaceCount ?? 0} surfaces) and stopped before its ` +
-            `first inline material.`,
+            `${firstXModel?.surfaceCount ?? 0} surfaces, ` +
+            `${firstXModel?.materials?.length ?? 0} inline materials, and ` +
+            `${firstXModel?.totals?.collisionTriangles ?? 0} collision triangles) ` +
+            `and published its checked dependency boundary. ` +
+            (firstXModel?.renderSurface?.state === "ready"
+                ? `WebGL2 is now drawing retail surface ` +
+                    `${firstXModel.renderSurface.surfaceIndex} ` +
+                    `(${firstXModel.renderSurface.vertexCount} vertices).`
+                : `The bootstrap surface remains active: ` +
+                    `${firstXModel?.renderSurface?.message ?? "no render candidate"}.`),
         );
         const readyImportId = runtime.assets.state === "ready"
             ? runtime.assets.manifest?.importId ?? null

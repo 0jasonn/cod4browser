@@ -86,6 +86,37 @@ async function observeRetailShaderRenderer(page)
         globalThis.__retailShaderLinkCount = 0;
         globalThis.__retailShaderUseCount = 0;
         globalThis.__retailShaderDrawCount = 0;
+        globalThis.__retailSurfaceUploads = [];
+        const originalBufferData = WebGL2RenderingContext.prototype.bufferData;
+        Object.defineProperty(WebGL2RenderingContext.prototype, "bufferData", {
+            configurable: true,
+            writable: true,
+            value(...args) {
+                const source = args[1];
+                if (this.canvas?.id === "game-canvas" && ArrayBuffer.isView(source)) {
+                    const bytesPerElement = Number(source.BYTES_PER_ELEMENT ?? 1);
+                    const sourceLength = Number(
+                        source.length ?? source.byteLength / bytesPerElement,
+                    );
+                    const sourceOffset = args.length >= 4 ? Number(args[3]) : 0;
+                    const elementCount = args.length >= 5
+                        ? Number(args[4])
+                        : sourceLength - sourceOffset;
+                    const byteLength = elementCount * bytesPerElement;
+                    if (byteLength <= 256 * 1024) {
+                        globalThis.__retailSurfaceUploads.push({
+                            target: args[0],
+                            bytes: Array.from(new Uint8Array(
+                                source.buffer,
+                                source.byteOffset + sourceOffset * bytesPerElement,
+                                byteLength,
+                            )),
+                        });
+                    }
+                }
+                return originalBufferData.apply(this, args);
+            },
+        });
         const shaderSources = new WeakMap();
         const programShaders = new WeakMap();
         const compatibilityPrograms = new WeakSet();
@@ -205,7 +236,7 @@ test("publishes one retail material and binds its resolved image", async ({ page
     ).toBe(true);
     await expect.poll(
         () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.rendererMaterial?.geometrySource),
-    ).toBe("synthetic");
+    ).toBe("retail-xmodel");
 
     const result = await page.evaluate(() => ({
         census: structuredClone(globalThis.__KISAKCOD_WEB__.retailCensus),
@@ -215,6 +246,7 @@ test("publishes one retail material and binds its resolved image", async ({ page
         engineAsset: structuredClone(globalThis.__KISAKCOD_WEB__.engineAsset),
         rendererTexture: structuredClone(globalThis.__KISAKCOD_WEB__.rendererTexture),
         rendererMaterial: structuredClone(globalThis.__KISAKCOD_WEB__.rendererMaterial),
+        rendererSurface: structuredClone(globalThis.__KISAKCOD_WEB__.rendererSurface),
         rendererShaderEvents: structuredClone(globalThis.__retailRendererShaderEvents),
         shaderSources: [...globalThis.__retailShaderSources],
         shaderBindings: structuredClone(globalThis.__retailShaderBindings),
@@ -222,6 +254,7 @@ test("publishes one retail material and binds its resolved image", async ({ page
         shaderLinkCount: globalThis.__retailShaderLinkCount,
         shaderUseCount: globalThis.__retailShaderUseCount,
         shaderDrawCount: globalThis.__retailShaderDrawCount,
+        surfaceUploads: structuredClone(globalThis.__retailSurfaceUploads),
         log: document.querySelector("#boot-log").textContent,
     }));
     expect(result.census).toMatchObject({
@@ -342,11 +375,11 @@ test("publishes one retail material and binds its resolved image", async ({ page
             nextBodyIndex: 2,
             nextBodyType: 3,
             nextBodyReference: 0xffff_ffff,
-            block0HighWaterAtBoundary: 220,
-            block4CursorAtBoundary: 376,
+            block0HighWaterAtBoundary: 336,
+            block4CursorAtBoundary: 928,
             stoppedBeforeAssetBody: false,
             assetBodiesEntered: 2,
-            completedAssetCount: 2,
+            completedAssetCount: 3,
             stoppedBeforeDifferentAssetType: false,
             stoppedBeforeTechniqueDependency: false,
             techniqueSets: [
@@ -390,165 +423,118 @@ test("publishes one retail material and binds its resolved image", async ({ page
                 firstTechniqueReference: 0,
                 references: { null: 34, inline: 0, shared: 0, alias: 0 },
                 identity: 1,
-                registryAliasCount: 3,
-                registryDefinedAliasCount: 2,
+                registryAliasCount: 6,
+                registryDefinedAliasCount: 6,
                 published: true,
                 stoppedBeforeDependency: false,
-                unsupportedOperation: "Load_Material",
+                unsupportedOperation: "",
             },
             firstXModel: {
                 assetIndex: 2,
                 name: "web/xmodel_wall",
                 numBones: 1,
                 numRootBones: 1,
-                surfaceCount: 2,
-                lodRampType: 0,
+                surfaceCount: 6,
                 references: {
-                    boneNames: 0xffff_ffff,
-                    parentList: 0,
-                    quats: 0,
-                    trans: 0,
-                    partClassification: 0xffff_ffff,
-                    baseMat: 0xffff_ffff,
-                    surfaces: 0xffff_ffff,
-                    materialHandles: 0xffff_ffff,
-                    collisionSurfaces: 0,
-                    boneInfo: 0xffff_ffff,
+                    collisionSurfaces: 0xffff_ffff,
                     physPreset: 0,
                     physGeoms: 0,
                 },
-                collisionSurfaceCount: 0,
-                contents: 0,
-                radius: 10,
-                mins: [-1, -2, -3],
-                maxs: [1, 2, 3],
-                lodCount: 1,
-                collisionLod: 0,
-                memoryUsage: 100,
-                flags: 0,
-                bad: false,
+                collisionSurfaceCount: 1,
                 offsets: {
-                    headerBlock0: 0,
-                    nameBlock4: 112,
-                    boneNamesBlock4: 128,
-                    parentListBlock4: 0,
-                    quatsBlock4: 0,
-                    transBlock4: 0,
-                    partClassificationBlock4: 130,
-                    baseMatBlock4: 132,
-                    surfacesBlock4: 164,
-                    materialHandlesBlock4: 368,
+                    materialHandlesBlock4: 640,
+                    collisionSurfacesBlock4: 796,
+                    boneInfoBlock4: 888,
                 },
                 totals: {
-                    vertices: 6,
-                    triangles: 2,
-                    rigidVertLists: 2,
+                    vertices: 19,
+                    triangles: 7,
+                    rigidVertLists: 6,
                     collisionNodes: 1,
                     collisionLeaves: 1,
-                    surfacePayloadBytes: 406,
+                    surfacePayloadBytes: 1140,
+                    collisionTriangles: 1,
+                    collisionPayloadBytes: 92,
                 },
-                boundaryInflatedOffset: 1144,
+                boundaryInflatedOffset: 2328,
                 headerTraversed: true,
                 skeletonPrefixTraversed: true,
                 surfaceHeadersTraversed: true,
                 surfaceDependenciesTraversed: true,
                 materialHandlesTraversed: true,
+                materialsTraversed: true,
+                collisionSurfacesTraversed: true,
+                boneInfoTraversed: true,
+                physPresetTraversed: true,
+                physGeomsTraversed: true,
+                published: true,
+                identity: 6,
                 stoppedBeforeSurfaceArray: false,
-                stoppedBeforeMaterialDependency: true,
-                unsupportedOperation: "Load_Material",
-                lods: [
-                    {
-                        index: 0, distance: 800, surfaceCount: 2, surfaceIndex: 0,
-                        partBits: [0x8000_0000, 0, 0, 0], lod: 0,
-                        smcIndexPlusOne: 0, smcAllocBits: 0,
-                    },
-                    {
-                        index: 1, distance: 0, surfaceCount: 0, surfaceIndex: 0,
-                        partBits: [0, 0, 0, 0], lod: 0,
-                        smcIndexPlusOne: 0, smcAllocBits: 0,
-                    },
-                    {
-                        index: 2, distance: 0, surfaceCount: 0, surfaceIndex: 0,
-                        partBits: [0, 0, 0, 0], lod: 0,
-                        smcIndexPlusOne: 0, smcAllocBits: 0,
-                    },
-                    {
-                        index: 3, distance: 0, surfaceCount: 0, surfaceIndex: 0,
-                        partBits: [0, 0, 0, 0], lod: 0,
-                        smcIndexPlusOne: 0, smcAllocBits: 0,
-                    },
-                ],
+                stoppedBeforeMaterialDependency: false,
+                unsupportedOperation: "",
+                renderSurface: {
+                    state: "ready",
+                    surfaceIndex: 0,
+                    materialIdentity: 4,
+                    vertexCount: 4,
+                    triangleCount: 2,
+                    projection: "largest-axes-orthographic-fit",
+                    horizontalAxis: 0,
+                    verticalAxis: 1,
+                    mins: [-2, -1, 0],
+                    maxs: [2, 1, 0],
+                    geometrySource: "retail-xmodel",
+                    fallbackPreserved: false,
+                },
                 boneNames: [{
                     index: 0,
                     scriptStringIndex: 0,
                     name: "tag_origin",
                     classification: 0,
                 }],
-                surfaces: [
-                    {
-                        index: 0,
-                        tileMode: 1,
-                        deformed: false,
-                        vertCount: 3,
-                        triCount: 1,
-                        baseTriIndex: 0,
-                        baseVertIndex: 0,
-                        vertListCount: 1,
-                        references: {
-                            triIndices: 0xffff_ffff,
-                            vertsBlend: 0,
-                            vertices: 0xffff_ffff,
-                            vertLists: 0xffff_ffff,
-                        },
-                        offsets: {
-                            verticesBlock7: 0,
-                            vertListsBlock4: 276,
-                            indicesBlock8: 0,
-                        },
-                        dependenciesTraversed: true,
-                        rigidVertLists: [{
-                            index: 0,
-                            boneOffset: 0,
-                            vertCount: 3,
-                            triOffset: 0,
-                            triCount: 1,
-                            collisionTree: {
-                                reference: 0xffff_ffff,
-                                translation: [0, 0, 0],
-                                scale: [1, 1, 1],
-                                nodeCount: 1,
-                                leafCount: 1,
-                                traversed: true,
-                            },
-                        }],
-                    },
-                    {
-                        index: 1,
-                        tileMode: 0,
-                        vertCount: 3,
-                        triCount: 1,
-                        baseTriIndex: 1,
-                        baseVertIndex: 3,
-                        vertListCount: 1,
-                        offsets: {
-                            verticesBlock7: 96,
-                            vertListsBlock4: 356,
-                            indicesBlock8: 16,
-                        },
-                        dependenciesTraversed: true,
-                        rigidVertLists: [{
-                            index: 0,
-                            collisionTree: {
-                                reference: 0,
-                                traversed: false,
-                            },
-                        }],
-                    },
-                ],
                 materialReferences: [
-                    { index: 0, reference: 0xffff_ffff },
-                    { index: 1, reference: 0x4000_0001 },
+                    { index: 0, reference: 0xffff_ffff, identity: 4 },
+                    { index: 1, reference: 0xffff_ffff, identity: 5 },
+                    { index: 2, reference: 0x4000_0281, identity: 4 },
+                    { index: 3, reference: 0x4000_0285, identity: 5 },
+                    { index: 4, reference: 0x4000_0281, identity: 4 },
+                    { index: 5, reference: 0x4000_0285, identity: 5 },
                 ],
+                materials: [
+                    {
+                        handleIndex: 0,
+                        name: "web/material_a",
+                        techniqueSetIdentity: 1,
+                        textureCount: 1,
+                        constantCount: 1,
+                        stateBitsCount: 1,
+                        identity: 4,
+                        published: true,
+                        images: [{
+                            textureIndex: 0,
+                            name: ",$identitynormalmap",
+                            identity: 3,
+                            published: true,
+                        }],
+                    },
+                    {
+                        handleIndex: 1,
+                        name: "web/material_b",
+                        techniqueSetIdentity: 2,
+                        textureCount: 1,
+                        constantCount: 0,
+                        stateBitsCount: 1,
+                        identity: 5,
+                        published: true,
+                        images: [],
+                    },
+                ],
+                collisionSurfaces: [{
+                    index: 0,
+                    triangleCount: 1,
+                    boneIndex: 0,
+                    traversed: true,
+                }],
             },
             typeCounts: [
                 { type: 2, name: "xanim", count: 1 },
@@ -630,8 +616,30 @@ test("publishes one retail material and binds its resolved image", async ({ page
         decodedFormat: "rgba8",
         compressedSource: true,
         recoveryBytes: 64,
-        geometrySource: "synthetic",
+        geometrySource: "retail-xmodel",
     });
+    expect(result.rendererSurface).toMatchObject({
+        state: "ready",
+        vertexCount: 4,
+        indexCount: 6,
+        drawIndexCount: 6,
+        topology: "triangle-list",
+        textureBinding: "engine-image",
+        resident: true,
+    });
+    expect(result.rendererSurface.submissionGeneration).toBeGreaterThanOrEqual(2);
+    const vertexUploads = result.surfaceUploads.filter(({ target }) => target === 0x8892);
+    const indexUploads = result.surfaceUploads.filter(({ target }) => target === 0x8893);
+    expect(vertexUploads.length).toBeGreaterThanOrEqual(2);
+    expect(indexUploads.length).toBeGreaterThanOrEqual(2);
+    const retailVertices = new Float32Array(Uint8Array.from(vertexUploads.at(-1).bytes).buffer);
+    expect([...retailVertices]).toHaveLength(4 * 7);
+    expect(retailVertices[0]).toBeCloseTo(-0.82, 5);
+    expect(retailVertices[1]).toBeCloseTo(-0.41, 5);
+    expect(retailVertices[7]).toBeCloseTo(-0.82, 5);
+    expect(retailVertices[8]).toBeCloseTo(0.41, 5);
+    expect([...new Uint16Array(Uint8Array.from(indexUploads.at(-1).bytes).buffer)])
+        .toEqual([0, 1, 2, 2, 3, 0]);
     expect(["ready", "lost"]).toContain(result.rendererShader.state);
     expect(result.rendererShader.resident).toBe(result.rendererShader.state === "ready");
     expect(result.rendererShader.submissionGeneration).toBeGreaterThan(0);
@@ -829,6 +837,8 @@ test("a WebGL2 binding failure keeps the bootstrap renderer active", async ({ pa
     ).toBe("failed");
     const result = await page.evaluate(() => ({
         shader: structuredClone(globalThis.__KISAKCOD_WEB__.rendererShader),
+        census: structuredClone(globalThis.__KISAKCOD_WEB__.retailCensus),
+        surface: structuredClone(globalThis.__KISAKCOD_WEB__.rendererSurface),
         draws: globalThis.__retailFallbackDraws,
         runtimeState: globalThis.__KISAKCOD_WEB__.state,
     }));
@@ -838,6 +848,16 @@ test("a WebGL2 binding failure keeps the bootstrap renderer active", async ({ pa
         retained: false,
         resident: false,
         firstDrawCompleted: false,
+    });
+    expect(result.census.worldInventory.firstXModel.renderSurface).toMatchObject({
+        state: "fallback",
+        fallbackPreserved: true,
+        message: "The retail shader binding was unavailable; the bootstrap surface remains active",
+    });
+    expect(result.surface).toMatchObject({
+        vertexCount: 4,
+        indexCount: 6,
+        submissionGeneration: 1,
     });
     expect(result.draws).toBeGreaterThan(0);
     expect(result.runtimeState).toBe("running");
@@ -1134,6 +1154,83 @@ test("an invalid XSurface collision tree fails closed", async ({ page }, testInf
         failClosed: true,
     });
     expect(census.worldInventory).toBeUndefined();
+});
+
+for (const [title, fixtureOptions, expectedError] of [
+    [
+        "an undefined XModel material alias fails closed",
+        { invalidXModelMaterialAlias: true },
+        "invalid XModel material dependency alias",
+    ],
+    [
+        "invalid XModel collision bounds fail closed",
+        { invalidXModelCollisionBounds: true },
+        "invalid XModel collision surface",
+    ],
+    [
+        "invalid XModel bone info fails closed",
+        { invalidXModelBoneInfo: true },
+        "invalid XModel bone info",
+    ],
+]) {
+    test(title, async ({ page }, testInfo) => {
+        const overrides = new Map([[
+            "zone/english/killhouse.ff",
+            createSyntheticWorldInventoryFastfile(fixtureOptions),
+        ]]);
+        await importInstall(page, testInfo, `m26-${title.replaceAll(" ", "-")}`, {
+            overrides,
+        });
+        await expect.poll(
+            () => page.evaluate(
+                () => globalThis.__KISAKCOD_WEB__?.retailCensus?.state,
+            ),
+            { timeout: 30_000 },
+        ).toBe("failed");
+        const census = await page.evaluate(
+            () => structuredClone(globalThis.__KISAKCOD_WEB__.retailCensus),
+        );
+        expect(census).toMatchObject({
+            state: "failed",
+            path: "zone/english/killhouse.ff",
+            stage: "failed",
+            error: expectedError,
+            completedAssetCount: 0,
+            failClosed: true,
+        });
+        expect(census.worldInventory).toBeUndefined();
+    });
+}
+
+test("an inline physics preset keeps the XModel unpublished", async ({ page }, testInfo) => {
+    const overrides = new Map([[
+        "zone/english/killhouse.ff",
+        createSyntheticWorldInventoryFastfile({ unsupportedXModelPhysPreset: true }),
+    ]]);
+    await importInstall(page, testInfo, "m26-unsupported-physics", { overrides });
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
+        { timeout: 30_000 },
+    ).toBe("ready");
+    const world = await page.evaluate(
+        () => structuredClone(
+            globalThis.__KISAKCOD_WEB__.retailCensus.worldInventory,
+        ),
+    );
+    expect(world).toMatchObject({
+        completedAssetCount: 2,
+        firstTechniqueSet: {
+            registryAliasCount: 6,
+            registryDefinedAliasCount: 5,
+            unsupportedOperation: "Load_PhysPreset",
+        },
+        firstXModel: {
+            published: false,
+            physPresetTraversed: false,
+            physGeomsTraversed: false,
+            unsupportedOperation: "Load_PhysPreset",
+        },
+    });
 });
 
 test("an invalid map technique-set header fails before publishing asset zero", async ({ page }, testInfo) => {

@@ -30,6 +30,12 @@ add_executable(web_engine_world_surface_tests
     "${KISAK_REPOSITORY_ROOT}/src/web/web_engine_world_surface.cpp"
 )
 
+add_executable(web_engine_xmodel_surface_tests
+    "${CMAKE_CURRENT_LIST_DIR}/web_engine_xmodel_surface_tests.cpp"
+    "${KISAK_REPOSITORY_ROOT}/src/web/web_engine_xmodel_surface.cpp"
+    "${KISAK_REPOSITORY_ROOT}/src/web/web_engine_world_surface.cpp"
+)
+
 add_executable(web_fastfile_world_surface_tests
     "${CMAKE_CURRENT_LIST_DIR}/web_fastfile_world_surface_tests.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_fastfile_source_stream.cpp"
@@ -75,6 +81,8 @@ add_executable(web_retail_fastfile_census_tests
     "${KISAK_REPOSITORY_ROOT}/src/web/web_fastfile_zone_registry.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_fastfile_zone_stream.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_retail_fastfile_census.cpp"
+    "${KISAK_REPOSITORY_ROOT}/src/web/web_engine_xmodel_surface.cpp"
+    "${KISAK_REPOSITORY_ROOT}/src/web/web_engine_world_surface.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_shader_compatibility.cpp"
 )
 
@@ -86,6 +94,8 @@ target_compile_features(web_renderer_surface_tests PRIVATE cxx_std_20)
 target_include_directories(web_renderer_surface_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
 target_compile_features(web_engine_world_surface_tests PRIVATE cxx_std_20)
 target_include_directories(web_engine_world_surface_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
+target_compile_features(web_engine_xmodel_surface_tests PRIVATE cxx_std_20)
+target_include_directories(web_engine_xmodel_surface_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
 target_compile_features(web_fastfile_world_surface_tests PRIVATE cxx_std_20)
 target_include_directories(web_fastfile_world_surface_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
 target_compile_features(web_fastfile_zone_stream_tests PRIVATE cxx_std_20)
@@ -123,6 +133,11 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "-sNO_DISABLE_EXCEPTION_CATCHING"
     )
     target_link_options(web_engine_world_surface_tests PRIVATE
+        "-sENVIRONMENT=node"
+        "-sEXIT_RUNTIME=1"
+        "-sNO_DISABLE_EXCEPTION_CATCHING"
+    )
+    target_link_options(web_engine_xmodel_surface_tests PRIVATE
         "-sENVIRONMENT=node"
         "-sEXIT_RUNTIME=1"
         "-sNO_DISABLE_EXCEPTION_CATCHING"
@@ -168,6 +183,7 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     target_link_options(web_retail_fastfile_census_tests PRIVATE
         "-sUSE_ZLIB=1"
         "-sENVIRONMENT=node"
+        "-sNODERAWFS=1"
         "-sEXIT_RUNTIME=1"
         "-sNO_DISABLE_EXCEPTION_CATCHING"
     )
@@ -175,6 +191,7 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     set_target_properties(iwi_image_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_renderer_surface_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_engine_world_surface_tests PROPERTIES SUFFIX ".cjs")
+    set_target_properties(web_engine_xmodel_surface_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_fastfile_world_surface_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_fastfile_zone_stream_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_fastfile_source_stream_tests PROPERTIES SUFFIX ".cjs")
@@ -192,6 +209,8 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_renderer_surface_tests>")
     add_test(NAME web_engine_world_surface_tests
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_engine_world_surface_tests>")
+    add_test(NAME web_engine_xmodel_surface_tests
+        COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_engine_xmodel_surface_tests>")
     add_test(NAME web_fastfile_world_surface_tests
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_fastfile_world_surface_tests>")
     add_test(NAME web_fastfile_zone_stream_tests
@@ -217,6 +236,7 @@ else()
     add_test(NAME iwi_image_tests COMMAND iwi_image_tests)
     add_test(NAME web_renderer_surface_tests COMMAND web_renderer_surface_tests)
     add_test(NAME web_engine_world_surface_tests COMMAND web_engine_world_surface_tests)
+    add_test(NAME web_engine_xmodel_surface_tests COMMAND web_engine_xmodel_surface_tests)
     add_test(NAME web_fastfile_world_surface_tests COMMAND web_fastfile_world_surface_tests)
     add_test(NAME web_fastfile_zone_stream_tests COMMAND web_fastfile_zone_stream_tests)
     add_test(NAME web_fastfile_source_stream_tests COMMAND web_fastfile_source_stream_tests)

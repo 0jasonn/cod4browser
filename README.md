@@ -34,9 +34,11 @@ that converted description and recreates both surface and texture after context
 loss; valid wavelet/cubemap/volume or otherwise unsupported IWI layouts remain non-fatal
 metadata results. It uses the pinned Emscripten zlib 1.3.2 port rather than the
 legacy native zlib copy. Automated browser, portable C++, and fuzz-harness
-inputs are generated synthetic data only. This proves conversion from an
-authentic engine-world representation, not retail map/BSP/fastfile compatibility,
-material rendering, a general virtual filesystem, or a playable game build.
+inputs are generated synthetic data only. The same renderer seam now also
+receives one bounded surface from the first fully published retail XModel in
+`killhouse.ff`. This is a retail model-surface render, not retail map/BSP
+compatibility, general material rendering, a general virtual filesystem, or a
+playable game build.
 
 Milestone 8 completes the bounded upstream fastfile/zone inventory and
 implements its first portable extraction path. The canonical browser fixture
@@ -221,6 +223,26 @@ collision nodes, and 284 leaves, then retains six ordered material handles and
 stops before the first inline `Material`. Large retail geometry payloads are
 hashed rather than retained, the XModel alias remains unpublished, and no
 retail model is rendered yet.
+
+Milestone 26 completes that first model's generated-loader dependency chain.
+It loads two inline materials and their bounded image/constant/state tables,
+resolves four material aliases and one image alias through the typed zone
+registry, validates 96 collision triangles and one bone-info record, and proves
+that both physics references are null. Only then is XModel identity 19
+published at inflated offset 67,723 with all 19 reserved aliases defined.
+Malformed aliases, collision bounds, and bone info fail closed.
+
+Milestone 27 retains only surface zero from that published model when it fits
+the existing 4,096-vertex/12,288-index renderer ceiling. A D3D-free converter
+decodes the 32-byte packed vertex records, including half-float UVs and native
+vertex color, validates every local index, and fits the two largest spatial
+axes into a deterministic orthographic clip-space view. The selected material
+handle must resolve to a published identity before the existing renderer
+atomically replaces its synthetic surface. The owned surface is 368 vertices
+and 252 triangles and selects material identity 16. Conversion, shader-binding,
+or backend failure preserves the bootstrap surface. This makes a real owned
+model silhouette visible, although it still uses the current startup sampler;
+it is not a GfxWorld/map render or playable scene.
 
 See [docs/web-port.md](docs/web-port.md) for the pinned toolchain, build steps,
 current boundary, validation limits, and next milestone, and see

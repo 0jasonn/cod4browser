@@ -1067,15 +1067,75 @@ tree, a null-tree rigid list, material ordering, fail-closed pointer/count
 mismatch, and invalid collision scale. No retail bytes or retained proprietary
 vertex/index payloads are stored in the repository.
 
-## Next boundary: Milestone 26
+## Milestone 26: first complete retail XModel dependency chain (complete)
 
-M26 should generalize the checked material loader to the XModel's two inline
-material handles, resolve the four encoded aliases through the zone registry,
-and continue through collision surfaces, bone info, physics preset, and physics
-geometry in upstream order. The XModel table alias must remain unpublished
-until all required dependencies complete. Rendering a model surface should
-follow only after that publication boundary and a deliberate conversion from
-packed XSurface vertices/indices to the browser renderer seam.
+The world reader now generalizes the checked material loader across the first
+XModel's six ordered material handles. It loads two inline materials, resolves
+four encoded aliases back to those handle cells, validates each technique-set
+alias, and walks bounded texture, image, constant, and state-bit tables in the
+same order as `Load_Material`. Inline images receive stable registry identities;
+the second material also proves a typed image alias back to an image published
+by the first material. Empty built-in images are accepted only with the exact
+zero texture/dimension layout, while streamed two-dimensional images retain
+bounded load-definition metadata and hashes rather than proprietary pixels.
+
+The owned first model publishes material `mc/mtl_street_light_02` as identity
+16 and `mc/mtl_street_light_bulb_02_off` as identity 18. Its six handles resolve
+to identities `16, 18, 16, 18, 16, 18`. Traversal then consumes two checked
+collision-surface headers and 96 finite collision triangles, validates one
+40-byte bone-info record, and proves that both physics references are null.
+The collision dependency accounts for 4,696 bytes and is hashed rather than
+retained.
+
+Only after that full chain succeeds does the registry assign XModel identity
+19 and publish asset-table alias 12. The boundary is inflated offset 67,723,
+block-4 cursor 38,112, with all 19 reserved aliases defined. Malformed material
+or image aliases, collision bounds, bone info, and resource limits fail without
+an externally available result. A non-null inline physics preset remains a
+conservative successful stop at `Load_PhysPreset`; the XModel alias stays
+undefined. Browser fixtures are freely generated and contain no retail bytes.
+
+## Milestone 27: first retail XModel surface render (complete)
+
+The dependency reader now retains serialized bytes for only the first XSurface,
+and only when it fits the existing renderer ceiling of 4,096 vertices and 4,096
+triangles. All later surfaces remain hash-only census evidence. Retention occurs
+inside the private parser result; no packed pointer or WebGL2 handle is exposed
+to JavaScript or shared engine code.
+
+After the complete M26 XModel publishes, a separate D3D-free engine converter
+checks the exact `vertexCount * 32` and `triangleCount * 6` byte lengths, decodes
+finite xyz/binormal values, native packed color, and upstream high-half-U /
+low-half-V IEEE half-float texture coordinates, and rejects every index outside
+the local vertex array. It selects the two largest non-degenerate spatial axes
+and aspect-preservingly fits them inside a clip-space margin. Only after the
+surface-zero material handle resolves to a published typed identity does the
+existing renderer validate, copy, upload, and atomically replace its surface.
+
+The read-only owned profile converts surface zero of
+`ch_street_wall_light_01_off`: 368 vertices, 252 triangles (756 indices), and
+material identity 16 (`mc/mtl_street_light_02`). Its deterministic projection
+uses X horizontally and Z vertically. The synthetic browser fixture observes a
+second vertex/index buffer upload containing its freely generated packed quad.
+A shader-binding failure leaves the original submission generation and
+four-vertex bootstrap surface active; malformed lengths, non-finite floats or
+halves, degenerate bounds, bad indices, missing material identity, allocation,
+and backend upload failure likewise do not replace the active surface.
+
+This is the first user-owned retail geometry drawn by the web renderer. The
+surface currently samples the already resident startup image; M27 validates
+and records the XModel material identity but does not yet load that material's
+diffuse IWI. It is one orthographically fitted model surface, not a camera,
+GfxWorld/map render, multi-surface LOD, lighting path, or playable game.
+
+## Next boundary: Milestone 28
+
+M28 should follow the selected surface material to one explicit color-map image
+and bind that image through the existing IWD/IWI and renderer recovery seams.
+Selection must be based on checked texture semantics and typed image identity,
+not filename order; unsupported built-ins or absent archive members must keep
+the current texture active. It should remain one surface and one material, not
+silently widen into general XModel or map rendering.
 
 Reaching `GfxWorld` still requires typed loaders for every intervening inline
 asset class; geometry, lightmaps, visibility, and camera state remain separate

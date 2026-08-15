@@ -47,11 +47,12 @@
                         <code>ch_street_wall_light_01_off</code>. The checked model reader retains its
                         skeleton and six <code>XSurface</code> records, then follows all bounded packed
                         vertices, rigid lists, collision trees, triangle indices, and material-handle
-                        slots in generated-loader order. The owned prefix accounts for 754 vertices,
-                        524 triangles, 44 collision nodes, and 284 leaves before stopping at the first
-                        inline <code>Material</code>. Vertex and index blobs are validated and hashed,
-                        not retained or rendered. This reaches the exact model-material boundary
-                        without skipping unknown bodies.
+                        slots in generated-loader order, resolves two materials, validates collision
+                        and bone dependencies, and publishes the complete first model. Only its
+                        bounded surface zero is retained for drawing: 368 packed vertices and 252
+                        triangles are decoded outside WebGL2, fitted to a deterministic X/Z view,
+                        and atomically replace the synthetic surface after material identity 16
+                        resolves. Later surfaces remain hash-only evidence.
                         An eight-task scheduler orders that work
                         with archive, asset, command, world-surface, and renderer jobs every frame.
                         No proprietary data is uploaded or bundled.
@@ -142,12 +143,11 @@
                         prefix validates. Its strict D3D9 contract selects, compiles, links, and draws
                         through owned WebGL2 source. DXT1/DXT3/DXT5 IWI images decode into bounded
                         RGBA8, so the material-resolved <code>images/3_cursor3.iwi</code> can bind to
-                        its sampler and survive context loss. The material and image dependency is
-                        retail; the indexed surface remains synthetic, so retail map rendering is not
-                        claimed. The <code>killhouse</code> pass reads only enough compressed input
-                        to inventory its table and complete the leading zero-dependency technique-set
-                        run. It stops before a different asset type or the first nested technique body;
-                        it never skips unknown bodies. Your source folder stays untouched.
+                        its sampler and survive context loss. The <code>killhouse</code> pass now
+                        follows the complete first XModel dependency chain and draws one owned retail
+                        model surface through the same recovery-safe indexed renderer seam. It still
+                        uses the startup sampler image; this is not a <code>GfxWorld</code> map render,
+                        camera, lighting path, or playable scene. Your source folder stays untouched.
                     </p>
                     <p class="asset-legal">
                         You must supply files from a legally owned Call of Duty 4 installation.

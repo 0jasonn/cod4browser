@@ -957,3 +957,77 @@ including an inline collision tree and a null collision-tree reference.
 Pointer/count mismatch and invalid collision scale fixtures fail atomically.
 This is complete XSurface dependency metadata for one model, not a decoded or
 rendered retail model.
+
+## Milestone 26 first complete killhouse XModel (complete)
+
+The generated-loader subset now continues from the six material-handle cells
+through two inline `Material` bodies. The remaining four handle tokens decode
+to the first two block-4 cells and resolve through the typed registry:
+
+| Handle | Serialized token | Resolved material identity |
+| ---: | ---: | ---: |
+| 0 | `ffffffff` | 16 |
+| 1 | `ffffffff` | 18 |
+| 2 | `400080a9` | 16 |
+| 3 | `400080ad` | 18 |
+| 4 | `400080a9` | 16 |
+| 5 | `400080ad` | 18 |
+
+The first material has three texture records, two constants, and seven state
+records. It publishes three inline images, including the exact zero-resource
+`,$identitynormalmap` layout. The second material has two textures, one
+constant, and four state records; one image token resolves to the first
+material's published image and its other image is inline. Every technique-set,
+material, and image reference is type checked before use.
+
+After materials, upstream order is preserved across two 44-byte
+`XModelCollSurf_s` headers, 92 and four collision triangles respectively, one
+40-byte `XBoneInfo`, the null `PhysPreset *`, and the null `PhysGeomList *`.
+Large triangle arrays are validated for finite values and hashed rather than
+retained.
+
+| Boundary field | Value |
+| --- | --- |
+| Inflated boundary | 67,723 |
+| Collision triangles | 96 |
+| Collision dependency bytes | 4,696 |
+| Block-0 high-water | 352 |
+| Block-4 cursor | 38,112 |
+| Registry publication | 19 aliases reserved; 19 defined; XModel identity 19 published |
+| Stop operation | none; dependency chain complete |
+
+The freely generated six-surface fixture proves two inline materials, four
+material aliases, an image alias, collision and bone-info traversal, and atomic
+XModel publication. Separate fixtures reject undefined aliases, invalid
+collision bounds, and invalid bone info. A non-null inline physics preset stops
+at `Load_PhysPreset` with the XModel alias still undefined. No retail payload is
+stored in the repository.
+
+## Milestone 27 first rendered killhouse XSurface (complete)
+
+The dependency result now retains only surface zero's bounded packed vertex and
+index bytes. For the owned model this is 11,776 vertex bytes and 1,512 index
+bytes; the other five surfaces remain hash-only. The engine converter then
+decodes and validates those records outside both the zone parser and WebGL2.
+
+| Render field | Value |
+| --- | --- |
+| Model / surface | `ch_street_wall_light_01_off` / 0 |
+| Packed vertices | 368 records / 11,776 bytes |
+| Triangle indices | 756 / 1,512 bytes |
+| Resolved material | identity 16 / `mc/mtl_street_light_02` |
+| Projection axes | X horizontal / Z vertical |
+| Renderer topology | indexed triangle list |
+| Publication | atomic replacement after complete XModel and shader publication |
+
+Every position, binormal sign, and half-float UV must be finite; every index
+must be below 368; and the complete byte lengths must match the checked header.
+The browser renderer owns only the converted two-dimensional positions, RGB
+color, UVs, and 16-bit indices used for context-loss recovery. Conversion or
+binding failure leaves the synthetic bootstrap surface active. Automated
+fixtures generate their packed geometry freely; no owned vertex or index bytes
+are copied into the repository.
+
+This is a first retail model-surface render. The current sampler image still
+comes from the startup material path, so correct XModel color-map selection is
+the next bounded dependency rather than an implied part of M27.

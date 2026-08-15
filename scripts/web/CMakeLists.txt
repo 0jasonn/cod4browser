@@ -22,6 +22,7 @@ add_executable(KisakCOD-web
     "${SRC_DIR}/web/web_engine_scheduler.cpp"
     "${SRC_DIR}/web/web_engine_surface.cpp"
     "${SRC_DIR}/web/web_engine_world_surface.cpp"
+    "${SRC_DIR}/web/web_engine_xmodel_surface.cpp"
     "${SRC_DIR}/web/web_fastfile_world_surface.cpp"
     "${SRC_DIR}/web/web_fastfile_source_stream.cpp"
     "${SRC_DIR}/web/web_fastfile_zone_registry.cpp"
