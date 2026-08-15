@@ -43,6 +43,7 @@ constexpr kisak::fastfile::StepBudget EXTRACTION_STEP_BUDGET{
     kisak::fastfile::MAX_STEP_BYTES,
     kisak::fastfile::MAX_STEP_RECORDS,
 };
+constexpr std::uint32_t SYNTHETIC_SOURCE_CHUNK_BYTES = 37u;
 
 enum class RuntimePhase : std::uint8_t
 {
@@ -56,6 +57,10 @@ struct RuntimeExtraction
 {
     RuntimePhase phase = RuntimePhase::Idle;
     kisak::fastfile::WorldSurfaceExtractionJob job;
+    std::vector<std::uint8_t> sourceBytes;
+    std::size_t sourceOffset = 0u;
+    bool sourceWaitReported = false;
+    bool needsSource = false;
     std::uint32_t fastfileBytes = 0u;
     std::uint32_t framePumpTick = 0u;
     std::uint32_t stepCount = 0u;
@@ -63,6 +68,10 @@ struct RuntimeExtraction
     std::uint32_t stepOutputBytes = 0u;
     std::uint32_t stepParsedBytes = 0u;
     std::uint32_t stepRecords = 0u;
+    std::uint32_t stepSourceBytes = 0u;
+    std::uint32_t sourceFeedCount = 0u;
+    std::uint32_t sourceBytesReceived = 0u;
+    std::uint32_t sourceBytesConsumed = 0u;
     std::uint32_t compressedBytesConsumed = 0u;
     std::uint32_t inflatedBytesProduced = 0u;
     std::uint32_t parsedBytes = 0u;
@@ -328,6 +337,12 @@ EM_JS(
      std::uint32_t stepOutputBytes,
      std::uint32_t stepParsedBytes,
      std::uint32_t stepRecords,
+     std::uint32_t stepSourceBytes,
+     std::uint32_t sourceFeedCount,
+     std::uint32_t sourceBytesReceived,
+     std::uint32_t sourceBytesConsumed,
+     std::uint32_t maxSourceChunkBytes,
+     std::uint32_t needsSource,
      std::uint32_t compressedBytesConsumed,
      std::uint32_t inflatedBytesProduced,
      std::uint32_t parsedBytes,
@@ -345,6 +360,8 @@ EM_JS(
      std::uint32_t materialAssetIndex,
      std::uint32_t worldAssetIndex,
      std::uint32_t materialIdentity,
+     std::uint32_t worldIdentity,
+     std::uint32_t registeredAssetCount,
      std::uint32_t sourceSurfaceIndex,
      std::uint32_t worldVertexCount,
      std::uint32_t worldIndexCount,
@@ -376,6 +393,12 @@ EM_JS(
                 stepOutputBytes: stepOutputBytes >>> 0,
                 stepParsedBytes: stepParsedBytes >>> 0,
                 stepRecords: stepRecords >>> 0,
+                stepSourceBytes: stepSourceBytes >>> 0,
+                sourceFeedCount: sourceFeedCount >>> 0,
+                sourceBytesReceived: sourceBytesReceived >>> 0,
+                sourceBytesConsumed: sourceBytesConsumed >>> 0,
+                maxSourceChunkBytes: maxSourceChunkBytes >>> 0,
+                needsSource: needsSource !== 0,
                 compressedBytesConsumed: compressedBytesConsumed >>> 0,
                 inflatedBytesProduced: inflatedBytesProduced >>> 0,
                 parsedBytes: parsedBytes >>> 0,
@@ -393,6 +416,8 @@ EM_JS(
                 materialAssetIndex: materialAssetIndex >>> 0,
                 worldAssetIndex: worldAssetIndex >>> 0,
                 materialIdentity: materialIdentity >>> 0,
+                worldIdentity: worldIdentity >>> 0,
+                registeredAssetCount: registeredAssetCount >>> 0,
                 sourceSurfaceIndex: sourceSurfaceIndex >>> 0,
                 worldVertexCount: worldVertexCount >>> 0,
                 worldIndexCount: worldIndexCount >>> 0,
@@ -431,6 +456,12 @@ void EmitWorldSurfaceLifecycle(
         g_runtimeExtraction.stepOutputBytes,
         g_runtimeExtraction.stepParsedBytes,
         g_runtimeExtraction.stepRecords,
+        g_runtimeExtraction.stepSourceBytes,
+        g_runtimeExtraction.sourceFeedCount,
+        g_runtimeExtraction.sourceBytesReceived,
+        g_runtimeExtraction.sourceBytesConsumed,
+        SYNTHETIC_SOURCE_CHUNK_BYTES,
+        g_runtimeExtraction.needsSource ? 1u : 0u,
         g_runtimeExtraction.compressedBytesConsumed,
         g_runtimeExtraction.inflatedBytesProduced,
         g_runtimeExtraction.parsedBytes,
@@ -448,6 +479,8 @@ void EmitWorldSurfaceLifecycle(
         hasSource ? extracted->materialAssetIndex : 0u,
         hasSource ? extracted->worldAssetIndex : 0u,
         hasSource ? extracted->materialIdentity : 0u,
+        hasSource ? extracted->worldIdentity : 0u,
+        hasSource ? extracted->registeredAssetCount : 0u,
         hasSource ? extracted->sourceSurfaceIndex : 0u,
         hasSource ? extracted->sourceWorldVertexCount : 0u,
         hasSource ? extracted->sourceWorldIndexCount : 0u,
@@ -480,6 +513,26 @@ bool AddCounter(std::uint32_t &total, std::uint32_t increment) noexcept
     return true;
 }
 
+bool SyncSourceMetrics() noexcept
+{
+    const std::uint64_t received =
+        g_runtimeExtraction.job.SourceBytesReceived();
+    const std::uint64_t consumed =
+        g_runtimeExtraction.job.SourceBytesConsumed();
+    if (received > UINT32_MAX || consumed > UINT32_MAX)
+    {
+        return false;
+    }
+    g_runtimeExtraction.sourceFeedCount =
+        g_runtimeExtraction.job.SourceFeedCount();
+    g_runtimeExtraction.sourceBytesReceived =
+        static_cast<std::uint32_t>(received);
+    g_runtimeExtraction.sourceBytesConsumed =
+        static_cast<std::uint32_t>(consumed);
+    g_runtimeExtraction.needsSource = g_runtimeExtraction.job.NeedsSource();
+    return true;
+}
+
 bool RecordStep(
     const WebFrameInfo &frame,
     const kisak::fastfile::StepReport &report) noexcept
@@ -489,6 +542,7 @@ bool RecordStep(
     g_runtimeExtraction.stepOutputBytes = report.inflatedBytesProducedThisStep;
     g_runtimeExtraction.stepParsedBytes = report.traversedBytesThisStep;
     g_runtimeExtraction.stepRecords = report.recordsProcessedThisStep;
+    g_runtimeExtraction.stepSourceBytes = report.sourceBytesConsumedThisStep;
     return AddCounter(g_runtimeExtraction.stepCount, 1u) &&
         AddCounter(
             g_runtimeExtraction.compressedBytesConsumed,
@@ -497,7 +551,8 @@ bool RecordStep(
             g_runtimeExtraction.inflatedBytesProduced,
             report.inflatedBytesProducedThisStep) &&
         AddCounter(g_runtimeExtraction.parsedBytes, report.traversedBytesThisStep) &&
-        AddCounter(g_runtimeExtraction.recordsProcessed, report.recordsProcessedThisStep);
+        AddCounter(g_runtimeExtraction.recordsProcessed, report.recordsProcessedThisStep) &&
+        SyncSourceMetrics();
 }
 
 const char *RuntimeStageString(kisak::fastfile::JobStage stage) noexcept
@@ -522,6 +577,9 @@ WebEngineSurfaceFrameResult FailRuntimeExtraction(
 {
     g_runtimeExtraction.phase = RuntimePhase::Failed;
     g_runtimeExtraction.job.Reset();
+    std::vector<std::uint8_t>().swap(g_runtimeExtraction.sourceBytes);
+    g_runtimeExtraction.sourceOffset = 0u;
+    g_runtimeExtraction.needsSource = false;
     EmitWorldSurfaceLifecycle(
         "failed",
         stage,
@@ -542,8 +600,9 @@ WebEngineSurfaceFrameResult CompleteRuntimeExtraction()
             "result", "The completed fastfile extraction did not expose one owned result");
     }
 
-    // TakeResult transfers only the selected surface. Release the source and
-    // inflated traversal staging before conversion or renderer submission.
+    // TakeResult transfers only the selected surface. The source queue has
+    // already released every consumed chunk; reset the remaining registry and
+    // traversal state before conversion or renderer submission.
     g_runtimeExtraction.job.Reset();
     const std::uint64_t expectedTraversalBytes =
         static_cast<std::uint64_t>(extracted.inflatedBytes) +
@@ -551,7 +610,9 @@ WebEngineSurfaceFrameResult CompleteRuntimeExtraction()
             kisak::fastfile::GFX_WORLD_VERTEX_WIRE_SIZE +
         static_cast<std::uint64_t>(extracted.metadata.triangleCount) * 3u *
             sizeof(std::uint16_t);
-    if (g_runtimeExtraction.compressedBytesConsumed != extracted.compressedBytes ||
+    if (g_runtimeExtraction.sourceBytesReceived != g_runtimeExtraction.fastfileBytes ||
+        g_runtimeExtraction.sourceBytesConsumed != g_runtimeExtraction.fastfileBytes ||
+        g_runtimeExtraction.compressedBytesConsumed != extracted.compressedBytes ||
         g_runtimeExtraction.inflatedBytesProduced != extracted.inflatedBytes ||
         expectedTraversalBytes > UINT32_MAX ||
         g_runtimeExtraction.parsedBytes != expectedTraversalBytes)
@@ -656,13 +717,18 @@ bool WebEngineSurface_Start()
 
     g_runtimeExtraction.fastfileBytes =
         static_cast<std::uint32_t>(syntheticFastfile.size());
+    g_runtimeExtraction.sourceBytes = std::move(syntheticFastfile);
+    kisak::fastfile::Limits extractionLimits;
+    extractionLimits.maxSourceChunkBytes = SYNTHETIC_SOURCE_CHUNK_BYTES;
     const kisak::fastfile::Error beginResult =
-        g_runtimeExtraction.job.Begin(std::move(syntheticFastfile), {});
+        g_runtimeExtraction.job.BeginStreaming(extractionLimits);
     if (beginResult != kisak::fastfile::Error::None)
     {
         const char *message = kisak::fastfile::ErrorString(beginResult);
         g_runtimeExtraction.phase = RuntimePhase::Failed;
         g_runtimeExtraction.job.Reset();
+        std::vector<std::uint8_t>().swap(g_runtimeExtraction.sourceBytes);
+        g_runtimeExtraction.sourceOffset = 0u;
         Web_Log(
             WebLogLevel::Error,
             "[kisakcod-web] Incremental fastfile extraction could not begin: %s.\n",
@@ -678,11 +744,17 @@ bool WebEngineSurface_Start()
         return false;
     }
 
+    if (!SyncSourceMetrics())
+    {
+        (void)FailRuntimeExtraction(
+            "source", "Resumable source metrics exceeded their runtime representation");
+        return false;
+    }
     g_runtimeExtraction.phase = RuntimePhase::Running;
     EmitWorldSurfaceLifecycle(
         "loading",
         "begin",
-        "The synthetic fastfile is queued for bounded incremental extraction",
+        "The synthetic fastfile is queued for bounded resumable source streaming",
         nullptr,
         g_runtimeExtraction.fastfileBytes,
         0u,
@@ -698,6 +770,69 @@ WebEngineSurfaceFrameResult WebEngineSurface_Frame(const WebFrameInfo &frame)
     case RuntimePhase::Failed: return WebEngineSurfaceFrameResult::Failed;
     case RuntimePhase::Idle: return WebEngineSurfaceFrameResult::Failed;
     case RuntimePhase::Running: break;
+    }
+
+    if (!SyncSourceMetrics())
+    {
+        return FailRuntimeExtraction(
+            "source", "Resumable source metrics exceeded their runtime representation");
+    }
+    if (g_runtimeExtraction.job.NeedsSource())
+    {
+        if (!g_runtimeExtraction.sourceWaitReported)
+        {
+            g_runtimeExtraction.sourceWaitReported = true;
+            g_runtimeExtraction.framePumpTick = frame.pumpTick;
+            g_runtimeExtraction.stepInputBytes = 0u;
+            g_runtimeExtraction.stepOutputBytes = 0u;
+            g_runtimeExtraction.stepParsedBytes = 0u;
+            g_runtimeExtraction.stepRecords = 0u;
+            g_runtimeExtraction.stepSourceBytes = 0u;
+            EmitWorldSurfaceLifecycle(
+                "loading",
+                "source-wait",
+                "Incremental extraction is waiting for the next bounded source chunk",
+                nullptr,
+                g_runtimeExtraction.fastfileBytes,
+                0u,
+                0u);
+            return WebEngineSurfaceFrameResult::Pending;
+        }
+
+        g_runtimeExtraction.sourceWaitReported = false;
+        if (g_runtimeExtraction.sourceOffset >=
+            g_runtimeExtraction.sourceBytes.size())
+        {
+            return FailRuntimeExtraction(
+                "source", "The synthetic source ended before its final marker");
+        }
+        const std::size_t remaining =
+            g_runtimeExtraction.sourceBytes.size() -
+            g_runtimeExtraction.sourceOffset;
+        const std::size_t count = std::min<std::size_t>(
+            SYNTHETIC_SOURCE_CHUNK_BYTES, remaining);
+        const bool final = count == remaining;
+        const kisak::fastfile::Error feedResult =
+            g_runtimeExtraction.job.FeedSource(
+                std::span<const std::uint8_t>(g_runtimeExtraction.sourceBytes)
+                    .subspan(g_runtimeExtraction.sourceOffset, count),
+                final);
+        if (feedResult != kisak::fastfile::Error::None)
+        {
+            return FailRuntimeExtraction(
+                "source", kisak::fastfile::ErrorString(feedResult));
+        }
+        g_runtimeExtraction.sourceOffset += count;
+        if (final)
+        {
+            std::vector<std::uint8_t>().swap(g_runtimeExtraction.sourceBytes);
+            g_runtimeExtraction.sourceOffset = 0u;
+        }
+        if (!SyncSourceMetrics())
+        {
+            return FailRuntimeExtraction(
+                "source", "Resumable source metrics exceeded their runtime representation");
+        }
     }
 
     const kisak::fastfile::JobStage stageBeforeStep =

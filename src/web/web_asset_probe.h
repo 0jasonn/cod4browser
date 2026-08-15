@@ -21,6 +21,10 @@ enum class WebAssetProbeResult : int32_t
     IwdEntryMismatch = 28,
     IwdEncrypted = 29,
     IwdCompression = 30,
+    FastfileHeader = 40,
+    FastfileAuthenticated = 41,
+    FastfileVersion = 42,
+    FastfileCompression = 43,
 };
 
 // These probes operate on caller-owned, bounded byte windows. Browser file
@@ -40,4 +44,11 @@ extern "C" int32_t KisakWeb_ProbeIwd(
     const uint8_t *central,
     uint32_t centralLength,
     uint32_t centralOffset,
+    uint32_t fileSize);
+
+// Validates only the bounded 12-byte IWff header and the following two-byte
+// zlib header. It deliberately does not inflate or traverse a retail zone.
+extern "C" int32_t KisakWeb_ProbeFastfileHeader(
+    const uint8_t *head,
+    uint32_t headLength,
     uint32_t fileSize);

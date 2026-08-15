@@ -1,7 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { crc32 } from "node:zlib";
+import { createInstallDirectory as createM12InstallDirectory } from "./install_fixture.mjs";
 import {
     createSyntheticIwd,
     createSyntheticIwi,
@@ -14,14 +13,6 @@ import {
 
 const ENGINE_ASSET_CACHE_LIMIT = 4 * 1024 * 1024;
 const IWI_PATH = "images/synthetic_engine_asset.iwi";
-const SYNTHETIC_LOCALIZATION = [
-    "english",
-    "",
-    "SYNTHETIC_ENGINE_ASSET",
-    '"Synthetic engine asset fixture"',
-    "",
-].join("\n");
-
 function expectProductionWorldSurfaceUploads(uploads)
 {
     const vertexUpload = uploads.find(
@@ -87,15 +78,7 @@ function engineArchive(entries)
 
 async function createInstallDirectory(testInfo, name, archive)
 {
-    const directory = testInfo.outputPath(name);
-    await mkdir(path.join(directory, "main"), { recursive: true });
-    await writeFile(
-        path.join(directory, "localization.txt"),
-        SYNTHETIC_LOCALIZATION,
-        "utf8",
-    );
-    await writeFile(path.join(directory, "main", "iw_00.iwd"), archive);
-    return directory;
+    return createM12InstallDirectory(testInfo, name, { primaryIwd: archive });
 }
 
 async function usePortableFolderPicker(page)
@@ -373,7 +356,11 @@ async function countFramebufferColors(page, expectedRgba)
                     return;
                 }
                 const counts = expected.map(() => 0);
+                let activeSurfacePixels = 0;
                 for (let offset = 0; offset < pixels.length; offset += 4) {
+                    if (Math.max(pixels[offset], pixels[offset + 1], pixels[offset + 2]) > 20) {
+                        activeSurfacePixels += 1;
+                    }
                     for (let index = 0; index < expected.length; index += 1) {
                         const color = expected[index];
                         if (pixels[offset] === color[0] &&
@@ -385,7 +372,7 @@ async function countFramebufferColors(page, expectedRgba)
                         }
                     }
                 }
-                resolve({ counts, width, height });
+                resolve({ counts, activeSurfacePixels, width, height });
             });
         });
     }), expectedRgba);
@@ -495,6 +482,8 @@ test("loads a stored IWI through the engine cache and releases its bytes", async
         materialAssetIndex: 0,
         worldAssetIndex: 1,
         materialIdentity: 1,
+        worldIdentity: 2,
+        registeredAssetCount: 2,
         sourceSurfaceIndex: 0,
         worldVertexCount: 6,
         worldIndexCount: 12,
@@ -516,10 +505,19 @@ test("loads a stored IWI through the engine cache and releases its bytes", async
     expect(result.engineWorldSurface).toMatchObject({
         maxStepBytes: 64 * 1024,
         maxStepRecords: 64,
+        maxSourceChunkBytes: 37,
+        needsSource: false,
         compressedBytesConsumed: result.engineWorldSurface.compressedBytes,
         inflatedBytesProduced: result.engineWorldSurface.inflatedBytes,
         parsedBytes: 1434,
     });
+    expect(result.engineWorldSurface.sourceBytesReceived)
+        .toBe(result.engineWorldSurface.fastfileBytes);
+    expect(result.engineWorldSurface.sourceBytesConsumed)
+        .toBe(result.engineWorldSurface.fastfileBytes);
+    expect(result.engineWorldSurface.sourceFeedCount)
+        .toBe(Math.ceil(result.engineWorldSurface.fastfileBytes / 37));
+    expect(result.engineWorldSurface.sourceFeedCount).toBeGreaterThan(1);
     expect(result.engineWorldSurface.stepCount).toBeGreaterThanOrEqual(2);
     expect(result.engineWorldSurface.recordsProcessed).toBeGreaterThan(0);
     expect(Object.values(result.engineWorldSurface).some(Array.isArray)).toBe(false);
@@ -529,6 +527,13 @@ test("loads a stored IWI through the engine cache and releases its bytes", async
     expect(result.engineWorldSurfaceEvents.filter(
         (event) => event.state === "ready",
     )).toHaveLength(1);
+    const sourceWaitEvents = result.engineWorldSurfaceEvents.filter(
+        (event) => event.state === "loading" && event.pipelineStage === "source-wait",
+    );
+    expect(sourceWaitEvents.length).toBeGreaterThan(1);
+    expect(sourceWaitEvents.every(
+        (event) => event.needsSource && event.stepSourceBytes === 0,
+    )).toBe(true);
     expect(result.rendererSurface).toMatchObject({
         state: "ready",
         vertexCount: 4,
@@ -564,7 +569,11 @@ test("loads a stored IWI through the engine cache and releases its bytes", async
     )).toBe(true);
 
     const beforeLoss = await countFramebufferColors(page, expectedRgba);
-    expect(beforeLoss.counts.every((count) => count > 100)).toBe(true);
+    // M18's real vertcol_simple2d contract modulates the sampled texture by
+    // interpolated vertex color, so exact source texels are no longer the
+    // correct framebuffer oracle. Texture upload is asserted above; this
+    // verifies that the modulated indexed surface has substantial coverage.
+    expect(beforeLoss.activeSurfacePixels).toBeGreaterThan(10_000);
     const resourceGeneration = result.rendererTexture.resourceGeneration;
     const baselineRecoveryCount = result.rendererTexture.recoveryCount;
     const rendererEventCount = result.rendererEvents.length;
@@ -730,7 +739,13 @@ test("loads a stored IWI through the engine cache and releases its bytes", async
     expect(recovered.engineWorldSurfaceEvents).toHaveLength(engineWorldSurfaceEventCount);
 
     const afterRestore = await countFramebufferColors(page, expectedRgba);
-    expect(afterRestore.counts.every((count) => count > 100)).toBe(true);
+    expect(afterRestore.activeSurfacePixels).toBeGreaterThan(10_000);
+    expect(afterRestore.activeSurfacePixels).toBeGreaterThan(
+        beforeLoss.activeSurfacePixels * 0.95,
+    );
+    expect(afterRestore.activeSurfacePixels).toBeLessThan(
+        beforeLoss.activeSurfacePixels * 1.05,
+    );
 });
 
 test("streams a deflated IWI while animation frames advance", async ({ page }, testInfo) => {
@@ -862,7 +877,7 @@ test("a synchronous ready listener cannot publish texture state after cancellati
     )).toBe(false);
 });
 
-test("keeps valid unsupported IWI formats outside the renderer backend", async ({ page }, testInfo) => {
+test("decodes a DXT1 IWI through the renderer-owned texture path", async ({ page }, testInfo) => {
     await usePortableFolderPicker(page);
     await observeEngineAsset(page);
     const iwi = createSyntheticIwi({
@@ -878,13 +893,13 @@ test("keeps valid unsupported IWI formats outside the renderer backend", async (
     }]);
     const directory = await createInstallDirectory(
         testInfo,
-        "engine-iwi-renderer-unsupported",
+        "engine-iwi-renderer-dxt1",
         archive,
     );
 
     await importArchive(page, directory);
     await waitForState(page, "engineAsset", "ready");
-    await waitForState(page, "rendererTexture", "unsupported");
+    await waitForState(page, "rendererTexture", "ready");
     const frameAtResult = await page.evaluate(
         () => globalThis.__syntheticEngineAssetRafTicks,
     );
@@ -914,19 +929,22 @@ test("keeps valid unsupported IWI formats outside the renderer backend", async (
         },
     ));
     expect(result.rendererTexture).toMatchObject({
-        state: "unsupported",
+        state: "ready",
         generation: result.engineAsset.generation,
         path: IWI_PATH,
         sourceFormat: IWI_FORMAT_DXT1,
         width: 4,
         height: 4,
-        recoveryBytes: 0,
-        resident: false,
+        mipLevel: 0,
+        payloadBytes: 64,
+        gpuFormat: "rgba8",
+        recoveryBytes: 64,
+        resident: true,
     });
-    expect(result.rendererTexture.message).toMatch(/unsupported|not uploaded/i);
+    expect(result.rendererTexture.message).toMatch(/uploaded|retained/i);
     expect(result.texImage2DCalls.some(
         ({ width, height }) => width === 4 && height === 4,
-    )).toBe(false);
+    )).toBe(true);
     expect(result.archive.state).toBe("ready");
     expect(result.assets.state).toBe("ready");
     expect(result.runtimeState).toBe("running");

@@ -2,13 +2,18 @@
 #include <qcommon/cmd.h>
 #include <universal/dvar.h>
 #include <web/web_archive_job.h>
+#include <web/web_cooperative_scheduler.h>
 #include <web/web_engine_asset.h>
 #include <web/web_engine_surface.h>
+#include <web/web_engine_scheduler.h>
 #include <web/web_filesystem.h>
+#include <web/web_qcommon_runtime.h>
+#include <web/web_retail_census_job.h>
 #include <web/web_renderer.h>
 #include <web/web_system.h>
 
 #include <cmath>
+#include <array>
 #include <cstdint>
 #include <cstring>
 
@@ -25,6 +30,7 @@ enum class BootstrapPhase : std::uint8_t
 };
 
 BootstrapPhase g_bootstrapPhase = BootstrapPhase::Initializing;
+WebFrameInfo g_scheduledFrame{};
 
 bool NearlyEqual(float actual, float expected, float tolerance = 0.0001f)
 {
@@ -119,11 +125,89 @@ bool InitializeHeadlessEngineSlice()
     return true;
 }
 
-void RunHeadlessEngineFrame(const WebFrameInfo &frame)
+using kisak::web::CooperativeTaskBudget;
+using kisak::web::CooperativeTaskHandle;
+using kisak::web::CooperativeTaskResult;
+using kisak::web::CooperativeTaskSpec;
+using kisak::web::CooperativeTaskState;
+
+CooperativeTaskResult FilesystemTask(
+    std::uint32_t,
+    const CooperativeTaskBudget &,
+    void *)
 {
     WebFs_PumpCompletions();
+    return {CooperativeTaskState::Progress, 0u, 0u};
+}
+
+void CancelFilesystemTask(void *)
+{
+    WebFs_CancelAll();
+}
+
+CooperativeTaskResult QcommonTask(
+    std::uint32_t,
+    const CooperativeTaskBudget &,
+    void *userData)
+{
+    const auto *frame = static_cast<const WebFrameInfo *>(userData);
+    WebQcommonRuntime_Frame(*frame);
+    return {CooperativeTaskState::Progress, 0u, 0u};
+}
+
+void CancelQcommonTask(void *)
+{
+    KisakWeb_CancelQcommonRuntime();
+}
+
+CooperativeTaskResult RetailCensusTask(
+    std::uint32_t,
+    const CooperativeTaskBudget &,
+    void *)
+{
+    const WebRetailCensusFrameResult result = WebRetailCensusJob_Frame();
+    return {CooperativeTaskState::Progress, result.bytesUsed, result.recordsUsed};
+}
+
+void CancelRetailCensusTask(void *)
+{
+    WebRetailCensusJob_Cancel();
+}
+
+CooperativeTaskResult ArchiveTask(
+    std::uint32_t,
+    const CooperativeTaskBudget &,
+    void *)
+{
     WebArchiveJob_Frame();
+    return {CooperativeTaskState::Progress, 0u, 0u};
+}
+
+void CancelArchiveTask(void *)
+{
+    WebArchiveJob_Cancel();
+}
+
+CooperativeTaskResult EngineAssetTask(
+    std::uint32_t,
+    const CooperativeTaskBudget &,
+    void *)
+{
     WebEngineAsset_Frame();
+    return {CooperativeTaskState::Progress, 0u, 0u};
+}
+
+void CancelEngineAssetTask(void *)
+{
+    (void)WebEngineAsset_Cancel();
+}
+
+CooperativeTaskResult CommandTask(
+    std::uint32_t,
+    const CooperativeTaskBudget &,
+    void *userData)
+{
+    const auto *frame = static_cast<const WebFrameInfo *>(userData);
     Cbuf_Execute(0, 0);
     if (!g_frameCommandReported &&
         std::strcmp(Dvar_GetString("web_frame_command"), "executed") == 0)
@@ -136,17 +220,21 @@ void RunHeadlessEngineFrame(const WebFrameInfo &frame)
             "ready",
             Dvar_GetString("web_qcommon"),
             Dvar_GetString("web_frame_command"),
-            frame.pumpTick);
+            frame->pumpTick);
     }
+    return {CooperativeTaskState::Progress, 0u, 1u};
 }
 
-void RenderFrame(const WebFrameInfo &frame, void *)
+CooperativeTaskResult SurfaceTask(
+    std::uint32_t,
+    const CooperativeTaskBudget &,
+    void *userData)
 {
-    RunHeadlessEngineFrame(frame);
+    const auto *frame = static_cast<const WebFrameInfo *>(userData);
     if (g_bootstrapPhase == BootstrapPhase::ExtractingSurface)
     {
         const WebEngineSurfaceFrameResult surfaceResult =
-            WebEngineSurface_Frame(frame);
+            WebEngineSurface_Frame(*frame);
         if (surfaceResult == WebEngineSurfaceFrameResult::Ready)
         {
             if (WebRenderer_Initialize())
@@ -160,6 +248,7 @@ void RenderFrame(const WebFrameInfo &frame, void *)
             {
                 g_bootstrapPhase = BootstrapPhase::Failed;
             }
+            return {CooperativeTaskState::Complete, 0u, 1u};
         }
         else if (surfaceResult == WebEngineSurfaceFrameResult::Failed)
         {
@@ -167,9 +256,56 @@ void RenderFrame(const WebFrameInfo &frame, void *)
             Web_EmitRuntimeState(
                 "failed",
                 "The bounded synthetic fastfile surface could not be incrementally extracted, converted, and submitted");
+            return {CooperativeTaskState::Failed, 0u, 1u};
+        }
+        return {CooperativeTaskState::Progress, 0u, 1u};
+    }
+    return {CooperativeTaskState::Idle, 0u, 0u};
+}
+
+CooperativeTaskResult RendererTask(
+    std::uint32_t,
+    const CooperativeTaskBudget &,
+    void *userData)
+{
+    const auto *frame = static_cast<const WebFrameInfo *>(userData);
+    WebRenderer_DrawFrame(*frame);
+    return {CooperativeTaskState::Progress, 0u, 1u};
+}
+
+bool InitializeEngineScheduler()
+{
+    if (!WebEngineScheduler_Initialize())
+    {
+        return false;
+    }
+    constexpr std::size_t TASK_COUNT = 8u;
+    const std::array<CooperativeTaskSpec, TASK_COUNT> tasks = {{
+        {"filesystem-completions", 10u, {0u, 8u}, FilesystemTask, CancelFilesystemTask, nullptr},
+        {"qcommon", 20u, {14u, 1u}, QcommonTask, CancelQcommonTask, &g_scheduledFrame},
+        {"retail-census", 30u, {64u * 1024u, 64u}, RetailCensusTask, CancelRetailCensusTask, nullptr},
+        {"archive", 40u, {64u * 1024u, 64u}, ArchiveTask, CancelArchiveTask, nullptr},
+        {"engine-asset", 50u, {64u * 1024u, 64u}, EngineAssetTask, CancelEngineAssetTask, nullptr},
+        {"command-buffer", 60u, {4u * 1024u, 1u}, CommandTask, nullptr, &g_scheduledFrame},
+        {"world-surface", 70u, {64u * 1024u, 64u}, SurfaceTask, nullptr, &g_scheduledFrame},
+        {"renderer", 80u, {0u, 1u}, RendererTask, nullptr, &g_scheduledFrame},
+    }};
+    std::array<CooperativeTaskHandle, TASK_COUNT> handles{};
+    for (std::size_t index = 0u; index < tasks.size(); ++index)
+    {
+        if (!WebEngineScheduler_Register(tasks[index], handles[index]))
+        {
+            WebEngineScheduler_Shutdown();
+            return false;
         }
     }
-    WebRenderer_DrawFrame(frame);
+    return true;
+}
+
+void RenderFrame(const WebFrameInfo &frame, void *)
+{
+    g_scheduledFrame = frame;
+    WebEngineScheduler_RunFrame(frame);
 }
 } // namespace
 
@@ -204,8 +340,14 @@ int main()
         return 1;
     }
     g_bootstrapPhase = BootstrapPhase::ExtractingSurface;
+    if (!InitializeEngineScheduler())
+    {
+        Web_EmitRuntimeState("failed", "The cooperative engine scheduler could not initialize");
+        return 1;
+    }
     if (!Web_StartFramePump(RenderFrame, nullptr))
     {
+        WebEngineScheduler_Shutdown();
         Web_EmitRuntimeState("failed", "The browser frame pump could not start");
         return 1;
     }

@@ -259,6 +259,8 @@ test("boots the headless engine slice and renders through WebGL2", async ({ page
         materialAssetIndex: 0,
         worldAssetIndex: 1,
         materialIdentity: 1,
+        worldIdentity: 2,
+        registeredAssetCount: 2,
         sourceSurfaceIndex: 0,
         worldVertexCount: 6,
         worldIndexCount: 12,
@@ -280,10 +282,19 @@ test("boots the headless engine slice and renders through WebGL2", async ({ page
     expect(runtimeSnapshot.engineWorldSurface).toMatchObject({
         maxStepBytes: 64 * 1024,
         maxStepRecords: 64,
+        maxSourceChunkBytes: 37,
+        needsSource: false,
         compressedBytesConsumed: runtimeSnapshot.engineWorldSurface.compressedBytes,
         inflatedBytesProduced: runtimeSnapshot.engineWorldSurface.inflatedBytes,
         parsedBytes: 1434,
     });
+    expect(runtimeSnapshot.engineWorldSurface.sourceBytesReceived)
+        .toBe(runtimeSnapshot.engineWorldSurface.fastfileBytes);
+    expect(runtimeSnapshot.engineWorldSurface.sourceBytesConsumed)
+        .toBe(runtimeSnapshot.engineWorldSurface.fastfileBytes);
+    expect(runtimeSnapshot.engineWorldSurface.sourceFeedCount)
+        .toBe(Math.ceil(runtimeSnapshot.engineWorldSurface.fastfileBytes / 37));
+    expect(runtimeSnapshot.engineWorldSurface.sourceFeedCount).toBeGreaterThan(1);
     expect(runtimeSnapshot.engineWorldSurface.stepCount).toBeGreaterThanOrEqual(2);
     expect(runtimeSnapshot.engineWorldSurface.recordsProcessed).toBeGreaterThan(0);
     expect(Object.values(runtimeSnapshot.engineWorldSurface).some(Array.isArray)).toBe(false);
@@ -353,6 +364,9 @@ test("boots the headless engine slice and renders through WebGL2", async ({ page
     const inflateEventIndex = runtimeSnapshot.engineWorldSurfaceEvents.findIndex(
         (event) => event.state === "loading" && event.pipelineStage === "inflate",
     );
+    const sourceWaitEventIndex = runtimeSnapshot.engineWorldSurfaceEvents.findIndex(
+        (event) => event.state === "loading" && event.pipelineStage === "source-wait",
+    );
     const traverseEventIndex = runtimeSnapshot.engineWorldSurfaceEvents.findIndex(
         (event) => event.state === "loading" && event.pipelineStage === "traverse",
     );
@@ -360,7 +374,8 @@ test("boots the headless engine slice and renders through WebGL2", async ({ page
         (event) => event.state === "ready" && event.pipelineStage === "complete",
     );
     expect(beginEventIndex).toBeGreaterThanOrEqual(0);
-    expect(inflateEventIndex).toBeGreaterThan(beginEventIndex);
+    expect(sourceWaitEventIndex).toBeGreaterThan(beginEventIndex);
+    expect(inflateEventIndex).toBeGreaterThan(sourceWaitEventIndex);
     expect(traverseEventIndex).toBeGreaterThan(inflateEventIndex);
     expect(completeEventIndex).toBeGreaterThan(traverseEventIndex);
     expect(progressEvents.length).toBeGreaterThanOrEqual(2);
@@ -372,15 +387,27 @@ test("boots the headless engine slice and renders through WebGL2", async ({ page
             extractionGeneration: runtimeSnapshot.engineWorldSurface.extractionGeneration,
             maxStepBytes: 64 * 1024,
             maxStepRecords: 64,
+            maxSourceChunkBytes: 37,
         });
         expect(progress.stepInputBytes).toBeLessThanOrEqual(progress.maxStepBytes);
         expect(progress.stepOutputBytes).toBeLessThanOrEqual(progress.maxStepBytes);
         expect(progress.stepParsedBytes).toBeLessThanOrEqual(progress.maxStepBytes);
         expect(progress.stepRecords).toBeLessThanOrEqual(progress.maxStepRecords);
+        expect(progress.stepSourceBytes).toBeLessThanOrEqual(progress.maxSourceChunkBytes);
+        if (progress.pipelineStage === "source-wait") {
+            expect(progress.needsSource).toBe(true);
+            expect(progress.stepSourceBytes).toBe(0);
+        }
         if (index > 0) {
             const previous = progressEvents[index - 1];
             expect(progress.framePumpTick).toBeGreaterThan(previous.framePumpTick);
-            expect(progress.stepCount).toBe(previous.stepCount + 1);
+            expect(progress.stepCount).toBeGreaterThanOrEqual(previous.stepCount);
+            expect(progress.stepCount).toBeLessThanOrEqual(previous.stepCount + 1);
+            expect(progress.sourceFeedCount).toBeGreaterThanOrEqual(previous.sourceFeedCount);
+            expect(progress.sourceBytesReceived)
+                .toBeGreaterThanOrEqual(previous.sourceBytesReceived);
+            expect(progress.sourceBytesConsumed)
+                .toBeGreaterThanOrEqual(previous.sourceBytesConsumed);
             expect(progress.compressedBytesConsumed)
                 .toBeGreaterThanOrEqual(previous.compressedBytesConsumed);
             expect(progress.inflatedBytesProduced)

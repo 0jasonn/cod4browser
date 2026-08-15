@@ -524,6 +524,8 @@ bool SameExtracted(
         left.materialAssetIndex != right.materialAssetIndex ||
         left.worldAssetIndex != right.worldAssetIndex ||
         left.materialIdentity != right.materialIdentity ||
+        left.worldIdentity != right.worldIdentity ||
+        left.registeredAssetCount != right.registeredAssetCount ||
         left.sourceWorldVertexCount != right.sourceWorldVertexCount ||
         left.sourceWorldIndexCount != right.sourceWorldIndexCount ||
         left.sourceWorldSurfaceCount != right.sourceWorldSurfaceCount ||
@@ -729,6 +731,10 @@ void TestGoldenExtractionAndConversion()
         "world top-level table index retained");
     Require(extracted.materialIdentity == 1u,
         "stable job-local material identity retained after block-zero reuse");
+    Require(extracted.worldIdentity == 2u,
+        "stable job-local world identity follows the registered material");
+    Require(extracted.registeredAssetCount == 2u,
+        "registry owns exactly the accepted top-level asset envelope");
     Require(extracted.sourceWorldIndexCount == 12u, "source index count retained");
     Require(extracted.sourceWorldSurfaceCount == 1u, "source surface count retained");
     Require(extracted.sourceSurfaceIndex == 0u, "source surface index retained");
@@ -1227,7 +1233,10 @@ void TestMaterialNamesAndAliases()
     RequireFailureAtomic(empty, Error::MaterialNameInvalid,
         "empty material name");
 
-    for (std::uint8_t invalid : {0x01u, 0x1fu, 0x7fu, 0x80u, 0xffu})
+    constexpr std::array<std::uint8_t, 5> invalidNameBytes = {
+        0x01u, 0x1fu, 0x7fu, 0x80u, 0xffu,
+    };
+    for (std::uint8_t invalid : invalidNameBytes)
     {
         SyntheticFastfile fixture = golden;
         fixture.inflated[fixture.materialNameOffset + 1u] = invalid;
@@ -1676,12 +1685,215 @@ void TestIncrementalInflateDrainAndBlockZeroHighWater()
         "block-zero declaration above exact peak is rejected");
 }
 
+void TestResumableSourceStreaming()
+{
+    const SyntheticFastfile fixture;
+    const ExtractedWorldSurface expected = ExtractGolden(fixture);
+    constexpr StepBudget budget{5u, 2u};
+
+    Limits limits;
+    limits.maxFileBytes = static_cast<std::uint32_t>(fixture.file.size());
+    limits.maxSourceChunkBytes = 7u;
+    WorldSurfaceExtractionJob job;
+    RequireResult(job.BeginStreaming(limits), Error::None,
+        "streaming extraction begins without a complete source allocation");
+    Require(job.NeedsSource() && !job.SourceFinalReceived(),
+        "new streaming job advertises initial source starvation");
+    const StepReport starved = job.Step(budget);
+    Require(starved.progress == JobProgress::Running && starved.needsSource &&
+            starved.sourceBytesConsumedThisStep == 0u &&
+            starved.compressedBytesConsumedThisStep == 0u &&
+            starved.inflatedBytesProducedThisStep == 0u,
+        "source starvation is a zero-work resumable state");
+
+    std::size_t sourceOffset = 0u;
+    std::size_t stepGuard = 0u;
+    std::uint32_t dataFeeds = 0u;
+    while (sourceOffset < fixture.file.size())
+    {
+        Require(job.NeedsSource(),
+            "producer feeds only after the decoder applies backpressure");
+        const std::size_t count = std::min<std::size_t>(
+            limits.maxSourceChunkBytes, fixture.file.size() - sourceOffset);
+        std::vector<std::uint8_t> chunk(
+            fixture.file.begin() + static_cast<std::ptrdiff_t>(sourceOffset),
+            fixture.file.begin() + static_cast<std::ptrdiff_t>(sourceOffset + count));
+        RequireResult(job.FeedSource(chunk, false), Error::None,
+            "one bounded non-final source chunk is accepted");
+        ++dataFeeds;
+        sourceOffset += count;
+        std::fill(chunk.begin(), chunk.end(), 0xa5u);
+
+        while (job.Progress() == JobProgress::Running && !job.NeedsSource())
+        {
+            const StepReport report = job.Step(budget);
+            Require(report.sourceBytesConsumedThisStep <= budget.maxBytes &&
+                    report.compressedBytesConsumedThisStep <= budget.maxBytes &&
+                    report.inflatedBytesProducedThisStep <= budget.maxBytes &&
+                    report.traversedBytesThisStep <= budget.maxBytes &&
+                    report.recordsProcessedThisStep <= budget.maxRecords,
+                "streaming work remains independently bounded per Step");
+            Require(++stepGuard < (1u << 22u),
+                "streaming extraction remains within its iteration guard");
+        }
+    }
+    Require(job.Progress() == JobProgress::Running && job.NeedsSource(),
+        "zlib completion waits for an explicit final marker");
+    RequireResult(job.FeedSource({}, true), Error::None,
+        "empty final feed closes a fully delivered compressed stream");
+    while (job.Progress() == JobProgress::Running)
+    {
+        (void)job.Step(budget);
+        Require(++stepGuard < (1u << 22u),
+            "finalized streaming extraction terminates within its guard");
+    }
+    Require(job.Progress() == JobProgress::Succeeded,
+        "arbitrarily chunked source reaches successful traversal");
+    Require(job.SourceFinalReceived() &&
+            job.SourceBytesReceived() == fixture.file.size() &&
+            job.SourceBytesConsumed() == fixture.file.size() &&
+            job.SourceFeedCount() == dataFeeds + 1u,
+        "source lifecycle retains exact feed and byte accounting");
+    ExtractedWorldSurface streamed;
+    Require(job.TakeResult(streamed) && SameExtracted(streamed, expected),
+        "streamed source produces the exact synchronous output");
+    RequireResult(job.FeedSource({}, true), Error::SourceNotReady,
+        "completed job refuses source mutation");
+
+    for (std::size_t split = 1u; split <= PREFIX_SIZE; ++split)
+    {
+        WorldSurfaceExtractionJob splitJob;
+        RequireResult(splitJob.BeginStreaming(), Error::None,
+            "split-prefix streaming job begins");
+        RequireResult(splitJob.FeedSource(
+                std::span<const std::uint8_t>(fixture.file).first(split), false),
+            Error::None, "first split-prefix fragment is accepted");
+        while (!splitJob.NeedsSource() &&
+            splitJob.Progress() == JobProgress::Running)
+        {
+            (void)splitJob.Step({3u, 1u});
+        }
+        Require(splitJob.Progress() == JobProgress::Running &&
+                splitJob.NeedsSource(),
+            "every prefix boundary pauses cleanly for its continuation");
+        RequireResult(splitJob.FeedSource(
+                std::span<const std::uint8_t>(fixture.file).subspan(split), true),
+            Error::None, "remaining split-prefix source is accepted as final");
+        while (splitJob.Progress() == JobProgress::Running)
+        {
+            (void)splitJob.Step({17u, 2u});
+        }
+        ExtractedWorldSurface splitOutput;
+        Require(splitJob.Progress() == JobProgress::Succeeded &&
+                splitJob.TakeResult(splitOutput) &&
+                SameExtracted(splitOutput, expected),
+            "prefix partition does not alter extraction output");
+    }
+}
+
+void TestStreamingSourceFailures()
+{
+    const SyntheticFastfile fixture;
+    WorldSurfaceExtractionJob idle;
+    RequireResult(idle.FeedSource({}, true), Error::SourceNotReady,
+        "idle job refuses source feeds");
+
+    Limits smallChunks;
+    smallChunks.maxSourceChunkBytes = 8u;
+    WorldSurfaceExtractionJob pressure;
+    RequireResult(pressure.BeginStreaming(smallChunks), Error::None,
+        "backpressure test stream begins");
+    const std::array<std::uint8_t, 4> first = {'I', 'W', 'f', 'f'};
+    RequireResult(pressure.FeedSource(first, false), Error::None,
+        "initial source fragment is accepted");
+    const std::uint64_t receivedBefore = pressure.SourceBytesReceived();
+    const std::uint32_t feedsBefore = pressure.SourceFeedCount();
+    RequireResult(pressure.FeedSource(first, false), Error::SourceBackpressure,
+        "unread source chunk applies backpressure");
+    Require(pressure.SourceBytesReceived() == receivedBefore &&
+            pressure.SourceFeedCount() == feedsBefore,
+        "backpressure failure is source-state atomic");
+    while (!pressure.NeedsSource())
+    {
+        (void)pressure.Step({1u, 1u});
+    }
+    const std::array<std::uint8_t, 9> oversized{};
+    RequireResult(pressure.FeedSource(oversized, false),
+        Error::SourceChunkTooLarge,
+        "source chunk limit is enforced before allocation");
+    Require(pressure.SourceBytesReceived() == receivedBefore &&
+            pressure.SourceFeedCount() == feedsBefore,
+        "oversized feed failure is source-state atomic");
+
+    WorldSurfaceExtractionJob finalOnce;
+    RequireResult(finalOnce.BeginStreaming(), Error::None,
+        "final-marker test stream begins");
+    RequireResult(finalOnce.FeedSource(
+            std::span<const std::uint8_t>(fixture.file).first(PREFIX_SIZE), true),
+        Error::None, "first final marker is accepted");
+    RequireResult(finalOnce.FeedSource({}, true), Error::SourceAlreadyFinal,
+        "a second final marker is rejected atomically");
+
+    Limits exactPrefixLimit;
+    exactPrefixLimit.maxFileBytes = PREFIX_SIZE;
+    exactPrefixLimit.maxSourceChunkBytes = PREFIX_SIZE;
+    WorldSurfaceExtractionJob totalLimit;
+    RequireResult(totalLimit.BeginStreaming(exactPrefixLimit), Error::None,
+        "total source-limit stream begins");
+    RequireResult(totalLimit.FeedSource(
+            std::span<const std::uint8_t>(fixture.file).first(PREFIX_SIZE), false),
+        Error::None, "exact total source limit is accepted");
+    (void)totalLimit.Step();
+    Require(totalLimit.NeedsSource(),
+        "exact prefix without payload remains resumably starved");
+    const std::array<std::uint8_t, 1> oneByte = {0u};
+    RequireResult(totalLimit.FeedSource(oneByte, true), Error::FileTooLarge,
+        "source total limit rejects the first excess byte");
+
+    const auto requireStreamingFailure = [](
+        std::span<const std::uint8_t> bytes,
+        Error expected,
+        std::string_view context)
+    {
+        WorldSurfaceExtractionJob failed;
+        RequireResult(failed.BeginStreaming(), Error::None,
+            "malformed streaming job begins");
+        RequireResult(failed.FeedSource(bytes, true), Error::None,
+            "malformed final source is accepted by the source seam");
+        std::size_t guard = 0u;
+        while (failed.Progress() == JobProgress::Running)
+        {
+            (void)failed.Step({31u, 2u});
+            Require(++guard < (1u << 20u),
+                "malformed streaming job terminates within its guard");
+        }
+        RequireResult(failed.Failure(), expected, context);
+    };
+
+    requireStreamingFailure(
+        std::span<const std::uint8_t>(fixture.file).first(PREFIX_SIZE - 1u),
+        Error::PrefixTruncated,
+        "final marker before a complete prefix is deterministic");
+    requireStreamingFailure(
+        std::span<const std::uint8_t>(fixture.file).first(fixture.file.size() - 1u),
+        Error::InflateTruncated,
+        "final marker before a complete zlib stream is deterministic");
+    std::vector<std::uint8_t> trailing = fixture.file;
+    trailing.push_back(0x5au);
+    requireStreamingFailure(trailing, Error::InflateTrailingData,
+        "bytes after streamed zlib completion are rejected");
+}
+
 void TestResultStrings()
 {
-    const std::array<Error, 52> errors = {
+    const std::array<Error, 56> errors = {
         Error::None,
         Error::InvalidArgument,
         Error::InvalidStepBudget,
+        Error::SourceChunkTooLarge,
+        Error::SourceBackpressure,
+        Error::SourceAlreadyFinal,
+        Error::SourceNotReady,
         Error::FileTooLarge,
         Error::PrefixTruncated,
         Error::InvalidMagic,
@@ -1825,6 +2037,8 @@ int main()
         TestIncrementalBudgetFailuresAndErrorEquivalence);
     runner.Run("incremental inflate drain and block-zero high-water",
         TestIncrementalInflateDrainAndBlockZeroHighWater);
+    runner.Run("resumable source streaming", TestResumableSourceStreaming);
+    runner.Run("streaming source failures", TestStreamingSourceFailures);
     runner.Run("result strings", TestResultStrings);
     return runner.Result();
 }

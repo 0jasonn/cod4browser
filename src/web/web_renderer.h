@@ -1,6 +1,7 @@
 #pragma once
 
 #include <web/web_renderer_surface.h>
+#include <web/web_shader_compatibility.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -34,6 +35,29 @@ struct WebRendererTextureState
     bool resident;
 };
 
+struct WebRendererShaderState
+{
+    const char *substitutionId;
+    std::uint32_t vertexSourceHash;
+    std::uint32_t fragmentSourceHash;
+    std::uint32_t submissionGeneration;
+    std::uint32_t resourceGeneration;
+    std::uint32_t recoveryCount;
+    std::uint32_t drawCount;
+    bool retained;
+    bool resident;
+    bool firstDrawCompleted;
+};
+
+enum class WebRendererShaderResult : std::uint8_t
+{
+    Success = 0,
+    InvalidDescriptor,
+    UnsupportedSubstitution,
+    AllocationFailed,
+    BackendFailure,
+};
+
 enum class WebRendererTextureResult : std::uint8_t
 {
     Success = 0,
@@ -45,6 +69,7 @@ enum class WebRendererTextureResult : std::uint8_t
 };
 
 const char *WebRenderer_TextureResultString(WebRendererTextureResult result) noexcept;
+const char *WebRenderer_ShaderResultString(WebRendererShaderResult result) noexcept;
 
 // Validates and copies one callback-scoped indexed surface plus its draw. The
 // renderer retains only bounded backend-neutral values, never the caller's
@@ -73,6 +98,18 @@ bool WebRenderer_ClearBootstrapTexture();
 // Reports only backend-neutral ownership/residency information. A retained
 // texture can be non-resident while the browser WebGL context is lost.
 WebRendererTextureState WebRenderer_GetBootstrapTextureState();
+
+// Retains one registry-owned WebGL2 compatibility program and atomically
+// replaces its GPU program when a context is available. Imported files select
+// the stable ID only; shader source always comes from compiled-in port code.
+WebRendererShaderResult WebRenderer_SetShaderCompatibility(
+    const kisak::web::WebGL2ShaderSubstitution &substitution);
+
+// Drops the retail compatibility program and returns drawing to the bootstrap
+// pipeline. Context-loss recovery never keeps a stale imported generation.
+bool WebRenderer_ClearShaderCompatibility();
+
+WebRendererShaderState WebRenderer_GetShaderCompatibilityState();
 
 // Draws one non-blocking browser frame. Engine work remains outside this seam.
 void WebRenderer_DrawFrame(const WebFrameInfo &frame);

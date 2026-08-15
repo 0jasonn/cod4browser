@@ -6,10 +6,35 @@ const APP_DIRECTORY = "kisakcod-web";
 const IMPORTS_DIRECTORY = "imports";
 const STORAGE_LOCK_NAME = "kisakcod-web-assets";
 const STORAGE_CHANNEL_NAME = "kisakcod-web-assets";
-const MANIFEST_SCHEMA = 1;
+const MANIFEST_SCHEMA = 2;
 const MAX_ADAPTER_READ = 1024 * 1024;
 const PROBE_WINDOW_SIZE = 4096;
 const ZIP_TAIL_WINDOW_SIZE = 22 + 0xffff;
+
+const BASE_ARCHIVES = Object.freeze(Array.from(
+    { length: 14 },
+    (_, index) => `main/iw_${String(index).padStart(2, "0")}.iwd`,
+));
+const LOCALIZED_ARCHIVES = Object.freeze(Array.from(
+    { length: 7 },
+    (_, index) => `main/localized_english_iw${String(index).padStart(2, "0")}.iwd`,
+));
+const STARTUP_ZONES = Object.freeze([
+    "zone/english/code_post_gfx.ff",
+    "zone/english/ui.ff",
+    "zone/english/common.ff",
+]);
+const MAP_ZONE = "zone/english/killhouse.ff";
+
+export const M12_INSTALL_PROFILE = Object.freeze({
+    id: "sp-killhouse-english-v1",
+    language: "english",
+    map: "killhouse",
+    baseArchives: BASE_ARCHIVES,
+    localizedArchives: LOCALIZED_ARCHIVES,
+    startupZones: STARTUP_ZONES,
+    mapZone: MAP_ZONE,
+});
 
 export const REQUIRED_ASSETS = Object.freeze([
     Object.freeze({
@@ -17,14 +42,41 @@ export const REQUIRED_ASSETS = Object.freeze([
         minimumSize: 1,
         maximumSize: 4095,
         label: "Localization configuration",
+        kind: "localization",
     }),
-    Object.freeze({
-        path: "main/iw_00.iwd",
+    ...BASE_ARCHIVES.map((path) => Object.freeze({
+        path,
         minimumSize: 100,
         maximumSize: 512 * 1024 * 1024,
         label: "Base asset archive",
+        kind: "iwd",
+    })),
+    ...LOCALIZED_ARCHIVES.map((path) => Object.freeze({
+        path,
+        minimumSize: 100,
+        maximumSize: 512 * 1024 * 1024,
+        label: "English localized asset archive",
+        kind: "iwd",
+    })),
+    ...STARTUP_ZONES.map((path) => Object.freeze({
+        path,
+        minimumSize: 14,
+        maximumSize: 512 * 1024 * 1024,
+        label: "Single-player startup fastfile",
+        kind: "fastfile",
+    })),
+    Object.freeze({
+        path: MAP_ZONE,
+        minimumSize: 14,
+        maximumSize: 512 * 1024 * 1024,
+        label: "F.N.G. map fastfile",
+        kind: "fastfile",
     }),
 ]);
+
+const REQUIREMENT_BY_PATH = new Map(
+    REQUIRED_ASSETS.map((requirement) => [requirement.path, requirement]),
+);
 
 const PROBE_ERRORS = new Map([
     [1, "The browser passed an invalid probe window to WebAssembly."],
@@ -32,17 +84,21 @@ const PROBE_ERRORS = new Map([
     [10, "localization.txt must fit the engine's 4 KiB localization buffer."],
     [11, "localization.txt is empty, malformed UTF-8, or has no localization entries."],
     [12, "localization.txt names a language this engine build does not support."],
-    [20, "main/iw_00.iwd does not begin with a complete ZIP local-file header."],
-    [21, "main/iw_00.iwd has no valid ZIP end-of-central-directory record."],
+    [20, "The required IWD does not begin with a complete ZIP local-file header."],
+    [21, "The required IWD has no valid ZIP end-of-central-directory record."],
     [22, "Multi-disk ZIP archives are not supported for IWD files."],
     [23, "ZIP64 archives are outside this milestone's IWD boundary."],
-    [24, "main/iw_00.iwd contains no archive entries."],
-    [25, "main/iw_00.iwd declares an invalid central-directory range."],
+    [24, "The required IWD contains no archive entries."],
+    [25, "The required IWD declares an invalid central-directory range."],
     [26, "The IWD central-directory probe window is inconsistent."],
-    [27, "main/iw_00.iwd has an invalid central-directory header."],
+    [27, "The required IWD has an invalid central-directory header."],
     [28, "The first IWD local and central-directory entries do not agree."],
     [29, "Encrypted IWD entries are not supported."],
     [30, "The first IWD entry uses an unsupported compression method."],
+    [40, "A required fastfile does not have a complete IWffu100 header."],
+    [41, "Authenticated fastfiles are outside the browser port's legal local-file boundary."],
+    [42, "A required fastfile does not use COD4 fastfile version 5."],
+    [43, "A required fastfile does not begin with a supported zlib stream."],
 ]);
 
 export class AssetImportError extends Error
@@ -120,7 +176,7 @@ export function entriesFromFileList(fileList)
 
         const relativePath = segments.join("/");
         const foldedPath = relativePath.toLocaleLowerCase("en-US");
-        if (!REQUIRED_ASSETS.some((requirement) => requirement.path === foldedPath)) {
+        if (!REQUIREMENT_BY_PATH.has(foldedPath)) {
             continue;
         }
         if (selectedByPath.has(foldedPath)) {
@@ -132,28 +188,21 @@ export function entriesFromFileList(fileList)
         selectedByPath.set(foldedPath, file);
     }
 
-    const localization = selectedByPath.get("localization.txt");
-    if (!localization) {
-        throw importError(
-            "MISSING_MANIFEST",
-            "Select the Call of Duty 4 installation folder containing localization.txt.",
-        );
+    const canonical = new Map();
+    for (const requirement of REQUIRED_ASSETS) {
+        const file = selectedByPath.get(requirement.path);
+        if (!file) {
+            const message = requirement.path === "localization.txt"
+                ? "Select the Call of Duty 4 installation folder containing localization.txt."
+                : `The selected installation is missing ${requirement.path}.`;
+            throw importError("MISSING_MANIFEST", message);
+        }
+        canonical.set(requirement.path, requireFileLike(file, requirement.path));
     }
-    const archive = selectedByPath.get("main/iw_00.iwd");
-    if (!archive) {
-        throw importError(
-            "MISSING_MANIFEST",
-            "The selected installation is missing main/iw_00.iwd.",
-        );
-    }
-
-    return new Map([
-        ["localization.txt", requireFileLike(localization, "localization.txt")],
-        ["main/iw_00.iwd", requireFileLike(archive, "main/iw_00.iwd")],
-    ]);
+    return canonical;
 }
 
-async function getRequiredHandle(directory, kind, name)
+async function getRequiredHandle(directory, kind, name, displayPath = name)
 {
     try {
         return kind === "directory"
@@ -163,12 +212,34 @@ async function getRequiredHandle(directory, kind, name)
         if (error?.name === "NotFoundError") {
             throw importError(
                 "MISSING_MANIFEST",
-                `The selected installation is missing ${name}.`,
+                `The selected installation is missing ${displayPath}.`,
                 error,
             );
         }
         throw error;
     }
+}
+
+async function getRequiredFileFromDirectory(directory, relativePath, directoryCache = null)
+{
+    const segments = relativePath.split("/");
+    let current = directory;
+    let directoryPath = "";
+    for (const segment of segments.slice(0, -1)) {
+        directoryPath = directoryPath ? `${directoryPath}/${segment}` : segment;
+        let next = directoryCache?.get(directoryPath);
+        if (!next) {
+            next = await getRequiredHandle(current, "directory", segment, relativePath);
+            directoryCache?.set(directoryPath, next);
+        }
+        current = next;
+    }
+    return getRequiredHandle(
+        current,
+        "file",
+        segments.at(-1),
+        relativePath,
+    );
 }
 
 export async function entriesFromDirectoryHandle(directory)
@@ -177,17 +248,18 @@ export async function entriesFromDirectoryHandle(directory)
         typeof directory.getDirectoryHandle !== "function") {
         throw importError("INVALID_PICKER", "The browser returned an invalid directory handle.");
     }
-    const localizationHandle = await getRequiredHandle(directory, "file", "localization.txt");
-    const mainHandle = await getRequiredHandle(directory, "directory", "main");
-    const archiveHandle = await getRequiredHandle(mainHandle, "file", "iw_00.iwd");
-    const [localization, archive] = await Promise.all([
-        localizationHandle.getFile(),
-        archiveHandle.getFile(),
-    ]);
-    return new Map([
-        ["localization.txt", requireFileLike(localization, "localization.txt")],
-        ["main/iw_00.iwd", requireFileLike(archive, "main/iw_00.iwd")],
-    ]);
+    const entries = new Map();
+    const directoryCache = new Map([["", directory]]);
+    for (const requirement of REQUIRED_ASSETS) {
+        const handle = await getRequiredFileFromDirectory(
+            directory,
+            requirement.path,
+            directoryCache,
+        );
+        const file = await handle.getFile();
+        entries.set(requirement.path, requireFileLike(file, requirement.path));
+    }
+    return entries;
 }
 
 function selectFromInput(input)
@@ -474,6 +546,62 @@ async function probeIwd(module, file)
     };
 }
 
+async function probeFastfile(module, file)
+{
+    const head = await readWindow(file, 0, Math.min(file.size, 14));
+    const result = callWasmProbe(
+        module,
+        "_KisakWeb_ProbeFastfileHeader",
+        [head],
+        ([data]) => [data, head.byteLength, file.size],
+    );
+    assertProbeSucceeded(result);
+    return { version: 5, compression: "zlib" };
+}
+
+async function probeInstallEntries(module, entries)
+{
+    const language = await probeLocalization(module, entries.get("localization.txt"));
+    if (language !== M12_INSTALL_PROFILE.language) {
+        throw importError(
+            "PROFILE_LANGUAGE",
+            `The ${M12_INSTALL_PROFILE.id} profile requires English game data.`,
+        );
+    }
+
+    let entriesDeclared = 0;
+    let archiveCount = 0;
+    let zoneCount = 0;
+    for (const requirement of REQUIRED_ASSETS) {
+        try {
+            if (requirement.kind === "iwd") {
+                const result = await probeIwd(module, entries.get(requirement.path));
+                entriesDeclared += result.entriesDeclared;
+                archiveCount += 1;
+            } else if (requirement.kind === "fastfile") {
+                await probeFastfile(module, entries.get(requirement.path));
+                zoneCount += 1;
+            }
+        } catch (error) {
+            if (error instanceof AssetImportError && error.code.startsWith("PROBE_")) {
+                throw importError(error.code, `${requirement.path}: ${error.message}`, error);
+            }
+            throw error;
+        }
+    }
+    return {
+        language,
+        profile: {
+            id: M12_INSTALL_PROFILE.id,
+            map: M12_INSTALL_PROFILE.map,
+            archiveCount,
+            zoneCount,
+        },
+        archiveProbe: { entriesDeclared, archivesProbed: archiveCount },
+        zoneProbe: { filesProbed: zoneCount, version: 5, compression: "zlib" },
+    };
+}
+
 async function copyFileToHandle(source, destinationHandle, reportBytes)
 {
     const writable = await destinationHandle.createWritable({ keepExistingData: false });
@@ -565,15 +693,16 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
 
     async function fileHandleFor(importId, path, create = false)
     {
+        if (!REQUIREMENT_BY_PATH.has(path)) {
+            throw importError("UNSAFE_PATH", `The asset adapter does not allow ${path}.`);
+        }
         const directory = await importDirectory(importId, create);
-        if (path === "localization.txt") {
-            return directory.getFileHandle("localization.txt", { create });
+        const segments = path.split("/");
+        let current = directory;
+        for (const segment of segments.slice(0, -1)) {
+            current = await current.getDirectoryHandle(segment, { create });
         }
-        if (path === "main/iw_00.iwd") {
-            const main = await directory.getDirectoryHandle("main", { create });
-            return main.getFileHandle("iw_00.iwd", { create });
-        }
-        throw importError("UNSAFE_PATH", `The asset adapter does not allow ${path}.`);
+        return current.getFileHandle(segments.at(-1), { create });
     }
 
     async function removeImport(importId)
@@ -624,16 +753,12 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
 
     async function probeStoredImport(importId, recordedManifest = null)
     {
-        const localizationHandle = await fileHandleFor(importId, "localization.txt");
-        const archiveHandle = await fileHandleFor(importId, "main/iw_00.iwd");
-        const [localization, archive] = await Promise.all([
-            localizationHandle.getFile(),
-            archiveHandle.getFile(),
-        ]);
-        validateSelectedEntries(new Map([
-            ["localization.txt", localization],
-            ["main/iw_00.iwd", archive],
-        ]));
+        const entries = new Map();
+        for (const requirement of REQUIRED_ASSETS) {
+            const handle = await fileHandleFor(importId, requirement.path);
+            entries.set(requirement.path, await handle.getFile());
+        }
+        validateSelectedEntries(entries);
 
         if (recordedManifest) {
             const { importId: recordedId, sizes: recordedSizes } =
@@ -641,35 +766,29 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
             if (recordedId !== importId) {
                 throw importError("INVALID_METADATA", "Stored asset metadata names the wrong import.");
             }
-            if (recordedSizes.get("localization.txt") !== localization.size ||
-                recordedSizes.get("main/iw_00.iwd") !== archive.size) {
-                throw importError("PERSISTED_SIZE", "Persisted asset sizes no longer match the manifest.");
+            for (const [path, file] of entries) {
+                if (recordedSizes.get(path) !== file.size) {
+                    throw importError(
+                        "PERSISTED_SIZE",
+                        "Persisted asset sizes no longer match the manifest.",
+                    );
+                }
             }
         }
 
-        const [language, archiveProbe] = await Promise.all([
-            probeLocalization(module, localization),
-            probeIwd(module, archive),
-        ]);
+        const probe = await probeInstallEntries(module, entries);
         return {
-            language,
-            archiveProbe,
+            ...probe,
             files: REQUIRED_ASSETS.map((requirement) => ({
                 path: requirement.path,
-                size: requirement.path === "localization.txt" ? localization.size : archive.size,
+                size: entries.get(requirement.path).size,
             })),
         };
     }
 
     async function probeSelectedEntries(entries)
     {
-        const localization = entries.get("localization.txt");
-        const archive = entries.get("main/iw_00.iwd");
-        const [language, archiveProbe] = await Promise.all([
-            probeLocalization(module, localization),
-            probeIwd(module, archive),
-        ]);
-        return { language, archiveProbe };
+        return probeInstallEntries(module, entries);
     }
 
     async function initialize()
@@ -732,7 +851,9 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
                         ...stored,
                         language: probe.language,
                         files: probe.files,
+                        profile: probe.profile,
                         archiveProbe: probe.archiveProbe,
+                        zoneProbe: probe.zoneProbe,
                     };
                     await collectGarbage(importId).catch(() => {});
                     emit({
@@ -915,7 +1036,9 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
                     importedAt: new Date().toISOString(),
                     language: probe.language,
                     files: probe.files,
+                    profile: probe.profile,
                     archiveProbe: probe.archiveProbe,
+                    zoneProbe: probe.zoneProbe,
                 };
                 await databasePut(database, ACTIVE_IMPORT_KEY, manifest);
                 activeManifest = manifest;

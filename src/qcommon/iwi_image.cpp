@@ -1,5 +1,6 @@
 #include <qcommon/iwi_image.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <limits>
 
@@ -10,9 +11,9 @@ namespace
 constexpr std::uint8_t TAG[] = {'I', 'W', 'i'};
 constexpr std::uint8_t MIN_FORMAT = 1u;
 constexpr std::uint8_t MAX_FORMAT = 13u;
-constexpr std::uint8_t FLAG_NO_PICMIP = 0x01u;
 constexpr std::uint16_t MIN_PICMIP_DIMENSION = 32u;
 constexpr std::size_t ARGB_BYTES_PER_PIXEL = 4u;
+constexpr std::size_t RGBA_BYTES_PER_PIXEL = 4u;
 
 std::uint16_t ReadLe16(std::span<const std::uint8_t> bytes, std::size_t offset) noexcept
 {
@@ -52,6 +53,24 @@ std::uint32_t CountMipmaps(
     return count;
 }
 
+std::uint32_t Count2dStoredMipmaps(
+    std::uint8_t flags,
+    std::uint16_t width,
+    std::uint16_t height) noexcept
+{
+    if ((flags & FLAG_NO_MIPMAPS) != 0u) return 1u;
+    std::uint32_t count = 1u;
+    std::uint32_t currentWidth = width;
+    std::uint32_t currentHeight = height;
+    while (currentWidth > 1u || currentHeight > 1u)
+    {
+        currentWidth = std::max(currentWidth >> 1u, 1u);
+        currentHeight = std::max(currentHeight >> 1u, 1u);
+        ++count;
+    }
+    return count;
+}
+
 bool CheckedMultiply(
     std::size_t left,
     std::size_t right,
@@ -76,6 +95,188 @@ bool CheckedAdd(
     }
     sum = left + right;
     return true;
+}
+
+std::uint8_t Expand5(std::uint16_t value) noexcept
+{
+    return static_cast<std::uint8_t>((value << 3u) | (value >> 2u));
+}
+
+std::uint8_t Expand6(std::uint16_t value) noexcept
+{
+    return static_cast<std::uint8_t>((value << 2u) | (value >> 4u));
+}
+
+struct Rgba
+{
+    std::uint8_t red = 0u;
+    std::uint8_t green = 0u;
+    std::uint8_t blue = 0u;
+    std::uint8_t alpha = 255u;
+};
+
+Rgba Decode565(std::uint16_t packed) noexcept
+{
+    return {
+        Expand5(static_cast<std::uint16_t>((packed >> 11u) & 0x1fu)),
+        Expand6(static_cast<std::uint16_t>((packed >> 5u) & 0x3fu)),
+        Expand5(static_cast<std::uint16_t>(packed & 0x1fu)),
+        255u,
+    };
+}
+
+std::uint8_t Interpolate(
+    std::uint8_t left,
+    std::uint8_t right,
+    std::uint32_t leftWeight,
+    std::uint32_t rightWeight,
+    std::uint32_t divisor) noexcept
+{
+    return static_cast<std::uint8_t>(
+        (static_cast<std::uint32_t>(left) * leftWeight +
+         static_cast<std::uint32_t>(right) * rightWeight) / divisor);
+}
+
+void BuildColorTable(
+    std::span<const std::uint8_t> block,
+    bool allowDxt1Transparency,
+    std::array<Rgba, 4> &colors) noexcept
+{
+    const std::uint16_t color0 = ReadLe16(block, 0u);
+    const std::uint16_t color1 = ReadLe16(block, 2u);
+    colors[0] = Decode565(color0);
+    colors[1] = Decode565(color1);
+    if (!allowDxt1Transparency || color0 > color1)
+    {
+        colors[2] = {
+            Interpolate(colors[0].red, colors[1].red, 2u, 1u, 3u),
+            Interpolate(colors[0].green, colors[1].green, 2u, 1u, 3u),
+            Interpolate(colors[0].blue, colors[1].blue, 2u, 1u, 3u),
+            255u,
+        };
+        colors[3] = {
+            Interpolate(colors[0].red, colors[1].red, 1u, 2u, 3u),
+            Interpolate(colors[0].green, colors[1].green, 1u, 2u, 3u),
+            Interpolate(colors[0].blue, colors[1].blue, 1u, 2u, 3u),
+            255u,
+        };
+    }
+    else
+    {
+        colors[2] = {
+            Interpolate(colors[0].red, colors[1].red, 1u, 1u, 2u),
+            Interpolate(colors[0].green, colors[1].green, 1u, 1u, 2u),
+            Interpolate(colors[0].blue, colors[1].blue, 1u, 1u, 2u),
+            255u,
+        };
+        colors[3] = {0u, 0u, 0u, 0u};
+    }
+}
+
+void BuildDxt5AlphaTable(
+    std::span<const std::uint8_t> block,
+    std::array<std::uint8_t, 8> &alpha) noexcept
+{
+    alpha[0] = block[0];
+    alpha[1] = block[1];
+    if (alpha[0] > alpha[1])
+    {
+        for (std::uint32_t index = 1u; index <= 6u; ++index)
+        {
+            alpha[index + 1u] = Interpolate(
+                alpha[0], alpha[1], 7u - index, index, 7u);
+        }
+    }
+    else
+    {
+        for (std::uint32_t index = 1u; index <= 4u; ++index)
+        {
+            alpha[index + 1u] = Interpolate(
+                alpha[0], alpha[1], 5u - index, index, 5u);
+        }
+        alpha[6] = 0u;
+        alpha[7] = 255u;
+    }
+}
+
+std::uint64_t ReadLe48(std::span<const std::uint8_t> bytes) noexcept
+{
+    std::uint64_t value = 0u;
+    for (std::size_t index = 0u; index < 6u; ++index)
+    {
+        value |= static_cast<std::uint64_t>(bytes[index]) << (index * 8u);
+    }
+    return value;
+}
+
+bool DxtLevelBytes(
+    std::uint32_t width,
+    std::uint32_t height,
+    std::size_t bytesPerBlock,
+    std::size_t &bytes) noexcept
+{
+    const std::size_t blockWidth = (static_cast<std::size_t>(width) + 3u) / 4u;
+    const std::size_t blockHeight = (static_cast<std::size_t>(height) + 3u) / 4u;
+    std::size_t blockCount = 0u;
+    return CheckedMultiply(blockWidth, blockHeight, blockCount) &&
+        CheckedMultiply(blockCount, bytesPerBlock, bytes);
+}
+
+void DecodeDxtBlock(
+    std::span<const std::uint8_t> block,
+    std::uint8_t format,
+    std::uint32_t blockX,
+    std::uint32_t blockY,
+    std::uint32_t width,
+    std::uint32_t height,
+    std::span<std::uint8_t> rgba) noexcept
+{
+    const std::size_t colorOffset = format == FORMAT_DXT1 ? 0u : 8u;
+    std::array<Rgba, 4> colors{};
+    BuildColorTable(
+        block.subspan(colorOffset, 8u),
+        format == FORMAT_DXT1,
+        colors);
+    const std::uint32_t colorIndices = ReadLe32(block, colorOffset + 4u);
+
+    std::array<std::uint8_t, 8> dxt5Alpha{};
+    std::uint64_t dxt5Indices = 0u;
+    if (format == FORMAT_DXT5)
+    {
+        BuildDxt5AlphaTable(block.first(8u), dxt5Alpha);
+        dxt5Indices = ReadLe48(block.subspan(2u, 6u));
+    }
+
+    for (std::uint32_t localY = 0u; localY < 4u; ++localY)
+    {
+        const std::uint32_t y = blockY * 4u + localY;
+        if (y >= height) continue;
+        for (std::uint32_t localX = 0u; localX < 4u; ++localX)
+        {
+            const std::uint32_t x = blockX * 4u + localX;
+            if (x >= width) continue;
+            const std::uint32_t pixel = localY * 4u + localX;
+            Rgba color = colors[(colorIndices >> (pixel * 2u)) & 3u];
+            if (format == FORMAT_DXT3)
+            {
+                const std::uint8_t packed = block[pixel / 2u];
+                const std::uint8_t nibble = static_cast<std::uint8_t>(
+                    (packed >> ((pixel & 1u) * 4u)) & 0x0fu);
+                color.alpha = static_cast<std::uint8_t>(nibble * 17u);
+            }
+            else if (format == FORMAT_DXT5)
+            {
+                color.alpha = dxt5Alpha[
+                    (dxt5Indices >> (pixel * 3u)) & 7u];
+            }
+            const std::size_t destination =
+                (static_cast<std::size_t>(y) * width + x) * RGBA_BYTES_PER_PIXEL;
+            rgba[destination] = color.red;
+            rgba[destination + 1u] = color.green;
+            rgba[destination + 2u] = color.blue;
+            rgba[destination + 3u] = color.alpha;
+        }
+    }
 }
 } // namespace
 
@@ -191,15 +392,20 @@ Error DecodeRgba8(
         return parseError;
     }
 
-    if (metadata.format != FORMAT_ARGB)
+    const bool compressed = metadata.format == FORMAT_DXT1 ||
+        metadata.format == FORMAT_DXT3 || metadata.format == FORMAT_DXT5;
+    if (metadata.format != FORMAT_ARGB && !compressed)
     {
         return Error::DecodeUnsupportedFormat;
     }
-    if (metadata.flags != FLAG_NO_MIPMAPS)
+    if ((metadata.format == FORMAT_ARGB && metadata.flags != FLAG_NO_MIPMAPS) ||
+        (compressed && (metadata.flags &
+            static_cast<std::uint8_t>(~(FLAG_NO_PICMIP | FLAG_NO_MIPMAPS))) != 0u))
     {
         return Error::DecodeUnsupportedFlags;
     }
-    if (metadata.depth != 1u || metadata.mipCount != 1u)
+    if (metadata.depth != 1u ||
+        (metadata.format == FORMAT_ARGB && metadata.mipCount != 1u))
     {
         return Error::DecodeUnsupportedDimensions;
     }
@@ -208,17 +414,54 @@ Error DecodeRgba8(
     std::size_t pixelBytes = 0u;
     std::size_t expectedMemberBytes = 0u;
     if (!CheckedMultiply(metadata.width, metadata.height, pixelCount) ||
-        !CheckedMultiply(pixelCount, ARGB_BYTES_PER_PIXEL, pixelBytes) ||
-        !CheckedAdd(HEADER_SIZE, pixelBytes, expectedMemberBytes))
+        !CheckedMultiply(pixelCount, RGBA_BYTES_PER_PIXEL, pixelBytes))
     {
         return Error::DecodeOutputTooLarge;
     }
-    if (bytes.size() > MAX_TEXTURE_MEMBER_BYTES ||
-        expectedMemberBytes > MAX_TEXTURE_MEMBER_BYTES)
+    if (bytes.size() > MAX_TEXTURE_MEMBER_BYTES || pixelBytes > MAX_TEXTURE_MEMBER_BYTES)
     {
         return Error::DecodeOutputTooLarge;
     }
-    if (bytes.size() != expectedMemberBytes)
+    std::size_t baseLevelOffset = HEADER_SIZE;
+    if (!compressed)
+    {
+        if (!CheckedAdd(HEADER_SIZE, pixelBytes, expectedMemberBytes) ||
+            bytes.size() != expectedMemberBytes)
+        {
+            return Error::DecodeInvalidLayout;
+        }
+    }
+    else
+    {
+        const std::size_t bytesPerBlock = metadata.format == FORMAT_DXT1 ? 8u : 16u;
+        const std::uint32_t storedMipCount = Count2dStoredMipmaps(
+            metadata.flags, metadata.width, metadata.height);
+        std::size_t payloadBytes = 0u;
+        std::size_t baseLevelBytes = 0u;
+        for (std::uint32_t mip = storedMipCount; mip > 0u; --mip)
+        {
+            const std::uint32_t level = mip - 1u;
+            const std::uint32_t width = std::max<std::uint32_t>(
+                static_cast<std::uint32_t>(metadata.width) >> level, 1u);
+            const std::uint32_t height = std::max<std::uint32_t>(
+                static_cast<std::uint32_t>(metadata.height) >> level, 1u);
+            std::size_t levelBytes = 0u;
+            if (!DxtLevelBytes(width, height, bytesPerBlock, levelBytes) ||
+                !CheckedAdd(payloadBytes, levelBytes, payloadBytes))
+            {
+                return Error::DecodeOutputTooLarge;
+            }
+            if (level == 0u) baseLevelBytes = levelBytes;
+        }
+        if (!CheckedAdd(HEADER_SIZE, payloadBytes, expectedMemberBytes) ||
+            bytes.size() != expectedMemberBytes || baseLevelBytes > payloadBytes)
+        {
+            return Error::DecodeInvalidLayout;
+        }
+        baseLevelOffset = HEADER_SIZE + payloadBytes - baseLevelBytes;
+    }
+
+    if (baseLevelOffset > bytes.size())
     {
         return Error::DecodeInvalidLayout;
     }
@@ -233,13 +476,40 @@ Error DecodeRgba8(
         return Error::DecodeAllocationFailed;
     }
 
-    const std::span<const std::uint8_t> bgra = bytes.subspan(HEADER_SIZE);
-    for (std::size_t offset = 0u; offset < pixelBytes; offset += ARGB_BYTES_PER_PIXEL)
+    if (!compressed)
     {
-        rgba[offset] = bgra[offset + 2u];
-        rgba[offset + 1u] = bgra[offset + 1u];
-        rgba[offset + 2u] = bgra[offset];
-        rgba[offset + 3u] = bgra[offset + 3u];
+        const std::span<const std::uint8_t> bgra = bytes.subspan(HEADER_SIZE);
+        for (std::size_t offset = 0u; offset < pixelBytes; offset += ARGB_BYTES_PER_PIXEL)
+        {
+            rgba[offset] = bgra[offset + 2u];
+            rgba[offset + 1u] = bgra[offset + 1u];
+            rgba[offset + 2u] = bgra[offset];
+            rgba[offset + 3u] = bgra[offset + 3u];
+        }
+    }
+    else
+    {
+        const std::size_t bytesPerBlock = metadata.format == FORMAT_DXT1 ? 8u : 16u;
+        const std::uint32_t blocksWide =
+            (static_cast<std::uint32_t>(metadata.width) + 3u) / 4u;
+        const std::uint32_t blocksHigh =
+            (static_cast<std::uint32_t>(metadata.height) + 3u) / 4u;
+        std::size_t sourceOffset = baseLevelOffset;
+        for (std::uint32_t blockY = 0u; blockY < blocksHigh; ++blockY)
+        {
+            for (std::uint32_t blockX = 0u; blockX < blocksWide; ++blockX)
+            {
+                DecodeDxtBlock(
+                    bytes.subspan(sourceOffset, bytesPerBlock),
+                    metadata.format,
+                    blockX,
+                    blockY,
+                    metadata.width,
+                    metadata.height,
+                    rgba);
+                sourceOffset += bytesPerBlock;
+            }
+        }
     }
 
     image.width = metadata.width;

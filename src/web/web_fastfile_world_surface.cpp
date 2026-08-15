@@ -1,4 +1,6 @@
 #include <web/web_fastfile_world_surface.h>
+#include <web/web_fastfile_source_stream.h>
+#include <web/web_fastfile_zone_registry.h>
 #include <web/web_fastfile_zone_stream.h>
 
 #include <zlib.h>
@@ -109,6 +111,47 @@ Error MapZoneStreamError(ZoneStreamError error) noexcept
     return Error::InvalidArgument;
 }
 
+Error MapSourceStreamError(SourceStreamError error) noexcept
+{
+    switch (error)
+    {
+    case SourceStreamError::None: return Error::None;
+    case SourceStreamError::ChunkTooLarge: return Error::SourceChunkTooLarge;
+    case SourceStreamError::TotalSizeLimit: return Error::FileTooLarge;
+    case SourceStreamError::Backpressure: return Error::SourceBackpressure;
+    case SourceStreamError::AlreadyFinal: return Error::SourceAlreadyFinal;
+    case SourceStreamError::AllocationFailed: return Error::AllocationFailed;
+    case SourceStreamError::NotInitialized:
+    case SourceStreamError::InvalidArgument:
+    case SourceStreamError::ConsumeInvalid:
+        return Error::InvalidArgument;
+    }
+    return Error::InvalidArgument;
+}
+
+Error MapZoneRegistryError(ZoneRegistryError error) noexcept
+{
+    switch (error)
+    {
+    case ZoneRegistryError::None: return Error::None;
+    case ZoneRegistryError::AssetLimit: return Error::AssetCountLimit;
+    case ZoneRegistryError::AliasLimit: return Error::AliasLimit;
+    case ZoneRegistryError::NameBytesLimit: return Error::StringBytesLimit;
+    case ZoneRegistryError::AliasUndefined: return Error::MaterialAliasUndefined;
+    case ZoneRegistryError::AliasDuplicate: return Error::MaterialAliasDuplicate;
+    case ZoneRegistryError::AliasInvalid:
+    case ZoneRegistryError::AssetUndefined:
+    case ZoneRegistryError::AssetTypeMismatch:
+        return Error::MaterialAliasInvalid;
+    case ZoneRegistryError::AllocationFailed: return Error::AllocationFailed;
+    case ZoneRegistryError::NotInitialized:
+    case ZoneRegistryError::InvalidArgument:
+    case ZoneRegistryError::AssetDuplicate:
+        return Error::InvalidArgument;
+    }
+    return Error::InvalidArgument;
+}
+
 bool ByteIsInRange(
     std::uint32_t byte,
     std::uint32_t begin,
@@ -174,32 +217,12 @@ WebEngineWorldVertex DecodeVertex(const std::uint8_t *bytes) noexcept
     return vertex;
 }
 
-bool DecodeAlias(
-    std::uint32_t token,
-    std::uint32_t &block,
-    std::uint32_t &offset) noexcept
+Error ValidateLimits(const Limits &limits) noexcept
 {
-    if (token == 0u || token == INLINE_POINTER || token == INLINE_SHARED_POINTER)
-    {
-        return false;
-    }
-    const std::uint32_t packed = token - 1u;
-    block = packed >> 28u;
-    offset = packed & POINTER_OFFSET_MASK;
-    return block < ZONE_BLOCK_COUNT;
-}
-
-std::uint32_t EncodeAlias(std::uint32_t block, std::uint32_t offset) noexcept
-{
-    return (block << 28u) | (offset + 1u);
-}
-
-Error ValidateFileEnvelope(
-    std::span<const std::uint8_t> fileBytes,
-    const Limits &limits) noexcept
-{
-    if ((fileBytes.data() == nullptr && !fileBytes.empty()) ||
-        limits.maxFileBytes < PREFIX_SIZE || limits.maxInflatedBytes == 0u ||
+    if (limits.maxFileBytes < PREFIX_SIZE ||
+        limits.maxSourceChunkBytes == 0u ||
+        limits.maxSourceChunkBytes > MAX_STEP_BYTES ||
+        limits.maxInflatedBytes == 0u ||
         limits.maxBlockBytes == 0u || limits.maxTotalBlockBytes == 0u ||
         limits.maxAssets == 0u || limits.maxStackDepth == 0u ||
         limits.maxStackDepth > ZONE_STREAM_STACK_CAPACITY ||
@@ -212,6 +235,44 @@ Error ValidateFileEnvelope(
     {
         return Error::InvalidArgument;
     }
+    return Error::None;
+}
+
+Error ValidatePrefix(std::span<const std::uint8_t> prefix) noexcept
+{
+    if ((prefix.data() == nullptr && !prefix.empty()) ||
+        prefix.size() < PREFIX_SIZE)
+    {
+        return Error::PrefixTruncated;
+    }
+    const std::span<const std::uint8_t> magic = prefix.first(8u);
+    if (Matches(magic, AUTHENTICATED_MAGIC))
+    {
+        return Error::AuthenticatedUnsupported;
+    }
+    if (!Matches(magic, UNSIGNED_MAGIC))
+    {
+        return Error::InvalidMagic;
+    }
+    if (ReadU32(prefix.data() + 8u) != VERSION)
+    {
+        return Error::UnsupportedVersion;
+    }
+    return Error::None;
+}
+
+Error ValidateFileEnvelope(
+    std::span<const std::uint8_t> fileBytes,
+    const Limits &limits) noexcept
+{
+    if ((fileBytes.data() == nullptr && !fileBytes.empty()))
+    {
+        return Error::InvalidArgument;
+    }
+    if (const Error error = ValidateLimits(limits); error != Error::None)
+    {
+        return error;
+    }
     if (fileBytes.size() > limits.maxFileBytes ||
         fileBytes.size() > std::numeric_limits<std::uint32_t>::max())
     {
@@ -221,18 +282,10 @@ Error ValidateFileEnvelope(
     {
         return Error::PrefixTruncated;
     }
-    const std::span<const std::uint8_t> magic = fileBytes.first(8u);
-    if (Matches(magic, AUTHENTICATED_MAGIC))
+    if (const Error error = ValidatePrefix(fileBytes.first(PREFIX_SIZE));
+        error != Error::None)
     {
-        return Error::AuthenticatedUnsupported;
-    }
-    if (!Matches(magic, UNSIGNED_MAGIC))
-    {
-        return Error::InvalidMagic;
-    }
-    if (ReadU32(fileBytes.data() + 8u) != VERSION)
-    {
-        return Error::UnsupportedVersion;
+        return error;
     }
     if (fileBytes.size() == PREFIX_SIZE)
     {
@@ -329,7 +382,11 @@ struct WorldSurfaceExtractionJob::Impl
         Complete,
     };
 
-    std::vector<std::uint8_t> fileBytes;
+    BoundedSourceStream source;
+    std::vector<std::uint8_t> ownedSource;
+    std::size_t ownedSourceOffset = 0u;
+    std::array<std::uint8_t, PREFIX_SIZE> prefix{};
+    std::uint32_t prefixBytes = 0u;
     ChunkedInflatedBytes inflated;
     std::array<std::uint8_t, GFX_WORLD_WIRE_SIZE> recordScratch{};
     std::array<std::uint8_t, GFX_WORLD_VERTEX_WIRE_SIZE> vertexScratch{};
@@ -337,8 +394,8 @@ struct WorldSurfaceExtractionJob::Impl
     Limits limits;
     z_stream stream{};
     bool streamInitialized = false;
+    bool inflateStreamEnded = false;
     Phase phase = Phase::Inflate;
-    std::size_t compressedCursor = PREFIX_SIZE;
     std::size_t readerPosition = 0u;
     std::size_t recordStart = 0u;
     std::size_t recordSize = 0u;
@@ -347,16 +404,17 @@ struct WorldSurfaceExtractionJob::Impl
     bool arenaPrepared = false;
     bool materialArenaPrepared = false;
     ZoneStreamMachine arenas;
+    ZoneAssetRegistry registry;
     ExtractedWorldSurface replacement;
     std::uint32_t declaredSize = 0u;
     std::uint32_t indexCount = 0u;
     std::uint32_t vertexCount = 0u;
     std::size_t serializedIndicesOffset = 0u;
     std::size_t serializedVerticesOffset = 0u;
-    std::uint32_t aliasSlotOffset = 0u;
+    ZoneSpan materialAliasSlot{};
     std::uint32_t materialMemoryIdentity = 0u;
     std::uint32_t totalStringBytes = 0u;
-    bool aliasDefined = false;
+    std::string materialNameScratch;
     SurfaceMetadata metadata;
     std::uint32_t selectedIndexCount = 0u;
     std::uint32_t selectedVertexCursor = 0u;
@@ -395,6 +453,32 @@ struct WorldSurfaceExtractionJob::Impl
         }
         streamInitialized = true;
         return Error::None;
+    }
+
+    bool HasOwnedSourcePending() const noexcept
+    {
+        return ownedSourceOffset < ownedSource.size();
+    }
+
+    Error FeedOwnedSource() noexcept
+    {
+        if (!source.NeedsSource() || !HasOwnedSourcePending())
+        {
+            return Error::None;
+        }
+        const std::size_t remaining = ownedSource.size() - ownedSourceOffset;
+        const std::size_t count = std::min<std::size_t>(
+            remaining, limits.maxSourceChunkBytes);
+        const bool final = count == remaining;
+        const Error error = MapSourceStreamError(source.Feed(
+            std::span<const std::uint8_t>(ownedSource)
+                .subspan(ownedSourceOffset, count),
+            final));
+        if (error == Error::None)
+        {
+            ownedSourceOffset += count;
+        }
+        return error;
     }
 
     Error PrepareRecord(std::uint64_t size, Error truncatedError) noexcept
@@ -545,16 +629,87 @@ struct WorldSurfaceExtractionJob::Impl
 
     Error StepInflate(const StepBudget &budget, StepReport &report) noexcept
     {
-        if (!streamInitialized)
+        if (const Error error = FeedOwnedSource(); error != Error::None)
         {
+            return error;
+        }
+
+        while (prefixBytes < PREFIX_SIZE)
+        {
+            const std::uint32_t sourceBudget =
+                budget.maxBytes - report.sourceBytesConsumedThisStep;
+            if (sourceBudget == 0u)
+            {
+                return Error::None;
+            }
+            const std::uint32_t needed = PREFIX_SIZE - prefixBytes;
+            const std::span<const std::uint8_t> input = source.Peek(
+                std::min(sourceBudget, needed));
+            if (input.empty())
+            {
+                if (source.FinalReceived())
+                {
+                    return Error::PrefixTruncated;
+                }
+                report.needsSource = !HasOwnedSourcePending();
+                return Error::None;
+            }
+            std::memcpy(prefix.data() + prefixBytes, input.data(), input.size());
+            const std::uint32_t consumed =
+                static_cast<std::uint32_t>(input.size());
+            if (const Error error = MapSourceStreamError(source.Consume(consumed));
+                error != Error::None)
+            {
+                return error;
+            }
+            prefixBytes += consumed;
+            report.sourceBytesConsumedThisStep += consumed;
+        }
+
+        if (!streamInitialized && !inflateStreamEnded)
+        {
+            if (const Error error = ValidatePrefix(prefix); error != Error::None)
+            {
+                return error;
+            }
             if (const Error error = BeginInflate(); error != Error::None)
             {
                 return error;
             }
         }
+
+        if (inflateStreamEnded)
+        {
+            if (source.AvailableBytes() != 0u)
+            {
+                return Error::InflateTrailingData;
+            }
+            if (source.FinalReceived())
+            {
+                phase = Phase::XFile;
+            }
+            else
+            {
+                report.needsSource = !HasOwnedSourcePending();
+            }
+            return Error::None;
+        }
+
+        const std::uint32_t sourceBudget =
+            budget.maxBytes - report.sourceBytesConsumedThisStep;
+        if (sourceBudget == 0u)
+        {
+            return Error::None;
+        }
+        const std::span<const std::uint8_t> input = source.Peek(sourceBudget);
+        if (input.empty() && !source.FinalReceived())
+        {
+            report.needsSource = !HasOwnedSourcePending();
+            return Error::None;
+        }
         const std::size_t inputCapacity = std::min<std::size_t>(
-            budget.maxBytes,
-            fileBytes.size() - compressedCursor);
+            sourceBudget,
+            input.size());
         const bool atOutputCeiling =
             inflated.size() == limits.maxInflatedBytes;
         std::array<std::uint8_t, 1> overflowGuard{};
@@ -579,7 +734,7 @@ struct WorldSurfaceExtractionJob::Impl
         stream.next_in = inputCapacity == 0u
             ? Z_NULL
             : const_cast<Bytef *>(reinterpret_cast<const Bytef *>(
-                fileBytes.data() + compressedCursor));
+                input.data()));
         stream.avail_in = static_cast<uInt>(inputCapacity);
         stream.next_out = reinterpret_cast<Bytef *>(output.data());
         stream.avail_out = static_cast<uInt>(outputCapacity);
@@ -588,8 +743,16 @@ struct WorldSurfaceExtractionJob::Impl
         const int result = inflate(&stream, Z_NO_FLUSH);
         const std::uint32_t consumed = inputBefore - stream.avail_in;
         const std::uint32_t produced = outputBefore - stream.avail_out;
-        compressedCursor += consumed;
+        if (consumed != 0u)
+        {
+            if (const Error error = MapSourceStreamError(source.Consume(consumed));
+                error != Error::None)
+            {
+                return error;
+            }
+        }
         report.compressedBytesConsumedThisStep = consumed;
+        report.sourceBytesConsumedThisStep += consumed;
         if (atOutputCeiling)
         {
             if (produced != 0u)
@@ -605,12 +768,20 @@ struct WorldSurfaceExtractionJob::Impl
 
         if (result == Z_STREAM_END)
         {
-            if (compressedCursor != fileBytes.size())
+            EndInflate();
+            inflateStreamEnded = true;
+            if (source.AvailableBytes() != 0u)
             {
                 return Error::InflateTrailingData;
             }
-            EndInflate();
-            phase = Phase::XFile;
+            if (source.FinalReceived())
+            {
+                phase = Phase::XFile;
+            }
+            else
+            {
+                report.needsSource = !HasOwnedSourcePending();
+            }
             return Error::None;
         }
         if (result == Z_MEM_ERROR)
@@ -619,15 +790,29 @@ struct WorldSurfaceExtractionJob::Impl
         }
         if (result != Z_OK)
         {
-            return result == Z_BUF_ERROR && compressedCursor == fileBytes.size()
-                ? Error::InflateTruncated
-                : Error::InflateData;
+            if (result == Z_BUF_ERROR && source.AvailableBytes() == 0u)
+            {
+                if (source.FinalReceived())
+                {
+                    return Error::InflateTruncated;
+                }
+                report.needsSource = !HasOwnedSourcePending();
+                return Error::None;
+            }
+            return Error::InflateData;
         }
         if (consumed == 0u && produced == 0u)
         {
-            return compressedCursor == fileBytes.size()
-                ? Error::InflateTruncated
-                : Error::InflateData;
+            if (source.AvailableBytes() == 0u)
+            {
+                if (source.FinalReceived())
+                {
+                    return Error::InflateTruncated;
+                }
+                report.needsSource = !HasOwnedSourcePending();
+                return Error::None;
+            }
+            return Error::InflateData;
         }
         return Error::None;
     }
@@ -704,6 +889,17 @@ Error WorldSurfaceExtractionJob::Impl::StepTraverse(
             };
             error = MapZoneStreamError(
                 arenas.Initialize(blockSizes, streamLimits));
+            if (error != Error::None)
+            {
+                return error;
+            }
+            const ZoneRegistryLimits registryLimits{
+                limits.maxAssets,
+                limits.maxAliases,
+                limits.maxTotalStringBytes,
+            };
+            error = MapZoneRegistryError(
+                registry.Initialize(blockSizes, registryLimits));
             if (error != Error::None)
             {
                 return error;
@@ -927,19 +1123,14 @@ Error WorldSurfaceExtractionJob::Impl::StepTraverse(
                 return Error::MaterialMemoryUnsupported;
             }
             const std::uint32_t materialAlias = ReadU32(memory);
-            std::uint32_t aliasBlock = 0u;
-            std::uint32_t aliasOffset = 0u;
-            if (!DecodeAlias(materialAlias, aliasBlock, aliasOffset) ||
-                aliasBlock != 4u || aliasOffset != aliasSlotOffset ||
-                materialAlias != EncodeAlias(4u, aliasSlotOffset))
+            std::uint32_t resolvedIdentity = 0u;
+            error = MapZoneRegistryError(registry.ResolveAlias(
+                materialAlias, ASSET_TYPE_MATERIAL, resolvedIdentity));
+            if (error != Error::None)
             {
-                return Error::MaterialAliasInvalid;
+                return error;
             }
-            if (!aliasDefined)
-            {
-                return Error::MaterialAliasUndefined;
-            }
-            materialMemoryIdentity = replacement.materialIdentity;
+            materialMemoryIdentity = resolvedIdentity;
             phase = Phase::Vertices;
             break;
         }
@@ -968,7 +1159,15 @@ Error WorldSurfaceExtractionJob::Impl::StepTraverse(
                 {
                     return error;
                 }
+                std::uint32_t aliasSlotOffset = 0u;
                 error = ReserveArena(4u, 4u, 4u, &aliasSlotOffset);
+                if (error != Error::None)
+                {
+                    return error;
+                }
+                materialAliasSlot = {4u, aliasSlotOffset, 4u};
+                error = MapZoneRegistryError(registry.ReserveAlias(
+                    materialAliasSlot, ASSET_TYPE_MATERIAL));
                 if (error != Error::None)
                 {
                     return error;
@@ -1035,16 +1234,25 @@ Error WorldSurfaceExtractionJob::Impl::StepTraverse(
             }
             if (character == 0u)
             {
-                if (replacement.materialName.empty())
+                if (materialNameScratch.empty())
                 {
                     return Error::MaterialNameInvalid;
                 }
-                if (aliasDefined)
+                error = MapZoneRegistryError(registry.RegisterAsset(
+                    ASSET_TYPE_MATERIAL,
+                    replacement.materialAssetIndex,
+                    materialNameScratch,
+                    replacement.materialIdentity));
+                if (error != Error::None)
                 {
-                    return Error::MaterialAliasDuplicate;
+                    return error;
                 }
-                replacement.materialIdentity = 1u;
-                aliasDefined = true;
+                error = MapZoneRegistryError(registry.PublishAlias(
+                    materialAliasSlot, replacement.materialIdentity));
+                if (error != Error::None)
+                {
+                    return error;
+                }
                 error = MapZoneStreamError(arenas.Pop());
                 if (error != Error::None)
                 {
@@ -1060,7 +1268,7 @@ Error WorldSurfaceExtractionJob::Impl::StepTraverse(
                 phase = Phase::World;
                 break;
             }
-            if (replacement.materialName.size() >= limits.maxMaterialNameBytes)
+            if (materialNameScratch.size() >= limits.maxMaterialNameBytes)
             {
                 return Error::MaterialNameTooLong;
             }
@@ -1068,7 +1276,7 @@ Error WorldSurfaceExtractionJob::Impl::StepTraverse(
             {
                 return Error::MaterialNameInvalid;
             }
-            replacement.materialName.push_back(static_cast<char>(character));
+            materialNameScratch.push_back(static_cast<char>(character));
             break;
         }
 
@@ -1163,19 +1371,15 @@ Error WorldSurfaceExtractionJob::Impl::StepTraverse(
             }
 
             const std::uint32_t materialAlias = ReadU32(surface + 16u);
-            std::uint32_t aliasBlock = 0u;
-            std::uint32_t aliasOffset = 0u;
-            if (!DecodeAlias(materialAlias, aliasBlock, aliasOffset) ||
-                aliasBlock != 4u || aliasOffset != aliasSlotOffset ||
-                materialAlias != EncodeAlias(4u, aliasSlotOffset))
+            std::uint32_t resolvedIdentity = 0u;
+            error = MapZoneRegistryError(registry.ResolveAlias(
+                materialAlias, ASSET_TYPE_MATERIAL, resolvedIdentity));
+            if (error != Error::None)
             {
-                return Error::MaterialAliasInvalid;
+                return error;
             }
-            if (!aliasDefined || replacement.materialIdentity == 0u)
-            {
-                return Error::MaterialAliasUndefined;
-            }
-            if (materialMemoryIdentity != replacement.materialIdentity)
+            if (resolvedIdentity != replacement.materialIdentity ||
+                materialMemoryIdentity != resolvedIdentity)
             {
                 return Error::MaterialAliasInvalid;
             }
@@ -1329,15 +1533,40 @@ Error WorldSurfaceExtractionJob::Impl::StepTraverse(
                 return error;
             }
 
+            error = MapZoneRegistryError(registry.RegisterAsset(
+                ASSET_TYPE_GFXWORLD,
+                replacement.worldAssetIndex,
+                {},
+                replacement.worldIdentity));
+            if (error != Error::None)
+            {
+                return error;
+            }
+            if (registry.AssetCount() != replacement.sourceAssetCount ||
+                registry.AliasCount() != 1u ||
+                registry.DefinedAliasCount() != 1u)
+            {
+                return Error::InvalidArgument;
+            }
+            const ZoneRegisteredAsset *material =
+                registry.FindAsset(replacement.materialIdentity);
+            if (!material || material->type != ASSET_TYPE_MATERIAL ||
+                material->sourceIndex != replacement.materialAssetIndex)
+            {
+                return Error::MaterialAliasInvalid;
+            }
+
             replacement.fastfileVersion = VERSION;
             replacement.compressedBytes = static_cast<std::uint32_t>(
-                fileBytes.size() - PREFIX_SIZE);
+                source.TotalBytesReceived() - PREFIX_SIZE);
             replacement.inflatedBytes = static_cast<std::uint32_t>(inflated.size());
             replacement.declaredZoneBytes = declaredSize;
             replacement.sourceWorldVertexCount = vertexCount;
             replacement.sourceWorldIndexCount = indexCount;
             replacement.sourceWorldSurfaceCount = 1u;
             replacement.sourceSurfaceIndex = 0u;
+            replacement.registeredAssetCount = registry.AssetCount();
+            replacement.materialName = material->name;
             replacement.metadata = metadata;
             ++report.recordsProcessedThisStep;
             phase = Phase::Complete;
@@ -1446,12 +1675,54 @@ Error WorldSurfaceExtractionJob::Begin(
         failure_ = validation;
         return validation;
     }
+    const Error beginError = BeginStreaming(limits);
+    if (beginError != Error::None)
+    {
+        return beginError;
+    }
+    try
+    {
+        impl_->ownedSource = std::move(fileBytes);
+        return Error::None;
+    }
+    catch (...)
+    {
+        Reset();
+        progress_ = JobProgress::Failed;
+        stage_ = JobStage::Failed;
+        failure_ = Error::AllocationFailed;
+        return failure_;
+    }
+}
 
+Error WorldSurfaceExtractionJob::BeginStreaming(const Limits &limits) noexcept
+{
+    Reset();
+    if (const Error validation = ValidateLimits(limits);
+        validation != Error::None)
+    {
+        progress_ = JobProgress::Failed;
+        stage_ = JobStage::Failed;
+        failure_ = validation;
+        return validation;
+    }
     try
     {
         auto replacement = std::make_unique<Impl>();
         replacement->limits = limits;
-        replacement->fileBytes = std::move(fileBytes);
+        const SourceStreamLimits sourceLimits{
+            limits.maxFileBytes,
+            std::min(limits.maxSourceChunkBytes, limits.maxFileBytes),
+        };
+        if (const Error error = MapSourceStreamError(
+                replacement->source.Initialize(sourceLimits));
+            error != Error::None)
+        {
+            progress_ = JobProgress::Failed;
+            stage_ = JobStage::Failed;
+            failure_ = error;
+            return error;
+        }
         impl_ = std::move(replacement);
         progress_ = JobProgress::Running;
         stage_ = JobStage::Inflate;
@@ -1465,6 +1736,19 @@ Error WorldSurfaceExtractionJob::Begin(
         failure_ = Error::AllocationFailed;
         return failure_;
     }
+}
+
+Error WorldSurfaceExtractionJob::FeedSource(
+    std::span<const std::uint8_t> bytes,
+    bool final) noexcept
+{
+    if (!impl_ || progress_ != JobProgress::Running ||
+        impl_->phase != Impl::Phase::Inflate ||
+        impl_->HasOwnedSourcePending())
+    {
+        return Error::SourceNotReady;
+    }
+    return MapSourceStreamError(impl_->source.Feed(bytes, final));
 }
 
 StepReport WorldSurfaceExtractionJob::Step(const StepBudget &budget) noexcept
@@ -1518,7 +1802,9 @@ StepReport WorldSurfaceExtractionJob::Step(const StepBudget &budget) noexcept
             progress_ = JobProgress::Succeeded;
             stage_ = JobStage::Complete;
             resultAvailable_ = true;
-            std::vector<std::uint8_t>().swap(impl_->fileBytes);
+            std::vector<std::uint8_t>().swap(impl_->ownedSource);
+            impl_->ownedSourceOffset = 0u;
+            std::string().swap(impl_->materialNameScratch);
             impl_->inflated.Clear();
         }
     }
@@ -1533,6 +1819,7 @@ StepReport WorldSurfaceExtractionJob::Step(const StepBudget &budget) noexcept
     report.progress = progress_;
     report.stage = progress_ == JobProgress::Running ? workStage : stage_;
     report.error = failure_;
+    report.needsSource = NeedsSource();
     return report;
 }
 
@@ -1549,6 +1836,33 @@ JobStage WorldSurfaceExtractionJob::Stage() const noexcept
 Error WorldSurfaceExtractionJob::Failure() const noexcept
 {
     return failure_;
+}
+
+bool WorldSurfaceExtractionJob::NeedsSource() const noexcept
+{
+    return impl_ && progress_ == JobProgress::Running &&
+        impl_->phase == Impl::Phase::Inflate &&
+        impl_->source.NeedsSource() && !impl_->HasOwnedSourcePending();
+}
+
+bool WorldSurfaceExtractionJob::SourceFinalReceived() const noexcept
+{
+    return impl_ && impl_->source.FinalReceived();
+}
+
+std::uint32_t WorldSurfaceExtractionJob::SourceFeedCount() const noexcept
+{
+    return impl_ ? impl_->source.FeedCount() : 0u;
+}
+
+std::uint64_t WorldSurfaceExtractionJob::SourceBytesReceived() const noexcept
+{
+    return impl_ ? impl_->source.TotalBytesReceived() : 0u;
+}
+
+std::uint64_t WorldSurfaceExtractionJob::SourceBytesConsumed() const noexcept
+{
+    return impl_ ? impl_->source.TotalBytesConsumed() : 0u;
 }
 
 bool WorldSurfaceExtractionJob::TakeResult(
@@ -1615,6 +1929,14 @@ const char *ErrorString(Error error) noexcept
     case Error::InvalidArgument: return "invalid fastfile world-surface argument";
     case Error::InvalidStepBudget:
         return "fastfile extraction step budget is invalid";
+    case Error::SourceChunkTooLarge:
+        return "fastfile source chunk exceeds its bounded size";
+    case Error::SourceBackpressure:
+        return "fastfile source still has unread bytes";
+    case Error::SourceAlreadyFinal:
+        return "fastfile source has already received its final marker";
+    case Error::SourceNotReady:
+        return "fastfile extraction is not ready for another source chunk";
     case Error::FileTooLarge: return "fastfile exceeds the bounded input size";
     case Error::PrefixTruncated: return "fastfile prefix is truncated";
     case Error::InvalidMagic: return "fastfile magic is invalid";

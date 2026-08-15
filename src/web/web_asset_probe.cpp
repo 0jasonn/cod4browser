@@ -15,6 +15,15 @@ constexpr uint32_t ZIP_MAX_COMMENT_SIZE = 0xffff;
 constexpr uint32_t ZIP_TAIL_WINDOW_SIZE = ZIP_EOCD_SIZE + ZIP_MAX_COMMENT_SIZE;
 constexpr uint32_t ZIP_LOCAL_HEADER_SIZE = 30;
 constexpr uint32_t ZIP_CENTRAL_HEADER_SIZE = 46;
+constexpr uint32_t FASTFILE_PROBE_SIZE = 14;
+constexpr uint32_t FASTFILE_VERSION = 5;
+
+constexpr std::array<uint8_t, 8> FASTFILE_UNSIGNED_MAGIC = {
+    'I', 'W', 'f', 'f', 'u', '1', '0', '0',
+};
+constexpr std::array<uint8_t, 8> FASTFILE_AUTHENTICATED_MAGIC = {
+    'I', 'W', 'f', 'f', '0', '1', '0', '0',
+};
 
 constexpr uint32_t ZIP_LOCAL_SIGNATURE = 0x04034b50;
 constexpr uint32_t ZIP_CENTRAL_SIGNATURE = 0x02014b50;
@@ -353,5 +362,55 @@ extern "C" int32_t KisakWeb_ProbeIwd(
         return Result(WebAssetProbeResult::IwdCompression);
     }
 
+    return Result(WebAssetProbeResult::Success);
+}
+
+extern "C" int32_t KisakWeb_ProbeFastfileHeader(
+    const uint8_t *head,
+    uint32_t headLength,
+    uint32_t fileSize)
+{
+    if (!head || headLength != std::min(fileSize, FASTFILE_PROBE_SIZE))
+    {
+        return Result(WebAssetProbeResult::InvalidArgument);
+    }
+    if (fileSize < FASTFILE_PROBE_SIZE)
+    {
+        return Result(WebAssetProbeResult::FastfileHeader);
+    }
+
+    const std::span<const uint8_t> bytes(head, headLength);
+    if (std::equal(
+            FASTFILE_AUTHENTICATED_MAGIC.begin(),
+            FASTFILE_AUTHENTICATED_MAGIC.end(),
+            bytes.begin()))
+    {
+        return Result(WebAssetProbeResult::FastfileAuthenticated);
+    }
+    if (!std::equal(
+            FASTFILE_UNSIGNED_MAGIC.begin(),
+            FASTFILE_UNSIGNED_MAGIC.end(),
+            bytes.begin()))
+    {
+        return Result(WebAssetProbeResult::FastfileHeader);
+    }
+
+    uint32_t version = 0;
+    if (!ReadU32(bytes, 8, version) || version != FASTFILE_VERSION)
+    {
+        return Result(WebAssetProbeResult::FastfileVersion);
+    }
+    const uint8_t compressionMethod = bytes[12];
+    const uint8_t compressionFlags = bytes[13];
+    const uint16_t compressionHeader = static_cast<uint16_t>(
+        static_cast<uint16_t>(compressionMethod) << 8u) |
+        static_cast<uint16_t>(compressionFlags);
+    if ((compressionMethod & 0x0fu) != 8u ||
+        (compressionMethod >> 4u) > 7u ||
+        (compressionFlags & 0x20u) != 0u ||
+        compressionHeader % 31u != 0u)
+    {
+        return Result(WebAssetProbeResult::FastfileCompression);
+    }
     return Result(WebAssetProbeResult::Success);
 }

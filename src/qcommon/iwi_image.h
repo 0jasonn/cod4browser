@@ -12,7 +12,12 @@ namespace kisak::iwi
 constexpr std::uint32_t HEADER_SIZE = 28u;
 constexpr std::uint8_t COD4_VERSION = 6u;
 constexpr std::uint8_t FORMAT_ARGB = 1u;
+constexpr std::uint8_t FORMAT_DXT1 = 11u;
+constexpr std::uint8_t FORMAT_DXT3 = 12u;
+constexpr std::uint8_t FORMAT_DXT5 = 13u;
+constexpr std::uint8_t FLAG_NO_PICMIP = 0x01u;
 constexpr std::uint8_t FLAG_NO_MIPMAPS = 0x02u;
+constexpr std::uint8_t FLAG_CUBEMAP = 0x04u;
 
 // The browser engine filesystem retains at most one complete 4 MiB member.
 // Keep the portable texture boundary at the same limit so callers never need
@@ -61,12 +66,13 @@ struct Rgba8Image
 // input remains owned by the caller and output is replaced only on success.
 Error Parse(std::span<const std::uint8_t> bytes, Metadata &metadata) noexcept;
 
-// Decodes the deliberately narrow first renderer texture slice from a complete
-// IWI v6 member. Only format 1 (named ARGB by the engine, serialized as BGRA),
-// flags == FLAG_NO_MIPMAPS, a two-dimensional depth of one, and one exact
-// tightly packed mip are accepted. The returned pixels are tightly packed
-// RGBA8 in row-major order. Input and output may alias; output is replaced only
-// after the complete image has been validated, allocated, and converted.
+// Decodes one bounded two-dimensional IWI v6 image into RGBA8. Format 1 (named
+// ARGB by the engine, serialized as BGRA) retains its original strict one-mip
+// boundary. DXT1, DXT3, and DXT5 accept an exact 2D mip chain in COD4's
+// smallest-to-largest file order and decode only the largest level. Cubemaps,
+// volumes, unknown flags, malformed block layouts, and output above the shared
+// 4 MiB recovery ceiling fail closed. Input and output may alias; output is
+// replaced only after complete validation, allocation, and conversion.
 Error DecodeRgba8(
     std::span<const std::uint8_t> bytes,
     Rgba8Image &image) noexcept;

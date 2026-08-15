@@ -29,6 +29,21 @@ const runtime = {
     lastFrame: null,
     contextLosses: 0,
     engine: null,
+    qcommon: {
+        state: "idle",
+        stage: "idle",
+        message: "Waiting for a validated local installation",
+    },
+    retailCensus: {
+        state: "idle",
+        stage: "idle",
+        message: "Waiting for qcommon pre-database startup",
+    },
+    scheduler: {
+        state: "idle",
+        message: "Waiting for the cooperative frame scheduler",
+    },
+    schedulerSamples: [],
     system: null,
     systemSamples: [],
     assets: {
@@ -43,12 +58,21 @@ const runtime = {
     },
     rendererSurface: { state: "idle", message: "Waiting for an engine surface" },
     rendererTexture: { state: "idle", message: "Waiting for a supported engine image" },
+    rendererShader: { state: "idle", message: "Waiting for a retail shader contract" },
+    rendererMaterial: {
+        state: "idle",
+        message: "Waiting for a shader sampler and decoded engine image",
+    },
 };
 globalThis.__KISAKCOD_WEB__ = runtime;
 
 let assetStore = null;
 let filesystemBridge = null;
 let archiveImportId = null;
+let qcommonImportId = null;
+let retailCensusImportId = null;
+let schedulerWarningsReported = 0;
+let schedulerViolationsReported = 0;
 
 const stateLabels = {
     loading: "Runtime loading",
@@ -102,6 +126,54 @@ function formatBytes(bytes) {
     return `${value.toFixed(digits)} ${units[unit]}`;
 }
 
+function updateRendererMaterialBinding() {
+    const shaderReady = runtime.rendererShader?.state === "ready" &&
+        runtime.rendererShader?.resident === true &&
+        runtime.rendererShader?.firstDrawCompleted === true;
+    const textureReady = runtime.rendererTexture?.state === "ready" &&
+        runtime.rendererTexture?.resident === true;
+    const previousReady = runtime.rendererMaterial?.state === "ready";
+    if (!shaderReady || !textureReady) {
+        runtime.rendererMaterial = {
+            state: "waiting",
+            message: "Waiting for a resident shader sampler and decoded engine image",
+            shaderReady,
+            textureReady,
+        };
+        return;
+    }
+
+    const sourceFormat = runtime.rendererTexture.sourceFormat >>> 0;
+    const compressedSource = sourceFormat >= 11 && sourceFormat <= 13;
+    runtime.rendererMaterial = {
+        state: "ready",
+        message: compressedSource
+            ? "Decoded COD4 DXT image bound to the retail shader sampler"
+            : "Decoded engine image bound to the retail shader sampler",
+        shaderSubstitutionId: runtime.rendererShader.substitutionId,
+        sampler: "u_colorMapSampler",
+        textureUnit: 0,
+        imagePath: runtime.rendererTexture.path,
+        sourceFormat,
+        decodedFormat: runtime.rendererTexture.gpuFormat,
+        compressedSource,
+        recoveryBytes: runtime.rendererTexture.recoveryBytes,
+        geometrySource: runtime.engineWorldSurface?.state !== "ready"
+            ? "unknown"
+            : runtime.engineWorldSurface.synthetic ? "synthetic" : "retail",
+    };
+    if (compressedSource) {
+        rendererStatus.textContent = "WebGL2 + COD4 DXT texture binding ready";
+    }
+    if (!previousReady) {
+        appendLog(
+            `[kisakcod-web] Bound ${runtime.rendererTexture.path || "engine IWI"} ` +
+            `(IWI format ${sourceFormat}) to ${runtime.rendererShader.substitutionId} ` +
+            `texture unit 0.`,
+        );
+    }
+}
+
 function publishAssetState(detail) {
     runtime.assets = { ...detail };
     globalThis.dispatchEvent(new CustomEvent("kisakcod:assets", {
@@ -129,6 +201,99 @@ globalThis.addEventListener("kisakcod:archive", (event) => {
         );
     } else if (event.detail.state === "failed") {
         appendLog(`[kisakcod-web] Archive reader: ${event.detail.message}`, "error");
+    }
+});
+
+globalThis.addEventListener("kisakcod:qcommon", (event) => {
+    runtime.qcommon = { ...event.detail };
+    if (event.detail.state === "ready") {
+        physicsStatus.textContent = "ODE + qcommon pre-database ready";
+        appendLog(
+            `[kisakcod-web] Qcommon checked ${event.detail.filesChecked}/` +
+            `${event.detail.totalFiles} startup files through the cooperative VFS.`,
+        );
+        const readyImportId = runtime.assets.state === "ready"
+            ? runtime.assets.manifest?.importId ?? null
+            : null;
+        if (readyImportId && readyImportId === qcommonImportId &&
+            readyImportId !== retailCensusImportId &&
+            typeof runtime.module?._KisakWeb_StartRetailCensus === "function") {
+            retailCensusImportId = readyImportId;
+            runtime.module._KisakWeb_StartRetailCensus();
+        }
+    } else if (event.detail.state === "failed") {
+        physicsStatus.textContent = "Qcommon startup failed";
+        appendLog(`[kisakcod-web] Qcommon startup: ${event.detail.message}`, "error");
+    } else if (event.detail.state === "loading") {
+        physicsStatus.textContent = `Qcommon startup: ${event.detail.stage}`;
+    }
+});
+
+globalThis.addEventListener("kisakcod:retail-census", (event) => {
+    runtime.retailCensus = structuredClone(event.detail);
+    if (event.detail.state === "ready") {
+        appendLog(
+            `[kisakcod-web] Counted ${event.detail.assetCount.toLocaleString()} ` +
+            `code_post_gfx assets; traversed ${event.detail.techniqueSetName} ` +
+              `and selected ${event.detail.shaderSubstitutionId}.`,
+        );
+        const readyImportId = runtime.assets.state === "ready"
+            ? runtime.assets.manifest?.importId ?? null
+            : null;
+        if (readyImportId && readyImportId === retailCensusImportId &&
+            readyImportId !== archiveImportId &&
+            typeof runtime.module?._KisakWeb_StartArchiveJob === "function") {
+            archiveImportId = readyImportId;
+            runtime.module._KisakWeb_StartArchiveJob();
+        }
+    } else if (event.detail.state === "failed") {
+        appendLog(`[kisakcod-web] Retail fastfile census: ${event.detail.message}`, "error");
+    }
+});
+
+globalThis.addEventListener("kisakcod:renderer-shader", (event) => {
+    const previousFirstDraw = runtime.rendererShader?.firstDrawCompleted === true;
+    runtime.rendererShader = structuredClone(event.detail);
+    if (event.detail.state === "ready" && event.detail.firstDrawCompleted) {
+        rendererStatus.textContent = "WebGL2 + COD4 shader contract ready";
+        if (!previousFirstDraw) {
+            appendLog(
+                `[kisakcod-web] Drew the indexed surface through ` +
+                `${event.detail.substitutionId}.`,
+            );
+        }
+    } else if (event.detail.state === "failed") {
+        rendererStatus.textContent = "WebGL2 shader substitution failed";
+        appendLog(`[kisakcod-web] Renderer shader: ${event.detail.message}`, "error");
+    } else if (event.detail.state === "lost") {
+        rendererStatus.textContent = "WebGL2 shader context lost";
+    } else if (event.detail.state === "cleared") {
+        rendererStatus.textContent = "WebGL2 + world surface ready";
+    }
+    updateRendererMaterialBinding();
+});
+
+globalThis.addEventListener("kisakcod:schedule", (event) => {
+    runtime.scheduler = structuredClone(event.detail);
+    runtime.schedulerSamples.push(runtime.scheduler);
+    if (runtime.schedulerSamples.length > 80) {
+        runtime.schedulerSamples.splice(0, runtime.schedulerSamples.length - 80);
+    }
+    if (event.detail.protocolViolations > schedulerViolationsReported) {
+        appendLog(
+            `[kisakcod-web] Scheduler quarantined ${event.detail.protocolViolations} ` +
+            `task protocol violation(s).`,
+            "error",
+        );
+        schedulerViolationsReported = event.detail.protocolViolations;
+    }
+    if (event.detail.starvationWarnings > schedulerWarningsReported) {
+        appendLog(
+            `[kisakcod-web] Scheduler observed ${event.detail.starvationWarnings} ` +
+            `repeated starvation condition(s).`,
+            "error",
+        );
+        schedulerWarningsReported = event.detail.starvationWarnings;
     }
 });
 
@@ -216,6 +381,7 @@ globalThis.addEventListener("kisakcod:renderer-texture", (event) => {
         engineAssetStatus.textContent = "Waiting for mounted archive";
         break;
     }
+    updateRendererMaterialBinding();
 });
 
 globalThis.addEventListener("kisakcod:engine-world-surface", (event) => {
@@ -236,6 +402,12 @@ globalThis.addEventListener("kisakcod:engine-world-surface", (event) => {
         stepOutputBytes: event.detail.stepOutputBytes,
         stepParsedBytes: event.detail.stepParsedBytes,
         stepRecords: event.detail.stepRecords,
+        stepSourceBytes: event.detail.stepSourceBytes,
+        sourceFeedCount: event.detail.sourceFeedCount,
+        sourceBytesReceived: event.detail.sourceBytesReceived,
+        sourceBytesConsumed: event.detail.sourceBytesConsumed,
+        maxSourceChunkBytes: event.detail.maxSourceChunkBytes,
+        needsSource: event.detail.needsSource,
         compressedBytesConsumed: event.detail.compressedBytesConsumed,
         inflatedBytesProduced: event.detail.inflatedBytesProduced,
         parsedBytes: event.detail.parsedBytes,
@@ -253,6 +425,8 @@ globalThis.addEventListener("kisakcod:engine-world-surface", (event) => {
         materialAssetIndex: event.detail.materialAssetIndex,
         worldAssetIndex: event.detail.worldAssetIndex,
         materialIdentity: event.detail.materialIdentity,
+        worldIdentity: event.detail.worldIdentity,
+        registeredAssetCount: event.detail.registeredAssetCount,
         sourceSurfaceIndex: event.detail.sourceSurfaceIndex,
         worldVertexCount: event.detail.worldVertexCount,
         worldIndexCount: event.detail.worldIndexCount,
@@ -270,6 +444,8 @@ globalThis.addEventListener("kisakcod:engine-world-surface", (event) => {
     case "loading":
         rendererStatus.textContent = event.detail.pipelineStage === "begin"
             ? "Preparing incremental fastfile extraction"
+            : event.detail.pipelineStage === "source-wait"
+                ? "Waiting for the next bounded fastfile chunk"
             : event.detail.pipelineStage === "inflate"
                 ? "Inflating fastfile incrementally"
                 : "Traversing fastfile incrementally";
@@ -299,6 +475,7 @@ globalThis.addEventListener("kisakcod:engine-world-surface", (event) => {
     default:
         break;
     }
+    updateRendererMaterialBinding();
 });
 
 globalThis.addEventListener("kisakcod:renderer-surface", (event) => {
@@ -346,6 +523,11 @@ function renderAssetManifest(manifest) {
     }
     const values = [
         ["Language", manifest.language],
+        ["Install profile", manifest.profile?.id ?? "unknown"],
+        ["Target map", manifest.profile?.map ?? "unknown"],
+        ["Validated files", manifest.files.length.toLocaleString()],
+        ["IWD archives verified", manifest.archiveProbe?.archivesProbed?.toLocaleString() ?? "unknown"],
+        ["Fastfiles verified", manifest.zoneProbe?.filesProbed?.toLocaleString() ?? "unknown"],
         ...manifest.files.map((file) => [file.path, formatBytes(file.size)]),
         ["IWD entries declared", manifest.archiveProbe?.entriesDeclared?.toLocaleString() ?? "unknown"],
     ];
@@ -411,14 +593,30 @@ globalThis.addEventListener("kisakcod:assets", (event) => {
     const preserveExistingArchive = assets.manifest?.importId === archiveImportId &&
         ["checking", "selecting", "validating", "importing", "failed", "ready"]
             .includes(assets.state);
-    if (readyImportId && readyImportId !== archiveImportId && filesystemBridge &&
-        typeof runtime.module?._KisakWeb_StartArchiveJob === "function") {
-        archiveImportId = readyImportId;
+    if (readyImportId && readyImportId !== qcommonImportId && filesystemBridge &&
+        typeof runtime.module?._KisakWeb_StartQcommonRuntime === "function") {
+        if (archiveImportId !== null) {
+            archiveImportId = null;
+            runtime.module?._KisakWeb_CancelArchiveJob?.();
+            publishArchiveState({
+                state: "idle",
+                message: "Waiting for qcommon pre-database startup",
+            });
+        }
+        if (retailCensusImportId !== null) {
+            retailCensusImportId = null;
+            runtime.module?._KisakWeb_CancelRetailCensus?.();
+        }
         filesystemBridge.invalidate();
-        runtime.module._KisakWeb_StartArchiveJob();
-    } else if (!readyImportId && archiveImportId !== null && !preserveExistingArchive) {
+        qcommonImportId = readyImportId;
+        runtime.module._KisakWeb_StartQcommonRuntime();
+    } else if (!readyImportId && qcommonImportId !== null && !preserveExistingArchive) {
+        qcommonImportId = null;
+        retailCensusImportId = null;
         archiveImportId = null;
         filesystemBridge?.invalidate();
+        runtime.module?._KisakWeb_CancelQcommonRuntime?.();
+        runtime.module?._KisakWeb_CancelRetailCensus?.();
         runtime.module?._KisakWeb_CancelArchiveJob?.();
         publishArchiveState({ state: "idle", message: "Waiting for a validated local archive" });
     }

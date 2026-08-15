@@ -28,6 +28,7 @@ constexpr std::uint32_t MAX_STEP_RECORDS = 64u;
 struct Limits
 {
     std::uint32_t maxFileBytes = 4u * 1024u * 1024u;
+    std::uint32_t maxSourceChunkBytes = MAX_STEP_BYTES;
     std::uint32_t maxInflatedBytes = 8u * 1024u * 1024u;
     std::uint32_t maxBlockBytes = 8u * 1024u * 1024u;
     std::uint32_t maxTotalBlockBytes = 8u * 1024u * 1024u;
@@ -79,6 +80,8 @@ struct ExtractedWorldSurface
     // Stable job-local identity resolved through the serialized block-4 alias.
     // This is deliberately not a serialized or native pointer value.
     std::uint32_t materialIdentity = 0u;
+    std::uint32_t worldIdentity = 0u;
+    std::uint32_t registeredAssetCount = 0u;
     std::uint32_t sourceWorldVertexCount = 0u;
     std::uint32_t sourceWorldIndexCount = 0u;
     std::uint32_t sourceWorldSurfaceCount = 0u;
@@ -99,6 +102,10 @@ enum class Error : std::uint32_t
     None = 0,
     InvalidArgument,
     InvalidStepBudget,
+    SourceChunkTooLarge,
+    SourceBackpressure,
+    SourceAlreadyFinal,
+    SourceNotReady,
     FileTooLarge,
     PrefixTruncated,
     InvalidMagic,
@@ -192,14 +199,18 @@ struct StepReport
     std::uint32_t inflatedBytesProducedThisStep = 0u;
     std::uint32_t traversedBytesThisStep = 0u;
     std::uint32_t recordsProcessedThisStep = 0u;
+    std::uint32_t sourceBytesConsumedThisStep = 0u;
+    bool needsSource = false;
 };
 
 // Incremental owner for the same deliberately strict extraction implemented
-// by ExtractWorldSurface. Begin takes the complete source allocation so no
-// caller-owned pointer can expire or change between browser frames. A zero or
-// over-limit Step consumes no work and terminates with InvalidStepBudget.
-// It never writes caller output. TakeResult is a one-shot atomic move that is
-// available only after Succeeded; every other call leaves destination intact.
+// by ExtractWorldSurface. BeginStreaming creates a backpressured source that
+// accepts one bounded chunk at a time and can remain Running while NeedsSource
+// is true. FeedSource copies each chunk, so caller memory may expire immediately.
+// The vector-taking Begin overload is a compatibility owner that feeds the same
+// source seam automatically. A zero or over-limit Step consumes no work and
+// terminates with InvalidStepBudget. It never writes caller output. TakeResult
+// is a one-shot atomic move available only after Succeeded.
 class WorldSurfaceExtractionJob
 {
 public:
@@ -213,10 +224,19 @@ public:
     Error Begin(
         std::vector<std::uint8_t> &&fileBytes,
         const Limits &limits = {}) noexcept;
+    Error BeginStreaming(const Limits &limits = {}) noexcept;
+    Error FeedSource(
+        std::span<const std::uint8_t> bytes,
+        bool final) noexcept;
     StepReport Step(const StepBudget &budget = {}) noexcept;
     JobProgress Progress() const noexcept;
     JobStage Stage() const noexcept;
     Error Failure() const noexcept;
+    bool NeedsSource() const noexcept;
+    bool SourceFinalReceived() const noexcept;
+    std::uint32_t SourceFeedCount() const noexcept;
+    std::uint64_t SourceBytesReceived() const noexcept;
+    std::uint64_t SourceBytesConsumed() const noexcept;
     bool TakeResult(ExtractedWorldSurface &destination) noexcept;
     void Reset() noexcept;
 

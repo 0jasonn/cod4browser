@@ -1,20 +1,11 @@
 import { expect, test } from "@playwright/test";
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { crc32 } from "node:zlib";
+import { createInstallDirectory as createM12InstallDirectory } from "./install_fixture.mjs";
 import {
     createSyntheticIwd,
     ZIP_METHOD_DEFLATE,
     ZIP_METHOD_STORE,
 } from "./synthetic_iwd.mjs";
-
-const SYNTHETIC_LOCALIZATION = [
-    "english",
-    "",
-    "SYNTHETIC_ARCHIVE_READER",
-    '"Synthetic archive fixture"',
-    "",
-].join("\n");
 
 const STORED_MEMBER = Object.freeze({
     path: "synthetic/stored.txt",
@@ -50,15 +41,7 @@ function expectedMember(entry)
 
 async function createInstallDirectory(testInfo, name, iwd)
 {
-    const directory = testInfo.outputPath(name);
-    await mkdir(path.join(directory, "main"), { recursive: true });
-    await writeFile(
-        path.join(directory, "localization.txt"),
-        SYNTHETIC_LOCALIZATION,
-        "utf8",
-    );
-    await writeFile(path.join(directory, "main", "iw_00.iwd"), iwd);
-    return directory;
+    return createM12InstallDirectory(testInfo, name, { primaryIwd: iwd });
 }
 
 async function usePortableFolderPicker(page)
@@ -161,7 +144,8 @@ function collectAssetNetworkRequests(page)
         const pathName = url.pathname.toLowerCase();
         if (url.protocol !== "data:" && url.protocol !== "blob:" &&
             (url.origin !== "http://127.0.0.1:8000" ||
-                pathName.endsWith("/localization.txt") || pathName.endsWith(".iwd"))) {
+                pathName.endsWith("/localization.txt") || pathName.endsWith(".iwd") ||
+                pathName.endsWith(".ff"))) {
             requests.push(`${request.method()} ${request.url()}`);
         }
     });
@@ -286,7 +270,7 @@ test("reports a member CRC failure without invalidating the outer asset import",
     expect(result.events.some((event) => event.state === "failed")).toBe(true);
     expect(result.assets).toMatchObject({
         state: "ready",
-        manifest: { archiveProbe: { entriesDeclared: 2 } },
+        manifest: { archiveProbe: { entriesDeclared: 22, archivesProbed: 21 } },
     });
     await expect(page.locator("#asset-state-label")).toHaveText("Local installation ready");
     expect(assetNetworkRequests).toEqual([]);

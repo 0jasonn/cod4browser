@@ -91,6 +91,35 @@ Bytes MakeIwi(
     return bytes;
 }
 
+Bytes MakeDxtIwi(
+    uint8_t format,
+    uint16_t width,
+    uint16_t height,
+    const Bytes &payload,
+    uint8_t flags = kisak::iwi::FLAG_NO_MIPMAPS)
+{
+    Bytes bytes = MakeIwi(format, flags, width, height, 1u, payload.size());
+    std::copy(payload.begin(), payload.end(), bytes.begin() + kisak::iwi::HEADER_SIZE);
+    return bytes;
+}
+
+Bytes MakeDxtColorBlock(
+    uint16_t color0,
+    uint16_t color1,
+    uint32_t indices)
+{
+    Bytes block(8u, 0u);
+    PatchU16(block, 0u, color0);
+    PatchU16(block, 2u, color1);
+    PatchU32(block, 4u, indices);
+    return block;
+}
+
+void Append(Bytes &destination, const Bytes &source)
+{
+    destination.insert(destination.end(), source.begin(), source.end());
+}
+
 bool SameMetadata(const Metadata &left, const Metadata &right)
 {
     return left.version == right.version &&
@@ -354,6 +383,167 @@ void TestRgba8DecodeAndSwizzle()
         "aliased decode commits only after conversion is complete");
 }
 
+void TestDxt1Decode()
+{
+    const Bytes opaqueBlock = MakeDxtColorBlock(0xf800u, 0x07e0u, 0xe4e4e4e4u);
+    Rgba8Image image = MakeSentinelImage();
+    RequireError(kisak::iwi::DecodeRgba8(MakeDxtIwi(
+        kisak::iwi::FORMAT_DXT1, 4u, 4u, opaqueBlock), image), Error::None,
+        "decode DXT1 four-color block");
+    const Bytes firstRow{
+        255u, 0u, 0u, 255u,
+        0u, 255u, 0u, 255u,
+        170u, 85u, 0u, 255u,
+        85u, 170u, 0u, 255u,
+    };
+    Require(image.width == 4u && image.height == 4u,
+        "DXT1 retains dimensions");
+    for (std::size_t row = 0u; row < 4u; ++row)
+    {
+        const auto decodedRow = std::span<const uint8_t>(image.pixels).subspan(
+            row * firstRow.size(), firstRow.size());
+        Require(std::equal(
+            firstRow.begin(), firstRow.end(), decodedRow.begin()),
+            "DXT1 expands RGB565 and two-bit selectors");
+    }
+
+    const Bytes transparentBlock = MakeDxtColorBlock(0x0000u, 0xffffu, 0xffffffffu);
+    RequireError(kisak::iwi::DecodeRgba8(MakeDxtIwi(
+        kisak::iwi::FORMAT_DXT1, 4u, 4u, transparentBlock), image), Error::None,
+        "decode DXT1 transparent mode");
+    for (std::size_t offset = 0u; offset < image.pixels.size(); offset += 4u)
+    {
+        Require(image.pixels[offset] == 0u && image.pixels[offset + 1u] == 0u &&
+                image.pixels[offset + 2u] == 0u && image.pixels[offset + 3u] == 0u,
+            "DXT1 selector three is transparent when color0 is not greater");
+    }
+}
+
+void TestDxt3Decode()
+{
+    Bytes block{0x10u, 0x32u, 0x54u, 0x76u, 0x98u, 0xbau, 0xdcu, 0xfeu};
+    Append(block, MakeDxtColorBlock(0xf800u, 0x07e0u, 0u));
+    Rgba8Image image{};
+    RequireError(kisak::iwi::DecodeRgba8(MakeDxtIwi(
+        kisak::iwi::FORMAT_DXT3, 4u, 4u, block), image), Error::None,
+        "decode DXT3 explicit alpha block");
+    for (std::size_t pixel = 0u; pixel < 16u; ++pixel)
+    {
+        const std::size_t offset = pixel * 4u;
+        Require(image.pixels[offset] == 255u && image.pixels[offset + 1u] == 0u &&
+                image.pixels[offset + 2u] == 0u &&
+                image.pixels[offset + 3u] == pixel * 17u,
+            "DXT3 expands four-bit alpha in serialized pixel order");
+    }
+}
+
+void TestDxt5Decode()
+{
+    Bytes block(8u, 0u);
+    block[0] = 255u;
+    block[1] = 0u;
+    std::uint64_t alphaIndices = 0u;
+    for (std::uint32_t pixel = 0u; pixel < 16u; ++pixel)
+    {
+        alphaIndices |= static_cast<std::uint64_t>(pixel & 7u) << (pixel * 3u);
+    }
+    for (std::size_t byte = 0u; byte < 6u; ++byte)
+    {
+        block[2u + byte] = static_cast<uint8_t>(alphaIndices >> (byte * 8u));
+    }
+    Append(block, MakeDxtColorBlock(0x001fu, 0x07e0u, 0u));
+    Rgba8Image image{};
+    RequireError(kisak::iwi::DecodeRgba8(MakeDxtIwi(
+        kisak::iwi::FORMAT_DXT5, 4u, 4u, block), image), Error::None,
+        "decode DXT5 interpolated alpha block");
+    const std::array<uint8_t, 8> expectedAlpha{
+        255u, 0u, 218u, 182u, 145u, 109u, 72u, 36u,
+    };
+    for (std::size_t pixel = 0u; pixel < 16u; ++pixel)
+    {
+        const std::size_t offset = pixel * 4u;
+        Require(image.pixels[offset] == 0u && image.pixels[offset + 1u] == 0u &&
+                image.pixels[offset + 2u] == 255u &&
+                image.pixels[offset + 3u] == expectedAlpha[pixel & 7u],
+            "DXT5 expands three-bit alpha selectors");
+    }
+}
+
+void TestDxtMipOrderAndClipping()
+{
+    const Bytes red = MakeDxtColorBlock(0xf800u, 0x07e0u, 0u);
+    const Bytes blue = MakeDxtColorBlock(0x001fu, 0x07e0u, 0u);
+    Bytes mipChain;
+    Append(mipChain, red);  // 1x1, level 3
+    Append(mipChain, red);  // 2x1, level 2
+    Append(mipChain, red);  // 4x2, level 1
+    Append(mipChain, blue); // 8x4 base block 0
+    Append(mipChain, blue); // 8x4 base block 1
+    Rgba8Image image{};
+    RequireError(kisak::iwi::DecodeRgba8(MakeDxtIwi(
+        kisak::iwi::FORMAT_DXT1, 8u, 4u, mipChain, 0u), image), Error::None,
+        "decode base image from COD4 smallest-to-largest mip order");
+    Require(image.pixels.size() == 8u * 4u * 4u,
+        "mip decode emits only the largest level");
+    for (std::size_t offset = 0u; offset < image.pixels.size(); offset += 4u)
+    {
+        Require(image.pixels[offset] == 0u && image.pixels[offset + 1u] == 0u &&
+                image.pixels[offset + 2u] == 255u && image.pixels[offset + 3u] == 255u,
+            "mip decode reads the base blocks at the end of the payload");
+    }
+
+    Bytes oddBlocks;
+    Append(oddBlocks, red);
+    Append(oddBlocks, blue);
+    RequireError(kisak::iwi::DecodeRgba8(MakeDxtIwi(
+        kisak::iwi::FORMAT_DXT1, 5u, 3u, oddBlocks), image), Error::None,
+        "decode clipped edge blocks for non-multiple-of-four dimensions");
+    Require(image.width == 5u && image.height == 3u && image.pixels.size() == 60u,
+        "clipped DXT output has an exact tight RGBA layout");
+    for (std::uint32_t row = 0u; row < 3u; ++row)
+    {
+        const std::size_t redOffset = (static_cast<std::size_t>(row) * 5u + 3u) * 4u;
+        const std::size_t blueOffset = (static_cast<std::size_t>(row) * 5u + 4u) * 4u;
+        Require(image.pixels[redOffset] == 255u && image.pixels[redOffset + 2u] == 0u &&
+                image.pixels[blueOffset] == 0u && image.pixels[blueOffset + 2u] == 255u,
+            "edge clipping preserves pixels from both compressed blocks");
+    }
+}
+
+void TestDxtValidationAndAtomicFailure()
+{
+    const Bytes block = MakeDxtColorBlock(0xf800u, 0x07e0u, 0u);
+    for (const uint8_t format : {
+        kisak::iwi::FORMAT_DXT1,
+        kisak::iwi::FORMAT_DXT3,
+        kisak::iwi::FORMAT_DXT5,
+    })
+    {
+        const std::size_t expected = format == kisak::iwi::FORMAT_DXT1 ? 8u : 16u;
+        RequireDecodeFailure(MakeIwi(
+            format, kisak::iwi::FLAG_NO_MIPMAPS, 4u, 4u, 1u, expected - 1u),
+            Error::DecodeInvalidLayout,
+            "reject truncated DXT block payload");
+        RequireDecodeFailure(MakeIwi(
+            format, kisak::iwi::FLAG_NO_MIPMAPS, 4u, 4u, 1u, expected + 1u),
+            Error::DecodeInvalidLayout,
+            "reject trailing DXT block payload");
+    }
+    RequireDecodeFailure(MakeDxtIwi(
+        kisak::iwi::FORMAT_DXT1, 4u, 4u, block, kisak::iwi::FLAG_CUBEMAP),
+        Error::DecodeUnsupportedFlags,
+        "reject DXT cubemap at the bounded 2D renderer seam");
+    RequireDecodeFailure(MakeIwi(
+        kisak::iwi::FORMAT_DXT1,
+        kisak::iwi::FLAG_NO_MIPMAPS,
+        2048u,
+        2048u,
+        1u,
+        8u),
+        Error::DecodeOutputTooLarge,
+        "reject DXT expansion above the RGBA recovery ceiling");
+}
+
 void TestRgba8DecodeRejectsUnsupportedSlice()
 {
     RequireDecodeFailure(
@@ -480,7 +670,9 @@ void TestRgba8DecodePropagatesParserErrors()
     const Bytes fixture = MakeIwi();
     for (std::size_t length = 0; length < kisak::iwi::HEADER_SIZE; ++length)
     {
-        const Bytes truncated(fixture.begin(), fixture.begin() + length);
+        const Bytes truncated(
+            fixture.begin(),
+            fixture.begin() + static_cast<Bytes::difference_type>(length));
         RequireDecodeFailure(truncated, Error::HeaderTruncated,
             "decoder preserves truncated-header parser error");
     }
@@ -610,6 +802,11 @@ int main()
     runner.Run("header validation", TestHeaderValidation);
     runner.Run("file-size validation", TestFileSizeValidation);
     runner.Run("RGBA8 decode and swizzle", TestRgba8DecodeAndSwizzle);
+    runner.Run("DXT1 decode", TestDxt1Decode);
+    runner.Run("DXT3 decode", TestDxt3Decode);
+    runner.Run("DXT5 decode", TestDxt5Decode);
+    runner.Run("DXT mip order and clipping", TestDxtMipOrderAndClipping);
+    runner.Run("DXT validation and atomic failure", TestDxtValidationAndAtomicFailure);
     runner.Run("RGBA8 unsupported slice", TestRgba8DecodeRejectsUnsupportedSlice);
     runner.Run("RGBA8 layout and limits", TestRgba8DecodeLayoutAndLimits);
     runner.Run("RGBA8 parser error propagation", TestRgba8DecodePropagatesParserErrors);

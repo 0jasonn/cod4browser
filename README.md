@@ -11,15 +11,19 @@ The `web-port` branch contains a browser target with a legal local-asset
 boundary. It compiles existing KisakCOD/ODE physics math plus portable
 command/dvar and bounded ZIP32/IWD slices to WebAssembly, then runs them through
 a monotonic, non-blocking browser frame pump beside a minimal WebGL2 capability
-renderer. Users can select `localization.txt` and `main/iw_00.iwd` from their own
-installation, stream them into private browser storage, and restore them on a
-later visit.
+renderer. Users can select the exact English F.N.G. profile from their own
+installation—`localization.txt`, 21 stock IWDs, three startup fastfiles, and
+`killhouse.ff`—stream it into private browser storage, and restore it later.
+After a validated import, a cooperative qcommon shell initializes bounded
+startup memory, an event queue, and the startup command/dvar set, then checks
+all 26 files through the asynchronous VFS before stopping at an explicit
+pre-database state.
 
 The runnable browser slice asynchronously mounts the imported IWD behind a narrow
 read-only engine filesystem, verifies representative stored and deflated
 members, and loads one bounded `images/*.iwi` member through a callback-scoped
-4 MiB cache. A portable decoder accepts one strict uncompressed IWI slice,
-converts its serialized BGRA mip to RGBA8, and submits it through a renderer
+4 MiB cache. A portable decoder accepts strict uncompressed BGRA and compressed
+DXT1/DXT3/DXT5 IWI slices, converts the selected base mip to RGBA8, and submits it through a renderer
 interface that keeps WebGL objects private. The engine side now converts one
 bounded surface from D3D-free mirrors of upstream's 44-byte `GfxWorldVertex` and
 16-byte `srfTriangles_t` layouts. A freely generated fixture selects four world
@@ -27,7 +31,7 @@ vertices and six local indices through non-zero source offsets, decodes native
 `0xAARRGGBB` color, and applies an explicit affine world-to-clip projection
 before submitting the existing indexed renderer contract. The renderer copies
 that converted description and recreates both surface and texture after context
-loss; valid compressed or otherwise unsupported IWI formats remain non-fatal
+loss; valid wavelet/cubemap/volume or otherwise unsupported IWI layouts remain non-fatal
 metadata results. It uses the pinned Emscripten zlib 1.3.2 port rather than the
 legacy native zlib copy. Automated browser, portable C++, and fuzz-harness
 inputs are generated synthetic data only. This proves conversion from an
@@ -74,15 +78,94 @@ compressed padding. Because the generated loader never selects delayed blocks
 2 or 3 in this slice, a separate synthetic microfixture specifies their checked
 FIFO replay.
 
-This remains synthetic-only, not a general decoder or retail-compatibility
-claim. Milestone 11 is tightly scoped to a stable multi-asset arena/alias/
-registry seam plus resumable source streaming; it does not yet add general
-generated-loader traversal. DXT IWI decoding and the broader asset graph remain
-later hurdles. A read-only audit of a legally owned retail installation may
-confirm framing and format prevalence, but that proves framing only: no
-proprietary file is copied or committed, and retail `.ff` input remains
-rejected. The browser importer is unchanged and still accepts only
-`localization.txt` and `main/iw_00.iwd` from a user-selected installation.
+Milestone 11 extracts stable asset registration and source delivery from that
+surface-specific state. A reusable registry owns names, sequential job-local
+identities, and checked alias cells with deterministic publish, resolve,
+unload, and reset behavior. A separate bounded source queue copies one producer
+chunk at a time, applies backpressure, and requires an explicit final marker.
+The parser can now pause across split prefix and zlib input, then resume without
+owning one complete compressed file. The browser proves the path by feeding the
+synthetic fixture in 37-byte chunks across RAF callbacks and publishing exact
+feed/byte counters and `source-wait` lifecycle events.
+
+Milestone 12 expands only the legal installation and file-access boundary. Its
+schema-2 manifest allowlists 26 paths: `localization.txt`, base IWDs `iw_00`
+through `iw_13`, English localized IWDs `iw00` through `iw06`, the
+`code_post_gfx`/`ui`/`common` startup zones, and the F.N.G. `killhouse` zone.
+Selection validates bounded localization, ZIP, and 14-byte IWff/zlib windows;
+OPFS persistence and restore verify every exact path and size. The asynchronous
+read-only VFS can stat and read any allowlisted file in bounded, cancellable
+chunks without placing a complete multi-gigabyte input in Wasm memory.
+
+At the M12 boundary this was not retail fastfile traversal or a playable-game claim. Reading
+`killhouse.ff` through the VFS does not change the synthetic world extraction
+generation, and no user-owned `.ff` reaches the strict two-record decoder. A
+read-only audit of the legally owned Steam installation confirmed the exact M12
+profile and version-5/zlib headers; no proprietary file was copied into the
+repository or used as an automated fixture.
+
+Milestone 13 completes the portable pre-database qcommon shell. Each browser
+frame advances at most one startup action. The job performs memory, event, and
+command/dvar initialization followed by a stat and bounded header read for each
+of the 26 profile paths: 55 actions and 148 input bytes in the successful path.
+It supports cancellation and fresh generations, publishes typed path-specific
+failures, and explicitly reports that Asyncify, pthreads, and retail zone
+traversal are disabled. At M13, DXT IWI decoding, the broader asset graph, and
+a real map remained later hurdles.
+
+Milestone 14 replaced the hand-written per-frame job chain with one fixed-capacity
+cooperative scheduler. Filesystem completions, qcommon, archive work, engine
+assets, commands, synthetic world extraction, and renderer submission run in a
+stable order; M15 adds the retail census as the eighth task and raises the
+current envelope as described below. A 12-ms inter-task wall-time check and
+generational handles prevent stale cancellation, repeated budget denial emits
+starvation diagnostics, and reservation violations quarantine the offending
+task. Sampled browser traces expose the schedule without changing the existing
+world-surface or renderer output.
+
+Milestone 15 added the first deliberately bounded retail fastfile traversal.
+After qcommon startup, the browser reads `code_post_gfx.ff` through the local
+VFS, validates its unsigned version-5/zlib/XFile envelope, traverses its script
+strings and complete asset-header table, publishes a type census, and stops
+before asset body zero. The current eight-task schedule reserves 266,254 bytes
+and 267 records inside 320-KiB/320-record/eight-call frame ceilings. A read-only
+check of the user's Steam file found 1,639 headers ending at inflated offset
+14,942; asset zero is an inline technique set.
+
+Milestone 16 follows that first body through its technique, pass, vertex
+declaration, vertex-shader metadata, and bounded D3D9 bytecode, then stops before
+the native `Load_CreateMaterialVertexShader` side effect. The real read-only
+boundary is `sm2/2d` to slot 4 to `vertcol_simple.hlsl`, a 103-DWORD program
+ending at inflated offset 15,673. No incomplete asset is published, no retail
+shader is executed or rendered, and no proprietary byte is copied into tests or
+committed.
+
+Milestone 17 replaces both native D3D9 shader-creation calls for that first pass
+with one strict portable compatibility record. A bounded decoder inventories
+VS 1.1/PS 2.0 instructions and CTAB register bindings, then selects the explicit
+GLSL ES 3.00 pair `webgl2.vertcol_simple2d.v1` only when the paired contracts and
+vertex routing all match. It consumes the three material arguments and
+`vertcol_simple2d` technique name before publishing asset zero atomically. The
+owned Steam file reaches inflated offset 15,950 with one completed asset; actual
+WebGL2 program creation and retail material/image binding remain later work.
+
+Milestone 18 makes that selected record renderer-owned. The browser compiles and
+links only the port's compiled-in GLSL, validates all three attributes and three
+uniforms, binds identity matrices and texture unit zero, and completes an
+indexed draw through `webgl2.vertcol_simple2d.v1`. Publication is atomic,
+binding failure keeps the bootstrap renderer active, cancellation retires stale
+state, and context restoration recompiles the program from bounded CPU-owned
+descriptions. The shader contract comes from the owned COD4 fastfile; the drawn
+surface and fallback/test texture are still synthetic.
+
+Milestone 19 adds bounded DXT1/DXT3/DXT5 IWI decoding, including exact COD4 mip
+ordering, edge clipping, alpha modes, malformed-layout rejection, and atomic
+RGBA8 publication under the existing 4 MiB recovery ceiling. The asynchronous
+IWD path can now decode and bind the owned archive's deterministic
+`images/$black.iwi` entry to the M18 sampler, and the launcher reports the joint
+shader/image state. Synthetic tests contain no game data. Geometry and the
+surface material identity are still synthetic; M20 targets a real serialized
+Material texture-table/GfxImage dependency.
 
 See [docs/web-port.md](docs/web-port.md) for the pinned toolchain, build steps,
 current boundary, validation limits, and next milestone, and see

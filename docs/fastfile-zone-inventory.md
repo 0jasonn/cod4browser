@@ -6,7 +6,8 @@ This document records the Milestone 8 inventory of the upstream
 fastfile/database path needed to recover one bounded `GfxWorld` surface, the
 strict portable decoder implemented from that inventory, the Milestone 9
 resumable execution boundary, and Milestone 10's exact supported-prefix
-multi-asset contract. The decoder compiles into the browser target and consumes
+multi-asset contract, plus Milestone 11's bounded source and asset-registry
+lifetime seams. The decoder compiles into the browser target and consumes
 a freely generated two-asset synthetic fastfile: one top-level `Material`
 followed by one `GfxWorld`. It is not a general fastfile loader and does not
 establish retail-map compatibility.
@@ -17,10 +18,10 @@ They reject every unsupported branch deterministically and expose owned output
 through a one-shot atomic result handoff. `src/web/web_engine_surface.cpp`
 generates the canonical input, advances its extraction once per browser frame,
 passes the selected surface to the existing world-surface converter, and
-submits the converted quad to the renderer. No user-owned fastfile reaches this
-path. The existing legal importer remains limited to
-`localization.txt` and `main/iw_00.iwd`; it does not select, copy, mount, or
-parse `.ff` files.
+submits the converted quad to the renderer. No user-owned fastfile reaches that
+strict decoder. The legal importer exposes only the exact schema-2 English
+F.N.G. profile; M15 separately routes a bounded `code_post_gfx.ff` prefix into
+the census described below, never into the synthetic renderer path.
 
 The relevant upstream implementation is concentrated in:
 
@@ -356,12 +357,14 @@ must not be ignored: it changes the decompressed traversal and would
 desynchronize every later record. The complete public error vocabulary is in
 `src/web/web_fastfile_world_surface.h`.
 
-The decoder still receives one complete in-memory file. The resumable job
-advances it once per RAF callback with bounded per-frame CPU work; this is not
-yet a resumable browser-file source or permission to accept user-owned data.
+The compatibility API may still own one complete in-memory vector, but it feeds
+the same bounded queue used by `BeginStreaming`. The browser runtime supplies
+37-byte copied source chunks across RAF callbacks and can pause with zero work
+while the next chunk is unavailable. This is not permission to accept
+user-owned fastfile data.
 Successful extraction returns only selected owned vertex/index slices, source
-metadata, block sizes, a bounded material name, and a stable job-local material
-identity. The runtime then calls `WebEngine_ConvertWorldSurface` and
+metadata, block sizes, a bounded material name, and stable job-local material
+and world identities. The runtime then calls `WebEngine_ConvertWorldSurface` and
 `WebRenderer_SetSurface`.
 
 ### Canonical Milestone 10 fixture
@@ -604,17 +607,160 @@ formats are common. That establishes framing and format prevalence only. No
 proprietary file is copied into or committed to this repository, and neither the
 decoder nor importer accepts retail `.ff` input.
 
-## Next design boundary: Milestone 11
+## Milestone 11 source and registry contract (complete)
 
-Milestone 11 should separate stable multi-asset arena, alias, and registration
-lifetime from the surface-specific extractor, including deterministic reset and
-unload behavior. It should also add a resumable source boundary so inflation can
-pause for bounded source chunks instead of requiring `Begin` to own one complete
-compressed allocation. Existing per-step/cumulative limits and atomic result
-handoff remain part of the contract.
+The source boundary is now a bounded one-chunk queue independent of the parser.
+A feed is copied atomically, cannot exceed its per-chunk or cumulative byte
+limit, and is rejected while unread bytes remain. Draining a chunk releases its
+allocation. End-of-source is explicit: the parser can wait after zlib reports
+stream end, then accept an empty final feed or reject any subsequent byte as
+trailing data. Prefix bytes and compressed payload may be split at every byte
+boundary without changing the extracted result.
 
-Keep that milestone synthetic-only and supported-prefix driven. It must not add
-a generic skip mechanism, accept another type implicitly, or route user-owned
-fastfiles into the decoder. General generated-loader traversal and bounded
-DXT1/DXT3/DXT5 IWI decode are the next real format hurdles, but they remain
-separate from M11's arena/identity/source-streaming seam.
+The asset-lifetime boundary is now a reusable registry independent of
+`GfxWorld` traversal. It owns asset records and names, allocates non-pointer
+identities beginning at one, validates alias cell block/range/alignment against
+declared arenas, and enforces unresolved-to-defined exactly once. Both
+`MaterialMemory.material` and `GfxSurface.material` resolve through this
+registry to material identity 1; the later top-level world is registered as
+identity 2. No block-0 address or serialized token is retained as an identity.
+`UnloadAll` releases names/assets/aliases while preserving configuration and
+restarting identity allocation; `Reset` additionally removes configuration.
+
+Portable tests cover starvation, backpressure, caller-buffer independence,
+split prefixes, explicit EOF, truncated and trailing zlib input, alias type and
+range errors, duplicate publication, unload/reset, and exact output equivalence.
+The browser supplies the canonical synthetic file in 37-byte chunks over
+separate RAF callbacks and reports its source lifecycle. The supported asset
+shape is unchanged and retail input remains disconnected.
+
+## Milestone 12 installation/VFS boundary (complete)
+
+The allowlisted English F.N.G. profile now contains 21 stock IWDs and four
+fastfiles in addition to localization. Fastfile selection validates only a
+14-byte window: unsigned `IWffu100`, little-endian version 5, and a valid zlib
+header without a preset dictionary. IWD validation retains its bounded ZIP32
+head/tail/central windows. OPFS restore verifies the schema-2 manifest, all 26
+canonical paths, every recorded file size, and all bounded probes before the
+profile becomes active.
+
+The read-only browser VFS can open immutable sources for the startup and
+`killhouse` zones, perform range-checked reads, cancel delayed work without a
+late Wasm-memory write, and detect a cleared/replaced import generation. It does
+not hand those bytes to this document's strict zone extractor. Automated tests
+verify that reading `killhouse.ff` leaves the synthetic extraction generation
+unchanged. A read-only retail audit confirmed the selected files and framing;
+no retail bytes are test fixtures or repository content.
+
+## Milestone 13 qcommon boundary (complete)
+
+The portable qcommon startup machine now consumes the M12 profile through the
+asynchronous VFS and stops at `pre-database`. It performs three bounded local
+initialization actions and stat/read pairs for the 26 allowlisted files. Only
+148 aggregate header bytes cross this boundary. The four `.ff` reads validate
+their 14-byte unsigned-version-5/zlib framing and are not routed into either a
+retail loader or this document's strict synthetic two-record extractor.
+
+The browser advances at most one startup action per RAF callback and publishes
+generation, action, file, byte, memory, event, and current-path diagnostics.
+Tests cover repeatable generations, cancellation while a VFS request is live,
+and typed path-specific I/O failure.
+
+## Milestone 14 scheduler boundary (complete)
+
+The original seven browser frame responsibilities run through one fixed-capacity
+cooperative scheduler in deterministic dependency order. M15 adds the retail
+census as an eighth task. A frame now admits no more than eight task calls,
+320 KiB of reservations, and 320 reserved records, and it
+checks a 12-ms wall-time window between callbacks. Generational ownership,
+single-delivery cancellation, starvation history, and protocol quarantine are
+portable and tested independently from browser timing. Sampled browser traces
+confirm the exact 266,254-byte/267-record admitted schedule and unchanged
+synthetic extraction and renderer output.
+
+## Milestone 15 retail census boundary (complete)
+
+The prefix-only reader now consumes `code_post_gfx.ff` through the browser VFS,
+the M11 source queue, and the M14 scheduler. It validates unsigned version-5
+framing, bounded zlib output, XFile and all nine block declarations, the script
+string pointer table and inline strings, and the complete XAsset table. It
+records every type and pointer class but stops at the byte immediately before
+asset body zero. Unknown generated records remain non-skippable.
+
+The legally owned Steam file was inspected read-only. Its exact prefix is:
+
+- file bytes: 872,586;
+- XFile size/external size: 1,378,265 / 950,499;
+- blocks 0..8: 498,816, 0, 0, 0, 407,412, 0, 0, 4,224, 480;
+- script strings: 107 slots (106 inline, one null), with string data ending at
+  inflated offset 1,830;
+- assets: 1,639 headers, ending at inflated offset 14,942;
+- asset zero: type 5 (`techset`), inline token `0xffffffff`.
+
+The nonzero census is: physpreset 1, xanim 11, xmodel 1, material 72,
+techset 90, image 7, sound 11, sndcurve 1, lightdef 2, font 9, menufile 2,
+localize 1,351, weapon 1, snddriverglobals 1, fx 1, impactfx 1, rawfile 76,
+and stringtable 1. Exactly 1,638 asset headers are inline and one is a normal
+alias. These facts are documentation and acceptance evidence; retail bytes are
+not test fixtures and were neither copied nor modified.
+
+## Milestone 16 technique-set boundary (complete)
+
+The reader now models the generated loader's block transitions and advances
+from the census through asset zero. The accepted sequence is the inline
+148-byte technique-set body in block 0, its block-4 name, exactly one populated
+inline technique reference, the technique header and complete pass-header
+array, the first inline vertex declaration, the inline vertex-shader header and
+name, and its bounded DWORD program. It stops before
+`Load_CreateMaterialVertexShader`; the later pixel shader, shader arguments,
+technique name, and remaining top-level assets are not skipped.
+`Load_BuildVertexDecl` is replaced only by an owned 32-byte portable routing
+descriptor and hash, not by a native or WebGL object.
+
+The real read-only boundary is technique set `sm2/2d`, technique slot 4, one
+pass, three vertex streams, and vertex shader `vertcol_simple.hlsl`. Its program
+is 103 DWORDs with FNV-1a `0x66467e0a`; serialized traversal stops at inflated
+offset 15,673. Logical offsets are block-4 asset table 1,772, technique 14,892,
+vertex declaration 14,920, vertex shader 15,020, name 15,036, and bytecode
+15,056. Block 0 has high-water 148 and block 4 has cursor 15,468. Since the
+native D3D creation operation has no browser implementation yet, zero assets
+are published at this boundary.
+
+## Milestone 17 paired shader and asset-zero boundary (complete)
+
+The portable decoder now validates D3D9 instruction framing and the embedded
+CTAB structures for the first vertex/pixel pair. `sm2/2d` resolves the pixel
+shader name back to `vertcol_simple.hlsl`; its PS 2.0 program is 55 DWORDs with
+FNV-1a `0x523f57e2`. The paired structural contract selects
+`webgl2.vertcol_simple2d.v1`, after which three material arguments (hash
+`0x90244fa9`) and technique name `vertcol_simple2d` are consumed. The real
+read-only traversal ends at inflated offset 15,950 with block-4 cursor 15,745,
+block-0 high-water 148, and one fully completed top-level asset. M18 owns actual
+WebGL2 program creation; M17 stores no graphics handles.
+
+## Milestone 18 renderer boundary (complete)
+
+The stable compatibility ID now resolves to compiled-in GLSL ES 3.00 inside the
+renderer. WebGL2 compilation, link, locations 0/1/2, both matrix uniforms, and
+the sampler uniform all validate before the program becomes active. The first
+indexed draw uses two identity matrices and texture unit zero; success is
+reported only after `glDrawElements` completes without a GL error. Failed
+binding validation leaves the bootstrap program drawing, while context restore
+rebuilds the compatibility program from bounded CPU-owned source descriptions.
+No retail shader bytecode is passed to WebGL and no retail surface is claimed.
+
+## Milestone 19 compressed-image boundary (complete)
+
+IWI formats 11/12/13 now have a bounded portable RGBA8 decode path for DXT1,
+DXT3, and DXT5. Exact block/mip layout, smallest-to-largest mip order, partial
+edge blocks, RGB565 interpolation, DXT1 transparency, and both alpha encodings
+are validated before atomic publication. Cubemaps, volumes, unknown flags, and
+decoded output above 4 MiB remain outside the boundary. The existing archive
+job can therefore bind the owned install's deterministic first bounded image
+(`images/$black.iwi`) to the M18 sampler instead of reporting format 11 as
+unsupported.
+
+This milestone joins a real compressed IWI image path to the retail-derived
+shader contract, but the current surface's material registry identity is still
+synthetic. M20 must traverse a compatible retail Material texture table and
+GfxImage name before claiming a real serialized material dependency.

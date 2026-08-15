@@ -224,7 +224,7 @@ On WebGL context loss every stale GPU handle is discarded. The shader pipeline,
 bootstrap geometry, and texture are recreated from renderer-owned CPU state after
 restoration, and `kisakcod:renderer-texture` reports residency, retained bytes,
 upload/resource generations, and recovery count without exposing pixel data or
-backend handles. A valid but currently unsupported IWI remains a successful
+backend handles. At the M5 boundary, a valid compressed or otherwise unsupported IWI remained a successful
 `kisakcod:engine-asset` metadata result while its renderer-texture state is
 `unsupported`; malformed payload layout and backend upload failure are reported
 separately and do not invalidate the mounted archive or stop the RAF pump.
@@ -233,7 +233,7 @@ Portable tests cover exact BGRA-to-RGBA conversion, aliased input/output,
 unsupported format/flag/dimension slices, layout and overflow limits, atomic
 failure, and the exact allocation boundary. Browser fixtures prove stored and
 deflated upload paths, continued RAF progress during asynchronous reads, exact
-synthetic framebuffer colors, graceful DXT1 and backend-dimension deferral,
+synthetic framebuffer colors, graceful DXT1 deferral at that milestone and backend-dimension deferral,
 bounded recovery ownership without a second filesystem read, cancellation-safe
 synchronous event re-entry, and identical texture colors after context
 restoration. A forced initial shader failure also proves that a partial renderer
@@ -342,9 +342,9 @@ At the Milestone 7 boundary this was an authentic representation conversion,
 not a fastfile extraction. Milestone 8 below supersedes that part with a strict
 synthetic `GfxWorld` decoder, but no `.d3dbsp`, retail surface, or retail
 material is loaded, and no visibility, lightmap, layered vertex, shader, or
-material-technique path is implemented. The legal importer remains deliberately
+material-technique path is implemented. At that boundary the legal importer was
 limited to `localization.txt` and `main/iw_00.iwd`; all automated geometry and
-asset fixtures are freely generated synthetic data.
+asset fixtures remain freely generated synthetic data.
 
 ## Milestone 8: fastfile/zone inventory and extraction contract (complete)
 
@@ -587,29 +587,331 @@ requests, and the missing-module path. Every automated asset is generated
 synthetic data. Set `KISAK_BROWSER_CHANNEL=msedge` to use an installed Microsoft
 Edge build.
 
-## Next boundary: Milestone 11
+## Milestone 11: resumable source and asset registry (complete)
 
-Milestone 11 should create a stable multi-asset arena/alias/registry seam and a
-resumable source-streaming boundary. Arena allocation, alias-cell lifecycle,
-stable job-local registration, and reset/unload behavior should become reusable
-components rather than state embedded specifically in the two-record surface
-extractor. The extractor should be able to pause for bounded source chunks and
-resume without first owning one complete compressed input allocation, while
-retaining the existing per-step ceilings, cumulative limits, deterministic
-errors, and one-shot atomic result publication.
+Milestone 11 separates two reusable lifetime boundaries from the strict
+surface extractor:
 
-Keep M11 synthetic-only and narrowly staged. It must not silently admit another
-asset type, scan past unknown records, mount a user-owned fastfile, or claim a
-retail map. Synthetic fixtures should establish stable identity across arena
-reuse and source starvation/resumption before broader generated-loader coverage
-is considered. General asset/dependency traversal and DXT1/DXT3/DXT5 IWI decode
-remain important later hurdles, but neither should be folded opportunistically
-into this seam milestone.
+- `BoundedSourceStream` is a single-unread-chunk queue with configured per-feed
+  and cumulative limits. `Feed` copies caller bytes atomically, returns
+  backpressure while a chunk remains unread, releases a drained allocation, and
+  requires an explicit final marker.
+- `ZoneAssetRegistry` owns asset names and sequential job-local identities. It
+  reserves checked four-byte logical alias cells, publishes each cell once only
+  after the target asset is registered, resolves tokens by expected asset type,
+  and defines separate unload and full-reset behavior.
+
+`WorldSurfaceExtractionJob::BeginStreaming` can now pause before or within the
+12-byte prefix, across arbitrary zlib input boundaries, and after zlib stream
+completion while waiting to distinguish clean EOF from trailing bytes. A
+starved `Step` stays running and performs zero work. Source chunk, total-byte,
+backpressure, duplicate-final, truncated-prefix, truncated-zlib, and trailing
+data failures are deterministic and preserve the prior feed state. The original
+vector-taking `Begin` and synchronous `ExtractWorldSurface` APIs drive this same
+source seam, so there is still only one traversal implementation.
+
+The browser runtime no longer gives the job one complete source allocation. It
+feeds the freely generated fixture in 37-byte chunks across RAF callbacks,
+deliberately reports `source-wait` before resuming, and releases its producer
+buffer after the final copied feed. Lifecycle metadata exposes bounded per-step
+source work, cumulative received/consumed bytes, feed count, and the two stable
+registry identities. The accepted serialized envelope remains exactly
+`Material(-2) -> GfxWorld(-1)`; no retail fastfile reaches this decoder.
+
+## Milestone 12: English F.N.G. installation VFS (complete)
+
+Milestone 12 widens the user-owned installation boundary without widening the
+zone grammar. Manifest schema 2 defines the exact `sp-killhouse-english-v1`
+profile:
+
+- `localization.txt`;
+- `main/iw_00.iwd` through `main/iw_13.iwd`;
+- `main/localized_english_iw00.iwd` through
+  `main/localized_english_iw06.iwd`;
+- `zone/english/code_post_gfx.ff`, `ui.ff`, and `common.ff`;
+- the F.N.G. map zone `zone/english/killhouse.ff`.
+
+The portable folder picker still filters the browser-provided relative file
+list, while the native directory picker requests only these exact files and
+never enumerates unrelated installation content. Paths are folded only at the
+selection boundary, stored canonically, and admitted to OPFS or VFS access only
+through the immutable allowlist. Missing files identify their full relative
+path. The English-only choice is explicit for this first single-player profile;
+other localization archive families require a later profile decision.
+
+Validation remains bounded. Localization uses the existing sub-4-KiB Wasm
+probe. Each IWD uses a 4-KiB head, at most 65,557 tail bytes, and at most 4 KiB
+of its declared central directory. Each fastfile sends only its first 14 bytes
+to `KisakWeb_ProbeFastfileHeader`, which requires unsigned `IWffu100`, version
+5, and a valid non-dictionary zlib header. No probe inflates a retail zone.
+After streaming copies into OPFS, restore reopens all 26 files, checks every
+recorded size, and repeats the bounded probes before publishing the active
+manifest atomically. Schema-1 metadata is rejected and cleaned rather than
+silently upgraded to an incomplete profile.
+
+The existing immutable-source VFS now works for every allowlisted IWD and
+fastfile. Reads remain capped at 1 MiB in the JavaScript adapter and 64 KiB at
+the C++ bridge, hold an import generation across asynchronous work, and retain
+the existing cancellation rule that prevents a late Promise from touching Wasm
+memory. Tests stat/read the `killhouse` and `common` fastfiles, cancel a delayed
+map read, and invalidate a startup-zone source after clear. Reading these files
+does not change the synthetic extraction/conversion generations: retail `.ff`
+bytes remain disconnected from `WorldSurfaceExtractionJob`.
+
+A read-only audit of the user's English Steam install found every profile path.
+Its 21 IWDs total 3,031,228,345 bytes; the four selected fastfiles total
+146,974,411 bytes; with localization the selected profile is 3,178,205,238
+bytes. No audited byte was copied, extracted, persisted, or committed by the
+repository tests; all automated fixtures are freely generated.
+
+## Milestone 13: cooperative qcommon pre-database shell (complete)
+
+`web_qcommon_preinit` is a platform-neutral startup machine with a fixed action
+grammar. It initializes a 256-KiB bounded startup arena, a 64-entry cooperative
+event queue, and five startup dvars through the existing portable command/dvar
+code. It then emits one stat and one offset-zero header read for each exact M12
+profile path. The successful English F.N.G. sequence is therefore 55 actions:
+three local initialization actions plus 52 asynchronous filesystem actions.
+It reads eight localization bytes, four bytes from each of 21 IWDs, and 14
+bytes from each of four fastfiles, or 148 bytes total.
+
+`web_qcommon_runtime` connects that machine to `WebFs` and advances no more than
+one action from each RAF callback. Promise completions remain queued until the
+next `WebFs_PumpCompletions`; callback-lifetime bytes are copied into a fixed
+14-byte completion record. Every request retains both an action token and the
+filesystem request ID. Cancellation retires the JavaScript token before
+releasing the Wasm buffer, and a restart uses a fresh generation with reset
+metrics. The error boundary is a fixed diagnostic buffer and reports the exact
+startup path plus a typed machine error.
+
+The launcher starts this shell only after the schema-2 import has been restored
+or published. Lifecycle events expose stage, generation, action/file/byte
+counts, memory and event limits, current path, and scheduling choices. A ready
+result has `stage = pre-database`, `filesChecked = 26`, `actionsIssued = 55`,
+and `probeBytesRead = 148`. Browser tests cover success, restart, in-flight
+cancellation, and a forced `killhouse.ff` I/O failure. The implementation does
+not use Asyncify or pthreads and does not inflate or traverse retail zones.
+
+## Milestone 14: cooperative engine-job scheduler (complete)
+
+`web_cooperative_scheduler` is a fixed-capacity, allocation-free scheduler with
+generational task handles. Registration assigns a stable order and a maximum
+byte/record reservation. Before invoking a callback, the scheduler charges that
+reservation against the frame envelope; call, byte, record, or inter-task wall
+time exhaustion leaves a typed trace entry and increments per-task starvation
+history. Three consecutive denied frames produce one warning. A callback that
+reports work outside its reservation is quarantined and receives its
+cancellation callback exactly once. A stale handle cannot disable, resume, or
+unregister a replacement generation.
+
+Milestone 14 originally registered seven tasks. Milestone 15 extends the live
+schedule to these eight tasks in order:
+
+1. filesystem completions;
+2. qcommon pre-database work;
+3. retail fastfile census work;
+4. IWD archive work;
+5. engine-asset work;
+6. command-buffer execution;
+7. synthetic world-surface extraction/conversion;
+8. renderer submission.
+
+Together they reserve 266,254 bytes and 267 records inside frame ceilings of
+320 KiB, 320 records, and eight calls. The scheduler checks a 12-ms wall-time
+window between callbacks. It cannot preempt a running C++ callback, so each job
+retains its existing hard inner ceiling; in particular, fastfile and archive
+steps remain bounded at no more than 64 KiB/64 records where applicable.
+Renderer submission stays last, preserving the previous data dependency.
+
+`web_engine_scheduler` publishes the first eight frames, every thirtieth frame,
+and every exceptional frame as `kisakcod:schedule`. Each event contains the
+limits, aggregate reservations and reported use, elapsed time, starvation and
+protocol counters, plus the ordered eight-entry trace. Browser tests assert the
+exact order and reservations and prove that the established converted surface
+and indexed renderer result are unchanged. Portable tests independently force
+each exhaustion class, repeated starvation, protocol quarantine, reset, and
+stale-generation cancellation.
+
+## Milestone 15: bounded retail fastfile census (complete)
+
+`web_retail_fastfile_census` reads the unsigned `IWffu100`/version-5 outer
+envelope through the M11 single-chunk source queue, incrementally inflates at
+most a 256-KiB prefix, and validates the 44-byte XFile, all nine declared block
+sizes, the 16-byte XAssetList, the complete script-string table, and the complete
+eight-byte XAsset table. Work is capped at 64 KiB and 64 semantic records per
+step. Counts, multiplication, string lengths, individual blocks, the block sum,
+source bytes, and allocation are all bounded. The result is published atomically
+only after the whole table has validated.
+
+At the M15 boundary, `web_retail_census_job` read only
+`zone/english/code_post_gfx.ff` from the
+allowlisted, generation-bound browser VFS. The launcher started it after qcommon
+reached `pre-database`, and started IWD mounting only after the retail job reached
+`body-boundary`. Cancellation retires its in-flight VFS request. Lifecycle data
+includes all nine block sizes, nonzero type counts, pointer-reference classes,
+source and inflated-prefix metrics, and the exact first unsupported asset
+type/index/token. It explicitly reports `traversesAssetBodies = false`.
+
+The freely generated automated fixture contains three script-string records and
+five asset headers followed by a recognizable sentinel body. Native/Wasm tests
+cover arbitrary source splits, work ceilings, malformed blocks, unsupported
+string references, invalid types, bad framing, and atomic failure. Browser tests
+prove qcommon → census → archive ordering and that a truncated zlib prefix fails
+closed without starting the archive.
+
+A separate read-only audit of the user's legally owned Steam file confirmed the
+real boundary without copying any retail byte into the repository: the file is
+872,586 bytes; XFile reports size 1,378,265, external size 950,499, and block
+sizes `[498816, 0, 0, 0, 407412, 0, 0, 4224, 480]`; 107 script-string slots end
+at inflated offset 1,830; and 1,639 asset headers end at offset 14,942. Asset zero
+is inline `techset` (type 5, token `0xffffffff`). The table contains 18 asset
+types, dominated by 1,351 localize, 90 techset, 76 rawfile, and 72 material
+records. M15 stopped there and did not claim those bodies were loadable.
+
+## Milestone 16: leading technique-set traversal (complete)
+
+M16 turns that census into the first generated-loader traversal. The bounded
+job now models the native nested block-4 script-string and asset-table
+allocations, pushes block 0 for the inline technique set, then returns to block
+4 for the technique-set name and dependent records. It validates the 148-byte
+`MaterialTechniqueSet`, its 34 embedded references, the first inline
+`MaterialTechnique`, its complete pass-header array, a 100-byte
+`MaterialVertexDeclaration`, a 16-byte `MaterialVertexShader`, its name, and a
+bounded DWORD program with the Direct3D vertex-shader signature.
+
+The native `Load_BuildVertexDecl` step is represented by an owned portable
+32-byte stream-routing descriptor plus its hash; it does not create or retain a
+D3D declaration. This makes the declaration dependency explicit without
+pretending that its browser backend exists already.
+
+Traversal terminates immediately before `Load_CreateMaterialVertexShader`, the
+first native D3D9 side effect. No WebGL handle is invented, the pixel shader and
+arguments are not skipped, and the incomplete technique set is not published:
+`completedAssetCount = 0` and `techniqueSetPublished = false`. Lifecycle output
+reports exact logical block offsets, block-0 high-water, block-4 cursor,
+technique slot/pass/stream counts, shader name, DWORD count, and an FNV-1a hash
+of the validated bytecode. Per-step ceilings remain 64 KiB/64 records, including
+when a caller deliberately supplies much smaller budgets.
+
+The freely generated fixture now contains this entire dependency prefix and a
+sentinel where pixel-shader traversal would begin. Tests additionally cover
+normal-reference rejection, bad shader signatures, declared block-4 overflow,
+cancellation/restart, and the required qcommon-to-traversal-to-archive ordering.
+
+The user's Steam file was audited read-only against the same contract. Asset
+zero is technique set `sm2/2d`; only technique slot 4 is populated; it has one
+pass and a three-stream vertex declaration. Its inline vertex shader is
+`vertcol_simple.hlsl`, containing 103 DWORDs (412 bytes), with FNV-1a
+`0x66467e0a`. The boundary is inflated offset 15,673. Logical block offsets are
+asset table 1,772, technique 14,892, vertex declaration 14,920, vertex shader
+15,020, shader name 15,036, and program 15,056; block 0 peaks at 148 and block 4
+stops at 15,468. No retail byte was copied or modified.
+
+## Milestone 17: first paired shader compatibility record (complete)
+
+`web_shader_compatibility` is a renderer-independent, bounded D3D9 token and
+CTAB decoder. It recognizes the first VS 1.1 / PS 2.0 pair by stage and version,
+instruction inventory, named register bindings, and the prepared vertex-stream
+routing contract. A filename or bytecode hash is diagnostic only. The one
+accepted contract selects owned GLSL ES 3.00 sources under stable identifier
+`webgl2.vertcol_simple2d.v1`; malformed, unknown, or partially matching programs
+fail without replacing an earlier result.
+
+The generated traversal now resumes after vertex bytecode, resolves the pixel
+shader's normal name reference, validates and decodes its inline program, reads
+all three eight-byte material arguments, and consumes the inline technique
+name. Only then does it unwind the technique and block-0 scopes and atomically
+publish asset zero. The boundary is immediately before asset one:
+`completedAssetCount = 1`, `techniqueSetPublished = true`, and no native D3D9
+handle is created or retained.
+
+The freely generated fixture supplies independent synthetic CTAB and token
+streams with the same semantic contract. Tests cover bounded token walking,
+CTAB ranges, atomic decoder failure, routing mismatch, incremental traversal,
+and browser lifecycle output. A separate ignored diagnostic ran the same C++
+path read-only against the owned Steam file: technique `vertcol_simple2d`, VS
+hash `0x66467e0a`, PS hash `0x523f57e2`, argument hash `0x90244fa9`, inflated
+boundary 15,950, block-4 cursor 15,745, and one completed asset. No retail byte
+was added to the repository or automated tests.
+
+## Milestone 18: renderer-owned compatibility program (complete)
+
+The M17 record now crosses a narrow renderer API as a registry-owned descriptor.
+Retail bytes can select `webgl2.vertcol_simple2d.v1`, but cannot provide GLSL:
+the renderer resolves and revalidates the stable ID, source text, and both source
+hashes against compiled-in port code before allocation. It retains bounded
+source descriptions for recovery and keeps all shader/program handles private.
+
+With a current WebGL2 context, publication compiles and links a replacement
+program before changing active state. It requires attribute locations 0/1/2 for
+position, color, and texture coordinates, plus live locations for
+`u_viewProjectionMatrix`, `u_worldMatrix`, and `u_colorMapSampler`. The first
+deterministic draw binds identity world/view-projection matrices, texture unit
+zero, the existing indexed surface VAO, and the existing fallback or imported
+texture. The two-component position and three-component color arrays rely only
+on WebGL's defined missing-component defaults (`z = 0`, `alpha = 1`). A GL error
+on that first draw retires the replacement GPU program and returns subsequent
+frames to the bootstrap pipeline.
+
+Lifecycle output reports selection/resource generations, source hashes,
+bindings, residency, recovery count, draw count, and first-draw completion.
+Context loss discards every handle and retains only source descriptions; restore
+recompiles, relinks, revalidates bindings, and increments recovery state. Import
+restart/cancellation clears the compatibility program so a stale asset
+generation cannot remain active. Browser tests intercept actual WebGL calls to
+prove the two sources, six binding queries, two identity matrices, indexed draw,
+atomic binding failure, bootstrap fallback, and context-loss reconstruction.
+
+This is the first draw through a contract decoded from owned COD4 data, but its
+geometry and fallback/test texture are still the repository's synthetic or
+freely generated inputs. It is not yet a rendered retail surface.
+
+## Milestone 19: bounded COD4 DXT image binding (complete)
+
+The portable IWI boundary now decodes formats 11, 12, and 13 (DXT1/BC1,
+DXT3/BC2, and DXT5/BC3) into tightly packed RGBA8. It validates the complete
+member before allocation, accepts only bounded two-dimensional images with
+known picmip/no-mipmap flags, rejects cubemaps and volumes, checks every block
+and mip-size calculation, clips partial edge blocks, and preserves COD4's
+smallest-to-largest serialized mip order while publishing only the largest
+level. DXT1 transparent mode, DXT3 explicit alpha, both DXT5 alpha-table modes,
+RGB565 expansion, malformed payloads, and the 4 MiB decoded recovery ceiling
+have portable native/Wasm vectors. Publication remains atomic when input and
+output alias or any validation/allocation step fails.
+
+That decoder crosses the existing asynchronous IWD/member path. The bounded,
+case-insensitive first `images/*.iwi` entry—`images/$black.iwi` in the verified
+owned Steam archive—can now be decoded, copied into renderer-owned recovery
+storage, uploaded as RGBA8, and bound to `u_colorMapSampler` on texture unit
+zero while the M18 compatibility program draws. Launcher state exposes this
+joint sampler/image binding as `rendererMaterial`, including stable shader ID,
+image path, source IWI format, decoded format, recovery bytes, and whether the
+current geometry is synthetic. Context recovery still recreates the texture
+without rereading the archive.
+
+Automated browser acceptance uses a freely generated `$black.iwi`-named DXT1
+fixture and proves it is simultaneously resident with the M18 program; it does
+not contain retail bytes. The owned install observation is read-only and is not
+part of the repository. This is the first path capable of drawing genuine COD4
+texture pixels, but the current indexed surface/material identity remains the
+synthetic M10 fixture. It does not yet claim that a retail `Material` or
+`GfxImage` asset record selected that image, nor that any map geometry rendered.
+
+## Next boundary: Milestone 20
+
+M20 should extend generated-loader traversal from the leading technique set to
+one compatible retail `Material` and its texture table/image reference, publish
+that dependency atomically through the zone registry, and use the resolved
+image name instead of the current deterministic first-IWI probe. The acceptance
+line is one real material choosing one real owned image; arbitrary materials,
+world geometry, lightmaps, visibility, and gameplay remain later work.
+
+General generated-loader traversal and a real-map render remain later format
+milestones.
 
 An optional loose `.d3dbsp` path is not an implicit shortcut: pursue it only
 after an explicit design decision establishes that it is a supported legal
 input, inventories its BSP lumps and versioning, and separates its native D3D9
 allocation work from portable parsing. The importer remains limited to
-`localization.txt` and `main/iw_00.iwd`; there is no retail map load, general
-virtual filesystem, save-data path, audio/input integration, or playable game
-loop.
+the exact schema-2 F.N.G. profile; there is no retail map load, save-data path,
+audio/input integration, or playable game loop.

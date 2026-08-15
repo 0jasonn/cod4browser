@@ -6,6 +6,8 @@ export const IWI_HEADER_SIZE = 28;
 export const IWI_VERSION_COD4 = 6;
 export const IWI_FORMAT_ARGB = 1;
 export const IWI_FORMAT_DXT1 = 11;
+export const IWI_FORMAT_DXT3 = 12;
+export const IWI_FORMAT_DXT5 = 13;
 export const IWI_FLAG_NO_MIPMAPS = 0x02;
 
 const ZIP_LOCAL_SIGNATURE = 0x04034b50;

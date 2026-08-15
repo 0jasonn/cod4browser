@@ -1,6 +1,7 @@
 #include <qcommon/iwd_archive.h>
 #include <qcommon/iwi_image.h>
 #include <web/web_fastfile_world_surface.h>
+#include <web/web_shader_compatibility.h>
 
 #include <algorithm>
 #include <array>
@@ -33,6 +34,12 @@ void ExerciseFastfile(std::span<const std::uint8_t> bytes)
     limits.maxWorldIndices = 32768u;
     kisak::fastfile::ExtractedWorldSurface surface;
     (void)kisak::fastfile::ExtractWorldSurface(bytes, limits, surface);
+}
+
+void ExerciseShader(std::span<const std::uint8_t> bytes)
+{
+    kisak::web::D3D9ShaderContract contract;
+    (void)kisak::web::DecodeD3D9Shader(bytes, {16384u, 4096u, 64u, 255u}, contract);
 }
 
 void ExerciseMember(
@@ -165,5 +172,6 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
     ExerciseIwi(bytes);
     ExerciseIwd(bytes);
     ExerciseFastfile(bytes);
+    ExerciseShader(bytes);
     return 0;
 }

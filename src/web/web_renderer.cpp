@@ -10,7 +10,10 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <new>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -20,6 +23,7 @@ struct WebRendererState
 {
     EMSCRIPTEN_WEBGL_CONTEXT_HANDLE context = 0;
     GLuint program = 0;
+    GLuint compatibilityProgram = 0;
     GLuint vertexArray = 0;
     GLuint vertexBuffer = 0;
     GLuint indexBuffer = 0;
@@ -27,6 +31,9 @@ struct WebRendererState
     GLint aspectUniform = -1;
     GLint textureUniform = -1;
     GLint textureEnabledUniform = -1;
+    GLint compatibilityViewProjectionUniform = -1;
+    GLint compatibilityWorldUniform = -1;
+    GLint compatibilityTextureUniform = -1;
     int frameNumber = 0;
     int canvasWidth = 0;
     int canvasHeight = 0;
@@ -51,6 +58,17 @@ struct WebRendererState
     std::uint32_t rebuildGeneration = 0;
     std::uint32_t recoveryCount = 0;
     bool sourceTextureActive = false;
+    std::string compatibilityId;
+    std::string compatibilityVertexSource;
+    std::string compatibilityFragmentSource;
+    std::uint32_t compatibilityVertexSourceHash = 0u;
+    std::uint32_t compatibilityFragmentSourceHash = 0u;
+    std::uint32_t compatibilitySubmissionGeneration = 0u;
+    std::uint32_t compatibilityResourceGeneration = 0u;
+    std::uint32_t compatibilityRecoveryCount = 0u;
+    std::uint32_t compatibilityDrawCount = 0u;
+    bool compatibilityActive = false;
+    bool compatibilityFirstDrawCompleted = false;
 };
 
 WebRendererState g_renderer;
@@ -82,6 +100,47 @@ EM_JS(
                 resourceGeneration: resourceGeneration >>> 0,
                 recoveryCount: recoveryCount >>> 0,
                 resident: Boolean(resident)
+            }
+        }));
+    });
+
+EM_JS(
+    void,
+    DispatchRendererShaderLifecycle,
+    (const char *state,
+     const char *message,
+     const char *substitutionId,
+     std::uint32_t vertexSourceHash,
+     std::uint32_t fragmentSourceHash,
+     std::uint32_t submissionGeneration,
+     std::uint32_t resourceGeneration,
+     std::uint32_t recoveryCount,
+     std::uint32_t drawCount,
+     bool retained,
+     bool resident,
+     bool firstDrawCompleted),
+    {
+        globalThis.dispatchEvent(new CustomEvent("kisakcod:renderer-shader", {
+            detail: {
+                state: UTF8ToString(state),
+                message: UTF8ToString(message),
+                substitutionId: UTF8ToString(substitutionId),
+                vertexSourceHash: vertexSourceHash >>> 0,
+                fragmentSourceHash: fragmentSourceHash >>> 0,
+                submissionGeneration: submissionGeneration >>> 0,
+                resourceGeneration: resourceGeneration >>> 0,
+                recoveryCount: recoveryCount >>> 0,
+                drawCount: drawCount >>> 0,
+                retained: Boolean(retained),
+                resident: Boolean(resident),
+                firstDrawCompleted: Boolean(firstDrawCompleted),
+                vertexAttributes: ["a_position", "a_color", "a_texcoord0"],
+                uniforms: [
+                    "u_viewProjectionMatrix",
+                    "u_worldMatrix",
+                    "u_colorMapSampler"
+                ],
+                textureUnit: 0
             }
         }));
     });
@@ -194,9 +253,28 @@ void EmitTextureLifecycle(const char *state, const char *message)
         g_renderer.initialized && !g_renderer.contextLost && g_renderer.texture != 0);
 }
 
+void EmitShaderLifecycle(const char *state, const char *message)
+{
+    DispatchRendererShaderLifecycle(
+        state,
+        message,
+        g_renderer.compatibilityId.c_str(),
+        g_renderer.compatibilityVertexSourceHash,
+        g_renderer.compatibilityFragmentSourceHash,
+        g_renderer.compatibilitySubmissionGeneration,
+        g_renderer.compatibilityResourceGeneration,
+        g_renderer.compatibilityRecoveryCount,
+        g_renderer.compatibilityDrawCount,
+        g_renderer.compatibilityActive,
+        g_renderer.initialized && !g_renderer.contextLost &&
+            g_renderer.compatibilityProgram != 0,
+        g_renderer.compatibilityFirstDrawCompleted);
+}
+
 void ResetGpuHandles()
 {
     g_renderer.program = 0;
+    g_renderer.compatibilityProgram = 0;
     g_renderer.vertexArray = 0;
     g_renderer.vertexBuffer = 0;
     g_renderer.indexBuffer = 0;
@@ -204,6 +282,9 @@ void ResetGpuHandles()
     g_renderer.aspectUniform = -1;
     g_renderer.textureUniform = -1;
     g_renderer.textureEnabledUniform = -1;
+    g_renderer.compatibilityViewProjectionUniform = -1;
+    g_renderer.compatibilityWorldUniform = -1;
+    g_renderer.compatibilityTextureUniform = -1;
     g_renderer.canvasWidth = 0;
     g_renderer.canvasHeight = 0;
 }
@@ -228,8 +309,96 @@ GLuint CompileShader(GLenum type, const char *source)
     return 0;
 }
 
+bool LinkProgram(
+    const char *label,
+    const char *vertexSource,
+    const char *fragmentSource,
+    GLuint &programOut)
+{
+    const GLuint vertexShader = CompileShader(GL_VERTEX_SHADER, vertexSource);
+    const GLuint fragmentShader = CompileShader(GL_FRAGMENT_SHADER, fragmentSource);
+    if (vertexShader == 0 || fragmentShader == 0)
+    {
+        glDeleteShader(vertexShader);
+        glDeleteShader(fragmentShader);
+        return false;
+    }
+
+    const GLuint program = glCreateProgram();
+    glAttachShader(program, vertexShader);
+    glAttachShader(program, fragmentShader);
+    glLinkProgram(program);
+    glDeleteShader(vertexShader);
+    glDeleteShader(fragmentShader);
+
+    GLint linked = GL_FALSE;
+    glGetProgramiv(program, GL_LINK_STATUS, &linked);
+    if (linked != GL_TRUE)
+    {
+        char log[1024] = {};
+        glGetProgramInfoLog(program, sizeof(log), nullptr, log);
+        Web_Log(
+            WebLogLevel::Error,
+            "[kisakcod-web] %s program link failed: %s\n",
+            label,
+            log);
+        glDeleteProgram(program);
+        return false;
+    }
+    programOut = program;
+    return true;
+}
+
+bool CreateCompatibilityProgram(
+    const char *vertexSource,
+    const char *fragmentSource,
+    GLuint &programOut,
+    GLint &viewProjectionOut,
+    GLint &worldOut,
+    GLint &textureOut)
+{
+    GLuint program = 0;
+    if (!LinkProgram("WebGL2 compatibility", vertexSource, fragmentSource, program))
+        return false;
+
+    while (glGetError() != GL_NO_ERROR)
+    {
+    }
+    const GLint position = glGetAttribLocation(program, "a_position");
+    const GLint color = glGetAttribLocation(program, "a_color");
+    const GLint texcoord = glGetAttribLocation(program, "a_texcoord0");
+    const GLint viewProjection =
+        glGetUniformLocation(program, "u_viewProjectionMatrix");
+    const GLint world = glGetUniformLocation(program, "u_worldMatrix");
+    const GLint texture = glGetUniformLocation(program, "u_colorMapSampler");
+    const GLenum error = glGetError();
+    if (position != 0 || color != 1 || texcoord != 2 ||
+        viewProjection < 0 || world < 0 || texture < 0 || error != GL_NO_ERROR)
+    {
+        Web_Log(
+            WebLogLevel::Error,
+            "[kisakcod-web] WebGL2 compatibility binding validation failed "
+            "(attributes %d/%d/%d, uniforms %d/%d/%d, error 0x%x).\n",
+            position,
+            color,
+            texcoord,
+            viewProjection,
+            world,
+            texture,
+            static_cast<unsigned int>(error));
+        glDeleteProgram(program);
+        return false;
+    }
+    programOut = program;
+    viewProjectionOut = viewProjection;
+    worldOut = world;
+    textureOut = texture;
+    return true;
+}
+
 void DeletePipelineObjects(
     GLuint program,
+    GLuint compatibilityProgram,
     GLuint vertexArray,
     GLuint vertexBuffer,
     GLuint indexBuffer,
@@ -254,6 +423,10 @@ void DeletePipelineObjects(
     if (program != 0)
     {
         glDeleteProgram(program);
+    }
+    if (compatibilityProgram != 0)
+    {
+        glDeleteProgram(compatibilityProgram);
     }
 }
 
@@ -281,6 +454,7 @@ void DestroyWebGLContext()
     {
         DeletePipelineObjects(
             g_renderer.program,
+            g_renderer.compatibilityProgram,
             g_renderer.vertexArray,
             g_renderer.vertexBuffer,
             g_renderer.indexBuffer,
@@ -488,32 +662,8 @@ bool CreateRendererResources()
         }
     )glsl";
 
-    const GLuint vertexShader = CompileShader(GL_VERTEX_SHADER, vertexSource);
-    const GLuint fragmentShader = CompileShader(GL_FRAGMENT_SHADER, fragmentSource);
-    if (vertexShader == 0 || fragmentShader == 0)
-    {
-        glDeleteShader(vertexShader);
-        glDeleteShader(fragmentShader);
-        return false;
-    }
-
-    const GLuint program = glCreateProgram();
-    glAttachShader(program, vertexShader);
-    glAttachShader(program, fragmentShader);
-    glLinkProgram(program);
-    glDeleteShader(vertexShader);
-    glDeleteShader(fragmentShader);
-
-    GLint linked = GL_FALSE;
-    glGetProgramiv(program, GL_LINK_STATUS, &linked);
-    if (linked != GL_TRUE)
-    {
-        char log[1024] = {};
-        glGetProgramInfoLog(program, sizeof(log), nullptr, log);
-        Web_Log(WebLogLevel::Error, "[kisakcod-web] Program link failed: %s\n", log);
-        glDeleteProgram(program);
-        return false;
-    }
+    GLuint program = 0;
+    if (!LinkProgram("bootstrap", vertexSource, fragmentSource, program)) return false;
 
     while (glGetError() != GL_NO_ERROR)
     {
@@ -548,19 +698,38 @@ bool CreateRendererResources()
     GLuint texture = 0;
     const bool textureReady = surfaceReady && CreateTextureObject(
         texturePixels, textureWidth, textureHeight, texture);
+    GLuint compatibilityProgram = 0;
+    GLint compatibilityViewProjection = -1;
+    GLint compatibilityWorld = -1;
+    GLint compatibilityTexture = -1;
+    const bool compatibilityReady = !g_renderer.compatibilityActive ||
+        CreateCompatibilityProgram(
+            g_renderer.compatibilityVertexSource.c_str(),
+            g_renderer.compatibilityFragmentSource.c_str(),
+            compatibilityProgram,
+            compatibilityViewProjection,
+            compatibilityWorld,
+            compatibilityTexture);
     if (aspectUniform < 0 || textureUniform < 0 || textureEnabledUniform < 0 ||
-        pipelineError != GL_NO_ERROR || !surfaceReady || !textureReady)
+        pipelineError != GL_NO_ERROR || !surfaceReady || !textureReady ||
+        !compatibilityReady)
     {
         Web_Log(
             WebLogLevel::Error,
             "[kisakcod-web] WebGL2 resource creation failed (0x%x).\n",
             static_cast<unsigned int>(pipelineError));
         DeletePipelineObjects(
-            program, vertexArray, vertexBuffer, indexBuffer, texture);
+            program,
+            compatibilityProgram,
+            vertexArray,
+            vertexBuffer,
+            indexBuffer,
+            texture);
         return false;
     }
 
     g_renderer.program = program;
+    g_renderer.compatibilityProgram = compatibilityProgram;
     g_renderer.vertexArray = vertexArray;
     g_renderer.vertexBuffer = vertexBuffer;
     g_renderer.indexBuffer = indexBuffer;
@@ -568,10 +737,17 @@ bool CreateRendererResources()
     g_renderer.aspectUniform = aspectUniform;
     g_renderer.textureUniform = textureUniform;
     g_renderer.textureEnabledUniform = textureEnabledUniform;
+    g_renderer.compatibilityViewProjectionUniform = compatibilityViewProjection;
+    g_renderer.compatibilityWorldUniform = compatibilityWorld;
+    g_renderer.compatibilityTextureUniform = compatibilityTexture;
     ++g_renderer.rebuildGeneration;
     if (g_renderer.surfaceActive)
     {
         ++g_renderer.surfaceResourceGeneration;
+    }
+    if (g_renderer.compatibilityActive)
+    {
+        ++g_renderer.compatibilityResourceGeneration;
     }
     return true;
 }
@@ -591,6 +767,12 @@ bool HandleWebGLContextLost(int, const void *, void *)
     EmitTextureLifecycle(
         "lost",
         "The renderer retained bounded pixels while the WebGL2 context was lost");
+    if (g_renderer.compatibilityActive)
+    {
+        EmitShaderLifecycle(
+            "lost",
+            "The renderer retained the selected WebGL2 shader contract while the context was lost");
+    }
     Web_Log(WebLogLevel::Info, "[kisakcod-web] WebGL2 context lost; rendering paused.\n");
     Web_EmitRuntimeState(
         "renderer-lost",
@@ -616,6 +798,12 @@ bool HandleWebGLContextRestored(int, const void *, void *)
         EmitTextureLifecycle(
             "failed",
             "The restored WebGL2 context could not be made current for texture recovery");
+        if (g_renderer.compatibilityActive)
+        {
+            EmitShaderLifecycle(
+                "failed",
+                "The restored WebGL2 context could not be made current for shader recovery");
+        }
         Web_EmitRuntimeState("failed", "The restored WebGL2 context could not be made current");
         return true;
     }
@@ -631,6 +819,12 @@ bool HandleWebGLContextRestored(int, const void *, void *)
         EmitTextureLifecycle(
             "failed",
             "The renderer could not recreate the retained texture after context loss");
+        if (g_renderer.compatibilityActive)
+        {
+            EmitShaderLifecycle(
+                "failed",
+                "The renderer could not recreate the selected WebGL2 shader program after context loss");
+        }
         Web_EmitRuntimeState("failed", "The WebGL2 renderer could not recover from context loss");
         return true;
     }
@@ -644,12 +838,22 @@ bool HandleWebGLContextRestored(int, const void *, void *)
     {
         ++g_renderer.recoveryCount;
     }
+    if (g_renderer.compatibilityActive)
+    {
+        ++g_renderer.compatibilityRecoveryCount;
+    }
     EmitSurfaceLifecycle(
         "ready",
         "The renderer recreated the indexed surface from its retained description");
     EmitTextureLifecycle(
         "ready",
         "The renderer recreated the texture from bounded recovery pixels");
+    if (g_renderer.compatibilityActive)
+    {
+        EmitShaderLifecycle(
+            "ready",
+            "The renderer recreated the selected WebGL2 shader program after context loss");
+    }
     Web_Log(WebLogLevel::Info, "[kisakcod-web] WebGL2 context restored; renderer rebuilt.\n");
     Web_EmitRuntimeState("running", "WebGL2 context restored and rendering resumed");
     return true;
@@ -749,6 +953,23 @@ const char *WebRenderer_TextureResultString(WebRendererTextureResult result) noe
         return "WebGL2 texture upload failed";
     }
     return "unknown renderer texture error";
+}
+
+const char *WebRenderer_ShaderResultString(WebRendererShaderResult result) noexcept
+{
+    switch (result)
+    {
+    case WebRendererShaderResult::Success: return "success";
+    case WebRendererShaderResult::InvalidDescriptor:
+        return "invalid WebGL2 shader compatibility descriptor";
+    case WebRendererShaderResult::UnsupportedSubstitution:
+        return "WebGL2 shader substitution is not registry-owned";
+    case WebRendererShaderResult::AllocationFailed:
+        return "renderer shader recovery allocation failed";
+    case WebRendererShaderResult::BackendFailure:
+        return "WebGL2 shader compilation, link, or binding validation failed";
+    }
+    return "unknown renderer shader error";
 }
 
 WebRendererSurfaceResult WebRenderer_SetSurface(
@@ -863,6 +1084,12 @@ bool WebRenderer_Initialize()
     EmitTextureLifecycle(
         "ready",
         "The renderer uploaded its retained texture during initialization");
+    if (g_renderer.compatibilityActive)
+    {
+        EmitShaderLifecycle(
+            "ready",
+            "The renderer compiled the retained WebGL2 shader contract during initialization");
+    }
     return true;
 }
 
@@ -997,6 +1224,144 @@ WebRendererTextureState WebRenderer_GetBootstrapTextureState()
     };
 }
 
+WebRendererShaderResult WebRenderer_SetShaderCompatibility(
+    const kisak::web::WebGL2ShaderSubstitution &substitution)
+{
+    if (!substitution.id || !substitution.vertexSource ||
+        !substitution.fragmentSource || substitution.vertexSourceHash == 0u ||
+        substitution.fragmentSourceHash == 0u)
+        return WebRendererShaderResult::InvalidDescriptor;
+
+    kisak::web::WebGL2ShaderSubstitution registered;
+    if (!kisak::web::LookupWebGL2ShaderSubstitution(substitution.id, registered) ||
+        registered.vertexSourceHash != substitution.vertexSourceHash ||
+        registered.fragmentSourceHash != substitution.fragmentSourceHash ||
+        std::strcmp(registered.vertexSource, substitution.vertexSource) != 0 ||
+        std::strcmp(registered.fragmentSource, substitution.fragmentSource) != 0)
+        return WebRendererShaderResult::UnsupportedSubstitution;
+
+    constexpr std::size_t MAX_SOURCE_BYTES = 16u * 1024u;
+    const std::size_t vertexLength = std::strlen(substitution.vertexSource);
+    const std::size_t fragmentLength = std::strlen(substitution.fragmentSource);
+    if (vertexLength == 0u || fragmentLength == 0u ||
+        vertexLength >= MAX_SOURCE_BYTES || fragmentLength >= MAX_SOURCE_BYTES)
+        return WebRendererShaderResult::InvalidDescriptor;
+
+    std::string retainedId;
+    std::string retainedVertex;
+    std::string retainedFragment;
+    try
+    {
+        retainedId = substitution.id;
+        retainedVertex = substitution.vertexSource;
+        retainedFragment = substitution.fragmentSource;
+    }
+    catch (const std::bad_alloc &)
+    {
+        return WebRendererShaderResult::AllocationFailed;
+    }
+
+    GLuint replacementProgram = 0;
+    GLint replacementViewProjection = -1;
+    GLint replacementWorld = -1;
+    GLint replacementTexture = -1;
+    if (g_renderer.initialized && !g_renderer.contextLost &&
+        !CreateCompatibilityProgram(
+            retainedVertex.c_str(),
+            retainedFragment.c_str(),
+            replacementProgram,
+            replacementViewProjection,
+            replacementWorld,
+            replacementTexture))
+    {
+        DispatchRendererShaderLifecycle(
+            "failed",
+            "The selected compatibility source did not compile, link, and bind atomically",
+            substitution.id,
+            substitution.vertexSourceHash,
+            substitution.fragmentSourceHash,
+            g_renderer.compatibilitySubmissionGeneration + 1u,
+            g_renderer.compatibilityResourceGeneration,
+            g_renderer.compatibilityRecoveryCount,
+            0u,
+            false,
+            false,
+            false);
+        return WebRendererShaderResult::BackendFailure;
+    }
+
+    if (replacementProgram != 0)
+    {
+        glDeleteProgram(g_renderer.compatibilityProgram);
+        g_renderer.compatibilityProgram = replacementProgram;
+        g_renderer.compatibilityViewProjectionUniform = replacementViewProjection;
+        g_renderer.compatibilityWorldUniform = replacementWorld;
+        g_renderer.compatibilityTextureUniform = replacementTexture;
+        ++g_renderer.compatibilityResourceGeneration;
+    }
+    g_renderer.compatibilityId = std::move(retainedId);
+    g_renderer.compatibilityVertexSource = std::move(retainedVertex);
+    g_renderer.compatibilityFragmentSource = std::move(retainedFragment);
+    g_renderer.compatibilityVertexSourceHash = substitution.vertexSourceHash;
+    g_renderer.compatibilityFragmentSourceHash = substitution.fragmentSourceHash;
+    g_renderer.compatibilityActive = true;
+    g_renderer.compatibilityDrawCount = 0u;
+    g_renderer.compatibilityFirstDrawCompleted = false;
+    ++g_renderer.compatibilitySubmissionGeneration;
+    Web_Log(
+        WebLogLevel::Info,
+        "[kisakcod-web] Renderer selected WebGL2 shader compatibility program %s.\n",
+        g_renderer.compatibilityId.c_str());
+    EmitShaderLifecycle(
+        replacementProgram != 0 ? "ready" : "retained",
+        replacementProgram != 0
+            ? "The selected WebGL2 shader program is resident with validated bindings"
+            : "The selected WebGL2 shader contract is retained for context recovery");
+    return WebRendererShaderResult::Success;
+}
+
+bool WebRenderer_ClearShaderCompatibility()
+{
+    if (!g_renderer.compatibilityActive) return true;
+    if (g_renderer.initialized && !g_renderer.contextLost &&
+        g_renderer.compatibilityProgram != 0)
+        glDeleteProgram(g_renderer.compatibilityProgram);
+    g_renderer.compatibilityProgram = 0;
+    g_renderer.compatibilityViewProjectionUniform = -1;
+    g_renderer.compatibilityWorldUniform = -1;
+    g_renderer.compatibilityTextureUniform = -1;
+    g_renderer.compatibilityActive = false;
+    g_renderer.compatibilityDrawCount = 0u;
+    g_renderer.compatibilityFirstDrawCompleted = false;
+    ++g_renderer.compatibilitySubmissionGeneration;
+    EmitShaderLifecycle(
+        "cleared",
+        "The imported shader generation was retired; drawing returned to the bootstrap pipeline");
+    g_renderer.compatibilityId.clear();
+    g_renderer.compatibilityVertexSource.clear();
+    g_renderer.compatibilityFragmentSource.clear();
+    g_renderer.compatibilityVertexSourceHash = 0u;
+    g_renderer.compatibilityFragmentSourceHash = 0u;
+    return true;
+}
+
+WebRendererShaderState WebRenderer_GetShaderCompatibilityState()
+{
+    return {
+        g_renderer.compatibilityId.c_str(),
+        g_renderer.compatibilityVertexSourceHash,
+        g_renderer.compatibilityFragmentSourceHash,
+        g_renderer.compatibilitySubmissionGeneration,
+        g_renderer.compatibilityResourceGeneration,
+        g_renderer.compatibilityRecoveryCount,
+        g_renderer.compatibilityDrawCount,
+        g_renderer.compatibilityActive,
+        g_renderer.initialized && !g_renderer.contextLost &&
+            g_renderer.compatibilityProgram != 0,
+        g_renderer.compatibilityFirstDrawCompleted,
+    };
+}
+
 void WebRenderer_DrawFrame(const WebFrameInfo &frame)
 {
     if (!g_renderer.initialized || g_renderer.contextLost ||
@@ -1021,17 +1386,46 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
     glClearColor(0.025f + wave * 0.012f, 0.03f, 0.035f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    glUseProgram(g_renderer.program);
-    glUniform1f(
-        g_renderer.aspectUniform,
-        height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 1.0f);
-    glUniform1i(g_renderer.textureUniform, 0);
-    glUniform1f(
-        g_renderer.textureEnabledUniform,
-        g_renderer.sourceTextureActive &&
-                g_renderer.draw.textureBinding == WebRendererTextureBinding::EngineImage
-            ? 1.0f
-            : 0.0f);
+    const bool compatibilityDraw = g_renderer.compatibilityActive &&
+        g_renderer.compatibilityProgram != 0;
+    if (compatibilityDraw)
+    {
+        while (glGetError() != GL_NO_ERROR)
+        {
+        }
+        constexpr GLfloat IDENTITY_MATRIX[16] = {
+            1.0f, 0.0f, 0.0f, 0.0f,
+            0.0f, 1.0f, 0.0f, 0.0f,
+            0.0f, 0.0f, 1.0f, 0.0f,
+            0.0f, 0.0f, 0.0f, 1.0f,
+        };
+        glUseProgram(g_renderer.compatibilityProgram);
+        glUniformMatrix4fv(
+            g_renderer.compatibilityViewProjectionUniform,
+            1,
+            GL_FALSE,
+            IDENTITY_MATRIX);
+        glUniformMatrix4fv(
+            g_renderer.compatibilityWorldUniform,
+            1,
+            GL_FALSE,
+            IDENTITY_MATRIX);
+        glUniform1i(g_renderer.compatibilityTextureUniform, 0);
+    }
+    else
+    {
+        glUseProgram(g_renderer.program);
+        glUniform1f(
+            g_renderer.aspectUniform,
+            height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 1.0f);
+        glUniform1i(g_renderer.textureUniform, 0);
+        glUniform1f(
+            g_renderer.textureEnabledUniform,
+            g_renderer.sourceTextureActive &&
+                    g_renderer.draw.textureBinding == WebRendererTextureBinding::EngineImage
+                ? 1.0f
+                : 0.0f);
+    }
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, g_renderer.texture);
     glBindVertexArray(g_renderer.vertexArray);
@@ -1042,6 +1436,42 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         static_cast<GLsizei>(g_renderer.draw.indexCount),
         GL_UNSIGNED_SHORT,
         reinterpret_cast<const void *>(indexOffset));
+
+    if (compatibilityDraw)
+    {
+        if (g_renderer.compatibilityDrawCount != UINT32_MAX)
+            ++g_renderer.compatibilityDrawCount;
+        if (!g_renderer.compatibilityFirstDrawCompleted)
+        {
+            const GLenum drawError = glGetError();
+            if (drawError == GL_NO_ERROR)
+            {
+                g_renderer.compatibilityFirstDrawCompleted = true;
+                Web_Log(
+                    WebLogLevel::Info,
+                    "[kisakcod-web] First draw completed through %s.\n",
+                    g_renderer.compatibilityId.c_str());
+                EmitShaderLifecycle(
+                    "ready",
+                    "The deterministic indexed draw completed through the selected COD4 shader contract");
+            }
+            else
+            {
+                Web_Log(
+                    WebLogLevel::Error,
+                    "[kisakcod-web] WebGL2 compatibility draw failed (0x%x).\n",
+                    static_cast<unsigned int>(drawError));
+                glDeleteProgram(g_renderer.compatibilityProgram);
+                g_renderer.compatibilityProgram = 0;
+                g_renderer.compatibilityViewProjectionUniform = -1;
+                g_renderer.compatibilityWorldUniform = -1;
+                g_renderer.compatibilityTextureUniform = -1;
+                EmitShaderLifecycle(
+                    "failed",
+                    "The selected shader program was resident but its first indexed draw failed");
+            }
+        }
+    }
 
     ++g_renderer.frameNumber;
     if (g_renderer.frameNumber == 1)
