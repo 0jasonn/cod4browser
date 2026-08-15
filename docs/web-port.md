@@ -1097,7 +1097,7 @@ undefined. Browser fixtures are freely generated and contain no retail bytes.
 
 ## Milestone 27: first retail XModel surface render (complete)
 
-The dependency reader now retains serialized bytes for only the first XSurface,
+At the M27 boundary the dependency reader retained serialized bytes for only the first XSurface,
 and only when it fits the existing renderer ceiling of 4,096 vertices and 4,096
 triangles. All later surfaces remain hash-only census evidence. Retention occurs
 inside the private parser result; no packed pointer or WebGL2 handle is exposed
@@ -1128,14 +1128,95 @@ and records the XModel material identity but does not yet load that material's
 diffuse IWI. It is one orthographically fitted model surface, not a camera,
 GfxWorld/map render, multi-surface LOD, lighting path, or playable game.
 
-## Next boundary: Milestone 28
+## Milestone 28: rendered XModel color-map binding (complete)
 
-M28 should follow the selected surface material to one explicit color-map image
-and bind that image through the existing IWD/IWI and renderer recovery seams.
-Selection must be based on checked texture semantics and typed image identity,
-not filename order; unsupported built-ins or absent archive members must keep
-the current texture active. It should remain one surface and one material, not
-silently widen into general XModel or map rendering.
+The M27 surface publication now passes its resolved material identity to a
+separate D3D-free selector. The selector requires exactly one published texture
+with upstream `TS_COLOR_MAP` semantic 2, follows that texture's typed image
+identity across the bounded XModel dependency result, and accepts only a
+published external two-dimensional DXT image with a traversed load definition
+and no embedded resource payload. It then copies only material/image names,
+identities, semantic, and the constructed `images/<name>.iwi` path. Ambiguous
+materials, duplicate color maps, unresolved or duplicate images, unsafe names,
+built-ins, and unsupported layouts leave the destination unchanged.
+
+The asynchronous archive path now searches `main/iw_00.iwd` through
+`main/iw_13.iwd` one at a time for that exact selected path and mounts only the
+matching bounded index. It does not choose another image by filename order. If
+the selected member is absent, the primary archive can still mount for the
+rest of the engine, but the image request reports unavailable and the current
+renderer texture remains resident. Built-in or unsupported selections suppress
+the legacy first-IWI probe for the same reason. Successful decode and renderer
+replacement remain atomic, and renderer-owned RGBA8 recovery pixels recreate
+the selected image after WebGL2 context loss.
+
+The read-only owned profile resolves surface-zero material
+`mc/mtl_street_light_02` (identity 16) to semantic-2 image
+`street_light_02_col` (identity 15), constructs
+`images/street_light_02_col.iwi`, and locates it in `main/iw_03.iwd`. Its IWI v6
+record is a 512 by 512 by 1 DXT1 image (format 11), within the existing 4 MiB
+decoded recovery ceiling. No owned archive or image bytes are copied into the
+repository.
+
+The freely generated browser fixture deliberately places its selected image in
+`iw_03` while lower archives contain other images, proving typed selection,
+bounded multi-archive discovery, IWI decode/upload, sampler binding, and the
+existing context-recovery seam. Separate fixtures prove that a built-in color
+map and a missing selected IWI keep the already resident texture and surface.
+
+This remains one orthographically fitted XModel surface and one material. It
+does not add a general material system, multi-surface model draw list, lighting,
+camera state, or map rendering.
+
+## Milestone 29: bounded first-LOD XModel draw list (complete)
+
+The XModel parser now retains packed render bytes only for surfaces in the
+first declared LOD, under 4,096-vertex/triangle per-surface ceilings and
+16,384-vertex/triangle aggregate retention ceilings. Later LODs remain census
+metadata and hashes. A separate portable builder validates each retained
+surface, resolves its material by typed identity, requires one supported
+semantic-2 external color map, deduplicates repeated image identities, and
+combines successful geometry into one shared-projection vertex/index buffer.
+One unsupported surface is recorded and skipped without erasing prior draws.
+
+The renderer now atomically owns up to 16 indexed draw ranges, 16,384 vertices,
+49,152 indices, and eight texture slots. Each IWI is discovered by its exact
+typed path and loaded sequentially even when slots live in different base
+archives. Individual decode or upload failure leaves every already resident
+slot and draw intact. Per-image recovery remains capped at 4 MiB and aggregate
+draw-list texture recovery at 16 MiB. WebGL2 context recovery rebuilds the
+shared geometry, all resident texture objects, and the selected compatibility
+program before drawing resumes.
+
+The combined vertex seam retains the model's third spatial axis and enables a
+depth buffer for the orthographic preview; flattening every triangle to depth
+zero had allowed later index ranges to overwrite nearer shade and bulb faces.
+Canvas-aspect correction is applied to the imported compatibility program,
+fully transparent DXT texels are discarded, and each color-map binding carries
+its checked COD4 sampler byte into WebGL2. The owned lamp materials both publish
+sampler state 11, which selects filtered repeating sampling instead of the
+bootstrap nearest/clamped fallback.
+
+The read-only owned profile proves that the first LOD of
+`ch_street_wall_light_01_off` contains two supported draws: 385 combined
+vertices and 828 indices projected on X/Z. Its two typed slots are
+`street_light_02_col` (512 x 512 DXT1) and
+`street_light_bulb_02_off_col` (64 x 64 DXT1); both exact members are present
+in `main/iw_03.iwd`. The automated browser profile independently exercises two
+material/image slots, sequential archive loading, multi-draw rendering, and
+recreation of every slot after context loss. Those fixtures are generated test
+data and contain no retail bytes.
+
+This is still one isolated, orthographically fitted first-LOD XModel. It does
+not add model placement, a perspective camera, lighting, general XModel
+streaming, or `GfxWorld` rendering.
+
+## Next boundary: Milestone 30
+
+M30 should resume the generated world-loader path after the completed XModel
+dependency and inventory the next required inline `GfxWorld` dependency class.
+It should publish one additional typed loader boundary with explicit limits,
+without turning the isolated XModel renderer into a map renderer prematurely.
 
 Reaching `GfxWorld` still requires typed loaders for every intervening inline
 asset class; geometry, lightmaps, visibility, and camera state remain separate

@@ -2,6 +2,8 @@
 
 #include <web/web_filesystem.h>
 #include <web/web_engine_asset.h>
+#include <web/web_engine_xmodel_draw_list.h>
+#include <web/web_engine_xmodel_material.h>
 #include <web/web_engine_xmodel_surface.h>
 #include <web/web_retail_fastfile_census.h>
 #include <web/web_renderer.h>
@@ -15,6 +17,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <span>
+#include <string_view>
 #include <vector>
 
 namespace
@@ -74,6 +77,16 @@ struct RetailRenderSurfacePublication
     std::uint8_t verticalAxis = 1u;
     std::array<float, 3> mins{};
     std::array<float, 3> maxs{};
+    WebEngineXModelDrawList drawList;
+};
+
+struct RetailColorMapPublication
+{
+    const char *state = "unavailable";
+    const char *message = "No rendered retail XSurface material was available";
+    WebEngineXModelMaterialResult result =
+        WebEngineXModelMaterialResult::InvalidSurfaceMaterial;
+    WebEngineXModelMaterialImageBinding binding;
 };
 
 const char *CurrentPath() noexcept
@@ -165,6 +178,93 @@ EM_JS(
             maxStepRecords: 64,
             blockSizes: [],
             typeCounts: []
+        };
+    });
+
+EM_JS(
+    void,
+    BeginRetailWorldXModelDrawList,
+    (uint32_t firstLodSurfaceIndex, uint32_t firstLodSurfaceCount,
+     uint32_t drawCount, uint32_t textureCount,
+     uint32_t totalVertices, uint32_t totalIndices),
+    {
+        const surface = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__
+            ?.worldInventory?.firstXModel?.renderSurface;
+        if (!surface) return;
+        surface.drawList = {
+            state: drawCount ? "ready" : "unavailable",
+            firstLodSurfaceIndex: firstLodSurfaceIndex >>> 0,
+            firstLodSurfaceCount: firstLodSurfaceCount >>> 0,
+            drawCount: drawCount >>> 0,
+            textureCount: textureCount >>> 0,
+            totalVertices: totalVertices >>> 0,
+            totalIndices: totalIndices >>> 0,
+            draws: [],
+            textures: [],
+        };
+    });
+
+EM_JS(
+    void,
+    AppendRetailWorldXModelDraw,
+    (uint32_t surfaceIndex, uint32_t materialIdentity,
+     uint32_t vertexCount, uint32_t triangleCount, uint32_t textureSlot,
+     const char *materialState, int retained),
+    {
+        const list = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__
+            ?.worldInventory?.firstXModel?.renderSurface?.drawList;
+        if (!list) return;
+        list.draws.push({
+            surfaceIndex: surfaceIndex >>> 0,
+            materialIdentity: materialIdentity >>> 0,
+            vertexCount: vertexCount >>> 0,
+            triangleCount: triangleCount >>> 0,
+            textureSlot: textureSlot >>> 0,
+            materialState: UTF8ToString(materialState),
+            retained: Boolean(retained),
+        });
+    });
+
+EM_JS(
+    void,
+    AppendRetailWorldXModelDrawTexture,
+    (uint32_t textureSlot, const char *materialName, const char *imageName,
+     const char *imagePath, uint32_t materialIdentity, uint32_t imageIdentity),
+    {
+        const list = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__
+            ?.worldInventory?.firstXModel?.renderSurface?.drawList;
+        if (!list) return;
+        list.textures.push({
+            textureSlot: textureSlot >>> 0,
+            materialName: UTF8ToString(materialName),
+            imageName: UTF8ToString(imageName),
+            imagePath: UTF8ToString(imagePath),
+            materialIdentity: materialIdentity >>> 0,
+            imageIdentity: imageIdentity >>> 0,
+            semantic: 2,
+        });
+    });
+
+EM_JS(
+    void,
+    AppendRetailWorldXModelColorMap,
+    (const char *state, const char *message, const char *materialName,
+     const char *imageName, const char *imagePath,
+     uint32_t materialIdentity, uint32_t imageIdentity, uint32_t semantic),
+    {
+        const surface = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__
+            ?.worldInventory?.firstXModel?.renderSurface;
+        if (!surface) return;
+        surface.colorMap = {
+            state: UTF8ToString(state),
+            message: UTF8ToString(message),
+            materialName: materialName ? UTF8ToString(materialName) : "",
+            imageName: imageName ? UTF8ToString(imageName) : "",
+            imagePath: imagePath ? UTF8ToString(imagePath) : "",
+            materialIdentity: materialIdentity >>> 0,
+            imageIdentity: imageIdentity >>> 0,
+            semantic: semantic >>> 0,
+            selectionSource: "typed-material-image-identity",
         };
     });
 
@@ -1070,71 +1170,51 @@ RetailRenderSurfacePublication PublishRetailXModelSurface(bool shaderReady)
             "The retail shader binding was unavailable; the bootstrap surface remains active";
         return publication;
     }
-    if (!model.published || model.surfaces.empty() ||
-        model.materialIdentities.empty())
+    if (!model.published)
     {
         publication.message =
             "The first XModel dependency chain was not fully published";
         return publication;
     }
-
-    const auto &surface = model.surfaces.front();
-    publication.surfaceIndex = surface.index;
-    publication.vertexCount = surface.vertCount;
-    publication.triangleCount = surface.triCount;
-    publication.materialIdentity = model.materialIdentities.front();
-    const bool materialResolved = publication.materialIdentity != 0u &&
-        std::any_of(model.materials.begin(), model.materials.end(),
-            [&](const kisak::fastfile::RetailXModelMaterial &material) {
-                return material.identity == publication.materialIdentity && material.published;
-            });
-    if (!surface.renderPayloadRetained ||
-        surface.retainedPackedVertices.empty() ||
-        surface.retainedPackedIndices.empty())
+    if (model.lodCount > 0)
     {
-        publication.message =
-            "The first XSurface was not available within the bounded render-retention slice";
-        return publication;
-    }
-    if (!materialResolved)
-    {
-        publication.message =
-            "The first XSurface material alias did not resolve to a published material";
-        return publication;
+        const std::uint32_t first = model.lods[0].surfaceIndex;
+        if (first < model.surfaces.size() && first < model.materialIdentities.size())
+        {
+            publication.surfaceIndex = model.surfaces[first].index;
+            publication.vertexCount = model.surfaces[first].vertCount;
+            publication.triangleCount = model.surfaces[first].triCount;
+            publication.materialIdentity = model.materialIdentities[first];
+        }
     }
 
-    const WebEnginePackedXSurfaceView view{
-        surface.retainedPackedVertices.data(),
-        surface.retainedPackedVertices.size(),
-        surface.vertCount,
-        surface.retainedPackedIndices.data(),
-        surface.retainedPackedIndices.size(),
-        surface.triCount,
-        publication.materialIdentity,
-    };
-    WebEngineConvertedXModelSurface converted;
-    const WebEngineXModelSurfaceResult conversion =
-        WebEngine_ConvertPackedXModelSurface(view, converted);
-    if (conversion != WebEngineXModelSurfaceResult::Success)
+    const WebEngineXModelDrawListResult conversion =
+        WebEngine_BuildXModelDrawList(model, publication.drawList);
+    if (conversion != WebEngineXModelDrawListResult::Success)
     {
-        publication.message = WebEngine_XModelSurfaceResultString(conversion);
+        publication.message = WebEngine_XModelDrawListResultString(conversion);
         Web_Log(
             WebLogLevel::Info,
-            "[kisakcod-web] Retail XModel surface conversion skipped: %s; "
+            "[kisakcod-web] Retail XModel draw-list conversion skipped: %s; "
             "the bootstrap surface remains active.\n",
             publication.message);
         return publication;
     }
 
-    const auto &rendererSurface = converted.rendererSurface;
-    const WebRendererSurfaceDesc descriptor{
-        rendererSurface.vertices.data(),
-        static_cast<std::uint32_t>(rendererSurface.vertices.size()),
-        rendererSurface.indices.data(),
-        static_cast<std::uint32_t>(rendererSurface.indices.size()),
+    const auto &renderer = publication.drawList.renderer;
+    const WebRendererDrawListDesc descriptor{
+        {
+            renderer.vertices.data(),
+            static_cast<std::uint32_t>(renderer.vertices.size()),
+            renderer.indices.data(),
+            static_cast<std::uint32_t>(renderer.indices.size()),
+        },
+        renderer.draws.data(),
+        static_cast<std::uint32_t>(renderer.draws.size()),
+        renderer.textureCount,
     };
     const WebRendererSurfaceResult submission =
-        WebRenderer_SetSurface(descriptor, rendererSurface.draw);
+        WebRenderer_SetDrawList(descriptor);
     if (submission != WebRendererSurfaceResult::Success)
     {
         publication.message = WebRenderer_SurfaceResultString(submission);
@@ -1148,36 +1228,121 @@ RetailRenderSurfacePublication PublishRetailXModelSurface(bool shaderReady)
 
     publication.state = "ready";
     publication.message =
-        "One user-owned retail XModel surface is resident through the WebGL2 renderer seam";
-    publication.mins = converted.mins;
-    publication.maxs = converted.maxs;
-    publication.horizontalAxis = converted.horizontalAxis;
-    publication.verticalAxis = converted.verticalAxis;
+        "The bounded first-LOD XModel draw list is resident through the WebGL2 renderer seam";
+    publication.mins = publication.drawList.mins;
+    publication.maxs = publication.drawList.maxs;
+    publication.horizontalAxis = publication.drawList.horizontalAxis;
+    publication.verticalAxis = publication.drawList.verticalAxis;
+    const auto firstReady = std::find_if(
+        publication.drawList.surfaces.begin(),
+        publication.drawList.surfaces.end(),
+        [](const WebEngineXModelDrawPublication &surface) {
+            return surface.retained;
+        });
+    if (firstReady != publication.drawList.surfaces.end())
+    {
+        publication.surfaceIndex = firstReady->surfaceIndex;
+        publication.vertexCount = firstReady->vertexCount;
+        publication.triangleCount = firstReady->triangleCount;
+        publication.materialIdentity = firstReady->materialIdentity;
+    }
     Web_Log(
         WebLogLevel::Info,
-        "[kisakcod-web] Published retail XModel '%s' surface %u "
-        "(%u vertices, %u triangles, material identity %u).\n",
+        "[kisakcod-web] Published retail XModel '%s' first LOD "
+        "(%zu draws, %zu textures, %zu vertices, %zu indices).\n",
         model.name.c_str(),
-        publication.surfaceIndex,
-        publication.vertexCount,
-        publication.triangleCount,
-        publication.materialIdentity);
+        renderer.draws.size(),
+        publication.drawList.textures.size(),
+        renderer.vertices.size(),
+        renderer.indices.size());
+    return publication;
+}
+
+RetailColorMapPublication SelectRetailXModelColorMap(
+    const RetailRenderSurfacePublication &surface)
+{
+    RetailColorMapPublication publication;
+    if (std::string_view(surface.state) != "ready")
+    {
+        publication.result = WebEngine_SelectXModelColorMap(
+            g_runtime.worldInventory.worldFirstXModel,
+            surface.materialIdentity,
+            publication.binding);
+        WebEngineAsset_RequireMaterialImageBinding();
+        publication.message = WebEngine_XModelMaterialResultString(publication.result);
+        publication.state =
+            publication.result == WebEngineXModelMaterialResult::BuiltinUnsupported ||
+            publication.result == WebEngineXModelMaterialResult::ImageLayoutUnsupported
+                ? "unsupported"
+                : publication.result == WebEngineXModelMaterialResult::ColorMapMissing ||
+                  publication.result == WebEngineXModelMaterialResult::ImageNotFound
+                    ? "unavailable" : "failed";
+        return publication;
+    }
+
+    if (surface.drawList.textures.empty())
+    {
+        WebEngineAsset_RequireMaterialImageBinding();
+        publication.message = "The retained draw list has no external color-map bindings";
+        publication.state = "unavailable";
+        Web_Log(
+            WebLogLevel::Info,
+            "[kisakcod-web] Retail XModel color-map selection skipped: %s; "
+            "the current renderer texture remains active.\n",
+            publication.message);
+        return publication;
+    }
+
+    publication.binding = surface.drawList.textures.front();
+    publication.result = WebEngineXModelMaterialResult::Success;
+    std::vector<WebEngineMaterialImageBindingDesc> bindings;
+    try
+    {
+        bindings.reserve(surface.drawList.textures.size());
+        for (const auto &binding : surface.drawList.textures)
+        {
+            bindings.push_back({
+                binding.materialName.c_str(), binding.imageName.c_str(),
+                binding.imagePath.c_str(), binding.materialIdentity,
+                binding.imageIdentity, binding.samplerState,
+            });
+        }
+    }
+    catch (...)
+    {
+        WebEngineAsset_RequireMaterialImageBinding();
+        publication.state = "failed";
+        publication.message = "The draw-list color-map queue could not be allocated";
+        return publication;
+    }
+    if (!WebEngineAsset_SetMaterialImageBindings(
+            bindings.data(), static_cast<unsigned int>(bindings.size())))
+    {
+        WebEngineAsset_RequireMaterialImageBinding();
+        publication.state = "failed";
+        publication.message = "The checked color-map binding was rejected";
+        return publication;
+    }
+
+    publication.state = "selected";
+    publication.message =
+        "Typed first-LOD color-map images are queued for bounded IWD/IWI loading";
+    const auto &binding = publication.binding;
+    Web_Log(
+        WebLogLevel::Info,
+        "[kisakcod-web] Retail XModel material '%s' selected color map %s "
+        "(semantic %u, material identity %u, image identity %u).\n",
+        binding.materialName.c_str(),
+        binding.imagePath.c_str(),
+        static_cast<unsigned>(binding.semantic),
+        binding.materialIdentity,
+        binding.imageIdentity);
     return publication;
 }
 
 void PublishReady()
 {
     const auto &result = g_runtime.result;
-    if (!WebEngineAsset_SetMaterialImageBinding(
-            result.materialName.c_str(),
-            result.imageName.c_str(),
-            result.imagePath.c_str(),
-            result.materialIdentity,
-            result.imageIdentity))
-    {
-        Fail("could not publish retail material", "material image binding was rejected");
-        return;
-    }
     bool shaderReady = false;
     kisak::web::WebGL2ShaderSubstitution substitution;
     if (!kisak::web::LookupWebGL2ShaderSubstitution(
@@ -1208,6 +1373,8 @@ void PublishReady()
     }
     const RetailRenderSurfacePublication renderSurface =
         PublishRetailXModelSurface(shaderReady);
+    const RetailColorMapPublication colorMap =
+        SelectRetailXModelColorMap(renderSurface);
     BeginRetailCensusReady(
         g_runtime.generation,
         g_runtime.codePostFileSize,
@@ -1445,6 +1612,45 @@ void PublishReady()
             renderSurface.verticalAxis,
             renderSurface.mins[0], renderSurface.mins[1], renderSurface.mins[2],
             renderSurface.maxs[0], renderSurface.maxs[1], renderSurface.maxs[2]);
+        BeginRetailWorldXModelDrawList(
+            renderSurface.drawList.firstLodSurfaceIndex,
+            renderSurface.drawList.firstLodSurfaceCount,
+            static_cast<std::uint32_t>(renderSurface.drawList.renderer.draws.size()),
+            static_cast<std::uint32_t>(renderSurface.drawList.textures.size()),
+            static_cast<std::uint32_t>(renderSurface.drawList.renderer.vertices.size()),
+            static_cast<std::uint32_t>(renderSurface.drawList.renderer.indices.size()));
+        for (const auto &draw : renderSurface.drawList.surfaces)
+        {
+            AppendRetailWorldXModelDraw(
+                draw.surfaceIndex,
+                draw.materialIdentity,
+                draw.vertexCount,
+                draw.triangleCount,
+                draw.textureSlot,
+                WebEngine_XModelMaterialResultString(draw.materialResult),
+                draw.retained ? 1 : 0);
+        }
+        for (std::size_t textureSlot = 0u;
+             textureSlot < renderSurface.drawList.textures.size(); ++textureSlot)
+        {
+            const auto &binding = renderSurface.drawList.textures[textureSlot];
+            AppendRetailWorldXModelDrawTexture(
+                static_cast<std::uint32_t>(textureSlot),
+                binding.materialName.c_str(),
+                binding.imageName.c_str(),
+                binding.imagePath.c_str(),
+                binding.materialIdentity,
+                binding.imageIdentity);
+        }
+        AppendRetailWorldXModelColorMap(
+            colorMap.state,
+            colorMap.message,
+            colorMap.binding.materialName.c_str(),
+            colorMap.binding.imageName.c_str(),
+            colorMap.binding.imagePath.c_str(),
+            colorMap.binding.materialIdentity,
+            colorMap.binding.imageIdentity,
+            colorMap.binding.semantic);
         for (std::size_t index = 0u; index < xmodel.lods.size(); ++index)
         {
             const auto &lod = xmodel.lods[index];

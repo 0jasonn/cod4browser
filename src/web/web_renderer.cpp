@@ -7,6 +7,7 @@
 #include <emscripten.h>
 #include <emscripten/html5.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -19,6 +20,18 @@
 
 namespace
 {
+struct WebRendererAuxTexture
+{
+    GLuint handle = 0;
+    std::vector<std::uint8_t> pixels;
+    std::uint32_t width = 0u;
+    std::uint32_t height = 0u;
+    std::uint32_t uploadGeneration = 0u;
+    std::uint32_t resourceGeneration = 0u;
+    std::uint32_t recoveryCount = 0u;
+    std::uint8_t samplerState = 0u;
+};
+
 struct WebRendererState
 {
     EMSCRIPTEN_WEBGL_CONTEXT_HANDLE context = 0;
@@ -47,6 +60,8 @@ struct WebRendererState
         0u,
         WebRendererTextureBinding::None,
     };
+    std::vector<WebRendererDrawListDrawDesc> draws;
+    std::uint32_t drawTextureCount = 1u;
     std::uint32_t surfaceSubmissionGeneration = 0;
     std::uint32_t surfaceResourceGeneration = 0;
     std::uint32_t surfaceRecoveryCount = 0;
@@ -54,10 +69,12 @@ struct WebRendererState
     std::vector<std::uint8_t> retainedPixels;
     std::uint32_t textureWidth = 0;
     std::uint32_t textureHeight = 0;
+    std::uint8_t textureSamplerState = 0u;
     std::uint32_t uploadGeneration = 0;
     std::uint32_t rebuildGeneration = 0;
     std::uint32_t recoveryCount = 0;
     bool sourceTextureActive = false;
+    std::vector<WebRendererAuxTexture> auxTextures;
     std::string compatibilityId;
     std::string compatibilityVertexSource;
     std::string compatibilityFragmentSource;
@@ -161,6 +178,8 @@ EM_JS(
      std::uint32_t submissionGeneration,
      std::uint32_t resourceGeneration,
      std::uint32_t recoveryCount,
+     std::uint32_t drawCount,
+     std::uint32_t textureCount,
      bool resident),
     {
         globalThis.dispatchEvent(new CustomEvent("kisakcod:renderer-surface", {
@@ -179,6 +198,8 @@ EM_JS(
                 submissionGeneration: submissionGeneration >>> 0,
                 resourceGeneration: resourceGeneration >>> 0,
                 recoveryCount: recoveryCount >>> 0,
+                drawCount: drawCount >>> 0,
+                textureCount: textureCount >>> 0,
                 resident: Boolean(resident)
             }
         }));
@@ -229,6 +250,9 @@ void EmitSurfaceLifecycle(const char *state, const char *message)
         g_renderer.surfaceSubmissionGeneration,
         g_renderer.surfaceResourceGeneration,
         g_renderer.surfaceRecoveryCount,
+        static_cast<std::uint32_t>(g_renderer.draws.empty()
+            ? 1u : g_renderer.draws.size()),
+        g_renderer.drawTextureCount,
         g_renderer.initialized && !g_renderer.contextLost &&
             g_renderer.vertexArray != 0 && g_renderer.vertexBuffer != 0 &&
             g_renderer.indexBuffer != 0);
@@ -279,6 +303,8 @@ void ResetGpuHandles()
     g_renderer.vertexBuffer = 0;
     g_renderer.indexBuffer = 0;
     g_renderer.texture = 0;
+    for (WebRendererAuxTexture &texture : g_renderer.auxTextures)
+        texture.handle = 0;
     g_renderer.aspectUniform = -1;
     g_renderer.textureUniform = -1;
     g_renderer.textureEnabledUniform = -1;
@@ -452,6 +478,11 @@ void DestroyWebGLContext()
     if (emscripten_webgl_make_context_current(g_renderer.context) ==
         EMSCRIPTEN_RESULT_SUCCESS)
     {
+        for (WebRendererAuxTexture &aux : g_renderer.auxTextures)
+        {
+            if (aux.handle != 0) glDeleteTextures(1, &aux.handle);
+            aux.handle = 0;
+        }
         DeletePipelineObjects(
             g_renderer.program,
             g_renderer.compatibilityProgram,
@@ -517,7 +548,7 @@ bool CreateSurfaceObjects(
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(
         0,
-        2,
+        3,
         GL_FLOAT,
         GL_FALSE,
         sizeof(WebRendererSurfaceVertex),
@@ -561,6 +592,7 @@ bool CreateTextureObject(
     const std::uint8_t *pixels,
     std::uint32_t width,
     std::uint32_t height,
+    std::uint8_t samplerState,
     GLuint &textureOut)
 {
     while (glGetError() != GL_NO_ERROR)
@@ -585,10 +617,24 @@ bool CreateTextureObject(
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, texture);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    const std::uint8_t filter = samplerState & 0x07u;
+    const GLint glFilter = samplerState == 0u || filter == 1u
+        ? GL_NEAREST
+        : GL_LINEAR;
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, glFilter);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, glFilter);
+    glTexParameteri(
+        GL_TEXTURE_2D,
+        GL_TEXTURE_WRAP_S,
+        samplerState == 0u || (samplerState & 0x20u) != 0u
+            ? GL_CLAMP_TO_EDGE
+            : GL_REPEAT);
+    glTexParameteri(
+        GL_TEXTURE_2D,
+        GL_TEXTURE_WRAP_T,
+        samplerState == 0u || (samplerState & 0x40u) != 0u
+            ? GL_CLAMP_TO_EDGE
+            : GL_REPEAT);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     glTexImage2D(
         GL_TEXTURE_2D,
@@ -628,7 +674,7 @@ bool CreateRendererResources()
 
     constexpr const char *vertexSource = R"glsl(#version 300 es
         precision highp float;
-        layout(location = 0) in vec2 a_position;
+        layout(location = 0) in vec3 a_position;
         layout(location = 1) in vec3 a_color;
         layout(location = 2) in vec2 a_texcoord;
         uniform float u_aspect;
@@ -637,10 +683,10 @@ bool CreateRendererResources()
 
         void main()
         {
-            vec2 position = a_position;
+            vec3 position = a_position;
             position.x *= min(1.0, u_aspect);
             position.y *= min(1.0, 1.0 / u_aspect);
-            gl_Position = vec4(position, 0.0, 1.0);
+            gl_Position = vec4(position, 1.0);
             v_color = a_color;
             v_texcoord = a_texcoord;
         }
@@ -657,6 +703,8 @@ bool CreateRendererResources()
         void main()
         {
             vec4 texel = texture(u_texture, v_texcoord);
+            if (u_texture_enabled > 0.5 && texel.a <= 0.0)
+                discard;
             vec4 bootstrap_color = vec4(v_color, 1.0);
             out_color = mix(bootstrap_color, texel, u_texture_enabled);
         }
@@ -678,11 +726,13 @@ bool CreateRendererResources()
     const std::uint8_t *texturePixels = FALLBACK_TEXTURE_RGBA;
     std::uint32_t textureWidth = 1u;
     std::uint32_t textureHeight = 1u;
+    std::uint8_t textureSamplerState = 0u;
     if (g_renderer.sourceTextureActive)
     {
         texturePixels = g_renderer.retainedPixels.data();
         textureWidth = g_renderer.textureWidth;
         textureHeight = g_renderer.textureHeight;
+        textureSamplerState = g_renderer.textureSamplerState;
     }
 
     GLuint vertexArray = 0;
@@ -697,7 +747,18 @@ bool CreateRendererResources()
 
     GLuint texture = 0;
     const bool textureReady = surfaceReady && CreateTextureObject(
-        texturePixels, textureWidth, textureHeight, texture);
+        texturePixels, textureWidth, textureHeight, textureSamplerState, texture);
+    std::vector<GLuint> auxiliaryHandles(g_renderer.auxTextures.size(), 0u);
+    bool auxiliaryReady = textureReady;
+    for (std::size_t index = 0u;
+         auxiliaryReady && index < g_renderer.auxTextures.size(); ++index)
+    {
+        const WebRendererAuxTexture &aux = g_renderer.auxTextures[index];
+        if (aux.pixels.empty()) continue;
+        auxiliaryReady = CreateTextureObject(
+            aux.pixels.data(), aux.width, aux.height, aux.samplerState,
+            auxiliaryHandles[index]);
+    }
     GLuint compatibilityProgram = 0;
     GLint compatibilityViewProjection = -1;
     GLint compatibilityWorld = -1;
@@ -712,6 +773,7 @@ bool CreateRendererResources()
             compatibilityTexture);
     if (aspectUniform < 0 || textureUniform < 0 || textureEnabledUniform < 0 ||
         pipelineError != GL_NO_ERROR || !surfaceReady || !textureReady ||
+        !auxiliaryReady ||
         !compatibilityReady)
     {
         Web_Log(
@@ -725,6 +787,8 @@ bool CreateRendererResources()
             vertexBuffer,
             indexBuffer,
             texture);
+        for (GLuint handle : auxiliaryHandles)
+            if (handle != 0) glDeleteTextures(1, &handle);
         return false;
     }
 
@@ -734,6 +798,12 @@ bool CreateRendererResources()
     g_renderer.vertexBuffer = vertexBuffer;
     g_renderer.indexBuffer = indexBuffer;
     g_renderer.texture = texture;
+    for (std::size_t index = 0u; index < auxiliaryHandles.size(); ++index)
+    {
+        g_renderer.auxTextures[index].handle = auxiliaryHandles[index];
+        if (auxiliaryHandles[index] != 0)
+            ++g_renderer.auxTextures[index].resourceGeneration;
+    }
     g_renderer.aspectUniform = aspectUniform;
     g_renderer.textureUniform = textureUniform;
     g_renderer.textureEnabledUniform = textureEnabledUniform;
@@ -837,6 +907,10 @@ bool HandleWebGLContextRestored(int, const void *, void *)
     if (g_renderer.sourceTextureActive)
     {
         ++g_renderer.recoveryCount;
+    }
+    for (WebRendererAuxTexture &aux : g_renderer.auxTextures)
+    {
+        if (!aux.pixels.empty()) ++aux.recoveryCount;
     }
     if (g_renderer.compatibilityActive)
     {
@@ -1016,6 +1090,11 @@ WebRendererSurfaceResult WebRenderer_SetSurface(
     g_renderer.retainedVertices = std::move(retainedSurface.vertices);
     g_renderer.retainedIndices = std::move(retainedSurface.indices);
     g_renderer.draw = retainedSurface.draw;
+    g_renderer.draws = {{retainedSurface.draw, 0u}};
+    g_renderer.drawTextureCount = 1u;
+    for (WebRendererAuxTexture &aux : g_renderer.auxTextures)
+        if (aux.handle != 0) glDeleteTextures(1, &aux.handle);
+    g_renderer.auxTextures.clear();
     g_renderer.surfaceActive = true;
     ++g_renderer.surfaceSubmissionGeneration;
 
@@ -1033,6 +1112,69 @@ WebRendererSurfaceResult WebRenderer_SetSurface(
         g_renderer.initialized && !g_renderer.contextLost
             ? "The engine-owned indexed surface is resident in the graphics backend"
             : "The renderer retained the engine-owned surface for backend initialization");
+    return WebRendererSurfaceResult::Success;
+}
+
+WebRendererSurfaceResult WebRenderer_SetDrawList(
+    const WebRendererDrawListDesc &drawList)
+{
+    WebRendererOwnedDrawList retained;
+    const WebRendererSurfaceResult copyResult =
+        WebRenderer_CopyDrawList(drawList, retained);
+    if (copyResult != WebRendererSurfaceResult::Success) return copyResult;
+
+    GLuint replacementVertexArray = 0;
+    GLuint replacementVertexBuffer = 0;
+    GLuint replacementIndexBuffer = 0;
+    if (g_renderer.initialized && !g_renderer.contextLost &&
+        !CreateSurfaceObjects(
+            retained.vertices, retained.indices,
+            replacementVertexArray, replacementVertexBuffer,
+            replacementIndexBuffer))
+        return WebRendererSurfaceResult::BackendFailure;
+
+    std::vector<WebRendererAuxTexture> replacementAux;
+    try
+    {
+        replacementAux.resize(retained.textureCount - 1u);
+        const std::size_t preserved = std::min(
+            replacementAux.size(), g_renderer.auxTextures.size());
+        for (std::size_t index = 0u; index < preserved; ++index)
+            replacementAux[index] = std::move(g_renderer.auxTextures[index]);
+    }
+    catch (const std::bad_alloc &)
+    {
+        DeleteSurfaceObjects(
+            replacementVertexArray, replacementVertexBuffer,
+            replacementIndexBuffer);
+        return WebRendererSurfaceResult::AllocationFailed;
+    }
+    for (std::size_t index = replacementAux.size();
+         index < g_renderer.auxTextures.size(); ++index)
+        if (g_renderer.auxTextures[index].handle != 0)
+            glDeleteTextures(1, &g_renderer.auxTextures[index].handle);
+
+    if (replacementVertexArray != 0)
+    {
+        DeleteSurfaceObjects(
+            g_renderer.vertexArray, g_renderer.vertexBuffer,
+            g_renderer.indexBuffer);
+        g_renderer.vertexArray = replacementVertexArray;
+        g_renderer.vertexBuffer = replacementVertexBuffer;
+        g_renderer.indexBuffer = replacementIndexBuffer;
+        ++g_renderer.surfaceResourceGeneration;
+    }
+    g_renderer.retainedVertices = std::move(retained.vertices);
+    g_renderer.retainedIndices = std::move(retained.indices);
+    g_renderer.draws = std::move(retained.draws);
+    g_renderer.draw = g_renderer.draws.front().draw;
+    g_renderer.drawTextureCount = retained.textureCount;
+    g_renderer.auxTextures = std::move(replacementAux);
+    g_renderer.surfaceActive = true;
+    ++g_renderer.surfaceSubmissionGeneration;
+    EmitSurfaceLifecycle(
+        g_renderer.initialized && !g_renderer.contextLost ? "ready" : "retained",
+        "The renderer retained a bounded first-LOD multi-surface draw list");
     return WebRendererSurfaceResult::Success;
 }
 
@@ -1121,7 +1263,8 @@ WebRendererTextureResult WebRenderer_SetBootstrapTexture(
     if (g_renderer.initialized && !g_renderer.contextLost)
     {
         if (!CreateTextureObject(
-                retainedCopy.data(), texture.width, texture.height, replacementTexture))
+                retainedCopy.data(), texture.width, texture.height,
+                texture.samplerState, replacementTexture))
         {
             return WebRendererTextureResult::BackendFailure;
         }
@@ -1136,6 +1279,7 @@ WebRendererTextureResult WebRenderer_SetBootstrapTexture(
     g_renderer.retainedPixels = std::move(retainedCopy);
     g_renderer.textureWidth = texture.width;
     g_renderer.textureHeight = texture.height;
+    g_renderer.textureSamplerState = texture.samplerState;
     g_renderer.sourceTextureActive = true;
     ++g_renderer.uploadGeneration;
 
@@ -1148,8 +1292,71 @@ WebRendererTextureResult WebRenderer_SetBootstrapTexture(
     return WebRendererTextureResult::Success;
 }
 
+WebRendererTextureResult WebRenderer_SetDrawTexture(
+    std::uint32_t textureSlot,
+    const WebRendererRgba8TextureDesc &texture)
+{
+    if (textureSlot >= g_renderer.drawTextureCount ||
+        textureSlot >= WEB_RENDERER_MAX_DRAW_LIST_TEXTURES)
+        return WebRendererTextureResult::InvalidDescriptor;
+
+    std::size_t expectedByteLength = 0u;
+    const WebRendererTextureResult validation =
+        ValidateTextureDesc(texture, expectedByteLength);
+    if (validation != WebRendererTextureResult::Success) return validation;
+
+    std::size_t retainedTotal = textureSlot == 0u
+        ? 0u : g_renderer.retainedPixels.size();
+    for (std::size_t index = 0u; index < g_renderer.auxTextures.size(); ++index)
+    {
+        if (textureSlot == index + 1u) continue;
+        retainedTotal += g_renderer.auxTextures[index].pixels.size();
+    }
+    if (retainedTotal > WEB_RENDERER_MAX_RETAINED_DRAW_TEXTURE_BYTES ||
+        expectedByteLength > WEB_RENDERER_MAX_RETAINED_DRAW_TEXTURE_BYTES - retainedTotal)
+        return WebRendererTextureResult::OutputTooLarge;
+
+    if (textureSlot == 0u) return WebRenderer_SetBootstrapTexture(texture);
+
+    std::vector<std::uint8_t> retainedCopy;
+    try
+    {
+        retainedCopy.assign(texture.pixels, texture.pixels + expectedByteLength);
+    }
+    catch (const std::bad_alloc &)
+    {
+        return WebRendererTextureResult::AllocationFailed;
+    }
+
+    GLuint replacement = 0;
+    if (g_renderer.initialized && !g_renderer.contextLost &&
+        !CreateTextureObject(
+            retainedCopy.data(), texture.width, texture.height,
+            texture.samplerState, replacement))
+        return WebRendererTextureResult::BackendFailure;
+
+    WebRendererAuxTexture &destination = g_renderer.auxTextures[textureSlot - 1u];
+    if (replacement != 0)
+    {
+        if (destination.handle != 0) glDeleteTextures(1, &destination.handle);
+        destination.handle = replacement;
+        ++destination.resourceGeneration;
+    }
+    destination.pixels = std::move(retainedCopy);
+    destination.width = texture.width;
+    destination.height = texture.height;
+    destination.samplerState = texture.samplerState;
+    ++destination.uploadGeneration;
+    return WebRendererTextureResult::Success;
+}
+
 bool WebRenderer_ClearBootstrapTexture()
 {
+    for (WebRendererAuxTexture &aux : g_renderer.auxTextures)
+    {
+        if (aux.handle != 0) glDeleteTextures(1, &aux.handle);
+        aux = {};
+    }
     if (!g_renderer.sourceTextureActive)
     {
         if (!g_renderer.initialized || g_renderer.contextLost || g_renderer.texture != 0)
@@ -1158,7 +1365,7 @@ bool WebRenderer_ClearBootstrapTexture()
         }
         GLuint fallbackTexture = 0;
         if (!CreateTextureObject(
-                FALLBACK_TEXTURE_RGBA, 1u, 1u, fallbackTexture))
+                FALLBACK_TEXTURE_RGBA, 1u, 1u, 0u, fallbackTexture))
         {
             return false;
         }
@@ -1172,7 +1379,7 @@ bool WebRenderer_ClearBootstrapTexture()
     if (g_renderer.initialized && !g_renderer.contextLost)
     {
         backendReady = CreateTextureObject(
-            FALLBACK_TEXTURE_RGBA, 1u, 1u, replacementTexture);
+            FALLBACK_TEXTURE_RGBA, 1u, 1u, 0u, replacementTexture);
     }
 
     if (replacementTexture != 0)
@@ -1191,6 +1398,7 @@ bool WebRenderer_ClearBootstrapTexture()
     std::vector<std::uint8_t>().swap(g_renderer.retainedPixels);
     g_renderer.textureWidth = 0u;
     g_renderer.textureHeight = 0u;
+    g_renderer.textureSamplerState = 0u;
     g_renderer.sourceTextureActive = false;
     ++g_renderer.uploadGeneration;
     Web_Log(WebLogLevel::Info, "[kisakcod-web] Renderer released the imported texture.\n");
@@ -1221,6 +1429,29 @@ WebRendererTextureState WebRenderer_GetBootstrapTextureState()
         g_renderer.recoveryCount,
         true,
         g_renderer.initialized && !g_renderer.contextLost && g_renderer.texture != 0,
+    };
+}
+
+WebRendererTextureState WebRenderer_GetDrawTextureState(
+    std::uint32_t textureSlot)
+{
+    if (textureSlot == 0u) return WebRenderer_GetBootstrapTextureState();
+    if (textureSlot >= g_renderer.drawTextureCount ||
+        textureSlot - 1u >= g_renderer.auxTextures.size()) return {};
+    const WebRendererAuxTexture &texture = g_renderer.auxTextures[textureSlot - 1u];
+    if (texture.pixels.empty()) return {
+        0u, 0u, 0u, texture.uploadGeneration, texture.resourceGeneration,
+        texture.recoveryCount, false, false,
+    };
+    return {
+        texture.width,
+        texture.height,
+        texture.pixels.size(),
+        texture.uploadGeneration,
+        texture.resourceGeneration,
+        texture.recoveryCount,
+        true,
+        g_renderer.initialized && !g_renderer.contextLost && texture.handle != 0,
     };
 }
 
@@ -1383,6 +1614,9 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
 
     const double elapsed = static_cast<double>(frame.monotonicMilliseconds) / 1000.0;
     const float wave = static_cast<float>(0.5 + 0.5 * std::sin(elapsed * 0.35));
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
+    glDepthMask(GL_TRUE);
     glClearColor(0.025f + wave * 0.012f, 0.03f, 0.035f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -1393,6 +1627,15 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         while (glGetError() != GL_NO_ERROR)
         {
         }
+        const float aspect = height > 0
+            ? static_cast<float>(width) / static_cast<float>(height)
+            : 1.0f;
+        const GLfloat viewProjection[16] = {
+            std::min(1.0f, aspect), 0.0f, 0.0f, 0.0f,
+            0.0f, std::min(1.0f, 1.0f / aspect), 0.0f, 0.0f,
+            0.0f, 0.0f, 1.0f, 0.0f,
+            0.0f, 0.0f, 0.0f, 1.0f,
+        };
         constexpr GLfloat IDENTITY_MATRIX[16] = {
             1.0f, 0.0f, 0.0f, 0.0f,
             0.0f, 1.0f, 0.0f, 0.0f,
@@ -1404,7 +1647,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             g_renderer.compatibilityViewProjectionUniform,
             1,
             GL_FALSE,
-            IDENTITY_MATRIX);
+            viewProjection);
         glUniformMatrix4fv(
             g_renderer.compatibilityWorldUniform,
             1,
@@ -1419,29 +1662,55 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             g_renderer.aspectUniform,
             height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 1.0f);
         glUniform1i(g_renderer.textureUniform, 0);
-        glUniform1f(
-            g_renderer.textureEnabledUniform,
-            g_renderer.sourceTextureActive &&
-                    g_renderer.draw.textureBinding == WebRendererTextureBinding::EngineImage
-                ? 1.0f
-                : 0.0f);
     }
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, g_renderer.texture);
     glBindVertexArray(g_renderer.vertexArray);
-    const std::uintptr_t indexOffset =
-        static_cast<std::uintptr_t>(g_renderer.draw.firstIndex) * sizeof(std::uint16_t);
-    glDrawElements(
-        GL_TRIANGLES,
-        static_cast<GLsizei>(g_renderer.draw.indexCount),
-        GL_UNSIGNED_SHORT,
-        reinterpret_cast<const void *>(indexOffset));
+    const bool multiSurface = g_renderer.draws.size() > 1u ||
+        g_renderer.drawTextureCount > 1u;
+    std::uint32_t completedDraws = 0u;
+    for (const WebRendererDrawListDrawDesc &entry : g_renderer.draws)
+    {
+        GLuint textureHandle = g_renderer.texture;
+        bool textureActive = g_renderer.sourceTextureActive;
+        if (entry.textureSlot > 0u)
+        {
+            if (entry.textureSlot - 1u >= g_renderer.auxTextures.size()) continue;
+            const WebRendererAuxTexture &aux =
+                g_renderer.auxTextures[entry.textureSlot - 1u];
+            textureHandle = aux.handle;
+            textureActive = !aux.pixels.empty();
+        }
+        if (multiSurface &&
+            entry.draw.textureBinding == WebRendererTextureBinding::EngineImage &&
+            (!textureActive || textureHandle == 0))
+            continue;
+        if (!compatibilityDraw)
+        {
+            glUniform1f(
+                g_renderer.textureEnabledUniform,
+                textureActive &&
+                        entry.draw.textureBinding == WebRendererTextureBinding::EngineImage
+                    ? 1.0f : 0.0f);
+        }
+        glBindTexture(GL_TEXTURE_2D, textureHandle);
+        const std::uintptr_t indexOffset =
+            static_cast<std::uintptr_t>(entry.draw.firstIndex) *
+            sizeof(std::uint16_t);
+        glDrawElements(
+            GL_TRIANGLES,
+            static_cast<GLsizei>(entry.draw.indexCount),
+            GL_UNSIGNED_SHORT,
+            reinterpret_cast<const void *>(indexOffset));
+        ++completedDraws;
+    }
 
     if (compatibilityDraw)
     {
-        if (g_renderer.compatibilityDrawCount != UINT32_MAX)
-            ++g_renderer.compatibilityDrawCount;
-        if (!g_renderer.compatibilityFirstDrawCompleted)
+        if (UINT32_MAX - g_renderer.compatibilityDrawCount < completedDraws)
+            g_renderer.compatibilityDrawCount = UINT32_MAX;
+        else
+            g_renderer.compatibilityDrawCount += completedDraws;
+        if (!g_renderer.compatibilityFirstDrawCompleted && completedDraws != 0u)
         {
             const GLenum drawError = glGetError();
             if (drawError == GL_NO_ERROR)

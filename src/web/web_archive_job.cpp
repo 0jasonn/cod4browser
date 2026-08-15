@@ -16,7 +16,7 @@
 
 namespace
 {
-constexpr const char *ARCHIVE_PATH = "main/iw_00.iwd";
+constexpr uint32_t BASE_ARCHIVE_COUNT = 14u;
 constexpr uint32_t ZIP_TAIL_BYTES = 22u + 0xffffu;
 constexpr std::size_t READY_ENTRIES_PER_FRAME = 64u;
 
@@ -49,6 +49,10 @@ struct ArchiveJob
 {
     Phase phase = Phase::Idle;
     uint32_t generation = 0;
+    uint32_t archiveIndex = 0;
+    std::string archivePath;
+    std::string targetMemberPath;
+    bool targetMemberUnavailable = false;
     WebFsRequestId requestId = 0;
     WebEngineFsRequestId memberRequestId = 0;
     uint32_t archiveSize = 0;
@@ -76,11 +80,14 @@ struct ArchiveJob
 
 ArchiveJob g_job;
 
-EM_JS(void, DispatchArchiveLoading, (uint32_t generation), {
+EM_JS(void, DispatchArchiveLoading,
+    (uint32_t generation, const char *path, const char *targetMember), {
     globalThis.dispatchEvent(new CustomEvent("kisakcod:archive", {
         detail: {
             state: "loading",
             generation: generation >>> 0,
+            path: UTF8ToString(path),
+            targetMember: targetMember ? UTF8ToString(targetMember) : null,
             message: "Opening the browser-local IWD archive"
         }
     }));
@@ -89,11 +96,15 @@ EM_JS(void, DispatchArchiveLoading, (uint32_t generation), {
 EM_JS(
     void,
     DispatchArchiveReadyBegin,
-    (uint32_t generation, uint32_t recordCount, uint32_t uniqueEntries),
+    (uint32_t generation, const char *path, const char *targetMember,
+     int targetMemberAvailable, uint32_t recordCount, uint32_t uniqueEntries),
     {
         const detail = {
             state: "ready",
             generation: generation >>> 0,
+            path: UTF8ToString(path),
+            targetMember: targetMember ? UTF8ToString(targetMember) : null,
+            targetMemberAvailable: Boolean(targetMemberAvailable),
             message: "The portable IWD reader mounted and verified archive members",
             recordCount,
             uniqueEntries,
@@ -157,6 +168,60 @@ void ResetJob(bool keepGeneration)
     const uint32_t generation = keepGeneration ? g_job.generation : 0;
     g_job = {};
     g_job.generation = generation;
+}
+
+bool SelectArchiveCandidate(uint32_t archiveIndex)
+{
+    if (archiveIndex >= BASE_ARCHIVE_COUNT) return false;
+    try
+    {
+        g_job.archiveIndex = archiveIndex;
+        g_job.archivePath = "main/iw_";
+        g_job.archivePath.push_back(static_cast<char>('0' + archiveIndex / 10u));
+        g_job.archivePath.push_back(static_cast<char>('0' + archiveIndex % 10u));
+        g_job.archivePath += ".iwd";
+    }
+    catch (...)
+    {
+        return false;
+    }
+    g_job.archiveSize = 0u;
+    g_job.windowOffset = 0u;
+    g_job.windowLength = 0u;
+    g_job.windowCursor = 0u;
+    g_job.completionReady = false;
+    g_job.completionStatus = WebFsStatus::Pending;
+    g_job.completionBytes.clear();
+    g_job.windowBytes.clear();
+    g_job.locator = {};
+    g_job.recordCount = 0u;
+    g_job.uniqueEntries = 0u;
+    return true;
+}
+
+bool BeginNextMaterialArchiveSearch()
+{
+    if (!WebEngineFs_Unmount()) return false;
+    const uint32_t generation = g_job.generation;
+    ResetJob(false);
+    g_job.generation = generation;
+    try
+    {
+        const char *targetMember = WebEngineAsset_MaterialImagePath();
+        if (!targetMember) return false;
+        g_job.targetMemberPath = targetMember;
+    }
+    catch (...)
+    {
+        return false;
+    }
+    if (!SelectArchiveCandidate(0u)) return false;
+    g_job.phase = Phase::NeedStat;
+    DispatchArchiveLoading(
+        generation,
+        g_job.archivePath.c_str(),
+        g_job.targetMemberPath.c_str());
+    return true;
 }
 
 const char *WebFsStatusString(WebFsStatus status)
@@ -309,7 +374,7 @@ void CompleteMemberRequest(const WebEngineFsCompletion &completion, void *userDa
 bool BeginStat()
 {
     const WebFsStatus status = WebFs_BeginStat(
-        ARCHIVE_PATH,
+        g_job.archivePath.c_str(),
         CompleteRequest,
         reinterpret_cast<void *>(static_cast<uintptr_t>(g_job.generation)),
         &g_job.requestId);
@@ -326,7 +391,7 @@ bool BeginRead(uint32_t offset, uint32_t length, Phase waitingPhase)
 {
     g_job.completionBytes.clear();
     const WebFsStatus status = WebFs_BeginRead(
-        ARCHIVE_PATH,
+        g_job.archivePath.c_str(),
         offset,
         length,
         CompleteRequest,
@@ -532,6 +597,9 @@ void BeginReadyPublication()
     g_job.phase = Phase::PublishingReadyEntries;
     DispatchArchiveReadyBegin(
         g_job.generation,
+        g_job.archivePath.c_str(),
+        g_job.targetMemberPath.empty() ? nullptr : g_job.targetMemberPath.c_str(),
+        g_job.targetMemberUnavailable ? 0 : 1,
         g_job.recordCount,
         g_job.uniqueEntries);
 }
@@ -604,8 +672,28 @@ void WebArchiveJob_Start()
     const uint32_t generation = g_job.generation == UINT32_MAX ? 1u : g_job.generation + 1u;
     ResetJob(false);
     g_job.generation = generation;
+    try
+    {
+        const char *targetMember = WebEngineAsset_MaterialImagePath();
+        if (targetMember) g_job.targetMemberPath = targetMember;
+    }
+    catch (...)
+    {
+        g_job.phase = Phase::Failed;
+        DispatchArchiveFailure(generation, "could not retain selected image path");
+        return;
+    }
+    if (!SelectArchiveCandidate(0u))
+    {
+        g_job.phase = Phase::Failed;
+        DispatchArchiveFailure(generation, "could not select a base IWD archive");
+        return;
+    }
     g_job.phase = Phase::NeedStat;
-    DispatchArchiveLoading(generation);
+    DispatchArchiveLoading(
+        generation,
+        g_job.archivePath.c_str(),
+        g_job.targetMemberPath.empty() ? nullptr : g_job.targetMemberPath.c_str());
 }
 
 void WebArchiveJob_Cancel()
@@ -633,6 +721,18 @@ void WebArchiveJob_Frame()
     case Phase::Failed:
         return;
     case Phase::Finished:
+        if (WebEngineAsset_CurrentBindingFinished() &&
+            WebEngineAsset_AdvanceMaterialImageBinding())
+        {
+            if (!BeginNextMaterialArchiveSearch())
+            {
+                g_job.phase = Phase::Failed;
+                DispatchArchiveFailure(
+                    g_job.generation,
+                    "could not begin the next material texture archive search");
+            }
+            return;
+        }
         if (!WebEngineFs_IsMounted())
         {
             g_job.phase = Phase::Failed;
@@ -702,10 +802,45 @@ void WebArchiveJob_Frame()
             return;
         }
         g_job.completionBytes.clear();
+        if (!g_job.targetMemberPath.empty() && !g_job.targetMemberUnavailable)
+        {
+            const kisak::iwd::Entry *targetEntry = nullptr;
+            try
+            {
+                targetEntry = index.Find(g_job.targetMemberPath);
+            }
+            catch (...)
+            {
+                Fail("could not search IWD", "selected member lookup failed");
+                return;
+            }
+            if (!targetEntry)
+            {
+                const uint32_t nextArchive = g_job.archiveIndex + 1u;
+                if (nextArchive >= BASE_ARCHIVE_COUNT)
+                {
+                    g_job.targetMemberUnavailable = true;
+                    if (!SelectArchiveCandidate(0u))
+                    {
+                        Fail("could not restore primary IWD", "out of memory");
+                        return;
+                    }
+                    g_job.phase = Phase::NeedStat;
+                    return;
+                }
+                if (!SelectArchiveCandidate(nextArchive))
+                {
+                    Fail("could not continue IWD search", "out of memory");
+                    return;
+                }
+                g_job.phase = Phase::NeedStat;
+                return;
+            }
+        }
         g_job.recordCount = index.RecordCount();
         g_job.uniqueEntries = static_cast<uint32_t>(index.Entries().size());
         const WebEngineFsStatus mountStatus = WebEngineFs_Mount(
-            g_job.locator, std::move(index));
+            g_job.archivePath.c_str(), g_job.locator, std::move(index));
         if (mountStatus != WebEngineFsStatus::Success)
         {
             g_job.memberStatus = mountStatus;

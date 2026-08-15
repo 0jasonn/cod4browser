@@ -278,6 +278,10 @@ export function createSyntheticWorldInventoryFastfile({
     invalidXModelCollisionBounds = false,
     invalidXModelBoneInfo = false,
     unsupportedXModelPhysPreset = false,
+    externalColorMap = true,
+    colorMapName = "synthetic_engine_asset",
+    secondExternalColorMap = false,
+    secondColorMapName = "synthetic_engine_asset_second",
 } = {})
 {
     const inflated = [];
@@ -335,7 +339,9 @@ export function createSyntheticWorldInventoryFastfile({
     setU32(xmodel, 32, 0xffff_ffff);
     setU32(xmodel, 36, 0xffff_ffff);
     setF32(xmodel, 40, 800);
-    setU16(xmodel, 44, 6);
+    // The first LOD contains the two material-bearing surfaces. The remaining
+    // serialized surfaces are later-LOD census evidence only.
+    setU16(xmodel, 44, 2);
     setU32(xmodel, 48, 0x8000_0000);
     setU32(xmodel, 152, 0xffff_ffff);
     setU32(xmodel, 156, 1);
@@ -395,6 +401,24 @@ export function createSyntheticWorldInventoryFastfile({
                 setU32(vertex, 28, 0x7f7f_ffff);
                 inflated.push(...vertex);
             }
+        } else if (index === 1) {
+            const packedVertices = [
+                [-0.6, -0.5, 0, 0x0000, 0x0000],
+                [ 0.6, -0.5, 0, 0x3c00, 0x0000],
+                [ 0.0,  0.7, 0, 0x3800, 0x3c00],
+            ];
+            for (const [x, y, z, u, v] of packedVertices) {
+                const vertex = new Array(32).fill(0);
+                setF32(vertex, 0, x);
+                setF32(vertex, 4, y);
+                setF32(vertex, 8, z);
+                setF32(vertex, 12, 1);
+                setU32(vertex, 16, 0xffff_ffff);
+                setU32(vertex, 20, (u << 16) | v);
+                setU32(vertex, 24, 0x7f7f_ffff);
+                setU32(vertex, 28, 0x7f7f_ffff);
+                inflated.push(...vertex);
+            }
         } else {
             for (let byte = 0; byte < 3 * 32; ++byte) {
                 inflated.push((byte + index) & 0xff);
@@ -440,6 +464,8 @@ export function createSyntheticWorldInventoryFastfile({
         imageReference,
         includeImage,
         includeConstant,
+        imageName = colorMapName,
+        imageExternal = externalColorMap,
     }) => {
         const material = new Array(80).fill(0);
         setU32(material, 0, 0xffff_ffff);
@@ -458,12 +484,30 @@ export function createSyntheticWorldInventoryFastfile({
         appendU32(inflated, imageReference);
         if (includeImage) {
             const image = new Array(36).fill(0);
+            if (imageExternal) {
+                setU32(image, 0, 3);
+                setU32(image, 4, 0xffff_fffe);
+                setU16(image, 24, 4);
+                setU16(image, 26, 4);
+                setU16(image, 28, 1);
+            }
             setU32(image, 32, 0xffff_ffff);
             inflated.push(
                 ...image,
-                ...Buffer.from(",$identitynormalmap", "ascii"),
+                ...Buffer.from(
+                    imageExternal ? imageName : ",$identitynormalmap",
+                    "ascii",
+                ),
                 0,
             );
+            if (imageExternal) {
+                appendU16(inflated, 0);
+                appendU16(inflated, 4);
+                appendU16(inflated, 4);
+                appendU16(inflated, 1);
+                appendU32(inflated, 0x3154_5844);
+                appendU32(inflated, 0);
+            }
         }
         if (includeConstant) {
             const constant = new Array(32).fill(0);
@@ -486,9 +530,13 @@ export function createSyntheticWorldInventoryFastfile({
     appendMaterial({
         name: "web/material_b",
         techniqueAlias: 0x4000_001d,
-        imageReference: invalidXModelMaterialAlias ? 0x4000_0001 : 0x4000_02b1,
-        includeImage: false,
+        imageReference: invalidXModelMaterialAlias
+            ? 0x4000_0001
+            : secondExternalColorMap ? 0xffff_ffff : 0x4000_02b1,
+        includeImage: secondExternalColorMap,
         includeConstant: false,
+        imageName: secondColorMapName,
+        imageExternal: secondExternalColorMap,
     });
 
     const collisionSurface = new Array(44).fill(0);

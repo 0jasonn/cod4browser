@@ -3,22 +3,22 @@ import { expect, test } from "@playwright/test";
 function expectProductionWorldSurfaceUploads(uploads)
 {
     const vertexUpload = uploads.find(
-        (upload) => upload.target === "array" && upload.byteLength === 112,
+        (upload) => upload.target === "array" && upload.byteLength === 128,
     );
     const indexUpload = uploads.find(
         (upload) => upload.target === "element-array" && upload.byteLength === 12,
     );
     expect(vertexUpload, "the converted world vertices should be uploaded").toBeTruthy();
     expect(indexUpload, "the converted world indices should be uploaded").toBeTruthy();
-    expect(vertexUpload.bytes).toHaveLength(112);
+    expect(vertexUpload.bytes).toHaveLength(128);
     expect(indexUpload.bytes).toHaveLength(12);
 
     const vertexValues = new Float32Array(Uint8Array.from(vertexUpload.bytes).buffer);
     const expectedVertices = [
-        [-0.5, 0.5, 224 / 255, 96 / 255, 32 / 255, 0, 0],
-        [-0.5, -0.5, 48 / 255, 176 / 255, 80 / 255, 0, 1],
-        [0.5, -0.5, 64 / 255, 112 / 255, 232 / 255, 1, 1],
-        [0.5, 0.5, 240 / 255, 208 / 255, 72 / 255, 1, 0],
+        [-0.5, 0.5, 0, 224 / 255, 96 / 255, 32 / 255, 0, 0],
+        [-0.5, -0.5, 0, 48 / 255, 176 / 255, 80 / 255, 0, 1],
+        [0.5, -0.5, 0, 64 / 255, 112 / 255, 232 / 255, 1, 1],
+        [0.5, 0.5, 0, 240 / 255, 208 / 255, 72 / 255, 1, 0],
     ].flat();
     expect([...vertexValues]).toHaveLength(expectedVertices.length);
     for (let index = 0; index < expectedVertices.length; index += 1) {
@@ -307,9 +307,9 @@ test("boots the headless engine slice and renders through WebGL2", async ({ page
         indexCount: 6,
         drawFirstIndex: 0,
         drawIndexCount: 6,
-        vertexBytes: 112,
+        vertexBytes: 128,
         indexBytes: 12,
-        recoveryBytes: 124,
+        recoveryBytes: 140,
         topology: "triangle-list",
         textureBinding: "engine-image",
         resident: true,
@@ -317,7 +317,7 @@ test("boots the headless engine slice and renders through WebGL2", async ({ page
     expect(runtimeSnapshot.rendererSurface).not.toHaveProperty("vertices");
     expect(runtimeSnapshot.rendererSurface).not.toHaveProperty("indices");
     expect(runtimeSnapshot.surfaceBufferUploads).toEqual(expect.arrayContaining([
-        expect.objectContaining({ target: "array", byteLength: 112 }),
+        expect.objectContaining({ target: "array", byteLength: 128 }),
         expect.objectContaining({ target: "element-array", byteLength: 12 }),
     ]));
     expectProductionWorldSurfaceUploads(runtimeSnapshot.surfaceBufferUploads);
@@ -340,12 +340,12 @@ test("boots the headless engine slice and renders through WebGL2", async ({ page
     expect(runtimeSnapshot.surfaceEvents[retainedSurfaceIndex]).toMatchObject({
         submissionGeneration: runtimeSnapshot.rendererSurface.submissionGeneration,
         resourceGeneration: 0,
-        recoveryBytes: 124,
+        recoveryBytes: 140,
         resident: false,
     });
     expect(runtimeSnapshot.surfaceEvents[readySurfaceIndex]).toMatchObject({
         submissionGeneration: runtimeSnapshot.rendererSurface.submissionGeneration,
-        recoveryBytes: 124,
+        recoveryBytes: 140,
         resident: true,
     });
     expect(runtimeSnapshot.surfaceEvents[readySurfaceIndex].resourceGeneration)
@@ -524,7 +524,7 @@ test("reports and recovers from WebGL2 context loss", async ({ page }) => {
     expect(lostSurface).toMatchObject({
         vertexCount: 4,
         indexCount: 6,
-        recoveryBytes: 124,
+        recoveryBytes: 140,
         submissionGeneration: beforeLoss.surface.submissionGeneration,
         resident: false,
     });
@@ -557,7 +557,7 @@ test("reports and recovers from WebGL2 context loss", async ({ page }) => {
         state: "ready",
         vertexCount: 4,
         indexCount: 6,
-        recoveryBytes: 124,
+        recoveryBytes: 140,
         submissionGeneration: beforeLoss.surface.submissionGeneration,
         resident: true,
     });
@@ -566,10 +566,10 @@ test("reports and recovers from WebGL2 context loss", async ({ page }) => {
     expect(recovered.surface.recoveryCount)
         .toBe(beforeLoss.surface.recoveryCount + 1);
     expect(recovered.bufferUploads.filter(
-        (upload) => upload.target === "array" && upload.byteLength === 112,
+        (upload) => upload.target === "array" && upload.byteLength === 128,
     ).length).toBeGreaterThan(
         beforeLoss.bufferUploads.filter(
-            (upload) => upload.target === "array" && upload.byteLength === 112,
+            (upload) => upload.target === "array" && upload.byteLength === 128,
         ).length,
     );
     expect(recovered.bufferUploads.filter(

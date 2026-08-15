@@ -1005,10 +1005,11 @@ stored in the repository.
 
 ## Milestone 27 first rendered killhouse XSurface (complete)
 
-The dependency result now retains only surface zero's bounded packed vertex and
-index bytes. For the owned model this is 11,776 vertex bytes and 1,512 index
-bytes; the other five surfaces remain hash-only. The engine converter then
-decodes and validates those records outside both the zone parser and WebGL2.
+At the M27 boundary the dependency result retained only surface zero's bounded
+packed vertex and index bytes. For the owned model this was 11,776 vertex bytes
+and 1,512 index bytes; the other five surfaces remained hash-only. M29 below
+supersedes that retention rule for the declared first LOD. The engine converter
+decodes and validates records outside both the zone parser and WebGL2.
 
 | Render field | Value |
 | --- | --- |
@@ -1022,8 +1023,8 @@ decodes and validates those records outside both the zone parser and WebGL2.
 
 Every position, binormal sign, and half-float UV must be finite; every index
 must be below 368; and the complete byte lengths must match the checked header.
-The browser renderer owns only the converted two-dimensional positions, RGB
-color, UVs, and 16-bit indices used for context-loss recovery. Conversion or
+The browser renderer owns only the converted three-dimensional preview
+positions, RGB color, UVs, and 16-bit indices used for context-loss recovery. Conversion or
 binding failure leaves the synthetic bootstrap surface active. Automated
 fixtures generate their packed geometry freely; no owned vertex or index bytes
 are copied into the repository.
@@ -1031,3 +1032,66 @@ are copied into the repository.
 This is a first retail model-surface render. The current sampler image still
 comes from the startup material path, so correct XModel color-map selection is
 the next bounded dependency rather than an implied part of M27.
+
+## Milestone 28 rendered XModel color map (complete)
+
+The rendered surface's material identity is now the only entry point to image
+selection. The portable engine selector finds that one published material,
+requires exactly one texture with semantic 2 (`TS_COLOR_MAP`), and resolves its
+typed image identity across the retained dependency records. It rejects
+filename-order substitution, duplicate semantics or identities, built-ins,
+embedded resources, and anything other than a bounded external 2D DXT image.
+
+| Binding field | Owned F.N.G. value |
+| --- | --- |
+| Surface material | identity 16 / `mc/mtl_street_light_02` |
+| Texture semantic | 2 / `TS_COLOR_MAP` |
+| Image | identity 15 / `street_light_02_col` |
+| Constructed member | `images/street_light_02_col.iwi` |
+| Owning archive | `main/iw_03.iwd` |
+| IWI metadata | v6, DXT1 format 11, 512 x 512 x 1 |
+
+The archive job searches the fourteen required base IWDs sequentially and
+mounts only the index containing the exact selected member. A missing member
+falls back to mounting the primary archive for unrelated engine work but never
+falls back to another image. Unsupported selection and failed read/decode/upload
+preserve the current renderer texture; successful replacement reuses the
+existing renderer recovery ownership.
+
+The synthetic end-to-end profile locates its selected image in `iw_03`, binds
+it to the one M27 surface, and has negative built-in and missing-member cases.
+No retail IWI bytes are retained in parser output, JavaScript state, tests, or
+repository fixtures.
+
+## Milestone 29 first-LOD XModel draw list (complete)
+
+Retention now follows `lods[0].surfaceIndex/surfaceCount` instead of an
+implicit surface-zero rule. Each candidate must independently survive packed
+geometry conversion and typed color-map resolution before it enters the
+renderer-owned list. All accepted surfaces use one projection fitted to their
+combined finite bounds, so separate XSurface records preserve their relative
+placement.
+
+| First-LOD field | Owned F.N.G. value |
+| --- | --- |
+| Surface range | indices 0-1 / 2 draws |
+| Combined geometry | 385 vertices / 828 indices |
+| Projection axes | X horizontal / Z vertical |
+| Texture slot 0 | `street_light_02_col`, 512 x 512 DXT1 |
+| Texture slot 1 | `street_light_bulb_02_off_col`, 64 x 64 DXT1 |
+| Exact archive membership | both in `main/iw_03.iwd` |
+
+Renderer ceilings are 16 draws, 16,384 vertices, 49,152 indices, eight texture
+slots, 4 MiB per decoded texture, and 16 MiB total retained texture pixels.
+Archive discovery and IWI upload advance one typed slot at a time; a later
+missing, unsupported, or failed slot cannot discard earlier successful draws.
+The renderer recreates the combined buffers and every resident slot after
+context loss. No owned geometry, archive member, decoded pixel, or derived
+asset payload is written to the repository.
+
+The M29 correction keeps the projection's remaining model axis as normalized
+depth, enables depth testing, applies compatibility-program aspect correction,
+and discards fully transparent sampled texels. Typed material bindings also
+retain the parsed sampler byte; both owned lamp slots report state 11 and are
+therefore filtered and repeated from their retail metadata rather than from a
+lamp-specific renderer rule.

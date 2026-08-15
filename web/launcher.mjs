@@ -58,6 +58,7 @@ const runtime = {
     },
     rendererSurface: { state: "idle", message: "Waiting for an engine surface" },
     rendererTexture: { state: "idle", message: "Waiting for a supported engine image" },
+    rendererTextures: [],
     rendererShader: { state: "idle", message: "Waiting for a retail shader contract" },
     rendererMaterial: {
         state: "idle",
@@ -130,20 +131,28 @@ function updateRendererMaterialBinding() {
     const shaderReady = runtime.rendererShader?.state === "ready" &&
         runtime.rendererShader?.resident === true &&
         runtime.rendererShader?.firstDrawCompleted === true;
-    const textureReady = runtime.rendererTexture?.state === "ready" &&
-        runtime.rendererTexture?.resident === true;
+    const renderSurface =
+        runtime.retailCensus?.worldInventory?.firstXModel?.renderSurface;
+    const xmodelColorMap = renderSurface?.colorMap;
+    const drawTextures = renderSurface?.drawList?.textures ??
+        (xmodelColorMap ? [{ ...xmodelColorMap, textureSlot: 0 }] : []);
+    const residentTextures = drawTextures.map((binding) =>
+        runtime.rendererTextures[binding.textureSlot >>> 0]);
+    const textureReady = drawTextures.length > 0 && residentTextures.every(
+        (texture, index) => texture?.state === "ready" && texture?.resident === true &&
+            texture.path?.toLowerCase() === drawTextures[index].imagePath.toLowerCase(),
+    );
     const materialReady = runtime.retailCensus?.state === "ready" &&
-        runtime.retailCensus?.materialPublished === true &&
-        runtime.retailCensus?.imagePublished === true &&
-        runtime.retailCensus?.materialImageResolved === true;
-    const selectedImagePath = runtime.retailCensus?.materialImagePath ?? "";
-    const textureMatchesMaterial = materialReady && textureReady &&
-        runtime.rendererTexture.path?.toLowerCase() === selectedImagePath.toLowerCase();
+        xmodelColorMap?.state === "selected" &&
+        xmodelColorMap.materialIdentity !== 0 && xmodelColorMap.imageIdentity !== 0 &&
+        xmodelColorMap.semantic === 2;
+    const primaryTexture = residentTextures[0] ?? runtime.rendererTexture;
+    const textureMatchesMaterial = materialReady && textureReady;
     const previousReady = runtime.rendererMaterial?.state === "ready";
     if (!shaderReady || !textureReady || !materialReady || !textureMatchesMaterial) {
         runtime.rendererMaterial = {
             state: "waiting",
-            message: "Waiting for a registered retail material and its resident image",
+        message: "Waiting for the rendered XModel material and its resident color map",
             shaderReady,
             textureReady,
             materialReady,
@@ -152,26 +161,30 @@ function updateRendererMaterialBinding() {
         return;
     }
 
-    const sourceFormat = runtime.rendererTexture.sourceFormat >>> 0;
+    const sourceFormat = primaryTexture.sourceFormat >>> 0;
     const compressedSource = sourceFormat >= 11 && sourceFormat <= 13;
     runtime.rendererMaterial = {
         state: "ready",
         message: compressedSource
             ? "Retail material selected a COD4 DXT image for the shader sampler"
             : "Retail material selected an engine image for the shader sampler",
-        materialSource: "retail-fastfile",
-        materialName: runtime.retailCensus.materialName,
-        materialIdentity: runtime.retailCensus.materialIdentity,
-        imageName: runtime.retailCensus.imageName,
-        imageIdentity: runtime.retailCensus.imageIdentity,
+        materialSource: "retail-xmodel",
+        materialName: xmodelColorMap.materialName,
+        materialIdentity: xmodelColorMap.materialIdentity,
+        imageName: xmodelColorMap.imageName,
+        imageIdentity: xmodelColorMap.imageIdentity,
+        imageSemantic: xmodelColorMap.semantic,
         shaderSubstitutionId: runtime.rendererShader.substitutionId,
         sampler: "u_colorMapSampler",
         textureUnit: 0,
-        imagePath: runtime.rendererTexture.path,
+        imagePath: primaryTexture.path,
         sourceFormat,
-        decodedFormat: runtime.rendererTexture.gpuFormat,
+        decodedFormat: primaryTexture.gpuFormat,
         compressedSource,
-        recoveryBytes: runtime.rendererTexture.recoveryBytes,
+        recoveryBytes: residentTextures.reduce(
+            (total, texture) => total + Number(texture?.recoveryBytes ?? 0), 0),
+        drawCount: renderSurface?.drawList?.drawCount ?? 1,
+        textureCount: drawTextures.length,
         geometrySource:
             runtime.retailCensus?.worldInventory?.firstXModel?.renderSurface?.state === "ready"
                 ? "retail-xmodel"
@@ -184,9 +197,9 @@ function updateRendererMaterialBinding() {
     }
     if (!previousReady) {
         appendLog(
-            `[kisakcod-web] Material ${runtime.retailCensus.materialName} selected ` +
-            `${runtime.rendererTexture.path || "engine IWI"} (IWI format ${sourceFormat}) ` +
-            `for ${runtime.rendererShader.substitutionId} texture unit 0.`,
+            `[kisakcod-web] XModel material ${xmodelColorMap.materialName} selected ` +
+            `${drawTextures.length} resident color map(s) for ` +
+            `${runtime.rendererShader.substitutionId}.`,
         );
     }
 }
@@ -268,7 +281,12 @@ globalThis.addEventListener("kisakcod:retail-census", (event) => {
             (firstXModel?.renderSurface?.state === "ready"
                 ? `WebGL2 is now drawing retail surface ` +
                     `${firstXModel.renderSurface.surfaceIndex} ` +
-                    `(${firstXModel.renderSurface.vertexCount} vertices).`
+                    `(${firstXModel.renderSurface.vertexCount} vertices); ` +
+                    (firstXModel.renderSurface.colorMap?.state === "selected"
+                        ? `its typed color map is ` +
+                            `${firstXModel.renderSurface.colorMap.imagePath}.`
+                        : `its current texture is retained: ` +
+                            `${firstXModel.renderSurface.colorMap?.message ?? "no color map"}.`)
                 : `The bootstrap surface remains active: ` +
                     `${firstXModel?.renderSurface?.message ?? "no render candidate"}.`),
         );
@@ -367,6 +385,12 @@ globalThis.addEventListener("kisakcod:renderer-texture", (event) => {
     runtime.rendererTexture = {
         ...runtime.rendererTexture,
         ...event.detail,
+    };
+    const textureSlot = event.detail.textureSlot >>> 0;
+    runtime.rendererTextures[textureSlot] = {
+        ...(runtime.rendererTextures[textureSlot] ?? {}),
+        ...event.detail,
+        textureSlot,
     };
     switch (event.detail.state) {
     case "ready":

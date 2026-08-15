@@ -62,8 +62,11 @@ float UnpackHalf(std::uint16_t packed) noexcept
 }
 } // namespace
 
-WebEngineXModelSurfaceResult WebEngine_ConvertPackedXModelSurface(
+namespace
+{
+WebEngineXModelSurfaceResult ConvertPackedXModelSurface(
     const WebEnginePackedXSurfaceView &source,
+    const WebEngineXModelProjectionBounds *projectionBounds,
     WebEngineConvertedXModelSurface &destination)
 {
     if (source.packedVertices == nullptr || source.packedIndices == nullptr ||
@@ -152,20 +155,36 @@ WebEngineXModelSurfaceResult WebEngine_ConvertPackedXModelSurface(
         return WebEngineXModelSurfaceResult::AllocationFailed;
     }
 
+    const std::array<float, 3> &projectionMins =
+        projectionBounds ? projectionBounds->mins : mins;
+    const std::array<float, 3> &projectionMaxs =
+        projectionBounds ? projectionBounds->maxs : maxs;
+    for (std::size_t axis = 0u; axis < 3u; ++axis)
+    {
+        if (!std::isfinite(projectionMins[axis]) ||
+            !std::isfinite(projectionMaxs[axis]) ||
+            projectionMins[axis] > projectionMaxs[axis])
+        {
+            return WebEngineXModelSurfaceResult::DegenerateProjection;
+        }
+    }
+
     std::array<std::uint8_t, 3> axes{0u, 1u, 2u};
     for (std::size_t left = 0u; left + 1u < axes.size(); ++left)
     {
         for (std::size_t right = left + 1u; right < axes.size(); ++right)
         {
-            if (maxs[axes[right]] - mins[axes[right]] >
-                maxs[axes[left]] - mins[axes[left]])
+            if (projectionMaxs[axes[right]] - projectionMins[axes[right]] >
+                projectionMaxs[axes[left]] - projectionMins[axes[left]])
             {
                 std::swap(axes[left], axes[right]);
             }
         }
     }
-    const float horizontalExtent = maxs[axes[0]] - mins[axes[0]];
-    const float verticalExtent = maxs[axes[1]] - mins[axes[1]];
+    const float horizontalExtent =
+        projectionMaxs[axes[0]] - projectionMins[axes[0]];
+    const float verticalExtent =
+        projectionMaxs[axes[1]] - projectionMins[axes[1]];
     const float largestExtent = std::max(horizontalExtent, verticalExtent);
     if (!std::isfinite(largestExtent) || largestExtent <= 0.0f ||
         verticalExtent <= 0.0f)
@@ -176,10 +195,10 @@ WebEngineXModelSurfaceResult WebEngine_ConvertPackedXModelSurface(
     WebEngineWorldProjection2D projection{};
     projection.clipXFromWorld[axes[0]] = scale;
     projection.clipXFromWorld[3] =
-        -0.5f * (mins[axes[0]] + maxs[axes[0]]) * scale;
+        -0.5f * (projectionMins[axes[0]] + projectionMaxs[axes[0]]) * scale;
     projection.clipYFromWorld[axes[1]] = scale;
     projection.clipYFromWorld[3] =
-        -0.5f * (mins[axes[1]] + maxs[axes[1]]) * scale;
+        -0.5f * (projectionMins[axes[1]] + projectionMaxs[axes[1]]) * scale;
 
     WebEngineConvertedWorldSurface converted;
     const WebEngineWorldSurfaceView worldView{
@@ -207,6 +226,18 @@ WebEngineXModelSurfaceResult WebEngine_ConvertPackedXModelSurface(
             : WebEngineXModelSurfaceResult::ConversionFailed;
     }
 
+    const std::uint8_t depthAxis = axes[2];
+    const float depthCenter =
+        0.5f * (projectionMins[depthAxis] + projectionMaxs[depthAxis]);
+    for (std::size_t index = 0u; index < decodedVertices.size(); ++index)
+    {
+        // Keep the third model-space axis for depth testing. It uses the same
+        // model-wide scale as X/Y, so the orthographic preview preserves the
+        // mesh's spatial proportions instead of flattening every triangle.
+        converted.vertices[index].position[2] =
+            (decodedVertices[index].xyz[depthAxis] - depthCenter) * scale;
+    }
+
     WebEngineConvertedXModelSurface replacement;
     replacement.rendererSurface = std::move(converted);
     replacement.mins = mins;
@@ -216,6 +247,22 @@ WebEngineXModelSurfaceResult WebEngine_ConvertPackedXModelSurface(
     replacement.verticalAxis = axes[1];
     destination = std::move(replacement);
     return WebEngineXModelSurfaceResult::Success;
+}
+} // namespace
+
+WebEngineXModelSurfaceResult WebEngine_ConvertPackedXModelSurface(
+    const WebEnginePackedXSurfaceView &source,
+    WebEngineConvertedXModelSurface &destination)
+{
+    return ConvertPackedXModelSurface(source, nullptr, destination);
+}
+
+WebEngineXModelSurfaceResult WebEngine_ConvertPackedXModelSurfaceWithBounds(
+    const WebEnginePackedXSurfaceView &source,
+    const WebEngineXModelProjectionBounds &projectionBounds,
+    WebEngineConvertedXModelSurface &destination)
+{
+    return ConvertPackedXModelSurface(source, &projectionBounds, destination);
 }
 
 const char *WebEngine_XModelSurfaceResultString(

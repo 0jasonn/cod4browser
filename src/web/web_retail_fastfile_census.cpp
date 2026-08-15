@@ -50,6 +50,8 @@ constexpr std::uint32_t XSURFACE_BYTES = 56u;
 constexpr std::uint32_t GFX_PACKED_VERTEX_BYTES = 32u;
 constexpr std::uint32_t MAX_RETAINED_RENDER_VERTICES = 4096u;
 constexpr std::uint32_t MAX_RETAINED_RENDER_TRIANGLES = 4096u;
+constexpr std::uint32_t MAX_RETAINED_LOD_VERTICES = 16384u;
+constexpr std::uint32_t MAX_RETAINED_LOD_TRIANGLES = 16384u;
 constexpr std::uint32_t RIGID_VERT_LIST_BYTES = 12u;
 constexpr std::uint32_t SURFACE_COLLISION_TREE_BYTES = 40u;
 constexpr std::uint32_t SURFACE_COLLISION_NODE_BYTES = 16u;
@@ -410,6 +412,8 @@ struct RetailFastfileCensusJob::Impl
     ZoneSpan worldTopLevelAliasSlot{};
     ZoneSpan worldXModelAliasSlot{};
     std::uint32_t worldSurfaceIndex = 0u;
+    std::uint32_t retainedLodVertices = 0u;
+    std::uint32_t retainedLodTriangles = 0u;
     std::uint32_t worldRigidVertListIndex = 0u;
     std::uint32_t worldMaterialIndex = 0u;
     std::uint32_t worldTextureIndex = 0u;
@@ -583,6 +587,8 @@ struct RetailFastfileCensusJob::Impl
         result.worldFirstXModel.assetIndex = assetIndex;
         result.worldFirstXModel.headerBlock0Offset = span.offset;
         worldSurfaceIndex = 0u;
+        retainedLodVertices = 0u;
+        retainedLodTriangles = 0u;
         worldRigidVertListIndex = 0u;
         worldMaterialIndex = 0u;
         worldTextureIndex = 0u;
@@ -1834,16 +1840,27 @@ struct RetailFastfileCensusJob::Impl
                     if (visit <= 0) return RetailCensusError::None;
                     surface.verticesHash = Fnv1a32(
                         std::span<const std::uint8_t>(inflated.data() + cursor, bytes));
-                    if (worldSurfaceIndex == 0u &&
+                    const RetailXModelLod &firstLod =
+                        result.worldFirstXModel.lods[0];
+                    const bool inFirstLod =
+                        worldSurfaceIndex >= firstLod.surfaceIndex &&
+                        worldSurfaceIndex - firstLod.surfaceIndex < firstLod.surfaceCount;
+                    if (inFirstLod &&
                         mode == RetailCensusMode::WorldXModelDependencies &&
                         surface.vertCount <= MAX_RETAINED_RENDER_VERTICES &&
-                        surface.triCount <= MAX_RETAINED_RENDER_TRIANGLES)
+                        surface.triCount <= MAX_RETAINED_RENDER_TRIANGLES &&
+                        retainedLodVertices <=
+                            MAX_RETAINED_LOD_VERTICES - surface.vertCount &&
+                        retainedLodTriangles <=
+                            MAX_RETAINED_LOD_TRIANGLES - surface.triCount)
                     {
                         try
                         {
                             surface.retainedPackedVertices.assign(
                                 inflated.data() + cursor,
                                 inflated.data() + cursor + bytes);
+                            retainedLodVertices += surface.vertCount;
+                            retainedLodTriangles += surface.triCount;
                         }
                         catch (...) { return RetailCensusError::AllocationFailed; }
                     }
@@ -2085,8 +2102,7 @@ struct RetailFastfileCensusJob::Impl
                     if (visit <= 0) return RetailCensusError::None;
                     surface.indicesHash = Fnv1a32(
                         std::span<const std::uint8_t>(inflated.data() + cursor, bytes));
-                    if (worldSurfaceIndex == 0u &&
-                        !surface.retainedPackedVertices.empty())
+                    if (!surface.retainedPackedVertices.empty())
                     {
                         try
                         {

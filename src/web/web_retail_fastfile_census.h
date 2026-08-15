@@ -335,9 +335,9 @@ struct RetailXSurface
     std::uint32_t indicesBlock8Offset = 0u;
     std::uint32_t verticesHash = 2166136261u;
     std::uint32_t indicesHash = 2166136261u;
-    // M27 retains only the deliberately bounded first surface. These remain
-    // serialized bytes until the engine-side packed-vertex converter validates
-    // the complete model and its selected material dependency.
+    // M29 retains only bounded surfaces in the first declared LOD. These remain
+    // serialized bytes until the engine-side draw-list converter validates the
+    // complete model and each selected material dependency.
     std::vector<std::uint8_t> retainedPackedVertices;
     std::vector<std::uint8_t> retainedPackedIndices;
     std::vector<RetailXRigidVertList> rigidVertLists;

@@ -1,5 +1,7 @@
 #include <web/web_retail_fastfile_census.h>
 #include <web/web_engine_xmodel_surface.h>
+#include <web/web_engine_xmodel_material.h>
+#include <web/web_engine_xmodel_draw_list.h>
 #include <web/web_shader_compatibility.h>
 
 #include <zlib.h>
@@ -402,7 +404,7 @@ std::vector<std::uint8_t> BuildWorldXModelPrefixInflated(
     SetU32(model, 32u, 0xffffffffu);
     SetU32(model, 36u, 0xffffffffu);
     SetF32(model, 40u, 800.0f);
-    PutU16At(model, 44u, surfaceCount);
+    PutU16At(model, 44u, surfaceCount == 6u ? 2u : surfaceCount);
     SetU32(model, 48u, 0x80000000u);
     if (withCollisionSurface)
     {
@@ -540,9 +542,20 @@ std::vector<std::uint8_t> BuildWorldXModelDependenciesInflated(
         if (includeImage)
         {
             std::vector<std::uint8_t> image(36u, 0u);
+            SetU32(image, 0u, 3u);
+            SetU32(image, 4u, 0xfffffffeu);
+            PutU16At(image, 24u, 4u);
+            PutU16At(image, 26u, 4u);
+            PutU16At(image, 28u, 1u);
             SetU32(image, 32u, 0xffffffffu);
             bytes.insert(bytes.end(), image.begin(), image.end());
-            AppendString(bytes, ",$identitynormalmap");
+            AppendString(bytes, "synthetic_xmodel_color");
+            PutU16(bytes, 0u);
+            PutU16(bytes, 4u);
+            PutU16(bytes, 4u);
+            PutU16(bytes, 1u);
+            PutU32(bytes, 0x31545844u);
+            PutU32(bytes, 0u);
         }
         if (includeConstant)
         {
@@ -829,13 +842,24 @@ void TestWorldXModelDependenciesBoundary()
     Require(model.materials.size() == 2u &&
         model.materials[0].name == "web/material_a" &&
         model.materials[0].images.size() == 1u &&
-        model.materials[0].images[0].name == ",$identitynormalmap" &&
+        model.materials[0].images[0].name == "synthetic_xmodel_color" &&
+        model.materials[0].images[0].loadDefTraversed &&
         model.materials[0].images[0].published &&
         model.materials[1].name == "web/material_b" &&
         model.materials[1].images.empty() &&
         model.materialIdentities ==
             std::vector<std::uint32_t>{4u, 5u, 4u, 5u, 4u, 5u},
         "M26 resolves two inline materials, their image, and four aliases");
+    WebEngineXModelMaterialImageBinding colorMap;
+    Require(WebEngine_SelectXModelColorMap(
+            model, model.materialIdentities.front(), colorMap) ==
+            WebEngineXModelMaterialResult::Success &&
+        colorMap.materialName == "web/material_a" &&
+        colorMap.imageName == "synthetic_xmodel_color" &&
+        colorMap.imagePath == "images/synthetic_xmodel_color.iwi" &&
+        colorMap.materialIdentity == 4u && colorMap.imageIdentity == 3u &&
+        colorMap.semantic == WEB_ENGINE_TEXTURE_SEMANTIC_COLOR_MAP,
+        "M28 follows the first surface material to one typed external color map");
     Require(model.collisionSurfaces.size() == 1u &&
         model.collisionSurfaces[0].traversed &&
         model.collisionTriangleCount == 1u &&
@@ -844,12 +868,15 @@ void TestWorldXModelDependenciesBoundary()
         model.boneInfoHash != 2166136261u,
         "M26 retains bounded collision and bone-info traversal evidence");
     Require(model.surfaces[0].renderPayloadRetained &&
-        model.surfaces[0].retainedPackedVertices.size() == 3u * 32u &&
-        model.surfaces[0].retainedPackedIndices.size() == 3u * sizeof(std::uint16_t) &&
-        !model.surfaces[1].renderPayloadRetained &&
-        model.surfaces[1].retainedPackedVertices.empty() &&
-        model.surfaces[1].retainedPackedIndices.empty(),
-        "M27 retains only the bounded first packed XSurface candidate");
+        model.surfaces[1].renderPayloadRetained &&
+        std::all_of(
+            model.surfaces.begin() + 2u, model.surfaces.end(),
+            [](const RetailXSurface &surface) {
+                return !surface.renderPayloadRetained &&
+                    surface.retainedPackedVertices.empty() &&
+                    surface.retainedPackedIndices.empty();
+            }),
+        "M29 retains only bounded packed XSurfaces in the declared first LOD");
 
     auto requireFailure = [](std::vector<std::uint8_t> inflated,
                              RetailCensusError expected,
@@ -1204,12 +1231,48 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
         converted.rendererSurface.indices.size() == 756u &&
         converted.materialIdentity == 16u,
         "owned M27 profile converts the first retail surface through the renderer seam");
+    WebEngineXModelMaterialImageBinding colorMap;
+    Require(WebEngine_SelectXModelColorMap(
+            model, converted.materialIdentity, colorMap) ==
+            WebEngineXModelMaterialResult::Success &&
+        colorMap.materialIdentity == converted.materialIdentity &&
+        colorMap.semantic == WEB_ENGINE_TEXTURE_SEMANTIC_COLOR_MAP,
+        "owned M28 profile resolves the rendered material's typed external color map");
     std::cout << "owned M27 render surface: vertices="
               << converted.rendererSurface.vertices.size()
               << " indices=" << converted.rendererSurface.indices.size()
               << " material=" << converted.materialIdentity
               << " axes=" << static_cast<unsigned>(converted.horizontalAxis)
               << ',' << static_cast<unsigned>(converted.verticalAxis) << '\n';
+    std::cout << "owned M28 color map: material=" << colorMap.materialName
+              << " image=" << colorMap.imageName
+              << " path=" << colorMap.imagePath
+              << " identities=" << colorMap.materialIdentity
+              << ',' << colorMap.imageIdentity
+              << " sampler=" << static_cast<unsigned>(colorMap.samplerState)
+              << " semantic=" << static_cast<unsigned>(colorMap.semantic) << '\n';
+    WebEngineXModelDrawList drawList;
+    Require(WebEngine_BuildXModelDrawList(model, drawList) ==
+            WebEngineXModelDrawListResult::Success,
+        "owned M29 profile builds the bounded first-LOD draw list");
+    std::cout << "owned M29 draw list: lod-surfaces="
+              << drawList.firstLodSurfaceCount
+              << " retained-draws=" << drawList.renderer.draws.size()
+              << " textures=" << drawList.textures.size()
+              << " vertices=" << drawList.renderer.vertices.size()
+              << " indices=" << drawList.renderer.indices.size()
+              << " axes=" << static_cast<unsigned>(drawList.horizontalAxis)
+              << ',' << static_cast<unsigned>(drawList.verticalAxis) << '\n';
+    for (std::size_t textureSlot = 0u;
+         textureSlot < drawList.textures.size(); ++textureSlot)
+    {
+        const auto &binding = drawList.textures[textureSlot];
+        std::cout << "  texture[" << textureSlot << "] material="
+                  << binding.materialName << " image=" << binding.imageName
+                  << " path=" << binding.imagePath
+                  << " sampler=" << static_cast<unsigned>(binding.samplerState)
+                  << '\n';
+    }
     std::cout << "owned xmodel: index=" << model.assetIndex
               << " name=" << model.name
               << " surfaces=" << model.surfaces.size()

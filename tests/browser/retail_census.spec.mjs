@@ -37,6 +37,25 @@ const M20_PRIMARY_IWD = createSyntheticIwd([
     },
 ]);
 
+const M28_IMAGE_IWD = createSyntheticIwd([{
+    path: "images/synthetic_xmodel_color.iwi",
+    contents: M19_DXT1_IWI,
+    method: "deflate",
+}]);
+
+const M29_IMAGE_IWD = createSyntheticIwd([
+    {
+        path: "images/synthetic_xmodel_color.iwi",
+        contents: M19_DXT1_IWI,
+        method: "deflate",
+    },
+    {
+        path: "images/synthetic_xmodel_color_second.iwi",
+        contents: M19_DXT1_IWI,
+        method: "deflate",
+    },
+]);
+
 async function importInstall(page, testInfo, name, options = {})
 {
     const directory = await createInstallDirectory(testInfo, name, options);
@@ -220,6 +239,14 @@ test("publishes one retail material and binds its resolved image", async ({ page
     await observeRetailShaderRenderer(page);
     await importInstall(page, testInfo, "retail-census-success", {
         primaryIwd: M20_PRIMARY_IWD,
+        overrides: new Map([
+            ["main/iw_03.iwd", M28_IMAGE_IWD],
+            ["zone/english/killhouse.ff",
+                createSyntheticWorldInventoryFastfile({
+                    externalColorMap: true,
+                    colorMapName: "synthetic_xmodel_color",
+                })],
+        ]),
     });
     await expect.poll(
         () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
@@ -242,6 +269,7 @@ test("publishes one retail material and binds its resolved image", async ({ page
         census: structuredClone(globalThis.__KISAKCOD_WEB__.retailCensus),
         events: structuredClone(globalThis.__retailCensusEvents),
         archiveEvents: structuredClone(globalThis.__retailCensusArchiveEvents),
+        archive: structuredClone(globalThis.__KISAKCOD_WEB__.archive),
         rendererShader: structuredClone(globalThis.__KISAKCOD_WEB__.rendererShader),
         engineAsset: structuredClone(globalThis.__KISAKCOD_WEB__.engineAsset),
         rendererTexture: structuredClone(globalThis.__KISAKCOD_WEB__.rendererTexture),
@@ -375,7 +403,7 @@ test("publishes one retail material and binds its resolved image", async ({ page
             nextBodyIndex: 2,
             nextBodyType: 3,
             nextBodyReference: 0xffff_ffff,
-            block0HighWaterAtBoundary: 336,
+            block0HighWaterAtBoundary: 352,
             block4CursorAtBoundary: 928,
             stoppedBeforeAssetBody: false,
             assetBodiesEntered: 2,
@@ -456,7 +484,7 @@ test("publishes one retail material and binds its resolved image", async ({ page
                     collisionTriangles: 1,
                     collisionPayloadBytes: 92,
                 },
-                boundaryInflatedOffset: 2328,
+                boundaryInflatedOffset: 2347,
                 headerTraversed: true,
                 skeletonPrefixTraversed: true,
                 surfaceHeadersTraversed: true,
@@ -485,6 +513,33 @@ test("publishes one retail material and binds its resolved image", async ({ page
                     maxs: [2, 1, 0],
                     geometrySource: "retail-xmodel",
                     fallbackPreserved: false,
+                    drawList: {
+                        state: "ready",
+                        firstLodSurfaceIndex: 0,
+                        firstLodSurfaceCount: 2,
+                        drawCount: 2,
+                        textureCount: 1,
+                        totalVertices: 7,
+                        totalIndices: 9,
+                        draws: [
+                            { surfaceIndex: 0, textureSlot: 0, retained: true },
+                            { surfaceIndex: 1, textureSlot: 0, retained: true },
+                        ],
+                        textures: [{
+                            textureSlot: 0,
+                            imagePath: "images/synthetic_xmodel_color.iwi",
+                        }],
+                    },
+                    colorMap: {
+                        state: "selected",
+                        materialName: "web/material_a",
+                        imageName: "synthetic_xmodel_color",
+                        imagePath: "images/synthetic_xmodel_color.iwi",
+                        materialIdentity: 4,
+                        imageIdentity: 3,
+                        semantic: 2,
+                        selectionSource: "typed-material-image-identity",
+                    },
                 },
                 boneNames: [{
                     index: 0,
@@ -512,8 +567,13 @@ test("publishes one retail material and binds its resolved image", async ({ page
                         published: true,
                         images: [{
                             textureIndex: 0,
-                            name: ",$identitynormalmap",
+                            name: "synthetic_xmodel_color",
+                            mapType: 3,
+                            dimensions: [4, 4, 1],
+                            format: 0x3154_5844,
+                            resourceBytes: 0,
                             identity: 3,
+                            loadDefTraversed: true,
                             published: true,
                         }],
                     },
@@ -581,18 +641,24 @@ test("publishes one retail material and binds its resolved image", async ({ page
         uniforms: ["u_viewProjectionMatrix", "u_worldMatrix", "u_colorMapSampler"],
         textureUnit: 0,
     });
+    expect(result.archive).toMatchObject({
+        state: "ready",
+        path: "main/iw_03.iwd",
+        targetMember: "images/synthetic_xmodel_color.iwi",
+        targetMemberAvailable: true,
+    });
     expect(result.engineAsset).toMatchObject({
         state: "ready",
-        path: "images/synthetic_engine_asset.iwi",
+        path: "images/synthetic_xmodel_color.iwi",
         selectionSource: "retail-material",
-        materialName: "web_cursor",
-        imageName: "synthetic_engine_asset",
+        materialName: "web/material_a",
+        imageName: "synthetic_xmodel_color",
         materialIdentity: 4,
         imageIdentity: 3,
     });
     expect(result.rendererTexture).toMatchObject({
         state: "ready",
-        path: "images/synthetic_engine_asset.iwi",
+        path: "images/synthetic_xmodel_color.iwi",
         sourceFormat: IWI_FORMAT_DXT1,
         width: 4,
         height: 4,
@@ -603,15 +669,16 @@ test("publishes one retail material and binds its resolved image", async ({ page
     });
     expect(result.rendererMaterial).toMatchObject({
         state: "ready",
-        materialSource: "retail-fastfile",
-        materialName: "web_cursor",
+        materialSource: "retail-xmodel",
+        materialName: "web/material_a",
         materialIdentity: 4,
-        imageName: "synthetic_engine_asset",
+        imageName: "synthetic_xmodel_color",
         imageIdentity: 3,
+        imageSemantic: 2,
         shaderSubstitutionId: "webgl2.vertcol_simple2d.v1",
         sampler: "u_colorMapSampler",
         textureUnit: 0,
-        imagePath: "images/synthetic_engine_asset.iwi",
+        imagePath: "images/synthetic_xmodel_color.iwi",
         sourceFormat: IWI_FORMAT_DXT1,
         decodedFormat: "rgba8",
         compressedSource: true,
@@ -620,9 +687,11 @@ test("publishes one retail material and binds its resolved image", async ({ page
     });
     expect(result.rendererSurface).toMatchObject({
         state: "ready",
-        vertexCount: 4,
-        indexCount: 6,
+        vertexCount: 7,
+        indexCount: 9,
         drawIndexCount: 6,
+        drawCount: 2,
+        textureCount: 1,
         topology: "triangle-list",
         textureBinding: "engine-image",
         resident: true,
@@ -633,13 +702,15 @@ test("publishes one retail material and binds its resolved image", async ({ page
     expect(vertexUploads.length).toBeGreaterThanOrEqual(2);
     expect(indexUploads.length).toBeGreaterThanOrEqual(2);
     const retailVertices = new Float32Array(Uint8Array.from(vertexUploads.at(-1).bytes).buffer);
-    expect([...retailVertices]).toHaveLength(4 * 7);
+    expect([...retailVertices]).toHaveLength(7 * 8);
     expect(retailVertices[0]).toBeCloseTo(-0.82, 5);
     expect(retailVertices[1]).toBeCloseTo(-0.41, 5);
-    expect(retailVertices[7]).toBeCloseTo(-0.82, 5);
-    expect(retailVertices[8]).toBeCloseTo(0.41, 5);
+    expect(retailVertices[2]).toBeCloseTo(0, 5);
+    expect(retailVertices[8]).toBeCloseTo(-0.82, 5);
+    expect(retailVertices[9]).toBeCloseTo(0.41, 5);
+    expect(retailVertices[10]).toBeCloseTo(0, 5);
     expect([...new Uint16Array(Uint8Array.from(indexUploads.at(-1).bytes).buffer)])
-        .toEqual([0, 1, 2, 2, 3, 0]);
+        .toEqual([0, 1, 2, 2, 3, 0, 4, 5, 6]);
     expect(["ready", "lost"]).toContain(result.rendererShader.state);
     expect(result.rendererShader.resident).toBe(result.rendererShader.state === "ready");
     expect(result.rendererShader.submissionGeneration).toBeGreaterThan(0);
@@ -658,10 +729,16 @@ test("publishes one retail material and binds its resolved image", async ({ page
     ]));
     const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
     expect(result.shaderMatrices.length).toBeGreaterThanOrEqual(2);
-    expect(result.shaderMatrices.slice(0, 2)).toEqual([
-        { transpose: false, values: identity },
-        { transpose: false, values: identity },
-    ]);
+    const [viewProjection, world] = result.shaderMatrices.slice(0, 2);
+    expect(viewProjection.transpose).toBe(false);
+    expect(viewProjection.values[0]).toBeCloseTo(1, 5);
+    expect(viewProjection.values[5]).toBeGreaterThan(0);
+    expect(viewProjection.values[5]).toBeLessThan(1);
+    expect(viewProjection.values.filter((_, index) => ![0, 5, 10, 15].includes(index)))
+        .toEqual(new Array(12).fill(0));
+    expect(viewProjection.values[10]).toBe(1);
+    expect(viewProjection.values[15]).toBe(1);
+    expect(world).toEqual({ transpose: false, values: identity });
     expect(result.rendererShaderEvents.some(
         (event) => event.state === "ready" && !event.firstDrawCompleted,
     )).toBe(true);
@@ -692,7 +769,7 @@ test("publishes one retail material and binds its resolved image", async ({ page
     ]));
     expect(result.archiveEvents.every(({ censusState }) => censusState === "ready")).toBe(true);
     expect(result.log).toContain(
-        "material web_cursor selected images/synthetic_engine_asset.iwi",
+        "XModel material web/material_a selected 1 resident color map(s)",
     );
 
     const firstGeneration = result.census.generation;
@@ -746,6 +823,214 @@ test("publishes one retail material and binds its resolved image", async ({ page
     );
     expect(restarted.generation).toBe(firstGeneration + 3);
     expect(restarted.assetCount).toBe(5);
+});
+
+test("loads independent color maps for every supported first-LOD draw", async ({ page }, testInfo) => {
+    await importInstall(page, testInfo, "retail-xmodel-draw-list", {
+        primaryIwd: M20_PRIMARY_IWD,
+        overrides: new Map([
+            ["main/iw_03.iwd", M29_IMAGE_IWD],
+            ["zone/english/killhouse.ff",
+                createSyntheticWorldInventoryFastfile({
+                    externalColorMap: true,
+                    colorMapName: "synthetic_xmodel_color",
+                    secondExternalColorMap: true,
+                    secondColorMapName: "synthetic_xmodel_color_second",
+                })],
+        ]),
+    });
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.rendererMaterial?.state),
+        { timeout: 30_000 },
+    ).toBe("ready");
+    const result = await page.evaluate(() => ({
+        drawList: structuredClone(globalThis.__KISAKCOD_WEB__.retailCensus
+            .worldInventory.firstXModel.renderSurface.drawList),
+        surface: structuredClone(globalThis.__KISAKCOD_WEB__.rendererSurface),
+        textures: structuredClone(globalThis.__KISAKCOD_WEB__.rendererTextures),
+        material: structuredClone(globalThis.__KISAKCOD_WEB__.rendererMaterial),
+        engineAsset: structuredClone(globalThis.__KISAKCOD_WEB__.engineAsset),
+        archive: structuredClone(globalThis.__KISAKCOD_WEB__.archive),
+    }));
+    expect(result.drawList).toMatchObject({
+        state: "ready",
+        firstLodSurfaceCount: 2,
+        drawCount: 2,
+        textureCount: 2,
+        totalVertices: 7,
+        totalIndices: 9,
+        draws: [
+            { surfaceIndex: 0, textureSlot: 0, retained: true },
+            { surfaceIndex: 1, textureSlot: 1, retained: true },
+        ],
+    });
+    expect(result.surface).toMatchObject({
+        state: "ready",
+        drawCount: 2,
+        textureCount: 2,
+        vertexCount: 7,
+        indexCount: 9,
+    });
+    expect(result.textures).toMatchObject([
+        {
+            state: "ready",
+            textureSlot: 0,
+            path: "images/synthetic_xmodel_color.iwi",
+            resident: true,
+        },
+        {
+            state: "ready",
+            textureSlot: 1,
+            path: "images/synthetic_xmodel_color_second.iwi",
+            resident: true,
+        },
+    ]);
+    expect(result.material).toMatchObject({
+        state: "ready",
+        drawCount: 2,
+        textureCount: 2,
+        recoveryBytes: 128,
+    });
+    expect(result.engineAsset).toMatchObject({ state: "ready", textureSlot: 1 });
+    expect(result.archive).toMatchObject({
+        state: "ready",
+        path: "main/iw_03.iwd",
+        targetMember: "images/synthetic_xmodel_color_second.iwi",
+        targetMemberAvailable: true,
+    });
+});
+
+test("recreates every first-LOD texture slot after context loss", async ({ page }, testInfo) => {
+    await page.addInitScript(() => {
+        globalThis.__m29TextureUploads = 0;
+        const original = WebGL2RenderingContext.prototype.texImage2D;
+        Object.defineProperty(WebGL2RenderingContext.prototype, "texImage2D", {
+            configurable: true,
+            writable: true,
+            value(...args) {
+                if (this.canvas?.id === "game-canvas") globalThis.__m29TextureUploads += 1;
+                return original.apply(this, args);
+            },
+        });
+    });
+    await importInstall(page, testInfo, "retail-xmodel-draw-list-recovery", {
+        primaryIwd: M20_PRIMARY_IWD,
+        overrides: new Map([
+            ["main/iw_03.iwd", M29_IMAGE_IWD],
+            ["zone/english/killhouse.ff",
+                createSyntheticWorldInventoryFastfile({
+                    externalColorMap: true,
+                    colorMapName: "synthetic_xmodel_color",
+                    secondExternalColorMap: true,
+                    secondColorMapName: "synthetic_xmodel_color_second",
+                })],
+        ]),
+    });
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.rendererMaterial?.state),
+        { timeout: 30_000 },
+    ).toBe("ready");
+    const before = await page.evaluate(() => globalThis.__m29TextureUploads);
+    await page.evaluate(() => {
+        const extension = document.querySelector("#game-canvas")
+            .getContext("webgl2").getExtension("WEBGL_lose_context");
+        globalThis.__m29LossExtension = extension;
+        extension.loseContext();
+    });
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.rendererShader?.state),
+    ).toBe("lost");
+    await page.evaluate(() => globalThis.__m29LossExtension.restoreContext());
+    await expect.poll(
+        () => page.evaluate(() => ({
+            shader: globalThis.__KISAKCOD_WEB__?.rendererShader?.state,
+            surface: globalThis.__KISAKCOD_WEB__?.rendererSurface?.state,
+            recoveryCount: globalThis.__KISAKCOD_WEB__?.rendererSurface?.recoveryCount,
+        })),
+        { timeout: 15_000 },
+    ).toMatchObject({ shader: "ready", surface: "ready", recoveryCount: 1 });
+    const after = await page.evaluate(() => globalThis.__m29TextureUploads);
+    expect(after - before).toBeGreaterThanOrEqual(2);
+});
+
+test("keeps the current texture when the selected XModel color map is built in", async ({ page }, testInfo) => {
+    await importInstall(page, testInfo, "retail-xmodel-builtin-color", {
+        primaryIwd: M20_PRIMARY_IWD,
+        overrides: new Map([["zone/english/killhouse.ff",
+            createSyntheticWorldInventoryFastfile({ externalColorMap: false })]]),
+    });
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
+    ).toBe("ready");
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.archive?.state),
+    ).toBe("ready");
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.engineAsset?.state),
+    ).toBe("unavailable");
+
+    const result = await page.evaluate(() => ({
+        colorMap: structuredClone(globalThis.__KISAKCOD_WEB__.retailCensus
+            .worldInventory.firstXModel.renderSurface.colorMap),
+        engineAsset: structuredClone(globalThis.__KISAKCOD_WEB__.engineAsset),
+        rendererSurface: structuredClone(globalThis.__KISAKCOD_WEB__.rendererSurface),
+    }));
+    expect(result.colorMap).toMatchObject({
+        state: "unsupported",
+        materialName: "",
+        imageName: "",
+        imagePath: "",
+    });
+    expect(result.colorMap.message).toMatch(/built-in image/i);
+    expect(result.engineAsset.message).toMatch(/no supported external color-map IWI/i);
+    expect(result.rendererSurface).toMatchObject({
+        state: "ready",
+        resident: true,
+        textureBinding: "engine-image",
+    });
+});
+
+test("keeps the current texture when the typed XModel IWI is absent", async ({ page }, testInfo) => {
+    const missingPath = "images/synthetic_missing_color.iwi";
+    await importInstall(page, testInfo, "retail-xmodel-missing-iwi", {
+        primaryIwd: M20_PRIMARY_IWD,
+        overrides: new Map([["zone/english/killhouse.ff",
+            createSyntheticWorldInventoryFastfile({
+                externalColorMap: true,
+                colorMapName: "synthetic_missing_color",
+            })]]),
+    });
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.archive?.state),
+    ).toBe("ready");
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.engineAsset?.state),
+    ).toBe("unavailable");
+
+    const result = await page.evaluate(() => ({
+        colorMap: structuredClone(globalThis.__KISAKCOD_WEB__.retailCensus
+            .worldInventory.firstXModel.renderSurface.colorMap),
+        archive: structuredClone(globalThis.__KISAKCOD_WEB__.archive),
+        engineAsset: structuredClone(globalThis.__KISAKCOD_WEB__.engineAsset),
+        rendererSurface: structuredClone(globalThis.__KISAKCOD_WEB__.rendererSurface),
+    }));
+    expect(result.colorMap).toMatchObject({
+        state: "selected",
+        imagePath: missingPath,
+        semantic: 2,
+    });
+    expect(result.archive).toMatchObject({
+        state: "ready",
+        path: "main/iw_00.iwd",
+        targetMember: missingPath,
+        targetMemberAvailable: false,
+    });
+    expect(result.engineAsset.message).toMatch(/material-selected IWI member is not available/i);
+    expect(result.rendererSurface).toMatchObject({
+        state: "ready",
+        resident: true,
+        textureBinding: "engine-image",
+    });
 });
 
 test("a truncated retail prefix fails closed and does not start the archive", async ({ page }, testInfo) => {
@@ -865,7 +1150,9 @@ test("a WebGL2 binding failure keeps the bootstrap renderer active", async ({ pa
 
 test("rebuilds the selected shader program after WebGL2 context loss", async ({ page }, testInfo) => {
     await observeRetailShaderRenderer(page);
-    await importInstall(page, testInfo, "retail-shader-context-recovery");
+    await importInstall(page, testInfo, "retail-shader-context-recovery", {
+        primaryIwd: M20_PRIMARY_IWD,
+    });
     await expect.poll(
         () => page.evaluate(
             () => globalThis.__KISAKCOD_WEB__?.rendererShader?.firstDrawCompleted,

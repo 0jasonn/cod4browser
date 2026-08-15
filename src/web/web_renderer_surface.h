@@ -4,24 +4,33 @@
 #include <cstdint>
 #include <type_traits>
 
-// This first surface seam is intentionally bounded to one modest indexed
-// draw. The fixed layout and 16-bit indices are backend-neutral; graphics API
-// handles and vertex declaration objects remain private to each renderer.
+// The original single-surface seam remains available for bootstrap callers.
+// M29 adds explicit aggregate limits for a modest first-LOD draw list. The
+// fixed layout and 16-bit indices remain backend-neutral; graphics handles and
+// vertex declaration objects stay private to the renderer.
 constexpr std::uint32_t WEB_RENDERER_MAX_SURFACE_VERTICES = 4096u;
 constexpr std::uint32_t WEB_RENDERER_MAX_SURFACE_INDICES = 12288u;
 constexpr std::size_t WEB_RENDERER_MAX_RETAINED_SURFACE_BYTES =
-    static_cast<std::size_t>(WEB_RENDERER_MAX_SURFACE_VERTICES) * 7u * sizeof(float) +
+    static_cast<std::size_t>(WEB_RENDERER_MAX_SURFACE_VERTICES) * 8u * sizeof(float) +
     static_cast<std::size_t>(WEB_RENDERER_MAX_SURFACE_INDICES) * sizeof(std::uint16_t);
+
+constexpr std::uint32_t WEB_RENDERER_MAX_DRAW_LIST_DRAWS = 16u;
+constexpr std::uint32_t WEB_RENDERER_MAX_DRAW_LIST_TEXTURES = 8u;
+constexpr std::uint32_t WEB_RENDERER_MAX_DRAW_LIST_VERTICES = 16384u;
+constexpr std::uint32_t WEB_RENDERER_MAX_DRAW_LIST_INDICES = 49152u;
+constexpr std::size_t WEB_RENDERER_MAX_RETAINED_DRAW_LIST_BYTES =
+    static_cast<std::size_t>(WEB_RENDERER_MAX_DRAW_LIST_VERTICES) * 8u * sizeof(float) +
+    static_cast<std::size_t>(WEB_RENDERER_MAX_DRAW_LIST_INDICES) * sizeof(std::uint16_t);
 
 struct WebRendererSurfaceVertex
 {
-    float position[2];
+    float position[3];
     float color[3];
     float textureCoordinate[2];
 };
 
 static_assert(std::is_standard_layout_v<WebRendererSurfaceVertex>);
-static_assert(sizeof(WebRendererSurfaceVertex) == 7u * sizeof(float));
+static_assert(sizeof(WebRendererSurfaceVertex) == 8u * sizeof(float));
 
 enum class WebRendererPrimitiveTopology : std::uint8_t
 {
@@ -50,6 +59,20 @@ struct WebRendererDrawDesc
     WebRendererTextureBinding textureBinding;
 };
 
+struct WebRendererDrawListDrawDesc
+{
+    WebRendererDrawDesc draw;
+    std::uint32_t textureSlot;
+};
+
+struct WebRendererDrawListDesc
+{
+    WebRendererSurfaceDesc surface;
+    const WebRendererDrawListDrawDesc *draws;
+    std::uint32_t drawCount;
+    std::uint32_t textureCount;
+};
+
 enum class WebRendererSurfaceResult : std::uint8_t
 {
     Success = 0,
@@ -69,5 +92,8 @@ enum class WebRendererSurfaceResult : std::uint8_t
 WebRendererSurfaceResult WebRenderer_ValidateSurface(
     const WebRendererSurfaceDesc &surface,
     const WebRendererDrawDesc &draw) noexcept;
+
+WebRendererSurfaceResult WebRenderer_ValidateDrawList(
+    const WebRendererDrawListDesc &drawList) noexcept;
 
 const char *WebRenderer_SurfaceResultString(WebRendererSurfaceResult result) noexcept;

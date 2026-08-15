@@ -232,6 +232,8 @@ void TestGoldenNonzeroRanges()
             "affine clip X includes xyz and translation");
         RequireNear(converted.vertices[index].position[1], expectedPositions[index][1],
             "affine clip Y includes xyz and translation");
+        RequireNear(converted.vertices[index].position[2], 0.0f,
+            "generic world-surface conversion keeps compatibility depth at zero");
     }
 
     RequireNear(converted.vertices[0].color[0], 0x11u / 255.0f,

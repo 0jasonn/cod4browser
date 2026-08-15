@@ -66,10 +66,11 @@ using WebEngineFsCompletionCallback =
 const char *WebEngineFs_StatusString(WebEngineFsStatus status) noexcept;
 
 // Mount takes ownership of the parsed index. The locator and index must have
-// been produced from the immutable source currently opened by WebFs at
-// main/iw_00.iwd. Mounting replaces any idle mount; an active request must be
-// cancelled or allowed to finish first.
+// been produced from the same immutable browser-VFS archivePath. Mounting
+// replaces any idle mount; an active request must be cancelled or allowed to
+// finish first.
 WebEngineFsStatus WebEngineFs_Mount(
+    const char *archivePath,
     const kisak::iwd::CentralDirectoryLocator &locator,
     kisak::iwd::ArchiveIndex &&index);
 

@@ -39,7 +39,10 @@ in vec4 v_color;
 in vec2 v_texcoord0;
 out vec4 outColor;
 void main() {
-    outColor = texture(u_colorMapSampler, v_texcoord0) * v_color;
+    vec4 texel = texture(u_colorMapSampler, v_texcoord0);
+    if (texel.a <= 0.0)
+        discard;
+    outColor = texel * v_color;
 }
 )glsl";
 

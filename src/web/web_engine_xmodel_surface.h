@@ -30,6 +30,12 @@ struct WebEngineConvertedXModelSurface
     std::uint8_t verticalAxis = 1u;
 };
 
+struct WebEngineXModelProjectionBounds
+{
+    std::array<float, 3> mins{};
+    std::array<float, 3> maxs{};
+};
+
 enum class WebEngineXModelSurfaceResult : std::uint8_t
 {
     Success = 0,
@@ -43,10 +49,18 @@ enum class WebEngineXModelSurfaceResult : std::uint8_t
     ConversionFailed,
 };
 
-// Decodes one complete packed surface and fits its two largest spatial axes to
-// a conservative clip-space square. Destination is unchanged on every error.
+// Decodes one complete packed surface, fits its two largest spatial axes to a
+// conservative clip-space square, and retains the remaining axis as depth.
+// Destination is unchanged on every error.
 WebEngineXModelSurfaceResult WebEngine_ConvertPackedXModelSurface(
     const WebEnginePackedXSurfaceView &source,
+    WebEngineConvertedXModelSurface &destination);
+
+// Uses one checked model-wide projection for every surface in a draw list, so
+// independently serialized XSurfaces retain their spatial relationship.
+WebEngineXModelSurfaceResult WebEngine_ConvertPackedXModelSurfaceWithBounds(
+    const WebEnginePackedXSurfaceView &source,
+    const WebEngineXModelProjectionBounds &projectionBounds,
     WebEngineConvertedXModelSurface &destination);
 
 const char *WebEngine_XModelSurfaceResultString(

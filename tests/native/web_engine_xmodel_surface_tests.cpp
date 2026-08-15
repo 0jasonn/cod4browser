@@ -90,11 +90,30 @@ void TestGoldenPackedSurface()
     Require(std::fabs(converted.rendererSurface.vertices[0].position[0] + 0.82f) < 0.00001f &&
         std::fabs(converted.rendererSurface.vertices[0].position[1] + 0.41f) < 0.00001f,
         "orthographic fit preserves aspect and clip margin");
+    Require(std::fabs(converted.rendererSurface.vertices[0].position[2]) < 0.00001f,
+        "constant third axis remains centered at zero depth");
     Require(converted.rendererSurface.vertices[2].textureCoordinate[0] == 1.0f &&
         converted.rendererSurface.vertices[2].textureCoordinate[1] == 1.0f,
         "packed half-float UVs decode in upstream component order");
     Require(std::fabs(converted.rendererSurface.vertices[0].color[0] - 32.0f / 255.0f) < 0.00001f,
         "packed vertex color crosses the existing renderer conversion");
+}
+
+void TestThirdAxisPreservesDepth()
+{
+    Fixture fixture;
+    PutF32(fixture.vertices, 4u, 4.5f);
+    PutF32(fixture.vertices, 32u + 4u, 4.75f);
+    PutF32(fixture.vertices, 64u + 4u, 5.25f);
+    PutF32(fixture.vertices, 96u + 4u, 5.5f);
+    WebEngineConvertedXModelSurface converted;
+    Require(WebEngine_ConvertPackedXModelSurface(fixture.View(), converted) ==
+        WebEngineXModelSurfaceResult::Success, "non-planar packed surface converts");
+    Require(converted.horizontalAxis == 0u && converted.verticalAxis == 2u,
+        "the two largest extents remain projection axes");
+    Require(converted.rendererSurface.vertices[0].position[2] < 0.0f &&
+        converted.rendererSurface.vertices[3].position[2] > 0.0f,
+        "the remaining model axis crosses the renderer seam as signed depth");
 }
 
 void TestFailuresAreAtomic()
@@ -136,6 +155,7 @@ int main()
     try
     {
         TestGoldenPackedSurface();
+        TestThirdAxisPreservesDepth();
         TestFailuresAreAtomic();
         std::cout << "web_engine_xmodel_surface_tests: ok\n";
         return 0;

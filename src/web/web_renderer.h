@@ -14,6 +14,8 @@ struct WebFrameInfo;
 constexpr std::uint32_t WEB_RENDERER_MAX_RGBA8_DIMENSION = 2048u;
 constexpr std::size_t WEB_RENDERER_MAX_RETAINED_TEXTURE_BYTES =
     4u * 1024u * 1024u;
+constexpr std::size_t WEB_RENDERER_MAX_RETAINED_DRAW_TEXTURE_BYTES =
+    16u * 1024u * 1024u;
 
 struct WebRendererRgba8TextureDesc
 {
@@ -21,6 +23,9 @@ struct WebRendererRgba8TextureDesc
     std::uint32_t height;
     const std::uint8_t *pixels;
     std::size_t byteLength;
+    // Original COD4 MaterialTextureDef sampler byte. Zero keeps the bootstrap
+    // fallback behavior; imported material bindings provide the checked value.
+    std::uint8_t samplerState = 0u;
 };
 
 struct WebRendererTextureState
@@ -79,6 +84,11 @@ WebRendererSurfaceResult WebRenderer_SetSurface(
     const WebRendererSurfaceDesc &surface,
     const WebRendererDrawDesc &draw);
 
+// Atomically replaces the shared geometry and all draw ranges. Texture pixels
+// are filled independently by slot and survive later per-slot failures.
+WebRendererSurfaceResult WebRenderer_SetDrawList(
+    const WebRendererDrawListDesc &drawList);
+
 // Creates the browser renderer and backend resources from any retained surface
 // and texture descriptions.
 bool WebRenderer_Initialize();
@@ -90,6 +100,10 @@ bool WebRenderer_Initialize();
 WebRendererTextureResult WebRenderer_SetBootstrapTexture(
     const WebRendererRgba8TextureDesc &texture);
 
+WebRendererTextureResult WebRenderer_SetDrawTexture(
+    std::uint32_t textureSlot,
+    const WebRendererRgba8TextureDesc &texture);
+
 // Returns submitted surfaces to their vertex-color fallback and releases
 // any imported recovery pixels. This is used when an asset generation is
 // cancelled or replaced so stale content cannot remain visible.
@@ -98,6 +112,8 @@ bool WebRenderer_ClearBootstrapTexture();
 // Reports only backend-neutral ownership/residency information. A retained
 // texture can be non-resident while the browser WebGL context is lost.
 WebRendererTextureState WebRenderer_GetBootstrapTextureState();
+WebRendererTextureState WebRenderer_GetDrawTextureState(
+    std::uint32_t textureSlot);
 
 // Retains one registry-owned WebGL2 compatibility program and atomically
 // replaces its GPU program when a context is available. Imported files select

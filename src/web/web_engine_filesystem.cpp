@@ -11,7 +11,6 @@
 
 namespace
 {
-constexpr const char *ARCHIVE_PATH = "main/iw_00.iwd";
 constexpr uint32_t LOCAL_HEADER_PREFIX_BYTES = 30u;
 constexpr uint32_t MAX_LOCAL_HEADER_BYTES =
     LOCAL_HEADER_PREFIX_BYTES + kisak::iwd::Limits{}.maxPathBytes +
@@ -69,6 +68,7 @@ struct Request
 struct Service
 {
     bool mounted = false;
+    std::string archivePath;
     kisak::iwd::CentralDirectoryLocator locator;
     kisak::iwd::ArchiveIndex index;
     uint32_t lastRequestId = 0;
@@ -88,6 +88,7 @@ WebEngineFsRequestId AllocateRequestId()
 void ClearMount()
 {
     g_service.mounted = false;
+    g_service.archivePath.clear();
     g_service.locator = {};
     g_service.index = {};
 }
@@ -215,7 +216,7 @@ bool BeginFilesystemRead(uint32_t offset, uint32_t length, Phase waitingPhase)
     request->completionBytes.clear();
     request->completionInputCursor = 0;
     const WebFsStatus status = WebFs_BeginRead(
-        ARCHIVE_PATH,
+        g_service.archivePath.c_str(),
         offset,
         length,
         CompleteFilesystemRequest,
@@ -568,6 +569,7 @@ const char *WebEngineFs_StatusString(WebEngineFsStatus status) noexcept
 }
 
 WebEngineFsStatus WebEngineFs_Mount(
+    const char *archivePath,
     const kisak::iwd::CentralDirectoryLocator &locator,
     kisak::iwd::ArchiveIndex &&index)
 {
@@ -575,7 +577,8 @@ WebEngineFsStatus WebEngineFs_Mount(
     {
         return WebEngineFsStatus::Busy;
     }
-    if (locator.archiveSize == 0 || locator.entryCount == 0 ||
+    if (!archivePath || archivePath[0] == '\0' ||
+        locator.archiveSize == 0 || locator.entryCount == 0 ||
         locator.entryCount != index.RecordCount() || index.Entries().empty() ||
         locator.eocdOffset > locator.archiveSize ||
         static_cast<uint64_t>(locator.centralOffset) + locator.centralSize !=
@@ -584,7 +587,25 @@ WebEngineFsStatus WebEngineFs_Mount(
         return WebEngineFsStatus::InvalidArgument;
     }
 
+    std::string mountedPath;
+    try
+    {
+        mountedPath = archivePath;
+    }
+    catch (...)
+    {
+        return WebEngineFsStatus::InternalError;
+    }
+    if (!mountedPath.starts_with("main/iw_") ||
+        !mountedPath.ends_with(".iwd") || mountedPath.size() != 14u ||
+        mountedPath[8] < '0' || mountedPath[8] > '9' ||
+        mountedPath[9] < '0' || mountedPath[9] > '9')
+    {
+        return WebEngineFsStatus::InvalidArgument;
+    }
+
     ClearMount();
+    g_service.archivePath = std::move(mountedPath);
     g_service.locator = locator;
     g_service.index = std::move(index);
     g_service.mounted = true;
