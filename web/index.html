@@ -6,205 +6,77 @@
     <meta
         http-equiv="Content-Security-Policy"
         content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'">
-    <meta name="theme-color" content="#10110f">
+    <meta name="theme-color" content="#0d0f0c">
     <link rel="icon" href="data:,">
-    <title>KisakCOD Browser Port</title>
+    <title>KisakCOD</title>
     <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-    <div class="page-shell">
-        <header class="site-header">
-            <a class="wordmark" href="./" aria-label="KisakCOD browser port home">
-                <span class="wordmark-mark" aria-hidden="true">K</span>
-                <span>
-                    <strong>KisakCOD</strong>
-                    <small>Browser port</small>
-                </span>
-            </a>
-            <div class="build-tag">Milestone 25 / first retail XSurface array</div>
-        </header>
+    <main class="app-shell">
+        <section class="viewport-panel" aria-labelledby="renderer-title">
+            <header class="panel-heading">
+                <h1 id="renderer-title">Renderer</h1>
+                <span id="frame-counter">Frame &mdash;</span>
+            </header>
+            <div class="canvas-wrap">
+                <canvas id="game-canvas" width="960" height="540" tabindex="0">
+                    A browser with canvas and WebGL2 support is required.
+                </canvas>
+            </div>
+        </section>
 
-        <main>
-            <section class="hero" aria-labelledby="page-title">
-                <div class="hero-copy">
-                    <p class="eyebrow">Native engine, new platform</p>
-                    <h1 id="page-title">Your game files.<br>Your browser.</h1>
-                    <p class="lede">
-                        KisakCOD now streams a freely generated Material-to-GfxWorld two-asset
-                        fastfile fixture through a bounded source queue and stable asset registry,
-                        then converts its world surface into the indexed WebGL2 seam. Select
-                        files from a legally owned English installation to validate the stock IWD
-                        archive families and the F.N.G. startup/map fastfiles through a local,
-                        read-only browser VFS. After qcommon startup, a bounded prefix reader now
-                        validates <code>code_post_gfx.ff</code>, inventories its complete asset table,
-                        and follows an exact two-technique-set/one-material prefix through one
-                        texture table and <code>GfxImage</code>. The renderer resolves the leading
-                        shader contract's compiled-in WebGL2 replacement, then loads the exact IWI
-                        selected by that registered retail material instead of probing the first image.
-                        A second bounded pass inventories the complete <code>killhouse.ff</code>
-                        asset table, then walks consecutive inline technique-set bodies. It publishes
-                        12 zero-dependency sets before entering asset 12's <code>XModel</code>,
-                        <code>ch_street_wall_light_01_off</code>. The checked model reader retains its
-                        skeleton and six <code>XSurface</code> records, then follows all bounded packed
-                        vertices, rigid lists, collision trees, triangle indices, and material-handle
-                        slots in generated-loader order, resolves two materials, validates collision
-                        and bone dependencies, and publishes the complete first model. Only its
-                        bounded surface zero is retained for drawing: 368 packed vertices and 252
-                        triangles are decoded outside WebGL2, fitted to a deterministic X/Z view,
-                        and atomically replace the synthetic surface after material identity 16
-                        resolves. Later surfaces remain hash-only evidence.
-                        An eight-task scheduler orders that work
-                        with archive, asset, command, world-surface, and renderer jobs every frame.
-                        No proprietary data is uploaded or bundled.
-                    </p>
-                    <div class="runtime-status" role="status" aria-live="polite">
-                        <span class="status-light" aria-hidden="true"></span>
-                        <span>
-                            <small id="runtime-label">Runtime loading</small>
-                            <strong id="runtime-message">Downloading the WebAssembly module</strong>
-                        </span>
+        <section class="asset-panel" aria-labelledby="asset-title">
+            <header class="panel-heading">
+                <h2 id="asset-title">COD4 installation</h2>
+            </header>
+            <div class="asset-control">
+                <div class="asset-status" role="status" aria-live="polite">
+                    <span class="asset-status-mark" aria-hidden="true"></span>
+                    <div>
+                        <small id="asset-state-label">Checking browser storage</small>
+                        <strong id="asset-message">Waiting for the asset probe</strong>
                     </div>
                 </div>
-
-                <div class="viewport-panel">
-                    <div class="viewport-header">
-                        <span>WebGL2 output</span>
-                        <span id="frame-counter">Frame &mdash;</span>
-                    </div>
-                    <div class="canvas-wrap">
-                        <canvas id="game-canvas" width="960" height="540" tabindex="0">
-                            A browser with canvas and WebGL2 support is required.
-                        </canvas>
-                        <div class="viewport-grid" aria-hidden="true"></div>
-                        <div class="corner-label" aria-hidden="true">WASM / GL2</div>
-                    </div>
+                <progress id="asset-progress" max="1" value="0" hidden></progress>
+                <div class="asset-actions">
+                    <button id="select-install-button" class="primary-action" type="button" disabled>
+                        Choose COD4 installation
+                    </button>
+                    <button id="clear-assets-button" class="secondary-action" type="button" hidden>
+                        Remove browser copy
+                    </button>
                 </div>
-            </section>
+                <input
+                    id="install-folder-input"
+                    type="file"
+                    webkitdirectory
+                    directory
+                    multiple
+                    hidden>
+            </div>
+        </section>
 
-            <section class="diagnostics" aria-label="Port diagnostics">
-                <article>
-                    <span class="diagnostic-index">01</span>
-                    <div>
-                        <small>Portable engine code</small>
-                        <strong id="physics-status">ODE + qcommon pending</strong>
-                    </div>
-                </article>
-                <article>
-                    <span class="diagnostic-index">02</span>
-                    <div>
-                        <small>Renderer seam</small>
-                        <strong id="renderer-status">WebGL2 pending</strong>
-                    </div>
-                </article>
-                <article>
-                    <span class="diagnostic-index">03</span>
-                    <div>
-                        <small>Browser system</small>
-                        <strong id="system-status">Timing + RAF pending</strong>
-                    </div>
-                </article>
-                <article>
-                    <span class="diagnostic-index">04</span>
-                    <div>
-                        <small>Canvas</small>
-                        <strong id="canvas-size">960 &times; 540</strong>
-                    </div>
-                </article>
-                <article>
-                    <span class="diagnostic-index">05</span>
-                    <div>
-                        <small>IWD archive</small>
-                        <strong id="archive-status">Waiting for local assets</strong>
-                    </div>
-                </article>
-                <article>
-                    <span class="diagnostic-index">06</span>
-                    <div>
-                        <small>Engine asset</small>
-                        <strong id="engine-asset-status">Waiting for mounted archive</strong>
-                    </div>
-                </article>
-            </section>
+        <section class="console-panel" aria-labelledby="console-title">
+            <header class="panel-heading">
+                <h2 id="console-title">Console log</h2>
+            </header>
+            <pre id="boot-log" aria-live="polite"></pre>
+        </section>
+    </main>
 
-            <section class="asset-panel" aria-labelledby="asset-title">
-                <div class="asset-copy">
-                    <p class="eyebrow">Local asset boundary</p>
-                    <h2 id="asset-title">Connect a legal installation</h2>
-                    <p>
-                        The M12 profile requests <code>localization.txt</code>, 14 base IWDs,
-                        7 English localized IWDs, and the four
-                        <code>code_post_gfx</code>/<code>ui</code>/<code>common</code>/<code>killhouse</code>
-                        fastfiles. It validates bounded headers and archive windows, copies the
-                        selected files into origin-private storage, and reopens any approved path
-                        through cancellable bounded reads. No complete retail file is copied into
-                        Wasm memory. The bounded <code>code_post_gfx</code> prefix reaches the
-                        startup loader. It publishes two technique sets, one material, and its inline
-                        image under stable registry identities only after the complete supported
-                        prefix validates. Its strict D3D9 contract selects, compiles, links, and draws
-                        through owned WebGL2 source. DXT1/DXT3/DXT5 IWI images decode into bounded
-                        RGBA8, so the material-resolved <code>images/3_cursor3.iwi</code> can bind to
-                        its sampler and survive context loss. The <code>killhouse</code> pass now
-                        follows the complete first XModel dependency chain and draws one owned retail
-                        model surface through the same recovery-safe indexed renderer seam. It still
-                        uses the startup sampler image; this is not a <code>GfxWorld</code> map render,
-                        camera, lighting path, or playable scene. Your source folder stays untouched.
-                    </p>
-                    <p class="asset-legal">
-                        You must supply files from a legally owned Call of Duty 4 installation.
-                        Game data remains on this device and is never sent to the server.
-                    </p>
-                </div>
-                <div class="asset-control">
-                    <div class="asset-status" role="status" aria-live="polite">
-                        <span class="asset-status-mark" aria-hidden="true"></span>
-                        <div>
-                            <small id="asset-state-label">Checking browser storage</small>
-                            <strong id="asset-message">Waiting for the WebAssembly asset probe</strong>
-                        </div>
-                    </div>
-                    <progress id="asset-progress" max="1" value="0" hidden></progress>
-                    <dl id="asset-manifest" class="asset-manifest" hidden></dl>
-                    <p id="asset-retention" class="asset-retention" hidden>
-                        This browser did not grant durable storage. The local copy can be
-                        evicted automatically; keep the original installation available.
-                    </p>
-                    <div class="asset-actions">
-                        <button id="select-install-button" class="primary-action" type="button" disabled>
-                            Choose COD4 installation
-                        </button>
-                        <button id="clear-assets-button" class="secondary-action" type="button" hidden>
-                            Remove browser copy
-                        </button>
-                    </div>
-                    <input
-                        id="install-folder-input"
-                        type="file"
-                        webkitdirectory
-                        directory
-                        multiple
-                        hidden>
-                </div>
-            </section>
-
-            <section class="console-panel" aria-labelledby="console-title">
-                <div class="console-heading">
-                    <div>
-                        <p class="eyebrow">Engine output</p>
-                        <h2 id="console-title">Boot console</h2>
-                    </div>
-                    <span>Last 80 lines</span>
-                </div>
-                <pre id="boot-log" aria-live="polite"></pre>
-            </section>
-        </main>
-
-        <footer>
-            <span>KisakCOD source is GPL-3.0.</span>
-            <span>Call of Duty game data is not included.</span>
-        </footer>
+    <div hidden>
+        <span id="runtime-label"></span>
+        <span id="runtime-message"></span>
+        <span id="canvas-size"></span>
+        <span id="physics-status"></span>
+        <span id="renderer-status"></span>
+        <span id="system-status"></span>
+        <span id="archive-status"></span>
+        <span id="engine-asset-status"></span>
+        <dl id="asset-manifest"></dl>
+        <p id="asset-retention"></p>
     </div>
 
-    <noscript>This bootstrap requires JavaScript to load WebAssembly.</noscript>
     <script type="module" src="./launcher.mjs"></script>
 </body>
 </html>
