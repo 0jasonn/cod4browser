@@ -1,6 +1,7 @@
 #include <web/web_retail_fastfile_census.h>
 
 #include <web/web_fastfile_source_stream.h>
+#include <web/web_fastfile_zone_registry.h>
 #include <web/web_fastfile_zone_stream.h>
 #include <web/web_shader_compatibility.h>
 
@@ -9,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -37,6 +39,24 @@ constexpr std::uint32_t VERTEX_DECLARATION_BYTES = 100u;
 constexpr std::uint32_t VERTEX_SHADER_BYTES = 16u;
 constexpr std::uint32_t PIXEL_SHADER_BYTES = 16u;
 constexpr std::uint32_t MATERIAL_ARGUMENT_BYTES = 8u;
+constexpr std::uint32_t MATERIAL_BYTES = 80u;
+constexpr std::uint32_t MATERIAL_TEXTURE_BYTES = 12u;
+constexpr std::uint32_t GFX_IMAGE_BYTES = 36u;
+constexpr std::uint32_t GFX_IMAGE_LOAD_DEF_BYTES = 16u;
+constexpr std::uint32_t GFX_STATE_BITS_BYTES = 8u;
+constexpr std::uint32_t XMODEL_BYTES = 220u;
+constexpr std::uint32_t DOBJ_ANIM_MAT_BYTES = 32u;
+constexpr std::uint32_t XSURFACE_BYTES = 56u;
+constexpr std::uint32_t GFX_PACKED_VERTEX_BYTES = 32u;
+constexpr std::uint32_t RIGID_VERT_LIST_BYTES = 12u;
+constexpr std::uint32_t SURFACE_COLLISION_TREE_BYTES = 40u;
+constexpr std::uint32_t SURFACE_COLLISION_NODE_BYTES = 16u;
+constexpr std::uint32_t SURFACE_COLLISION_LEAF_BYTES = 2u;
+constexpr std::uint32_t ASSET_TYPE_XMODEL = 3u;
+constexpr std::uint32_t ASSET_TYPE_MATERIAL = 4u;
+constexpr std::uint32_t ASSET_TYPE_TECHNIQUE_SET = 5u;
+constexpr std::uint32_t ASSET_TYPE_IMAGE = 6u;
+constexpr std::uint32_t ASSET_TYPE_GFX_WORLD = 16u;
 
 constexpr std::array<const char *, RETAIL_CENSUS_ASSET_TYPE_COUNT> ASSET_NAMES = {{
     "xmodelpieces", "physpreset", "xanim", "xmodel", "material", "techset",
@@ -55,9 +75,33 @@ std::uint32_t ReadU32(const std::uint8_t *bytes) noexcept
         static_cast<std::uint32_t>(bytes[3]) << 24u;
 }
 
+std::uint16_t ReadU16(const std::uint8_t *bytes) noexcept
+{
+    return static_cast<std::uint16_t>(bytes[0]) |
+        static_cast<std::uint16_t>(
+            static_cast<std::uint16_t>(bytes[1]) << 8u);
+}
+
 std::int32_t ReadS32(const std::uint8_t *bytes) noexcept
 {
     return std::bit_cast<std::int32_t>(ReadU32(bytes));
+}
+
+std::int16_t ReadS16(const std::uint8_t *bytes) noexcept
+{
+    return std::bit_cast<std::int16_t>(ReadU16(bytes));
+}
+
+float ReadF32(const std::uint8_t *bytes) noexcept
+{
+    return std::bit_cast<float>(ReadU32(bytes));
+}
+
+bool SupportedImageFormat(std::uint32_t format) noexcept
+{
+    return format == 0x31545844u || // DXT1
+        format == 0x33545844u ||    // DXT3
+        format == 0x35545844u;      // DXT5
 }
 
 RetailCensusError MapSourceError(SourceStreamError error) noexcept
@@ -85,9 +129,40 @@ RetailCensusError MapZoneError(ZoneStreamError error) noexcept
     }
 }
 
-std::uint32_t Fnv1a32(std::span<const std::uint8_t> bytes) noexcept
+RetailCensusError MapRegistryError(ZoneRegistryError error) noexcept
 {
-    std::uint32_t value = 2166136261u;
+    return error == ZoneRegistryError::None
+        ? RetailCensusError::None
+        : error == ZoneRegistryError::AllocationFailed
+            ? RetailCensusError::AllocationFailed
+            : RetailCensusError::AssetRegistryInvalid;
+}
+
+bool ValidPublishedName(std::string_view name) noexcept
+{
+    if (name.empty() || name.front() == '/' || name.front() == '\\') return false;
+    bool segmentStart = true;
+    std::uint32_t dotCount = 0u;
+    for (const unsigned char byte : name)
+    {
+        if (byte < 0x21u || byte > 0x7eu || byte == '\\' || byte == ':') return false;
+        if (byte == '/')
+        {
+            if (segmentStart || dotCount == 2u) return false;
+            segmentStart = true;
+            dotCount = 0u;
+            continue;
+        }
+        if (segmentStart && byte == '.') ++dotCount;
+        else if (segmentStart) segmentStart = false;
+    }
+    return !segmentStart && dotCount != 2u;
+}
+
+std::uint32_t Fnv1a32(
+    std::span<const std::uint8_t> bytes,
+    std::uint32_t value = 2166136261u) noexcept
+{
     for (const std::uint8_t byte : bytes)
     {
         value ^= byte;
@@ -106,7 +181,17 @@ bool ValidLimits(const RetailCensusLimits &limits) noexcept
         limits.maxScriptStrings != 0u && limits.maxScriptStringBytes != 0u &&
         limits.maxTotalScriptStringBytes != 0u && limits.maxAssets != 0u &&
         limits.maxTechniqueNameBytes != 0u && limits.maxTechniquePasses != 0u &&
-        limits.maxShaderNameBytes != 0u && limits.maxShaderProgramDwords != 0u;
+        limits.maxShaderNameBytes != 0u && limits.maxShaderProgramDwords != 0u &&
+        limits.maxMaterialNameBytes != 0u && limits.maxImageNameBytes != 0u &&
+        limits.maxMaterialTextures != 0u && limits.maxImageResourceBytes != 0u &&
+        limits.maxXModelNameBytes != 0u &&
+        limits.maxXModelCollisionSurfaces != 0u &&
+        limits.maxXModelSurfaceVertices != 0u &&
+        limits.maxXModelSurfaceTriangles != 0u &&
+        limits.maxXModelRigidVertLists != 0u &&
+        limits.maxXModelCollisionNodes != 0u &&
+        limits.maxXModelCollisionLeaves != 0u &&
+        limits.maxXModelSurfacePayloadBytes != 0u;
 }
 } // namespace
 
@@ -150,6 +235,8 @@ const char *RetailCensusErrorString(RetailCensusError error) noexcept
     case RetailCensusError::ZoneStreamInvalid: return "invalid logical zone stream state";
     case RetailCensusError::ZoneBlockOverflow: return "logical zone block overflow";
     case RetailCensusError::FirstAssetUnsupported: return "first asset is not an inline technique set";
+    case RetailCensusError::AssetPrefixUnsupported: return "fastfile does not have the supported two-techset/material prefix";
+    case RetailCensusError::AssetRegistryInvalid: return "retail asset registry state is invalid";
     case RetailCensusError::TechniqueSetLayoutUnsupported: return "unsupported technique-set layout";
     case RetailCensusError::TechniqueSetNameInvalid: return "invalid technique-set name";
     case RetailCensusError::TechniqueSetNameTooLong: return "technique-set name exceeds limit";
@@ -169,6 +256,31 @@ const char *RetailCensusErrorString(RetailCensusError error) noexcept
     case RetailCensusError::ShaderSubstitutionUnsupported: return "no WebGL2 shader substitution matches";
     case RetailCensusError::ShaderArgumentLayoutUnsupported: return "unsupported shader argument layout";
     case RetailCensusError::TechniqueNameInvalid: return "invalid technique name";
+    case RetailCensusError::TechniqueAliasInvalid: return "material technique-set dependency alias is invalid";
+    case RetailCensusError::MaterialLayoutUnsupported: return "unsupported material layout";
+    case RetailCensusError::MaterialNameInvalid: return "invalid material name";
+    case RetailCensusError::MaterialNameTooLong: return "material name exceeds limit";
+    case RetailCensusError::MaterialTechniqueSetInvalid: return "material technique-set reference is invalid";
+    case RetailCensusError::MaterialTextureCountLimit: return "material texture count exceeds limit";
+    case RetailCensusError::MaterialTextureLayoutUnsupported: return "unsupported material texture layout";
+    case RetailCensusError::ImageLayoutUnsupported: return "unsupported GfxImage layout";
+    case RetailCensusError::ImageNameInvalid: return "invalid GfxImage name";
+    case RetailCensusError::ImageNameTooLong: return "GfxImage name exceeds limit";
+    case RetailCensusError::ImageResourceSizeInvalid: return "invalid GfxImage resource size";
+    case RetailCensusError::ImageResourceSizeLimit: return "GfxImage resource exceeds limit";
+    case RetailCensusError::MaterialStateBitsUnsupported: return "unsupported material state-bits layout";
+    case RetailCensusError::GfxWorldMissing: return "fastfile contains no GfxWorld asset";
+    case RetailCensusError::XModelLayoutUnsupported: return "unsupported XModel layout";
+    case RetailCensusError::XModelNameInvalid: return "invalid XModel name";
+    case RetailCensusError::XModelNameTooLong: return "XModel name exceeds limit";
+    case RetailCensusError::XModelCountInvalid: return "invalid XModel count";
+    case RetailCensusError::XModelBoundsInvalid: return "invalid XModel bounds";
+    case RetailCensusError::XModelScriptStringInvalid: return "invalid XModel bone script string";
+    case RetailCensusError::XModelDependencyUnsupported: return "unsupported XModel dependency";
+    case RetailCensusError::XSurfaceLayoutUnsupported: return "unsupported XSurface layout";
+    case RetailCensusError::XSurfaceCountInvalid: return "invalid XSurface count";
+    case RetailCensusError::XSurfacePayloadLimit: return "XSurface payload exceeds limit";
+    case RetailCensusError::XSurfaceCollisionInvalid: return "invalid XSurface collision tree";
     case RetailCensusError::AllocationFailed: return "allocation failed";
     }
     return "unknown retail census error";
@@ -198,6 +310,43 @@ const char *RetailCensusStageString(RetailCensusStage stage) noexcept
     case RetailCensusStage::PixelShaderProgram: return "pixel-shader-program";
     case RetailCensusStage::ShaderArguments: return "shader-arguments";
     case RetailCensusStage::TechniqueName: return "technique-name";
+    case RetailCensusStage::SecondTechniqueSet: return "material-technique-set";
+    case RetailCensusStage::SecondTechniqueSetName: return "material-technique-set-name";
+    case RetailCensusStage::SecondTechnique: return "material-technique";
+    case RetailCensusStage::SecondMaterialPasses: return "material-technique-passes";
+    case RetailCensusStage::SecondVertexShader: return "material-vertex-shader";
+    case RetailCensusStage::SecondVertexShaderProgram: return "material-vertex-program";
+    case RetailCensusStage::SecondPixelShader: return "material-pixel-shader";
+    case RetailCensusStage::SecondPixelShaderProgram: return "material-pixel-program";
+    case RetailCensusStage::SecondShaderArguments: return "material-shader-arguments";
+    case RetailCensusStage::SecondTechniqueName: return "material-technique-name";
+    case RetailCensusStage::Material: return "material";
+    case RetailCensusStage::MaterialName: return "material-name";
+    case RetailCensusStage::MaterialTextureTable: return "material-texture-table";
+    case RetailCensusStage::Image: return "gfx-image";
+    case RetailCensusStage::ImageName: return "gfx-image-name";
+    case RetailCensusStage::ImageLoadDef: return "gfx-image-load-def";
+    case RetailCensusStage::ImageResource: return "gfx-image-resource";
+    case RetailCensusStage::MaterialStateBits: return "material-state-bits";
+    case RetailCensusStage::WorldTechniqueSet: return "world-technique-set";
+    case RetailCensusStage::WorldTechniqueSetName: return "world-technique-set-name";
+    case RetailCensusStage::WorldXModel: return "world-xmodel";
+    case RetailCensusStage::WorldXModelName: return "world-xmodel-name";
+    case RetailCensusStage::WorldXModelBoneNames: return "world-xmodel-bone-names";
+    case RetailCensusStage::WorldXModelParentList: return "world-xmodel-parent-list";
+    case RetailCensusStage::WorldXModelQuats: return "world-xmodel-quats";
+    case RetailCensusStage::WorldXModelTrans: return "world-xmodel-trans";
+    case RetailCensusStage::WorldXModelPartClassification: return "world-xmodel-part-classification";
+    case RetailCensusStage::WorldXModelBaseMat: return "world-xmodel-base-mat";
+    case RetailCensusStage::WorldXModelSurfaceHeaders: return "world-xmodel-surface-headers";
+    case RetailCensusStage::WorldXModelSurfaceBlendInfo: return "world-xmodel-surface-blend-info";
+    case RetailCensusStage::WorldXModelSurfaceVertices: return "world-xmodel-surface-vertices";
+    case RetailCensusStage::WorldXModelSurfaceVertLists: return "world-xmodel-surface-vert-lists";
+    case RetailCensusStage::WorldXModelSurfaceCollisionTree: return "world-xmodel-surface-collision-tree";
+    case RetailCensusStage::WorldXModelSurfaceCollisionNodes: return "world-xmodel-surface-collision-nodes";
+    case RetailCensusStage::WorldXModelSurfaceCollisionLeaves: return "world-xmodel-surface-collision-leaves";
+    case RetailCensusStage::WorldXModelSurfaceIndices: return "world-xmodel-surface-indices";
+    case RetailCensusStage::WorldXModelMaterialHandles: return "world-xmodel-material-handles";
     case RetailCensusStage::AssetBoundary: return "asset-boundary";
     case RetailCensusStage::Failed: return "failed";
     }
@@ -207,6 +356,7 @@ const char *RetailCensusStageString(RetailCensusStage stage) noexcept
 struct RetailFastfileCensusJob::Impl
 {
     BoundedSourceStream source;
+    RetailCensusMode mode = RetailCensusMode::CodePostGfxMaterial;
     RetailCensusLimits limits{};
     std::array<std::uint8_t, PREFIX_BYTES> prefix{};
     std::uint32_t prefixCount = 0u;
@@ -217,6 +367,7 @@ struct RetailFastfileCensusJob::Impl
     std::size_t cursor = 0u;
     std::size_t assetTableOffset = 0u;
     std::vector<std::uint32_t> scriptTokens;
+    std::vector<std::string> scriptStrings;
     std::uint32_t scriptIndex = 0u;
     std::uint32_t assetIndex = 0u;
     std::size_t recordVisited = 0u;
@@ -225,6 +376,13 @@ struct RetailFastfileCensusJob::Impl
     bool scriptScopesOpen = false;
     bool assetScopeOpen = false;
     std::array<std::uint32_t, 34> techniqueTokens{};
+    std::vector<std::uint32_t> worldAssetTypes;
+    std::vector<std::uint32_t> worldAssetReferences;
+    std::uint32_t worldBodyIndex = 0u;
+    ZoneSpan worldTopLevelAliasSlot{};
+    ZoneSpan worldXModelAliasSlot{};
+    std::uint32_t worldSurfaceIndex = 0u;
+    std::uint32_t worldRigidVertListIndex = 0u;
     std::uint32_t materialPassBytes = 0u;
     std::uint32_t vertexShaderProgramBytes = 0u;
     std::uint32_t pixelShaderProgramBytes = 0u;
@@ -234,6 +392,26 @@ struct RetailFastfileCensusJob::Impl
     std::uint32_t vertexShaderNameBlock4Offset = 0u;
     kisak::web::D3D9ShaderContract vertexContract;
     kisak::web::D3D9ShaderContract pixelContract;
+    std::array<std::uint32_t, 3> prefixTypes{};
+    std::array<std::uint32_t, 3> prefixReferences{};
+    ZoneAssetRegistry registry;
+    std::array<ZoneSpan, 3> topLevelAliasSlots{};
+    std::array<std::uint32_t, 34> secondTechniqueTokens{};
+    std::uint32_t secondMaterialPassBytes = 0u;
+    std::uint32_t secondVertexProgramBytes = 0u;
+    std::uint32_t secondPixelProgramBytes = 0u;
+    std::uint32_t secondArgumentBytes = 0u;
+    std::uint32_t secondArgumentCount = 0u;
+    std::uint32_t secondTechniqueNameToken = 0u;
+    std::uint32_t secondVertexShaderNameToken = 0u;
+    std::uint32_t secondPixelShaderNameToken = 0u;
+    std::uint32_t materialTechniqueSetToken = 0u;
+    std::uint32_t materialTextureTableToken = 0u;
+    std::uint32_t materialStateBitsToken = 0u;
+    std::uint32_t materialStateBitsBytes = 0u;
+    std::uint32_t imageTextureToken = 0u;
+    std::uint32_t imageResourceBytes = 0u;
+    ZoneSpan materialImageAliasSlot{};
     RetailFastfileCensus result{};
 
     ~Impl()
@@ -283,6 +461,102 @@ struct RetailFastfileCensusJob::Impl
             : RetailCensusError::UnsupportedVersion;
     }
 
+    RetailCensusError BeginWorldTechniqueSet(
+        RetailCensusStage &stage) noexcept
+    {
+        if (worldBodyIndex >= worldAssetTypes.size() ||
+            worldAssetTypes[worldBodyIndex] != ASSET_TYPE_TECHNIQUE_SET ||
+            worldAssetReferences[worldBodyIndex] != INLINE_POINTER)
+        {
+            return RetailCensusError::FirstAssetUnsupported;
+        }
+        worldTopLevelAliasSlot = {
+            4u,
+            result.assetTableBlock4Offset + worldBodyIndex * ASSET_BYTES + 4u,
+            4u,
+        };
+        if (const RetailCensusError error = MapRegistryError(
+                registry.ReserveAlias(
+                    worldTopLevelAliasSlot, ASSET_TYPE_TECHNIQUE_SET));
+            error != RetailCensusError::None)
+        {
+            return error;
+        }
+        if (const RetailCensusError error = Push(0u);
+            error != RetailCensusError::None)
+        {
+            return error;
+        }
+        ZoneSpan span;
+        if (const RetailCensusError error = Plan(
+                4u, TECHNIQUE_SET_BYTES, &span);
+            error != RetailCensusError::None)
+        {
+            return error;
+        }
+        try
+        {
+            result.worldTechniqueSets.emplace_back();
+        }
+        catch (...) { return RetailCensusError::AllocationFailed; }
+        RetailWorldTechniqueSet &entry = result.worldTechniqueSets.back();
+        entry.assetIndex = worldBodyIndex;
+        entry.block0Offset = span.offset;
+        techniqueTokens.fill(0u);
+        result.worldTechniqueSetBodiesEntered = static_cast<std::uint32_t>(
+            result.worldTechniqueSets.size());
+        result.worldNextAssetIndex = worldBodyIndex;
+        if (worldBodyIndex == 0u)
+            result.worldFirstTechniqueSetBlock0Offset = span.offset;
+        stage = RetailCensusStage::WorldTechniqueSet;
+        return RetailCensusError::None;
+    }
+
+    RetailCensusError BeginWorldXModel(
+        std::uint32_t assetIndex,
+        RetailCensusStage &stage) noexcept
+    {
+        if (assetIndex >= worldAssetTypes.size() ||
+            worldAssetTypes[assetIndex] != ASSET_TYPE_XMODEL ||
+            worldAssetReferences[assetIndex] != INLINE_POINTER)
+        {
+            return RetailCensusError::XModelLayoutUnsupported;
+        }
+        worldXModelAliasSlot = {
+            4u,
+            result.assetTableBlock4Offset + assetIndex * ASSET_BYTES + 4u,
+            4u,
+        };
+        if (const RetailCensusError error = MapRegistryError(
+                registry.ReserveAlias(worldXModelAliasSlot, ASSET_TYPE_XMODEL));
+            error != RetailCensusError::None)
+        {
+            return error;
+        }
+        if (const RetailCensusError error = Push(0u);
+            error != RetailCensusError::None)
+        {
+            return error;
+        }
+        ZoneSpan span;
+        if (const RetailCensusError error = Plan(4u, XMODEL_BYTES, &span);
+            error != RetailCensusError::None)
+        {
+            return error;
+        }
+        result.worldFirstXModel = {};
+        result.worldFirstXModel.assetIndex = assetIndex;
+        result.worldFirstXModel.headerBlock0Offset = span.offset;
+        worldSurfaceIndex = 0u;
+        worldRigidVertListIndex = 0u;
+        result.worldNextAssetIndex = assetIndex;
+        result.nextBodyIndex = assetIndex;
+        result.nextBodyType = ASSET_TYPE_XMODEL;
+        result.nextBodyReference = INLINE_POINTER;
+        stage = RetailCensusStage::WorldXModel;
+        return RetailCensusError::None;
+    }
+
     RetailCensusError Parse(
         RetailCensusStepBudget budget,
         RetailCensusStepReport &report,
@@ -305,6 +579,34 @@ struct RetailFastfileCensusJob::Impl
             if (recordVisited != bytes) return 0;
             recordVisited = 0u;
             return 1;
+        };
+        auto finishWorldXModel = [&](const char *operation,
+                                     bool dependency,
+                                     bool surfaceArray) noexcept {
+            RetailWorldXModel &model = result.worldFirstXModel;
+            model.boundaryInflatedOffset = static_cast<std::uint32_t>(cursor);
+            model.stoppedBeforeSurfaceArray = surfaceArray;
+            result.block0HighWaterAtBoundary = arenas.HighWater(0u);
+            result.block4CursorAtBoundary = arenas.Cursor(4u);
+            result.worldRegistryAliasCount = registry.AliasCount();
+            result.worldRegistryDefinedAliasCount = registry.DefinedAliasCount();
+            result.stoppedBeforeWorldXModelDependency = dependency;
+            result.stoppedBeforeDifferentWorldAssetType = false;
+            result.unsupportedOperation = operation;
+            stage = RetailCensusStage::AssetBoundary;
+            complete = true;
+        };
+        auto addSurfacePayload = [&](std::uint64_t bytes) noexcept {
+            RetailWorldXModel &model = result.worldFirstXModel;
+            const std::uint64_t total =
+                static_cast<std::uint64_t>(model.surfacePayloadBytes) + bytes;
+            if (total > limits.maxXModelSurfacePayloadBytes ||
+                total > std::numeric_limits<std::uint32_t>::max())
+            {
+                return RetailCensusError::XSurfacePayloadLimit;
+            }
+            model.surfacePayloadBytes = static_cast<std::uint32_t>(total);
+            return RetailCensusError::None;
         };
         while (report.recordsProcessed < budget.maxRecords &&
             report.traversedBytes < budget.maxBytes)
@@ -329,6 +631,12 @@ struct RetailFastfileCensusJob::Impl
                 if (const RetailCensusError error = MapZoneError(arenas.Initialize(
                         result.blockSizes,
                         {limits.maxTotalBlockBytes, 64u, 4096u, limits.maxTotalBlockBytes}));
+                    error != RetailCensusError::None)
+                    return error;
+                if (const RetailCensusError error = MapRegistryError(registry.Initialize(
+                        result.blockSizes,
+                        {limits.maxAssets, limits.maxAssets,
+                         limits.maxInflatedPrefixBytes}));
                     error != RetailCensusError::None)
                     return error;
                 arenasInitialized = true;
@@ -358,6 +666,18 @@ struct RetailFastfileCensusJob::Impl
                 if (assetToken != INLINE_POINTER) return RetailCensusError::AssetArrayInvalid;
                 result.scriptStringCount = static_cast<std::uint32_t>(scriptCount);
                 result.assetCount = static_cast<std::uint32_t>(assetCount);
+                if (mode == RetailCensusMode::WorldTechniqueSetPrefix ||
+                    mode == RetailCensusMode::WorldXModelPrefix ||
+                    mode == RetailCensusMode::WorldXSurfacePrefix)
+                {
+                    try
+                    {
+                        worldAssetTypes.reserve(result.assetCount);
+                        worldAssetReferences.reserve(result.assetCount);
+                        result.worldTechniqueSets.reserve(result.assetCount);
+                    }
+                    catch (...) { return RetailCensusError::AllocationFailed; }
+                }
                 cursor += ASSET_LIST_BYTES;
                 ++report.recordsProcessed;
                 stage = RetailCensusStage::ScriptStringPointers;
@@ -385,6 +705,7 @@ struct RetailFastfileCensusJob::Impl
                 try
                 {
                     scriptTokens.resize(result.scriptStringCount);
+                    scriptStrings.resize(result.scriptStringCount);
                 }
                 catch (...) { return RetailCensusError::AllocationFailed; }
                 for (std::uint32_t index = 0u; index < result.scriptStringCount; ++index)
@@ -453,6 +774,13 @@ struct RetailFastfileCensusJob::Impl
                 const int visit = visitRecord(bytes);
                 if (visit <= 0) return RetailCensusError::None;
                 result.scriptStringBytes += static_cast<std::uint32_t>(bytes);
+                try
+                {
+                    scriptStrings[scriptIndex].assign(
+                        reinterpret_cast<const char *>(inflated.data() + cursor),
+                        bytes - 1u);
+                }
+                catch (...) { return RetailCensusError::AllocationFailed; }
                 cursor += bytes;
                 ++scriptIndex;
                 ++report.recordsProcessed;
@@ -471,9 +799,48 @@ struct RetailFastfileCensusJob::Impl
                     result.firstBodyIndex = 0u;
                     result.inflatedPrefixBytes = static_cast<std::uint32_t>(
                         assetTableOffset + tableBytes);
-                    if (!assetScopeOpen || result.firstBodyType != 5u ||
+                    if (mode == RetailCensusMode::WorldAssetInventory)
+                    {
+                        if (result.firstGfxWorldAssetIndex == UINT32_MAX)
+                            return RetailCensusError::GfxWorldMissing;
+                        if (!assetScopeOpen) return RetailCensusError::ZoneStreamInvalid;
+                        if (const RetailCensusError error = Pop();
+                            error != RetailCensusError::None) return error;
+                        assetScopeOpen = false;
+                        result.stoppedBeforeAssetBody = true;
+                        result.completedAssetCount = 0u;
+                        result.block0HighWaterAtBoundary = arenas.HighWater(0u);
+                        result.block4CursorAtBoundary = arenas.Cursor(4u);
+                        stage = RetailCensusStage::AssetBoundary;
+                        complete = true;
+                        return RetailCensusError::None;
+                    }
+                    if (mode == RetailCensusMode::WorldTechniqueSetPrefix ||
+                        mode == RetailCensusMode::WorldXModelPrefix ||
+                        mode == RetailCensusMode::WorldXSurfacePrefix)
+                    {
+                        if (result.firstGfxWorldAssetIndex == UINT32_MAX)
+                            return RetailCensusError::GfxWorldMissing;
+                        if (!assetScopeOpen || worldAssetTypes.empty() ||
+                            worldAssetTypes.front() != ASSET_TYPE_TECHNIQUE_SET ||
+                            worldAssetReferences.front() != INLINE_POINTER)
+                            return RetailCensusError::FirstAssetUnsupported;
+                        worldBodyIndex = 0u;
+                        if (const RetailCensusError error = BeginWorldTechniqueSet(stage);
+                            error != RetailCensusError::None) return error;
+                        continue;
+                    }
+                    if (!assetScopeOpen || result.firstBodyType != ASSET_TYPE_TECHNIQUE_SET ||
                         result.firstBodyReference != INLINE_POINTER)
                         return RetailCensusError::FirstAssetUnsupported;
+                    if (result.assetCount < prefixTypes.size() ||
+                        prefixTypes != std::array<std::uint32_t, 3>{
+                            ASSET_TYPE_TECHNIQUE_SET,
+                            ASSET_TYPE_TECHNIQUE_SET,
+                            ASSET_TYPE_MATERIAL} ||
+                        std::any_of(prefixReferences.begin(), prefixReferences.end(),
+                            [](std::uint32_t token) { return token != INLINE_POINTER; }))
+                        return RetailCensusError::AssetPrefixUnsupported;
                     if (const RetailCensusError error = Push(0u);
                         error != RetailCensusError::None) return error;
                     ZoneSpan span;
@@ -493,10 +860,59 @@ struct RetailFastfileCensusJob::Impl
                     return RetailCensusError::AssetTypeInvalid;
                 const std::uint32_t type = static_cast<std::uint32_t>(signedType);
                 const std::uint32_t reference = ReadU32(record + 4u);
+                result.assetTableOrderHash = Fnv1a32(
+                    std::span<const std::uint8_t>(record, ASSET_BYTES),
+                    result.assetTableOrderHash);
+                if (type == ASSET_TYPE_GFX_WORLD &&
+                    result.firstGfxWorldAssetIndex == UINT32_MAX)
+                {
+                    result.firstGfxWorldAssetIndex = assetIndex;
+                    result.firstGfxWorldReference = reference;
+                    result.typesBeforeFirstGfxWorld = result.typeCounts;
+                    result.inlineReferencesBeforeFirstGfxWorld =
+                        result.inlineAssetReferences;
+                    result.sharedReferencesBeforeFirstGfxWorld =
+                        result.sharedAssetReferences;
+                    result.aliasReferencesBeforeFirstGfxWorld =
+                        result.aliasAssetReferences;
+                    result.nullReferencesBeforeFirstGfxWorld =
+                        result.nullAssetReferences;
+                }
                 if (assetIndex == 0u)
                 {
                     result.firstBodyType = type;
                     result.firstBodyReference = reference;
+                }
+                else if (assetIndex == 1u)
+                {
+                    result.nextBodyType = type;
+                    result.nextBodyReference = reference;
+                }
+                if (mode == RetailCensusMode::CodePostGfxMaterial &&
+                    assetIndex < prefixTypes.size())
+                {
+                    prefixTypes[assetIndex] = type;
+                    prefixReferences[assetIndex] = reference;
+                    topLevelAliasSlots[assetIndex] = {
+                        4u,
+                        result.assetTableBlock4Offset + assetIndex * ASSET_BYTES + 4u,
+                        4u,
+                    };
+                    if (const RetailCensusError error = MapRegistryError(
+                            registry.ReserveAlias(topLevelAliasSlots[assetIndex], type));
+                        error != RetailCensusError::None)
+                        return error;
+                }
+                else if (mode == RetailCensusMode::WorldTechniqueSetPrefix ||
+                    mode == RetailCensusMode::WorldXModelPrefix ||
+                    mode == RetailCensusMode::WorldXSurfacePrefix)
+                {
+                    try
+                    {
+                        worldAssetTypes.push_back(type);
+                        worldAssetReferences.push_back(reference);
+                    }
+                    catch (...) { return RetailCensusError::AllocationFailed; }
                 }
                 ++result.typeCounts[type];
                 if (reference == 0u) ++result.nullAssetReferences;
@@ -507,6 +923,1064 @@ struct RetailFastfileCensusJob::Impl
                 cursor += ASSET_BYTES;
                 ++report.recordsProcessed;
                 continue;
+            }
+            if (stage == RetailCensusStage::WorldTechniqueSet)
+            {
+                const int visit = visitRecord(TECHNIQUE_SET_BYTES);
+                if (visit <= 0) return RetailCensusError::None;
+                const std::uint8_t *record = inflated.data() + cursor;
+                if (ReadU32(record) != INLINE_POINTER || record[5u] != 0u ||
+                    record[6u] != 0u || record[7u] != 0u)
+                    return RetailCensusError::TechniqueSetLayoutUnsupported;
+                RetailWorldTechniqueSet &entry = result.worldTechniqueSets.back();
+                entry.worldVertFormat = record[4u];
+                entry.remapReference = ReadU32(record + 8u);
+                for (std::uint32_t index = 0u; index < techniqueTokens.size(); ++index)
+                    techniqueTokens[index] = ReadU32(record + 12u + index * 4u);
+                if (worldBodyIndex == 0u)
+                {
+                    result.worldFirstTechniqueSetWorldVertFormat = entry.worldVertFormat;
+                    result.worldFirstTechniqueSetRemapReference = entry.remapReference;
+                    result.worldFirstTechniqueSetHeaderTraversed = true;
+                }
+                cursor += TECHNIQUE_SET_BYTES;
+                ++report.recordsProcessed;
+                if (const RetailCensusError error = Push(4u);
+                    error != RetailCensusError::None) return error;
+                stage = RetailCensusStage::WorldTechniqueSetName;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldTechniqueSetName)
+            {
+                RetailWorldTechniqueSet &entry = result.worldTechniqueSets.back();
+                const auto begin = inflated.begin() + static_cast<std::ptrdiff_t>(cursor);
+                const auto terminator = std::find(begin, inflated.end(), 0u);
+                if (terminator == inflated.end())
+                {
+                    if (inflated.size() - cursor >= limits.maxTechniqueNameBytes)
+                        return RetailCensusError::TechniqueSetNameTooLong;
+                    blocked = true;
+                    return RetailCensusError::None;
+                }
+                const std::size_t bytes = static_cast<std::size_t>(terminator - begin) + 1u;
+                if (bytes <= 1u) return RetailCensusError::TechniqueSetNameInvalid;
+                if (bytes > limits.maxTechniqueNameBytes)
+                    return RetailCensusError::TechniqueSetNameTooLong;
+                if (recordVisited == 0u)
+                {
+                    ZoneSpan span;
+                    if (const RetailCensusError error = Plan(1u, bytes, &span);
+                        error != RetailCensusError::None) return error;
+                    entry.nameBlock4Offset = span.offset;
+                    if (worldBodyIndex == 0u)
+                        result.worldFirstTechniqueSetNameBlock4Offset = span.offset;
+                }
+                const int visit = visitRecord(bytes);
+                if (visit <= 0) return RetailCensusError::None;
+                try
+                {
+                    entry.name.assign(
+                        reinterpret_cast<const char *>(inflated.data() + cursor), bytes - 1u);
+                }
+                catch (...) { return RetailCensusError::AllocationFailed; }
+                if (!ValidPublishedName(entry.name))
+                    return RetailCensusError::TechniqueSetNameInvalid;
+                cursor += bytes;
+                ++report.recordsProcessed;
+                for (std::uint32_t index = 0u; index < techniqueTokens.size(); ++index)
+                {
+                    const std::uint32_t token = techniqueTokens[index];
+                    if (token == 0u)
+                    {
+                        ++entry.nullTechniqueReferences;
+                        continue;
+                    }
+                    if (entry.firstTechniqueSlot == UINT32_MAX)
+                    {
+                        entry.firstTechniqueSlot = index;
+                        entry.firstTechniqueReference = token;
+                    }
+                    if (token == INLINE_POINTER)
+                        ++entry.inlineTechniqueReferences;
+                    else if (token == SHARED_POINTER)
+                        ++entry.sharedTechniqueReferences;
+                    else
+                        ++entry.aliasTechniqueReferences;
+                }
+                entry.boundaryInflatedOffset = static_cast<std::uint32_t>(cursor);
+                if (worldBodyIndex == 0u)
+                {
+                    try { result.worldFirstTechniqueSetName = entry.name; }
+                    catch (...) { return RetailCensusError::AllocationFailed; }
+                    result.worldFirstTechniqueSlot = entry.firstTechniqueSlot;
+                    result.worldFirstTechniqueReference = entry.firstTechniqueReference;
+                    result.worldTechniqueNullReferences = entry.nullTechniqueReferences;
+                    result.worldTechniqueInlineReferences = entry.inlineTechniqueReferences;
+                    result.worldTechniqueSharedReferences = entry.sharedTechniqueReferences;
+                    result.worldTechniqueAliasReferences = entry.aliasTechniqueReferences;
+                    result.worldFirstTechniqueSetBoundaryInflatedOffset =
+                        entry.boundaryInflatedOffset;
+                }
+                result.block0HighWaterAtBoundary = arenas.HighWater(0u);
+                result.block4CursorAtBoundary = arenas.Cursor(4u);
+                result.stoppedBeforeAssetBody = false;
+                if (entry.firstTechniqueSlot == UINT32_MAX)
+                {
+                    if (const RetailCensusError error = Pop();
+                        error != RetailCensusError::None) return error;
+                    if (const RetailCensusError error = Pop();
+                        error != RetailCensusError::None) return error;
+                    if (const RetailCensusError error = MapRegistryError(
+                            registry.RegisterAsset(
+                                ASSET_TYPE_TECHNIQUE_SET,
+                                entry.assetIndex,
+                                entry.name,
+                                entry.identity));
+                        error != RetailCensusError::None) return error;
+                    if (const RetailCensusError error = MapRegistryError(
+                            registry.PublishAlias(
+                                worldTopLevelAliasSlot,
+                                entry.identity));
+                        error != RetailCensusError::None) return error;
+                    entry.published = true;
+                    ++result.completedAssetCount;
+                    if (worldBodyIndex == 0u)
+                    {
+                        result.worldFirstTechniqueSetIdentity = entry.identity;
+                        result.worldFirstTechniqueSetPublished = true;
+                    }
+                    result.stoppedBeforeWorldTechniqueDependency = false;
+
+                    const std::uint32_t nextIndex = worldBodyIndex + 1u;
+                    result.worldNextAssetIndex = nextIndex;
+                    result.nextBodyIndex = nextIndex;
+                    if (nextIndex >= worldAssetTypes.size())
+                    {
+                        result.unsupportedOperation = "Load_XAssetHeader(end of table)";
+                    }
+                    else
+                    {
+                        result.nextBodyType = worldAssetTypes[nextIndex];
+                        result.nextBodyReference = worldAssetReferences[nextIndex];
+                        if (result.nextBodyType == ASSET_TYPE_TECHNIQUE_SET &&
+                            result.nextBodyReference == INLINE_POINTER)
+                        {
+                            worldBodyIndex = nextIndex;
+                            if (const RetailCensusError error = BeginWorldTechniqueSet(stage);
+                                error != RetailCensusError::None) return error;
+                            continue;
+                        }
+                        if ((mode == RetailCensusMode::WorldXModelPrefix ||
+                             mode == RetailCensusMode::WorldXSurfacePrefix) &&
+                            result.nextBodyType == ASSET_TYPE_XMODEL &&
+                            result.nextBodyReference == INLINE_POINTER)
+                        {
+                            if (const RetailCensusError error = BeginWorldXModel(
+                                    nextIndex, stage);
+                                error != RetailCensusError::None) return error;
+                            continue;
+                        }
+                        result.stoppedBeforeDifferentWorldAssetType =
+                            result.nextBodyType != ASSET_TYPE_TECHNIQUE_SET;
+                        result.unsupportedOperation = result.stoppedBeforeDifferentWorldAssetType
+                            ? "Load_XAssetHeader(non-technique-set)"
+                            : "Load_XAssetHeader(non-inline technique-set)";
+                    }
+                }
+                else
+                {
+                    result.worldNextAssetIndex = worldBodyIndex;
+                    result.nextBodyIndex = worldBodyIndex;
+                    result.nextBodyType = ASSET_TYPE_TECHNIQUE_SET;
+                    result.nextBodyReference = INLINE_POINTER;
+                    result.stoppedBeforeWorldTechniqueDependency = true;
+                    result.unsupportedOperation = "Load_MaterialTechnique";
+                }
+                result.worldRegistryAliasCount = registry.AliasCount();
+                result.worldRegistryDefinedAliasCount = registry.DefinedAliasCount();
+                stage = RetailCensusStage::AssetBoundary;
+                complete = true;
+                return RetailCensusError::None;
+            }
+            if (stage == RetailCensusStage::WorldXModel)
+            {
+                const int visit = visitRecord(XMODEL_BYTES);
+                if (visit <= 0) return RetailCensusError::None;
+                const std::uint8_t *record = inflated.data() + cursor;
+                RetailWorldXModel &model = result.worldFirstXModel;
+                if (ReadU32(record) != INLINE_POINTER)
+                    return RetailCensusError::XModelLayoutUnsupported;
+                model.numBones = record[4u];
+                model.numRootBones = record[5u];
+                model.surfaceCount = record[6u];
+                model.lodRampType = record[7u];
+                model.boneNamesReference = ReadU32(record + 8u);
+                model.parentListReference = ReadU32(record + 12u);
+                model.quatsReference = ReadU32(record + 16u);
+                model.transReference = ReadU32(record + 20u);
+                model.partClassificationReference = ReadU32(record + 24u);
+                model.baseMatReference = ReadU32(record + 28u);
+                model.surfacesReference = ReadU32(record + 32u);
+                model.materialHandlesReference = ReadU32(record + 36u);
+                for (std::size_t index = 0u; index < model.lods.size(); ++index)
+                {
+                    const std::uint8_t *lodRecord = record + 40u + index * 28u;
+                    RetailXModelLod &lod = model.lods[index];
+                    lod.distance = ReadF32(lodRecord);
+                    lod.surfaceCount = ReadU16(lodRecord + 4u);
+                    lod.surfaceIndex = ReadU16(lodRecord + 6u);
+                    for (std::size_t bit = 0u; bit < lod.partBits.size(); ++bit)
+                        lod.partBits[bit] = ReadU32(lodRecord + 8u + bit * 4u);
+                    lod.lod = lodRecord[24u];
+                    lod.smcIndexPlusOne = lodRecord[25u];
+                    lod.smcAllocBits = lodRecord[26u];
+                    if (lodRecord[27u] != 0u)
+                        return RetailCensusError::XModelLayoutUnsupported;
+                }
+                model.collisionSurfacesReference = ReadU32(record + 152u);
+                model.collisionSurfaceCount = ReadU32(record + 156u);
+                model.contents = ReadU32(record + 160u);
+                model.boneInfoReference = ReadU32(record + 164u);
+                model.radius = ReadF32(record + 168u);
+                for (std::size_t axis = 0u; axis < 3u; ++axis)
+                {
+                    model.mins[axis] = ReadF32(record + 172u + axis * 4u);
+                    model.maxs[axis] = ReadF32(record + 184u + axis * 4u);
+                }
+                model.lodCount = ReadS16(record + 196u);
+                model.collisionLod = ReadS16(record + 198u);
+                model.memoryUsage = ReadU32(record + 204u);
+                model.flags = record[208u];
+                model.bad = record[209u] != 0u;
+                model.physPresetReference = ReadU32(record + 212u);
+                model.physGeomsReference = ReadU32(record + 216u);
+
+                const std::uint32_t childBones =
+                    static_cast<std::uint32_t>(model.numBones) -
+                    static_cast<std::uint32_t>(model.numRootBones);
+                if (model.numRootBones > model.numBones || model.lodRampType > 1u ||
+                    model.lodCount <= 0 || model.lodCount > 4 ||
+                    model.collisionLod < -1 || model.collisionLod >= model.lodCount ||
+                    model.collisionSurfaceCount > limits.maxXModelCollisionSurfaces ||
+                    record[209u] > 1u)
+                {
+                    return RetailCensusError::XModelCountInvalid;
+                }
+                if (!std::isfinite(model.radius) || model.radius < 0.0f)
+                    return RetailCensusError::XModelBoundsInvalid;
+                for (std::size_t axis = 0u; axis < 3u; ++axis)
+                {
+                    if (!std::isfinite(model.mins[axis]) ||
+                        !std::isfinite(model.maxs[axis]) ||
+                        model.mins[axis] > model.maxs[axis])
+                    {
+                        return RetailCensusError::XModelBoundsInvalid;
+                    }
+                }
+                for (std::int32_t index = 0; index < model.lodCount; ++index)
+                {
+                    const RetailXModelLod &lod = model.lods[static_cast<std::size_t>(index)];
+                    if (!std::isfinite(lod.distance) || lod.distance < 0.0f ||
+                        static_cast<std::uint32_t>(lod.surfaceIndex) + lod.surfaceCount >
+                            model.surfaceCount)
+                    {
+                        return RetailCensusError::XModelCountInvalid;
+                    }
+                }
+                const auto pointerMatchesCount = [](std::uint32_t token,
+                                                     std::uint32_t count) noexcept {
+                    return (count == 0u) == (token == 0u);
+                };
+                if (!pointerMatchesCount(model.boneNamesReference, model.numBones) ||
+                    !pointerMatchesCount(model.parentListReference, childBones) ||
+                    !pointerMatchesCount(model.quatsReference, childBones) ||
+                    !pointerMatchesCount(model.transReference, childBones) ||
+                    !pointerMatchesCount(model.partClassificationReference, model.numBones) ||
+                    !pointerMatchesCount(model.baseMatReference, model.numBones) ||
+                    !pointerMatchesCount(model.surfacesReference, model.surfaceCount) ||
+                    !pointerMatchesCount(model.materialHandlesReference, model.surfaceCount) ||
+                    !pointerMatchesCount(
+                        model.collisionSurfacesReference, model.collisionSurfaceCount) ||
+                    !pointerMatchesCount(model.boneInfoReference, model.numBones))
+                {
+                    return RetailCensusError::XModelLayoutUnsupported;
+                }
+                model.headerTraversed = true;
+                cursor += XMODEL_BYTES;
+                ++report.recordsProcessed;
+                if (const RetailCensusError error = Push(4u);
+                    error != RetailCensusError::None) return error;
+                stage = RetailCensusStage::WorldXModelName;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldXModelName)
+            {
+                RetailWorldXModel &model = result.worldFirstXModel;
+                const auto begin = inflated.begin() + static_cast<std::ptrdiff_t>(cursor);
+                const auto terminator = std::find(begin, inflated.end(), 0u);
+                if (terminator == inflated.end())
+                {
+                    if (inflated.size() - cursor >= limits.maxXModelNameBytes)
+                        return RetailCensusError::XModelNameTooLong;
+                    blocked = true;
+                    return RetailCensusError::None;
+                }
+                const std::size_t bytes = static_cast<std::size_t>(terminator - begin) + 1u;
+                if (bytes <= 1u) return RetailCensusError::XModelNameInvalid;
+                if (bytes > limits.maxXModelNameBytes)
+                    return RetailCensusError::XModelNameTooLong;
+                if (recordVisited == 0u)
+                {
+                    ZoneSpan span;
+                    if (const RetailCensusError error = Plan(1u, bytes, &span);
+                        error != RetailCensusError::None) return error;
+                    model.nameBlock4Offset = span.offset;
+                }
+                const int visit = visitRecord(bytes);
+                if (visit <= 0) return RetailCensusError::None;
+                try
+                {
+                    model.name.assign(
+                        reinterpret_cast<const char *>(inflated.data() + cursor), bytes - 1u);
+                }
+                catch (...) { return RetailCensusError::AllocationFailed; }
+                if (!ValidPublishedName(model.name))
+                    return RetailCensusError::XModelNameInvalid;
+                cursor += bytes;
+                ++report.recordsProcessed;
+                stage = RetailCensusStage::WorldXModelBoneNames;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldXModelBoneNames)
+            {
+                RetailWorldXModel &model = result.worldFirstXModel;
+                if (model.numBones == 0u)
+                {
+                    stage = RetailCensusStage::WorldXModelParentList;
+                    continue;
+                }
+                if (model.boneNamesReference != INLINE_POINTER)
+                {
+                    finishWorldXModel("Load_ScriptStringArray", true, false);
+                    return RetailCensusError::None;
+                }
+                const std::size_t bytes = static_cast<std::size_t>(model.numBones) * 2u;
+                if (!Available(bytes))
+                {
+                    blocked = true;
+                    return RetailCensusError::None;
+                }
+                if (recordVisited == 0u)
+                {
+                    ZoneSpan span;
+                    if (const RetailCensusError error = Plan(2u, bytes, &span);
+                        error != RetailCensusError::None) return error;
+                    model.boneNamesBlock4Offset = span.offset;
+                }
+                const int visit = visitRecord(bytes);
+                if (visit <= 0) return RetailCensusError::None;
+                try
+                {
+                    model.boneNameScriptStringIndices.resize(model.numBones);
+                    model.boneNames.resize(model.numBones);
+                    for (std::size_t index = 0u; index < model.numBones; ++index)
+                    {
+                        const std::uint16_t token = ReadU16(
+                            inflated.data() + cursor + index * 2u);
+                        if (token >= scriptStrings.size() || scriptStrings[token].empty())
+                            return RetailCensusError::XModelScriptStringInvalid;
+                        model.boneNameScriptStringIndices[index] = token;
+                        model.boneNames[index] = scriptStrings[token];
+                    }
+                }
+                catch (...) { return RetailCensusError::AllocationFailed; }
+                cursor += bytes;
+                ++report.recordsProcessed;
+                stage = RetailCensusStage::WorldXModelParentList;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldXModelParentList)
+            {
+                RetailWorldXModel &model = result.worldFirstXModel;
+                const std::uint32_t childBones = model.numBones - model.numRootBones;
+                if (childBones == 0u)
+                {
+                    stage = RetailCensusStage::WorldXModelQuats;
+                    continue;
+                }
+                if (model.parentListReference != INLINE_POINTER)
+                {
+                    finishWorldXModel("Load_byteArray(parentList)", true, false);
+                    return RetailCensusError::None;
+                }
+                if (!Available(childBones))
+                {
+                    blocked = true;
+                    return RetailCensusError::None;
+                }
+                if (recordVisited == 0u)
+                {
+                    ZoneSpan span;
+                    if (const RetailCensusError error = Plan(1u, childBones, &span);
+                        error != RetailCensusError::None) return error;
+                    model.parentListBlock4Offset = span.offset;
+                }
+                const int visit = visitRecord(childBones);
+                if (visit <= 0) return RetailCensusError::None;
+                try
+                {
+                    model.parentList.assign(
+                        inflated.begin() + static_cast<std::ptrdiff_t>(cursor),
+                        inflated.begin() + static_cast<std::ptrdiff_t>(cursor + childBones));
+                }
+                catch (...) { return RetailCensusError::AllocationFailed; }
+                cursor += childBones;
+                ++report.recordsProcessed;
+                stage = RetailCensusStage::WorldXModelQuats;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldXModelQuats)
+            {
+                RetailWorldXModel &model = result.worldFirstXModel;
+                const std::uint32_t childBones = model.numBones - model.numRootBones;
+                if (childBones == 0u)
+                {
+                    stage = RetailCensusStage::WorldXModelTrans;
+                    continue;
+                }
+                if (model.quatsReference != INLINE_POINTER)
+                {
+                    finishWorldXModel("Load_shortArray(quats)", true, false);
+                    return RetailCensusError::None;
+                }
+                const std::size_t bytes = static_cast<std::size_t>(childBones) * 8u;
+                if (!Available(bytes))
+                {
+                    blocked = true;
+                    return RetailCensusError::None;
+                }
+                if (recordVisited == 0u)
+                {
+                    ZoneSpan span;
+                    if (const RetailCensusError error = Plan(2u, bytes, &span);
+                        error != RetailCensusError::None) return error;
+                    model.quatsBlock4Offset = span.offset;
+                }
+                const int visit = visitRecord(bytes);
+                if (visit <= 0) return RetailCensusError::None;
+                cursor += bytes;
+                ++report.recordsProcessed;
+                stage = RetailCensusStage::WorldXModelTrans;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldXModelTrans)
+            {
+                RetailWorldXModel &model = result.worldFirstXModel;
+                const std::uint32_t childBones = model.numBones - model.numRootBones;
+                if (childBones == 0u)
+                {
+                    stage = RetailCensusStage::WorldXModelPartClassification;
+                    continue;
+                }
+                if (model.transReference != INLINE_POINTER)
+                {
+                    finishWorldXModel("Load_floatArray(trans)", true, false);
+                    return RetailCensusError::None;
+                }
+                const std::size_t count = static_cast<std::size_t>(childBones) * 4u;
+                const std::size_t bytes = count * 4u;
+                if (!Available(bytes))
+                {
+                    blocked = true;
+                    return RetailCensusError::None;
+                }
+                if (recordVisited == 0u)
+                {
+                    ZoneSpan span;
+                    if (const RetailCensusError error = Plan(4u, bytes, &span);
+                        error != RetailCensusError::None) return error;
+                    model.transBlock4Offset = span.offset;
+                }
+                const int visit = visitRecord(bytes);
+                if (visit <= 0) return RetailCensusError::None;
+                for (std::size_t index = 0u; index < count; ++index)
+                {
+                    if (!std::isfinite(ReadF32(inflated.data() + cursor + index * 4u)))
+                        return RetailCensusError::XModelBoundsInvalid;
+                }
+                cursor += bytes;
+                ++report.recordsProcessed;
+                stage = RetailCensusStage::WorldXModelPartClassification;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldXModelPartClassification)
+            {
+                RetailWorldXModel &model = result.worldFirstXModel;
+                if (model.numBones == 0u)
+                {
+                    stage = RetailCensusStage::WorldXModelBaseMat;
+                    continue;
+                }
+                if (model.partClassificationReference != INLINE_POINTER)
+                {
+                    finishWorldXModel("Load_byteArray(partClassification)", true, false);
+                    return RetailCensusError::None;
+                }
+                if (!Available(model.numBones))
+                {
+                    blocked = true;
+                    return RetailCensusError::None;
+                }
+                if (recordVisited == 0u)
+                {
+                    ZoneSpan span;
+                    if (const RetailCensusError error = Plan(1u, model.numBones, &span);
+                        error != RetailCensusError::None) return error;
+                    model.partClassificationBlock4Offset = span.offset;
+                }
+                const int visit = visitRecord(model.numBones);
+                if (visit <= 0) return RetailCensusError::None;
+                try
+                {
+                    model.partClassification.assign(
+                        inflated.begin() + static_cast<std::ptrdiff_t>(cursor),
+                        inflated.begin() + static_cast<std::ptrdiff_t>(
+                            cursor + model.numBones));
+                }
+                catch (...) { return RetailCensusError::AllocationFailed; }
+                cursor += model.numBones;
+                ++report.recordsProcessed;
+                stage = RetailCensusStage::WorldXModelBaseMat;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldXModelBaseMat)
+            {
+                RetailWorldXModel &model = result.worldFirstXModel;
+                if (model.numBones != 0u)
+                {
+                    if (model.baseMatReference != INLINE_POINTER)
+                    {
+                        finishWorldXModel("Load_DObjAnimMatArray", true, false);
+                        return RetailCensusError::None;
+                    }
+                    const std::size_t floatCount =
+                        static_cast<std::size_t>(model.numBones) * 8u;
+                    const std::size_t bytes =
+                        static_cast<std::size_t>(model.numBones) * DOBJ_ANIM_MAT_BYTES;
+                    if (!Available(bytes))
+                    {
+                        blocked = true;
+                        return RetailCensusError::None;
+                    }
+                    if (recordVisited == 0u)
+                    {
+                        ZoneSpan span;
+                        if (const RetailCensusError error = Plan(4u, bytes, &span);
+                            error != RetailCensusError::None) return error;
+                        model.baseMatBlock4Offset = span.offset;
+                    }
+                    const int visit = visitRecord(bytes);
+                    if (visit <= 0) return RetailCensusError::None;
+                    for (std::size_t index = 0u; index < floatCount; ++index)
+                    {
+                        if (!std::isfinite(ReadF32(
+                                inflated.data() + cursor + index * 4u)))
+                        {
+                            return RetailCensusError::XModelBoundsInvalid;
+                        }
+                    }
+                    cursor += bytes;
+                    ++report.recordsProcessed;
+                }
+                model.skeletonPrefixTraversed = true;
+                if (model.surfacesReference != 0u)
+                {
+                    if (mode != RetailCensusMode::WorldXSurfacePrefix)
+                    {
+                        finishWorldXModel("Load_XSurfaceArray", true, true);
+                        return RetailCensusError::None;
+                    }
+                    stage = RetailCensusStage::WorldXModelSurfaceHeaders;
+                    continue;
+                }
+                finishWorldXModel("Load_MaterialHandleArray", true, false);
+                return RetailCensusError::None;
+            }
+            if (stage == RetailCensusStage::WorldXModelSurfaceHeaders)
+            {
+                RetailWorldXModel &model = result.worldFirstXModel;
+                const std::size_t bytes =
+                    static_cast<std::size_t>(model.surfaceCount) * XSURFACE_BYTES;
+                if (!Available(bytes))
+                {
+                    blocked = true;
+                    return RetailCensusError::None;
+                }
+                if (recordVisited == 0u)
+                {
+                    ZoneSpan span;
+                    if (const RetailCensusError error = Plan(4u, bytes, &span);
+                        error != RetailCensusError::None) return error;
+                    if (const RetailCensusError error = addSurfacePayload(bytes);
+                        error != RetailCensusError::None) return error;
+                    model.surfacesBlock4Offset = span.offset;
+                }
+                const int visit = visitRecord(bytes);
+                if (visit <= 0) return RetailCensusError::None;
+                try
+                {
+                    model.surfaces.resize(model.surfaceCount);
+                }
+                catch (...) { return RetailCensusError::AllocationFailed; }
+                std::uint64_t totalVertices = 0u;
+                std::uint64_t totalTriangles = 0u;
+                std::uint64_t totalVertLists = 0u;
+                for (std::size_t index = 0u; index < model.surfaces.size(); ++index)
+                {
+                    const std::uint8_t *record =
+                        inflated.data() + cursor + index * XSURFACE_BYTES;
+                    RetailXSurface &surface = model.surfaces[index];
+                    surface.index = static_cast<std::uint32_t>(index);
+                    surface.tileMode = record[0u];
+                    if (record[1u] > 1u)
+                        return RetailCensusError::XSurfaceLayoutUnsupported;
+                    surface.deformed = record[1u] != 0u;
+                    surface.vertCount = ReadU16(record + 2u);
+                    surface.triCount = ReadU16(record + 4u);
+                    surface.zoneHandle = record[6u];
+                    surface.baseTriIndex = ReadU16(record + 8u);
+                    surface.baseVertIndex = ReadU16(record + 10u);
+                    surface.triIndicesReference = ReadU32(record + 12u);
+                    for (std::size_t weight = 0u; weight < 4u; ++weight)
+                    {
+                        surface.blendVertCounts[weight] =
+                            ReadS16(record + 16u + weight * 2u);
+                        if (surface.blendVertCounts[weight] < 0)
+                            return RetailCensusError::XSurfaceCountInvalid;
+                    }
+                    surface.vertsBlendReference = ReadU32(record + 24u);
+                    surface.vertsReference = ReadU32(record + 28u);
+                    surface.vertListCount = ReadU32(record + 32u);
+                    surface.vertListReference = ReadU32(record + 36u);
+                    for (std::size_t part = 0u; part < 4u; ++part)
+                        surface.partBits[part] = ReadU32(record + 40u + part * 4u);
+
+                    const std::uint32_t blendVertices =
+                        static_cast<std::uint32_t>(surface.blendVertCounts[0]) +
+                        static_cast<std::uint32_t>(surface.blendVertCounts[1]) +
+                        static_cast<std::uint32_t>(surface.blendVertCounts[2]) +
+                        static_cast<std::uint32_t>(surface.blendVertCounts[3]);
+                    surface.blendWordCount =
+                        static_cast<std::uint32_t>(surface.blendVertCounts[0]) +
+                        3u * static_cast<std::uint32_t>(surface.blendVertCounts[1]) +
+                        5u * static_cast<std::uint32_t>(surface.blendVertCounts[2]) +
+                        7u * static_cast<std::uint32_t>(surface.blendVertCounts[3]);
+                    const auto pointerMatchesCount = [](std::uint32_t token,
+                                                         std::uint32_t count) noexcept {
+                        return (count == 0u) == (token == 0u);
+                    };
+                    if (blendVertices > surface.vertCount ||
+                        !pointerMatchesCount(
+                            surface.vertsBlendReference, surface.blendWordCount) ||
+                        !pointerMatchesCount(surface.vertsReference, surface.vertCount) ||
+                        !pointerMatchesCount(
+                            surface.triIndicesReference, surface.triCount) ||
+                        !pointerMatchesCount(
+                            surface.vertListReference, surface.vertListCount) ||
+                        static_cast<std::uint32_t>(surface.baseVertIndex) +
+                            surface.vertCount > 65536u ||
+                        static_cast<std::uint32_t>(surface.baseTriIndex) +
+                            surface.triCount > 65536u)
+                    {
+                        return RetailCensusError::XSurfaceLayoutUnsupported;
+                    }
+                    totalVertices += surface.vertCount;
+                    totalTriangles += surface.triCount;
+                    totalVertLists += surface.vertListCount;
+                    if (totalVertices > limits.maxXModelSurfaceVertices ||
+                        totalTriangles > limits.maxXModelSurfaceTriangles ||
+                        totalVertLists > limits.maxXModelRigidVertLists)
+                    {
+                        return RetailCensusError::XSurfaceCountInvalid;
+                    }
+                }
+                model.totalVertices = static_cast<std::uint32_t>(totalVertices);
+                model.totalTriangles = static_cast<std::uint32_t>(totalTriangles);
+                model.totalRigidVertLists = static_cast<std::uint32_t>(totalVertLists);
+                model.surfaceHeadersTraversed = true;
+                cursor += bytes;
+                ++report.recordsProcessed;
+                worldSurfaceIndex = 0u;
+                stage = RetailCensusStage::WorldXModelSurfaceBlendInfo;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldXModelSurfaceBlendInfo)
+            {
+                RetailWorldXModel &model = result.worldFirstXModel;
+                if (worldSurfaceIndex >= model.surfaces.size())
+                {
+                    model.surfaceDependenciesTraversed = true;
+                    stage = RetailCensusStage::WorldXModelMaterialHandles;
+                    continue;
+                }
+                RetailXSurface &surface = model.surfaces[worldSurfaceIndex];
+                if (surface.vertsBlendReference == INLINE_POINTER)
+                {
+                    const std::size_t bytes =
+                        static_cast<std::size_t>(surface.blendWordCount) * 2u;
+                    if (!Available(bytes))
+                    {
+                        blocked = true;
+                        return RetailCensusError::None;
+                    }
+                    if (recordVisited == 0u)
+                    {
+                        ZoneSpan span;
+                        if (const RetailCensusError error = Plan(2u, bytes, &span);
+                            error != RetailCensusError::None) return error;
+                        if (const RetailCensusError error = addSurfacePayload(bytes);
+                            error != RetailCensusError::None) return error;
+                        surface.blendInfoBlock4Offset = span.offset;
+                    }
+                    const int visit = visitRecord(bytes);
+                    if (visit <= 0) return RetailCensusError::None;
+                    cursor += bytes;
+                    ++report.recordsProcessed;
+                }
+                if (const RetailCensusError error = Push(7u);
+                    error != RetailCensusError::None) return error;
+                stage = RetailCensusStage::WorldXModelSurfaceVertices;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldXModelSurfaceVertices)
+            {
+                RetailXSurface &surface =
+                    result.worldFirstXModel.surfaces[worldSurfaceIndex];
+                if (surface.vertsReference == INLINE_POINTER)
+                {
+                    const std::size_t bytes =
+                        static_cast<std::size_t>(surface.vertCount) *
+                        GFX_PACKED_VERTEX_BYTES;
+                    if (!Available(bytes))
+                    {
+                        blocked = true;
+                        return RetailCensusError::None;
+                    }
+                    if (recordVisited == 0u)
+                    {
+                        ZoneSpan span;
+                        if (const RetailCensusError error = Plan(16u, bytes, &span);
+                            error != RetailCensusError::None) return error;
+                        if (const RetailCensusError error = addSurfacePayload(bytes);
+                            error != RetailCensusError::None) return error;
+                        surface.verticesBlock7Offset = span.offset;
+                    }
+                    const int visit = visitRecord(bytes);
+                    if (visit <= 0) return RetailCensusError::None;
+                    surface.verticesHash = Fnv1a32(
+                        std::span<const std::uint8_t>(inflated.data() + cursor, bytes));
+                    cursor += bytes;
+                    ++report.recordsProcessed;
+                }
+                if (const RetailCensusError error = Pop();
+                    error != RetailCensusError::None) return error;
+                stage = RetailCensusStage::WorldXModelSurfaceVertLists;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldXModelSurfaceVertLists)
+            {
+                RetailXSurface &surface =
+                    result.worldFirstXModel.surfaces[worldSurfaceIndex];
+                if (surface.vertListReference == INLINE_POINTER)
+                {
+                    const std::size_t bytes =
+                        static_cast<std::size_t>(surface.vertListCount) *
+                        RIGID_VERT_LIST_BYTES;
+                    if (!Available(bytes))
+                    {
+                        blocked = true;
+                        return RetailCensusError::None;
+                    }
+                    if (recordVisited == 0u)
+                    {
+                        ZoneSpan span;
+                        if (const RetailCensusError error = Plan(4u, bytes, &span);
+                            error != RetailCensusError::None) return error;
+                        if (const RetailCensusError error = addSurfacePayload(bytes);
+                            error != RetailCensusError::None) return error;
+                        surface.vertListsBlock4Offset = span.offset;
+                    }
+                    const int visit = visitRecord(bytes);
+                    if (visit <= 0) return RetailCensusError::None;
+                    try
+                    {
+                        surface.rigidVertLists.resize(surface.vertListCount);
+                    }
+                    catch (...) { return RetailCensusError::AllocationFailed; }
+                    std::uint64_t listedVertices = 0u;
+                    std::uint64_t listedTriangles = 0u;
+                    for (std::size_t index = 0u;
+                         index < surface.rigidVertLists.size(); ++index)
+                    {
+                        const std::uint8_t *record = inflated.data() + cursor +
+                            index * RIGID_VERT_LIST_BYTES;
+                        RetailXRigidVertList &list = surface.rigidVertLists[index];
+                        list.boneOffset = ReadU16(record);
+                        list.vertCount = ReadU16(record + 2u);
+                        list.triOffset = ReadU16(record + 4u);
+                        list.triCount = ReadU16(record + 6u);
+                        list.collisionTree.reference = ReadU32(record + 8u);
+                        listedVertices += list.vertCount;
+                        listedTriangles += list.triCount;
+                        if (static_cast<std::uint32_t>(list.triOffset) +
+                                list.triCount > surface.triCount ||
+                            listedVertices > surface.vertCount ||
+                            listedTriangles > surface.triCount)
+                        {
+                            return RetailCensusError::XSurfaceCountInvalid;
+                        }
+                    }
+                    cursor += bytes;
+                    ++report.recordsProcessed;
+                    worldRigidVertListIndex = 0u;
+                    stage = RetailCensusStage::WorldXModelSurfaceCollisionTree;
+                    continue;
+                }
+                if (const RetailCensusError error = Push(8u);
+                    error != RetailCensusError::None) return error;
+                stage = RetailCensusStage::WorldXModelSurfaceIndices;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldXModelSurfaceCollisionTree)
+            {
+                RetailXSurface &surface =
+                    result.worldFirstXModel.surfaces[worldSurfaceIndex];
+                if (worldRigidVertListIndex >= surface.rigidVertLists.size())
+                {
+                    if (const RetailCensusError error = Push(8u);
+                        error != RetailCensusError::None) return error;
+                    stage = RetailCensusStage::WorldXModelSurfaceIndices;
+                    continue;
+                }
+                RetailXSurfaceCollisionTree &tree =
+                    surface.rigidVertLists[worldRigidVertListIndex].collisionTree;
+                if (tree.reference != INLINE_POINTER)
+                {
+                    ++worldRigidVertListIndex;
+                    continue;
+                }
+                if (!Available(SURFACE_COLLISION_TREE_BYTES))
+                {
+                    blocked = true;
+                    return RetailCensusError::None;
+                }
+                if (recordVisited == 0u)
+                {
+                    ZoneSpan span;
+                    if (const RetailCensusError error = Plan(
+                            4u, SURFACE_COLLISION_TREE_BYTES, &span);
+                        error != RetailCensusError::None) return error;
+                    if (const RetailCensusError error = addSurfacePayload(
+                            SURFACE_COLLISION_TREE_BYTES);
+                        error != RetailCensusError::None) return error;
+                    tree.headerBlock4Offset = span.offset;
+                }
+                const int visit = visitRecord(SURFACE_COLLISION_TREE_BYTES);
+                if (visit <= 0) return RetailCensusError::None;
+                const std::uint8_t *record = inflated.data() + cursor;
+                for (std::size_t axis = 0u; axis < 3u; ++axis)
+                {
+                    tree.translation[axis] = ReadF32(record + axis * 4u);
+                    tree.scale[axis] = ReadF32(record + 12u + axis * 4u);
+                    if (!std::isfinite(tree.translation[axis]) ||
+                        !std::isfinite(tree.scale[axis]) ||
+                        tree.scale[axis] <= 0.0f)
+                    {
+                        return RetailCensusError::XSurfaceCollisionInvalid;
+                    }
+                }
+                tree.nodeCount = ReadU32(record + 24u);
+                tree.nodesReference = ReadU32(record + 28u);
+                tree.leafCount = ReadU32(record + 32u);
+                tree.leafsReference = ReadU32(record + 36u);
+                if ((tree.nodeCount == 0u) != (tree.nodesReference == 0u) ||
+                    (tree.leafCount == 0u) != (tree.leafsReference == 0u) ||
+                    static_cast<std::uint64_t>(
+                        result.worldFirstXModel.totalCollisionNodes) +
+                            tree.nodeCount > limits.maxXModelCollisionNodes ||
+                    static_cast<std::uint64_t>(
+                        result.worldFirstXModel.totalCollisionLeaves) +
+                            tree.leafCount > limits.maxXModelCollisionLeaves)
+                {
+                    return RetailCensusError::XSurfaceCollisionInvalid;
+                }
+                result.worldFirstXModel.totalCollisionNodes += tree.nodeCount;
+                result.worldFirstXModel.totalCollisionLeaves += tree.leafCount;
+                cursor += SURFACE_COLLISION_TREE_BYTES;
+                ++report.recordsProcessed;
+                stage = RetailCensusStage::WorldXModelSurfaceCollisionNodes;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldXModelSurfaceCollisionNodes)
+            {
+                RetailXSurfaceCollisionTree &tree =
+                    result.worldFirstXModel.surfaces[worldSurfaceIndex]
+                        .rigidVertLists[worldRigidVertListIndex].collisionTree;
+                if (tree.nodesReference != 0u)
+                {
+                    const std::size_t bytes =
+                        static_cast<std::size_t>(tree.nodeCount) *
+                        SURFACE_COLLISION_NODE_BYTES;
+                    if (!Available(bytes))
+                    {
+                        blocked = true;
+                        return RetailCensusError::None;
+                    }
+                    if (recordVisited == 0u)
+                    {
+                        ZoneSpan span;
+                        if (const RetailCensusError error = Plan(16u, bytes, &span);
+                            error != RetailCensusError::None) return error;
+                        if (const RetailCensusError error = addSurfacePayload(bytes);
+                            error != RetailCensusError::None) return error;
+                        tree.nodesBlock4Offset = span.offset;
+                    }
+                    const int visit = visitRecord(bytes);
+                    if (visit <= 0) return RetailCensusError::None;
+                    tree.nodesHash = Fnv1a32(
+                        std::span<const std::uint8_t>(inflated.data() + cursor, bytes));
+                    cursor += bytes;
+                    ++report.recordsProcessed;
+                }
+                stage = RetailCensusStage::WorldXModelSurfaceCollisionLeaves;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldXModelSurfaceCollisionLeaves)
+            {
+                RetailXSurfaceCollisionTree &tree =
+                    result.worldFirstXModel.surfaces[worldSurfaceIndex]
+                        .rigidVertLists[worldRigidVertListIndex].collisionTree;
+                if (tree.leafsReference != 0u)
+                {
+                    const std::size_t bytes =
+                        static_cast<std::size_t>(tree.leafCount) *
+                        SURFACE_COLLISION_LEAF_BYTES;
+                    if (!Available(bytes))
+                    {
+                        blocked = true;
+                        return RetailCensusError::None;
+                    }
+                    if (recordVisited == 0u)
+                    {
+                        ZoneSpan span;
+                        if (const RetailCensusError error = Plan(2u, bytes, &span);
+                            error != RetailCensusError::None) return error;
+                        if (const RetailCensusError error = addSurfacePayload(bytes);
+                            error != RetailCensusError::None) return error;
+                        tree.leafsBlock4Offset = span.offset;
+                    }
+                    const int visit = visitRecord(bytes);
+                    if (visit <= 0) return RetailCensusError::None;
+                    tree.leafsHash = Fnv1a32(
+                        std::span<const std::uint8_t>(inflated.data() + cursor, bytes));
+                    cursor += bytes;
+                    ++report.recordsProcessed;
+                }
+                tree.traversed = true;
+                ++worldRigidVertListIndex;
+                stage = RetailCensusStage::WorldXModelSurfaceCollisionTree;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldXModelSurfaceIndices)
+            {
+                RetailXSurface &surface =
+                    result.worldFirstXModel.surfaces[worldSurfaceIndex];
+                if (surface.triIndicesReference == INLINE_POINTER)
+                {
+                    const std::size_t bytes =
+                        static_cast<std::size_t>(surface.triCount) * 6u;
+                    if (!Available(bytes))
+                    {
+                        blocked = true;
+                        return RetailCensusError::None;
+                    }
+                    if (recordVisited == 0u)
+                    {
+                        ZoneSpan span;
+                        if (const RetailCensusError error = Plan(16u, bytes, &span);
+                            error != RetailCensusError::None) return error;
+                        if (const RetailCensusError error = addSurfacePayload(bytes);
+                            error != RetailCensusError::None) return error;
+                        surface.indicesBlock8Offset = span.offset;
+                    }
+                    const int visit = visitRecord(bytes);
+                    if (visit <= 0) return RetailCensusError::None;
+                    surface.indicesHash = Fnv1a32(
+                        std::span<const std::uint8_t>(inflated.data() + cursor, bytes));
+                    cursor += bytes;
+                    ++report.recordsProcessed;
+                }
+                if (const RetailCensusError error = Pop();
+                    error != RetailCensusError::None) return error;
+                surface.dependenciesTraversed = true;
+                ++worldSurfaceIndex;
+                stage = RetailCensusStage::WorldXModelSurfaceBlendInfo;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldXModelMaterialHandles)
+            {
+                RetailWorldXModel &model = result.worldFirstXModel;
+                if (model.materialHandlesReference == 0u)
+                {
+                    model.materialHandlesTraversed = true;
+                    finishWorldXModel("Load_XModelCollSurfArray", true, false);
+                    return RetailCensusError::None;
+                }
+                const std::size_t bytes =
+                    static_cast<std::size_t>(model.surfaceCount) * 4u;
+                if (!Available(bytes))
+                {
+                    blocked = true;
+                    return RetailCensusError::None;
+                }
+                if (recordVisited == 0u)
+                {
+                    ZoneSpan span;
+                    if (const RetailCensusError error = Plan(4u, bytes, &span);
+                        error != RetailCensusError::None) return error;
+                    if (const RetailCensusError error = addSurfacePayload(bytes);
+                        error != RetailCensusError::None) return error;
+                    model.materialHandlesBlock4Offset = span.offset;
+                }
+                const int visit = visitRecord(bytes);
+                if (visit <= 0) return RetailCensusError::None;
+                try
+                {
+                    model.materialReferences.resize(model.surfaceCount);
+                    for (std::size_t index = 0u;
+                         index < model.materialReferences.size(); ++index)
+                    {
+                        model.materialReferences[index] =
+                            ReadU32(inflated.data() + cursor + index * 4u);
+                    }
+                }
+                catch (...) { return RetailCensusError::AllocationFailed; }
+                cursor += bytes;
+                ++report.recordsProcessed;
+                model.materialHandlesTraversed = true;
+                const bool hasInlineMaterial = std::any_of(
+                    model.materialReferences.begin(), model.materialReferences.end(),
+                    [](std::uint32_t token) {
+                        return token == INLINE_POINTER || token == SHARED_POINTER;
+                    });
+                if (hasInlineMaterial)
+                {
+                    model.stoppedBeforeMaterialDependency = true;
+                    finishWorldXModel("Load_Material", true, false);
+                    return RetailCensusError::None;
+                }
+                finishWorldXModel("Load_XModelCollSurfArray", true, false);
+                return RetailCensusError::None;
             }
             if (stage == RetailCensusStage::TechniqueSet)
             {
@@ -661,9 +2135,10 @@ struct RetailFastfileCensusJob::Impl
                 const std::uint32_t vertexShaderNameToken = ReadU32(record);
                 const std::uint32_t runtimeShader = ReadU32(record + 4u);
                 const std::uint32_t programToken = ReadU32(record + 8u);
-                const std::uint32_t programDwords = ReadU32(record + 12u);
+                const std::uint32_t programDwords = ReadU16(record + 12u);
+                const std::uint32_t loadForRenderer = ReadU16(record + 14u);
                 if (vertexShaderNameToken != INLINE_POINTER || runtimeShader != 0u ||
-                    programToken != INLINE_POINTER)
+                    programToken != INLINE_POINTER || loadForRenderer != 0u)
                     return RetailCensusError::VertexShaderLayoutUnsupported;
                 if (programDwords == 0u) return RetailCensusError::ShaderProgramSizeInvalid;
                 if (programDwords > limits.maxShaderProgramDwords ||
@@ -754,11 +2229,13 @@ struct RetailFastfileCensusJob::Impl
                 const std::uint32_t nameToken = ReadU32(record);
                 const std::uint32_t runtimeShader = ReadU32(record + 4u);
                 const std::uint32_t programToken = ReadU32(record + 8u);
-                const std::uint32_t programDwords = ReadU32(record + 12u);
+                const std::uint32_t programDwords = ReadU16(record + 12u);
+                const std::uint32_t loadForRenderer = ReadU16(record + 14u);
                 const std::uint32_t expectedNameToken = 0x40000001u +
                     vertexShaderNameBlock4Offset;
                 if (pixelShaderToken != INLINE_POINTER || nameToken != expectedNameToken ||
-                    runtimeShader != 0u || programToken != INLINE_POINTER)
+                    runtimeShader != 0u || programToken != INLINE_POINTER ||
+                    loadForRenderer != 0u)
                     return RetailCensusError::PixelShaderLayoutUnsupported;
                 if (programDwords == 0u) return RetailCensusError::ShaderProgramSizeInvalid;
                 if (programDwords > limits.maxShaderProgramDwords ||
@@ -851,8 +2328,10 @@ struct RetailFastfileCensusJob::Impl
                     return RetailCensusError::TechniqueSetNameTooLong;
                 if (recordVisited == 0u)
                 {
-                    if (const RetailCensusError error = Plan(1u, bytes);
+                    ZoneSpan nameSpan;
+                    if (const RetailCensusError error = Plan(1u, bytes, &nameSpan);
                         error != RetailCensusError::None) return error;
+                    result.techniqueNameBlock4Offset = nameSpan.offset;
                 }
                 const int visit = visitRecord(bytes);
                 if (visit <= 0) return RetailCensusError::None;
@@ -868,13 +2347,544 @@ struct RetailFastfileCensusJob::Impl
                     error != RetailCensusError::None) return error;
                 if (const RetailCensusError error = Pop();
                     error != RetailCensusError::None) return error;
-                result.block0HighWaterAtBoundary = arenas.HighWater(0u);
-                result.block4CursorAtBoundary = arenas.Cursor(4u);
+                if (const RetailCensusError error = MapRegistryError(
+                        registry.RegisterAsset(
+                            ASSET_TYPE_TECHNIQUE_SET, 0u,
+                            result.techniqueSetName,
+                            result.compatibilityTechniqueSetIdentity));
+                    error != RetailCensusError::None) return error;
+                if (const RetailCensusError error = MapRegistryError(
+                        registry.PublishAlias(
+                            topLevelAliasSlots[0],
+                            result.compatibilityTechniqueSetIdentity));
+                    error != RetailCensusError::None) return error;
                 result.completedAssetCount = 1u;
                 result.techniqueSetPublished = true;
                 result.stoppedBeforeAssetBody = false;
                 result.stoppedBeforeShaderCreation = false;
                 result.unsupportedOperation = nullptr;
+                if (const RetailCensusError error = Push(0u);
+                    error != RetailCensusError::None) return error;
+                ZoneSpan span;
+                if (const RetailCensusError error = Plan(
+                        4u, TECHNIQUE_SET_BYTES, &span);
+                    error != RetailCensusError::None) return error;
+                result.materialTechniqueSetBlock0Offset = span.offset;
+                stage = RetailCensusStage::SecondTechniqueSet;
+                continue;
+            }
+            if (stage == RetailCensusStage::SecondTechniqueSet)
+            {
+                const int visit = visitRecord(TECHNIQUE_SET_BYTES);
+                if (visit <= 0) return RetailCensusError::None;
+                const std::uint8_t *record = inflated.data() + cursor;
+                if (ReadU32(record) != INLINE_POINTER || record[4] != 0u ||
+                    record[5] != 0u || record[6] != 0u || record[7] != 0u ||
+                    ReadU32(record + 8u) != 0u)
+                    return RetailCensusError::TechniqueSetLayoutUnsupported;
+                for (std::uint32_t index = 0u; index < secondTechniqueTokens.size(); ++index)
+                    secondTechniqueTokens[index] = ReadU32(record + 12u + index * 4u);
+                cursor += TECHNIQUE_SET_BYTES;
+                ++report.recordsProcessed;
+                if (const RetailCensusError error = Push(4u);
+                    error != RetailCensusError::None) return error;
+                stage = RetailCensusStage::SecondTechniqueSetName;
+                continue;
+            }
+            if (stage == RetailCensusStage::SecondTechniqueSetName)
+            {
+                const auto begin = inflated.begin() + static_cast<std::ptrdiff_t>(cursor);
+                const auto terminator = std::find(begin, inflated.end(), 0u);
+                if (terminator == inflated.end())
+                {
+                    if (inflated.size() - cursor >= limits.maxTechniqueNameBytes)
+                        return RetailCensusError::TechniqueSetNameTooLong;
+                    blocked = true;
+                    return RetailCensusError::None;
+                }
+                const std::size_t bytes = static_cast<std::size_t>(terminator - begin) + 1u;
+                if (bytes <= 1u) return RetailCensusError::TechniqueSetNameInvalid;
+                if (bytes > limits.maxTechniqueNameBytes)
+                    return RetailCensusError::TechniqueSetNameTooLong;
+                if (recordVisited == 0u)
+                {
+                    if (const RetailCensusError error = Plan(1u, bytes);
+                        error != RetailCensusError::None) return error;
+                }
+                const int visit = visitRecord(bytes);
+                if (visit <= 0) return RetailCensusError::None;
+                try
+                {
+                    result.materialTechniqueSetName.assign(
+                        reinterpret_cast<const char *>(inflated.data() + cursor), bytes - 1u);
+                }
+                catch (...) { return RetailCensusError::AllocationFailed; }
+                if (!ValidPublishedName(result.materialTechniqueSetName))
+                    return RetailCensusError::TechniqueSetNameInvalid;
+                cursor += bytes;
+                ++report.recordsProcessed;
+                std::uint32_t populated = 0u;
+                for (std::uint32_t index = 0u; index < secondTechniqueTokens.size(); ++index)
+                {
+                    if (secondTechniqueTokens[index] == 0u) continue;
+                    if (index != result.firstTechniqueSlot ||
+                        secondTechniqueTokens[index] != INLINE_POINTER)
+                        return RetailCensusError::TechniqueReferenceUnsupported;
+                    ++populated;
+                }
+                if (populated != 1u) return RetailCensusError::TechniqueReferenceUnsupported;
+                ZoneSpan span;
+                if (const RetailCensusError error = Plan(
+                        4u, TECHNIQUE_HEADER_BYTES, &span);
+                    error != RetailCensusError::None) return error;
+                result.materialTechniqueBlock4Offset = span.offset;
+                stage = RetailCensusStage::SecondTechnique;
+                continue;
+            }
+            if (stage == RetailCensusStage::SecondTechnique)
+            {
+                const int visit = visitRecord(TECHNIQUE_HEADER_BYTES);
+                if (visit <= 0) return RetailCensusError::None;
+                const std::uint8_t *record = inflated.data() + cursor;
+                secondTechniqueNameToken = ReadU32(record);
+                ZoneSpan primaryNameSpan{4u, result.techniqueNameBlock4Offset, 4u};
+                std::uint32_t expectedNameToken = 0u;
+                if (!EncodeZoneAliasToken(primaryNameSpan, expectedNameToken) ||
+                    secondTechniqueNameToken != expectedNameToken ||
+                    ReadU16(record + 6u) != 1u)
+                    return RetailCensusError::TechniqueAliasInvalid;
+                secondMaterialPassBytes = MATERIAL_PASS_BYTES;
+                cursor += TECHNIQUE_HEADER_BYTES;
+                ++report.recordsProcessed;
+                if (const RetailCensusError error = Plan(1u, secondMaterialPassBytes);
+                    error != RetailCensusError::None) return error;
+                stage = RetailCensusStage::SecondMaterialPasses;
+                continue;
+            }
+            if (stage == RetailCensusStage::SecondMaterialPasses)
+            {
+                const int visit = visitRecord(secondMaterialPassBytes);
+                if (visit <= 0) return RetailCensusError::None;
+                const std::uint8_t *record = inflated.data() + cursor;
+                ZoneSpan primaryDeclSpan{4u, result.vertexDeclarationBlock4Offset, 4u};
+                std::uint32_t expectedDeclToken = 0u;
+                if (!EncodeZoneAliasToken(primaryDeclSpan, expectedDeclToken) ||
+                    ReadU32(record) != expectedDeclToken ||
+                    ReadU32(record + 4u) != INLINE_POINTER ||
+                    ReadU32(record + 8u) != INLINE_POINTER ||
+                    ReadU32(record + 16u) != INLINE_POINTER)
+                    return RetailCensusError::MaterialPassUnsupported;
+                secondArgumentCount = static_cast<std::uint32_t>(record[12]) +
+                    static_cast<std::uint32_t>(record[13]) +
+                    static_cast<std::uint32_t>(record[14]);
+                if (secondArgumentCount == 0u || secondArgumentCount > 192u ||
+                    secondArgumentCount > UINT32_MAX / MATERIAL_ARGUMENT_BYTES)
+                    return RetailCensusError::ShaderArgumentLayoutUnsupported;
+                secondArgumentBytes = secondArgumentCount * MATERIAL_ARGUMENT_BYTES;
+                cursor += secondMaterialPassBytes;
+                ++report.recordsProcessed;
+                if (const RetailCensusError error = Plan(4u, VERTEX_SHADER_BYTES);
+                    error != RetailCensusError::None) return error;
+                stage = RetailCensusStage::SecondVertexShader;
+                continue;
+            }
+            if (stage == RetailCensusStage::SecondVertexShader)
+            {
+                const int visit = visitRecord(VERTEX_SHADER_BYTES);
+                if (visit <= 0) return RetailCensusError::None;
+                const std::uint8_t *record = inflated.data() + cursor;
+                secondVertexShaderNameToken = ReadU32(record);
+                ZoneSpan primaryShaderNameSpan{4u, vertexShaderNameBlock4Offset, 4u};
+                std::uint32_t expectedNameToken = 0u;
+                const std::uint32_t dwords = ReadU16(record + 12u);
+                if (!EncodeZoneAliasToken(primaryShaderNameSpan, expectedNameToken) ||
+                    secondVertexShaderNameToken != expectedNameToken ||
+                    ReadU32(record + 4u) != 0u || ReadU32(record + 8u) != INLINE_POINTER ||
+                    dwords == 0u || ReadU16(record + 14u) != 1u)
+                    return RetailCensusError::VertexShaderLayoutUnsupported;
+                if (dwords > limits.maxShaderProgramDwords || dwords > UINT32_MAX / 4u)
+                    return RetailCensusError::ShaderProgramSizeLimit;
+                secondVertexProgramBytes = dwords * 4u;
+                cursor += VERTEX_SHADER_BYTES;
+                ++report.recordsProcessed;
+                if (const RetailCensusError error = Plan(4u, secondVertexProgramBytes);
+                    error != RetailCensusError::None) return error;
+                stage = RetailCensusStage::SecondVertexShaderProgram;
+                continue;
+            }
+            if (stage == RetailCensusStage::SecondVertexShaderProgram)
+            {
+                const int visit = visitRecord(secondVertexProgramBytes);
+                if (visit <= 0) return RetailCensusError::None;
+                const std::uint8_t *record = inflated.data() + cursor;
+                const std::uint32_t version = ReadU32(record);
+                if ((version & 0xffff0000u) != 0xfffe0000u ||
+                    (version & 0xffffu) == 0u ||
+                    ReadU32(record + secondVertexProgramBytes - 4u) != 0x0000ffffu)
+                    return RetailCensusError::ShaderContractInvalid;
+                cursor += secondVertexProgramBytes;
+                ++report.recordsProcessed;
+                if (const RetailCensusError planError = Plan(4u, PIXEL_SHADER_BYTES);
+                    planError != RetailCensusError::None) return planError;
+                stage = RetailCensusStage::SecondPixelShader;
+                continue;
+            }
+            if (stage == RetailCensusStage::SecondPixelShader)
+            {
+                const int visit = visitRecord(PIXEL_SHADER_BYTES);
+                if (visit <= 0) return RetailCensusError::None;
+                const std::uint8_t *record = inflated.data() + cursor;
+                secondPixelShaderNameToken = ReadU32(record);
+                const std::uint32_t dwords = ReadU16(record + 12u);
+                if (secondPixelShaderNameToken != secondVertexShaderNameToken ||
+                    ReadU32(record + 4u) != 0u || ReadU32(record + 8u) != INLINE_POINTER ||
+                    dwords == 0u || ReadU16(record + 14u) != 1u)
+                    return RetailCensusError::PixelShaderLayoutUnsupported;
+                if (dwords > limits.maxShaderProgramDwords || dwords > UINT32_MAX / 4u)
+                    return RetailCensusError::ShaderProgramSizeLimit;
+                secondPixelProgramBytes = dwords * 4u;
+                cursor += PIXEL_SHADER_BYTES;
+                ++report.recordsProcessed;
+                if (const RetailCensusError error = Plan(4u, secondPixelProgramBytes);
+                    error != RetailCensusError::None) return error;
+                stage = RetailCensusStage::SecondPixelShaderProgram;
+                continue;
+            }
+            if (stage == RetailCensusStage::SecondPixelShaderProgram)
+            {
+                const int visit = visitRecord(secondPixelProgramBytes);
+                if (visit <= 0) return RetailCensusError::None;
+                const std::uint8_t *record = inflated.data() + cursor;
+                const std::uint32_t version = ReadU32(record);
+                if ((version & 0xffff0000u) != 0xffff0000u ||
+                    (version & 0xffffu) == 0u ||
+                    ReadU32(record + secondPixelProgramBytes - 4u) != 0x0000ffffu)
+                    return RetailCensusError::ShaderContractInvalid;
+                cursor += secondPixelProgramBytes;
+                ++report.recordsProcessed;
+                if (const RetailCensusError planError = Plan(4u, secondArgumentBytes);
+                    planError != RetailCensusError::None) return planError;
+                stage = RetailCensusStage::SecondShaderArguments;
+                continue;
+            }
+            if (stage == RetailCensusStage::SecondShaderArguments)
+            {
+                const int visit = visitRecord(secondArgumentBytes);
+                if (visit <= 0) return RetailCensusError::None;
+                const std::uint8_t *record = inflated.data() + cursor;
+                for (std::uint32_t index = 0u; index < secondArgumentCount; ++index)
+                {
+                    const std::uint16_t type = ReadU16(record + index * MATERIAL_ARGUMENT_BYTES);
+                    if (type != 2u && type != 3u)
+                        return RetailCensusError::ShaderArgumentLayoutUnsupported;
+                }
+                cursor += secondArgumentBytes;
+                ++report.recordsProcessed;
+                stage = RetailCensusStage::SecondTechniqueName;
+                continue;
+            }
+            if (stage == RetailCensusStage::SecondTechniqueName)
+            {
+                ZoneSpan primaryNameSpan{4u, result.techniqueNameBlock4Offset, 4u};
+                std::uint32_t expectedNameToken = 0u;
+                if (!EncodeZoneAliasToken(primaryNameSpan, expectedNameToken) ||
+                    secondTechniqueNameToken != expectedNameToken)
+                    return RetailCensusError::TechniqueAliasInvalid;
+                ++report.recordsProcessed;
+                if (const RetailCensusError error = Pop();
+                    error != RetailCensusError::None) return error;
+                if (const RetailCensusError error = Pop();
+                    error != RetailCensusError::None) return error;
+                if (const RetailCensusError error = MapRegistryError(
+                        registry.RegisterAsset(
+                            ASSET_TYPE_TECHNIQUE_SET, 1u,
+                            result.materialTechniqueSetName,
+                            result.materialTechniqueSetIdentity));
+                    error != RetailCensusError::None) return error;
+                if (const RetailCensusError error = MapRegistryError(
+                        registry.PublishAlias(
+                            topLevelAliasSlots[1],
+                            result.materialTechniqueSetIdentity));
+                    error != RetailCensusError::None) return error;
+                result.completedAssetCount = 2u;
+                result.materialTechniqueSetPublished = true;
+                if (const RetailCensusError error = Push(0u);
+                    error != RetailCensusError::None) return error;
+                ZoneSpan span;
+                if (const RetailCensusError error = Plan(4u, MATERIAL_BYTES, &span);
+                    error != RetailCensusError::None) return error;
+                result.materialBlock0Offset = span.offset;
+                result.materialAssetIndex = 2u;
+                stage = RetailCensusStage::Material;
+                continue;
+            }
+            if (stage == RetailCensusStage::Material)
+            {
+                const int visit = visitRecord(MATERIAL_BYTES);
+                if (visit <= 0) return RetailCensusError::None;
+                const std::uint8_t *record = inflated.data() + cursor;
+                materialTechniqueSetToken = ReadU32(record + 64u);
+                materialTextureTableToken = ReadU32(record + 68u);
+                materialStateBitsToken = ReadU32(record + 76u);
+                const std::uint32_t textureCount = record[58u];
+                const std::uint32_t constantCount = record[59u];
+                const std::uint32_t stateBitsCount = record[60u];
+                if (ReadU32(record) != INLINE_POINTER || textureCount == 0u ||
+                    textureCount > limits.maxMaterialTextures || textureCount != 1u ||
+                    constantCount != 0u || stateBitsCount != 1u ||
+                    materialTextureTableToken != INLINE_POINTER ||
+                    ReadU32(record + 72u) != 0u ||
+                    materialStateBitsToken != INLINE_POINTER)
+                    return textureCount > limits.maxMaterialTextures
+                        ? RetailCensusError::MaterialTextureCountLimit
+                        : RetailCensusError::MaterialLayoutUnsupported;
+                std::uint32_t techniqueIdentity = 0u;
+                if (registry.ResolveAlias(
+                        materialTechniqueSetToken,
+                        ASSET_TYPE_TECHNIQUE_SET,
+                        techniqueIdentity) != ZoneRegistryError::None ||
+                    techniqueIdentity != result.materialTechniqueSetIdentity)
+                    return RetailCensusError::MaterialTechniqueSetInvalid;
+                result.materialTextureCount = textureCount;
+                materialStateBitsBytes = stateBitsCount * GFX_STATE_BITS_BYTES;
+                cursor += MATERIAL_BYTES;
+                ++report.recordsProcessed;
+                if (const RetailCensusError error = Push(4u);
+                    error != RetailCensusError::None) return error;
+                stage = RetailCensusStage::MaterialName;
+                continue;
+            }
+            if (stage == RetailCensusStage::MaterialName)
+            {
+                const auto begin = inflated.begin() + static_cast<std::ptrdiff_t>(cursor);
+                const auto terminator = std::find(begin, inflated.end(), 0u);
+                if (terminator == inflated.end())
+                {
+                    if (inflated.size() - cursor >= limits.maxMaterialNameBytes)
+                        return RetailCensusError::MaterialNameTooLong;
+                    blocked = true;
+                    return RetailCensusError::None;
+                }
+                const std::size_t bytes = static_cast<std::size_t>(terminator - begin) + 1u;
+                if (bytes <= 1u) return RetailCensusError::MaterialNameInvalid;
+                if (bytes > limits.maxMaterialNameBytes)
+                    return RetailCensusError::MaterialNameTooLong;
+                if (recordVisited == 0u)
+                {
+                    ZoneSpan span;
+                    if (const RetailCensusError error = Plan(1u, bytes, &span);
+                        error != RetailCensusError::None) return error;
+                    result.materialNameBlock4Offset = span.offset;
+                }
+                const int visit = visitRecord(bytes);
+                if (visit <= 0) return RetailCensusError::None;
+                try
+                {
+                    result.materialName.assign(
+                        reinterpret_cast<const char *>(inflated.data() + cursor), bytes - 1u);
+                }
+                catch (...) { return RetailCensusError::AllocationFailed; }
+                if (!ValidPublishedName(result.materialName))
+                    return RetailCensusError::MaterialNameInvalid;
+                cursor += bytes;
+                ++report.recordsProcessed;
+                ZoneSpan span;
+                if (const RetailCensusError error = Plan(
+                        4u,
+                        static_cast<std::uint64_t>(result.materialTextureCount) * MATERIAL_TEXTURE_BYTES,
+                        &span);
+                    error != RetailCensusError::None) return error;
+                result.materialTextureTableBlock4Offset = span.offset;
+                stage = RetailCensusStage::MaterialTextureTable;
+                continue;
+            }
+            if (stage == RetailCensusStage::MaterialTextureTable)
+            {
+                const std::uint32_t bytes = result.materialTextureCount * MATERIAL_TEXTURE_BYTES;
+                const int visit = visitRecord(bytes);
+                if (visit <= 0) return RetailCensusError::None;
+                const std::uint8_t *record = inflated.data() + cursor;
+                if (record[4u] == 0u || record[5u] == 0u || record[7u] == 11u ||
+                    ReadU32(record + 8u) != INLINE_POINTER)
+                    return RetailCensusError::MaterialTextureLayoutUnsupported;
+                materialImageAliasSlot = {
+                    4u,
+                    result.materialTextureTableBlock4Offset + 8u,
+                    4u,
+                };
+                if (const RetailCensusError error = MapRegistryError(
+                        registry.ReserveAlias(materialImageAliasSlot, ASSET_TYPE_IMAGE));
+                    error != RetailCensusError::None) return error;
+                cursor += bytes;
+                ++report.recordsProcessed;
+                if (const RetailCensusError error = Push(0u);
+                    error != RetailCensusError::None) return error;
+                ZoneSpan span;
+                if (const RetailCensusError error = Plan(4u, GFX_IMAGE_BYTES, &span);
+                    error != RetailCensusError::None) return error;
+                result.imageBlock0Offset = span.offset;
+                stage = RetailCensusStage::Image;
+                continue;
+            }
+            if (stage == RetailCensusStage::Image)
+            {
+                const int visit = visitRecord(GFX_IMAGE_BYTES);
+                if (visit <= 0) return RetailCensusError::None;
+                const std::uint8_t *record = inflated.data() + cursor;
+                imageTextureToken = ReadU32(record + 4u);
+                const std::uint32_t width = ReadU16(record + 24u);
+                const std::uint32_t height = ReadU16(record + 26u);
+                const std::uint32_t depth = ReadU16(record + 28u);
+                if (ReadU32(record) != 3u ||
+                    (imageTextureToken != INLINE_POINTER && imageTextureToken != SHARED_POINTER) ||
+                    record[10u] > 1u || width == 0u || height == 0u || depth != 1u ||
+                    ReadU32(record + 32u) != INLINE_POINTER)
+                    return RetailCensusError::ImageLayoutUnsupported;
+                result.imageWidth = width;
+                result.imageHeight = height;
+                result.imageDepth = depth;
+                cursor += GFX_IMAGE_BYTES;
+                ++report.recordsProcessed;
+                if (const RetailCensusError error = Push(4u);
+                    error != RetailCensusError::None) return error;
+                stage = RetailCensusStage::ImageName;
+                continue;
+            }
+            if (stage == RetailCensusStage::ImageName)
+            {
+                const auto begin = inflated.begin() + static_cast<std::ptrdiff_t>(cursor);
+                const auto terminator = std::find(begin, inflated.end(), 0u);
+                if (terminator == inflated.end())
+                {
+                    if (inflated.size() - cursor >= limits.maxImageNameBytes)
+                        return RetailCensusError::ImageNameTooLong;
+                    blocked = true;
+                    return RetailCensusError::None;
+                }
+                const std::size_t bytes = static_cast<std::size_t>(terminator - begin) + 1u;
+                if (bytes <= 1u) return RetailCensusError::ImageNameInvalid;
+                if (bytes > limits.maxImageNameBytes)
+                    return RetailCensusError::ImageNameTooLong;
+                if (recordVisited == 0u)
+                {
+                    ZoneSpan span;
+                    if (const RetailCensusError error = Plan(1u, bytes, &span);
+                        error != RetailCensusError::None) return error;
+                    result.imageNameBlock4Offset = span.offset;
+                }
+                const int visit = visitRecord(bytes);
+                if (visit <= 0) return RetailCensusError::None;
+                try
+                {
+                    result.imageName.assign(
+                        reinterpret_cast<const char *>(inflated.data() + cursor), bytes - 1u);
+                    result.imagePath = "images/";
+                    result.imagePath += result.imageName;
+                    result.imagePath += ".iwi";
+                }
+                catch (...) { return RetailCensusError::AllocationFailed; }
+                if (!ValidPublishedName(result.imageName) ||
+                    !ValidPublishedName(result.imagePath))
+                    return RetailCensusError::ImageNameInvalid;
+                cursor += bytes;
+                ++report.recordsProcessed;
+                if (const RetailCensusError error = Push(0u);
+                    error != RetailCensusError::None) return error;
+                ZoneSpan span;
+                if (const RetailCensusError error = Plan(4u, GFX_IMAGE_LOAD_DEF_BYTES, &span);
+                    error != RetailCensusError::None) return error;
+                result.imageLoadDefBlock0Offset = span.offset;
+                stage = RetailCensusStage::ImageLoadDef;
+                continue;
+            }
+            if (stage == RetailCensusStage::ImageLoadDef)
+            {
+                const int visit = visitRecord(GFX_IMAGE_LOAD_DEF_BYTES);
+                if (visit <= 0) return RetailCensusError::None;
+                const std::uint8_t *record = inflated.data() + cursor;
+                const std::int32_t width = static_cast<std::int16_t>(ReadU16(record + 2u));
+                const std::int32_t height = static_cast<std::int16_t>(ReadU16(record + 4u));
+                const std::int32_t depth = static_cast<std::int16_t>(ReadU16(record + 6u));
+                const std::int32_t resourceBytes = ReadS32(record + 12u);
+                if (record[0u] != 1u || record[1u] != 2u ||
+                    !SupportedImageFormat(ReadU32(record + 8u)) ||
+                    width != static_cast<std::int32_t>(result.imageWidth) ||
+                    height != static_cast<std::int32_t>(result.imageHeight) ||
+                    depth != static_cast<std::int32_t>(result.imageDepth) || resourceBytes < 0)
+                    return resourceBytes < 0
+                        ? RetailCensusError::ImageResourceSizeInvalid
+                        : RetailCensusError::ImageLayoutUnsupported;
+                if (static_cast<std::uint32_t>(resourceBytes) > limits.maxImageResourceBytes)
+                    return RetailCensusError::ImageResourceSizeLimit;
+                result.imageFormat = ReadU32(record + 8u);
+                result.imageResourceBytes = static_cast<std::uint32_t>(resourceBytes);
+                imageResourceBytes = result.imageResourceBytes;
+                cursor += GFX_IMAGE_LOAD_DEF_BYTES;
+                ++report.recordsProcessed;
+                if (const RetailCensusError error = Plan(1u, imageResourceBytes);
+                    error != RetailCensusError::None) return error;
+                stage = RetailCensusStage::ImageResource;
+                continue;
+            }
+            if (stage == RetailCensusStage::ImageResource)
+            {
+                const int visit = visitRecord(imageResourceBytes);
+                if (visit <= 0) return RetailCensusError::None;
+                cursor += imageResourceBytes;
+                ++report.recordsProcessed;
+                if (const RetailCensusError error = Pop();
+                    error != RetailCensusError::None) return error;
+                if (const RetailCensusError error = Pop();
+                    error != RetailCensusError::None) return error;
+                if (const RetailCensusError error = Pop();
+                    error != RetailCensusError::None) return error;
+                if (const RetailCensusError error = MapRegistryError(
+                        registry.RegisterAsset(
+                            ASSET_TYPE_IMAGE, result.materialAssetIndex,
+                            result.imageName, result.imageIdentity));
+                    error != RetailCensusError::None) return error;
+                if (const RetailCensusError error = MapRegistryError(
+                        registry.PublishAlias(materialImageAliasSlot, result.imageIdentity));
+                    error != RetailCensusError::None) return error;
+                result.imagePublished = true;
+                ZoneSpan span;
+                if (const RetailCensusError error = Plan(4u, materialStateBitsBytes, &span);
+                    error != RetailCensusError::None) return error;
+                result.materialStateBitsBlock4Offset = span.offset;
+                stage = RetailCensusStage::MaterialStateBits;
+                continue;
+            }
+            if (stage == RetailCensusStage::MaterialStateBits)
+            {
+                const int visit = visitRecord(materialStateBitsBytes);
+                if (visit <= 0) return RetailCensusError::None;
+                cursor += materialStateBitsBytes;
+                ++report.recordsProcessed;
+                if (const RetailCensusError error = Pop();
+                    error != RetailCensusError::None) return error;
+                if (const RetailCensusError error = Pop();
+                    error != RetailCensusError::None) return error;
+                if (const RetailCensusError error = MapRegistryError(
+                        registry.RegisterAsset(
+                            ASSET_TYPE_MATERIAL, result.materialAssetIndex,
+                            result.materialName, result.materialIdentity));
+                    error != RetailCensusError::None) return error;
+                if (const RetailCensusError error = MapRegistryError(
+                        registry.PublishAlias(
+                            topLevelAliasSlots[2], result.materialIdentity));
+                    error != RetailCensusError::None) return error;
+                result.materialPublished = true;
+                result.materialImageResolved = result.imagePublished;
+                result.completedAssetCount = 3u;
+                result.registryAssetCount = registry.AssetCount();
+                result.registryAliasCount = registry.AliasCount();
+                result.registryDefinedAliasCount = registry.DefinedAliasCount();
+                if (result.registryAssetCount != 4u ||
+                    result.registryAliasCount != 4u ||
+                    result.registryDefinedAliasCount != 4u)
+                    return RetailCensusError::AssetRegistryInvalid;
+                result.block0HighWaterAtBoundary = arenas.HighWater(0u);
+                result.block4CursorAtBoundary = arenas.Cursor(4u);
                 stage = RetailCensusStage::AssetBoundary;
                 complete = true;
                 return RetailCensusError::None;
@@ -892,11 +2902,19 @@ RetailFastfileCensusJob &RetailFastfileCensusJob::operator=(RetailFastfileCensus
 
 RetailCensusError RetailFastfileCensusJob::BeginStreaming(const RetailCensusLimits &limits) noexcept
 {
+    return BeginStreaming(RetailCensusMode::CodePostGfxMaterial, limits);
+}
+
+RetailCensusError RetailFastfileCensusJob::BeginStreaming(
+    RetailCensusMode mode,
+    const RetailCensusLimits &limits) noexcept
+{
     Reset();
     if (!ValidLimits(limits)) return RetailCensusError::InvalidArgument;
     try { impl_ = std::make_unique<Impl>(); }
     catch (...) { return RetailCensusError::AllocationFailed; }
     impl_->limits = limits;
+    impl_->mode = mode;
     const SourceStreamError sourceError = impl_->source.Initialize({
         limits.maxFileBytes, limits.maxSourceChunkBytes});
     if (sourceError != SourceStreamError::None)

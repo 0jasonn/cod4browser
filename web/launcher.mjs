@@ -132,13 +132,22 @@ function updateRendererMaterialBinding() {
         runtime.rendererShader?.firstDrawCompleted === true;
     const textureReady = runtime.rendererTexture?.state === "ready" &&
         runtime.rendererTexture?.resident === true;
+    const materialReady = runtime.retailCensus?.state === "ready" &&
+        runtime.retailCensus?.materialPublished === true &&
+        runtime.retailCensus?.imagePublished === true &&
+        runtime.retailCensus?.materialImageResolved === true;
+    const selectedImagePath = runtime.retailCensus?.materialImagePath ?? "";
+    const textureMatchesMaterial = materialReady && textureReady &&
+        runtime.rendererTexture.path?.toLowerCase() === selectedImagePath.toLowerCase();
     const previousReady = runtime.rendererMaterial?.state === "ready";
-    if (!shaderReady || !textureReady) {
+    if (!shaderReady || !textureReady || !materialReady || !textureMatchesMaterial) {
         runtime.rendererMaterial = {
             state: "waiting",
-            message: "Waiting for a resident shader sampler and decoded engine image",
+            message: "Waiting for a registered retail material and its resident image",
             shaderReady,
             textureReady,
+            materialReady,
+            textureMatchesMaterial,
         };
         return;
     }
@@ -148,8 +157,13 @@ function updateRendererMaterialBinding() {
     runtime.rendererMaterial = {
         state: "ready",
         message: compressedSource
-            ? "Decoded COD4 DXT image bound to the retail shader sampler"
-            : "Decoded engine image bound to the retail shader sampler",
+            ? "Retail material selected a COD4 DXT image for the shader sampler"
+            : "Retail material selected an engine image for the shader sampler",
+        materialSource: "retail-fastfile",
+        materialName: runtime.retailCensus.materialName,
+        materialIdentity: runtime.retailCensus.materialIdentity,
+        imageName: runtime.retailCensus.imageName,
+        imageIdentity: runtime.retailCensus.imageIdentity,
         shaderSubstitutionId: runtime.rendererShader.substitutionId,
         sampler: "u_colorMapSampler",
         textureUnit: 0,
@@ -167,9 +181,9 @@ function updateRendererMaterialBinding() {
     }
     if (!previousReady) {
         appendLog(
-            `[kisakcod-web] Bound ${runtime.rendererTexture.path || "engine IWI"} ` +
-            `(IWI format ${sourceFormat}) to ${runtime.rendererShader.substitutionId} ` +
-            `texture unit 0.`,
+            `[kisakcod-web] Material ${runtime.retailCensus.materialName} selected ` +
+            `${runtime.rendererTexture.path || "engine IWI"} (IWI format ${sourceFormat}) ` +
+            `for ${runtime.rendererShader.substitutionId} texture unit 0.`,
         );
     }
 }
@@ -232,10 +246,20 @@ globalThis.addEventListener("kisakcod:qcommon", (event) => {
 globalThis.addEventListener("kisakcod:retail-census", (event) => {
     runtime.retailCensus = structuredClone(event.detail);
     if (event.detail.state === "ready") {
+        const firstXModel = event.detail.worldInventory.firstXModel;
         appendLog(
             `[kisakcod-web] Counted ${event.detail.assetCount.toLocaleString()} ` +
-            `code_post_gfx assets; traversed ${event.detail.techniqueSetName} ` +
-              `and selected ${event.detail.shaderSubstitutionId}.`,
+            `code_post_gfx assets; material ${event.detail.materialName} selected ` +
+            `${event.detail.materialImagePath} with ${event.detail.shaderSubstitutionId}. ` +
+            `Killhouse contains ${event.detail.worldInventory.assetCount.toLocaleString()} ` +
+            `assets; its first GfxWorld is table index ` +
+            `${event.detail.worldInventory.firstGfxWorldAssetIndex}. ` +
+            `Published ${event.detail.worldInventory.completedAssetCount} consecutive ` +
+            `map technique sets, then traversed XModel ${firstXModel?.name ?? "unknown"} ` +
+            `(${firstXModel?.totals?.vertices ?? 0} vertices, ` +
+            `${firstXModel?.totals?.triangles ?? 0} triangles, ` +
+            `${firstXModel?.surfaceCount ?? 0} surfaces) and stopped before its ` +
+            `first inline material.`,
         );
         const readyImportId = runtime.assets.state === "ready"
             ? runtime.assets.manifest?.importId ?? null
@@ -249,6 +273,7 @@ globalThis.addEventListener("kisakcod:retail-census", (event) => {
     } else if (event.detail.state === "failed") {
         appendLog(`[kisakcod-web] Retail fastfile census: ${event.detail.message}`, "error");
     }
+    updateRendererMaterialBinding();
 });
 
 globalThis.addEventListener("kisakcod:renderer-shader", (event) => {

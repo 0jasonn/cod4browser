@@ -27,6 +27,11 @@ function appendU32(bytes, value)
         (value >>> 16) & 0xff, (value >>> 24) & 0xff);
 }
 
+function appendU16(bytes, value)
+{
+    bytes.push(value & 0xff, (value >>> 8) & 0xff);
+}
+
 function setU32(bytes, offset, value)
 {
     bytes[offset] = value & 0xff;
@@ -39,6 +44,16 @@ function setU16(bytes, offset, value)
 {
     bytes[offset] = value & 0xff;
     bytes[offset + 1] = (value >>> 8) & 0xff;
+}
+
+function setF32(bytes, offset, value)
+{
+    const buffer = new ArrayBuffer(4);
+    new DataView(buffer).setFloat32(0, value, true);
+    const encoded = new Uint8Array(buffer);
+    for (let index = 0; index < encoded.length; index += 1) {
+        bytes[offset + index] = encoded[index];
+    }
 }
 
 function createSyntheticShaderProgram(vertex)
@@ -104,7 +119,7 @@ function createSyntheticShaderProgram(vertex)
     return words;
 }
 
-// Freely generated structural fixture for the M17 paired-shader path.
+// Freely generated structural fixture for the M20 material/image path.
 export function createSyntheticRetailCensusFastfile()
 {
     const inflated = [];
@@ -126,7 +141,7 @@ export function createSyntheticRetailCensusFastfile()
     const assets = [
         [5, 0xffff_ffff],
         [5, 0xffff_ffff],
-        [4, 0xffff_fffe],
+        [4, 0xffff_ffff],
         [22, 0x4000_0011],
         [32, 0],
     ];
@@ -176,7 +191,210 @@ export function createSyntheticRetailCensusFastfile()
         appendU32(inflated, word);
     }
     inflated.push(...Buffer.from("web_synthetic2d", "ascii"), 0);
-    inflated.push(...new Array(64).fill(0xa5));
+
+    const materialTechniqueSet = new Array(148).fill(0);
+    setU32(materialTechniqueSet, 0, 0xffff_ffff);
+    setU32(materialTechniqueSet, 12 + 4 * 4, 0xffff_ffff);
+    inflated.push(...materialTechniqueSet, ...Buffer.from("web/material_techset", "ascii"), 0);
+    appendU32(inflated, 0x4000_0385);
+    appendU16(inflated, 0);
+    appendU16(inflated, 1);
+    appendU32(inflated, 0x4000_0079);
+    appendU32(inflated, 0xffff_ffff);
+    appendU32(inflated, 0xffff_ffff);
+    inflated.push(1, 1, 1, 0);
+    appendU32(inflated, 0xffff_ffff);
+    appendU32(inflated, 0x4000_00ed);
+    appendU32(inflated, 0);
+    appendU32(inflated, 0xffff_ffff);
+    appendU16(inflated, vertexProgram.length);
+    appendU16(inflated, 1);
+    for (const word of vertexProgram) appendU32(inflated, word);
+    appendU32(inflated, 0x4000_00ed);
+    appendU32(inflated, 0);
+    appendU32(inflated, 0xffff_ffff);
+    appendU16(inflated, pixelProgram.length);
+    appendU16(inflated, 1);
+    for (const word of pixelProgram) appendU32(inflated, word);
+    for (const word of [0x0004_0003, 0x0400_003c, 0x0000_0003,
+        0x0400_004c, 0x0000_0002, 0xa0ab_1041]) {
+        appendU32(inflated, word);
+    }
+
+    const material = new Array(80).fill(0);
+    setU32(material, 0, 0xffff_ffff);
+    material[5] = 43;
+    material[6] = 1;
+    material[7] = 1;
+    material[58] = 1;
+    material[60] = 1;
+    material[62] = 3;
+    setU32(material, 64, 0x4000_0029);
+    setU32(material, 68, 0xffff_ffff);
+    setU32(material, 76, 0xffff_ffff);
+    inflated.push(...material, ...Buffer.from("web_cursor", "ascii"), 0);
+    appendU32(inflated, 0xa0ab_1041);
+    inflated.push("c".charCodeAt(0), "p".charCodeAt(0), 0xe2, 0);
+    appendU32(inflated, 0xffff_ffff);
+
+    const image = new Array(36).fill(0);
+    setU32(image, 0, 3);
+    setU32(image, 4, 0xffff_fffe);
+    image[10] = 1;
+    setU16(image, 24, 4);
+    setU16(image, 26, 4);
+    setU16(image, 28, 1);
+    image[30] = 3;
+    setU32(image, 32, 0xffff_ffff);
+    inflated.push(...image, ...Buffer.from("synthetic_engine_asset", "ascii"), 0);
+    inflated.push(1, 2);
+    appendU16(inflated, 4);
+    appendU16(inflated, 4);
+    appendU16(inflated, 1);
+    appendU32(inflated, 0x3154_5844);
+    appendU32(inflated, 0);
+    inflated.push(...new Array(8).fill(0));
+    const compressed = deflateSync(Uint8Array.from(inflated), { level: 9 });
+    return Uint8Array.from([
+        0x49, 0x57, 0x66, 0x66, 0x75, 0x31, 0x30, 0x30,
+        0x05, 0x00, 0x00, 0x00,
+        ...compressed,
+    ]);
+}
+
+// Freely generated fixture for the M21 table inventory through the M25 bounded
+// XSurface dependency prefix. It contains no retail bytes.
+export function createSyntheticWorldInventoryFastfile({
+    includeWorld = true,
+    invalidTechniqueSet = false,
+    invalidSecondTechniqueSet = false,
+    secondTechniqueDependency = false,
+    invalidXModelBounds = false,
+    unsupportedXModelBoneNames = false,
+    invalidXModelBoneString = false,
+    invalidXSurfaceLayout = false,
+    invalidXSurfaceCollision = false,
+} = {})
+{
+    const inflated = [];
+    appendU32(inflated, 2_000_000);
+    appendU32(inflated, 1_000_000);
+    for (const size of [4096, 0, 0, 0, 4096, 0, 0, 4096, 4096]) {
+        appendU32(inflated, size);
+    }
+    appendU32(inflated, 1);
+    appendU32(inflated, 0xffff_ffff);
+    const assets = [
+        [5, 0xffff_ffff],
+        [5, 0xffff_ffff],
+        [3, 0xffff_ffff],
+        [2, 0xffff_ffff],
+        [31, 0xffff_ffff],
+        [includeWorld ? 16 : 31, 0xffff_ffff],
+        [32, 0],
+    ];
+    appendU32(inflated, assets.length);
+    appendU32(inflated, 0xffff_ffff);
+    appendU32(inflated, 0xffff_ffff);
+    inflated.push(...Buffer.from("tag_origin", "ascii"), 0);
+    for (const [type, reference] of assets) {
+        appendU32(inflated, type);
+        appendU32(inflated, reference);
+    }
+    const firstTechniqueSet = new Array(148).fill(0);
+    setU32(firstTechniqueSet, 0, 0xffff_ffff);
+    if (invalidTechniqueSet) firstTechniqueSet[5] = 1;
+    inflated.push(
+        ...firstTechniqueSet,
+        ...Buffer.from(",web/mc_l_sm_r0c0s0", "ascii"),
+        0,
+    );
+    const secondTechniqueSet = new Array(148).fill(0);
+    setU32(secondTechniqueSet, 0, 0xffff_ffff);
+    if (invalidSecondTechniqueSet) secondTechniqueSet[5] = 1;
+    if (secondTechniqueDependency) {
+        setU32(secondTechniqueSet, 12 + 4 * 4, 0xffff_ffff);
+    }
+    inflated.push(
+        ...secondTechniqueSet,
+        ...Buffer.from(",web/mc_l_sm_r0c0s1", "ascii"),
+        0,
+    );
+    const xmodel = new Array(220).fill(0);
+    setU32(xmodel, 0, 0xffff_ffff);
+    xmodel[4] = 1;
+    xmodel[5] = 1;
+    xmodel[6] = 2;
+    setU32(xmodel, 8, unsupportedXModelBoneNames ? 0x4000_0001 : 0xffff_ffff);
+    setU32(xmodel, 24, 0xffff_ffff);
+    setU32(xmodel, 28, 0xffff_ffff);
+    setU32(xmodel, 32, 0xffff_ffff);
+    setU32(xmodel, 36, 0xffff_ffff);
+    setF32(xmodel, 40, 800);
+    setU16(xmodel, 44, 2);
+    setU32(xmodel, 48, 0x8000_0000);
+    setU32(xmodel, 164, 0xffff_ffff);
+    setF32(xmodel, 168, 10);
+    setF32(xmodel, 172, invalidXModelBounds ? 2 : -1);
+    setF32(xmodel, 176, -2);
+    setF32(xmodel, 180, -3);
+    setF32(xmodel, 184, 1);
+    setF32(xmodel, 188, 2);
+    setF32(xmodel, 192, 3);
+    setU16(xmodel, 196, 1);
+    setU16(xmodel, 198, 0);
+    setU32(xmodel, 204, 100);
+    inflated.push(...xmodel, ...Buffer.from("web/xmodel_wall", "ascii"), 0);
+    appendU16(inflated, invalidXModelBoneString ? 1 : 0);
+    inflated.push(0);
+    const baseMat = new Array(32).fill(0);
+    setF32(baseMat, 12, 1);
+    setF32(baseMat, 28, 1);
+    inflated.push(...baseMat);
+    for (let index = 0; index < 2; ++index) {
+        const surface = new Array(56).fill(0);
+        surface[0] = index === 0 ? 1 : 0;
+        setU16(surface, 2, 3);
+        setU16(surface, 4, 1);
+        setU16(surface, 8, index);
+        setU16(surface, 10, index * 3);
+        setU32(surface, 12,
+            invalidXSurfaceLayout && index === 0 ? 0 : 0xffff_ffff);
+        setU32(surface, 28, 0xffff_ffff);
+        setU32(surface, 32, 1);
+        setU32(surface, 36, 0xffff_ffff);
+        setU32(surface, 40, 0x8000_0000);
+        inflated.push(...surface);
+    }
+    for (let index = 0; index < 2; ++index) {
+        for (let byte = 0; byte < 3 * 32; ++byte) {
+            inflated.push((byte + index) & 0xff);
+        }
+        appendU16(inflated, 0);
+        appendU16(inflated, 3);
+        appendU16(inflated, 0);
+        appendU16(inflated, 1);
+        appendU32(inflated, index === 0 ? 0xffff_ffff : 0);
+        if (index === 0) {
+            for (let axis = 0; axis < 3; ++axis) appendU32(inflated, 0);
+            const collisionTree = new Array(12).fill(0);
+            setF32(collisionTree, 0, invalidXSurfaceCollision ? 0 : 1);
+            setF32(collisionTree, 4, 1);
+            setF32(collisionTree, 8, 1);
+            inflated.push(...collisionTree);
+            appendU32(inflated, 1);
+            appendU32(inflated, 0xffff_ffff);
+            appendU32(inflated, 1);
+            appendU32(inflated, 0xffff_ffff);
+            for (let byte = 0; byte < 16; ++byte) inflated.push(0x40 + byte);
+            appendU16(inflated, 0);
+        }
+        appendU16(inflated, 0);
+        appendU16(inflated, 1);
+        appendU16(inflated, 2);
+    }
+    appendU32(inflated, 0xffff_ffff);
+    appendU32(inflated, 0x4000_0001);
     const compressed = deflateSync(Uint8Array.from(inflated), { level: 9 });
     return Uint8Array.from([
         0x49, 0x57, 0x66, 0x66, 0x75, 0x31, 0x30, 0x30,
@@ -214,6 +432,8 @@ export async function createInstallDirectory(
                 contents = createSyntheticIwd();
             } else if (requirement.path === "zone/english/code_post_gfx.ff") {
                 contents = createSyntheticRetailCensusFastfile();
+            } else if (requirement.path === "zone/english/killhouse.ff") {
+                contents = createSyntheticWorldInventoryFastfile();
             } else {
                 contents = createSyntheticFastfileHeader();
             }

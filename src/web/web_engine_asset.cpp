@@ -54,6 +54,17 @@ struct EngineAssetJob
 
 EngineAssetJob g_job;
 
+struct MaterialImageBinding
+{
+    std::string materialName;
+    std::string imageName;
+    std::string imagePath;
+    uint32_t materialIdentity = 0u;
+    uint32_t imageIdentity = 0u;
+};
+
+MaterialImageBinding g_materialBinding;
+
 struct RendererTexturePublication
 {
     std::string state;
@@ -101,7 +112,12 @@ EM_JS(
      uint32_t height,
      uint32_t depth,
      uint32_t mipCount,
-     uint32_t cacheRetainedBytes),
+     uint32_t cacheRetainedBytes,
+     int materialSelected,
+     const char *materialName,
+     const char *imageName,
+     uint32_t materialIdentity,
+     uint32_t imageIdentity),
     {
         globalThis.dispatchEvent(new CustomEvent("kisakcod:engine-asset", {
             detail: {
@@ -119,7 +135,12 @@ EM_JS(
                 height,
                 depth,
                 mipCount,
-                cacheRetainedBytes: cacheRetainedBytes >>> 0
+                cacheRetainedBytes: cacheRetainedBytes >>> 0,
+                selectionSource: materialSelected ? "retail-material" : "archive-probe",
+                materialName: materialSelected ? UTF8ToString(materialName) : null,
+                imageName: materialSelected ? UTF8ToString(imageName) : null,
+                materialIdentity: materialSelected ? materialIdentity >>> 0 : 0,
+                imageIdentity: materialSelected ? imageIdentity >>> 0 : 0
             }
         }));
     });
@@ -253,6 +274,11 @@ const kisak::iwd::Entry *SelectIwiEntry()
         {
             continue;
         }
+        if (!g_materialBinding.imagePath.empty())
+        {
+            if (AsciiEqual(entry.path, g_materialBinding.imagePath)) return &entry;
+            continue;
+        }
         if (!selected || AsciiLess(entry.path, selected->path))
         {
             selected = &entry;
@@ -374,7 +400,6 @@ void CompleteRead(const WebEngineFsCompletion &completion, void *userData)
         SetFailure(std::move(message));
         return;
     }
-
     kisak::iwi::Rgba8Image decodedImage;
     const kisak::iwi::Error textureError = kisak::iwi::DecodeRgba8(
         std::span<const uint8_t>(completion.data, completion.dataLength),
@@ -509,7 +534,12 @@ void ConsumeCompletion()
         g_job.completionMetadata.height,
         g_job.completionMetadata.depth,
         g_job.completionMetadata.mipCount,
-        static_cast<uint32_t>(retainedBytes));
+        static_cast<uint32_t>(retainedBytes),
+        g_materialBinding.imagePath.empty() ? 0 : 1,
+        g_materialBinding.materialName.c_str(),
+        g_materialBinding.imageName.c_str(),
+        g_materialBinding.materialIdentity,
+        g_materialBinding.imageIdentity);
     if (JobStillMatches(generation, Phase::Finished))
     {
         DispatchRendererTexturePublication(texture);
@@ -537,6 +567,39 @@ void WebEngineAsset_Start()
     {
         DispatchRendererTexturePublication(texture);
     }
+}
+
+bool WebEngineAsset_SetMaterialImageBinding(
+    const char *materialName,
+    const char *imageName,
+    const char *imagePath,
+    unsigned int materialIdentity,
+    unsigned int imageIdentity)
+{
+    if (!materialName || !*materialName || !imageName || !*imageName ||
+        !imagePath || !IsIwiPath(imagePath) || materialIdentity == 0u ||
+        imageIdentity == 0u)
+        return false;
+    try
+    {
+        MaterialImageBinding replacement;
+        replacement.materialName = materialName;
+        replacement.imageName = imageName;
+        replacement.imagePath = imagePath;
+        replacement.materialIdentity = materialIdentity;
+        replacement.imageIdentity = imageIdentity;
+        g_materialBinding = std::move(replacement);
+    }
+    catch (...)
+    {
+        return false;
+    }
+    return true;
+}
+
+void WebEngineAsset_ClearMaterialImageBinding()
+{
+    g_materialBinding = {};
 }
 
 bool WebEngineAsset_Cancel()
@@ -592,7 +655,9 @@ void WebEngineAsset_Frame()
         const kisak::iwd::Entry *entry = SelectIwiEntry();
         if (!entry)
         {
-            PublishUnavailable("No bounded images/*.iwi member is available");
+            PublishUnavailable(g_materialBinding.imagePath.empty()
+                ? "No bounded images/*.iwi member is available"
+                : "The material-selected IWI member is not available");
             return;
         }
         g_job.selectedPath = entry->path;

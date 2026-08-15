@@ -164,8 +164,63 @@ RGBA8 publication under the existing 4 MiB recovery ceiling. The asynchronous
 IWD path can now decode and bind the owned archive's deterministic
 `images/$black.iwi` entry to the M18 sampler, and the launcher reports the joint
 shader/image state. Synthetic tests contain no game data. Geometry and the
-surface material identity are still synthetic; M20 targets a real serialized
-Material texture-table/GfxImage dependency.
+surface material identity were still synthetic at that boundary.
+
+Milestone 20 completes that dependency boundary. The generated-loader reader
+now accepts exactly the owned `code_post_gfx.ff` prefix of two inline technique
+sets followed by material `ui_cursor`. It resolves the material's normal
+technique-set alias, validates one non-water texture record and inline 2D
+`GfxImage` named `3_cursor3`, and publishes four stable registry identities only
+after the complete supported prefix succeeds. The archive job then requests
+`images/3_cursor3.iwi` exactly—never the alphabetically first image—and sends it
+through the existing bounded DXT/RGBA8 renderer path. A freely generated browser
+fixture proves the same selection while retaining a lower-sorting decoy image.
+The current indexed surface remains synthetic; no retail map geometry,
+lightmaps, visibility, general material traversal, or gameplay is claimed.
+
+Milestone 21 adds a second table-only reader mode for the owned F.N.G.
+`killhouse.ff`. The browser streams only the compressed prefix needed to
+validate its XFile metadata, script strings, and complete asset table, records
+the stable table-order hash and the first `GfxWorld` entry, then stops before
+asset body zero. The owned inventory contains 1,684 assets; the world is inline
+at index 772 and all 772 preceding entries are also inline. This proves that a
+correct generated-loader path cannot jump directly to world bytes. The first
+body is a technique set, making general retail technique-set traversal the next
+bounded dependency milestone. The synthetic browser fixture contains no game
+data and verifies both successful inventory and fail-closed missing-world input.
+
+Milestone 22 enters `killhouse.ff` asset body zero without widening the map
+claim. The bounded 148-byte `MaterialTechniqueSet` is
+`,sm2/mc_l_sm_r0c0s0`; it has world-vertex format zero, no remap, and 34 null
+technique pointers. Its name and dependency array complete at inflated offset
+30,915, after which the zone registry assigns identity 1 and publishes the
+asset-zero table alias atomically. The parser then stops before inline asset
+one, which is another technique set. Dependency-bearing synthetic sets remain
+unpublished at the first technique pointer, and malformed headers fail closed.
+No retail shader or map geometry is executed.
+
+Milestone 23 generalizes that checked loader across consecutive inline map
+technique sets. The owned F.N.G. prefix contains 12 zero-dependency sets at
+asset indices 0–11; all 12 receive stable identities and defined table aliases
+before traversal stops at inline `XModel` asset 12. Synthetic coverage proves
+later dependency stops, different-type stops, and fail-closed malformed later
+headers. No model body or retail map geometry is parsed or rendered.
+
+Milestone 24 enters that first retail `XModel`,
+`ch_street_wall_light_01_off`, with a checked 220-byte header and bounded
+skeleton-prefix loader. It retains one resolved bone, six declared surfaces,
+three LOD ranges, bounds, collision counts, and memory metadata, then stops
+before `Load_XSurfaceArray`. The model alias remains unpublished until its
+nested surface and later dependencies are implemented; no retail model geometry
+is parsed or rendered.
+
+Milestone 25 follows all six of that model's `XSurface` dependencies through
+their packed vertices, rigid lists, collision trees, and triangle indices. The
+owned prefix accounts for 754 vertices, 524 triangles, six rigid lists, 44
+collision nodes, and 284 leaves, then retains six ordered material handles and
+stops before the first inline `Material`. Large retail geometry payloads are
+hashed rather than retained, the XModel alias remains unpublished, and no
+retail model is rendered yet.
 
 See [docs/web-port.md](docs/web-port.md) for the pinned toolchain, build steps,
 current boundary, validation limits, and next milestone, and see

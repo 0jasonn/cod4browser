@@ -4,6 +4,7 @@ import {
     createInstallDirectory,
     createSyntheticFastfileHeader,
     createSyntheticRetailCensusFastfile,
+    createSyntheticWorldInventoryFastfile,
 } from "./install_fixture.mjs";
 import {
     createSyntheticIwd,
@@ -23,11 +24,18 @@ const M19_DXT1_IWI = createSyntheticIwi({
     ]),
 });
 
-const M19_PRIMARY_IWD = createSyntheticIwd([{
-    path: "images/$black.iwi",
-    contents: M19_DXT1_IWI,
-    method: "deflate",
-}]);
+const M20_PRIMARY_IWD = createSyntheticIwd([
+    {
+        path: "images/$black.iwi",
+        contents: M19_DXT1_IWI,
+        method: "deflate",
+    },
+    {
+        path: "images/synthetic_engine_asset.iwi",
+        contents: M19_DXT1_IWI,
+        method: "deflate",
+    },
+]);
 
 async function importInstall(page, testInfo, name, options = {})
 {
@@ -177,10 +185,10 @@ async function observeRetailShaderRenderer(page)
     });
 }
 
-test("publishes the leading technique set with a WebGL2 shader substitution", async ({ page }, testInfo) => {
+test("publishes one retail material and binds its resolved image", async ({ page }, testInfo) => {
     await observeRetailShaderRenderer(page);
     await importInstall(page, testInfo, "retail-census-success", {
-        primaryIwd: M19_PRIMARY_IWD,
+        primaryIwd: M20_PRIMARY_IWD,
     });
     await expect.poll(
         () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
@@ -204,6 +212,7 @@ test("publishes the leading technique set with a WebGL2 shader substitution", as
         events: structuredClone(globalThis.__retailCensusEvents),
         archiveEvents: structuredClone(globalThis.__retailCensusArchiveEvents),
         rendererShader: structuredClone(globalThis.__KISAKCOD_WEB__.rendererShader),
+        engineAsset: structuredClone(globalThis.__KISAKCOD_WEB__.engineAsset),
         rendererTexture: structuredClone(globalThis.__KISAKCOD_WEB__.rendererTexture),
         rendererMaterial: structuredClone(globalThis.__KISAKCOD_WEB__.rendererMaterial),
         rendererShaderEvents: structuredClone(globalThis.__retailRendererShaderEvents),
@@ -227,8 +236,8 @@ test("publishes the leading technique set with a WebGL2 shader substitution", as
         scriptStringBytes: 15,
         assetCount: 5,
         inflatedPrefixBytes: 127,
-        inlineReferences: 2,
-        sharedReferences: 1,
+        inlineReferences: 3,
+        sharedReferences: 0,
         aliasReferences: 1,
         nullReferences: 1,
         firstTraversedAssetIndex: 0,
@@ -236,7 +245,7 @@ test("publishes the leading technique set with a WebGL2 shader substitution", as
         firstTraversedAssetTypeName: "techset",
         firstTraversedAssetReference: 0xffff_ffff,
         stoppedBeforeAssetBody: false,
-        assetBodiesEntered: 1,
+        assetBodiesEntered: 3,
         techniqueSetName: "web/synthetic_techset",
         firstTechniqueSlot: 4,
         techniquePassCount: 1,
@@ -266,9 +275,45 @@ test("publishes the leading technique set with a WebGL2 shader substitution", as
         pixelShaderProgramBlock4Offset: 676,
         shaderArgumentsBlock4Offset: 876,
         block0HighWaterAtBoundary: 148,
-        block4CursorAtBoundary: 916,
-        completedAssetCount: 1,
+        block4CursorAtBoundary: 1684,
+        completedAssetCount: 3,
         techniqueSetPublished: true,
+        materialTechniqueSetName: "web/material_techset",
+        materialName: "web_cursor",
+        imageName: "synthetic_engine_asset",
+        materialImagePath: "images/synthetic_engine_asset.iwi",
+        materialAssetIndex: 2,
+        materialTextureCount: 1,
+        materialImage: {
+            name: "synthetic_engine_asset",
+            path: "images/synthetic_engine_asset.iwi",
+            width: 4,
+            height: 4,
+            depth: 1,
+            serializedFormat: 0x3154_5844,
+            resourceBytes: 0,
+            identity: 3,
+        },
+        compatibilityTechniqueSetIdentity: 1,
+        materialTechniqueSetIdentity: 2,
+        imageIdentity: 3,
+        materialIdentity: 4,
+        registryAssetCount: 4,
+        registryAliasCount: 4,
+        registryDefinedAliasCount: 4,
+        materialTechniqueSetBlock0Offset: 0,
+        materialTechniqueBlock4Offset: 940,
+        materialBlock0Offset: 0,
+        materialNameBlock4Offset: 1628,
+        materialTextureTableBlock4Offset: 1640,
+        imageBlock0Offset: 80,
+        imageNameBlock4Offset: 1652,
+        imageLoadDefBlock0Offset: 116,
+        materialStateBitsBlock4Offset: 1676,
+        materialTechniqueSetPublished: true,
+        materialPublished: true,
+        imagePublished: true,
+        materialImageResolved: true,
         stoppedBeforeShaderCreation: false,
         unsupportedOperation: null,
         traversesAssetBodies: true,
@@ -276,12 +321,266 @@ test("publishes the leading technique set with a WebGL2 shader substitution", as
         maxInflatedPrefixBytes: 256 * 1024,
         maxStepBytes: 64 * 1024,
         maxStepRecords: 64,
+        worldInventory: {
+            state: "ready",
+            stage: "asset-boundary",
+            path: "zone/english/killhouse.ff",
+            assetCount: 7,
+            inflatedPrefixBytes: 131,
+            assetTableOrderHash: 0x7cbd_671b,
+            firstGfxWorldAssetIndex: 5,
+            firstGfxWorldReference: 0xffff_ffff,
+            assetsBeforeFirstGfxWorld: 5,
+            referencesBeforeFirstGfxWorld: {
+                inline: 5,
+                shared: 0,
+                alias: 0,
+                null: 0,
+            },
+            firstBodyType: 5,
+            firstBodyReference: 0xffff_ffff,
+            nextBodyIndex: 2,
+            nextBodyType: 3,
+            nextBodyReference: 0xffff_ffff,
+            block0HighWaterAtBoundary: 220,
+            block4CursorAtBoundary: 376,
+            stoppedBeforeAssetBody: false,
+            assetBodiesEntered: 2,
+            completedAssetCount: 2,
+            stoppedBeforeDifferentAssetType: false,
+            stoppedBeforeTechniqueDependency: false,
+            techniqueSets: [
+                {
+                    assetIndex: 0,
+                    name: ",web/mc_l_sm_r0c0s0",
+                    worldVertFormat: 0,
+                    remapReference: 0,
+                    block0Offset: 0,
+                    nameBlock4Offset: 72,
+                    boundaryInflatedOffset: 299,
+                    firstTechniqueSlot: 0xffff_ffff,
+                    firstTechniqueReference: 0,
+                    references: { null: 34, inline: 0, shared: 0, alias: 0 },
+                    identity: 1,
+                    published: true,
+                },
+                {
+                    assetIndex: 1,
+                    name: ",web/mc_l_sm_r0c0s1",
+                    worldVertFormat: 0,
+                    remapReference: 0,
+                    block0Offset: 0,
+                    nameBlock4Offset: 92,
+                    boundaryInflatedOffset: 467,
+                    firstTechniqueSlot: 0xffff_ffff,
+                    firstTechniqueReference: 0,
+                    references: { null: 34, inline: 0, shared: 0, alias: 0 },
+                    identity: 2,
+                    published: true,
+                },
+            ],
+            firstTechniqueSet: {
+                name: ",web/mc_l_sm_r0c0s0",
+                worldVertFormat: 0,
+                remapReference: 0,
+                block0Offset: 0,
+                nameBlock4Offset: 72,
+                boundaryInflatedOffset: 299,
+                firstTechniqueSlot: 0xffff_ffff,
+                firstTechniqueReference: 0,
+                references: { null: 34, inline: 0, shared: 0, alias: 0 },
+                identity: 1,
+                registryAliasCount: 3,
+                registryDefinedAliasCount: 2,
+                published: true,
+                stoppedBeforeDependency: false,
+                unsupportedOperation: "Load_Material",
+            },
+            firstXModel: {
+                assetIndex: 2,
+                name: "web/xmodel_wall",
+                numBones: 1,
+                numRootBones: 1,
+                surfaceCount: 2,
+                lodRampType: 0,
+                references: {
+                    boneNames: 0xffff_ffff,
+                    parentList: 0,
+                    quats: 0,
+                    trans: 0,
+                    partClassification: 0xffff_ffff,
+                    baseMat: 0xffff_ffff,
+                    surfaces: 0xffff_ffff,
+                    materialHandles: 0xffff_ffff,
+                    collisionSurfaces: 0,
+                    boneInfo: 0xffff_ffff,
+                    physPreset: 0,
+                    physGeoms: 0,
+                },
+                collisionSurfaceCount: 0,
+                contents: 0,
+                radius: 10,
+                mins: [-1, -2, -3],
+                maxs: [1, 2, 3],
+                lodCount: 1,
+                collisionLod: 0,
+                memoryUsage: 100,
+                flags: 0,
+                bad: false,
+                offsets: {
+                    headerBlock0: 0,
+                    nameBlock4: 112,
+                    boneNamesBlock4: 128,
+                    parentListBlock4: 0,
+                    quatsBlock4: 0,
+                    transBlock4: 0,
+                    partClassificationBlock4: 130,
+                    baseMatBlock4: 132,
+                    surfacesBlock4: 164,
+                    materialHandlesBlock4: 368,
+                },
+                totals: {
+                    vertices: 6,
+                    triangles: 2,
+                    rigidVertLists: 2,
+                    collisionNodes: 1,
+                    collisionLeaves: 1,
+                    surfacePayloadBytes: 406,
+                },
+                boundaryInflatedOffset: 1144,
+                headerTraversed: true,
+                skeletonPrefixTraversed: true,
+                surfaceHeadersTraversed: true,
+                surfaceDependenciesTraversed: true,
+                materialHandlesTraversed: true,
+                stoppedBeforeSurfaceArray: false,
+                stoppedBeforeMaterialDependency: true,
+                unsupportedOperation: "Load_Material",
+                lods: [
+                    {
+                        index: 0, distance: 800, surfaceCount: 2, surfaceIndex: 0,
+                        partBits: [0x8000_0000, 0, 0, 0], lod: 0,
+                        smcIndexPlusOne: 0, smcAllocBits: 0,
+                    },
+                    {
+                        index: 1, distance: 0, surfaceCount: 0, surfaceIndex: 0,
+                        partBits: [0, 0, 0, 0], lod: 0,
+                        smcIndexPlusOne: 0, smcAllocBits: 0,
+                    },
+                    {
+                        index: 2, distance: 0, surfaceCount: 0, surfaceIndex: 0,
+                        partBits: [0, 0, 0, 0], lod: 0,
+                        smcIndexPlusOne: 0, smcAllocBits: 0,
+                    },
+                    {
+                        index: 3, distance: 0, surfaceCount: 0, surfaceIndex: 0,
+                        partBits: [0, 0, 0, 0], lod: 0,
+                        smcIndexPlusOne: 0, smcAllocBits: 0,
+                    },
+                ],
+                boneNames: [{
+                    index: 0,
+                    scriptStringIndex: 0,
+                    name: "tag_origin",
+                    classification: 0,
+                }],
+                surfaces: [
+                    {
+                        index: 0,
+                        tileMode: 1,
+                        deformed: false,
+                        vertCount: 3,
+                        triCount: 1,
+                        baseTriIndex: 0,
+                        baseVertIndex: 0,
+                        vertListCount: 1,
+                        references: {
+                            triIndices: 0xffff_ffff,
+                            vertsBlend: 0,
+                            vertices: 0xffff_ffff,
+                            vertLists: 0xffff_ffff,
+                        },
+                        offsets: {
+                            verticesBlock7: 0,
+                            vertListsBlock4: 276,
+                            indicesBlock8: 0,
+                        },
+                        dependenciesTraversed: true,
+                        rigidVertLists: [{
+                            index: 0,
+                            boneOffset: 0,
+                            vertCount: 3,
+                            triOffset: 0,
+                            triCount: 1,
+                            collisionTree: {
+                                reference: 0xffff_ffff,
+                                translation: [0, 0, 0],
+                                scale: [1, 1, 1],
+                                nodeCount: 1,
+                                leafCount: 1,
+                                traversed: true,
+                            },
+                        }],
+                    },
+                    {
+                        index: 1,
+                        tileMode: 0,
+                        vertCount: 3,
+                        triCount: 1,
+                        baseTriIndex: 1,
+                        baseVertIndex: 3,
+                        vertListCount: 1,
+                        offsets: {
+                            verticesBlock7: 96,
+                            vertListsBlock4: 356,
+                            indicesBlock8: 16,
+                        },
+                        dependenciesTraversed: true,
+                        rigidVertLists: [{
+                            index: 0,
+                            collisionTree: {
+                                reference: 0,
+                                traversed: false,
+                            },
+                        }],
+                    },
+                ],
+                materialReferences: [
+                    { index: 0, reference: 0xffff_ffff },
+                    { index: 1, reference: 0x4000_0001 },
+                ],
+            },
+            typeCounts: [
+                { type: 2, name: "xanim", count: 1 },
+                { type: 3, name: "xmodel", count: 1 },
+                { type: 5, name: "techset", count: 2 },
+                { type: 16, name: "gfx_map", count: 1 },
+                { type: 31, name: "rawfile", count: 1 },
+                { type: 32, name: "stringtable", count: 1 },
+            ],
+            typesBeforeFirstGfxWorld: [
+                { type: 2, name: "xanim", count: 1 },
+                { type: 3, name: "xmodel", count: 1 },
+                { type: 5, name: "techset", count: 2 },
+                { type: 31, name: "rawfile", count: 1 },
+            ],
+        },
     });
     expect(result.census.generation).toBeGreaterThan(0);
     expect(result.census.sourceBytesRead).toBeGreaterThan(12);
     expect(result.census.sourceBytesConsumed).toBeGreaterThan(12);
     expect(result.census.sourceBytesConsumed).toBeLessThanOrEqual(result.census.sourceBytesRead);
     expect(result.census.sourceFeedCount).toBeGreaterThan(0);
+    expect(result.census.worldInventory.fileSize).toBeGreaterThan(12);
+    expect(result.census.worldInventory.firstXModel.surfaces[0].verticesHash)
+        .not.toBe(0x811c_9dc5);
+    expect(result.census.worldInventory.firstXModel.surfaces[0].indicesHash)
+        .not.toBe(0x811c_9dc5);
+    expect(result.census.worldInventory.sourceBytesRead).toBeGreaterThan(12);
+    expect(result.census.worldInventory.sourceBytesConsumed).toBeLessThanOrEqual(
+        result.census.worldInventory.sourceBytesRead,
+    );
+    expect(result.census.worldInventory.sourceFeedCount).toBeGreaterThan(0);
     expect(result.census.pixelShaderProgramHash).toBeGreaterThan(0);
     expect(result.census.shaderArgumentHash).toBeGreaterThan(0);
     expect(result.census.vertexGlslHash).toBeGreaterThan(0);
@@ -296,9 +595,18 @@ test("publishes the leading technique set with a WebGL2 shader substitution", as
         uniforms: ["u_viewProjectionMatrix", "u_worldMatrix", "u_colorMapSampler"],
         textureUnit: 0,
     });
+    expect(result.engineAsset).toMatchObject({
+        state: "ready",
+        path: "images/synthetic_engine_asset.iwi",
+        selectionSource: "retail-material",
+        materialName: "web_cursor",
+        imageName: "synthetic_engine_asset",
+        materialIdentity: 4,
+        imageIdentity: 3,
+    });
     expect(result.rendererTexture).toMatchObject({
         state: "ready",
-        path: "images/$black.iwi",
+        path: "images/synthetic_engine_asset.iwi",
         sourceFormat: IWI_FORMAT_DXT1,
         width: 4,
         height: 4,
@@ -309,10 +617,15 @@ test("publishes the leading technique set with a WebGL2 shader substitution", as
     });
     expect(result.rendererMaterial).toMatchObject({
         state: "ready",
+        materialSource: "retail-fastfile",
+        materialName: "web_cursor",
+        materialIdentity: 4,
+        imageName: "synthetic_engine_asset",
+        imageIdentity: 3,
         shaderSubstitutionId: "webgl2.vertcol_simple2d.v1",
         sampler: "u_colorMapSampler",
         textureUnit: 0,
-        imagePath: "images/$black.iwi",
+        imagePath: "images/synthetic_engine_asset.iwi",
         sourceFormat: IWI_FORMAT_DXT1,
         decodedFormat: "rgba8",
         compressedSource: true,
@@ -366,10 +679,13 @@ test("publishes the leading technique set with a WebGL2 shader substitution", as
     ]);
     expect(result.events.map(({ stage }) => stage)).toEqual(expect.arrayContaining([
         "stat",
+        "world-stat",
         "asset-boundary",
     ]));
     expect(result.archiveEvents.every(({ censusState }) => censusState === "ready")).toBe(true);
-    expect(result.log).toContain("traversed web/synthetic_techset");
+    expect(result.log).toContain(
+        "material web_cursor selected images/synthetic_engine_asset.iwi",
+    );
 
     const firstGeneration = result.census.generation;
     await page.evaluate(() => {
@@ -606,4 +922,267 @@ test("an invalid vertex program fails before shader creation or asset publicatio
         failClosed: true,
     });
     expect(result.archive.state).toBe("idle");
+});
+
+test("a map table without GfxWorld fails before publishing startup assets", async ({ page }, testInfo) => {
+    const overrides = new Map([
+        ["zone/english/killhouse.ff",
+            createSyntheticWorldInventoryFastfile({ includeWorld: false })],
+    ]);
+    await importInstall(page, testInfo, "retail-census-missing-world", { overrides });
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
+        { timeout: 30_000 },
+    ).toBe("failed");
+    const result = await page.evaluate(() => ({
+        census: structuredClone(globalThis.__KISAKCOD_WEB__.retailCensus),
+        archive: structuredClone(globalThis.__KISAKCOD_WEB__.archive),
+        rendererShader: structuredClone(globalThis.__KISAKCOD_WEB__.rendererShader),
+    }));
+    expect(result.census).toMatchObject({
+        state: "failed",
+        path: "zone/english/killhouse.ff",
+        stage: "failed",
+        error: "fastfile contains no GfxWorld asset",
+        completedAssetCount: 0,
+        techniqueSetPublished: false,
+        failClosed: true,
+    });
+    expect(result.archive.state).toBe("idle");
+    expect(result.rendererShader.substitutionId).not.toBe("webgl2.vertcol_simple2d.v1");
+});
+
+test("stops after retaining consecutive publications when a later technique set has a dependency", async ({ page }, testInfo) => {
+    const overrides = new Map([
+        ["zone/english/killhouse.ff",
+            createSyntheticWorldInventoryFastfile({ secondTechniqueDependency: true })],
+    ]);
+    await importInstall(page, testInfo, "retail-census-later-technique-dependency", {
+        overrides,
+        primaryIwd: M20_PRIMARY_IWD,
+    });
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
+        { timeout: 30_000 },
+    ).toBe("ready");
+    const inventory = await page.evaluate(
+        () => structuredClone(globalThis.__KISAKCOD_WEB__.retailCensus.worldInventory),
+    );
+    expect(inventory).toMatchObject({
+        assetBodiesEntered: 2,
+        completedAssetCount: 1,
+        nextBodyIndex: 1,
+        nextBodyType: 5,
+        stoppedBeforeDifferentAssetType: false,
+        stoppedBeforeTechniqueDependency: true,
+        firstTechniqueSet: {
+            published: true,
+            registryAliasCount: 2,
+            registryDefinedAliasCount: 1,
+            stoppedBeforeDependency: false,
+            unsupportedOperation: "Load_MaterialTechnique",
+        },
+        techniqueSets: [
+            { assetIndex: 0, identity: 1, published: true },
+            {
+                assetIndex: 1,
+                identity: 0,
+                published: false,
+                firstTechniqueSlot: 4,
+                firstTechniqueReference: 0xffff_ffff,
+                references: { null: 33, inline: 1, shared: 0, alias: 0 },
+            },
+        ],
+    });
+});
+
+test("retains the fixed XModel header when its first bone dependency is unsupported", async ({ page }, testInfo) => {
+    const overrides = new Map([
+        ["zone/english/killhouse.ff",
+            createSyntheticWorldInventoryFastfile({ unsupportedXModelBoneNames: true })],
+    ]);
+    await importInstall(page, testInfo, "retail-census-xmodel-dependency", {
+        overrides,
+        primaryIwd: M20_PRIMARY_IWD,
+    });
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
+        { timeout: 30_000 },
+    ).toBe("ready");
+    const inventory = await page.evaluate(
+        () => structuredClone(globalThis.__KISAKCOD_WEB__.retailCensus.worldInventory),
+    );
+    expect(inventory).toMatchObject({
+        completedAssetCount: 2,
+        nextBodyIndex: 2,
+        nextBodyType: 3,
+        block0HighWaterAtBoundary: 220,
+        block4CursorAtBoundary: 128,
+        firstTechniqueSet: {
+            registryAliasCount: 3,
+            registryDefinedAliasCount: 2,
+            unsupportedOperation: "Load_ScriptStringArray",
+        },
+        firstXModel: {
+            assetIndex: 2,
+            name: "web/xmodel_wall",
+            headerTraversed: true,
+            skeletonPrefixTraversed: false,
+            stoppedBeforeSurfaceArray: false,
+            boundaryInflatedOffset: 703,
+            unsupportedOperation: "Load_ScriptStringArray",
+            boneNames: [],
+        },
+    });
+});
+
+test("invalid XModel bounds fail without exposing prior technique publications", async ({ page }, testInfo) => {
+    const overrides = new Map([
+        ["zone/english/killhouse.ff",
+            createSyntheticWorldInventoryFastfile({ invalidXModelBounds: true })],
+    ]);
+    await importInstall(page, testInfo, "retail-census-invalid-xmodel-bounds", {
+        overrides,
+    });
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
+        { timeout: 30_000 },
+    ).toBe("failed");
+    const census = await page.evaluate(
+        () => structuredClone(globalThis.__KISAKCOD_WEB__.retailCensus),
+    );
+    expect(census).toMatchObject({
+        state: "failed",
+        path: "zone/english/killhouse.ff",
+        stage: "failed",
+        error: "invalid XModel bounds",
+        completedAssetCount: 0,
+        failClosed: true,
+    });
+    expect(census.worldInventory).toBeUndefined();
+});
+
+test("an out-of-range XModel bone script string fails closed", async ({ page }, testInfo) => {
+    const overrides = new Map([
+        ["zone/english/killhouse.ff",
+            createSyntheticWorldInventoryFastfile({ invalidXModelBoneString: true })],
+    ]);
+    await importInstall(page, testInfo, "retail-census-invalid-xmodel-bone", {
+        overrides,
+    });
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
+        { timeout: 30_000 },
+    ).toBe("failed");
+    const census = await page.evaluate(
+        () => structuredClone(globalThis.__KISAKCOD_WEB__.retailCensus),
+    );
+    expect(census).toMatchObject({
+        state: "failed",
+        path: "zone/english/killhouse.ff",
+        stage: "failed",
+        error: "invalid XModel bone script string",
+        completedAssetCount: 0,
+        failClosed: true,
+    });
+    expect(census.worldInventory).toBeUndefined();
+});
+
+test("an XSurface pointer/count mismatch fails without a partial model", async ({ page }, testInfo) => {
+    const overrides = new Map([
+        ["zone/english/killhouse.ff",
+            createSyntheticWorldInventoryFastfile({ invalidXSurfaceLayout: true })],
+    ]);
+    await importInstall(page, testInfo, "retail-census-invalid-xsurface", { overrides });
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
+        { timeout: 30_000 },
+    ).toBe("failed");
+    const census = await page.evaluate(
+        () => structuredClone(globalThis.__KISAKCOD_WEB__.retailCensus),
+    );
+    expect(census).toMatchObject({
+        state: "failed",
+        path: "zone/english/killhouse.ff",
+        stage: "failed",
+        error: "unsupported XSurface layout",
+        completedAssetCount: 0,
+        failClosed: true,
+    });
+    expect(census.worldInventory).toBeUndefined();
+});
+
+test("an invalid XSurface collision tree fails closed", async ({ page }, testInfo) => {
+    const overrides = new Map([
+        ["zone/english/killhouse.ff",
+            createSyntheticWorldInventoryFastfile({ invalidXSurfaceCollision: true })],
+    ]);
+    await importInstall(page, testInfo, "retail-census-invalid-xsurface-tree", { overrides });
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
+        { timeout: 30_000 },
+    ).toBe("failed");
+    const census = await page.evaluate(
+        () => structuredClone(globalThis.__KISAKCOD_WEB__.retailCensus),
+    );
+    expect(census).toMatchObject({
+        state: "failed",
+        path: "zone/english/killhouse.ff",
+        stage: "failed",
+        error: "invalid XSurface collision tree",
+        completedAssetCount: 0,
+        failClosed: true,
+    });
+    expect(census.worldInventory).toBeUndefined();
+});
+
+test("an invalid map technique-set header fails before publishing asset zero", async ({ page }, testInfo) => {
+    const overrides = new Map([
+        ["zone/english/killhouse.ff",
+            createSyntheticWorldInventoryFastfile({ invalidTechniqueSet: true })],
+    ]);
+    await importInstall(page, testInfo, "retail-census-invalid-world-techset", { overrides });
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
+        { timeout: 30_000 },
+    ).toBe("failed");
+    const census = await page.evaluate(
+        () => structuredClone(globalThis.__KISAKCOD_WEB__.retailCensus),
+    );
+    expect(census).toMatchObject({
+        state: "failed",
+        path: "zone/english/killhouse.ff",
+        stage: "failed",
+        error: "unsupported technique-set layout",
+        completedAssetCount: 0,
+        techniqueSetPublished: false,
+        failClosed: true,
+    });
+});
+
+test("an invalid later map technique-set header exposes no partial prefix", async ({ page }, testInfo) => {
+    const overrides = new Map([
+        ["zone/english/killhouse.ff",
+            createSyntheticWorldInventoryFastfile({ invalidSecondTechniqueSet: true })],
+    ]);
+    await importInstall(page, testInfo, "retail-census-invalid-later-world-techset", {
+        overrides,
+    });
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
+        { timeout: 30_000 },
+    ).toBe("failed");
+    const census = await page.evaluate(
+        () => structuredClone(globalThis.__KISAKCOD_WEB__.retailCensus),
+    );
+    expect(census).toMatchObject({
+        state: "failed",
+        path: "zone/english/killhouse.ff",
+        stage: "failed",
+        error: "unsupported technique-set layout",
+        completedAssetCount: 0,
+        techniqueSetPublished: false,
+        failClosed: true,
+    });
+    expect(census.worldInventory).toBeUndefined();
 });

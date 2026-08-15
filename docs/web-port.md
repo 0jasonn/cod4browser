@@ -897,14 +897,189 @@ texture pixels, but the current indexed surface/material identity remains the
 synthetic M10 fixture. It does not yet claim that a retail `Material` or
 `GfxImage` asset record selected that image, nor that any map geometry rendered.
 
-## Next boundary: Milestone 20
+## Milestone 20: registered retail material/image binding (complete)
 
-M20 should extend generated-loader traversal from the leading technique set to
-one compatible retail `Material` and its texture table/image reference, publish
-that dependency atomically through the zone registry, and use the resolved
-image name instead of the current deterministic first-IWI probe. The acceptance
-line is one real material choosing one real owned image; arbitrary materials,
-world geometry, lightmaps, visibility, and gameplay remain later work.
+The retail generated-loader path now accepts the exact leading three-asset
+prefix observed in the owned English `code_post_gfx.ff`: `sm2/2d`, `2d`, and
+material `ui_cursor`, all inline. The first technique set still owns the strict
+M17/M18 WebGL2 substitution. The second set is traversed separately as the
+material's serialized dependency: its normal aliases to the first declaration,
+shader name, and technique name are checked, its renderer-one vertex/pixel
+programs receive bounded stage/version/terminal framing validation, and no
+second shader substitution or native D3D object is invented.
+
+`ui_cursor` is accepted only with one non-water 12-byte texture definition, no
+constant table, one state-bits record, and a normal reference to the completed
+`2d` technique-set asset. Its inline `GfxImage` must be a bounded two-dimensional
+record with a safe inline name and a consistent bounded load definition. The
+owned record is `3_cursor3`, 64 by 64 by 1, with a DXT3 load format and no
+embedded resource bytes. The resulting archive path is constructed as
+`images/3_cursor3.iwi`; it is present in the owned `main/iw_00.iwd` and is read
+through the existing M3/M4 engine-filesystem service and M19 DXT decoder.
+
+The shared zone registry reserves the pointer cells before traversal and owns
+four stable identities in generated-loader publication order: compatibility
+technique set 1, material technique set 2, nested image 3, and material 4. The
+three top-level cells plus the material texture's image cell must all be defined
+before publication. A bad prefix, unresolved or mistyped alias, water texture,
+unsafe name, inconsistent image dimensions, negative/oversized resource, or
+allocation failure leaves no externally available result.
+
+The read-only owned diagnostic completes three top-level assets at inflated
+offset 17,013 with block-0 high-water 148 and block-4 cursor 16,532. No retail
+byte is stored in the repository. The freely generated fixture uses material
+`web_cursor` and image `synthetic_engine_asset`; its IWD deliberately also
+contains the lower-sorting `images/$black.iwi`, proving that the browser loads
+the material-selected path instead of the former deterministic first-image
+probe. Cancellation clears the binding, and a missing selected member fails
+closed rather than falling back.
+
+This is the first real serialized material choosing a real owned image. The
+drawn indexed geometry remains the synthetic M10 world surface, so this is not
+a retail map render.
+
+## Milestone 21: retail world-asset inventory (complete)
+
+The cooperative census now runs a second parser mode over the allowlisted
+`zone/english/killhouse.ff` after the M20 startup material succeeds. This mode
+validates the same unsigned v5/zlib envelope, XFile record, script strings, and
+complete XAsset table, but intentionally stops before generated-loader body
+zero. It publishes no map asset and never treats a declared size as permission
+to skip an unknown body.
+
+The read-only owned inventory observes a 70,391,800-byte file containing 1,684
+assets. Only 16,295 compressed bytes are consumed to reach the 30,747-byte
+inflated table boundary. The stable table-order hash is `0x12e39952`; asset zero
+is an inline technique set, and the first inline `GfxWorld` is index 772. Every
+one of the 772 preceding references is inline, so none can be resolved as an
+already-published alias or omitted as null. Their type census is 146 `xanim`,
+315 `xmodel`, 218 `techset`, one `com_map`, one `lightdef`, 10 `weapon`, 60
+`fx`, and 21 `rawfile` entries.
+
+The full owned table contains 270 `xanim`, 382 `xmodel`, six `material`, 238
+`techset`, 466 `sound`, one each of `col_map_sp`, `com_map`, `game_map_sp`, and
+`gfx_map`, one `lightdef`, three `menufile`, 151 `localize`, 12 `weapon`, 120
+`fx`, and 31 `rawfile` entries. No retail bytes are stored in the repository.
+The freely generated browser fixture has seven headers and places its synthetic
+world at index five; malformed coverage proves a table without `GfxWorld`
+fails before the already-validated startup material or shader is published.
+
+This inventory materially narrows the route to a real world surface: direct
+seeking to asset 772 would violate generated-loader ordering and pointer
+publication. It does not parse a retail map body or change the synthetic drawn
+geometry.
+
+## Milestone 22: first retail map asset (complete)
+
+The map census now continues past the M21 table boundary into the exact
+generated-loader body-zero path. It allocates the 148-byte
+`MaterialTechniqueSet` in temporary block 0, enters persistent block 4 for its
+bounded name, and classifies all 34 technique-pointer tokens without converting
+or executing any unknown dependency.
+
+The owned asset is `,sm2/mc_l_sm_r0c0s0`: world-vertex format zero, null remap,
+and 34 null technique pointers. Its name ends at inflated offset 30,915;
+block-0 high-water is 148 and block-4 cursor is 30,708. With no nested technique
+body pending, the parser unwinds both frames, registers stable identity 1, and
+defines the reserved top-level asset-zero alias atomically. It then stops before
+asset one, which the table identifies as another inline technique set.
+
+The generalized boundary also handles dependency-bearing synthetic sets
+conservatively: it records null, inline, shared-sentinel, and normal-alias token
+classes, but leaves the top-level alias unresolved and stops before
+`Load_MaterialTechnique`. Invalid header state or an unsafe/unterminated name
+fails without making a result available. The browser fixture models the owned
+zero-dependency publication and contains no retail bytes.
+
+This is the first successfully published asset from a retail map fastfile. It
+does not create a shader, read asset one, or render map geometry.
+
+## Milestone 23: consecutive retail map assets (complete)
+
+The world-prefix mode now repeats the checked 148-byte technique-set load for
+each consecutive inline top-level entry. Every body receives its own bounded
+result record, temporary block-0 allocation, persistent block-4 name span, and
+table-cell alias. A set is registered and its alias published only when all 34
+technique pointers are null. The loop stops before the first nested
+`MaterialTechnique`, non-inline reference, or different top-level type.
+
+The owned F.N.G. fastfile begins with 12 zero-dependency technique sets at asset
+indices 0 through 11. All 12 publish with identities 1 through 12 and a 12/12
+defined alias registry. Their serialized run ends at inflated offset 32,729;
+temporary block 0 retains a 148-byte high-water mark, while persistent block 4
+advances to 30,894. Asset 12 is an inline `XModel`, so traversal stops before
+its body. No model bytes are interpreted.
+
+The freely generated browser fixture publishes two consecutive sets before an
+inline `XModel`. Companion fixtures stop on a dependency in set one and reject
+a malformed later header without exposing a partial result. No retail bytes are
+stored in the repository.
+
+## Milestone 24: first retail XModel boundary (complete)
+
+The world-prefix reader now enters inline asset 12 using the upstream generated
+loader order. It consumes the fixed 220-byte `XModel` record, validates its
+counts, LOD windows, finite bounds, pointer/count relationships, and collision
+surface limit, then allocates only the simple skeleton prefix whose lengths are
+proved by those fields. Bone script-string tokens are resolved through the
+already checked zone string table. The traversal stops immediately before the
+first `XSurface` array; it does not infer or skip any surface payload.
+
+The owned first model is `ch_street_wall_light_01_off`: one root bone, six
+surfaces, three two-surface LODs, two declared collision surfaces, radius
+approximately 45.003, and memory usage 24,847 bytes. Its single bone token is 1
+and resolves to `polysurface269`. The model prefix ends at inflated offset
+33,012. Temporary block 0 reaches a 220-byte high-water mark, while persistent
+block 4 advances from the model name at logical offset 30,894 through the bone
+token, classification byte, and base matrix to logical cursor 30,960.
+
+The asset-12 table alias is reserved but deliberately remains undefined because
+the model has not completed its surface, material, collision, or physics
+dependencies. The registry therefore reports 13 reserved aliases and 12
+defined aliases. Synthetic fixtures cover the same successful boundary, a
+non-inline bone-name dependency that stops after the fixed header, invalid
+bounds, and an invalid bone string token; malformed inputs fail without
+publishing a partial public result. No retail bytes are stored in the
+repository, and no model geometry is rendered.
+
+## Milestone 25: first retail XSurface dependency prefix (complete)
+
+The map reader now continues from the M24 skeleton boundary through the exact
+`Load_XSurfaceArray` order. It validates every fixed 56-byte surface header,
+weighted-vertex counts and pointer relationships, then accounts for inline
+32-byte packed vertices in block 7, rigid-vertex lists and collision trees in
+block 4, and triangle indices in block 8. Payload sizes and aggregate counts
+are independently capped; large vertex, node, leaf, and index arrays are hashed
+as traversal evidence instead of being retained in the census result.
+
+For `ch_street_wall_light_01_off`, all six surfaces complete: 754 vertices,
+524 triangles, six rigid lists, 44 collision nodes, and 284 collision leaves.
+The serialized surface dependency run occupies 29,216 bytes including the
+surface and material-handle arrays. It ends at inflated offset 62,228 with
+block-4 cursor 32,960. The six material slots are retained in surface order:
+two inline material tokens followed by aliases `0x400080a9`, `0x400080ad`,
+`0x400080a9`, and `0x400080ad`.
+
+Traversal stops before the first inline `Material`. The asset-12 alias therefore
+remains reserved and undefined, and the XModel is not rendered. Synthetic
+coverage proves two surfaces across blocks 4, 7, and 8, one inline collision
+tree, a null-tree rigid list, material ordering, fail-closed pointer/count
+mismatch, and invalid collision scale. No retail bytes or retained proprietary
+vertex/index payloads are stored in the repository.
+
+## Next boundary: Milestone 26
+
+M26 should generalize the checked material loader to the XModel's two inline
+material handles, resolve the four encoded aliases through the zone registry,
+and continue through collision surfaces, bone info, physics preset, and physics
+geometry in upstream order. The XModel table alias must remain unpublished
+until all required dependencies complete. Rendering a model surface should
+follow only after that publication boundary and a deliberate conversion from
+packed XSurface vertices/indices to the browser renderer seam.
+
+Reaching `GfxWorld` still requires typed loaders for every intervening inline
+asset class; geometry, lightmaps, visibility, and camera state remain separate
+later boundaries.
 
 General generated-loader traversal and a real-map render remain later format
 milestones.

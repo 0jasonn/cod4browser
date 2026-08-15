@@ -760,7 +760,200 @@ job can therefore bind the owned install's deterministic first bounded image
 (`images/$black.iwi`) to the M18 sampler instead of reporting format 11 as
 unsupported.
 
-This milestone joins a real compressed IWI image path to the retail-derived
-shader contract, but the current surface's material registry identity is still
-synthetic. M20 must traverse a compatible retail Material texture table and
-GfxImage name before claiming a real serialized material dependency.
+This milestone joined a real compressed IWI image path to the retail-derived
+shader contract, but at that boundary the surface's material registry identity
+was still synthetic.
+
+## Milestone 20 material/image registry boundary (complete)
+
+The supported retail prefix now extends through top-level assets 0–2:
+
+| Index | Type | Name | Publication |
+| ---: | --- | --- | --- |
+| 0 | techset | `sm2/2d` | compatibility identity 1 |
+| 1 | techset | `2d` | material-technique identity 2 |
+| 2 | material | `ui_cursor` | material identity 4 |
+
+The nested `GfxImage` `3_cursor3` is published as identity 3 before its owning
+material, matching generated-loader dependency order. The material's technique
+token resolves the asset-one pointer cell in block 4; its sole non-water texture
+record owns a separately reserved image cell. All four registry aliases are
+defined before the result becomes visible.
+
+The material body is 80 bytes with texture/constant/state-bits counts 1/0/1.
+Its texture record is 12 bytes and references one inline 36-byte 2D image. The
+image name produces `images/3_cursor3.iwi`; its 16-byte load definition reports
+64 by 64 by 1, DXT3, and zero embedded resource bytes. Parsing still models the
+nested block-0/block-4 frames, so temporary material and image bodies rewind
+without invalidating owned names or registry identities. The final owned-file
+boundary is inflated offset 17,013, block-0 high-water 148, and block-4 cursor
+16,532.
+
+Only the first technique set selects the compiled-in shader substitution. The
+second renderer-one shader pair is bounded and structurally framed so traversal
+can reach the material, but it does not select GLSL or create GPU state. The
+browser binds the IWI selected by the registered image name; a missing member
+does not fall back to another archive entry. Synthetic tests reproduce the
+layout and use a decoy lower-sorting image without containing retail data.
+
+## Milestone 21 killhouse world-asset inventory (complete)
+
+The table-only world inventory mode uses the same bounded streaming inflater
+and nine-block declarations but returns atomically at the asset-table boundary.
+It requires at least one type-16 `gfx_map`/`GfxWorld` header, records its exact
+index and pointer token, retains a rolling FNV-1a hash over every serialized
+eight-byte table record, and snapshots both type and pointer-reference counts
+before the first world. No registry cell or asset identity is published because
+body zero has not run.
+
+The owned F.N.G. `killhouse.ff` observation is:
+
+| Field | Value |
+| --- | ---: |
+| File bytes | 70,391,800 |
+| Compressed bytes consumed | 16,295 |
+| Inflated table boundary | 30,747 |
+| Total asset headers | 1,684 |
+| Table-order hash | `0x12e39952` |
+| First body | inline `techset` at index 0 |
+| First `GfxWorld` | inline index 772 |
+| References before world | 772 inline; 0 shared, alias, or null |
+
+Those 772 preceding entries comprise 146 `xanim`, 315 `xmodel`, 218 `techset`,
+one `com_map`, one `lightdef`, 10 `weapon`, 60 `fx`, and 21 `rawfile` headers.
+The result is a dependency-order proof, not permission to jump to offset 772:
+all preceding bodies must be traversed so their nested allocations and aliases
+are defined exactly as the generated loader expects.
+
+The synthetic fixture uses seven headers and a world at index five. M21 stops
+at its table boundary even though the fixture now also carries the M23
+two-technique-set prefix. A companion table with no world fails with
+`GfxWorldMissing` and cannot expose a partial result.
+
+## Milestone 22 first killhouse asset boundary (complete)
+
+The owned table's first entry is an inline 148-byte `MaterialTechniqueSet`.
+The generated loader reads its XString and then visits the fixed 34-element
+`MaterialTechniquePtr` array. M22 models exactly that ordering and distinguishes
+null, inline (`0xffffffff`), shared-sentinel (`0xfffffffe`), and normal encoded
+references without assuming that the pointer helpers are interchangeable.
+
+The read-only owned result is:
+
+| Field | Value |
+| --- | --- |
+| Name | `,sm2/mc_l_sm_r0c0s0` |
+| World vertex format | 0 |
+| Remapped set token | null |
+| Technique tokens | 34 null |
+| Inflated boundary | 30,915 |
+| Block-0 high-water | 148 |
+| Block-4 cursor | 30,708 |
+| Registry publication | identity 1; alias 1/1 defined |
+| Next body | inline `techset` at asset index 1 |
+
+Because every nested technique token is null, body zero has no dependent
+`MaterialTechnique` allocation. The parser can pop the name and asset frames,
+register the set, and publish its table cell exactly where upstream calls
+`Load_MaterialTechniqueSetAsset`. Dependency-bearing fixtures instead stop
+before the first technique body with the alias still reserved and undefined.
+Malformed headers likewise expose no partial registry state.
+
+## Milestone 23 consecutive killhouse technique sets (complete)
+
+The same body loader now loops while the next top-level table entry is an inline
+type-5 technique set. Each completed zero-dependency body is registered by its
+asset index and name, then atomically publishes the exact block-4 table-cell
+alias reserved for that entry. A dependency-bearing body remains reserved but
+undefined, and a malformed later body makes the entire public result
+unavailable.
+
+The read-only owned result is:
+
+| Field | Value |
+| --- | --- |
+| Technique-set bodies entered | 12 (asset indices 0–11) |
+| Completed/published | 12 |
+| Stable identities | 1–12 |
+| Registry publication | 12 aliases; 12 defined |
+| Technique pointers | 408 null; no nested technique body |
+| Final inflated boundary | 32,729 |
+| Block-0 high-water | 148 |
+| Block-4 cursor | 30,894 |
+| Next body | inline `xmodel` at asset index 12 |
+
+The names cover the owned leading `mc_l` shadow/light technique variants; the
+first remains `,sm2/mc_l_sm_r0c0s0` and the twelfth is
+`,mc_l_hsm_b0c0`. The next byte belongs to an `XModel` body and is not parsed.
+This remains a generated-loader prefix proof, not a model or map render.
+
+## Milestone 24 first killhouse XModel prefix (complete)
+
+The checked traversal now enters asset 12 in the same field and pointer order
+as upstream `Load_XModel`. It validates the 220-byte fixed record and consumes
+the bounded skeleton prefix: name, bone script-string tokens, child-parent
+indices, child quaternions and translations, part classifications, and base
+matrices. It stops before `Load_XSurfaceArray`; no surface, material, collision,
+or physics body is skipped.
+
+The read-only owned result is:
+
+| Field | Value |
+| --- | --- |
+| Asset index / type | 12 / inline `xmodel` |
+| Name | `ch_street_wall_light_01_off` |
+| Bones | 1 total; 1 root |
+| Bone 0 | token 1 / `polysurface269` |
+| Surfaces | 6 declared |
+| LODs | 3; distances 800, 1,200, and 1,000,000; two surfaces each |
+| Collision | LOD 2; 2 surfaces declared |
+| Radius | approximately 45.003 |
+| Bounds | min `[0, -14.6680, -12.6054]`; max `[44.5406, 14.6680, 22.7265]` |
+| Model memory usage | 24,847 bytes |
+| Final inflated boundary | 33,012 |
+| Block-0 high-water | 220 |
+| Block-4 cursor | 30,960 |
+| Registry publication | 13 aliases reserved; 12 defined; XModel unpublished |
+| Stop operation | `Load_XSurfaceArray` |
+
+The synthetic fixture uses a freely generated one-bone model and proves the
+same ordering without copying retail data. Separate cases preserve a valid
+fixed header at an unsupported bone-name reference and fail closed for invalid
+bounds or an out-of-range bone script-string token. This is an XModel metadata
+and skeleton-prefix result, not a model render.
+
+## Milestone 25 first killhouse XSurface prefix (complete)
+
+The loader now consumes the six fixed `XSurface` records and follows each
+surface's dependencies in upstream order: blend metadata, block-7 packed
+vertices, block-4 rigid lists and collision trees, then block-8 triangle
+indices. It retains structural records and hashes of large payloads, not retail
+geometry bytes. After all surfaces complete, it inventories the six material
+handle tokens and stops before the first inline material body.
+
+The read-only owned result is:
+
+| Surface | Vertices | Triangles | Rigid lists | Collision nodes | Collision leaves |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 0 | 368 | 252 | 1 | 21 | 133 |
+| 1 | 17 | 24 | 1 | 3 | 18 |
+| 2 | 213 | 140 | 1 | 10 | 72 |
+| 3 | 9 | 12 | 1 | 1 | 10 |
+| 4 | 141 | 92 | 1 | 8 | 48 |
+| 5 | 6 | 4 | 1 | 1 | 3 |
+| **Total** | **754** | **524** | **6** | **44** | **284** |
+
+| Boundary field | Value |
+| --- | --- |
+| Inflated boundary | 62,228 |
+| Surface-prefix bytes | 29,216 |
+| Block-4 cursor | 32,960 |
+| Material slots | `ffffffff`, `ffffffff`, `400080a9`, `400080ad`, `400080a9`, `400080ad` |
+| Registry publication | 13 aliases reserved; 12 defined; XModel unpublished |
+| Stop operation | `Load_Material` |
+
+The freely generated two-surface fixture exercises the same block switching,
+including an inline collision tree and a null collision-tree reference.
+Pointer/count mismatch and invalid collision scale fixtures fail atomically.
+This is complete XSurface dependency metadata for one model, not a decoded or
+rendered retail model.

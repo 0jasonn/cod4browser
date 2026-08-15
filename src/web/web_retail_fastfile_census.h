@@ -5,6 +5,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <vector>
 
 namespace kisak::fastfile
 {
@@ -28,6 +29,18 @@ struct RetailCensusLimits
     std::uint32_t maxTechniquePasses = 16u;
     std::uint32_t maxShaderNameBytes = 255u;
     std::uint32_t maxShaderProgramDwords = 16384u;
+    std::uint32_t maxMaterialNameBytes = 255u;
+    std::uint32_t maxImageNameBytes = 255u;
+    std::uint32_t maxMaterialTextures = 8u;
+    std::uint32_t maxImageResourceBytes = 4u * 1024u * 1024u;
+    std::uint32_t maxXModelNameBytes = 255u;
+    std::uint32_t maxXModelCollisionSurfaces = 4096u;
+    std::uint32_t maxXModelSurfaceVertices = 1024u * 1024u;
+    std::uint32_t maxXModelSurfaceTriangles = 1024u * 1024u;
+    std::uint32_t maxXModelRigidVertLists = 4096u;
+    std::uint32_t maxXModelCollisionNodes = 1024u * 1024u;
+    std::uint32_t maxXModelCollisionLeaves = 1024u * 1024u;
+    std::uint32_t maxXModelSurfacePayloadBytes = 64u * 1024u * 1024u;
 };
 
 enum class RetailCensusError : std::uint8_t
@@ -63,6 +76,8 @@ enum class RetailCensusError : std::uint8_t
     ZoneStreamInvalid,
     ZoneBlockOverflow,
     FirstAssetUnsupported,
+    AssetPrefixUnsupported,
+    AssetRegistryInvalid,
     TechniqueSetLayoutUnsupported,
     TechniqueSetNameInvalid,
     TechniqueSetNameTooLong,
@@ -82,6 +97,31 @@ enum class RetailCensusError : std::uint8_t
     ShaderSubstitutionUnsupported,
     ShaderArgumentLayoutUnsupported,
     TechniqueNameInvalid,
+    TechniqueAliasInvalid,
+    MaterialLayoutUnsupported,
+    MaterialNameInvalid,
+    MaterialNameTooLong,
+    MaterialTechniqueSetInvalid,
+    MaterialTextureCountLimit,
+    MaterialTextureLayoutUnsupported,
+    ImageLayoutUnsupported,
+    ImageNameInvalid,
+    ImageNameTooLong,
+    ImageResourceSizeInvalid,
+    ImageResourceSizeLimit,
+    MaterialStateBitsUnsupported,
+    GfxWorldMissing,
+    XModelLayoutUnsupported,
+    XModelNameInvalid,
+    XModelNameTooLong,
+    XModelCountInvalid,
+    XModelBoundsInvalid,
+    XModelScriptStringInvalid,
+    XModelDependencyUnsupported,
+    XSurfaceLayoutUnsupported,
+    XSurfaceCountInvalid,
+    XSurfacePayloadLimit,
+    XSurfaceCollisionInvalid,
     AllocationFailed,
 };
 
@@ -94,6 +134,16 @@ enum class RetailCensusProgress : std::uint8_t
     Running,
     Succeeded,
     Failed,
+};
+
+enum class RetailCensusMode : std::uint8_t
+{
+    CodePostGfxMaterial = 0,
+    WorldAssetInventory,
+    WorldTechniqueSetPrefix,
+    WorldFirstTechniqueSet = WorldTechniqueSetPrefix,
+    WorldXModelPrefix,
+    WorldXSurfacePrefix,
 };
 
 enum class RetailCensusStage : std::uint8_t
@@ -118,6 +168,45 @@ enum class RetailCensusStage : std::uint8_t
     PixelShaderProgram,
     ShaderArguments,
     TechniqueName,
+    SecondTechniqueSet,
+    SecondTechniqueSetName,
+    SecondTechnique,
+    SecondMaterialPasses,
+    SecondVertexShader,
+    SecondVertexShaderProgram,
+    SecondPixelShader,
+    SecondPixelShaderProgram,
+    SecondShaderArguments,
+    SecondTechniqueName,
+    Material,
+    MaterialName,
+    MaterialTextureTable,
+    Image,
+    ImageName,
+    ImageLoadDef,
+    ImageResource,
+    MaterialStateBits,
+    WorldTechniqueSet,
+    WorldTechniqueSetName,
+    WorldFirstTechniqueSet = WorldTechniqueSet,
+    WorldFirstTechniqueSetName = WorldTechniqueSetName,
+    WorldXModel,
+    WorldXModelName,
+    WorldXModelBoneNames,
+    WorldXModelParentList,
+    WorldXModelQuats,
+    WorldXModelTrans,
+    WorldXModelPartClassification,
+    WorldXModelBaseMat,
+    WorldXModelSurfaceHeaders,
+    WorldXModelSurfaceBlendInfo,
+    WorldXModelSurfaceVertices,
+    WorldXModelSurfaceVertLists,
+    WorldXModelSurfaceCollisionTree,
+    WorldXModelSurfaceCollisionNodes,
+    WorldXModelSurfaceCollisionLeaves,
+    WorldXModelSurfaceIndices,
+    WorldXModelMaterialHandles,
     AssetBoundary,
     Failed,
 };
@@ -142,6 +231,153 @@ struct RetailCensusStepReport
     bool needsSource = false;
 };
 
+struct RetailWorldTechniqueSet
+{
+    std::uint32_t assetIndex = 0u;
+    std::string name;
+    std::uint32_t worldVertFormat = 0u;
+    std::uint32_t remapReference = 0u;
+    std::uint32_t block0Offset = 0u;
+    std::uint32_t nameBlock4Offset = 0u;
+    std::uint32_t boundaryInflatedOffset = 0u;
+    std::uint32_t firstTechniqueSlot = UINT32_MAX;
+    std::uint32_t firstTechniqueReference = 0u;
+    std::uint32_t nullTechniqueReferences = 0u;
+    std::uint32_t inlineTechniqueReferences = 0u;
+    std::uint32_t sharedTechniqueReferences = 0u;
+    std::uint32_t aliasTechniqueReferences = 0u;
+    std::uint32_t identity = 0u;
+    bool published = false;
+};
+
+struct RetailXModelLod
+{
+    float distance = 0.0f;
+    std::uint16_t surfaceCount = 0u;
+    std::uint16_t surfaceIndex = 0u;
+    std::array<std::uint32_t, 4> partBits{};
+    std::uint8_t lod = 0u;
+    std::uint8_t smcIndexPlusOne = 0u;
+    std::uint8_t smcAllocBits = 0u;
+};
+
+struct RetailXSurfaceCollisionTree
+{
+    std::uint32_t reference = 0u;
+    std::array<float, 3> translation{};
+    std::array<float, 3> scale{};
+    std::uint32_t nodeCount = 0u;
+    std::uint32_t nodesReference = 0u;
+    std::uint32_t leafCount = 0u;
+    std::uint32_t leafsReference = 0u;
+    std::uint32_t headerBlock4Offset = 0u;
+    std::uint32_t nodesBlock4Offset = 0u;
+    std::uint32_t leafsBlock4Offset = 0u;
+    std::uint32_t nodesHash = 2166136261u;
+    std::uint32_t leafsHash = 2166136261u;
+    bool traversed = false;
+};
+
+struct RetailXRigidVertList
+{
+    std::uint16_t boneOffset = 0u;
+    std::uint16_t vertCount = 0u;
+    std::uint16_t triOffset = 0u;
+    std::uint16_t triCount = 0u;
+    RetailXSurfaceCollisionTree collisionTree;
+};
+
+struct RetailXSurface
+{
+    std::uint32_t index = 0u;
+    std::uint8_t tileMode = 0u;
+    bool deformed = false;
+    std::uint16_t vertCount = 0u;
+    std::uint16_t triCount = 0u;
+    std::uint8_t zoneHandle = 0u;
+    std::uint16_t baseTriIndex = 0u;
+    std::uint16_t baseVertIndex = 0u;
+    std::uint32_t triIndicesReference = 0u;
+    std::array<std::int16_t, 4> blendVertCounts{};
+    std::uint32_t vertsBlendReference = 0u;
+    std::uint32_t vertsReference = 0u;
+    std::uint32_t vertListCount = 0u;
+    std::uint32_t vertListReference = 0u;
+    std::array<std::uint32_t, 4> partBits{};
+    std::uint32_t blendWordCount = 0u;
+    std::uint32_t blendInfoBlock4Offset = 0u;
+    std::uint32_t verticesBlock7Offset = 0u;
+    std::uint32_t vertListsBlock4Offset = 0u;
+    std::uint32_t indicesBlock8Offset = 0u;
+    std::uint32_t verticesHash = 2166136261u;
+    std::uint32_t indicesHash = 2166136261u;
+    std::vector<RetailXRigidVertList> rigidVertLists;
+    bool dependenciesTraversed = false;
+};
+
+struct RetailWorldXModel
+{
+    std::uint32_t assetIndex = 0u;
+    std::string name;
+    std::uint8_t numBones = 0u;
+    std::uint8_t numRootBones = 0u;
+    std::uint8_t surfaceCount = 0u;
+    std::uint8_t lodRampType = 0u;
+    std::uint32_t boneNamesReference = 0u;
+    std::uint32_t parentListReference = 0u;
+    std::uint32_t quatsReference = 0u;
+    std::uint32_t transReference = 0u;
+    std::uint32_t partClassificationReference = 0u;
+    std::uint32_t baseMatReference = 0u;
+    std::uint32_t surfacesReference = 0u;
+    std::uint32_t materialHandlesReference = 0u;
+    std::array<RetailXModelLod, 4> lods{};
+    std::uint32_t collisionSurfacesReference = 0u;
+    std::uint32_t collisionSurfaceCount = 0u;
+    std::uint32_t contents = 0u;
+    std::uint32_t boneInfoReference = 0u;
+    float radius = 0.0f;
+    std::array<float, 3> mins{};
+    std::array<float, 3> maxs{};
+    std::int16_t lodCount = 0;
+    std::int16_t collisionLod = 0;
+    std::uint32_t memoryUsage = 0u;
+    std::uint8_t flags = 0u;
+    bool bad = false;
+    std::uint32_t physPresetReference = 0u;
+    std::uint32_t physGeomsReference = 0u;
+    std::vector<std::uint16_t> boneNameScriptStringIndices;
+    std::vector<std::string> boneNames;
+    std::vector<std::uint8_t> parentList;
+    std::vector<std::uint8_t> partClassification;
+    std::vector<RetailXSurface> surfaces;
+    std::vector<std::uint32_t> materialReferences;
+    std::uint32_t totalVertices = 0u;
+    std::uint32_t totalTriangles = 0u;
+    std::uint32_t totalRigidVertLists = 0u;
+    std::uint32_t totalCollisionNodes = 0u;
+    std::uint32_t totalCollisionLeaves = 0u;
+    std::uint32_t surfacePayloadBytes = 0u;
+    std::uint32_t headerBlock0Offset = 0u;
+    std::uint32_t nameBlock4Offset = 0u;
+    std::uint32_t boneNamesBlock4Offset = 0u;
+    std::uint32_t parentListBlock4Offset = 0u;
+    std::uint32_t quatsBlock4Offset = 0u;
+    std::uint32_t transBlock4Offset = 0u;
+    std::uint32_t partClassificationBlock4Offset = 0u;
+    std::uint32_t baseMatBlock4Offset = 0u;
+    std::uint32_t surfacesBlock4Offset = 0u;
+    std::uint32_t materialHandlesBlock4Offset = 0u;
+    std::uint32_t boundaryInflatedOffset = 0u;
+    bool headerTraversed = false;
+    bool skeletonPrefixTraversed = false;
+    bool surfaceHeadersTraversed = false;
+    bool surfaceDependenciesTraversed = false;
+    bool materialHandlesTraversed = false;
+    bool stoppedBeforeSurfaceArray = false;
+    bool stoppedBeforeMaterialDependency = false;
+};
+
 struct RetailFastfileCensus
 {
     std::uint32_t version = 0u;
@@ -153,6 +389,38 @@ struct RetailFastfileCensus
     std::uint32_t scriptStringBytes = 0u;
     std::uint32_t assetCount = 0u;
     std::array<std::uint32_t, RETAIL_CENSUS_ASSET_TYPE_COUNT> typeCounts{};
+    std::array<std::uint32_t, RETAIL_CENSUS_ASSET_TYPE_COUNT> typesBeforeFirstGfxWorld{};
+    std::uint32_t assetTableOrderHash = 2166136261u;
+    std::uint32_t firstGfxWorldAssetIndex = UINT32_MAX;
+    std::uint32_t firstGfxWorldReference = 0u;
+    std::uint32_t inlineReferencesBeforeFirstGfxWorld = 0u;
+    std::uint32_t sharedReferencesBeforeFirstGfxWorld = 0u;
+    std::uint32_t aliasReferencesBeforeFirstGfxWorld = 0u;
+    std::uint32_t nullReferencesBeforeFirstGfxWorld = 0u;
+    std::string worldFirstTechniqueSetName;
+    std::uint32_t worldFirstTechniqueSetWorldVertFormat = 0u;
+    std::uint32_t worldFirstTechniqueSetRemapReference = 0u;
+    std::uint32_t worldFirstTechniqueSetBlock0Offset = 0u;
+    std::uint32_t worldFirstTechniqueSetNameBlock4Offset = 0u;
+    std::uint32_t worldFirstTechniqueSetBoundaryInflatedOffset = 0u;
+    std::uint32_t worldFirstTechniqueSlot = UINT32_MAX;
+    std::uint32_t worldFirstTechniqueReference = 0u;
+    std::uint32_t worldTechniqueNullReferences = 0u;
+    std::uint32_t worldTechniqueInlineReferences = 0u;
+    std::uint32_t worldTechniqueSharedReferences = 0u;
+    std::uint32_t worldTechniqueAliasReferences = 0u;
+    std::uint32_t worldRegistryAliasCount = 0u;
+    std::uint32_t worldRegistryDefinedAliasCount = 0u;
+    std::uint32_t worldFirstTechniqueSetIdentity = 0u;
+    std::vector<RetailWorldTechniqueSet> worldTechniqueSets;
+    std::uint32_t worldTechniqueSetBodiesEntered = 0u;
+    std::uint32_t worldNextAssetIndex = 0u;
+    RetailWorldXModel worldFirstXModel;
+    bool worldFirstTechniqueSetHeaderTraversed = false;
+    bool worldFirstTechniqueSetPublished = false;
+    bool stoppedBeforeWorldTechniqueDependency = false;
+    bool stoppedBeforeDifferentWorldAssetType = false;
+    bool stoppedBeforeWorldXModelDependency = false;
     std::uint32_t inlineAssetReferences = 0u;
     std::uint32_t sharedAssetReferences = 0u;
     std::uint32_t aliasAssetReferences = 0u;
@@ -160,6 +428,9 @@ struct RetailFastfileCensus
     std::uint32_t firstBodyIndex = 0u;
     std::uint32_t firstBodyType = 0u;
     std::uint32_t firstBodyReference = 0u;
+    std::uint32_t nextBodyIndex = 1u;
+    std::uint32_t nextBodyType = 0u;
+    std::uint32_t nextBodyReference = 0u;
     std::uint32_t inflatedPrefixBytes = 0u;
     std::uint64_t sourceBytesConsumed = 0u;
     std::uint32_t sourceFeedCount = 0u;
@@ -195,6 +466,34 @@ struct RetailFastfileCensus
     std::uint32_t pixelShaderBlock4Offset = 0u;
     std::uint32_t pixelShaderProgramBlock4Offset = 0u;
     std::uint32_t shaderArgumentsBlock4Offset = 0u;
+    std::uint32_t techniqueNameBlock4Offset = 0u;
+    std::string materialTechniqueSetName;
+    std::string materialName;
+    std::string imageName;
+    std::string imagePath;
+    std::uint32_t materialAssetIndex = 0u;
+    std::uint32_t materialTextureCount = 0u;
+    std::uint32_t imageWidth = 0u;
+    std::uint32_t imageHeight = 0u;
+    std::uint32_t imageDepth = 0u;
+    std::uint32_t imageFormat = 0u;
+    std::uint32_t imageResourceBytes = 0u;
+    std::uint32_t materialTechniqueSetBlock0Offset = 0u;
+    std::uint32_t materialTechniqueBlock4Offset = 0u;
+    std::uint32_t materialBlock0Offset = 0u;
+    std::uint32_t materialNameBlock4Offset = 0u;
+    std::uint32_t materialTextureTableBlock4Offset = 0u;
+    std::uint32_t imageBlock0Offset = 0u;
+    std::uint32_t imageNameBlock4Offset = 0u;
+    std::uint32_t imageLoadDefBlock0Offset = 0u;
+    std::uint32_t materialStateBitsBlock4Offset = 0u;
+    std::uint32_t compatibilityTechniqueSetIdentity = 0u;
+    std::uint32_t materialTechniqueSetIdentity = 0u;
+    std::uint32_t materialIdentity = 0u;
+    std::uint32_t imageIdentity = 0u;
+    std::uint32_t registryAssetCount = 0u;
+    std::uint32_t registryAliasCount = 0u;
+    std::uint32_t registryDefinedAliasCount = 0u;
     std::uint32_t block0HighWaterAtBoundary = 0u;
     std::uint32_t block4CursorAtBoundary = 0u;
     std::uint32_t completedAssetCount = 0u;
@@ -202,15 +501,29 @@ struct RetailFastfileCensus
     bool vertexDeclarationPrepared = false;
     bool stoppedBeforeShaderCreation = false;
     bool shaderCompatibilitySelected = false;
+    bool materialTechniqueSetPublished = false;
+    bool materialPublished = false;
+    bool imagePublished = false;
+    bool materialImageResolved = false;
     const char *unsupportedOperation = nullptr;
 };
 
 // A deliberately narrow retail reader. It validates the unsigned v5/zlib
 // envelope, XFile, ScriptStringList and complete XAsset table, then follows the
-// generated loader for asset zero through its technique set, first technique,
-// first pass, both shader contracts, arguments, and technique name. Native D3D9
-// creation is replaced by an explicit WebGL2 compatibility record; asset zero
-// is published only after the complete generated-loader path validates.
+// generated loader for the exact leading two-technique-set/one-material prefix.
+// The first technique set selects the owned WebGL2 compatibility program. The
+// second is traversed as the material's serialized dependency; one texture-table
+// entry and its inline GfxImage are then validated and published through stable
+// registry identities. WorldAssetInventory instead requires a GfxWorld table
+// entry and stops before body zero while retaining the exact intervening order.
+// WorldTechniqueSetPrefix enters consecutive inline technique-set bodies,
+// publishes each zero-dependency set, and stops before the first technique
+// dependency or different top-level asset type.
+// WorldXModelPrefix continues into the first inline XModel, validates its fixed
+// header and bounded skeleton prefix, then stops before XSurface traversal.
+// WorldXSurfacePrefix additionally walks bounded surface, rigid-list,
+// collision, vertex/index, and material-handle records in generated-loader order.
+// Native D3D9 creation is never invoked.
 class RetailFastfileCensusJob
 {
 public:
@@ -222,6 +535,9 @@ public:
     RetailFastfileCensusJob &operator=(const RetailFastfileCensusJob &) = delete;
 
     RetailCensusError BeginStreaming(
+        const RetailCensusLimits &limits = {}) noexcept;
+    RetailCensusError BeginStreaming(
+        RetailCensusMode mode,
         const RetailCensusLimits &limits = {}) noexcept;
     RetailCensusError FeedSource(
         std::span<const std::uint8_t> bytes,

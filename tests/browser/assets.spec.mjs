@@ -4,10 +4,13 @@ import path from "node:path";
 import {
     createInstallDirectory as createM12InstallDirectory,
     createSyntheticFastfileHeader,
+    createSyntheticWorldInventoryFastfile,
     SYNTHETIC_LOCALIZATION,
 } from "./install_fixture.mjs";
 import { REQUIRED_ASSETS } from "../../web/asset_store.mjs";
 import { createSyntheticIwd } from "./synthetic_iwd.mjs";
+
+const SYNTHETIC_MAP_FASTFILE_SIZE = createSyntheticWorldInventoryFastfile().length;
 
 async function createInstallDirectory(testInfo, name, { localization, iwd } = {})
 {
@@ -157,7 +160,7 @@ test("imports synthetic files through the portable picker and restores them afte
     expect(adapterProbe.archiveSignature).toEqual([0x50, 0x4b, 0x03, 0x04]);
     expect(adapterProbe.mapStat).toMatchObject({
         path: "zone/english/killhouse.ff",
-        size: 14,
+        size: SYNTHETIC_MAP_FASTFILE_SIZE,
     });
     expect(adapterProbe.mapHeader).toEqual([
         0x49, 0x57, 0x66, 0x66, 0x75, 0x31, 0x30, 0x30,

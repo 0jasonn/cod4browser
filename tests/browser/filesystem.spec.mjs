@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { createInstallDirectory as createM12InstallDirectory } from "./install_fixture.mjs";
+import {
+    createInstallDirectory as createM12InstallDirectory,
+    createSyntheticWorldInventoryFastfile,
+} from "./install_fixture.mjs";
 import {
     createSyntheticIwd,
     ZIP_METHOD_DEFLATE,
@@ -8,6 +11,7 @@ import {
 
 const ARCHIVE_PATH = "main/iw_00.iwd";
 const MAP_FASTFILE_PATH = "zone/english/killhouse.ff";
+const MAP_FASTFILE_SIZE = createSyntheticWorldInventoryFastfile().length;
 const STARTUP_FASTFILE_PATH = "zone/english/common.ff";
 function filesystemFixture()
 {
@@ -150,7 +154,7 @@ test("immutable asset sources provide bounded reads while the frame pump advance
     expect(result.signature).toEqual([0x50, 0x4b, 0x03, 0x04]);
     expect(result.mapSource).toEqual({
         path: MAP_FASTFILE_PATH,
-        size: 14,
+        size: MAP_FASTFILE_SIZE,
         frozen: true,
     });
     expect(result.mapHeader).toEqual([
@@ -166,7 +170,7 @@ test("immutable asset sources provide bounded reads while the frame pump advance
 test("bridge cancellation prevents a delayed read from touching Wasm memory or completing", async ({ page }, testInfo) => {
     await importFixture(page, testInfo, "filesystem-cancellation");
 
-    const result = await page.evaluate(async ({ fastfilePath }) => {
+    const result = await page.evaluate(async ({ fastfilePath, fastfileSize }) => {
         const runtime = globalThis.__KISAKCOD_WEB__;
         const module = runtime.module;
         const bridge = runtime.filesystemBridge;
@@ -220,7 +224,7 @@ test("bridge cancellation prevents a delayed read from touching Wasm memory or c
                 throw new Error("Synthetic fastfile stat was not accepted.");
             }
             const statCompletion = await statCompleted;
-            if (statCompletion[1] !== 0 || statCompletion[2] !== 14) {
+            if (statCompletion[1] !== 0 || statCompletion[2] !== fastfileSize) {
                 throw new Error("Synthetic fastfile stat did not complete successfully.");
             }
             accepted = bridge.read(requestId, fastfilePath, 0, 4, destination, 4);
@@ -248,7 +252,7 @@ test("bridge cancellation prevents a delayed read from touching Wasm memory or c
             Reflect.set(module, "_KisakWeb_CompleteFsRead", originalCompletion);
             module._free(destination);
         }
-    }, { fastfilePath: MAP_FASTFILE_PATH });
+    }, { fastfilePath: MAP_FASTFILE_PATH, fastfileSize: MAP_FASTFILE_SIZE });
 
     expect(result).toMatchObject({
         accepted: true,

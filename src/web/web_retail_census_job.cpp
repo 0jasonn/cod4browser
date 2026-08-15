@@ -1,6 +1,7 @@
 #include <web/web_retail_census_job.h>
 
 #include <web/web_filesystem.h>
+#include <web/web_engine_asset.h>
 #include <web/web_retail_fastfile_census.h>
 #include <web/web_renderer.h>
 #include <web/web_shader_compatibility.h>
@@ -16,7 +17,14 @@
 
 namespace
 {
-constexpr const char *FASTFILE_PATH = "zone/english/code_post_gfx.ff";
+constexpr const char *CODE_POST_GFX_PATH = "zone/english/code_post_gfx.ff";
+constexpr const char *WORLD_FASTFILE_PATH = "zone/english/killhouse.ff";
+
+enum class Dataset : std::uint8_t
+{
+    CodePostGfx,
+    WorldInventory,
+};
 
 enum class Phase : std::uint8_t
 {
@@ -33,32 +41,51 @@ enum class Phase : std::uint8_t
 struct RetailCensusRuntime
 {
     Phase phase = Phase::Idle;
+    Dataset dataset = Dataset::CodePostGfx;
     std::uint32_t generation = 0u;
     WebFsRequestId requestId = 0u;
     std::uint32_t fileSize = 0u;
     std::uint32_t readOffset = 0u;
+    std::uint32_t codePostFileSize = 0u;
+    std::uint32_t codePostSourceBytesRead = 0u;
+    std::uint32_t worldFileSize = 0u;
+    std::uint32_t worldSourceBytesRead = 0u;
     bool completionReady = false;
     WebFsStatus completionStatus = WebFsStatus::Pending;
     std::vector<std::uint8_t> completionBytes;
     kisak::fastfile::RetailFastfileCensusJob parser;
     kisak::fastfile::RetailFastfileCensus result;
+    kisak::fastfile::RetailFastfileCensus worldInventory;
 };
 
 RetailCensusRuntime g_runtime;
 
-EM_JS(void, DispatchRetailCensusLoading, (uint32_t generation, const char *stage), {
+const char *CurrentPath() noexcept
+{
+    return g_runtime.dataset == Dataset::CodePostGfx
+        ? CODE_POST_GFX_PATH : WORLD_FASTFILE_PATH;
+}
+
+const char *CurrentTraversal() noexcept
+{
+    return g_runtime.dataset == Dataset::CodePostGfx
+        ? "two-techsets-one-material" : "world-xsurface-prefix";
+}
+
+EM_JS(void, DispatchRetailCensusLoading,
+    (uint32_t generation, const char *stage, const char *path, const char *traversal), {
     globalThis.dispatchEvent(new CustomEvent("kisakcod:retail-census", {
         detail: {
             state: "loading",
             stage: UTF8ToString(stage),
             generation: generation >>> 0,
-            path: "zone/english/code_post_gfx.ff",
+            path: UTF8ToString(path),
             message: "Reading a bounded retail fastfile prefix through the browser VFS",
             maxSourceChunkBytes: 64 * 1024,
             maxInflatedPrefixBytes: 256 * 1024,
             maxStepBytes: 64 * 1024,
             maxStepRecords: 64,
-            assetBodyTraversal: "leading-technique-set-only"
+            assetBodyTraversal: UTF8ToString(traversal)
         }
     }));
 });
@@ -93,7 +120,7 @@ EM_JS(
             stage: "asset-boundary",
             generation: generation >>> 0,
             path: "zone/english/code_post_gfx.ff",
-            message: "Leading technique set published with an explicit WebGL2 shader substitution",
+            message: "Resolved the startup material and published the first retail map technique set",
             fileSize: fileSize >>> 0,
             sourceBytesRead: sourceBytesRead >>> 0,
             sourceBytesConsumed,
@@ -115,7 +142,7 @@ EM_JS(
             firstTraversedAssetTypeName: UTF8ToString(firstBodyTypeName),
             firstTraversedAssetReference: firstBodyReference >>> 0,
             stoppedBeforeAssetBody: false,
-            assetBodiesEntered: 1,
+            assetBodiesEntered: 3,
             maxSourceChunkBytes: 64 * 1024,
             maxInflatedPrefixBytes: 256 * 1024,
             maxStepBytes: 64 * 1024,
@@ -181,6 +208,82 @@ EM_JS(
 
 EM_JS(
     void,
+    AppendRetailMaterialBinding,
+    (const char *materialTechniqueSetName,
+     const char *materialName,
+     const char *imageName,
+     const char *imagePath,
+     uint32_t materialAssetIndex,
+     uint32_t materialTextureCount,
+     uint32_t imageWidth,
+     uint32_t imageHeight,
+     uint32_t imageDepth,
+     uint32_t imageFormat,
+     uint32_t imageResourceBytes,
+     uint32_t compatibilityTechniqueSetIdentity,
+     uint32_t materialTechniqueSetIdentity,
+     uint32_t materialIdentity,
+     uint32_t imageIdentity,
+     uint32_t registryAssetCount,
+     uint32_t registryAliasCount,
+     uint32_t registryDefinedAliasCount,
+     uint32_t materialTechniqueSetBlock0Offset,
+     uint32_t materialTechniqueBlock4Offset,
+     uint32_t materialBlock0Offset,
+     uint32_t materialNameBlock4Offset,
+     uint32_t materialTextureTableBlock4Offset,
+     uint32_t imageBlock0Offset,
+     uint32_t imageNameBlock4Offset,
+     uint32_t imageLoadDefBlock0Offset,
+     uint32_t materialStateBitsBlock4Offset,
+     int materialTechniqueSetPublished,
+     int materialPublished,
+     int imagePublished,
+     int materialImageResolved),
+    {
+        const detail = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__;
+        if (detail) {
+            detail.materialTechniqueSetName = UTF8ToString(materialTechniqueSetName);
+            detail.materialName = UTF8ToString(materialName);
+            detail.imageName = UTF8ToString(imageName);
+            detail.materialImagePath = UTF8ToString(imagePath);
+            detail.materialAssetIndex = materialAssetIndex >>> 0;
+            detail.materialTextureCount = materialTextureCount >>> 0;
+            detail.materialImage = {
+                name: detail.imageName,
+                path: detail.materialImagePath,
+                width: imageWidth >>> 0,
+                height: imageHeight >>> 0,
+                depth: imageDepth >>> 0,
+                serializedFormat: imageFormat >>> 0,
+                resourceBytes: imageResourceBytes >>> 0,
+                identity: imageIdentity >>> 0,
+            };
+            detail.compatibilityTechniqueSetIdentity = compatibilityTechniqueSetIdentity >>> 0;
+            detail.materialTechniqueSetIdentity = materialTechniqueSetIdentity >>> 0;
+            detail.materialIdentity = materialIdentity >>> 0;
+            detail.imageIdentity = imageIdentity >>> 0;
+            detail.registryAssetCount = registryAssetCount >>> 0;
+            detail.registryAliasCount = registryAliasCount >>> 0;
+            detail.registryDefinedAliasCount = registryDefinedAliasCount >>> 0;
+            detail.materialTechniqueSetBlock0Offset = materialTechniqueSetBlock0Offset >>> 0;
+            detail.materialTechniqueBlock4Offset = materialTechniqueBlock4Offset >>> 0;
+            detail.materialBlock0Offset = materialBlock0Offset >>> 0;
+            detail.materialNameBlock4Offset = materialNameBlock4Offset >>> 0;
+            detail.materialTextureTableBlock4Offset = materialTextureTableBlock4Offset >>> 0;
+            detail.imageBlock0Offset = imageBlock0Offset >>> 0;
+            detail.imageNameBlock4Offset = imageNameBlock4Offset >>> 0;
+            detail.imageLoadDefBlock0Offset = imageLoadDefBlock0Offset >>> 0;
+            detail.materialStateBitsBlock4Offset = materialStateBitsBlock4Offset >>> 0;
+            detail.materialTechniqueSetPublished = Boolean(materialTechniqueSetPublished);
+            detail.materialPublished = Boolean(materialPublished);
+            detail.imagePublished = Boolean(imagePublished);
+            detail.materialImageResolved = Boolean(materialImageResolved);
+        }
+    });
+
+EM_JS(
+    void,
     AppendRetailShaderCompatibility,
     (const char *pixelShaderName,
      uint32_t vertexInstructionCount,
@@ -222,6 +325,405 @@ EM_JS(
         }
     });
 
+EM_JS(
+    void,
+    AppendRetailWorldInventory,
+    (uint32_t fileSize,
+     uint32_t sourceBytesRead,
+     double sourceBytesConsumed,
+     uint32_t sourceFeedCount,
+     uint32_t assetCount,
+     uint32_t inflatedPrefixBytes,
+     uint32_t assetTableOrderHash,
+     uint32_t firstGfxWorldAssetIndex,
+     uint32_t firstGfxWorldReference,
+     uint32_t inlineBeforeWorld,
+     uint32_t sharedBeforeWorld,
+     uint32_t aliasBeforeWorld,
+     uint32_t nullBeforeWorld,
+     uint32_t firstBodyType,
+     uint32_t firstBodyReference,
+     uint32_t nextBodyType,
+     uint32_t nextBodyReference,
+     uint32_t nextBodyIndex,
+     uint32_t assetBodiesEntered,
+     uint32_t completedAssetCount,
+     int stoppedBeforeDifferentAssetType,
+     uint32_t block0HighWater,
+     uint32_t block4Cursor,
+     const char *techniqueSetName,
+     uint32_t worldVertFormat,
+     uint32_t remapReference,
+     uint32_t techniqueSetBlock0Offset,
+     uint32_t techniqueSetNameBlock4Offset,
+     uint32_t techniqueSetBoundaryInflatedOffset,
+     uint32_t firstTechniqueSlot,
+     uint32_t firstTechniqueReference,
+     uint32_t nullTechniqueReferences,
+     uint32_t inlineTechniqueReferences,
+     uint32_t sharedTechniqueReferences,
+     uint32_t aliasTechniqueReferences,
+     uint32_t techniqueSetIdentity,
+     uint32_t registryAliasCount,
+     uint32_t registryDefinedAliasCount,
+     int techniqueSetPublished,
+     int stoppedBeforeTechniqueDependency,
+     const char *unsupportedOperation),
+    {
+        const detail = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__;
+        if (detail) {
+            detail.worldInventory = {
+                state: "ready",
+                stage: "asset-boundary",
+                path: "zone/english/killhouse.ff",
+                message: "Inventoried the map table and traversed the first XModel surface dependencies to its material boundary",
+                fileSize: fileSize >>> 0,
+                sourceBytesRead: sourceBytesRead >>> 0,
+                sourceBytesConsumed,
+                sourceFeedCount: sourceFeedCount >>> 0,
+                assetCount: assetCount >>> 0,
+                inflatedPrefixBytes: inflatedPrefixBytes >>> 0,
+                assetTableOrderHash: assetTableOrderHash >>> 0,
+                firstGfxWorldAssetIndex: firstGfxWorldAssetIndex >>> 0,
+                firstGfxWorldReference: firstGfxWorldReference >>> 0,
+                assetsBeforeFirstGfxWorld: firstGfxWorldAssetIndex >>> 0,
+                referencesBeforeFirstGfxWorld: {
+                    inline: inlineBeforeWorld >>> 0,
+                    shared: sharedBeforeWorld >>> 0,
+                    alias: aliasBeforeWorld >>> 0,
+                    null: nullBeforeWorld >>> 0,
+                },
+                firstBodyType: firstBodyType >>> 0,
+                firstBodyReference: firstBodyReference >>> 0,
+                nextBodyIndex: nextBodyIndex >>> 0,
+                nextBodyType: nextBodyType >>> 0,
+                nextBodyReference: nextBodyReference >>> 0,
+                block0HighWaterAtBoundary: block0HighWater >>> 0,
+                block4CursorAtBoundary: block4Cursor >>> 0,
+                stoppedBeforeAssetBody: false,
+                assetBodiesEntered: assetBodiesEntered >>> 0,
+                completedAssetCount: completedAssetCount >>> 0,
+                stoppedBeforeDifferentAssetType: Boolean(stoppedBeforeDifferentAssetType),
+                stoppedBeforeTechniqueDependency: Boolean(stoppedBeforeTechniqueDependency),
+                techniqueSets: [],
+                firstXModel: null,
+                firstTechniqueSet: {
+                    name: UTF8ToString(techniqueSetName),
+                    worldVertFormat: worldVertFormat >>> 0,
+                    remapReference: remapReference >>> 0,
+                    block0Offset: techniqueSetBlock0Offset >>> 0,
+                    nameBlock4Offset: techniqueSetNameBlock4Offset >>> 0,
+                    boundaryInflatedOffset: techniqueSetBoundaryInflatedOffset >>> 0,
+                    firstTechniqueSlot: firstTechniqueSlot >>> 0,
+                    firstTechniqueReference: firstTechniqueReference >>> 0,
+                    references: {
+                        null: nullTechniqueReferences >>> 0,
+                        inline: inlineTechniqueReferences >>> 0,
+                        shared: sharedTechniqueReferences >>> 0,
+                        alias: aliasTechniqueReferences >>> 0,
+                    },
+                    identity: techniqueSetIdentity >>> 0,
+                    registryAliasCount: registryAliasCount >>> 0,
+                    registryDefinedAliasCount: registryDefinedAliasCount >>> 0,
+                    published: Boolean(techniqueSetPublished),
+                    stoppedBeforeDependency: Boolean(
+                        stoppedBeforeTechniqueDependency && (completedAssetCount >>> 0) === 0),
+                    unsupportedOperation: UTF8ToString(unsupportedOperation),
+                },
+                typeCounts: [],
+                typesBeforeFirstGfxWorld: [],
+            };
+        }
+    });
+
+EM_JS(
+    void,
+    AppendRetailWorldTechniqueSet,
+    (uint32_t assetIndex,
+     const char *name,
+     uint32_t worldVertFormat,
+     uint32_t remapReference,
+     uint32_t block0Offset,
+     uint32_t nameBlock4Offset,
+     uint32_t boundaryInflatedOffset,
+     uint32_t firstTechniqueSlot,
+     uint32_t firstTechniqueReference,
+     uint32_t nullTechniqueReferences,
+     uint32_t inlineTechniqueReferences,
+     uint32_t sharedTechniqueReferences,
+     uint32_t aliasTechniqueReferences,
+     uint32_t identity,
+     int published),
+    {
+        const inventory = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory;
+        if (!inventory) return;
+        inventory.techniqueSets.push({
+            assetIndex: assetIndex >>> 0,
+            name: UTF8ToString(name),
+            worldVertFormat: worldVertFormat >>> 0,
+            remapReference: remapReference >>> 0,
+            block0Offset: block0Offset >>> 0,
+            nameBlock4Offset: nameBlock4Offset >>> 0,
+            boundaryInflatedOffset: boundaryInflatedOffset >>> 0,
+            firstTechniqueSlot: firstTechniqueSlot >>> 0,
+            firstTechniqueReference: firstTechniqueReference >>> 0,
+            references: {
+                null: nullTechniqueReferences >>> 0,
+                inline: inlineTechniqueReferences >>> 0,
+                shared: sharedTechniqueReferences >>> 0,
+                alias: aliasTechniqueReferences >>> 0,
+            },
+            identity: identity >>> 0,
+            published: Boolean(published),
+        });
+    });
+
+EM_JS(
+    void,
+    BeginRetailWorldXModel,
+    (uint32_t assetIndex, const char *name,
+     uint32_t numBones, uint32_t numRootBones, uint32_t surfaceCount,
+     uint32_t lodRampType, uint32_t boneNamesReference,
+     uint32_t parentListReference, uint32_t quatsReference,
+     uint32_t transReference, uint32_t partClassificationReference,
+     uint32_t baseMatReference, uint32_t surfacesReference,
+     uint32_t materialHandlesReference, uint32_t collisionSurfacesReference,
+     uint32_t collisionSurfaceCount, uint32_t contents,
+     uint32_t boneInfoReference, double radius,
+     double minX, double minY, double minZ,
+     double maxX, double maxY, double maxZ,
+     int32_t lodCount, int32_t collisionLod, uint32_t memoryUsage,
+     uint32_t flags, int bad, uint32_t physPresetReference,
+     uint32_t physGeomsReference, uint32_t headerBlock0Offset,
+     uint32_t nameBlock4Offset, uint32_t boneNamesBlock4Offset,
+     uint32_t parentListBlock4Offset, uint32_t quatsBlock4Offset,
+     uint32_t transBlock4Offset, uint32_t partClassificationBlock4Offset,
+     uint32_t baseMatBlock4Offset, uint32_t surfacesBlock4Offset,
+     uint32_t materialHandlesBlock4Offset, uint32_t boundaryInflatedOffset,
+     uint32_t totalVertices, uint32_t totalTriangles,
+     uint32_t totalRigidVertLists, uint32_t totalCollisionNodes,
+     uint32_t totalCollisionLeaves, uint32_t surfacePayloadBytes,
+     int headerTraversed, int skeletonPrefixTraversed,
+     int surfaceHeadersTraversed, int surfaceDependenciesTraversed,
+     int materialHandlesTraversed, int stoppedBeforeSurfaceArray,
+     int stoppedBeforeMaterialDependency, const char *unsupportedOperation),
+    {
+        const inventory = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory;
+        if (!inventory) return;
+        inventory.firstXModel = {
+            assetIndex: assetIndex >>> 0,
+            name: UTF8ToString(name),
+            numBones: numBones >>> 0,
+            numRootBones: numRootBones >>> 0,
+            surfaceCount: surfaceCount >>> 0,
+            lodRampType: lodRampType >>> 0,
+            references: {
+                boneNames: boneNamesReference >>> 0,
+                parentList: parentListReference >>> 0,
+                quats: quatsReference >>> 0,
+                trans: transReference >>> 0,
+                partClassification: partClassificationReference >>> 0,
+                baseMat: baseMatReference >>> 0,
+                surfaces: surfacesReference >>> 0,
+                materialHandles: materialHandlesReference >>> 0,
+                collisionSurfaces: collisionSurfacesReference >>> 0,
+                boneInfo: boneInfoReference >>> 0,
+                physPreset: physPresetReference >>> 0,
+                physGeoms: physGeomsReference >>> 0,
+            },
+            collisionSurfaceCount: collisionSurfaceCount >>> 0,
+            contents: contents >>> 0,
+            radius,
+            mins: [minX, minY, minZ],
+            maxs: [maxX, maxY, maxZ],
+            lodCount,
+            collisionLod,
+            memoryUsage: memoryUsage >>> 0,
+            flags: flags >>> 0,
+            bad: Boolean(bad),
+            offsets: {
+                headerBlock0: headerBlock0Offset >>> 0,
+                nameBlock4: nameBlock4Offset >>> 0,
+                boneNamesBlock4: boneNamesBlock4Offset >>> 0,
+                parentListBlock4: parentListBlock4Offset >>> 0,
+                quatsBlock4: quatsBlock4Offset >>> 0,
+                transBlock4: transBlock4Offset >>> 0,
+                partClassificationBlock4: partClassificationBlock4Offset >>> 0,
+                baseMatBlock4: baseMatBlock4Offset >>> 0,
+                surfacesBlock4: surfacesBlock4Offset >>> 0,
+                materialHandlesBlock4: materialHandlesBlock4Offset >>> 0,
+            },
+            totals: {
+                vertices: totalVertices >>> 0,
+                triangles: totalTriangles >>> 0,
+                rigidVertLists: totalRigidVertLists >>> 0,
+                collisionNodes: totalCollisionNodes >>> 0,
+                collisionLeaves: totalCollisionLeaves >>> 0,
+                surfacePayloadBytes: surfacePayloadBytes >>> 0,
+            },
+            boundaryInflatedOffset: boundaryInflatedOffset >>> 0,
+            headerTraversed: Boolean(headerTraversed),
+            skeletonPrefixTraversed: Boolean(skeletonPrefixTraversed),
+            surfaceHeadersTraversed: Boolean(surfaceHeadersTraversed),
+            surfaceDependenciesTraversed: Boolean(surfaceDependenciesTraversed),
+            materialHandlesTraversed: Boolean(materialHandlesTraversed),
+            stoppedBeforeSurfaceArray: Boolean(stoppedBeforeSurfaceArray),
+            stoppedBeforeMaterialDependency: Boolean(stoppedBeforeMaterialDependency),
+            unsupportedOperation: UTF8ToString(unsupportedOperation),
+            lods: [],
+            boneNames: [],
+            surfaces: [],
+            materialReferences: [],
+        };
+    });
+
+EM_JS(
+    void,
+    AppendRetailWorldXModelLod,
+    (uint32_t index, double distance, uint32_t surfaceCount,
+     uint32_t surfaceIndex, uint32_t partBits0, uint32_t partBits1,
+     uint32_t partBits2, uint32_t partBits3, uint32_t lod,
+     uint32_t smcIndexPlusOne, uint32_t smcAllocBits),
+    {
+        const model = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory?.firstXModel;
+        if (!model) return;
+        model.lods.push({
+            index: index >>> 0,
+            distance,
+            surfaceCount: surfaceCount >>> 0,
+            surfaceIndex: surfaceIndex >>> 0,
+            partBits: [partBits0 >>> 0, partBits1 >>> 0,
+                partBits2 >>> 0, partBits3 >>> 0],
+            lod: lod >>> 0,
+            smcIndexPlusOne: smcIndexPlusOne >>> 0,
+            smcAllocBits: smcAllocBits >>> 0,
+        });
+    });
+
+EM_JS(
+    void,
+    AppendRetailWorldXModelBone,
+    (uint32_t index, uint32_t scriptStringIndex,
+     const char *name, uint32_t classification),
+    {
+        const model = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory?.firstXModel;
+        if (!model) return;
+        model.boneNames.push({
+            index: index >>> 0,
+            scriptStringIndex: scriptStringIndex >>> 0,
+            name: UTF8ToString(name),
+            classification: classification >>> 0,
+        });
+    });
+
+EM_JS(
+    void,
+    AppendRetailWorldXSurface,
+    (uint32_t index, uint32_t tileMode, int deformed,
+     uint32_t vertCount, uint32_t triCount, uint32_t zoneHandle,
+     uint32_t baseTriIndex, uint32_t baseVertIndex,
+     uint32_t triIndicesReference, uint32_t vertsBlendReference,
+     uint32_t vertsReference, uint32_t vertListCount,
+     uint32_t vertListReference, uint32_t blendWordCount,
+     uint32_t verticesBlock7Offset, uint32_t vertListsBlock4Offset,
+     uint32_t indicesBlock8Offset, uint32_t verticesHash,
+     uint32_t indicesHash, int dependenciesTraversed),
+    {
+        const model = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory?.firstXModel;
+        if (!model) return;
+        model.surfaces.push({
+            index: index >>> 0,
+            tileMode: tileMode >>> 0,
+            deformed: Boolean(deformed),
+            vertCount: vertCount >>> 0,
+            triCount: triCount >>> 0,
+            zoneHandle: zoneHandle >>> 0,
+            baseTriIndex: baseTriIndex >>> 0,
+            baseVertIndex: baseVertIndex >>> 0,
+            references: {
+                triIndices: triIndicesReference >>> 0,
+                vertsBlend: vertsBlendReference >>> 0,
+                vertices: vertsReference >>> 0,
+                vertLists: vertListReference >>> 0,
+            },
+            vertListCount: vertListCount >>> 0,
+            blendWordCount: blendWordCount >>> 0,
+            offsets: {
+                verticesBlock7: verticesBlock7Offset >>> 0,
+                vertListsBlock4: vertListsBlock4Offset >>> 0,
+                indicesBlock8: indicesBlock8Offset >>> 0,
+            },
+            verticesHash: verticesHash >>> 0,
+            indicesHash: indicesHash >>> 0,
+            dependenciesTraversed: Boolean(dependenciesTraversed),
+            rigidVertLists: [],
+        });
+    });
+
+EM_JS(
+    void,
+    AppendRetailWorldXSurfaceRigidList,
+    (uint32_t surfaceIndex, uint32_t index, uint32_t boneOffset,
+     uint32_t vertCount, uint32_t triOffset, uint32_t triCount,
+     uint32_t treeReference, double transX, double transY, double transZ,
+     double scaleX, double scaleY, double scaleZ,
+     uint32_t nodeCount, uint32_t nodesReference,
+     uint32_t leafCount, uint32_t leafsReference,
+     uint32_t nodesHash, uint32_t leafsHash, int treeTraversed),
+    {
+        const surface = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__
+            ?.worldInventory?.firstXModel?.surfaces?.[surfaceIndex >>> 0];
+        if (!surface) return;
+        surface.rigidVertLists.push({
+            index: index >>> 0,
+            boneOffset: boneOffset >>> 0,
+            vertCount: vertCount >>> 0,
+            triOffset: triOffset >>> 0,
+            triCount: triCount >>> 0,
+            collisionTree: {
+                reference: treeReference >>> 0,
+                translation: [transX, transY, transZ],
+                scale: [scaleX, scaleY, scaleZ],
+                nodeCount: nodeCount >>> 0,
+                nodesReference: nodesReference >>> 0,
+                leafCount: leafCount >>> 0,
+                leafsReference: leafsReference >>> 0,
+                nodesHash: nodesHash >>> 0,
+                leafsHash: leafsHash >>> 0,
+                traversed: Boolean(treeTraversed),
+            },
+        });
+    });
+
+EM_JS(
+    void,
+    AppendRetailWorldXModelMaterialReference,
+    (uint32_t index, uint32_t reference),
+    {
+        const model = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory?.firstXModel;
+        if (!model) return;
+        model.materialReferences.push({
+            index: index >>> 0,
+            reference: reference >>> 0,
+        });
+    });
+
+EM_JS(void, AppendRetailWorldInventoryType,
+    (uint32_t type, const char *name, uint32_t total, uint32_t beforeWorld), {
+        const inventory = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory;
+        if (!inventory) return;
+        if (total) inventory.typeCounts.push({
+            type: type >>> 0,
+            name: UTF8ToString(name),
+            count: total >>> 0,
+        });
+        if (beforeWorld) inventory.typesBeforeFirstGfxWorld.push({
+            type: type >>> 0,
+            name: UTF8ToString(name),
+            count: beforeWorld >>> 0,
+        });
+    });
+
 EM_JS(void, AppendRetailCensusBlock, (uint32_t block, uint32_t size), {
     globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.blockSizes.push({
         block: block >>> 0,
@@ -256,14 +758,15 @@ EM_JS(void, DiscardRetailCensusReady, (), {
 EM_JS(
     void,
     DispatchRetailCensusFailure,
-    (uint32_t generation, const char *stage, const char *error, const char *message),
+    (uint32_t generation, const char *stage, const char *path,
+     const char *error, const char *message),
     {
         globalThis.dispatchEvent(new CustomEvent("kisakcod:retail-census", {
             detail: {
                 state: "failed",
                 stage: UTF8ToString(stage),
                 generation: generation >>> 0,
-                path: "zone/english/code_post_gfx.ff",
+                path: UTF8ToString(path),
                 error: UTF8ToString(error),
                 message: UTF8ToString(message),
                 completedAssetCount: 0,
@@ -281,7 +784,7 @@ EM_JS(void, DispatchRetailCensusIdle, (uint32_t generation), {
             generation: generation >>> 0,
             path: "zone/english/code_post_gfx.ff",
             message: "Waiting for qcommon pre-database startup",
-            assetBodyTraversal: "leading-technique-set-only"
+            assetBodyTraversal: "two-techsets-one-material"
         }
     }));
 });
@@ -296,7 +799,7 @@ const char *WebFsStatusString(WebFsStatus status)
     case WebFsStatus::InvalidArgument: return "invalid filesystem request";
     case WebFsStatus::NoRequestSlots: return "filesystem request table is full";
     case WebFsStatus::InvalidRange: return "filesystem range is invalid";
-    case WebFsStatus::NotFound: return "code_post_gfx.ff was not found";
+    case WebFsStatus::NotFound: return "retail fastfile was not found";
     case WebFsStatus::StaleSource: return "browser asset import changed during census";
     case WebFsStatus::IoError: return "browser filesystem I/O failed";
     case WebFsStatus::ProtocolError: return "browser filesystem protocol failed";
@@ -349,10 +852,12 @@ void Fail(const char *context, const char *reason)
         g_runtime.requestId = 0u;
     }
     g_runtime.phase = Phase::Failed;
+    WebEngineAsset_ClearMaterialImageBinding();
     const auto stage = g_runtime.parser.Stage();
     DispatchRetailCensusFailure(
         g_runtime.generation,
         kisak::fastfile::RetailCensusStageString(stage),
+        CurrentPath(),
         reason,
         message);
     Web_Log(WebLogLevel::Error, "[kisakcod-web] Retail fastfile census failed: %s\n", message);
@@ -361,6 +866,16 @@ void Fail(const char *context, const char *reason)
 void PublishReady()
 {
     const auto &result = g_runtime.result;
+    if (!WebEngineAsset_SetMaterialImageBinding(
+            result.materialName.c_str(),
+            result.imageName.c_str(),
+            result.imagePath.c_str(),
+            result.materialIdentity,
+            result.imageIdentity))
+    {
+        Fail("could not publish retail material", "material image binding was rejected");
+        return;
+    }
     kisak::web::WebGL2ShaderSubstitution substitution;
     if (!kisak::web::LookupWebGL2ShaderSubstitution(
             result.shaderSubstitutionId, substitution) ||
@@ -386,8 +901,8 @@ void PublishReady()
     }
     BeginRetailCensusReady(
         g_runtime.generation,
-        g_runtime.fileSize,
-        g_runtime.readOffset,
+        g_runtime.codePostFileSize,
+        g_runtime.codePostSourceBytesRead,
         static_cast<double>(result.sourceBytesConsumed),
         result.sourceFeedCount,
         result.version,
@@ -446,6 +961,249 @@ void PublishReady()
         result.pixelShaderProgramBlock4Offset,
         result.shaderArgumentsBlock4Offset,
         result.shaderCompatibilitySelected ? 1 : 0);
+    AppendRetailMaterialBinding(
+        result.materialTechniqueSetName.c_str(),
+        result.materialName.c_str(),
+        result.imageName.c_str(),
+        result.imagePath.c_str(),
+        result.materialAssetIndex,
+        result.materialTextureCount,
+        result.imageWidth,
+        result.imageHeight,
+        result.imageDepth,
+        result.imageFormat,
+        result.imageResourceBytes,
+        result.compatibilityTechniqueSetIdentity,
+        result.materialTechniqueSetIdentity,
+        result.materialIdentity,
+        result.imageIdentity,
+        result.registryAssetCount,
+        result.registryAliasCount,
+        result.registryDefinedAliasCount,
+        result.materialTechniqueSetBlock0Offset,
+        result.materialTechniqueBlock4Offset,
+        result.materialBlock0Offset,
+        result.materialNameBlock4Offset,
+        result.materialTextureTableBlock4Offset,
+        result.imageBlock0Offset,
+        result.imageNameBlock4Offset,
+        result.imageLoadDefBlock0Offset,
+        result.materialStateBitsBlock4Offset,
+        result.materialTechniqueSetPublished ? 1 : 0,
+        result.materialPublished ? 1 : 0,
+        result.imagePublished ? 1 : 0,
+        result.materialImageResolved ? 1 : 0);
+    const auto &world = g_runtime.worldInventory;
+    AppendRetailWorldInventory(
+        g_runtime.worldFileSize,
+        g_runtime.worldSourceBytesRead,
+        static_cast<double>(world.sourceBytesConsumed),
+        world.sourceFeedCount,
+        world.assetCount,
+        world.inflatedPrefixBytes,
+        world.assetTableOrderHash,
+        world.firstGfxWorldAssetIndex,
+        world.firstGfxWorldReference,
+        world.inlineReferencesBeforeFirstGfxWorld,
+        world.sharedReferencesBeforeFirstGfxWorld,
+        world.aliasReferencesBeforeFirstGfxWorld,
+        world.nullReferencesBeforeFirstGfxWorld,
+        world.firstBodyType,
+        world.firstBodyReference,
+        world.nextBodyType,
+        world.nextBodyReference,
+        world.nextBodyIndex,
+        world.worldTechniqueSetBodiesEntered,
+        world.completedAssetCount,
+        world.stoppedBeforeDifferentWorldAssetType ? 1 : 0,
+        world.block0HighWaterAtBoundary,
+        world.block4CursorAtBoundary,
+        world.worldFirstTechniqueSetName.c_str(),
+        world.worldFirstTechniqueSetWorldVertFormat,
+        world.worldFirstTechniqueSetRemapReference,
+        world.worldFirstTechniqueSetBlock0Offset,
+        world.worldFirstTechniqueSetNameBlock4Offset,
+        world.worldFirstTechniqueSetBoundaryInflatedOffset,
+        world.worldFirstTechniqueSlot,
+        world.worldFirstTechniqueReference,
+        world.worldTechniqueNullReferences,
+        world.worldTechniqueInlineReferences,
+        world.worldTechniqueSharedReferences,
+        world.worldTechniqueAliasReferences,
+        world.worldFirstTechniqueSetIdentity,
+        world.worldRegistryAliasCount,
+        world.worldRegistryDefinedAliasCount,
+        world.worldFirstTechniqueSetPublished ? 1 : 0,
+        world.stoppedBeforeWorldTechniqueDependency ? 1 : 0,
+        world.unsupportedOperation ? world.unsupportedOperation : "unknown");
+    for (const auto &techniqueSet : world.worldTechniqueSets)
+    {
+        AppendRetailWorldTechniqueSet(
+            techniqueSet.assetIndex,
+            techniqueSet.name.c_str(),
+            techniqueSet.worldVertFormat,
+            techniqueSet.remapReference,
+            techniqueSet.block0Offset,
+            techniqueSet.nameBlock4Offset,
+            techniqueSet.boundaryInflatedOffset,
+            techniqueSet.firstTechniqueSlot,
+            techniqueSet.firstTechniqueReference,
+            techniqueSet.nullTechniqueReferences,
+            techniqueSet.inlineTechniqueReferences,
+            techniqueSet.sharedTechniqueReferences,
+            techniqueSet.aliasTechniqueReferences,
+            techniqueSet.identity,
+            techniqueSet.published ? 1 : 0);
+    }
+    const auto &xmodel = world.worldFirstXModel;
+    if (xmodel.headerTraversed)
+    {
+        BeginRetailWorldXModel(
+            xmodel.assetIndex,
+            xmodel.name.c_str(),
+            xmodel.numBones,
+            xmodel.numRootBones,
+            xmodel.surfaceCount,
+            xmodel.lodRampType,
+            xmodel.boneNamesReference,
+            xmodel.parentListReference,
+            xmodel.quatsReference,
+            xmodel.transReference,
+            xmodel.partClassificationReference,
+            xmodel.baseMatReference,
+            xmodel.surfacesReference,
+            xmodel.materialHandlesReference,
+            xmodel.collisionSurfacesReference,
+            xmodel.collisionSurfaceCount,
+            xmodel.contents,
+            xmodel.boneInfoReference,
+            xmodel.radius,
+            xmodel.mins[0], xmodel.mins[1], xmodel.mins[2],
+            xmodel.maxs[0], xmodel.maxs[1], xmodel.maxs[2],
+            xmodel.lodCount,
+            xmodel.collisionLod,
+            xmodel.memoryUsage,
+            xmodel.flags,
+            xmodel.bad ? 1 : 0,
+            xmodel.physPresetReference,
+            xmodel.physGeomsReference,
+            xmodel.headerBlock0Offset,
+            xmodel.nameBlock4Offset,
+            xmodel.boneNamesBlock4Offset,
+            xmodel.parentListBlock4Offset,
+            xmodel.quatsBlock4Offset,
+            xmodel.transBlock4Offset,
+            xmodel.partClassificationBlock4Offset,
+            xmodel.baseMatBlock4Offset,
+            xmodel.surfacesBlock4Offset,
+            xmodel.materialHandlesBlock4Offset,
+            xmodel.boundaryInflatedOffset,
+            xmodel.totalVertices,
+            xmodel.totalTriangles,
+            xmodel.totalRigidVertLists,
+            xmodel.totalCollisionNodes,
+            xmodel.totalCollisionLeaves,
+            xmodel.surfacePayloadBytes,
+            xmodel.headerTraversed ? 1 : 0,
+            xmodel.skeletonPrefixTraversed ? 1 : 0,
+            xmodel.surfaceHeadersTraversed ? 1 : 0,
+            xmodel.surfaceDependenciesTraversed ? 1 : 0,
+            xmodel.materialHandlesTraversed ? 1 : 0,
+            xmodel.stoppedBeforeSurfaceArray ? 1 : 0,
+            xmodel.stoppedBeforeMaterialDependency ? 1 : 0,
+            world.unsupportedOperation ? world.unsupportedOperation : "unknown");
+        for (std::size_t index = 0u; index < xmodel.lods.size(); ++index)
+        {
+            const auto &lod = xmodel.lods[index];
+            AppendRetailWorldXModelLod(
+                static_cast<std::uint32_t>(index),
+                lod.distance,
+                lod.surfaceCount,
+                lod.surfaceIndex,
+                lod.partBits[0], lod.partBits[1],
+                lod.partBits[2], lod.partBits[3],
+                lod.lod,
+                lod.smcIndexPlusOne,
+                lod.smcAllocBits);
+        }
+        for (std::size_t index = 0u; index < xmodel.boneNames.size(); ++index)
+        {
+            const std::uint8_t classification =
+                index < xmodel.partClassification.size()
+                    ? xmodel.partClassification[index] : 0u;
+            AppendRetailWorldXModelBone(
+                static_cast<std::uint32_t>(index),
+                xmodel.boneNameScriptStringIndices[index],
+                xmodel.boneNames[index].c_str(),
+                classification);
+        }
+        for (const auto &surface : xmodel.surfaces)
+        {
+            AppendRetailWorldXSurface(
+                surface.index,
+                surface.tileMode,
+                surface.deformed ? 1 : 0,
+                surface.vertCount,
+                surface.triCount,
+                surface.zoneHandle,
+                surface.baseTriIndex,
+                surface.baseVertIndex,
+                surface.triIndicesReference,
+                surface.vertsBlendReference,
+                surface.vertsReference,
+                surface.vertListCount,
+                surface.vertListReference,
+                surface.blendWordCount,
+                surface.verticesBlock7Offset,
+                surface.vertListsBlock4Offset,
+                surface.indicesBlock8Offset,
+                surface.verticesHash,
+                surface.indicesHash,
+                surface.dependenciesTraversed ? 1 : 0);
+            for (std::size_t index = 0u;
+                 index < surface.rigidVertLists.size(); ++index)
+            {
+                const auto &list = surface.rigidVertLists[index];
+                const auto &tree = list.collisionTree;
+                AppendRetailWorldXSurfaceRigidList(
+                    surface.index,
+                    static_cast<std::uint32_t>(index),
+                    list.boneOffset,
+                    list.vertCount,
+                    list.triOffset,
+                    list.triCount,
+                    tree.reference,
+                    tree.translation[0], tree.translation[1], tree.translation[2],
+                    tree.scale[0], tree.scale[1], tree.scale[2],
+                    tree.nodeCount,
+                    tree.nodesReference,
+                    tree.leafCount,
+                    tree.leafsReference,
+                    tree.nodesHash,
+                    tree.leafsHash,
+                    tree.traversed ? 1 : 0);
+            }
+        }
+        for (std::size_t index = 0u;
+             index < xmodel.materialReferences.size(); ++index)
+        {
+            AppendRetailWorldXModelMaterialReference(
+                static_cast<std::uint32_t>(index),
+                xmodel.materialReferences[index]);
+        }
+    }
+    for (std::uint32_t type = 0u; type < world.typeCounts.size(); ++type)
+    {
+        if (world.typeCounts[type] != 0u ||
+            world.typesBeforeFirstGfxWorld[type] != 0u)
+        {
+            AppendRetailWorldInventoryType(
+                type,
+                kisak::fastfile::RetailAssetTypeName(type),
+                world.typeCounts[type],
+                world.typesBeforeFirstGfxWorld[type]);
+        }
+    }
     for (std::uint32_t block = 0u; block < result.blockSizes.size(); ++block)
         AppendRetailCensusBlock(block, result.blockSizes[block]);
     for (std::uint32_t type = 0u; type < result.typeCounts.size(); ++type)
@@ -457,9 +1215,12 @@ void PublishReady()
     EndRetailCensusReady();
     Web_Log(
         WebLogLevel::Info,
-        "[kisakcod-web] Retail census found %u assets; published %s with a WebGL2 shader substitution.\n",
+        "[kisakcod-web] Retail census found %u startup assets and %u map assets; first GfxWorld is table index %u, and material %s resolved %s.\n",
         result.assetCount,
-        kisak::fastfile::RetailAssetTypeName(result.firstBodyType));
+        world.assetCount,
+        world.firstGfxWorldAssetIndex,
+        result.materialName.c_str(),
+        result.imagePath.c_str());
 }
 } // namespace
 
@@ -477,6 +1238,7 @@ void WebRetailCensusJob_Start()
 {
     DiscardRetailCensusReady();
     (void)WebRenderer_ClearShaderCompatibility();
+    WebEngineAsset_ClearMaterialImageBinding();
     if (g_runtime.requestId != 0u) (void)WebFs_Cancel(g_runtime.requestId);
     const std::uint32_t generation = g_runtime.generation == UINT32_MAX
         ? 1u : g_runtime.generation + 1u;
@@ -489,13 +1251,15 @@ void WebRetailCensusJob_Start()
         return;
     }
     g_runtime.phase = Phase::NeedStat;
-    DispatchRetailCensusLoading(generation, "stat");
+    DispatchRetailCensusLoading(
+        generation, "stat", CurrentPath(), CurrentTraversal());
 }
 
 void WebRetailCensusJob_Cancel()
 {
     DiscardRetailCensusReady();
     (void)WebRenderer_ClearShaderCompatibility();
+    WebEngineAsset_ClearMaterialImageBinding();
     if (g_runtime.requestId != 0u) (void)WebFs_Cancel(g_runtime.requestId);
     const std::uint32_t generation = g_runtime.generation == UINT32_MAX
         ? 1u : g_runtime.generation + 1u;
@@ -516,42 +1280,46 @@ WebRetailCensusFrameResult WebRetailCensusJob_Frame()
     case Phase::NeedStat:
     {
         const WebFsStatus status = WebFs_BeginStat(
-            FASTFILE_PATH, CompleteRequest,
+            CurrentPath(), CompleteRequest,
             reinterpret_cast<void *>(static_cast<std::uintptr_t>(g_runtime.generation)),
             &g_runtime.requestId);
-        if (status != WebFsStatus::Pending) Fail("could not stat code_post_gfx.ff", WebFsStatusString(status));
+        if (status != WebFsStatus::Pending) Fail("could not stat retail fastfile", WebFsStatusString(status));
         else g_runtime.phase = Phase::WaitingStat;
         return {};
     }
     case Phase::WaitingStat:
+    {
         if (!g_runtime.completionReady) return {};
         g_runtime.completionReady = false;
         if (g_runtime.completionStatus != WebFsStatus::Success)
         {
-            Fail("could not stat code_post_gfx.ff", WebFsStatusString(g_runtime.completionStatus));
+            Fail("could not stat retail fastfile", WebFsStatusString(g_runtime.completionStatus));
             return {};
         }
-        if (g_runtime.fileSize < 14u || g_runtime.fileSize > 16u * 1024u * 1024u)
+        const std::uint32_t maximumFileSize = g_runtime.dataset == Dataset::CodePostGfx
+            ? 16u * 1024u * 1024u : 128u * 1024u * 1024u;
+        if (g_runtime.fileSize < 14u || g_runtime.fileSize > maximumFileSize)
         {
-            Fail("could not census code_post_gfx.ff", "file size is outside the bounded census envelope");
+            Fail("could not census retail fastfile", "file size is outside the bounded census envelope");
             return {};
         }
         g_runtime.phase = Phase::NeedRead;
         return {};
+    }
     case Phase::NeedRead:
     {
         if (g_runtime.readOffset >= g_runtime.fileSize)
         {
-            Fail("could not census code_post_gfx.ff", "compressed prefix ended before the asset table");
+            Fail("could not census retail fastfile", "compressed prefix ended before the asset table");
             return {};
         }
         const std::uint32_t length = std::min<std::uint32_t>(
             WEB_FS_MAX_READ_SIZE, g_runtime.fileSize - g_runtime.readOffset);
         const WebFsStatus status = WebFs_BeginRead(
-            FASTFILE_PATH, g_runtime.readOffset, length, CompleteRequest,
+            CurrentPath(), g_runtime.readOffset, length, CompleteRequest,
             reinterpret_cast<void *>(static_cast<std::uintptr_t>(g_runtime.generation)),
             &g_runtime.requestId);
-        if (status != WebFsStatus::Pending) Fail("could not read code_post_gfx.ff", WebFsStatusString(status));
+        if (status != WebFsStatus::Pending) Fail("could not read retail fastfile", WebFsStatusString(status));
         else g_runtime.phase = Phase::WaitingRead;
         return {};
     }
@@ -560,12 +1328,12 @@ WebRetailCensusFrameResult WebRetailCensusJob_Frame()
         g_runtime.completionReady = false;
         if (g_runtime.completionStatus != WebFsStatus::Success)
         {
-            Fail("could not read code_post_gfx.ff", WebFsStatusString(g_runtime.completionStatus));
+            Fail("could not read retail fastfile", WebFsStatusString(g_runtime.completionStatus));
             return {};
         }
         if (g_runtime.completionBytes.empty())
         {
-            Fail("could not read code_post_gfx.ff", "filesystem returned an empty bounded read");
+            Fail("could not read retail fastfile", "filesystem returned an empty bounded read");
             return {};
         }
         {
@@ -573,7 +1341,7 @@ WebRetailCensusFrameResult WebRetailCensusJob_Frame()
             const auto error = g_runtime.parser.FeedSource(g_runtime.completionBytes, final);
             if (error != RetailCensusError::None)
             {
-                Fail("could not feed code_post_gfx.ff", RetailCensusErrorString(error));
+                Fail("could not feed retail fastfile", RetailCensusErrorString(error));
                 return {};
             }
             g_runtime.readOffset += static_cast<std::uint32_t>(g_runtime.completionBytes.size());
@@ -590,16 +1358,43 @@ WebRetailCensusFrameResult WebRetailCensusJob_Frame()
             report.traversedBytes});
         if (report.progress == RetailCensusProgress::Failed)
         {
-            Fail("could not traverse code_post_gfx.ff prefix", RetailCensusErrorString(report.error));
+            Fail("could not traverse retail fastfile prefix", RetailCensusErrorString(report.error));
         }
         else if (report.progress == RetailCensusProgress::Succeeded)
         {
-            if (!g_runtime.parser.TakeResult(g_runtime.result))
+            RetailFastfileCensus &destination = g_runtime.dataset == Dataset::CodePostGfx
+                ? g_runtime.result : g_runtime.worldInventory;
+            if (!g_runtime.parser.TakeResult(destination))
             {
-                Fail("could not publish code_post_gfx.ff census", "completed result was unavailable");
+                Fail("could not publish retail fastfile census", "completed result was unavailable");
+            }
+            else if (g_runtime.dataset == Dataset::CodePostGfx)
+            {
+                g_runtime.codePostFileSize = g_runtime.fileSize;
+                g_runtime.codePostSourceBytesRead = g_runtime.readOffset;
+                g_runtime.dataset = Dataset::WorldInventory;
+                g_runtime.fileSize = 0u;
+                g_runtime.readOffset = 0u;
+                g_runtime.completionReady = false;
+                g_runtime.completionStatus = WebFsStatus::Pending;
+                g_runtime.completionBytes.clear();
+                if (const auto error = g_runtime.parser.BeginStreaming(
+                        RetailCensusMode::WorldXSurfacePrefix);
+                    error != RetailCensusError::None)
+                {
+                    Fail("could not start world asset inventory", RetailCensusErrorString(error));
+                }
+                else
+                {
+                    g_runtime.phase = Phase::NeedStat;
+                    DispatchRetailCensusLoading(
+                        g_runtime.generation, "world-stat", CurrentPath(), CurrentTraversal());
+                }
             }
             else
             {
+                g_runtime.worldFileSize = g_runtime.fileSize;
+                g_runtime.worldSourceBytesRead = g_runtime.readOffset;
                 g_runtime.phase = Phase::Finished;
                 PublishReady();
             }
