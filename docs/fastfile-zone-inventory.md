@@ -1402,8 +1402,28 @@ publishes asset 35 as XModel identity 64 at inflated offset 397,694. Its one
 brush-backed geom contains eight sides, eight planes, 40 adjacent-edge bytes,
 and 488 bytes of checked physics payload.
 
-Traversal no longer stops after each boundary. The same owned run publishes
-assets 35 through 113 and stops inside asset 114, `com_barrel_white`, at a
-prior-pointer bone-name array variant. At that boundary 114 top-level assets
-are complete, 53 XModels have been collected, and the registry contains 326
-assets with 327 aliases reserved / 326 defined.
+Traversal no longer stops after each boundary. A reusable checked block-4
+array-slice resolver now covers every retained XModel skeleton-array class:
+script-string indices, parent indices, quaternions, translations, part
+classifications, base matrices, and bone-info bytes. This publishes asset 114
+and continues across the remaining XModel / technique-set run, including
+comma-prefixed engine-owned map-type-zero image placeholders.
+
+The next reusable family traverses `FxEffectDef` headers and their generated
+element order: velocity samples, visual-state samples, visual arrays, material
+or XModel dependencies, effect-name references, and trails. The first owned FX
+asset, `props/watermelon_splat`, publishes at index 381 / identity 1242 with one
+mark element and four engine-owned materials. `props/watermelon` publishes at
+index 382 / identity 1250 with six elements, three inline materials, prior
+aliases, and four nested empty comma-prefixed XModels. Those empty models are
+accepted only as engine-owned placeholders; ordinary XModels retain the strict
+LOD and bounds checks.
+
+The dispatcher then resumes the established XModel and technique-set loaders.
+The current owned result completes top-level assets 0 through 394 and stops
+before the first inline `RawFile` at index 395. It contains 269 published
+XModels, two published FX effects, and 1,289 registry assets with all 1,289
+aliases defined. The last top-level XModel is asset 394,
+`com_drop_rope_obj`, identity 1289. The retained inflated-prefix ceiling is 64
+MiB, while every logical pointer target remains constrained by its declared
+block size and current high-water mark.

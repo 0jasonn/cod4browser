@@ -1510,12 +1510,35 @@ Asset 35 now publishes as XModel identity 64 at inflated offset 397,694. Its
 physics summary is one geom, one brush, eight sides, eight planes, 40 edges,
 and 488 serialized bytes.
 
-The same run continued through asset 113. It now has 114 completed top-level
-assets, 53 collected XModels, 326 registered assets, and 327 aliases reserved /
-326 defined. The active boundary is XModel asset 114, `com_barrel_white`, whose
-bone-name array is a prior logical pointer rather than inline storage. That
-reusable array-alias variant is the next item in the current loader-family
-batch, not a standalone milestone.
+The next family batch introduced one checked block-4 array-slice resolver and
+uses it for XModel bone names, parent indices, quaternions, translations, part
+classifications, base matrices, and bone-info bytes. Inline and shared-inline
+forms use the same retained typed containers. A logical reference must resolve
+inside an already published XModel array with matching element width,
+alignment, and bounds; forged, forward, and cross-family references fail
+closed. The image loader also recognizes comma-prefixed map-type-zero names as
+engine-owned placeholders, including both `,$identitynormalmap` and
+`,spotlight_lensflare`, without inventing a texture load definition.
+
+The reusable FX family now validates the 32-byte `FxEffectDef`, the complete
+252-byte element array, bounded velocity and visual-state samples, mark and
+ordinary visual arrays, XString references, and optional trail payloads. Visual
+dependencies resolve through the typed registry. Inline engine-owned materials
+are accepted only in their zero-dependency form; nested inline XModels reuse
+the complete checked XModel loader. Empty comma-prefixed FX XModels are
+recognized as engine-owned placeholders and cannot make a non-comma empty
+model valid.
+
+The owned run publishes `props/watermelon_splat` as asset 381 / identity 1242
+and `props/watermelon` as asset 382 / identity 1250. The first has one mark
+element and four inline materials. The second has six sampled elements, three
+inline materials, prior aliases, and four nested engine-owned XModels. After
+returning from those dependencies, the dispatcher reuses its existing loaders
+through asset 394 and stops before the first inline `RawFile` at asset 395.
+The result has 395 completed top-level assets, 269 published XModels, two FX
+effects, and 1,289 registered assets with all 1,289 aliases defined. The
+bounded retained-inflate ceiling remains 64 MiB; 377 top-level records remain
+before the first `GfxWorld`.
 
 Reaching `GfxWorld` still requires typed loaders for every intervening inline
 asset class; geometry, lightmaps, visibility, and camera state remain separate

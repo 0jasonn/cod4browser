@@ -701,7 +701,10 @@ std::vector<std::uint8_t> BuildWorldPostXModelTechniqueSetInflated(
 std::vector<std::uint8_t> BuildWorldSecondXModelPrefixInflated(
     bool invalidBounds = false,
     bool unsupportedBoneNames = false,
-    bool invalidSurfaceLayout = false)
+    bool invalidSurfaceLayout = false,
+    std::uint32_t priorBoneNamesReference = 0u,
+    std::uint32_t priorPartClassificationReference = 0u,
+    std::uint32_t priorBaseMatReference = 0u)
 {
     std::vector<std::uint8_t> bytes =
         BuildWorldPostXModelTechniqueSetInflated();
@@ -719,10 +722,17 @@ std::vector<std::uint8_t> BuildWorldSecondXModelPrefixInflated(
     model[4u] = 1u;
     model[5u] = 1u;
     model[6u] = 3u;
-    SetU32(model, 8u,
-        unsupportedBoneNames ? 0x40000001u : 0xffffffffu);
-    SetU32(model, 24u, 0xffffffffu);
-    SetU32(model, 28u, 0xffffffffu);
+    const std::uint32_t boneNamesReference = priorBoneNamesReference != 0u
+        ? priorBoneNamesReference
+        : (unsupportedBoneNames ? 0x40000001u : 0xffffffffu);
+    SetU32(model, 8u, boneNamesReference);
+    const std::uint32_t partClassificationReference =
+        priorPartClassificationReference != 0u
+            ? priorPartClassificationReference : 0xffffffffu;
+    const std::uint32_t baseMatReference = priorBaseMatReference != 0u
+        ? priorBaseMatReference : 0xffffffffu;
+    SetU32(model, 24u, partClassificationReference);
+    SetU32(model, 28u, baseMatReference);
     SetU32(model, 32u, 0xffffffffu);
     SetU32(model, 36u, 0xffffffffu);
     SetF32(model, 40u, 1200.0f);
@@ -743,12 +753,24 @@ std::vector<std::uint8_t> BuildWorldSecondXModelPrefixInflated(
     SetU32(model, 204u, 512u);
     bytes.insert(bytes.end(), model.begin(), model.end());
     AppendString(bytes, "web/xmodel_second");
-    PutU16(bytes, 0u);
-    bytes.push_back(0u);
-    std::vector<std::uint8_t> baseMat(32u, 0u);
-    SetF32(baseMat, 12u, 1.0f);
-    SetF32(baseMat, 28u, 1.0f);
-    bytes.insert(bytes.end(), baseMat.begin(), baseMat.end());
+    if (boneNamesReference == 0xffffffffu ||
+        boneNamesReference == 0xfffffffeu)
+    {
+        PutU16(bytes, 0u);
+    }
+    if (partClassificationReference == 0xffffffffu ||
+        partClassificationReference == 0xfffffffeu)
+    {
+        bytes.push_back(0u);
+    }
+    if (baseMatReference == 0xffffffffu ||
+        baseMatReference == 0xfffffffeu)
+    {
+        std::vector<std::uint8_t> baseMat(32u, 0u);
+        SetF32(baseMat, 12u, 1.0f);
+        SetF32(baseMat, 28u, 1.0f);
+        bytes.insert(bytes.end(), baseMat.begin(), baseMat.end());
+    }
     for (std::uint32_t index = 0u; index < 3u; ++index)
     {
         std::vector<std::uint8_t> surface(56u, 0u);
@@ -969,6 +991,62 @@ std::vector<std::uint8_t> BuildReusableWorldXModelLoaderInflated(
     return bytes;
 }
 
+std::vector<std::uint8_t> BuildReusableWorldFxLoaderInflated(
+    bool invalidMaterial = false)
+{
+    std::vector<std::uint8_t> bytes;
+    PutU32(bytes, 4096u);
+    PutU32(bytes, 0u);
+    const std::array<std::uint32_t, 9> blocks = {{
+        1024u * 1024u, 0u, 0u, 0u, 1024u * 1024u,
+        0u, 0u, 0u, 0u,
+    }};
+    for (const std::uint32_t block : blocks) PutU32(bytes, block);
+    PutU32(bytes, 0u);
+    PutU32(bytes, 0u);
+    PutU32(bytes, 3u);
+    PutU32(bytes, 0xffffffffu);
+    for (const std::uint32_t type : {5u, 25u, 16u})
+    {
+        PutU32(bytes, type);
+        PutU32(bytes, 0xffffffffu);
+    }
+
+    std::vector<std::uint8_t> techniqueSet(148u, 0u);
+    SetU32(techniqueSet, 0u, 0xffffffffu);
+    bytes.insert(bytes.end(), techniqueSet.begin(), techniqueSet.end());
+    AppendString(bytes, ",web/fx_prefix");
+
+    PutU32(bytes, 0xffffffffu);
+    PutU32(bytes, 0u);
+    PutU32(bytes, 512u);
+    PutU32(bytes, 0u);
+    PutU32(bytes, 0u);
+    PutU32(bytes, 1u);
+    PutU32(bytes, 0u);
+    PutU32(bytes, 0xffffffffu);
+    AppendString(bytes, "web/fx_mark");
+
+    std::vector<std::uint8_t> elem(252u, 0u);
+    elem[176u] = 9u;
+    elem[177u] = 1u;
+    SetU32(elem, 188u, 0xffffffffu);
+    bytes.insert(bytes.end(), elem.begin(), elem.end());
+    PutU32(bytes, 0xffffffffu);
+    PutU32(bytes, 0xffffffffu);
+    for (std::uint32_t index = 0u; index < 2u; ++index)
+    {
+        std::vector<std::uint8_t> material(80u, 0u);
+        SetU32(material, 0u, 0xffffffffu);
+        if (invalidMaterial && index == 1u) material[58u] = 1u;
+        bytes.insert(bytes.end(), material.begin(), material.end());
+        AppendString(bytes, index == 0u
+            ? ",web/fx_mark_world"
+            : ",web/fx_mark_model");
+    }
+    return bytes;
+}
+
 kisak::fastfile::RetailFastfileCensus Run(
     const std::vector<std::uint8_t> &file,
     std::size_t chunkBytes = 7u,
@@ -1089,13 +1167,19 @@ void TestWorldXModelPrefixBoundary()
         result.block4CursorAtBoundary == 164u,
         "bounded XModel header and skeleton prefix retain exact metadata");
 
-    const auto unsupported = Run(
-        BuildFile(BuildWorldXModelPrefixInflated(false, true)), 7u, 2u, 3u,
-        RetailCensusMode::WorldXModelPrefix);
-    Require(unsupported.worldXModels.at(0u).headerTraversed &&
-        !unsupported.worldXModels.at(0u).skeletonPrefixTraversed &&
-        std::string(unsupported.unsupportedOperation) == "Load_ScriptStringArray",
-        "unsupported bone dependency stops after fixed header");
+    RetailFastfileCensusJob invalidBoneAlias;
+    Require(invalidBoneAlias.BeginStreaming(
+        RetailCensusMode::WorldXModelPrefix) == RetailCensusError::None,
+        "invalid XModel bone alias fixture starts");
+    const auto invalidBoneAliasFile = BuildFile(
+        BuildWorldXModelPrefixInflated(false, true));
+    Require(invalidBoneAlias.FeedSource(invalidBoneAliasFile, true) ==
+        RetailCensusError::None, "invalid XModel bone alias source is accepted");
+    while (invalidBoneAlias.Progress() == RetailCensusProgress::Running)
+        (void)invalidBoneAlias.Step();
+    Require(invalidBoneAlias.Failure() ==
+        RetailCensusError::XModelScriptStringAliasInvalid,
+        "unpublished XModel bone alias fails closed");
 
     const auto malformed = BuildFile(BuildWorldXModelPrefixInflated(true));
     RetailFastfileCensusJob job;
@@ -1480,15 +1564,52 @@ void TestWorldSecondXModelPrefixBoundary()
         !invalid.TakeResult(unavailable),
         "invalid second-XModel bounds expose no partial public result");
 
-    const auto unsupported = Run(
-        BuildFile(BuildWorldSecondXModelPrefixInflated(false, true)),
+    const std::uint32_t priorBoneNamesToken =
+        0x40000001u + first.boneNamesBlock4Offset;
+    const std::uint32_t priorPartClassificationToken =
+        0x40000001u + first.partClassificationBlock4Offset;
+    const std::uint32_t priorBaseMatToken =
+        0x40000001u + first.baseMatBlock4Offset;
+    const auto reused = Run(
+        BuildFile(BuildWorldSecondXModelPrefixInflated(
+            false, false, false, priorBoneNamesToken,
+            priorPartClassificationToken, priorBaseMatToken)),
         7u, 2u, 3u, RetailCensusMode::WorldSecondXModelPrefix);
-    Require(unsupported.worldXModels.at(0u).published &&
-        unsupported.worldXModels.at(1u).headerTraversed &&
-        !unsupported.worldXModels.at(1u).skeletonPrefixTraversed &&
-        std::string(unsupported.unsupportedOperation) ==
-            "Load_ScriptStringArray",
-        "unsupported second-XModel bone names preserve the first model");
+    const RetailWorldXModel &reusedFirst = reused.worldXModels.at(0u);
+    const RetailWorldXModel &reusedSecond = reused.worldXModels.at(1u);
+    Require(reusedFirst.published && reusedSecond.skeletonPrefixTraversed,
+        "prior bone array resolution continues through the second skeleton");
+    Require(reusedSecond.boneNames == std::vector<std::string>{"tag_origin"} &&
+        reusedSecond.boneNameScriptStringIndices ==
+            std::vector<std::uint16_t>{0u},
+        "prior bone array resolution retains the typed script strings");
+    Require(reusedSecond.boneNamesBlock4Offset == reusedFirst.boneNamesBlock4Offset,
+        "prior bone array resolution retains its logical block-4 address");
+    Require(reusedSecond.partClassification == reusedFirst.partClassification &&
+        reusedSecond.partClassificationBlock4Offset ==
+            reusedFirst.partClassificationBlock4Offset &&
+        reusedSecond.baseMat == reusedFirst.baseMat &&
+        reusedSecond.baseMatBlock4Offset == reusedFirst.baseMatBlock4Offset,
+        "typed-array resolver reuses classification and base-matrix slices");
+    Require(reusedSecond.boundaryInflatedOffset ==
+            second.boundaryInflatedOffset - 35u &&
+        std::string(reused.unsupportedOperation) == "Load_XSurfaceArray",
+        "prior skeleton-array resolution consumes no inline payload");
+
+    RetailFastfileCensusJob invalidSecondBoneAlias;
+    Require(invalidSecondBoneAlias.BeginStreaming(
+        RetailCensusMode::WorldSecondXModelPrefix) == RetailCensusError::None,
+        "invalid second-XModel bone alias fixture starts");
+    const auto invalidSecondBoneAliasFile = BuildFile(
+        BuildWorldSecondXModelPrefixInflated(false, true));
+    Require(invalidSecondBoneAlias.FeedSource(
+        invalidSecondBoneAliasFile, true) == RetailCensusError::None,
+        "invalid second-XModel bone alias source is accepted");
+    while (invalidSecondBoneAlias.Progress() == RetailCensusProgress::Running)
+        (void)invalidSecondBoneAlias.Step();
+    Require(invalidSecondBoneAlias.Failure() ==
+        RetailCensusError::XModelScriptStringAliasInvalid,
+        "unpublished second-XModel bone alias fails closed");
 }
 
 void TestWorldSecondXSurfacePrefixBoundary()
@@ -1827,6 +1948,44 @@ void TestReusableWorldMaterialTechniqueLoader()
         "an invalid second dependency cannot publish the parent technique set");
 }
 
+void TestReusableWorldFxLoader()
+{
+    using namespace kisak::fastfile;
+    const RetailFastfileCensus result = Run(
+        BuildFile(BuildReusableWorldFxLoaderInflated()),
+        7u, 2u, 3u, RetailCensusMode::WorldAssetLoader);
+    Require(result.worldFxEffects.size() == 1u &&
+        result.worldFxEffects[0].assetIndex == 1u &&
+        result.worldFxEffects[0].name == "web/fx_mark" &&
+        result.worldFxEffects[0].published &&
+        result.worldFxEffects[0].elemDefs.size() == 1u &&
+        result.worldFxEffects[0].elemDefs[0].elemType == 9u &&
+        result.worldFxEffects[0].elemDefs[0].visualReferences.size() == 2u &&
+        result.worldFxEffects[0].elemDefs[0].visualIdentities[0] != 0u &&
+        result.worldFxEffects[0].elemDefs[0].visualIdentities[1] != 0u &&
+        result.worldFxEffects[0].materials.size() == 2u &&
+        result.worldFxEffects[0].materials[0].published &&
+        result.worldFxEffects[0].materials[1].published &&
+        result.completedAssetCount == 2u &&
+        result.nextBodyIndex == 2u && result.nextBodyType == 16u &&
+        result.stoppedBeforeDifferentWorldAssetType,
+        "the reusable dispatcher publishes an FX mark-visual family atomically");
+
+    RetailFastfileCensusJob malformed;
+    Require(malformed.BeginStreaming(RetailCensusMode::WorldAssetLoader) ==
+        RetailCensusError::None, "malformed FX fixture starts");
+    const auto malformedFile = BuildFile(
+        BuildReusableWorldFxLoaderInflated(true));
+    Require(malformed.FeedSource(malformedFile, true) ==
+        RetailCensusError::None, "malformed FX fixture is accepted");
+    while (malformed.Progress() == RetailCensusProgress::Running)
+        (void)malformed.Step();
+    RetailFastfileCensus unavailable;
+    Require(malformed.Failure() == RetailCensusError::FxMaterialUnsupported &&
+        !malformed.TakeResult(unavailable),
+        "a malformed nested FX material cannot publish its parent effect");
+}
+
 void TestPositiveIncrementalCensus()
 {
     const auto result = Run(BuildFile());
@@ -2073,7 +2232,7 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
     std::ifstream input(path, std::ios::binary);
     Require(input.good(), "owned world surface diagnostic opens fastfile");
     RetailFastfileCensusJob job;
-    Require(job.BeginStreaming(RetailCensusMode::WorldXModelLoader) ==
+    Require(job.BeginStreaming(RetailCensusMode::WorldAssetLoader) ==
         RetailCensusError::None, "owned reusable XModel-loader diagnostic starts");
     std::vector<std::uint8_t> chunk(RETAIL_CENSUS_MAX_STEP_BYTES);
     std::uint32_t steps = 0u;
@@ -2301,25 +2460,75 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
             }
         }
     }
+    for (const RetailWorldFxEffectDef &effect : result.worldFxEffects)
+    {
+        std::cout << "  FX asset=" << effect.assetIndex
+                  << " name=" << effect.name
+                  << " identity=" << effect.identity
+                  << " elems=" << effect.elemDefs.size()
+                  << " materials=" << effect.materials.size()
+                  << " boundary=" << effect.boundaryInflatedOffset << '\n';
+        for (std::size_t index = 0u; index < effect.elemDefs.size(); ++index)
+        {
+            const RetailWorldFxElemDef &elem = effect.elemDefs[index];
+            std::cout << "    elem[" << index << "] type="
+                      << static_cast<unsigned>(elem.elemType)
+                      << " visuals=" << elem.visualReferences.size()
+                      << " velocity=0x" << std::hex
+                      << elem.velocitySamplesHash
+                      << " visual=0x" << elem.visualSamplesHash
+                      << std::dec << " trail=" << elem.trailVertexCount
+                      << '/' << elem.trailIndexCount << '\n';
+        }
+    }
     const auto sandbagIt = std::find_if(
         result.worldXModels.begin(), result.worldXModels.end(),
         [](const RetailWorldXModel &entry) { return entry.assetIndex == 35u; });
+    Require(result.worldFxEffects.size() == 2u,
+        "owned traversal publishes both leading FX effects");
+    const RetailWorldFxEffectDef &splatFx = result.worldFxEffects[0u];
+    const RetailWorldFxEffectDef &watermelonFx = result.worldFxEffects[1u];
+    const std::size_t nestedBuiltinModels = static_cast<std::size_t>(
+        std::count_if(
+            result.worldXModels.begin(), result.worldXModels.end(),
+            [](const RetailWorldXModel &entry) {
+                return !entry.topLevelAsset && entry.published &&
+                    entry.name.starts_with(',') && entry.lodCount == 0;
+            }));
     Require(sandbagIt != result.worldXModels.end() &&
         sandbagIt->name == "mil_sandbag_desert_single_flat" &&
         sandbagIt->published && sandbagIt->identity == 64u &&
         sandbagIt->physPresetTraversed && sandbagIt->physGeomsTraversed &&
         sandbagIt->physGeomCount != 0u &&
         sandbagIt->physGeomPayloadBytes != 0u &&
-        result.completedAssetCount == 114u &&
-        result.worldXModels.size() == 53u &&
-        result.registryAssetCount == 326u &&
-        result.registryAliasCount == 327u &&
-        result.registryDefinedAliasCount == 326u &&
-        nextModel.assetIndex == 114u &&
-        nextModel.name == "com_barrel_white" &&
-        !nextModel.published &&
-        std::string(result.unsupportedOperation) == "Load_ScriptStringArray",
-        "owned throughput loader publishes asset 35 and advances to asset 114");
+        result.completedAssetCount == 395u &&
+        result.worldXModels.size() == 269u && nestedBuiltinModels == 4u &&
+        result.registryAssetCount == 1289u &&
+        result.registryAliasCount == 1289u &&
+        result.registryDefinedAliasCount == 1289u &&
+        splatFx.assetIndex == 381u &&
+        splatFx.name == "props/watermelon_splat" &&
+        splatFx.identity == 1242u && splatFx.published &&
+        splatFx.elemDefs.size() == 1u && splatFx.materials.size() == 4u &&
+        splatFx.elemDefs[0u].elemType == 9u &&
+        splatFx.elemDefs[0u].visualIdentities.size() == 4u &&
+        watermelonFx.assetIndex == 382u &&
+        watermelonFx.name == "props/watermelon" &&
+        watermelonFx.identity == 1250u && watermelonFx.published &&
+        watermelonFx.elemDefs.size() == 6u &&
+        watermelonFx.materials.size() == 3u &&
+        watermelonFx.elemDefs[5u].elemType == 5u &&
+        watermelonFx.elemDefs[5u].visualIdentities.size() == 4u &&
+        std::all_of(
+            watermelonFx.elemDefs[5u].visualIdentities.begin(),
+            watermelonFx.elemDefs[5u].visualIdentities.end(),
+            [](std::uint32_t identity) { return identity != 0u; }) &&
+        nextModel.assetIndex == 394u &&
+        nextModel.name == "com_drop_rope_obj" &&
+        nextModel.published &&
+        result.nextBodyIndex == 395u && result.nextBodyType == 31u &&
+        result.unsupportedOperation == nullptr,
+        "owned FX-family traversal reaches the first RawFile at asset 395");
     return;
     Require(model.published && model.identity == 19u &&
         model.rendererPayloadSelected && model.rendererPayloadAvailable &&
@@ -2679,6 +2888,7 @@ int main(int argc, char **argv)
     TestWorldXModelCollectionBoundary();
     TestReusableWorldXModelLoader();
     TestReusableWorldMaterialTechniqueLoader();
+    TestReusableWorldFxLoader();
     TestMalformedPrefixRecords();
     TestTechniqueTraversalFailures();
     TestEnvelopeAndAtomicity();

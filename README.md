@@ -348,11 +348,18 @@ as identity 63 at inflated offset 397,206. Asset 35 remains unpublished at its
 next inline dependency, `PhysGeomList`; that bounded loader is the M40 handoff.
 
 Active development now batches complete loader families instead of stopping at
-numbered boundaries. The first throughput batch completed `PhysGeomList`,
-published the sandbag as XModel identity 64, and continued the owned dispatcher
-through asset 113 in one run. The current boundary is asset 114,
-`com_barrel_white`, at a reusable prior-pointer bone-name array variant. The
-owned result now contains 53 XModels and 114 completed top-level assets.
+numbered boundaries. The current reusable typed-array loader accepts inline,
+shared-inline, and checked slices of previously published XModel skeleton data.
+Together with the completed `PhysGeomList` path and comma-prefixed engine image
+placeholders, it advanced the owned dispatcher through top-level asset 380 in
+one run. The reusable `FxEffectDef` family now follows checked element headers,
+velocity/visual samples, mark and ordinary visuals, effect-name references,
+engine-owned materials, trails, and nested XModels. It publishes assets 381 and
+382, then returns to the existing XModel and technique-set loaders through
+asset 394. The current boundary is the first `RawFile`, asset 395. The owned
+result contains 269 published XModels (four are nested FX built-ins), two FX
+effects, 395 completed top-level assets, and 1,289 published registry
+identities. There are 377 top-level records left before the first `GfxWorld`.
 
 See [docs/web-port.md](docs/web-port.md) for the pinned toolchain, build steps,
 current boundary and validation limits, and see

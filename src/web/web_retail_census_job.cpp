@@ -540,7 +540,7 @@ EM_JS(
                 state: "ready",
                 stage: "asset-boundary",
                 path: "zone/english/killhouse.ff",
-                message: "Ran the reusable bounded XModel loader through the supported top-level asset sequence",
+                message: "Ran the reusable bounded asset loaders through the supported top-level sequence",
                 fileSize: fileSize >>> 0,
                 sourceBytesRead: sourceBytesRead >>> 0,
                 sourceBytesConsumed,
@@ -572,6 +572,7 @@ EM_JS(
                 techniqueSets: [],
                 postXModelTechniqueSet: null,
                 xmodels: [],
+                fxEffects: [],
                 firstXModel: null,
                 firstTechniqueSet: {
                     name: UTF8ToString(techniqueSetName),
@@ -600,6 +601,64 @@ EM_JS(
                 typesBeforeFirstGfxWorld: [],
             };
         }
+    });
+
+EM_JS(
+    void,
+    AppendRetailWorldFxEffect,
+    (uint32_t assetIndex, const char *name, int flags, int totalSize,
+     int msecLoopingLife, uint32_t loopingCount, uint32_t oneShotCount,
+     uint32_t emissionCount, uint32_t identity,
+     uint32_t boundaryInflatedOffset, uint32_t materialCount, int published),
+    {
+        const inventory = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory;
+        if (!inventory) return;
+        inventory.fxEffects.push({
+            assetIndex: assetIndex >>> 0,
+            name: UTF8ToString(name),
+            flags: flags | 0,
+            totalSize: totalSize | 0,
+            msecLoopingLife: msecLoopingLife | 0,
+            elementCounts: {
+                looping: loopingCount >>> 0,
+                oneShot: oneShotCount >>> 0,
+                emission: emissionCount >>> 0,
+            },
+            identity: identity >>> 0,
+            boundaryInflatedOffset: boundaryInflatedOffset >>> 0,
+            materialCount: materialCount >>> 0,
+            published: Boolean(published),
+            elements: [],
+        });
+    });
+
+EM_JS(
+    void,
+    AppendRetailWorldFxElem,
+    (uint32_t assetIndex, uint32_t elemIndex, uint32_t elemType,
+     uint32_t visualCount, uint32_t velocityIntervalCount,
+     uint32_t visualStateIntervalCount, uint32_t velocitySamplesHash,
+     uint32_t visualSamplesHash, uint32_t trailPayloadHash,
+     uint32_t trailVertexCount, uint32_t trailIndexCount, int traversed),
+    {
+        const effects = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__
+            ?.worldInventory?.fxEffects;
+        const effect = effects?.find(
+            (entry) => entry.assetIndex === (assetIndex >>> 0));
+        if (!effect) return;
+        effect.elements.push({
+            index: elemIndex >>> 0,
+            type: elemType >>> 0,
+            visualCount: visualCount >>> 0,
+            velocityIntervalCount: velocityIntervalCount >>> 0,
+            visualStateIntervalCount: visualStateIntervalCount >>> 0,
+            velocitySamplesHash: velocitySamplesHash >>> 0,
+            visualSamplesHash: visualSamplesHash >>> 0,
+            trailPayloadHash: trailPayloadHash >>> 0,
+            trailVertexCount: trailVertexCount >>> 0,
+            trailIndexCount: trailIndexCount >>> 0,
+            traversed: Boolean(traversed),
+        });
     });
 
 EM_JS(
@@ -1905,6 +1964,40 @@ void PublishReady()
                 technique.completed ? 1 : 0);
         }
     }
+    for (const auto &effect : world.worldFxEffects)
+    {
+        AppendRetailWorldFxEffect(
+            effect.assetIndex,
+            effect.name.c_str(),
+            effect.flags,
+            effect.totalSize,
+            effect.msecLoopingLife,
+            effect.loopingElemCount,
+            effect.oneShotElemCount,
+            effect.emissionElemCount,
+            effect.identity,
+            effect.boundaryInflatedOffset,
+            static_cast<std::uint32_t>(effect.materials.size()),
+            effect.published ? 1 : 0);
+        for (std::size_t elemIndex = 0u;
+             elemIndex < effect.elemDefs.size(); ++elemIndex)
+        {
+            const auto &elem = effect.elemDefs[elemIndex];
+            AppendRetailWorldFxElem(
+                effect.assetIndex,
+                static_cast<std::uint32_t>(elemIndex),
+                elem.elemType,
+                static_cast<std::uint32_t>(elem.visualReferences.size()),
+                elem.velocityIntervalCount,
+                elem.visualStateIntervalCount,
+                elem.velocitySamplesHash,
+                elem.visualSamplesHash,
+                elem.trailPayloadHash,
+                elem.trailVertexCount,
+                elem.trailIndexCount,
+                elem.traversed ? 1 : 0);
+        }
+    }
     if (!world.worldXModels.empty())
     {
         const auto &xmodel = world.worldXModels.front();
@@ -2688,7 +2781,7 @@ WebRetailCensusFrameResult WebRetailCensusJob_Frame()
                 g_runtime.completionStatus = WebFsStatus::Pending;
                 g_runtime.completionBytes.clear();
                 if (const auto error = g_runtime.parser.BeginStreaming(
-                        RetailCensusMode::WorldXModelLoader);
+                        RetailCensusMode::WorldAssetLoader);
                     error != RetailCensusError::None)
                 {
                     Fail("could not start world asset inventory", RetailCensusErrorString(error));

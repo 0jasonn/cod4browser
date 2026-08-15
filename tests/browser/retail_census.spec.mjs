@@ -3,6 +3,7 @@ import { deflateSync, inflateSync } from "node:zlib";
 import {
     createInstallDirectory,
     createSyntheticFastfileHeader,
+    createSyntheticFxInventoryFastfile,
     createSyntheticRetailCensusFastfile,
     createSyntheticWorldInventoryFastfile,
 } from "./install_fixture.mjs";
@@ -22,6 +23,39 @@ const M19_DXT1_IWI = createSyntheticIwi({
         0x00, 0xf8, 0xe0, 0x07,
         0xe4, 0xe4, 0xe4, 0xe4,
     ]),
+});
+
+test("publishes a checked FX mark-visual family", async ({ page }, testInfo) => {
+    await importInstall(page, testInfo, "retail-fx-family", {
+        overrides: new Map([["zone/english/killhouse.ff",
+            createSyntheticFxInventoryFastfile()]]),
+    });
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
+        { timeout: 30_000 },
+    ).toBe("ready");
+    const inventory = await page.evaluate(
+        () => structuredClone(globalThis.__KISAKCOD_WEB__.retailCensus.worldInventory),
+    );
+    expect(inventory).toMatchObject({
+        completedAssetCount: 2,
+        nextBodyIndex: 2,
+        nextBodyType: 16,
+        fxEffects: [{
+            assetIndex: 1,
+            name: "web/fx_mark",
+            identity: 4,
+            materialCount: 2,
+            published: true,
+            elementCounts: { looping: 0, oneShot: 1, emission: 0 },
+            elements: [{
+                index: 0,
+                type: 9,
+                visualCount: 2,
+                traversed: true,
+            }],
+        }],
+    });
 });
 
 const M20_PRIMARY_IWD = createSyntheticIwd([
@@ -659,6 +693,7 @@ test("publishes one retail material and binds its resolved image", async ({ page
                     traversed: true,
                 }],
             },
+            fxEffects: [],
             xmodels: [
                 { assetIndex: 2, identity: 6, published: true },
                 {
@@ -1412,7 +1447,7 @@ test("an incomplete reusable technique dependency fails closed", async ({ page }
     expect(census.worldInventory).toBeUndefined();
 });
 
-test("retains the fixed XModel header when its first bone dependency is unsupported", async ({ page }, testInfo) => {
+test("a forged first-XModel bone-array alias fails closed", async ({ page }, testInfo) => {
     const overrides = new Map([
         ["zone/english/killhouse.ff",
             createSyntheticWorldInventoryFastfile({ unsupportedXModelBoneNames: true })],
@@ -1424,32 +1459,17 @@ test("retains the fixed XModel header when its first bone dependency is unsuppor
     await expect.poll(
         () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
         { timeout: 30_000 },
-    ).toBe("ready");
-    const inventory = await page.evaluate(
-        () => structuredClone(globalThis.__KISAKCOD_WEB__.retailCensus.worldInventory),
+    ).toBe("failed");
+    const census = await page.evaluate(
+        () => structuredClone(globalThis.__KISAKCOD_WEB__.retailCensus),
     );
-    expect(inventory).toMatchObject({
-        completedAssetCount: 2,
-        nextBodyIndex: 2,
-        nextBodyType: 3,
-        block0HighWaterAtBoundary: 220,
-        block4CursorAtBoundary: 128,
-        firstTechniqueSet: {
-            registryAliasCount: 3,
-            registryDefinedAliasCount: 2,
-            unsupportedOperation: "Load_ScriptStringArray",
-        },
-        firstXModel: {
-            assetIndex: 2,
-            name: "web/xmodel_wall",
-            headerTraversed: true,
-            skeletonPrefixTraversed: false,
-            stoppedBeforeSurfaceArray: false,
-            boundaryInflatedOffset: 703,
-            unsupportedOperation: "Load_ScriptStringArray",
-            boneNames: [],
-        },
+    expect(census).toMatchObject({
+        state: "failed",
+        error: "invalid XModel bone script-string array alias",
+        completedAssetCount: 0,
+        failClosed: true,
     });
+    expect(census.worldInventory).toBeUndefined();
 });
 
 test("invalid XModel bounds fail without exposing prior technique publications", async ({ page }, testInfo) => {
@@ -2068,7 +2088,7 @@ test("invalid second-XModel bounds expose no partial public result", async ({ pa
     expect(census.worldInventory).toBeUndefined();
 });
 
-test("an unsupported second-XModel skeleton dependency preserves the first model", async ({ page }, testInfo) => {
+test("a forged second-XModel bone-array alias exposes no partial world", async ({ page }, testInfo) => {
     const overrides = new Map([[
         "zone/english/killhouse.ff",
         createSyntheticWorldInventoryFastfile({
@@ -2081,29 +2101,17 @@ test("an unsupported second-XModel skeleton dependency preserves the first model
     await expect.poll(
         () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
         { timeout: 30_000 },
-    ).toBe("ready");
-    const world = await page.evaluate(
-        () => structuredClone(
-            globalThis.__KISAKCOD_WEB__.retailCensus.worldInventory,
-        ),
+    ).toBe("failed");
+    const census = await page.evaluate(
+        () => structuredClone(globalThis.__KISAKCOD_WEB__.retailCensus),
     );
-    expect(world).toMatchObject({
-        firstXModel: { identity: 6, published: true },
-        xmodels: [
-            { identity: 6, published: true },
-            {
-                assetIndex: 5,
-                headerTraversed: true,
-                skeletonPrefixTraversed: false,
-                unsupportedOperation: "Load_ScriptStringArray",
-            },
-        ],
-        firstTechniqueSet: {
-            registryAliasCount: 9,
-            registryDefinedAliasCount: 8,
-            unsupportedOperation: "Load_ScriptStringArray",
-        },
+    expect(census).toMatchObject({
+        state: "failed",
+        error: "invalid XModel bone script-string array alias",
+        completedAssetCount: 0,
+        failClosed: true,
     });
+    expect(census.worldInventory).toBeUndefined();
 });
 
 test("a malformed post-XModel technique set fails without publishing the prior prefix", async ({ page }, testInfo) => {

@@ -18,7 +18,9 @@ struct RetailCensusLimits
 {
     std::uint32_t maxFileBytes = 16u * 1024u * 1024u;
     std::uint32_t maxSourceChunkBytes = RETAIL_CENSUS_MAX_STEP_BYTES;
-    std::uint32_t maxInflatedPrefixBytes = 8u * 1024u * 1024u;
+    // Retain enough checked prefix to cross large retail dependency runs while
+    // remaining well below the declared aggregate zone-stream ceiling.
+    std::uint32_t maxInflatedPrefixBytes = 64u * 1024u * 1024u;
     std::uint32_t maxBlockBytes = 512u * 1024u * 1024u;
     std::uint64_t maxTotalBlockBytes = 1536ull * 1024ull * 1024ull;
     std::uint32_t maxScriptStrings = 4096u;
@@ -53,6 +55,12 @@ struct RetailCensusLimits
     std::uint32_t maxPhysGeomBrushSides = 65536u;
     std::uint32_t maxPhysGeomBrushEdges = 1024u * 1024u;
     std::uint32_t maxPhysGeomPayloadBytes = 64u * 1024u * 1024u;
+    std::uint32_t maxFxEffects = 4096u;
+    std::uint32_t maxFxElemDefs = 65536u;
+    std::uint32_t maxFxVisuals = 65536u;
+    std::uint32_t maxFxSampleBytes = 64u * 1024u * 1024u;
+    std::uint32_t maxFxTrailVertices = 65536u;
+    std::uint32_t maxFxTrailIndices = 131072u;
 };
 
 enum class RetailCensusError : std::uint8_t
@@ -130,6 +138,8 @@ enum class RetailCensusError : std::uint8_t
     XModelCollectionLimit,
     XModelBoundsInvalid,
     XModelScriptStringInvalid,
+    XModelScriptStringAliasInvalid,
+    XModelArrayAliasInvalid,
     XModelDependencyUnsupported,
     XSurfaceLayoutUnsupported,
     XSurfaceCountInvalid,
@@ -153,6 +163,16 @@ enum class RetailCensusError : std::uint8_t
     PhysGeomValuesInvalid,
     PhysGeomBrushInvalid,
     PhysGeomPayloadLimit,
+    FxEffectLayoutUnsupported,
+    FxEffectNameInvalid,
+    FxEffectNameTooLong,
+    FxEffectCountLimit,
+    FxElemLayoutUnsupported,
+    FxElemSampleLimit,
+    FxElemVisualInvalid,
+    FxStringReferenceInvalid,
+    FxTrailInvalid,
+    FxMaterialUnsupported,
     PostXModelAssetUnsupported,
     AllocationFailed,
 };
@@ -186,6 +206,9 @@ enum class RetailCensusMode : std::uint8_t
     // runs share the same operation; compatible technique-set bodies may occur
     // between them.
     WorldXModelLoader,
+    // The reusable dispatcher now also traverses supported FxEffectDef bodies
+    // and their nested material/XModel dependencies.
+    WorldAssetLoader = WorldXModelLoader,
     WorldXModelCollection = WorldXModelLoader,
 };
 
@@ -287,6 +310,20 @@ enum class RetailCensusStage : std::uint8_t
     WorldMaterialShaderArguments,
     WorldMaterialLiteralConstant,
     WorldMaterialTechniqueName,
+    WorldFxEffect,
+    WorldFxEffectName,
+    WorldFxElemHeaders,
+    WorldFxElemVelocitySamples,
+    WorldFxElemVisualSamples,
+    WorldFxElemVisualArray,
+    WorldFxElemVisuals,
+    WorldFxString,
+    WorldFxTrail,
+    WorldFxTrailVertices,
+    WorldFxTrailIndices,
+    WorldFxMaterial,
+    WorldFxMaterialName,
+    WorldFxPublish,
     AssetBoundary,
     Failed,
 };
@@ -514,6 +551,7 @@ struct RetailXModelPhysPreset
 struct RetailWorldXModel
 {
     std::uint32_t assetIndex = 0u;
+    std::uint32_t registrySourceIndex = 0u;
     std::string name;
     std::uint8_t numBones = 0u;
     std::uint8_t numRootBones = 0u;
@@ -555,7 +593,11 @@ struct RetailWorldXModel
     std::vector<std::uint16_t> boneNameScriptStringIndices;
     std::vector<std::string> boneNames;
     std::vector<std::uint8_t> parentList;
+    std::vector<std::int16_t> quats;
+    std::vector<float> trans;
     std::vector<std::uint8_t> partClassification;
+    std::vector<float> baseMat;
+    std::vector<std::uint8_t> boneInfoData;
     std::vector<RetailXSurface> surfaces;
     std::vector<std::uint32_t> materialReferences;
     std::vector<std::uint32_t> materialIdentities;
@@ -605,8 +647,66 @@ struct RetailWorldXModel
     bool rendererPayloadSelected = false;
     bool rendererPayloadAvailable = false;
     bool published = false;
+    bool topLevelAsset = true;
     bool stoppedBeforeSurfaceArray = false;
     bool stoppedBeforeMaterialDependency = false;
+};
+
+struct RetailWorldFxMaterial
+{
+    std::string name;
+    std::uint32_t referenceBlock4Offset = 0u;
+    std::uint32_t headerBlock0Offset = 0u;
+    std::uint32_t nameBlock4Offset = 0u;
+    std::uint32_t identity = 0u;
+    bool published = false;
+};
+
+struct RetailWorldFxElemDef
+{
+    std::uint32_t flags = 0u;
+    std::uint8_t elemType = 0u;
+    std::uint8_t visualCount = 0u;
+    std::uint8_t velocityIntervalCount = 0u;
+    std::uint8_t visualStateIntervalCount = 0u;
+    std::uint32_t velocitySamplesReference = 0u;
+    std::uint32_t visualSamplesReference = 0u;
+    std::uint32_t visualsReference = 0u;
+    std::array<std::uint32_t, 3> effectReferences{};
+    std::uint32_t trailReference = 0u;
+    std::uint32_t headerBlock4Offset = 0u;
+    std::uint32_t velocitySamplesBlock4Offset = 0u;
+    std::uint32_t visualSamplesBlock4Offset = 0u;
+    std::uint32_t visualArrayBlock4Offset = 0u;
+    std::uint32_t velocitySamplesHash = 2166136261u;
+    std::uint32_t visualSamplesHash = 2166136261u;
+    std::uint32_t trailPayloadHash = 2166136261u;
+    std::uint32_t trailVertexCount = 0u;
+    std::uint32_t trailIndexCount = 0u;
+    std::vector<std::uint32_t> visualReferences;
+    std::vector<std::uint32_t> visualIdentities;
+    bool traversed = false;
+};
+
+struct RetailWorldFxEffectDef
+{
+    std::uint32_t assetIndex = 0u;
+    std::string name;
+    std::int32_t flags = 0;
+    std::int32_t totalSize = 0;
+    std::int32_t msecLoopingLife = 0;
+    std::uint32_t loopingElemCount = 0u;
+    std::uint32_t oneShotElemCount = 0u;
+    std::uint32_t emissionElemCount = 0u;
+    std::uint32_t elemDefsReference = 0u;
+    std::uint32_t headerBlock0Offset = 0u;
+    std::uint32_t nameBlock4Offset = 0u;
+    std::uint32_t elemDefsBlock4Offset = 0u;
+    std::uint32_t identity = 0u;
+    std::uint32_t boundaryInflatedOffset = 0u;
+    std::vector<RetailWorldFxElemDef> elemDefs;
+    std::vector<RetailWorldFxMaterial> materials;
+    bool published = false;
 };
 
 struct RetailFastfileCensus
@@ -650,6 +750,7 @@ struct RetailFastfileCensus
     std::uint32_t worldPostXModelTechniqueSetBodiesEntered = 0u;
     std::uint32_t worldPostXModelTechniqueSetCompletedCount = 0u;
     std::vector<RetailWorldXModel> worldXModels;
+    std::vector<RetailWorldFxEffectDef> worldFxEffects;
     bool worldFirstTechniqueSetHeaderTraversed = false;
     bool worldFirstTechniqueSetPublished = false;
     bool stoppedBeforeWorldTechniqueDependency = false;
@@ -781,7 +882,10 @@ struct RetailFastfileCensus
 // It also completes bounded inline MaterialTechnique dependencies before
 // publishing their parent set, models shared GfxImage insertion-pointer cells
 // so typed image aliases resolve at canonical block-4 addresses, then returns
-// to that same dispatcher.
+// to that same dispatcher. WorldAssetLoader is the canonical alias once the
+// same dispatcher also reaches inline FxEffectDef bodies. The FX path validates
+// bounded samples, visuals, name references, trails, engine-owned materials,
+// and nested XModels before publishing its parent effect.
 // Renderer selection is explicit per model. Eligible first-LOD payloads share
 // an aggregate byte ceiling and may be switched without reparsing; decoding and
 // graphics submission remain separate engine-side work. WorldXModelCollection

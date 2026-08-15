@@ -820,6 +820,53 @@ export function createSyntheticWorldInventoryFastfile({
     ]);
 }
 
+export function createSyntheticFxInventoryFastfile()
+{
+    const inflated = [];
+    appendU32(inflated, 4096);
+    appendU32(inflated, 0);
+    for (const size of [1024 * 1024, 0, 0, 0, 1024 * 1024, 0, 0, 0, 0]) {
+        appendU32(inflated, size);
+    }
+    appendU32(inflated, 0);
+    appendU32(inflated, 0);
+    appendU32(inflated, 3);
+    appendU32(inflated, 0xffff_ffff);
+    for (const type of [5, 25, 16]) {
+        appendU32(inflated, type);
+        appendU32(inflated, 0xffff_ffff);
+    }
+    const techniqueSet = new Array(148).fill(0);
+    setU32(techniqueSet, 0, 0xffff_ffff);
+    inflated.push(
+        ...techniqueSet,
+        ...Buffer.from(",web/fx_prefix", "ascii"),
+        0,
+    );
+    for (const value of [0xffff_ffff, 0, 512, 0, 0, 1, 0, 0xffff_ffff]) {
+        appendU32(inflated, value);
+    }
+    inflated.push(...Buffer.from("web/fx_mark", "ascii"), 0);
+    const elem = new Array(252).fill(0);
+    elem[176] = 9;
+    elem[177] = 1;
+    setU32(elem, 188, 0xffff_ffff);
+    inflated.push(...elem);
+    appendU32(inflated, 0xffff_ffff);
+    appendU32(inflated, 0xffff_ffff);
+    for (const name of [",web/fx_mark_world", ",web/fx_mark_model"]) {
+        const material = new Array(80).fill(0);
+        setU32(material, 0, 0xffff_ffff);
+        inflated.push(...material, ...Buffer.from(name, "ascii"), 0);
+    }
+    const compressed = deflateSync(Uint8Array.from(inflated), { level: 9 });
+    return Uint8Array.from([
+        0x49, 0x57, 0x66, 0x66, 0x75, 0x31, 0x30, 0x30,
+        0x05, 0x00, 0x00, 0x00,
+        ...compressed,
+    ]);
+}
+
 export async function createInstallDirectory(
     testInfo,
     name,

@@ -67,12 +67,19 @@ constexpr std::uint32_t PHYS_GEOM_INFO_BYTES = 68u;
 constexpr std::uint32_t BRUSH_WRAPPER_BYTES = 80u;
 constexpr std::uint32_t BRUSH_SIDE_BYTES = 12u;
 constexpr std::uint32_t COLLISION_PLANE_BYTES = 20u;
+constexpr std::uint32_t FX_EFFECT_DEF_BYTES = 32u;
+constexpr std::uint32_t FX_ELEM_DEF_BYTES = 252u;
+constexpr std::uint32_t FX_VELOCITY_SAMPLE_BYTES = 96u;
+constexpr std::uint32_t FX_VISUAL_SAMPLE_BYTES = 48u;
+constexpr std::uint32_t FX_TRAIL_DEF_BYTES = 28u;
+constexpr std::uint32_t FX_TRAIL_VERTEX_BYTES = 20u;
 constexpr std::uint32_t ASSET_TYPE_PHYS_PRESET = 1u;
 constexpr std::uint32_t ASSET_TYPE_XMODEL = 3u;
 constexpr std::uint32_t ASSET_TYPE_MATERIAL = 4u;
 constexpr std::uint32_t ASSET_TYPE_TECHNIQUE_SET = 5u;
 constexpr std::uint32_t ASSET_TYPE_IMAGE = 6u;
 constexpr std::uint32_t ASSET_TYPE_GFX_WORLD = 16u;
+constexpr std::uint32_t ASSET_TYPE_FX = 25u;
 
 struct WorldMaterialPassState
 {
@@ -96,6 +103,19 @@ enum class WorldMaterialPassPhase : std::uint8_t
     PixelShader,
     Arguments,
     Complete,
+};
+
+enum class WorldFxElemPhase : std::uint8_t
+{
+    VisualString = 0,
+    VelocitySamples,
+    VisualSamples,
+    VisualArray,
+    Visuals,
+    EffectOnImpact,
+    EffectOnDeath,
+    EffectEmitted,
+    Trail,
 };
 
 constexpr std::array<const char *, RETAIL_CENSUS_ASSET_TYPE_COUNT> ASSET_NAMES = {{
@@ -236,7 +256,10 @@ bool ValidLimits(const RetailCensusLimits &limits) noexcept
         limits.maxXModelSurfacePayloadBytes != 0u &&
         limits.maxRetainedXModelRendererBytes != 0u &&
         limits.maxXModelCollisionTriangles != 0u &&
-        limits.maxXModelCollisionPayloadBytes != 0u;
+        limits.maxXModelCollisionPayloadBytes != 0u &&
+        limits.maxFxEffects != 0u && limits.maxFxElemDefs != 0u &&
+        limits.maxFxVisuals != 0u && limits.maxFxSampleBytes != 0u &&
+        limits.maxFxTrailVertices != 0u && limits.maxFxTrailIndices != 0u;
 }
 } // namespace
 
@@ -322,6 +345,8 @@ const char *RetailCensusErrorString(RetailCensusError error) noexcept
     case RetailCensusError::XModelCollectionLimit: return "XModel collection limit exceeded";
     case RetailCensusError::XModelBoundsInvalid: return "invalid XModel bounds";
     case RetailCensusError::XModelScriptStringInvalid: return "invalid XModel bone script string";
+    case RetailCensusError::XModelScriptStringAliasInvalid: return "invalid XModel bone script-string array alias";
+    case RetailCensusError::XModelArrayAliasInvalid: return "invalid XModel typed-array alias";
     case RetailCensusError::XModelDependencyUnsupported: return "unsupported XModel dependency";
     case RetailCensusError::XSurfaceLayoutUnsupported: return "unsupported XSurface layout";
     case RetailCensusError::XSurfaceCountInvalid: return "invalid XSurface count";
@@ -345,6 +370,16 @@ const char *RetailCensusErrorString(RetailCensusError error) noexcept
     case RetailCensusError::PhysGeomValuesInvalid: return "invalid physics geometry values";
     case RetailCensusError::PhysGeomBrushInvalid: return "invalid physics geometry brush";
     case RetailCensusError::PhysGeomPayloadLimit: return "physics geometry payload exceeds limit";
+    case RetailCensusError::FxEffectLayoutUnsupported: return "unsupported FX effect layout";
+    case RetailCensusError::FxEffectNameInvalid: return "invalid FX effect name";
+    case RetailCensusError::FxEffectNameTooLong: return "FX effect name exceeds limit";
+    case RetailCensusError::FxEffectCountLimit: return "FX effect element count exceeds limit";
+    case RetailCensusError::FxElemLayoutUnsupported: return "unsupported FX element layout";
+    case RetailCensusError::FxElemSampleLimit: return "FX element samples exceed limit";
+    case RetailCensusError::FxElemVisualInvalid: return "invalid FX element visual dependency";
+    case RetailCensusError::FxStringReferenceInvalid: return "invalid FX string reference";
+    case RetailCensusError::FxTrailInvalid: return "invalid FX trail definition";
+    case RetailCensusError::FxMaterialUnsupported: return "unsupported FX material dependency";
     case RetailCensusError::PostXModelAssetUnsupported:
         return "asset after the first XModel is not an inline technique set";
     case RetailCensusError::AllocationFailed: return "allocation failed";
@@ -450,6 +485,20 @@ const char *RetailCensusStageString(RetailCensusStage stage) noexcept
     case RetailCensusStage::WorldMaterialShaderArguments: return "world-material-shader-arguments";
     case RetailCensusStage::WorldMaterialLiteralConstant: return "world-material-literal-constant";
     case RetailCensusStage::WorldMaterialTechniqueName: return "world-material-technique-name";
+    case RetailCensusStage::WorldFxEffect: return "world-fx-effect";
+    case RetailCensusStage::WorldFxEffectName: return "world-fx-effect-name";
+    case RetailCensusStage::WorldFxElemHeaders: return "world-fx-element-headers";
+    case RetailCensusStage::WorldFxElemVelocitySamples: return "world-fx-velocity-samples";
+    case RetailCensusStage::WorldFxElemVisualSamples: return "world-fx-visual-samples";
+    case RetailCensusStage::WorldFxElemVisualArray: return "world-fx-visual-array";
+    case RetailCensusStage::WorldFxElemVisuals: return "world-fx-visuals";
+    case RetailCensusStage::WorldFxString: return "world-fx-string";
+    case RetailCensusStage::WorldFxTrail: return "world-fx-trail";
+    case RetailCensusStage::WorldFxTrailVertices: return "world-fx-trail-vertices";
+    case RetailCensusStage::WorldFxTrailIndices: return "world-fx-trail-indices";
+    case RetailCensusStage::WorldFxMaterial: return "world-fx-material";
+    case RetailCensusStage::WorldFxMaterialName: return "world-fx-material-name";
+    case RetailCensusStage::WorldFxPublish: return "world-fx-publish";
     case RetailCensusStage::AssetBoundary: return "asset-boundary";
     case RetailCensusStage::Failed: return "failed";
     }
@@ -484,6 +533,8 @@ struct RetailFastfileCensusJob::Impl
     std::uint32_t worldBodyIndex = 0u;
     ZoneSpan worldTopLevelAliasSlot{};
     ZoneSpan worldXModelAliasSlot{};
+    bool worldXModelNested = false;
+    std::uint32_t worldXModelNestedFxVisualIndex = 0u;
     ZoneSpan worldPhysPresetInsertAliasSlot{};
     bool worldPhysPresetHasInsertAlias = false;
     std::vector<WorldPhysGeomInfoState> worldPhysGeomInfos;
@@ -519,6 +570,17 @@ struct RetailFastfileCensusJob::Impl
     std::uint32_t worldMaterialArgumentBytes = 0u;
     std::vector<std::uint32_t> worldMaterialLiteralTokens;
     std::uint32_t worldMaterialLiteralIndex = 0u;
+    ZoneSpan worldFxAliasSlot{};
+    ZoneSpan worldFxMaterialAliasSlot{};
+    std::size_t worldFxIndex = 0u;
+    std::uint32_t worldFxElemIndex = 0u;
+    std::uint32_t worldFxVisualIndex = 0u;
+    WorldFxElemPhase worldFxElemPhase = WorldFxElemPhase::VelocitySamples;
+    std::uint32_t worldFxStringReference = 0u;
+    std::uint32_t worldFxTrailVertsReference = 0u;
+    std::uint32_t worldFxTrailIndicesReference = 0u;
+    std::uint32_t worldFxTrailVertexCount = 0u;
+    std::uint32_t worldFxTrailIndexCount = 0u;
     std::uint32_t materialPassBytes = 0u;
     std::uint32_t vertexShaderProgramBytes = 0u;
     std::uint32_t pixelShaderProgramBytes = 0u;
@@ -699,8 +761,11 @@ struct RetailFastfileCensusJob::Impl
         worldXModelIndex = result.worldXModels.size() - 1u;
         RetailWorldXModel &model = result.worldXModels.back();
         model.assetIndex = assetIndex;
+        model.registrySourceIndex = assetIndex;
         model.headerBlock0Offset = span.offset;
         model.rendererPayloadSelected = worldXModelIndex == 0u;
+        model.topLevelAsset = true;
+        worldXModelNested = false;
         worldSurfaceIndex = 0u;
         retainedLodVertices = 0u;
         retainedLodTriangles = 0u;
@@ -716,6 +781,104 @@ struct RetailFastfileCensusJob::Impl
         result.nextBodyType = ASSET_TYPE_XMODEL;
         result.nextBodyReference = INLINE_POINTER;
         stage = RetailCensusStage::WorldXModel;
+        return RetailCensusError::None;
+    }
+
+    RetailCensusError BeginNestedWorldXModel(
+        std::uint32_t token,
+        const ZoneSpan &aliasSlot,
+        std::uint32_t visualIndex,
+        RetailCensusStage &stage) noexcept
+    {
+        if ((token != INLINE_POINTER && token != SHARED_POINTER) ||
+            result.worldXModels.size() >= limits.maxWorldXModels)
+        {
+            return token == INLINE_POINTER || token == SHARED_POINTER
+                ? RetailCensusError::XModelCollectionLimit
+                : RetailCensusError::FxElemVisualInvalid;
+        }
+        worldXModelAliasSlot = aliasSlot;
+        if (const RetailCensusError error = MapRegistryError(
+                registry.ReserveAlias(aliasSlot, ASSET_TYPE_XMODEL));
+            error != RetailCensusError::None)
+        {
+            return error;
+        }
+        if (token == SHARED_POINTER)
+        {
+            if (const RetailCensusError error = Plan(4u, 4u);
+                error != RetailCensusError::None) return error;
+        }
+        if (const RetailCensusError error = Push(0u);
+            error != RetailCensusError::None) return error;
+        ZoneSpan span;
+        if (const RetailCensusError error = Plan(4u, XMODEL_BYTES, &span);
+            error != RetailCensusError::None) return error;
+        try { result.worldXModels.emplace_back(); }
+        catch (...) { return RetailCensusError::AllocationFailed; }
+        worldXModelIndex = result.worldXModels.size() - 1u;
+        RetailWorldXModel &model = result.worldXModels.back();
+        model.assetIndex = result.worldFxEffects[worldFxIndex].assetIndex;
+        model.registrySourceIndex = aliasSlot.offset;
+        model.headerBlock0Offset = span.offset;
+        model.rendererPayloadSelected = false;
+        model.topLevelAsset = false;
+        worldXModelNested = true;
+        worldXModelNestedFxVisualIndex = visualIndex;
+        worldSurfaceIndex = 0u;
+        retainedLodVertices = 0u;
+        retainedLodTriangles = 0u;
+        worldRigidVertListIndex = 0u;
+        worldMaterialIndex = 0u;
+        worldTextureIndex = 0u;
+        worldCollisionSurfaceIndex = 0u;
+        worldImageResourceBytes = 0u;
+        worldPhysPresetInsertAliasSlot = {};
+        worldPhysPresetHasInsertAlias = false;
+        stage = RetailCensusStage::WorldXModel;
+        return RetailCensusError::None;
+    }
+
+    RetailCensusError BeginWorldFxEffect(
+        std::uint32_t assetIndex,
+        RetailCensusStage &stage) noexcept
+    {
+        if (assetIndex >= worldAssetTypes.size() ||
+            worldAssetTypes[assetIndex] != ASSET_TYPE_FX ||
+            worldAssetReferences[assetIndex] != INLINE_POINTER)
+        {
+            return RetailCensusError::FxEffectLayoutUnsupported;
+        }
+        if (result.worldFxEffects.size() >= limits.maxFxEffects)
+            return RetailCensusError::FxEffectCountLimit;
+        worldFxAliasSlot = {
+            4u,
+            result.assetTableBlock4Offset + assetIndex * ASSET_BYTES + 4u,
+            4u,
+        };
+        if (const RetailCensusError error = MapRegistryError(
+                registry.ReserveAlias(worldFxAliasSlot, ASSET_TYPE_FX));
+            error != RetailCensusError::None) return error;
+        if (const RetailCensusError error = Push(0u);
+            error != RetailCensusError::None) return error;
+        ZoneSpan span;
+        if (const RetailCensusError error = Plan(
+                4u, FX_EFFECT_DEF_BYTES, &span);
+            error != RetailCensusError::None) return error;
+        try { result.worldFxEffects.emplace_back(); }
+        catch (...) { return RetailCensusError::AllocationFailed; }
+        worldFxIndex = result.worldFxEffects.size() - 1u;
+        RetailWorldFxEffectDef &effect = result.worldFxEffects.back();
+        effect.assetIndex = assetIndex;
+        effect.headerBlock0Offset = span.offset;
+        worldFxElemIndex = 0u;
+        worldFxVisualIndex = 0u;
+        worldFxElemPhase = WorldFxElemPhase::VelocitySamples;
+        result.worldNextAssetIndex = assetIndex;
+        result.nextBodyIndex = assetIndex;
+        result.nextBodyType = ASSET_TYPE_FX;
+        result.nextBodyReference = INLINE_POINTER;
+        stage = RetailCensusStage::WorldFxEffect;
         return RetailCensusError::None;
     }
 
@@ -736,6 +899,120 @@ struct RetailFastfileCensusJob::Impl
             offset < arenas.DeclaredSize(block) &&
             4u <= arenas.DeclaredSize(block) - offset &&
             offset < arenas.HighWater(block);
+    }
+
+    template <typename T>
+    RetailCensusError ResolvePriorWorldXModelArray(
+        std::uint32_t token,
+        std::size_t count,
+        std::uint32_t alignment,
+        const std::vector<T> RetailWorldXModel::*valuesMember,
+        const std::uint32_t RetailWorldXModel::*offsetMember,
+        std::vector<T> &values,
+        std::uint32_t &resolvedOffset,
+        RetailCensusError invalidAlias) noexcept
+    {
+        ZoneSpan target;
+        if (alignment == 0u || (alignment & (alignment - 1u)) != 0u ||
+            !DecodeZoneAliasToken(token, target) || target.block != 4u ||
+            (target.offset & (alignment - 1u)) != 0u ||
+            count > std::numeric_limits<std::uint32_t>::max() / sizeof(T))
+        {
+            return invalidAlias;
+        }
+        const std::uint32_t bytes =
+            static_cast<std::uint32_t>(count * sizeof(T));
+        if (target.offset > arenas.DeclaredSize(4u) ||
+            bytes > arenas.DeclaredSize(4u) - target.offset ||
+            target.offset > arenas.HighWater(4u) ||
+            bytes > arenas.HighWater(4u) - target.offset)
+        {
+            return invalidAlias;
+        }
+        const RetailWorldXModel *source = nullptr;
+        std::size_t sourceIndex = 0u;
+        for (const RetailWorldXModel &candidate : result.worldXModels)
+        {
+            const std::vector<T> &candidateValues = candidate.*valuesMember;
+            const std::uint32_t candidateOffset = candidate.*offsetMember;
+            if (!candidate.published || target.offset < candidateOffset)
+                continue;
+            const std::uint32_t delta = target.offset - candidateOffset;
+            if (delta % sizeof(T) != 0u) continue;
+            const std::size_t begin = delta / sizeof(T);
+            if (begin <= candidateValues.size() &&
+                count <= candidateValues.size() - begin)
+            {
+                source = &candidate;
+                sourceIndex = begin;
+                break;
+            }
+        }
+        if (source == nullptr) return invalidAlias;
+        const std::vector<T> &sourceValues = source->*valuesMember;
+        std::vector<T> assigned;
+        try
+        {
+            assigned.assign(
+                sourceValues.begin() + static_cast<std::ptrdiff_t>(sourceIndex),
+                sourceValues.begin() + static_cast<std::ptrdiff_t>(
+                    sourceIndex + count));
+        }
+        catch (...) { return RetailCensusError::AllocationFailed; }
+        values.swap(assigned);
+        resolvedOffset = target.offset;
+        return RetailCensusError::None;
+    }
+
+    RetailCensusError AssignWorldXModelBoneNames(
+        RetailWorldXModel &model,
+        std::span<const std::uint16_t> indices) noexcept
+    {
+        if (indices.size() != model.numBones)
+            return RetailCensusError::XModelScriptStringInvalid;
+        std::vector<std::uint16_t> assignedIndices;
+        std::vector<std::string> assignedNames;
+        try
+        {
+            assignedIndices.assign(indices.begin(), indices.end());
+            assignedNames.reserve(indices.size());
+            for (const std::uint16_t token : indices)
+            {
+                if (token >= scriptStrings.size())
+                    return RetailCensusError::XModelScriptStringInvalid;
+                assignedNames.push_back(scriptStrings[token]);
+            }
+        }
+        catch (...) { return RetailCensusError::AllocationFailed; }
+        model.boneNameScriptStringIndices.swap(assignedIndices);
+        model.boneNames.swap(assignedNames);
+        return RetailCensusError::None;
+    }
+
+    RetailCensusError ResolvePriorWorldXModelBoneNames(
+        RetailWorldXModel &model) noexcept
+    {
+        std::vector<std::uint16_t> indices;
+        std::uint32_t resolvedOffset = 0u;
+        if (const RetailCensusError error = ResolvePriorWorldXModelArray(
+                model.boneNamesReference, model.numBones, 2u,
+                &RetailWorldXModel::boneNameScriptStringIndices,
+                &RetailWorldXModel::boneNamesBlock4Offset,
+                indices, resolvedOffset,
+                RetailCensusError::XModelScriptStringAliasInvalid);
+            error != RetailCensusError::None)
+        {
+            return error;
+        }
+        if (const RetailCensusError error =
+                AssignWorldXModelBoneNames(
+                    model, std::span<const std::uint16_t>(indices));
+            error != RetailCensusError::None)
+        {
+            return error;
+        }
+        model.boneNamesBlock4Offset = resolvedOffset;
+        return RetailCensusError::None;
     }
 
     RetailCensusError BeginWorldMaterialTechnique(
@@ -801,6 +1078,12 @@ struct RetailFastfileCensusJob::Impl
         };
         auto activeWorldXModel = [&]() noexcept -> RetailWorldXModel & {
             return result.worldXModels[worldXModelIndex];
+        };
+        auto activeWorldFx = [&]() noexcept -> RetailWorldFxEffectDef & {
+            return result.worldFxEffects[worldFxIndex];
+        };
+        auto activeWorldFxElem = [&]() noexcept -> RetailWorldFxElemDef & {
+            return result.worldFxEffects[worldFxIndex].elemDefs[worldFxElemIndex];
         };
         auto hasCompletedWorldMaterialTechnique = [&]() noexcept {
             return std::any_of(
@@ -924,9 +1207,26 @@ struct RetailFastfileCensusJob::Impl
                 {
                     return BeginWorldXModel(index, nextStage);
                 }
+                if (result.nextBodyReference == INLINE_POINTER &&
+                    result.nextBodyType == ASSET_TYPE_FX)
+                {
+                    return BeginWorldFxEffect(index, nextStage);
+                }
                 result.stoppedBeforeDifferentWorldAssetType = true;
                 nextStage = RetailCensusStage::AssetBoundary;
                 complete = true;
+                return RetailCensusError::None;
+            };
+        auto finishWorldFxElem =
+            [&](RetailCensusStage &nextStage) noexcept -> RetailCensusError {
+                RetailWorldFxElemDef &elem = activeWorldFxElem();
+                elem.traversed = true;
+                ++worldFxElemIndex;
+                worldFxVisualIndex = 0u;
+                worldFxElemPhase = WorldFxElemPhase::VelocitySamples;
+                nextStage = worldFxElemIndex < activeWorldFx().elemDefs.size()
+                    ? RetailCensusStage::WorldFxElemVelocitySamples
+                    : RetailCensusStage::WorldFxPublish;
                 return RetailCensusError::None;
             };
         auto publishWorldTechniqueSet =
@@ -1868,6 +2168,18 @@ struct RetailFastfileCensusJob::Impl
                                 }
                                 continue;
                             }
+                            if (mode == RetailCensusMode::WorldXModelLoader &&
+                                result.nextBodyType == ASSET_TYPE_FX &&
+                                result.nextBodyReference == INLINE_POINTER)
+                            {
+                                if (const RetailCensusError error =
+                                        BeginWorldFxEffect(nextIndex, stage);
+                                    error != RetailCensusError::None)
+                                {
+                                    return error;
+                                }
+                                continue;
+                            }
                             if (mode == RetailCensusMode::WorldXModelLoader)
                             {
                                 result.stoppedBeforeDifferentWorldAssetType = true;
@@ -1906,6 +2218,15 @@ struct RetailFastfileCensusJob::Impl
                             result.nextBodyReference == INLINE_POINTER)
                         {
                             if (const RetailCensusError error = BeginWorldXModel(
+                                    nextIndex, stage);
+                                error != RetailCensusError::None) return error;
+                            continue;
+                        }
+                        if (mode == RetailCensusMode::WorldXModelLoader &&
+                            result.nextBodyType == ASSET_TYPE_FX &&
+                            result.nextBodyReference == INLINE_POINTER)
+                        {
+                            if (const RetailCensusError error = BeginWorldFxEffect(
                                     nextIndex, stage);
                                 error != RetailCensusError::None) return error;
                             continue;
@@ -2280,6 +2601,633 @@ struct RetailFastfileCensusJob::Impl
                 if (!complete) continue;
                 return RetailCensusError::None;
             }
+            if (stage == RetailCensusStage::WorldFxEffect)
+            {
+                const int visit = visitRecord(FX_EFFECT_DEF_BYTES);
+                if (visit <= 0) return RetailCensusError::None;
+                const std::uint8_t *record = inflated.data() + cursor;
+                RetailWorldFxEffectDef &effect = activeWorldFx();
+                const std::int32_t looping = ReadS32(record + 16u);
+                const std::int32_t oneShot = ReadS32(record + 20u);
+                const std::int32_t emission = ReadS32(record + 24u);
+                effect.flags = ReadS32(record + 4u);
+                effect.totalSize = ReadS32(record + 8u);
+                effect.msecLoopingLife = ReadS32(record + 12u);
+                effect.elemDefsReference = ReadU32(record + 28u);
+                if (ReadU32(record) != INLINE_POINTER ||
+                    effect.totalSize < static_cast<std::int32_t>(FX_EFFECT_DEF_BYTES) ||
+                    effect.msecLoopingLife < 0 || looping < 0 || oneShot < 0 ||
+                    emission < 0)
+                {
+                    return RetailCensusError::FxEffectLayoutUnsupported;
+                }
+                const std::uint64_t elemCount =
+                    static_cast<std::uint64_t>(looping) +
+                    static_cast<std::uint64_t>(oneShot) +
+                    static_cast<std::uint64_t>(emission);
+                if (elemCount > limits.maxFxElemDefs)
+                    return RetailCensusError::FxEffectCountLimit;
+                if ((elemCount == 0u && effect.elemDefsReference != 0u) ||
+                    (elemCount != 0u &&
+                     effect.elemDefsReference != INLINE_POINTER))
+                {
+                    return RetailCensusError::FxEffectLayoutUnsupported;
+                }
+                effect.loopingElemCount = static_cast<std::uint32_t>(looping);
+                effect.oneShotElemCount = static_cast<std::uint32_t>(oneShot);
+                effect.emissionElemCount = static_cast<std::uint32_t>(emission);
+                cursor += FX_EFFECT_DEF_BYTES;
+                ++report.recordsProcessed;
+                if (const RetailCensusError error = Push(4u);
+                    error != RetailCensusError::None) return error;
+                stage = RetailCensusStage::WorldFxEffectName;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldFxEffectName)
+            {
+                RetailWorldFxEffectDef &effect = activeWorldFx();
+                const auto begin = inflated.begin() +
+                    static_cast<std::ptrdiff_t>(cursor);
+                const auto terminator = std::find(begin, inflated.end(), 0u);
+                if (terminator == inflated.end())
+                {
+                    if (inflated.size() - cursor >= limits.maxXModelNameBytes)
+                        return RetailCensusError::FxEffectNameTooLong;
+                    blocked = true;
+                    return RetailCensusError::None;
+                }
+                const std::size_t bytes =
+                    static_cast<std::size_t>(terminator - begin) + 1u;
+                if (bytes <= 1u) return RetailCensusError::FxEffectNameInvalid;
+                if (bytes > limits.maxXModelNameBytes)
+                    return RetailCensusError::FxEffectNameTooLong;
+                if (recordVisited == 0u)
+                {
+                    ZoneSpan span;
+                    if (const RetailCensusError error = Plan(1u, bytes, &span);
+                        error != RetailCensusError::None) return error;
+                    effect.nameBlock4Offset = span.offset;
+                }
+                const int visit = visitRecord(bytes);
+                if (visit <= 0) return RetailCensusError::None;
+                try
+                {
+                    effect.name.assign(
+                        reinterpret_cast<const char *>(inflated.data() + cursor),
+                        bytes - 1u);
+                }
+                catch (...) { return RetailCensusError::AllocationFailed; }
+                if (!ValidPublishedName(effect.name))
+                    return RetailCensusError::FxEffectNameInvalid;
+                cursor += bytes;
+                ++report.recordsProcessed;
+                const std::uint64_t elemCount =
+                    static_cast<std::uint64_t>(effect.loopingElemCount) +
+                    effect.oneShotElemCount + effect.emissionElemCount;
+                if (elemCount == 0u)
+                {
+                    stage = RetailCensusStage::WorldFxPublish;
+                    continue;
+                }
+                const std::uint64_t headerBytes = elemCount * FX_ELEM_DEF_BYTES;
+                ZoneSpan span;
+                if (const RetailCensusError error = Plan(4u, headerBytes, &span);
+                    error != RetailCensusError::None) return error;
+                effect.elemDefsBlock4Offset = span.offset;
+                stage = RetailCensusStage::WorldFxElemHeaders;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldFxElemHeaders)
+            {
+                RetailWorldFxEffectDef &effect = activeWorldFx();
+                const std::size_t elemCount =
+                    static_cast<std::size_t>(effect.loopingElemCount) +
+                    effect.oneShotElemCount + effect.emissionElemCount;
+                const std::size_t bytes = elemCount * FX_ELEM_DEF_BYTES;
+                const int visit = visitRecord(bytes);
+                if (visit <= 0) return RetailCensusError::None;
+                std::vector<RetailWorldFxElemDef> elems;
+                try { elems.resize(elemCount); }
+                catch (...) { return RetailCensusError::AllocationFailed; }
+                std::uint64_t visualCountTotal = 0u;
+                for (std::size_t index = 0u; index < elemCount; ++index)
+                {
+                    const std::uint8_t *record = inflated.data() + cursor +
+                        index * FX_ELEM_DEF_BYTES;
+                    RetailWorldFxElemDef &elem = elems[index];
+                    elem.flags = ReadU32(record);
+                    elem.elemType = record[176u];
+                    elem.visualCount = record[177u];
+                    elem.velocityIntervalCount = record[178u];
+                    elem.visualStateIntervalCount = record[179u];
+                    elem.velocitySamplesReference = ReadU32(record + 180u);
+                    elem.visualSamplesReference = ReadU32(record + 184u);
+                    elem.visualsReference = ReadU32(record + 188u);
+                    elem.effectReferences = {
+                        ReadU32(record + 216u), ReadU32(record + 220u),
+                        ReadU32(record + 224u)};
+                    elem.trailReference = ReadU32(record + 244u);
+                    elem.headerBlock4Offset = effect.elemDefsBlock4Offset +
+                        static_cast<std::uint32_t>(index * FX_ELEM_DEF_BYTES);
+                    if (elem.elemType > 10u ||
+                        (elem.velocitySamplesReference != 0u &&
+                         elem.velocitySamplesReference != INLINE_POINTER) ||
+                        (elem.visualSamplesReference != 0u &&
+                         elem.visualSamplesReference != INLINE_POINTER) ||
+                        (elem.trailReference != 0u &&
+                         elem.trailReference != INLINE_POINTER))
+                    {
+                        return RetailCensusError::FxElemLayoutUnsupported;
+                    }
+                    const bool usesVisualArray = elem.elemType == 9u ||
+                        elem.visualCount > 1u;
+                    if (usesVisualArray && elem.visualsReference != 0u &&
+                        elem.visualsReference != INLINE_POINTER)
+                    {
+                        return RetailCensusError::FxElemLayoutUnsupported;
+                    }
+                    visualCountTotal += elem.elemType == 9u
+                        ? static_cast<std::uint64_t>(elem.visualCount) * 2u
+                        : elem.visualCount > 1u ? elem.visualCount : 1u;
+                    if (visualCountTotal > limits.maxFxVisuals)
+                        return RetailCensusError::FxEffectCountLimit;
+                }
+                effect.elemDefs.swap(elems);
+                cursor += bytes;
+                ++report.recordsProcessed;
+                worldFxElemIndex = 0u;
+                worldFxVisualIndex = 0u;
+                worldFxElemPhase = WorldFxElemPhase::VelocitySamples;
+                stage = RetailCensusStage::WorldFxElemVelocitySamples;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldFxElemVelocitySamples)
+            {
+                RetailWorldFxElemDef &elem = activeWorldFxElem();
+                if (elem.velocitySamplesReference != 0u)
+                {
+                    const std::uint64_t bytes64 =
+                        (static_cast<std::uint64_t>(elem.velocityIntervalCount) + 1u) *
+                        FX_VELOCITY_SAMPLE_BYTES;
+                    if (bytes64 > limits.maxFxSampleBytes)
+                        return RetailCensusError::FxElemSampleLimit;
+                    const std::size_t bytes = static_cast<std::size_t>(bytes64);
+                    if (recordVisited == 0u)
+                    {
+                        ZoneSpan span;
+                        if (const RetailCensusError error = Plan(4u, bytes, &span);
+                            error != RetailCensusError::None) return error;
+                        elem.velocitySamplesBlock4Offset = span.offset;
+                    }
+                    const int visit = visitRecord(bytes);
+                    if (visit <= 0) return RetailCensusError::None;
+                    elem.velocitySamplesHash = Fnv1a32(
+                        std::span<const std::uint8_t>(
+                            inflated.data() + cursor, bytes));
+                    cursor += bytes;
+                    ++report.recordsProcessed;
+                }
+                stage = RetailCensusStage::WorldFxElemVisualSamples;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldFxElemVisualSamples)
+            {
+                RetailWorldFxElemDef &elem = activeWorldFxElem();
+                if (elem.visualSamplesReference != 0u)
+                {
+                    const std::uint64_t bytes64 =
+                        (static_cast<std::uint64_t>(elem.visualStateIntervalCount) + 1u) *
+                        FX_VISUAL_SAMPLE_BYTES;
+                    if (bytes64 > limits.maxFxSampleBytes)
+                        return RetailCensusError::FxElemSampleLimit;
+                    const std::size_t bytes = static_cast<std::size_t>(bytes64);
+                    if (recordVisited == 0u)
+                    {
+                        ZoneSpan span;
+                        if (const RetailCensusError error = Plan(4u, bytes, &span);
+                            error != RetailCensusError::None) return error;
+                        elem.visualSamplesBlock4Offset = span.offset;
+                    }
+                    const int visit = visitRecord(bytes);
+                    if (visit <= 0) return RetailCensusError::None;
+                    elem.visualSamplesHash = Fnv1a32(
+                        std::span<const std::uint8_t>(
+                            inflated.data() + cursor, bytes));
+                    cursor += bytes;
+                    ++report.recordsProcessed;
+                }
+                stage = RetailCensusStage::WorldFxElemVisualArray;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldFxElemVisualArray)
+            {
+                RetailWorldFxElemDef &elem = activeWorldFxElem();
+                const bool usesArray = elem.elemType == 9u ||
+                    elem.visualCount > 1u;
+                const std::size_t count = elem.elemType == 9u
+                    ? static_cast<std::size_t>(elem.visualCount) * 2u
+                    : elem.visualCount > 1u ? elem.visualCount : 1u;
+                try
+                {
+                    elem.visualReferences.assign(count, 0u);
+                    elem.visualIdentities.assign(count, 0u);
+                }
+                catch (...) { return RetailCensusError::AllocationFailed; }
+                if (usesArray && elem.visualsReference != 0u)
+                {
+                    const std::size_t bytes = count * 4u;
+                    if (recordVisited == 0u)
+                    {
+                        ZoneSpan span;
+                        if (const RetailCensusError error = Plan(4u, bytes, &span);
+                            error != RetailCensusError::None) return error;
+                        elem.visualArrayBlock4Offset = span.offset;
+                    }
+                    const int visit = visitRecord(bytes);
+                    if (visit <= 0) return RetailCensusError::None;
+                    for (std::size_t index = 0u; index < count; ++index)
+                    {
+                        elem.visualReferences[index] =
+                            ReadU32(inflated.data() + cursor + index * 4u);
+                    }
+                    cursor += bytes;
+                    ++report.recordsProcessed;
+                }
+                else if (!usesArray)
+                {
+                    elem.visualArrayBlock4Offset = elem.headerBlock4Offset + 188u;
+                    elem.visualReferences[0] = elem.visualsReference;
+                }
+                worldFxVisualIndex = 0u;
+                stage = RetailCensusStage::WorldFxElemVisuals;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldFxElemVisuals)
+            {
+                RetailWorldFxElemDef &elem = activeWorldFxElem();
+                while (worldFxVisualIndex < elem.visualReferences.size())
+                {
+                    const std::uint32_t token =
+                        elem.visualReferences[worldFxVisualIndex];
+                    const ZoneSpan aliasSlot{
+                        4u,
+                        elem.visualArrayBlock4Offset + worldFxVisualIndex * 4u,
+                        4u,
+                    };
+                    if (elem.elemType == 6u || elem.elemType == 7u || token == 0u)
+                    {
+                        ++worldFxVisualIndex;
+                        continue;
+                    }
+                    if (elem.elemType == 8u || elem.elemType == 10u)
+                    {
+                        worldFxStringReference = token;
+                        worldFxElemPhase = WorldFxElemPhase::VisualString;
+                        stage = RetailCensusStage::WorldFxString;
+                        break;
+                    }
+                    if (elem.elemType == 5u)
+                    {
+                        if (token == INLINE_POINTER || token == SHARED_POINTER)
+                        {
+                            if (const RetailCensusError error =
+                                    BeginNestedWorldXModel(
+                                        token, aliasSlot, worldFxVisualIndex, stage);
+                                error != RetailCensusError::None) return error;
+                            break;
+                        }
+                        std::uint32_t identity = 0u;
+                        if (registry.ResolveAlias(
+                                token, ASSET_TYPE_XMODEL, identity) !=
+                            ZoneRegistryError::None)
+                        {
+                            return RetailCensusError::FxElemVisualInvalid;
+                        }
+                        elem.visualIdentities[worldFxVisualIndex] = identity;
+                        ++worldFxVisualIndex;
+                        continue;
+                    }
+                    if (token == INLINE_POINTER || token == SHARED_POINTER)
+                    {
+                        worldFxMaterialAliasSlot = aliasSlot;
+                        if (const RetailCensusError error = MapRegistryError(
+                                registry.ReserveAlias(
+                                    aliasSlot, ASSET_TYPE_MATERIAL));
+                            error != RetailCensusError::None) return error;
+                        if (token == SHARED_POINTER)
+                        {
+                            if (const RetailCensusError error = Plan(4u, 4u);
+                                error != RetailCensusError::None) return error;
+                        }
+                        if (const RetailCensusError error = Push(0u);
+                            error != RetailCensusError::None) return error;
+                        ZoneSpan span;
+                        if (const RetailCensusError error = Plan(
+                                4u, MATERIAL_BYTES, &span);
+                            error != RetailCensusError::None) return error;
+                        try { activeWorldFx().materials.emplace_back(); }
+                        catch (...) { return RetailCensusError::AllocationFailed; }
+                        RetailWorldFxMaterial &material =
+                            activeWorldFx().materials.back();
+                        material.referenceBlock4Offset = aliasSlot.offset;
+                        material.headerBlock0Offset = span.offset;
+                        stage = RetailCensusStage::WorldFxMaterial;
+                        break;
+                    }
+                    std::uint32_t identity = 0u;
+                    if (registry.ResolveAlias(
+                            token, ASSET_TYPE_MATERIAL, identity) !=
+                        ZoneRegistryError::None)
+                    {
+                        return RetailCensusError::FxElemVisualInvalid;
+                    }
+                    elem.visualIdentities[worldFxVisualIndex] = identity;
+                    ++worldFxVisualIndex;
+                }
+                if (stage != RetailCensusStage::WorldFxElemVisuals) continue;
+                worldFxElemPhase = WorldFxElemPhase::EffectOnImpact;
+                worldFxStringReference = elem.effectReferences[0u];
+                stage = RetailCensusStage::WorldFxString;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldFxString)
+            {
+                const std::uint32_t token = worldFxStringReference;
+                if (token == INLINE_POINTER)
+                {
+                    const auto begin = inflated.begin() +
+                        static_cast<std::ptrdiff_t>(cursor);
+                    const auto terminator = std::find(begin, inflated.end(), 0u);
+                    if (terminator == inflated.end())
+                    {
+                        if (inflated.size() - cursor >= limits.maxXModelNameBytes)
+                            return RetailCensusError::FxEffectNameTooLong;
+                        blocked = true;
+                        return RetailCensusError::None;
+                    }
+                    const std::size_t bytes =
+                        static_cast<std::size_t>(terminator - begin) + 1u;
+                    if (bytes <= 1u || bytes > limits.maxXModelNameBytes)
+                        return bytes <= 1u
+                            ? RetailCensusError::FxStringReferenceInvalid
+                            : RetailCensusError::FxEffectNameTooLong;
+                    if (recordVisited == 0u)
+                    {
+                        if (const RetailCensusError error = Plan(1u, bytes);
+                            error != RetailCensusError::None) return error;
+                    }
+                    const int visit = visitRecord(bytes);
+                    if (visit <= 0) return RetailCensusError::None;
+                    if (!ValidPublishedName(std::string_view(
+                            reinterpret_cast<const char *>(
+                                inflated.data() + cursor), bytes - 1u)))
+                    {
+                        return RetailCensusError::FxStringReferenceInvalid;
+                    }
+                    cursor += bytes;
+                    ++report.recordsProcessed;
+                }
+                else if (token != 0u && !ValidPriorZonePointer(token))
+                {
+                    return RetailCensusError::FxStringReferenceInvalid;
+                }
+                if (worldFxElemPhase == WorldFxElemPhase::VisualString)
+                {
+                    ++worldFxVisualIndex;
+                    stage = RetailCensusStage::WorldFxElemVisuals;
+                    continue;
+                }
+                RetailWorldFxElemDef &elem = activeWorldFxElem();
+                if (worldFxElemPhase == WorldFxElemPhase::EffectOnImpact)
+                {
+                    worldFxElemPhase = WorldFxElemPhase::EffectOnDeath;
+                    worldFxStringReference = elem.effectReferences[1u];
+                    continue;
+                }
+                if (worldFxElemPhase == WorldFxElemPhase::EffectOnDeath)
+                {
+                    worldFxElemPhase = WorldFxElemPhase::EffectEmitted;
+                    worldFxStringReference = elem.effectReferences[2u];
+                    continue;
+                }
+                if (worldFxElemPhase != WorldFxElemPhase::EffectEmitted)
+                    return RetailCensusError::ZoneStreamInvalid;
+                stage = RetailCensusStage::WorldFxTrail;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldFxTrail)
+            {
+                RetailWorldFxElemDef &elem = activeWorldFxElem();
+                if (elem.trailReference == 0u)
+                {
+                    if (const RetailCensusError error = finishWorldFxElem(stage);
+                        error != RetailCensusError::None) return error;
+                    continue;
+                }
+                if (recordVisited == 0u)
+                {
+                    if (const RetailCensusError error = Plan(
+                            4u, FX_TRAIL_DEF_BYTES);
+                        error != RetailCensusError::None) return error;
+                }
+                const int visit = visitRecord(FX_TRAIL_DEF_BYTES);
+                if (visit <= 0) return RetailCensusError::None;
+                const std::uint8_t *record = inflated.data() + cursor;
+                const std::int32_t vertCount = ReadS32(record + 12u);
+                const std::int32_t indexCount = ReadS32(record + 20u);
+                worldFxTrailVertsReference = ReadU32(record + 16u);
+                worldFxTrailIndicesReference = ReadU32(record + 24u);
+                if (vertCount < 0 || indexCount < 0 ||
+                    static_cast<std::uint32_t>(vertCount) >
+                        limits.maxFxTrailVertices ||
+                    static_cast<std::uint32_t>(indexCount) >
+                        limits.maxFxTrailIndices ||
+                    ((vertCount == 0) != (worldFxTrailVertsReference == 0u)) ||
+                    ((indexCount == 0) != (worldFxTrailIndicesReference == 0u)) ||
+                    (vertCount != 0 &&
+                     worldFxTrailVertsReference != INLINE_POINTER) ||
+                    (indexCount != 0 &&
+                     worldFxTrailIndicesReference != INLINE_POINTER))
+                {
+                    return RetailCensusError::FxTrailInvalid;
+                }
+                worldFxTrailVertexCount = static_cast<std::uint32_t>(vertCount);
+                worldFxTrailIndexCount = static_cast<std::uint32_t>(indexCount);
+                elem.trailVertexCount = worldFxTrailVertexCount;
+                elem.trailIndexCount = worldFxTrailIndexCount;
+                elem.trailPayloadHash = Fnv1a32(
+                    std::span<const std::uint8_t>(record, FX_TRAIL_DEF_BYTES));
+                cursor += FX_TRAIL_DEF_BYTES;
+                ++report.recordsProcessed;
+                stage = RetailCensusStage::WorldFxTrailVertices;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldFxTrailVertices)
+            {
+                RetailWorldFxElemDef &elem = activeWorldFxElem();
+                const std::size_t bytes =
+                    static_cast<std::size_t>(worldFxTrailVertexCount) *
+                    FX_TRAIL_VERTEX_BYTES;
+                if (bytes != 0u)
+                {
+                    if (recordVisited == 0u)
+                    {
+                        if (const RetailCensusError error = Plan(4u, bytes);
+                            error != RetailCensusError::None) return error;
+                    }
+                    const int visit = visitRecord(bytes);
+                    if (visit <= 0) return RetailCensusError::None;
+                    elem.trailPayloadHash = Fnv1a32(
+                        std::span<const std::uint8_t>(
+                            inflated.data() + cursor, bytes),
+                        elem.trailPayloadHash);
+                    cursor += bytes;
+                    ++report.recordsProcessed;
+                }
+                stage = RetailCensusStage::WorldFxTrailIndices;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldFxTrailIndices)
+            {
+                RetailWorldFxElemDef &elem = activeWorldFxElem();
+                const std::size_t bytes =
+                    static_cast<std::size_t>(worldFxTrailIndexCount) * 2u;
+                if (bytes != 0u)
+                {
+                    if (recordVisited == 0u)
+                    {
+                        if (const RetailCensusError error = Plan(2u, bytes);
+                            error != RetailCensusError::None) return error;
+                    }
+                    const int visit = visitRecord(bytes);
+                    if (visit <= 0) return RetailCensusError::None;
+                    elem.trailPayloadHash = Fnv1a32(
+                        std::span<const std::uint8_t>(
+                            inflated.data() + cursor, bytes),
+                        elem.trailPayloadHash);
+                    cursor += bytes;
+                    ++report.recordsProcessed;
+                }
+                if (const RetailCensusError error = finishWorldFxElem(stage);
+                    error != RetailCensusError::None) return error;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldFxMaterial)
+            {
+                RetailWorldFxMaterial &material = activeWorldFx().materials.back();
+                const int visit = visitRecord(MATERIAL_BYTES);
+                if (visit <= 0) return RetailCensusError::None;
+                const std::uint8_t *record = inflated.data() + cursor;
+                if (ReadU32(record) != INLINE_POINTER ||
+                    record[58u] != 0u || record[59u] != 0u ||
+                    record[60u] != 0u || record[63u] != 0u ||
+                    ReadU32(record + 64u) != 0u ||
+                    ReadU32(record + 68u) != 0u ||
+                    ReadU32(record + 72u) != 0u ||
+                    ReadU32(record + 76u) != 0u)
+                {
+                    return RetailCensusError::FxMaterialUnsupported;
+                }
+                cursor += MATERIAL_BYTES;
+                ++report.recordsProcessed;
+                if (const RetailCensusError error = Push(4u);
+                    error != RetailCensusError::None) return error;
+                stage = RetailCensusStage::WorldFxMaterialName;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldFxMaterialName)
+            {
+                RetailWorldFxMaterial &material = activeWorldFx().materials.back();
+                const auto begin = inflated.begin() +
+                    static_cast<std::ptrdiff_t>(cursor);
+                const auto terminator = std::find(begin, inflated.end(), 0u);
+                if (terminator == inflated.end())
+                {
+                    if (inflated.size() - cursor >= limits.maxMaterialNameBytes)
+                        return RetailCensusError::MaterialNameTooLong;
+                    blocked = true;
+                    return RetailCensusError::None;
+                }
+                const std::size_t bytes =
+                    static_cast<std::size_t>(terminator - begin) + 1u;
+                if (bytes <= 1u || bytes > limits.maxMaterialNameBytes)
+                    return bytes <= 1u
+                        ? RetailCensusError::MaterialNameInvalid
+                        : RetailCensusError::MaterialNameTooLong;
+                if (recordVisited == 0u)
+                {
+                    ZoneSpan span;
+                    if (const RetailCensusError error = Plan(1u, bytes, &span);
+                        error != RetailCensusError::None) return error;
+                    material.nameBlock4Offset = span.offset;
+                }
+                const int visit = visitRecord(bytes);
+                if (visit <= 0) return RetailCensusError::None;
+                try
+                {
+                    material.name.assign(
+                        reinterpret_cast<const char *>(inflated.data() + cursor),
+                        bytes - 1u);
+                }
+                catch (...) { return RetailCensusError::AllocationFailed; }
+                if (!ValidPublishedName(material.name))
+                    return RetailCensusError::MaterialNameInvalid;
+                cursor += bytes;
+                ++report.recordsProcessed;
+                if (const RetailCensusError error = Pop();
+                    error != RetailCensusError::None) return error;
+                if (const RetailCensusError error = Pop();
+                    error != RetailCensusError::None) return error;
+                if (const RetailCensusError error = MapRegistryError(
+                        registry.RegisterAsset(
+                            ASSET_TYPE_MATERIAL,
+                            material.referenceBlock4Offset,
+                            material.name, material.identity));
+                    error != RetailCensusError::None) return error;
+                if (const RetailCensusError error = MapRegistryError(
+                        registry.PublishAlias(
+                            worldFxMaterialAliasSlot, material.identity));
+                    error != RetailCensusError::None) return error;
+                material.published = true;
+                RetailWorldFxElemDef &elem = activeWorldFxElem();
+                if (worldFxVisualIndex >= elem.visualIdentities.size())
+                    return RetailCensusError::FxElemVisualInvalid;
+                elem.visualIdentities[worldFxVisualIndex] = material.identity;
+                ++worldFxVisualIndex;
+                stage = RetailCensusStage::WorldFxElemVisuals;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldFxPublish)
+            {
+                RetailWorldFxEffectDef &effect = activeWorldFx();
+                if (const RetailCensusError error = Pop();
+                    error != RetailCensusError::None) return error;
+                if (const RetailCensusError error = Pop();
+                    error != RetailCensusError::None) return error;
+                if (const RetailCensusError error = MapRegistryError(
+                        registry.RegisterAsset(
+                            ASSET_TYPE_FX, effect.assetIndex,
+                            effect.name, effect.identity));
+                    error != RetailCensusError::None) return error;
+                if (const RetailCensusError error = MapRegistryError(
+                        registry.PublishAlias(worldFxAliasSlot, effect.identity));
+                    error != RetailCensusError::None) return error;
+                effect.published = true;
+                effect.boundaryInflatedOffset = static_cast<std::uint32_t>(cursor);
+                ++result.completedAssetCount;
+                result.block0HighWaterAtBoundary = arenas.HighWater(0u);
+                result.block4CursorAtBoundary = arenas.Cursor(4u);
+                result.worldRegistryAliasCount = registry.AliasCount();
+                result.worldRegistryDefinedAliasCount = registry.DefinedAliasCount();
+                result.registryAssetCount = registry.AssetCount();
+                result.registryAliasCount = registry.AliasCount();
+                result.registryDefinedAliasCount = registry.DefinedAliasCount();
+                if (const RetailCensusError error = dispatchSupportedWorldAsset(
+                        effect.assetIndex + 1u, stage);
+                    error != RetailCensusError::None) return error;
+                if (complete) return RetailCensusError::None;
+                continue;
+            }
             if (stage == RetailCensusStage::WorldXModel)
             {
                 const int visit = visitRecord(XMODEL_BYTES);
@@ -2336,9 +3284,14 @@ struct RetailFastfileCensusJob::Impl
                 const std::uint32_t childBones =
                     static_cast<std::uint32_t>(model.numBones) -
                     static_cast<std::uint32_t>(model.numRootBones);
+                const bool emptyBuiltin = model.numBones == 0u &&
+                    model.numRootBones == 0u && model.surfaceCount == 0u &&
+                    model.lodCount == 0 && model.collisionLod == 0 &&
+                    model.collisionSurfaceCount == 0u;
                 if (model.numRootBones > model.numBones || model.lodRampType > 1u ||
-                    model.lodCount <= 0 || model.lodCount > 4 ||
-                    model.collisionLod < -1 || model.collisionLod >= model.lodCount ||
+                    (!emptyBuiltin && (model.lodCount <= 0 || model.lodCount > 4 ||
+                     model.collisionLod < -1 ||
+                     model.collisionLod >= model.lodCount)) ||
                     model.collisionSurfaceCount > limits.maxXModelCollisionSurfaces ||
                     record[209u] > 1u)
                 {
@@ -2424,6 +3377,8 @@ struct RetailFastfileCensusJob::Impl
                 catch (...) { return RetailCensusError::AllocationFailed; }
                 if (!ValidPublishedName(model.name))
                     return RetailCensusError::XModelNameInvalid;
+                if (model.lodCount == 0 && !model.name.starts_with(','))
+                    return RetailCensusError::XModelCountInvalid;
                 cursor += bytes;
                 ++report.recordsProcessed;
                 stage = RetailCensusStage::WorldXModelBoneNames;
@@ -2437,10 +3392,18 @@ struct RetailFastfileCensusJob::Impl
                     stage = RetailCensusStage::WorldXModelParentList;
                     continue;
                 }
-                if (model.boneNamesReference != INLINE_POINTER)
+                if (model.boneNamesReference != INLINE_POINTER &&
+                    model.boneNamesReference != SHARED_POINTER)
                 {
-                    finishWorldXModel("Load_ScriptStringArray", true, false);
-                    return RetailCensusError::None;
+                    if (const RetailCensusError error =
+                            ResolvePriorWorldXModelBoneNames(model);
+                        error != RetailCensusError::None)
+                    {
+                        return error;
+                    }
+                    ++report.recordsProcessed;
+                    stage = RetailCensusStage::WorldXModelParentList;
+                    continue;
                 }
                 const std::size_t bytes = static_cast<std::size_t>(model.numBones) * 2u;
                 if (!Available(bytes))
@@ -2457,21 +3420,21 @@ struct RetailFastfileCensusJob::Impl
                 }
                 const int visit = visitRecord(bytes);
                 if (visit <= 0) return RetailCensusError::None;
+                std::vector<std::uint16_t> indices;
                 try
                 {
-                    model.boneNameScriptStringIndices.resize(model.numBones);
-                    model.boneNames.resize(model.numBones);
+                    indices.resize(model.numBones);
                     for (std::size_t index = 0u; index < model.numBones; ++index)
-                    {
-                        const std::uint16_t token = ReadU16(
+                        indices[index] = ReadU16(
                             inflated.data() + cursor + index * 2u);
-                        if (token >= scriptStrings.size())
-                            return RetailCensusError::XModelScriptStringInvalid;
-                        model.boneNameScriptStringIndices[index] = token;
-                        model.boneNames[index] = scriptStrings[token];
-                    }
                 }
                 catch (...) { return RetailCensusError::AllocationFailed; }
+                if (const RetailCensusError error = AssignWorldXModelBoneNames(
+                        model, std::span<const std::uint16_t>(indices));
+                    error != RetailCensusError::None)
+                {
+                    return error;
+                }
                 cursor += bytes;
                 ++report.recordsProcessed;
                 stage = RetailCensusStage::WorldXModelParentList;
@@ -2486,10 +3449,24 @@ struct RetailFastfileCensusJob::Impl
                     stage = RetailCensusStage::WorldXModelQuats;
                     continue;
                 }
-                if (model.parentListReference != INLINE_POINTER)
+                if (model.parentListReference != INLINE_POINTER &&
+                    model.parentListReference != SHARED_POINTER)
                 {
-                    finishWorldXModel("Load_byteArray(parentList)", true, false);
-                    return RetailCensusError::None;
+                    if (const RetailCensusError error =
+                            ResolvePriorWorldXModelArray(
+                                model.parentListReference, childBones, 1u,
+                                &RetailWorldXModel::parentList,
+                                &RetailWorldXModel::parentListBlock4Offset,
+                                model.parentList,
+                                model.parentListBlock4Offset,
+                                RetailCensusError::XModelArrayAliasInvalid);
+                        error != RetailCensusError::None)
+                    {
+                        return error;
+                    }
+                    ++report.recordsProcessed;
+                    stage = RetailCensusStage::WorldXModelQuats;
+                    continue;
                 }
                 if (!Available(childBones))
                 {
@@ -2526,10 +3503,25 @@ struct RetailFastfileCensusJob::Impl
                     stage = RetailCensusStage::WorldXModelTrans;
                     continue;
                 }
-                if (model.quatsReference != INLINE_POINTER)
+                const std::size_t count =
+                    static_cast<std::size_t>(childBones) * 4u;
+                if (model.quatsReference != INLINE_POINTER &&
+                    model.quatsReference != SHARED_POINTER)
                 {
-                    finishWorldXModel("Load_shortArray(quats)", true, false);
-                    return RetailCensusError::None;
+                    if (const RetailCensusError error =
+                            ResolvePriorWorldXModelArray(
+                                model.quatsReference, count, 2u,
+                                &RetailWorldXModel::quats,
+                                &RetailWorldXModel::quatsBlock4Offset,
+                                model.quats, model.quatsBlock4Offset,
+                                RetailCensusError::XModelArrayAliasInvalid);
+                        error != RetailCensusError::None)
+                    {
+                        return error;
+                    }
+                    ++report.recordsProcessed;
+                    stage = RetailCensusStage::WorldXModelTrans;
+                    continue;
                 }
                 const std::size_t bytes = static_cast<std::size_t>(childBones) * 8u;
                 if (!Available(bytes))
@@ -2546,6 +3538,14 @@ struct RetailFastfileCensusJob::Impl
                 }
                 const int visit = visitRecord(bytes);
                 if (visit <= 0) return RetailCensusError::None;
+                try
+                {
+                    model.quats.resize(count);
+                    for (std::size_t index = 0u; index < count; ++index)
+                        model.quats[index] = ReadS16(
+                            inflated.data() + cursor + index * 2u);
+                }
+                catch (...) { return RetailCensusError::AllocationFailed; }
                 cursor += bytes;
                 ++report.recordsProcessed;
                 stage = RetailCensusStage::WorldXModelTrans;
@@ -2560,12 +3560,25 @@ struct RetailFastfileCensusJob::Impl
                     stage = RetailCensusStage::WorldXModelPartClassification;
                     continue;
                 }
-                if (model.transReference != INLINE_POINTER)
-                {
-                    finishWorldXModel("Load_floatArray(trans)", true, false);
-                    return RetailCensusError::None;
-                }
                 const std::size_t count = static_cast<std::size_t>(childBones) * 4u;
+                if (model.transReference != INLINE_POINTER &&
+                    model.transReference != SHARED_POINTER)
+                {
+                    if (const RetailCensusError error =
+                            ResolvePriorWorldXModelArray(
+                                model.transReference, count, 4u,
+                                &RetailWorldXModel::trans,
+                                &RetailWorldXModel::transBlock4Offset,
+                                model.trans, model.transBlock4Offset,
+                                RetailCensusError::XModelArrayAliasInvalid);
+                        error != RetailCensusError::None)
+                    {
+                        return error;
+                    }
+                    ++report.recordsProcessed;
+                    stage = RetailCensusStage::WorldXModelPartClassification;
+                    continue;
+                }
                 const std::size_t bytes = count * 4u;
                 if (!Available(bytes))
                 {
@@ -2581,11 +3594,19 @@ struct RetailFastfileCensusJob::Impl
                 }
                 const int visit = visitRecord(bytes);
                 if (visit <= 0) return RetailCensusError::None;
-                for (std::size_t index = 0u; index < count; ++index)
+                try
                 {
-                    if (!std::isfinite(ReadF32(inflated.data() + cursor + index * 4u)))
-                        return RetailCensusError::XModelBoundsInvalid;
+                    model.trans.resize(count);
+                    for (std::size_t index = 0u; index < count; ++index)
+                    {
+                        const float value = ReadF32(
+                            inflated.data() + cursor + index * 4u);
+                        if (!std::isfinite(value))
+                            return RetailCensusError::XModelBoundsInvalid;
+                        model.trans[index] = value;
+                    }
                 }
+                catch (...) { return RetailCensusError::AllocationFailed; }
                 cursor += bytes;
                 ++report.recordsProcessed;
                 stage = RetailCensusStage::WorldXModelPartClassification;
@@ -2599,10 +3620,25 @@ struct RetailFastfileCensusJob::Impl
                     stage = RetailCensusStage::WorldXModelBaseMat;
                     continue;
                 }
-                if (model.partClassificationReference != INLINE_POINTER)
+                if (model.partClassificationReference != INLINE_POINTER &&
+                    model.partClassificationReference != SHARED_POINTER)
                 {
-                    finishWorldXModel("Load_byteArray(partClassification)", true, false);
-                    return RetailCensusError::None;
+                    if (const RetailCensusError error =
+                            ResolvePriorWorldXModelArray(
+                                model.partClassificationReference,
+                                model.numBones, 1u,
+                                &RetailWorldXModel::partClassification,
+                                &RetailWorldXModel::partClassificationBlock4Offset,
+                                model.partClassification,
+                                model.partClassificationBlock4Offset,
+                                RetailCensusError::XModelArrayAliasInvalid);
+                        error != RetailCensusError::None)
+                    {
+                        return error;
+                    }
+                    ++report.recordsProcessed;
+                    stage = RetailCensusStage::WorldXModelBaseMat;
+                    continue;
                 }
                 if (!Available(model.numBones))
                 {
@@ -2636,39 +3672,63 @@ struct RetailFastfileCensusJob::Impl
                 RetailWorldXModel &model = activeWorldXModel();
                 if (model.numBones != 0u)
                 {
-                    if (model.baseMatReference != INLINE_POINTER)
-                    {
-                        finishWorldXModel("Load_DObjAnimMatArray", true, false);
-                        return RetailCensusError::None;
-                    }
                     const std::size_t floatCount =
                         static_cast<std::size_t>(model.numBones) * 8u;
-                    const std::size_t bytes =
-                        static_cast<std::size_t>(model.numBones) * DOBJ_ANIM_MAT_BYTES;
-                    if (!Available(bytes))
+                    if (model.baseMatReference != INLINE_POINTER &&
+                        model.baseMatReference != SHARED_POINTER)
                     {
-                        blocked = true;
-                        return RetailCensusError::None;
-                    }
-                    if (recordVisited == 0u)
-                    {
-                        ZoneSpan span;
-                        if (const RetailCensusError error = Plan(4u, bytes, &span);
-                            error != RetailCensusError::None) return error;
-                        model.baseMatBlock4Offset = span.offset;
-                    }
-                    const int visit = visitRecord(bytes);
-                    if (visit <= 0) return RetailCensusError::None;
-                    for (std::size_t index = 0u; index < floatCount; ++index)
-                    {
-                        if (!std::isfinite(ReadF32(
-                                inflated.data() + cursor + index * 4u)))
+                        if (const RetailCensusError error =
+                                ResolvePriorWorldXModelArray(
+                                    model.baseMatReference, floatCount, 4u,
+                                    &RetailWorldXModel::baseMat,
+                                    &RetailWorldXModel::baseMatBlock4Offset,
+                                    model.baseMat,
+                                    model.baseMatBlock4Offset,
+                                    RetailCensusError::XModelArrayAliasInvalid);
+                            error != RetailCensusError::None)
                         {
-                            return RetailCensusError::XModelBoundsInvalid;
+                            return error;
                         }
+                        ++report.recordsProcessed;
+                        model.skeletonPrefixTraversed = true;
                     }
-                    cursor += bytes;
-                    ++report.recordsProcessed;
+                    else
+                    {
+                        const std::size_t bytes =
+                            static_cast<std::size_t>(model.numBones) *
+                            DOBJ_ANIM_MAT_BYTES;
+                        if (!Available(bytes))
+                        {
+                            blocked = true;
+                            return RetailCensusError::None;
+                        }
+                        if (recordVisited == 0u)
+                        {
+                            ZoneSpan span;
+                            if (const RetailCensusError error =
+                                    Plan(4u, bytes, &span);
+                                error != RetailCensusError::None) return error;
+                            model.baseMatBlock4Offset = span.offset;
+                        }
+                        const int visit = visitRecord(bytes);
+                        if (visit <= 0) return RetailCensusError::None;
+                        try
+                        {
+                            model.baseMat.resize(floatCount);
+                            for (std::size_t index = 0u;
+                                 index < floatCount; ++index)
+                            {
+                                const float value = ReadF32(
+                                    inflated.data() + cursor + index * 4u);
+                                if (!std::isfinite(value))
+                                    return RetailCensusError::XModelBoundsInvalid;
+                                model.baseMat[index] = value;
+                            }
+                        }
+                        catch (...) { return RetailCensusError::AllocationFailed; }
+                        cursor += bytes;
+                        ++report.recordsProcessed;
+                    }
                 }
                 model.skeletonPrefixTraversed = true;
                 if (model.surfacesReference != 0u)
@@ -3513,7 +4573,10 @@ struct RetailFastfileCensusJob::Impl
                 catch (...) { return RetailCensusError::AllocationFailed; }
                 if (!ValidPublishedName(image.name))
                     return RetailCensusError::ImageNameInvalid;
-                if (image.mapType == 0u && !image.name.starts_with(",$"))
+                // Map-type zero names are engine-owned placeholders. Retail
+                // data uses both ",$..." built-ins and comma-prefixed names
+                // such as ",spotlight_lensflare"; neither has an inline loaddef.
+                if (image.mapType == 0u && !image.name.starts_with(','))
                     return RetailCensusError::ImageNameInvalid;
                 cursor += bytes;
                 ++report.recordsProcessed;
@@ -3908,10 +4971,30 @@ struct RetailFastfileCensusJob::Impl
                 RetailWorldXModel &model = activeWorldXModel();
                 if (model.numBones != 0u)
                 {
-                    if (model.boneInfoReference != INLINE_POINTER)
-                        return RetailCensusError::XModelBoneInfoInvalid;
                     const std::size_t bytes =
                         static_cast<std::size_t>(model.numBones) * XBONE_INFO_BYTES;
+                    if (model.boneInfoReference != INLINE_POINTER &&
+                        model.boneInfoReference != SHARED_POINTER)
+                    {
+                        if (const RetailCensusError error =
+                                ResolvePriorWorldXModelArray(
+                                    model.boneInfoReference, bytes, 4u,
+                                    &RetailWorldXModel::boneInfoData,
+                                    &RetailWorldXModel::boneInfoBlock4Offset,
+                                    model.boneInfoData,
+                                    model.boneInfoBlock4Offset,
+                                    RetailCensusError::XModelArrayAliasInvalid);
+                            error != RetailCensusError::None)
+                        {
+                            return error;
+                        }
+                        model.boneInfoHash = Fnv1a32(
+                            std::span<const std::uint8_t>(model.boneInfoData));
+                        ++report.recordsProcessed;
+                        model.boneInfoTraversed = true;
+                        stage = RetailCensusStage::WorldXModelPhysPreset;
+                        continue;
+                    }
                     if (!Available(bytes))
                     {
                         blocked = true;
@@ -3926,6 +5009,14 @@ struct RetailFastfileCensusJob::Impl
                     }
                     const int visit = visitRecord(bytes);
                     if (visit <= 0) return RetailCensusError::None;
+                    try
+                    {
+                        model.boneInfoData.assign(
+                            inflated.begin() + static_cast<std::ptrdiff_t>(cursor),
+                            inflated.begin() + static_cast<std::ptrdiff_t>(
+                                cursor + bytes));
+                    }
+                    catch (...) { return RetailCensusError::AllocationFailed; }
                     for (std::size_t bone = 0u; bone < model.numBones; ++bone)
                     {
                         const std::uint8_t *record = inflated.data() + cursor +
@@ -3947,8 +5038,7 @@ struct RetailFastfileCensusJob::Impl
                             return RetailCensusError::XModelBoneInfoInvalid;
                     }
                     model.boneInfoHash = Fnv1a32(
-                        std::span<const std::uint8_t>(
-                            inflated.data() + cursor, bytes));
+                        std::span<const std::uint8_t>(model.boneInfoData));
                     cursor += bytes;
                     ++report.recordsProcessed;
                 }
@@ -4489,7 +5579,7 @@ struct RetailFastfileCensusJob::Impl
                     error != RetailCensusError::None) return error;
                 if (const RetailCensusError error = MapRegistryError(
                         registry.RegisterAsset(
-                            ASSET_TYPE_XMODEL, model.assetIndex,
+                            ASSET_TYPE_XMODEL, model.registrySourceIndex,
                             model.name, model.identity));
                     error != RetailCensusError::None) return error;
                 if (const RetailCensusError error = MapRegistryError(
@@ -4498,6 +5588,28 @@ struct RetailFastfileCensusJob::Impl
                     error != RetailCensusError::None) return error;
                 model.published = true;
                 model.boundaryInflatedOffset = static_cast<std::uint32_t>(cursor);
+                if (worldXModelNested)
+                {
+                    RetailWorldFxElemDef &elem = result.worldFxEffects[worldFxIndex]
+                        .elemDefs[worldFxElemIndex];
+                    if (worldXModelNestedFxVisualIndex >=
+                        elem.visualIdentities.size())
+                    {
+                        return RetailCensusError::FxElemVisualInvalid;
+                    }
+                    elem.visualIdentities[worldXModelNestedFxVisualIndex] =
+                        model.identity;
+                    ++worldFxVisualIndex;
+                    worldXModelNested = false;
+                    result.block0HighWaterAtBoundary = arenas.HighWater(0u);
+                    result.block4CursorAtBoundary = arenas.Cursor(4u);
+                    result.registryAssetCount = registry.AssetCount();
+                    result.registryAliasCount = registry.AliasCount();
+                    result.registryDefinedAliasCount =
+                        registry.DefinedAliasCount();
+                    stage = RetailCensusStage::WorldFxElemVisuals;
+                    continue;
+                }
                 ++result.completedAssetCount;
                 result.worldNextAssetIndex = model.assetIndex + 1u;
                 result.nextBodyIndex = result.worldNextAssetIndex;
