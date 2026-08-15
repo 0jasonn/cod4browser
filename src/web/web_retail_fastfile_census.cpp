@@ -297,6 +297,8 @@ const char *RetailCensusErrorString(RetailCensusError error) noexcept
     case RetailCensusError::XModelCollisionPayloadLimit: return "XModel collision payload exceeds limit";
     case RetailCensusError::XModelBoneInfoInvalid: return "invalid XModel bone info";
     case RetailCensusError::XModelPhysicsUnsupported: return "unsupported XModel physics dependency";
+    case RetailCensusError::PostXModelAssetUnsupported:
+        return "asset after the first XModel is not an inline technique set";
     case RetailCensusError::AllocationFailed: return "allocation failed";
     }
     return "unknown retail census error";
@@ -545,6 +547,11 @@ struct RetailFastfileCensusJob::Impl
         result.worldTechniqueSetBodiesEntered = static_cast<std::uint32_t>(
             result.worldTechniqueSets.size());
         result.worldNextAssetIndex = worldBodyIndex;
+        if (result.worldFirstXModel.published &&
+            worldBodyIndex > result.worldFirstXModel.assetIndex)
+        {
+            result.worldPostXModelTechniqueSetAssetIndex = worldBodyIndex;
+        }
         if (worldBodyIndex == 0u)
             result.worldFirstTechniqueSetBlock0Offset = span.offset;
         stage = RetailCensusStage::WorldTechniqueSet;
@@ -825,7 +832,8 @@ struct RetailFastfileCensusJob::Impl
                 if (mode == RetailCensusMode::WorldTechniqueSetPrefix ||
                     mode == RetailCensusMode::WorldXModelPrefix ||
                     mode == RetailCensusMode::WorldXSurfacePrefix ||
-                    mode == RetailCensusMode::WorldXModelDependencies)
+                    mode == RetailCensusMode::WorldXModelDependencies ||
+                    mode == RetailCensusMode::WorldPostXModelTechniqueSet)
                 {
                     try
                     {
@@ -975,7 +983,8 @@ struct RetailFastfileCensusJob::Impl
                     if (mode == RetailCensusMode::WorldTechniqueSetPrefix ||
                         mode == RetailCensusMode::WorldXModelPrefix ||
                         mode == RetailCensusMode::WorldXSurfacePrefix ||
-                        mode == RetailCensusMode::WorldXModelDependencies)
+                        mode == RetailCensusMode::WorldXModelDependencies ||
+                        mode == RetailCensusMode::WorldPostXModelTechniqueSet)
                     {
                         if (result.firstGfxWorldAssetIndex == UINT32_MAX)
                             return RetailCensusError::GfxWorldMissing;
@@ -1064,7 +1073,8 @@ struct RetailFastfileCensusJob::Impl
                 else if (mode == RetailCensusMode::WorldTechniqueSetPrefix ||
                     mode == RetailCensusMode::WorldXModelPrefix ||
                     mode == RetailCensusMode::WorldXSurfacePrefix ||
-                    mode == RetailCensusMode::WorldXModelDependencies)
+                    mode == RetailCensusMode::WorldXModelDependencies ||
+                    mode == RetailCensusMode::WorldPostXModelTechniqueSet)
                 {
                     try
                     {
@@ -1203,6 +1213,11 @@ struct RetailFastfileCensusJob::Impl
                         error != RetailCensusError::None) return error;
                     entry.published = true;
                     ++result.completedAssetCount;
+                    if (entry.assetIndex ==
+                        result.worldPostXModelTechniqueSetAssetIndex)
+                    {
+                        result.worldPostXModelTechniqueSetPublished = true;
+                    }
                     if (worldBodyIndex == 0u)
                     {
                         result.worldFirstTechniqueSetIdentity = entry.identity;
@@ -1221,6 +1236,21 @@ struct RetailFastfileCensusJob::Impl
                     {
                         result.nextBodyType = worldAssetTypes[nextIndex];
                         result.nextBodyReference = worldAssetReferences[nextIndex];
+                        if (result.worldFirstXModel.published &&
+                            entry.assetIndex > result.worldFirstXModel.assetIndex)
+                        {
+                            result.worldRegistryAliasCount = registry.AliasCount();
+                            result.worldRegistryDefinedAliasCount =
+                                registry.DefinedAliasCount();
+                            result.registryAssetCount = registry.AssetCount();
+                            result.registryAliasCount = registry.AliasCount();
+                            result.registryDefinedAliasCount =
+                                registry.DefinedAliasCount();
+                            result.unsupportedOperation = nullptr;
+                            stage = RetailCensusStage::AssetBoundary;
+                            complete = true;
+                            return RetailCensusError::None;
+                        }
                         if (result.nextBodyType == ASSET_TYPE_TECHNIQUE_SET &&
                             result.nextBodyReference == INLINE_POINTER)
                         {
@@ -1231,7 +1261,8 @@ struct RetailFastfileCensusJob::Impl
                         }
                         if ((mode == RetailCensusMode::WorldXModelPrefix ||
                              mode == RetailCensusMode::WorldXSurfacePrefix ||
-                             mode == RetailCensusMode::WorldXModelDependencies) &&
+                             mode == RetailCensusMode::WorldXModelDependencies ||
+                             mode == RetailCensusMode::WorldPostXModelTechniqueSet) &&
                             result.nextBodyType == ASSET_TYPE_XMODEL &&
                             result.nextBodyReference == INLINE_POINTER)
                         {
@@ -1656,7 +1687,8 @@ struct RetailFastfileCensusJob::Impl
                 if (model.surfacesReference != 0u)
                 {
                     if (mode != RetailCensusMode::WorldXSurfacePrefix &&
-                        mode != RetailCensusMode::WorldXModelDependencies)
+                        mode != RetailCensusMode::WorldXModelDependencies &&
+                        mode != RetailCensusMode::WorldPostXModelTechniqueSet)
                     {
                         finishWorldXModel("Load_XSurfaceArray", true, true);
                         return RetailCensusError::None;
@@ -1846,7 +1878,8 @@ struct RetailFastfileCensusJob::Impl
                         worldSurfaceIndex >= firstLod.surfaceIndex &&
                         worldSurfaceIndex - firstLod.surfaceIndex < firstLod.surfaceCount;
                     if (inFirstLod &&
-                        mode == RetailCensusMode::WorldXModelDependencies &&
+                        (mode == RetailCensusMode::WorldXModelDependencies ||
+                         mode == RetailCensusMode::WorldPostXModelTechniqueSet) &&
                         surface.vertCount <= MAX_RETAINED_RENDER_VERTICES &&
                         surface.triCount <= MAX_RETAINED_RENDER_TRIANGLES &&
                         retainedLodVertices <=
@@ -2129,7 +2162,8 @@ struct RetailFastfileCensusJob::Impl
                 if (model.materialHandlesReference == 0u)
                 {
                     model.materialHandlesTraversed = true;
-                    if (mode != RetailCensusMode::WorldXModelDependencies)
+                    if (mode != RetailCensusMode::WorldXModelDependencies &&
+                        mode != RetailCensusMode::WorldPostXModelTechniqueSet)
                     {
                         finishWorldXModel("Load_XModelCollSurfArray", true, false);
                         return RetailCensusError::None;
@@ -2175,7 +2209,8 @@ struct RetailFastfileCensusJob::Impl
                     model.materialIdentities.assign(model.surfaceCount, 0u);
                 }
                 catch (...) { return RetailCensusError::AllocationFailed; }
-                if (mode == RetailCensusMode::WorldXModelDependencies)
+                if (mode == RetailCensusMode::WorldXModelDependencies ||
+                    mode == RetailCensusMode::WorldPostXModelTechniqueSet)
                 {
                     worldMaterialIndex = 0u;
                     if (const RetailCensusError error = advanceWorldMaterials(stage);
@@ -2854,6 +2889,13 @@ struct RetailFastfileCensusJob::Impl
                 model.boundaryInflatedOffset = static_cast<std::uint32_t>(cursor);
                 ++result.completedAssetCount;
                 result.worldNextAssetIndex = model.assetIndex + 1u;
+                result.nextBodyIndex = result.worldNextAssetIndex;
+                if (result.nextBodyIndex < worldAssetTypes.size())
+                {
+                    result.nextBodyType = worldAssetTypes[result.nextBodyIndex];
+                    result.nextBodyReference =
+                        worldAssetReferences[result.nextBodyIndex];
+                }
                 result.block0HighWaterAtBoundary = arenas.HighWater(0u);
                 result.block4CursorAtBoundary = arenas.Cursor(4u);
                 result.worldRegistryAliasCount = registry.AliasCount();
@@ -2864,6 +2906,21 @@ struct RetailFastfileCensusJob::Impl
                 result.stoppedBeforeWorldXModelDependency = false;
                 result.stoppedBeforeDifferentWorldAssetType = false;
                 result.unsupportedOperation = nullptr;
+                if (mode == RetailCensusMode::WorldPostXModelTechniqueSet &&
+                    result.nextBodyIndex < worldAssetTypes.size() &&
+                    result.nextBodyType == ASSET_TYPE_TECHNIQUE_SET &&
+                    result.nextBodyReference == INLINE_POINTER)
+                {
+                    worldBodyIndex = result.nextBodyIndex;
+                    if (const RetailCensusError error = BeginWorldTechniqueSet(stage);
+                        error != RetailCensusError::None)
+                    {
+                        return error;
+                    }
+                    continue;
+                }
+                if (mode == RetailCensusMode::WorldPostXModelTechniqueSet)
+                    return RetailCensusError::PostXModelAssetUnsupported;
                 stage = RetailCensusStage::AssetBoundary;
                 complete = true;
                 return RetailCensusError::None;

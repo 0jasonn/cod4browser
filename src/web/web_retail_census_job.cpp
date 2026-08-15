@@ -492,7 +492,7 @@ EM_JS(
                 state: "ready",
                 stage: "asset-boundary",
                 path: "zone/english/killhouse.ff",
-                message: "Inventoried the map table and traversed the first XModel surface dependencies to its material boundary",
+                message: "Traversed the first XModel dependency chain and the next typed technique-set boundary",
                 fileSize: fileSize >>> 0,
                 sourceBytesRead: sourceBytesRead >>> 0,
                 sourceBytesConsumed,
@@ -522,6 +522,7 @@ EM_JS(
                 stoppedBeforeDifferentAssetType: Boolean(stoppedBeforeDifferentAssetType),
                 stoppedBeforeTechniqueDependency: Boolean(stoppedBeforeTechniqueDependency),
                 techniqueSets: [],
+                postXModelTechniqueSet: null,
                 firstXModel: null,
                 firstTechniqueSet: {
                     name: UTF8ToString(techniqueSetName),
@@ -550,6 +551,20 @@ EM_JS(
                 typesBeforeFirstGfxWorld: [],
             };
         }
+    });
+
+EM_JS(
+    void,
+    FinalizeRetailPostXModelTechniqueSet,
+    (uint32_t xmodelAssetIndex),
+    {
+        const inventory = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory;
+        if (!inventory) return;
+        const post = inventory.techniqueSets.find(
+            (entry) => entry.assetIndex > (xmodelAssetIndex >>> 0));
+        inventory.postXModelTechniqueSet = post
+            ? {...post, source: "generated-loader-after-first-xmodel"}
+            : null;
     });
 
 EM_JS(
@@ -1534,6 +1549,7 @@ void PublishReady()
     const auto &xmodel = world.worldFirstXModel;
     if (xmodel.headerTraversed)
     {
+        FinalizeRetailPostXModelTechniqueSet(xmodel.assetIndex);
         BeginRetailWorldXModel(
             xmodel.assetIndex,
             xmodel.name.c_str(),
@@ -1993,7 +2009,7 @@ WebRetailCensusFrameResult WebRetailCensusJob_Frame()
                 g_runtime.completionStatus = WebFsStatus::Pending;
                 g_runtime.completionBytes.clear();
                 if (const auto error = g_runtime.parser.BeginStreaming(
-                        RetailCensusMode::WorldXModelDependencies);
+                        RetailCensusMode::WorldPostXModelTechniqueSet);
                     error != RetailCensusError::None)
                 {
                     Fail("could not start world asset inventory", RetailCensusErrorString(error));

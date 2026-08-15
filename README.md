@@ -244,6 +244,21 @@ or backend failure preserves the bootstrap surface. This makes a real owned
 model silhouette visible, although it still uses the current startup sampler;
 it is not a GfxWorld/map render or playable scene.
 
+Milestones 28 and 29 resolve each retained first-LOD surface through its typed
+material and semantic-2 color-map identity, discover the exact IWI members in
+the user's base archives, and submit a bounded multi-draw preview. The owned
+first LOD contains two draws, 385 combined vertices, 828 indices, and two DXT1
+textures. Renderer recovery retains the shared geometry and every texture slot;
+this remains an isolated orthographic XModel preview rather than a map renderer.
+
+Milestone 30 resumes the generated top-level loader after the completed XModel
+and publishes exactly one additional typed boundary. Owned asset 13 is inline
+technique set `,sm2/mc_l_sm_r0c0n0s0`; all 34 technique pointers are null, so
+identity 20 and its table alias publish at inflated offset 67,893. The parser
+stops before another inline technique set at asset 14. Malformed input exposes
+no partial result, and a dependency-bearing fixture stops before the nested
+`MaterialTechnique` with the new alias undefined.
+
 See [docs/web-port.md](docs/web-port.md) for the pinned toolchain, build steps,
 current boundary, validation limits, and next milestone, and see
 [docs/fastfile-zone-inventory.md](docs/fastfile-zone-inventory.md) for the

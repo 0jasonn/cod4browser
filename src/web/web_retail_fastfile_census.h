@@ -131,6 +131,7 @@ enum class RetailCensusError : std::uint8_t
     XModelCollisionPayloadLimit,
     XModelBoneInfoInvalid,
     XModelPhysicsUnsupported,
+    PostXModelAssetUnsupported,
     AllocationFailed,
 };
 
@@ -154,6 +155,7 @@ enum class RetailCensusMode : std::uint8_t
     WorldXModelPrefix,
     WorldXSurfacePrefix,
     WorldXModelDependencies,
+    WorldPostXModelTechniqueSet,
 };
 
 enum class RetailCensusStage : std::uint8_t
@@ -528,12 +530,14 @@ struct RetailFastfileCensus
     std::vector<RetailWorldTechniqueSet> worldTechniqueSets;
     std::uint32_t worldTechniqueSetBodiesEntered = 0u;
     std::uint32_t worldNextAssetIndex = 0u;
+    std::uint32_t worldPostXModelTechniqueSetAssetIndex = UINT32_MAX;
     RetailWorldXModel worldFirstXModel;
     bool worldFirstTechniqueSetHeaderTraversed = false;
     bool worldFirstTechniqueSetPublished = false;
     bool stoppedBeforeWorldTechniqueDependency = false;
     bool stoppedBeforeDifferentWorldAssetType = false;
     bool stoppedBeforeWorldXModelDependency = false;
+    bool worldPostXModelTechniqueSetPublished = false;
     std::uint32_t inlineAssetReferences = 0u;
     std::uint32_t sharedAssetReferences = 0u;
     std::uint32_t aliasAssetReferences = 0u;
@@ -639,6 +643,9 @@ struct RetailFastfileCensus
 // WorldXModelDependencies continues through checked material/image dependencies,
 // collision triangles, bone info, and the first model's null physics references,
 // publishing the XModel alias only after the complete dependency chain succeeds.
+// WorldPostXModelTechniqueSet resumes the generated top-level loader after that
+// publication, enters exactly one following inline MaterialTechniqueSet, and
+// stops before the next asset body or its first nested MaterialTechnique.
 // It retains serialized vertex/index bytes only for a renderer-bounded first
 // surface; decoding and graphics submission remain separate engine-side work.
 // Native D3D9 creation is never invoked.

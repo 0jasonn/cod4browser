@@ -1211,12 +1211,37 @@ This is still one isolated, orthographically fitted first-LOD XModel. It does
 not add model placement, a perspective camera, lighting, general XModel
 streaming, or `GfxWorld` rendering.
 
-## Next boundary: Milestone 30
+## Milestone 30: first post-XModel technique set (complete)
 
-M30 should resume the generated world-loader path after the completed XModel
-dependency and inventory the next required inline `GfxWorld` dependency class.
-It should publish one additional typed loader boundary with explicit limits,
-without turning the isolated XModel renderer into a map renderer prematurely.
+The generated world-loader traversal now resumes after publishing the complete
+asset-12 XModel instead of treating that publication as the terminal parser
+state. A separate census mode reads the next table record, requires an inline
+type-5 `MaterialTechniqueSet`, reserves its exact block-4 table cell, and reuses
+the checked 148-byte technique-set loader for exactly one body. It stops before
+asset 14 or before the first nested `MaterialTechnique`; it does not loop into a
+second XModel or reinterpret bytes from another asset class.
+
+The owned asset 13 is `,sm2/mc_l_sm_r0c0n0s0`. Its world-vertex format and
+remap token are zero, and all 34 technique pointers are null, so the parser can
+unwind both zone frames, register identity 20, and publish the reserved alias.
+Its body ends at inflated offset 67,893. Block-0 high-water remains 352 bytes,
+block-4 advances to 38,134, and the registry is 20/20 defined. The next untouched
+record is another inline technique set at asset 14.
+
+Malformed post-XModel headers fail without making the previously traversed
+prefix public. A freely generated dependency-bearing fixture keeps the XModel
+published but leaves the new alias undefined and stops before
+`Load_MaterialTechnique`. Browser lifecycle output identifies the post-model
+record separately from the leading run. No new renderer work, proprietary
+payload retention, or map claim is part of this milestone.
+
+## Next boundary: Milestone 31
+
+M31 should enter asset 14 and generalize the checked post-XModel
+technique-set loader across the consecutive zero-dependency run, stopping at
+the first nested technique or different top-level type. It should record the
+exact owned run and next required inline asset class without turning the
+isolated XModel preview into a map renderer prematurely.
 
 Reaching `GfxWorld` still requires typed loaders for every intervening inline
 asset class; geometry, lightmaps, visibility, and camera state remain separate

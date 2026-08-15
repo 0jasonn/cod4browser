@@ -263,6 +263,10 @@ globalThis.addEventListener("kisakcod:retail-census", (event) => {
     runtime.retailCensus = structuredClone(event.detail);
     if (event.detail.state === "ready") {
         const firstXModel = event.detail.worldInventory.firstXModel;
+        const postXModelTechniqueSet =
+            event.detail.worldInventory.postXModelTechniqueSet;
+        const publishedTechniqueSets = event.detail.worldInventory.techniqueSets
+            .filter((entry) => entry.published).length;
         appendLog(
             `[kisakcod-web] Counted ${event.detail.assetCount.toLocaleString()} ` +
             `code_post_gfx assets; material ${event.detail.materialName} selected ` +
@@ -270,7 +274,7 @@ globalThis.addEventListener("kisakcod:retail-census", (event) => {
             `Killhouse contains ${event.detail.worldInventory.assetCount.toLocaleString()} ` +
             `assets; its first GfxWorld is table index ` +
             `${event.detail.worldInventory.firstGfxWorldAssetIndex}. ` +
-            `Published ${event.detail.worldInventory.completedAssetCount} consecutive ` +
+            `Published ${publishedTechniqueSets} bounded ` +
             `map technique sets, then traversed XModel ${firstXModel?.name ?? "unknown"} ` +
             `(${firstXModel?.totals?.vertices ?? 0} vertices, ` +
             `${firstXModel?.totals?.triangles ?? 0} triangles, ` +
@@ -278,6 +282,11 @@ globalThis.addEventListener("kisakcod:retail-census", (event) => {
             `${firstXModel?.materials?.length ?? 0} inline materials, and ` +
             `${firstXModel?.totals?.collisionTriangles ?? 0} collision triangles) ` +
             `and published its checked dependency boundary. ` +
+            (postXModelTechniqueSet?.published
+                ? `M30 also published post-model technique set ` +
+                    `${postXModelTechniqueSet.name} at asset ` +
+                    `${postXModelTechniqueSet.assetIndex}. `
+                : `The post-model technique set remains unpublished. `) +
             (firstXModel?.renderSurface?.state === "ready"
                 ? `WebGL2 is now drawing retail surface ` +
                     `${firstXModel.renderSurface.surfaceIndex} ` +

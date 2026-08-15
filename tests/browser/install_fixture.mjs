@@ -262,8 +262,8 @@ export function createSyntheticRetailCensusFastfile()
     ]);
 }
 
-// Freely generated fixture for the M21 table inventory through the M26 first
-// XModel dependency publication. It contains no retail bytes.
+// Freely generated fixture for the M21 table inventory through the M30 first
+// post-XModel technique-set publication. It contains no retail bytes.
 export function createSyntheticWorldInventoryFastfile({
     includeWorld = true,
     invalidTechniqueSet = false,
@@ -278,6 +278,8 @@ export function createSyntheticWorldInventoryFastfile({
     invalidXModelCollisionBounds = false,
     invalidXModelBoneInfo = false,
     unsupportedXModelPhysPreset = false,
+    invalidPostXModelTechniqueSet = false,
+    postXModelTechniqueDependency = false,
     externalColorMap = true,
     colorMapName = "synthetic_engine_asset",
     secondExternalColorMap = false,
@@ -296,7 +298,7 @@ export function createSyntheticWorldInventoryFastfile({
         [5, 0xffff_ffff],
         [5, 0xffff_ffff],
         [3, 0xffff_ffff],
-        [2, 0xffff_ffff],
+        [5, 0xffff_ffff],
         [31, 0xffff_ffff],
         [includeWorld ? 16 : 31, 0xffff_ffff],
         [32, 0],
@@ -562,6 +564,17 @@ export function createSyntheticWorldInventoryFastfile({
     setF32(boneInfo, 20, 1);
     setF32(boneInfo, 36, 3);
     inflated.push(...boneInfo);
+    const postXModelTechniqueSet = new Array(148).fill(0);
+    setU32(postXModelTechniqueSet, 0, 0xffff_ffff);
+    if (invalidPostXModelTechniqueSet) postXModelTechniqueSet[5] = 1;
+    if (postXModelTechniqueDependency) {
+        setU32(postXModelTechniqueSet, 12 + 4 * 4, 0xffff_ffff);
+    }
+    inflated.push(
+        ...postXModelTechniqueSet,
+        ...Buffer.from(",web/mc_l_sm_r0c0n0s0", "ascii"),
+        0,
+    );
     const compressed = deflateSync(Uint8Array.from(inflated), { level: 9 });
     return Uint8Array.from([
         0x49, 0x57, 0x66, 0x66, 0x75, 0x31, 0x30, 0x30,

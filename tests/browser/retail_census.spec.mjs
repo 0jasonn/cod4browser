@@ -388,7 +388,7 @@ test("publishes one retail material and binds its resolved image", async ({ page
             path: "zone/english/killhouse.ff",
             assetCount: 7,
             inflatedPrefixBytes: 131,
-            assetTableOrderHash: 0x7cbd_671b,
+            assetTableOrderHash: 0x32e4_9114,
             firstGfxWorldAssetIndex: 5,
             firstGfxWorldReference: 0xffff_ffff,
             assetsBeforeFirstGfxWorld: 5,
@@ -400,14 +400,14 @@ test("publishes one retail material and binds its resolved image", async ({ page
             },
             firstBodyType: 5,
             firstBodyReference: 0xffff_ffff,
-            nextBodyIndex: 2,
-            nextBodyType: 3,
+            nextBodyIndex: 4,
+            nextBodyType: 31,
             nextBodyReference: 0xffff_ffff,
             block0HighWaterAtBoundary: 352,
-            block4CursorAtBoundary: 928,
+            block4CursorAtBoundary: 950,
             stoppedBeforeAssetBody: false,
-            assetBodiesEntered: 2,
-            completedAssetCount: 3,
+            assetBodiesEntered: 3,
+            completedAssetCount: 4,
             stoppedBeforeDifferentAssetType: false,
             stoppedBeforeTechniqueDependency: false,
             techniqueSets: [
@@ -439,7 +439,29 @@ test("publishes one retail material and binds its resolved image", async ({ page
                     identity: 2,
                     published: true,
                 },
+                {
+                    assetIndex: 3,
+                    name: ",web/mc_l_sm_r0c0n0s0",
+                    worldVertFormat: 0,
+                    remapReference: 0,
+                    block0Offset: 0,
+                    nameBlock4Offset: 928,
+                    boundaryInflatedOffset: 2517,
+                    firstTechniqueSlot: 0xffff_ffff,
+                    firstTechniqueReference: 0,
+                    references: { null: 34, inline: 0, shared: 0, alias: 0 },
+                    identity: 7,
+                    published: true,
+                },
             ],
+            postXModelTechniqueSet: {
+                assetIndex: 3,
+                name: ",web/mc_l_sm_r0c0n0s0",
+                identity: 7,
+                published: true,
+                references: { null: 34, inline: 0, shared: 0, alias: 0 },
+                source: "generated-loader-after-first-xmodel",
+            },
             firstTechniqueSet: {
                 name: ",web/mc_l_sm_r0c0s0",
                 worldVertFormat: 0,
@@ -451,8 +473,8 @@ test("publishes one retail material and binds its resolved image", async ({ page
                 firstTechniqueReference: 0,
                 references: { null: 34, inline: 0, shared: 0, alias: 0 },
                 identity: 1,
-                registryAliasCount: 6,
-                registryDefinedAliasCount: 6,
+                registryAliasCount: 7,
+                registryDefinedAliasCount: 7,
                 published: true,
                 stoppedBeforeDependency: false,
                 unsupportedOperation: "",
@@ -597,17 +619,15 @@ test("publishes one retail material and binds its resolved image", async ({ page
                 }],
             },
             typeCounts: [
-                { type: 2, name: "xanim", count: 1 },
                 { type: 3, name: "xmodel", count: 1 },
-                { type: 5, name: "techset", count: 2 },
+                { type: 5, name: "techset", count: 3 },
                 { type: 16, name: "gfx_map", count: 1 },
                 { type: 31, name: "rawfile", count: 1 },
                 { type: 32, name: "stringtable", count: 1 },
             ],
             typesBeforeFirstGfxWorld: [
-                { type: 2, name: "xanim", count: 1 },
                 { type: 3, name: "xmodel", count: 1 },
-                { type: 5, name: "techset", count: 2 },
+                { type: 5, name: "techset", count: 3 },
                 { type: 31, name: "rawfile", count: 1 },
             ],
         },
@@ -1569,4 +1589,91 @@ test("an invalid later map technique-set header exposes no partial prefix", asyn
         failClosed: true,
     });
     expect(census.worldInventory).toBeUndefined();
+});
+
+test("publishes the first typed technique set after the XModel", async ({ page }, testInfo) => {
+    await importInstall(page, testInfo, "m30-post-xmodel-techset");
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
+        { timeout: 30_000 },
+    ).toBe("ready");
+    const world = await page.evaluate(
+        () => structuredClone(
+            globalThis.__KISAKCOD_WEB__.retailCensus.worldInventory,
+        ),
+    );
+    expect(world).toMatchObject({
+        completedAssetCount: 4,
+        nextBodyIndex: 4,
+        nextBodyType: 31,
+        postXModelTechniqueSet: {
+            assetIndex: 3,
+            name: ",web/mc_l_sm_r0c0n0s0",
+            firstTechniqueSlot: 0xffff_ffff,
+            references: { null: 34, inline: 0, shared: 0, alias: 0 },
+            identity: 7,
+            published: true,
+            source: "generated-loader-after-first-xmodel",
+        },
+        firstXModel: { assetIndex: 2, identity: 6, published: true },
+    });
+});
+
+test("a malformed post-XModel technique set fails without publishing the prior prefix", async ({ page }, testInfo) => {
+    const overrides = new Map([[
+        "zone/english/killhouse.ff",
+        createSyntheticWorldInventoryFastfile({ invalidPostXModelTechniqueSet: true }),
+    ]]);
+    await importInstall(page, testInfo, "m30-invalid-post-xmodel-techset", { overrides });
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
+        { timeout: 30_000 },
+    ).toBe("failed");
+    const census = await page.evaluate(
+        () => structuredClone(globalThis.__KISAKCOD_WEB__.retailCensus),
+    );
+    expect(census).toMatchObject({
+        state: "failed",
+        path: "zone/english/killhouse.ff",
+        stage: "failed",
+        error: "unsupported technique-set layout",
+        completedAssetCount: 0,
+        failClosed: true,
+    });
+    expect(census.worldInventory).toBeUndefined();
+});
+
+test("a dependent post-XModel technique set stops before its nested technique", async ({ page }, testInfo) => {
+    const overrides = new Map([[
+        "zone/english/killhouse.ff",
+        createSyntheticWorldInventoryFastfile({ postXModelTechniqueDependency: true }),
+    ]]);
+    await importInstall(page, testInfo, "m30-dependent-post-xmodel-techset", { overrides });
+    await expect.poll(
+        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
+        { timeout: 30_000 },
+    ).toBe("ready");
+    const world = await page.evaluate(
+        () => structuredClone(
+            globalThis.__KISAKCOD_WEB__.retailCensus.worldInventory,
+        ),
+    );
+    expect(world).toMatchObject({
+        completedAssetCount: 3,
+        nextBodyIndex: 3,
+        nextBodyType: 5,
+        firstTechniqueSet: {
+            registryAliasCount: 7,
+            registryDefinedAliasCount: 6,
+            unsupportedOperation: "Load_MaterialTechnique",
+        },
+        postXModelTechniqueSet: {
+            assetIndex: 3,
+            identity: 0,
+            published: false,
+            firstTechniqueSlot: 4,
+            references: { null: 33, inline: 1, shared: 0, alias: 0 },
+        },
+        firstXModel: { identity: 6, published: true },
+    });
 });

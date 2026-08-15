@@ -605,6 +605,25 @@ std::vector<std::uint8_t> BuildWorldXModelDependenciesInflated(
     return bytes;
 }
 
+std::vector<std::uint8_t> BuildWorldPostXModelTechniqueSetInflated(
+    bool invalidHeader = false,
+    bool withTechniqueDependency = false)
+{
+    std::vector<std::uint8_t> bytes = BuildWorldXModelDependenciesInflated();
+    constexpr std::size_t assetTableOffset = 75u;
+    constexpr std::size_t postXModelAssetIndex = 3u;
+    SetU32(bytes, assetTableOffset + postXModelAssetIndex * 8u, 5u);
+
+    std::vector<std::uint8_t> techniqueSet(148u, 0u);
+    SetU32(techniqueSet, 0u, 0xffffffffu);
+    if (invalidHeader) techniqueSet[5u] = 1u;
+    if (withTechniqueDependency)
+        SetU32(techniqueSet, 12u + 4u * 4u, 0xffffffffu);
+    bytes.insert(bytes.end(), techniqueSet.begin(), techniqueSet.end());
+    AppendString(bytes, ",web/mc_l_sm_r0c0n0s0");
+    return bytes;
+}
+
 kisak::fastfile::RetailFastfileCensus Run(
     const std::vector<std::uint8_t> &file,
     std::size_t chunkBytes = 7u,
@@ -914,6 +933,72 @@ void TestWorldXModelDependenciesBoundary()
         "unsupported inline physics keeps the XModel alias unpublished");
 }
 
+void TestWorldPostXModelTechniqueSetBoundary()
+{
+    using namespace kisak::fastfile;
+    const auto result = Run(
+        BuildFile(BuildWorldPostXModelTechniqueSetInflated()),
+        7u, 2u, 3u, RetailCensusMode::WorldPostXModelTechniqueSet);
+    Require(result.worldFirstXModel.published &&
+        result.worldPostXModelTechniqueSetAssetIndex == 3u &&
+        result.worldPostXModelTechniqueSetPublished &&
+        result.worldTechniqueSets.size() == 3u,
+        "M30 enters one typed technique set after the published XModel");
+    const RetailWorldTechniqueSet &post = result.worldTechniqueSets.back();
+    Require(post.assetIndex == 3u &&
+        post.name == ",web/mc_l_sm_r0c0n0s0" &&
+        post.nullTechniqueReferences == 34u &&
+        post.inlineTechniqueReferences == 0u &&
+        post.identity == 7u && post.published &&
+        result.completedAssetCount == 4u &&
+        result.registryAssetCount == 7u &&
+        result.worldRegistryAliasCount == 7u &&
+        result.worldRegistryDefinedAliasCount == 7u &&
+        result.nextBodyIndex == 4u && result.nextBodyType == 31u &&
+        result.nextBodyReference == 0xffffffffu &&
+        result.unsupportedOperation == nullptr,
+        "M30 publishes the zero-dependency set atomically and stops before asset four");
+
+    RetailFastfileCensusJob malformed;
+    Require(malformed.BeginStreaming(RetailCensusMode::WorldPostXModelTechniqueSet) ==
+        RetailCensusError::None, "malformed M30 fixture starts");
+    const auto malformedFile = BuildFile(
+        BuildWorldPostXModelTechniqueSetInflated(true));
+    Require(malformed.FeedSource(malformedFile, true) == RetailCensusError::None,
+        "malformed M30 source is accepted");
+    while (malformed.Progress() == RetailCensusProgress::Running)
+        (void)malformed.Step();
+    RetailFastfileCensus unavailable;
+    unavailable.completedAssetCount = 99u;
+    Require(malformed.Failure() == RetailCensusError::TechniqueSetLayoutUnsupported &&
+        !malformed.TakeResult(unavailable) && unavailable.completedAssetCount == 99u,
+        "malformed post-XModel set cannot expose the prior dependency prefix");
+
+    RetailFastfileCensusJob wrongType;
+    Require(wrongType.BeginStreaming(RetailCensusMode::WorldPostXModelTechniqueSet) ==
+        RetailCensusError::None, "wrong-type M30 fixture starts");
+    const auto wrongTypeFile = BuildFile(BuildWorldXModelDependenciesInflated());
+    Require(wrongType.FeedSource(wrongTypeFile, true) == RetailCensusError::None,
+        "wrong-type M30 source is accepted");
+    while (wrongType.Progress() == RetailCensusProgress::Running)
+        (void)wrongType.Step();
+    Require(wrongType.Failure() == RetailCensusError::PostXModelAssetUnsupported,
+        "M30 rejects a non-technique-set body after the first XModel");
+
+    const auto dependency = Run(
+        BuildFile(BuildWorldPostXModelTechniqueSetInflated(false, true)),
+        7u, 2u, 3u, RetailCensusMode::WorldPostXModelTechniqueSet);
+    const RetailWorldTechniqueSet &blocked = dependency.worldTechniqueSets.back();
+    Require(dependency.worldFirstXModel.published && !blocked.published &&
+        blocked.firstTechniqueSlot == 4u &&
+        blocked.inlineTechniqueReferences == 1u &&
+        dependency.completedAssetCount == 3u &&
+        dependency.worldRegistryAliasCount == 7u &&
+        dependency.worldRegistryDefinedAliasCount == 6u &&
+        std::string(dependency.unsupportedOperation) == "Load_MaterialTechnique",
+        "M30 stops conservatively before a nested technique body");
+}
+
 void TestPositiveIncrementalCensus()
 {
     const auto result = Run(BuildFile());
@@ -1159,8 +1244,8 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
     std::ifstream input(path, std::ios::binary);
     Require(input.good(), "owned world surface diagnostic opens fastfile");
     RetailFastfileCensusJob job;
-    Require(job.BeginStreaming(RetailCensusMode::WorldXModelDependencies) ==
-        RetailCensusError::None, "owned world surface diagnostic starts");
+    Require(job.BeginStreaming(RetailCensusMode::WorldPostXModelTechniqueSet) ==
+        RetailCensusError::None, "owned M30 diagnostic starts");
     std::vector<std::uint8_t> chunk(RETAIL_CENSUS_MAX_STEP_BYTES);
     std::uint32_t steps = 0u;
     while (job.Progress() == RetailCensusProgress::Running && steps++ < 10000u)
@@ -1188,6 +1273,23 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
     RetailFastfileCensus result;
     Require(job.TakeResult(result), "owned world surface result is available");
     const RetailWorldXModel &model = result.worldFirstXModel;
+    const auto &post = result.worldTechniqueSets.back();
+    std::cout << "owned M30 technique set: index=" << post.assetIndex
+              << " name=" << post.name
+              << " identity=" << post.identity
+              << " published=" << post.published
+              << " boundary=" << post.boundaryInflatedOffset
+              << " refs=" << post.nullTechniqueReferences << ','
+              << post.inlineTechniqueReferences << ','
+              << post.sharedTechniqueReferences << ','
+              << post.aliasTechniqueReferences
+              << " registry=" << result.worldRegistryAliasCount << '/'
+              << result.worldRegistryDefinedAliasCount
+              << " next=" << result.nextBodyIndex << ':'
+              << result.nextBodyType << ":0x" << std::hex
+              << result.nextBodyReference << std::dec
+              << " block0=" << result.block0HighWaterAtBoundary
+              << " block4=" << result.block4CursorAtBoundary << '\n';
     std::cout << "owned M26 registry: model-identity=" << model.identity
               << " block0=" << result.block0HighWaterAtBoundary
               << " assets=" << result.registryAssetCount
@@ -1205,11 +1307,21 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
         model.collisionPayloadBytes == 4696u &&
         model.boundaryInflatedOffset == 67723u &&
         result.block0HighWaterAtBoundary == 352u &&
-        result.block4CursorAtBoundary == 38112u &&
-        result.registryAssetCount == 19u &&
-        result.worldRegistryAliasCount == 19u &&
-        result.worldRegistryDefinedAliasCount == 19u,
-        "owned M26 profile publishes the exact first XModel dependency chain");
+        result.block4CursorAtBoundary == 38134u &&
+        result.registryAssetCount == 20u &&
+        result.worldRegistryAliasCount == 20u &&
+        result.worldRegistryDefinedAliasCount == 20u,
+        "owned M30 profile preserves the XModel and publishes the next technique set");
+    Require(post.assetIndex == 13u &&
+        post.name == ",sm2/mc_l_sm_r0c0n0s0" &&
+        post.nullTechniqueReferences == 34u &&
+        post.identity == 20u && post.published &&
+        post.boundaryInflatedOffset == 67893u &&
+        result.worldPostXModelTechniqueSetAssetIndex == 13u &&
+        result.worldPostXModelTechniqueSetPublished &&
+        result.nextBodyIndex == 14u && result.nextBodyType == 5u &&
+        result.nextBodyReference == 0xffffffffu,
+        "owned M30 profile matches the first post-XModel typed boundary");
     const RetailXSurface &renderCandidate = model.surfaces.front();
     WebEngineConvertedXModelSurface converted;
     Require(renderCandidate.renderPayloadRetained &&
@@ -1262,7 +1374,12 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
               << " vertices=" << drawList.renderer.vertices.size()
               << " indices=" << drawList.renderer.indices.size()
               << " axes=" << static_cast<unsigned>(drawList.horizontalAxis)
-              << ',' << static_cast<unsigned>(drawList.verticalAxis) << '\n';
+               << ',' << static_cast<unsigned>(drawList.verticalAxis) << '\n';
+    std::cout << "owned M30 next body: index=" << result.nextBodyIndex
+              << " type=" << result.nextBodyType
+              << " (" << RetailAssetTypeName(result.nextBodyType) << ')'
+              << " reference=0x" << std::hex << result.nextBodyReference
+              << std::dec << '\n';
     for (std::size_t textureSlot = 0u;
          textureSlot < drawList.textures.size(); ++textureSlot)
     {
@@ -1323,6 +1440,7 @@ int main(int argc, char **argv)
     TestWorldXModelPrefixBoundary();
     TestWorldXSurfacePrefixBoundary();
     TestWorldXModelDependenciesBoundary();
+    TestWorldPostXModelTechniqueSetBoundary();
     TestMalformedPrefixRecords();
     TestTechniqueTraversalFailures();
     TestEnvelopeAndAtomicity();

@@ -1095,3 +1095,31 @@ and discards fully transparent sampled texels. Typed material bindings also
 retain the parsed sampler byte; both owned lamp slots report state 11 and are
 therefore filtered and repeated from their retail metadata rather than from a
 lamp-specific renderer rule.
+
+## Milestone 30 first post-XModel technique set (complete)
+
+Traversal now returns to `Load_XAssetHeader` after the complete asset-12
+XModel and enters exactly one following inline type-5 record. The same bounded
+`MaterialTechniqueSet` loader used for the leading map prefix owns the result;
+the M30 mode stops after this record rather than falling through into arbitrary
+later bodies.
+
+| Boundary field | Owned F.N.G. value |
+| --- | --- |
+| Asset index / type | 13 / inline `techset` |
+| Name | `,sm2/mc_l_sm_r0c0n0s0` |
+| World vertex format / remap | 0 / null |
+| Technique pointers | 34 null |
+| Identity / alias | 20 / published |
+| Inflated boundary | 67,893 |
+| Block-0 high-water | 352 |
+| Block-4 cursor | 38,134 |
+| Registry publication | 20 aliases reserved; 20 defined |
+| Next body | inline `techset` at asset index 14 |
+
+The table cell is reserved before the body is entered and published only after
+the complete header, bounded name, pointer classification, and zone-frame
+unwind succeed. A malformed record makes the whole result unavailable. A
+synthetic set with one inline dependency stops before `Load_MaterialTechnique`,
+preserving the published XModel but leaving the asset-13 alias undefined. No
+retail body bytes or derived asset payload are stored in the repository.
