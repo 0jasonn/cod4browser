@@ -1235,6 +1235,79 @@ the published material's checked texture-table allocation. Resolution remains
 strictly typed and bounded, and malformed generated aliases publish no partial
 world result.
 
-No second-model geometry is retained or rendered. M35 should store completed
-models in a bounded collection and reuse this full dependency path for the
-consecutive XModels beginning at asset 22.
+No second-model geometry is retained or rendered.
+
+## Milestone 35 bounded consecutive XModel collection (complete)
+
+The first/second result split has been replaced by a bounded `worldXModels`
+collection. The generated loader uses one active collection index and repeats
+the complete M34 dependency path while consecutive inline type-3 assets remain.
+Entry zero is the initial renderer selection, while every eligible model may
+retain packed first-LOD vertex/index bytes under the aggregate ceiling.
+
+The owned asset-22 result is:
+
+| Boundary field | Owned F.N.G. value |
+| --- | --- |
+| Model / identity | `com_steel_ladder_top` / 33 |
+| Collection entries | 3 (assets 12, 21, and 22) |
+| Material identities | 31, 31, 31, 31 |
+| Surfaces / vertices / triangles | 4 / 660 / 420 |
+| Rigid lists / surface payload | 4 / 25,008 bytes |
+| Collision surfaces / triangles | 1 / 228 |
+| Collision payload | 10,988 bytes |
+| Bone-info hash | `0x499d1ece` |
+| Physics dependencies | null preset and geom list; complete |
+| Inflated publication boundary | 148,660 |
+| Block-4 cursor | 66,676 |
+| Registry assets / aliases | 33 / 34 reserved and defined |
+| Next body | inline technique-set asset 23 |
+
+Asset 22 reuses the material published for asset 21, so it adds no material or
+image bodies. Eligible later models now retain bounded first-LOD render payloads
+under one aggregate ceiling. Generated coverage
+uses a third zero-surface model to prove repeatable completion, rejects invalid
+third-model bounds without publishing a partial collection, and enforces an
+explicit `maxWorldXModels` ceiling.
+
+## Milestone 36 reusable XModel loader dispatch (complete)
+
+The canonical `WorldXModelLoader` mode now drives one bounded complete XModel
+operation from the shared supported-asset dispatcher. It handles consecutive
+models and models separated by technique-set runs; `WorldXModelCollection`
+remains an alias for compatibility with earlier callers. Each result records
+whether renderer payload is available and whether it is currently selected;
+entry zero is only the initial browser policy.
+
+The launcher selector lists retained models and switches the renderer-owned
+draw list through a narrow exported operation without reparsing the fastfile.
+Material and image aliases that point at an earlier model are copied into
+deduplicated resolved catalogs for the referring model, so the new material
+queue can load the selected model's typed color maps. A shared 16 MiB retention ceiling
+bounds the collection, and models beyond the available budget remain valid
+inventory entries but are disabled in the selector.
+
+Generated coverage exercises `XModel -> technique sets -> XModel -> technique
+set`, in addition to the existing three-model repeat, zero-surface, malformed
+third-model, and collection-ceiling cases. This proves that XModel completion
+returns to a reusable dispatcher rather than a first/second/consecutive special
+case.
+
+The owned traversal now enters asset 23 after publishing all three reached
+XModels:
+
+| Field | Value |
+| --- | --- |
+| Asset / name | 23 / `sm2/mc_unlit` |
+| Technique references | 16 null / 2 inline / 0 shared / 16 alias |
+| Header/name boundary | 148,821 inflated bytes |
+| Block-4 cursor | 66,689 |
+| Registry assets | 33 published |
+| Registry aliases | 35 reserved / 34 defined |
+| Stop | first nested `Load_MaterialTechnique` |
+
+Asset 23 remains unpublished, so no partial technique set or alias escapes the
+dependency boundary. M37 should implement the reusable nested technique loader
+and return to the same top-level dispatcher. Full support for the 315 pre-world
+XModels cannot be claimed until the intervening asset classes can also be
+traversed to reach them.

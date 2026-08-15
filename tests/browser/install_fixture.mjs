@@ -648,8 +648,23 @@ export function createSyntheticWorldInventoryFastfile({
         inflated.push(...surface);
     }
     for (let index = 0; index < 3; ++index) {
-        for (let byte = 0; byte < 3 * 32; ++byte) {
-            inflated.push((0x80 + byte + index) & 0xff);
+        const offset = index * 1.5;
+        const packedVertices = [
+            [offset - 0.5, -0.5, 0, 0x0000, 0x0000],
+            [offset + 0.5, -0.5, 0, 0x3c00, 0x0000],
+            [offset, 0.5, 0, 0x0000, 0x3c00],
+        ];
+        for (const [x, y, z, u, v] of packedVertices) {
+            const vertex = new Array(32).fill(0);
+            setF32(vertex, 0, x);
+            setF32(vertex, 4, y);
+            setF32(vertex, 8, z);
+            setF32(vertex, 12, 1);
+            setU32(vertex, 16, 0xffff_ffff);
+            setU32(vertex, 20, (u << 16) | v);
+            setU32(vertex, 24, 0x7f7f_ffff);
+            setU32(vertex, 28, 0x7f7f_ffff);
+            inflated.push(...vertex);
         }
         appendU16(inflated, 0);
         appendU16(inflated, 3);

@@ -16,7 +16,15 @@
         <section class="viewport-panel" aria-labelledby="renderer-title">
             <header class="panel-heading">
                 <h1 id="renderer-title">Renderer</h1>
-                <span id="frame-counter">Frame &mdash;</span>
+                <div class="renderer-controls">
+                    <label class="xmodel-control" for="xmodel-select">
+                        <span>XModel</span>
+                        <select id="xmodel-select" disabled>
+                            <option value="">Waiting for models</option>
+                        </select>
+                    </label>
+                    <span id="frame-counter">Frame &mdash;</span>
+                </div>
             </header>
             <div class="canvas-wrap">
                 <canvas id="game-canvas" width="960" height="540" tabindex="0">

@@ -408,7 +408,7 @@ test("publishes one retail material and binds its resolved image", async ({ page
             stoppedBeforeAssetBody: false,
             assetBodiesEntered: 4,
             completedAssetCount: 6,
-            stoppedBeforeDifferentAssetType: false,
+            stoppedBeforeDifferentAssetType: true,
             stoppedBeforeTechniqueDependency: false,
             techniqueSets: [
                 {
@@ -499,7 +499,7 @@ test("publishes one retail material and binds its resolved image", async ({ page
                 nextBodyIndex: 6,
                 nextBodyType: 16,
                 nextBodyReference: 0xffff_ffff,
-                stoppedBeforeDifferentAssetType: false,
+                stoppedBeforeDifferentAssetType: true,
                 stoppedBeforeTechniqueDependency: false,
             },
             firstTechniqueSet: {
@@ -658,29 +658,31 @@ test("publishes one retail material and binds its resolved image", async ({ page
                     traversed: true,
                 }],
             },
-            secondXModel: {
-                assetIndex: 5,
-                name: "web/xmodel_second",
-                numBones: 1,
-                numRootBones: 1,
-                surfaceCount: 3,
-                lodCount: 1,
-                headerTraversed: true,
-                skeletonPrefixTraversed: true,
-                surfaceHeadersTraversed: true,
-                surfaceDependenciesTraversed: true,
-                materialHandlesTraversed: true,
-                materialsTraversed: true,
-                collisionSurfacesTraversed: true,
-                boneInfoTraversed: true,
-                physPresetTraversed: true,
-                physGeomsTraversed: true,
-                published: true,
-                identity: 10,
-                stoppedBeforeSurfaceArray: false,
-                stoppedBeforeMaterialDependency: false,
-                unsupportedOperation: "",
-                totals: {
+            xmodels: [
+                { assetIndex: 2, identity: 6, published: true },
+                {
+                    assetIndex: 5,
+                    name: "web/xmodel_second",
+                    numBones: 1,
+                    numRootBones: 1,
+                    surfaceCount: 3,
+                    lodCount: 1,
+                    headerTraversed: true,
+                    skeletonPrefixTraversed: true,
+                    surfaceHeadersTraversed: true,
+                    surfaceDependenciesTraversed: true,
+                    materialHandlesTraversed: true,
+                    materialsTraversed: true,
+                    collisionSurfacesTraversed: true,
+                    boneInfoTraversed: true,
+                    physPresetTraversed: true,
+                    physGeomsTraversed: true,
+                    published: true,
+                    identity: 10,
+                    stoppedBeforeSurfaceArray: false,
+                    stoppedBeforeMaterialDependency: false,
+                    unsupportedOperation: "",
+                    totals: {
                     vertices: 9,
                     triangles: 3,
                     rigidVertLists: 3,
@@ -716,7 +718,8 @@ test("publishes one retail material and binds its resolved image", async ({ page
                     boneIndex: 0,
                     traversed: true,
                 }],
-            },
+                },
+            ],
             typeCounts: [
                 { type: 3, name: "xmodel", count: 2 },
                 { type: 5, name: "techset", count: 4 },
@@ -1702,7 +1705,7 @@ test("publishes the consecutive typed technique-set run after the XModel", async
         completedAssetCount: 6,
         nextBodyIndex: 6,
         nextBodyType: 16,
-        stoppedBeforeDifferentAssetType: false,
+        stoppedBeforeDifferentAssetType: true,
         postXModelTechniqueSets: [
             {
                 assetIndex: 3,
@@ -1732,14 +1735,14 @@ test("publishes the consecutive typed technique-set run after the XModel", async
             completedCount: 2,
             nextBodyIndex: 6,
             nextBodyType: 16,
-            stoppedBeforeDifferentAssetType: false,
+            stoppedBeforeDifferentAssetType: true,
             stoppedBeforeTechniqueDependency: false,
         },
         firstXModel: { assetIndex: 2, identity: 6, published: true },
     });
 });
 
-test("publishes the complete second XModel without replacing or rendering the first", async ({ page }, testInfo) => {
+test("selects between complete retained XModels without reparsing", async ({ page }, testInfo) => {
     await importInstall(page, testInfo, "m34-second-xmodel-dependencies");
     await expect.poll(
         () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
@@ -1754,35 +1757,42 @@ test("publishes the complete second XModel without replacing or rendering the fi
         completedAssetCount: 6,
         nextBodyIndex: 6,
         nextBodyType: 16,
+        selectedXModelIndex: 0,
         firstXModel: {
             assetIndex: 2,
             name: "web/xmodel_wall",
             identity: 6,
             published: true,
+            rendererPayloadSelected: true,
+            rendererPayloadAvailable: true,
             renderSurface: { state: "ready", geometrySource: "retail-xmodel" },
         },
-        secondXModel: {
-            assetIndex: 5,
-            name: "web/xmodel_second",
-            numBones: 1,
-            numRootBones: 1,
-            surfaceCount: 3,
-            headerTraversed: true,
-            skeletonPrefixTraversed: true,
-            surfaceHeadersTraversed: true,
-            surfaceDependenciesTraversed: true,
-            materialHandlesTraversed: true,
-            materialsTraversed: true,
-            collisionSurfacesTraversed: true,
-            boneInfoTraversed: true,
-            physPresetTraversed: true,
-            physGeomsTraversed: true,
-            published: true,
-            identity: 10,
-            stoppedBeforeSurfaceArray: false,
-            stoppedBeforeMaterialDependency: false,
-            unsupportedOperation: "",
-            totals: {
+        xmodels: [
+            { assetIndex: 2, identity: 6, published: true },
+            {
+                assetIndex: 5,
+                name: "web/xmodel_second",
+                numBones: 1,
+                numRootBones: 1,
+                surfaceCount: 3,
+                headerTraversed: true,
+                skeletonPrefixTraversed: true,
+                surfaceHeadersTraversed: true,
+                surfaceDependenciesTraversed: true,
+                materialHandlesTraversed: true,
+                materialsTraversed: true,
+                collisionSurfacesTraversed: true,
+                boneInfoTraversed: true,
+                physPresetTraversed: true,
+                physGeomsTraversed: true,
+                published: true,
+                rendererPayloadSelected: false,
+                rendererPayloadAvailable: true,
+                identity: 10,
+                stoppedBeforeSurfaceArray: false,
+                stoppedBeforeMaterialDependency: false,
+                unsupportedOperation: "",
+                totals: {
                 vertices: 9,
                 triangles: 3,
                 rigidVertLists: 3,
@@ -1809,15 +1819,16 @@ test("publishes the complete second XModel without replacing or rendering the fi
                 boneIndex: 0,
                 traversed: true,
             }],
-        },
+            },
+        ],
         firstTechniqueSet: {
             registryAliasCount: 11,
             registryDefinedAliasCount: 11,
             unsupportedOperation: "",
         },
     });
-    expect(world.secondXModel.surfaces).toHaveLength(3);
-    expect(world.secondXModel.surfaces).toEqual(
+    expect(world.xmodels[1].surfaces).toHaveLength(3);
+    expect(world.xmodels[1].surfaces).toEqual(
         expect.arrayContaining([
             expect.objectContaining({
                 vertCount: 3,
@@ -1830,7 +1841,52 @@ test("publishes the complete second XModel without replacing or rendering the fi
             }),
         ]),
     );
-    expect(world.secondXModel.renderSurface).toBeUndefined();
+    expect(world.xmodels[1].renderSurface).toBeUndefined();
+
+    const selector = page.locator("#xmodel-select");
+    await expect(selector).toBeEnabled();
+    await expect(selector.locator("option")).toHaveCount(2);
+    await expect(selector).toHaveValue("0");
+    const priorSubmission = await page.evaluate(
+        () => globalThis.__KISAKCOD_WEB__.rendererSurface
+            .submissionGeneration,
+    );
+    await selector.selectOption("1");
+    await expect(selector).toHaveValue("1");
+    await expect.poll(() => page.evaluate(() => ({
+        selected: globalThis.__KISAKCOD_WEB__.retailCensus
+            .worldInventory.selectedXModelIndex,
+        name: globalThis.__KISAKCOD_WEB__.retailCensus
+            .worldInventory.selectedXModel?.name,
+        state: globalThis.__KISAKCOD_WEB__.retailCensus
+            .worldInventory.selectedXModel?.renderSurface?.state,
+        draws: globalThis.__KISAKCOD_WEB__.retailCensus
+            .worldInventory.selectedXModel?.renderSurface?.drawList?.drawCount,
+        submission: globalThis.__KISAKCOD_WEB__.rendererSurface
+            .submissionGeneration,
+    })), { timeout: 10_000 }).toMatchObject({
+        selected: 1,
+        name: "web/xmodel_second",
+        state: "ready",
+        draws: 3,
+        submission: priorSubmission + 1,
+    });
+    const selectedWorld = await page.evaluate(
+        () => structuredClone(
+            globalThis.__KISAKCOD_WEB__.retailCensus.worldInventory,
+        ),
+    );
+    expect(selectedWorld.firstXModel.name).toBe("web/xmodel_wall");
+    expect(selectedWorld.xmodels[0].rendererPayloadSelected).toBe(false);
+    expect(selectedWorld.xmodels[1]).toMatchObject({
+        rendererPayloadSelected: true,
+        renderSurface: {
+            state: "ready",
+            vertexCount: 3,
+            triangleCount: 1,
+            drawList: { drawCount: 3, totalVertices: 9, totalIndices: 9 },
+        },
+    });
 });
 
 test("invalid second-XModel material alias exposes no partial public result", async ({ page }, testInfo) => {
@@ -1931,12 +1987,15 @@ test("an unsupported second-XModel skeleton dependency preserves the first model
     );
     expect(world).toMatchObject({
         firstXModel: { identity: 6, published: true },
-        secondXModel: {
-            assetIndex: 5,
-            headerTraversed: true,
-            skeletonPrefixTraversed: false,
-            unsupportedOperation: "Load_ScriptStringArray",
-        },
+        xmodels: [
+            { identity: 6, published: true },
+            {
+                assetIndex: 5,
+                headerTraversed: true,
+                skeletonPrefixTraversed: false,
+                unsupportedOperation: "Load_ScriptStringArray",
+            },
+        ],
         firstTechniqueSet: {
             registryAliasCount: 9,
             registryDefinedAliasCount: 8,

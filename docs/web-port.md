@@ -1339,13 +1339,78 @@ The first model's renderer-owned draw list and textures remain unchanged. The
 ladder's census contains hashes and typed dependencies only; it is neither
 retained for WebGL nor exposed as a viewer model.
 
-## Next boundary: Milestone 35
+## Milestone 35: bounded consecutive XModel collection (complete)
 
-Asset 22 is another inline XModel. M35 should replace the first/second result
-special cases with a bounded collection and loop the complete shared XModel
-loader across consecutive top-level model bodies, while preserving the first
-model as the only current renderer selection. This is the architectural step
-toward full XModel compatibility required before reaching `GfxWorld`.
+The world result now owns a bounded XModel collection instead of dedicated
+first/second parser slots. A single active collection index drives the complete
+shared header, skeleton, surface, material/image, collision, bone-info, and
+physics path. After asset 21 publishes, the top-level loader loops directly into
+consecutive inline XModels and stops cleanly at the first different asset type.
+The configured collection ceiling is explicit and malformed later models still
+prevent any partial result from being published.
+
+The owned F.N.G. run now publishes three models: asset 12
+`ch_street_wall_light_01_off` (identity 19), asset 21 `com_steel_ladder`
+(identity 32), and asset 22 `com_steel_ladder_top` (identity 33). The third model
+has four surfaces, 660 vertices, 420 triangles, four rigid lists, and 25,008
+bounded surface bytes. All four material handles resolve to the already
+published `mc/mtl_steel_ladder` identity 31, so no new material body is entered.
+Its one collision surface contains 228 triangles and 10,988 bounded collision
+bytes; bone info hashes to `0x499d1ece`, and both null physics references
+complete normally.
+
+The final inflated boundary is 148,660, the block-4 cursor is 66,676, all 34
+reserved aliases are defined, and 33 typed assets are registered. Traversal
+stops before inline technique-set asset 23. Eligible collection entries retain
+packed first-LOD payload under a shared 16 MiB ceiling; entry zero is merely the
+initial active renderer choice and remains exposed through the legacy
+`firstXModel` alias. A generated three-model fixture additionally proves the repeat loop,
+zero-surface completion, the collection ceiling, and atomic rejection of invalid
+third-model bounds.
+
+## Milestone 36: reusable XModel loader dispatch (complete)
+
+`WorldXModelLoader` is now the canonical complete-loader mode; the former
+`WorldXModelCollection` name remains an API-compatible alias. The supported
+top-level dispatcher invokes the same bounded XModel operation for consecutive
+and separated model runs and can resume technique-set traversal after any
+completed model. Renderer payload selection is recorded explicitly on each
+model instead of being inferred from the active parser index. The launcher
+builds a selector from the published collection, disables entries without a
+retained payload, and calls a narrow C export to atomically replace the active
+WebGL2 draw list. Selection reuses the parsed collection, resolves material and
+image aliases through deduplicated per-model catalogs, rebuilds the typed
+color-map queue, and does not re-read or reparse the fastfile. Inventory publication still
+succeeds when the aggregate byte budget prevents a model from being selectable.
+
+A generated eight-asset fixture proves the complete sequence `techset,
+techset, XModel, techset, techset, XModel, techset, GfxWorld`. Both models
+publish through the same header, skeleton, surface, material/image, collision,
+bone-info, and null-physics stages. The trailing technique set also publishes,
+showing that loader completion returns control to the shared dispatcher rather
+than a model-position special case. Existing three-consecutive-model, malformed
+third-model, collection-limit, renderer-byte-ceiling, and live selection
+coverage remains active.
+
+The owned run still publishes XModel assets 12, 21, and 22, then enters inline
+technique-set asset 23 instead of stopping before it. Asset 23 is
+`sm2/mc_unlit`; its fixed header and name complete at inflated offset 148,821
+with 16 null, two inline, zero shared, and 16 alias technique references. The
+block-4 cursor is 66,689. The new alias is reserved but deliberately unpublished
+(35 reserved, 34 defined), and the parser stops atomically before the first
+nested `Load_MaterialTechnique` dependency.
+
+This demonstrates reusable XModel dispatch across every supported layout, not
+that all 315 XModels before `GfxWorld` have already been consumed. Proving the
+entire owned population still requires typed loaders for the intervening inline
+asset classes and any dependency variants they expose.
+
+## Next boundary: Milestone 37
+
+Resume inside asset 23 with a bounded reusable `MaterialTechnique` dependency
+loader, then return to the supported top-level dispatcher. Do not publish the
+technique set or its reserved alias until both inline technique dependencies
+complete.
 
 Reaching `GfxWorld` still requires typed loaders for every intervening inline
 asset class; geometry, lightmaps, visibility, and camera state remain separate

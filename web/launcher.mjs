@@ -6,6 +6,7 @@ const runtimeLabel = document.querySelector("#runtime-label");
 const runtimeMessage = document.querySelector("#runtime-message");
 const bootLog = document.querySelector("#boot-log");
 const frameCounter = document.querySelector("#frame-counter");
+const xmodelSelect = document.querySelector("#xmodel-select");
 const canvasSize = document.querySelector("#canvas-size");
 const physicsStatus = document.querySelector("#physics-status");
 const rendererStatus = document.querySelector("#renderer-status");
@@ -127,12 +128,61 @@ function formatBytes(bytes) {
     return `${value.toFixed(digits)} ${units[unit]}`;
 }
 
+function selectedRetailXModel(worldInventory =
+    runtime.retailCensus?.worldInventory) {
+    if (!worldInventory) {
+        return null;
+    }
+    const index = worldInventory.selectedXModelIndex;
+    if (Number.isInteger(index) && index >= 0) {
+        return worldInventory.xmodels?.[index] ?? null;
+    }
+    return worldInventory.selectedXModel ?? worldInventory.firstXModel ?? null;
+}
+
+function renderXModelSelector(worldInventory =
+    runtime.retailCensus?.worldInventory) {
+    const models = worldInventory?.xmodels ?? [];
+    const selectedIndex = Number.isInteger(worldInventory?.selectedXModelIndex)
+        ? worldInventory.selectedXModelIndex
+        : models.findIndex((model) => model?.rendererPayloadSelected);
+    xmodelSelect.replaceChildren();
+    if (models.length === 0) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = "Waiting for models";
+        xmodelSelect.append(option);
+        xmodelSelect.disabled = true;
+        return;
+    }
+    let selectableCount = 0;
+    models.forEach((model, index) => {
+        const option = document.createElement("option");
+        const selectable = model?.published === true &&
+            model?.rendererPayloadAvailable === true;
+        option.value = String(index);
+        option.disabled = !selectable;
+        option.textContent = `${model?.name || `XModel ${index}`} ` +
+            `(asset ${model?.assetIndex ?? "?"})` +
+            (selectable ? "" : " — unavailable");
+        if (selectable) {
+            selectableCount += 1;
+        }
+        xmodelSelect.append(option);
+    });
+    if (selectedIndex >= 0 && selectedIndex < models.length) {
+        xmodelSelect.value = String(selectedIndex);
+    }
+    xmodelSelect.disabled = selectableCount < 2 ||
+        typeof runtime.module?._KisakWeb_SelectRetailXModel !== "function";
+}
+
 function updateRendererMaterialBinding() {
     const shaderReady = runtime.rendererShader?.state === "ready" &&
         runtime.rendererShader?.resident === true &&
         runtime.rendererShader?.firstDrawCompleted === true;
-    const renderSurface =
-        runtime.retailCensus?.worldInventory?.firstXModel?.renderSurface;
+    const selectedXModel = selectedRetailXModel();
+    const renderSurface = selectedXModel?.renderSurface;
     const xmodelColorMap = renderSurface?.colorMap;
     const drawTextures = renderSurface?.drawList?.textures ??
         (xmodelColorMap ? [{ ...xmodelColorMap, textureSlot: 0 }] : []);
@@ -186,7 +236,7 @@ function updateRendererMaterialBinding() {
         drawCount: renderSurface?.drawList?.drawCount ?? 1,
         textureCount: drawTextures.length,
         geometrySource:
-            runtime.retailCensus?.worldInventory?.firstXModel?.renderSurface?.state === "ready"
+            renderSurface?.state === "ready"
                 ? "retail-xmodel"
                 : runtime.engineWorldSurface?.state !== "ready"
                     ? "unknown"
@@ -261,9 +311,10 @@ globalThis.addEventListener("kisakcod:qcommon", (event) => {
 
 globalThis.addEventListener("kisakcod:retail-census", (event) => {
     runtime.retailCensus = structuredClone(event.detail);
+    renderXModelSelector(runtime.retailCensus.worldInventory);
     if (event.detail.state === "ready") {
         const firstXModel = event.detail.worldInventory.firstXModel;
-        const secondXModel = event.detail.worldInventory.secondXModel;
+        const secondXModel = event.detail.worldInventory.xmodels?.[1];
         const postXModelTechniqueSet =
             event.detail.worldInventory.postXModelTechniqueSet;
         const postXModelTechniqueSetRun =
@@ -326,6 +377,27 @@ globalThis.addEventListener("kisakcod:retail-census", (event) => {
     } else if (event.detail.state === "failed") {
         appendLog(`[kisakcod-web] Retail fastfile census: ${event.detail.message}`, "error");
     }
+    updateRendererMaterialBinding();
+});
+
+globalThis.addEventListener("kisakcod:xmodel-selection", (event) => {
+    const inventory = runtime.retailCensus?.worldInventory;
+    const modelIndex = event.detail.modelIndex;
+    const model = inventory?.xmodels?.[modelIndex];
+    if (!inventory || !model) {
+        return;
+    }
+    inventory.xmodels.forEach((entry, index) => {
+        entry.rendererPayloadSelected = index === modelIndex;
+    });
+    model.renderSurface = structuredClone(event.detail.renderSurface);
+    inventory.selectedXModelIndex = modelIndex;
+    inventory.selectedXModel = model;
+    renderXModelSelector(inventory);
+    appendLog(
+        `[kisakcod-web] Rendering XModel ${model.name} ` +
+        `(asset ${model.assetIndex}, ${model.renderSurface?.drawList?.drawCount ?? 0} draws).`,
+    );
     updateRendererMaterialBinding();
 });
 
@@ -804,6 +876,20 @@ clearAssetsButton.addEventListener("click", async () => {
         appendLog("[kisakcod-web] Removed the browser-local asset import.");
     } catch (error) {
         appendLog(`[kisakcod-web] Could not clear browser storage: ${error.message}`, "error");
+    }
+});
+
+xmodelSelect.addEventListener("change", () => {
+    const inventory = runtime.retailCensus?.worldInventory;
+    const previousIndex = inventory?.selectedXModelIndex;
+    const modelIndex = Number.parseInt(xmodelSelect.value, 10);
+    if (!Number.isInteger(modelIndex) || !inventory?.xmodels?.[modelIndex] ||
+        typeof runtime.module?._KisakWeb_SelectRetailXModel !== "function" ||
+        runtime.module._KisakWeb_SelectRetailXModel(modelIndex) !== 1) {
+        if (Number.isInteger(previousIndex)) {
+            xmodelSelect.value = String(previousIndex);
+        }
+        appendLog("[kisakcod-web] The selected XModel is not renderable.", "error");
     }
 });
 

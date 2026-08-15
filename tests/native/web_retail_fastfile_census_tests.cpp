@@ -702,8 +702,28 @@ std::vector<std::uint8_t> BuildWorldSecondXModelPrefixInflated(
     }
     for (std::uint32_t index = 0u; index < 3u; ++index)
     {
-        for (std::uint32_t byte = 0u; byte < 3u * 32u; ++byte)
-            bytes.push_back(static_cast<std::uint8_t>(0x80u + byte + index));
+        const float offset = static_cast<float>(index) * 1.5f;
+        const std::array<std::array<float, 3>, 3> positions{{
+            {{offset - 0.5f, -0.5f, 0.0f}},
+            {{offset + 0.5f, -0.5f, 0.0f}},
+            {{offset, 0.5f, 0.0f}},
+        }};
+        for (std::size_t vertexIndex = 0u;
+             vertexIndex < positions.size(); ++vertexIndex)
+        {
+            std::vector<std::uint8_t> vertex(32u, 0u);
+            SetF32(vertex, 0u, positions[vertexIndex][0]);
+            SetF32(vertex, 4u, positions[vertexIndex][1]);
+            SetF32(vertex, 8u, positions[vertexIndex][2]);
+            SetF32(vertex, 12u, 1.0f);
+            SetU32(vertex, 16u, 0xffffffffu);
+            const std::uint32_t u = vertexIndex == 1u ? 0x3c00u : 0u;
+            const std::uint32_t v = vertexIndex == 2u ? 0x3c00u : 0u;
+            SetU32(vertex, 20u, (u << 16u) | v);
+            SetU32(vertex, 24u, 0x7f7fffffu);
+            SetU32(vertex, 28u, 0x7f7fffffu);
+            bytes.insert(bytes.end(), vertex.begin(), vertex.end());
+        }
         PutU16(bytes, 0u);
         PutU16(bytes, 3u);
         PutU16(bytes, 0u);
@@ -766,6 +786,64 @@ std::vector<std::uint8_t> BuildWorldSecondXModelDependenciesInflated(
     SetF32(boneInfo, 20u, 1.0f);
     SetF32(boneInfo, 36u, 3.0f);
     bytes.insert(bytes.end(), boneInfo.begin(), boneInfo.end());
+    return bytes;
+}
+
+std::vector<std::uint8_t> BuildWorldXModelCollectionInflated(
+    bool invalidThirdBounds = false)
+{
+    std::vector<std::uint8_t> bytes =
+        BuildWorldSecondXModelDependenciesInflated();
+    constexpr std::size_t assetTableOffset = 75u;
+    constexpr std::size_t thirdXModelAssetIndex = 6u;
+    SetU32(bytes, 52u, 8u);
+    SetU32(bytes, assetTableOffset + thirdXModelAssetIndex * 8u, 3u);
+    SetU32(bytes, assetTableOffset + thirdXModelAssetIndex * 8u + 4u,
+        0xffffffffu);
+    const std::array<std::uint8_t, 8> gfxWorldEntry = {{
+        16u, 0u, 0u, 0u, 0xffu, 0xffu, 0xffu, 0xffu,
+    }};
+    bytes.insert(
+        bytes.begin() + static_cast<std::ptrdiff_t>(assetTableOffset + 7u * 8u),
+        gfxWorldEntry.begin(), gfxWorldEntry.end());
+
+    std::vector<std::uint8_t> model(220u, 0u);
+    SetU32(model, 0u, 0xffffffffu);
+    SetF32(model, 40u, 1600.0f);
+    SetF32(model, 168u, 0.0f);
+    SetF32(model, 172u, invalidThirdBounds ? 1.0f : 0.0f);
+    SetF32(model, 176u, 0.0f);
+    SetF32(model, 180u, 0.0f);
+    SetF32(model, 184u, 0.0f);
+    SetF32(model, 188u, 0.0f);
+    SetF32(model, 192u, 0.0f);
+    PutU16At(model, 196u, 1u);
+    PutU16At(model, 198u, 0xffffu);
+    bytes.insert(bytes.end(), model.begin(), model.end());
+    AppendString(bytes, "web/xmodel_third");
+    return bytes;
+}
+
+std::vector<std::uint8_t> BuildReusableWorldXModelLoaderInflated()
+{
+    std::vector<std::uint8_t> bytes =
+        BuildWorldSecondXModelDependenciesInflated();
+    constexpr std::size_t assetTableOffset = 75u;
+    constexpr std::size_t trailingTechniqueSetAssetIndex = 6u;
+    SetU32(bytes, 52u, 8u);
+    SetU32(bytes,
+        assetTableOffset + trailingTechniqueSetAssetIndex * 8u, 5u);
+    const std::array<std::uint8_t, 8> gfxWorldEntry = {{
+        16u, 0u, 0u, 0u, 0xffu, 0xffu, 0xffu, 0xffu,
+    }};
+    bytes.insert(
+        bytes.begin() + static_cast<std::ptrdiff_t>(assetTableOffset + 7u * 8u),
+        gfxWorldEntry.begin(), gfxWorldEntry.end());
+
+    std::vector<std::uint8_t> techniqueSet(148u, 0u);
+    SetU32(techniqueSet, 0u, 0xffffffffu);
+    bytes.insert(bytes.end(), techniqueSet.begin(), techniqueSet.end());
+    AppendString(bytes, ",web/reusable_xmodel_loader_tail");
     return bytes;
 }
 
@@ -872,7 +950,7 @@ void TestWorldXModelPrefixBoundary()
     const auto result = Run(
         BuildFile(BuildWorldXModelPrefixInflated()), 7u, 2u, 3u,
         RetailCensusMode::WorldXModelPrefix);
-    const RetailWorldXModel &model = result.worldFirstXModel;
+    const RetailWorldXModel &model = result.worldXModels.at(0u);
     Require(result.worldTechniqueSets.size() == 2u &&
         result.completedAssetCount == 2u &&
         result.worldRegistryAliasCount == 3u &&
@@ -892,8 +970,8 @@ void TestWorldXModelPrefixBoundary()
     const auto unsupported = Run(
         BuildFile(BuildWorldXModelPrefixInflated(false, true)), 7u, 2u, 3u,
         RetailCensusMode::WorldXModelPrefix);
-    Require(unsupported.worldFirstXModel.headerTraversed &&
-        !unsupported.worldFirstXModel.skeletonPrefixTraversed &&
+    Require(unsupported.worldXModels.at(0u).headerTraversed &&
+        !unsupported.worldXModels.at(0u).skeletonPrefixTraversed &&
         std::string(unsupported.unsupportedOperation) == "Load_ScriptStringArray",
         "unsupported bone dependency stops after fixed header");
 
@@ -914,7 +992,7 @@ void TestWorldXSurfacePrefixBoundary()
     const auto result = Run(
         BuildFile(BuildWorldXSurfacePrefixInflated()), 7u, 2u, 3u,
         RetailCensusMode::WorldXSurfacePrefix);
-    const RetailWorldXModel &model = result.worldFirstXModel;
+    const RetailWorldXModel &model = result.worldXModels.at(0u);
     Require(model.headerTraversed && model.skeletonPrefixTraversed &&
         model.surfaceHeadersTraversed && model.surfaceDependenciesTraversed &&
         model.materialHandlesTraversed && model.stoppedBeforeMaterialDependency &&
@@ -994,7 +1072,7 @@ void TestWorldXModelDependenciesBoundary()
     const auto result = Run(
         BuildFile(BuildWorldXModelDependenciesInflated()), 7u, 2u, 3u,
         RetailCensusMode::WorldXModelDependencies);
-    const RetailWorldXModel &model = result.worldFirstXModel;
+    const RetailWorldXModel &model = result.worldXModels.at(0u);
     Require(model.published && model.materialsTraversed &&
         model.collisionSurfacesTraversed && model.boneInfoTraversed &&
         model.physPresetTraversed && model.physGeomsTraversed &&
@@ -1071,7 +1149,7 @@ void TestWorldXModelDependenciesBoundary()
         BuildFile(BuildWorldXModelDependenciesInflated(
             false, false, false, true)),
         7u, 2u, 3u, RetailCensusMode::WorldXModelDependencies);
-    Require(!unsupportedPhysics.worldFirstXModel.published &&
+    Require(!unsupportedPhysics.worldXModels.at(0u).published &&
         std::string(unsupportedPhysics.unsupportedOperation) == "Load_PhysPreset" &&
         unsupportedPhysics.worldRegistryDefinedAliasCount + 1u ==
             unsupportedPhysics.worldRegistryAliasCount,
@@ -1084,7 +1162,7 @@ void TestWorldPostXModelTechniqueSetBoundary()
     const auto result = Run(
         BuildFile(BuildWorldPostXModelTechniqueSetInflated()),
         7u, 2u, 3u, RetailCensusMode::WorldPostXModelTechniqueSet);
-    Require(result.worldFirstXModel.published &&
+    Require(result.worldXModels.at(0u).published &&
         result.worldPostXModelTechniqueSetAssetIndex == 3u &&
         result.worldPostXModelTechniqueSetPublished &&
         result.worldPostXModelTechniqueSetBodiesEntered == 2u &&
@@ -1157,7 +1235,7 @@ void TestWorldPostXModelTechniqueSetBoundary()
         BuildFile(BuildWorldPostXModelTechniqueSetInflated(false, true)),
         7u, 2u, 3u, RetailCensusMode::WorldPostXModelTechniqueSet);
     const RetailWorldTechniqueSet &blocked = dependency.worldTechniqueSets.back();
-    Require(dependency.worldFirstXModel.published && !blocked.published &&
+    Require(dependency.worldXModels.at(0u).published && !blocked.published &&
         blocked.firstTechniqueSlot == 4u &&
         blocked.inlineTechniqueReferences == 1u &&
         dependency.completedAssetCount == 3u &&
@@ -1191,8 +1269,8 @@ void TestWorldSecondXModelPrefixBoundary()
     const auto result = Run(
         BuildFile(BuildWorldSecondXModelPrefixInflated()),
         7u, 2u, 3u, RetailCensusMode::WorldSecondXModelPrefix);
-    const RetailWorldXModel &first = result.worldFirstXModel;
-    const RetailWorldXModel &second = result.worldSecondXModel;
+    const RetailWorldXModel &first = result.worldXModels.at(0u);
+    const RetailWorldXModel &second = result.worldXModels.at(1u);
     Require(first.published && first.name == "web/xmodel_wall" &&
         first.identity == 6u && first.surfaces.size() == 6u,
         "M32 preserves the complete first XModel result");
@@ -1230,9 +1308,9 @@ void TestWorldSecondXModelPrefixBoundary()
     const auto unsupported = Run(
         BuildFile(BuildWorldSecondXModelPrefixInflated(false, true)),
         7u, 2u, 3u, RetailCensusMode::WorldSecondXModelPrefix);
-    Require(unsupported.worldFirstXModel.published &&
-        unsupported.worldSecondXModel.headerTraversed &&
-        !unsupported.worldSecondXModel.skeletonPrefixTraversed &&
+    Require(unsupported.worldXModels.at(0u).published &&
+        unsupported.worldXModels.at(1u).headerTraversed &&
+        !unsupported.worldXModels.at(1u).skeletonPrefixTraversed &&
         std::string(unsupported.unsupportedOperation) ==
             "Load_ScriptStringArray",
         "unsupported second-XModel bone names preserve the first model");
@@ -1244,8 +1322,8 @@ void TestWorldSecondXSurfacePrefixBoundary()
     const auto result = Run(
         BuildFile(BuildWorldSecondXModelPrefixInflated()),
         7u, 2u, 3u, RetailCensusMode::WorldSecondXSurfacePrefix);
-    const RetailWorldXModel &first = result.worldFirstXModel;
-    const RetailWorldXModel &second = result.worldSecondXModel;
+    const RetailWorldXModel &first = result.worldXModels.at(0u);
+    const RetailWorldXModel &second = result.worldXModels.at(1u);
     Require(first.published && first.name == "web/xmodel_wall" &&
         first.surfaces.size() == 6u,
         "M33 preserves the complete first XModel result");
@@ -1290,8 +1368,8 @@ void TestWorldSecondXModelDependenciesBoundary()
     const auto result = Run(
         BuildFile(BuildWorldSecondXModelDependenciesInflated()),
         7u, 2u, 3u, RetailCensusMode::WorldSecondXModelDependencies);
-    const RetailWorldXModel &first = result.worldFirstXModel;
-    const RetailWorldXModel &second = result.worldSecondXModel;
+    const RetailWorldXModel &first = result.worldXModels.at(0u);
+    const RetailWorldXModel &second = result.worldXModels.at(1u);
     Require(first.published && first.identity == 6u &&
         first.name == "web/xmodel_wall" && first.surfaces.size() == 6u,
         "M34 preserves the first published XModel");
@@ -1331,6 +1409,186 @@ void TestWorldSecondXModelDependenciesBoundary()
     Require(invalid.Failure() == RetailCensusError::MaterialTechniqueSetInvalid &&
         !invalid.TakeResult(unavailable),
         "invalid second-model material alias exposes no partial result");
+}
+
+void TestWorldXModelCollectionBoundary()
+{
+    using namespace kisak::fastfile;
+    const auto file = BuildFile(BuildWorldXModelCollectionInflated());
+    const auto result = Run(
+        file, 7u, 2u, 3u, RetailCensusMode::WorldXModelCollection);
+    Require(result.worldXModels.size() == 3u,
+        "M35 stores every completed XModel in one collection");
+    const RetailWorldXModel &first = result.worldXModels.at(0u);
+    const RetailWorldXModel &second = result.worldXModels.at(1u);
+    const RetailWorldXModel &third = result.worldXModels.at(2u);
+    Require(first.published && first.assetIndex == 2u && first.identity == 6u &&
+        first.rendererPayloadSelected &&
+        first.rendererPayloadAvailable &&
+        second.published && second.assetIndex == 5u && second.identity == 10u &&
+        !second.rendererPayloadSelected && second.rendererPayloadAvailable &&
+        third.published && third.assetIndex == 6u && third.identity == 11u &&
+        !third.rendererPayloadSelected && !third.rendererPayloadAvailable &&
+        third.name == "web/xmodel_third" && third.surfaceCount == 0u &&
+        third.surfaceHeadersTraversed && third.surfaceDependenciesTraversed &&
+        third.materialHandlesTraversed && third.materialsTraversed &&
+        third.collisionSurfacesTraversed && third.boneInfoTraversed &&
+        third.physPresetTraversed && third.physGeomsTraversed &&
+        result.completedAssetCount == 7u && result.registryAssetCount == 11u &&
+        result.worldRegistryAliasCount == 12u &&
+        result.worldRegistryDefinedAliasCount == 12u &&
+        result.nextBodyIndex == 7u && result.nextBodyType == 16u &&
+        result.stoppedBeforeDifferentWorldAssetType &&
+        result.unsupportedOperation == nullptr,
+        "M35 loops the complete loader through the consecutive third model");
+    Require(std::any_of(first.surfaces.begin(), first.surfaces.end(),
+                [](const RetailXSurface &surface) {
+                    return surface.renderPayloadRetained;
+                }) &&
+            std::any_of(second.surfaces.begin(), second.surfaces.end(),
+                [](const RetailXSurface &surface) {
+                    return surface.renderPayloadRetained;
+                }),
+        "the loader retains bounded selectable payloads without changing selection");
+
+    RetailFastfileCensusJob malformed;
+    Require(malformed.BeginStreaming(RetailCensusMode::WorldXModelCollection) ==
+        RetailCensusError::None, "invalid M35 fixture starts");
+    const auto invalidFile = BuildFile(
+        BuildWorldXModelCollectionInflated(true));
+    Require(malformed.FeedSource(invalidFile, true) == RetailCensusError::None,
+        "invalid M35 source is accepted");
+    while (malformed.Progress() == RetailCensusProgress::Running)
+        (void)malformed.Step();
+    RetailFastfileCensus unavailable;
+    Require(malformed.Failure() == RetailCensusError::XModelBoundsInvalid &&
+        !malformed.TakeResult(unavailable),
+        "invalid third-model bounds expose no partial collection");
+
+    RetailCensusLimits limits;
+    limits.maxWorldXModels = 2u;
+    RetailFastfileCensusJob bounded;
+    Require(bounded.BeginStreaming(
+            RetailCensusMode::WorldXModelCollection, limits) ==
+        RetailCensusError::None, "bounded M35 fixture starts");
+    Require(bounded.FeedSource(file, true) == RetailCensusError::None,
+        "bounded M35 source is accepted");
+    while (bounded.Progress() == RetailCensusProgress::Running)
+        (void)bounded.Step();
+    Require(bounded.Failure() == RetailCensusError::XModelCollectionLimit &&
+        !bounded.TakeResult(unavailable),
+        "M35 rejects a collection that exceeds its explicit model limit");
+}
+
+void TestReusableWorldXModelLoader()
+{
+    using namespace kisak::fastfile;
+    const auto result = Run(
+        BuildFile(BuildReusableWorldXModelLoaderInflated()),
+        7u, 2u, 3u, RetailCensusMode::WorldXModelLoader);
+    Require(result.worldXModels.size() == 2u &&
+        result.worldXModels[0].assetIndex == 2u &&
+        result.worldXModels[0].published &&
+        result.worldXModels[0].rendererPayloadSelected &&
+        result.worldXModels[0].rendererPayloadAvailable &&
+        result.worldXModels[0].resolvedMaterials.size() == 2u &&
+        result.worldXModels[0].resolvedImages.size() == 1u &&
+        result.worldXModels[1].assetIndex == 5u &&
+        result.worldXModels[1].published &&
+        !result.worldXModels[1].rendererPayloadSelected &&
+        result.worldXModels[1].rendererPayloadAvailable &&
+        result.worldXModels[1].resolvedMaterials.size() == 1u &&
+        result.worldXModels[1].resolvedImages.size() == 1u,
+        "the reusable loader handles XModels separated by technique-set runs");
+    Require(result.worldTechniqueSets.size() == 5u &&
+        result.worldTechniqueSets.back().assetIndex == 6u &&
+        result.worldTechniqueSets.back().name ==
+            ",web/reusable_xmodel_loader_tail" &&
+        result.worldTechniqueSets.back().published &&
+        result.completedAssetCount == 7u &&
+        result.nextBodyIndex == 7u && result.nextBodyType == 16u &&
+        result.stoppedBeforeDifferentWorldAssetType &&
+        result.unsupportedOperation == nullptr,
+        "the supported dispatcher resumes after every completed XModel");
+    Require(std::any_of(result.worldXModels[0].surfaces.begin(),
+                result.worldXModels[0].surfaces.end(),
+                [](const RetailXSurface &surface) {
+                    return surface.renderPayloadRetained;
+                }) &&
+            std::any_of(result.worldXModels[1].surfaces.begin(),
+                result.worldXModels[1].surfaces.end(),
+                [](const RetailXSurface &surface) {
+                    return surface.renderPayloadRetained;
+                }),
+        "each bounded model is selectable while only one is initially active");
+    WebEngineXModelDrawList secondDrawList;
+    const WebEngineXModelDrawListResult secondDrawResult =
+        WebEngine_BuildXModelDrawList(result.worldXModels[1], secondDrawList);
+    if (secondDrawResult != WebEngineXModelDrawListResult::Success)
+    {
+        std::cerr << "second retained XModel draw list: "
+                  << WebEngine_XModelDrawListResultString(secondDrawResult)
+                  << "; lods=" << result.worldXModels[1].lodCount
+                  << "; first=" << result.worldXModels[1].lods[0].surfaceIndex
+                  << "; count=" << result.worldXModels[1].lods[0].surfaceCount
+                  << "; surfaces=" << result.worldXModels[1].surfaces.size()
+                  << "; materials=" << result.worldXModels[1].materialIdentities.size()
+                  << '\n';
+        for (const RetailXSurface &surface : result.worldXModels[1].surfaces)
+        {
+            WebEngineConvertedXModelSurface converted;
+            WebEngineXModelMaterialImageBinding binding;
+            const auto materialResult = WebEngine_SelectXModelColorMap(
+                result.worldXModels[1],
+                result.worldXModels[1].materialIdentities[surface.index],
+                binding);
+            const WebEnginePackedXSurfaceView view{
+                surface.retainedPackedVertices.data(),
+                surface.retainedPackedVertices.size(),
+                surface.vertCount,
+                surface.retainedPackedIndices.data(),
+                surface.retainedPackedIndices.size(),
+                surface.triCount,
+                result.worldXModels[1].materialIdentities[surface.index],
+            };
+            std::cerr << "  surface " << surface.index
+                      << " retained=" << surface.renderPayloadRetained
+                      << " material="
+                      << WebEngine_XModelMaterialResultString(materialResult)
+                      << " conversion=" << WebEngine_XModelSurfaceResultString(
+                            WebEngine_ConvertPackedXModelSurface(view, converted))
+                      << '\n';
+        }
+    }
+    Require(secondDrawResult == WebEngineXModelDrawListResult::Success &&
+        secondDrawList.renderer.draws.size() == 3u &&
+        secondDrawList.renderer.vertices.size() == 9u &&
+        secondDrawList.renderer.indices.size() == 9u,
+        "the second retained XModel builds a complete renderer draw list");
+
+    RetailCensusLimits limits;
+    limits.maxRetainedXModelRendererBytes = 1u;
+    RetailFastfileCensusJob bounded;
+    const auto file = BuildFile(BuildReusableWorldXModelLoaderInflated());
+    Require(bounded.BeginStreaming(
+            RetailCensusMode::WorldXModelLoader, limits) ==
+            RetailCensusError::None,
+        "the renderer-retention budget fixture starts");
+    Require(bounded.FeedSource(file, true) == RetailCensusError::None,
+        "the renderer-retention budget source is accepted");
+    while (bounded.Progress() == RetailCensusProgress::Running)
+        (void)bounded.Step();
+    RetailFastfileCensus boundedResult;
+    Require(bounded.Progress() == RetailCensusProgress::Succeeded &&
+        bounded.TakeResult(boundedResult) &&
+        boundedResult.worldXModels.size() == 2u &&
+        std::none_of(
+            boundedResult.worldXModels.begin(),
+            boundedResult.worldXModels.end(),
+            [](const RetailWorldXModel &model) {
+                return model.rendererPayloadAvailable;
+            }),
+        "the aggregate renderer-byte ceiling disables retention without rejecting inventory");
 }
 
 void TestPositiveIncrementalCensus()
@@ -1578,8 +1836,8 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
     std::ifstream input(path, std::ios::binary);
     Require(input.good(), "owned world surface diagnostic opens fastfile");
     RetailFastfileCensusJob job;
-    Require(job.BeginStreaming(RetailCensusMode::WorldSecondXModelDependencies) ==
-        RetailCensusError::None, "owned M34 diagnostic starts");
+    Require(job.BeginStreaming(RetailCensusMode::WorldXModelLoader) ==
+        RetailCensusError::None, "owned reusable XModel-loader diagnostic starts");
     std::vector<std::uint8_t> chunk(RETAIL_CENSUS_MAX_STEP_BYTES);
     std::uint32_t steps = 0u;
     while (job.Progress() == RetailCensusProgress::Running && steps++ < 10000u)
@@ -1606,32 +1864,46 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
         "owned world surface reaches dependency boundary");
     RetailFastfileCensus result;
     Require(job.TakeResult(result), "owned world surface result is available");
-    const RetailWorldXModel &model = result.worldFirstXModel;
-    const RetailWorldXModel &secondModel = result.worldSecondXModel;
+    Require(!result.worldXModels.empty(),
+        "owned M35 diagnostic publishes a model collection");
+    const RetailWorldXModel &model = result.worldXModels.front();
+    Require(result.worldXModels.size() >= 2u,
+        "owned M35 diagnostic preserves the M34 model prefix");
+    const RetailWorldXModel &secondModel = result.worldXModels.at(1u);
+    const RetailWorldXModel &finalModel = result.worldXModels.back();
     const auto &post = result.worldTechniqueSets.back();
-    std::cout << "owned M34 XModel dependencies: index=" << secondModel.assetIndex
-              << " name=" << secondModel.name
-              << " bones=" << static_cast<unsigned>(secondModel.numBones)
-              << '/' << static_cast<unsigned>(secondModel.numRootBones)
-              << " surfaces=" << static_cast<unsigned>(secondModel.surfaceCount)
-              << '/' << secondModel.surfaces.size()
-              << " vertices=" << secondModel.totalVertices
-              << " triangles=" << secondModel.totalTriangles
-              << " rigid-lists=" << secondModel.totalRigidVertLists
-              << " payload=" << secondModel.surfacePayloadBytes
-              << " material-handles=" << secondModel.materialReferences.size()
-              << " surface-block4=" << secondModel.surfacesBlock4Offset
-              << " handles-block4=" << secondModel.materialHandlesBlock4Offset
-              << " lods=" << secondModel.lodCount
-              << " collision-surfaces=" << secondModel.collisionSurfaceCount
-              << " radius=" << secondModel.radius
-              << " memory=" << secondModel.memoryUsage
-              << " boundary=" << secondModel.boundaryInflatedOffset
-              << " name-block4=" << secondModel.nameBlock4Offset
-              << " skeleton=" << secondModel.skeletonPrefixTraversed
+    const auto priorPostIt = std::find_if(
+        result.worldTechniqueSets.begin(), result.worldTechniqueSets.end(),
+        [](const RetailWorldTechniqueSet &entry) {
+            return entry.assetIndex == 20u;
+        });
+    Require(priorPostIt != result.worldTechniqueSets.end(),
+        "owned reusable loader retains the prior technique-set run");
+    const RetailWorldTechniqueSet &priorPost = *priorPostIt;
+    std::cout << "owned M35 XModel collection: count=" << result.worldXModels.size()
+              << " final-index=" << finalModel.assetIndex
+              << " name=" << finalModel.name
+              << " bones=" << static_cast<unsigned>(finalModel.numBones)
+              << '/' << static_cast<unsigned>(finalModel.numRootBones)
+              << " surfaces=" << static_cast<unsigned>(finalModel.surfaceCount)
+              << '/' << finalModel.surfaces.size()
+              << " vertices=" << finalModel.totalVertices
+              << " triangles=" << finalModel.totalTriangles
+              << " rigid-lists=" << finalModel.totalRigidVertLists
+              << " payload=" << finalModel.surfacePayloadBytes
+              << " material-handles=" << finalModel.materialReferences.size()
+              << " surface-block4=" << finalModel.surfacesBlock4Offset
+              << " handles-block4=" << finalModel.materialHandlesBlock4Offset
+              << " lods=" << finalModel.lodCount
+              << " collision-surfaces=" << finalModel.collisionSurfaceCount
+              << " radius=" << finalModel.radius
+              << " memory=" << finalModel.memoryUsage
+              << " boundary=" << finalModel.boundaryInflatedOffset
+              << " name-block4=" << finalModel.nameBlock4Offset
+              << " skeleton=" << finalModel.skeletonPrefixTraversed
               << " stop=" << (result.unsupportedOperation
                     ? result.unsupportedOperation : "complete") << '\n';
-    std::cout << "owned M31 final technique set: index=" << post.assetIndex
+    std::cout << "owned reusable-loader technique boundary: index=" << post.assetIndex
               << " name=" << post.name
               << " identity=" << post.identity
               << " published=" << post.published
@@ -1680,7 +1952,10 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
                       << " published=" << image.published << '\n';
     }
     Require(model.published && model.identity == 19u &&
+        model.rendererPayloadSelected && model.rendererPayloadAvailable &&
         model.materials.size() == 2u &&
+        model.resolvedMaterials.size() == 2u &&
+        model.resolvedImages.size() == 4u &&
         model.materials[0].name == "mc/mtl_street_light_02" &&
         model.materials[0].identity == 16u &&
         model.materials[1].name == "mc/mtl_street_light_bulb_02_off" &&
@@ -1689,25 +1964,18 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
             std::vector<std::uint32_t>{16u, 18u, 16u, 18u, 16u, 18u} &&
         model.collisionTriangleCount == 96u &&
         model.collisionPayloadBytes == 4696u &&
-        model.boundaryInflatedOffset == 67723u &&
-        result.block0HighWaterAtBoundary == 352u &&
-        result.block4CursorAtBoundary == 54188u &&
-        result.registryAssetCount == 32u &&
-        result.worldRegistryAliasCount == 33u &&
-        result.worldRegistryDefinedAliasCount == 33u,
+        model.boundaryInflatedOffset == 67723u,
         "owned M34 profile preserves the first XModel and technique-set run");
-    Require(post.assetIndex == 20u &&
-        post.name == ",mc_l_hsm_r0c0n0s0" &&
-        post.nullTechniqueReferences == 34u &&
-        post.identity == 27u && post.published &&
-        post.boundaryInflatedOffset == 69063u &&
+    Require(priorPost.assetIndex == 20u &&
+        priorPost.name == ",mc_l_hsm_r0c0n0s0" &&
+        priorPost.nullTechniqueReferences == 34u &&
+        priorPost.identity == 27u && priorPost.published &&
+        priorPost.boundaryInflatedOffset == 69063u &&
         result.worldPostXModelTechniqueSetAssetIndex == 13u &&
         result.worldPostXModelTechniqueSetPublished &&
-        result.worldPostXModelTechniqueSetBodiesEntered == 8u &&
-        result.worldPostXModelTechniqueSetCompletedCount == 8u &&
-        result.nextBodyIndex == 22u && result.nextBodyType == 3u &&
-        result.nextBodyReference == 0xffffffffu,
-        "owned M34 profile preserves the consecutive technique-set run");
+        result.worldPostXModelTechniqueSetBodiesEntered == 9u &&
+        result.worldPostXModelTechniqueSetCompletedCount == 8u,
+        "owned reusable loader preserves the completed technique-set prefix");
     Require(secondModel.assetIndex == 21u &&
         secondModel.name == "com_steel_ladder" &&
         secondModel.headerTraversed && secondModel.skeletonPrefixTraversed &&
@@ -1716,6 +1984,8 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
         secondModel.materialHandlesTraversed &&
         !secondModel.stoppedBeforeMaterialDependency &&
         !secondModel.stoppedBeforeSurfaceArray && secondModel.published &&
+        !secondModel.rendererPayloadSelected &&
+        secondModel.rendererPayloadAvailable &&
         secondModel.identity == 32u &&
         secondModel.numBones == 1u && secondModel.numRootBones == 1u &&
         secondModel.surfaceCount == 3u && secondModel.lodCount == 3 &&
@@ -1730,6 +2000,8 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
         secondModel.materialIdentities ==
             std::vector<std::uint32_t>{31u, 31u, 31u} &&
         secondModel.materialsTraversed && secondModel.materials.size() == 1u &&
+        secondModel.resolvedMaterials.size() == 1u &&
+        secondModel.resolvedImages.size() == 3u &&
         secondModel.materials[0].name == "mc/mtl_steel_ladder" &&
         secondModel.materials[0].identity == 31u &&
         secondModel.materials[0].techniqueSetIdentity == 24u &&
@@ -1741,7 +2013,7 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
         secondModel.boneInfoTraversed &&
         secondModel.boneInfoHash == 0x604bd5f6u &&
         secondModel.physPresetTraversed && secondModel.physGeomsTraversed &&
-        std::none_of(secondModel.surfaces.begin(), secondModel.surfaces.end(),
+        std::any_of(secondModel.surfaces.begin(), secondModel.surfaces.end(),
             [](const RetailXSurface &surface) {
                 return surface.renderPayloadRetained;
             }) &&
@@ -1749,10 +2021,83 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
         secondModel.radius > 200.69f && secondModel.radius < 200.70f &&
         secondModel.memoryUsage == 24551u &&
         secondModel.boundaryInflatedOffset == 112348u &&
-        secondModel.nameBlock4Offset == 38268u &&
-        result.completedAssetCount == 22u &&
-        result.unsupportedOperation == nullptr,
+        secondModel.nameBlock4Offset == 38268u,
         "owned M34 profile publishes the complete second XModel");
+    Require(result.worldXModels.size() == 3u &&
+        finalModel.assetIndex == 22u &&
+        finalModel.name == "com_steel_ladder_top" &&
+        finalModel.headerTraversed && finalModel.skeletonPrefixTraversed &&
+        finalModel.surfaceHeadersTraversed &&
+        finalModel.surfaceDependenciesTraversed &&
+        finalModel.materialHandlesTraversed && finalModel.materialsTraversed &&
+        finalModel.collisionSurfacesTraversed && finalModel.boneInfoTraversed &&
+        finalModel.physPresetTraversed && finalModel.physGeomsTraversed &&
+        finalModel.published && finalModel.identity == 33u &&
+        !finalModel.rendererPayloadSelected &&
+        finalModel.rendererPayloadAvailable &&
+        finalModel.numBones == 1u && finalModel.numRootBones == 1u &&
+        finalModel.surfaceCount == 4u && finalModel.lodCount == 4 &&
+        finalModel.surfaces.size() == 4u &&
+        finalModel.totalVertices == 660u && finalModel.totalTriangles == 420u &&
+        finalModel.totalRigidVertLists == 4u &&
+        finalModel.surfacePayloadBytes == 25008u &&
+        finalModel.materialReferences.size() == 4u &&
+        finalModel.materialIdentities ==
+            std::vector<std::uint32_t>{31u, 31u, 31u, 31u} &&
+        finalModel.materials.empty() &&
+        finalModel.resolvedMaterials.size() == 1u &&
+        finalModel.resolvedImages.size() == 3u &&
+        finalModel.collisionSurfaces.size() == 1u &&
+        finalModel.collisionTriangleCount == 228u &&
+        finalModel.collisionPayloadBytes == 10988u &&
+        finalModel.boneInfoHash == 0x499d1eceu &&
+        finalModel.memoryUsage == 21747u &&
+        finalModel.boundaryInflatedOffset == 148660u &&
+        finalModel.nameBlock4Offset == 54188u &&
+        std::any_of(finalModel.surfaces.begin(), finalModel.surfaces.end(),
+            [](const RetailXSurface &surface) {
+                return surface.renderPayloadRetained;
+            }) &&
+        result.completedAssetCount == 23u &&
+        result.registryAssetCount == 33u &&
+        result.worldRegistryAliasCount == 35u &&
+        result.worldRegistryDefinedAliasCount == 34u &&
+        result.block0HighWaterAtBoundary == 352u &&
+        result.block4CursorAtBoundary == 66689u &&
+        result.nextBodyIndex == 23u && result.nextBodyType == 5u &&
+        result.nextBodyReference == 0xffffffffu &&
+        !result.stoppedBeforeDifferentWorldAssetType &&
+        result.stoppedBeforeWorldTechniqueDependency &&
+        std::string(result.unsupportedOperation) == "Load_MaterialTechnique" &&
+        post.assetIndex == 23u && post.name == "sm2/mc_unlit" &&
+        post.nullTechniqueReferences == 16u &&
+        post.inlineTechniqueReferences == 2u &&
+        post.sharedTechniqueReferences == 0u &&
+        post.aliasTechniqueReferences == 16u &&
+        !post.published && post.identity == 0u &&
+        post.boundaryInflatedOffset == 148821u,
+        "owned reusable loader publishes every complete XModel then enters asset 23");
+    WebEngineXModelDrawList firstModelDrawList;
+    WebEngineXModelDrawList secondModelDrawList;
+    WebEngineXModelDrawList finalModelDrawList;
+    Require(WebEngine_BuildXModelDrawList(
+            model, firstModelDrawList) ==
+            WebEngineXModelDrawListResult::Success &&
+        !firstModelDrawList.renderer.draws.empty() &&
+        WebEngine_BuildXModelDrawList(
+            secondModel, secondModelDrawList) ==
+            WebEngineXModelDrawListResult::Success &&
+        !secondModelDrawList.renderer.draws.empty() &&
+        WebEngine_BuildXModelDrawList(
+            finalModel, finalModelDrawList) ==
+            WebEngineXModelDrawListResult::Success &&
+        !finalModelDrawList.renderer.draws.empty(),
+        "all three owned retained XModels resolve materials and build selectable draw lists");
+    std::cout << "owned selectable draw lists: first="
+              << firstModelDrawList.renderer.draws.size()
+              << " second=" << secondModelDrawList.renderer.draws.size()
+              << " third=" << finalModelDrawList.renderer.draws.size()
+              << '\n';
     for (const RetailXSurface &surface : secondModel.surfaces)
     {
         std::cout << "  M34 surface[" << surface.index << "] vertices="
@@ -1897,6 +2242,8 @@ int main(int argc, char **argv)
     TestWorldSecondXModelPrefixBoundary();
     TestWorldSecondXSurfacePrefixBoundary();
     TestWorldSecondXModelDependenciesBoundary();
+    TestWorldXModelCollectionBoundary();
+    TestReusableWorldXModelLoader();
     TestMalformedPrefixRecords();
     TestTechniqueTraversalFailures();
     TestEnvelopeAndAtomicity();

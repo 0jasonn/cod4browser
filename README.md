@@ -35,8 +35,10 @@ loss; valid wavelet/cubemap/volume or otherwise unsupported IWI layouts remain n
 metadata results. It uses the pinned Emscripten zlib 1.3.2 port rather than the
 legacy native zlib copy. Automated browser, portable C++, and fuzz-harness
 inputs are generated synthetic data only. The same renderer seam now also
-receives one bounded surface from the first fully published retail XModel in
-`killhouse.ff`. This is a retail model-surface render, not retail map/BSP
+receives a bounded first-LOD draw list from a selected fully published retail
+XModel in `killhouse.ff`; the launcher lists every retained renderable model and
+can replace the active draw list without reparsing the fastfile. This is a
+retail model preview, not retail map/BSP
 compatibility, general material rendering, a general virtual filesystem, or a
 playable game build.
 
@@ -290,8 +292,32 @@ collision-surface, bone-info, and null-physics stages. The owned
 single material `mc/mtl_steel_ladder` is identity 31 and resolves three images
 with identities 28–30. Its collision surface contributes 296 checked triangles
 and 14,252 bounded bytes. The first model remains the only renderer consumer.
-The next serialized body is inline XModel asset 22, making a repeatable XModel
-collection/loop the next boundary.
+The next serialized body is inline XModel asset 22.
+
+Milestone 35 replaces the first/second parser slots with a bounded XModel
+collection and loops the complete loader over consecutive inline models. Owned
+asset 22, `com_steel_ladder_top`, publishes as identity 33 with four surfaces,
+660 vertices, 420 triangles, 25,008 surface bytes, and 228 checked collision
+triangles. Its four material handles reuse identity 31. All 34 aliases are
+defined at the 148,660 inflated boundary, and traversal stops before inline
+technique-set asset 23. Eligible entries retain bounded renderer payload under
+the aggregate byte ceiling, with entry zero initially selected; the asset-23
+technique-set run is the next parsing boundary.
+
+Milestone 36 turns that collection path into a reusable XModel loader operation.
+The supported top-level dispatcher can now invoke the same bounded loader for
+consecutive or separated XModel runs, including after intervening technique
+sets, while a shared byte ceiling bounds retained first-LOD payloads and an
+explicit per-model flag records the active renderer choice. The browser
+selector replaces the renderer-owned draw list and typed color-map queue without
+reparsing, including material and image aliases owned by earlier models.
+Generated coverage proves `XModel -> technique sets -> XModel ->
+technique set` reuse. The owned loader publishes all three reached models and
+then enters asset 23, `sm2/mc_unlit`; it classifies 16 null, two inline, and 16
+alias technique references before stopping safely at the first nested
+`MaterialTechnique`. This proves reusable loader dispatch, not yet compatibility
+with every one of the 315 pre-world retail XModels; reaching those still depends
+on loaders for the intervening top-level asset classes.
 
 See [docs/web-port.md](docs/web-port.md) for the pinned toolchain, build steps,
 current boundary, validation limits, and next milestone, and see

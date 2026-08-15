@@ -186,10 +186,14 @@ EM_JS(
     BeginRetailWorldXModelDrawList,
     (uint32_t firstLodSurfaceIndex, uint32_t firstLodSurfaceCount,
      uint32_t drawCount, uint32_t textureCount,
-     uint32_t totalVertices, uint32_t totalIndices),
+     uint32_t totalVertices, uint32_t totalIndices, uint32_t modelIndex),
     {
-        const surface = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__
-            ?.worldInventory?.firstXModel?.renderSurface;
+        modelIndex = modelIndex >>> 0;
+        const selection = globalThis.__KISAKCOD_XMODEL_SELECTION_DETAIL__;
+        const model = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__
+            ?.worldInventory?.xmodels?.[modelIndex] ??
+            (selection?.modelIndex === modelIndex ? selection.model : null);
+        const surface = model?.renderSurface;
         if (!surface) return;
         surface.drawList = {
             state: drawCount ? "ready" : "unavailable",
@@ -209,10 +213,14 @@ EM_JS(
     AppendRetailWorldXModelDraw,
     (uint32_t surfaceIndex, uint32_t materialIdentity,
      uint32_t vertexCount, uint32_t triangleCount, uint32_t textureSlot,
-     const char *materialState, int retained),
+     const char *materialState, int retained, uint32_t modelIndex),
     {
-        const list = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__
-            ?.worldInventory?.firstXModel?.renderSurface?.drawList;
+        modelIndex = modelIndex >>> 0;
+        const selection = globalThis.__KISAKCOD_XMODEL_SELECTION_DETAIL__;
+        const model = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__
+            ?.worldInventory?.xmodels?.[modelIndex] ??
+            (selection?.modelIndex === modelIndex ? selection.model : null);
+        const list = model?.renderSurface?.drawList;
         if (!list) return;
         list.draws.push({
             surfaceIndex: surfaceIndex >>> 0,
@@ -229,10 +237,15 @@ EM_JS(
     void,
     AppendRetailWorldXModelDrawTexture,
     (uint32_t textureSlot, const char *materialName, const char *imageName,
-     const char *imagePath, uint32_t materialIdentity, uint32_t imageIdentity),
+     const char *imagePath, uint32_t materialIdentity, uint32_t imageIdentity,
+     uint32_t modelIndex),
     {
-        const list = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__
-            ?.worldInventory?.firstXModel?.renderSurface?.drawList;
+        modelIndex = modelIndex >>> 0;
+        const selection = globalThis.__KISAKCOD_XMODEL_SELECTION_DETAIL__;
+        const model = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__
+            ?.worldInventory?.xmodels?.[modelIndex] ??
+            (selection?.modelIndex === modelIndex ? selection.model : null);
+        const list = model?.renderSurface?.drawList;
         if (!list) return;
         list.textures.push({
             textureSlot: textureSlot >>> 0,
@@ -250,10 +263,15 @@ EM_JS(
     AppendRetailWorldXModelColorMap,
     (const char *state, const char *message, const char *materialName,
      const char *imageName, const char *imagePath,
-     uint32_t materialIdentity, uint32_t imageIdentity, uint32_t semantic),
+     uint32_t materialIdentity, uint32_t imageIdentity, uint32_t semantic,
+     uint32_t modelIndex),
     {
-        const surface = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__
-            ?.worldInventory?.firstXModel?.renderSurface;
+        modelIndex = modelIndex >>> 0;
+        const selection = globalThis.__KISAKCOD_XMODEL_SELECTION_DETAIL__;
+        const model = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__
+            ?.worldInventory?.xmodels?.[modelIndex] ??
+            (selection?.modelIndex === modelIndex ? selection.model : null);
+        const surface = model?.renderSurface;
         if (!surface) return;
         surface.colorMap = {
             state: UTF8ToString(state),
@@ -267,6 +285,33 @@ EM_JS(
             selectionSource: "typed-material-image-identity",
         };
     });
+
+EM_JS(
+    void,
+    BeginRetailWorldXModelSelection,
+    (uint32_t modelIndex, uint32_t assetIndex, uint32_t identity,
+     const char *name),
+    {
+        globalThis.__KISAKCOD_XMODEL_SELECTION_DETAIL__ = {
+            state: "ready",
+            modelIndex: modelIndex >>> 0,
+            assetIndex: assetIndex >>> 0,
+            identity: identity >>> 0,
+            name: UTF8ToString(name),
+            model: {},
+        };
+    });
+
+EM_JS(void, EndRetailWorldXModelSelection, (), {
+    const detail = globalThis.__KISAKCOD_XMODEL_SELECTION_DETAIL__;
+    delete globalThis.__KISAKCOD_XMODEL_SELECTION_DETAIL__;
+    if (detail) {
+        detail.renderSurface = detail.model.renderSurface ?? null;
+        delete detail.model;
+        globalThis.dispatchEvent(new CustomEvent(
+            "kisakcod:xmodel-selection", { detail }));
+    }
+});
 
 EM_JS(
     void,
@@ -492,7 +537,7 @@ EM_JS(
                 state: "ready",
                 stage: "asset-boundary",
                 path: "zone/english/killhouse.ff",
-                message: "Traversed the first XModel, post-model technique sets, and second XModel prefix",
+                message: "Ran the reusable bounded XModel loader through the supported top-level asset sequence",
                 fileSize: fileSize >>> 0,
                 sourceBytesRead: sourceBytesRead >>> 0,
                 sourceBytesConsumed,
@@ -523,6 +568,7 @@ EM_JS(
                 stoppedBeforeTechniqueDependency: Boolean(stoppedBeforeTechniqueDependency),
                 techniqueSets: [],
                 postXModelTechniqueSet: null,
+                xmodels: [],
                 firstXModel: null,
                 firstTechniqueSet: {
                     name: UTF8ToString(techniqueSetName),
@@ -655,11 +701,12 @@ EM_JS(
      int surfaceHeadersTraversed, int surfaceDependenciesTraversed,
      int materialHandlesTraversed, int stoppedBeforeSurfaceArray,
      int stoppedBeforeMaterialDependency, const char *unsupportedOperation,
-     int secondModel),
+     int rendererPayloadSelected, int rendererPayloadAvailable, int modelIndex),
     {
         const inventory = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory;
         if (!inventory) return;
-        inventory[secondModel ? "secondXModel" : "firstXModel"] = {
+        modelIndex = modelIndex >>> 0;
+        const model = {
             assetIndex: assetIndex >>> 0,
             name: UTF8ToString(name),
             numBones: numBones >>> 0,
@@ -720,12 +767,16 @@ EM_JS(
             materialHandlesTraversed: Boolean(materialHandlesTraversed),
             stoppedBeforeSurfaceArray: Boolean(stoppedBeforeSurfaceArray),
             stoppedBeforeMaterialDependency: Boolean(stoppedBeforeMaterialDependency),
+            rendererPayloadSelected: Boolean(rendererPayloadSelected),
+            rendererPayloadAvailable: Boolean(rendererPayloadAvailable),
             unsupportedOperation: UTF8ToString(unsupportedOperation),
             lods: [],
             boneNames: [],
             surfaces: [],
             materialReferences: [],
         };
+        inventory.xmodels[modelIndex] = model;
+        if (modelIndex === 0) inventory.firstXModel = model;
     });
 
 EM_JS(
@@ -734,10 +785,10 @@ EM_JS(
     (uint32_t index, double distance, uint32_t surfaceCount,
      uint32_t surfaceIndex, uint32_t partBits0, uint32_t partBits1,
      uint32_t partBits2, uint32_t partBits3, uint32_t lod,
-     uint32_t smcIndexPlusOne, uint32_t smcAllocBits, int secondModel),
+     uint32_t smcIndexPlusOne, uint32_t smcAllocBits, int modelIndex),
     {
         const inventory = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory;
-        const model = inventory?.[secondModel ? "secondXModel" : "firstXModel"];
+        const model = inventory?.xmodels?.[modelIndex >>> 0];
         if (!model) return;
         model.lods.push({
             index: index >>> 0,
@@ -756,10 +807,10 @@ EM_JS(
     void,
     AppendRetailWorldXModelBone,
     (uint32_t index, uint32_t scriptStringIndex,
-     const char *name, uint32_t classification, int secondModel),
+     const char *name, uint32_t classification, int modelIndex),
     {
         const inventory = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory;
-        const model = inventory?.[secondModel ? "secondXModel" : "firstXModel"];
+        const model = inventory?.xmodels?.[modelIndex >>> 0];
         if (!model) return;
         model.boneNames.push({
             index: index >>> 0,
@@ -780,10 +831,10 @@ EM_JS(
      uint32_t vertListReference, uint32_t blendWordCount,
      uint32_t verticesBlock7Offset, uint32_t vertListsBlock4Offset,
      uint32_t indicesBlock8Offset, uint32_t verticesHash,
-     uint32_t indicesHash, int dependenciesTraversed, int secondModel),
+     uint32_t indicesHash, int dependenciesTraversed, int modelIndex),
     {
         const inventory = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory;
-        const model = inventory?.[secondModel ? "secondXModel" : "firstXModel"];
+        const model = inventory?.xmodels?.[modelIndex >>> 0];
         if (!model) return;
         model.surfaces.push({
             index: index >>> 0,
@@ -824,10 +875,10 @@ EM_JS(
      uint32_t nodeCount, uint32_t nodesReference,
      uint32_t leafCount, uint32_t leafsReference,
      uint32_t nodesHash, uint32_t leafsHash, int treeTraversed,
-     int secondModel),
+     int modelIndex),
     {
         const inventory = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory;
-        const surface = inventory?.[secondModel ? "secondXModel" : "firstXModel"]
+        const surface = inventory?.xmodels?.[modelIndex >>> 0]
             ?.surfaces?.[surfaceIndex >>> 0];
         if (!surface) return;
         surface.rigidVertLists.push({
@@ -854,10 +905,10 @@ EM_JS(
 EM_JS(
     void,
     AppendRetailWorldXModelMaterialReference,
-    (uint32_t index, uint32_t reference, uint32_t identity, int secondModel),
+    (uint32_t index, uint32_t reference, uint32_t identity, int modelIndex),
     {
         const inventory = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory;
-        const model = inventory?.[secondModel ? "secondXModel" : "firstXModel"];
+        const model = inventory?.xmodels?.[modelIndex >>> 0];
         if (!model) return;
         model.materialReferences.push({
             index: index >>> 0,
@@ -874,10 +925,10 @@ EM_JS(
      uint32_t collisionPayloadBytes, uint32_t boneInfoHash,
      int materialsTraversed, int collisionSurfacesTraversed,
      int boneInfoTraversed, int physPresetTraversed,
-     int physGeomsTraversed, int published, int secondModel),
+     int physGeomsTraversed, int published, int modelIndex),
     {
         const inventory = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory;
-        const model = inventory?.[secondModel ? "secondXModel" : "firstXModel"];
+        const model = inventory?.xmodels?.[modelIndex >>> 0];
         if (!model) return;
         model.identity = identity >>> 0;
         model.offsets.collisionSurfacesBlock4 = collisionSurfacesBlock4Offset >>> 0;
@@ -902,10 +953,13 @@ EM_JS(
      uint32_t materialIdentity, uint32_t vertexCount, uint32_t triangleCount,
      uint32_t horizontalAxis, uint32_t verticalAxis,
      double minX, double minY, double minZ,
-     double maxX, double maxY, double maxZ),
+     double maxX, double maxY, double maxZ, uint32_t modelIndex),
     {
+        modelIndex = modelIndex >>> 0;
+        const selection = globalThis.__KISAKCOD_XMODEL_SELECTION_DETAIL__;
         const model = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__
-            ?.worldInventory?.firstXModel;
+            ?.worldInventory?.xmodels?.[modelIndex] ??
+            (selection?.modelIndex === modelIndex ? selection.model : null);
         if (!model) return;
         model.renderSurface = {
             state: UTF8ToString(state),
@@ -934,10 +988,10 @@ EM_JS(
      uint32_t textureTableBlock4Offset, uint32_t constantTableBlock4Offset,
      uint32_t stateBitsTableBlock4Offset, uint32_t constantsHash,
      uint32_t stateBitsHash, uint32_t identity, int published,
-     int secondModel),
+     int modelIndex),
     {
         const inventory = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory;
-        const model = inventory?.[secondModel ? "secondXModel" : "firstXModel"];
+        const model = inventory?.xmodels?.[modelIndex >>> 0];
         if (!model) return;
         model.materials.push({
             handleIndex: handleIndex >>> 0,
@@ -969,10 +1023,10 @@ EM_JS(
     (uint32_t materialIndex, uint32_t index, uint32_t nameHash,
      uint32_t nameStart, uint32_t nameEnd, uint32_t samplerState,
      uint32_t semantic, uint32_t imageReference,
-     uint32_t imageIdentity, int resolved, int secondModel),
+     uint32_t imageIdentity, int resolved, int modelIndex),
     {
         const inventory = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory;
-        const material = inventory?.[secondModel ? "secondXModel" : "firstXModel"]
+        const material = inventory?.xmodels?.[modelIndex >>> 0]
             ?.materials?.[materialIndex >>> 0];
         if (!material) return;
         material.textures.push({
@@ -997,10 +1051,10 @@ EM_JS(
      uint32_t resourceBytes, uint32_t headerBlock0Offset,
      uint32_t nameBlock4Offset, uint32_t loadDefBlock0Offset,
      uint32_t identity, int loadDefTraversed, int published,
-     int secondModel),
+     int modelIndex),
     {
         const inventory = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory;
-        const material = inventory?.[secondModel ? "secondXModel" : "firstXModel"]
+        const material = inventory?.xmodels?.[modelIndex >>> 0]
             ?.materials?.[materialIndex >>> 0];
         if (!material) return;
         material.images.push({
@@ -1030,10 +1084,10 @@ EM_JS(
      double maxX, double maxY, double maxZ,
      int32_t boneIndex, int32_t contents, int32_t surfaceFlags,
      uint32_t trianglesBlock4Offset, uint32_t trianglesHash,
-     int traversed, int secondModel),
+     int traversed, int modelIndex),
     {
         const inventory = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory;
-        const model = inventory?.[secondModel ? "secondXModel" : "firstXModel"];
+        const model = inventory?.xmodels?.[modelIndex >>> 0];
         if (!model) return;
         model.collisionSurfaces.push({
             index: index >>> 0,
@@ -1089,6 +1143,14 @@ EM_JS(void, EndRetailCensusReady, (), {
     const detail = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__;
     delete globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__;
     if (detail) {
+        const inventory = detail.worldInventory;
+        if (inventory) {
+            const selectedIndex = inventory.xmodels.findIndex(
+                (model) => model?.rendererPayloadSelected);
+            inventory.selectedXModelIndex = selectedIndex >= 0 ? selectedIndex : null;
+            inventory.selectedXModel = selectedIndex >= 0
+                ? inventory.xmodels[selectedIndex] : null;
+        }
         globalThis.dispatchEvent(new CustomEvent("kisakcod:retail-census", { detail }));
     }
 });
@@ -1205,10 +1267,28 @@ void Fail(const char *context, const char *reason)
     Web_Log(WebLogLevel::Error, "[kisakcod-web] Retail fastfile census failed: %s\n", message);
 }
 
+const kisak::fastfile::RetailWorldXModel *SelectedRetailXModel() noexcept
+{
+    const auto &models = g_runtime.worldInventory.worldXModels;
+    const auto selected = std::find_if(
+        models.begin(), models.end(),
+        [](const kisak::fastfile::RetailWorldXModel &model) {
+            return model.rendererPayloadSelected;
+        });
+    return selected == models.end() ? nullptr : &*selected;
+}
+
 RetailRenderSurfacePublication PublishRetailXModelSurface(bool shaderReady)
 {
     RetailRenderSurfacePublication publication;
-    const auto &model = g_runtime.worldInventory.worldFirstXModel;
+    const kisak::fastfile::RetailWorldXModel *selectedModel =
+        SelectedRetailXModel();
+    if (selectedModel == nullptr)
+    {
+        publication.message = "The retail world contains no renderer-selected XModel";
+        return publication;
+    }
+    const kisak::fastfile::RetailWorldXModel &model = *selectedModel;
     if (!shaderReady)
     {
         publication.message =
@@ -1218,7 +1298,7 @@ RetailRenderSurfacePublication PublishRetailXModelSurface(bool shaderReady)
     if (!model.published)
     {
         publication.message =
-            "The first XModel dependency chain was not fully published";
+            "The selected XModel dependency chain was not fully published";
         return publication;
     }
     if (model.lodCount > 0)
@@ -1273,7 +1353,7 @@ RetailRenderSurfacePublication PublishRetailXModelSurface(bool shaderReady)
 
     publication.state = "ready";
     publication.message =
-        "The bounded first-LOD XModel draw list is resident through the WebGL2 renderer seam";
+        "The selected bounded first-LOD XModel draw list is resident through the WebGL2 renderer seam";
     publication.mins = publication.drawList.mins;
     publication.maxs = publication.drawList.maxs;
     publication.horizontalAxis = publication.drawList.horizontalAxis;
@@ -1307,10 +1387,18 @@ RetailColorMapPublication SelectRetailXModelColorMap(
     const RetailRenderSurfacePublication &surface)
 {
     RetailColorMapPublication publication;
+    const kisak::fastfile::RetailWorldXModel *selectedModel =
+        SelectedRetailXModel();
+    if (selectedModel == nullptr)
+    {
+        publication.message = "The retail world contains no renderer-selected XModel";
+        publication.state = "unavailable";
+        return publication;
+    }
     if (std::string_view(surface.state) != "ready")
     {
         publication.result = WebEngine_SelectXModelColorMap(
-            g_runtime.worldInventory.worldFirstXModel,
+            *selectedModel,
             surface.materialIdentity,
             publication.binding);
         WebEngineAsset_RequireMaterialImageBinding();
@@ -1383,6 +1471,143 @@ RetailColorMapPublication SelectRetailXModelColorMap(
         binding.materialIdentity,
         binding.imageIdentity);
     return publication;
+}
+
+void DispatchRetailXModelSelection(
+    std::uint32_t modelIndex,
+    const kisak::fastfile::RetailWorldXModel &model,
+    const RetailRenderSurfacePublication &renderSurface,
+    const RetailColorMapPublication &colorMap)
+{
+    BeginRetailWorldXModelSelection(
+        modelIndex, model.assetIndex, model.identity, model.name.c_str());
+    AppendRetailWorldXModelRenderSurface(
+        renderSurface.state,
+        renderSurface.message,
+        renderSurface.surfaceIndex,
+        renderSurface.materialIdentity,
+        renderSurface.vertexCount,
+        renderSurface.triangleCount,
+        renderSurface.horizontalAxis,
+        renderSurface.verticalAxis,
+        renderSurface.mins[0], renderSurface.mins[1], renderSurface.mins[2],
+        renderSurface.maxs[0], renderSurface.maxs[1], renderSurface.maxs[2],
+        modelIndex);
+    BeginRetailWorldXModelDrawList(
+        renderSurface.drawList.firstLodSurfaceIndex,
+        renderSurface.drawList.firstLodSurfaceCount,
+        static_cast<std::uint32_t>(renderSurface.drawList.renderer.draws.size()),
+        static_cast<std::uint32_t>(renderSurface.drawList.textures.size()),
+        static_cast<std::uint32_t>(renderSurface.drawList.renderer.vertices.size()),
+        static_cast<std::uint32_t>(renderSurface.drawList.renderer.indices.size()),
+        modelIndex);
+    for (const auto &draw : renderSurface.drawList.surfaces)
+    {
+        AppendRetailWorldXModelDraw(
+            draw.surfaceIndex,
+            draw.materialIdentity,
+            draw.vertexCount,
+            draw.triangleCount,
+            draw.textureSlot,
+            WebEngine_XModelMaterialResultString(draw.materialResult),
+            draw.retained ? 1 : 0,
+            modelIndex);
+    }
+    for (std::size_t textureSlot = 0u;
+         textureSlot < renderSurface.drawList.textures.size(); ++textureSlot)
+    {
+        const auto &binding = renderSurface.drawList.textures[textureSlot];
+        AppendRetailWorldXModelDrawTexture(
+            static_cast<std::uint32_t>(textureSlot),
+            binding.materialName.c_str(),
+            binding.imageName.c_str(),
+            binding.imagePath.c_str(),
+            binding.materialIdentity,
+            binding.imageIdentity,
+            modelIndex);
+    }
+    AppendRetailWorldXModelColorMap(
+        colorMap.state,
+        colorMap.message,
+        colorMap.binding.materialName.c_str(),
+        colorMap.binding.imageName.c_str(),
+        colorMap.binding.imagePath.c_str(),
+        colorMap.binding.materialIdentity,
+        colorMap.binding.imageIdentity,
+        colorMap.binding.semantic,
+        modelIndex);
+    EndRetailWorldXModelSelection();
+}
+
+bool SelectRetailXModel(std::uint32_t modelIndex)
+{
+    auto &models = g_runtime.worldInventory.worldXModels;
+    if (g_runtime.phase != Phase::Finished)
+    {
+        Web_Log(
+            WebLogLevel::Error,
+            "[kisakcod-web] XModel selection rejected before the retail census finished.\n");
+        return false;
+    }
+    if (modelIndex >= models.size())
+    {
+        Web_Log(
+            WebLogLevel::Error,
+            "[kisakcod-web] XModel selection index %u is outside the published collection.\n",
+            modelIndex);
+        return false;
+    }
+    if (!models[modelIndex].published ||
+        !models[modelIndex].rendererPayloadAvailable)
+    {
+        Web_Log(
+            WebLogLevel::Error,
+            "[kisakcod-web] XModel %u '%s' has no complete retained renderer payload.\n",
+            modelIndex,
+            models[modelIndex].name.c_str());
+        return false;
+    }
+
+    const auto previous = std::find_if(
+        models.begin(), models.end(),
+        [](const kisak::fastfile::RetailWorldXModel &model) {
+            return model.rendererPayloadSelected;
+        });
+    const std::size_t previousIndex = previous == models.end()
+        ? models.size()
+        : static_cast<std::size_t>(previous - models.begin());
+    for (std::size_t index = 0u; index < models.size(); ++index)
+        models[index].rendererPayloadSelected = index == modelIndex;
+
+    const WebRendererShaderState shader =
+        WebRenderer_GetShaderCompatibilityState();
+    const RetailRenderSurfacePublication renderSurface =
+        PublishRetailXModelSurface(shader.retained);
+    if (std::string_view(renderSurface.state) != "ready")
+    {
+        for (std::size_t index = 0u; index < models.size(); ++index)
+            models[index].rendererPayloadSelected = index == previousIndex;
+        Web_Log(
+            WebLogLevel::Error,
+            "[kisakcod-web] XModel %u '%s' could not replace the render surface: %s.\n",
+            modelIndex,
+            models[modelIndex].name.c_str(),
+            renderSurface.message);
+        return false;
+    }
+
+    const RetailColorMapPublication colorMap =
+        SelectRetailXModelColorMap(renderSurface);
+    DispatchRetailXModelSelection(
+        modelIndex, models[modelIndex], renderSurface, colorMap);
+    if (std::string_view(colorMap.state) == "selected")
+        WebEngineAsset_Start();
+    Web_Log(
+        WebLogLevel::Info,
+        "[kisakcod-web] Selected retail XModel %u '%s' for rendering.\n",
+        modelIndex,
+        models[modelIndex].name.c_str());
+    return true;
 }
 
 void PublishReady()
@@ -1576,9 +1801,11 @@ void PublishReady()
             techniqueSet.identity,
             techniqueSet.published ? 1 : 0);
     }
-    const auto &xmodel = world.worldFirstXModel;
-    if (xmodel.headerTraversed)
+    if (!world.worldXModels.empty())
     {
+        const auto &xmodel = world.worldXModels.front();
+        if (xmodel.headerTraversed)
+        {
         FinalizeRetailPostXModelTechniqueSetRun(
             xmodel.assetIndex,
             world.worldPostXModelTechniqueSetAssetIndex,
@@ -1638,6 +1865,8 @@ void PublishReady()
             xmodel.stoppedBeforeSurfaceArray ? 1 : 0,
             xmodel.stoppedBeforeMaterialDependency ? 1 : 0,
             world.unsupportedOperation ? world.unsupportedOperation : "",
+            xmodel.rendererPayloadSelected ? 1 : 0,
+            xmodel.rendererPayloadAvailable ? 1 : 0,
             0);
         CompleteRetailWorldXModelDependencies(
             xmodel.identity,
@@ -1663,14 +1892,16 @@ void PublishReady()
             renderSurface.horizontalAxis,
             renderSurface.verticalAxis,
             renderSurface.mins[0], renderSurface.mins[1], renderSurface.mins[2],
-            renderSurface.maxs[0], renderSurface.maxs[1], renderSurface.maxs[2]);
+            renderSurface.maxs[0], renderSurface.maxs[1], renderSurface.maxs[2],
+            0u);
         BeginRetailWorldXModelDrawList(
             renderSurface.drawList.firstLodSurfaceIndex,
             renderSurface.drawList.firstLodSurfaceCount,
             static_cast<std::uint32_t>(renderSurface.drawList.renderer.draws.size()),
             static_cast<std::uint32_t>(renderSurface.drawList.textures.size()),
             static_cast<std::uint32_t>(renderSurface.drawList.renderer.vertices.size()),
-            static_cast<std::uint32_t>(renderSurface.drawList.renderer.indices.size()));
+            static_cast<std::uint32_t>(renderSurface.drawList.renderer.indices.size()),
+            0u);
         for (const auto &draw : renderSurface.drawList.surfaces)
         {
             AppendRetailWorldXModelDraw(
@@ -1680,7 +1911,8 @@ void PublishReady()
                 draw.triangleCount,
                 draw.textureSlot,
                 WebEngine_XModelMaterialResultString(draw.materialResult),
-                draw.retained ? 1 : 0);
+                draw.retained ? 1 : 0,
+                0u);
         }
         for (std::size_t textureSlot = 0u;
              textureSlot < renderSurface.drawList.textures.size(); ++textureSlot)
@@ -1692,7 +1924,8 @@ void PublishReady()
                 binding.imageName.c_str(),
                 binding.imagePath.c_str(),
                 binding.materialIdentity,
-                binding.imageIdentity);
+                binding.imageIdentity,
+                0u);
         }
         AppendRetailWorldXModelColorMap(
             colorMap.state,
@@ -1702,7 +1935,8 @@ void PublishReady()
             colorMap.binding.imagePath.c_str(),
             colorMap.binding.materialIdentity,
             colorMap.binding.imageIdentity,
-            colorMap.binding.semantic);
+            colorMap.binding.semantic,
+            0u);
         for (std::size_t index = 0u; index < xmodel.lods.size(); ++index)
         {
             const auto &lod = xmodel.lods[index];
@@ -1866,10 +2100,14 @@ void PublishReady()
                 surface.traversed ? 1 : 0,
                 0);
         }
+        }
     }
-    const auto &secondXModel = world.worldSecondXModel;
-    if (secondXModel.headerTraversed)
+    for (std::size_t xmodelIndex = 1u;
+         xmodelIndex < world.worldXModels.size(); ++xmodelIndex)
     {
+        const auto &secondXModel = world.worldXModels[xmodelIndex];
+        if (secondXModel.headerTraversed)
+        {
         BeginRetailWorldXModel(
             secondXModel.assetIndex,
             secondXModel.name.c_str(),
@@ -1924,7 +2162,9 @@ void PublishReady()
             secondXModel.stoppedBeforeSurfaceArray ? 1 : 0,
             secondXModel.stoppedBeforeMaterialDependency ? 1 : 0,
             world.unsupportedOperation ? world.unsupportedOperation : "",
-            1);
+            secondXModel.rendererPayloadSelected ? 1 : 0,
+            secondXModel.rendererPayloadAvailable ? 1 : 0,
+            static_cast<int>(xmodelIndex));
         CompleteRetailWorldXModelDependencies(
             secondXModel.identity,
             secondXModel.collisionSurfacesBlock4Offset,
@@ -1938,7 +2178,7 @@ void PublishReady()
             secondXModel.physPresetTraversed ? 1 : 0,
             secondXModel.physGeomsTraversed ? 1 : 0,
             secondXModel.published ? 1 : 0,
-            1);
+            static_cast<int>(xmodelIndex));
         for (std::size_t index = 0u; index < secondXModel.lods.size(); ++index)
         {
             const auto &lod = secondXModel.lods[index];
@@ -1952,7 +2192,7 @@ void PublishReady()
                 lod.lod,
                 lod.smcIndexPlusOne,
                 lod.smcAllocBits,
-                1);
+                static_cast<int>(xmodelIndex));
         }
         for (std::size_t index = 0u;
              index < secondXModel.boneNames.size(); ++index)
@@ -1965,7 +2205,7 @@ void PublishReady()
                 secondXModel.boneNameScriptStringIndices[index],
                 secondXModel.boneNames[index].c_str(),
                 classification,
-                1);
+                static_cast<int>(xmodelIndex));
         }
         for (const auto &surface : secondXModel.surfaces)
         {
@@ -1990,7 +2230,7 @@ void PublishReady()
                 surface.verticesHash,
                 surface.indicesHash,
                 surface.dependenciesTraversed ? 1 : 0,
-                1);
+                static_cast<int>(xmodelIndex));
             for (std::size_t index = 0u;
                  index < surface.rigidVertLists.size(); ++index)
             {
@@ -2013,7 +2253,7 @@ void PublishReady()
                     tree.nodesHash,
                     tree.leafsHash,
                     tree.traversed ? 1 : 0,
-                    1);
+                    static_cast<int>(xmodelIndex));
             }
         }
         for (std::size_t index = 0u;
@@ -2024,7 +2264,7 @@ void PublishReady()
                 secondXModel.materialReferences[index],
                 index < secondXModel.materialIdentities.size()
                     ? secondXModel.materialIdentities[index] : 0u,
-                1);
+                static_cast<int>(xmodelIndex));
         }
         for (std::size_t materialIndex = 0u;
              materialIndex < secondXModel.materials.size(); ++materialIndex)
@@ -2047,7 +2287,7 @@ void PublishReady()
                 material.stateBitsHash,
                 material.identity,
                 material.published ? 1 : 0,
-                1);
+                static_cast<int>(xmodelIndex));
             for (std::size_t textureIndex = 0u;
                  textureIndex < material.textures.size(); ++textureIndex)
             {
@@ -2063,7 +2303,7 @@ void PublishReady()
                     texture.imageReference,
                     texture.imageIdentity,
                     texture.resolved ? 1 : 0,
-                    1);
+                    static_cast<int>(xmodelIndex));
             }
             for (const auto &image : material.images)
             {
@@ -2084,7 +2324,7 @@ void PublishReady()
                     image.identity,
                     image.loadDefTraversed ? 1 : 0,
                     image.published ? 1 : 0,
-                    1);
+                    static_cast<int>(xmodelIndex));
             }
         }
         for (const auto &surface : secondXModel.collisionSurfaces)
@@ -2101,7 +2341,8 @@ void PublishReady()
                 surface.trianglesBlock4Offset,
                 surface.trianglesHash,
                 surface.traversed ? 1 : 0,
-                1);
+                static_cast<int>(xmodelIndex));
+        }
         }
     }
     for (std::uint32_t type = 0u; type < world.typeCounts.size(); ++type)
@@ -2144,6 +2385,12 @@ extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_StartRetailCensus()
 extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_CancelRetailCensus()
 {
     WebRetailCensusJob_Cancel();
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_SelectRetailXModel(
+    std::uint32_t modelIndex)
+{
+    return SelectRetailXModel(modelIndex) ? 1 : 0;
 }
 
 void WebRetailCensusJob_Start()
@@ -2291,7 +2538,7 @@ WebRetailCensusFrameResult WebRetailCensusJob_Frame()
                 g_runtime.completionStatus = WebFsStatus::Pending;
                 g_runtime.completionBytes.clear();
                 if (const auto error = g_runtime.parser.BeginStreaming(
-                        RetailCensusMode::WorldSecondXModelDependencies);
+                        RetailCensusMode::WorldXModelLoader);
                     error != RetailCensusError::None)
                 {
                     Fail("could not start world asset inventory", RetailCensusErrorString(error));

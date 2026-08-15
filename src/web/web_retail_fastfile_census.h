@@ -36,6 +36,7 @@ struct RetailCensusLimits
     std::uint32_t maxMaterialConstants = 64u;
     std::uint32_t maxMaterialStateBits = 64u;
     std::uint32_t maxXModelNameBytes = 255u;
+    std::uint32_t maxWorldXModels = 4096u;
     std::uint32_t maxXModelCollisionSurfaces = 4096u;
     std::uint32_t maxXModelSurfaceVertices = 1024u * 1024u;
     std::uint32_t maxXModelSurfaceTriangles = 1024u * 1024u;
@@ -43,6 +44,7 @@ struct RetailCensusLimits
     std::uint32_t maxXModelCollisionNodes = 1024u * 1024u;
     std::uint32_t maxXModelCollisionLeaves = 1024u * 1024u;
     std::uint32_t maxXModelSurfacePayloadBytes = 64u * 1024u * 1024u;
+    std::uint32_t maxRetainedXModelRendererBytes = 16u * 1024u * 1024u;
     std::uint32_t maxXModelCollisionTriangles = 1024u * 1024u;
     std::uint32_t maxXModelCollisionPayloadBytes = 64u * 1024u * 1024u;
 };
@@ -119,6 +121,7 @@ enum class RetailCensusError : std::uint8_t
     XModelNameInvalid,
     XModelNameTooLong,
     XModelCountInvalid,
+    XModelCollectionLimit,
     XModelBoundsInvalid,
     XModelScriptStringInvalid,
     XModelDependencyUnsupported,
@@ -159,6 +162,12 @@ enum class RetailCensusMode : std::uint8_t
     WorldSecondXModelPrefix,
     WorldSecondXSurfacePrefix,
     WorldSecondXModelDependencies,
+    // Runs the reusable bounded XModel loader whenever the supported top-level
+    // dispatcher encounters an inline XModel. Consecutive and separated model
+    // runs share the same operation; compatible technique-set bodies may occur
+    // between them.
+    WorldXModelLoader,
+    WorldXModelCollection = WorldXModelLoader,
 };
 
 enum class RetailCensusStage : std::uint8_t
@@ -457,6 +466,12 @@ struct RetailWorldXModel
     std::vector<std::uint32_t> materialReferences;
     std::vector<std::uint32_t> materialIdentities;
     std::vector<RetailXModelMaterial> materials;
+    // Deduplicated published material metadata reachable by this model,
+    // including aliases to materials owned by earlier XModels.
+    std::vector<RetailXModelMaterial> resolvedMaterials;
+    // Deduplicated published image metadata reachable by this model's
+    // materials, including aliases to images owned by earlier XModels.
+    std::vector<RetailXModelImage> resolvedImages;
     std::vector<RetailXModelCollisionSurface> collisionSurfaces;
     std::uint32_t totalVertices = 0u;
     std::uint32_t totalTriangles = 0u;
@@ -491,6 +506,10 @@ struct RetailWorldXModel
     bool boneInfoTraversed = false;
     bool physPresetTraversed = false;
     bool physGeomsTraversed = false;
+    // Renderer selection is a caller policy, not an XModel parsing rule.
+    // Eligible models can retain bounded payloads; entry zero starts selected.
+    bool rendererPayloadSelected = false;
+    bool rendererPayloadAvailable = false;
     bool published = false;
     bool stoppedBeforeSurfaceArray = false;
     bool stoppedBeforeMaterialDependency = false;
@@ -536,8 +555,7 @@ struct RetailFastfileCensus
     std::uint32_t worldPostXModelTechniqueSetAssetIndex = UINT32_MAX;
     std::uint32_t worldPostXModelTechniqueSetBodiesEntered = 0u;
     std::uint32_t worldPostXModelTechniqueSetCompletedCount = 0u;
-    RetailWorldXModel worldFirstXModel;
-    RetailWorldXModel worldSecondXModel;
+    std::vector<RetailWorldXModel> worldXModels;
     bool worldFirstTechniqueSetHeaderTraversed = false;
     bool worldFirstTechniqueSetPublished = false;
     bool stoppedBeforeWorldTechniqueDependency = false;
@@ -662,8 +680,13 @@ struct RetailFastfileCensus
 // introducing a standalone model-viewer path.
 // WorldSecondXModelDependencies completes that model's checked material/image,
 // collision, bone-info, and null-physics chain and publishes its reserved alias.
-// It retains serialized vertex/index bytes only for a renderer-bounded first
-// surface; decoding and graphics submission remain separate engine-side work.
+// WorldXModelLoader stores each model in a bounded collection and invokes the
+// same complete dependency path whenever the supported top-level dispatcher
+// encounters an inline XModel, including after intervening technique-set runs.
+// Renderer selection is explicit per model. Eligible first-LOD payloads share
+// an aggregate byte ceiling and may be switched without reparsing; decoding and
+// graphics submission remain separate engine-side work. WorldXModelCollection
+// remains an API-compatible alias for the former milestone name.
 // Native D3D9 creation is never invoked.
 class RetailFastfileCensusJob
 {

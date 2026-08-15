@@ -65,7 +65,9 @@ WebEngineXModelMaterialResult WebEngine_SelectXModelColorMap(
         return WebEngineXModelMaterialResult::InvalidSurfaceMaterial;
 
     const RetailXModelMaterial *selectedMaterial = nullptr;
-    for (const RetailXModelMaterial &material : model.materials)
+    const auto &resolvedMaterials = model.resolvedMaterials.empty()
+        ? model.materials : model.resolvedMaterials;
+    for (const RetailXModelMaterial &material : resolvedMaterials)
     {
         if (material.identity != surfaceMaterialIdentity) continue;
         if (selectedMaterial != nullptr)
@@ -89,14 +91,29 @@ WebEngineXModelMaterialResult WebEngine_SelectXModelColorMap(
         return WebEngineXModelMaterialResult::ImageUnresolved;
 
     const RetailXModelImage *selectedImage = nullptr;
-    for (const RetailXModelMaterial &material : model.materials)
+    if (!model.resolvedImages.empty())
     {
-        for (const RetailXModelImage &image : material.images)
+        for (const RetailXModelImage &image : model.resolvedImages)
         {
             if (image.identity != selectedTexture->imageIdentity) continue;
             if (selectedImage != nullptr)
                 return WebEngineXModelMaterialResult::ImageAmbiguous;
             selectedImage = &image;
+        }
+    }
+    else
+    {
+        // Preserve compatibility with manually constructed host-native test
+        // models that predate the parser's resolved-image catalog.
+        for (const RetailXModelMaterial &material : model.materials)
+        {
+            for (const RetailXModelImage &image : material.images)
+            {
+                if (image.identity != selectedTexture->imageIdentity) continue;
+                if (selectedImage != nullptr)
+                    return WebEngineXModelMaterialResult::ImageAmbiguous;
+                selectedImage = &image;
+            }
         }
     }
     if (!selectedImage || !selectedImage->published)
