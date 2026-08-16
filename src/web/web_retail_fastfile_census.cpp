@@ -8628,7 +8628,7 @@ struct RetailFastfileCensusJob::Impl
                         : (static_cast<std::size_t>(worldXAnimDeltaTransSize) + 1u) *
                             (parts.numframes >= 0x100u ? 2u : 1u);
                     storage.deltaTrans = AllocateFlexibleObject<XAnimPartTrans>(
-                        worldXAnimDeltaTransSize == 0u ? 16u : 32u + indexBytes);
+                        sizeof(XAnimPartTrans) + indexBytes);
                     if (!storage.deltaTrans)
                         return RetailCensusError::AllocationFailed;
                     storage.deltaTrans->size = worldXAnimDeltaTransSize;
@@ -8666,14 +8666,14 @@ struct RetailFastfileCensusJob::Impl
                     if (parts.numframes >= 0x100u)
                     {
                         auto *target = reinterpret_cast<std::uint16_t *>(
-                            reinterpret_cast<std::uint8_t *>(storage.deltaTrans.get()) + 32u);
+                            &storage.deltaTrans->u.frames.indices);
                         for (std::size_t index = 0u; index < count; ++index)
                             target[index] = ReadU16(record + index * 2u);
                     }
                     else
                     {
                         std::memcpy(
-                            reinterpret_cast<std::uint8_t *>(storage.deltaTrans.get()) + 32u,
+                            &storage.deltaTrans->u.frames.indices,
                             record, count);
                     }
                     worldXAnimPhase = WorldXAnimPhase::DeltaTransData;
@@ -8714,7 +8714,7 @@ struct RetailFastfileCensusJob::Impl
                         : (static_cast<std::size_t>(worldXAnimDeltaQuatSize) + 1u) *
                             (parts.numframes >= 0x100u ? 2u : 1u);
                     storage.deltaQuat = AllocateFlexibleObject<XAnimDeltaPartQuat>(
-                        worldXAnimDeltaQuatSize == 0u ? 8u : 8u + indexBytes);
+                        sizeof(XAnimDeltaPartQuat) + indexBytes);
                     if (!storage.deltaQuat)
                         return RetailCensusError::AllocationFailed;
                     storage.deltaQuat->size = worldXAnimDeltaQuatSize;
@@ -8743,14 +8743,14 @@ struct RetailFastfileCensusJob::Impl
                     if (parts.numframes >= 0x100u)
                     {
                         auto *target = reinterpret_cast<std::uint16_t *>(
-                            reinterpret_cast<std::uint8_t *>(storage.deltaQuat.get()) + 8u);
+                            &storage.deltaQuat->u.frames.indices);
                         for (std::size_t index = 0u; index < count; ++index)
                             target[index] = ReadU16(record + index * 2u);
                     }
                     else
                     {
                         std::memcpy(
-                            reinterpret_cast<std::uint8_t *>(storage.deltaQuat.get()) + 8u,
+                            &storage.deltaQuat->u.frames.indices,
                             record, count);
                     }
                     worldXAnimPhase = WorldXAnimPhase::DeltaQuatData;

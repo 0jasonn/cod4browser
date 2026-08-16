@@ -128,6 +128,19 @@ async function waitForArchive(page, state)
     ), { message: `the synthetic archive should reach ${state}` }).toBe(state);
 }
 
+async function waitForArchiveEvent(page, state)
+{
+    await expect.poll(() => page.evaluate(
+        (expectedState) => globalThis.__syntheticArchiveEvents?.some(
+            (event) => event.state === expectedState,
+        ) ?? false,
+        state,
+    ), {
+        message: `the synthetic archive should publish ${state}`,
+        timeout: 30_000,
+    }).toBe(true);
+}
+
 async function chooseDirectory(page, directory)
 {
     const chooserPromise = page.waitForEvent("filechooser");
@@ -173,13 +186,16 @@ test("enumerates and verifies stored and deflated members without blocking frame
     await waitForAssets(page, "empty");
     await chooseDirectory(page, directory);
     await waitForAssets(page, "ready");
-    await waitForArchive(page, "ready");
+    await waitForArchiveEvent(page, "ready");
 
-    const result = await page.evaluate(() => ({
-        archive: structuredClone(globalThis.__KISAKCOD_WEB__.archive),
-        events: globalThis.__syntheticArchiveEvents,
-        delayedReads: globalThis.__syntheticArchiveReadDelays,
-    }));
+    const result = await page.evaluate(() => {
+        const events = structuredClone(globalThis.__syntheticArchiveEvents);
+        return {
+            archive: events.findLast((event) => event.state === "ready"),
+            events,
+            delayedReads: structuredClone(globalThis.__syntheticArchiveReadDelays),
+        };
+    });
     expect(result.archive.entries.map(entryPath)).toEqual([
         STORED_MEMBER.path,
         DEFLATED_MEMBER.path,

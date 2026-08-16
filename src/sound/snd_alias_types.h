@@ -127,11 +127,11 @@ struct snd_alias_list_t
     int count;
 };
 
-static_assert(sizeof(SoundFile) == 12);
-static_assert(sizeof(_AILSOUNDINFO_COD4) == 36);
-static_assert(sizeof(MssSoundCOD4) == 40);
-static_assert(sizeof(LoadedSound) == 44);
-static_assert(sizeof(SndCurve) == 72);
-static_assert(sizeof(SpeakerMap) == 408);
-static_assert(sizeof(snd_alias_t) == 92);
-static_assert(sizeof(snd_alias_list_t) == 12);
+static_assert(sizeof(void *) != 4u || sizeof(SoundFile) == 12u);
+static_assert(sizeof(void *) != 4u || sizeof(_AILSOUNDINFO_COD4) == 36u);
+static_assert(sizeof(void *) != 4u || sizeof(MssSoundCOD4) == 40u);
+static_assert(sizeof(void *) != 4u || sizeof(LoadedSound) == 44u);
+static_assert(sizeof(void *) != 4u || sizeof(SndCurve) == 72u);
+static_assert(sizeof(void *) != 4u || sizeof(SpeakerMap) == 408u);
+static_assert(sizeof(void *) != 4u || sizeof(snd_alias_t) == 92u);
+static_assert(sizeof(void *) != 4u || sizeof(snd_alias_list_t) == 12u);

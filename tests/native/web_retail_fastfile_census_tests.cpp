@@ -2760,9 +2760,9 @@ void TestReusableWorldXAnimPartsLoader()
             parts.deltaPart->quat->u.frames.frames[1u][1u] == 13,
         "delta translation and quaternion frame pointers use canonical flexible structures");
     const auto *transIndices = reinterpret_cast<const std::uint8_t *>(
-        parts.deltaPart->trans) + 32u;
+        &parts.deltaPart->trans->u.frames.indices);
     const auto *quatIndices = reinterpret_cast<const std::uint8_t *>(
-        parts.deltaPart->quat) + 8u;
+        &parts.deltaPart->quat->u.frames.indices);
     Require(transIndices[0u] == 0u && transIndices[1u] == 9u &&
             quatIndices[0u] == 0u && quatIndices[1u] == 9u,
         "packed low-frame delta indices remain inline after their canonical headers");
