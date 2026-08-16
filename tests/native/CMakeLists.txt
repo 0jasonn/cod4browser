@@ -25,6 +25,43 @@ add_executable(canonical_asset_abi_tests
     "${KISAK_REPOSITORY_ROOT}/src/database/db_semantic_trace.cpp"
 )
 
+add_executable(qcommon_math_tests
+    "${CMAKE_CURRENT_LIST_DIR}/qcommon_math_tests.cpp"
+)
+
+add_executable(web_thread_context_tests
+    "${CMAKE_CURRENT_LIST_DIR}/web_thread_context_tests.cpp"
+    "${KISAK_REPOSITORY_ROOT}/src/web/web_thread_context.cpp"
+)
+
+if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    add_executable(gate3_com_init_trace_tests
+        "${CMAKE_CURRENT_LIST_DIR}/gate3_com_init_trace_tests.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/qcommon/com_init_trace.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/qcommon/common.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/qcommon/cmd_core.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/script/scr_memorytree.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/script/scr_stringlist.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/universal/com_constantconfigstrings.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/universal/com_memory_string.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/universal/com_shared.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/universal/dvar.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/universal/dvar_cmds.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/universal/q_shared.cpp"
+    )
+    target_compile_features(gate3_com_init_trace_tests PRIVATE cxx_std_20)
+    target_include_directories(gate3_com_init_trace_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
+    target_compile_definitions(gate3_com_init_trace_tests PRIVATE
+        KISAK_SP=1 KISAK_GATE3_COM_INIT_PREFIX=1 dNODEBUG=1)
+    if (MSVC)
+        target_compile_definitions(gate3_com_init_trace_tests PRIVATE WIN32=1)
+        target_compile_options(gate3_com_init_trace_tests PRIVATE /Gy /Gw /Zc:inline)
+        target_link_options(gate3_com_init_trace_tests PRIVATE /OPT:REF /OPT:ICF)
+    else()
+        target_compile_definitions(gate3_com_init_trace_tests PRIVATE KISAK_WEB=1)
+    endif()
+endif()
+
 add_executable(web_renderer_surface_tests
     "${CMAKE_CURRENT_LIST_DIR}/web_renderer_surface_tests.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_renderer_surface.cpp"
@@ -98,6 +135,11 @@ target_compile_features(iwi_image_tests PRIVATE cxx_std_20)
 target_include_directories(iwi_image_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
 target_compile_features(canonical_asset_abi_tests PRIVATE cxx_std_20)
 target_include_directories(canonical_asset_abi_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
+target_compile_features(qcommon_math_tests PRIVATE cxx_std_20)
+target_include_directories(qcommon_math_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
+target_compile_features(web_thread_context_tests PRIVATE cxx_std_20)
+target_include_directories(web_thread_context_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
+target_compile_definitions(web_thread_context_tests PRIVATE KISAK_SP=1)
 target_compile_features(web_renderer_surface_tests PRIVATE cxx_std_20)
 target_include_directories(web_renderer_surface_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
 target_compile_features(web_engine_world_surface_tests PRIVATE cxx_std_20)
@@ -138,6 +180,24 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "-sEXIT_RUNTIME=1"
         "-sNO_DISABLE_EXCEPTION_CATCHING"
     )
+    target_link_options(qcommon_math_tests PRIVATE
+        "-sENVIRONMENT=node"
+        "-sEXIT_RUNTIME=1"
+        "-sNO_DISABLE_EXCEPTION_CATCHING"
+    )
+    target_link_options(web_thread_context_tests PRIVATE
+        "-sENVIRONMENT=node"
+        "-sEXIT_RUNTIME=1"
+        "-sNO_DISABLE_EXCEPTION_CATCHING"
+    )
+    if (TARGET gate3_com_init_trace_tests)
+        target_link_options(gate3_com_init_trace_tests PRIVATE
+            "-sENVIRONMENT=node"
+            "-sEXIT_RUNTIME=1"
+            "-sNO_DISABLE_EXCEPTION_CATCHING"
+            "-sERROR_ON_UNDEFINED_SYMBOLS=1"
+        )
+    endif()
     target_link_options(web_renderer_surface_tests PRIVATE
         "-sENVIRONMENT=node"
         "-sEXIT_RUNTIME=1"
@@ -197,6 +257,11 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     set_target_properties(iwd_archive_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(iwi_image_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(canonical_asset_abi_tests PROPERTIES SUFFIX ".cjs")
+    set_target_properties(qcommon_math_tests PROPERTIES SUFFIX ".cjs")
+    set_target_properties(web_thread_context_tests PROPERTIES SUFFIX ".cjs")
+    if (TARGET gate3_com_init_trace_tests)
+        set_target_properties(gate3_com_init_trace_tests PROPERTIES SUFFIX ".cjs")
+    endif()
     set_target_properties(web_renderer_surface_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_engine_world_surface_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_fastfile_world_surface_tests PROPERTIES SUFFIX ".cjs")
@@ -214,6 +279,14 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:iwi_image_tests>")
     add_test(NAME canonical_asset_abi_tests
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:canonical_asset_abi_tests>")
+    add_test(NAME qcommon_math_tests
+        COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:qcommon_math_tests>")
+    add_test(NAME web_thread_context_tests
+        COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_thread_context_tests>")
+    if (TARGET gate3_com_init_trace_tests)
+        add_test(NAME gate3_com_init_trace_tests
+            COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:gate3_com_init_trace_tests>")
+    endif()
     add_test(NAME web_renderer_surface_tests
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_renderer_surface_tests>")
     add_test(NAME web_engine_world_surface_tests
@@ -266,6 +339,11 @@ else()
     add_test(NAME iwd_archive_tests COMMAND iwd_archive_tests)
     add_test(NAME iwi_image_tests COMMAND iwi_image_tests)
     add_test(NAME canonical_asset_abi_tests COMMAND canonical_asset_abi_tests)
+    add_test(NAME qcommon_math_tests COMMAND qcommon_math_tests)
+    add_test(NAME web_thread_context_tests COMMAND web_thread_context_tests)
+    if (TARGET gate3_com_init_trace_tests)
+        add_test(NAME gate3_com_init_trace_tests COMMAND gate3_com_init_trace_tests)
+    endif()
     add_test(NAME web_renderer_surface_tests COMMAND web_renderer_surface_tests)
     add_test(NAME web_engine_world_surface_tests COMMAND web_engine_world_surface_tests)
     add_test(NAME web_fastfile_world_surface_tests COMMAND web_fastfile_world_surface_tests)

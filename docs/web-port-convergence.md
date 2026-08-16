@@ -41,13 +41,15 @@ substitute as convergence.
 
 ## Snapshot
 
-Snapshot baseline: branch `web-port`, through complete canonical Killhouse
-`GfxWorld` publication at asset 772 and one bounded real-world WebGL2 draw in
-the current working tree.
+Snapshot baseline: branch `web-port`, through the first executable Gate 3
+`Com_Init` prefix while retaining complete canonical Killhouse `GfxWorld`
+publication at asset 772 and one bounded real-world WebGL2 draw.
 
-The production web target contains 37 C/C++ translation units: six outside
-`src/web` and 31 inside it. The non-web unit added before this milestone is the shared database semantic
-trace. This is only a source-inventory baseline; it is not
+The production web target contains 46 C/C++ translation units: 15 outside
+`src/web` and 31 inside it. The Gate 3 slice adds the real `common.cpp`,
+canonical dvar implementation, string-list/memory support, constant config
+strings, and shared qcommon utilities. This is only a source-inventory
+baseline; it is not
 a quality metric by itself because filesystem, lifecycle, and WebGL code should
 remain platform-owned.
 
@@ -84,11 +86,12 @@ been removed.
 | Browser launcher and legal asset selection | `WEB PLATFORM IMPLEMENTATION` | DOM file picker, exact-path validation, local manifest, and restore UI are genuine browser responsibilities. |
 | OPFS/IndexedDB asset persistence | `WEB PLATFORM IMPLEMENTATION` | Keep storage asynchronous in the host and hidden behind the filesystem boundary. |
 | Wasm filesystem bridge | `WEB PLATFORM IMPLEMENTATION` / partial | The browser I/O side is permanent. Its engine-facing API must converge on Kisak filesystem semantics rather than become a separate VFS used directly by game systems. |
-| Browser lifecycle, logging, and timing | `WEB PLATFORM IMPLEMENTATION` | Keep event-loop and page-lifecycle handling in `src/web`; expose narrow system calls to shared code. |
+| Browser lifecycle, logging, and timing | `WEB PLATFORM IMPLEMENTATION` | Event-loop and page-lifecycle handling remain in `src/web`. `common.cpp` now owns engine print formatting while `Sys_Print`/`Sys_Error` remain narrow platform sinks. |
+| System/thread context | `WEB PLATFORM IMPLEMENTATION` / partial | `qcommon/system.h` and `qcommon/thread_context.h` expose engine-visible critical sections, main-thread identity, CPU count, four `Sys_GetValue` slots, and the `jmp_buf` error boundary without D3D or Win32 header ownership. The Web implementation is deliberately single-threaded and reports no render/server thread. |
 | Cooperative scheduler | `TEMPORARY WEB SUBSTITUTE` | It currently advances bootstrap jobs and protects the main thread. Retain it for the present traversal, but do not spread its state machines through shared engine code. Long term, stage browser I/O outside a Worker-hosted synchronous-looking engine. |
-| Command system | `MODIFIED KISAK` / partial | `src/qcommon/cmd_core.cpp` implements the Kisak command APIs as a reduced portable core. Reconcile it with `src/qcommon/cmd.cpp` as more qcommon code compiles. |
-| Dvar system | `MODIFIED KISAK` / partial | `src/universal/dvar_core.cpp` is a reduced portable implementation. Preserve API and behavior parity and converge with the full dvar implementation. |
-| qcommon startup | `TEMPORARY WEB SUBSTITUTE` | The bounded pre-database shell proves ordering and I/O but is not `Com_Init`. Replace milestone-specific startup actions by compiling the real initialization path behind platform services. |
+| Command system | `MODIFIED KISAK` / partial | `src/qcommon/cmd_core.cpp` remains a reduced portable core and is now the principal command blocker. The Gate 3 prefix uses its canonical `Cbuf_Init`, `Cmd_Init`, tokenization, `set`, and `seta` surface; converge on `src/qcommon/cmd.cpp` rather than expanding it. |
+| Dvar system | `MODIFIED KISAK` / partial | Production Wasm now compiles canonical `src/universal/dvar.cpp` and `dvar_cmds.cpp`; `dvar_core.cpp` is retired from that target. Persistence, file parsing, localization-only commands, and tracking are gated beyond the current prefix and must return with their owning subsystems. |
+| qcommon startup | `MODIFIED KISAK` / partial plus `TEMPORARY WEB SUBSTITUTE` oracle | Real `common.cpp` now executes `Com_Init` in canonical order through `CCS_InitConstantConfigStrings` and stops before `PMem_Init/DB_SetInitializing`, with matching Win32 x86/Wasm traces. The old browser pre-database shell remains only because it still exercises asynchronous VFS header probing; do not expand it. |
 | Canonical database asset ABI | `SHARED KISAK` / partial | `RawFile`, `XAssetHeader`, `XAssetType`, and `XAsset` live in renderer-free `src/database/db_asset_types.h`. Canonical `XAnimParts`, `WeaponDef`, `LocalizeEntry`, XModel, Material, draw-surface key, FX, collision-plane, ClipMap, `ComWorld`, `ComPrimaryLight`, `GfxImage`, `GfxLightDef`, and the complete database-facing `GfxWorld` graph are isolated in lightweight shared type headers consumed by both native declarations and the portable loader. `GfxWorld` remains the 732-byte Win32 structure; its 44-byte vertex, 48-byte surface, DPVS, cell/portal, lighting, model, shadow, and dynamic records retain their original 32-bit contracts. Win32/Wasm tests enforce those layouts. Expand this extraction only when a real shared consumer requires another canonical type. |
 | IWD/ZIP reading | `MODIFIED KISAK` / partial | The bounded reader is portable and tested, but final integration should be through Kisak filesystem/database calls rather than a preview-only archive job. |
 | IWI decoding | `MODIFIED KISAK` / partial | Bounded DXT decoding is reusable. Connect it to canonical `GfxImage` loading and renderer upload instead of browser material queues. |
@@ -125,7 +128,7 @@ been removed.
 | Database semantic trace | `MODIFIED KISAK` / partial | A shared address-independent event format, exact hash, and portable contract hash now exist. The web loader emits bounded events; the native asset-array/RawFile generated path has an inert-by-default observer hook. MSVC compiles and passes the portable trace projection; full generated-loader execution still requires the monolithic native target and runtime prerequisites. |
 | Portable parser tests | `MODIFIED KISAK` / partial | Synthetic fixtures cover bounds and failure behavior. Native and Wasm suites include canonical ABI, trace determinism/limits, and the native-observer/web RawFile projection. A direct low-ceiling libFuzzer target now drives the real ordered dispatcher with malformed legal seeds; full generated native-loader execution remains a later environment-backed check. |
 | Playwright browser tests | `WEB PLATFORM IMPLEMENTATION` | Continue boot, storage, lifecycle, context-loss, and end-to-end boundary coverage with synthetic assets. |
-| Synthetic CI | `MODIFIED KISAK` / platform verification | GitHub Actions now builds and tests native Linux, sanitized parser/dispatcher fuzz targets, Win32 MSVC, Emscripten/Node differential contracts, Playwright smoke/full tiers, and a Release browser artifact. No retail assets are fetched or embedded. |
+| Synthetic CI | `MODIFIED KISAK` / platform verification | GitHub Actions builds and tests native Linux, sanitized parser/dispatcher fuzz targets, Win32 MSVC, Emscripten/Node differential contracts, Playwright smoke/full tiers, and a Release browser artifact. Every browser build also runs the strict undefined-symbol Gate 3 `Com_Init` check. No retail assets are fetched or embedded. |
 
 ## Convergence gates
 
@@ -248,9 +251,16 @@ been removed.
 Once Gate 2 renders enough geometry to prove the pipeline, stop broadening the
 viewer. Prioritize compile inventories and vertical initialization slices for:
 
-The initial [`Com_Init` inventory](gate-3-com-init-inventory.md) records the
-native call order, current browser substitutes, first Wasm compile blockers,
-platform ownership boundaries, and the first compile-led implementation slice.
+The first [`Com_Init` implementation inventory](gate-3-com-init-inventory.md)
+records the executed native order, temporary compile envelope, platform
+boundaries, matching Win32 x86/Wasm trace, and exact memory/database stop.
+
+The first runtime slice is complete: `common.cpp` is in production Wasm,
+`Com_Init` reaches `CCS_InitConstantConfigStrings`, and both platforms stop at
+`PMem_Init/DB_SetInitializing` with 10 trace stages, three startup-line
+segments, four commands, and 22 prefix dvars. Canonical `dvar.cpp` has replaced
+`dvar_core.cpp`; `cmd_core.cpp` remains temporary. No filesystem promise,
+Asyncify path, census-as-database call, or post-boundary subsystem was added.
 
 1. `Com_Init` and the real qcommon lifecycle.
 2. `DB_LoadXZone` and canonical asset ownership.
@@ -295,11 +305,11 @@ Update this section when a milestone changes architectural ownership.
 
 | Indicator | Required direction | Current reading |
 | --- | --- | --- |
-| Shared or narrowly modified Kisak code in the web target | Increase | Low but improving: six of 32 production translation units are outside `src/web`; canonical database asset types are directly consumable by Wasm and WeaponDef family mechanics are isolated for later DB integration. |
-| Browser-only engine substitutes | Decrease after their validation purpose is met | High: qcommon bootstrap, retail DB traversal, and temporary asset records remain substitutes. The XModel preview frontend is retired. |
+| Shared or narrowly modified Kisak code in the web target | Increase | Improving: 15 of 46 production translation units are outside `src/web`, including real `common.cpp`, canonical dvar/string-list/config-string code, shared database trace/types, and ODE math. |
+| Browser-only engine substitutes | Decrease after their validation purpose is met | High but falling: `dvar_core.cpp` is retired from production. `cmd_core.cpp`, the VFS qcommon oracle, retail DB traversal, and temporary nested asset records remain substitutes. The XModel preview frontend is retired. |
 | Permanent browser platform code | Stable and isolated | Good: launcher, storage, lifecycle, filesystem bridge, and WebGL2 are under explicit web boundaries. |
-| Native engine systems not compiled | Decrease sharply after the GfxWorld proof | High: DB, client, cgame, game, xanim, collision, and script VM are not in the web target. |
-| Native-vs-web semantic comparisons | Increase | Foundation present: shared trace format and the RawFile contract projection pass in both Wasm and Win32 MSVC. Execution of the generated native producer remains pending. |
+| Native engine systems not compiled | Decrease sharply after the GfxWorld proof | High: the qcommon prefix is now executing, but DB, client, cgame, game, xanim, collision, and script VM remain outside the web target. |
+| Native-vs-web semantic comparisons | Increase | The Gate 3 startup closure produces the same normalized 10-stage/3-startup/4-command/22-dvar trace in Win32 x86 and Wasm. Database trace and RawFile projections also pass; full generated native DB execution remains pending. |
 | Viewer-only feature work | Stop after world proof | Retired: the canonical world-to-WebGL2 seam is proven and the XModel preview UI, state, bridge, retained geometry, and multi-draw path have been removed. |
 
 ## Update rule

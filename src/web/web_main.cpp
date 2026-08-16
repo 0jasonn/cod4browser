@@ -1,5 +1,8 @@
 #include <ode/odemath.h>
 #include <qcommon/cmd.h>
+#include <qcommon/com_init_trace.h>
+#include <qcommon/qcommon.h>
+#include <qcommon/system.h>
 #include <universal/dvar.h>
 #include <web/web_archive_job.h>
 #include <web/web_cooperative_scheduler.h>
@@ -16,6 +19,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <csetjmp>
 
 namespace
 {
@@ -74,12 +78,19 @@ bool RunPhysicsMathSmokeTest()
 
 bool InitializeHeadlessEngineSlice()
 {
-    // Match the native relationship where dvar commands can be registered
-    // before Cmd_Init adds the built-in command set.  Neither initializer
-    // clears the other's registrations.
+    // Match the native entry envelope: dvars precede the canonical Com_Init
+    // error boundary, while command and core initialization remain owned by
+    // common.cpp in their native order.
     Dvar_Init();
-    Cbuf_Init();
-    Cmd_Init();
+    char commandLine[] = "+set gate3_startup wasm +seta gate3_archive 1";
+    Com_Init(commandLine);
+    const ComInitTraceSnapshot &trace = Com_GetInitTrace();
+    if (!trace.stopStage || std::strcmp(trace.stopStage, "PMem_Init/DB_SetInitializing") != 0 ||
+        std::strcmp(Dvar_GetString("gate3_startup"), "wasm") != 0 ||
+        std::strcmp(Dvar_GetString("gate3_archive"), "1") != 0)
+    {
+        return false;
+    }
 
     char limitedTokens[] = "first second token with spaces";
     Cmd_TokenizeStringWithLimit(limitedTokens, 2);
@@ -314,6 +325,12 @@ int main()
     // Establish the same lazy monotonic epoch used by the native system layer
     // before engine initialization begins.
     (void)Sys_Milliseconds();
+    Sys_InitializeCriticalSections();
+    Sys_InitMainThread();
+    static jmp_buf errorBoundary;
+    static va_info_t formattedText;
+    Sys_SetValue(1, &formattedText);
+    Sys_SetValue(2, &errorBoundary);
     Web_Log(WebLogLevel::Info, "[kisakcod-web] Browser system layer starting.\n");
     Web_EmitRuntimeState("loading", "Validating portable engine code");
 

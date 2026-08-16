@@ -2,10 +2,18 @@
 #include "scr_memorytree.h"
 #include "scr_stringlist.h"
 
+#if defined(KISAK_WEB) || defined(KISAK_GATE3_COM_INIT_PREFIX)
+#include <qcommon/system.h>
+#else
 #include <win32/win_local.h>
+#endif
 #include <qcommon/qcommon.h>
 #include <cstdint>
+#if defined(KISAK_WEB) || defined(KISAK_GATE3_COM_INIT_PREFIX)
+#define PROF_SCOPED(name) ((void)0)
+#else
 #include <universal/profile.h>
+#endif
 
 scrMemTreePub_t scrMemTreePub;
 int marker_scr_memorytree;

@@ -5,11 +5,15 @@
 #include <qcommon/mem_track.h>
 #include <qcommon/threads.h>
 
+#if !defined(KISAK_WEB) && !defined(KISAK_GATE3_COM_INIT_PREFIX)
 #include <EffectsCore/fx_system.h>
+#endif
 
 #include <string.h>
+#if !defined(KISAK_WEB) && !defined(KISAK_GATE3_COM_INIT_PREFIX)
 #include <gfx_d3d/r_model.h>
 #include "com_sndalias.h"
+#endif
 
 #include <setjmp.h>
 
@@ -164,10 +168,12 @@ static char value1[2][2][8192]; // main + render threads, no server
 
 void __cdecl TRACK_q_shared()
 {
+#ifndef KISAK_GATE3_COM_INIT_PREFIX
     TRACK_STATIC_ARR(va_info, 10);
     TRACK_STATIC_ARR(g_com_error, 10);
     TRACK_STATIC_ARR(g_traceThreadInfo, 10);
     TRACK_STATIC_ARR(value1, 10);
+#endif
 }
 
 uint8_t __cdecl ColorIndex(uint8_t c)
@@ -927,6 +933,7 @@ void __cdecl Info_SetValueForKey_Big(char *s, const char *key, const char *value
         Com_Printf(16, "Info string length exceeded. key: %s value: %s Info string: %s", key, value, s);
 }
 
+#ifndef KISAK_GATE3_COM_INIT_PREFIX
 bool __cdecl ParseConfigStringToStruct(
     uint8_t *pStruct,
     const cspField_t *pFieldList,
@@ -1133,4 +1140,5 @@ uint32_t __cdecl LongNoSwap(uint32_t color)
 {
     return color;
 }
+#endif
 

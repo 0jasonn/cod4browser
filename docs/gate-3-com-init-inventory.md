@@ -1,160 +1,152 @@
 # Gate 3 `Com_Init` inventory
 
-This inventory starts the Gate 3 runtime pivot. It records the current native
-startup sequence, the browser substitutes that must be retired, the first
-observed Wasm compile blockers, and the intended platform seams. It does not
-change loader, database, or runtime behavior.
+This inventory records the first executable Gate 3 runtime slice. The browser
+target now enters the canonical qcommon translation unit and advances in native
+order through constant-config-string initialization. It deliberately stops
+before physical-memory/database initialization; it does not claim to boot the
+game or load a zone through the Kisak runtime.
 
-## Current boundary
+## Executed boundary
 
-The web target does not compile `src/qcommon/common.cpp` and does not call
-`Com_Init`. It currently compiles:
+`KisakCOD-web` compiles `src/qcommon/common.cpp` with a temporary
+`KISAK_GATE3_COM_INIT_PREFIX` compile envelope. The envelope exists to keep
+post-boundary client, server, filesystem, database, D3D, sound, and Win32
+references out of this strict incremental link. It is compiled for both Win32
+x86 and Wasm, contains no browser lifecycle or asynchronous state machine, and
+must shrink and ultimately disappear as the canonical dependency closure
+advances.
 
-- `src/qcommon/cmd_core.cpp` instead of the canonical `cmd.cpp`;
-- `src/universal/dvar_core.cpp` instead of the canonical `dvar.cpp`;
-- `web_qcommon_preinit.*`, a deterministic header-probe state machine; and
-- `web_qcommon_runtime.*`, the browser-VFS adapter that advances that machine
-  through the cooperative frame scheduler.
-
-`web_main.cpp` separately calls `Dvar_Init`, `Cbuf_Init`, and `Cmd_Init` for a
-small command/dvar smoke path. After a validated import, the temporary qcommon
-machine allocates a 256 KiB arena, initializes a 64-entry event queue, registers
-five web startup dvars, and checks 26 allowlisted file headers. Its terminal
-`pre-database` state is an ordering and I/O proof; it is not an implementation
-of any native `Com_Init` prefix.
-
-The temporary machine remains useful as a regression oracle until real
-`Com_Init` reaches an equivalent observable boundary. It must not become the
-permanent engine lifecycle.
-
-## Native entry envelope
-
-The single-player Win32 entry point performs this work before `Com_Init`:
-
-1. initializes critical sections and main-thread state;
-2. initializes memory tracking and localization;
-3. calls `Com_InitParse` and `Dvar_Init`;
-4. initializes timing, system information, and profiling; and
-5. calls `Com_Init` with a mutable command-line buffer.
-
-Steam setup, splash windows, process-instance checks, and Win32 window-class
-registration are native host concerns and do not belong in the browser port.
-The parser, dvar, timing, thread-context, and profiling prerequisites require a
-shared or web-platform implementation before the real call is safe.
-
-`Com_Init` itself establishes the engine error boundary with the `Sys_GetValue`
-slot-2 `jmp_buf`, calls `Com_Init_Try_Block_Function`, applies startup commands,
-runs error cleanup, and finally starts renderer/hunk users when no server is
-running. The browser currently has no `Sys_GetValue`/thread-context equivalent
-for that error boundary.
-
-## Canonical initialization order
-
-The important order in `Com_Init_Try_Block_Function` is:
-
-| Phase | Canonical calls | Current web status |
-| --- | --- | --- |
-| Core parsing | `Com_ParseCommandLine`, `SL_Init`, `Swap_Init` | Command-line parsing is uncompiled; string-list initialization is uncompiled; byte-swap initialization is uncompiled. |
-| Commands and dvars | `Cbuf_Init`, `Cmd_Init`, `Com_StartupVariable`, `Com_InitDvars`, `CCS_InitConstantConfigStrings` | Reduced command/dvar cores exist, but the real implementations and `Com_Init` sequencing are uncompiled. |
-| Database allocation envelope | `PMem_Init`, `DB_SetInitializing`, `PMem_BeginAlloc`, `Com_InitXAssets`/`DB_InitThread` | Canonical database structures are used by the Gate 1/2 loader, but these runtime owners are uncompiled. |
-| Filesystem and configs | `CL_InitKeyCommands`, `FS_InitFilesystem`, `Con_InitChannels`, `Com_StartupConfigs`, `Cbuf_Execute` | The browser VFS is asynchronous at its host boundary. Native synchronous filesystem/config behavior is uncompiled. |
-| Hunk and diagnostics | `Com_InitHunkMemory`, `Hunk_InitDebugMemory`, `ProfLoad_Init`, command registration, version dvars | Uncompiled. Native memory sizing and profile assumptions need an explicit Wasm inventory. |
-| System and script runtime | `Sys_Init`, `Scr_InitVariables`, `Scr_Init`, `Com_SetScriptSettings`, `XAnimInit`, `DObjInit` | Browser timing/logging exist; the system entry contract, script VM, xanim, and DObj runtime are uncompiled. |
-| Game/client runtime | `SV_Init`, `CL_InitOnceForAllClients`, `CL_Init` | Uncompiled. Gate 3 should preserve the single-player order rather than invent a browser lifecycle. |
-| Platform backends | `SND_InitDriver`, `R_InitThreads`, `CL_InitRenderer`, `SND_Init`, `SV_InitServerThread` | WebGL2 resource ownership exists, but the Kisak renderer frontend is uncompiled. Audio and server-thread adapters are absent. |
-| Completion | intro command, `PMem_EndAlloc`, `DB_SetInitializing(false)`, `com_fullyInitialized` | Uncompiled. Bink playback must remain disabled or use a browser-owned replacement. |
-
-## First Wasm compile probe
-
-The initial read-only syntax probe was:
+The executed order is:
 
 ```text
-em++ -std=c++20 -DKISAK_WEB=1 -DKISAK_SP=1 -DdNODEBUG=1 \
-  -Isrc -Ideps -fsyntax-only src/qcommon/common.cpp
+Com_Init
+  -> setjmp(Sys_GetValue(2))
+  -> Com_Init_Try_Block_Function
+     -> Com_ParseCommandLine
+     -> SL_Init
+     -> Swap_Init
+     -> Cbuf_Init
+     -> Cmd_Init
+     -> Com_StartupVariable
+     -> Com_InitDvars
+     -> CCS_InitConstantConfigStrings
+     -> STOP before PMem_Init / DB_SetInitializing
 ```
 
-It stops before parsing `common.cpp` because `qcommon.h` unconditionally
-includes `xmmintrin.h` and `intrin.h`. Emscripten reports that SSE is not enabled
-and cannot supply the next Windows `intrin.h`. `qcommon.h` uses `_mm_cvtss_si32`
-for `SnapFloatToInt`; this requires a narrow portable implementation or a
-platform-selected intrinsic, not enabling x86 SSE for Wasm.
+No stage is skipped to reach a later call. The stop is immediately before the
+native `IsFastFileLoad()` branch would enter `PMem_Init`,
+`DB_SetInitializing(true)`, and `$init` allocation. `FS_InitFilesystem` is
+later in the same canonical function and is also intentionally unreachable.
 
-The next known blockers, once that header is portable, are:
+The production launcher supplies a mutable startup line containing `set` and
+`seta`, initializes `Dvar_Init`, main-thread identity, `va_info`, and the
+slot-2 `jmp_buf`, and then calls `Com_Init`. The browser event
+`kisakcod:gate3-init` publishes the normalized result only after the stop is
+reached.
 
-- `common.cpp` directly includes `win32/win_local.h`, `win_net_debug.h`,
-  `win_storage.h`, and D3D renderer headers;
-- the web target defines only `KISAK_WEB`; the offline target also needs an
-  explicit single-player compile identity without inheriting Win32 behavior;
-- `web_system.cpp` currently supplies the lightweight `Com_Printf`, while
-  `common.cpp` owns the canonical implementation, so linking both would create
-  a duplicate symbol;
-- canonical `Com_Printf`/logging uses native filesystem locking and Windows CRT
-  spellings, which need a platform log/file boundary;
-- `Sys_GetValue`, main-thread identity, critical sections, and the initialization
-  `jmp_buf` slots currently come from the native thread/system layer;
-- filesystem/config and database initialization are synchronous-looking engine
-  operations, while the current Wasm module runs on the DOM thread with an
-  asynchronous JavaScript VFS;
-- the full `Com_Init` translation unit references client, server, script,
-  xanim, DObj, sound, renderer, hunk, profiling, and error-cleanup code, and the
-  web link intentionally rejects undefined symbols; and
-- native renderer, sound, Bink, raw networking, Steam, and server-thread
-  implementations cannot be linked as accidental closure.
+## Semantic checkpoint
 
-These are compile and ownership blockers, not reasons to reproduce `Com_Init`
-as another browser-only state machine.
+The same source closure executes in a strict Emscripten/Node target and a
+Win32 x86 target. Both currently report:
 
-## Owned Gate 2 oracle carried into Gate 3
+```text
+gate3-trace stages=10 startup=3 commands=4 dvars=22 stop=PMem_Init/DB_SetInitializing
+```
 
-The post-cleanup owned browser run confirmed that canonical
-`maps/killhouse.d3dbsp` surface 6077 was submitted as 2,009 vertices and 128
-triangles, became a resident 384-index renderer surface, and produced an
-instrumented WebGL2 384-index draw. The native and Wasm observations agree on
-the world, surface, geometry, and draw but currently report different material
-names for that surface: native reports `wc/decal_porterjustice8`, while Wasm
-reports `wc/me_cinderblock_wall2_top`. The retired preview path is not involved
-in either observation, and the bounded world proof does not use this name to
-select a texture. Preserve this mismatch as a Gate 3 native/Wasm regression
-oracle; do not conceal it by hard-coding either name or by adding a browser-only
-material translation.
+The trace records the ten ordered stage labels, the stop stage, registered
+command count, and the 22 dvar names registered by the prefix. Tests also check
+representative defaults and flags, including `useFastFile`, `developer`,
+`com_timescale`, `sys_smp_allowed`, and the archived startup dvar. It contains
+no addresses, OS handles, or browser objects.
 
-## Ownership decisions
+`tools/build_web.ps1` builds and runs the dedicated
+`check-gate3-com-init` target on every browser build. That target retains
+`ERROR_ON_UNDEFINED_SYMBOLS=1`; the checkpoint cannot pass by accepting an
+unresolved closure.
 
-Retain or adapt shared Kisak behavior for command-line parsing, command/dvar
-semantics, string lists, byte swapping, initialization ordering, memory owners,
-database startup, script/xanim/DObj initialization, client/server startup, and
-error cleanup.
+## Newly shared or adapted engine code
 
-Keep browser timing, filesystem host calls, worker lifecycle, canvas/context,
-audio unlock, persistent storage, and logging sinks behind platform APIs. The
-preferred execution model remains a main-thread launcher/file picker plus a
-dedicated Worker containing the engine Wasm, a synchronous-style engine
-filesystem, and OffscreenCanvas/WebGL2. This inventory does not justify
-Asyncify or pthreads.
+The production Wasm target now compiles these additional Kisak translation
+units:
 
-Do not compile the D3D backend, native Bink/Miles/Steam integrations, or raw
-socket transport into Wasm. Do not weaken `ERROR_ON_UNDEFINED_SYMBOLS` to make
-the dependency closure appear complete.
+- `qcommon/common.cpp` and the normalized `qcommon/com_init_trace.cpp`;
+- `script/scr_memorytree.cpp` and `script/scr_stringlist.cpp`;
+- `universal/com_constantconfigstrings.cpp`;
+- the canonical `universal/dvar.cpp` and `universal/dvar_cmds.cpp`;
+- `universal/q_shared.cpp` and `universal/com_shared.cpp`; and
+- the exact shared-string allocation operations extracted into
+  `universal/com_memory_string.cpp`.
 
-## First implementation slice
+The canonical dvar implementation replaces `universal/dvar_core.cpp` in the
+production Web target. Gate-prefix compilation excludes dvar persistence,
+filesystem parsing, localization-only commands, and memory-tracker reporting
+that are not reachable before the stop; those functions remain unchanged for
+normal native builds. The reduced `qcommon/cmd_core.cpp` is still temporary.
+Only its canonical `Cbuf_Init`, `Cmd_Init`, tokenization, `set`, and `seta`
+closure is used here. Full `cmd.cpp` remains the main command-system convergence
+task for the next slice.
 
-The first Gate 3 implementation should be deliberately compile-led:
+## Portable and platform boundaries
 
-1. make the shared qcommon rounding/intrinsic helpers compile for Wasm without
-   changing serialized or native behavior;
-2. add an explicit web single-player compile identity and a compile-only
-   `common.cpp` inventory target;
-3. remove direct platform-header ownership from `common.cpp` through narrow
-   system, logging, timing, and thread-context interfaces;
-4. reconcile the reduced command/dvar cores with canonical `cmd.cpp`/`dvar.cpp`
-   rather than expanding their parallel behavior; and
-5. grow the link closure in canonical initialization order, recording each
-   genuine platform dependency and stopping before asynchronous filesystem or
-   database work is invoked on the DOM thread.
+Shared qcommon headers no longer unconditionally require x86 SSE or Windows
+intrinsics. `SnapFloatToInt` keeps `_mm_cvtss_si32` on native Windows x86/x64
+and uses `std::nearbyint` on Wasm and other portable targets. Native and Wasm
+tests cover its rounding behavior. Serialized/database structures are
+unchanged.
 
-The first runtime checkpoint should come from the real `Com_Init` path and have
-a native/Wasm semantic trace for initialization order, command-line startup
-variables, dvar registrations, and failure stage. Only after that checkpoint is
-stable should `web_qcommon_preinit.*` and `web_qcommon_runtime.*` be retired.
+The Web target explicitly defines `KISAK_WEB=1` and `KISAK_SP=1`. It does not
+inherit `WIN32` and does not enable D3D9, Miles, Bink, Steam, raw sockets, or a
+native server thread.
 
-No Gate 3 runtime implementation is included in this inventory pass.
+The browser-owned platform implementations are narrow:
+
+- `qcommon/system.h` declares critical-section, CPU-count, value-slot, sleep,
+  and fatal-error services without requiring renderer headers;
+- `qcommon/thread_context.h` owns engine thread identities independently of
+  D3D backend declarations;
+- `web_thread_context.cpp` provides one main-thread context, four engine-visible
+  value slots, deterministic critical-section semantics, and explicitly false
+  render/server-thread identities;
+- `web_system.cpp` owns `Sys_Print` and `Sys_Error`, while `common.cpp` owns
+  `Com_PrintMessage`/`Com_Printf` formatting and ordering; and
+- `web_assertive.cpp` routes shared assertions to the platform fatal-error
+  sink.
+
+This preserves the semantic role of `Sys_GetValue(2)` and `setjmp`/`longjmp`
+without putting DOM error flow into qcommon. The first target stays
+single-threaded and does not imply pthread or Worker-thread availability.
+
+## Remaining canonical order
+
+| Next phase | Native owner | Current blocker/decision |
+| --- | --- | --- |
+| `PMem_Init`, `DB_SetInitializing`, `PMem_BeginAlloc` | physical memory and database runtime | Requires a measured Wasm memory-owner design and real DB allocation semantics. Do not substitute the retail census. |
+| `Com_InitXAssets` / DB thread startup | canonical database | Must converge on `DB_LoadXZone` and canonical ownership; no browser parser shortcut is permitted. |
+| `CL_InitKeyCommands` | client command system | Requires the full canonical command closure, beginning with replacing `cmd_core.cpp`. |
+| `FS_InitFilesystem`, configs, `Cbuf_Execute` | Kisak filesystem/config system | Engine calls are synchronous-looking, while the current DOM-host VFS boundary is asynchronous. The preferred resolution remains a Worker-hosted engine with staged browser I/O, not promises in qcommon or automatic Asyncify. |
+| hunk, script, xanim/DObj, server/client, renderer/audio | shared runtime plus platform backends | Out of scope until the memory/DB/filesystem boundary is designed and the preceding order runs. |
+
+The immediate next slice should inventory and implement the smallest real
+`PMem_Init`/database allocation envelope while compiling more canonical
+`cmd.cpp`. It should stop again before initiating zone I/O unless a documented
+synchronous Worker filesystem boundary is available.
+
+## Temporary bootstrap and Gate 2 oracle
+
+`web_qcommon_preinit.*` and `web_qcommon_runtime.*` remain regression
+infrastructure. The real prefix now reaches a stronger canonical ordering
+checkpoint, but it does not yet perform their bounded browser-VFS header probe,
+so retiring them would remove coverage rather than eliminate a duplicate
+runtime. They must not gain new engine lifecycle behavior and should be removed
+once the real FS/DB path provides an equivalent observable boundary.
+
+Gate 2 loaders, canonical `GfxWorld`, the bounded Killhouse adapter, WebGL2
+draw, and retail census tests remain unchanged and green. The diagnostic
+material discrepancy remains unresolved and visible:
+
+```text
+native: wc/decal_porterjustice8
+Wasm:   wc/me_cinderblock_wall2_top
+```
+
+No name was hard-coded and no translation table was added.

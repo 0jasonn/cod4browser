@@ -1,20 +1,39 @@
 #include <universal/q_shared.h>
 #include <qcommon/qcommon.h>
 
+#if defined(KISAK_WEB) || defined(KISAK_GATE3_COM_INIT_PREFIX)
+#include <qcommon/system.h>
+#else
 #include <Windows.h>
 #include <win32/win_local.h>
+#endif
 #include <qcommon/cmd.h>
 #include "com_files.h"
 #include "com_memory.h"
 #include <stringed/stringed_hooks.h>
 #include "q_parse.h"
+#if !defined(KISAK_WEB) && !defined(KISAK_GATE3_COM_INIT_PREFIX)
 #include <gfx_d3d/r_dvars.h>
 #include <win32/win_net.h>
 #include <devgui/devgui.h>
+#endif
+#if !defined(KISAK_WEB) && !defined(KISAK_GATE3_COM_INIT_PREFIX)
 #include "com_math.h"
+#endif
 #include "memfile.h"        // Dvar_Save/LoadDvars
 
 #include <algorithm>
+
+#if defined(KISAK_WEB) || defined(KISAK_GATE3_COM_INIT_PREFIX)
+#define CLAMP(value, minimum, maximum) std::clamp((value), (minimum), (maximum))
+namespace
+{
+bool Dvar_Vec4Compare(const float *lhs, const float *rhs)
+{
+    return lhs[0] == rhs[0] && lhs[1] == rhs[1] && lhs[2] == rhs[2] && lhs[3] == rhs[3];
+}
+}
+#endif
 
 #ifdef KISAK_MP
 #include <client_mp/client_mp.h>
@@ -110,6 +129,7 @@ void __cdecl Dvar_GetCombinedString(char *combined, int first)
     }
 }
 
+#ifndef KISAK_GATE3_COM_INIT_PREFIX
 void __cdecl Dvar_WriteVariables(int f)
 {
     Dvar_ForEach((void(__cdecl *)(const dvar_s *, void *))Dvar_WriteSingleVariable, &f);
@@ -151,6 +171,7 @@ void __cdecl Dvar_WriteSingleDefault(const dvar_s *dvar, int *userData)
         }
     }
 }
+#endif
 
 void __cdecl PBdvar_set(const char *var_name, char *value)
 {
@@ -764,7 +785,11 @@ int __cdecl Dvar_ValuesEqual(uint8_t type, DvarValue val0, DvarValue val1)
         result = v5;
         break;
     case 4u:
+#if defined(KISAK_WEB) || defined(KISAK_GATE3_COM_INIT_PREFIX)
+        result = Dvar_Vec4Compare(&val0.value, &val1.value);
+#else
         result = Vec4Compare(&val0.value, &val1.value);
+#endif
         break;
     case 5u:
         result = val0.integer == val1.integer;
@@ -2707,6 +2732,11 @@ void __cdecl Dvar_SetCommand(const char *dvarName, char *string)
     }
 }
 
+void Dvar_SetCommand(const char *dvarName, const char *string)
+{
+    Dvar_SetCommand(dvarName, const_cast<char *>(string));
+}
+
 void __cdecl Dvar_SetDomainFunc(dvar_s *dvar, bool(__cdecl *customFunc)(dvar_s *, DvarValue))
 {
     const char *v2; // eax
@@ -2881,6 +2911,7 @@ int __cdecl Com_SaveDvarsToBuffer(const char **dvarnames, uint32_t numDvars, cha
     return 1;
 }
 
+#ifndef KISAK_GATE3_COM_INIT_PREFIX
 int __cdecl Com_LoadDvarsFromBuffer(const char **dvarnames, uint32_t numDvars, char *buffer, char *filename)
 {
     const char *v4; // eax
@@ -2944,9 +2975,10 @@ int __cdecl Com_LoadDvarsFromBuffer(const char **dvarnames, uint32_t numDvars, c
     }
     return 0;
 }
+#endif
 
 
-#ifdef KISAK_SP
+#if defined(KISAK_SP) && !defined(KISAK_GATE3_COM_INIT_PREFIX)
 void Dvar_SaveDvars(MemoryFile *memFile, uint16_t filter)
 {
     InterlockedIncrement(&g_dvarCritSect.readCount);
@@ -3042,4 +3074,4 @@ void Dvar_LoadDvars(MemoryFile *memFile)
     }
 }
 
-#endif // KISAK_SP
+#endif // KISAK_SP && !KISAK_GATE3_COM_INIT_PREFIX

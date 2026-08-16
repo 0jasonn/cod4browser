@@ -33,8 +33,10 @@ char info2[8192];
 
 void __cdecl TRACK_dvar_cmds()
 {
+#ifndef KISAK_GATE3_COM_INIT_PREFIX
     track_static_alloc_internal(info1, sizeof(info1), "info1", 10);
     track_static_alloc_internal(info2, sizeof(info2), "info2", 10);
+#endif
 }
 
 void __cdecl Dvar_Toggle_f()
@@ -520,6 +522,13 @@ cmd_function_s Dvar_SetU_f_VAR;
 
 void __cdecl Dvar_AddCommands()
 {
+#ifdef KISAK_GATE3_COM_INIT_PREFIX
+    // The compile/runtime checkpoint needs only the two canonical startup
+    // variable commands. The remaining canonical registrations stay owned by
+    // this translation unit and return when cmd.cpp/filesystem closure does.
+    Cmd_AddCommandInternal("set", Dvar_Set_f, &Dvar_Set_f_VAR);
+    Cmd_AddCommandInternal("seta", Dvar_SetA_f, &Dvar_SetA_f_VAR);
+#else
     Cmd_AddCommandInternal("toggle", Dvar_Toggle_f, &Dvar_Toggle_f_VAR);
     Cmd_AddCommandInternal("togglep", Dvar_TogglePrint_f, &Dvar_TogglePrint_f_VAR);
     Cmd_AddCommandInternal("set", Dvar_Set_f, &Dvar_Set_f_VAR);
@@ -535,6 +544,7 @@ void __cdecl Dvar_AddCommands()
     Cmd_AddCommandInternal("dvar_int", Dvar_RegisterInt_f, &Dvar_RegisterInt_f_VAR);
     Cmd_AddCommandInternal("dvar_float", Dvar_RegisterFloat_f, &Dvar_RegisterFloat_f_VAR);
     Cmd_AddCommandInternal("setu", Dvar_SetU_f, &Dvar_SetU_f_VAR);
+#endif
 }
 
 void __cdecl Dvar_RegisterBool_f()
@@ -663,6 +673,7 @@ void __cdecl Dvar_RegisterFloat_f()
     }
 }
 
+#ifndef KISAK_GATE3_COM_INIT_PREFIX
 void __cdecl Dvar_SetFromLocalizedStr_f()
 {
     const char *v0; // eax
@@ -701,6 +712,7 @@ void __cdecl Dvar_SetFromLocalizedStr_f()
         Com_Printf(0, "USAGE: setFromLocalizedString <variable> <string>\n");
     }
 }
+#endif
 
 void __cdecl Dvar_SetToTime_f()
 {

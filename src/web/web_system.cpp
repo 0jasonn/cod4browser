@@ -7,6 +7,7 @@
 #include <emscripten/html5.h>
 
 #include <cstdarg>
+#include <cstdlib>
 #include <cstdio>
 
 namespace
@@ -115,16 +116,14 @@ void __cdecl Sys_Print(const char *text)
     std::fflush(stdout);
 }
 
-void QDECL Com_Printf(int channel, const char *format, ...)
+void Sys_Error(const char *format, ...)
 {
-    (void)channel;
-    char buffer[LOG_BUFFER_SIZE]{};
     va_list arguments;
     va_start(arguments, format);
-    std::vsnprintf(buffer, sizeof(buffer), format, arguments);
+    PrintFormatted(stderr, format, arguments);
     va_end(arguments);
-    buffer[sizeof(buffer) - 1] = '\0';
-    Sys_Print(buffer);
+    std::fputc('\n', stderr);
+    std::abort();
 }
 
 void Web_Log(WebLogLevel level, const char *format, ...)

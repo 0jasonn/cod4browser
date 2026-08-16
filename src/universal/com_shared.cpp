@@ -160,10 +160,18 @@ int __cdecl Com_RealTime(qtime_s *qtime)
     __int64 t; // [esp+0h] [ebp-10h] BYREF
     tm *tms; // [esp+Ch] [ebp-4h]
 
+#ifdef KISAK_WEB
+    t = time(nullptr);
+#else
     t = _time64(0);
+#endif
     if (!qtime)
         return t;
+#ifdef KISAK_WEB
+    tms = localtime(&t);
+#else
     tms = _localtime64(&t);
+#endif
     if (tms)
     {
         qtime->tm_sec = tms->tm_sec;

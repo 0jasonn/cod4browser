@@ -1,0 +1,49 @@
+#pragma once
+
+// Engine thread identities are shared qcommon data. They must not be owned by
+// the D3D renderer merely because the original Win32 header happened to expose
+// them there.
+#ifdef KISAK_MP
+enum ThreadContext_t : int
+{
+    THREAD_CONTEXT_MAIN = 0,
+    THREAD_CONTEXT_BACKEND = 1,
+    THREAD_CONTEXT_WORKER0 = 2,
+    THREAD_CONTEXT_WORKER1 = 3,
+    THREAD_CONTEXT_TRACE_COUNT = 4,
+    THREAD_CONTEXT_TRACE_LAST = 3,
+    THREAD_CONTEXT_CINEMATIC = 4,
+    THREAD_CONTEXT_TITLE_SERVER = 5,
+    THREAD_CONTEXT_DATABASE = 6,
+    THREAD_CONTEXT_COUNT = 7,
+};
+#elif defined(KISAK_SP)
+enum ThreadContext_t : int
+{
+    THREAD_CONTEXT_MAIN = 0,
+    THREAD_CONTEXT_BACKEND = 1,
+    THREAD_CONTEXT_WORKER0 = 2,
+    THREAD_CONTEXT_WORKER1 = 3,
+    THREAD_CONTEXT_WORKER2 = 4,
+    THREAD_CONTEXT_SERVER = 5,
+    THREAD_CONTEXT_TRACE_COUNT = 6,
+    THREAD_CONTEXT_TRACE_LAST = 5,
+    THREAD_CONTEXT_CINEMATIC = 6,
+    THREAD_CONTEXT_TITLE_SERVER = 7,
+    THREAD_CONTEXT_DATABASE = 8,
+    THREAD_CONTEXT_STREAM = 9,
+    THREAD_CONTEXT_SNDSTREAMPACKETCALLBACK = 10,
+    THREAD_CONTEXT_SERVER_DEMO = 11,
+    THREAD_CONTEXT_COUNT = 12,
+};
+#elif defined(KISAK_RADIANT)
+enum ThreadContext_t : int
+{
+    THREAD_CONTEXT_MAIN = 0,
+    THREAD_CONTEXT_BACKEND = 1,
+    THREAD_CONTEXT_DATABASE = 2,
+    THREAD_CONTEXT_COUNT = 3,
+};
+#else
+#error "A Kisak engine identity must define KISAK_SP, KISAK_MP, or KISAK_RADIANT"
+#endif

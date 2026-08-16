@@ -9,13 +9,21 @@ set(KISAK_WEB_SOURCE_DIR "${CMAKE_SOURCE_DIR}/web")
 
 add_executable(KisakCOD-web
     "${SRC_DIR}/database/db_semantic_trace.cpp"
-    # The first platform-neutral qcommon slice: command parsing/buffering and
-    # an owned-string dvar registry with no filesystem or Win32 dependencies.
+    "${SRC_DIR}/qcommon/com_init_trace.cpp"
+    "${SRC_DIR}/qcommon/common.cpp"
     "${SRC_DIR}/qcommon/cmd_core.cpp"
     "${SRC_DIR}/qcommon/iwd_archive.cpp"
     "${SRC_DIR}/qcommon/iwi_image.cpp"
-    "${SRC_DIR}/universal/dvar_core.cpp"
+    "${SRC_DIR}/script/scr_memorytree.cpp"
+    "${SRC_DIR}/script/scr_stringlist.cpp"
+    "${SRC_DIR}/universal/com_constantconfigstrings.cpp"
+    "${SRC_DIR}/universal/com_memory_string.cpp"
+    "${SRC_DIR}/universal/com_shared.cpp"
+    "${SRC_DIR}/universal/dvar.cpp"
+    "${SRC_DIR}/universal/dvar_cmds.cpp"
+    "${SRC_DIR}/universal/q_shared.cpp"
     "${SRC_DIR}/web/web_archive_job.cpp"
+    "${SRC_DIR}/web/web_assertive.cpp"
     "${SRC_DIR}/web/web_asset_probe.cpp"
     "${SRC_DIR}/web/web_cooperative_scheduler.cpp"
     "${SRC_DIR}/web/web_engine_asset.cpp"
@@ -43,6 +51,7 @@ add_executable(KisakCOD-web
     "${SRC_DIR}/web/web_renderer.cpp"
     "${SRC_DIR}/web/web_renderer_surface.cpp"
     "${SRC_DIR}/web/web_system.cpp"
+    "${SRC_DIR}/web/web_thread_context.cpp"
     "${SRC_DIR}/web/web_main.cpp"
     # This is existing KisakCOD/ODE physics code, not a bootstrap substitute.
     "${SRC_DIR}/physics/ode/odemath.cpp"
@@ -58,6 +67,46 @@ set_target_properties(KisakCOD-web PROPERTIES
 )
 
 kisak_configure_web_target(KisakCOD-web)
+target_compile_definitions(KisakCOD-web PRIVATE KISAK_GATE3_COM_INIT_PREFIX=1)
+
+# A small, strict-link inventory executable for the canonical common.cpp
+# prefix. It is intentionally independent of the browser launcher and Gate 2
+# runtime so accidental undefined symbols cannot hide behind that larger link.
+add_executable(KisakCOD-web-com-init-check EXCLUDE_FROM_ALL
+    "${CMAKE_SOURCE_DIR}/tests/native/gate3_com_init_trace_tests.cpp"
+    "${SRC_DIR}/qcommon/com_init_trace.cpp"
+    "${SRC_DIR}/qcommon/common.cpp"
+    "${SRC_DIR}/qcommon/cmd_core.cpp"
+    "${SRC_DIR}/script/scr_memorytree.cpp"
+    "${SRC_DIR}/script/scr_stringlist.cpp"
+    "${SRC_DIR}/universal/com_constantconfigstrings.cpp"
+    "${SRC_DIR}/universal/com_memory_string.cpp"
+    "${SRC_DIR}/universal/com_shared.cpp"
+    "${SRC_DIR}/universal/dvar.cpp"
+    "${SRC_DIR}/universal/dvar_cmds.cpp"
+    "${SRC_DIR}/universal/q_shared.cpp"
+)
+target_compile_features(KisakCOD-web-com-init-check PRIVATE cxx_std_20)
+target_include_directories(KisakCOD-web-com-init-check PRIVATE "${SRC_DIR}" "${DEPS_DIR}")
+target_compile_definitions(KisakCOD-web-com-init-check PRIVATE
+    KISAK_WEB=1 KISAK_SP=1 KISAK_GATE3_COM_INIT_PREFIX=1 dNODEBUG=1)
+target_compile_options(KisakCOD-web-com-init-check PRIVATE "-sNO_DISABLE_EXCEPTION_CATCHING")
+target_link_options(KisakCOD-web-com-init-check PRIVATE
+    "-sENVIRONMENT=node"
+    "-sEXIT_RUNTIME=1"
+    "-sNO_DISABLE_EXCEPTION_CATCHING"
+    "-sERROR_ON_UNDEFINED_SYMBOLS=1"
+)
+set_target_properties(KisakCOD-web-com-init-check PROPERTIES
+    SUFFIX ".cjs"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/gate3-check"
+)
+find_program(KISAK_GATE3_NODE_EXECUTABLE NAMES node node.exe REQUIRED)
+add_custom_target(check-gate3-com-init
+    COMMAND "${KISAK_GATE3_NODE_EXECUTABLE}" "$<TARGET_FILE:KisakCOD-web-com-init-check>"
+    DEPENDS KisakCOD-web-com-init-check
+    VERBATIM
+)
 
 # Emscripten emits the JavaScript module as the primary linker output and the
 # WebAssembly binary beside it. Tell Ninja about the second output so a deleted

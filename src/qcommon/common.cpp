@@ -1,3 +1,7 @@
+#ifdef KISAK_GATE3_COM_INIT_PREFIX
+#include "common_gate3_prefix.inl"
+#else
+
 #include <universal/q_shared.h>
 #include "qcommon.h"
 
@@ -2425,3 +2429,5 @@ void Com_SetTimeScale(float timescale)
 }
 
 #endif // KISAK_SP
+
+#endif // KISAK_GATE3_COM_INIT_PREFIX

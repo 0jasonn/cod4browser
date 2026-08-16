@@ -3,11 +3,19 @@
 
 #include <string.h> // strlen()
 #include <universal/assertive.h>
+#if defined(KISAK_WEB) || defined(KISAK_GATE3_COM_INIT_PREFIX)
+#include <qcommon/system.h>
+#else
 #include <win32/win_local.h>
+#endif
 #include <qcommon/qcommon.h>
 
 #include "scr_memorytree.h"
+#if defined(KISAK_WEB) || defined(KISAK_GATE3_COM_INIT_PREFIX)
+#define PROF_SCOPED(name) ((void)0)
+#else
 #include <universal/profile.h>
+#endif
 #include <universal/com_constantconfigstrings.h>
 #include "scr_variable.h"
 
@@ -176,7 +184,7 @@ void SL_ShutdownSystem(uint32_t user)
 			if (((uint8_t)user & refStr->user) == 0)
 				break;
 
-			refStr->data = ((uint8_t)(~(BYTE)user & HIWORD(refStr->data)) << 16) | refStr->data & 0xFF00FFFF;
+			refStr->data = ((uint8_t)(~(uint8_t)user & HIWORD(refStr->data)) << 16) | refStr->data & 0xFF00FFFF;
 
 			scrStringGlob.nextFreeEntry = 0;
 			SL_RemoveRefToString(scrStringGlob.hashTable[hash].u.prev);
@@ -216,7 +224,7 @@ void SL_TransferSystem(uint32_t from, uint32_t to)
 			RefString* refStr = GetRefString(scrStringGlob.hashTable[hash].u.prev);
 			if (((uint8_t)from & refStr->user) != 0)
 			{
-				refStr->data = ((uint8_t)(~(BYTE)from & HIWORD(refStr->data)) << 16) | refStr->data & 0xFF00FFFF;
+				refStr->data = ((uint8_t)(~(uint8_t)from & HIWORD(refStr->data)) << 16) | refStr->data & 0xFF00FFFF;
 				refStr->data = ((uint8_t)(to | HIWORD(refStr->data)) << 16) | refStr->data & 0xFF00FFFF;
 			}
 		}
@@ -536,7 +544,7 @@ uint32_t SL_GetStringForVector(const float* v)
 {
 	char tempString[132];
 
-	snprintf(tempString, ARRAYSIZE(tempString), "(%g, %g, %g)", *v, v[1], v[2]);
+	snprintf(tempString, sizeof(tempString), "(%g, %g, %g)", *v, v[1], v[2]);
 	return SL_GetString_(tempString, 0, MT_TYPE_SCRIPT_STRING);
 }
 
@@ -544,7 +552,7 @@ uint32_t SL_GetStringForInt(int i)
 {
 	char tempString[132]; // [esp+0h] [ebp-88h] BYREF
 
-	snprintf(tempString, ARRAYSIZE(tempString), "%i", i);
+	snprintf(tempString, sizeof(tempString), "%i", i);
 	return SL_GetString_(tempString, 0, MT_TYPE_SCRIPT_STRING);
 }
 
@@ -552,7 +560,7 @@ uint32_t SL_GetStringForFloat(float f)
 {
 	char tempString[132]; // [esp+8h] [ebp-88h] BYREF
 
-	snprintf(tempString, ARRAYSIZE(tempString), "%g", f);
+	snprintf(tempString, sizeof(tempString), "%g", f);
 	return SL_GetString_(tempString, 0, MT_TYPE_SCRIPT_STRING);
 }
 

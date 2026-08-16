@@ -1,7 +1,10 @@
 #pragma once
 
-#include <Windows.h> // literally just for some of the extern types at the bottom
-#include <gfx_d3d/rb_backend.h> // THREAD_CONTEXT_COUNT
+#include <qcommon/thread_context.h>
+
+#if defined(_WIN32) && !defined(KISAK_GATE3_COM_INIT_PREFIX)
+#include <Windows.h>
+#endif
 
 enum ThreadOwner : __int32
 {                                       // ...
@@ -18,7 +21,11 @@ char __cdecl Sys_SpawnRenderThread(void(__cdecl* function)(uint32_t));
 void __cdecl Sys_CreateEvent(bool manualReset, bool initialState, void** event);
 void __cdecl Sys_CreateThread(void(__cdecl* function)(uint32_t), ThreadContext_t threadContext);
 void __cdecl SetThreadName(uint32_t threadId, const char* threadName);
+#ifdef _WIN32
 uint32_t __stdcall Sys_ThreadMain(ThreadContext_t parameter);
+#else
+uint32_t Sys_ThreadMain(ThreadContext_t parameter);
+#endif
 char __cdecl Sys_SpawnDatabaseThread(void(__cdecl* function)(uint32_t));
 void __cdecl Sys_SuspendDatabaseThread(ThreadOwner owner);
 void __cdecl Sys_ResetEvent(void** event);
@@ -120,9 +127,11 @@ WinThreadLock __cdecl Win_GetThreadLock();
 void Win_UpdateThreadLock();
 
 
+#if defined(_WIN32) && !defined(KISAK_GATE3_COM_INIT_PREFIX)
 extern void *g_threadValues[THREAD_CONTEXT_COUNT][4];
 extern DWORD threadId[THREAD_CONTEXT_COUNT];
 extern HANDLE threadHandle[THREAD_CONTEXT_COUNT];
 extern uint32_t s_affinityMaskForProcess;
 extern uint32_t s_cpuCount;
 extern uint32_t s_affinityMaskForCpu[4];
+#endif

@@ -8,7 +8,9 @@ endif()
 
 function(kisak_configure_web_target TARGET_NAME)
     target_compile_features(${TARGET_NAME} PRIVATE cxx_std_20)
-    target_compile_definitions(${TARGET_NAME} PRIVATE KISAK_WEB=1 dNODEBUG=1)
+    # Platform and engine identity are orthogonal. Web must never inherit the
+    # Win32 host merely to select the canonical offline single-player code.
+    target_compile_definitions(${TARGET_NAME} PRIVATE KISAK_WEB=1 KISAK_SP=1 dNODEBUG=1)
     target_compile_options(${TARGET_NAME} PRIVATE
         "-sUSE_ZLIB=1"
         # Imported metadata controls several bounded allocations. Keep the

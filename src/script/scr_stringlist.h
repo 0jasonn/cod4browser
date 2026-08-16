@@ -23,7 +23,7 @@ struct HashEntry
     HashEntry_unnamed_type_u u;
 };
 
-struct __declspec(align(128)) scrStringGlob_t
+struct alignas(128) scrStringGlob_t
 {                                       
     HashEntry hashTable[20000];         
     bool inited;                        
@@ -36,9 +36,9 @@ struct __declspec(align(128)) scrStringGlob_t
      {
          struct
          {
-             unsigned __int32 refCount : 16;
-             unsigned __int32 user : 8;
-             unsigned __int32 byteLen : 8; // includes null terminator
+             uint32_t refCount : 16;
+             uint32_t user : 8;
+             uint32_t byteLen : 8; // includes null terminator
          };
          volatile uint32_t data;
      };

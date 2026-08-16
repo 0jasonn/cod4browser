@@ -274,8 +274,11 @@ bool RegisterCommandsAndDvars()
         return false;
     }
     const std::array<const dvar_s *, kisak::web::QCOMMON_COMMAND_DVAR_COUNT> dvars = {{
-        Dvar_RegisterString("developer", "0", 0u, "Enable developer diagnostics"),
-        Dvar_RegisterString("useFastFile", "1", 0u, "Use zone fastfiles"),
+        // These two now belong to canonical Com_InitDvars. The temporary
+        // bootstrap observes them without attempting to reinterpret their
+        // canonical integer/bool types as strings.
+        Dvar_FindVar("developer"),
+        Dvar_FindVar("useFastFile"),
         Dvar_RegisterString("fs_game", "", 0u, "Selected game directory"),
         Dvar_RegisterString("loc_language", "english", 0u, "Selected localization"),
         Dvar_RegisterString(

@@ -41,6 +41,15 @@
 #include <climits>
 #include <cstdint>
 
+#ifdef KISAK_WEB
+#define _snprintf snprintf
+#define _vsnprintf vsnprintf
+#define CPUSTRING "web-wasm32"
+#ifndef __forceinline
+#define __forceinline inline __attribute__((always_inline))
+#endif
+#endif
+
 // this is the define for determining if we have an asm version of a C function
 #if (defined _M_IX86 || defined __i386__) && !defined __sun__  && !defined __LCC__
 #define id386	1

@@ -49,6 +49,11 @@ if ($LASTEXITCODE -ne 0) {
     throw 'Failed to build the web target.'
 }
 
+& $cmakeExecutable --build $buildDirectory --target check-gate3-com-init -- -j1
+if ($LASTEXITCODE -ne 0) {
+    throw 'The strict Gate 3 Com_Init compile/link/runtime check failed.'
+}
+
 $siteDirectory = Join-Path $buildDirectory 'site'
 foreach ($requiredOutput in @(
     'index.html',
