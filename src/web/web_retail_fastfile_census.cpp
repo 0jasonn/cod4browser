@@ -403,6 +403,23 @@ bool DatabaseNamesEqual(
             });
 }
 
+bool DatabaseNameLess(
+    std::string_view left,
+    std::string_view right) noexcept
+{
+    const auto foldAscii = [](unsigned char value) noexcept {
+        return value >= 'A' && value <= 'Z'
+            ? static_cast<unsigned char>(value + ('a' - 'A'))
+            : value;
+    };
+    return std::lexicographical_compare(
+        left.begin(), left.end(), right.begin(), right.end(),
+        [foldAscii](char lhs, char rhs) noexcept {
+            return foldAscii(static_cast<unsigned char>(lhs)) <
+                foldAscii(static_cast<unsigned char>(rhs));
+        });
+}
+
 std::uint32_t Fnv1a32(
     std::span<const std::uint8_t> bytes,
     std::uint32_t value = 2166136261u) noexcept
@@ -1950,6 +1967,21 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
         if (!DecodeZoneAliasToken(token, nativeTarget) ||
             nativeTarget.block != 4u)
             return false;
+        const auto rememberNativeResolution = [&]() noexcept {
+            if (!value || offset == UINT32_MAX) return false;
+            try
+            {
+                nativeBlock4StringAliases.emplace(
+                    nativeTarget.offset, std::make_pair(offset, value));
+                zoneStringTokenAliases.emplace(token, value);
+            }
+            catch (...)
+            {
+                // The owned string remains valid even if this compatibility
+                // correspondence cannot be cached.
+            }
+            return true;
+        };
         const auto nativeIndexed =
             nativeBlock4StringAliases.find(nativeTarget.offset);
         if (nativeIndexed != nativeBlock4StringAliases.end() &&
@@ -1966,7 +1998,7 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
         {
             value = indexed->second;
             offset = target.offset;
-            return true;
+            return rememberNativeResolution();
         }
         // DB_ConvertOffsetToPointer converts an address, not an asset key.
         // XStrings therefore may legally point into a prior character payload
@@ -1998,7 +2030,7 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
             }
             catch (...) { return false; }
             offset = target.offset;
-            return true;
+            return rememberNativeResolution();
         }
         if (prerequisiteZone)
         {
@@ -2020,7 +2052,7 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
             {
                 value = closest->second;
                 offset = closest->first;
-                return true;
+                return rememberNativeResolution();
             }
         }
         auto copyValue = [&](const std::string &source) noexcept {
@@ -2029,7 +2061,7 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
             offset = target.offset;
             try { block4StringAliases.emplace(target.offset, value); }
             catch (...) { return false; }
-            return true;
+            return rememberNativeResolution();
         };
         for (std::size_t index = 0u;
              index < scriptStringBlock4Offsets.size(); ++index)
@@ -2166,7 +2198,7 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
                 {
                     value = candidate.storage->strings[index];
                     offset = target.offset;
-                    return true;
+                    return rememberNativeResolution();
                 }
             }
             for (std::size_t index = 0u;
@@ -2177,7 +2209,7 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
                 {
                     value = candidate.storage->soundNames[index];
                     offset = target.offset;
-                    return true;
+                    return rememberNativeResolution();
                 }
             }
             for (std::size_t index = 0u;
@@ -2190,11 +2222,164 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
                 {
                     value = candidate.storage->bounceSoundNames[index];
                     offset = target.offset;
-                    return true;
+                    return rememberNativeResolution();
                 }
             }
         }
         return false;
+    }
+
+    bool ResolveOrderedWeaponSoundName(
+        std::uint32_t token,
+        std::shared_ptr<std::string> &value,
+        std::uint32_t &offset) noexcept
+    {
+        ZoneSpan nativeTarget;
+        if (!prerequisiteZone || worldSoundIndex < 4u ||
+            !DecodeZoneAliasToken(token, nativeTarget) ||
+            nativeTarget.block != 4u)
+            return false;
+
+        // IW3 emits each top-level asset-type run in database-name order. A
+        // prerequisite WeaponDef can load the exact sound-name XString before
+        // the corresponding type-7 row through Load_snd_alias_list_name. Use
+        // that retained payload only after the preceding serialized sound rows
+        // prove the ordering invariant. This bridges a missing native/local
+        // offset correspondence without synthesizing a name or moving a cursor.
+        const std::size_t orderedBegin = worldSoundIndex > 8u
+            ? worldSoundIndex - 8u : 0u;
+        const std::string *lowerBound = nullptr;
+        for (std::size_t index = orderedBegin; index < worldSoundIndex; ++index)
+        {
+            const RetailPublishedSoundAliasList &entry =
+                result.worldSoundAliasLists[index];
+            if (!entry.published || !entry.storage || !entry.storage->aliasName ||
+                (lowerBound && !DatabaseNameLess(
+                    *lowerBound, *entry.storage->aliasName)))
+                return false;
+            lowerBound = entry.storage->aliasName.get();
+        }
+        if (!lowerBound) return false;
+
+        const auto alreadyPublished = [&](const std::string &name) noexcept {
+            return std::any_of(
+                result.worldSoundAliasLists.begin(),
+                result.worldSoundAliasLists.begin() +
+                    static_cast<std::ptrdiff_t>(worldSoundIndex),
+                [&](const RetailPublishedSoundAliasList &entry) {
+                    return entry.published && entry.storage &&
+                        entry.storage->aliasName &&
+                        DatabaseNamesEqual(*entry.storage->aliasName, name);
+                });
+        };
+        std::shared_ptr<std::string> candidate;
+        const auto consider = [&](const std::shared_ptr<std::string> &name,
+                                  std::uint32_t) noexcept {
+            if (!name || !ValidPublishedName(*name) ||
+                !DatabaseNameLess(*lowerBound, *name) ||
+                alreadyPublished(*name))
+                return;
+            if (!candidate || DatabaseNameLess(*name, *candidate))
+                candidate = name;
+        };
+        for (const RetailPublishedWeaponDef &weapon : result.worldWeapons)
+        {
+            if (!weapon.storage) continue;
+            for (std::size_t index = 0u;
+                 index < weapon.storage->soundNames.size(); ++index)
+            {
+                consider(weapon.storage->soundNames[index],
+                    weapon.soundNameStringBlock4Offsets[index]);
+            }
+            for (std::size_t index = 0u;
+                 index < weapon.storage->bounceSoundNames.size(); ++index)
+            {
+                consider(weapon.storage->bounceSoundNames[index],
+                    weapon.bounceSoundNameStringBlock4Offsets[index]);
+            }
+        }
+        if (!candidate) return false;
+
+        std::uint32_t predecessorNative = 0u;
+        std::uint32_t predecessorLocal = 0u;
+        std::uint32_t successorNative = UINT32_MAX;
+        std::uint32_t successorLocal = 0u;
+        for (const auto &[anchorNative, local] : nativeBlock4StringAliases)
+        {
+            if (!local.second) continue;
+            if (anchorNative < nativeTarget.offset &&
+                anchorNative >= predecessorNative)
+            {
+                predecessorNative = anchorNative;
+                predecessorLocal = local.first;
+            }
+            else if (anchorNative > nativeTarget.offset &&
+                anchorNative < successorNative)
+            {
+                successorNative = anchorNative;
+                successorLocal = local.first;
+            }
+        }
+        const auto project = [&](std::uint32_t anchorNative,
+                                 std::uint32_t anchorLocal,
+                                 std::uint32_t fallback) noexcept {
+            if (anchorNative == 0u || anchorNative == UINT32_MAX)
+                return fallback;
+            const std::int64_t projected =
+                static_cast<std::int64_t>(nativeTarget.offset) + anchorLocal -
+                anchorNative;
+            return projected < 0 || projected > UINT32_MAX
+                ? fallback : static_cast<std::uint32_t>(projected);
+        };
+        const std::uint32_t lower = project(
+            predecessorNative, predecessorLocal, 0u);
+        const std::uint32_t upper = project(
+            successorNative, successorLocal, UINT32_MAX);
+
+        std::uint32_t candidateOffset = UINT32_MAX;
+        bool candidateInBounds = false;
+        const auto selectStorage = [&](const std::shared_ptr<std::string> &name,
+                                       std::uint32_t localOffset) noexcept {
+            if (!name || !DatabaseNamesEqual(*name, *candidate) ||
+                localOffset == UINT32_MAX)
+                return;
+            if (localOffset >= lower && localOffset <= upper)
+            {
+                if (!candidateInBounds || localOffset < candidateOffset)
+                {
+                    candidateOffset = localOffset;
+                    candidate = name;
+                    candidateInBounds = true;
+                }
+            }
+            else if (!candidateInBounds &&
+                (candidateOffset == UINT32_MAX || localOffset < candidateOffset))
+            {
+                candidateOffset = localOffset;
+                candidate = name;
+            }
+        };
+        for (const RetailPublishedWeaponDef &weapon : result.worldWeapons)
+        {
+            if (!weapon.storage) continue;
+            for (std::size_t index = 0u;
+                 index < weapon.storage->soundNames.size(); ++index)
+            {
+                selectStorage(weapon.storage->soundNames[index],
+                    weapon.soundNameStringBlock4Offsets[index]);
+            }
+            for (std::size_t index = 0u;
+                 index < weapon.storage->bounceSoundNames.size(); ++index)
+            {
+                selectStorage(weapon.storage->bounceSoundNames[index],
+                    weapon.bounceSoundNameStringBlock4Offsets[index]);
+            }
+        }
+        if (candidateOffset == UINT32_MAX) return false;
+
+        value = std::move(candidate);
+        offset = candidateOffset;
+        return true;
     }
 
     ZoneRegistryError ResolveRegistryAlias(
@@ -2411,6 +2596,8 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
         if (!DecodeZoneAliasToken(token, nativeTarget) ||
             nativeTarget.block != 4u)
             return false;
+        std::uint32_t resolvedCellOffset = UINT32_MAX;
+        std::uint32_t resolvedStringOffset = UINT32_MAX;
         auto find = [&](const ZoneSpan &target) noexcept {
             for (RetailPublishedWeaponDef &candidate : result.worldWeapons)
             {
@@ -2422,6 +2609,10 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
                             target.offset && candidate.storage->soundNames[index])
                     {
                         value = candidate.storage->soundNames[index];
+                        resolvedCellOffset =
+                            candidate.soundNameCellBlock4Offsets[index];
+                        resolvedStringOffset =
+                            candidate.soundNameStringBlock4Offsets[index];
                         return true;
                     }
                 }
@@ -2434,19 +2625,44 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
                         candidate.storage->bounceSoundNames[index])
                     {
                         value = candidate.storage->bounceSoundNames[index];
+                        resolvedCellOffset =
+                            candidate.bounceSoundNameCellBlock4Offsets[index];
+                        resolvedStringOffset = candidate.
+                            bounceSoundNameStringBlock4Offsets[index];
                         return true;
                     }
                 }
             }
             return false;
         };
+        const auto rememberInlinePayload = [&]() noexcept {
+            if (!value || resolvedCellOffset == UINT32_MAX ||
+                resolvedStringOffset != resolvedCellOffset + 4u ||
+                nativeTarget.offset > 0x0ffffffbu)
+                return;
+            try
+            {
+                nativeBlock4StringAliases.emplace(
+                    nativeTarget.offset + 4u,
+                    std::make_pair(resolvedStringOffset, value));
+            }
+            catch (...) {}
+        };
         // A native alias may still name an object from an earlier range whose
         // portable and native virtual offsets agree.  Prefer that exact
         // address before applying a later range's compatibility translation.
-        if (find(nativeTarget)) return true;
+        if (find(nativeTarget))
+        {
+            rememberInlinePayload();
+            return true;
+        }
         ZoneSpan target = nativeTarget;
         if (!TranslateNativeBlock4Span(target)) return false;
-        if (target.offset != nativeTarget.offset && find(target)) return true;
+        if (target.offset != nativeTarget.offset && find(target))
+        {
+            rememberInlinePayload();
+            return true;
+        }
         return false;
     }
 
@@ -8000,6 +8216,13 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
                             resolved = ResolvePriorZoneStringPayload(
                                 token, value, stringOffset);
                         }
+                    }
+                    if (!resolved && prerequisiteZone &&
+                        worldSoundStringTarget ==
+                            WorldSoundStringTarget::ListName)
+                    {
+                        resolved = ResolveOrderedWeaponSoundName(
+                            token, value, stringOffset);
                     }
                     if (!resolved && prerequisiteZone &&
                         worldSoundStringTarget ==

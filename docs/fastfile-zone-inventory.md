@@ -1669,6 +1669,18 @@ type-7 run beginning at asset 4,778 retains 1,723 table rows backed by 1,716
 unique DB/zone-owned canonical sound graphs. Serialized aliases and repeated DB
 names converge on the existing canonical object.
 
+A second browser-selected retail `common.ff` variant exposed a prerequisite-only
+block-4 correspondence gap in the ordered type-7 run. When the list-name token
+cannot be translated directly, the loader now requires an already-proven
+database-name-ordered sound run and reuses the next canonical WeaponDef
+`Load_snd_alias_list_name` XString. Nearest known native/local XString
+correspondences prefer the matching retained cell when duplicate same-name
+cells exist; otherwise the earliest stable owner of that exact canonical name
+is retained. No name is synthesized, no stream position changes, and normal
+fail-closed behavior remains in effect when the ordered-run or ownership
+invariants are unavailable. That file now completes the common-zone census and
+continues through the Killhouse map census and retail XModel draw.
+
 The cross-zone catalog is only a case-insensitive ownership/index seam over
 those objects. It retains the common-zone result, returns exact canonical
 pointers, and uses the indexed canonical `null` sound for the native
