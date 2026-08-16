@@ -4,6 +4,7 @@
 #include <web/web_engine_xmodel_material.h>
 #include <web/web_engine_xmodel_draw_list.h>
 #include <web/web_shader_compatibility.h>
+#include "zlib_test_support.h"
 
 #include <zlib.h>
 
@@ -311,7 +312,8 @@ std::vector<std::uint8_t> BuildInflated()
 
 std::vector<std::uint8_t> BuildFile(std::vector<std::uint8_t> inflated = BuildInflated())
 {
-    uLongf compressedSize = compressBound(static_cast<uLong>(inflated.size()));
+    uLongf compressedSize = KisakTestCompressBound(
+        static_cast<uLong>(inflated.size()));
     std::vector<std::uint8_t> compressed(compressedSize);
     Require(compress2(
         compressed.data(), &compressedSize, inflated.data(),
@@ -1001,27 +1003,35 @@ std::vector<std::uint8_t> BuildReusableWorldXModelLoaderInflated(
 std::vector<std::uint8_t> BuildReusableWorldFxLoaderInflated(
     bool invalidMaterial = false);
 
-std::vector<std::uint8_t> BuildReusableWorldRawFileLoaderInflated()
+std::vector<std::uint8_t> BuildReusableWorldRawFileLoaderInflated(
+    std::uint32_t rawFileCount = 1u)
 {
     std::vector<std::uint8_t> bytes =
         BuildReusableWorldFxLoaderInflated(false);
     constexpr std::size_t assetTableOffset = 60u;
     constexpr std::size_t rawFileAssetIndex = 2u;
-    SetU32(bytes, 52u, 4u);
+    SetU32(bytes, 52u, 3u + rawFileCount);
     const std::array<std::uint8_t, 8> rawFileEntry = {{
         31u, 0u, 0u, 0u, 0xffu, 0xffu, 0xffu, 0xffu,
     }};
-    bytes.insert(
-        bytes.begin() + static_cast<std::ptrdiff_t>(
-            assetTableOffset + rawFileAssetIndex * 8u),
-        rawFileEntry.begin(), rawFileEntry.end());
-
-    PutU32(bytes, 0xffffffffu);
-    PutU32(bytes, 4u);
-    PutU32(bytes, 1u);
-    AppendString(bytes, "scripts/web_rawfile.gsc");
-    const std::array<std::uint8_t, 5> payload = {{'t', 'e', 's', 't', 0u}};
-    bytes.insert(bytes.end(), payload.begin(), payload.end());
+    for (std::uint32_t index = 0u; index < rawFileCount; ++index)
+    {
+        bytes.insert(
+            bytes.begin() + static_cast<std::ptrdiff_t>(
+                assetTableOffset + (rawFileAssetIndex + index) * 8u),
+            rawFileEntry.begin(), rawFileEntry.end());
+    }
+    for (std::uint32_t index = 0u; index < rawFileCount; ++index)
+    {
+        PutU32(bytes, 0xffffffffu);
+        PutU32(bytes, 4u);
+        PutU32(bytes, 1u);
+        AppendString(bytes, index == 0u
+            ? "scripts/web_rawfile.gsc"
+            : "scripts/web_rawfile_second.gsc");
+        const std::array<std::uint8_t, 5> payload = {{'t', 'e', 's', 't', 0u}};
+        bytes.insert(bytes.end(), payload.begin(), payload.end());
+    }
     return bytes;
 }
 
@@ -2038,6 +2048,26 @@ void TestReusableWorldRawFileLoader()
                 SemanticTraceContractHash(webProjection),
         "native generated-loader observer and web RawFile trace share a contract");
 
+    const auto runFile = BuildFile(
+        BuildReusableWorldRawFileLoaderInflated(2u));
+    const RetailFastfileCensus run = Run(
+        runFile, 7u, 2u, 3u, RetailCensusMode::WorldAssetLoader);
+    Require(run.worldRawFiles.size() == 2u &&
+            run.worldRawFiles[0u].assetIndex == 2u &&
+            run.worldRawFiles[1u].assetIndex == 3u &&
+            run.worldRawFiles[1u].name ==
+                "scripts/web_rawfile_second.gsc" &&
+            run.worldRawFiles[0u].published &&
+            run.worldRawFiles[1u].published &&
+            run.worldRawFiles[0u].identity !=
+                run.worldRawFiles[1u].identity &&
+            run.completedAssetCount == 4u &&
+            run.nextBodyIndex == 4u &&
+            run.nextBodyType == ASSET_TYPE_GFXWORLD &&
+            run.stoppedAfterCanonicalRawFile &&
+            run.semanticTrace.size() == 9u,
+        "the canonical RawFile operation handles a consecutive top-level run");
+
     RetailCensusLimits limits;
     limits.maxRawFileBytes = 3u;
     RetailFastfileCensusJob bounded;
@@ -2051,6 +2081,22 @@ void TestReusableWorldRawFileLoader()
     Require(bounded.Failure() == RetailCensusError::RawFilePayloadLimit &&
             !bounded.TakeResult(unavailable),
         "RawFile payloads are rejected atomically above the explicit ceiling");
+
+    limits = {};
+    limits.maxRawFiles = 1u;
+    RetailFastfileCensusJob collectionBounded;
+    Require(collectionBounded.BeginStreaming(
+                RetailCensusMode::WorldAssetLoader, limits) ==
+            RetailCensusError::None &&
+            collectionBounded.FeedSource(runFile, true) ==
+                RetailCensusError::None,
+        "RawFile collection-ceiling fixture starts");
+    while (collectionBounded.Progress() == RetailCensusProgress::Running)
+        (void)collectionBounded.Step();
+    Require(collectionBounded.Failure() ==
+                RetailCensusError::RawFileCollectionLimit &&
+            !collectionBounded.TakeResult(unavailable),
+        "a RawFile run cannot exceed its explicit collection ceiling");
 }
 
 void TestReusableWorldMaterialTechniqueLoader()
@@ -2433,6 +2479,14 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
     Require(priorPostIt != result.worldTechniqueSets.end(),
         "owned reusable loader retains the prior technique-set run");
     const RetailWorldTechniqueSet &priorPost = *priorPostIt;
+    std::cerr << "owned post-RawFile boundary: completed="
+              << result.completedAssetCount
+              << " registry=" << result.registryAssetCount
+              << " next=" << result.nextBodyIndex << ':'
+              << result.nextBodyType << ":0x" << std::hex
+              << result.nextBodyReference << std::dec
+              << " model=" << nextModel.assetIndex << ':'
+              << nextModel.name << ':' << nextModel.identity << '\n';
     std::cout << "owned M39 XModel boundary: count=" << result.worldXModels.size()
               << " next-index=" << nextModel.assetIndex
               << " name=" << nextModel.name
@@ -2641,25 +2695,29 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
                 return !entry.topLevelAsset && entry.published &&
                     entry.name.starts_with(',') && entry.lodCount == 0;
              }));
-    Require(result.worldRawFiles.size() == 1u,
-        "owned traversal retains the first canonical RawFile");
+    Require(result.worldRawFiles.size() == 2u,
+        "owned traversal retains the consecutive canonical RawFile run");
     const RetailWorldRawFile &firstRawFile = result.worldRawFiles.front();
-    std::cout << "  RawFile asset=" << firstRawFile.assetIndex
-              << " name=" << firstRawFile.name
-              << " identity=" << firstRawFile.identity
-              << " length=" << firstRawFile.length
-              << " boundary=" << firstRawFile.boundaryInflatedOffset << '\n';
+    const RetailWorldRawFile &secondRawFile = result.worldRawFiles.back();
+    for (const RetailWorldRawFile &rawFile : result.worldRawFiles)
+    {
+        std::cout << "  RawFile asset=" << rawFile.assetIndex
+                  << " name=" << rawFile.name
+                  << " identity=" << rawFile.identity
+                  << " length=" << rawFile.length
+                  << " boundary=" << rawFile.boundaryInflatedOffset << '\n';
+    }
     Require(sandbagIt != result.worldXModels.end() &&
         sandbagIt->name == "mil_sandbag_desert_single_flat" &&
         sandbagIt->published && sandbagIt->identity == 64u &&
         sandbagIt->physPresetTraversed && sandbagIt->physGeomsTraversed &&
         sandbagIt->physGeomCount != 0u &&
         sandbagIt->physGeomPayloadBytes != 0u &&
-        result.completedAssetCount == 396u &&
-        result.worldXModels.size() == 269u && nestedBuiltinModels == 4u &&
-        result.registryAssetCount == 1290u &&
-        result.registryAliasCount == 1290u &&
-        result.registryDefinedAliasCount == 1290u &&
+        result.completedAssetCount == 398u &&
+        result.worldXModels.size() == 270u && nestedBuiltinModels == 4u &&
+        result.registryAssetCount == 1311u &&
+        result.registryAliasCount == 1311u &&
+        result.registryDefinedAliasCount == 1311u &&
         splatFx.assetIndex == 381u &&
         splatFx.name == "props/watermelon_splat" &&
         splatFx.identity == 1242u && splatFx.published &&
@@ -2677,17 +2735,22 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
             watermelonFx.elemDefs[5u].visualIdentities.begin(),
             watermelonFx.elemDefs[5u].visualIdentities.end(),
             [](std::uint32_t identity) { return identity != 0u; }) &&
-        nextModel.assetIndex == 394u &&
-        nextModel.name == "com_drop_rope_obj" &&
-        nextModel.published &&
+        nextModel.assetIndex == 397u &&
+        nextModel.name == "body_complete_sp_sas_ct_benjamin" &&
+        nextModel.identity == 1311u && nextModel.published &&
         firstRawFile.assetIndex == 395u && firstRawFile.published &&
         firstRawFile.identity == 1290u && firstRawFile.asset &&
         firstRawFile.asset->name == firstRawFile.nameStorage->c_str() &&
         firstRawFile.asset->len == firstRawFile.length &&
-        result.nextBodyIndex == 396u && result.nextBodyType == 31u &&
-        result.stoppedAfterCanonicalRawFile &&
+        secondRawFile.assetIndex == 396u && secondRawFile.published &&
+        secondRawFile.identity == 1291u && secondRawFile.asset &&
+        secondRawFile.asset->name == secondRawFile.nameStorage->c_str() &&
+        secondRawFile.asset->len == secondRawFile.length &&
+        result.nextBodyIndex == 398u && result.nextBodyType == 31u &&
+        result.nextBodyReference == 0xffffffffu &&
+        result.stoppedBeforeDifferentWorldAssetType &&
         result.unsupportedOperation == nullptr,
-        "owned FX-family traversal publishes RawFile 395 and stops at 396");
+        "owned dispatcher publishes RawFiles 395-396 and XModel 397 before RawFile 398");
     return;
     Require(model.published && model.identity == 19u &&
         model.rendererPayloadSelected && model.rendererPayloadAvailable &&

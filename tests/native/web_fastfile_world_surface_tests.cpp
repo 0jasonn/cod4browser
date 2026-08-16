@@ -1,4 +1,5 @@
 #include <web/web_fastfile_world_surface.h>
+#include "zlib_test_support.h"
 
 #include <zlib.h>
 
@@ -210,7 +211,8 @@ void WriteVertex(
 
 std::vector<std::uint8_t> Compress(std::span<const std::uint8_t> inflated)
 {
-    uLongf capacity = compressBound(static_cast<uLong>(inflated.size()));
+    uLongf capacity = KisakTestCompressBound(
+        static_cast<uLong>(inflated.size()));
     std::vector<std::uint8_t> compressed(capacity);
     const int result = compress2(
         reinterpret_cast<Bytef *>(compressed.data()),

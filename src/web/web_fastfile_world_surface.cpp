@@ -731,8 +731,9 @@ struct WorldSurfaceExtractionJob::Impl
         }
         const std::size_t outputCapacity = output.size();
 
+        std::array<std::uint8_t, 1> emptyInput{};
         stream.next_in = inputCapacity == 0u
-            ? Z_NULL
+            ? reinterpret_cast<Bytef *>(emptyInput.data())
             : const_cast<Bytef *>(reinterpret_cast<const Bytef *>(
                 input.data()));
         stream.avail_in = static_cast<uInt>(inputCapacity);

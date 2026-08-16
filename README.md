@@ -356,11 +356,14 @@ one run. The reusable `FxEffectDef` family now follows checked element headers,
 velocity/visual samples, mark and ordinary visuals, effect-name references,
 engine-owned materials, trails, and nested XModels. It publishes assets 381 and
 382, then returns to the existing XModel and technique-set loaders through
-asset 394. The canonical `RawFile` path now publishes asset 395
-(`aitype/ally_blackkit_shtgn_winchester.gsc`, 1,781 payload bytes) and records
-the next boundary at inline `RawFile` asset 396. The owned result contains 269
-published XModels (four are nested FX built-ins), two FX effects, 396 completed
-top-level assets, and 1,290 published registry identities. There are 376
+asset 394. The reusable canonical `RawFile` path now publishes assets 395 and
+396 (`aitype/ally_blackkit_shtgn_winchester.gsc`, 1,781 payload bytes, and
+`character/character_sp_sas_ct_benjamin.gsc`, 201 bytes). The common dispatcher
+then publishes XModel asset 397, `body_complete_sp_sas_ct_benjamin`, with 15
+surfaces and its checked material/image dependencies, and records the next
+boundary at inline RawFile asset 398. The owned result contains 270 published
+XModels (four are nested FX built-ins), two FX effects, 398 completed top-level
+assets, and 1,311 published registry identities. There are 374
 top-level records left before the first `GfxWorld`.
 
 The first convergence checkpoint moves canonical `RawFile`, `XAssetHeader`,
@@ -371,7 +374,11 @@ canonical asset types, including top-level begin, atomic publication, and next
 asset boundary events. The generated native DB path now has an opt-in observer
 at `Load_XAssetArrayCustom` and `Load_RawFilePtr`; a portable contract hash
 compares logical stream coordinates without native addresses or inflate
-read-ahead diagnostics. The next loader slice starts at RawFile asset 396.
+read-ahead diagnostics. The Win32 portable suite now builds with MSVC against
+KisakCOD's bundled zlib 1.1.4 and passes all 16 tests; that run also caught and
+fixed zero-length inflate calls that newer zlib accepts but 1.1.4 rejects when
+`next_in` is null. The next loader slice resumes the canonical RawFile path at
+asset 398 after the proven XModel handoff.
 
 See [docs/web-port.md](docs/web-port.md) for the pinned toolchain, build steps,
 current boundary and validation limits, and see

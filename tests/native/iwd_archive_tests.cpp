@@ -1,4 +1,5 @@
 #include <qcommon/iwd_archive.h>
+#include "zlib_test_support.h"
 
 #include <zlib.h>
 
@@ -119,7 +120,8 @@ Bytes DeflateRaw(std::span<const uint8_t> input)
         throw TestFailure("fixture raw-deflate initialization failed");
     }
 
-    Bytes output(std::max<std::size_t>(64, compressBound(static_cast<uLong>(input.size()))));
+    Bytes output(std::max<std::size_t>(
+        64, KisakTestCompressBound(static_cast<uLong>(input.size()))));
     stream.next_in = input.empty()
         ? Z_NULL
         : const_cast<Bytef *>(reinterpret_cast<const Bytef *>(input.data()));

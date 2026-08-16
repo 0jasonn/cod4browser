@@ -975,8 +975,9 @@ Error MemberDecoder::Consume(
         outputCapacity = 1;
     }
 
+    std::array<uint8_t, 1> emptyInput{};
     impl_->stream.next_in = input.empty()
-        ? Z_NULL
+        ? reinterpret_cast<Bytef *>(emptyInput.data())
         : const_cast<Bytef *>(reinterpret_cast<const Bytef *>(input.data()));
     impl_->stream.avail_in = static_cast<uInt>(input.size());
     impl_->stream.next_out = reinterpret_cast<Bytef *>(outputData);
@@ -1047,8 +1048,9 @@ Error MemberDecoder::Finish() noexcept
 
     if (impl_->method == 8 && !impl_->streamEnded)
     {
+        std::array<uint8_t, 1> emptyInput{};
         std::array<uint8_t, 1> overflowGuard{};
-        impl_->stream.next_in = Z_NULL;
+        impl_->stream.next_in = reinterpret_cast<Bytef *>(emptyInput.data());
         impl_->stream.avail_in = 0;
         impl_->stream.next_out = reinterpret_cast<Bytef *>(overflowGuard.data());
         impl_->stream.avail_out = 1;

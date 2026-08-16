@@ -3680,12 +3680,32 @@ struct RetailFastfileCensusJob::Impl
                     result.nextBodyType = worldAssetTypes[result.nextBodyIndex];
                     result.nextBodyReference =
                         worldAssetReferences[result.nextBodyIndex];
+                    if (result.nextBodyType == ASSET_TYPE_RAW_FILE &&
+                        result.nextBodyReference == INLINE_POINTER)
+                    {
+                        if (const RetailCensusError error = BeginWorldRawFile(
+                                result.nextBodyIndex, stage);
+                            error != RetailCensusError::None)
+                        {
+                            return error;
+                        }
+                        continue;
+                    }
+                    if (const RetailCensusError error =
+                            dispatchSupportedWorldAsset(
+                                result.nextBodyIndex, stage);
+                        error != RetailCensusError::None)
+                    {
+                        return error;
+                    }
+                    if (!complete) continue;
                     result.stoppedAfterCanonicalRawFile = true;
-                    result.stoppedBeforeDifferentWorldAssetType =
-                        result.nextBodyType != ASSET_TYPE_RAW_FILE;
                 }
-                stage = RetailCensusStage::AssetBoundary;
-                complete = true;
+                else
+                {
+                    stage = RetailCensusStage::AssetBoundary;
+                    complete = true;
+                }
                 return RetailCensusError::None;
             }
             if (stage == RetailCensusStage::WorldXModel)
@@ -6105,6 +6125,15 @@ struct RetailFastfileCensusJob::Impl
                 if (mode == RetailCensusMode::WorldSecondXModelDependencies &&
                     worldXModelIndex != 0u)
                 {
+                    stage = RetailCensusStage::AssetBoundary;
+                    complete = true;
+                    return RetailCensusError::None;
+                }
+                if (mode == RetailCensusMode::WorldXModelLoader &&
+                    !result.worldRawFiles.empty())
+                {
+                    result.stoppedBeforeDifferentWorldAssetType =
+                        result.nextBodyIndex < worldAssetTypes.size();
                     stage = RetailCensusStage::AssetBoundary;
                     complete = true;
                     return RetailCensusError::None;

@@ -51,10 +51,10 @@ a quality metric by itself because filesystem, lifecycle, and WebGL code should
 remain platform-owned.
 
 Current retail traversal of `killhouse.ff` completes top-level assets 0 through
-395 and stops before inline `RawFile` asset 396. It has 376 top-level records
-left before the first `GfxWorld` at asset 772. The retained result includes 269
-published XModels, two FX effects, and 1,290 registry identities. RawFile 395 is
-published through the canonical Kisak type; the older XModel/material/FX
+397 and stops before inline RawFile asset 398. It has 374 top-level records left
+before the first `GfxWorld` at asset 772. The retained result includes 270
+published XModels, two FX effects, and 1,311 registry identities. RawFiles 395
+and 396 are published through the canonical Kisak type; the XModel/material/FX
 results remain census/preview records rather than canonical publications.
 
 ## System inventory
@@ -96,8 +96,8 @@ results remain census/preview records rather than canonical publications.
 | Audio | `NOT COMPILED` / future `WEB PLATFORM IMPLEMENTATION` | Preserve Kisak sound semantics where possible and isolate autoplay/unlock and Web Audio/OpenAL integration. |
 | Networking | `NOT COMPILED` / future `WEB PLATFORM IMPLEMENTATION` | Offline single-player first. Any later multiplayer requires a framed WebSocket/WebTransport relay; browsers cannot use raw COD4 UDP. |
 | Bink cinematics, Miles, and Steam | `NATIVE ONLY` | Feature-gate them. Use browser-compatible video/audio/auth paths or graceful omission without shipping native proprietary binaries. |
-| Database semantic trace | `MODIFIED KISAK` / partial | A shared address-independent event format, exact hash, and portable contract hash now exist. The web loader emits bounded events; the native asset-array/RawFile generated path has an inert-by-default observer hook. A full native executable comparison still requires the unavailable native toolchain. |
-| Portable parser tests | `MODIFIED KISAK` / partial | Synthetic fixtures cover bounds and failure behavior. The Wasm suite checks canonical ABI, trace determinism/limits, and a native-observer/web RawFile contract projection. Full generated native-loader execution remains a later environment-backed check. |
+| Database semantic trace | `MODIFIED KISAK` / partial | A shared address-independent event format, exact hash, and portable contract hash now exist. The web loader emits bounded events; the native asset-array/RawFile generated path has an inert-by-default observer hook. MSVC compiles and passes the portable trace projection; full generated-loader execution still requires the monolithic native target and runtime prerequisites. |
+| Portable parser tests | `MODIFIED KISAK` / partial | Synthetic fixtures cover bounds and failure behavior. Both the 16-test Wasm suite and the 16-test Win32 MSVC suite pass, including canonical ABI, trace determinism/limits, and the native-observer/web RawFile contract projection. Full generated native-loader execution remains a later environment-backed check. |
 | Playwright browser tests | `WEB PLATFORM IMPLEMENTATION` | Continue boot, storage, lifecycle, context-loss, and end-to-end boundary coverage with synthetic assets. |
 
 ## Convergence gates
@@ -111,9 +111,10 @@ results remain census/preview records rather than canonical publications.
 - The current loader emits normalized top-level begin, publication, and
   boundary events with an explicit ceiling and deterministic hash.
 - The trace intentionally contains no process addresses or graphics handles.
-- The native producer hook is present, but full native generated-loader
-  execution remains pending a usable native compiler and legally owned test
-  environment; portable observer projection is not mislabeled as that run.
+- The native producer hook is present and the portable observer projection
+  passes under MSVC. Full native generated-loader execution remains pending the
+  monolithic target's SDK/runtime prerequisites and a legally owned test
+  environment; the projection is not mislabeled as that run.
 
 ### Checkpoint 2: canonical RawFile publication (complete)
 
@@ -123,13 +124,15 @@ results remain census/preview records rather than canonical publications.
   canonical `RawFile` whose pointers have stable owned lifetime.
 - Explicit count, name, individual payload, aggregate retained-byte, and trace
   ceilings keep failure atomic.
-- The synthetic contract test reaches a next-asset boundary, and the owned
-  Killhouse run publishes asset 395 / identity 1290 before RawFile asset 396.
+- The synthetic contract test covers consecutive RawFiles and collection
+  ceilings. The owned Killhouse run publishes assets 395-396 / identities
+  1290-1291, returns through the dispatcher to publish XModel 397 / identity
+  1311, and stops before inline RawFile asset 398.
 
 ### Gate 1: finish the pre-GfxWorld dependency graph
 
-- Reuse the bounded canonical `RawFile` operation from asset 396 onward, then
-  implement every remaining inline family in serialized order.
+- Resume the canonical RawFile operation at asset 398, then implement every
+  remaining inline family in serialized order.
 - Preserve block cursors, high-water marks, insertion cells, aliases, dependency
   order, and atomic publication.
 - Do not seek directly to asset 772.
@@ -200,7 +203,7 @@ Update this section when a milestone changes architectural ownership.
 | Browser-only engine substitutes | Decrease after their validation purpose is met | High: qcommon bootstrap, retail DB traversal, asset records, and preview frontend remain substitutes. |
 | Permanent browser platform code | Stable and isolated | Good: launcher, storage, lifecycle, filesystem bridge, and WebGL2 are under explicit web boundaries. |
 | Native engine systems not compiled | Decrease sharply after the GfxWorld proof | High: DB, client, cgame, game, xanim, collision, and script VM are not in the web target. |
-| Native-vs-web semantic comparisons | Increase | Foundation present: shared trace format and web producer pass Wasm tests; the native producer and first equality gate remain pending. |
+| Native-vs-web semantic comparisons | Increase | Foundation present: shared trace format and the RawFile contract projection pass in both Wasm and Win32 MSVC. Execution of the generated native producer remains pending. |
 | Viewer-only feature work | Stop after world proof | Controlled: current preview exists to validate assets and rendering, not as the product direction. |
 
 ## Update rule

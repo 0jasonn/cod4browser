@@ -280,10 +280,34 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     add_test(NAME web_retail_fastfile_census_tests
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_retail_fastfile_census_tests>")
 else()
-    find_package(ZLIB REQUIRED)
-    target_link_libraries(iwd_archive_tests PRIVATE ZLIB::ZLIB)
-    target_link_libraries(web_fastfile_world_surface_tests PRIVATE ZLIB::ZLIB)
-    target_link_libraries(web_retail_fastfile_census_tests PRIVATE ZLIB::ZLIB)
+    if (WIN32)
+        enable_language(C)
+        add_library(kisak_test_zlib STATIC
+            "${KISAK_REPOSITORY_ROOT}/deps/zlib/adler32.c"
+            "${KISAK_REPOSITORY_ROOT}/deps/zlib/compress.c"
+            "${KISAK_REPOSITORY_ROOT}/deps/zlib/crc32.c"
+            "${KISAK_REPOSITORY_ROOT}/deps/zlib/deflate.c"
+            "${KISAK_REPOSITORY_ROOT}/deps/zlib/gzio.c"
+            "${KISAK_REPOSITORY_ROOT}/deps/zlib/infblock.c"
+            "${KISAK_REPOSITORY_ROOT}/deps/zlib/infcodes.c"
+            "${KISAK_REPOSITORY_ROOT}/deps/zlib/inffast.c"
+            "${KISAK_REPOSITORY_ROOT}/deps/zlib/inflate.c"
+            "${KISAK_REPOSITORY_ROOT}/deps/zlib/inftrees.c"
+            "${KISAK_REPOSITORY_ROOT}/deps/zlib/infutil.c"
+            "${KISAK_REPOSITORY_ROOT}/deps/zlib/trees.c"
+            "${KISAK_REPOSITORY_ROOT}/deps/zlib/uncompr.c"
+            "${KISAK_REPOSITORY_ROOT}/deps/zlib/zutil.c"
+        )
+        target_include_directories(kisak_test_zlib PUBLIC
+            "${KISAK_REPOSITORY_ROOT}/deps/zlib")
+        set(KISAK_TEST_ZLIB_TARGET kisak_test_zlib)
+    else()
+        find_package(ZLIB REQUIRED)
+        set(KISAK_TEST_ZLIB_TARGET ZLIB::ZLIB)
+    endif()
+    target_link_libraries(iwd_archive_tests PRIVATE ${KISAK_TEST_ZLIB_TARGET})
+    target_link_libraries(web_fastfile_world_surface_tests PRIVATE ${KISAK_TEST_ZLIB_TARGET})
+    target_link_libraries(web_retail_fastfile_census_tests PRIVATE ${KISAK_TEST_ZLIB_TARGET})
     add_test(NAME iwd_archive_tests COMMAND iwd_archive_tests)
     add_test(NAME iwi_image_tests COMMAND iwi_image_tests)
     add_test(NAME canonical_asset_abi_tests COMMAND canonical_asset_abi_tests)

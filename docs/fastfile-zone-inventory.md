@@ -1421,12 +1421,15 @@ LOD and bounds checks.
 
 The dispatcher then resumes the established XModel and technique-set loaders.
 The canonical RawFile operation follows the native 12-byte header, block-4
-name, and `len + 1` buffer ordering and publishes top-level asset 395 as
-identity 1290. The owned record is
-`aitype/ally_blackkit_shtgn_winchester.gsc`, length 1,781. The current result
-therefore completes assets 0 through 395 and stops before inline RawFile asset
-396. It contains 269 published XModels, two published FX effects, and 1,290
-registry assets with all 1,290 aliases defined. The last top-level XModel is
-asset 394, `com_drop_rope_obj`, identity 1289. The retained inflated-prefix
-ceiling is 64 MiB, while every logical pointer target remains constrained by
-its declared block size and current high-water mark.
+name, and `len + 1` buffer ordering and publishes top-level assets 395 and 396
+as identities 1290 and 1291. The owned records are
+`aitype/ally_blackkit_shtgn_winchester.gsc` (length 1,781) and
+`character/character_sp_sas_ct_benjamin.gsc` (length 201). The common
+dispatcher then publishes XModel asset 397,
+`body_complete_sp_sas_ct_benjamin`, as identity 1311 with 15 surfaces and four
+LODs. The current result therefore completes assets 0 through 397 and stops
+before inline RawFile asset 398. It contains 270 published XModels, two
+published FX effects, and 1,311 registry assets with all 1,311 aliases defined.
+The retained inflated-prefix ceiling is 64 MiB, while every logical pointer
+target remains constrained by its declared block size and current high-water
+mark.

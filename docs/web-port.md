@@ -536,10 +536,11 @@ npm.cmd run test:browser
 
 The portable archive, IWI, renderer-surface, engine-world conversion, fastfile
 traversal, and zone-stream unit tests can be built separately from the native
-game targets when a C++20 compiler and zlib development package are available:
+game targets. Windows builds use KisakCOD's bundled zlib 1.1.4; other native
+platforms require a zlib development package:
 
 ```powershell
-cmake -S . -B build/portable-tests -DKISAK_PORTABLE_TESTS_ONLY=ON
+cmake -S . -B build/portable-tests -A Win32 -DKISAK_PORTABLE_TESTS_ONLY=ON
 cmake --build build/portable-tests
 ctest --test-dir build/portable-tests -C Debug --output-on-failure
 ```
@@ -1539,10 +1540,14 @@ the 12-byte canonical header is allocated in block 0, the name and `len + 1`
 payload are bounded in block 4, the canonical `RawFile` pointers are backed by
 owned stable storage, and publication occurs only after the full payload is
 available. The owned file publishes identity 1290 for
-`aitype/ally_blackkit_shtgn_winchester.gsc` with length 1,781, then stops at
-inline RawFile asset 396. The result has 396 completed top-level assets, 269
-published XModels, two FX effects, and 1,290 registered assets with all 1,290
-aliases defined. The bounded retained-inflate ceiling remains 64 MiB; 376
+`aitype/ally_blackkit_shtgn_winchester.gsc` with length 1,781 and identity 1291
+for `character/character_sp_sas_ct_benjamin.gsc` with length 201. Returning to
+the common dispatcher publishes XModel asset 397,
+`body_complete_sp_sas_ct_benjamin`, including 15 surfaces, four LODs, and its
+checked material/image dependencies, then stops at inline RawFile asset 398.
+The result has 398 completed top-level assets, 270 published XModels, two FX
+effects, and 1,311 registered assets with all 1,311 aliases defined. The
+bounded retained-inflate ceiling remains 64 MiB; 374
 top-level records remain before the first `GfxWorld`.
 
 Reaching `GfxWorld` still requires typed loaders for every intervening inline
@@ -1588,9 +1593,10 @@ The generated native asset-array loop now supplies stable top-level indices to
 an opt-in semantic trace observer. `Load_RawFilePtr` emits begin/publication
 events using block-0 object and block-4 reference-cell coordinates. A null
 observer is the default and trace failures cannot change loader behavior. The
-full native target could not be compiled in this environment because its
-Visual Studio 2022 toolchain is unavailable, so this is source instrumentation,
-not a claim that a native executable was run.
+portable Win32 target now compiles and runs under MSVC, including the shared
+semantic trace and retail traversal projection. The complete generated native
+DB path is still not claimed as executed: that monolithic target also requires
+the native DirectX, Bink, Miles, Steam, and legally owned runtime setup.
 
 The Wasm suite drives the same observer contract against a mixed synthetic
 technique-set/FX/RawFile fixture. Its portable contract hash excludes registry
@@ -1599,9 +1605,16 @@ retaining event kind, canonical type, asset index, logical block coordinates,
 alias coordinates, and validated name. Payload size and retained-byte ceilings
 fail atomically.
 
-The owned `killhouse.ff` run verifies canonical RawFile asset 395 and the exact
-asset-396 boundary. The next step is to inventory whether asset 396 can reuse
-the same RawFile operation without new pointer cases, then traverse the
+The first MSVC run used the same bundled zlib 1.1.4 as the native game and
+exposed a version-specific streaming rule: unlike newer zlib, 1.1.4 rejects a
+null `next_in` pointer even when `avail_in` is zero. The IWD member decoder and
+fastfile surface inflater now provide a stable non-null zero-length buffer.
+All 16 portable Win32 tests pass with that native dependency.
+
+The owned `killhouse.ff` run verifies that assets 395 and 396 reuse the same
+canonical RawFile operation. It then returns to the reusable dispatcher and
+publishes the already supported XModel at 397, recording the exact RawFile-398
+boundary. The next step resumes that canonical RawFile path and continues the
 remaining serialized families in order.
 
 General generated-loader traversal and a real-map render remain later format
