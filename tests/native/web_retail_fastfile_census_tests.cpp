@@ -4,6 +4,7 @@
 #include <web/web_engine_xmodel_material.h>
 #include <web/web_engine_xmodel_draw_list.h>
 #include <web/web_shader_compatibility.h>
+#include <qcommon/cm_types.h>
 #include "zlib_test_support.h"
 
 #include <zlib.h>
@@ -452,6 +453,101 @@ std::vector<std::uint8_t> BuildLocalizeZoneInflated()
     SetU32(material, 0u, 0xffffffffu);
     bytes.insert(bytes.end(), material.begin(), material.end());
     AppendString(bytes, "web/localize_boundary_material");
+    return bytes;
+}
+
+std::vector<std::uint8_t> BuildClipMapZoneInflated(
+    bool withArrays = false,
+    bool withMapEnts = false,
+    bool withAlias = false)
+{
+    std::vector<std::uint8_t> bytes;
+    PutU32(bytes, 4096u);
+    PutU32(bytes, 0u);
+    for (const std::uint32_t block :
+         std::array<std::uint32_t, 9>{{4096u, 0u, 0u, 0u, 4096u,
+                                      0u, 0u, 0u, 0u}})
+        PutU32(bytes, block);
+    PutU32(bytes, 0u);
+    PutU32(bytes, 0u);
+    PutU32(bytes, withAlias ? 3u : 2u);
+    PutU32(bytes, 0xffffffffu);
+    PutU32(bytes, 10u);
+    PutU32(bytes, withAlias ? 0xfffffffeu : 0xffffffffu);
+    if (withAlias)
+    {
+        PutU32(bytes, 10u);
+        PutU32(bytes, 0x40000019u); // block-4 offset 24: insertion cell
+    }
+    PutU32(bytes, 32u);
+    PutU32(bytes, 0u);
+
+    std::vector<std::uint8_t> clipMap(284u, 0u);
+    SetU32(clipMap, 0u, 0xffffffffu);
+    SetU32(clipMap, 4u, 1u);
+    if (withArrays)
+    {
+        for (const std::size_t offset : {8u, 16u, 24u, 32u, 40u, 48u,
+                 56u, 64u, 72u, 80u, 88u, 96u, 108u, 116u, 124u,
+                 132u, 148u, 152u})
+            SetU32(clipMap, offset, offset == 148u || offset == 152u ? 2u : 1u);
+        for (const std::size_t offset : {12u, 20u, 28u, 36u, 44u, 52u,
+                 60u, 68u, 76u, 84u, 92u, 100u, 104u, 112u, 120u,
+                 128u, 136u, 156u})
+            SetU32(clipMap, offset, 0xffffffffu);
+    }
+    if (withMapEnts) SetU32(clipMap, 164u, 0xffffffffu);
+    SetU32(clipMap, 280u, 0x12345678u);
+    bytes.insert(bytes.end(), clipMap.begin(), clipMap.end());
+    AppendString(bytes, "maps/mp/web_clipmap.d3dbsp");
+    if (withArrays)
+    {
+        std::vector<std::uint8_t> plane(20u, 0u);
+        SetF32(plane, 0u, 1.0f);
+        plane[16u] = 0u;
+        plane[17u] = 0u;
+        bytes.insert(bytes.end(), plane.begin(), plane.end());
+        bytes.insert(bytes.end(), 80u, 0u); // cStaticModel_s
+        std::vector<std::uint8_t> material(72u, 0u);
+        std::copy_n("clip_material", 13u, material.begin());
+        SetU32(material, 64u, 7u);
+        SetU32(material, 68u, 9u);
+        bytes.insert(bytes.end(), material.begin(), material.end());
+        bytes.insert(bytes.end(), 12u, 0u); // cbrushside_t
+        bytes.push_back(3u); // brush edge
+        bytes.insert(bytes.end(), 8u, 0u); // cNode_t
+        std::vector<std::uint8_t> leaf(44u, 0u);
+        SetU32(leaf, 4u, 5u);
+        bytes.insert(bytes.end(), leaf.begin(), leaf.end());
+        PutU16(bytes, 4u);
+        bytes.insert(bytes.end(), 20u, 0u); // cLeafBrushNode_s
+        PutU32(bytes, 6u);
+        for (const float value : {1.0f, 2.0f, 3.0f})
+            PutU32(bytes, std::bit_cast<std::uint32_t>(value));
+        PutU16(bytes, 0u);
+        PutU16(bytes, 1u);
+        PutU16(bytes, 2u);
+        bytes.insert(bytes.end(), {1u, 0u, 0u, 0u});
+        std::vector<std::uint8_t> border(28u, 0u);
+        SetF32(border, 20u, 4.0f);
+        bytes.insert(bytes.end(), border.begin(), border.end());
+        bytes.insert(bytes.end(), 12u, 0u); // CollisionPartition
+        std::vector<std::uint8_t> tree(32u, 0u);
+        PutU16At(tree, 24u, 2u);
+        bytes.insert(bytes.end(), tree.begin(), tree.end());
+        std::vector<std::uint8_t> cmodel(72u, 0u);
+        SetF32(cmodel, 24u, 8.0f);
+        bytes.insert(bytes.end(), cmodel.begin(), cmodel.end());
+        bytes.insert(bytes.end(), {0xaau, 0xbbu, 0xccu, 0xddu});
+    }
+    if (withMapEnts)
+    {
+        PutU32(bytes, 0xffffffffu);
+        PutU32(bytes, 0xffffffffu);
+        PutU32(bytes, 4u);
+        AppendString(bytes, "maps/mp/web_clipmap_entities.d3dbsp");
+        bytes.insert(bytes.end(), {'{', ' ', '}', 0u});
+    }
     return bytes;
 }
 
@@ -1698,6 +1794,102 @@ void TestCanonicalLocalizeZoneLoader()
             material.textureCount == 0u && material.constantCount == 0u &&
             material.stateBitsCount == 0u,
         "generic zone dispatcher publishes a zero-dependency canonical Material");
+}
+
+void TestCanonicalClipMapLoader()
+{
+    using namespace kisak::fastfile;
+    const RetailFastfileCensus result = Run(
+        BuildFile(BuildClipMapZoneInflated()),
+        7u, 2u, 3u, RetailCensusMode::WorldAssetLoader);
+    Require(result.completedAssetCount == 1u &&
+            result.nextBodyIndex == 1u && result.nextBodyType == 32u &&
+            result.worldClipMaps.size() == 1u,
+        "top-level dispatch routes col_map_sp through the ClipMap family");
+    const RetailPublishedClipMap &published = result.worldClipMaps.front();
+    Require(published.published && published.asset && published.storage &&
+            published.assetType == 10u &&
+            std::string_view(published.asset->name) ==
+                "maps/mp/web_clipmap.d3dbsp" &&
+            published.asset->isInUse == 1 &&
+            published.asset->checksum == 0x12345678u &&
+            published.asset->planes == nullptr &&
+            published.asset->mapEnts == nullptr &&
+            published.identity != 0u,
+        "ClipMap family publishes the canonical clipMap_t only after its child graph completes");
+    Require(result.semanticTrace.size() == 3u &&
+            result.semanticTrace[0u].kind ==
+                kisak::database::SemanticTraceEventKind::AssetBegin &&
+            result.semanticTrace[1u].kind ==
+                kisak::database::SemanticTraceEventKind::AssetPublish &&
+            result.semanticTrace[1u].assetType == ASSET_TYPE_CLIPMAP &&
+            result.semanticTrace[2u].kind ==
+                kisak::database::SemanticTraceEventKind::Boundary,
+        "ClipMap preserves begin/publication/boundary semantic trace ordering");
+
+    const RetailFastfileCensus populated = Run(
+        BuildFile(BuildClipMapZoneInflated(true)),
+        5u, 1u, 1u, RetailCensusMode::WorldAssetLoader);
+    const clipMap_t &map = *populated.worldClipMaps.front().asset;
+    Require(map.planeCount == 1 && map.planes && map.planes[0].normal[0] == 1.0f &&
+            map.numStaticModels == 1u && map.staticModelList &&
+            map.numMaterials == 1u && map.materials &&
+            std::string_view(map.materials[0].material) == "clip_material" &&
+            map.numLeafs == 1u && map.leafs && map.leafs[0].brushContents == 5 &&
+            map.vertCount == 1u && map.verts && map.verts[0][2] == 3.0f &&
+            map.triCount == 1 && map.triIndices && map.triIndices[2] == 2u &&
+            map.borderCount == 1 && map.borders && map.borders[0].start == 4.0f &&
+            map.aabbTreeCount == 1 && map.aabbTrees &&
+            map.aabbTrees[0].materialIndex == 2u &&
+            map.numSubModels == 1u && map.cmodels && map.cmodels[0].radius == 8.0f &&
+            map.visibility && map.visibility[0] == 0xaau && map.visibility[3] == 0xddu,
+        "ClipMap family retains canonical simple child arrays in generated order under tiny step budgets");
+
+    const RetailFastfileCensus nested = Run(
+        BuildFile(BuildClipMapZoneInflated(false, true)),
+        5u, 1u, 1u, RetailCensusMode::WorldAssetLoader);
+    const clipMap_t &nestedMap = *nested.worldClipMaps.front().asset;
+    Require(nestedMap.mapEnts && nestedMap.mapEnts->name &&
+            std::string_view(nestedMap.mapEnts->name) ==
+                "maps/mp/web_clipmap_entities.d3dbsp" &&
+            nestedMap.mapEnts->numEntityChars == 4 &&
+            nestedMap.mapEnts->entityString &&
+            std::string_view(nestedMap.mapEnts->entityString, 4u) ==
+                std::string_view("{ }\0", 4u) &&
+            nested.registryAssetCount == 2u,
+        "ClipMap loads and publishes its canonical nested MapEnts dependency before the parent");
+
+    const RetailFastfileCensus aliased = Run(
+        BuildFile(BuildClipMapZoneInflated(false, false, true)),
+        5u, 1u, 1u, RetailCensusMode::WorldAssetLoader);
+    Require(aliased.worldClipMaps.size() == 2u &&
+            aliased.worldClipMaps[0u].published &&
+            aliased.worldClipMaps[1u].published &&
+            aliased.worldClipMaps[0u].serializedReference == 0xfffffffeu &&
+            aliased.worldClipMaps[0u].insertPointerBlock4Offset == 24u &&
+            aliased.worldClipMaps[1u].pointerAlias &&
+            aliased.worldClipMaps[1u].identity ==
+                aliased.worldClipMaps[0u].identity &&
+            aliased.worldClipMaps[1u].asset.get() ==
+                aliased.worldClipMaps[0u].asset.get() &&
+            aliased.completedAssetCount == 2u &&
+            aliased.nextBodyIndex == 2u && aliased.nextBodyType == 32u,
+        "Load_ClipMapPtr publishes its insertion cell and converts a later reference to the canonical asset");
+
+    std::vector<std::uint8_t> malformedInflated = BuildClipMapZoneInflated();
+    SetU32(malformedInflated, 84u, UINT32_MAX); // clipMap_t::planeCount
+    RetailFastfileCensusJob malformed;
+    const std::vector<std::uint8_t> malformedFile = BuildFile(malformedInflated);
+    Require(malformed.BeginStreaming(RetailCensusMode::WorldAssetLoader) ==
+            RetailCensusError::None &&
+            malformed.FeedSource(malformedFile, true) == RetailCensusError::None,
+        "malformed ClipMap fixture starts");
+    while (malformed.Progress() == RetailCensusProgress::Running)
+        (void)malformed.Step({5u, 1u});
+    RetailFastfileCensus unavailable;
+    Require(malformed.Failure() == RetailCensusError::ClipMapCountInvalid &&
+            !malformed.TakeResult(unavailable),
+        "invalid ClipMap child counts fail atomically without exposing partial ownership");
 }
 
 void TestWorldTechniqueSetPrefixBoundary()
@@ -4287,6 +4479,7 @@ int main(int argc, char **argv)
     TestPositiveIncrementalCensus();
     TestWorldAssetInventory();
     TestCanonicalLocalizeZoneLoader();
+    TestCanonicalClipMapLoader();
     TestWorldTechniqueSetPrefixBoundary();
     TestWorldXModelPrefixBoundary();
     TestWorldXSurfacePrefixBoundary();

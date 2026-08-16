@@ -1,4 +1,6 @@
 #include <web/web_retail_fastfile_census.h>
+#include <web/web_retail_load_context.h>
+#include <web/web_retail_load_clipmap.h>
 #include <web/web_retail_load_weapon.h>
 
 #include <web/web_fastfile_source_stream.h>
@@ -103,6 +105,8 @@ constexpr std::uint32_t ASSET_TYPE_MATERIAL = 4u;
 constexpr std::uint32_t ASSET_TYPE_TECHNIQUE_SET = 5u;
 constexpr std::uint32_t ASSET_TYPE_IMAGE = 6u;
 constexpr std::uint32_t ASSET_TYPE_SOUND = 7u;
+constexpr std::uint32_t ASSET_TYPE_CLIPMAP = 10u;
+constexpr std::uint32_t ASSET_TYPE_CLIPMAP_PVS = 11u;
 constexpr std::uint32_t ASSET_TYPE_GFX_WORLD = 16u;
 constexpr std::uint32_t ASSET_TYPE_MENU_LIST = 20u;
 constexpr std::uint32_t ASSET_TYPE_LOCALIZE = 22u;
@@ -128,6 +132,10 @@ static_assert(ASSET_TYPE_GFX_WORLD ==
     static_cast<std::uint32_t>(::ASSET_TYPE_GFXWORLD));
 static_assert(ASSET_TYPE_SOUND ==
     static_cast<std::uint32_t>(::ASSET_TYPE_SOUND));
+static_assert(ASSET_TYPE_CLIPMAP ==
+    static_cast<std::uint32_t>(::ASSET_TYPE_CLIPMAP));
+static_assert(ASSET_TYPE_CLIPMAP_PVS ==
+    static_cast<std::uint32_t>(::ASSET_TYPE_CLIPMAP_PVS));
 static_assert(ASSET_TYPE_MENU_LIST ==
     static_cast<std::uint32_t>(::ASSET_TYPE_MENULIST));
 static_assert(ASSET_TYPE_LOCALIZE ==
@@ -453,6 +461,10 @@ bool ValidLimits(const RetailCensusLimits &limits) noexcept
         limits.maxSoundAliasesPerList != 0u &&
         limits.maxSoundStringBytes != 0u &&
         limits.maxRetainedSoundBytes != 0u &&
+        limits.maxClipMaps != 0u && limits.maxClipMapNameBytes != 0u &&
+        limits.maxClipMapArrayElements != 0u &&
+        limits.maxClipMapPayloadBytes != 0u &&
+        limits.maxRetainedClipMapBytes != 0u &&
         limits.maxSemanticTraceEntries != 0u;
 }
 
@@ -627,6 +639,15 @@ const char *RetailCensusErrorString(RetailCensusError error) noexcept
     case RetailCensusError::SoundAliasDependencyUnsupported: return "unsupported sound alias dependency";
     case RetailCensusError::SoundAliasPayloadLimit: return "sound alias payload exceeds limit";
     case RetailCensusError::SoundAliasCatalogPublishFailed: return "sound alias catalog publication failed";
+    case RetailCensusError::ClipMapLayoutUnsupported: return "unsupported clipMap_t layout";
+    case RetailCensusError::ClipMapCollectionLimit: return "ClipMap collection exceeds limit";
+    case RetailCensusError::ClipMapNameInvalid: return "invalid ClipMap name";
+    case RetailCensusError::ClipMapNameTooLong: return "ClipMap name exceeds limit";
+    case RetailCensusError::ClipMapCountInvalid: return "invalid ClipMap child count";
+    case RetailCensusError::ClipMapPayloadLimit: return "ClipMap payload exceeds limit";
+    case RetailCensusError::ClipMapPointerInvalid: return "invalid ClipMap pointer";
+    case RetailCensusError::ClipMapDependencyUnsupported: return "ClipMap dependency is not published";
+    case RetailCensusError::ClipMapAliasInvalid: return "invalid ClipMap alias";
     case RetailCensusError::PostXModelAssetUnsupported:
         return "asset after the first XModel is not an inline technique set";
     case RetailCensusError::SemanticTraceLimit:
@@ -781,13 +802,14 @@ const char *RetailCensusStageString(RetailCensusStage stage) noexcept
     case RetailCensusStage::WorldSoundAliasCurve: return "world-sound-alias-curve";
     case RetailCensusStage::WorldSoundAliasSpeakerMap: return "world-sound-alias-speaker-map";
     case RetailCensusStage::WorldSoundAliasPublish: return "world-sound-alias-publish";
+    case RetailCensusStage::WorldClipMap: return "world-clipmap";
     case RetailCensusStage::AssetBoundary: return "asset-boundary";
     case RetailCensusStage::Failed: return "failed";
     }
     return "unknown";
 }
 
-struct RetailFastfileCensusJob::Impl
+struct RetailFastfileCensusJob::Impl final : RetailLoadContext
 {
     BoundedSourceStream source;
     RetailCensusMode mode = RetailCensusMode::CodePostGfxMaterial;
@@ -982,6 +1004,7 @@ struct RetailFastfileCensusJob::Impl
     ZoneSpan worldSoundCurveInsertAliasSlot{};
     bool worldSoundCurveHasInsertAlias = false;
     std::uint64_t retainedSoundBytes = 0u;
+    RetailClipMapLoadFamily clipMapLoader;
     ZoneSpan worldMenuStringSpan{};
     std::uint32_t worldFxImpactAssetIndex = 0u;
     std::uint32_t worldFxImpactNameReference = 0u;
@@ -1030,6 +1053,9 @@ struct RetailFastfileCensusJob::Impl
     std::uint32_t imageResourceBytes = 0u;
     ZoneSpan materialImageAliasSlot{};
     RetailFastfileCensus result{};
+    RetailCensusStepBudget *activeLoadBudget = nullptr;
+    RetailCensusStepReport *activeLoadReport = nullptr;
+    bool *activeLoadBlocked = nullptr;
 
     ~Impl()
     {
@@ -1066,6 +1092,66 @@ struct RetailFastfileCensusJob::Impl
         return RetailCensusError::None;
     }
 
+    ZoneStreamMachine &Streams() noexcept override { return arenas; }
+    ZoneAssetRegistry &Assets() noexcept override { return registry; }
+    RetailFastfileCensus &Ownership() noexcept override { return result; }
+    const RetailCensusLimits &LoaderLimits() const noexcept override
+    {
+        return limits;
+    }
+    std::size_t InflatedCursor() const noexcept override { return cursor; }
+    std::span<const std::uint8_t> InflatedTail() const noexcept override
+    {
+        return cursor <= inflated.size()
+            ? std::span<const std::uint8_t>(inflated).subspan(cursor)
+            : std::span<const std::uint8_t>{};
+    }
+    RetailLoadVisit VisitRecord(std::size_t bytes) noexcept override
+    {
+        if (!activeLoadBudget || !activeLoadReport || !activeLoadBlocked ||
+            !Available(bytes))
+        {
+            if (activeLoadBlocked) *activeLoadBlocked = true;
+            return RetailLoadVisit::Blocked;
+        }
+        const std::size_t byteBudget =
+            activeLoadBudget->maxBytes - activeLoadReport->traversedBytes;
+        const std::size_t count = std::min(bytes - recordVisited, byteBudget);
+        recordVisited += count;
+        activeLoadReport->traversedBytes += static_cast<std::uint32_t>(count);
+        if (recordVisited != bytes) return RetailLoadVisit::Partial;
+        recordVisited = 0u;
+        return RetailLoadVisit::Complete;
+    }
+    void ConsumeRecord(std::size_t bytes) noexcept override
+    {
+        cursor += bytes;
+        if (activeLoadReport) ++activeLoadReport->recordsProcessed;
+    }
+    void BlockForInflatedInput() noexcept override
+    {
+        if (activeLoadBlocked) *activeLoadBlocked = true;
+    }
+    RetailCensusError PushStream(std::uint32_t block) noexcept override
+    {
+        return Push(block);
+    }
+    RetailCensusError PopStream() noexcept override { return Pop(); }
+    RetailCensusError PlanStream(
+        std::uint32_t alignment,
+        std::uint64_t length,
+        ZoneSpan *span,
+        ZoneLoadKind *kind) noexcept override
+    {
+        ZoneLoadPlan plan;
+        const RetailCensusError error =
+            MapZoneError(arenas.PlanLoad(alignment, length, plan));
+        if (error != RetailCensusError::None) return error;
+        if (span) *span = plan.span;
+        if (kind) *kind = plan.kind;
+        return RetailCensusError::None;
+    }
+
     RetailCensusError AppendSemanticTrace(
         kisak::database::SemanticTraceEventKind kind,
         std::uint32_t assetType,
@@ -1097,6 +1183,20 @@ struct RetailFastfileCensusJob::Impl
         }
         catch (...) { return RetailCensusError::AllocationFailed; }
         return RetailCensusError::None;
+    }
+
+    RetailCensusError Trace(
+        kisak::database::SemanticTraceEventKind kind,
+        std::uint32_t assetType,
+        std::uint32_t tracedAssetIndex,
+        std::uint32_t identity,
+        std::uint32_t inflatedOffset,
+        const ZoneSpan &span,
+        std::string_view name,
+        const ZoneSpan &related) noexcept override
+    {
+        return AppendSemanticTrace(kind, assetType, tracedAssetIndex, identity,
+            inflatedOffset, span, name, related);
     }
 
     RetailCensusError EnsureBoundarySemanticTrace() noexcept
@@ -2121,6 +2221,113 @@ struct RetailFastfileCensusJob::Impl
         return registry.ResolveAlias(adjustedToken, expectedType, identity);
     }
 
+    ZoneRegistryError ResolveAssetAlias(
+        std::uint32_t token,
+        std::uint32_t expectedType,
+        std::uint32_t &identity) const noexcept override
+    {
+        return ResolveRegistryAlias(token, expectedType, identity);
+    }
+
+    void *FindCanonicalAsset(
+        std::uint32_t type,
+        std::uint32_t identity) noexcept override
+    {
+        if (type == ASSET_TYPE_XMODEL)
+        {
+            for (RetailWorldXModel &entry : result.worldXModels)
+                if (entry.published && entry.identity == identity && entry.asset)
+                    return entry.asset.get();
+        }
+        else if (type == ASSET_TYPE_FX)
+        {
+            for (RetailWorldFxEffectDef &entry : result.worldFxEffects)
+                if (entry.published && entry.identity == identity && entry.asset)
+                    return entry.asset.get();
+        }
+        else if (type == ASSET_TYPE_MATERIAL)
+        {
+            for (RetailXModelMaterial &entry : result.worldMaterials)
+                if (entry.published && entry.identity == identity && entry.asset)
+                    return entry.asset.get();
+            for (RetailWorldXModel &model : result.worldXModels)
+                for (RetailXModelMaterial &entry : model.materials)
+                    if (entry.published && entry.identity == identity && entry.asset)
+                        return entry.asset.get();
+            for (RetailWorldFxEffectDef &effect : result.worldFxEffects)
+                for (RetailWorldFxMaterial &entry : effect.materials)
+                    if (entry.published && entry.identity == identity && entry.asset)
+                        return entry.asset.get();
+        }
+        else if (type == ASSET_TYPE_SOUND)
+        {
+            for (RetailPublishedSoundAliasList &entry : result.worldSoundAliasLists)
+                if (entry.published && entry.identity == identity && entry.asset)
+                    return entry.asset.get();
+        }
+        else if (type == ASSET_TYPE_XANIM_PARTS)
+        {
+            for (RetailPublishedXAnimParts &entry : result.worldXAnimParts)
+                if (entry.published && entry.identity == identity && entry.asset)
+                    return entry.asset.get();
+        }
+        else if (type == ASSET_TYPE_WEAPON)
+        {
+            for (RetailPublishedWeaponDef &entry : result.worldWeapons)
+                if (entry.published && entry.identity == identity && entry.asset)
+                    return entry.asset.get();
+        }
+        else if (type == ASSET_TYPE_CLIPMAP || type == ASSET_TYPE_CLIPMAP_PVS)
+        {
+            for (RetailPublishedClipMap &entry : result.worldClipMaps)
+                if (entry.published && entry.identity == identity && entry.asset)
+                    return entry.asset.get();
+        }
+        return nullptr;
+    }
+
+    bool ValidPointerToken(
+        std::uint32_t token,
+        std::uint32_t alignment) const noexcept override
+    {
+        return ValidPriorZonePointer(token, alignment);
+    }
+
+    bool ResolveXString(
+        std::uint32_t token,
+        std::shared_ptr<std::string> &value,
+        std::uint32_t &block4Offset) noexcept override
+    {
+        return ResolvePriorZoneStringPayload(token, value, block4Offset);
+    }
+
+    RetailCensusError RememberXString(
+        std::uint32_t serializedToken,
+        const ZoneSpan &span,
+        const std::shared_ptr<std::string> &value) noexcept override
+    {
+        if (!value || span.block != 4u)
+            return RetailCensusError::InvalidArgument;
+        try
+        {
+            block4StringAliases.emplace(span.offset, value);
+            if (serializedToken != 0u && serializedToken != INLINE_POINTER &&
+                serializedToken != SHARED_POINTER)
+            {
+                zoneStringTokenAliases.emplace(serializedToken, value);
+                ZoneSpan native;
+                if (DecodeZoneAliasToken(serializedToken, native) &&
+                    native.block == 4u)
+                {
+                    nativeBlock4StringAliases.emplace(
+                        native.offset, std::make_pair(span.offset, value));
+                }
+            }
+        }
+        catch (...) { return RetailCensusError::AllocationFailed; }
+        return RetailCensusError::None;
+    }
+
     bool RecordBlock4CompatibilityBias(
         std::uint32_t start,
         std::uint32_t biasValue) noexcept
@@ -2527,10 +2734,10 @@ struct RetailFastfileCensusJob::Impl
                     ++worldWeaponOperationIndex;
                     continue;
                 }
-                std::uint32_t identity = 0u;
-                if (ResolveRegistryAlias(
-                        token, ASSET_TYPE_XMODEL, identity) !=
-                    ZoneRegistryError::None)
+                void *resolved = nullptr;
+                if (weapon_loader::ResolveCanonicalDependency(
+                        *this, token, ASSET_TYPE_XMODEL, resolved) !=
+                    RetailCensusError::None)
                 {
                     if (!prerequisiteZone)
                         return RetailCensusError::WeaponDependencyUnsupported;
@@ -2538,15 +2745,8 @@ struct RetailFastfileCensusJob::Impl
                     ++worldWeaponOperationIndex;
                     continue;
                 }
-                const auto found = std::find_if(
-                    result.worldXModels.begin(), result.worldXModels.end(),
-                    [identity](const RetailWorldXModel &candidate) {
-                        return candidate.published && candidate.identity == identity &&
-                            candidate.asset;
-                    });
-                if (found == result.worldXModels.end())
-                    return RetailCensusError::WeaponDependencyUnsupported;
-                AssignWeaponXModel(weapon, operation.index, found->asset.get());
+                AssignWeaponXModel(
+                    weapon, operation.index, static_cast<XModel *>(resolved));
                 ++worldWeaponOperationIndex;
                 continue;
             }
@@ -2569,9 +2769,10 @@ struct RetailFastfileCensusJob::Impl
                     ++worldWeaponOperationIndex;
                     continue;
                 }
-                std::uint32_t identity = 0u;
-                if (ResolveRegistryAlias(token, ASSET_TYPE_FX, identity) !=
-                    ZoneRegistryError::None)
+                void *resolved = nullptr;
+                if (weapon_loader::ResolveCanonicalDependency(
+                        *this, token, ASSET_TYPE_FX, resolved) !=
+                    RetailCensusError::None)
                 {
                     if (!prerequisiteZone)
                         return RetailCensusError::WeaponDependencyUnsupported;
@@ -2579,15 +2780,8 @@ struct RetailFastfileCensusJob::Impl
                     ++worldWeaponOperationIndex;
                     continue;
                 }
-                const auto found = std::find_if(
-                    result.worldFxEffects.begin(), result.worldFxEffects.end(),
-                    [identity](const RetailWorldFxEffectDef &candidate) {
-                        return candidate.published && candidate.identity == identity &&
-                            candidate.asset;
-                    });
-                if (found == result.worldFxEffects.end())
-                    return RetailCensusError::WeaponDependencyUnsupported;
-                AssignWeaponFx(weapon, operation.index, found->asset.get());
+                AssignWeaponFx(weapon, operation.index,
+                    static_cast<const FxEffectDef *>(resolved));
                 ++worldWeaponOperationIndex;
                 continue;
             }
@@ -2648,9 +2842,10 @@ struct RetailFastfileCensusJob::Impl
                     stage = RetailCensusStage::WorldXModelMaterial;
                     return RetailCensusError::None;
                 }
-                std::uint32_t identity = 0u;
-                if (ResolveRegistryAlias(token, ASSET_TYPE_MATERIAL, identity) !=
-                    ZoneRegistryError::None)
+                void *resolvedAsset = nullptr;
+                if (weapon_loader::ResolveCanonicalDependency(
+                        *this, token, ASSET_TYPE_MATERIAL, resolvedAsset) !=
+                    RetailCensusError::None)
                 {
                     if (!prerequisiteZone)
                         return RetailCensusError::WeaponDependencyUnsupported;
@@ -2658,45 +2853,8 @@ struct RetailFastfileCensusJob::Impl
                     ++worldWeaponOperationIndex;
                     continue;
                 }
-                Material *resolved = nullptr;
-                const auto zoneMaterial = std::find_if(
-                    result.worldMaterials.begin(), result.worldMaterials.end(),
-                    [identity](const RetailXModelMaterial &candidate) {
-                        return candidate.published &&
-                            candidate.identity == identity && candidate.asset;
-                    });
-                if (zoneMaterial != result.worldMaterials.end())
-                    resolved = zoneMaterial->asset.get();
-                for (const RetailWorldXModel &model : result.worldXModels)
-                {
-                    if (resolved != nullptr) break;
-                    const auto found = std::find_if(
-                        model.materials.begin(), model.materials.end(),
-                        [identity](const RetailXModelMaterial &candidate) {
-                            return candidate.published &&
-                                candidate.identity == identity && candidate.asset;
-                        });
-                    if (found != model.materials.end())
-                    {
-                        resolved = found->asset.get();
-                        break;
-                    }
-                }
-                for (const RetailWorldFxEffectDef &effect : result.worldFxEffects)
-                {
-                    if (resolved != nullptr) break;
-                    const auto found = std::find_if(
-                        effect.materials.begin(), effect.materials.end(),
-                        [identity](const RetailWorldFxMaterial &candidate) {
-                            return candidate.published &&
-                                candidate.identity == identity && candidate.asset;
-                        });
-                    if (found != effect.materials.end())
-                        resolved = found->asset.get();
-                }
-                if (resolved == nullptr)
-                    return RetailCensusError::WeaponDependencyUnsupported;
-                AssignWeaponMaterial(weapon, operation.index, resolved);
+                AssignWeaponMaterial(weapon, operation.index,
+                    static_cast<Material *>(resolvedAsset));
                 ++worldWeaponOperationIndex;
                 continue;
             }
@@ -3370,6 +3528,9 @@ struct RetailFastfileCensusJob::Impl
     {
         blocked = false;
         complete = false;
+        activeLoadBudget = &budget;
+        activeLoadReport = &report;
+        activeLoadBlocked = &blocked;
         auto visitRecord = [&](std::size_t bytes) noexcept -> int {
             if (!Available(bytes))
             {
@@ -3760,6 +3921,20 @@ struct RetailFastfileCensusJob::Impl
                 }
                 result.nextBodyType = worldAssetTypes[index];
                 result.nextBodyReference = worldAssetReferences[index];
+                if (result.nextBodyType == ASSET_TYPE_CLIPMAP ||
+                    result.nextBodyType == ASSET_TYPE_CLIPMAP_PVS)
+                {
+                    clipMapLoader.Reset();
+                    if (const RetailCensusError error = clipMapLoader.Begin(
+                            *this, index, result.nextBodyType,
+                            result.nextBodyReference);
+                        error != RetailCensusError::None)
+                    {
+                        return error;
+                    }
+                    nextStage = RetailCensusStage::WorldClipMap;
+                    return RetailCensusError::None;
+                }
                 if (result.nextBodyType == ASSET_TYPE_SOUND &&
                     (result.nextBodyReference == INLINE_POINTER ||
                      result.nextBodyReference == SHARED_POINTER))
@@ -8354,6 +8529,40 @@ struct RetailFastfileCensusJob::Impl
                 if (const RetailCensusError error = dispatchSupportedWorldAsset(
                         entry.assetIndex + 1u, stage);
                     error != RetailCensusError::None) return error;
+                if (complete) return RetailCensusError::None;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldClipMap)
+            {
+                if (clipMapLoader.Progress() ==
+                    RetailClipMapLoadProgress::Running)
+                {
+                    if (const RetailCensusError error = clipMapLoader.Step(*this);
+                        error != RetailCensusError::None)
+                    {
+                        return error;
+                    }
+                    if (clipMapLoader.Progress() ==
+                        RetailClipMapLoadProgress::Running)
+                    {
+                        return RetailCensusError::None;
+                    }
+                }
+                if (result.worldClipMaps.empty())
+                    return RetailCensusError::ClipMapLayoutUnsupported;
+                const RetailPublishedClipMap &entry = result.worldClipMaps.back();
+                ++result.completedAssetCount;
+                result.block0HighWaterAtBoundary = arenas.HighWater(0u);
+                result.block4CursorAtBoundary = arenas.Cursor(4u);
+                result.worldRegistryAliasCount = registry.AliasCount();
+                result.worldRegistryDefinedAliasCount = registry.DefinedAliasCount();
+                result.registryAssetCount = registry.AssetCount();
+                result.registryAliasCount = registry.AliasCount();
+                result.registryDefinedAliasCount = registry.DefinedAliasCount();
+                if (const RetailCensusError error = dispatchSupportedWorldAsset(
+                        entry.assetIndex + 1u, stage);
+                    error != RetailCensusError::None)
+                    return error;
                 if (complete) return RetailCensusError::None;
                 continue;
             }

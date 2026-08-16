@@ -1,6 +1,7 @@
 #pragma once
 
 #include <bgame/weapon_types.h>
+#include <web/web_retail_load_context.h>
 
 #include <array>
 #include <cstdint>
@@ -32,6 +33,12 @@ const std::array<std::uint32_t, 8> &MaterialFieldOffsets() noexcept;
 const std::array<std::uint32_t, 48> &SoundFieldOffsets() noexcept;
 const std::array<std::uint32_t, 4> &AccuracyKnotFieldOffsets() noexcept;
 const std::array<Operation, 157> &Operations() noexcept;
+
+RetailCensusError ResolveCanonicalDependency(
+    RetailLoadContext &context,
+    std::uint32_t token,
+    std::uint32_t assetType,
+    void *&asset) noexcept;
 
 void AssignWeaponString(WeaponDef &weapon, std::uint32_t index,
     const char *value) noexcept;

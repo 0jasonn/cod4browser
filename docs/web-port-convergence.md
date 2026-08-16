@@ -44,8 +44,8 @@ substitute as convergence.
 Snapshot baseline: branch `web-port`, through the ordered Killhouse pre-world
 boundary at asset 704 in the current working tree.
 
-The production web target contains 32 C/C++ translation units: six outside
-`src/web` and 26 inside it. The new non-web unit is the shared database semantic
+The production web target contains 33 C/C++ translation units: six outside
+`src/web` and 27 inside it. The non-web unit added before this milestone is the shared database semantic
 trace. This is only a source-inventory baseline; it is not
 a quality metric by itself because filesystem, lifecycle, and WebGL code should
 remain platform-owned.
@@ -77,12 +77,13 @@ remain temporary convergence scaffolding.
 | Command system | `MODIFIED KISAK` / partial | `src/qcommon/cmd_core.cpp` implements the Kisak command APIs as a reduced portable core. Reconcile it with `src/qcommon/cmd.cpp` as more qcommon code compiles. |
 | Dvar system | `MODIFIED KISAK` / partial | `src/universal/dvar_core.cpp` is a reduced portable implementation. Preserve API and behavior parity and converge with the full dvar implementation. |
 | qcommon startup | `TEMPORARY WEB SUBSTITUTE` | The bounded pre-database shell proves ordering and I/O but is not `Com_Init`. Replace milestone-specific startup actions by compiling the real initialization path behind platform services. |
-| Canonical database asset ABI | `SHARED KISAK` / partial | `RawFile`, `XAssetHeader`, `XAssetType`, and `XAsset` live in renderer-free `src/database/db_asset_types.h`. Canonical `XAnimParts`, `WeaponDef`, `LocalizeEntry`, XModel, Material, draw-surface key, and FX header declarations are isolated in renderer-free type headers consumed by both the native declarations and portable loader. Win32/Wasm tests enforce their 32-bit IW3 layouts. Expand this extraction only when a real shared consumer requires another canonical type. |
+| Canonical database asset ABI | `SHARED KISAK` / partial | `RawFile`, `XAssetHeader`, `XAssetType`, and `XAsset` live in renderer-free `src/database/db_asset_types.h`. Canonical `XAnimParts`, `WeaponDef`, `LocalizeEntry`, XModel, Material, draw-surface key, FX, collision-plane, and ClipMap declarations are isolated in lightweight shared type headers consumed by both native declarations and the portable loader. Win32/Wasm tests enforce the 32-bit IW3 layouts. Expand this extraction only when a real shared consumer requires another canonical type. |
 | IWD/ZIP reading | `MODIFIED KISAK` / partial | The bounded reader is portable and tested, but final integration should be through Kisak filesystem/database calls rather than a preview-only archive job. |
 | IWI decoding | `MODIFIED KISAK` / partial | Bounded DXT decoding is reusable. Connect it to canonical `GfxImage` loading and renderer upload instead of browser material queues. |
 | Fastfile framing and zone stream machine | `TEMPORARY WEB SUBSTITUTE` | It accurately models blocks, rewind/high-water behavior, pointer classes, aliases, and bounded streaming. Use it as differential evidence and migrate reusable mechanics toward the Kisak DB loader. |
 | Asset registry | `TEMPORARY WEB SUBSTITUTE` | Stable typed identities prove alias behavior. Independent asset, alias, and name-byte ceilings now back indexed identity, source, type/name, and alias lookup with atomic reset/unload tests. The destination remains Kisak `XAsset` registration and native DB ownership. |
-| Retail loader dispatcher | `TEMPORARY WEB SUBSTITUTE` | `web_retail_fastfile_census.*` is the current pre-world traversal vehicle. It reports canonical asset types through the shared semantic trace and reaches ordered asset 704 without seeking. WeaponDef generated field/order/assignment mechanics have been extracted to `web_retail_load_weapon.*`; continue family extraction around shared state rather than extending the monolith toward a parallel engine. |
+| Retail loader dispatcher | `TEMPORARY WEB SUBSTITUTE` | `web_retail_fastfile_census.*` is the current pre-world traversal vehicle. It reports canonical asset types through the shared semantic trace and reaches ordered asset 704 without seeking. `web_retail_load_context.h` now exposes only stream, registry, ownership, trace, limits, lookup, and shared alias/XString services to extracted families. WeaponDef dependency resolution uses that seam, and ClipMap owns its resumable generated-loader state in `web_retail_load_clipmap.*`. Stable families remain in the dispatcher until they are materially changed. |
+| `clipMap_t` asset loading | `MODIFIED KISAK` / partial | The dedicated family transcribes the 284-byte `Load_clipMap_t` record, block-4 child order, block-1 zero-fill dynamic client allocations, root insertion/alias handling, bounded ownership, and atomic canonical publication for `col_map_sp`/`col_map_mp`. Synthetic MSVC/Wasm coverage exercises empty and populated child graphs under one-byte traversal budgets. Inline DynEntity dependency bodies remain fail-closed until their canonical families are compiled; no `CM_LoadMap` or collision runtime behavior is included. Type 12 `com_map` is native `ComWorld`, not `clipMap_t`, and remains the next distinct inventory boundary. |
 | `XAnimParts` asset loading | `MODIFIED KISAK` / partial | The bounded path mirrors native `Load_XAnimPartsPtr` / `Load_XAnimParts`: block-0 body allocation, optional shared insertion cell, block-4 name and payload scope, exact array order, low/high-frame index widths, and flexible delta translation/quaternion storage. It publishes the canonical Kisak structure with ownership-only backing; the owned run publishes assets 437-457. Replace the temporary owner with real zone allocation during DB convergence. |
 | `WeaponDef` asset loading | `MODIFIED KISAK` / partial | The canonical header, fixed scalar decode, 40 script strings, all 48 native XStrings, four accuracy arrays, root insertion/alias handling, canonical XModel/Material/FX resolution, sound-name cells, bounce array, bounded ownership, and atomic publication are covered. Direct XStrings now preserve native address semantics, including pointers into earlier character payloads, while bounded compatibility translation is anchored only by generated WeaponDef order. The owned run publishes ten WeaponDefs before `com_map`; inline child bodies remain explicit future work. |
 | Sound alias loading and catalog | `MODIFIED KISAK` / partial | The prerequisite dispatcher mirrors the native list/header/component order and owns canonical `snd_alias_list_t`, `snd_alias_t`, `SoundFile`, `LoadedSound`, `SndCurve`, and `SpeakerMap` metadata in the publishing zone. `web_sound_alias_catalog.*` remains a case-insensitive ownership/index seam: it stores pointers to those objects, retains the common-zone owner, collapses native DB name aliases, and uses the indexed canonical `null` sound for native missing-sound fallback. It neither copies nor synthesizes sound records. No payload playback or audio runtime behavior is implemented. |
@@ -154,7 +155,7 @@ remain temporary convergence scaffolding.
   pointer forms; bone and notify tables; every packed data array; both index
   widths; flexible delta translation/quaternion payloads; zero-length presence
   fields; bounded ownership; and atomic failure.
-- Both 16-test Win32/MSVC and 16-test Wasm suites pass after the shared change.
+- Both Win32/MSVC and Wasm suites pass after the shared change.
 - The owned Killhouse run publishes XAnimParts assets 437-457 as identities
   1368-1388 before entering the WeaponDef dependency graph.
 
@@ -203,8 +204,10 @@ remain temporary convergence scaffolding.
   indirection slices are implemented. The general prerequisite-zone owner,
   canonical sound publication, cross-zone index, and owned asset-458 rerun are
   complete. The ordered Killhouse traversal now reaches asset 704. Inventory
-  and implement native `Load_ClipMap`/`com_map` dependencies next; reuse the
-  existing child loaders if an inline child body appears.
+  The native `Load_clipMap_ptr` / `Load_clipMap_t` family is now isolated and
+  publishes canonical `clipMap_t` for asset types 10/11. Inventory native
+  `Load_ComWorldPtr` / `Load_ComWorld` for the distinct type-12 `com_map`
+  boundary next; reuse existing child loaders if an inline child body appears.
 - Preserve block cursors, high-water marks, insertion cells, aliases, dependency
   order, and atomic publication.
 - Do not seek directly to asset 772.

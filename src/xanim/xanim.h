@@ -2,6 +2,7 @@
 
 // LWSS: This file has way too many structs. KISAKTODO: move out later.
 #include <database/db_asset_types.h>
+#include <qcommon/cm_types.h>
 #include <xanim/xanim_types.h>
 #include "xanim_public.h"
 #include <script/scr_stringlist.h>
@@ -133,131 +134,6 @@ struct XAnimNotify_s // sizeof=0xC
     uint32_t type;
     float timeFrac;
 };
-
-struct cStaticModelWritable // sizeof=0x2
-{                                       // ...
-    uint16_t nextModelInWorldSector;
-};
-struct cStaticModel_s // sizeof=0x50
-{
-    cStaticModelWritable writable;
-    // padding byte
-    // padding byte
-    XModel* xmodel;
-    float origin[3];
-    float invScaledAxis[3][3];
-    float absmin[3];
-    float absmax[3];
-};
-struct dmaterial_t // sizeof=0x48
-{
-    char material[64];
-    int surfaceFlags;
-    int contentFlags;
-};
-struct cNode_t // sizeof=0x8
-{
-    cplane_s* plane;
-    __int16 children[2];
-};
-
-struct cLeafBrushNodeLeaf_t // sizeof=0x4
-{                                       // ...
-    uint16_t* brushes;
-};
-struct cLeafBrushNodeChildren_t // sizeof=0xC
-{                                       // ...
-    float dist;
-    float range;
-    uint16_t childOffset[2];
-};
-union cLeafBrushNodeData_t // sizeof=0xC
-{                                       // ...
-    cLeafBrushNodeLeaf_t leaf;
-    cLeafBrushNodeChildren_t children;
-};
-struct cLeafBrushNode_s // sizeof=0x14
-{
-    unsigned __int8 axis;
-    // padding byte
-    __int16 leafBrushCount;
-    int contents;
-    cLeafBrushNodeData_t data;
-};
-struct CollisionBorder // sizeof=0x1C
-{
-    float distEq[3];
-    float zBase;
-    float zSlope;
-    float start;
-    float length;
-};
-struct CollisionPartition // sizeof=0xC
-{
-    unsigned __int8 triCount;
-    unsigned __int8 borderCount;
-    // padding byte
-    // padding byte
-    int firstTri;
-    CollisionBorder* borders;
-};
-union CollisionAabbTreeIndex // sizeof=0x4
-{                                       // ...
-    int firstChildIndex;
-    int partitionIndex;
-};
-struct CollisionAabbTree // sizeof=0x20
-{
-    float origin[3];
-    float halfSize[3];
-    uint16_t materialIndex;
-    uint16_t childCount;
-    CollisionAabbTreeIndex u;
-};
-
-struct cbrushside_t // sizeof=0xC
-{                                       // ...
-    cplane_s* plane;                    // ...
-    uint32_t materialNum;           // ...
-    __int16 firstAdjacentSideOffset;
-    unsigned __int8 edgeCount;
-    // padding byte
-};
-
-struct __declspec(align(16)) cbrush_t // sizeof=0x50
-{                                       // ...
-    float mins[3];
-    int contents;
-    float maxs[3];
-    uint32_t numsides;
-    cbrushside_t* sides;
-    __int16 axialMaterialNum[2][3];
-    unsigned __int8* baseAdjacentSide;
-    __int16 firstAdjacentSideOffsets[2][3];
-    unsigned __int8 edgeCount[2][3];
-    // padding byte
-    // padding byte
-    // padding byte
-    // padding byte
-    // padding byte
-    // padding byte
-    // padding byte
-    // padding byte
-    // padding byte
-    // padding byte
-};
-
-struct MapEnts // sizeof=0xC
-{                                       // ...
-    const char* name;
-    char* entityString;
-    int numEntityChars;
-};
-
-struct DynEntityDef;
-struct DynEntityPose;
-struct DynEntityClient;
-struct DynEntityColl;
 
 struct ComPrimaryLight // sizeof=0x44 (SP/MP Same)
 {

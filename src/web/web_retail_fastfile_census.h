@@ -21,6 +21,8 @@
 namespace kisak::fastfile
 {
 
+struct CanonicalClipMapStorage;
+
 inline constexpr std::uint32_t RETAIL_CENSUS_ASSET_TYPE_COUNT = 33u;
 inline constexpr std::uint32_t RETAIL_CENSUS_MAX_STEP_BYTES = 64u * 1024u;
 inline constexpr std::uint32_t RETAIL_CENSUS_MAX_STEP_RECORDS = 64u;
@@ -96,6 +98,11 @@ struct RetailCensusLimits
     std::uint32_t maxSoundAliasesPerList = 4096u;
     std::uint32_t maxSoundStringBytes = 4096u;
     std::uint32_t maxRetainedSoundBytes = 128u * 1024u * 1024u;
+    std::uint32_t maxClipMaps = 8u;
+    std::uint32_t maxClipMapNameBytes = 255u;
+    std::uint32_t maxClipMapArrayElements = 16u * 1024u * 1024u;
+    std::uint32_t maxClipMapPayloadBytes = 512u * 1024u * 1024u;
+    std::uint32_t maxRetainedClipMapBytes = 512u * 1024u * 1024u;
     std::uint32_t maxSemanticTraceEntries = 65536u;
 };
 
@@ -250,6 +257,15 @@ enum class RetailCensusError : std::uint8_t
     SoundAliasDependencyUnsupported,
     SoundAliasPayloadLimit,
     SoundAliasCatalogPublishFailed,
+    ClipMapLayoutUnsupported,
+    ClipMapCollectionLimit,
+    ClipMapNameInvalid,
+    ClipMapNameTooLong,
+    ClipMapCountInvalid,
+    ClipMapPayloadLimit,
+    ClipMapPointerInvalid,
+    ClipMapDependencyUnsupported,
+    ClipMapAliasInvalid,
     PostXModelAssetUnsupported,
     SemanticTraceLimit,
     AllocationFailed,
@@ -436,6 +452,7 @@ enum class RetailCensusStage : std::uint8_t
     WorldSoundAliasCurve,
     WorldSoundAliasSpeakerMap,
     WorldSoundAliasPublish,
+    WorldClipMap,
     AssetBoundary,
     Failed,
 };
@@ -991,6 +1008,23 @@ struct RetailPublishedSoundAliasList
     bool published = false;
 };
 
+struct RetailPublishedClipMap
+{
+    std::uint32_t assetIndex = 0u;
+    std::uint32_t assetType = 0u;
+    std::uint32_t serializedReference = 0u;
+    std::uint32_t headerBlock0Offset = 0u;
+    std::uint32_t insertPointerBlock4Offset = UINT32_MAX;
+    std::uint32_t nameBlock4Offset = UINT32_MAX;
+    std::uint32_t payloadBytes = 0u;
+    std::uint32_t identity = 0u;
+    std::uint32_t boundaryInflatedOffset = 0u;
+    std::shared_ptr<CanonicalClipMapStorage> storage;
+    std::shared_ptr<clipMap_t> asset;
+    bool pointerAlias = false;
+    bool published = false;
+};
+
 struct RetailFastfileCensus
 {
     std::uint32_t version = 0u;
@@ -1128,6 +1162,7 @@ struct RetailFastfileCensus
     std::vector<RetailPublishedXAnimParts> worldXAnimParts;
     std::vector<RetailPublishedWeaponDef> worldWeapons;
     std::vector<RetailPublishedSoundAliasList> worldSoundAliasLists;
+    std::vector<RetailPublishedClipMap> worldClipMaps;
     std::vector<kisak::database::SemanticTraceEntry> semanticTrace;
     std::uint32_t semanticTraceHash = 2166136261u;
     std::uint32_t semanticTraceContractHash = 2166136261u;

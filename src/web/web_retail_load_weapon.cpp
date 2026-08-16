@@ -111,6 +111,27 @@ const std::array<std::uint32_t, 48> &SoundFieldOffsets() noexcept { return SOUND
 const std::array<std::uint32_t, 4> &AccuracyKnotFieldOffsets() noexcept { return ACCURACY_KNOT_OFFSETS; }
 const std::array<Operation, 157> &Operations() noexcept { return OPERATIONS; }
 
+RetailCensusError ResolveCanonicalDependency(
+    RetailLoadContext &context,
+    std::uint32_t token,
+    std::uint32_t assetType,
+    void *&asset) noexcept
+{
+    asset = nullptr;
+    if (token == 0u) return RetailCensusError::None;
+    if (token == UINT32_MAX || token == UINT32_MAX - 1u)
+        return RetailCensusError::WeaponDependencyUnsupported;
+    std::uint32_t identity = 0u;
+    if (context.ResolveAssetAlias(token, assetType, identity) !=
+        ZoneRegistryError::None)
+    {
+        return RetailCensusError::WeaponDependencyUnsupported;
+    }
+    asset = context.FindCanonicalAsset(assetType, identity);
+    return asset ? RetailCensusError::None
+                 : RetailCensusError::WeaponDependencyUnsupported;
+}
+
 void AssignWeaponString(WeaponDef &weapon, std::uint32_t index,
     const char *value) noexcept
 {

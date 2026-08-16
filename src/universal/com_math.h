@@ -1,6 +1,7 @@
 #pragma once
 
 #include <universal/assertive.h>
+#include <universal/cplane_types.h>
 
 #include <math.h>
 #include <cstdint>
@@ -15,15 +16,6 @@
 #define IS_NAN(x) _isnan(x)
 
 static const float MPH_TO_INCHES_PER_SEC = 17.6f;
-
-struct cplane_s // sizeof=0x14
-{                                       // ...
-    float normal[3];                    // ...
-    float dist;
-    uint8_t type;
-    uint8_t signbits;
-    uint8_t pad[2];
-};
 
 union PackedUnitVec // sizeof=0x4
 {                                       // ...
