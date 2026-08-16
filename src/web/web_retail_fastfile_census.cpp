@@ -82,6 +82,7 @@ constexpr std::uint32_t XANIM_DELTA_TRANS_HEADER_BYTES = 4u;
 constexpr std::uint32_t XANIM_DELTA_TRANS_FRAMES_BYTES = 28u;
 constexpr std::uint32_t XANIM_DELTA_QUAT_HEADER_BYTES = 4u;
 constexpr std::uint32_t XANIM_DELTA_QUAT_FRAMES_BYTES = 4u;
+constexpr std::uint32_t WEAPON_DEF_BYTES = 2168u;
 constexpr std::uint32_t ASSET_TYPE_PHYS_PRESET = 1u;
 constexpr std::uint32_t ASSET_TYPE_XANIM_PARTS = 2u;
 constexpr std::uint32_t ASSET_TYPE_XMODEL = 3u;
@@ -89,6 +90,7 @@ constexpr std::uint32_t ASSET_TYPE_MATERIAL = 4u;
 constexpr std::uint32_t ASSET_TYPE_TECHNIQUE_SET = 5u;
 constexpr std::uint32_t ASSET_TYPE_IMAGE = 6u;
 constexpr std::uint32_t ASSET_TYPE_GFX_WORLD = 16u;
+constexpr std::uint32_t ASSET_TYPE_WEAPON = 23u;
 constexpr std::uint32_t ASSET_TYPE_FX = 25u;
 constexpr std::uint32_t ASSET_TYPE_RAW_FILE = 31u;
 
@@ -106,6 +108,8 @@ static_assert(ASSET_TYPE_IMAGE ==
     static_cast<std::uint32_t>(::ASSET_TYPE_IMAGE));
 static_assert(ASSET_TYPE_GFX_WORLD ==
     static_cast<std::uint32_t>(::ASSET_TYPE_GFXWORLD));
+static_assert(ASSET_TYPE_WEAPON ==
+    static_cast<std::uint32_t>(::ASSET_TYPE_WEAPON));
 static_assert(ASSET_TYPE_FX ==
     static_cast<std::uint32_t>(::ASSET_TYPE_FX));
 static_assert(ASSET_TYPE_RAW_FILE ==
@@ -170,6 +174,49 @@ enum class WorldXAnimPhase : std::uint8_t
     Indices,
     Complete,
 };
+
+enum class WorldWeaponOperationKind : std::uint8_t
+{
+    String = 0,
+    AccuracyKnots,
+};
+
+struct WorldWeaponOperation
+{
+    WorldWeaponOperationKind kind;
+    std::uint8_t index;
+};
+
+constexpr std::array<std::uint32_t, 48> WEAPON_STRING_OFFSETS = {{
+    0u, 4u, 8u,
+    80u, 84u, 88u, 92u, 96u, 100u, 104u, 108u, 112u, 116u,
+    120u, 124u, 128u, 132u, 136u, 140u, 144u, 148u, 152u, 156u,
+    160u, 164u, 168u, 172u, 176u, 180u, 184u, 188u, 192u, 196u,
+    200u, 204u, 208u, 212u,
+    804u, 812u, 832u, 1340u, 1900u, 1904u, 2012u, 2016u, 2036u,
+    2152u, 2156u,
+}};
+
+// Native Load_WeaponDef interleaves the two graph names with their current
+// and original vec2 arrays. All earlier/later strings remain in field order.
+constexpr std::array<WorldWeaponOperation, 52> WEAPON_OPERATIONS = [] {
+    std::array<WorldWeaponOperation, 52> operations{};
+    std::size_t output = 0u;
+    for (std::uint8_t index = 0u; index <= 41u; ++index)
+        operations[output++] = {WorldWeaponOperationKind::String, index};
+    operations[output++] = {WorldWeaponOperationKind::AccuracyKnots, 0u};
+    operations[output++] = {WorldWeaponOperationKind::AccuracyKnots, 1u};
+    operations[output++] = {WorldWeaponOperationKind::String, 42u};
+    operations[output++] = {WorldWeaponOperationKind::AccuracyKnots, 2u};
+    operations[output++] = {WorldWeaponOperationKind::AccuracyKnots, 3u};
+    for (std::uint8_t index = 43u; index < 48u; ++index)
+        operations[output++] = {WorldWeaponOperationKind::String, index};
+    return operations;
+}();
+
+constexpr std::array<std::uint32_t, 4> WEAPON_ACCURACY_KNOT_OFFSETS = {{
+    1908u, 1916u, 1912u, 1920u,
+}};
 
 constexpr std::array<const char *, RETAIL_CENSUS_ASSET_TYPE_COUNT> ASSET_NAMES = {{
     "xmodelpieces", "physpreset", "xanim", "xmodel", "material", "techset",
@@ -318,6 +365,10 @@ bool ValidLimits(const RetailCensusLimits &limits) noexcept
         limits.maxXAnimParts != 0u && limits.maxXAnimNameBytes != 0u &&
         limits.maxXAnimIndices != 0u && limits.maxXAnimPayloadBytes != 0u &&
         limits.maxRetainedXAnimBytes != 0u &&
+        limits.maxWeapons != 0u && limits.maxWeaponStringBytes != 0u &&
+        limits.maxWeaponAccuracyKnots != 0u &&
+        limits.maxWeaponPayloadBytes != 0u &&
+        limits.maxRetainedWeaponBytes != 0u &&
         limits.maxSemanticTraceEntries != 0u;
 }
 
@@ -465,6 +516,16 @@ const char *RetailCensusErrorString(RetailCensusError error) noexcept
     case RetailCensusError::XAnimPayloadLimit: return "XAnimParts payload exceeds limit";
     case RetailCensusError::XAnimDeltaInvalid: return "invalid XAnimParts delta payload";
     case RetailCensusError::XAnimAliasInvalid: return "invalid XAnimParts pointer alias";
+    case RetailCensusError::WeaponLayoutUnsupported: return "unsupported WeaponDef layout";
+    case RetailCensusError::WeaponNameInvalid: return "invalid WeaponDef internal name";
+    case RetailCensusError::WeaponStringInvalid: return "invalid WeaponDef string pointer";
+    case RetailCensusError::WeaponStringTooLong: return "WeaponDef string exceeds limit";
+    case RetailCensusError::WeaponCollectionLimit: return "WeaponDef collection limit exceeded";
+    case RetailCensusError::WeaponScriptStringInvalid: return "invalid WeaponDef script string";
+    case RetailCensusError::WeaponDependencyUnsupported: return "WeaponDef canonical dependency is not published";
+    case RetailCensusError::WeaponAccuracyInvalid: return "invalid WeaponDef accuracy graph";
+    case RetailCensusError::WeaponPayloadLimit: return "WeaponDef payload exceeds limit";
+    case RetailCensusError::WeaponAliasInvalid: return "invalid WeaponDef pointer alias";
     case RetailCensusError::PostXModelAssetUnsupported:
         return "asset after the first XModel is not an inline technique set";
     case RetailCensusError::SemanticTraceLimit:
@@ -592,6 +653,10 @@ const char *RetailCensusStageString(RetailCensusStage stage) noexcept
     case RetailCensusStage::WorldXAnimName: return "world-xanim-name";
     case RetailCensusStage::WorldXAnimPayload: return "world-xanim-payload";
     case RetailCensusStage::WorldXAnimPublish: return "world-xanim-publish";
+    case RetailCensusStage::WorldWeaponDef: return "world-weapon-def";
+    case RetailCensusStage::WorldWeaponString: return "world-weapon-string";
+    case RetailCensusStage::WorldWeaponAccuracyKnots: return "world-weapon-accuracy-knots";
+    case RetailCensusStage::WorldWeaponPublish: return "world-weapon-publish";
     case RetailCensusStage::AssetBoundary: return "asset-boundary";
     case RetailCensusStage::Failed: return "failed";
     }
@@ -692,6 +757,14 @@ struct RetailFastfileCensusJob::Impl
     std::uint16_t worldXAnimDeltaQuatSize = 0u;
     bool worldXAnimDeltaTransSmall = false;
     std::uint64_t retainedXAnimBytes = 0u;
+    ZoneSpan worldWeaponAliasSlot{};
+    ZoneSpan worldWeaponInsertAliasSlot{};
+    bool worldWeaponHasInsertAlias = false;
+    std::size_t worldWeaponIndex = 0u;
+    std::size_t worldWeaponOperationIndex = 0u;
+    std::array<std::uint32_t, 48> worldWeaponStringReferences{};
+    std::array<std::uint32_t, 4> worldWeaponAccuracyReferences{};
+    std::uint64_t retainedWeaponBytes = 0u;
     std::size_t worldFxIndex = 0u;
     std::uint32_t worldFxElemIndex = 0u;
     std::uint32_t worldFxVisualIndex = 0u;
@@ -1164,6 +1237,291 @@ struct RetailFastfileCensusJob::Impl
         return RetailCensusError::None;
     }
 
+    static void AssignWeaponString(
+        WeaponDef &weapon,
+        std::uint32_t index,
+        const char *value) noexcept
+    {
+        if (index < 3u)
+        {
+            const char **targets[] = {
+                &weapon.szInternalName,
+                &weapon.szDisplayName,
+                &weapon.szOverlayName,
+            };
+            *targets[index] = value;
+            return;
+        }
+        if (index < 36u)
+        {
+            weapon.szXAnims[index - 3u] = value;
+            return;
+        }
+        switch (index)
+        {
+        case 36u: weapon.szModeName = value; break;
+        case 37u: weapon.szAmmoName = value; break;
+        case 38u: weapon.szClipName = value; break;
+        case 39u: weapon.szSharedAmmoCapName = value; break;
+        case 40u: weapon.szAltWeaponName = value; break;
+        case 41u: weapon.accuracyGraphName[0u] = value; break;
+        case 42u: weapon.accuracyGraphName[1u] = value; break;
+        case 43u: weapon.szUseHintString = value; break;
+        case 44u: weapon.dropHintString = value; break;
+        case 45u: weapon.szScript = value; break;
+        case 46u: weapon.fireRumble = value; break;
+        case 47u: weapon.meleeImpactRumble = value; break;
+        default: break;
+        }
+    }
+
+    static void AssignWeaponAccuracyKnots(
+        WeaponDef &weapon,
+        std::uint32_t index,
+        float (*value)[WEAP_ACCURACY_COUNT]) noexcept
+    {
+        switch (index)
+        {
+        case 0u: weapon.accuracyGraphKnots[0u] = value; break;
+        case 1u: weapon.originalAccuracyGraphKnots[0u] = value; break;
+        case 2u: weapon.accuracyGraphKnots[1u] = value; break;
+        case 3u: weapon.originalAccuracyGraphKnots[1u] = value; break;
+        default: break;
+        }
+    }
+
+    RetailCensusError BeginWorldWeaponDef(
+        std::uint32_t assetIndex,
+        RetailCensusStage &stage) noexcept
+    {
+        if (assetIndex >= worldAssetTypes.size() ||
+            worldAssetTypes[assetIndex] != ASSET_TYPE_WEAPON ||
+            (worldAssetReferences[assetIndex] != INLINE_POINTER &&
+             worldAssetReferences[assetIndex] != SHARED_POINTER))
+        {
+            return RetailCensusError::WeaponLayoutUnsupported;
+        }
+        if (result.worldWeapons.size() >= limits.maxWeapons)
+            return RetailCensusError::WeaponCollectionLimit;
+
+        worldWeaponAliasSlot = {
+            4u,
+            result.assetTableBlock4Offset + assetIndex * ASSET_BYTES + 4u,
+            4u,
+        };
+        if (const RetailCensusError error = MapRegistryError(
+                registry.ReserveAlias(worldWeaponAliasSlot, ASSET_TYPE_WEAPON));
+            error != RetailCensusError::None)
+        {
+            return error;
+        }
+        if (const RetailCensusError error = Push(0u);
+            error != RetailCensusError::None) return error;
+        ZoneSpan headerSpan;
+        if (const RetailCensusError error = Plan(
+                4u, WEAPON_DEF_BYTES, &headerSpan);
+            error != RetailCensusError::None) return error;
+
+        worldWeaponHasInsertAlias =
+            worldAssetReferences[assetIndex] == SHARED_POINTER;
+        worldWeaponInsertAliasSlot = {};
+        if (worldWeaponHasInsertAlias)
+        {
+            if (const RetailCensusError error = Push(4u);
+                error != RetailCensusError::None) return error;
+            if (const RetailCensusError error = Plan(
+                    4u, 4u, &worldWeaponInsertAliasSlot);
+                error != RetailCensusError::None) return error;
+            if (const RetailCensusError error = Pop();
+                error != RetailCensusError::None) return error;
+            if (const RetailCensusError error = MapRegistryError(
+                    registry.ReserveAlias(
+                        worldWeaponInsertAliasSlot, ASSET_TYPE_WEAPON));
+                error != RetailCensusError::None) return error;
+        }
+
+        try
+        {
+            result.worldWeapons.emplace_back();
+            RetailPublishedWeaponDef &entry = result.worldWeapons.back();
+            entry.storage = std::make_shared<CanonicalWeaponDefStorage>();
+            entry.asset = std::make_shared<WeaponDef>();
+        }
+        catch (...) { return RetailCensusError::AllocationFailed; }
+        worldWeaponIndex = result.worldWeapons.size() - 1u;
+        RetailPublishedWeaponDef &entry = result.worldWeapons.back();
+        *entry.asset = {};
+        entry.assetIndex = assetIndex;
+        entry.serializedReference = worldAssetReferences[assetIndex];
+        entry.headerBlock0Offset = headerSpan.offset;
+        entry.stringBlock4Offsets.fill(UINT32_MAX);
+        entry.accuracyKnotBlock4Offsets.fill(UINT32_MAX);
+        if (worldWeaponHasInsertAlias)
+            entry.insertPointerBlock4Offset = worldWeaponInsertAliasSlot.offset;
+        if (const RetailCensusError error = AppendSemanticTrace(
+                kisak::database::SemanticTraceEventKind::AssetBegin,
+                ASSET_TYPE_WEAPON,
+                assetIndex,
+                0u,
+                static_cast<std::uint32_t>(cursor),
+                headerSpan,
+                {},
+                worldWeaponAliasSlot);
+            error != RetailCensusError::None)
+        {
+            return error;
+        }
+        worldWeaponOperationIndex = 0u;
+        worldWeaponStringReferences.fill(0u);
+        worldWeaponAccuracyReferences.fill(0u);
+        result.worldNextAssetIndex = assetIndex;
+        result.nextBodyIndex = assetIndex;
+        result.nextBodyType = ASSET_TYPE_WEAPON;
+        result.nextBodyReference = worldAssetReferences[assetIndex];
+        stage = RetailCensusStage::WorldWeaponDef;
+        return RetailCensusError::None;
+    }
+
+    RetailCensusError ScheduleWorldWeaponOperation(
+        RetailCensusStage &stage) noexcept
+    {
+        RetailPublishedWeaponDef &entry = result.worldWeapons[worldWeaponIndex];
+        WeaponDef &weapon = *entry.asset;
+        while (worldWeaponOperationIndex < WEAPON_OPERATIONS.size())
+        {
+            const WorldWeaponOperation operation =
+                WEAPON_OPERATIONS[worldWeaponOperationIndex];
+            if (operation.kind == WorldWeaponOperationKind::String)
+            {
+                const std::uint32_t token =
+                    worldWeaponStringReferences[operation.index];
+                if (token == 0u)
+                {
+                    AssignWeaponString(weapon, operation.index, nullptr);
+                    ++worldWeaponOperationIndex;
+                    continue;
+                }
+                if (token == INLINE_POINTER)
+                {
+                    stage = RetailCensusStage::WorldWeaponString;
+                    return RetailCensusError::None;
+                }
+                if (token == SHARED_POINTER)
+                    return RetailCensusError::WeaponStringInvalid;
+                ZoneSpan target;
+                if (!DecodeZoneAliasToken(token, target) || target.block != 4u)
+                    return RetailCensusError::WeaponStringInvalid;
+                bool found = false;
+                for (std::size_t weaponIndex = 0u;
+                     weaponIndex <= worldWeaponIndex && !found;
+                     ++weaponIndex)
+                {
+                    RetailPublishedWeaponDef &candidate =
+                        result.worldWeapons[weaponIndex];
+                    if (!candidate.storage) continue;
+                    for (std::size_t stringIndex = 0u;
+                         stringIndex < candidate.stringBlock4Offsets.size();
+                         ++stringIndex)
+                    {
+                        if (candidate.stringBlock4Offsets[stringIndex] !=
+                                target.offset ||
+                            !candidate.storage->strings[stringIndex])
+                        {
+                            continue;
+                        }
+                        entry.storage->strings[operation.index] =
+                            candidate.storage->strings[stringIndex];
+                        entry.stringBlock4Offsets[operation.index] = target.offset;
+                        AssignWeaponString(
+                            weapon,
+                            operation.index,
+                            entry.storage->strings[operation.index]->c_str());
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) return RetailCensusError::WeaponStringInvalid;
+                ++worldWeaponOperationIndex;
+                continue;
+            }
+
+            const std::uint32_t knotIndex = operation.index;
+            const std::uint32_t token =
+                worldWeaponAccuracyReferences[knotIndex];
+            const std::uint32_t graphIndex = knotIndex < 2u ? 0u : 1u;
+            const int signedCount = weapon.accuracyGraphKnotCount[graphIndex];
+            if (signedCount < 0 ||
+                static_cast<std::uint32_t>(signedCount) >
+                    limits.maxWeaponAccuracyKnots)
+            {
+                return RetailCensusError::WeaponAccuracyInvalid;
+            }
+            if (token == 0u)
+            {
+                AssignWeaponAccuracyKnots(weapon, knotIndex, nullptr);
+                ++worldWeaponOperationIndex;
+                continue;
+            }
+            if (token == INLINE_POINTER)
+            {
+                const std::uint64_t bytes =
+                    static_cast<std::uint64_t>(signedCount) * 8u;
+                if (bytes > limits.maxWeaponPayloadBytes - entry.payloadBytes ||
+                    bytes > limits.maxRetainedWeaponBytes - retainedWeaponBytes)
+                {
+                    return RetailCensusError::WeaponPayloadLimit;
+                }
+                ZoneSpan span;
+                if (const RetailCensusError error = Plan(4u, bytes, &span);
+                    error != RetailCensusError::None) return error;
+                entry.accuracyKnotBlock4Offsets[knotIndex] = span.offset;
+                entry.payloadBytes += static_cast<std::uint32_t>(bytes);
+                retainedWeaponBytes += bytes;
+                stage = RetailCensusStage::WorldWeaponAccuracyKnots;
+                return RetailCensusError::None;
+            }
+            if (token == SHARED_POINTER)
+                return RetailCensusError::WeaponAccuracyInvalid;
+            ZoneSpan target;
+            if (!DecodeZoneAliasToken(token, target) || target.block != 4u)
+                return RetailCensusError::WeaponAccuracyInvalid;
+            bool found = false;
+            for (std::size_t weaponIndex = 0u;
+                 weaponIndex <= worldWeaponIndex && !found;
+                 ++weaponIndex)
+            {
+                RetailPublishedWeaponDef &candidate =
+                    result.worldWeapons[weaponIndex];
+                if (!candidate.storage) continue;
+                for (std::size_t candidateIndex = 0u;
+                     candidateIndex < candidate.accuracyKnotBlock4Offsets.size();
+                     ++candidateIndex)
+                {
+                    if (candidate.accuracyKnotBlock4Offsets[candidateIndex] !=
+                            target.offset ||
+                        !candidate.storage->accuracyKnots[candidateIndex])
+                    {
+                        continue;
+                    }
+                    entry.storage->accuracyKnots[knotIndex] =
+                        candidate.storage->accuracyKnots[candidateIndex];
+                    entry.accuracyKnotBlock4Offsets[knotIndex] = target.offset;
+                    AssignWeaponAccuracyKnots(
+                        weapon,
+                        knotIndex,
+                        reinterpret_cast<float (*)[WEAP_ACCURACY_COUNT]>(
+                            entry.storage->accuracyKnots[knotIndex]->data()));
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) return RetailCensusError::WeaponAccuracyInvalid;
+            ++worldWeaponOperationIndex;
+        }
+        stage = RetailCensusStage::WorldWeaponPublish;
+        return RetailCensusError::None;
+    }
+
     RetailCensusError BeginWorldXAnimParts(
         std::uint32_t assetIndex,
         RetailCensusStage &stage) noexcept
@@ -1632,6 +1990,9 @@ struct RetailFastfileCensusJob::Impl
         auto activeWorldXAnim = [&]() noexcept -> RetailPublishedXAnimParts & {
             return result.worldXAnimParts[worldXAnimIndex];
         };
+        auto activeWorldWeapon = [&]() noexcept -> RetailPublishedWeaponDef & {
+            return result.worldWeapons[worldWeaponIndex];
+        };
         auto activeWorldMaterial = [&]() noexcept -> RetailXModelMaterial & {
             return worldMaterialOwnedByFx
                 ? activeWorldFx().materials.back()
@@ -1748,6 +2109,64 @@ struct RetailFastfileCensusJob::Impl
                 }
                 result.nextBodyType = worldAssetTypes[index];
                 result.nextBodyReference = worldAssetReferences[index];
+                if (result.nextBodyType == ASSET_TYPE_WEAPON &&
+                    (result.nextBodyReference == INLINE_POINTER ||
+                     result.nextBodyReference == SHARED_POINTER))
+                {
+                    return BeginWorldWeaponDef(index, nextStage);
+                }
+                if (result.nextBodyType == ASSET_TYPE_WEAPON)
+                {
+                    if (result.worldWeapons.size() >= limits.maxWeapons)
+                        return RetailCensusError::WeaponCollectionLimit;
+                    std::uint32_t identity = 0u;
+                    std::shared_ptr<WeaponDef> priorAsset;
+                    std::shared_ptr<CanonicalWeaponDefStorage> priorStorage;
+                    std::array<std::uint32_t, 48> priorStringOffsets{};
+                    std::array<std::uint32_t, 4> priorKnotOffsets{};
+                    if (result.nextBodyReference != 0u)
+                    {
+                        if (registry.ResolveAlias(
+                                result.nextBodyReference,
+                                ASSET_TYPE_WEAPON,
+                                identity) != ZoneRegistryError::None)
+                        {
+                            return RetailCensusError::WeaponAliasInvalid;
+                        }
+                        const auto found = std::find_if(
+                            result.worldWeapons.begin(),
+                            result.worldWeapons.end(),
+                            [identity](const RetailPublishedWeaponDef &entry) {
+                                return entry.identity == identity && entry.asset;
+                            });
+                        if (found == result.worldWeapons.end())
+                            return RetailCensusError::WeaponAliasInvalid;
+                        priorAsset = found->asset;
+                        priorStorage = found->storage;
+                        priorStringOffsets = found->stringBlock4Offsets;
+                        priorKnotOffsets = found->accuracyKnotBlock4Offsets;
+                    }
+                    try { result.worldWeapons.emplace_back(); }
+                    catch (...) { return RetailCensusError::AllocationFailed; }
+                    worldWeaponIndex = result.worldWeapons.size() - 1u;
+                    RetailPublishedWeaponDef &entry = result.worldWeapons.back();
+                    entry.assetIndex = index;
+                    entry.serializedReference = result.nextBodyReference;
+                    entry.identity = identity;
+                    entry.boundaryInflatedOffset =
+                        static_cast<std::uint32_t>(cursor);
+                    entry.pointerAlias = result.nextBodyReference != 0u;
+                    entry.published = true;
+                    if (priorAsset)
+                    {
+                        entry.asset = std::move(priorAsset);
+                        entry.storage = std::move(priorStorage);
+                        entry.stringBlock4Offsets = priorStringOffsets;
+                        entry.accuracyKnotBlock4Offsets = priorKnotOffsets;
+                    }
+                    nextStage = RetailCensusStage::WorldWeaponPublish;
+                    return RetailCensusError::None;
+                }
                 if (result.nextBodyType == ASSET_TYPE_XANIM_PARTS &&
                     (result.nextBodyReference == INLINE_POINTER ||
                      result.nextBodyReference == SHARED_POINTER))
@@ -2893,7 +3312,8 @@ struct RetailFastfileCensusJob::Impl
                                 continue;
                             }
                             if (mode == RetailCensusMode::WorldXModelLoader &&
-                                result.nextBodyType == ASSET_TYPE_XANIM_PARTS)
+                                (result.nextBodyType == ASSET_TYPE_XANIM_PARTS ||
+                                 result.nextBodyType == ASSET_TYPE_WEAPON))
                             {
                                 if (const RetailCensusError error =
                                         dispatchSupportedWorldAsset(
@@ -2965,7 +3385,8 @@ struct RetailFastfileCensusJob::Impl
                             continue;
                         }
                         if (mode == RetailCensusMode::WorldXModelLoader &&
-                            result.nextBodyType == ASSET_TYPE_XANIM_PARTS)
+                            (result.nextBodyType == ASSET_TYPE_XANIM_PARTS ||
+                             result.nextBodyType == ASSET_TYPE_WEAPON))
                         {
                             if (const RetailCensusError error =
                                     dispatchSupportedWorldAsset(
@@ -3908,6 +4329,288 @@ struct RetailFastfileCensusJob::Impl
                 result.registryDefinedAliasCount = registry.DefinedAliasCount();
                 if (const RetailCensusError error = dispatchSupportedWorldAsset(
                         effect.assetIndex + 1u, stage);
+                    error != RetailCensusError::None) return error;
+                if (complete) return RetailCensusError::None;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldWeaponDef)
+            {
+                const int visit = visitRecord(WEAPON_DEF_BYTES);
+                if (visit <= 0) return RetailCensusError::None;
+                const std::uint8_t *record = inflated.data() + cursor;
+                RetailPublishedWeaponDef &entry = activeWorldWeapon();
+                WeaponDef &weapon = *entry.asset;
+
+                auto copyScalarRange = [&](void *target,
+                                           std::size_t wireOffset,
+                                           std::size_t bytes) noexcept {
+                    std::memcpy(target, record + wireOffset, bytes);
+                };
+                copyScalarRange(weapon.hideTags, 216u, 116u);
+                copyScalarRange(&weapon.iReticleCenterSize, 548u, 152u);
+                copyScalarRange(&weapon.hudIconRatio, 784u, 4u);
+                copyScalarRange(&weapon.ammoCounterIconRatio, 792u, 12u);
+                copyScalarRange(&weapon.iAmmoIndex, 808u, 4u);
+                copyScalarRange(&weapon.iClipIndex, 816u, 16u);
+                copyScalarRange(&weapon.iSharedAmmoCapIndex, 836u, 236u);
+                copyScalarRange(&weapon.overlayReticle, 1080u, 224u);
+                copyScalarRange(&weapon.killIconRatio, 1308u, 8u);
+                copyScalarRange(&weapon.dpadIconRatio, 1320u, 20u);
+                copyScalarRange(&weapon.altWeaponIndex, 1344u, 68u);
+                copyScalarRange(&weapon.projExplosion, 1416u, 4u);
+                copyScalarRange(
+                    &weapon.projExplosionEffectForceNormalUp, 1424u, 4u);
+                copyScalarRange(&weapon.bProjImpactExplode, 1440u, 264u);
+                copyScalarRange(weapon.vProjectileColor, 1708u, 24u);
+                copyScalarRange(&weapon.fAdsAimPitch, 1740u, 160u);
+                copyScalarRange(weapon.accuracyGraphKnotCount, 1924u, 88u);
+                copyScalarRange(&weapon.iUseHintStringIndex, 2020u, 16u);
+                copyScalarRange(weapon.fOOPosAnimLength, 2040u, 112u);
+                copyScalarRange(&weapon.adsDofStart, 2160u, 8u);
+
+                for (std::size_t index = 0u;
+                     index < WEAPON_STRING_OFFSETS.size(); ++index)
+                {
+                    worldWeaponStringReferences[index] =
+                        ReadU32(record + WEAPON_STRING_OFFSETS[index]);
+                }
+                for (std::size_t index = 0u;
+                     index < WEAPON_ACCURACY_KNOT_OFFSETS.size(); ++index)
+                {
+                    worldWeaponAccuracyReferences[index] =
+                        ReadU32(record + WEAPON_ACCURACY_KNOT_OFFSETS[index]);
+                }
+                if (worldWeaponStringReferences[0u] == 0u)
+                    return RetailCensusError::WeaponNameInvalid;
+
+                auto requireNullRange = [&](std::uint32_t begin,
+                                            std::uint32_t count) noexcept {
+                    for (std::uint32_t index = 0u; index < count; ++index)
+                    {
+                        if (ReadU32(record + begin + index * 4u) != 0u)
+                            return false;
+                    }
+                    return true;
+                };
+                if (!requireNullRange(12u, 17u) ||
+                    !requireNullRange(332u, 2u) ||
+                    !requireNullRange(340u, 45u) ||
+                    ReadU32(record + 520u) != 0u ||
+                    !requireNullRange(524u, 6u) ||
+                    !requireNullRange(700u, 20u) ||
+                    ReadU32(record + 780u) != 0u ||
+                    ReadU32(record + 788u) != 0u ||
+                    !requireNullRange(1072u, 2u) ||
+                    ReadU32(record + 1304u) != 0u ||
+                    ReadU32(record + 1316u) != 0u ||
+                    ReadU32(record + 1412u) != 0u ||
+                    ReadU32(record + 1420u) != 0u ||
+                    ReadU32(record + 1428u) != 0u ||
+                    !requireNullRange(1432u, 2u) ||
+                    ReadU32(record + 1704u) != 0u ||
+                    ReadU32(record + 1732u) != 0u ||
+                    ReadU32(record + 1736u) != 0u)
+                {
+                    return RetailCensusError::WeaponDependencyUnsupported;
+                }
+
+                for (const std::pair<std::uint32_t, std::uint32_t> range : {
+                         std::pair{216u, 8u},
+                         std::pair{232u, 16u},
+                         std::pair{264u, 16u}})
+                {
+                    for (std::uint32_t index = 0u; index < range.second; ++index)
+                    {
+                        if (ReadU16(record + range.first + index * 2u) >=
+                            scriptStrings.size())
+                        {
+                            return RetailCensusError::WeaponScriptStringInvalid;
+                        }
+                    }
+                }
+                for (std::size_t graph = 0u; graph < 2u; ++graph)
+                {
+                    if (weapon.accuracyGraphKnotCount[graph] < 0 ||
+                        static_cast<std::uint32_t>(
+                            weapon.accuracyGraphKnotCount[graph]) >
+                            limits.maxWeaponAccuracyKnots)
+                    {
+                        return RetailCensusError::WeaponAccuracyInvalid;
+                    }
+                }
+
+                cursor += WEAPON_DEF_BYTES;
+                ++report.recordsProcessed;
+                if (const RetailCensusError error = Push(4u);
+                    error != RetailCensusError::None) return error;
+                worldWeaponOperationIndex = 0u;
+                if (const RetailCensusError error =
+                        ScheduleWorldWeaponOperation(stage);
+                    error != RetailCensusError::None) return error;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldWeaponString)
+            {
+                RetailPublishedWeaponDef &entry = activeWorldWeapon();
+                const WorldWeaponOperation operation =
+                    WEAPON_OPERATIONS[worldWeaponOperationIndex];
+                if (operation.kind != WorldWeaponOperationKind::String)
+                    return RetailCensusError::WeaponLayoutUnsupported;
+                const auto begin = inflated.begin() +
+                    static_cast<std::ptrdiff_t>(cursor);
+                const auto terminator = std::find(begin, inflated.end(), 0u);
+                if (terminator == inflated.end())
+                {
+                    if (inflated.size() - cursor >= limits.maxWeaponStringBytes)
+                        return RetailCensusError::WeaponStringTooLong;
+                    blocked = true;
+                    return RetailCensusError::None;
+                }
+                const std::size_t bytes =
+                    static_cast<std::size_t>(terminator - begin) + 1u;
+                if (bytes > limits.maxWeaponStringBytes)
+                    return RetailCensusError::WeaponStringTooLong;
+                if (recordVisited == 0u)
+                {
+                    if (bytes > limits.maxWeaponPayloadBytes - entry.payloadBytes ||
+                        bytes > limits.maxRetainedWeaponBytes - retainedWeaponBytes)
+                    {
+                        return RetailCensusError::WeaponPayloadLimit;
+                    }
+                    ZoneSpan span;
+                    if (const RetailCensusError error = Plan(1u, bytes, &span);
+                        error != RetailCensusError::None) return error;
+                    entry.stringBlock4Offsets[operation.index] = span.offset;
+                    entry.payloadBytes += static_cast<std::uint32_t>(bytes);
+                    retainedWeaponBytes += bytes;
+                }
+                const int visitString = visitRecord(bytes);
+                if (visitString <= 0) return RetailCensusError::None;
+                try
+                {
+                    entry.storage->strings[operation.index] =
+                        std::make_shared<std::string>(
+                            reinterpret_cast<const char *>(
+                                inflated.data() + cursor),
+                            bytes - 1u);
+                }
+                catch (...) { return RetailCensusError::AllocationFailed; }
+                AssignWeaponString(
+                    *entry.asset,
+                    operation.index,
+                    entry.storage->strings[operation.index]->c_str());
+                cursor += bytes;
+                ++report.recordsProcessed;
+                ++worldWeaponOperationIndex;
+                if (const RetailCensusError error =
+                        ScheduleWorldWeaponOperation(stage);
+                    error != RetailCensusError::None) return error;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldWeaponAccuracyKnots)
+            {
+                RetailPublishedWeaponDef &entry = activeWorldWeapon();
+                WeaponDef &weapon = *entry.asset;
+                const WorldWeaponOperation operation =
+                    WEAPON_OPERATIONS[worldWeaponOperationIndex];
+                if (operation.kind != WorldWeaponOperationKind::AccuracyKnots)
+                    return RetailCensusError::WeaponLayoutUnsupported;
+                const std::uint32_t graphIndex =
+                    operation.index < 2u ? 0u : 1u;
+                const std::size_t count = static_cast<std::size_t>(
+                    weapon.accuracyGraphKnotCount[graphIndex]);
+                const std::size_t bytes = count * 8u;
+                const int visitKnots = visitRecord(bytes);
+                if (visitKnots <= 0) return RetailCensusError::None;
+                try
+                {
+                    entry.storage->accuracyKnots[operation.index] =
+                        std::make_shared<std::vector<std::array<float, 2>>>(
+                            std::max<std::size_t>(count, 1u));
+                }
+                catch (...) { return RetailCensusError::AllocationFailed; }
+                for (std::size_t index = 0u; index < count; ++index)
+                {
+                    (*entry.storage->accuracyKnots[operation.index])[index] = {{
+                        ReadF32(inflated.data() + cursor + index * 8u),
+                        ReadF32(inflated.data() + cursor + index * 8u + 4u),
+                    }};
+                }
+                AssignWeaponAccuracyKnots(
+                    weapon,
+                    operation.index,
+                    reinterpret_cast<float (*)[WEAP_ACCURACY_COUNT]>(
+                        entry.storage->accuracyKnots[operation.index]->data()));
+                cursor += bytes;
+                ++report.recordsProcessed;
+                ++worldWeaponOperationIndex;
+                if (const RetailCensusError error =
+                        ScheduleWorldWeaponOperation(stage);
+                    error != RetailCensusError::None) return error;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldWeaponPublish)
+            {
+                RetailPublishedWeaponDef &entry = activeWorldWeapon();
+                if (!entry.pointerAlias && entry.serializedReference != 0u)
+                {
+                    if (const RetailCensusError error = Pop();
+                        error != RetailCensusError::None) return error;
+                    if (const RetailCensusError error = Pop();
+                        error != RetailCensusError::None) return error;
+                    if (!entry.storage || !entry.asset ||
+                        !entry.storage->strings[0u] ||
+                        !ValidPublishedName(*entry.storage->strings[0u]))
+                    {
+                        return RetailCensusError::WeaponNameInvalid;
+                    }
+                    if (const RetailCensusError error = MapRegistryError(
+                            registry.RegisterAsset(
+                                ASSET_TYPE_WEAPON,
+                                entry.assetIndex,
+                                *entry.storage->strings[0u],
+                                entry.identity));
+                        error != RetailCensusError::None) return error;
+                    if (const RetailCensusError error = MapRegistryError(
+                            registry.PublishAlias(
+                                worldWeaponAliasSlot, entry.identity));
+                        error != RetailCensusError::None) return error;
+                    if (worldWeaponHasInsertAlias)
+                    {
+                        if (const RetailCensusError error = MapRegistryError(
+                                registry.PublishAlias(
+                                    worldWeaponInsertAliasSlot,
+                                    entry.identity));
+                            error != RetailCensusError::None) return error;
+                    }
+                    entry.published = true;
+                    entry.boundaryInflatedOffset =
+                        static_cast<std::uint32_t>(cursor);
+                    if (const RetailCensusError error = AppendSemanticTrace(
+                            kisak::database::SemanticTraceEventKind::AssetPublish,
+                            ASSET_TYPE_WEAPON,
+                            entry.assetIndex,
+                            entry.identity,
+                            entry.boundaryInflatedOffset,
+                            {0u, entry.headerBlock0Offset, WEAPON_DEF_BYTES},
+                            *entry.storage->strings[0u],
+                            worldWeaponAliasSlot);
+                        error != RetailCensusError::None)
+                    {
+                        return error;
+                    }
+                }
+                ++result.completedAssetCount;
+                result.block0HighWaterAtBoundary = arenas.HighWater(0u);
+                result.block4CursorAtBoundary = arenas.Cursor(4u);
+                result.worldRegistryAliasCount = registry.AliasCount();
+                result.worldRegistryDefinedAliasCount =
+                    registry.DefinedAliasCount();
+                result.registryAssetCount = registry.AssetCount();
+                result.registryAliasCount = registry.AliasCount();
+                result.registryDefinedAliasCount = registry.DefinedAliasCount();
+                if (const RetailCensusError error = dispatchSupportedWorldAsset(
+                        entry.assetIndex + 1u, stage);
                     error != RetailCensusError::None) return error;
                 if (complete) return RetailCensusError::None;
                 continue;

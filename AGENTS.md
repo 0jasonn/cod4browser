@@ -118,7 +118,10 @@ Kisak behavior or explain why a platform-owned implementation is permanent.
 - Bootstrap the local pinned toolchain with `tools/bootstrap_web_toolchain.ps1`.
 - Build the debug Wasm target with `tools/build_web.ps1`.
 - Serve only the generated site with `python tools/serve_web.py --directory build/web/site`.
-- Run the browser boot smoke test with `npm.cmd run test:browser` after `npm.cmd ci` and browser installation.
+- Run the tagged browser smoke suite with `npm.cmd run test:browser` after
+  `npm.cmd ci` and browser installation. Run `npm.cmd run test:browser:full`
+  for substantial browser-platform milestones. The intentionally redundant
+  `npm.cmd run test:browser:all` tier is diagnostic-only.
 - The toolchain lives under ignored `.tools/`; do not activate it permanently or commit it.
 
 ## Testing expectations
@@ -133,7 +136,12 @@ Kisak behavior or explain why a platform-owned implementation is permanent.
   Kisak rather than independently specifying IW3 behavior.
 - Test with synthetic malformed archives and network messages. Porting old native code into a browser increases the importance of fuzzing and strict bounds validation.
 - For rendering work, retain a deterministic small scene or capture and compare it deliberately; tolerate only documented platform variance.
-- Run the narrowest relevant checks while iterating, then the complete available suite before handing work off. Report exactly what ran and what could not run.
+- Run the narrowest relevant checks while iterating, then the tagged browser
+  smoke suite before ordinary handoffs. Run the curated full browser suite for
+  substantial browser-platform milestones and release-facing changes. Direct
+  native/Wasm parser tests are authoritative for cases tagged
+  `@native-covered`; do not routinely rerun their browser duplicates. Report
+  exactly what ran and what could not run.
 - "Compiles," "boots," and "playable" are separate milestones. State which one was demonstrated and in which browser.
 
 ## Change discipline

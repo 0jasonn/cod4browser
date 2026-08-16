@@ -38,7 +38,7 @@ async function importInstall(page, testInfo, name)
     return directory;
 }
 
-test("qcommon reaches a bounded cooperative pre-database boundary", async ({ page }, testInfo) => {
+test("qcommon reaches a bounded cooperative pre-database boundary", { tag: "@smoke" }, async ({ page }, testInfo) => {
     await importInstall(page, testInfo, "qcommon-success");
     await expect.poll(
         () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.qcommon?.state),

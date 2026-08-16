@@ -159,7 +159,7 @@ async function observeIndexedSurface(page)
     });
 }
 
-test("boots the headless engine slice and renders through WebGL2", async ({ page }) => {
+test("boots the headless engine slice and renders through WebGL2", { tag: "@smoke" }, async ({ page }) => {
     await observeIndexedSurface(page);
     const pageErrors = [];
     const consoleErrors = [];
@@ -483,7 +483,7 @@ test("boots the headless engine slice and renders through WebGL2", async ({ page
     expect(consoleErrors).toEqual([]);
 });
 
-test("reports and recovers from WebGL2 context loss", async ({ page }) => {
+test("reports and recovers from WebGL2 context loss", { tag: "@smoke" }, async ({ page }) => {
     await observeIndexedSurface(page);
     await page.goto("/");
     await expect.poll(
@@ -759,7 +759,7 @@ test("does not recover a renderer whose initial pipeline failed", async ({ page 
     expect(terminalState.states).not.toContain("running");
 });
 
-test("shows a useful failure when the generated module is missing", async ({ page }) => {
+test("shows a useful failure when the generated module is missing", { tag: "@smoke" }, async ({ page }) => {
     await page.route("**/kisakcod.mjs", (route) => route.abort("failed"));
     await page.goto("/");
 

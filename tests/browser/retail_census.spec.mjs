@@ -269,7 +269,7 @@ async function observeRetailShaderRenderer(page)
     });
 }
 
-test("publishes one retail material and binds its resolved image", async ({ page }, testInfo) => {
+test("publishes one retail material and binds its resolved image", { tag: "@smoke" }, async ({ page }, testInfo) => {
     await observeRetailShaderRenderer(page);
     await importInstall(page, testInfo, "retail-census-success", {
         primaryIwd: M20_PRIMARY_IWD,
@@ -1063,7 +1063,7 @@ test("loads independent color maps for every supported first-LOD draw", async ({
     });
 });
 
-test("recreates every first-LOD texture slot after context loss", async ({ page }, testInfo) => {
+test("recreates every first-LOD texture slot after context loss", { tag: "@smoke" }, async ({ page }, testInfo) => {
     await page.addInitScript(() => {
         globalThis.__m29TextureUploads = 0;
         const original = WebGL2RenderingContext.prototype.texImage2D;
@@ -1363,7 +1363,7 @@ test("rebuilds the selected shader program after WebGL2 context loss", async ({ 
     )).toBe(true);
 });
 
-test("an invalid vertex program fails before shader creation or asset publication", async ({ page }, testInfo) => {
+test("an invalid vertex program fails before shader creation or asset publication", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const valid = createSyntheticRetailCensusFastfile();
     const inflated = inflateSync(valid.subarray(12));
     inflated.writeUInt32LE(0x0000_0101, 458);
@@ -1394,7 +1394,7 @@ test("an invalid vertex program fails before shader creation or asset publicatio
     expect(result.archive.state).toBe("idle");
 });
 
-test("a map table without GfxWorld fails before publishing startup assets", async ({ page }, testInfo) => {
+test("a map table without GfxWorld fails before publishing startup assets", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const overrides = new Map([
         ["zone/english/killhouse.ff",
             createSyntheticWorldInventoryFastfile({ includeWorld: false })],
@@ -1422,7 +1422,7 @@ test("a map table without GfxWorld fails before publishing startup assets", asyn
     expect(result.rendererShader.substitutionId).not.toBe("webgl2.vertcol_simple2d.v1");
 });
 
-test("an incomplete reusable technique dependency fails closed", async ({ page }, testInfo) => {
+test("an incomplete reusable technique dependency fails closed", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const overrides = new Map([
         ["zone/english/killhouse.ff",
             createSyntheticWorldInventoryFastfile({ secondTechniqueDependency: true })],
@@ -1447,7 +1447,7 @@ test("an incomplete reusable technique dependency fails closed", async ({ page }
     expect(census.worldInventory).toBeUndefined();
 });
 
-test("a forged first-XModel bone-array alias fails closed", async ({ page }, testInfo) => {
+test("a forged first-XModel bone-array alias fails closed", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const overrides = new Map([
         ["zone/english/killhouse.ff",
             createSyntheticWorldInventoryFastfile({ unsupportedXModelBoneNames: true })],
@@ -1472,7 +1472,7 @@ test("a forged first-XModel bone-array alias fails closed", async ({ page }, tes
     expect(census.worldInventory).toBeUndefined();
 });
 
-test("invalid XModel bounds fail without exposing prior technique publications", async ({ page }, testInfo) => {
+test("invalid XModel bounds fail without exposing prior technique publications", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const overrides = new Map([
         ["zone/english/killhouse.ff",
             createSyntheticWorldInventoryFastfile({ invalidXModelBounds: true })],
@@ -1498,7 +1498,7 @@ test("invalid XModel bounds fail without exposing prior technique publications",
     expect(census.worldInventory).toBeUndefined();
 });
 
-test("an out-of-range XModel bone script string fails closed", async ({ page }, testInfo) => {
+test("an out-of-range XModel bone script string fails closed", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const overrides = new Map([
         ["zone/english/killhouse.ff",
             createSyntheticWorldInventoryFastfile({ invalidXModelBoneString: true })],
@@ -1524,7 +1524,7 @@ test("an out-of-range XModel bone script string fails closed", async ({ page }, 
     expect(census.worldInventory).toBeUndefined();
 });
 
-test("an XSurface pointer/count mismatch fails without a partial model", async ({ page }, testInfo) => {
+test("an XSurface pointer/count mismatch fails without a partial model", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const overrides = new Map([
         ["zone/english/killhouse.ff",
             createSyntheticWorldInventoryFastfile({ invalidXSurfaceLayout: true })],
@@ -1548,7 +1548,7 @@ test("an XSurface pointer/count mismatch fails without a partial model", async (
     expect(census.worldInventory).toBeUndefined();
 });
 
-test("an invalid XSurface collision tree fails closed", async ({ page }, testInfo) => {
+test("an invalid XSurface collision tree fails closed", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const overrides = new Map([
         ["zone/english/killhouse.ff",
             createSyntheticWorldInventoryFastfile({ invalidXSurfaceCollision: true })],
@@ -1589,7 +1589,7 @@ for (const [title, fixtureOptions, expectedError] of [
         "invalid XModel bone info",
     ],
 ]) {
-    test(title, async ({ page }, testInfo) => {
+    test(title, { tag: "@native-covered" }, async ({ page }, testInfo) => {
         const overrides = new Map([[
             "zone/english/killhouse.ff",
             createSyntheticWorldInventoryFastfile(fixtureOptions),
@@ -1618,7 +1618,7 @@ for (const [title, fixtureOptions, expectedError] of [
     });
 }
 
-test("an inline physics preset publishes before its XModel", async ({ page }, testInfo) => {
+test("an inline physics preset publishes before its XModel", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const overrides = new Map([[
         "zone/english/killhouse.ff",
         createSyntheticWorldInventoryFastfile({ xModelPhysPreset: true }),
@@ -1674,7 +1674,7 @@ for (const [title, fixtureOptions, expectedError] of [
         "invalid physics preset sound alias prefix",
     ],
 ]) {
-    test(title, async ({ page }, testInfo) => {
+    test(title, { tag: "@native-covered" }, async ({ page }, testInfo) => {
         const overrides = new Map([[
             "zone/english/killhouse.ff",
             createSyntheticWorldInventoryFastfile(fixtureOptions),
@@ -1703,7 +1703,7 @@ for (const [title, fixtureOptions, expectedError] of [
     });
 }
 
-test("an invalid map technique-set header fails before publishing asset zero", async ({ page }, testInfo) => {
+test("an invalid map technique-set header fails before publishing asset zero", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const overrides = new Map([
         ["zone/english/killhouse.ff",
             createSyntheticWorldInventoryFastfile({ invalidTechniqueSet: true })],
@@ -1727,7 +1727,7 @@ test("an invalid map technique-set header fails before publishing asset zero", a
     });
 });
 
-test("an invalid later map technique-set header exposes no partial prefix", async ({ page }, testInfo) => {
+test("an invalid later map technique-set header exposes no partial prefix", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const overrides = new Map([
         ["zone/english/killhouse.ff",
             createSyntheticWorldInventoryFastfile({ invalidSecondTechniqueSet: true })],
@@ -1754,7 +1754,7 @@ test("an invalid later map technique-set header exposes no partial prefix", asyn
     expect(census.worldInventory).toBeUndefined();
 });
 
-test("publishes the consecutive typed technique-set run after the XModel", async ({ page }, testInfo) => {
+test("publishes the consecutive typed technique-set run after the XModel", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     await importInstall(page, testInfo, "m31-post-xmodel-techset-run");
     await expect.poll(
         () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
@@ -1806,7 +1806,7 @@ test("publishes the consecutive typed technique-set run after the XModel", async
     });
 });
 
-test("selects between complete retained XModels without reparsing", async ({ page }, testInfo) => {
+test("selects between complete retained XModels without reparsing", { tag: "@smoke" }, async ({ page }, testInfo) => {
     await importInstall(page, testInfo, "m34-second-xmodel-dependencies");
     await expect.poll(
         () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
@@ -1953,7 +1953,7 @@ test("selects between complete retained XModels without reparsing", async ({ pag
     });
 });
 
-test("invalid second-XModel material alias exposes no partial public result", async ({ page }, testInfo) => {
+test("invalid second-XModel material alias exposes no partial public result", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const overrides = new Map([[
         "zone/english/killhouse.ff",
         createSyntheticWorldInventoryFastfile({
@@ -1980,7 +1980,7 @@ test("invalid second-XModel material alias exposes no partial public result", as
     expect(census.worldInventory).toBeUndefined();
 });
 
-test("resolves a reusable shared GfxImage alias after insertion-pointer planning", async ({ page }, testInfo) => {
+test("resolves a reusable shared GfxImage alias after insertion-pointer planning", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     await importInstall(page, testInfo, "m38-shared-image-alias");
     await expect.poll(
         () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.retailCensus?.state),
@@ -2011,7 +2011,7 @@ test("resolves a reusable shared GfxImage alias after insertion-pointer planning
     });
 });
 
-test("undefined reusable GfxImage alias fails before parent publication", async ({ page }, testInfo) => {
+test("undefined reusable GfxImage alias fails before parent publication", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const overrides = new Map([[
         "zone/english/killhouse.ff",
         createSyntheticWorldInventoryFastfile({
@@ -2038,7 +2038,7 @@ test("undefined reusable GfxImage alias fails before parent publication", async 
     expect(census.worldInventory).toBeUndefined();
 });
 
-test("invalid second-XSurface layout exposes no partial public result", async ({ page }, testInfo) => {
+test("invalid second-XSurface layout exposes no partial public result", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const overrides = new Map([[
         "zone/english/killhouse.ff",
         createSyntheticWorldInventoryFastfile({
@@ -2065,7 +2065,7 @@ test("invalid second-XSurface layout exposes no partial public result", async ({
     expect(census.worldInventory).toBeUndefined();
 });
 
-test("invalid second-XModel bounds expose no partial public result", async ({ page }, testInfo) => {
+test("invalid second-XModel bounds expose no partial public result", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const overrides = new Map([[
         "zone/english/killhouse.ff",
         createSyntheticWorldInventoryFastfile({ invalidSecondXModelBounds: true }),
@@ -2088,7 +2088,7 @@ test("invalid second-XModel bounds expose no partial public result", async ({ pa
     expect(census.worldInventory).toBeUndefined();
 });
 
-test("a forged second-XModel bone-array alias exposes no partial world", async ({ page }, testInfo) => {
+test("a forged second-XModel bone-array alias exposes no partial world", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const overrides = new Map([[
         "zone/english/killhouse.ff",
         createSyntheticWorldInventoryFastfile({
@@ -2114,7 +2114,7 @@ test("a forged second-XModel bone-array alias exposes no partial world", async (
     expect(census.worldInventory).toBeUndefined();
 });
 
-test("a malformed post-XModel technique set fails without publishing the prior prefix", async ({ page }, testInfo) => {
+test("a malformed post-XModel technique set fails without publishing the prior prefix", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const overrides = new Map([[
         "zone/english/killhouse.ff",
         createSyntheticWorldInventoryFastfile({ invalidPostXModelTechniqueSet: true }),
@@ -2138,7 +2138,7 @@ test("a malformed post-XModel technique set fails without publishing the prior p
     expect(census.worldInventory).toBeUndefined();
 });
 
-test("a malformed later post-XModel technique set exposes no partial run", async ({ page }, testInfo) => {
+test("a malformed later post-XModel technique set exposes no partial run", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const overrides = new Map([[
         "zone/english/killhouse.ff",
         createSyntheticWorldInventoryFastfile({
@@ -2166,7 +2166,7 @@ test("a malformed later post-XModel technique set exposes no partial run", async
     expect(census.worldInventory).toBeUndefined();
 });
 
-test("completes both reusable MaterialTechnique dependencies before publishing", async ({ page }, testInfo) => {
+test("completes both reusable MaterialTechnique dependencies before publishing", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const overrides = new Map([[
         "zone/english/killhouse.ff",
         createSyntheticWorldInventoryFastfile({
@@ -2232,7 +2232,7 @@ test("completes both reusable MaterialTechnique dependencies before publishing",
         });
 });
 
-test("an invalid second MaterialTechnique cannot publish its parent", async ({ page }, testInfo) => {
+test("an invalid second MaterialTechnique cannot publish its parent", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const overrides = new Map([[
         "zone/english/killhouse.ff",
         createSyntheticWorldInventoryFastfile({
@@ -2258,7 +2258,7 @@ test("an invalid second MaterialTechnique cannot publish its parent", async ({ p
     expect(census.worldInventory).toBeUndefined();
 });
 
-test("an incomplete later reusable technique dependency fails closed", async ({ page }, testInfo) => {
+test("an incomplete later reusable technique dependency fails closed", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const overrides = new Map([[
         "zone/english/killhouse.ff",
         createSyntheticWorldInventoryFastfile({

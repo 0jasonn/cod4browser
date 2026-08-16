@@ -532,6 +532,12 @@ Install the test dependencies and Chromium with:
 npm.cmd ci
 npx.cmd playwright install chromium
 npm.cmd run test:browser
+
+# Substantial browser-platform milestones:
+npm.cmd run test:browser:full
+
+# Diagnostic browser rerun of cases already covered by native/Wasm tests:
+npm.cmd run test:browser:all
 ```
 
 The portable archive, IWI, renderer-surface, engine-world conversion, fastfile
@@ -1622,10 +1628,14 @@ All 16 portable Win32 tests pass with that native dependency.
 The owned `killhouse.ff` run verifies that assets 395, 396, 398, 400, 402, and
 404 reuse the same canonical RawFile operation across intervening XModels. It
 then continues through the supported weapon-model and FX dependencies to asset
-436 and publishes canonical XAnimParts assets 437-457. The next step begins
-from the inventoried native `Load_WeaponDefPtr` / `Load_WeaponDef` path for
-inline type-23 asset 458 and continues the remaining serialized families in
-order.
+436 and publishes canonical XAnimParts assets 437-457. The native
+`Load_WeaponDefPtr` / `Load_WeaponDef` path for inline type-23 asset 458 is
+inventoried through its complete ordered dependency graph. A bounded canonical
+slice now implements the fixed scalar record, root insertion and prior aliases,
+all script strings and direct XStrings, four accuracy arrays, stable ownership,
+and delayed publication. The owned asset still cannot publish until non-null
+canonical XModel/Material/FX children and native sound-name lookup are
+connected; those are the next ordered dependencies.
 
 General generated-loader traversal and a real-map render remain later format
 milestones.

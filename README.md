@@ -380,9 +380,15 @@ read-ahead diagnostics. The Win32 portable suite now builds with MSVC against
 KisakCOD's bundled zlib 1.1.4 and passes all 16 tests; that run also caught and
 fixed zero-length inflate calls that newer zlib accepts but 1.1.4 rejects when
 `next_in` is null. Both Win32/MSVC and Wasm portable suites pass after the
-canonical XAnim type/loader change. The next loader family is native type-23
-`WeaponDef` at asset 458; its 2,168-byte header and ordered dependency graph
-must remain canonical before traversal continues toward `GfxWorld`.
+canonical XAnim type/loader change. Native type-23 `WeaponDef` at asset 458 is
+now isolated as a renderer-free canonical type, and the first bounded operation
+decodes its full fixed scalar record, script strings, 48 direct XStrings, four
+accuracy arrays, root insertion cell, and prior aliases. It publishes
+synthetically only when every dependency is representable. Non-null
+XModel/Material/FX/sound children still fail explicitly; exposing those
+canonical child objects and implementing native sound-name lookup is the next
+step before the owned asset can publish and traversal can continue toward
+`GfxWorld`.
 
 See [docs/web-port.md](docs/web-port.md) for the pinned toolchain, build steps,
 current boundary and validation limits, and see

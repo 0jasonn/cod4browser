@@ -53,7 +53,7 @@ async function chooseDirectory(page, directory)
     await chooser.setFiles(directory);
 }
 
-test("imports synthetic files through the portable picker and restores them after reload", async ({ page }, testInfo) => {
+test("imports synthetic files through the portable picker and restores them after reload", { tag: "@smoke" }, async ({ page }, testInfo) => {
     await usePortableFolderPicker(page);
     const directory = await createInstallDirectory(testInfo, "synthetic-install");
     const assetNetworkRequests = [];
@@ -309,7 +309,7 @@ test("requires the selected single-player map fastfile", async ({ page }, testIn
     );
 });
 
-test("rejects malformed retail fastfile framing before persistence", async ({ page }, testInfo) => {
+test("rejects malformed retail fastfile framing before persistence", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     await usePortableFolderPicker(page);
     const malformed = createSyntheticFastfileHeader();
     malformed[0] = 0x58;
@@ -409,7 +409,7 @@ test("rejects an unsupported localization marker and commits no active import", 
     );
 });
 
-test("rejects a plausible IWD with a malformed central-directory envelope", async ({ page }, testInfo) => {
+test("rejects a plausible IWD with a malformed central-directory envelope", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     await usePortableFolderPicker(page);
     const malformedIwd = createSyntheticIwd();
     malformedIwd.writeUInt32LE(0, malformedIwd.length - 22);
@@ -425,7 +425,7 @@ test("rejects a plausible IWD with a malformed central-directory envelope", asyn
     );
 });
 
-test("the Wasm probe rejects unsafe synthetic ZIP32 variants before copying", async ({ page }) => {
+test("the Wasm probe rejects unsafe synthetic ZIP32 variants before copying", { tag: "@native-covered" }, async ({ page }) => {
     await page.goto("/");
     await waitForEngine(page);
     await waitForAssets(page, "empty");
@@ -605,7 +605,7 @@ test("a replacement corrupted during its OPFS copy rolls back atomically", async
     )).toBe(firstImportId);
 });
 
-test("serializes cross-tab changes and clear removes committed and abandoned imports", async ({ page }, testInfo) => {
+test("serializes cross-tab changes and clear removes committed and abandoned imports", { tag: "@smoke" }, async ({ page }, testInfo) => {
     await usePortableFolderPicker(page);
     const directory = await createInstallDirectory(testInfo, "cross-tab-install");
     const secondPage = await page.context().newPage();
@@ -746,7 +746,7 @@ async function listFilesRecursively(directory)
     return nested.flat();
 }
 
-test("the generated site contains no retail game data or proprietary runtime binaries", async () => {
+test("the generated site contains no retail game data or proprietary runtime binaries", { tag: "@smoke" }, async () => {
     const scanRoots = ["build/web/site", "web", "tests", "src/web", "scripts/web"];
     const files = (await Promise.all(scanRoots.map((root) =>
         listFilesRecursively(path.resolve(root))))).flat();

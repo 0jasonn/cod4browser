@@ -77,7 +77,7 @@ async function importFixture(page, testInfo, name)
     return fixture;
 }
 
-test("immutable asset sources provide bounded reads while the frame pump advances", async ({ page }, testInfo) => {
+test("immutable asset sources provide bounded reads while the frame pump advances", { tag: "@smoke" }, async ({ page }, testInfo) => {
     const fixture = await importFixture(page, testInfo, "filesystem-source");
 
     const result = await page.evaluate(async ({ archivePath, mapPath }) => {
@@ -167,7 +167,7 @@ test("immutable asset sources provide bounded reads while the frame pump advance
     expect(result.afterFrame).toBeGreaterThan(result.beforeFrame);
 });
 
-test("bridge cancellation prevents a delayed read from touching Wasm memory or completing", async ({ page }, testInfo) => {
+test("bridge cancellation prevents a delayed read from touching Wasm memory or completing", { tag: "@smoke" }, async ({ page }, testInfo) => {
     await importFixture(page, testInfo, "filesystem-cancellation");
 
     const result = await page.evaluate(async ({ fastfilePath, fastfileSize }) => {

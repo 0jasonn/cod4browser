@@ -1,6 +1,7 @@
 #pragma once
 
 #include <database/db_semantic_trace.h>
+#include <bgame/weapon_types.h>
 #include <xanim/xanim_types.h>
 
 #include <array>
@@ -73,6 +74,11 @@ struct RetailCensusLimits
     std::uint32_t maxXAnimIndices = 16u * 1024u * 1024u;
     std::uint32_t maxXAnimPayloadBytes = 64u * 1024u * 1024u;
     std::uint32_t maxRetainedXAnimBytes = 128u * 1024u * 1024u;
+    std::uint32_t maxWeapons = 4096u;
+    std::uint32_t maxWeaponStringBytes = 4096u;
+    std::uint32_t maxWeaponAccuracyKnots = 65536u;
+    std::uint32_t maxWeaponPayloadBytes = 4u * 1024u * 1024u;
+    std::uint32_t maxRetainedWeaponBytes = 128u * 1024u * 1024u;
     std::uint32_t maxSemanticTraceEntries = 65536u;
 };
 
@@ -200,6 +206,16 @@ enum class RetailCensusError : std::uint8_t
     XAnimPayloadLimit,
     XAnimDeltaInvalid,
     XAnimAliasInvalid,
+    WeaponLayoutUnsupported,
+    WeaponNameInvalid,
+    WeaponStringInvalid,
+    WeaponStringTooLong,
+    WeaponCollectionLimit,
+    WeaponScriptStringInvalid,
+    WeaponDependencyUnsupported,
+    WeaponAccuracyInvalid,
+    WeaponPayloadLimit,
+    WeaponAliasInvalid,
     PostXModelAssetUnsupported,
     SemanticTraceLimit,
     AllocationFailed,
@@ -358,6 +374,10 @@ enum class RetailCensusStage : std::uint8_t
     WorldXAnimName,
     WorldXAnimPayload,
     WorldXAnimPublish,
+    WorldWeaponDef,
+    WorldWeaponString,
+    WorldWeaponAccuracyKnots,
+    WorldWeaponPublish,
     AssetBoundary,
     Failed,
 };
@@ -799,6 +819,33 @@ struct RetailPublishedXAnimParts
     bool published = false;
 };
 
+// Ownership-only backing for canonical WeaponDef pointers. The fixed record is
+// decoded into WeaponDef itself; this storage only keeps variable-length
+// XStrings and vec2 accuracy-knot arrays alive across result moves/copies.
+struct CanonicalWeaponDefStorage
+{
+    std::array<std::shared_ptr<std::string>, 48> strings{};
+    std::array<std::shared_ptr<std::vector<std::array<float, 2>>>, 4>
+        accuracyKnots{};
+};
+
+struct RetailPublishedWeaponDef
+{
+    std::uint32_t assetIndex = 0u;
+    std::uint32_t serializedReference = 0u;
+    std::uint32_t headerBlock0Offset = 0u;
+    std::uint32_t insertPointerBlock4Offset = UINT32_MAX;
+    std::array<std::uint32_t, 48> stringBlock4Offsets{};
+    std::array<std::uint32_t, 4> accuracyKnotBlock4Offsets{};
+    std::uint32_t payloadBytes = 0u;
+    std::uint32_t identity = 0u;
+    std::uint32_t boundaryInflatedOffset = 0u;
+    std::shared_ptr<CanonicalWeaponDefStorage> storage;
+    std::shared_ptr<WeaponDef> asset;
+    bool pointerAlias = false;
+    bool published = false;
+};
+
 struct RetailFastfileCensus
 {
     std::uint32_t version = 0u;
@@ -927,6 +974,7 @@ struct RetailFastfileCensus
     std::uint32_t completedAssetCount = 0u;
     std::vector<RetailWorldRawFile> worldRawFiles;
     std::vector<RetailPublishedXAnimParts> worldXAnimParts;
+    std::vector<RetailPublishedWeaponDef> worldWeapons;
     std::vector<kisak::database::SemanticTraceEntry> semanticTrace;
     std::uint32_t semanticTraceHash = 2166136261u;
     std::uint32_t semanticTraceContractHash = 2166136261u;

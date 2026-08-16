@@ -1215,6 +1215,101 @@ std::vector<std::uint8_t> BuildReusableWorldXAnimLoaderInflated(
     return bytes;
 }
 
+std::vector<std::uint8_t> BuildReusableWorldWeaponLoaderInflated(
+    bool invalidScriptString = false,
+    bool unsupportedDependency = false,
+    bool invalidAlias = false)
+{
+    std::vector<std::uint8_t> bytes;
+    PutU32(bytes, 8192u);
+    PutU32(bytes, 0u);
+    const std::array<std::uint32_t, 9> blocks = {{
+        1024u * 1024u, 0u, 0u, 0u, 1024u * 1024u,
+        0u, 0u, 0u, 0u,
+    }};
+    for (const std::uint32_t block : blocks) PutU32(bytes, block);
+
+    const std::string scriptString = "tag_none";
+    PutU32(bytes, 1u);
+    PutU32(bytes, 0xffffffffu);
+    PutU32(bytes, 4u);
+    PutU32(bytes, 0xffffffffu);
+    PutU32(bytes, 0xffffffffu);
+    AppendString(bytes, scriptString);
+
+    const std::string techniqueName = ",web/weapon_prefix";
+    std::uint32_t block4Cursor = 4u +
+        static_cast<std::uint32_t>(scriptString.size() + 1u);
+    block4Cursor = (block4Cursor + 3u) & ~3u;
+    block4Cursor += 4u * 8u;
+    block4Cursor += static_cast<std::uint32_t>(techniqueName.size() + 1u);
+    const std::uint32_t insertionOffset = (block4Cursor + 3u) & ~3u;
+    const std::uint32_t insertionAlias =
+        0x40000000u | (insertionOffset + 1u);
+
+    const std::array<std::uint32_t, 4> types = {{5u, 23u, 23u, 16u}};
+    const std::array<std::uint32_t, 4> references = {{
+        0xffffffffu,
+        0xfffffffeu,
+        invalidAlias ? insertionAlias + 4u : insertionAlias,
+        0xffffffffu,
+    }};
+    for (std::size_t index = 0u; index < types.size(); ++index)
+    {
+        PutU32(bytes, types[index]);
+        PutU32(bytes, references[index]);
+    }
+
+    std::vector<std::uint8_t> techniqueSet(148u, 0u);
+    SetU32(techniqueSet, 0u, 0xffffffffu);
+    bytes.insert(bytes.end(), techniqueSet.begin(), techniqueSet.end());
+    AppendString(bytes, techniqueName);
+
+    std::vector<std::uint8_t> weapon(2168u, 0u);
+    for (const std::size_t offset : {0u, 4u, 804u, 1900u, 1904u, 2036u})
+        SetU32(weapon, offset, 0xffffffffu);
+    SetU32(weapon, 1908u, 0xffffffffu);
+    SetU32(weapon, 1912u, 0xffffffffu);
+    SetU32(weapon, 1916u, 0xffffffffu);
+    SetU32(weapon, 1920u, 0xffffffffu);
+    PutU16At(weapon, 216u, invalidScriptString ? 1u : 0u);
+    SetU32(weapon, 296u, 7u);
+    SetU32(weapon, 300u, 2u);
+    SetU32(weapon, 304u, 4u);
+    SetU32(weapon, 548u, 31u);
+    SetF32(weapon, 1024u, 123.5f);
+    SetU32(weapon, 1344u, 19u);
+    SetU32(weapon, 1416u, 3u);
+    SetF32(weapon, 1468u, 0.25f);
+    SetF32(weapon, 1740u, 1.5f);
+    SetU32(weapon, 1924u, 2u);
+    SetU32(weapon, 1928u, 1u);
+    SetU32(weapon, 1932u, 9u);
+    SetU32(weapon, 1936u, 8u);
+    SetU32(weapon, 1940u, 77u);
+    SetU32(weapon, 2020u, 11u);
+    SetU32(weapon, 2048u, 55u);
+    SetF32(weapon, 2160u, 4.5f);
+    if (unsupportedDependency) SetU32(weapon, 76u, 0xffffffffu);
+    bytes.insert(bytes.end(), weapon.begin(), weapon.end());
+
+    AppendString(bytes, "web/weapon_full");
+    AppendString(bytes, "WEAPON_WEB_FULL");
+    AppendString(bytes, "web_ammo");
+    AppendString(bytes, "web_accuracy_zero");
+    for (const float value : {0.0f, 1.0f, 2.0f, 3.0f})
+        PutU32(bytes, std::bit_cast<std::uint32_t>(value));
+    for (const float value : {4.0f, 5.0f, 6.0f, 7.0f})
+        PutU32(bytes, std::bit_cast<std::uint32_t>(value));
+    AppendString(bytes, "web_accuracy_one");
+    for (const float value : {8.0f, 9.0f})
+        PutU32(bytes, std::bit_cast<std::uint32_t>(value));
+    for (const float value : {10.0f, 11.0f})
+        PutU32(bytes, std::bit_cast<std::uint32_t>(value));
+    AppendString(bytes, "web_weapon_script");
+    return bytes;
+}
+
 std::vector<std::uint8_t> BuildReusableWorldFxLoaderInflated(
     bool invalidMaterial)
 {
@@ -2450,6 +2545,123 @@ void TestReusableWorldXAnimPartsLoader()
         "undefined XAnimParts pointer aliases fail closed");
 }
 
+void TestReusableWorldWeaponDefLoader()
+{
+    using namespace kisak::fastfile;
+    using namespace kisak::database;
+    const auto file = BuildFile(BuildReusableWorldWeaponLoaderInflated());
+    const RetailFastfileCensus result = Run(
+        file, 7u, 2u, 3u, RetailCensusMode::WorldAssetLoader);
+    Require(result.worldWeapons.size() == 2u,
+        "the dispatcher retains one canonical WeaponDef and one pointer alias");
+    const RetailPublishedWeaponDef &first = result.worldWeapons[0u];
+    const RetailPublishedWeaponDef &alias = result.worldWeapons[1u];
+    Require(first.assetIndex == 1u && first.published && first.asset &&
+            first.storage && first.storage->strings[0u] &&
+            *first.storage->strings[0u] == "web/weapon_full" &&
+            first.asset->szInternalName ==
+                first.storage->strings[0u]->c_str() &&
+            first.serializedReference == 0xfffffffeu &&
+            first.insertPointerBlock4Offset != UINT32_MAX &&
+            first.payloadBytes == 142u && first.identity == 2u,
+        "shared WeaponDef publishes only after its strings and knot arrays complete");
+    Require(alias.assetIndex == 2u && alias.published && alias.pointerAlias &&
+            alias.identity == first.identity &&
+            alias.asset.get() == first.asset.get() &&
+            alias.storage.get() == first.storage.get() &&
+            alias.serializedReference ==
+                (0x40000000u | (first.insertPointerBlock4Offset + 1u)),
+        "Load_WeaponDefPtr resolves the shared insertion cell to canonical ownership");
+
+    const WeaponDef &weapon = *first.asset;
+    Require(weapon.playerAnimType == 7 && weapon.weapType == WEAPTYPE_PROJECTILE &&
+            weapon.weapClass == WEAPCLASS_PISTOL &&
+            weapon.iReticleCenterSize == 31 && weapon.autoAimRange == 123.5f &&
+            weapon.altWeaponIndex == 19u &&
+            weapon.projExplosion == WEAPPROJEXP_NONE &&
+            weapon.lowAmmoWarningThreshold == 0.25f &&
+            weapon.fAdsAimPitch == 1.5f &&
+            weapon.iPositionReloadTransTime == 77 &&
+            weapon.iUseHintStringIndex == 11 && weapon.minDamage == 55 &&
+            weapon.adsDofStart == 4.5f,
+        "WeaponDef scalar spans decode into the canonical gameplay structure");
+    Require(weapon.hideTags[0u] == 0u &&
+            std::string_view(weapon.szDisplayName) == "WEAPON_WEB_FULL" &&
+            std::string_view(weapon.szAmmoName) == "web_ammo" &&
+            std::string_view(weapon.accuracyGraphName[0u]) ==
+                "web_accuracy_zero" &&
+            std::string_view(weapon.accuracyGraphName[1u]) ==
+                "web_accuracy_one" &&
+            std::string_view(weapon.szScript) == "web_weapon_script",
+        "direct XStrings preserve generated Load_WeaponDef traversal order");
+    Require(weapon.accuracyGraphKnotCount[0u] == 2 &&
+            weapon.accuracyGraphKnotCount[1u] == 1 &&
+            weapon.originalAccuracyGraphKnotCount[0u] == 9 &&
+            weapon.originalAccuracyGraphKnotCount[1u] == 8 &&
+            weapon.accuracyGraphKnots[0u] &&
+            weapon.accuracyGraphKnots[0u][1u][1u] == 3.0f &&
+            weapon.originalAccuracyGraphKnots[0u][1u][0u] == 6.0f &&
+            weapon.accuracyGraphKnots[1u][0u][1u] == 9.0f &&
+            weapon.originalAccuracyGraphKnots[1u][0u][0u] == 10.0f,
+        "both graph pairs use accuracyGraphKnotCount while retaining original counts");
+    Require(result.completedAssetCount == 3u &&
+            result.nextBodyIndex == 3u &&
+            result.nextBodyType == ASSET_TYPE_GFXWORLD &&
+            result.stoppedBeforeDifferentWorldAssetType &&
+            result.semanticTrace.size() == 5u &&
+            result.semanticTrace[2u].kind == SemanticTraceEventKind::AssetBegin &&
+            result.semanticTrace[2u].assetType == ASSET_TYPE_WEAPON &&
+            result.semanticTrace[3u].kind == SemanticTraceEventKind::AssetPublish,
+        "WeaponDef publication returns to the reusable dispatcher before GfxWorld");
+
+    RetailFastfileCensus copied = result;
+    Require(copied.worldWeapons[0u].asset->accuracyGraphKnots[0u][1u][0u] ==
+                2.0f &&
+            copied.worldWeapons[1u].asset.get() ==
+                copied.worldWeapons[0u].asset.get(),
+        "canonical WeaponDef ownership remains stable when a census result is copied");
+
+    auto requireFailure = [](const std::vector<std::uint8_t> &malformedFile,
+                             RetailCensusError expected,
+                             const RetailCensusLimits &limits,
+                             const char *message) {
+        RetailFastfileCensusJob job;
+        Require(job.BeginStreaming(
+                    RetailCensusMode::WorldAssetLoader, limits) ==
+                    RetailCensusError::None &&
+                job.FeedSource(malformedFile, true) == RetailCensusError::None,
+            "malformed WeaponDef fixture starts");
+        while (job.Progress() == RetailCensusProgress::Running)
+            (void)job.Step();
+        RetailFastfileCensus unavailable;
+        Require(job.Failure() == expected && !job.TakeResult(unavailable), message);
+    };
+
+    const RetailCensusLimits defaultLimits;
+    requireFailure(
+        BuildFile(BuildReusableWorldWeaponLoaderInflated(true)),
+        RetailCensusError::WeaponScriptStringInvalid,
+        defaultLimits,
+        "out-of-range WeaponDef script strings fail before publication");
+    requireFailure(
+        BuildFile(BuildReusableWorldWeaponLoaderInflated(false, true)),
+        RetailCensusError::WeaponDependencyUnsupported,
+        defaultLimits,
+        "unpublished canonical WeaponDef dependencies are never silently nulled");
+    requireFailure(
+        BuildFile(BuildReusableWorldWeaponLoaderInflated(false, false, true)),
+        RetailCensusError::WeaponAliasInvalid,
+        defaultLimits,
+        "undefined WeaponDef insertion aliases fail closed");
+    RetailCensusLimits payloadLimits;
+    payloadLimits.maxWeaponPayloadBytes = 64u;
+    requireFailure(
+        file,
+        RetailCensusError::WeaponPayloadLimit,
+        payloadLimits,
+        "bounded WeaponDef strings and knot arrays fail atomically");
+}
+
 void TestReusableWorldMaterialTechniqueLoader()
 {
     using namespace kisak::fastfile;
@@ -3503,6 +3715,7 @@ int main(int argc, char **argv)
     TestReusableWorldXModelLoader();
     TestReusableWorldRawFileLoader();
     TestReusableWorldXAnimPartsLoader();
+    TestReusableWorldWeaponDefLoader();
     TestReusableWorldMaterialTechniqueLoader();
     TestReusableWorldFxLoader();
     TestMalformedPrefixRecords();

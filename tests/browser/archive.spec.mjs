@@ -157,7 +157,7 @@ function entryPath(entry)
     return typeof entry === "string" ? entry : entry.path;
 }
 
-test("enumerates and verifies stored and deflated members without blocking frames", async ({ page }, testInfo) => {
+test("enumerates and verifies stored and deflated members without blocking frames", { tag: "@smoke" }, async ({ page }, testInfo) => {
     await usePortableFolderPicker(page);
     await observeArchive(page, { readDelayMilliseconds: 80 });
     const archive = createSyntheticIwd([

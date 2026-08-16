@@ -1514,3 +1514,136 @@ numerous sound-alias names, an optional 29-entry bounce-sound array, materials,
 inline-or-prior pointer forms. WeaponDef must be extracted and loaded as a
 canonical Kisak type; a name-only browser substitute would not preserve the
 native contract.
+
+### Native `WeaponDef` loader inventory (complete)
+
+The authoritative path is `Load_XAssetHeader` -> `Load_WeaponDefPtr` ->
+`Load_WeaponDef` in `src/database/db_load.cpp`. Type 23 is the canonical
+`ASSET_TYPE_WEAPON` value `0x17`. `WeaponDef` is now isolated in the
+renderer-free `src/bgame/weapon_types.h` shared header and retains its checked
+Win32/Wasm size of `0x878` (2,168) bytes.
+`weaponDefFields` in `src/bgame/bg_weapons_load_obj.cpp` independently records
+the offsets of the externally named fields and agrees with that layout.
+
+The pointer loader uses the normal asset-publication envelope:
+
+| Root token | Native behavior |
+| --- | --- |
+| `0` | Null weapon pointer; no body or publication. |
+| `0xffffffff` (`-1`) | Align block 0 to four bytes, load one inline body, then publish it with `Load_WeaponDefAsset`. |
+| `0xfffffffe` (`-2`) | As above, but reserve a four-byte block-4 insertion cell before loading the body and fill it only after publication. |
+| Other nonzero | Convert a previously defined alias cell; no new body is read. |
+
+Asset 458 is an inline top-level body, so its 2,168 header bytes are read from
+block 0. `Load_WeaponDef` then pushes block 4 for the complete nested graph.
+Returning through `Load_WeaponDefPtr` pops block 0 back to its entry cursor, as
+with the other top-level temporary bodies, while retaining its high-water
+extent. `DB_AddXAsset(ASSET_TYPE_WEAPON, ...)` is not called until every child
+below has completed. If the root used `-2`, its insertion cell is populated
+only after that call returns.
+
+The fixed header contains the following dependency-bearing regions. Offsets
+are decimal Win32 offsets from the start of the 2,168-byte body.
+
+| Starting offset(s) | Header fields | Count / kind |
+| ---: | --- | --- |
+| `0`, `4`, `8` | internal, display, and overlay names | 3 `XString` fields |
+| `12, 16, ..., 72`; `76` | `gunXModel`, `handXModel` | 16 model handles plus 1 |
+| `80, 84, ..., 208`; `212` | `szXAnims`, `szModeName` | 33 animation strings plus 1 |
+| `216, 218, ..., 230`; `232, ..., 262`; `264, ..., 294` | hide tags and notetrack key/value maps | 8 + 16 + 16 script-string indices |
+| `332`, `336` | view/world muzzle flash | 2 FX handles |
+| `340, 344, ..., 516` | pickup-through-putaway sound fields | 45 sound-name references |
+| `520` | `bounceSound` | Optional direct/inline array of 29 sound-name references |
+| `524, 528, 532, 536` | shell/last-shot eject effects | 4 FX handles |
+| `540`, `544` | reticle center/side | 2 material handles |
+| `700, 704, ..., 760`; `764, 768, 772, 776` | world models and clip/rocket/knife models | 16 model handles plus 4 |
+| `780`, `788` | HUD and ammo-counter icons | 2 material handles |
+| `804`, `812`, `832` | ammo, clip, and shared-cap names | 3 `XString` fields |
+| `1072`, `1076`, `1304`, `1316` | overlay, kill, and dpad icons | 4 material handles |
+| `1340` | alternate-weapon name | 1 `XString` |
+| `1412` | projectile model | 1 model handle |
+| `1420`, `1428`, `1432`, `1436` | explosion/dud FX and sounds | 2 FX plus 2 sound-name references |
+| `1704`, `1732`, `1736` | trail/ignition FX and ignition sound | 2 FX plus 1 sound-name reference |
+| `1900, 1904, ..., 1936` | two accuracy-graph names, four knot pointers, and two pairs of counts | 2 strings plus 4 optional `vec2` arrays |
+| `2012`, `2016`, `2036`, `2152`, `2156` | use/drop hints, script, and rumble names | 5 `XString` fields |
+
+The exact block-4 traversal order is:
+
+1. Internal, display, and overlay `XString` values.
+2. Sixteen gun-model handles, then the hand-model handle.
+3. Thirty-three animation `XString` values, then the mode name.
+4. Eight hide-tag, 16 notetrack-key, and 16 notetrack-value script strings.
+5. View and world flash FX handles.
+6. The 45 scalar sound-name references, in header order from `pickupSound`
+   through `putawaySoundPlayer`.
+7. The optional 29-entry `bounceSound` array.
+8. Four eject FX, two reticle materials, 16 world-model handles, then the
+   world-clip, rocket, knife, and world-knife models.
+9. HUD and ammo-counter materials; ammo, clip, and shared-cap strings;
+   overlay/low-resolution-overlay, kill, and dpad materials.
+10. Alternate-weapon string and projectile model.
+11. Projectile explosion/dud FX, explosion/dud sound names, trail/ignition FX,
+    and ignition sound name.
+12. Accuracy graph zero name, current knots, and original knots; then graph
+    one name, current knots, and original knots.
+13. Use-hint, drop-hint, script, fire-rumble, and melee-impact-rumble strings.
+
+Across the fixed and optional graph this is 38 model handles, 10 FX handles,
+8 material handles, 48 scalar `XString` fields, 48 scalar sound-name
+references, 40 fixed script-string translations, an optional 29-entry sound
+array, and four optional knot arrays. These counts describe loader calls, not
+necessarily non-null retail dependencies.
+
+The child fields do not all share one pointer-token grammar:
+
+| Field class | Accepted native forms | Serialized consequence |
+| --- | --- | --- |
+| Model, FX, and material handles | null, `-1`, `-2`, or prior alias | Inline assets are allocated in block 0; `-2` reserves a block-4 alias cell before the child body. |
+| Direct `XString` | null, `-1`, or direct zone pointer | `-1` reads a NUL-terminated byte string at the current block-4 cursor; there is no `-2` insertion form. |
+| Sound-name reference | null, `-1`, or direct pointer to an `XString` cell | `-1` first allocates and reads a four-byte `XString` cell, then resolves the resulting name through `DB_FindXAssetHeader(ASSET_TYPE_SOUND, name)`. It is not an inline `snd_alias_list_t` body. |
+| `bounceSound` | null, `-1`, or direct zone pointer | `-1` aligns block 4 to four bytes, reads 29 pointer cells, then applies the sound-name operation to each cell. |
+| Accuracy knots | null, `-1`, or direct zone pointer | `-1` aligns block 4 to four bytes and reads `count * 8` bytes of `vec2` data. There is no `-2` form. |
+| Script strings | fixed 16-bit indices already inside the header | No extra bytes are read; each index is translated through the zone's previously loaded script-string list. |
+
+Both current and original knot arrays for graph zero use
+`accuracyGraphKnotCount[0]`; both arrays for graph one use
+`accuracyGraphKnotCount[1]`. `originalAccuracyGraphKnotCount` is retained in
+the canonical record but is not consulted by this generated loader. A checked
+port must reject negative counts, multiplication overflow, payload-limit
+excesses, invalid script-string indices, unsupported sentinels, undefined
+aliases, and out-of-range direct pointers before exposing any parent result.
+
+The implementation handoff is therefore:
+
+- isolate the canonical `WeaponDef` declaration and its enum dependencies in a
+  renderer-free shared header rather than introduce `RetailWeaponDef`;
+- decode the fixed 32-bit wire record separately from its stable canonical
+  in-memory owner;
+- reuse the existing typed XModel, Material, and FX operations in the order
+  above;
+- add the native sound-name lookup contract rather than treating those fields
+  as inline sound assets;
+- publish the canonical weapon and define any root insertion cell only after
+  the entire dependency graph succeeds.
+
+### Canonical `WeaponDef` loader slice (partial)
+
+The reusable dispatcher now implements the root `-1`, root `-2` insertion-cell,
+and prior-alias envelope for type 23. It decodes every non-pointer span from the
+2,168-byte wire header into the canonical `WeaponDef`, validates all 40 fixed
+script-string indices, traverses the 48 direct `XString` fields in native order,
+and owns all four current/original accuracy-knot arrays. Publication and both
+root aliases remain undefined until that complete supported graph succeeds.
+
+Synthetic native coverage proves scalar preservation, the interleaving of graph
+names and arrays, the native rule that both current and original arrays use
+`accuracyGraphKnotCount`, stable ownership across result copies, and atomic
+failure for invalid script indices, payload excess, undefined root aliases, and
+unpublished child assets.
+
+This is deliberately not yet the complete asset-458 implementation. Non-null
+XModel, Material, FX, sound-name, or bounce-sound dependencies return
+`WeaponDependencyUnsupported`; none are converted to null canonical pointers.
+The next slice must make the existing child loaders publish canonical objects,
+then resume these fields in the exact inventory order and implement the sound
+name lookup contract before the owned weapon may publish.

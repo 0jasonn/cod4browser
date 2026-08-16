@@ -749,7 +749,7 @@ test("loads a stored IWI through the engine cache and releases its bytes", async
     );
 });
 
-test("streams a deflated IWI while animation frames advance", async ({ page }, testInfo) => {
+test("streams a deflated IWI while animation frames advance", { tag: "@smoke" }, async ({ page }, testInfo) => {
     await usePortableFolderPicker(page);
     await observeEngineAsset(page, { readDelayMilliseconds: 80 });
     const iwi = createSyntheticIwi({
@@ -878,7 +878,7 @@ test("a synchronous ready listener cannot publish texture state after cancellati
     )).toBe(false);
 });
 
-test("decodes a DXT1 IWI through the renderer-owned texture path", async ({ page }, testInfo) => {
+test("decodes a DXT1 IWI through the renderer-owned texture path", { tag: "@smoke" }, async ({ page }, testInfo) => {
     await usePortableFolderPicker(page);
     await observeEngineAsset(page);
     const iwi = createSyntheticIwi({
@@ -1059,7 +1059,7 @@ test("budgets a maximum-ratio cached IWI across animation frames", async ({ page
     expect(ready.observedRafTick - loading.observedRafTick).toBeGreaterThanOrEqual(48);
 });
 
-test("reports a malformed IWI without invalidating the mounted archive", async ({ page }, testInfo) => {
+test("reports a malformed IWI without invalidating the mounted archive", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     await usePortableFolderPicker(page);
     await observeEngineAsset(page);
     const malformedIwi = createSyntheticIwi({ tag: "BAD" });
@@ -1083,7 +1083,7 @@ test("reports a malformed IWI without invalidating the mounted archive", async (
     expect(result.assets.state).toBe("ready");
 });
 
-test("rejects an IWI local header that overlaps the central directory", async ({ page }, testInfo) => {
+test("rejects an IWI local header that overlaps the central directory", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     await usePortableFolderPicker(page);
     await observeEngineAsset(page);
     const iwi = createSyntheticIwi();
@@ -1328,7 +1328,7 @@ test("a stale engine read invalidates the mount without publishing a late ready 
     )).toBe(true);
 });
 
-test("a cancelled read from an old import cannot overwrite the replacement IWI", async ({ page }, testInfo) => {
+test("a cancelled read from an old import cannot overwrite the replacement IWI", { tag: "@smoke" }, async ({ page }, testInfo) => {
     await usePortableFolderPicker(page);
     await observeEngineAsset(page, { gateFirstRead: true });
     const oldIwi = createSyntheticIwi();

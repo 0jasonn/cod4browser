@@ -51,6 +51,7 @@ set(BGAME
     "${SRC_DIR}/bgame/bg_weapons.cpp"
     "${SRC_DIR}/bgame/bg_weapons.h"
     "${SRC_DIR}/bgame/bg_weapons_load_obj.cpp"
+    "${SRC_DIR}/bgame/weapon_types.h"
 )
 
 set(CGAME
