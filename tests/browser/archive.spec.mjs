@@ -88,7 +88,7 @@ async function observeArchive(page, { readDelayMilliseconds = 0 } = {})
                 const runtime = globalThis.__KISAKCOD_WEB__;
                 const archiveState = runtime?.archive?.state;
                 const isArchiveRead = runtime?.assets?.state === "ready" ||
-                    (archiveState && archiveState !== "ready" && archiveState !== "failed");
+                    archiveState === "loading";
                 if (!isArchiveRead) {
                     return originalArrayBuffer.call(this);
                 }
