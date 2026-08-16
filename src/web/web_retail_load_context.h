@@ -69,6 +69,15 @@ public:
     virtual bool ValidPointerToken(
         std::uint32_t token,
         std::uint32_t alignment = 1u) const noexcept = 0;
+    virtual bool TranslatePointerToken(
+        std::uint32_t token,
+        std::uint32_t alignment,
+        ZoneSpan &target) const noexcept = 0;
+    virtual RetailCensusError BeginXModelDependency(
+        std::uint32_t ownerAssetIndex,
+        std::uint32_t token,
+        const ZoneSpan &pointerCell) noexcept = 0;
+    virtual XModel *TakeXModelDependency() noexcept = 0;
 
     virtual bool ResolveXString(
         std::uint32_t token,

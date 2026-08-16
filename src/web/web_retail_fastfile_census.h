@@ -5,6 +5,7 @@
 #include <database/localize_types.h>
 #include <bgame/weapon_types.h>
 #include <gfx_d3d/gfx_light_types.h>
+#include <gfx_d3d/gfx_world_types.h>
 #include <gfx_d3d/material_types.h>
 #include <qcommon/com_world_types.h>
 #include <sound/snd_alias_types.h>
@@ -26,6 +27,7 @@ namespace kisak::fastfile
 struct CanonicalClipMapStorage;
 struct CanonicalComWorldStorage;
 struct CanonicalLightDefStorage;
+struct CanonicalGfxWorldStorage;
 
 inline constexpr std::uint32_t RETAIL_CENSUS_ASSET_TYPE_COUNT = 33u;
 inline constexpr std::uint32_t RETAIL_CENSUS_MAX_STEP_BYTES = 64u * 1024u;
@@ -33,6 +35,9 @@ inline constexpr std::uint32_t RETAIL_CENSUS_MAX_STEP_RECORDS = 64u;
 
 struct RetailCensusLimits
 {
+    // Gate 2 is opt-in while callers that intentionally stop at the first
+    // GfxWorld body retain their historical boundary contract.
+    bool loadGfxWorld = false;
     std::uint32_t maxFileBytes = 16u * 1024u * 1024u;
     std::uint32_t maxSourceChunkBytes = RETAIL_CENSUS_MAX_STEP_BYTES;
     // Retain enough checked prefix to cross large retail dependency runs while
@@ -115,6 +120,18 @@ struct RetailCensusLimits
     std::uint32_t maxComWorldPayloadBytes = 2u * 1024u * 1024u;
     std::uint32_t maxLightDefs = 256u;
     std::uint32_t maxLightDefNameBytes = 255u;
+    std::uint32_t maxGfxWorlds = 4u;
+    std::uint32_t maxGfxWorldNameBytes = 1024u;
+    std::uint32_t maxGfxWorldArrayElements = 16u * 1024u * 1024u;
+    std::uint32_t maxGfxWorldVertices = 4u * 1024u * 1024u;
+    std::uint32_t maxGfxWorldIndices = 16u * 1024u * 1024u;
+    std::uint32_t maxGfxWorldSurfaces = 2u * 1024u * 1024u;
+    std::uint32_t maxGfxWorldCells = 65536u;
+    std::uint32_t maxGfxWorldLightmaps = 65536u;
+    std::uint32_t maxGfxWorldStaticModels = 2u * 1024u * 1024u;
+    std::uint32_t maxGfxWorldMaterialMemory = 2u * 1024u * 1024u;
+    std::uint32_t maxGfxWorldPayloadBytes = 768u * 1024u * 1024u;
+    std::uint32_t maxRetainedGfxWorldBytes = 768u * 1024u * 1024u;
     std::uint32_t maxSemanticTraceEntries = 65536u;
 };
 
@@ -294,6 +311,20 @@ enum class RetailCensusError : std::uint8_t
     LightDefNameTooLong,
     LightDefImageInvalid,
     LightDefAliasInvalid,
+    GfxWorldLayoutUnsupported,
+    GfxWorldCollectionLimit,
+    GfxWorldNameInvalid,
+    GfxWorldNameTooLong,
+    GfxWorldCountInvalid,
+    GfxWorldPayloadLimit,
+    GfxWorldPointerInvalid,
+    GfxWorldImageInvalid,
+    GfxWorldMaterialInvalid,
+    GfxWorldModelInvalid,
+    GfxWorldLightDefInvalid,
+    GfxWorldCellInvalid,
+    GfxWorldSurfaceInvalid,
+    GfxWorldAliasInvalid,
     PostXModelAssetUnsupported,
     SemanticTraceLimit,
     AllocationFailed,
@@ -483,6 +514,7 @@ enum class RetailCensusStage : std::uint8_t
     WorldClipMap,
     WorldComWorld,
     WorldLightDef,
+    WorldGfxWorld,
     AssetBoundary,
     Failed,
 };
@@ -1100,6 +1132,34 @@ struct RetailPublishedLightDef
     bool published = false;
 };
 
+struct RetailPublishedGfxWorld
+{
+    std::uint32_t assetIndex = 0u;
+    std::uint32_t serializedReference = 0u;
+    std::uint32_t headerBlock0Offset = UINT32_MAX;
+    std::uint32_t insertPointerBlock4Offset = UINT32_MAX;
+    std::uint32_t nameBlock4Offset = UINT32_MAX;
+    std::uint32_t baseNameBlock4Offset = UINT32_MAX;
+    std::uint32_t identity = 0u;
+    std::uint32_t boundaryInflatedOffset = 0u;
+    std::uint32_t payloadBytes = 0u;
+    std::uint32_t block0HighWaterAtPublication = 0u;
+    std::uint32_t block1HighWaterAtPublication = 0u;
+    std::uint32_t block4CursorAtPublication = 0u;
+    std::uint32_t registryAssetCountAtPublication = 0u;
+    std::uint32_t registryAliasCountAtPublication = 0u;
+    std::uint32_t registryDefinedAliasCountAtPublication = 0u;
+    // Canonical registry identities resolved for dpvs.surfaces in serialized
+    // order. Keeping these beside the owned graph makes native/Wasm pointer
+    // identity differences observable without introducing a second world IR.
+    std::vector<std::uint32_t> surfaceMaterialIdentities;
+    std::shared_ptr<CanonicalGfxWorldStorage> storage;
+    std::shared_ptr<GfxWorld> asset;
+    bool nullRoot = false;
+    bool pointerAlias = false;
+    bool published = false;
+};
+
 struct RetailFastfileCensus
 {
     std::uint32_t version = 0u;
@@ -1241,6 +1301,7 @@ struct RetailFastfileCensus
     std::vector<RetailPublishedComWorld> worldComWorlds;
     std::vector<RetailPublishedGfxImage> worldImages;
     std::vector<RetailPublishedLightDef> worldLightDefs;
+    std::vector<RetailPublishedGfxWorld> worldGfxWorlds;
     std::vector<kisak::database::SemanticTraceEntry> semanticTrace;
     std::uint32_t semanticTraceHash = 2166136261u;
     std::uint32_t semanticTraceContractHash = 2166136261u;
@@ -1317,6 +1378,10 @@ public:
         RetailCensusMode mode,
         const RetailCensusLimits &limits = {},
         RetailSoundAliasLookup soundLookup = {}) noexcept;
+    // May be changed only before the first source byte is supplied. Browser
+    // fixture zones deliberately stop at the historical pre-GfxWorld boundary;
+    // a full retail zone enables the canonical body after its stat completes.
+    bool ConfigureGfxWorldLoading(bool enabled) noexcept;
     RetailCensusError FeedSource(
         std::span<const std::uint8_t> bytes,
         bool final) noexcept;

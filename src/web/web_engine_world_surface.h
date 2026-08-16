@@ -2,10 +2,14 @@
 
 #include <web/web_renderer_surface.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
 #include <vector>
+
+struct GfxWorld;
+struct Material;
 
 // D3D-free mirror of the geometry fields consumed from upstream
 // GfxWorldVertex. The offsets and 44-byte size match the runtime world-vertex
@@ -117,3 +121,42 @@ WebEngineWorldSurfaceResult WebEngine_ConvertWorldSurface(
 
 const char *WebEngine_WorldSurfaceResultString(
     WebEngineWorldSurfaceResult result) noexcept;
+
+// One deliberately narrow renderer publication from the canonical GfxWorld
+// database graph. The adapter selects the most triangle-rich bounded base
+// surface (lowest index wins ties) and never creates a parallel world
+// representation.
+struct WebEngineGfxWorldSurfacePublication
+{
+    std::uint32_t surfaceIndex = 0u;
+    std::uint32_t vertexCount = 0u;
+    std::uint32_t triangleCount = 0u;
+    const Material *material = nullptr;
+    const char *materialName = nullptr;
+    std::uint8_t horizontalAxis = 0u;
+    std::uint8_t verticalAxis = 1u;
+    std::uint8_t depthAxis = 2u;
+    std::array<float, 3> mins{};
+    std::array<float, 3> maxs{};
+    WebEngineConvertedWorldSurface rendererSurface;
+};
+
+enum class WebEngineGfxWorldSurfaceResult : std::uint8_t
+{
+    Success = 0,
+    InvalidWorld,
+    NoRenderableSurface,
+    InvalidSurfaceBounds,
+    ConversionFailed,
+    AllocationFailed,
+};
+
+// The canonical GfxWorld remains owned by the database result. The returned
+// publication owns the bounded renderer copy and is therefore source-lifetime
+// independent. Failure leaves destination unchanged.
+WebEngineGfxWorldSurfaceResult WebEngine_BuildGfxWorldSurface(
+    const GfxWorld &world,
+    WebEngineGfxWorldSurfacePublication &destination);
+
+const char *WebEngine_GfxWorldSurfaceResultString(
+    WebEngineGfxWorldSurfaceResult result) noexcept;

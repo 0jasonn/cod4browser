@@ -1,5 +1,7 @@
 #include <web/web_engine_world_surface.h>
 
+#include <gfx_d3d/gfx_world_types.h>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -80,6 +82,20 @@ WebEngineWorldVertex MakeVertex(
         0x10203040u,
         0x50607080u,
     };
+}
+
+GfxWorldVertex MakeGfxVertex(
+    float x, float y, float z, std::uint32_t color = 0xffffffffu)
+{
+    GfxWorldVertex vertex{};
+    vertex.xyz[0] = x;
+    vertex.xyz[1] = y;
+    vertex.xyz[2] = z;
+    vertex.binormalSign = 1.0f;
+    vertex.color.packed = color;
+    vertex.texCoord[0] = x;
+    vertex.texCoord[1] = y;
+    return vertex;
 }
 
 WebEngineWorldProjection2D IdentityProjection()
@@ -197,6 +213,81 @@ void TestUpstreamLayouts()
         "triangle-count offset matches upstream");
     Require(offsetof(WebEngineWorldSurfaceRange, baseIndex) == 12u,
         "base-index offset matches upstream");
+    Require(sizeof(GfxWorldVertex) == sizeof(WebEngineWorldVertex),
+        "canonical GfxWorld vertex matches the renderer boundary layout");
+    Require(sizeof(srfTriangles_t) == sizeof(WebEngineWorldSurfaceRange),
+        "canonical GfxWorld range matches the renderer boundary layout");
+}
+
+void TestCanonicalGfxWorldAdapter()
+{
+    std::array<GfxWorldVertex, 7> vertices{
+        MakeGfxVertex(99.0f, 99.0f, 99.0f),
+        MakeGfxVertex(98.0f, 98.0f, 98.0f),
+        MakeGfxVertex(-2.0f, -1.0f, 4.0f, 0xff112233u),
+        MakeGfxVertex(2.0f, -1.0f, 4.5f, 0xff445566u),
+        MakeGfxVertex(2.0f, 3.0f, 5.0f, 0xff778899u),
+        MakeGfxVertex(-2.0f, 3.0f, 5.5f, 0xffaabbccu),
+        MakeGfxVertex(97.0f, 97.0f, 97.0f),
+    };
+    std::array<std::uint16_t, 9> indices{
+        0xffffu, 0xffffu, 0xffffu, 0u, 1u, 2u, 2u, 3u, 0u,
+    };
+    Material material{};
+    material.info.name = "mc/killhouse_wall";
+    std::array<GfxSurface, 3> surfaces{};
+    surfaces[0].tris = {4, 0, 3u, 1u, 0};
+    surfaces[1].tris = {0, 0, 3u, 1u, 0};
+    surfaces[1].bounds[0][0] = 1.0f;
+    surfaces[1].bounds[1][0] = 1.0f;
+    surfaces[1].bounds[0][1] = 2.0f;
+    surfaces[1].bounds[1][1] = 2.0f;
+    surfaces[1].bounds[0][2] = 3.0f;
+    surfaces[1].bounds[1][2] = 3.0f;
+    surfaces[2].tris = {0, 2, 4u, 2u, 3};
+    surfaces[2].material = &material;
+    surfaces[2].bounds[0][0] = -2.0f;
+    surfaces[2].bounds[0][1] = -1.0f;
+    surfaces[2].bounds[0][2] = 4.0f;
+    surfaces[2].bounds[1][0] = 2.0f;
+    surfaces[2].bounds[1][1] = 3.0f;
+    surfaces[2].bounds[1][2] = 5.5f;
+
+    GfxWorld world{};
+    world.vertexCount = static_cast<std::uint32_t>(vertices.size());
+    world.vd.vertices = vertices.data();
+    world.indexCount = static_cast<int>(indices.size());
+    world.indices = indices.data();
+    world.surfaceCount = static_cast<int>(surfaces.size());
+    world.dpvs.surfaces = surfaces.data();
+
+    WebEngineGfxWorldSurfacePublication publication;
+    Require(WebEngine_BuildGfxWorldSurface(world, publication) ==
+            WebEngineGfxWorldSurfaceResult::Success,
+        "canonical GfxWorld adapter selects a bounded base surface");
+    Require(publication.surfaceIndex == 2u,
+        "canonical adapter skips layered and degenerate candidates deterministically");
+    Require(publication.vertexCount == 4u && publication.triangleCount == 2u,
+        "canonical adapter retains selected surface counts");
+    Require(std::string_view(publication.materialName) == "mc/killhouse_wall",
+        "canonical adapter retains the resolved Material identity by name");
+    Require(publication.rendererSurface.indices ==
+            std::vector<std::uint16_t>({0u, 1u, 2u, 2u, 3u, 0u}),
+        "canonical adapter preserves surface-local indices");
+    Require(publication.horizontalAxis == 0u && publication.verticalAxis == 1u &&
+            publication.depthAxis == 2u,
+        "equal major extents use stable canonical axis order");
+    RequireNear(publication.rendererSurface.vertices.front().position[2], -0.3075f,
+        "canonical adapter preserves the third world axis as renderer depth");
+
+    const WebEngineGfxWorldSurfacePublication before = publication;
+    surfaces[2].bounds[0][0] = std::numeric_limits<float>::quiet_NaN();
+    Require(WebEngine_BuildGfxWorldSurface(world, publication) ==
+            WebEngineGfxWorldSurfaceResult::InvalidSurfaceBounds,
+        "malformed canonical surface bounds are rejected");
+    Require(publication.surfaceIndex == before.surfaceIndex &&
+            SameConverted(publication.rendererSurface, before.rendererSurface),
+        "failed canonical adaptation atomically preserves the prior publication");
 }
 
 void TestGoldenNonzeroRanges()
@@ -638,6 +729,7 @@ int main()
 {
     Runner runner;
     runner.Run("upstream-compatible layouts", TestUpstreamLayouts);
+    runner.Run("canonical GfxWorld adapter", TestCanonicalGfxWorldAdapter);
     runner.Run("golden nonzero ranges", TestGoldenNonzeroRanges);
     runner.Run("null and zero descriptors", TestNullAndZeroDescriptors);
     runner.Run("layered format rejection", TestLayeredFormatRejection);

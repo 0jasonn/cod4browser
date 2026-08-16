@@ -41,12 +41,12 @@ substitute as convergence.
 
 ## Snapshot
 
-Snapshot baseline: branch `web-port`, through canonical Killhouse `LightDef`
-publication at asset 705 and the ordered pre-`GfxWorld` boundary at asset 772
-in the current working tree.
+Snapshot baseline: branch `web-port`, through complete canonical Killhouse
+`GfxWorld` publication at asset 772 and one bounded real-world WebGL2 draw in
+the current working tree.
 
-The production web target contains 36 C/C++ translation units: six outside
-`src/web` and 30 inside it. The non-web unit added before this milestone is the shared database semantic
+The production web target contains 37 C/C++ translation units: six outside
+`src/web` and 31 inside it. The non-web unit added before this milestone is the shared database semantic
 trace. This is only a source-inventory baseline; it is not
 a quality metric by itself because filesystem, lifecycle, and WebGL code should
 remain platform-owned.
@@ -56,16 +56,20 @@ in `common.ff`. Its type-7 run begins at asset 4,778 and retains 1,723 sound
 table rows backed by 1,716 unique canonical `snd_alias_list_t` objects. The
 cross-zone index then lets `killhouse.ff` publish its canonical type-23
 `WeaponDef` run beginning at asset 458 (`winchester1200`). Ordered traversal no
-longer stops at that validation boundary: it completes assets 0-771 and reaches
-the first `GfxWorld` at asset 772 without entering its body. The retained prefix
-contains 218 technique sets, 320 XModels, 60 FX effects, 146
+longer stops at that validation boundary: it completes assets 0-771 and
+continues from that exact retained state through the complete generated-loader
+order for `GfxWorld` 772. The published result contains 218 technique sets, 325
+XModels (including five inline static-model dependencies), 60 FX effects, 146
 canonical `XAnimParts`, 10 WeaponDefs, 21 canonical RawFiles, and the canonical
 type-12 `ComWorld` for `maps/killhouse.d3dbsp` with 24 primary lights. Asset 705
 is the canonical `GfxLightDef` `light_point_linear`; its attenuation pointer
 resolves to canonical `GfxImage` identity 1,773. Assets 706-771 are already
-supported technique sets. The pre-world state is block-0 high-water 2,300,
-block-4 cursor 11,121,808, inflated cursor 36,119,878, 1,840 registered assets,
-and 1,944 defined aliases.
+supported technique sets. The world contains 448,962 vertices, 829,539 indices,
+8,694 surfaces, three cells, three lightmaps, and 12,255 static models. Its
+final inflated cursor is 86,162,172; block-0 high-water is 8,389,392, block-1
+high-water is 509,456, block-4 cursor is 37,147,366, and the registry reports
+2,371 assets with 2,479 defined aliases. No seek, rewind-to-world, or
+reconstructed registry is used.
 RawFiles 395, 396, 398, 400, 402, and 404 are published through the canonical
 Kisak type. XModel, Material, and FX publications now also expose stable
 canonical top-level objects, while their retained nested census/preview graphs
@@ -84,12 +88,12 @@ remain temporary convergence scaffolding.
 | Command system | `MODIFIED KISAK` / partial | `src/qcommon/cmd_core.cpp` implements the Kisak command APIs as a reduced portable core. Reconcile it with `src/qcommon/cmd.cpp` as more qcommon code compiles. |
 | Dvar system | `MODIFIED KISAK` / partial | `src/universal/dvar_core.cpp` is a reduced portable implementation. Preserve API and behavior parity and converge with the full dvar implementation. |
 | qcommon startup | `TEMPORARY WEB SUBSTITUTE` | The bounded pre-database shell proves ordering and I/O but is not `Com_Init`. Replace milestone-specific startup actions by compiling the real initialization path behind platform services. |
-| Canonical database asset ABI | `SHARED KISAK` / partial | `RawFile`, `XAssetHeader`, `XAssetType`, and `XAsset` live in renderer-free `src/database/db_asset_types.h`. Canonical `XAnimParts`, `WeaponDef`, `LocalizeEntry`, XModel, Material, draw-surface key, FX, collision-plane, ClipMap, `ComWorld`, `ComPrimaryLight`, `GfxImage`, and `GfxLightDef` declarations are isolated in lightweight shared type headers consumed by both native declarations and the portable loader. Win32/Wasm tests enforce the 32-bit IW3 layouts. Expand this extraction only when a real shared consumer requires another canonical type. |
+| Canonical database asset ABI | `SHARED KISAK` / partial | `RawFile`, `XAssetHeader`, `XAssetType`, and `XAsset` live in renderer-free `src/database/db_asset_types.h`. Canonical `XAnimParts`, `WeaponDef`, `LocalizeEntry`, XModel, Material, draw-surface key, FX, collision-plane, ClipMap, `ComWorld`, `ComPrimaryLight`, `GfxImage`, `GfxLightDef`, and the complete database-facing `GfxWorld` graph are isolated in lightweight shared type headers consumed by both native declarations and the portable loader. `GfxWorld` remains the 732-byte Win32 structure; its 44-byte vertex, 48-byte surface, DPVS, cell/portal, lighting, model, shadow, and dynamic records retain their original 32-bit contracts. Win32/Wasm tests enforce those layouts. Expand this extraction only when a real shared consumer requires another canonical type. |
 | IWD/ZIP reading | `MODIFIED KISAK` / partial | The bounded reader is portable and tested, but final integration should be through Kisak filesystem/database calls rather than a preview-only archive job. |
 | IWI decoding | `MODIFIED KISAK` / partial | Bounded DXT decoding is reusable. Connect it to canonical `GfxImage` loading and renderer upload instead of browser material queues. |
 | Fastfile framing and zone stream machine | `TEMPORARY WEB SUBSTITUTE` | It accurately models blocks, rewind/high-water behavior, pointer classes, aliases, and bounded streaming. Use it as differential evidence and migrate reusable mechanics toward the Kisak DB loader. |
 | Asset registry | `TEMPORARY WEB SUBSTITUTE` | Stable typed identities prove alias behavior. Independent asset, alias, and name-byte ceilings now back indexed identity, source, type/name, and alias lookup with atomic reset/unload tests. The destination remains Kisak `XAsset` registration and native DB ownership. |
-| Retail loader dispatcher | `TEMPORARY WEB SUBSTITUTE` | `web_retail_fastfile_census.*` is the current pre-world traversal vehicle. It reports canonical asset types through the shared semantic trace, publishes ordered assets 0-771, and reaches the `GfxWorld` 772 boundary without seeking or entering the body. `web_retail_load_context.h` exposes only stream, registry, ownership, trace, limits, lookup, and shared alias/XString services to extracted families. WeaponDef dependency resolution uses that seam; ClipMap, ComWorld, GfxImage, and LightDef own resumable generated-loader state in dedicated families. Stable families remain in the dispatcher until they are materially changed. |
+| Retail loader dispatcher | `TEMPORARY WEB SUBSTITUTE` | `web_retail_fastfile_census.*` remains the orchestration vehicle, but type 16 is dispatched to `web_retail_load_gfxworld.*`; the census file does not implement the world body. The retained stream/registry state publishes ordered assets 0-772 without seeking. `web_retail_load_context.h` exposes only stream, registry, ownership, trace, limits, lookup, and shared alias/XString/XModel dependency services to extracted families. Stable families remain in the dispatcher until they are materially changed. |
 | `clipMap_t` asset loading | `MODIFIED KISAK` / partial | The dedicated family transcribes the 284-byte `Load_clipMap_t` record, block-4 child order, block-1 zero-fill dynamic client allocations, root insertion/alias handling, bounded ownership, and atomic canonical publication for `col_map_sp`/`col_map_mp`. Synthetic MSVC/Wasm coverage exercises empty and populated child graphs under one-byte traversal budgets. Inline DynEntity dependency bodies remain fail-closed until their canonical families are compiled; no `CM_LoadMap` or collision runtime behavior is included. Type 12 `com_map` remains correctly distinct from `clipMap_t` and is now handled by the canonical ComWorld family. |
 | `ComWorld` asset loading | `MODIFIED KISAK` / partial | `web_retail_load_comworld.*` transcribes native `Load_ComWorldPtr`, `Load_ComWorld`, `Load_ComPrimaryLightArray`, and `Load_ComPrimaryLight`: root null/inline/shared/prior-alias handling, block-0 body allocation, block-4 name and 68-byte light array, per-light `defName` XStrings, checked ceilings, and publication only after the complete body. The owned run publishes asset 704 as canonical `ComWorld`; no light rendering, evaluation, collision, gameplay, or `GfxWorld` behavior is present. |
 | `GfxLightDef` asset loading | `MODIFIED KISAK` / partial | `web_retail_load_lightdef.*` transcribes `Load_GfxLightDefPtr`, `Load_GfxLightDef`, and `Load_GfxLightImage`: four-byte root cells, null/inline/shared/prior aliases, block-0 16-byte bodies, block-4 names, embedded 8-byte light images, canonical `GfxImage*` dependencies, insertion cells, and final-only publication. Killhouse asset 705 publishes as `light_point_linear`; no rendering, attenuation evaluation, shadow behavior, or primary-light linking is implemented. |
@@ -100,7 +104,7 @@ remain temporary convergence scaffolding.
 | `XModel` | `MODIFIED KISAK` / partial | The existing checked traversal now publishes a stable canonical `XModel` top-level object with canonical name, scalar metadata, skeleton-array pointers, and canonical Material handle identity. `RetailWorldXModel` still owns temporary surface, collision, and physics retention; converge those nested graphs before compiling broader consumers. |
 | `Material` and techniques | `MODIFIED KISAK` / partial | Existing XModel/FX material traversal now exposes canonical `Material` headers and stable names, and XModel handles point at those exact objects. Texture/image/technique ownership remains in temporary records; converge those canonical child graphs and translate only D3D shader/backend state. |
 | `GfxImage` | `MODIFIED KISAK` / partial; native backend `NATIVE ONLY` | The reusable database path and the pre-existing material path now publish canonical `GfxImage` metadata/name pointers through the shared registry. Its canonical texture slot remains null; IWI decoding, retained payload metadata, WebGL resource creation, and context recovery remain renderer/backend infrastructure. Continue converging all remaining image consumers on this family. |
-| `GfxWorld` | `TEMPORARY WEB SUBSTITUTE`; canonical code `NOT COMPILED` | Synthetic extraction proves one surface and retail traversal is in progress. Finish all preceding retail families, load and publish a real canonical world, then render only enough Killhouse geometry to prove the seam. |
+| `GfxWorld` | `MODIFIED KISAK` / partial | `web_retail_load_gfxworld.*` is a dedicated resumable transcription of `Load_GfxWorldPtr`, `Load_GfxWorld`, and their complete serialized child order. It publishes the canonical `GfxWorld` only after images, materials, cells/portals, lightmaps/grid, vertices/layers, models, shadow/light regions, DPVS static/dynamic, block-1 runtime allocations, and five inline XModel dependencies complete. Important stages emit normalized semantic checkpoints. D3D vertex buffers remain null and runtime texture-slot arrays are zero-filled. `WebEngine_BuildGfxWorldSurface` reads the canonical vertex/index/surface/material pointers directly and copies one bounded real Killhouse surface into the renderer contract; no retained browser scene object is introduced. Gate 2 renderer expansion stops here. |
 | XModel/model preview scene | `TEMPORARY WEB SUBSTITUTE` | Useful validation UI with orthographic projection and selectable models. Freeze feature growth after the real-world proof and retire it as an architectural center. |
 | Renderer frontend | `TEMPORARY WEB SUBSTITUTE` / partial | Current converted surfaces and draw lists bypass most Kisak frontend behavior. Introduce portable draw commands behind the Kisak renderer frontend and keep backend handles private. |
 | WebGL2 backend and context recovery | `WEB PLATFORM IMPLEMENTATION` | Permanent platform boundary. Preserve resource recreation and fail-safe publication. Do not expose WebGL handles to engine systems. |
@@ -200,9 +204,9 @@ remain temporary convergence scaffolding.
   earlier unsafe arbitrary-string calibration.
 - Ordered traversal continues through nine more WeaponDefs and all intervening
   technique-set, XModel, FX, XAnimParts, and RawFile rows. It publishes type-12
-  `com_map` asset 704, type-17 `lightdef` asset 705, and the 66 technique sets
-  at 706-771. It then stops before `GfxWorld` 772. No direct seek or world-body
-  entry is used.
+  `com_map` asset 704, type-17 `lightdef` asset 705, the 66 technique sets at
+  706-771, and canonical `GfxWorld` 772. No direct seek or reconstructed
+  world-body entry is used.
 
 ### Gate 1: finish the pre-GfxWorld dependency graph
 
@@ -229,13 +233,14 @@ remain temporary convergence scaffolding.
 
 ### Gate 2: canonical GfxWorld publication
 
-- Load the world and its dependencies into canonical Kisak structures or a
-  narrowly adapted shared DB path.
-- Keep serialized wire decoding distinct from the in-memory engine type, but do
-  not introduce a second browser scene model.
-- Publish only after the complete supported dependency graph succeeds.
-- Prove a bounded piece of real Killhouse world geometry through the renderer
-  frontend and WebGL2 backend.
+- Complete. The full serialized graph loads into canonical Kisak structures,
+  with wire decoding and ownership kept separate from the in-memory type.
+- Publication is final-only and records exact block/registry state plus semantic
+  stage checkpoints. Strict count and retained-byte ceilings guard every array.
+- One bounded real Killhouse `GfxSurface` is copied directly from canonical
+  `vd.vertices`, `indices`, `dpvs.surfaces`, and `Material*` into the existing
+  portable WebGL2 contract. GPU resources remain renderer-owned.
+- Stop viewer growth here and begin the Gate 3 runtime pivot.
 
 ### Gate 3: runtime pivot
 
@@ -290,7 +295,7 @@ Update this section when a milestone changes architectural ownership.
 | Permanent browser platform code | Stable and isolated | Good: launcher, storage, lifecycle, filesystem bridge, and WebGL2 are under explicit web boundaries. |
 | Native engine systems not compiled | Decrease sharply after the GfxWorld proof | High: DB, client, cgame, game, xanim, collision, and script VM are not in the web target. |
 | Native-vs-web semantic comparisons | Increase | Foundation present: shared trace format and the RawFile contract projection pass in both Wasm and Win32 MSVC. Execution of the generated native producer remains pending. |
-| Viewer-only feature work | Stop after world proof | Controlled: current preview exists to validate assets and rendering, not as the product direction. |
+| Viewer-only feature work | Stop after world proof | Frozen: the canonical world-to-WebGL2 seam is proven; further work pivots to Gate 3 runtime systems rather than map-viewer polish. |
 
 ## Update rule
 

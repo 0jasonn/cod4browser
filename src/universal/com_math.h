@@ -2,6 +2,7 @@
 
 #include <universal/assertive.h>
 #include <universal/cplane_types.h>
+#include <universal/packed_unit_vec.h>
 
 #include <math.h>
 #include <cstdint>
@@ -16,20 +17,6 @@
 #define IS_NAN(x) _isnan(x)
 
 static const float MPH_TO_INCHES_PER_SEC = 17.6f;
-
-union PackedUnitVec // sizeof=0x4
-{                                       // ...
-    operator uint32_t()
-    {
-        return packed;
-    }
-    operator int()
-    {
-        return packed;
-    }
-    uint32_t packed;
-    uint8_t array[4];
-};
 
 using vec2 = float[2];
 using vec3 = float[3];

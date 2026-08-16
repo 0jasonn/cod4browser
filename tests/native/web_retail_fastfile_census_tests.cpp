@@ -416,6 +416,54 @@ std::vector<std::uint8_t> BuildFile(std::vector<std::uint8_t> inflated = BuildIn
     return file;
 }
 
+std::uint32_t Block4Token(std::uint32_t offset);
+
+std::vector<std::uint8_t> BuildMinimalGfxWorldZoneInflated(
+    std::uint32_t rootReference = 0xffffffffu,
+    bool appendPriorAlias = false,
+    bool allocateRuntimeTextures = true)
+{
+    std::vector<std::uint8_t> bytes;
+    PutU32(bytes, 1024u * 1024u);
+    PutU32(bytes, 0u);
+    for (const std::uint32_t block :
+         std::array<std::uint32_t, 9>{{1024u * 1024u, 4096u, 0u, 0u,
+                                      1024u * 1024u, 0u, 0u, 0u, 0u}})
+        PutU32(bytes, block);
+    PutU32(bytes, 0u);
+    PutU32(bytes, 0u);
+    const std::uint32_t assetCount = appendPriorAlias ? 3u : 2u;
+    PutU32(bytes, assetCount);
+    PutU32(bytes, 0xffffffffu);
+    PutU32(bytes, ASSET_TYPE_GFXWORLD);
+    PutU32(bytes, rootReference);
+    if (appendPriorAlias)
+    {
+        PutU32(bytes, ASSET_TYPE_GFXWORLD);
+        PutU32(bytes, Block4Token(assetCount * 8u));
+    }
+    PutU32(bytes, ASSET_TYPE_RAWFILE);
+    PutU32(bytes, 0u);
+    if (rootReference == 0u) return bytes;
+
+    std::vector<std::uint8_t> world(732u, 0u);
+    SetU32(world, 0u, 0xffffffffu);
+    SetU32(world, 4u, 0xffffffffu);
+    SetU32(world, 0xdcu, 1u); // one sun primary light, no non-sun lights
+    if (allocateRuntimeTextures)
+    {
+        SetU32(world, 0xe4u, 1u); // reflectionProbeCount
+        SetU32(world, 0xecu, 1u); // block-1 reflection runtime slots
+        SetU32(world, 0x108u, 1u); // lightmapCount
+        SetU32(world, 0x148u, 1u); // block-1 primary runtime slots
+        SetU32(world, 0x14cu, 1u); // block-1 secondary runtime slots
+    }
+    bytes.insert(bytes.end(), world.begin(), world.end());
+    AppendString(bytes, "maps/mp/web_minimal_gfxworld.d3dbsp");
+    AppendString(bytes, "web_minimal_gfxworld");
+    return bytes;
+}
+
 std::vector<std::uint8_t> BuildLocalizeZoneInflated()
 {
     std::vector<std::uint8_t> bytes;
@@ -1937,11 +1985,14 @@ kisak::fastfile::RetailFastfileCensus Run(
     std::uint32_t stepBytes = 3u,
     kisak::fastfile::RetailCensusMode mode =
         kisak::fastfile::RetailCensusMode::CodePostGfxMaterial,
-    kisak::fastfile::RetailSoundAliasLookup soundLookup = {})
+    kisak::fastfile::RetailSoundAliasLookup soundLookup = {},
+    bool loadGfxWorld = false)
 {
     using namespace kisak::fastfile;
     RetailFastfileCensusJob job;
-    Require(job.BeginStreaming(mode, {}, soundLookup) ==
+    RetailCensusLimits limits;
+    limits.loadGfxWorld = loadGfxWorld;
+    Require(job.BeginStreaming(mode, limits, soundLookup) ==
         RetailCensusError::None, "census starts");
     std::size_t offset = 0u;
     std::uint32_t steps = 0u;
@@ -2019,6 +2070,95 @@ void TestCanonicalLocalizeZoneLoader()
             material.textureCount == 0u && material.constantCount == 0u &&
             material.stateBitsCount == 0u,
         "generic zone dispatcher publishes a zero-dependency canonical Material");
+}
+
+void TestCanonicalGfxWorldLoader()
+{
+    using namespace kisak::fastfile;
+    const RetailFastfileCensus nullRoot = Run(
+        BuildFile(BuildMinimalGfxWorldZoneInflated(0u)),
+        5u, 1u, 1u, RetailCensusMode::WorldAssetLoader, {}, true);
+    Require(nullRoot.completedAssetCount == 1u &&
+            nullRoot.nextBodyIndex == 1u &&
+            nullRoot.nextBodyType == ASSET_TYPE_RAWFILE &&
+            nullRoot.worldGfxWorlds.size() == 1u &&
+            nullRoot.worldGfxWorlds.front().nullRoot &&
+            !nullRoot.worldGfxWorlds.front().asset,
+        "Load_GfxWorldPtr preserves a null root without exposing a canonical asset");
+
+    const RetailFastfileCensus minimal = Run(
+        BuildFile(BuildMinimalGfxWorldZoneInflated()),
+        5u, 1u, 1u, RetailCensusMode::WorldAssetLoader, {}, true);
+    Require(minimal.completedAssetCount == 1u &&
+            minimal.nextBodyIndex == 1u &&
+            minimal.nextBodyType == ASSET_TYPE_RAWFILE &&
+            minimal.worldGfxWorlds.size() == 1u,
+        "dispatcher completes a minimal canonical GfxWorld before the next asset");
+    const RetailPublishedGfxWorld &published = minimal.worldGfxWorlds.front();
+    Require(published.published && published.asset && published.storage &&
+            published.identity != 0u &&
+            std::string_view(published.asset->name) ==
+                "maps/mp/web_minimal_gfxworld.d3dbsp" &&
+            std::string_view(published.asset->baseName) ==
+                "web_minimal_gfxworld" &&
+            published.asset->reflectionProbeTextures &&
+            published.asset->reflectionProbeTextures[0u].basemap == nullptr &&
+            published.asset->lightmapPrimaryTextures &&
+            published.asset->lightmapPrimaryTextures[0u].basemap == nullptr &&
+            published.asset->lightmapSecondaryTextures &&
+            published.asset->lightmapSecondaryTextures[0u].basemap == nullptr &&
+            published.block1HighWaterAtPublication == 12u &&
+            minimal.semanticTrace.back().kind ==
+                kisak::database::SemanticTraceEventKind::Boundary,
+        "minimal GfxWorld publishes only after its null children and zero-filled block-1 runtime slots complete");
+
+    const RetailFastfileCensus aliased = Run(
+        BuildFile(BuildMinimalGfxWorldZoneInflated(0xfffffffeu, true)),
+        5u, 1u, 1u, RetailCensusMode::WorldAssetLoader, {}, true);
+    Require(aliased.completedAssetCount == 2u &&
+            aliased.worldGfxWorlds.size() == 2u &&
+            aliased.worldGfxWorlds[0u].published &&
+            aliased.worldGfxWorlds[0u].insertPointerBlock4Offset == 24u &&
+            aliased.worldGfxWorlds[1u].pointerAlias &&
+            aliased.worldGfxWorlds[1u].identity ==
+                aliased.worldGfxWorlds[0u].identity &&
+            aliased.worldGfxWorlds[1u].asset.get() ==
+                aliased.worldGfxWorlds[0u].asset.get(),
+        "Load_GfxWorldPtr preserves -2 insertion-cell and later prior-alias identity");
+
+    const auto expectAtomicFailure = [](std::vector<std::uint8_t> inflated,
+                                        RetailCensusError expected,
+                                        const char *message) {
+        RetailFastfileCensusJob job;
+        RetailCensusLimits limits;
+        limits.loadGfxWorld = true;
+        const std::vector<std::uint8_t> file = BuildFile(std::move(inflated));
+        Require(job.BeginStreaming(RetailCensusMode::WorldAssetLoader, limits) ==
+                    RetailCensusError::None &&
+                job.FeedSource(file, true) == RetailCensusError::None,
+            "malformed GfxWorld fixture starts");
+        while (job.Progress() == RetailCensusProgress::Running)
+            (void)job.Step({5u, 1u});
+        RetailFastfileCensus unavailable;
+        Require(job.Failure() == expected && !job.TakeResult(unavailable), message);
+    };
+
+    std::vector<std::uint8_t> overflowing = BuildMinimalGfxWorldZoneInflated();
+    constexpr std::size_t rootOffset = 60u + 2u * 8u;
+    SetU32(overflowing, rootOffset + 0x30u, UINT32_MAX);
+    expectAtomicFailure(std::move(overflowing),
+        RetailCensusError::GfxWorldCountInvalid,
+        "overflowing GfxWorld counts fail without publishing partial ownership");
+
+    std::vector<std::uint8_t> truncated = BuildMinimalGfxWorldZoneInflated();
+    truncated.resize(rootOffset + 100u);
+    expectAtomicFailure(std::move(truncated),
+        RetailCensusError::RecordTruncated,
+        "truncated GfxWorld bodies fail without publishing partial ownership");
+
+    expectAtomicFailure(BuildMinimalGfxWorldZoneInflated(0xffffffffu, true),
+        RetailCensusError::GfxWorldAliasInvalid,
+        "an undefined GfxWorld prior alias fails atomically");
 }
 
 void TestCanonicalClipMapLoader()
@@ -4194,6 +4334,8 @@ void TestOwnedWorldSurfaceIfRequested(
         Require(worldInput.good(),
             "Killhouse WeaponDef retry opens the world fastfile");
         RetailFastfileCensusJob worldJob;
+        limits.loadGfxWorld = true;
+        limits.maxImageResourceBytes = 64u * 1024u * 1024u;
         Require(worldJob.BeginStreaming(
                     RetailCensusMode::WorldAssetLoader,
                     limits,
@@ -4202,7 +4344,7 @@ void TestOwnedWorldSurfaceIfRequested(
             "Killhouse traversal starts with the common-zone lookup seam");
         steps = 0u;
         while (worldJob.Progress() == RetailCensusProgress::Running &&
-               steps++ < 20000u)
+               steps++ < 100000u)
         {
             if (worldJob.NeedsSource())
             {
@@ -4323,12 +4465,61 @@ void TestOwnedWorldSurfaceIfRequested(
                           ? UINT32_MAX
                           : worldResult.semanticTrace.back().inflatedOffset)
                   << " trace=" << worldResult.semanticTrace.size() << '\n';
-        Require(worldResult.completedAssetCount == 772u &&
-                worldResult.nextBodyIndex == 772u &&
-                worldResult.nextBodyType == 16u &&
-                worldResult.nextBodyReference == 0xffffffffu &&
+        Require(worldResult.worldGfxWorlds.size() == 1u &&
+                worldResult.worldGfxWorlds.front().published &&
+                worldResult.worldGfxWorlds.front().asset,
+            "Killhouse Gate 2 publishes one canonical GfxWorld");
+        const RetailPublishedGfxWorld &gfxEntry =
+            worldResult.worldGfxWorlds.front();
+        const GfxWorld &gfx = *gfxEntry.asset;
+        WebEngineGfxWorldSurfacePublication gfxSurface;
+        Require(WebEngine_BuildGfxWorldSurface(gfx, gfxSurface) ==
+                WebEngineGfxWorldSurfaceResult::Success,
+            "Killhouse canonical GfxWorld exposes one bounded real renderer surface");
+        std::cerr << "Killhouse GfxWorld: name=" << gfx.name
+                  << " base=" << (gfx.baseName ? gfx.baseName : "")
+                  << " planes=" << gfx.planeCount
+                  << " nodes=" << gfx.nodeCount
+                  << " cells=" << gfx.dpvsPlanes.cellCount
+                  << " vertices=" << gfx.vertexCount
+                  << " indices=" << gfx.indexCount
+                  << " surfaces=" << gfx.surfaceCount
+                  << " static-models=" << gfx.dpvs.smodelCount
+                  << " lightmaps=" << gfx.lightmapCount
+                  << " materials=" << gfx.materialMemoryCount
+                  << " payload=" << gfxEntry.payloadBytes
+                  << " boundary=" << gfxEntry.boundaryInflatedOffset
+                  << " highwater0=" << gfxEntry.block0HighWaterAtPublication
+                  << " highwater1=" << gfxEntry.block1HighWaterAtPublication
+                  << " cursor4=" << gfxEntry.block4CursorAtPublication
+                  << " registry=" << gfxEntry.registryAssetCountAtPublication
+                  << '/' << gfxEntry.registryAliasCountAtPublication
+                  << '/' << gfxEntry.registryDefinedAliasCountAtPublication
+                  << " renderer-surface=" << gfxSurface.surfaceIndex
+                  << ':' << gfxSurface.vertexCount
+                  << '/' << gfxSurface.triangleCount
+                  << " material="
+                  << (gfxSurface.materialName ? gfxSurface.materialName : "")
+                  << " material-identity="
+                  << (gfxSurface.surfaceIndex <
+                          gfxEntry.surfaceMaterialIdentities.size()
+                      ? gfxEntry.surfaceMaterialIdentities[gfxSurface.surfaceIndex]
+                      : 0u)
+                  << '\n';
+        const auto worldPublish = std::find_if(
+            worldResult.semanticTrace.rbegin(),
+            worldResult.semanticTrace.rend(),
+            [](const kisak::database::SemanticTraceEntry &entry) {
+                return entry.kind ==
+                        kisak::database::SemanticTraceEventKind::AssetPublish &&
+                    entry.assetType == ASSET_TYPE_GFXWORLD &&
+                    entry.assetIndex == 772u;
+            });
+        Require(worldResult.completedAssetCount == 773u &&
+                worldResult.nextBodyIndex == 773u &&
+                worldResult.nextBodyType == 13u &&
                 worldResult.worldTechniqueSets.size() == 218u &&
-                worldResult.worldXModels.size() == 320u &&
+                worldResult.worldXModels.size() == 325u &&
                 worldResult.worldFxEffects.size() == 60u &&
                 worldResult.worldXAnimParts.size() == 146u &&
                 worldResult.worldWeapons.size() == 10u &&
@@ -4339,13 +4530,10 @@ void TestOwnedWorldSurfaceIfRequested(
                 std::string_view(firstLightDef.asset->name) ==
                     "light_point_linear" &&
                 firstLightDef.asset->attenuation.image != nullptr &&
-                worldResult.stoppedBeforeDifferentWorldAssetType &&
                 !worldResult.semanticTrace.empty() &&
                 worldResult.semanticTrace.back().kind ==
                     kisak::database::SemanticTraceEventKind::Boundary &&
-                worldResult.semanticTrace.back().assetType ==
-                    ASSET_TYPE_GFXWORLD &&
-                worldResult.semanticTrace.back().assetIndex == 772u &&
+                worldPublish != worldResult.semanticTrace.rend() &&
                 std::all_of(
                     worldResult.worldLightDefs.begin(),
                     worldResult.worldLightDefs.end(),
@@ -4356,8 +4544,37 @@ void TestOwnedWorldSurfaceIfRequested(
                 comWorld.assetIndex == 704u &&
                 std::string_view(comWorld.asset->name) == "maps/killhouse.d3dbsp" &&
                 comWorld.asset->primaryLightCount == 24u &&
-                comWorld.asset->primaryLights != nullptr,
-            "Killhouse ordered traversal publishes every LightDef and stops before GfxWorld 772");
+                comWorld.asset->primaryLights != nullptr &&
+                gfx.name && std::string_view(gfx.name) ==
+                    "maps/killhouse.d3dbsp" &&
+                gfx.vd.vertices && gfx.indices && gfx.dpvs.surfaces &&
+                gfx.vd.worldVb == nullptr && gfx.vld.layerVb == nullptr &&
+                gfxEntry.surfaceMaterialIdentities.size() ==
+                    static_cast<std::size_t>(gfx.surfaceCount) &&
+                gfxSurface.material ==
+                    gfx.dpvs.surfaces[gfxSurface.surfaceIndex].material &&
+                (gfx.reflectionProbeTextures == nullptr ||
+                    std::all_of(
+                        gfx.reflectionProbeTextures,
+                        gfx.reflectionProbeTextures + gfx.reflectionProbeCount,
+                        [](const GfxTexture &texture) {
+                            return texture.basemap == nullptr;
+                        })) &&
+                (gfx.lightmapPrimaryTextures == nullptr ||
+                    std::all_of(
+                        gfx.lightmapPrimaryTextures,
+                        gfx.lightmapPrimaryTextures + gfx.lightmapCount,
+                        [](const GfxTexture &texture) {
+                            return texture.basemap == nullptr;
+                        })) &&
+                (gfx.lightmapSecondaryTextures == nullptr ||
+                    std::all_of(
+                        gfx.lightmapSecondaryTextures,
+                        gfx.lightmapSecondaryTextures + gfx.lightmapCount,
+                        [](const GfxTexture &texture) {
+                            return texture.basemap == nullptr;
+                        })),
+            "Killhouse ordered traversal atomically publishes GfxWorld 772");
         return;
     }
     Require(!result.worldXModels.empty(),
@@ -5044,6 +5261,7 @@ int main(int argc, char **argv)
     TestPositiveIncrementalCensus();
     TestWorldAssetInventory();
     TestCanonicalLocalizeZoneLoader();
+    TestCanonicalGfxWorldLoader();
     TestCanonicalClipMapLoader();
     TestCanonicalComWorldLoader();
     TestCanonicalLightDefLoader();

@@ -311,7 +311,14 @@ RetailCensusError RetailImageLoadFamily::Step(
         const bool bounded2d = entry.mapType == MAPTYPE_2D &&
             state.textureToken != 0u && entry.width != 0u &&
             entry.height != 0u && entry.depth == 1u;
-        if ((!emptyBuiltin && !bounded2d) || record[10u] > 1u ||
+        const bool bounded3d = entry.mapType == MAPTYPE_3D &&
+            state.textureToken != 0u && entry.width != 0u &&
+            entry.height != 0u && entry.depth != 0u;
+        const bool boundedCube = entry.mapType == MAPTYPE_CUBE &&
+            state.textureToken != 0u && entry.width != 0u &&
+            entry.width == entry.height && entry.depth == 1u;
+        if ((!emptyBuiltin && !bounded2d && !bounded3d && !boundedCube) ||
+            record[10u] > 1u ||
             entry.nameReference == 0u ||
             entry.nameReference == SHARED_POINTER)
             return RetailCensusError::ImageLayoutUnsupported;

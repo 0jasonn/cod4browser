@@ -5,6 +5,7 @@
 #include <web/web_engine_xmodel_draw_list.h>
 #include <web/web_engine_xmodel_material.h>
 #include <web/web_engine_xmodel_surface.h>
+#include <web/web_engine_world_surface.h>
 #include <web/web_retail_fastfile_census.h>
 #include <web/web_renderer.h>
 #include <web/web_shader_compatibility.h>
@@ -26,6 +27,10 @@ namespace
 constexpr const char *CODE_POST_GFX_PATH = "zone/english/code_post_gfx.ff";
 constexpr const char *COMMON_FASTFILE_PATH = "zone/english/common.ff";
 constexpr const char *WORLD_FASTFILE_PATH = "zone/english/killhouse.ff";
+// Synthetic browser fixtures are intentionally only a few hundred bytes and
+// end at the old pre-world boundary. Real retail Killhouse is about 70 MiB;
+// this conservative envelope avoids treating a test prefix as a complete zone.
+constexpr std::uint32_t MIN_COMPLETE_WORLD_FASTFILE_BYTES = 1024u * 1024u;
 
 enum class Dataset : std::uint8_t
 {
@@ -94,6 +99,15 @@ struct RetailColorMapPublication
     WebEngineXModelMaterialImageBinding binding;
 };
 
+struct RetailGfxWorldSurfacePublication
+{
+    const char *state = "fallback";
+    const char *message = "No canonical GfxWorld surface was submitted";
+    WebEngineGfxWorldSurfaceResult result =
+        WebEngineGfxWorldSurfaceResult::InvalidWorld;
+    WebEngineGfxWorldSurfacePublication surface;
+};
+
 const char *CurrentPath() noexcept
 {
     switch (g_runtime.dataset)
@@ -111,7 +125,7 @@ const char *CurrentTraversal() noexcept
         ? "two-techsets-one-material"
         : g_runtime.dataset == Dataset::CommonPrerequisite
             ? "prerequisite-zone-assets"
-            : "world-xmodel-dependencies";
+            : "native-order-world-gfxworld";
 }
 
 EM_JS(void, DispatchRetailCensusLoading,
@@ -614,6 +628,40 @@ EM_JS(
                 typesBeforeFirstGfxWorld: [],
             };
         }
+    });
+
+EM_JS(
+    void,
+    AppendRetailGfxWorldSurface,
+    (const char *state, const char *message, const char *worldName,
+     const char *materialName, uint32_t surfaceIndex,
+     uint32_t vertexCount, uint32_t triangleCount,
+     uint32_t horizontalAxis, uint32_t verticalAxis, uint32_t depthAxis,
+     double minX, double minY, double minZ,
+     double maxX, double maxY, double maxZ),
+    {
+        const inventory = globalThis.__KISAKCOD_RETAIL_CENSUS_DETAIL__?.worldInventory;
+        if (!inventory) return;
+        inventory.gfxWorld = {
+            name: UTF8ToString(worldName),
+            rendererSurface: {
+                state: UTF8ToString(state),
+                message: UTF8ToString(message),
+                submissionState: UTF8ToString(state) === "submitted"
+                    ? "submitted" : "not-submitted",
+                renderState: "pending-first-frame",
+                rendered: false,
+                surfaceIndex: surfaceIndex >>> 0,
+                materialName: UTF8ToString(materialName),
+                vertexCount: vertexCount >>> 0,
+                triangleCount: triangleCount >>> 0,
+                horizontalAxis: horizontalAxis >>> 0,
+                verticalAxis: verticalAxis >>> 0,
+                depthAxis: depthAxis >>> 0,
+                mins: [minX, minY, minZ],
+                maxs: [maxX, maxY, maxZ],
+            },
+        };
     });
 
 EM_JS(
@@ -1541,6 +1589,73 @@ RetailRenderSurfacePublication PublishRetailXModelSurface(bool shaderReady)
     return publication;
 }
 
+RetailGfxWorldSurfacePublication PublishRetailGfxWorldSurface(bool shaderReady)
+{
+    RetailGfxWorldSurfacePublication publication;
+    if (!shaderReady)
+    {
+        publication.message =
+            "The retail shader binding was unavailable; canonical world geometry was not submitted";
+        return publication;
+    }
+    const auto &worlds = g_runtime.worldInventory.worldGfxWorlds;
+    if (worlds.empty() || !worlds.front().published || !worlds.front().asset)
+    {
+        publication.message = "The canonical GfxWorld was not atomically published";
+        return publication;
+    }
+
+    publication.result = WebEngine_BuildGfxWorldSurface(
+        *worlds.front().asset, publication.surface);
+    if (publication.result != WebEngineGfxWorldSurfaceResult::Success)
+    {
+        publication.message =
+            WebEngine_GfxWorldSurfaceResultString(publication.result);
+        Web_Log(
+            WebLogLevel::Error,
+            "[kisakcod-web] Canonical GfxWorld renderer adaptation failed: %s.\n",
+            publication.message);
+        return publication;
+    }
+
+    const auto &converted = publication.surface.rendererSurface;
+    const WebRendererSurfaceDesc descriptor{
+        converted.vertices.data(),
+        static_cast<std::uint32_t>(converted.vertices.size()),
+        converted.indices.data(),
+        static_cast<std::uint32_t>(converted.indices.size()),
+    };
+    const WebRendererSurfaceResult submission =
+        WebRenderer_SetSurface(descriptor, converted.draw);
+    if (submission != WebRendererSurfaceResult::Success)
+    {
+        publication.message = WebRenderer_SurfaceResultString(submission);
+        Web_Log(
+            WebLogLevel::Error,
+            "[kisakcod-web] Canonical GfxWorld surface submission failed: %s.\n",
+            publication.message);
+        return publication;
+    }
+
+    publication.state = "submitted";
+    publication.message =
+        "Canonical Killhouse geometry was submitted; rendering is confirmed by the subsequent first-frame event";
+    const GfxWorld &world = *worlds.front().asset;
+    Web_Log(
+        WebLogLevel::Info,
+        "[kisakcod-web] Submitted canonical GfxWorld '%s' surface %u "
+        "(%u vertices, %u triangles, material '%s', identity %u) to WebGL2; first-frame rendering is pending.\n",
+        world.name ? world.name : "",
+        publication.surface.surfaceIndex,
+        publication.surface.vertexCount,
+        publication.surface.triangleCount,
+        publication.surface.materialName ? publication.surface.materialName : "",
+        publication.surface.surfaceIndex < worlds.front().surfaceMaterialIdentities.size()
+            ? worlds.front().surfaceMaterialIdentities[publication.surface.surfaceIndex]
+            : 0u);
+    return publication;
+}
+
 RetailColorMapPublication SelectRetailXModelColorMap(
     const RetailRenderSurfacePublication &surface)
 {
@@ -1803,6 +1918,10 @@ void PublishReady()
         PublishRetailXModelSurface(shaderReady);
     const RetailColorMapPublication colorMap =
         SelectRetailXModelColorMap(renderSurface);
+    // Keep the existing XModel material selection as a bootstrap texture
+    // source, then make canonical world geometry the final submitted surface.
+    const RetailGfxWorldSurfacePublication gfxWorldSurface =
+        PublishRetailGfxWorldSurface(shaderReady);
     BeginRetailCensusReady(
         g_runtime.generation,
         g_runtime.codePostFileSize,
@@ -1941,6 +2060,28 @@ void PublishReady()
         world.worldFirstTechniqueSetPublished ? 1 : 0,
         world.stoppedBeforeWorldTechniqueDependency ? 1 : 0,
         world.unsupportedOperation ? world.unsupportedOperation : "");
+    const GfxWorld *publishedWorld =
+        !world.worldGfxWorlds.empty() && world.worldGfxWorlds.front().asset
+            ? world.worldGfxWorlds.front().asset.get()
+            : nullptr;
+    AppendRetailGfxWorldSurface(
+        gfxWorldSurface.state,
+        gfxWorldSurface.message,
+        publishedWorld && publishedWorld->name ? publishedWorld->name : "",
+        gfxWorldSurface.surface.materialName
+            ? gfxWorldSurface.surface.materialName : "",
+        gfxWorldSurface.surface.surfaceIndex,
+        gfxWorldSurface.surface.vertexCount,
+        gfxWorldSurface.surface.triangleCount,
+        gfxWorldSurface.surface.horizontalAxis,
+        gfxWorldSurface.surface.verticalAxis,
+        gfxWorldSurface.surface.depthAxis,
+        gfxWorldSurface.surface.mins[0],
+        gfxWorldSurface.surface.mins[1],
+        gfxWorldSurface.surface.mins[2],
+        gfxWorldSurface.surface.maxs[0],
+        gfxWorldSurface.surface.maxs[1],
+        gfxWorldSurface.surface.maxs[2]);
     for (const auto &techniqueSet : world.worldTechniqueSets)
     {
         AppendRetailWorldTechniqueSet(
@@ -2718,6 +2859,14 @@ WebRetailCensusFrameResult WebRetailCensusJob_Frame()
             Fail("could not census retail fastfile", "file size is outside the bounded census envelope");
             return {};
         }
+        if (g_runtime.dataset == Dataset::WorldInventory &&
+            g_runtime.fileSize < MIN_COMPLETE_WORLD_FASTFILE_BYTES &&
+            !g_runtime.parser.ConfigureGfxWorldLoading(false))
+        {
+            Fail("could not configure world traversal",
+                "GfxWorld policy changed after source traversal began");
+            return {};
+        }
         g_runtime.phase = Phase::NeedRead;
         return {};
     }
@@ -2855,6 +3004,8 @@ WebRetailCensusFrameResult WebRetailCensusJob_Frame()
                 RetailCensusLimits limits;
                 limits.maxFileBytes = 128u * 1024u * 1024u;
                 limits.maxInflatedPrefixBytes = 128u * 1024u * 1024u;
+                limits.maxImageResourceBytes = 64u * 1024u * 1024u;
+                limits.loadGfxWorld = true;
                 if (const auto error = g_runtime.parser.BeginStreaming(
                         RetailCensusMode::WorldAssetLoader, limits,
                         g_runtime.soundCatalog.Lookup());

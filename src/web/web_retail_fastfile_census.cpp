@@ -2,6 +2,7 @@
 #include <web/web_retail_load_context.h>
 #include <web/web_retail_load_clipmap.h>
 #include <web/web_retail_load_comworld.h>
+#include <web/web_retail_load_gfxworld.h>
 #include <web/web_retail_load_lightdef.h>
 #include <web/web_retail_load_weapon.h>
 
@@ -488,6 +489,13 @@ bool ValidLimits(const RetailCensusLimits &limits) noexcept
         limits.maxClipMapPayloadBytes != 0u &&
         limits.maxRetainedClipMapBytes != 0u &&
         limits.maxLightDefs != 0u && limits.maxLightDefNameBytes != 0u &&
+        limits.maxGfxWorlds != 0u && limits.maxGfxWorldNameBytes != 0u &&
+        limits.maxGfxWorldArrayElements != 0u &&
+        limits.maxGfxWorldVertices != 0u && limits.maxGfxWorldIndices != 0u &&
+        limits.maxGfxWorldSurfaces != 0u && limits.maxGfxWorldCells != 0u &&
+        limits.maxGfxWorldLightmaps != 0u && limits.maxGfxWorldStaticModels != 0u &&
+        limits.maxGfxWorldMaterialMemory != 0u && limits.maxGfxWorldPayloadBytes != 0u &&
+        limits.maxRetainedGfxWorldBytes != 0u &&
         limits.maxSemanticTraceEntries != 0u;
 }
 
@@ -687,6 +695,20 @@ const char *RetailCensusErrorString(RetailCensusError error) noexcept
     case RetailCensusError::LightDefNameTooLong: return "GfxLightDef name exceeds limit";
     case RetailCensusError::LightDefImageInvalid: return "GfxLightDef image dependency is not published";
     case RetailCensusError::LightDefAliasInvalid: return "invalid GfxLightDef alias";
+    case RetailCensusError::GfxWorldLayoutUnsupported: return "unsupported GfxWorld child layout";
+    case RetailCensusError::GfxWorldCollectionLimit: return "GfxWorld collection exceeds limit";
+    case RetailCensusError::GfxWorldNameInvalid: return "invalid GfxWorld name";
+    case RetailCensusError::GfxWorldNameTooLong: return "GfxWorld name exceeds limit";
+    case RetailCensusError::GfxWorldCountInvalid: return "invalid or excessive GfxWorld count";
+    case RetailCensusError::GfxWorldPayloadLimit: return "GfxWorld payload exceeds limit";
+    case RetailCensusError::GfxWorldPointerInvalid: return "invalid GfxWorld pointer";
+    case RetailCensusError::GfxWorldImageInvalid: return "invalid GfxWorld image dependency";
+    case RetailCensusError::GfxWorldMaterialInvalid: return "invalid GfxWorld material dependency";
+    case RetailCensusError::GfxWorldModelInvalid: return "invalid GfxWorld XModel dependency";
+    case RetailCensusError::GfxWorldLightDefInvalid: return "invalid GfxWorld light definition dependency";
+    case RetailCensusError::GfxWorldCellInvalid: return "invalid GfxWorld cell or portal";
+    case RetailCensusError::GfxWorldSurfaceInvalid: return "invalid GfxWorld surface";
+    case RetailCensusError::GfxWorldAliasInvalid: return "invalid GfxWorld alias";
     case RetailCensusError::PostXModelAssetUnsupported:
         return "asset after the first XModel is not an inline technique set";
     case RetailCensusError::SemanticTraceLimit:
@@ -844,6 +866,7 @@ const char *RetailCensusStageString(RetailCensusStage stage) noexcept
     case RetailCensusStage::WorldClipMap: return "world-clipmap";
     case RetailCensusStage::WorldComWorld: return "world-comworld";
     case RetailCensusStage::WorldLightDef: return "world-lightdef";
+    case RetailCensusStage::WorldGfxWorld: return "world-gfxworld";
     case RetailCensusStage::AssetBoundary: return "asset-boundary";
     case RetailCensusStage::Failed: return "failed";
     }
@@ -1048,6 +1071,12 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
     RetailClipMapLoadFamily clipMapLoader;
     RetailComWorldLoadFamily comWorldLoader;
     RetailLightDefLoadFamily lightDefLoader;
+    RetailGfxWorldLoadFamily gfxWorldLoader;
+    bool gfxWorldXModelPending = false;
+    bool gfxWorldXModelReady = false;
+    bool gfxWorldXModelHasInsert = false;
+    ZoneSpan gfxWorldXModelInsert{};
+    XModel *gfxWorldXModelCompleted = nullptr;
     ZoneSpan worldMenuStringSpan{};
     std::uint32_t worldFxImpactAssetIndex = 0u;
     std::uint32_t worldFxImpactNameReference = 0u;
@@ -1099,6 +1128,7 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
     RetailCensusStepBudget *activeLoadBudget = nullptr;
     RetailCensusStepReport *activeLoadReport = nullptr;
     bool *activeLoadBlocked = nullptr;
+    RetailCensusStage *activeLoadStage = nullptr;
 
     ~Impl()
     {
@@ -2522,6 +2552,99 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
         return ValidPriorZonePointer(token, alignment);
     }
 
+    bool TranslatePointerToken(
+        std::uint32_t token,
+        std::uint32_t alignment,
+        ZoneSpan &target) const noexcept override
+    {
+        if (!DecodeZoneAliasToken(token, target) ||
+            (alignment != 0u && target.offset % alignment != 0u))
+            return false;
+        if (target.block == 4u && !TranslateNativeBlock4Span(target))
+            return false;
+        return true;
+    }
+
+    RetailCensusError BeginXModelDependency(
+        std::uint32_t ownerAssetIndex,
+        std::uint32_t token,
+        const ZoneSpan &pointerCell) noexcept override
+    {
+        if (gfxWorldXModelPending || gfxWorldXModelReady)
+            return RetailCensusError::InvalidArgument;
+        if ((token != INLINE_POINTER && token != SHARED_POINTER) ||
+            result.worldXModels.size() >= limits.maxWorldXModels)
+            return token == INLINE_POINTER || token == SHARED_POINTER
+                ? RetailCensusError::XModelCollectionLimit
+                : RetailCensusError::XModelLayoutUnsupported;
+        worldXModelAliasSlot = pointerCell;
+        if (const RetailCensusError error = MapRegistryError(
+                registry.ReserveAlias(pointerCell, ASSET_TYPE_XMODEL));
+            error != RetailCensusError::None)
+            return error;
+        gfxWorldXModelHasInsert = token == SHARED_POINTER;
+        gfxWorldXModelInsert = {};
+        if (gfxWorldXModelHasInsert)
+        {
+            if (const RetailCensusError error = Plan(
+                    4u, 4u, &gfxWorldXModelInsert);
+                error != RetailCensusError::None)
+                return error;
+            if (const RetailCensusError error = MapRegistryError(
+                    registry.ReserveAlias(
+                        gfxWorldXModelInsert, ASSET_TYPE_XMODEL));
+                error != RetailCensusError::None)
+                return error;
+        }
+        if (const RetailCensusError error = Push(0u);
+            error != RetailCensusError::None)
+            return error;
+        ZoneSpan header;
+        if (const RetailCensusError error = Plan(4u, XMODEL_BYTES, &header);
+            error != RetailCensusError::None)
+            return error;
+        try
+        {
+            result.worldXModels.emplace_back();
+            result.worldXModels.back().asset = std::make_shared<XModel>();
+        }
+        catch (...) { return RetailCensusError::AllocationFailed; }
+        worldXModelIndex = result.worldXModels.size() - 1u;
+        RetailWorldXModel &model = result.worldXModels.back();
+        *model.asset = {};
+        model.assetIndex = ownerAssetIndex;
+        model.registrySourceIndex =
+            (pointerCell.block << 28u) | pointerCell.offset;
+        model.headerBlock0Offset = header.offset;
+        model.rendererPayloadSelected = false;
+        model.topLevelAsset = false;
+        worldXModelNested = false;
+        worldSurfaceIndex = 0u;
+        retainedLodVertices = 0u;
+        retainedLodTriangles = 0u;
+        worldRigidVertListIndex = 0u;
+        worldMaterialIndex = 0u;
+        worldTextureIndex = 0u;
+        worldCollisionSurfaceIndex = 0u;
+        worldImageResourceBytes = 0u;
+        worldPhysPresetInsertAliasSlot = {};
+        worldPhysPresetHasInsertAlias = false;
+        gfxWorldXModelPending = true;
+        gfxWorldXModelCompleted = nullptr;
+        if (!activeLoadStage) return RetailCensusError::InvalidArgument;
+        *activeLoadStage = RetailCensusStage::WorldXModel;
+        return RetailCensusError::None;
+    }
+
+    XModel *TakeXModelDependency() noexcept override
+    {
+        if (!gfxWorldXModelReady) return nullptr;
+        gfxWorldXModelReady = false;
+        XModel *value = gfxWorldXModelCompleted;
+        gfxWorldXModelCompleted = nullptr;
+        return value;
+    }
+
     bool ResolveXString(
         std::uint32_t token,
         std::shared_ptr<std::string> &value,
@@ -3791,6 +3914,7 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
         activeLoadBudget = &budget;
         activeLoadReport = &report;
         activeLoadBlocked = &blocked;
+        activeLoadStage = &stage;
         auto visitRecord = [&](std::size_t bytes) noexcept -> int {
             if (!Available(bytes))
             {
@@ -4215,6 +4339,18 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
                         error != RetailCensusError::None)
                         return error;
                     nextStage = RetailCensusStage::WorldLightDef;
+                    return RetailCensusError::None;
+                }
+                if (mode == RetailCensusMode::WorldAssetLoader &&
+                    limits.loadGfxWorld &&
+                    result.nextBodyType == ASSET_TYPE_GFX_WORLD)
+                {
+                    gfxWorldLoader.Reset();
+                    if (const RetailCensusError error = gfxWorldLoader.Begin(
+                            *this, index, result.nextBodyReference);
+                        error != RetailCensusError::None)
+                        return error;
+                    nextStage = RetailCensusStage::WorldGfxWorld;
                     return RetailCensusError::None;
                 }
                 if (result.nextBodyType == ASSET_TYPE_SOUND &&
@@ -8936,6 +9072,35 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
                 if (complete) return RetailCensusError::None;
                 continue;
             }
+            if (stage == RetailCensusStage::WorldGfxWorld)
+            {
+                if (gfxWorldLoader.Progress() == RetailGfxWorldLoadProgress::Running)
+                {
+                    if (const RetailCensusError error = gfxWorldLoader.Step(*this);
+                        error != RetailCensusError::None)
+                        return error;
+                    if (gfxWorldLoader.Progress() == RetailGfxWorldLoadProgress::Running)
+                        return RetailCensusError::None;
+                }
+                if (result.worldGfxWorlds.empty() ||
+                    !result.worldGfxWorlds.back().published)
+                    return RetailCensusError::GfxWorldLayoutUnsupported;
+                const RetailPublishedGfxWorld &entry = result.worldGfxWorlds.back();
+                ++result.completedAssetCount;
+                result.block0HighWaterAtBoundary = arenas.HighWater(0u);
+                result.block4CursorAtBoundary = arenas.Cursor(4u);
+                result.worldRegistryAliasCount = registry.AliasCount();
+                result.worldRegistryDefinedAliasCount = registry.DefinedAliasCount();
+                result.registryAssetCount = registry.AssetCount();
+                result.registryAliasCount = registry.AliasCount();
+                result.registryDefinedAliasCount = registry.DefinedAliasCount();
+                if (const RetailCensusError error =
+                        dispatchSupportedWorldAsset(entry.assetIndex + 1u, stage);
+                    error != RetailCensusError::None)
+                    return error;
+                if (complete) return RetailCensusError::None;
+                continue;
+            }
             if (stage == RetailCensusStage::WorldXAnimParts)
             {
                 const int visit = visitRecord(XANIM_PARTS_BYTES);
@@ -12385,8 +12550,28 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
                         registry.PublishAlias(
                             worldXModelAliasSlot, model.identity));
                     error != RetailCensusError::None) return error;
+                if (gfxWorldXModelPending && gfxWorldXModelHasInsert)
+                    if (const RetailCensusError error = MapRegistryError(
+                            registry.PublishAlias(
+                                gfxWorldXModelInsert, model.identity));
+                        error != RetailCensusError::None) return error;
                 model.published = true;
                 model.boundaryInflatedOffset = static_cast<std::uint32_t>(cursor);
+                if (gfxWorldXModelPending)
+                {
+                    gfxWorldXModelPending = false;
+                    gfxWorldXModelReady = true;
+                    gfxWorldXModelHasInsert = false;
+                    gfxWorldXModelCompleted = model.asset.get();
+                    result.block0HighWaterAtBoundary = arenas.HighWater(0u);
+                    result.block4CursorAtBoundary = arenas.Cursor(4u);
+                    result.registryAssetCount = registry.AssetCount();
+                    result.registryAliasCount = registry.AliasCount();
+                    result.registryDefinedAliasCount =
+                        registry.DefinedAliasCount();
+                    stage = RetailCensusStage::WorldGfxWorld;
+                    continue;
+                }
                 if (worldXModelNested)
                 {
                     RetailWorldFxElemDef &elem = result.worldFxEffects[worldFxIndex]
@@ -13450,6 +13635,18 @@ RetailCensusError RetailFastfileCensusJob::FeedSource(
     if (!impl_ || progress_ != RetailCensusProgress::Running)
         return RetailCensusError::InvalidArgument;
     return MapSourceError(impl_->source.Feed(bytes, final));
+}
+
+bool RetailFastfileCensusJob::ConfigureGfxWorldLoading(bool enabled) noexcept
+{
+    if (!impl_ || progress_ != RetailCensusProgress::Running ||
+        stage_ != RetailCensusStage::Prefix ||
+        impl_->source.TotalBytesReceived() != 0u)
+    {
+        return false;
+    }
+    impl_->limits.loadGfxWorld = enabled;
+    return true;
 }
 
 RetailCensusStepReport RetailFastfileCensusJob::Step(

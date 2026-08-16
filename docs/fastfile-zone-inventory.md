@@ -1743,3 +1743,93 @@ Synthetic coverage includes null roots, `-1`, `-2`, root and insertion aliases,
 direct/prior/interior LightDef XStrings, null and non-null attenuation images,
 inline/shared/prior image references, dependency failure, malformed image
 metadata, truncation, one-byte step budgets, and no-result atomic failure.
+## Gate 2 native `GfxWorld` generated-loader inventory
+
+This inventory is the implementation contract for Gate 2.  It was transcribed
+from `Load_GfxWorldPtr`, `Load_GfxWorld`, and every generated child operation
+reached from them in `src/database/db_load.cpp`.  The browser loader must enter
+this sequence from the retained asset-772 stream and registry state; none of
+the offsets below authorize a seek, rewind, or reconstruction.
+
+`Load_GfxWorldPtr` first consumes the four-byte root reference from block 4,
+pushes block 0, and then applies the normal asset-root contract.  Null consumes
+no body.  `-1` allocates and loads a 732-byte `GfxWorld`; `-2` additionally
+reserves a block-4 insertion cell.  Any other value is a prior asset alias.
+The table alias and optional insertion cell are published only after the full
+body and all children complete, immediately before block 0 is popped.
+
+`Load_GfxWorld` reads the 732-byte root in block 0, pushes block 4, and performs
+the following operations in this exact order:
+
+1. `name`, then `baseName`, through `Load_XString`.
+2. `indexCount` 16-bit indices, aligned to two bytes.
+3. `skySurfCount` 32-bit sky-start surface indices.
+4. `skyImage` through `Load_GfxImagePtr`.
+5. Optional `sunLight`: inline `-1` loads one 64-byte `GfxLight` and its
+   `GfxLightDefPtr`; otherwise the pointer is converted from a prior block
+   alias.
+6. `reflectionProbeCount` 16-byte `GfxReflectionProbe` records, each resolving
+   one `GfxImagePtr`.
+7. In block 1, `reflectionProbeCount` runtime `GfxTexture` slots.  They are
+   zero-filled/neutral in the browser database path and never create GPU
+   resources.
+8. Embedded `GfxWorldDpvsPlanes`: optional aliased/inline `planeCount`
+   20-byte planes, optional `nodeCount` 16-bit nodes, then in block 1
+   `cellCount * 256` 32-bit scene-entity cell words.
+9. `cellCount` 56-byte `GfxCell` records.  For each cell, in field order:
+   `aabbTreeCount` 44-byte trees (each with optional/prior-aliased 16-bit
+   static-model indices), `portalCount` 68-byte portals (each with optional
+   inline/prior-aliased cell and `vertexCount` 12-byte vertices),
+   `cullGroupCount` 32-bit indices, and `reflectionProbeCount` bytes.
+10. `lightmapCount` eight-byte lightmap pairs, resolving primary then
+    secondary `GfxImagePtr` for every record.
+11. Embedded 56-byte `GfxLightGrid`: row-start words derived from the selected
+    row-axis min/max range, raw row bytes, four-byte entries, then 168-byte
+    color records.
+12. In block 1, primary and then secondary runtime `GfxTexture` arrays, each
+    `lightmapCount` elements and left neutral by the database loader.
+13. `modelCount` 56-byte `GfxBrushModel` records.
+14. `materialMemoryCount` eight-byte `MaterialMemory` records, resolving one
+    `MaterialHandle` per record.
+15. Embedded eight-byte `GfxWorldVertexData`: `vertexCount` 44-byte canonical
+    vertices followed by the runtime vertex-buffer field.  The D3D upload side
+    effect is omitted; the runtime field stays null.
+16. Embedded eight-byte `GfxWorldVertexLayerData`: `vertexLayerDataSize` raw
+    bytes followed by the runtime layer-buffer field, also left null.
+17. Embedded 96-byte `sunflare_t`, resolving sprite material then flare
+    material.
+18. `outdoorImage` through `Load_GfxImagePtr`.
+19. In block 1, `cellCount * ceil(cellCount / 32)` 32-bit cell-caster words.
+20. In block 1, `dynEntClientCount[0]` six-byte scene dynamic-model records.
+21. In block 1, `dynEntClientCount[1]` four-byte scene dynamic-brush records.
+22. In block 1, `(primaryLightCount - (sunPrimaryLightIndex + 1)) * 4096`
+    32-bit primary-light/entity shadow-visibility words.
+23. In block 1, model and then brush dynamic-entity shadow words, each
+    `dynEntClientCount[k] * nonSunPrimaryLightCount` 32-bit values.
+24. In block 1, `dynEntClientCount[0]` non-sun-primary-light bytes.
+25. `primaryLightCount` 12-byte `GfxShadowGeometry` records; each loads
+    `surfaceCount` and then `smodelCount` 16-bit index arrays.
+26. `primaryLightCount` eight-byte `GfxLightRegion` records; each loads
+    `hullCount` 80-byte hulls and then each hull's `axisCount` 20-byte axes.
+27. Embedded 104-byte `GfxWorldDpvsStatic`, in order: three block-1
+    `smodelCount` visibility byte arrays; three block-1 `staticSurfaceCount`
+    visibility byte arrays; block-1 `2 * smodelVisDataCount` 16-byte LOD
+    records; `staticSurfaceCountNoDecal + staticSurfaceCount` sorted 16-bit
+    surface indices; `smodelCount` 28-byte instances; `surfaceCount` 48-byte
+    `GfxSurface` records with one material handle each; `cullGroupCount`
+    32-byte cull groups; `smodelCount` 76-byte draw instances with one XModel
+    pointer each; block-1 `staticSurfaceCount` eight-byte draw-surface keys;
+    and block-1 `surfaceVisDataCount` 16-byte sun-shadow bit records.
+28. Embedded 48-byte `GfxWorldDpvsDynamic`: block-1 cell-bit words for model
+    then brush dynamic entities (`cellCount * dynEntClientWordCount[k]`), then
+    six block-1 visibility arrays in native order
+    `[model][0], [brush][0], [model][1], [brush][1], [model][2], [brush][2]`,
+    each `32 * dynEntClientWordCount[k]` bytes.
+29. Pop block 4, register the canonical `GfxWorld`, publish the top-level table
+    alias and optional insertion cell atomically, then pop block 0.
+
+Every count-derived byte length above requires checked multiplication and
+addition before stream planning or allocation.  A nested unsupported token is
+reported at its named child operation and cannot be treated as absent.  Block-1
+records are runtime allocations/zero-fill and do not consume compressed input;
+all serialized CPU data remains owned by the canonical world publication.
