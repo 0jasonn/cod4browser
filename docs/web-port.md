@@ -1660,11 +1660,24 @@ mixing, decoding, or browser audio runtime behavior is implemented.
 
 The first-WeaponDef stop is retired as a traversal boundary. The owned
 common-to-Killhouse run now continues in serialized order, completes assets
-0-704, and stops before asset 705, type 17 (`lightdef`). The supported prefix
-publishes 152 technique sets, 320 XModels, 60 FX effects, 146 XAnimParts, ten
-WeaponDefs, 21 RawFiles, and one canonical `ComWorld`. Asset 704 is
-`maps/killhouse.d3dbsp` with 24 canonical `ComPrimaryLight` records.
-`GfxWorld` is not sought directly; `lightdef` is the next family inventory.
+0-771, and stops before asset 772, type 16 (`gfx_map`/`GfxWorld`). The supported
+prefix publishes 218 technique sets, 320 XModels, 60 FX effects, 146
+XAnimParts, ten WeaponDefs, 21 RawFiles, one canonical `ComWorld`, and one
+canonical `GfxLightDef`. Asset 704 is `maps/killhouse.d3dbsp` with 24 canonical
+`ComPrimaryLight` records. Asset 705 is `light_point_linear` with a canonical
+`GfxImage*` attenuation dependency; assets 706-771 are technique sets.
+The natural boundary has block-0 high-water 2,300, block-4 cursor 11,121,808,
+inflated cursor 36,119,878, 1,840 registered assets, and 1,944 defined aliases.
+`GfxWorld` was neither sought directly nor entered.
+
+Native `Load_GfxLightDefPtr`, `Load_GfxLightDef`, and `Load_GfxLightImage` are
+implemented in the dedicated `web_retail_load_lightdef.*` family. It preserves
+the four-byte root envelope, 16-byte canonical body, block-4 XString order,
+embedded eight-byte light-image record, image pointer aliases and insertion
+cells, and final-only parent publication. A reusable database-side image family
+publishes real canonical `GfxImage` metadata/name objects with a null texture
+slot. IWI decoding and WebGL resource creation remain renderer/backend work;
+the LightDef loader performs no GPU upload or light-runtime behavior.
 
 Native `Load_XString` converts any nonzero non-inline token to an address, so a
 valid pointer need not equal the first byte of an indexed string. Weapon

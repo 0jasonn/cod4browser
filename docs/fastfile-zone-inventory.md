@@ -1708,8 +1708,38 @@ phase. Synthetic tests cover null, `-1`, `-2`, prior root aliases, zero and
 multiple lights, exact and interior XString aliases, malformed counts,
 truncation, string ceilings, and atomic failure.
 
-The owned ordered run now completes asset 704 as `maps/killhouse.d3dbsp` with
-24 primary lights. Its diagnostic boundary is inflated offset 35,674,922,
-block-0 high-water 2,300, block-4 cursor 10,685,947, and 1,772 registered
-assets with 1,875 defined aliases. Traversal stops naturally before asset 705,
-type 17 (`lightdef`). It has not sought to or entered `GfxWorld` asset 772.
+The owned ordered run completes asset 704 as `maps/killhouse.d3dbsp` with 24
+primary lights, then publishes asset 705 as canonical `GfxLightDef`
+`light_point_linear`. Its name occupies block-4 offset 10,685,928 and its
+attenuation image resolves through canonical image identity 1,773; publication
+finishes at inflated offset 35,674,990. Assets 706-771 are the remaining 66
+already-supported technique sets. Traversal then stops naturally before asset
+772, type 16 (`GfxWorld`), with block-0 high-water 2,300, block-4 cursor
+11,121,808, inflated cursor 36,119,878, 1,840 registered assets, and 1,944
+defined aliases. It has not sought to or entered the GfxWorld body.
+
+## Canonical `GfxLightDef` boundary
+
+Native `Load_GfxLightDefPtr` consumes the already-staged four-byte XAsset root
+cell, pushes block 0, and distinguishes null, `-1`, `-2`, and prior-alias
+forms. Inline/shared roots allocate an aligned 16-byte `GfxLightDef`; `-2`
+also creates the generated insertion cell. `Load_GfxLightDef` reads that body,
+pushes block 4, resolves `name` through `Load_XString`, and calls
+`Load_GfxLightImage` on the embedded eight-byte record. Because the embedded
+record was part of the root body, that call does not consume a second copy; it
+loads only the contained `GfxImage*` dependency. The root loader calls
+`Load_LightDefAsset` only after the image graph succeeds, then fills the
+insertion cell.
+
+`web_retail_load_lightdef.*` mirrors this order with `RetailLoadContext`.
+`web_retail_load_image.*` provides the reusable canonical dependency path for
+null, inline/shared, and prior-alias images. Existing material-image publication
+now exposes the same canonical `GfxImage*` identity. The canonical image's
+texture union is kept null; serialized load-def/resource metadata remains in
+the checked traversal record, and IWI decode plus WebGL upload remain owned by
+the renderer/backend.
+
+Synthetic coverage includes null roots, `-1`, `-2`, root and insertion aliases,
+direct/prior/interior LightDef XStrings, null and non-null attenuation images,
+inline/shared/prior image references, dependency failure, malformed image
+metadata, truncation, one-byte step budgets, and no-result atomic failure.

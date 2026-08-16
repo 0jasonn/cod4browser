@@ -2123,7 +2123,7 @@ void __cdecl Load_GfxImageLoadDef(bool atStreamStart)
 {
     if (!atStreamStart)
         MyAssertHandler("c:\\trees\\cod3\\src\\database\\../gfx_d3d/r_image_load_db.h", 2614, 0, "%s", "atStreamStart");
-    iassert(OFFSET_TO_GfxImageLoadDef_DATA == 16);
+    iassert(GFX_IMAGE_LOAD_DEF_DATA_OFFSET == 16u);
     Load_Stream(1, (unsigned char*)varGfxImageLoadDef, 16);
     if (DB_GetStreamPos() != varGfxImageLoadDef->data)
         MyAssertHandler(

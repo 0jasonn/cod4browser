@@ -36,6 +36,8 @@ add_executable(KisakCOD-web
     "${SRC_DIR}/web/web_retail_fastfile_census.cpp"
     "${SRC_DIR}/web/web_retail_load_clipmap.cpp"
     "${SRC_DIR}/web/web_retail_load_comworld.cpp"
+    "${SRC_DIR}/web/web_retail_load_image.cpp"
+    "${SRC_DIR}/web/web_retail_load_lightdef.cpp"
     "${SRC_DIR}/web/web_retail_load_weapon.cpp"
     "${SRC_DIR}/web/web_shader_compatibility.cpp"
     "${SRC_DIR}/web/web_sound_alias_catalog.cpp"

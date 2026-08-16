@@ -2,6 +2,7 @@
 #include <web/web_retail_load_context.h>
 #include <web/web_retail_load_clipmap.h>
 #include <web/web_retail_load_comworld.h>
+#include <web/web_retail_load_lightdef.h>
 #include <web/web_retail_load_weapon.h>
 
 #include <web/web_fastfile_source_stream.h>
@@ -109,6 +110,7 @@ constexpr std::uint32_t ASSET_TYPE_SOUND = 7u;
 constexpr std::uint32_t ASSET_TYPE_CLIPMAP = 10u;
 constexpr std::uint32_t ASSET_TYPE_CLIPMAP_PVS = 11u;
 constexpr std::uint32_t ASSET_TYPE_GFX_WORLD = 16u;
+constexpr std::uint32_t ASSET_TYPE_LIGHT_DEF = 17u;
 constexpr std::uint32_t ASSET_TYPE_MENU_LIST = 20u;
 constexpr std::uint32_t ASSET_TYPE_LOCALIZE = 22u;
 constexpr std::uint32_t ASSET_TYPE_WEAPON = 23u;
@@ -131,6 +133,8 @@ static_assert(ASSET_TYPE_IMAGE ==
     static_cast<std::uint32_t>(::ASSET_TYPE_IMAGE));
 static_assert(ASSET_TYPE_GFX_WORLD ==
     static_cast<std::uint32_t>(::ASSET_TYPE_GFXWORLD));
+static_assert(ASSET_TYPE_LIGHT_DEF ==
+    static_cast<std::uint32_t>(::ASSET_TYPE_LIGHT_DEF));
 static_assert(ASSET_TYPE_SOUND ==
     static_cast<std::uint32_t>(::ASSET_TYPE_SOUND));
 static_assert(ASSET_TYPE_CLIPMAP ==
@@ -483,6 +487,7 @@ bool ValidLimits(const RetailCensusLimits &limits) noexcept
         limits.maxClipMapArrayElements != 0u &&
         limits.maxClipMapPayloadBytes != 0u &&
         limits.maxRetainedClipMapBytes != 0u &&
+        limits.maxLightDefs != 0u && limits.maxLightDefNameBytes != 0u &&
         limits.maxSemanticTraceEntries != 0u;
 }
 
@@ -676,6 +681,12 @@ const char *RetailCensusErrorString(RetailCensusError error) noexcept
     case RetailCensusError::ComWorldStringBytesLimit: return "ComWorld strings exceed aggregate limit";
     case RetailCensusError::ComWorldPayloadLimit: return "ComWorld payload exceeds limit";
     case RetailCensusError::ComWorldAliasInvalid: return "invalid ComWorld alias";
+    case RetailCensusError::LightDefLayoutUnsupported: return "unsupported GfxLightDef layout";
+    case RetailCensusError::LightDefCollectionLimit: return "GfxLightDef collection exceeds limit";
+    case RetailCensusError::LightDefNameInvalid: return "invalid GfxLightDef name";
+    case RetailCensusError::LightDefNameTooLong: return "GfxLightDef name exceeds limit";
+    case RetailCensusError::LightDefImageInvalid: return "GfxLightDef image dependency is not published";
+    case RetailCensusError::LightDefAliasInvalid: return "invalid GfxLightDef alias";
     case RetailCensusError::PostXModelAssetUnsupported:
         return "asset after the first XModel is not an inline technique set";
     case RetailCensusError::SemanticTraceLimit:
@@ -832,6 +843,7 @@ const char *RetailCensusStageString(RetailCensusStage stage) noexcept
     case RetailCensusStage::WorldSoundAliasPublish: return "world-sound-alias-publish";
     case RetailCensusStage::WorldClipMap: return "world-clipmap";
     case RetailCensusStage::WorldComWorld: return "world-comworld";
+    case RetailCensusStage::WorldLightDef: return "world-lightdef";
     case RetailCensusStage::AssetBoundary: return "asset-boundary";
     case RetailCensusStage::Failed: return "failed";
     }
@@ -1035,6 +1047,7 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
     std::uint64_t retainedSoundBytes = 0u;
     RetailClipMapLoadFamily clipMapLoader;
     RetailComWorldLoadFamily comWorldLoader;
+    RetailLightDefLoadFamily lightDefLoader;
     ZoneSpan worldMenuStringSpan{};
     std::uint32_t worldFxImpactAssetIndex = 0u;
     std::uint32_t worldFxImpactNameReference = 0u;
@@ -2484,6 +2497,18 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
         else if (type == ASSET_TYPE_COMWORLD)
         {
             for (RetailPublishedComWorld &entry : result.worldComWorlds)
+                if (entry.published && entry.identity == identity && entry.asset)
+                    return entry.asset.get();
+        }
+        else if (type == ASSET_TYPE_IMAGE)
+        {
+            for (RetailPublishedGfxImage &entry : result.worldImages)
+                if (entry.published && entry.identity == identity && entry.asset)
+                    return entry.asset.get();
+        }
+        else if (type == ASSET_TYPE_LIGHT_DEF)
+        {
+            for (RetailPublishedLightDef &entry : result.worldLightDefs)
                 if (entry.published && entry.identity == identity && entry.asset)
                     return entry.asset.get();
         }
@@ -4182,6 +4207,16 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
                     nextStage = RetailCensusStage::WorldComWorld;
                     return RetailCensusError::None;
                 }
+                if (result.nextBodyType == ASSET_TYPE_LIGHT_DEF)
+                {
+                    lightDefLoader.Reset();
+                    if (const RetailCensusError error = lightDefLoader.Begin(
+                            *this, index, result.nextBodyReference);
+                        error != RetailCensusError::None)
+                        return error;
+                    nextStage = RetailCensusStage::WorldLightDef;
+                    return RetailCensusError::None;
+                }
                 if (result.nextBodyType == ASSET_TYPE_SOUND &&
                     (result.nextBodyReference == INLINE_POINTER ||
                      result.nextBodyReference == SHARED_POINTER))
@@ -4722,6 +4757,12 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
         };
         auto findPublishedWorldImage = [&](std::uint32_t identity) noexcept
             -> const RetailXModelImage * {
+            const auto canonical = std::find_if(
+                result.worldImages.begin(), result.worldImages.end(),
+                [&](const RetailPublishedGfxImage &entry) {
+                    return entry.identity == identity && entry.published;
+                });
+            if (canonical != result.worldImages.end()) return &*canonical;
             for (const RetailXModelMaterial &material : result.worldMaterials)
             {
                 const auto image = std::find_if(
@@ -5000,8 +5041,13 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
                     }
                     catch (...) { return RetailCensusError::AllocationFailed; }
                     RetailXModelImage &image = material.images.back();
+                    image.ownerAssetIndex = result.nextBodyIndex;
+                    image.serializedReference = token;
                     image.textureIndex = worldTextureIndex;
                     image.headerBlock0Offset = span.offset;
+                    try { image.asset = std::make_shared<GfxImage>(); }
+                    catch (...) { return RetailCensusError::AllocationFailed; }
+                    std::memset(image.asset.get(), 0, sizeof(GfxImage));
                     if (worldImageHasInsertAlias)
                     {
                         image.assetInsertPointerBlock4Offset =
@@ -8855,6 +8901,41 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
                 if (complete) return RetailCensusError::None;
                 continue;
             }
+            if (stage == RetailCensusStage::WorldLightDef)
+            {
+                if (lightDefLoader.Progress() ==
+                    RetailLightDefLoadProgress::Running)
+                {
+                    if (const RetailCensusError error =
+                            lightDefLoader.Step(*this);
+                        error != RetailCensusError::None)
+                        return error;
+                    if (lightDefLoader.Progress() ==
+                        RetailLightDefLoadProgress::Running)
+                        return RetailCensusError::None;
+                }
+                if (result.worldLightDefs.empty())
+                    return RetailCensusError::LightDefLayoutUnsupported;
+                const RetailPublishedLightDef &entry =
+                    result.worldLightDefs.back();
+                ++result.completedAssetCount;
+                result.block0HighWaterAtBoundary = arenas.HighWater(0u);
+                result.block4CursorAtBoundary = arenas.Cursor(4u);
+                result.worldRegistryAliasCount = registry.AliasCount();
+                result.worldRegistryDefinedAliasCount =
+                    registry.DefinedAliasCount();
+                result.registryAssetCount = registry.AssetCount();
+                result.registryAliasCount = registry.AliasCount();
+                result.registryDefinedAliasCount =
+                    registry.DefinedAliasCount();
+                if (const RetailCensusError error =
+                        dispatchSupportedWorldAsset(
+                            entry.assetIndex + 1u, stage);
+                    error != RetailCensusError::None)
+                    return error;
+                if (complete) return RetailCensusError::None;
+                continue;
+            }
             if (stage == RetailCensusStage::WorldXAnimParts)
             {
                 const int visit = visitRecord(XANIM_PARTS_BYTES);
@@ -11010,6 +11091,21 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
                 {
                     return RetailCensusError::ImageLayoutUnsupported;
                 }
+                GfxImage &canonical = *image.asset;
+                canonical.mapType = static_cast<MapType>(image.mapType);
+                canonical.texture.basemap = nullptr;
+                canonical.picmip.platform[0u] = record[8u];
+                canonical.picmip.platform[1u] = record[9u];
+                canonical.noPicmip = record[10u] != 0u;
+                canonical.semantic = record[11u];
+                canonical.track = record[12u];
+                canonical.cardMemory.platform[0u] = ReadS32(record + 16u);
+                canonical.cardMemory.platform[1u] = ReadS32(record + 20u);
+                canonical.width = image.width;
+                canonical.height = image.height;
+                canonical.depth = image.depth;
+                canonical.category = record[30u];
+                canonical.delayLoadPixels = record[31u] != 0u;
                 cursor += GFX_IMAGE_BYTES;
                 ++report.recordsProcessed;
                 if (const RetailCensusError error = Push(4u);
@@ -11062,8 +11158,10 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
                     }
                     else
                     {
-                        image.name = *name;
+                        image.canonicalName = std::move(name);
+                        image.name = *image.canonicalName;
                         image.nameBlock4Offset = offset;
+                        image.asset->name = image.canonicalName->c_str();
                         if (image.mapType == 0u && !image.name.starts_with(','))
                             return RetailCensusError::ImageNameInvalid;
                     }
@@ -11102,10 +11200,13 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
                     image.name.assign(
                         reinterpret_cast<const char *>(inflated.data() + cursor),
                         bytes - 1u);
+                    image.canonicalName =
+                        std::make_shared<std::string>(image.name);
                 }
                 catch (...) { return RetailCensusError::AllocationFailed; }
                 if (!ValidPublishedName(image.name))
                     return RetailCensusError::ImageNameInvalid;
+                image.asset->name = image.canonicalName->c_str();
                 // Map-type zero names are engine-owned placeholders. Retail
                 // data uses both ",$..." built-ins and comma-prefixed names
                 // such as ",spotlight_lensflare"; neither has an inline loaddef.
@@ -11140,6 +11241,10 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
                             error != RetailCensusError::None) return error;
                     }
                     image.published = true;
+                    image.boundaryInflatedOffset =
+                        static_cast<std::uint32_t>(cursor);
+                    try { result.worldImages.push_back(image); }
+                    catch (...) { return RetailCensusError::AllocationFailed; }
                 }
                 if (const RetailCensusError error = Pop();
                     error != RetailCensusError::None) return error;
@@ -11239,6 +11344,10 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
                             error != RetailCensusError::None) return error;
                     }
                     image.published = true;
+                    image.boundaryInflatedOffset =
+                        static_cast<std::uint32_t>(cursor);
+                    try { result.worldImages.push_back(image); }
+                    catch (...) { return RetailCensusError::AllocationFailed; }
                 }
                 if (const RetailCensusError error = Pop();
                     error != RetailCensusError::None) return error;

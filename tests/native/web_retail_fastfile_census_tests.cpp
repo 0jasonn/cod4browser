@@ -632,6 +632,150 @@ std::vector<std::uint8_t> BuildComWorldZoneInflated(
     return bytes;
 }
 
+std::vector<std::uint8_t> BuildLightDefZoneInflated(
+    std::uint32_t rootReference = 0xffffffffu,
+    bool priorRootAlias = false,
+    std::uint32_t imageReference = 0u,
+    bool malformedImage = false)
+{
+    std::vector<std::uint8_t> bytes;
+    PutU32(bytes, 4096u);
+    PutU32(bytes, 0u);
+    for (const std::uint32_t block :
+         std::array<std::uint32_t, 9>{{4096u, 0u, 0u, 0u, 4096u,
+                                      0u, 0u, 0u, 0u}})
+        PutU32(bytes, block);
+    PutU32(bytes, 0u);
+    PutU32(bytes, 0u);
+    const std::uint32_t assetCount = priorRootAlias ? 3u : 2u;
+    PutU32(bytes, assetCount);
+    PutU32(bytes, 0xffffffffu);
+    PutU32(bytes, 17u);
+    PutU32(bytes, rootReference);
+    if (priorRootAlias)
+    {
+        PutU32(bytes, 17u);
+        PutU32(bytes, Block4Token(assetCount * 8u));
+    }
+    PutU32(bytes, 32u);
+    PutU32(bytes, 0u);
+    if (rootReference == 0u) return bytes;
+
+    std::vector<std::uint8_t> lightDef(16u, 0u);
+    SetU32(lightDef, 0u, 0xffffffffu);
+    SetU32(lightDef, 4u, imageReference);
+    lightDef[8u] = 7u;
+    SetU32(lightDef, 12u, 42u);
+    bytes.insert(bytes.end(), lightDef.begin(), lightDef.end());
+    AppendString(bytes, "light/web_attenuation");
+
+    if (imageReference == 0xffffffffu || imageReference == 0xfffffffeu)
+    {
+        std::vector<std::uint8_t> image(36u, 0u);
+        SetU32(image, 0u, 3u);
+        SetU32(image, 4u, 0xffffffffu);
+        PutU16At(image, 24u, 4u);
+        PutU16At(image, 26u, 4u);
+        PutU16At(image, 28u, 1u);
+        SetU32(image, 32u, 0xffffffffu);
+        bytes.insert(bytes.end(), image.begin(), image.end());
+        AppendString(bytes, "web/light_attenuation_image");
+        bytes.push_back(1u);
+        bytes.push_back(2u);
+        PutU16(bytes, malformedImage ? 8u : 4u);
+        PutU16(bytes, 4u);
+        PutU16(bytes, 1u);
+        PutU32(bytes, 0x31545844u);
+        PutU32(bytes, 0u);
+    }
+    return bytes;
+}
+
+std::vector<std::uint8_t> BuildLightDefStringAliasZoneInflated()
+{
+    std::vector<std::uint8_t> bytes;
+    PutU32(bytes, 4096u);
+    PutU32(bytes, 0u);
+    for (const std::uint32_t block :
+         std::array<std::uint32_t, 9>{{4096u, 0u, 0u, 0u, 4096u,
+                                      0u, 0u, 0u, 0u}})
+        PutU32(bytes, block);
+    PutU32(bytes, 0u);
+    PutU32(bytes, 0u);
+    PutU32(bytes, 4u);
+    PutU32(bytes, 0xffffffffu);
+    for (std::uint32_t index = 0u; index < 3u; ++index)
+    {
+        PutU32(bytes, 17u);
+        PutU32(bytes, 0xffffffffu);
+    }
+    PutU32(bytes, 32u);
+    PutU32(bytes, 0u);
+
+    constexpr std::uint32_t firstNameOffset = 32u;
+    const auto appendBody = [&](std::uint32_t nameToken) {
+        std::vector<std::uint8_t> lightDef(16u, 0u);
+        SetU32(lightDef, 0u, nameToken);
+        bytes.insert(bytes.end(), lightDef.begin(), lightDef.end());
+    };
+    appendBody(0xffffffffu);
+    AppendString(bytes, "light/web_name");
+    appendBody(Block4Token(firstNameOffset));
+    appendBody(Block4Token(firstNameOffset + 6u));
+    return bytes;
+}
+
+std::vector<std::uint8_t> BuildLightDefImageAliasZoneInflated()
+{
+    std::vector<std::uint8_t> bytes;
+    PutU32(bytes, 4096u);
+    PutU32(bytes, 0u);
+    for (const std::uint32_t block :
+         std::array<std::uint32_t, 9>{{4096u, 0u, 0u, 0u, 4096u,
+                                      0u, 0u, 0u, 0u}})
+        PutU32(bytes, block);
+    PutU32(bytes, 0u);
+    PutU32(bytes, 0u);
+    PutU32(bytes, 3u);
+    PutU32(bytes, 0xffffffffu);
+    PutU32(bytes, 17u);
+    PutU32(bytes, 0xffffffffu);
+    PutU32(bytes, 17u);
+    PutU32(bytes, 0xffffffffu);
+    PutU32(bytes, 32u);
+    PutU32(bytes, 0u);
+
+    std::vector<std::uint8_t> first(16u, 0u);
+    SetU32(first, 0u, 0xffffffffu);
+    SetU32(first, 4u, 0xfffffffeu);
+    bytes.insert(bytes.end(), first.begin(), first.end());
+    AppendString(bytes, "light/web_attenuation");
+    std::vector<std::uint8_t> image(36u, 0u);
+    SetU32(image, 0u, 3u);
+    SetU32(image, 4u, 0xffffffffu);
+    PutU16At(image, 24u, 4u);
+    PutU16At(image, 26u, 4u);
+    PutU16At(image, 28u, 1u);
+    SetU32(image, 32u, 0xffffffffu);
+    bytes.insert(bytes.end(), image.begin(), image.end());
+    AppendString(bytes, "web/light_attenuation_image");
+    bytes.push_back(1u);
+    bytes.push_back(2u);
+    PutU16(bytes, 4u);
+    PutU16(bytes, 4u);
+    PutU16(bytes, 1u);
+    PutU32(bytes, 0x31545844u);
+    PutU32(bytes, 0u);
+
+    std::vector<std::uint8_t> second(16u, 0u);
+    SetU32(second, 0u, 0xffffffffu);
+    // Table bytes [0,24), first name [24,46), image insertion cell [48,52).
+    SetU32(second, 4u, Block4Token(48u));
+    bytes.insert(bytes.end(), second.begin(), second.end());
+    AppendString(bytes, "light/web_attenuation_alias");
+    return bytes;
+}
+
 std::vector<std::uint8_t> BuildWorldTechniquePrefixInflated(
     bool firstDependency = false,
     bool secondDependency = false,
@@ -2099,6 +2243,140 @@ void TestCanonicalComWorldLoader()
         "ComPrimaryLight defName XStrings enforce their explicit byte ceiling before publication");
 }
 
+void TestCanonicalLightDefLoader()
+{
+    using namespace kisak::fastfile;
+
+    const RetailFastfileCensus nullRoot = Run(
+        BuildFile(BuildLightDefZoneInflated(0u)),
+        5u, 1u, 1u, RetailCensusMode::WorldAssetLoader);
+    Require(nullRoot.completedAssetCount == 1u &&
+            nullRoot.nextBodyIndex == 1u && nullRoot.nextBodyType == 32u &&
+            nullRoot.worldLightDefs.size() == 1u &&
+            nullRoot.worldLightDefs[0u].nullRoot &&
+            !nullRoot.worldLightDefs[0u].asset &&
+            !nullRoot.worldLightDefs[0u].published,
+        "Load_GfxLightDefPtr preserves a null four-byte root cell");
+
+    const RetailFastfileCensus direct = Run(
+        BuildFile(BuildLightDefZoneInflated()),
+        5u, 1u, 1u, RetailCensusMode::WorldAssetLoader);
+    const RetailPublishedLightDef &light = direct.worldLightDefs.front();
+    Require(light.published && light.asset && light.storage &&
+            light.serializedReference == 0xffffffffu &&
+            light.headerBlock0Offset == 0u &&
+            std::string_view(light.asset->name) ==
+                "light/web_attenuation" &&
+            light.asset->attenuation.image == nullptr &&
+            light.asset->attenuation.samplerState == 7u &&
+            light.asset->lmapLookupStart == 42 && light.identity != 0u,
+        "Load_GfxLightDef(-1) publishes the canonical 16-byte body after its null image graph");
+
+    const RetailFastfileCensus inserted = Run(
+        BuildFile(BuildLightDefZoneInflated(
+            0xfffffffeu, true)),
+        5u, 1u, 1u, RetailCensusMode::WorldAssetLoader);
+    Require(inserted.worldLightDefs.size() == 2u &&
+            inserted.worldLightDefs[0u].published &&
+            inserted.worldLightDefs[0u].insertPointerBlock4Offset == 24u &&
+            inserted.worldLightDefs[1u].pointerAlias &&
+            inserted.worldLightDefs[1u].published &&
+            inserted.worldLightDefs[1u].identity ==
+                inserted.worldLightDefs[0u].identity &&
+            inserted.worldLightDefs[1u].asset.get() ==
+                inserted.worldLightDefs[0u].asset.get() &&
+            inserted.completedAssetCount == 2u,
+        "Load_GfxLightDefPtr(-2) fills its insertion cell and later root aliases retain canonical identity");
+
+    const RetailFastfileCensus strings = Run(
+        BuildFile(BuildLightDefStringAliasZoneInflated()),
+        5u, 1u, 1u, RetailCensusMode::WorldAssetLoader);
+    Require(strings.worldLightDefs.size() == 3u &&
+            std::string_view(strings.worldLightDefs[0u].asset->name) ==
+                "light/web_name" &&
+            strings.worldLightDefs[1u].asset->name ==
+                strings.worldLightDefs[0u].asset->name &&
+            std::string_view(strings.worldLightDefs[2u].asset->name) ==
+                "web_name" &&
+            strings.worldLightDefs[1u].nameBlock4Offset ==
+                strings.worldLightDefs[0u].nameBlock4Offset &&
+            strings.worldLightDefs[2u].nameBlock4Offset ==
+                strings.worldLightDefs[0u].nameBlock4Offset + 6u,
+        "GfxLightDef XStrings preserve direct, prior, and interior block-4 aliases");
+
+    const RetailFastfileCensus inlineImage = Run(
+        BuildFile(BuildLightDefZoneInflated(
+            0xffffffffu, false, 0xffffffffu)),
+        5u, 1u, 1u, RetailCensusMode::WorldAssetLoader);
+    const RetailPublishedLightDef &imaged =
+        inlineImage.worldLightDefs.front();
+    Require(imaged.published && imaged.asset &&
+            imaged.asset->attenuation.image &&
+            imaged.attenuationImageIdentity != 0u &&
+            inlineImage.worldImages.size() == 1u &&
+            inlineImage.worldImages[0u].published &&
+            inlineImage.worldImages[0u].asset.get() ==
+                imaged.asset->attenuation.image &&
+            inlineImage.worldImages[0u].asset->texture.basemap == nullptr &&
+            inlineImage.worldImages[0u].asset->width == 4u &&
+            std::string_view(inlineImage.worldImages[0u].asset->name) ==
+                "web/light_attenuation_image",
+        "non-null attenuation loads a canonical GfxImage dependency without a renderer texture handle");
+
+    const RetailFastfileCensus imageAlias = Run(
+        BuildFile(BuildLightDefImageAliasZoneInflated()),
+        5u, 1u, 1u, RetailCensusMode::WorldAssetLoader);
+    Require(imageAlias.worldLightDefs.size() == 2u &&
+            imageAlias.worldImages.size() == 2u &&
+            imageAlias.worldImages[0u].published &&
+            imageAlias.worldImages[0u].assetInsertPointerBlock4Offset == 48u &&
+            imageAlias.worldImages[1u].pointerAlias &&
+            imageAlias.worldImages[1u].identity ==
+                imageAlias.worldImages[0u].identity &&
+            imageAlias.worldLightDefs[0u].asset->attenuation.image ==
+                imageAlias.worldLightDefs[1u].asset->attenuation.image,
+        "Load_GfxLightImage resolves a prior image insertion alias through the canonical image registry");
+
+    const auto expectFailure = [](std::vector<std::uint8_t> inflated,
+                                  RetailCensusError expected,
+                                  const char *message) {
+        RetailFastfileCensusJob job;
+        const auto file = BuildFile(std::move(inflated));
+        Require(job.BeginStreaming(RetailCensusMode::WorldAssetLoader) ==
+                RetailCensusError::None &&
+                job.FeedSource(file, true) == RetailCensusError::None,
+            "LightDef negative fixture starts");
+        for (std::uint32_t step = 0u; step < 10000u &&
+             job.Progress() == RetailCensusProgress::Running; ++step)
+            (void)job.Step({5u, 1u});
+        RetailFastfileCensus unavailable;
+        unavailable.assetCount = 99u;
+        if (job.Progress() != RetailCensusProgress::Failed ||
+            job.Failure() != expected)
+            std::cerr << "LightDef negative stopped at "
+                      << RetailCensusStageString(job.Stage()) << ": "
+                      << RetailCensusErrorString(job.Failure()) << '\n';
+        Require(job.Progress() == RetailCensusProgress::Failed &&
+                job.Failure() == expected &&
+                !job.TakeResult(unavailable) && unavailable.assetCount == 99u,
+            message);
+    };
+
+    expectFailure(BuildLightDefZoneInflated(
+            0xffffffffu, false, Block4Token(1000u)),
+        RetailCensusError::LightDefImageInvalid,
+        "an unresolved attenuation image fails before LightDef publication");
+    expectFailure(BuildLightDefZoneInflated(
+            0xffffffffu, false, 0xffffffffu, true),
+        RetailCensusError::ImageLayoutUnsupported,
+        "a malformed canonical image dependency fails the LightDef atomically");
+    std::vector<std::uint8_t> truncated = BuildLightDefZoneInflated(
+        0xffffffffu, false, 0xffffffffu);
+    truncated.pop_back();
+    expectFailure(std::move(truncated), RetailCensusError::RecordTruncated,
+        "truncated LightDef dependency data exposes no partial result");
+}
+
 void TestWorldTechniqueSetPrefixBoundary()
 {
     using namespace kisak::fastfile;
@@ -2288,6 +2566,13 @@ void TestWorldXModelDependenciesBoundary()
         model.materials[0].images[0].name == "synthetic_xmodel_color" &&
         model.materials[0].images[0].loadDefTraversed &&
         model.materials[0].images[0].published &&
+        model.materials[0].images[0].asset &&
+        model.materials[0].images[0].asset->texture.basemap == nullptr &&
+        result.worldImages.size() == 1u &&
+        result.worldImages[0u].asset.get() ==
+            model.materials[0].images[0].asset.get() &&
+        std::string_view(result.worldImages[0u].asset->name) ==
+            "synthetic_xmodel_color" &&
         model.materials[1].name == "web/material_b" &&
         model.materials[1].images.empty() &&
         model.materialIdentities ==
@@ -3990,6 +4275,8 @@ void TestOwnedWorldSurfaceIfRequested(
                   << ",weapons=" << worldResult.worldWeapons.size()
                   << ",rawfiles=" << worldResult.worldRawFiles.size()
                   << ",comworlds=" << worldResult.worldComWorlds.size()
+                  << ",images=" << worldResult.worldImages.size()
+                  << ",lightdefs=" << worldResult.worldLightDefs.size()
                   << "}\n";
         Require(worldResult.worldComWorlds.size() == 1u &&
                 worldResult.worldComWorlds.front().asset,
@@ -4006,22 +4293,71 @@ void TestOwnedWorldSurfaceIfRequested(
                   << " cursor4=" << worldResult.block4CursorAtBoundary
                   << " registry=" << worldResult.registryAssetCount << '/'
                   << worldResult.registryDefinedAliasCount << '\n';
-        Require(worldResult.completedAssetCount == 705u &&
-                worldResult.nextBodyIndex == 705u &&
-                worldResult.nextBodyType == 17u &&
-                worldResult.worldTechniqueSets.size() == 152u &&
+        Require(!worldResult.worldLightDefs.empty(),
+            "Killhouse traversal retains its pre-world LightDef run");
+        const RetailPublishedLightDef &firstLightDef =
+            worldResult.worldLightDefs.front();
+        const RetailPublishedLightDef &lastLightDef =
+            worldResult.worldLightDefs.back();
+        std::cerr << "Killhouse LightDefs: first="
+                  << firstLightDef.assetIndex << ':' << firstLightDef.asset->name
+                  << " image=" << firstLightDef.attenuationImageIdentity
+                  << " block0=" << firstLightDef.headerBlock0Offset
+                  << " block4-name=" << firstLightDef.nameBlock4Offset
+                  << " boundary=" << firstLightDef.boundaryInflatedOffset
+                  << " last=" << lastLightDef.assetIndex << ':'
+                  << lastLightDef.asset->name
+                  << " image=" << lastLightDef.attenuationImageIdentity
+                  << " block0=" << lastLightDef.headerBlock0Offset
+                  << " block4-name=" << lastLightDef.nameBlock4Offset
+                  << " boundary=" << lastLightDef.boundaryInflatedOffset
+                  << " preworld-highwater0="
+                  << worldResult.block0HighWaterAtBoundary
+                  << " preworld-cursor4="
+                  << worldResult.block4CursorAtBoundary
+                  << " preworld-registry="
+                  << worldResult.registryAssetCount << '/'
+                  << worldResult.registryDefinedAliasCount
+                  << " boundary-inflated="
+                  << (worldResult.semanticTrace.empty()
+                          ? UINT32_MAX
+                          : worldResult.semanticTrace.back().inflatedOffset)
+                  << " trace=" << worldResult.semanticTrace.size() << '\n';
+        Require(worldResult.completedAssetCount == 772u &&
+                worldResult.nextBodyIndex == 772u &&
+                worldResult.nextBodyType == 16u &&
+                worldResult.nextBodyReference == 0xffffffffu &&
+                worldResult.worldTechniqueSets.size() == 218u &&
                 worldResult.worldXModels.size() == 320u &&
                 worldResult.worldFxEffects.size() == 60u &&
                 worldResult.worldXAnimParts.size() == 146u &&
                 worldResult.worldWeapons.size() == 10u &&
                 worldResult.worldRawFiles.size() == 21u &&
                 worldResult.worldComWorlds.size() == 1u &&
+                firstLightDef.assetIndex == 705u &&
+                lastLightDef.assetIndex == 705u &&
+                std::string_view(firstLightDef.asset->name) ==
+                    "light_point_linear" &&
+                firstLightDef.asset->attenuation.image != nullptr &&
+                worldResult.stoppedBeforeDifferentWorldAssetType &&
+                !worldResult.semanticTrace.empty() &&
+                worldResult.semanticTrace.back().kind ==
+                    kisak::database::SemanticTraceEventKind::Boundary &&
+                worldResult.semanticTrace.back().assetType ==
+                    ASSET_TYPE_GFXWORLD &&
+                worldResult.semanticTrace.back().assetIndex == 772u &&
+                std::all_of(
+                    worldResult.worldLightDefs.begin(),
+                    worldResult.worldLightDefs.end(),
+                    [](const RetailPublishedLightDef &entry) {
+                        return entry.published && entry.asset && entry.storage;
+                    }) &&
                 comWorld.published && comWorld.asset && comWorld.storage &&
                 comWorld.assetIndex == 704u &&
                 std::string_view(comWorld.asset->name) == "maps/killhouse.d3dbsp" &&
                 comWorld.asset->primaryLightCount == 24u &&
                 comWorld.asset->primaryLights != nullptr,
-            "Killhouse ordered traversal publishes canonical com_map and stops at lightdef");
+            "Killhouse ordered traversal publishes every LightDef and stops before GfxWorld 772");
         return;
     }
     Require(!result.worldXModels.empty(),
@@ -4710,6 +5046,7 @@ int main(int argc, char **argv)
     TestCanonicalLocalizeZoneLoader();
     TestCanonicalClipMapLoader();
     TestCanonicalComWorldLoader();
+    TestCanonicalLightDefLoader();
     TestWorldTechniqueSetPrefixBoundary();
     TestWorldXModelPrefixBoundary();
     TestWorldXSurfacePrefixBoundary();

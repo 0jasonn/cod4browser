@@ -4,6 +4,7 @@
 #include <database/db_semantic_trace.h>
 #include <database/localize_types.h>
 #include <bgame/weapon_types.h>
+#include <gfx_d3d/gfx_light_types.h>
 #include <gfx_d3d/material_types.h>
 #include <qcommon/com_world_types.h>
 #include <sound/snd_alias_types.h>
@@ -24,6 +25,7 @@ namespace kisak::fastfile
 
 struct CanonicalClipMapStorage;
 struct CanonicalComWorldStorage;
+struct CanonicalLightDefStorage;
 
 inline constexpr std::uint32_t RETAIL_CENSUS_ASSET_TYPE_COUNT = 33u;
 inline constexpr std::uint32_t RETAIL_CENSUS_MAX_STEP_BYTES = 64u * 1024u;
@@ -111,6 +113,8 @@ struct RetailCensusLimits
     std::uint32_t maxComWorldLightDefNameBytes = 255u;
     std::uint32_t maxComWorldStringBytes = 1024u * 1024u;
     std::uint32_t maxComWorldPayloadBytes = 2u * 1024u * 1024u;
+    std::uint32_t maxLightDefs = 256u;
+    std::uint32_t maxLightDefNameBytes = 255u;
     std::uint32_t maxSemanticTraceEntries = 65536u;
 };
 
@@ -284,6 +288,12 @@ enum class RetailCensusError : std::uint8_t
     ComWorldStringBytesLimit,
     ComWorldPayloadLimit,
     ComWorldAliasInvalid,
+    LightDefLayoutUnsupported,
+    LightDefCollectionLimit,
+    LightDefNameInvalid,
+    LightDefNameTooLong,
+    LightDefImageInvalid,
+    LightDefAliasInvalid,
     PostXModelAssetUnsupported,
     SemanticTraceLimit,
     AllocationFailed,
@@ -472,6 +482,7 @@ enum class RetailCensusStage : std::uint8_t
     WorldSoundAliasPublish,
     WorldClipMap,
     WorldComWorld,
+    WorldLightDef,
     AssetBoundary,
     Failed,
 };
@@ -604,8 +615,10 @@ struct RetailXSurface
     bool dependenciesTraversed = false;
 };
 
-struct RetailXModelImage
+struct RetailPublishedGfxImage
 {
+    std::uint32_t ownerAssetIndex = 0u;
+    std::uint32_t serializedReference = 0u;
     std::uint32_t textureIndex = 0u;
     std::string name;
     std::uint32_t nameReference = 0u;
@@ -625,9 +638,16 @@ struct RetailXModelImage
     std::uint32_t textureInsertPointerBlock4Offset = UINT32_MAX;
     std::uint32_t loadDefBlock0Offset = 0u;
     std::uint32_t identity = 0u;
+    std::uint32_t boundaryInflatedOffset = 0u;
+    std::shared_ptr<std::string> canonicalName;
+    std::shared_ptr<GfxImage> asset;
+    bool pointerAlias = false;
+    bool nullRoot = false;
     bool loadDefTraversed = false;
     bool published = false;
 };
+
+using RetailXModelImage = RetailPublishedGfxImage;
 
 struct RetailXModelMaterialTexture
 {
@@ -1063,6 +1083,23 @@ struct RetailPublishedComWorld
     bool published = false;
 };
 
+struct RetailPublishedLightDef
+{
+    std::uint32_t assetIndex = 0u;
+    std::uint32_t serializedReference = 0u;
+    std::uint32_t headerBlock0Offset = UINT32_MAX;
+    std::uint32_t insertPointerBlock4Offset = UINT32_MAX;
+    std::uint32_t nameBlock4Offset = UINT32_MAX;
+    std::uint32_t attenuationImageIdentity = 0u;
+    std::uint32_t identity = 0u;
+    std::uint32_t boundaryInflatedOffset = 0u;
+    std::shared_ptr<CanonicalLightDefStorage> storage;
+    std::shared_ptr<GfxLightDef> asset;
+    bool nullRoot = false;
+    bool pointerAlias = false;
+    bool published = false;
+};
+
 struct RetailFastfileCensus
 {
     std::uint32_t version = 0u;
@@ -1202,6 +1239,8 @@ struct RetailFastfileCensus
     std::vector<RetailPublishedSoundAliasList> worldSoundAliasLists;
     std::vector<RetailPublishedClipMap> worldClipMaps;
     std::vector<RetailPublishedComWorld> worldComWorlds;
+    std::vector<RetailPublishedGfxImage> worldImages;
+    std::vector<RetailPublishedLightDef> worldLightDefs;
     std::vector<kisak::database::SemanticTraceEntry> semanticTrace;
     std::uint32_t semanticTraceHash = 2166136261u;
     std::uint32_t semanticTraceContractHash = 2166136261u;
