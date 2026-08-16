@@ -3,10 +3,12 @@
 #include <qcommon/common_api.h>
 #include <qcommon/qcommon.h>
 #include <qcommon/system.h>
+#include <database/db_initialization.h>
 #include <script/scr_stringlist.h>
 #include <universal/com_constantconfigstrings.h>
 #include <universal/dvar.h>
 #include <universal/q_shared.h>
+#include <universal/physicalmemory.h>
 
 #include <csetjmp>
 #include <cstdarg>
@@ -41,14 +43,23 @@ const dvar_t *cl_paused_simple;
 const dvar_t *useFastFile;
 const dvar_t *sys_lockThreads;
 const dvar_t *sys_smp_allowed;
+static const char *comInitAllocName = "$init";
 
 namespace
 {
 const char *s_lockThreadNames[4] = {"none", "minimal", "all"};
 
-void CountCommand(const char *)
+void TraceCommand(const char *name)
 {
-    ++const_cast<ComInitTraceSnapshot &>(Com_GetInitTrace()).commandCount;
+    Com_InitTraceCommand(name);
+}
+
+void Gate3_ReachComInitXAssetsBoundary()
+{
+    // The canonical body calls DB_InitThread. A browser database runtime must
+    // live in the same dedicated Worker as the synchronous engine filesystem;
+    // this checkpoint stops before inventing a DOM-thread substitute.
+    Com_InitTraceStage("Com_InitXAssets");
 }
 
 void TraceDvar(const char *name)
@@ -81,6 +92,16 @@ void Com_PrintWarning(int channel, const char *format, ...)
     std::vsnprintf(message, sizeof(message), format, arguments);
     va_end(arguments);
     Com_PrintMessage(channel, message, 2);
+}
+
+void Com_PrintError(int channel, const char *format, ...)
+{
+    char message[4096]{};
+    va_list arguments;
+    va_start(arguments, format);
+    std::vsnprintf(message, sizeof(message), format, arguments);
+    va_end(arguments);
+    Com_PrintMessage(channel, message, 1);
 }
 
 void _copyDWord(std::uint32_t *destination, std::uint32_t value, std::uint32_t count)
@@ -224,11 +245,26 @@ void __cdecl Com_Init_Try_Block_Function(char *commandLine)
     Com_InitTraceStage("CCS_InitConstantConfigStrings");
     CCS_InitConstantConfigStrings();
 
+    Com_InitTraceStage("PMem_Init");
+    PMem_Init();
+    Com_InitTraceStage("DB_SetInitializing");
+    DB_SetInitializing(true);
+    Com_InitTraceStage("PMem_BeginAlloc");
+    PMem_BeginAlloc(comInitAllocName, 1u);
+
     auto &trace = const_cast<ComInitTraceSnapshot &>(Com_GetInitTrace());
     trace.commandCount = 0;
-    Cmd_ForEach(CountCommand);
+    Cmd_ForEach(TraceCommand);
     Com_InitTraceSetCounts(static_cast<std::size_t>(com_numConsoleLines), trace.commandCount);
-    Com_InitTraceStop("PMem_Init/DB_SetInitializing");
+    const PhysicalMemory *memory = PMem_GetState();
+    Com_InitTraceSetMemory(
+        static_cast<std::size_t>(memory->prim[1].pos),
+        static_cast<std::size_t>(memory->prim[0].pos),
+        static_cast<std::size_t>(memory->prim[1].pos),
+        static_cast<std::size_t>(memory->prim[1].allocListCount),
+        true);
+    Gate3_ReachComInitXAssetsBoundary();
+    Com_InitTraceStop("DB_InitThread/WorkerHostedDatabase");
 }
 
 void __cdecl Com_Init(char *commandLine)

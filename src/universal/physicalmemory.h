@@ -37,3 +37,4 @@ uint8_t *__cdecl PMem_Alloc(
     uint32_t allocType);
 uint32_t __cdecl PMem_GetFreeAmount();
 void __cdecl PMem_DumpMemStats();
+const PhysicalMemory *__cdecl PMem_GetState();

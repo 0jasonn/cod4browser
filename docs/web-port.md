@@ -31,13 +31,16 @@ web-owned frame pump schedules exactly one engine callback per browser
 `requestAnimationFrame`. It does not spin, sleep, enable Asyncify, or block the
 browser event loop.
 
-The Wasm target also compiles a deliberately narrow, platform-neutral slice of
-the existing command and dvar design:
+The original bootstrap used deliberately narrow `cmd_core.cpp` and
+`dvar_core.cpp` slices. Gate 3 has since retired both from the production and
+test build lists in favor of canonical `cmd.cpp`, `dvar.cpp`, and
+`dvar_cmds.cpp`; this section records the behavior first proven by that
+bootstrap:
 
-1. `src/qcommon/cmd_core.cpp` provides command registration, tokenization,
+1. The former `src/qcommon/cmd_core.cpp` provided command registration, tokenization,
    quoted strings and comments, the 64 KiB command buffer, case-insensitive
    dispatch, and frame-based `wait` behavior through the existing `cmd.h` API.
-2. `src/universal/dvar_core.cpp` provides a fixed registry and owned string
+2. The former `src/universal/dvar_core.cpp` provided a fixed registry and owned string
    values. It supports `set` and direct dvar query/set commands without storing
    pointers in integer fields.
 3. Browser initialization executes quoted, escaped, commented, and
@@ -46,13 +49,10 @@ the existing command and dvar design:
 4. Structured system and engine events expose the monotonic clock, pump ticks,
    and dvar results to the launcher and Playwright smoke test.
 
-This is not the full `qcommon` runtime. The upstream `cmd.cpp`, `dvar.cpp`, and
-`common.cpp` translation units still directly depend on Win32 synchronization,
-the native filesystem, database/fastfile loading, scripts, client/server code,
-and renderer integrations. Those dependencies were not hidden behind broad
-stubs. The current slice is single-threaded, asset-free, and intentionally has
-no `exec`, config persistence, client/server command forwarding, or arbitrary
-JavaScript command bridge.
+The current Gate 3 runtime now compiles `cmd.cpp`, `dvar.cpp`, and `common.cpp`
+through the PMem/database-initializing prefix. It remains single-threaded and
+does not yet provide filesystem-backed `exec`, config persistence,
+client/server command forwarding, or an arbitrary JavaScript command bridge.
 
 ## Milestone 2: browser filesystem and legal asset import (complete)
 

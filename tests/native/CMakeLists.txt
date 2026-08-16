@@ -38,8 +38,9 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
     add_executable(gate3_com_init_trace_tests
         "${CMAKE_CURRENT_LIST_DIR}/gate3_com_init_trace_tests.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/qcommon/com_init_trace.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_initialization.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/qcommon/common.cpp"
-        "${KISAK_REPOSITORY_ROOT}/src/qcommon/cmd_core.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/qcommon/cmd.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/script/scr_memorytree.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/script/scr_stringlist.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/universal/com_constantconfigstrings.cpp"
@@ -48,6 +49,7 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
         "${KISAK_REPOSITORY_ROOT}/src/universal/dvar.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/universal/dvar_cmds.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/universal/q_shared.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/universal/physicalmemory.cpp"
     )
     target_compile_features(gate3_com_init_trace_tests PRIVATE cxx_std_20)
     target_include_directories(gate3_com_init_trace_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
@@ -196,6 +198,7 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
             "-sEXIT_RUNTIME=1"
             "-sNO_DISABLE_EXCEPTION_CATCHING"
             "-sERROR_ON_UNDEFINED_SYMBOLS=1"
+            "-sALLOW_MEMORY_GROWTH=1"
         )
     endif()
     target_link_options(web_renderer_surface_tests PRIVATE

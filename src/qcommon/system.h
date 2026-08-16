@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #if defined(KISAK_GATE3_COM_INIT_PREFIX) || !defined(_WIN32)
@@ -152,3 +153,6 @@ void Sys_SetValue(int valueIndex, void *data);
 void *Sys_GetValue(int valueIndex);
 void NET_Sleep(int milliseconds);
 void Sys_Error(const char *format, ...);
+void Sys_OutOfMemErrorInternal(const char *filename, int line);
+void *Sys_AllocatePhysicalMemory(std::size_t size, std::size_t alignment);
+void Sys_FreePhysicalMemory(void *memory);

@@ -5,6 +5,11 @@
 #include <universal/q_parse.h>
 
 #include "qcommon.h"
+#if defined(KISAK_GATE3_COM_INIT_PREFIX)
+#include <qcommon/system.h>
+#include <universal/dvar.h>
+#define PROF_SCOPED(name) ((void)0)
+#else
 #include "mem_track.h"
 #include "threads.h"
 
@@ -14,6 +19,7 @@
 #include <script/scr_debugger.h>
 #include <server/sv_game.h>
 #include <universal/profile.h>
+#endif
 
 static cmd_function_s* cmd_functions = NULL;
 
@@ -66,7 +72,15 @@ const char **__cdecl Cmd_GetAutoCompleteFileList(const char *cmdName, int32_t  *
     *fileCount = 0;
     cmd = _Cmd_FindCommand(cmdName);
     if (cmd && cmd->autoCompleteDir && cmd->autoCompleteExt)
+#if defined(KISAK_GATE3_COM_INIT_PREFIX)
+    {
+        // File completion is unavailable until the synchronous engine
+        // filesystem boundary has been established.
+        return 0;
+    }
+#else
         return FS_ListFiles(cmd->autoCompleteDir, cmd->autoCompleteExt, FS_LIST_PURE_ONLY, fileCount);
+#endif
     else
         return 0;
 }
@@ -193,6 +207,7 @@ void Cmd_Vstr_f(void) {
 }
 
 // avail add
+#if !defined(KISAK_GATE3_COM_INIT_PREFIX)
 #include <universal/com_files.h>
 #include <format>
 #include <filesystem>
@@ -433,6 +448,7 @@ void Cmd_Dumpraw_f(void)
     //DumpFileType(ASSET_TYPE_MENU);
 }
 // avail end
+#endif
 
 void Cmd_Init()
 {
@@ -442,9 +458,11 @@ void Cmd_Init()
 	Cmd_AddCommandInternal("exec", Cmd_Exec_f, &Cmd_Exec_f_VAR);
 	Cmd_AddCommandInternal("vstr", Cmd_Vstr_f, &Cmd_Vstr_f_VAR);
 	Cmd_AddCommandInternal("wait", Cmd_Wait_f, &Cmd_Wait_f_VAR);
+#if !defined(KISAK_GATE3_COM_INIT_PREFIX)
     // avail add
     Cmd_AddCommandInternal("dumpraw", Cmd_Dumpraw_f, &Cmd_Dumpraw_f_VAR);
     // avail end
+#endif
 }
 
 void Cmd_AddCommandInternal(const char* cmdName, void(__cdecl* function)(), cmd_function_s* allocedCmd)
@@ -487,6 +505,7 @@ cmd_function_s* Cmd_FindCommand(const char* cmdName)
 
 void __cdecl TRACK_cmd()
 {
+#if !defined(KISAK_GATE3_COM_INIT_PREFIX)
     track_static_alloc_internal(&cmd_args, 132, "cmd_args", 10);
     track_static_alloc_internal(&cmd_argsPrivate, 10280, "cmd_argsPrivate", 10);
     track_static_alloc_internal(cmd_textArray, 12, "cmd_textArray", 10);
@@ -495,6 +514,7 @@ void __cdecl TRACK_cmd()
     track_static_alloc_internal(&sv_cmd_argsPrivate, 10280, "sv_cmd_argsPrivate", 10);
     track_static_alloc_internal(&sv_cmd_text, 12, "sv_cmd_text", 10);
     track_static_alloc_internal(sv_cmd_text_buf, 0x10000, "sv_cmd_text_buf", 10);
+#endif
 }
 
 void __cdecl _Cmd_Wait_f()
@@ -548,7 +568,9 @@ void __cdecl Cbuf_AddText(int32_t  localClientNum, const char *text)
     {
         memcpy_noncrt(&cmd_text->data[cmd_text->cmdsize], text, length + 1);
         cmd_text->cmdsize += length;
+#if !defined(KISAK_GATE3_COM_INIT_PREFIX)
         Scr_MonitorCommand(text);
+#endif
     }
     else
     {
@@ -602,13 +624,14 @@ void __cdecl Cbuf_InsertText(int32_t  localClientNum, const char *text)
     }
 }
 
+static cmd_function_s *sv_cmd_functions;
+
+#if !defined(KISAK_GATE3_COM_INIT_PREFIX)
 void __cdecl Cbuf_AddServerText_f()
 {
     if (!alwaysfails)
         MyAssertHandler(".\\qcommon\\cmd.cpp", 309, 0, "Cbuf_AddServerText_f was called.");
 }
-
-static cmd_function_s *sv_cmd_functions;
 
 void __cdecl Cmd_ExecuteServerString(char *text)
 {
@@ -700,6 +723,7 @@ void __cdecl Cmd_AddServerCommandInternal(const char *cmdName, void(__cdecl *fun
     if (function)
         Com_Printf(16, "Cmd_AddServerCommand: %s already defined\n", cmdName);
 }
+#endif
 
 void __cdecl Cbuf_ExecuteBuffer(int32_t  localClientNum, int32_t  controllerIndex, const char *buffer)
 {
@@ -748,7 +772,9 @@ void __cdecl Cbuf_Execute(int32_t  localClientNum, int32_t  controllerIndex)
     cmd_insideCBufExecute[localClientNum] = 1;
     Cbuf_ExecuteInternal(localClientNum, controllerIndex);
     cmd_insideCBufExecute[localClientNum] = 0;
+#if !defined(KISAK_GATE3_COM_INIT_PREFIX)
     Cbuf_SV_Execute();
+#endif
 }
 
 void __cdecl Cbuf_ExecuteInternal(int32_t  localClientNum, int32_t  controllerIndex)
@@ -1200,11 +1226,11 @@ void __cdecl Cmd_ExecuteSingleCommand(int32_t  localClientNum, int32_t  controll
         {
             cmd_args.localClientNum[cmd_args.nesting] = localClientNum;
             cmd_args.controllerIndex[cmd_args.nesting] = controllerIndex;
-#ifdef KISAK_SP
+#if defined(KISAK_SP) && !defined(KISAK_GATE3_COM_INIT_PREFIX)
             Cmd_CheckNotify();
 #endif
             arg0 = Cmd_Argv(0);
-            for (itr = cmd_functions; itr->next; itr = itr->next)
+            for (itr = cmd_functions; itr; itr = itr->next)
             {
                 if (!I_stricmp(arg0, itr->name))
                 {
@@ -1213,6 +1239,7 @@ void __cdecl Cmd_ExecuteSingleCommand(int32_t  localClientNum, int32_t  controll
                     //cmd_functions = cmd;
                     if (itr->function)
                     {
+#if !defined(KISAK_GATE3_COM_INIT_PREFIX)
                         if (itr->function == Cbuf_AddServerText_f)
                         {
 #ifndef KISAK_RADIANT
@@ -1222,6 +1249,7 @@ void __cdecl Cmd_ExecuteSingleCommand(int32_t  localClientNum, int32_t  controll
                             Cmd_ExecuteServerString(text);
                         }
                         else
+#endif
                         {
                             itr->function();
                         }
@@ -1244,6 +1272,9 @@ void __cdecl Cmd_ExecuteSingleCommand(int32_t  localClientNum, int32_t  controll
             //}
             //else
             {
+#if defined(KISAK_GATE3_COM_INIT_PREFIX)
+                Dvar_Command();
+#else
                 if (!Dvar_Command() && (!com_sv_running || !com_sv_running->current.enabled || !SV_GameCommand()))
                 {
 #ifndef KISAK_RADIANT
@@ -1252,6 +1283,7 @@ void __cdecl Cmd_ExecuteSingleCommand(int32_t  localClientNum, int32_t  controll
                     return;
 #endif
                 }
+#endif
             }
 
         }
@@ -1287,6 +1319,26 @@ void __cdecl Cmd_List_f()
     Com_Printf(0, "%i commands\n", i);
 }
 
+#if defined(KISAK_GATE3_COM_INIT_PREFIX)
+void __cdecl Cmd_Exec_f()
+{
+    Com_Error(
+        ERR_DROP,
+        "exec requires the synchronous engine filesystem, which is not initialized at this Gate 3 checkpoint");
+}
+
+char __cdecl Cmd_ExecFromDisk(int32_t, int32_t, const char *)
+{
+    Com_Error(ERR_DROP, "disk exec reached before the synchronous engine filesystem boundary");
+    return 0;
+}
+
+char __cdecl Cmd_ExecFromFastFile(int32_t, int32_t, const char *)
+{
+    Com_Error(ERR_DROP, "fastfile exec reached before canonical database zone loading");
+    return 0;
+}
+#else
 void __cdecl Cmd_Exec_f()
 {
     char *v0; // eax
@@ -1360,6 +1412,7 @@ char __cdecl Cmd_ExecFromFastFile(int32_t  localClientNum, int32_t  controllerIn
     Cbuf_ExecuteBuffer(localClientNum, controllerIndex, (char *)rawfile->buffer);
     return 1;
 }
+#endif
 
 void __cdecl SV_Cmd_ArgvBuffer(int32_t  arg, char *buffer, int32_t  bufferLength)
 {
@@ -1369,7 +1422,7 @@ void __cdecl SV_Cmd_ArgvBuffer(int32_t  arg, char *buffer, int32_t  bufferLength
     I_strncpyz(buffer, v3, bufferLength);
 }
 
-#ifdef KISAK_SP
+#if defined(KISAK_SP) && !defined(KISAK_GATE3_COM_INIT_PREFIX)
 #include <script/scr_vm.h>
 #include <game/g_local.h>
 

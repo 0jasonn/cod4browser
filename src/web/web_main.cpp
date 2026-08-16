@@ -85,7 +85,11 @@ bool InitializeHeadlessEngineSlice()
     char commandLine[] = "+set gate3_startup wasm +seta gate3_archive 1";
     Com_Init(commandLine);
     const ComInitTraceSnapshot &trace = Com_GetInitTrace();
-    if (!trace.stopStage || std::strcmp(trace.stopStage, "PMem_Init/DB_SetInitializing") != 0 ||
+    if (!trace.stopStage ||
+        std::strcmp(trace.stopStage, "DB_InitThread/WorkerHostedDatabase") != 0 ||
+        trace.physicalMemorySize != 0x8000000u || trace.pmemLowPosition != 0 ||
+        trace.pmemHighPosition != 0x8000000u || trace.pmemHighAllocationCount != 1 ||
+        !trace.databaseInitializing ||
         std::strcmp(Dvar_GetString("gate3_startup"), "wasm") != 0 ||
         std::strcmp(Dvar_GetString("gate3_archive"), "1") != 0)
     {

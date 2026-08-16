@@ -9,9 +9,10 @@ set(KISAK_WEB_SOURCE_DIR "${CMAKE_SOURCE_DIR}/web")
 
 add_executable(KisakCOD-web
     "${SRC_DIR}/database/db_semantic_trace.cpp"
+    "${SRC_DIR}/database/db_initialization.cpp"
     "${SRC_DIR}/qcommon/com_init_trace.cpp"
     "${SRC_DIR}/qcommon/common.cpp"
-    "${SRC_DIR}/qcommon/cmd_core.cpp"
+    "${SRC_DIR}/qcommon/cmd.cpp"
     "${SRC_DIR}/qcommon/iwd_archive.cpp"
     "${SRC_DIR}/qcommon/iwi_image.cpp"
     "${SRC_DIR}/script/scr_memorytree.cpp"
@@ -22,6 +23,7 @@ add_executable(KisakCOD-web
     "${SRC_DIR}/universal/dvar.cpp"
     "${SRC_DIR}/universal/dvar_cmds.cpp"
     "${SRC_DIR}/universal/q_shared.cpp"
+    "${SRC_DIR}/universal/physicalmemory.cpp"
     "${SRC_DIR}/web/web_archive_job.cpp"
     "${SRC_DIR}/web/web_assertive.cpp"
     "${SRC_DIR}/web/web_asset_probe.cpp"
@@ -75,8 +77,9 @@ target_compile_definitions(KisakCOD-web PRIVATE KISAK_GATE3_COM_INIT_PREFIX=1)
 add_executable(KisakCOD-web-com-init-check EXCLUDE_FROM_ALL
     "${CMAKE_SOURCE_DIR}/tests/native/gate3_com_init_trace_tests.cpp"
     "${SRC_DIR}/qcommon/com_init_trace.cpp"
+    "${SRC_DIR}/database/db_initialization.cpp"
     "${SRC_DIR}/qcommon/common.cpp"
-    "${SRC_DIR}/qcommon/cmd_core.cpp"
+    "${SRC_DIR}/qcommon/cmd.cpp"
     "${SRC_DIR}/script/scr_memorytree.cpp"
     "${SRC_DIR}/script/scr_stringlist.cpp"
     "${SRC_DIR}/universal/com_constantconfigstrings.cpp"
@@ -85,6 +88,7 @@ add_executable(KisakCOD-web-com-init-check EXCLUDE_FROM_ALL
     "${SRC_DIR}/universal/dvar.cpp"
     "${SRC_DIR}/universal/dvar_cmds.cpp"
     "${SRC_DIR}/universal/q_shared.cpp"
+    "${SRC_DIR}/universal/physicalmemory.cpp"
 )
 target_compile_features(KisakCOD-web-com-init-check PRIVATE cxx_std_20)
 target_include_directories(KisakCOD-web-com-init-check PRIVATE "${SRC_DIR}" "${DEPS_DIR}")
@@ -96,6 +100,7 @@ target_link_options(KisakCOD-web-com-init-check PRIVATE
     "-sEXIT_RUNTIME=1"
     "-sNO_DISABLE_EXCEPTION_CATCHING"
     "-sERROR_ON_UNDEFINED_SYMBOLS=1"
+    "-sALLOW_MEMORY_GROWTH=1"
 )
 set_target_properties(KisakCOD-web-com-init-check PROPERTIES
     SUFFIX ".cjs"

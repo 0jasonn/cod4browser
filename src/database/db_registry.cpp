@@ -1,5 +1,6 @@
 #include <universal/q_shared.h>
 #include "database.h"
+#include "db_initialization.h"
 
 #include <qcommon/files.h>
 #include <qcommon/mem_track.h>
@@ -432,7 +433,6 @@ bool g_isRecoveringLostDevice;
 bool g_mayRecoverLostAssets;
 volatile bool g_loadingZone;
 volatile uint32_t g_zoneInfoCount;
-bool g_initializing;
 
 char g_debugZoneName[64];
 uint32_t g_zoneAllocType;
@@ -1776,11 +1776,6 @@ void __cdecl DB_Update()
         if (Sys_IsDatabaseReady())
             DB_PostLoadXZone();
     }
-}
-
-void __cdecl DB_SetInitializing(bool inUse)
-{
-    g_initializing = inUse;
 }
 
 bool __cdecl DB_GetInitializing()

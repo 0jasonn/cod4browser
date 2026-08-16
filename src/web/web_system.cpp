@@ -126,6 +126,25 @@ void Sys_Error(const char *format, ...)
     std::abort();
 }
 
+void Sys_OutOfMemErrorInternal(const char *filename, int line)
+{
+    Sys_Error("Out of memory at %s:%d", filename ? filename : "?", line);
+}
+
+void *Sys_AllocatePhysicalMemory(std::size_t size, std::size_t alignment)
+{
+    if (!size || !alignment || (alignment & (alignment - 1)) != 0 || size % alignment != 0)
+    {
+        return nullptr;
+    }
+    return std::aligned_alloc(alignment, size);
+}
+
+void Sys_FreePhysicalMemory(void *memory)
+{
+    std::free(memory);
+}
+
 void Web_Log(WebLogLevel level, const char *format, ...)
 {
     va_list arguments;

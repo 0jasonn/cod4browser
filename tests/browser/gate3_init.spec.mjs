@@ -14,11 +14,17 @@ test("real Com_Init publishes the Gate 3 canonical prefix trace", { tag: "@smoke
 
     const trace = await page.evaluate(() => structuredClone(globalThis.__gate3InitTraces[0]));
     expect(trace).toMatchObject({
-        stopStage: "PMem_Init/DB_SetInitializing",
-        stageCount: 10,
+        stopStage: "DB_InitThread/WorkerHostedDatabase",
+        stageCount: 14,
         startupVariableCount: 3,
-        commandCount: 4,
+        commandCount: 6,
         dvarCount: 22,
+        commands: ["wait", "vstr", "exec", "cmdlist", "seta", "set"],
+        physicalMemorySize: 0x8000000,
+        pmemLowPosition: 0,
+        pmemHighPosition: 0x8000000,
+        pmemHighAllocationCount: 1,
+        databaseInitializing: true,
         stages: [
             "Com_Init entered",
             "Com_ParseCommandLine",
@@ -29,6 +35,10 @@ test("real Com_Init publishes the Gate 3 canonical prefix trace", { tag: "@smoke
             "Com_StartupVariable",
             "Com_InitDvars",
             "CCS_InitConstantConfigStrings",
+            "PMem_Init",
+            "DB_SetInitializing",
+            "PMem_BeginAlloc",
+            "Com_InitXAssets",
             "stop",
         ],
     });

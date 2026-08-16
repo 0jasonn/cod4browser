@@ -1,22 +1,47 @@
 #include <universal/q_shared.h>
 #include "physicalmemory.h"
 
+#if defined(KISAK_WEB) || defined(KISAK_GATE3_COM_INIT_PREFIX)
+#include <qcommon/system.h>
+#else
 #include <Windows.h>
+#include <win32/win_local.h>
+#endif
 #include "assertive.h"
 #include <qcommon/mem_track.h>
 #include "q_shared.h"
 #include <qcommon/qcommon.h>
-#include <win32/win_local.h>
+
+#include <limits>
 
 PhysicalMemory g_mem;
 int g_overAllocatedSize;
+
+#if defined(KISAK_WEB) || defined(KISAK_GATE3_COM_INIT_PREFIX)
+static void PMem_SetCheckedOverAllocation(uint64_t byteCount)
+{
+    g_overAllocatedSize = byteCount > static_cast<uint64_t>(std::numeric_limits<int>::max())
+        ? std::numeric_limits<int>::max()
+        : static_cast<int>(byteCount);
+}
+#endif
 
 void __cdecl PMem_Init()
 {
     uint8_t *memory; // [esp+0h] [ebp-4h]
 
-    memory = (uint8_t *)VirtualAlloc(0, 0x8000000u, 0x1000u, 4u);
-    PMem_InitPhysicalMemory(&g_mem, memory, 0x8000000u);
+    constexpr uint32_t physicalMemorySize = 0x8000000u;
+#if defined(KISAK_WEB) || defined(KISAK_GATE3_COM_INIT_PREFIX)
+    memory = static_cast<uint8_t *>(Sys_AllocatePhysicalMemory(physicalMemorySize, 0x1000u));
+    if (!memory)
+    {
+        Sys_OutOfMemErrorInternal(".\\universal\\physicalmemory.cpp", 283);
+        return;
+    }
+#else
+    memory = (uint8_t *)VirtualAlloc(0, physicalMemorySize, 0x1000u, 4u);
+#endif
+    PMem_InitPhysicalMemory(&g_mem, memory, physicalMemorySize);
 }
 
 void __cdecl PMem_DumpMemStats()
@@ -201,6 +226,16 @@ uint8_t *__cdecl PMem_Alloc(
     uint32_t lowPos; // [esp+14h] [ebp-8h]
     uint32_t alignmenta; // [esp+28h] [ebp+Ch]
 
+#if defined(KISAK_WEB) || defined(KISAK_GATE3_COM_INIT_PREFIX)
+    if (allocType >= 2)
+    {
+        Com_Error(ERR_DROP, "PMem_Alloc: invalid allocation end %u", allocType);
+    }
+    if (!alignment || (alignment & (alignment - 1)) != 0)
+    {
+        Com_Error(ERR_DROP, "PMem_Alloc: alignment %u is not a power of two", alignment);
+    }
+#endif
     prim = &g_mem.prim[allocType];
     if (!prim->allocName)
         MyAssertHandler(".\\universal\\physicalmemory.cpp", 536, 0, "%s", "prim->allocName");
@@ -213,6 +248,14 @@ uint8_t *__cdecl PMem_Alloc(
     {
         if (allocType != 1)
             MyAssertHandler(".\\universal\\physicalmemory.cpp", 633, 0, "%s", "allocType == PHYS_ALLOC_HIGH");
+#if defined(KISAK_WEB) || defined(KISAK_GATE3_COM_INIT_PREFIX)
+        if (size > g_mem.prim[allocType].pos)
+        {
+            PMem_SetCheckedOverAllocation(size - g_mem.prim[allocType].pos);
+            Sys_OutOfMemErrorInternal(".\\universal\\physicalmemory.cpp", 641);
+            return nullptr;
+        }
+#endif
         lowPos = ~alignmenta & (g_mem.prim[allocType].pos - size);
         g_overAllocatedSize = g_mem.prim[0].pos - lowPos;
         if (g_overAllocatedSize > 0)
@@ -221,7 +264,25 @@ uint8_t *__cdecl PMem_Alloc(
     }
     else
     {
+#if defined(KISAK_WEB) || defined(KISAK_GATE3_COM_INIT_PREFIX)
+        if (prim->pos > std::numeric_limits<uint32_t>::max() - alignmenta)
+        {
+            PMem_SetCheckedOverAllocation(alignmenta);
+            Sys_OutOfMemErrorInternal(".\\universal\\physicalmemory.cpp", 608);
+            return nullptr;
+        }
+#endif
         lowPos = ~alignmenta & (alignmenta + prim->pos);
+#if defined(KISAK_WEB) || defined(KISAK_GATE3_COM_INIT_PREFIX)
+        if (lowPos > g_mem.prim[1].pos || size > g_mem.prim[1].pos - lowPos)
+        {
+            const uint64_t requestedEnd = static_cast<uint64_t>(lowPos) + size;
+            PMem_SetCheckedOverAllocation(requestedEnd - g_mem.prim[1].pos);
+            Com_PrintError(16, "Need %i more bytes of ram for alloc to succeed\n", g_overAllocatedSize);
+            Sys_OutOfMemErrorInternal(".\\universal\\physicalmemory.cpp", 608);
+            return nullptr;
+        }
+#endif
         g_overAllocatedSize = size + lowPos - g_mem.prim[1].pos;
         if (g_overAllocatedSize > 0)
         {
@@ -236,5 +297,10 @@ uint8_t *__cdecl PMem_Alloc(
 uint32_t __cdecl PMem_GetFreeAmount()
 {
     return g_mem.prim[1].pos - g_mem.prim[0].pos;
+}
+
+const PhysicalMemory *__cdecl PMem_GetState()
+{
+    return &g_mem;
 }
 
