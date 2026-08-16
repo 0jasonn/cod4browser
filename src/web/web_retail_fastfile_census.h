@@ -38,6 +38,9 @@ struct RetailCensusLimits
     std::uint32_t maxScriptStringBytes = 4096u;
     std::uint32_t maxTotalScriptStringBytes = 256u * 1024u;
     std::uint32_t maxAssets = 16384u;
+    std::uint32_t maxRegistryAssets = 16384u;
+    std::uint32_t maxRegistryAliases = 65536u;
+    std::uint32_t maxRegistryNameBytes = 8u * 1024u * 1024u;
     std::uint32_t maxTechniqueNameBytes = 255u;
     std::uint32_t maxTechniquePasses = 16u;
     std::uint32_t maxShaderNameBytes = 255u;
@@ -94,9 +97,6 @@ struct RetailCensusLimits
     std::uint32_t maxSoundStringBytes = 4096u;
     std::uint32_t maxRetainedSoundBytes = 128u * 1024u * 1024u;
     std::uint32_t maxSemanticTraceEntries = 65536u;
-    // Optional vertical-slice boundary that succeeds immediately after the
-    // first canonical WeaponDef publication.
-    bool stopAfterFirstPublishedWeapon = false;
 };
 
 enum class RetailCensusError : std::uint8_t

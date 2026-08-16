@@ -1,4 +1,5 @@
 #include <web/web_retail_fastfile_census.h>
+#include <web/web_retail_load_weapon.h>
 
 #include <web/web_fastfile_source_stream.h>
 #include <web/web_fastfile_zone_registry.h>
@@ -202,17 +203,6 @@ enum class WorldXAnimPhase : std::uint8_t
     Complete,
 };
 
-enum class WorldWeaponOperationKind : std::uint8_t
-{
-    String = 0,
-    XModel,
-    Fx,
-    Material,
-    Sound,
-    BounceSound,
-    AccuracyKnots,
-};
-
 struct WorldSoundAliasState
 {
     std::array<std::uint32_t, 4> stringReferences{};
@@ -267,107 +257,16 @@ struct WorldMenuTask
     std::uint32_t extra = 0u;
 };
 
-struct WorldWeaponOperation
-{
-    WorldWeaponOperationKind kind;
-    std::uint16_t index;
-};
-
-constexpr std::array<std::uint32_t, 48> WEAPON_STRING_OFFSETS = {{
-    0u, 4u, 8u,
-    80u, 84u, 88u, 92u, 96u, 100u, 104u, 108u, 112u, 116u,
-    120u, 124u, 128u, 132u, 136u, 140u, 144u, 148u, 152u, 156u,
-    160u, 164u, 168u, 172u, 176u, 180u, 184u, 188u, 192u, 196u,
-    200u, 204u, 208u, 212u,
-    804u, 812u, 832u, 1340u, 1900u, 1904u, 2012u, 2016u, 2036u,
-    2152u, 2156u,
-}};
-
-constexpr std::array<std::uint32_t, 38> WEAPON_XMODEL_OFFSETS = [] {
-    std::array<std::uint32_t, 38> offsets{};
-    std::size_t output = 0u;
-    for (std::uint32_t offset = 12u; offset <= 72u; offset += 4u)
-        offsets[output++] = offset;
-    offsets[output++] = 76u;
-    for (std::uint32_t offset = 700u; offset <= 760u; offset += 4u)
-        offsets[output++] = offset;
-    for (const std::uint32_t offset : {764u, 768u, 772u, 776u, 1412u})
-        offsets[output++] = offset;
-    return offsets;
-}();
-
-constexpr std::array<std::uint32_t, 10> WEAPON_FX_OFFSETS = {{
-    332u, 336u, 524u, 528u, 532u, 536u,
-    1420u, 1428u, 1704u, 1732u,
-}};
-
-constexpr std::array<std::uint32_t, 8> WEAPON_MATERIAL_OFFSETS = {{
-    540u, 544u, 780u, 788u, 1072u, 1076u, 1304u, 1316u,
-}};
-
-constexpr std::array<std::uint32_t, 48> WEAPON_SOUND_OFFSETS = [] {
-    std::array<std::uint32_t, 48> offsets{};
-    std::size_t output = 0u;
-    for (std::uint32_t offset = 340u; offset <= 516u; offset += 4u)
-        offsets[output++] = offset;
-    offsets[output++] = 1432u;
-    offsets[output++] = 1436u;
-    offsets[output++] = 1736u;
-    return offsets;
-}();
-
-// Exact generated Load_WeaponDef child order. Alias-only canonical asset
-// handles consume no stream bytes but still resolve at their native position.
-constexpr std::array<WorldWeaponOperation, 157> WEAPON_OPERATIONS = [] {
-    std::array<WorldWeaponOperation, 157> operations{};
-    std::size_t output = 0u;
-    for (std::uint16_t index = 0u; index < 3u; ++index)
-        operations[output++] = {WorldWeaponOperationKind::String, index};
-    for (std::uint16_t index = 0u; index < 17u; ++index)
-        operations[output++] = {WorldWeaponOperationKind::XModel, index};
-    for (std::uint16_t index = 3u; index <= 36u; ++index)
-        operations[output++] = {WorldWeaponOperationKind::String, index};
-    for (std::uint16_t index = 0u; index < 2u; ++index)
-        operations[output++] = {WorldWeaponOperationKind::Fx, index};
-    for (std::uint16_t index = 0u; index < 45u; ++index)
-        operations[output++] = {WorldWeaponOperationKind::Sound, index};
-    operations[output++] = {WorldWeaponOperationKind::BounceSound, 0u};
-    for (std::uint16_t index = 2u; index < 6u; ++index)
-        operations[output++] = {WorldWeaponOperationKind::Fx, index};
-    for (std::uint16_t index = 0u; index < 2u; ++index)
-        operations[output++] = {WorldWeaponOperationKind::Material, index};
-    for (std::uint16_t index = 17u; index <= 36u; ++index)
-        operations[output++] = {WorldWeaponOperationKind::XModel, index};
-    operations[output++] = {WorldWeaponOperationKind::Material, 2u};
-    operations[output++] = {WorldWeaponOperationKind::Material, 3u};
-    operations[output++] = {WorldWeaponOperationKind::String, 37u};
-    operations[output++] = {WorldWeaponOperationKind::String, 38u};
-    operations[output++] = {WorldWeaponOperationKind::String, 39u};
-    for (std::uint16_t index = 4u; index < 8u; ++index)
-        operations[output++] = {WorldWeaponOperationKind::Material, index};
-    operations[output++] = {WorldWeaponOperationKind::String, 40u};
-    operations[output++] = {WorldWeaponOperationKind::XModel, 37u};
-    operations[output++] = {WorldWeaponOperationKind::Fx, 6u};
-    operations[output++] = {WorldWeaponOperationKind::Fx, 7u};
-    operations[output++] = {WorldWeaponOperationKind::Sound, 45u};
-    operations[output++] = {WorldWeaponOperationKind::Sound, 46u};
-    operations[output++] = {WorldWeaponOperationKind::Fx, 8u};
-    operations[output++] = {WorldWeaponOperationKind::Fx, 9u};
-    operations[output++] = {WorldWeaponOperationKind::Sound, 47u};
-    operations[output++] = {WorldWeaponOperationKind::String, 41u};
-    operations[output++] = {WorldWeaponOperationKind::AccuracyKnots, 0u};
-    operations[output++] = {WorldWeaponOperationKind::AccuracyKnots, 1u};
-    operations[output++] = {WorldWeaponOperationKind::String, 42u};
-    operations[output++] = {WorldWeaponOperationKind::AccuracyKnots, 2u};
-    operations[output++] = {WorldWeaponOperationKind::AccuracyKnots, 3u};
-    for (std::uint16_t index = 43u; index < 48u; ++index)
-        operations[output++] = {WorldWeaponOperationKind::String, index};
-    return operations;
-}();
-
-constexpr std::array<std::uint32_t, 4> WEAPON_ACCURACY_KNOT_OFFSETS = {{
-    1908u, 1916u, 1912u, 1920u,
-}};
+using WorldWeaponOperationKind = weapon_loader::OperationKind;
+using WorldWeaponOperation = weapon_loader::Operation;
+const auto &WEAPON_STRING_OFFSETS = weapon_loader::StringFieldOffsets();
+const auto &WEAPON_XMODEL_OFFSETS = weapon_loader::XModelFieldOffsets();
+const auto &WEAPON_FX_OFFSETS = weapon_loader::FxFieldOffsets();
+const auto &WEAPON_MATERIAL_OFFSETS = weapon_loader::MaterialFieldOffsets();
+const auto &WEAPON_SOUND_OFFSETS = weapon_loader::SoundFieldOffsets();
+const auto &WEAPON_OPERATIONS = weapon_loader::Operations();
+const auto &WEAPON_ACCURACY_KNOT_OFFSETS =
+    weapon_loader::AccuracyKnotFieldOffsets();
 
 constexpr std::array<const char *, RETAIL_CENSUS_ASSET_TYPE_COUNT> ASSET_NAMES = {{
     "xmodelpieces", "physpreset", "xanim", "xmodel", "material", "techset",
@@ -517,6 +416,8 @@ bool ValidLimits(const RetailCensusLimits &limits) noexcept
         limits.maxBlockBytes != 0u && limits.maxTotalBlockBytes != 0u &&
         limits.maxScriptStrings != 0u && limits.maxScriptStringBytes != 0u &&
         limits.maxTotalScriptStringBytes != 0u && limits.maxAssets != 0u &&
+        limits.maxRegistryAssets != 0u && limits.maxRegistryAliases != 0u &&
+        limits.maxRegistryNameBytes != 0u &&
         limits.maxTechniqueNameBytes != 0u && limits.maxTechniquePasses != 0u &&
         limits.maxShaderNameBytes != 0u && limits.maxShaderProgramDwords != 0u &&
         limits.maxMaterialNameBytes != 0u && limits.maxImageNameBytes != 0u &&
@@ -940,6 +841,7 @@ struct RetailFastfileCensusJob::Impl
     std::int32_t block4NativeOffsetBias = 0;
     bool block4NativeOffsetBiasKnown = false;
     std::uint32_t block4NativeOffsetBiasStart = UINT32_MAX;
+    std::vector<std::pair<std::uint32_t, std::int32_t>> block4BiasSegments;
     std::uint32_t scriptIndex = 0u;
     std::uint32_t assetIndex = 0u;
     std::size_t recordVisited = 0u;
@@ -1864,37 +1766,7 @@ struct RetailFastfileCensusJob::Impl
         std::uint32_t index,
         const char *value) noexcept
     {
-        if (index < 3u)
-        {
-            const char **targets[] = {
-                &weapon.szInternalName,
-                &weapon.szDisplayName,
-                &weapon.szOverlayName,
-            };
-            *targets[index] = value;
-            return;
-        }
-        if (index < 36u)
-        {
-            weapon.szXAnims[index - 3u] = value;
-            return;
-        }
-        switch (index)
-        {
-        case 36u: weapon.szModeName = value; break;
-        case 37u: weapon.szAmmoName = value; break;
-        case 38u: weapon.szClipName = value; break;
-        case 39u: weapon.szSharedAmmoCapName = value; break;
-        case 40u: weapon.szAltWeaponName = value; break;
-        case 41u: weapon.accuracyGraphName[0u] = value; break;
-        case 42u: weapon.accuracyGraphName[1u] = value; break;
-        case 43u: weapon.szUseHintString = value; break;
-        case 44u: weapon.dropHintString = value; break;
-        case 45u: weapon.szScript = value; break;
-        case 46u: weapon.fireRumble = value; break;
-        case 47u: weapon.meleeImpactRumble = value; break;
-        default: break;
-        }
+        weapon_loader::AssignWeaponString(weapon, index, value);
     }
 
     static void AssignWeaponAccuracyKnots(
@@ -1902,14 +1774,7 @@ struct RetailFastfileCensusJob::Impl
         std::uint32_t index,
         float (*value)[WEAP_ACCURACY_COUNT]) noexcept
     {
-        switch (index)
-        {
-        case 0u: weapon.accuracyGraphKnots[0u] = value; break;
-        case 1u: weapon.originalAccuracyGraphKnots[0u] = value; break;
-        case 2u: weapon.accuracyGraphKnots[1u] = value; break;
-        case 3u: weapon.originalAccuracyGraphKnots[1u] = value; break;
-        default: break;
-        }
+        weapon_loader::AssignWeaponAccuracyKnots(weapon, index, value);
     }
 
     static void AssignWeaponXModel(
@@ -1917,14 +1782,7 @@ struct RetailFastfileCensusJob::Impl
         std::uint32_t index,
         XModel *value) noexcept
     {
-        if (index < 16u) weapon.gunXModel[index] = value;
-        else if (index == 16u) weapon.handXModel = value;
-        else if (index < 33u) weapon.worldModel[index - 17u] = value;
-        else if (index == 33u) weapon.worldClipModel = value;
-        else if (index == 34u) weapon.rocketModel = value;
-        else if (index == 35u) weapon.knifeModel = value;
-        else if (index == 36u) weapon.worldKnifeModel = value;
-        else if (index == 37u) weapon.projectileModel = value;
+        weapon_loader::AssignWeaponXModel(weapon, index, value);
     }
 
     static void AssignWeaponFx(
@@ -1932,19 +1790,7 @@ struct RetailFastfileCensusJob::Impl
         std::uint32_t index,
         const FxEffectDef *value) noexcept
     {
-        const FxEffectDef **targets[] = {
-            &weapon.viewFlashEffect,
-            &weapon.worldFlashEffect,
-            &weapon.viewShellEjectEffect,
-            &weapon.worldShellEjectEffect,
-            &weapon.viewLastShotEjectEffect,
-            &weapon.worldLastShotEjectEffect,
-            &weapon.projExplosionEffect,
-            &weapon.projDudEffect,
-            &weapon.projTrailEffect,
-            &weapon.projIgnitionEffect,
-        };
-        if (index < std::size(targets)) *targets[index] = value;
+        weapon_loader::AssignWeaponFx(weapon, index, value);
     }
 
     static void AssignWeaponMaterial(
@@ -1952,17 +1798,7 @@ struct RetailFastfileCensusJob::Impl
         std::uint32_t index,
         Material *value) noexcept
     {
-        Material **targets[] = {
-            &weapon.reticleCenter,
-            &weapon.reticleSide,
-            &weapon.hudIcon,
-            &weapon.ammoCounterIcon,
-            &weapon.overlayMaterial,
-            &weapon.overlayMaterialLowRes,
-            &weapon.killIcon,
-            &weapon.dpadIcon,
-        };
-        if (index < std::size(targets)) *targets[index] = value;
+        weapon_loader::AssignWeaponMaterial(weapon, index, value);
     }
 
     static void AssignWeaponSound(
@@ -1970,57 +1806,39 @@ struct RetailFastfileCensusJob::Impl
         std::uint32_t index,
         snd_alias_list_t *value) noexcept
     {
-        snd_alias_list_t **targets[] = {
-            &weapon.pickupSound,
-            &weapon.pickupSoundPlayer,
-            &weapon.ammoPickupSound,
-            &weapon.ammoPickupSoundPlayer,
-            &weapon.projectileSound,
-            &weapon.pullbackSound,
-            &weapon.pullbackSoundPlayer,
-            &weapon.fireSound,
-            &weapon.fireSoundPlayer,
-            &weapon.fireLoopSound,
-            &weapon.fireLoopSoundPlayer,
-            &weapon.fireStopSound,
-            &weapon.fireStopSoundPlayer,
-            &weapon.fireLastSound,
-            &weapon.fireLastSoundPlayer,
-            &weapon.emptyFireSound,
-            &weapon.emptyFireSoundPlayer,
-            &weapon.meleeSwipeSound,
-            &weapon.meleeSwipeSoundPlayer,
-            &weapon.meleeHitSound,
-            &weapon.meleeMissSound,
-            &weapon.rechamberSound,
-            &weapon.rechamberSoundPlayer,
-            &weapon.reloadSound,
-            &weapon.reloadSoundPlayer,
-            &weapon.reloadEmptySound,
-            &weapon.reloadEmptySoundPlayer,
-            &weapon.reloadStartSound,
-            &weapon.reloadStartSoundPlayer,
-            &weapon.reloadEndSound,
-            &weapon.reloadEndSoundPlayer,
-            &weapon.detonateSound,
-            &weapon.detonateSoundPlayer,
-            &weapon.nightVisionWearSound,
-            &weapon.nightVisionWearSoundPlayer,
-            &weapon.nightVisionRemoveSound,
-            &weapon.nightVisionRemoveSoundPlayer,
-            &weapon.altSwitchSound,
-            &weapon.altSwitchSoundPlayer,
-            &weapon.raiseSound,
-            &weapon.raiseSoundPlayer,
-            &weapon.firstRaiseSound,
-            &weapon.firstRaiseSoundPlayer,
-            &weapon.putawaySound,
-            &weapon.putawaySoundPlayer,
-            &weapon.projExplosionSound,
-            &weapon.projDudSound,
-            &weapon.projIgnitionSound,
-        };
-        if (index < std::size(targets)) *targets[index] = value;
+        weapon_loader::AssignWeaponSound(weapon, index, value);
+    }
+
+    bool TranslateNativeBlock4Span(ZoneSpan &target) const noexcept
+    {
+        if (target.block != 4u)
+        {
+            return true;
+        }
+        std::int32_t bias = 0;
+        bool found = false;
+        for (const auto &segment : block4BiasSegments)
+        {
+            if (segment.first <= target.offset)
+            {
+                bias = segment.second;
+                found = true;
+            }
+        }
+        if (!found && block4NativeOffsetBiasKnown &&
+            target.offset >= block4NativeOffsetBiasStart)
+        {
+            bias = block4NativeOffsetBias;
+            found = true;
+        }
+        if (!found) return true;
+        const std::int64_t adjusted = static_cast<std::int64_t>(target.offset) +
+            bias;
+        if (adjusted < 0 || adjusted > UINT32_MAX)
+            return false;
+        target.offset = static_cast<std::uint32_t>(adjusted);
+        return target.offset <= arenas.DeclaredSize(4u) &&
+            target.length <= arenas.DeclaredSize(4u) - target.offset;
     }
 
     bool ResolvePriorZoneStringPayload(
@@ -2042,18 +1860,43 @@ struct RetailFastfileCensusJob::Impl
             return true;
         }
         ZoneSpan target = nativeTarget;
-        if (block4NativeOffsetBiasKnown &&
-            target.offset >= block4NativeOffsetBiasStart)
-        {
-            const std::int64_t adjusted = static_cast<std::int64_t>(
-                target.offset) + block4NativeOffsetBias;
-            if (adjusted < 0 || adjusted > UINT32_MAX) return false;
-            target.offset = static_cast<std::uint32_t>(adjusted);
-        }
+        if (!TranslateNativeBlock4Span(target)) return false;
         const auto indexed = block4StringAliases.find(target.offset);
         if (indexed != block4StringAliases.end() && indexed->second)
         {
             value = indexed->second;
+            offset = target.offset;
+            return true;
+        }
+        // DB_ConvertOffsetToPointer converts an address, not an asset key.
+        // XStrings therefore may legally point into a prior character payload
+        // (WeaponDef animation fields commonly retain only the suffix of an
+        // XAnimParts name).  Preserve that native behavior while keeping the
+        // derived suffix independently owned and stable.
+        std::shared_ptr<std::string> containing;
+        std::size_t suffixOffset = 0u;
+        for (const auto &[candidateOffset, candidate] : block4StringAliases)
+        {
+            if (!candidate || target.offset < candidateOffset)
+                continue;
+            const std::uint64_t delta =
+                static_cast<std::uint64_t>(target.offset) - candidateOffset;
+            if (delta <= candidate->size())
+            {
+                containing = candidate;
+                suffixOffset = static_cast<std::size_t>(delta);
+                break;
+            }
+        }
+        if (containing)
+        {
+            try
+            {
+                value = std::make_shared<std::string>(
+                    containing->substr(suffixOffset));
+                block4StringAliases.emplace(target.offset, value);
+            }
+            catch (...) { return false; }
             offset = target.offset;
             return true;
         }
@@ -2254,39 +2097,149 @@ struct RetailFastfileCensusJob::Impl
         return false;
     }
 
+    ZoneRegistryError ResolveRegistryAlias(
+        std::uint32_t token,
+        std::uint32_t expectedType,
+        std::uint32_t &identity) const noexcept
+    {
+        ZoneRegistryError error =
+            registry.ResolveAlias(token, expectedType, identity);
+        if (error == ZoneRegistryError::None ||
+            (block4BiasSegments.empty() && !block4NativeOffsetBiasKnown))
+        {
+            return error;
+        }
+        ZoneSpan target;
+        if (!DecodeZoneAliasToken(token, target) || target.block != 4u ||
+            !TranslateNativeBlock4Span(target))
+        {
+            return error;
+        }
+        std::uint32_t adjustedToken = 0u;
+        if (!EncodeZoneAliasToken(target, adjustedToken))
+            return error;
+        return registry.ResolveAlias(adjustedToken, expectedType, identity);
+    }
+
+    bool RecordBlock4CompatibilityBias(
+        std::uint32_t start,
+        std::uint32_t biasValue) noexcept
+    {
+        if (biasValue > 4096u) return false;
+        const std::int32_t bias = static_cast<std::int32_t>(biasValue);
+        if (!block4BiasSegments.empty())
+        {
+            const auto &prior = block4BiasSegments.back();
+            if (start < prior.first || bias < prior.second ||
+                bias - prior.second > 4096)
+                return false;
+        }
+        try
+        {
+            if (block4BiasSegments.empty() ||
+                block4BiasSegments.back() != std::pair{start, bias})
+                block4BiasSegments.emplace_back(start, bias);
+        }
+        catch (...) { return false; }
+        return true;
+    }
+
+    bool CalibrateBlock4BiasFromWeaponXString(
+        std::uint32_t token,
+        const RetailPublishedWeaponDef &entry) noexcept
+    {
+        ZoneSpan target;
+        if (prerequisiteZone || !entry.storage ||
+            !DecodeZoneAliasToken(token, target) || target.block != 4u)
+            return false;
+
+        // First prefer a string already loaded by this WeaponDef. Generated
+        // Load_WeaponDef processes XStrings in field order, so a later field
+        // may point into an earlier inline string after temporary families have
+        // shifted the compatibility arena.
+        std::uint32_t currentWeaponCandidate = 0u;
+        std::uint32_t currentWeaponEarliest = UINT32_MAX;
+        for (std::size_t index = 0u; index < entry.stringBlock4Offsets.size(); ++index)
+        {
+            const std::uint32_t offset = entry.stringBlock4Offsets[index];
+            if (offset != UINT32_MAX && entry.storage->strings[index] &&
+                offset >= target.offset && offset - target.offset <= 4096u)
+            {
+                currentWeaponCandidate = std::max(currentWeaponCandidate, offset);
+                currentWeaponEarliest = std::min(currentWeaponEarliest, offset);
+            }
+        }
+        if (currentWeaponCandidate != 0u)
+        {
+            const std::uint32_t bias = currentWeaponCandidate - target.offset;
+            const std::uint32_t coveredPrefix =
+                currentWeaponCandidate - currentWeaponEarliest;
+            const std::uint32_t start = target.offset >= coveredPrefix
+                ? target.offset - coveredPrefix : target.offset;
+            if (RecordBlock4CompatibilityBias(start, bias)) return true;
+        }
+
+        // WeaponDef::szXAnims may instead point into a canonical XAnimParts
+        // name. Choose only the nearest published name in the same bounded
+        // drift window, and require monotonic bias growth above.
+        std::uint32_t xanimCandidate = UINT32_MAX;
+        for (const RetailPublishedXAnimParts &parts : result.worldXAnimParts)
+        {
+            if (!parts.published || !parts.storage || !parts.storage->name ||
+                parts.nameBlock4Offset < target.offset ||
+                parts.nameBlock4Offset - target.offset > 4096u)
+                continue;
+            xanimCandidate = std::min(xanimCandidate, parts.nameBlock4Offset);
+        }
+        return xanimCandidate != UINT32_MAX &&
+            RecordBlock4CompatibilityBias(
+                target.offset, xanimCandidate - target.offset);
+    }
+
     bool ResolvePriorWeaponSoundCell(
         std::uint32_t token,
         std::shared_ptr<std::string> &value) noexcept
     {
-        ZoneSpan target;
-        if (!DecodeZoneAliasToken(token, target) || target.block != 4u)
+        ZoneSpan nativeTarget;
+        if (!DecodeZoneAliasToken(token, nativeTarget) ||
+            nativeTarget.block != 4u)
             return false;
-        for (RetailPublishedWeaponDef &candidate : result.worldWeapons)
-        {
-            if (!candidate.storage) continue;
-            for (std::size_t index = 0u;
-                 index < candidate.soundNameCellBlock4Offsets.size(); ++index)
+        auto find = [&](const ZoneSpan &target) noexcept {
+            for (RetailPublishedWeaponDef &candidate : result.worldWeapons)
             {
-                if (candidate.soundNameCellBlock4Offsets[index] == target.offset &&
-                    candidate.storage->soundNames[index])
+                if (!candidate.storage) continue;
+                for (std::size_t index = 0u;
+                     index < candidate.soundNameCellBlock4Offsets.size(); ++index)
                 {
-                    value = candidate.storage->soundNames[index];
-                    return true;
+                    if (candidate.soundNameCellBlock4Offsets[index] ==
+                            target.offset && candidate.storage->soundNames[index])
+                    {
+                        value = candidate.storage->soundNames[index];
+                        return true;
+                    }
+                }
+                for (std::size_t index = 0u;
+                     index < candidate.bounceSoundNameCellBlock4Offsets.size();
+                     ++index)
+                {
+                    if (candidate.bounceSoundNameCellBlock4Offsets[index] ==
+                            target.offset &&
+                        candidate.storage->bounceSoundNames[index])
+                    {
+                        value = candidate.storage->bounceSoundNames[index];
+                        return true;
+                    }
                 }
             }
-            for (std::size_t index = 0u;
-                 index < candidate.bounceSoundNameCellBlock4Offsets.size();
-                 ++index)
-            {
-                if (candidate.bounceSoundNameCellBlock4Offsets[index] ==
-                        target.offset &&
-                    candidate.storage->bounceSoundNames[index])
-                {
-                    value = candidate.storage->bounceSoundNames[index];
-                    return true;
-                }
-            }
-        }
+            return false;
+        };
+        // A native alias may still name an object from an earlier range whose
+        // portable and native virtual offsets agree.  Prefer that exact
+        // address before applying a later range's compatibility translation.
+        if (find(nativeTarget)) return true;
+        ZoneSpan target = nativeTarget;
+        if (!TranslateNativeBlock4Span(target)) return false;
+        if (target.offset != nativeTarget.offset && find(target)) return true;
         return false;
     }
 
@@ -2532,8 +2485,13 @@ struct RetailFastfileCensusJob::Impl
                     return RetailCensusError::WeaponStringInvalid;
                 std::shared_ptr<std::string> resolved;
                 std::uint32_t resolvedOffset = UINT32_MAX;
-                if (!ResolvePriorZoneStringPayload(
-                        token, resolved, resolvedOffset))
+                bool stringResolved = ResolvePriorZoneStringPayload(
+                    token, resolved, resolvedOffset);
+                if (!stringResolved &&
+                    CalibrateBlock4BiasFromWeaponXString(token, entry))
+                    stringResolved = ResolvePriorZoneStringPayload(
+                        token, resolved, resolvedOffset);
+                if (!stringResolved)
                 {
                     if (!prerequisiteZone)
                         return RetailCensusError::WeaponStringInvalid;
@@ -2570,7 +2528,7 @@ struct RetailFastfileCensusJob::Impl
                     continue;
                 }
                 std::uint32_t identity = 0u;
-                if (registry.ResolveAlias(
+                if (ResolveRegistryAlias(
                         token, ASSET_TYPE_XMODEL, identity) !=
                     ZoneRegistryError::None)
                 {
@@ -2612,7 +2570,7 @@ struct RetailFastfileCensusJob::Impl
                     continue;
                 }
                 std::uint32_t identity = 0u;
-                if (registry.ResolveAlias(token, ASSET_TYPE_FX, identity) !=
+                if (ResolveRegistryAlias(token, ASSET_TYPE_FX, identity) !=
                     ZoneRegistryError::None)
                 {
                     if (!prerequisiteZone)
@@ -2691,7 +2649,7 @@ struct RetailFastfileCensusJob::Impl
                     return RetailCensusError::None;
                 }
                 std::uint32_t identity = 0u;
-                if (registry.ResolveAlias(token, ASSET_TYPE_MATERIAL, identity) !=
+                if (ResolveRegistryAlias(token, ASSET_TYPE_MATERIAL, identity) !=
                     ZoneRegistryError::None)
                 {
                     if (!prerequisiteZone)
@@ -2829,7 +2787,8 @@ struct RetailFastfileCensusJob::Impl
                     continue;
                 }
                 ZoneSpan target;
-                if (!DecodeZoneAliasToken(token, target) || target.block != 4u)
+                if (!DecodeZoneAliasToken(token, target) || target.block != 4u ||
+                    !TranslateNativeBlock4Span(target))
                 {
                     if (!prerequisiteZone)
                         return RetailCensusError::WeaponSoundNameInvalid;
@@ -2897,7 +2856,8 @@ struct RetailFastfileCensusJob::Impl
             if (token == SHARED_POINTER)
                 return RetailCensusError::WeaponAccuracyInvalid;
             ZoneSpan target;
-            if (!DecodeZoneAliasToken(token, target) || target.block != 4u)
+            if (!DecodeZoneAliasToken(token, target) || target.block != 4u ||
+                !TranslateNativeBlock4Span(target))
                 return RetailCensusError::WeaponAccuracyInvalid;
             bool found = false;
             for (std::size_t weaponIndex = 0u;
@@ -3251,6 +3211,7 @@ struct RetailFastfileCensusJob::Impl
         ZoneSpan target;
         if (alignment == 0u || (alignment & (alignment - 1u)) != 0u ||
             !DecodeZoneAliasToken(token, target) || target.block != 4u ||
+            !TranslateNativeBlock4Span(target) ||
             (target.offset & (alignment - 1u)) != 0u ||
             count > std::numeric_limits<std::uint32_t>::max() / sizeof(T))
         {
@@ -3808,7 +3769,7 @@ struct RetailFastfileCensusJob::Impl
                 if (result.nextBodyType == ASSET_TYPE_SOUND)
                 {
                     std::uint32_t identity = 0u;
-                    if (registry.ResolveAlias(
+                    if (ResolveRegistryAlias(
                             result.nextBodyReference,
                             ASSET_TYPE_SOUND,
                             identity) != ZoneRegistryError::None)
@@ -3859,7 +3820,7 @@ struct RetailFastfileCensusJob::Impl
                     std::shared_ptr<CanonicalLocalizeEntryStorage> priorStorage;
                     if (result.nextBodyReference != 0u)
                     {
-                        if (registry.ResolveAlias(
+                        if (ResolveRegistryAlias(
                                 result.nextBodyReference,
                                 ASSET_TYPE_LOCALIZE,
                                 identity) != ZoneRegistryError::None)
@@ -3917,7 +3878,7 @@ struct RetailFastfileCensusJob::Impl
                     std::array<std::uint32_t, 4> priorKnotOffsets{};
                     if (result.nextBodyReference != 0u)
                     {
-                        if (registry.ResolveAlias(
+                        if (ResolveRegistryAlias(
                                 result.nextBodyReference,
                                 ASSET_TYPE_WEAPON,
                                 identity) != ZoneRegistryError::None)
@@ -3993,7 +3954,7 @@ struct RetailFastfileCensusJob::Impl
                     std::uint32_t priorNameOffset = 0u;
                     if (result.nextBodyReference != 0u)
                     {
-                        if (registry.ResolveAlias(
+                        if (ResolveRegistryAlias(
                                 result.nextBodyReference,
                                 ASSET_TYPE_XANIM_PARTS,
                                 identity) != ZoneRegistryError::None)
@@ -4485,7 +4446,7 @@ struct RetailFastfileCensusJob::Impl
                     continue;
                 }
                 std::uint32_t identity = 0u;
-                ZoneRegistryError resolveError = registry.ResolveAlias(
+                ZoneRegistryError resolveError = ResolveRegistryAlias(
                     token, ASSET_TYPE_MATERIAL, identity);
                 if (resolveError != ZoneRegistryError::None)
                 {
@@ -4523,7 +4484,7 @@ struct RetailFastfileCensusJob::Impl
                     {
                         return error;
                     }
-                    resolveError = registry.ResolveAlias(
+                    resolveError = ResolveRegistryAlias(
                         token, ASSET_TYPE_MATERIAL, identity);
                     if (resolveError != ZoneRegistryError::None)
                         return RetailCensusError::XModelMaterialAliasInvalid;
@@ -4635,7 +4596,7 @@ struct RetailFastfileCensusJob::Impl
                     continue;
                 }
                 std::uint32_t identity = 0u;
-                if (registry.ResolveAlias(token, ASSET_TYPE_IMAGE, identity) !=
+                if (ResolveRegistryAlias(token, ASSET_TYPE_IMAGE, identity) !=
                     ZoneRegistryError::None)
                 {
                     if (prerequisiteZone &&
@@ -4705,8 +4666,8 @@ struct RetailFastfileCensusJob::Impl
                     return error;
                 if (const RetailCensusError error = MapRegistryError(registry.Initialize(
                         result.blockSizes,
-                        {limits.maxAssets, limits.maxAssets,
-                         limits.maxInflatedPrefixBytes}));
+                        {limits.maxRegistryAssets, limits.maxRegistryAliases,
+                         limits.maxRegistryNameBytes}));
                     error != RetailCensusError::None)
                     return error;
                 arenasInitialized = true;
@@ -6057,7 +6018,7 @@ struct RetailFastfileCensusJob::Impl
                             break;
                         }
                         std::uint32_t identity = 0u;
-                        if (registry.ResolveAlias(
+                        if (ResolveRegistryAlias(
                                 token, ASSET_TYPE_XMODEL, identity) !=
                             ZoneRegistryError::None)
                         {
@@ -6110,7 +6071,7 @@ struct RetailFastfileCensusJob::Impl
                         break;
                     }
                     std::uint32_t identity = 0u;
-                    ZoneRegistryError resolveError = registry.ResolveAlias(
+                    ZoneRegistryError resolveError = ResolveRegistryAlias(
                         token, ASSET_TYPE_MATERIAL, identity);
                     if (resolveError != ZoneRegistryError::None)
                     {
@@ -7417,8 +7378,9 @@ struct RetailFastfileCensusJob::Impl
                 }
                 std::shared_ptr<std::string> name;
                 std::uint32_t stringOffset = UINT32_MAX;
-                if (!ResolvePriorZoneStringPayload(
-                        worldWeaponSoundStringReference, name, stringOffset))
+                const bool soundStringResolved = ResolvePriorZoneStringPayload(
+                    worldWeaponSoundStringReference, name, stringOffset);
+                if (!soundStringResolved)
                 {
                     if (!prerequisiteZone)
                     {
@@ -7658,27 +7620,6 @@ struct RetailFastfileCensusJob::Impl
                 result.registryAssetCount = registry.AssetCount();
                 result.registryAliasCount = registry.AliasCount();
                 result.registryDefinedAliasCount = registry.DefinedAliasCount();
-                if (limits.stopAfterFirstPublishedWeapon && entry.published)
-                {
-                    const std::uint32_t nextIndex = entry.assetIndex + 1u;
-                    result.worldNextAssetIndex = nextIndex;
-                    result.nextBodyIndex = nextIndex;
-                    if (nextIndex < worldAssetTypes.size())
-                    {
-                        result.nextBodyType = worldAssetTypes[nextIndex];
-                        result.nextBodyReference =
-                            worldAssetReferences[nextIndex];
-                    }
-                    else
-                    {
-                        result.nextBodyType = 0u;
-                        result.nextBodyReference = 0u;
-                    }
-                    result.stoppedBeforeDifferentWorldAssetType = true;
-                    stage = RetailCensusStage::AssetBoundary;
-                    complete = true;
-                    return RetailCensusError::None;
-                }
                 if (const RetailCensusError error = dispatchSupportedWorldAsset(
                         entry.assetIndex + 1u, stage);
                     error != RetailCensusError::None) return error;
@@ -8532,6 +8473,12 @@ struct RetailFastfileCensusJob::Impl
                 catch (...) { return RetailCensusError::AllocationFailed; }
                 if (!ValidPublishedName(*entry.storage->name))
                     return RetailCensusError::XAnimNameInvalid;
+                try
+                {
+                    block4StringAliases.emplace(
+                        entry.nameBlock4Offset, entry.storage->name);
+                }
+                catch (...) { return RetailCensusError::AllocationFailed; }
                 entry.asset->name = entry.storage->name->c_str();
                 cursor += bytes;
                 ++report.recordsProcessed;
@@ -10356,7 +10303,7 @@ struct RetailFastfileCensusJob::Impl
                     return RetailCensusError::MaterialLayoutUnsupported;
                 }
                 if (material.techniqueSetReference != 0u &&
-                    registry.ResolveAlias(
+                    ResolveRegistryAlias(
                         material.techniqueSetReference,
                         ASSET_TYPE_TECHNIQUE_SET,
                         material.techniqueSetIdentity) != ZoneRegistryError::None)
@@ -11276,7 +11223,7 @@ struct RetailFastfileCensusJob::Impl
                         continue;
                     }
                     std::uint32_t identity = 0u;
-                    if (registry.ResolveAlias(
+                    if (ResolveRegistryAlias(
                             model.physPresetReference,
                             ASSET_TYPE_PHYS_PRESET, identity) !=
                         ZoneRegistryError::None)
@@ -12588,7 +12535,7 @@ struct RetailFastfileCensusJob::Impl
                         ? RetailCensusError::MaterialTextureCountLimit
                         : RetailCensusError::MaterialLayoutUnsupported;
                 std::uint32_t techniqueIdentity = 0u;
-                if (registry.ResolveAlias(
+                if (ResolveRegistryAlias(
                         materialTechniqueSetToken,
                         ASSET_TYPE_TECHNIQUE_SET,
                         techniqueIdentity) != ZoneRegistryError::None ||

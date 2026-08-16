@@ -1650,13 +1650,52 @@ names and serialized pointer aliases converge on 1,716 unique objects.
 The case-insensitive sound catalog indexes those exact objects and retains the
 common-zone owner; it does not copy or synthesize sound records. Its lookup
 provider mirrors native missing-sound behavior by returning the indexed
-canonical `null` object. With that provider, the owned Killhouse traversal
-publishes WeaponDef 458 (`winchester1200`) through its normal canonical lookup
-path and stops at the explicit first-published-weapon boundary at asset 459.
-No playback, mixing, decoding, or browser audio runtime behavior is implemented.
+canonical `null` object. At that checkpoint, the owned Killhouse traversal
+published WeaponDef 458 (`winchester1200`) through its normal canonical lookup
+path and stopped at the explicit first-published-weapon boundary at asset 459.
+That temporary stop is retired by the ordered traversal below. No playback,
+mixing, decoding, or browser audio runtime behavior is implemented.
 
-General generated-loader traversal and a real-map render remain later format
-milestones.
+## Ordered pre-world boundary, loader extraction, and synthetic CI
+
+The first-WeaponDef stop is retired as a traversal boundary. The owned
+common-to-Killhouse run now continues in serialized order, completes assets
+0-703, and stops before asset 704, type 12 (`com_map`). The supported prefix
+publishes 152 technique sets, 320 XModels, 60 FX effects, 146 XAnimParts, ten
+WeaponDefs, and 21 RawFiles. `GfxWorld` is not sought directly; `com_map` and
+its native dependencies are the next family inventory.
+
+Native `Load_XString` converts any nonzero non-inline token to an address, so a
+valid pointer need not equal the first byte of an indexed string. Weapon
+animation fields exercise this by pointing into earlier XAnim names. The
+portable resolver now retains those suffixes with stable ownership and uses a
+strictly bounded, monotonic compatibility offset only where temporary
+pre-world allocation accounting requires it. Arbitrary WeaponDef strings no
+longer establish large inferred offsets.
+
+The generated WeaponDef field offsets, operation order, and canonical pointer
+assignments have moved to `src/web/web_retail_load_weapon.*`. The dispatcher
+still owns the shared stream, registry, publication, trace, and backing storage;
+this is the first family extraction from the monolith, not a second registry or
+engine object model. Continue extracting coherent generated-loader families
+before adding the substantially larger clip-map/world loaders.
+
+The zone registry now enforces independent asset, alias, and total-name-byte
+ceilings. Canonical vector order is retained while identity, type/source,
+hashed type/name, and alias-span indices provide bounded lookup; failures and
+UnloadAll/Reset remain atomic and release index storage.
+
+`retail_fastfile_dispatcher_fuzz` drives the real streaming dispatcher with low
+file, inflate, block, collection, retained-byte, trace, step, and iteration
+ceilings. Each mutation is tried both as a malformed physical file and as
+arbitrary inflated bytes behind a valid synthetic fastfile envelope, allowing
+the fuzzer to reach pointer/count/stream/publication paths rather than stopping
+at the outer header. Its checked-in corpus contains only synthetic
+truncated/malformed inputs. `.github/workflows/web-port.yml` adds legal
+synthetic Linux native,
+Clang sanitizer/fuzzer, Windows MSVC, Emscripten/Node differential, Playwright
+smoke/full, and Release browser-artifact jobs. CI never downloads or packages
+retail game data.
 
 An optional loose `.d3dbsp` path is not an implicit shortcut: pursue it only
 after an explicit design decision establishes that it is a supported legal

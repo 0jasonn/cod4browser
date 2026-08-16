@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace kisak::fastfile
@@ -15,7 +16,7 @@ struct ZoneRegistryLimits
 {
     std::uint32_t maxAssets = 2u;
     std::uint32_t maxAliases = 1u;
-    std::uint32_t maxTotalNameBytes = 256u;
+    std::uint32_t maxNameBytes = 256u;
 };
 
 struct ZoneRegisteredAsset
@@ -80,6 +81,9 @@ public:
         std::uint32_t &identity) const noexcept;
 
     const ZoneRegisteredAsset *FindAsset(std::uint32_t identity) const noexcept;
+    const ZoneRegisteredAsset *FindAsset(
+        std::uint32_t type,
+        std::string_view name) const noexcept;
 
     bool Initialized() const noexcept;
     std::uint32_t AssetCount() const noexcept;
@@ -104,6 +108,10 @@ private:
     std::array<std::uint32_t, ZONE_STREAM_BLOCK_COUNT> declared_{};
     std::vector<ZoneRegisteredAsset> assets_;
     std::vector<AliasEntry> aliases_;
+    std::unordered_map<std::uint32_t, std::size_t> assetByIdentity_;
+    std::unordered_map<std::uint64_t, std::size_t> assetBySource_;
+    std::unordered_multimap<std::uint64_t, std::size_t> assetByNameHash_;
+    std::unordered_map<std::uint64_t, std::size_t> aliasBySpan_;
     ZoneRegistryLimits limits_{};
     std::uint32_t totalNameBytes_ = 0u;
     std::uint32_t nextIdentity_ = 1u;

@@ -3510,7 +3510,6 @@ void TestOwnedWorldSurfaceIfRequested(
         Require(worldInput.good(),
             "Killhouse WeaponDef retry opens the world fastfile");
         RetailFastfileCensusJob worldJob;
-        limits.stopAfterFirstPublishedWeapon = true;
         Require(worldJob.BeginStreaming(
                     RetailCensusMode::WorldAssetLoader,
                     limits,
@@ -3569,14 +3568,39 @@ void TestOwnedWorldSurfaceIfRequested(
                     *weaponIt->storage->soundNames[2u]) &&
                 *weaponIt->storage->soundNames[7u] ==
                     "weap_winch1200_fire_npc" &&
-                weaponIt->asset->fireSound == catalog.Find("null") &&
-                worldResult.nextBodyIndex == 459u,
+                weaponIt->asset->fireSound == catalog.Find("null"),
             "Killhouse WeaponDef 458 uses exact common sound pointers and the zone-owned native default");
         std::cerr << "common -> Killhouse publication: sounds="
                   << catalog.EntryCount() << " weapon="
                   << weaponIt->assetIndex << ':'
                   << weaponIt->asset->szInternalName << " pickup="
                   << *weaponIt->storage->soundNames[0u] << '\n';
+        std::cerr << "Killhouse ordered boundary: completed="
+                  << worldResult.completedAssetCount << " next="
+                  << worldResult.nextBodyIndex << ':'
+                  << worldResult.nextBodyType << " ("
+                  << RetailAssetTypeName(worldResult.nextBodyType) << ")"
+                  << " operation="
+                  << (worldResult.unsupportedOperation
+                          ? worldResult.unsupportedOperation : "complete")
+                  << " canonical={techsets="
+                  << worldResult.worldTechniqueSets.size()
+                  << ",xmodels=" << worldResult.worldXModels.size()
+                  << ",fx=" << worldResult.worldFxEffects.size()
+                  << ",xanim=" << worldResult.worldXAnimParts.size()
+                  << ",weapons=" << worldResult.worldWeapons.size()
+                  << ",rawfiles=" << worldResult.worldRawFiles.size()
+                  << "}\n";
+        Require(worldResult.completedAssetCount == 704u &&
+                worldResult.nextBodyIndex == 704u &&
+                worldResult.nextBodyType == 12u &&
+                worldResult.worldTechniqueSets.size() == 152u &&
+                worldResult.worldXModels.size() == 320u &&
+                worldResult.worldFxEffects.size() == 60u &&
+                worldResult.worldXAnimParts.size() == 146u &&
+                worldResult.worldWeapons.size() == 10u &&
+                worldResult.worldRawFiles.size() == 21u,
+            "Killhouse ordered traversal reaches the exact com_map boundary with the canonical prefix");
         return;
     }
     Require(!result.worldXModels.empty(),

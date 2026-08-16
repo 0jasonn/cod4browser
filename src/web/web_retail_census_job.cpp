@@ -2855,7 +2855,6 @@ WebRetailCensusFrameResult WebRetailCensusJob_Frame()
                 RetailCensusLimits limits;
                 limits.maxFileBytes = 128u * 1024u * 1024u;
                 limits.maxInflatedPrefixBytes = 128u * 1024u * 1024u;
-                limits.stopAfterFirstPublishedWeapon = true;
                 if (const auto error = g_runtime.parser.BeginStreaming(
                         RetailCensusMode::WorldAssetLoader, limits,
                         g_runtime.soundCatalog.Lookup());

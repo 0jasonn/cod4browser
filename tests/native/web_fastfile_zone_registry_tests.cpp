@@ -96,6 +96,10 @@ void TestStableAssetsAndAliasLifecycle()
     Require(material && material->name == "web/synthetic" &&
             material->type == MATERIAL_TYPE && material->sourceIndex == 0u,
         "registry retains stable material metadata after later registration");
+    Require(registry.FindAsset(MATERIAL_TYPE, "web/synthetic") == material &&
+            registry.FindAsset(WORLD_TYPE, "web/synthetic") == nullptr &&
+            registry.FindAsset(MATERIAL_TYPE, "missing") == nullptr,
+        "type/name index resolves exact canonical metadata without cross-type matches");
 
     RequireError(registry.PublishAlias(alias, materialIdentity),
         ZoneRegistryError::AliasDuplicate,
@@ -103,6 +107,56 @@ void TestStableAssetsAndAliasLifecycle()
     RequireError(registry.ResolveAlias(token, WORLD_TYPE, untouched),
         ZoneRegistryError::AssetTypeMismatch,
         "alias resolution enforces expected asset type");
+}
+
+void TestIndependentCeilingsAndIndexReset()
+{
+    ZoneAssetRegistry registry;
+    RequireError(registry.Initialize(Declared(), {1u, 3u, 5u}),
+        ZoneRegistryError::None,
+        "independent ceiling fixture initializes");
+    std::uint32_t identity = 0u;
+    RequireError(registry.RegisterAsset(
+            MATERIAL_TYPE, 9u, "alpha", identity),
+        ZoneRegistryError::None,
+        "name ceiling permits an exact five-byte asset");
+    RequireError(registry.RegisterAsset(WORLD_TYPE, 10u, {}, identity),
+        ZoneRegistryError::AssetLimit,
+        "asset ceiling is independent from remaining alias capacity");
+    for (const std::uint32_t offset : {16u, 20u, 24u})
+    {
+        RequireError(registry.ReserveAlias({4u, offset, 4u}, MATERIAL_TYPE),
+            ZoneRegistryError::None,
+            "alias ceiling remains available after the asset ceiling");
+    }
+    RequireError(registry.ReserveAlias({4u, 28u, 4u}, MATERIAL_TYPE),
+        ZoneRegistryError::AliasLimit,
+        "fourth alias independently reaches the alias ceiling");
+
+    registry.UnloadAll();
+    Require(registry.FindAsset(1u) == nullptr &&
+            registry.FindAsset(MATERIAL_TYPE, "alpha") == nullptr,
+        "UnloadAll clears identity and type/name indices");
+    RequireError(registry.RegisterAsset(
+            MATERIAL_TYPE, 11u, "beta", identity),
+        ZoneRegistryError::None,
+        "registry indices accept a new canonical order after unload");
+    Require(identity == 1u &&
+            registry.FindAsset(MATERIAL_TYPE, "beta") != nullptr,
+        "index reset restarts identity order and type/name lookup");
+
+    ZoneAssetRegistry names;
+    RequireError(names.Initialize(Declared(), {3u, 3u, 1u}),
+        ZoneRegistryError::None,
+        "name-only ceiling fixture initializes");
+    RequireError(names.RegisterAsset(MATERIAL_TYPE, 0u, "a", identity),
+        ZoneRegistryError::None,
+        "name ceiling accepts its exact byte count");
+    RequireError(names.RegisterAsset(WORLD_TYPE, 1u, "b", identity),
+        ZoneRegistryError::NameBytesLimit,
+        "name-byte ceiling is independent from remaining asset capacity");
+    Require(names.AssetCount() == 1u && names.AliasCount() == 0u,
+        "name ceiling failure leaves all independent counts unchanged");
 }
 
 void TestValidationLimitsAndAtomicity()
@@ -225,6 +279,7 @@ int main()
 {
     TestStableAssetsAndAliasLifecycle();
     TestValidationLimitsAndAtomicity();
+    TestIndependentCeilingsAndIndexReset();
     TestUnloadResetAndStrings();
     std::cout << "web_fastfile_zone_registry_tests: PASS\n";
     return 0;

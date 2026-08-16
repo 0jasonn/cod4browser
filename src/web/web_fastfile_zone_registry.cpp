@@ -13,6 +13,36 @@ constexpr std::uint32_t INLINE_POINTER = 0xffffffffu;
 constexpr std::uint32_t INLINE_SHARED_POINTER = 0xfffffffeu;
 constexpr std::uint32_t POINTER_OFFSET_MASK = 0x0fffffffu;
 
+std::uint64_t AssetSourceKey(
+    std::uint32_t type,
+    std::uint32_t sourceIndex) noexcept
+{
+    return (static_cast<std::uint64_t>(type) << 32u) | sourceIndex;
+}
+
+std::uint64_t AliasSpanKey(const ZoneSpan &slot) noexcept
+{
+    return (static_cast<std::uint64_t>(slot.block) << 32u) | slot.offset;
+}
+
+std::uint64_t AssetNameHash(
+    std::uint32_t type,
+    std::string_view name) noexcept
+{
+    std::uint64_t value = 1469598103934665603ull;
+    for (std::uint32_t shift = 0u; shift < 32u; shift += 8u)
+    {
+        value ^= (type >> shift) & 0xffu;
+        value *= 1099511628211ull;
+    }
+    for (const unsigned char byte : name)
+    {
+        value ^= byte;
+        value *= 1099511628211ull;
+    }
+    return value;
+}
+
 bool SpanIsValidAlias(
     const ZoneSpan &slot,
     const std::array<std::uint32_t, ZONE_STREAM_BLOCK_COUNT> &declared) noexcept
@@ -61,13 +91,17 @@ ZoneRegistryError ZoneAssetRegistry::Initialize(
     const ZoneRegistryLimits &limits) noexcept
 {
     if (limits.maxAssets == 0u || limits.maxAliases == 0u ||
-        limits.maxTotalNameBytes == 0u)
+        limits.maxNameBytes == 0u)
     {
         return ZoneRegistryError::InvalidArgument;
     }
 
     std::vector<ZoneRegisteredAsset>().swap(assets_);
     std::vector<AliasEntry>().swap(aliases_);
+    std::unordered_map<std::uint32_t, std::size_t>().swap(assetByIdentity_);
+    std::unordered_map<std::uint64_t, std::size_t>().swap(assetBySource_);
+    std::unordered_multimap<std::uint64_t, std::size_t>().swap(assetByNameHash_);
+    std::unordered_map<std::uint64_t, std::size_t>().swap(aliasBySpan_);
     declared_ = declaredSizes;
     limits_ = limits;
     totalNameBytes_ = 0u;
@@ -94,18 +128,19 @@ ZoneRegistryError ZoneAssetRegistry::RegisterAsset(
     {
         return ZoneRegistryError::AssetLimit;
     }
-    if (name.size() > limits_.maxTotalNameBytes - totalNameBytes_)
+    if (name.size() > limits_.maxNameBytes - totalNameBytes_)
     {
         return ZoneRegistryError::NameBytesLimit;
     }
-    if (std::any_of(assets_.begin(), assets_.end(),
-            [type, sourceIndex](const ZoneRegisteredAsset &asset) {
-                return asset.type == type && asset.sourceIndex == sourceIndex;
-            }))
+    const std::uint64_t sourceKey = AssetSourceKey(type, sourceIndex);
+    if (assetBySource_.contains(sourceKey))
     {
         return ZoneRegistryError::AssetDuplicate;
     }
 
+    bool assetAppended = false;
+    bool sourceIndexed = false;
+    bool identityIndexed = false;
     try
     {
         ZoneRegisteredAsset asset;
@@ -114,13 +149,40 @@ ZoneRegistryError ZoneAssetRegistry::RegisterAsset(
         asset.sourceIndex = sourceIndex;
         asset.name.assign(name.begin(), name.end());
         assets_.push_back(std::move(asset));
+        assetAppended = true;
+        const std::size_t index = assets_.size() - 1u;
+        const auto [sourceIt, sourceInserted] =
+            assetBySource_.emplace(sourceKey, index);
+        if (!sourceInserted)
+        {
+            assets_.pop_back();
+            return ZoneRegistryError::AssetDuplicate;
+        }
+        sourceIndexed = true;
+        const auto [identityIt, identityInserted] =
+            assetByIdentity_.emplace(nextIdentity_, index);
+        if (!identityInserted)
+        {
+            assetBySource_.erase(sourceIt);
+            assets_.pop_back();
+            return ZoneRegistryError::InvalidArgument;
+        }
+        identityIndexed = true;
+        assetByNameHash_.emplace(
+            AssetNameHash(type, assets_.back().name), index);
     }
     catch (const std::bad_alloc &)
     {
+        if (identityIndexed) assetByIdentity_.erase(nextIdentity_);
+        if (sourceIndexed) assetBySource_.erase(sourceKey);
+        if (assetAppended) assets_.pop_back();
         return ZoneRegistryError::AllocationFailed;
     }
     catch (...)
     {
+        if (identityIndexed) assetByIdentity_.erase(nextIdentity_);
+        if (sourceIndexed) assetBySource_.erase(sourceKey);
+        if (assetAppended) assets_.pop_back();
         return ZoneRegistryError::AllocationFailed;
     }
 
@@ -146,7 +208,8 @@ ZoneRegistryError ZoneAssetRegistry::ReserveAlias(
     {
         return ZoneRegistryError::AliasLimit;
     }
-    if (FindAlias(slot) != nullptr)
+    const std::uint64_t spanKey = AliasSpanKey(slot);
+    if (aliasBySpan_.contains(spanKey))
     {
         return ZoneRegistryError::AliasDuplicate;
     }
@@ -154,6 +217,21 @@ ZoneRegistryError ZoneAssetRegistry::ReserveAlias(
     try
     {
         aliases_.push_back({slot, expectedType, 0u});
+        try
+        {
+            const auto [it, inserted] =
+                aliasBySpan_.emplace(spanKey, aliases_.size() - 1u);
+            if (!inserted)
+            {
+                aliases_.pop_back();
+                return ZoneRegistryError::AliasDuplicate;
+            }
+        }
+        catch (...)
+        {
+            aliases_.pop_back();
+            throw;
+        }
     }
     catch (const std::bad_alloc &)
     {
@@ -241,12 +319,24 @@ ZoneRegistryError ZoneAssetRegistry::ResolveAlias(
 const ZoneRegisteredAsset *ZoneAssetRegistry::FindAsset(
     std::uint32_t identity) const noexcept
 {
-    const auto found = std::find_if(
-        assets_.begin(), assets_.end(),
-        [identity](const ZoneRegisteredAsset &asset) {
-            return asset.identity == identity;
-        });
-    return found == assets_.end() ? nullptr : &*found;
+    const auto found = assetByIdentity_.find(identity);
+    return found == assetByIdentity_.end() || found->second >= assets_.size()
+        ? nullptr : &assets_[found->second];
+}
+
+const ZoneRegisteredAsset *ZoneAssetRegistry::FindAsset(
+    std::uint32_t type,
+    std::string_view name) const noexcept
+{
+    const auto [begin, end] = assetByNameHash_.equal_range(
+        AssetNameHash(type, name));
+    for (auto candidate = begin; candidate != end; ++candidate)
+    {
+        if (candidate->second >= assets_.size()) continue;
+        const ZoneRegisteredAsset &asset = assets_[candidate->second];
+        if (asset.type == type && asset.name == name) return &asset;
+    }
+    return nullptr;
 }
 
 bool ZoneAssetRegistry::Initialized() const noexcept
@@ -280,6 +370,10 @@ void ZoneAssetRegistry::UnloadAll() noexcept
 {
     std::vector<ZoneRegisteredAsset>().swap(assets_);
     std::vector<AliasEntry>().swap(aliases_);
+    std::unordered_map<std::uint32_t, std::size_t>().swap(assetByIdentity_);
+    std::unordered_map<std::uint64_t, std::size_t>().swap(assetBySource_);
+    std::unordered_multimap<std::uint64_t, std::size_t>().swap(assetByNameHash_);
+    std::unordered_map<std::uint64_t, std::size_t>().swap(aliasBySpan_);
     totalNameBytes_ = 0u;
     nextIdentity_ = 1u;
 }
@@ -295,19 +389,17 @@ void ZoneAssetRegistry::Reset() noexcept
 ZoneAssetRegistry::AliasEntry *ZoneAssetRegistry::FindAlias(
     const ZoneSpan &slot) noexcept
 {
-    const auto found = std::find_if(
-        aliases_.begin(), aliases_.end(),
-        [&slot](const AliasEntry &entry) { return entry.slot == slot; });
-    return found == aliases_.end() ? nullptr : &*found;
+    const auto found = aliasBySpan_.find(AliasSpanKey(slot));
+    return found == aliasBySpan_.end() || found->second >= aliases_.size()
+        ? nullptr : &aliases_[found->second];
 }
 
 const ZoneAssetRegistry::AliasEntry *ZoneAssetRegistry::FindAlias(
     const ZoneSpan &slot) const noexcept
 {
-    const auto found = std::find_if(
-        aliases_.begin(), aliases_.end(),
-        [&slot](const AliasEntry &entry) { return entry.slot == slot; });
-    return found == aliases_.end() ? nullptr : &*found;
+    const auto found = aliasBySpan_.find(AliasSpanKey(slot));
+    return found == aliasBySpan_.end() || found->second >= aliases_.size()
+        ? nullptr : &aliases_[found->second];
 }
 
 const char *ZoneRegistryErrorString(ZoneRegistryError error) noexcept

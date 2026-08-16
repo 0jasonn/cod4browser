@@ -100,6 +100,7 @@ add_executable(web_retail_fastfile_census_tests
     "${KISAK_REPOSITORY_ROOT}/src/web/web_fastfile_zone_registry.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_fastfile_zone_stream.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_retail_fastfile_census.cpp"
+    "${KISAK_REPOSITORY_ROOT}/src/web/web_retail_load_weapon.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_sound_alias_catalog.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_engine_xmodel_surface.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_engine_xmodel_material.cpp"
@@ -355,4 +356,27 @@ if (KISAK_BUILD_FUZZERS)
         -fsanitize=fuzzer,address,undefined
     )
     target_link_libraries(asset_parsers_fuzz PRIVATE ZLIB::ZLIB)
+
+    add_executable(retail_fastfile_dispatcher_fuzz
+        "${CMAKE_CURRENT_LIST_DIR}/../fuzz/retail_fastfile_dispatcher_fuzz.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_semantic_trace.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/web/web_fastfile_source_stream.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/web/web_fastfile_zone_registry.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/web/web_fastfile_zone_stream.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/web/web_retail_fastfile_census.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/web/web_retail_load_weapon.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/web/web_sound_alias_catalog.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/web/web_shader_compatibility.cpp"
+    )
+    target_compile_features(retail_fastfile_dispatcher_fuzz PRIVATE cxx_std_20)
+    target_include_directories(retail_fastfile_dispatcher_fuzz PRIVATE
+        "${KISAK_REPOSITORY_ROOT}/src")
+    target_compile_options(retail_fastfile_dispatcher_fuzz PRIVATE
+        -fsanitize=fuzzer,address,undefined
+        -fno-omit-frame-pointer
+    )
+    target_link_options(retail_fastfile_dispatcher_fuzz PRIVATE
+        -fsanitize=fuzzer,address,undefined
+    )
+    target_link_libraries(retail_fastfile_dispatcher_fuzz PRIVATE ZLIB::ZLIB)
 endif()

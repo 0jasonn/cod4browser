@@ -1,0 +1,118 @@
+name: Web port synthetic CI
+
+on:
+  push:
+    branches: [master, web-port]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-portable:
+    name: Native portable and trace contract (Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check patch whitespace
+        run: git diff --check
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build zlib1g-dev
+      - name: Configure portable tests
+        run: cmake -S . -B build/portable -G Ninja -DKISAK_PORTABLE_TESTS_ONLY=ON -DCMAKE_BUILD_TYPE=Release
+      - name: Build portable tests
+        run: cmake --build build/portable --parallel 2
+      - name: Run legal synthetic native suite
+        run: ctest --test-dir build/portable --output-on-failure
+      - name: Run native semantic trace contract explicitly
+        run: ./build/portable/tests/native/canonical_asset_abi_tests
+
+  dispatcher-fuzz:
+    name: Sanitized parser and dispatcher fuzz smoke
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install fuzz dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang ninja-build zlib1g-dev
+      - name: Configure Clang libFuzzer targets
+        run: >-
+          cmake -S . -B build/fuzz -G Ninja
+          -DCMAKE_C_COMPILER=clang
+          -DCMAKE_CXX_COMPILER=clang++
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DKISAK_PORTABLE_TESTS_ONLY=ON
+          -DKISAK_BUILD_FUZZERS=ON
+      - name: Build fuzz targets
+        run: cmake --build build/fuzz --target asset_parsers_fuzz retail_fastfile_dispatcher_fuzz --parallel 2
+      - name: Exercise imported-asset parsers
+        run: ./build/fuzz/tests/native/asset_parsers_fuzz -runs=256 -max_len=262144 -timeout=10
+      - name: Exercise ordered retail dispatcher corpus
+        run: >-
+          ./build/fuzz/tests/native/retail_fastfile_dispatcher_fuzz
+          tests/fuzz/corpus/retail_fastfile_dispatcher
+          -runs=512 -max_len=262144 -timeout=10
+
+  windows-portable:
+    name: Native portable (Windows MSVC x86)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure portable tests
+        run: cmake -S . -B build/portable-windows -A Win32 -DKISAK_PORTABLE_TESTS_ONLY=ON
+      - name: Build portable tests
+        run: cmake --build build/portable-windows --config Release --parallel 2
+      - name: Run legal synthetic Windows suite
+        run: ctest --test-dir build/portable-windows -C Release --output-on-failure
+
+  wasm-browser-production:
+    name: Wasm differential, Playwright, and production build
+    runs-on: windows-2022
+    env:
+      KISAK_PLAYWRIGHT_WORKERS: 2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: npm
+      - name: Install pinned Emscripten toolchain
+        shell: powershell
+        run: tools/bootstrap_web_toolchain.ps1
+      - name: Install JavaScript dependencies
+        run: npm.cmd ci
+      - name: Build debug browser target
+        shell: powershell
+        run: tools/build_web.ps1 -Configuration Debug
+      - name: Configure Wasm portable differential tests
+        shell: powershell
+        run: |
+          $toolchain = Get-Content -Raw tools/web_toolchain.json | ConvertFrom-Json
+          $emsdk = Join-Path $env:GITHUB_WORKSPACE '.tools\emsdk'
+          $cmake = Join-Path $emsdk "cmake\$($toolchain.cmake)_64bit\bin\cmake.exe"
+          $ninja = Join-Path $emsdk "ninja\$($toolchain.ninja)_64bit\ninja.exe"
+          $emscripten = Join-Path $emsdk 'upstream\emscripten\cmake\Modules\Platform\Emscripten.cmake'
+          $env:EM_CONFIG = Join-Path $emsdk '.emscripten'
+          $env:EMSDK = $emsdk
+          & $cmake -S . -B build/wasm-tests -G Ninja "-DCMAKE_TOOLCHAIN_FILE=$emscripten" "-DCMAKE_MAKE_PROGRAM=$ninja" -DKISAK_PORTABLE_TESTS_ONLY=ON -DCMAKE_BUILD_TYPE=Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $cmake --build build/wasm-tests --parallel 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $cmake --build build/wasm-tests --target test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install Chromium
+        run: npx.cmd playwright install chromium
+      - name: Run tagged browser smoke suite
+        run: npm.cmd run test:browser
+      - name: Run curated browser platform suite
+        run: npm.cmd run test:browser:full
+      - name: Build production browser target
+        shell: powershell
+        run: tools/build_web.ps1 -Configuration Release
+      - name: Upload production site
+        uses: actions/upload-artifact@v4
+        with:
+          name: kisakcod-web-production
+          path: build/web/site
+          if-no-files-found: error
+          retention-days: 7
