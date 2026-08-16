@@ -131,7 +131,12 @@ snd_alias_list_t *RetailSoundAliasCatalog::LookupEntry(
     std::string_view name, void *userData) noexcept
 {
     if (userData == nullptr) return nullptr;
-    return static_cast<RetailSoundAliasCatalog *>(userData)->Find(name);
+    auto &catalog = *static_cast<RetailSoundAliasCatalog *>(userData);
+    if (snd_alias_list_t *asset = catalog.Find(name)) return asset;
+    // DB_FindXAssetHeader creates a default entry for a missing sound. Keep
+    // this lookup seam non-owning by returning the canonical zone-published
+    // sound default instead of synthesizing a browser-side alias object.
+    return catalog.Find("null");
 }
 
 } // namespace kisak::fastfile

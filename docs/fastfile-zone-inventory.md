@@ -1504,6 +1504,10 @@ The owned Killhouse run publishes 21 consecutive XAnimParts bodies:
 | Registry | 1,388 assets / 1,388 defined aliases |
 | Next boundary | inline type-23 `WeaponDef` asset 458 |
 
+That table records the pre-WeaponDef XAnim checkpoint. The current owned
+common-to-Killhouse run continues through asset 458 and completes at the
+first-published-weapon boundary, asset 459.
+
 The native weapon inventory establishes why this is the next genuinely
 unsupported family: `Load_WeaponDefPtr` has the familiar block-0 pointer and
 publication envelope, but `Load_WeaponDef` traverses a 2,168-byte canonical
@@ -1659,22 +1663,17 @@ identity and sound lookup order without manufacturing placeholder assets.
 This is deliberately still partial. Inline `-1`/`-2` XModel, Material, or FX
 children inside WeaponDef remain explicit `WeaponDependencyUnsupported`
 failures until the existing child state machines gain a WeaponDef return path.
-The owned Killhouse traversal resolves its canonical child and prior XString
-aliases and now stops at `WeaponSoundLookupFailed` because the standalone web
-diagnostic has no native/common-zone sound catalog. Connecting that real
-catalog—not replacing names with dummy sound objects—is the next asset-458
-boundary.
+The owned prerequisite run now completes all 6,502 `common.ff` assets. Generic
+block-4 Material visual pointer-cell aliasing crosses FX asset 4,098, and the
+type-7 run beginning at asset 4,778 retains 1,723 table rows backed by 1,716
+unique DB/zone-owned canonical sound graphs. Serialized aliases and repeated DB
+names converge on the existing canonical object.
 
-The lookup side of that boundary now has a bounded cross-zone catalog with
-native-style case-insensitive names and retained zone ownership, and the browser
-orchestration passes it into the WeaponDef operation. Owned `common.ff` table
-evidence records 1,723 type-7 sound assets, first at asset 4,778. Reaching them
-in generated order requires 1,006 XAnim, 364 RawFile, 3,028 LocalizeEntry, 98
-technique-set, and early Material dependencies. The reusable canonical
-`LocalizeEntry` operation now advances through the complete localization run;
-common traversal also accepts prior-XString image/technique names and the native
-A8/A8L8 image formats, then advances through early XModels and the first ten FX
-assets. It next stops at FX asset 4,098 on a chained Material visual alias whose
-logical block-4 publication is not yet represented. The catalog is not populated
-and the owned Killhouse boundary is not claimed complete until that ordered graph
-and the real sound assets publish successfully.
+The cross-zone catalog is only a case-insensitive ownership/index seam over
+those objects. It retains the common-zone result, returns exact canonical
+pointers, and uses the indexed canonical `null` sound for the native
+`DB_FindXAssetHeader` missing-sound behavior; it does not create a browser sound
+database. The owned common-to-Killhouse regression publishes WeaponDef 458
+(`winchester1200`) and stops at the generic first-published-weapon boundary,
+asset 459. Pickup and ammo-pickup pointers are exact common objects. No sound
+playback or other audio runtime behavior is part of this milestone.

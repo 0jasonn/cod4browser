@@ -50,12 +50,14 @@ trace. This is only a source-inventory baseline; it is not
 a quality metric by itself because filesystem, lifecycle, and WebGL code should
 remain platform-owned.
 
-The last successful owned traversal of `killhouse.ff` completes top-level
-assets 0 through 457 at the inline type-23 `WeaponDef` asset 458 boundary. It
-has 314 top-level records left before the first `GfxWorld` at asset 772. The
-retained result
-includes 278 published XModels, 11 FX effects, 21 canonical `XAnimParts`, and
-1,388 registry identities.
+The last successful prerequisite traversal completes all 6,502 ordered assets
+in `common.ff`. Its type-7 run begins at asset 4,778 and retains 1,723 sound
+table rows backed by 1,716 unique canonical `snd_alias_list_t` objects. The
+cross-zone index then lets `killhouse.ff` publish its first canonical
+type-23 `WeaponDef`, asset 458 (`winchester1200`), before the explicit
+first-weapon milestone boundary at asset 459. The retained Killhouse prefix
+also includes 278 published XModels, 11 FX effects, and 21 canonical
+`XAnimParts`.
 RawFiles 395, 396, 398, 400, 402, and 404 are published through the canonical
 Kisak type. XModel, Material, and FX publications now also expose stable
 canonical top-level objects, while their retained nested census/preview graphs
@@ -81,8 +83,8 @@ remain temporary convergence scaffolding.
 | Asset registry | `TEMPORARY WEB SUBSTITUTE` | Stable typed identities prove alias behavior, but the destination is Kisak `XAsset` registration and native DB ownership. |
 | Retail loader dispatcher | `TEMPORARY WEB SUBSTITUTE` | `web_retail_fastfile_census.*` is the current pre-world traversal vehicle. It reports canonical asset types through the shared semantic trace, publishes canonical RawFile and XAnimParts assets, and now contains a bounded partial canonical WeaponDef operation. Continue reusable families without turning other `Retail*` results into the permanent object model. |
 | `XAnimParts` asset loading | `MODIFIED KISAK` / partial | The bounded path mirrors native `Load_XAnimPartsPtr` / `Load_XAnimParts`: block-0 body allocation, optional shared insertion cell, block-4 name and payload scope, exact array order, low/high-frame index widths, and flexible delta translation/quaternion storage. It publishes the canonical Kisak structure with ownership-only backing; the owned run publishes assets 437-457. Replace the temporary owner with real zone allocation during DB convergence. |
-| `WeaponDef` asset loading | `MODIFIED KISAK` / partial | The canonical header, fixed scalar decode, 40 script strings, 48 direct XStrings (including prior non-weapon zone strings), four accuracy arrays, root insertion cell/alias handling, canonical prior-alias XModel/Material/FX resolution, 48 native sound-name cells, the 29-entry bounce array, bounded ownership, and atomic publication are implemented and covered synthetically. Sound names resolve only through an injected database lookup; the owned web traversal now reaches that unavailable catalog boundary rather than publishing fabricated sound assets. Inline `-1`/`-2` XModel, Material, or FX bodies inside a WeaponDef remain explicit failures. |
-| Sound alias catalog | `MODIFIED KISAK` / partial | `web_sound_alias_catalog.*` is the bounded cross-zone ownership seam for canonical `snd_alias_list_t` pointers. It matches native case-insensitive asset-name lookup, retains the publishing zone owner, rejects duplicates/missing entries, and is now the lookup provider passed to the Killhouse WeaponDef traversal. The browser catalog remains empty until the real common-zone sound assets are published; no placeholder aliases are created. |
+| `WeaponDef` asset loading | `MODIFIED KISAK` / partial | The canonical header, fixed scalar decode, 40 script strings, 48 direct XStrings (including prior non-weapon zone strings), four accuracy arrays, root insertion cell/alias handling, canonical prior-alias XModel/Material/FX resolution, 48 native sound-name cells, the 29-entry bounce array, bounded ownership, and atomic publication are implemented and covered synthetically. The owned common-to-Killhouse run publishes asset 458 through the injected canonical lookup. Inline `-1`/`-2` XModel, Material, or FX bodies inside a WeaponDef remain explicit failures, and the first-weapon boundary deliberately does not claim the later weapon run. |
+| Sound alias loading and catalog | `MODIFIED KISAK` / partial | The prerequisite dispatcher mirrors the native list/header/component order and owns canonical `snd_alias_list_t`, `snd_alias_t`, `SoundFile`, `LoadedSound`, `SndCurve`, and `SpeakerMap` metadata in the publishing zone. `web_sound_alias_catalog.*` remains a case-insensitive ownership/index seam: it stores pointers to those objects, retains the common-zone owner, collapses native DB name aliases, and uses the indexed canonical `null` sound for native missing-sound fallback. It neither copies nor synthesizes sound records. No payload playback or audio runtime behavior is implemented. |
 | `LocalizeEntry` asset loading | `MODIFIED KISAK` / partial | The renderer-free canonical ABI and reusable pointer/body operation now cover inline/shared roots, direct/prior XStrings, bounded ownership, aliases, and atomic publication. This advances the owned `common.ff` traversal through all 3,028 localization assets rather than skipping their stream effects. |
 | `XModel` | `MODIFIED KISAK` / partial | The existing checked traversal now publishes a stable canonical `XModel` top-level object with canonical name, scalar metadata, skeleton-array pointers, and canonical Material handle identity. `RetailWorldXModel` still owns temporary surface, collision, and physics retention; converge those nested graphs before compiling broader consumers. |
 | `Material` and techniques | `MODIFIED KISAK` / partial | Existing XModel/FX material traversal now exposes canonical `Material` headers and stable names, and XModel handles point at those exact objects. Texture/image/technique ownership remains in temporary records; converge those canonical child graphs and translate only D3D shader/backend state. |
@@ -167,17 +169,18 @@ remain temporary convergence scaffolding.
   followed by an injected `ASSET_TYPE_SOUND` name lookup. Direct cells, inline
   names, the 29-entry bounce array, reused cells, lookup failure, and atomic
   publication are covered synthetically. No placeholder sound asset is made.
-- The owned Killhouse diagnostic now gets through canonical child and prior
-  XString aliases and stops at the unavailable sound database lookup. Connecting
-  the real canonical sound catalog is the remaining owned asset-458 boundary.
-- The cross-zone catalog/lookup lifetime contract is connected. An owned
-  `common.ff` inventory confirms 1,723 type-7 sound assets beginning at asset
-  4,778. Its ordered traversal now crosses the 1,006 XAnim and 3,028
-  `LocalizeEntry` assets, handles prior XString names and the native
-  A8/A8L8 image formats, and reaches the first FX run. The next common boundary
-  is an unresolved chained Material visual alias in FX asset 4,098. Sound catalog
-  population therefore remains pending and Killhouse still fails closed at
-  `WeaponSoundLookupFailed`.
+- Generic FX Material visuals now preserve native block-4 pointer-cell alias
+  semantics. Asset 4,098 is no longer a special boundary, and a synthetic
+  regression covers a normal token that dereferences an earlier patched
+  Material visual cell.
+- The owned `common.ff` run completes all 6,502 assets, including all 1,723
+  type-7 rows beginning at 4,778. It publishes 1,716 unique canonical sound
+  objects into the cross-zone index while retaining serialized and DB aliases
+  in the zone result.
+- The owned common-to-Killhouse run publishes WeaponDef 458 through normal
+  case-insensitive lookup. Pickup and ammo-pickup fields point at the exact
+  common objects; a genuinely absent NPC alias follows native behavior to the
+  indexed zone-owned `null` sound. No audio playback behavior was added.
 
 ### Gate 1: finish the pre-GfxWorld dependency graph
 
@@ -186,11 +189,10 @@ remain temporary convergence scaffolding.
   dependency order, sound-name indirections, dynamic arrays, aliases, and
   atomic publication envelope. The canonical root/body, scalar, XString,
   script-string, accuracy-array, prior canonical child-alias, and sound-name
-  indirection slices are implemented. The catalog lookup/lifetime seam is now
-  connected; next finish the ordered common-zone traversal from Material asset
-  4,098's FX visual alias through the first type-7 sound at 4,778, publish those
-  canonical sound assets into the catalog, and rerun owned asset 458. Continue to reuse the
-  existing child loaders if a later WeaponDef contains inline child bodies.
+  indirection slices are implemented. The general prerequisite-zone owner,
+  canonical sound publication, cross-zone index, and owned asset-458 rerun are
+  complete. Continue the ordered Killhouse traversal from asset 459 and reuse
+  the existing child loaders if a later WeaponDef contains inline child bodies.
 - Preserve block cursors, high-water marks, insertion cells, aliases, dependency
   order, and atomic publication.
 - Do not seek directly to asset 772.

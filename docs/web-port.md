@@ -1557,12 +1557,12 @@ weapon XModel/FX/technique-set run through asset 436. FX assets 423-425, 427,
 and 429-433 exercise the shared material dependency path; asset 423 alone owns
 seven checked materials. The canonical XAnimParts loader then follows the
 native 88-byte header and exact block-4 payload order, publishing assets
-437-457 as identities 1368-1388 without adding animation playback. The result
-has 458 completed top-level assets, 278 published XModels, 11 FX effects, 21
-canonical XAnimParts, and 1,388 registered assets with all 1,388 aliases
-defined. It stops before inline type-23 `WeaponDef` asset 458. The bounded
-retained-inflate ceiling remains 64 MiB; 314 top-level records remain before
-the first `GfxWorld`.
+437-457 as identities 1368-1388 without adding animation playback. After the
+common prerequisite handoff, the result has 459 completed top-level assets,
+278 published XModels, 11 FX effects, 21 canonical XAnimParts, and one
+canonical WeaponDef. It stops at the explicit first-published-weapon boundary,
+asset 459. The owned integration uses a 128 MiB inflated ceiling; 313 top-level
+records remain before the first `GfxWorld`.
 
 Reaching `GfxWorld` still requires typed loaders for every intervening inline
 asset class; geometry, lightmaps, visibility, and camera state remain separate
@@ -1640,17 +1640,20 @@ reaches that lookup and stops because the standalone web path has no canonical
 common-zone sound catalog; connecting the real catalog is the next ordered
 dependency.
 
-The cross-zone catalog lifetime and lookup seam is now connected to the browser
-orchestration. It retains publishing-zone ownership and returns only real
-canonical `snd_alias_list_t` pointers with native-style case-insensitive name
-matching. The owned `common.ff` inventory contains 1,723 sound assets beginning
-at asset 4,778. Ordered common traversal now publishes its 1,006 XAnim assets,
-all 3,028 canonical `LocalizeEntry` assets, prior-XString image and technique-set
-names, native A8/A8L8 image metadata, the remaining early Materials and XModels,
-and the first ten FX assets. It now stops at an unresolved chained Material
-visual alias in FX asset 4,098. Until that pre-sound graph and the sound loader
-publish into the catalog, the catalog is intentionally empty and Killhouse
-continues to reject atomically at `WeaponSoundLookupFailed`.
+The prerequisite-zone and cross-zone ownership path is now connected to the
+browser orchestration. Generic native block-4 Material visual alias semantics
+cross FX asset 4,098 without an asset-specific exception. Ordered `common.ff`
+traversal completes all 6,502 assets and retains all 1,723 sound table rows
+beginning at asset 4,778 as DB/zone-owned canonical sound graphs. Repeated DB
+names and serialized pointer aliases converge on 1,716 unique objects.
+
+The case-insensitive sound catalog indexes those exact objects and retains the
+common-zone owner; it does not copy or synthesize sound records. Its lookup
+provider mirrors native missing-sound behavior by returning the indexed
+canonical `null` object. With that provider, the owned Killhouse traversal
+publishes WeaponDef 458 (`winchester1200`) through its normal canonical lookup
+path and stops at the explicit first-published-weapon boundary at asset 459.
+No playback, mixing, decoding, or browser audio runtime behavior is implemented.
 
 General generated-loader traversal and a real-map render remain later format
 milestones.

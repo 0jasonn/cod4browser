@@ -16,6 +16,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -23,11 +24,13 @@
 namespace
 {
 constexpr const char *CODE_POST_GFX_PATH = "zone/english/code_post_gfx.ff";
+constexpr const char *COMMON_FASTFILE_PATH = "zone/english/common.ff";
 constexpr const char *WORLD_FASTFILE_PATH = "zone/english/killhouse.ff";
 
 enum class Dataset : std::uint8_t
 {
     CodePostGfx,
+    CommonPrerequisite,
     WorldInventory,
 };
 
@@ -61,6 +64,7 @@ struct RetailCensusRuntime
     kisak::fastfile::RetailFastfileCensusJob parser;
     kisak::fastfile::RetailSoundAliasCatalog soundCatalog;
     kisak::fastfile::RetailFastfileCensus result;
+    std::shared_ptr<kisak::fastfile::RetailFastfileCensus> commonPrerequisite;
     kisak::fastfile::RetailFastfileCensus worldInventory;
 };
 
@@ -92,14 +96,22 @@ struct RetailColorMapPublication
 
 const char *CurrentPath() noexcept
 {
-    return g_runtime.dataset == Dataset::CodePostGfx
-        ? CODE_POST_GFX_PATH : WORLD_FASTFILE_PATH;
+    switch (g_runtime.dataset)
+    {
+    case Dataset::CodePostGfx: return CODE_POST_GFX_PATH;
+    case Dataset::CommonPrerequisite: return COMMON_FASTFILE_PATH;
+    case Dataset::WorldInventory: return WORLD_FASTFILE_PATH;
+    }
+    return WORLD_FASTFILE_PATH;
 }
 
 const char *CurrentTraversal() noexcept
 {
     return g_runtime.dataset == Dataset::CodePostGfx
-        ? "two-techsets-one-material" : "world-xmodel-dependencies";
+        ? "two-techsets-one-material"
+        : g_runtime.dataset == Dataset::CommonPrerequisite
+            ? "prerequisite-zone-assets"
+            : "world-xmodel-dependencies";
 }
 
 EM_JS(void, DispatchRetailCensusLoading,
@@ -2765,28 +2777,92 @@ WebRetailCensusFrameResult WebRetailCensusJob_Frame()
         }
         else if (report.progress == RetailCensusProgress::Succeeded)
         {
-            RetailFastfileCensus &destination = g_runtime.dataset == Dataset::CodePostGfx
-                ? g_runtime.result : g_runtime.worldInventory;
-            if (!g_runtime.parser.TakeResult(destination))
+            RetailFastfileCensus completed;
+            if (!g_runtime.parser.TakeResult(completed))
             {
                 Fail("could not publish retail fastfile census", "completed result was unavailable");
             }
             else if (g_runtime.dataset == Dataset::CodePostGfx)
             {
+                g_runtime.result = std::move(completed);
                 g_runtime.codePostFileSize = g_runtime.fileSize;
                 g_runtime.codePostSourceBytesRead = g_runtime.readOffset;
+                g_runtime.dataset = Dataset::CommonPrerequisite;
+                g_runtime.fileSize = 0u;
+                g_runtime.readOffset = 0u;
+                g_runtime.completionReady = false;
+                g_runtime.completionStatus = WebFsStatus::Pending;
+                g_runtime.completionBytes.clear();
+                RetailCensusLimits limits;
+                limits.maxFileBytes = 128u * 1024u * 1024u;
+                limits.maxInflatedPrefixBytes = 128u * 1024u * 1024u;
+                if (const auto error = g_runtime.parser.BeginStreaming(
+                        RetailCensusMode::PrerequisiteZone, limits);
+                    error != RetailCensusError::None)
+                {
+                    Fail("could not start prerequisite-zone traversal",
+                        RetailCensusErrorString(error));
+                }
+                else
+                {
+                    g_runtime.phase = Phase::NeedStat;
+                    DispatchRetailCensusLoading(
+                        g_runtime.generation, "common-stat", CurrentPath(), CurrentTraversal());
+                }
+            }
+            else if (g_runtime.dataset == Dataset::CommonPrerequisite)
+            {
+                try
+                {
+                    g_runtime.commonPrerequisite =
+                        std::make_shared<RetailFastfileCensus>(
+                            std::move(completed));
+                }
+                catch (...)
+                {
+                    Fail("could not retain prerequisite zone", "allocation failed");
+                    return {bytesUsed, report.recordsProcessed};
+                }
+                g_runtime.soundCatalog.Reset();
+                for (const RetailPublishedSoundAliasList &entry :
+                     g_runtime.commonPrerequisite->worldSoundAliasLists)
+                {
+                    if (!entry.published || entry.pointerAlias ||
+                        entry.databaseAlias ||
+                        !entry.asset || !entry.storage ||
+                        !entry.storage->aliasName)
+                    {
+                        continue;
+                    }
+                    const RetailSoundAliasCatalogError publishError =
+                        g_runtime.soundCatalog.Publish(
+                            *entry.storage->aliasName,
+                            entry.asset.get(),
+                            g_runtime.commonPrerequisite);
+                    if (publishError != RetailSoundAliasCatalogError::None)
+                    {
+                        Fail("could not index common-zone sound asset",
+                            RetailSoundAliasCatalogErrorString(publishError));
+                        return {bytesUsed, report.recordsProcessed};
+                    }
+                }
                 g_runtime.dataset = Dataset::WorldInventory;
                 g_runtime.fileSize = 0u;
                 g_runtime.readOffset = 0u;
                 g_runtime.completionReady = false;
                 g_runtime.completionStatus = WebFsStatus::Pending;
                 g_runtime.completionBytes.clear();
+                RetailCensusLimits limits;
+                limits.maxFileBytes = 128u * 1024u * 1024u;
+                limits.maxInflatedPrefixBytes = 128u * 1024u * 1024u;
+                limits.stopAfterFirstPublishedWeapon = true;
                 if (const auto error = g_runtime.parser.BeginStreaming(
-                        RetailCensusMode::WorldAssetLoader, {},
+                        RetailCensusMode::WorldAssetLoader, limits,
                         g_runtime.soundCatalog.Lookup());
                     error != RetailCensusError::None)
                 {
-                    Fail("could not start world asset inventory", RetailCensusErrorString(error));
+                    Fail("could not start world asset inventory",
+                        RetailCensusErrorString(error));
                 }
                 else
                 {
@@ -2797,6 +2873,7 @@ WebRetailCensusFrameResult WebRetailCensusJob_Frame()
             }
             else
             {
+                g_runtime.worldInventory = std::move(completed);
                 g_runtime.worldFileSize = g_runtime.fileSize;
                 g_runtime.worldSourceBytesRead = g_runtime.readOffset;
                 g_runtime.phase = Phase::Finished;

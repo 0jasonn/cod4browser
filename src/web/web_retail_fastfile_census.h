@@ -5,6 +5,7 @@
 #include <database/localize_types.h>
 #include <bgame/weapon_types.h>
 #include <gfx_d3d/material_types.h>
+#include <sound/snd_alias_types.h>
 #include <web/web_sound_alias_catalog.h>
 #include <xanim/xanim_types.h>
 #include <xanim/xmodel_types.h>
@@ -88,7 +89,14 @@ struct RetailCensusLimits
     std::uint32_t maxLocalizeEntries = 8192u;
     std::uint32_t maxLocalizeStringBytes = 64u * 1024u;
     std::uint32_t maxRetainedLocalizeBytes = 32u * 1024u * 1024u;
+    std::uint32_t maxSoundAliasLists = 16384u;
+    std::uint32_t maxSoundAliasesPerList = 4096u;
+    std::uint32_t maxSoundStringBytes = 4096u;
+    std::uint32_t maxRetainedSoundBytes = 128u * 1024u * 1024u;
     std::uint32_t maxSemanticTraceEntries = 65536u;
+    // Optional vertical-slice boundary that succeeds immediately after the
+    // first canonical WeaponDef publication.
+    bool stopAfterFirstPublishedWeapon = false;
 };
 
 enum class RetailCensusError : std::uint8_t
@@ -234,6 +242,14 @@ enum class RetailCensusError : std::uint8_t
     LocalizeStringTooLong,
     LocalizePayloadLimit,
     LocalizeAliasInvalid,
+    SoundAliasLayoutUnsupported,
+    SoundAliasCollectionLimit,
+    SoundAliasCountLimit,
+    SoundAliasStringInvalid,
+    SoundAliasStringTooLong,
+    SoundAliasDependencyUnsupported,
+    SoundAliasPayloadLimit,
+    SoundAliasCatalogPublishFailed,
     PostXModelAssetUnsupported,
     SemanticTraceLimit,
     AllocationFailed,
@@ -272,6 +288,7 @@ enum class RetailCensusMode : std::uint8_t
     // and their nested material/XModel dependencies.
     WorldAssetLoader = WorldXModelLoader,
     WorldXModelCollection = WorldXModelLoader,
+    PrerequisiteZone,
 };
 
 enum class RetailCensusStage : std::uint8_t
@@ -384,6 +401,11 @@ enum class RetailCensusStage : std::uint8_t
     WorldFxTrailVertices,
     WorldFxTrailIndices,
     WorldFxPublish,
+    WorldFxImpactTable,
+    WorldFxImpactName,
+    WorldFxImpactEntries,
+    WorldFxImpactPublish,
+    WorldMenuTasks,
     WorldRawFile,
     WorldRawFileName,
     WorldRawFileBuffer,
@@ -403,6 +425,17 @@ enum class RetailCensusStage : std::uint8_t
     WorldLocalizeValue,
     WorldLocalizeName,
     WorldLocalizePublish,
+    WorldSoundAliasList,
+    WorldSoundAliasListName,
+    WorldSoundAliasHeaders,
+    WorldSoundAliasString,
+    WorldSoundAliasFile,
+    WorldSoundLoadedSound,
+    WorldSoundLoadedSoundName,
+    WorldSoundLoadedSoundData,
+    WorldSoundAliasCurve,
+    WorldSoundAliasSpeakerMap,
+    WorldSoundAliasPublish,
     AssetBoundary,
     Failed,
 };
@@ -549,6 +582,10 @@ struct RetailXModelImage
     std::uint32_t resourceBytes = 0u;
     std::uint32_t headerBlock0Offset = 0u;
     std::uint32_t nameBlock4Offset = 0u;
+    // DB_InsertPointer storage for a shared (-2) GfxImagePtr. This belongs to
+    // the database pointer envelope, distinct from the image texture/load-def
+    // insertion cell below.
+    std::uint32_t assetInsertPointerBlock4Offset = UINT32_MAX;
     std::uint32_t textureInsertPointerBlock4Offset = UINT32_MAX;
     std::uint32_t loadDefBlock0Offset = 0u;
     std::uint32_t identity = 0u;
@@ -917,6 +954,43 @@ struct RetailPublishedLocalizeEntry
     bool published = false;
 };
 
+// Ownership backing for the canonical sound graph published by a zone. The
+// catalog only indexes `asset`; all names and child objects remain owned here
+// with the same lifetime as the prerequisite-zone result.
+struct CanonicalSoundAliasListStorage
+{
+    std::shared_ptr<std::string> aliasName;
+    std::shared_ptr<std::vector<snd_alias_t>> aliases;
+    std::vector<std::array<std::shared_ptr<std::string>, 4>> aliasStrings;
+    std::vector<std::array<std::shared_ptr<std::string>, 2>> fileStrings;
+    std::vector<std::shared_ptr<SoundFile>> soundFiles;
+    std::vector<std::uint32_t> soundFileBlock4Offsets;
+    std::vector<std::shared_ptr<LoadedSound>> loadedSounds;
+    std::vector<std::shared_ptr<std::string>> loadedSoundNames;
+    std::vector<std::shared_ptr<SndCurve>> curves;
+    std::vector<std::shared_ptr<std::string>> curveNames;
+    std::vector<std::shared_ptr<SpeakerMap>> speakerMaps;
+    std::vector<std::shared_ptr<std::string>> speakerMapNames;
+};
+
+struct RetailPublishedSoundAliasList
+{
+    std::uint32_t assetIndex = 0u;
+    std::uint32_t serializedReference = 0u;
+    std::uint32_t headerBlock0Offset = 0u;
+    std::uint32_t insertPointerBlock4Offset = UINT32_MAX;
+    std::uint32_t nameBlock4Offset = UINT32_MAX;
+    std::uint32_t aliasesBlock4Offset = UINT32_MAX;
+    std::uint32_t payloadBytes = 0u;
+    std::uint32_t identity = 0u;
+    std::uint32_t boundaryInflatedOffset = 0u;
+    std::shared_ptr<CanonicalSoundAliasListStorage> storage;
+    std::shared_ptr<snd_alias_list_t> asset;
+    bool pointerAlias = false;
+    bool databaseAlias = false;
+    bool published = false;
+};
+
 struct RetailFastfileCensus
 {
     std::uint32_t version = 0u;
@@ -1053,6 +1127,7 @@ struct RetailFastfileCensus
     std::vector<RetailWorldRawFile> worldRawFiles;
     std::vector<RetailPublishedXAnimParts> worldXAnimParts;
     std::vector<RetailPublishedWeaponDef> worldWeapons;
+    std::vector<RetailPublishedSoundAliasList> worldSoundAliasLists;
     std::vector<kisak::database::SemanticTraceEntry> semanticTrace;
     std::uint32_t semanticTraceHash = 2166136261u;
     std::uint32_t semanticTraceContractHash = 2166136261u;

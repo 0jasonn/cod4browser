@@ -16,6 +16,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <span>
 #include <string>
 #include <vector>
@@ -67,11 +68,23 @@ void TestSoundAliasCatalogLookupContract()
 {
     using namespace kisak::fastfile;
     RetailSoundAliasCatalog catalog;
-    auto pickupOwner = std::make_shared<std::array<std::uint32_t, 3>>();
+    auto pickupOwner = std::make_shared<RetailFastfileCensus>();
+    pickupOwner->worldSoundAliasLists.emplace_back();
+    RetailPublishedSoundAliasList &published =
+        pickupOwner->worldSoundAliasLists.back();
+    published.storage = std::make_shared<CanonicalSoundAliasListStorage>();
+    published.storage->aliasName =
+        std::make_shared<std::string>("Web/Pickup");
+    published.storage->aliases =
+        std::make_shared<std::vector<snd_alias_t>>(1u);
+    published.asset = std::make_shared<snd_alias_list_t>();
+    published.asset->aliasName = published.storage->aliasName->c_str();
+    published.asset->head = published.storage->aliases->data();
+    published.asset->count = 1;
+    published.published = true;
     auto bounceOwner = std::make_shared<std::array<std::uint32_t, 3>>();
     std::weak_ptr<const void> pickupLifetime = pickupOwner;
-    snd_alias_list_t *pickup =
-        reinterpret_cast<snd_alias_list_t *>(pickupOwner->data());
+    snd_alias_list_t *pickup = published.asset.get();
     snd_alias_list_t *bounce =
         reinterpret_cast<snd_alias_list_t *>(bounceOwner->data());
 
@@ -85,14 +98,24 @@ void TestSoundAliasCatalogLookupContract()
     pickupOwner.reset();
     Require(!pickupLifetime.expired() &&
             catalog.Find("web/pickup") == pickup &&
+            catalog.Find("web/pickup")->head ==
+                published.storage->aliases->data() &&
             catalog.Find("WEB/BOUNCE") == bounce &&
             catalog.Find("web/missing") == nullptr,
-        "sound catalog lookup matches native case-insensitive DB names");
+        "sound catalog indexes the exact zone-owned canonical graph without copying it");
     const RetailSoundAliasLookup lookup = catalog.Lookup();
     Require(lookup.function != nullptr &&
             lookup.function("WEB/PICKUP", lookup.userData) == pickup &&
             lookup.function("web/missing", lookup.userData) == nullptr,
         "sound catalog exposes the WeaponDef lookup contract directly");
+    auto nullOwner = std::make_shared<std::array<std::uint32_t, 3>>();
+    snd_alias_list_t *nullSound =
+        reinterpret_cast<snd_alias_list_t *>(nullOwner->data());
+    Require(catalog.Publish("null", nullSound, nullOwner) ==
+                RetailSoundAliasCatalogError::None &&
+            lookup.function("web/missing", lookup.userData) == nullSound &&
+            catalog.Find("web/missing") == nullptr,
+        "lookup uses the indexed zone-owned native sound default without changing exact Find semantics");
     Require(catalog.Publish("web/PICKUP", bounce, bounceOwner) ==
                 RetailSoundAliasCatalogError::Duplicate &&
             catalog.Publish({}, bounce, bounceOwner) ==
@@ -1106,7 +1129,8 @@ std::vector<std::uint8_t> BuildReusableWorldXModelLoaderInflated(
 }
 
 std::vector<std::uint8_t> BuildReusableWorldFxLoaderInflated(
-    bool invalidMaterial = false);
+    bool invalidMaterial = false,
+    std::uint32_t secondVisualReference = 0xffffffffu);
 
 std::vector<std::uint8_t> BuildReusableWorldRawFileLoaderInflated(
     std::uint32_t rawFileCount = 1u)
@@ -1509,7 +1533,8 @@ std::vector<std::uint8_t> BuildWeaponCanonicalAliasDependenciesInflated(
 }
 
 std::vector<std::uint8_t> BuildReusableWorldFxLoaderInflated(
-    bool invalidMaterial)
+    bool invalidMaterial,
+    std::uint32_t secondVisualReference)
 {
     std::vector<std::uint8_t> bytes;
     PutU32(bytes, 4096u);
@@ -1550,8 +1575,10 @@ std::vector<std::uint8_t> BuildReusableWorldFxLoaderInflated(
     SetU32(elem, 188u, 0xffffffffu);
     bytes.insert(bytes.end(), elem.begin(), elem.end());
     PutU32(bytes, 0xffffffffu);
-    PutU32(bytes, 0xffffffffu);
-    for (std::uint32_t index = 0u; index < 2u; ++index)
+    PutU32(bytes, secondVisualReference);
+    const std::uint32_t materialCount =
+        secondVisualReference == 0xffffffffu ? 2u : 1u;
+    for (std::uint32_t index = 0u; index < materialCount; ++index)
     {
         std::vector<std::uint8_t> material(80u, 0u);
         SetU32(material, 0u, 0xffffffffu);
@@ -3076,6 +3103,29 @@ void TestReusableWorldFxLoader()
         result.stoppedBeforeDifferentWorldAssetType,
         "FX visuals reuse the checked material and image dependency path");
 
+    std::uint32_t firstVisualAlias = 0u;
+    Require(EncodeZoneAliasToken(
+                {4u,
+                 result.worldFxEffects[0u].elemDefs[0u]
+                     .visualArrayBlock4Offset,
+                 4u},
+                firstVisualAlias),
+        "FX regression encodes the first block-4 Material visual cell");
+    const RetailFastfileCensus aliased = Run(
+        BuildFile(BuildReusableWorldFxLoaderInflated(
+            false, firstVisualAlias)),
+        7u, 2u, 3u, RetailCensusMode::WorldAssetLoader);
+    const RetailWorldFxElemDef &aliasedElem =
+        aliased.worldFxEffects.at(0u).elemDefs.at(0u);
+    Require(aliasedElem.visualReferences.size() == 2u &&
+            aliasedElem.visualReferences[1u] == firstVisualAlias &&
+            aliasedElem.visualIdentities[0u] != 0u &&
+            aliasedElem.visualIdentities[1u] ==
+                aliasedElem.visualIdentities[0u] &&
+            aliased.worldFxEffects[0u].materials.size() == 1u &&
+            aliased.worldFxEffects[0u].published,
+        "normal block-4 Material visual aliases dereference the already-patched visual cell");
+
     RetailFastfileCensusJob malformed;
     Require(malformed.BeginStreaming(RetailCensusMode::WorldAssetLoader) ==
         RetailCensusError::None, "malformed FX fixture starts");
@@ -3330,15 +3380,20 @@ void TestShaderCompatibilityDecoder()
         "malformed CTAB fails atomically");
 }
 
-void TestOwnedWorldSurfaceIfRequested(const char *path)
+void TestOwnedWorldSurfaceIfRequested(
+    const char *path,
+    const char *worldPath)
 {
     if (!path || *path == '\0') return;
     using namespace kisak::fastfile;
     std::ifstream input(path, std::ios::binary);
     Require(input.good(), "owned world surface diagnostic opens fastfile");
     RetailFastfileCensusJob job;
-    Require(job.BeginStreaming(RetailCensusMode::WorldAssetLoader) ==
-        RetailCensusError::None, "owned reusable XModel-loader diagnostic starts");
+    RetailCensusLimits limits;
+    limits.maxFileBytes = 128u * 1024u * 1024u;
+    limits.maxInflatedPrefixBytes = 128u * 1024u * 1024u;
+    Require(job.BeginStreaming(RetailCensusMode::PrerequisiteZone, limits) ==
+        RetailCensusError::None, "owned prerequisite-zone diagnostic starts");
     std::vector<std::uint8_t> chunk(RETAIL_CENSUS_MAX_STEP_BYTES);
     std::uint32_t steps = 0u;
     while (job.Progress() == RetailCensusProgress::Running && steps++ < 10000u)
@@ -3349,9 +3404,13 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
             const std::size_t count = static_cast<std::size_t>(input.gcount());
             Require(count != 0u, "owned world surface diagnostic receives source");
             const bool final = input.peek() == std::ifstream::traits_type::eof();
-            Require(job.FeedSource(
-                std::span<const std::uint8_t>(chunk.data(), count), final) ==
-                RetailCensusError::None, "owned world surface source accepted");
+            const RetailCensusError feedError = job.FeedSource(
+                std::span<const std::uint8_t>(chunk.data(), count), final);
+            if (feedError != RetailCensusError::None)
+                std::cerr << "owned world surface feed failed: "
+                          << RetailCensusErrorString(feedError) << '\n';
+            Require(feedError == RetailCensusError::None,
+                "owned world surface source accepted");
         }
         (void)job.Step();
     }
@@ -3373,7 +3432,14 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
                   << result.nextBodyIndex << " type " << result.nextBodyType
                   << " (" << RetailAssetTypeName(result.nextBodyType) << ") after "
                   << result.completedAssetCount << " completed assets, reference 0x"
-                  << std::hex << result.nextBodyReference << std::dec << '\n';
+                  << std::hex << result.nextBodyReference << std::dec
+                  << ", operation "
+                  << (result.unsupportedOperation
+                        ? result.unsupportedOperation : "complete") << '\n';
+        if (!result.worldXModels.empty())
+            std::cerr << "  final retained xmodel: "
+                      << result.worldXModels.back().assetIndex << ' '
+                      << result.worldXModels.back().name << '\n';
         std::cerr << "  retained top-level materials: "
                   << result.worldMaterials.size() << '\n';
         for (std::uint32_t type = 0u; type < result.typeCounts.size(); ++type)
@@ -3383,6 +3449,134 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
                       << "): " << result.typeCounts[type] << ", first asset "
                       << result.firstTypeIndices[type] << '\n';
         }
+        if (!worldPath || *worldPath == '\0') return;
+
+        Require(result.completedAssetCount == result.assetCount &&
+                result.worldSoundAliasLists.size() == 1723u &&
+                result.worldSoundAliasLists.front().assetIndex == 4778u,
+            "common prerequisite traversal publishes the canonical sound run beginning at asset 4778");
+        auto commonOwner = std::make_shared<RetailFastfileCensus>(
+            std::move(result));
+        RetailSoundAliasCatalog catalog;
+        for (const RetailPublishedSoundAliasList &entry :
+             commonOwner->worldSoundAliasLists)
+        {
+            Require(entry.published && entry.asset && entry.storage &&
+                    entry.storage->aliasName,
+                "common sound publication retains its canonical zone-owned graph");
+            if (entry.pointerAlias || entry.databaseAlias) continue;
+            const RetailSoundAliasCatalogError catalogError = catalog.Publish(
+                *entry.storage->aliasName,
+                entry.asset.get(),
+                commonOwner);
+            if (catalogError != RetailSoundAliasCatalogError::None)
+            {
+                snd_alias_list_t *prior = catalog.Find(
+                    *entry.storage->aliasName);
+                const auto priorEntry = std::find_if(
+                    commonOwner->worldSoundAliasLists.begin(),
+                    commonOwner->worldSoundAliasLists.end(),
+                    [prior](const RetailPublishedSoundAliasList &candidate) {
+                        return candidate.asset.get() == prior;
+                    });
+                std::cerr << "sound catalog publication failed at asset "
+                          << entry.assetIndex << " name "
+                          << *entry.storage->aliasName << ": "
+                          << RetailSoundAliasCatalogErrorString(catalogError)
+                          << " (first asset "
+                          << (priorEntry ==
+                                  commonOwner->worldSoundAliasLists.end()
+                              ? UINT32_MAX : priorEntry->assetIndex)
+                          << ", offsets "
+                          << (priorEntry ==
+                                  commonOwner->worldSoundAliasLists.end()
+                              ? UINT32_MAX : priorEntry->nameBlock4Offset)
+                          << '/' << entry.nameBlock4Offset
+                          << ", refs 0x" << std::hex
+                          << (priorEntry ==
+                                  commonOwner->worldSoundAliasLists.end()
+                              ? 0u : priorEntry->serializedReference)
+                          << "/0x" << entry.serializedReference << std::dec
+                          << ")"
+                          << '\n';
+            }
+            Require(catalogError == RetailSoundAliasCatalogError::None,
+                "common sound assets publish into the cross-zone lookup index");
+        }
+        Require(catalog.EntryCount() == 1716u,
+            "cross-zone sound catalog indexes canonical common sound publications");
+
+        std::ifstream worldInput(worldPath, std::ios::binary);
+        Require(worldInput.good(),
+            "Killhouse WeaponDef retry opens the world fastfile");
+        RetailFastfileCensusJob worldJob;
+        limits.stopAfterFirstPublishedWeapon = true;
+        Require(worldJob.BeginStreaming(
+                    RetailCensusMode::WorldAssetLoader,
+                    limits,
+                    catalog.Lookup()) ==
+                    RetailCensusError::None,
+            "Killhouse traversal starts with the common-zone lookup seam");
+        steps = 0u;
+        while (worldJob.Progress() == RetailCensusProgress::Running &&
+               steps++ < 20000u)
+        {
+            if (worldJob.NeedsSource())
+            {
+                worldInput.read(
+                    reinterpret_cast<char *>(chunk.data()), chunk.size());
+                const std::size_t count =
+                    static_cast<std::size_t>(worldInput.gcount());
+                Require(count != 0u,
+                    "Killhouse WeaponDef retry receives source bytes");
+                const bool final =
+                    worldInput.peek() == std::ifstream::traits_type::eof();
+                Require(worldJob.FeedSource(
+                            std::span<const std::uint8_t>(
+                                chunk.data(), count),
+                            final) == RetailCensusError::None,
+                    "Killhouse WeaponDef retry accepts source bytes");
+            }
+            (void)worldJob.Step();
+        }
+        if (worldJob.Progress() != RetailCensusProgress::Succeeded)
+        {
+            std::cerr << "Killhouse retry stopped at "
+                      << RetailCensusStageString(worldJob.Stage()) << ": "
+                      << RetailCensusErrorString(worldJob.Failure())
+                      << " (asset " << worldJob.CurrentAssetIndex()
+                      << ", type " << worldJob.CurrentAssetType() << ")\n";
+        }
+        Require(worldJob.Progress() == RetailCensusProgress::Succeeded,
+            "Killhouse traversal resolves WeaponDef 458 through common assets");
+        RetailFastfileCensus worldResult;
+        Require(worldJob.TakeResult(worldResult),
+            "Killhouse WeaponDef retry publishes a result");
+        const auto weaponIt = std::find_if(
+            worldResult.worldWeapons.begin(),
+            worldResult.worldWeapons.end(),
+            [](const RetailPublishedWeaponDef &entry) {
+                return entry.assetIndex == 458u;
+            });
+        Require(weaponIt != worldResult.worldWeapons.end() &&
+                weaponIt->published && weaponIt->asset &&
+                weaponIt->storage && weaponIt->storage->soundNames[0u] &&
+                weaponIt->storage->soundNames[2u] &&
+                weaponIt->storage->soundNames[7u] &&
+                weaponIt->asset->pickupSound == catalog.Find(
+                    *weaponIt->storage->soundNames[0u]) &&
+                weaponIt->asset->ammoPickupSound == catalog.Find(
+                    *weaponIt->storage->soundNames[2u]) &&
+                *weaponIt->storage->soundNames[7u] ==
+                    "weap_winch1200_fire_npc" &&
+                weaponIt->asset->fireSound == catalog.Find("null") &&
+                worldResult.nextBodyIndex == 459u,
+            "Killhouse WeaponDef 458 uses exact common sound pointers and the zone-owned native default");
+        std::cerr << "common -> Killhouse publication: sounds="
+                  << catalog.EntryCount() << " weapon="
+                  << weaponIt->assetIndex << ':'
+                  << weaponIt->asset->szInternalName << " pickup="
+                  << *weaponIt->storage->soundNames[0u] << '\n';
         return;
     }
     Require(!result.worldXModels.empty(),
@@ -4088,7 +4282,9 @@ int main(int argc, char **argv)
     TestTechniqueTraversalFailures();
     TestEnvelopeAndAtomicity();
     TestShaderCompatibilityDecoder();
-    TestOwnedWorldSurfaceIfRequested(argc > 1 ? argv[1] : nullptr);
+    TestOwnedWorldSurfaceIfRequested(
+        argc > 1 ? argv[1] : nullptr,
+        argc > 2 ? argv[2] : nullptr);
     std::cout << "web retail fastfile census tests passed\n";
     return 0;
 }

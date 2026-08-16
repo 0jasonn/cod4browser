@@ -141,137 +141,13 @@ struct snd_listener // sizeof=0x38
     // padding byte
     // padding byte
 };
-// LWSS HACK: We use a slightly different version of MSS that has a +4 bigger struct.
- struct _AILSOUNDINFO_COD4 // sizeof=0x24
-{                                       // ...
-    int format;
-    const void *data_ptr;               // ...
-    uint32_t data_len;              // ...
-    uint32_t rate;
-    int bits;
-    int channels;
-    uint32_t samples;
-    uint32_t block_size;
-    const void *initial_ptr;            // ...
-};
-struct MssSoundCOD4 // sizeof=0x28
-{
-    _AILSOUNDINFO_COD4 info;
-    uint8_t *data;
-};
-// LWSS END
-//struct MssSound // sizeof=0x2C
-//{                                       // ...
-//    _AILSOUNDINFO info;
-//    uint8_t *data;
-//};
-struct LoadedSound // sizeof=0x2C
-{                                       // ...
-    const char *name;
-    MssSoundCOD4 sound;
-};
-static_assert(sizeof(LoadedSound) == 44);
+#include <sound/snd_alias_types.h>
 
-struct StreamFileNameRaw // sizeof=0x8
-{                                       // ...
-    const char *dir;
-    const char *name;
-};
-union StreamFileInfo // sizeof=0x8
-{                                       // ...
-    StreamFileNameRaw raw;
-};
-struct StreamFileName // sizeof=0x8
-{                                       // ...
-    StreamFileInfo info;
-};
-struct StreamedSound // sizeof=0x8
-{                                       // ...
-    StreamFileName filename;
-};
-union SoundFileRef // sizeof=0x8
-{                                       // ...
-    LoadedSound *loadSnd;
-    StreamedSound streamSnd;
-};
-struct SoundFile // sizeof=0xC
-{
-    uint8_t type;
-    uint8_t exists;
-    // padding byte
-    // padding byte
-    SoundFileRef u;
-};
-
-struct SndCurve // sizeof=0x48
-{                                       // ...
-    const char *filename;               // ...
-    int knotCount;                      // ...
-    float knots[8][2];                  // ...
-};
-static_assert(sizeof(SndCurve) == 72);
-
-struct MSSSpeakerLevels // sizeof=0x10
-{                                       // ...
-    int speaker;
-    int numLevels;
-    float levels[2];
-};
-struct MSSChannelMap // sizeof=0x64
-{                                       // ...
-    int speakerCount;
-    MSSSpeakerLevels speakers[6];
-};
-struct SpeakerMap // sizeof=0x198
-{                                       // ...
-    bool isDefault;
-    // padding byte
-    // padding byte
-    // padding byte
-    const char *name;                   // ...
-    MSSChannelMap channelMaps[2][2];
-};
 struct SpeakerMapInfo // sizeof=0x1D8
 {                                       // ...
     char name[64];
     SpeakerMap speakerMap;              // ...
 };
-struct snd_alias_t // sizeof=0x5C
-{
-    const char *aliasName;
-    const char *subtitle;
-    const char *secondaryAliasName;
-    const char *chainAliasName;
-    SoundFile *soundFile;
-    int sequence;
-    float volMin;
-    float volMax;
-    float pitchMin;
-    float pitchMax;
-    float distMin;
-    float distMax;
-    int flags;
-    float slavePercentage;
-    float probability;
-    float lfePercentage;
-    float centerPercentage;
-    int startDelay;
-    SndCurve *volumeFalloffCurve;
-    float envelopMin;
-    float envelopMax;
-    float envelopPercentage;
-    SpeakerMap *speakerMap;
-};
-static_assert(sizeof(snd_alias_t) == 92);
-
-struct snd_alias_list_t // sizeof=0xC
-{                                       // ...
-    const char *aliasName;              // ...
-    snd_alias_t *head;                  // ...
-    int count;                          // ...
-};
-static_assert(sizeof(snd_alias_list_t) == 12);
-
 struct snd_entchannel_info_t // sizeof=0x50
 {                                       // ...
     char name[64];

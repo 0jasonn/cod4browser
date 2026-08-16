@@ -21,6 +21,36 @@ export function createSyntheticFastfileHeader()
     ]);
 }
 
+// Freely generated minimal prerequisite zone. It exercises the real
+// code_post_gfx -> common -> world orchestration without inventing retail
+// assets or requiring sound records in unrelated browser-platform tests.
+export function createSyntheticEmptyPrerequisiteFastfile()
+{
+    const inflated = [];
+    appendU32(inflated, 4096);
+    appendU32(inflated, 0);
+    for (const size of [1024, 0, 0, 0, 1024, 0, 0, 0, 0]) {
+        appendU32(inflated, size);
+    }
+    appendU32(inflated, 0); // script-string count
+    appendU32(inflated, 0); // script-string table
+    appendU32(inflated, 1); // asset count
+    appendU32(inflated, 0xffff_ffff); // asset table
+    appendU32(inflated, 31); // RawFile
+    appendU32(inflated, 0xffff_ffff);
+    appendU32(inflated, 0xffff_ffff); // RawFile name
+    appendU32(inflated, 4);
+    appendU32(inflated, 1); // RawFile payload presence
+    inflated.push(...Buffer.from("tests/empty_common.txt", "ascii"), 0);
+    inflated.push(...Buffer.from("test", "ascii"), 0);
+    const compressed = deflateSync(Uint8Array.from(inflated), { level: 9 });
+    return Uint8Array.from([
+        0x49, 0x57, 0x66, 0x66, 0x75, 0x31, 0x30, 0x30,
+        0x05, 0x00, 0x00, 0x00,
+        ...compressed,
+    ]);
+}
+
 function appendU32(bytes, value)
 {
     bytes.push(value & 0xff, (value >>> 8) & 0xff,
@@ -896,6 +926,8 @@ export async function createInstallDirectory(
                 contents = createSyntheticIwd();
             } else if (requirement.path === "zone/english/code_post_gfx.ff") {
                 contents = createSyntheticRetailCensusFastfile();
+            } else if (requirement.path === "zone/english/common.ff") {
+                contents = createSyntheticEmptyPrerequisiteFastfile();
             } else if (requirement.path === "zone/english/killhouse.ff") {
                 contents = createSyntheticWorldInventoryFastfile();
             } else {

@@ -12,8 +12,9 @@ namespace kisak::fastfile
 {
 
 // Mirrors DB_FindXAssetHeader(ASSET_TYPE_SOUND, name) without making the
-// bounded fastfile operation own database policy. The provider retains every
-// returned asset for the complete traversal.
+// bounded fastfile operation own an independent database. Exact names resolve
+// to indexed zone objects; a miss resolves to the indexed canonical `null`
+// sound when that prerequisite asset has been published.
 using RetailSoundAliasLookupFunction = snd_alias_list_t *(*)(
     std::string_view name, void *userData) noexcept;
 
