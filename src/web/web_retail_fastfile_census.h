@@ -335,8 +335,6 @@ enum class RetailCensusStage : std::uint8_t
     WorldFxTrail,
     WorldFxTrailVertices,
     WorldFxTrailIndices,
-    WorldFxMaterial,
-    WorldFxMaterialName,
     WorldFxPublish,
     WorldRawFile,
     WorldRawFileName,
@@ -670,15 +668,7 @@ struct RetailWorldXModel
     bool stoppedBeforeMaterialDependency = false;
 };
 
-struct RetailWorldFxMaterial
-{
-    std::string name;
-    std::uint32_t referenceBlock4Offset = 0u;
-    std::uint32_t headerBlock0Offset = 0u;
-    std::uint32_t nameBlock4Offset = 0u;
-    std::uint32_t identity = 0u;
-    bool published = false;
-};
+using RetailWorldFxMaterial = RetailXModelMaterial;
 
 struct RetailWorldFxElemDef
 {

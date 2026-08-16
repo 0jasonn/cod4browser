@@ -354,17 +354,15 @@ Together with the completed `PhysGeomList` path and comma-prefixed engine image
 placeholders, it advanced the owned dispatcher through top-level asset 380 in
 one run. The reusable `FxEffectDef` family now follows checked element headers,
 velocity/visual samples, mark and ordinary visuals, effect-name references,
-engine-owned materials, trails, and nested XModels. It publishes assets 381 and
-382, then returns to the existing XModel and technique-set loaders through
-asset 394. The reusable canonical `RawFile` path now publishes assets 395 and
-396 (`aitype/ally_blackkit_shtgn_winchester.gsc`, 1,781 payload bytes, and
-`character/character_sp_sas_ct_benjamin.gsc`, 201 bytes). The common dispatcher
-then publishes XModel asset 397, `body_complete_sp_sas_ct_benjamin`, with 15
-surfaces and its checked material/image dependencies, and records the next
-boundary at inline RawFile asset 398. The owned result contains 270 published
-XModels (four are nested FX built-ins), two FX effects, 398 completed top-level
-assets, and 1,311 published registry identities. There are 374
-top-level records left before the first `GfxWorld`.
+materials, trails, and nested XModels. FX materials reuse the same checked
+`Material`/`GfxImage` dependency path as XModels instead of a zero-dependency
+FX substitute. After canonical RawFiles 395-396, the dispatcher resumes at
+RawFile assets 398, 400, 402, and 404 and continues through the intervening
+XModels, technique sets, and nine additional FX effects. The owned result now
+completes top-level assets 0-436 and stops before inline type-2 `XAnimParts`
+asset 437. It contains six canonical RawFiles, 278 published XModels (four are
+nested FX built-ins), 11 FX effects, and 1,367 fully defined registry
+identities. There are 335 top-level records left before the first `GfxWorld`.
 
 The first convergence checkpoint moves canonical `RawFile`, `XAssetHeader`,
 `XAssetType`, and `XAsset` declarations into a renderer-free shared database
@@ -377,8 +375,9 @@ compares logical stream coordinates without native addresses or inflate
 read-ahead diagnostics. The Win32 portable suite now builds with MSVC against
 KisakCOD's bundled zlib 1.1.4 and passes all 16 tests; that run also caught and
 fixed zero-length inflate calls that newer zlib accepts but 1.1.4 rejects when
-`next_in` is null. The next loader slice resumes the canonical RawFile path at
-asset 398 after the proven XModel handoff.
+`next_in` is null. The next loader family is native type-2 `XAnimParts` at
+asset 437; traversal must inventory and follow its generated Kisak loader
+before continuing toward `GfxWorld`.
 
 See [docs/web-port.md](docs/web-port.md) for the pinned toolchain, build steps,
 current boundary and validation limits, and see

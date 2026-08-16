@@ -1524,11 +1524,12 @@ engine-owned placeholders, including both `,$identitynormalmap` and
 The reusable FX family now validates the 32-byte `FxEffectDef`, the complete
 252-byte element array, bounded velocity and visual-state samples, mark and
 ordinary visual arrays, XString references, and optional trail payloads. Visual
-dependencies resolve through the typed registry. Inline engine-owned materials
-are accepted only in their zero-dependency form; nested inline XModels reuse
-the complete checked XModel loader. Empty comma-prefixed FX XModels are
-recognized as engine-owned placeholders and cannot make a non-comma empty
-model valid.
+dependencies resolve through the typed registry. Inline FX materials reuse the
+same bounded material, texture, image, constant, and state-bit loader as XModel
+materials; shared insertion cells publish with the completed material. Nested
+inline XModels reuse the complete checked XModel loader. Empty comma-prefixed
+FX XModels are recognized as engine-owned placeholders and cannot make a
+non-comma empty model valid.
 
 The owned run publishes `props/watermelon_splat` as asset 381 / identity 1242
 and `props/watermelon` as asset 382 / identity 1250. The first has one mark
@@ -1544,11 +1545,15 @@ available. The owned file publishes identity 1290 for
 for `character/character_sp_sas_ct_benjamin.gsc` with length 201. Returning to
 the common dispatcher publishes XModel asset 397,
 `body_complete_sp_sas_ct_benjamin`, including 15 surfaces, four LODs, and its
-checked material/image dependencies, then stops at inline RawFile asset 398.
-The result has 398 completed top-level assets, 270 published XModels, two FX
-effects, and 1,311 registered assets with all 1,311 aliases defined. The
-bounded retained-inflate ceiling remains 64 MiB; 374
-top-level records remain before the first `GfxWorld`.
+checked material/image dependencies. The dispatcher then publishes canonical
+RawFiles 398, 400, 402, and 404, the intervening character XModels, and the
+weapon XModel/FX/technique-set run through asset 436. FX assets 423-425, 427,
+and 429-433 exercise the shared material dependency path; asset 423 alone owns
+seven checked materials. The result has 437 completed top-level assets, 278
+published XModels, 11 FX effects, and 1,367 registered assets with all 1,367
+aliases defined. It stops before inline type-2 `XAnimParts` asset 437. The
+bounded retained-inflate ceiling remains 64 MiB; 335 top-level records remain
+before the first `GfxWorld`.
 
 Reaching `GfxWorld` still requires typed loaders for every intervening inline
 asset class; geometry, lightmaps, visibility, and camera state remain separate
@@ -1611,11 +1616,12 @@ null `next_in` pointer even when `avail_in` is zero. The IWD member decoder and
 fastfile surface inflater now provide a stable non-null zero-length buffer.
 All 16 portable Win32 tests pass with that native dependency.
 
-The owned `killhouse.ff` run verifies that assets 395 and 396 reuse the same
-canonical RawFile operation. It then returns to the reusable dispatcher and
-publishes the already supported XModel at 397, recording the exact RawFile-398
-boundary. The next step resumes that canonical RawFile path and continues the
-remaining serialized families in order.
+The owned `killhouse.ff` run verifies that assets 395, 396, 398, 400, 402, and
+404 reuse the same canonical RawFile operation across intervening XModels. It
+then continues through the supported weapon and FX dependencies to asset 436.
+The next step inventories native `Load_XAnimPartsPtr`/`Load_XAnimParts` for
+inline type-2 asset 437 and continues the remaining serialized families in
+order.
 
 General generated-loader traversal and a real-map render remain later format
 milestones.

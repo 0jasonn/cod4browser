@@ -1427,9 +1427,35 @@ as identities 1290 and 1291. The owned records are
 `character/character_sp_sas_ct_benjamin.gsc` (length 201). The common
 dispatcher then publishes XModel asset 397,
 `body_complete_sp_sas_ct_benjamin`, as identity 1311 with 15 surfaces and four
-LODs. The current result therefore completes assets 0 through 397 and stops
+LODs. The M39 checkpoint therefore completes assets 0 through 397 and stops
 before inline RawFile asset 398. It contains 270 published XModels, two
 published FX effects, and 1,311 registry assets with all 1,311 aliases defined.
 The retained inflated-prefix ceiling is 64 MiB, while every logical pointer
 target remains constrained by its declared block size and current high-water
 mark.
+
+## Milestone 40 RawFile continuation and shared FX materials (complete)
+
+The one-off post-RawFile XModel stop has been removed. A generated
+`RawFile -> XModel -> RawFile` fixture proves that each completed body returns
+to the common dispatcher, and collection/payload ceilings still fail
+atomically. The owned run publishes four additional canonical RawFiles at
+assets 398, 400, 402, and 404 (identities 1312, 1314, 1316, and 1318) while
+preserving stable owned storage behind each canonical `RawFile` pointer.
+
+Native `Load_FxElemVisuals` reaches `Load_MaterialHandle`, so FX visuals no
+longer use a separate name-only material parser. They reuse the checked
+material/texture/image/constant/state-bit operation already used by XModels.
+Typed aliases and optional shared insertion cells publish only after the full
+material dependency succeeds. The FX header now matches native DB semantics:
+`elemDefs` is a non-null presence field, and runtime `totalSize` metadata does
+not control serialized traversal. Generated coverage includes a nested FX
+material with an inline engine-owned `GfxImage`.
+
+The owned result completes top-level assets 0-436. It contains six canonical
+RawFiles, 278 published XModels, 11 FX effects, and 1,367 assets with all 1,367
+aliases defined. XModel asset 436, `viewmodel_knife`, publishes as identity
+1367 at inflated offset 28,658,479; block 0 remains at high-water 352 and block
+4 reaches cursor 8,260,512. The next untouched body is inline type-2
+`XAnimParts` asset 437. There are 335 serialized top-level assets remaining
+before the first `GfxWorld` at asset 772.

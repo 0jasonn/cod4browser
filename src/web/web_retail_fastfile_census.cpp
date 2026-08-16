@@ -527,8 +527,6 @@ const char *RetailCensusStageString(RetailCensusStage stage) noexcept
     case RetailCensusStage::WorldFxTrail: return "world-fx-trail";
     case RetailCensusStage::WorldFxTrailVertices: return "world-fx-trail-vertices";
     case RetailCensusStage::WorldFxTrailIndices: return "world-fx-trail-indices";
-    case RetailCensusStage::WorldFxMaterial: return "world-fx-material";
-    case RetailCensusStage::WorldFxMaterialName: return "world-fx-material-name";
     case RetailCensusStage::WorldFxPublish: return "world-fx-publish";
     case RetailCensusStage::WorldRawFile: return "world-rawfile";
     case RetailCensusStage::WorldRawFileName: return "world-rawfile-name";
@@ -593,6 +591,9 @@ struct RetailFastfileCensusJob::Impl
     std::uint32_t worldCollisionSurfaceIndex = 0u;
     std::uint32_t worldImageResourceBytes = 0u;
     ZoneSpan worldMaterialAliasSlot{};
+    ZoneSpan worldMaterialInsertAliasSlot{};
+    bool worldMaterialHasInsertAlias = false;
+    bool worldMaterialOwnedByFx = false;
     ZoneSpan worldImageAliasSlot{};
     std::uint32_t worldTechniqueSlotIndex = 0u;
     std::uint32_t worldMaterialPassIndex = 0u;
@@ -607,7 +608,6 @@ struct RetailFastfileCensusJob::Impl
     std::uint32_t worldMaterialLiteralIndex = 0u;
     ZoneSpan worldFxAliasSlot{};
     ZoneSpan worldRawFileAliasSlot{};
-    ZoneSpan worldFxMaterialAliasSlot{};
     std::size_t worldFxIndex = 0u;
     std::uint32_t worldFxElemIndex = 0u;
     std::uint32_t worldFxVisualIndex = 0u;
@@ -1283,6 +1283,11 @@ struct RetailFastfileCensusJob::Impl
         auto activeWorldFxElem = [&]() noexcept -> RetailWorldFxElemDef & {
             return result.worldFxEffects[worldFxIndex].elemDefs[worldFxElemIndex];
         };
+        auto activeWorldMaterial = [&]() noexcept -> RetailXModelMaterial & {
+            return worldMaterialOwnedByFx
+                ? activeWorldFx().materials.back()
+                : activeWorldXModel().materials.back();
+        };
         auto hasCompletedWorldMaterialTechnique = [&]() noexcept {
             return std::any_of(
                 result.worldTechniqueSets.begin(),
@@ -1654,6 +1659,7 @@ struct RetailFastfileCensusJob::Impl
             return RetailCensusError::None;
         };
         auto retainResolvedWorldImage = [&](const RetailXModelImage &image) noexcept {
+            if (worldMaterialOwnedByFx) return RetailCensusError::None;
             RetailWorldXModel &model = activeWorldXModel();
             const auto existing = std::find_if(
                 model.resolvedImages.begin(), model.resolvedImages.end(),
@@ -1683,10 +1689,23 @@ struct RetailFastfileCensusJob::Impl
                     if (image != material.images.end()) return &*image;
                 }
             }
+            for (const RetailWorldFxEffectDef &effect : result.worldFxEffects)
+            {
+                for (const RetailWorldFxMaterial &material : effect.materials)
+                {
+                    const auto image = std::find_if(
+                        material.images.begin(), material.images.end(),
+                        [&](const RetailXModelImage &entry) {
+                            return entry.identity == identity && entry.published;
+                        });
+                    if (image != material.images.end()) return &*image;
+                }
+            }
             return nullptr;
         };
         auto retainResolvedWorldMaterial =
             [&](const RetailXModelMaterial &material) noexcept {
+                if (worldMaterialOwnedByFx) return RetailCensusError::None;
                 RetailWorldXModel &model = activeWorldXModel();
                 const auto existing = std::find_if(
                     model.resolvedMaterials.begin(),
@@ -1714,6 +1733,15 @@ struct RetailFastfileCensusJob::Impl
                     });
                 if (material != model.materials.end()) return &*material;
             }
+            for (const RetailWorldFxEffectDef &effect : result.worldFxEffects)
+            {
+                const auto material = std::find_if(
+                    effect.materials.begin(), effect.materials.end(),
+                    [&](const RetailWorldFxMaterial &entry) {
+                        return entry.identity == identity && entry.published;
+                    });
+                if (material != effect.materials.end()) return &*material;
+            }
             return nullptr;
         };
         auto advanceWorldMaterials = [&](RetailCensusStage &nextStage) noexcept {
@@ -1724,6 +1752,7 @@ struct RetailFastfileCensusJob::Impl
                     model.materialReferences[worldMaterialIndex];
                 if (token == INLINE_POINTER || token == SHARED_POINTER)
                 {
+                    worldMaterialOwnedByFx = false;
                     worldMaterialAliasSlot = {
                         4u,
                         model.materialHandlesBlock4Offset +
@@ -1735,7 +1764,19 @@ struct RetailFastfileCensusJob::Impl
                                 worldMaterialAliasSlot, ASSET_TYPE_MATERIAL));
                         error != RetailCensusError::None)
                     {
-                        return error;
+                            return error;
+                    }
+                    worldMaterialHasInsertAlias = token == SHARED_POINTER;
+                    if (worldMaterialHasInsertAlias)
+                    {
+                        if (const RetailCensusError error = Plan(
+                                4u, 4u, &worldMaterialInsertAliasSlot);
+                            error != RetailCensusError::None) return error;
+                        if (const RetailCensusError error = MapRegistryError(
+                                registry.ReserveAlias(
+                                    worldMaterialInsertAliasSlot,
+                                    ASSET_TYPE_MATERIAL));
+                            error != RetailCensusError::None) return error;
                     }
                     if (const RetailCensusError error = Push(0u);
                         error != RetailCensusError::None) return error;
@@ -1820,8 +1861,7 @@ struct RetailFastfileCensusJob::Impl
             return RetailCensusError::None;
         };
         auto advanceWorldTextures = [&](RetailCensusStage &nextStage) noexcept {
-            RetailXModelMaterial &material =
-                activeWorldXModel().materials.back();
+            RetailXModelMaterial &material = activeWorldMaterial();
             while (worldTextureIndex < material.textures.size())
             {
                 RetailXModelMaterialTexture &texture =
@@ -2887,22 +2927,24 @@ struct RetailFastfileCensusJob::Impl
                 effect.totalSize = ReadS32(record + 8u);
                 effect.msecLoopingLife = ReadS32(record + 12u);
                 effect.elemDefsReference = ReadU32(record + 28u);
+                // totalSize describes the runtime allocation built by the FX
+                // converter; native DB traversal neither sizes from nor
+                // validates it.
                 if (ReadU32(record) != INLINE_POINTER ||
-                    effect.totalSize < static_cast<std::int32_t>(FX_EFFECT_DEF_BYTES) ||
-                    effect.msecLoopingLife < 0 || looping < 0 || oneShot < 0 ||
-                    emission < 0)
-                {
+                    effect.msecLoopingLife < 0)
                     return RetailCensusError::FxEffectLayoutUnsupported;
-                }
+                if (looping < 0 || oneShot < 0 || emission < 0)
+                    return RetailCensusError::FxEffectLayoutUnsupported;
                 const std::uint64_t elemCount =
                     static_cast<std::uint64_t>(looping) +
                     static_cast<std::uint64_t>(oneShot) +
                     static_cast<std::uint64_t>(emission);
                 if (elemCount > limits.maxFxElemDefs)
                     return RetailCensusError::FxEffectCountLimit;
-                if ((elemCount == 0u && effect.elemDefsReference != 0u) ||
-                    (elemCount != 0u &&
-                     effect.elemDefsReference != INLINE_POINTER))
+                // Native Load_FxEffectDef treats elemDefs as a presence field:
+                // any non-null serialized value is replaced by the allocation
+                // for the contiguous FxElemDef array.
+                if ((elemCount == 0u) != (effect.elemDefsReference == 0u))
                 {
                     return RetailCensusError::FxEffectLayoutUnsupported;
                 }
@@ -3182,14 +3224,22 @@ struct RetailFastfileCensusJob::Impl
                     }
                     if (token == INLINE_POINTER || token == SHARED_POINTER)
                     {
-                        worldFxMaterialAliasSlot = aliasSlot;
+                        worldMaterialOwnedByFx = true;
+                        worldMaterialAliasSlot = aliasSlot;
                         if (const RetailCensusError error = MapRegistryError(
                                 registry.ReserveAlias(
                                     aliasSlot, ASSET_TYPE_MATERIAL));
                             error != RetailCensusError::None) return error;
-                        if (token == SHARED_POINTER)
+                        worldMaterialHasInsertAlias = token == SHARED_POINTER;
+                        if (worldMaterialHasInsertAlias)
                         {
-                            if (const RetailCensusError error = Plan(4u, 4u);
+                            if (const RetailCensusError error = Plan(
+                                    4u, 4u, &worldMaterialInsertAliasSlot);
+                                error != RetailCensusError::None) return error;
+                            if (const RetailCensusError error = MapRegistryError(
+                                    registry.ReserveAlias(
+                                        worldMaterialInsertAliasSlot,
+                                        ASSET_TYPE_MATERIAL));
                                 error != RetailCensusError::None) return error;
                         }
                         if (const RetailCensusError error = Push(0u);
@@ -3202,9 +3252,10 @@ struct RetailFastfileCensusJob::Impl
                         catch (...) { return RetailCensusError::AllocationFailed; }
                         RetailWorldFxMaterial &material =
                             activeWorldFx().materials.back();
-                        material.referenceBlock4Offset = aliasSlot.offset;
+                        material.handleIndex = worldFxVisualIndex;
                         material.headerBlock0Offset = span.offset;
-                        stage = RetailCensusStage::WorldFxMaterial;
+                        worldTextureIndex = 0u;
+                        stage = RetailCensusStage::WorldXModelMaterial;
                         break;
                     }
                     std::uint32_t identity = 0u;
@@ -3383,91 +3434,6 @@ struct RetailFastfileCensusJob::Impl
                 }
                 if (const RetailCensusError error = finishWorldFxElem(stage);
                     error != RetailCensusError::None) return error;
-                continue;
-            }
-            if (stage == RetailCensusStage::WorldFxMaterial)
-            {
-                RetailWorldFxMaterial &material = activeWorldFx().materials.back();
-                const int visit = visitRecord(MATERIAL_BYTES);
-                if (visit <= 0) return RetailCensusError::None;
-                const std::uint8_t *record = inflated.data() + cursor;
-                if (ReadU32(record) != INLINE_POINTER ||
-                    record[58u] != 0u || record[59u] != 0u ||
-                    record[60u] != 0u || record[63u] != 0u ||
-                    ReadU32(record + 64u) != 0u ||
-                    ReadU32(record + 68u) != 0u ||
-                    ReadU32(record + 72u) != 0u ||
-                    ReadU32(record + 76u) != 0u)
-                {
-                    return RetailCensusError::FxMaterialUnsupported;
-                }
-                cursor += MATERIAL_BYTES;
-                ++report.recordsProcessed;
-                if (const RetailCensusError error = Push(4u);
-                    error != RetailCensusError::None) return error;
-                stage = RetailCensusStage::WorldFxMaterialName;
-                continue;
-            }
-            if (stage == RetailCensusStage::WorldFxMaterialName)
-            {
-                RetailWorldFxMaterial &material = activeWorldFx().materials.back();
-                const auto begin = inflated.begin() +
-                    static_cast<std::ptrdiff_t>(cursor);
-                const auto terminator = std::find(begin, inflated.end(), 0u);
-                if (terminator == inflated.end())
-                {
-                    if (inflated.size() - cursor >= limits.maxMaterialNameBytes)
-                        return RetailCensusError::MaterialNameTooLong;
-                    blocked = true;
-                    return RetailCensusError::None;
-                }
-                const std::size_t bytes =
-                    static_cast<std::size_t>(terminator - begin) + 1u;
-                if (bytes <= 1u || bytes > limits.maxMaterialNameBytes)
-                    return bytes <= 1u
-                        ? RetailCensusError::MaterialNameInvalid
-                        : RetailCensusError::MaterialNameTooLong;
-                if (recordVisited == 0u)
-                {
-                    ZoneSpan span;
-                    if (const RetailCensusError error = Plan(1u, bytes, &span);
-                        error != RetailCensusError::None) return error;
-                    material.nameBlock4Offset = span.offset;
-                }
-                const int visit = visitRecord(bytes);
-                if (visit <= 0) return RetailCensusError::None;
-                try
-                {
-                    material.name.assign(
-                        reinterpret_cast<const char *>(inflated.data() + cursor),
-                        bytes - 1u);
-                }
-                catch (...) { return RetailCensusError::AllocationFailed; }
-                if (!ValidPublishedName(material.name))
-                    return RetailCensusError::MaterialNameInvalid;
-                cursor += bytes;
-                ++report.recordsProcessed;
-                if (const RetailCensusError error = Pop();
-                    error != RetailCensusError::None) return error;
-                if (const RetailCensusError error = Pop();
-                    error != RetailCensusError::None) return error;
-                if (const RetailCensusError error = MapRegistryError(
-                        registry.RegisterAsset(
-                            ASSET_TYPE_MATERIAL,
-                            material.referenceBlock4Offset,
-                            material.name, material.identity));
-                    error != RetailCensusError::None) return error;
-                if (const RetailCensusError error = MapRegistryError(
-                        registry.PublishAlias(
-                            worldFxMaterialAliasSlot, material.identity));
-                    error != RetailCensusError::None) return error;
-                material.published = true;
-                RetailWorldFxElemDef &elem = activeWorldFxElem();
-                if (worldFxVisualIndex >= elem.visualIdentities.size())
-                    return RetailCensusError::FxElemVisualInvalid;
-                elem.visualIdentities[worldFxVisualIndex] = material.identity;
-                ++worldFxVisualIndex;
-                stage = RetailCensusStage::WorldFxElemVisuals;
                 continue;
             }
             if (stage == RetailCensusStage::WorldFxPublish)
@@ -4822,8 +4788,7 @@ struct RetailFastfileCensusJob::Impl
             }
             if (stage == RetailCensusStage::WorldXModelMaterial)
             {
-                RetailXModelMaterial &material =
-                    activeWorldXModel().materials.back();
+                RetailXModelMaterial &material = activeWorldMaterial();
                 const int visit = visitRecord(MATERIAL_BYTES);
                 if (visit <= 0) return RetailCensusError::None;
                 const std::uint8_t *record = inflated.data() + cursor;
@@ -4847,6 +4812,8 @@ struct RetailFastfileCensusJob::Impl
                     !pointerMatchesCount(constantToken, material.constantCount) ||
                     !pointerMatchesCount(stateBitsToken, material.stateBitsCount))
                 {
+                    if (worldMaterialOwnedByFx)
+                        return RetailCensusError::FxMaterialUnsupported;
                     if (material.textureCount > limits.maxMaterialTextures)
                         return RetailCensusError::MaterialTextureCountLimit;
                     return RetailCensusError::MaterialLayoutUnsupported;
@@ -4876,8 +4843,7 @@ struct RetailFastfileCensusJob::Impl
             }
             if (stage == RetailCensusStage::WorldXModelMaterialName)
             {
-                RetailXModelMaterial &material =
-                    activeWorldXModel().materials.back();
+                RetailXModelMaterial &material = activeWorldMaterial();
                 const auto begin = inflated.begin() +
                     static_cast<std::ptrdiff_t>(cursor);
                 const auto terminator = std::find(begin, inflated.end(), 0u);
@@ -4918,8 +4884,7 @@ struct RetailFastfileCensusJob::Impl
             }
             if (stage == RetailCensusStage::WorldXModelMaterialTextures)
             {
-                RetailXModelMaterial &material =
-                    activeWorldXModel().materials.back();
+                RetailXModelMaterial &material = activeWorldMaterial();
                 const std::size_t bytes =
                     static_cast<std::size_t>(material.textureCount) *
                     MATERIAL_TEXTURE_BYTES;
@@ -4986,8 +4951,7 @@ struct RetailFastfileCensusJob::Impl
             }
             if (stage == RetailCensusStage::WorldXModelImage)
             {
-                RetailXModelImage &image =
-                    activeWorldXModel().materials.back().images.back();
+                RetailXModelImage &image = activeWorldMaterial().images.back();
                 const int visit = visitRecord(GFX_IMAGE_BYTES);
                 if (visit <= 0) return RetailCensusError::None;
                 const std::uint8_t *record = inflated.data() + cursor;
@@ -5017,8 +4981,7 @@ struct RetailFastfileCensusJob::Impl
             }
             if (stage == RetailCensusStage::WorldXModelImageName)
             {
-                RetailXModelMaterial &material =
-                    activeWorldXModel().materials.back();
+                RetailXModelMaterial &material = activeWorldMaterial();
                 RetailXModelImage &image = material.images.back();
                 const auto begin = inflated.begin() +
                     static_cast<std::ptrdiff_t>(cursor);
@@ -5119,8 +5082,7 @@ struct RetailFastfileCensusJob::Impl
             }
             if (stage == RetailCensusStage::WorldXModelImageLoadDef)
             {
-                RetailXModelImage &image =
-                    activeWorldXModel().materials.back().images.back();
+                RetailXModelImage &image = activeWorldMaterial().images.back();
                 const int visit = visitRecord(GFX_IMAGE_LOAD_DEF_BYTES);
                 if (visit <= 0) return RetailCensusError::None;
                 const std::uint8_t *record = inflated.data() + cursor;
@@ -5158,7 +5120,7 @@ struct RetailFastfileCensusJob::Impl
                 const int visit = visitRecord(worldImageResourceBytes);
                 if (visit <= 0) return RetailCensusError::None;
                 RetailXModelMaterial &material =
-                    activeWorldXModel().materials.back();
+                    activeWorldMaterial();
                 RetailXModelImage &image = material.images.back();
                 cursor += worldImageResourceBytes;
                 ++report.recordsProcessed;
@@ -5203,8 +5165,7 @@ struct RetailFastfileCensusJob::Impl
             }
             if (stage == RetailCensusStage::WorldXModelMaterialConstants)
             {
-                RetailXModelMaterial &material =
-                    activeWorldXModel().materials.back();
+                RetailXModelMaterial &material = activeWorldMaterial();
                 const std::size_t bytes =
                     static_cast<std::size_t>(material.constantCount) *
                     MATERIAL_CONSTANT_BYTES;
@@ -5246,8 +5207,7 @@ struct RetailFastfileCensusJob::Impl
             }
             if (stage == RetailCensusStage::WorldXModelMaterialStateBits)
             {
-                RetailWorldXModel &model = activeWorldXModel();
-                RetailXModelMaterial &material = model.materials.back();
+                RetailXModelMaterial &material = activeWorldMaterial();
                 const std::size_t bytes =
                     static_cast<std::size_t>(material.stateBitsCount) *
                     GFX_STATE_BITS_BYTES;
@@ -5286,11 +5246,33 @@ struct RetailFastfileCensusJob::Impl
                         registry.PublishAlias(
                             worldMaterialAliasSlot, material.identity));
                     error != RetailCensusError::None) return error;
+                if (worldMaterialHasInsertAlias)
+                {
+                    if (const RetailCensusError error = MapRegistryError(
+                            registry.PublishAlias(
+                                worldMaterialInsertAliasSlot,
+                                material.identity));
+                        error != RetailCensusError::None) return error;
+                }
                 material.published = true;
                 if (const RetailCensusError error =
                         retainResolvedWorldMaterial(material);
                     error != RetailCensusError::None) return error;
+                if (worldMaterialOwnedByFx)
+                {
+                    RetailWorldFxElemDef &elem = activeWorldFxElem();
+                    if (material.handleIndex >= elem.visualIdentities.size())
+                        return RetailCensusError::FxElemVisualInvalid;
+                    elem.visualIdentities[material.handleIndex] = material.identity;
+                    worldFxVisualIndex = material.handleIndex + 1u;
+                    worldMaterialOwnedByFx = false;
+                    worldMaterialHasInsertAlias = false;
+                    stage = RetailCensusStage::WorldFxElemVisuals;
+                    continue;
+                }
+                RetailWorldXModel &model = activeWorldXModel();
                 model.materialIdentities[material.handleIndex] = material.identity;
+                worldMaterialHasInsertAlias = false;
                 ++worldMaterialIndex;
                 if (const RetailCensusError error = advanceWorldMaterials(stage);
                     error != RetailCensusError::None)
@@ -6125,15 +6107,6 @@ struct RetailFastfileCensusJob::Impl
                 if (mode == RetailCensusMode::WorldSecondXModelDependencies &&
                     worldXModelIndex != 0u)
                 {
-                    stage = RetailCensusStage::AssetBoundary;
-                    complete = true;
-                    return RetailCensusError::None;
-                }
-                if (mode == RetailCensusMode::WorldXModelLoader &&
-                    !result.worldRawFiles.empty())
-                {
-                    result.stoppedBeforeDifferentWorldAssetType =
-                        result.nextBodyIndex < worldAssetTypes.size();
                     stage = RetailCensusStage::AssetBoundary;
                     complete = true;
                     return RetailCensusError::None;

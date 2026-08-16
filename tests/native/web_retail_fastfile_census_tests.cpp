@@ -1035,6 +1035,54 @@ std::vector<std::uint8_t> BuildReusableWorldRawFileLoaderInflated(
     return bytes;
 }
 
+std::vector<std::uint8_t> BuildInterleavedWorldRawFileLoaderInflated()
+{
+    std::vector<std::uint8_t> bytes;
+    PutU32(bytes, 4096u);
+    PutU32(bytes, 0u);
+    const std::array<std::uint32_t, 9> blocks = {{
+        1024u * 1024u, 0u, 0u, 0u, 1024u * 1024u,
+        0u, 0u, 0u, 0u,
+    }};
+    for (const std::uint32_t block : blocks) PutU32(bytes, block);
+    PutU32(bytes, 0u);
+    PutU32(bytes, 0u);
+    PutU32(bytes, 5u);
+    PutU32(bytes, 0xffffffffu);
+    for (const std::uint32_t type : {5u, 31u, 3u, 31u, 16u})
+    {
+        PutU32(bytes, type);
+        PutU32(bytes, 0xffffffffu);
+    }
+
+    std::vector<std::uint8_t> techniqueSet(148u, 0u);
+    SetU32(techniqueSet, 0u, 0xffffffffu);
+    bytes.insert(bytes.end(), techniqueSet.begin(), techniqueSet.end());
+    AppendString(bytes, ",web/rawfile_interleave_prefix");
+
+    PutU32(bytes, 0xffffffffu);
+    PutU32(bytes, 4u);
+    PutU32(bytes, 1u);
+    AppendString(bytes, "scripts/web_rawfile_before.gsc");
+    for (const std::uint8_t byte :
+        std::array<std::uint8_t, 5>{{'b', 'e', 'f', 'o', 0u}})
+        bytes.push_back(byte);
+
+    std::vector<std::uint8_t> model(220u, 0u);
+    SetU32(model, 0u, 0xffffffffu);
+    bytes.insert(bytes.end(), model.begin(), model.end());
+    AppendString(bytes, ",web/empty_xmodel_between_rawfiles");
+
+    PutU32(bytes, 0xffffffffu);
+    PutU32(bytes, 4u);
+    PutU32(bytes, 1u);
+    AppendString(bytes, "scripts/web_rawfile_after.gsc");
+    for (const std::uint8_t byte :
+        std::array<std::uint8_t, 5>{{'a', 'f', 't', 'r', 0u}})
+        bytes.push_back(byte);
+    return bytes;
+}
+
 std::vector<std::uint8_t> BuildReusableWorldFxLoaderInflated(
     bool invalidMaterial)
 {
@@ -1063,12 +1111,12 @@ std::vector<std::uint8_t> BuildReusableWorldFxLoaderInflated(
 
     PutU32(bytes, 0xffffffffu);
     PutU32(bytes, 0u);
-    PutU32(bytes, 512u);
+    PutU32(bytes, 0u);
     PutU32(bytes, 0u);
     PutU32(bytes, 0u);
     PutU32(bytes, 1u);
     PutU32(bytes, 0u);
-    PutU32(bytes, 0xffffffffu);
+    PutU32(bytes, 1u);
     AppendString(bytes, "web/fx_mark");
 
     std::vector<std::uint8_t> elem(252u, 0u);
@@ -1082,11 +1130,29 @@ std::vector<std::uint8_t> BuildReusableWorldFxLoaderInflated(
     {
         std::vector<std::uint8_t> material(80u, 0u);
         SetU32(material, 0u, 0xffffffffu);
+        if (index == 0u)
+        {
+            material[58u] = 1u;
+            SetU32(material, 68u, 0xffffffffu);
+        }
         if (invalidMaterial && index == 1u) material[58u] = 1u;
         bytes.insert(bytes.end(), material.begin(), material.end());
         AppendString(bytes, index == 0u
             ? ",web/fx_mark_world"
             : ",web/fx_mark_model");
+        if (index == 0u)
+        {
+            PutU32(bytes, 0x12345678u);
+            bytes.push_back('c');
+            bytes.push_back('p');
+            bytes.push_back(1u);
+            bytes.push_back(2u);
+            PutU32(bytes, 0xffffffffu);
+            std::vector<std::uint8_t> image(36u, 0u);
+            SetU32(image, 32u, 0xffffffffu);
+            bytes.insert(bytes.end(), image.begin(), image.end());
+            AppendString(bytes, ",web/fx_mark_builtin");
+        }
     }
     return bytes;
 }
@@ -2097,6 +2163,28 @@ void TestReusableWorldRawFileLoader()
                 RetailCensusError::RawFileCollectionLimit &&
             !collectionBounded.TakeResult(unavailable),
         "a RawFile run cannot exceed its explicit collection ceiling");
+
+    const RetailFastfileCensus interleaved = Run(
+        BuildFile(BuildInterleavedWorldRawFileLoaderInflated()),
+        7u, 2u, 3u, RetailCensusMode::WorldAssetLoader);
+    Require(interleaved.worldRawFiles.size() == 2u &&
+            interleaved.worldRawFiles[0u].assetIndex == 1u &&
+            interleaved.worldRawFiles[0u].published &&
+            interleaved.worldRawFiles[1u].assetIndex == 3u &&
+            interleaved.worldRawFiles[1u].published &&
+            interleaved.worldXModels.size() == 1u &&
+            interleaved.worldXModels[0u].assetIndex == 2u &&
+            interleaved.worldXModels[0u].published &&
+            interleaved.completedAssetCount == 4u &&
+            interleaved.nextBodyIndex == 4u &&
+            interleaved.nextBodyType == ASSET_TYPE_GFXWORLD &&
+            interleaved.stoppedAfterCanonicalRawFile &&
+            interleaved.semanticTrace.size() == 9u &&
+            interleaved.semanticTrace[6u].kind ==
+                SemanticTraceEventKind::AssetBegin &&
+            interleaved.semanticTrace[6u].assetType == ASSET_TYPE_RAWFILE &&
+            interleaved.semanticTrace[6u].assetIndex == 3u,
+        "dispatcher resumes RawFile loading after an intervening XModel");
 }
 
 void TestReusableWorldMaterialTechniqueLoader()
@@ -2157,11 +2245,17 @@ void TestReusableWorldFxLoader()
         result.worldFxEffects[0].elemDefs[0].visualIdentities[1] != 0u &&
         result.worldFxEffects[0].materials.size() == 2u &&
         result.worldFxEffects[0].materials[0].published &&
+        result.worldFxEffects[0].materials[0].textures.size() == 1u &&
+        result.worldFxEffects[0].materials[0].textures[0].resolved &&
+        result.worldFxEffects[0].materials[0].images.size() == 1u &&
+        result.worldFxEffects[0].materials[0].images[0].name ==
+            ",web/fx_mark_builtin" &&
+        result.worldFxEffects[0].materials[0].images[0].published &&
         result.worldFxEffects[0].materials[1].published &&
         result.completedAssetCount == 2u &&
         result.nextBodyIndex == 2u && result.nextBodyType == 16u &&
         result.stoppedBeforeDifferentWorldAssetType,
-        "the reusable dispatcher publishes an FX mark-visual family atomically");
+        "FX visuals reuse the checked material and image dependency path");
 
     RetailFastfileCensusJob malformed;
     Require(malformed.BeginStreaming(RetailCensusMode::WorldAssetLoader) ==
@@ -2684,10 +2778,12 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
     const auto sandbagIt = std::find_if(
         result.worldXModels.begin(), result.worldXModels.end(),
         [](const RetailWorldXModel &entry) { return entry.assetIndex == 35u; });
-    Require(result.worldFxEffects.size() == 2u,
-        "owned traversal publishes both leading FX effects");
+    Require(result.worldFxEffects.size() == 11u,
+        "owned traversal publishes every FX effect before asset 437");
     const RetailWorldFxEffectDef &splatFx = result.worldFxEffects[0u];
     const RetailWorldFxEffectDef &watermelonFx = result.worldFxEffects[1u];
+    const RetailWorldFxEffectDef &winchesterMuzzleFx =
+        result.worldFxEffects[2u];
     const std::size_t nestedBuiltinModels = static_cast<std::size_t>(
         std::count_if(
             result.worldXModels.begin(), result.worldXModels.end(),
@@ -2695,10 +2791,10 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
                 return !entry.topLevelAsset && entry.published &&
                     entry.name.starts_with(',') && entry.lodCount == 0;
              }));
-    Require(result.worldRawFiles.size() == 2u,
-        "owned traversal retains the consecutive canonical RawFile run");
+    Require(result.worldRawFiles.size() == 6u,
+        "owned traversal retains all canonical RawFiles before asset 437");
     const RetailWorldRawFile &firstRawFile = result.worldRawFiles.front();
-    const RetailWorldRawFile &secondRawFile = result.worldRawFiles.back();
+    const RetailWorldRawFile &finalRawFile = result.worldRawFiles.back();
     for (const RetailWorldRawFile &rawFile : result.worldRawFiles)
     {
         std::cout << "  RawFile asset=" << rawFile.assetIndex
@@ -2713,11 +2809,11 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
         sandbagIt->physPresetTraversed && sandbagIt->physGeomsTraversed &&
         sandbagIt->physGeomCount != 0u &&
         sandbagIt->physGeomPayloadBytes != 0u &&
-        result.completedAssetCount == 398u &&
-        result.worldXModels.size() == 270u && nestedBuiltinModels == 4u &&
-        result.registryAssetCount == 1311u &&
-        result.registryAliasCount == 1311u &&
-        result.registryDefinedAliasCount == 1311u &&
+        result.completedAssetCount == 437u &&
+        result.worldXModels.size() == 278u && nestedBuiltinModels == 4u &&
+        result.registryAssetCount == 1367u &&
+        result.registryAliasCount == 1367u &&
+        result.registryDefinedAliasCount == 1367u &&
         splatFx.assetIndex == 381u &&
         splatFx.name == "props/watermelon_splat" &&
         splatFx.identity == 1242u && splatFx.published &&
@@ -2735,22 +2831,34 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
             watermelonFx.elemDefs[5u].visualIdentities.begin(),
             watermelonFx.elemDefs[5u].visualIdentities.end(),
             [](std::uint32_t identity) { return identity != 0u; }) &&
-        nextModel.assetIndex == 397u &&
-        nextModel.name == "body_complete_sp_sas_ct_benjamin" &&
-        nextModel.identity == 1311u && nextModel.published &&
+        winchesterMuzzleFx.assetIndex == 423u &&
+        winchesterMuzzleFx.name == "muzzleflashes/winch_flshview" &&
+        winchesterMuzzleFx.identity == 1346u &&
+        winchesterMuzzleFx.published &&
+        winchesterMuzzleFx.elemDefs.size() == 11u &&
+        winchesterMuzzleFx.materials.size() == 7u &&
+        std::any_of(
+            winchesterMuzzleFx.materials.begin(),
+            winchesterMuzzleFx.materials.end(),
+            [](const RetailWorldFxMaterial &material) {
+                return material.published && !material.textures.empty();
+            }) &&
+        nextModel.assetIndex == 436u &&
+        nextModel.name == "viewmodel_knife" &&
+        nextModel.identity == 1367u && nextModel.published &&
         firstRawFile.assetIndex == 395u && firstRawFile.published &&
         firstRawFile.identity == 1290u && firstRawFile.asset &&
         firstRawFile.asset->name == firstRawFile.nameStorage->c_str() &&
         firstRawFile.asset->len == firstRawFile.length &&
-        secondRawFile.assetIndex == 396u && secondRawFile.published &&
-        secondRawFile.identity == 1291u && secondRawFile.asset &&
-        secondRawFile.asset->name == secondRawFile.nameStorage->c_str() &&
-        secondRawFile.asset->len == secondRawFile.length &&
-        result.nextBodyIndex == 398u && result.nextBodyType == 31u &&
+        finalRawFile.assetIndex == 404u && finalRawFile.published &&
+        finalRawFile.identity == 1318u && finalRawFile.asset &&
+        finalRawFile.asset->name == finalRawFile.nameStorage->c_str() &&
+        finalRawFile.asset->len == finalRawFile.length &&
+        result.nextBodyIndex == 437u && result.nextBodyType == 2u &&
         result.nextBodyReference == 0xffffffffu &&
         result.stoppedBeforeDifferentWorldAssetType &&
         result.unsupportedOperation == nullptr,
-        "owned dispatcher publishes RawFiles 395-396 and XModel 397 before RawFile 398");
+        "owned dispatcher publishes through asset 436 before XAnimParts 437");
     return;
     Require(model.published && model.identity == 19u &&
         model.rendererPayloadSelected && model.rendererPayloadAvailable &&

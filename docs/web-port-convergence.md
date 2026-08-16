@@ -51,11 +51,12 @@ a quality metric by itself because filesystem, lifecycle, and WebGL code should
 remain platform-owned.
 
 Current retail traversal of `killhouse.ff` completes top-level assets 0 through
-397 and stops before inline RawFile asset 398. It has 374 top-level records left
-before the first `GfxWorld` at asset 772. The retained result includes 270
-published XModels, two FX effects, and 1,311 registry identities. RawFiles 395
-and 396 are published through the canonical Kisak type; the XModel/material/FX
-results remain census/preview records rather than canonical publications.
+436 and stops before inline type-2 `XAnimParts` asset 437. It has 335 top-level
+records left before the first `GfxWorld` at asset 772. The retained result
+includes 278 published XModels, 11 FX effects, and 1,367 registry identities.
+RawFiles 395, 396, 398, 400, 402, and 404 are published through the canonical
+Kisak type; the XModel/material/FX results remain census/preview records rather
+than canonical publications.
 
 ## System inventory
 
@@ -124,15 +125,19 @@ results remain census/preview records rather than canonical publications.
   canonical `RawFile` whose pointers have stable owned lifetime.
 - Explicit count, name, individual payload, aggregate retained-byte, and trace
   ceilings keep failure atomic.
-- The synthetic contract test covers consecutive RawFiles and collection
-  ceilings. The owned Killhouse run publishes assets 395-396 / identities
-  1290-1291, returns through the dispatcher to publish XModel 397 / identity
-  1311, and stops before inline RawFile asset 398.
+- The synthetic contract test covers consecutive RawFiles, collection ceilings,
+  and `RawFile -> XModel -> RawFile` dispatcher return. The owned Killhouse run
+  publishes six canonical RawFiles through asset 404, then continues through
+  XModel, technique-set, and FX dependencies to asset 436.
+- FX visuals now reuse the checked XModel material/image dependency loader.
+  Shared material insertion cells and typed aliases publish only after complete
+  dependency success. Native `FxEffectDef::elemDefs` is treated as a presence
+  field and `totalSize` does not size database traversal.
 
 ### Gate 1: finish the pre-GfxWorld dependency graph
 
-- Resume the canonical RawFile operation at asset 398, then implement every
-  remaining inline family in serialized order.
+- Inventory and implement native type-2 `XAnimParts` at asset 437, then continue
+  every remaining inline family in serialized order.
 - Preserve block cursors, high-water marks, insertion cells, aliases, dependency
   order, and atomic publication.
 - Do not seek directly to asset 772.
