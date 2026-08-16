@@ -1689,3 +1689,27 @@ database. The owned common-to-Killhouse regression publishes WeaponDef 458
 (`winchester1200`) and stops at the generic first-published-weapon boundary,
 asset 459. Pickup and ammo-pickup pointers are exact common objects. No sound
 playback or other audio runtime behavior is part of this milestone.
+
+## Canonical `ComWorld` boundary
+
+Native `Load_ComWorldPtr` consumes the already-loaded four-byte XAsset root
+cell, pushes block 0, and distinguishes null, `-1`, `-2`, and prior alias
+forms. Inline/shared roots allocate an aligned 16-byte `ComWorld`; `-2` also
+allocates a four-byte block-4 insertion cell. `Load_ComWorld` then pushes block
+4, resolves the world-name `XString`, and, for any non-null `primaryLights`
+marker, bulk-loads `primaryLightCount * 68` bytes before resolving each
+`ComPrimaryLight::defName` XString in array order. Only the root pointer loader
+calls `Load_ComWorldAsset`, after that complete child sequence.
+
+The dedicated portable family mirrors that order with checked multiplication,
+explicit world/name/light/string ceilings, canonical renderer-free
+`ComWorld`/`ComPrimaryLight` ownership, and publication only at the final
+phase. Synthetic tests cover null, `-1`, `-2`, prior root aliases, zero and
+multiple lights, exact and interior XString aliases, malformed counts,
+truncation, string ceilings, and atomic failure.
+
+The owned ordered run now completes asset 704 as `maps/killhouse.d3dbsp` with
+24 primary lights. Its diagnostic boundary is inflated offset 35,674,922,
+block-0 high-water 2,300, block-4 cursor 10,685,947, and 1,772 registered
+assets with 1,875 defined aliases. Traversal stops naturally before asset 705,
+type 17 (`lightdef`). It has not sought to or entered `GfxWorld` asset 772.

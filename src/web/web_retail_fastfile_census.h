@@ -5,6 +5,7 @@
 #include <database/localize_types.h>
 #include <bgame/weapon_types.h>
 #include <gfx_d3d/material_types.h>
+#include <qcommon/com_world_types.h>
 #include <sound/snd_alias_types.h>
 #include <web/web_sound_alias_catalog.h>
 #include <xanim/xanim_types.h>
@@ -22,6 +23,7 @@ namespace kisak::fastfile
 {
 
 struct CanonicalClipMapStorage;
+struct CanonicalComWorldStorage;
 
 inline constexpr std::uint32_t RETAIL_CENSUS_ASSET_TYPE_COUNT = 33u;
 inline constexpr std::uint32_t RETAIL_CENSUS_MAX_STEP_BYTES = 64u * 1024u;
@@ -103,6 +105,12 @@ struct RetailCensusLimits
     std::uint32_t maxClipMapArrayElements = 16u * 1024u * 1024u;
     std::uint32_t maxClipMapPayloadBytes = 512u * 1024u * 1024u;
     std::uint32_t maxRetainedClipMapBytes = 512u * 1024u * 1024u;
+    std::uint32_t maxComWorlds = 8u;
+    std::uint32_t maxComWorldNameBytes = 255u;
+    std::uint32_t maxComWorldPrimaryLights = 4096u;
+    std::uint32_t maxComWorldLightDefNameBytes = 255u;
+    std::uint32_t maxComWorldStringBytes = 1024u * 1024u;
+    std::uint32_t maxComWorldPayloadBytes = 2u * 1024u * 1024u;
     std::uint32_t maxSemanticTraceEntries = 65536u;
 };
 
@@ -266,6 +274,16 @@ enum class RetailCensusError : std::uint8_t
     ClipMapPointerInvalid,
     ClipMapDependencyUnsupported,
     ClipMapAliasInvalid,
+    ComWorldLayoutUnsupported,
+    ComWorldCollectionLimit,
+    ComWorldNameInvalid,
+    ComWorldNameTooLong,
+    ComWorldLightCountInvalid,
+    ComWorldLightNameInvalid,
+    ComWorldLightNameTooLong,
+    ComWorldStringBytesLimit,
+    ComWorldPayloadLimit,
+    ComWorldAliasInvalid,
     PostXModelAssetUnsupported,
     SemanticTraceLimit,
     AllocationFailed,
@@ -453,6 +471,7 @@ enum class RetailCensusStage : std::uint8_t
     WorldSoundAliasSpeakerMap,
     WorldSoundAliasPublish,
     WorldClipMap,
+    WorldComWorld,
     AssetBoundary,
     Failed,
 };
@@ -1025,6 +1044,25 @@ struct RetailPublishedClipMap
     bool published = false;
 };
 
+struct RetailPublishedComWorld
+{
+    std::uint32_t assetIndex = 0u;
+    std::uint32_t serializedReference = 0u;
+    std::uint32_t headerBlock0Offset = UINT32_MAX;
+    std::uint32_t insertPointerBlock4Offset = UINT32_MAX;
+    std::uint32_t nameBlock4Offset = UINT32_MAX;
+    std::uint32_t primaryLightsBlock4Offset = UINT32_MAX;
+    std::uint32_t payloadBytes = 0u;
+    std::uint32_t identity = 0u;
+    std::uint32_t boundaryInflatedOffset = 0u;
+    std::vector<std::uint32_t> lightDefNameBlock4Offsets;
+    std::shared_ptr<CanonicalComWorldStorage> storage;
+    std::shared_ptr<ComWorld> asset;
+    bool nullRoot = false;
+    bool pointerAlias = false;
+    bool published = false;
+};
+
 struct RetailFastfileCensus
 {
     std::uint32_t version = 0u;
@@ -1163,6 +1201,7 @@ struct RetailFastfileCensus
     std::vector<RetailPublishedWeaponDef> worldWeapons;
     std::vector<RetailPublishedSoundAliasList> worldSoundAliasLists;
     std::vector<RetailPublishedClipMap> worldClipMaps;
+    std::vector<RetailPublishedComWorld> worldComWorlds;
     std::vector<kisak::database::SemanticTraceEntry> semanticTrace;
     std::uint32_t semanticTraceHash = 2166136261u;
     std::uint32_t semanticTraceContractHash = 2166136261u;

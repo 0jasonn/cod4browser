@@ -551,6 +551,87 @@ std::vector<std::uint8_t> BuildClipMapZoneInflated(
     return bytes;
 }
 
+std::uint32_t Block4Token(std::uint32_t offset)
+{
+    return 0x40000000u | (offset + 1u);
+}
+
+std::uint32_t Align4(std::uint32_t value)
+{
+    return (value + 3u) & ~3u;
+}
+
+std::vector<std::uint8_t> BuildComWorldZoneInflated(
+    std::uint32_t rootReference = 0xffffffffu,
+    bool priorRootAlias = false,
+    bool multipleLights = false,
+    bool nonnullZeroLightArray = false,
+    std::string worldName = "maps/mp/web_comworld.d3dbsp",
+    std::string firstLightName = "light/web_primary")
+{
+    std::vector<std::uint8_t> bytes;
+    PutU32(bytes, 4096u);
+    PutU32(bytes, 0u);
+    for (const std::uint32_t block :
+         std::array<std::uint32_t, 9>{{4096u, 0u, 0u, 0u, 4096u,
+                                      0u, 0u, 0u, 0u}})
+        PutU32(bytes, block);
+    PutU32(bytes, 0u);
+    PutU32(bytes, 0u);
+    const std::uint32_t assetCount = priorRootAlias ? 3u : 2u;
+    PutU32(bytes, assetCount);
+    PutU32(bytes, 0xffffffffu);
+    PutU32(bytes, 12u);
+    PutU32(bytes, rootReference);
+    if (priorRootAlias)
+    {
+        PutU32(bytes, 12u);
+        // Load_ComWorldPtr(-2) creates DB_InsertPointer immediately after the
+        // complete block-4 XAsset table.
+        PutU32(bytes, Block4Token(assetCount * 8u));
+    }
+    PutU32(bytes, 32u);
+    PutU32(bytes, 0u);
+
+    if (rootReference == 0u) return bytes;
+
+    std::vector<std::uint8_t> world(16u, 0u);
+    SetU32(world, 0u, 0xffffffffu);
+    SetU32(world, 4u, 1u);
+    SetU32(world, 8u, multipleLights ? 3u : 0u);
+    SetU32(world, 12u,
+        multipleLights || nonnullZeroLightArray ? 1u : 0u);
+    bytes.insert(bytes.end(), world.begin(), world.end());
+
+    const std::uint32_t tableBytes = assetCount * 8u;
+    const std::uint32_t insertionBytes = rootReference == 0xfffffffeu ? 4u : 0u;
+    const std::uint32_t nameOffset = tableBytes + insertionBytes;
+    AppendString(bytes, worldName);
+    if (!multipleLights) return bytes;
+
+    const std::uint32_t arrayOffset = Align4(
+        nameOffset + static_cast<std::uint32_t>(worldName.size()) + 1u);
+    const std::uint32_t firstDefNameOffset = arrayOffset + 3u * 68u;
+    std::vector<std::uint8_t> lights(3u * 68u, 0u);
+    for (std::uint32_t index = 0u; index < 3u; ++index)
+    {
+        const std::size_t offset = static_cast<std::size_t>(index) * 68u;
+        lights[offset] = static_cast<std::uint8_t>(index + 1u);
+        lights[offset + 1u] = static_cast<std::uint8_t>(index & 1u);
+        lights[offset + 2u] = static_cast<std::uint8_t>(8u + index);
+        SetF32(lights, offset + 4u, 0.25f + static_cast<float>(index));
+        SetF32(lights, offset + 16u, -1.0f + static_cast<float>(index));
+        SetF32(lights, offset + 28u, 10.0f + static_cast<float>(index));
+        SetF32(lights, offset + 40u, 128.0f + static_cast<float>(index));
+    }
+    SetU32(lights, 64u, 0xffffffffu);
+    SetU32(lights, 68u + 64u, Block4Token(firstDefNameOffset));
+    SetU32(lights, 2u * 68u + 64u, Block4Token(firstDefNameOffset + 6u));
+    bytes.insert(bytes.end(), lights.begin(), lights.end());
+    AppendString(bytes, firstLightName);
+    return bytes;
+}
+
 std::vector<std::uint8_t> BuildWorldTechniquePrefixInflated(
     bool firstDependency = false,
     bool secondDependency = false,
@@ -1890,6 +1971,132 @@ void TestCanonicalClipMapLoader()
     Require(malformed.Failure() == RetailCensusError::ClipMapCountInvalid &&
             !malformed.TakeResult(unavailable),
         "invalid ClipMap child counts fail atomically without exposing partial ownership");
+}
+
+void TestCanonicalComWorldLoader()
+{
+    using namespace kisak::fastfile;
+
+    const RetailFastfileCensus nullRoot = Run(
+        BuildFile(BuildComWorldZoneInflated(0u)),
+        5u, 1u, 1u, RetailCensusMode::WorldAssetLoader);
+    Require(nullRoot.completedAssetCount == 1u &&
+            nullRoot.nextBodyIndex == 1u && nullRoot.nextBodyType == 32u &&
+            nullRoot.worldComWorlds.size() == 1u &&
+            nullRoot.worldComWorlds[0u].nullRoot &&
+            !nullRoot.worldComWorlds[0u].asset &&
+            !nullRoot.worldComWorlds[0u].published,
+        "Load_ComWorldPtr preserves a null top-level root without allocating or publishing");
+
+    const RetailFastfileCensus zeroLights = Run(
+        BuildFile(BuildComWorldZoneInflated()),
+        5u, 1u, 1u, RetailCensusMode::WorldAssetLoader);
+    const RetailPublishedComWorld &zero = zeroLights.worldComWorlds.front();
+    Require(zero.published && zero.asset && zero.storage &&
+            zero.serializedReference == 0xffffffffu &&
+            zero.headerBlock0Offset == 0u &&
+            std::string_view(zero.asset->name) ==
+                "maps/mp/web_comworld.d3dbsp" &&
+            zero.asset->isInUse == 1 &&
+            zero.asset->primaryLightCount == 0u &&
+            zero.asset->primaryLights == nullptr && zero.identity != 0u,
+        "Load_ComWorld publishes the canonical 16-byte body with a null zero-light array");
+
+    const RetailFastfileCensus allocatedZeroLights = Run(
+        BuildFile(BuildComWorldZoneInflated(
+            0xffffffffu, false, false, true)),
+        5u, 1u, 1u, RetailCensusMode::WorldAssetLoader);
+    Require(allocatedZeroLights.worldComWorlds[0u].asset->primaryLightCount == 0u &&
+            allocatedZeroLights.worldComWorlds[0u].asset->primaryLights != nullptr,
+        "a non-null serialized primaryLights marker retains native zero-count allocation semantics");
+
+    const RetailFastfileCensus multiple = Run(
+        BuildFile(BuildComWorldZoneInflated(
+            0xffffffffu, false, true)),
+        5u, 1u, 1u, RetailCensusMode::WorldAssetLoader);
+    const RetailPublishedComWorld &lit = multiple.worldComWorlds.front();
+    Require(lit.published && lit.asset && lit.asset->primaryLightCount == 3u &&
+            lit.asset->primaryLights && lit.asset->primaryLights[0u].type == 1u &&
+            lit.asset->primaryLights[1u].type == 2u &&
+            lit.asset->primaryLights[2u].type == 3u &&
+            lit.asset->primaryLights[0u].radius == 128.0f &&
+            lit.asset->primaryLights[2u].origin[0u] == 12.0f &&
+            std::string_view(lit.asset->primaryLights[0u].defName) ==
+                "light/web_primary" &&
+            lit.asset->primaryLights[1u].defName ==
+                lit.asset->primaryLights[0u].defName &&
+            std::string_view(lit.asset->primaryLights[2u].defName) ==
+                "web_primary" &&
+            lit.lightDefNameBlock4Offsets[1u] ==
+                lit.lightDefNameBlock4Offsets[0u] &&
+            lit.lightDefNameBlock4Offsets[2u] ==
+                lit.lightDefNameBlock4Offsets[0u] + 6u,
+        "ComPrimaryLight array loading preserves scalar bytes plus exact and interior XString aliases");
+
+    const RetailFastfileCensus inserted = Run(
+        BuildFile(BuildComWorldZoneInflated(
+            0xfffffffeu, true, true)),
+        5u, 1u, 1u, RetailCensusMode::WorldAssetLoader);
+    Require(inserted.worldComWorlds.size() == 2u &&
+            inserted.worldComWorlds[0u].published &&
+            inserted.worldComWorlds[0u].insertPointerBlock4Offset == 24u &&
+            inserted.worldComWorlds[1u].pointerAlias &&
+            inserted.worldComWorlds[1u].published &&
+            inserted.worldComWorlds[1u].identity ==
+                inserted.worldComWorlds[0u].identity &&
+            inserted.worldComWorlds[1u].asset.get() ==
+                inserted.worldComWorlds[0u].asset.get() &&
+            inserted.completedAssetCount == 2u &&
+            inserted.nextBodyIndex == 2u && inserted.nextBodyType == 32u,
+        "Load_ComWorldPtr(-2) publishes its insertion cell and later aliases resolve to the canonical world");
+
+    const auto expectFailure = [](std::vector<std::uint8_t> inflated,
+                                  RetailCensusError expected,
+                                  const char *message) {
+        RetailFastfileCensusJob job;
+        const auto file = BuildFile(std::move(inflated));
+        Require(job.BeginStreaming(RetailCensusMode::WorldAssetLoader) ==
+                RetailCensusError::None &&
+                job.FeedSource(file, true) == RetailCensusError::None,
+            "ComWorld negative fixture starts");
+        for (std::uint32_t step = 0u; step < 10000u &&
+             job.Progress() == RetailCensusProgress::Running; ++step)
+            (void)job.Step();
+        RetailFastfileCensus unavailable;
+        unavailable.assetCount = 99u;
+        if (job.Progress() != RetailCensusProgress::Failed ||
+            job.Failure() != expected)
+            std::cerr << "ComWorld negative stopped at "
+                      << RetailCensusStageString(job.Stage()) << ": "
+                      << RetailCensusErrorString(job.Failure()) << '\n';
+        Require(job.Progress() == RetailCensusProgress::Failed &&
+                job.Failure() == expected &&
+                !job.TakeResult(unavailable) && unavailable.assetCount == 99u,
+            message);
+    };
+
+    std::vector<std::uint8_t> malformedCount = BuildComWorldZoneInflated();
+    SetU32(malformedCount, 84u, UINT32_MAX);
+    expectFailure(std::move(malformedCount),
+        RetailCensusError::ComWorldLightCountInvalid,
+        "malformed ComWorld primary-light counts fail before allocation and publish nothing");
+
+    std::vector<std::uint8_t> truncated =
+        BuildComWorldZoneInflated(0xffffffffu, false, true);
+    truncated.pop_back();
+    expectFailure(std::move(truncated), RetailCensusError::InflateTruncated,
+        "truncated ComPrimaryLight defName input fails atomically");
+
+    expectFailure(BuildComWorldZoneInflated(
+            0xffffffffu, false, false, false, std::string(255u, 'w')),
+        RetailCensusError::ComWorldNameTooLong,
+        "ComWorld XStrings enforce their explicit byte ceiling before publication");
+
+    expectFailure(BuildComWorldZoneInflated(
+            0xffffffffu, false, true, false,
+            "maps/mp/web_comworld.d3dbsp", std::string(255u, 'l')),
+        RetailCensusError::ComWorldLightNameTooLong,
+        "ComPrimaryLight defName XStrings enforce their explicit byte ceiling before publication");
 }
 
 void TestWorldTechniqueSetPrefixBoundary()
@@ -3782,17 +3989,39 @@ void TestOwnedWorldSurfaceIfRequested(
                   << ",xanim=" << worldResult.worldXAnimParts.size()
                   << ",weapons=" << worldResult.worldWeapons.size()
                   << ",rawfiles=" << worldResult.worldRawFiles.size()
+                  << ",comworlds=" << worldResult.worldComWorlds.size()
                   << "}\n";
-        Require(worldResult.completedAssetCount == 704u &&
-                worldResult.nextBodyIndex == 704u &&
-                worldResult.nextBodyType == 12u &&
+        Require(worldResult.worldComWorlds.size() == 1u &&
+                worldResult.worldComWorlds.front().asset,
+            "Killhouse traversal retains one canonical ComWorld");
+        const RetailPublishedComWorld &comWorld =
+            worldResult.worldComWorlds.front();
+        std::cerr << "Killhouse ComWorld: name=" << comWorld.asset->name
+                  << " lights=" << comWorld.asset->primaryLightCount
+                  << " block0=" << comWorld.headerBlock0Offset
+                  << " block4-name=" << comWorld.nameBlock4Offset
+                  << " block4-lights=" << comWorld.primaryLightsBlock4Offset
+                  << " boundary=" << comWorld.boundaryInflatedOffset
+                  << " highwater0=" << worldResult.block0HighWaterAtBoundary
+                  << " cursor4=" << worldResult.block4CursorAtBoundary
+                  << " registry=" << worldResult.registryAssetCount << '/'
+                  << worldResult.registryDefinedAliasCount << '\n';
+        Require(worldResult.completedAssetCount == 705u &&
+                worldResult.nextBodyIndex == 705u &&
+                worldResult.nextBodyType == 17u &&
                 worldResult.worldTechniqueSets.size() == 152u &&
                 worldResult.worldXModels.size() == 320u &&
                 worldResult.worldFxEffects.size() == 60u &&
                 worldResult.worldXAnimParts.size() == 146u &&
                 worldResult.worldWeapons.size() == 10u &&
-                worldResult.worldRawFiles.size() == 21u,
-            "Killhouse ordered traversal reaches the exact com_map boundary with the canonical prefix");
+                worldResult.worldRawFiles.size() == 21u &&
+                worldResult.worldComWorlds.size() == 1u &&
+                comWorld.published && comWorld.asset && comWorld.storage &&
+                comWorld.assetIndex == 704u &&
+                std::string_view(comWorld.asset->name) == "maps/killhouse.d3dbsp" &&
+                comWorld.asset->primaryLightCount == 24u &&
+                comWorld.asset->primaryLights != nullptr,
+            "Killhouse ordered traversal publishes canonical com_map and stops at lightdef");
         return;
     }
     Require(!result.worldXModels.empty(),
@@ -4480,6 +4709,7 @@ int main(int argc, char **argv)
     TestWorldAssetInventory();
     TestCanonicalLocalizeZoneLoader();
     TestCanonicalClipMapLoader();
+    TestCanonicalComWorldLoader();
     TestWorldTechniqueSetPrefixBoundary();
     TestWorldXModelPrefixBoundary();
     TestWorldXSurfacePrefixBoundary();

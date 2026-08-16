@@ -3,6 +3,7 @@
 #include <database/db_asset_types.h>
 #include <database/db_semantic_trace.h>
 #include <gfx_d3d/material_types.h>
+#include <qcommon/com_world_types.h>
 #include <xanim/xanim_types.h>
 #include <xanim/xmodel_types.h>
 
@@ -37,7 +38,9 @@ void TestCanonicalAssetTypes()
     Require(std::is_standard_layout_v<XModel> &&
             std::is_standard_layout_v<Material> &&
             std::is_standard_layout_v<FxEffectDef> &&
-            std::is_standard_layout_v<WeaponDef>,
+            std::is_standard_layout_v<WeaponDef> &&
+            std::is_standard_layout_v<ComPrimaryLight> &&
+            std::is_standard_layout_v<ComWorld>,
         "canonical weapon dependency types remain standard-layout records");
     Require(sizeof(XAssetHeader) == sizeof(void *),
         "XAssetHeader remains one native pointer wide");
@@ -76,7 +79,11 @@ void TestCanonicalAssetTypes()
                 offsetof(Material, techniqueSet) == 64u &&
                 sizeof(FxEffectDef) == 32u &&
                 offsetof(FxEffectDef, elemDefs) == 28u &&
-                sizeof(WeaponDef) == 2168u,
+                sizeof(WeaponDef) == 2168u &&
+                sizeof(ComPrimaryLight) == 68u &&
+                offsetof(ComPrimaryLight, defName) == 64u &&
+                sizeof(ComWorld) == 16u &&
+                offsetof(ComWorld, primaryLights) == 12u,
             "32-bit native/Wasm builds match canonical weapon child ABIs");
     }
 

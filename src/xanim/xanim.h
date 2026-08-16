@@ -13,6 +13,7 @@
 #include <bgame/weapon_types.h>
 #include <xanim/xanim.h>
 #include <sound/snd_public.h>
+#include <qcommon/com_world_types.h>
 #include "dobj.h"
 #include "xmodel.h"
 #include <gfx_d3d/r_material.h>
@@ -133,31 +134,6 @@ struct XAnimNotify_s // sizeof=0xC
     const char* name;
     uint32_t type;
     float timeFrac;
-};
-
-struct ComPrimaryLight // sizeof=0x44 (SP/MP Same)
-{
-    unsigned __int8 type;
-    unsigned __int8 canUseShadowMap;
-    unsigned __int8 exponent;
-    unsigned __int8 unused;
-    float color[3];
-    float dir[3];
-    float origin[3];
-    float radius;
-    float cosHalfFovOuter;
-    float cosHalfFovInner;
-    float cosHalfFovExpanded;
-    float rotationLimit;
-    float translationLimit;
-    const char* defName;
-};
-struct ComWorld // sizeof=0x10 (SP/MP Same)
-{                                       // ...
-    const char* name;                   // ...
-    int isInUse;                        // ...
-    uint32_t primaryLightCount;     // ...
-    ComPrimaryLight* primaryLights;     // ...
 };
 
 struct XModelDrawInfo // sizeof=0x4

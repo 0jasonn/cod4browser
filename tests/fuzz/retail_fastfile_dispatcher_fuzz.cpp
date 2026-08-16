@@ -1,4 +1,5 @@
 #include <web/web_retail_fastfile_census.h>
+#include "../native/zlib_test_support.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -82,7 +83,8 @@ std::vector<std::uint8_t> WrapAsSyntheticFastfile(
     constexpr std::size_t MAX_INFLATED_INPUT = 192u * 1024u;
     if (inflated.size() > MAX_INFLATED_INPUT) return {};
 
-    uLongf compressedSize = compressBound(static_cast<uLong>(inflated.size()));
+    uLongf compressedSize = KisakTestCompressBound(
+        static_cast<uLong>(inflated.size()));
     std::vector<std::uint8_t> file(12u + compressedSize);
     constexpr std::uint8_t HEADER[12] = {
         'I', 'W', 'f', 'f', 'u', '1', '0', '0', 5u, 0u, 0u, 0u,

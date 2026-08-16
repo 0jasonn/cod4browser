@@ -101,6 +101,7 @@ add_executable(web_retail_fastfile_census_tests
     "${KISAK_REPOSITORY_ROOT}/src/web/web_fastfile_zone_stream.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_retail_fastfile_census.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_retail_load_clipmap.cpp"
+    "${KISAK_REPOSITORY_ROOT}/src/web/web_retail_load_comworld.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_retail_load_weapon.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_sound_alias_catalog.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_engine_xmodel_surface.cpp"
@@ -356,7 +357,7 @@ if (KISAK_BUILD_FUZZERS)
     target_link_options(asset_parsers_fuzz PRIVATE
         -fsanitize=fuzzer,address,undefined
     )
-    target_link_libraries(asset_parsers_fuzz PRIVATE ZLIB::ZLIB)
+    target_link_libraries(asset_parsers_fuzz PRIVATE ${KISAK_TEST_ZLIB_TARGET})
 
     add_executable(retail_fastfile_dispatcher_fuzz
         "${CMAKE_CURRENT_LIST_DIR}/../fuzz/retail_fastfile_dispatcher_fuzz.cpp"
@@ -366,6 +367,7 @@ if (KISAK_BUILD_FUZZERS)
         "${KISAK_REPOSITORY_ROOT}/src/web/web_fastfile_zone_stream.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/web/web_retail_fastfile_census.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/web/web_retail_load_clipmap.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/web/web_retail_load_comworld.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/web/web_retail_load_weapon.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/web/web_sound_alias_catalog.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/web/web_shader_compatibility.cpp"
@@ -380,5 +382,6 @@ if (KISAK_BUILD_FUZZERS)
     target_link_options(retail_fastfile_dispatcher_fuzz PRIVATE
         -fsanitize=fuzzer,address,undefined
     )
-    target_link_libraries(retail_fastfile_dispatcher_fuzz PRIVATE ZLIB::ZLIB)
+    target_link_libraries(retail_fastfile_dispatcher_fuzz PRIVATE
+        ${KISAK_TEST_ZLIB_TARGET})
 endif()

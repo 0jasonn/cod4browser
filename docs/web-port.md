@@ -1660,10 +1660,11 @@ mixing, decoding, or browser audio runtime behavior is implemented.
 
 The first-WeaponDef stop is retired as a traversal boundary. The owned
 common-to-Killhouse run now continues in serialized order, completes assets
-0-703, and stops before asset 704, type 12 (`com_map`). The supported prefix
+0-704, and stops before asset 705, type 17 (`lightdef`). The supported prefix
 publishes 152 technique sets, 320 XModels, 60 FX effects, 146 XAnimParts, ten
-WeaponDefs, and 21 RawFiles. `GfxWorld` is not sought directly; `com_map` and
-its native dependencies are the next family inventory.
+WeaponDefs, 21 RawFiles, and one canonical `ComWorld`. Asset 704 is
+`maps/killhouse.d3dbsp` with 24 canonical `ComPrimaryLight` records.
+`GfxWorld` is not sought directly; `lightdef` is the next family inventory.
 
 Native `Load_XString` converts any nonzero non-inline token to an address, so a
 valid pointer need not equal the first byte of an indexed string. Weapon

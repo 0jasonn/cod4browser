@@ -1,6 +1,7 @@
 #include <web/web_retail_fastfile_census.h>
 #include <web/web_retail_load_context.h>
 #include <web/web_retail_load_clipmap.h>
+#include <web/web_retail_load_comworld.h>
 #include <web/web_retail_load_weapon.h>
 
 #include <web/web_fastfile_source_stream.h>
@@ -665,6 +666,16 @@ const char *RetailCensusErrorString(RetailCensusError error) noexcept
     case RetailCensusError::ClipMapPointerInvalid: return "invalid ClipMap pointer";
     case RetailCensusError::ClipMapDependencyUnsupported: return "ClipMap dependency is not published";
     case RetailCensusError::ClipMapAliasInvalid: return "invalid ClipMap alias";
+    case RetailCensusError::ComWorldLayoutUnsupported: return "unsupported ComWorld layout";
+    case RetailCensusError::ComWorldCollectionLimit: return "ComWorld collection exceeds limit";
+    case RetailCensusError::ComWorldNameInvalid: return "invalid ComWorld name";
+    case RetailCensusError::ComWorldNameTooLong: return "ComWorld name exceeds limit";
+    case RetailCensusError::ComWorldLightCountInvalid: return "invalid ComWorld primary-light count";
+    case RetailCensusError::ComWorldLightNameInvalid: return "invalid ComPrimaryLight defName";
+    case RetailCensusError::ComWorldLightNameTooLong: return "ComPrimaryLight defName exceeds limit";
+    case RetailCensusError::ComWorldStringBytesLimit: return "ComWorld strings exceed aggregate limit";
+    case RetailCensusError::ComWorldPayloadLimit: return "ComWorld payload exceeds limit";
+    case RetailCensusError::ComWorldAliasInvalid: return "invalid ComWorld alias";
     case RetailCensusError::PostXModelAssetUnsupported:
         return "asset after the first XModel is not an inline technique set";
     case RetailCensusError::SemanticTraceLimit:
@@ -820,6 +831,7 @@ const char *RetailCensusStageString(RetailCensusStage stage) noexcept
     case RetailCensusStage::WorldSoundAliasSpeakerMap: return "world-sound-alias-speaker-map";
     case RetailCensusStage::WorldSoundAliasPublish: return "world-sound-alias-publish";
     case RetailCensusStage::WorldClipMap: return "world-clipmap";
+    case RetailCensusStage::WorldComWorld: return "world-comworld";
     case RetailCensusStage::AssetBoundary: return "asset-boundary";
     case RetailCensusStage::Failed: return "failed";
     }
@@ -1022,6 +1034,7 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
     bool worldSoundCurveHasInsertAlias = false;
     std::uint64_t retainedSoundBytes = 0u;
     RetailClipMapLoadFamily clipMapLoader;
+    RetailComWorldLoadFamily comWorldLoader;
     ZoneSpan worldMenuStringSpan{};
     std::uint32_t worldFxImpactAssetIndex = 0u;
     std::uint32_t worldFxImpactNameReference = 0u;
@@ -2465,6 +2478,12 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
         else if (type == ASSET_TYPE_CLIPMAP || type == ASSET_TYPE_CLIPMAP_PVS)
         {
             for (RetailPublishedClipMap &entry : result.worldClipMaps)
+                if (entry.published && entry.identity == identity && entry.asset)
+                    return entry.asset.get();
+        }
+        else if (type == ASSET_TYPE_COMWORLD)
+        {
+            for (RetailPublishedComWorld &entry : result.worldComWorlds)
                 if (entry.published && entry.identity == identity && entry.asset)
                     return entry.asset.get();
         }
@@ -4149,6 +4168,18 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
                         return error;
                     }
                     nextStage = RetailCensusStage::WorldClipMap;
+                    return RetailCensusError::None;
+                }
+                if (result.nextBodyType == ASSET_TYPE_COMWORLD)
+                {
+                    comWorldLoader.Reset();
+                    if (const RetailCensusError error = comWorldLoader.Begin(
+                            *this, index, result.nextBodyReference);
+                        error != RetailCensusError::None)
+                    {
+                        return error;
+                    }
+                    nextStage = RetailCensusStage::WorldComWorld;
                     return RetailCensusError::None;
                 }
                 if (result.nextBodyType == ASSET_TYPE_SOUND &&
@@ -8774,6 +8805,41 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
                 if (result.worldClipMaps.empty())
                     return RetailCensusError::ClipMapLayoutUnsupported;
                 const RetailPublishedClipMap &entry = result.worldClipMaps.back();
+                ++result.completedAssetCount;
+                result.block0HighWaterAtBoundary = arenas.HighWater(0u);
+                result.block4CursorAtBoundary = arenas.Cursor(4u);
+                result.worldRegistryAliasCount = registry.AliasCount();
+                result.worldRegistryDefinedAliasCount = registry.DefinedAliasCount();
+                result.registryAssetCount = registry.AssetCount();
+                result.registryAliasCount = registry.AliasCount();
+                result.registryDefinedAliasCount = registry.DefinedAliasCount();
+                if (const RetailCensusError error = dispatchSupportedWorldAsset(
+                        entry.assetIndex + 1u, stage);
+                    error != RetailCensusError::None)
+                    return error;
+                if (complete) return RetailCensusError::None;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldComWorld)
+            {
+                if (comWorldLoader.Progress() ==
+                    RetailComWorldLoadProgress::Running)
+                {
+                    if (const RetailCensusError error = comWorldLoader.Step(*this);
+                        error != RetailCensusError::None)
+                    {
+                        return error;
+                    }
+                    if (comWorldLoader.Progress() ==
+                        RetailComWorldLoadProgress::Running)
+                    {
+                        return RetailCensusError::None;
+                    }
+                }
+                if (result.worldComWorlds.empty())
+                    return RetailCensusError::ComWorldLayoutUnsupported;
+                const RetailPublishedComWorld &entry =
+                    result.worldComWorlds.back();
                 ++result.completedAssetCount;
                 result.block0HighWaterAtBoundary = arenas.HighWater(0u);
                 result.block4CursorAtBoundary = arenas.Cursor(4u);
