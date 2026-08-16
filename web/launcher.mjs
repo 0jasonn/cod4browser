@@ -6,7 +6,6 @@ const runtimeLabel = document.querySelector("#runtime-label");
 const runtimeMessage = document.querySelector("#runtime-message");
 const bootLog = document.querySelector("#boot-log");
 const frameCounter = document.querySelector("#frame-counter");
-const xmodelSelect = document.querySelector("#xmodel-select");
 const canvasSize = document.querySelector("#canvas-size");
 const physicsStatus = document.querySelector("#physics-status");
 const rendererStatus = document.querySelector("#renderer-status");
@@ -59,12 +58,7 @@ const runtime = {
     },
     rendererSurface: { state: "idle", message: "Waiting for an engine surface" },
     rendererTexture: { state: "idle", message: "Waiting for a supported engine image" },
-    rendererTextures: [],
     rendererShader: { state: "idle", message: "Waiting for a retail shader contract" },
-    rendererMaterial: {
-        state: "idle",
-        message: "Waiting for a shader sampler and decoded engine image",
-    },
 };
 globalThis.__KISAKCOD_WEB__ = runtime;
 
@@ -128,132 +122,6 @@ function formatBytes(bytes) {
     return `${value.toFixed(digits)} ${units[unit]}`;
 }
 
-function selectedRetailXModel(worldInventory =
-    runtime.retailCensus?.worldInventory) {
-    if (!worldInventory) {
-        return null;
-    }
-    const index = worldInventory.selectedXModelIndex;
-    if (Number.isInteger(index) && index >= 0) {
-        return worldInventory.xmodels?.[index] ?? null;
-    }
-    return worldInventory.selectedXModel ?? worldInventory.firstXModel ?? null;
-}
-
-function renderXModelSelector(worldInventory =
-    runtime.retailCensus?.worldInventory) {
-    const models = worldInventory?.xmodels ?? [];
-    const selectedIndex = Number.isInteger(worldInventory?.selectedXModelIndex)
-        ? worldInventory.selectedXModelIndex
-        : models.findIndex((model) => model?.rendererPayloadSelected);
-    xmodelSelect.replaceChildren();
-    if (models.length === 0) {
-        const option = document.createElement("option");
-        option.value = "";
-        option.textContent = "Waiting for models";
-        xmodelSelect.append(option);
-        xmodelSelect.disabled = true;
-        return;
-    }
-    let selectableCount = 0;
-    models.forEach((model, index) => {
-        const option = document.createElement("option");
-        const selectable = model?.published === true &&
-            model?.rendererPayloadAvailable === true;
-        option.value = String(index);
-        option.disabled = !selectable;
-        option.textContent = `${model?.name || `XModel ${index}`} ` +
-            `(asset ${model?.assetIndex ?? "?"})` +
-            (selectable ? "" : " — unavailable");
-        if (selectable) {
-            selectableCount += 1;
-        }
-        xmodelSelect.append(option);
-    });
-    if (selectedIndex >= 0 && selectedIndex < models.length) {
-        xmodelSelect.value = String(selectedIndex);
-    }
-    xmodelSelect.disabled = selectableCount < 2 ||
-        typeof runtime.module?._KisakWeb_SelectRetailXModel !== "function";
-}
-
-function updateRendererMaterialBinding() {
-    const shaderReady = runtime.rendererShader?.state === "ready" &&
-        runtime.rendererShader?.resident === true &&
-        runtime.rendererShader?.firstDrawCompleted === true;
-    const selectedXModel = selectedRetailXModel();
-    const renderSurface = selectedXModel?.renderSurface;
-    const xmodelColorMap = renderSurface?.colorMap;
-    const drawTextures = renderSurface?.drawList?.textures ??
-        (xmodelColorMap ? [{ ...xmodelColorMap, textureSlot: 0 }] : []);
-    const residentTextures = drawTextures.map((binding) =>
-        runtime.rendererTextures[binding.textureSlot >>> 0]);
-    const textureReady = drawTextures.length > 0 && residentTextures.every(
-        (texture, index) => texture?.state === "ready" && texture?.resident === true &&
-            texture.path?.toLowerCase() === drawTextures[index].imagePath.toLowerCase(),
-    );
-    const materialReady = runtime.retailCensus?.state === "ready" &&
-        xmodelColorMap?.state === "selected" &&
-        xmodelColorMap.materialIdentity !== 0 && xmodelColorMap.imageIdentity !== 0 &&
-        xmodelColorMap.semantic === 2;
-    const primaryTexture = residentTextures[0] ?? runtime.rendererTexture;
-    const textureMatchesMaterial = materialReady && textureReady;
-    const previousReady = runtime.rendererMaterial?.state === "ready";
-    if (!shaderReady || !textureReady || !materialReady || !textureMatchesMaterial) {
-        runtime.rendererMaterial = {
-            state: "waiting",
-        message: "Waiting for the rendered XModel material and its resident color map",
-            shaderReady,
-            textureReady,
-            materialReady,
-            textureMatchesMaterial,
-        };
-        return;
-    }
-
-    const sourceFormat = primaryTexture.sourceFormat >>> 0;
-    const compressedSource = sourceFormat >= 11 && sourceFormat <= 13;
-    runtime.rendererMaterial = {
-        state: "ready",
-        message: compressedSource
-            ? "Retail material selected a COD4 DXT image for the shader sampler"
-            : "Retail material selected an engine image for the shader sampler",
-        materialSource: "retail-xmodel",
-        materialName: xmodelColorMap.materialName,
-        materialIdentity: xmodelColorMap.materialIdentity,
-        imageName: xmodelColorMap.imageName,
-        imageIdentity: xmodelColorMap.imageIdentity,
-        imageSemantic: xmodelColorMap.semantic,
-        shaderSubstitutionId: runtime.rendererShader.substitutionId,
-        sampler: "u_colorMapSampler",
-        textureUnit: 0,
-        imagePath: primaryTexture.path,
-        sourceFormat,
-        decodedFormat: primaryTexture.gpuFormat,
-        compressedSource,
-        recoveryBytes: residentTextures.reduce(
-            (total, texture) => total + Number(texture?.recoveryBytes ?? 0), 0),
-        drawCount: renderSurface?.drawList?.drawCount ?? 1,
-        textureCount: drawTextures.length,
-        geometrySource:
-            renderSurface?.state === "ready"
-                ? "retail-xmodel"
-                : runtime.engineWorldSurface?.state !== "ready"
-                    ? "unknown"
-                    : runtime.engineWorldSurface.synthetic ? "synthetic" : "retail",
-    };
-    if (compressedSource) {
-        rendererStatus.textContent = "WebGL2 + COD4 DXT texture binding ready";
-    }
-    if (!previousReady) {
-        appendLog(
-            `[kisakcod-web] XModel material ${xmodelColorMap.materialName} selected ` +
-            `${drawTextures.length} resident color map(s) for ` +
-            `${runtime.rendererShader.substitutionId}.`,
-        );
-    }
-}
-
 function publishAssetState(detail) {
     runtime.assets = { ...detail };
     globalThis.dispatchEvent(new CustomEvent("kisakcod:assets", {
@@ -311,7 +179,6 @@ globalThis.addEventListener("kisakcod:qcommon", (event) => {
 
 globalThis.addEventListener("kisakcod:retail-census", (event) => {
     runtime.retailCensus = structuredClone(event.detail);
-    renderXModelSelector(runtime.retailCensus.worldInventory);
     if (event.detail.state === "ready") {
         const firstXModel = event.detail.worldInventory.firstXModel;
         const secondXModel = event.detail.worldInventory.xmodels?.[1];
@@ -353,17 +220,13 @@ globalThis.addEventListener("kisakcod:retail-census", (event) => {
                     `${secondXModel.surfaceCount} surfaces, ` +
                     `${secondXModel.materials?.length ?? 0} inline material(s)). `
                 : `The second XModel header remains untouched. `) +
-            (firstXModel?.renderSurface?.state === "ready"
-                ? `WebGL2 is now drawing retail surface ` +
-                    `${firstXModel.renderSurface.surfaceIndex} ` +
-                    `(${firstXModel.renderSurface.vertexCount} vertices); ` +
-                    (firstXModel.renderSurface.colorMap?.state === "selected"
-                        ? `its typed color map is ` +
-                            `${firstXModel.renderSurface.colorMap.imagePath}.`
-                        : `its current texture is retained: ` +
-                            `${firstXModel.renderSurface.colorMap?.message ?? "no color map"}.`)
-                : `The bootstrap surface remains active: ` +
-                    `${firstXModel?.renderSurface?.message ?? "no render candidate"}.`),
+            (event.detail.worldInventory.gfxWorld?.rendererSurface?.submissionState ===
+                "submitted"
+                ? `Submitted bounded canonical GfxWorld surface ` +
+                    `${event.detail.worldInventory.gfxWorld.rendererSurface.surfaceIndex} ` +
+                    `(${event.detail.worldInventory.gfxWorld.rendererSurface.vertexCount} vertices).`
+                : `The bootstrap surface remains active until a canonical GfxWorld ` +
+                    `surface is available.`),
         );
         const readyImportId = runtime.assets.state === "ready"
             ? runtime.assets.manifest?.importId ?? null
@@ -377,28 +240,6 @@ globalThis.addEventListener("kisakcod:retail-census", (event) => {
     } else if (event.detail.state === "failed") {
         appendLog(`[kisakcod-web] Retail fastfile census: ${event.detail.message}`, "error");
     }
-    updateRendererMaterialBinding();
-});
-
-globalThis.addEventListener("kisakcod:xmodel-selection", (event) => {
-    const inventory = runtime.retailCensus?.worldInventory;
-    const modelIndex = event.detail.modelIndex;
-    const model = inventory?.xmodels?.[modelIndex];
-    if (!inventory || !model) {
-        return;
-    }
-    inventory.xmodels.forEach((entry, index) => {
-        entry.rendererPayloadSelected = index === modelIndex;
-    });
-    model.renderSurface = structuredClone(event.detail.renderSurface);
-    inventory.selectedXModelIndex = modelIndex;
-    inventory.selectedXModel = model;
-    renderXModelSelector(inventory);
-    appendLog(
-        `[kisakcod-web] Rendering XModel ${model.name} ` +
-        `(asset ${model.assetIndex}, ${model.renderSurface?.drawList?.drawCount ?? 0} draws).`,
-    );
-    updateRendererMaterialBinding();
 });
 
 globalThis.addEventListener("kisakcod:renderer-shader", (event) => {
@@ -420,7 +261,6 @@ globalThis.addEventListener("kisakcod:renderer-shader", (event) => {
     } else if (event.detail.state === "cleared") {
         rendererStatus.textContent = "WebGL2 + world surface ready";
     }
-    updateRendererMaterialBinding();
 });
 
 globalThis.addEventListener("kisakcod:schedule", (event) => {
@@ -482,12 +322,6 @@ globalThis.addEventListener("kisakcod:renderer-texture", (event) => {
         ...runtime.rendererTexture,
         ...event.detail,
     };
-    const textureSlot = event.detail.textureSlot >>> 0;
-    runtime.rendererTextures[textureSlot] = {
-        ...(runtime.rendererTextures[textureSlot] ?? {}),
-        ...event.detail,
-        textureSlot,
-    };
     switch (event.detail.state) {
     case "ready":
         if (event.detail.resident === false) {
@@ -537,7 +371,6 @@ globalThis.addEventListener("kisakcod:renderer-texture", (event) => {
         engineAssetStatus.textContent = "Waiting for mounted archive";
         break;
     }
-    updateRendererMaterialBinding();
 });
 
 globalThis.addEventListener("kisakcod:engine-world-surface", (event) => {
@@ -631,7 +464,6 @@ globalThis.addEventListener("kisakcod:engine-world-surface", (event) => {
     default:
         break;
     }
-    updateRendererMaterialBinding();
 });
 
 globalThis.addEventListener("kisakcod:renderer-surface", (event) => {
@@ -876,20 +708,6 @@ clearAssetsButton.addEventListener("click", async () => {
         appendLog("[kisakcod-web] Removed the browser-local asset import.");
     } catch (error) {
         appendLog(`[kisakcod-web] Could not clear browser storage: ${error.message}`, "error");
-    }
-});
-
-xmodelSelect.addEventListener("change", () => {
-    const inventory = runtime.retailCensus?.worldInventory;
-    const previousIndex = inventory?.selectedXModelIndex;
-    const modelIndex = Number.parseInt(xmodelSelect.value, 10);
-    if (!Number.isInteger(modelIndex) || !inventory?.xmodels?.[modelIndex] ||
-        typeof runtime.module?._KisakWeb_SelectRetailXModel !== "function" ||
-        runtime.module._KisakWeb_SelectRetailXModel(modelIndex) !== 1) {
-        if (Number.isInteger(previousIndex)) {
-            xmodelSelect.value = String(previousIndex);
-        }
-        appendLog("[kisakcod-web] The selected XModel is not renderable.", "error");
     }
 });
 

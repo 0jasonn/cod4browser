@@ -1,8 +1,6 @@
 #include <web/web_retail_fastfile_census.h>
 #include <web/web_fastfile_zone_registry.h>
-#include <web/web_engine_xmodel_surface.h>
-#include <web/web_engine_xmodel_material.h>
-#include <web/web_engine_xmodel_draw_list.h>
+#include <web/web_engine_world_surface.h>
 #include <web/web_shader_compatibility.h>
 #include <qcommon/cm_types.h>
 #include "zlib_test_support.h"
@@ -2726,16 +2724,6 @@ void TestWorldXModelDependenciesBoundary()
         uncompressed.worldXModels[0].materials[0].images[0].format == 0x16u &&
         uncompressed.worldXModels[0].materials[0].images[0].resourceBytes == 0u,
         "bounded zero-resource X8R8G8B8 image metadata publishes safely");
-    WebEngineXModelMaterialImageBinding colorMap;
-    Require(WebEngine_SelectXModelColorMap(
-            model, model.materialIdentities.front(), colorMap) ==
-            WebEngineXModelMaterialResult::Success &&
-        colorMap.materialName == "web/material_a" &&
-        colorMap.imageName == "synthetic_xmodel_color" &&
-        colorMap.imagePath == "images/synthetic_xmodel_color.iwi" &&
-        colorMap.materialIdentity == 4u && colorMap.imageIdentity == 3u &&
-        colorMap.semantic == WEB_ENGINE_TEXTURE_SEMANTIC_COLOR_MAP,
-        "M28 follows the first surface material to one typed external color map");
     Require(model.collisionSurfaces.size() == 1u &&
         model.collisionSurfaces[0].traversed &&
         model.collisionTriangleCount == 1u &&
@@ -2743,16 +2731,6 @@ void TestWorldXModelDependenciesBoundary()
         model.collisionSurfaces[0].trianglesHash != 2166136261u &&
         model.boneInfoHash != 2166136261u,
         "M26 retains bounded collision and bone-info traversal evidence");
-    Require(model.surfaces[0].renderPayloadRetained &&
-        model.surfaces[1].renderPayloadRetained &&
-        std::all_of(
-            model.surfaces.begin() + 2u, model.surfaces.end(),
-            [](const RetailXSurface &surface) {
-                return !surface.renderPayloadRetained &&
-                    surface.retainedPackedVertices.empty() &&
-                    surface.retainedPackedIndices.empty();
-            }),
-        "M29 retains only bounded packed XSurfaces in the declared first LOD");
 
     auto requireFailure = [](std::vector<std::uint8_t> inflated,
                              RetailCensusError expected,
@@ -3057,8 +3035,7 @@ void TestWorldSecondXSurfacePrefixBoundary()
             [](const RetailXSurface &surface) {
                 return surface.vertCount == 3u && surface.triCount == 1u &&
                     surface.rigidVertLists.size() == 1u &&
-                    surface.dependenciesTraversed &&
-                    !surface.renderPayloadRetained;
+                    surface.dependenciesTraversed;
             }) &&
         std::string(result.unsupportedOperation) == "Load_Material",
         "M33 traverses the second XSurface prefix through material handles");
@@ -3159,12 +3136,8 @@ void TestWorldXModelCollectionBoundary()
     const RetailWorldXModel &second = result.worldXModels.at(1u);
     const RetailWorldXModel &third = result.worldXModels.at(2u);
     Require(first.published && first.assetIndex == 2u && first.identity == 6u &&
-        first.rendererPayloadSelected &&
-        first.rendererPayloadAvailable &&
         second.published && second.assetIndex == 5u && second.identity == 10u &&
-        !second.rendererPayloadSelected && second.rendererPayloadAvailable &&
         third.published && third.assetIndex == 6u && third.identity == 11u &&
-        !third.rendererPayloadSelected && !third.rendererPayloadAvailable &&
         third.name == "web/xmodel_third" && third.surfaceCount == 0u &&
         third.surfaceHeadersTraversed && third.surfaceDependenciesTraversed &&
         third.materialHandlesTraversed && third.materialsTraversed &&
@@ -3177,16 +3150,6 @@ void TestWorldXModelCollectionBoundary()
         result.stoppedBeforeDifferentWorldAssetType &&
         result.unsupportedOperation == nullptr,
         "M35 loops the complete loader through the consecutive third model");
-    Require(std::any_of(first.surfaces.begin(), first.surfaces.end(),
-                [](const RetailXSurface &surface) {
-                    return surface.renderPayloadRetained;
-                }) &&
-            std::any_of(second.surfaces.begin(), second.surfaces.end(),
-                [](const RetailXSurface &surface) {
-                    return surface.renderPayloadRetained;
-                }),
-        "the loader retains bounded selectable payloads without changing selection");
-
     RetailFastfileCensusJob malformed;
     Require(malformed.BeginStreaming(RetailCensusMode::WorldXModelCollection) ==
         RetailCensusError::None, "invalid M35 fixture starts");
@@ -3225,14 +3188,10 @@ void TestReusableWorldXModelLoader()
     Require(result.worldXModels.size() == 2u &&
         result.worldXModels[0].assetIndex == 2u &&
         result.worldXModels[0].published &&
-        result.worldXModels[0].rendererPayloadSelected &&
-        result.worldXModels[0].rendererPayloadAvailable &&
         result.worldXModels[0].resolvedMaterials.size() == 2u &&
         result.worldXModels[0].resolvedImages.size() == 1u &&
         result.worldXModels[1].assetIndex == 5u &&
         result.worldXModels[1].published &&
-        !result.worldXModels[1].rendererPayloadSelected &&
-        result.worldXModels[1].rendererPayloadAvailable &&
         result.worldXModels[1].resolvedMaterials.size() == 1u &&
         result.worldXModels[1].resolvedImages.size() == 1u,
         "the reusable loader handles XModels separated by technique-set runs");
@@ -3294,86 +3253,7 @@ void TestReusableWorldXModelLoader()
         result.semanticTraceHash ==
             kisak::database::SemanticTraceHash(result.semanticTrace),
         "the reusable loader emits a normalized begin/publish/boundary trace");
-    Require(std::any_of(result.worldXModels[0].surfaces.begin(),
-                result.worldXModels[0].surfaces.end(),
-                [](const RetailXSurface &surface) {
-                    return surface.renderPayloadRetained;
-                }) &&
-            std::any_of(result.worldXModels[1].surfaces.begin(),
-                result.worldXModels[1].surfaces.end(),
-                [](const RetailXSurface &surface) {
-                    return surface.renderPayloadRetained;
-                }),
-        "each bounded model is selectable while only one is initially active");
-    WebEngineXModelDrawList secondDrawList;
-    const WebEngineXModelDrawListResult secondDrawResult =
-        WebEngine_BuildXModelDrawList(result.worldXModels[1], secondDrawList);
-    if (secondDrawResult != WebEngineXModelDrawListResult::Success)
-    {
-        std::cerr << "second retained XModel draw list: "
-                  << WebEngine_XModelDrawListResultString(secondDrawResult)
-                  << "; lods=" << result.worldXModels[1].lodCount
-                  << "; first=" << result.worldXModels[1].lods[0].surfaceIndex
-                  << "; count=" << result.worldXModels[1].lods[0].surfaceCount
-                  << "; surfaces=" << result.worldXModels[1].surfaces.size()
-                  << "; materials=" << result.worldXModels[1].materialIdentities.size()
-                  << '\n';
-        for (const RetailXSurface &surface : result.worldXModels[1].surfaces)
-        {
-            WebEngineConvertedXModelSurface converted;
-            WebEngineXModelMaterialImageBinding binding;
-            const auto materialResult = WebEngine_SelectXModelColorMap(
-                result.worldXModels[1],
-                result.worldXModels[1].materialIdentities[surface.index],
-                binding);
-            const WebEnginePackedXSurfaceView view{
-                surface.retainedPackedVertices.data(),
-                surface.retainedPackedVertices.size(),
-                surface.vertCount,
-                surface.retainedPackedIndices.data(),
-                surface.retainedPackedIndices.size(),
-                surface.triCount,
-                result.worldXModels[1].materialIdentities[surface.index],
-            };
-            std::cerr << "  surface " << surface.index
-                      << " retained=" << surface.renderPayloadRetained
-                      << " material="
-                      << WebEngine_XModelMaterialResultString(materialResult)
-                      << " conversion=" << WebEngine_XModelSurfaceResultString(
-                            WebEngine_ConvertPackedXModelSurface(view, converted))
-                      << '\n';
-        }
-    }
-    Require(secondDrawResult == WebEngineXModelDrawListResult::Success &&
-        secondDrawList.renderer.draws.size() == 3u &&
-        secondDrawList.renderer.vertices.size() == 9u &&
-        secondDrawList.renderer.indices.size() == 9u,
-        "the second retained XModel builds a complete renderer draw list");
-
-    RetailCensusLimits limits;
-    limits.maxRetainedXModelRendererBytes = 1u;
-    RetailFastfileCensusJob bounded;
     const auto file = BuildFile(BuildReusableWorldXModelLoaderInflated());
-    Require(bounded.BeginStreaming(
-            RetailCensusMode::WorldXModelLoader, limits) ==
-            RetailCensusError::None,
-        "the renderer-retention budget fixture starts");
-    Require(bounded.FeedSource(file, true) == RetailCensusError::None,
-        "the renderer-retention budget source is accepted");
-    while (bounded.Progress() == RetailCensusProgress::Running)
-        (void)bounded.Step();
-    RetailFastfileCensus boundedResult;
-    Require(bounded.Progress() == RetailCensusProgress::Succeeded &&
-        bounded.TakeResult(boundedResult) &&
-        boundedResult.worldXModels.size() == 2u &&
-        std::none_of(
-            boundedResult.worldXModels.begin(),
-            boundedResult.worldXModels.end(),
-            [](const RetailWorldXModel &model) {
-                return model.rendererPayloadAvailable;
-            }),
-        "the aggregate renderer-byte ceiling disables retention without rejecting inventory");
-
     RetailCensusLimits traceLimits;
     traceLimits.maxSemanticTraceEntries = 1u;
     RetailFastfileCensusJob traceBounded;
@@ -4913,7 +4793,6 @@ void TestOwnedWorldSurfaceIfRequested(
         "owned dispatcher publishes XAnimParts assets 437-457 before WeaponDef 458");
     return;
     Require(model.published && model.identity == 19u &&
-        model.rendererPayloadSelected && model.rendererPayloadAvailable &&
         model.materials.size() == 2u &&
         model.resolvedMaterials.size() == 2u &&
         model.resolvedImages.size() == 4u &&
@@ -4945,8 +4824,6 @@ void TestOwnedWorldSurfaceIfRequested(
         secondModel.materialHandlesTraversed &&
         !secondModel.stoppedBeforeMaterialDependency &&
         !secondModel.stoppedBeforeSurfaceArray && secondModel.published &&
-        !secondModel.rendererPayloadSelected &&
-        secondModel.rendererPayloadAvailable &&
         secondModel.identity == 32u &&
         secondModel.numBones == 1u && secondModel.numRootBones == 1u &&
         secondModel.surfaceCount == 3u && secondModel.lodCount == 3 &&
@@ -4974,10 +4851,6 @@ void TestOwnedWorldSurfaceIfRequested(
         secondModel.boneInfoTraversed &&
         secondModel.boneInfoHash == 0x604bd5f6u &&
         secondModel.physPresetTraversed && secondModel.physGeomsTraversed &&
-        std::any_of(secondModel.surfaces.begin(), secondModel.surfaces.end(),
-            [](const RetailXSurface &surface) {
-                return surface.renderPayloadRetained;
-            }) &&
         secondModel.collisionSurfaceCount == 1u &&
         secondModel.radius > 200.69f && secondModel.radius < 200.70f &&
         secondModel.memoryUsage == 24551u &&
@@ -4994,8 +4867,6 @@ void TestOwnedWorldSurfaceIfRequested(
         finalModel.collisionSurfacesTraversed && finalModel.boneInfoTraversed &&
         finalModel.physPresetTraversed && finalModel.physGeomsTraversed &&
         finalModel.published && finalModel.identity == 33u &&
-        !finalModel.rendererPayloadSelected &&
-        finalModel.rendererPayloadAvailable &&
         finalModel.numBones == 1u && finalModel.numRootBones == 1u &&
         finalModel.surfaceCount == 4u && finalModel.lodCount == 4 &&
         finalModel.surfaces.size() == 4u &&
@@ -5015,10 +4886,6 @@ void TestOwnedWorldSurfaceIfRequested(
         finalModel.memoryUsage == 21747u &&
         finalModel.boundaryInflatedOffset == 148660u &&
         finalModel.nameBlock4Offset == 54236u &&
-        std::any_of(finalModel.surfaces.begin(), finalModel.surfaces.end(),
-            [](const RetailXSurface &surface) {
-                return surface.renderPayloadRetained;
-            }) &&
         result.completedAssetCount == 35u &&
         result.registryAssetCount == 63u &&
         result.worldRegistryAliasCount == 65u &&
@@ -5102,27 +4969,6 @@ void TestOwnedWorldSurfaceIfRequested(
         dropRopeModel.collisionPayloadBytes == 56972u &&
         dropRopeModel.boundaryInflatedOffset == 374026u,
         "owned M38 publishes XModel assets 33 and 34 atomically");
-    WebEngineXModelDrawList firstModelDrawList;
-    WebEngineXModelDrawList secondModelDrawList;
-    WebEngineXModelDrawList finalModelDrawList;
-    Require(WebEngine_BuildXModelDrawList(
-            model, firstModelDrawList) ==
-            WebEngineXModelDrawListResult::Success &&
-        !firstModelDrawList.renderer.draws.empty() &&
-        WebEngine_BuildXModelDrawList(
-            secondModel, secondModelDrawList) ==
-            WebEngineXModelDrawListResult::Success &&
-        !secondModelDrawList.renderer.draws.empty() &&
-        WebEngine_BuildXModelDrawList(
-            finalModel, finalModelDrawList) ==
-            WebEngineXModelDrawListResult::Success &&
-        !finalModelDrawList.renderer.draws.empty(),
-        "all three owned retained XModels resolve materials and build selectable draw lists");
-    std::cout << "owned selectable draw lists: first="
-              << firstModelDrawList.renderer.draws.size()
-              << " second=" << secondModelDrawList.renderer.draws.size()
-              << " third=" << finalModelDrawList.renderer.draws.size()
-              << '\n';
     for (const RetailXSurface &surface : secondModel.surfaces)
     {
         std::cout << "  M34 surface[" << surface.index << "] vertices="
@@ -5145,74 +4991,11 @@ void TestOwnedWorldSurfaceIfRequested(
                   << " boundary=" << entry.boundaryInflatedOffset
                   << " name-block4=" << entry.nameBlock4Offset << '\n';
     }
-    const RetailXSurface &renderCandidate = model.surfaces.front();
-    WebEngineConvertedXModelSurface converted;
-    Require(renderCandidate.renderPayloadRetained &&
-        renderCandidate.retainedPackedVertices.size() == 11776u &&
-        renderCandidate.retainedPackedIndices.size() == 1512u,
-        "owned M27 profile retains the exact bounded first XSurface payload");
-    const WebEnginePackedXSurfaceView view{
-        renderCandidate.retainedPackedVertices.data(),
-        renderCandidate.retainedPackedVertices.size(),
-        renderCandidate.vertCount,
-        renderCandidate.retainedPackedIndices.data(),
-        renderCandidate.retainedPackedIndices.size(),
-        renderCandidate.triCount,
-        model.materialIdentities.front(),
-    };
-    Require(WebEngine_ConvertPackedXModelSurface(view, converted) ==
-        WebEngineXModelSurfaceResult::Success &&
-        converted.rendererSurface.vertices.size() == 368u &&
-        converted.rendererSurface.indices.size() == 756u &&
-        converted.materialIdentity == 16u,
-        "owned M27 profile converts the first retail surface through the renderer seam");
-    WebEngineXModelMaterialImageBinding colorMap;
-    Require(WebEngine_SelectXModelColorMap(
-            model, converted.materialIdentity, colorMap) ==
-            WebEngineXModelMaterialResult::Success &&
-        colorMap.materialIdentity == converted.materialIdentity &&
-        colorMap.semantic == WEB_ENGINE_TEXTURE_SEMANTIC_COLOR_MAP,
-        "owned M28 profile resolves the rendered material's typed external color map");
-    std::cout << "owned M27 render surface: vertices="
-              << converted.rendererSurface.vertices.size()
-              << " indices=" << converted.rendererSurface.indices.size()
-              << " material=" << converted.materialIdentity
-              << " axes=" << static_cast<unsigned>(converted.horizontalAxis)
-              << ',' << static_cast<unsigned>(converted.verticalAxis) << '\n';
-    std::cout << "owned M28 color map: material=" << colorMap.materialName
-              << " image=" << colorMap.imageName
-              << " path=" << colorMap.imagePath
-              << " identities=" << colorMap.materialIdentity
-              << ',' << colorMap.imageIdentity
-              << " sampler=" << static_cast<unsigned>(colorMap.samplerState)
-              << " semantic=" << static_cast<unsigned>(colorMap.semantic) << '\n';
-    WebEngineXModelDrawList drawList;
-    Require(WebEngine_BuildXModelDrawList(model, drawList) ==
-            WebEngineXModelDrawListResult::Success,
-        "owned M29 profile builds the bounded first-LOD draw list");
-    std::cout << "owned M29 draw list: lod-surfaces="
-              << drawList.firstLodSurfaceCount
-              << " retained-draws=" << drawList.renderer.draws.size()
-              << " textures=" << drawList.textures.size()
-              << " vertices=" << drawList.renderer.vertices.size()
-              << " indices=" << drawList.renderer.indices.size()
-              << " axes=" << static_cast<unsigned>(drawList.horizontalAxis)
-               << ',' << static_cast<unsigned>(drawList.verticalAxis) << '\n';
     std::cout << "owned M31 next body: index=" << result.nextBodyIndex
               << " type=" << result.nextBodyType
               << " (" << RetailAssetTypeName(result.nextBodyType) << ')'
               << " reference=0x" << std::hex << result.nextBodyReference
               << std::dec << '\n';
-    for (std::size_t textureSlot = 0u;
-         textureSlot < drawList.textures.size(); ++textureSlot)
-    {
-        const auto &binding = drawList.textures[textureSlot];
-        std::cout << "  texture[" << textureSlot << "] material="
-                  << binding.materialName << " image=" << binding.imageName
-                  << " path=" << binding.imagePath
-                  << " sampler=" << static_cast<unsigned>(binding.samplerState)
-                  << '\n';
-    }
     std::cout << "owned xmodel: index=" << model.assetIndex
               << " name=" << model.name
               << " surfaces=" << model.surfaces.size()

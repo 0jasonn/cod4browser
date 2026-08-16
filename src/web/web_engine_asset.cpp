@@ -55,31 +55,6 @@ struct EngineAssetJob
 
 EngineAssetJob g_job;
 
-struct MaterialImageBinding
-{
-    std::string materialName;
-    std::string imageName;
-    std::string imagePath;
-    uint32_t materialIdentity = 0u;
-    uint32_t imageIdentity = 0u;
-    std::uint8_t samplerState = 0u;
-};
-
-MaterialImageBinding g_materialBinding;
-std::vector<MaterialImageBinding> g_materialBindings;
-std::uint32_t g_materialBindingCursor = 0u;
-bool g_materialBindingRequired = false;
-
-bool HasMaterialImageBinding() noexcept
-{
-    return !g_materialBinding.imagePath.empty();
-}
-
-bool PreserveCurrentTexture() noexcept
-{
-    return g_materialBindingRequired || HasMaterialImageBinding();
-}
-
 struct RendererTexturePublication
 {
     std::string state;
@@ -117,7 +92,6 @@ EM_JS(
     void,
     DispatchEngineAssetReady,
     (uint32_t generation,
-     uint32_t textureSlot,
      const char *path,
      uint32_t size,
      uint32_t compressionMethod,
@@ -129,11 +103,6 @@ EM_JS(
      uint32_t depth,
      uint32_t mipCount,
      uint32_t cacheRetainedBytes,
-     int materialSelected,
-     const char *materialName,
-     const char *imageName,
-     uint32_t materialIdentity,
-     uint32_t imageIdentity,
      const char *rendererReplacementState,
      const char *rendererReplacementMessage),
     {
@@ -141,7 +110,6 @@ EM_JS(
             detail: {
                 state: "ready",
                 generation: generation >>> 0,
-                textureSlot: textureSlot >>> 0,
                 message: "Loaded and parsed one IWI through the engine filesystem",
                 path: UTF8ToString(path),
                 kind: "iwi",
@@ -155,11 +123,7 @@ EM_JS(
                 depth,
                 mipCount,
                 cacheRetainedBytes: cacheRetainedBytes >>> 0,
-                selectionSource: materialSelected ? "retail-material" : "archive-probe",
-                materialName: materialSelected ? UTF8ToString(materialName) : null,
-                imageName: materialSelected ? UTF8ToString(imageName) : null,
-                materialIdentity: materialSelected ? materialIdentity >>> 0 : 0,
-                imageIdentity: materialSelected ? imageIdentity >>> 0 : 0,
+                selectionSource: "archive-probe",
                 rendererReplacementState: UTF8ToString(rendererReplacementState),
                 rendererReplacementMessage: UTF8ToString(rendererReplacementMessage)
             }
@@ -171,7 +135,6 @@ EM_JS(
     DispatchRendererTextureState,
     (const char *state,
      uint32_t generation,
-     uint32_t textureSlot,
      const char *path,
      uint32_t sourceFormat,
      uint32_t width,
@@ -188,7 +151,6 @@ EM_JS(
             detail: {
                 state: UTF8ToString(state),
                 generation: generation >>> 0,
-                textureSlot: textureSlot >>> 0,
                 path: path ? UTF8ToString(path) : "",
                 sourceFormat,
                 width,
@@ -288,7 +250,6 @@ bool AsciiLess(std::string_view lhs, std::string_view rhs) noexcept
 
 const kisak::iwd::Entry *SelectIwiEntry()
 {
-    if (g_materialBindingRequired && !HasMaterialImageBinding()) return nullptr;
     const kisak::iwd::Entry *selected = nullptr;
     for (const kisak::iwd::Entry &entry : WebEngineFs_Entries())
     {
@@ -296,11 +257,6 @@ const kisak::iwd::Entry *SelectIwiEntry()
             entry.uncompressedSize > WEB_ENGINE_FS_MAX_CACHED_MEMBER_BYTES ||
             !IsIwiPath(entry.path))
         {
-            continue;
-        }
-        if (!g_materialBinding.imagePath.empty())
-        {
-            if (AsciiEqual(entry.path, g_materialBinding.imagePath)) return &entry;
             continue;
         }
         if (!selected || AsciiLess(entry.path, selected->path))
@@ -334,7 +290,7 @@ RendererTexturePublication CaptureRendererTexturePublication(
     publication.width = g_job.completionMetadata.width;
     publication.height = g_job.completionMetadata.height;
     publication.payloadBytes = payloadBytes;
-    publication.renderer = WebRenderer_GetDrawTextureState(g_materialBindingCursor);
+    publication.renderer = WebRenderer_GetBootstrapTextureState();
     return publication;
 }
 
@@ -344,7 +300,6 @@ void DispatchRendererTexturePublication(
     DispatchRendererTextureState(
         publication.state.c_str(),
         publication.generation,
-        g_materialBindingCursor,
         publication.path.c_str(),
         publication.sourceFormat,
         publication.width,
@@ -445,12 +400,10 @@ void PublishUnavailable(const char *message)
 {
     g_job.phase = Phase::Unavailable;
     const uint32_t generation = g_job.generation;
-    const bool preserveCurrentTexture = PreserveCurrentTexture();
-    const RendererTexturePublication texture = preserveCurrentTexture
-        ? RendererTexturePublication{}
-        : CaptureRendererTexturePublication("unavailable", message);
+    const RendererTexturePublication texture =
+        CaptureRendererTexturePublication("unavailable", message);
     DispatchEngineAssetProblem("unavailable", generation, message);
-    if (!preserveCurrentTexture && JobStillMatches(generation, Phase::Unavailable))
+    if (JobStillMatches(generation, Phase::Unavailable))
     {
         DispatchRendererTexturePublication(texture);
     }
@@ -460,12 +413,10 @@ void PublishFailure(const char *message)
 {
     g_job.phase = Phase::Failed;
     const uint32_t generation = g_job.generation;
-    const bool preserveCurrentTexture = PreserveCurrentTexture();
-    const RendererTexturePublication texture = preserveCurrentTexture
-        ? RendererTexturePublication{}
-        : CaptureRendererTexturePublication("failed", message);
+    const RendererTexturePublication texture =
+        CaptureRendererTexturePublication("failed", message);
     DispatchEngineAssetProblem("failed", generation, message);
-    if (!preserveCurrentTexture && JobStillMatches(generation, Phase::Failed))
+    if (JobStillMatches(generation, Phase::Failed))
     {
         DispatchRendererTexturePublication(texture);
     }
@@ -521,10 +472,10 @@ void ConsumeCompletion()
             g_job.completionImage.height,
             g_job.completionImage.pixels.data(),
             g_job.completionImage.pixels.size(),
-            g_materialBinding.samplerState,
+            0u,
         };
         const WebRendererTextureResult uploadResult =
-            WebRenderer_SetDrawTexture(g_materialBindingCursor, upload);
+            WebRenderer_SetBootstrapTexture(upload);
         g_job.completionImage = {};
         if (uploadResult != WebRendererTextureResult::Success)
         {
@@ -540,7 +491,7 @@ void ConsumeCompletion()
         else
         {
             const WebRendererTextureState renderer =
-                WebRenderer_GetDrawTextureState(g_materialBindingCursor);
+                WebRenderer_GetBootstrapTextureState();
             texture = CaptureRendererTexturePublication(
                 renderer.resident ? "ready" : "retained",
                 renderer.resident
@@ -551,13 +502,9 @@ void ConsumeCompletion()
     }
 
     const uint32_t generation = g_job.generation;
-    const bool preserveCurrentTexture = PreserveCurrentTexture();
-    const bool replacementPublished = texture.state == "ready" ||
-        texture.state == "retained";
     g_job.phase = Phase::Finished;
     DispatchEngineAssetReady(
         generation,
-        g_materialBindingCursor,
         g_job.completionPath.c_str(),
         g_job.completionSize,
         g_job.completionMethod,
@@ -569,15 +516,9 @@ void ConsumeCompletion()
         g_job.completionMetadata.depth,
         g_job.completionMetadata.mipCount,
         static_cast<uint32_t>(retainedBytes),
-        g_materialBinding.imagePath.empty() ? 0 : 1,
-        g_materialBinding.materialName.c_str(),
-        g_materialBinding.imageName.c_str(),
-        g_materialBinding.materialIdentity,
-        g_materialBinding.imageIdentity,
         texture.state.c_str(),
         texture.message.c_str());
-    if ((!preserveCurrentTexture || replacementPublished) &&
-        JobStillMatches(generation, Phase::Finished))
+    if (JobStillMatches(generation, Phase::Finished))
     {
         DispatchRendererTexturePublication(texture);
     }
@@ -592,121 +533,18 @@ void WebEngineAsset_Start()
         return;
     }
     const uint32_t generation = NextGeneration(g_job.generation);
-    const bool preserveCurrentTexture = PreserveCurrentTexture();
-    const bool rendererCleared = preserveCurrentTexture
-        ? false
-        : WebRenderer_ClearBootstrapTexture();
+    const bool rendererCleared = WebRenderer_ClearBootstrapTexture();
     ResetJob(generation, Phase::NeedSelection);
-    const RendererTexturePublication texture = preserveCurrentTexture
-        ? RendererTexturePublication{}
-        : CaptureRendererTexturePublication(
-            "loading",
-            rendererCleared
-                ? "Waiting for one supported bounded IWI texture"
-                : "Previous recovery pixels were released; the renderer fallback is not resident");
+    const RendererTexturePublication texture = CaptureRendererTexturePublication(
+        "loading",
+        rendererCleared
+            ? "Waiting for one supported bounded IWI texture"
+            : "Previous recovery pixels were released; the renderer fallback is not resident");
     DispatchEngineAssetLoading(generation);
-    if (!preserveCurrentTexture && JobStillMatches(generation, Phase::NeedSelection))
+    if (JobStillMatches(generation, Phase::NeedSelection))
     {
         DispatchRendererTexturePublication(texture);
     }
-}
-
-bool WebEngineAsset_SetMaterialImageBinding(
-    const char *materialName,
-    const char *imageName,
-    const char *imagePath,
-    unsigned int materialIdentity,
-    unsigned int imageIdentity,
-    unsigned int samplerState)
-{
-    const WebEngineMaterialImageBindingDesc binding{
-        materialName, imageName, imagePath, materialIdentity, imageIdentity,
-        samplerState,
-    };
-    return WebEngineAsset_SetMaterialImageBindings(&binding, 1u);
-}
-
-bool WebEngineAsset_SetMaterialImageBindings(
-    const WebEngineMaterialImageBindingDesc *bindings,
-    unsigned int bindingCount)
-{
-    if (!bindings || bindingCount == 0u ||
-        bindingCount > WEB_RENDERER_MAX_DRAW_LIST_TEXTURES) return false;
-    try
-    {
-        std::vector<MaterialImageBinding> replacement;
-        replacement.reserve(bindingCount);
-        for (unsigned int index = 0u; index < bindingCount; ++index)
-        {
-            const WebEngineMaterialImageBindingDesc &source = bindings[index];
-            if (!source.materialName || !*source.materialName ||
-                !source.imageName || !*source.imageName ||
-                !source.imagePath || !IsIwiPath(source.imagePath) ||
-                source.materialIdentity == 0u || source.imageIdentity == 0u ||
-                source.samplerState > UINT8_MAX)
-                return false;
-            MaterialImageBinding binding;
-            binding.materialName = source.materialName;
-            binding.imageName = source.imageName;
-            binding.imagePath = source.imagePath;
-            binding.materialIdentity = source.materialIdentity;
-            binding.imageIdentity = source.imageIdentity;
-            binding.samplerState = static_cast<std::uint8_t>(source.samplerState);
-            replacement.push_back(std::move(binding));
-        }
-        g_materialBindings = std::move(replacement);
-        g_materialBindingCursor = 0u;
-        g_materialBinding = g_materialBindings.front();
-        g_materialBindingRequired = true;
-    }
-    catch (...)
-    {
-        return false;
-    }
-    return true;
-}
-
-void WebEngineAsset_RequireMaterialImageBinding()
-{
-    g_materialBinding = {};
-    g_materialBindings.clear();
-    g_materialBindingCursor = 0u;
-    g_materialBindingRequired = true;
-}
-
-void WebEngineAsset_ClearMaterialImageBinding()
-{
-    g_materialBinding = {};
-    g_materialBindings.clear();
-    g_materialBindingCursor = 0u;
-    g_materialBindingRequired = false;
-}
-
-const char *WebEngineAsset_MaterialImagePath() noexcept
-{
-    return HasMaterialImageBinding() ? g_materialBinding.imagePath.c_str() : nullptr;
-}
-
-unsigned int WebEngineAsset_MaterialImageSlot() noexcept
-{
-    return g_materialBindingCursor;
-}
-
-bool WebEngineAsset_CurrentBindingFinished() noexcept
-{
-    return g_job.phase == Phase::Finished || g_job.phase == Phase::Failed ||
-        g_job.phase == Phase::Unavailable;
-}
-
-bool WebEngineAsset_AdvanceMaterialImageBinding()
-{
-    if (!WebEngineAsset_CurrentBindingFinished() ||
-        g_materialBindingCursor + 1u >= g_materialBindings.size())
-        return false;
-    ++g_materialBindingCursor;
-    g_materialBinding = g_materialBindings[g_materialBindingCursor];
-    ResetJob(NextGeneration(g_job.generation), Phase::Idle);
-    return true;
 }
 
 bool WebEngineAsset_Cancel()
@@ -762,11 +600,7 @@ void WebEngineAsset_Frame()
         const kisak::iwd::Entry *entry = SelectIwiEntry();
         if (!entry)
         {
-            PublishUnavailable(g_materialBindingRequired
-                ? (g_materialBinding.imagePath.empty()
-                    ? "The rendered material has no supported external color-map IWI"
-                    : "The material-selected IWI member is not available")
-                : "No bounded images/*.iwi member is available");
+            PublishUnavailable("No bounded images/*.iwi member is available");
             return;
         }
         g_job.selectedPath = entry->path;

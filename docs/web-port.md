@@ -1218,6 +1218,14 @@ This is still one isolated, orthographically fitted first-LOD XModel. It does
 not add model placement, a perspective camera, lighting, general XModel
 streaming, or `GfxWorld` rendering.
 
+Post-Gate-2 status: this XModel preview path is retired. Its selector UI,
+preview state and camera/projection, retained packed first-LOD geometry,
+preview-only material/image bridge, renderer multi-draw/texture-slot commands,
+and interaction tests have been removed. The milestone text above is retained
+only as a record of the validation path that preceded the canonical bounded
+`GfxWorld` proof. Canonical XModel loading, publication, aliasing, and
+Material/GfxImage dependencies remain in the database path.
+
 ## Milestone 30: first post-XModel technique set (complete)
 
 The generated world-loader traversal now resumes after publishing the complete
@@ -1280,8 +1288,9 @@ The world reader now distinguishes the active XModel from the published first
 model. After the M31 technique-set run, it reserves the asset-21 table alias,
 pushes a fresh block-0 scope, validates the 220-byte `XModel` header, and walks
 the same bounded name and skeleton-prefix stages used by M24. All second-model
-state is retained separately; the first model's surfaces, materials, texture
-bindings, draw list, identity, and renderer publication remain unchanged.
+state is retained separately; at that milestone the first model's surfaces,
+materials, texture bindings, draw list, identity, and renderer publication
+remained unchanged.
 
 The owned asset is `com_steel_ladder`: one root bone, three surfaces, three
 LODs, one collision surface, radius approximately 200.696, and memory usage
@@ -1342,9 +1351,9 @@ the registry now accepts that canonical typed target only after the material is
 published. A generated fixture exercises the same forward dependency-span alias
 and fails closed for an invalid technique-set alias.
 
-The first model's renderer-owned draw list and textures remain unchanged. The
-ladder's census contains hashes and typed dependencies only; it is neither
-retained for WebGL nor exposed as a viewer model.
+At that milestone the first model's renderer-owned draw list and textures
+remained unchanged. The ladder's census contained hashes and typed dependencies
+only; it was neither retained for WebGL nor exposed as a viewer model.
 
 ## Milestone 35: bounded consecutive XModel collection (complete)
 
@@ -1368,10 +1377,11 @@ complete normally.
 
 The final inflated boundary is 148,660, the block-4 cursor is 66,676, all 34
 reserved aliases are defined, and 33 typed assets are registered. Traversal
-stops before inline technique-set asset 23. Eligible collection entries retain
-packed first-LOD payload under a shared 16 MiB ceiling; entry zero is merely the
-initial active renderer choice and remains exposed through the legacy
-`firstXModel` alias. A generated three-model fixture additionally proves the repeat loop,
+stops before inline technique-set asset 23. At that milestone, eligible
+collection entries retained packed first-LOD payload under a shared 16 MiB
+ceiling and entry zero was the initial renderer choice. The canonical census
+still exposes the `firstXModel` compatibility alias. A generated three-model
+fixture additionally proves the repeat loop,
 zero-surface completion, the collection ceiling, and atomic rejection of invalid
 third-model bounds.
 
@@ -1381,23 +1391,20 @@ third-model bounds.
 `WorldXModelCollection` name remains an API-compatible alias. The supported
 top-level dispatcher invokes the same bounded XModel operation for consecutive
 and separated model runs and can resume technique-set traversal after any
-completed model. Renderer payload selection is recorded explicitly on each
-model instead of being inferred from the active parser index. The launcher
-builds a selector from the published collection, disables entries without a
-retained payload, and calls a narrow C export to atomically replace the active
-WebGL2 draw list. Selection reuses the parsed collection, resolves material and
-image aliases through deduplicated per-model catalogs, rebuilds the typed
-color-map queue, and does not re-read or reparse the fastfile. Inventory publication still
-succeeds when the aggregate byte budget prevents a model from being selectable.
+completed model. The milestone also recorded renderer selection per model and
+added a launcher selector plus a narrow draw-list replacement export. That
+preview-only selection, retained payload, color-map queue, and export are now
+removed. The reusable canonical loader and its material/image alias resolution
+remain.
 
 A generated eight-asset fixture proves the complete sequence `techset,
 techset, XModel, techset, techset, XModel, techset, GfxWorld`. Both models
 publish through the same header, skeleton, surface, material/image, collision,
 bone-info, and null-physics stages. The trailing technique set also publishes,
 showing that loader completion returns control to the shared dispatcher rather
-than a model-position special case. Existing three-consecutive-model, malformed
-third-model, collection-limit, renderer-byte-ceiling, and live selection
-coverage remains active.
+than a model-position special case. The canonical multi-model, malformed-model,
+and collection-limit coverage remains active; renderer-byte-ceiling and live
+selection tests were removed with the retired previewer.
 
 The owned run still publishes XModel assets 12, 21, and 22, then enters inline
 technique-set asset 23 instead of stopping before it. Asset 23 is

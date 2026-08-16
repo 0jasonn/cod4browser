@@ -70,8 +70,7 @@ body {
     text-transform: uppercase;
 }
 
-.renderer-controls,
-.xmodel-control {
+.renderer-controls {
     display: flex;
     align-items: center;
 }
@@ -79,36 +78,6 @@ body {
 .renderer-controls {
     min-width: 0;
     gap: 14px;
-}
-
-.xmodel-control {
-    gap: 7px;
-    color: var(--muted);
-    font-size: 10px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-}
-
-#xmodel-select {
-    width: min(310px, 34vw);
-    height: 30px;
-    padding: 0 28px 0 9px;
-    color: var(--ink);
-    border: 1px solid var(--line);
-    border-radius: 0;
-    background: #0d0f0c;
-    font: 11px/1 ui-monospace, "Cascadia Code", monospace;
-}
-
-#xmodel-select:hover:not(:disabled),
-#xmodel-select:focus-visible {
-    border-color: var(--accent);
-    outline: none;
-}
-
-#xmodel-select:disabled {
-    color: var(--muted);
-    opacity: 0.62;
 }
 
 .canvas-wrap {
@@ -266,7 +235,4 @@ body {
         gap: 7px;
     }
 
-    #xmodel-select {
-        width: min(230px, 58vw);
-    }
 }

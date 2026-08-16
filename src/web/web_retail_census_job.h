@@ -14,4 +14,3 @@ WebRetailCensusFrameResult WebRetailCensusJob_Frame();
 
 extern "C" void KisakWeb_StartRetailCensus();
 extern "C" void KisakWeb_CancelRetailCensus();
-extern "C" int KisakWeb_SelectRetailXModel(std::uint32_t modelIndex);

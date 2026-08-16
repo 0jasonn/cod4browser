@@ -294,42 +294,6 @@ void TestOwnedCopyAndAtomicFailure()
         "failed replacement preserves owned draw");
 }
 
-void TestDrawListCopyAndLimits()
-{
-    const Vertices vertices = MakeVertices();
-    const std::array<std::uint16_t, 6> indices{0u, 1u, 2u, 0u, 2u, 1u};
-    const std::array<WebRendererDrawListDrawDesc, 2> draws{{
-        {MakeDraw(), 0u},
-        {{WebRendererPrimitiveTopology::TriangleList, 3u, 3u,
-            WebRendererTextureBinding::EngineImage}, 1u},
-    }};
-    const WebRendererDrawListDesc description{
-        {vertices.data(), 3u, indices.data(), 6u},
-        draws.data(), 2u, 2u,
-    };
-    WebRendererOwnedDrawList owned;
-    RequireResult(
-        WebRenderer_CopyDrawList(description, owned),
-        WebRendererSurfaceResult::Success,
-        "copy bounded draw list");
-    Require(owned.draws.size() == 2u && owned.textureCount == 2u &&
-        owned.draws[1].draw.firstIndex == 3u &&
-        owned.draws[1].textureSlot == 1u,
-        "draw ranges and slots are retained by value");
-
-    auto invalidDraws = draws;
-    invalidDraws[1].textureSlot = 2u;
-    const WebRendererDrawListDesc invalid{
-        description.surface, invalidDraws.data(), 2u, 2u,
-    };
-    RequireResult(
-        WebRenderer_CopyDrawList(invalid, owned),
-        WebRendererSurfaceResult::InvalidDescriptor,
-        "out-of-range texture slot is rejected");
-    Require(owned.draws.size() == 2u && owned.draws[1].textureSlot == 1u,
-        "failed list replacement preserves prior owned draws");
-}
-
 void TestErrorStrings()
 {
     for (const WebRendererSurfaceResult result : {
@@ -388,7 +352,6 @@ int main()
     runner.Run("draw validation", TestDrawValidation);
     runner.Run("vertex and index validation", TestVertexAndIndexValidation);
     runner.Run("owned copy and atomic failure", TestOwnedCopyAndAtomicFailure);
-    runner.Run("draw-list copy and limits", TestDrawListCopyAndLimits);
     runner.Run("surface result strings", TestErrorStrings);
     return runner.Result();
 }

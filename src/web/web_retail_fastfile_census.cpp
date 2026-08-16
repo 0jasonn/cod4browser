@@ -59,10 +59,6 @@ constexpr std::uint32_t XMODEL_BYTES = 220u;
 constexpr std::uint32_t DOBJ_ANIM_MAT_BYTES = 32u;
 constexpr std::uint32_t XSURFACE_BYTES = 56u;
 constexpr std::uint32_t GFX_PACKED_VERTEX_BYTES = 32u;
-constexpr std::uint32_t MAX_RETAINED_RENDER_VERTICES = 4096u;
-constexpr std::uint32_t MAX_RETAINED_RENDER_TRIANGLES = 4096u;
-constexpr std::uint32_t MAX_RETAINED_LOD_VERTICES = 16384u;
-constexpr std::uint32_t MAX_RETAINED_LOD_TRIANGLES = 16384u;
 constexpr std::uint32_t RIGID_VERT_LIST_BYTES = 12u;
 constexpr std::uint32_t SURFACE_COLLISION_TREE_BYTES = 40u;
 constexpr std::uint32_t SURFACE_COLLISION_NODE_BYTES = 16u;
@@ -462,7 +458,6 @@ bool ValidLimits(const RetailCensusLimits &limits) noexcept
         limits.maxXModelCollisionNodes != 0u &&
         limits.maxXModelCollisionLeaves != 0u &&
         limits.maxXModelSurfacePayloadBytes != 0u &&
-        limits.maxRetainedXModelRendererBytes != 0u &&
         limits.maxXModelCollisionTriangles != 0u &&
         limits.maxXModelCollisionPayloadBytes != 0u &&
         limits.maxFxEffects != 0u && limits.maxFxElemDefs != 0u &&
@@ -957,9 +952,6 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
     std::uint32_t worldPhysGeomEdgeCount = 0u;
     std::size_t worldXModelIndex = 0u;
     std::uint32_t worldSurfaceIndex = 0u;
-    std::uint32_t retainedLodVertices = 0u;
-    std::uint32_t retainedLodTriangles = 0u;
-    std::uint64_t retainedRendererPayloadBytes = 0u;
     std::uint32_t worldRigidVertListIndex = 0u;
     std::uint32_t worldMaterialIndex = 0u;
     std::uint32_t worldTextureIndex = 0u;
@@ -1438,7 +1430,6 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
         model.assetIndex = assetIndex;
         model.registrySourceIndex = assetIndex;
         model.headerBlock0Offset = span.offset;
-        model.rendererPayloadSelected = worldXModelIndex == 0u;
         model.topLevelAsset = true;
         if (const RetailCensusError error = AppendSemanticTrace(
                 kisak::database::SemanticTraceEventKind::AssetBegin,
@@ -1455,8 +1446,6 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
         }
         worldXModelNested = false;
         worldSurfaceIndex = 0u;
-        retainedLodVertices = 0u;
-        retainedLodTriangles = 0u;
         worldRigidVertListIndex = 0u;
         worldMaterialIndex = 0u;
         worldTextureIndex = 0u;
@@ -1514,13 +1503,10 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
         model.assetIndex = result.worldFxEffects[worldFxIndex].assetIndex;
         model.registrySourceIndex = aliasSlot.offset;
         model.headerBlock0Offset = span.offset;
-        model.rendererPayloadSelected = false;
         model.topLevelAsset = false;
         worldXModelNested = true;
         worldXModelNestedFxVisualIndex = visualIndex;
         worldSurfaceIndex = 0u;
-        retainedLodVertices = 0u;
-        retainedLodTriangles = 0u;
         worldRigidVertListIndex = 0u;
         worldMaterialIndex = 0u;
         worldTextureIndex = 0u;
@@ -2616,12 +2602,9 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
         model.registrySourceIndex =
             (pointerCell.block << 28u) | pointerCell.offset;
         model.headerBlock0Offset = header.offset;
-        model.rendererPayloadSelected = false;
         model.topLevelAsset = false;
         worldXModelNested = false;
         worldSurfaceIndex = 0u;
-        retainedLodVertices = 0u;
-        retainedLodTriangles = 0u;
         worldRigidVertListIndex = 0u;
         worldMaterialIndex = 0u;
         worldTextureIndex = 0u;
@@ -10611,46 +10594,6 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
                     if (visit <= 0) return RetailCensusError::None;
                     surface.verticesHash = Fnv1a32(
                         std::span<const std::uint8_t>(inflated.data() + cursor, bytes));
-                    const RetailXModelLod &firstLod = model.lods[0];
-                    const bool inFirstLod =
-                        worldSurfaceIndex >= firstLod.surfaceIndex &&
-                        worldSurfaceIndex - firstLod.surfaceIndex < firstLod.surfaceCount;
-                    const std::uint64_t retainedSurfaceBytes =
-                        static_cast<std::uint64_t>(bytes) +
-                        static_cast<std::uint64_t>(surface.triCount) * 6u;
-                    if (inFirstLod &&
-                        (mode == RetailCensusMode::WorldXModelDependencies ||
-                         mode == RetailCensusMode::WorldPostXModelTechniqueSet ||
-                         mode == RetailCensusMode::WorldSecondXModelPrefix ||
-                         (mode == RetailCensusMode::WorldSecondXSurfacePrefix &&
-                          worldXModelIndex == 0u) ||
-                         (mode == RetailCensusMode::WorldSecondXModelDependencies &&
-                          worldXModelIndex == 0u) ||
-                         mode == RetailCensusMode::WorldXModelLoader) &&
-                        surface.triIndicesReference == INLINE_POINTER &&
-                        surface.vertCount <= MAX_RETAINED_RENDER_VERTICES &&
-                        surface.triCount <= MAX_RETAINED_RENDER_TRIANGLES &&
-                        retainedLodVertices <=
-                            MAX_RETAINED_LOD_VERTICES - surface.vertCount &&
-                        retainedLodTriangles <=
-                            MAX_RETAINED_LOD_TRIANGLES - surface.triCount &&
-                        retainedSurfaceBytes <=
-                            limits.maxRetainedXModelRendererBytes &&
-                        retainedRendererPayloadBytes <=
-                            limits.maxRetainedXModelRendererBytes -
-                                retainedSurfaceBytes)
-                    {
-                        try
-                        {
-                            surface.retainedPackedVertices.assign(
-                                inflated.data() + cursor,
-                                inflated.data() + cursor + bytes);
-                            retainedLodVertices += surface.vertCount;
-                            retainedLodTriangles += surface.triCount;
-                            retainedRendererPayloadBytes += retainedSurfaceBytes;
-                        }
-                        catch (...) { return RetailCensusError::AllocationFailed; }
-                    }
                     cursor += bytes;
                     ++report.recordsProcessed;
                 }
@@ -10889,18 +10832,6 @@ struct RetailFastfileCensusJob::Impl final : RetailLoadContext
                     if (visit <= 0) return RetailCensusError::None;
                     surface.indicesHash = Fnv1a32(
                         std::span<const std::uint8_t>(inflated.data() + cursor, bytes));
-                    if (!surface.retainedPackedVertices.empty())
-                    {
-                        try
-                        {
-                            surface.retainedPackedIndices.assign(
-                                inflated.data() + cursor,
-                                inflated.data() + cursor + bytes);
-                        }
-                        catch (...) { return RetailCensusError::AllocationFailed; }
-                        surface.renderPayloadRetained = true;
-                        activeWorldXModel().rendererPayloadAvailable = true;
-                    }
                     cursor += bytes;
                     ++report.recordsProcessed;
                 }

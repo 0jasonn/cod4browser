@@ -199,31 +199,6 @@ bool SelectArchiveCandidate(uint32_t archiveIndex)
     return true;
 }
 
-bool BeginNextMaterialArchiveSearch()
-{
-    if (!WebEngineFs_Unmount()) return false;
-    const uint32_t generation = g_job.generation;
-    ResetJob(false);
-    g_job.generation = generation;
-    try
-    {
-        const char *targetMember = WebEngineAsset_MaterialImagePath();
-        if (!targetMember) return false;
-        g_job.targetMemberPath = targetMember;
-    }
-    catch (...)
-    {
-        return false;
-    }
-    if (!SelectArchiveCandidate(0u)) return false;
-    g_job.phase = Phase::NeedStat;
-    DispatchArchiveLoading(
-        generation,
-        g_job.archivePath.c_str(),
-        g_job.targetMemberPath.c_str());
-    return true;
-}
-
 const char *WebFsStatusString(WebFsStatus status)
 {
     switch (status)
@@ -672,17 +647,6 @@ void WebArchiveJob_Start()
     const uint32_t generation = g_job.generation == UINT32_MAX ? 1u : g_job.generation + 1u;
     ResetJob(false);
     g_job.generation = generation;
-    try
-    {
-        const char *targetMember = WebEngineAsset_MaterialImagePath();
-        if (targetMember) g_job.targetMemberPath = targetMember;
-    }
-    catch (...)
-    {
-        g_job.phase = Phase::Failed;
-        DispatchArchiveFailure(generation, "could not retain selected image path");
-        return;
-    }
     if (!SelectArchiveCandidate(0u))
     {
         g_job.phase = Phase::Failed;
@@ -721,18 +685,6 @@ void WebArchiveJob_Frame()
     case Phase::Failed:
         return;
     case Phase::Finished:
-        if (WebEngineAsset_CurrentBindingFinished() &&
-            WebEngineAsset_AdvanceMaterialImageBinding())
-        {
-            if (!BeginNextMaterialArchiveSearch())
-            {
-                g_job.phase = Phase::Failed;
-                DispatchArchiveFailure(
-                    g_job.generation,
-                    "could not begin the next material texture archive search");
-            }
-            return;
-        }
         if (!WebEngineFs_IsMounted())
         {
             g_job.phase = Phase::Failed;

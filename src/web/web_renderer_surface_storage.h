@@ -20,22 +20,8 @@ struct WebRendererOwnedSurface
     };
 };
 
-struct WebRendererOwnedDrawList
-{
-    std::vector<WebRendererSurfaceVertex> vertices;
-    std::vector<std::uint16_t> indices;
-    std::vector<WebRendererDrawListDrawDesc> draws;
-    std::uint32_t textureCount = 0u;
-};
-
 // On failure, destination remains completely unchanged.
 WebRendererSurfaceResult WebRenderer_CopySurface(
     const WebRendererSurfaceDesc &surface,
     const WebRendererDrawDesc &draw,
     WebRendererOwnedSurface &destination);
-
-// Copies an entire validated list atomically. Draw ranges may be disjoint, but
-// every retained index is validated against the shared vertex array.
-WebRendererSurfaceResult WebRenderer_CopyDrawList(
-    const WebRendererDrawListDesc &drawList,
-    WebRendererOwnedDrawList &destination);

@@ -34,13 +34,12 @@ that converted description and recreates both surface and texture after context
 loss; valid wavelet/cubemap/volume or otherwise unsupported IWI layouts remain non-fatal
 metadata results. It uses the pinned Emscripten zlib 1.3.2 port rather than the
 legacy native zlib copy. Automated browser, portable C++, and fuzz-harness
-inputs are generated synthetic data only. The same renderer seam now also
-receives a bounded first-LOD draw list from a selected fully published retail
-XModel in `killhouse.ff`; the launcher lists every retained renderable model and
-can replace the active draw list without reparsing the fastfile. This is a
-retail model preview, not retail map/BSP
-compatibility, general material rendering, a general virtual filesystem, or a
-playable game build.
+inputs are generated synthetic data only. The renderer seam now receives one
+bounded surface directly from the canonically published retail `GfxWorld` in
+`killhouse.ff`. The former selectable, orthographic XModel preview scene was
+retired after Gate 2; canonical XModel loading and dependency publication remain.
+This is a bounded renderer proof, not general map/BSP compatibility, general
+material rendering, a general virtual filesystem, or a playable game build.
 
 Milestone 8 completes the bounded upstream fastfile/zone inventory and
 implements its first portable extraction path. The canonical browser fixture
@@ -252,6 +251,10 @@ the user's base archives, and submit a bounded multi-draw preview. The owned
 first LOD contains two draws, 385 combined vertices, 828 indices, and two DXT1
 textures. Renderer recovery retains the shared geometry and every texture slot;
 this remains an isolated orthographic XModel preview rather than a map renderer.
+That validation preview, including its retained geometry, UI, browser bridge,
+multi-draw commands, and preview-only tests, was retired after the canonical
+Gate 2 `GfxWorld` rendering proof superseded it. The milestone description is
+retained as project history, not as a description of current runtime behavior.
 
 Milestone 30 resumes the generated top-level loader after the completed XModel
 and publishes exactly one additional typed boundary. Owned asset 13 is inline
@@ -300,17 +303,17 @@ asset 22, `com_steel_ladder_top`, publishes as identity 33 with four surfaces,
 660 vertices, 420 triangles, 25,008 surface bytes, and 228 checked collision
 triangles. Its four material handles reuse identity 31. All 34 aliases are
 defined at the 148,660 inflated boundary, and traversal stops before inline
-technique-set asset 23. Eligible entries retain bounded renderer payload under
-the aggregate byte ceiling, with entry zero initially selected; the asset-23
-technique-set run is the next parsing boundary.
+technique-set asset 23. At that milestone, eligible entries retained bounded
+renderer payload under an aggregate byte ceiling, with entry zero initially
+selected; the asset-23 technique-set run was the next parsing boundary.
 
 Milestone 36 turns that collection path into a reusable XModel loader operation.
 The supported top-level dispatcher can now invoke the same bounded loader for
 consecutive or separated XModel runs, including after intervening technique
-sets, while a shared byte ceiling bounds retained first-LOD payloads and an
-explicit per-model flag records the active renderer choice. The browser
-selector replaces the renderer-owned draw list and typed color-map queue without
-reparsing, including material and image aliases owned by earlier models.
+sets. The milestone also added retained first-LOD payloads, an active-renderer
+flag, and a browser selector that replaced the draw list and color-map queue
+without reparsing. Those preview-only payloads, flags, and selector paths are
+now retired; the reusable loader and canonical dependencies remain.
 Generated coverage proves `XModel -> technique sets -> XModel ->
 technique set` reuse. The owned loader publishes all three reached models and
 then enters asset 23, `sm2/mc_unlit`; it classifies 16 null, two inline, and 16

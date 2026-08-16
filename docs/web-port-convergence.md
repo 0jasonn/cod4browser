@@ -72,8 +72,9 @@ high-water is 509,456, block-4 cursor is 37,147,366, and the registry reports
 reconstructed registry is used.
 RawFiles 395, 396, 398, 400, 402, and 404 are published through the canonical
 Kisak type. XModel, Material, and FX publications now also expose stable
-canonical top-level objects, while their retained nested census/preview graphs
-remain temporary convergence scaffolding.
+canonical top-level objects, while their retained nested census/dependency
+records remain temporary convergence scaffolding. Preview render graphs have
+been removed.
 
 ## System inventory
 
@@ -105,8 +106,8 @@ remain temporary convergence scaffolding.
 | `Material` and techniques | `MODIFIED KISAK` / partial | Existing XModel/FX material traversal now exposes canonical `Material` headers and stable names, and XModel handles point at those exact objects. Texture/image/technique ownership remains in temporary records; converge those canonical child graphs and translate only D3D shader/backend state. |
 | `GfxImage` | `MODIFIED KISAK` / partial; native backend `NATIVE ONLY` | The reusable database path and the pre-existing material path now publish canonical `GfxImage` metadata/name pointers through the shared registry. Its canonical texture slot remains null; IWI decoding, retained payload metadata, WebGL resource creation, and context recovery remain renderer/backend infrastructure. Continue converging all remaining image consumers on this family. |
 | `GfxWorld` | `MODIFIED KISAK` / partial | `web_retail_load_gfxworld.*` is a dedicated resumable transcription of `Load_GfxWorldPtr`, `Load_GfxWorld`, and their complete serialized child order. It publishes the canonical `GfxWorld` only after images, materials, cells/portals, lightmaps/grid, vertices/layers, models, shadow/light regions, DPVS static/dynamic, block-1 runtime allocations, and five inline XModel dependencies complete. Important stages emit normalized semantic checkpoints. D3D vertex buffers remain null and runtime texture-slot arrays are zero-filled. `WebEngine_BuildGfxWorldSurface` reads the canonical vertex/index/surface/material pointers directly and copies one bounded real Killhouse surface into the renderer contract; no retained browser scene object is introduced. Gate 2 renderer expansion stops here. |
-| XModel/model preview scene | `TEMPORARY WEB SUBSTITUTE` | Useful validation UI with orthographic projection and selectable models. Freeze feature growth after the real-world proof and retire it as an architectural center. |
-| Renderer frontend | `TEMPORARY WEB SUBSTITUTE` / partial | Current converted surfaces and draw lists bypass most Kisak frontend behavior. Introduce portable draw commands behind the Kisak renderer frontend and keep backend handles private. |
+| XModel/model preview scene | `RETIRED` | Removed after Gate 2: no selectable-model UI/state, retained preview geometry, preview camera/projection, preview material bridge, or multi-draw command path remains. Canonical XModel loading/publication and dependencies remain available to `GfxWorld`, `WeaponDef`, FX, and later runtime consumers. |
+| Renderer frontend | `TEMPORARY WEB SUBSTITUTE` / partial | The bounded canonical `GfxWorld` surface still bypasses most Kisak frontend behavior. Introduce portable draw commands behind the Kisak renderer frontend and keep backend handles private. |
 | WebGL2 backend and context recovery | `WEB PLATFORM IMPLEMENTATION` | Permanent platform boundary. Preserve resource recreation and fail-safe publication. Do not expose WebGL handles to engine systems. |
 | D3D9 renderer backend | `NATIVE ONLY` | Retain for native builds and use as behavioral reference; do not compile Direct3D objects into Wasm. |
 | Shader compatibility | `MODIFIED KISAK` / `WEB PLATFORM IMPLEMENTATION` boundary | Native material/shader contracts should remain canonical; selecting or translating to built-in GLSL belongs at the backend seam. |
@@ -247,6 +248,10 @@ remain temporary convergence scaffolding.
 Once Gate 2 renders enough geometry to prove the pipeline, stop broadening the
 viewer. Prioritize compile inventories and vertical initialization slices for:
 
+The initial [`Com_Init` inventory](gate-3-com-init-inventory.md) records the
+native call order, current browser substitutes, first Wasm compile blockers,
+platform ownership boundaries, and the first compile-led implementation slice.
+
 1. `Com_Init` and the real qcommon lifecycle.
 2. `DB_LoadXZone` and canonical asset ownership.
 3. `CM_LoadMap` and collision.
@@ -291,11 +296,11 @@ Update this section when a milestone changes architectural ownership.
 | Indicator | Required direction | Current reading |
 | --- | --- | --- |
 | Shared or narrowly modified Kisak code in the web target | Increase | Low but improving: six of 32 production translation units are outside `src/web`; canonical database asset types are directly consumable by Wasm and WeaponDef family mechanics are isolated for later DB integration. |
-| Browser-only engine substitutes | Decrease after their validation purpose is met | High: qcommon bootstrap, retail DB traversal, asset records, and preview frontend remain substitutes. |
+| Browser-only engine substitutes | Decrease after their validation purpose is met | High: qcommon bootstrap, retail DB traversal, and temporary asset records remain substitutes. The XModel preview frontend is retired. |
 | Permanent browser platform code | Stable and isolated | Good: launcher, storage, lifecycle, filesystem bridge, and WebGL2 are under explicit web boundaries. |
 | Native engine systems not compiled | Decrease sharply after the GfxWorld proof | High: DB, client, cgame, game, xanim, collision, and script VM are not in the web target. |
 | Native-vs-web semantic comparisons | Increase | Foundation present: shared trace format and the RawFile contract projection pass in both Wasm and Win32 MSVC. Execution of the generated native producer remains pending. |
-| Viewer-only feature work | Stop after world proof | Frozen: the canonical world-to-WebGL2 seam is proven; further work pivots to Gate 3 runtime systems rather than map-viewer polish. |
+| Viewer-only feature work | Stop after world proof | Retired: the canonical world-to-WebGL2 seam is proven and the XModel preview UI, state, bridge, retained geometry, and multi-draw path have been removed. |
 
 ## Update rule
 

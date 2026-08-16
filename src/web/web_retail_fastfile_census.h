@@ -73,7 +73,6 @@ struct RetailCensusLimits
     std::uint32_t maxXModelCollisionNodes = 1024u * 1024u;
     std::uint32_t maxXModelCollisionLeaves = 1024u * 1024u;
     std::uint32_t maxXModelSurfacePayloadBytes = 64u * 1024u * 1024u;
-    std::uint32_t maxRetainedXModelRendererBytes = 16u * 1024u * 1024u;
     std::uint32_t maxXModelCollisionTriangles = 1024u * 1024u;
     std::uint32_t maxXModelCollisionPayloadBytes = 64u * 1024u * 1024u;
     std::uint32_t maxXModelPhysGeoms = 4096u;
@@ -637,13 +636,7 @@ struct RetailXSurface
     std::uint32_t indicesBlock8Offset = 0u;
     std::uint32_t verticesHash = 2166136261u;
     std::uint32_t indicesHash = 2166136261u;
-    // M29 retains only bounded surfaces in the first declared LOD. These remain
-    // serialized bytes until the engine-side draw-list converter validates the
-    // complete model and each selected material dependency.
-    std::vector<std::uint8_t> retainedPackedVertices;
-    std::vector<std::uint8_t> retainedPackedIndices;
     std::vector<RetailXRigidVertList> rigidVertLists;
-    bool renderPayloadRetained = false;
     bool dependenciesTraversed = false;
 };
 
@@ -853,10 +846,6 @@ struct RetailWorldXModel
     bool boneInfoTraversed = false;
     bool physPresetTraversed = false;
     bool physGeomsTraversed = false;
-    // Renderer selection is a caller policy, not an XModel parsing rule.
-    // Eligible models can retain bounded payloads; entry zero starts selected.
-    bool rendererPayloadSelected = false;
-    bool rendererPayloadAvailable = false;
     bool published = false;
     bool topLevelAsset = true;
     bool stoppedBeforeSurfaceArray = false;

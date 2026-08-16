@@ -536,14 +536,14 @@ test("loads a stored IWI through the engine cache and releases its bytes", async
     )).toBe(true);
     expect(result.rendererSurface).toMatchObject({
         state: "ready",
-        vertexCount: 7,
-        indexCount: 9,
+        vertexCount: 4,
+        indexCount: 6,
         drawFirstIndex: 0,
         drawIndexCount: 6,
-        vertexBytes: 224,
-        indexBytes: 18,
-        recoveryBytes: 242,
-        drawCount: 2,
+        vertexBytes: 128,
+        indexBytes: 12,
+        recoveryBytes: 140,
+        drawCount: 1,
         topology: "triangle-list",
         textureBinding: "engine-image",
         resident: true,
@@ -559,9 +559,9 @@ test("loads a stored IWI through the engine cache and releases its bytes", async
     expect(result.surfaceDrawArraysCount).toBe(0);
     expect(result.surfaceLastDraw).toEqual({
         mode: "triangles",
-        count: 3,
+        count: 6,
         type: "uint16",
-        offset: 12,
+        offset: 0,
     });
     expect(result.events.some((event) => event.state === "loading")).toBe(true);
     expect(result.events.some((event) => event.state === "ready")).toBe(true);
@@ -595,10 +595,10 @@ test("loads a stored IWI through the engine cache and releases its bytes", async
     const worldSurfaceParsedBytes = result.engineWorldSurface.parsedBytes;
     const worldSurfaceRecordsProcessed = result.engineWorldSurface.recordsProcessed;
     const vertexUploadCount = result.surfaceBufferUploads.filter(
-        (upload) => upload.target === "array" && upload.byteLength === 224,
+        (upload) => upload.target === "array" && upload.byteLength === 128,
     ).length;
     const indexUploadCount = result.surfaceBufferUploads.filter(
-        (upload) => upload.target === "element-array" && upload.byteLength === 18,
+        (upload) => upload.target === "element-array" && upload.byteLength === 12,
     ).length;
     const textureUploadCount = result.texImage2DCalls.filter(
         (call) => call.width === 2 && call.height === 2,
@@ -658,9 +658,9 @@ test("loads a stored IWI through the engine cache and releases its bytes", async
     expect(recovered.blobReads).toBe(result.blobReads);
     expect(recovered.rendererSurface).toMatchObject({
         state: "ready",
-        vertexCount: 7,
-        indexCount: 9,
-        recoveryBytes: 242,
+        vertexCount: 4,
+        indexCount: 6,
+        recoveryBytes: 140,
         submissionGeneration: surfaceSubmissionGeneration,
         resident: true,
     });
@@ -668,10 +668,10 @@ test("loads a stored IWI through the engine cache and releases its bytes", async
         .toBeGreaterThan(surfaceResourceGeneration);
     expect(recovered.rendererSurface.recoveryCount).toBe(surfaceRecoveryCount + 1);
     expect(recovered.surfaceBufferUploads.filter(
-        (upload) => upload.target === "array" && upload.byteLength === 224,
+        (upload) => upload.target === "array" && upload.byteLength === 128,
     ).length).toBeGreaterThan(vertexUploadCount);
     expect(recovered.surfaceBufferUploads.filter(
-        (upload) => upload.target === "element-array" && upload.byteLength === 18,
+        (upload) => upload.target === "element-array" && upload.byteLength === 12,
     ).length).toBeGreaterThan(indexUploadCount);
     expect(recovered.texImage2DCalls.filter(
         (call) => call.width === 2 && call.height === 2,
@@ -679,9 +679,9 @@ test("loads a stored IWI through the engine cache and releases its bytes", async
     expect(recovered.surfaceDrawArraysCount).toBe(0);
     expect(recovered.surfaceLastDraw).toEqual({
         mode: "triangles",
-        count: 3,
+        count: 6,
         type: "uint16",
-        offset: 12,
+        offset: 0,
     });
 
     const lifecycle = recovered.rendererEvents.slice(rendererEventCount);
@@ -716,12 +716,12 @@ test("loads a stored IWI through the engine cache and releases its bytes", async
     expect(surfaceLostIndex).toBeGreaterThanOrEqual(0);
     expect(surfaceReadyIndex).toBeGreaterThan(surfaceLostIndex);
     expect(surfaceLifecycle[surfaceLostIndex]).toMatchObject({
-        recoveryBytes: 242,
+        recoveryBytes: 140,
         submissionGeneration: surfaceSubmissionGeneration,
         resident: false,
     });
     expect(surfaceLifecycle[surfaceReadyIndex]).toMatchObject({
-        recoveryBytes: 242,
+        recoveryBytes: 140,
         submissionGeneration: surfaceSubmissionGeneration,
         resident: true,
     });
@@ -844,7 +844,7 @@ test("a synchronous ready listener cannot publish texture state after cancellati
     )).toBeGreaterThan(frameAtCancel + 2);
     expect(await page.evaluate(
         () => globalThis.__syntheticSurfaceDrawElementsCount,
-    )).toBe(surfaceDrawsAtCancel);
+    )).toBeGreaterThan(surfaceDrawsAtCancel);
 
     const result = await page.evaluate(() => ({
         cancelledGeneration: globalThis.__syntheticReentrantCancelGeneration,
@@ -868,9 +868,9 @@ test("a synchronous ready listener cannot publish texture state after cancellati
     )).toEqual([]);
     expect(result.rendererSurface).toMatchObject({
         state: "ready",
-        vertexCount: 7,
-        indexCount: 9,
-        recoveryBytes: 242,
+        vertexCount: 4,
+        indexCount: 6,
+        recoveryBytes: 140,
         resident: true,
     });
     expect(result.surfaceEvents.some((event) =>
@@ -999,7 +999,7 @@ test("rejects textures above the backend dimension floor before WebGL upload", a
     });
     expect(result.engineAsset.rendererReplacementMessage).toMatch(/dimension|backend limit/i);
     expect(result.rendererTexture).toMatchObject({
-        state: "idle",
+        state: "unsupported",
     });
     expect(result.texImage2DCalls.some(
         (call) => call.width === width && call.height === 1,
