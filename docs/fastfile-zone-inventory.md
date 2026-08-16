@@ -1459,3 +1459,58 @@ aliases defined. XModel asset 436, `viewmodel_knife`, publishes as identity
 4 reaches cursor 8,260,512. The next untouched body is inline type-2
 `XAnimParts` asset 437. There are 335 serialized top-level assets remaining
 before the first `GfxWorld` at asset 772.
+
+## Milestone 41 canonical XAnimParts publication (complete)
+
+The implementation first inventoried the generated native path and uses it as
+the behavioral reference. `Load_XAnimPartsPtr` consumes the pointer field in
+the caller's stream, pushes block 0, accepts null, inline (`-1`), shared
+(`-2` plus a block-4 insertion cell), or a prior typed alias, and publishes only
+after `Load_XAnimParts` returns. The body loader consumes the 88-byte canonical
+header in block 0, pushes block 4, and traverses this exact order:
+
+1. XString name.
+2. `boneCount[9]` script-string names and `notifyCount` notify records.
+3. Optional delta part, translation, and quaternion payloads.
+4. Byte, short, int, random-short, random-byte, and random-int arrays.
+5. Animation indices, using bytes below 256 frames and ushorts otherwise.
+
+All pointer fields in the main packed-array graph are native presence fields:
+any non-null value allocates at the current checked block-4 position. They are
+not incorrectly restricted to `-1`. Translation and quaternion delta indices
+are inline flexible tails after their canonical headers; frame arrays remain
+separate aligned allocations. The temporary traversal owner allocates enough
+stable storage for those tails and publishes pointers only through the real
+Kisak `XAnimParts`, `XAnimDeltaPart`, `XAnimPartTrans`, and
+`XAnimDeltaPartQuat` structures. It does not implement playback or DObj work.
+
+Synthetic coverage exercises shared insertion and later alias conversion,
+low- and high-frame index widths, bone/notify tables, all packed array classes,
+both delta encodings, zero-length presence allocation, copy-stable lifetime,
+and atomic limit/script-string/alias failures. The canonical type graph now
+lives in renderer-free `src/xanim/xanim_types.h`, shared with native
+`xanim.h`. Both the 16-test Win32/MSVC suite and the 16-test Wasm suite pass.
+
+The owned Killhouse run publishes 21 consecutive XAnimParts bodies:
+
+| Field | Value |
+| --- | --- |
+| Asset range / identities | 437-457 / 1368-1388 |
+| First | `viewmodel_winchester_idle`, 0 frames, 79 bones, 1 notify, 1,593 payload bytes |
+| First boundary | 28,660,186 inflated bytes |
+| Last | `viewmodel_winchester_ads_down`, 12 frames, 1 bone, 1 notify, 105 payload bytes |
+| Last boundary | 28,774,997 inflated bytes |
+| Completed top-level assets | 458 (indices 0-457) |
+| Registry | 1,388 assets / 1,388 defined aliases |
+| Next boundary | inline type-23 `WeaponDef` asset 458 |
+
+The native weapon inventory establishes why this is the next genuinely
+unsupported family: `Load_WeaponDefPtr` has the familiar block-0 pointer and
+publication envelope, but `Load_WeaponDef` traverses a 2,168-byte canonical
+record followed by a large ordered block-4 graph. That graph includes 16 gun
+models, a hand model, 33 animation-name strings, script-string maps, FX,
+numerous sound-alias names, an optional 29-entry bounce-sound array, materials,
+16 world models, projectile dependencies, and two accuracy-graph pairs with
+inline-or-prior pointer forms. WeaponDef must be extracted and loaded as a
+canonical Kisak type; a name-only browser substitute would not preserve the
+native contract.

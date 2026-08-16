@@ -1083,6 +1083,138 @@ std::vector<std::uint8_t> BuildInterleavedWorldRawFileLoaderInflated()
     return bytes;
 }
 
+std::vector<std::uint8_t> BuildReusableWorldXAnimLoaderInflated(
+    bool invalidBoneName = false,
+    bool invalidAlias = false)
+{
+    std::vector<std::uint8_t> bytes;
+    PutU32(bytes, 4096u);
+    PutU32(bytes, 0u);
+    const std::array<std::uint32_t, 9> blocks = {{
+        1024u * 1024u, 0u, 0u, 0u, 1024u * 1024u,
+        0u, 0u, 0u, 0u,
+    }};
+    for (const std::uint32_t block : blocks) PutU32(bytes, block);
+
+    const std::array<std::string, 2> scriptStrings = {{"tag_origin", "end"}};
+    PutU32(bytes, static_cast<std::uint32_t>(scriptStrings.size()));
+    PutU32(bytes, 0xffffffffu);
+    PutU32(bytes, 5u);
+    PutU32(bytes, 0xffffffffu);
+    for (std::size_t index = 0u; index < scriptStrings.size(); ++index)
+        PutU32(bytes, 0xffffffffu);
+    for (const std::string &value : scriptStrings) AppendString(bytes, value);
+
+    const std::string techniqueName = ",web/xanim_prefix";
+    std::uint32_t block4Cursor =
+        static_cast<std::uint32_t>(scriptStrings.size() * 4u);
+    for (const std::string &value : scriptStrings)
+        block4Cursor += static_cast<std::uint32_t>(value.size() + 1u);
+    block4Cursor = (block4Cursor + 3u) & ~3u;
+    block4Cursor += 5u * 8u;
+    block4Cursor += static_cast<std::uint32_t>(techniqueName.size() + 1u);
+    const std::uint32_t insertionOffset = (block4Cursor + 3u) & ~3u;
+    const std::uint32_t insertionAlias =
+        0x40000000u | (insertionOffset + 1u);
+
+    const std::array<std::uint32_t, 5> types = {{5u, 2u, 2u, 2u, 16u}};
+    const std::array<std::uint32_t, 5> references = {{
+        0xffffffffu,
+        0xfffffffeu,
+        invalidAlias ? insertionAlias + 4u : insertionAlias,
+        0xffffffffu,
+        0xffffffffu,
+    }};
+    for (std::size_t index = 0u; index < types.size(); ++index)
+    {
+        PutU32(bytes, types[index]);
+        PutU32(bytes, references[index]);
+    }
+
+    std::vector<std::uint8_t> techniqueSet(148u, 0u);
+    SetU32(techniqueSet, 0u, 0xffffffffu);
+    bytes.insert(bytes.end(), techniqueSet.begin(), techniqueSet.end());
+    AppendString(bytes, techniqueName);
+
+    std::vector<std::uint8_t> first(88u, 0u);
+    SetU32(first, 0u, 0xffffffffu);
+    PutU16At(first, 4u, 2u);
+    PutU16At(first, 6u, 2u);
+    PutU16At(first, 8u, 1u);
+    PutU16At(first, 10u, 2u);
+    PutU16At(first, 12u, 1u);
+    PutU16At(first, 14u, 10u);
+    first[16u] = 1u;
+    first[17u] = 1u;
+    first[27u] = 2u;
+    first[28u] = 2u;
+    SetU32(first, 32u, 2u);
+    SetU32(first, 36u, 3u);
+    SetF32(first, 40u, 30.0f);
+    SetF32(first, 44u, 0.1f);
+    for (const std::size_t offset : {
+             48u, 52u, 56u, 60u, 64u, 68u, 72u, 76u, 80u, 84u})
+    {
+        SetU32(first, offset, 1u);
+    }
+    bytes.insert(bytes.end(), first.begin(), first.end());
+    AppendString(bytes, "web/xanim_full");
+    PutU16(bytes, 0u);
+    PutU16(bytes, invalidBoneName ? 2u : 1u);
+    PutU16(bytes, 0u);
+    PutU16(bytes, 0u);
+    PutU32(bytes, std::bit_cast<std::uint32_t>(0.25f));
+    PutU16(bytes, 1u);
+    PutU16(bytes, 0u);
+    PutU32(bytes, std::bit_cast<std::uint32_t>(0.75f));
+    PutU32(bytes, 1u);
+    PutU32(bytes, 1u);
+    PutU16(bytes, 1u);
+    bytes.push_back(1u);
+    bytes.push_back(0u);
+    for (const float value : {0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f})
+        PutU32(bytes, std::bit_cast<std::uint32_t>(value));
+    PutU32(bytes, 1u);
+    bytes.push_back(0u);
+    bytes.push_back(9u);
+    for (const std::uint8_t value : {1u, 2u, 3u, 4u, 5u, 6u})
+        bytes.push_back(value);
+    PutU16(bytes, 1u);
+    PutU16(bytes, 0u);
+    PutU32(bytes, 1u);
+    bytes.push_back(0u);
+    bytes.push_back(9u);
+    for (const std::int16_t value : {10, 11, 12, 13})
+        PutU16(bytes, static_cast<std::uint16_t>(value));
+    bytes.push_back(0xa1u);
+    bytes.push_back(0xa2u);
+    PutU16(bytes, 0x101u);
+    PutU16(bytes, 0x202u);
+    PutU32(bytes, 0x01020304u);
+    PutU16(bytes, 0x303u);
+    PutU16(bytes, 0x404u);
+    bytes.push_back(0xb1u);
+    bytes.push_back(0xb2u);
+    PutU32(bytes, 0x11121314u);
+    bytes.push_back(1u);
+    bytes.push_back(2u);
+    bytes.push_back(3u);
+
+    std::vector<std::uint8_t> second(88u, 0u);
+    SetU32(second, 0u, 0xffffffffu);
+    PutU16At(second, 14u, 300u);
+    SetU32(second, 52u, 1u);
+    SetU32(second, 36u, 2u);
+    SetU32(second, 76u, 1u);
+    SetF32(second, 40u, 20.0f);
+    SetF32(second, 44u, 1.0f / 20.0f);
+    bytes.insert(bytes.end(), second.begin(), second.end());
+    AppendString(bytes, "web/xanim_wide_indices");
+    PutU16(bytes, 257u);
+    PutU16(bytes, 299u);
+    return bytes;
+}
+
 std::vector<std::uint8_t> BuildReusableWorldFxLoaderInflated(
     bool invalidMaterial)
 {
@@ -2187,6 +2319,137 @@ void TestReusableWorldRawFileLoader()
         "dispatcher resumes RawFile loading after an intervening XModel");
 }
 
+void TestReusableWorldXAnimPartsLoader()
+{
+    using namespace kisak::fastfile;
+    using namespace kisak::database;
+    const auto file = BuildFile(BuildReusableWorldXAnimLoaderInflated());
+    const RetailFastfileCensus result = Run(
+        file, 7u, 2u, 3u, RetailCensusMode::WorldAssetLoader);
+    Require(result.worldXAnimParts.size() == 3u,
+        "the dispatcher retains two bodies and one XAnimParts alias");
+    const RetailPublishedXAnimParts &first = result.worldXAnimParts[0u];
+    const RetailPublishedXAnimParts &alias = result.worldXAnimParts[1u];
+    const RetailPublishedXAnimParts &wide = result.worldXAnimParts[2u];
+    Require(first.assetIndex == 1u && first.published && first.asset &&
+            first.storage && first.storage->name &&
+            *first.storage->name == "web/xanim_full" &&
+            first.asset->name == first.storage->name->c_str() &&
+            first.serializedReference == 0xfffffffeu &&
+            first.insertPointerBlock4Offset != UINT32_MAX &&
+            first.payloadBytes == 109u && first.identity == 2u,
+        "shared XAnimParts publishes the canonical header after complete payload traversal");
+    Require(alias.assetIndex == 2u && alias.published && alias.pointerAlias &&
+            alias.identity == first.identity &&
+            alias.asset.get() == first.asset.get() &&
+            alias.storage.get() == first.storage.get() &&
+            alias.serializedReference ==
+                (0x40000000u | (first.insertPointerBlock4Offset + 1u)),
+        "Load_XAnimPartsPtr alias conversion resolves the shared insertion cell");
+
+    const XAnimParts &parts = *first.asset;
+    Require(parts.dataByteCount == 2u && parts.dataShortCount == 2u &&
+            parts.dataIntCount == 1u && parts.randomDataShortCount == 2u &&
+            parts.randomDataByteCount == 2u &&
+            parts.randomDataIntCount == 1u && parts.indexCount == 3u &&
+            parts.numframes == 10u && parts.bLoop && parts.bDelta &&
+            parts.boneCount[9] == 2u && parts.notifyCount == 2u,
+        "canonical XAnimParts preserves counts, flags, and the bone/name table shape");
+    Require(parts.names && parts.names[0u] == 0u && parts.names[1u] == 1u &&
+            parts.notify && parts.notify[0u].name == 0u &&
+            parts.notify[0u].time == 0.25f &&
+            parts.notify[1u].name == 1u &&
+            parts.notify[1u].time == 0.75f,
+        "bone names and notifications retain checked script-string indices");
+    Require(parts.deltaPart && parts.deltaPart->trans && parts.deltaPart->quat &&
+            parts.deltaPart->trans->size == 1u &&
+            parts.deltaPart->trans->smallTrans == 1u &&
+            parts.deltaPart->trans->u.frames.mins[1u] == 1.0f &&
+            parts.deltaPart->trans->u.frames.size[2u] == 5.0f &&
+            parts.deltaPart->trans->u.frames.frames._1 &&
+            parts.deltaPart->trans->u.frames.frames._1[1u][2u] == 6u &&
+            parts.deltaPart->quat->size == 1u &&
+            parts.deltaPart->quat->u.frames.frames &&
+            parts.deltaPart->quat->u.frames.frames[1u][1u] == 13,
+        "delta translation and quaternion frame pointers use canonical flexible structures");
+    const auto *transIndices = reinterpret_cast<const std::uint8_t *>(
+        parts.deltaPart->trans) + 32u;
+    const auto *quatIndices = reinterpret_cast<const std::uint8_t *>(
+        parts.deltaPart->quat) + 8u;
+    Require(transIndices[0u] == 0u && transIndices[1u] == 9u &&
+            quatIndices[0u] == 0u && quatIndices[1u] == 9u,
+        "packed low-frame delta indices remain inline after their canonical headers");
+    Require(parts.dataByte[1u] == 0xa2u && parts.dataShort[1u] == 0x202 &&
+            parts.dataInt[0u] == 0x01020304 &&
+            parts.randomDataShort[1u] == 0x404 &&
+            parts.randomDataByte[1u] == 0xb2u &&
+            parts.randomDataInt[0u] == 0x11121314 &&
+            parts.indices._1[2u] == 3u,
+        "all generated packed animation arrays publish through canonical pointers");
+    Require(wide.assetIndex == 3u && wide.published && wide.identity == 3u &&
+            wide.asset && wide.asset->numframes == 300u &&
+            wide.asset->dataByteCount == 0u && wide.asset->dataByte != nullptr &&
+            wide.asset->indices._2 && wide.asset->indices._2[0u] == 257u &&
+            wide.asset->indices._2[1u] == 299u,
+        "wide-frame indices use ushort storage and preserve zero-length presence allocation");
+    Require(result.completedAssetCount == 4u &&
+            result.registryAssetCount == 3u &&
+            result.registryAliasCount == 4u &&
+            result.registryDefinedAliasCount == 4u &&
+            result.nextBodyIndex == 4u &&
+            result.nextBodyType == ASSET_TYPE_GFXWORLD &&
+            result.stoppedBeforeDifferentWorldAssetType &&
+            result.semanticTrace.size() == 7u &&
+            result.semanticTrace.back().kind == SemanticTraceEventKind::Boundary,
+        "XAnimParts bodies and aliases return to traversal before GfxWorld");
+
+    RetailFastfileCensus copied = result;
+    Require(copied.worldXAnimParts[0u].asset->dataByte[0u] == 0xa1u &&
+            copied.worldXAnimParts[1u].asset.get() ==
+                copied.worldXAnimParts[0u].asset.get(),
+        "canonical XAnimParts ownership remains stable when a census result is copied");
+
+    RetailCensusLimits limits;
+    limits.maxXAnimPayloadBytes = 32u;
+    RetailFastfileCensusJob bounded;
+    Require(bounded.BeginStreaming(RetailCensusMode::WorldAssetLoader, limits) ==
+            RetailCensusError::None &&
+            bounded.FeedSource(file, true) == RetailCensusError::None,
+        "bounded XAnimParts fixture starts");
+    while (bounded.Progress() == RetailCensusProgress::Running)
+        (void)bounded.Step();
+    RetailFastfileCensus unavailable;
+    Require(bounded.Failure() == RetailCensusError::XAnimPayloadLimit &&
+            !bounded.TakeResult(unavailable),
+        "XAnimParts payload limits fail atomically before publication");
+
+    RetailFastfileCensusJob badBone;
+    const auto badBoneFile = BuildFile(
+        BuildReusableWorldXAnimLoaderInflated(true));
+    Require(badBone.BeginStreaming(RetailCensusMode::WorldAssetLoader) ==
+            RetailCensusError::None &&
+            badBone.FeedSource(badBoneFile, true) == RetailCensusError::None,
+        "invalid XAnimParts bone-name fixture starts");
+    while (badBone.Progress() == RetailCensusProgress::Running)
+        (void)badBone.Step();
+    Require(badBone.Failure() == RetailCensusError::XAnimScriptStringInvalid &&
+            !badBone.TakeResult(unavailable),
+        "out-of-range XAnimParts script strings cannot publish the asset");
+
+    RetailFastfileCensusJob badAlias;
+    const auto badAliasFile = BuildFile(
+        BuildReusableWorldXAnimLoaderInflated(false, true));
+    Require(badAlias.BeginStreaming(RetailCensusMode::WorldAssetLoader) ==
+            RetailCensusError::None &&
+            badAlias.FeedSource(badAliasFile, true) == RetailCensusError::None,
+        "invalid XAnimParts pointer-alias fixture starts");
+    while (badAlias.Progress() == RetailCensusProgress::Running)
+        (void)badAlias.Step();
+    Require(badAlias.Failure() == RetailCensusError::XAnimAliasInvalid &&
+            !badAlias.TakeResult(unavailable),
+        "undefined XAnimParts pointer aliases fail closed");
+}
+
 void TestReusableWorldMaterialTechniqueLoader()
 {
     using namespace kisak::fastfile;
@@ -2803,17 +3066,38 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
                   << " length=" << rawFile.length
                   << " boundary=" << rawFile.boundaryInflatedOffset << '\n';
     }
+    for (const RetailPublishedXAnimParts &entry : result.worldXAnimParts)
+    {
+        const XAnimParts *parts = entry.asset.get();
+        std::cout << "  XAnimParts asset=" << entry.assetIndex
+                  << " name=" << (parts && parts->name ? parts->name : "")
+                  << " identity=" << entry.identity
+                  << " frames=" << (parts ? parts->numframes : 0u)
+                  << " bones=" << (parts ? parts->boneCount[9] : 0u)
+                  << " notify=" << (parts ? parts->notifyCount : 0u)
+                  << " indices=" << (parts ? parts->indexCount : 0u)
+                  << " data=" << (parts ? parts->dataByteCount : 0u)
+                  << '/' << (parts ? parts->dataShortCount : 0u)
+                  << '/' << (parts ? parts->dataIntCount : 0u)
+                  << " random=" << (parts ? parts->randomDataByteCount : 0u)
+                  << '/' << (parts ? parts->randomDataShortCount : 0u)
+                  << '/' << (parts ? parts->randomDataIntCount : 0u)
+                  << " delta=" << (parts && parts->deltaPart)
+                  << " payload=" << entry.payloadBytes
+                  << " boundary=" << entry.boundaryInflatedOffset << '\n';
+    }
     Require(sandbagIt != result.worldXModels.end() &&
         sandbagIt->name == "mil_sandbag_desert_single_flat" &&
         sandbagIt->published && sandbagIt->identity == 64u &&
         sandbagIt->physPresetTraversed && sandbagIt->physGeomsTraversed &&
         sandbagIt->physGeomCount != 0u &&
         sandbagIt->physGeomPayloadBytes != 0u &&
-        result.completedAssetCount == 437u &&
+        result.completedAssetCount == 458u &&
         result.worldXModels.size() == 278u && nestedBuiltinModels == 4u &&
-        result.registryAssetCount == 1367u &&
-        result.registryAliasCount == 1367u &&
-        result.registryDefinedAliasCount == 1367u &&
+        result.worldXAnimParts.size() == 21u &&
+        result.registryAssetCount == 1388u &&
+        result.registryAliasCount == 1388u &&
+        result.registryDefinedAliasCount == 1388u &&
         splatFx.assetIndex == 381u &&
         splatFx.name == "props/watermelon_splat" &&
         splatFx.identity == 1242u && splatFx.published &&
@@ -2854,11 +3138,11 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
         finalRawFile.identity == 1318u && finalRawFile.asset &&
         finalRawFile.asset->name == finalRawFile.nameStorage->c_str() &&
         finalRawFile.asset->len == finalRawFile.length &&
-        result.nextBodyIndex == 437u && result.nextBodyType == 2u &&
+        result.nextBodyIndex == 458u && result.nextBodyType == 23u &&
         result.nextBodyReference == 0xffffffffu &&
         result.stoppedBeforeDifferentWorldAssetType &&
         result.unsupportedOperation == nullptr,
-        "owned dispatcher publishes through asset 436 before XAnimParts 437");
+        "owned dispatcher publishes XAnimParts assets 437-457 before WeaponDef 458");
     return;
     Require(model.published && model.identity == 19u &&
         model.rendererPayloadSelected && model.rendererPayloadAvailable &&
@@ -3218,6 +3502,7 @@ int main(int argc, char **argv)
     TestWorldXModelCollectionBoundary();
     TestReusableWorldXModelLoader();
     TestReusableWorldRawFileLoader();
+    TestReusableWorldXAnimPartsLoader();
     TestReusableWorldMaterialTechniqueLoader();
     TestReusableWorldFxLoader();
     TestMalformedPrefixRecords();

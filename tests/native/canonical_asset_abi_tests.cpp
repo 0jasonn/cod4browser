@@ -1,5 +1,6 @@
 #include <database/db_asset_types.h>
 #include <database/db_semantic_trace.h>
+#include <xanim/xanim_types.h>
 
 #include <cstddef>
 #include <cstdlib>
@@ -27,6 +28,8 @@ void TestCanonicalAssetTypes()
         "RawFile remains a standard-layout canonical engine type");
     Require(std::is_standard_layout_v<XAsset>,
         "XAsset remains a standard-layout canonical engine type");
+    Require(std::is_standard_layout_v<XAnimParts>,
+        "XAnimParts remains a standard-layout canonical engine type");
     Require(sizeof(XAssetHeader) == sizeof(void *),
         "XAssetHeader remains one native pointer wide");
     Require(offsetof(RawFile, name) == 0u &&
@@ -45,9 +48,20 @@ void TestCanonicalAssetTypes()
                 sizeof(XAsset) == 8u &&
                 offsetof(XAsset, header) == 4u,
             "32-bit native/Wasm builds match the IW3 asset ABI");
+        Require(sizeof(XAnimParts) == 88u &&
+                offsetof(XAnimParts, boneCount) == 18u &&
+                offsetof(XAnimParts, randomDataShortCount) == 32u &&
+                offsetof(XAnimParts, names) == 48u &&
+                offsetof(XAnimParts, indices) == 76u &&
+                offsetof(XAnimParts, notify) == 80u &&
+                offsetof(XAnimParts, deltaPart) == 84u &&
+                sizeof(XAnimPartTrans) == 36u &&
+                sizeof(XAnimDeltaPartQuat) == 12u,
+            "32-bit native/Wasm builds match the canonical XAnimParts graph ABI");
     }
 
-    Require(ASSET_TYPE_XMODEL == static_cast<XAssetType>(3) &&
+    Require(ASSET_TYPE_XANIMPARTS == static_cast<XAssetType>(2) &&
+            ASSET_TYPE_XMODEL == static_cast<XAssetType>(3) &&
             ASSET_TYPE_MATERIAL == static_cast<XAssetType>(4) &&
             ASSET_TYPE_GFXWORLD == static_cast<XAssetType>(16) &&
             ASSET_TYPE_FX == static_cast<XAssetType>(25) &&

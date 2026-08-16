@@ -51,9 +51,10 @@ a quality metric by itself because filesystem, lifecycle, and WebGL code should
 remain platform-owned.
 
 Current retail traversal of `killhouse.ff` completes top-level assets 0 through
-436 and stops before inline type-2 `XAnimParts` asset 437. It has 335 top-level
+457 and stops before inline type-23 `WeaponDef` asset 458. It has 314 top-level
 records left before the first `GfxWorld` at asset 772. The retained result
-includes 278 published XModels, 11 FX effects, and 1,367 registry identities.
+includes 278 published XModels, 11 FX effects, 21 canonical `XAnimParts`, and
+1,388 registry identities.
 RawFiles 395, 396, 398, 400, 402, and 404 are published through the canonical
 Kisak type; the XModel/material/FX results remain census/preview records rather
 than canonical publications.
@@ -71,12 +72,13 @@ than canonical publications.
 | Command system | `MODIFIED KISAK` / partial | `src/qcommon/cmd_core.cpp` implements the Kisak command APIs as a reduced portable core. Reconcile it with `src/qcommon/cmd.cpp` as more qcommon code compiles. |
 | Dvar system | `MODIFIED KISAK` / partial | `src/universal/dvar_core.cpp` is a reduced portable implementation. Preserve API and behavior parity and converge with the full dvar implementation. |
 | qcommon startup | `TEMPORARY WEB SUBSTITUTE` | The bounded pre-database shell proves ordering and I/O but is not `Com_Init`. Replace milestone-specific startup actions by compiling the real initialization path behind platform services. |
-| Canonical database asset ABI | `SHARED KISAK` / partial | `RawFile`, `XAssetHeader`, `XAssetType`, and `XAsset` now live in renderer-free `src/database/db_asset_types.h`; xanim consumes the same declarations. Wasm tests enforce their 32-bit IW3 layout. Expand this extraction only when a real shared consumer requires another canonical type. |
+| Canonical database asset ABI | `SHARED KISAK` / partial | `RawFile`, `XAssetHeader`, `XAssetType`, and `XAsset` live in renderer-free `src/database/db_asset_types.h`. The canonical `XAnimParts` graph is now isolated in renderer-free `src/xanim/xanim_types.h`, which both the full native xanim header and portable loader consume. Win32/Wasm tests enforce the 32-bit IW3 layout. Expand this extraction only when a real shared consumer requires another canonical type. |
 | IWD/ZIP reading | `MODIFIED KISAK` / partial | The bounded reader is portable and tested, but final integration should be through Kisak filesystem/database calls rather than a preview-only archive job. |
 | IWI decoding | `MODIFIED KISAK` / partial | Bounded DXT decoding is reusable. Connect it to canonical `GfxImage` loading and renderer upload instead of browser material queues. |
 | Fastfile framing and zone stream machine | `TEMPORARY WEB SUBSTITUTE` | It accurately models blocks, rewind/high-water behavior, pointer classes, aliases, and bounded streaming. Use it as differential evidence and migrate reusable mechanics toward the Kisak DB loader. |
 | Asset registry | `TEMPORARY WEB SUBSTITUTE` | Stable typed identities prove alias behavior, but the destination is Kisak `XAsset` registration and native DB ownership. |
-| Retail loader dispatcher | `TEMPORARY WEB SUBSTITUTE` | `web_retail_fastfile_census.*` is the current pre-world traversal vehicle. It reports canonical asset types through the shared semantic trace and now publishes one canonical RawFile before an explicit boundary. Continue reusable families without turning other `Retail*` results into the permanent object model. |
+| Retail loader dispatcher | `TEMPORARY WEB SUBSTITUTE` | `web_retail_fastfile_census.*` is the current pre-world traversal vehicle. It reports canonical asset types through the shared semantic trace and publishes canonical RawFile and XAnimParts assets before explicit unsupported-family boundaries. Continue reusable families without turning other `Retail*` results into the permanent object model. |
+| `XAnimParts` asset loading | `MODIFIED KISAK` / partial | The bounded path mirrors native `Load_XAnimPartsPtr` / `Load_XAnimParts`: block-0 body allocation, optional shared insertion cell, block-4 name and payload scope, exact array order, low/high-frame index widths, and flexible delta translation/quaternion storage. It publishes the canonical Kisak structure with ownership-only backing; the owned run publishes assets 437-457. Replace the temporary owner with real zone allocation during DB convergence. |
 | `XModel` | `TEMPORARY WEB SUBSTITUTE`; canonical code `NOT COMPILED` | Retail data is retained as `RetailWorldXModel`. Converge loader output and publication on `XModel` from `src/xanim/xmodel.h`, then compile the consumers that require it. |
 | `Material` and techniques | `TEMPORARY WEB SUBSTITUTE`; canonical code `NOT COMPILED` | Current `RetailXModelMaterial` and compatibility records validate dependencies. Converge on `Material`, `MaterialTechniqueSet`, and related Kisak structures; translate only D3D shader/backend state. |
 | `GfxImage` | `TEMPORARY WEB SUBSTITUTE`; native backend `NATIVE ONLY` | Current metadata plus IWD lookup proves image selection. Publish canonical image assets while keeping GPU texture creation in the WebGL backend. |
@@ -88,7 +90,7 @@ than canonical publications.
 | Shader compatibility | `MODIFIED KISAK` / `WEB PLATFORM IMPLEMENTATION` boundary | Native material/shader contracts should remain canonical; selecting or translating to built-in GLSL belongs at the backend seam. |
 | ODE math | `SHARED KISAK` | `src/physics/ode/odemath.cpp` is compiled directly. Expand shared ODE/collision code based on compile inventory and measured needs. |
 | Collision and `CM_LoadMap` | `NOT COMPILED` | Prioritize after the first real GfxWorld render so map state is consumed by real engine systems. |
-| xanim and DObj | `NOT COMPILED` | Compile canonical XModel consumers rather than adding behavior to preview records. |
+| xanim and DObj runtime | `NOT COMPILED` | Asset publication is tracked separately above. Do not add playback, skeletal evaluation, or browser-only DObj behavior during traversal; compile the real xanim/DObj consumers after the GfxWorld proof and runtime pivot. |
 | Script VM and `Scr_Init` | `NOT COMPILED` | Bring up after database/world publication dependencies are credible. |
 | Client and `CL_Init` | `NOT COMPILED` | Initial runtime pivot target; replace launcher-driven scene behavior with real client initialization. |
 | cgame and `CG_Init` | `NOT COMPILED` | Required for a playable offline client; port through platform and renderer seams. |
@@ -134,10 +136,23 @@ than canonical publications.
   dependency success. Native `FxEffectDef::elemDefs` is treated as a presence
   field and `totalSize` does not size database traversal.
 
+### Checkpoint 3: canonical XAnimParts publication (complete)
+
+- The renderer-free canonical type header is shared by native xanim code and
+  the portable database path; no permanent `RetailXAnim*` object model was
+  introduced.
+- Synthetic coverage mirrors `-1`, `-2`, insertion-cell, and prior-alias
+  pointer forms; bone and notify tables; every packed data array; both index
+  widths; flexible delta translation/quaternion payloads; zero-length presence
+  fields; bounded ownership; and atomic failure.
+- Both 16-test Win32/MSVC and 16-test Wasm suites pass after the shared change.
+- The owned Killhouse run publishes XAnimParts assets 437-457 as identities
+  1368-1388 and then stops before inline WeaponDef asset 458.
+
 ### Gate 1: finish the pre-GfxWorld dependency graph
 
-- Inventory and implement native type-2 `XAnimParts` at asset 437, then continue
-  every remaining inline family in serialized order.
+- Inventory native type-23 `Load_WeaponDefPtr` / `Load_WeaponDef` at asset 458,
+  then continue every remaining inline family in serialized order.
 - Preserve block cursors, high-water marks, insertion cells, aliases, dependency
   order, and atomic publication.
 - Do not seek directly to asset 772.

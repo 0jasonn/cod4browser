@@ -1,6 +1,7 @@
 #pragma once
 
 #include <database/db_semantic_trace.h>
+#include <xanim/xanim_types.h>
 
 #include <array>
 #include <cstdint>
@@ -67,6 +68,11 @@ struct RetailCensusLimits
     std::uint32_t maxRawFileNameBytes = 255u;
     std::uint32_t maxRawFileBytes = 8u * 1024u * 1024u;
     std::uint32_t maxRetainedRawFileBytes = 32u * 1024u * 1024u;
+    std::uint32_t maxXAnimParts = 4096u;
+    std::uint32_t maxXAnimNameBytes = 255u;
+    std::uint32_t maxXAnimIndices = 16u * 1024u * 1024u;
+    std::uint32_t maxXAnimPayloadBytes = 64u * 1024u * 1024u;
+    std::uint32_t maxRetainedXAnimBytes = 128u * 1024u * 1024u;
     std::uint32_t maxSemanticTraceEntries = 65536u;
 };
 
@@ -186,6 +192,14 @@ enum class RetailCensusError : std::uint8_t
     RawFileSizeInvalid,
     RawFilePayloadLimit,
     RawFileCollectionLimit,
+    XAnimLayoutUnsupported,
+    XAnimNameInvalid,
+    XAnimNameTooLong,
+    XAnimCollectionLimit,
+    XAnimScriptStringInvalid,
+    XAnimPayloadLimit,
+    XAnimDeltaInvalid,
+    XAnimAliasInvalid,
     PostXModelAssetUnsupported,
     SemanticTraceLimit,
     AllocationFailed,
@@ -340,6 +354,10 @@ enum class RetailCensusStage : std::uint8_t
     WorldRawFileName,
     WorldRawFileBuffer,
     WorldRawFilePublish,
+    WorldXAnimParts,
+    WorldXAnimName,
+    WorldXAnimPayload,
+    WorldXAnimPublish,
     AssetBoundary,
     Failed,
 };
@@ -739,6 +757,48 @@ struct RetailWorldRawFile
     bool published = false;
 };
 
+// Ownership-only backing for the canonical XAnimParts pointer graph. This is
+// not a second animation representation: every decoded field is published on
+// XAnimParts and its canonical child structures. Shared ownership keeps those
+// pointers stable across result moves/copies until a real Kisak zone allocator
+// replaces this traversal scaffold.
+struct CanonicalXAnimPartsStorage
+{
+    std::shared_ptr<std::string> name;
+    std::shared_ptr<std::vector<std::uint16_t>> names;
+    std::shared_ptr<std::vector<XAnimNotifyInfo>> notify;
+    std::shared_ptr<XAnimDeltaPart> deltaPart;
+    std::shared_ptr<XAnimPartTrans> deltaTrans;
+    std::shared_ptr<XAnimDeltaPartQuat> deltaQuat;
+    std::shared_ptr<std::vector<std::uint8_t>> deltaTransByteFrames;
+    std::shared_ptr<std::vector<std::uint16_t>> deltaTransShortFrames;
+    std::shared_ptr<std::vector<std::int16_t>> deltaQuatFrames;
+    std::shared_ptr<std::vector<std::uint8_t>> dataByte;
+    std::shared_ptr<std::vector<std::int16_t>> dataShort;
+    std::shared_ptr<std::vector<int>> dataInt;
+    std::shared_ptr<std::vector<std::int16_t>> randomDataShort;
+    std::shared_ptr<std::vector<std::uint8_t>> randomDataByte;
+    std::shared_ptr<std::vector<int>> randomDataInt;
+    std::shared_ptr<std::vector<std::uint8_t>> byteIndices;
+    std::shared_ptr<std::vector<std::uint16_t>> shortIndices;
+};
+
+struct RetailPublishedXAnimParts
+{
+    std::uint32_t assetIndex = 0u;
+    std::uint32_t serializedReference = 0u;
+    std::uint32_t headerBlock0Offset = 0u;
+    std::uint32_t nameBlock4Offset = 0u;
+    std::uint32_t insertPointerBlock4Offset = UINT32_MAX;
+    std::uint32_t payloadBytes = 0u;
+    std::uint32_t identity = 0u;
+    std::uint32_t boundaryInflatedOffset = 0u;
+    std::shared_ptr<CanonicalXAnimPartsStorage> storage;
+    std::shared_ptr<XAnimParts> asset;
+    bool pointerAlias = false;
+    bool published = false;
+};
+
 struct RetailFastfileCensus
 {
     std::uint32_t version = 0u;
@@ -866,6 +926,7 @@ struct RetailFastfileCensus
     std::uint32_t block4CursorAtBoundary = 0u;
     std::uint32_t completedAssetCount = 0u;
     std::vector<RetailWorldRawFile> worldRawFiles;
+    std::vector<RetailPublishedXAnimParts> worldXAnimParts;
     std::vector<kisak::database::SemanticTraceEntry> semanticTrace;
     std::uint32_t semanticTraceHash = 2166136261u;
     std::uint32_t semanticTraceContractHash = 2166136261u;

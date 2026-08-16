@@ -75,7 +75,15 @@ constexpr std::uint32_t FX_VISUAL_SAMPLE_BYTES = 48u;
 constexpr std::uint32_t FX_TRAIL_DEF_BYTES = 28u;
 constexpr std::uint32_t FX_TRAIL_VERTEX_BYTES = 20u;
 constexpr std::uint32_t RAWFILE_BYTES = 12u;
+constexpr std::uint32_t XANIM_PARTS_BYTES = 88u;
+constexpr std::uint32_t XANIM_NOTIFY_BYTES = 8u;
+constexpr std::uint32_t XANIM_DELTA_PART_BYTES = 8u;
+constexpr std::uint32_t XANIM_DELTA_TRANS_HEADER_BYTES = 4u;
+constexpr std::uint32_t XANIM_DELTA_TRANS_FRAMES_BYTES = 28u;
+constexpr std::uint32_t XANIM_DELTA_QUAT_HEADER_BYTES = 4u;
+constexpr std::uint32_t XANIM_DELTA_QUAT_FRAMES_BYTES = 4u;
 constexpr std::uint32_t ASSET_TYPE_PHYS_PRESET = 1u;
+constexpr std::uint32_t ASSET_TYPE_XANIM_PARTS = 2u;
 constexpr std::uint32_t ASSET_TYPE_XMODEL = 3u;
 constexpr std::uint32_t ASSET_TYPE_MATERIAL = 4u;
 constexpr std::uint32_t ASSET_TYPE_TECHNIQUE_SET = 5u;
@@ -86,6 +94,8 @@ constexpr std::uint32_t ASSET_TYPE_RAW_FILE = 31u;
 
 static_assert(ASSET_TYPE_PHYS_PRESET ==
     static_cast<std::uint32_t>(::ASSET_TYPE_PHYSPRESET));
+static_assert(ASSET_TYPE_XANIM_PARTS ==
+    static_cast<std::uint32_t>(::ASSET_TYPE_XANIMPARTS));
 static_assert(ASSET_TYPE_XMODEL ==
     static_cast<std::uint32_t>(::ASSET_TYPE_XMODEL));
 static_assert(ASSET_TYPE_MATERIAL ==
@@ -136,6 +146,29 @@ enum class WorldFxElemPhase : std::uint8_t
     EffectOnDeath,
     EffectEmitted,
     Trail,
+};
+
+enum class WorldXAnimPhase : std::uint8_t
+{
+    BoneNames = 0,
+    Notify,
+    DeltaPart,
+    DeltaTransHeader,
+    DeltaTransFrames,
+    DeltaTransIndices,
+    DeltaTransData,
+    DeltaQuatHeader,
+    DeltaQuatFrames,
+    DeltaQuatIndices,
+    DeltaQuatData,
+    DataByte,
+    DataShort,
+    DataInt,
+    RandomDataShort,
+    RandomDataByte,
+    RandomDataInt,
+    Indices,
+    Complete,
 };
 
 constexpr std::array<const char *, RETAIL_CENSUS_ASSET_TYPE_COUNT> ASSET_NAMES = {{
@@ -282,7 +315,22 @@ bool ValidLimits(const RetailCensusLimits &limits) noexcept
         limits.maxFxTrailVertices != 0u && limits.maxFxTrailIndices != 0u &&
         limits.maxRawFiles != 0u && limits.maxRawFileNameBytes != 0u &&
         limits.maxRawFileBytes != 0u && limits.maxRetainedRawFileBytes != 0u &&
+        limits.maxXAnimParts != 0u && limits.maxXAnimNameBytes != 0u &&
+        limits.maxXAnimIndices != 0u && limits.maxXAnimPayloadBytes != 0u &&
+        limits.maxRetainedXAnimBytes != 0u &&
         limits.maxSemanticTraceEntries != 0u;
+}
+
+template <typename T>
+std::shared_ptr<T> AllocateFlexibleObject(std::size_t bytes) noexcept
+{
+    bytes = std::max(bytes, sizeof(T));
+    void *memory = ::operator new(bytes, std::nothrow);
+    if (!memory) return {};
+    std::memset(memory, 0, bytes);
+    return std::shared_ptr<T>(
+        static_cast<T *>(memory),
+        [](T *value) noexcept { ::operator delete(value); });
 }
 } // namespace
 
@@ -409,6 +457,14 @@ const char *RetailCensusErrorString(RetailCensusError error) noexcept
     case RetailCensusError::RawFileSizeInvalid: return "invalid RawFile size";
     case RetailCensusError::RawFilePayloadLimit: return "RawFile payload exceeds limit";
     case RetailCensusError::RawFileCollectionLimit: return "RawFile collection limit exceeded";
+    case RetailCensusError::XAnimLayoutUnsupported: return "unsupported XAnimParts layout";
+    case RetailCensusError::XAnimNameInvalid: return "invalid XAnimParts name";
+    case RetailCensusError::XAnimNameTooLong: return "XAnimParts name exceeds limit";
+    case RetailCensusError::XAnimCollectionLimit: return "XAnimParts collection limit exceeded";
+    case RetailCensusError::XAnimScriptStringInvalid: return "invalid XAnimParts script string";
+    case RetailCensusError::XAnimPayloadLimit: return "XAnimParts payload exceeds limit";
+    case RetailCensusError::XAnimDeltaInvalid: return "invalid XAnimParts delta payload";
+    case RetailCensusError::XAnimAliasInvalid: return "invalid XAnimParts pointer alias";
     case RetailCensusError::PostXModelAssetUnsupported:
         return "asset after the first XModel is not an inline technique set";
     case RetailCensusError::SemanticTraceLimit:
@@ -532,6 +588,10 @@ const char *RetailCensusStageString(RetailCensusStage stage) noexcept
     case RetailCensusStage::WorldRawFileName: return "world-rawfile-name";
     case RetailCensusStage::WorldRawFileBuffer: return "world-rawfile-buffer";
     case RetailCensusStage::WorldRawFilePublish: return "world-rawfile-publish";
+    case RetailCensusStage::WorldXAnimParts: return "world-xanim-parts";
+    case RetailCensusStage::WorldXAnimName: return "world-xanim-name";
+    case RetailCensusStage::WorldXAnimPayload: return "world-xanim-payload";
+    case RetailCensusStage::WorldXAnimPublish: return "world-xanim-publish";
     case RetailCensusStage::AssetBoundary: return "asset-boundary";
     case RetailCensusStage::Failed: return "failed";
     }
@@ -608,6 +668,30 @@ struct RetailFastfileCensusJob::Impl
     std::uint32_t worldMaterialLiteralIndex = 0u;
     ZoneSpan worldFxAliasSlot{};
     ZoneSpan worldRawFileAliasSlot{};
+    ZoneSpan worldXAnimAliasSlot{};
+    ZoneSpan worldXAnimInsertAliasSlot{};
+    bool worldXAnimHasInsertAlias = false;
+    std::size_t worldXAnimIndex = 0u;
+    WorldXAnimPhase worldXAnimPhase = WorldXAnimPhase::BoneNames;
+    std::uint32_t worldXAnimNameReference = 0u;
+    std::uint32_t worldXAnimNamesReference = 0u;
+    std::uint32_t worldXAnimNotifyReference = 0u;
+    std::uint32_t worldXAnimDeltaReference = 0u;
+    std::uint32_t worldXAnimDataByteReference = 0u;
+    std::uint32_t worldXAnimDataShortReference = 0u;
+    std::uint32_t worldXAnimDataIntReference = 0u;
+    std::uint32_t worldXAnimRandomShortReference = 0u;
+    std::uint32_t worldXAnimRandomByteReference = 0u;
+    std::uint32_t worldXAnimRandomIntReference = 0u;
+    std::uint32_t worldXAnimIndicesReference = 0u;
+    std::uint32_t worldXAnimDeltaTransReference = 0u;
+    std::uint32_t worldXAnimDeltaQuatReference = 0u;
+    std::uint32_t worldXAnimDeltaTransFramesReference = 0u;
+    std::uint32_t worldXAnimDeltaQuatFramesReference = 0u;
+    std::uint16_t worldXAnimDeltaTransSize = 0u;
+    std::uint16_t worldXAnimDeltaQuatSize = 0u;
+    bool worldXAnimDeltaTransSmall = false;
+    std::uint64_t retainedXAnimBytes = 0u;
     std::size_t worldFxIndex = 0u;
     std::uint32_t worldFxElemIndex = 0u;
     std::uint32_t worldFxVisualIndex = 0u;
@@ -1080,6 +1164,268 @@ struct RetailFastfileCensusJob::Impl
         return RetailCensusError::None;
     }
 
+    RetailCensusError BeginWorldXAnimParts(
+        std::uint32_t assetIndex,
+        RetailCensusStage &stage) noexcept
+    {
+        if (assetIndex >= worldAssetTypes.size() ||
+            worldAssetTypes[assetIndex] != ASSET_TYPE_XANIM_PARTS ||
+            (worldAssetReferences[assetIndex] != INLINE_POINTER &&
+             worldAssetReferences[assetIndex] != SHARED_POINTER))
+        {
+            return RetailCensusError::XAnimLayoutUnsupported;
+        }
+        if (result.worldXAnimParts.size() >= limits.maxXAnimParts)
+            return RetailCensusError::XAnimCollectionLimit;
+        worldXAnimAliasSlot = {
+            4u,
+            result.assetTableBlock4Offset + assetIndex * ASSET_BYTES + 4u,
+            4u,
+        };
+        if (const RetailCensusError error = MapRegistryError(
+                registry.ReserveAlias(
+                    worldXAnimAliasSlot, ASSET_TYPE_XANIM_PARTS));
+            error != RetailCensusError::None)
+        {
+            return error;
+        }
+        if (const RetailCensusError error = Push(0u);
+            error != RetailCensusError::None) return error;
+        ZoneSpan headerSpan;
+        if (const RetailCensusError error = Plan(
+                4u, XANIM_PARTS_BYTES, &headerSpan);
+            error != RetailCensusError::None) return error;
+
+        worldXAnimHasInsertAlias =
+            worldAssetReferences[assetIndex] == SHARED_POINTER;
+        worldXAnimInsertAliasSlot = {};
+        if (worldXAnimHasInsertAlias)
+        {
+            if (const RetailCensusError error = Push(4u);
+                error != RetailCensusError::None) return error;
+            if (const RetailCensusError error = Plan(
+                    4u, 4u, &worldXAnimInsertAliasSlot);
+                error != RetailCensusError::None) return error;
+            if (const RetailCensusError error = Pop();
+                error != RetailCensusError::None) return error;
+            if (const RetailCensusError error = MapRegistryError(
+                    registry.ReserveAlias(
+                        worldXAnimInsertAliasSlot, ASSET_TYPE_XANIM_PARTS));
+                error != RetailCensusError::None) return error;
+        }
+
+        try
+        {
+            result.worldXAnimParts.emplace_back();
+            RetailPublishedXAnimParts &entry = result.worldXAnimParts.back();
+            entry.storage = std::make_shared<CanonicalXAnimPartsStorage>();
+            entry.asset = std::make_shared<XAnimParts>();
+        }
+        catch (...) { return RetailCensusError::AllocationFailed; }
+        worldXAnimIndex = result.worldXAnimParts.size() - 1u;
+        RetailPublishedXAnimParts &entry = result.worldXAnimParts.back();
+        *entry.asset = {};
+        entry.assetIndex = assetIndex;
+        entry.serializedReference = worldAssetReferences[assetIndex];
+        entry.headerBlock0Offset = headerSpan.offset;
+        if (worldXAnimHasInsertAlias)
+            entry.insertPointerBlock4Offset = worldXAnimInsertAliasSlot.offset;
+        if (const RetailCensusError error = AppendSemanticTrace(
+                kisak::database::SemanticTraceEventKind::AssetBegin,
+                ASSET_TYPE_XANIM_PARTS,
+                assetIndex,
+                0u,
+                static_cast<std::uint32_t>(cursor),
+                headerSpan,
+                {},
+                worldXAnimAliasSlot);
+            error != RetailCensusError::None)
+        {
+            return error;
+        }
+        worldXAnimPhase = WorldXAnimPhase::BoneNames;
+        worldXAnimNameReference = 0u;
+        worldXAnimNamesReference = 0u;
+        worldXAnimNotifyReference = 0u;
+        worldXAnimDeltaReference = 0u;
+        worldXAnimDataByteReference = 0u;
+        worldXAnimDataShortReference = 0u;
+        worldXAnimDataIntReference = 0u;
+        worldXAnimRandomShortReference = 0u;
+        worldXAnimRandomByteReference = 0u;
+        worldXAnimRandomIntReference = 0u;
+        worldXAnimIndicesReference = 0u;
+        worldXAnimDeltaTransReference = 0u;
+        worldXAnimDeltaQuatReference = 0u;
+        worldXAnimDeltaTransFramesReference = 0u;
+        worldXAnimDeltaQuatFramesReference = 0u;
+        worldXAnimDeltaTransSize = 0u;
+        worldXAnimDeltaQuatSize = 0u;
+        worldXAnimDeltaTransSmall = false;
+        result.worldNextAssetIndex = assetIndex;
+        result.nextBodyIndex = assetIndex;
+        result.nextBodyType = ASSET_TYPE_XANIM_PARTS;
+        result.nextBodyReference = worldAssetReferences[assetIndex];
+        stage = RetailCensusStage::WorldXAnimParts;
+        return RetailCensusError::None;
+    }
+
+    RetailCensusError PlanWorldXAnimPayload(
+        std::uint32_t alignment,
+        std::uint64_t bytes) noexcept
+    {
+        RetailPublishedXAnimParts &entry = result.worldXAnimParts[worldXAnimIndex];
+        if (bytes > limits.maxXAnimPayloadBytes - entry.payloadBytes ||
+            bytes > limits.maxRetainedXAnimBytes - retainedXAnimBytes)
+        {
+            return RetailCensusError::XAnimPayloadLimit;
+        }
+        if (const RetailCensusError error = Plan(alignment, bytes);
+            error != RetailCensusError::None) return error;
+        entry.payloadBytes += static_cast<std::uint32_t>(bytes);
+        retainedXAnimBytes += bytes;
+        return RetailCensusError::None;
+    }
+
+    RetailCensusError ScheduleWorldXAnimPayload(
+        RetailCensusStage &stage) noexcept
+    {
+        XAnimParts &parts = *result.worldXAnimParts[worldXAnimIndex].asset;
+        for (;;)
+        {
+            std::uint64_t bytes = 0u;
+            std::uint32_t alignment = 1u;
+            bool present = false;
+            switch (worldXAnimPhase)
+            {
+            case WorldXAnimPhase::BoneNames:
+                present = worldXAnimNamesReference != 0u;
+                bytes = static_cast<std::uint64_t>(parts.boneCount[9]) * 2u;
+                alignment = 2u;
+                break;
+            case WorldXAnimPhase::Notify:
+                present = worldXAnimNotifyReference != 0u;
+                bytes = static_cast<std::uint64_t>(parts.notifyCount) *
+                    XANIM_NOTIFY_BYTES;
+                alignment = 4u;
+                break;
+            case WorldXAnimPhase::DeltaPart:
+                present = worldXAnimDeltaReference != 0u;
+                bytes = XANIM_DELTA_PART_BYTES;
+                alignment = 4u;
+                break;
+            case WorldXAnimPhase::DeltaTransHeader:
+                present = worldXAnimDeltaTransReference != 0u;
+                bytes = XANIM_DELTA_TRANS_HEADER_BYTES;
+                alignment = 4u;
+                break;
+            case WorldXAnimPhase::DeltaTransFrames:
+                present = true;
+                bytes = worldXAnimDeltaTransSize == 0u
+                    ? 12u : XANIM_DELTA_TRANS_FRAMES_BYTES;
+                alignment = 1u;
+                break;
+            case WorldXAnimPhase::DeltaTransIndices:
+                present = worldXAnimDeltaTransSize != 0u;
+                bytes = (static_cast<std::uint64_t>(worldXAnimDeltaTransSize) + 1u) *
+                    (parts.numframes >= 0x100u ? 2u : 1u);
+                alignment = 1u;
+                break;
+            case WorldXAnimPhase::DeltaTransData:
+                present = worldXAnimDeltaTransSize != 0u &&
+                    worldXAnimDeltaTransFramesReference != 0u;
+                bytes = (static_cast<std::uint64_t>(worldXAnimDeltaTransSize) + 1u) *
+                    (worldXAnimDeltaTransSmall ? 3u : 6u);
+                alignment = worldXAnimDeltaTransSmall ? 1u : 4u;
+                break;
+            case WorldXAnimPhase::DeltaQuatHeader:
+                present = worldXAnimDeltaQuatReference != 0u;
+                bytes = XANIM_DELTA_QUAT_HEADER_BYTES;
+                alignment = 4u;
+                break;
+            case WorldXAnimPhase::DeltaQuatFrames:
+                present = true;
+                bytes = worldXAnimDeltaQuatSize == 0u
+                    ? 4u : XANIM_DELTA_QUAT_FRAMES_BYTES;
+                alignment = 1u;
+                break;
+            case WorldXAnimPhase::DeltaQuatIndices:
+                present = worldXAnimDeltaQuatSize != 0u;
+                bytes = (static_cast<std::uint64_t>(worldXAnimDeltaQuatSize) + 1u) *
+                    (parts.numframes >= 0x100u ? 2u : 1u);
+                alignment = 1u;
+                break;
+            case WorldXAnimPhase::DeltaQuatData:
+                present = worldXAnimDeltaQuatSize != 0u &&
+                    worldXAnimDeltaQuatFramesReference != 0u;
+                bytes = (static_cast<std::uint64_t>(worldXAnimDeltaQuatSize) + 1u) * 4u;
+                alignment = 4u;
+                break;
+            case WorldXAnimPhase::DataByte:
+                present = worldXAnimDataByteReference != 0u;
+                bytes = parts.dataByteCount;
+                break;
+            case WorldXAnimPhase::DataShort:
+                present = worldXAnimDataShortReference != 0u;
+                bytes = static_cast<std::uint64_t>(parts.dataShortCount) * 2u;
+                alignment = 2u;
+                break;
+            case WorldXAnimPhase::DataInt:
+                present = worldXAnimDataIntReference != 0u;
+                bytes = static_cast<std::uint64_t>(parts.dataIntCount) * 4u;
+                alignment = 4u;
+                break;
+            case WorldXAnimPhase::RandomDataShort:
+                present = worldXAnimRandomShortReference != 0u;
+                bytes = static_cast<std::uint64_t>(parts.randomDataShortCount) * 2u;
+                alignment = 2u;
+                break;
+            case WorldXAnimPhase::RandomDataByte:
+                present = worldXAnimRandomByteReference != 0u;
+                bytes = parts.randomDataByteCount;
+                break;
+            case WorldXAnimPhase::RandomDataInt:
+                present = worldXAnimRandomIntReference != 0u;
+                bytes = static_cast<std::uint64_t>(parts.randomDataIntCount) * 4u;
+                alignment = 4u;
+                break;
+            case WorldXAnimPhase::Indices:
+                present = worldXAnimIndicesReference != 0u;
+                if (parts.indexCount > limits.maxXAnimIndices)
+                    return RetailCensusError::XAnimPayloadLimit;
+                bytes = static_cast<std::uint64_t>(parts.indexCount) *
+                    (parts.numframes >= 0x100u ? 2u : 1u);
+                alignment = parts.numframes >= 0x100u ? 2u : 1u;
+                break;
+            case WorldXAnimPhase::Complete:
+                stage = RetailCensusStage::WorldXAnimPublish;
+                return RetailCensusError::None;
+            }
+            if (present)
+            {
+                if (const RetailCensusError error =
+                        PlanWorldXAnimPayload(alignment, bytes);
+                    error != RetailCensusError::None) return error;
+                stage = RetailCensusStage::WorldXAnimPayload;
+                return RetailCensusError::None;
+            }
+
+            if (worldXAnimPhase == WorldXAnimPhase::DeltaPart)
+                worldXAnimPhase = WorldXAnimPhase::DataByte;
+            else if (worldXAnimPhase == WorldXAnimPhase::DeltaTransHeader)
+                worldXAnimPhase = WorldXAnimPhase::DeltaQuatHeader;
+            else if (worldXAnimPhase == WorldXAnimPhase::DeltaTransData)
+                worldXAnimPhase = WorldXAnimPhase::DeltaQuatHeader;
+            else if (worldXAnimPhase == WorldXAnimPhase::DeltaQuatHeader)
+                worldXAnimPhase = WorldXAnimPhase::DataByte;
+            else if (worldXAnimPhase == WorldXAnimPhase::DeltaQuatData)
+                worldXAnimPhase = WorldXAnimPhase::DataByte;
+            else
+                worldXAnimPhase = static_cast<WorldXAnimPhase>(
+                    static_cast<std::uint8_t>(worldXAnimPhase) + 1u);
+        }
+    }
+
     bool ValidPriorZonePointer(
         std::uint32_t token,
         std::uint32_t alignment = 1u) const noexcept
@@ -1283,6 +1629,9 @@ struct RetailFastfileCensusJob::Impl
         auto activeWorldFxElem = [&]() noexcept -> RetailWorldFxElemDef & {
             return result.worldFxEffects[worldFxIndex].elemDefs[worldFxElemIndex];
         };
+        auto activeWorldXAnim = [&]() noexcept -> RetailPublishedXAnimParts & {
+            return result.worldXAnimParts[worldXAnimIndex];
+        };
         auto activeWorldMaterial = [&]() noexcept -> RetailXModelMaterial & {
             return worldMaterialOwnedByFx
                 ? activeWorldFx().materials.back()
@@ -1399,6 +1748,65 @@ struct RetailFastfileCensusJob::Impl
                 }
                 result.nextBodyType = worldAssetTypes[index];
                 result.nextBodyReference = worldAssetReferences[index];
+                if (result.nextBodyType == ASSET_TYPE_XANIM_PARTS &&
+                    (result.nextBodyReference == INLINE_POINTER ||
+                     result.nextBodyReference == SHARED_POINTER))
+                {
+                    return BeginWorldXAnimParts(index, nextStage);
+                }
+                if (result.nextBodyType == ASSET_TYPE_XANIM_PARTS)
+                {
+                    if (result.worldXAnimParts.size() >= limits.maxXAnimParts)
+                        return RetailCensusError::XAnimCollectionLimit;
+                    std::uint32_t identity = 0u;
+                    std::shared_ptr<XAnimParts> priorAsset;
+                    std::shared_ptr<CanonicalXAnimPartsStorage> priorStorage;
+                    std::uint32_t priorNameOffset = 0u;
+                    if (result.nextBodyReference != 0u)
+                    {
+                        if (registry.ResolveAlias(
+                                result.nextBodyReference,
+                                ASSET_TYPE_XANIM_PARTS,
+                                identity) != ZoneRegistryError::None)
+                        {
+                            return RetailCensusError::XAnimAliasInvalid;
+                        }
+                        const auto found = std::find_if(
+                            result.worldXAnimParts.begin(),
+                            result.worldXAnimParts.end(),
+                            [identity](const RetailPublishedXAnimParts &entry) {
+                                return entry.identity == identity && entry.asset;
+                            });
+                        if (found == result.worldXAnimParts.end())
+                            return RetailCensusError::XAnimAliasInvalid;
+                        priorAsset = found->asset;
+                        priorStorage = found->storage;
+                        priorNameOffset = found->nameBlock4Offset;
+                    }
+                    try
+                    {
+                        result.worldXAnimParts.emplace_back();
+                    }
+                    catch (...) { return RetailCensusError::AllocationFailed; }
+                    worldXAnimIndex = result.worldXAnimParts.size() - 1u;
+                    RetailPublishedXAnimParts &entry =
+                        result.worldXAnimParts.back();
+                    entry.assetIndex = index;
+                    entry.serializedReference = result.nextBodyReference;
+                    entry.identity = identity;
+                    entry.boundaryInflatedOffset =
+                        static_cast<std::uint32_t>(cursor);
+                    entry.pointerAlias = result.nextBodyReference != 0u;
+                    entry.published = true;
+                    if (priorAsset)
+                    {
+                        entry.asset = std::move(priorAsset);
+                        entry.storage = std::move(priorStorage);
+                        entry.nameBlock4Offset = priorNameOffset;
+                    }
+                    nextStage = RetailCensusStage::WorldXAnimPublish;
+                    return RetailCensusError::None;
+                }
                 if (result.nextBodyReference == INLINE_POINTER &&
                     result.nextBodyType == ASSET_TYPE_TECHNIQUE_SET)
                 {
@@ -2484,6 +2892,18 @@ struct RetailFastfileCensusJob::Impl
                                 }
                                 continue;
                             }
+                            if (mode == RetailCensusMode::WorldXModelLoader &&
+                                result.nextBodyType == ASSET_TYPE_XANIM_PARTS)
+                            {
+                                if (const RetailCensusError error =
+                                        dispatchSupportedWorldAsset(
+                                            nextIndex, stage);
+                                    error != RetailCensusError::None)
+                                {
+                                    return error;
+                                }
+                                continue;
+                            }
                             if (mode == RetailCensusMode::WorldXModelLoader)
                             {
                                 result.stoppedBeforeDifferentWorldAssetType = true;
@@ -2542,6 +2962,18 @@ struct RetailFastfileCensusJob::Impl
                             if (const RetailCensusError error = BeginWorldRawFile(
                                     nextIndex, stage);
                                 error != RetailCensusError::None) return error;
+                            continue;
+                        }
+                        if (mode == RetailCensusMode::WorldXModelLoader &&
+                            result.nextBodyType == ASSET_TYPE_XANIM_PARTS)
+                        {
+                            if (const RetailCensusError error =
+                                    dispatchSupportedWorldAsset(
+                                        nextIndex, stage);
+                                error != RetailCensusError::None)
+                            {
+                                return error;
+                            }
                             continue;
                         }
                         if (mode == RetailCensusMode::WorldXModelLoader)
@@ -3476,6 +3908,562 @@ struct RetailFastfileCensusJob::Impl
                 result.registryDefinedAliasCount = registry.DefinedAliasCount();
                 if (const RetailCensusError error = dispatchSupportedWorldAsset(
                         effect.assetIndex + 1u, stage);
+                    error != RetailCensusError::None) return error;
+                if (complete) return RetailCensusError::None;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldXAnimParts)
+            {
+                const int visit = visitRecord(XANIM_PARTS_BYTES);
+                if (visit <= 0) return RetailCensusError::None;
+                const std::uint8_t *record = inflated.data() + cursor;
+                RetailPublishedXAnimParts &entry = activeWorldXAnim();
+                XAnimParts &parts = *entry.asset;
+                worldXAnimNameReference = ReadU32(record);
+                parts.dataByteCount = ReadU16(record + 4u);
+                parts.dataShortCount = ReadU16(record + 6u);
+                parts.dataIntCount = ReadU16(record + 8u);
+                parts.randomDataByteCount = ReadU16(record + 10u);
+                parts.randomDataIntCount = ReadU16(record + 12u);
+                parts.numframes = ReadU16(record + 14u);
+                if (record[16u] > 1u || record[17u] > 1u ||
+                    record[30u] > 1u)
+                {
+                    return RetailCensusError::XAnimLayoutUnsupported;
+                }
+                parts.bLoop = record[16u] != 0u;
+                parts.bDelta = record[17u] != 0u;
+                std::copy_n(record + 18u, 10u, parts.boneCount);
+                parts.notifyCount = record[28u];
+                parts.assetType = record[29u];
+                parts.isDefault = record[30u] != 0u;
+                parts.padding = record[31u];
+                parts.randomDataShortCount = ReadU32(record + 32u);
+                parts.indexCount = ReadU32(record + 36u);
+                parts.framerate = ReadF32(record + 40u);
+                parts.frequency = ReadF32(record + 44u);
+                worldXAnimNamesReference = ReadU32(record + 48u);
+                worldXAnimDataByteReference = ReadU32(record + 52u);
+                worldXAnimDataShortReference = ReadU32(record + 56u);
+                worldXAnimDataIntReference = ReadU32(record + 60u);
+                worldXAnimRandomShortReference = ReadU32(record + 64u);
+                worldXAnimRandomByteReference = ReadU32(record + 68u);
+                worldXAnimRandomIntReference = ReadU32(record + 72u);
+                worldXAnimIndicesReference = ReadU32(record + 76u);
+                worldXAnimNotifyReference = ReadU32(record + 80u);
+                worldXAnimDeltaReference = ReadU32(record + 84u);
+                if (worldXAnimNameReference == 0u)
+                    return RetailCensusError::XAnimNameInvalid;
+                cursor += XANIM_PARTS_BYTES;
+                ++report.recordsProcessed;
+                if (const RetailCensusError error = Push(4u);
+                    error != RetailCensusError::None) return error;
+                stage = RetailCensusStage::WorldXAnimName;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldXAnimName)
+            {
+                RetailPublishedXAnimParts &entry = activeWorldXAnim();
+                if (worldXAnimNameReference != INLINE_POINTER)
+                {
+                    ZoneSpan nameSpan;
+                    if (!DecodeZoneAliasToken(worldXAnimNameReference, nameSpan) ||
+                        nameSpan.block != 4u)
+                    {
+                        return RetailCensusError::XAnimNameInvalid;
+                    }
+                    const auto prior = std::find_if(
+                        result.worldXAnimParts.begin(),
+                        result.worldXAnimParts.begin() +
+                            static_cast<std::ptrdiff_t>(worldXAnimIndex),
+                        [&nameSpan](const RetailPublishedXAnimParts &candidate) {
+                            return candidate.published && candidate.storage &&
+                                candidate.storage->name &&
+                                candidate.nameBlock4Offset == nameSpan.offset;
+                        });
+                    if (prior == result.worldXAnimParts.begin() +
+                            static_cast<std::ptrdiff_t>(worldXAnimIndex))
+                    {
+                        return RetailCensusError::XAnimNameInvalid;
+                    }
+                    entry.storage->name = prior->storage->name;
+                    entry.nameBlock4Offset = nameSpan.offset;
+                    entry.asset->name = entry.storage->name->c_str();
+                    worldXAnimPhase = WorldXAnimPhase::BoneNames;
+                    if (const RetailCensusError error =
+                            ScheduleWorldXAnimPayload(stage);
+                        error != RetailCensusError::None) return error;
+                    continue;
+                }
+                const auto begin = inflated.begin() +
+                    static_cast<std::ptrdiff_t>(cursor);
+                const auto terminator = std::find(begin, inflated.end(), 0u);
+                if (terminator == inflated.end())
+                {
+                    if (inflated.size() - cursor >= limits.maxXAnimNameBytes)
+                        return RetailCensusError::XAnimNameTooLong;
+                    blocked = true;
+                    return RetailCensusError::None;
+                }
+                const std::size_t bytes =
+                    static_cast<std::size_t>(terminator - begin) + 1u;
+                if (bytes <= 1u) return RetailCensusError::XAnimNameInvalid;
+                if (bytes > limits.maxXAnimNameBytes)
+                    return RetailCensusError::XAnimNameTooLong;
+                if (recordVisited == 0u)
+                {
+                    ZoneSpan span;
+                    if (const RetailCensusError error = Plan(1u, bytes, &span);
+                        error != RetailCensusError::None) return error;
+                    entry.nameBlock4Offset = span.offset;
+                }
+                const int visit = visitRecord(bytes);
+                if (visit <= 0) return RetailCensusError::None;
+                try
+                {
+                    entry.storage->name = std::make_shared<std::string>(
+                        reinterpret_cast<const char *>(inflated.data() + cursor),
+                        bytes - 1u);
+                }
+                catch (...) { return RetailCensusError::AllocationFailed; }
+                if (!ValidPublishedName(*entry.storage->name))
+                    return RetailCensusError::XAnimNameInvalid;
+                entry.asset->name = entry.storage->name->c_str();
+                cursor += bytes;
+                ++report.recordsProcessed;
+                worldXAnimPhase = WorldXAnimPhase::BoneNames;
+                if (const RetailCensusError error =
+                        ScheduleWorldXAnimPayload(stage);
+                    error != RetailCensusError::None) return error;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldXAnimPayload)
+            {
+                RetailPublishedXAnimParts &entry = activeWorldXAnim();
+                CanonicalXAnimPartsStorage &storage = *entry.storage;
+                XAnimParts &parts = *entry.asset;
+                std::size_t bytes = 0u;
+                switch (worldXAnimPhase)
+                {
+                case WorldXAnimPhase::BoneNames:
+                    bytes = static_cast<std::size_t>(parts.boneCount[9]) * 2u;
+                    break;
+                case WorldXAnimPhase::Notify:
+                    bytes = static_cast<std::size_t>(parts.notifyCount) *
+                        XANIM_NOTIFY_BYTES;
+                    break;
+                case WorldXAnimPhase::DeltaPart:
+                    bytes = XANIM_DELTA_PART_BYTES;
+                    break;
+                case WorldXAnimPhase::DeltaTransHeader:
+                    bytes = XANIM_DELTA_TRANS_HEADER_BYTES;
+                    break;
+                case WorldXAnimPhase::DeltaTransFrames:
+                    bytes = worldXAnimDeltaTransSize == 0u
+                        ? 12u : XANIM_DELTA_TRANS_FRAMES_BYTES;
+                    break;
+                case WorldXAnimPhase::DeltaTransIndices:
+                    bytes = (static_cast<std::size_t>(worldXAnimDeltaTransSize) + 1u) *
+                        (parts.numframes >= 0x100u ? 2u : 1u);
+                    break;
+                case WorldXAnimPhase::DeltaTransData:
+                    bytes = (static_cast<std::size_t>(worldXAnimDeltaTransSize) + 1u) *
+                        (worldXAnimDeltaTransSmall ? 3u : 6u);
+                    break;
+                case WorldXAnimPhase::DeltaQuatHeader:
+                    bytes = XANIM_DELTA_QUAT_HEADER_BYTES;
+                    break;
+                case WorldXAnimPhase::DeltaQuatFrames:
+                    bytes = worldXAnimDeltaQuatSize == 0u
+                        ? 4u : XANIM_DELTA_QUAT_FRAMES_BYTES;
+                    break;
+                case WorldXAnimPhase::DeltaQuatIndices:
+                    bytes = (static_cast<std::size_t>(worldXAnimDeltaQuatSize) + 1u) *
+                        (parts.numframes >= 0x100u ? 2u : 1u);
+                    break;
+                case WorldXAnimPhase::DeltaQuatData:
+                    bytes = (static_cast<std::size_t>(worldXAnimDeltaQuatSize) + 1u) * 4u;
+                    break;
+                case WorldXAnimPhase::DataByte: bytes = parts.dataByteCount; break;
+                case WorldXAnimPhase::DataShort:
+                    bytes = static_cast<std::size_t>(parts.dataShortCount) * 2u;
+                    break;
+                case WorldXAnimPhase::DataInt:
+                    bytes = static_cast<std::size_t>(parts.dataIntCount) * 4u;
+                    break;
+                case WorldXAnimPhase::RandomDataShort:
+                    bytes = static_cast<std::size_t>(parts.randomDataShortCount) * 2u;
+                    break;
+                case WorldXAnimPhase::RandomDataByte:
+                    bytes = parts.randomDataByteCount;
+                    break;
+                case WorldXAnimPhase::RandomDataInt:
+                    bytes = static_cast<std::size_t>(parts.randomDataIntCount) * 4u;
+                    break;
+                case WorldXAnimPhase::Indices:
+                    bytes = static_cast<std::size_t>(parts.indexCount) *
+                        (parts.numframes >= 0x100u ? 2u : 1u);
+                    break;
+                case WorldXAnimPhase::Complete:
+                    return RetailCensusError::XAnimLayoutUnsupported;
+                }
+                const int visit = visitRecord(bytes);
+                if (visit <= 0) return RetailCensusError::None;
+                const std::uint8_t *record = inflated.data() + cursor;
+                auto allocateVector = []<typename T>(
+                    std::shared_ptr<std::vector<T>> &target,
+                    std::size_t count) noexcept -> bool {
+                    try
+                    {
+                        target = std::make_shared<std::vector<T>>(
+                            std::max<std::size_t>(count, 1u));
+                    }
+                    catch (...) { return false; }
+                    return true;
+                };
+                switch (worldXAnimPhase)
+                {
+                case WorldXAnimPhase::BoneNames:
+                {
+                    const std::size_t count = parts.boneCount[9];
+                    if (!allocateVector(storage.names, count))
+                        return RetailCensusError::AllocationFailed;
+                    for (std::size_t index = 0u; index < count; ++index)
+                    {
+                        const std::uint16_t value = ReadU16(record + index * 2u);
+                        if (value >= scriptStrings.size())
+                            return RetailCensusError::XAnimScriptStringInvalid;
+                        (*storage.names)[index] = value;
+                    }
+                    parts.names = storage.names->data();
+                    worldXAnimPhase = WorldXAnimPhase::Notify;
+                    break;
+                }
+                case WorldXAnimPhase::Notify:
+                {
+                    const std::size_t count = parts.notifyCount;
+                    if (!allocateVector(storage.notify, count))
+                        return RetailCensusError::AllocationFailed;
+                    for (std::size_t index = 0u; index < count; ++index)
+                    {
+                        const std::uint8_t *item = record + index * XANIM_NOTIFY_BYTES;
+                        const std::uint16_t name = ReadU16(item);
+                        if (name >= scriptStrings.size())
+                            return RetailCensusError::XAnimScriptStringInvalid;
+                        (*storage.notify)[index] = {
+                            name, ReadU16(item + 2u), ReadF32(item + 4u)};
+                    }
+                    parts.notify = storage.notify->data();
+                    worldXAnimPhase = WorldXAnimPhase::DeltaPart;
+                    break;
+                }
+                case WorldXAnimPhase::DeltaPart:
+                    try { storage.deltaPart = std::make_shared<XAnimDeltaPart>(); }
+                    catch (...) { return RetailCensusError::AllocationFailed; }
+                    *storage.deltaPart = {};
+                    parts.deltaPart = storage.deltaPart.get();
+                    worldXAnimDeltaTransReference = ReadU32(record);
+                    worldXAnimDeltaQuatReference = ReadU32(record + 4u);
+                    worldXAnimPhase = WorldXAnimPhase::DeltaTransHeader;
+                    break;
+                case WorldXAnimPhase::DeltaTransHeader:
+                {
+                    worldXAnimDeltaTransSize = ReadU16(record);
+                    if (record[2u] > 1u)
+                        return RetailCensusError::XAnimDeltaInvalid;
+                    worldXAnimDeltaTransSmall = record[2u] != 0u;
+                    const std::size_t indexBytes = worldXAnimDeltaTransSize == 0u
+                        ? 0u
+                        : (static_cast<std::size_t>(worldXAnimDeltaTransSize) + 1u) *
+                            (parts.numframes >= 0x100u ? 2u : 1u);
+                    storage.deltaTrans = AllocateFlexibleObject<XAnimPartTrans>(
+                        worldXAnimDeltaTransSize == 0u ? 16u : 32u + indexBytes);
+                    if (!storage.deltaTrans)
+                        return RetailCensusError::AllocationFailed;
+                    storage.deltaTrans->size = worldXAnimDeltaTransSize;
+                    storage.deltaTrans->smallTrans = record[2u];
+                    storage.deltaTrans->padding = record[3u];
+                    storage.deltaPart->trans = storage.deltaTrans.get();
+                    worldXAnimPhase = WorldXAnimPhase::DeltaTransFrames;
+                    break;
+                }
+                case WorldXAnimPhase::DeltaTransFrames:
+                    if (worldXAnimDeltaTransSize == 0u)
+                    {
+                        for (std::size_t index = 0u; index < 3u; ++index)
+                            storage.deltaTrans->u.frame0[index] =
+                                ReadF32(record + index * 4u);
+                        worldXAnimPhase = WorldXAnimPhase::DeltaQuatHeader;
+                    }
+                    else
+                    {
+                        for (std::size_t index = 0u; index < 3u; ++index)
+                        {
+                            storage.deltaTrans->u.frames.mins[index] =
+                                ReadF32(record + index * 4u);
+                            storage.deltaTrans->u.frames.size[index] =
+                                ReadF32(record + 12u + index * 4u);
+                        }
+                        worldXAnimDeltaTransFramesReference = ReadU32(record + 24u);
+                        worldXAnimPhase = WorldXAnimPhase::DeltaTransIndices;
+                    }
+                    break;
+                case WorldXAnimPhase::DeltaTransIndices:
+                {
+                    const std::size_t count =
+                        static_cast<std::size_t>(worldXAnimDeltaTransSize) + 1u;
+                    if (parts.numframes >= 0x100u)
+                    {
+                        auto *target = reinterpret_cast<std::uint16_t *>(
+                            reinterpret_cast<std::uint8_t *>(storage.deltaTrans.get()) + 32u);
+                        for (std::size_t index = 0u; index < count; ++index)
+                            target[index] = ReadU16(record + index * 2u);
+                    }
+                    else
+                    {
+                        std::memcpy(
+                            reinterpret_cast<std::uint8_t *>(storage.deltaTrans.get()) + 32u,
+                            record, count);
+                    }
+                    worldXAnimPhase = WorldXAnimPhase::DeltaTransData;
+                    break;
+                }
+                case WorldXAnimPhase::DeltaTransData:
+                {
+                    const std::size_t count =
+                        static_cast<std::size_t>(worldXAnimDeltaTransSize) + 1u;
+                    if (worldXAnimDeltaTransSmall)
+                    {
+                        if (!allocateVector(storage.deltaTransByteFrames, count * 3u))
+                            return RetailCensusError::AllocationFailed;
+                        std::memcpy(storage.deltaTransByteFrames->data(), record, bytes);
+                        storage.deltaTrans->u.frames.frames._1 =
+                            reinterpret_cast<std::uint8_t (*)[3]>(
+                                storage.deltaTransByteFrames->data());
+                    }
+                    else
+                    {
+                        if (!allocateVector(storage.deltaTransShortFrames, count * 3u))
+                            return RetailCensusError::AllocationFailed;
+                        for (std::size_t index = 0u; index < count * 3u; ++index)
+                            (*storage.deltaTransShortFrames)[index] =
+                                ReadU16(record + index * 2u);
+                        storage.deltaTrans->u.frames.frames._2 =
+                            reinterpret_cast<std::uint16_t (*)[3]>(
+                                storage.deltaTransShortFrames->data());
+                    }
+                    worldXAnimPhase = WorldXAnimPhase::DeltaQuatHeader;
+                    break;
+                }
+                case WorldXAnimPhase::DeltaQuatHeader:
+                {
+                    worldXAnimDeltaQuatSize = ReadU16(record);
+                    const std::size_t indexBytes = worldXAnimDeltaQuatSize == 0u
+                        ? 0u
+                        : (static_cast<std::size_t>(worldXAnimDeltaQuatSize) + 1u) *
+                            (parts.numframes >= 0x100u ? 2u : 1u);
+                    storage.deltaQuat = AllocateFlexibleObject<XAnimDeltaPartQuat>(
+                        worldXAnimDeltaQuatSize == 0u ? 8u : 8u + indexBytes);
+                    if (!storage.deltaQuat)
+                        return RetailCensusError::AllocationFailed;
+                    storage.deltaQuat->size = worldXAnimDeltaQuatSize;
+                    storage.deltaQuat->padding = ReadU16(record + 2u);
+                    storage.deltaPart->quat = storage.deltaQuat.get();
+                    worldXAnimPhase = WorldXAnimPhase::DeltaQuatFrames;
+                    break;
+                }
+                case WorldXAnimPhase::DeltaQuatFrames:
+                    if (worldXAnimDeltaQuatSize == 0u)
+                    {
+                        storage.deltaQuat->u.frame0[0] = ReadS16(record);
+                        storage.deltaQuat->u.frame0[1] = ReadS16(record + 2u);
+                        worldXAnimPhase = WorldXAnimPhase::DataByte;
+                    }
+                    else
+                    {
+                        worldXAnimDeltaQuatFramesReference = ReadU32(record);
+                        worldXAnimPhase = WorldXAnimPhase::DeltaQuatIndices;
+                    }
+                    break;
+                case WorldXAnimPhase::DeltaQuatIndices:
+                {
+                    const std::size_t count =
+                        static_cast<std::size_t>(worldXAnimDeltaQuatSize) + 1u;
+                    if (parts.numframes >= 0x100u)
+                    {
+                        auto *target = reinterpret_cast<std::uint16_t *>(
+                            reinterpret_cast<std::uint8_t *>(storage.deltaQuat.get()) + 8u);
+                        for (std::size_t index = 0u; index < count; ++index)
+                            target[index] = ReadU16(record + index * 2u);
+                    }
+                    else
+                    {
+                        std::memcpy(
+                            reinterpret_cast<std::uint8_t *>(storage.deltaQuat.get()) + 8u,
+                            record, count);
+                    }
+                    worldXAnimPhase = WorldXAnimPhase::DeltaQuatData;
+                    break;
+                }
+                case WorldXAnimPhase::DeltaQuatData:
+                {
+                    const std::size_t count =
+                        static_cast<std::size_t>(worldXAnimDeltaQuatSize) + 1u;
+                    if (!allocateVector(storage.deltaQuatFrames, count * 2u))
+                        return RetailCensusError::AllocationFailed;
+                    for (std::size_t index = 0u; index < count * 2u; ++index)
+                        (*storage.deltaQuatFrames)[index] =
+                            ReadS16(record + index * 2u);
+                    storage.deltaQuat->u.frames.frames =
+                        reinterpret_cast<std::int16_t (*)[2]>(
+                            storage.deltaQuatFrames->data());
+                    worldXAnimPhase = WorldXAnimPhase::DataByte;
+                    break;
+                }
+                case WorldXAnimPhase::DataByte:
+                    if (!allocateVector(storage.dataByte, parts.dataByteCount))
+                        return RetailCensusError::AllocationFailed;
+                    std::memcpy(storage.dataByte->data(), record, bytes);
+                    parts.dataByte = storage.dataByte->data();
+                    worldXAnimPhase = WorldXAnimPhase::DataShort;
+                    break;
+                case WorldXAnimPhase::DataShort:
+                    if (!allocateVector(storage.dataShort, parts.dataShortCount))
+                        return RetailCensusError::AllocationFailed;
+                    for (std::size_t index = 0u; index < parts.dataShortCount; ++index)
+                        (*storage.dataShort)[index] = ReadS16(record + index * 2u);
+                    parts.dataShort = storage.dataShort->data();
+                    worldXAnimPhase = WorldXAnimPhase::DataInt;
+                    break;
+                case WorldXAnimPhase::DataInt:
+                    if (!allocateVector(storage.dataInt, parts.dataIntCount))
+                        return RetailCensusError::AllocationFailed;
+                    for (std::size_t index = 0u; index < parts.dataIntCount; ++index)
+                        (*storage.dataInt)[index] = ReadS32(record + index * 4u);
+                    parts.dataInt = storage.dataInt->data();
+                    worldXAnimPhase = WorldXAnimPhase::RandomDataShort;
+                    break;
+                case WorldXAnimPhase::RandomDataShort:
+                    if (!allocateVector(storage.randomDataShort,
+                            parts.randomDataShortCount))
+                        return RetailCensusError::AllocationFailed;
+                    for (std::size_t index = 0u;
+                         index < parts.randomDataShortCount; ++index)
+                    {
+                        (*storage.randomDataShort)[index] =
+                            ReadS16(record + index * 2u);
+                    }
+                    parts.randomDataShort = storage.randomDataShort->data();
+                    worldXAnimPhase = WorldXAnimPhase::RandomDataByte;
+                    break;
+                case WorldXAnimPhase::RandomDataByte:
+                    if (!allocateVector(storage.randomDataByte,
+                            parts.randomDataByteCount))
+                        return RetailCensusError::AllocationFailed;
+                    std::memcpy(storage.randomDataByte->data(), record, bytes);
+                    parts.randomDataByte = storage.randomDataByte->data();
+                    worldXAnimPhase = WorldXAnimPhase::RandomDataInt;
+                    break;
+                case WorldXAnimPhase::RandomDataInt:
+                    if (!allocateVector(storage.randomDataInt,
+                            parts.randomDataIntCount))
+                        return RetailCensusError::AllocationFailed;
+                    for (std::size_t index = 0u;
+                         index < parts.randomDataIntCount; ++index)
+                    {
+                        (*storage.randomDataInt)[index] =
+                            ReadS32(record + index * 4u);
+                    }
+                    parts.randomDataInt = storage.randomDataInt->data();
+                    worldXAnimPhase = WorldXAnimPhase::Indices;
+                    break;
+                case WorldXAnimPhase::Indices:
+                    if (parts.numframes >= 0x100u)
+                    {
+                        if (!allocateVector(storage.shortIndices, parts.indexCount))
+                            return RetailCensusError::AllocationFailed;
+                        for (std::size_t index = 0u; index < parts.indexCount; ++index)
+                            (*storage.shortIndices)[index] =
+                                ReadU16(record + index * 2u);
+                        parts.indices._2 = storage.shortIndices->data();
+                    }
+                    else
+                    {
+                        if (!allocateVector(storage.byteIndices, parts.indexCount))
+                            return RetailCensusError::AllocationFailed;
+                        std::memcpy(storage.byteIndices->data(), record, bytes);
+                        parts.indices._1 = storage.byteIndices->data();
+                    }
+                    worldXAnimPhase = WorldXAnimPhase::Complete;
+                    break;
+                case WorldXAnimPhase::Complete:
+                    return RetailCensusError::XAnimLayoutUnsupported;
+                }
+                cursor += bytes;
+                ++report.recordsProcessed;
+                if (const RetailCensusError error =
+                        ScheduleWorldXAnimPayload(stage);
+                    error != RetailCensusError::None) return error;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldXAnimPublish)
+            {
+                RetailPublishedXAnimParts &entry = activeWorldXAnim();
+                if (!entry.pointerAlias && entry.serializedReference != 0u)
+                {
+                    if (const RetailCensusError error = Pop();
+                        error != RetailCensusError::None) return error;
+                    if (const RetailCensusError error = Pop();
+                        error != RetailCensusError::None) return error;
+                    if (!entry.storage || !entry.storage->name || !entry.asset)
+                        return RetailCensusError::XAnimLayoutUnsupported;
+                    if (const RetailCensusError error = MapRegistryError(
+                            registry.RegisterAsset(
+                                ASSET_TYPE_XANIM_PARTS,
+                                entry.assetIndex,
+                                *entry.storage->name,
+                                entry.identity));
+                        error != RetailCensusError::None) return error;
+                    if (const RetailCensusError error = MapRegistryError(
+                            registry.PublishAlias(
+                                worldXAnimAliasSlot, entry.identity));
+                        error != RetailCensusError::None) return error;
+                    if (worldXAnimHasInsertAlias)
+                    {
+                        if (const RetailCensusError error = MapRegistryError(
+                                registry.PublishAlias(
+                                    worldXAnimInsertAliasSlot,
+                                    entry.identity));
+                            error != RetailCensusError::None) return error;
+                    }
+                    entry.published = true;
+                    entry.boundaryInflatedOffset =
+                        static_cast<std::uint32_t>(cursor);
+                    if (const RetailCensusError error = AppendSemanticTrace(
+                            kisak::database::SemanticTraceEventKind::AssetPublish,
+                            ASSET_TYPE_XANIM_PARTS,
+                            entry.assetIndex,
+                            entry.identity,
+                            entry.boundaryInflatedOffset,
+                            {0u, entry.headerBlock0Offset, XANIM_PARTS_BYTES},
+                            *entry.storage->name,
+                            worldXAnimAliasSlot);
+                        error != RetailCensusError::None)
+                    {
+                        return error;
+                    }
+                }
+                ++result.completedAssetCount;
+                result.block0HighWaterAtBoundary = arenas.HighWater(0u);
+                result.block4CursorAtBoundary = arenas.Cursor(4u);
+                result.worldRegistryAliasCount = registry.AliasCount();
+                result.worldRegistryDefinedAliasCount =
+                    registry.DefinedAliasCount();
+                result.registryAssetCount = registry.AssetCount();
+                result.registryAliasCount = registry.AliasCount();
+                result.registryDefinedAliasCount = registry.DefinedAliasCount();
+                if (const RetailCensusError error = dispatchSupportedWorldAsset(
+                        entry.assetIndex + 1u, stage);
                     error != RetailCensusError::None) return error;
                 if (complete) return RetailCensusError::None;
                 continue;

@@ -1549,11 +1549,14 @@ checked material/image dependencies. The dispatcher then publishes canonical
 RawFiles 398, 400, 402, and 404, the intervening character XModels, and the
 weapon XModel/FX/technique-set run through asset 436. FX assets 423-425, 427,
 and 429-433 exercise the shared material dependency path; asset 423 alone owns
-seven checked materials. The result has 437 completed top-level assets, 278
-published XModels, 11 FX effects, and 1,367 registered assets with all 1,367
-aliases defined. It stops before inline type-2 `XAnimParts` asset 437. The
-bounded retained-inflate ceiling remains 64 MiB; 335 top-level records remain
-before the first `GfxWorld`.
+seven checked materials. The canonical XAnimParts loader then follows the
+native 88-byte header and exact block-4 payload order, publishing assets
+437-457 as identities 1368-1388 without adding animation playback. The result
+has 458 completed top-level assets, 278 published XModels, 11 FX effects, 21
+canonical XAnimParts, and 1,388 registered assets with all 1,388 aliases
+defined. It stops before inline type-23 `WeaponDef` asset 458. The bounded
+retained-inflate ceiling remains 64 MiB; 314 top-level records remain before
+the first `GfxWorld`.
 
 Reaching `GfxWorld` still requires typed loaders for every intervening inline
 asset class; geometry, lightmaps, visibility, and camera state remain separate
@@ -1618,9 +1621,10 @@ All 16 portable Win32 tests pass with that native dependency.
 
 The owned `killhouse.ff` run verifies that assets 395, 396, 398, 400, 402, and
 404 reuse the same canonical RawFile operation across intervening XModels. It
-then continues through the supported weapon and FX dependencies to asset 436.
-The next step inventories native `Load_XAnimPartsPtr`/`Load_XAnimParts` for
-inline type-2 asset 437 and continues the remaining serialized families in
+then continues through the supported weapon-model and FX dependencies to asset
+436 and publishes canonical XAnimParts assets 437-457. The next step begins
+from the inventoried native `Load_WeaponDefPtr` / `Load_WeaponDef` path for
+inline type-23 asset 458 and continues the remaining serialized families in
 order.
 
 General generated-loader traversal and a real-map render remain later format

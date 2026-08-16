@@ -358,11 +358,15 @@ materials, trails, and nested XModels. FX materials reuse the same checked
 `Material`/`GfxImage` dependency path as XModels instead of a zero-dependency
 FX substitute. After canonical RawFiles 395-396, the dispatcher resumes at
 RawFile assets 398, 400, 402, and 404 and continues through the intervening
-XModels, technique sets, and nine additional FX effects. The owned result now
-completes top-level assets 0-436 and stops before inline type-2 `XAnimParts`
-asset 437. It contains six canonical RawFiles, 278 published XModels (four are
-nested FX built-ins), 11 FX effects, and 1,367 fully defined registry
-identities. There are 335 top-level records left before the first `GfxWorld`.
+XModels, technique sets, and nine additional FX effects. The native
+`Load_XAnimPartsPtr` / `Load_XAnimParts` contract is now mirrored by a bounded
+loader that publishes canonical Kisak `XAnimParts`, including packed arrays,
+bone/notify tables, flexible delta data, and both index widths. The owned result
+completes top-level assets 0-457 and stops before inline type-23 `WeaponDef`
+asset 458. It contains six canonical RawFiles, 278 published XModels (four are
+nested FX built-ins), 11 FX effects, 21 canonical XAnimParts, and 1,388 fully
+defined registry identities. There are 314 top-level records left before the
+first `GfxWorld`.
 
 The first convergence checkpoint moves canonical `RawFile`, `XAssetHeader`,
 `XAssetType`, and `XAsset` declarations into a renderer-free shared database
@@ -375,9 +379,10 @@ compares logical stream coordinates without native addresses or inflate
 read-ahead diagnostics. The Win32 portable suite now builds with MSVC against
 KisakCOD's bundled zlib 1.1.4 and passes all 16 tests; that run also caught and
 fixed zero-length inflate calls that newer zlib accepts but 1.1.4 rejects when
-`next_in` is null. The next loader family is native type-2 `XAnimParts` at
-asset 437; traversal must inventory and follow its generated Kisak loader
-before continuing toward `GfxWorld`.
+`next_in` is null. Both Win32/MSVC and Wasm portable suites pass after the
+canonical XAnim type/loader change. The next loader family is native type-23
+`WeaponDef` at asset 458; its 2,168-byte header and ordered dependency graph
+must remain canonical before traversal continues toward `GfxWorld`.
 
 See [docs/web-port.md](docs/web-port.md) for the pinned toolchain, build steps,
 current boundary and validation limits, and see
