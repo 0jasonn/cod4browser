@@ -59,6 +59,7 @@ struct RetailCensusRuntime
     WebFsStatus completionStatus = WebFsStatus::Pending;
     std::vector<std::uint8_t> completionBytes;
     kisak::fastfile::RetailFastfileCensusJob parser;
+    kisak::fastfile::RetailSoundAliasCatalog soundCatalog;
     kisak::fastfile::RetailFastfileCensus result;
     kisak::fastfile::RetailFastfileCensus worldInventory;
 };
@@ -1360,7 +1361,7 @@ const char *WebFsStatusString(WebFsStatus status)
 void Reset(bool keepGeneration)
 {
     const std::uint32_t generation = keepGeneration ? g_runtime.generation : 0u;
-    g_runtime = {};
+    g_runtime = RetailCensusRuntime{};
     g_runtime.generation = generation;
 }
 
@@ -2781,7 +2782,8 @@ WebRetailCensusFrameResult WebRetailCensusJob_Frame()
                 g_runtime.completionStatus = WebFsStatus::Pending;
                 g_runtime.completionBytes.clear();
                 if (const auto error = g_runtime.parser.BeginStreaming(
-                        RetailCensusMode::WorldAssetLoader);
+                        RetailCensusMode::WorldAssetLoader, {},
+                        g_runtime.soundCatalog.Lookup());
                     error != RetailCensusError::None)
                 {
                     Fail("could not start world asset inventory", RetailCensusErrorString(error));

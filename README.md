@@ -384,11 +384,17 @@ canonical XAnim type/loader change. Native type-23 `WeaponDef` at asset 458 is
 now isolated as a renderer-free canonical type, and the first bounded operation
 decodes its full fixed scalar record, script strings, 48 direct XStrings, four
 accuracy arrays, root insertion cell, and prior aliases. It publishes
-synthetically only when every dependency is representable. Non-null
-XModel/Material/FX/sound children still fail explicitly; exposing those
-canonical child objects and implementing native sound-name lookup is the next
-step before the owned asset can publish and traversal can continue toward
-`GfxWorld`.
+synthetically only when every dependency is representable. Prior canonical
+XModel/Material/FX aliases and the native sound-name lookup contract are now
+implemented; inline WeaponDef-local child bodies still reject explicitly. The
+owned asset reaches `WeaponSoundLookupFailed`. A retained cross-zone sound
+catalog now supplies that lookup seam, and owned `common.ff` traversal crosses
+its complete 3,028-entry canonical localization run before stopping at a
+prior-XString/image-format/Material path and the first ten FX assets. Its next
+boundary is an unresolved chained Material alias in FX asset 4,098, ahead of
+the 1,723 real sound assets. The next step is to finish that ordered common-zone
+graph and publish its canonical sound aliases into the catalog before resuming
+asset 458 toward `GfxWorld`.
 
 See [docs/web-port.md](docs/web-port.md) for the pinned toolchain, build steps,
 current boundary and validation limits, and see

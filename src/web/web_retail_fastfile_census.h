@@ -2,8 +2,10 @@
 
 #include <EffectsCore/fx_types.h>
 #include <database/db_semantic_trace.h>
+#include <database/localize_types.h>
 #include <bgame/weapon_types.h>
 #include <gfx_d3d/material_types.h>
+#include <web/web_sound_alias_catalog.h>
 #include <xanim/xanim_types.h>
 #include <xanim/xmodel_types.h>
 
@@ -83,6 +85,9 @@ struct RetailCensusLimits
     std::uint32_t maxWeaponAccuracyKnots = 65536u;
     std::uint32_t maxWeaponPayloadBytes = 4u * 1024u * 1024u;
     std::uint32_t maxRetainedWeaponBytes = 128u * 1024u * 1024u;
+    std::uint32_t maxLocalizeEntries = 8192u;
+    std::uint32_t maxLocalizeStringBytes = 64u * 1024u;
+    std::uint32_t maxRetainedLocalizeBytes = 32u * 1024u * 1024u;
     std::uint32_t maxSemanticTraceEntries = 65536u;
 };
 
@@ -223,6 +228,12 @@ enum class RetailCensusError : std::uint8_t
     WeaponAccuracyInvalid,
     WeaponPayloadLimit,
     WeaponAliasInvalid,
+    LocalizeLayoutUnsupported,
+    LocalizeCollectionLimit,
+    LocalizeStringInvalid,
+    LocalizeStringTooLong,
+    LocalizePayloadLimit,
+    LocalizeAliasInvalid,
     PostXModelAssetUnsupported,
     SemanticTraceLimit,
     AllocationFailed,
@@ -388,6 +399,10 @@ enum class RetailCensusStage : std::uint8_t
     WorldWeaponBounceSoundCells,
     WorldWeaponAccuracyKnots,
     WorldWeaponPublish,
+    WorldLocalizeEntry,
+    WorldLocalizeValue,
+    WorldLocalizeName,
+    WorldLocalizePublish,
     AssetBoundary,
     Failed,
 };
@@ -432,6 +447,7 @@ struct RetailWorldTechniqueSet
 {
     std::uint32_t assetIndex = 0u;
     std::string name;
+    std::uint32_t nameReference = 0u;
     std::uint32_t worldVertFormat = 0u;
     std::uint32_t remapReference = 0u;
     std::uint32_t block0Offset = 0u;
@@ -523,6 +539,7 @@ struct RetailXModelImage
 {
     std::uint32_t textureIndex = 0u;
     std::string name;
+    std::uint32_t nameReference = 0u;
     std::uint32_t mapType = 0u;
     std::uint32_t textureReference = 0u;
     std::uint16_t width = 0u;
@@ -877,15 +894,27 @@ struct RetailPublishedWeaponDef
     bool published = false;
 };
 
-// Mirrors the native DB sound-alias lookup: the caller retains ownership, and
-// a null result rejects the WeaponDef before publication.
-using RetailSoundAliasLookupFunction = snd_alias_list_t *(*)(
-    std::string_view name, void *userData) noexcept;
-
-struct RetailSoundAliasLookup
+struct CanonicalLocalizeEntryStorage
 {
-    RetailSoundAliasLookupFunction function = nullptr;
-    void *userData = nullptr;
+    std::shared_ptr<std::string> value;
+    std::shared_ptr<std::string> name;
+};
+
+struct RetailPublishedLocalizeEntry
+{
+    std::uint32_t assetIndex = 0u;
+    std::uint32_t serializedReference = 0u;
+    std::uint32_t headerBlock0Offset = 0u;
+    std::uint32_t insertPointerBlock4Offset = UINT32_MAX;
+    std::uint32_t valueBlock4Offset = UINT32_MAX;
+    std::uint32_t nameBlock4Offset = UINT32_MAX;
+    std::uint32_t payloadBytes = 0u;
+    std::uint32_t identity = 0u;
+    std::uint32_t boundaryInflatedOffset = 0u;
+    std::shared_ptr<CanonicalLocalizeEntryStorage> storage;
+    std::shared_ptr<LocalizeEntry> asset;
+    bool pointerAlias = false;
+    bool published = false;
 };
 
 struct RetailFastfileCensus
@@ -899,7 +928,14 @@ struct RetailFastfileCensus
     std::uint32_t scriptStringBytes = 0u;
     std::uint32_t assetCount = 0u;
     std::array<std::uint32_t, RETAIL_CENSUS_ASSET_TYPE_COUNT> typeCounts{};
+    std::array<std::uint32_t, RETAIL_CENSUS_ASSET_TYPE_COUNT> firstTypeIndices = [] {
+        std::array<std::uint32_t, RETAIL_CENSUS_ASSET_TYPE_COUNT> indices{};
+        indices.fill(UINT32_MAX);
+        return indices;
+    }();
     std::array<std::uint32_t, RETAIL_CENSUS_ASSET_TYPE_COUNT> typesBeforeFirstGfxWorld{};
+    std::vector<RetailPublishedLocalizeEntry> worldLocalizeEntries;
+    std::vector<RetailXModelMaterial> worldMaterials;
     std::uint32_t assetTableOrderHash = 2166136261u;
     std::uint32_t firstGfxWorldAssetIndex = UINT32_MAX;
     std::uint32_t firstGfxWorldReference = 0u;
@@ -1101,6 +1137,8 @@ public:
     RetailCensusProgress Progress() const noexcept;
     RetailCensusStage Stage() const noexcept;
     RetailCensusError Failure() const noexcept;
+    std::uint32_t CurrentAssetIndex() const noexcept;
+    std::uint32_t CurrentAssetType() const noexcept;
     bool NeedsSource() const noexcept;
     std::uint64_t SourceBytesReceived() const noexcept;
     bool TakeResult(RetailFastfileCensus &destination) noexcept;

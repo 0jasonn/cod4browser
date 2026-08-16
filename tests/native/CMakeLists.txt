@@ -100,6 +100,7 @@ add_executable(web_retail_fastfile_census_tests
     "${KISAK_REPOSITORY_ROOT}/src/web/web_fastfile_zone_registry.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_fastfile_zone_stream.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_retail_fastfile_census.cpp"
+    "${KISAK_REPOSITORY_ROOT}/src/web/web_sound_alias_catalog.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_engine_xmodel_surface.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_engine_xmodel_material.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_engine_xmodel_draw_list.cpp"

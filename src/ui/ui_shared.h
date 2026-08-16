@@ -1,6 +1,7 @@
 #pragma once
 
 #include <bgame/bg_local.h> // team_t
+#include <database/localize_types.h>
 
 #include <gfx_d3d/r_font.h>
 #include "keycodes.h"
@@ -841,12 +842,6 @@ struct multiDef_s // sizeof=0x188
     float dvarValue[32];
     int count;
     int strDef;
-};
-
-struct LocalizeEntry // sizeof=0x8
-{                                       // ...
-    const char *value;
-    const char *name;
 };
 
 // ui_shared

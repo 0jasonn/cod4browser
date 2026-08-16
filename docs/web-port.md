@@ -1640,6 +1640,18 @@ reaches that lookup and stops because the standalone web path has no canonical
 common-zone sound catalog; connecting the real catalog is the next ordered
 dependency.
 
+The cross-zone catalog lifetime and lookup seam is now connected to the browser
+orchestration. It retains publishing-zone ownership and returns only real
+canonical `snd_alias_list_t` pointers with native-style case-insensitive name
+matching. The owned `common.ff` inventory contains 1,723 sound assets beginning
+at asset 4,778. Ordered common traversal now publishes its 1,006 XAnim assets,
+all 3,028 canonical `LocalizeEntry` assets, prior-XString image and technique-set
+names, native A8/A8L8 image metadata, the remaining early Materials and XModels,
+and the first ten FX assets. It now stops at an unresolved chained Material
+visual alias in FX asset 4,098. Until that pre-sound graph and the sound loader
+publish into the catalog, the catalog is intentionally empty and Killhouse
+continues to reject atomically at `WeaponSoundLookupFailed`.
+
 General generated-loader traversal and a real-map render remain later format
 milestones.
 

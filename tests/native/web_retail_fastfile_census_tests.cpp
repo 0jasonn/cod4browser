@@ -63,6 +63,46 @@ void CollectSemanticTrace(
         ->push_back(entry);
 }
 
+void TestSoundAliasCatalogLookupContract()
+{
+    using namespace kisak::fastfile;
+    RetailSoundAliasCatalog catalog;
+    auto pickupOwner = std::make_shared<std::array<std::uint32_t, 3>>();
+    auto bounceOwner = std::make_shared<std::array<std::uint32_t, 3>>();
+    std::weak_ptr<const void> pickupLifetime = pickupOwner;
+    snd_alias_list_t *pickup =
+        reinterpret_cast<snd_alias_list_t *>(pickupOwner->data());
+    snd_alias_list_t *bounce =
+        reinterpret_cast<snd_alias_list_t *>(bounceOwner->data());
+
+    Require(catalog.Publish("Web/Pickup", pickup, pickupOwner) ==
+                RetailSoundAliasCatalogError::None &&
+            catalog.Publish("web/bounce", bounce, bounceOwner) ==
+                RetailSoundAliasCatalogError::None &&
+            catalog.EntryCount() == 2u &&
+            catalog.TotalNameBytes() == 20u,
+        "sound catalog retains canonical cross-zone entries");
+    pickupOwner.reset();
+    Require(!pickupLifetime.expired() &&
+            catalog.Find("web/pickup") == pickup &&
+            catalog.Find("WEB/BOUNCE") == bounce &&
+            catalog.Find("web/missing") == nullptr,
+        "sound catalog lookup matches native case-insensitive DB names");
+    const RetailSoundAliasLookup lookup = catalog.Lookup();
+    Require(lookup.function != nullptr &&
+            lookup.function("WEB/PICKUP", lookup.userData) == pickup &&
+            lookup.function("web/missing", lookup.userData) == nullptr,
+        "sound catalog exposes the WeaponDef lookup contract directly");
+    Require(catalog.Publish("web/PICKUP", bounce, bounceOwner) ==
+                RetailSoundAliasCatalogError::Duplicate &&
+            catalog.Publish({}, bounce, bounceOwner) ==
+                RetailSoundAliasCatalogError::InvalidArgument,
+        "sound catalog rejects ambiguous or invalid publication");
+    catalog.Reset();
+    Require(catalog.EntryCount() == 0u && pickupLifetime.expired(),
+        "sound catalog reset releases retained zone ownership");
+}
+
 void PutU32(std::vector<std::uint8_t> &bytes, std::uint32_t value)
 {
     bytes.push_back(static_cast<std::uint8_t>(value));
@@ -350,6 +390,46 @@ std::vector<std::uint8_t> BuildFile(std::vector<std::uint8_t> inflated = BuildIn
     };
     file.insert(file.end(), compressed.begin(), compressed.end());
     return file;
+}
+
+std::vector<std::uint8_t> BuildLocalizeZoneInflated()
+{
+    std::vector<std::uint8_t> bytes;
+    PutU32(bytes, 4096u);
+    PutU32(bytes, 0u);
+    for (const std::uint32_t block :
+         std::array<std::uint32_t, 9>{{4096u, 0u, 0u, 0u, 4096u,
+                                      0u, 0u, 0u, 0u}})
+    {
+        PutU32(bytes, block);
+    }
+    PutU32(bytes, 0u);
+    PutU32(bytes, 0u);
+    PutU32(bytes, 4u);
+    PutU32(bytes, 0xffffffffu);
+    for (const std::pair<std::uint32_t, std::uint32_t> asset : {
+             std::pair{22u, 0xffffffffu},
+             std::pair{22u, 0xffffffffu},
+             std::pair{4u, 0xffffffffu},
+             std::pair{32u, 0u},
+         })
+    {
+        PutU32(bytes, asset.first);
+        PutU32(bytes, asset.second);
+    }
+
+    PutU32(bytes, 0xffffffffu);
+    PutU32(bytes, 0xffffffffu);
+    AppendString(bytes, "Hello");
+    AppendString(bytes, "KEY_ONE");
+    PutU32(bytes, 0x40000021u); // block-4 offset 32: first value payload
+    PutU32(bytes, 0xffffffffu);
+    AppendString(bytes, "KEY_TWO");
+    std::vector<std::uint8_t> material(80u, 0u);
+    SetU32(material, 0u, 0xffffffffu);
+    bytes.insert(bytes.end(), material.begin(), material.end());
+    AppendString(bytes, "web/localize_boundary_material");
+    return bytes;
 }
 
 std::vector<std::uint8_t> BuildWorldTechniquePrefixInflated(
@@ -1559,6 +1639,38 @@ void TestWorldAssetInventory()
         result.typesBeforeFirstGfxWorld[3u] == 1u &&
         result.inlineReferencesBeforeFirstGfxWorld == 5u,
         "world inventory retains table order and stops before body zero");
+}
+
+void TestCanonicalLocalizeZoneLoader()
+{
+    using namespace kisak::fastfile;
+    const RetailFastfileCensus result = Run(
+        BuildFile(BuildLocalizeZoneInflated()),
+        7u, 2u, 3u, RetailCensusMode::WorldAssetLoader);
+    Require(result.completedAssetCount == 3u &&
+            result.nextBodyIndex == 3u && result.nextBodyType == 32u &&
+            result.firstGfxWorldAssetIndex == UINT32_MAX &&
+            result.worldLocalizeEntries.size() == 2u &&
+            result.worldMaterials.size() == 1u,
+        "generic zone dispatcher publishes LocalizeEntry and Material assets without a GfxWorld");
+    const RetailPublishedLocalizeEntry &first =
+        result.worldLocalizeEntries[0u];
+    const RetailPublishedLocalizeEntry &second =
+        result.worldLocalizeEntries[1u];
+    Require(first.published && second.published && first.asset && second.asset &&
+            std::string_view(first.asset->value) == "Hello" &&
+            std::string_view(first.asset->name) == "KEY_ONE" &&
+            std::string_view(second.asset->value) == "Hello" &&
+            std::string_view(second.asset->name) == "KEY_TWO" &&
+            second.storage->value == first.storage->value,
+        "canonical LocalizeEntry values retain native XString alias identity");
+    const RetailXModelMaterial &material = result.worldMaterials[0u];
+    Require(material.published && material.asset &&
+            std::string_view(material.asset->info.name) ==
+                "web/localize_boundary_material" &&
+            material.textureCount == 0u && material.constantCount == 0u &&
+            material.stateBitsCount == 0u,
+        "generic zone dispatcher publishes a zero-dependency canonical Material");
 }
 
 void TestWorldTechniqueSetPrefixBoundary()
@@ -3247,12 +3359,32 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
     {
         std::cerr << "owned world surface stopped at "
                   << RetailCensusStageString(job.Stage()) << ": "
-                  << RetailCensusErrorString(job.Failure()) << '\n';
+                  << RetailCensusErrorString(job.Failure()) << " (asset "
+                  << job.CurrentAssetIndex() << ", type "
+                  << job.CurrentAssetType() << ")\n";
     }
     Require(job.Progress() == RetailCensusProgress::Succeeded,
         "owned world surface reaches dependency boundary");
     RetailFastfileCensus result;
     Require(job.TakeResult(result), "owned world surface result is available");
+    if (result.firstGfxWorldAssetIndex == UINT32_MAX)
+    {
+        std::cerr << "owned non-world zone reached asset "
+                  << result.nextBodyIndex << " type " << result.nextBodyType
+                  << " (" << RetailAssetTypeName(result.nextBodyType) << ") after "
+                  << result.completedAssetCount << " completed assets, reference 0x"
+                  << std::hex << result.nextBodyReference << std::dec << '\n';
+        std::cerr << "  retained top-level materials: "
+                  << result.worldMaterials.size() << '\n';
+        for (std::uint32_t type = 0u; type < result.typeCounts.size(); ++type)
+        {
+            if (result.typeCounts[type] == 0u) continue;
+            std::cerr << "  type " << type << " (" << RetailAssetTypeName(type)
+                      << "): " << result.typeCounts[type] << ", first asset "
+                      << result.firstTypeIndices[type] << '\n';
+        }
+        return;
+    }
     Require(!result.worldXModels.empty(),
         "owned M35 diagnostic publishes a model collection");
     const RetailWorldXModel &model = result.worldXModels.front();
@@ -3933,8 +4065,10 @@ void TestOwnedWorldSurfaceIfRequested(const char *path)
 
 int main(int argc, char **argv)
 {
+    TestSoundAliasCatalogLookupContract();
     TestPositiveIncrementalCensus();
     TestWorldAssetInventory();
+    TestCanonicalLocalizeZoneLoader();
     TestWorldTechniqueSetPrefixBoundary();
     TestWorldXModelPrefixBoundary();
     TestWorldXSurfacePrefixBoundary();

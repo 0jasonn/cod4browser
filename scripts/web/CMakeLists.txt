@@ -35,6 +35,7 @@ add_executable(KisakCOD-web
     "${SRC_DIR}/web/web_qcommon_runtime.cpp"
     "${SRC_DIR}/web/web_retail_fastfile_census.cpp"
     "${SRC_DIR}/web/web_shader_compatibility.cpp"
+    "${SRC_DIR}/web/web_sound_alias_catalog.cpp"
     "${SRC_DIR}/web/web_retail_census_job.cpp"
     "${SRC_DIR}/web/web_renderer.cpp"
     "${SRC_DIR}/web/web_renderer_surface.cpp"

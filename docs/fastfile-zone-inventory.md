@@ -1664,3 +1664,17 @@ aliases and now stops at `WeaponSoundLookupFailed` because the standalone web
 diagnostic has no native/common-zone sound catalog. Connecting that real
 catalog—not replacing names with dummy sound objects—is the next asset-458
 boundary.
+
+The lookup side of that boundary now has a bounded cross-zone catalog with
+native-style case-insensitive names and retained zone ownership, and the browser
+orchestration passes it into the WeaponDef operation. Owned `common.ff` table
+evidence records 1,723 type-7 sound assets, first at asset 4,778. Reaching them
+in generated order requires 1,006 XAnim, 364 RawFile, 3,028 LocalizeEntry, 98
+technique-set, and early Material dependencies. The reusable canonical
+`LocalizeEntry` operation now advances through the complete localization run;
+common traversal also accepts prior-XString image/technique names and the native
+A8/A8L8 image formats, then advances through early XModels and the first ten FX
+assets. It next stops at FX asset 4,098 on a chained Material visual alias whose
+logical block-4 publication is not yet represented. The catalog is not populated
+and the owned Killhouse boundary is not claimed complete until that ordered graph
+and the real sound assets publish successfully.
