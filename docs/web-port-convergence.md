@@ -57,8 +57,9 @@ retained result
 includes 278 published XModels, 11 FX effects, 21 canonical `XAnimParts`, and
 1,388 registry identities.
 RawFiles 395, 396, 398, 400, 402, and 404 are published through the canonical
-Kisak type; the XModel/material/FX results remain census/preview records rather
-than canonical publications.
+Kisak type. XModel, Material, and FX publications now also expose stable
+canonical top-level objects, while their retained nested census/preview graphs
+remain temporary convergence scaffolding.
 
 ## System inventory
 
@@ -73,16 +74,16 @@ than canonical publications.
 | Command system | `MODIFIED KISAK` / partial | `src/qcommon/cmd_core.cpp` implements the Kisak command APIs as a reduced portable core. Reconcile it with `src/qcommon/cmd.cpp` as more qcommon code compiles. |
 | Dvar system | `MODIFIED KISAK` / partial | `src/universal/dvar_core.cpp` is a reduced portable implementation. Preserve API and behavior parity and converge with the full dvar implementation. |
 | qcommon startup | `TEMPORARY WEB SUBSTITUTE` | The bounded pre-database shell proves ordering and I/O but is not `Com_Init`. Replace milestone-specific startup actions by compiling the real initialization path behind platform services. |
-| Canonical database asset ABI | `SHARED KISAK` / partial | `RawFile`, `XAssetHeader`, `XAssetType`, and `XAsset` live in renderer-free `src/database/db_asset_types.h`. Canonical `XAnimParts` and `WeaponDef` are isolated in renderer-free `src/xanim/xanim_types.h` and `src/bgame/weapon_types.h`; the full native headers and portable loader consume them. Win32/Wasm tests enforce the 32-bit IW3 layouts. Expand this extraction only when a real shared consumer requires another canonical type. |
+| Canonical database asset ABI | `SHARED KISAK` / partial | `RawFile`, `XAssetHeader`, `XAssetType`, and `XAsset` live in renderer-free `src/database/db_asset_types.h`. Canonical `XAnimParts`, `WeaponDef`, XModel, Material, draw-surface key, and FX header declarations are isolated in renderer-free type headers consumed by both the native declarations and portable loader. Win32/Wasm tests enforce their 32-bit IW3 layouts. Expand this extraction only when a real shared consumer requires another canonical type. |
 | IWD/ZIP reading | `MODIFIED KISAK` / partial | The bounded reader is portable and tested, but final integration should be through Kisak filesystem/database calls rather than a preview-only archive job. |
 | IWI decoding | `MODIFIED KISAK` / partial | Bounded DXT decoding is reusable. Connect it to canonical `GfxImage` loading and renderer upload instead of browser material queues. |
 | Fastfile framing and zone stream machine | `TEMPORARY WEB SUBSTITUTE` | It accurately models blocks, rewind/high-water behavior, pointer classes, aliases, and bounded streaming. Use it as differential evidence and migrate reusable mechanics toward the Kisak DB loader. |
 | Asset registry | `TEMPORARY WEB SUBSTITUTE` | Stable typed identities prove alias behavior, but the destination is Kisak `XAsset` registration and native DB ownership. |
 | Retail loader dispatcher | `TEMPORARY WEB SUBSTITUTE` | `web_retail_fastfile_census.*` is the current pre-world traversal vehicle. It reports canonical asset types through the shared semantic trace, publishes canonical RawFile and XAnimParts assets, and now contains a bounded partial canonical WeaponDef operation. Continue reusable families without turning other `Retail*` results into the permanent object model. |
 | `XAnimParts` asset loading | `MODIFIED KISAK` / partial | The bounded path mirrors native `Load_XAnimPartsPtr` / `Load_XAnimParts`: block-0 body allocation, optional shared insertion cell, block-4 name and payload scope, exact array order, low/high-frame index widths, and flexible delta translation/quaternion storage. It publishes the canonical Kisak structure with ownership-only backing; the owned run publishes assets 437-457. Replace the temporary owner with real zone allocation during DB convergence. |
-| `WeaponDef` asset loading | `MODIFIED KISAK` / partial | The canonical header, fixed scalar decode, 40 script strings, 48 direct XStrings, four accuracy arrays, root insertion cell/alias handling, bounded ownership, and atomic publication are implemented and covered synthetically. Non-null XModel, Material, FX, and sound-name children fail explicitly until those loaders expose canonical child pointers and the native sound lookup contract is added. |
-| `XModel` | `TEMPORARY WEB SUBSTITUTE`; canonical code `NOT COMPILED` | Retail data is retained as `RetailWorldXModel`. Converge loader output and publication on `XModel` from `src/xanim/xmodel.h`, then compile the consumers that require it. |
-| `Material` and techniques | `TEMPORARY WEB SUBSTITUTE`; canonical code `NOT COMPILED` | Current `RetailXModelMaterial` and compatibility records validate dependencies. Converge on `Material`, `MaterialTechniqueSet`, and related Kisak structures; translate only D3D shader/backend state. |
+| `WeaponDef` asset loading | `MODIFIED KISAK` / partial | The canonical header, fixed scalar decode, 40 script strings, 48 direct XStrings (including prior non-weapon zone strings), four accuracy arrays, root insertion cell/alias handling, canonical prior-alias XModel/Material/FX resolution, 48 native sound-name cells, the 29-entry bounce array, bounded ownership, and atomic publication are implemented and covered synthetically. Sound names resolve only through an injected database lookup; the owned web traversal now reaches that unavailable catalog boundary rather than publishing fabricated sound assets. Inline `-1`/`-2` XModel, Material, or FX bodies inside a WeaponDef remain explicit failures. |
+| `XModel` | `MODIFIED KISAK` / partial | The existing checked traversal now publishes a stable canonical `XModel` top-level object with canonical name, scalar metadata, skeleton-array pointers, and canonical Material handle identity. `RetailWorldXModel` still owns temporary surface, collision, and physics retention; converge those nested graphs before compiling broader consumers. |
+| `Material` and techniques | `MODIFIED KISAK` / partial | Existing XModel/FX material traversal now exposes canonical `Material` headers and stable names, and XModel handles point at those exact objects. Texture/image/technique ownership remains in temporary records; converge those canonical child graphs and translate only D3D shader/backend state. |
 | `GfxImage` | `TEMPORARY WEB SUBSTITUTE`; native backend `NATIVE ONLY` | Current metadata plus IWD lookup proves image selection. Publish canonical image assets while keeping GPU texture creation in the WebGL backend. |
 | `GfxWorld` | `TEMPORARY WEB SUBSTITUTE`; canonical code `NOT COMPILED` | Synthetic extraction proves one surface and retail traversal is in progress. Finish all preceding retail families, load and publish a real canonical world, then render only enough Killhouse geometry to prove the seam. |
 | XModel/model preview scene | `TEMPORARY WEB SUBSTITUTE` | Useful validation UI with orthographic projection and selectable models. Freeze feature growth after the real-world proof and retire it as an architectural center. |
@@ -149,8 +150,24 @@ than canonical publications.
   fields; bounded ownership; and atomic failure.
 - Both 16-test Win32/MSVC and 16-test Wasm suites pass after the shared change.
 - The owned Killhouse run publishes XAnimParts assets 437-457 as identities
-  1368-1388. The new partial WeaponDef operation is synthetic-only until its
-  non-null canonical child dependencies are connected.
+  1368-1388 before entering the WeaponDef dependency graph.
+
+### Checkpoint 4: canonical WeaponDef dependency handles (partial)
+
+- Renderer-free canonical declarations for XModel, Material, the draw-surface
+  key, and the FX header are shared by native headers and the portable loader;
+  32-bit Win32/Wasm ABI tests cover their exact sizes and key offsets.
+- Existing checked XModel, Material, and FX loaders expose stable canonical
+  top-level objects. Weapon handles resolve prior typed registry aliases to
+  those exact pointers in generated-loader order; inline child bodies still
+  fail explicitly rather than forking the loaders.
+- `Load_snd_alias_list_name` semantics are modeled as an XString-pointer cell
+  followed by an injected `ASSET_TYPE_SOUND` name lookup. Direct cells, inline
+  names, the 29-entry bounce array, reused cells, lookup failure, and atomic
+  publication are covered synthetically. No placeholder sound asset is made.
+- The owned Killhouse diagnostic now gets through canonical child and prior
+  XString aliases and stops at the unavailable sound database lookup. Connecting
+  the real canonical sound catalog is the remaining owned asset-458 boundary.
 
 ### Gate 1: finish the pre-GfxWorld dependency graph
 
@@ -158,9 +175,11 @@ than canonical publications.
   458 is inventoried, including its canonical 2,168-byte layout, exact block-4
   dependency order, sound-name indirections, dynamic arrays, aliases, and
   atomic publication envelope. The canonical root/body, scalar, XString,
-  script-string, and accuracy-array slice is implemented. Next publish
-  canonical XModel/Material/FX children and add sound-name lookup so asset 458
-  can complete, then continue every remaining inline family in serialized order.
+  script-string, accuracy-array, prior canonical child-alias, and sound-name
+  indirection slices are implemented. Next connect the native sound catalog to
+  the lookup boundary (and reuse the existing child loaders if asset 458 proves
+  to contain inline child bodies), then continue every remaining inline family
+  in serialized order.
 - Preserve block cursors, high-water marks, insertion cells, aliases, dependency
   order, and atomic publication.
 - Do not seek directly to asset 772.

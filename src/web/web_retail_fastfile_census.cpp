@@ -178,13 +178,18 @@ enum class WorldXAnimPhase : std::uint8_t
 enum class WorldWeaponOperationKind : std::uint8_t
 {
     String = 0,
+    XModel,
+    Fx,
+    Material,
+    Sound,
+    BounceSound,
     AccuracyKnots,
 };
 
 struct WorldWeaponOperation
 {
     WorldWeaponOperationKind kind;
-    std::uint8_t index;
+    std::uint16_t index;
 };
 
 constexpr std::array<std::uint32_t, 48> WEAPON_STRING_OFFSETS = {{
@@ -197,19 +202,84 @@ constexpr std::array<std::uint32_t, 48> WEAPON_STRING_OFFSETS = {{
     2152u, 2156u,
 }};
 
-// Native Load_WeaponDef interleaves the two graph names with their current
-// and original vec2 arrays. All earlier/later strings remain in field order.
-constexpr std::array<WorldWeaponOperation, 52> WEAPON_OPERATIONS = [] {
-    std::array<WorldWeaponOperation, 52> operations{};
+constexpr std::array<std::uint32_t, 38> WEAPON_XMODEL_OFFSETS = [] {
+    std::array<std::uint32_t, 38> offsets{};
     std::size_t output = 0u;
-    for (std::uint8_t index = 0u; index <= 41u; ++index)
+    for (std::uint32_t offset = 12u; offset <= 72u; offset += 4u)
+        offsets[output++] = offset;
+    offsets[output++] = 76u;
+    for (std::uint32_t offset = 700u; offset <= 760u; offset += 4u)
+        offsets[output++] = offset;
+    for (const std::uint32_t offset : {764u, 768u, 772u, 776u, 1412u})
+        offsets[output++] = offset;
+    return offsets;
+}();
+
+constexpr std::array<std::uint32_t, 10> WEAPON_FX_OFFSETS = {{
+    332u, 336u, 524u, 528u, 532u, 536u,
+    1420u, 1428u, 1704u, 1732u,
+}};
+
+constexpr std::array<std::uint32_t, 8> WEAPON_MATERIAL_OFFSETS = {{
+    540u, 544u, 780u, 788u, 1072u, 1076u, 1304u, 1316u,
+}};
+
+constexpr std::array<std::uint32_t, 48> WEAPON_SOUND_OFFSETS = [] {
+    std::array<std::uint32_t, 48> offsets{};
+    std::size_t output = 0u;
+    for (std::uint32_t offset = 340u; offset <= 516u; offset += 4u)
+        offsets[output++] = offset;
+    offsets[output++] = 1432u;
+    offsets[output++] = 1436u;
+    offsets[output++] = 1736u;
+    return offsets;
+}();
+
+// Exact generated Load_WeaponDef child order. Alias-only canonical asset
+// handles consume no stream bytes but still resolve at their native position.
+constexpr std::array<WorldWeaponOperation, 157> WEAPON_OPERATIONS = [] {
+    std::array<WorldWeaponOperation, 157> operations{};
+    std::size_t output = 0u;
+    for (std::uint16_t index = 0u; index < 3u; ++index)
         operations[output++] = {WorldWeaponOperationKind::String, index};
+    for (std::uint16_t index = 0u; index < 17u; ++index)
+        operations[output++] = {WorldWeaponOperationKind::XModel, index};
+    for (std::uint16_t index = 3u; index <= 36u; ++index)
+        operations[output++] = {WorldWeaponOperationKind::String, index};
+    for (std::uint16_t index = 0u; index < 2u; ++index)
+        operations[output++] = {WorldWeaponOperationKind::Fx, index};
+    for (std::uint16_t index = 0u; index < 45u; ++index)
+        operations[output++] = {WorldWeaponOperationKind::Sound, index};
+    operations[output++] = {WorldWeaponOperationKind::BounceSound, 0u};
+    for (std::uint16_t index = 2u; index < 6u; ++index)
+        operations[output++] = {WorldWeaponOperationKind::Fx, index};
+    for (std::uint16_t index = 0u; index < 2u; ++index)
+        operations[output++] = {WorldWeaponOperationKind::Material, index};
+    for (std::uint16_t index = 17u; index <= 36u; ++index)
+        operations[output++] = {WorldWeaponOperationKind::XModel, index};
+    operations[output++] = {WorldWeaponOperationKind::Material, 2u};
+    operations[output++] = {WorldWeaponOperationKind::String, 37u};
+    operations[output++] = {WorldWeaponOperationKind::Material, 3u};
+    operations[output++] = {WorldWeaponOperationKind::String, 38u};
+    operations[output++] = {WorldWeaponOperationKind::String, 39u};
+    for (std::uint16_t index = 4u; index < 8u; ++index)
+        operations[output++] = {WorldWeaponOperationKind::Material, index};
+    operations[output++] = {WorldWeaponOperationKind::String, 40u};
+    operations[output++] = {WorldWeaponOperationKind::XModel, 37u};
+    operations[output++] = {WorldWeaponOperationKind::Fx, 6u};
+    operations[output++] = {WorldWeaponOperationKind::Fx, 7u};
+    operations[output++] = {WorldWeaponOperationKind::Sound, 45u};
+    operations[output++] = {WorldWeaponOperationKind::Sound, 46u};
+    operations[output++] = {WorldWeaponOperationKind::Fx, 8u};
+    operations[output++] = {WorldWeaponOperationKind::Fx, 9u};
+    operations[output++] = {WorldWeaponOperationKind::Sound, 47u};
+    operations[output++] = {WorldWeaponOperationKind::String, 41u};
     operations[output++] = {WorldWeaponOperationKind::AccuracyKnots, 0u};
     operations[output++] = {WorldWeaponOperationKind::AccuracyKnots, 1u};
     operations[output++] = {WorldWeaponOperationKind::String, 42u};
     operations[output++] = {WorldWeaponOperationKind::AccuracyKnots, 2u};
     operations[output++] = {WorldWeaponOperationKind::AccuracyKnots, 3u};
-    for (std::uint8_t index = 43u; index < 48u; ++index)
+    for (std::uint16_t index = 43u; index < 48u; ++index)
         operations[output++] = {WorldWeaponOperationKind::String, index};
     return operations;
 }();
@@ -523,6 +593,9 @@ const char *RetailCensusErrorString(RetailCensusError error) noexcept
     case RetailCensusError::WeaponCollectionLimit: return "WeaponDef collection limit exceeded";
     case RetailCensusError::WeaponScriptStringInvalid: return "invalid WeaponDef script string";
     case RetailCensusError::WeaponDependencyUnsupported: return "WeaponDef canonical dependency is not published";
+    case RetailCensusError::WeaponSoundNameInvalid: return "invalid WeaponDef sound-name indirection";
+    case RetailCensusError::WeaponSoundNameTooLong: return "WeaponDef sound name exceeds limit";
+    case RetailCensusError::WeaponSoundLookupFailed: return "WeaponDef sound name was not found";
     case RetailCensusError::WeaponAccuracyInvalid: return "invalid WeaponDef accuracy graph";
     case RetailCensusError::WeaponPayloadLimit: return "WeaponDef payload exceeds limit";
     case RetailCensusError::WeaponAliasInvalid: return "invalid WeaponDef pointer alias";
@@ -655,6 +728,9 @@ const char *RetailCensusStageString(RetailCensusStage stage) noexcept
     case RetailCensusStage::WorldXAnimPublish: return "world-xanim-publish";
     case RetailCensusStage::WorldWeaponDef: return "world-weapon-def";
     case RetailCensusStage::WorldWeaponString: return "world-weapon-string";
+    case RetailCensusStage::WorldWeaponSoundNameCell: return "world-weapon-sound-name-cell";
+    case RetailCensusStage::WorldWeaponSoundName: return "world-weapon-sound-name";
+    case RetailCensusStage::WorldWeaponBounceSoundCells: return "world-weapon-bounce-sound-cells";
     case RetailCensusStage::WorldWeaponAccuracyKnots: return "world-weapon-accuracy-knots";
     case RetailCensusStage::WorldWeaponPublish: return "world-weapon-publish";
     case RetailCensusStage::AssetBoundary: return "asset-boundary";
@@ -668,6 +744,7 @@ struct RetailFastfileCensusJob::Impl
     BoundedSourceStream source;
     RetailCensusMode mode = RetailCensusMode::CodePostGfxMaterial;
     RetailCensusLimits limits{};
+    RetailSoundAliasLookup soundLookup{};
     std::array<std::uint8_t, PREFIX_BYTES> prefix{};
     std::uint32_t prefixCount = 0u;
     std::vector<std::uint8_t> inflated;
@@ -763,6 +840,17 @@ struct RetailFastfileCensusJob::Impl
     std::size_t worldWeaponIndex = 0u;
     std::size_t worldWeaponOperationIndex = 0u;
     std::array<std::uint32_t, 48> worldWeaponStringReferences{};
+    std::array<std::uint32_t, 38> worldWeaponXModelReferences{};
+    std::array<std::uint32_t, 10> worldWeaponFxReferences{};
+    std::array<std::uint32_t, 8> worldWeaponMaterialReferences{};
+    std::array<std::uint32_t, 48> worldWeaponSoundReferences{};
+    std::uint32_t worldWeaponBounceSoundReference = 0u;
+    std::array<std::uint32_t, 29> worldWeaponBounceSoundReferences{};
+    std::uint32_t worldWeaponSoundStringReference = 0u;
+    std::uint32_t worldWeaponSoundIndex = 0u;
+    bool worldWeaponSoundIsBounce = false;
+    bool worldWeaponBounceActive = false;
+    std::uint32_t worldWeaponBounceIndex = 0u;
     std::array<std::uint32_t, 4> worldWeaponAccuracyReferences{};
     std::uint64_t retainedWeaponBytes = 0u;
     std::size_t worldFxIndex = 0u;
@@ -1030,10 +1118,12 @@ struct RetailFastfileCensusJob::Impl
         try
         {
             result.worldXModels.emplace_back();
+            result.worldXModels.back().asset = std::make_shared<XModel>();
         }
         catch (...) { return RetailCensusError::AllocationFailed; }
         worldXModelIndex = result.worldXModels.size() - 1u;
         RetailWorldXModel &model = result.worldXModels.back();
+        *model.asset = {};
         model.assetIndex = assetIndex;
         model.registrySourceIndex = assetIndex;
         model.headerBlock0Offset = span.offset;
@@ -1101,10 +1191,15 @@ struct RetailFastfileCensusJob::Impl
         ZoneSpan span;
         if (const RetailCensusError error = Plan(4u, XMODEL_BYTES, &span);
             error != RetailCensusError::None) return error;
-        try { result.worldXModels.emplace_back(); }
+        try
+        {
+            result.worldXModels.emplace_back();
+            result.worldXModels.back().asset = std::make_shared<XModel>();
+        }
         catch (...) { return RetailCensusError::AllocationFailed; }
         worldXModelIndex = result.worldXModels.size() - 1u;
         RetailWorldXModel &model = result.worldXModels.back();
+        *model.asset = {};
         model.assetIndex = result.worldFxEffects[worldFxIndex].assetIndex;
         model.registrySourceIndex = aliasSlot.offset;
         model.headerBlock0Offset = span.offset;
@@ -1152,10 +1247,16 @@ struct RetailFastfileCensusJob::Impl
         if (const RetailCensusError error = Plan(
                 4u, FX_EFFECT_DEF_BYTES, &span);
             error != RetailCensusError::None) return error;
-        try { result.worldFxEffects.emplace_back(); }
+        try
+        {
+            result.worldFxEffects.emplace_back();
+            result.worldFxEffects.back().asset =
+                std::make_shared<FxEffectDef>();
+        }
         catch (...) { return RetailCensusError::AllocationFailed; }
         worldFxIndex = result.worldFxEffects.size() - 1u;
         RetailWorldFxEffectDef &effect = result.worldFxEffects.back();
+        *effect.asset = {};
         effect.assetIndex = assetIndex;
         effect.headerBlock0Offset = span.offset;
         if (const RetailCensusError error = AppendSemanticTrace(
@@ -1290,6 +1391,313 @@ struct RetailFastfileCensusJob::Impl
         }
     }
 
+    static void AssignWeaponXModel(
+        WeaponDef &weapon,
+        std::uint32_t index,
+        XModel *value) noexcept
+    {
+        if (index < 16u) weapon.gunXModel[index] = value;
+        else if (index == 16u) weapon.handXModel = value;
+        else if (index < 33u) weapon.worldModel[index - 17u] = value;
+        else if (index == 33u) weapon.worldClipModel = value;
+        else if (index == 34u) weapon.rocketModel = value;
+        else if (index == 35u) weapon.knifeModel = value;
+        else if (index == 36u) weapon.worldKnifeModel = value;
+        else if (index == 37u) weapon.projectileModel = value;
+    }
+
+    static void AssignWeaponFx(
+        WeaponDef &weapon,
+        std::uint32_t index,
+        const FxEffectDef *value) noexcept
+    {
+        const FxEffectDef **targets[] = {
+            &weapon.viewFlashEffect,
+            &weapon.worldFlashEffect,
+            &weapon.viewShellEjectEffect,
+            &weapon.worldShellEjectEffect,
+            &weapon.viewLastShotEjectEffect,
+            &weapon.worldLastShotEjectEffect,
+            &weapon.projExplosionEffect,
+            &weapon.projDudEffect,
+            &weapon.projTrailEffect,
+            &weapon.projIgnitionEffect,
+        };
+        if (index < std::size(targets)) *targets[index] = value;
+    }
+
+    static void AssignWeaponMaterial(
+        WeaponDef &weapon,
+        std::uint32_t index,
+        Material *value) noexcept
+    {
+        Material **targets[] = {
+            &weapon.reticleCenter,
+            &weapon.reticleSide,
+            &weapon.hudIcon,
+            &weapon.ammoCounterIcon,
+            &weapon.overlayMaterial,
+            &weapon.overlayMaterialLowRes,
+            &weapon.killIcon,
+            &weapon.dpadIcon,
+        };
+        if (index < std::size(targets)) *targets[index] = value;
+    }
+
+    static void AssignWeaponSound(
+        WeaponDef &weapon,
+        std::uint32_t index,
+        snd_alias_list_t *value) noexcept
+    {
+        snd_alias_list_t **targets[] = {
+            &weapon.pickupSound,
+            &weapon.pickupSoundPlayer,
+            &weapon.ammoPickupSound,
+            &weapon.ammoPickupSoundPlayer,
+            &weapon.projectileSound,
+            &weapon.pullbackSound,
+            &weapon.pullbackSoundPlayer,
+            &weapon.fireSound,
+            &weapon.fireSoundPlayer,
+            &weapon.fireLoopSound,
+            &weapon.fireLoopSoundPlayer,
+            &weapon.fireStopSound,
+            &weapon.fireStopSoundPlayer,
+            &weapon.fireLastSound,
+            &weapon.fireLastSoundPlayer,
+            &weapon.emptyFireSound,
+            &weapon.emptyFireSoundPlayer,
+            &weapon.meleeSwipeSound,
+            &weapon.meleeSwipeSoundPlayer,
+            &weapon.meleeHitSound,
+            &weapon.meleeMissSound,
+            &weapon.rechamberSound,
+            &weapon.rechamberSoundPlayer,
+            &weapon.reloadSound,
+            &weapon.reloadSoundPlayer,
+            &weapon.reloadEmptySound,
+            &weapon.reloadEmptySoundPlayer,
+            &weapon.reloadStartSound,
+            &weapon.reloadStartSoundPlayer,
+            &weapon.reloadEndSound,
+            &weapon.reloadEndSoundPlayer,
+            &weapon.detonateSound,
+            &weapon.detonateSoundPlayer,
+            &weapon.nightVisionWearSound,
+            &weapon.nightVisionWearSoundPlayer,
+            &weapon.nightVisionRemoveSound,
+            &weapon.nightVisionRemoveSoundPlayer,
+            &weapon.altSwitchSound,
+            &weapon.altSwitchSoundPlayer,
+            &weapon.raiseSound,
+            &weapon.raiseSoundPlayer,
+            &weapon.firstRaiseSound,
+            &weapon.firstRaiseSoundPlayer,
+            &weapon.putawaySound,
+            &weapon.putawaySoundPlayer,
+            &weapon.projExplosionSound,
+            &weapon.projDudSound,
+            &weapon.projIgnitionSound,
+        };
+        if (index < std::size(targets)) *targets[index] = value;
+    }
+
+    bool ResolvePriorZoneStringPayload(
+        std::uint32_t token,
+        std::shared_ptr<std::string> &value,
+        std::uint32_t &offset) noexcept
+    {
+        ZoneSpan target;
+        if (!DecodeZoneAliasToken(token, target) || target.block != 4u)
+            return false;
+        auto copyValue = [&](const std::string &source) noexcept {
+            try { value = std::make_shared<std::string>(source); }
+            catch (...) { return false; }
+            offset = target.offset;
+            return true;
+        };
+        for (const RetailWorldTechniqueSet &set : result.worldTechniqueSets)
+        {
+            if (set.nameBlock4Offset == target.offset)
+                return copyValue(set.name);
+            for (const RetailWorldMaterialTechnique &technique : set.techniques)
+                if (technique.nameBlock4Offset == target.offset)
+                    return copyValue(technique.name);
+        }
+        for (const RetailWorldXModel &model : result.worldXModels)
+        {
+            if (model.nameBlock4Offset == target.offset && model.canonicalName)
+            {
+                value = model.canonicalName;
+                offset = target.offset;
+                return true;
+            }
+            if (model.physPreset.nameBlock4Offset == target.offset)
+                return copyValue(model.physPreset.name);
+            if (model.physPreset.soundAliasPrefixBlock4Offset == target.offset)
+                return copyValue(model.physPreset.soundAliasPrefix);
+            for (const RetailXModelMaterial &material : model.materials)
+            {
+                if (material.nameBlock4Offset == target.offset &&
+                    material.canonicalName)
+                {
+                    value = material.canonicalName;
+                    offset = target.offset;
+                    return true;
+                }
+                for (const RetailXModelImage &image : material.images)
+                    if (image.nameBlock4Offset == target.offset)
+                        return copyValue(image.name);
+            }
+        }
+        for (const RetailWorldFxEffectDef &effect : result.worldFxEffects)
+        {
+            if (effect.nameBlock4Offset == target.offset && effect.canonicalName)
+            {
+                value = effect.canonicalName;
+                offset = target.offset;
+                return true;
+            }
+            for (const RetailWorldFxMaterial &material : effect.materials)
+            {
+                if (material.nameBlock4Offset == target.offset &&
+                    material.canonicalName)
+                {
+                    value = material.canonicalName;
+                    offset = target.offset;
+                    return true;
+                }
+                for (const RetailXModelImage &image : material.images)
+                    if (image.nameBlock4Offset == target.offset)
+                        return copyValue(image.name);
+            }
+        }
+        for (const RetailWorldRawFile &rawFile : result.worldRawFiles)
+        {
+            if (rawFile.nameBlock4Offset == target.offset && rawFile.nameStorage)
+            {
+                value = rawFile.nameStorage;
+                offset = target.offset;
+                return true;
+            }
+        }
+        for (const RetailPublishedXAnimParts &parts : result.worldXAnimParts)
+        {
+            if (parts.nameBlock4Offset == target.offset &&
+                parts.storage && parts.storage->name)
+            {
+                value = parts.storage->name;
+                offset = target.offset;
+                return true;
+            }
+        }
+        for (RetailPublishedWeaponDef &candidate : result.worldWeapons)
+        {
+            if (!candidate.storage) continue;
+            for (std::size_t index = 0u;
+                 index < candidate.stringBlock4Offsets.size(); ++index)
+            {
+                if (candidate.stringBlock4Offsets[index] == target.offset &&
+                    candidate.storage->strings[index])
+                {
+                    value = candidate.storage->strings[index];
+                    offset = target.offset;
+                    return true;
+                }
+            }
+            for (std::size_t index = 0u;
+                 index < candidate.soundNameStringBlock4Offsets.size(); ++index)
+            {
+                if (candidate.soundNameStringBlock4Offsets[index] == target.offset &&
+                    candidate.storage->soundNames[index])
+                {
+                    value = candidate.storage->soundNames[index];
+                    offset = target.offset;
+                    return true;
+                }
+            }
+            for (std::size_t index = 0u;
+                 index < candidate.bounceSoundNameStringBlock4Offsets.size();
+                 ++index)
+            {
+                if (candidate.bounceSoundNameStringBlock4Offsets[index] ==
+                        target.offset &&
+                    candidate.storage->bounceSoundNames[index])
+                {
+                    value = candidate.storage->bounceSoundNames[index];
+                    offset = target.offset;
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    bool ResolvePriorWeaponSoundCell(
+        std::uint32_t token,
+        std::shared_ptr<std::string> &value) noexcept
+    {
+        ZoneSpan target;
+        if (!DecodeZoneAliasToken(token, target) || target.block != 4u)
+            return false;
+        for (RetailPublishedWeaponDef &candidate : result.worldWeapons)
+        {
+            if (!candidate.storage) continue;
+            for (std::size_t index = 0u;
+                 index < candidate.soundNameCellBlock4Offsets.size(); ++index)
+            {
+                if (candidate.soundNameCellBlock4Offsets[index] == target.offset &&
+                    candidate.storage->soundNames[index])
+                {
+                    value = candidate.storage->soundNames[index];
+                    return true;
+                }
+            }
+            for (std::size_t index = 0u;
+                 index < candidate.bounceSoundNameCellBlock4Offsets.size();
+                 ++index)
+            {
+                if (candidate.bounceSoundNameCellBlock4Offsets[index] ==
+                        target.offset &&
+                    candidate.storage->bounceSoundNames[index])
+                {
+                    value = candidate.storage->bounceSoundNames[index];
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    RetailCensusError FinishWorldWeaponSoundName(
+        const std::shared_ptr<std::string> &name) noexcept
+    {
+        if (!name || !ValidPublishedName(*name))
+            return RetailCensusError::WeaponSoundNameInvalid;
+        if (soundLookup.function == nullptr)
+            return RetailCensusError::WeaponSoundLookupFailed;
+        snd_alias_list_t *alias =
+            soundLookup.function(*name, soundLookup.userData);
+        if (alias == nullptr)
+            return RetailCensusError::WeaponSoundLookupFailed;
+        RetailPublishedWeaponDef &entry = result.worldWeapons[worldWeaponIndex];
+        if (worldWeaponSoundIsBounce)
+        {
+            if (!entry.storage->bounceSounds || worldWeaponSoundIndex >= 29u)
+                return RetailCensusError::WeaponSoundNameInvalid;
+            entry.storage->bounceSoundNames[worldWeaponSoundIndex] = name;
+            (*entry.storage->bounceSounds)[worldWeaponSoundIndex] = alias;
+            ++worldWeaponBounceIndex;
+        }
+        else
+        {
+            entry.storage->soundNames[worldWeaponSoundIndex] = name;
+            AssignWeaponSound(*entry.asset, worldWeaponSoundIndex, alias);
+            ++worldWeaponOperationIndex;
+        }
+        return RetailCensusError::None;
+    }
+
     RetailCensusError BeginWorldWeaponDef(
         std::uint32_t assetIndex,
         RetailCensusStage &stage) noexcept
@@ -1355,6 +1763,10 @@ struct RetailFastfileCensusJob::Impl
         entry.serializedReference = worldAssetReferences[assetIndex];
         entry.headerBlock0Offset = headerSpan.offset;
         entry.stringBlock4Offsets.fill(UINT32_MAX);
+        entry.soundNameCellBlock4Offsets.fill(UINT32_MAX);
+        entry.soundNameStringBlock4Offsets.fill(UINT32_MAX);
+        entry.bounceSoundNameCellBlock4Offsets.fill(UINT32_MAX);
+        entry.bounceSoundNameStringBlock4Offsets.fill(UINT32_MAX);
         entry.accuracyKnotBlock4Offsets.fill(UINT32_MAX);
         if (worldWeaponHasInsertAlias)
             entry.insertPointerBlock4Offset = worldWeaponInsertAliasSlot.offset;
@@ -1373,6 +1785,17 @@ struct RetailFastfileCensusJob::Impl
         }
         worldWeaponOperationIndex = 0u;
         worldWeaponStringReferences.fill(0u);
+        worldWeaponXModelReferences.fill(0u);
+        worldWeaponFxReferences.fill(0u);
+        worldWeaponMaterialReferences.fill(0u);
+        worldWeaponSoundReferences.fill(0u);
+        worldWeaponBounceSoundReference = 0u;
+        worldWeaponBounceSoundReferences.fill(0u);
+        worldWeaponSoundStringReference = 0u;
+        worldWeaponSoundIndex = 0u;
+        worldWeaponSoundIsBounce = false;
+        worldWeaponBounceActive = false;
+        worldWeaponBounceIndex = 0u;
         worldWeaponAccuracyReferences.fill(0u);
         result.worldNextAssetIndex = assetIndex;
         result.nextBodyIndex = assetIndex;
@@ -1389,6 +1812,54 @@ struct RetailFastfileCensusJob::Impl
         WeaponDef &weapon = *entry.asset;
         while (worldWeaponOperationIndex < WEAPON_OPERATIONS.size())
         {
+            if (worldWeaponBounceActive)
+            {
+                if (worldWeaponBounceIndex >=
+                    worldWeaponBounceSoundReferences.size())
+                {
+                    weapon.bounceSound = entry.storage->bounceSounds->data();
+                    worldWeaponBounceActive = false;
+                    ++worldWeaponOperationIndex;
+                    continue;
+                }
+                worldWeaponSoundIsBounce = true;
+                worldWeaponSoundIndex = worldWeaponBounceIndex;
+                const std::uint32_t token =
+                    worldWeaponBounceSoundReferences[worldWeaponBounceIndex];
+                if (token == 0u)
+                {
+                    (*entry.storage->bounceSounds)[worldWeaponBounceIndex] = nullptr;
+                    ++worldWeaponBounceIndex;
+                    continue;
+                }
+                if (token == INLINE_POINTER)
+                {
+                    if (4u > limits.maxWeaponPayloadBytes - entry.payloadBytes ||
+                        4u > limits.maxRetainedWeaponBytes - retainedWeaponBytes)
+                    {
+                        return RetailCensusError::WeaponPayloadLimit;
+                    }
+                    ZoneSpan span;
+                    if (const RetailCensusError error = Plan(4u, 4u, &span);
+                        error != RetailCensusError::None) return error;
+                    entry.bounceSoundNameCellBlock4Offsets[
+                        worldWeaponBounceIndex] = span.offset;
+                    entry.payloadBytes += 4u;
+                    retainedWeaponBytes += 4u;
+                    stage = RetailCensusStage::WorldWeaponSoundNameCell;
+                    return RetailCensusError::None;
+                }
+                if (token == SHARED_POINTER)
+                    return RetailCensusError::WeaponSoundNameInvalid;
+                std::shared_ptr<std::string> name;
+                if (!ResolvePriorWeaponSoundCell(token, name))
+                    return RetailCensusError::WeaponSoundNameInvalid;
+                if (const RetailCensusError error =
+                        FinishWorldWeaponSoundName(name);
+                    error != RetailCensusError::None) return error;
+                continue;
+            }
+
             const WorldWeaponOperation operation =
                 WEAPON_OPERATIONS[worldWeaponOperationIndex];
             if (operation.kind == WorldWeaponOperationKind::String)
@@ -1408,39 +1879,218 @@ struct RetailFastfileCensusJob::Impl
                 }
                 if (token == SHARED_POINTER)
                     return RetailCensusError::WeaponStringInvalid;
-                ZoneSpan target;
-                if (!DecodeZoneAliasToken(token, target) || target.block != 4u)
+                std::shared_ptr<std::string> resolved;
+                std::uint32_t resolvedOffset = UINT32_MAX;
+                if (!ResolvePriorZoneStringPayload(
+                        token, resolved, resolvedOffset))
                     return RetailCensusError::WeaponStringInvalid;
-                bool found = false;
-                for (std::size_t weaponIndex = 0u;
-                     weaponIndex <= worldWeaponIndex && !found;
-                     ++weaponIndex)
+                entry.storage->strings[operation.index] = std::move(resolved);
+                entry.stringBlock4Offsets[operation.index] = resolvedOffset;
+                AssignWeaponString(
+                    weapon,
+                    operation.index,
+                    entry.storage->strings[operation.index]->c_str());
+                ++worldWeaponOperationIndex;
+                continue;
+            }
+
+            if (operation.kind == WorldWeaponOperationKind::XModel)
+            {
+                const std::uint32_t token =
+                    worldWeaponXModelReferences[operation.index];
+                if (token == 0u)
                 {
-                    RetailPublishedWeaponDef &candidate =
-                        result.worldWeapons[weaponIndex];
-                    if (!candidate.storage) continue;
-                    for (std::size_t stringIndex = 0u;
-                         stringIndex < candidate.stringBlock4Offsets.size();
-                         ++stringIndex)
+                    AssignWeaponXModel(weapon, operation.index, nullptr);
+                    ++worldWeaponOperationIndex;
+                    continue;
+                }
+                if (token == INLINE_POINTER || token == SHARED_POINTER)
+                    return RetailCensusError::WeaponDependencyUnsupported;
+                std::uint32_t identity = 0u;
+                if (registry.ResolveAlias(
+                        token, ASSET_TYPE_XMODEL, identity) !=
+                    ZoneRegistryError::None)
+                {
+                    return RetailCensusError::WeaponDependencyUnsupported;
+                }
+                const auto found = std::find_if(
+                    result.worldXModels.begin(), result.worldXModels.end(),
+                    [identity](const RetailWorldXModel &candidate) {
+                        return candidate.published && candidate.identity == identity &&
+                            candidate.asset;
+                    });
+                if (found == result.worldXModels.end())
+                    return RetailCensusError::WeaponDependencyUnsupported;
+                AssignWeaponXModel(weapon, operation.index, found->asset.get());
+                ++worldWeaponOperationIndex;
+                continue;
+            }
+
+            if (operation.kind == WorldWeaponOperationKind::Fx)
+            {
+                const std::uint32_t token =
+                    worldWeaponFxReferences[operation.index];
+                if (token == 0u)
+                {
+                    AssignWeaponFx(weapon, operation.index, nullptr);
+                    ++worldWeaponOperationIndex;
+                    continue;
+                }
+                if (token == INLINE_POINTER || token == SHARED_POINTER)
+                    return RetailCensusError::WeaponDependencyUnsupported;
+                std::uint32_t identity = 0u;
+                if (registry.ResolveAlias(token, ASSET_TYPE_FX, identity) !=
+                    ZoneRegistryError::None)
+                {
+                    return RetailCensusError::WeaponDependencyUnsupported;
+                }
+                const auto found = std::find_if(
+                    result.worldFxEffects.begin(), result.worldFxEffects.end(),
+                    [identity](const RetailWorldFxEffectDef &candidate) {
+                        return candidate.published && candidate.identity == identity &&
+                            candidate.asset;
+                    });
+                if (found == result.worldFxEffects.end())
+                    return RetailCensusError::WeaponDependencyUnsupported;
+                AssignWeaponFx(weapon, operation.index, found->asset.get());
+                ++worldWeaponOperationIndex;
+                continue;
+            }
+
+            if (operation.kind == WorldWeaponOperationKind::Material)
+            {
+                const std::uint32_t token =
+                    worldWeaponMaterialReferences[operation.index];
+                if (token == 0u)
+                {
+                    AssignWeaponMaterial(weapon, operation.index, nullptr);
+                    ++worldWeaponOperationIndex;
+                    continue;
+                }
+                if (token == INLINE_POINTER || token == SHARED_POINTER)
+                    return RetailCensusError::WeaponDependencyUnsupported;
+                std::uint32_t identity = 0u;
+                if (registry.ResolveAlias(token, ASSET_TYPE_MATERIAL, identity) !=
+                    ZoneRegistryError::None)
+                {
+                    return RetailCensusError::WeaponDependencyUnsupported;
+                }
+                Material *resolved = nullptr;
+                for (const RetailWorldXModel &model : result.worldXModels)
+                {
+                    const auto found = std::find_if(
+                        model.materials.begin(), model.materials.end(),
+                        [identity](const RetailXModelMaterial &candidate) {
+                            return candidate.published &&
+                                candidate.identity == identity && candidate.asset;
+                        });
+                    if (found != model.materials.end())
                     {
-                        if (candidate.stringBlock4Offsets[stringIndex] !=
-                                target.offset ||
-                            !candidate.storage->strings[stringIndex])
-                        {
-                            continue;
-                        }
-                        entry.storage->strings[operation.index] =
-                            candidate.storage->strings[stringIndex];
-                        entry.stringBlock4Offsets[operation.index] = target.offset;
-                        AssignWeaponString(
-                            weapon,
-                            operation.index,
-                            entry.storage->strings[operation.index]->c_str());
-                        found = true;
+                        resolved = found->asset.get();
                         break;
                     }
                 }
-                if (!found) return RetailCensusError::WeaponStringInvalid;
+                for (const RetailWorldFxEffectDef &effect : result.worldFxEffects)
+                {
+                    if (resolved != nullptr) break;
+                    const auto found = std::find_if(
+                        effect.materials.begin(), effect.materials.end(),
+                        [identity](const RetailWorldFxMaterial &candidate) {
+                            return candidate.published &&
+                                candidate.identity == identity && candidate.asset;
+                        });
+                    if (found != effect.materials.end())
+                        resolved = found->asset.get();
+                }
+                if (resolved == nullptr)
+                    return RetailCensusError::WeaponDependencyUnsupported;
+                AssignWeaponMaterial(weapon, operation.index, resolved);
+                ++worldWeaponOperationIndex;
+                continue;
+            }
+
+            if (operation.kind == WorldWeaponOperationKind::Sound)
+            {
+                const std::uint32_t token =
+                    worldWeaponSoundReferences[operation.index];
+                if (token == 0u)
+                {
+                    AssignWeaponSound(weapon, operation.index, nullptr);
+                    ++worldWeaponOperationIndex;
+                    continue;
+                }
+                worldWeaponSoundIsBounce = false;
+                worldWeaponSoundIndex = operation.index;
+                if (token == INLINE_POINTER)
+                {
+                    if (4u > limits.maxWeaponPayloadBytes - entry.payloadBytes ||
+                        4u > limits.maxRetainedWeaponBytes - retainedWeaponBytes)
+                    {
+                        return RetailCensusError::WeaponPayloadLimit;
+                    }
+                    ZoneSpan span;
+                    if (const RetailCensusError error = Plan(4u, 4u, &span);
+                        error != RetailCensusError::None) return error;
+                    entry.soundNameCellBlock4Offsets[operation.index] = span.offset;
+                    entry.payloadBytes += 4u;
+                    retainedWeaponBytes += 4u;
+                    stage = RetailCensusStage::WorldWeaponSoundNameCell;
+                    return RetailCensusError::None;
+                }
+                if (token == SHARED_POINTER)
+                    return RetailCensusError::WeaponSoundNameInvalid;
+                std::shared_ptr<std::string> name;
+                if (!ResolvePriorWeaponSoundCell(token, name))
+                    return RetailCensusError::WeaponSoundNameInvalid;
+                if (const RetailCensusError error =
+                        FinishWorldWeaponSoundName(name);
+                    error != RetailCensusError::None) return error;
+                continue;
+            }
+
+            if (operation.kind == WorldWeaponOperationKind::BounceSound)
+            {
+                const std::uint32_t token = worldWeaponBounceSoundReference;
+                if (token == 0u)
+                {
+                    weapon.bounceSound = nullptr;
+                    ++worldWeaponOperationIndex;
+                    continue;
+                }
+                if (token == INLINE_POINTER)
+                {
+                    constexpr std::uint32_t bytes = 29u * 4u;
+                    if (bytes > limits.maxWeaponPayloadBytes - entry.payloadBytes ||
+                        bytes > limits.maxRetainedWeaponBytes - retainedWeaponBytes)
+                    {
+                        return RetailCensusError::WeaponPayloadLimit;
+                    }
+                    ZoneSpan span;
+                    if (const RetailCensusError error = Plan(4u, bytes, &span);
+                        error != RetailCensusError::None) return error;
+                    entry.bounceSoundArrayBlock4Offset = span.offset;
+                    entry.payloadBytes += bytes;
+                    retainedWeaponBytes += bytes;
+                    stage = RetailCensusStage::WorldWeaponBounceSoundCells;
+                    return RetailCensusError::None;
+                }
+                if (token == SHARED_POINTER)
+                    return RetailCensusError::WeaponSoundNameInvalid;
+                ZoneSpan target;
+                if (!DecodeZoneAliasToken(token, target) || target.block != 4u)
+                    return RetailCensusError::WeaponSoundNameInvalid;
+                const auto found = std::find_if(
+                    result.worldWeapons.begin(), result.worldWeapons.end(),
+                    [&](const RetailPublishedWeaponDef &candidate) {
+                        return candidate.storage &&
+                            candidate.storage->bounceSounds &&
+                            candidate.bounceSoundArrayBlock4Offset == target.offset;
+                    });
+                if (found == result.worldWeapons.end())
+                    return RetailCensusError::WeaponSoundNameInvalid;
+                entry.storage->bounceSounds = found->storage->bounceSounds;
+                entry.bounceSoundArrayBlock4Offset = target.offset;
+                weapon.bounceSound = entry.storage->bounceSounds->data();
                 ++worldWeaponOperationIndex;
                 continue;
             }
@@ -2123,6 +2773,11 @@ struct RetailFastfileCensusJob::Impl
                     std::shared_ptr<WeaponDef> priorAsset;
                     std::shared_ptr<CanonicalWeaponDefStorage> priorStorage;
                     std::array<std::uint32_t, 48> priorStringOffsets{};
+                    std::array<std::uint32_t, 48> priorSoundCellOffsets{};
+                    std::array<std::uint32_t, 48> priorSoundStringOffsets{};
+                    std::array<std::uint32_t, 29> priorBounceCellOffsets{};
+                    std::array<std::uint32_t, 29> priorBounceStringOffsets{};
+                    std::uint32_t priorBounceArrayOffset = UINT32_MAX;
                     std::array<std::uint32_t, 4> priorKnotOffsets{};
                     if (result.nextBodyReference != 0u)
                     {
@@ -2144,6 +2799,16 @@ struct RetailFastfileCensusJob::Impl
                         priorAsset = found->asset;
                         priorStorage = found->storage;
                         priorStringOffsets = found->stringBlock4Offsets;
+                        priorSoundCellOffsets =
+                            found->soundNameCellBlock4Offsets;
+                        priorSoundStringOffsets =
+                            found->soundNameStringBlock4Offsets;
+                        priorBounceCellOffsets =
+                            found->bounceSoundNameCellBlock4Offsets;
+                        priorBounceStringOffsets =
+                            found->bounceSoundNameStringBlock4Offsets;
+                        priorBounceArrayOffset =
+                            found->bounceSoundArrayBlock4Offset;
                         priorKnotOffsets = found->accuracyKnotBlock4Offsets;
                     }
                     try { result.worldWeapons.emplace_back(); }
@@ -2162,6 +2827,15 @@ struct RetailFastfileCensusJob::Impl
                         entry.asset = std::move(priorAsset);
                         entry.storage = std::move(priorStorage);
                         entry.stringBlock4Offsets = priorStringOffsets;
+                        entry.soundNameCellBlock4Offsets = priorSoundCellOffsets;
+                        entry.soundNameStringBlock4Offsets =
+                            priorSoundStringOffsets;
+                        entry.bounceSoundNameCellBlock4Offsets =
+                            priorBounceCellOffsets;
+                        entry.bounceSoundNameStringBlock4Offsets =
+                            priorBounceStringOffsets;
+                        entry.bounceSoundArrayBlock4Offset =
+                            priorBounceArrayOffset;
                         entry.accuracyKnotBlock4Offsets = priorKnotOffsets;
                     }
                     nextStage = RetailCensusStage::WorldWeaponPublish;
@@ -2614,9 +3288,12 @@ struct RetailFastfileCensusJob::Impl
                     try
                     {
                         model.materials.emplace_back();
+                        model.materials.back().asset =
+                            std::make_shared<Material>();
                     }
                     catch (...) { return RetailCensusError::AllocationFailed; }
                     RetailXModelMaterial &material = model.materials.back();
+                    *material.asset = {};
                     material.handleIndex = worldMaterialIndex;
                     material.headerBlock0Offset = span.offset;
                     worldTextureIndex = 0u;
@@ -3804,6 +4481,12 @@ struct RetailFastfileCensusJob::Impl
                 effect.loopingElemCount = static_cast<std::uint32_t>(looping);
                 effect.oneShotElemCount = static_cast<std::uint32_t>(oneShot);
                 effect.emissionElemCount = static_cast<std::uint32_t>(emission);
+                effect.asset->flags = effect.flags;
+                effect.asset->totalSize = effect.totalSize;
+                effect.asset->msecLoopingLife = effect.msecLoopingLife;
+                effect.asset->elemDefCountLooping = looping;
+                effect.asset->elemDefCountOneShot = oneShot;
+                effect.asset->elemDefCountEmission = emission;
                 cursor += FX_EFFECT_DEF_BYTES;
                 ++report.recordsProcessed;
                 if (const RetailCensusError error = Push(4u);
@@ -3843,10 +4526,13 @@ struct RetailFastfileCensusJob::Impl
                     effect.name.assign(
                         reinterpret_cast<const char *>(inflated.data() + cursor),
                         bytes - 1u);
+                    effect.canonicalName =
+                        std::make_shared<std::string>(effect.name);
                 }
                 catch (...) { return RetailCensusError::AllocationFailed; }
                 if (!ValidPublishedName(effect.name))
                     return RetailCensusError::FxEffectNameInvalid;
+                effect.asset->name = effect.canonicalName->c_str();
                 cursor += bytes;
                 ++report.recordsProcessed;
                 const std::uint64_t elemCount =
@@ -3875,7 +4561,20 @@ struct RetailFastfileCensusJob::Impl
                 const int visit = visitRecord(bytes);
                 if (visit <= 0) return RetailCensusError::None;
                 std::vector<RetailWorldFxElemDef> elems;
-                try { elems.resize(elemCount); }
+                try
+                {
+                    elems.resize(elemCount);
+                    effect.canonicalElemDefWords =
+                        std::make_shared<std::vector<std::uint32_t>>(
+                            elemCount * (FX_ELEM_DEF_BYTES / 4u));
+                    std::memcpy(
+                        effect.canonicalElemDefWords->data(),
+                        inflated.data() + cursor,
+                        bytes);
+                    effect.asset->elemDefs =
+                        reinterpret_cast<const FxElemDef *>(
+                            effect.canonicalElemDefWords->data());
+                }
                 catch (...) { return RetailCensusError::AllocationFailed; }
                 std::uint64_t visualCountTotal = 0u;
                 for (std::size_t index = 0u; index < elemCount; ++index)
@@ -4101,10 +4800,16 @@ struct RetailFastfileCensusJob::Impl
                         if (const RetailCensusError error = Plan(
                                 4u, MATERIAL_BYTES, &span);
                             error != RetailCensusError::None) return error;
-                        try { activeWorldFx().materials.emplace_back(); }
+                        try
+                        {
+                            activeWorldFx().materials.emplace_back();
+                            activeWorldFx().materials.back().asset =
+                                std::make_shared<Material>();
+                        }
                         catch (...) { return RetailCensusError::AllocationFailed; }
                         RetailWorldFxMaterial &material =
                             activeWorldFx().materials.back();
+                        *material.asset = {};
                         material.handleIndex = worldFxVisualIndex;
                         material.headerBlock0Offset = span.offset;
                         worldTextureIndex = 0u;
@@ -4380,39 +5085,33 @@ struct RetailFastfileCensusJob::Impl
                     worldWeaponAccuracyReferences[index] =
                         ReadU32(record + WEAPON_ACCURACY_KNOT_OFFSETS[index]);
                 }
+                for (std::size_t index = 0u;
+                     index < WEAPON_XMODEL_OFFSETS.size(); ++index)
+                {
+                    worldWeaponXModelReferences[index] =
+                        ReadU32(record + WEAPON_XMODEL_OFFSETS[index]);
+                }
+                for (std::size_t index = 0u;
+                     index < WEAPON_FX_OFFSETS.size(); ++index)
+                {
+                    worldWeaponFxReferences[index] =
+                        ReadU32(record + WEAPON_FX_OFFSETS[index]);
+                }
+                for (std::size_t index = 0u;
+                     index < WEAPON_MATERIAL_OFFSETS.size(); ++index)
+                {
+                    worldWeaponMaterialReferences[index] =
+                        ReadU32(record + WEAPON_MATERIAL_OFFSETS[index]);
+                }
+                for (std::size_t index = 0u;
+                     index < WEAPON_SOUND_OFFSETS.size(); ++index)
+                {
+                    worldWeaponSoundReferences[index] =
+                        ReadU32(record + WEAPON_SOUND_OFFSETS[index]);
+                }
+                worldWeaponBounceSoundReference = ReadU32(record + 520u);
                 if (worldWeaponStringReferences[0u] == 0u)
                     return RetailCensusError::WeaponNameInvalid;
-
-                auto requireNullRange = [&](std::uint32_t begin,
-                                            std::uint32_t count) noexcept {
-                    for (std::uint32_t index = 0u; index < count; ++index)
-                    {
-                        if (ReadU32(record + begin + index * 4u) != 0u)
-                            return false;
-                    }
-                    return true;
-                };
-                if (!requireNullRange(12u, 17u) ||
-                    !requireNullRange(332u, 2u) ||
-                    !requireNullRange(340u, 45u) ||
-                    ReadU32(record + 520u) != 0u ||
-                    !requireNullRange(524u, 6u) ||
-                    !requireNullRange(700u, 20u) ||
-                    ReadU32(record + 780u) != 0u ||
-                    ReadU32(record + 788u) != 0u ||
-                    !requireNullRange(1072u, 2u) ||
-                    ReadU32(record + 1304u) != 0u ||
-                    ReadU32(record + 1316u) != 0u ||
-                    ReadU32(record + 1412u) != 0u ||
-                    ReadU32(record + 1420u) != 0u ||
-                    ReadU32(record + 1428u) != 0u ||
-                    !requireNullRange(1432u, 2u) ||
-                    ReadU32(record + 1704u) != 0u ||
-                    ReadU32(record + 1732u) != 0u ||
-                    ReadU32(record + 1736u) != 0u)
-                {
-                    return RetailCensusError::WeaponDependencyUnsupported;
-                }
 
                 for (const std::pair<std::uint32_t, std::uint32_t> range : {
                          std::pair{216u, 8u},
@@ -4502,6 +5201,131 @@ struct RetailFastfileCensusJob::Impl
                 cursor += bytes;
                 ++report.recordsProcessed;
                 ++worldWeaponOperationIndex;
+                if (const RetailCensusError error =
+                        ScheduleWorldWeaponOperation(stage);
+                    error != RetailCensusError::None) return error;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldWeaponSoundNameCell)
+            {
+                const int visit = visitRecord(4u);
+                if (visit <= 0) return RetailCensusError::None;
+                worldWeaponSoundStringReference = ReadU32(
+                    inflated.data() + cursor);
+                cursor += 4u;
+                ++report.recordsProcessed;
+                if (worldWeaponSoundStringReference == 0u ||
+                    worldWeaponSoundStringReference == SHARED_POINTER)
+                {
+                    return RetailCensusError::WeaponSoundNameInvalid;
+                }
+                if (worldWeaponSoundStringReference == INLINE_POINTER)
+                {
+                    stage = RetailCensusStage::WorldWeaponSoundName;
+                    continue;
+                }
+                std::shared_ptr<std::string> name;
+                std::uint32_t stringOffset = UINT32_MAX;
+                if (!ResolvePriorZoneStringPayload(
+                        worldWeaponSoundStringReference, name, stringOffset))
+                {
+                    return RetailCensusError::WeaponSoundNameInvalid;
+                }
+                RetailPublishedWeaponDef &entry = activeWorldWeapon();
+                if (worldWeaponSoundIsBounce)
+                    entry.bounceSoundNameStringBlock4Offsets[
+                        worldWeaponSoundIndex] = stringOffset;
+                else
+                    entry.soundNameStringBlock4Offsets[
+                        worldWeaponSoundIndex] = stringOffset;
+                if (const RetailCensusError error =
+                        FinishWorldWeaponSoundName(name);
+                    error != RetailCensusError::None) return error;
+                if (const RetailCensusError error =
+                        ScheduleWorldWeaponOperation(stage);
+                    error != RetailCensusError::None) return error;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldWeaponSoundName)
+            {
+                RetailPublishedWeaponDef &entry = activeWorldWeapon();
+                const auto begin = inflated.begin() +
+                    static_cast<std::ptrdiff_t>(cursor);
+                const auto terminator = std::find(begin, inflated.end(), 0u);
+                if (terminator == inflated.end())
+                {
+                    if (inflated.size() - cursor >= limits.maxWeaponStringBytes)
+                        return RetailCensusError::WeaponSoundNameTooLong;
+                    blocked = true;
+                    return RetailCensusError::None;
+                }
+                const std::size_t bytes =
+                    static_cast<std::size_t>(terminator - begin) + 1u;
+                if (bytes <= 1u)
+                    return RetailCensusError::WeaponSoundNameInvalid;
+                if (bytes > limits.maxWeaponStringBytes)
+                    return RetailCensusError::WeaponSoundNameTooLong;
+                if (recordVisited == 0u)
+                {
+                    if (bytes > limits.maxWeaponPayloadBytes - entry.payloadBytes ||
+                        bytes > limits.maxRetainedWeaponBytes - retainedWeaponBytes)
+                    {
+                        return RetailCensusError::WeaponPayloadLimit;
+                    }
+                    ZoneSpan span;
+                    if (const RetailCensusError error = Plan(1u, bytes, &span);
+                        error != RetailCensusError::None) return error;
+                    if (worldWeaponSoundIsBounce)
+                        entry.bounceSoundNameStringBlock4Offsets[
+                            worldWeaponSoundIndex] = span.offset;
+                    else
+                        entry.soundNameStringBlock4Offsets[
+                            worldWeaponSoundIndex] = span.offset;
+                    entry.payloadBytes += static_cast<std::uint32_t>(bytes);
+                    retainedWeaponBytes += bytes;
+                }
+                const int visitString = visitRecord(bytes);
+                if (visitString <= 0) return RetailCensusError::None;
+                std::shared_ptr<std::string> name;
+                try
+                {
+                    name = std::make_shared<std::string>(
+                        reinterpret_cast<const char *>(inflated.data() + cursor),
+                        bytes - 1u);
+                }
+                catch (...) { return RetailCensusError::AllocationFailed; }
+                cursor += bytes;
+                ++report.recordsProcessed;
+                if (const RetailCensusError error =
+                        FinishWorldWeaponSoundName(name);
+                    error != RetailCensusError::None) return error;
+                if (const RetailCensusError error =
+                        ScheduleWorldWeaponOperation(stage);
+                    error != RetailCensusError::None) return error;
+                continue;
+            }
+            if (stage == RetailCensusStage::WorldWeaponBounceSoundCells)
+            {
+                constexpr std::size_t bytes = 29u * 4u;
+                const int visit = visitRecord(bytes);
+                if (visit <= 0) return RetailCensusError::None;
+                for (std::size_t index = 0u;
+                     index < worldWeaponBounceSoundReferences.size(); ++index)
+                {
+                    worldWeaponBounceSoundReferences[index] = ReadU32(
+                        inflated.data() + cursor + index * 4u);
+                }
+                try
+                {
+                    activeWorldWeapon().storage->bounceSounds =
+                        std::make_shared<std::vector<snd_alias_list_t *>>(
+                            29u, nullptr);
+                }
+                catch (...) { return RetailCensusError::AllocationFailed; }
+                cursor += bytes;
+                ++report.recordsProcessed;
+                worldWeaponBounceActive = true;
+                worldWeaponBounceIndex = 0u;
                 if (const RetailCensusError error =
                         ScheduleWorldWeaponOperation(stage);
                     error != RetailCensusError::None) return error;
@@ -5418,6 +6242,42 @@ struct RetailFastfileCensusJob::Impl
                 model.physPresetReference = ReadU32(record + 212u);
                 model.physGeomsReference = ReadU32(record + 216u);
 
+                XModel &canonical = *model.asset;
+                canonical.numBones = model.numBones;
+                canonical.numRootBones = model.numRootBones;
+                canonical.numsurfs = model.surfaceCount;
+                canonical.lodRampType = model.lodRampType;
+                for (std::size_t index = 0u; index < model.lods.size(); ++index)
+                {
+                    canonical.lodInfo[index].dist = model.lods[index].distance;
+                    canonical.lodInfo[index].numsurfs =
+                        model.lods[index].surfaceCount;
+                    canonical.lodInfo[index].surfIndex =
+                        model.lods[index].surfaceIndex;
+                    for (std::size_t bit = 0u; bit < 4u; ++bit)
+                    {
+                        canonical.lodInfo[index].partBits[bit] =
+                            static_cast<int>(model.lods[index].partBits[bit]);
+                    }
+                    canonical.lodInfo[index].lod = model.lods[index].lod;
+                    canonical.lodInfo[index].smcIndexPlusOne =
+                        model.lods[index].smcIndexPlusOne;
+                    canonical.lodInfo[index].smcAllocBits =
+                        model.lods[index].smcAllocBits;
+                    canonical.lodInfo[index].unused = 0u;
+                }
+                canonical.numCollSurfs =
+                    static_cast<int>(model.collisionSurfaceCount);
+                canonical.contents = static_cast<int>(model.contents);
+                canonical.radius = model.radius;
+                std::copy(model.mins.begin(), model.mins.end(), canonical.mins);
+                std::copy(model.maxs.begin(), model.maxs.end(), canonical.maxs);
+                canonical.numLods = model.lodCount;
+                canonical.collLod = model.collisionLod;
+                canonical.memUsage = static_cast<int>(model.memoryUsage);
+                canonical.flags = model.flags;
+                canonical.bad = model.bad;
+
                 const std::uint32_t childBones =
                     static_cast<std::uint32_t>(model.numBones) -
                     static_cast<std::uint32_t>(model.numRootBones);
@@ -5510,12 +6370,15 @@ struct RetailFastfileCensusJob::Impl
                 {
                     model.name.assign(
                         reinterpret_cast<const char *>(inflated.data() + cursor), bytes - 1u);
+                    model.canonicalName =
+                        std::make_shared<std::string>(model.name);
                 }
                 catch (...) { return RetailCensusError::AllocationFailed; }
                 if (!ValidPublishedName(model.name))
                     return RetailCensusError::XModelNameInvalid;
                 if (model.lodCount == 0 && !model.name.starts_with(','))
                     return RetailCensusError::XModelCountInvalid;
+                model.asset->name = model.canonicalName->c_str();
                 cursor += bytes;
                 ++report.recordsProcessed;
                 stage = RetailCensusStage::WorldXModelBoneNames;
@@ -6517,6 +7380,22 @@ struct RetailFastfileCensusJob::Impl
                 {
                     return RetailCensusError::MaterialTechniqueSetInvalid;
                 }
+                Material &canonical = *material.asset;
+                canonical.info.gameFlags = record[4u];
+                canonical.info.sortKey = record[5u];
+                canonical.info.textureAtlasRowCount = record[6u];
+                canonical.info.textureAtlasColumnCount = record[7u];
+                std::memcpy(&canonical.info.drawSurf.packed, record + 8u, 8u);
+                canonical.info.surfaceTypeBits = ReadU32(record + 16u);
+                canonical.info.hashIndex = ReadU16(record + 20u);
+                canonical.info.padding = ReadU16(record + 22u);
+                std::memcpy(canonical.stateBitsEntry, record + 24u, 34u);
+                canonical.textureCount = material.textureCount;
+                canonical.constantCount = material.constantCount;
+                canonical.stateBitsCount = material.stateBitsCount;
+                canonical.stateFlags = record[61u];
+                canonical.cameraRegion = record[62u];
+                canonical.padding = record[63u];
                 for (std::size_t index = 0u;
                      material.techniqueSetReference != 0u && index < 34u;
                      ++index)
@@ -6564,10 +7443,13 @@ struct RetailFastfileCensusJob::Impl
                     material.name.assign(
                         reinterpret_cast<const char *>(inflated.data() + cursor),
                         bytes - 1u);
+                    material.canonicalName =
+                        std::make_shared<std::string>(material.name);
                 }
                 catch (...) { return RetailCensusError::AllocationFailed; }
                 if (!ValidPublishedName(material.name))
                     return RetailCensusError::MaterialNameInvalid;
+                material.asset->info.name = material.canonicalName->c_str();
                 cursor += bytes;
                 ++report.recordsProcessed;
                 stage = RetailCensusStage::WorldXModelMaterialTextures;
@@ -7726,6 +8608,45 @@ struct RetailFastfileCensusJob::Impl
             if (stage == RetailCensusStage::WorldXModelPublish)
             {
                 RetailWorldXModel &model = activeWorldXModel();
+                XModel &canonical = *model.asset;
+                canonical.boneNames = model.boneNameScriptStringIndices.empty()
+                    ? nullptr
+                    : model.boneNameScriptStringIndices.data();
+                canonical.parentList = model.parentList.empty()
+                    ? nullptr : model.parentList.data();
+                canonical.quats = model.quats.empty() ? nullptr : model.quats.data();
+                canonical.trans = model.trans.empty() ? nullptr : model.trans.data();
+                canonical.partClassification = model.partClassification.empty()
+                    ? nullptr : model.partClassification.data();
+                canonical.baseMat = model.baseMat.empty()
+                    ? nullptr
+                    : reinterpret_cast<DObjAnimMat *>(model.baseMat.data());
+                canonical.boneInfo = model.boneInfoData.empty()
+                    ? nullptr
+                    : reinterpret_cast<XBoneInfo *>(model.boneInfoData.data());
+                if (!model.materialIdentities.empty())
+                {
+                    try
+                    {
+                        model.canonicalMaterialHandles =
+                            std::make_shared<std::vector<Material *>>(
+                                model.materialIdentities.size(), nullptr);
+                    }
+                    catch (...) { return RetailCensusError::AllocationFailed; }
+                    for (std::size_t index = 0u;
+                         index < model.materialIdentities.size(); ++index)
+                    {
+                        const RetailXModelMaterial *material =
+                            findPublishedWorldMaterial(
+                                model.materialIdentities[index]);
+                        if (material == nullptr || !material->asset)
+                            return RetailCensusError::XModelMaterialAliasInvalid;
+                        (*model.canonicalMaterialHandles)[index] =
+                            material->asset.get();
+                    }
+                    canonical.materialHandles =
+                        model.canonicalMaterialHandles->data();
+                }
                 if (const RetailCensusError error = Pop();
                     error != RetailCensusError::None) return error;
                 if (const RetailCensusError error = Pop();
@@ -8772,7 +9693,8 @@ RetailCensusError RetailFastfileCensusJob::BeginStreaming(const RetailCensusLimi
 
 RetailCensusError RetailFastfileCensusJob::BeginStreaming(
     RetailCensusMode mode,
-    const RetailCensusLimits &limits) noexcept
+    const RetailCensusLimits &limits,
+    RetailSoundAliasLookup soundLookup) noexcept
 {
     Reset();
     if (!ValidLimits(limits)) return RetailCensusError::InvalidArgument;
@@ -8780,6 +9702,7 @@ RetailCensusError RetailFastfileCensusJob::BeginStreaming(
     catch (...) { return RetailCensusError::AllocationFailed; }
     impl_->limits = limits;
     impl_->mode = mode;
+    impl_->soundLookup = soundLookup;
     const SourceStreamError sourceError = impl_->source.Initialize({
         limits.maxFileBytes, limits.maxSourceChunkBytes});
     if (sourceError != SourceStreamError::None)

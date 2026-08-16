@@ -2,6 +2,7 @@
 
 #include <d3d9.h>
 
+#include <gfx_d3d/material_types.h>
 #include "r_gfx.h"
 
 #define SAMPLER_INDEX_INVALID 255
@@ -431,20 +432,6 @@ struct MaterialConstantDef // sizeof=0x20
     float literal[4];
 };
 
-struct MaterialInfo // sizeof=0x18
-{                                       // ...
-    const char *name;                   // ...
-    uint8_t gameFlags;
-    uint8_t sortKey;
-    uint8_t textureAtlasRowCount; // ...
-    uint8_t textureAtlasColumnCount; // ...
-    GfxDrawSurf drawSurf;
-    uint32_t surfaceTypeBits;
-    uint16_t hashIndex;
-    // padding byte
-    // padding byte
-};
-
 struct MaterialTechniqueSet // sizeof=0x94
 {                                       // ...
     const char *name;
@@ -456,52 +443,6 @@ struct MaterialTechniqueSet // sizeof=0x94
     MaterialTechnique *techniques[34];
 };
 static_assert(sizeof(MaterialTechniqueSet) == 148);
-
-struct Material // sizeof=0x50
-{                                       // ...
-    MaterialInfo info;
-    uint8_t stateBitsEntry[34];
-    uint8_t textureCount;
-    uint8_t constantCount;
-    uint8_t stateBitsCount;
-    uint8_t stateFlags;
-    uint8_t cameraRegion;
-    // padding byte
-    MaterialTechniqueSet *techniqueSet;
-    MaterialTextureDef *textureTable;
-    MaterialConstantDef *constantTable;
-    GfxStateBits *stateBitsTable;
-#ifdef KISAK_RADIANT
-    // EDITOR-ONLY trailing field. The CoD4Radiant.exe Material embeds a 56-byte
-    // MaterialInfo whose surfaceFlags lives at info+0x2C; the kisak SP/MP build uses
-    // the reduced 24-byte MaterialInfo (CoD3 layout) which has no surfaceFlags. Rather
-    // than widen the shared MaterialInfo (which would shift every SP/MP offset), the
-    // editor build stores the on-disk MaterialInfoRaw.surfaceFlags as a trailing field
-    // on Material. Material_CastsStencilShadow (0x4FEE90) reads it; populated in
-    // Material_LoadRaw from mtlRaw->info.surfaceFlags. SP/MP never compile this branch,
-    // so their Material stays byte-identical at 80 bytes.
-    int surfaceFlags;
-    // EDITOR-ONLY: the on-disk MaterialInfoRaw.usage (@+0x11, char) + .locale (@+0x14,
-    // uint32). In CoD4Radiant.exe these live in the embedded 56-byte MaterialInfo
-    // (usage@+0x1C / locale@+0x20) that Editor_AddRadiantMaterial (0x45a5b0) reads into
-    // qtexture_s.usage_index / .tex_num_or_localefilter to drive the texture-browser
-    // usage/locale filters (TexWnd_IterateMaterials 0x45ba70 LABEL_37). kisak's reduced
-    // 24-byte runtime MaterialInfo drops both, so the editor build stashes them here
-    // (same pattern as surfaceFlags above); populated in Material_LoadRaw. SP/MP never
-    // compile these.
-    uint16_t editorToolFlags; // raw MaterialInfoRaw.toolFlags
-    uint8_t  editorUsage;     // raw MaterialInfoRaw.usage  (qtexture usage_index)
-    uint32_t editorLocale;    // raw MaterialInfoRaw.locale (qtexture localefilter mask)
-#endif
-};
-#ifdef KISAK_RADIANT
-// surfaceFlags lands at offset 80 (right after stateBitsTable@76), editorUsage@84,
-// editorLocale@88; sizeof rounds to 96 because GfxDrawSurf (in MaterialInfo) forces
-// 8-byte alignment. The pad is harmless — the fields are read/written by name.
-static_assert(sizeof(Material) == 96);
-#else
-static_assert(sizeof(Material) == 80);
-#endif
 
 struct MaterialMemory // sizeof=0x8
 {                                       // ...

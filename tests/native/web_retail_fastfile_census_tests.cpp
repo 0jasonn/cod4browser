@@ -31,6 +31,31 @@ void Require(bool condition, const char *message)
     }
 }
 
+struct SyntheticWeaponSoundLookup
+{
+    std::array<std::uint32_t, 3> pickup{};
+    std::array<std::uint32_t, 3> bounce{};
+    std::uint32_t pickupLookups = 0u;
+    std::uint32_t bounceLookups = 0u;
+};
+
+snd_alias_list_t *LookupSyntheticWeaponSound(
+    std::string_view name, void *userData) noexcept
+{
+    auto &lookup = *static_cast<SyntheticWeaponSoundLookup *>(userData);
+    if (name == "web/pickup")
+    {
+        ++lookup.pickupLookups;
+        return reinterpret_cast<snd_alias_list_t *>(lookup.pickup.data());
+    }
+    if (name == "web/bounce")
+    {
+        ++lookup.bounceLookups;
+        return reinterpret_cast<snd_alias_list_t *>(lookup.bounce.data());
+    }
+    return nullptr;
+}
+
 void CollectSemanticTrace(
     const kisak::database::SemanticTraceEntry &entry, void *userData)
 {
@@ -1310,6 +1335,99 @@ std::vector<std::uint8_t> BuildReusableWorldWeaponLoaderInflated(
     return bytes;
 }
 
+std::vector<std::uint8_t> BuildWeaponCanonicalAliasDependenciesInflated(
+    bool withSounds = false)
+{
+    std::vector<std::uint8_t> bytes;
+    PutU32(bytes, 8192u);
+    PutU32(bytes, 0u);
+    for (const std::uint32_t block :
+         std::array<std::uint32_t, 9>{{
+             1024u * 1024u, 0u, 0u, 0u, 1024u * 1024u,
+             0u, 0u, 0u, 0u}})
+    {
+        PutU32(bytes, block);
+    }
+    PutU32(bytes, 1u);
+    PutU32(bytes, 0xffffffffu);
+    PutU32(bytes, 5u);
+    PutU32(bytes, 0xffffffffu);
+    PutU32(bytes, 0xffffffffu);
+    AppendString(bytes, "tag_none");
+    for (const std::uint32_t type : {5u, 3u, 25u, 23u, 16u})
+    {
+        PutU32(bytes, type);
+        PutU32(bytes, 0xffffffffu);
+    }
+
+    constexpr std::uint32_t xmodelAlias = 0x4000001du;
+    constexpr std::uint32_t fxAlias = 0x40000025u;
+    // The script table/name consume 13 bytes and align the asset table to
+    // offset 16. The table ends at 56. The technique, XModel, and FX
+    // names consume 14, 15, and 11 bytes, so the aligned FxElemDef starts at
+    // offset 96 and its inline visual handle cell is at 96 + 188.
+    constexpr std::uint32_t materialAlias = 0x4000011du;
+    constexpr std::uint32_t materialNameAlias = 0x4000015du;
+    constexpr std::uint32_t pickupSoundCellAlias = 0x4000017du;
+
+    std::vector<std::uint8_t> technique(148u, 0u);
+    SetU32(technique, 0u, 0xffffffffu);
+    bytes.insert(bytes.end(), technique.begin(), technique.end());
+    AppendString(bytes, ",web/dep_tech");
+
+    std::vector<std::uint8_t> model(220u, 0u);
+    SetU32(model, 0u, 0xffffffffu);
+    bytes.insert(bytes.end(), model.begin(), model.end());
+    AppendString(bytes, ",web/dep_model");
+
+    std::vector<std::uint8_t> effect(32u, 0u);
+    SetU32(effect, 0u, 0xffffffffu);
+    SetU32(effect, 16u, 1u);
+    SetU32(effect, 28u, 1u);
+    bytes.insert(bytes.end(), effect.begin(), effect.end());
+    AppendString(bytes, "web/dep_fx");
+
+    std::vector<std::uint8_t> elem(252u, 0u);
+    elem[177u] = 1u;
+    SetU32(elem, 188u, 0xffffffffu);
+    bytes.insert(bytes.end(), elem.begin(), elem.end());
+
+    std::vector<std::uint8_t> material(80u, 0u);
+    SetU32(material, 0u, 0xffffffffu);
+    std::fill(material.begin() + 24u, material.begin() + 58u, 0xffu);
+    bytes.insert(bytes.end(), material.begin(), material.end());
+    AppendString(bytes, "web/dep_material");
+
+    std::vector<std::uint8_t> weapon(2168u, 0u);
+    SetU32(weapon, 0u, 0xffffffffu);
+    SetU32(weapon, 8u, materialNameAlias);
+    SetU32(weapon, 12u, xmodelAlias);
+    SetU32(weapon, 332u, fxAlias);
+    SetU32(weapon, 540u, materialAlias);
+    if (withSounds)
+    {
+        SetU32(weapon, 340u, 0xffffffffu);
+        SetU32(weapon, 520u, 0xffffffffu);
+        SetU32(weapon, 1736u, pickupSoundCellAlias);
+    }
+    bytes.insert(bytes.end(), weapon.begin(), weapon.end());
+    AppendString(bytes, "web/dep_weapon");
+    if (withSounds)
+    {
+        PutU32(bytes, 0xffffffffu);
+        AppendString(bytes, "web/pickup");
+        for (std::size_t index = 0u; index < 29u; ++index)
+        {
+            PutU32(bytes, index == 0u
+                ? 0xffffffffu
+                : index == 1u ? pickupSoundCellAlias : 0u);
+        }
+        PutU32(bytes, 0xffffffffu);
+        AppendString(bytes, "web/bounce");
+    }
+    return bytes;
+}
+
 std::vector<std::uint8_t> BuildReusableWorldFxLoaderInflated(
     bool invalidMaterial)
 {
@@ -1390,11 +1508,13 @@ kisak::fastfile::RetailFastfileCensus Run(
     std::uint32_t stepRecords = 2u,
     std::uint32_t stepBytes = 3u,
     kisak::fastfile::RetailCensusMode mode =
-        kisak::fastfile::RetailCensusMode::CodePostGfxMaterial)
+        kisak::fastfile::RetailCensusMode::CodePostGfxMaterial,
+    kisak::fastfile::RetailSoundAliasLookup soundLookup = {})
 {
     using namespace kisak::fastfile;
     RetailFastfileCensusJob job;
-    Require(job.BeginStreaming(mode) == RetailCensusError::None, "census starts");
+    Require(job.BeginStreaming(mode, {}, soundLookup) ==
+        RetailCensusError::None, "census starts");
     std::size_t offset = 0u;
     std::uint32_t steps = 0u;
     while (job.Progress() == RetailCensusProgress::Running && steps++ < 10000u)
@@ -2153,6 +2273,39 @@ void TestReusableWorldXModelLoader()
         result.worldXModels[1].resolvedMaterials.size() == 1u &&
         result.worldXModels[1].resolvedImages.size() == 1u,
         "the reusable loader handles XModels separated by technique-set runs");
+    Require(result.worldXModels[0u].asset &&
+            result.worldXModels[0u].canonicalName &&
+            result.worldXModels[0u].asset->name ==
+                result.worldXModels[0u].canonicalName->c_str() &&
+            result.worldXModels[0u].asset->numBones ==
+                result.worldXModels[0u].numBones &&
+            result.worldXModels[0u].asset->numsurfs ==
+                result.worldXModels[0u].surfaceCount &&
+            result.worldXModels[0u].asset->materialHandles ==
+                result.worldXModels[0u].canonicalMaterialHandles->data() &&
+            result.worldXModels[0u].asset->materialHandles[0u] ==
+                result.worldXModels[0u].materials[0u].asset.get(),
+        "published XModels expose canonical scalar and material pointer identity");
+    Material *aliasedMaterial = nullptr;
+    for (const RetailWorldXModel &model : result.worldXModels)
+    {
+        const auto found = std::find_if(
+            model.materials.begin(), model.materials.end(),
+            [&](const RetailXModelMaterial &material) {
+                return material.identity ==
+                    result.worldXModels[1u].materialIdentities[0u];
+            });
+        if (found != model.materials.end())
+        {
+            aliasedMaterial = found->asset.get();
+            break;
+        }
+    }
+    Require(aliasedMaterial != nullptr && result.worldXModels[1u].asset &&
+            result.worldXModels[1u].asset->materialHandles &&
+            result.worldXModels[1u].asset->materialHandles[0u] ==
+                aliasedMaterial,
+        "canonical XModel material aliases preserve prior asset pointer identity");
     Require(result.worldTechniqueSets.size() == 5u &&
         result.worldTechniqueSets.back().assetIndex == 6u &&
         result.worldTechniqueSets.back().name ==
@@ -2620,6 +2773,85 @@ void TestReusableWorldWeaponDefLoader()
             copied.worldWeapons[1u].asset.get() ==
                 copied.worldWeapons[0u].asset.get(),
         "canonical WeaponDef ownership remains stable when a census result is copied");
+
+    const RetailFastfileCensus dependencies = Run(
+        BuildFile(BuildWeaponCanonicalAliasDependenciesInflated()),
+        7u, 2u, 3u, RetailCensusMode::WorldAssetLoader);
+    Require(dependencies.worldXModels.size() == 1u &&
+            dependencies.worldXModels[0u].published &&
+            dependencies.worldXModels[0u].asset &&
+            std::string_view(dependencies.worldXModels[0u].asset->name) ==
+                ",web/dep_model" &&
+            dependencies.worldFxEffects.size() == 1u &&
+            dependencies.worldFxEffects[0u].published &&
+            dependencies.worldFxEffects[0u].asset &&
+            std::string_view(dependencies.worldFxEffects[0u].asset->name) ==
+                "web/dep_fx" &&
+            dependencies.worldFxEffects[0u].asset->elemDefCountLooping == 1 &&
+            dependencies.worldFxEffects[0u].asset->elemDefs != nullptr &&
+            dependencies.worldFxEffects[0u].materials.size() == 1u &&
+            dependencies.worldFxEffects[0u].materials[0u].published &&
+            dependencies.worldFxEffects[0u].materials[0u].asset &&
+            std::string_view(
+                dependencies.worldFxEffects[0u].materials[0u].asset->info.name) ==
+                "web/dep_material",
+        "existing XModel, FX, and Material loaders expose canonical child objects");
+    Require(dependencies.worldWeapons.size() == 1u &&
+            dependencies.worldWeapons[0u].published &&
+            dependencies.worldWeapons[0u].asset &&
+            dependencies.worldWeapons[0u].asset->gunXModel[0u] ==
+                dependencies.worldXModels[0u].asset.get() &&
+            dependencies.worldWeapons[0u].asset->viewFlashEffect ==
+                dependencies.worldFxEffects[0u].asset.get() &&
+            dependencies.worldWeapons[0u].asset->reticleCenter ==
+                dependencies.worldFxEffects[0u].materials[0u].asset.get() &&
+            std::string_view(
+                dependencies.worldWeapons[0u].asset->szOverlayName) ==
+                "web/dep_material" &&
+            dependencies.completedAssetCount == 4u &&
+            dependencies.nextBodyType == ASSET_TYPE_GFXWORLD,
+        "WeaponDef alias handles resolve to canonical child pointer identity");
+
+    SyntheticWeaponSoundLookup soundCatalog;
+    const RetailFastfileCensus sounds = Run(
+        BuildFile(BuildWeaponCanonicalAliasDependenciesInflated(true)),
+        7u, 2u, 3u, RetailCensusMode::WorldAssetLoader,
+        {LookupSyntheticWeaponSound, &soundCatalog});
+    const RetailPublishedWeaponDef &soundWeapon = sounds.worldWeapons[0u];
+    Require(soundWeapon.published && soundWeapon.asset && soundWeapon.storage &&
+            soundWeapon.asset->pickupSound ==
+                reinterpret_cast<snd_alias_list_t *>(soundCatalog.pickup.data()) &&
+            soundWeapon.asset->projIgnitionSound ==
+                soundWeapon.asset->pickupSound &&
+            soundWeapon.asset->bounceSound &&
+            soundWeapon.asset->bounceSound[0u] ==
+                reinterpret_cast<snd_alias_list_t *>(soundCatalog.bounce.data()) &&
+            soundWeapon.asset->bounceSound[1u] ==
+                soundWeapon.asset->pickupSound &&
+            soundWeapon.asset->bounceSound[2u] == nullptr &&
+            soundWeapon.storage->soundNames[0u] &&
+            *soundWeapon.storage->soundNames[0u] == "web/pickup" &&
+            soundWeapon.storage->bounceSoundNames[0u] &&
+            *soundWeapon.storage->bounceSoundNames[0u] == "web/bounce" &&
+            soundCatalog.pickupLookups == 3u &&
+            soundCatalog.bounceLookups == 1u,
+        "native sound-name cells, aliases, bounce arrays, and DB lookup order resolve canonically");
+
+    RetailFastfileCensusJob missingSoundLookup;
+    const auto soundFile = BuildFile(
+        BuildWeaponCanonicalAliasDependenciesInflated(true));
+    Require(missingSoundLookup.BeginStreaming(
+                RetailCensusMode::WorldAssetLoader) == RetailCensusError::None &&
+            missingSoundLookup.FeedSource(soundFile, true) ==
+                RetailCensusError::None,
+        "missing sound lookup fixture starts");
+    while (missingSoundLookup.Progress() == RetailCensusProgress::Running)
+        (void)missingSoundLookup.Step();
+    RetailFastfileCensus missingSoundResult;
+    Require(missingSoundLookup.Failure() ==
+                RetailCensusError::WeaponSoundLookupFailed &&
+            !missingSoundLookup.TakeResult(missingSoundResult),
+        "sound-name lookup failure preserves atomic WeaponDef publication");
 
     auto requireFailure = [](const std::vector<std::uint8_t> &malformedFile,
                              RetailCensusError expected,

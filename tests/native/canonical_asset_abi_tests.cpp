@@ -1,6 +1,10 @@
+#include <EffectsCore/fx_types.h>
+#include <bgame/weapon_types.h>
 #include <database/db_asset_types.h>
 #include <database/db_semantic_trace.h>
+#include <gfx_d3d/material_types.h>
 #include <xanim/xanim_types.h>
+#include <xanim/xmodel_types.h>
 
 #include <cstddef>
 #include <cstdlib>
@@ -30,6 +34,11 @@ void TestCanonicalAssetTypes()
         "XAsset remains a standard-layout canonical engine type");
     Require(std::is_standard_layout_v<XAnimParts>,
         "XAnimParts remains a standard-layout canonical engine type");
+    Require(std::is_standard_layout_v<XModel> &&
+            std::is_standard_layout_v<Material> &&
+            std::is_standard_layout_v<FxEffectDef> &&
+            std::is_standard_layout_v<WeaponDef>,
+        "canonical weapon dependency types remain standard-layout records");
     Require(sizeof(XAssetHeader) == sizeof(void *),
         "XAssetHeader remains one native pointer wide");
     Require(offsetof(RawFile, name) == 0u &&
@@ -58,6 +67,17 @@ void TestCanonicalAssetTypes()
                 sizeof(XAnimPartTrans) == 36u &&
                 sizeof(XAnimDeltaPartQuat) == 12u,
             "32-bit native/Wasm builds match the canonical XAnimParts graph ABI");
+        Require(sizeof(XModel) == 220u &&
+                offsetof(XModel, materialHandles) == 36u &&
+                offsetof(XModel, lodInfo) == 40u &&
+                offsetof(XModel, physPreset) == 212u &&
+                sizeof(Material) == 80u &&
+                offsetof(Material, stateBitsEntry) == 24u &&
+                offsetof(Material, techniqueSet) == 64u &&
+                sizeof(FxEffectDef) == 32u &&
+                offsetof(FxEffectDef, elemDefs) == 28u &&
+                sizeof(WeaponDef) == 2168u,
+            "32-bit native/Wasm builds match canonical weapon child ABIs");
     }
 
     Require(ASSET_TYPE_XANIMPARTS == static_cast<XAssetType>(2) &&

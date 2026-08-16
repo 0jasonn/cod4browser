@@ -1,5 +1,6 @@
 #pragma once
 
+#include <EffectsCore/fx_types.h>
 #include <universal/com_math.h>
 
 constexpr size_t MAX_EFFECTS = 1024;
@@ -63,19 +64,6 @@ struct FxSpatialFrame // sizeof=0x1C
     float quat[4];
     float origin[3];                    // ...
 };
-
-struct FxEffectDef // sizeof=0x20
-{                                       // ...
-    const char *name;
-    int flags;
-    int totalSize;
-    int msecLoopingLife;
-    int elemDefCountLooping;
-    int elemDefCountOneShot;
-    int elemDefCountEmission;
-    const FxElemDef *elemDefs;
-};
-static_assert(sizeof(FxEffectDef) == 32);
 
 struct FxEffect // sizeof=0x80
 {                                       // ...

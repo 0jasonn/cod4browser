@@ -1626,7 +1626,7 @@ The implementation handoff is therefore:
 - publish the canonical weapon and define any root insertion cell only after
   the entire dependency graph succeeds.
 
-### Canonical `WeaponDef` loader slice (partial)
+### Canonical `WeaponDef` loader and dependency slice (partial)
 
 The reusable dispatcher now implements the root `-1`, root `-2` insertion-cell,
 and prior-alias envelope for type 23. It decodes every non-pointer span from the
@@ -1641,9 +1641,26 @@ names and arrays, the native rule that both current and original arrays use
 failure for invalid script indices, payload excess, undefined root aliases, and
 unpublished child assets.
 
-This is deliberately not yet the complete asset-458 implementation. Non-null
-XModel, Material, FX, sound-name, or bounce-sound dependencies return
-`WeaponDependencyUnsupported`; none are converted to null canonical pointers.
-The next slice must make the existing child loaders publish canonical objects,
-then resume these fields in the exact inventory order and implement the sound
-name lookup contract before the owned weapon may publish.
+The next slice exposes renderer-free canonical XModel, Material, draw-surface,
+and FX header ABIs from the existing native declarations. Their checked loaders
+now own stable canonical top-level objects, and WeaponDef prior aliases resolve
+to those exact typed pointers in the generated order. Direct WeaponDef XStrings
+also resolve prior retained zone strings rather than assuming every alias came
+from an earlier weapon.
+
+Sound fields now implement the native two-level contract: a non-null field is
+an XString-pointer cell, not an inline sound body, and its resolved name is
+passed to an injected `ASSET_TYPE_SOUND` database lookup. The loader covers
+inline and prior name cells, direct string payload aliases, the optional
+29-cell bounce array, reused bounce arrays, bounded retained ownership, and
+atomic lookup failure. Synthetic coverage proves XModel/Material/FX pointer
+identity and sound lookup order without manufacturing placeholder assets.
+
+This is deliberately still partial. Inline `-1`/`-2` XModel, Material, or FX
+children inside WeaponDef remain explicit `WeaponDependencyUnsupported`
+failures until the existing child state machines gain a WeaponDef return path.
+The owned Killhouse traversal resolves its canonical child and prior XString
+aliases and now stops at `WeaponSoundLookupFailed` because the standalone web
+diagnostic has no native/common-zone sound catalog. Connecting that real
+catalog—not replacing names with dummy sound objects—is the next asset-458
+boundary.

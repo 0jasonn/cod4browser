@@ -1,14 +1,18 @@
 #pragma once
 
+#include <EffectsCore/fx_types.h>
 #include <database/db_semantic_trace.h>
 #include <bgame/weapon_types.h>
+#include <gfx_d3d/material_types.h>
 #include <xanim/xanim_types.h>
+#include <xanim/xmodel_types.h>
 
 #include <array>
 #include <cstdint>
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace kisak::fastfile
@@ -213,6 +217,9 @@ enum class RetailCensusError : std::uint8_t
     WeaponCollectionLimit,
     WeaponScriptStringInvalid,
     WeaponDependencyUnsupported,
+    WeaponSoundNameInvalid,
+    WeaponSoundNameTooLong,
+    WeaponSoundLookupFailed,
     WeaponAccuracyInvalid,
     WeaponPayloadLimit,
     WeaponAliasInvalid,
@@ -376,6 +383,9 @@ enum class RetailCensusStage : std::uint8_t
     WorldXAnimPublish,
     WorldWeaponDef,
     WorldWeaponString,
+    WorldWeaponSoundNameCell,
+    WorldWeaponSoundName,
+    WorldWeaponBounceSoundCells,
     WorldWeaponAccuracyKnots,
     WorldWeaponPublish,
     AssetBoundary,
@@ -560,6 +570,8 @@ struct RetailXModelMaterial
     std::uint32_t identity = 0u;
     std::vector<RetailXModelMaterialTexture> textures;
     std::vector<RetailXModelImage> images;
+    std::shared_ptr<std::string> canonicalName;
+    std::shared_ptr<Material> asset;
     bool published = false;
 };
 
@@ -686,6 +698,9 @@ struct RetailWorldXModel
     std::uint32_t boneInfoHash = 2166136261u;
     std::uint32_t identity = 0u;
     std::uint32_t boundaryInflatedOffset = 0u;
+    std::shared_ptr<std::string> canonicalName;
+    std::shared_ptr<std::vector<Material *>> canonicalMaterialHandles;
+    std::shared_ptr<XModel> asset;
     bool headerTraversed = false;
     bool skeletonPrefixTraversed = false;
     bool surfaceHeadersTraversed = false;
@@ -752,6 +767,13 @@ struct RetailWorldFxEffectDef
     std::uint32_t boundaryInflatedOffset = 0u;
     std::vector<RetailWorldFxElemDef> elemDefs;
     std::vector<RetailWorldFxMaterial> materials;
+    std::shared_ptr<std::string> canonicalName;
+    // The current FX traversal owns the exact contiguous 252-byte element
+    // headers as aligned words. Their nested samples/visuals remain governed
+    // by the existing bounded loader while the canonical top-level handle is
+    // exposed to database consumers.
+    std::shared_ptr<std::vector<std::uint32_t>> canonicalElemDefWords;
+    std::shared_ptr<FxEffectDef> asset;
     bool published = false;
 };
 
@@ -820,11 +842,15 @@ struct RetailPublishedXAnimParts
 };
 
 // Ownership-only backing for canonical WeaponDef pointers. The fixed record is
-// decoded into WeaponDef itself; this storage only keeps variable-length
-// XStrings and vec2 accuracy-knot arrays alive across result moves/copies.
+// decoded into WeaponDef itself; this storage keeps variable-length XStrings,
+// sound-name indirections/bounce handles, and vec2 accuracy-knot arrays alive
+// across result moves/copies.
 struct CanonicalWeaponDefStorage
 {
     std::array<std::shared_ptr<std::string>, 48> strings{};
+    std::array<std::shared_ptr<std::string>, 48> soundNames{};
+    std::array<std::shared_ptr<std::string>, 29> bounceSoundNames{};
+    std::shared_ptr<std::vector<snd_alias_list_t *>> bounceSounds;
     std::array<std::shared_ptr<std::vector<std::array<float, 2>>>, 4>
         accuracyKnots{};
 };
@@ -836,6 +862,11 @@ struct RetailPublishedWeaponDef
     std::uint32_t headerBlock0Offset = 0u;
     std::uint32_t insertPointerBlock4Offset = UINT32_MAX;
     std::array<std::uint32_t, 48> stringBlock4Offsets{};
+    std::array<std::uint32_t, 48> soundNameCellBlock4Offsets{};
+    std::array<std::uint32_t, 48> soundNameStringBlock4Offsets{};
+    std::array<std::uint32_t, 29> bounceSoundNameCellBlock4Offsets{};
+    std::array<std::uint32_t, 29> bounceSoundNameStringBlock4Offsets{};
+    std::uint32_t bounceSoundArrayBlock4Offset = UINT32_MAX;
     std::array<std::uint32_t, 4> accuracyKnotBlock4Offsets{};
     std::uint32_t payloadBytes = 0u;
     std::uint32_t identity = 0u;
@@ -844,6 +875,17 @@ struct RetailPublishedWeaponDef
     std::shared_ptr<WeaponDef> asset;
     bool pointerAlias = false;
     bool published = false;
+};
+
+// Mirrors the native DB sound-alias lookup: the caller retains ownership, and
+// a null result rejects the WeaponDef before publication.
+using RetailSoundAliasLookupFunction = snd_alias_list_t *(*)(
+    std::string_view name, void *userData) noexcept;
+
+struct RetailSoundAliasLookup
+{
+    RetailSoundAliasLookupFunction function = nullptr;
+    void *userData = nullptr;
 };
 
 struct RetailFastfileCensus
@@ -1049,7 +1091,8 @@ public:
         const RetailCensusLimits &limits = {}) noexcept;
     RetailCensusError BeginStreaming(
         RetailCensusMode mode,
-        const RetailCensusLimits &limits = {}) noexcept;
+        const RetailCensusLimits &limits = {},
+        RetailSoundAliasLookup soundLookup = {}) noexcept;
     RetailCensusError FeedSource(
         std::span<const std::uint8_t> bytes,
         bool final) noexcept;

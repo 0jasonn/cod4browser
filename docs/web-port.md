@@ -1633,9 +1633,12 @@ then continues through the supported weapon-model and FX dependencies to asset
 inventoried through its complete ordered dependency graph. A bounded canonical
 slice now implements the fixed scalar record, root insertion and prior aliases,
 all script strings and direct XStrings, four accuracy arrays, stable ownership,
-and delayed publication. The owned asset still cannot publish until non-null
-canonical XModel/Material/FX children and native sound-name lookup are
-connected; those are the next ordered dependencies.
+delayed publication, and prior canonical XModel/Material/FX handle resolution.
+Native sound-name cells and the bounce array resolve through an injected
+database lookup rather than inline sound objects. The owned traversal now
+reaches that lookup and stops because the standalone web path has no canonical
+common-zone sound catalog; connecting the real catalog is the next ordered
+dependency.
 
 General generated-loader traversal and a real-map render remain later format
 milestones.

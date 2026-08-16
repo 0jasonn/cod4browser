@@ -2,6 +2,7 @@
 
 #include <d3d9.h>
 
+#include <gfx_d3d/gfx_draw_surf_types.h>
 #include <universal/com_math.h>
 #include <qcommon/com_pack.h>
 #include <cstdint>
@@ -314,28 +315,6 @@ struct GfxStaticModelDrawInst // sizeof=0x4C
     // padding byte
     // padding byte
     // padding byte
-};
-
-struct GfxDrawSurfFields // sizeof=0x8
-{                                       // ...
-    /* 0*/ unsigned __int64 objectId : 16;
-    /*16*/ unsigned __int64 reflectionProbeIndex : 8;
-    /*24*/ unsigned __int64 customIndex : 5;         
-    /*29*/ unsigned __int64 materialSortedIndex : 11;
-    /*40*/ unsigned __int64 prepass : 2;             
-    /*42*/ unsigned __int64 primaryLightIndex : 8;   
-    /*50*/ unsigned __int64 surfType : 4;            
-    /*54*/ unsigned __int64 primarySortKey : 6;      
-    /*60*/ unsigned __int64 unused : 4;              
-};
-
-constexpr unsigned __int64 DRAWSURF_KEY_MASK = 0xFFFFFFFFE0000000;
-
-union GfxDrawSurf // sizeof=0x8
-{                                       // ...
-    GfxDrawSurfFields fields;
-    unsigned __int64 packed;
-    unsigned __int32 packed_low;// KISAKTODO dumb hack
 };
 
 struct GfxDrawSurfList // sizeof=0x8
