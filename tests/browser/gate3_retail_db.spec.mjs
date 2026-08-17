@@ -54,18 +54,27 @@ test("canonical Gate 3 traverses a locally owned retail startup zone", {
     expect(result.final.openSucceeded).toBe(true);
     expect(result.final.xassetListBegin).toBe(true);
     expect(result.stages).toContain("first generated-loader entry");
+    console.log(`KISAK_RETAIL_GATE3 ${JSON.stringify({
+        final: result.final,
+        publications: result.publications,
+    })}`);
     expect(result.final).toMatchObject({
         stopStage: "Load_XAssetHeader/unsupported family closure",
-        assetIndex: 2,
-        assetType: 4,
+        assetIndex: 5,
+        assetType: 22,
+        streamBlock: 4,
+        streamOffset: 16568,
         publicationEnd: true,
-        freeEntryCountAfter: 32750,
+        freeEntryCountAfter: 32746,
     });
-    expect(result.publications).toHaveLength(2);
-    expect(result.publications.map((entry) => entry.assetIndex)).toEqual([0, 1]);
-    expect(result.publications.map((entry) => entry.assetType)).toEqual([5, 5]);
-    expect(result.publications.map((entry) => entry.assetEntryIndex)).toEqual([16, 17]);
-    expect(result.publications.map((entry) => entry.assetPoolIndex)).toEqual([0, 1]);
+    expect(result.publications).toHaveLength(6);
+    expect(result.publications.map((entry) => entry.assetIndex)).toEqual(
+        [0, 1, 2, 2, 3, 4]);
+    expect(result.publications.map((entry) => entry.assetType)).toEqual(
+        [5, 5, 6, 4, 6, 6]);
+    expect(result.publications.map((entry) => entry.assetEntryIndex)).toEqual(
+        [16, 17, 18, 19, 20, 21]);
+    expect(result.publications.map((entry) => entry.assetPoolIndex)).toEqual(
+        [0, 1, 0, 0, 1, 2]);
     expect(result.publications.every((entry) => entry.assetName.length > 0)).toBe(true);
-    console.log(`KISAK_RETAIL_GATE3 ${JSON.stringify(result)}`);
 });

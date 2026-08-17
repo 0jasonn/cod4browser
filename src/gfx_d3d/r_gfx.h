@@ -499,11 +499,6 @@ struct DiskBrushModel // sizeof=0x30
     int numBrushes;
 };
 
-struct GfxStateBits // sizeof=0x8
-{
-    uint32_t loadBits[2];
-};
-
 struct GfxFog // sizeof=0x14
 {                                       // ...
     int startTime;                      // ...

@@ -20,8 +20,14 @@ extern PhysPreset *varPhysPreset;
 extern PhysPreset **varPhysPresetPtr;
 extern MaterialTechniqueSet *varMaterialTechniqueSet;
 extern MaterialTechniqueSet **varMaterialTechniqueSetPtr;
+extern Material *varMaterial;
+extern Material **varMaterialHandle;
+extern GfxImage *varGfxImage;
+extern GfxImage **varGfxImagePtr;
 extern XAssetHeader *varXAssetHeader;
 
 void __cdecl Load_XString(bool atStreamStart);
 void __cdecl Load_MaterialTechniqueSetPtr(bool atStreamStart);
+void __cdecl Load_MaterialHandle(bool atStreamStart);
+void __cdecl Load_GfxImagePtr(bool atStreamStart);
 void DB_SetGeneratedAssetIndex(std::uint32_t index);

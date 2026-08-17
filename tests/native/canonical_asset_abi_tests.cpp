@@ -2,6 +2,7 @@
 #include <bgame/weapon_types.h>
 #include <database/db_asset_types.h>
 #include <database/db_semantic_trace.h>
+#include <gfx_d3d/gfx_image_types.h>
 #include <gfx_d3d/material_types.h>
 #include <gfx_d3d/gfx_light_types.h>
 #include <qcommon/com_world_types.h>
@@ -94,6 +95,13 @@ void TestCanonicalAssetTypes()
                 sizeof(MaterialVertexShader) == 16u &&
                 sizeof(MaterialPixelShader) == 16u &&
                 sizeof(MaterialShaderArgument) == 8u &&
+                sizeof(MaterialTextureDef) == 12u &&
+                offsetof(MaterialTextureDef, u) == 8u &&
+                sizeof(MaterialConstantDef) == 32u &&
+                sizeof(GfxStateBits) == 8u &&
+                sizeof(water_t) == 68u &&
+                offsetof(water_t, image) == 64u &&
+                sizeof(complex_s) == 8u &&
                 sizeof(FxEffectDef) == 32u &&
                 offsetof(FxEffectDef, elemDefs) == 28u &&
                 sizeof(WeaponDef) == 2168u &&
@@ -114,6 +122,7 @@ void TestCanonicalAssetTypes()
             ASSET_TYPE_XMODEL == static_cast<XAssetType>(3) &&
             ASSET_TYPE_MATERIAL == static_cast<XAssetType>(4) &&
             ASSET_TYPE_TECHNIQUE_SET == static_cast<XAssetType>(5) &&
+            ASSET_TYPE_IMAGE == static_cast<XAssetType>(6) &&
             ASSET_TYPE_GFXWORLD == static_cast<XAssetType>(16) &&
             ASSET_TYPE_LIGHT_DEF == static_cast<XAssetType>(17) &&
             ASSET_TYPE_FX == static_cast<XAssetType>(25) &&

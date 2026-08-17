@@ -279,6 +279,10 @@ static void Load_XAssetHeader(bool atStreamStart)
             varXAsset->header.data)));
     switch (varXAsset->type)
     {
+    case ASSET_TYPE_MATERIAL:
+        varMaterialHandle = reinterpret_cast<Material **>(varXAssetHeader);
+        Load_MaterialHandle(false);
+        break;
     case ASSET_TYPE_PHYSPRESET:
         varPhysPresetPtr = reinterpret_cast<PhysPreset **>(varXAssetHeader);
         Load_PhysPresetPtr(false);
@@ -287,6 +291,10 @@ static void Load_XAssetHeader(bool atStreamStart)
         varMaterialTechniqueSetPtr =
             reinterpret_cast<MaterialTechniqueSet **>(varXAssetHeader);
         Load_MaterialTechniqueSetPtr(false);
+        break;
+    case ASSET_TYPE_IMAGE:
+        varGfxImagePtr = reinterpret_cast<GfxImage **>(varXAssetHeader);
+        Load_GfxImagePtr(false);
         break;
     case ASSET_TYPE_RAWFILE:
         varRawFilePtr = reinterpret_cast<RawFile **>(varXAssetHeader);

@@ -35,3 +35,8 @@ void __cdecl Material_UploadShaders(MaterialTechniqueSet *techSet)
 {
     iassert(techSet);
 }
+
+void __cdecl Load_PicmipWater(water_t **waterRef)
+{
+    iassert(waterRef && *waterRef);
+}

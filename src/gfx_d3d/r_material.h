@@ -229,33 +229,6 @@ struct $4ABF24606230B73E4E420CE33A1F14B1 // sizeof=0xC
     uint32_t remapValue;            // ...
 };
 
-struct WaterWritable // sizeof=0x4
-{                                       // ...
-    float floatTime;
-};
-
-struct complex_s // sizeof=0x8
-{                                       // ...
-    float real;                         // ...
-    float imag;                         // ...
-};
-struct water_t // sizeof=0x44
-{                                       // ...
-    WaterWritable writable;
-    complex_s *H0;
-    float *wTerm;
-    int M;                              // ...
-    int N;                              // ...
-    float Lx;                           // ...
-    float Lz;                           // ...
-    float gravity;                      // ...
-    float windvel;                      // ...
-    float winddir[2];                   // ...
-    float amplitude;                    // ...
-    float codeConstant[4];
-    GfxImage *image;                    // ...
-};
-
 struct ShaderIndexRange // sizeof=0xC
 {                                       // ...
     uint32_t first;                 // ...
@@ -326,29 +299,6 @@ struct GfxAssembledShaderText // sizeof=0x8418
     // padding byte
     uint32_t fileCount;
     GfxAssembledShaderTextFile files[128];
-};
-
-union MaterialTextureDefInfo // sizeof=0x4
-{                                       // ...
-    GfxImage *image;
-    water_t *water;
-};
-
-struct MaterialTextureDef // sizeof=0xC
-{
-    uint32_t nameHash;
-    char nameStart;
-    char nameEnd;
-    uint8_t samplerState;
-    uint8_t semantic;
-    MaterialTextureDefInfo u;
-};
-
-struct MaterialConstantDef // sizeof=0x20
-{
-    uint32_t nameHash;
-    char name[12];
-    float literal[4];
 };
 
 struct MaterialMemory // sizeof=0x8

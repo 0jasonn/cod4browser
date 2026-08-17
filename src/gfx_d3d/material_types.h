@@ -6,7 +6,7 @@
 
 struct MaterialTextureDef;
 struct MaterialConstantDef;
-struct GfxStateBits;
+struct GfxImage;
 struct IDirect3DVertexDeclaration9;
 struct IDirect3DVertexShader9;
 struct IDirect3DPixelShader9;
@@ -124,6 +124,62 @@ struct MaterialTechniqueSet // sizeof=0x94
     MaterialTechnique *techniques[34];
 };
 
+struct GfxStateBits // sizeof=0x8
+{
+    std::uint32_t loadBits[2];
+};
+
+struct WaterWritable // sizeof=0x4
+{
+    float floatTime;
+};
+
+struct complex_s // sizeof=0x8
+{
+    float real;
+    float imag;
+};
+
+struct water_t // sizeof=0x44
+{
+    WaterWritable writable;
+    complex_s *H0;
+    float *wTerm;
+    std::int32_t M;
+    std::int32_t N;
+    float Lx;
+    float Lz;
+    float gravity;
+    float windvel;
+    float winddir[2];
+    float amplitude;
+    float codeConstant[4];
+    GfxImage *image;
+};
+
+union MaterialTextureDefInfo // sizeof=0x4
+{
+    GfxImage *image;
+    water_t *water;
+};
+
+struct MaterialTextureDef // sizeof=0xC
+{
+    std::uint32_t nameHash;
+    char nameStart;
+    char nameEnd;
+    std::uint8_t samplerState;
+    std::uint8_t semantic;
+    MaterialTextureDefInfo u;
+};
+
+struct MaterialConstantDef // sizeof=0x20
+{
+    std::uint32_t nameHash;
+    char name[12];
+    float literal[4];
+};
+
 // Canonical KisakCOD/IW3 database-facing material records. Backend shader and
 // texture implementations remain in r_material.h.
 struct MaterialInfo // sizeof=0x18
@@ -172,6 +228,11 @@ static_assert(sizeof(void *) != 4u || sizeof(MaterialShaderArgument) == 8u);
 static_assert(sizeof(void *) != 4u || sizeof(MaterialPass) == 20u);
 static_assert(sizeof(void *) != 4u || sizeof(MaterialTechnique) == 28u);
 static_assert(sizeof(void *) != 4u || sizeof(MaterialTechniqueSet) == 148u);
+static_assert(sizeof(void *) != 4u || sizeof(GfxStateBits) == 8u);
+static_assert(sizeof(void *) != 4u || sizeof(complex_s) == 8u);
+static_assert(sizeof(void *) != 4u || sizeof(water_t) == 68u);
+static_assert(sizeof(void *) != 4u || sizeof(MaterialTextureDef) == 12u);
+static_assert(sizeof(void *) != 4u || sizeof(MaterialConstantDef) == 32u);
 #ifdef KISAK_RADIANT
 static_assert(sizeof(void *) != 4u || sizeof(Material) == 96u);
 #else

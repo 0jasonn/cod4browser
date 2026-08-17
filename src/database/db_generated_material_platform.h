@@ -13,3 +13,4 @@ void __cdecl Load_CreateMaterialPixelShader(
     GfxPixelShaderLoadDef *loadDef, MaterialPixelShader *mtlShader);
 void __cdecl Material_OriginalRemapTechniqueSet(MaterialTechniqueSet *techSet);
 void __cdecl Material_UploadShaders(MaterialTechniqueSet *techSet);
+void __cdecl Load_PicmipWater(water_t **waterRef);

@@ -2,6 +2,7 @@
 #include <database/db_registry_pools.h>
 #include <database/db_registry_publication.h>
 #include <database/db_runtime_prefix.h>
+#include <gfx_d3d/gfx_image_types.h>
 #include <gfx_d3d/material_types.h>
 #include <physics/phys_preset.h>
 #include <qcommon/qcommon.h>
@@ -19,6 +20,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -55,6 +57,11 @@ void AppendZeros(std::vector<std::uint8_t> &bytes, std::size_t count)
 std::uint32_t Align4(std::uint32_t value)
 {
     return (value + 3u) & ~3u;
+}
+
+std::uint32_t Align16(std::uint32_t value)
+{
+    return (value + 15u) & ~15u;
 }
 
 void AppendF32(std::vector<std::uint8_t> &bytes, float value)
@@ -273,6 +280,223 @@ std::vector<std::uint8_t> MakeTechniqueSetXFile(
     inflated.insert(inflated.end(), techniqueName,
         techniqueName + std::strlen(techniqueName));
     if (options.terminateTechniqueName) inflated.push_back(0);
+    return CompressXFile(inflated);
+}
+
+struct MaterialFixtureOptions
+{
+    std::uint32_t assetPointer = UINT32_MAX - 1u;
+    bool includeAliasAsset = true;
+    std::uint32_t materialNamePointer = UINT32_MAX;
+    std::uint32_t techniqueSetPointer = 0;
+    std::uint32_t textureTablePointer = UINT32_MAX;
+    std::uint32_t constantTablePointer = UINT32_MAX;
+    std::uint32_t stateBitsTablePointer = UINT32_MAX;
+    std::uint32_t imagePointer = UINT32_MAX - 1u;
+    std::uint32_t imageTexturePointer = UINT32_MAX;
+    std::uint32_t waterPointer = UINT32_MAX;
+    bool directImageName = false;
+    bool terminateMaterialName = true;
+    bool terminateImageName = true;
+    std::int32_t waterM = 2;
+    std::int32_t waterN = 2;
+    std::int32_t imageResourceSize = 4;
+};
+
+std::vector<std::uint8_t> MakeMaterialXFile(
+    const MaterialFixtureOptions &options = {})
+{
+    constexpr const char *materialName = "materials/gate3";
+    constexpr const char *imageName = "images/gate3";
+    const bool inlineAsset = options.assetPointer == UINT32_MAX ||
+        options.assetPointer == UINT32_MAX - 1u;
+    const std::uint32_t assetCount = options.includeAliasAsset ? 2u : 1u;
+
+    std::vector<std::uint8_t> inflated;
+    AppendU32(inflated, 16384);
+    AppendU32(inflated, 0);
+    for (const std::uint32_t size : std::array<std::uint32_t, 9>{
+        8192, 0, 0, 0, 8192, 0, 0, 0, 0}) AppendU32(inflated, size);
+
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, assetCount);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, ASSET_TYPE_MATERIAL);
+    AppendU32(inflated, options.assetPointer);
+    if (options.includeAliasAsset)
+    {
+        AppendU32(inflated, ASSET_TYPE_MATERIAL);
+        AppendU32(inflated, 0x40000011u);
+    }
+    if (!inlineAsset) return CompressXFile(inflated);
+
+    std::uint32_t block0Offset = 0;
+    std::uint32_t block4Offset = assetCount * sizeof(XAsset);
+    if (options.assetPointer == UINT32_MAX - 1u)
+        block4Offset = Align4(block4Offset) + 4u;
+    const std::uint32_t materialNameOffset = block4Offset;
+    const std::uint32_t materialNameAlias =
+        0x40000001u + materialNameOffset;
+
+    const std::size_t materialBodyStart = inflated.size();
+    AppendU32(inflated, options.materialNamePointer);
+    inflated.push_back(1);
+    inflated.push_back(2);
+    inflated.push_back(1);
+    inflated.push_back(1);
+    AppendU32(inflated, 0x11223344u);
+    AppendU32(inflated, 0x55667788u);
+    AppendU32(inflated, 0xA5A5A5A5u);
+    AppendU16(inflated, 0x1234u);
+    AppendU16(inflated, 0);
+    AppendZeros(inflated, 34);
+    inflated.push_back(2);
+    inflated.push_back(1);
+    inflated.push_back(1);
+    inflated.push_back(3);
+    inflated.push_back(4);
+    inflated.push_back(0);
+    AppendU32(inflated, options.techniqueSetPointer);
+    AppendU32(inflated, options.textureTablePointer);
+    AppendU32(inflated, options.constantTablePointer);
+    AppendU32(inflated, options.stateBitsTablePointer);
+    assert(inflated.size() - materialBodyStart == sizeof(Material));
+    block0Offset += sizeof(Material);
+
+    if (options.materialNamePointer == UINT32_MAX)
+    {
+        inflated.insert(inflated.end(), materialName,
+            materialName + std::strlen(materialName));
+        if (options.terminateMaterialName) inflated.push_back(0);
+        block4Offset += static_cast<std::uint32_t>(std::strlen(materialName) +
+            (options.terminateMaterialName ? 1u : 0u));
+    }
+    if (options.textureTablePointer != UINT32_MAX)
+        return CompressXFile(inflated);
+
+    block4Offset = Align4(block4Offset);
+    const std::uint32_t imageInsertionOffset = block4Offset +
+        2u * sizeof(MaterialTextureDef);
+    const std::uint32_t imageInsertionAlias =
+        0x40000001u + imageInsertionOffset;
+
+    AppendU32(inflated, 0x11111111u);
+    inflated.push_back('i');
+    inflated.push_back('m');
+    inflated.push_back(1);
+    inflated.push_back(2);
+    AppendU32(inflated, options.imagePointer);
+    AppendU32(inflated, 0x22222222u);
+    inflated.push_back('w');
+    inflated.push_back('t');
+    inflated.push_back(2);
+    inflated.push_back(11);
+    AppendU32(inflated, options.waterPointer);
+    block4Offset += 2u * sizeof(MaterialTextureDef);
+
+    if (options.imagePointer == UINT32_MAX ||
+        options.imagePointer == UINT32_MAX - 1u)
+    {
+        if (options.imagePointer == UINT32_MAX - 1u)
+            block4Offset = Align4(block4Offset) + 4u;
+        block0Offset = Align4(block0Offset);
+        const std::size_t imageBodyStart = inflated.size();
+        AppendU32(inflated, MAPTYPE_2D);
+        AppendU32(inflated, options.imageTexturePointer);
+        inflated.push_back(0);
+        inflated.push_back(0);
+        inflated.push_back(0);
+        inflated.push_back(2);
+        inflated.push_back(3);
+        AppendZeros(inflated, 3);
+        AppendU32(inflated, 64);
+        AppendU32(inflated, 32);
+        AppendU16(inflated, 4);
+        AppendU16(inflated, 4);
+        AppendU16(inflated, 1);
+        inflated.push_back(1);
+        inflated.push_back(0);
+        AppendU32(inflated, options.directImageName
+            ? materialNameAlias : UINT32_MAX);
+        assert(inflated.size() - imageBodyStart == sizeof(GfxImage));
+        block0Offset += sizeof(GfxImage);
+
+        if (!options.directImageName)
+        {
+            inflated.insert(inflated.end(), imageName,
+                imageName + std::strlen(imageName));
+            if (options.terminateImageName) inflated.push_back(0);
+            block4Offset += static_cast<std::uint32_t>(std::strlen(imageName) +
+                (options.terminateImageName ? 1u : 0u));
+        }
+        if (options.imageTexturePointer == UINT32_MAX ||
+            options.imageTexturePointer == UINT32_MAX - 1u)
+        {
+            if (options.imageTexturePointer == UINT32_MAX - 1u)
+                block4Offset = Align4(block4Offset) + 4u;
+            block0Offset = Align4(block0Offset);
+            inflated.push_back(1);
+            inflated.push_back(0);
+            AppendU16(inflated, 4);
+            AppendU16(inflated, 4);
+            AppendU16(inflated, 1);
+            AppendU32(inflated, 21);
+            AppendU32(inflated,
+                static_cast<std::uint32_t>(options.imageResourceSize));
+            if (options.imageResourceSize == 4)
+                AppendU32(inflated, 0x494D4733u);
+            block0Offset += 16u + (options.imageResourceSize == 4 ? 4u : 0u);
+        }
+    }
+
+    if (options.waterPointer == UINT32_MAX)
+    {
+        block4Offset = Align4(block4Offset);
+        const std::size_t waterBodyStart = inflated.size();
+        AppendF32(inflated, 0.5f);
+        AppendU32(inflated, 1);
+        AppendU32(inflated, 1);
+        AppendU32(inflated, static_cast<std::uint32_t>(options.waterM));
+        AppendU32(inflated, static_cast<std::uint32_t>(options.waterN));
+        for (float value : std::array<float, 7>{
+            4.0f, 4.0f, 9.8f, 2.0f, 1.0f, 0.0f, 0.25f})
+            AppendF32(inflated, value);
+        for (float value : std::array<float, 4>{1.0f, 2.0f, 3.0f, 4.0f})
+            AppendF32(inflated, value);
+        AppendU32(inflated, options.imagePointer == UINT32_MAX - 1u
+            ? imageInsertionAlias : 0u);
+        assert(inflated.size() - waterBodyStart == sizeof(water_t));
+        block4Offset += sizeof(water_t);
+        if (options.waterM == 2 && options.waterN == 2)
+        {
+            block4Offset = Align4(block4Offset);
+            for (std::uint32_t index = 0; index < 8; ++index)
+                AppendF32(inflated, static_cast<float>(index + 1));
+            block4Offset += 4u * sizeof(complex_s);
+            block4Offset = Align4(block4Offset);
+            for (std::uint32_t index = 0; index < 4; ++index)
+                AppendF32(inflated, static_cast<float>(index + 10));
+            block4Offset += 4u * sizeof(float);
+        }
+    }
+
+    if (options.constantTablePointer == UINT32_MAX)
+    {
+        block4Offset = Align16(block4Offset);
+        AppendU32(inflated, 0x33333333u);
+        inflated.insert(inflated.end(), {'g','a','t','e','3',0,0,0,0,0,0,0});
+        for (float value : std::array<float, 4>{5.0f, 6.0f, 7.0f, 8.0f})
+            AppendF32(inflated, value);
+        block4Offset += sizeof(MaterialConstantDef);
+    }
+    if (options.stateBitsTablePointer == UINT32_MAX)
+    {
+        block4Offset = Align4(block4Offset);
+        AppendU32(inflated, 0x44444444u);
+        AppendU32(inflated, 0x55555555u);
+        block4Offset += sizeof(GfxStateBits);
+    }
     return CompressXFile(inflated);
 }
 
@@ -676,6 +900,160 @@ int main()
     assert(DB_FindXAssetHeader(ASSET_TYPE_TECHNIQUE_SET,
         "techsets/gate3").techniqueSet);
 
+    const std::vector<std::uint8_t> materialInsertAlias = MakeMaterialXFile();
+    Run(materialInsertAlias, zone);
+    assert(g_trace.xassetCount == 2 && g_trace.assetIndex == 1);
+    assert(g_trace.assetType == ASSET_TYPE_MATERIAL);
+    assert(std::strcmp(g_trace.pointerClassification,
+        "prior-offset/alias") == 0);
+    assert(g_trace.publicationBegin && g_trace.publicationEnd);
+    assert(g_trace.assetEntryIndex == 17 && g_trace.assetPoolIndex == 0);
+    assert(g_trace.freeEntryCountBefore == 32751 &&
+        g_trace.freeEntryCountAfter == 32750);
+    assert(g_trace.assetHash == DB_HashForNameCanonical(
+        "materials/gate3", ASSET_TYPE_MATERIAL));
+    assert(g_trace.streamOffsets[0] == 136);
+    assert(g_trace.streamOffsets[4] == 248);
+    const XAssetHeader publishedMaterial = DB_FindXAssetHeader(
+        ASSET_TYPE_MATERIAL, "materials/gate3");
+    const XAssetHeader publishedImage = DB_FindXAssetHeader(
+        ASSET_TYPE_IMAGE, "images/gate3");
+    assert(publishedMaterial.material && publishedImage.image);
+    assert(publishedMaterial.material->info.gameFlags == 1);
+    assert(publishedMaterial.material->info.sortKey == 2);
+    assert(publishedMaterial.material->techniqueSet == nullptr);
+    assert(publishedMaterial.material->textureCount == 2);
+    assert(publishedMaterial.material->textureTable);
+    assert(publishedMaterial.material->textureTable[0].semantic == 2);
+    assert(publishedMaterial.material->textureTable[0].u.image ==
+        publishedImage.image);
+    assert(publishedImage.image->mapType == MAPTYPE_2D);
+    assert(publishedImage.image->width == 4 && publishedImage.image->height == 4);
+    assert(publishedImage.image->texture.basemap == nullptr);
+    const water_t *publishedWater =
+        publishedMaterial.material->textureTable[1].u.water;
+    assert(publishedWater && publishedWater->M == 2 && publishedWater->N == 2);
+    assert(publishedWater->image == publishedImage.image);
+    assert(publishedWater->H0 && publishedWater->H0[0].real == 1.0f &&
+        publishedWater->H0[3].imag == 8.0f);
+    assert(publishedWater->wTerm && publishedWater->wTerm[0] == 10.0f &&
+        publishedWater->wTerm[3] == 13.0f);
+    assert(publishedMaterial.material->constantTable &&
+        publishedMaterial.material->constantTable[0].nameHash == 0x33333333u &&
+        publishedMaterial.material->constantTable[0].literal[3] == 8.0f);
+    assert(publishedMaterial.material->stateBitsTable &&
+        publishedMaterial.material->stateBitsTable[0].loadBits[0] ==
+            0x44444444u &&
+        publishedMaterial.material->stateBitsTable[0].loadBits[1] ==
+            0x55555555u);
+    assert(reinterpret_cast<const std::uint8_t *>(
+        publishedMaterial.material->constantTable) == zone.blocks[4].data + 208);
+    assert(reinterpret_cast<const std::uint8_t *>(
+        publishedMaterial.material->stateBitsTable) == zone.blocks[4].data + 240);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_MATERIAL) == 2047);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_IMAGE) == 2399);
+    const XAsset *materialAssets = reinterpret_cast<const XAsset *>(
+        zone.blocks[4].data);
+    assert(materialAssets[0].header.material == publishedMaterial.material);
+    assert(materialAssets[1].header.material == publishedMaterial.material);
+    std::uint32_t materialInsertion = 0;
+    std::uint32_t imageInsertion = 0;
+    std::memcpy(&materialInsertion, zone.blocks[4].data + 16,
+        sizeof(materialInsertion));
+    std::memcpy(&imageInsertion, zone.blocks[4].data + 60,
+        sizeof(imageInsertion));
+    assert(materialInsertion == reinterpret_cast<std::uint32_t>(
+        publishedMaterial.material));
+    assert(imageInsertion == reinterpret_cast<std::uint32_t>(
+        publishedImage.image));
+
+    MaterialFixtureOptions sharedMaterialOptions{};
+    sharedMaterialOptions.assetPointer = UINT32_MAX;
+    sharedMaterialOptions.includeAliasAsset = false;
+    sharedMaterialOptions.imagePointer = UINT32_MAX;
+    sharedMaterialOptions.directImageName = true;
+    sharedMaterialOptions.waterPointer = 0;
+    Run(MakeMaterialXFile(sharedMaterialOptions), zone);
+    assert(std::strcmp(g_trace.pointerClassification,
+        "inline-shared/-1") == 0);
+    assert(g_trace.publicationEnd && g_trace.assetEntryIndex == 17);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_MATERIAL,
+        "materials/gate3").material);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_IMAGE,
+        "materials/gate3").image);
+
+    MaterialFixtureOptions nullMaterialDependencies{};
+    nullMaterialDependencies.assetPointer = UINT32_MAX;
+    nullMaterialDependencies.includeAliasAsset = false;
+    nullMaterialDependencies.textureTablePointer = 0;
+    nullMaterialDependencies.constantTablePointer = 0;
+    nullMaterialDependencies.stateBitsTablePointer = 0;
+    Run(MakeMaterialXFile(nullMaterialDependencies), zone);
+    const XAssetHeader nullDependencyMaterial = DB_FindXAssetHeader(
+        ASSET_TYPE_MATERIAL, "materials/gate3");
+    assert(nullDependencyMaterial.material);
+    assert(!nullDependencyMaterial.material->textureTable &&
+        !nullDependencyMaterial.material->constantTable &&
+        !nullDependencyMaterial.material->stateBitsTable &&
+        !nullDependencyMaterial.material->techniqueSet);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_IMAGE) == 2400);
+
+    MaterialFixtureOptions nullMaterialOptions{};
+    nullMaterialOptions.assetPointer = 0;
+    nullMaterialOptions.includeAliasAsset = false;
+    Run(MakeMaterialXFile(nullMaterialOptions), zone);
+    assert(std::strcmp(g_trace.pointerClassification, "null") == 0);
+    assert(!g_trace.publicationBegin && !g_trace.publicationEnd);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_MATERIAL) == 2048);
+
+    MaterialFixtureOptions invalidMaterialAsset{};
+    invalidMaterialAsset.assetPointer = UINT32_MAX - 2u;
+    invalidMaterialAsset.includeAliasAsset = false;
+    Run(MakeMaterialXFile(invalidMaterialAsset), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "stream/invalid alias offset") == 0);
+
+    MaterialFixtureOptions invalidWaterPointer{};
+    invalidWaterPointer.includeAliasAsset = false;
+    invalidWaterPointer.waterPointer = UINT32_MAX - 1u;
+    Run(MakeMaterialXFile(invalidWaterPointer), zone);
+    assert(g_trace.generatedLoadFailed);
+    assert(!DB_FindXAssetHeader(ASSET_TYPE_MATERIAL,
+        "materials/gate3").material);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_IMAGE, "images/gate3").image);
+    assert(std::strcmp(g_trace.stopStage, "stream/invalid pointer offset") == 0);
+
+    MaterialFixtureOptions invalidStatePointer{};
+    invalidStatePointer.includeAliasAsset = false;
+    invalidStatePointer.stateBitsTablePointer = UINT32_MAX - 1u;
+    Run(MakeMaterialXFile(invalidStatePointer), zone);
+    assert(g_trace.generatedLoadFailed);
+    assert(!DB_FindXAssetHeader(ASSET_TYPE_MATERIAL,
+        "materials/gate3").material);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_IMAGE, "images/gate3").image);
+    assert(std::strcmp(g_trace.stopStage, "stream/invalid pointer offset") == 0);
+
+    MaterialFixtureOptions excessiveWater{};
+    excessiveWater.includeAliasAsset = false;
+    excessiveWater.waterM = (std::numeric_limits<std::int32_t>::max)();
+    excessiveWater.waterN = 2;
+    Run(MakeMaterialXFile(excessiveWater), zone);
+    assert(g_trace.generatedLoadFailed);
+    assert(!DB_FindXAssetHeader(ASSET_TYPE_MATERIAL,
+        "materials/gate3").material);
+    assert(std::strcmp(g_trace.stopStage, "water/H0 array") == 0);
+
+    MaterialFixtureOptions truncatedImage{};
+    truncatedImage.includeAliasAsset = false;
+    truncatedImage.imageResourceSize = 8192;
+    Run(MakeMaterialXFile(truncatedImage), zone);
+    assert(g_trace.generatedLoadFailed);
+    assert(!DB_FindXAssetHeader(ASSET_TYPE_IMAGE, "images/gate3").image);
+    assert(!DB_FindXAssetHeader(ASSET_TYPE_MATERIAL,
+        "materials/gate3").material);
+    assert(std::strcmp(g_trace.stopStage,
+        "GfxImageLoadDef/resource size") == 0);
+
     TechniqueSetFixtureOptions nullTechniqueOptions{};
     nullTechniqueOptions.assetPointer = 0;
     nullTechniqueOptions.includeAliasAsset = false;
@@ -782,6 +1160,49 @@ int main()
         sizeof(failedInsertion));
     assert(failedInsertion == 0);
 
+    Reset(materialInsertAlias);
+    *static_cast<void **>(DB_XAssetPool[ASSET_TYPE_IMAGE]) = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset pool exhaustion") == 0);
+    assert(!DB_FindXAssetHeader(ASSET_TYPE_IMAGE, "images/gate3").image);
+    assert(!DB_FindXAssetHeader(ASSET_TYPE_MATERIAL,
+        "materials/gate3").material);
+    std::uint32_t failedImageInsertion = UINT32_MAX;
+    std::memcpy(&failedInsertion, zone.blocks[4].data + 16,
+        sizeof(failedInsertion));
+    std::memcpy(&failedImageInsertion, zone.blocks[4].data + 60,
+        sizeof(failedImageInsertion));
+    assert(failedInsertion == 0 && failedImageInsertion == 0);
+
+    Reset(materialInsertAlias);
+    *static_cast<void **>(DB_XAssetPool[ASSET_TYPE_MATERIAL]) = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset pool exhaustion") == 0);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_IMAGE, "images/gate3").image);
+    assert(!DB_FindXAssetHeader(ASSET_TYPE_MATERIAL,
+        "materials/gate3").material);
+    std::memcpy(&failedInsertion, zone.blocks[4].data + 16,
+        sizeof(failedInsertion));
+    assert(failedInsertion == 0);
+
+    Reset(materialInsertAlias);
+    g_assetEntryPool[16].next = nullptr;
+    g_freeAssetEntryHead = &g_assetEntryPool[16];
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset entry exhaustion") == 0);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_IMAGE, "images/gate3").image);
+    assert(!DB_FindXAssetHeader(ASSET_TYPE_MATERIAL,
+        "materials/gate3").material);
+    std::memcpy(&failedInsertion, zone.blocks[4].data + 16,
+        sizeof(failedInsertion));
+    assert(failedInsertion == 0);
+
     Reset(physInsertAlias);
     g_freeAssetEntryHead = nullptr;
     RunPrepared(zone);
@@ -821,6 +1242,6 @@ int main()
     assert(g_trace.publicationEnd && g_trace.cleanupComplete);
     assert(std::strcmp(g_trace.stopStage, "Load_XAssetHeader/next-family-closure") == 0);
 
-    std::printf("gate3-db-stream rawfile=published physpreset=published technique-set=published insert=-2 alias=block4:16 technique=block4:36 direct-xstring=block4:20 material-children=251 entry=16 pool=0 free=32752->32751 zone=1 stop=next-family-closure\n");
+    std::printf("gate3-db-stream rawfile=published physpreset=published technique-set=published material=published image=published water=loaded insert=-2 alias=block4:16 technique=block4:36 direct-xstring=block4:20 technique-children=251 material-children=block0:136,block4:248 image-entry=16 material-entry=17 free=32752->32750 zone=1 stop=next-family-closure\n");
     return 0;
 }

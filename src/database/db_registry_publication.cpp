@@ -4,6 +4,7 @@
 #include <database/db_registry_publication.h>
 #include <database/db_runtime_prefix.h>
 #include <database/db_generated_material_platform.h>
+#include <gfx_d3d/gfx_image_types.h>
 #include <gfx_d3d/material_types.h>
 #include <physics/phys_preset.h>
 
@@ -31,6 +32,12 @@ const char *AssetName(const XAsset &asset)
     case ASSET_TYPE_TECHNIQUE_SET:
         name = asset.header.techniqueSet ? asset.header.techniqueSet->name : nullptr;
         break;
+    case ASSET_TYPE_MATERIAL:
+        name = asset.header.material ? asset.header.material->info.name : nullptr;
+        break;
+    case ASSET_TYPE_IMAGE:
+        name = asset.header.image ? asset.header.image->name : nullptr;
+        break;
     case ASSET_TYPE_RAWFILE:
         name = asset.header.rawfile ? asset.header.rawfile->name : nullptr;
         break;
@@ -50,7 +57,9 @@ std::size_t AssetSize(XAssetType type)
     switch (type)
     {
     case ASSET_TYPE_PHYSPRESET: return sizeof(PhysPreset);
+    case ASSET_TYPE_MATERIAL: return sizeof(Material);
     case ASSET_TYPE_TECHNIQUE_SET: return sizeof(MaterialTechniqueSet);
+    case ASSET_TYPE_IMAGE: return sizeof(GfxImage);
     case ASSET_TYPE_RAWFILE: return sizeof(RawFile);
     default: return 0;
     }
@@ -245,6 +254,30 @@ void __cdecl Load_MaterialTechniqueSetAsset(XAssetHeader *techniqueSet)
     *techniqueSet = published;
     Material_OriginalRemapTechniqueSet(techniqueSet->techniqueSet);
     Material_UploadShaders(techniqueSet->techniqueSet);
+}
+
+void __cdecl Load_MaterialAsset(XAssetHeader *material)
+{
+    if (!material || !material->material)
+    {
+        DB_RuntimeGeneratedFailure("publication/null Material");
+        return;
+    }
+    XAssetHeader published = DB_AddXAsset(ASSET_TYPE_MATERIAL, *material);
+    if (!published.data) return;
+    *material = published;
+}
+
+void __cdecl Load_GfxImageAsset(XAssetHeader *image)
+{
+    if (!image || !image->image)
+    {
+        DB_RuntimeGeneratedFailure("publication/null GfxImage");
+        return;
+    }
+    XAssetHeader published = DB_AddXAsset(ASSET_TYPE_IMAGE, *image);
+    if (!published.data) return;
+    *image = published;
 }
 
 XAssetHeader __cdecl DB_FindXAssetHeader(XAssetType type, const char *name)
