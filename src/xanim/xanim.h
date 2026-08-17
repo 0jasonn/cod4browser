@@ -4,6 +4,7 @@
 #include <database/db_asset_types.h>
 #include <database/db_file_types.h>
 #include <database/db_registry_types.h>
+#include <physics/phys_preset.h>
 #include <qcommon/cm_types.h>
 #include <xanim/xanim_types.h>
 #include "xanim_public.h"
@@ -162,25 +163,6 @@ struct SndDriverGlobals // sizeof=0x4
 {                                       // ...
     const char* name;
 };
-
-struct PhysPreset // sizeof=0x2C
-{                                       // ...
-    const char *name;                   // ...
-    int type;                           // ...
-    float mass;                         // ...
-    float bounce;                       // ...
-    float friction;                     // ...
-    float bulletForceScale;             // ...
-    float explosiveForceScale;          // ...
-    const char *sndAliasPrefix;         // ...
-    float piecesSpreadFraction;
-    float piecesUpwardVelocity;
-    bool tempDefaultToCylinder;
-    // padding byte
-    // padding byte
-    // padding byte
-};
-
 
 extern "C" {
     // win32

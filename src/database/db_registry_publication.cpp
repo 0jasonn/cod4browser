@@ -3,6 +3,7 @@
 #include <database/db_registry_pools.h>
 #include <database/db_registry_publication.h>
 #include <database/db_runtime_prefix.h>
+#include <physics/phys_preset.h>
 
 #include <qcommon/threads.h>
 #include <qcommon/system.h>
@@ -19,19 +20,40 @@ namespace
 {
 const char *AssetName(const XAsset &asset)
 {
-    if (asset.type != ASSET_TYPE_RAWFILE || !asset.header.rawfile ||
-        !asset.header.rawfile->name)
+    const char *name = nullptr;
+    switch (asset.type)
+    {
+    case ASSET_TYPE_PHYSPRESET:
+        name = asset.header.physPreset ? asset.header.physPreset->name : nullptr;
+        break;
+    case ASSET_TYPE_RAWFILE:
+        name = asset.header.rawfile ? asset.header.rawfile->name : nullptr;
+        break;
+    default:
+        break;
+    }
+    if (!name)
     {
         DB_RuntimeGeneratedFailure("publication/unsupported or unnamed asset");
         return nullptr;
     }
-    return asset.header.rawfile->name;
+    return name;
+}
+
+std::size_t AssetSize(XAssetType type)
+{
+    switch (type)
+    {
+    case ASSET_TYPE_PHYSPRESET: return sizeof(PhysPreset);
+    case ASSET_TYPE_RAWFILE: return sizeof(RawFile);
+    default: return 0;
+    }
 }
 
 XAssetHeader AllocAssetHeader(XAssetType type)
 {
     XAssetHeader header{};
-    if (type != ASSET_TYPE_RAWFILE || !DB_XAssetPool[type])
+    if (!AssetSize(type) || !DB_XAssetPool[type])
         return header;
     auto **freeHead = static_cast<void **>(DB_XAssetPool[type]);
     if (!*freeHead) return header;
@@ -57,10 +79,12 @@ XAssetEntryPoolEntry *AllocAssetEntry(XAssetType type, std::uint8_t zoneIndex)
     return entry;
 }
 
-void CloneRawFile(const XAsset &from, XAsset &to)
+void CloneAsset(const XAsset &from, XAsset &to)
 {
-    iassert(from.type == ASSET_TYPE_RAWFILE && to.type == ASSET_TYPE_RAWFILE);
-    std::memcpy(to.header.rawfile, from.header.rawfile, sizeof(RawFile));
+    iassert(from.type == to.type);
+    const std::size_t size = AssetSize(from.type);
+    iassert(size && from.header.data && to.header.data);
+    std::memcpy(to.header.data, from.header.data, size);
 }
 
 XAssetEntryPoolEntry *DB_LinkXAssetEntry(
@@ -86,7 +110,7 @@ XAssetEntryPoolEntry *DB_LinkXAssetEntry(
             : "publication/asset entry exhaustion");
         return nullptr;
     }
-    CloneRawFile(asset, entry->entry.asset);
+    CloneAsset(asset, entry->entry.asset);
 
     if (!existing)
     {
@@ -104,11 +128,14 @@ XAssetEntryPoolEntry *DB_LinkXAssetEntry(
         return existing;
     }
 
-    RawFile previous = *existing->entry.asset.header.rawfile;
+    alignas(4) std::byte previous[sizeof(PhysPreset)]{};
+    const std::size_t assetSize = AssetSize(asset.type);
+    std::memcpy(previous, existing->entry.asset.header.data, assetSize);
     const std::uint8_t previousZone = existing->entry.zoneIndex;
-    *existing->entry.asset.header.rawfile = *entry->entry.asset.header.rawfile;
+    std::memcpy(existing->entry.asset.header.data,
+        entry->entry.asset.header.data, assetSize);
     existing->entry.zoneIndex = entry->entry.zoneIndex;
-    *entry->entry.asset.header.rawfile = previous;
+    std::memcpy(entry->entry.asset.header.data, previous, assetSize);
     entry->entry.zoneIndex = previousZone;
     entry->entry.nextOverride = existing->entry.nextOverride;
     existing->entry.nextOverride = static_cast<std::uint16_t>(
@@ -185,6 +212,18 @@ void __cdecl Load_RawFileAsset(XAssetHeader *rawfile)
     XAssetHeader published = DB_AddXAsset(ASSET_TYPE_RAWFILE, *rawfile);
     if (!published.data) return;
     *rawfile = published;
+}
+
+void __cdecl Load_PhysPresetAsset(XAssetHeader *physPreset)
+{
+    if (!physPreset || !physPreset->physPreset)
+    {
+        DB_RuntimeGeneratedFailure("publication/null PhysPreset");
+        return;
+    }
+    XAssetHeader published = DB_AddXAsset(ASSET_TYPE_PHYSPRESET, *physPreset);
+    if (!published.data) return;
+    *physPreset = published;
 }
 
 XAssetHeader __cdecl DB_FindXAssetHeader(XAssetType type, const char *name)

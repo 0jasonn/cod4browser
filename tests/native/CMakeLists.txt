@@ -74,6 +74,7 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
     add_executable(gate3_db_stream_trace_tests
         "${CMAKE_CURRENT_LIST_DIR}/gate3_db_stream_trace_tests.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_auth.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_file_platform.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_file_load.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_loaders.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_memory.cpp"

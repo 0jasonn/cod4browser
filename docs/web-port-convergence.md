@@ -42,11 +42,11 @@ substitute as convergence.
 ## Snapshot
 
 Snapshot baseline: branch `web-port`, through the canonical Worker/database
-runtime prefix and first generated RawFile publication, while retaining
+lifecycle and generated RawFile plus PhysPreset publication, while retaining
 complete canonical Killhouse `GfxWorld` publication at asset 772 and one
 bounded real-world WebGL2 draw in the explicit Gate 2 oracle.
 
-The production web target contains 58 C/C++ translation units: 26 outside
+The production web target contains 60 C/C++ translation units: 28 outside
 `src/web` and 32 inside it. The runtime prefix includes real `common.cpp`, canonical
 dvar and command implementations, real physical memory, database-initializing
 state, string-list/memory support, constant config strings, and shared qcommon
@@ -103,8 +103,10 @@ reproduce the same asset/world evidence.
 shrink/no-growth contracts. Their exact functions, native owners, platform
 hook, and deletion path are listed in
 [`canonical-runtime-prefix-inventory.md`](canonical-runtime-prefix-inventory.md).
-No duplicate could be safely retired in this cleanup because canonical
-`db_registry.cpp` still brings an uncompiled dependency closure.
+All eight duplicated DB lifecycle functions have moved out of
+`db_runtime_prefix.cpp`; the real `db_registry.cpp` translation unit now owns
+their browser-SP compile slice. The prefix retains trace/failure state and the
+exported browser start hook.
 
 The production target and strict runtime check reuse one
 `kisak_web_runtime_prefix` object library. The strict executable compiles only
@@ -135,12 +137,12 @@ and WebGL seams. The exhaustive browser suite remains explicitly available.
 | Dvar system | `MODIFIED KISAK` / partial | Production Wasm now compiles canonical `src/universal/dvar.cpp` and `dvar_cmds.cpp`; `dvar_core.cpp` is retired from that target. Persistence, file parsing, localization-only commands, and tracking are gated beyond the current prefix and must return with their owning subsystems. |
 | qcommon startup | `MODIFIED KISAK` / partial plus `TEMPORARY WEB SUBSTITUTE` oracle | Real `common.cpp` executes through `PMem_Init`, `DB_SetInitializing(true)`, `$init`, `Com_InitXAssets`, and `DB_InitThread`. Native-test/Wasm traces match through the new call and stop pending the first mounted `DB_LoadXAssets` request. The old browser pre-database shell remains regression infrastructure only. |
 | Physical memory | `MODIFIED KISAK` / platform-owned backing | Production Wasm compiles canonical `physicalmemory.cpp` and its fixed 128 MiB two-ended arena. Only page-aligned backing acquisition is browser-owned; explicit 32-bit overflow/collision checks protect linear memory. Native/Wasm tests compare alignment, cursor order, named-scope reset, and failure. |
-| Database initialization | `MODIFIED KISAK` / partial | Canonical initialization now executes through `DB_LoadXFile`, incremental inflate, the 44-byte `XFile`, nine PMem-owned blocks, `DB_InitStreams`, `Load_XAssetListCustom`, `Load_ScriptStringList`, `Load_XAssetArrayCustom`, `Load_XAsset`, and the generated RawFile family. The first asset is published through the canonical pool/free-chain/hash/zone envelope. Census state is neither read nor wrapped. Win32 x86 and Wasm emit the same normalized synthetic trace; the next missing dispatcher family is `PhysPreset`. |
-| Canonical database asset ABI | `SHARED KISAK` / partial | `RawFile`, `XAssetHeader`, `XAssetType`, and `XAsset` live in renderer-free `src/database/db_asset_types.h`. Canonical `XAnimParts`, `WeaponDef`, `LocalizeEntry`, XModel, Material, draw-surface key, FX, collision-plane, ClipMap, `ComWorld`, `ComPrimaryLight`, `GfxImage`, `GfxLightDef`, and the complete database-facing `GfxWorld` graph are isolated in lightweight shared type headers consumed by both native declarations and the portable loader. `GfxWorld` remains the 732-byte Win32 structure; its 44-byte vertex, 48-byte surface, DPVS, cell/portal, lighting, model, shadow, and dynamic records retain their original 32-bit contracts. Win32/Wasm tests enforce those layouts. Expand this extraction only when a real shared consumer requires another canonical type. |
+| Database initialization | `MODIFIED KISAK` / partial | The web target compiles real `db_registry.cpp` ownership for `DB_BuildOSPath`, `DB_TryLoadXFileInternal`, `DB_TryLoadXFile`, `DB_Thread`, `DB_LoadXZone`, `DB_LoadZone_f`, `DB_InitThread`, and `DB_LoadXAssets`. It then executes through XFile inflate, PMem blocks, streams, generated list/string/asset dispatch, RawFile, and PhysPreset. Narrow synchronous file and Sys context adapters own the platform boundary. Retail `code_post_gfx.ff` reaches asset 0 type 5 before the uncompiled MaterialTechniqueSet family. |
+| Canonical database asset ABI | `SHARED KISAK` / partial | `RawFile`, `XAssetHeader`, `XAssetType`, and `XAsset` remain renderer-free. The canonical 44-byte `PhysPreset` is shared from `physics/phys_preset.h` by xanim and generated DB loading. Canonical `XAnimParts`, `WeaponDef`, `LocalizeEntry`, XModel, Material, FX, collision, world, image, and light structures remain shared lightweight ABI declarations. |
 | IWD/ZIP reading | `MODIFIED KISAK` / partial | The bounded reader is portable and tested, but final integration should be through Kisak filesystem/database calls rather than a preview-only archive job. |
 | IWI decoding | `MODIFIED KISAK` / partial | Bounded DXT decoding is reusable. Connect it to canonical `GfxImage` loading and renderer upload instead of browser material queues. |
 | Fastfile framing and zone stream machine | `TEMPORARY WEB SUBSTITUTE` | It accurately models blocks, rewind/high-water behavior, pointer classes, aliases, and bounded streaming. Use it as differential evidence and migrate reusable mechanics toward the Kisak DB loader. |
-| Asset registry | `MODIFIED KISAK` / partial plus `TEMPORARY WEB SUBSTITUTE` oracle | The generated RawFile path now consumes the canonical 32-bit asset-entry pool, per-type pool, free chain, normalized hash table, and zone ownership through the extracted `DB_AddXAsset`/`DB_LinkXAssetEntry` closure. The Gate 2 registry remains frozen as a differential oracle for census traversal and rendering; it is not called by the generated path. Extend canonical publication family-by-family. |
+| Asset registry | `MODIFIED KISAK` / partial plus `TEMPORARY WEB SUBSTITUTE` oracle | Generated RawFile and PhysPreset paths consume the canonical 32-bit asset-entry pool, per-type pools, free chain, normalized hash table, and zone ownership through `DB_AddXAsset`/`DB_LinkXAssetEntry`. PhysPreset uses pool slot 0 and entry 16 with free entries 32,752 -> 32,751. Gate 2 remains a frozen oracle and is not called by the generated path. |
 | Retail loader dispatcher | `TEMPORARY WEB SUBSTITUTE` / frozen Gate 2 oracle | `web_retail_fastfile_census.*` remains the orchestration vehicle, but normal startup no longer executes it. The source has an explicit freeze contract and is isolated with its diagnostic dependencies in `kisak_web_gate2_oracle`; canonical DB code must not call it. It remains linked only until canonical DB can reproduce equivalent asset/world evidence. |
 | `clipMap_t` asset loading | `MODIFIED KISAK` / partial | The dedicated family transcribes the 284-byte `Load_clipMap_t` record, block-4 child order, block-1 zero-fill dynamic client allocations, root insertion/alias handling, bounded ownership, and atomic canonical publication for `col_map_sp`/`col_map_mp`. Synthetic MSVC/Wasm coverage exercises empty and populated child graphs under one-byte traversal budgets. Inline DynEntity dependency bodies remain fail-closed until their canonical families are compiled; no `CM_LoadMap` or collision runtime behavior is included. Type 12 `com_map` remains correctly distinct from `clipMap_t` and is now handled by the canonical ComWorld family. |
 | `ComWorld` asset loading | `MODIFIED KISAK` / partial | `web_retail_load_comworld.*` transcribes native `Load_ComWorldPtr`, `Load_ComWorld`, `Load_ComPrimaryLightArray`, and `Load_ComPrimaryLight`: root null/inline/shared/prior-alias handling, block-0 body allocation, block-4 name and 68-byte light array, per-light `defName` XStrings, checked ceilings, and publication only after the complete body. The owned run publishes asset 704 as canonical `ComWorld`; no light rendering, evaluation, collision, gameplay, or `GfxWorld` behavior is present. |
@@ -320,15 +322,18 @@ The follow-on
 now records incremental inflate, PMem block allocation, stream initialization,
 and the former generated-loader boundary. The next
 [`Gate 3 generated-loader inventory`](history/gate-3-generated-loader-inventory.md)
-records the shared generated list/string/asset/RawFile extraction, first
-canonical DB publication, matching Win32 x86/Wasm trace, and the exact
-`PhysPreset` next-family closure.
+records the earlier shared generated list/string/asset/RawFile extraction.
+The current
+[`DB registry and PhysPreset inventory`](gate-3-db-registry-physpreset-inventory.md)
+records lifecycle ownership, matching Win32 x86/Wasm PhysPreset publication,
+and the owned retail traversal.
 
 The former `DB_TryLoadXFileInternal -> CreateFileA` boundary is now a narrow
 platform open over the Worker mount. The double-buffered reader, inflate setup,
-XFile block table, zone streams, generated prefix, and first RawFile
-publication now use shared Kisak code. The next generated closure is
-`Load_PhysPresetPtr -> Load_PhysPreset -> Load_PhysPresetAsset`.
+XFile block table, zone streams, generated prefix, RawFile, and PhysPreset
+publication now use shared Kisak code. The owned retail startup zone naturally
+stops at asset 0, type 5 `ASSET_TYPE_TECHNIQUE_SET`; that is the recommended
+next generated-family slice after architecture review.
 
 1. `Com_Init` and the real qcommon lifecycle.
 2. `DB_LoadXZone` and canonical asset ownership.
@@ -373,11 +378,11 @@ Update this section when a milestone changes architectural ownership.
 
 | Indicator | Required direction | Current reading |
 | --- | --- | --- |
-| Shared or narrowly modified Kisak code in the web target | Increase | Improving: 26 of 59 production translation units are outside `src/web`, now including the generated-list/RawFile extraction and canonical registry-publication closure beside `db_auth.cpp`, `db_file_load.cpp`, `db_memory.cpp`, `db_stream.cpp`, and `db_stream_load.cpp`. |
+| Shared or narrowly modified Kisak code in the web target | Increase | Improving: 28 of 60 production translation units are outside `src/web`, now including real `db_registry.cpp`, the DB file-platform seam, generated RawFile/PhysPreset loading, and canonical registry publication. |
 | Browser-only engine substitutes | Decrease after their validation purpose is met | High but falling: `dvar_core.cpp` and `cmd_core.cpp` are retired from production. The VFS qcommon oracle, retail DB traversal, and temporary nested asset records remain substitutes. The XModel preview frontend is retired. |
 | Permanent browser platform code | Stable and isolated | Good: launcher, storage, lifecycle, filesystem bridge, and WebGL2 are under explicit web boundaries. |
 | Native engine systems not compiled | Decrease sharply after the GfxWorld proof | High: qcommon plus canonical DB framing, incremental inflate, PMem blocks, stream globals, generated list/string/asset dispatch, RawFile loading, and first DB publication now execute. Remaining generated families, client, cgame, game, xanim runtime, collision, and script VM remain outside the web target. |
-| Native-vs-web semantic comparisons | Increase | The Gate 3 startup closure still matches under Win32 x86 and Wasm. The same platforms now also consume empty, ordered-script-string, and RawFile XFiles through the shared generated closure; the primary 134-byte result is byte-for-byte identical through publication and final stream offsets. |
+| Native-vs-web semantic comparisons | Increase | The Gate 3 startup closure still matches under Win32 x86 and Wasm. Both platforms consume the same RawFile and PhysPreset fixtures and emit the same result through `-1`, `-2`, insertion, prior alias, direct/inline XStrings, final publication, and deterministic pool/free-chain deltas. |
 | Viewer-only feature work | Stop after world proof | Retired: the canonical world-to-WebGL2 seam is proven and the XModel preview UI, state, bridge, retained geometry, and multi-draw path have been removed. |
 
 ## Update rule

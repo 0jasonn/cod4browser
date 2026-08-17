@@ -2,6 +2,7 @@
 #include <database/db_registry_pools.h>
 #include <database/db_registry_publication.h>
 #include <database/db_runtime_prefix.h>
+#include <physics/phys_preset.h>
 #include <qcommon/qcommon.h>
 #include <qcommon/system.h>
 #include <script/scr_stringlist.h>
@@ -37,6 +38,14 @@ void AppendU32(std::vector<std::uint8_t> &bytes, std::uint32_t value)
     bytes.push_back(static_cast<std::uint8_t>(value >> 8));
     bytes.push_back(static_cast<std::uint8_t>(value >> 16));
     bytes.push_back(static_cast<std::uint8_t>(value >> 24));
+}
+
+void AppendF32(std::vector<std::uint8_t> &bytes, float value)
+{
+    std::uint32_t encoded = 0;
+    static_assert(sizeof(encoded) == sizeof(value));
+    std::memcpy(&encoded, &value, sizeof(encoded));
+    AppendU32(bytes, encoded);
 }
 
 void AppendCString(std::vector<std::uint8_t> &bytes, const char *value)
@@ -78,6 +87,60 @@ std::vector<std::uint8_t> MakeGeneratedPrefixXFile()
     AppendCString(inflated, "tests/gate3_first.txt");
     AppendCString(inflated, "first");
     assert(inflated.size() == 134);
+    return CompressXFile(inflated);
+}
+
+std::vector<std::uint8_t> MakePhysPresetXFile(
+    std::uint32_t assetPointer = UINT32_MAX - 1u,
+    std::uint32_t namePointer = UINT32_MAX,
+    std::uint32_t sndAliasPointer = 0x40000015u,
+    bool priorAlias = true,
+    bool includeName = true,
+    bool terminateName = true,
+    std::size_t nameLength = 0)
+{
+    std::vector<std::uint8_t> inflated;
+    AppendU32(inflated, 8192);
+    AppendU32(inflated, 0);
+    for (const std::uint32_t size : std::array<std::uint32_t, 9>{
+        4096, 0, 0, 0, 4096, 0, 0, 0, 0}) AppendU32(inflated, size);
+
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, priorAlias ? 2u : 1u);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, ASSET_TYPE_PHYSPRESET);
+    AppendU32(inflated, assetPointer);
+    if (priorAlias)
+    {
+        AppendU32(inflated, ASSET_TYPE_PHYSPRESET);
+        AppendU32(inflated, 0x40000011u);
+    }
+    if (assetPointer == UINT32_MAX || assetPointer == UINT32_MAX - 1u)
+    {
+        AppendU32(inflated, namePointer);
+        AppendU32(inflated, 7);
+        AppendF32(inflated, 12.5f);
+        AppendF32(inflated, 0.25f);
+        AppendF32(inflated, 0.75f);
+        AppendF32(inflated, 2.0f);
+        AppendF32(inflated, 3.0f);
+        AppendU32(inflated, sndAliasPointer);
+        AppendF32(inflated, 0.5f);
+        AppendF32(inflated, 4.0f);
+        AppendU32(inflated, 1);
+        if (includeName)
+        {
+            const char *name = "physics/gate3";
+            if (nameLength)
+                inflated.insert(inflated.end(), nameLength, 'x');
+            else
+                inflated.insert(inflated.end(), name, name + std::strlen(name));
+            if (terminateName) inflated.push_back(0);
+        }
+        if (sndAliasPointer == UINT32_MAX)
+            AppendCString(inflated, "metal");
+    }
     return CompressXFile(inflated);
 }
 
@@ -382,6 +445,76 @@ int main()
     assert(published.rawfile && published.rawfile->len == 5);
     assert(std::strcmp(published.rawfile->buffer, "first") == 0);
 
+    const std::vector<std::uint8_t> physInsertAlias = MakePhysPresetXFile();
+    Run(physInsertAlias, zone);
+    assert(g_trace.xassetCount == 2 && g_trace.assetIndex == 1);
+    assert(g_trace.assetType == ASSET_TYPE_PHYSPRESET);
+    assert(std::strcmp(g_trace.pointerClassification, "prior-offset/alias") == 0);
+    assert(g_trace.publicationBegin && g_trace.publicationEnd);
+    assert(g_trace.assetEntryIndex == 16 && g_trace.assetPoolIndex == 0);
+    assert(g_trace.freeEntryCountBefore == 32752 && g_trace.freeEntryCountAfter == 32751);
+    assert(g_trace.assetHash == DB_HashForNameCanonical(
+        "physics/gate3", ASSET_TYPE_PHYSPRESET));
+    assert(g_trace.assetZoneIndex == 1);
+    assert(g_trace.streamOffsets[0] == sizeof(PhysPreset));
+    assert(g_trace.streamOffsets[4] == 34);
+    const XAssetHeader publishedPhys = DB_FindXAssetHeader(
+        ASSET_TYPE_PHYSPRESET, "physics/gate3");
+    assert(publishedPhys.physPreset);
+    assert(publishedPhys.physPreset->type == 7);
+    assert(publishedPhys.physPreset->mass == 12.5f);
+    assert(publishedPhys.physPreset->tempDefaultToCylinder);
+    assert(publishedPhys.physPreset->sndAliasPrefix ==
+        publishedPhys.physPreset->name);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_PHYSPRESET) == 63);
+
+    Run(MakePhysPresetXFile(UINT32_MAX, UINT32_MAX, UINT32_MAX,
+        false), zone);
+    assert(std::strcmp(g_trace.pointerClassification, "inline-shared/-1") == 0);
+    assert(g_trace.publicationEnd && g_trace.assetPoolIndex == 0);
+    const XAssetHeader sharedPhys = DB_FindXAssetHeader(
+        ASSET_TYPE_PHYSPRESET, "physics/gate3");
+    assert(sharedPhys.physPreset);
+    assert(std::strcmp(sharedPhys.physPreset->sndAliasPrefix, "metal") == 0);
+
+    Run(MakePhysPresetXFile(0, 0, 0, false, false), zone);
+    assert(std::strcmp(g_trace.pointerClassification, "null") == 0);
+    assert(!g_trace.publicationBegin && !g_trace.publicationEnd);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_PHYSPRESET) == 64);
+
+    Run(MakePhysPresetXFile(UINT32_MAX - 2u, 0, 0, false, false), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "stream/invalid alias offset") == 0);
+
+    Run(MakePhysPresetXFile(UINT32_MAX - 1u, UINT32_MAX, 0x4000000du,
+        false, true, false), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0 ||
+        std::strcmp(g_trace.stopStage, "stream/truncated string") == 0);
+
+    Run(MakePhysPresetXFile(UINT32_MAX - 1u, UINT32_MAX, 0x4000000du,
+        false, true, false, 4084), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "stream/truncated string") == 0);
+
+    Reset(physInsertAlias);
+    *static_cast<void **>(DB_XAssetPool[ASSET_TYPE_PHYSPRESET]) = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
+        !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage, "publication/asset pool exhaustion") == 0);
+    assert(DB_FindXAssetEntryCanonical(
+        ASSET_TYPE_PHYSPRESET, "physics/gate3") == nullptr);
+
+    Reset(physInsertAlias);
+    g_freeAssetEntryHead = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
+        !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage, "publication/asset entry exhaustion") == 0);
+    assert(DB_FindXAssetEntryCanonical(
+        ASSET_TYPE_PHYSPRESET, "physics/gate3") == nullptr);
+
     Reset(generated);
     *static_cast<void **>(DB_XAssetPool[ASSET_TYPE_RAWFILE]) = nullptr;
     RunPrepared(zone);
@@ -412,6 +545,6 @@ int main()
     assert(g_trace.publicationEnd && g_trace.cleanupComplete);
     assert(std::strcmp(g_trace.stopStage, "Load_XAssetHeader/next-family-closure") == 0);
 
-    std::printf("gate3-db-stream produced=134 strings=1 assets=1 type=31 entry=16 pool=0 free=32752->32751 zone=1 offsets=0,0,0,0,68,0,0,0,0 stop=next-family-closure\n");
+    std::printf("gate3-db-stream rawfile=published physpreset=published insert=-2 alias=block4:16 direct-xstring=block4:20 entry=16 pool=0 free=32752->32751 zone=1 stop=next-family-closure\n");
     return 0;
 }

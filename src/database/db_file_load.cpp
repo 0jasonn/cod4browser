@@ -6,12 +6,12 @@
 #include <database/db_semantic_trace.h>
 #if defined(KISAK_WEB)
 #include <database/db_generated_loaders.h>
+#include <database/db_file_platform.h>
 #endif
 
 #include <qcommon/threads.h>
 #if defined(KISAK_WEB)
 #include <database/db_runtime_prefix.h>
-#include <web/web_database_filesystem.h>
 #include <universal/physicalmemory.h>
 #else
 #include <win32/win_local.h>
@@ -78,9 +78,9 @@ static void Load_XAssetListCustom();
 static void __cdecl Load_XAssetArrayCustom(int32_t count);
 
 #if defined(KISAK_WEB)
-static WebDatabaseFile DB_WebFile()
+static DBPlatformFile DB_WebFile()
 {
-    return static_cast<WebDatabaseFile>(reinterpret_cast<std::uintptr_t>(g_load.f) - 1u);
+    return DB_PlatformFileFromOpaque(g_load.f);
 }
 
 static void DB_WebFail(const char *stage)
@@ -122,7 +122,7 @@ void __cdecl DB_CancelLoadXFile()
         if (!g_load.f)
             MyAssertHandler(".\\database\\db_file_load.cpp", 165, 0, "%s", "g_load.f");
 #if defined(KISAK_WEB)
-        WebDatabaseFS_Close(DB_WebFile());
+        DB_PlatformCloseFile(DB_WebFile());
         g_load.f = nullptr;
         g_load.compressBufferStart = nullptr;
         DB_RuntimeTraceCleanupComplete();
@@ -288,7 +288,7 @@ int32_t __cdecl DB_ReadData()
         g_load.interrupt();
 #if defined(KISAK_WEB)
     fileBuffer = &g_load.compressBufferStart[g_load.readOffset % 0x80000];
-    const std::int32_t bytesRead = WebDatabaseFS_Read(
+    const std::int32_t bytesRead = DB_PlatformReadFile(
         DB_WebFile(), fileBuffer, 0x40000u);
     if (bytesRead < 0)
         return 0;
@@ -495,7 +495,7 @@ void __cdecl DB_LoadXFileInternal()
     if (g_trackLoadProgress)
     {
 #if defined(KISAK_WEB)
-        const std::int64_t webFileSize = WebDatabaseFS_Size(DB_WebFile());
+        const std::int64_t webFileSize = DB_PlatformFileSize(DB_WebFile());
         fileSize = webFileSize >= 0 && webFileSize <= (std::numeric_limits<std::int32_t>::max)()
             ? static_cast<std::int32_t>(webFileSize)
             : 0;

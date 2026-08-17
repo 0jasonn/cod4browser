@@ -49,12 +49,14 @@ kisak_configure_web_compile_target(kisak_web_gate2_oracle)
 
 add_executable(KisakCOD-web
     "${SRC_DIR}/database/db_auth.cpp"
+    "${SRC_DIR}/database/db_file_platform.cpp"
     "${SRC_DIR}/database/db_file_load.cpp"
     "${SRC_DIR}/database/db_generated_loaders.cpp"
     "${SRC_DIR}/database/db_semantic_trace.cpp"
     "${SRC_DIR}/database/db_memory.cpp"
     "${SRC_DIR}/database/db_registry_pools.cpp"
     "${SRC_DIR}/database/db_registry_publication.cpp"
+    "${SRC_DIR}/database/db_registry.cpp"
     "${SRC_DIR}/database/db_runtime_prefix.cpp"
     "${SRC_DIR}/database/db_stream.cpp"
     "${SRC_DIR}/database/db_stream_load.cpp"
@@ -98,7 +100,10 @@ set_target_properties(KisakCOD-web PROPERTIES
 )
 
 kisak_configure_web_target(KisakCOD-web)
-target_compile_definitions(KisakCOD-web PRIVATE KISAK_GATE3_COM_INIT_PREFIX=1)
+target_compile_definitions(KisakCOD-web PRIVATE
+    KISAK_GATE3_COM_INIT_PREFIX=1
+    KISAK_DB_REGISTRY_LIFECYCLE_SLICE=1
+)
 target_link_libraries(KisakCOD-web PRIVATE kisak_web_gate2_oracle)
 
 # A small, strict-link inventory executable for the canonical common.cpp

@@ -2,6 +2,7 @@
 
 #include <database/db_asset_types.h>
 #include <database/db_file_types.h>
+#include <physics/phys_preset.h>
 
 #include <cstdint>
 
@@ -14,6 +15,8 @@ extern const char *varConstChar;
 extern const char **varXString;
 extern RawFile *varRawFile;
 extern RawFile **varRawFilePtr;
+extern PhysPreset *varPhysPreset;
+extern PhysPreset **varPhysPresetPtr;
 extern XAssetHeader *varXAssetHeader;
 
 void DB_SetGeneratedAssetIndex(std::uint32_t index);

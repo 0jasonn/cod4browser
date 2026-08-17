@@ -1,14 +1,15 @@
 # Canonical runtime prefix retirement inventory
 
 The current Wasm runtime compiles canonical command/dvar behavior, PMem,
-database pools, XFile streaming, and the generated RawFile loader. Two
-temporary extraction files close dependencies that are not yet portable. Both
-are shrink-only integration mechanisms, not browser-owned engine layers.
+database pools, XFile streaming, generated RawFile and PhysPreset loading, and
+the browser-SP lifecycle slice owned by the real `db_registry.cpp` translation
+unit. Remaining extraction files are shrink-only integration mechanisms, not
+browser-owned engine layers.
 
 ## `db_runtime_prefix.cpp`
 
-Native `db_registry.cpp` already owns these canonical functions, but its full
-dependency closure is not yet in the Wasm target:
+The following former duplicates have been deleted from this file and are now
+compiled under canonical `db_registry.cpp` ownership:
 
 - `DB_BuildOSPath`
 - `DB_TryLoadXFileInternal`
@@ -19,13 +20,16 @@ dependency closure is not yet in the Wasm target:
 - `DB_InitThread`
 - `DB_LoadXAssets`
 
-They remain temporary duplicates. None could be safely removed in this cleanup
-because doing so would sever the current Worker-hosted database path. Each must
-be deleted as the corresponding canonical owner and its Sys/FS/thread
-dependencies compile.
+Their browser-SP closure retains native request order, flags, logical DB thread
+context, zone records, PMem scope, XFile call order, and sync completion.
+Native mod/reorder, renderer archive, zone unload, lost-device, and the
+infinite OS-thread wait loop remain gated until their owning subsystems
+compile. Synchronous open/read/size/close and path construction are below
+`db_file_platform.h`; shared DB units no longer include web filesystem headers.
 
 Temporary deterministic trace/failure scaffolding comprises `Trace`, `Stop`,
-`CurrentScriptIdentity`, every `DB_RuntimeTrace*` function,
+`CaptureStreamState`, `CurrentScriptIdentity`, every `DB_RuntimeTrace*` and
+`DB_RuntimeSet*` function,
 `DB_RuntimeGeneratedFailure`, `DB_RuntimeGeneratedLoadFailed`,
 `DB_RuntimeStreamCanRead`, and `DB_GetRuntimeTrace`. These exist for strict
 native/Wasm semantic comparison and should retire with the integration prefix.

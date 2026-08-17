@@ -63,6 +63,12 @@ const DBRuntimeTraceSnapshot &DB_GetRuntimeTrace();
 // translation units. These functions do not own decoding or allocation.
 void DB_RuntimeTraceStage(const char *stage);
 void DB_RuntimeTraceStop(const char *stage);
+void DB_RuntimeSetLogicalPath(const char *path);
+void DB_RuntimeSetFileSize(std::uint32_t fileSize);
+void DB_RuntimeTraceOpenSucceeded();
+void DB_RuntimeTraceThreadInitialized();
+void DB_RuntimeTracePoolsInitialized(
+    std::uint32_t poolCount, std::uint32_t freeEntryCount);
 void DB_RuntimeTraceHeaderRead(std::uint32_t bytesRead, std::uint32_t fileSize);
 void DB_RuntimeTraceInputRefill(std::uint32_t bytesRead);
 void DB_RuntimeTraceInflate(

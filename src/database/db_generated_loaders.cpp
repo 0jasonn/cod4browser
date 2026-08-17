@@ -13,6 +13,8 @@ const char *varConstChar = nullptr;
 const char **varXString = nullptr;
 RawFile *varRawFile = nullptr;
 RawFile **varRawFilePtr = nullptr;
+PhysPreset *varPhysPreset = nullptr;
+PhysPreset **varPhysPresetPtr = nullptr;
 XAsset *varXAsset = nullptr;
 XAssetHeader *varXAssetHeader = nullptr;
 XAssetList *varXAssetList = nullptr;
@@ -118,6 +120,58 @@ void Load_XString(bool atStreamStart)
     }
 }
 
+void Load_PhysPreset(bool atStreamStart)
+{
+    Load_Stream(atStreamStart, reinterpret_cast<std::uint8_t *>(varPhysPreset),
+        sizeof(PhysPreset));
+    if (DB_RuntimeGeneratedLoadFailed()) return;
+    DB_PushStreamPos(4);
+    varXString = &varPhysPreset->name;
+    Load_XString(false);
+    if (!DB_RuntimeGeneratedLoadFailed())
+    {
+        varXString = &varPhysPreset->sndAliasPrefix;
+        Load_XString(false);
+    }
+    DB_PopStreamPos();
+}
+
+void Load_PhysPresetPtr(bool atStreamStart)
+{
+    Load_Stream(atStreamStart,
+        reinterpret_cast<std::uint8_t *>(varPhysPresetPtr), 4);
+    if (DB_RuntimeGeneratedLoadFailed()) return;
+    DB_PushStreamPos(0);
+    if (*varPhysPresetPtr)
+    {
+        const std::uintptr_t value =
+            reinterpret_cast<std::uintptr_t>(*varPhysPresetPtr);
+        if (value == UINT32_MAX || value == UINT32_MAX - 1u)
+        {
+            *varPhysPresetPtr = reinterpret_cast<PhysPreset *>(
+                AllocLoad_FxElemVisStateSample());
+            varPhysPreset = *varPhysPresetPtr;
+            const void **inserted = value == UINT32_MAX - 1u
+                ? DB_InsertPointer() : nullptr;
+            Load_PhysPreset(true);
+            if (!DB_RuntimeGeneratedLoadFailed())
+                Load_PhysPresetAsset(
+                    reinterpret_cast<XAssetHeader *>(varPhysPresetPtr));
+            if (!DB_RuntimeGeneratedLoadFailed())
+            {
+                DB_RuntimeTraceAssetLoaded((*varPhysPresetPtr)->name);
+                if (inserted) *inserted = *varPhysPresetPtr;
+            }
+        }
+        else
+        {
+            DB_ConvertOffsetToAlias(
+                reinterpret_cast<std::uint32_t *>(varPhysPresetPtr));
+        }
+    }
+    DB_PopStreamPos();
+}
+
 void Load_RawFile(bool atStreamStart)
 {
     Load_Stream(atStreamStart, reinterpret_cast<std::uint8_t *>(varRawFile),
@@ -220,6 +274,10 @@ static void Load_XAssetHeader(bool atStreamStart)
             varXAsset->header.data)));
     switch (varXAsset->type)
     {
+    case ASSET_TYPE_PHYSPRESET:
+        varPhysPresetPtr = reinterpret_cast<PhysPreset **>(varXAssetHeader);
+        Load_PhysPresetPtr(false);
+        break;
     case ASSET_TYPE_RAWFILE:
         varRawFilePtr = reinterpret_cast<RawFile **>(varXAssetHeader);
         Load_RawFilePtr(false);

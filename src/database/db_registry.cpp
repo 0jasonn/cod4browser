@@ -1,3 +1,7 @@
+#if defined(KISAK_DB_REGISTRY_LIFECYCLE_SLICE)
+#include <database/db_registry_lifecycle.inl>
+#else
+
 #include <universal/q_shared.h>
 #include "database.h"
 #include "db_initialization.h"
@@ -3014,3 +3018,5 @@ void __cdecl Load_GetCurrentZoneHandle(uint8_t *handle)
     //        g_zoneIndex);
     *handle = g_zoneIndex;
 }
+
+#endif // KISAK_DB_REGISTRY_LIFECYCLE_SLICE
