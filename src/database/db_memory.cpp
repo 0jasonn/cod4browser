@@ -1,9 +1,18 @@
 #include <universal/q_shared.h>
+#if defined(KISAK_DB_SYNC_FILE_TEST) && !defined(KISAK_WEB)
+#define KISAK_WEB 1
+#endif
 #include "database.h"
 
 #include <universal/physicalmemory.h>
 #include <qcommon/qcommon.h>
+#if defined(KISAK_WEB)
+#include <database/db_runtime_prefix.h>
+#else
 #include <gfx_d3d/r_buffers.h>
+#endif
+
+#include <limits>
 
 int32_t g_block_mem_type[9] =
 { 0, 1, 1, 2, 1, 1, 2, 2, 2 };
@@ -24,8 +33,46 @@ const char *g_block_mem_name[9] =
 // --- file-local forward declarations (moved out of database.h) ---
 static uint8_t *__cdecl DB_MemAlloc(uint32_t size, uint32_t type, uint32_t allocType);
 
+bool DB_CanAllocXZoneMemory(const uint32_t *blockSize, uint32_t allocType)
+{
+    if (!blockSize || allocType >= 2) return false;
+    const PhysicalMemory *memory = PMem_GetState();
+    if (!memory || !memory->buf) return false;
+
+    std::uint64_t low = memory->prim[0].pos;
+    std::uint64_t high = memory->prim[1].pos;
+    constexpr std::uint64_t alignmentMask = 0xfffu;
+    for (std::uint32_t blockIndex = 0; blockIndex < 9; ++blockIndex)
+    {
+        if (!blockSize[blockIndex]) continue;
+        std::uint64_t request = blockSize[blockIndex];
+        if (g_block_mem_type[blockIndex] <= 1) request += 15u;
+        if (allocType == 0)
+        {
+            if (low > (std::numeric_limits<std::uint32_t>::max)() - alignmentMask)
+                return false;
+            const std::uint64_t aligned = (low + alignmentMask) & ~alignmentMask;
+            if (aligned > high || request > high - aligned) return false;
+            low = aligned + request;
+        }
+        else
+        {
+            if (request > high) return false;
+            high = (high - request) & ~alignmentMask;
+            if (high < low) return false;
+        }
+    }
+    return true;
+}
+
 void __cdecl DB_RecoverGeometryBuffers(XZoneMemory *zoneMem)
 {
+#if defined(KISAK_WEB)
+    // The canonical block allocation remains PMem-owned. GPU buffer creation
+    // belongs to the renderer backend and is intentionally beyond this DB
+    // stream milestone.
+    (void)zoneMem;
+#else
     uint8_t *lockedData; // [esp+4h] [ebp-4h]
     uint8_t *lockedDataa; // [esp+4h] [ebp-4h]
 
@@ -51,10 +98,14 @@ void __cdecl DB_RecoverGeometryBuffers(XZoneMemory *zoneMem)
         else
             R_FinishStaticIndexBuffer((IDirect3DIndexBuffer9 *)zoneMem->indexBuffer);
     }
+#endif
 }
 
 void __cdecl DB_ReleaseGeometryBuffers(XZoneMemory *zoneMem)
 {
+#if defined(KISAK_WEB)
+    (void)zoneMem;
+#else
     IDirect3DVertexBuffer9 *vb; // [esp+0h] [ebp-8h]
     IDirect3DIndexBuffer9 *ib; // [esp+4h] [ebp-4h]
 
@@ -74,6 +125,7 @@ void __cdecl DB_ReleaseGeometryBuffers(XZoneMemory *zoneMem)
         R_FreeStaticIndexBuffer(ib);
         zoneMem->indexBuffer = 0;
     }
+#endif
 }
 
 void __cdecl DB_AllocXZoneMemory(
@@ -86,6 +138,18 @@ void __cdecl DB_AllocXZoneMemory(
     uint32_t blockIndex; // [esp+28h] [ebp-Ch]
     uint8_t *buf; // [esp+2Ch] [ebp-8h]
     uint32_t size; // [esp+30h] [ebp-4h]
+
+#if defined(KISAK_WEB)
+    // Simulate the exact nine-block alignment/order before moving either PMem
+    // cursor so failure remains atomic in Wasm linear memory.
+    if (!DB_CanAllocXZoneMemory(blockSize, allocType))
+    {
+        Com_Error(
+            ERR_DROP,
+            "Could not allocate canonical XFile blocks for zone '%s' from PMem",
+            filename);
+    }
+#endif
 
     for (blockIndex = 0; blockIndex < 9; ++blockIndex)
     {
@@ -107,8 +171,12 @@ void __cdecl DB_AllocXZoneMemory(
             }
             zoneMem->blocks[blockIndex].size = size;
             zoneMem->blocks[blockIndex].data = buf;
+#if defined(KISAK_WEB)
+            DB_RuntimeTraceBlockAllocation(blockIndex, size);
+#endif
         }
     }
+#if !defined(KISAK_WEB)
     if (zoneMem->vertexBuffer)
         MyAssertHandler(".\\database\\db_memory.cpp", 104, 0, "%s", "zoneMem->vertexBuffer == NULL");
     if (zoneMem->lockedVertexData)
@@ -121,12 +189,19 @@ void __cdecl DB_AllocXZoneMemory(
         MyAssertHandler(".\\database\\db_memory.cpp", 111, 0, "%s", "zoneMem->lockedIndexData == NULL");
     if (zoneMem->blocks[8].size)
         zoneMem->lockedIndexData = (uint8_t *)R_AllocStaticIndexBuffer((IDirect3DIndexBuffer9 **)&zoneMem->indexBuffer, zoneMem->blocks[8].size);
+#endif
 }
 
 uint8_t *__cdecl DB_MemAlloc(uint32_t size, uint32_t type, uint32_t allocType)
 {
     if (type <= 1)
+    {
+#if defined(KISAK_WEB)
+        if (size > (std::numeric_limits<std::uint32_t>::max)() - 15u)
+            return nullptr;
+#endif
         return PMem_Alloc(size + 15, 0x1000u, 4, allocType);
+    }
     iassert(type == DM_MEMORY_PHYSICAL);
     return PMem_Alloc(size, 0x1000u, 0x404u, allocType);
 }

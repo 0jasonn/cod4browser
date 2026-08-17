@@ -8,10 +8,15 @@ set(KISAK_WEB_SITE_DIR "${CMAKE_BINARY_DIR}/site")
 set(KISAK_WEB_SOURCE_DIR "${CMAKE_SOURCE_DIR}/web")
 
 add_executable(KisakCOD-web
+    "${SRC_DIR}/database/db_auth.cpp"
+    "${SRC_DIR}/database/db_file_load.cpp"
     "${SRC_DIR}/database/db_semantic_trace.cpp"
     "${SRC_DIR}/database/db_initialization.cpp"
+    "${SRC_DIR}/database/db_memory.cpp"
     "${SRC_DIR}/database/db_registry_pools.cpp"
     "${SRC_DIR}/database/db_runtime_prefix.cpp"
+    "${SRC_DIR}/database/db_stream.cpp"
+    "${SRC_DIR}/database/db_stream_load.cpp"
     "${SRC_DIR}/qcommon/com_init_trace.cpp"
     "${SRC_DIR}/qcommon/common.cpp"
     "${SRC_DIR}/qcommon/cmd.cpp"

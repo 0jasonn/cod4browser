@@ -131,10 +131,12 @@ export function createWorkerSyncFilesystem()
     function readMounted(file, offset, destination)
     {
         if (!Number.isSafeInteger(offset) || offset < 0 ||
-            offset > file.size || destination.byteLength > file.size - offset) {
+            offset > file.size) {
             return -1;
         }
-        return file.access.read(destination, { at: offset });
+        const readable = Math.min(destination.byteLength, file.size - offset);
+        if (readable === 0) return 0;
+        return file.access.read(destination.subarray(0, readable), { at: offset });
     }
 
     function installForModule(wasmModule)

@@ -1,13 +1,24 @@
 #include <universal/q_shared.h>
+#if defined(KISAK_DB_SYNC_FILE_TEST) && !defined(KISAK_WEB)
+#define KISAK_WEB 1
+#endif
 #include "database.h"
 #include <database/db_semantic_trace.h>
 
 #include <qcommon/threads.h>
+#if defined(KISAK_WEB)
+#include <database/db_runtime_prefix.h>
+#include <web/web_database_filesystem.h>
+#include <universal/physicalmemory.h>
+#else
 #include <win32/win_local.h>
 #include <universal/com_files.h>
 
 #include <gfx_d3d/r_image.h>
 #include <gfx_d3d/r_buffers.h>
+#endif
+
+#include <limits>
 
 //uint32_t volatile g_loadingAssets      828e3f3c     db_file_load.obj
 //int32_t marker_db_file_load  828e3f40     db_file_load.obj
@@ -18,7 +29,16 @@ struct DB_LoadData // sizeof=0x68
     const char* filename;               // ...
     XZoneMemory* zoneMem;               // ...
     int32_t outstandingReads;               // ...
+#if defined(KISAK_WEB)
+    uint32_t readOffset;
+    uint32_t completedReadSize;
+    bool endOfFile;
+    bool inflateInitialized;
+    bool failed;
+    const char *failureStage;
+#else
     OVERLAPPED overlapped;             // ...
+#endif
     z_stream_s stream;                  // ...
     uint8_t* compressBufferStart; // ...
     uint8_t* compressBufferEnd; // ...
@@ -33,8 +53,13 @@ bool g_anyFastFileLoaded;
 #endif
 
 DB_LoadData g_load;
+#if defined(KISAK_WEB)
+int32_t g_loadedSize;
+int32_t g_loadedExternalBytes;
+#else
 LONG g_loadedSize;
 LONG g_loadedExternalBytes;
+#endif
 volatile int32_t g_totalSize;
 volatile int32_t g_totalExternalBytes;
 int32_t g_trackLoadProgress;
@@ -49,16 +74,48 @@ static int32_t __cdecl DB_ReadData();
 static void Load_XAssetListCustom();
 static void __cdecl Load_XAssetArrayCustom(int32_t count);
 
+#if defined(KISAK_WEB)
+static WebDatabaseFile DB_WebFile()
+{
+    return static_cast<WebDatabaseFile>(reinterpret_cast<std::uintptr_t>(g_load.f) - 1u);
+}
+
+static void DB_WebFail(const char *stage)
+{
+    if (!g_load.failed)
+    {
+        g_load.failed = true;
+        g_load.failureStage = stage;
+        DB_RuntimeTraceStage(stage);
+    }
+}
+#endif
+
 void __cdecl DB_CancelLoadXFile()
 {
     if (g_load.compressBufferStart)
     {
         while (g_load.outstandingReads)
             DB_WaitXFileStage();
+#if defined(KISAK_WEB)
+        if (g_load.inflateInitialized)
+        {
+            DB_AuthLoad_InflateEnd(&g_load.stream);
+            g_load.inflateInitialized = false;
+        }
+#else
         DB_AuthLoad_InflateEnd(&g_load.stream);
+#endif
         if (!g_load.f)
             MyAssertHandler(".\\database\\db_file_load.cpp", 165, 0, "%s", "g_load.f");
+#if defined(KISAK_WEB)
+        WebDatabaseFS_Close(DB_WebFile());
+        g_load.f = nullptr;
+        g_load.compressBufferStart = nullptr;
+        DB_RuntimeTraceCleanupComplete();
+#else
         CloseHandle(g_load.f);
+#endif
     }
 }
 
@@ -71,15 +128,25 @@ int32_t DB_WaitXFileStage()
     if (g_load.outstandingReads <= 0)
         MyAssertHandler(".\\database\\db_file_load.cpp", 280, 0, "%s", "g_load.outstandingReads > 0");
     --g_load.outstandingReads;
+#if defined(KISAK_WEB)
+    result = ++g_loadedSize;
+    g_load.stream.avail_in += g_load.completedReadSize;
+    g_load.completedReadSize = 0;
+#else
     SleepEx(0xFFFFFFFF, 1);
     result = InterlockedIncrement(&g_loadedSize);
     g_load.stream.avail_in += 0x40000;
+#endif
     return result;
 }
 
 void __cdecl DB_LoadedExternalData(int32_t size)
 {
+#if defined(KISAK_WEB)
+    g_loadedExternalBytes += size;
+#else
     InterlockedExchangeAdd(&g_loadedExternalBytes, size);
+#endif
 }
 
 double __cdecl DB_GetLoadedFraction()
@@ -120,11 +187,22 @@ void __cdecl DB_LoadXFileData(uint8_t *pos, uint32_t size)
         if (!g_load.stream.avail_in)
             goto LABEL_19;
         err = DB_AuthLoad_Inflate(&g_load.stream, 2);
+#if defined(KISAK_WEB)
+        DB_RuntimeTraceInflate(
+            static_cast<std::uint32_t>(g_load.stream.total_in),
+            static_cast<std::uint32_t>(g_load.stream.total_out));
+#endif
         if (err >= 2)
         {
+#if defined(KISAK_WEB)
+            DB_WebFail(err == Z_DATA_ERROR ? "inflate/corrupt zlib data" : "inflate/failure");
+            g_load.stream.avail_out = 0;
+            return;
+#else
             KISAK_NULLSUB();
             DB_CancelLoadXFile();
             Com_Error(ERR_DROP, "Fastfile for zone '%s' appears corrupt or unreadable (code %i.)", g_load.filename, err + 110);
+#endif
         }
         if (g_load.f)
         {
@@ -142,10 +220,28 @@ void __cdecl DB_LoadXFileData(uint8_t *pos, uint32_t size)
             break;
         if (err)
         {
+#if defined(KISAK_WEB)
+            DB_WebFail(err == Z_STREAM_END ? "inflate/premature end of stream" : "inflate/non-Z_OK result");
+            g_load.stream.avail_out = 0;
+            return;
+#else
             v2 = va("Invalid fast file '%s' (%d != Z_OK)", g_load.filename, err);
             MyAssertHandler(".\\database\\db_file_load.cpp", 402, 0, "%s\n\t%s", "err == Z_OK", v2);
+#endif
         }
     LABEL_19:
+#if defined(KISAK_WEB)
+        if (!g_load.outstandingReads)
+        {
+            DB_ReadXFileStage();
+            if (!g_load.outstandingReads)
+            {
+                DB_WebFail("inflate/premature EOF");
+                g_load.stream.avail_out = 0;
+                return;
+            }
+        }
+#endif
         DB_WaitXFileStage();
         DB_ReadXFileStage();
     }
@@ -157,8 +253,13 @@ void DB_ReadXFileStage()
     {
         if (g_load.outstandingReads)
             MyAssertHandler(".\\database\\db_file_load.cpp", 254, 0, "%s", "!g_load.outstandingReads");
+#if defined(KISAK_WEB)
+        if (!g_load.endOfFile && !DB_ReadData())
+            DB_WebFail("XFile input/read failure");
+#else
         if (!DB_ReadData() && GetLastError() != 38)
             Com_Error(ERR_DROP, "Read error of file '%s'", g_load.filename);
+#endif
     }
 }
 
@@ -172,6 +273,25 @@ int32_t __cdecl DB_ReadData()
         MyAssertHandler(".\\database\\db_file_load.cpp", 189, 0, "%s", "g_load.f");
     if (g_load.interrupt)
         g_load.interrupt();
+#if defined(KISAK_WEB)
+    fileBuffer = &g_load.compressBufferStart[g_load.readOffset % 0x80000];
+    const std::int32_t bytesRead = WebDatabaseFS_Read(
+        DB_WebFile(), fileBuffer, 0x40000u);
+    if (bytesRead < 0)
+        return 0;
+    if (bytesRead == 0)
+    {
+        g_load.endOfFile = true;
+        return 1;
+    }
+    g_load.completedReadSize = static_cast<std::uint32_t>(bytesRead);
+    ++g_load.outstandingReads;
+    g_load.readOffset += g_load.completedReadSize;
+    if (g_load.completedReadSize < 0x40000u)
+        g_load.endOfFile = true;
+    DB_RuntimeTraceInputRefill(g_load.completedReadSize);
+    return 1;
+#else
     fileBuffer = &g_load.compressBufferStart[g_load.overlapped.Offset % 0x80000];
     Sys_WaitDatabaseThread();
     if (!ReadFileEx(g_load.f, fileBuffer, 0x40000u, &g_load.overlapped, (LPOVERLAPPED_COMPLETION_ROUTINE)DB_FileReadCompletion))
@@ -179,8 +299,10 @@ int32_t __cdecl DB_ReadData()
     ++g_load.outstandingReads;
     g_load.overlapped.Offset += 0x40000;
     return 1;
+#endif
 }
 
+#if !defined(KISAK_WEB)
 void __stdcall DB_FileReadCompletion(
     uint32_t dwErrorCode,
     uint32_t dwNumberOfBytesTransfered,
@@ -188,7 +310,9 @@ void __stdcall DB_FileReadCompletion(
 {
     ;
 }
+#endif
 
+#if !defined(KISAK_WEB)
 void __cdecl DB_LoadDelayedImages()
 {
     uint32_t copyIter; // [esp+0h] [ebp-4h]
@@ -214,6 +338,7 @@ void __cdecl DB_FinishGeometryBlocks(XZoneMemory *zoneMem)
         zoneMem->lockedIndexData = 0;
     }
 }
+#endif
 
 void __cdecl DB_LoadXFileInternal()
 {
@@ -228,26 +353,67 @@ void __cdecl DB_LoadXFileInternal()
     iassert(g_load.f);
     DB_ReadXFileStage();
     if (!g_load.outstandingReads)
+#if defined(KISAK_WEB)
+    {
+        DB_WebFail("XFile/empty file");
+        DB_CancelLoadXFile();
+        DB_RuntimeTraceStop(g_load.failureStage);
+        return;
+    }
+#else
         Com_Error(ERR_DROP, "Fastfile for zone '%s' is empty.", g_load.filename);
+#endif
     DB_WaitXFileStage();
     DB_ReadXFileStage();
     if (g_load.stream.avail_in < 8)
+#if defined(KISAK_WEB)
+    {
+        DB_WebFail("XFile/header short read");
+        DB_CancelLoadXFile();
+        DB_RuntimeTraceStop(g_load.failureStage);
+        return;
+    }
+#else
         MyAssertHandler(".\\database\\db_file_load.cpp", 598, 0, "%s", "sizeof( magic ) <= g_load.stream.avail_in");
+#endif
     *(uint32_t *)magic = *(uint32_t *)g_load.stream.next_in;
     *(uint32_t *)&magic[4] = *((uint32_t *)g_load.stream.next_in + 1);
     g_load.stream.next_in += 8;
     g_load.stream.avail_in -= 8;
     if (memcmp(magic, "IWff0100", 8u) && memcmp(magic, "IWffu100", 8u))
     {
+#if defined(KISAK_WEB)
+        DB_WebFail("XFile/invalid magic");
+        DB_CancelLoadXFile();
+        DB_RuntimeTraceStop(g_load.failureStage);
+        return;
+#else
         KISAK_NULLSUB();
         Com_Error(ERR_DROP, "Fastfile for zone '%s' is corrupt or unreadable.", g_load.filename);
+#endif
     }
+#if defined(KISAK_WEB)
+    if (g_load.stream.avail_in < sizeof(version))
+    {
+        DB_WebFail("XFile/version short read");
+        DB_CancelLoadXFile();
+        DB_RuntimeTraceStop(g_load.failureStage);
+        return;
+    }
+#else
     iassert(sizeof(version) <= g_load.stream.avail_in);
+#endif
     version = *(uint32_t *)g_load.stream.next_in;
     g_load.stream.next_in += 4;
     g_load.stream.avail_in -= 4;
     if (version != 5)
     {
+#if defined(KISAK_WEB)
+        DB_WebFail(version >= 5 ? "XFile/version newer" : "XFile/version older");
+        DB_CancelLoadXFile();
+        DB_RuntimeTraceStop(g_load.failureStage);
+        return;
+#else
         if (version >= 5)
             Com_Error(
                 ERR_DROP,
@@ -262,7 +428,12 @@ void __cdecl DB_LoadXFileInternal()
                 g_load.filename,
                 version,
                 5);
+#endif
     }
+#if defined(KISAK_WEB)
+    DB_RuntimeTraceHeaderRead(12u, 0u);
+    DB_RuntimeTraceStage("zone header/framing validation");
+#endif
     fileIsSecure = memcmp(magic, "IWffu100", 8u) != 0;
     err = DB_AuthLoad_InflateInit(&g_load.stream, fileIsSecure);
     failureReason = 0;
@@ -272,15 +443,52 @@ void __cdecl DB_LoadXFileInternal()
         failureReason = "init failed";
     if (failureReason)
     {
+#if defined(KISAK_WEB)
+        DB_WebFail(fileIsSecure ? "inflate/authenticated file unsupported" : "inflate/init failed");
+        DB_CancelLoadXFile();
+        DB_RuntimeTraceStop(g_load.failureStage);
+        return;
+#else
         KISAK_NULLSUB();
         DB_CancelLoadXFile();
         Com_Error(ERR_DROP, "Fastfile for zone '%s' could not be loaded (%s)", g_load.filename, failureReason);
+#endif
     }
+#if defined(KISAK_WEB)
+    g_load.inflateInitialized = true;
+    DB_RuntimeTraceInflateInitialized();
+#endif
     
     DB_LoadXFileData((uint8_t *)&file, sizeof(XFile));
+#if defined(KISAK_WEB)
+    if (g_load.failed)
+    {
+        const char *stage = g_load.failureStage;
+        DB_CancelLoadXFile();
+        DB_RuntimeTraceStop(stage);
+        return;
+    }
+    DB_RuntimeTraceXFile(file.size, file.externalSize, file.blockSize);
+
+    if (!DB_CanAllocXZoneMemory(file.blockSize, g_load.allocType))
+    {
+        DB_WebFail("XFile/block allocation exhaustion");
+        const char *stage = g_load.failureStage;
+        DB_CancelLoadXFile();
+        DB_RuntimeTraceStop(stage);
+        return;
+    }
+#endif
     if (g_trackLoadProgress)
     {
+#if defined(KISAK_WEB)
+        const std::int64_t webFileSize = WebDatabaseFS_Size(DB_WebFile());
+        fileSize = webFileSize >= 0 && webFileSize <= (std::numeric_limits<std::int32_t>::max)()
+            ? static_cast<std::int32_t>(webFileSize)
+            : 0;
+#else
         fileSize = GetFileSize(g_load.f, 0);
+#endif
         if (file.externalSize + fileSize >= 0x100000)
         {
             g_totalSize = (fileSize + 0x3FFFF) / 0x40000 - g_loadedSize;
@@ -291,6 +499,12 @@ void __cdecl DB_LoadXFileInternal()
     }
     DB_AllocXZoneMemory(file.blockSize, g_load.filename, g_load.zoneMem, g_load.allocType);
     DB_InitStreams(g_load.zoneMem);
+#if defined(KISAK_WEB)
+    DB_RuntimeTraceStage("first generated-loader entry");
+    DB_CancelLoadXFile();
+    DB_RuntimeTraceStop("Load_XAssetListCustom/generated-loader-closure");
+    return;
+#else
     Load_XAssetListCustom();
     DB_PushStreamPos(4);
     if (varXAssetList->assets)
@@ -313,6 +527,7 @@ void __cdecl DB_LoadXFileInternal()
 	g_anyFastFileLoaded = true;
 #endif
     DB_CancelLoadXFile();
+#endif
 }
 
 bool __cdecl DB_IsMinimumFastFileLoaded()
@@ -324,6 +539,7 @@ bool __cdecl DB_IsMinimumFastFileLoaded()
 #endif
 }
 
+#if !defined(KISAK_WEB)
 void Load_XAssetListCustom()
 {
     varXAssetList = &g_varXAssetList;
@@ -353,6 +569,7 @@ void __cdecl Load_XAssetArrayCustom(int32_t count)
         ++var;
     }
 }
+#endif
 
 void __cdecl DB_ResetZoneSize(int32_t trackLoadProgress)
 {
@@ -372,6 +589,10 @@ void __cdecl DB_LoadXFile(
     uint8_t *buf,
     int32_t allocType)
 {
+#if defined(KISAK_WEB)
+    (void)path;
+    DB_RuntimeTraceStage("DB_LoadXFile");
+#endif
     if (((uintptr_t)buf & 3) != 0)
         MyAssertHandler(".\\database\\db_file_load.cpp", 749, 0, "%s", "!(reinterpret_cast< psize_int >( buf ) & 3)");
     memset((uint8_t *)&g_load, 0, sizeof(g_load));

@@ -4,12 +4,20 @@
 
 #include <zlib/zlib.h>
 
+#if defined(KISAK_WEB) || defined(KISAK_DB_SYNC_FILE_TEST)
+#include <database/db_asset_types.h>
+#include <database/db_file_types.h>
+#include <database/db_registry_types.h>
+#else
 #include <xanim/xanim.h>
 #include <xanim/xmodel.h>
+#endif
+#if !defined(KISAK_WEB) && !defined(KISAK_DB_SYNC_FILE_TEST)
 #include <win32/win_local.h>
-#
+#endif
 
 extern bool g_anyFastFileLoaded;
+struct FastCriticalSection;
 
 enum $D93A52C218787A3ED865FD745137F4B3 : int32_t
 {
@@ -43,7 +51,7 @@ char *__cdecl DB_ReferencedFFChecksums();
 char *__cdecl DB_ReferencedFFNameList();
 void __cdecl Hunk_OverrideDataForFile(int32_t type, const char *name, void *data);
 void __cdecl DB_GetIndexBufferAndBase(uint8_t zoneHandle, void *indices, void **ib, int32_t *baseIndex);
-void __cdecl DB_GetVertexBufferAndOffset(uint8_t zoneHandle, _BYTE *verts, void **vb, int32_t *vertexOffset);
+void __cdecl DB_GetVertexBufferAndOffset(uint8_t zoneHandle, uint8_t *verts, void **vb, int32_t *vertexOffset);
 void __cdecl DB_EndRecoverLostDevice();
 void __cdecl DB_BeginRecoverLostDevice();
 void __cdecl Load_PhysPresetAsset(XAssetHeader *physPreset);
@@ -163,10 +171,12 @@ uint32_t __cdecl DB_AuthLoad_Inflate(z_stream_s *stream, int32_t flush);
 void __cdecl DB_LoadedExternalData(int32_t size);
 double __cdecl DB_GetLoadedFraction();
 void __cdecl DB_LoadXFileData(uint8_t *pos, uint32_t size);
+#if !defined(KISAK_WEB) && !defined(KISAK_DB_SYNC_FILE_TEST)
 void __stdcall DB_FileReadCompletion(
     uint32_t dwErrorCode,
     uint32_t dwNumberOfBytesTransfered,
     _OVERLAPPED *lpOverlapped);
+#endif
 void __cdecl DB_LoadXFileInternal();
 void __cdecl DB_ResetZoneSize(int32_t trackLoadProgress);
 void __cdecl DB_LoadXFile(
@@ -186,6 +196,7 @@ void __cdecl DB_AllocXZoneMemory(
     const char *filename,
     XZoneMemory *zoneMem,
     uint32_t allocType);
+bool DB_CanAllocXZoneMemory(const uint32_t *blockSize, uint32_t allocType);
 
 
 // db_stream

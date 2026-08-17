@@ -95,7 +95,7 @@ reserved exactly as in Kisak. Twenty-six pool/singleton identities are active
 for the SP build. Singleton bodies remain owned by their native subsystems;
 the Web prefix retains identities only and does not decode or publish them.
 
-The executed path is:
+The original executed path was:
 
 ```text
 Com_InitXAssets
@@ -114,6 +114,10 @@ zone header/framing validation
 stop=DB_LoadXFile/streaming-inflate-closure
 ```
 
+That stop has now been crossed. The current canonical streaming inventory and
+new generated-loader stop are recorded in
+[`gate-3-xfile-streaming-inventory.md`](gate-3-xfile-streaming-inventory.md).
+
 The browser test uses a freely generated synthetic `code_post_gfx.ff` through
 the normal `zone/english/<zone>.ff` path. It validates the eight-byte IWff
 magic, version 5, and zlib framing. The same path can consume a legally owned
@@ -125,7 +129,7 @@ Win32 x86 and Wasm emit the identical normalized pool contract
 test separately asserts the ordered DB stages above, logical path, 14-byte
 read, and framing result without exposing a host path or storage identity.
 
-## Exact next blocker
+## Superseded next blocker
 
 The stop is immediately before integrating `DB_LoadXFile` and
 `DB_LoadXFileInternal` beyond framing. Native `db_file_load.cpp` uses
@@ -133,10 +137,7 @@ The stop is immediately before integrating `DB_LoadXFile` and
 then zlib authentication, XFile block sizes, PMem zone allocation, stream
 initialization, generated asset loaders, delayed images, and final publication.
 
-The next slice should make that translation unit consume the synchronous
-platform file handle while retaining its double-buffer/order contract, then
-compile `db_memory.cpp`, `db_stream.cpp`, `db_stream_load.cpp`, and the first
-generated load closure needed for the XFile/asset-list prefix. It should stop
-at the next missing canonical asset family rather than route through the
-census. The current architecture already supplies the required Worker-hosted
-synchronous filesystem boundary; no additional Worker is required yet.
+That work is complete through `DB_InitStreams`. The exact next closure is now
+`Load_XAssetListCustom -> Load_ScriptStringList` in `db_load.cpp`; the census
+is still not an execution dependency. The current architecture continues to
+need no additional Worker.

@@ -21,6 +21,62 @@ export function createSyntheticFastfileHeader()
     ]);
 }
 
+// Freely generated fixture for the canonical Gate 3 XFile envelope. It keeps
+// the first 44 inflated bytes deterministic and can append arbitrary bytes for
+// refill/failure coverage without borrowing from retail data.
+export function createSyntheticCanonicalXFile({
+    size = 4096,
+    externalSize = 0,
+    blockSizes = [1024, 0, 0, 0, 1024, 0, 0, 0, 0],
+    trailingBytes = [],
+} = {})
+{
+    if (blockSizes.length !== 9) throw new Error("XFile requires nine block sizes");
+    const inflated = [];
+    appendU32(inflated, size);
+    appendU32(inflated, externalSize);
+    for (const blockSize of blockSizes) appendU32(inflated, blockSize);
+    inflated.push(...trailingBytes);
+    const compressed = deflateSync(Uint8Array.from(inflated), { level: 9 });
+    return Uint8Array.from([
+        0x49, 0x57, 0x66, 0x66, 0x75, 0x31, 0x30, 0x30,
+        0x05, 0x00, 0x00, 0x00,
+        ...compressed,
+    ]);
+}
+
+export function createSyntheticCanonicalRefillXFile()
+{
+    const inflated = [];
+    appendU32(inflated, 4096);
+    appendU32(inflated, 0);
+    for (const blockSize of [1024, 0, 0, 0, 1024, 0, 0, 0, 0]) {
+        appendU32(inflated, blockSize);
+    }
+
+    // Valid zlib/deflate with enough empty stored blocks to place the first
+    // output beyond the native 256 KiB input half-buffer.
+    const deflate = [0x78, 0x01];
+    for (let index = 0; index < 52_430; ++index) {
+        deflate.push(0x00, 0x00, 0x00, 0xff, 0xff);
+    }
+    const length = inflated.length;
+    deflate.push(0x01, length & 0xff, length >>> 8,
+        (~length) & 0xff, ((~length) >>> 8) & 0xff, ...inflated);
+    let a = 1;
+    let b = 0;
+    for (const byte of inflated) {
+        a = (a + byte) % 65_521;
+        b = (b + a) % 65_521;
+    }
+    const adler = ((b << 16) | a) >>> 0;
+    deflate.push(adler >>> 24, (adler >>> 16) & 0xff,
+        (adler >>> 8) & 0xff, adler & 0xff);
+    return Uint8Array.from([
+        ...Buffer.from("IWffu100", "ascii"), 5, 0, 0, 0, ...deflate,
+    ]);
+}
+
 // Freely generated minimal prerequisite zone. It exercises the real
 // code_post_gfx -> common -> world orchestration without inventing retail
 // assets or requiring sound records in unrelated browser-platform tests.

@@ -1,4 +1,7 @@
 #include <universal/q_shared.h>
+#if defined(KISAK_DB_SYNC_FILE_TEST) && !defined(KISAK_WEB)
+#define KISAK_WEB 1
+#endif
 #include "database.h"
 
 #include <zlib/zlib.h>

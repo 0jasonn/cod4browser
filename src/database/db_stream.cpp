@@ -1,5 +1,13 @@
 #include <universal/q_shared.h>
+#if defined(KISAK_DB_SYNC_FILE_TEST) && !defined(KISAK_WEB)
+#define KISAK_WEB 1
+#endif
 #include "database.h"
+#if defined(KISAK_WEB)
+#include <database/db_runtime_prefix.h>
+#endif
+
+#include <cstdint>
 
 uint32_t g_streamDelayIndex;
 XBlock * g_streamBlocks;
@@ -26,6 +34,9 @@ void __cdecl DB_InitStreams(XZoneMemory *zoneMem)
     g_streamPosStackIndex = 0;
     for (i = 0; i < 9; ++i)
         g_streamPosArray[i] = zoneMem->blocks[i].data;
+#if defined(KISAK_WEB)
+    DB_RuntimeTraceStreamsInitialized(0, 0);
+#endif
 }
 
 void __cdecl DB_PushStreamPos(uint32_t index)
@@ -85,7 +96,9 @@ uint8_t *__cdecl DB_GetStreamPos()
 uint8_t *__cdecl DB_AllocStreamPos(int32_t alignment)
 {
     iassert(g_streamPos);
-    g_streamPos = (uint8_t *)(~alignment & (uint32_t)&g_streamPos[alignment]);
+    const std::uintptr_t address = reinterpret_cast<std::uintptr_t>(g_streamPos);
+    const std::uintptr_t mask = static_cast<std::uintptr_t>(alignment);
+    g_streamPos = reinterpret_cast<uint8_t *>((address + mask) & ~mask);
     return g_streamPos;
 }
 

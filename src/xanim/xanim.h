@@ -2,6 +2,7 @@
 
 // LWSS: This file has way too many structs. KISAKTODO: move out later.
 #include <database/db_asset_types.h>
+#include <database/db_file_types.h>
 #include <database/db_registry_types.h>
 #include <qcommon/cm_types.h>
 #include <xanim/xanim_types.h>
@@ -235,29 +236,6 @@ struct XAssetPool
     XAssetPoolEntry<T> *freeHead;
     XAssetPoolEntry<T> entries[LEN];
 };
-
-struct ScriptStringList // sizeof=0x8
-{                                       // ...
-    int count;
-    const char **strings;
-};
-static_assert(sizeof(ScriptStringList) == 8);
-
-struct XAssetList // sizeof=0x10
-{                                       // ...
-    ScriptStringList stringList;
-    int assetCount;
-    XAsset *assets;
-};
-static_assert(sizeof(XAssetList) == 16);
-
-struct XFile // sizeof=0x2C
-{                                       // ...
-    uint32_t size;
-    uint32_t externalSize;          // ...
-    uint32_t blockSize[9];          // ...
-};
-static_assert(sizeof(XFile) == 44);
 
 struct XSurfaceCollisionAabb // sizeof=0xC
 {                                       // ...

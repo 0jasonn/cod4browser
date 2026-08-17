@@ -1,11 +1,14 @@
 #include <database/db_runtime_prefix.h>
 
+#include <database/database.h>
+#include <database/db_initialization.h>
 #include <database/db_registry_pools.h>
 #include <qcommon/cmd.h>
 #include <qcommon/qcommon.h>
 #include <qcommon/system.h>
 #include <qcommon/threads.h>
 #include <universal/q_shared.h>
+#include <universal/physicalmemory.h>
 #include <web/web_database_filesystem.h>
 #include <web/web_system.h>
 
@@ -33,13 +36,21 @@ bool g_zoneInited = false;
 bool g_databaseThreadEntered = false;
 char g_logicalPath[256]{};
 cmd_function_s g_loadZoneCommand{};
+alignas(16) std::array<std::uint8_t, 0x80000> g_fileBuffer{};
 
 EM_JS(void, EmitDatabaseTrace, (
     const char *stage, const char *path, std::uint32_t bytesRead,
     std::uint32_t fileSize, std::uint32_t readOffset,
     std::uint32_t requestedBytes, std::uint32_t poolCount,
     std::uint32_t freeEntryCount, int threadInitialized,
-    int headerValid, int openSucceeded, const char *stopStage), {
+    int headerValid, int openSucceeded, const char *stopStage,
+    std::uint32_t compressedBytesConsumed,
+    std::uint32_t decompressedBytesProduced,
+    std::uint32_t inputRefillCount, std::uint32_t xfileSize,
+    std::uint32_t xfileExternalSize, const std::uint32_t *blockSizes,
+    std::uint32_t blockAllocationCount, std::uint32_t blockAllocationBytes,
+    std::uint32_t streamBlock, std::uint32_t streamOffset,
+    int inflateInitialized, int streamInitialized, int cleanupComplete), {
     globalThis.dispatchEvent(new CustomEvent("kisakcod:database", { detail: {
         stage: UTF8ToString(stage),
         logicalPath: path ? UTF8ToString(path) : "",
@@ -53,6 +64,19 @@ EM_JS(void, EmitDatabaseTrace, (
         headerValid: Boolean(headerValid),
         openSucceeded: Boolean(openSucceeded),
         stopStage: stopStage ? UTF8ToString(stopStage) : "",
+        compressedBytesConsumed: compressedBytesConsumed >>> 0,
+        decompressedBytesProduced: decompressedBytesProduced >>> 0,
+        inputRefillCount: inputRefillCount >>> 0,
+        xfileSize: xfileSize >>> 0,
+        xfileExternalSize: xfileExternalSize >>> 0,
+        blockSizes: Array.from(HEAPU32.subarray(blockSizes >>> 2, (blockSizes >>> 2) + 9)),
+        blockAllocationCount: blockAllocationCount >>> 0,
+        blockAllocationBytes: blockAllocationBytes >>> 0,
+        streamBlock: streamBlock >>> 0,
+        streamOffset: streamOffset >>> 0,
+        inflateInitialized: Boolean(inflateInitialized),
+        streamInitialized: Boolean(streamInitialized),
+        cleanupComplete: Boolean(cleanupComplete),
     }}));
 });
 
@@ -64,7 +88,13 @@ void Trace(const char *stage)
         g_trace.fileSize, g_trace.readOffset, g_trace.requestedBytes,
         g_trace.initializedPoolCount,
         g_trace.freeAssetEntryCount, g_trace.threadInitialized,
-        g_trace.headerValid, g_trace.openSucceeded, g_trace.stopStage);
+        g_trace.headerValid, g_trace.openSucceeded, g_trace.stopStage,
+        g_trace.compressedBytesConsumed, g_trace.decompressedBytesProduced,
+        g_trace.inputRefillCount, g_trace.xfileSize, g_trace.xfileExternalSize,
+        g_trace.blockSizes, g_trace.blockAllocationCount,
+        g_trace.blockAllocationBytes, g_trace.streamBlock,
+        g_trace.streamOffset, g_trace.inflateInitialized,
+        g_trace.streamInitialized, g_trace.cleanupComplete);
 }
 
 void Stop(const char *stage)
@@ -74,7 +104,13 @@ void Stop(const char *stage)
         g_trace.fileSize, g_trace.readOffset, g_trace.requestedBytes,
         g_trace.initializedPoolCount,
         g_trace.freeAssetEntryCount, g_trace.threadInitialized,
-        g_trace.headerValid, g_trace.openSucceeded, stage);
+        g_trace.headerValid, g_trace.openSucceeded, stage,
+        g_trace.compressedBytesConsumed, g_trace.decompressedBytesProduced,
+        g_trace.inputRefillCount, g_trace.xfileSize, g_trace.xfileExternalSize,
+        g_trace.blockSizes, g_trace.blockAllocationCount,
+        g_trace.blockAllocationBytes, g_trace.streamBlock,
+        g_trace.streamOffset, g_trace.inflateInitialized,
+        g_trace.streamInitialized, g_trace.cleanupComplete);
 }
 
 void DB_BuildOSPath(const char *zoneName, std::uint32_t size, char *filename)
@@ -121,35 +157,21 @@ bool DB_TryLoadXFileInternal(char *zoneName, int zoneFlags)
     zone.fileSize = g_trace.fileSize;
     g_zoneHandles[g_zoneCount++] = static_cast<std::uint8_t>(zoneIndex);
 
-    std::array<std::uint8_t, 14> header{};
-    g_trace.readOffset = 0;
-    g_trace.requestedBytes = static_cast<std::uint32_t>(header.size());
-    const std::int32_t bytesRead = WebDatabaseFS_Read(
-        file, header.data(), static_cast<std::uint32_t>(header.size()));
-    WebDatabaseFS_Close(file);
-    g_trace.bytesRead = bytesRead > 0 ? static_cast<std::uint32_t>(bytesRead) : 0;
-    Trace("zone header read");
-    if (bytesRead != static_cast<std::int32_t>(header.size()))
-    {
-        Stop("zone header short read");
-        return false;
-    }
-
-    std::uint32_t version = 0;
-    std::memcpy(&version, header.data() + 8, sizeof(version));
-    const bool magicValid = std::memcmp(header.data(), "IWff0100", 8) == 0 ||
-        std::memcmp(header.data(), "IWffu100", 8) == 0;
-    const bool zlibFraming = header[12] == 0x78;
-    g_trace.headerValid = magicValid && version == 5 && zlibFraming;
-    Trace("zone header/framing validation");
-    if (!g_trace.headerValid)
-    {
-        Stop("zone header/framing rejected");
-        return false;
-    }
-
-    Stop("DB_LoadXFile/streaming-inflate-closure");
-    return true;
+    const int allocType = zoneFlags == 1 || zoneFlags == 4 ||
+        zoneFlags == 16 || zoneFlags == 32 || zoneFlags == 64 ? 1 : 0;
+    zone.allocType = allocType;
+    PMem_BeginAlloc(zone.name, static_cast<std::uint32_t>(allocType));
+    DB_LoadXFile(
+        g_logicalPath,
+        reinterpret_cast<void *>(static_cast<std::uintptr_t>(file) + 1u),
+        zone.name,
+        &zone.mem,
+        nullptr,
+        g_fileBuffer.data(),
+        allocType);
+    DB_LoadXFileInternal();
+    PMem_EndAlloc(zone.name, static_cast<std::uint32_t>(allocType));
+    return g_trace.streamInitialized;
 }
 
 void DB_TryLoadXFile()
@@ -209,6 +231,81 @@ void DB_LoadZone_f()
 }
 } // namespace
 
+void DB_RuntimeTraceStage(const char *stage)
+{
+    Trace(stage);
+}
+
+void DB_RuntimeTraceStop(const char *stage)
+{
+    Stop(stage);
+}
+
+void DB_RuntimeTraceHeaderRead(std::uint32_t bytesRead, std::uint32_t fileSize)
+{
+    g_trace.headerValid = true;
+    if (fileSize) g_trace.fileSize = fileSize;
+    g_trace.requestedBytes = bytesRead;
+    Trace("zone header read");
+}
+
+void DB_RuntimeTraceInputRefill(std::uint32_t bytesRead)
+{
+    g_trace.readOffset = g_trace.bytesRead;
+    g_trace.requestedBytes = 0x40000u;
+    g_trace.bytesRead += bytesRead;
+    ++g_trace.inputRefillCount;
+    Trace("compressed input refill");
+}
+
+void DB_RuntimeTraceInflate(
+    std::uint32_t compressedBytesConsumed,
+    std::uint32_t decompressedBytesProduced)
+{
+    g_trace.compressedBytesConsumed = compressedBytesConsumed;
+    g_trace.decompressedBytesProduced = decompressedBytesProduced;
+    Trace("inflate progress");
+}
+
+void DB_RuntimeTraceInflateInitialized()
+{
+    g_trace.inflateInitialized = true;
+    Trace("inflate init");
+}
+
+void DB_RuntimeTraceXFile(
+    std::uint32_t size,
+    std::uint32_t externalSize,
+    const std::uint32_t *blockSizes)
+{
+    g_trace.xfileSize = size;
+    g_trace.xfileExternalSize = externalSize;
+    std::memcpy(g_trace.blockSizes, blockSizes, sizeof(g_trace.blockSizes));
+    Trace("XFile block sizes");
+}
+
+void DB_RuntimeTraceBlockAllocation(std::uint32_t blockIndex, std::uint32_t size)
+{
+    (void)blockIndex;
+    ++g_trace.blockAllocationCount;
+    g_trace.blockAllocationBytes += size;
+    Trace("PMem block allocation");
+}
+
+void DB_RuntimeTraceStreamsInitialized(std::uint32_t block, std::uint32_t offset)
+{
+    g_trace.streamBlock = block;
+    g_trace.streamOffset = offset;
+    g_trace.streamInitialized = true;
+    Trace("stream block initialization");
+}
+
+void DB_RuntimeTraceCleanupComplete()
+{
+    g_trace.cleanupComplete = true;
+    Trace("XFile cleanup");
+}
+
 void DB_InitThread()
 {
     Trace("DB_InitThread");
@@ -242,6 +339,17 @@ const DBRuntimeTraceSnapshot &DB_GetRuntimeTrace()
 
 extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_StartCanonicalDbHeaderProbe()
 {
+    // The isolated Com_Init prefix intentionally published its trace while the
+    // native $init high-allocation scope was still open. The mounted DB request
+    // occurs after that boundary, matching the native ordering where $init is
+    // closed and database initialization is released before high-zone PMem.
+    const PhysicalMemory *memory = PMem_GetState();
+    if (memory->prim[1].allocName)
+    {
+        const char *initScope = memory->prim[1].allocName;
+        PMem_EndAlloc(initScope, 1u);
+        DB_SetInitializing(false);
+    }
     XZoneInfo zoneInfo{"code_post_gfx", 4, 0};
     DB_LoadXAssets(&zoneInfo, 1, 1);
 }

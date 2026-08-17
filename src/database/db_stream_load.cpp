@@ -1,5 +1,9 @@
 #include <universal/q_shared.h>
+#if defined(KISAK_DB_SYNC_FILE_TEST) && !defined(KISAK_WEB)
+#define KISAK_WEB 1
+#endif
 #include "database.h"
+#include <script/scr_stringlist.h>
 
 
 void __cdecl Load_Stream(bool atStreamStart, uint8_t *ptr, int32_t size)

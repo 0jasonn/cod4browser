@@ -71,6 +71,25 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
     else()
         target_compile_definitions(gate3_com_init_trace_tests PRIVATE KISAK_WEB=1)
     endif()
+
+    add_executable(gate3_db_stream_trace_tests
+        "${CMAKE_CURRENT_LIST_DIR}/gate3_db_stream_trace_tests.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_auth.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_file_load.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_memory.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_stream.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_stream_load.cpp"
+    )
+    target_compile_features(gate3_db_stream_trace_tests PRIVATE cxx_std_20)
+    target_include_directories(gate3_db_stream_trace_tests PRIVATE
+        "${KISAK_REPOSITORY_ROOT}/src" "${KISAK_REPOSITORY_ROOT}/deps")
+    target_compile_definitions(gate3_db_stream_trace_tests PRIVATE
+        KISAK_SP=1 KISAK_DB_SYNC_FILE_TEST=1 dNODEBUG=1)
+    if (MSVC)
+        target_compile_definitions(gate3_db_stream_trace_tests PRIVATE WIN32=1)
+    else()
+        target_compile_definitions(gate3_db_stream_trace_tests PRIVATE KISAK_WEB=1)
+    endif()
 endif()
 
 add_executable(web_renderer_surface_tests
@@ -313,6 +332,14 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         add_test(NAME gate3_db_pool_tests
             COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:gate3_db_pool_tests>")
     endif()
+    if (TARGET gate3_db_stream_trace_tests)
+        target_compile_options(gate3_db_stream_trace_tests PRIVATE "-sUSE_ZLIB=1")
+        target_link_options(gate3_db_stream_trace_tests PRIVATE
+            "-sUSE_ZLIB=1" "-sENVIRONMENT=node" "-sEXIT_RUNTIME=1")
+        set_target_properties(gate3_db_stream_trace_tests PROPERTIES SUFFIX ".cjs")
+        add_test(NAME gate3_db_stream_trace_tests
+            COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:gate3_db_stream_trace_tests>")
+    endif()
     add_test(NAME web_renderer_surface_tests
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_renderer_surface_tests>")
     add_test(NAME web_engine_world_surface_tests
@@ -362,6 +389,9 @@ else()
     target_link_libraries(iwd_archive_tests PRIVATE ${KISAK_TEST_ZLIB_TARGET})
     target_link_libraries(web_fastfile_world_surface_tests PRIVATE ${KISAK_TEST_ZLIB_TARGET})
     target_link_libraries(web_retail_fastfile_census_tests PRIVATE ${KISAK_TEST_ZLIB_TARGET})
+    if (TARGET gate3_db_stream_trace_tests)
+        target_link_libraries(gate3_db_stream_trace_tests PRIVATE ${KISAK_TEST_ZLIB_TARGET})
+    endif()
     add_test(NAME iwd_archive_tests COMMAND iwd_archive_tests)
     add_test(NAME iwi_image_tests COMMAND iwi_image_tests)
     add_test(NAME canonical_asset_abi_tests COMMAND canonical_asset_abi_tests)
@@ -372,6 +402,9 @@ else()
     endif()
     if (TARGET gate3_db_pool_tests)
         add_test(NAME gate3_db_pool_tests COMMAND gate3_db_pool_tests)
+    endif()
+    if (TARGET gate3_db_stream_trace_tests)
+        add_test(NAME gate3_db_stream_trace_tests COMMAND gate3_db_stream_trace_tests)
     endif()
     add_test(NAME web_renderer_surface_tests COMMAND web_renderer_surface_tests)
     add_test(NAME web_engine_world_surface_tests COMMAND web_engine_world_surface_tests)
