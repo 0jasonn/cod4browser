@@ -4,7 +4,9 @@
 #include <database/db_file_types.h>
 #include <database/localize_types.h>
 #include <gfx_d3d/material_types.h>
+#include <gfx_d3d/r_font.h>
 #include <physics/phys_preset.h>
+#include <sound/snd_alias_types.h>
 
 #include <cstdint>
 
@@ -27,6 +29,14 @@ extern GfxImage *varGfxImage;
 extern GfxImage **varGfxImagePtr;
 extern LocalizeEntry *varLocalizeEntry;
 extern LocalizeEntry **varLocalizeEntryPtr;
+extern SndCurve *varSndCurve;
+extern SndCurve **varSndCurvePtr;
+extern LoadedSound *varLoadedSound;
+extern LoadedSound **varLoadedSoundPtr;
+extern snd_alias_list_t *varsnd_alias_list_t;
+extern snd_alias_list_t **varsnd_alias_list_ptr;
+extern Font_s *varFont;
+extern Font_s **varFontHandle;
 extern XAssetHeader *varXAssetHeader;
 
 void __cdecl Load_XString(bool atStreamStart);
@@ -34,4 +44,8 @@ void __cdecl Load_MaterialTechniqueSetPtr(bool atStreamStart);
 void __cdecl Load_MaterialHandle(bool atStreamStart);
 void __cdecl Load_GfxImagePtr(bool atStreamStart);
 void __cdecl Load_LocalizeEntryPtr(bool atStreamStart);
+void __cdecl Load_SndCurvePtr(bool atStreamStart);
+void __cdecl Load_LoadedSoundPtr(bool atStreamStart);
+void __cdecl Load_snd_alias_list_ptr(bool atStreamStart);
+void __cdecl Load_FontHandle(bool atStreamStart);
 void DB_SetGeneratedAssetIndex(std::uint32_t index);

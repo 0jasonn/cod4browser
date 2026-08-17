@@ -5,10 +5,12 @@
 #include <database/localize_types.h>
 #include <gfx_d3d/gfx_image_types.h>
 #include <gfx_d3d/material_types.h>
+#include <gfx_d3d/r_font.h>
 #include <physics/phys_preset.h>
 #include <qcommon/qcommon.h>
 #include <qcommon/system.h>
 #include <script/scr_stringlist.h>
+#include <sound/snd_alias_types.h>
 #include <universal/physicalmemory.h>
 #include <web/web_database_filesystem.h>
 
@@ -574,6 +576,263 @@ std::vector<std::uint8_t> MakeLocalizeXFile(
     return CompressXFile(inflated);
 }
 
+struct SndCurveFixtureOptions
+{
+    std::uint32_t assetPointer = UINT32_MAX - 1u;
+    bool includeAliasAsset = true;
+    std::uint32_t filenamePointer = UINT32_MAX;
+    bool includeBody = true;
+    bool includeFilename = true;
+    bool terminateFilename = true;
+};
+
+std::vector<std::uint8_t> MakeSndCurveXFile(
+    const SndCurveFixtureOptions &options = {})
+{
+    constexpr const char *filename = "soundcurves/gate3";
+    const bool inlineAsset = options.assetPointer == UINT32_MAX ||
+        options.assetPointer == UINT32_MAX - 1u;
+    const std::uint32_t assetCount = options.includeAliasAsset ? 2u : 1u;
+
+    std::vector<std::uint8_t> inflated;
+    AppendU32(inflated, 8192);
+    AppendU32(inflated, 0);
+    for (const std::uint32_t size : std::array<std::uint32_t, 9>{
+        4096, 0, 0, 0, 4096, 0, 0, 0, 0}) AppendU32(inflated, size);
+
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, assetCount);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, ASSET_TYPE_SOUND_CURVE);
+    AppendU32(inflated, options.assetPointer);
+    if (options.includeAliasAsset)
+    {
+        AppendU32(inflated, ASSET_TYPE_SOUND_CURVE);
+        AppendU32(inflated, 0x40000011u);
+    }
+    if (!inlineAsset || !options.includeBody) return CompressXFile(inflated);
+
+    AppendU32(inflated, options.filenamePointer);
+    AppendU32(inflated, 3);
+    for (std::uint32_t knot = 0; knot < 8; ++knot)
+    {
+        AppendF32(inflated, static_cast<float>(knot) / 7.0f);
+        AppendF32(inflated, 1.0f - static_cast<float>(knot) / 7.0f);
+    }
+    if (options.filenamePointer == UINT32_MAX && options.includeFilename)
+    {
+        inflated.insert(inflated.end(), filename,
+            filename + std::strlen(filename));
+        if (options.terminateFilename) inflated.push_back(0);
+    }
+    return CompressXFile(inflated);
+}
+
+std::vector<std::uint8_t> MakeSndDriverGlobalsXFile()
+{
+    std::vector<std::uint8_t> inflated;
+    AppendU32(inflated, 4096);
+    AppendU32(inflated, 0);
+    for (const std::uint32_t size : std::array<std::uint32_t, 9>{
+        0, 0, 0, 0, 4096, 0, 0, 0, 0}) AppendU32(inflated, size);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 1);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, ASSET_TYPE_SNDDRIVER_GLOBALS);
+    AppendU32(inflated, 0x40000001u);
+    return CompressXFile(inflated);
+}
+
+struct SoundAliasFixtureOptions
+{
+    std::uint32_t assetPointer = UINT32_MAX - 1u;
+    bool includeAliasAsset = true;
+    std::int32_t aliasCount = 1;
+    std::uint32_t headPointer = UINT32_MAX;
+    bool terminateListName = true;
+};
+
+std::vector<std::uint8_t> MakeSoundAliasXFile(
+    const SoundAliasFixtureOptions &options = {})
+{
+    constexpr const char *listName = "sound/gate3";
+    constexpr const char *streamDir = "sound";
+    constexpr const char *streamName = "gate3.wav";
+    constexpr const char *speakerName = "speaker/gate3";
+    const bool inlineAsset = options.assetPointer == UINT32_MAX ||
+        options.assetPointer == UINT32_MAX - 1u;
+    const std::uint32_t assetCount = options.includeAliasAsset ? 2u : 1u;
+
+    std::vector<std::uint8_t> inflated;
+    AppendU32(inflated, 16384);
+    AppendU32(inflated, 0);
+    for (const std::uint32_t size : std::array<std::uint32_t, 9>{
+        4096, 0, 0, 0, 8192, 0, 0, 0, 0}) AppendU32(inflated, size);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, assetCount);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, ASSET_TYPE_SOUND);
+    AppendU32(inflated, options.assetPointer);
+    if (options.includeAliasAsset)
+    {
+        AppendU32(inflated, ASSET_TYPE_SOUND);
+        AppendU32(inflated, 0x40000011u);
+    }
+    if (!inlineAsset) return CompressXFile(inflated);
+
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, options.headPointer);
+    AppendU32(inflated, static_cast<std::uint32_t>(options.aliasCount));
+    inflated.insert(inflated.end(), listName,
+        listName + std::strlen(listName));
+    if (options.terminateListName) inflated.push_back(0);
+    if (!options.terminateListName || options.headPointer != UINT32_MAX ||
+        options.aliasCount != 1) return CompressXFile(inflated);
+
+    while ((inflated.size() & 3u) != 0u) inflated.push_back(0);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, 0);
+    for (float value : std::array<float, 6>{1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 100.0f})
+        AppendF32(inflated, value);
+    AppendU32(inflated, 0);
+    for (float value : std::array<float, 4>{0.0f, 1.0f, 0.0f, 0.0f})
+        AppendF32(inflated, value);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 0);
+    for (float value : std::array<float, 3>{0.0f, 0.0f, 0.0f})
+        AppendF32(inflated, value);
+    AppendU32(inflated, UINT32_MAX);
+
+    AppendCString(inflated, listName);
+    while ((inflated.size() & 3u) != 0u) inflated.push_back(0);
+    AppendU32(inflated, 0x00000100u);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, UINT32_MAX);
+    AppendCString(inflated, streamDir);
+    AppendCString(inflated, streamName);
+    while ((inflated.size() & 3u) != 0u) inflated.push_back(0);
+    AppendU32(inflated, 1);
+    AppendU32(inflated, UINT32_MAX);
+    AppendZeros(inflated, sizeof(SpeakerMap) - 8u);
+    AppendCString(inflated, speakerName);
+    return CompressXFile(inflated);
+}
+
+struct LoadedSoundFixtureOptions
+{
+    std::uint32_t assetPointer = UINT32_MAX - 1u;
+    bool includeAliasAsset = true;
+    std::uint32_t dataPointer = UINT32_MAX - 1u;
+    std::uint32_t dataLength = 4;
+    bool includeData = true;
+};
+
+std::vector<std::uint8_t> MakeLoadedSoundXFile(
+    const LoadedSoundFixtureOptions &options = {})
+{
+    constexpr const char *name = "loaded/gate3.wav";
+    const bool inlineAsset = options.assetPointer == UINT32_MAX ||
+        options.assetPointer == UINT32_MAX - 1u;
+    const std::uint32_t assetCount = options.includeAliasAsset ? 2u : 1u;
+    std::vector<std::uint8_t> inflated;
+    AppendU32(inflated, 8192);
+    AppendU32(inflated, 0);
+    for (const std::uint32_t size : std::array<std::uint32_t, 9>{
+        4096, 0, 0, 0, 4096, 0, 0, 0, 0}) AppendU32(inflated, size);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, assetCount);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, ASSET_TYPE_LOADED_SOUND);
+    AppendU32(inflated, options.assetPointer);
+    if (options.includeAliasAsset)
+    {
+        AppendU32(inflated, ASSET_TYPE_LOADED_SOUND);
+        AppendU32(inflated, 0x40000011u);
+    }
+    if (!inlineAsset) return CompressXFile(inflated);
+
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, 1);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, options.dataLength);
+    AppendU32(inflated, 44100);
+    AppendU32(inflated, 16);
+    AppendU32(inflated, 1);
+    AppendU32(inflated, 2);
+    AppendU32(inflated, 2);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, options.dataPointer);
+    AppendCString(inflated, name);
+    if (options.dataPointer == UINT32_MAX - 1u)
+    {
+        while ((inflated.size() & 3u) != 0u) inflated.push_back(0);
+        AppendU32(inflated, 0);
+    }
+    if (options.includeData)
+        for (std::uint32_t index = 0; index < options.dataLength; ++index)
+            inflated.push_back(static_cast<std::uint8_t>(index + 1u));
+    return CompressXFile(inflated);
+}
+
+struct FontFixtureOptions
+{
+    std::uint32_t assetPointer = UINT32_MAX - 1u;
+    bool includeAliasAsset = true;
+    std::int32_t glyphCount = 2;
+    std::uint32_t glyphPointer = UINT32_MAX;
+    bool includeGlyphs = true;
+};
+
+std::vector<std::uint8_t> MakeFontXFile(
+    const FontFixtureOptions &options = {})
+{
+    constexpr const char *name = "fonts/gate3";
+    const bool inlineAsset = options.assetPointer == UINT32_MAX ||
+        options.assetPointer == UINT32_MAX - 1u;
+    const std::uint32_t assetCount = options.includeAliasAsset ? 2u : 1u;
+    std::vector<std::uint8_t> inflated;
+    AppendU32(inflated, 8192);
+    AppendU32(inflated, 0);
+    for (const std::uint32_t size : std::array<std::uint32_t, 9>{
+        4096, 0, 0, 0, 4096, 0, 0, 0, 0}) AppendU32(inflated, size);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, assetCount);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, ASSET_TYPE_FONT);
+    AppendU32(inflated, options.assetPointer);
+    if (options.includeAliasAsset)
+    {
+        AppendU32(inflated, ASSET_TYPE_FONT);
+        AppendU32(inflated, 0x40000011u);
+    }
+    if (!inlineAsset) return CompressXFile(inflated);
+
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, 16);
+    AppendU32(inflated, static_cast<std::uint32_t>(options.glyphCount));
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, options.glyphPointer);
+    AppendCString(inflated, name);
+    if (options.glyphPointer == UINT32_MAX && options.includeGlyphs &&
+        options.glyphCount > 0 && options.glyphCount < 64)
+    {
+        while ((inflated.size() & 3u) != 0u) inflated.push_back(0);
+        AppendZeros(inflated,
+            static_cast<std::size_t>(options.glyphCount) * sizeof(Glyph));
+    }
+    return CompressXFile(inflated);
+}
+
 std::vector<std::uint8_t> MakeEmptyXFile(
     const std::array<std::uint32_t, 9> &blocks)
 {
@@ -1072,6 +1331,246 @@ int main()
         !nullDependencyMaterial.material->techniqueSet);
     assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_IMAGE) == 2400);
 
+    const std::vector<std::uint8_t> sndCurveInsertAlias =
+        MakeSndCurveXFile();
+    Run(sndCurveInsertAlias, zone);
+    assert(g_trace.xassetCount == 2 && g_trace.assetIndex == 1);
+    assert(g_trace.assetType == ASSET_TYPE_SOUND_CURVE);
+    assert(std::strcmp(g_trace.pointerClassification,
+        "prior-offset/alias") == 0);
+    assert(g_trace.publicationBegin && g_trace.publicationEnd);
+    assert(g_trace.assetEntryIndex == 16 && g_trace.assetPoolIndex == 0);
+    assert(g_trace.freeEntryCountBefore == 32752 &&
+        g_trace.freeEntryCountAfter == 32751);
+    assert(g_trace.assetHash == DB_HashForNameCanonical(
+        "soundcurves/gate3", ASSET_TYPE_SOUND_CURVE));
+    assert(g_trace.assetZoneIndex == 1);
+    assert(g_trace.streamOffsets[0] == sizeof(SndCurve));
+    assert(g_trace.streamOffsets[4] == 38);
+    const XAssetHeader publishedSndCurve = DB_FindXAssetHeader(
+        ASSET_TYPE_SOUND_CURVE, "soundcurves/gate3");
+    assert(publishedSndCurve.sndCurve);
+    assert(publishedSndCurve.sndCurve->knotCount == 3);
+    assert(publishedSndCurve.sndCurve->knots[0][0] == 0.0f &&
+        publishedSndCurve.sndCurve->knots[0][1] == 1.0f &&
+        publishedSndCurve.sndCurve->knots[7][0] == 1.0f &&
+        publishedSndCurve.sndCurve->knots[7][1] == 0.0f);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_SOUND_CURVE) == 63);
+    const XAsset *sndCurveAssets = reinterpret_cast<const XAsset *>(
+        zone.blocks[4].data);
+    assert(sndCurveAssets[0].header.sndCurve == publishedSndCurve.sndCurve);
+    assert(sndCurveAssets[1].header.sndCurve == publishedSndCurve.sndCurve);
+    std::uint32_t sndCurveInsertion = 0;
+    std::memcpy(&sndCurveInsertion, zone.blocks[4].data + 16,
+        sizeof(sndCurveInsertion));
+    assert(sndCurveInsertion == reinterpret_cast<std::uint32_t>(
+        publishedSndCurve.sndCurve));
+
+    SndCurveFixtureOptions sharedSndCurve{};
+    sharedSndCurve.assetPointer = UINT32_MAX;
+    sharedSndCurve.includeAliasAsset = false;
+    Run(MakeSndCurveXFile(sharedSndCurve), zone);
+    assert(std::strcmp(g_trace.pointerClassification,
+        "inline-shared/-1") == 0);
+    assert(g_trace.publicationEnd && g_trace.assetEntryIndex == 16);
+    assert(g_trace.streamOffsets[0] == sizeof(SndCurve) &&
+        g_trace.streamOffsets[4] == 26);
+
+    SndCurveFixtureOptions nullSndCurve{};
+    nullSndCurve.assetPointer = 0;
+    nullSndCurve.includeAliasAsset = false;
+    Run(MakeSndCurveXFile(nullSndCurve), zone);
+    assert(std::strcmp(g_trace.pointerClassification, "null") == 0);
+    assert(!g_trace.publicationBegin && !g_trace.publicationEnd);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_SOUND_CURVE) == 64);
+
+    SndCurveFixtureOptions malformedSndCurve{};
+    malformedSndCurve.assetPointer = UINT32_MAX - 2u;
+    malformedSndCurve.includeAliasAsset = false;
+    Run(MakeSndCurveXFile(malformedSndCurve), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "stream/invalid alias offset") == 0);
+
+    SndCurveFixtureOptions malformedSndCurveName{};
+    malformedSndCurveName.assetPointer = UINT32_MAX;
+    malformedSndCurveName.includeAliasAsset = false;
+    malformedSndCurveName.filenamePointer = UINT32_MAX - 1u;
+    Run(MakeSndCurveXFile(malformedSndCurveName), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage,
+        "stream/invalid pointer offset") == 0);
+
+    SndCurveFixtureOptions truncatedSndCurveBody{};
+    truncatedSndCurveBody.assetPointer = UINT32_MAX;
+    truncatedSndCurveBody.includeAliasAsset = false;
+    truncatedSndCurveBody.includeBody = false;
+    Run(MakeSndCurveXFile(truncatedSndCurveBody), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0);
+
+    SndCurveFixtureOptions truncatedSndCurveName{};
+    truncatedSndCurveName.assetPointer = UINT32_MAX;
+    truncatedSndCurveName.includeAliasAsset = false;
+    truncatedSndCurveName.terminateFilename = false;
+    Run(MakeSndCurveXFile(truncatedSndCurveName), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0 ||
+        std::strcmp(g_trace.stopStage, "stream/truncated string") == 0);
+
+    const std::vector<std::uint8_t> soundAliasInsertAlias =
+        MakeSoundAliasXFile();
+    Run(soundAliasInsertAlias, zone);
+    assert(g_trace.xassetCount == 2 && g_trace.assetIndex == 1);
+    assert(g_trace.assetType == ASSET_TYPE_SOUND);
+    assert(std::strcmp(g_trace.pointerClassification,
+        "prior-offset/alias") == 0);
+    assert(g_trace.publicationBegin && g_trace.publicationEnd);
+    assert(g_trace.assetEntryIndex == 16 && g_trace.assetPoolIndex == 0);
+    assert(g_trace.streamOffsets[0] == sizeof(snd_alias_list_t));
+    assert(g_trace.streamOffsets[4] == 586);
+    const XAssetHeader publishedSound = DB_FindXAssetHeader(
+        ASSET_TYPE_SOUND, "sound/gate3");
+    assert(publishedSound.sound && publishedSound.sound->count == 1);
+    assert(std::strcmp(publishedSound.sound->head[0].aliasName,
+        "sound/gate3") == 0);
+    assert(publishedSound.sound->head[0].soundFile &&
+        publishedSound.sound->head[0].soundFile->type == 0);
+    assert(std::strcmp(publishedSound.sound->head[0].soundFile->u.streamSnd
+        .filename.info.raw.dir, "sound") == 0);
+    assert(std::strcmp(publishedSound.sound->head[0].soundFile->u.streamSnd
+        .filename.info.raw.name, "gate3.wav") == 0);
+    assert(!publishedSound.sound->head[0].volumeFalloffCurve);
+    assert(publishedSound.sound->head[0].speakerMap &&
+        std::strcmp(publishedSound.sound->head[0].speakerMap->name,
+            "speaker/gate3") == 0);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_SOUND) == 15999);
+
+    SoundAliasFixtureOptions sharedSoundAlias{};
+    sharedSoundAlias.assetPointer = UINT32_MAX;
+    sharedSoundAlias.includeAliasAsset = false;
+    Run(MakeSoundAliasXFile(sharedSoundAlias), zone);
+    assert(std::strcmp(g_trace.pointerClassification,
+        "inline-shared/-1") == 0);
+    assert(g_trace.publicationEnd && g_trace.streamOffsets[4] == 574);
+
+    SoundAliasFixtureOptions nullSoundAlias{};
+    nullSoundAlias.assetPointer = 0;
+    nullSoundAlias.includeAliasAsset = false;
+    Run(MakeSoundAliasXFile(nullSoundAlias), zone);
+    assert(!g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_SOUND) == 16000);
+
+    SoundAliasFixtureOptions malformedSoundAlias{};
+    malformedSoundAlias.assetPointer = UINT32_MAX - 2u;
+    malformedSoundAlias.includeAliasAsset = false;
+    Run(MakeSoundAliasXFile(malformedSoundAlias), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "stream/invalid alias offset") == 0);
+
+    SoundAliasFixtureOptions invalidSoundAliasCount{};
+    invalidSoundAliasCount.assetPointer = UINT32_MAX;
+    invalidSoundAliasCount.includeAliasAsset = false;
+    invalidSoundAliasCount.aliasCount = -1;
+    Run(MakeSoundAliasXFile(invalidSoundAliasCount), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "SoundAlias/alias array") == 0);
+
+    SoundAliasFixtureOptions truncatedSoundAlias{};
+    truncatedSoundAlias.assetPointer = UINT32_MAX;
+    truncatedSoundAlias.includeAliasAsset = false;
+    truncatedSoundAlias.terminateListName = false;
+    Run(MakeSoundAliasXFile(truncatedSoundAlias), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0 ||
+        std::strcmp(g_trace.stopStage, "stream/truncated string") == 0);
+
+    const std::vector<std::uint8_t> loadedSoundInsertAlias =
+        MakeLoadedSoundXFile();
+    Run(loadedSoundInsertAlias, zone);
+    assert(g_trace.xassetCount == 2 && g_trace.assetIndex == 1);
+    assert(g_trace.assetType == ASSET_TYPE_LOADED_SOUND);
+    assert(g_trace.publicationBegin && g_trace.publicationEnd);
+    assert(g_trace.streamOffsets[0] == 48 && g_trace.streamOffsets[4] == 44);
+    const XAssetHeader publishedLoadedSound = DB_FindXAssetHeader(
+        ASSET_TYPE_LOADED_SOUND, "loaded/gate3.wav");
+    assert(publishedLoadedSound.loadSnd);
+    assert(publishedLoadedSound.loadSnd->sound.info.data_len == 4);
+    assert(publishedLoadedSound.loadSnd->sound.data[0] == 1 &&
+        publishedLoadedSound.loadSnd->sound.data[3] == 4);
+    assert(publishedLoadedSound.loadSnd->sound.info.data_ptr ==
+        publishedLoadedSound.loadSnd->sound.data);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_LOADED_SOUND) == 1199);
+
+    LoadedSoundFixtureOptions truncatedLoadedSound{};
+    truncatedLoadedSound.assetPointer = UINT32_MAX;
+    truncatedLoadedSound.includeAliasAsset = false;
+    truncatedLoadedSound.includeData = false;
+    Run(MakeLoadedSoundXFile(truncatedLoadedSound), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "LoadedSound/data array") == 0 ||
+        std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0);
+
+    const std::vector<std::uint8_t> fontInsertAlias = MakeFontXFile();
+    Run(fontInsertAlias, zone);
+    assert(g_trace.xassetCount == 2 && g_trace.assetIndex == 1);
+    assert(g_trace.assetType == ASSET_TYPE_FONT);
+    assert(g_trace.publicationBegin && g_trace.publicationEnd);
+    assert(g_trace.streamOffsets[0] == sizeof(Font_s));
+    assert(g_trace.streamOffsets[4] == 80);
+    const XAssetHeader publishedFont = DB_FindXAssetHeader(
+        ASSET_TYPE_FONT, "fonts/gate3");
+    assert(publishedFont.font && publishedFont.font->glyphCount == 2);
+    assert(publishedFont.font->glyphs && !publishedFont.font->material &&
+        !publishedFont.font->glowMaterial);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_FONT) == 15);
+
+    FontFixtureOptions sharedFont{};
+    sharedFont.assetPointer = UINT32_MAX;
+    sharedFont.includeAliasAsset = false;
+    Run(MakeFontXFile(sharedFont), zone);
+    assert(std::strcmp(g_trace.pointerClassification,
+        "inline-shared/-1") == 0);
+    assert(g_trace.publicationEnd && g_trace.streamOffsets[4] == 68);
+
+    FontFixtureOptions nullFont{};
+    nullFont.assetPointer = 0;
+    nullFont.includeAliasAsset = false;
+    Run(MakeFontXFile(nullFont), zone);
+    assert(!g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_FONT) == 16);
+
+    FontFixtureOptions malformedFont{};
+    malformedFont.assetPointer = UINT32_MAX - 2u;
+    malformedFont.includeAliasAsset = false;
+    Run(MakeFontXFile(malformedFont), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "stream/invalid alias offset") == 0);
+
+    FontFixtureOptions invalidFontCount{};
+    invalidFontCount.assetPointer = UINT32_MAX;
+    invalidFontCount.includeAliasAsset = false;
+    invalidFontCount.glyphCount = -1;
+    Run(MakeFontXFile(invalidFontCount), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "Font/glyph array") == 0);
+
+    FontFixtureOptions truncatedFont{};
+    truncatedFont.assetPointer = UINT32_MAX;
+    truncatedFont.includeAliasAsset = false;
+    truncatedFont.includeGlyphs = false;
+    Run(MakeFontXFile(truncatedFont), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "Font/glyph array") == 0 ||
+        std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0);
+
+    Run(MakeSndDriverGlobalsXFile(), zone);
+    assert(!g_trace.generatedLoadFailed && g_trace.xassetListEnd);
+    assert(g_trace.assetType == ASSET_TYPE_SNDDRIVER_GLOBALS);
+    assert(std::strcmp(g_trace.pointerClassification,
+        "prior-offset/alias") == 0);
+    assert(!g_trace.publicationBegin && !g_trace.publicationEnd);
+    assert(g_trace.streamOffsets[0] == 0 && g_trace.streamOffsets[4] == 8);
+
     const std::vector<std::uint8_t> localizeInsertAlias =
         MakeLocalizeXFile();
     Run(localizeInsertAlias, zone);
@@ -1415,6 +1914,124 @@ int main()
         sizeof(failedLocalizeInsertion));
     assert(failedLocalizeInsertion == 0);
 
+    const std::uint32_t sndCurveHash = DB_HashForNameCanonical(
+        "soundcurves/gate3", ASSET_TYPE_SOUND_CURVE);
+    Reset(sndCurveInsertAlias);
+    *static_cast<void **>(DB_XAssetPool[ASSET_TYPE_SOUND_CURVE]) = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
+        !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset pool exhaustion") == 0);
+    assert(db_hashTable[sndCurveHash] == 0);
+    assert(DB_GetFreeAssetEntryCount() == 32752);
+    assert(!DB_FindXAssetHeader(ASSET_TYPE_SOUND_CURVE,
+        "soundcurves/gate3").sndCurve);
+    std::uint32_t failedSndCurveInsertion = UINT32_MAX;
+    std::memcpy(&failedSndCurveInsertion, zone.blocks[4].data + 16,
+        sizeof(failedSndCurveInsertion));
+    assert(failedSndCurveInsertion == 0);
+
+    const std::uint32_t soundAliasHash = DB_HashForNameCanonical(
+        "sound/gate3", ASSET_TYPE_SOUND);
+    Reset(soundAliasInsertAlias);
+    *static_cast<void **>(DB_XAssetPool[ASSET_TYPE_SOUND]) = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
+        !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset pool exhaustion") == 0);
+    assert(db_hashTable[soundAliasHash] == 0);
+    assert(DB_GetFreeAssetEntryCount() == 32752);
+    std::uint32_t failedSoundAliasInsertion = UINT32_MAX;
+    std::memcpy(&failedSoundAliasInsertion, zone.blocks[4].data + 16,
+        sizeof(failedSoundAliasInsertion));
+    assert(failedSoundAliasInsertion == 0);
+
+    Reset(soundAliasInsertAlias);
+    g_freeAssetEntryHead = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
+        !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset entry exhaustion") == 0);
+    assert(db_hashTable[soundAliasHash] == 0);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_SOUND) == 16000);
+    std::memcpy(&failedSoundAliasInsertion, zone.blocks[4].data + 16,
+        sizeof(failedSoundAliasInsertion));
+    assert(failedSoundAliasInsertion == 0);
+
+    const std::uint32_t loadedSoundHash = DB_HashForNameCanonical(
+        "loaded/gate3.wav", ASSET_TYPE_LOADED_SOUND);
+    Reset(loadedSoundInsertAlias);
+    *static_cast<void **>(DB_XAssetPool[ASSET_TYPE_LOADED_SOUND]) = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
+        !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset pool exhaustion") == 0);
+    assert(db_hashTable[loadedSoundHash] == 0);
+    assert(DB_GetFreeAssetEntryCount() == 32752);
+    std::uint32_t failedLoadedSoundInsertion = UINT32_MAX;
+    std::memcpy(&failedLoadedSoundInsertion, zone.blocks[4].data + 16,
+        sizeof(failedLoadedSoundInsertion));
+    assert(failedLoadedSoundInsertion == 0);
+
+    const std::uint32_t fontHash = DB_HashForNameCanonical(
+        "fonts/gate3", ASSET_TYPE_FONT);
+    Reset(fontInsertAlias);
+    *static_cast<void **>(DB_XAssetPool[ASSET_TYPE_FONT]) = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
+        !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset pool exhaustion") == 0);
+    assert(db_hashTable[fontHash] == 0);
+    assert(DB_GetFreeAssetEntryCount() == 32752);
+    std::uint32_t failedFontInsertion = UINT32_MAX;
+    std::memcpy(&failedFontInsertion, zone.blocks[4].data + 16,
+        sizeof(failedFontInsertion));
+    assert(failedFontInsertion == 0);
+
+    Reset(fontInsertAlias);
+    g_freeAssetEntryHead = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
+        !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset entry exhaustion") == 0);
+    assert(db_hashTable[fontHash] == 0);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_FONT) == 16);
+    std::memcpy(&failedFontInsertion, zone.blocks[4].data + 16,
+        sizeof(failedFontInsertion));
+    assert(failedFontInsertion == 0);
+
+    Reset(loadedSoundInsertAlias);
+    g_freeAssetEntryHead = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
+        !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset entry exhaustion") == 0);
+    assert(db_hashTable[loadedSoundHash] == 0);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_LOADED_SOUND) == 1200);
+    std::memcpy(&failedLoadedSoundInsertion, zone.blocks[4].data + 16,
+        sizeof(failedLoadedSoundInsertion));
+    assert(failedLoadedSoundInsertion == 0);
+
+    Reset(sndCurveInsertAlias);
+    g_freeAssetEntryHead = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
+        !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset entry exhaustion") == 0);
+    assert(db_hashTable[sndCurveHash] == 0);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_SOUND_CURVE) == 64);
+    std::memcpy(&failedSndCurveInsertion, zone.blocks[4].data + 16,
+        sizeof(failedSndCurveInsertion));
+    assert(failedSndCurveInsertion == 0);
+
     Reset(materialInsertAlias);
     g_assetEntryPool[16].next = nullptr;
     g_freeAssetEntryHead = &g_assetEntryPool[16];
@@ -1468,6 +2085,6 @@ int main()
     assert(g_trace.publicationEnd && g_trace.cleanupComplete);
     assert(std::strcmp(g_trace.stopStage, "Load_XAssetHeader/next-family-closure") == 0);
 
-    std::printf("gate3-db-stream rawfile=published physpreset=published technique-set=published material=published image=published water=loaded localize=published insert=-2 alias=block4:16 technique=block4:36 direct-xstring=block4:18 technique-children=251 material-children=block0:136,block4:248 localize-children=block0:8,block4:51 image-entry=16 material-entry=17 localize-entry=16 free=32752->32751 zone=1 stop=next-family-closure\n");
+    std::printf("gate3-db-stream rawfile=published physpreset=published technique-set=published material=published image=published water=loaded sound-curve=published sound-alias=published loaded-sound=published font=published snddriver=canonical-noop localize=published insert=-2 alias=block4:16 technique=block4:36 direct-xstring=block4:18 technique-children=251 material-children=block0:136,block4:248 sound-curve-children=block0:72,block4:38 sound-alias-children=block0:12,block4:586 loaded-sound-children=block0:48,block4:44 font-children=block0:24,block4:80 localize-children=block0:8,block4:51 image-entry=16 material-entry=17 sound-curve-entry=16 sound-alias-entry=16 loaded-sound-entry=16 font-entry=16 localize-entry=16 free=32752->32751 zone=1 stop=next-family-closure\n");
     return 0;
 }

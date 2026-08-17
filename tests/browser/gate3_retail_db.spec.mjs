@@ -68,19 +68,31 @@ test("canonical Gate 3 traverses a locally owned retail startup zone", {
         firstLocalize: localizePublications[0],
         lastLocalize: localizePublications.at(-1),
         lastPublication: result.publications.at(-1),
+        emptyNames: result.publications.filter(
+            (entry) => entry.assetName.length === 0),
     })}`);
     expect(result.final).toMatchObject({
         stopStage: "Load_XAssetHeader/unsupported family closure",
-        assetIndex: 1200,
-        assetType: 8,
+        assetIndex: 1224,
+        assetType: 25,
         streamBlock: 4,
-        streamOffset: 176300,
+        streamOffset: 219848,
         publicationEnd: true,
-        freeEntryCountAfter: 31551,
+        freeEntryCountAfter: 31512,
         pointerClassification: "inline-shared/-1",
     });
-    expect(result.publications).toHaveLength(1201);
-    expect(publicationsByType).toEqual({ 4: 1, 5: 2, 6: 8, 22: 1116, 31: 74 });
+    expect(result.publications).toHaveLength(1240);
+    expect(publicationsByType).toEqual({
+        4: 5,
+        5: 4,
+        6: 10,
+        7: 11,
+        8: 2,
+        9: 9,
+        19: 9,
+        22: 1116,
+        31: 74,
+    });
     expect(localizePublications).toHaveLength(1116);
     expect(localizePublications[0]).toMatchObject({
         assetIndex: 5,
@@ -97,12 +109,21 @@ test("canonical Gate 3 traverses a locally owned retail startup zone", {
         freeEntryCountAfter: 31630,
     });
     expect(result.publications.at(-1)).toMatchObject({
-        assetIndex: 1199,
-        assetType: 31,
-        assetEntryIndex: 1216,
-        assetPoolIndex: 73,
-        freeEntryCountBefore: 31552,
-        freeEntryCountAfter: 31551,
+        assetIndex: 1223,
+        assetType: 5,
+        assetEntryIndex: 1255,
+        assetPoolIndex: 3,
+        freeEntryCountBefore: 31513,
+        freeEntryCountAfter: 31512,
     });
-    expect(result.publications.every((entry) => entry.assetName.length > 0)).toBe(true);
+    const emptyNames = result.publications.filter(
+        (entry) => entry.assetName.length === 0);
+    expect(emptyNames).toEqual([expect.objectContaining({
+        assetIndex: 1202,
+        assetType: 8,
+        assetEntryIndex: 1219,
+        assetPoolIndex: 1,
+    })]);
+    expect(result.publications.filter(
+        (entry) => entry.assetName.length > 0)).toHaveLength(1239);
 });

@@ -5,8 +5,10 @@
 #include <database/localize_types.h>
 #include <gfx_d3d/gfx_image_types.h>
 #include <gfx_d3d/material_types.h>
+#include <gfx_d3d/r_font.h>
 #include <gfx_d3d/gfx_light_types.h>
 #include <qcommon/com_world_types.h>
+#include <sound/snd_alias_types.h>
 #include <xanim/xanim_types.h>
 #include <xanim/xmodel_types.h>
 
@@ -48,6 +50,14 @@ void TestCanonicalAssetTypes()
             std::is_standard_layout_v<ComPrimaryLight> &&
             std::is_standard_layout_v<ComWorld> &&
             std::is_standard_layout_v<GfxImage> &&
+            std::is_standard_layout_v<SndCurve> &&
+            std::is_standard_layout_v<LoadedSound> &&
+            std::is_standard_layout_v<SoundFile> &&
+            std::is_standard_layout_v<SpeakerMap> &&
+            std::is_standard_layout_v<snd_alias_t> &&
+            std::is_standard_layout_v<snd_alias_list_t> &&
+            std::is_standard_layout_v<Font_s> &&
+            std::is_standard_layout_v<Glyph> &&
             std::is_standard_layout_v<LocalizeEntry> &&
             std::is_standard_layout_v<GfxLightDef>,
         "canonical weapon dependency types remain standard-layout records");
@@ -113,6 +123,28 @@ void TestCanonicalAssetTypes()
                 offsetof(ComWorld, primaryLights) == 12u &&
                 sizeof(GfxImage) == 36u &&
                 offsetof(GfxImage, name) == 32u &&
+                sizeof(SndCurve) == 72u &&
+                offsetof(SndCurve, filename) == 0u &&
+                offsetof(SndCurve, knotCount) == 4u &&
+                offsetof(SndCurve, knots) == 8u &&
+                sizeof(LoadedSound) == 44u &&
+                offsetof(LoadedSound, name) == 0u &&
+                offsetof(LoadedSound, sound) == 4u &&
+                sizeof(SoundFile) == 12u &&
+                offsetof(SoundFile, u) == 4u &&
+                sizeof(SpeakerMap) == 408u &&
+                offsetof(SpeakerMap, name) == 4u &&
+                sizeof(snd_alias_t) == 92u &&
+                offsetof(snd_alias_t, soundFile) == 16u &&
+                offsetof(snd_alias_t, volumeFalloffCurve) == 72u &&
+                offsetof(snd_alias_t, speakerMap) == 88u &&
+                sizeof(snd_alias_list_t) == 12u &&
+                offsetof(snd_alias_list_t, head) == 4u &&
+                offsetof(snd_alias_list_t, count) == 8u &&
+                sizeof(Font_s) == 24u &&
+                offsetof(Font_s, material) == 12u &&
+                offsetof(Font_s, glyphs) == 20u &&
+                sizeof(Glyph) == 24u &&
                 sizeof(LocalizeEntry) == 8u &&
                 offsetof(LocalizeEntry, value) == 0u &&
                 offsetof(LocalizeEntry, name) == 4u &&
@@ -128,6 +160,10 @@ void TestCanonicalAssetTypes()
             ASSET_TYPE_MATERIAL == static_cast<XAssetType>(4) &&
             ASSET_TYPE_TECHNIQUE_SET == static_cast<XAssetType>(5) &&
             ASSET_TYPE_IMAGE == static_cast<XAssetType>(6) &&
+            ASSET_TYPE_SOUND == static_cast<XAssetType>(7) &&
+            ASSET_TYPE_SOUND_CURVE == static_cast<XAssetType>(8) &&
+            ASSET_TYPE_LOADED_SOUND == static_cast<XAssetType>(9) &&
+            ASSET_TYPE_FONT == static_cast<XAssetType>(19) &&
             ASSET_TYPE_GFXWORLD == static_cast<XAssetType>(16) &&
             ASSET_TYPE_LIGHT_DEF == static_cast<XAssetType>(17) &&
             ASSET_TYPE_LOCALIZE_ENTRY == static_cast<XAssetType>(22) &&

@@ -296,10 +296,31 @@ static void Load_XAssetHeader(bool atStreamStart)
         varGfxImagePtr = reinterpret_cast<GfxImage **>(varXAssetHeader);
         Load_GfxImagePtr(false);
         break;
+    case ASSET_TYPE_SOUND:
+        varsnd_alias_list_ptr = reinterpret_cast<snd_alias_list_t **>(
+            varXAssetHeader);
+        Load_snd_alias_list_ptr(false);
+        break;
+    case ASSET_TYPE_SOUND_CURVE:
+        varSndCurvePtr = reinterpret_cast<SndCurve **>(varXAssetHeader);
+        Load_SndCurvePtr(false);
+        break;
+    case ASSET_TYPE_LOADED_SOUND:
+        varLoadedSoundPtr = reinterpret_cast<LoadedSound **>(varXAssetHeader);
+        Load_LoadedSoundPtr(false);
+        break;
     case ASSET_TYPE_LOCALIZE_ENTRY:
         varLocalizeEntryPtr = reinterpret_cast<LocalizeEntry **>(
             varXAssetHeader);
         Load_LocalizeEntryPtr(false);
+        break;
+    case ASSET_TYPE_SNDDRIVER_GLOBALS:
+        // The canonical generated dispatcher intentionally has no loader for
+        // this singleton type. Preserve that exact no-consumption behavior.
+        break;
+    case ASSET_TYPE_FONT:
+        varFontHandle = reinterpret_cast<Font_s **>(varXAssetHeader);
+        Load_FontHandle(false);
         break;
     case ASSET_TYPE_RAWFILE:
         varRawFilePtr = reinterpret_cast<RawFile **>(varXAssetHeader);

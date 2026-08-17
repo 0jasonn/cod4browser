@@ -7,7 +7,9 @@
 #include <database/localize_types.h>
 #include <gfx_d3d/gfx_image_types.h>
 #include <gfx_d3d/material_types.h>
+#include <gfx_d3d/r_font.h>
 #include <physics/phys_preset.h>
+#include <sound/snd_alias_types.h>
 
 #include <qcommon/threads.h>
 #include <qcommon/system.h>
@@ -39,6 +41,18 @@ const char *AssetName(const XAsset &asset)
     case ASSET_TYPE_IMAGE:
         name = asset.header.image ? asset.header.image->name : nullptr;
         break;
+    case ASSET_TYPE_SOUND:
+        name = asset.header.sound ? asset.header.sound->aliasName : nullptr;
+        break;
+    case ASSET_TYPE_SOUND_CURVE:
+        name = asset.header.sndCurve ? asset.header.sndCurve->filename : nullptr;
+        break;
+    case ASSET_TYPE_LOADED_SOUND:
+        name = asset.header.loadSnd ? asset.header.loadSnd->name : nullptr;
+        break;
+    case ASSET_TYPE_FONT:
+        name = asset.header.font ? asset.header.font->fontName : nullptr;
+        break;
     case ASSET_TYPE_LOCALIZE_ENTRY:
         name = asset.header.localize ? asset.header.localize->name : nullptr;
         break;
@@ -64,6 +78,10 @@ std::size_t AssetSize(XAssetType type)
     case ASSET_TYPE_MATERIAL: return sizeof(Material);
     case ASSET_TYPE_TECHNIQUE_SET: return sizeof(MaterialTechniqueSet);
     case ASSET_TYPE_IMAGE: return sizeof(GfxImage);
+    case ASSET_TYPE_SOUND: return sizeof(snd_alias_list_t);
+    case ASSET_TYPE_SOUND_CURVE: return sizeof(SndCurve);
+    case ASSET_TYPE_LOADED_SOUND: return sizeof(LoadedSound);
+    case ASSET_TYPE_FONT: return sizeof(Font_s);
     case ASSET_TYPE_LOCALIZE_ENTRY: return sizeof(LocalizeEntry);
     case ASSET_TYPE_RAWFILE: return sizeof(RawFile);
     default: return 0;
@@ -283,6 +301,55 @@ void __cdecl Load_GfxImageAsset(XAssetHeader *image)
     XAssetHeader published = DB_AddXAsset(ASSET_TYPE_IMAGE, *image);
     if (!published.data) return;
     *image = published;
+}
+
+void __cdecl Load_SndCurveAsset(XAssetHeader *sndCurve)
+{
+    if (!sndCurve || !sndCurve->sndCurve)
+    {
+        DB_RuntimeGeneratedFailure("publication/null SndCurve");
+        return;
+    }
+    XAssetHeader published = DB_AddXAsset(ASSET_TYPE_SOUND_CURVE, *sndCurve);
+    if (!published.data) return;
+    *sndCurve = published;
+}
+
+void __cdecl Load_snd_alias_list_Asset(XAssetHeader *sound)
+{
+    if (!sound || !sound->sound)
+    {
+        DB_RuntimeGeneratedFailure("publication/null sound alias list");
+        return;
+    }
+    XAssetHeader published = DB_AddXAsset(ASSET_TYPE_SOUND, *sound);
+    if (!published.data) return;
+    *sound = published;
+}
+
+void __cdecl Load_LoadedSoundAsset(XAssetHeader *loadedSound)
+{
+    if (!loadedSound || !loadedSound->loadSnd)
+    {
+        DB_RuntimeGeneratedFailure("publication/null LoadedSound");
+        return;
+    }
+    XAssetHeader published = DB_AddXAsset(ASSET_TYPE_LOADED_SOUND,
+        *loadedSound);
+    if (!published.data) return;
+    *loadedSound = published;
+}
+
+void __cdecl Load_FontAsset(XAssetHeader *font)
+{
+    if (!font || !font->font)
+    {
+        DB_RuntimeGeneratedFailure("publication/null Font");
+        return;
+    }
+    XAssetHeader published = DB_AddXAsset(ASSET_TYPE_FONT, *font);
+    if (!published.data) return;
+    *font = published;
 }
 
 void __cdecl Load_LocalizeEntryAsset(XAssetHeader *localize)
