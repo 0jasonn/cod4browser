@@ -3,6 +3,12 @@
 #include <cstddef>
 #include <cstdint>
 
+#if defined(_MSC_VER)
+#define KISAK_CDECL __cdecl
+#else
+#define KISAK_CDECL
+#endif
+
 #if defined(KISAK_GATE3_COM_INIT_PREFIX) || !defined(_WIN32)
 using LONG = std::int32_t;
 

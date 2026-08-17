@@ -13,7 +13,7 @@ std::array<std::array<void *, VALUE_SLOT_COUNT>, THREAD_CONTEXT_COUNT> g_context
 std::array<std::uint32_t, CRITSECT_COUNT> g_criticalSectionDepth{};
 bool g_mainThreadInitialized = false;
 ThreadContext_t g_currentContext = THREAD_CONTEXT_MAIN;
-void(__cdecl *g_databaseFunction)(std::uint32_t) = nullptr;
+void(KISAK_CDECL *g_databaseFunction)(std::uint32_t) = nullptr;
 bool g_databaseCompleted = true;
 bool g_databaseCompleted2 = true;
 
@@ -114,7 +114,7 @@ void *Sys_GetValue(int valueIndex)
         [static_cast<std::size_t>(valueIndex)];
 }
 
-char Sys_SpawnDatabaseThread(void(__cdecl *function)(std::uint32_t))
+char Sys_SpawnDatabaseThread(void(KISAK_CDECL *function)(std::uint32_t))
 {
     if (!function || g_databaseFunction) return 0;
     g_databaseFunction = function;
