@@ -3,6 +3,7 @@
 #include <database/db_asset_types.h>
 #include <database/db_file_types.h>
 #include <database/localize_types.h>
+#include <EffectsCore/fx_types.h>
 #include <gfx_d3d/material_types.h>
 #include <gfx_d3d/r_font.h>
 #include <physics/phys_preset.h>
@@ -37,6 +38,8 @@ extern snd_alias_list_t *varsnd_alias_list_t;
 extern snd_alias_list_t **varsnd_alias_list_ptr;
 extern Font_s *varFont;
 extern Font_s **varFontHandle;
+extern FxEffectDef *varFxEffectDef;
+extern const FxEffectDef **varFxEffectDefHandle;
 extern XAssetHeader *varXAssetHeader;
 
 void __cdecl Load_XString(bool atStreamStart);
@@ -48,4 +51,7 @@ void __cdecl Load_SndCurvePtr(bool atStreamStart);
 void __cdecl Load_LoadedSoundPtr(bool atStreamStart);
 void __cdecl Load_snd_alias_list_ptr(bool atStreamStart);
 void __cdecl Load_FontHandle(bool atStreamStart);
+void __cdecl Load_FxEffectDefHandle(bool atStreamStart);
+void __cdecl Load_FxEffectDefHandleArray(bool atStreamStart,
+    std::int32_t count);
 void DB_SetGeneratedAssetIndex(std::uint32_t index);

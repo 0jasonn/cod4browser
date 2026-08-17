@@ -322,6 +322,11 @@ static void Load_XAssetHeader(bool atStreamStart)
         varFontHandle = reinterpret_cast<Font_s **>(varXAssetHeader);
         Load_FontHandle(false);
         break;
+    case ASSET_TYPE_FX:
+        varFxEffectDefHandle = reinterpret_cast<const FxEffectDef **>(
+            varXAssetHeader);
+        Load_FxEffectDefHandle(false);
+        break;
     case ASSET_TYPE_RAWFILE:
         varRawFilePtr = reinterpret_cast<RawFile **>(varXAssetHeader);
         Load_RawFilePtr(false);

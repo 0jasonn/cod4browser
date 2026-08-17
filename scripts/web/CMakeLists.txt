@@ -60,6 +60,7 @@ add_executable(KisakCOD-web
     "${SRC_DIR}/database/db_generated_loaded_sound.cpp"
     "${SRC_DIR}/database/db_generated_sound_platform.cpp"
     "${SRC_DIR}/database/db_generated_font.cpp"
+    "${SRC_DIR}/database/db_generated_fx.cpp"
     "${SRC_DIR}/database/db_generated_material.cpp"
     "${SRC_DIR}/database/db_generated_material_platform.cpp"
     "${SRC_DIR}/database/db_generated_material_technique.cpp"

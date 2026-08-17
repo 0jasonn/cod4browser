@@ -73,24 +73,25 @@ test("canonical Gate 3 traverses a locally owned retail startup zone", {
     })}`);
     expect(result.final).toMatchObject({
         stopStage: "Load_XAssetHeader/unsupported family closure",
-        assetIndex: 1224,
-        assetType: 25,
+        assetIndex: 1225,
+        assetType: 26,
         streamBlock: 4,
-        streamOffset: 219848,
+        streamOffset: 220880,
         publicationEnd: true,
-        freeEntryCountAfter: 31512,
+        freeEntryCountAfter: 31509,
         pointerClassification: "inline-shared/-1",
     });
-    expect(result.publications).toHaveLength(1240);
+    expect(result.publications).toHaveLength(1243);
     expect(publicationsByType).toEqual({
-        4: 5,
+        4: 6,
         5: 4,
-        6: 10,
+        6: 11,
         7: 11,
         8: 2,
         9: 9,
         19: 9,
         22: 1116,
+        25: 1,
         31: 74,
     });
     expect(localizePublications).toHaveLength(1116);
@@ -109,12 +110,13 @@ test("canonical Gate 3 traverses a locally owned retail startup zone", {
         freeEntryCountAfter: 31630,
     });
     expect(result.publications.at(-1)).toMatchObject({
-        assetIndex: 1223,
-        assetType: 5,
-        assetEntryIndex: 1255,
-        assetPoolIndex: 3,
-        freeEntryCountBefore: 31513,
-        freeEntryCountAfter: 31512,
+        assetIndex: 1224,
+        assetType: 25,
+        assetName: "misc/missing_fx",
+        assetEntryIndex: 1258,
+        assetPoolIndex: 0,
+        freeEntryCountBefore: 31510,
+        freeEntryCountAfter: 31509,
     });
     const emptyNames = result.publications.filter(
         (entry) => entry.assetName.length === 0);
@@ -125,5 +127,5 @@ test("canonical Gate 3 traverses a locally owned retail startup zone", {
         assetPoolIndex: 1,
     })]);
     expect(result.publications.filter(
-        (entry) => entry.assetName.length > 0)).toHaveLength(1239);
+        (entry) => entry.assetName.length > 0)).toHaveLength(1242);
 });

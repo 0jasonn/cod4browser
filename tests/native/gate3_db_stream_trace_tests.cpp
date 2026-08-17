@@ -3,6 +3,7 @@
 #include <database/db_registry_publication.h>
 #include <database/db_runtime_prefix.h>
 #include <database/localize_types.h>
+#include <EffectsCore/fx_types.h>
 #include <gfx_d3d/gfx_image_types.h>
 #include <gfx_d3d/material_types.h>
 #include <gfx_d3d/r_font.h>
@@ -20,6 +21,7 @@
 #include <array>
 #include <cassert>
 #include <cctype>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -55,6 +57,16 @@ void AppendU16(std::vector<std::uint8_t> &bytes, std::uint16_t value)
 void AppendZeros(std::vector<std::uint8_t> &bytes, std::size_t count)
 {
     bytes.insert(bytes.end(), count, 0);
+}
+
+void WriteU32(std::vector<std::uint8_t> &bytes, std::size_t offset,
+    std::uint32_t value)
+{
+    assert(offset + sizeof(value) <= bytes.size());
+    bytes[offset] = static_cast<std::uint8_t>(value);
+    bytes[offset + 1] = static_cast<std::uint8_t>(value >> 8);
+    bytes[offset + 2] = static_cast<std::uint8_t>(value >> 16);
+    bytes[offset + 3] = static_cast<std::uint8_t>(value >> 24);
 }
 
 std::uint32_t Align4(std::uint32_t value)
@@ -833,6 +845,113 @@ std::vector<std::uint8_t> MakeFontXFile(
     return CompressXFile(inflated);
 }
 
+struct FxFixtureOptions
+{
+    std::uint32_t assetPointer = UINT32_MAX - 1u;
+    bool includeAliasAsset = true;
+    bool includeBody = true;
+    bool terminateName = true;
+    std::int32_t elementCount = 1;
+    std::uint8_t elementType = 6;
+    std::uint8_t visualCount = 0;
+    std::uint32_t visualPointer = 0;
+    bool includeSamples = true;
+    bool includeTrail = true;
+    std::int32_t trailVertCount = 2;
+    std::int32_t trailIndCount = 3;
+    bool includeTrailData = true;
+};
+
+std::vector<std::uint8_t> MakeFxXFile(
+    const FxFixtureOptions &options = {})
+{
+    constexpr const char *name = "fx/gate3";
+    const bool inlineAsset = options.assetPointer == UINT32_MAX ||
+        options.assetPointer == UINT32_MAX - 1u;
+    const std::uint32_t assetCount = options.includeAliasAsset ? 2u : 1u;
+    std::vector<std::uint8_t> inflated;
+    AppendU32(inflated, 16384);
+    AppendU32(inflated, 0);
+    for (const std::uint32_t size : std::array<std::uint32_t, 9>{
+        4096, 0, 0, 0, 12288, 0, 0, 0, 0}) AppendU32(inflated, size);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, assetCount);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, ASSET_TYPE_FX);
+    AppendU32(inflated, options.assetPointer);
+    if (options.includeAliasAsset)
+    {
+        AppendU32(inflated, ASSET_TYPE_FX);
+        AppendU32(inflated, 0x40000011u);
+    }
+    if (!inlineAsset || !options.includeBody) return CompressXFile(inflated);
+
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, 0x1234u);
+    AppendU32(inflated, sizeof(FxEffectDef));
+    AppendU32(inflated, 250);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, static_cast<std::uint32_t>(options.elementCount));
+    AppendU32(inflated, 0);
+    AppendU32(inflated, options.elementCount == 0 ? 0u : 1u);
+    inflated.insert(inflated.end(), name, name + std::strlen(name));
+    if (options.terminateName) inflated.push_back(0);
+    if (!options.terminateName || options.elementCount != 1)
+        return CompressXFile(inflated);
+
+    while ((inflated.size() & 3u) != 0u) inflated.push_back(0);
+    const std::size_t elementOffset = inflated.size();
+    AppendZeros(inflated, sizeof(FxElemDef));
+    inflated[elementOffset + offsetof(FxElemDef, elemType)] =
+        options.elementType;
+    inflated[elementOffset + offsetof(FxElemDef, visualCount)] =
+        options.visualCount;
+    if (options.includeSamples)
+    {
+        WriteU32(inflated, elementOffset + offsetof(FxElemDef, velSamples), 1);
+        WriteU32(inflated, elementOffset + offsetof(FxElemDef, visSamples), 1);
+    }
+    WriteU32(inflated, elementOffset + offsetof(FxElemDef, visuals),
+        options.visualPointer);
+    if (options.includeTrail)
+        WriteU32(inflated, elementOffset + offsetof(FxElemDef, trailDef), 1);
+
+    if (options.includeSamples)
+    {
+        while ((inflated.size() & 3u) != 0u) inflated.push_back(0);
+        AppendZeros(inflated, sizeof(FxElemVelStateSample));
+        AppendZeros(inflated, sizeof(FxElemVisStateSample));
+    }
+    if (options.visualPointer == UINT32_MAX && options.elementType == 8)
+        AppendCString(inflated, "sound/fx_gate3");
+    if (!options.includeTrail) return CompressXFile(inflated);
+
+    while ((inflated.size() & 3u) != 0u) inflated.push_back(0);
+    const std::size_t trailOffset = inflated.size();
+    AppendZeros(inflated, sizeof(FxTrailDef));
+    WriteU32(inflated, trailOffset + offsetof(FxTrailDef, vertCount),
+        static_cast<std::uint32_t>(options.trailVertCount));
+    WriteU32(inflated, trailOffset + offsetof(FxTrailDef, verts), 1);
+    WriteU32(inflated, trailOffset + offsetof(FxTrailDef, indCount),
+        static_cast<std::uint32_t>(options.trailIndCount));
+    WriteU32(inflated, trailOffset + offsetof(FxTrailDef, inds), 1);
+    if (!options.includeTrailData) return CompressXFile(inflated);
+    if (options.trailVertCount > 0 && options.trailVertCount < 64)
+    {
+        while ((inflated.size() & 3u) != 0u) inflated.push_back(0);
+        AppendZeros(inflated, static_cast<std::size_t>(options.trailVertCount) *
+            sizeof(FxTrailVertex));
+    }
+    if (options.trailIndCount > 0 && options.trailIndCount < 64)
+    {
+        while ((inflated.size() & 1u) != 0u) inflated.push_back(0);
+        for (std::int32_t index = 0; index < options.trailIndCount; ++index)
+            AppendU16(inflated, static_cast<std::uint16_t>(index));
+    }
+    return CompressXFile(inflated);
+}
+
 std::vector<std::uint8_t> MakeEmptyXFile(
     const std::array<std::uint32_t, 9> &blocks)
 {
@@ -1563,6 +1682,124 @@ int main()
     assert(std::strcmp(g_trace.stopStage, "Font/glyph array") == 0 ||
         std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0);
 
+    const std::vector<std::uint8_t> fxInsertAlias = MakeFxXFile();
+    Run(fxInsertAlias, zone);
+    assert(g_trace.xassetCount == 2 && g_trace.assetIndex == 1);
+    assert(g_trace.assetType == ASSET_TYPE_FX);
+    assert(std::strcmp(g_trace.pointerClassification,
+        "prior-offset/alias") == 0);
+    assert(g_trace.publicationBegin && g_trace.publicationEnd);
+    assert(g_trace.assetEntryIndex == 16 && g_trace.assetPoolIndex == 0);
+    assert(g_trace.freeEntryCountBefore == 32752 &&
+        g_trace.freeEntryCountAfter == 32751);
+    assert(g_trace.assetHash == DB_HashForNameCanonical(
+        "fx/gate3", ASSET_TYPE_FX));
+    assert(g_trace.assetZoneIndex == 1);
+    assert(g_trace.streamOffsets[0] == sizeof(FxEffectDef));
+    assert(g_trace.streamOffsets[4] == 502);
+    const XAssetHeader publishedFx = DB_FindXAssetHeader(
+        ASSET_TYPE_FX, "fx/gate3");
+    assert(publishedFx.fx && publishedFx.fx->flags == 0x1234);
+    assert(publishedFx.fx->elemDefCountOneShot == 1 &&
+        publishedFx.fx->elemDefs);
+    const FxElemDef &publishedElement = publishedFx.fx->elemDefs[0];
+    assert(publishedElement.elemType == 6 && publishedElement.visualCount == 0);
+    assert(publishedElement.velSamples && publishedElement.visSamples);
+    assert(publishedElement.trailDef &&
+        publishedElement.trailDef->vertCount == 2 &&
+        publishedElement.trailDef->indCount == 3);
+    assert(publishedElement.trailDef->verts &&
+        publishedElement.trailDef->inds &&
+        publishedElement.trailDef->inds[2] == 2);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_FX) == 399);
+    const XAsset *fxAssets = reinterpret_cast<const XAsset *>(
+        zone.blocks[4].data);
+    assert(fxAssets[0].header.fx == publishedFx.fx &&
+        fxAssets[1].header.fx == publishedFx.fx);
+    std::uint32_t fxInsertion = 0;
+    std::memcpy(&fxInsertion, zone.blocks[4].data + 16,
+        sizeof(fxInsertion));
+    assert(fxInsertion == reinterpret_cast<std::uint32_t>(publishedFx.fx));
+
+    FxFixtureOptions sharedFx{};
+    sharedFx.assetPointer = UINT32_MAX;
+    sharedFx.includeAliasAsset = false;
+    sharedFx.includeSamples = false;
+    sharedFx.includeTrail = false;
+    Run(MakeFxXFile(sharedFx), zone);
+    assert(std::strcmp(g_trace.pointerClassification,
+        "inline-shared/-1") == 0);
+    assert(g_trace.publicationEnd && g_trace.streamOffsets[0] == 32 &&
+        g_trace.streamOffsets[4] == 272);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_FX, "fx/gate3").fx);
+
+    FxFixtureOptions soundVisualFx{};
+    soundVisualFx.assetPointer = UINT32_MAX;
+    soundVisualFx.includeAliasAsset = false;
+    soundVisualFx.elementType = 8;
+    soundVisualFx.visualCount = 1;
+    soundVisualFx.visualPointer = UINT32_MAX;
+    soundVisualFx.includeTrail = false;
+    Run(MakeFxXFile(soundVisualFx), zone);
+    const XAssetHeader publishedSoundVisualFx = DB_FindXAssetHeader(
+        ASSET_TYPE_FX, "fx/gate3");
+    assert(publishedSoundVisualFx.fx &&
+        std::strcmp(publishedSoundVisualFx.fx->elemDefs[0]
+            .visuals.instance.soundName, "sound/fx_gate3") == 0);
+
+    FxFixtureOptions nullFx{};
+    nullFx.assetPointer = 0;
+    nullFx.includeAliasAsset = false;
+    Run(MakeFxXFile(nullFx), zone);
+    assert(!g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_FX) == 400);
+
+    FxFixtureOptions malformedFx{};
+    malformedFx.assetPointer = UINT32_MAX - 2u;
+    malformedFx.includeAliasAsset = false;
+    Run(MakeFxXFile(malformedFx), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "stream/invalid alias offset") == 0);
+
+    FxFixtureOptions invalidFxCount{};
+    invalidFxCount.assetPointer = UINT32_MAX;
+    invalidFxCount.includeAliasAsset = false;
+    invalidFxCount.elementCount = -1;
+    Run(MakeFxXFile(invalidFxCount), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "FX/element array") == 0);
+
+    FxFixtureOptions truncatedFx{};
+    truncatedFx.assetPointer = UINT32_MAX;
+    truncatedFx.includeAliasAsset = false;
+    truncatedFx.includeBody = false;
+    Run(MakeFxXFile(truncatedFx), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0);
+
+    FxFixtureOptions truncatedFxTrail{};
+    truncatedFxTrail.assetPointer = UINT32_MAX;
+    truncatedFxTrail.includeAliasAsset = false;
+    truncatedFxTrail.includeTrailData = false;
+    Run(MakeFxXFile(truncatedFxTrail), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "FX/trail vertices") == 0 ||
+        std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0);
+
+    FxFixtureOptions inlineModelFx{};
+    inlineModelFx.elementType = 5;
+    inlineModelFx.visualCount = 1;
+    inlineModelFx.visualPointer = UINT32_MAX;
+    inlineModelFx.includeTrail = false;
+    Run(MakeFxXFile(inlineModelFx), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage,
+        "Load_XModelPtr/unsupported inline body closure") == 0);
+    std::uint32_t failedFxModelInsertion = UINT32_MAX;
+    std::memcpy(&failedFxModelInsertion, zone.blocks[4].data + 16,
+        sizeof(failedFxModelInsertion));
+    assert(failedFxModelInsertion == 0);
+
     Run(MakeSndDriverGlobalsXFile(), zone);
     assert(!g_trace.generatedLoadFailed && g_trace.xassetListEnd);
     assert(g_trace.assetType == ASSET_TYPE_SNDDRIVER_GLOBALS);
@@ -2006,6 +2243,35 @@ int main()
         sizeof(failedFontInsertion));
     assert(failedFontInsertion == 0);
 
+    const std::uint32_t fxHash = DB_HashForNameCanonical(
+        "fx/gate3", ASSET_TYPE_FX);
+    Reset(fxInsertAlias);
+    *static_cast<void **>(DB_XAssetPool[ASSET_TYPE_FX]) = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
+        !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset pool exhaustion") == 0);
+    assert(db_hashTable[fxHash] == 0);
+    assert(DB_GetFreeAssetEntryCount() == 32752);
+    std::uint32_t failedFxInsertion = UINT32_MAX;
+    std::memcpy(&failedFxInsertion, zone.blocks[4].data + 16,
+        sizeof(failedFxInsertion));
+    assert(failedFxInsertion == 0);
+
+    Reset(fxInsertAlias);
+    g_freeAssetEntryHead = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
+        !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset entry exhaustion") == 0);
+    assert(db_hashTable[fxHash] == 0);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_FX) == 400);
+    std::memcpy(&failedFxInsertion, zone.blocks[4].data + 16,
+        sizeof(failedFxInsertion));
+    assert(failedFxInsertion == 0);
+
     Reset(loadedSoundInsertAlias);
     g_freeAssetEntryHead = nullptr;
     RunPrepared(zone);
@@ -2085,6 +2351,6 @@ int main()
     assert(g_trace.publicationEnd && g_trace.cleanupComplete);
     assert(std::strcmp(g_trace.stopStage, "Load_XAssetHeader/next-family-closure") == 0);
 
-    std::printf("gate3-db-stream rawfile=published physpreset=published technique-set=published material=published image=published water=loaded sound-curve=published sound-alias=published loaded-sound=published font=published snddriver=canonical-noop localize=published insert=-2 alias=block4:16 technique=block4:36 direct-xstring=block4:18 technique-children=251 material-children=block0:136,block4:248 sound-curve-children=block0:72,block4:38 sound-alias-children=block0:12,block4:586 loaded-sound-children=block0:48,block4:44 font-children=block0:24,block4:80 localize-children=block0:8,block4:51 image-entry=16 material-entry=17 sound-curve-entry=16 sound-alias-entry=16 loaded-sound-entry=16 font-entry=16 localize-entry=16 free=32752->32751 zone=1 stop=next-family-closure\n");
+    std::printf("gate3-db-stream rawfile=published physpreset=published technique-set=published material=published image=published water=loaded sound-curve=published sound-alias=published loaded-sound=published font=published fx=published snddriver=canonical-noop localize=published insert=-2 alias=block4:16 technique=block4:36 direct-xstring=block4:18 technique-children=251 material-children=block0:136,block4:248 sound-curve-children=block0:72,block4:38 sound-alias-children=block0:12,block4:586 loaded-sound-children=block0:48,block4:44 font-children=block0:24,block4:80 fx-children=block0:32,block4:502 localize-children=block0:8,block4:51 image-entry=16 material-entry=17 sound-curve-entry=16 sound-alias-entry=16 loaded-sound-entry=16 font-entry=16 fx-entry=16 localize-entry=16 free=32752->32751 zone=1 xmodel-inline=blocked stop=next-family-closure\n");
     return 0;
 }

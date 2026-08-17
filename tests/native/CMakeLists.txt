@@ -85,6 +85,7 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
         "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_loaded_sound.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_sound_platform.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_font.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_fx.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_material.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_material_platform.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_material_technique.cpp"

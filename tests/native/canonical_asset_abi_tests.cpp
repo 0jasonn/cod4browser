@@ -46,6 +46,10 @@ void TestCanonicalAssetTypes()
             std::is_standard_layout_v<MaterialTechnique> &&
             std::is_standard_layout_v<MaterialPass> &&
             std::is_standard_layout_v<FxEffectDef> &&
+            std::is_standard_layout_v<FxElemDef> &&
+            std::is_standard_layout_v<FxTrailDef> &&
+            std::is_standard_layout_v<FxElemVelStateSample> &&
+            std::is_standard_layout_v<FxElemVisStateSample> &&
             std::is_standard_layout_v<WeaponDef> &&
             std::is_standard_layout_v<ComPrimaryLight> &&
             std::is_standard_layout_v<ComWorld> &&
@@ -116,6 +120,19 @@ void TestCanonicalAssetTypes()
                 sizeof(complex_s) == 8u &&
                 sizeof(FxEffectDef) == 32u &&
                 offsetof(FxEffectDef, elemDefs) == 28u &&
+                sizeof(FxElemDef) == 252u &&
+                offsetof(FxElemDef, elemType) == 176u &&
+                offsetof(FxElemDef, velSamples) == 180u &&
+                offsetof(FxElemDef, visuals) == 188u &&
+                offsetof(FxElemDef, effectOnImpact) == 216u &&
+                offsetof(FxElemDef, trailDef) == 244u &&
+                sizeof(FxElemVelStateSample) == 96u &&
+                sizeof(FxElemVisStateSample) == 48u &&
+                sizeof(FxElemMarkVisuals) == 8u &&
+                sizeof(FxTrailVertex) == 20u &&
+                sizeof(FxTrailDef) == 28u &&
+                offsetof(FxTrailDef, verts) == 16u &&
+                offsetof(FxTrailDef, inds) == 24u &&
                 sizeof(WeaponDef) == 2168u &&
                 sizeof(ComPrimaryLight) == 68u &&
                 offsetof(ComPrimaryLight, defName) == 64u &&

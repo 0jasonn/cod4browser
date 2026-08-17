@@ -18,6 +18,7 @@ remains an explicitly started oracle and does not supply assets to this path.
 | Sound alias list | yes | Alias arrays, streamed/loaded references, SndCurve and SpeakerMap dependencies |
 | LoadedSound | yes | Canonical metadata/payload stream, aliases and publication |
 | Font | yes | Canonical body, Material dependencies, glyph array and publication |
+| FxEffectDef | yes, reached closure | Canonical elements, samples, visuals, references, trails and publication; inline XModel bodies remain fail-closed |
 
 The shared prefix also owns XAssetList, ScriptStringList, XString, stream block,
 PMem, zone, pool, free-chain, hash and insertion-cell behavior used by these
@@ -36,7 +37,6 @@ DB dispatcher and real DB publication path:
 - GfxLightDef
 - MenuList
 - WeaponDef
-- FxEffectDef
 - FxImpactTable
 - StringTable
 - GfxWorld
@@ -62,9 +62,9 @@ still appear inside Gate 2 oracle results, but they are no longer census-only.
 
 ## Next retail blocker
 
-Owned `code_post_gfx.ff` now publishes 1,240 assets and reaches asset 1224,
-type 25 `ASSET_TYPE_FX`, at block 4 offset 219848. The next generated closure
-begins with `Load_FxEffectDefHandle`. It expands into variable 252-byte element
-graphs, velocity/visual samples, trails, recursive effect references,
-Materials and the not-yet-compiled XModel closure, so it is the current major
-architectural boundary.
+Owned `code_post_gfx.ff` now publishes 1,243 assets, including
+`misc/missing_fx` plus its nested Material and GfxImage, and reaches asset 1225,
+type 26 `ASSET_TYPE_IMPACT_FX`, at block 4 offset 220880. The next generated
+closure is `Load_FxImpactTablePtr -> Load_FxImpactTable ->` 12 fixed
+`FxImpactEntry` records, each containing 29 non-flesh and four flesh
+`FxEffectDefHandle` dependencies.

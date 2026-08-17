@@ -4,6 +4,7 @@
 #include <database/db_registry_publication.h>
 #include <database/db_runtime_prefix.h>
 #include <database/db_generated_material_platform.h>
+#include <EffectsCore/fx_types.h>
 #include <database/localize_types.h>
 #include <gfx_d3d/gfx_image_types.h>
 #include <gfx_d3d/material_types.h>
@@ -53,6 +54,9 @@ const char *AssetName(const XAsset &asset)
     case ASSET_TYPE_FONT:
         name = asset.header.font ? asset.header.font->fontName : nullptr;
         break;
+    case ASSET_TYPE_FX:
+        name = asset.header.fx ? asset.header.fx->name : nullptr;
+        break;
     case ASSET_TYPE_LOCALIZE_ENTRY:
         name = asset.header.localize ? asset.header.localize->name : nullptr;
         break;
@@ -82,6 +86,7 @@ std::size_t AssetSize(XAssetType type)
     case ASSET_TYPE_SOUND_CURVE: return sizeof(SndCurve);
     case ASSET_TYPE_LOADED_SOUND: return sizeof(LoadedSound);
     case ASSET_TYPE_FONT: return sizeof(Font_s);
+    case ASSET_TYPE_FX: return sizeof(FxEffectDef);
     case ASSET_TYPE_LOCALIZE_ENTRY: return sizeof(LocalizeEntry);
     case ASSET_TYPE_RAWFILE: return sizeof(RawFile);
     default: return 0;
@@ -350,6 +355,25 @@ void __cdecl Load_FontAsset(XAssetHeader *font)
     XAssetHeader published = DB_AddXAsset(ASSET_TYPE_FONT, *font);
     if (!published.data) return;
     *font = published;
+}
+
+void __cdecl Load_FxEffectDefAsset(XAssetHeader *fx)
+{
+    if (!fx || !fx->fx)
+    {
+        DB_RuntimeGeneratedFailure("publication/null FxEffectDef");
+        return;
+    }
+    XAssetHeader published = DB_AddXAsset(ASSET_TYPE_FX, *fx);
+    if (!published.data) return;
+    *fx = published;
+}
+
+void __cdecl Load_FxEffectDefFromName(const char **name)
+{
+    if (!name || !*name) return;
+    *reinterpret_cast<XAssetHeader *>(name) = DB_FindXAssetHeader(
+        ASSET_TYPE_FX, *name);
 }
 
 void __cdecl Load_LocalizeEntryAsset(XAssetHeader *localize)
