@@ -2,14 +2,15 @@
 
 #include <database/db_asset_types.h>
 #include <database/db_file_types.h>
+#include <gfx_d3d/material_types.h>
 #include <physics/phys_preset.h>
 
 #include <cstdint>
 
-// Shared extraction of the first generated db_load.cpp closure. The full
-// monolithic generated unit remains authoritative for native builds; this
-// closure keeps its stream/global ordering while making the first family
-// independently linkable by both 32-bit native tests and Wasm.
+// Shared extractions of generated db_load.cpp closures. The full monolithic
+// generated unit remains authoritative for native builds; these units preserve
+// its stream/global ordering while making reached families independently
+// linkable by both 32-bit native tests and Wasm.
 extern const char **varTempString;
 extern const char *varConstChar;
 extern const char **varXString;
@@ -17,6 +18,10 @@ extern RawFile *varRawFile;
 extern RawFile **varRawFilePtr;
 extern PhysPreset *varPhysPreset;
 extern PhysPreset **varPhysPresetPtr;
+extern MaterialTechniqueSet *varMaterialTechniqueSet;
+extern MaterialTechniqueSet **varMaterialTechniqueSetPtr;
 extern XAssetHeader *varXAssetHeader;
 
+void __cdecl Load_XString(bool atStreamStart);
+void __cdecl Load_MaterialTechniqueSetPtr(bool atStreamStart);
 void DB_SetGeneratedAssetIndex(std::uint32_t index);

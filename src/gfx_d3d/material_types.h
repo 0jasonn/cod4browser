@@ -4,10 +4,125 @@
 
 #include <cstdint>
 
-struct MaterialTechniqueSet;
 struct MaterialTextureDef;
 struct MaterialConstantDef;
 struct GfxStateBits;
+struct IDirect3DVertexDeclaration9;
+struct IDirect3DVertexShader9;
+struct IDirect3DPixelShader9;
+enum MaterialTextureSource : std::uint32_t;
+
+struct GfxVertexShaderLoadDef // sizeof=0x8
+{
+    void *program;
+    std::uint16_t programSize;
+    std::uint16_t loadForRenderer;
+};
+
+struct GfxPixelShaderLoadDef // sizeof=0x8
+{
+    void *program;
+    std::uint16_t programSize;
+    std::uint16_t loadForRenderer;
+};
+
+struct MaterialStreamRouting // sizeof=0x2
+{
+    std::uint8_t source;
+    std::uint8_t dest;
+};
+
+struct MaterialVertexStreamRouting // sizeof=0x60
+{
+    MaterialStreamRouting data[16];
+    IDirect3DVertexDeclaration9 *decl[16];
+};
+
+struct MaterialVertexDeclaration // sizeof=0x64
+{
+    std::uint8_t streamCount;
+    bool hasOptionalSource;
+    bool isLoaded;
+    std::uint8_t padding;
+    MaterialVertexStreamRouting routing;
+};
+
+struct MaterialVertexShaderProgram // sizeof=0xC
+{
+    IDirect3DVertexShader9 *vs;
+    GfxVertexShaderLoadDef loadDef;
+};
+
+struct MaterialVertexShader // sizeof=0x10
+{
+    const char *name;
+    MaterialVertexShaderProgram prog;
+};
+
+struct MaterialPixelShaderProgram // sizeof=0xC
+{
+    IDirect3DPixelShader9 *ps;
+    GfxPixelShaderLoadDef loadDef;
+};
+
+struct MaterialPixelShader // sizeof=0x10
+{
+    const char *name;
+    MaterialPixelShaderProgram prog;
+};
+
+struct MaterialArgumentCodeConst // sizeof=0x4
+{
+    std::uint16_t index;
+    std::uint8_t firstRow;
+    std::uint8_t rowCount;
+};
+
+union MaterialArgumentDef // sizeof=0x4
+{
+    const float *literalConst;
+    MaterialArgumentCodeConst codeConst;
+    MaterialTextureSource codeSampler;
+    std::uint32_t nameHash;
+};
+
+struct MaterialShaderArgument // sizeof=0x8
+{
+    std::uint16_t type;
+    std::uint16_t dest;
+    MaterialArgumentDef u;
+};
+
+struct MaterialPass // sizeof=0x14
+{
+    MaterialVertexDeclaration *vertexDecl;
+    MaterialVertexShader *vertexShader;
+    MaterialPixelShader *pixelShader;
+    std::uint8_t perPrimArgCount;
+    std::uint8_t perObjArgCount;
+    std::uint8_t stableArgCount;
+    std::uint8_t customSamplerFlags;
+    MaterialShaderArgument *args;
+};
+
+struct MaterialTechnique // serialized header sizeof=0x8, native minimum sizeof=0x1C
+{
+    const char *name;
+    std::uint16_t flags;
+    std::uint16_t passCount;
+    MaterialPass passArray[1];
+};
+
+struct MaterialTechniqueSet // sizeof=0x94
+{
+    const char *name;
+    std::uint8_t worldVertFormat;
+    bool hasBeenUploaded;
+    std::uint8_t unused[1];
+    std::uint8_t padding;
+    MaterialTechniqueSet *remappedTechniqueSet;
+    MaterialTechnique *techniques[34];
+};
 
 // Canonical KisakCOD/IW3 database-facing material records. Backend shader and
 // texture implementations remain in r_material.h.
@@ -47,6 +162,16 @@ struct Material // IW3 size: 0x50
 };
 
 static_assert(sizeof(void *) != 4u || sizeof(MaterialInfo) == 24u);
+static_assert(sizeof(void *) != 4u || sizeof(GfxVertexShaderLoadDef) == 8u);
+static_assert(sizeof(void *) != 4u || sizeof(GfxPixelShaderLoadDef) == 8u);
+static_assert(sizeof(void *) != 4u || sizeof(MaterialVertexDeclaration) == 100u);
+static_assert(sizeof(void *) != 4u || sizeof(MaterialVertexShader) == 16u);
+static_assert(sizeof(void *) != 4u || sizeof(MaterialPixelShader) == 16u);
+static_assert(sizeof(void *) != 4u || sizeof(MaterialArgumentDef) == 4u);
+static_assert(sizeof(void *) != 4u || sizeof(MaterialShaderArgument) == 8u);
+static_assert(sizeof(void *) != 4u || sizeof(MaterialPass) == 20u);
+static_assert(sizeof(void *) != 4u || sizeof(MaterialTechnique) == 28u);
+static_assert(sizeof(void *) != 4u || sizeof(MaterialTechniqueSet) == 148u);
 #ifdef KISAK_RADIANT
 static_assert(sizeof(void *) != 4u || sizeof(Material) == 96u);
 #else

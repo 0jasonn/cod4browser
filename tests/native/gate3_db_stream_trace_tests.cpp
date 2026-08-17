@@ -2,6 +2,7 @@
 #include <database/db_registry_pools.h>
 #include <database/db_registry_publication.h>
 #include <database/db_runtime_prefix.h>
+#include <gfx_d3d/material_types.h>
 #include <physics/phys_preset.h>
 #include <qcommon/qcommon.h>
 #include <qcommon/system.h>
@@ -38,6 +39,22 @@ void AppendU32(std::vector<std::uint8_t> &bytes, std::uint32_t value)
     bytes.push_back(static_cast<std::uint8_t>(value >> 8));
     bytes.push_back(static_cast<std::uint8_t>(value >> 16));
     bytes.push_back(static_cast<std::uint8_t>(value >> 24));
+}
+
+void AppendU16(std::vector<std::uint8_t> &bytes, std::uint16_t value)
+{
+    bytes.push_back(static_cast<std::uint8_t>(value));
+    bytes.push_back(static_cast<std::uint8_t>(value >> 8));
+}
+
+void AppendZeros(std::vector<std::uint8_t> &bytes, std::size_t count)
+{
+    bytes.insert(bytes.end(), count, 0);
+}
+
+std::uint32_t Align4(std::uint32_t value)
+{
+    return (value + 3u) & ~3u;
 }
 
 void AppendF32(std::vector<std::uint8_t> &bytes, float value)
@@ -144,6 +161,121 @@ std::vector<std::uint8_t> MakePhysPresetXFile(
     return CompressXFile(inflated);
 }
 
+struct TechniqueSetFixtureOptions
+{
+    std::uint32_t assetPointer = UINT32_MAX - 1u;
+    std::uint32_t techniquePointer = UINT32_MAX;
+    bool includeAliasAsset = true;
+    bool includeTechniqueAlias = true;
+    bool terminateTechniqueName = true;
+    std::uint16_t passCount = 1;
+    std::uint16_t vertexProgramSize = 1;
+};
+
+std::vector<std::uint8_t> MakeTechniqueSetXFile(
+    const TechniqueSetFixtureOptions &options = {})
+{
+    constexpr const char *setName = "techsets/gate3";
+    constexpr const char *pixelShaderName = "ps_gate3";
+    constexpr const char *techniqueName = "tech_gate3";
+    const bool inlineAsset = options.assetPointer == UINT32_MAX ||
+        options.assetPointer == UINT32_MAX - 1u;
+    const std::uint32_t assetCount = options.includeAliasAsset ? 2u : 1u;
+
+    std::vector<std::uint8_t> inflated;
+    AppendU32(inflated, 8192);
+    AppendU32(inflated, 0);
+    for (const std::uint32_t size : std::array<std::uint32_t, 9>{
+        4096, 0, 0, 0, 4096, 0, 0, 0, 0}) AppendU32(inflated, size);
+
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, assetCount);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, ASSET_TYPE_TECHNIQUE_SET);
+    AppendU32(inflated, options.assetPointer);
+    if (options.includeAliasAsset)
+    {
+        AppendU32(inflated, ASSET_TYPE_TECHNIQUE_SET);
+        AppendU32(inflated, 0x40000011u);
+    }
+    if (!inlineAsset) return CompressXFile(inflated);
+
+    std::uint32_t block4Offset = assetCount * sizeof(XAsset);
+    if (options.assetPointer == UINT32_MAX - 1u)
+        block4Offset = Align4(block4Offset) + 4u;
+    const std::uint32_t setNameOffset = block4Offset;
+    block4Offset += static_cast<std::uint32_t>(std::strlen(setName) + 1u);
+    const std::uint32_t techniqueOffset = Align4(block4Offset);
+    const std::uint32_t techniqueAlias = 0x40000001u + techniqueOffset;
+    const std::uint32_t setNameAlias = 0x40000001u + setNameOffset;
+
+    AppendU32(inflated, UINT32_MAX);
+    inflated.push_back(2);
+    inflated.push_back(0);
+    inflated.push_back(0);
+    inflated.push_back(0);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, options.techniquePointer);
+    AppendU32(inflated, options.includeTechniqueAlias &&
+        options.techniquePointer == UINT32_MAX ? techniqueAlias : 0u);
+    for (std::uint32_t index = 2; index < 34; ++index) AppendU32(inflated, 0);
+    AppendCString(inflated, setName);
+
+    if (options.techniquePointer != UINT32_MAX)
+        return CompressXFile(inflated);
+
+    AppendU32(inflated, UINT32_MAX);
+    AppendU16(inflated, 0x12u);
+    AppendU16(inflated, options.passCount);
+    if (options.passCount != 1)
+        return CompressXFile(inflated);
+
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, UINT32_MAX);
+    inflated.push_back(1);
+    inflated.push_back(0);
+    inflated.push_back(0);
+    inflated.push_back(0);
+    AppendU32(inflated, 1);
+
+    inflated.push_back(1);
+    inflated.push_back(0);
+    inflated.push_back(0);
+    inflated.push_back(0);
+    AppendZeros(inflated, 96);
+
+    AppendU32(inflated, setNameAlias);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 1);
+    AppendU16(inflated, options.vertexProgramSize);
+    AppendU16(inflated, 0);
+    if (options.vertexProgramSize != 1)
+        return CompressXFile(inflated);
+    AppendU32(inflated, 0x56530001u);
+
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 1);
+    AppendU16(inflated, 1);
+    AppendU16(inflated, 0);
+    AppendCString(inflated, pixelShaderName);
+    AppendU32(inflated, 0x50530001u);
+
+    AppendU16(inflated, 1);
+    AppendU16(inflated, 3);
+    AppendU32(inflated, UINT32_MAX);
+    AppendF32(inflated, 1.0f);
+    AppendF32(inflated, 2.0f);
+    AppendF32(inflated, 3.0f);
+    AppendF32(inflated, 4.0f);
+    inflated.insert(inflated.end(), techniqueName,
+        techniqueName + std::strlen(techniqueName));
+    if (options.terminateTechniqueName) inflated.push_back(0);
+    return CompressXFile(inflated);
+}
+
 std::vector<std::uint8_t> MakeEmptyXFile(
     const std::array<std::uint32_t, 9> &blocks)
 {
@@ -180,6 +312,7 @@ void Reset(const std::vector<std::uint8_t> &file)
     g_trace = {};
     g_lowPosition = 0;
     g_highPosition = static_cast<std::uint32_t>(g_arena.size());
+    std::fill(g_arena.begin(), g_arena.end(), 0);
     g_scriptString.clear();
     std::memset(g_zones, 0, sizeof(g_zones));
     g_zones[1].flags = 1;
@@ -477,6 +610,122 @@ int main()
     assert(sharedPhys.physPreset);
     assert(std::strcmp(sharedPhys.physPreset->sndAliasPrefix, "metal") == 0);
 
+    const std::vector<std::uint8_t> techniqueInsertAlias =
+        MakeTechniqueSetXFile();
+    Run(techniqueInsertAlias, zone);
+    assert(g_trace.xassetCount == 2 && g_trace.assetIndex == 1);
+    assert(g_trace.assetType == ASSET_TYPE_TECHNIQUE_SET);
+    assert(std::strcmp(g_trace.pointerClassification, "prior-offset/alias") == 0);
+    assert(g_trace.publicationBegin && g_trace.publicationEnd);
+    assert(g_trace.assetEntryIndex == 16 && g_trace.assetPoolIndex == 0);
+    assert(g_trace.freeEntryCountBefore == 32752 &&
+        g_trace.freeEntryCountAfter == 32751);
+    assert(g_trace.assetHash == DB_HashForNameCanonical(
+        "techsets/gate3", ASSET_TYPE_TECHNIQUE_SET));
+    assert(g_trace.assetZoneIndex == 1);
+    assert(g_trace.streamOffsets[0] == sizeof(MaterialTechniqueSet));
+    assert(g_trace.streamOffsets[4] == 251);
+    const XAssetHeader publishedTechniqueSet = DB_FindXAssetHeader(
+        ASSET_TYPE_TECHNIQUE_SET, "techsets/gate3");
+    assert(publishedTechniqueSet.techniqueSet);
+    assert(publishedTechniqueSet.techniqueSet->worldVertFormat == 2);
+    assert(publishedTechniqueSet.techniqueSet->remappedTechniqueSet ==
+        publishedTechniqueSet.techniqueSet);
+    assert(publishedTechniqueSet.techniqueSet->techniques[0]);
+    assert(publishedTechniqueSet.techniqueSet->techniques[1] ==
+        publishedTechniqueSet.techniqueSet->techniques[0]);
+    const MaterialTechnique *publishedTechnique =
+        publishedTechniqueSet.techniqueSet->techniques[0];
+    assert(publishedTechnique->flags == 0x12u &&
+        publishedTechnique->passCount == 1);
+    assert(std::strcmp(publishedTechnique->name, "tech_gate3") == 0);
+    const MaterialPass &publishedPass = publishedTechnique->passArray[0];
+    assert(publishedPass.vertexDecl && publishedPass.vertexDecl->isLoaded);
+    assert(std::all_of(std::begin(publishedPass.vertexDecl->routing.decl),
+        std::end(publishedPass.vertexDecl->routing.decl),
+        [](const void *decl) { return decl == nullptr; }));
+    assert(publishedPass.vertexShader && publishedPass.pixelShader);
+    assert(publishedPass.vertexShader->name ==
+        publishedTechniqueSet.techniqueSet->name);
+    assert(publishedPass.vertexShader->prog.vs == nullptr);
+    assert(publishedPass.vertexShader->prog.loadDef.program &&
+        *static_cast<std::uint32_t *>(
+            publishedPass.vertexShader->prog.loadDef.program) == 0x56530001u);
+    assert(std::strcmp(publishedPass.pixelShader->name, "ps_gate3") == 0);
+    assert(publishedPass.pixelShader->prog.ps == nullptr);
+    assert(publishedPass.pixelShader->prog.loadDef.program &&
+        *static_cast<std::uint32_t *>(
+            publishedPass.pixelShader->prog.loadDef.program) == 0x50530001u);
+    assert(publishedPass.args && publishedPass.args[0].type == 1 &&
+        publishedPass.args[0].dest == 3);
+    assert(publishedPass.args[0].u.literalConst[0] == 1.0f &&
+        publishedPass.args[0].u.literalConst[3] == 4.0f);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_TECHNIQUE_SET) == 1023);
+    const XAsset *techniqueAssets = reinterpret_cast<const XAsset *>(
+        zone.blocks[4].data);
+    assert(techniqueAssets[0].header.techniqueSet == publishedTechniqueSet.techniqueSet);
+    assert(techniqueAssets[1].header.techniqueSet == publishedTechniqueSet.techniqueSet);
+
+    TechniqueSetFixtureOptions sharedTechniqueOptions{};
+    sharedTechniqueOptions.assetPointer = UINT32_MAX;
+    sharedTechniqueOptions.includeAliasAsset = false;
+    sharedTechniqueOptions.includeTechniqueAlias = false;
+    Run(MakeTechniqueSetXFile(sharedTechniqueOptions), zone);
+    assert(std::strcmp(g_trace.pointerClassification, "inline-shared/-1") == 0);
+    assert(g_trace.publicationEnd && g_trace.assetPoolIndex == 0);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_TECHNIQUE_SET,
+        "techsets/gate3").techniqueSet);
+
+    TechniqueSetFixtureOptions nullTechniqueOptions{};
+    nullTechniqueOptions.assetPointer = 0;
+    nullTechniqueOptions.includeAliasAsset = false;
+    Run(MakeTechniqueSetXFile(nullTechniqueOptions), zone);
+    assert(std::strcmp(g_trace.pointerClassification, "null") == 0);
+    assert(!g_trace.publicationBegin && !g_trace.publicationEnd);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_TECHNIQUE_SET) == 1024);
+
+    TechniqueSetFixtureOptions invalidTechniqueAssetOptions{};
+    invalidTechniqueAssetOptions.assetPointer = UINT32_MAX - 2u;
+    invalidTechniqueAssetOptions.includeAliasAsset = false;
+    Run(MakeTechniqueSetXFile(invalidTechniqueAssetOptions), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "stream/invalid alias offset") == 0);
+
+    TechniqueSetFixtureOptions invalidTechniqueChildOptions{};
+    invalidTechniqueChildOptions.techniquePointer = UINT32_MAX - 1u;
+    invalidTechniqueChildOptions.includeAliasAsset = false;
+    invalidTechniqueChildOptions.includeTechniqueAlias = false;
+    Run(MakeTechniqueSetXFile(invalidTechniqueChildOptions), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "stream/invalid pointer offset") == 0);
+
+    TechniqueSetFixtureOptions excessivePassOptions{};
+    excessivePassOptions.includeAliasAsset = false;
+    excessivePassOptions.includeTechniqueAlias = false;
+    excessivePassOptions.passCount = 1000;
+    Run(MakeTechniqueSetXFile(excessivePassOptions), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage,
+        "MaterialTechnique/pass array") == 0);
+
+    TechniqueSetFixtureOptions excessiveProgramOptions{};
+    excessiveProgramOptions.includeAliasAsset = false;
+    excessiveProgramOptions.includeTechniqueAlias = false;
+    excessiveProgramOptions.vertexProgramSize = 1024;
+    Run(MakeTechniqueSetXFile(excessiveProgramOptions), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage,
+        "MaterialShader/program array") == 0);
+
+    TechniqueSetFixtureOptions truncatedTechniqueOptions{};
+    truncatedTechniqueOptions.includeAliasAsset = false;
+    truncatedTechniqueOptions.includeTechniqueAlias = false;
+    truncatedTechniqueOptions.terminateTechniqueName = false;
+    Run(MakeTechniqueSetXFile(truncatedTechniqueOptions), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0 ||
+        std::strcmp(g_trace.stopStage, "stream/truncated string") == 0);
+
     Run(MakePhysPresetXFile(0, 0, 0, false, false), zone);
     assert(std::strcmp(g_trace.pointerClassification, "null") == 0);
     assert(!g_trace.publicationBegin && !g_trace.publicationEnd);
@@ -505,6 +754,33 @@ int main()
     assert(std::strcmp(g_trace.stopStage, "publication/asset pool exhaustion") == 0);
     assert(DB_FindXAssetEntryCanonical(
         ASSET_TYPE_PHYSPRESET, "physics/gate3") == nullptr);
+
+    Reset(techniqueInsertAlias);
+    *static_cast<void **>(DB_XAssetPool[ASSET_TYPE_TECHNIQUE_SET]) = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
+        !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset pool exhaustion") == 0);
+    assert(DB_FindXAssetEntryCanonical(ASSET_TYPE_TECHNIQUE_SET,
+        "techsets/gate3") == nullptr);
+    std::uint32_t failedInsertion = UINT32_MAX;
+    std::memcpy(&failedInsertion, zone.blocks[4].data + 16,
+        sizeof(failedInsertion));
+    assert(failedInsertion == 0);
+
+    Reset(techniqueInsertAlias);
+    g_freeAssetEntryHead = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
+        !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset entry exhaustion") == 0);
+    assert(DB_FindXAssetEntryCanonical(ASSET_TYPE_TECHNIQUE_SET,
+        "techsets/gate3") == nullptr);
+    std::memcpy(&failedInsertion, zone.blocks[4].data + 16,
+        sizeof(failedInsertion));
+    assert(failedInsertion == 0);
 
     Reset(physInsertAlias);
     g_freeAssetEntryHead = nullptr;
@@ -545,6 +821,6 @@ int main()
     assert(g_trace.publicationEnd && g_trace.cleanupComplete);
     assert(std::strcmp(g_trace.stopStage, "Load_XAssetHeader/next-family-closure") == 0);
 
-    std::printf("gate3-db-stream rawfile=published physpreset=published insert=-2 alias=block4:16 direct-xstring=block4:20 entry=16 pool=0 free=32752->32751 zone=1 stop=next-family-closure\n");
+    std::printf("gate3-db-stream rawfile=published physpreset=published technique-set=published insert=-2 alias=block4:16 technique=block4:36 direct-xstring=block4:20 material-children=251 entry=16 pool=0 free=32752->32751 zone=1 stop=next-family-closure\n");
     return 0;
 }

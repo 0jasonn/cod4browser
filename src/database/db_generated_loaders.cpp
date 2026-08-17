@@ -103,7 +103,7 @@ void Load_TempStringArray(bool atStreamStart, std::int32_t count)
     }
 }
 
-void Load_XString(bool atStreamStart)
+void Load_XStringInternal(bool atStreamStart)
 {
     Load_Stream(atStreamStart, reinterpret_cast<std::uint8_t *>(varXString), 4);
     if (DB_RuntimeGeneratedLoadFailed() || !*varXString) return;
@@ -127,11 +127,11 @@ void Load_PhysPreset(bool atStreamStart)
     if (DB_RuntimeGeneratedLoadFailed()) return;
     DB_PushStreamPos(4);
     varXString = &varPhysPreset->name;
-    Load_XString(false);
+    Load_XStringInternal(false);
     if (!DB_RuntimeGeneratedLoadFailed())
     {
         varXString = &varPhysPreset->sndAliasPrefix;
-        Load_XString(false);
+        Load_XStringInternal(false);
     }
     DB_PopStreamPos();
 }
@@ -179,7 +179,7 @@ void Load_RawFile(bool atStreamStart)
     if (DB_RuntimeGeneratedLoadFailed()) return;
     DB_PushStreamPos(4);
     varXString = &varRawFile->name;
-    Load_XString(false);
+    Load_XStringInternal(false);
     if (!DB_RuntimeGeneratedLoadFailed() && varRawFile->buffer)
     {
         if (varRawFile->len < 0 || varRawFile->len ==
@@ -229,6 +229,11 @@ void Load_RawFilePtr(bool atStreamStart)
 }
 } // namespace
 
+void __cdecl Load_XString(bool atStreamStart)
+{
+    Load_XStringInternal(atStreamStart);
+}
+
 XAsset *__cdecl AllocLoad_FxElemVisStateSample()
 {
     return reinterpret_cast<XAsset *>(DB_AllocStreamPos(3));
@@ -277,6 +282,11 @@ static void Load_XAssetHeader(bool atStreamStart)
     case ASSET_TYPE_PHYSPRESET:
         varPhysPresetPtr = reinterpret_cast<PhysPreset **>(varXAssetHeader);
         Load_PhysPresetPtr(false);
+        break;
+    case ASSET_TYPE_TECHNIQUE_SET:
+        varMaterialTechniqueSetPtr =
+            reinterpret_cast<MaterialTechniqueSet **>(varXAssetHeader);
+        Load_MaterialTechniqueSetPtr(false);
         break;
     case ASSET_TYPE_RAWFILE:
         varRawFilePtr = reinterpret_cast<RawFile **>(varXAssetHeader);

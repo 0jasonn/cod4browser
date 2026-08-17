@@ -3,6 +3,8 @@
 #include <database/db_registry_pools.h>
 #include <database/db_registry_publication.h>
 #include <database/db_runtime_prefix.h>
+#include <database/db_generated_material_platform.h>
+#include <gfx_d3d/material_types.h>
 #include <physics/phys_preset.h>
 
 #include <qcommon/threads.h>
@@ -26,6 +28,9 @@ const char *AssetName(const XAsset &asset)
     case ASSET_TYPE_PHYSPRESET:
         name = asset.header.physPreset ? asset.header.physPreset->name : nullptr;
         break;
+    case ASSET_TYPE_TECHNIQUE_SET:
+        name = asset.header.techniqueSet ? asset.header.techniqueSet->name : nullptr;
+        break;
     case ASSET_TYPE_RAWFILE:
         name = asset.header.rawfile ? asset.header.rawfile->name : nullptr;
         break;
@@ -45,6 +50,7 @@ std::size_t AssetSize(XAssetType type)
     switch (type)
     {
     case ASSET_TYPE_PHYSPRESET: return sizeof(PhysPreset);
+    case ASSET_TYPE_TECHNIQUE_SET: return sizeof(MaterialTechniqueSet);
     case ASSET_TYPE_RAWFILE: return sizeof(RawFile);
     default: return 0;
     }
@@ -128,7 +134,7 @@ XAssetEntryPoolEntry *DB_LinkXAssetEntry(
         return existing;
     }
 
-    alignas(4) std::byte previous[sizeof(PhysPreset)]{};
+    alignas(4) std::byte previous[sizeof(MaterialTechniqueSet)]{};
     const std::size_t assetSize = AssetSize(asset.type);
     std::memcpy(previous, existing->entry.asset.header.data, assetSize);
     const std::uint8_t previousZone = existing->entry.zoneIndex;
@@ -224,6 +230,21 @@ void __cdecl Load_PhysPresetAsset(XAssetHeader *physPreset)
     XAssetHeader published = DB_AddXAsset(ASSET_TYPE_PHYSPRESET, *physPreset);
     if (!published.data) return;
     *physPreset = published;
+}
+
+void __cdecl Load_MaterialTechniqueSetAsset(XAssetHeader *techniqueSet)
+{
+    if (!techniqueSet || !techniqueSet->techniqueSet)
+    {
+        DB_RuntimeGeneratedFailure("publication/null MaterialTechniqueSet");
+        return;
+    }
+    XAssetHeader published = DB_AddXAsset(ASSET_TYPE_TECHNIQUE_SET,
+        *techniqueSet);
+    if (!published.data) return;
+    *techniqueSet = published;
+    Material_OriginalRemapTechniqueSet(techniqueSet->techniqueSet);
+    Material_UploadShaders(techniqueSet->techniqueSet);
 }
 
 XAssetHeader __cdecl DB_FindXAssetHeader(XAssetType type, const char *name)

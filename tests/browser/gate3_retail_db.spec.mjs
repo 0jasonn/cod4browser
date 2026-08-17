@@ -39,9 +39,33 @@ test("canonical Gate 3 traverses a locally owned retail startup zone", {
     const result = await page.evaluate(() => ({
         final: structuredClone(globalThis.__KISAKCOD_WEB__.database),
         stages: globalThis.__gate3RetailDbEvents.map((event) => event.stage),
+        publications: globalThis.__gate3RetailDbEvents
+            .filter((event) => event.stage === "publication end")
+            .map((event) => ({
+                assetIndex: event.assetIndex,
+                assetType: event.assetType,
+                assetName: event.assetName,
+                assetEntryIndex: event.assetEntryIndex,
+                assetPoolIndex: event.assetPoolIndex,
+                freeEntryCountBefore: event.freeEntryCountBefore,
+                freeEntryCountAfter: event.freeEntryCountAfter,
+            })),
     }));
     expect(result.final.openSucceeded).toBe(true);
     expect(result.final.xassetListBegin).toBe(true);
     expect(result.stages).toContain("first generated-loader entry");
-    console.log(`KISAK_RETAIL_GATE3 ${JSON.stringify(result.final)}`);
+    expect(result.final).toMatchObject({
+        stopStage: "Load_XAssetHeader/unsupported family closure",
+        assetIndex: 2,
+        assetType: 4,
+        publicationEnd: true,
+        freeEntryCountAfter: 32750,
+    });
+    expect(result.publications).toHaveLength(2);
+    expect(result.publications.map((entry) => entry.assetIndex)).toEqual([0, 1]);
+    expect(result.publications.map((entry) => entry.assetType)).toEqual([5, 5]);
+    expect(result.publications.map((entry) => entry.assetEntryIndex)).toEqual([16, 17]);
+    expect(result.publications.map((entry) => entry.assetPoolIndex)).toEqual([0, 1]);
+    expect(result.publications.every((entry) => entry.assetName.length > 0)).toBe(true);
+    console.log(`KISAK_RETAIL_GATE3 ${JSON.stringify(result)}`);
 });

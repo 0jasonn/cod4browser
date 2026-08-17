@@ -206,12 +206,6 @@ struct MaterialTypeInfo // sizeof=0xC
     uint32_t prefixLen;             // ...
 };
 
-struct MaterialStreamRouting // sizeof=0x2
-{                                       // ...
-    uint8_t source;             // ...
-    uint8_t dest;               // ...
-};
-
 struct MtlStateMapBitName // sizeof=0x8
 {                                       // ...
     const char *name;
@@ -235,81 +229,6 @@ struct $4ABF24606230B73E4E420CE33A1F14B1 // sizeof=0xC
     uint32_t remapValue;            // ...
 };
 
-struct MaterialVertexStreamRouting // sizeof=0x60
-{                                       // ...
-    MaterialStreamRouting data[16];
-    IDirect3DVertexDeclaration9 *decl[16];
-};
-
-struct MaterialVertexDeclaration // sizeof=0x64
-{                                       // ...
-    uint8_t streamCount;
-    bool hasOptionalSource;
-    bool isLoaded;
-    // padding byte
-    MaterialVertexStreamRouting routing;
-};
-struct MaterialVertexShaderProgram // sizeof=0xC
-{                                       // ...
-    IDirect3DVertexShader9 *vs;
-    GfxVertexShaderLoadDef loadDef;
-};
-struct MaterialVertexShader // sizeof=0x10
-{                                       // ...
-    const char *name;
-    MaterialVertexShaderProgram prog;
-};
-
-struct MaterialPixelShaderProgram // sizeof=0xC
-{                                       // ...
-    IDirect3DPixelShader9 *ps;
-    GfxPixelShaderLoadDef loadDef;
-};
-static_assert(sizeof(MaterialPixelShaderProgram) == 12);
-
-struct MaterialPixelShader // sizeof=0x10
-{                                       // ...
-    const char *name;
-    MaterialPixelShaderProgram prog;
-};
-struct MaterialArgumentCodeConst // sizeof=0x4
-{                                       // ...
-    uint16_t index;
-    uint8_t firstRow;
-    uint8_t rowCount;
-};
-union MaterialArgumentDef // sizeof=0x4
-{                                       // ...
-    const float *literalConst;
-    MaterialArgumentCodeConst codeConst;
-    MaterialTextureSource codeSampler;
-    uint32_t nameHash;
-};
-struct MaterialShaderArgument // sizeof=0x8
-{                                       // ...
-    uint16_t type; // $74254F2FBB58A9D84A85080F50CF363D
-    uint16_t dest;
-    MaterialArgumentDef u;
-};
-struct MaterialPass // sizeof=0x14
-{                                       // ...
-    MaterialVertexDeclaration *vertexDecl; // ... // 0
-    MaterialVertexShader *vertexShader; // 4
-    MaterialPixelShader *pixelShader; // 8
-    uint8_t perPrimArgCount;
-    uint8_t perObjArgCount;
-    uint8_t stableArgCount;
-    uint8_t customSamplerFlags;
-    MaterialShaderArgument *args;
-};
-
-struct MaterialTechnique // sizeof=0x1C
-{
-    const char *name;
-    uint16_t flags;
-    uint16_t passCount;
-    MaterialPass passArray[1];
-};
 struct WaterWritable // sizeof=0x4
 {                                       // ...
     float floatTime;
@@ -431,18 +350,6 @@ struct MaterialConstantDef // sizeof=0x20
     char name[12];
     float literal[4];
 };
-
-struct MaterialTechniqueSet // sizeof=0x94
-{                                       // ...
-    const char *name;
-    uint8_t worldVertFormat;
-    bool hasBeenUploaded;
-    uint8_t unused[1];
-    // padding byte
-    MaterialTechniqueSet *remappedTechniqueSet;
-    MaterialTechnique *techniques[34];
-};
-static_assert(sizeof(MaterialTechniqueSet) == 148);
 
 struct MaterialMemory // sizeof=0x8
 {                                       // ...

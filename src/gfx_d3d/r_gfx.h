@@ -521,21 +521,6 @@ struct GfxVertex // sizeof=0x20
     PackedUnitVec normal;               // ...
 };
 
-struct GfxVertexShaderLoadDef // sizeof=0x8
-{                                       // ...
-    void* program;
-    uint16_t programSize;
-    uint16_t loadForRenderer;
-};
-
-struct GfxPixelShaderLoadDef // sizeof=0x8
-{                                       // ...
-    void* program;
-    uint16_t programSize;
-    uint16_t loadForRenderer;
-};
-static_assert(sizeof(GfxPixelShaderLoadDef) == 8);
-
 struct GfxDepthOfField // sizeof=0x20
 {                                       // ...
     float viewModelStart;

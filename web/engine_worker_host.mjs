@@ -21,6 +21,7 @@ export function createEngineWorkerHost(canvas, { onLog, onAbort } = {})
     let releaseFilesystemLease = null;
     let filesystemLeaseCompletion = null;
     let unmounting = null;
+    let filesystemMutation = Promise.resolve();
     let resolveReady;
     let rejectReady;
     const ready = new Promise((resolve, reject) => {
@@ -109,20 +110,33 @@ export function createEngineWorkerHost(canvas, { onLog, onAbort } = {})
         }
     }
 
+    function serializeFilesystemMutation(callback)
+    {
+        const result = filesystemMutation.catch(() => {}).then(callback);
+        filesystemMutation = result.catch(() => {});
+        return result;
+    }
+
     const facade = {
         ready,
         async mount(manifest) {
-            await releaseMountedFilesystem();
-            await acquireFilesystemLease();
-            try {
-                return await rpc("mount", { manifest });
-            } catch (error) {
+            return serializeFilesystemMutation(async () => {
                 await releaseMountedFilesystem();
-                throw error;
-            }
+                await acquireFilesystemLease();
+                try {
+                    return await rpc("mount", { manifest });
+                } catch (error) {
+                    await releaseMountedFilesystem();
+                    throw error;
+                }
+            });
         },
-        unmount: releaseMountedFilesystem,
-        invalidate: releaseMountedFilesystem,
+        unmount() {
+            return serializeFilesystemMutation(releaseMountedFilesystem);
+        },
+        invalidate() {
+            return serializeFilesystemMutation(releaseMountedFilesystem);
+        },
         resize(width, height) { worker.postMessage({ type: "resize", width, height }); },
         callProbe(functionName, buffers, argumentLayout) {
             const transferred = buffers.map((bytes) => {

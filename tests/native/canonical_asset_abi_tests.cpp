@@ -38,6 +38,9 @@ void TestCanonicalAssetTypes()
         "XAnimParts remains a standard-layout canonical engine type");
     Require(std::is_standard_layout_v<XModel> &&
             std::is_standard_layout_v<Material> &&
+            std::is_standard_layout_v<MaterialTechniqueSet> &&
+            std::is_standard_layout_v<MaterialTechnique> &&
+            std::is_standard_layout_v<MaterialPass> &&
             std::is_standard_layout_v<FxEffectDef> &&
             std::is_standard_layout_v<WeaponDef> &&
             std::is_standard_layout_v<ComPrimaryLight> &&
@@ -80,6 +83,17 @@ void TestCanonicalAssetTypes()
                 sizeof(Material) == 80u &&
                 offsetof(Material, stateBitsEntry) == 24u &&
                 offsetof(Material, techniqueSet) == 64u &&
+                sizeof(MaterialTechniqueSet) == 148u &&
+                offsetof(MaterialTechniqueSet, remappedTechniqueSet) == 8u &&
+                offsetof(MaterialTechniqueSet, techniques) == 12u &&
+                sizeof(MaterialTechnique) == 28u &&
+                offsetof(MaterialTechnique, passArray) == 8u &&
+                sizeof(MaterialPass) == 20u &&
+                offsetof(MaterialPass, args) == 16u &&
+                sizeof(MaterialVertexDeclaration) == 100u &&
+                sizeof(MaterialVertexShader) == 16u &&
+                sizeof(MaterialPixelShader) == 16u &&
+                sizeof(MaterialShaderArgument) == 8u &&
                 sizeof(FxEffectDef) == 32u &&
                 offsetof(FxEffectDef, elemDefs) == 28u &&
                 sizeof(WeaponDef) == 2168u &&
@@ -99,6 +113,7 @@ void TestCanonicalAssetTypes()
     Require(ASSET_TYPE_XANIMPARTS == static_cast<XAssetType>(2) &&
             ASSET_TYPE_XMODEL == static_cast<XAssetType>(3) &&
             ASSET_TYPE_MATERIAL == static_cast<XAssetType>(4) &&
+            ASSET_TYPE_TECHNIQUE_SET == static_cast<XAssetType>(5) &&
             ASSET_TYPE_GFXWORLD == static_cast<XAssetType>(16) &&
             ASSET_TYPE_LIGHT_DEF == static_cast<XAssetType>(17) &&
             ASSET_TYPE_FX == static_cast<XAssetType>(25) &&

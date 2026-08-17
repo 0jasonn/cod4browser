@@ -52,6 +52,8 @@ add_executable(KisakCOD-web
     "${SRC_DIR}/database/db_file_platform.cpp"
     "${SRC_DIR}/database/db_file_load.cpp"
     "${SRC_DIR}/database/db_generated_loaders.cpp"
+    "${SRC_DIR}/database/db_generated_material_platform.cpp"
+    "${SRC_DIR}/database/db_generated_material_technique.cpp"
     "${SRC_DIR}/database/db_semantic_trace.cpp"
     "${SRC_DIR}/database/db_memory.cpp"
     "${SRC_DIR}/database/db_registry_pools.cpp"
