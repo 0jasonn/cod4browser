@@ -54,6 +54,7 @@ add_executable(KisakCOD-web
     "${SRC_DIR}/database/db_generated_loaders.cpp"
     "${SRC_DIR}/database/db_generated_image.cpp"
     "${SRC_DIR}/database/db_generated_image_platform.cpp"
+    "${SRC_DIR}/database/db_generated_localize.cpp"
     "${SRC_DIR}/database/db_generated_material.cpp"
     "${SRC_DIR}/database/db_generated_material_platform.cpp"
     "${SRC_DIR}/database/db_generated_material_technique.cpp"

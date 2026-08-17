@@ -2,6 +2,7 @@
 
 #include <database/db_asset_types.h>
 #include <database/db_file_types.h>
+#include <database/localize_types.h>
 #include <gfx_d3d/material_types.h>
 #include <physics/phys_preset.h>
 
@@ -24,10 +25,13 @@ extern Material *varMaterial;
 extern Material **varMaterialHandle;
 extern GfxImage *varGfxImage;
 extern GfxImage **varGfxImagePtr;
+extern LocalizeEntry *varLocalizeEntry;
+extern LocalizeEntry **varLocalizeEntryPtr;
 extern XAssetHeader *varXAssetHeader;
 
 void __cdecl Load_XString(bool atStreamStart);
 void __cdecl Load_MaterialTechniqueSetPtr(bool atStreamStart);
 void __cdecl Load_MaterialHandle(bool atStreamStart);
 void __cdecl Load_GfxImagePtr(bool atStreamStart);
+void __cdecl Load_LocalizeEntryPtr(bool atStreamStart);
 void DB_SetGeneratedAssetIndex(std::uint32_t index);

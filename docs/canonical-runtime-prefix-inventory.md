@@ -2,7 +2,7 @@
 
 The current Wasm runtime compiles canonical command/dvar behavior, PMem,
 database pools, XFile streaming, generated RawFile, PhysPreset,
-MaterialTechniqueSet, Material, GfxImage, and water loading, and
+MaterialTechniqueSet, Material, GfxImage, water, and LocalizeEntry loading, and
 the browser-SP lifecycle slice owned by the real `db_registry.cpp` translation
 unit. Remaining extraction files are shrink-only integration mechanisms, not
 browser-owned engine layers.

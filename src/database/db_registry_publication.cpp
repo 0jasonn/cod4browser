@@ -4,6 +4,7 @@
 #include <database/db_registry_publication.h>
 #include <database/db_runtime_prefix.h>
 #include <database/db_generated_material_platform.h>
+#include <database/localize_types.h>
 #include <gfx_d3d/gfx_image_types.h>
 #include <gfx_d3d/material_types.h>
 #include <physics/phys_preset.h>
@@ -38,6 +39,9 @@ const char *AssetName(const XAsset &asset)
     case ASSET_TYPE_IMAGE:
         name = asset.header.image ? asset.header.image->name : nullptr;
         break;
+    case ASSET_TYPE_LOCALIZE_ENTRY:
+        name = asset.header.localize ? asset.header.localize->name : nullptr;
+        break;
     case ASSET_TYPE_RAWFILE:
         name = asset.header.rawfile ? asset.header.rawfile->name : nullptr;
         break;
@@ -60,6 +64,7 @@ std::size_t AssetSize(XAssetType type)
     case ASSET_TYPE_MATERIAL: return sizeof(Material);
     case ASSET_TYPE_TECHNIQUE_SET: return sizeof(MaterialTechniqueSet);
     case ASSET_TYPE_IMAGE: return sizeof(GfxImage);
+    case ASSET_TYPE_LOCALIZE_ENTRY: return sizeof(LocalizeEntry);
     case ASSET_TYPE_RAWFILE: return sizeof(RawFile);
     default: return 0;
     }
@@ -278,6 +283,19 @@ void __cdecl Load_GfxImageAsset(XAssetHeader *image)
     XAssetHeader published = DB_AddXAsset(ASSET_TYPE_IMAGE, *image);
     if (!published.data) return;
     *image = published;
+}
+
+void __cdecl Load_LocalizeEntryAsset(XAssetHeader *localize)
+{
+    if (!localize || !localize->localize)
+    {
+        DB_RuntimeGeneratedFailure("publication/null LocalizeEntry");
+        return;
+    }
+    XAssetHeader published = DB_AddXAsset(ASSET_TYPE_LOCALIZE_ENTRY,
+        *localize);
+    if (!published.data) return;
+    *localize = published;
 }
 
 XAssetHeader __cdecl DB_FindXAssetHeader(XAssetType type, const char *name)

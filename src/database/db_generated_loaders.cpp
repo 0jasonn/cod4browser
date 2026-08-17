@@ -296,6 +296,11 @@ static void Load_XAssetHeader(bool atStreamStart)
         varGfxImagePtr = reinterpret_cast<GfxImage **>(varXAssetHeader);
         Load_GfxImagePtr(false);
         break;
+    case ASSET_TYPE_LOCALIZE_ENTRY:
+        varLocalizeEntryPtr = reinterpret_cast<LocalizeEntry **>(
+            varXAssetHeader);
+        Load_LocalizeEntryPtr(false);
+        break;
     case ASSET_TYPE_RAWFILE:
         varRawFilePtr = reinterpret_cast<RawFile **>(varXAssetHeader);
         Load_RawFilePtr(false);

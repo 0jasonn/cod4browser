@@ -2,6 +2,7 @@
 #include <database/db_registry_pools.h>
 #include <database/db_registry_publication.h>
 #include <database/db_runtime_prefix.h>
+#include <database/localize_types.h>
 #include <gfx_d3d/gfx_image_types.h>
 #include <gfx_d3d/material_types.h>
 #include <physics/phys_preset.h>
@@ -496,6 +497,79 @@ std::vector<std::uint8_t> MakeMaterialXFile(
         AppendU32(inflated, 0x44444444u);
         AppendU32(inflated, 0x55555555u);
         block4Offset += sizeof(GfxStateBits);
+    }
+    return CompressXFile(inflated);
+}
+
+struct LocalizeFixtureOptions
+{
+    std::uint32_t assetPointer = UINT32_MAX - 1u;
+    bool includeAliasAsset = true;
+    std::uint32_t valuePointer = UINT32_MAX;
+    std::uint32_t namePointer = UINT32_MAX;
+    bool directNameToValueInterior = false;
+    bool includeValue = true;
+    bool includeName = true;
+    bool terminateValue = true;
+    bool terminateName = true;
+    std::size_t valueLength = 0;
+    std::size_t nameLength = 0;
+};
+
+std::vector<std::uint8_t> MakeLocalizeXFile(
+    const LocalizeFixtureOptions &options = {})
+{
+    constexpr const char *localizedValue = "Localized gate3";
+    constexpr const char *localizedName = "LOCALIZE_GATE3";
+    const bool inlineAsset = options.assetPointer == UINT32_MAX ||
+        options.assetPointer == UINT32_MAX - 1u;
+    const std::uint32_t assetCount = options.includeAliasAsset ? 2u : 1u;
+
+    std::vector<std::uint8_t> inflated;
+    AppendU32(inflated, 8192);
+    AppendU32(inflated, 0);
+    for (const std::uint32_t size : std::array<std::uint32_t, 9>{
+        4096, 0, 0, 0, 4096, 0, 0, 0, 0}) AppendU32(inflated, size);
+
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, assetCount);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, ASSET_TYPE_LOCALIZE_ENTRY);
+    AppendU32(inflated, options.assetPointer);
+    if (options.includeAliasAsset)
+    {
+        AppendU32(inflated, ASSET_TYPE_LOCALIZE_ENTRY);
+        AppendU32(inflated, 0x40000011u);
+    }
+    if (!inlineAsset) return CompressXFile(inflated);
+
+    std::uint32_t block4Offset = assetCount * sizeof(XAsset);
+    if (options.assetPointer == UINT32_MAX - 1u)
+        block4Offset = Align4(block4Offset) + 4u;
+    const std::uint32_t valueOffset = block4Offset;
+    const std::uint32_t namePointer = options.directNameToValueInterior
+        ? 0x40000001u + valueOffset + 10u : options.namePointer;
+
+    AppendU32(inflated, options.valuePointer);
+    AppendU32(inflated, namePointer);
+    if (options.valuePointer == UINT32_MAX && options.includeValue)
+    {
+        if (options.valueLength)
+            inflated.insert(inflated.end(), options.valueLength, 'v');
+        else
+            inflated.insert(inflated.end(), localizedValue,
+                localizedValue + std::strlen(localizedValue));
+        if (options.terminateValue) inflated.push_back(0);
+    }
+    if (namePointer == UINT32_MAX && options.includeName)
+    {
+        if (options.nameLength)
+            inflated.insert(inflated.end(), options.nameLength, 'n');
+        else
+            inflated.insert(inflated.end(), localizedName,
+                localizedName + std::strlen(localizedName));
+        if (options.terminateName) inflated.push_back(0);
     }
     return CompressXFile(inflated);
 }
@@ -998,6 +1072,127 @@ int main()
         !nullDependencyMaterial.material->techniqueSet);
     assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_IMAGE) == 2400);
 
+    const std::vector<std::uint8_t> localizeInsertAlias =
+        MakeLocalizeXFile();
+    Run(localizeInsertAlias, zone);
+    assert(g_trace.xassetCount == 2 && g_trace.assetIndex == 1);
+    assert(g_trace.assetType == ASSET_TYPE_LOCALIZE_ENTRY);
+    assert(std::strcmp(g_trace.pointerClassification,
+        "prior-offset/alias") == 0);
+    assert(g_trace.publicationBegin && g_trace.publicationEnd);
+    assert(g_trace.assetEntryIndex == 16 && g_trace.assetPoolIndex == 0);
+    assert(g_trace.freeEntryCountBefore == 32752 &&
+        g_trace.freeEntryCountAfter == 32751);
+    assert(g_trace.assetHash == DB_HashForNameCanonical(
+        "LOCALIZE_GATE3", ASSET_TYPE_LOCALIZE_ENTRY));
+    assert(g_trace.assetZoneIndex == 1);
+    assert(g_trace.streamOffsets[0] == sizeof(LocalizeEntry));
+    assert(g_trace.streamOffsets[4] == 51);
+    const XAssetHeader publishedLocalize = DB_FindXAssetHeader(
+        ASSET_TYPE_LOCALIZE_ENTRY, "LOCALIZE_GATE3");
+    assert(publishedLocalize.localize);
+    assert(std::strcmp(publishedLocalize.localize->value,
+        "Localized gate3") == 0);
+    assert(std::strcmp(publishedLocalize.localize->name,
+        "LOCALIZE_GATE3") == 0);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_LOCALIZE_ENTRY) == 6143);
+    const XAsset *localizeAssets = reinterpret_cast<const XAsset *>(
+        zone.blocks[4].data);
+    assert(localizeAssets[0].header.localize == publishedLocalize.localize);
+    assert(localizeAssets[1].header.localize == publishedLocalize.localize);
+    std::uint32_t localizeInsertion = 0;
+    std::memcpy(&localizeInsertion, zone.blocks[4].data + 16,
+        sizeof(localizeInsertion));
+    assert(localizeInsertion == reinterpret_cast<std::uint32_t>(
+        publishedLocalize.localize));
+
+    LocalizeFixtureOptions sharedLocalizeOptions{};
+    sharedLocalizeOptions.assetPointer = UINT32_MAX;
+    sharedLocalizeOptions.includeAliasAsset = false;
+    Run(MakeLocalizeXFile(sharedLocalizeOptions), zone);
+    assert(std::strcmp(g_trace.pointerClassification,
+        "inline-shared/-1") == 0);
+    assert(g_trace.publicationEnd && g_trace.assetEntryIndex == 16);
+    assert(g_trace.streamOffsets[0] == sizeof(LocalizeEntry) &&
+        g_trace.streamOffsets[4] == 39);
+
+    LocalizeFixtureOptions directLocalizeOptions{};
+    directLocalizeOptions.assetPointer = UINT32_MAX;
+    directLocalizeOptions.includeAliasAsset = false;
+    directLocalizeOptions.directNameToValueInterior = true;
+    Run(MakeLocalizeXFile(directLocalizeOptions), zone);
+    const XAssetHeader directLocalize = DB_FindXAssetHeader(
+        ASSET_TYPE_LOCALIZE_ENTRY, "gate3");
+    assert(directLocalize.localize);
+    assert(directLocalize.localize->name ==
+        directLocalize.localize->value + 10);
+    assert(g_trace.streamOffsets[4] == 24);
+
+    LocalizeFixtureOptions nullLocalizeValue{};
+    nullLocalizeValue.assetPointer = UINT32_MAX;
+    nullLocalizeValue.includeAliasAsset = false;
+    nullLocalizeValue.valuePointer = 0;
+    Run(MakeLocalizeXFile(nullLocalizeValue), zone);
+    const XAssetHeader nullValueLocalize = DB_FindXAssetHeader(
+        ASSET_TYPE_LOCALIZE_ENTRY, "LOCALIZE_GATE3");
+    assert(nullValueLocalize.localize && !nullValueLocalize.localize->value);
+
+    LocalizeFixtureOptions nullLocalizeAsset{};
+    nullLocalizeAsset.assetPointer = 0;
+    nullLocalizeAsset.includeAliasAsset = false;
+    Run(MakeLocalizeXFile(nullLocalizeAsset), zone);
+    assert(std::strcmp(g_trace.pointerClassification, "null") == 0);
+    assert(!g_trace.publicationBegin && !g_trace.publicationEnd);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_LOCALIZE_ENTRY) == 6144);
+
+    LocalizeFixtureOptions invalidLocalizeAsset{};
+    invalidLocalizeAsset.assetPointer = UINT32_MAX - 2u;
+    invalidLocalizeAsset.includeAliasAsset = false;
+    Run(MakeLocalizeXFile(invalidLocalizeAsset), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "stream/invalid alias offset") == 0);
+
+    LocalizeFixtureOptions invalidLocalizeString{};
+    invalidLocalizeString.assetPointer = UINT32_MAX;
+    invalidLocalizeString.includeAliasAsset = false;
+    invalidLocalizeString.valuePointer = 0;
+    invalidLocalizeString.namePointer = UINT32_MAX - 1u;
+    Run(MakeLocalizeXFile(invalidLocalizeString), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "stream/invalid pointer offset") == 0);
+    assert(DB_GetFreeAssetEntryCount() == 32752);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_LOCALIZE_ENTRY) == 6144);
+
+    LocalizeFixtureOptions nullLocalizeName{};
+    nullLocalizeName.assetPointer = UINT32_MAX;
+    nullLocalizeName.includeAliasAsset = false;
+    nullLocalizeName.valuePointer = 0;
+    nullLocalizeName.namePointer = 0;
+    Run(MakeLocalizeXFile(nullLocalizeName), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/unsupported or unnamed asset") == 0);
+
+    LocalizeFixtureOptions truncatedLocalize{};
+    truncatedLocalize.assetPointer = UINT32_MAX;
+    truncatedLocalize.includeAliasAsset = false;
+    truncatedLocalize.valuePointer = 0;
+    truncatedLocalize.terminateName = false;
+    Run(MakeLocalizeXFile(truncatedLocalize), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0 ||
+        std::strcmp(g_trace.stopStage, "stream/truncated string") == 0);
+
+    LocalizeFixtureOptions excessiveLocalize{};
+    excessiveLocalize.assetPointer = UINT32_MAX;
+    excessiveLocalize.includeAliasAsset = false;
+    excessiveLocalize.valuePointer = 0;
+    excessiveLocalize.nameLength = 4088;
+    excessiveLocalize.terminateName = false;
+    Run(MakeLocalizeXFile(excessiveLocalize), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "stream/truncated string") == 0);
+
     MaterialFixtureOptions nullMaterialOptions{};
     nullMaterialOptions.assetPointer = 0;
     nullMaterialOptions.includeAliasAsset = false;
@@ -1189,6 +1384,37 @@ int main()
         sizeof(failedInsertion));
     assert(failedInsertion == 0);
 
+    const std::uint32_t localizeHash = DB_HashForNameCanonical(
+        "LOCALIZE_GATE3", ASSET_TYPE_LOCALIZE_ENTRY);
+    Reset(localizeInsertAlias);
+    *static_cast<void **>(DB_XAssetPool[ASSET_TYPE_LOCALIZE_ENTRY]) = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
+        !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset pool exhaustion") == 0);
+    assert(db_hashTable[localizeHash] == 0);
+    assert(DB_GetFreeAssetEntryCount() == 32752);
+    assert(!DB_FindXAssetHeader(ASSET_TYPE_LOCALIZE_ENTRY,
+        "LOCALIZE_GATE3").localize);
+    std::uint32_t failedLocalizeInsertion = UINT32_MAX;
+    std::memcpy(&failedLocalizeInsertion, zone.blocks[4].data + 16,
+        sizeof(failedLocalizeInsertion));
+    assert(failedLocalizeInsertion == 0);
+
+    Reset(localizeInsertAlias);
+    g_freeAssetEntryHead = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
+        !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset entry exhaustion") == 0);
+    assert(db_hashTable[localizeHash] == 0);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_LOCALIZE_ENTRY) == 6144);
+    std::memcpy(&failedLocalizeInsertion, zone.blocks[4].data + 16,
+        sizeof(failedLocalizeInsertion));
+    assert(failedLocalizeInsertion == 0);
+
     Reset(materialInsertAlias);
     g_assetEntryPool[16].next = nullptr;
     g_freeAssetEntryHead = &g_assetEntryPool[16];
@@ -1242,6 +1468,6 @@ int main()
     assert(g_trace.publicationEnd && g_trace.cleanupComplete);
     assert(std::strcmp(g_trace.stopStage, "Load_XAssetHeader/next-family-closure") == 0);
 
-    std::printf("gate3-db-stream rawfile=published physpreset=published technique-set=published material=published image=published water=loaded insert=-2 alias=block4:16 technique=block4:36 direct-xstring=block4:20 technique-children=251 material-children=block0:136,block4:248 image-entry=16 material-entry=17 free=32752->32750 zone=1 stop=next-family-closure\n");
+    std::printf("gate3-db-stream rawfile=published physpreset=published technique-set=published material=published image=published water=loaded localize=published insert=-2 alias=block4:16 technique=block4:36 direct-xstring=block4:18 technique-children=251 material-children=block0:136,block4:248 localize-children=block0:8,block4:51 image-entry=16 material-entry=17 localize-entry=16 free=32752->32751 zone=1 stop=next-family-closure\n");
     return 0;
 }

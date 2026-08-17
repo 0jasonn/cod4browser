@@ -2,6 +2,7 @@
 #include <bgame/weapon_types.h>
 #include <database/db_asset_types.h>
 #include <database/db_semantic_trace.h>
+#include <database/localize_types.h>
 #include <gfx_d3d/gfx_image_types.h>
 #include <gfx_d3d/material_types.h>
 #include <gfx_d3d/gfx_light_types.h>
@@ -47,6 +48,7 @@ void TestCanonicalAssetTypes()
             std::is_standard_layout_v<ComPrimaryLight> &&
             std::is_standard_layout_v<ComWorld> &&
             std::is_standard_layout_v<GfxImage> &&
+            std::is_standard_layout_v<LocalizeEntry> &&
             std::is_standard_layout_v<GfxLightDef>,
         "canonical weapon dependency types remain standard-layout records");
     Require(sizeof(XAssetHeader) == sizeof(void *),
@@ -111,6 +113,9 @@ void TestCanonicalAssetTypes()
                 offsetof(ComWorld, primaryLights) == 12u &&
                 sizeof(GfxImage) == 36u &&
                 offsetof(GfxImage, name) == 32u &&
+                sizeof(LocalizeEntry) == 8u &&
+                offsetof(LocalizeEntry, value) == 0u &&
+                offsetof(LocalizeEntry, name) == 4u &&
                 sizeof(GfxLightImage) == 8u &&
                 sizeof(GfxLightDef) == 16u &&
                 offsetof(GfxLightDef, attenuation) == 4u &&
@@ -125,6 +130,7 @@ void TestCanonicalAssetTypes()
             ASSET_TYPE_IMAGE == static_cast<XAssetType>(6) &&
             ASSET_TYPE_GFXWORLD == static_cast<XAssetType>(16) &&
             ASSET_TYPE_LIGHT_DEF == static_cast<XAssetType>(17) &&
+            ASSET_TYPE_LOCALIZE_ENTRY == static_cast<XAssetType>(22) &&
             ASSET_TYPE_FX == static_cast<XAssetType>(25) &&
             ASSET_TYPE_RAWFILE == static_cast<XAssetType>(31) &&
             ASSET_TYPE_STRINGTABLE == static_cast<XAssetType>(32),

@@ -54,27 +54,55 @@ test("canonical Gate 3 traverses a locally owned retail startup zone", {
     expect(result.final.openSucceeded).toBe(true);
     expect(result.final.xassetListBegin).toBe(true);
     expect(result.stages).toContain("first generated-loader entry");
+    const publicationsByType = Object.fromEntries(
+        [...new Set(result.publications.map((entry) => entry.assetType))]
+            .map((type) => [type, result.publications.filter(
+                (entry) => entry.assetType === type).length]),
+    );
+    const localizePublications = result.publications.filter(
+        (entry) => entry.assetType === 22);
     console.log(`KISAK_RETAIL_GATE3 ${JSON.stringify({
         final: result.final,
-        publications: result.publications,
+        publicationCount: result.publications.length,
+        publicationsByType,
+        firstLocalize: localizePublications[0],
+        lastLocalize: localizePublications.at(-1),
+        lastPublication: result.publications.at(-1),
     })}`);
     expect(result.final).toMatchObject({
         stopStage: "Load_XAssetHeader/unsupported family closure",
-        assetIndex: 5,
-        assetType: 22,
+        assetIndex: 1200,
+        assetType: 8,
         streamBlock: 4,
-        streamOffset: 16568,
+        streamOffset: 176300,
         publicationEnd: true,
-        freeEntryCountAfter: 32746,
+        freeEntryCountAfter: 31551,
+        pointerClassification: "inline-shared/-1",
     });
-    expect(result.publications).toHaveLength(6);
-    expect(result.publications.map((entry) => entry.assetIndex)).toEqual(
-        [0, 1, 2, 2, 3, 4]);
-    expect(result.publications.map((entry) => entry.assetType)).toEqual(
-        [5, 5, 6, 4, 6, 6]);
-    expect(result.publications.map((entry) => entry.assetEntryIndex)).toEqual(
-        [16, 17, 18, 19, 20, 21]);
-    expect(result.publications.map((entry) => entry.assetPoolIndex)).toEqual(
-        [0, 1, 0, 0, 1, 2]);
+    expect(result.publications).toHaveLength(1201);
+    expect(publicationsByType).toEqual({ 4: 1, 5: 2, 6: 8, 22: 1116, 31: 74 });
+    expect(localizePublications).toHaveLength(1116);
+    expect(localizePublications[0]).toMatchObject({
+        assetIndex: 5,
+        assetEntryIndex: 22,
+        assetPoolIndex: 0,
+        freeEntryCountBefore: 32746,
+        freeEntryCountAfter: 32745,
+    });
+    expect(localizePublications.at(-1)).toMatchObject({
+        assetIndex: 1120,
+        assetEntryIndex: 1137,
+        assetPoolIndex: 1115,
+        freeEntryCountBefore: 31631,
+        freeEntryCountAfter: 31630,
+    });
+    expect(result.publications.at(-1)).toMatchObject({
+        assetIndex: 1199,
+        assetType: 31,
+        assetEntryIndex: 1216,
+        assetPoolIndex: 73,
+        freeEntryCountBefore: 31552,
+        freeEntryCountAfter: 31551,
+    });
     expect(result.publications.every((entry) => entry.assetName.length > 0)).toBe(true);
 });
