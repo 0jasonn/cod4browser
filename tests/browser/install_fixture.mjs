@@ -21,7 +21,7 @@ export function createSyntheticFastfileHeader()
     ]);
 }
 
-// Freely generated fixture for the canonical Gate 3 XFile envelope. It keeps
+// Freely generated fixture for the canonical runtime-prefix XFile envelope. It keeps
 // the first 44 inflated bytes deterministic and can append arbitrary bytes for
 // refill/failure coverage without borrowing from retail data.
 export function createSyntheticCanonicalXFile({

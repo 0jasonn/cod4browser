@@ -7,7 +7,7 @@ const forwardedEvents = [
     "kisakcod:renderer-surface", "kisakcod:state", "kisakcod:frame",
     "kisakcod:system", "kisakcod:engine", "kisakcod:runtime",
     "kisakcod:database",
-    "kisakcod:gate3-init",
+    "kisakcod:canonical-runtime-prefix",
 ];
 
 if (typeof globalThis.CustomEvent !== "function") {

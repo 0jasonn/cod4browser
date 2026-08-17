@@ -66,7 +66,7 @@ Production Wasm now directly compiles:
 
 The executed path reaches `DB_InitStreams` with all nine canonical block slots.
 The following generated-prefix and first-publication slice is inventoried in
-`docs/gate-3-generated-loader-inventory.md`. No census or
+`gate-3-generated-loader-inventory.md`. No census or
 `WebRetailLoadContext` state is read by either path.
 
 The default freely generated fixture produces the 44-byte `XFile`, reports
@@ -102,7 +102,7 @@ identities, and host paths are absent from both traces.
 
 `Load_XAssetListCustom`, `Load_ScriptStringList`, `Load_XAssetArrayCustom`,
 `Load_XAsset`, the RawFile family, and first canonical DB publication now run.
-See `docs/gate-3-generated-loader-inventory.md` for the exact shared extraction,
+See `gate-3-generated-loader-inventory.md` for the exact shared extraction,
 trace, and next `PhysPreset` closure.
 
 No configured legally owned retail root was available during this slice, so a

@@ -38,7 +38,7 @@ const runtime = {
     retailCensus: {
         state: "idle",
         stage: "idle",
-        message: "Waiting for qcommon pre-database startup",
+        message: "Gate 2 diagnostic/oracle mode has not been requested",
     },
     scheduler: {
         state: "idle",
@@ -69,8 +69,29 @@ let archiveImportId = null;
 let qcommonImportId = null;
 let retailCensusImportId = null;
 let mountingImportId = null;
+let gate2OracleEnabled = false;
 let schedulerWarningsReported = 0;
 let schedulerViolationsReported = 0;
+
+function maybeStartGate2Oracle()
+{
+    const readyImportId = runtime.assets.state === "ready"
+        ? runtime.assets.manifest?.importId ?? null
+        : null;
+    if (!gate2OracleEnabled || !readyImportId || readyImportId !== qcommonImportId ||
+        runtime.qcommon.state !== "ready" || readyImportId === retailCensusImportId ||
+        typeof runtime.module?._KisakWeb_StartRetailCensus !== "function") {
+        return false;
+    }
+    retailCensusImportId = readyImportId;
+    runtime.module._KisakWeb_StartRetailCensus();
+    return true;
+}
+
+runtime.startGate2Oracle = () => {
+    gate2OracleEnabled = true;
+    return maybeStartGate2Oracle();
+};
 
 const stateLabels = {
     loading: "Runtime loading",
@@ -162,15 +183,7 @@ globalThis.addEventListener("kisakcod:qcommon", (event) => {
             `[kisakcod-web] Qcommon checked ${event.detail.filesChecked}/` +
             `${event.detail.totalFiles} startup files through the cooperative VFS.`,
         );
-        const readyImportId = runtime.assets.state === "ready"
-            ? runtime.assets.manifest?.importId ?? null
-            : null;
-        if (readyImportId && readyImportId === qcommonImportId &&
-            readyImportId !== retailCensusImportId &&
-            typeof runtime.module?._KisakWeb_StartRetailCensus === "function") {
-            retailCensusImportId = readyImportId;
-            runtime.module._KisakWeb_StartRetailCensus();
-        }
+        maybeStartGate2Oracle();
     } else if (event.detail.state === "failed") {
         physicsStatus.textContent = "Qcommon startup failed";
         appendLog(`[kisakcod-web] Qcommon startup: ${event.detail.message}`, "error");
@@ -594,7 +607,7 @@ globalThis.addEventListener("kisakcod:assets", (event) => {
                     runtime.module?._KisakWeb_CancelArchiveJob?.();
                     publishArchiveState({
                         state: "idle",
-                        message: "Waiting for qcommon pre-database startup",
+                        message: "Waiting for an explicit Gate 2 diagnostic/oracle request",
                     });
                 }
                 if (retailCensusImportId !== null) {
@@ -606,7 +619,7 @@ globalThis.addEventListener("kisakcod:assets", (event) => {
                     runtime.assets.manifest?.importId !== readyImportId) return;
                 qcommonImportId = readyImportId;
                 runtime.module._KisakWeb_StartQcommonRuntime();
-                runtime.module._KisakWeb_StartCanonicalDbHeaderProbe?.();
+                runtime.module._KisakWeb_StartCanonicalDbRuntimeCheck?.();
             } catch (error) {
                 appendLog(`[kisakcod-web] Engine filesystem mount: ${error.message}`, "error");
             } finally {

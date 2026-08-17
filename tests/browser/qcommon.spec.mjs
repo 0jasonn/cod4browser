@@ -38,19 +38,15 @@ async function importInstall(page, testInfo, name)
     return directory;
 }
 
-test("qcommon reaches a bounded cooperative pre-database boundary", { tag: "@smoke" }, async ({ page }, testInfo) => {
+test("qcommon reaches its bounded canonical database handoff", { tag: "@smoke" }, async ({ page }, testInfo) => {
     await importInstall(page, testInfo, "qcommon-success");
     await expect.poll(
         () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.qcommon?.state),
         { timeout: 30_000 },
     ).toBe("ready");
-    await expect.poll(
-        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.archive?.state),
-        { timeout: 30_000 },
-    ).toBe("ready");
-
     const result = await page.evaluate(() => ({
         qcommon: structuredClone(globalThis.__KISAKCOD_WEB__.qcommon),
+        archive: structuredClone(globalThis.__KISAKCOD_WEB__.archive),
         events: structuredClone(globalThis.__qcommonEvents),
         archiveEvents: structuredClone(globalThis.__qcommonArchiveEvents),
         log: document.querySelector("#boot-log").textContent,
@@ -86,8 +82,8 @@ test("qcommon reaches a bounded cooperative pre-database boundary", { tag: "@smo
         "filesystem-read",
         "pre-database",
     ]));
-    expect(result.archiveEvents.length).toBeGreaterThan(0);
-    expect(result.archiveEvents.every((event) => event.qcommonState === "ready")).toBe(true);
+    expect(result.archive).toMatchObject({ state: "idle" });
+    expect(result.archiveEvents).toEqual([]);
     const loadingEvents = result.events.filter((event) => event.state === "loading");
     for (let index = 1; index < loadingEvents.length; index += 1) {
         expect(loadingEvents[index].framePumpTick)

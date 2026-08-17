@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { requestGate2Oracle } from "./gate2_oracle.mjs";
 import { deflateSync, inflateSync } from "node:zlib";
 import {
     createInstallDirectory,
@@ -25,7 +26,7 @@ const M19_DXT1_IWI = createSyntheticIwi({
     ]),
 });
 
-test("publishes a checked FX mark-visual family", async ({ page }, testInfo) => {
+test("publishes a checked FX mark-visual family", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     await importInstall(page, testInfo, "retail-fx-family", {
         overrides: new Map([["zone/english/killhouse.ff",
             createSyntheticFxInventoryFastfile()]]),
@@ -109,6 +110,7 @@ async function importInstall(page, testInfo, name, options = {})
         () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.assets?.state),
         { timeout: 30_000 },
     ).toBe("ready");
+    await requestGate2Oracle(page);
 }
 
 async function observeRetailShaderRenderer(page)
@@ -272,6 +274,15 @@ test("publishes the retail census and canonical renderer boundary", { tag: "@smo
             () => globalThis.__KISAKCOD_WEB__?.rendererShader?.firstDrawCompleted,
         ),
     ).toBe(true);
+    await expect.poll(() => page.evaluate(() => ({
+        engineAsset: globalThis.__KISAKCOD_WEB__?.engineAsset?.state,
+        rendererTexture: globalThis.__KISAKCOD_WEB__?.rendererTexture?.state,
+        rendererSurface: globalThis.__KISAKCOD_WEB__?.rendererSurface?.state,
+    }))).toEqual({
+        engineAsset: "ready",
+        rendererTexture: "ready",
+        rendererSurface: "ready",
+    });
     const result = await page.evaluate(() => ({
         census: structuredClone(globalThis.__KISAKCOD_WEB__.retailCensus),
         events: structuredClone(globalThis.__retailCensusEvents),

@@ -9,8 +9,8 @@
     "build:web": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/build_web.ps1",
     "serve:web": "python tools/serve_web.py --directory build/web/site",
     "test:browser": "playwright test --grep @smoke",
-    "test:browser:full": "playwright test --grep-invert @native-covered",
-    "test:browser:all": "playwright test"
+    "test:browser:remainder": "playwright test --grep-invert \"@smoke|@native-covered\"",
+    "test:browser:full": "playwright test"
   },
   "engines": {
     "node": "24.18.0",

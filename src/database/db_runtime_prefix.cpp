@@ -1,3 +1,14 @@
+// TEMPORARY CANONICAL-RUNTIME INTEGRATION PREFIX -- SHRINK-ONLY CONTRACT.
+//
+// Native db_registry.cpp owns DB_BuildOSPath, DB_TryLoadXFile*, DB_Thread,
+// DB_LoadXZone, DB_LoadZone_f, DB_InitThread, and DB_LoadXAssets. They remain
+// here only because db_registry.cpp's dependency closure is not yet portable
+// enough for this Wasm target. The DB_Runtime* functions are temporary
+// deterministic trace/failure scaffolding; the exported start function is a
+// browser platform hook. Do not add canonical DB behavior here when its native
+// owner can instead be compiled. Move browser I/O through narrow Sys/FS/thread
+// interfaces and delete each duplicate as its native translation unit lands.
+
 #include <database/db_runtime_prefix.h>
 
 #include <database/database.h>
@@ -494,7 +505,7 @@ const DBRuntimeTraceSnapshot &DB_GetRuntimeTrace()
     return g_trace;
 }
 
-extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_StartCanonicalDbHeaderProbe()
+extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_StartCanonicalDbRuntimeCheck()
 {
     // The isolated Com_Init prefix intentionally published its trace while the
     // native $init high-allocation scope was still open. The mounted DB request

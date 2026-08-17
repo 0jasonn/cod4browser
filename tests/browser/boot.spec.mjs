@@ -611,7 +611,6 @@ test("does not resume when indexed surface recovery fails", async ({ page }) => 
         "WebGL2 indexed surface creation failed",
     );
 
-    await page.waitForTimeout(150);
     const failed = await page.evaluate(() => ({
         surface: structuredClone(globalThis.__KISAKCOD_WEB__.rendererSurface),
         draws: globalThis.__KISAKCOD_SURFACE_RESTORE_DRAWS__,
@@ -653,8 +652,6 @@ test("does not recover a renderer whose initial pipeline failed", async ({ page 
         await globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestLoseWebGLContext");
         await globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestRestoreWebGLContext");
     });
-    await page.waitForTimeout(250);
-
     const terminalState = await page.evaluate(() => ({
         current: globalThis.__KISAKCOD_WEB__?.state,
         lastFrame: globalThis.__KISAKCOD_WEB__?.lastFrame ?? null,

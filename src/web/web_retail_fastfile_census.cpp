@@ -1,3 +1,13 @@
+// GATE 2 REGRESSION/DIFFERENTIAL ORACLE -- FROZEN.
+//
+// This implementation preserves the bounded retail census and canonical
+// GfxWorld/Killhouse proof while the production path converges on Kisak DB.
+// Do not call it from the canonical database path, add new runtime
+// architecture here, or split it solely for style. Changes are limited to
+// correctness fixes and compatibility required to compare against canonical
+// DB behavior. The retirement sequence is freeze -> isolate -> replace with
+// canonical DB/runtime -> remove from the normal production link.
+
 #include <web/web_retail_fastfile_census.h>
 #include <web/web_retail_load_context.h>
 #include <web/web_retail_load_clipmap.h>

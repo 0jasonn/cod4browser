@@ -132,7 +132,7 @@ test("Worker-hosted canonical DB streams an XFile into PMem and stops at generat
             .test(event.logicalPath))).toBe(false);
 });
 
-test("canonical generated prefix loads an empty XAssetList", async ({ page }, testInfo) => {
+test("canonical generated prefix loads an empty XAssetList", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const fastfile = createSyntheticGeneratedPrefixFastfile();
     await importWithCodePost(page, testInfo, "gate3-db-empty-list", fastfile);
     await expect.poll(() => page.evaluate(
@@ -155,7 +155,7 @@ test("canonical generated prefix loads an empty XAssetList", async ({ page }, te
     });
 });
 
-test("canonical generated prefix interns an ordered ScriptStringList", async ({ page }, testInfo) => {
+test("canonical generated prefix interns an ordered ScriptStringList", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const fastfile = createSyntheticGeneratedPrefixFastfile({
         scriptStrings: ["gate3_alpha", "gate3_beta"],
     });
@@ -267,7 +267,7 @@ test("canonical generated prefix rejects a malformed asset alias", async ({ page
         () => globalThis.__KISAKCOD_WEB__.database.publicationEnd)).toBe(false);
 });
 
-test("canonical generated prefix does not publish a half-loaded RawFile", async ({ page }, testInfo) => {
+test("canonical generated prefix does not publish a half-loaded RawFile", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const complete = createSyntheticGeneratedPrefixFastfile({
         rawFiles: [{ name: "tests/half_loaded.txt", contents: "payload" }],
         compressionLevel: 0,
@@ -285,7 +285,7 @@ test("canonical generated prefix does not publish a half-loaded RawFile", async 
     expect(trace.cleanupComplete).toBe(true);
 });
 
-test("canonical DB reports a premature zlib stream end and cleans up", async ({ page }, testInfo) => {
+test("canonical DB reports a premature zlib stream end and cleans up", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const compressed = deflateSync(Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8]));
     const fastfile = Uint8Array.from([
         ...Buffer.from("IWffu100", "ascii"), 5, 0, 0, 0, ...compressed,
@@ -349,7 +349,7 @@ test("canonical DB preserves the 256 KiB alternating input refill contract", asy
     expect(trace.compressedBytesConsumed).toBeGreaterThan(0x40000 - 12);
 });
 
-test("canonical DB rejects corrupt zlib data and cleans up", async ({ page }, testInfo) => {
+test("canonical DB rejects corrupt zlib data and cleans up", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const fastfile = Uint8Array.from([
         ...Buffer.from("IWffu100", "ascii"), 5, 0, 0, 0,
         0x78, 0xda, 0xff, 0xff, 0xff, 0xff,
@@ -364,7 +364,7 @@ test("canonical DB rejects corrupt zlib data and cleans up", async ({ page }, te
     }))).resolves.toEqual({ cleanupComplete: true, streamInitialized: false });
 });
 
-test("canonical DB rejects XFile block allocation exhaustion atomically", async ({ page }, testInfo) => {
+test("canonical DB rejects XFile block allocation exhaustion atomically", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const fastfile = createSyntheticCanonicalXFile({
         blockSizes: [0x0800_0001, 0, 0, 0, 0, 0, 0, 0, 0],
     });
@@ -383,7 +383,7 @@ test("canonical DB rejects XFile block allocation exhaustion atomically", async 
     });
 });
 
-test("canonical DB rejects XFile block arithmetic overflow atomically", async ({ page }, testInfo) => {
+test("canonical DB rejects XFile block arithmetic overflow atomically", { tag: "@native-covered" }, async ({ page }, testInfo) => {
     const fastfile = createSyntheticCanonicalXFile({
         blockSizes: [0xffff_fff8, 0, 0, 0, 0, 0, 0, 0, 0],
     });

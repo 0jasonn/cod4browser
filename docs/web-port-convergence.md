@@ -41,12 +41,13 @@ substitute as convergence.
 
 ## Snapshot
 
-Snapshot baseline: branch `web-port`, through the third executable Gate 3
-Worker/database prefix while retaining complete canonical Killhouse `GfxWorld`
-publication at asset 772 and one bounded real-world WebGL2 draw.
+Snapshot baseline: branch `web-port`, through the canonical Worker/database
+runtime prefix and first generated RawFile publication, while retaining
+complete canonical Killhouse `GfxWorld` publication at asset 772 and one
+bounded real-world WebGL2 draw in the explicit Gate 2 oracle.
 
-The production web target contains 57 C/C++ translation units: 24 outside
-`src/web` and 33 inside it. Gate 3 now includes real `common.cpp`, canonical
+The production web target contains 58 C/C++ translation units: 26 outside
+`src/web` and 32 inside it. The runtime prefix includes real `common.cpp`, canonical
 dvar and command implementations, real physical memory, database-initializing
 state, string-list/memory support, constant config strings, and shared qcommon
 utilities. This is only a source-inventory
@@ -79,6 +80,46 @@ canonical top-level objects, while their retained nested census/dependency
 records remain temporary convergence scaffolding. Preview render graphs have
 been removed.
 
+### Runtime/oracle separation
+
+Normal launcher startup mounts the validated import, starts qcommon, and runs
+the canonical database/runtime check. It leaves the census, archive probe,
+engine-asset proof, canonical retail world, and bounded Killhouse draw idle.
+`runtime.startGate2Oracle()` explicitly enables that retained diagnostic path;
+every dependent browser test requests it. The oracle remains linked for now so
+the same production artifact can prove compatibility, but its sources are
+isolated in the `kisak_web_gate2_oracle` static library.
+
+Gate 2-only production sources are the retail census/load dispatcher,
+archive/engine-asset job chain, sound catalog/job, and their bounded renderer
+proof. They are frozen regression infrastructure. Canonical DB/runtime sources
+must not call them. The eventual split is a runtime artifact without that
+library plus a diagnostic/test artifact that retains it, once canonical DB can
+reproduce the same asset/world evidence.
+
+### Prefix, build, and test ownership
+
+`db_runtime_prefix.cpp` and `common_gate3_prefix.inl` carry source-level
+shrink/no-growth contracts. Their exact functions, native owners, platform
+hook, and deletion path are listed in
+[`canonical-runtime-prefix-inventory.md`](canonical-runtime-prefix-inventory.md).
+No duplicate could be safely retired in this cleanup because canonical
+`db_registry.cpp` still brings an uncompiled dependency closure.
+
+The production target and strict runtime check reuse one
+`kisak_web_runtime_prefix` object library. The strict executable compiles only
+its dedicated test translation unit instead of recompiling thirteen runtime
+units. Compatible native/Wasm portable tests similarly reuse source-stream,
+zone-stream, registry, surface, shader, and semantic-trace libraries;
+sanitizer/fuzzer objects remain separately instrumented.
+
+Routine browser ownership is split into disjoint `@smoke` and
+`not @smoke and not @native-covered` tiers. Parser corruption, stream bounds,
+PMem/pool exhaustion, generated-loader semantics, ABI, and deterministic
+traces are authoritative in direct native/Wasm tests. Browser E2E retains one
+Worker failure-propagation proof and owns lifecycle, storage, bridge, canvas,
+and WebGL seams. The exhaustive browser suite remains explicitly available.
+
 ## System inventory
 
 | System | Current status | Evidence and convergence action |
@@ -100,7 +141,7 @@ been removed.
 | IWI decoding | `MODIFIED KISAK` / partial | Bounded DXT decoding is reusable. Connect it to canonical `GfxImage` loading and renderer upload instead of browser material queues. |
 | Fastfile framing and zone stream machine | `TEMPORARY WEB SUBSTITUTE` | It accurately models blocks, rewind/high-water behavior, pointer classes, aliases, and bounded streaming. Use it as differential evidence and migrate reusable mechanics toward the Kisak DB loader. |
 | Asset registry | `MODIFIED KISAK` / partial plus `TEMPORARY WEB SUBSTITUTE` oracle | The generated RawFile path now consumes the canonical 32-bit asset-entry pool, per-type pool, free chain, normalized hash table, and zone ownership through the extracted `DB_AddXAsset`/`DB_LinkXAssetEntry` closure. The Gate 2 registry remains frozen as a differential oracle for census traversal and rendering; it is not called by the generated path. Extend canonical publication family-by-family. |
-| Retail loader dispatcher | `TEMPORARY WEB SUBSTITUTE` | `web_retail_fastfile_census.*` remains the orchestration vehicle, but type 16 is dispatched to `web_retail_load_gfxworld.*`; the census file does not implement the world body. The retained stream/registry state publishes ordered assets 0-772 without seeking. `web_retail_load_context.h` exposes only stream, registry, ownership, trace, limits, lookup, and shared alias/XString/XModel dependency services to extracted families. Stable families remain in the dispatcher until they are materially changed. |
+| Retail loader dispatcher | `TEMPORARY WEB SUBSTITUTE` / frozen Gate 2 oracle | `web_retail_fastfile_census.*` remains the orchestration vehicle, but normal startup no longer executes it. The source has an explicit freeze contract and is isolated with its diagnostic dependencies in `kisak_web_gate2_oracle`; canonical DB code must not call it. It remains linked only until canonical DB can reproduce equivalent asset/world evidence. |
 | `clipMap_t` asset loading | `MODIFIED KISAK` / partial | The dedicated family transcribes the 284-byte `Load_clipMap_t` record, block-4 child order, block-1 zero-fill dynamic client allocations, root insertion/alias handling, bounded ownership, and atomic canonical publication for `col_map_sp`/`col_map_mp`. Synthetic MSVC/Wasm coverage exercises empty and populated child graphs under one-byte traversal budgets. Inline DynEntity dependency bodies remain fail-closed until their canonical families are compiled; no `CM_LoadMap` or collision runtime behavior is included. Type 12 `com_map` remains correctly distinct from `clipMap_t` and is now handled by the canonical ComWorld family. |
 | `ComWorld` asset loading | `MODIFIED KISAK` / partial | `web_retail_load_comworld.*` transcribes native `Load_ComWorldPtr`, `Load_ComWorld`, `Load_ComPrimaryLightArray`, and `Load_ComPrimaryLight`: root null/inline/shared/prior-alias handling, block-0 body allocation, block-4 name and 68-byte light array, per-light `defName` XStrings, checked ceilings, and publication only after the complete body. The owned run publishes asset 704 as canonical `ComWorld`; no light rendering, evaluation, collision, gameplay, or `GfxWorld` behavior is present. |
 | `GfxLightDef` asset loading | `MODIFIED KISAK` / partial | `web_retail_load_lightdef.*` transcribes `Load_GfxLightDefPtr`, `Load_GfxLightDef`, and `Load_GfxLightImage`: four-byte root cells, null/inline/shared/prior aliases, block-0 16-byte bodies, block-4 names, embedded 8-byte light images, canonical `GfxImage*` dependencies, insertion cells, and final-only publication. Killhouse asset 705 publishes as `light_point_linear`; no rendering, attenuation evaluation, shadow behavior, or primary-light linking is implemented. |
@@ -130,8 +171,8 @@ been removed.
 | Bink cinematics, Miles, and Steam | `NATIVE ONLY` | Feature-gate them. Use browser-compatible video/audio/auth paths or graceful omission without shipping native proprietary binaries. |
 | Database semantic trace | `MODIFIED KISAK` / partial | The Gate 3 runtime trace now records list boundaries, ordered interned strings, asset index/type/name, pointer class, publication boundaries, pool/entry indices, free counts, canonical hash, zone, nine final offsets, and failure stage without addresses. Win32 x86 and Wasm execute the same extracted generated closure and print identical normalized results. |
 | Portable parser tests | `MODIFIED KISAK` / partial | Empty-list, string-list, one-RawFile, malformed stream/pointer/count/type, half-asset, pool-exhaustion, and entry-exhaustion fixtures cover the generated prefix. The same direct executable runs under Win32 x86 and Emscripten; browser tests cover the Worker filesystem boundary. The census dispatcher fuzz target remains independent regression evidence. |
-| Playwright browser tests | `WEB PLATFORM IMPLEMENTATION` | Continue boot, storage, lifecycle, context-loss, and end-to-end boundary coverage with synthetic assets. |
-| Synthetic CI | `MODIFIED KISAK` / platform verification | GitHub Actions builds and tests native Linux, sanitized parser/dispatcher fuzz targets, Win32 MSVC, Emscripten/Node differential contracts, Playwright smoke/full tiers, and a Release browser artifact. Every browser build also runs the strict undefined-symbol Gate 3 `Com_Init` check. No retail assets are fetched or embedded. |
+| Playwright browser tests | `WEB PLATFORM IMPLEMENTATION` | Routine smoke/remainder tiers are disjoint and focus on Worker, storage, lifecycle, bridge, canvas, and WebGL behavior. `@native-covered` duplicates run only in the explicit exhaustive suite. Synthetic assets only. |
+| Synthetic CI | `MODIFIED KISAK` / platform verification | GitHub Actions builds and tests native Linux, sanitized parser/dispatcher fuzz targets, Win32 MSVC, Emscripten/Node differential contracts, and disjoint Playwright smoke/remainder tiers. It builds one Release site, tests that exact site, then uploads it; strict undefined-symbol checking reuses the runtime-prefix objects. No retail assets are fetched or embedded. |
 
 ## Convergence gates
 
@@ -254,9 +295,9 @@ been removed.
 Once Gate 2 renders enough geometry to prove the pipeline, stop broadening the
 viewer. Prioritize compile inventories and vertical initialization slices for:
 
-The first [`Com_Init` implementation inventory](gate-3-com-init-inventory.md)
-records the executed native order, temporary compile envelope, platform
-boundaries, matching Win32 x86/Wasm trace, and exact memory/database stop.
+The current [`canonical runtime prefix inventory`](canonical-runtime-prefix-inventory.md)
+classifies every remaining temporary DB/common owner and its retirement path.
+The earlier Gate 3 checkpoints are retained under `docs/history/`.
 
 The second runtime slice is complete: `common.cpp` reaches real `PMem_Init`,
 `DB_SetInitializing(true)`, and `PMem_BeginAlloc("$init", 1)`. Both platforms
@@ -267,18 +308,18 @@ Canonical `dvar.cpp` and `cmd.cpp` have replaced `dvar_core.cpp` and
 `cmd_core.cpp` in production. No filesystem Promise, Asyncify path,
 census-as-database call or post-boundary subsystem was added.
 
-The third runtime slice is described in
-[`gate-3-worker-database-inventory.md`](gate-3-worker-database-inventory.md).
+The third runtime slice is described in the historical
+[`Gate 3 Worker/database inventory`](history/gate-3-worker-database-inventory.md).
 The browser now uses the target main-thread launcher -> dedicated engine Worker
 -> Wasm -> synchronous engine filesystem shape. Database work is synchronous
 inside that Worker with a distinct logical DB context; inventory found no
 current correctness requirement for a pthread or second Worker. Canonical pool
 state and zone request ordering initialize before the normal logical zone path.
 The follow-on
-[`gate-3-xfile-streaming-inventory.md`](gate-3-xfile-streaming-inventory.md)
+[`Gate 3 XFile streaming inventory`](history/gate-3-xfile-streaming-inventory.md)
 now records incremental inflate, PMem block allocation, stream initialization,
 and the former generated-loader boundary. The next
-[`gate-3-generated-loader-inventory.md`](gate-3-generated-loader-inventory.md)
+[`Gate 3 generated-loader inventory`](history/gate-3-generated-loader-inventory.md)
 records the shared generated list/string/asset/RawFile extraction, first
 canonical DB publication, matching Win32 x86/Wasm trace, and the exact
 `PhysPreset` next-family closure.

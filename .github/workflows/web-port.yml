@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: web-port-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   native-portable:
     name: Native portable and trace contract (Linux)
@@ -24,9 +28,7 @@ jobs:
       - name: Build portable tests
         run: cmake --build build/portable --parallel 2
       - name: Run legal synthetic native suite
-        run: ctest --test-dir build/portable --output-on-failure
-      - name: Run native semantic trace contract explicitly
-        run: ./build/portable/tests/native/canonical_asset_abi_tests
+        run: ctest --test-dir build/portable --output-on-failure --parallel 2
 
   dispatcher-fuzz:
     name: Sanitized parser and dispatcher fuzz smoke
@@ -63,13 +65,14 @@ jobs:
       - name: Build portable tests
         run: cmake --build build/portable-windows --config Release --parallel 2
       - name: Run legal synthetic Windows suite
-        run: ctest --test-dir build/portable-windows -C Release --output-on-failure
+        run: ctest --test-dir build/portable-windows -C Release --output-on-failure --parallel 2
 
   wasm-browser-production:
     name: Wasm differential, Playwright, and production build
     runs-on: windows-2022
     env:
       KISAK_PLAYWRIGHT_WORKERS: 2
+      KISAK_BUILD_JOBS: 2
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -81,34 +84,46 @@ jobs:
         run: tools/bootstrap_web_toolchain.ps1
       - name: Install JavaScript dependencies
         run: npm.cmd ci
-      - name: Build debug browser target
+      - name: Build tested production browser target
         shell: powershell
-        run: tools/build_web.ps1 -Configuration Debug
+        run: tools/build_web.ps1 -Configuration Release
       - name: Configure Wasm portable differential tests
         shell: powershell
         run: |
+          $total = [Diagnostics.Stopwatch]::StartNew()
           $toolchain = Get-Content -Raw tools/web_toolchain.json | ConvertFrom-Json
           $emsdk = Join-Path $env:GITHUB_WORKSPACE '.tools\emsdk'
           $cmake = Join-Path $emsdk "cmake\$($toolchain.cmake)_64bit\bin\cmake.exe"
+          $ctest = Join-Path (Split-Path -Parent $cmake) 'ctest.exe'
           $ninja = Join-Path $emsdk "ninja\$($toolchain.ninja)_64bit\ninja.exe"
           $emscripten = Join-Path $emsdk 'upstream\emscripten\cmake\Modules\Platform\Emscripten.cmake'
           $env:EM_CONFIG = Join-Path $emsdk '.emscripten'
           $env:EMSDK = $emsdk
+          $step = [Diagnostics.Stopwatch]::StartNew()
           & $cmake -S . -B build/wasm-tests -G Ninja "-DCMAKE_TOOLCHAIN_FILE=$emscripten" "-DCMAKE_MAKE_PROGRAM=$ninja" -DKISAK_PORTABLE_TESTS_ONLY=ON -DCMAKE_BUILD_TYPE=Release
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $step.Stop(); Write-Host ("KISAK_TIMING wasm_test_configure_seconds={0:N3}" -f $step.Elapsed.TotalSeconds)
+          $step.Restart()
           & $cmake --build build/wasm-tests --parallel 2
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & $cmake --build build/wasm-tests --target test
+          $step.Stop(); Write-Host ("KISAK_TIMING wasm_test_compile_seconds={0:N3}" -f $step.Elapsed.TotalSeconds)
+          $step.Restart()
+          & $ctest --test-dir build/wasm-tests --output-on-failure --parallel 2
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $step.Stop(); Write-Host ("KISAK_TIMING wasm_test_seconds={0:N3}" -f $step.Elapsed.TotalSeconds)
+          $total.Stop(); Write-Host ("KISAK_TIMING wasm_test_total_seconds={0:N3}" -f $total.Elapsed.TotalSeconds)
       - name: Install Chromium
         run: npx.cmd playwright install chromium
       - name: Run tagged browser smoke suite
         run: npm.cmd run test:browser
-      - name: Run curated browser platform suite
-        run: npm.cmd run test:browser:full
-      - name: Build production browser target
+      - name: Run non-duplicated browser remainder
+        run: npm.cmd run test:browser:remainder
+      - name: Record tested artifact sizes
         shell: powershell
-        run: tools/build_web.ps1 -Configuration Release
+        run: |
+          Get-ChildItem build/web/site -File | Sort-Object Name | ForEach-Object {
+            Write-Host ("KISAK_ARTIFACT {0} bytes={1}" -f $_.Name, $_.Length)
+          }
       - name: Upload production site
         uses: actions/upload-artifact@v4
         with:

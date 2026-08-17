@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { installGate2OracleRequest } from "./gate2_oracle.mjs";
 import { crc32 } from "node:zlib";
 import { createInstallDirectory as createM12InstallDirectory } from "./install_fixture.mjs";
 import {
@@ -91,12 +92,10 @@ async function usePortableFolderPicker(page)
     });
 }
 
-async function observeEngineAsset(
-    page,
-    { readDelayMilliseconds = 0, gateFirstRead = false } = {},
-)
+async function observeEngineAsset(page)
 {
-    await page.addInitScript(({ delay, gate }) => {
+    await installGate2OracleRequest(page);
+    await page.addInitScript(() => {
         globalThis.__syntheticEngineAssetEvents = [];
         globalThis.__syntheticRendererTextureEvents = [];
         globalThis.__syntheticRendererSurfaceEvents = [];
@@ -111,16 +110,6 @@ async function observeEngineAsset(
         globalThis.__syntheticSurfaceDrawArraysCount = 0;
         globalThis.__syntheticSurfaceLastDraw = null;
         let observedGeneration = null;
-        let firstReadCaptured = false;
-        let reportReadStarted;
-        let releaseRead = () => {};
-        const readStarted = new Promise((resolve) => { reportReadStarted = resolve; });
-        const readGate = gate
-            ? new Promise((resolve) => { releaseRead = resolve; })
-            : Promise.resolve();
-
-        globalThis.__syntheticEngineAssetReadStarted = readStarted;
-        globalThis.__releaseSyntheticEngineAssetRead = () => releaseRead();
         const countFrame = () => {
             globalThis.__syntheticEngineAssetRafTicks += 1;
             globalThis.requestAnimationFrame(countFrame);
@@ -165,27 +154,12 @@ async function observeEngineAsset(
             writable: true,
             async value() {
                 globalThis.__syntheticAllBlobArrayBufferReads += 1;
-                const runtime = globalThis.__KISAKCOD_WEB__;
-                const isEngineAssetRead = observedGeneration !== null &&
-                    runtime?.engineAsset?.state === "loading";
+                const isEngineAssetRead = observedGeneration !== null;
                 if (!isEngineAssetRead) {
                     return originalArrayBuffer.call(this);
                 }
 
                 const beforeFrame = globalThis.__syntheticEngineAssetRafTicks;
-                if (!firstReadCaptured) {
-                    firstReadCaptured = true;
-                    reportReadStarted({
-                        generation: observedGeneration,
-                        beforeFrame,
-                        size: this.size,
-                    });
-                    if (gate) {
-                        await readGate;
-                    } else if (delay > 0) {
-                        await new Promise((resolve) => globalThis.setTimeout(resolve, delay));
-                    }
-                }
                 const bytes = await originalArrayBuffer.call(this);
                 globalThis.__syntheticEngineAssetReadSamples.push({
                     generation: observedGeneration,
@@ -299,7 +273,7 @@ async function observeEngineAsset(
                 return originalDrawArrays.apply(this, args);
             },
         });
-    }, { delay: readDelayMilliseconds, gate: gateFirstRead });
+    });
 }
 
 async function waitForRuntime(page)
@@ -333,49 +307,6 @@ async function importArchive(page, directory)
     await chooseDirectory(page, directory);
     await waitForState(page, "assets", "ready");
     await waitForState(page, "archive", "ready");
-}
-
-async function countFramebufferColors(page, expectedRgba)
-{
-    return page.evaluate((expected) => new Promise((resolve, reject) => {
-        globalThis.requestAnimationFrame(() => {
-            globalThis.requestAnimationFrame(() => {
-                const canvas = document.querySelector("#game-canvas");
-                const gl = canvas?.getContext("webgl2");
-                if (!gl) {
-                    reject(new Error("The WebGL2 renderer context is unavailable."));
-                    return;
-                }
-                gl.finish();
-                const width = gl.drawingBufferWidth;
-                const height = gl.drawingBufferHeight;
-                const pixels = new Uint8Array(width * height * 4);
-                gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-                if (gl.getError() !== gl.NO_ERROR) {
-                    reject(new Error("The WebGL2 framebuffer readback failed."));
-                    return;
-                }
-                const counts = expected.map(() => 0);
-                let activeSurfacePixels = 0;
-                for (let offset = 0; offset < pixels.length; offset += 4) {
-                    if (Math.max(pixels[offset], pixels[offset + 1], pixels[offset + 2]) > 20) {
-                        activeSurfacePixels += 1;
-                    }
-                    for (let index = 0; index < expected.length; index += 1) {
-                        const color = expected[index];
-                        if (pixels[offset] === color[0] &&
-                            pixels[offset + 1] === color[1] &&
-                            pixels[offset + 2] === color[2] &&
-                            pixels[offset + 3] === color[3]) {
-                            counts[index] += 1;
-                            break;
-                        }
-                    }
-                }
-                resolve({ counts, activeSurfacePixels, width, height });
-            });
-        });
-    }), expectedRgba);
 }
 
 function expectedReady(pathName, contents, compressionMethod, metadata)
@@ -683,7 +614,7 @@ test("loads a stored IWI through the engine cache and releases its bytes", async
 
 test("streams a deflated IWI while animation frames advance", { tag: "@smoke" }, async ({ page }, testInfo) => {
     await usePortableFolderPicker(page);
-    await observeEngineAsset(page, { readDelayMilliseconds: 80 });
+    await observeEngineAsset(page);
     const iwi = createSyntheticIwi({
         width: 384,
         height: 256,
@@ -1231,7 +1162,7 @@ test("a stale engine read invalidates the mount without publishing a late ready 
 
 test("a cancelled read from an old import cannot overwrite the replacement IWI", { tag: "@smoke" }, async ({ page }, testInfo) => {
     await usePortableFolderPicker(page);
-    await observeEngineAsset(page, { gateFirstRead: true });
+    await observeEngineAsset(page);
     const oldIwi = createSyntheticIwi();
     const newIwi = createSyntheticIwi({
         width: 4,

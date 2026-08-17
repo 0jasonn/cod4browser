@@ -241,7 +241,7 @@ int main()
     assert(caughtArenaOverflow);
 
     std::printf(
-        "gate3-trace stages=%zu startup=%zu commands=%zu dvars=%zu pmem=%zu stop=%s\n",
+        "canonical-runtime-trace stages=%zu startup=%zu commands=%zu dvars=%zu pmem=%zu stop=%s\n",
         trace.stageCount,
         trace.startupVariableCount,
         trace.commandCount,

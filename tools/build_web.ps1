@@ -3,10 +3,18 @@
 [CmdletBinding()]
 param(
     [ValidateSet('Debug', 'Release')]
-    [string]$Configuration = 'Debug'
+    [string]$Configuration = 'Release'
 )
 
 $ErrorActionPreference = 'Stop'
+
+$buildJobs = 2
+if ($env:KISAK_BUILD_JOBS) {
+    if (-not [int]::TryParse($env:KISAK_BUILD_JOBS, [ref]$buildJobs) -or
+        $buildJobs -lt 1 -or $buildJobs -gt 16) {
+        throw 'KISAK_BUILD_JOBS must be an integer from 1 through 16.'
+    }
+}
 
 $repositoryRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $toolchainDefinitionPath = Join-Path $PSScriptRoot 'web_toolchain.json'
@@ -32,6 +40,8 @@ foreach ($requiredPath in @(
 $env:EM_CONFIG = $emscriptenConfig
 $env:EMSDK = $emsdkRoot
 
+$totalTimer = [Diagnostics.Stopwatch]::StartNew()
+$stepTimer = [Diagnostics.Stopwatch]::StartNew()
 & $cmakeExecutable `
     -S $repositoryRoot `
     -B $buildDirectory `
@@ -43,16 +53,26 @@ $env:EMSDK = $emsdkRoot
 if ($LASTEXITCODE -ne 0) {
     throw 'Failed to configure the web target.'
 }
+$stepTimer.Stop()
+Write-Host ("KISAK_TIMING web_configure_seconds={0:N3}" -f $stepTimer.Elapsed.TotalSeconds)
 
-& $cmakeExecutable --build $buildDirectory --target KisakCOD-web -- -j1
+$stepTimer.Restart()
+& $cmakeExecutable --build $buildDirectory --target KisakCOD-web --parallel $buildJobs
 if ($LASTEXITCODE -ne 0) {
     throw 'Failed to build the web target.'
 }
+$stepTimer.Stop()
+Write-Host ("KISAK_TIMING web_compile_seconds={0:N3} jobs={1}" -f `
+    $stepTimer.Elapsed.TotalSeconds, $buildJobs)
 
-& $cmakeExecutable --build $buildDirectory --target check-gate3-com-init -- -j1
+$stepTimer.Restart()
+& $cmakeExecutable --build $buildDirectory --target check-canonical-runtime-prefix --parallel $buildJobs
 if ($LASTEXITCODE -ne 0) {
-    throw 'The strict Gate 3 Com_Init compile/link/runtime check failed.'
+    throw 'The strict canonical runtime-prefix compile/link/runtime check failed.'
 }
+$stepTimer.Stop()
+Write-Host ("KISAK_TIMING runtime_prefix_check_seconds={0:N3} jobs={1}" -f `
+    $stepTimer.Elapsed.TotalSeconds, $buildJobs)
 
 $siteDirectory = Join-Path $buildDirectory 'site'
 foreach ($requiredOutput in @(
@@ -71,3 +91,5 @@ foreach ($requiredOutput in @(
 }
 
 Write-Host "Browser build ready at $buildDirectory\site\index.html"
+$totalTimer.Stop()
+Write-Host ("KISAK_TIMING web_build_total_seconds={0:N3}" -f $totalTimer.Elapsed.TotalSeconds)

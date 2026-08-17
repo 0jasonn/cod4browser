@@ -2,7 +2,7 @@ const EXPORTED_COMMANDS = [
     "_KisakWeb_StartArchiveJob", "_KisakWeb_CancelArchiveJob",
     "_KisakWeb_StartQcommonRuntime", "_KisakWeb_CancelQcommonRuntime",
     "_KisakWeb_StartRetailCensus", "_KisakWeb_CancelRetailCensus",
-    "_KisakWeb_StartCanonicalDbHeaderProbe",
+    "_KisakWeb_StartCanonicalDbRuntimeCheck",
     "_KisakWeb_TestLoseWebGLContext", "_KisakWeb_TestRestoreWebGLContext",
 ];
 const ENGINE_FILESYSTEM_LOCK = "kisakcod-web-engine-filesystem-v1";

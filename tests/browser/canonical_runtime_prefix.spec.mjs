@@ -1,9 +1,9 @@
 import { expect, test } from "@playwright/test";
 
-test("real Com_Init publishes the Gate 3 canonical prefix trace", { tag: "@smoke" }, async ({ page }) => {
+test("real Com_Init publishes the canonical runtime-prefix trace", { tag: "@smoke" }, async ({ page }) => {
     await page.addInitScript(() => {
         globalThis.__gate3InitTraces = [];
-        globalThis.addEventListener("kisakcod:gate3-init", (event) => {
+        globalThis.addEventListener("kisakcod:canonical-runtime-prefix", (event) => {
             globalThis.__gate3InitTraces.push(structuredClone(event.detail));
         });
     });

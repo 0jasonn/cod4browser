@@ -73,7 +73,6 @@ async function importFixture(page, testInfo, name)
     const chooser = await chooserPromise;
     await chooser.setFiles(fixture.directory);
     await waitForRuntimeState(page, "assets", "ready");
-    await waitForRuntimeState(page, "archive", "ready");
     return fixture;
 }
 
@@ -99,6 +98,7 @@ test("immutable asset sources provide bounded reads while the frame pump advance
             invalidRange = error.code;
         }
 
+        const beforeFrame = runtime.system?.framePumpTicks ?? 0;
         const arrayBufferDescriptor = Object.getOwnPropertyDescriptor(
             Blob.prototype,
             "arrayBuffer",
@@ -108,12 +108,26 @@ test("immutable asset sources provide bounded reads while the frame pump advance
             ...arrayBufferDescriptor,
             async value() {
                 delayedReads += 1;
-                await new Promise((resolve) => globalThis.setTimeout(resolve, 800));
+                await new Promise((resolve, reject) => {
+                    let framesRemaining = 120;
+                    const advance = () => {
+                        if ((runtime.system?.framePumpTicks ?? 0) > beforeFrame) {
+                            resolve();
+                            return;
+                        }
+                        framesRemaining -= 1;
+                        if (framesRemaining === 0) {
+                            reject(new Error("frame pump did not advance"));
+                            return;
+                        }
+                        globalThis.requestAnimationFrame(advance);
+                    };
+                    globalThis.requestAnimationFrame(advance);
+                });
                 return arrayBufferDescriptor.value.call(this);
             },
         });
 
-        const beforeFrame = runtime.system?.framePumpTicks ?? 0;
         let delayedSignature;
         try {
             delayedSignature = Array.from(
@@ -220,7 +234,12 @@ test("bridge cancellation prevents a delayed read from touching Wasm memory or c
             ]);
             cancelled = bridge.cancel(requestId);
             releaseRead();
-            await new Promise((resolve) => globalThis.setTimeout(resolve, 50));
+            await new Promise((resolve) => {
+                const channel = new MessageChannel();
+                channel.port1.addEventListener("message", resolve, { once: true });
+                channel.port1.start();
+                channel.port2.postMessage(null);
+            });
             return {
                 accepted,
                 cancelled,

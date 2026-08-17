@@ -1147,7 +1147,8 @@ The read-only owned profile records this exact run:
 | Registry publication | 27 aliases reserved; 27 defined |
 | Next body | inline `XModel` at asset index 21 |
 
-The eight names and body boundaries are recorded in `docs/web-port.md`. No
+The eight names and body boundaries are recorded in
+`docs/history/web-port-milestones.md`. No
 asset-21 bytes are interpreted, no second XModel is retained or rendered, and
 no proprietary byte is added to source or fixtures.
 

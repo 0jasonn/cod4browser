@@ -31,7 +31,7 @@ EM_JS(
     {
         if (typeof globalThis.dispatchEvent !== "function" ||
             typeof globalThis.CustomEvent !== "function") return;
-        globalThis.dispatchEvent(new CustomEvent("kisakcod:gate3-init", {
+        globalThis.dispatchEvent(new CustomEvent("kisakcod:canonical-runtime-prefix", {
             detail: {
                 stopStage: UTF8ToString(stopStage),
                 stages: UTF8ToString(stages).split("|").filter(Boolean),

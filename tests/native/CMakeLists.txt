@@ -22,7 +22,6 @@ add_executable(iwi_image_tests
 
 add_executable(canonical_asset_abi_tests
     "${CMAKE_CURRENT_LIST_DIR}/canonical_asset_abi_tests.cpp"
-    "${KISAK_REPOSITORY_ROOT}/src/database/db_semantic_trace.cpp"
 )
 
 add_executable(qcommon_math_tests
@@ -44,7 +43,7 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
     target_compile_definitions(gate3_db_pool_tests PRIVATE
         KISAK_SP=1 KISAK_DB_POOL_STANDALONE=1 dNODEBUG=1)
 
-    add_executable(gate3_com_init_trace_tests
+    add_executable(canonical_runtime_prefix_tests
         "${CMAKE_CURRENT_LIST_DIR}/gate3_com_init_trace_tests.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/qcommon/com_init_trace.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_initialization.cpp"
@@ -60,16 +59,16 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
         "${KISAK_REPOSITORY_ROOT}/src/universal/q_shared.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/universal/physicalmemory.cpp"
     )
-    target_compile_features(gate3_com_init_trace_tests PRIVATE cxx_std_20)
-    target_include_directories(gate3_com_init_trace_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
-    target_compile_definitions(gate3_com_init_trace_tests PRIVATE
+    target_compile_features(canonical_runtime_prefix_tests PRIVATE cxx_std_20)
+    target_include_directories(canonical_runtime_prefix_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
+    target_compile_definitions(canonical_runtime_prefix_tests PRIVATE
         KISAK_SP=1 KISAK_GATE3_COM_INIT_PREFIX=1 dNODEBUG=1)
     if (MSVC)
-        target_compile_definitions(gate3_com_init_trace_tests PRIVATE WIN32=1)
-        target_compile_options(gate3_com_init_trace_tests PRIVATE /Gy /Gw /Zc:inline)
-        target_link_options(gate3_com_init_trace_tests PRIVATE /OPT:REF /OPT:ICF)
+        target_compile_definitions(canonical_runtime_prefix_tests PRIVATE WIN32=1)
+        target_compile_options(canonical_runtime_prefix_tests PRIVATE /Gy /Gw /Zc:inline)
+        target_link_options(canonical_runtime_prefix_tests PRIVATE /OPT:REF /OPT:ICF)
     else()
-        target_compile_definitions(gate3_com_init_trace_tests PRIVATE KISAK_WEB=1)
+        target_compile_definitions(canonical_runtime_prefix_tests PRIVATE KISAK_WEB=1)
     endif()
 
     add_executable(gate3_db_stream_trace_tests
@@ -80,7 +79,6 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
         "${KISAK_REPOSITORY_ROOT}/src/database/db_memory.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_registry_pools.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_registry_publication.cpp"
-        "${KISAK_REPOSITORY_ROOT}/src/database/db_semantic_trace.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_stream.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_stream_load.cpp"
     )
@@ -103,31 +101,22 @@ add_executable(web_renderer_surface_tests
 
 add_executable(web_engine_world_surface_tests
     "${CMAKE_CURRENT_LIST_DIR}/web_engine_world_surface_tests.cpp"
-    "${KISAK_REPOSITORY_ROOT}/src/web/web_engine_world_surface.cpp"
 )
 
 add_executable(web_fastfile_world_surface_tests
     "${CMAKE_CURRENT_LIST_DIR}/web_fastfile_world_surface_tests.cpp"
-    "${KISAK_REPOSITORY_ROOT}/src/web/web_fastfile_source_stream.cpp"
-    "${KISAK_REPOSITORY_ROOT}/src/web/web_fastfile_zone_registry.cpp"
-    "${KISAK_REPOSITORY_ROOT}/src/web/web_fastfile_zone_stream.cpp"
-    "${KISAK_REPOSITORY_ROOT}/src/web/web_fastfile_world_surface.cpp"
-    "${KISAK_REPOSITORY_ROOT}/src/web/web_engine_world_surface.cpp"
 )
 
 add_executable(web_fastfile_zone_stream_tests
     "${CMAKE_CURRENT_LIST_DIR}/web_fastfile_zone_stream_tests.cpp"
-    "${KISAK_REPOSITORY_ROOT}/src/web/web_fastfile_zone_stream.cpp"
 )
 
 add_executable(web_fastfile_source_stream_tests
     "${CMAKE_CURRENT_LIST_DIR}/web_fastfile_source_stream_tests.cpp"
-    "${KISAK_REPOSITORY_ROOT}/src/web/web_fastfile_source_stream.cpp"
 )
 
 add_executable(web_fastfile_zone_registry_tests
     "${CMAKE_CURRENT_LIST_DIR}/web_fastfile_zone_registry_tests.cpp"
-    "${KISAK_REPOSITORY_ROOT}/src/web/web_fastfile_zone_registry.cpp"
 )
 
 add_executable(web_asset_probe_tests
@@ -147,10 +136,6 @@ add_executable(web_cooperative_scheduler_tests
 
 add_executable(web_retail_fastfile_census_tests
     "${CMAKE_CURRENT_LIST_DIR}/web_retail_fastfile_census_tests.cpp"
-    "${KISAK_REPOSITORY_ROOT}/src/database/db_semantic_trace.cpp"
-    "${KISAK_REPOSITORY_ROOT}/src/web/web_fastfile_source_stream.cpp"
-    "${KISAK_REPOSITORY_ROOT}/src/web/web_fastfile_zone_registry.cpp"
-    "${KISAK_REPOSITORY_ROOT}/src/web/web_fastfile_zone_stream.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_retail_fastfile_census.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_retail_load_clipmap.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_retail_load_comworld.cpp"
@@ -159,9 +144,43 @@ add_executable(web_retail_fastfile_census_tests
     "${KISAK_REPOSITORY_ROOT}/src/web/web_retail_load_lightdef.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_retail_load_weapon.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_sound_alias_catalog.cpp"
+)
+
+# Regular native/Wasm tests share identically compiled portable support code.
+# Fuzz targets deliberately keep separate sanitizer-instrumented objects below.
+add_library(kisak_test_fastfile_support STATIC
+    "${KISAK_REPOSITORY_ROOT}/src/web/web_fastfile_source_stream.cpp"
+    "${KISAK_REPOSITORY_ROOT}/src/web/web_fastfile_zone_registry.cpp"
+    "${KISAK_REPOSITORY_ROOT}/src/web/web_fastfile_zone_stream.cpp"
+    "${KISAK_REPOSITORY_ROOT}/src/web/web_fastfile_world_surface.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_engine_world_surface.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_shader_compatibility.cpp"
 )
+target_compile_features(kisak_test_fastfile_support PRIVATE cxx_std_20)
+target_include_directories(kisak_test_fastfile_support PUBLIC
+    "${KISAK_REPOSITORY_ROOT}/src")
+if (WIN32)
+    target_include_directories(kisak_test_fastfile_support PRIVATE
+        "${KISAK_REPOSITORY_ROOT}/deps/zlib")
+endif()
+
+add_library(kisak_test_semantic_trace STATIC
+    "${KISAK_REPOSITORY_ROOT}/src/database/db_semantic_trace.cpp")
+target_compile_features(kisak_test_semantic_trace PRIVATE cxx_std_20)
+target_include_directories(kisak_test_semantic_trace PUBLIC
+    "${KISAK_REPOSITORY_ROOT}/src")
+
+target_link_libraries(canonical_asset_abi_tests PRIVATE kisak_test_semantic_trace)
+target_link_libraries(web_engine_world_surface_tests PRIVATE kisak_test_fastfile_support)
+target_link_libraries(web_fastfile_world_surface_tests PRIVATE kisak_test_fastfile_support)
+target_link_libraries(web_fastfile_zone_stream_tests PRIVATE kisak_test_fastfile_support)
+target_link_libraries(web_fastfile_source_stream_tests PRIVATE kisak_test_fastfile_support)
+target_link_libraries(web_fastfile_zone_registry_tests PRIVATE kisak_test_fastfile_support)
+target_link_libraries(web_retail_fastfile_census_tests PRIVATE
+    kisak_test_fastfile_support kisak_test_semantic_trace)
+if (TARGET gate3_db_stream_trace_tests)
+    target_link_libraries(gate3_db_stream_trace_tests PRIVATE kisak_test_semantic_trace)
+endif()
 
 target_compile_features(iwd_archive_tests PRIVATE cxx_std_20)
 target_include_directories(iwd_archive_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
@@ -197,6 +216,7 @@ target_include_directories(web_retail_fastfile_census_tests PRIVATE "${KISAK_REP
 
 if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     # Use Emscripten's maintained zlib port, matching the browser target.
+    target_compile_options(kisak_test_fastfile_support PRIVATE "-sUSE_ZLIB=1")
     target_compile_options(iwd_archive_tests PRIVATE "-sUSE_ZLIB=1")
     target_link_options(iwd_archive_tests PRIVATE
         "-sUSE_ZLIB=1"
@@ -224,8 +244,8 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "-sEXIT_RUNTIME=1"
         "-sNO_DISABLE_EXCEPTION_CATCHING"
     )
-    if (TARGET gate3_com_init_trace_tests)
-        target_link_options(gate3_com_init_trace_tests PRIVATE
+    if (TARGET canonical_runtime_prefix_tests)
+        target_link_options(canonical_runtime_prefix_tests PRIVATE
             "-sENVIRONMENT=node"
             "-sEXIT_RUNTIME=1"
             "-sNO_DISABLE_EXCEPTION_CATCHING"
@@ -301,8 +321,8 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     set_target_properties(canonical_asset_abi_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(qcommon_math_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_thread_context_tests PROPERTIES SUFFIX ".cjs")
-    if (TARGET gate3_com_init_trace_tests)
-        set_target_properties(gate3_com_init_trace_tests PROPERTIES SUFFIX ".cjs")
+    if (TARGET canonical_runtime_prefix_tests)
+        set_target_properties(canonical_runtime_prefix_tests PROPERTIES SUFFIX ".cjs")
     endif()
     if (TARGET gate3_db_pool_tests)
         set_target_properties(gate3_db_pool_tests PROPERTIES SUFFIX ".cjs")
@@ -328,9 +348,9 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:qcommon_math_tests>")
     add_test(NAME web_thread_context_tests
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_thread_context_tests>")
-    if (TARGET gate3_com_init_trace_tests)
-        add_test(NAME gate3_com_init_trace_tests
-            COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:gate3_com_init_trace_tests>")
+    if (TARGET canonical_runtime_prefix_tests)
+        add_test(NAME canonical_runtime_prefix_tests
+            COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:canonical_runtime_prefix_tests>")
     endif()
     if (TARGET gate3_db_pool_tests)
         add_test(NAME gate3_db_pool_tests
@@ -401,8 +421,8 @@ else()
     add_test(NAME canonical_asset_abi_tests COMMAND canonical_asset_abi_tests)
     add_test(NAME qcommon_math_tests COMMAND qcommon_math_tests)
     add_test(NAME web_thread_context_tests COMMAND web_thread_context_tests)
-    if (TARGET gate3_com_init_trace_tests)
-        add_test(NAME gate3_com_init_trace_tests COMMAND gate3_com_init_trace_tests)
+    if (TARGET canonical_runtime_prefix_tests)
+        add_test(NAME canonical_runtime_prefix_tests COMMAND canonical_runtime_prefix_tests)
     endif()
     if (TARGET gate3_db_pool_tests)
         add_test(NAME gate3_db_pool_tests COMMAND gate3_db_pool_tests)

@@ -1324,7 +1324,7 @@ void __cdecl Cmd_Exec_f()
 {
     Com_Error(
         ERR_DROP,
-        "exec requires the synchronous engine filesystem, which is not initialized at this Gate 3 checkpoint");
+        "exec requires the synchronous engine filesystem, which is not initialized in this runtime prefix");
 }
 
 char __cdecl Cmd_ExecFromDisk(int32_t, int32_t, const char *)

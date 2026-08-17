@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { installGate2OracleRequest } from "./gate2_oracle.mjs";
 import { crc32 } from "node:zlib";
 import { createInstallDirectory as createM12InstallDirectory } from "./install_fixture.mjs";
 import {
@@ -54,11 +55,11 @@ async function usePortableFolderPicker(page)
     });
 }
 
-async function observeArchive(page, { readDelayMilliseconds = 0 } = {})
+async function observeArchive(page)
 {
-    await page.addInitScript(({ delay }) => {
+    await installGate2OracleRequest(page);
+    await page.addInitScript(() => {
         globalThis.__syntheticArchiveEvents = [];
-        globalThis.__syntheticArchiveReadDelays = [];
         globalThis.__syntheticArchivePublishSamples = [];
         globalThis.__syntheticArchiveRafTicks = 0;
         const countFrame = () => {
@@ -85,35 +86,7 @@ async function observeArchive(page, { readDelayMilliseconds = 0 } = {})
                 entries: event.detail.entries,
             });
         });
-
-        if (delay <= 0) {
-            return;
-        }
-        const originalArrayBuffer = Blob.prototype.arrayBuffer;
-        Object.defineProperty(Blob.prototype, "arrayBuffer", {
-            configurable: true,
-            writable: true,
-            async value() {
-                const runtime = globalThis.__KISAKCOD_WEB__;
-                const archiveState = runtime?.archive?.state;
-                const isArchiveRead = runtime?.assets?.state === "ready" ||
-                    archiveState === "loading";
-                if (!isArchiveRead) {
-                    return originalArrayBuffer.call(this);
-                }
-
-                const beforeFrame = globalThis.__syntheticArchiveRafTicks;
-                await new Promise((resolve) => globalThis.setTimeout(resolve, delay));
-                const bytes = await originalArrayBuffer.call(this);
-                globalThis.__syntheticArchiveReadDelays.push({
-                    beforeFrame,
-                    afterFrame: globalThis.__syntheticArchiveRafTicks,
-                    size: this.size,
-                });
-                return bytes;
-            },
-        });
-    }, { delay: readDelayMilliseconds });
+    });
 }
 
 async function waitForEngine(page)
@@ -181,7 +154,7 @@ function entryPath(entry)
 
 test("enumerates and verifies stored and deflated members without blocking frames", { tag: "@smoke" }, async ({ page }, testInfo) => {
     await usePortableFolderPicker(page);
-    await observeArchive(page, { readDelayMilliseconds: 80 });
+    await observeArchive(page);
     const archive = createSyntheticIwd([
         STORED_MEMBER,
         DEFLATED_MEMBER,
@@ -202,7 +175,6 @@ test("enumerates and verifies stored and deflated members without blocking frame
         return {
             archive: events.findLast((event) => event.state === "ready"),
             events,
-            delayedReads: structuredClone(globalThis.__syntheticArchiveReadDelays),
         };
     });
     expect(result.archive.entries.map(entryPath)).toEqual([

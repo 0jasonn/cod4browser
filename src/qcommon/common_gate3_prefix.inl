@@ -1,3 +1,11 @@
+// TEMPORARY COMMON.CPP COMPILE/INTEGRATION PREFIX -- NO-GROWTH CONTRACT.
+//
+// This file keeps the current canonical Com_Init prefix buildable while later
+// common.cpp dependencies are still unavailable to Wasm. It must not become a
+// common_web.cpp: do not add unrelated future Com_Init behavior here. Prefer
+// compiling canonical dependency owners, then remove the corresponding
+// extracted globals/functions until normal common.cpp can compile directly.
+
 #include <qcommon/cmd.h>
 #include <qcommon/com_init_trace.h>
 #include <qcommon/common_api.h>
@@ -55,7 +63,7 @@ void TraceCommand(const char *name)
     Com_InitTraceCommand(name);
 }
 
-void Gate3_ReachComInitXAssetsBoundary()
+void ReachCanonicalRuntimeDatabaseBoundary()
 {
     Com_InitTraceStage("Com_InitXAssets");
     Com_InitXAssets();
@@ -267,7 +275,7 @@ void __cdecl Com_Init_Try_Block_Function(char *commandLine)
         static_cast<std::size_t>(memory->prim[1].pos),
         static_cast<std::size_t>(memory->prim[1].allocListCount),
         true);
-    Gate3_ReachComInitXAssetsBoundary();
+    ReachCanonicalRuntimeDatabaseBoundary();
     Com_InitTraceStop("DB_LoadXAssets/engine-filesystem-mount");
 }
 

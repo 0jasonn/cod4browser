@@ -116,12 +116,13 @@ Kisak behavior or explain why a platform-owned implementation is permanent.
 - Prefer source-built, browser-compatible dependencies with licenses suitable for GPL-3.0 distribution. Record replacements for every removed native library.
 - Serve browser builds over HTTP for testing; do not rely on `file://` behavior.
 - Bootstrap the local pinned toolchain with `tools/bootstrap_web_toolchain.ps1`.
-- Build the debug Wasm target with `tools/build_web.ps1`.
+- Build the production Release target with `tools/build_web.ps1 -Configuration Release`.
 - Serve only the generated site with `python tools/serve_web.py --directory build/web/site`.
-- Run the tagged browser smoke suite with `npm.cmd run test:browser` after
-  `npm.cmd ci` and browser installation. Run `npm.cmd run test:browser:full`
-  for substantial browser-platform milestones. The intentionally redundant
-  `npm.cmd run test:browser:all` tier is diagnostic-only.
+- Run the non-overlapping routine tiers with `npm.cmd run test:browser` and
+  `npm.cmd run test:browser:remainder` after `npm.cmd ci` and browser
+  installation. Run `npm.cmd run test:browser:full` only when the explicit
+  exhaustive browser suite, including native-authoritative duplicates, is
+  useful.
 - The toolchain lives under ignored `.tools/`; do not activate it permanently or commit it.
 
 ## Testing expectations
@@ -137,8 +138,9 @@ Kisak behavior or explain why a platform-owned implementation is permanent.
 - Test with synthetic malformed archives and network messages. Porting old native code into a browser increases the importance of fuzzing and strict bounds validation.
 - For rendering work, retain a deterministic small scene or capture and compare it deliberately; tolerate only documented platform variance.
 - Run the narrowest relevant checks while iterating, then the tagged browser
-  smoke suite before ordinary handoffs. Run the curated full browser suite for
-  substantial browser-platform milestones and release-facing changes. Direct
+  smoke and non-overlapping remainder tiers before ordinary handoffs. Run the
+  exhaustive browser suite only when its duplicate boundary evidence is
+  specifically useful. Direct
   native/Wasm parser tests are authoritative for cases tagged
   `@native-covered`; do not routinely rerun their browser duplicates. Report
   exactly what ran and what could not run.
