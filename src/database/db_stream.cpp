@@ -98,13 +98,30 @@ uint8_t *__cdecl DB_AllocStreamPos(int32_t alignment)
     iassert(g_streamPos);
     const std::uintptr_t address = reinterpret_cast<std::uintptr_t>(g_streamPos);
     const std::uintptr_t mask = static_cast<std::uintptr_t>(alignment);
-    g_streamPos = reinterpret_cast<uint8_t *>((address + mask) & ~mask);
+    uint8_t *aligned = reinterpret_cast<uint8_t *>((address + mask) & ~mask);
+#if defined(KISAK_WEB)
+    const XBlock &block = g_streamZoneMem->blocks[g_streamPosIndex];
+    if (alignment < 0 || aligned < block.data ||
+        static_cast<std::size_t>(aligned - block.data) > block.size)
+    {
+        DB_RuntimeGeneratedFailure("stream/alignment outside canonical block");
+        return g_streamPos;
+    }
+#endif
+    g_streamPos = aligned;
     return g_streamPos;
 }
 
 void __cdecl DB_IncStreamPos(int32_t size)
 {
     iassert(g_streamPos);
+#if defined(KISAK_WEB)
+    if (size < 0 || !DB_RuntimeStreamCanRead(static_cast<std::size_t>(size)))
+    {
+        DB_RuntimeGeneratedFailure("stream/increment outside canonical block");
+        return;
+    }
+#endif
     iassert(g_streamPos + size <= g_streamZoneMem->blocks[g_streamPosIndex].data + g_streamZoneMem->blocks[g_streamPosIndex].size);
 
     g_streamPos += size;
@@ -116,6 +133,14 @@ const void **__cdecl DB_InsertPointer()
 
     DB_PushStreamPos(4);
     pData = (const void **)DB_AllocStreamPos(3);
+#if defined(KISAK_WEB)
+    if (DB_RuntimeGeneratedLoadFailed() || !DB_RuntimeStreamCanRead(4u))
+    {
+        DB_RuntimeGeneratedFailure("stream/insert pointer outside canonical block");
+        DB_PopStreamPos();
+        return nullptr;
+    }
+#endif
     DB_IncStreamPos(4);
     DB_PopStreamPos();
     return pData;

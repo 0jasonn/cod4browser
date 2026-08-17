@@ -4,6 +4,9 @@
 #endif
 #include "database.h"
 #include <database/db_semantic_trace.h>
+#if defined(KISAK_WEB)
+#include <database/db_generated_loaders.h>
+#endif
 
 #include <qcommon/threads.h>
 #if defined(KISAK_WEB)
@@ -88,6 +91,16 @@ static void DB_WebFail(const char *stage)
         g_load.failureStage = stage;
         DB_RuntimeTraceStage(stage);
     }
+}
+
+void DB_FailXFileLoad(const char *stage)
+{
+    DB_WebFail(stage);
+}
+
+bool DB_HasXFileLoadFailure()
+{
+    return g_load.failed;
 }
 #endif
 
@@ -501,8 +514,33 @@ void __cdecl DB_LoadXFileInternal()
     DB_InitStreams(g_load.zoneMem);
 #if defined(KISAK_WEB)
     DB_RuntimeTraceStage("first generated-loader entry");
+    Load_XAssetListCustom();
+    if (!DB_RuntimeGeneratedLoadFailed())
+    {
+        DB_PushStreamPos(4);
+        if (varXAssetList->assetCount < 0 ||
+            static_cast<std::uint64_t>(varXAssetList->assetCount) * sizeof(XAsset) >
+                (std::numeric_limits<std::uint32_t>::max)())
+        {
+            DB_RuntimeGeneratedFailure("XAssetList/excessive asset count");
+        }
+        else if (varXAssetList->assets)
+        {
+            varXAssetList->assets = AllocLoad_FxElemVisStateSample();
+            varXAsset = varXAssetList->assets;
+            Load_XAssetArrayCustom(varXAssetList->assetCount);
+        }
+        else if (varXAssetList->assetCount)
+        {
+            DB_RuntimeGeneratedFailure("XAssetList/missing asset array");
+        }
+        DB_PopStreamPos();
+    }
+    if (!DB_RuntimeGeneratedLoadFailed()) DB_RuntimeTraceXAssetListEnd();
     DB_CancelLoadXFile();
-    DB_RuntimeTraceStop("Load_XAssetListCustom/generated-loader-closure");
+    DB_RuntimeTraceStop(DB_RuntimeGeneratedLoadFailed()
+        ? g_load.failureStage
+        : "Load_XAssetHeader/next-family-closure");
     return;
 #else
     Load_XAssetListCustom();
@@ -539,12 +577,16 @@ bool __cdecl DB_IsMinimumFastFileLoaded()
 #endif
 }
 
-#if !defined(KISAK_WEB)
 void Load_XAssetListCustom()
 {
     varXAssetList = &g_varXAssetList;
     
     DB_LoadXFileData((uint8_t *)&g_varXAssetList, sizeof(XAssetList));
+#if defined(KISAK_WEB)
+    if (DB_HasXFileLoadFailure()) return;
+    DB_RuntimeTraceXAssetListBegin(
+        varXAssetList->stringList.count, varXAssetList->assetCount);
+#endif
     DB_PushStreamPos(4);
     varScriptStringList = &varXAssetList->stringList;
     Load_ScriptStringList(0);
@@ -556,7 +598,27 @@ void __cdecl Load_XAssetArrayCustom(int32_t count)
     XAsset *var; // [esp+0h] [ebp-8h]
     int32_t i; // [esp+4h] [ebp-4h]
 
-    Load_Stream(1, (uint8_t *)varXAsset, 8 * count);
+    if (count < 0 || static_cast<std::uint64_t>(count) * sizeof(XAsset) >
+        (std::numeric_limits<std::uint32_t>::max)())
+    {
+#if defined(KISAK_WEB)
+        DB_RuntimeGeneratedFailure("XAssetList/excessive asset count");
+        return;
+#else
+        iassert(count >= 0);
+#endif
+    }
+#if defined(KISAK_WEB)
+    if (!DB_RuntimeStreamCanRead(static_cast<std::size_t>(count) * sizeof(XAsset)))
+    {
+        DB_RuntimeGeneratedFailure("XAssetList/excessive asset count");
+        return;
+    }
+#endif
+    Load_Stream(1, (uint8_t *)varXAsset, sizeof(XAsset) * count);
+#if defined(KISAK_WEB)
+    if (DB_RuntimeGeneratedLoadFailed()) return;
+#endif
     kisak::database::ResetNativeSemanticTraceContext();
     var = varXAsset;
     for (i = 0; i < count; ++i)
@@ -564,12 +626,17 @@ void __cdecl Load_XAssetArrayCustom(int32_t count)
         varXAsset = var;
         kisak::database::EnterNativeSemanticTraceAsset(
             static_cast<std::uint32_t>(i), varXAsset->type);
+#if defined(KISAK_WEB)
+        DB_SetGeneratedAssetIndex(static_cast<std::uint32_t>(i));
+#endif
         Load_XAsset(0);
         kisak::database::LeaveNativeSemanticTraceAsset();
+#if defined(KISAK_WEB)
+        if (DB_RuntimeGeneratedLoadFailed()) return;
+#endif
         ++var;
     }
 }
-#endif
 
 void __cdecl DB_ResetZoneSize(int32_t trackLoadProgress)
 {

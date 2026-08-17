@@ -76,7 +76,11 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
         "${CMAKE_CURRENT_LIST_DIR}/gate3_db_stream_trace_tests.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_auth.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_file_load.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_loaders.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_memory.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_registry_pools.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_registry_publication.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_semantic_trace.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_stream.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_stream_load.cpp"
     )
@@ -84,7 +88,7 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
     target_include_directories(gate3_db_stream_trace_tests PRIVATE
         "${KISAK_REPOSITORY_ROOT}/src" "${KISAK_REPOSITORY_ROOT}/deps")
     target_compile_definitions(gate3_db_stream_trace_tests PRIVATE
-        KISAK_SP=1 KISAK_DB_SYNC_FILE_TEST=1 dNODEBUG=1)
+        KISAK_SP=1 KISAK_DB_SYNC_FILE_TEST=1 KISAK_DB_POOL_STANDALONE=1 dNODEBUG=1)
     if (MSVC)
         target_compile_definitions(gate3_db_stream_trace_tests PRIVATE WIN32=1)
     else()

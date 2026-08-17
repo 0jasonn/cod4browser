@@ -4,10 +4,21 @@
 #endif
 #include "database.h"
 #include <script/scr_stringlist.h>
+#if defined(KISAK_WEB)
+#include <database/db_runtime_prefix.h>
+#endif
 
 
 void __cdecl Load_Stream(bool atStreamStart, uint8_t *ptr, int32_t size)
 {
+#if defined(KISAK_WEB)
+    if (size < 0 || (atStreamStart && !DB_RuntimeStreamCanRead(
+        static_cast<std::size_t>(size))))
+    {
+        DB_RuntimeGeneratedFailure("stream/read outside canonical block");
+        return;
+    }
+#endif
     iassert(atStreamStart == (ptr == DB_GetStreamPos()));
     if (atStreamStart && size)
     {
@@ -46,11 +57,34 @@ void __cdecl DB_ConvertOffsetToAlias(uint32_t *data)
 
     offset = *data;
     iassert((offset && (offset != -1) && (offset != -2)));
+#if defined(KISAK_WEB)
+    const std::uint32_t blockIndex = (offset - 1) >> 28;
+    const std::uint32_t blockOffset = (offset - 1) & 0xFFFFFFF;
+    if (blockIndex >= 9 || !g_streamZoneMem->blocks[blockIndex].data ||
+        blockOffset > g_streamZoneMem->blocks[blockIndex].size ||
+        sizeof(std::uint32_t) > g_streamZoneMem->blocks[blockIndex].size - blockOffset)
+    {
+        DB_RuntimeGeneratedFailure("stream/invalid alias offset");
+        return;
+    }
+#endif
     *data = *(uint32_t *)&g_streamZoneMem->blocks[(offset - 1) >> 28].data[(offset - 1) & 0xFFFFFFF];
 }
 
 void __cdecl DB_ConvertOffsetToPointer(uint32_t *data)
 {
+#if defined(KISAK_WEB)
+    const std::uint32_t offset = *data;
+    const std::uint32_t blockIndex = (offset - 1) >> 28;
+    const std::uint32_t blockOffset = (offset - 1) & 0xFFFFFFF;
+    if (!offset || offset == UINT32_MAX || offset == UINT32_MAX - 1u ||
+        blockIndex >= 9 || !g_streamZoneMem->blocks[blockIndex].data ||
+        blockOffset >= g_streamZoneMem->blocks[blockIndex].size)
+    {
+        DB_RuntimeGeneratedFailure("stream/invalid pointer offset");
+        return;
+    }
+#endif
     *data = (uint32_t)&g_streamZoneMem->blocks[(uint32_t)(*data - 1) >> 28].data[(*data - 1) & 0xFFFFFFF];
 }
 
@@ -62,7 +96,17 @@ void __cdecl Load_XStringCustom(char **str)
     s = *str;
     for (pos = (uint8_t *)*str; ; ++pos)
     {
+#if defined(KISAK_WEB)
+        if (!DB_RuntimeStreamCanRead(1u))
+        {
+            DB_RuntimeGeneratedFailure("stream/truncated string");
+            return;
+        }
+#endif
         DB_LoadXFileData(pos, 1u);
+#if defined(KISAK_WEB)
+        if (DB_RuntimeGeneratedLoadFailed()) return;
+#endif
         if (!*pos)
             break;
     }

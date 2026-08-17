@@ -3,6 +3,7 @@
 #include <database/database.h>
 #include <database/db_initialization.h>
 #include <database/db_registry_pools.h>
+#include <database/db_registry_publication.h>
 #include <qcommon/cmd.h>
 #include <qcommon/qcommon.h>
 #include <qcommon/system.h>
@@ -27,7 +28,6 @@ struct ZoneRequest
 
 DBRuntimeTraceSnapshot g_trace;
 std::array<ZoneRequest, 8> g_zoneInfo{};
-std::array<XZone, 33> g_zones{};
 std::array<std::uint8_t, 32> g_zoneHandles{};
 std::uint32_t g_zoneInfoCount = 0;
 std::uint32_t g_zoneCount = 0;
@@ -50,7 +50,16 @@ EM_JS(void, EmitDatabaseTrace, (
     std::uint32_t xfileExternalSize, const std::uint32_t *blockSizes,
     std::uint32_t blockAllocationCount, std::uint32_t blockAllocationBytes,
     std::uint32_t streamBlock, std::uint32_t streamOffset,
-    int inflateInitialized, int streamInitialized, int cleanupComplete), {
+    int inflateInitialized, int streamInitialized, int cleanupComplete,
+    int xassetListBegin, int xassetListEnd,
+    std::uint32_t scriptStringCount, std::uint32_t scriptStringObservedCount,
+    const char *scriptStringIdentity, std::uint32_t xassetCount,
+    std::uint32_t assetIndex, std::uint32_t assetType, const char *assetName,
+    const char *pointerClassification, int publicationBegin, int publicationEnd,
+    std::uint32_t assetEntryIndex, std::uint32_t assetPoolIndex,
+    std::uint32_t freeEntryCountBefore, std::uint32_t freeEntryCountAfter,
+    std::uint32_t assetHash, std::uint32_t assetZoneIndex,
+    int generatedLoadFailed, const std::uint32_t *streamOffsets), {
     globalThis.dispatchEvent(new CustomEvent("kisakcod:database", { detail: {
         stage: UTF8ToString(stage),
         logicalPath: path ? UTF8ToString(path) : "",
@@ -77,8 +86,35 @@ EM_JS(void, EmitDatabaseTrace, (
         inflateInitialized: Boolean(inflateInitialized),
         streamInitialized: Boolean(streamInitialized),
         cleanupComplete: Boolean(cleanupComplete),
+        xassetListBegin: Boolean(xassetListBegin),
+        xassetListEnd: Boolean(xassetListEnd),
+        scriptStringCount: scriptStringCount >>> 0,
+        scriptStringObservedCount: scriptStringObservedCount >>> 0,
+        scriptStringIdentity: scriptStringIdentity ? UTF8ToString(scriptStringIdentity) : "",
+        xassetCount: xassetCount >>> 0,
+        assetIndex: assetIndex >>> 0,
+        assetType: assetType >>> 0,
+        assetName: assetName ? UTF8ToString(assetName) : "",
+        pointerClassification: pointerClassification ? UTF8ToString(pointerClassification) : "",
+        publicationBegin: Boolean(publicationBegin),
+        publicationEnd: Boolean(publicationEnd),
+        assetEntryIndex: assetEntryIndex >>> 0,
+        assetPoolIndex: assetPoolIndex >>> 0,
+        freeEntryCountBefore: freeEntryCountBefore >>> 0,
+        freeEntryCountAfter: freeEntryCountAfter >>> 0,
+        assetHash: assetHash >>> 0,
+        assetZoneIndex: assetZoneIndex >>> 0,
+        generatedLoadFailed: Boolean(generatedLoadFailed),
+        streamOffsets: Array.from(HEAPU32.subarray(streamOffsets >>> 2, (streamOffsets >>> 2) + 9)),
     }}));
 });
+
+const char *CurrentScriptIdentity()
+{
+    return g_trace.scriptStringObservedCount
+        ? g_trace.scriptStringIdentities[g_trace.scriptStringObservedCount - 1]
+        : "";
+}
 
 void Trace(const char *stage)
 {
@@ -94,7 +130,16 @@ void Trace(const char *stage)
         g_trace.blockSizes, g_trace.blockAllocationCount,
         g_trace.blockAllocationBytes, g_trace.streamBlock,
         g_trace.streamOffset, g_trace.inflateInitialized,
-        g_trace.streamInitialized, g_trace.cleanupComplete);
+        g_trace.streamInitialized, g_trace.cleanupComplete,
+        g_trace.xassetListBegin, g_trace.xassetListEnd,
+        g_trace.scriptStringCount, g_trace.scriptStringObservedCount,
+        CurrentScriptIdentity(), g_trace.xassetCount, g_trace.assetIndex,
+        g_trace.assetType, g_trace.assetName, g_trace.pointerClassification,
+        g_trace.publicationBegin, g_trace.publicationEnd,
+        g_trace.assetEntryIndex, g_trace.assetPoolIndex,
+        g_trace.freeEntryCountBefore, g_trace.freeEntryCountAfter,
+        g_trace.assetHash, g_trace.assetZoneIndex,
+        g_trace.generatedLoadFailed, g_trace.streamOffsets);
 }
 
 void Stop(const char *stage)
@@ -110,7 +155,16 @@ void Stop(const char *stage)
         g_trace.blockSizes, g_trace.blockAllocationCount,
         g_trace.blockAllocationBytes, g_trace.streamBlock,
         g_trace.streamOffset, g_trace.inflateInitialized,
-        g_trace.streamInitialized, g_trace.cleanupComplete);
+        g_trace.streamInitialized, g_trace.cleanupComplete,
+        g_trace.xassetListBegin, g_trace.xassetListEnd,
+        g_trace.scriptStringCount, g_trace.scriptStringObservedCount,
+        CurrentScriptIdentity(), g_trace.xassetCount, g_trace.assetIndex,
+        g_trace.assetType, g_trace.assetName, g_trace.pointerClassification,
+        g_trace.publicationBegin, g_trace.publicationEnd,
+        g_trace.assetEntryIndex, g_trace.assetPoolIndex,
+        g_trace.freeEntryCountBefore, g_trace.freeEntryCountAfter,
+        g_trace.assetHash, g_trace.assetZoneIndex,
+        g_trace.generatedLoadFailed, g_trace.streamOffsets);
 }
 
 void DB_BuildOSPath(const char *zoneName, std::uint32_t size, char *filename)
@@ -145,7 +199,7 @@ bool DB_TryLoadXFileInternal(char *zoneName, int zoneFlags)
     g_trace.fileSize = static_cast<std::uint32_t>(size);
 
     std::uint32_t zoneIndex = 0;
-    for (std::uint32_t index = 1; index < g_zones.size(); ++index)
+    for (std::uint32_t index = 1; index < ASSET_TYPE_COUNT; ++index)
     {
         if (!g_zones[index].name[0]) { zoneIndex = index; break; }
     }
@@ -160,6 +214,7 @@ bool DB_TryLoadXFileInternal(char *zoneName, int zoneFlags)
     const int allocType = zoneFlags == 1 || zoneFlags == 4 ||
         zoneFlags == 16 || zoneFlags == 32 || zoneFlags == 64 ? 1 : 0;
     zone.allocType = allocType;
+    DB_SetLoadingZoneIndex(zoneIndex);
     PMem_BeginAlloc(zone.name, static_cast<std::uint32_t>(allocType));
     DB_LoadXFile(
         g_logicalPath,
@@ -304,6 +359,108 @@ void DB_RuntimeTraceCleanupComplete()
 {
     g_trace.cleanupComplete = true;
     Trace("XFile cleanup");
+}
+
+void DB_RuntimeTraceXAssetListBegin(
+    std::int32_t scriptStringCount, std::int32_t assetCount)
+{
+    g_trace.xassetListBegin = true;
+    g_trace.scriptStringCount = scriptStringCount >= 0
+        ? static_cast<std::uint32_t>(scriptStringCount) : UINT32_MAX;
+    g_trace.xassetCount = assetCount >= 0
+        ? static_cast<std::uint32_t>(assetCount) : UINT32_MAX;
+    Trace("XAssetList begin");
+}
+
+void DB_RuntimeTraceXAssetListEnd()
+{
+    g_trace.xassetListEnd = true;
+    for (std::uint32_t index = 0; index < 9; ++index)
+    {
+        const std::uint8_t *position = index == g_streamPosIndex
+            ? g_streamPos : g_streamPosArray[index];
+        const std::uint8_t *base = g_streamZoneMem->blocks[index].data;
+        g_trace.streamOffsets[index] = position && base && position >= base
+            ? static_cast<std::uint32_t>(position - base) : 0u;
+    }
+    Trace("XAssetList end");
+}
+
+void DB_RuntimeTraceScriptString(std::uint32_t index, const char *identity)
+{
+    if (index < std::size(g_trace.scriptStringIdentities))
+        I_strncpyz(g_trace.scriptStringIdentities[index], identity ? identity : "",
+            sizeof(g_trace.scriptStringIdentities[index]));
+    g_trace.scriptStringObservedCount = index + 1;
+    Trace("script string");
+}
+
+void DB_RuntimeTraceAssetBegin(
+    std::uint32_t index, XAssetType type, const char *pointerClassification)
+{
+    g_trace.assetIndex = index;
+    g_trace.assetType = static_cast<std::uint32_t>(type);
+    I_strncpyz(g_trace.pointerClassification,
+        pointerClassification ? pointerClassification : "",
+        sizeof(g_trace.pointerClassification));
+    Trace("XAsset begin");
+}
+
+void DB_RuntimeTraceAssetLoaded(const char *name)
+{
+    I_strncpyz(g_trace.assetName, name ? name : "", sizeof(g_trace.assetName));
+    Trace("XAsset loaded");
+}
+
+void DB_RuntimeTracePublicationBegin(
+    XAssetType type, const char *name, std::size_t freeEntryCount)
+{
+    g_trace.publicationBegin = true;
+    g_trace.assetType = static_cast<std::uint32_t>(type);
+    I_strncpyz(g_trace.assetName, name ? name : "", sizeof(g_trace.assetName));
+    g_trace.freeEntryCountBefore = static_cast<std::uint32_t>(freeEntryCount);
+    Trace("publication begin");
+}
+
+void DB_RuntimeTracePublicationEnd(
+    XAssetType type, const char *name, std::uint32_t entryIndex,
+    std::uint32_t poolIndex, std::size_t freeBefore, std::size_t freeAfter,
+    std::uint32_t hash, std::uint32_t zoneIndex)
+{
+    g_trace.publicationEnd = true;
+    g_trace.assetType = static_cast<std::uint32_t>(type);
+    I_strncpyz(g_trace.assetName, name ? name : "", sizeof(g_trace.assetName));
+    g_trace.assetEntryIndex = entryIndex;
+    g_trace.assetPoolIndex = poolIndex;
+    g_trace.freeEntryCountBefore = static_cast<std::uint32_t>(freeBefore);
+    g_trace.freeEntryCountAfter = static_cast<std::uint32_t>(freeAfter);
+    g_trace.assetHash = hash;
+    g_trace.assetZoneIndex = zoneIndex;
+    Trace("publication end");
+}
+
+void DB_RuntimeGeneratedFailure(const char *stage)
+{
+    if (!g_trace.generatedLoadFailed)
+    {
+        g_trace.generatedLoadFailed = true;
+        DB_FailXFileLoad(stage);
+        Trace(stage);
+    }
+}
+
+bool DB_RuntimeGeneratedLoadFailed()
+{
+    return g_trace.generatedLoadFailed || DB_HasXFileLoadFailure();
+}
+
+bool DB_RuntimeStreamCanRead(std::size_t size)
+{
+    if (g_streamPosIndex >= 9 || !g_streamZoneMem || !g_streamPos) return false;
+    const XBlock &block = g_streamZoneMem->blocks[g_streamPosIndex];
+    if (!block.data || g_streamPos < block.data) return size == 0;
+    const std::size_t offset = static_cast<std::size_t>(g_streamPos - block.data);
+    return offset <= block.size && size <= block.size - offset;
 }
 
 void DB_InitThread()

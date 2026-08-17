@@ -197,6 +197,10 @@ void __cdecl DB_AllocXZoneMemory(
     XZoneMemory *zoneMem,
     uint32_t allocType);
 bool DB_CanAllocXZoneMemory(const uint32_t *blockSize, uint32_t allocType);
+#if defined(KISAK_WEB) || defined(KISAK_DB_SYNC_FILE_TEST)
+void DB_FailXFileLoad(const char *stage);
+bool DB_HasXFileLoadFailure();
+#endif
 
 
 // db_stream

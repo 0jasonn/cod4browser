@@ -194,3 +194,33 @@ std::size_t DB_GetFreeAssetEntryCount()
     for (XAssetEntryPoolEntry *entry = g_freeAssetEntryHead; entry; entry = entry->next) ++count;
     return count;
 }
+
+std::size_t DB_GetAssetPoolFreeCount(XAssetType type)
+{
+    if (type < 0 || type >= ASSET_TYPE_COUNT || !DB_XAssetPool[type] ||
+        !g_poolStride[type]) return 0;
+    void *entry = *static_cast<void **>(DB_XAssetPool[type]);
+    std::size_t count = 0;
+    while (entry)
+    {
+        ++count;
+        std::memcpy(&entry, entry, sizeof(entry));
+    }
+    return count;
+}
+
+std::uint32_t DB_GetAssetPoolIndex(XAssetType type, XAssetHeader header)
+{
+    if (type < 0 || type >= ASSET_TYPE_COUNT || !header.data ||
+        !DB_XAssetPool[type] || !g_poolStride[type]) return UINT32_MAX;
+    const auto *base = static_cast<const std::byte *>(DB_XAssetPool[type]) +
+        sizeof(void *);
+    const auto *entry = static_cast<const std::byte *>(header.data);
+    if (entry < base) return UINT32_MAX;
+    const std::size_t offset = static_cast<std::size_t>(entry - base);
+    if (offset % g_poolStride[type]) return UINT32_MAX;
+    const std::size_t index = offset / g_poolStride[type];
+    return index < static_cast<std::size_t>(g_poolSize[type])
+        ? static_cast<std::uint32_t>(index)
+        : UINT32_MAX;
+}

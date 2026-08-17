@@ -1,6 +1,9 @@
 #include <database/database.h>
+#include <database/db_registry_pools.h>
+#include <database/db_registry_publication.h>
 #include <database/db_runtime_prefix.h>
 #include <qcommon/qcommon.h>
+#include <qcommon/system.h>
 #include <script/scr_stringlist.h>
 #include <universal/physicalmemory.h>
 #include <web/web_database_filesystem.h>
@@ -10,7 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
-#include <cstdarg>
+#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -26,15 +29,7 @@ DBRuntimeTraceSnapshot g_trace{};
 alignas(4096) std::array<std::uint8_t, 4 * 1024 * 1024> g_arena{};
 std::uint32_t g_lowPosition = 0;
 std::uint32_t g_highPosition = static_cast<std::uint32_t>(g_arena.size());
-
-void Reset(const std::vector<std::uint8_t> &file)
-{
-    g_file = file;
-    g_filePosition = 0;
-    g_trace = {};
-    g_lowPosition = 0;
-    g_highPosition = static_cast<std::uint32_t>(g_arena.size());
-}
+std::string g_scriptString;
 
 void AppendU32(std::vector<std::uint8_t> &bytes, std::uint32_t value)
 {
@@ -44,12 +39,13 @@ void AppendU32(std::vector<std::uint8_t> &bytes, std::uint32_t value)
     bytes.push_back(static_cast<std::uint8_t>(value >> 24));
 }
 
-std::vector<std::uint8_t> MakeXFile(const std::array<std::uint32_t, 9> &blocks)
+void AppendCString(std::vector<std::uint8_t> &bytes, const char *value)
 {
-    std::vector<std::uint8_t> inflated;
-    AppendU32(inflated, 4096);
-    AppendU32(inflated, 0);
-    for (const std::uint32_t size : blocks) AppendU32(inflated, size);
+    bytes.insert(bytes.end(), value, value + std::strlen(value) + 1);
+}
+
+std::vector<std::uint8_t> CompressXFile(const std::vector<std::uint8_t> &inflated)
+{
     uLongf compressedSize = static_cast<uLongf>(inflated.size() * 2 + 64);
     std::vector<std::uint8_t> compressed(compressedSize);
     assert(compress2(compressed.data(), &compressedSize, inflated.data(),
@@ -60,14 +56,87 @@ std::vector<std::uint8_t> MakeXFile(const std::array<std::uint32_t, 9> &blocks)
     return result;
 }
 
-void Run(const std::vector<std::uint8_t> &file, XZoneMemory &zone)
+std::vector<std::uint8_t> MakeGeneratedPrefixXFile()
 {
-    Reset(file);
+    std::vector<std::uint8_t> inflated;
+    AppendU32(inflated, 8192);
+    AppendU32(inflated, 0);
+    for (const std::uint32_t size : std::array<std::uint32_t, 9>{
+        4096, 0, 0, 0, 4096, 0, 0, 0, 0}) AppendU32(inflated, size);
+
+    AppendU32(inflated, 1);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, 1);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, UINT32_MAX);
+    AppendCString(inflated, "gate3_script_identity");
+    AppendU32(inflated, ASSET_TYPE_RAWFILE);
+    AppendU32(inflated, UINT32_MAX - 1u);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, 5);
+    AppendU32(inflated, 1);
+    AppendCString(inflated, "tests/gate3_first.txt");
+    AppendCString(inflated, "first");
+    assert(inflated.size() == 134);
+    return CompressXFile(inflated);
+}
+
+std::vector<std::uint8_t> MakeEmptyXFile(
+    const std::array<std::uint32_t, 9> &blocks)
+{
+    std::vector<std::uint8_t> inflated;
+    AppendU32(inflated, 4096);
+    AppendU32(inflated, 0);
+    for (const std::uint32_t size : blocks) AppendU32(inflated, size);
+    for (int index = 0; index < 4; ++index) AppendU32(inflated, 0);
+    return CompressXFile(inflated);
+}
+
+std::vector<std::uint8_t> MakeScriptListXFile()
+{
+    std::vector<std::uint8_t> inflated;
+    AppendU32(inflated, 8192);
+    AppendU32(inflated, 0);
+    for (const std::uint32_t size : std::array<std::uint32_t, 9>{
+        4096, 0, 0, 0, 4096, 0, 0, 0, 0}) AppendU32(inflated, size);
+    AppendU32(inflated, 2);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, UINT32_MAX);
+    AppendCString(inflated, "gate3_alpha");
+    AppendCString(inflated, "gate3_beta");
+    return CompressXFile(inflated);
+}
+
+void Reset(const std::vector<std::uint8_t> &file)
+{
+    g_file = file;
+    g_filePosition = 0;
+    g_trace = {};
+    g_lowPosition = 0;
+    g_highPosition = static_cast<std::uint32_t>(g_arena.size());
+    g_scriptString.clear();
+    std::memset(g_zones, 0, sizeof(g_zones));
+    g_zones[1].flags = 1;
+    DB_InitAssetPools();
+    DB_SetLoadingZoneIndex(1);
+}
+
+void RunPrepared(XZoneMemory &zone)
+{
     zone = {};
     alignas(16) static std::array<std::uint8_t, 0x80000> inputBuffer{};
     DB_LoadXFile("zone/english/synthetic.ff", reinterpret_cast<void *>(1),
         "synthetic", &zone, nullptr, inputBuffer.data(), 0);
     DB_LoadXFileInternal();
+}
+
+void Run(const std::vector<std::uint8_t> &file, XZoneMemory &zone)
+{
+    Reset(file);
+    RunPrepared(zone);
 }
 } // namespace
 
@@ -121,6 +190,85 @@ void DB_RuntimeTraceStreamsInitialized(std::uint32_t block, std::uint32_t offset
     g_trace.streamInitialized = true;
 }
 void DB_RuntimeTraceCleanupComplete() { g_trace.cleanupComplete = true; }
+void DB_RuntimeTraceXAssetListBegin(std::int32_t strings, std::int32_t assets)
+{
+    g_trace.xassetListBegin = true;
+    g_trace.scriptStringCount = strings >= 0 ? strings : UINT32_MAX;
+    g_trace.xassetCount = assets >= 0 ? assets : UINT32_MAX;
+}
+void DB_RuntimeTraceXAssetListEnd()
+{
+    g_trace.xassetListEnd = true;
+    for (std::uint32_t index = 0; index < 9; ++index)
+    {
+        const std::uint8_t *position = index == g_streamPosIndex
+            ? g_streamPos : g_streamPosArray[index];
+        const std::uint8_t *base = g_streamZoneMem->blocks[index].data;
+        g_trace.streamOffsets[index] = position && base && position >= base
+            ? static_cast<std::uint32_t>(position - base) : 0u;
+    }
+}
+void DB_RuntimeTraceScriptString(std::uint32_t index, const char *identity)
+{
+    if (index < std::size(g_trace.scriptStringIdentities))
+        std::snprintf(g_trace.scriptStringIdentities[index],
+            sizeof(g_trace.scriptStringIdentities[index]), "%s", identity ? identity : "");
+    g_trace.scriptStringObservedCount = index + 1;
+}
+void DB_RuntimeTraceAssetBegin(std::uint32_t index, XAssetType type,
+    const char *classification)
+{
+    g_trace.assetIndex = index;
+    g_trace.assetType = type;
+    std::snprintf(g_trace.pointerClassification,
+        sizeof(g_trace.pointerClassification), "%s", classification ? classification : "");
+}
+void DB_RuntimeTraceAssetLoaded(const char *name)
+{
+    std::snprintf(g_trace.assetName, sizeof(g_trace.assetName), "%s", name ? name : "");
+}
+void DB_RuntimeTracePublicationBegin(XAssetType type, const char *name,
+    std::size_t freeCount)
+{
+    g_trace.publicationBegin = true;
+    g_trace.assetType = type;
+    g_trace.freeEntryCountBefore = static_cast<std::uint32_t>(freeCount);
+    std::snprintf(g_trace.assetName, sizeof(g_trace.assetName), "%s", name ? name : "");
+}
+void DB_RuntimeTracePublicationEnd(XAssetType type, const char *name,
+    std::uint32_t entryIndex, std::uint32_t poolIndex, std::size_t freeBefore,
+    std::size_t freeAfter, std::uint32_t hash, std::uint32_t zoneIndex)
+{
+    g_trace.publicationEnd = true;
+    g_trace.assetType = type;
+    g_trace.assetEntryIndex = entryIndex;
+    g_trace.assetPoolIndex = poolIndex;
+    g_trace.freeEntryCountBefore = static_cast<std::uint32_t>(freeBefore);
+    g_trace.freeEntryCountAfter = static_cast<std::uint32_t>(freeAfter);
+    g_trace.assetHash = hash;
+    g_trace.assetZoneIndex = zoneIndex;
+    std::snprintf(g_trace.assetName, sizeof(g_trace.assetName), "%s", name ? name : "");
+}
+void DB_RuntimeGeneratedFailure(const char *stage)
+{
+    if (!g_trace.generatedLoadFailed)
+    {
+        g_trace.generatedLoadFailed = true;
+        DB_FailXFileLoad(stage);
+    }
+}
+bool DB_RuntimeGeneratedLoadFailed()
+{
+    return g_trace.generatedLoadFailed || DB_HasXFileLoadFailure();
+}
+bool DB_RuntimeStreamCanRead(std::size_t size)
+{
+    if (g_streamPosIndex >= 9 || !g_streamZoneMem || !g_streamPos) return false;
+    const XBlock &block = g_streamZoneMem->blocks[g_streamPosIndex];
+    if (!block.data || g_streamPos < block.data) return size == 0;
+    const std::size_t offset = static_cast<std::size_t>(g_streamPos - block.data);
+    return offset <= block.size && size <= block.size - offset;
+}
 
 void MyAssertHandler(const char *, int, int, const char *, ...)
 {
@@ -129,7 +277,35 @@ void MyAssertHandler(const char *, int, int, const char *, ...)
 void Com_Error(errorParm_t, const char *, ...) { throw std::runtime_error("canonical DB error"); }
 void Com_PrintError(int, const char *, ...) {}
 void Com_Printf(int, const char *, ...) {}
-std::uint32_t SL_GetString(const char *, std::uint32_t) { return 0; }
+int I_stricmp(const char *left, const char *right)
+{
+    while (*left && std::tolower(static_cast<unsigned char>(*left)) ==
+        std::tolower(static_cast<unsigned char>(*right)))
+    {
+        ++left;
+        ++right;
+    }
+    return std::tolower(static_cast<unsigned char>(*left)) -
+        std::tolower(static_cast<unsigned char>(*right));
+}
+void track_static_alloc_internal(void *, int, const char *, int) {}
+void Sys_LockWrite(FastCriticalSection *section)
+{
+    section->writeCount = section->writeCount + 1;
+}
+void Sys_UnlockWrite(FastCriticalSection *section)
+{
+    section->writeCount = section->writeCount - 1;
+}
+std::uint32_t SL_GetString(const char *value, std::uint32_t)
+{
+    g_scriptString = value ? value : "";
+    return g_scriptString.empty() ? 0u : 1u;
+}
+const char *SL_ConvertToString(std::uint32_t value)
+{
+    return value == 1 ? g_scriptString.c_str() : "";
+}
 
 std::uint8_t *PMem_Alloc(std::uint32_t size, std::uint32_t alignment,
     std::uint32_t, std::uint32_t allocType)
@@ -162,44 +338,80 @@ const PhysicalMemory *PMem_GetState()
 int main()
 {
     XZoneMemory zone{};
-    const std::array<std::uint32_t, 9> blocks{1024, 0, 0, 0, 2048, 0, 0, 64, 32};
-    Run(MakeXFile(blocks), zone);
-    assert(g_trace.headerValid);
-    assert(g_trace.inflateInitialized);
-    assert(g_trace.decompressedBytesProduced == sizeof(XFile));
-    assert(g_trace.compressedBytesConsumed > 0);
-    assert(g_trace.xfileSize == 4096);
-    assert(std::memcmp(g_trace.blockSizes, blocks.data(), sizeof(blocks)) == 0);
-    assert(g_trace.blockAllocationCount == 4);
-    assert(g_trace.blockAllocationBytes == 3168);
-    assert(g_trace.streamInitialized && g_trace.streamBlock == 0 && g_trace.streamOffset == 0);
-    assert(g_trace.cleanupComplete);
-    assert(std::strcmp(g_trace.stopStage,
-        "Load_XAssetListCustom/generated-loader-closure") == 0);
-    assert(g_streamZoneMem == &zone);
-    assert(g_streamPos == zone.blocks[0].data);
+    const std::array<std::uint32_t, 9> prefixBlocks{
+        4096, 0, 0, 0, 4096, 0, 0, 0, 0};
+    Run(MakeEmptyXFile(prefixBlocks), zone);
+    assert(g_trace.decompressedBytesProduced == 60);
+    assert(g_trace.xassetListBegin && g_trace.xassetListEnd);
+    assert(g_trace.scriptStringCount == 0 && g_trace.xassetCount == 0);
+    assert(std::all_of(std::begin(g_trace.streamOffsets),
+        std::end(g_trace.streamOffsets), [](std::uint32_t value) { return value == 0; }));
+    assert(std::strcmp(g_trace.stopStage, "Load_XAssetHeader/next-family-closure") == 0);
+
+    Run(MakeScriptListXFile(), zone);
+    assert(g_trace.scriptStringCount == 2 && g_trace.scriptStringObservedCount == 2);
+    assert(std::strcmp(g_trace.scriptStringIdentities[0], "gate3_alpha") == 0);
+    assert(std::strcmp(g_trace.scriptStringIdentities[1], "gate3_beta") == 0);
+    assert(g_trace.xassetCount == 0 && g_trace.streamOffsets[4] == 31);
+    assert(!g_trace.publicationBegin && !g_trace.generatedLoadFailed);
+
+    const std::vector<std::uint8_t> generated = MakeGeneratedPrefixXFile();
+    Run(generated, zone);
+    assert(g_trace.headerValid && g_trace.inflateInitialized);
+    assert(g_trace.decompressedBytesProduced == 134);
+    assert(g_trace.xfileSize == 8192 && g_trace.blockAllocationCount == 2);
+    assert(g_trace.blockAllocationBytes == 8192 && g_trace.streamInitialized);
+    assert(g_trace.xassetListBegin && g_trace.xassetListEnd);
+    assert(g_trace.scriptStringCount == 1 && g_trace.scriptStringObservedCount == 1);
+    assert(std::strcmp(g_trace.scriptStringIdentities[0], "gate3_script_identity") == 0);
+    assert(g_trace.xassetCount == 1 && g_trace.assetIndex == 0);
+    assert(g_trace.assetType == ASSET_TYPE_RAWFILE);
+    assert(std::strcmp(g_trace.pointerClassification, "inline-insert/-2") == 0);
+    assert(std::strcmp(g_trace.assetName, "tests/gate3_first.txt") == 0);
+    assert(g_trace.publicationBegin && g_trace.publicationEnd);
+    assert(g_trace.assetEntryIndex == 16 && g_trace.assetPoolIndex == 0);
+    assert(g_trace.freeEntryCountBefore == 32752 && g_trace.freeEntryCountAfter == 32751);
+    assert(g_trace.assetHash == DB_HashForNameCanonical(
+        "tests/gate3_first.txt", ASSET_TYPE_RAWFILE));
+    assert(g_trace.assetZoneIndex == 1);
+    assert(g_trace.streamOffsets[0] == 0 && g_trace.streamOffsets[4] == 68);
+    assert(g_trace.cleanupComplete && !g_trace.generatedLoadFailed);
+    assert(std::strcmp(g_trace.stopStage, "Load_XAssetHeader/next-family-closure") == 0);
+    const XAssetHeader published = DB_FindXAssetHeader(
+        ASSET_TYPE_RAWFILE, "tests/gate3_first.txt");
+    assert(published.rawfile && published.rawfile->len == 5);
+    assert(std::strcmp(published.rawfile->buffer, "first") == 0);
+
+    Reset(generated);
+    *static_cast<void **>(DB_XAssetPool[ASSET_TYPE_RAWFILE]) = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin && !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage, "publication/asset pool exhaustion") == 0);
+    assert(DB_FindXAssetEntryCanonical(ASSET_TYPE_RAWFILE,
+        "tests/gate3_first.txt") == nullptr);
+
+    Reset(generated);
+    g_freeAssetEntryHead = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin && !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage, "publication/asset entry exhaustion") == 0);
+    assert(DB_FindXAssetEntryCanonical(ASSET_TYPE_RAWFILE,
+        "tests/gate3_first.txt") == nullptr);
 
     const std::array<std::uint32_t, 9> oversized{0x08000001u, 0, 0, 0, 0, 0, 0, 0, 0};
-    Run(MakeXFile(oversized), zone);
+    Run(MakeEmptyXFile(oversized), zone);
     assert(std::strcmp(g_trace.stopStage, "XFile/block allocation exhaustion") == 0);
-    assert(g_trace.blockAllocationCount == 0);
-    assert(!g_trace.streamInitialized && g_trace.cleanupComplete);
+    assert(g_trace.blockAllocationCount == 0 && !g_trace.streamInitialized);
 
     const std::array<std::uint32_t, 9> overflowing{0xfffffff8u, 0, 0, 0, 0, 0, 0, 0, 0};
-    Run(MakeXFile(overflowing), zone);
+    Run(MakeEmptyXFile(overflowing), zone);
     assert(std::strcmp(g_trace.stopStage, "XFile/block allocation exhaustion") == 0);
-    assert(g_trace.blockAllocationCount == 0);
-    assert(!g_trace.streamInitialized && g_trace.cleanupComplete);
+    assert(g_trace.blockAllocationCount == 0 && !g_trace.streamInitialized);
 
-    // A failed request must leave the global load descriptor reusable by the
-    // next canonical request rather than retaining EOF/inflate state.
-    Run(MakeXFile(blocks), zone);
-    assert(std::strcmp(g_trace.stopStage,
-        "Load_XAssetListCustom/generated-loader-closure") == 0);
-    assert(g_trace.decompressedBytesProduced == sizeof(XFile));
-    assert(g_trace.blockAllocationCount == 4);
-    assert(g_trace.streamInitialized && g_trace.cleanupComplete);
+    Run(generated, zone);
+    assert(g_trace.publicationEnd && g_trace.cleanupComplete);
+    assert(std::strcmp(g_trace.stopStage, "Load_XAssetHeader/next-family-closure") == 0);
 
-    std::printf("gate3-db-stream produced=44 blocks=1024,0,0,0,2048,0,0,64,32 allocations=4 stop=generated-loader-closure\n");
+    std::printf("gate3-db-stream produced=134 strings=1 assets=1 type=31 entry=16 pool=0 free=32752->32751 zone=1 offsets=0,0,0,0,68,0,0,0,0 stop=next-family-closure\n");
     return 0;
 }

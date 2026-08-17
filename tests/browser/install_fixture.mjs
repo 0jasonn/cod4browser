@@ -45,6 +45,49 @@ export function createSyntheticCanonicalXFile({
     ]);
 }
 
+export function createSyntheticGeneratedPrefixFastfile({
+    scriptStrings = [],
+    rawFiles = [],
+    scriptStringCount = scriptStrings.length,
+    assetCount = rawFiles.length,
+    assetType = 31,
+    assetPointer = 0xffff_fffe,
+    blockSizes = [4096, 0, 0, 0, 4096, 0, 0, 0, 0],
+    compressionLevel = 9,
+} = {})
+{
+    const inflated = [];
+    appendU32(inflated, 8192);
+    appendU32(inflated, 0);
+    for (const blockSize of blockSizes) appendU32(inflated, blockSize);
+    appendU32(inflated, scriptStringCount);
+    appendU32(inflated, scriptStrings.length ? 0xffff_ffff : 0);
+    appendU32(inflated, assetCount);
+    appendU32(inflated, rawFiles.length ? 0xffff_ffff : 0);
+    for (const _identity of scriptStrings) appendU32(inflated, 0xffff_ffff);
+    for (const identity of scriptStrings) {
+        inflated.push(...Buffer.from(identity, "utf8"), 0);
+    }
+    for (const _rawFile of rawFiles) {
+        appendU32(inflated, assetType);
+        appendU32(inflated, assetPointer);
+    }
+    for (const rawFile of rawFiles) {
+        const payload = Buffer.from(rawFile.contents ?? "", "utf8");
+        appendU32(inflated, 0xffff_ffff);
+        appendU32(inflated, payload.length);
+        appendU32(inflated, 1);
+        inflated.push(...Buffer.from(rawFile.name, "utf8"), 0);
+        inflated.push(...payload, 0);
+    }
+    const compressed = deflateSync(Uint8Array.from(inflated), {
+        level: compressionLevel,
+    });
+    return Uint8Array.from([
+        ...Buffer.from("IWffu100", "ascii"), 5, 0, 0, 0, ...compressed,
+    ]);
+}
+
 export function createSyntheticCanonicalRefillXFile()
 {
     const inflated = [];
@@ -53,6 +96,10 @@ export function createSyntheticCanonicalRefillXFile()
     for (const blockSize of [1024, 0, 0, 0, 1024, 0, 0, 0, 0]) {
         appendU32(inflated, blockSize);
     }
+    appendU32(inflated, 0); // ScriptStringList count
+    appendU32(inflated, 0); // ScriptStringList strings
+    appendU32(inflated, 0); // XAsset count
+    appendU32(inflated, 0); // XAsset array
 
     // Valid zlib/deflate with enough empty stored blocks to place the first
     // output beyond the native 256 KiB input half-buffer.

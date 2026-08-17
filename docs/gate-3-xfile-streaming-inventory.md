@@ -64,10 +64,10 @@ Production Wasm now directly compiles:
 - `db_stream.cpp`
 - `db_stream_load.cpp`
 
-The executed path reaches `DB_InitStreams` with all nine canonical block slots,
-then publishes `first generated-loader entry` and stops at
-`Load_XAssetListCustom/generated-loader-closure`. No census or
-`WebRetailLoadContext` state is read.
+The executed path reaches `DB_InitStreams` with all nine canonical block slots.
+The following generated-prefix and first-publication slice is inventoried in
+`docs/gate-3-generated-loader-inventory.md`. No census or
+`WebRetailLoadContext` state is read by either path.
 
 The default freely generated fixture produces the 44-byte `XFile`, reports
 block sizes `498816,0,0,0,407412,0,0,4224,480`, allocates the four non-empty
@@ -86,31 +86,24 @@ nine block sizes; it has no separately encoded block-count field to validate.
 
 ## Differential evidence
 
-`gate3_db_stream_trace_tests` compiles the same five shared DB translation
-units for Win32 x86 and Emscripten. Both executions emit:
+The original streaming checkpoint compiled the same five DB translation units
+for Win32 x86 and Emscripten and emitted a 44-byte-envelope trace. The current
+test has advanced to the generated closure and both executions now emit:
 
 ```text
-gate3-db-stream produced=44 blocks=1024,0,0,0,2048,0,0,64,32 allocations=4 stop=generated-loader-closure
+gate3-db-stream produced=134 strings=1 assets=1 type=31 entry=16 pool=0 free=32752->32751 zone=1 offsets=0,0,0,0,68,0,0,0,0 stop=next-family-closure
 ```
 
 The browser Worker test separately verifies the real synchronous OPFS-style
 descriptor boundary and normalized trace transport. Addresses, browser storage
 identities, and host paths are absent from both traces.
 
-## Exact next closure
+## Superseded closure
 
-The first deliberately unentered function is `Load_XAssetListCustom` in
-`db_file_load.cpp`. Its first generated dependency is
-`Load_ScriptStringList` in `db_load.cpp`. Compiling `db_load.cpp` currently
-pulls the generated family graph and globals for XAnim, XModel, materials,
-images, sound, collision, ComWorld, GfxWorld, FX, weapons, RawFile,
-StringTable, renderer buffer finalization, and database publication.
-
-The next slice should extract or compile that closure in native generated
-order, beginning with `XAssetList` and `ScriptStringList`, then stop at the
-first asset-family dependency that cannot link. It must continue to use
-`g_streamPos`, `g_streamPosArray`, `g_streamZoneMem`, and PMem-owned blocks;
-the census remains differential evidence only.
+`Load_XAssetListCustom`, `Load_ScriptStringList`, `Load_XAssetArrayCustom`,
+`Load_XAsset`, the RawFile family, and first canonical DB publication now run.
+See `docs/gate-3-generated-loader-inventory.md` for the exact shared extraction,
+trace, and next `PhysPreset` closure.
 
 No configured legally owned retail root was available during this slice, so a
 real-zone run was not claimed. The production path is generic
