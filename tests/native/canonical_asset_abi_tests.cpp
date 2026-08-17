@@ -11,6 +11,7 @@
 #include <sound/snd_alias_types.h>
 #include <xanim/xanim_types.h>
 #include <xanim/xmodel_types.h>
+#include <ui/ui_asset_types.h>
 
 #include <cstddef>
 #include <cstdlib>
@@ -50,6 +51,8 @@ void TestCanonicalAssetTypes()
             std::is_standard_layout_v<FxTrailDef> &&
             std::is_standard_layout_v<FxElemVelStateSample> &&
             std::is_standard_layout_v<FxElemVisStateSample> &&
+            std::is_standard_layout_v<FxImpactEntry> &&
+            std::is_standard_layout_v<FxImpactTable> &&
             std::is_standard_layout_v<WeaponDef> &&
             std::is_standard_layout_v<ComPrimaryLight> &&
             std::is_standard_layout_v<ComWorld> &&
@@ -63,7 +66,11 @@ void TestCanonicalAssetTypes()
             std::is_standard_layout_v<Font_s> &&
             std::is_standard_layout_v<Glyph> &&
             std::is_standard_layout_v<LocalizeEntry> &&
-            std::is_standard_layout_v<GfxLightDef>,
+            std::is_standard_layout_v<GfxLightDef> &&
+            std::is_standard_layout_v<MenuList> &&
+            std::is_standard_layout_v<menuDef_t> &&
+            std::is_standard_layout_v<itemDef_s> &&
+            std::is_standard_layout_v<statement_s>,
         "canonical weapon dependency types remain standard-layout records");
     Require(sizeof(XAssetHeader) == sizeof(void *),
         "XAssetHeader remains one native pointer wide");
@@ -133,6 +140,10 @@ void TestCanonicalAssetTypes()
                 sizeof(FxTrailDef) == 28u &&
                 offsetof(FxTrailDef, verts) == 16u &&
                 offsetof(FxTrailDef, inds) == 24u &&
+                sizeof(FxImpactEntry) == 132u &&
+                offsetof(FxImpactEntry, flesh) == 116u &&
+                sizeof(FxImpactTable) == 8u &&
+                offsetof(FxImpactTable, table) == 4u &&
                 sizeof(WeaponDef) == 2168u &&
                 sizeof(ComPrimaryLight) == 68u &&
                 offsetof(ComPrimaryLight, defName) == 64u &&
@@ -168,7 +179,21 @@ void TestCanonicalAssetTypes()
                 sizeof(GfxLightImage) == 8u &&
                 sizeof(GfxLightDef) == 16u &&
                 offsetof(GfxLightDef, attenuation) == 4u &&
-                offsetof(GfxLightDef, lmapLookupStart) == 12u,
+                offsetof(GfxLightDef, lmapLookupStart) == 12u &&
+                sizeof(windowDef_t) == 156u &&
+                sizeof(ItemKeyHandler) == 12u &&
+                sizeof(Operand) == 8u &&
+                sizeof(expressionEntry) == 12u &&
+                sizeof(statement_s) == 8u &&
+                sizeof(itemDef_s) == 372u &&
+                offsetof(itemDef_s, typeData) == 300u &&
+                sizeof(menuDef_t) == 284u &&
+                offsetof(menuDef_t, items) == 280u &&
+                sizeof(MenuList) == 12u &&
+                offsetof(MenuList, menus) == 8u &&
+                sizeof(listBoxDef_s) == 340u &&
+                sizeof(editFieldDef_s) == 32u &&
+                sizeof(multiDef_s) == 392u,
             "32-bit native/Wasm builds match canonical weapon child ABIs");
     }
 
@@ -183,6 +208,8 @@ void TestCanonicalAssetTypes()
             ASSET_TYPE_FONT == static_cast<XAssetType>(19) &&
             ASSET_TYPE_GFXWORLD == static_cast<XAssetType>(16) &&
             ASSET_TYPE_LIGHT_DEF == static_cast<XAssetType>(17) &&
+            ASSET_TYPE_MENULIST == static_cast<XAssetType>(20) &&
+            ASSET_TYPE_MENU == static_cast<XAssetType>(21) &&
             ASSET_TYPE_LOCALIZE_ENTRY == static_cast<XAssetType>(22) &&
             ASSET_TYPE_FX == static_cast<XAssetType>(25) &&
             ASSET_TYPE_RAWFILE == static_cast<XAssetType>(31) &&

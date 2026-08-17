@@ -5,6 +5,7 @@
 #include <database/localize_types.h>
 #include <EffectsCore/fx_types.h>
 #include <gfx_d3d/material_types.h>
+#include <gfx_d3d/gfx_light_types.h>
 #include <gfx_d3d/r_font.h>
 #include <physics/phys_preset.h>
 #include <sound/snd_alias_types.h>
@@ -40,6 +41,16 @@ extern Font_s *varFont;
 extern Font_s **varFontHandle;
 extern FxEffectDef *varFxEffectDef;
 extern const FxEffectDef **varFxEffectDefHandle;
+extern FxImpactEntry *varFxImpactEntry;
+extern FxImpactTable *varFxImpactTable;
+extern FxImpactTable **varFxImpactTablePtr;
+extern GfxLightDef *varGfxLightDef;
+extern GfxLightDef **varGfxLightDefPtr;
+extern GfxLightImage *varGfxLightImage;
+extern MenuList *varMenuList;
+extern MenuList **varMenuListPtr;
+extern menuDef_t *varmenuDef_t;
+extern menuDef_t **varmenuDefPtr;
 extern XAssetHeader *varXAssetHeader;
 
 void __cdecl Load_XString(bool atStreamStart);
@@ -54,4 +65,8 @@ void __cdecl Load_FontHandle(bool atStreamStart);
 void __cdecl Load_FxEffectDefHandle(bool atStreamStart);
 void __cdecl Load_FxEffectDefHandleArray(bool atStreamStart,
     std::int32_t count);
+void __cdecl Load_FxImpactTablePtr(bool atStreamStart);
+void __cdecl Load_GfxLightDefPtr(bool atStreamStart);
+void __cdecl Load_MenuListPtr(bool atStreamStart);
+void __cdecl Load_menuDef_ptr(bool atStreamStart);
 void DB_SetGeneratedAssetIndex(std::uint32_t index);

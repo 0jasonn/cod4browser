@@ -309,19 +309,6 @@ struct FxElemPreVisualState // sizeof=0x1C
     int randomSeed;
     uint32_t distanceFade;
 };
-struct FxImpactEntry // sizeof=0x84
-{
-    const FxEffectDef *nonflesh[29];
-    const FxEffectDef *flesh[4];
-};
-
-struct FxImpactTable // sizeof=0x8
-{                                       // ...
-    const char *name;
-    FxImpactEntry *table;
-};
-static_assert(sizeof(FxImpactTable) == 8);
-
 struct FxSystemBuffers // sizeof=0x47480
 {                                       // ...
     FxEffect effects[MAX_EFFECTS];

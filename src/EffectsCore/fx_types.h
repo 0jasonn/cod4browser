@@ -185,6 +185,18 @@ struct FxElemDef // IW3 size: 0xFC
     std::uint8_t unused[1];
 };
 
+struct FxImpactEntry // IW3 size: 0x84
+{
+    const FxEffectDef *nonflesh[29];
+    const FxEffectDef *flesh[4];
+};
+
+struct FxImpactTable // IW3 size: 0x8
+{
+    const char *name;
+    FxImpactEntry *table;
+};
+
 static_assert(sizeof(FxFloatRange) == 8u);
 static_assert(sizeof(FxSpawnDef) == 8u);
 static_assert(sizeof(FxElemAtlas) == 8u);
@@ -199,3 +211,5 @@ static_assert(sizeof(void *) != 4u || sizeof(FxElemMarkVisuals) == 8u);
 static_assert(sizeof(void *) != 4u || sizeof(FxElemDefVisuals) == 4u);
 static_assert(sizeof(void *) != 4u || sizeof(FxTrailDef) == 28u);
 static_assert(sizeof(void *) != 4u || sizeof(FxElemDef) == 252u);
+static_assert(sizeof(void *) != 4u || sizeof(FxImpactEntry) == 132u);
+static_assert(sizeof(void *) != 4u || sizeof(FxImpactTable) == 8u);

@@ -327,6 +327,23 @@ static void Load_XAssetHeader(bool atStreamStart)
             varXAssetHeader);
         Load_FxEffectDefHandle(false);
         break;
+    case ASSET_TYPE_IMPACT_FX:
+        varFxImpactTablePtr = reinterpret_cast<FxImpactTable **>(
+            varXAssetHeader);
+        Load_FxImpactTablePtr(false);
+        break;
+    case ASSET_TYPE_LIGHT_DEF:
+        varGfxLightDefPtr = reinterpret_cast<GfxLightDef **>(varXAssetHeader);
+        Load_GfxLightDefPtr(false);
+        break;
+    case ASSET_TYPE_MENULIST:
+        varMenuListPtr = reinterpret_cast<MenuList **>(varXAssetHeader);
+        Load_MenuListPtr(false);
+        break;
+    case ASSET_TYPE_MENU:
+        varmenuDefPtr = reinterpret_cast<menuDef_t **>(varXAssetHeader);
+        Load_menuDef_ptr(false);
+        break;
     case ASSET_TYPE_RAWFILE:
         varRawFilePtr = reinterpret_cast<RawFile **>(varXAssetHeader);
         Load_RawFilePtr(false);

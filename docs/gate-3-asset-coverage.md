@@ -19,6 +19,10 @@ remains an explicitly started oracle and does not supply assets to this path.
 | LoadedSound | yes | Canonical metadata/payload stream, aliases and publication |
 | Font | yes | Canonical body, Material dependencies, glyph array and publication |
 | FxEffectDef | yes, reached closure | Canonical elements, samples, visuals, references, trails and publication; inline XModel bodies remain fail-closed |
+| FxImpactTable | yes | Fixed 12-entry table, 396 FxEffectDef handles, aliases and dependency-ordered publication |
+| GfxLightDef | yes | Canonical 16-byte body, embedded light image, GfxImage dependency and publication |
+| MenuList | yes | Canonical list body, Menu pointer array, root aliases and final publication |
+| Menu | yes, nested and top-level | Window/item/key/type-data/expression closure, Material/sound dependencies, item-parent reparenting and publication |
 
 The shared prefix also owns XAssetList, ScriptStringList, XString, stream block,
 PMem, zone, pool, free-chain, hash and insertion-cell behavior used by these
@@ -34,10 +38,7 @@ DB dispatcher and real DB publication path:
 - XModel and its surface/collision/physics graph
 - clipMap/clipMapPVS
 - ComWorld
-- GfxLightDef
-- MenuList
 - WeaponDef
-- FxImpactTable
 - StringTable
 - GfxWorld
 
@@ -62,9 +63,13 @@ still appear inside Gate 2 oracle results, but they are no longer census-only.
 
 ## Next retail blocker
 
-Owned `code_post_gfx.ff` now publishes 1,243 assets, including
-`misc/missing_fx` plus its nested Material and GfxImage, and reaches asset 1225,
-type 26 `ASSET_TYPE_IMPACT_FX`, at block 4 offset 220880. The next generated
-closure is `Load_FxImpactTablePtr -> Load_FxImpactTable ->` 12 fixed
-`FxImpactEntry` records, each containing 29 non-flesh and four flesh
-`FxEffectDefHandle` dependencies.
+Owned `code_post_gfx.ff` now publishes 1,555 records through asset 1505,
+including one FxImpactTable, two GfxLightDefs, two MenuLists and 14 Menu child
+assets. It reaches asset 1506, type 23 `ASSET_TYPE_WEAPON`, at block 4 offset
+373196. The next generated closure is `Load_WeaponDefPtr -> Load_WeaponDef ->
+Load_WeaponDefAsset`: a 2,168-byte body with XModel arrays, 33 animation-name
+XStrings, 40 script strings, dozens of sound-name cells, Material and FX
+dependencies, a 29-entry bounce-sound table, projectile dependencies, and four
+accuracy-graph arrays. Inline XModel loading is not yet canonical in Gate 3,
+so WeaponDef is the next dependency-heavy architectural slice rather than a
+single-family leaf loader.

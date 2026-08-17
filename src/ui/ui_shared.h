@@ -4,6 +4,7 @@
 #include <database/localize_types.h>
 
 #include <gfx_d3d/r_font.h>
+#include <ui/ui_asset_types.h>
 #include "keycodes.h"
 
 #undef DrawText
@@ -20,6 +21,7 @@ enum Scr_ConsoleOpenMode : __int32
     SCR_CONSOLE_INPUT_OUTPUT = 0x1,
 };
 
+#ifndef KISAK_UI_ASSET_TYPES_DEFINED
 #ifdef KISAK_MP
 enum operationEnum : __int32
 {                                       // ...
@@ -198,6 +200,7 @@ enum operationEnum : __int32
     NUM_OPERATORS = 0x50,
 };
 #endif
+#endif // KISAK_UI_ASSET_TYPES_DEFINED
 
 
 #ifdef KISAK_MP
@@ -354,6 +357,7 @@ struct Eval // sizeof=0x5010
     // padding byte
 };
 
+#ifndef KISAK_UI_ASSET_TYPES_DEFINED
 struct rectDef_s // sizeof=0x18 // (SP/MP Same)
 {                                       // ...
     float x;                            // ...
@@ -543,6 +547,7 @@ struct menuDef_t // sizeof=0x11C
     statement_s rectYExp;
     itemDef_s **items;
 };
+#endif // KISAK_UI_ASSET_TYPES_DEFINED
 
 union UILocalVar_u // sizeof=0x4
 {                                       // ...
@@ -623,12 +628,14 @@ struct loadAssets_t // sizeof=0x10
     float fadeInAmount;                 // ...
 };
 
+#ifndef KISAK_UI_ASSET_TYPES_DEFINED
 struct MenuList // sizeof=0xC
 {                                       // ...
     const char *name;
     int menuCount;                      // ...
     menuDef_t **menus;                  // ...
 };
+#endif // KISAK_UI_ASSET_TYPES_DEFINED
 
 struct $F99A9AECA2B60514CA5C8024B8EAC369 // sizeof=0xC1C
 {                                       // ...
@@ -798,6 +805,7 @@ struct CachedAssets_t // sizeof=0x48
 };
 
 
+#ifndef KISAK_UI_ASSET_TYPES_DEFINED
 struct columnInfo_s // sizeof=0x10
 {                                       // ...
     int pos;
@@ -843,6 +851,7 @@ struct multiDef_s // sizeof=0x188
     int count;
     int strDef;
 };
+#endif // KISAK_UI_ASSET_TYPES_DEFINED
 
 // ui_shared
 bool __cdecl Window_IsVisible(int localClientNum, const windowDef_t *w);

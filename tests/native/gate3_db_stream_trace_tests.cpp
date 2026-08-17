@@ -12,6 +12,7 @@
 #include <qcommon/system.h>
 #include <script/scr_stringlist.h>
 #include <sound/snd_alias_types.h>
+#include <ui/ui_asset_types.h>
 #include <universal/physicalmemory.h>
 #include <web/web_database_filesystem.h>
 
@@ -952,6 +953,299 @@ std::vector<std::uint8_t> MakeFxXFile(
     return CompressXFile(inflated);
 }
 
+struct FxImpactFixtureOptions
+{
+    std::uint32_t assetPointer = UINT32_MAX - 1u;
+    bool includeAliasAsset = true;
+    std::uint32_t tablePointer = 1;
+    bool includeTable = true;
+    std::uint32_t firstFxPointer = UINT32_MAX - 1u;
+    bool includeFxBody = true;
+    bool includeFxAlias = true;
+    bool terminateName = true;
+};
+
+std::vector<std::uint8_t> MakeFxImpactXFile(
+    const FxImpactFixtureOptions &options = {})
+{
+    constexpr const char *name = "impact/gate3";
+    constexpr const char *fxName = "fx/impact_child";
+    const bool inlineAsset = options.assetPointer == UINT32_MAX ||
+        options.assetPointer == UINT32_MAX - 1u;
+    const std::uint32_t assetCount = options.includeAliasAsset ? 2u : 1u;
+    std::vector<std::uint8_t> inflated;
+    AppendU32(inflated, 16384);
+    AppendU32(inflated, 0);
+    for (const std::uint32_t size : std::array<std::uint32_t, 9>{
+        4096, 0, 0, 0, 12288, 0, 0, 0, 0}) AppendU32(inflated, size);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, assetCount);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, ASSET_TYPE_IMPACT_FX);
+    AppendU32(inflated, options.assetPointer);
+    if (options.includeAliasAsset)
+    {
+        AppendU32(inflated, ASSET_TYPE_IMPACT_FX);
+        AppendU32(inflated, 0x40000011u);
+    }
+    if (!inlineAsset) return CompressXFile(inflated);
+
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, options.tablePointer);
+    inflated.insert(inflated.end(), name, name + std::strlen(name));
+    if (options.terminateName) inflated.push_back(0);
+    if (!options.terminateName || !options.tablePointer ||
+        !options.includeTable) return CompressXFile(inflated);
+
+    while ((inflated.size() & 3u) != 0u) inflated.push_back(0);
+    const std::size_t entryOffset = inflated.size();
+    AppendZeros(inflated, 12u * sizeof(FxImpactEntry));
+    WriteU32(inflated, entryOffset, options.firstFxPointer);
+    if (options.firstFxPointer == UINT32_MAX - 1u && options.includeFxAlias)
+    {
+        std::uint32_t block4Offset = assetCount * sizeof(XAsset);
+        if (options.assetPointer == UINT32_MAX - 1u)
+            block4Offset = Align4(block4Offset) + 4u;
+        block4Offset += static_cast<std::uint32_t>(std::strlen(name) + 1u);
+        block4Offset = Align4(block4Offset) +
+            12u * static_cast<std::uint32_t>(sizeof(FxImpactEntry));
+        WriteU32(inflated, entryOffset + sizeof(FxEffectDef *),
+            0x40000001u + block4Offset);
+    }
+    if ((options.firstFxPointer != UINT32_MAX &&
+            options.firstFxPointer != UINT32_MAX - 1u) ||
+        !options.includeFxBody) return CompressXFile(inflated);
+
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, sizeof(FxEffectDef));
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 0);
+    AppendCString(inflated, fxName);
+    return CompressXFile(inflated);
+}
+
+struct LightDefFixtureOptions
+{
+    std::uint32_t assetPointer = UINT32_MAX - 1u;
+    bool includeAliasAsset = true;
+    bool includeBody = true;
+    bool terminateName = true;
+    std::uint32_t imagePointer = UINT32_MAX - 1u;
+    bool includeImageBody = true;
+    bool terminateImageName = true;
+};
+
+std::vector<std::uint8_t> MakeLightDefXFile(
+    const LightDefFixtureOptions &options = {})
+{
+    constexpr const char *name = "lights/gate3";
+    constexpr const char *imageName = "images/light_gate3";
+    const bool inlineAsset = options.assetPointer == UINT32_MAX ||
+        options.assetPointer == UINT32_MAX - 1u;
+    const std::uint32_t assetCount = options.includeAliasAsset ? 2u : 1u;
+    std::vector<std::uint8_t> inflated;
+    AppendU32(inflated, 8192);
+    AppendU32(inflated, 0);
+    for (const std::uint32_t size : std::array<std::uint32_t, 9>{
+        4096, 0, 0, 0, 4096, 0, 0, 0, 0}) AppendU32(inflated, size);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, assetCount);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, ASSET_TYPE_LIGHT_DEF);
+    AppendU32(inflated, options.assetPointer);
+    if (options.includeAliasAsset)
+    {
+        AppendU32(inflated, ASSET_TYPE_LIGHT_DEF);
+        AppendU32(inflated, 0x40000011u);
+    }
+    if (!inlineAsset || !options.includeBody) return CompressXFile(inflated);
+
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, options.imagePointer);
+    inflated.push_back(7);
+    AppendZeros(inflated, 3);
+    AppendU32(inflated, 42);
+    inflated.insert(inflated.end(), name, name + std::strlen(name));
+    if (options.terminateName) inflated.push_back(0);
+    if (!options.terminateName ||
+        (options.imagePointer != UINT32_MAX &&
+            options.imagePointer != UINT32_MAX - 1u) ||
+        !options.includeImageBody) return CompressXFile(inflated);
+
+    const std::size_t imageBodyStart = inflated.size();
+    AppendU32(inflated, MAPTYPE_2D);
+    AppendU32(inflated, 0);
+    inflated.push_back(0);
+    inflated.push_back(0);
+    inflated.push_back(0);
+    inflated.push_back(2);
+    inflated.push_back(3);
+    AppendZeros(inflated, 3);
+    AppendU32(inflated, 64);
+    AppendU32(inflated, 32);
+    AppendU16(inflated, 4);
+    AppendU16(inflated, 4);
+    AppendU16(inflated, 1);
+    inflated.push_back(1);
+    inflated.push_back(0);
+    AppendU32(inflated, UINT32_MAX);
+    assert(inflated.size() - imageBodyStart == sizeof(GfxImage));
+    inflated.insert(inflated.end(), imageName,
+        imageName + std::strlen(imageName));
+    if (options.terminateImageName) inflated.push_back(0);
+    return CompressXFile(inflated);
+}
+
+struct MenuListFixtureOptions
+{
+    std::uint32_t assetPointer = UINT32_MAX - 1u;
+    bool includeAliasAsset = true;
+    bool includeListBody = true;
+    bool terminateListName = true;
+    std::int32_t menuCount = 2;
+    std::uint32_t menusPointer = 1;
+    std::uint32_t firstMenuPointer = UINT32_MAX - 1u;
+    bool includeMenuBody = true;
+    std::int32_t itemCount = 1;
+    std::uint32_t itemsPointer = 1;
+    bool includeItemBody = true;
+    std::int32_t expressionCount = 2;
+    bool includeExpressionBodies = true;
+};
+
+std::vector<std::uint8_t> MakeMenuListXFile(
+    const MenuListFixtureOptions &options = {})
+{
+    constexpr const char *listName = "menus/gate3";
+    constexpr const char *menuName = "menu/gate3";
+    constexpr const char *itemText = "menu item";
+    constexpr const char *keyAction = "key/action";
+    constexpr const char *enableDvar = "enable_gate";
+    constexpr const char *doubleClick = "double/click";
+    constexpr const char *expressionString = "expr/string";
+    const bool inlineList = options.assetPointer == UINT32_MAX ||
+        options.assetPointer == UINT32_MAX - 1u;
+    const bool inlineMenu = options.firstMenuPointer == UINT32_MAX ||
+        options.firstMenuPointer == UINT32_MAX - 1u;
+    const std::uint32_t assetCount = options.includeAliasAsset ? 2u : 1u;
+
+    std::vector<std::uint8_t> inflated;
+    AppendU32(inflated, 16384);
+    AppendU32(inflated, 0);
+    for (const std::uint32_t size : std::array<std::uint32_t, 9>{
+        4096, 0, 0, 0, 12288, 0, 0, 0, 0}) AppendU32(inflated, size);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, assetCount);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, ASSET_TYPE_MENULIST);
+    AppendU32(inflated, options.assetPointer);
+    if (options.includeAliasAsset)
+    {
+        AppendU32(inflated, ASSET_TYPE_MENULIST);
+        AppendU32(inflated, 0x40000011u);
+    }
+    if (!inlineList || !options.includeListBody) return CompressXFile(inflated);
+
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, static_cast<std::uint32_t>(options.menuCount));
+    AppendU32(inflated, options.menusPointer);
+    inflated.insert(inflated.end(), listName,
+        listName + std::strlen(listName));
+    if (options.terminateListName) inflated.push_back(0);
+    if (!options.terminateListName || !options.menusPointer ||
+        options.menuCount <= 0) return CompressXFile(inflated);
+
+    const std::uint32_t rootInsertionBytes =
+        options.assetPointer == UINT32_MAX - 1u ? 4u : 0u;
+    const std::uint32_t menuTableOffset = Align4(assetCount * 8u +
+        rootInsertionBytes + static_cast<std::uint32_t>(
+            std::strlen(listName) + 1u));
+    const std::uint32_t menuInsertionOffset = menuTableOffset +
+        static_cast<std::uint32_t>(options.menuCount) * 4u;
+    AppendU32(inflated, options.firstMenuPointer);
+    for (std::int32_t index = 1; index < options.menuCount; ++index)
+        AppendU32(inflated, 0x40000001u + menuInsertionOffset);
+    if (!inlineMenu || !options.includeMenuBody) return CompressXFile(inflated);
+
+    const std::size_t menuOffset = inflated.size();
+    AppendZeros(inflated, sizeof(menuDef_t));
+    WriteU32(inflated, menuOffset + offsetof(menuDef_t, window) +
+        offsetof(windowDef_t, name), UINT32_MAX);
+    WriteU32(inflated, menuOffset + offsetof(menuDef_t, window) +
+        offsetof(windowDef_t, group), 0x40000001u + assetCount * 8u +
+        rootInsertionBytes);
+    WriteU32(inflated, menuOffset + offsetof(menuDef_t, itemCount),
+        static_cast<std::uint32_t>(options.itemCount));
+    WriteU32(inflated, menuOffset + offsetof(menuDef_t, items),
+        options.itemsPointer);
+    AppendCString(inflated, menuName);
+    if (!options.itemsPointer || options.itemCount <= 0)
+        return CompressXFile(inflated);
+
+    for (std::int32_t index = 0; index < options.itemCount; ++index)
+        AppendU32(inflated, 1);
+    if (!options.includeItemBody) return CompressXFile(inflated);
+
+    const std::size_t itemOffset = inflated.size();
+    AppendZeros(inflated, sizeof(itemDef_s));
+    WriteU32(inflated, itemOffset + offsetof(itemDef_s, window) +
+        offsetof(windowDef_t, name), 0x40000001u + menuInsertionOffset + 4u);
+    WriteU32(inflated, itemOffset + offsetof(itemDef_s, type), 6u);
+    WriteU32(inflated, itemOffset + offsetof(itemDef_s, text), UINT32_MAX);
+    WriteU32(inflated, itemOffset + offsetof(itemDef_s, onKey), 1u);
+    WriteU32(inflated, itemOffset + offsetof(itemDef_s, enableDvar),
+        UINT32_MAX);
+    WriteU32(inflated, itemOffset + offsetof(itemDef_s, typeData), 1u);
+    WriteU32(inflated, itemOffset + offsetof(itemDef_s, visibleExp) +
+        offsetof(statement_s, numEntries),
+        static_cast<std::uint32_t>(options.expressionCount));
+    WriteU32(inflated, itemOffset + offsetof(itemDef_s, visibleExp) +
+        offsetof(statement_s, entries), 1u);
+    AppendCString(inflated, itemText);
+
+    const std::size_t keyOffset = inflated.size();
+    AppendZeros(inflated, sizeof(ItemKeyHandler));
+    WriteU32(inflated, keyOffset + offsetof(ItemKeyHandler, key), 13u);
+    WriteU32(inflated, keyOffset + offsetof(ItemKeyHandler, action),
+        UINT32_MAX);
+    AppendCString(inflated, keyAction);
+    AppendCString(inflated, enableDvar);
+
+    const std::size_t listBoxOffset = inflated.size();
+    AppendZeros(inflated, sizeof(listBoxDef_s));
+    WriteU32(inflated, listBoxOffset + offsetof(listBoxDef_s, doubleClick),
+        UINT32_MAX);
+    AppendCString(inflated, doubleClick);
+    if (options.expressionCount <= 0) return CompressXFile(inflated);
+
+    for (std::int32_t index = 0; index < options.expressionCount; ++index)
+        AppendU32(inflated, 1u);
+    if (!options.includeExpressionBodies) return CompressXFile(inflated);
+    for (std::int32_t index = 0; index < options.expressionCount; ++index)
+    {
+        const std::size_t entryOffset = inflated.size();
+        AppendZeros(inflated, sizeof(expressionEntry));
+        if (index == 0)
+        {
+            WriteU32(inflated, entryOffset + offsetof(expressionEntry, type),
+                1u);
+            WriteU32(inflated, entryOffset + offsetof(expressionEntry, data) +
+                offsetof(Operand, dataType), VAL_STRING);
+            WriteU32(inflated, entryOffset + offsetof(expressionEntry, data) +
+                offsetof(Operand, internals), UINT32_MAX);
+            AppendCString(inflated, expressionString);
+        }
+    }
+    return CompressXFile(inflated);
+}
+
 std::vector<std::uint8_t> MakeEmptyXFile(
     const std::array<std::uint32_t, 9> &blocks)
 {
@@ -1800,6 +2094,376 @@ int main()
         sizeof(failedFxModelInsertion));
     assert(failedFxModelInsertion == 0);
 
+    const std::vector<std::uint8_t> fxImpactInsertAlias =
+        MakeFxImpactXFile();
+    Run(fxImpactInsertAlias, zone);
+    assert(g_trace.xassetCount == 2 && g_trace.assetIndex == 1);
+    assert(g_trace.assetType == ASSET_TYPE_IMPACT_FX);
+    assert(std::strcmp(g_trace.pointerClassification,
+        "prior-offset/alias") == 0);
+    assert(g_trace.publicationBegin && g_trace.publicationEnd);
+    assert(g_trace.assetEntryIndex == 17 && g_trace.assetPoolIndex == 0);
+    assert(g_trace.freeEntryCountBefore == 32751 &&
+        g_trace.freeEntryCountAfter == 32750);
+    assert(g_trace.assetHash == DB_HashForNameCanonical(
+        "impact/gate3", ASSET_TYPE_IMPACT_FX));
+    assert(g_trace.assetZoneIndex == 1);
+    assert(g_trace.streamOffsets[0] == 40);
+    assert(g_trace.streamOffsets[4] == 1640);
+    const XAssetHeader publishedImpact = DB_FindXAssetHeader(
+        ASSET_TYPE_IMPACT_FX, "impact/gate3");
+    const XAssetHeader publishedImpactFx = DB_FindXAssetHeader(
+        ASSET_TYPE_FX, "fx/impact_child");
+    assert(publishedImpact.impactFx && publishedImpact.impactFx->table);
+    assert(publishedImpactFx.fx);
+    assert(publishedImpact.impactFx->table[0].nonflesh[0] ==
+        publishedImpactFx.fx);
+    assert(publishedImpact.impactFx->table[0].nonflesh[1] ==
+        publishedImpactFx.fx);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_FX) == 399);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_IMPACT_FX) == 3);
+    const XAsset *fxImpactAssets = reinterpret_cast<const XAsset *>(
+        zone.blocks[4].data);
+    assert(fxImpactAssets[0].header.impactFx == publishedImpact.impactFx &&
+        fxImpactAssets[1].header.impactFx == publishedImpact.impactFx);
+    std::uint32_t fxImpactInsertion = 0;
+    std::uint32_t nestedFxInsertion = 0;
+    std::memcpy(&fxImpactInsertion, zone.blocks[4].data + 16,
+        sizeof(fxImpactInsertion));
+    std::memcpy(&nestedFxInsertion, zone.blocks[4].data + 1620,
+        sizeof(nestedFxInsertion));
+    assert(fxImpactInsertion == reinterpret_cast<std::uint32_t>(
+        publishedImpact.impactFx));
+    assert(nestedFxInsertion == reinterpret_cast<std::uint32_t>(
+        publishedImpactFx.fx));
+
+    FxImpactFixtureOptions sharedImpact{};
+    sharedImpact.assetPointer = UINT32_MAX;
+    sharedImpact.includeAliasAsset = false;
+    sharedImpact.tablePointer = 0;
+    Run(MakeFxImpactXFile(sharedImpact), zone);
+    assert(std::strcmp(g_trace.pointerClassification,
+        "inline-shared/-1") == 0);
+    assert(g_trace.publicationEnd && g_trace.assetEntryIndex == 16);
+    assert(g_trace.streamOffsets[0] == sizeof(FxImpactTable) &&
+        g_trace.streamOffsets[4] == 21);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_IMPACT_FX,
+        "impact/gate3").impactFx);
+
+    FxImpactFixtureOptions nullImpact{};
+    nullImpact.assetPointer = 0;
+    nullImpact.includeAliasAsset = false;
+    Run(MakeFxImpactXFile(nullImpact), zone);
+    assert(!g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_IMPACT_FX) == 4);
+
+    FxImpactFixtureOptions malformedImpact{};
+    malformedImpact.assetPointer = UINT32_MAX - 2u;
+    malformedImpact.includeAliasAsset = false;
+    Run(MakeFxImpactXFile(malformedImpact), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "stream/invalid alias offset") == 0);
+
+    FxImpactFixtureOptions truncatedImpactName{};
+    truncatedImpactName.assetPointer = UINT32_MAX;
+    truncatedImpactName.includeAliasAsset = false;
+    truncatedImpactName.terminateName = false;
+    Run(MakeFxImpactXFile(truncatedImpactName), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0 ||
+        std::strcmp(g_trace.stopStage, "stream/truncated string") == 0);
+
+    FxImpactFixtureOptions truncatedImpactTable{};
+    truncatedImpactTable.assetPointer = UINT32_MAX;
+    truncatedImpactTable.includeAliasAsset = false;
+    truncatedImpactTable.includeTable = false;
+    Run(MakeFxImpactXFile(truncatedImpactTable), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "FX impact/entry array") == 0 ||
+        std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0);
+
+    FxImpactFixtureOptions malformedImpactFx{};
+    malformedImpactFx.assetPointer = UINT32_MAX;
+    malformedImpactFx.includeAliasAsset = false;
+    malformedImpactFx.firstFxPointer = UINT32_MAX - 2u;
+    Run(MakeFxImpactXFile(malformedImpactFx), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "stream/invalid alias offset") == 0);
+
+    FxImpactFixtureOptions truncatedImpactFx{};
+    truncatedImpactFx.assetPointer = UINT32_MAX;
+    truncatedImpactFx.includeAliasAsset = false;
+    truncatedImpactFx.includeFxBody = false;
+    Run(MakeFxImpactXFile(truncatedImpactFx), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0);
+
+    const std::vector<std::uint8_t> lightInsertAlias = MakeLightDefXFile();
+    Run(lightInsertAlias, zone);
+    assert(g_trace.xassetCount == 2 && g_trace.assetIndex == 1);
+    assert(g_trace.assetType == ASSET_TYPE_LIGHT_DEF);
+    assert(std::strcmp(g_trace.pointerClassification,
+        "prior-offset/alias") == 0);
+    assert(g_trace.publicationBegin && g_trace.publicationEnd);
+    assert(g_trace.assetEntryIndex == 17 && g_trace.assetPoolIndex == 0);
+    assert(g_trace.freeEntryCountBefore == 32751 &&
+        g_trace.freeEntryCountAfter == 32750);
+    assert(g_trace.assetHash == DB_HashForNameCanonical(
+        "lights/gate3", ASSET_TYPE_LIGHT_DEF));
+    assert(g_trace.streamOffsets[0] == 52);
+    assert(g_trace.streamOffsets[4] == 59);
+    const XAssetHeader publishedLight = DB_FindXAssetHeader(
+        ASSET_TYPE_LIGHT_DEF, "lights/gate3");
+    const XAssetHeader publishedLightImage = DB_FindXAssetHeader(
+        ASSET_TYPE_IMAGE, "images/light_gate3");
+    assert(publishedLight.lightDef && publishedLightImage.image);
+    assert(publishedLight.lightDef->attenuation.image ==
+        publishedLightImage.image);
+    assert(publishedLight.lightDef->attenuation.samplerState == 7);
+    assert(publishedLight.lightDef->lmapLookupStart == 42);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_LIGHT_DEF) == 31);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_IMAGE) == 2399);
+    const XAsset *lightAssets = reinterpret_cast<const XAsset *>(
+        zone.blocks[4].data);
+    assert(lightAssets[0].header.lightDef == publishedLight.lightDef &&
+        lightAssets[1].header.lightDef == publishedLight.lightDef);
+    std::uint32_t lightInsertion = 0;
+    std::uint32_t lightImageInsertion = 0;
+    std::memcpy(&lightInsertion, zone.blocks[4].data + 16,
+        sizeof(lightInsertion));
+    std::memcpy(&lightImageInsertion, zone.blocks[4].data + 36,
+        sizeof(lightImageInsertion));
+    assert(lightInsertion == reinterpret_cast<std::uint32_t>(
+        publishedLight.lightDef));
+    assert(lightImageInsertion == reinterpret_cast<std::uint32_t>(
+        publishedLightImage.image));
+
+    LightDefFixtureOptions sharedLight{};
+    sharedLight.assetPointer = UINT32_MAX;
+    sharedLight.includeAliasAsset = false;
+    sharedLight.imagePointer = 0;
+    Run(MakeLightDefXFile(sharedLight), zone);
+    assert(std::strcmp(g_trace.pointerClassification,
+        "inline-shared/-1") == 0);
+    assert(g_trace.publicationEnd && g_trace.assetEntryIndex == 16);
+    assert(g_trace.streamOffsets[0] == sizeof(GfxLightDef) &&
+        g_trace.streamOffsets[4] == 21);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_LIGHT_DEF,
+        "lights/gate3").lightDef);
+
+    LightDefFixtureOptions nullLight{};
+    nullLight.assetPointer = 0;
+    nullLight.includeAliasAsset = false;
+    Run(MakeLightDefXFile(nullLight), zone);
+    assert(!g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_LIGHT_DEF) == 32);
+
+    LightDefFixtureOptions malformedLight{};
+    malformedLight.assetPointer = UINT32_MAX - 2u;
+    malformedLight.includeAliasAsset = false;
+    Run(MakeLightDefXFile(malformedLight), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "stream/invalid alias offset") == 0);
+
+    LightDefFixtureOptions truncatedLight{};
+    truncatedLight.assetPointer = UINT32_MAX;
+    truncatedLight.includeAliasAsset = false;
+    truncatedLight.includeBody = false;
+    Run(MakeLightDefXFile(truncatedLight), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0);
+
+    LightDefFixtureOptions malformedLightImage{};
+    malformedLightImage.assetPointer = UINT32_MAX;
+    malformedLightImage.includeAliasAsset = false;
+    malformedLightImage.imagePointer = UINT32_MAX - 2u;
+    Run(MakeLightDefXFile(malformedLightImage), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "stream/invalid alias offset") == 0);
+
+    LightDefFixtureOptions truncatedLightImage{};
+    truncatedLightImage.assetPointer = UINT32_MAX;
+    truncatedLightImage.includeAliasAsset = false;
+    truncatedLightImage.includeImageBody = false;
+    Run(MakeLightDefXFile(truncatedLightImage), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0);
+
+    LightDefFixtureOptions truncatedLightImageName{};
+    truncatedLightImageName.assetPointer = UINT32_MAX;
+    truncatedLightImageName.includeAliasAsset = false;
+    truncatedLightImageName.terminateImageName = false;
+    Run(MakeLightDefXFile(truncatedLightImageName), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0 ||
+        std::strcmp(g_trace.stopStage, "stream/truncated string") == 0);
+
+    const std::vector<std::uint8_t> menuListInsertAlias =
+        MakeMenuListXFile();
+    Run(menuListInsertAlias, zone);
+    assert(g_trace.xassetCount == 2 && g_trace.assetIndex == 1);
+    assert(g_trace.assetType == ASSET_TYPE_MENULIST);
+    assert(std::strcmp(g_trace.pointerClassification,
+        "prior-offset/alias") == 0);
+    assert(g_trace.publicationBegin && g_trace.publicationEnd);
+    assert(g_trace.assetEntryIndex == 17 && g_trace.assetPoolIndex == 0);
+    assert(g_trace.freeEntryCountBefore == 32751 &&
+        g_trace.freeEntryCountAfter == 32750);
+    assert(g_trace.assetHash == DB_HashForNameCanonical(
+        "menus/gate3", ASSET_TYPE_MENULIST));
+    assert(g_trace.streamOffsets[0] == sizeof(MenuList) + sizeof(menuDef_t));
+    assert(g_trace.streamOffsets[4] == 880);
+    const XAssetHeader publishedMenuList = DB_FindXAssetHeader(
+        ASSET_TYPE_MENULIST, "menus/gate3");
+    const XAssetHeader publishedMenu = DB_FindXAssetHeader(
+        ASSET_TYPE_MENU, "menu/gate3");
+    assert(publishedMenuList.menuList && publishedMenu.menu);
+    assert(publishedMenuList.menuList->menuCount == 2);
+    assert(publishedMenuList.menuList->menus[0] == publishedMenu.menu &&
+        publishedMenuList.menuList->menus[1] == publishedMenu.menu);
+    assert(std::strcmp(publishedMenu.menu->window.group, "menus/gate3") == 0);
+    assert(publishedMenu.menu->itemCount == 1 && publishedMenu.menu->items);
+    const itemDef_s *publishedItem = publishedMenu.menu->items[0];
+    assert(publishedItem && publishedItem->parent == publishedMenu.menu);
+    assert(std::strcmp(publishedItem->window.name, "menu/gate3") == 0);
+    assert(std::strcmp(publishedItem->text, "menu item") == 0);
+    assert(publishedItem->onKey && publishedItem->onKey->key == 13);
+    assert(std::strcmp(publishedItem->onKey->action, "key/action") == 0);
+    assert(std::strcmp(publishedItem->enableDvar, "enable_gate") == 0);
+    assert(publishedItem->typeData.listBox &&
+        std::strcmp(publishedItem->typeData.listBox->doubleClick,
+            "double/click") == 0);
+    assert(publishedItem->visibleExp.numEntries == 2 &&
+        publishedItem->visibleExp.entries);
+    assert(publishedItem->visibleExp.entries[0]->type == 1 &&
+        publishedItem->visibleExp.entries[0]->data.operand.dataType ==
+            VAL_STRING);
+    assert(std::strcmp(publishedItem->visibleExp.entries[0]->data.operand.
+        internals.string, "expr/string") == 0);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_MENU) == 639);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_MENULIST) == 127);
+    const XAsset *menuListAssets = reinterpret_cast<const XAsset *>(
+        zone.blocks[4].data);
+    assert(menuListAssets[0].header.menuList == publishedMenuList.menuList &&
+        menuListAssets[1].header.menuList == publishedMenuList.menuList);
+    std::uint32_t menuListInsertion = 0;
+    std::uint32_t menuInsertion = 0;
+    std::memcpy(&menuListInsertion, zone.blocks[4].data + 16,
+        sizeof(menuListInsertion));
+    std::memcpy(&menuInsertion, zone.blocks[4].data + 40,
+        sizeof(menuInsertion));
+    assert(menuListInsertion == reinterpret_cast<std::uint32_t>(
+        publishedMenuList.menuList));
+    assert(menuInsertion == reinterpret_cast<std::uint32_t>(
+        publishedMenu.menu));
+
+    MenuListFixtureOptions sharedMenuList{};
+    sharedMenuList.assetPointer = UINT32_MAX;
+    sharedMenuList.includeAliasAsset = false;
+    sharedMenuList.menuCount = 0;
+    sharedMenuList.menusPointer = 0;
+    Run(MakeMenuListXFile(sharedMenuList), zone);
+    assert(!g_trace.generatedLoadFailed && g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.pointerClassification,
+        "inline-shared/-1") == 0);
+    assert(g_trace.streamOffsets[0] == sizeof(MenuList));
+    assert(g_trace.streamOffsets[4] == 20);
+
+    MenuListFixtureOptions nullMenuList{};
+    nullMenuList.assetPointer = 0;
+    nullMenuList.includeAliasAsset = false;
+    Run(MakeMenuListXFile(nullMenuList), zone);
+    assert(!g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_MENULIST) == 128);
+
+    MenuListFixtureOptions malformedMenuList{};
+    malformedMenuList.assetPointer = UINT32_MAX - 2u;
+    malformedMenuList.includeAliasAsset = false;
+    Run(MakeMenuListXFile(malformedMenuList), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "stream/invalid alias offset") == 0);
+
+    MenuListFixtureOptions truncatedMenuList{};
+    truncatedMenuList.assetPointer = UINT32_MAX;
+    truncatedMenuList.includeAliasAsset = false;
+    truncatedMenuList.includeListBody = false;
+    Run(MakeMenuListXFile(truncatedMenuList), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0);
+
+    MenuListFixtureOptions truncatedMenuListName{};
+    truncatedMenuListName.assetPointer = UINT32_MAX;
+    truncatedMenuListName.includeAliasAsset = false;
+    truncatedMenuListName.terminateListName = false;
+    Run(MakeMenuListXFile(truncatedMenuListName), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0 ||
+        std::strcmp(g_trace.stopStage, "stream/truncated string") == 0);
+
+    MenuListFixtureOptions invalidMenuCount{};
+    invalidMenuCount.assetPointer = UINT32_MAX;
+    invalidMenuCount.includeAliasAsset = false;
+    invalidMenuCount.menuCount = -1;
+    Run(MakeMenuListXFile(invalidMenuCount), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage,
+        "MenuList/menu pointer table") == 0);
+
+    MenuListFixtureOptions malformedMenu{};
+    malformedMenu.assetPointer = UINT32_MAX;
+    malformedMenu.includeAliasAsset = false;
+    malformedMenu.menuCount = 1;
+    malformedMenu.firstMenuPointer = UINT32_MAX - 2u;
+    Run(MakeMenuListXFile(malformedMenu), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "stream/invalid alias offset") == 0);
+
+    MenuListFixtureOptions truncatedMenu{};
+    truncatedMenu.assetPointer = UINT32_MAX;
+    truncatedMenu.includeAliasAsset = false;
+    truncatedMenu.menuCount = 1;
+    truncatedMenu.includeMenuBody = false;
+    Run(MakeMenuListXFile(truncatedMenu), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0);
+
+    MenuListFixtureOptions invalidItemCount{};
+    invalidItemCount.assetPointer = UINT32_MAX;
+    invalidItemCount.includeAliasAsset = false;
+    invalidItemCount.menuCount = 1;
+    invalidItemCount.itemCount = -1;
+    Run(MakeMenuListXFile(invalidItemCount), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "Menu/item pointer table") == 0);
+
+    MenuListFixtureOptions truncatedItem{};
+    truncatedItem.assetPointer = UINT32_MAX;
+    truncatedItem.includeAliasAsset = false;
+    truncatedItem.menuCount = 1;
+    truncatedItem.includeItemBody = false;
+    Run(MakeMenuListXFile(truncatedItem), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0);
+
+    MenuListFixtureOptions invalidExpressionCount{};
+    invalidExpressionCount.assetPointer = UINT32_MAX;
+    invalidExpressionCount.includeAliasAsset = false;
+    invalidExpressionCount.menuCount = 1;
+    invalidExpressionCount.expressionCount = -1;
+    Run(MakeMenuListXFile(invalidExpressionCount), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage,
+        "Menu/statement entry table") == 0);
+
+    MenuListFixtureOptions truncatedExpression{};
+    truncatedExpression.assetPointer = UINT32_MAX;
+    truncatedExpression.includeAliasAsset = false;
+    truncatedExpression.menuCount = 1;
+    truncatedExpression.includeExpressionBodies = false;
+    Run(MakeMenuListXFile(truncatedExpression), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0);
+
     Run(MakeSndDriverGlobalsXFile(), zone);
     assert(!g_trace.generatedLoadFailed && g_trace.xassetListEnd);
     assert(g_trace.assetType == ASSET_TYPE_SNDDRIVER_GLOBALS);
@@ -2272,6 +2936,125 @@ int main()
         sizeof(failedFxInsertion));
     assert(failedFxInsertion == 0);
 
+    const std::uint32_t fxImpactHash = DB_HashForNameCanonical(
+        "impact/gate3", ASSET_TYPE_IMPACT_FX);
+    Reset(fxImpactInsertAlias);
+    *static_cast<void **>(DB_XAssetPool[ASSET_TYPE_IMPACT_FX]) = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
+        !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset pool exhaustion") == 0);
+    assert(db_hashTable[fxImpactHash] == 0);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_FX, "fx/impact_child").fx);
+    assert(DB_GetFreeAssetEntryCount() == 32751);
+    std::uint32_t failedFxImpactInsertion = UINT32_MAX;
+    std::memcpy(&failedFxImpactInsertion, zone.blocks[4].data + 16,
+        sizeof(failedFxImpactInsertion));
+    assert(failedFxImpactInsertion == 0);
+
+    Reset(fxImpactInsertAlias);
+    g_assetEntryPool[16].next = nullptr;
+    g_freeAssetEntryHead = &g_assetEntryPool[16];
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
+        !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset entry exhaustion") == 0);
+    assert(db_hashTable[fxImpactHash] == 0);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_FX, "fx/impact_child").fx);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_IMPACT_FX) == 4);
+    std::memcpy(&failedFxImpactInsertion, zone.blocks[4].data + 16,
+        sizeof(failedFxImpactInsertion));
+    assert(failedFxImpactInsertion == 0);
+
+    const std::uint32_t lightHash = DB_HashForNameCanonical(
+        "lights/gate3", ASSET_TYPE_LIGHT_DEF);
+    Reset(lightInsertAlias);
+    *static_cast<void **>(DB_XAssetPool[ASSET_TYPE_LIGHT_DEF]) = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
+        !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset pool exhaustion") == 0);
+    assert(db_hashTable[lightHash] == 0);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_IMAGE,
+        "images/light_gate3").image);
+    std::uint32_t failedLightInsertion = UINT32_MAX;
+    std::memcpy(&failedLightInsertion, zone.blocks[4].data + 16,
+        sizeof(failedLightInsertion));
+    assert(failedLightInsertion == 0);
+
+    Reset(lightInsertAlias);
+    g_assetEntryPool[16].next = nullptr;
+    g_freeAssetEntryHead = &g_assetEntryPool[16];
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
+        !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset entry exhaustion") == 0);
+    assert(db_hashTable[lightHash] == 0);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_IMAGE,
+        "images/light_gate3").image);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_LIGHT_DEF) == 32);
+    std::memcpy(&failedLightInsertion, zone.blocks[4].data + 16,
+        sizeof(failedLightInsertion));
+    assert(failedLightInsertion == 0);
+
+    const std::uint32_t menuHash = DB_HashForNameCanonical(
+        "menu/gate3", ASSET_TYPE_MENU);
+    const std::uint32_t menuListHash = DB_HashForNameCanonical(
+        "menus/gate3", ASSET_TYPE_MENULIST);
+    Reset(menuListInsertAlias);
+    *static_cast<void **>(DB_XAssetPool[ASSET_TYPE_MENU]) = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
+        !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset pool exhaustion") == 0);
+    assert(db_hashTable[menuHash] == 0 && db_hashTable[menuListHash] == 0);
+    assert(DB_GetFreeAssetEntryCount() == 32752);
+    std::uint32_t failedMenuListInsertion = UINT32_MAX;
+    std::uint32_t failedMenuInsertion = UINT32_MAX;
+    std::memcpy(&failedMenuListInsertion, zone.blocks[4].data + 16,
+        sizeof(failedMenuListInsertion));
+    std::memcpy(&failedMenuInsertion, zone.blocks[4].data + 40,
+        sizeof(failedMenuInsertion));
+    assert(failedMenuListInsertion == 0 && failedMenuInsertion == 0);
+
+    Reset(menuListInsertAlias);
+    *static_cast<void **>(DB_XAssetPool[ASSET_TYPE_MENULIST]) = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
+        !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset pool exhaustion") == 0);
+    assert(db_hashTable[menuListHash] == 0);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_MENU, "menu/gate3").menu);
+    assert(DB_GetFreeAssetEntryCount() == 32751);
+    std::memcpy(&failedMenuListInsertion, zone.blocks[4].data + 16,
+        sizeof(failedMenuListInsertion));
+    std::memcpy(&failedMenuInsertion, zone.blocks[4].data + 40,
+        sizeof(failedMenuInsertion));
+    assert(failedMenuListInsertion == 0);
+    assert(failedMenuInsertion == reinterpret_cast<std::uint32_t>(
+        DB_FindXAssetHeader(ASSET_TYPE_MENU, "menu/gate3").menu));
+
+    Reset(menuListInsertAlias);
+    g_assetEntryPool[16].next = nullptr;
+    g_freeAssetEntryHead = &g_assetEntryPool[16];
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
+        !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset entry exhaustion") == 0);
+    assert(db_hashTable[menuListHash] == 0);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_MENU, "menu/gate3").menu);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_MENULIST) == 128);
+    std::memcpy(&failedMenuListInsertion, zone.blocks[4].data + 16,
+        sizeof(failedMenuListInsertion));
+    assert(failedMenuListInsertion == 0);
+
     Reset(loadedSoundInsertAlias);
     g_freeAssetEntryHead = nullptr;
     RunPrepared(zone);
@@ -2351,6 +3134,6 @@ int main()
     assert(g_trace.publicationEnd && g_trace.cleanupComplete);
     assert(std::strcmp(g_trace.stopStage, "Load_XAssetHeader/next-family-closure") == 0);
 
-    std::printf("gate3-db-stream rawfile=published physpreset=published technique-set=published material=published image=published water=loaded sound-curve=published sound-alias=published loaded-sound=published font=published fx=published snddriver=canonical-noop localize=published insert=-2 alias=block4:16 technique=block4:36 direct-xstring=block4:18 technique-children=251 material-children=block0:136,block4:248 sound-curve-children=block0:72,block4:38 sound-alias-children=block0:12,block4:586 loaded-sound-children=block0:48,block4:44 font-children=block0:24,block4:80 fx-children=block0:32,block4:502 localize-children=block0:8,block4:51 image-entry=16 material-entry=17 sound-curve-entry=16 sound-alias-entry=16 loaded-sound-entry=16 font-entry=16 fx-entry=16 localize-entry=16 free=32752->32751 zone=1 xmodel-inline=blocked stop=next-family-closure\n");
+    std::printf("gate3-db-stream rawfile=published physpreset=published technique-set=published material=published image=published water=loaded sound-curve=published sound-alias=published loaded-sound=published font=published fx=published impact-fx=published light-def=published menu=published menu-list=published snddriver=canonical-noop localize=published insert=-2 alias=block4:16 technique=block4:36 direct-xstring=block4:18 technique-children=251 material-children=block0:136,block4:248 sound-curve-children=block0:72,block4:38 sound-alias-children=block0:12,block4:586 loaded-sound-children=block0:48,block4:44 font-children=block0:24,block4:80 fx-children=block0:32,block4:502 impact-fx-children=block0:40,block4:1640 light-def-children=block0:52,block4:59 menu-children=block0:296,block4:880 localize-children=block0:8,block4:51 image-entry=16 material-entry=17 sound-curve-entry=16 sound-alias-entry=16 loaded-sound-entry=16 font-entry=16 fx-entry=16 impact-fx-entry=17 light-def-entry=17 menu-entry=16 menu-list-entry=17 localize-entry=16 free=32752->32750 zone=1 xmodel-inline=blocked stop=weapon-closure\n");
     return 0;
 }

@@ -7,10 +7,12 @@
 #include <EffectsCore/fx_types.h>
 #include <database/localize_types.h>
 #include <gfx_d3d/gfx_image_types.h>
+#include <gfx_d3d/gfx_light_types.h>
 #include <gfx_d3d/material_types.h>
 #include <gfx_d3d/r_font.h>
 #include <physics/phys_preset.h>
 #include <sound/snd_alias_types.h>
+#include <ui/ui_asset_types.h>
 
 #include <qcommon/threads.h>
 #include <qcommon/system.h>
@@ -57,6 +59,18 @@ const char *AssetName(const XAsset &asset)
     case ASSET_TYPE_FX:
         name = asset.header.fx ? asset.header.fx->name : nullptr;
         break;
+    case ASSET_TYPE_IMPACT_FX:
+        name = asset.header.impactFx ? asset.header.impactFx->name : nullptr;
+        break;
+    case ASSET_TYPE_LIGHT_DEF:
+        name = asset.header.lightDef ? asset.header.lightDef->name : nullptr;
+        break;
+    case ASSET_TYPE_MENULIST:
+        name = asset.header.menuList ? asset.header.menuList->name : nullptr;
+        break;
+    case ASSET_TYPE_MENU:
+        name = asset.header.menu ? asset.header.menu->window.name : nullptr;
+        break;
     case ASSET_TYPE_LOCALIZE_ENTRY:
         name = asset.header.localize ? asset.header.localize->name : nullptr;
         break;
@@ -87,6 +101,10 @@ std::size_t AssetSize(XAssetType type)
     case ASSET_TYPE_LOADED_SOUND: return sizeof(LoadedSound);
     case ASSET_TYPE_FONT: return sizeof(Font_s);
     case ASSET_TYPE_FX: return sizeof(FxEffectDef);
+    case ASSET_TYPE_IMPACT_FX: return sizeof(FxImpactTable);
+    case ASSET_TYPE_LIGHT_DEF: return sizeof(GfxLightDef);
+    case ASSET_TYPE_MENULIST: return sizeof(MenuList);
+    case ASSET_TYPE_MENU: return sizeof(menuDef_t);
     case ASSET_TYPE_LOCALIZE_ENTRY: return sizeof(LocalizeEntry);
     case ASSET_TYPE_RAWFILE: return sizeof(RawFile);
     default: return 0;
@@ -171,7 +189,7 @@ XAssetEntryPoolEntry *DB_LinkXAssetEntry(
         return existing;
     }
 
-    alignas(4) std::byte previous[sizeof(MaterialTechniqueSet)]{};
+    alignas(4) std::byte previous[sizeof(menuDef_t)]{};
     const std::size_t assetSize = AssetSize(asset.type);
     std::memcpy(previous, existing->entry.asset.header.data, assetSize);
     const std::uint8_t previousZone = existing->entry.zoneIndex;
@@ -374,6 +392,70 @@ void __cdecl Load_FxEffectDefFromName(const char **name)
     if (!name || !*name) return;
     *reinterpret_cast<XAssetHeader *>(name) = DB_FindXAssetHeader(
         ASSET_TYPE_FX, *name);
+}
+
+void __cdecl Load_FxImpactTableAsset(XAssetHeader *impactFx)
+{
+    if (!impactFx || !impactFx->impactFx)
+    {
+        DB_RuntimeGeneratedFailure("publication/null FxImpactTable");
+        return;
+    }
+    XAssetHeader published = DB_AddXAsset(ASSET_TYPE_IMPACT_FX, *impactFx);
+    if (!published.data) return;
+    *impactFx = published;
+}
+
+void __cdecl Load_LightDefAsset(XAssetHeader *lightDef)
+{
+    if (!lightDef || !lightDef->lightDef)
+    {
+        DB_RuntimeGeneratedFailure("publication/null GfxLightDef");
+        return;
+    }
+    XAssetHeader published = DB_AddXAsset(ASSET_TYPE_LIGHT_DEF, *lightDef);
+    if (!published.data) return;
+    *lightDef = published;
+}
+
+void __cdecl Load_MenuListAsset(XAssetHeader *menuList)
+{
+    if (!menuList || !menuList->menuList)
+    {
+        DB_RuntimeGeneratedFailure("publication/null MenuList");
+        return;
+    }
+    XAssetHeader published = DB_AddXAsset(ASSET_TYPE_MENULIST, *menuList);
+    if (!published.data) return;
+    *menuList = published;
+}
+
+void __cdecl Load_MenuAsset(XAssetHeader *menu)
+{
+    if (!menu || !menu->menu)
+    {
+        DB_RuntimeGeneratedFailure("publication/null Menu");
+        return;
+    }
+    menuDef_t *source = menu->menu;
+    if (source->itemCount < 0 || (source->itemCount && !source->items))
+    {
+        DB_RuntimeGeneratedFailure("publication/invalid Menu items");
+        return;
+    }
+    for (std::int32_t index = 0; index < source->itemCount; ++index)
+    {
+        if (!source->items[index])
+        {
+            DB_RuntimeGeneratedFailure("publication/null Menu item");
+            return;
+        }
+    }
+    XAssetHeader published = DB_AddXAsset(ASSET_TYPE_MENU, *menu);
+    if (!published.data) return;
+    *menu = published;
+    for (std::int32_t index = 0; index < source->itemCount; ++index)
+        source->items[index]->parent = menu->menu;
 }
 
 void __cdecl Load_LocalizeEntryAsset(XAssetHeader *localize)
