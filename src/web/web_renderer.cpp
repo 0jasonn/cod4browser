@@ -75,6 +75,8 @@ struct WebRendererState
 
 WebRendererState g_renderer;
 constexpr std::uint8_t FALLBACK_TEXTURE_RGBA[] = {255u, 255u, 255u, 255u};
+bool HandleWebGLContextLost(int, const void *, void *);
+bool HandleWebGLContextRestored(int, const void *, void *);
 
 EM_JS(
     void,
@@ -195,6 +197,16 @@ const char *SurfaceTopologyString(WebRendererPrimitiveTopology topology) noexcep
     return topology == WebRendererPrimitiveTopology::TriangleList
         ? "triangle-list"
         : "unsupported";
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestLoseWebGLContext()
+{
+    return HandleWebGLContextLost(0, nullptr, nullptr) ? 1 : 0;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestRestoreWebGLContext()
+{
+    return HandleWebGLContextRestored(0, nullptr, nullptr) ? 1 : 0;
 }
 
 const char *SurfaceTextureBindingString(WebRendererTextureBinding binding) noexcept
@@ -453,9 +465,9 @@ void DestroyWebGLContext()
     // event cannot publish a recovered runtime for an initialization that
     // never completed.
     (void)emscripten_set_webglcontextlost_callback(
-        "#game-canvas", nullptr, EM_TRUE, nullptr);
+        "#canvas", nullptr, EM_TRUE, nullptr);
     (void)emscripten_set_webglcontextrestored_callback(
-        "#game-canvas", nullptr, EM_TRUE, nullptr);
+        "#canvas", nullptr, EM_TRUE, nullptr);
 
     if (emscripten_webgl_make_context_current(g_renderer.context) ==
         EMSCRIPTEN_RESULT_SUCCESS)
@@ -888,6 +900,12 @@ bool HandleWebGLContextRestored(int, const void *, void *)
 
 bool CreateWebGLContext()
 {
+    EM_ASM({
+        const canvas = globalThis.__KISAKCOD_OFFSCREEN_CANVAS__;
+        if (canvas && typeof GL === "object" && GL.offscreenCanvases) {
+            GL.offscreenCanvases.canvas = canvas;
+        }
+    });
     EmscriptenWebGLContextAttributes attributes;
     emscripten_webgl_init_context_attributes(&attributes);
     attributes.alpha = EM_FALSE;
@@ -900,7 +918,7 @@ bool CreateWebGLContext()
     attributes.majorVersion = 2;
     attributes.minorVersion = 0;
 
-    g_renderer.context = emscripten_webgl_create_context("#game-canvas", &attributes);
+    g_renderer.context = emscripten_webgl_create_context("#canvas", &attributes);
     if (g_renderer.context <= 0)
     {
         Web_Log(
@@ -917,10 +935,10 @@ bool CreateWebGLContext()
     }
 
     const EMSCRIPTEN_RESULT lostCallbackResult = emscripten_set_webglcontextlost_callback(
-        "#game-canvas", nullptr, EM_TRUE, HandleWebGLContextLost);
+        "#canvas", nullptr, EM_TRUE, HandleWebGLContextLost);
     const EMSCRIPTEN_RESULT restoredCallbackResult =
         emscripten_set_webglcontextrestored_callback(
-            "#game-canvas", nullptr, EM_TRUE, HandleWebGLContextRestored);
+            "#canvas", nullptr, EM_TRUE, HandleWebGLContextRestored);
     return lostCallbackResult == EMSCRIPTEN_RESULT_SUCCESS &&
         restoredCallbackResult == EMSCRIPTEN_RESULT_SUCCESS;
 }
@@ -1403,7 +1421,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
 
     int width = 0;
     int height = 0;
-    emscripten_get_canvas_element_size("#game-canvas", &width, &height);
+    emscripten_get_canvas_element_size("#canvas", &width, &height);
     if (width != g_renderer.canvasWidth || height != g_renderer.canvasHeight)
     {
         g_renderer.canvasWidth = width;

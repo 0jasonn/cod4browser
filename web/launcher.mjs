@@ -1,5 +1,5 @@
 import { createBrowserAssetStore, selectInstallEntries } from "./asset_store.mjs";
-import { installBrowserFilesystemBridge } from "./filesystem_bridge.mjs";
+import { createEngineWorkerHost } from "./engine_worker_host.mjs";
 
 const canvas = document.querySelector("#game-canvas");
 const runtimeLabel = document.querySelector("#runtime-label");
@@ -29,6 +29,7 @@ const runtime = {
     lastFrame: null,
     contextLosses: 0,
     engine: null,
+    database: { stage: "idle", stopStage: "" },
     qcommon: {
         state: "idle",
         stage: "idle",
@@ -67,6 +68,7 @@ let filesystemBridge = null;
 let archiveImportId = null;
 let qcommonImportId = null;
 let retailCensusImportId = null;
+let mountingImportId = null;
 let schedulerWarningsReported = 0;
 let schedulerViolationsReported = 0;
 
@@ -581,23 +583,36 @@ globalThis.addEventListener("kisakcod:assets", (event) => {
     const preserveExistingArchive = assets.manifest?.importId === archiveImportId &&
         ["checking", "selecting", "validating", "importing", "failed", "ready"]
             .includes(assets.state);
-    if (readyImportId && readyImportId !== qcommonImportId && filesystemBridge &&
+    if (readyImportId && readyImportId !== qcommonImportId &&
+        readyImportId !== mountingImportId && filesystemBridge &&
         typeof runtime.module?._KisakWeb_StartQcommonRuntime === "function") {
-        if (archiveImportId !== null) {
-            archiveImportId = null;
-            runtime.module?._KisakWeb_CancelArchiveJob?.();
-            publishArchiveState({
-                state: "idle",
-                message: "Waiting for qcommon pre-database startup",
-            });
-        }
-        if (retailCensusImportId !== null) {
-            retailCensusImportId = null;
-            runtime.module?._KisakWeb_CancelRetailCensus?.();
-        }
-        filesystemBridge.invalidate();
-        qcommonImportId = readyImportId;
-        runtime.module._KisakWeb_StartQcommonRuntime();
+        mountingImportId = readyImportId;
+        void (async () => {
+            try {
+                if (archiveImportId !== null) {
+                    archiveImportId = null;
+                    runtime.module?._KisakWeb_CancelArchiveJob?.();
+                    publishArchiveState({
+                        state: "idle",
+                        message: "Waiting for qcommon pre-database startup",
+                    });
+                }
+                if (retailCensusImportId !== null) {
+                    retailCensusImportId = null;
+                    runtime.module?._KisakWeb_CancelRetailCensus?.();
+                }
+                await runtime.module.mount(assets.manifest);
+                if (runtime.assets.state !== "ready" ||
+                    runtime.assets.manifest?.importId !== readyImportId) return;
+                qcommonImportId = readyImportId;
+                runtime.module._KisakWeb_StartQcommonRuntime();
+                runtime.module._KisakWeb_StartCanonicalDbHeaderProbe?.();
+            } catch (error) {
+                appendLog(`[kisakcod-web] Engine filesystem mount: ${error.message}`, "error");
+            } finally {
+                if (mountingImportId === readyImportId) mountingImportId = null;
+            }
+        })();
     } else if (!readyImportId && qcommonImportId !== null && !preserveExistingArchive) {
         qcommonImportId = null;
         retailCensusImportId = null;
@@ -615,10 +630,11 @@ function resizeCanvas() {
     const scale = Math.min(globalThis.devicePixelRatio || 1, 2);
     const width = Math.max(1, Math.round(bounds.width * scale));
     const height = Math.max(1, Math.round(bounds.height * scale));
-    if (canvas.width !== width || canvas.height !== height) {
+    if (!runtime.module && (canvas.width !== width || canvas.height !== height)) {
         canvas.width = width;
         canvas.height = height;
     }
+    runtime.module?.resize?.(width, height);
 }
 
 globalThis.addEventListener("kisakcod:state", (event) => {
@@ -657,6 +673,13 @@ globalThis.addEventListener("kisakcod:engine", (event) => {
         : "ODE + commands initialized";
 });
 
+globalThis.addEventListener("kisakcod:database", (event) => {
+    // Database trace events are deliberately normalized deltas.  Retain the
+    // deterministic prefix state so the final stop publication describes the
+    // initialization envelope as well as the last file operation.
+    runtime.database = { ...runtime.database, ...event.detail };
+});
+
 const resizeObserver = new ResizeObserver(resizeCanvas);
 resizeObserver.observe(canvas);
 resizeCanvas();
@@ -681,6 +704,7 @@ selectInstallButton.addEventListener("click", async () => {
             publishAssetState(previousState);
             return;
         }
+        await runtime.module?.unmount?.();
         await assetStore.importEntries(entries);
         appendLog("[kisakcod-web] Local installation persisted and probed successfully.");
     } catch (error) {
@@ -704,6 +728,7 @@ clearAssetsButton.addEventListener("click", async () => {
         return;
     }
     try {
+        await runtime.module?.unmount?.();
         await assetStore.clear();
         appendLog("[kisakcod-web] Removed the browser-local asset import.");
     } catch (error) {
@@ -712,24 +737,17 @@ clearAssetsButton.addEventListener("click", async () => {
 });
 
 try {
-    const { default: createKisakCOD } = await import("./kisakcod.mjs");
-    runtime.module = await createKisakCOD({
-        canvas,
-        locateFile(path) {
-            return new URL(path, import.meta.url).href;
-        },
-        print(message) {
-            appendLog(message);
-        },
-        printErr(message) {
-            appendLog(message, "error");
+    runtime.module = createEngineWorkerHost(canvas, {
+        onLog(message, level) {
+            appendLog(message, level);
         },
         onAbort(reason) {
             setState("failed", `WebAssembly aborted: ${reason}`);
         },
     });
+    await runtime.module.ready;
     assetStore = createBrowserAssetStore(runtime.module, { onState: publishAssetState });
-    filesystemBridge = installBrowserFilesystemBridge(runtime.module, assetStore);
+    filesystemBridge = runtime.module;
     runtime.filesystemBridge = filesystemBridge;
     runtime.assetStore = assetStore;
     try {

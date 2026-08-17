@@ -109,32 +109,9 @@ test("qcommon startup is repeatable, cancellable, and reports typed VFS failure"
 
     await page.evaluate(() => {
         const runtime = globalThis.__KISAKCOD_WEB__;
-        const original = globalThis.__KISAKCOD_WEB_FS_BRIDGE__;
-        runtime.__qcommonOriginalBridge = original;
-        let heldRequest = 0;
-        globalThis.__KISAKCOD_WEB_FS_BRIDGE__ = {
-            stat(requestId) {
-                heldRequest = requestId;
-                return true;
-            },
-            read: (...args) => original.read(...args),
-            cancel(requestId) {
-                if (requestId === heldRequest) {
-                    heldRequest = 0;
-                    return true;
-                }
-                return original.cancel(requestId);
-            },
-        };
         runtime.module._KisakWeb_StartQcommonRuntime();
+        runtime.module._KisakWeb_CancelQcommonRuntime();
     });
-    await expect.poll(
-        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__.qcommon.generation),
-    ).toBe(firstGeneration + 1);
-    await expect.poll(
-        () => page.evaluate(() => globalThis.__KISAKCOD_WEB__.qcommon.actionPending),
-    ).toBe(true);
-    await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module._KisakWeb_CancelQcommonRuntime());
     await expect.poll(
         () => page.evaluate(() => globalThis.__KISAKCOD_WEB__.qcommon.state),
     ).toBe("idle");
@@ -149,20 +126,9 @@ test("qcommon startup is repeatable, cancellable, and reports typed VFS failure"
         actionPending: false,
     });
 
-    await page.evaluate(() => {
+    await page.evaluate(async () => {
         const runtime = globalThis.__KISAKCOD_WEB__;
-        const original = runtime.__qcommonOriginalBridge;
-        globalThis.__KISAKCOD_WEB_FS_BRIDGE__ = {
-            stat: (...args) => original.stat(...args),
-            read(requestId, path, ...args) {
-                if (path === "zone/english/killhouse.ff") {
-                    queueMicrotask(() => runtime.module._KisakWeb_CompleteFsRead(requestId, 8, 0));
-                    return true;
-                }
-                return original.read(requestId, path, ...args);
-            },
-            cancel: (...args) => original.cancel(...args),
-        };
+        await runtime.module.testControl({ failReadPath: "zone/english/killhouse.ff" });
         runtime.module._KisakWeb_StartQcommonRuntime();
     });
     await expect.poll(

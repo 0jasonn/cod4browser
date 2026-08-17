@@ -10,6 +10,8 @@ set(KISAK_WEB_SOURCE_DIR "${CMAKE_SOURCE_DIR}/web")
 add_executable(KisakCOD-web
     "${SRC_DIR}/database/db_semantic_trace.cpp"
     "${SRC_DIR}/database/db_initialization.cpp"
+    "${SRC_DIR}/database/db_registry_pools.cpp"
+    "${SRC_DIR}/database/db_runtime_prefix.cpp"
     "${SRC_DIR}/qcommon/com_init_trace.cpp"
     "${SRC_DIR}/qcommon/common.cpp"
     "${SRC_DIR}/qcommon/cmd.cpp"
@@ -28,6 +30,7 @@ add_executable(KisakCOD-web
     "${SRC_DIR}/web/web_assertive.cpp"
     "${SRC_DIR}/web/web_asset_probe.cpp"
     "${SRC_DIR}/web/web_cooperative_scheduler.cpp"
+    "${SRC_DIR}/web/web_database_filesystem.cpp"
     "${SRC_DIR}/web/web_engine_asset.cpp"
     "${SRC_DIR}/web/web_engine_filesystem.cpp"
     "${SRC_DIR}/web/web_engine_scheduler.cpp"
@@ -125,7 +128,8 @@ add_custom_command(TARGET KisakCOD-web POST_BUILD
 # configure_file registers these launcher files as configure dependencies, so
 # editing one refreshes the served site on the next incremental build.
 file(MAKE_DIRECTORY "${KISAK_WEB_SITE_DIR}")
-foreach(WEB_FILE index.html launcher.mjs asset_store.mjs filesystem_bridge.mjs styles.css)
+foreach(WEB_FILE index.html launcher.mjs asset_store.mjs filesystem_bridge.mjs
+        engine_worker.mjs engine_worker_host.mjs worker_sync_filesystem.mjs styles.css)
     configure_file(
         "${KISAK_WEB_SOURCE_DIR}/${WEB_FILE}"
         "${KISAK_WEB_SITE_DIR}/${WEB_FILE}"

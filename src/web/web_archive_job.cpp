@@ -116,6 +116,12 @@ EM_JS(
 
 EM_JS(void, DispatchArchiveReadyEntry, (const char *path), {
     globalThis.__KISAKCOD_ARCHIVE_DETAIL__?.entries.push({ path: UTF8ToString(path) });
+    const detail = globalThis.__KISAKCOD_ARCHIVE_DETAIL__;
+    if (detail && detail.entries.length % 64 === 0) {
+        globalThis.dispatchEvent(new CustomEvent("kisakcod:archive-progress", {
+            detail: { generation: detail.generation, entries: detail.entries.length }
+        }));
+    }
 });
 
 EM_JS(

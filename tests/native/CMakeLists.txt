@@ -35,6 +35,15 @@ add_executable(web_thread_context_tests
 )
 
 if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    add_executable(gate3_db_pool_tests
+        "${CMAKE_CURRENT_LIST_DIR}/gate3_db_pool_tests.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_registry_pools.cpp"
+    )
+    target_compile_features(gate3_db_pool_tests PRIVATE cxx_std_20)
+    target_include_directories(gate3_db_pool_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
+    target_compile_definitions(gate3_db_pool_tests PRIVATE
+        KISAK_SP=1 KISAK_DB_POOL_STANDALONE=1 dNODEBUG=1)
+
     add_executable(gate3_com_init_trace_tests
         "${CMAKE_CURRENT_LIST_DIR}/gate3_com_init_trace_tests.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/qcommon/com_init_trace.cpp"
@@ -201,6 +210,13 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
             "-sALLOW_MEMORY_GROWTH=1"
         )
     endif()
+    if (TARGET gate3_db_pool_tests)
+        target_link_options(gate3_db_pool_tests PRIVATE
+            "-sENVIRONMENT=node"
+            "-sEXIT_RUNTIME=1"
+            "-sNO_DISABLE_EXCEPTION_CATCHING"
+        )
+    endif()
     target_link_options(web_renderer_surface_tests PRIVATE
         "-sENVIRONMENT=node"
         "-sEXIT_RUNTIME=1"
@@ -265,6 +281,9 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     if (TARGET gate3_com_init_trace_tests)
         set_target_properties(gate3_com_init_trace_tests PROPERTIES SUFFIX ".cjs")
     endif()
+    if (TARGET gate3_db_pool_tests)
+        set_target_properties(gate3_db_pool_tests PROPERTIES SUFFIX ".cjs")
+    endif()
     set_target_properties(web_renderer_surface_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_engine_world_surface_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_fastfile_world_surface_tests PROPERTIES SUFFIX ".cjs")
@@ -289,6 +308,10 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     if (TARGET gate3_com_init_trace_tests)
         add_test(NAME gate3_com_init_trace_tests
             COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:gate3_com_init_trace_tests>")
+    endif()
+    if (TARGET gate3_db_pool_tests)
+        add_test(NAME gate3_db_pool_tests
+            COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:gate3_db_pool_tests>")
     endif()
     add_test(NAME web_renderer_surface_tests
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_renderer_surface_tests>")
@@ -346,6 +369,9 @@ else()
     add_test(NAME web_thread_context_tests COMMAND web_thread_context_tests)
     if (TARGET gate3_com_init_trace_tests)
         add_test(NAME gate3_com_init_trace_tests COMMAND gate3_com_init_trace_tests)
+    endif()
+    if (TARGET gate3_db_pool_tests)
+        add_test(NAME gate3_db_pool_tests COMMAND gate3_db_pool_tests)
     endif()
     add_test(NAME web_renderer_surface_tests COMMAND web_renderer_surface_tests)
     add_test(NAME web_engine_world_surface_tests COMMAND web_engine_world_surface_tests)

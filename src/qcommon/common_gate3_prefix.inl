@@ -4,6 +4,7 @@
 #include <qcommon/qcommon.h>
 #include <qcommon/system.h>
 #include <database/db_initialization.h>
+#include <database/db_runtime_prefix.h>
 #include <script/scr_stringlist.h>
 #include <universal/com_constantconfigstrings.h>
 #include <universal/dvar.h>
@@ -56,10 +57,8 @@ void TraceCommand(const char *name)
 
 void Gate3_ReachComInitXAssetsBoundary()
 {
-    // The canonical body calls DB_InitThread. A browser database runtime must
-    // live in the same dedicated Worker as the synchronous engine filesystem;
-    // this checkpoint stops before inventing a DOM-thread substitute.
     Com_InitTraceStage("Com_InitXAssets");
+    Com_InitXAssets();
 }
 
 void TraceDvar(const char *name)
@@ -67,6 +66,11 @@ void TraceDvar(const char *name)
     Com_InitTraceDvar(name);
 }
 } // namespace
+
+void Com_InitXAssets()
+{
+    DB_InitThread();
+}
 
 void QDECL Com_PrintMessage(int, const char *message, int)
 {
@@ -264,7 +268,7 @@ void __cdecl Com_Init_Try_Block_Function(char *commandLine)
         static_cast<std::size_t>(memory->prim[1].allocListCount),
         true);
     Gate3_ReachComInitXAssetsBoundary();
-    Com_InitTraceStop("DB_InitThread/WorkerHostedDatabase");
+    Com_InitTraceStop("DB_LoadXAssets/engine-filesystem-mount");
 }
 
 void __cdecl Com_Init(char *commandLine)

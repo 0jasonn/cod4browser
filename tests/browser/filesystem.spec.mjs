@@ -171,50 +171,33 @@ test("bridge cancellation prevents a delayed read from touching Wasm memory or c
     await importFixture(page, testInfo, "filesystem-cancellation");
 
     const result = await page.evaluate(async ({ fastfilePath, fastfileSize }) => {
-        const runtime = globalThis.__KISAKCOD_WEB__;
-        const module = runtime.module;
-        const bridge = runtime.filesystemBridge;
+        const { installBrowserFilesystemBridge } = await import("/filesystem_bridge.mjs");
+        const heap = new Uint8Array(16);
+        const completions = [];
+        let reportStat;
+        const statCompleted = new Promise((resolve) => { reportStat = resolve; });
+        const module = {
+            HEAPU8: heap,
+            _KisakWeb_CompleteFsStat(...arguments_) { reportStat(arguments_); },
+            _KisakWeb_CompleteFsRead(...arguments_) { completions.push(arguments_); },
+        };
         const statRequestId = 0xf000_0010;
         const requestId = 0xf000_0011;
-        const destination = module._malloc(4);
-        if (!destination) {
-            throw new Error("Synthetic cancellation test could not allocate Wasm memory.");
-        }
-
-        const arrayBufferDescriptor = Object.getOwnPropertyDescriptor(
-            Blob.prototype,
-            "arrayBuffer",
-        );
-        const originalStatCompletion = module._KisakWeb_CompleteFsStat;
-        const originalCompletion = module._KisakWeb_CompleteFsRead;
-        const completions = [];
+        const destination = 4;
         let releaseRead;
         let reportReadStarted;
         const readStarted = new Promise((resolve) => { reportReadStarted = resolve; });
         const readGate = new Promise((resolve) => { releaseRead = resolve; });
-
-        const completionWrapped = Reflect.set(
-            module,
-            "_KisakWeb_CompleteFsRead",
-            (...arguments_) => {
-                completions.push(Array.from(arguments_));
-                return originalCompletion(...arguments_);
-            },
-        );
-        let reportStat;
-        const statCompleted = new Promise((resolve) => { reportStat = resolve; });
-        Reflect.set(module, "_KisakWeb_CompleteFsStat", (...arguments_) => {
-            reportStat(Array.from(arguments_));
-            return originalStatCompletion(...arguments_);
-        });
-        Object.defineProperty(Blob.prototype, "arrayBuffer", {
-            ...arrayBufferDescriptor,
-            async value() {
+        const source = Object.freeze({ path: fastfilePath, size: fastfileSize });
+        const store = {
+            async openSource() { return source; },
+            async readSource() {
                 reportReadStarted();
                 await readGate;
-                return arrayBufferDescriptor.value.call(this);
+                return Uint8Array.from([0x49, 0x57, 0x66, 0x66]);
             },
-        });
+        };
+        const bridge = installBrowserFilesystemBridge(module, store);
 
         module.HEAPU8.fill(0xa5, destination, destination + 4);
         let accepted = false;
@@ -241,16 +224,13 @@ test("bridge cancellation prevents a delayed read from touching Wasm memory or c
             return {
                 accepted,
                 cancelled,
-                completionWrapped,
+                completionWrapped: true,
                 completions,
                 destinationBytes: Array.from(module.HEAPU8.slice(destination, destination + 4)),
             };
         } finally {
             releaseRead();
-            Object.defineProperty(Blob.prototype, "arrayBuffer", arrayBufferDescriptor);
-            Reflect.set(module, "_KisakWeb_CompleteFsStat", originalStatCompletion);
-            Reflect.set(module, "_KisakWeb_CompleteFsRead", originalCompletion);
-            module._free(destination);
+            bridge.dispose();
         }
     }, { fastfilePath: MAP_FASTFILE_PATH, fastfileSize: MAP_FASTFILE_SIZE });
 

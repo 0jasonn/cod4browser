@@ -1,6 +1,7 @@
 #include <universal/q_shared.h>
 #include "database.h"
 #include "db_initialization.h"
+#include "db_registry_pools.h"
 
 #include <qcommon/files.h>
 #include <qcommon/mem_track.h>
@@ -43,81 +44,9 @@ struct DBReorderAssetEntry // sizeof=0x10
     const char *assetName;
 };
 
-#define POOLSIZE_XMODELPIECES   64
-#define POOLSIZE_PHYSPRESET     64
-#define POOLSIZE_XANIMPARTS     4096
-#define POOLSIZE_XMODEL         1000
-#define POOLSIZE_MATERIAL       2048
-#define POOLSIZE_TECHNIQUE_SET  1024 // 512 on SP (XBox?)
-#define POOLSIZE_IMAGE          2400
-#define POOLSIZE_SOUND          16'000
-#define POOLSIZE_SOUND_CURVE    64
-#define POOLSIZE_LOADED_SOUND   1200
-#define POOLSIZE_CLIPMAP        1
-#define POOLSIZE_CLIPMAP_PVS    1
-#define POOLSIZE_COMWORLD       1
-#define POOLSIZE_GAMEWORLD_SP   1
-#define POOLSIZE_GAMEWORLD_MP   1
-#define POOLSIZE_MAP_ENTS       2
-#define POOLSIZE_GFXWORLD       1
-#define POOLSIZE_LIGHT_DEF      32
-#define POOLSIZE_UI_MAP         0
-#define POOLSIZE_FONT           16
-#define POOLSIZE_MENULIST       128
-#define POOLSIZE_MENU           640 // 512 on SP
-#define POOLSIZE_LOCALIZE_ENTRY 6144
-#define POOLSIZE_WEAPON         128
-#define POOLSIZE_SNDDRIVER_GLOBALS 1
-#define POOLSIZE_FX             400
-#define POOLSIZE_IMPACT_FX      4
-#define POOLSIZE_AITYPE         0
-#define POOLSIZE_MPTYPE         0
-#define POOLSIZE_CHARACTER      0
-#define POOLSIZE_XMODELALIAS    0
-#define POOLSIZE_RAWFILE        1024
-#define POOLSIZE_STRINGTABLE    50
-
-int32_t g_poolSize[ASSET_TYPE_COUNT] =
-{
-    POOLSIZE_XMODELPIECES,
-    POOLSIZE_PHYSPRESET,
-    POOLSIZE_XANIMPARTS,
-    POOLSIZE_XMODEL,
-    POOLSIZE_MATERIAL,
-    POOLSIZE_TECHNIQUE_SET,
-    POOLSIZE_IMAGE,
-    POOLSIZE_SOUND,
-    POOLSIZE_SOUND_CURVE,
-    POOLSIZE_LOADED_SOUND,
-    POOLSIZE_CLIPMAP,
-    POOLSIZE_CLIPMAP_PVS,
-    POOLSIZE_COMWORLD,
-    POOLSIZE_GAMEWORLD_SP,
-    POOLSIZE_GAMEWORLD_MP,
-    POOLSIZE_MAP_ENTS,
-    POOLSIZE_GFXWORLD,
-    POOLSIZE_LIGHT_DEF,
-    POOLSIZE_UI_MAP,
-    POOLSIZE_FONT,
-    POOLSIZE_MENULIST,
-    POOLSIZE_MENU,
-    POOLSIZE_LOCALIZE_ENTRY,
-    POOLSIZE_WEAPON,
-    POOLSIZE_SNDDRIVER_GLOBALS,
-    POOLSIZE_FX,
-    POOLSIZE_IMPACT_FX,
-    POOLSIZE_AITYPE,
-    POOLSIZE_MPTYPE,
-    POOLSIZE_CHARACTER,
-    POOLSIZE_XMODELALIAS,
-    POOLSIZE_RAWFILE,
-    POOLSIZE_STRINGTABLE,
-}; // idb
-
 bool g_archiveBuf;
 
 // --- file-local forward declarations (moved out of database.h) ---
-static void __cdecl DB_InitSingleton(void *pool, int32_t size);
 static void __cdecl DB_RemoveClipMap(XAssetHeader ass);
 static void __cdecl DB_RemoveComWorld(XAssetHeader ass);
 static void __cdecl DB_RemoveGfxWorld(XAssetHeader ass);
@@ -149,7 +78,6 @@ static bool __cdecl DB_OverrideAsset(uint32_t newZoneIndex, uint32_t existingZon
 static void __cdecl DB_GetXAsset(XAssetType type, XAssetHeader header);
 static void DB_PostLoadXZone();
 static void DB_Init();
-static void __cdecl DB_InitPoolHeader(XAssetType type);
 static void __cdecl DB_LoadXZone(XZoneInfo *zoneInfo, uint32_t zoneCount);
 static void __cdecl DB_LoadZone_f();
 static void __cdecl  DB_Thread(uint32_t threadContext);
@@ -389,37 +317,12 @@ int32_t g_missingAssetFile;
 //uint32_t volatile g_mainThreadBlocked  829f278c     db_registry.obj
 
 uint32_t volatile g_mainThreadBlocked;
-XAssetEntryPoolEntry *g_freeAssetEntryHead;
 
-uint16_t db_hashTable[32768];
 XAssetEntry *g_copyInfo[0x800];
 uint32_t g_copyInfoCount;
 XZone g_zones[ASSET_TYPE_COUNT]{ 0 };
 uint8_t g_zoneHandles[32];
 char g_zoneNameList[2080];
-XAssetPool<XModelPieces, POOLSIZE_XMODELPIECES> g_XModelPiecesPool;
-XAssetPool<PhysPreset, POOLSIZE_PHYSPRESET> g_PhysPresetPool;
-XAssetPool<XAnimParts, POOLSIZE_XANIMPARTS> g_XAnimPartsPool;
-XAssetPool<XModel, POOLSIZE_XMODEL> g_XModelPool;
-XAssetPool<Material, POOLSIZE_MATERIAL> g_MaterialPool;
-XAssetPool<MaterialTechniqueSet, POOLSIZE_TECHNIQUE_SET> g_MaterialTechniqueSetPool;
-XAssetPool<GfxImage, POOLSIZE_IMAGE> g_GfxImagePool;
-XAssetPool<snd_alias_list_t, POOLSIZE_SOUND> g_SoundPool;
-XAssetPool<SndCurve, POOLSIZE_SOUND_CURVE> g_SndCurvePool;
-XAssetPool<LoadedSound, POOLSIZE_LOADED_SOUND> g_LoadedSoundPool;
-XAssetPool<MapEnts, POOLSIZE_MAP_ENTS> g_MapEntsPool;
-XAssetPool<GfxLightDef, POOLSIZE_LIGHT_DEF> g_GfxLightDefPool;
-XAssetPool<Font_s, POOLSIZE_FONT> g_FontPool;
-XAssetPool<MenuList, POOLSIZE_MENULIST> g_MenuListPool;
-XAssetPool<menuDef_t, POOLSIZE_MENU> g_MenuPool;
-XAssetPool<LocalizeEntry, POOLSIZE_LOCALIZE_ENTRY> g_LocalizeEntryPool;
-XAssetPool<WeaponDef, POOLSIZE_WEAPON> g_WeaponDefPool;
-XAssetPool<FxEffectDef, POOLSIZE_FX> g_FxEffectDefPool;
-XAssetPool<FxImpactTable, POOLSIZE_IMPACT_FX> g_FxImpactTablePool;
-XAssetPool<RawFile, POOLSIZE_RAWFILE> g_RawFilePool;
-XAssetPool<StringTable, POOLSIZE_STRINGTABLE> g_StringTablePool;
-
-XAssetEntryPoolEntry g_assetEntryPool[32768];
 uint8_t g_fileBuf[524288];
 
 fileData_s *com_fileDataHashTable[1024];
@@ -508,98 +411,6 @@ void __cdecl Hunk_OverrideDataForFile(int32_t type, const char *name, void *data
         MyAssertHandler(".\\universal\\com_memory.cpp", 1554, 0, "Hunk_OverrideDataForFile: could not find data");
 }
 
-template <typename T>
-void __cdecl DB_InitPool(void *arg, int32_t size)
-{
-    //XAssetPool<RawFile, POOLSIZE_RAWFILE> *pool = (XAssetPool<RawFile, POOLSIZE_RAWFILE>*)arg;
-    T *pool = (T *)arg;
-    pool->freeHead = &pool->entries[0];
-    for (int32_t i = 0; i < size - 1; i++)
-    {
-        pool->entries[i].next = &pool->entries[i + 1];
-    }
-    pool->entries[size - 1].next = NULL;
-}
-
-void(__cdecl *DB_InitPoolHeaderHandler[ASSET_TYPE_COUNT])(void *, int) =
-{
-  DB_InitPool<XAssetPool<XModelPieces, POOLSIZE_XMODELPIECES>>,
-  DB_InitPool<XAssetPool<PhysPreset, POOLSIZE_PHYSPRESET>>,
-  DB_InitPool<XAssetPool<XAnimParts, POOLSIZE_XANIMPARTS>>,
-  DB_InitPool<XAssetPool<XModel, POOLSIZE_XMODEL>>,
-  DB_InitPool<XAssetPool<Material, POOLSIZE_MATERIAL>>,
-  DB_InitPool<XAssetPool<MaterialTechniqueSet, POOLSIZE_TECHNIQUE_SET>>,
-  DB_InitPool<XAssetPool<GfxImage, POOLSIZE_IMAGE>>,
-  DB_InitPool<XAssetPool<snd_alias_list_t, POOLSIZE_SOUND>>,
-  DB_InitPool<XAssetPool<SndCurve, POOLSIZE_SOUND_CURVE>>,
-  DB_InitPool<XAssetPool<LoadedSound, POOLSIZE_LOADED_SOUND>>,
-  &DB_InitSingleton,
-  &DB_InitSingleton,
-  &DB_InitSingleton,
-  &DB_InitSingleton,
-  &DB_InitSingleton,
-  DB_InitPool<XAssetPool<MapEnts, POOLSIZE_MAP_ENTS>>,
-  &DB_InitSingleton,
-  DB_InitPool<XAssetPool<GfxLightDef, POOLSIZE_LIGHT_DEF>>,
-  NULL,
-  DB_InitPool<XAssetPool<Font_s, POOLSIZE_FONT>>,
-  DB_InitPool<XAssetPool<MenuList, POOLSIZE_MENULIST>>,
-  DB_InitPool<XAssetPool<menuDef_t, POOLSIZE_MENU>>,
-  DB_InitPool<XAssetPool<LocalizeEntry, POOLSIZE_LOCALIZE_ENTRY>>,
-  DB_InitPool<XAssetPool<WeaponDef, POOLSIZE_WEAPON>>,
-  DB_InitPool<XAssetPool<SndDriverGlobals, POOLSIZE_SNDDRIVER_GLOBALS>>,
-  DB_InitPool<XAssetPool<FxEffectDef, POOLSIZE_FX>>,
-  DB_InitPool<XAssetPool<FxImpactTable, POOLSIZE_IMPACT_FX>>,
-  NULL,
-  NULL,
-  NULL,
-  NULL,
-  DB_InitPool<XAssetPool<RawFile, POOLSIZE_RAWFILE>>,
-  DB_InitPool<XAssetPool<StringTable, POOLSIZE_STRINGTABLE>>,
-}; // idb
-
-void *DB_XAssetPool[ASSET_TYPE_COUNT] =
-{
-  &g_XModelPiecesPool,
-  &g_PhysPresetPool,
-  &g_XAnimPartsPool,
-  &g_XModelPool,
-  &g_MaterialPool,
-  &g_MaterialTechniqueSetPool,
-  &g_GfxImagePool,
-  &g_SoundPool,
-  &g_SndCurvePool,
-  &g_LoadedSoundPool,
-  &cm,
-  &cm,
-  &comWorld,
-#ifdef KISAK_MP
-  NULL,         // GAMEWORLD_SP
-  &gameWorldMp, // GAMEWORLD_MP
-#elif KISAK_SP
-  &gameWorldSp, // GAMEWORLD_SP
-  NULL,         // GAMEWORLD_MP
-#endif
-  &g_MapEntsPool,
-  &s_world,
-  &g_GfxLightDefPool,
-  NULL,
-  &g_FontPool,
-  &g_MenuListPool,
-  &g_MenuPool,
-  &g_LocalizeEntryPool,
-  &g_WeaponDefPool,
-  NULL, // &g_SndDriverGlobalsPool (Set in SP?)
-  &g_FxEffectDefPool,
-  &g_FxImpactTablePool,
-  NULL,
-  NULL,
-  NULL,
-  NULL,
-  &g_RawFilePool,
-  &g_StringTablePool
-}; // idb
-
 void __cdecl TRACK_db_registry()
 {
     track_static_alloc_internal(db_hashTable, 0x10000, "db_hashTable", 10);
@@ -607,28 +418,7 @@ void __cdecl TRACK_db_registry()
     track_static_alloc_internal(g_zones, 5544, "g_zones", 10);
     track_static_alloc_internal(g_zoneHandles, 32, "g_zoneHandles", 10);
     track_static_alloc_internal(g_zoneNameList, 2080, "g_zoneNameList", 10);
-    track_static_alloc_internal(&g_XModelPiecesPool, 772, "g_XModelPiecesPool", 10);
-    track_static_alloc_internal(&g_PhysPresetPool, 2820, "g_PhysPresetPool", 10);
-    track_static_alloc_internal(&g_XAnimPartsPool, 360452, "g_XAnimPartsPool", 10);
-    track_static_alloc_internal(&g_XModelPool, 220004, "g_XModelPool", 10);
-    track_static_alloc_internal(&g_MaterialPool, 163848, "g_MaterialPool", 10);
-    track_static_alloc_internal(&g_MaterialTechniqueSetPool, 151556, "g_MaterialTechniqueSetPool", 10);
-    track_static_alloc_internal(&g_GfxImagePool, 86404, "g_GfxImagePool", 10);
-    track_static_alloc_internal(&g_SoundPool, 192004, "g_SoundPool", 10);
-    track_static_alloc_internal(&g_SndCurvePool, 4612, "g_SndCurvePool", 10);
-    track_static_alloc_internal(&g_LoadedSoundPool, 52804, "g_LoadedSoundPool", 10);
-    track_static_alloc_internal(&g_MapEntsPool, 28, "g_MapEntsPool", 10);
-    track_static_alloc_internal(&g_GfxLightDefPool, 516, "g_GfxLightDefPool", 10);
-    track_static_alloc_internal(&g_FontPool, 388, "g_FontPool", 10);
-    track_static_alloc_internal(&g_MenuListPool, 1540, "g_MenuListPool", 10);
-    track_static_alloc_internal(&g_MenuPool, 181764, "g_MenuPool", 10);
-    track_static_alloc_internal(&g_LocalizeEntryPool, 49156, "g_LocalizeEntryPool", 10);
-    track_static_alloc_internal(&g_WeaponDefPool, 277508, "g_WeaponDefPool", 10);
-    track_static_alloc_internal(&g_FxEffectDefPool, 12804, "g_FxEffectDefPool", 10);
-    track_static_alloc_internal(&g_FxImpactTablePool, 36, "g_FxImpactTablePool", 10);
-    track_static_alloc_internal(&g_RawFilePool, 12292, "g_RawFilePool", 10);
-    track_static_alloc_internal(&g_StringTablePool, 804, "g_StringTablePool", 10);
-    track_static_alloc_internal(g_assetEntryPool, 0x80000, "g_assetEntryPool", 10);
+    DB_TrackAssetPools();
     track_static_alloc_internal(g_fileBuf, 0x80000, "g_fileBuf", 10);
 }
 
@@ -722,12 +512,6 @@ void __cdecl DB_BeginRecoverLostDevice()
             "%s",
             "critSect->readCount > 0");
     InterlockedDecrement(&db_hashCritSect.readCount);
-}
-
-void __cdecl DB_InitSingleton(void *pool, int32_t size)
-{
-    if (size != 1)
-        MyAssertHandler(".\\database\\db_registry.cpp", 528, 0, "%s\n\t(size) = %i", "(size == 1)", size);
 }
 
 void __cdecl Load_PhysPresetAsset(XAssetHeader *physPreset)
@@ -2294,21 +2078,7 @@ void __cdecl DB_LoadXAssets(XZoneInfo *zoneInfo, uint32_t zoneCount, int32_t syn
 
 void DB_Init()
 {
-    for (XAssetType type = (XAssetType)0; type < ASSET_TYPE_COUNT; ++type)
-        DB_InitPoolHeader(type);
-
-    g_freeAssetEntryHead = g_assetEntryPool + 16;
-
-    for (int32_t i = 1; i < 0x7FFF; ++i)
-        g_assetEntryPool[i].next = &g_assetEntryPool[i + 1];
-
-    g_assetEntryPool[0x7FFF].next = NULL;
-}
-
-void __cdecl DB_InitPoolHeader(XAssetType type)
-{
-    if (DB_XAssetPool[type])
-        DB_InitPoolHeaderHandler[type](DB_XAssetPool[type], g_poolSize[type]);
+    DB_InitAssetPools();
 }
 
 void __cdecl DB_LoadXZone(XZoneInfo *zoneInfo, uint32_t zoneCount)

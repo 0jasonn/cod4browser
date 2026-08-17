@@ -450,8 +450,18 @@ async function readWindow(file, offset, length)
     return new Uint8Array(await file.slice(offset, Math.min(file.size, offset + length)).arrayBuffer());
 }
 
-function callWasmProbe(module, functionName, buffers, buildArguments)
+async function callWasmProbe(module, functionName, buffers, buildArguments)
 {
+    if (typeof module?.callProbe === "function") {
+        const symbolicPointers = buffers.map((_, index) =>
+            Object.freeze({ pointerIndex: index }));
+        const argumentLayout = buildArguments(symbolicPointers).map((argument) =>
+            argument && typeof argument === "object" &&
+                Number.isInteger(argument.pointerIndex)
+                ? { kind: "pointer", index: argument.pointerIndex }
+                : { kind: "value", value: argument });
+        return module.callProbe(functionName, buffers, argumentLayout);
+    }
     const probe = module?.[functionName];
     if (typeof probe !== "function" || typeof module?._malloc !== "function" ||
         typeof module?._free !== "function") {
@@ -498,7 +508,7 @@ function assertProbeSucceeded(result)
 async function probeLocalization(module, file)
 {
     const bytes = await readWindow(file, 0, file.size);
-    const result = callWasmProbe(
+    const result = await callWasmProbe(
         module,
         "_KisakWeb_ProbeLocalization",
         [bytes],
@@ -524,7 +534,7 @@ async function probeIwd(module, file)
     const central = centralOffset <= file.size
         ? await readWindow(file, centralOffset, requestedCentralLength)
         : new Uint8Array();
-    const result = callWasmProbe(
+    const result = await callWasmProbe(
         module,
         "_KisakWeb_ProbeIwd",
         [head, tail, central],
@@ -549,7 +559,7 @@ async function probeIwd(module, file)
 async function probeFastfile(module, file)
 {
     const head = await readWindow(file, 0, Math.min(file.size, 14));
-    const result = callWasmProbe(
+    const result = await callWasmProbe(
         module,
         "_KisakWeb_ProbeFastfileHeader",
         [head],
@@ -639,6 +649,7 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
     const storageChannel = typeof BroadcastChannel === "function"
         ? new BroadcastChannel(STORAGE_CHANNEL_NAME)
         : null;
+    const engineFilesystemLock = "kisakcod-web-engine-filesystem-v1";
 
     const emit = (detail) => onState({
         persistenceGranted,
@@ -657,6 +668,16 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
     function broadcastChange()
     {
         storageChannel?.postMessage({ type: "changed" });
+    }
+
+    async function releaseEngineFilesForMutation()
+    {
+        storageChannel?.postMessage({ type: "release-engine-files" });
+        await module?.unmount?.();
+        // Every mounted engine tab holds this lock in shared mode.  Waiting for
+        // an exclusive turn proves their Worker SyncAccessHandles have closed
+        // before OPFS directories are replaced or removed.
+        await navigator.locks.request(engineFilesystemLock, { mode: "exclusive" }, () => {});
     }
 
     function scheduleExternalSync()
@@ -966,6 +987,7 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
                 manifest: previousManifest,
             });
             await probeSelectedEntries(entries);
+            await releaseEngineFilesForMutation();
 
             return await withStorageLock(async () => {
                 const storedBeforeImport = await databaseGet(database, ACTIVE_IMPORT_KEY);
@@ -1084,6 +1106,7 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
         let activeFilesRemoved = false;
         try {
             await ensureBackend();
+            await releaseEngineFilesForMutation();
             await withStorageLock(async () => {
                 storedManifest = await databaseGet(database, ACTIVE_IMPORT_KEY);
                 emit({
@@ -1264,6 +1287,10 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
     }
 
     storageChannel?.addEventListener("message", (event) => {
+        if (event.data?.type === "release-engine-files") {
+            void module?.unmount?.().catch(() => {});
+            return;
+        }
         if (event.data?.type !== "changed") {
             return;
         }

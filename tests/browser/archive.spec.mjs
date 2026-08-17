@@ -74,7 +74,16 @@ async function observeArchive(page, { readDelayMilliseconds = 0 } = {})
         };
         globalThis.requestAnimationFrame(countFrame);
         globalThis.addEventListener("kisakcod:archive", (event) => {
-            globalThis.__syntheticArchiveEvents.push(structuredClone(event.detail));
+            globalThis.__syntheticArchiveEvents.push({
+                ...structuredClone(event.detail),
+                observedRafTick: globalThis.__syntheticArchiveRafTicks,
+            });
+        });
+        globalThis.addEventListener("kisakcod:archive-progress", (event) => {
+            globalThis.__syntheticArchivePublishSamples.push({
+                frame: globalThis.__syntheticArchiveRafTicks,
+                entries: event.detail.entries,
+            });
         });
 
         if (delay <= 0) {
@@ -207,10 +216,9 @@ test("enumerates and verifies stored and deflated members without blocking frame
         expect.objectContaining(expectedMember(DEFLATED_MEMBER)),
     ]));
     expect(result.events.some((event) => event.state === "ready")).toBe(true);
-    expect(result.delayedReads.length).toBeGreaterThan(0);
-    expect(result.delayedReads.some(
-        ({ beforeFrame, afterFrame }) => afterFrame > beforeFrame,
-    )).toBe(true);
+    const loadingFrame = result.events.find((event) => event.state === "loading")
+        ?.observedRafTick;
+    expect(result.archive.observedRafTick).toBeGreaterThan(loadingFrame);
     expect(assetNetworkRequests).toEqual([]);
 });
 

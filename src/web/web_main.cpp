@@ -86,7 +86,7 @@ bool InitializeHeadlessEngineSlice()
     Com_Init(commandLine);
     const ComInitTraceSnapshot &trace = Com_GetInitTrace();
     if (!trace.stopStage ||
-        std::strcmp(trace.stopStage, "DB_InitThread/WorkerHostedDatabase") != 0 ||
+        std::strcmp(trace.stopStage, "DB_LoadXAssets/engine-filesystem-mount") != 0 ||
         trace.physicalMemorySize != 0x8000000u || trace.pmemLowPosition != 0 ||
         trace.pmemHighPosition != 0x8000000u || trace.pmemHighAllocationCount != 1 ||
         !trace.databaseInitializing ||

@@ -2,6 +2,7 @@
 
 // LWSS: This file has way too many structs. KISAKTODO: move out later.
 #include <database/db_asset_types.h>
+#include <database/db_registry_types.h>
 #include <qcommon/cm_types.h>
 #include <xanim/xanim_types.h>
 #include "xanim_public.h"
@@ -233,60 +234,6 @@ struct XAssetPool
 {
     XAssetPoolEntry<T> *freeHead;
     XAssetPoolEntry<T> entries[LEN];
-};
-
-struct XAssetEntry // sizeof=0x10
-{                                       // ...
-    XAsset asset;                       // ...
-    unsigned __int8 zoneIndex;
-    bool inuse;
-    uint16_t nextHash;
-    uint16_t nextOverride;
-    uint16_t usageFrame;
-};
-
-union XAssetEntryPoolEntry // sizeof=0x10
-{                                       // ...
-    XAssetEntryPoolEntry()
-    {
-    }
-    XAssetEntry entry;
-    XAssetEntryPoolEntry *next;
-};
-
-struct XZoneInfo // sizeof=0xC
-{                                       // ...
-    const char *name;                   // ...
-    int allocFlags;                     // ...
-    int freeFlags;                      // ...
-};
-
-struct XBlock // sizeof=0x8
-{                                       // ...
-    unsigned __int8 *data;
-    uint32_t size;
-};
-
-struct XZoneMemory // sizeof=0x58
-{                                       // ...
-    XBlock blocks[9];
-    unsigned __int8 *lockedVertexData;
-    unsigned __int8 *lockedIndexData;
-    void *vertexBuffer;
-    void *indexBuffer;
-};
-
-struct XZone // sizeof=0xA8
-{                                       // ...
-    char name[64];                      // ...
-    int flags;                          // ...
-    int allocType;
-    XZoneMemory mem;                    // ...
-    int fileSize;                       // ...
-    bool modZone;                       // ...
-    // padding byte
-    // padding byte
-    // padding byte
 };
 
 struct ScriptStringList // sizeof=0x8

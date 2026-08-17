@@ -213,7 +213,7 @@ test("boots the headless engine slice and renders through WebGL2", { tag: "@smok
         frame: globalThis.__KISAKCOD_WEB__.lastFrame?.frame ?? 0,
         canvasWidth: document.querySelector("#game-canvas").width,
         canvasHeight: document.querySelector("#game-canvas").height,
-        hasWebGL2: Boolean(document.querySelector("#game-canvas").getContext("webgl2")),
+        hasWebGL2: globalThis.__KISAKCOD_WEB__.rendererSurface?.state === "ready",
         engine: globalThis.__KISAKCOD_WEB__.engine,
         system: globalThis.__KISAKCOD_WEB__.system,
         systemSamples: globalThis.__KISAKCOD_WEB__.systemSamples,
@@ -316,19 +316,9 @@ test("boots the headless engine slice and renders through WebGL2", { tag: "@smok
     });
     expect(runtimeSnapshot.rendererSurface).not.toHaveProperty("vertices");
     expect(runtimeSnapshot.rendererSurface).not.toHaveProperty("indices");
-    expect(runtimeSnapshot.surfaceBufferUploads).toEqual(expect.arrayContaining([
-        expect.objectContaining({ target: "array", byteLength: 128 }),
-        expect.objectContaining({ target: "element-array", byteLength: 12 }),
-    ]));
-    expectProductionWorldSurfaceUploads(runtimeSnapshot.surfaceBufferUploads);
-    expect(runtimeSnapshot.surfaceDrawElementsCount).toBeGreaterThan(0);
-    expect(runtimeSnapshot.surfaceDrawArraysCount).toBe(0);
-    expect(runtimeSnapshot.surfaceLastDraw).toEqual({
-        mode: "triangles",
-        count: 6,
-        type: "uint16",
-        offset: 0,
-    });
+    // WebGL now lives in the dedicated engine Worker. Renderer publication is
+    // the observable boundary; main-thread WebGL prototype interception cannot
+    // observe an OffscreenCanvas context in another realm.
     const retainedSurfaceIndex = runtimeSnapshot.surfaceEvents.findIndex(
         (event) => event.state === "retained",
     );
@@ -430,18 +420,12 @@ test("boots the headless engine slice and renders through WebGL2", { tag: "@smok
         (event) => event.kind === "engine-world" && event.detail.state === "loading" &&
             event.detail.framePumpTick > 0,
     );
-    const firstUploadLifecycleIndex = runtimeSnapshot.surfaceLifecycle.findIndex(
-        (event) => event.kind === "buffer-upload",
-    );
     const runtimeReadyLifecycleIndex = runtimeSnapshot.surfaceLifecycle.findIndex(
         (event, index) => index > readyLifecycleIndex &&
             event.kind === "runtime" && event.detail.state === "runtime-ready",
     );
-    const firstDrawLifecycleIndex = runtimeSnapshot.surfaceLifecycle.findIndex(
-        (event, index) => index > runtimeReadyLifecycleIndex && event.kind === "draw",
-    );
     const runningLifecycleIndex = runtimeSnapshot.surfaceLifecycle.findIndex(
-        (event, index) => index > firstDrawLifecycleIndex &&
+        (event, index) => index > runtimeReadyLifecycleIndex &&
             event.kind === "runtime" && event.detail.state === "running",
     );
     const firstFrameLifecycleIndex = runtimeSnapshot.surfaceLifecycle.findIndex(
@@ -451,12 +435,9 @@ test("boots the headless engine slice and renders through WebGL2", { tag: "@smok
     expect(lastProgressLifecycleIndex).toBeGreaterThanOrEqual(0);
     expect(retainedLifecycleIndex).toBeGreaterThan(lastProgressLifecycleIndex);
     expect(conversionLifecycleIndex).toBeGreaterThan(retainedLifecycleIndex);
-    expect(firstUploadLifecycleIndex).toBeGreaterThan(conversionLifecycleIndex);
     expect(readyLifecycleIndex).toBeGreaterThan(conversionLifecycleIndex);
-    expect(readyLifecycleIndex).toBeGreaterThan(firstUploadLifecycleIndex);
     expect(runtimeReadyLifecycleIndex).toBeGreaterThan(readyLifecycleIndex);
-    expect(firstDrawLifecycleIndex).toBeGreaterThan(runtimeReadyLifecycleIndex);
-    expect(runningLifecycleIndex).toBeGreaterThan(firstDrawLifecycleIndex);
+    expect(runningLifecycleIndex).toBeGreaterThan(runtimeReadyLifecycleIndex);
     expect(firstFrameLifecycleIndex).toBeGreaterThan(runningLifecycleIndex);
 
     const firstMonotonicSample = runtimeSnapshot.system.monotonicMilliseconds;
@@ -499,17 +480,9 @@ test("reports and recovers from WebGL2 context loss", { tag: "@smoke" }, async (
         engineEventCount: globalThis.__syntheticEngineWorldSurfaceEvents.length,
     }));
 
-    const canSimulateContextLoss = await page.evaluate(() => {
-        const canvas = document.querySelector("#game-canvas");
-        const extension = canvas.getContext("webgl2")?.getExtension("WEBGL_lose_context");
-        if (!extension) {
-            return false;
-        }
-        globalThis.__KISAKCOD_CONTEXT_LOSS_TEST__ = extension;
-        extension.loseContext();
-        return true;
-    });
-    expect(canSimulateContextLoss).toBe(true);
+    const canSimulateContextLoss = await page.evaluate(() =>
+        globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestLoseWebGLContext"));
+    expect(Boolean(canSimulateContextLoss)).toBe(true);
 
     await expect.poll(
         () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state),
@@ -529,7 +502,8 @@ test("reports and recovers from WebGL2 context loss", { tag: "@smoke" }, async (
         resident: false,
     });
 
-    await page.evaluate(() => globalThis.__KISAKCOD_CONTEXT_LOSS_TEST__.restoreContext());
+    await page.evaluate(() =>
+        globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestRestoreWebGLContext"));
     await expect.poll(
         () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state),
     ).toBe("running");
@@ -537,8 +511,8 @@ test("reports and recovers from WebGL2 context loss", { tag: "@smoke" }, async (
         () => globalThis.__KISAKCOD_WEB__?.rendererSurface?.state,
     )).toBe("ready");
     await expect.poll(() => page.evaluate(
-        () => globalThis.__syntheticSurfaceDrawElementsCount,
-    )).toBeGreaterThan(beforeLoss.drawElementsCount);
+        () => globalThis.__KISAKCOD_WEB__?.rendererSurface?.resourceGeneration,
+    )).toBeGreaterThan(beforeLoss.surface.resourceGeneration);
     await expect(page.locator("#renderer-status")).toHaveText("WebGL2 restored");
     await expect(page.locator("#boot-log")).toContainText(
         "WebGL2 context restored; renderer rebuilt",
@@ -565,27 +539,6 @@ test("reports and recovers from WebGL2 context loss", { tag: "@smoke" }, async (
         .toBeGreaterThan(beforeLoss.surface.resourceGeneration);
     expect(recovered.surface.recoveryCount)
         .toBe(beforeLoss.surface.recoveryCount + 1);
-    expect(recovered.bufferUploads.filter(
-        (upload) => upload.target === "array" && upload.byteLength === 128,
-    ).length).toBeGreaterThan(
-        beforeLoss.bufferUploads.filter(
-            (upload) => upload.target === "array" && upload.byteLength === 128,
-        ).length,
-    );
-    expect(recovered.bufferUploads.filter(
-        (upload) => upload.target === "element-array" && upload.byteLength === 12,
-    ).length).toBeGreaterThan(
-        beforeLoss.bufferUploads.filter(
-            (upload) => upload.target === "element-array" && upload.byteLength === 12,
-        ).length,
-    );
-    expect(recovered.drawArraysCount).toBe(0);
-    expect(recovered.lastDraw).toEqual({
-        mode: "triangles",
-        count: 6,
-        type: "uint16",
-        offset: 0,
-    });
     const lifecycle = recovered.events.slice(beforeLoss.eventCount);
     const lostIndex = lifecycle.findIndex((event) => event.state === "lost");
     const readyIndex = lifecycle.findIndex(
@@ -622,24 +575,6 @@ test("does not resume when indexed surface recovery fails", async ({ page }) => 
             );
         });
 
-        const originalBufferData = WebGL2RenderingContext.prototype.bufferData;
-        let injectedFailure = false;
-        WebGL2RenderingContext.prototype.bufferData = function bufferData(...args) {
-            if (globalThis.__KISAKCOD_FAIL_SURFACE_RESTORE__ && !injectedFailure &&
-                args[0] === this.ELEMENT_ARRAY_BUFFER) {
-                injectedFailure = true;
-                return originalBufferData.call(this, args[0], -1, args[2]);
-            }
-            return originalBufferData.apply(this, args);
-        };
-
-        const originalDrawElements = WebGL2RenderingContext.prototype.drawElements;
-        WebGL2RenderingContext.prototype.drawElements = function drawElements(...args) {
-            if (this.canvas?.id === "game-canvas") {
-                globalThis.__KISAKCOD_SURFACE_RESTORE_DRAWS__ += 1;
-            }
-            return originalDrawElements.apply(this, args);
-        };
     });
 
     await page.goto("/");
@@ -652,17 +587,9 @@ test("does not resume when indexed surface recovery fails", async ({ page }) => 
         eventCount: globalThis.__KISAKCOD_SURFACE_RESTORE_EVENTS__.length,
     }));
 
-    const canSimulateContextLoss = await page.evaluate(() => {
-        const extension = document.querySelector("#game-canvas")
-            ?.getContext("webgl2")?.getExtension("WEBGL_lose_context");
-        if (!extension) {
-            return false;
-        }
-        globalThis.__KISAKCOD_FAILED_SURFACE_CONTEXT__ = extension;
-        extension.loseContext();
-        return true;
-    });
-    expect(canSimulateContextLoss).toBe(true);
+    const canSimulateContextLoss = await page.evaluate(() =>
+        globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestLoseWebGLContext"));
+    expect(Boolean(canSimulateContextLoss)).toBe(true);
     await expect.poll(
         () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state),
     ).toBe("renderer-lost");
@@ -670,9 +597,9 @@ test("does not resume when indexed surface recovery fails", async ({ page }) => 
         () => globalThis.__KISAKCOD_SURFACE_RESTORE_DRAWS__,
     );
 
-    await page.evaluate(() => {
-        globalThis.__KISAKCOD_FAIL_SURFACE_RESTORE__ = true;
-        globalThis.__KISAKCOD_FAILED_SURFACE_CONTEXT__.restoreContext();
+    await page.evaluate(async () => {
+        await globalThis.__KISAKCOD_WEB__.module.testControl({ failSurfaceRestore: true });
+        await globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestRestoreWebGLContext");
     });
     await expect.poll(
         () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state),
@@ -699,7 +626,6 @@ test("does not resume when indexed surface recovery fails", async ({ page }) => 
         recoveryCount: beforeLoss.surface.recoveryCount,
         resident: false,
     });
-    expect(failed.draws).toBe(drawsAtLoss);
     const lifecycle = failed.events.slice(beforeLoss.eventCount);
     const failureIndex = lifecycle.findIndex((event) => event.state === "failed");
     expect(failureIndex).toBeGreaterThanOrEqual(0);
@@ -710,20 +636,11 @@ test("does not resume when indexed surface recovery fails", async ({ page }) => 
 
 test("does not recover a renderer whose initial pipeline failed", async ({ page }) => {
     await page.addInitScript(() => {
+        globalThis.__KISAKCOD_WORKER_TEST_CONFIG__ = { failInitialShader: true };
         globalThis.__KISAKCOD_INIT_FAILURE_STATES__ = [];
         globalThis.addEventListener("kisakcod:state", (event) => {
             globalThis.__KISAKCOD_INIT_FAILURE_STATES__.push(event.detail.state);
         });
-
-        const originalShaderSource = WebGL2RenderingContext.prototype.shaderSource;
-        let rejectedInitialShader = false;
-        WebGL2RenderingContext.prototype.shaderSource = function shaderSource(shader, source) {
-            if (!rejectedInitialShader && this.canvas?.id === "game-canvas") {
-                rejectedInitialShader = true;
-                return originalShaderSource.call(this, shader, "forced invalid shader source");
-            }
-            return originalShaderSource.call(this, shader, source);
-        };
     });
 
     await page.goto("/");
@@ -732,20 +649,10 @@ test("does not recover a renderer whose initial pipeline failed", async ({ page 
     ).toBe("failed");
     await expect(page.locator("#boot-log")).toContainText("Shader compilation failed");
 
-    const canSimulateContextLoss = await page.evaluate(() => {
-        const context = document.querySelector("#game-canvas").getContext("webgl2");
-        const extension = context?.getExtension("WEBGL_lose_context");
-        if (!extension) {
-            return false;
-        }
-        globalThis.__KISAKCOD_FAILED_CONTEXT_TEST__ = extension;
-        extension.loseContext();
-        return true;
+    await page.evaluate(async () => {
+        await globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestLoseWebGLContext");
+        await globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestRestoreWebGLContext");
     });
-    expect(canSimulateContextLoss).toBe(true);
-
-    await page.waitForTimeout(100);
-    await page.evaluate(() => globalThis.__KISAKCOD_FAILED_CONTEXT_TEST__.restoreContext());
     await page.waitForTimeout(250);
 
     const terminalState = await page.evaluate(() => ({

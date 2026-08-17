@@ -22,6 +22,7 @@ namespace
 std::array<void *, 4> g_values{};
 bool g_mainThreadInitialized = false;
 int g_probeCount = 0;
+int g_databaseThreadInitCount = 0;
 std::array<std::array<char, 32>, 2> g_probeArguments{};
 
 void __cdecl ProbeCommand()
@@ -37,6 +38,8 @@ void __cdecl ProbeCommand()
     ++g_probeCount;
 }
 } // namespace
+
+void DB_InitThread() { ++g_databaseThreadInitCount; }
 
 void Sys_InitializeCriticalSections() {}
 void Sys_EnterCriticalSection(int) {}
@@ -131,7 +134,8 @@ int main()
     {
         assert(std::strcmp(trace.stages[index], expectedStages[index]) == 0);
     }
-    assert(std::strcmp(trace.stopStage, "DB_InitThread/WorkerHostedDatabase") == 0);
+    assert(std::strcmp(trace.stopStage, "DB_LoadXAssets/engine-filesystem-mount") == 0);
+    assert(g_databaseThreadInitCount == 1);
     assert(trace.startupVariableCount == 3);
     constexpr std::array<const char *, 6> expectedCommands{{
         "wait", "vstr", "exec", "cmdlist", "seta", "set",

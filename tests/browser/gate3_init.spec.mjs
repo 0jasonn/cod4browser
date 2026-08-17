@@ -14,7 +14,7 @@ test("real Com_Init publishes the Gate 3 canonical prefix trace", { tag: "@smoke
 
     const trace = await page.evaluate(() => structuredClone(globalThis.__gate3InitTraces[0]));
     expect(trace).toMatchObject({
-        stopStage: "DB_InitThread/WorkerHostedDatabase",
+        stopStage: "DB_LoadXAssets/engine-filesystem-mount",
         stageCount: 14,
         startupVariableCount: 3,
         commandCount: 6,

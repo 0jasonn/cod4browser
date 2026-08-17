@@ -1,15 +1,30 @@
 #include <qcommon/system.h>
+#include <qcommon/thread_context.h>
 
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 
 namespace
 {
 constexpr int VALUE_SLOT_COUNT = 4;
 
-std::array<void *, VALUE_SLOT_COUNT> g_mainThreadValues{};
+std::array<std::array<void *, VALUE_SLOT_COUNT>, THREAD_CONTEXT_COUNT> g_contextValues{};
 std::array<std::uint32_t, CRITSECT_COUNT> g_criticalSectionDepth{};
 bool g_mainThreadInitialized = false;
+ThreadContext_t g_currentContext = THREAD_CONTEXT_MAIN;
+void(__cdecl *g_databaseFunction)(std::uint32_t) = nullptr;
+bool g_databaseCompleted = true;
+bool g_databaseCompleted2 = true;
+
+void RunDatabaseFunction()
+{
+    if (!g_databaseFunction) std::abort();
+    const ThreadContext_t previous = g_currentContext;
+    g_currentContext = THREAD_CONTEXT_DATABASE;
+    g_databaseFunction(THREAD_CONTEXT_DATABASE);
+    g_currentContext = previous;
+}
 } // namespace
 
 void Sys_InitializeCriticalSections()
@@ -67,7 +82,7 @@ void Sys_InitMainThread()
 
 bool Sys_IsMainThread()
 {
-    return g_mainThreadInitialized;
+    return g_mainThreadInitialized && g_currentContext == THREAD_CONTEXT_MAIN;
 }
 
 bool Sys_IsRenderThread()
@@ -84,7 +99,8 @@ void Sys_SetValue(int valueIndex, void *data)
 {
     if (valueIndex >= 0 && valueIndex < VALUE_SLOT_COUNT)
     {
-        g_mainThreadValues[static_cast<std::size_t>(valueIndex)] = data;
+        g_contextValues[static_cast<std::size_t>(g_currentContext)]
+            [static_cast<std::size_t>(valueIndex)] = data;
     }
 }
 
@@ -94,8 +110,38 @@ void *Sys_GetValue(int valueIndex)
     {
         return nullptr;
     }
-    return g_mainThreadValues[static_cast<std::size_t>(valueIndex)];
+    return g_contextValues[static_cast<std::size_t>(g_currentContext)]
+        [static_cast<std::size_t>(valueIndex)];
 }
+
+char Sys_SpawnDatabaseThread(void(__cdecl *function)(std::uint32_t))
+{
+    if (!function || g_databaseFunction) return 0;
+    g_databaseFunction = function;
+    g_contextValues[THREAD_CONTEXT_DATABASE] = g_contextValues[THREAD_CONTEXT_MAIN];
+    RunDatabaseFunction();
+    return 1;
+}
+
+bool Sys_IsDatabaseThread()
+{
+    return g_currentContext == THREAD_CONTEXT_DATABASE;
+}
+
+void Sys_WakeDatabase() { g_databaseCompleted = false; }
+void Sys_WakeDatabase2() { g_databaseCompleted2 = false; }
+void Sys_DatabaseCompleted() { g_databaseCompleted = true; }
+void Sys_DatabaseCompleted2() { g_databaseCompleted2 = true; }
+bool Sys_IsDatabaseReady() { return g_databaseCompleted; }
+bool Sys_IsDatabaseReady2() { return g_databaseCompleted2; }
+void Sys_SyncDatabase() { if (!g_databaseCompleted) std::abort(); }
+void Sys_NotifyDatabase()
+{
+    if (!g_databaseFunction) std::abort();
+    RunDatabaseFunction();
+}
+void Sys_WaitStartDatabase() {}
+void Sys_WaitDatabaseThread() {}
 
 void NET_Sleep(int)
 {
