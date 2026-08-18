@@ -13,12 +13,14 @@ get_filename_component(KISAK_REPOSITORY_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." A
 add_executable(iwd_archive_tests
     "${CMAKE_CURRENT_LIST_DIR}/iwd_archive_tests.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/qcommon/iwd_archive.cpp"
-    "${KISAK_REPOSITORY_ROOT}/src/qcommon/unzip.cpp"
 )
-if (NOT MSVC AND NOT EMSCRIPTEN AND NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
-    # Kisak's canonical file wrappers retain the Win32 calling-convention
-    # spelling. It is semantically empty on native non-Windows test hosts.
-    target_compile_definitions(iwd_archive_tests PRIVATE __cdecl=)
+if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    # Canonical unzip owns IW3 structures with the 32-bit engine ABI. Keep the
+    # platform-neutral archive parser available to 64-bit native test hosts.
+    target_sources(iwd_archive_tests PRIVATE
+        "${KISAK_REPOSITORY_ROOT}/src/qcommon/unzip.cpp")
+    target_compile_definitions(iwd_archive_tests PRIVATE
+        KISAK_TEST_CANONICAL_MINIZIP=1)
 endif()
 
 add_executable(iwi_image_tests

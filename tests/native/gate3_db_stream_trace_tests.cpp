@@ -1863,10 +1863,13 @@ std::vector<std::uint8_t> MakeGameWorldSpXFile(bool invalidNodeCount = false)
     for (const std::uint32_t size : std::array<std::uint32_t, 9>{
         4096, 4096, 0, 0, 8192, 0, 0, 0, 0}) AppendU32(inflated, size);
 
-    AppendU32(inflated, 0);
-    AppendU32(inflated, 0);
+    // Script-string index zero is the canonical null entry. Keep the remap
+    // table present so native and Wasm execute the same indexed lookup.
     AppendU32(inflated, 1);
     AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, 1);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, 0);
     AppendU32(inflated, ASSET_TYPE_GAMEWORLD_SP);
     AppendU32(inflated, UINT32_MAX - 1u);
 

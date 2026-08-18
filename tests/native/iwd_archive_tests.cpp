@@ -1,5 +1,7 @@
 #include <qcommon/iwd_archive.h>
+#if defined(KISAK_TEST_CANONICAL_MINIZIP)
 #include <qcommon/unzip.h>
+#endif
 #include "zlib_test_support.h"
 
 #include <zlib.h>
@@ -22,6 +24,7 @@
 #include <utility>
 #include <vector>
 
+#if defined(KISAK_TEST_CANONICAL_MINIZIP)
 void *Z_Malloc(int size, const char *, int)
 {
     return std::malloc(static_cast<std::size_t>(size));
@@ -70,6 +73,7 @@ int __cdecl FS_FileGetFileSize(FILE *stream)
         size > std::numeric_limits<int>::max()) return -1;
     return static_cast<int>(size);
 }
+#endif
 
 namespace
 {
@@ -350,6 +354,7 @@ Fixture BuildFixture(std::vector<EntrySpec> specifications, Bytes comment = {})
     return fixture;
 }
 
+#if defined(KISAK_TEST_CANONICAL_MINIZIP)
 void TestCanonicalMinizipReadAndSeek()
 {
 #if defined(__EMSCRIPTEN__)
@@ -393,6 +398,7 @@ void TestCanonicalMinizipReadAndSeek()
     Require(unzClose(archive) == UNZ_OK, "canonical IWD closes cleanly");
     Require(std::remove(fixturePath) == 0, "canonical minizip fixture is removed");
 }
+#endif
 
 CentralDirectoryLocator Locate(const Fixture &fixture, const Limits &limits = {})
 {
@@ -1011,7 +1017,9 @@ private:
 int main()
 {
     Runner runner;
+#if defined(KISAK_TEST_CANONICAL_MINIZIP)
     runner.Run("canonical minizip read/seek", TestCanonicalMinizipReadAndSeek);
+#endif
     runner.Run("stored/deflated happy path", TestHappyPath);
     runner.Run("EOCD locator rejections", TestLocatorRejections);
     runner.Run("central metadata rejections", TestCentralMetadataRejections);

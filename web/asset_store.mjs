@@ -253,28 +253,24 @@ export async function entriesFromDirectoryHandle(directory)
         throw importError("INVALID_PICKER", "The browser returned an invalid directory handle.");
     }
     const entries = new Map();
-    async function visit(current, prefix)
-    {
-        for await (const [name, handle] of current.entries()) {
-            const relativePath = normalizeSelectionPath(prefix ? `${prefix}/${name}` : name);
-            const foldedPath = relativePath.toLocaleLowerCase("en-US");
-            if (new TextEncoder().encode(foldedPath).byteLength > MAX_IMPORTED_PATH_BYTES) {
-                throw importError("UNSAFE_PATH", `The selected path is too long: ${relativePath}.`);
-            }
-            if (handle.kind === "directory") {
-                await visit(handle, foldedPath);
-                continue;
-            }
-            if (handle.kind !== "file" || entries.has(foldedPath)) {
-                throw importError("DUPLICATE_PATH", `The selected folder contains conflicting paths for ${relativePath}.`);
-            }
-            entries.set(foldedPath, requireFileLike(await handle.getFile(), relativePath));
-            if (entries.size > MAX_IMPORTED_FILES) {
-                throw importError("TOO_MANY_FILES", "The selected installation contains too many files.");
-            }
+    const directoryCache = new Map();
+    for (const requirement of REQUIRED_ASSETS) {
+        const handle = await getRequiredFileFromDirectory(
+            directory,
+            requirement.path,
+            directoryCache,
+        );
+        if (!handle || handle.kind !== "file" || typeof handle.getFile !== "function") {
+            throw importError(
+                "INVALID_FILE",
+                `${requirement.path} is not a readable browser file handle.`,
+            );
         }
+        entries.set(
+            requirement.path,
+            requireFileLike(await handle.getFile(), requirement.path),
+        );
     }
-    await visit(directory, "");
     validateSelectedEntries(entries);
     return entries;
 }

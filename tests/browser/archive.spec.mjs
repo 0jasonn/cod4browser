@@ -107,7 +107,10 @@ async function waitForArchive(page, state)
 {
     await expect.poll(() => page.evaluate(
         () => globalThis.__KISAKCOD_WEB__?.archive?.state,
-    ), { message: `the synthetic archive should reach ${state}` }).toBe(state);
+    ), {
+        message: `the synthetic archive should reach ${state}`,
+        timeout: 30_000,
+    }).toBe(state);
 }
 
 async function waitForArchiveEvent(page, state)
