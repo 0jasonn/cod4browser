@@ -27,6 +27,7 @@ namespace
 std::array<void *, 4> g_values{};
 bool g_mainThreadInitialized = false;
 XZoneInfo g_zoneRequest{};
+std::array<char, 64> g_zoneName{};
 std::uint32_t g_zoneCount = 0;
 std::int32_t g_zoneSync = -1;
 std::array<char, 64> g_spawnMap{};
@@ -109,6 +110,9 @@ void DB_LoadXAssets(
     assert(zoneInfo);
     assert(zoneCount == 1);
     g_zoneRequest = zoneInfo[0];
+    std::snprintf(
+        g_zoneName.data(), g_zoneName.size(), "%s", zoneInfo[0].name);
+    g_zoneRequest.name = g_zoneName.data();
     g_zoneCount = zoneCount;
     g_zoneSync = sync;
 }
