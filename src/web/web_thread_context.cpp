@@ -1,10 +1,11 @@
 #include <qcommon/system.h>
 #include <qcommon/thread_context.h>
-#include <universal/q_shared.h>
 
 #include <array>
 #include <cstdint>
 #include <cstdlib>
+
+void KISAK_CDECL Com_InitThreadData(int threadContext);
 
 namespace
 {
