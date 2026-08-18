@@ -9,6 +9,7 @@
 
 #include <universal/memfile.h>
 #include <universal/pool_allocator.h>
+#include <physics/phys_geom_types.h>
 
 enum $B7C75F5EC8C61F46B3FEFC285D8D85F1 : __int32
 {
@@ -88,46 +89,6 @@ struct InputOutput // sizeof=0x8
 {                                       // ...
     const objInfo *Input;               // ...
     Results *Output;                    // ...
-};
-
-struct BrushWrapper // sizeof=0x50
-{
-    float mins[3];
-    int contents;
-    float maxs[3];
-    uint32_t numsides;
-    cbrushside_t *sides;
-    __int16 axialMaterialNum[2][3];
-    uint8_t *baseAdjacentSide;
-    __int16 firstAdjacentSideOffsets[2][3];
-    uint8_t edgeCount[2][3];
-    // padding byte
-    // padding byte
-    int totalEdgeCount;
-    cplane_s *planes;
-};
-
-struct PhysMass // sizeof=0x24
-{                                       // ...
-    float centerOfMass[3];
-    float momentsOfInertia[3];
-    float productsOfInertia[3];
-};
-
-struct PhysGeomInfo // sizeof=0x44
-{
-    BrushWrapper *brush;
-    int type;
-    float orientation[3][3];
-    float offset[3];
-    float halfLengths[3];
-};
-
-struct PhysGeomList // sizeof=0x2C
-{
-    uint32_t count;
-    PhysGeomInfo *geoms;
-    PhysMass mass;
 };
 
 struct PhysContact // sizeof=0x24

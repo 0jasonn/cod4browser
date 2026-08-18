@@ -211,6 +211,7 @@ void TestCanonicalAssetTypes()
             ASSET_TYPE_MENULIST == static_cast<XAssetType>(20) &&
             ASSET_TYPE_MENU == static_cast<XAssetType>(21) &&
             ASSET_TYPE_LOCALIZE_ENTRY == static_cast<XAssetType>(22) &&
+            ASSET_TYPE_WEAPON == static_cast<XAssetType>(23) &&
             ASSET_TYPE_FX == static_cast<XAssetType>(25) &&
             ASSET_TYPE_RAWFILE == static_cast<XAssetType>(31) &&
             ASSET_TYPE_STRINGTABLE == static_cast<XAssetType>(32),

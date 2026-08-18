@@ -4,6 +4,7 @@
 #include <database/db_registry_publication.h>
 #include <database/db_runtime_prefix.h>
 #include <database/db_generated_material_platform.h>
+#include <bgame/weapon_types.h>
 #include <EffectsCore/fx_types.h>
 #include <database/localize_types.h>
 #include <gfx_d3d/gfx_image_types.h>
@@ -13,6 +14,8 @@
 #include <physics/phys_preset.h>
 #include <sound/snd_alias_types.h>
 #include <ui/ui_asset_types.h>
+#include <xanim/xmodel_types.h>
+#include <xanim/xanim_types.h>
 
 #include <qcommon/threads.h>
 #include <qcommon/system.h>
@@ -32,6 +35,15 @@ const char *AssetName(const XAsset &asset)
     const char *name = nullptr;
     switch (asset.type)
     {
+    case ASSET_TYPE_XMODEL:
+        name = asset.header.model ? asset.header.model->name : nullptr;
+        break;
+    case ASSET_TYPE_XANIMPARTS:
+        name = asset.header.parts ? asset.header.parts->name : nullptr;
+        break;
+    case ASSET_TYPE_WEAPON:
+        name = asset.header.weapon ? asset.header.weapon->szInternalName : nullptr;
+        break;
     case ASSET_TYPE_PHYSPRESET:
         name = asset.header.physPreset ? asset.header.physPreset->name : nullptr;
         break;
@@ -77,6 +89,9 @@ const char *AssetName(const XAsset &asset)
     case ASSET_TYPE_RAWFILE:
         name = asset.header.rawfile ? asset.header.rawfile->name : nullptr;
         break;
+    case ASSET_TYPE_STRINGTABLE:
+        name = asset.header.stringTable ? asset.header.stringTable->name : nullptr;
+        break;
     default:
         break;
     }
@@ -92,6 +107,9 @@ std::size_t AssetSize(XAssetType type)
 {
     switch (type)
     {
+    case ASSET_TYPE_XMODEL: return sizeof(XModel);
+    case ASSET_TYPE_XANIMPARTS: return sizeof(XAnimParts);
+    case ASSET_TYPE_WEAPON: return sizeof(WeaponDef);
     case ASSET_TYPE_PHYSPRESET: return sizeof(PhysPreset);
     case ASSET_TYPE_MATERIAL: return sizeof(Material);
     case ASSET_TYPE_TECHNIQUE_SET: return sizeof(MaterialTechniqueSet);
@@ -107,6 +125,7 @@ std::size_t AssetSize(XAssetType type)
     case ASSET_TYPE_MENU: return sizeof(menuDef_t);
     case ASSET_TYPE_LOCALIZE_ENTRY: return sizeof(LocalizeEntry);
     case ASSET_TYPE_RAWFILE: return sizeof(RawFile);
+    case ASSET_TYPE_STRINGTABLE: return sizeof(StringTable);
     default: return 0;
     }
 }
@@ -189,7 +208,7 @@ XAssetEntryPoolEntry *DB_LinkXAssetEntry(
         return existing;
     }
 
-    alignas(4) std::byte previous[sizeof(menuDef_t)]{};
+    alignas(4) std::byte previous[sizeof(WeaponDef)]{};
     const std::size_t assetSize = AssetSize(asset.type);
     std::memcpy(previous, existing->entry.asset.header.data, assetSize);
     const std::uint8_t previousZone = existing->entry.zoneIndex;
@@ -273,6 +292,54 @@ void __cdecl Load_RawFileAsset(XAssetHeader *rawfile)
     XAssetHeader published = DB_AddXAsset(ASSET_TYPE_RAWFILE, *rawfile);
     if (!published.data) return;
     *rawfile = published;
+}
+
+void __cdecl Load_StringTableAsset(XAssetHeader *stringTable)
+{
+    if (!stringTable || !stringTable->stringTable)
+    {
+        DB_RuntimeGeneratedFailure("publication/null StringTable");
+        return;
+    }
+    XAssetHeader published = DB_AddXAsset(ASSET_TYPE_STRINGTABLE, *stringTable);
+    if (!published.data) return;
+    *stringTable = published;
+}
+
+void __cdecl Load_XModelAsset(XAssetHeader *model)
+{
+    if (!model || !model->model)
+    {
+        DB_RuntimeGeneratedFailure("publication/null XModel");
+        return;
+    }
+    XAssetHeader published = DB_AddXAsset(ASSET_TYPE_XMODEL, *model);
+    if (!published.data) return;
+    *model = published;
+}
+
+void __cdecl Load_XAnimPartsAsset(XAssetHeader *parts)
+{
+    if (!parts || !parts->parts)
+    {
+        DB_RuntimeGeneratedFailure("publication/null XAnimParts");
+        return;
+    }
+    XAssetHeader published = DB_AddXAsset(ASSET_TYPE_XANIMPARTS, *parts);
+    if (!published.data) return;
+    *parts = published;
+}
+
+void __cdecl Load_WeaponDefAsset(XAssetHeader *weapon)
+{
+    if (!weapon || !weapon->weapon)
+    {
+        DB_RuntimeGeneratedFailure("publication/null WeaponDef");
+        return;
+    }
+    XAssetHeader published = DB_AddXAsset(ASSET_TYPE_WEAPON, *weapon);
+    if (!published.data) return;
+    *weapon = published;
 }
 
 void __cdecl Load_PhysPresetAsset(XAssetHeader *physPreset)

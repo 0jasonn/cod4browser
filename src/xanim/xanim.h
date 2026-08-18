@@ -21,6 +21,7 @@
 #include "xmodel.h"
 #include <gfx_d3d/r_material.h>
 #include <gfx_d3d/r_gfx.h>
+#include <xanim/xsurface_types.h>
 
 #ifndef KISAK_RADIANT
 #include <game/pathnode.h>
@@ -218,69 +219,6 @@ struct XAssetPool
     XAssetPoolEntry<T> *freeHead;
     XAssetPoolEntry<T> entries[LEN];
 };
-
-struct XSurfaceCollisionAabb // sizeof=0xC
-{                                       // ...
-    uint16_t mins[3];
-    uint16_t maxs[3];
-};
-
-struct XSurfaceCollisionNode // sizeof=0x10
-{
-    XSurfaceCollisionAabb aabb;
-    uint16_t childBeginIndex;
-    uint16_t childCount;
-};
-
-struct XSurfaceCollisionLeaf // sizeof=0x2
-{
-    uint16_t triangleBeginIndex;
-};
-
-struct XSurfaceCollisionTree // sizeof=0x28
-{
-    float trans[3];
-    float scale[3];
-    uint32_t nodeCount;
-    XSurfaceCollisionNode *nodes;
-    uint32_t leafCount;
-    XSurfaceCollisionLeaf *leafs;
-};
-struct XRigidVertList // sizeof=0xC
-{                                       // ...
-    uint16_t boneOffset;        // ...
-    uint16_t vertCount;         // ...
-    uint16_t triOffset;         // ...
-    uint16_t triCount;          // ...
-    XSurfaceCollisionTree *collisionTree;
-};
-static_assert(sizeof(XRigidVertList) == 12);
-
-struct XSurfaceVertexInfo // sizeof=0xC
-{                                       // ...
-    __int16 vertCount[4];
-    uint16_t *vertsBlend;
-};
-static_assert(sizeof(XSurfaceVertexInfo) == 12);
-
-struct XSurface // sizeof=0x38
-{
-    unsigned __int8 tileMode;
-    bool deformed;
-    uint16_t vertCount;
-    uint16_t triCount;
-    unsigned __int8 zoneHandle;
-    // padding byte
-    uint16_t baseTriIndex;
-    uint16_t baseVertIndex;
-    uint16_t *triIndices;
-    XSurfaceVertexInfo vertInfo;
-    GfxPackedVertex *verts0;
-    uint32_t vertListCount;
-    XRigidVertList *vertList;
-    int partBits[4];
-};
-static_assert(sizeof(XSurface) == 56);
 
 struct DObj_s;
 

@@ -206,6 +206,13 @@ void __cdecl DB_InitThread()
         Sys_Error("Failed to create database thread");
 }
 
+void __cdecl Load_GetCurrentZoneHandle(std::uint8_t *handle)
+{
+    iassert(handle);
+    iassert(g_loadingZone);
+    *handle = static_cast<std::uint8_t>(g_zoneIndex);
+}
+
 void __cdecl DB_LoadXAssets(
     XZoneInfo *zoneInfo, std::uint32_t zoneCount, std::int32_t sync)
 {

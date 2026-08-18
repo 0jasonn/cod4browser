@@ -2,6 +2,7 @@
 #include <ode/ode.h>
 #include <qcommon/bitarray.h>
 #include <cstdint>
+#include <xanim/dobj_types.h>
 
 struct PhysPreset;
 
@@ -32,14 +33,6 @@ struct DObjTrace_s // sizeof=0x1C
     // padding byte
     // padding byte
 };
-
-struct DObjAnimMat // sizeof=0x20
-{                                       // ...
-    float quat[4];                      // ...
-    float trans[3];                     // ...
-    float transWeight;                  // ...
-};
-static_assert(sizeof(DObjAnimMat) == 32);
 
 struct DSkelPartBits // sizeof=0x30
 {                                       // ...

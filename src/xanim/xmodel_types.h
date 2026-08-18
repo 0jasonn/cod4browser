@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-struct DObjAnimMat;
+#include <xanim/dobj_types.h>
 struct XSurface;
 struct Material;
 struct PhysPreset;

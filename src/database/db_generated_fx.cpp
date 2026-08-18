@@ -110,21 +110,8 @@ void Load_FxElemVisuals(bool atStreamStart)
     {
     case 5:
     {
-        XModel **model = &varFxElemVisuals->model;
-        Load_Stream(atStreamStart, reinterpret_cast<std::uint8_t *>(model), 4);
-        if (DB_RuntimeGeneratedLoadFailed() || !*model) break;
-        const std::uintptr_t value = reinterpret_cast<std::uintptr_t>(*model);
-        if (value == UINT32_MAX || value == UINT32_MAX - 1u)
-        {
-            // This is the exact point where native Load_XModelPtr allocates
-            // and enters Load_XModel. Null and prior aliases remain usable.
-            DB_RuntimeGeneratedFailure(
-                "Load_XModelPtr/unsupported inline body closure");
-        }
-        else
-        {
-            DB_ConvertOffsetToAlias(reinterpret_cast<std::uint32_t *>(model));
-        }
+        varXModelPtr = &varFxElemVisuals->model;
+        Load_XModelPtr(atStreamStart);
         break;
     }
     case 10:

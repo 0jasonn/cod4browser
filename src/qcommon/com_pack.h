@@ -1,20 +1,8 @@
 #pragma once
 
 #include <universal/com_math.h>
+#include <qcommon/packed_tex_coords.h>
 #include <cstdint>
-
-struct PackedTexCoords // sizeof=0x4
-{                                       // ...
-    PackedTexCoords()
-    {
-        packed = 0;
-    }
-    PackedTexCoords(uint32_t i)
-    {
-        packed = i;
-    }
-    uint32_t packed;
-};
 
 void __cdecl Vec2UnpackTexCoords(PackedTexCoords in, float *out);
 void __cdecl Vec3UnpackUnitVec(PackedUnitVec in, float *out);

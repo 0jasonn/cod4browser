@@ -15,6 +15,7 @@ RawFile *varRawFile = nullptr;
 RawFile **varRawFilePtr = nullptr;
 PhysPreset *varPhysPreset = nullptr;
 PhysPreset **varPhysPresetPtr = nullptr;
+std::uint16_t *varScriptString = nullptr;
 XAsset *varXAsset = nullptr;
 XAssetHeader *varXAssetHeader = nullptr;
 XAssetList *varXAssetList = nullptr;
@@ -234,6 +235,57 @@ void __cdecl Load_XString(bool atStreamStart)
     Load_XStringInternal(atStreamStart);
 }
 
+void __cdecl Load_ScriptStringArray(bool atStreamStart, std::int32_t count)
+{
+    if (count < 0 || static_cast<std::uint64_t>(count) * sizeof(std::uint16_t) >
+        (std::numeric_limits<std::uint32_t>::max)())
+    {
+        DB_RuntimeGeneratedFailure("ScriptString/excessive count");
+        return;
+    }
+    const std::size_t bytes = static_cast<std::size_t>(count) *
+        sizeof(std::uint16_t);
+    if (atStreamStart && !DB_RuntimeStreamCanRead(bytes))
+    {
+        DB_RuntimeGeneratedFailure("ScriptString/excessive count");
+        return;
+    }
+    Load_Stream(atStreamStart, reinterpret_cast<std::uint8_t *>(varScriptString),
+        static_cast<std::int32_t>(bytes));
+    if (DB_RuntimeGeneratedLoadFailed()) return;
+    std::uint16_t *entry = varScriptString;
+    for (std::int32_t index = 0; index < count; ++index, ++entry)
+    {
+        varScriptString = entry;
+        Load_Stream(false, reinterpret_cast<std::uint8_t *>(varScriptString), 2);
+        Load_ScriptStringCustom(varScriptString);
+        if (DB_RuntimeGeneratedLoadFailed()) return;
+    }
+}
+
+void __cdecl Load_PhysPresetPtrGenerated(bool atStreamStart)
+{
+    Load_PhysPresetPtr(atStreamStart);
+}
+
+void __cdecl Load_MaterialHandleArrayGenerated(bool atStreamStart,
+    std::int32_t count)
+{
+    std::size_t bytes = 0;
+    if (!CheckedCount(count, sizeof(Material *),
+        "MaterialHandle/excessive count", bytes)) return;
+    Load_Stream(atStreamStart, reinterpret_cast<std::uint8_t *>(varMaterialHandle),
+        static_cast<std::int32_t>(bytes));
+    if (DB_RuntimeGeneratedLoadFailed()) return;
+    Material **entry = varMaterialHandle;
+    for (std::int32_t index = 0; index < count; ++index, ++entry)
+    {
+        varMaterialHandle = entry;
+        Load_MaterialHandle(false);
+        if (DB_RuntimeGeneratedLoadFailed()) return;
+    }
+}
+
 XAsset *__cdecl AllocLoad_FxElemVisStateSample()
 {
     return reinterpret_cast<XAsset *>(DB_AllocStreamPos(3));
@@ -296,6 +348,14 @@ static void Load_XAssetHeader(bool atStreamStart)
         varGfxImagePtr = reinterpret_cast<GfxImage **>(varXAssetHeader);
         Load_GfxImagePtr(false);
         break;
+    case ASSET_TYPE_XMODEL:
+        varXModelPtr = reinterpret_cast<XModel **>(varXAssetHeader);
+        Load_XModelPtr(false);
+        break;
+    case ASSET_TYPE_XANIMPARTS:
+        varXAnimPartsPtr = reinterpret_cast<XAnimParts **>(varXAssetHeader);
+        Load_XAnimPartsPtr(false);
+        break;
     case ASSET_TYPE_SOUND:
         varsnd_alias_list_ptr = reinterpret_cast<snd_alias_list_t **>(
             varXAssetHeader);
@@ -313,6 +373,10 @@ static void Load_XAssetHeader(bool atStreamStart)
         varLocalizeEntryPtr = reinterpret_cast<LocalizeEntry **>(
             varXAssetHeader);
         Load_LocalizeEntryPtr(false);
+        break;
+    case ASSET_TYPE_WEAPON:
+        varWeaponDefPtr = reinterpret_cast<WeaponDef **>(varXAssetHeader);
+        Load_WeaponDefPtr(false);
         break;
     case ASSET_TYPE_SNDDRIVER_GLOBALS:
         // The canonical generated dispatcher intentionally has no loader for
@@ -347,6 +411,10 @@ static void Load_XAssetHeader(bool atStreamStart)
     case ASSET_TYPE_RAWFILE:
         varRawFilePtr = reinterpret_cast<RawFile **>(varXAssetHeader);
         Load_RawFilePtr(false);
+        break;
+    case ASSET_TYPE_STRINGTABLE:
+        varStringTablePtr = reinterpret_cast<StringTable **>(varXAssetHeader);
+        Load_StringTablePtr(false);
         break;
     default:
         DB_RuntimeGeneratedFailure("Load_XAssetHeader/unsupported family closure");

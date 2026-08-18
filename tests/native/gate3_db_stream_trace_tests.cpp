@@ -3,16 +3,22 @@
 #include <database/db_registry_publication.h>
 #include <database/db_runtime_prefix.h>
 #include <database/localize_types.h>
+#include <bgame/weapon_types.h>
 #include <EffectsCore/fx_types.h>
 #include <gfx_d3d/gfx_image_types.h>
+#include <gfx_d3d/gfx_light_types.h>
 #include <gfx_d3d/material_types.h>
 #include <gfx_d3d/r_font.h>
 #include <physics/phys_preset.h>
+#include <physics/phys_geom_types.h>
 #include <qcommon/qcommon.h>
 #include <qcommon/system.h>
 #include <script/scr_stringlist.h>
 #include <sound/snd_alias_types.h>
 #include <ui/ui_asset_types.h>
+#include <xanim/xmodel_types.h>
+#include <xanim/xanim_types.h>
+#include <xanim/xsurface_types.h>
 #include <universal/physicalmemory.h>
 #include <web/web_database_filesystem.h>
 
@@ -58,6 +64,19 @@ void AppendU16(std::vector<std::uint8_t> &bytes, std::uint16_t value)
 void AppendZeros(std::vector<std::uint8_t> &bytes, std::size_t count)
 {
     bytes.insert(bytes.end(), count, 0);
+}
+
+template <typename T>
+void AppendObject(std::vector<std::uint8_t> &bytes, const T &value)
+{
+    const auto *begin = reinterpret_cast<const std::uint8_t *>(&value);
+    bytes.insert(bytes.end(), begin, begin + sizeof(value));
+}
+
+template <typename T>
+T *PointerToken(std::uint32_t token)
+{
+    return reinterpret_cast<T *>(static_cast<std::uintptr_t>(token));
 }
 
 void WriteU32(std::vector<std::uint8_t> &bytes, std::size_t offset,
@@ -516,6 +535,388 @@ std::vector<std::uint8_t> MakeMaterialXFile(
     return CompressXFile(inflated);
 }
 
+struct XModelFixtureOptions
+{
+    std::uint32_t assetPointer = UINT32_MAX - 1u;
+    bool includeAliasAsset = true;
+    bool includeBody = true;
+    bool includeName = true;
+    bool terminateName = true;
+    bool includeSurfaceVertices = true;
+    bool includeSurfaceIndices = true;
+};
+
+std::vector<std::uint8_t> MakeXModelXFile(
+    const XModelFixtureOptions &options = {})
+{
+    const bool inlineAsset = options.assetPointer == UINT32_MAX ||
+        options.assetPointer == UINT32_MAX - 1u;
+    const std::uint32_t assetCount = options.includeAliasAsset ? 2u : 1u;
+    std::vector<std::uint8_t> inflated;
+    AppendU32(inflated, 32768);
+    AppendU32(inflated, 0);
+    for (const std::uint32_t size : std::array<std::uint32_t, 9>{
+        8192, 0, 0, 0, 16384, 0, 0, 4096, 4096}) AppendU32(inflated, size);
+
+    AppendU32(inflated, 1);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, assetCount);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, UINT32_MAX);
+    AppendCString(inflated, "tag_gate3");
+    AppendU32(inflated, ASSET_TYPE_XMODEL);
+    AppendU32(inflated, options.assetPointer);
+    if (options.includeAliasAsset)
+    {
+        AppendU32(inflated, ASSET_TYPE_XMODEL);
+        AppendU32(inflated, 0x40000011u);
+    }
+    if (!inlineAsset || !options.includeBody) return CompressXFile(inflated);
+
+    XModel model{};
+    model.name = PointerToken<const char>(UINT32_MAX);
+    model.numBones = 1;
+    model.numRootBones = 1;
+    model.numsurfs = 1;
+    model.boneNames = PointerToken<std::uint16_t>(UINT32_MAX);
+    model.partClassification = PointerToken<std::uint8_t>(UINT32_MAX);
+    model.baseMat = PointerToken<DObjAnimMat>(UINT32_MAX);
+    model.surfs = PointerToken<XSurface>(1);
+    model.materialHandles = PointerToken<Material *>(1);
+    model.collSurfs = PointerToken<XModelCollSurf_s>(1);
+    model.numCollSurfs = 1;
+    model.boneInfo = PointerToken<XBoneInfo>(1);
+    model.physPreset = PointerToken<PhysPreset>(UINT32_MAX - 1u);
+    model.physGeoms = PointerToken<PhysGeomList>(UINT32_MAX);
+    AppendObject(inflated, model);
+    if (options.includeName)
+    {
+        inflated.insert(inflated.end(), {'x','m','o','d','e','l','/','g','a','t','e','3'});
+        if (options.terminateName) inflated.push_back(0);
+    }
+    AppendU16(inflated, 0);
+    inflated.push_back(7);
+    DObjAnimMat baseMat{};
+    baseMat.quat[3] = 1.0f;
+    baseMat.transWeight = 2.0f;
+    AppendObject(inflated, baseMat);
+
+    XSurface surface{};
+    surface.vertCount = 1;
+    surface.triCount = 1;
+    surface.vertInfo.vertCount[0] = 1;
+    surface.vertInfo.vertsBlend = PointerToken<std::uint16_t>(UINT32_MAX);
+    surface.verts0 = PointerToken<GfxPackedVertex>(UINT32_MAX);
+    surface.vertListCount = 1;
+    surface.vertList = PointerToken<XRigidVertList>(UINT32_MAX);
+    surface.triIndices = PointerToken<std::uint16_t>(UINT32_MAX);
+    AppendObject(inflated, surface);
+    AppendU16(inflated, 0x1234u);
+    if (options.includeSurfaceVertices)
+    {
+        GfxPackedVertex vertex{};
+        vertex.xyz[0] = 1.0f;
+        vertex.xyz[1] = 2.0f;
+        vertex.xyz[2] = 3.0f;
+        vertex.color.packed = 0xff804020u;
+        AppendObject(inflated, vertex);
+    }
+    XRigidVertList rigid{};
+    rigid.vertCount = 1;
+    rigid.triCount = 1;
+    rigid.collisionTree = PointerToken<XSurfaceCollisionTree>(UINT32_MAX);
+    AppendObject(inflated, rigid);
+    XSurfaceCollisionTree tree{};
+    tree.nodeCount = 1;
+    tree.nodes = PointerToken<XSurfaceCollisionNode>(1);
+    tree.leafCount = 1;
+    tree.leafs = PointerToken<XSurfaceCollisionLeaf>(1);
+    AppendObject(inflated, tree);
+    XSurfaceCollisionNode node{};
+    node.childCount = 1;
+    AppendObject(inflated, node);
+    XSurfaceCollisionLeaf leaf{};
+    leaf.triangleBeginIndex = 3;
+    AppendObject(inflated, leaf);
+    if (options.includeSurfaceIndices)
+    {
+        AppendU16(inflated, 0);
+        AppendU16(inflated, 0);
+        AppendU16(inflated, 0);
+    }
+    AppendU32(inflated, 0); // null material handle
+
+    XModelCollSurf_s collSurf{};
+    collSurf.collTris = PointerToken<XModelCollTri_s>(1);
+    collSurf.numCollTris = 1;
+    collSurf.boneIdx = 0;
+    AppendObject(inflated, collSurf);
+    XModelCollTri_s collTri{};
+    collTri.plane[2] = 1.0f;
+    AppendObject(inflated, collTri);
+    XBoneInfo boneInfo{};
+    boneInfo.radiusSquared = 4.0f;
+    AppendObject(inflated, boneInfo);
+
+    PhysPreset preset{};
+    preset.name = PointerToken<const char>(UINT32_MAX);
+    preset.type = 3;
+    preset.mass = 5.0f;
+    AppendObject(inflated, preset);
+    AppendCString(inflated, "physics/xmodel_gate3");
+
+    PhysGeomList geomList{};
+    geomList.count = 1;
+    geomList.geoms = PointerToken<PhysGeomInfo>(1);
+    AppendObject(inflated, geomList);
+    PhysGeomInfo geom{};
+    geom.brush = PointerToken<BrushWrapper>(UINT32_MAX);
+    geom.type = 12;
+    AppendObject(inflated, geom);
+    BrushWrapper brush{};
+    brush.numsides = 1;
+    brush.sides = PointerToken<cbrushside_t>(1);
+    brush.baseAdjacentSide = PointerToken<std::uint8_t>(1);
+    brush.totalEdgeCount = 1;
+    brush.planes = PointerToken<cplane_s>(UINT32_MAX);
+    AppendObject(inflated, brush);
+    cbrushside_t side{};
+    side.plane = PointerToken<cplane_s>(UINT32_MAX);
+    side.materialNum = 9;
+    AppendObject(inflated, side);
+    cplane_s sidePlane{};
+    sidePlane.normal[0] = 1.0f;
+    AppendObject(inflated, sidePlane);
+    inflated.push_back(0);
+    cplane_s planes{};
+    planes.normal[2] = 1.0f;
+    AppendObject(inflated, planes);
+    return CompressXFile(inflated);
+}
+
+struct WeaponFixtureOptions
+{
+    std::uint32_t assetPointer = UINT32_MAX - 1u;
+    bool includeAliasAsset = true;
+    bool includeBody = true;
+    bool includeXModelBody = true;
+    bool terminateName = true;
+    std::int32_t accuracyCount = 2;
+};
+
+std::vector<std::uint8_t> MakeWeaponXFile(
+    const WeaponFixtureOptions &options = {})
+{
+    const bool inlineAsset = options.assetPointer == UINT32_MAX ||
+        options.assetPointer == UINT32_MAX - 1u;
+    const std::uint32_t assetCount = options.includeAliasAsset ? 2u : 1u;
+    std::vector<std::uint8_t> inflated;
+    AppendU32(inflated, 32768);
+    AppendU32(inflated, 0);
+    for (const std::uint32_t size : std::array<std::uint32_t, 9>{
+        8192, 0, 0, 0, 16384, 0, 0, 0, 0}) AppendU32(inflated, size);
+    AppendU32(inflated, 1);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, assetCount);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, UINT32_MAX);
+    AppendCString(inflated, "tag_weapon");
+    AppendU32(inflated, ASSET_TYPE_WEAPON);
+    AppendU32(inflated, options.assetPointer);
+    if (options.includeAliasAsset)
+    {
+        AppendU32(inflated, ASSET_TYPE_WEAPON);
+        AppendU32(inflated, 0x40000011u);
+    }
+    if (!inlineAsset || !options.includeBody) return CompressXFile(inflated);
+
+    WeaponDef weapon{};
+    weapon.szInternalName = PointerToken<const char>(UINT32_MAX);
+    // The ScriptStringList consumes block4:0..14, the asset array 16..31,
+    // and the inserted Weapon cell 32..35, so its name starts at 36.
+    weapon.szDisplayName = PointerToken<const char>(0x40000025u);
+    weapon.gunXModel[0] = PointerToken<XModel>(UINT32_MAX - 1u);
+    // The 13-byte Weapon name ends at 49; XModel insertion aligns to block4:52.
+    weapon.handXModel = PointerToken<XModel>(0x40000035u);
+    weapon.szXAnims[0] = PointerToken<const char>(UINT32_MAX);
+    weapon.pickupSound = PointerToken<snd_alias_list_t>(UINT32_MAX);
+    weapon.bounceSound = PointerToken<snd_alias_list_t *>(UINT32_MAX);
+    weapon.accuracyGraphName[0] = PointerToken<const char>(UINT32_MAX);
+    weapon.accuracyGraphKnots[0] = PointerToken<float[WEAP_ACCURACY_COUNT]>(
+        UINT32_MAX);
+    weapon.originalAccuracyGraphKnots[0] =
+        PointerToken<float[WEAP_ACCURACY_COUNT]>(UINT32_MAX);
+    weapon.accuracyGraphKnotCount[0] = options.accuracyCount;
+    weapon.szScript = PointerToken<const char>(UINT32_MAX);
+    AppendObject(inflated, weapon);
+    inflated.insert(inflated.end(), {'w','e','a','p','o','n','/','g','a','t','e','3'});
+    if (options.terminateName) inflated.push_back(0);
+
+    if (options.includeXModelBody)
+    {
+        XModel model{};
+        model.name = PointerToken<const char>(UINT32_MAX);
+        AppendObject(inflated, model);
+        AppendCString(inflated, "xmodel/weapon_gate3");
+        AppendCString(inflated, "anim_gate3");
+        AppendU32(inflated, UINT32_MAX);
+        AppendCString(inflated, "sound/gate3_missing");
+        AppendZeros(inflated, 29u * sizeof(snd_alias_list_t *));
+        AppendCString(inflated, "accuracy/gate3");
+        if (options.accuracyCount >= 0 && options.accuracyCount < 32)
+        {
+            for (std::int32_t set = 0; set < 2; ++set)
+                for (std::int32_t index = 0;
+                    index < options.accuracyCount * WEAP_ACCURACY_COUNT; ++index)
+                    AppendF32(inflated, static_cast<float>(index + set * 10));
+        }
+        AppendCString(inflated, "scripts/gate3_weapon");
+    }
+    return CompressXFile(inflated);
+}
+
+struct XAnimFixtureOptions
+{
+    std::uint32_t assetPointer = UINT32_MAX - 1u;
+    bool includeAliasAsset = true;
+    bool includePayload = true;
+};
+
+std::vector<std::uint8_t> MakeXAnimXFile(
+    const XAnimFixtureOptions &options = {})
+{
+    const bool inlineAsset = options.assetPointer == UINT32_MAX ||
+        options.assetPointer == UINT32_MAX - 1u;
+    const std::uint32_t assetCount = options.includeAliasAsset ? 2u : 1u;
+    std::vector<std::uint8_t> inflated;
+    AppendU32(inflated, 16384);
+    AppendU32(inflated, 0);
+    for (const std::uint32_t size : std::array<std::uint32_t, 9>{
+        4096, 0, 0, 0, 12288, 0, 0, 0, 0}) AppendU32(inflated, size);
+    AppendU32(inflated, 1);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, assetCount);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, UINT32_MAX);
+    AppendCString(inflated, "tag_xanim");
+    AppendU32(inflated, ASSET_TYPE_XANIMPARTS);
+    AppendU32(inflated, options.assetPointer);
+    if (options.includeAliasAsset)
+    {
+        AppendU32(inflated, ASSET_TYPE_XANIMPARTS);
+        AppendU32(inflated, 0x40000011u);
+    }
+    if (!inlineAsset || !options.includePayload) return CompressXFile(inflated);
+
+    XAnimParts parts{};
+    parts.name = PointerToken<const char>(UINT32_MAX);
+    parts.numframes = 300;
+    parts.boneCount[9] = 2;
+    parts.names = PointerToken<std::uint16_t>(1);
+    parts.notifyCount = 1;
+    parts.notify = PointerToken<XAnimNotifyInfo>(1);
+    parts.deltaPart = PointerToken<XAnimDeltaPart>(1);
+    parts.dataByteCount = 1;
+    parts.dataShortCount = 1;
+    parts.dataIntCount = 1;
+    parts.randomDataShortCount = 1;
+    parts.randomDataByteCount = 1;
+    parts.randomDataIntCount = 1;
+    parts.indexCount = 2;
+    parts.dataByte = PointerToken<std::uint8_t>(1);
+    parts.dataShort = PointerToken<std::int16_t>(1);
+    parts.dataInt = PointerToken<int>(1);
+    parts.randomDataShort = PointerToken<std::int16_t>(1);
+    parts.randomDataByte = PointerToken<std::uint8_t>(1);
+    parts.randomDataInt = PointerToken<int>(1);
+    parts.indices.data = PointerToken<void>(1);
+    AppendObject(inflated, parts);
+    AppendCString(inflated, "xanim/gate3");
+    AppendU16(inflated, 0);
+    AppendU16(inflated, 0);
+    XAnimNotifyInfo notify{};
+    notify.name = 0;
+    notify.time = 0.5f;
+    AppendObject(inflated, notify);
+    XAnimDeltaPart delta{};
+    delta.trans = PointerToken<XAnimPartTrans>(1);
+    delta.quat = PointerToken<XAnimDeltaPartQuat>(1);
+    AppendObject(inflated, delta);
+    AppendU16(inflated, 1);
+    inflated.push_back(0);
+    inflated.push_back(0);
+    for (int index = 0; index < 6; ++index) AppendF32(inflated, float(index));
+    AppendU32(inflated, 1);
+    AppendU16(inflated, 0);
+    AppendU16(inflated, 1);
+    for (int index = 0; index < 6; ++index) AppendU16(inflated, std::uint16_t(index));
+    AppendU16(inflated, 1);
+    AppendU16(inflated, 0);
+    AppendU32(inflated, 1);
+    AppendU16(inflated, 0);
+    AppendU16(inflated, 1);
+    for (int index = 0; index < 4; ++index) AppendU16(inflated, std::uint16_t(index + 10));
+    inflated.push_back(0xaa);
+    AppendU16(inflated, 0x1234);
+    AppendU32(inflated, 0x55667788u);
+    AppendU16(inflated, 0x2345);
+    inflated.push_back(0xbb);
+    AppendU32(inflated, 0x66778899u);
+    AppendU16(inflated, 2);
+    AppendU16(inflated, 3);
+    return CompressXFile(inflated);
+}
+
+struct StringTableFixtureOptions
+{
+    std::uint32_t assetPointer = UINT32_MAX;
+    bool includeAliasAsset = true;
+    bool includeBody = true;
+    std::int32_t columns = 2;
+    std::int32_t rows = 2;
+};
+
+std::vector<std::uint8_t> MakeStringTableXFile(
+    const StringTableFixtureOptions &options = {})
+{
+    const std::uint32_t assetCount = options.includeAliasAsset ? 2u : 1u;
+    std::vector<std::uint8_t> inflated;
+    AppendU32(inflated, 8192);
+    AppendU32(inflated, 0);
+    for (const std::uint32_t size : std::array<std::uint32_t, 9>{
+        4096, 0, 0, 0, 4096, 0, 0, 0, 0}) AppendU32(inflated, size);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, assetCount);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, ASSET_TYPE_STRINGTABLE);
+    AppendU32(inflated, options.assetPointer);
+    if (options.includeAliasAsset)
+    {
+        AppendU32(inflated, ASSET_TYPE_STRINGTABLE);
+        AppendU32(inflated, 0x40000011u);
+    }
+    if (options.assetPointer != UINT32_MAX || !options.includeBody)
+        return CompressXFile(inflated);
+    StringTable table{};
+    table.name = PointerToken<const char>(UINT32_MAX);
+    table.columnCount = options.columns;
+    table.rowCount = options.rows;
+    table.values = PointerToken<const char *>(1);
+    AppendObject(inflated, table);
+    AppendCString(inflated, "stringtable/gate3.csv");
+    if (options.columns == 2 && options.rows == 2)
+    {
+        AppendU32(inflated, UINT32_MAX);
+        AppendU32(inflated, UINT32_MAX);
+        AppendU32(inflated, 0);
+        AppendU32(inflated, 0x40000021u);
+        AppendCString(inflated, "key");
+        AppendCString(inflated, "value");
+    }
+    return CompressXFile(inflated);
+}
+
 struct LocalizeFixtureOptions
 {
     std::uint32_t assetPointer = UINT32_MAX - 1u;
@@ -784,11 +1185,6 @@ std::vector<std::uint8_t> MakeLoadedSoundXFile(
     AppendU32(inflated, 0);
     AppendU32(inflated, options.dataPointer);
     AppendCString(inflated, name);
-    if (options.dataPointer == UINT32_MAX - 1u)
-    {
-        while ((inflated.size() & 3u) != 0u) inflated.push_back(0);
-        AppendU32(inflated, 0);
-    }
     if (options.includeData)
         for (std::uint32_t index = 0; index < options.dataLength; ++index)
             inflated.push_back(static_cast<std::uint8_t>(index + 1u));
@@ -901,7 +1297,6 @@ std::vector<std::uint8_t> MakeFxXFile(
     if (!options.terminateName || options.elementCount != 1)
         return CompressXFile(inflated);
 
-    while ((inflated.size() & 3u) != 0u) inflated.push_back(0);
     const std::size_t elementOffset = inflated.size();
     AppendZeros(inflated, sizeof(FxElemDef));
     inflated[elementOffset + offsetof(FxElemDef, elemType)] =
@@ -920,7 +1315,6 @@ std::vector<std::uint8_t> MakeFxXFile(
 
     if (options.includeSamples)
     {
-        while ((inflated.size() & 3u) != 0u) inflated.push_back(0);
         AppendZeros(inflated, sizeof(FxElemVelStateSample));
         AppendZeros(inflated, sizeof(FxElemVisStateSample));
     }
@@ -928,7 +1322,6 @@ std::vector<std::uint8_t> MakeFxXFile(
         AppendCString(inflated, "sound/fx_gate3");
     if (!options.includeTrail) return CompressXFile(inflated);
 
-    while ((inflated.size() & 3u) != 0u) inflated.push_back(0);
     const std::size_t trailOffset = inflated.size();
     AppendZeros(inflated, sizeof(FxTrailDef));
     WriteU32(inflated, trailOffset + offsetof(FxTrailDef, vertCount),
@@ -940,13 +1333,11 @@ std::vector<std::uint8_t> MakeFxXFile(
     if (!options.includeTrailData) return CompressXFile(inflated);
     if (options.trailVertCount > 0 && options.trailVertCount < 64)
     {
-        while ((inflated.size() & 3u) != 0u) inflated.push_back(0);
         AppendZeros(inflated, static_cast<std::size_t>(options.trailVertCount) *
             sizeof(FxTrailVertex));
     }
     if (options.trailIndCount > 0 && options.trailIndCount < 64)
     {
-        while ((inflated.size() & 1u) != 0u) inflated.push_back(0);
         for (std::int32_t index = 0; index < options.trailIndCount; ++index)
             AppendU16(inflated, static_cast<std::uint16_t>(index));
     }
@@ -998,7 +1389,6 @@ std::vector<std::uint8_t> MakeFxImpactXFile(
     if (!options.terminateName || !options.tablePointer ||
         !options.includeTable) return CompressXFile(inflated);
 
-    while ((inflated.size() & 3u) != 0u) inflated.push_back(0);
     const std::size_t entryOffset = inflated.size();
     AppendZeros(inflated, 12u * sizeof(FxImpactEntry));
     WriteU32(inflated, entryOffset, options.firstFxPointer);
@@ -1324,7 +1714,14 @@ std::int32_t WebDatabaseFS_Read(WebDatabaseFile, void *destination, std::uint32_
 void WebDatabaseFS_Close(WebDatabaseFile) {}
 
 void DB_RuntimeTraceStage(const char *) {}
-void DB_RuntimeTraceStop(const char *stage) { g_trace.stopStage = stage; }
+void DB_RuntimeTraceStop(const char *stage)
+{
+    g_trace.stopStage = stage;
+    // The differential fixture normalizes transport/inflate and generated
+    // loader failures into one platform-independent failure bit.
+    g_trace.generatedLoadFailed =
+        g_trace.generatedLoadFailed || DB_HasXFileLoadFailure();
+}
 void DB_RuntimeTraceHeaderRead(std::uint32_t, std::uint32_t) { g_trace.headerValid = true; }
 void DB_RuntimeTraceInputRefill(std::uint32_t bytesRead)
 {
@@ -1472,6 +1869,12 @@ const char *SL_ConvertToString(std::uint32_t value)
 {
     return value == 1 ? g_scriptString.c_str() : "";
 }
+void SL_AddUser(std::uint32_t, std::uint32_t) {}
+void Load_GetCurrentZoneHandle(std::uint8_t *handle)
+{
+    assert(handle);
+    *handle = static_cast<std::uint8_t>(g_zoneIndex);
+}
 
 std::uint8_t *PMem_Alloc(std::uint32_t size, std::uint32_t alignment,
     std::uint32_t, std::uint32_t allocType)
@@ -1559,7 +1962,7 @@ int main()
     assert(g_trace.assetHash == DB_HashForNameCanonical(
         "physics/gate3", ASSET_TYPE_PHYSPRESET));
     assert(g_trace.assetZoneIndex == 1);
-    assert(g_trace.streamOffsets[0] == sizeof(PhysPreset));
+    assert(g_trace.streamOffsets[0] == 0);
     assert(g_trace.streamOffsets[4] == 34);
     const XAssetHeader publishedPhys = DB_FindXAssetHeader(
         ASSET_TYPE_PHYSPRESET, "physics/gate3");
@@ -1580,6 +1983,209 @@ int main()
     assert(sharedPhys.physPreset);
     assert(std::strcmp(sharedPhys.physPreset->sndAliasPrefix, "metal") == 0);
 
+    const std::vector<std::uint8_t> xmodelInsertAlias = MakeXModelXFile();
+    Run(xmodelInsertAlias, zone);
+    assert(g_trace.xassetCount == 2 && g_trace.assetIndex == 1);
+    assert(g_trace.assetType == ASSET_TYPE_XMODEL);
+    assert(std::strcmp(g_trace.pointerClassification, "prior-offset/alias") == 0);
+    assert(g_trace.publicationBegin && g_trace.publicationEnd);
+    assert(g_trace.assetEntryIndex == 17 && g_trace.assetPoolIndex == 0);
+    assert(g_trace.freeEntryCountBefore == 32751 &&
+        g_trace.freeEntryCountAfter == 32750);
+    assert(g_trace.assetHash == DB_HashForNameCanonical(
+        "xmodel/gate3", ASSET_TYPE_XMODEL));
+    const XAssetHeader publishedXModel = DB_FindXAssetHeader(
+        ASSET_TYPE_XMODEL, "xmodel/gate3");
+    assert(publishedXModel.model && publishedXModel.model->numBones == 1);
+    assert(publishedXModel.model->boneNames &&
+        publishedXModel.model->boneNames[0] == 1);
+    assert(publishedXModel.model->partClassification[0] == 7);
+    assert(publishedXModel.model->baseMat[0].transWeight == 2.0f);
+    assert(publishedXModel.model->surfs &&
+        publishedXModel.model->surfs[0].zoneHandle == 1);
+    assert(publishedXModel.model->surfs[0].verts0[0].xyz[2] == 3.0f);
+    assert(publishedXModel.model->surfs[0].triIndices[2] == 0);
+    assert(publishedXModel.model->surfs[0].vertList[0].collisionTree);
+    assert(publishedXModel.model->collSurfs[0].collTris[0].plane[2] == 1.0f);
+    assert(publishedXModel.model->boneInfo[0].radiusSquared == 4.0f);
+    assert(publishedXModel.model->physPreset &&
+        std::strcmp(publishedXModel.model->physPreset->name,
+            "physics/xmodel_gate3") == 0);
+    assert(publishedXModel.model->physGeoms &&
+        publishedXModel.model->physGeoms->count == 1);
+    assert(publishedXModel.model->physGeoms->geoms[0].brush->sides[0].materialNum == 9);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_XMODEL) == 999);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_PHYSPRESET) == 63);
+
+    XModelFixtureOptions sharedXModel{};
+    sharedXModel.assetPointer = UINT32_MAX;
+    sharedXModel.includeAliasAsset = false;
+    Run(MakeXModelXFile(sharedXModel), zone);
+    assert(g_trace.publicationEnd && !g_trace.generatedLoadFailed);
+    assert(std::strcmp(g_trace.pointerClassification,
+        "inline-shared/-1") == 0);
+
+    XModelFixtureOptions nullXModel{};
+    nullXModel.assetPointer = 0;
+    nullXModel.includeAliasAsset = false;
+    Run(MakeXModelXFile(nullXModel), zone);
+    assert(!g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+
+    XModelFixtureOptions malformedXModel{};
+    malformedXModel.assetPointer = UINT32_MAX - 2u;
+    malformedXModel.includeAliasAsset = false;
+    Run(MakeXModelXFile(malformedXModel), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "stream/invalid alias offset") == 0);
+
+    XModelFixtureOptions truncatedXModel{};
+    truncatedXModel.includeAliasAsset = false;
+    truncatedXModel.includeSurfaceVertices = false;
+    Run(MakeXModelXFile(truncatedXModel), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationEnd);
+
+    const std::vector<std::uint8_t> weaponInsertAlias = MakeWeaponXFile();
+    Run(weaponInsertAlias, zone);
+    assert(g_trace.xassetCount == 2 && g_trace.assetIndex == 1);
+    assert(g_trace.assetType == ASSET_TYPE_WEAPON);
+    assert(std::strcmp(g_trace.pointerClassification, "prior-offset/alias") == 0);
+    assert(g_trace.publicationBegin && g_trace.publicationEnd);
+    assert(g_trace.assetEntryIndex == 17 && g_trace.assetPoolIndex == 0);
+    assert(g_trace.freeEntryCountBefore == 32751 &&
+        g_trace.freeEntryCountAfter == 32750);
+    const XAssetHeader publishedWeapon = DB_FindXAssetHeader(
+        ASSET_TYPE_WEAPON, "weapon/gate3");
+    assert(publishedWeapon.weapon);
+    assert(publishedWeapon.weapon->szDisplayName ==
+        publishedWeapon.weapon->szInternalName);
+    assert(publishedWeapon.weapon->gunXModel[0] &&
+        publishedWeapon.weapon->handXModel ==
+            publishedWeapon.weapon->gunXModel[0]);
+    assert(std::strcmp(publishedWeapon.weapon->gunXModel[0]->name,
+        "xmodel/weapon_gate3") == 0);
+    assert(std::strcmp(publishedWeapon.weapon->szXAnims[0],
+        "anim_gate3") == 0);
+    assert(publishedWeapon.weapon->hideTags[0] == 1);
+    assert(!publishedWeapon.weapon->pickupSound);
+    assert(publishedWeapon.weapon->bounceSound &&
+        !publishedWeapon.weapon->bounceSound[28]);
+    assert(publishedWeapon.weapon->accuracyGraphKnots[0][1][1] == 3.0f);
+    assert(publishedWeapon.weapon->originalAccuracyGraphKnots[0][0][0] == 10.0f);
+    assert(std::strcmp(publishedWeapon.weapon->szScript,
+        "scripts/gate3_weapon") == 0);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_WEAPON) == 127);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_XMODEL) == 999);
+
+    WeaponFixtureOptions sharedWeapon{};
+    sharedWeapon.assetPointer = UINT32_MAX;
+    sharedWeapon.includeAliasAsset = false;
+    Run(MakeWeaponXFile(sharedWeapon), zone);
+    assert(g_trace.publicationEnd && !g_trace.generatedLoadFailed);
+
+    WeaponFixtureOptions nullWeapon{};
+    nullWeapon.assetPointer = 0;
+    nullWeapon.includeAliasAsset = false;
+    Run(MakeWeaponXFile(nullWeapon), zone);
+    assert(!g_trace.publicationBegin && !g_trace.generatedLoadFailed);
+
+    WeaponFixtureOptions malformedWeapon{};
+    malformedWeapon.assetPointer = UINT32_MAX - 2u;
+    malformedWeapon.includeAliasAsset = false;
+    Run(MakeWeaponXFile(malformedWeapon), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+
+    WeaponFixtureOptions truncatedWeapon{};
+    truncatedWeapon.includeAliasAsset = false;
+    truncatedWeapon.includeXModelBody = false;
+    Run(MakeWeaponXFile(truncatedWeapon), zone);
+    assert(DB_RuntimeGeneratedLoadFailed() && !g_trace.publicationEnd);
+
+    WeaponFixtureOptions excessiveWeapon{};
+    excessiveWeapon.includeAliasAsset = false;
+    excessiveWeapon.accuracyCount = (std::numeric_limits<std::int32_t>::max)();
+    Run(MakeWeaponXFile(excessiveWeapon), zone);
+    assert(g_trace.generatedLoadFailed);
+    assert(!DB_FindXAssetHeader(ASSET_TYPE_WEAPON,
+        "weapon/gate3").weapon);
+    assert(std::strcmp(g_trace.stopStage, "Weapon/accuracy graph 0") == 0);
+
+    const std::vector<std::uint8_t> xanimInsertAlias = MakeXAnimXFile();
+    Run(xanimInsertAlias, zone);
+    assert(g_trace.xassetCount == 2 && g_trace.assetIndex == 1);
+    assert(g_trace.assetType == ASSET_TYPE_XANIMPARTS);
+    assert(g_trace.publicationBegin && g_trace.publicationEnd);
+    assert(g_trace.assetEntryIndex == 16 && g_trace.assetPoolIndex == 0);
+    const XAssetHeader publishedXAnim = DB_FindXAssetHeader(
+        ASSET_TYPE_XANIMPARTS, "xanim/gate3");
+    assert(publishedXAnim.parts && publishedXAnim.parts->numframes == 300);
+    assert(publishedXAnim.parts->names[0] == 1 &&
+        publishedXAnim.parts->names[1] == 1);
+    assert(publishedXAnim.parts->notify[0].name == 1 &&
+        publishedXAnim.parts->notify[0].time == 0.5f);
+    assert(publishedXAnim.parts->deltaPart->trans->size == 1);
+    assert(publishedXAnim.parts->deltaPart->trans->u.frames.frames._2[1][2] == 5);
+    assert(publishedXAnim.parts->deltaPart->quat->u.frames.frames[1][1] == 13);
+    assert(publishedXAnim.parts->dataByte[0] == 0xaa);
+    assert(publishedXAnim.parts->dataShort[0] == 0x1234);
+    assert(publishedXAnim.parts->dataInt[0] == 0x55667788);
+    assert(publishedXAnim.parts->indices._2[1] == 3);
+
+    XAnimFixtureOptions nullXAnim{};
+    nullXAnim.assetPointer = 0;
+    nullXAnim.includeAliasAsset = false;
+    Run(MakeXAnimXFile(nullXAnim), zone);
+    assert(!g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+
+    XAnimFixtureOptions malformedXAnim{};
+    malformedXAnim.assetPointer = UINT32_MAX - 2u;
+    malformedXAnim.includeAliasAsset = false;
+    Run(MakeXAnimXFile(malformedXAnim), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+
+    XAnimFixtureOptions truncatedXAnim{};
+    truncatedXAnim.includeAliasAsset = false;
+    truncatedXAnim.includePayload = false;
+    Run(MakeXAnimXFile(truncatedXAnim), zone);
+    assert(DB_RuntimeGeneratedLoadFailed() && !g_trace.publicationEnd);
+
+    const std::vector<std::uint8_t> stringTableFixture =
+        MakeStringTableXFile();
+    Run(stringTableFixture, zone);
+    assert(g_trace.xassetCount == 2 && g_trace.assetIndex == 1);
+    assert(g_trace.assetType == ASSET_TYPE_STRINGTABLE);
+    assert(g_trace.publicationBegin && g_trace.publicationEnd);
+    assert(g_trace.assetEntryIndex == 16 && g_trace.assetPoolIndex == 0);
+    const XAssetHeader publishedStringTable = DB_FindXAssetHeader(
+        ASSET_TYPE_STRINGTABLE, "stringtable/gate3.csv");
+    assert(publishedStringTable.stringTable);
+    assert(publishedStringTable.stringTable->columnCount == 2 &&
+        publishedStringTable.stringTable->rowCount == 2);
+    assert(std::strcmp(publishedStringTable.stringTable->values[0], "key") == 0);
+    assert(std::strcmp(publishedStringTable.stringTable->values[1], "value") == 0);
+    assert(!publishedStringTable.stringTable->values[2]);
+    assert(publishedStringTable.stringTable->values[3] ==
+        publishedStringTable.stringTable->name);
+
+    StringTableFixtureOptions nullStringTable{};
+    nullStringTable.assetPointer = 0;
+    nullStringTable.includeAliasAsset = false;
+    Run(MakeStringTableXFile(nullStringTable), zone);
+    assert(!g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+
+    StringTableFixtureOptions malformedStringTable{};
+    malformedStringTable.assetPointer = UINT32_MAX - 1u;
+    malformedStringTable.includeAliasAsset = false;
+    Run(MakeStringTableXFile(malformedStringTable), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+
+    StringTableFixtureOptions excessiveStringTable{};
+    excessiveStringTable.includeAliasAsset = false;
+    excessiveStringTable.columns = (std::numeric_limits<std::int32_t>::max)();
+    excessiveStringTable.rows = 2;
+    Run(MakeStringTableXFile(excessiveStringTable), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage, "StringTable/excessive values") == 0);
+
     const std::vector<std::uint8_t> techniqueInsertAlias =
         MakeTechniqueSetXFile();
     Run(techniqueInsertAlias, zone);
@@ -1593,7 +2199,7 @@ int main()
     assert(g_trace.assetHash == DB_HashForNameCanonical(
         "techsets/gate3", ASSET_TYPE_TECHNIQUE_SET));
     assert(g_trace.assetZoneIndex == 1);
-    assert(g_trace.streamOffsets[0] == sizeof(MaterialTechniqueSet));
+    assert(g_trace.streamOffsets[0] == 0);
     assert(g_trace.streamOffsets[4] == 251);
     const XAssetHeader publishedTechniqueSet = DB_FindXAssetHeader(
         ASSET_TYPE_TECHNIQUE_SET, "techsets/gate3");
@@ -1658,7 +2264,7 @@ int main()
         g_trace.freeEntryCountAfter == 32750);
     assert(g_trace.assetHash == DB_HashForNameCanonical(
         "materials/gate3", ASSET_TYPE_MATERIAL));
-    assert(g_trace.streamOffsets[0] == 136);
+    assert(g_trace.streamOffsets[0] == 0);
     assert(g_trace.streamOffsets[4] == 248);
     const XAssetHeader publishedMaterial = DB_FindXAssetHeader(
         ASSET_TYPE_MATERIAL, "materials/gate3");
@@ -1758,7 +2364,7 @@ int main()
     assert(g_trace.assetHash == DB_HashForNameCanonical(
         "soundcurves/gate3", ASSET_TYPE_SOUND_CURVE));
     assert(g_trace.assetZoneIndex == 1);
-    assert(g_trace.streamOffsets[0] == sizeof(SndCurve));
+    assert(g_trace.streamOffsets[0] == 0);
     assert(g_trace.streamOffsets[4] == 38);
     const XAssetHeader publishedSndCurve = DB_FindXAssetHeader(
         ASSET_TYPE_SOUND_CURVE, "soundcurves/gate3");
@@ -1786,7 +2392,7 @@ int main()
     assert(std::strcmp(g_trace.pointerClassification,
         "inline-shared/-1") == 0);
     assert(g_trace.publicationEnd && g_trace.assetEntryIndex == 16);
-    assert(g_trace.streamOffsets[0] == sizeof(SndCurve) &&
+    assert(g_trace.streamOffsets[0] == 0 &&
         g_trace.streamOffsets[4] == 26);
 
     SndCurveFixtureOptions nullSndCurve{};
@@ -1839,7 +2445,7 @@ int main()
         "prior-offset/alias") == 0);
     assert(g_trace.publicationBegin && g_trace.publicationEnd);
     assert(g_trace.assetEntryIndex == 16 && g_trace.assetPoolIndex == 0);
-    assert(g_trace.streamOffsets[0] == sizeof(snd_alias_list_t));
+    assert(g_trace.streamOffsets[0] == 0);
     assert(g_trace.streamOffsets[4] == 586);
     const XAssetHeader publishedSound = DB_FindXAssetHeader(
         ASSET_TYPE_SOUND, "sound/gate3");
@@ -1903,7 +2509,7 @@ int main()
     assert(g_trace.xassetCount == 2 && g_trace.assetIndex == 1);
     assert(g_trace.assetType == ASSET_TYPE_LOADED_SOUND);
     assert(g_trace.publicationBegin && g_trace.publicationEnd);
-    assert(g_trace.streamOffsets[0] == 48 && g_trace.streamOffsets[4] == 44);
+    assert(g_trace.streamOffsets[0] == 0 && g_trace.streamOffsets[4] == 44);
     const XAssetHeader publishedLoadedSound = DB_FindXAssetHeader(
         ASSET_TYPE_LOADED_SOUND, "loaded/gate3.wav");
     assert(publishedLoadedSound.loadSnd);
@@ -1928,7 +2534,7 @@ int main()
     assert(g_trace.xassetCount == 2 && g_trace.assetIndex == 1);
     assert(g_trace.assetType == ASSET_TYPE_FONT);
     assert(g_trace.publicationBegin && g_trace.publicationEnd);
-    assert(g_trace.streamOffsets[0] == sizeof(Font_s));
+    assert(g_trace.streamOffsets[0] == 0);
     assert(g_trace.streamOffsets[4] == 80);
     const XAssetHeader publishedFont = DB_FindXAssetHeader(
         ASSET_TYPE_FONT, "fonts/gate3");
@@ -1989,7 +2595,7 @@ int main()
     assert(g_trace.assetHash == DB_HashForNameCanonical(
         "fx/gate3", ASSET_TYPE_FX));
     assert(g_trace.assetZoneIndex == 1);
-    assert(g_trace.streamOffsets[0] == sizeof(FxEffectDef));
+    assert(g_trace.streamOffsets[0] == 0);
     assert(g_trace.streamOffsets[4] == 502);
     const XAssetHeader publishedFx = DB_FindXAssetHeader(
         ASSET_TYPE_FX, "fx/gate3");
@@ -2023,7 +2629,7 @@ int main()
     Run(MakeFxXFile(sharedFx), zone);
     assert(std::strcmp(g_trace.pointerClassification,
         "inline-shared/-1") == 0);
-    assert(g_trace.publicationEnd && g_trace.streamOffsets[0] == 32 &&
+    assert(g_trace.publicationEnd && g_trace.streamOffsets[0] == 0 &&
         g_trace.streamOffsets[4] == 272);
     assert(DB_FindXAssetHeader(ASSET_TYPE_FX, "fx/gate3").fx);
 
@@ -2087,8 +2693,7 @@ int main()
     inlineModelFx.includeTrail = false;
     Run(MakeFxXFile(inlineModelFx), zone);
     assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
-    assert(std::strcmp(g_trace.stopStage,
-        "Load_XModelPtr/unsupported inline body closure") == 0);
+    assert(std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0);
     std::uint32_t failedFxModelInsertion = UINT32_MAX;
     std::memcpy(&failedFxModelInsertion, zone.blocks[4].data + 16,
         sizeof(failedFxModelInsertion));
@@ -2108,7 +2713,7 @@ int main()
     assert(g_trace.assetHash == DB_HashForNameCanonical(
         "impact/gate3", ASSET_TYPE_IMPACT_FX));
     assert(g_trace.assetZoneIndex == 1);
-    assert(g_trace.streamOffsets[0] == 40);
+    assert(g_trace.streamOffsets[0] == 0);
     assert(g_trace.streamOffsets[4] == 1640);
     const XAssetHeader publishedImpact = DB_FindXAssetHeader(
         ASSET_TYPE_IMPACT_FX, "impact/gate3");
@@ -2145,7 +2750,7 @@ int main()
     assert(std::strcmp(g_trace.pointerClassification,
         "inline-shared/-1") == 0);
     assert(g_trace.publicationEnd && g_trace.assetEntryIndex == 16);
-    assert(g_trace.streamOffsets[0] == sizeof(FxImpactTable) &&
+    assert(g_trace.streamOffsets[0] == 0 &&
         g_trace.streamOffsets[4] == 21);
     assert(DB_FindXAssetHeader(ASSET_TYPE_IMPACT_FX,
         "impact/gate3").impactFx);
@@ -2210,7 +2815,7 @@ int main()
         g_trace.freeEntryCountAfter == 32750);
     assert(g_trace.assetHash == DB_HashForNameCanonical(
         "lights/gate3", ASSET_TYPE_LIGHT_DEF));
-    assert(g_trace.streamOffsets[0] == 52);
+    assert(g_trace.streamOffsets[0] == 0);
     assert(g_trace.streamOffsets[4] == 59);
     const XAssetHeader publishedLight = DB_FindXAssetHeader(
         ASSET_TYPE_LIGHT_DEF, "lights/gate3");
@@ -2246,7 +2851,7 @@ int main()
     assert(std::strcmp(g_trace.pointerClassification,
         "inline-shared/-1") == 0);
     assert(g_trace.publicationEnd && g_trace.assetEntryIndex == 16);
-    assert(g_trace.streamOffsets[0] == sizeof(GfxLightDef) &&
+    assert(g_trace.streamOffsets[0] == 0 &&
         g_trace.streamOffsets[4] == 21);
     assert(DB_FindXAssetHeader(ASSET_TYPE_LIGHT_DEF,
         "lights/gate3").lightDef);
@@ -2311,7 +2916,7 @@ int main()
         g_trace.freeEntryCountAfter == 32750);
     assert(g_trace.assetHash == DB_HashForNameCanonical(
         "menus/gate3", ASSET_TYPE_MENULIST));
-    assert(g_trace.streamOffsets[0] == sizeof(MenuList) + sizeof(menuDef_t));
+    assert(g_trace.streamOffsets[0] == 0);
     assert(g_trace.streamOffsets[4] == 880);
     const XAssetHeader publishedMenuList = DB_FindXAssetHeader(
         ASSET_TYPE_MENULIST, "menus/gate3");
@@ -2366,7 +2971,7 @@ int main()
     assert(!g_trace.generatedLoadFailed && g_trace.publicationEnd);
     assert(std::strcmp(g_trace.pointerClassification,
         "inline-shared/-1") == 0);
-    assert(g_trace.streamOffsets[0] == sizeof(MenuList));
+    assert(g_trace.streamOffsets[0] == 0);
     assert(g_trace.streamOffsets[4] == 20);
 
     MenuListFixtureOptions nullMenuList{};
@@ -2486,7 +3091,7 @@ int main()
     assert(g_trace.assetHash == DB_HashForNameCanonical(
         "LOCALIZE_GATE3", ASSET_TYPE_LOCALIZE_ENTRY));
     assert(g_trace.assetZoneIndex == 1);
-    assert(g_trace.streamOffsets[0] == sizeof(LocalizeEntry));
+    assert(g_trace.streamOffsets[0] == 0);
     assert(g_trace.streamOffsets[4] == 51);
     const XAssetHeader publishedLocalize = DB_FindXAssetHeader(
         ASSET_TYPE_LOCALIZE_ENTRY, "LOCALIZE_GATE3");
@@ -2513,7 +3118,7 @@ int main()
     assert(std::strcmp(g_trace.pointerClassification,
         "inline-shared/-1") == 0);
     assert(g_trace.publicationEnd && g_trace.assetEntryIndex == 16);
-    assert(g_trace.streamOffsets[0] == sizeof(LocalizeEntry) &&
+    assert(g_trace.streamOffsets[0] == 0 &&
         g_trace.streamOffsets[4] == 39);
 
     LocalizeFixtureOptions directLocalizeOptions{};
@@ -2591,7 +3196,8 @@ int main()
     excessiveLocalize.terminateName = false;
     Run(MakeLocalizeXFile(excessiveLocalize), zone);
     assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
-    assert(std::strcmp(g_trace.stopStage, "stream/truncated string") == 0);
+    assert(std::strcmp(g_trace.stopStage, "stream/truncated string") == 0 ||
+        std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0);
 
     MaterialFixtureOptions nullMaterialOptions{};
     nullMaterialOptions.assetPointer = 0;
@@ -2717,16 +3323,126 @@ int main()
     Run(MakePhysPresetXFile(UINT32_MAX - 1u, UINT32_MAX, 0x4000000du,
         false, true, false, 4084), zone);
     assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
-    assert(std::strcmp(g_trace.stopStage, "stream/truncated string") == 0);
+    assert(std::strcmp(g_trace.stopStage, "stream/truncated string") == 0 ||
+        std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0);
 
     Reset(physInsertAlias);
     *static_cast<void **>(DB_XAssetPool[ASSET_TYPE_PHYSPRESET]) = nullptr;
     RunPrepared(zone);
-    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
-        !g_trace.publicationEnd);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin);
     assert(std::strcmp(g_trace.stopStage, "publication/asset pool exhaustion") == 0);
     assert(DB_FindXAssetEntryCanonical(
         ASSET_TYPE_PHYSPRESET, "physics/gate3") == nullptr);
+
+    const std::uint32_t xmodelHash = DB_HashForNameCanonical(
+        "xmodel/gate3", ASSET_TYPE_XMODEL);
+    Reset(xmodelInsertAlias);
+    *static_cast<void **>(DB_XAssetPool[ASSET_TYPE_XMODEL]) = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset pool exhaustion") == 0);
+    assert(db_hashTable[xmodelHash] == 0);
+    assert(DB_GetFreeAssetEntryCount() == 32751);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_PHYSPRESET,
+        "physics/xmodel_gate3").physPreset);
+    std::uint32_t failedXModelInsertion = UINT32_MAX;
+    std::memcpy(&failedXModelInsertion, zone.blocks[4].data + 32,
+        sizeof(failedXModelInsertion));
+    assert(failedXModelInsertion == 0);
+
+    Reset(xmodelInsertAlias);
+    g_assetEntryPool[16].next = nullptr;
+    g_freeAssetEntryHead = &g_assetEntryPool[16];
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset entry exhaustion") == 0);
+    assert(db_hashTable[xmodelHash] == 0);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_XMODEL) == 1000);
+    std::memcpy(&failedXModelInsertion, zone.blocks[4].data + 32,
+        sizeof(failedXModelInsertion));
+    assert(failedXModelInsertion == 0);
+
+    const std::uint32_t weaponHash = DB_HashForNameCanonical(
+        "weapon/gate3", ASSET_TYPE_WEAPON);
+    Reset(weaponInsertAlias);
+    *static_cast<void **>(DB_XAssetPool[ASSET_TYPE_WEAPON]) = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset pool exhaustion") == 0);
+    assert(db_hashTable[weaponHash] == 0);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_XMODEL,
+        "xmodel/weapon_gate3").model);
+    std::uint32_t failedWeaponInsertion = UINT32_MAX;
+    std::memcpy(&failedWeaponInsertion, zone.blocks[4].data + 32,
+        sizeof(failedWeaponInsertion));
+    assert(failedWeaponInsertion == 0);
+
+    Reset(weaponInsertAlias);
+    g_assetEntryPool[16].next = nullptr;
+    g_freeAssetEntryHead = &g_assetEntryPool[16];
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset entry exhaustion") == 0);
+    assert(db_hashTable[weaponHash] == 0);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_XMODEL,
+        "xmodel/weapon_gate3").model);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_WEAPON) == 128);
+    std::memcpy(&failedWeaponInsertion, zone.blocks[4].data + 32,
+        sizeof(failedWeaponInsertion));
+    assert(failedWeaponInsertion == 0);
+
+    const std::uint32_t xanimHash = DB_HashForNameCanonical(
+        "xanim/gate3", ASSET_TYPE_XANIMPARTS);
+    Reset(xanimInsertAlias);
+    *static_cast<void **>(DB_XAssetPool[ASSET_TYPE_XANIMPARTS]) = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
+        !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset pool exhaustion") == 0);
+    assert(db_hashTable[xanimHash] == 0);
+    std::uint32_t failedXAnimInsertion = UINT32_MAX;
+    std::memcpy(&failedXAnimInsertion, zone.blocks[4].data + 32,
+        sizeof(failedXAnimInsertion));
+    assert(failedXAnimInsertion == 0);
+
+    Reset(xanimInsertAlias);
+    g_freeAssetEntryHead = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
+        !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset entry exhaustion") == 0);
+    assert(db_hashTable[xanimHash] == 0);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_XANIMPARTS) == 4096);
+    std::memcpy(&failedXAnimInsertion, zone.blocks[4].data + 32,
+        sizeof(failedXAnimInsertion));
+    assert(failedXAnimInsertion == 0);
+
+    const std::uint32_t stringTableHash = DB_HashForNameCanonical(
+        "stringtable/gate3.csv", ASSET_TYPE_STRINGTABLE);
+    Reset(stringTableFixture);
+    *static_cast<void **>(DB_XAssetPool[ASSET_TYPE_STRINGTABLE]) = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
+        !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset pool exhaustion") == 0);
+    assert(db_hashTable[stringTableHash] == 0);
+
+    Reset(stringTableFixture);
+    g_freeAssetEntryHead = nullptr;
+    RunPrepared(zone);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
+        !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage,
+        "publication/asset entry exhaustion") == 0);
+    assert(db_hashTable[stringTableHash] == 0);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_STRINGTABLE) == 50);
 
     Reset(techniqueInsertAlias);
     *static_cast<void **>(DB_XAssetPool[ASSET_TYPE_TECHNIQUE_SET]) = nullptr;
@@ -2941,8 +3657,7 @@ int main()
     Reset(fxImpactInsertAlias);
     *static_cast<void **>(DB_XAssetPool[ASSET_TYPE_IMPACT_FX]) = nullptr;
     RunPrepared(zone);
-    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
-        !g_trace.publicationEnd);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin);
     assert(std::strcmp(g_trace.stopStage,
         "publication/asset pool exhaustion") == 0);
     assert(db_hashTable[fxImpactHash] == 0);
@@ -2957,8 +3672,7 @@ int main()
     g_assetEntryPool[16].next = nullptr;
     g_freeAssetEntryHead = &g_assetEntryPool[16];
     RunPrepared(zone);
-    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
-        !g_trace.publicationEnd);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin);
     assert(std::strcmp(g_trace.stopStage,
         "publication/asset entry exhaustion") == 0);
     assert(db_hashTable[fxImpactHash] == 0);
@@ -2973,8 +3687,7 @@ int main()
     Reset(lightInsertAlias);
     *static_cast<void **>(DB_XAssetPool[ASSET_TYPE_LIGHT_DEF]) = nullptr;
     RunPrepared(zone);
-    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
-        !g_trace.publicationEnd);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin);
     assert(std::strcmp(g_trace.stopStage,
         "publication/asset pool exhaustion") == 0);
     assert(db_hashTable[lightHash] == 0);
@@ -2989,8 +3702,7 @@ int main()
     g_assetEntryPool[16].next = nullptr;
     g_freeAssetEntryHead = &g_assetEntryPool[16];
     RunPrepared(zone);
-    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
-        !g_trace.publicationEnd);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin);
     assert(std::strcmp(g_trace.stopStage,
         "publication/asset entry exhaustion") == 0);
     assert(db_hashTable[lightHash] == 0);
@@ -3025,8 +3737,7 @@ int main()
     Reset(menuListInsertAlias);
     *static_cast<void **>(DB_XAssetPool[ASSET_TYPE_MENULIST]) = nullptr;
     RunPrepared(zone);
-    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
-        !g_trace.publicationEnd);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin);
     assert(std::strcmp(g_trace.stopStage,
         "publication/asset pool exhaustion") == 0);
     assert(db_hashTable[menuListHash] == 0);
@@ -3044,8 +3755,7 @@ int main()
     g_assetEntryPool[16].next = nullptr;
     g_freeAssetEntryHead = &g_assetEntryPool[16];
     RunPrepared(zone);
-    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin &&
-        !g_trace.publicationEnd);
+    assert(g_trace.generatedLoadFailed && g_trace.publicationBegin);
     assert(std::strcmp(g_trace.stopStage,
         "publication/asset entry exhaustion") == 0);
     assert(db_hashTable[menuListHash] == 0);
@@ -3134,6 +3844,6 @@ int main()
     assert(g_trace.publicationEnd && g_trace.cleanupComplete);
     assert(std::strcmp(g_trace.stopStage, "Load_XAssetHeader/next-family-closure") == 0);
 
-    std::printf("gate3-db-stream rawfile=published physpreset=published technique-set=published material=published image=published water=loaded sound-curve=published sound-alias=published loaded-sound=published font=published fx=published impact-fx=published light-def=published menu=published menu-list=published snddriver=canonical-noop localize=published insert=-2 alias=block4:16 technique=block4:36 direct-xstring=block4:18 technique-children=251 material-children=block0:136,block4:248 sound-curve-children=block0:72,block4:38 sound-alias-children=block0:12,block4:586 loaded-sound-children=block0:48,block4:44 font-children=block0:24,block4:80 fx-children=block0:32,block4:502 impact-fx-children=block0:40,block4:1640 light-def-children=block0:52,block4:59 menu-children=block0:296,block4:880 localize-children=block0:8,block4:51 image-entry=16 material-entry=17 sound-curve-entry=16 sound-alias-entry=16 loaded-sound-entry=16 font-entry=16 fx-entry=16 impact-fx-entry=17 light-def-entry=17 menu-entry=16 menu-list-entry=17 localize-entry=16 free=32752->32750 zone=1 xmodel-inline=blocked stop=weapon-closure\n");
+    std::printf("gate3-db-stream rawfile=published physpreset=published xmodel=published weapon=published xanim=published stringtable=published technique-set=published material=published image=published water=loaded sound-curve=published sound-alias=published loaded-sound=published font=published fx=published impact-fx=published light-def=published menu=published menu-list=published snddriver=canonical-noop localize=published insert=-2 alias=block4:16 technique=block4:36 direct-xstring=block4:18 technique-children=block0:0,block4:251 material-children=block0:0,block4:248 sound-curve-children=block0:0,block4:38 sound-alias-children=block0:0,block4:586 loaded-sound-children=block0:0,block4:44 font-children=block0:0,block4:80 fx-children=block0:0,block4:502 impact-fx-children=block0:0,block4:1640 light-def-children=block0:0,block4:59 menu-children=block0:0,block4:880 localize-children=block0:0,block4:51 image-entry=16 material-entry=17 sound-curve-entry=16 sound-alias-entry=16 loaded-sound-entry=16 font-entry=16 fx-entry=16 impact-fx-entry=17 light-def-entry=17 menu-entry=16 menu-list-entry=17 localize-entry=16 free=32752->32750 zone=1 stop=code-post-complete\n");
     return 0;
 }

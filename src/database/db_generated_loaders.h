@@ -9,6 +9,9 @@
 #include <gfx_d3d/r_font.h>
 #include <physics/phys_preset.h>
 #include <sound/snd_alias_types.h>
+#include <xanim/xmodel_types.h>
+#include <xanim/xanim_types.h>
+#include <bgame/weapon_types.h>
 
 #include <cstdint>
 
@@ -52,8 +55,26 @@ extern MenuList **varMenuListPtr;
 extern menuDef_t *varmenuDef_t;
 extern menuDef_t **varmenuDefPtr;
 extern XAssetHeader *varXAssetHeader;
+extern XModel *varXModel;
+extern XModel **varXModelPtr;
+extern std::uint16_t *varScriptString;
+extern WeaponDef *varWeaponDef;
+extern WeaponDef **varWeaponDefPtr;
+extern XAnimParts *varXAnimParts;
+extern XAnimParts **varXAnimPartsPtr;
+extern StringTable *varStringTable;
+extern StringTable **varStringTablePtr;
 
 void __cdecl Load_XString(bool atStreamStart);
+void __cdecl Load_ScriptStringArray(bool atStreamStart, std::int32_t count);
+void __cdecl Load_PhysPresetPtrGenerated(bool atStreamStart);
+void __cdecl Load_MaterialHandleArrayGenerated(bool atStreamStart,
+    std::int32_t count);
+void __cdecl Load_XModelPtr(bool atStreamStart);
+void __cdecl Load_XModelPtrArray(bool atStreamStart, std::int32_t count);
+void __cdecl Load_WeaponDefPtr(bool atStreamStart);
+void __cdecl Load_XAnimPartsPtr(bool atStreamStart);
+void __cdecl Load_StringTablePtr(bool atStreamStart);
 void __cdecl Load_MaterialTechniqueSetPtr(bool atStreamStart);
 void __cdecl Load_MaterialHandle(bool atStreamStart);
 void __cdecl Load_GfxImagePtr(bool atStreamStart);

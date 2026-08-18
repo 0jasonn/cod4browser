@@ -3,6 +3,7 @@
 #include <d3d9.h>
 
 #include <gfx_d3d/gfx_draw_surf_types.h>
+#include <gfx_d3d/gfx_packed_vertex_types.h>
 #include <gfx_d3d/gfx_image_types.h>
 #include <gfx_d3d/gfx_light_types.h>
 #include <universal/com_math.h>
@@ -21,45 +22,6 @@ struct srfTriangles_t // sizeof=0x10
     uint16_t vertexCount;
     uint16_t triCount;
     int baseIndex;
-};
-
-union GfxColor // sizeof=0x4
-{                                       // ...
-    operator uint32_t()
-    {
-        return packed;
-    }
-    GfxColor()
-    {
-        packed = 0;
-    }
-    GfxColor(int i)
-    {
-        packed = i;
-    }
-    GfxColor(uint32_t i)
-    {
-        packed = i;
-    }
-    uint32_t packed;
-    uint8_t array[4];
-};
-
-struct GfxPackedVertex // sizeof=0x20
-{                                       // ...
-    float xyz[3];
-    float binormalSign;
-    GfxColor color;
-    PackedTexCoords texCoord;
-    PackedUnitVec normal;
-    PackedUnitVec tangent;
-};
-static_assert(sizeof(GfxPackedVertex) == 32);
-
-struct GfxPackedVertexNormal // sizeof=0x8
-{                                       // ...
-    PackedUnitVec normal;
-    PackedUnitVec tangent;
 };
 
 struct GfxDynamicIndices // sizeof=0xC

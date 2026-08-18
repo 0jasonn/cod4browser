@@ -9,6 +9,9 @@ remains an explicitly started oracle and does not supply assets to this path.
 | --- | --- | --- |
 | RawFile | yes | Generated body/pointer loader and real pool/hash publication |
 | PhysPreset | yes | Canonical 44-byte ABI, XStrings, pointer aliases and publication |
+| XModel | yes | Canonical skeleton, surface/vertex/index, collision, Material, PhysPreset and physical-geometry closure |
+| XAnimParts | yes | Canonical notifies, ScriptStrings, packed arrays, dynamic indices and delta translation/quaternion closure |
+| WeaponDef | yes | Canonical 2,168-byte body, XModel/Material/FX/sound dependencies, ScriptStrings and accuracy arrays |
 | MaterialTechniqueSet | yes | Complete reached technique/pass/shader closure and publication |
 | GfxImage | yes | Body, load definition/payload, pointer aliases and publication |
 | Material | yes | Info, TechniqueSet, texture/image/water, constants/state and publication |
@@ -23,6 +26,7 @@ remains an explicitly started oracle and does not supply assets to this path.
 | GfxLightDef | yes | Canonical 16-byte body, embedded light image, GfxImage dependency and publication |
 | MenuList | yes | Canonical list body, Menu pointer array, root aliases and final publication |
 | Menu | yes, nested and top-level | Window/item/key/type-data/expression closure, Material/sound dependencies, item-parent reparenting and publication |
+| StringTable | yes | Canonical special root-pointer rules, name/value XStrings and row/column table publication |
 
 The shared prefix also owns XAssetList, ScriptStringList, XString, stream block,
 PMem, zone, pool, free-chain, hash and insertion-cell behavior used by these
@@ -34,12 +38,8 @@ These families have useful bounded oracle coverage or canonical-shaped records
 in the explicit Gate 2 path, but do not yet execute through the normal generated
 DB dispatcher and real DB publication path:
 
-- XAnimParts
-- XModel and its surface/collision/physics graph
 - clipMap/clipMapPVS
 - ComWorld
-- WeaponDef
-- StringTable
 - GfxWorld
 
 Material, TechniqueSet, GfxImage, PhysPreset, RawFile and LocalizeEntry may
@@ -61,15 +61,13 @@ still appear inside Gate 2 oracle results, but they are no longer census-only.
 - The launcher, Worker mount, synchronous filesystem adapter and WebGL backend
   remain legitimate browser platform boundaries.
 
-## Next retail blocker
+## Current retail boundary
 
-Owned `code_post_gfx.ff` now publishes 1,555 records through asset 1505,
-including one FxImpactTable, two GfxLightDefs, two MenuLists and 14 Menu child
-assets. It reaches asset 1506, type 23 `ASSET_TYPE_WEAPON`, at block 4 offset
-373196. The next generated closure is `Load_WeaponDefPtr -> Load_WeaponDef ->
-Load_WeaponDefAsset`: a 2,168-byte body with XModel arrays, 33 animation-name
-XStrings, 40 script strings, dozens of sound-name cells, Material and FX
-dependencies, a 29-entry bounce-sound table, projectile dependencies, and four
-accuracy-graph arrays. Inline XModel loading is not yet canonical in Gate 3,
-so WeaponDef is the next dependency-heavy architectural slice rather than a
-single-family leaf loader.
+Owned `code_post_gfx.ff` completes all 1,639 assets through the ordinary
+generated dispatcher. It produces 1,698 real publications through entry 1,713,
+leaves 31,054 free entries, and ends at asset 1,638, type 31 RawFile
+`code_post_gfx`. All allocated stream blocks are consumed exactly:
+`[0,0,0,0,407412,0,0,4224,480]`. There is no unsupported generated family in
+this zone. This is an architecture-review stop; the next work item is to resume
+the normal startup zone request order and inventory the first genuine family
+boundary reached there, without preselecting or seeking to a later asset.

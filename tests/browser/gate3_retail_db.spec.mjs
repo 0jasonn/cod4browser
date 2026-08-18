@@ -72,20 +72,25 @@ test("canonical Gate 3 traverses a locally owned retail startup zone", {
             (entry) => entry.assetName.length === 0),
     })}`);
     expect(result.final).toMatchObject({
-        stopStage: "Load_XAssetHeader/unsupported family closure",
-        assetIndex: 1506,
-        assetType: 23,
-        streamBlock: 4,
-        streamOffset: 373196,
+        stopStage: "Load_XAssetHeader/next-family-closure",
+        logicalPath: "zone/english/code_post_gfx.ff",
+        assetIndex: 1638,
+        assetType: 31,
+        assetName: "code_post_gfx",
         publicationEnd: true,
-        freeEntryCountAfter: 31197,
-        pointerClassification: "inline-shared/-1",
+        freeEntryCountAfter: 31054,
+        generatedLoadFailed: false,
+        xassetListEnd: true,
+        streamOffsets: [0, 0, 0, 0, 407412, 0, 0, 4224, 480],
     });
-    expect(result.publications).toHaveLength(1555);
+    expect(result.publications).toHaveLength(1698);
     expect(publicationsByType).toEqual({
-        4: 72,
-        5: 86,
-        6: 24,
+        1: 1,
+        2: 11,
+        3: 1,
+        4: 82,
+        5: 90,
+        6: 33,
         7: 11,
         8: 2,
         9: 9,
@@ -93,12 +98,14 @@ test("canonical Gate 3 traverses a locally owned retail startup zone", {
         19: 9,
         20: 2,
         21: 14,
-        22: 1248,
+        22: 1351,
+        23: 1,
         25: 1,
         26: 1,
-        31: 74,
+        31: 76,
+        32: 1,
     });
-    expect(localizePublications).toHaveLength(1248);
+    expect(localizePublications).toHaveLength(1351);
     expect(localizePublications[0]).toMatchObject({
         assetIndex: 5,
         assetEntryIndex: 22,
@@ -107,20 +114,21 @@ test("canonical Gate 3 traverses a locally owned retail startup zone", {
         freeEntryCountAfter: 32745,
     });
     expect(localizePublications.at(-1)).toMatchObject({
-        assetIndex: 1359,
-        assetEntryIndex: 1394,
-        assetPoolIndex: 1247,
-        freeEntryCountBefore: 31374,
-        freeEntryCountAfter: 31373,
+        assetIndex: 1636,
+        assetName: "VIDSUBTITLES_ATTRACT_LOOP_VIDEO13",
+        assetEntryIndex: 1711,
+        assetPoolIndex: 1350,
+        freeEntryCountBefore: 31057,
+        freeEntryCountAfter: 31056,
     });
     expect(result.publications.at(-1)).toMatchObject({
-        assetIndex: 1505,
-        assetType: 20,
-        assetName: "ui/default.menu",
-        assetEntryIndex: 1570,
-        assetPoolIndex: 1,
-        freeEntryCountBefore: 31198,
-        freeEntryCountAfter: 31197,
+        assetIndex: 1638,
+        assetType: 31,
+        assetName: "code_post_gfx",
+        assetEntryIndex: 1713,
+        assetPoolIndex: 75,
+        freeEntryCountBefore: 31055,
+        freeEntryCountAfter: 31054,
     });
     const emptyNames = result.publications.filter(
         (entry) => entry.assetName.length === 0);
@@ -131,5 +139,5 @@ test("canonical Gate 3 traverses a locally owned retail startup zone", {
         assetPoolIndex: 1,
     })]);
     expect(result.publications.filter(
-        (entry) => entry.assetName.length > 0)).toHaveLength(1554);
+        (entry) => entry.assetName.length > 0)).toHaveLength(1697);
 });

@@ -77,6 +77,12 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
         "${KISAK_REPOSITORY_ROOT}/src/database/db_file_platform.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_file_load.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_loaders.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_xmodel.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_xanim.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_xmodel_surface.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_xmodel_physics.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_weapon.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_stringtable.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_image.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_image_platform.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_localize.cpp"
@@ -99,6 +105,7 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
         "${KISAK_REPOSITORY_ROOT}/src/database/db_registry_publication.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_stream.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_stream_load.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_stringtable_load.cpp"
     )
     target_compile_features(gate3_db_stream_trace_tests PRIVATE cxx_std_20)
     target_include_directories(gate3_db_stream_trace_tests PRIVATE
@@ -107,8 +114,10 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
         KISAK_SP=1 KISAK_DB_SYNC_FILE_TEST=1 KISAK_DB_POOL_STANDALONE=1 dNODEBUG=1)
     if (MSVC)
         target_compile_definitions(gate3_db_stream_trace_tests PRIVATE WIN32=1)
+        target_compile_options(gate3_db_stream_trace_tests PRIVATE /UNDEBUG)
     else()
         target_compile_definitions(gate3_db_stream_trace_tests PRIVATE KISAK_WEB=1)
+        target_compile_options(gate3_db_stream_trace_tests PRIVATE -UNDEBUG)
     endif()
 endif()
 
