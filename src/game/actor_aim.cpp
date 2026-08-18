@@ -18,7 +18,7 @@
 #include "actor_events.h"
 #include <universal/com_files.h>
 #include <devgui/devgui.h>
-#include <win32/win_local.h>
+#include <qcommon/sys_paths.h>
 #include <universal/profile.h>
 
 #define AI_DEBUG_ACCURACY_MSG_COUNT 8
@@ -1111,7 +1111,7 @@ void __cdecl Actor_CommonAccuracyGraphEventCallback(
     if (event == EVENT_ACCEPT)
     {
         memset(v15, 0, 0x2000u);
-        snprintf((char *)v15, ARRAYSIZE(v15), "Weapon: %s\nKnot Count: %d\n", *data, *graph->knotCount); // This probably needs to be changed type
+        snprintf((char *)v15, ARRAY_COUNT(v15), "Weapon: %s\nKnot Count: %d\n", *data, *graph->knotCount); // This probably needs to be changed type
         v7 = 0;
         if (*graph->knotCount > 0)
         {
@@ -1120,7 +1120,7 @@ void __cdecl Actor_CommonAccuracyGraphEventCallback(
             {
                 snprintf(
                     v14,
-                    ARRAYSIZE(v14),
+                    ARRAY_COUNT(v14),
                     "%.4f %.4f\n",
                     graph->knots[v8][0],
                     graph->knots[v8][1]
@@ -1282,7 +1282,7 @@ void __cdecl Actor_InitWeaponAccuracyGraphForWeapon(unsigned int weaponIndex)
         Actor_AiVsAiAccuracyGraphEventCallback);
     if (inited)
     {
-        snprintf(v5, ARRAYSIZE(v5), "AI/AI Vs. AI Accuracy/%s", WeaponDef->szInternalName);
+        snprintf(v5, ARRAY_COUNT(v5), "AI/AI Vs. AI Accuracy/%s", WeaponDef->szInternalName);
         DevGui_AddGraph(v5, inited);
     }
     v4 = Actor_InitWeaponAccuracyGraphForWeaponType(
@@ -1291,7 +1291,7 @@ void __cdecl Actor_InitWeaponAccuracyGraphForWeapon(unsigned int weaponIndex)
         Actor_AiVsPlayerAccuracyGraphEventCallback);
     if (v4)
     {
-        snprintf(v5, ARRAYSIZE(v5), "AI/AI Vs. Player Accuracy/%s", WeaponDef->szInternalName);
+        snprintf(v5, ARRAY_COUNT(v5), "AI/AI Vs. Player Accuracy/%s", WeaponDef->szInternalName);
         DevGui_AddGraph(v5, v4);
     }
 }
@@ -1310,9 +1310,9 @@ void __cdecl Actor_ShutdownWeaponAccuracyGraph()
         do
         {
             v2 = *p_data;
-            snprintf(v3, ARRAYSIZE(v3), "AI/AI Vs. AI Accuracy/%s", **p_data);
+            snprintf(v3, ARRAY_COUNT(v3), "AI/AI Vs. AI Accuracy/%s", **p_data);
             DevGui_RemoveMenu(v3);
-            snprintf(v3, ARRAYSIZE(v3), "AI/AI Vs. Player Accuracy/%s", *v2);
+            snprintf(v3, ARRAY_COUNT(v3), "AI/AI Vs. Player Accuracy/%s", *v2);
             DevGui_RemoveMenu(v3);
             ++v0;
             p_data += 8;

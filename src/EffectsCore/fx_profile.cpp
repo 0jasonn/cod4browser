@@ -1,5 +1,6 @@
 #include <universal/q_shared.h>
 #include "fx_system.h"
+#include <qcommon/system.h>
 
 
 void __cdecl FX_DrawProfile(int32_t clientIndex, void(__cdecl *drawFunc)(char *), float *profilePos)

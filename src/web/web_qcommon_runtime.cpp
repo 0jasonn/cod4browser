@@ -1,6 +1,7 @@
 #include <web/web_qcommon_runtime.h>
 
 #include <qcommon/cmd.h>
+#include <qcommon/qcommon.h>
 #include <universal/dvar.h>
 #include <web/web_filesystem.h>
 #include <web/web_qcommon_preinit.h>
@@ -280,7 +281,9 @@ bool RegisterCommandsAndDvars()
         Dvar_FindVar("developer"),
         Dvar_FindVar("useFastFile"),
         Dvar_RegisterString("fs_game", "", 0u, "Selected game directory"),
-        Dvar_RegisterString("loc_language", "english", 0u, "Selected localization"),
+        Dvar_RegisterInt(
+            "loc_language", 0, 0, 15, DVAR_ARCHIVE | DVAR_LATCH,
+            "The current language locale"),
         Dvar_RegisterString(
             "com_webPreDatabase",
             "initializing",

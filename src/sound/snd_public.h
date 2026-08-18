@@ -1,6 +1,9 @@
 #pragma once
+#include "snd_runtime_state.h"
+#include "snd_runtime_api.h"
 
 #include <qcommon/qcommon.h>
+#include <sound/snd_alias_system.h>
 #ifndef KISAK_OPENAL
 #include <msslib/mss.h>
 #else
@@ -16,7 +19,10 @@
 typedef char CHAR;
 typedef short SHORT;
 typedef int BOOL;
-typedef long LONG;
+#ifndef KISAK_LONG_DEFINED
+typedef std::int32_t LONG;
+#define KISAK_LONG_DEFINED 1
+#endif
 typedef CHAR *LPSTR, *PSTR;
 typedef unsigned long ULONG_PTR, *PULONG_PTR;
 typedef ULONG_PTR DWORD_PTR, *PDWORD_PTR;
@@ -112,13 +118,6 @@ enum snd_stopsounds_arg_t : __int32
     SND_KEEP_MUSIC_AND_AMBIENT = 0x6,
     SND_STOP_STREAMED = 0x8,
     SND_KEEP_CHANNEL_VOLUMES = 0x10,
-};
-enum snd_alias_system_t : __int32
-{                                       // ...
-    SASYS_UI = 0x0,
-    SASYS_CGAME = 0x1,
-    SASYS_GAME = 0x2,
-    SASYS_COUNT = 0x3,
 };
 enum SndLengthId : __int32
 {                                       // ...
@@ -537,6 +536,7 @@ void SND_UpdatePhysics();
 bool __cdecl SND_ShouldGiveCpuWarning();
 void __cdecl SND_StopSounds(snd_stopsounds_arg_t which);
 void __cdecl SND_Init();
+char __cdecl SND_InitDriver();
 void __cdecl SND_PlayLocal_f();
 void __cdecl RelativeToListener(const snd_listener *listener, float yaw, float pitch, float dist, float *result);
 void SND_InitEntChannels();
@@ -544,7 +544,6 @@ void __cdecl SND_ParseEntChannelFile(const char *buffer);
 char __cdecl SND_BooleanFromString(const char *value, const char *trueValue, const char *falseValue, bool defaultValue);
 void __cdecl SND_Shutdown();
 void __cdecl SND_ShutdownChannels();
-void __cdecl SND_ErrorCleanup();
 void __cdecl SND_Save(struct MemoryFile *memFile);
 void __cdecl SND_Save3DChannel(int chanIndex, struct MemoryFile *memFile);
 void __cdecl SND_SaveSoundAlias(const snd_alias_t *alias, struct MemoryFile *memFile);
@@ -585,7 +584,6 @@ struct LoadedSound *__cdecl SND_LoadSoundFile(const char *name);
 
 extern const dvar_t *snd_cinematicVolumeScale;
 extern const dvar_t *snd_enable3D;
-extern const dvar_t *snd_enableEq;
 extern const dvar_t *snd_debugReplace;
 extern const dvar_t *snd_debugAlias;
 extern const dvar_t *snd_enable2D;

@@ -2,6 +2,7 @@
 #include "ragdoll.h"
 #include <xanim/dobj.h>
 #include <physics/phys_local.h>
+#include <physics/phys_preset.h>
 #include <qcommon/threads.h>
 #include <xanim/dobj_utils.h>
 #include <universal/profile.h>

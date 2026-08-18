@@ -370,7 +370,7 @@ int __cdecl SND_StartAlias2DSample(SndStartAliasInfo *startAliasInfo, int *pChan
         }
         else if ((startAliasInfo->alias0->flags & 0x20) != 0)
         {
-            start_msec = SnapFloatToInt(random() * (float)total_msec) & 0xFFFFFF80;
+            start_msec = SnapFloatToInt(Q_random() * (float)total_msec) & 0xFFFFFF80;
         }
         else
         {
@@ -589,7 +589,7 @@ int __cdecl SND_StartAlias3DSample(SndStartAliasInfo *startAliasInfo, int *pChan
         }
         else if ((startAliasInfo->alias0->flags & 0x20) != 0)
         {
-            start_msec = SnapFloatToInt(random() * (float)total_msec) & 0xFFFFFF80;
+            start_msec = SnapFloatToInt(Q_random() * (float)total_msec) & 0xFFFFFF80;
         }
         else
         {
@@ -753,7 +753,7 @@ int __cdecl SND_StartAliasStreamOnChannel(SndStartAliasInfo *startAliasInfo, int
                         }
                         else if ((startAliasInfo->alias0->flags & 0x20) != 0)
                         {
-                            start_msec = SnapFloatToInt(random() * (float)total_msec[0]) & 0xFFFFFF80;
+                            start_msec = SnapFloatToInt(Q_random() * (float)total_msec[0]) & 0xFFFFFF80;
                         }
                         else
                         {

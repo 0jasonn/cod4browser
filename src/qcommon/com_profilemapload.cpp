@@ -34,7 +34,7 @@ void __cdecl ProfLoad_BeginTrackedValue(MapProfileTrackedValue type)
 
     if (mapLoadProfile.isLoading && mapLoadProfile.currentEntry && Sys_IsMainThread())
     {
-        ticks = __rdtsc();
+        ticks = Sys_RawTimerTicks();
         ProfLoad_BeginTrackedValueTicks(&mapLoadProfile.elements[type], ticks);
         ++mapLoadProfile.elementAccessCount[type];
         for (entry = mapLoadProfile.currentEntry; entry; entry = entry->parent)
@@ -55,7 +55,7 @@ void __cdecl ProfLoad_EndTrackedValue(MapProfileTrackedValue type)
 
     if (mapLoadProfile.isLoading && mapLoadProfile.currentEntry && Sys_IsMainThread())
     {
-        ticks = __rdtsc();
+        ticks = Sys_RawTimerTicks();
         ProfLoad_EndTrackedValueTicks(&mapLoadProfile.elements[type], ticks);
         for (entry = mapLoadProfile.currentEntry; entry; entry = entry->parent)
             ProfLoad_EndTrackedValueTicks(&entry->elements[type], ticks);
@@ -80,7 +80,7 @@ void __cdecl ProfLoad_Activate()
     iassert( mapLoadProfile.isLoading == false );
     memset((uint8_t *)&mapLoadProfile, 0, sizeof(mapLoadProfile));
     mapLoadProfile.isLoading = 1;
-    mapLoadProfile.ticksStart = __rdtsc();
+    mapLoadProfile.ticksStart = Sys_RawTimerTicks();
     mapLoadProfile.ticksFinish = mapLoadProfile.ticksStart;
     Com_Printf(12, "^6Activating map load profiler\n");
 }
@@ -88,7 +88,7 @@ void __cdecl ProfLoad_Activate()
 void __cdecl ProfLoad_Deactivate()
 {
     iassert( mapLoadProfile.isLoading == true );
-    mapLoadProfile.ticksFinish = __rdtsc();
+    mapLoadProfile.ticksFinish = Sys_RawTimerTicks();
     mapLoadProfile.isLoading = 0;
     ProfLoad_Print();
 }
@@ -335,7 +335,7 @@ void __cdecl ProfLoad_Begin(const char *label)
             v1 = 0;
         entry->indent = v1;
         mapLoadProfile.currentEntry = entry;
-        entry->ticksStart = __rdtsc();
+        entry->ticksStart = Sys_RawTimerTicks();
         entry->label = label;
     }
 }
@@ -377,7 +377,7 @@ void __cdecl ProfLoad_End()
         entry = mapLoadProfile.currentEntry;
         iassert( entry );
         iassert( entry->label );
-        mapLoadProfile.ticksFinish = __rdtsc();
+        mapLoadProfile.ticksFinish = Sys_RawTimerTicks();
         timeStepInTicks = mapLoadProfile.ticksFinish - entry->ticksStart;
         entry->ticksTotal += timeStepInTicks;
         if (!entry->parent)

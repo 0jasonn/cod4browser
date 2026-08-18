@@ -12,6 +12,7 @@
 #include "g_local.h"
 #include "actor_team_move.h"
 #include "actor_events.h"
+#include <universal/com_math.h>
 
 void __cdecl Actor_Exposed_CheckLockGoal(actor_s *self)
 {

@@ -7,7 +7,7 @@
 
 namespace kisak::web
 {
-inline constexpr std::size_t QCOMMON_STARTUP_FILE_COUNT = 26u;
+inline constexpr std::size_t QCOMMON_STARTUP_FILE_COUNT = 25u;
 inline constexpr std::uint32_t QCOMMON_STARTUP_ARENA_BYTES = 256u * 1024u;
 inline constexpr std::uint32_t QCOMMON_EVENT_CAPACITY = 64u;
 inline constexpr std::uint32_t QCOMMON_COMMAND_DVAR_COUNT = 5u;

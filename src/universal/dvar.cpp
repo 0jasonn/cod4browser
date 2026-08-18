@@ -2978,7 +2978,7 @@ int __cdecl Com_LoadDvarsFromBuffer(const char **dvarnames, uint32_t numDvars, c
 #endif
 
 
-#if defined(KISAK_SP) && !defined(KISAK_GATE3_COM_INIT_PREFIX)
+#if defined(KISAK_SP) && (!defined(KISAK_GATE3_COM_INIT_PREFIX) || defined(KISAK_RUNTIME_MAP_DB_BOUNDARY))
 void Dvar_SaveDvars(MemoryFile *memFile, uint16_t filter)
 {
     InterlockedIncrement(&g_dvarCritSect.readCount);

@@ -8,9 +8,10 @@
 #include <qcommon/msg.h>
 #include <universal/memfile.h>
 #endif
-#include <gfx_d3d/r_debug.h>
+#include <gfx_d3d/r_debug_types.h>
 
 struct snd_alias_t;
+struct refdef_s;
 
 #ifdef KISAK_SP
 

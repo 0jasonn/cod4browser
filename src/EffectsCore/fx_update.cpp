@@ -16,7 +16,7 @@
 
 #include <physics/phys_local.h>
 
-#include <win32/win_local.h>
+#include <qcommon/system.h>
 #include <aim_assist/aim_assist.h>
 
 #include <universal/profile.h>

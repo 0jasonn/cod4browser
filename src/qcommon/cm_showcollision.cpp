@@ -3,9 +3,6 @@
 #include "mem_track.h"
 #include <xanim/xanim.h>
 
-#include <Windows.h>
-
-
 uint8_t windingPool[12292];
 
 void __cdecl TRACK_cm_showcollision()
@@ -663,12 +660,7 @@ BOOL __cdecl BoxOnPlaneSide(const float *emins, const float *emaxs, const cplane
         if (!alwaysfails)
             MyAssertHandler(".\\universal\\com_math.cpp", 3473, 1, "BoxOnPlaneSide: invalid signbits for plane");
 
-        __debugbreak();
-        __debugbreak();
-        __debugbreak();
-        __debugbreak();
-        __debugbreak();
-        break;
+        return 0;
     }
     
     return (2 * (v4 < p->dist)) | (v3 > p->dist); // KISAKTODO: probably BoxDistSqrdExceeds()

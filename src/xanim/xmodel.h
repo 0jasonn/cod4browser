@@ -1,6 +1,5 @@
 #pragma once
 #include <universal/com_math.h>
-#include <gfx_d3d/r_material.h>
 #include <xanim/xmodel_types.h>
 //#include <physics/phys_local.h>
 

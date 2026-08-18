@@ -1,7 +1,6 @@
 #include <universal/q_shared.h>
 #include "bg_public.h"
 #include "bg_local.h"
-#include <aim_assist/aim_assist.h>
 #include <xanim/xanim.h>
 
 

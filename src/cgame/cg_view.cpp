@@ -13,10 +13,10 @@
 #include "cg_ents.h"
 #include "cg_draw.h"
 #include <qcommon/threads.h>
-#include <gfx_d3d/r_cinematic.h>
-#include <gfx_d3d/r_workercmds_common.h>
+#include <gfx_d3d/r_cinematic_api.h>
+#include <gfx_d3d/r_client_api.h>
+#include <gfx_d3d/r_cgame_api.h>
 #include <aim_assist/aim_assist.h>
-#include <gfx_d3d/r_dpvs.h>
 #include "cg_predict.h"
 #include "cg_modelpreviewer.h"
 #include <client/cl_input.h>
@@ -24,6 +24,7 @@
 #include "cg_snapshot.h"
 #include <client/cl_scrn.h>
 #include <universal/profile.h>
+#include <sound/snd_public.h>
 #include <game/g_main.h>
 
 ClientViewParams clientViewParamsArray[1][1] = { { { 0.0, 0.0, 1.0, 1.0 } } };

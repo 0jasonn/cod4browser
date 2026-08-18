@@ -1,5 +1,10 @@
 #pragma once
 
+#define MAX_WEAPONS 128
+#define ITEM_WEAPMODEL(x) (MAX_WEAPONS * ((x) / MAX_WEAPONS))
+
+#include <script/scr_animtree_runtime.h>
+
 #ifdef KISAK_MP
 #include <qcommon/msg_mp.h>
 #elif KISAK_SP
@@ -433,16 +438,6 @@ struct animScript_t // sizeof=0x204
     animScriptItem_t* items[128];
 };
 static_assert(sizeof(animScript_t) == 0x204);
-
-struct scr_animtree_t // sizeof=0x4
-{                                       // ...
-    scr_animtree_t()
-    {
-        anims = NULL;
-    }
-    XAnim_s* anims;                     // ...
-};
-static_assert(sizeof(scr_animtree_t) == 0x4);
 
 struct __declspec(align(8)) animScriptData_t // sizeof=0x9A9D0
 {                                       // ...
@@ -2336,6 +2331,7 @@ void __cdecl BG_CalculateWeaponPosition_Sway(
 int32_t __cdecl BG_PlayerWeaponCountPrimaryTypes(const playerState_s *ps);
 bool __cdecl BG_PlayerWeaponsFull_Primaries(const playerState_s *ps);
 char __cdecl BG_PlayerHasCompatibleWeapon(const playerState_s *ps, uint32_t weaponIndex);
+int __cdecl BG_PlayerHasWeapon(const playerState_s *ps, int weaponIndex);
 bool __cdecl BG_ThrowingBackGrenade(const playerState_s *ps);
 WeaponDef *__cdecl BG_LoadWeaponDef(const char *name);
 WeaponDef *__cdecl BG_LoadWeaponDef_FastFile(const char *name);

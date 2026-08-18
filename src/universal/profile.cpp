@@ -4,7 +4,17 @@
 #include <qcommon/threads.h>
 #include "timing.h"
 
+#if defined(KISAK_WEB)
+#include <emscripten/emscripten.h>
+struct LARGE_INTEGER { long long QuadPart; };
+using _LARGE_INTEGER = LARGE_INTEGER;
+static inline void QueryPerformanceCounter(LARGE_INTEGER *value)
+{
+    value->QuadPart = static_cast<long long>(emscripten_get_now() * 1000.0);
+}
+#else
 #include <Windows.h>
+#endif
 
 ProfileScript profileScript;
 int g_profileStack[256];

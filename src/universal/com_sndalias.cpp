@@ -2,13 +2,17 @@
 #include "com_sndalias.h"
 #include "com_memory.h"
 #include <devgui/devgui.h>
-#include <sound/snd_local.h>
+#include <sound/snd_public.h>
 #include "com_files.h"
 #include <qcommon/cmd.h>
 #include <database/database.h>
+#include <xanim/xmodel.h>
 #include "q_parse.h"
 
 SoundAliasGlobals g_sa;
+
+bool __cdecl SND_IsMultiChannel();
+int __cdecl SND_GetSoundFileSize(uint32_t *pSoundFile);
 
 char __cdecl Com_LoadVolumeFalloffCurve(const char *name, SndCurve *curve)
 {

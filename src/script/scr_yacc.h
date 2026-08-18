@@ -1,7 +1,12 @@
 #pragma once
 #include "scr_stringlist.h"
 #include <cstdio> // FILE
+
+#if defined(_WIN32) && !defined(KISAK_WEB)
 #include <Windows.h>
+#else
+using LPVOID = void *;
+#endif
 
 // LWSS: this enum name is kinda retarded
 enum Enum_t : __int32

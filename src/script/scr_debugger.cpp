@@ -17,9 +17,17 @@
 #include <win32/win_net_debug.h>
 #include "scr_evaluate.h"
 #include <client/client.h>
+#ifdef KISAK_WEB
+#include <client/input_runtime_api.h>
+#else
 #include <win32/win_input.h>
+#endif
 #include <qcommon/threads.h>
+#ifdef KISAK_WEB
+#include <gfx_d3d/r_debugger_api.h>
+#else
 #include <gfx_d3d/r_rendercmds.h>
+#endif
 #include <qcommon/cmd.h>
 #include <win32/win_net.h>
 #include "scr_compiler.h"
@@ -477,7 +485,7 @@ void __cdecl Scr_KeyEvent(int key)
     float v3; // [esp+1Ch] [ebp-18h]
     float v4; // [esp+20h] [ebp-14h]
     UI_VerticalDivider *comp; // [esp+24h] [ebp-10h]
-    DWORD newMouseTime; // [esp+28h] [ebp-Ch]
+    uint32_t newMouseTime; // [esp+28h] [ebp-Ch]
     float point[2]; // [esp+2Ch] [ebp-8h] BYREF
 
     if (!scrDebuggerGlob.debugger_inited_system)

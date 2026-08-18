@@ -12,7 +12,8 @@
 #include <universal/surfaceflags.h>
 #include <database/database.h>
 #include "cg_servercmds.h"
-#include <gfx_d3d/r_model.h>
+#include <gfx_d3d/r_cgame_api.h>
+#include <gfx_d3d/r_statistics.h>
 #include <EffectsCore/fx_system.h>
 #include <ragdoll/ragdoll.h>
 #include "cg_consolecmds.h"
@@ -21,6 +22,7 @@
 #include "cg_modelpreviewer.h"
 #include <game/g_local.h>
 #include <client/cl_scrn.h>
+#include <physics/phys_preset.h>
 
 UiContext cgDC;
 

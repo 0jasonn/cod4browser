@@ -23,6 +23,7 @@
 #include <gfx_d3d/r_bsp.h>
 #include <stringed/stringed_hooks.h>
 #include <qcommon/cmd.h>
+#include <qcommon/engine_lifecycle_trace.h>
 #include <universal/physicalmemory.h>
 #include <gfx_d3d/rb_shade.h>
 #include <gfx_d3d/r_staticmodelcache.h>
@@ -2018,6 +2019,13 @@ void __cdecl DB_LoadXAssets(XZoneInfo *zoneInfo, uint32_t zoneCount, int32_t syn
     int32_t i; // [esp+10h] [ebp-8h]
     int32_t zoneFreeFlags; // [esp+14h] [ebp-4h]
 
+    EmitEngineLifecycleTrace(
+        EngineLifecycleStage::DatabaseLoadAssets,
+        zoneInfo && zoneCount ? zoneInfo[0].name : nullptr,
+        zoneCount,
+        zoneInfo && zoneCount ? zoneInfo[0].allocFlags : 0,
+        zoneInfo && zoneCount ? zoneInfo[0].freeFlags : 0,
+        sync);
     iassert(Sys_IsMainThread());
     iassert(zoneCount);
 
@@ -2103,6 +2111,12 @@ void __cdecl DB_LoadXZone(XZoneInfo *zoneInfo, uint32_t zoneCount)
         zoneName = (char *)zoneInfo[j].name;
         if (zoneName)
         {
+            EmitEngineLifecycleTrace(
+                EngineLifecycleStage::DatabaseLoadZone,
+                zoneName,
+                zoneCount,
+                zoneInfo[j].allocFlags,
+                zoneInfo[j].freeFlags);
             if (zoneInfoCount >= 8)
                 MyAssertHandler(".\\database\\db_registry.cpp", 3249, 0, "%s", "zoneInfoCount < ARRAY_COUNT( g_zoneInfo )");
             I_strncpyz(g_zoneInfo[zoneInfoCount].name, zoneName, 64);
@@ -2421,6 +2435,11 @@ int32_t __cdecl DB_TryLoadXFileInternal(char *zoneName, int32_t zoneFlags)
     uint32_t i; // [esp+114h] [ebp-8h]
     void *zoneFile; // [esp+118h] [ebp-4h]
 
+    EmitEngineLifecycleTrace(
+        EngineLifecycleStage::LogicalFastfileRequest,
+        zoneName,
+        1,
+        zoneFlags);
     Com_Printf(0, "Trying to load file %s with flags %x\n", zoneName, zoneFlags);
 
     modZone = 0;

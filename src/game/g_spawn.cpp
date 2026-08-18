@@ -11,7 +11,6 @@
 #include "g_save.h"
 #include <script/scr_const.h>
 #include <server/sv_public.h>
-#include <cgame/cg_local.h>
 #include "actor_grenade.h"
 #include "turret.h"
 #include "g_vehicle_path.h"

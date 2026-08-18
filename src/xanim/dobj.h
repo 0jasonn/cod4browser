@@ -1,4 +1,5 @@
 #pragma once
+#include <xanim/dobj_runtime_init.h>
 #include <ode/ode.h>
 #include <qcommon/bitarray.h>
 #include <cstdint>
@@ -82,7 +83,6 @@ struct DObjModel_s // sizeof=0x8
     // padding byte
 };
 
-void __cdecl DObjInit();
 void __cdecl DObjShutdown();
 void __cdecl DObjDumpInfo(const DObj_s *obj);
 bool __cdecl DObjIgnoreCollision(const DObj_s *obj, char modelIndex);

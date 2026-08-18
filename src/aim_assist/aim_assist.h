@@ -1,29 +1,11 @@
 #pragma once
+#include "aim_target_types.h"
 #include <cgame/cg_local.h>
 #include <qcommon/graph.h>
 #include <cstdint>
 
 #define EF_AIM_ASSIST 0x800
 #define SOLID_BMODEL 0xFFFFFF
-
-struct AimTarget // sizeof=0x2C
-{                                       // ...
-    int32_t entIndex;
-    float worldDistSqr;
-    float mins[3];
-    float maxs[3];
-    float velocity[3];
-};
-static_assert(sizeof(AimTarget) == 0x2C);
-
-struct AimTargetGlob // sizeof=0x1608
-{                                       // ...
-    AimTarget targets[64];
-    int32_t targetCount;
-    AimTarget clientTargets[64];
-    int32_t clientTargetCount;
-};
-static_assert(sizeof(AimTargetGlob) == 0x1608);
 
 struct AimTweakables // sizeof=0x20
 {                                       // ...

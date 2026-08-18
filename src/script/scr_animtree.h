@@ -1,23 +1,7 @@
 #pragma once
+#include "scr_animtree_runtime.h"
 #include <xanim/xanim.h>
 #include <bgame/bg_local.h>
-
-#define MAX_XANIMTREE_NUM       0x80 // 128
-
-struct scrAnimPub_t // sizeof=0x41C
-{                                       // ...
-    uint32_t animtrees;             // ...
-    uint32_t animtree_node;         // ...
-    uint32_t animTreeNames;         // ...
-    scr_animtree_t xanim_lookup[2][MAX_XANIMTREE_NUM]; // ...
-    uint32_t xanim_num[2];          // ...
-    uint32_t animTreeIndex;         // ...
-    bool animtree_loading;              // ...
-    // padding byte
-    // padding byte
-    // padding byte
-};
-static_assert(sizeof(scrAnimPub_t) == 0x41C);
 
 struct scrAnimGlob_t // sizeof=0x20C
 {                                       // ...
@@ -67,5 +51,3 @@ bool __cdecl AnimTreeParseInternal(
 int __cdecl GetAnimTreeParseProperties();
 scr_animtree_t __cdecl Scr_FindAnimTree(const char *filename);
 void __cdecl Scr_FindAnim(const char *filename, const char *animName, scr_anim_s *anim, int user);
-
-extern scrAnimPub_t scrAnimPub;

@@ -1,7 +1,11 @@
 #include <universal/q_shared.h>
 #include "client.h"
 #include <sound/snd_public.h>
+#if defined(KISAK_WEB)
+#include <gfx_d3d/r_cinematic_api.h>
+#else
 #include <gfx_d3d/r_cinematic.h>
+#endif
 #include <qcommon/cmd.h>
 #ifdef KISAK_MP
 #include <client_mp/client_mp.h>

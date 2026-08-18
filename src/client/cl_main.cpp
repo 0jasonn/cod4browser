@@ -4,22 +4,25 @@
 
 #include <universal/q_shared.h>
 #include "client.h"
+#include "cl_fastfile_config.h"
 #include <game/g_local.h>
 #include "cl_ui.h"
 #include <qcommon/cmd.h>
 #include <devgui/devgui.h>
-#include <win32/win_local.h>
+#include <qcommon/system.h>
 #include <server/sv_public.h>
 #include <universal/com_files.h>
 #include <universal/q_parse.h>
 #include <database/database.h>
 #include <ui/ui.h>
 #include <qcommon/threads.h>
+#include <qcommon/loading_keepalive.h>
 #include <cgame/cg_snapshot.h>
 #include "cl_parse.h"
 #include "cl_demo.h"
-#include <gfx_d3d/r_init.h>
-#include <gfx_d3d/r_cinematic.h>
+#include <gfx_d3d/r_runtime_api.h>
+#include <gfx_d3d/r_cinematic_api.h>
+#include <gfx_d3d/r_configuration.h>
 #include <stringed/stringed_hooks.h>
 #include "cl_input.h"
 #include <cgame/cg_main.h>
@@ -27,7 +30,7 @@
 #include "cl_scrn.h"
 #include <qcommon/com_bsp.h>
 #include <universal/profile.h>
-#include <sound/snd_local.h>
+#include <sound/snd_public.h>
 #include <server/server.h>
 
 enum MovieToPlayScriptOp : __int32
@@ -84,42 +87,6 @@ const MovieToPlayScriptOpInfo s_movieToPlayScriptOpInfo[18] =
 };
 
 
-clientConnection_t clientConnections[1];
-clientUIActive_t clientUIActives[1];
-clientActive_t clients[1];
-clientStatic_t cls;
-
-const dvar_t *input_invertPitch;
-const dvar_t *cl_avidemo;
-const dvar_t *cl_testAnimWeight;
-const dvar_t *cl_freemoveScale;
-#ifdef KISAK_MP
-const dvar_t *motd;
-#endif
-const dvar_t *cl_sensitivity;
-const dvar_t *cl_forceavidemo;
-const dvar_t *m_yaw;
-const dvar_t *m_pitch;
-const dvar_t *nextdemo;
-const dvar_t *cl_freemove;
-const dvar_t *cl_showMouseRate;
-const dvar_t *takeCoverWarnings;
-const dvar_t *m_forward;
-const dvar_t *cheat_items_set2;
-const dvar_t *cl_mouseAccel;
-const dvar_t *cheat_points;
-const dvar_t *input_viewSensitivity;
-const dvar_t *input_autoAim;
-const dvar_t *cl_inGameVideo;
-const dvar_t *cl_noprint;
-const dvar_t *m_side;
-const dvar_t *m_filter;
-const dvar_t *cheat_items_set1;
-const dvar_t *cl_freelook;
-const dvar_t *cl_shownet;
-
-const dvar_s *arcadeScore[19]{ 0 };
-
 void __cdecl TRACK_cl_main()
 {
     track_static_alloc_internal(clientUIActives, 20, "clientUIActives", 9);
@@ -165,19 +132,6 @@ int __cdecl CL_LocalClientNumFromControllerIndex(unsigned int controllerIndex)
             controllerIndex,
             cl_controller_in_use);
     return 0;
-}
-
-int __cdecl CL_ControllerIndexFromClientNum(int clientIndex)
-{
-    if (clientIndex)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\client\\cl_main.cpp",
-            230,
-            0,
-            "clientIndex doesn't index STATIC_MAX_LOCAL_CLIENTS\n\t%i not in [0, %i)",
-            clientIndex,
-            1);
-    return cl_controller_in_use;
 }
 
 int __cdecl CL_GetFirstActiveControllerIndex()
@@ -1062,18 +1016,6 @@ static void SetupGfxConfig(GfxConfiguration *config)
 }
 
 
-static void CL_SetFastFileNames(GfxConfiguration *config, bool dedicatedServer)
-{
-    iassert(config);
-
-    config->codeFastFileName = "code_post_gfx";
-    config->uiFastFileName = "ui";
-    config->commonFastFileName = "common";
-    config->localizedCodeFastFileName = NULL;
-    config->localizedCommonFastFileName = NULL;
-    config->modFastFileName = DB_ModFileExists() != 0 ? "mod" : NULL;
-}
-
 void __cdecl CL_InitRef()
 {
     GfxConfiguration config; // [sp+50h] [-20h] BYREF
@@ -1765,170 +1707,6 @@ void __cdecl CL_DrawLogo()
 }
 
 
-cmd_function_s CL_ForwardToServer_f_VAR;
-cmd_function_s CL_Disconnect_f_VAR;
-cmd_function_s CL_Disconnect_f_VAR_SERVER;
-cmd_function_s CL_Vid_Restart_f_VAR;
-cmd_function_s CL_Vid_Restart_f_VAR_SERVER;
-cmd_function_s CL_Snd_Restart_f_VAR;
-cmd_function_s CL_Snd_Restart_f_VAR_SERVER;
-cmd_function_s CL_PlayDemo_f_VAR_0;
-cmd_function_s CL_PlayDemo_f_VAR_SERVER_0;
-cmd_function_s CL_PlayDemo_f_VAR;
-cmd_function_s CL_PlayDemo_f_VAR_SERVER;
-cmd_function_s CL_Record_f_VAR;
-cmd_function_s CL_StopRecord_f_VAR;
-cmd_function_s CL_PlayLogo_f_VAR;
-cmd_function_s CL_PlayCinematic_f_VAR;
-cmd_function_s CL_PlayUnskippableCinematic_f_VAR;
-cmd_function_s CL_Pause_f_VAR;
-cmd_function_s CL_VoidCommand_VAR;
-cmd_function_s CL_startMultiplayer_f_VAR;
-cmd_function_s CL_ShellExecute_URL_f_VAR;
-cmd_function_s CL_IncAnimWeight_f_VAR;
-cmd_function_s CL_DecAnimWeight_f_VAR;
-cmd_function_s XModelDumpInfo_VAR;
-cmd_function_s CL_StopControllerRumbles_VAR;
-
-void __cdecl CL_Init(int localClientNum)
-{
-    int v21; // r28
-    const dvar_s **v22; // r29
-    const char *v23; // r5
-    unsigned __int16 v24; // r4
-    const char *v26; // r5
-    unsigned __int16 v27; // r4
-    char v29[80]; // [sp+70h] [-90h] BYREF
-
-    Com_Printf(14, "----- Client Initialization -----\n");
-    srand(Sys_MillisecondsRaw());
-    Con_Init();
-    if (localClientNum)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\client\\client.h",
-            576,
-            0,
-            "%s\n\t(localClientNum) = %i",
-            "(localClientNum == 0)",
-            localClientNum);
-    clientUIActives[0].connectionState = CA_DISCONNECTED;
-    //CL_ResetLastGamePadEventTime(); // KISAKTODO
-    cls.realtime = 0;
-    CL_InitInput();
-    cl_noprint = Dvar_RegisterBool("cl_noprint", 0, 0, "Print nothing to the console");
-    cl_shownet = Dvar_RegisterInt("cl_shownet", 0, -2, 4, 0, "Display network debugging information");
-    cl_avidemo = Dvar_RegisterInt("cl_avidemo", 0, 0, 0x7FFFFFFF, 0, "AVI demo frames per second");
-    cl_forceavidemo = Dvar_RegisterBool("cl_forceavidemo", 0, 0, "Record AVI demo even if client is not active");
-    cl_yawspeed = Dvar_RegisterFloat("cl_yawspeed", 140.0, -FLT_MAX, FLT_MAX, 0, "Max yaw speed in degrees for game pad and keyboard");
-    cl_pitchspeed = Dvar_RegisterFloat("cl_pitchspeed", 140.0, -FLT_MAX, FLT_MAX, 0, "Max pitch speed in degrees for game pad and keyboard");
-    cl_anglespeedkey = Dvar_RegisterFloat("cl_anglespeedkey", 1.5, 0.0, FLT_MAX, 0, "Multiplier for max angle speed for gamepad and keyboard");
-    cl_sensitivity = Dvar_RegisterFloat("sensitivity", 5.0, 0.01f, 100.0, 0, "Mouse sensitivity");
-    cl_mouseAccel = Dvar_RegisterFloat("cl_mouseAccel", 0.0, 0.0, 100.0, 0, "Mouse acceleration");
-    cl_freelook = Dvar_RegisterBool("cl_freelook", 1, DVAR_ARCHIVE, "Enable looking with mouse");
-    cl_showMouseRate = Dvar_RegisterBool(
-        "cl_showmouserate",
-        0,
-        0,
-        "Print mouse rate debugging information to the console");
-    cl_inGameVideo = Dvar_RegisterBool("r_inGameVideo", 1, 1u, "Allow in game cinematics");
-    m_pitch = Dvar_RegisterFloat("m_pitch", 0.022, -1.0, 1.0, 0, "Default pitch");
-    m_yaw = Dvar_RegisterFloat("m_yaw", 0.022, -1.0, 1.0, 0, "Default yaw");
-    m_forward = Dvar_RegisterFloat("m_forward", 0.25, -1.0, 1.0, 0, "Forward speed in units per second");
-    m_side = Dvar_RegisterFloat("m_side", 0.25, -1.0, 1.0, 0, "Sideways motion in units per second");
-    m_filter = Dvar_RegisterBool("m_filter", 0, 1u, "Allow mouse movement smoothing");
-    cg_drawCrosshair = Dvar_RegisterBool("cg_drawCrosshair", 1, 1u, "Turn on weapon crosshair");
-    cg_subtitles = Dvar_RegisterBool("cg_subtitles", 1, 1u, "Turn on subtitles");
-    takeCoverWarnings = Dvar_RegisterInt(
-        "takeCoverWarnings",
-        -1,
-        -1,
-        50,
-        0x4001u,
-        "Number of times remaining to show the take cover warning (negative value indicates it has yet to"
-        " be initialized)");
-    cheat_points = Dvar_RegisterInt(
-        "cheat_points",
-        0,
-        0,
-        0x7FFFFFFF,
-        0x4001u,
-        "Used by script for keeping track of cheats");
-    cheat_items_set1 = Dvar_RegisterInt(
-        "cheat_items_set1",
-        0,
-        0,
-        0x7FFFFFFF,
-        0x4001u,
-        "Used by script for keeping track of cheats");
-    cheat_items_set2 = Dvar_RegisterInt(
-        "cheat_items_set2",
-        0,
-        0,
-        0x7FFFFFFF,
-        0x4001u,
-        "Used by script for keeping track of cheats");
-
-    v21 = 0;
-    v22 = arcadeScore;
-    do
-    {
-        Com_sprintf(v29, 32, "s%d", v21);
-        *v22++ = Dvar_RegisterInt(v29, 0, 0, 0x7FFFFFFF, 0x4001u, "Used by script for keeping track of arcade scores");
-        ++v21;
-    } while ((int)v22 < (int)&arcadeScore[19]);
-
-    input_invertPitch = Dvar_RegisterBool("input_invertPitch", 0, 0x400u, "Invert gamepad pitch");
-    input_viewSensitivity = Dvar_RegisterFloat("input_viewSensitivity", 1.0, 0.000099999997, 5.0, 0, 0);
-    input_autoAim = Dvar_RegisterBool("input_autoAim", 1, 0x400u, "Turn on auto aim for consoles");
-#ifdef KISAK_MP
-    motd = Dvar_RegisterString("motd", SEH_SafeTranslateString((char*)"PLATFORM_NOMOTD"), 0, "Message of the day");
-#endif
-    nextmap = Dvar_RegisterString("nextmap", "", 0, "The next map name");
-    nextdemo = Dvar_RegisterString("nextdemo", "", 0, "The next demo to play");
-    Dvar_RegisterBool("cg_blood", 1, 1u, "Show blood");
-    Campaign_RegisterDvars();
-    iassert(loc_language);
-    iassert(loc_translate);
-    iassert(loc_warnings);
-    iassert(loc_warningsAsErrors);
-    Cmd_AddCommandInternal("cmd", CL_ForwardToServer_f, &CL_ForwardToServer_f_VAR);
-    Cmd_AddCommandInternal("disconnect", Cbuf_AddServerText_f, &CL_Disconnect_f_VAR);
-    Cmd_AddServerCommandInternal("disconnect", CL_Disconnect_f, &CL_Disconnect_f_VAR_SERVER);
-    Cmd_AddCommandInternal("demo", Cbuf_AddServerText_f, &CL_PlayDemo_f_VAR_0);
-    Cmd_AddServerCommandInternal("demo", CL_PlayDemo_f, &CL_PlayDemo_f_VAR_SERVER_0);
-    Cmd_AddCommandInternal("timedemo", Cbuf_AddServerText_f, &CL_PlayDemo_f_VAR);
-    Cmd_AddServerCommandInternal("timedemo", CL_PlayDemo_f, &CL_PlayDemo_f_VAR_SERVER);
-	Cmd_AddCommandInternal("vid_restart", Cbuf_AddServerText_f, &CL_Vid_Restart_f_VAR);
-	Cmd_AddServerCommandInternal("vid_restart", CL_Vid_Restart_f, &CL_Vid_Restart_f_VAR_SERVER);
-	Cmd_AddCommandInternal("snd_restart", Cbuf_AddServerText_f, &CL_Snd_Restart_f_VAR);
-	Cmd_AddServerCommandInternal("snd_restart", CL_Snd_Restart_f, &CL_Snd_Restart_f_VAR_SERVER);
-    Cmd_SetAutoComplete("demo", "demos", "spd");
-    Cmd_SetAutoComplete("timedemo", "demos", "spd");
-    Cmd_AddCommandInternal("record", CL_Record_f, &CL_Record_f_VAR);
-    Cmd_AddCommandInternal("stoprecord", CL_StopRecord_f, &CL_StopRecord_f_VAR);
-    Cmd_AddCommandInternal("logo", CL_PlayLogo_f, &CL_PlayLogo_f_VAR);
-    Cmd_AddCommandInternal("cinematic", CL_PlayCinematic_f, &CL_PlayCinematic_f_VAR);
-    Cmd_AddCommandInternal("unskippablecinematic", CL_PlayUnskippableCinematic_f, &CL_PlayUnskippableCinematic_f_VAR);
-    Cmd_SetAutoComplete("cinematic", "video", "wmv");
-    Cmd_AddCommandInternal("pause", CL_Pause_f, &CL_Pause_f_VAR);
-    Cmd_AddCommandInternal("sl", CL_VoidCommand, &CL_VoidCommand_VAR);
-    Cmd_AddCommandInternal("startMultiplayer", CL_startMultiplayer_f, &CL_startMultiplayer_f_VAR);
-    Cmd_AddCommandInternal("shellExecute", CL_ShellExecute_URL_f, &CL_ShellExecute_URL_f_VAR);
-    Cmd_AddCommandInternal("+incAnimWeight", (void(__cdecl *)())CL_IncAnimWeight_f, &CL_IncAnimWeight_f_VAR);
-    Cmd_AddCommandInternal("+decAnimWeight", (void(__cdecl *)())CL_DecAnimWeight_f, &CL_DecAnimWeight_f_VAR);
-    cl_testAnimWeight = Dvar_RegisterFloat("cl_testAnimWeight", 0.0, 0.0, 1.0, 0, "test animation weighting");
-    Cmd_AddCommandInternal("modelDumpInfo", XModelDumpInfo, &XModelDumpInfo_VAR);
-    //CL_Xenon_RegisterDvars();
-    //CL_Xenon_RegisterCommands();
-    Cmd_AddCommandInternal("stopControllerRumble", CL_StopControllerRumbles, &CL_StopControllerRumbles_VAR);
-    Com_Printf(14, "----- Initializing Renderer ----\n");
-
-    CL_InitRef();
-
-    SCR_Init();
-    Cbuf_Execute(0, cl_controller_in_use);
-    clientUIActives[0].isRunning = 1;
-    clients[0].usingAds = 0;
-    Com_Printf(14, "----- Client Initialization Complete -----\n");
-}
+// CL_Init and its state now live in cl_initialization.cpp so the canonical
+// initialization path can compile without this file's D3D/native include graph.
 

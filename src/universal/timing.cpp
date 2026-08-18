@@ -1,7 +1,11 @@
 #include <universal/q_shared.h>
 #include "timing.h"
 
+#if defined(KISAK_WEB)
+#include <emscripten/emscripten.h>
+#else
 #include <Windows.h>
+#endif
 #include <qcommon/threads.h>
 
 long double msecPerRawTimerTick;
@@ -9,6 +13,12 @@ double qpc2msec;
 
 double __cdecl SecondsPerTick()
 {
+#if defined(KISAK_WEB)
+    // Sys_MillisecondsRaw is an engine millisecond tick on the browser
+    // platform, rather than a CPU cycle counter.
+    qpc2msec = 1.0;
+    return 0.001;
+#else
     _LARGE_INTEGER tscStop; // [esp+20h] [ebp-30h]
     _LARGE_INTEGER qpcFrequency; // [esp+28h] [ebp-28h] BYREF
     _LARGE_INTEGER qpcStart; // [esp+30h] [ebp-20h] BYREF
@@ -34,6 +44,7 @@ double __cdecl SecondsPerTick()
             * (double)qpcFrequency.QuadPart);
     Win_SetThreadLock(THREAD_LOCK_NONE);
     return secPerTick;
+#endif
 }
 
 void __cdecl InitTiming()

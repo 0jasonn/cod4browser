@@ -7,15 +7,15 @@
 #include <universal/q_shared.h>
 #include "ui.h"
 #include <client/client.h>
-#include <win32/win_local.h>
+#include <qcommon/system.h>
 #include <qcommon/cmd.h>
 #include <game/savedevice.h>
-#include <gfx_d3d/r_cinematic.h>
+#include <gfx_d3d/r_cinematic_api.h>
+#include <gfx_d3d/r_client_api.h>
 #include <stringed/stringed_hooks.h>
 #include <client/cl_demo.h>
 #include <cgame/cg_newdraw.h>
 #include <game/savememory.h>
-#include <gfx_d3d/r_init.h>
 #include <universal/profile.h>
 #include <client/cl_scrn.h>
 #include <client/cl_input.h>
@@ -732,8 +732,13 @@ void __cdecl UI_DrawSaveGameName(int localClientNum, rectDef_s *rect, Font_s *fo
 void __cdecl UI_DrawGLInfo(int localClientNum, rectDef_s *rect, Font_s *font, float scale, float *color, int textStyle)
 {
 	char info[1024];
+	char gpu[512];
+	char cpuVendor[13];
+	char cpuName[256];
 
-    Com_sprintf(info, sizeof(info), "Video: %ux%u @ %.0fHz\nGPU: %s\nCPU: %s %s", cls.vidConfig.displayWidth, cls.vidConfig.displayHeight, cls.vidConfig.displayFrequency, sys_info.gpuDescription, sys_info.cpuVendor, sys_info.cpuName);
+    Sys_GetHardwareDescription(gpu, sizeof(gpu), cpuVendor, sizeof(cpuVendor),
+        cpuName, sizeof(cpuName));
+    Com_sprintf(info, sizeof(info), "Video: %ux%u @ %.0fHz\nGPU: %s\nCPU: %s %s", cls.vidConfig.displayWidth, cls.vidConfig.displayHeight, cls.vidConfig.displayFrequency, gpu, cpuVendor, cpuName);
     UI_DrawWrappedText(&scrPlaceView[localClientNum], info, rect, font, rect->x, rect->y, scale, color, textStyle, 0, NULL);
 }
 

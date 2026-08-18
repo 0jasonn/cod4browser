@@ -8,7 +8,6 @@
 #include <xanim/xanim.h>
 #include "g_scr_main.h"
 #include "g_local.h"
-#include <cgame/cg_local.h>
 #include <script/scr_const.h>
 #include "sentient.h"
 #include "g_main.h"

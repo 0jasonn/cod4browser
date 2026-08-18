@@ -1,50 +1,8 @@
 #pragma once
 
+#include "r_debug_types.h"
 #include "r_gfx.h"
-
-struct trDebugString_t // sizeof=0x80
-{
-    float xyz[3];
-    float color[4];
-    float scale;
-    char text[96];
-};
-
-struct clientDebugStringInfo_t // sizeof=0x10
-{                                       // ...
-    int max;                            // ...
-    int num;                            // ...
-    trDebugString_t* strings;           // ...
-    int* durations;                     // ...
-};
-
-struct trDebugLine_t // sizeof=0x2C
-{
-    float start[3];
-    float end[3];
-    float color[4];
-    int depthTest;
-};
-
-struct clientDebugLineInfo_t // sizeof=0x10
-{                                       // ...
-    int max;                            // ...
-    int num;                            // ...
-    trDebugLine_t* lines;               // ...
-    int* durations;                     // ...
-};
-
-struct clientDebug_t // sizeof=0x68
-{                                       // ...
-    int prevFromServer;
-    int fromServer;                     // ...
-    clientDebugStringInfo_t clStrings;  // ...
-    clientDebugStringInfo_t svStringsBuffer; // ...
-    clientDebugStringInfo_t svStrings;  // ...
-    clientDebugLineInfo_t clLines;      // ...
-    clientDebugLineInfo_t svLinesBuffer; // ...
-    clientDebugLineInfo_t svLines;      // ...
-};
+#include "r_warning_types.h"
 
 struct GfxDebugPoly // sizeof=0x18
 {
@@ -85,52 +43,6 @@ struct DebugGlobals // sizeof=0x54
     GfxDebugPlume* plumes;              // ...
     int plumeCount;                     // ...
     int plumeLimit;                     // ...
-};
-
-enum GfxWarningType : __int32
-{                                       // ...
-    R_WARN_FRONTEND_ENT_LIMIT = 0x0,
-    R_WARN_KNOWN_MODELS = 0x1,
-    R_WARN_KNOWN_SPECIAL_MODELS = 0x2,
-    R_WARN_MODEL_LIGHT_CACHE = 0x3,
-    R_WARN_SCENE_ENTITIES = 0x4,
-    R_WARN_TEMP_SKIN_BUF_SIZE = 0x5,
-    R_WARN_MAX_SKINNED_CACHE_VERTICES = 0x6,
-    R_WARN_MAX_SCENE_SURFS_SIZE = 0x7,
-    R_WARN_PORTAL_PLANES = 0x8,
-    R_WARN_MAX_CLOUDS = 0x9,
-    R_WARN_MAX_DLIGHTS = 0xA,
-    R_WARN_SMODEL_LIGHTING = 0xB,
-    R_WARN_MAX_DRAWSURFS = 0xC,
-    R_WARN_GFX_CODE_MESH_LIMIT = 0xD,
-    R_WARN_GFX_MARK_MESH_LIMIT = 0xE,
-    R_WARN_MAX_SCENE_DRAWSURFS = 0xF,
-    R_WARN_MAX_FX_DRAWSURFS = 0x10,
-    R_WARN_NONEMISSIVE_FX_MATERIAL = 0x11,
-    R_WARN_NONLIGHTMAP_MARK_MATERIAL = 0x12,
-    R_WARN_PRIM_DRAW_SURF_BUFFER_SIZE = 0x13,
-    R_WARN_CMDBUF_OVERFLOW = 0x14,
-    R_WARN_MISSING_DECL_NONDEBUG = 0x15,
-    R_WARN_MAX_DYNENT_REFS = 0x16,
-    R_WARN_MAX_SCENE_DOBJ_REFS = 0x17,
-    R_WARN_MAX_SCENE_MODEL_REFS = 0x18,
-    R_WARN_MAX_SCENE_BRUSH_REFS = 0x19,
-    R_WARN_MAX_CODE_INDS = 0x1A,
-    R_WARN_MAX_CODE_VERTS = 0x1B,
-    R_WARN_MAX_CODE_ARGS = 0x1C,
-    R_WARN_MAX_MARK_INDS = 0x1D,
-    R_WARN_MAX_MARK_VERTS = 0x1E,
-    R_WARN_DEBUG_ALLOC = 0x1F,
-    R_WARN_SPOT_LIGHT_LIMIT = 0x20,
-    R_WARN_FX_ELEM_LIMIT = 0x21,
-    R_WARN_WORKER_CMD_SIZE = 0x22,
-    R_WARN_UNKNOWN_STATICMODEL_SHADER = 0x23,
-    R_WARN_UNKNOWN_XMODEL_SHADER = 0x24,
-    R_WARN_DYNAMIC_INDEX_BUFFER_SIZE = 0x25,
-    R_WARN_TOO_MANY_LIGHT_GRID_POINTS = 0x26,
-    R_WARN_FOGABLE_2DTEXT = 0x27,
-    R_WARN_FOGABLE_2DGLYPH = 0x28,
-    R_WARN_COUNT = 0x29,
 };
 
 void __cdecl TRACK_r_debug();

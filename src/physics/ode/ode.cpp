@@ -1429,7 +1429,7 @@ extern "C" void dTestDataStructures()
 #include "odeext.h"
 
 #include <universal/pool_allocator.h>
-#include <win32/win_local.h>
+#include <qcommon/system.h>
 
 #include <string>
 

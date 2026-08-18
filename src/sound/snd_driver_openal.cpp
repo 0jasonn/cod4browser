@@ -5,7 +5,7 @@
 #include "snd_public.h"
 #include <qcommon/qcommon.h>
 #include <universal/com_files.h>
-#include <gfx_d3d/r_cinematic.h>
+#include <gfx_d3d/r_cinematic_api.h>
 #include <universal/com_sndalias.h>
 #include <universal/profile.h>
 
@@ -17,7 +17,9 @@
 
 #include <dr_libs/dr_wav.h>
 #include <dr_libs/dr_mp3.h>
+#if !defined(KISAK_WEB)
 #include <AL/efx-presets.h>
+#endif
 #include <fstream>
 
 AlLocal alGlob;
@@ -484,7 +486,7 @@ int __cdecl SND_StartAlias2DSample(SndStartAliasInfo *startAliasInfo, int *pChan
         }
         else if ((startAliasInfo->alias0->flags & 0x20) != 0)
         {
-            start_msec = SnapFloatToInt(random() * (float)total_msec) & 0xFFFFFF80;
+            start_msec = SnapFloatToInt(Q_random() * (float)total_msec) & 0xFFFFFF80;
         }
         else
         {
@@ -607,7 +609,7 @@ int __cdecl SND_StartAlias3DSample(SndStartAliasInfo *startAliasInfo, int *pChan
         }
         else if ((startAliasInfo->alias0->flags & 0x20) != 0)
         {
-            start_msec = SnapFloatToInt(random() * (float)total_msec) & 0xFFFFFF80;
+            start_msec = SnapFloatToInt(Q_random() * (float)total_msec) & 0xFFFFFF80;
         }
         else
         {
@@ -795,7 +797,7 @@ int __cdecl SND_StartAliasStreamOnChannel(SndStartAliasInfo *startAliasInfo, int
         }
         else if ((startAliasInfo->alias0->flags & 0x20) != 0)
         {
-            start_msec = SnapFloatToInt(random() * (float)total_msec) & 0xFFFFFF80;
+            start_msec = SnapFloatToInt(Q_random() * (float)total_msec) & 0xFFFFFF80;
         }
         else
         {
@@ -861,6 +863,7 @@ int __cdecl SND_StartAliasStreamOnChannel(SndStartAliasInfo *startAliasInfo, int
 // as these - verified name-for-name, not assumed - so this is a mechanical 1:1 copy, not a
 // design decision. SND_RoomtypeFromString (snd.cpp) maps a string to an index into this
 // same list, so the two arrays must stay in lockstep.
+#if !defined(KISAK_WEB)
 static const EFXEAXREVERBPROPERTIES AL_RoomPresets[26] =
 {
     EFX_REVERB_PRESET_GENERIC,
@@ -917,6 +920,7 @@ static void AL_ApplyReverbPreset(ALuint effect, const EFXEAXREVERBPROPERTIES &pr
     alEffectf(effect, AL_EAXREVERB_ROOM_ROLLOFF_FACTOR, props.flRoomRolloffFactor);
     alEffecti(effect, AL_EAXREVERB_DECAY_HFLIMIT, props.iDecayHFLimit);
 }
+#endif
 
 // Sets the per-channel wet-send *gain* (AL_AUXILIARY_SEND_FILTER has no gain parameter of
 // its own - see AlLocal::sendFilter's comment in snd_local.h for why a lowpass filter is
@@ -926,17 +930,26 @@ static void AL_ApplyReverbPreset(ALuint effect, const EFXEAXREVERBPROPERTIES &pr
 // at its default (unfiltered, full AL_GAIN) which already matches "dry always 1.0".
 void SND_ApplyReverbSend(int index, const snd_alias_t *alias)
 {
+#if defined(KISAK_WEB)
+    (void)index;
+    (void)alias;
+#else
     float wet = MSS_GetWetLevel(alias);
     alFilterf(alGlob.sendFilter[index], AL_LOWPASS_GAIN, wet);
     alFilterf(alGlob.sendFilter[index], AL_LOWPASS_GAINHF, 1.0f);
     alSource3i(alGlob.source[index], AL_AUXILIARY_SEND_FILTER, alGlob.auxSlot, 0, alGlob.sendFilter[index]);
+#endif
 }
 
 void __cdecl SND_SetRoomtype(int roomtype)
 {
+#if defined(KISAK_WEB)
+    (void)roomtype;
+#else
     iassert(roomtype >= 0 && roomtype < ARRAY_COUNT(AL_RoomPresets));
     AL_ApplyReverbPreset(alGlob.reverbEffect, AL_RoomPresets[roomtype]);
     alAuxiliaryEffectSloti(alGlob.auxSlot, AL_EFFECTSLOT_EFFECT, alGlob.reverbEffect);
+#endif
 }
 
 void __cdecl SND_UpdateEqs()
@@ -1095,7 +1108,7 @@ void __cdecl SND_PrintEqParams()
     }
 }
 
-double __cdecl SND_Get2DChannelVolume(int index)
+float __cdecl SND_Get2DChannelVolume(int index)
 {
     iassert(index >= 0 && index < 0 + g_snd.max_2D_channels);
 
@@ -1113,7 +1126,7 @@ void __cdecl SND_Set2DChannelVolume(int index, float volume)
     alSourcef(alGlob.source[index], AL_GAIN, volume);
 }
 
-double __cdecl SND_Get3DChannelVolume(int index)
+float __cdecl SND_Get3DChannelVolume(int index)
 {
     iassert(index >= (0 + 8) && index < (0 + 8) + g_snd.max_3D_channels);
 
@@ -1129,7 +1142,7 @@ void __cdecl SND_Set3DChannelVolume(int index, float volume)
     alSourcef(alGlob.source[index], AL_GAIN, volume);
 }
 
-double __cdecl SND_GetStreamChannelVolume(int index)
+float __cdecl SND_GetStreamChannelVolume(int index)
 {
     iassert(index >= SND_FIRST_STREAM_CHANNEL && index < SND_FIRST_STREAM_CHANNEL + g_snd.max_stream_channels);
 
@@ -1571,7 +1584,7 @@ void __cdecl SND_SetData(MssSoundCOD4 *mssSound, void *srcData)
 }
 
 #ifdef KISAK_SP
-void SND_SetEqLerp(double lerp)
+void SND_SetEqLerp(float lerp)
 {
     if (lerp < 0.0 || lerp > 1.0)
         MyAssertHandler(

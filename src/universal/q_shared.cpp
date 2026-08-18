@@ -17,6 +17,16 @@
 
 #include <setjmp.h>
 
+#if defined(KISAK_CANONICAL_MAP_COMMANDS) && defined(KISAK_GATE3_COM_INIT_PREFIX)
+#include <universal/com_math.h>
+struct FxEffectDef;
+struct snd_alias_list_t;
+const FxEffectDef *__cdecl FX_Register(const char *name);
+XModel *__cdecl R_RegisterModel(const char *name);
+Material *__cdecl Material_RegisterHandle(const char *name, int imageTrack);
+snd_alias_list_t *__cdecl Com_FindSoundAlias(const char *name);
+#endif
+
 //Line 53466:  0006 : 02bc009c       int marker_q_shared      8537009c     q_shared.obj
 //Line 53467 : 0006 : 02bc58d0       struct TraceThreadInfo *g_traceThreadInfo 853758d0     q_shared.obj
 //Line 14278 : 0001 : 0006fb0c       struct orientation_t const orIdentity 8207010c     q_shared.obj
@@ -933,7 +943,7 @@ void __cdecl Info_SetValueForKey_Big(char *s, const char *key, const char *value
         Com_Printf(16, "Info string length exceeded. key: %s value: %s Info string: %s", key, value, s);
 }
 
-#ifndef KISAK_GATE3_COM_INIT_PREFIX
+#if !defined(KISAK_GATE3_COM_INIT_PREFIX) || defined(KISAK_CANONICAL_MAP_COMMANDS)
 bool __cdecl ParseConfigStringToStruct(
     uint8_t *pStruct,
     const cspField_t *pFieldList,

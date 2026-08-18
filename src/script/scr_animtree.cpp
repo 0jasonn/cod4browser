@@ -28,7 +28,6 @@ enum
 #define ANIMFLAG_ADDITIVE       16
 
 scrAnimGlob_t scrAnimGlob;
-scrAnimPub_t scrAnimPub;
 
 
 void __cdecl TRACK_scr_animtree()

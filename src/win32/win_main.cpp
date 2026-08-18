@@ -49,6 +49,15 @@ int eventTail;
 
 SysInfo sys_info;
 
+void Sys_GetHardwareDescription(char *gpu, std::size_t gpuSize,
+    char *cpuVendor, std::size_t cpuVendorSize,
+    char *cpuName, std::size_t cpuNameSize)
+{
+    I_strncpyz(gpu, sys_info.gpuDescription, static_cast<int>(gpuSize));
+    I_strncpyz(cpuVendor, sys_info.cpuVendor, static_cast<int>(cpuVendorSize));
+    I_strncpyz(cpuName, sys_info.cpuName, static_cast<int>(cpuNameSize));
+}
+
 int client_state;
 
 cmd_function_s Sys_In_Restart_f_VAR;

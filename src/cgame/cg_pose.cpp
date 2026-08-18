@@ -9,7 +9,7 @@
 #include <ragdoll/ragdoll.h>
 #include <client/cl_pose.h>
 #include "cg_main.h"
-#include <gfx_d3d/r_scene.h>
+#include <gfx_d3d/r_scene_api.h>
 #include <universal/profile.h>
 
 void __cdecl PitchToQuat(float pitch, float *quat)

@@ -5,6 +5,7 @@
 #include <universal/q_shared.h>
 #include "g_main.h"
 #include "g_local.h"
+#include "g_runtime_state.h"
 #include <universal/q_shared.h>
 #include <cgame/cg_public.h>
 #include <script/scr_main.h>
@@ -18,7 +19,10 @@
 #include <server/sv_game.h>
 #include "actor_spawner.h"
 #include <aim_assist/aim_target.h>
-#include <script/scr_vm.h>
+#include <script/scr_vm_runtime.h>
+#include <sound/snd_runtime_state.h>
+#include <universal/com_math.h>
+#include <xanim/xanim_runtime_api.h>
 #include "actor_threat.h"
 #include <script/scr_const.h>
 #include "g_vehicle_path.h"
@@ -39,6 +43,21 @@ const char *g_helicopterYawAltitudeControlsNames[4] =
   "Altitude: bumper buttons     Yaw: thumbstick",
   NULL
 };
+
+int G_GetPlayerHealthPercentageForSave()
+{
+    if (!g_entities[0].health || !g_entities[0].client->pers.maxHealth)
+        return 1;
+
+    int health = static_cast<int>(
+        static_cast<float>(100 * g_entities[0].health) /
+        static_cast<float>(g_entities[0].client->pers.maxHealth));
+    if (health < 1)
+        return 1;
+    if (health > 100)
+        return 100;
+    return health;
+}
 
 const char *g_entinfoNames[7] =
 {

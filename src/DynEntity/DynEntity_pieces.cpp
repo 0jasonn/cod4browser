@@ -1,8 +1,9 @@
 #include <universal/q_shared.h>
 #include "DynEntity_client.h"
-#include <win32/win_local.h>
-#include <gfx_d3d/r_dpvs.h>
+#include <qcommon/system.h>
+#include <gfx_d3d/r_dynentity_api.h>
 #include <universal/profile.h>
+#include <physics/phys_preset.h>
 
 const dvar_t *dynEntPieces_velocity;
 const dvar_t *dynEntPieces_angularVelocity;

@@ -20,6 +20,8 @@
 #include <ui/ui.h>
 #include <qcommon/cmd.h>
 #include <gfx_d3d/r_drawsurf.h>
+#include <gfx_d3d/r_registration_api.h>
+#include <sound/snd_public.h>
 
 void __cdecl CL_WriteDemoShortCString(MemoryFile *memFile, const char *string)
 {
@@ -505,7 +507,7 @@ void __cdecl CL_Record_f()
                 v7 = v6;
                 while (*v7++)
                     ;
-                v10[0] = (_BYTE)v7 - (_BYTE)v6 - 1;
+                v10[0] = static_cast<_BYTE>(v7 - v6 - 1);
                 FS_Write((const char*)v10, 1, cls.demofile);
                 v9 = FS_Write(v6, v10[0], cls.demofile);
                 Hunk_CheckTempMemoryClear();

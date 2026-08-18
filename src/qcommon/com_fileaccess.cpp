@@ -137,6 +137,15 @@ int __cdecl FileWrapper_GetFileSize(FILE *h)
 }
 
 #ifdef KISAK_SP
+#if defined(KISAK_WEB)
+uint32_t FS_FileTell(FILE *file)
+{
+    ProfLoad_BeginTrackedValue(MAP_PROFILE_FILE_SEEK);
+    const long position = ftell(file);
+    ProfLoad_EndTrackedValue(MAP_PROFILE_FILE_SEEK);
+    return position < 0 ? 0u : static_cast<uint32_t>(position);
+}
+#else
 #include <Windows.h>
 #include <fileapi.h>
 uint32_t FS_FileTell(FILE *file)
@@ -151,4 +160,5 @@ uint32_t FS_FileTell(FILE *file)
     ProfLoad_EndTrackedValue(MAP_PROFILE_FILE_SEEK);
     return v2.LowPart;
 }
+#endif
 #endif

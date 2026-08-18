@@ -7,7 +7,7 @@
 #include <xanim/dobj.h>
 #include <xanim/xanim.h>
 #include "cg_local.h"
-#include <gfx_d3d/r_scene.h>
+#include <gfx_d3d/r_cgame_api.h>
 
 enum ButtonNames : __int32
 {

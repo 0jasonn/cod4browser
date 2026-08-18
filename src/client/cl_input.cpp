@@ -9,7 +9,7 @@
 #include <cgame/cg_main.h>
 #include <game/g_local.h>
 #include <aim_assist/aim_assist.h>
-#include <win32/win_local.h>
+#include <qcommon/system.h>
 #include <qcommon/msg.h>
 #include <devgui/devgui.h>
 #include <ui/ui.h>

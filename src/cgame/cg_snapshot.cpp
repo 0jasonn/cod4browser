@@ -10,12 +10,13 @@
 #include <aim_assist/aim_assist.h>
 #include "cg_main.h"
 #include "cg_actors.h"
-#include <gfx_d3d/r_dpvs.h>
+#include <gfx_d3d/r_cgame_api.h>
 #include "cg_view.h"
 #include <game/actor.h>
 #include <game/g_local.h>
-#include <gfx_d3d/r_model.h>
 #include "cg_servercmds.h"
+#include <sound/snd_public.h>
+#include <qcommon/system.h>
 
 unsigned int g_centInPrevSnapshot[68]{ 0 };
 bool g_clientDirty[MAX_GENTITIES];
@@ -634,7 +635,7 @@ void __cdecl CG_ProcessNextSnap(int localClientNum)
     int v3; // r25
     int v4; // r23
     unsigned int v5; // r31
-    DWORD i; // r11
+    uint32_t i; // r11
     unsigned int v7; // r29
     unsigned int v8; // r30
     snapshot_s *nextSnap; // r23
@@ -665,7 +666,7 @@ void __cdecl CG_ProcessNextSnap(int localClientNum)
         //    R_UnlinkEntity(localClientNum, v8);
         //    CG_UnlinkEntity(localClientNum, v8);
         //}
-        while (_BitScanReverse(&i, v5))
+        while (Sys_BitScanReverse(&i, v5))
         {
             unsigned int v7 = 0x80000000 >> (31 - i);  // Same as 1 << i
             unsigned int v8 = v3 + (31 - i);           // Match _cntlzw bit index (MSB-first)

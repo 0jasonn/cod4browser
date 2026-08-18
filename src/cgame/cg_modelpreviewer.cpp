@@ -10,7 +10,7 @@
 #include <universal/com_files.h>
 #include <xanim/dobj_utils.h>
 #include "cg_ents.h"
-#include <gfx_d3d/r_model.h>
+#include <gfx_d3d/r_cgame_api.h>
 #include <devgui/devgui.h>
 #include <ragdoll/ragdoll.h>
 #include <database/database.h>

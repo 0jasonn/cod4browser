@@ -7,9 +7,11 @@
 #include "sv_world.h"
 #include <client/client.h>
 #include <universal/com_files.h>
-#include <universal/com_sndalias.h>
+#include <universal/com_sndalias_runtime.h>
+#include <sound/snd_runtime_api.h>
 #include <qcommon/com_bsp.h>
 #include <qcommon/threads.h>
+#include <universal/com_math.h>
 
 #ifdef KISAK_MP
 #include <game_mp/g_main_mp.h>
@@ -504,9 +506,10 @@ int __cdecl SV_GameCommand()
 #include <game/g_local.h>
 #include <client/cl_demo.h>
 #include "sv_public.h"
-#include <win32/win_local.h>
+#include <qcommon/loading_keepalive.h>
 #include <client/cl_input.h>
 #include <universal/profile.h>
+#include <gfx_d3d/r_remote_screen.h>
 
 void __cdecl SV_CheckLoadLevel(SaveGame *save)
 {
@@ -521,7 +524,7 @@ void __cdecl SV_CheckLoadLevel(SaveGame *save)
     Hunk_CheckTempMemoryHighClear();
 }
 
-static void SV_FreeReliableCommandsForClient(client_t *cl)
+static void SV_ClearReliableCommandsForGameVM(client_t *cl)
 {
     Com_Memset(&cl->reliableCommands, 0, 12);
 }
@@ -536,7 +539,7 @@ static void SV_ShutdownGameVM(int clearScripts)
     sv.state = SS_DEAD;
     G_ShutdownGame(clearScripts);
     svs.clients->gentity = 0;
-    SV_FreeReliableCommandsForClient(svs.clients);
+    SV_ClearReliableCommandsForGameVM(svs.clients);
 }
 
 void __cdecl SV_ShutdownGameProgs()

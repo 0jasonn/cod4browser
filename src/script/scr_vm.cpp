@@ -23,7 +23,6 @@
 #include <universal/com_memory.h>
 #include <universal/com_files.h>
 #include <win32/win_net_debug.h>
-#include <win32/win_input.h>
 #include <client/client.h>
 #include <qcommon/mem_track.h>
 #include "scr_evaluate.h"
@@ -65,18 +64,6 @@ void Log(char const *format, ...)
 #pragma warning(push)
 #pragma warning( disable : 4146 ) // LWSS: disable C4146 `unary minus operator applied to unsigned type, result still unsigned`. This is used somewhat properly here (-Scr_ReadUnsignedShort())
 
-scrVmPub_t scrVmPub;
-scrVmGlob_t scrVmGlob;
-jmp_buf g_script_error[33];
-scrVmDebugPub_t scrVmDebugPub;
-
-function_stack_t fs;
-
-const dvar_s *logScriptTimes;
-
-int opcode;
-int caseCount;
-int thread_count;
 
 void __cdecl GScr_AddVector(const float* vVec)
 {
@@ -205,74 +192,6 @@ void __cdecl TRACK_scr_vm()
     track_static_alloc_internal(&scrVmPub, 17192, "scrVmPub", 7);
     track_static_alloc_internal(g_script_error, 2112, "g_script_error", 7);
     track_static_alloc_internal(&scrVmDebugPub, 147984, "scrVmDebugPub", 0);
-}
-
-void __cdecl Scr_ClearErrorMessage()
-{
-    scrVarPub.error_message = 0;
-    scrVmGlob.dialog_error_message = 0;
-    scrVarPub.error_index = 0;
-}
-
-void __cdecl Scr_Init()
-{
-    if (scrVarPub.bInited)
-        MyAssertHandler(".\\script\\scr_vm.cpp", 169, 0, "%s", "!scrVarPub.bInited");
-    Scr_InitClassMap();
-    Scr_VM_Init();
-    scrCompilePub.script_loading = 0;
-    scrAnimPub.animtree_loading = 0;
-    scrCompilePub.scripts = 0;
-    scrCompilePub.loadedscripts = 0;
-    scrAnimPub.animtrees = 0;
-    scrCompilePub.builtinMeth = 0;
-    scrCompilePub.builtinFunc = 0;
-    scrVarPub.bInited = 1;
-}
-
-const dvar_s* Scr_VM_Init()
-{
-    const dvar_s* result; // eax
-
-    scrVarPub.varUsagePos = "<script init variable>";
-    scrVmPub.maxstack = &scrVmPub.stack[2047];
-    scrVmPub.top = scrVmPub.stack;
-    scrVmPub.function_count = 0;
-    scrVmPub.function_frame = scrVmPub.function_frame_start;
-    scrVmPub.localVars = (uint32_t*)&scrVmGlob.starttime;
-    scrVarPub.evaluate = 0;
-    scrVmPub.debugCode = 0;
-    Scr_ClearErrorMessage();
-    scrVmPub.terminal_error = 0;
-    scrVmPub.outparamcount = 0;
-    scrVmPub.inparamcount = 0;
-    scrVarPub.tempVariable = AllocValue();
-    scrVarPub.timeArrayId = 0;
-    scrVarPub.pauseArrayId = 0;
-    scrVarPub.levelId = 0;
-    scrVarPub.gameId = 0;
-    scrVarPub.animId = 0;
-    scrVarPub.freeEntList = 0;
-    scrVmPub.stack[0].type = VAR_CODEPOS;
-    scrVmGlob.loading = 0;
-    scrVmGlob.recordPlace = 0;
-    scrVmGlob.lastFileName = 0;
-    scrVmGlob.lastLine = 0;
-    scrVarPub.ext_threadcount = 0;
-    scrVarPub.numScriptThreads = 0;
-    scrVarPub.varUsagePos = 0;
-    result = Dvar_RegisterBool("logScriptTimes", 0, DVAR_NOFLAG, "Log times for every print called from script");
-    logScriptTimes = result;
-    return result;
-}
-
-void __cdecl Scr_Settings(int developer, int developer_script, int abort_on_error)
-{
-    //iassert(!abort_on_error || developer);
-
-    scrVarPub.developer = developer != 0;
-    scrVarPub.developer_script = developer_script != 0;
-    scrVmPub.abort_on_error = abort_on_error != 0;
 }
 
 void __cdecl Scr_Shutdown()
@@ -2629,9 +2548,9 @@ CallBuiltIn:
             }
             scrVmPub.top = fs.top;
             builtInTime = scrVmDebugPub.builtInTime;
-            time = __rdtsc();
+            time = Sys_RawTimerTicks();
             ((void (*)(void))scrCompilePub.func_table[builtinIndex])();
-            timeSpent = __rdtsc() - time;
+            timeSpent = Sys_RawTimerTicks() - time;
             scrVmDebugPub.builtInTime = timeSpent + builtInTime;
             scrVmDebugPub.func_table[builtinIndex].prof += timeSpent;
             ++scrVmDebugPub.func_table[builtinIndex].usage;
@@ -2677,9 +2596,9 @@ CallBuiltinMethod:
                     scrVmPub.top = fs.top - 1;
                 }
                 builtInTime = scrVmDebugPub.builtInTime;
-                time = __rdtsc();
+                time = Sys_RawTimerTicks();
                 ((void (*)(scr_entref_t))scrCompilePub.func_table[builtinIndex])(entref);
-                timeSpent = __rdtsc() - time;
+                timeSpent = Sys_RawTimerTicks() - time;
                 scrVmDebugPub.builtInTime = timeSpent + builtInTime;
                 scrVmDebugPub.func_table[builtinIndex].prof += timeSpent;
                 ++scrVmDebugPub.func_table[builtinIndex].usage;
@@ -3537,10 +3456,10 @@ uint32_t __cdecl VM_Execute(uint32_t localId, const char *pos, uint32_t paramcou
         if (scrVarPub.bScriptProfile)
         {
             scrVmDebugPub.builtInTime = 0;
-            time = __rdtsc();
+            time = Sys_RawTimerTicks();
             localIda = VM_ExecuteInternal();
             if (!scrVmPub.function_count)
-                Scr_AddProfileTime(pos, __rdtsc() - time, scrVmDebugPub.builtInTime);
+                Scr_AddProfileTime(pos, Sys_RawTimerTicks() - time, scrVmDebugPub.builtInTime);
         }
         else
         {
@@ -4661,14 +4580,14 @@ void __cdecl VM_Resume(uint32_t timeId)
         if (scrVarPub.bScriptProfile)
         {
             scrVmDebugPub.builtInTime = 0;
-            time = __rdtsc();
+            time = Sys_RawTimerTicks();
             pos = fs.pos;
             //v2 = VM_Execute_0();
             //v2 = VM_ExecuteInternal(stack.pos, stack.localId, stack.localVarCount, stack.top, stack.startTop);
             v2 = VM_ExecuteInternal();
             RemoveRefToObject(v2);
             RemoveRefToValue(scrVmPub.stack[1].type, scrVmPub.stack[1].u);
-            Scr_AddProfileTime(pos, __rdtsc() - time, scrVmDebugPub.builtInTime);
+            Scr_AddProfileTime(pos, Sys_RawTimerTicks() - time, scrVmDebugPub.builtInTime);
         }
         else
         {
@@ -4857,7 +4776,7 @@ int __cdecl Scr_AddLocalVars(uint32_t localId)
 
 void __cdecl Scr_ResetTimeout()
 {
-    DWORD v0; // eax
+    uint32_t v0; // eax
 
     scrVmGlob.starttime = Sys_Milliseconds();
     iassert(logScriptTimes);

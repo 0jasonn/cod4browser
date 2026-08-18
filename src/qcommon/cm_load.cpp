@@ -1,11 +1,11 @@
 #include <universal/q_shared.h>
 #include "qcommon.h"
+#include "threads.h"
+#include "engine_lifecycle_trace.h"
 #include "mem_track.h"
 #include <universal/com_memory.h>
 #include <database/database.h>
-#include <win32/win_local.h>
-#include "com_bsp.h"
-#include <gfx_d3d/rb_backend.h>
+#include <qcommon/system.h>
 
 //Line 53199 : 0006 : 006e75b8       struct clipMap_t cm        82e975b8     cm_load.obj
 clipMap_t cm;
@@ -39,10 +39,12 @@ void __cdecl CM_LoadMap(const char *name, int *checksum)
 {
     if (!name || !*name)
         Com_Error(ERR_DROP, "CM_LoadMap: NULL name");
+    EmitEngineLifecycleTrace(EngineLifecycleStage::CollisionLoadBegin, name);
     CM_LoadMapData(name);
     CM_InitAllThreadData();
     cm.isInUse = 1;
     *checksum = cm.checksum;
+    EmitEngineLifecycleTrace(EngineLifecycleStage::CollisionLoadComplete, name);
 }
 
 extern TraceThreadInfo g_traceThreadInfo[THREAD_CONTEXT_COUNT];

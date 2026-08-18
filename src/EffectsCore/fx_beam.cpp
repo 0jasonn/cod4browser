@@ -3,7 +3,7 @@
 
 #include <gfx_d3d/r_drawsurf.h>
 
-#include <gfx_d3d/r_scene.h>
+#include <gfx_d3d/r_scene_api.h>
 
 #ifdef KISAK_MP
 #include <client_mp/client_mp.h>

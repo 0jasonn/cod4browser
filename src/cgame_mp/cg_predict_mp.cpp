@@ -84,7 +84,7 @@ void __cdecl CG_PredictPlayerState(int32_t localClientNum)
         {
             cgameGlob->adsViewErrorDone = 1;
             size = flrand(weapDef->adsViewErrorMin, weapDef->adsViewErrorMax);
-            v2 = random();
+            v2 = Q_random();
             angle = (v2 + v2) * 3.141592741012573;
             fCos = cos(angle);
             fSin = sin(angle);

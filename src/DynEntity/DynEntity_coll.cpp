@@ -1,6 +1,7 @@
 #include <universal/q_shared.h>
 #include "DynEntity_client.h"
 #include <qcommon/mem_track.h>
+#include <physics/phys_preset.h>
 
 DynEntityCollWorld dynEntCollWorlds[2];
 

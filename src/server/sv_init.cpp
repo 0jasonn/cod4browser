@@ -1,3 +1,7 @@
+#if defined(KISAK_RUNTIME_MAP_DB_BOUNDARY)
+#include <server/sv_map_lifecycle.inl>
+#else
+
 #ifndef KISAK_SP 
 #error This file is for SinglePlayer only 
 #endif
@@ -5,21 +9,40 @@
 #include <universal/q_shared.h>
 #include "server.h"
 #include "sv_public.h"
-#include <ui/ui.h>
+#include "sv_map_assets.h"
+#include "sv_map_command.h"
 #include <database/database.h>
 #include <qcommon/cmd.h>
-#include "sv_game.h"
-#include <qcommon/com_bsp.h>
 #include <client/cl_demo.h>
 #include <game/savedevice.h>
 #include <game/savememory.h>
-#include <game/g_main.h>
-#include <cgame/cg_main.h>
 #include <client/cl_scrn.h>
 #include <universal/profile.h>
 #include <qcommon/threads.h>
 #include <universal/com_files.h>
-#include <universal/com_sndalias.h>
+#include <universal/q_parse.h>
+#include <sound/snd_alias_system.h>
+
+void __cdecl UI_LoadIngameMenus();
+void __cdecl SV_ShutdownGameProgs();
+void __cdecl SV_InitGameProgs(
+    std::uint32_t randomSeed,
+    int savegame,
+    SaveGame **save);
+void SV_CheckLoadLevel(SaveGame *save);
+void __cdecl Com_GetBspFilename(
+    char *filename,
+    std::uint32_t size,
+    const char *mapname);
+void __cdecl Com_LoadBsp(char *filename);
+void __cdecl Com_LoadWorld(char *name);
+void __cdecl CG_RegisterSounds();
+void __cdecl R_BeginRemoteScreenUpdate();
+void __cdecl R_EndRemoteScreenUpdate();
+void __cdecl Com_LoadSoundAliases(
+    const char *loadspec,
+    const char *loadspecCurGame,
+    snd_alias_system_t system);
 
 const dvar_t *sv_clientFrameRateFix;
 const dvar_t *sv_loadMyChanges;
@@ -118,7 +141,9 @@ void __cdecl SV_ClearServer()
     if (sv.emptyConfigString)
         SL_RemoveRefToString(sv.emptyConfigString);
     Com_Memset(&sv, 0, sizeof(server_t));
+#if !defined(KISAK_RUNTIME_MAP_DB_BOUNDARY)
     SV_ClearPendingSaves();
+#endif
     com_inServerFrame = 0;
 }
 
@@ -165,25 +190,6 @@ int __cdecl SV_SaveImmediately(const char *levelName)
     return SV_ProcessPendingSaves();
 }
 
-void __cdecl SV_LoadLevelAssets(const char *mapname)
-{
-    XZoneInfo zoneInfo; // [sp+50h] [-20h] BYREF
-
-    zoneInfo.name = mapname;
-    //zoneInfo.allocFlags = 2;
-    //zoneInfo.freeFlags = 2;
-    // LWSS: I am changing the flags here 2 -> 8. This is accurate to SP on PC.
-    // Unloading one of the other zones causes an error with mp/defaultstringtable not being found.
-    // That file is the default stringtable file, but is only located in `code_post_gfx_mp` which is not loaded at all in SP
-    zoneInfo.allocFlags = 8;
-    zoneInfo.freeFlags = 8;
-    DB_LoadXAssets(&zoneInfo, 1, 0);
-    if (sv_loadMyChanges->current.enabled)
-    {
-        Cbuf_ExecuteBuffer(0, CL_ControllerIndexFromClientNum(0), "loadzone mychanges\n");
-    }
-}
-
 bool __cdecl SV_Loaded()
 {
     return sv.state == SS_GAME;
@@ -194,9 +200,18 @@ void __cdecl SV_Init()
     const char *v0; // r5
     unsigned __int16 v1; // r4
 
+#if !defined(KISAK_RUNTIME_MAP_DB_BOUNDARY)
     Memcard_InitializeSystem();
     SaveDevice_Init();
+#endif
+#if defined(KISAK_RUNTIME_MAP_DB_BOUNDARY)
+    // Save/replay services are not required before the first local SP map DB
+    // request. Preserve the canonical SV_Init owner and register its normal
+    // map commands while those later runtime services remain feature-gated.
+    SV_RegisterMapCommands();
+#else
     SV_AddOperatorCommands();
+#endif
     sv_gameskill = Dvar_RegisterInt("g_gameskill", 1, 0, 3, 0x64u, "Game skill level");
     sv_player_maxhealth = Dvar_RegisterInt("g_player_maxhealth", 100, 10, 2000, 2u, "Maximum player health");
     sv_player_damageMultiplier = Dvar_RegisterFloat("player_damageMultiplier", 1.0, 0.0, 1000.0, 0, 0);
@@ -240,7 +255,9 @@ void __cdecl SV_Init()
         0,
         "Use autosaves as part of demos - will make demo access faster but will cause hitches");
     replay_asserts = Dvar_RegisterBool("replay_asserts", 1, 0, "Enable/Disable replay aborts due to inconsistency");
+#if !defined(KISAK_RUNTIME_MAP_DB_BOUNDARY)
     SV_InitDemoSystem();
+#endif
     nextmap = Dvar_RegisterString("nextmap", "", 0, "Next map to load");
     Dvar_RegisterInt("g_reloading", 0, 0, 4, 0x40u, "True if the game is currently reloading");
     sv_smp = Dvar_RegisterBool("sv_smp", 1, 0, "Enable server multithreading");
@@ -263,9 +280,11 @@ void __cdecl SV_Shutdown(const char *finalmsg)
         //LSP_ForceSendPacket();
         Com_Printf(15, "----- Server Shutdown -----\n");
         SV_RemoveOperatorCommands();
+#if !defined(KISAK_RUNTIME_MAP_DB_BOUNDARY)
         SV_ShutdownGameProgs();
         SaveMemory_CleanupSaveMemory();
         SaveMemory_ShutdownSaveSystem();
+#endif
         SV_ClearServer();
         v1 = &svs;
         v2 = 10;
@@ -459,7 +478,9 @@ void __cdecl SV_SpawnServer(const char *mapname, int savegame)
 
     {
         PROF_SCOPED("Clear load game");
+#if !defined(KISAK_RUNTIME_MAP_DB_BOUNDARY)
         SV_ClearLoadGame();
+#endif
         iassert(sv_gameskill);
     }
     
@@ -530,6 +551,14 @@ void __cdecl SV_SpawnServer(const char *mapname, int savegame)
             SV_LoadLevelAssets(mapname);
         }
     }
+
+#if defined(KISAK_RUNTIME_MAP_DB_BOUNDARY)
+    // The browser convergence target intentionally ends this native function
+    // only after the synchronous canonical DB traversal returns. Its next
+    // engine-owned statement is the post-load remote-screen/UI path, followed
+    // by CM_LoadMap below. Do not add post-DB substitutes here.
+    return;
+#endif
 
     R_BeginRemoteScreenUpdate();
 
@@ -669,4 +698,6 @@ void __cdecl SV_SpawnServer(const char *mapname, int savegame)
 
     Sys_EndLoadThreadPriorities();
 }
+
+#endif // KISAK_RUNTIME_MAP_DB_BOUNDARY
 

@@ -1,6 +1,7 @@
 #pragma once
 
-#include <xanim/xanim.h>
+#include <qcommon/com_checksum.h>
+#include <qcommon/com_world_types.h>
 
 #define BSP_VERSION 22
 
@@ -148,7 +149,6 @@ char *__cdecl Com_ValidateBspLumpData(
     uint32_t *count);
 uint32_t __cdecl Com_GetBspVersion();
 
-int __cdecl Com_BlockChecksumKey32(const uint8_t *data, uint32_t length, uint32_t initialCrc);
 char *__cdecl Com_EntityString(int *numEntityChars);
 
 void __cdecl Com_LoadWorld(char *name);

@@ -136,7 +136,6 @@ void __cdecl CG_AmmoCounterRegisterDvars()
         DVAR_NOFLAG,
         "lowAmmoWarningColor2, but when no ammo.");
 }
-
 void __cdecl CG_DrawPlayerWeaponAmmoStock(
     int32_t localClientNum,
     const rectDef_s *rect,
@@ -1219,11 +1218,4 @@ uint32_t __cdecl GetWeaponIndex(const cg_s *cgameGlob)
         return cgameGlob->weaponSelect;
     else
         return cgameGlob->predictedPlayerState.weapon;
-}
-
-int BG_PlayerHasWeapon(const playerState_s *ps, int weaponIndex)
-{
-    iassert(ps);
-
-    return Com_BitCheckAssert(ps->weapons, weaponIndex, 16);
 }

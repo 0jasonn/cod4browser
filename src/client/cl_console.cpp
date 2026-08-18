@@ -4,7 +4,7 @@
 
 #include <qcommon/cmd.h>
 #include <stringed/stringed_hooks.h>
-#include <win32/win_local.h>
+#include <qcommon/system.h>
 #include <gfx_d3d/r_rendercmds.h>
 #include <qcommon/threads.h>
 #include <universal/com_files.h>

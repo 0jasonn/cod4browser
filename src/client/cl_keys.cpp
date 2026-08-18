@@ -7,7 +7,7 @@
 #include <universal/com_memory.h>
 #include <cgame/cg_local.h>
 #include <stringed/stringed_hooks.h>
-#include <win32/win_local.h>
+#include <qcommon/system.h>
 #include <universal/com_files.h>
 #include <devgui/devgui.h>
 #include <script/scr_debugger.h>
@@ -18,7 +18,6 @@
 #include <server_mp/server_mp.h>
 #elif KISAK_SP
 #include <cgame/cg_main.h>
-#include <cgame/cg_modelpreviewer.h>
 #include "cl_ui.h"
 #include "cl_scrn.h"
 #endif

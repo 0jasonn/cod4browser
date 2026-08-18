@@ -1,4 +1,5 @@
 #include <universal/q_shared.h>
+#include <universal/com_math.h>
 #include "devgui.h"
 #include <qcommon/cmd.h>
 #include <client/client.h>

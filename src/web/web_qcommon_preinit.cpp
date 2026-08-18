@@ -33,7 +33,6 @@ constexpr std::array<QcommonStartupFile, QCOMMON_STARTUP_FILE_COUNT> STARTUP_FIL
     {"zone/english/code_post_gfx.ff", QcommonFileKind::Fastfile, 14u},
     {"zone/english/ui.ff", QcommonFileKind::Fastfile, 14u},
     {"zone/english/common.ff", QcommonFileKind::Fastfile, 14u},
-    {"zone/english/killhouse.ff", QcommonFileKind::Fastfile, 14u},
 }};
 
 bool ValidHeader(QcommonFileKind kind, std::span<const std::uint8_t> bytes) noexcept

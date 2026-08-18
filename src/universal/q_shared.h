@@ -45,6 +45,7 @@
 #define _snprintf snprintf
 #define _vsnprintf vsnprintf
 #define CPUSTRING "web-wasm32"
+using BOOL = int;
 #ifndef __forceinline
 #define __forceinline inline __attribute__((always_inline))
 #endif
@@ -101,6 +102,13 @@ static ID_INLINE int BigLong(int l) { return LongSwap(l); }
 #define LittleFloat
 
 #define	PATH_SEP '\\'
+
+#elif defined(KISAK_WEB)
+
+// WebAssembly is little-endian. Preserve the native zip/parser call shape
+// without admitting a Win32 dependency into the browser platform.
+static inline short LittleShort(short value) { return value; }
+static inline int LittleLong(int value) { return value; }
 
 #endif // WIN32
 
@@ -715,6 +723,9 @@ uint32_t __cdecl LongNoSwap(uint32_t color);
 #define arr_esize(a) (sizeof((a)[0]))
 #define arr_cnt(a) (sizeof(a)/arr_esize(a))
 #define ARRAY_COUNT(a) arr_cnt(a)
+#ifndef ARRAYSIZE
+#define ARRAYSIZE(a) ARRAY_COUNT(a)
+#endif
 struct va_info_t
 {
 	char va_string[2][1024];
@@ -770,6 +781,7 @@ struct trace_t // sizeof=0x2C
 // win_shared
 uint32_t __cdecl Sys_Milliseconds();
 uint32_t __cdecl Sys_MillisecondsRaw();
+uint32_t __cdecl Sys_RawTimerTicks();
 void __cdecl Sys_SnapVector(float *v);
 
 // com_shared

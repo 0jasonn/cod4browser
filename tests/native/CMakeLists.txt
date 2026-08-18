@@ -28,6 +28,25 @@ add_executable(qcommon_math_tests
     "${CMAKE_CURRENT_LIST_DIR}/qcommon_math_tests.cpp"
 )
 
+add_executable(canonical_startup_zone_tests
+    "${CMAKE_CURRENT_LIST_DIR}/canonical_startup_zone_tests.cpp"
+    "${KISAK_REPOSITORY_ROOT}/src/client/cl_fastfile_config.cpp"
+    "${KISAK_REPOSITORY_ROOT}/src/gfx_d3d/r_asset_load.cpp"
+)
+target_compile_features(canonical_startup_zone_tests PRIVATE cxx_std_20)
+target_include_directories(canonical_startup_zone_tests PRIVATE
+    "${KISAK_REPOSITORY_ROOT}/src" "${KISAK_REPOSITORY_ROOT}/deps")
+target_compile_definitions(canonical_startup_zone_tests PRIVATE
+    KISAK_SP=1 dNODEBUG=1)
+if (MSVC)
+    target_compile_options(canonical_startup_zone_tests PRIVATE /UNDEBUG)
+else()
+    target_compile_options(canonical_startup_zone_tests PRIVATE -UNDEBUG)
+endif()
+if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    target_compile_definitions(canonical_startup_zone_tests PRIVATE KISAK_WEB=1)
+endif()
+
 add_executable(web_thread_context_tests
     "${CMAKE_CURRENT_LIST_DIR}/web_thread_context_tests.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_thread_context.cpp"
@@ -71,6 +90,71 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
         target_compile_definitions(canonical_runtime_prefix_tests PRIVATE KISAK_WEB=1)
     endif()
 
+    add_executable(canonical_map_request_tests
+        "${CMAKE_CURRENT_LIST_DIR}/canonical_map_request_tests.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/client/cl_initialization.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/server/sv_map_assets.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/server/sv_map_command.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/qcommon/com_init_trace.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/qcommon/engine_lifecycle_trace.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_initialization.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/qcommon/common.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/qcommon/cmd.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/script/scr_memorytree.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/script/scr_stringlist.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/universal/com_constantconfigstrings.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/universal/com_memory_string.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/universal/com_shared.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/universal/dvar.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/universal/dvar_cmds.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/universal/q_shared.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/universal/physicalmemory.cpp"
+    )
+    target_compile_features(canonical_map_request_tests PRIVATE cxx_std_20)
+    target_include_directories(canonical_map_request_tests PRIVATE
+        "${KISAK_REPOSITORY_ROOT}/src" "${KISAK_REPOSITORY_ROOT}/deps")
+    target_compile_definitions(canonical_map_request_tests PRIVATE
+        KISAK_SP=1 KISAK_GATE3_COM_INIT_PREFIX=1
+        KISAK_CANONICAL_MAP_COMMANDS=1 dNODEBUG=1)
+    if (MSVC)
+        target_compile_definitions(canonical_map_request_tests PRIVATE WIN32=1)
+        target_compile_options(canonical_map_request_tests PRIVATE
+            /Gy /Gw /Zc:inline /UNDEBUG)
+        target_link_options(canonical_map_request_tests PRIVATE /OPT:REF /OPT:ICF)
+    else()
+        target_compile_definitions(canonical_map_request_tests PRIVATE KISAK_WEB=1)
+        target_compile_options(canonical_map_request_tests PRIVATE -UNDEBUG -fdeclspec)
+    endif()
+
+    add_executable(canonical_cm_load_tests
+        "${CMAKE_CURRENT_LIST_DIR}/canonical_cm_load_tests.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/qcommon/cm_load.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/qcommon/com_world_runtime.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/qcommon/engine_lifecycle_trace.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_registry_pools.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/universal/com_memory_hunk.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/game/savememory_init.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/script/scr_variable_init.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/script/scr_vm_init.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/script/scr_runtime_error.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/xanim/xanim_init.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/xanim/dobj_init.cpp"
+    )
+    target_compile_features(canonical_cm_load_tests PRIVATE cxx_std_20)
+    target_include_directories(canonical_cm_load_tests PRIVATE
+        "${KISAK_REPOSITORY_ROOT}/src" "${KISAK_REPOSITORY_ROOT}/deps")
+    target_compile_definitions(canonical_cm_load_tests PRIVATE
+        KISAK_SP=1 KISAK_CANONICAL_CM_LOAD_TEST=1
+        KISAK_DB_SYNC_FILE_TEST=1 dNODEBUG=1)
+    if (MSVC)
+        target_compile_options(canonical_cm_load_tests PRIVATE
+            /Gy /Gw /Zc:inline /UNDEBUG)
+        target_link_options(canonical_cm_load_tests PRIVATE /OPT:REF /OPT:ICF)
+    else()
+        target_compile_definitions(canonical_cm_load_tests PRIVATE KISAK_WEB=1)
+        target_compile_options(canonical_cm_load_tests PRIVATE -UNDEBUG -fdeclspec)
+    endif()
+
     add_executable(gate3_db_stream_trace_tests
         "${CMAKE_CURRENT_LIST_DIR}/gate3_db_stream_trace_tests.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_auth.cpp"
@@ -83,6 +167,9 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
         "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_xmodel_physics.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_weapon.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_stringtable.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_comworld.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_gfxworld.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_gfxworld_platform.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_image.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_image_platform.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_localize.cpp"
@@ -266,6 +353,11 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "-sEXIT_RUNTIME=1"
         "-sNO_DISABLE_EXCEPTION_CATCHING"
     )
+    target_link_options(canonical_startup_zone_tests PRIVATE
+        "-sENVIRONMENT=node"
+        "-sEXIT_RUNTIME=1"
+        "-sNO_DISABLE_EXCEPTION_CATCHING"
+    )
     target_link_options(web_thread_context_tests PRIVATE
         "-sENVIRONMENT=node"
         "-sEXIT_RUNTIME=1"
@@ -278,6 +370,23 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
             "-sNO_DISABLE_EXCEPTION_CATCHING"
             "-sERROR_ON_UNDEFINED_SYMBOLS=1"
             "-sALLOW_MEMORY_GROWTH=1"
+        )
+    endif()
+    if (TARGET canonical_map_request_tests)
+        target_link_options(canonical_map_request_tests PRIVATE
+            "-sENVIRONMENT=node"
+            "-sEXIT_RUNTIME=1"
+            "-sNO_DISABLE_EXCEPTION_CATCHING"
+            "-sERROR_ON_UNDEFINED_SYMBOLS=1"
+            "-sALLOW_MEMORY_GROWTH=1"
+        )
+    endif()
+    if (TARGET canonical_cm_load_tests)
+        target_link_options(canonical_cm_load_tests PRIVATE
+            "-sENVIRONMENT=node"
+            "-sEXIT_RUNTIME=1"
+            "-sNO_DISABLE_EXCEPTION_CATCHING"
+            "-sERROR_ON_UNDEFINED_SYMBOLS=1"
         )
     endif()
     if (TARGET gate3_db_pool_tests)
@@ -347,9 +456,16 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     set_target_properties(iwi_image_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(canonical_asset_abi_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(qcommon_math_tests PROPERTIES SUFFIX ".cjs")
+    set_target_properties(canonical_startup_zone_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_thread_context_tests PROPERTIES SUFFIX ".cjs")
     if (TARGET canonical_runtime_prefix_tests)
         set_target_properties(canonical_runtime_prefix_tests PROPERTIES SUFFIX ".cjs")
+    endif()
+    if (TARGET canonical_map_request_tests)
+        set_target_properties(canonical_map_request_tests PROPERTIES SUFFIX ".cjs")
+    endif()
+    if (TARGET canonical_cm_load_tests)
+        set_target_properties(canonical_cm_load_tests PROPERTIES SUFFIX ".cjs")
     endif()
     if (TARGET gate3_db_pool_tests)
         set_target_properties(gate3_db_pool_tests PROPERTIES SUFFIX ".cjs")
@@ -373,11 +489,21 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:canonical_asset_abi_tests>")
     add_test(NAME qcommon_math_tests
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:qcommon_math_tests>")
+    add_test(NAME canonical_startup_zone_tests
+        COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:canonical_startup_zone_tests>")
     add_test(NAME web_thread_context_tests
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_thread_context_tests>")
     if (TARGET canonical_runtime_prefix_tests)
         add_test(NAME canonical_runtime_prefix_tests
             COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:canonical_runtime_prefix_tests>")
+    endif()
+    if (TARGET canonical_map_request_tests)
+        add_test(NAME canonical_map_request_tests
+            COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:canonical_map_request_tests>")
+    endif()
+    if (TARGET canonical_cm_load_tests)
+        add_test(NAME canonical_cm_load_tests
+            COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:canonical_cm_load_tests>")
     endif()
     if (TARGET gate3_db_pool_tests)
         add_test(NAME gate3_db_pool_tests
@@ -447,9 +573,16 @@ else()
     add_test(NAME iwi_image_tests COMMAND iwi_image_tests)
     add_test(NAME canonical_asset_abi_tests COMMAND canonical_asset_abi_tests)
     add_test(NAME qcommon_math_tests COMMAND qcommon_math_tests)
+    add_test(NAME canonical_startup_zone_tests COMMAND canonical_startup_zone_tests)
     add_test(NAME web_thread_context_tests COMMAND web_thread_context_tests)
     if (TARGET canonical_runtime_prefix_tests)
         add_test(NAME canonical_runtime_prefix_tests COMMAND canonical_runtime_prefix_tests)
+    endif()
+    if (TARGET canonical_map_request_tests)
+        add_test(NAME canonical_map_request_tests COMMAND canonical_map_request_tests)
+    endif()
+    if (TARGET canonical_cm_load_tests)
+        add_test(NAME canonical_cm_load_tests COMMAND canonical_cm_load_tests)
     endif()
     if (TARGET gate3_db_pool_tests)
         add_test(NAME gate3_db_pool_tests COMMAND gate3_db_pool_tests)

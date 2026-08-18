@@ -2,14 +2,13 @@
 #include "fx_system.h"
 
 #include <gfx_d3d/r_drawsurf.h>
-#include <gfx_d3d/r_scene.h>
-#include <gfx_d3d/r_dpvs.h>
+#include <gfx_d3d/r_scene_api.h>
 
 #include <aim_assist/aim_assist.h>
 
 #include <physics/phys_local.h>
 
-#include <win32/win_local.h>
+#include <qcommon/system.h>
 #include <universal/profile.h>
 
 #ifdef KISAK_MP

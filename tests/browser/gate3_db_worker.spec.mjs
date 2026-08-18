@@ -39,12 +39,16 @@ test("Worker-hosted canonical DB streams an XFile into PMem and stops at generat
     });
     await importWithCodePost(page, testInfo, "gate3-db-worker", fastfile);
 
-    await expect.poll(() => page.evaluate(
-        () => globalThis.__KISAKCOD_WEB__?.database?.stopStage,
-    ), { timeout: 30_000 }).toBe("Load_XAssetHeader/next-family-closure");
+    await expect.poll(() => page.evaluate(() => globalThis.__databaseEvents.some(
+        (event) => event.stage === "DB stop" &&
+            event.logicalPath === "zone/english/code_post_gfx.ff" &&
+            event.stopStage === "Load_XAssetHeader/next-family-closure",
+    )), { timeout: 30_000 }).toBe(true);
 
     const result = await page.evaluate(() => ({
-        current: structuredClone(globalThis.__KISAKCOD_WEB__.database),
+        current: structuredClone(globalThis.__databaseEvents.findLast(
+            (event) => event.stage === "DB stop" &&
+                event.logicalPath === "zone/english/code_post_gfx.ff")),
         events: structuredClone(globalThis.__databaseEvents),
     }));
     expect(result.current).toMatchObject({
@@ -329,11 +333,15 @@ test("canonical DB reports truncated compressed input and cleans up", async ({ p
 test("canonical DB preserves the 256 KiB alternating input refill contract", async ({ page }, testInfo) => {
     const fastfile = createSyntheticCanonicalRefillXFile();
     await importWithCodePost(page, testInfo, "gate3-db-refill", fastfile);
-    await expect.poll(() => page.evaluate(
-        () => globalThis.__KISAKCOD_WEB__?.database?.stopStage,
-    )).toBe("Load_XAssetHeader/next-family-closure");
+    await expect.poll(() => page.evaluate(() => globalThis.__databaseEvents.some(
+        (event) => event.stage === "DB stop" &&
+            event.logicalPath === "zone/english/code_post_gfx.ff" &&
+            event.stopStage === "Load_XAssetHeader/next-family-closure",
+    ))).toBe(true);
     const trace = await page.evaluate(() => structuredClone(
-        globalThis.__KISAKCOD_WEB__.database));
+        globalThis.__databaseEvents.findLast((event) =>
+            event.stage === "DB stop" &&
+            event.logicalPath === "zone/english/code_post_gfx.ff")));
     expect(trace).toMatchObject({
         bytesRead: fastfile.byteLength,
         inputRefillCount: 2,

@@ -44,7 +44,6 @@ enum
 
 #undef GetObject
 
-scrCompilePub_t scrCompilePub;
 scrCompileGlob_t scrCompileGlob;
 
 enum

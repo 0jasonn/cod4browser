@@ -1756,7 +1756,7 @@ void __cdecl SND_ChoosePitchAndVolume(
     volMax = (1.0 - lerp) * alias0->volMax + alias1->volMax * lerp;
     pitchMin = (1.0 - lerp) * alias0->pitchMin + alias1->pitchMin * lerp;
     pitchMax = (1.0 - lerp) * alias0->pitchMax + alias1->pitchMax * lerp;
-    *volume = random() * (volMax - volMin) + volMin;
+    *volume = Q_random() * (volMax - volMin) + volMin;
     *volume = *volume * volumeScale;
     v9 = *volume;
     v8 = v9 - 1.0;
@@ -1773,7 +1773,7 @@ void __cdecl SND_ChoosePitchAndVolume(
         v6 = 0.0;
 
     *volume = v6;
-    *pitch = random() * (pitchMax - pitchMin) + pitchMin;
+    *pitch = Q_random() * (pitchMax - pitchMin) + pitchMin;
 }
 
 char __cdecl SND_ContinueLoopingSound(
@@ -2165,9 +2165,9 @@ void __cdecl SND_StartBackground(
         Com_Error(ERR_DROP, "alias %s sound %s played as an ambient / music track is not streamed; type must be 'streamed'", alias->aliasName, filename);
     }
     v8 = alias->volMax - alias->volMin;
-    volume = random() * v8 + alias->volMin;
+    volume = Q_random() * v8 + alias->volMin;
     v7 = alias->pitchMax - alias->pitchMin;
-    pitch = random() * v7 + alias->pitchMin;
+    pitch = Q_random() * v7 + alias->pitchMin;
     channel = SND_FIRST_STREAM_CHANNEL + track;
 
     iassert(channel >= ((0 + 8) + 32) && channel < ((0 + 8) + 32) + g_snd.max_stream_channels);
@@ -2344,7 +2344,7 @@ void __cdecl SND_PlayAmbientAlias(
             playedNew = 0;
 
             if ((alias->flags & 0x20) != 0)
-                fraction = random();
+                fraction = Q_random();
             else
                 fraction = 0.0;
 
@@ -2377,7 +2377,7 @@ void __cdecl SND_PlayAmbientAlias(
                     g_snd.chaninfo[tracknum].alias1 = aliases[i];
                     v4 = aliases[i];
                     v5 = v4->volMax - v4->volMin;
-                    volume = random() * v5 + v4->volMin;
+                    volume = Q_random() * v5 + v4->volMin;
                     trackptr = &g_snd.background[i + g_snd.ambient_track];
                     if (fadetime)
                         g_snd.background[i + g_snd.ambient_track].goalrate = (volume

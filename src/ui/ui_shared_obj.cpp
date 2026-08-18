@@ -5,6 +5,7 @@
 #include <universal/com_sndalias.h>
 
 #include <gfx_d3d/r_material.h>
+#include <ctime>
 
 $F99A9AECA2B60514CA5C8024B8EAC369 g_load_0;
 char menuBuf1[4096];
@@ -1089,7 +1090,7 @@ int __cdecl PC_ExpandBuiltinDefine(
     char v6; // [esp+47h] [ebp-21h]
     token_s *v7; // [esp+4Ch] [ebp-1Ch]
     script_s *scriptstack; // [esp+50h] [ebp-18h]
-    __int64 t; // [esp+58h] [ebp-10h] BYREF
+    std::time_t t; // [esp+58h] [ebp-10h] BYREF
     char *curtime; // [esp+60h] [ebp-8h]
     token_s *token; // [esp+64h] [ebp-4h]
 
@@ -1118,22 +1119,20 @@ int __cdecl PC_ExpandBuiltinDefine(
         token->type = 4;
         goto LABEL_8;
     case 3:
-        t = _time64(0);
-        curtime = _ctime64(&t);
+        t = std::time(nullptr);
+        curtime = std::ctime(&t);
         strcpy(token->string, "\"");
         strncat(token->string, curtime + 4, 7u);
         strncat(&token->string[7], curtime + 20, 4u);
         strcat(token->string, "\"");
-        free(curtime);
         token->type = 4;
         goto LABEL_8;
     case 4:
-        t = _time64(0);
-        curtime = _ctime64(&t);
+        t = std::time(nullptr);
+        curtime = std::ctime(&t);
         strcpy(token->string, "\"");
         strncat(token->string, curtime + 11, 8u);
         strcat(token->string, "\"");
-        free(curtime);
         token->type = 4;
     LABEL_8:
         token->subtype = strlen(token->string);
@@ -3911,7 +3910,7 @@ bool __cdecl Eval_EvaluationStep(Eval *eval)
             && eval->opStack[4 * eval->valStackPos + 1016] == EVAL_OP_COLON
             && eval->opStack[4 * eval->valStackPos + 1020] == EVAL_OP_COLON)
         {
-            same = _stricmp(
+            same = I_stricmp(
                 (const char *)eval->opStack[4 * eval->valStackPos + 1018],
                 (const char *)eval->opStack[4 * eval->valStackPos + 1022]) == 0;
             free((void *)eval->opStack[4 * eval->valStackPos + 1018]);
@@ -3939,7 +3938,7 @@ bool __cdecl Eval_EvaluationStep(Eval *eval)
             && eval->opStack[4 * eval->valStackPos + 1016] == EVAL_OP_COLON
             && eval->opStack[4 * eval->valStackPos + 1020] == EVAL_OP_COLON)
         {
-            v16 = _stricmp(
+            v16 = I_stricmp(
                 (const char *)eval->opStack[4 * eval->valStackPos + 1018],
                 (const char *)eval->opStack[4 * eval->valStackPos + 1022]) == 0;
             free((void *)eval->opStack[4 * eval->valStackPos + 1018]);

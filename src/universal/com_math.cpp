@@ -200,14 +200,14 @@ void __cdecl TRACK_com_math()
     track_static_alloc_internal(bytedirs, 1944, "bytedirs", 10);
 }
 
-float __cdecl random()
+float __cdecl Q_random()
 {
     return (rand() / 32768.0);
 }
 
 float __cdecl crandom()
 {
-    return (random() * 2.0 - 1.0);
+    return (Q_random() * 2.0 - 1.0);
 }
 
 void __cdecl GaussianRandom(float *f0, float *f1)

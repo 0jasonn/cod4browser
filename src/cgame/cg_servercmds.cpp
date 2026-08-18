@@ -6,13 +6,11 @@
 #include "cg_servercmds.h"
 #include <client/client.h>
 #include <qcommon/com_bsp.h>
-#include <gfx_d3d/r_dpvs.h>
+#include <gfx_d3d/r_cgame_api.h>
 #include "cg_vehicle_hud.h"
 #include "cg_scoreboard.h"
 #include <EffectsCore/fx_system.h>
-#include <gfx_d3d/r_model.h>
 #include <qcommon/cmd.h>
-#include <gfx_d3d/r_fog.h>
 #include <ui/ui.h>
 #include <DynEntity/DynEntity_client.h>
 #include "cg_main.h"

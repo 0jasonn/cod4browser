@@ -1,4 +1,5 @@
 #include <universal/q_shared.h>
+#include <qcommon/system.h>
 #include "fx_system.h"
 
 int32_t warnCount_1;

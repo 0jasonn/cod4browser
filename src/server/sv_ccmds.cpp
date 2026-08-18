@@ -17,7 +17,8 @@
 #include <ui/ui.h>
 #include <universal/com_files.h>
 #include "sv_public.h"
-#include <cgame/cg_main.h>
+#include "sv_map_command.h"
+#include <cgame/cg_runtime_api.h>
 
 int sv_loadScripts;
 int sv_map_restart;
@@ -1030,38 +1031,6 @@ void __cdecl SV_RemoveOperatorCommands()
     ;
 }
 
-void SV_Map_f()
-{
-    char *hasSVG; // r3
-    bool savegame; // r31
-    char mapname[64]; // [sp+50h] [-A0h] BYREF
-    char filename[72]; // [sp+90h] [-60h] BYREF
-
-    com_errorPrintsCount = 0;
-    SV_Cmd_ArgvBuffer(1, mapname, 64);
-    //if (!ui_skipMainLockout->current.enabled)
-    //    SV_SelectSaveDevice_f();
-    I_strlwr(mapname);
-    hasSVG = strstr(mapname, ".svg");
-
-    savegame = hasSVG != 0;
-
-    if (hasSVG)
-    {
-        I_strncpyz(filename, mapname, 64);
-        if (!(unsigned __int8)ExtractMapStringFromSaveGame(filename, mapname))
-        {
-            //HIDWORD(v4) = &unk_8207A5B4;
-            G_SaveError(ERR_DROP, SAVE_ERROR_MISSING_DEVICE, "Unable to extract map string name from save");
-        }
-    }
-    Dvar_SetBool(sv_cheats, 1);
-    CL_ShutdownDemo();
-    FS_ConvertPath(mapname);
-    SV_SpawnServer(mapname, savegame);
-    ShowLoadErrorsSummary(mapname, com_errorPrintsCount);
-}
-
 cmd_function_s SV_NextLevel_f_VAR;
 cmd_function_s SV_NextLevel_f_VAR_SERVER;
 cmd_function_s SV_SelectSaveDevice_f_VAR;
@@ -1116,14 +1085,6 @@ cmd_function_s SV_DemoInfo_f_VAR;
 cmd_function_s SV_DemoInfo_f_VAR_SERVER;
 cmd_function_s SV_LoadGame_f_VAR_SERVER;
 cmd_function_s SV_LoadGame_f_VAR;
-cmd_function_s SV_Map_f_VAR_SERVER;
-cmd_function_s SV_Map_f_VAR;
-cmd_function_s SV_Map_f_VAR_SERVER_0;
-cmd_function_s SV_Map_f_VAR_0;
-cmd_function_s SV_Map_f_VAR_SERVER_1;
-cmd_function_s SV_Map_f_VAR_SERVER_2;
-cmd_function_s SV_Map_f_VAR_2;
-cmd_function_s SV_Map_f_VAR_1;
 cmd_function_s SV_MapRestart_f_VAR_SERVER;
 cmd_function_s SV_MapRestart_f_VAR;
 cmd_function_s SV_FastRestart_f_VAR_SERVER;
@@ -1140,18 +1101,7 @@ void __cdecl SV_AddOperatorCommands()
         Cmd_AddServerCommandInternal("fast_restart", SV_FastRestart_f, &SV_FastRestart_f_VAR_SERVER);
         Cmd_AddCommandInternal("map_restart", Cbuf_AddServerText_f, &SV_MapRestart_f_VAR);
         Cmd_AddServerCommandInternal("map_restart", SV_MapRestart_f, &SV_MapRestart_f_VAR_SERVER);
-        Cmd_AddCommandInternal("spmap", Cbuf_AddServerText_f, &SV_Map_f_VAR_2);
-        Cmd_AddServerCommandInternal("spmap", SV_Map_f, &SV_Map_f_VAR_SERVER_2);
-        Cmd_AddCommandInternal("map", Cbuf_AddServerText_f, &SV_Map_f_VAR_1);
-        Cmd_AddServerCommandInternal("map", SV_Map_f, &SV_Map_f_VAR_SERVER_1);
-        Cmd_AddCommandInternal("devmap", Cbuf_AddServerText_f, &SV_Map_f_VAR_0);
-        Cmd_AddServerCommandInternal("devmap", SV_Map_f, &SV_Map_f_VAR_SERVER_0);
-        Cmd_AddCommandInternal("spdevmap", Cbuf_AddServerText_f, &SV_Map_f_VAR);
-        Cmd_AddServerCommandInternal("spdevmap", SV_Map_f, &SV_Map_f_VAR_SERVER);
-        Cmd_SetAutoComplete("map", "maps", "d3dbsp");
-        Cmd_SetAutoComplete("spmap", "maps", "d3dbsp");
-        Cmd_SetAutoComplete("devmap", "maps", "d3dbsp");
-        Cmd_SetAutoComplete("spdevmap", "maps", "d3dbsp");
+        SV_RegisterMapCommands();
         Cmd_AddCommandInternal("loadgame", Cbuf_AddServerText_f, &SV_LoadGame_f_VAR);
         Cmd_AddServerCommandInternal("loadgame", SV_LoadGame_f, &SV_LoadGame_f_VAR_SERVER);
         Cmd_SetAutoComplete("loadgame", "save", "svg");

@@ -1,10 +1,8 @@
 #pragma once
 
 #ifdef KISAK_MP
-#include <cgame_mp/cg_local_mp.h>
 #include <server_mp/server_mp.h>
 #elif KISAK_SP
-#include <cgame/cg_local.h>
 #include <server/server.h>
 #elif defined(KISAK_RADIANT)
 // Editor has no server; forward-declare the types used in function signatures below.
@@ -16,6 +14,11 @@ struct DObjAnimMat;
 struct DObj_s;
 struct XModel;
 #endif
+
+struct DObjAnimMat;
+struct DObj_s;
+struct XAnimTree_s;
+struct XModel;
 
 
 void __cdecl TRACK_sv_game();

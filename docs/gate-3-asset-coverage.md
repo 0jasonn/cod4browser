@@ -47,9 +47,8 @@ still appear inside Gate 2 oracle results, but they are no longer census-only.
 
 ## Temporary scaffolding still present
 
-- `db_runtime_prefix.cpp` contains the browser entry hook plus normalized
-  trace/failure seams; it owns no generated asset behavior and remains
-  shrink-only.
+- `db_runtime_prefix.cpp` contains only normalized trace/failure seams; it owns
+  no browser entry hook or generated asset behavior and remains shrink-only.
 - `common_gate3_prefix.inl` remains the frozen qcommon bootstrap extraction.
 - `web_retail_fastfile_census.*`, its resumable family loaders, registry and
   retained Killhouse ownership remain an explicitly started Gate 2 oracle.
@@ -63,11 +62,12 @@ still appear inside Gate 2 oracle results, but they are no longer census-only.
 
 ## Current retail boundary
 
-Owned `code_post_gfx.ff` completes all 1,639 assets through the ordinary
-generated dispatcher. It produces 1,698 real publications through entry 1,713,
-leaves 31,054 free entries, and ends at asset 1,638, type 31 RawFile
-`code_post_gfx`. All allocated stream blocks are consumed exactly:
-`[0,0,0,0,407412,0,0,4224,480]`. There is no unsupported generated family in
-this zone. This is an architecture-review stop; the next work item is to resume
-the normal startup zone request order and inventory the first genuine family
-boundary reached there, without preselecting or seeking to a later asset.
+The shared client/renderer request now drives `code_post_gfx.ff`, `ui.ff`, and
+`common.ff` in native order and with native allocation flags. All 1,639, 35,
+and 6,502 ordered assets respectively complete through the ordinary generated
+dispatcher. The retained registry records 9,637 real publications through
+entry 9,652, leaves 23,115 free entries, and ends at common asset 6,501, type
+31 RawFile `common`. Final common stream offsets are
+`[0,0,0,0,28021740,0,0,438944,76704]`. No unsupported family occurs in the
+complete prerequisite chain. The exact checkpoints are recorded in
+[`gate-3-startup-zone-chain.md`](gate-3-startup-zone-chain.md).

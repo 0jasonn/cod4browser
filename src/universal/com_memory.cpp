@@ -7,11 +7,12 @@
 #include <string.h>
 #include <qcommon/qcommon.h>
 #include <qcommon/threads.h>
+#include <qcommon/system.h>
 
 #include <qcommon/mem_track.h>
-#include <win32/win_local.h>
-#include <win32/win_net.h>
 #include <database/database.h>
+#include <xanim/xanim.h>
+#include <xanim/xmodel.h>
 #include "com_files.h"
 #include <qcommon/cmd.h>
 #include <gfx_d3d/r_dvars.h>
@@ -58,8 +59,8 @@ void __cdecl Hunk_AddAsset(XAssetHeader header, _DWORD *data)
 void Com_TouchMemory()
 {
     int32_t sum; // [esp+4h] [ebp-10h]
-    DWORD start; // [esp+8h] [ebp-Ch]
-    DWORD end; // [esp+Ch] [ebp-8h]
+    uint32_t start; // [esp+8h] [ebp-Ch]
+    uint32_t end; // [esp+Ch] [ebp-8h]
     int32_t i; // [esp+10h] [ebp-4h]
     int32_t ia; // [esp+10h] [ebp-4h]
 
@@ -138,7 +139,7 @@ void* __cdecl Z_VirtualReserve(int32_t size)
 
     if (size <= 0)
         MyAssertHandler(".\\universal\\com_memory.cpp", 150, 0, "%s\n\t(size) = %i", "(size > 0)", size);
-    buf = VirtualAlloc(0, size, 0x2000u, 4u);
+    buf = Sys_VirtualReserve(size);
     if (!buf)
         MyAssertHandler(".\\universal\\com_memory.cpp", 208, 0, "%s", "buf");
     return buf;
@@ -148,12 +149,12 @@ void __cdecl Z_VirtualDecommitInternal(void* ptr, int32_t size)
 {
     if (size < 0)
         MyAssertHandler(".\\universal\\com_memory.cpp", 325, 0, "%s\n\t(size) = %i", "(size >= 0)", size);
-    VirtualFree(ptr, size, 0x4000u);
+    Sys_VirtualDecommit(ptr, size);
 }
 
 void __cdecl Z_VirtualFreeInternal(void* ptr)
 {
-    VirtualFree(ptr, 0, 0x8000u);
+    Sys_VirtualRelease(ptr);
 }
 
 void* __cdecl Z_TryVirtualAllocInternal(int32_t size)
@@ -170,7 +171,7 @@ void* __cdecl Z_TryVirtualAllocInternal(int32_t size)
 bool __cdecl Z_TryVirtualCommitInternal(void* ptr, int32_t size)
 {
     iassert(size >= 0);
-    return VirtualAlloc(ptr, size, 0x1000u, 4u) != 0;
+    return Sys_VirtualCommit(ptr, size);
 }
 
 void __cdecl Z_VirtualCommitInternal(void* ptr, int32_t size)
@@ -266,9 +267,11 @@ void Com_InitHunkMemory()
     {
         s_hunkTotal = 0xA00000;
     }
+#ifndef KISAK_WEB
     R_ReflectionProbeRegisterDvars();
     if (r_reflectionProbeGenerate->current.enabled)
         s_hunkTotal = 0x20000000;
+#endif
     s_hunkData = (unsigned char*)Z_VirtualReserve(s_hunkTotal);
     if (!s_hunkData)
         Sys_OutOfMemErrorInternal(".\\universal\\com_memory.cpp", 1318);
@@ -524,7 +527,7 @@ uint32_t __cdecl Hunk_AllocateTempMemoryHigh(int32_t size, const char* name)
         Com_Error(ERR_DROP, "Hunk_AllocateTempMemoryHigh: failed on %i bytes (total %i MB, low %i MB, high %i MB)", size, s_hunkTotal / 0x100000, hunk_low.temp / 0x100000, hunk_high.temp / 0x100000);
     }
     buf = (uint32_t)&s_hunkData[s_hunkTotal - hunk_high.temp];
-    if ((((_BYTE)s_hunkTotal + (_BYTE)s_hunkData - LOBYTE(hunk_high.temp)) & 0xF) != 0)
+    if ((static_cast<uintptr_t>(buf) & 0xF) != 0)
         MyAssertHandler(".\\universal\\com_memory.cpp", 2074, 0, "%s", "!(((psize_int)buf) & 15)");
     if (endBuf != (uint8_t*)(buf & 0xFFFFF000))
         Z_VirtualCommit((void*)(buf & 0xFFFFF000), (int)&endBuf[-(int)(buf & 0xFFFFF000)]); // KISAKTODO: sus int32_t cast
@@ -631,7 +634,7 @@ uint32_t* __cdecl Hunk_AllocateTempMemory(int32_t size, const char* name)
     }
     hdr = (hunkHeader_t*)buf;
     bufa = buf + 16;
-    if (((uint8_t)bufa & 0xF) != 0)
+    if ((reinterpret_cast<uintptr_t>(bufa) & 0xF) != 0)
         MyAssertHandler(".\\universal\\com_memory.cpp", 2303, 0, "%s", "!(((psize_int)buf) & 15)");
     commitSize = ((uint32_t)&s_hunkData[hunk_low.temp + 4095] & 0xFFFFF000) - (uint32_t)beginBuf;
     if (commitSize)

@@ -6,7 +6,8 @@
 #include "cl_pose.h"
 
 #include <universal/assertive.h>
-#include <gfx_d3d/r_scene.h>
+#include <qcommon/system.h>
+#include <gfx_d3d/r_scene_api.h>
 #include "client.h"
 #include <xanim/dobj_utils.h>
 

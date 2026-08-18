@@ -2,7 +2,10 @@
 #include "dobj_utils.h"
 #include "xmodel.h"
 #include <universal/assertive.h>
-#include <gfx_d3d/r_utils.h>
+#include <universal/com_math.h>
+#include <gfx_d3d/r_lod_api.h>
+#include <qcommon/system.h>
+#include <script/scr_stringlist.h>
 #include <universal/profile.h>
 
 DObjAnimMat *__cdecl DObjGetRotTransArray(const DObj_s *obj)

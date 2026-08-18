@@ -12,7 +12,6 @@
 #include "actor_events.h"
 #include "actor_senses.h"
 #include "actor_threat.h"
-#include <cgame/cg_local.h>
 
 const float g_vSpawnCheckPoints[11][3] =
 {

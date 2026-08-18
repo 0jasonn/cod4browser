@@ -4,8 +4,12 @@
 #error This file is for SinglePlayer only
 #endif
 
-#include "aim_assist.h"
-#include <client/client.h>
+#include "aim_target_types.h"
+#include <universal/q_shared.h>
+
+struct SaveGame;
+struct gentity_s;
+struct playerState_s;
 
 void __cdecl TRACK_aim_target();
 const dvar_s *__cdecl AimTarget_RegisterDvars(int a1, unsigned __int16 a2, const char *a3);

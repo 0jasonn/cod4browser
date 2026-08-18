@@ -40,6 +40,14 @@ void __cdecl ProbeCommand()
 } // namespace
 
 void DB_InitThread() { ++g_databaseThreadInitCount; }
+int com_inServerFrame = 0;
+void __cdecl SV_WaitServer() { assert(!com_inServerFrame); }
+void __cdecl G_AddCommandNotify(volatile std::uint16_t) {}
+void Scr_Error(const char *) { std::abort(); }
+void __cdecl MemFile_WriteData(MemoryFile *, int, const void *) {}
+void __cdecl MemFile_WriteCString(MemoryFile *, const char *) {}
+const char *__cdecl MemFile_ReadCString(MemoryFile *) { return ""; }
+void __cdecl MemFile_ReadData(MemoryFile *, int, std::uint8_t *) {}
 
 void Sys_InitializeCriticalSections() {}
 void Sys_EnterCriticalSection(int) {}

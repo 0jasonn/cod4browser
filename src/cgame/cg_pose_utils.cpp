@@ -3,6 +3,7 @@
 #include "cg_public.h"
 
 #include <bgame/bg_local.h>
+#include <qcommon/system.h>
 
 void __cdecl CG_UsedDObjCalcPose(cpose_t *pose)
 {

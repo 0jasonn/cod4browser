@@ -6,6 +6,7 @@
 #include <database/database.h>
 #include "cmd.h"
 #include <sound/snd_public.h>
+#include <universal/com_memory.h>
 
 int fs_numServerReferencedIwds;
 char basename[64];

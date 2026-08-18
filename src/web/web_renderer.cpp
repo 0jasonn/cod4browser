@@ -49,6 +49,7 @@ struct WebRendererState
         WebRendererTextureBinding::None,
     };
     std::uint32_t surfaceSubmissionGeneration = 0;
+    std::uint32_t surfaceDrawnSubmissionGeneration = 0;
     std::uint32_t surfaceResourceGeneration = 0;
     std::uint32_t surfaceRecoveryCount = 0;
     bool surfaceActive = false;
@@ -192,6 +193,29 @@ EM_JS(
         }));
     });
 
+EM_JS(
+    void,
+    DispatchRendererSurfaceDraw,
+    (std::uint32_t vertexCount, std::uint32_t indexCount,
+     std::uint32_t drawFirstIndex, std::uint32_t drawIndexCount,
+     std::uint32_t submissionGeneration, std::uint32_t resourceGeneration,
+     bool resident),
+    {
+        globalThis.dispatchEvent(new CustomEvent(
+            "kisakcod:renderer-surface-draw", { detail: {
+                state: "drawn",
+                message: "The current engine-owned indexed surface was issued through WebGL2",
+                vertexCount: vertexCount >>> 0,
+                indexCount: indexCount >>> 0,
+                drawFirstIndex: drawFirstIndex >>> 0,
+                drawIndexCount: drawIndexCount >>> 0,
+                topology: "triangle-list",
+                submissionGeneration: submissionGeneration >>> 0,
+                resourceGeneration: resourceGeneration >>> 0,
+                resident: Boolean(resident)
+            }}));
+    });
+
 const char *SurfaceTopologyString(WebRendererPrimitiveTopology topology) noexcept
 {
     return topology == WebRendererPrimitiveTopology::TriangleList
@@ -249,6 +273,20 @@ void EmitSurfaceLifecycle(const char *state, const char *message)
         g_renderer.surfaceRecoveryCount,
         1u,
         1u,
+        g_renderer.initialized && !g_renderer.contextLost &&
+            g_renderer.vertexArray != 0 && g_renderer.vertexBuffer != 0 &&
+            g_renderer.indexBuffer != 0);
+}
+
+void EmitSurfaceDraw()
+{
+    DispatchRendererSurfaceDraw(
+        static_cast<std::uint32_t>(g_renderer.retainedVertices.size()),
+        static_cast<std::uint32_t>(g_renderer.retainedIndices.size()),
+        g_renderer.draw.firstIndex,
+        g_renderer.draw.indexCount,
+        g_renderer.surfaceSubmissionGeneration,
+        g_renderer.surfaceResourceGeneration,
         g_renderer.initialized && !g_renderer.contextLost &&
             g_renderer.vertexArray != 0 && g_renderer.vertexBuffer != 0 &&
             g_renderer.indexBuffer != 0);
@@ -1500,6 +1538,14 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         GL_UNSIGNED_SHORT,
         reinterpret_cast<const void *>(indexOffset));
     constexpr std::uint32_t completedDraws = 1u;
+
+    if (g_renderer.surfaceDrawnSubmissionGeneration !=
+        g_renderer.surfaceSubmissionGeneration)
+    {
+        g_renderer.surfaceDrawnSubmissionGeneration =
+            g_renderer.surfaceSubmissionGeneration;
+        EmitSurfaceDraw();
+    }
 
     if (compatibilityDraw)
     {

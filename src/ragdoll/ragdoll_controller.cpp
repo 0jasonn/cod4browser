@@ -1,7 +1,7 @@
 #include <universal/q_shared.h>
 #include "ragdoll.h"
 
-#include <gfx_d3d/r_scene.h>
+#include <gfx_d3d/r_scene_api.h>
 
 #include <xanim/dobj.h>
 #include <xanim/dobj_utils.h>

@@ -8,7 +8,6 @@
 #include "scr_compiler.h"
 
 #include <qcommon/qcommon.h>
-#include <Windows.h>
 #include <universal/com_files.h>
 #include "scr_parser.h"
 #include <database/database.h>
@@ -18,18 +17,6 @@
 #undef GetObject
 #undef FindObject
 
-scrVarPub_t scrVarPub;
-scrVarDebugPub_t* scrVarDebugPub;
-scrVarDebugPub_t scrVarDebugPubBuf;
-scrVarGlob_t scrVarGlob;
-
-scr_classStruct_t g_classMap[CLASS_NUM_COUNT] =
-{
-	{ 0, 0, 0x65, "entity" },
-	{ 0, 0, 0x68, "hudelem" },
-	{ 0, 0, 0x70, "pathnode" },
-	{ 0, 0, 0x76, "vehiclenode" }
-};
 
 // This is 101 in MP. Nothing(1) in SP. I don't ask questions.
 #ifdef KISAK_MP
@@ -79,71 +66,6 @@ bool IsObject(VariableValueInternal* entryValue)
 bool IsObject(VariableValue* value)
 {
 	return value->type >= VAR_THREAD;
-}
-
-void Scr_InitVariables()
-{
-	if (!scrVarDebugPub)
-		scrVarDebugPub = &scrVarDebugPubBuf;
-
-	memset(scrVarDebugPub->leakCount, 0, sizeof(scrVarDebugPub->leakCount));
-
-	scrVarPub.totalObjectRefCount = 0;
-	scrVarPub.totalVectorRefCount = 0;
-
-	if (scrVarDebugPub)
-		memset(scrVarDebugPub->extRefCount, 0, sizeof(scrVarDebugPub->extRefCount));
-
-	scrVarPub.numScriptValues = 0;
-	scrVarPub.numScriptObjects = 0;
-
-	if (scrVarDebugPub)
-		memset(scrVarDebugPub, 0, 0x60000u);
-
-	Scr_InitVariableRange(VARIABLELIST_PARENT_BEGIN, VARIABLELIST_PARENT_SIZE + 1);
-	Scr_InitVariableRange(VARIABLELIST_CHILD_BEGIN, 0x18000u);
-}
-
-void Scr_InitVariableRange(uint32_t begin, uint32_t end)
-{
-	uint32_t index; // [esp+4h] [ebp-8h]
-	VariableValueInternal* value = NULL; // [esp+8h] [ebp-4h]
-	VariableValueInternal* valuea; // [esp+8h] [ebp-4h]
-
-	for (index = begin + 1; index < end; ++index)
-	{
-		value = &scrVarGlob.variableList[index];
-		value->w.status = 0;
-
-		iassert(!(value->w.type & VAR_MASK));
-
-		value->hash.id = index - begin;
-		value->v.next = index - begin;
-		value->u.next = index - begin + 1;
-		value->hash.u.prev = index - begin - 1;
-	}
-
-	valuea = &scrVarGlob.variableList[begin];
-	valuea->w.status = 0;
-
-	iassert(!(valuea->w.type & VAR_MASK));
-
-	valuea->w.status = valuea->w.status;
-	valuea->hash.id = 0;
-	valuea->v.next = 0;
-	valuea->u.next = 1;
-	scrVarGlob.variableList[begin + VARIABLELIST_PARENT_BEGIN].hash.u.prev = 0;
-	valuea->hash.u.prev = end - begin - 1;
-	scrVarGlob.variableList[end - 1].u.next = 0;
-}
-
-void Scr_InitClassMap()
-{
-	for (int classnum = 0; classnum < CLASS_NUM_COUNT; ++classnum)
-	{
-		g_classMap[classnum].entArrayId = 0;
-		g_classMap[classnum].id = 0;
-	}
 }
 
 uint32_t Scr_GetNumScriptVars(void)
@@ -255,66 +177,6 @@ uint32_t  GetStartLocalId(uint32_t threadId)
 		&& (scrVarGlob.variableList[VARIABLELIST_PARENT_BEGIN + threadId].w.type & VAR_MASK) <= VAR_TIME_THREAD);
 
 	return threadId;
-}
-
-uint32_t  AllocValue(void)
-{
-	VariableValueInternal* entry; // [esp+0h] [ebp-14h]
-	uint16_t newIndex; // [esp+4h] [ebp-10h]
-	uint16_t next; // [esp+8h] [ebp-Ch]
-	VariableValueInternal* entryValue; // [esp+Ch] [ebp-8h]
-	uint16_t index; // [esp+10h] [ebp-4h]
-
-	index = scrVarGlob.variableList[VARIABLELIST_CHILD_BEGIN].u.next;
-
-	if (!scrVarGlob.variableList[VARIABLELIST_CHILD_BEGIN].u.next)
-		Scr_TerminalError("exceeded maximum number of script variables");
-
-	entry = &scrVarGlob.variableList[index + VARIABLELIST_CHILD_BEGIN];
-	entryValue = &scrVarGlob.variableList[entry->hash.id + VARIABLELIST_CHILD_BEGIN];
-	iassert((entryValue->w.status & VAR_STAT_MASK) == VAR_STAT_FREE);
-
-	next = entryValue->u.next;
-	if (entry != entryValue && (entry->w.status & VAR_STAT_MASK) == 0)
-	{
-		newIndex = entry->v.next;
-		iassert(newIndex != index);
-		scrVarGlob.variableList[newIndex + VARIABLELIST_CHILD_BEGIN].hash.id = entry->hash.id;
-		entry->hash.id = index;
-		entryValue->v.next = newIndex;
-		entryValue->u.next = entry->u.next;
-		entryValue = &scrVarGlob.variableList[index + VARIABLELIST_CHILD_BEGIN];
-	}
-	scrVarGlob.variableList[VARIABLELIST_CHILD_BEGIN].u.next = next;
-	scrVarGlob.variableList[next + VARIABLELIST_CHILD_BEGIN].hash.u.prev = 0;
-	entryValue->v.next = index;
-	entryValue->nextSibling = 0;
-	entry->hash.u.prev = 0;
-
-	iassert(entry->hash.id > 0 && entry->hash.id < VARIABLELIST_CHILD_SIZE);
-
-	++scrVarPub.totalObjectRefCount;
-
-	if (scrVarDebugPub)
-	{
-		iassert(!scrVarDebugPub->leakCount[VARIABLELIST_CHILD_BEGIN + entry->hash.id]);
-		++scrVarDebugPub->leakCount[entry->hash.id + VARIABLELIST_CHILD_BEGIN];
-	}
-	++scrVarPub.numScriptValues;
-
-	iassert(scrVarPub.varUsagePos);
-
-	if (scrVarDebugPub)
-	{
-		iassert(!scrVarDebugPub->varUsage[VARIABLELIST_CHILD_BEGIN + entry->hash.id]);
-		scrVarDebugPub->varUsage[entry->hash.id + VARIABLELIST_CHILD_BEGIN] = scrVarPub.varUsagePos;
-	}
-	entryValue->w.status = VAR_STAT_EXTERNAL;
-
-	iassert(!(entryValue->w.type & VAR_MASK));
-
-	entryValue->w.status = (unsigned char)entryValue->w.status;
-	return entry->hash.id;
 }
 
 uint32_t  AllocObject(void)

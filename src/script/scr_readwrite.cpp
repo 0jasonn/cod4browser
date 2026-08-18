@@ -1234,7 +1234,7 @@ void __cdecl DoSaveEntryInternal(unsigned int type, VariableUnion *u, MemoryFile
         case 3u:
             v19 = MemFile_GetUsedSize(memFile);
             //ProfMem_Begin("string", v19);
-            v20 = SL_ConvertToString((unsigned __int16)u);
+            v20 = SL_ConvertToString(static_cast<unsigned __int16>(reinterpret_cast<std::uintptr_t>(u)));
             MemFile_WriteCString(memFile, v20);
             v21 = MemFile_GetUsedSize(memFile);
             //ProfMem_End(v21);
@@ -1462,7 +1462,8 @@ void __cdecl AddSaveEntryInternal(unsigned int type, const VariableStackBuffer *
         if (u && !scrVarPub.saveIdMap[(unsigned int)u])
         {
             scrVarPub.saveIdMap[(unsigned int)u] = ++scrVarPub.savecount;
-            *(unsigned __int16 *)((char *)scrVarPub.saveIdMapRev + __ROL4__(scrVarPub.savecount, 1)) = (unsigned __int16)u;
+            *(unsigned __int16 *)((char *)scrVarPub.saveIdMapRev + __ROL4__(scrVarPub.savecount, 1)) =
+                static_cast<unsigned __int16>(reinterpret_cast<std::uintptr_t>(u));
         }
     }
     else if (type == 10)
@@ -1509,19 +1510,20 @@ void __cdecl DoSaveEntry(VariableValue *value, VariableValue *name, bool isArray
     {
         v12 = MemFile_GetUsedSize(memFile);
         //ProfMem_Begin("non-array", v12);
-        if (((unsigned int)name & 0xFF000000) != 0)
+        const std::uintptr_t nameValue = reinterpret_cast<std::uintptr_t>(name);
+        if ((nameValue & 0xFF000000) != 0)
             MyAssertHandler(
                 "c:\\trees\\cod3\\cod3src\\src\\script\\scr_readwrite.cpp",
                 402,
                 0,
                 "%s\n\t(name) = %i",
                 "(!(name & 0xFF000000))",
-                name);
-        v27[0] = (v27[0] & 0xFFFFFF00) | ((uint8_t)name);
+                static_cast<unsigned int>(nameValue));
+        v27[0] = (v27[0] & 0xFFFFFF00) | static_cast<std::uint8_t>(nameValue);
         MemFile_WriteData(memFile, 1, v27);
-        v27[0] = (v27[0] & 0xFFFFFF00) | (((uint32_t)name >> 8) & 0xFF);
+        v27[0] = (v27[0] & 0xFFFFFF00) | ((nameValue >> 8) & 0xFF);
         MemFile_WriteData(memFile, 1, v27);
-        v27[0] = (v27[0] & 0xFFFFFF00) | (((uint32_t)name >> 16) & 0xFF);
+        v27[0] = (v27[0] & 0xFFFFFF00) | ((nameValue >> 16) & 0xFF);
         MemFile_WriteData(memFile, 1, v27);
         v13 = MemFile_GetUsedSize(memFile);
         //ProfMem_End(v13);
@@ -1529,7 +1531,8 @@ void __cdecl DoSaveEntry(VariableValue *value, VariableValue *name, bool isArray
         //ProfMem_End(v14);
         return;
     }
-    VariableValue arrVal = Scr_GetArrayIndexValue((unsigned int)name);
+    VariableValue arrVal = Scr_GetArrayIndexValue(
+        static_cast<unsigned int>(reinterpret_cast<std::uintptr_t>(name)));
     if (arrVal.type == 1)
     {
         WriteId(arrVal.u.intValue, 5u, memFile);
@@ -1879,7 +1882,7 @@ void __cdecl Scr_SavePost(MemoryFile *memFile)
 void __cdecl AddSaveStack(const VariableStackBuffer *stackBuf)
 {
     int size; // r9
-    CONST char *buf; // r31
+    const char *buf; // r31
     int v4; // r10
     __int16 v5; // r29
     const VariableStackBuffer *v6; // r3

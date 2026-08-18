@@ -124,6 +124,7 @@ extern const dvar_t *com_dedicated;
 extern const dvar_t *com_hiDef;
 extern const dvar_t *com_animCheck;
 extern const dvar_t *com_developer_script;
+extern const dvar_t *com_developer_script_abort_on_error;
 extern const dvar_t *dev_timescale;
 extern const dvar_t *cl_useMapPreloading;
 extern const dvar_t *com_maxfps;

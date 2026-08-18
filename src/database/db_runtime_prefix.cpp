@@ -7,9 +7,7 @@
 #include <database/db_runtime_prefix.h>
 
 #include <database/database.h>
-#include <database/db_initialization.h>
 #include <universal/q_shared.h>
-#include <universal/physicalmemory.h>
 
 #include <emscripten.h>
 
@@ -370,21 +368,4 @@ bool DB_RuntimeStreamCanRead(std::size_t size)
 const DBRuntimeTraceSnapshot &DB_GetRuntimeTrace()
 {
     return g_trace;
-}
-
-extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_StartCanonicalDbRuntimeCheck()
-{
-    // The isolated Com_Init prefix intentionally published its trace while the
-    // native $init high-allocation scope was still open. The mounted DB request
-    // occurs after that boundary, matching the native ordering where $init is
-    // closed and database initialization is released before high-zone PMem.
-    const PhysicalMemory *memory = PMem_GetState();
-    if (memory->prim[1].allocName)
-    {
-        const char *initScope = memory->prim[1].allocName;
-        PMem_EndAlloc(initScope, 1u);
-        DB_SetInitializing(false);
-    }
-    XZoneInfo zoneInfo{"code_post_gfx", 4, 0};
-    DB_LoadXAssets(&zoneInfo, 1, 1);
 }

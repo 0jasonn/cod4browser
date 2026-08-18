@@ -52,7 +52,7 @@ void __cdecl SV_DisplaySaveErrorUI(void)
 	Com_PrintError(10, "SV_DisplaySaveErrorUI: a save operation failed\n");
 }
 
-bool __cdecl BuildCleanSavePath(char *cleanSavePath, unsigned int cleanSavePathSize, char const *filename, enum SaveType saveType)
+bool __cdecl BuildCleanSavePath(char *cleanSavePath, unsigned int cleanSavePathSize, char const *filename, SaveType saveType)
 {
 	if (!filename)
 		MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savedevice_xenon.cpp", 83, 0, "%s", "filename");

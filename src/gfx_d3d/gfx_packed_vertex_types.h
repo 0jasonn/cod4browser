@@ -1,19 +1,8 @@
 #pragma once
 
 #include <qcommon/packed_tex_coords.h>
+#include <gfx_d3d/gfx_color_types.h>
 #include <universal/packed_unit_vec.h>
-
-#include <cstdint>
-
-union GfxColor
-{
-    operator std::uint32_t() const { return packed; }
-    GfxColor() : packed(0) {}
-    GfxColor(int value) : packed(static_cast<std::uint32_t>(value)) {}
-    GfxColor(std::uint32_t value) : packed(value) {}
-    std::uint32_t packed;
-    std::uint8_t array[4];
-};
 
 struct GfxPackedVertex
 {
@@ -31,6 +20,5 @@ struct GfxPackedVertexNormal
     PackedUnitVec tangent;
 };
 
-static_assert(sizeof(GfxColor) == 4u);
 static_assert(sizeof(GfxPackedVertex) == 32u);
 static_assert(sizeof(GfxPackedVertexNormal) == 8u);

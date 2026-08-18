@@ -10,7 +10,7 @@
 #include <game/g_actor_prone.h>
 #include <ragdoll/ragdoll.h>
 #include "cg_ents.h"
-#include <gfx_d3d/r_scene.h>
+#include <gfx_d3d/r_cgame_api.h>
 #include "cg_local.h"
 #include "cg_compassfriendlies.h"
 

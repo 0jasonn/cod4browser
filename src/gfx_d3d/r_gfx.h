@@ -1,11 +1,17 @@
 #pragma once
 
+#if defined(KISAK_WEB)
+struct IDirect3DIndexBuffer9;
+struct IDirect3DVertexBuffer9;
+#else
 #include <d3d9.h>
+#endif
 
 #include <gfx_d3d/gfx_draw_surf_types.h>
 #include <gfx_d3d/gfx_packed_vertex_types.h>
 #include <gfx_d3d/gfx_image_types.h>
 #include <gfx_d3d/gfx_light_types.h>
+#include <gfx_d3d/gfx_placement_types.h>
 #include <universal/com_math.h>
 #include <qcommon/com_pack.h>
 #include <cstdint>
@@ -52,18 +58,6 @@ struct GfxMeshData // sizeof=0x20
 struct GfxMatrix // sizeof=0x40
 {                                       // ...
     float m[4][4];                      // ...
-};
-
-struct GfxPlacement // sizeof=0x1C
-{                                       // ...
-    float quat[4];                      // ...
-    float origin[3];                    // ...
-};
-
-struct GfxScaledPlacement // sizeof=0x20
-{                                       // ...
-    GfxPlacement base;                  // ...
-    float scale;                        // ...
 };
 
 struct GfxViewParms // sizeof=0x140

@@ -2,7 +2,7 @@
 #include "fx_system.h"
 #include <universal/com_files.h>
 #include <universal/q_parse.h>
-#include <gfx_d3d/r_model.h>
+#include <gfx_d3d/r_cgame_api.h>
 #include <universal/com_memory.h>
 #include <physics/phys_local.h>
 #include <database/database.h>
@@ -1147,7 +1147,7 @@ const FxEffectDef *__cdecl FX_Load(const char *name)
     const FxEffectDef *v5; // [esp+10h] [ebp-10B54h]
     FxEditorEffectDef edEffectDef; // [esp+14h] [ebp-10B50h] BYREF
 
-    strcpy_s(edEffectDef.name, name);
+    I_strncpyz(edEffectDef.name, name, sizeof(edEffectDef.name));
     if (FX_LoadEditorEffect(name, &edEffectDef)
         && (v5 = FX_Convert(&edEffectDef, &FX_AllocMem)) != 0)
     {

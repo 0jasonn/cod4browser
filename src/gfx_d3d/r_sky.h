@@ -1,5 +1,9 @@
 #pragma once
 
+#if defined(KISAK_WEB)
+struct IDirect3DQuery9;
+#endif
+
 #include <qcommon/qcommon.h>
 #include "r_material.h"
 

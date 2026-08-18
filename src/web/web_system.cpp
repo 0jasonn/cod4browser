@@ -2,6 +2,9 @@
 
 #include <qcommon/common_api.h>
 #include <universal/q_shared.h>
+#include <universal/com_math.h>
+#include <qcommon/system_info.h>
+#include <qcommon/qcommon_math.h>
 
 #include <emscripten.h>
 #include <emscripten/html5.h>
@@ -9,6 +12,8 @@
 #include <cstdarg>
 #include <cstdlib>
 #include <cstdio>
+#include <cmath>
+#include <cstring>
 
 namespace
 {
@@ -89,10 +94,26 @@ void PrintFormatted(FILE *stream, const char *format, va_list arguments)
 }
 } // namespace
 
+SysInfo sys_info{
+    1.0L, 1.0L, 1, 1, 1024, "WebGL2", true,
+    "WebAssembly", "Browser Worker"
+};
+
 uint32_t __cdecl Sys_MillisecondsRaw()
 {
     const auto now = static_cast<uint64_t>(emscripten_get_now());
     return static_cast<uint32_t>(now);
+}
+
+uint32_t __cdecl Sys_RawTimerTicks()
+{
+    return static_cast<uint32_t>(emscripten_get_now() * 1000.0);
+}
+
+void __cdecl Sys_LoadingKeepAlive()
+{
+    // Loading runs synchronously in the engine Worker. The browser main
+    // thread and frame pump stay responsive without a native message pump.
 }
 
 uint32_t __cdecl Sys_Milliseconds()
@@ -143,6 +164,172 @@ void *Sys_AllocatePhysicalMemory(std::size_t size, std::size_t alignment)
 void Sys_FreePhysicalMemory(void *memory)
 {
     std::free(memory);
+}
+
+void *Sys_VirtualReserve(std::size_t size)
+{
+    constexpr std::size_t alignment = 4096;
+    const std::size_t alignedSize = (size + alignment - 1) & ~(alignment - 1);
+    return std::aligned_alloc(alignment, alignedSize);
+}
+
+bool Sys_VirtualCommit(void *memory, std::size_t size)
+{
+    return memory != nullptr || size == 0;
+}
+
+void Sys_VirtualDecommit(void *, std::size_t)
+{
+    // Wasm linear memory cannot decommit an address range. The reservation is
+    // retained and reused by the canonical zone/hunk allocator.
+}
+
+void Sys_VirtualRelease(void *memory)
+{
+    std::free(memory);
+}
+
+char *Sys_GetClipboardData()
+{
+    // Clipboard reads require an asynchronous browser permission boundary.
+    // The synchronous engine API therefore reports no clipboard contents.
+    return nullptr;
+}
+
+EM_JS(int, Web_SetClipboardData, (const char *text), {
+    if (!navigator.clipboard || !navigator.clipboard.writeText) {
+        return 0;
+    }
+    navigator.clipboard.writeText(UTF8ToString(text)).catch(() => {});
+    return 1;
+});
+
+int __cdecl Sys_SetClipboardData(const char *text)
+{
+    return text ? Web_SetClipboardData(text) : 0;
+}
+
+void IN_Frame()
+{
+    // Browser input is delivered by DOM event callbacks; there is no native
+    // device pump to service once per engine frame.
+}
+
+EM_JS(void, Web_SetSystemCursorVisible, (int show), {
+    const canvas = Module.canvas;
+    if (canvas) {
+        canvas.style.cursor = show ? "default" : "none";
+    }
+});
+
+void __cdecl IN_ShowSystemCursor(int show)
+{
+    Web_SetSystemCursorVisible(show);
+}
+
+void __cdecl IN_SetForegroundWindow()
+{
+    // The engine already runs in the focused browser Worker/canvas pair.
+}
+
+EM_JS(void, Web_ActivateMouse, (), {
+    const canvas = Module.canvas;
+    if (canvas && canvas.requestPointerLock &&
+        (typeof document === "undefined" || document.pointerLockElement !== canvas)) {
+        try { canvas.requestPointerLock(); } catch (_) {}
+    }
+});
+
+void __cdecl IN_ActivateMouse(int force)
+{
+    (void)force;
+    Web_ActivateMouse();
+}
+
+void __cdecl Sys_SnapVector(float *value)
+{
+    value[0] = SnapFloat(value[0]);
+    value[1] = SnapFloat(value[1]);
+    value[2] = SnapFloat(value[2]);
+}
+
+void Sys_SuspendOtherThreads()
+{
+    // The initial browser runtime has one synchronous engine Worker.
+}
+
+int __cdecl Sys_IsRemoteDebugClient() { return 0; }
+int __cdecl Sys_ReadDebugSocketInt() { return 0; }
+void __cdecl Sys_WriteDebugSocketInt(int) {}
+void __cdecl Sys_WriteDebugSocketString(char *) {}
+void __cdecl Sys_WriteDebugSocketMessageType(unsigned char) {}
+void __cdecl Sys_EndWriteDebugSocket() {}
+
+namespace
+{
+bool g_allowClientMessages = true;
+bool g_serverWakePending = false;
+int g_serverTimeout = 0;
+}
+
+void Sys_ClientMessageReceived() {}
+void Sys_AllowSendClientMessages() { g_allowClientMessages = true; }
+void Sys_DisallowSendClientMessages() { g_allowClientMessages = false; }
+bool Sys_WaitServerSnapshot() { return true; }
+void Sys_WakeServer() { g_serverWakePending = true; }
+void Sys_SleepServer() { g_serverWakePending = false; }
+bool Sys_WaitServer() { return true; }
+void Sys_SetServerTimeout(int timeout) { g_serverTimeout = timeout; }
+bool Sys_WaitForSaveHistoryDone() { return true; }
+void Sys_SetSaveHistoryEvent() {}
+
+void Sys_Sleep(std::uint32_t)
+{
+    // Blocking the engine Worker cannot advance another engine execution
+    // context. All admitted browser runtime paths are cooperative instead.
+}
+
+int __cdecl LiveStorage_GetStat(int, int) { return 0; }
+void __cdecl LiveStorage_NewUser() {}
+
+EM_JS(void, Web_OpenURL, (const char *url), {
+    const value = UTF8ToString(url);
+    if (typeof globalThis.open === "function") {
+        globalThis.open(value, "_blank", "noopener");
+    } else if (typeof globalThis.postMessage === "function") {
+        globalThis.postMessage({ type: "kisakcod:open-url", url: value });
+    }
+});
+
+void __cdecl Sys_OpenURL(const char *url, int)
+{
+    if (url && *url)
+    {
+        Web_OpenURL(url);
+    }
+}
+
+EM_JS(void, Web_GetHardwareDescription,
+    (char *gpu, std::size_t gpuSize, char *vendor, std::size_t vendorSize,
+     char *name, std::size_t nameSize), {
+        let gpuName = "WebGL2";
+        try {
+            const canvas = Module.canvas;
+            const gl = canvas && canvas.getContext && canvas.getContext("webgl2");
+            const ext = gl && gl.getExtension("WEBGL_debug_renderer_info");
+            if (gl && ext) gpuName = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL);
+        } catch (_) {}
+        stringToUTF8(gpuName, gpu, gpuSize);
+        stringToUTF8("WebAssembly", vendor, vendorSize);
+        stringToUTF8((typeof navigator !== "undefined" && navigator.userAgent) || "Browser", name, nameSize);
+    });
+
+void Sys_GetHardwareDescription(char *gpu, std::size_t gpuSize,
+    char *cpuVendor, std::size_t cpuVendorSize,
+    char *cpuName, std::size_t cpuNameSize)
+{
+    Web_GetHardwareDescription(gpu, gpuSize, cpuVendor, cpuVendorSize,
+        cpuName, cpuNameSize);
 }
 
 void Web_Log(WebLogLevel level, const char *format, ...)

@@ -1857,7 +1857,7 @@ void __cdecl ActorCmd_GetAnglesToLikelyEnemyPath(scr_entref_t entref)
     actor_s *v1; // r31
 
     v1 = Actor_Get(entref);
-    if ((unsigned __int8)Actor_GetAnglesToLikelyEnemyPath(v1))
+    if (Actor_GetAnglesToLikelyEnemyPath(v1))
         Scr_AddVector(v1->anglesToLikelyEnemyPath);
 }
 

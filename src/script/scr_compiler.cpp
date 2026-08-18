@@ -16,7 +16,6 @@
 
 #undef GetObject 
 
-scrCompilePub_t scrCompilePub;
 scrCompileGlob_t scrCompileGlob;
 
 void __cdecl EmitOpcode(Opcode_t op, int offset, int callType);

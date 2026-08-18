@@ -1,15 +1,16 @@
 #include <universal/q_shared.h>
 #include "phys_local.h"
+#include "phys_preset.h"
 #include <DynEntity/DynEntity_client.h>
 #include <qcommon/mem_track.h>
 #include <aim_assist/aim_assist.h>
 #include <qcommon/cmd.h>
 #include <xanim/xmodel.h>
+#include <sound/snd_public.h>
 
 #include <ode/objects.h>
 #include <physics/ode/collision_kernel.h>
-#include <win32/win_local.h>
-#include <gfx_d3d/r_dpvs.h>
+#include <qcommon/system.h>
 #include "ode/odeext.h"
 #include <universal/profile.h>
 #include "ode/collision_transform.h"
@@ -1773,11 +1774,11 @@ void __cdecl Phys_PerformanceEndFrame()
 
 void __cdecl Phys_RunToTime(int localClientNum, PhysWorld worldIndex, int timeNow)
 {
-    DWORD v3; // eax
+    uint32_t v3; // eax
     float seconds; // [esp+20h] [ebp-5Ch]
     uint32_t v5; // [esp+2Ch] [ebp-50h]
     PhysWorldData *data; // [esp+6Ch] [ebp-10h]
-    DWORD time; // [esp+70h] [ebp-Ch]
+    uint32_t time; // [esp+70h] [ebp-Ch]
     dxWorld *world; // [esp+74h] [ebp-8h]
     uint32_t maxIter; // [esp+78h] [ebp-4h]
 

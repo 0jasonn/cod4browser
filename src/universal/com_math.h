@@ -14,7 +14,11 @@
 #define MAX_11BIT_FLT 0.99951172f // not a real name
 
 #define CLAMP(x, low, high) ((x) < (low) ? (low) : ((x) > (high) ? (high) : (x)))
+#if defined(_MSC_VER)
 #define IS_NAN(x) _isnan(x)
+#else
+#define IS_NAN(x) isnan(x)
+#endif
 
 static const float MPH_TO_INCHES_PER_SEC = 17.6f;
 
@@ -143,7 +147,7 @@ void __cdecl TRACK_com_math();
 // == RANDOM == 
 void __cdecl Rand_Init(int seed);
 
-float __cdecl random();
+float __cdecl Q_random();
 float __cdecl crandom();
 
 float __cdecl flrand(float min, float max);

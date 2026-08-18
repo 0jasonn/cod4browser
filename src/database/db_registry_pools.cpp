@@ -1,6 +1,8 @@
 #include <database/db_registry_pools.h>
 
 #include <qcommon/mem_track.h>
+#include <qcommon/com_world_types.h>
+#include <gfx_d3d/gfx_world_types.h>
 #include <universal/q_shared.h>
 
 
@@ -79,9 +81,9 @@ ASSERT_POOL_LAYOUT(g_StringTablePool, 16, 50);
 // replaced by their canonical subsystem-owned object bodies as those TUs join
 // the Web target; this prefix never decodes or publishes singleton assets.
 alignas(4) std::array<std::byte, 4> g_clipMapIdentity{};
-alignas(4) std::array<std::byte, 4> g_comWorldIdentity{};
+alignas(4) std::array<std::byte, sizeof(ComWorld)> g_comWorldIdentity{};
 alignas(4) std::array<std::byte, 4> g_gameWorldSpIdentity{};
-alignas(4) std::array<std::byte, 4> g_gfxWorldIdentity{};
+alignas(4) std::array<std::byte, sizeof(GfxWorld)> g_gfxWorldIdentity{};
 
 bool g_assetPoolsInitialized = false;
 
@@ -98,10 +100,13 @@ void InitPool(void *storage, std::uint32_t stride, std::int32_t count)
 }
 } // namespace
 
-#if !defined(KISAK_WEB) && !defined(KISAK_DB_POOL_STANDALONE)
+#if !defined(KISAK_DB_POOL_STANDALONE)
 extern clipMap_t cm;
 extern ComWorld comWorld;
 extern GfxWorld s_world;
+#endif
+
+#if !defined(KISAK_WEB) && !defined(KISAK_DB_POOL_STANDALONE)
 #if defined(KISAK_MP)
 extern GameWorldMp gameWorldMp;
 #else
@@ -119,7 +124,7 @@ void *DB_XAssetPool[ASSET_TYPE_COUNT] = {
     &g_XModelPiecesPool, &g_PhysPresetPool, &g_XAnimPartsPool, &g_XModelPool,
     &g_MaterialPool, &g_MaterialTechniqueSetPool, &g_GfxImagePool,
     &g_SoundPool, &g_SndCurvePool, &g_LoadedSoundPool,
- #if defined(KISAK_WEB) || defined(KISAK_DB_POOL_STANDALONE)
+ #if defined(KISAK_DB_POOL_STANDALONE)
     g_clipMapIdentity.data(), g_clipMapIdentity.data(), g_comWorldIdentity.data(),
 #if defined(KISAK_MP)
     nullptr, g_gameWorldSpIdentity.data(),
@@ -127,6 +132,14 @@ void *DB_XAssetPool[ASSET_TYPE_COUNT] = {
     g_gameWorldSpIdentity.data(), nullptr,
 #endif
     &g_MapEntsPool, g_gfxWorldIdentity.data(), &g_GfxLightDefPool, nullptr,
+ #elif defined(KISAK_WEB) || defined(KISAK_CANONICAL_CM_LOAD_TEST)
+    &cm, &cm, &comWorld,
+#if defined(KISAK_MP)
+    nullptr, g_gameWorldSpIdentity.data(),
+#else
+    g_gameWorldSpIdentity.data(), nullptr,
+#endif
+    &g_MapEntsPool, &s_world, &g_GfxLightDefPool, nullptr,
  #else
     &cm, &cm, &comWorld,
  #if defined(KISAK_MP)
@@ -209,10 +222,18 @@ std::size_t DB_GetAssetPoolFreeCount(XAssetType type)
     return count;
 }
 
+bool DB_IsSingletonAssetPool(XAssetType type)
+{
+    return type >= 0 && type < ASSET_TYPE_COUNT && DB_XAssetPool[type] &&
+        !g_poolStride[type] && g_poolSize[type] == 1;
+}
+
 std::uint32_t DB_GetAssetPoolIndex(XAssetType type, XAssetHeader header)
 {
     if (type < 0 || type >= ASSET_TYPE_COUNT || !header.data ||
-        !DB_XAssetPool[type] || !g_poolStride[type]) return UINT32_MAX;
+        !DB_XAssetPool[type]) return UINT32_MAX;
+    if (!g_poolStride[type])
+        return header.data == DB_XAssetPool[type] ? 0u : UINT32_MAX;
     const auto *base = static_cast<const std::byte *>(DB_XAssetPool[type]) +
         sizeof(void *);
     const auto *entry = static_cast<const std::byte *>(header.data);

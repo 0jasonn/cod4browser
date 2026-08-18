@@ -3,6 +3,56 @@ message("----- KisakCOD Browser Platform Slice -----")
 project(KisakCOD-web LANGUAGES C CXX)
 
 include(${PLATFORM_DIR}/web/platform.cmake)
+include(${SCRIPTS_DIR}/common_files.cmake)
+include(${SCRIPTS_DIR}/sp/sp_files.cmake)
+
+# Loose-source XAnim parsing is a native development path. Browser startup is
+# fastfile-only; keep the canonical runtime XAnim owners while excluding the
+# renderer-coupled loose-file importer.
+list(REMOVE_ITEM XANIM "${SRC_DIR}/xanim/xanim_load_obj.cpp")
+list(REMOVE_ITEM XANIM
+    "${SRC_DIR}/xanim/xmodel_load_obj.cpp"
+    "${SRC_DIR}/xanim/xmodel_load_phys_collmap.cpp")
+
+# The production target already owns these platform/bootstrap translation
+# units explicitly above. The remaining inventories are the canonical SP
+# client/cgame runtime reached after the DB-owned map publication.
+list(REMOVE_ITEM CLIENT
+    "${SRC_DIR}/client/cl_cin.cpp"
+    "${SRC_DIR}/client/cl_fastfile_config.cpp"
+    "${SRC_DIR}/client/cl_initialization.cpp"
+    "${SRC_DIR}/client/cl_main_pc.cpp"
+    "${SRC_DIR}/client/cl_controller.cpp")
+list(REMOVE_ITEM UI "${SRC_DIR}/ui/mission.cpp")
+
+# These sources were pulled in explicitly while the runtime closure was still
+# narrow.  The complete inventories below now own them; keep one translation
+# unit per canonical implementation.
+list(REMOVE_ITEM CGAME
+    "${SRC_DIR}/cgame/cg_ents.cpp"
+    "${SRC_DIR}/cgame/cg_weapons.cpp"
+    "${SRC_DIR}/cgame/cg_view.cpp"
+    "${SRC_DIR}/cgame/cg_world.cpp")
+list(REMOVE_ITEM PHYSICS_ODE "${SRC_DIR}/physics/ode/odemath.cpp")
+# Loose editor FX parsing is a native development path. Runtime registration
+# is owned by the canonical fastfile-backed frontend implementation.
+list(REMOVE_ITEM EFFECTSCORE "${SRC_DIR}/EffectsCore/fx_load_obj.cpp")
+
+# Browser audio uses the canonical sound mixer and the OpenAL driver. Miles,
+# native dynamic-driver loading, and loose-object development loading are not
+# linkable browser integrations.
+list(REMOVE_ITEM SOUND
+    "${SRC_DIR}/sound/snd_mss.cpp")
+
+set_source_files_properties(
+    "${SRC_DIR}/sound/snd_driver_load_obj.cpp"
+    PROPERTIES COMPILE_DEFINITIONS "DR_WAV_IMPLEMENTATION;DR_MP3_IMPLEMENTATION")
+
+# These canonical script owners are already compiled into the shared runtime
+# prefix used by both production and the strict Node boundary check.
+list(REMOVE_ITEM SCRIPT
+    "${SRC_DIR}/script/scr_memorytree.cpp"
+    "${SRC_DIR}/script/scr_stringlist.cpp")
 
 set(KISAK_WEB_SITE_DIR "${CMAKE_BINARY_DIR}/site")
 set(KISAK_WEB_SOURCE_DIR "${CMAKE_SOURCE_DIR}/web")
@@ -18,7 +68,6 @@ set(KISAK_WEB_RUNTIME_PREFIX_SOURCES
     "${SRC_DIR}/script/scr_memorytree.cpp"
     "${SRC_DIR}/script/scr_stringlist.cpp"
     "${SRC_DIR}/universal/com_constantconfigstrings.cpp"
-    "${SRC_DIR}/universal/com_memory_string.cpp"
     "${SRC_DIR}/universal/com_shared.cpp"
     "${SRC_DIR}/universal/dvar.cpp"
     "${SRC_DIR}/universal/dvar_cmds.cpp"
@@ -28,7 +77,21 @@ set(KISAK_WEB_RUNTIME_PREFIX_SOURCES
 add_library(kisak_web_runtime_prefix OBJECT ${KISAK_WEB_RUNTIME_PREFIX_SOURCES})
 target_include_directories(kisak_web_runtime_prefix PRIVATE "${SRC_DIR}" "${DEPS_DIR}")
 kisak_configure_web_compile_target(kisak_web_runtime_prefix)
-target_compile_definitions(kisak_web_runtime_prefix PRIVATE KISAK_GATE3_COM_INIT_PREFIX=1)
+target_compile_definitions(kisak_web_runtime_prefix PRIVATE
+    KISAK_GATE3_COM_INIT_PREFIX=1
+    KISAK_CANONICAL_MAP_COMMANDS=1
+    KISAK_RUNTIME_MAP_DB_BOUNDARY=1)
+
+# Keep the strict prefix oracle genuinely narrow. Production compiles the same
+# canonical sources with the admitted runtime boundary above, while this copy
+# must continue to link and run without filesystem, DB, save, or game owners.
+add_library(kisak_web_runtime_prefix_check OBJECT
+    ${KISAK_WEB_RUNTIME_PREFIX_SOURCES})
+target_include_directories(kisak_web_runtime_prefix_check PRIVATE
+    "${SRC_DIR}" "${DEPS_DIR}")
+kisak_configure_web_compile_target(kisak_web_runtime_prefix_check)
+target_compile_definitions(kisak_web_runtime_prefix_check PRIVATE
+    KISAK_GATE3_COM_INIT_PREFIX=1)
 
 # Gate 2 remains linked for an explicitly requested diagnostic/oracle run. Keep
 # its large census implementation isolated so a future target can omit this
@@ -48,6 +111,11 @@ target_include_directories(kisak_web_gate2_oracle PRIVATE "${SRC_DIR}" "${DEPS_D
 kisak_configure_web_compile_target(kisak_web_gate2_oracle)
 
 add_executable(KisakCOD-web
+    "${SRC_DIR}/client/cl_fastfile_config.cpp"
+    "${SRC_DIR}/client/cl_controller.cpp"
+    "${SRC_DIR}/client/cl_cin.cpp"
+    "${SRC_DIR}/client/cl_initialization.cpp"
+    "${SRC_DIR}/client/cl_main_pc.cpp"
     "${SRC_DIR}/database/db_auth.cpp"
     "${SRC_DIR}/database/db_file_platform.cpp"
     "${SRC_DIR}/database/db_file_load.cpp"
@@ -58,6 +126,8 @@ add_executable(KisakCOD-web
     "${SRC_DIR}/database/db_generated_xmodel_physics.cpp"
     "${SRC_DIR}/database/db_generated_weapon.cpp"
     "${SRC_DIR}/database/db_generated_stringtable.cpp"
+    "${SRC_DIR}/database/db_generated_comworld.cpp"
+    "${SRC_DIR}/database/db_generated_gfxworld.cpp"
     "${SRC_DIR}/database/db_generated_image.cpp"
     "${SRC_DIR}/database/db_generated_image_platform.cpp"
     "${SRC_DIR}/database/db_generated_localize.cpp"
@@ -85,9 +155,38 @@ add_executable(KisakCOD-web
     "${SRC_DIR}/database/db_stream_load.cpp"
     "${SRC_DIR}/database/db_stringtable_load.cpp"
     "${SRC_DIR}/qcommon/iwd_archive.cpp"
+    "${SRC_DIR}/EffectsCore/fx_fastfile_registration.cpp"
     "${SRC_DIR}/qcommon/iwi_image.cpp"
+    "${SRC_DIR}/qcommon/engine_lifecycle_trace.cpp"
+    "${SRC_DIR}/qcommon/common_runtime_state.cpp"
+    "${SRC_DIR}/qcommon/common_runtime_continuation.cpp"
+    "${SRC_DIR}/qcommon/cm_load.cpp"
+    "${SRC_DIR}/qcommon/cm_memory.cpp"
+    "${SRC_DIR}/qcommon/com_world_runtime.cpp"
+    "${SRC_DIR}/script/scr_variable_init.cpp"
+    "${SRC_DIR}/script/scr_vm_init.cpp"
+    "${SRC_DIR}/xanim/xanim_init.cpp"
+    "${SRC_DIR}/xanim/dobj_init.cpp"
+    "${SRC_DIR}/gfx_d3d/r_asset_load.cpp"
+    "${SRC_DIR}/gfx_d3d/gfx_world_runtime.cpp"
+    "${SRC_DIR}/game/savememory.cpp"
+    "${SRC_DIR}/game/savememory_init.cpp"
+    "${SRC_DIR}/game/g_main.cpp"
+    "${SRC_DIR}/server/sv_init.cpp"
+    "${SRC_DIR}/server/sv_game.cpp"
+    "${SRC_DIR}/server/sv_map_assets.cpp"
+    "${SRC_DIR}/server/sv_map_command.cpp"
+    "${SRC_DIR}/server/sv_state.cpp"
+    "${SRC_DIR}/ui/mission.cpp"
+    "${SRC_DIR}/universal/filesystem_path.cpp"
+    "${SRC_DIR}/universal/com_memory.cpp"
+    "${SRC_DIR}/universal/dvar_runtime_io.cpp"
+    "${SRC_DIR}/universal/memfile.cpp"
     "${SRC_DIR}/web/web_archive_job.cpp"
+    "${SRC_DIR}/web/web_client_server_lifecycle.cpp"
+    "${SRC_DIR}/web/web_canonical_gfxworld.cpp"
     "${SRC_DIR}/web/web_assertive.cpp"
+    "${SRC_DIR}/web/web_cinematic.cpp"
     "${SRC_DIR}/web/web_asset_probe.cpp"
     "${SRC_DIR}/web/web_cooperative_scheduler.cpp"
     "${SRC_DIR}/web/web_database_filesystem.cpp"
@@ -105,14 +204,90 @@ add_executable(KisakCOD-web
     "${SRC_DIR}/web/web_qcommon_runtime.cpp"
     "${SRC_DIR}/web/web_shader_compatibility.cpp"
     "${SRC_DIR}/web/web_renderer.cpp"
+    "${SRC_DIR}/web/web_renderer_frontend.cpp"
     "${SRC_DIR}/web/web_renderer_surface.cpp"
     "${SRC_DIR}/web/web_system.cpp"
+    "${SRC_DIR}/web/web_system_files.cpp"
     "${SRC_DIR}/web/web_thread_context.cpp"
     "${SRC_DIR}/web/web_main.cpp"
     # This is existing KisakCOD/ODE physics code, not a bootstrap substitute.
     "${SRC_DIR}/physics/ode/odemath.cpp"
     $<TARGET_OBJECTS:kisak_web_runtime_prefix>
 )
+
+# The post-DB runtime is no longer a browser-owned bootstrap. Pull the real SP
+# game/server inventories into the production target so SV_InitGameProgs,
+# G_InitGame, entity spawning, script loading, and the local connection path
+# converge as one canonical link closure. Platform-owned client/cgame backends
+# remain separate until this server/game closure is complete.
+target_sources(KisakCOD-web PRIVATE
+    ${AIM_ASSIST}
+    ${BGAME}
+    ${GAME}
+    ${SCRIPT}
+    ${SERVER}
+    ${XANIM}
+    ${CLIENT}
+    ${DYNENTITY}
+    ${DEVGUI}
+    ${STRINGED}
+    ${UI}
+    ${CGAME}
+    ${EFFECTSCORE}
+    ${RAGDOLL}
+    ${PHYSICS}
+    ${PHYSICS_ODE}
+    ${SOUND}
+
+    # These four were removed from CGAME above because they entered the target
+    # during the first narrow cgame closure.
+    "${SRC_DIR}/cgame/cg_ents.cpp"
+    "${SRC_DIR}/cgame/cg_weapons.cpp"
+    "${SRC_DIR}/cgame/cg_view.cpp"
+    "${SRC_DIR}/cgame/cg_world.cpp"
+
+    # Canonical portable owners reached from G_InitGame. Keep this curated so
+    # native Win32 files and already-compiled prefix sources are not admitted.
+    "${SRC_DIR}/universal/com_math.cpp"
+    "${SRC_DIR}/universal/com_math_anglevectors.cpp"
+    "${SRC_DIR}/universal/com_loadutils.cpp"
+    "${SRC_DIR}/universal/q_parse.cpp"
+    "${SRC_DIR}/universal/com_sndalias.cpp"
+    "${SRC_DIR}/universal/com_stringtable.cpp"
+    "${SRC_DIR}/universal/surfaceflags.cpp"
+    "${SRC_DIR}/universal/com_files.cpp"
+    "${SRC_DIR}/universal/com_sndalias_load_obj.cpp"
+    "${SRC_DIR}/universal/pool_allocator.cpp"
+    "${SRC_DIR}/universal/profile.cpp"
+    "${SRC_DIR}/universal/timing.cpp"
+    "${SRC_DIR}/buildnumber.cpp"
+    "${SRC_DIR}/gfx_d3d/r_fastfile_registration.cpp"
+    "${SRC_DIR}/qcommon/cm_showcollision.cpp"
+    "${SRC_DIR}/qcommon/cm_mesh.cpp"
+    "${SRC_DIR}/qcommon/cm_staticmodel.cpp"
+    "${SRC_DIR}/qcommon/cm_test.cpp"
+    "${SRC_DIR}/qcommon/cm_trace.cpp"
+    "${SRC_DIR}/qcommon/cm_tracebox.cpp"
+    "${SRC_DIR}/qcommon/cm_world.cpp"
+    "${SRC_DIR}/qcommon/com_pack.cpp"
+    "${SRC_DIR}/qcommon/com_bsp.cpp"
+    "${SRC_DIR}/qcommon/com_profilemapload.cpp"
+    "${SRC_DIR}/qcommon/com_checksum.cpp"
+    "${SRC_DIR}/qcommon/com_fileaccess.cpp"
+    "${SRC_DIR}/qcommon/com_playerprofile.cpp"
+    "${SRC_DIR}/qcommon/files.cpp"
+    "${SRC_DIR}/qcommon/statmonitor.cpp"
+    "${SRC_DIR}/qcommon/dobj_management.cpp"
+    "${SRC_DIR}/qcommon/md4.cpp"
+    "${SRC_DIR}/qcommon/mem_track.cpp"
+    "${SRC_DIR}/qcommon/msg.cpp"
+    "${SRC_DIR}/qcommon/unzip.cpp"
+)
+
+set_source_files_properties(
+    "${SRC_DIR}/game/g_main.cpp"
+    "${SRC_DIR}/server/sv_game.cpp"
+    PROPERTIES COMPILE_OPTIONS "-flto")
 
 target_include_directories(KisakCOD-web PRIVATE
     "${SRC_DIR}"
@@ -124,9 +299,13 @@ set_target_properties(KisakCOD-web PROPERTIES
 )
 
 kisak_configure_web_target(KisakCOD-web)
+target_link_options(KisakCOD-web PRIVATE "-flto" "-Wl,--error-limit=0")
 target_compile_definitions(KisakCOD-web PRIVATE
     KISAK_GATE3_COM_INIT_PREFIX=1
+    KISAK_CANONICAL_MAP_COMMANDS=1
     KISAK_DB_REGISTRY_LIFECYCLE_SLICE=1
+    KISAK_RUNTIME_MAP_DB_BOUNDARY=1
+    KISAK_OPENAL=1
 )
 target_link_libraries(KisakCOD-web PRIVATE kisak_web_gate2_oracle)
 
@@ -135,7 +314,8 @@ target_link_libraries(KisakCOD-web PRIVATE kisak_web_gate2_oracle)
 # runtime so accidental undefined symbols cannot hide behind that larger link.
 add_executable(KisakCOD-web-runtime-prefix-check EXCLUDE_FROM_ALL
     "${CMAKE_SOURCE_DIR}/tests/native/gate3_com_init_trace_tests.cpp"
-    $<TARGET_OBJECTS:kisak_web_runtime_prefix>
+    "${SRC_DIR}/universal/com_memory_string.cpp"
+    $<TARGET_OBJECTS:kisak_web_runtime_prefix_check>
 )
 target_compile_features(KisakCOD-web-runtime-prefix-check PRIVATE cxx_std_20)
 target_include_directories(KisakCOD-web-runtime-prefix-check PRIVATE "${SRC_DIR}" "${DEPS_DIR}")

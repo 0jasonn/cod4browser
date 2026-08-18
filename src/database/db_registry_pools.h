@@ -16,6 +16,7 @@ std::size_t DB_GetInitializedAssetPoolCount();
 std::size_t DB_GetFreeAssetEntryCount();
 std::size_t DB_GetAssetPoolFreeCount(XAssetType type);
 std::uint32_t DB_GetAssetPoolIndex(XAssetType type, XAssetHeader header);
+bool DB_IsSingletonAssetPool(XAssetType type);
 
 extern int32_t g_poolSize[ASSET_TYPE_COUNT];
 extern void *DB_XAssetPool[ASSET_TYPE_COUNT];

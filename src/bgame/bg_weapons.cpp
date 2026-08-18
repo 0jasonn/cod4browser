@@ -4,7 +4,6 @@
 #include <database/database.h>
 #include <qcommon/mem_track.h>
 #include <universal/surfaceflags.h>
-#include <aim_assist/aim_assist.h>
 #include <xanim/xanim.h>
 #include <universal/com_files.h>
 
@@ -3573,13 +3572,13 @@ void __cdecl BG_WeaponFireRecoil(const playerState_s *ps, float *vGunSpeed, floa
 
     if (fPosLerp == 1.0)
     {
-        fPitchKick = random() * (weapDef->fAdsViewKickPitchMax - weapDef->fAdsViewKickPitchMin) + weapDef->fAdsViewKickPitchMin;
-        fYawKick = random() * (weapDef->fAdsViewKickYawMax - weapDef->fAdsViewKickYawMin) + weapDef->fAdsViewKickYawMin;
+        fPitchKick = Q_random() * (weapDef->fAdsViewKickPitchMax - weapDef->fAdsViewKickPitchMin) + weapDef->fAdsViewKickPitchMin;
+        fYawKick = Q_random() * (weapDef->fAdsViewKickYawMax - weapDef->fAdsViewKickYawMin) + weapDef->fAdsViewKickYawMin;
     }
     else
     {
-        fPitchKick = random() * (weapDef->fHipViewKickPitchMax - weapDef->fHipViewKickPitchMin) + weapDef->fHipViewKickPitchMin;
-        fYawKick = random() * (weapDef->fHipViewKickYawMax - weapDef->fHipViewKickYawMin) + weapDef->fHipViewKickYawMin;
+        fPitchKick = Q_random() * (weapDef->fHipViewKickPitchMax - weapDef->fHipViewKickPitchMin) + weapDef->fHipViewKickPitchMin;
+        fYawKick = Q_random() * (weapDef->fHipViewKickYawMax - weapDef->fHipViewKickYawMin) + weapDef->fHipViewKickYawMin;
     }
 
     fPitchKick *= fReducePercent;
@@ -3591,13 +3590,13 @@ void __cdecl BG_WeaponFireRecoil(const playerState_s *ps, float *vGunSpeed, floa
 
     if (fPosLerp <= 0.0)
     {
-        fPitchKick = random() * (weapDef->fHipGunKickPitchMax - weapDef->fHipGunKickPitchMin) + weapDef->fHipGunKickPitchMin;
-        fYawKick = random() * (weapDef->fHipGunKickYawMax - weapDef->fHipGunKickYawMin) + weapDef->fHipGunKickYawMin;
+        fPitchKick = Q_random() * (weapDef->fHipGunKickPitchMax - weapDef->fHipGunKickPitchMin) + weapDef->fHipGunKickPitchMin;
+        fYawKick = Q_random() * (weapDef->fHipGunKickYawMax - weapDef->fHipGunKickYawMin) + weapDef->fHipGunKickYawMin;
     }
     else
     {
-        fPitchKick = random() * (weapDef->fAdsGunKickPitchMax - weapDef->fAdsGunKickPitchMin) + weapDef->fAdsGunKickPitchMin;
-        fYawKick = random() * (weapDef->fAdsGunKickYawMax - weapDef->fAdsGunKickYawMin) + weapDef->fAdsGunKickYawMin;
+        fPitchKick = Q_random() * (weapDef->fAdsGunKickPitchMax - weapDef->fAdsGunKickPitchMin) + weapDef->fAdsGunKickPitchMin;
+        fYawKick = Q_random() * (weapDef->fAdsGunKickYawMax - weapDef->fAdsGunKickYawMin) + weapDef->fAdsGunKickYawMin;
     }
 
     fPitchKick *= fReducePercent;
@@ -4493,6 +4492,13 @@ bool __cdecl BG_PlayerWeaponsFull_Primaries(const playerState_s *ps)
     iassert(ps);
 
     return BG_PlayerWeaponCountPrimaryTypes(ps) >= 2;
+}
+
+int __cdecl BG_PlayerHasWeapon(const playerState_s *ps, int weaponIndex)
+{
+    iassert(ps);
+
+    return Com_BitCheckAssert(ps->weapons, weaponIndex, 16);
 }
 
 char __cdecl BG_PlayerHasCompatibleWeapon(const playerState_s *ps, uint32_t weaponIndex)

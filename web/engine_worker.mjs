@@ -4,10 +4,13 @@ const forwardedEvents = [
     "kisakcod:archive", "kisakcod:archive-progress", "kisakcod:qcommon", "kisakcod:retail-census",
     "kisakcod:renderer-shader", "kisakcod:schedule", "kisakcod:engine-asset",
     "kisakcod:renderer-texture", "kisakcod:engine-world-surface",
-    "kisakcod:renderer-surface", "kisakcod:state", "kisakcod:frame",
+    "kisakcod:renderer-surface", "kisakcod:renderer-surface-draw",
+    "kisakcod:state", "kisakcod:frame",
     "kisakcod:system", "kisakcod:engine", "kisakcod:runtime",
     "kisakcod:database",
+    "kisakcod:canonical-gfxworld",
     "kisakcod:canonical-runtime-prefix",
+    "kisakcod:engine-lifecycle",
 ];
 
 if (typeof globalThis.CustomEvent !== "function") {

@@ -1,14 +1,14 @@
 #include <universal/q_shared.h>
 #include "qcommon.h"
 #include "mem_track.h"
-#include <win32/win_local.h>
+#include <qcommon/system.h>
 
 #ifdef KISAK_MP
 #include <client_mp/client_mp.h>
 #elif KISAK_SP
 #include <client/client.h>
 #endif
-#include <gfx_d3d/r_material.h>
+#include <gfx_d3d/r_cgame_api.h>
 
 statmonitor_s stats[7];
 int statCount;

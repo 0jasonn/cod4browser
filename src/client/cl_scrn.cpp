@@ -13,7 +13,9 @@
 #include <cgame/cg_view.h>
 #include <devgui/devgui.h>
 #include <qcommon/threads.h>
-#include <win32/win_local.h>
+#include <qcommon/system.h>
+#include <qcommon/loading_keepalive.h>
+#include <sound/snd_public.h>
 #include <qcommon/cmd.h>
 #include <gfx_d3d/r_screenshot.h>
 

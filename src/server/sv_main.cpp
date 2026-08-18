@@ -6,52 +6,19 @@
 #include "server.h"
 #include "sv_public.h"
 #include <game/savememory.h>
-#include <cgame/cg_main.h>
+#include <cgame/cg_runtime_api.h>
 #include <game/g_save.h>
 #include <script/scr_vm.h>
 #include <client/cl_demo.h>
 #include <game/g_local.h>
 #include "sv_game.h"
-#include <gfx_d3d/r_workercmds.h>
+#include <gfx_d3d/r_worker_api.h>
 #include <qcommon/threads.h>
-#include <win32/win_local.h>
+#include <qcommon/system.h>
 #include <universal/profile.h>
 #include <client/cl_scrn.h>
 #include <game/savedevice.h>
 #include <qcommon/cmd.h>
-
-server_t sv;
-serverStatic_t svs;
-
-int com_time;
-int com_inServerFrame;
-
-const dvar_t *sv_lastSaveGame;
-const dvar_t *sv_smp;
-const dvar_t *sv_player_damageMultiplier;
-const dvar_t *sv_player_maxhealth;
-const dvar_t *sv_saveOnStartMap;
-const dvar_t *sv_gameskill;
-const dvar_t *sv_mapname;
-#ifdef KISAK_XBOX
-const dvar_t *sv_saveDeviceAvailable;
-#endif
-const dvar_t *sv_cheats;
-const dvar_t *player_healthEasy;
-const dvar_t *player_healthHard;
-const dvar_t *sv_player_deathInvulnerableTime;
-const dvar_t *runForTime;
-const dvar_t *sv_saveGameSuccess;
-#ifdef KISAK_XBOX
-const dvar_t *sv_saveGameAvailable;
-const dvar_t *sv_saveGameNotReadable;
-#endif
-const dvar_t *replay_autosave;
-const dvar_t *player_healthMedium;
-const dvar_t *player_healthFu;
-const dvar_t *replay_asserts;
-
-PendingSaveList pendingSaveGlob;
 
 void __cdecl TRACK_sv_main()
 {
@@ -508,13 +475,13 @@ void __cdecl  SV_ServerThread(unsigned int threadContext)
 
     iassert(threadContext == THREAD_CONTEXT_SERVER);
     Value = Sys_GetValue(2);
-    if (setjmp((int*)Value))
+    if (setjmp(*(jmp_buf *)Value))
     {
         do
         {
             Profile_Recover(1);
             v2 = Sys_GetValue(2);
-        } while (setjmp((int *)v2));
+        } while (setjmp(*(jmp_buf *)v2));
     }
     Profile_Guard(1);
     Sys_InitServerEvents();

@@ -56,10 +56,10 @@ test("qcommon reaches its bounded canonical database handoff", { tag: "@smoke" }
         state: "ready",
         stage: "pre-database",
         error: "none",
-        filesChecked: 26,
-        totalFiles: 26,
-        probeBytesRead: 148,
-        actionsIssued: 55,
+        filesChecked: 25,
+        totalFiles: 25,
+        probeBytesRead: 134,
+        actionsIssued: 53,
         arenaBytes: 256 * 1024,
         eventCapacity: 64,
         commandDvarCount: 5,
@@ -124,7 +124,7 @@ test("qcommon startup is repeatable, cancellable, and reports typed VFS failure"
 
     await page.evaluate(async () => {
         const runtime = globalThis.__KISAKCOD_WEB__;
-        await runtime.module.testControl({ failReadPath: "zone/english/killhouse.ff" });
+        await runtime.module.testControl({ failReadPath: "zone/english/common.ff" });
         runtime.module._KisakWeb_StartQcommonRuntime();
     });
     await expect.poll(
@@ -137,11 +137,11 @@ test("qcommon startup is repeatable, cancellable, and reports typed VFS failure"
     expect(failed).toMatchObject({
         stage: "failed",
         error: "startup file read failed",
-        currentPath: "zone/english/killhouse.ff",
-        filesChecked: 25,
-        totalFiles: 26,
+        currentPath: "zone/english/common.ff",
+        filesChecked: 24,
+        totalFiles: 25,
         actionPending: false,
         retailTraversal: false,
     });
-    expect(failed.message).toContain("zone/english/killhouse.ff");
+    expect(failed.message).toContain("zone/english/common.ff");
 });

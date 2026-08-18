@@ -369,6 +369,14 @@ static void Load_XAssetHeader(bool atStreamStart)
         varLoadedSoundPtr = reinterpret_cast<LoadedSound **>(varXAssetHeader);
         Load_LoadedSoundPtr(false);
         break;
+    case ASSET_TYPE_COMWORLD:
+        varComWorldPtr = reinterpret_cast<ComWorld **>(varXAssetHeader);
+        Load_ComWorldPtr(false);
+        break;
+    case ASSET_TYPE_GFXWORLD:
+        varGfxWorldPtr = reinterpret_cast<GfxWorld **>(varXAssetHeader);
+        Load_GfxWorldPtr(false);
+        break;
     case ASSET_TYPE_LOCALIZE_ENTRY:
         varLocalizeEntryPtr = reinterpret_cast<LocalizeEntry **>(
             varXAssetHeader);

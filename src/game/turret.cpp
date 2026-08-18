@@ -19,6 +19,7 @@
 #include "actor_turret.h"
 #include <xanim/dobj_utils.h>
 #include <script/scr_vm.h>
+#include <sound/snd_alias_types.h>
 
 TurretInfo turretInfoStore[32];
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <gfx_d3d/gfx_draw_surf_types.h>
+#include <gfx_d3d/gfx_color_types.h>
 #include <gfx_d3d/gfx_image_types.h>
 #include <gfx_d3d/gfx_light_types.h>
 #include <gfx_d3d/material_types.h>
@@ -25,12 +26,6 @@ struct srfTriangles_t
     std::uint16_t vertexCount;
     std::uint16_t triCount;
     int baseIndex;
-};
-
-union GfxColor
-{
-    std::uint32_t packed;
-    std::uint8_t array[4];
 };
 
 struct GfxStaticModelInst

@@ -4,7 +4,6 @@
 #include <universal/assertive.h>
 #include <qcommon/qcommon.h>
 
-#include <Windows.h>
 #include "threads.h"
 #include <xanim/xanim.h>
 #include <mutex>
@@ -162,7 +161,7 @@ void __cdecl TRACK_memtrack()
 #endif
 }
 
-static void __cdecl track_addbasicinfo(meminfo_t* info, int type, int size)
+void __cdecl track_addbasicinfo(meminfo_t* info, int type, int size)
 {
     int v3; // [esp+8h] [ebp-8h]
     int v4; // [esp+Ch] [ebp-4h]

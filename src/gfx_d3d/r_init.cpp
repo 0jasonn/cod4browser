@@ -1,5 +1,6 @@
 #include <universal/q_shared.h>
 #include "r_init.h"
+#include "r_asset_load.h"
 #include <qcommon/mem_track.h>
 #include <qcommon/threads.h>
 #include <win32/win_local.h>
@@ -3642,51 +3643,7 @@ char __cdecl R_CreateGameWindow(GfxWindowParms *wndParms)
 
 void R_LoadGraphicsAssets()
 {
-    XZoneInfo zoneInfo[6]{ 0 }; // [esp+0h] [ebp-50h] BYREF
-    uint32_t zoneCount; // [esp+4Ch] [ebp-4h]
-
-    zoneInfo[0].name = gfxCfg.codeFastFileName;
-    zoneInfo[0].allocFlags = 2;
-    zoneInfo[0].freeFlags = 0;
-    zoneCount = 1;
-
-    if (gfxCfg.localizedCodeFastFileName)
-    {
-        zoneInfo[zoneCount].name = gfxCfg.localizedCodeFastFileName;
-        zoneInfo[zoneCount].allocFlags = 0;
-        zoneInfo[zoneCount].freeFlags = 0;
-        zoneCount++;
-    }
-    if (gfxCfg.uiFastFileName)
-    {
-        zoneInfo[zoneCount].name = gfxCfg.uiFastFileName;
-        zoneInfo[zoneCount].allocFlags = 8;
-        zoneInfo[zoneCount].freeFlags = 0;
-        zoneCount++;
-    }
-
-    zoneInfo[zoneCount].name = gfxCfg.commonFastFileName;
-    zoneInfo[zoneCount].allocFlags = 4;
-    zoneInfo[zoneCount].freeFlags = 0;
-    zoneCount++;
-
-    if (gfxCfg.localizedCommonFastFileName)
-    {
-        zoneInfo[zoneCount].name = gfxCfg.localizedCommonFastFileName;
-        zoneInfo[zoneCount].allocFlags = 1;
-        zoneInfo[zoneCount].freeFlags = 0;
-        zoneCount++;
-    }
-
-    if (gfxCfg.modFastFileName)
-    {
-        zoneInfo[zoneCount].name = gfxCfg.modFastFileName;
-        zoneInfo[zoneCount].allocFlags = 16;
-        zoneInfo[zoneCount].freeFlags = 0;
-        zoneCount++;
-    }
-
-    DB_LoadXAssets(zoneInfo, zoneCount, 0);
+    R_LoadGraphicsAssetZones(gfxCfg);
 }
 
 void __cdecl R_UpdateGpuSyncType()

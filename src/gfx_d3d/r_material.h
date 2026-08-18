@@ -1,6 +1,10 @@
 #pragma once
 
+#if defined(KISAK_WEB)
+struct IDirect3DVertexDeclaration9;
+#else
 #include <d3d9.h>
+#endif
 
 #include <gfx_d3d/material_types.h>
 #include "r_gfx.h"

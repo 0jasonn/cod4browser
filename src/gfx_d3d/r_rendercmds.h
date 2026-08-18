@@ -1,11 +1,17 @@
 #pragma once
 
+#if defined(KISAK_WEB)
+struct IDirect3DSurface9;
+struct IDirect3DQuery9;
+#endif
+
 #include <qcommon/qcommon.h>
 
 #include "r_debug.h"
 #include "r_font.h"
 #include "r_gfx.h"
 #include "r_material.h"
+#include "gfx_particle_cloud_types.h"
 #include <qcommon/com_pack.h>
 
 enum CodeConstant : __int32; // r_state.h
@@ -279,14 +285,6 @@ struct FxCodeMeshData // sizeof=0x10
     uint32_t pad;
 };
 
-struct GfxParticleCloud // sizeof=0x40
-{                                       // ...
-    GfxScaledPlacement placement;
-    float endpos[3];
-    GfxColor color;
-    float radius[2];
-    uint32_t pad[2];
-};
 union PackedLightingCoords // sizeof=0x4
 {                                       // ...
     uint32_t packed;

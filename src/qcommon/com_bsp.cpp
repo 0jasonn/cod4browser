@@ -1,8 +1,11 @@
 #include <universal/q_shared.h>
 #include "com_bsp.h"
-#include <win32/win_local.h>
+#include <qcommon/system.h>
+#include <universal/com_math.h>
 
+#if !defined(KISAK_WEB)
 ComWorld comWorld;
+#endif
 
 char __cdecl Com_CanPrimaryLightAffectPoint(const ComPrimaryLight *light, const float *point)
 {
@@ -57,12 +60,14 @@ double __cdecl CosOfSumOfArcCos(float cos0, float cos1)
     return (float)(cos0 * cos1 - v4);
 }
 
+#if !defined(KISAK_WEB)
 void __cdecl Com_UnloadWorld()
 {
     iassert( IsFastFileLoad() );
     if (comWorld.isInUse)
         Sys_Error("Cannot unload world while it is in use");
 }
+#endif
 
 uint32_t Com_FindClosestPrimaryLight(const float *origin)
 {

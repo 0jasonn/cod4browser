@@ -1,6 +1,7 @@
 #pragma once
 
 #include "scr_debugger.h"
+#include "scr_compile_runtime.h"
 
 #define MAX_PRECACHE_ENTRIES 1024
 
@@ -106,28 +107,6 @@ struct scrCompileGlob_t // sizeof=0x1D8
 };
 static_assert(sizeof(scrCompileGlob_t) == 0x1D8);
 
-#define SCR_FUNC_TABLE_SIZE 1024
-
-struct scrCompilePub_t
-{
-    int value_count;
-    int far_function_count;
-    uint32_t loadedscripts;
-    uint32_t scripts;
-    uint32_t builtinFunc;
-    uint32_t builtinMeth;
-    short canonicalStrings[65536];
-    const char *in_ptr;
-    const char *parseBuf;
-    bool script_loading;
-    bool allowedBreakpoint;
-    int developer_statement;
-    unsigned char *opcodePos;
-    uint32_t programLen;
-    int func_table_size;
-    int func_table[SCR_FUNC_TABLE_SIZE];
-};
-
 void __cdecl Scr_CompileStatement(sval_u parseData);
 void __cdecl ScriptCompile(
     sval_u val,
@@ -136,5 +115,4 @@ void __cdecl ScriptCompile(
     struct PrecacheEntry *entries,
     int entriesCount);
 
-extern scrCompilePub_t scrCompilePub;
 extern scrCompileGlob_t scrCompileGlob;

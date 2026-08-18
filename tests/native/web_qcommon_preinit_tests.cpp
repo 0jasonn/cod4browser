@@ -94,11 +94,11 @@ void CompleteOneFile(QcommonPreinitMachine &machine, const QcommonStartupFile &f
 void TestProfileAndSuccessfulSequence()
 {
     const auto files = kisak::web::QcommonStartupFiles();
-    Require(files.size() == 26u, "startup profile has exactly 26 files");
+    Require(files.size() == 25u, "startup profile has exactly 25 files");
     Require(std::string_view(files.front().path) == "localization.txt",
         "startup profile begins with localization");
-    Require(std::string_view(files.back().path) == "zone/english/killhouse.ff",
-        "startup profile ends with the selected map zone");
+    Require(std::string_view(files.back().path) == "zone/english/common.ff",
+        "startup profile ends with the final prerequisite zone");
 
     QcommonPreinitMachine machine;
     Require(machine.Start(7u), "startup begins with a nonzero generation");
@@ -113,12 +113,12 @@ void TestProfileAndSuccessfulSequence()
     Require(snapshot.stage == QcommonPreinitStage::PreDatabase &&
             snapshot.error == QcommonPreinitError::None,
         "successful startup has no error");
-    Require(snapshot.generation == 7u && snapshot.filesChecked == 26u &&
-            snapshot.totalFiles == 26u,
+    Require(snapshot.generation == 7u && snapshot.filesChecked == 25u &&
+            snapshot.totalFiles == 25u,
         "ready snapshot retains generation and exact file counts");
-    Require(snapshot.probeBytesRead == 148u,
-        "startup reads only 148 aggregate header bytes");
-    Require(snapshot.actionsIssued == 55u,
+    Require(snapshot.probeBytesRead == 134u,
+        "startup reads only 134 aggregate header bytes");
+    Require(snapshot.actionsIssued == 53u,
         "three local actions plus stat/read pairs are issued");
     Require(snapshot.arenaBytes == kisak::web::QCOMMON_STARTUP_ARENA_BYTES &&
             snapshot.eventCapacity == kisak::web::QCOMMON_EVENT_CAPACITY &&

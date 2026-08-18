@@ -4,6 +4,7 @@
 #include <universal/com_files.h>
 #include <database/database.h>
 #include <universal/profile.h>
+#include "qcommon.h"
 
 BspGlob comBspGlob;
 

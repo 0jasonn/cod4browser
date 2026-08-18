@@ -7,11 +7,13 @@
 #include <EffectsCore/fx_types.h>
 #include <gfx_d3d/gfx_image_types.h>
 #include <gfx_d3d/gfx_light_types.h>
+#include <gfx_d3d/gfx_world_types.h>
 #include <gfx_d3d/material_types.h>
 #include <gfx_d3d/r_font.h>
 #include <physics/phys_preset.h>
 #include <physics/phys_geom_types.h>
 #include <qcommon/qcommon.h>
+#include <qcommon/com_world_types.h>
 #include <qcommon/system.h>
 #include <script/scr_stringlist.h>
 #include <sound/snd_alias_types.h>
@@ -1419,6 +1421,188 @@ std::vector<std::uint8_t> MakeFxImpactXFile(
     return CompressXFile(inflated);
 }
 
+struct ComWorldFixtureOptions
+{
+    std::uint32_t assetPointer = UINT32_MAX - 1u;
+    bool includeAliasAsset = true;
+    bool includeBody = true;
+    bool terminateName = true;
+    std::uint32_t primaryLightCount = 2;
+    std::uint32_t primaryLightsPointer = 1;
+    bool includeLights = true;
+    std::uint32_t includedLightCount = 2;
+    std::uint32_t inlineDefNameCount = 2;
+};
+
+std::vector<std::uint8_t> MakeComWorldXFile(
+    const ComWorldFixtureOptions &options = {})
+{
+    constexpr const char *name = "maps/gate3.d3dbsp";
+    constexpr const char *lightNames[] = {
+        "light/gate3_0", "light/gate3_1",
+    };
+    const bool inlineAsset = options.assetPointer == UINT32_MAX ||
+        options.assetPointer == UINT32_MAX - 1u;
+    const std::uint32_t assetCount = options.includeAliasAsset ? 2u : 1u;
+    std::vector<std::uint8_t> inflated;
+    AppendU32(inflated, 8192);
+    AppendU32(inflated, 0);
+    for (const std::uint32_t size : std::array<std::uint32_t, 9>{
+        4096, 0, 0, 0, 4096, 0, 0, 0, 0}) AppendU32(inflated, size);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, assetCount);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, ASSET_TYPE_COMWORLD);
+    AppendU32(inflated, options.assetPointer);
+    if (options.includeAliasAsset)
+    {
+        AppendU32(inflated, ASSET_TYPE_COMWORLD);
+        AppendU32(inflated, 0x40000011u);
+    }
+    if (!inlineAsset || !options.includeBody) return CompressXFile(inflated);
+
+    ComWorld world{};
+    world.name = PointerToken<const char>(UINT32_MAX);
+    world.isInUse = 1;
+    world.primaryLightCount = options.primaryLightCount;
+    world.primaryLights = PointerToken<ComPrimaryLight>(
+        options.primaryLightsPointer);
+    AppendObject(inflated, world);
+    inflated.insert(inflated.end(), name, name + std::strlen(name));
+    if (options.terminateName) inflated.push_back(0);
+    if (!options.terminateName || !options.primaryLightsPointer ||
+        !options.includeLights) return CompressXFile(inflated);
+
+    for (std::uint32_t index = 0; index < options.includedLightCount; ++index)
+    {
+        ComPrimaryLight light{};
+        light.type = static_cast<std::uint8_t>(index + 1u);
+        light.canUseShadowMap = 1;
+        light.exponent = static_cast<std::uint8_t>(index + 2u);
+        light.color[0] = 0.25f + static_cast<float>(index);
+        light.radius = 128.0f + static_cast<float>(index);
+        light.defName = PointerToken<const char>(UINT32_MAX);
+        AppendObject(inflated, light);
+    }
+    for (std::uint32_t index = 0; index < options.inlineDefNameCount; ++index)
+        AppendCString(inflated, lightNames[index % std::size(lightNames)]);
+    return CompressXFile(inflated);
+}
+
+struct GfxWorldFixtureOptions
+{
+    std::uint32_t assetPointer = UINT32_MAX - 1u;
+    bool includeAliasAsset = true;
+    bool includeBody = true;
+    bool terminateName = true;
+    bool terminateBaseName = true;
+    int indexCount = 3;
+    std::uint32_t indexPointer = 1;
+    std::uint32_t vertexCount = 3;
+    std::uint32_t vertexPointer = 1;
+    int surfaceCount = 1;
+    std::uint32_t surfacePointer = 1;
+    std::uint32_t includedIndexCount = 3;
+    std::uint32_t includedVertexCount = 3;
+    std::uint32_t includedSurfaceCount = 1;
+    std::uint32_t primaryLightCount = 1;
+    std::uint32_t sunPrimaryLightIndex = 0;
+};
+
+std::vector<std::uint8_t> MakeGfxWorldXFile(
+    const GfxWorldFixtureOptions &options = {})
+{
+    constexpr const char *name = "maps/gfxworld_gate3.d3dbsp";
+    constexpr const char *baseName = "gfxworld_gate3";
+    const bool inlineAsset = options.assetPointer == UINT32_MAX ||
+        options.assetPointer == UINT32_MAX - 1u;
+    const std::uint32_t assetCount = options.includeAliasAsset ? 2u : 1u;
+    std::vector<std::uint8_t> inflated;
+    AppendU32(inflated, 12288);
+    AppendU32(inflated, 0);
+    for (const std::uint32_t size : std::array<std::uint32_t, 9>{
+        4096, 4096, 0, 0, 4096, 0, 0, 0, 0}) AppendU32(inflated, size);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, assetCount);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, ASSET_TYPE_GFXWORLD);
+    AppendU32(inflated, options.assetPointer);
+    if (options.includeAliasAsset)
+    {
+        AppendU32(inflated, ASSET_TYPE_GFXWORLD);
+        AppendU32(inflated, 0x40000011u);
+    }
+    if (!inlineAsset || !options.includeBody) return CompressXFile(inflated);
+
+    GfxWorld world{};
+    world.name = PointerToken<const char>(UINT32_MAX);
+    world.baseName = PointerToken<const char>(UINT32_MAX);
+    world.indexCount = options.indexCount;
+    world.indices = PointerToken<std::uint16_t>(options.indexPointer);
+    world.surfaceCount = options.surfaceCount;
+    world.vertexCount = options.vertexCount;
+    world.vd.vertices = PointerToken<GfxWorldVertex>(options.vertexPointer);
+    world.primaryLightCount = options.primaryLightCount;
+    world.sunPrimaryLightIndex = options.sunPrimaryLightIndex;
+    world.lightGrid.rowAxis = 0;
+    world.dpvs.staticSurfaceCount = options.surfaceCount > 0
+        ? static_cast<std::uint32_t>(options.surfaceCount) : 0u;
+    world.dpvs.staticSurfaceCountNoDecal = world.dpvs.staticSurfaceCount;
+    world.dpvs.surfaces = PointerToken<GfxSurface>(options.surfacePointer);
+    AppendObject(inflated, world);
+    inflated.insert(inflated.end(), name, name + std::strlen(name));
+    if (options.terminateName) inflated.push_back(0);
+    if (!options.terminateName) return CompressXFile(inflated);
+    inflated.insert(inflated.end(), baseName,
+        baseName + std::strlen(baseName));
+    if (options.terminateBaseName) inflated.push_back(0);
+    if (!options.terminateBaseName) return CompressXFile(inflated);
+
+    if (options.indexPointer)
+    {
+        constexpr std::uint16_t indices[] = {0, 1, 2};
+        for (std::uint32_t index = 0; index < options.includedIndexCount;
+            ++index) AppendU16(inflated, indices[index % std::size(indices)]);
+    }
+    if (options.vertexPointer)
+    {
+        constexpr float positions[3][3] = {
+            {-1.0f, -1.0f, 0.0f},
+            { 1.0f, -1.0f, 0.0f},
+            { 0.0f,  1.0f, 0.0f},
+        };
+        for (std::uint32_t index = 0; index < options.includedVertexCount;
+            ++index)
+        {
+            GfxWorldVertex vertex{};
+            std::memcpy(vertex.xyz, positions[index % std::size(positions)],
+                sizeof(vertex.xyz));
+            vertex.color.packed = 0xffffffffu;
+            AppendObject(inflated, vertex);
+        }
+    }
+    if (options.surfacePointer)
+    {
+        for (std::uint32_t index = 0; index < options.includedSurfaceCount;
+            ++index)
+        {
+            GfxSurface surface{};
+            surface.tris.firstVertex = 0;
+            surface.tris.vertexCount = 3;
+            surface.tris.triCount = 1;
+            surface.tris.baseIndex = 0;
+            surface.bounds[0][0] = -1.0f;
+            surface.bounds[0][1] = -1.0f;
+            surface.bounds[1][0] = 1.0f;
+            surface.bounds[1][1] = 1.0f;
+            AppendObject(inflated, surface);
+        }
+    }
+    return CompressXFile(inflated);
+}
+
 struct LightDefFixtureOptions
 {
     std::uint32_t assetPointer = UINT32_MAX - 1u;
@@ -2803,6 +2987,220 @@ int main()
     assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
     assert(std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0);
 
+    const std::vector<std::uint8_t> comWorldInsertAlias = MakeComWorldXFile();
+    Run(comWorldInsertAlias, zone);
+    assert(g_trace.xassetCount == 2 && g_trace.assetIndex == 1);
+    assert(g_trace.assetType == ASSET_TYPE_COMWORLD);
+    assert(std::strcmp(g_trace.pointerClassification,
+        "prior-offset/alias") == 0);
+    assert(g_trace.publicationBegin && g_trace.publicationEnd);
+    assert(g_trace.assetEntryIndex == 16 && g_trace.assetPoolIndex == 0);
+    assert(g_trace.freeEntryCountBefore == 32752 &&
+        g_trace.freeEntryCountAfter == 32751);
+    assert(g_trace.assetHash == DB_HashForNameCanonical(
+        "maps/gate3.d3dbsp", ASSET_TYPE_COMWORLD));
+    assert(g_trace.streamOffsets[0] == 0 &&
+        g_trace.streamOffsets[4] == 204);
+    const XAssetHeader publishedComWorld = DB_FindXAssetHeader(
+        ASSET_TYPE_COMWORLD, "maps/gate3.d3dbsp");
+    assert(publishedComWorld.comWorld);
+    assert(publishedComWorld.comWorld->isInUse == 1 &&
+        publishedComWorld.comWorld->primaryLightCount == 2);
+    assert(publishedComWorld.comWorld->primaryLights);
+    assert(publishedComWorld.comWorld->primaryLights[0].type == 1 &&
+        publishedComWorld.comWorld->primaryLights[1].type == 2);
+    assert(publishedComWorld.comWorld->primaryLights[0].radius == 128.0f &&
+        publishedComWorld.comWorld->primaryLights[1].radius == 129.0f);
+    assert(std::strcmp(publishedComWorld.comWorld->primaryLights[0].defName,
+        "light/gate3_0") == 0);
+    assert(std::strcmp(publishedComWorld.comWorld->primaryLights[1].defName,
+        "light/gate3_1") == 0);
+    const XAsset *comWorldAssets = reinterpret_cast<const XAsset *>(
+        zone.blocks[4].data);
+    assert(comWorldAssets[0].header.comWorld == publishedComWorld.comWorld &&
+        comWorldAssets[1].header.comWorld == publishedComWorld.comWorld);
+    std::uint32_t comWorldInsertion = 0;
+    std::memcpy(&comWorldInsertion, zone.blocks[4].data + 16,
+        sizeof(comWorldInsertion));
+    assert(comWorldInsertion == reinterpret_cast<std::uint32_t>(
+        publishedComWorld.comWorld));
+
+    ComWorldFixtureOptions sharedComWorld{};
+    sharedComWorld.assetPointer = UINT32_MAX;
+    sharedComWorld.includeAliasAsset = false;
+    sharedComWorld.primaryLightCount = 0;
+    sharedComWorld.primaryLightsPointer = 0;
+    sharedComWorld.includedLightCount = 0;
+    sharedComWorld.inlineDefNameCount = 0;
+    Run(MakeComWorldXFile(sharedComWorld), zone);
+    assert(std::strcmp(g_trace.pointerClassification,
+        "inline-shared/-1") == 0);
+    assert(g_trace.publicationEnd && g_trace.assetEntryIndex == 16 &&
+        g_trace.assetPoolIndex == 0);
+    assert(g_trace.streamOffsets[0] == 0 &&
+        g_trace.streamOffsets[4] == 26);
+
+    ComWorldFixtureOptions nullComWorld{};
+    nullComWorld.assetPointer = 0;
+    nullComWorld.includeAliasAsset = false;
+    Run(MakeComWorldXFile(nullComWorld), zone);
+    assert(!g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+
+    ComWorldFixtureOptions malformedComWorld{};
+    malformedComWorld.assetPointer = UINT32_MAX - 2u;
+    malformedComWorld.includeAliasAsset = false;
+    Run(MakeComWorldXFile(malformedComWorld), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "stream/invalid alias offset") == 0);
+
+    ComWorldFixtureOptions truncatedComWorld{};
+    truncatedComWorld.assetPointer = UINT32_MAX;
+    truncatedComWorld.includeAliasAsset = false;
+    truncatedComWorld.includeBody = false;
+    Run(MakeComWorldXFile(truncatedComWorld), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0);
+
+    ComWorldFixtureOptions unterminatedComWorld{};
+    unterminatedComWorld.assetPointer = UINT32_MAX;
+    unterminatedComWorld.includeAliasAsset = false;
+    unterminatedComWorld.terminateName = false;
+    Run(MakeComWorldXFile(unterminatedComWorld), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0 ||
+        std::strcmp(g_trace.stopStage, "stream/truncated string") == 0);
+
+    ComWorldFixtureOptions excessiveComWorld{};
+    excessiveComWorld.assetPointer = UINT32_MAX;
+    excessiveComWorld.includeAliasAsset = false;
+    excessiveComWorld.primaryLightCount = UINT32_MAX;
+    excessiveComWorld.includeLights = false;
+    Run(MakeComWorldXFile(excessiveComWorld), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage,
+        "ComWorld/excessive primary lights") == 0);
+
+    ComWorldFixtureOptions truncatedComWorldLights{};
+    truncatedComWorldLights.assetPointer = UINT32_MAX;
+    truncatedComWorldLights.includeAliasAsset = false;
+    truncatedComWorldLights.includedLightCount = 1;
+    truncatedComWorldLights.inlineDefNameCount = 0;
+    Run(MakeComWorldXFile(truncatedComWorldLights), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+
+    ComWorldFixtureOptions truncatedComWorldLightName{};
+    truncatedComWorldLightName.assetPointer = UINT32_MAX;
+    truncatedComWorldLightName.includeAliasAsset = false;
+    truncatedComWorldLightName.inlineDefNameCount = 1;
+    Run(MakeComWorldXFile(truncatedComWorldLightName), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+
+    const std::vector<std::uint8_t> gfxWorldInsertAlias =
+        MakeGfxWorldXFile();
+    Run(gfxWorldInsertAlias, zone);
+    assert(!g_trace.generatedLoadFailed);
+    assert(g_trace.xassetCount == 2 && g_trace.assetIndex == 1);
+    assert(g_trace.assetType == ASSET_TYPE_GFXWORLD);
+    assert(std::strcmp(g_trace.pointerClassification,
+        "prior-offset/alias") == 0);
+    assert(g_trace.publicationBegin && g_trace.publicationEnd);
+    assert(g_trace.assetEntryIndex == 16 && g_trace.assetPoolIndex == 0);
+    assert(g_trace.freeEntryCountBefore == 32752 &&
+        g_trace.freeEntryCountAfter == 32751);
+    assert(g_trace.assetHash == DB_HashForNameCanonical(
+        "maps/gfxworld_gate3.d3dbsp", ASSET_TYPE_GFXWORLD));
+    assert(g_trace.streamOffsets[0] == 0 &&
+        g_trace.streamOffsets[1] == 0 &&
+        g_trace.streamOffsets[4] == 248);
+    const XAssetHeader publishedGfxWorld = DB_FindXAssetHeader(
+        ASSET_TYPE_GFXWORLD, "maps/gfxworld_gate3.d3dbsp");
+    assert(publishedGfxWorld.gfxWorld);
+    assert(std::strcmp(publishedGfxWorld.gfxWorld->baseName,
+        "gfxworld_gate3") == 0);
+    assert(publishedGfxWorld.gfxWorld->indexCount == 3 &&
+        publishedGfxWorld.gfxWorld->vertexCount == 3 &&
+        publishedGfxWorld.gfxWorld->surfaceCount == 1);
+    assert(publishedGfxWorld.gfxWorld->indices[0] == 0 &&
+        publishedGfxWorld.gfxWorld->indices[1] == 1 &&
+        publishedGfxWorld.gfxWorld->indices[2] == 2);
+    assert(publishedGfxWorld.gfxWorld->vd.vertices[0].xyz[0] == -1.0f &&
+        publishedGfxWorld.gfxWorld->vd.vertices[1].xyz[0] == 1.0f &&
+        publishedGfxWorld.gfxWorld->vd.vertices[2].xyz[1] == 1.0f);
+    assert(publishedGfxWorld.gfxWorld->dpvs.surfaces);
+    assert(publishedGfxWorld.gfxWorld->dpvs.surfaces[0].tris.vertexCount == 3 &&
+        publishedGfxWorld.gfxWorld->dpvs.surfaces[0].tris.triCount == 1);
+    const XAsset *gfxWorldAssets = reinterpret_cast<const XAsset *>(
+        zone.blocks[4].data);
+    assert(gfxWorldAssets[0].header.gfxWorld == publishedGfxWorld.gfxWorld &&
+        gfxWorldAssets[1].header.gfxWorld == publishedGfxWorld.gfxWorld);
+    std::uint32_t gfxWorldInsertion = 0;
+    std::memcpy(&gfxWorldInsertion, zone.blocks[4].data + 16,
+        sizeof(gfxWorldInsertion));
+    assert(gfxWorldInsertion == reinterpret_cast<std::uint32_t>(
+        publishedGfxWorld.gfxWorld));
+
+    GfxWorldFixtureOptions sharedGfxWorld{};
+    sharedGfxWorld.assetPointer = UINT32_MAX;
+    sharedGfxWorld.includeAliasAsset = false;
+    Run(MakeGfxWorldXFile(sharedGfxWorld), zone);
+    assert(!g_trace.generatedLoadFailed && g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.pointerClassification,
+        "inline-shared/-1") == 0);
+
+    GfxWorldFixtureOptions nullGfxWorld{};
+    nullGfxWorld.assetPointer = 0;
+    nullGfxWorld.includeAliasAsset = false;
+    Run(MakeGfxWorldXFile(nullGfxWorld), zone);
+    assert(!g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+
+    GfxWorldFixtureOptions malformedGfxWorld{};
+    malformedGfxWorld.assetPointer = UINT32_MAX - 2u;
+    malformedGfxWorld.includeAliasAsset = false;
+    Run(MakeGfxWorldXFile(malformedGfxWorld), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "stream/invalid alias offset") == 0);
+
+    GfxWorldFixtureOptions truncatedGfxWorld{};
+    truncatedGfxWorld.assetPointer = UINT32_MAX;
+    truncatedGfxWorld.includeAliasAsset = false;
+    truncatedGfxWorld.includeBody = false;
+    Run(MakeGfxWorldXFile(truncatedGfxWorld), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0);
+
+    GfxWorldFixtureOptions unterminatedGfxWorld{};
+    unterminatedGfxWorld.assetPointer = UINT32_MAX;
+    unterminatedGfxWorld.includeAliasAsset = false;
+    unterminatedGfxWorld.terminateName = false;
+    Run(MakeGfxWorldXFile(unterminatedGfxWorld), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+
+    GfxWorldFixtureOptions excessiveGfxWorldIndices{};
+    excessiveGfxWorldIndices.assetPointer = UINT32_MAX;
+    excessiveGfxWorldIndices.includeAliasAsset = false;
+    excessiveGfxWorldIndices.indexCount =
+        (std::numeric_limits<std::int32_t>::max)();
+    Run(MakeGfxWorldXFile(excessiveGfxWorldIndices), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage, "GfxWorld/index array") == 0);
+
+    GfxWorldFixtureOptions invalidGfxWorldLights{};
+    invalidGfxWorldLights.assetPointer = UINT32_MAX;
+    invalidGfxWorldLights.includeAliasAsset = false;
+    invalidGfxWorldLights.primaryLightCount = 0;
+    Run(MakeGfxWorldXFile(invalidGfxWorldLights), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+    assert(std::strcmp(g_trace.stopStage,
+        "GfxWorld/invalid primary light range") == 0);
+
+    GfxWorldFixtureOptions truncatedGfxWorldVertices{};
+    truncatedGfxWorldVertices.assetPointer = UINT32_MAX;
+    truncatedGfxWorldVertices.includeAliasAsset = false;
+    truncatedGfxWorldVertices.includedVertexCount = 2;
+    truncatedGfxWorldVertices.includedSurfaceCount = 0;
+    Run(MakeGfxWorldXFile(truncatedGfxWorldVertices), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
+
     const std::vector<std::uint8_t> lightInsertAlias = MakeLightDefXFile();
     Run(lightInsertAlias, zone);
     assert(g_trace.xassetCount == 2 && g_trace.assetIndex == 1);
@@ -3844,6 +4242,6 @@ int main()
     assert(g_trace.publicationEnd && g_trace.cleanupComplete);
     assert(std::strcmp(g_trace.stopStage, "Load_XAssetHeader/next-family-closure") == 0);
 
-    std::printf("gate3-db-stream rawfile=published physpreset=published xmodel=published weapon=published xanim=published stringtable=published technique-set=published material=published image=published water=loaded sound-curve=published sound-alias=published loaded-sound=published font=published fx=published impact-fx=published light-def=published menu=published menu-list=published snddriver=canonical-noop localize=published insert=-2 alias=block4:16 technique=block4:36 direct-xstring=block4:18 technique-children=block0:0,block4:251 material-children=block0:0,block4:248 sound-curve-children=block0:0,block4:38 sound-alias-children=block0:0,block4:586 loaded-sound-children=block0:0,block4:44 font-children=block0:0,block4:80 fx-children=block0:0,block4:502 impact-fx-children=block0:0,block4:1640 light-def-children=block0:0,block4:59 menu-children=block0:0,block4:880 localize-children=block0:0,block4:51 image-entry=16 material-entry=17 sound-curve-entry=16 sound-alias-entry=16 loaded-sound-entry=16 font-entry=16 fx-entry=16 impact-fx-entry=17 light-def-entry=17 menu-entry=16 menu-list-entry=17 localize-entry=16 free=32752->32750 zone=1 stop=code-post-complete\n");
+    std::printf("gate3-db-stream rawfile=published physpreset=published xmodel=published weapon=published xanim=published stringtable=published technique-set=published material=published image=published water=loaded sound-curve=published sound-alias=published loaded-sound=published font=published fx=published impact-fx=published comworld=published gfxworld=published light-def=published menu=published menu-list=published snddriver=canonical-noop localize=published insert=-2 alias=block4:16 technique=block4:36 direct-xstring=block4:18 technique-children=block0:0,block4:251 material-children=block0:0,block4:248 sound-curve-children=block0:0,block4:38 sound-alias-children=block0:0,block4:586 loaded-sound-children=block0:0,block4:44 font-children=block0:0,block4:80 fx-children=block0:0,block4:502 impact-fx-children=block0:0,block4:1640 comworld-children=block0:0,block4:204 gfxworld-children=block0:0,block1:0,block4:248 light-def-children=block0:0,block4:59 menu-children=block0:0,block4:880 localize-children=block0:0,block4:51 image-entry=16 material-entry=17 sound-curve-entry=16 sound-alias-entry=16 loaded-sound-entry=16 font-entry=16 fx-entry=16 impact-fx-entry=17 comworld-entry=16 gfxworld-entry=16 light-def-entry=17 menu-entry=16 menu-list-entry=17 localize-entry=16 free=32752->32750 zone=1 stop=code-post-complete\n");
     return 0;
 }

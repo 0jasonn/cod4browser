@@ -1,4 +1,5 @@
 #include <universal/q_shared.h>
+#include <qcommon/system.h>
 #include "dobj.h"
 #include <universal/profile.h>
 #include "xanim.h"
@@ -158,7 +159,7 @@ void __cdecl CalcSkelRootBonesNoParentOrDuplicate(
     int minBoneIndex,
     int *calcPartBits)
 {
-    DWORD v5; // eax
+    uint32_t v5; // eax
     int v6; // [esp+0h] [ebp-50h]
     float *v; // [esp+20h] [ebp-30h]
     float v8; // [esp+24h] [ebp-2Ch]
@@ -188,7 +189,7 @@ void __cdecl CalcSkelRootBonesNoParentOrDuplicate(
 
         while (1)
         {
-            if (!_BitScanReverse(&v5, bits))
+            if (!Sys_BitScanReverse(&v5, bits))
                 v5 = 63; // `CountLeadingZeros'::`2': : notFound;
             boneIndexLow = v5 ^ 0x1F;
             if ((v5 ^ 0x1F) >= v6)
@@ -225,7 +226,7 @@ void __cdecl CalcSkelRootBonesWithParent(
     int *calcPartBits,
     const int *controlPartBits)
 {
-    DWORD v7; // eax
+    uint32_t v7; // eax
     const DObjAnimMat *parentMat; // [esp+D0h] [ebp-3Ch]
     DObjAnimMat *childMat; // [esp+D4h] [ebp-38h]
     uint32_t boneIndex; // [esp+D8h] [ebp-34h]
@@ -254,7 +255,7 @@ void __cdecl CalcSkelRootBonesWithParent(
             maxBoneIndexLow = maxBoneIndex;
         while (1)
         {
-            if (!_BitScanReverse(&v7, bits))
+            if (!Sys_BitScanReverse(&v7, bits))
                 v7 = 63;
             boneIndexLow = v7 ^ 0x1F;
             if ((v7 ^ 0x1Fu) >= maxBoneIndexLow)
@@ -310,7 +311,7 @@ void __cdecl CalcSkelNonRootBones(
     int *calcPartBits,
     const int *controlPartBits)
 {
-    DWORD v6; // eax
+    uint32_t v6; // eax
     DObjAnimMat *childMat; // [esp+E0h] [ebp-4Ch]
     const DObjAnimMat *parentMat; // [esp+E4h] [ebp-48h]
     int boneIndex; // [esp+E8h] [ebp-44h]
@@ -344,7 +345,7 @@ void __cdecl CalcSkelNonRootBones(
 
         while (1)
         {
-            if (!_BitScanReverse(&v6, bits))
+            if (!Sys_BitScanReverse(&v6, bits))
                 v6 = 63;
             boneIndexLow = v6 ^ 0x1F;
             if ((v6 ^ 0x1F) >= maxBoneIndexLow)

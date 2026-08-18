@@ -7,6 +7,7 @@
 
 #include <xanim/xanim.h>
 #include <xanim/dobj.h>
+#include <gfx_d3d/gfx_placement_types.h>
 
 const float traceOffsets[5][2] = { { 0.0, 0.0 }, { 1.0, 1.0 }, { -1.0, 1.0 }, { 1.0, -1.0 }, { -1.0, -1.0 } }; // idb
 

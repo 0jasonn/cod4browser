@@ -37,20 +37,29 @@ Temporary deterministic trace/failure scaffolding comprises `Trace`, `Stop`,
 `DB_RuntimeStreamCanRead`, and `DB_GetRuntimeTrace`. These exist for strict
 native/Wasm semantic comparison and should retire with the integration prefix.
 
-`KisakWeb_StartCanonicalDbRuntimeCheck` is the only genuine browser-facing
-entry hook in the file. Its eventual owner should be a narrow web platform
-adapter; no DOM, Promise, OPFS object, or WebGL type is exposed to canonical DB
-structures.
+`KisakWeb_StartCanonicalDbRuntimeCheck` now lives in the narrow
+`web_client_server_lifecycle.cpp` platform adapter. It initializes the shared
+script/XAnim/DObj/server owners, lets `CL_InitRef` compute the renderer
+configuration, calls the shared renderer-owned request builder, and closes the
+temporary `$init` PMem scope. No zone name, DOM, Promise, OPFS object, or WebGL
+type is exposed by the adapter.
 
-Include audit: the direct `<emscripten.h>`/`EM_JS` dependencies are confined to
-this temporary DB prefix and the conditional trace emitter in
-`com_init_trace.cpp`. They do not leak into canonical DB types or generated
-loaders. Moving both emitters behind a narrow web trace adapter is remaining
-cleanup debt; doing it here would have expanded the ABI/linkage change beyond
-the measured build sprint.
+Include audit: direct `<emscripten.h>`/`EM_JS` dependencies are confined to
+narrow web adapters and conditional trace emitters. They do not leak into
+canonical DB types or generated loaders.
 
 Rule: add no canonical database behavior here when the native owner can be
 compiled. Browser I/O belongs behind Sys/FS/thread interfaces.
+
+The runtime pivot follows that rule: `cm_load.cpp` is compiled directly, while
+the first-map Hunk and fastfile common-world behavior have small portable
+owners in `com_memory_hunk.cpp` and `com_world_runtime.cpp`. None of these were
+added to `db_runtime_prefix.cpp`. Production pool identities now resolve
+ClipMap, ComWorld, and GfxWorld to `&cm`, `&comWorld`, and `&s_world`.
+
+Both shrink-only files are smaller at this checkpoint (`db_runtime_prefix.cpp`
+334 lines; `common_gate3_prefix.inl` 273 lines). Their no-growth rule remains
+part of the Release runtime-prefix check.
 
 ## `common_gate3_prefix.inl`
 

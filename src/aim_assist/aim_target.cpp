@@ -12,6 +12,7 @@
 #include <game/actor.h>
 #include <game/g_main.h>
 #include <universal/profile.h>
+#include <universal/com_math.h>
 
 AimTargetGlob atGlob;
 

@@ -5,23 +5,24 @@
 #include <universal/q_shared.h>
 #include "cg_ents.h"
 #include <qcommon/com_bsp.h>
-#include <gfx_d3d/r_scene.h>
+#include <gfx_d3d/r_cgame_api.h>
 #include "cg_actors.h"
 #include <xanim/dobj_utils.h>
 #include <EffectsCore/fx_system.h>
-#include <win32/win_local.h>
+#include <qcommon/system.h>
 #include <physics/phys_local.h>
 #include <game/savememory.h>
 #include <ragdoll/ragdoll.h>
-#include <gfx_d3d/r_workercmds_common.h>
 #include "cg_main.h"
 #include <script/scr_const.h>
 #include "cg_local.h"
-#include <gfx_d3d/r_model.h>
 #include "cg_pose.h"
 #include "cg_compassfriendlies.h"
 
 #include <bgame/bg_local.h>
+#include <sound/snd_public.h>
+#include <sound/snd_alias_system.h>
+#include <physics/phys_preset.h>
 
 void __cdecl LocalConvertQuatToMat(const DObjAnimMat *mat, float (*axis)[3])
 {
@@ -243,7 +244,7 @@ void __cdecl CG_AddEntityLoopSound(int localClientNum, const centity_s *cent)
         ConfigString = CL_GetConfigString(localClientNum, cent->nextState.loopSound + CS_SOUNDALIASES);
         origin = cent->pose.origin;
     }
-    CG_PlaySoundAliasByName(localClientNum, cent->nextState.number, origin, ConfigString);
+    CG_PlaySoundAliasByName(localClientNum, SndEntHandle(cent->nextState.number), origin, ConfigString);
 }
 
 void __cdecl CG_EntityEffects(int localClientNum, centity_s *cent)
@@ -354,7 +355,7 @@ void __cdecl CG_Missile(int localClientNum, centity_s *cent)
         WeaponDef = BG_GetWeaponDef(cent->nextState.weapon);
         projectileSound = WeaponDef->projectileSound;
         if (projectileSound)
-            CG_PlaySoundAlias(localClientNum, cent->nextState.number, cent->pose.origin, projectileSound);
+            CG_PlaySoundAlias(localClientNum, SndEntHandle(cent->nextState.number), cent->pose.origin, projectileSound);
         ClientDObj = Com_GetClientDObj(cent->nextState.number, 0);
 		if (!ClientDObj && WeaponDef->projectileModel)
 		{
@@ -379,7 +380,7 @@ void __cdecl CG_Missile(int localClientNum, centity_s *cent)
                     CG_PlayBoltedEffect(localClientNum, projIgnitionEffect, cent->nextState.number, scr_const.tag_fx);
                 projIgnitionSound = WeaponDef->projIgnitionSound;
                 if (projIgnitionSound)
-                    CG_PlaySoundAlias(localClientNum, cent->nextState.number, cent->pose.origin, projIgnitionSound);
+                    CG_PlaySoundAlias(localClientNum, SndEntHandle(cent->nextState.number), cent->pose.origin, projIgnitionSound);
             }
             RenderFlagForRefEntity = CG_GetRenderFlagForRefEntity(cent->nextState.lerp.eFlags);
             //R_AddDObjToScene(ClientDObj, &cent->pose, cent->nextState.number, RenderFlagForRefEntity, v12, v13);

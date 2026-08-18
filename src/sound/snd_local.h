@@ -5,12 +5,14 @@
 #else
 #include <AL/al.h>
 #include <AL/alc.h>
+#if !defined(KISAK_WEB)
 // efx.h only declares its functions as directly-linkable (rather than just LPALGENEFFECTS-
 // style function-pointer typedefs meant for dynamic alGetProcAddress loading) when this is
 // defined first. Since we statically link openal-soft ourselves and know EFX is compiled
 // in, direct linkage is simpler than the usual portable-extension-loading dance.
 #define AL_ALEXT_PROTOTYPES
 #include <AL/efx.h>
+#endif
 #endif
 #include "snd_public.h"
 

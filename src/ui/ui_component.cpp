@@ -9,6 +9,10 @@
 #include <script/scr_vm.h>
 #include <universal/com_files.h>
 #include <client/client.h>
+#include <qcommon/system.h>
+#include <gfx_d3d/r_client_api.h>
+#include <gfx_d3d/r_debugger_api.h>
+#include <gfx_d3d/r_registration_api.h>
 
 #ifdef KISAK_MP
 #include <client_mp/client_mp.h>
@@ -1304,7 +1308,9 @@ void __thiscall Scr_ScriptWatch::SortHitBreakpointsTop()
     if (Sys_IsRemoteDebugClient())
     {
         scrDebuggerGlob.gainFocusTime = Sys_Milliseconds() + 500;
+#if !defined(KISAK_WEB)
         SetForegroundWindow(g_wv.hWnd);
+#endif
     }
     scrDebuggerGlob.atBreakpoint = 1;
     hitBreakpoint = 0;

@@ -5,14 +5,21 @@
 #include <universal/com_memory.h>
 #include <qcommon/com_fileaccess.h>
 #include <qcommon/qcommon.h>
-#include <win32/win_local.h>
+#include <qcommon/system.h>
+#include <qcommon/sys_paths.h>
+#include <qcommon/system_files.h>
 #include <qcommon/threads.h>
 #include <stringed/stringed_hooks.h>
 #include <qcommon/unzip.h>
 #include <qcommon/com_bsp.h>
 #include <qcommon/cmd.h>
 #include <qcommon/files.h>
+#include <sound/snd_public.h>
+#if defined(_WIN32)
 #include <io.h>
+#else
+#include <unistd.h>
+#endif
 
 const dvar_t *fs_remotePCDirectory;
 const dvar_t *fs_remotePCName;
@@ -293,7 +300,9 @@ int __cdecl FS_GetFileOsPath(const char *filename, char *ospath)
 
 int __cdecl FS_OpenFileOverwrite(char *qpath)
 {
+#if defined(_WIN32)
     DWORD oldAttributes; // [esp+0h] [ebp-10Ch]
+#endif
     char ospath[256]; // [esp+4h] [ebp-108h] BYREF
     uint32_t attributes; // [esp+108h] [ebp-4h]
 
@@ -304,10 +313,12 @@ int __cdecl FS_OpenFileOverwrite(char *qpath)
     {
         if (fs_debug->current.integer)
             Com_Printf(10, "FS_FOpenFileOverWrite: %s\n", ospath);
+#if defined(_WIN32)
         oldAttributes = GetFileAttributesA(ospath);
         attributes = oldAttributes & 0xFFFFFFFE;
         if ((oldAttributes & 0xFFFFFFFE) != oldAttributes)
             SetFileAttributesA(ospath, attributes);
+#endif
         return FS_GetHandleAndOpenFile(qpath, ospath, FS_THREAD_MAIN);
     }
     else
@@ -1223,16 +1234,6 @@ int __cdecl FS_WriteFile(char *filename, char *buffer, uint32_t size)
     }
 }
 
-void __cdecl FS_ConvertPath(char *s)
-{
-    while (*s)
-    {
-        if (*s == 92 || *s == 58)
-            *s = 47;
-        ++s;
-    }
-}
-
 bool __cdecl FS_GameDirDomainFunc(dvar_s *dvar, DvarValue newValue)
 {
     bool result; // al
@@ -1288,7 +1289,11 @@ void FS_RegisterDvars()
             {
                 char probe[MAX_PATH];
                 Com_sprintf( probe, sizeof( probe ), "%s\\raw", exeDir );
+#if defined(_WIN32)
                 if ( GetFileAttributesA( probe ) != INVALID_FILE_ATTRIBUTES )
+#else
+                if (access(probe, F_OK) == 0)
+#endif
                 {
                     I_strncpyz( s_fsBase, exeDir, sizeof( s_fsBase ) );
                     v2 = s_fsBase;

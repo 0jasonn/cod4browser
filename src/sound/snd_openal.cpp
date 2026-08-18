@@ -90,9 +90,11 @@ char __cdecl MSS_Init()
     // per-sample dry/wet send level - see SND_SetRoomtype/SND_ApplyReverbSend in
     // snd_driver.cpp, Phase 6). The effect's actual EAXREVERB properties get filled in by
     // SND_SetRoomtype whenever the room changes; just allocate the objects here.
+#if !defined(KISAK_WEB)
     alGenAuxiliaryEffectSlots(1, &alGlob.auxSlot);
     alGenEffects(1, &alGlob.reverbEffect);
     alEffecti(alGlob.reverbEffect, AL_EFFECT_TYPE, AL_EFFECT_EAXREVERB);
+#endif
 
     g_snd.Initialized2d = 1;
     g_snd.Initialized3d = 1;
@@ -123,9 +125,11 @@ void MSS_InitChannels()
 
     // Per-channel wet-send gain carrier (see AlLocal::sendFilter's comment in snd_local.h).
     // Allocated once here, params updated in place per-channel by SND_ApplyReverbSend.
+#if !defined(KISAK_WEB)
     alGenFilters(totalChannels, alGlob.sendFilter);
     for (int i = 0; i < totalChannels; ++i)
         alFilteri(alGlob.sendFilter[i], AL_FILTER_TYPE, AL_FILTER_LOWPASS);
+#endif
 
     g_snd.ambient_track = 1;
 }
@@ -180,10 +184,14 @@ void MSS_ShutdownCleanup()
         if (totalChannels > 0)
         {
             alDeleteSources(totalChannels, alGlob.source);
+#if !defined(KISAK_WEB)
             alDeleteFilters(totalChannels, alGlob.sendFilter);
+#endif
         }
+#if !defined(KISAK_WEB)
         alDeleteAuxiliaryEffectSlots(1, &alGlob.auxSlot);
         alDeleteEffects(1, &alGlob.reverbEffect);
+#endif
 
         alcMakeContextCurrent(NULL);
         alcDestroyContext(alGlob.context);

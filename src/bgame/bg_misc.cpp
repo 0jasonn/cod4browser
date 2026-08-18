@@ -7,7 +7,6 @@
 #include <game/game_public.h>
 #include <universal/com_files.h>
 #include <xanim/xanim.h>
-#include <cgame/cg_local.h>
 
 const char *bgShockDvarNames[27] =
 {
@@ -215,7 +214,7 @@ void __cdecl BG_RegisterShockVolumeDvars()
         iassert(channelName);
         iassert(strlen(channelName->name) < SND_MAX_ENTCHANNEL_NAMELENGTH);
 
-        sprintf_s(bgShockChannelNames[i], 80, "bg_shock_volume_%s", channelName->name);        
+        Com_sprintf(bgShockChannelNames[i], 80, "bg_shock_volume_%s", channelName->name);
         min.value.max = 1.0;
         min.value.min = 0.0;
         bg_shock_volume[i] = Dvar_RegisterFloat(bgShockChannelNames[i], 0.5, min, DVAR_CHEAT, "");

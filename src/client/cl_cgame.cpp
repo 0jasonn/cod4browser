@@ -5,12 +5,11 @@
 #include <universal/q_shared.h>
 #include "client.h"
 #include <qcommon/cmd.h>
-#include <gfx_d3d/r_fog.h>
-#include <gfx_d3d/r_cinematic.h>
+#include <gfx_d3d/r_client_api.h>
+#include <gfx_d3d/r_cinematic_api.h>
 #include <universal/com_files.h>
 #include <stringed/stringed_hooks.h>
 #include <cgame/cg_servercmds.h>
-#include <gfx_d3d/r_init.h>
 #include <cgame/cg_snapshot.h>
 #include "cl_demo.h"
 #include <cgame/cg_main.h>
@@ -18,7 +17,6 @@
 #include <EffectsCore/fx_system.h>
 #include <cgame/cg_newdraw.h>
 #include <ui/ui.h>
-#include <gfx_d3d/r_scene.h>
 #include <universal/com_sndalias.h>
 #include <xanim/dobj_utils.h>
 #include "cl_pose.h"

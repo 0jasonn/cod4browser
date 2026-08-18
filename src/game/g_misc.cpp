@@ -4,13 +4,13 @@
 
 #include <universal/q_shared.h>
 #include "g_local.h"
-#include <cgame/cg_view.h>
+#include <cgame/cg_runtime_api.h>
 #include "g_main.h"
-#include <cgame/cg_ents.h>
 #include <xanim/xanim.h>
 #include <server/sv_game.h>
 #include <script/scr_const.h>
 #include <qcommon/com_bsp.h>
+#include <qcommon/com_pack.h>
 
 float __cdecl G_GetEntInfoScale()
 {

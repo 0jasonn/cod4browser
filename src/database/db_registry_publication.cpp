@@ -2,6 +2,7 @@
 #include <database/database.h>
 #include <database/db_registry_pools.h>
 #include <database/db_registry_publication.h>
+#include <database/db_generated_gfxworld_platform.h>
 #include <database/db_runtime_prefix.h>
 #include <database/db_generated_material_platform.h>
 #include <bgame/weapon_types.h>
@@ -12,6 +13,8 @@
 #include <gfx_d3d/material_types.h>
 #include <gfx_d3d/r_font.h>
 #include <physics/phys_preset.h>
+#include <qcommon/com_world_types.h>
+#include <gfx_d3d/gfx_world_types.h>
 #include <sound/snd_alias_types.h>
 #include <ui/ui_asset_types.h>
 #include <xanim/xmodel_types.h>
@@ -65,6 +68,12 @@ const char *AssetName(const XAsset &asset)
     case ASSET_TYPE_LOADED_SOUND:
         name = asset.header.loadSnd ? asset.header.loadSnd->name : nullptr;
         break;
+    case ASSET_TYPE_COMWORLD:
+        name = asset.header.comWorld ? asset.header.comWorld->name : nullptr;
+        break;
+    case ASSET_TYPE_GFXWORLD:
+        name = asset.header.gfxWorld ? asset.header.gfxWorld->name : nullptr;
+        break;
     case ASSET_TYPE_FONT:
         name = asset.header.font ? asset.header.font->fontName : nullptr;
         break;
@@ -117,6 +126,8 @@ std::size_t AssetSize(XAssetType type)
     case ASSET_TYPE_SOUND: return sizeof(snd_alias_list_t);
     case ASSET_TYPE_SOUND_CURVE: return sizeof(SndCurve);
     case ASSET_TYPE_LOADED_SOUND: return sizeof(LoadedSound);
+    case ASSET_TYPE_COMWORLD: return sizeof(ComWorld);
+    case ASSET_TYPE_GFXWORLD: return sizeof(GfxWorld);
     case ASSET_TYPE_FONT: return sizeof(Font_s);
     case ASSET_TYPE_FX: return sizeof(FxEffectDef);
     case ASSET_TYPE_IMPACT_FX: return sizeof(FxImpactTable);
@@ -135,6 +146,11 @@ XAssetHeader AllocAssetHeader(XAssetType type)
     XAssetHeader header{};
     if (!AssetSize(type) || !DB_XAssetPool[type])
         return header;
+    if (DB_IsSingletonAssetPool(type))
+    {
+        header.data = DB_XAssetPool[type];
+        return header;
+    }
     auto **freeHead = static_cast<void **>(DB_XAssetPool[type]);
     if (!*freeHead) return header;
     header.data = *freeHead;
@@ -304,6 +320,31 @@ void __cdecl Load_StringTableAsset(XAssetHeader *stringTable)
     XAssetHeader published = DB_AddXAsset(ASSET_TYPE_STRINGTABLE, *stringTable);
     if (!published.data) return;
     *stringTable = published;
+}
+
+void __cdecl Load_ComWorldAsset(XAssetHeader *comWorld)
+{
+    if (!comWorld || !comWorld->comWorld)
+    {
+        DB_RuntimeGeneratedFailure("publication/null ComWorld");
+        return;
+    }
+    XAssetHeader published = DB_AddXAsset(ASSET_TYPE_COMWORLD, *comWorld);
+    if (!published.data) return;
+    *comWorld = published;
+}
+
+void __cdecl Load_GfxWorldAsset(XAssetHeader *gfxWorld)
+{
+    if (!gfxWorld || !gfxWorld->gfxWorld)
+    {
+        DB_RuntimeGeneratedFailure("publication/null GfxWorld");
+        return;
+    }
+    XAssetHeader published = DB_AddXAsset(ASSET_TYPE_GFXWORLD, *gfxWorld);
+    if (!published.data) return;
+    *gfxWorld = published;
+    DB_PlatformPublishGfxWorld(gfxWorld->gfxWorld);
 }
 
 void __cdecl Load_XModelAsset(XAssetHeader *model)

@@ -10,7 +10,6 @@
 #include <universal/profile.h>
 #include <script/scr_vm.h>
 #include <universal/com_files.h>
-#include <win32/win_local.h>
 
 #ifdef KISAK_MP
 #include <cgame_mp/cg_local_mp.h>
@@ -18,17 +17,6 @@
 
 #endif
 
-
-static int g_info_usage;
-static int g_info_high_usage;
-int g_notifyListSize;
-
-static uint32_t g_endNotetrackName;
-
-static bool g_anim_developer;
-
-static XAnimNotify_s g_notifyList[0x80];
-static XAnimInfo g_xAnimInfo[0x1000];
 
 int __cdecl XAnimGetTreeHighMemUsage()
 {
@@ -54,30 +42,6 @@ int __cdecl XAnimGetTreeMaxMemUsage()
 XAnimInfo *XAnimAllocInfo(DObj_s *obj, uint32_t animIndex, int after)
 {
     return &g_xAnimInfo[XAnimAllocInfoIndex(obj, animIndex, after)];
-}
-
-void __cdecl XAnimInit()
-{
-    int i; // [esp+0h] [ebp-4h]
-
-    for (i = 0; i < 4096; ++i)
-    {
-        g_xAnimInfo[i].prev = (i + 4095) % 4096;
-        g_xAnimInfo[i].next = (i + 1) % 4096;
-    }
-    g_xAnimInfo[0].state.currentAnimTime = 0.0;
-    g_xAnimInfo[0].state.oldTime = 0.0;
-    g_xAnimInfo[0].state.cycleCount = 0;
-    g_xAnimInfo[0].state.oldCycleCount = 0;
-    g_xAnimInfo[0].state.goalTime = 0.0;
-    g_xAnimInfo[0].state.goalWeight = 0.0;
-    g_xAnimInfo[0].state.weight = 0.0;
-    g_xAnimInfo[0].state.rate = 0.0;
-    g_xAnimInfo[0].state.instantWeightChange = 0;
-    g_endNotetrackName = SL_GetString_("end", 0, MT_TYPE_NOTETRACK);
-    g_anim_developer = 1;
-    g_info_usage = 1;
-    g_info_high_usage = 1;
 }
 
 void __cdecl XAnimShutdown()
@@ -177,6 +141,17 @@ XAnimParts *__cdecl XAnimPrecache(const char *name, void *(__cdecl *Alloc)(int))
         result = XAnimFindData_LoadObj(name);
     if (!result)
     {
+#if defined(KISAK_WEB)
+        iassert(IsFastFileLoad());
+        parts = XAnimFindData_FastFile("void");
+        if (!parts)
+        {
+            Com_Error(ERR_DROP, "Cannot find xanim %s", "void");
+            return 0;
+        }
+        parts = XAnimClone(parts, Alloc);
+        parts->isDefault = 1;
+#else
         parts = XAnimLoadFile((char*)name, Alloc);
         if (!parts)
         {
@@ -199,6 +174,7 @@ XAnimParts *__cdecl XAnimPrecache(const char *name, void *(__cdecl *Alloc)(int))
             parts = XAnimClone(defaultParts, Alloc);
             parts->isDefault = 1;
         }
+#endif
         parts->name = Hunk_SetDataForFile(6, name, parts, Alloc);
         return parts;
     }
@@ -3771,7 +3747,7 @@ bool __cdecl XAnimHasTime(const XAnim_s* anims, uint32_t animIndex)
     return IsLeafNode(&anims->entries[animIndex]) || (anims->entries[animIndex].animParent.flags & 3) != 0;
 }
 
-BOOL __cdecl XAnimIsPrimitive(XAnim_s* anims, uint32_t animIndex)
+int __cdecl XAnimIsPrimitive(XAnim_s* anims, uint32_t animIndex)
 {
     return anims->entries[animIndex].numAnims == 0;
 }

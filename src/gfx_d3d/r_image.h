@@ -85,12 +85,7 @@ struct ImageList // sizeof=0x2004
     GfxImage *image[2048];              // ...
 };
 
-struct Image_MemUsage // sizeof=0xC
-{                                       // ...
-    int total;                          // ...
-    int lightmap;
-    int minspec;                        // ...
-};
+#include "r_statistics.h"
 
 #ifdef KISAK_RADIANT
 // CoD4Radiant.exe imageGlobals: Image_Alloc @0x5128b0 and Image_FindExisting @0x513200

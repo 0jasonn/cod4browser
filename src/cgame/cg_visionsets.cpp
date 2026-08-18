@@ -87,10 +87,10 @@ void __cdecl CG_AddVisionSetMenuItem(XAssetHeader header)
 
     iassert(header.rawfile);
     iassert(header.rawfile->name);
-    visionSetNameEnd = I_stristr(header.xmodelPieces->name, ".vision");
+    visionSetNameEnd = I_stristr(header.rawfile->name, ".vision");
     if (visionSetNameEnd)
     {
-        visionSetNameBegin = I_stristr(header.xmodelPieces->name, "/");
+        visionSetNameBegin = I_stristr(header.rawfile->name, "/");
         iassert(visionSetNameBegin);
         ++visionSetNameBegin;
         iassert(visionSetNameEnd - visionSetNameBegin < static_cast<int>( sizeof( visionSetName ) ));

@@ -5,8 +5,7 @@
 #include <qcommon/mem_track.h>
 
 #include <gfx_d3d/r_drawsurf.h>
-#include <gfx_d3d/rb_tess.h>
-#include <gfx_d3d/r_scene.h>
+#include <gfx_d3d/r_cgame_api.h>
 #include <gfx_d3d/r_marks.h>
 
 #include <xanim/dobj.h>
@@ -19,7 +18,7 @@
 #include <cgame/cg_main.h>
 #endif
 
-#include <win32/win_local.h>
+#include <qcommon/system.h>
 
 #include <algorithm>
 #include <aim_assist/aim_assist.h>
@@ -1020,7 +1019,7 @@ static void __cdecl FX_EmitMarkTri(
         index.value[0] = *indices + baseVertex;
         index.value[1] = indices[1] + baseVertex;
         pIndex = (r_double_index_t *)&outSurf->indices[outSurf->indexCount];
-        if (((uint8_t)pIndex & 3) != 0)
+        if ((reinterpret_cast<uintptr_t>(pIndex) & 3u) != 0)
             MyAssertHandler(".\\EffectsCore\\fx_marks.cpp", 1255, 0, "%s", "!((uint)pIndex & 3)");
         *pIndex = index;
         marksSystem->hasCarryIndex = 1;

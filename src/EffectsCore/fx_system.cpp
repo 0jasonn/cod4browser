@@ -6,7 +6,7 @@
 
 #include <physics/phys_local.h>
 
-#include <gfx_d3d/rb_light.h>
+#include <gfx_d3d/r_effects_api.h>
 
 #include <universal/com_sndalias.h>
 
@@ -17,8 +17,7 @@
 #include <cgame/cg_main.h>
 #endif
 
-#include <win32/win_local.h>
-#include <gfx_d3d/r_model.h>
+#include <qcommon/system.h>
 
 #include <universal/profile.h>
 

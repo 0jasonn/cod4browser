@@ -7,6 +7,7 @@
 #include "client.h"
 #include <ui/ui.h>
 #include <universal/com_sndalias.h>
+#include <gfx_d3d/r_debugger_api.h>
 
 void __cdecl Key_KeynumToStringBuf(int keynum, char *buf, int buflen)
 {

@@ -10,6 +10,13 @@
 
 #include <bgame/bg_local.h>
 
+#if defined(_MSC_VER)
+struct _iobuf;
+#else
+#include <cstdio>
+using _iobuf = FILE;
+#endif
+
 enum clientConnected_t : __int32
 {
     CON_DISCONNECTED = 0x0,
@@ -469,6 +476,7 @@ bool __cdecl SV_SaveMemory_IsRecentlyLoaded();
 
 extern server_t sv;
 extern serverStatic_t svs;
+extern PendingSaveList pendingSaveGlob;
 
 extern int com_time;
 extern int com_inServerFrame;

@@ -2,6 +2,7 @@
 #include "bg_public.h"
 #include "bg_local.h"
 #include <universal/profile.h>
+#include <universal/com_math.h>
 #include <xanim/dobj_utils.h>
 
 #ifdef KISAK_MP
@@ -9,7 +10,6 @@
 #elif KISAK_SP
 #include <game/g_main.h>
 #endif
-#include <cgame/cg_local.h>
 
 #ifdef KISAK_SP
 char __cdecl BG_CheckProneView(

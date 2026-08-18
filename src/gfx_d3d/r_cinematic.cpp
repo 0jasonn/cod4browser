@@ -1161,6 +1161,18 @@ bool __cdecl R_Cinematic_IsStarted()
     return !R_Cinematic_IsFinished() && cinematicGlob.currentCinematicName[0];
 }
 
+bool R_Cinematic_GetPlaybackInfo(char *name, std::size_t nameSize,
+    std::uint32_t *timeInMsec)
+{
+    if (!name || !nameSize || !timeInMsec || !cinematicGlob.currentCinematicName[0])
+    {
+        return false;
+    }
+    I_strncpyz(name, cinematicGlob.currentCinematicName, static_cast<int>(nameSize));
+    *timeInMsec = cinematicGlob.timeInMsec;
+    return true;
+}
+
 bool __cdecl R_Cinematic_IsNextReady()
 {
     return R_Cinematic_IsNextReady_Internal();

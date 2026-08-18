@@ -618,7 +618,7 @@ void dCloseODE()
 
 
 // LWSS ADD - Custom for COD4
-#include <win32/win_local.h> // lwss add
+#include <qcommon/system.h>
 #include <universal/pool_allocator.h> // lwss add
 
 #include "odeext.h"

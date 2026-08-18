@@ -1051,33 +1051,33 @@ void __cdecl SV_BotUserMove(client_t *cl)
         nullcmd.weapon = SV_GameClientNum(cl - svs.clients)->weapon;
         if (!G_GetClientArchiveTime(cl - svs.clients))
         {
-            if (random() < 0.5 && sv_botsPressAttackBtn->current.enabled)
+            if (Q_random() < 0.5 && sv_botsPressAttackBtn->current.enabled)
                 nullcmd.buttons |= 1u;
-            if (random() < 0.5)
+            if (Q_random() < 0.5)
                 nullcmd.buttons |= 0x28u;
-            if (random() >= 0.3300000131130219)
+            if (Q_random() >= 0.3300000131130219)
             {
-                if (random() < 0.5)
+                if (Q_random() < 0.5)
                     nullcmd.forwardmove = -127;
             }
             else
             {
                 nullcmd.forwardmove = 127;
             }
-            if (random() >= 0.3300000131130219)
+            if (Q_random() >= 0.3300000131130219)
             {
-                if (random() < 0.5)
+                if (Q_random() < 0.5)
                     nullcmd.rightmove = -127;
             }
             else
             {
                 nullcmd.rightmove = 127;
             }
-            if (random() < 0.3300000131130219)
+            if (Q_random() < 0.3300000131130219)
                 nullcmd.angles[0] = (int)(crandom() * 360.0);
-            if (random() < 0.3300000131130219)
+            if (Q_random() < 0.3300000131130219)
                 nullcmd.angles[1] = (int)(crandom() * 360.0);
-            if (random() < 0.3300000131130219)
+            if (Q_random() < 0.3300000131130219)
                 nullcmd.angles[2] = (int)(crandom() * 360.0);
         }
         cl->header.deltaMessage = cl->header.netchan.outgoingSequence - 1;

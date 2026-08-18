@@ -4,30 +4,34 @@
 #include <database/db_asset_types.h>
 #include <database/db_file_types.h>
 #include <database/db_registry_types.h>
-#include <physics/phys_preset.h>
-#include <qcommon/cm_types.h>
 #include <xanim/xanim_types.h>
+#include <xanim/xanim_runtime_init.h>
 #include "xanim_public.h"
 #include <script/scr_stringlist.h>
+#if !defined(KISAK_DB_REGISTRY_LIFECYCLE_SLICE)
+#include <EffectsCore/fx_types.h>
+#include <database/localize_types.h>
+#include <physics/phys_preset.h>
+#include <qcommon/cm_types.h>
 #include <gfx_d3d/r_font.h>
-#include <gfx_d3d/r_bsp.h>
-#include <universal/com_math.h>
+#include <gfx_d3d/gfx_image_types.h>
+#include <gfx_d3d/gfx_light_types.h>
+#include <gfx_d3d/gfx_world_types.h>
+#include <gfx_d3d/material_types.h>
 #include <bgame/bg_weapons.h>
 #include <bgame/weapon_types.h>
-#include <xanim/xanim.h>
-#include <sound/snd_public.h>
+#include <sound/snd_alias_types.h>
 #include <qcommon/com_world_types.h>
+#include <ui/ui_shared.h>
+#endif
+#include <universal/com_math.h>
 #include "dobj.h"
 #include "xmodel.h"
-#include <gfx_d3d/r_material.h>
-#include <gfx_d3d/r_gfx.h>
 #include <xanim/xsurface_types.h>
 
 #ifndef KISAK_RADIANT
 #include <game/pathnode.h>
 #endif
-
-#include <ui/ui_shared.h>
 
 #define ANIM_FLAG_COMPLETE 1
 
@@ -37,11 +41,6 @@ struct XModelNameMap // sizeof=0x4
     uint16_t index;
 };
 
-struct XAnimParent // sizeof=0x4
-{                                       // ...
-    uint16_t flags;
-    uint16_t children;
-};
 struct XAnimEntry // sizeof=0x8
 {                                       // ...
     uint16_t numAnims;
@@ -64,8 +63,8 @@ struct XAnimTree_s // sizeof=0x14
 {
     XAnim_s *anims;
     int info_usage;
-    volatile long calcRefCount;
-    volatile long modifyRefCount;
+    volatile int32_t calcRefCount;
+    volatile int32_t modifyRefCount;
     uint16_t children;
     // padding byte
     // padding byte
@@ -74,48 +73,6 @@ struct mnode_t // sizeof=0x4
 {
     uint16_t cellIndex;
     uint16_t rightChildOffset;
-};
-
-struct XAnimState // sizeof=0x20
-{                                       // ...
-    float currentAnimTime;              // ...
-    float oldTime;                      // ...
-    __int16 cycleCount;                 // ...
-    __int16 oldCycleCount;              // ...
-    float goalTime;                     // ...
-    float goalWeight;                   // ...
-    float weight;                       // ...
-    float rate;                         // ...
-    bool instantWeightChange;           // ...
-    // padding byte
-    // padding byte
-    // padding byte
-};
-
-struct XAnimInfo // sizeof=0x40
-{                                       // ...
-    uint16_t notifyChild;
-    __int16 notifyIndex;
-    uint16_t notifyName;
-    uint16_t notifyType;
-    uint16_t prev;              // ...
-    uint16_t next;              // ...
-    uint16_t children;          // ...
-    uint16_t parent;            // ...
-    uint16_t animIndex;         // ...
-    uint16_t animToModel;
-    bool inuse;                         // ...
-    // padding byte
-    // padding byte
-    // padding byte
-    XAnimTree_s* tree;
-    //$7F333398CC08E12E110886895274CBFC ___u12;
-    union
-    {                                       // ...
-        XAnimParts* parts;
-        XAnimParent animParent;
-    };
-    XAnimState state;                   // ...
 };
 
 struct XAnimSimpleRotPos // sizeof=0x18
@@ -133,33 +90,6 @@ struct XAnimDeltaInfo // sizeof=0x4
     bool bUseGoalWeight;                // ...
 };
 
-struct XAnimNotify_s // sizeof=0xC
-{                                       // ...
-    const char* name;
-    uint32_t type;
-    float timeFrac;
-};
-
-struct XModelDrawInfo // sizeof=0x4
-{                                       // ...
-    uint16_t lod;
-    uint16_t surfId;
-};
-struct GfxSceneDynModel // sizeof=0x6
-{
-    XModelDrawInfo info;
-    uint16_t dynEntId;
-};
-struct BModelDrawInfo // sizeof=0x2
-{                                       // ...
-    uint16_t surfId;
-};
-struct GfxSceneDynBrush // sizeof=0x4
-{
-    BModelDrawInfo info;
-    uint16_t dynEntId;
-};
-
 struct SndDriverGlobals // sizeof=0x4
 {                                       // ...
     const char* name;
@@ -170,6 +100,7 @@ extern "C" {
     struct _OVERLAPPED;
 }
 
+#if !defined(KISAK_DB_REGISTRY_LIFECYCLE_SLICE)
 union XAssetSize // sizeof=0x878
 {                                       // ...
     XAssetSize()
@@ -219,6 +150,7 @@ struct XAssetPool
     XAssetPoolEntry<T> *freeHead;
     XAssetPoolEntry<T> entries[LEN];
 };
+#endif
 
 struct DObj_s;
 
@@ -450,7 +382,7 @@ void __cdecl XAnimSetupSyncNodes(XAnim_s* anims);
 void __cdecl XAnimSetupSyncNodes_r(XAnim_s* anims, uint32_t animIndex);
 void __cdecl XAnimFillInSyncNodes_r(XAnim_s* anims, uint32_t animIndex, bool bLoop);
 bool __cdecl XAnimHasTime(const XAnim_s* anims, uint32_t animIndex);
-BOOL __cdecl XAnimIsPrimitive(XAnim_s* anims, uint32_t animIndex);
+int __cdecl XAnimIsPrimitive(XAnim_s* anims, uint32_t animIndex);
 void __cdecl XAnimSetTime(XAnimTree_s *tree, uint32_t animIndex, float time);
 void __cdecl XAnimUpdateServerNotifyIndex(XAnimInfo* info, const XAnimParts* parts);
 uint32_t __cdecl XAnimRestart(XAnimTree_s* tree, uint32_t infoIndex, float goalTime);

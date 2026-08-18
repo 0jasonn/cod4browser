@@ -3,6 +3,7 @@
 #include <universal/assertive.h>
 #include <universal/com_memory.h>
 #include <database/database.h>
+#include <database/localize_types.h>
 #include <universal/com_files.h>
 
 CStringEdPackage *TheStringPackage;

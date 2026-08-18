@@ -128,6 +128,10 @@ void __cdecl FS_FreeMem(char *buffer);
 int __cdecl FS_FileExists(char *file);
 int __cdecl FS_WriteFile(char *filename, char *buffer, uint32_t size);
 void __cdecl FS_ConvertPath(char *s);
+void __cdecl Com_GetBspFilename(
+    char *filename,
+    std::uint32_t size,
+    const char *mapname);
 void __cdecl FS_InitFilesystem();
 uint32_t __cdecl FS_FOpenFileByMode(char *qpath, int *f, fsMode_t mode);
 void __cdecl FS_Flush(int f);

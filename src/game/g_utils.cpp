@@ -1880,10 +1880,11 @@ int __cdecl G_SaveFreeEntities(unsigned __int8 *buf)
         {
             if (buf)
             {
-                *v4 = (unsigned __int8)firstFreeEnt->nextFree;
-                v4[1] = BYTE1(firstFreeEnt->nextFree);
-                v4[2] = BYTE2(firstFreeEnt->nextFree);
-                v4[3] = HIBYTE(firstFreeEnt->nextFree);
+                const std::uintptr_t nextFree = reinterpret_cast<std::uintptr_t>(firstFreeEnt->nextFree);
+                *v4 = static_cast<unsigned __int8>(nextFree);
+                v4[1] = static_cast<unsigned __int8>(nextFree >> 8);
+                v4[2] = static_cast<unsigned __int8>(nextFree >> 16);
+                v4[3] = static_cast<unsigned __int8>(nextFree >> 24);
             }
             firstFreeEnt = firstFreeEnt->nextFree;
             result += 4;

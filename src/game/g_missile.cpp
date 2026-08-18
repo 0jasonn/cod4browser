@@ -4,7 +4,6 @@
 #include <server/sv_world.h>
 #include <script/scr_vm.h>
 #include "bullet.h"
-#include <cgame/cg_local.h>
 
 #ifdef KISAK_MP
 #include <game_mp/g_utils_mp.h>
@@ -15,6 +14,8 @@
 #include "actor_events.h"
 #include <xanim/xmodel.h>
 #endif
+
+static const float missileUp[3] = {0.0f, 0.0f, 1.0f};
 
 struct AttractorRepulsor_t // sizeof=0x18
 {                                       // ...
@@ -360,7 +361,7 @@ void __cdecl G_ExplodeMissile(gentity_s *ent)
                     2065);
                 if (weapDef->projExplosionEffectForceNormalUp)
                 {
-                    normal = up;
+                    normal = missileUp;
                 }
                 else
                 {
@@ -1212,11 +1213,11 @@ void __cdecl MissileImpact(gentity_s *ent, trace_t *trace, float *dir, float *en
         && ent->missileTargetEnt.isDefined()
         && (v7 = ent->missileTargetEnt.ent(), v7 == other))
     {
-        normal = up;
+        normal = missileUp;
     }
     else if (weapDef->projExplosionEffectForceNormalUp)
     {
-        normal = up;
+        normal = missileUp;
     }
     else
     {

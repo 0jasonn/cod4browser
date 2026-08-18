@@ -19,8 +19,6 @@
 #include <qcommon/ent.h>
 #endif
 
-#include <cgame/cg_local.h>
-
 char __cdecl Bullet_Trace(
     const BulletFireParams *bp,
     const WeaponDef *weapDef,

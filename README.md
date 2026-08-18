@@ -8,10 +8,11 @@ platform boundaries.
 
 The current build is an architecture and compatibility proof, not a playable
 game. A dedicated Worker executes the canonical `Com_Init` prefix, physical
-memory, database pools, XFile streaming, and the generated RawFile loader. A
-separate, explicitly requested Gate 2 diagnostic traverses the retained retail
-census path, publishes the canonical Killhouse `GfxWorld`, and renders one
-bounded world surface through WebGL2. Normal startup does not run that oracle.
+memory, database pools, XFile streaming, and every generated family required
+to complete the canonical `code_post_gfx`, `ui`, and `common` startup-zone
+request. The normal DB path then opens Killhouse, publishes the canonical
+`GfxWorld`, compares it with the frozen Gate 2 oracle, and renders its bounded
+world surface through WebGL2. Normal startup does not use the census as DB.
 
 ## Legal asset boundary
 
@@ -82,14 +83,20 @@ Demonstrated:
 - legal local import, validation, persistence, restore, and Worker-mounted
   synchronous filesystem access;
 - canonical command/dvar behavior, 128 MiB PMem, DB pools, XFile streaming,
-  generated RawFile publication, and normalized native/Wasm traces;
+  completion of all 8,176 ordered assets in the three engine-requested startup
+  prerequisite zones, and normalized native/Wasm traces;
 - an opt-in Gate 2 oracle retaining the retail census, canonical Killhouse
   `GfxWorld`, and bounded WebGL2 world-surface proof; and
 - synthetic Linux, MSVC x86, Wasm, browser, sanitizer, and fuzz validation.
 
-Not yet demonstrated: `CM_LoadMap`, the complete client/server/game/cgame
-runtime, script VM, input, audio, cinematics, multiplayer transport, or a
-playable offline slice.
+The real `CM_LoadMap`, script/XAnim/DObj initialization, local-server command
+path, and their normalized x86/Wasm contracts are compiled and tested. The
+owned browser run still stops at the ordered `GameWorldSp` asset before
+ClipMap publication. The next architecture decision is how the Worker mount
+backs canonical `FS_InitFilesystem`, directory enumeration, and IWD/minizip
+access so full `CL_Init` can replace the bounded startup entry without
+duplicating browser asset state. Input, audio, cinematics, cgame, and a
+playable offline slice are not yet demonstrated.
 
 ## License
 

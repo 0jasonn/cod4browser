@@ -8,10 +8,9 @@
 #include "cg_main.h"
 #include "cg_servercmds.h"
 #include "cg_newdraw.h"
-#include <gfx_d3d/r_cinematic.h>
+#include <gfx_d3d/r_cinematic_api.h>
 #include <ui/ui.h>
 #include "cg_view.h"
-#include <gfx_d3d/r_reflection_probe.h>
 
 CenterPrint s_centerPrint[1];
 ScreenBlur s_screenBlur[1];

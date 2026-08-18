@@ -5,7 +5,7 @@
 #include <universal/q_parse.h>
 
 #include "qcommon.h"
-#if defined(KISAK_GATE3_COM_INIT_PREFIX)
+#if defined(KISAK_GATE3_COM_INIT_PREFIX) && !defined(KISAK_RUNTIME_MAP_DB_BOUNDARY)
 #include <qcommon/system.h>
 #include <universal/dvar.h>
 #define PROF_SCOPED(name) ((void)0)
@@ -14,7 +14,9 @@
 #include "threads.h"
 
 #include <database/database.h>
+#if !defined(KISAK_WEB)
 #include <win32/win_local.h>
+#endif
 #include <universal/com_files.h>
 #include <script/scr_debugger.h>
 #include <server/sv_game.h>
@@ -626,7 +628,11 @@ void __cdecl Cbuf_InsertText(int32_t  localClientNum, const char *text)
 
 static cmd_function_s *sv_cmd_functions;
 
-#if !defined(KISAK_GATE3_COM_INIT_PREFIX)
+#if !defined(KISAK_GATE3_COM_INIT_PREFIX) || defined(KISAK_CANONICAL_MAP_COMMANDS)
+#if defined(KISAK_GATE3_COM_INIT_PREFIX)
+void __cdecl SV_WaitServer();
+extern int com_inServerFrame;
+#endif
 void __cdecl Cbuf_AddServerText_f()
 {
     if (!alwaysfails)
@@ -1226,7 +1232,7 @@ void __cdecl Cmd_ExecuteSingleCommand(int32_t  localClientNum, int32_t  controll
         {
             cmd_args.localClientNum[cmd_args.nesting] = localClientNum;
             cmd_args.controllerIndex[cmd_args.nesting] = controllerIndex;
-#if defined(KISAK_SP) && !defined(KISAK_GATE3_COM_INIT_PREFIX)
+#if defined(KISAK_SP) && (!defined(KISAK_GATE3_COM_INIT_PREFIX) || defined(KISAK_RUNTIME_MAP_DB_BOUNDARY))
             Cmd_CheckNotify();
 #endif
             arg0 = Cmd_Argv(0);
@@ -1239,7 +1245,7 @@ void __cdecl Cmd_ExecuteSingleCommand(int32_t  localClientNum, int32_t  controll
                     //cmd_functions = cmd;
                     if (itr->function)
                     {
-#if !defined(KISAK_GATE3_COM_INIT_PREFIX)
+#if !defined(KISAK_GATE3_COM_INIT_PREFIX) || defined(KISAK_CANONICAL_MAP_COMMANDS)
                         if (itr->function == Cbuf_AddServerText_f)
                         {
 #ifndef KISAK_RADIANT
@@ -1422,9 +1428,12 @@ void __cdecl SV_Cmd_ArgvBuffer(int32_t  arg, char *buffer, int32_t  bufferLength
     I_strncpyz(buffer, v3, bufferLength);
 }
 
-#if defined(KISAK_SP) && !defined(KISAK_GATE3_COM_INIT_PREFIX)
-#include <script/scr_vm.h>
-#include <game/g_local.h>
+#if defined(KISAK_SP) && (!defined(KISAK_GATE3_COM_INIT_PREFIX) || defined(KISAK_RUNTIME_MAP_DB_BOUNDARY))
+#include <script/scr_stringlist.h>
+#include <universal/memfile.h>
+
+void __cdecl G_AddCommandNotify(volatile unsigned __int16 notify);
+void Scr_Error(const char *error);
 
 struct CmdScriptNotify
 {

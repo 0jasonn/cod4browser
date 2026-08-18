@@ -4,39 +4,21 @@
 
 #include <universal/q_shared.h>
 #include "savememory.h"
-#include <qcommon/com_bsp.h>
+#include "savememory_state.h"
+#include <qcommon/com_checksum.h>
 #include <buildnumber.h>
-#include "g_main.h"
-#include <bgame/bg_public.h>
 #include <server/server.h>
-#include <server/sv_game.h>
+#include <game/g_runtime_state.h>
 #include "savedevice.h"     // OpenDevice/CloseDevice/ReadFromDevice/WriteSaveToDevice
 
-struct __declspec(align(4)) SaveMemoryGlob
-{
-    SaveGame *committedGameSave;
-    SaveGame *currentGameSave;
-    SaveGame game0;
-    SaveGame game1;
-    SaveGame demo;
-    unsigned __int8 buffer0[1572864];
-    unsigned __int8 buffer1[1572864];
-    unsigned __int8 buffer2[1572864];
-    int recentLoadTime;
-    bool isCommitForced;
-};
+void __cdecl SV_GameSendServerCommand(int clientNum, const char *text);
+void Scr_GetChecksum(std::uint32_t *checksum);
 
-SaveMemoryGlob saveMemoryGlob;
 int g_saveId;
 
 unsigned int __cdecl Com_BlockChecksum32(const void *buffer, unsigned int length)
 {
     return Com_BlockChecksumKey32((const unsigned char*)buffer, length, 0);
-}
-
-void __cdecl TRACK_save_memory()
-{
-    track_static_alloc_internal(&saveMemoryGlob, 4722040, "saveMemoryGlob", 10);
 }
 
 MemoryFile * SaveMemory_GetMemoryFile(SaveGame *save)
@@ -45,83 +27,6 @@ MemoryFile * SaveMemory_GetMemoryFile(SaveGame *save)
     iassert(!save->isDirectWriteActive);
 
     return (MemoryFile*)save;
-}
-
-SaveGame *__cdecl SaveMemory_GetSaveHandle(unsigned int type)
-{
-    if (!type)
-        return saveMemoryGlob.currentGameSave;
-    if (type == 1)
-        return &saveMemoryGlob.demo;
-    if (type < 3)
-        return saveMemoryGlob.committedGameSave;
-    if (!alwaysfails)
-        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp", 174, 0, "unreachable");
-    return 0;
-}
-
-void __cdecl SaveMemory_ClearSaveGame(SaveGame *saveGame, bool isUsingGlobalBuffer)
-{
-    memset(saveGame, 0, sizeof(SaveGame));
-    saveGame->isUsingGlobalBuffer = isUsingGlobalBuffer;
-}
-
-void *SaveMemory_ResetGameBuffers()
-{
-    void *result; // r3
-
-    memset(&saveMemoryGlob.game0, 0, sizeof(saveMemoryGlob.game0));
-    saveMemoryGlob.game0.isUsingGlobalBuffer = 1;
-    result = memset(&saveMemoryGlob.game1, 0, sizeof(saveMemoryGlob.game1));
-    saveMemoryGlob.game1.isUsingGlobalBuffer = 1;
-    saveMemoryGlob.game0.memFile.buffer = saveMemoryGlob.buffer0;
-    saveMemoryGlob.game1.memFile.buffer = saveMemoryGlob.buffer1;
-    saveMemoryGlob.game0.memFile.bufferSize = 1572864;
-    saveMemoryGlob.game1.memFile.bufferSize = 1572864;
-    saveMemoryGlob.committedGameSave = &saveMemoryGlob.game0;
-    saveMemoryGlob.currentGameSave = &saveMemoryGlob.game1;
-    return result;
-}
-
-void __cdecl SaveMemory_InitializeSaveSystem()
-{
-    if (saveMemoryGlob.committedGameSave)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp",
-            226,
-            0,
-            "%s",
-            "!saveMemoryGlob.committedGameSave");
-    if (saveMemoryGlob.currentGameSave)
-        MyAssertHandler(
-            "c:\\trees\\cod3\\cod3src\\src\\game\\savememory.cpp",
-            227,
-            0,
-            "%s",
-            "!saveMemoryGlob.currentGameSave");
-    memset(&saveMemoryGlob.game0, 0, sizeof(saveMemoryGlob.game0));
-    saveMemoryGlob.game0.isUsingGlobalBuffer = 1;
-    memset(&saveMemoryGlob.game1, 0, sizeof(saveMemoryGlob.game1));
-    saveMemoryGlob.game1.isUsingGlobalBuffer = 1;
-    saveMemoryGlob.game0.memFile.buffer = saveMemoryGlob.buffer0;
-    saveMemoryGlob.game1.memFile.buffer = saveMemoryGlob.buffer1;
-    saveMemoryGlob.game0.memFile.bufferSize = 1572864;
-    saveMemoryGlob.game1.memFile.bufferSize = 1572864;
-    saveMemoryGlob.committedGameSave = &saveMemoryGlob.game0;
-    saveMemoryGlob.currentGameSave = &saveMemoryGlob.game1;
-    saveMemoryGlob.recentLoadTime = 0;
-}
-
-void __cdecl SaveMemory_ShutdownSaveSystem()
-{
-    saveMemoryGlob.committedGameSave = 0;
-    saveMemoryGlob.currentGameSave = 0;
-}
-
-void __cdecl SaveMemory_ClearDemoSave()
-{
-    memset(&saveMemoryGlob.demo, 0, sizeof(saveMemoryGlob.demo));
-    saveMemoryGlob.demo.isUsingGlobalBuffer = 0;
 }
 
 void __cdecl SaveMemory_AllocateTempMemory(SaveGame *save, int size, void *buffer)
@@ -433,18 +338,7 @@ void __cdecl SaveMemory_CreateHeader(
         I_strncpyz(save->header.description, description, 256);
     else
         save->header.description[0] = 0;
-    if (g_entities[0].health && g_entities[0].client->pers.maxHealth)
-    {
-        v43 = (int)((float)(100 * g_entities[0].health) / (float)g_entities[0].client->pers.maxHealth);
-        if (v43 < 1)
-            v43 = 1;
-        else if (v43 > 100)
-            v43 = 100;
-    }
-    else
-    {
-        v43 = 1;
-    }
+    v43 = G_GetPlayerHealthPercentageForSave();
     save->header.health = v43;
     save->header.skill = sv_gameskill->current.integer;
     Com_RealTime(&save->header.time);

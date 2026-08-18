@@ -690,7 +690,7 @@ void __cdecl Phys_ApplyContactJitter(PhysWorld worldIndex, dContactGeom *contact
                 else
                     distanceScale = (jitter->outerRadius - distance) * distanceScale;
                 v4 = jitter->maxDisplacement - jitter->minDisplacement;
-                displacement = random() * v4 + jitter->minDisplacement;
+                displacement = Q_random() * v4 + jitter->minDisplacement;
                 displacement = displacement * distanceScale * massScale * time;
                 Vec3Scale(upVec, displacement, force);
                 Phys_ObjAddForce(worldIndex, body, contact->pos, force);

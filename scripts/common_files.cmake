@@ -96,6 +96,7 @@ set(COMMON
 )
 
 set(DATABASE
+    "${SRC_DIR}/database/db_zone_loading.h"
     "${SRC_DIR}/database/database.h"
     "${SRC_DIR}/database/db_asset_types.h"
     "${SRC_DIR}/database/db_assetnames.cpp"
@@ -208,6 +209,7 @@ set(GFX_D3D
     "${SRC_DIR}/gfx_d3d/r_cmds.h"
     "${SRC_DIR}/gfx_d3d/r_debug.cpp"
     "${SRC_DIR}/gfx_d3d/r_debug.h"
+    "${SRC_DIR}/gfx_d3d/r_debug_types.h"
     "${SRC_DIR}/gfx_d3d/r_debug_alloc.cpp"
     "${SRC_DIR}/gfx_d3d/r_devgui.cpp"
     "${SRC_DIR}/gfx_d3d/r_devgui.h"
@@ -255,6 +257,9 @@ set(GFX_D3D
     "${SRC_DIR}/gfx_d3d/r_image_wavelet.cpp"
     "${SRC_DIR}/gfx_d3d/r_init.cpp"
     "${SRC_DIR}/gfx_d3d/r_init.h"
+    "${SRC_DIR}/gfx_d3d/r_asset_load.cpp"
+    "${SRC_DIR}/gfx_d3d/r_asset_load.h"
+    "${SRC_DIR}/gfx_d3d/r_configuration.h"
     "${SRC_DIR}/gfx_d3d/r_light.cpp"
     "${SRC_DIR}/gfx_d3d/r_light.h"
     "${SRC_DIR}/gfx_d3d/r_light_load_obj.cpp"
@@ -381,6 +386,9 @@ set(PHYSICS_ODE
 )
 
 set(QCOMMON
+    "${SRC_DIR}/qcommon/engine_lifecycle_trace.cpp"
+    "${SRC_DIR}/qcommon/common_runtime_state.cpp"
+    "${SRC_DIR}/qcommon/engine_lifecycle_trace.h"
     "${SRC_DIR}/qcommon/bitarray.h"
     "${SRC_DIR}/qcommon/cmd.cpp"
     "${SRC_DIR}/qcommon/cmd.h"
@@ -457,8 +465,10 @@ set(SCRIPT
     "${SRC_DIR}/script/scr_stringlist.cpp"
     "${SRC_DIR}/script/scr_stringlist.h"
     "${SRC_DIR}/script/scr_variable.cpp"
+    "${SRC_DIR}/script/scr_variable_init.cpp"
     "${SRC_DIR}/script/scr_variable.h"
     "${SRC_DIR}/script/scr_vm.cpp"
+    "${SRC_DIR}/script/scr_vm_init.cpp"
     "${SRC_DIR}/script/scr_vm.h"
     "${SRC_DIR}/script/scr_yacc.h"
     "${SRC_DIR}/script/scr_yacc2.cpp"
@@ -543,6 +553,7 @@ set(UNIVERSAL
     "${SRC_DIR}/universal/com_stringtable.cpp"
     "${SRC_DIR}/universal/dvar.cpp"
     "${SRC_DIR}/universal/dvar_cmds.cpp"
+    "${SRC_DIR}/universal/filesystem_path.cpp"
     "${SRC_DIR}/universal/fft.cpp"
     "${SRC_DIR}/universal/fft.h"
     "${SRC_DIR}/universal/memfile.cpp"
@@ -592,11 +603,13 @@ set(WIN32_SRC
 
 set(XANIM
     "${SRC_DIR}/xanim/dobj.cpp"
+    "${SRC_DIR}/xanim/dobj_init.cpp"
     "${SRC_DIR}/xanim/dobj.h"
     "${SRC_DIR}/xanim/dobj_skel.cpp"
     "${SRC_DIR}/xanim/dobj_utils.cpp"
     "${SRC_DIR}/xanim/dobj_utils.h"
     "${SRC_DIR}/xanim/xanim.cpp"
+    "${SRC_DIR}/xanim/xanim_init.cpp"
     "${SRC_DIR}/xanim/xanim.h"
     "${SRC_DIR}/xanim/xanim_calc.cpp"
     "${SRC_DIR}/xanim/xanim_calc.h"

@@ -7,6 +7,7 @@
 #include <universal/memfile.h>
 #include <client/client.h>
 #include <server/server.h>
+#include <game/save_error.h>
 
 enum saveFieldtype_t : __int32
 {
@@ -37,12 +38,6 @@ enum SaveHandleType : __int32
     SAVE_LAST_COMMITTED = 0x2,
 };
 
-enum SaveErrorType : __int32
-{
-    SAVE_ERROR_MISSING_DEVICE = 0x0,
-    SAVE_ERROR_CORRUPT_SAVE = 0x1,
-};
-
 struct saveField_t
 {
     int ofs;
@@ -62,11 +57,6 @@ void __cdecl Scr_FreeEntityFields(gentity_s *ent);
 void __cdecl Scr_FreeActorFields(actor_s *pActor);
 void __cdecl Scr_FreeSentientFields(sentient_s *sentient);
 // local variable allocation has failed, the output may be wrong!
-void G_SaveError(
-    errorParm_t code,
-    SaveErrorType errorType,
-    const char *fmt,
-    ...);
 void __cdecl WriteCStyleString(const char *psz, int maxlen, SaveGame *save);
 void __cdecl ReadCStyleString(char *psz, int maxlen, SaveGame *save);
 void __cdecl WriteWeaponIndex(unsigned int weapon, SaveGame *save);

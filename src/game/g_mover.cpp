@@ -1,4 +1,5 @@
 #include <universal/q_shared.h>
+#include <universal/com_math.h>
 #include "game_public.h"
 #include <qcommon/mem_track.h>
 #include <server/sv_world.h>

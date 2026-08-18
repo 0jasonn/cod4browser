@@ -60,10 +60,7 @@
 
 int marker_common;
 
-int com_expectedHunkUsage;
-
 int com_skelTimeStamp;
-uint32_t com_errorPrintsCount;
 float com_timescaleValue;
 //00751450       struct _iobuf* debuglogfile 82f01450     common.obj
 int com_fixedConsolePosition;
@@ -99,7 +96,6 @@ const dvar_t *fastfile_allowNoAuth;
 const dvar_t *com_logfile;
 const dvar_t *cl_paused;
 const dvar_t *com_timescale;
-const dvar_t *nextmap;
 const dvar_t *version;
 const dvar_t *com_sv_running;
 const dvar_t *com_useConfig;

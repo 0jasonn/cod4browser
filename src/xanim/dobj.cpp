@@ -23,16 +23,6 @@ struct SavedDObj // sizeof=0x60
     uint32_t hidePartBits[4];       // ...
 };
 
-uint32_t g_empty;
-
-void __cdecl DObjInit()
-{
-    int duplicatePartBits[5]; // [esp+0h] [ebp-14h] BYREF
-
-    memset(duplicatePartBits, 0, sizeof(duplicatePartBits));
-    g_empty = SL_GetStringOfSize((char *)duplicatePartBits, 0, 0x11u, MT_TYPE_DUPLICATE_PARTS);
-}
-
 void __cdecl DObjShutdown()
 {
     if (g_empty)

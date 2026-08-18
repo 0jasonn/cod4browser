@@ -1,4 +1,5 @@
 #pragma once
+#include "com_sndalias_runtime.h"
 #include <qcommon/qcommon.h>
 #include <qcommon/graph.h>
 #include <sound/snd_public.h>
@@ -216,7 +217,6 @@ snd_alias_t *__cdecl Com_PickSoundAlias(const char *aliasname);
 bool __cdecl Com_AliasNameRefersToSingleAlias(const char *aliasname);
 
 void __cdecl Com_LoadSoundAliases(const char *loadspec, const char *loadspecCurGame, snd_alias_system_t system);
-void __cdecl Com_UnloadSoundAliases(snd_alias_system_t system);
 
 char __cdecl Com_AddAliasList(const char *name, snd_alias_list_t *aliasList);
 

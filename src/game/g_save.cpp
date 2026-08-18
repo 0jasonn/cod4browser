@@ -20,12 +20,13 @@
 #include "actor_event_listeners.h"
 #include <server/sv_public.h>
 #include <server/sv_game.h>
-#include <gfx_d3d/r_cinematic.h>
+#include <gfx_d3d/r_cinematic_api.h>
 #include <script/scr_memorytree.h>
 #include <aim_assist/aim_target.h>
 #include <DynEntity/DynEntity_client.h>
 #include <xanim/dobj_utils.h>
 #include <cgame/cg_ents.h>
+#include <cgame/cg_runtime_api.h>
 #include "actor_corpse.h"
 #include <qcommon/cmd.h>
 #include <script/scr_vm.h>

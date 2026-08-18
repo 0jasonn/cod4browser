@@ -2,6 +2,17 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <bit>
+
+inline bool Sys_BitScanReverse(std::uint32_t *index, std::uint32_t mask)
+{
+    if (!mask)
+    {
+        return false;
+    }
+    *index = 31u - static_cast<std::uint32_t>(std::countl_zero(mask));
+    return true;
+}
 
 #if defined(_MSC_VER)
 #define KISAK_CDECL __cdecl
@@ -10,7 +21,10 @@
 #endif
 
 #if defined(KISAK_GATE3_COM_INIT_PREFIX) || !defined(_WIN32)
+#ifndef KISAK_LONG_DEFINED
 using LONG = std::int32_t;
+#define KISAK_LONG_DEFINED 1
+#endif
 
 inline LONG InterlockedIncrement(volatile LONG *value)
 {
@@ -24,6 +38,38 @@ inline std::uint32_t InterlockedIncrement(volatile std::uint32_t *value)
     const std::uint32_t updated = *value + 1;
     *value = updated;
     return updated;
+}
+
+inline LONG InterlockedExchangeAdd(volatile LONG *value, LONG amount)
+{
+    const LONG original = *value;
+    *value = original + amount;
+    return original;
+}
+
+inline std::uint32_t InterlockedExchangeAdd(
+    volatile std::uint32_t *value,
+    std::uint32_t amount)
+{
+    const std::uint32_t original = *value;
+    *value = original + amount;
+    return original;
+}
+
+inline LONG InterlockedExchange(volatile LONG *value, LONG exchange)
+{
+    const LONG original = *value;
+    *value = exchange;
+    return original;
+}
+
+inline std::uint32_t InterlockedExchange(
+    volatile std::uint32_t *value,
+    std::uint32_t exchange)
+{
+    const std::uint32_t original = *value;
+    *value = exchange;
+    return original;
 }
 
 inline LONG InterlockedDecrement(volatile LONG *value)
@@ -62,6 +108,49 @@ inline std::uint32_t InterlockedCompareExchange(
     }
     return original;
 }
+
+#if defined(KISAK_WEB)
+inline long InterlockedIncrement(volatile long *value)
+{
+    const long updated = *value + 1;
+    *value = updated;
+    return updated;
+}
+
+inline long InterlockedDecrement(volatile long *value)
+{
+    const long updated = *value - 1;
+    *value = updated;
+    return updated;
+}
+
+inline long InterlockedExchangeAdd(volatile long *value, long amount)
+{
+    const long original = *value;
+    *value = original + amount;
+    return original;
+}
+
+inline long InterlockedExchange(volatile long *value, long exchange)
+{
+    const long original = *value;
+    *value = exchange;
+    return original;
+}
+
+inline long InterlockedCompareExchange(
+    volatile long *destination,
+    long exchange,
+    long compare)
+{
+    const long original = *destination;
+    if (original == compare)
+    {
+        *destination = exchange;
+    }
+    return original;
+}
+#endif
 #else
 #include <Windows.h>
 #endif
@@ -153,6 +242,14 @@ void Sys_UnlockWrite(FastCriticalSection *criticalSection);
 std::uint32_t Sys_GetCpuCount();
 void Sys_InitMainThread();
 bool Sys_IsMainThread();
+char *Sys_GetClipboardData();
+int __cdecl Sys_SetClipboardData(const char *text);
+void IN_Frame();
+void __cdecl IN_ShowSystemCursor(int show);
+void __cdecl Sys_OpenURL(const char *url, int doexit);
+void Sys_GetHardwareDescription(char *gpu, std::size_t gpuSize,
+    char *cpuVendor, std::size_t cpuVendorSize,
+    char *cpuName, std::size_t cpuNameSize);
 bool Sys_IsRenderThread();
 bool Sys_IsServerThread();
 void Sys_SetValue(int valueIndex, void *data);
@@ -162,3 +259,7 @@ void Sys_Error(const char *format, ...);
 void Sys_OutOfMemErrorInternal(const char *filename, int line);
 void *Sys_AllocatePhysicalMemory(std::size_t size, std::size_t alignment);
 void Sys_FreePhysicalMemory(void *memory);
+void *Sys_VirtualReserve(std::size_t size);
+bool Sys_VirtualCommit(void *memory, std::size_t size);
+void Sys_VirtualDecommit(void *memory, std::size_t size);
+void Sys_VirtualRelease(void *memory);

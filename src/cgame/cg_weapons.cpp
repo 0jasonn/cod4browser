@@ -11,7 +11,7 @@
 #include <aim_assist/aim_assist.h>
 #include <script/scr_const.h>
 #include <xanim/dobj_utils.h>
-#include <gfx_d3d/r_scene.h>
+#include <gfx_d3d/r_cgame_api.h>
 #include <sound/snd_public.h>
 #include <qcommon/cmd.h>
 #include <EffectsCore/fx_system.h>
@@ -28,7 +28,6 @@
 #include "cg_view.h"
 #include <game/savememory.h>
 #include <xanim/xanim_readwrite.h>
-#include <gfx_d3d/r_model.h>
 #include "cg_compassfriendlies.h"
 #include <client/cl_scrn.h>
 #endif
@@ -3465,7 +3464,7 @@ void __cdecl CG_RandomEffectAxis(const float *forward, float *left, float *up)
     dot = Vec3Dot(point, forward);
     scale = -dot;
     Vec3Mad(point, scale, forward, point);
-    degrees = random() * 360.0;
+    degrees = Q_random() * 360.0;
     RotatePointAroundVector(left, forward, point, degrees);
     Vec3Normalize(left);
     Vec3Cross(forward, left, up);

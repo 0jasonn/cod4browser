@@ -8,6 +8,7 @@
 #include <gfx_d3d/gfx_light_types.h>
 #include <gfx_d3d/r_font.h>
 #include <physics/phys_preset.h>
+#include <qcommon/com_world_types.h>
 #include <sound/snd_alias_types.h>
 #include <xanim/xmodel_types.h>
 #include <xanim/xanim_types.h>
@@ -64,6 +65,11 @@ extern XAnimParts *varXAnimParts;
 extern XAnimParts **varXAnimPartsPtr;
 extern StringTable *varStringTable;
 extern StringTable **varStringTablePtr;
+extern ComWorld *varComWorld;
+extern ComWorld **varComWorldPtr;
+extern ComPrimaryLight *varComPrimaryLight;
+extern GfxWorld *varGfxWorld;
+extern GfxWorld **varGfxWorldPtr;
 
 void __cdecl Load_XString(bool atStreamStart);
 void __cdecl Load_ScriptStringArray(bool atStreamStart, std::int32_t count);
@@ -75,6 +81,8 @@ void __cdecl Load_XModelPtrArray(bool atStreamStart, std::int32_t count);
 void __cdecl Load_WeaponDefPtr(bool atStreamStart);
 void __cdecl Load_XAnimPartsPtr(bool atStreamStart);
 void __cdecl Load_StringTablePtr(bool atStreamStart);
+void __cdecl Load_ComWorldPtr(bool atStreamStart);
+void __cdecl Load_GfxWorldPtr(bool atStreamStart);
 void __cdecl Load_MaterialTechniqueSetPtr(bool atStreamStart);
 void __cdecl Load_MaterialHandle(bool atStreamStart);
 void __cdecl Load_GfxImagePtr(bool atStreamStart);

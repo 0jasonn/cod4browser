@@ -9,6 +9,7 @@
 #include "actor_state.h"
 #include "actor_orientation.h"
 #include <script/scr_const.h>
+#include <universal/com_math.h>
 
 bool __cdecl Actor_ScriptedAnim_Start(actor_s *self, ai_state_t ePrevState)
 {

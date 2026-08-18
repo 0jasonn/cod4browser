@@ -8,7 +8,8 @@
 #include <game/g_local.h>
 #include <qcommon/threads.h>
 #include <game/savememory.h>
-#include <win32/win_local.h>
+#include <qcommon/sys_paths.h>
+#include <qcommon/system.h>
 #include <universal/com_files.h>
 #include <qcommon/com_playerprofile.h>
 #include <client/cl_demo.h>
@@ -18,7 +19,7 @@
 #include <qcommon/cmd.h>
 #include <client/cl_input.h>
 #include <script/scr_readwrite.h>
-#include <cgame/cg_main.h> // replay_time
+#include <cgame/cg_runtime_api.h> // replay_time
 #include <game/savedevice.h>
 
 unsigned __int8 g_buf[2][3145728];
@@ -1571,11 +1572,11 @@ bool __cdecl SV_ActiveHistoryIsMark(const char *name)
 
 int __cdecl SV_LoadHistoryForMark(const char *name)
 {
-    char v2; // r11
+    bool v2; // r11
     FileMarkSkip *MarkSkip; // r11
     server_demo_history_t *v5; // r11
 
-    v2 = (char)g_history;
+    v2 = g_history != nullptr;
     if (g_history)
         v2 = g_history->manual && I_stricmp(g_history->name, name) == 0;
     if (!v2)

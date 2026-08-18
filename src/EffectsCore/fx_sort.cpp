@@ -1,6 +1,7 @@
 #include <universal/q_shared.h>
 #include "fx_system.h"
 #include <universal/profile.h>
+#include <qcommon/system.h>
 
 
 void __cdecl FX_SortEffects(FxSystem *system)

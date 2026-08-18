@@ -1,5 +1,6 @@
 #include <universal/q_shared.h>
 #include "phys_local.h"
+#include "phys_preset.h"
 #include <universal/com_memory.h>
 #include <qcommon/qcommon.h>
 #include <universal/com_files.h>

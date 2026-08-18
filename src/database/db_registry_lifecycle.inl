@@ -9,14 +9,31 @@
 #include <database/db_registry_publication.h>
 #include <database/db_runtime_prefix.h>
 #include <qcommon/cmd.h>
+#include <qcommon/engine_lifecycle_trace.h>
 #include <qcommon/qcommon.h>
 #include <qcommon/system.h>
 #include <qcommon/threads.h>
 #include <universal/physicalmemory.h>
 #include <universal/q_shared.h>
+#include <xanim/xmodel.h>
+#include <bgame/bg_local.h>
+#include <gfx_d3d/r_material.h>
 
 #include <array>
 #include <cstring>
+
+fileData_s *com_fileDataHashTable[1024]{};
+
+const char *g_assetNames[ASSET_TYPE_COUNT] =
+{
+    "xmodelpieces", "physpreset", "xanim", "xmodel", "material",
+    "techset", "image", "sound", "sndcurve", "loaded_sound",
+    "col_map_sp", "col_map_mp", "com_map", "game_map_sp",
+    "game_map_mp", "map_ents", "gfx_map", "lightdef", "ui_map",
+    "font", "menufile", "menu", "localize", "weapon",
+    "snddriverglobals", "fx", "impactfx", "aitype", "mptype",
+    "character", "xmodelalias", "rawfile", "stringtable"
+};
 
 namespace
 {
@@ -31,6 +48,8 @@ std::int32_t g_zoneCount = 0;
 std::array<std::uint8_t, 32> g_zoneHandles{};
 volatile bool g_loadingZone = false;
 volatile std::uint32_t g_zoneInfoCount = 0;
+std::uint32_t g_pendingZoneInfoCount = 0;
+std::uint32_t g_pendingZoneInfoIndex = 0;
 std::uint32_t g_zoneAllocType = 0;
 volatile std::uint32_t g_loadingAssets = 0;
 std::array<XZoneInfoInternal, 8> g_zoneInfo{};
@@ -65,6 +84,11 @@ std::int32_t DB_GetZoneAllocType(std::int32_t zoneFlags)
 std::int32_t DB_TryLoadXFileInternal(char *zoneName, std::int32_t zoneFlags)
 {
     DB_RuntimeTraceStage("DB_TryLoadXFileInternal");
+    EmitEngineLifecycleTrace(
+        EngineLifecycleStage::LogicalFastfileRequest,
+        zoneName,
+        1,
+        zoneFlags);
     iassert(!g_zoneInfoCount);
 
     char filename[256]{};
@@ -128,21 +152,40 @@ std::int32_t DB_TryLoadXFileInternal(char *zoneName, std::int32_t zoneFlags)
 void DB_TryLoadXFile()
 {
     DB_RuntimeTraceStage("DB_TryLoadXFile");
-    if (!g_zoneInfoCount)
+    if (!g_pendingZoneInfoCount && !g_zoneInfoCount)
     {
         iassert(!g_loadingAssets);
         return;
     }
 
-    const std::uint32_t zoneInfoCount = g_zoneInfoCount;
-    g_zoneInfoCount = 0;
-    iassert(!g_loadingZone);
-    for (std::uint32_t index = 0; index < zoneInfoCount; ++index)
+    if (!g_pendingZoneInfoCount)
     {
-        (void)DB_TryLoadXFileInternal(
-            g_zoneInfo[index].name, g_zoneInfo[index].flags);
-        g_loadingAssets = g_loadingAssets - 1u;
+        g_pendingZoneInfoCount = g_zoneInfoCount;
+        g_pendingZoneInfoIndex = 0;
+        g_zoneInfoCount = 0;
     }
+    iassert(!g_loadingZone);
+    while (g_pendingZoneInfoIndex < g_pendingZoneInfoCount)
+    {
+        const std::uint32_t index = g_pendingZoneInfoIndex;
+        // The native DB thread waits here while Com_Init owns the $init
+        // physical-memory scope. A Worker has no second execution stack to
+        // block, so retain the engine queue and resume it after Com_Init
+        // releases that scope.
+        if (DB_GetZoneAllocType(g_zoneInfo[index].flags) == 1 && g_initializing)
+            return;
+        const bool loaded = DB_TryLoadXFileInternal(
+            g_zoneInfo[index].name, g_zoneInfo[index].flags) != 0;
+        ++g_pendingZoneInfoIndex;
+        g_loadingAssets = g_loadingAssets - 1u;
+        if (!loaded)
+        {
+            g_loadingAssets -= g_pendingZoneInfoCount - g_pendingZoneInfoIndex;
+            break;
+        }
+    }
+    g_pendingZoneInfoCount = 0;
+    g_pendingZoneInfoIndex = 0;
     iassert(!g_loadingZone);
     iassert(!g_loadingAssets);
     Sys_DatabaseCompleted();
@@ -172,6 +215,12 @@ void DB_LoadXZone(XZoneInfo *zoneInfo, std::uint32_t zoneCount)
     for (std::uint32_t index = 0; index < zoneCount; ++index)
     {
         if (!zoneInfo[index].name) continue;
+        EmitEngineLifecycleTrace(
+            EngineLifecycleStage::DatabaseLoadZone,
+            zoneInfo[index].name,
+            zoneCount,
+            zoneInfo[index].allocFlags,
+            zoneInfo[index].freeFlags);
         iassert(requestCount < g_zoneInfo.size());
         I_strncpyz(g_zoneInfo[requestCount].name, zoneInfo[index].name,
             sizeof(g_zoneInfo[requestCount].name));
@@ -217,6 +266,13 @@ void __cdecl DB_LoadXAssets(
     XZoneInfo *zoneInfo, std::uint32_t zoneCount, std::int32_t sync)
 {
     DB_RuntimeTraceStage("DB_LoadXAssets");
+    EmitEngineLifecycleTrace(
+        EngineLifecycleStage::DatabaseLoadAssets,
+        zoneInfo && zoneCount ? zoneInfo[0].name : nullptr,
+        zoneCount,
+        zoneInfo && zoneCount ? zoneInfo[0].allocFlags : 0,
+        zoneInfo && zoneCount ? zoneInfo[0].freeFlags : 0,
+        sync);
     iassert(Sys_IsMainThread());
     iassert(zoneInfo && zoneCount);
 
@@ -238,4 +294,100 @@ void __cdecl DB_LoadXAssets(
     g_sync = sync;
     DB_LoadXZone(zoneInfo, zoneCount);
     if (sync) Sys_SyncDatabase();
+}
+
+void __cdecl DB_ReleaseXAssets()
+{
+    iassert(Sys_IsMainThread());
+    Sys_SyncDatabase();
+    for (std::uint32_t hash = 0; hash < 0x8000u; ++hash)
+    {
+        for (std::uint32_t assetEntryIndex = db_hashTable[hash];
+             assetEntryIndex;
+             assetEntryIndex =
+                 g_assetEntryPool[assetEntryIndex].entry.nextHash)
+        {
+            g_assetEntryPool[assetEntryIndex].entry.inuse = 0;
+        }
+    }
+}
+
+void __cdecl DB_EnumXAssets_FastFile(
+    XAssetType type,
+    void(__cdecl *func)(XAssetHeader, void *),
+    void *inData,
+    bool includeOverride)
+{
+    iassert(type >= 0 && type < ASSET_TYPE_COUNT);
+    iassert(func);
+    Sys_LockWrite(&db_hashCritSect);
+    for (std::uint32_t hash = 0; hash < 0x8000u; ++hash)
+    {
+        for (std::uint32_t index = db_hashTable[hash]; index;
+             index = g_assetEntryPool[index].entry.nextHash)
+        {
+            XAssetEntryPoolEntry *entry = &g_assetEntryPool[index];
+            if (entry->entry.asset.type != type) continue;
+            func(entry->entry.asset.header, inData);
+            if (!includeOverride) continue;
+            for (std::uint32_t overrideIndex = entry->entry.nextOverride;
+                 overrideIndex;
+                 overrideIndex =
+                     g_assetEntryPool[overrideIndex].entry.nextOverride)
+            {
+                func(g_assetEntryPool[overrideIndex].entry.asset.header,
+                    inData);
+            }
+        }
+    }
+    Sys_UnlockWrite(&db_hashCritSect);
+}
+
+void __cdecl DB_EnumXAssets(
+    XAssetType type,
+    void(__cdecl *func)(XAssetHeader, void *),
+    void *inData,
+    bool includeOverride)
+{
+    DB_EnumXAssets_FastFile(type, func, inData, includeOverride);
+}
+
+void __cdecl DB_Update()
+{
+    iassert(Sys_IsMainThread());
+    if (!Sys_IsDatabaseReady2() && Sys_IsDatabaseReady())
+    {
+        // This is the no-copy branch of canonical DB_PostLoadXZone. The Web
+        // loader publishes atomically during generated loading, so there is
+        // no g_copyInfo archive/relink phase to perform here.
+        Material_DirtyTechniqueSetOverrides();
+        BG_FillInAllWeaponItems();
+        Sys_DatabaseCompleted2();
+    }
+}
+
+const char *__cdecl DB_GetXAssetTypeName(std::uint32_t type)
+{
+    iassert(type < ASSET_TYPE_COUNT);
+    return g_assetNames[type];
+}
+
+bool __cdecl DB_IsXAssetDefault(XAssetType type, const char *name)
+{
+    XAssetEntryPoolEntry *entry = DB_FindXAssetEntryCanonical(type, name);
+    return entry && entry->entry.zoneIndex == 0;
+}
+
+void __cdecl DB_ReplaceModel(const char *original, const char *replacement)
+{
+    XAssetEntryPoolEntry *originalEntry =
+        DB_FindXAssetEntryCanonical(ASSET_TYPE_XMODEL, original);
+    XAssetEntryPoolEntry *replacementEntry =
+        DB_FindXAssetEntryCanonical(ASSET_TYPE_XMODEL, replacement);
+    if (!originalEntry || !replacementEntry) return;
+
+    const char *originalName = originalEntry->entry.asset.header.model->name;
+    *originalEntry->entry.asset.header.model =
+        *replacementEntry->entry.asset.header.model;
+    originalEntry->entry.asset.header.model->name = originalName;
 }

@@ -15,7 +15,7 @@
 #undef time
 
 // Generates a membername string literal, then offsetof (EX: "value", 132)
-#define	NETF_BASE(s, x) #x,(size_t)&((s*)0)->x
+#define NETF_BASE(s, x) #x, static_cast<int>(offsetof(s, x))
 
 #define NETF_HUD(x) NETF_BASE(hudelem_s, x)
 
