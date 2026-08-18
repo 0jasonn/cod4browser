@@ -1325,7 +1325,7 @@ void __cdecl Cmd_List_f()
     Com_Printf(0, "%i commands\n", i);
 }
 
-#if defined(KISAK_GATE3_COM_INIT_PREFIX)
+#if defined(KISAK_GATE3_COM_INIT_PREFIX) && !defined(KISAK_RUNTIME_MAP_DB_BOUNDARY)
 void __cdecl Cmd_Exec_f()
 {
     Com_Error(

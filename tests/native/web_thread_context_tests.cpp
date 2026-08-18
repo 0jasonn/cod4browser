@@ -3,6 +3,16 @@
 #include <cassert>
 #include <cstdint>
 
+namespace
+{
+int g_initializedThreadContext = -1;
+}
+
+void Com_InitThreadData(int threadContext)
+{
+    g_initializedThreadContext = threadContext;
+}
+
 int main()
 {
     Sys_InitializeCriticalSections();
@@ -13,6 +23,7 @@ int main()
 
     Sys_InitMainThread();
     assert(Sys_IsMainThread());
+    assert(g_initializedThreadContext == THREAD_CONTEXT_MAIN);
 
     std::uint32_t values[4] = {1, 2, 3, 4};
     for (int index = 0; index < 4; ++index)

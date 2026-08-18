@@ -15,6 +15,11 @@ add_executable(iwd_archive_tests
     "${KISAK_REPOSITORY_ROOT}/src/qcommon/iwd_archive.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/qcommon/unzip.cpp"
 )
+if (NOT MSVC AND NOT EMSCRIPTEN AND NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    # Kisak's canonical file wrappers retain the Win32 calling-convention
+    # spelling. It is semantically empty on native non-Windows test hosts.
+    target_compile_definitions(iwd_archive_tests PRIVATE __cdecl=)
+endif()
 
 add_executable(iwi_image_tests
     "${CMAKE_CURRENT_LIST_DIR}/iwi_image_tests.cpp"
@@ -62,6 +67,9 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
     target_include_directories(gate3_db_pool_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
     target_compile_definitions(gate3_db_pool_tests PRIVATE
         KISAK_SP=1 KISAK_DB_POOL_STANDALONE=1 dNODEBUG=1)
+    if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+        target_compile_options(gate3_db_pool_tests PRIVATE -fdeclspec)
+    endif()
 
     add_executable(canonical_runtime_prefix_tests
         "${CMAKE_CURRENT_LIST_DIR}/gate3_com_init_trace_tests.cpp"
@@ -133,6 +141,7 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
         "${KISAK_REPOSITORY_ROOT}/src/qcommon/com_world_runtime.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/qcommon/engine_lifecycle_trace.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_registry_pools.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/game/g_bsp.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/universal/com_memory_hunk.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/game/savememory_init.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/script/scr_variable_init.cpp"
