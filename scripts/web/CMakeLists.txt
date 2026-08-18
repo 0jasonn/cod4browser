@@ -214,6 +214,7 @@ add_executable(KisakCOD-web
     "${SRC_DIR}/physics/ode/odemath.cpp"
     $<TARGET_OBJECTS:kisak_web_runtime_prefix>
 )
+add_dependencies(KisakCOD-web update_build_number)
 
 # The post-DB runtime is no longer a browser-owned bootstrap. Pull the real SP
 # game/server inventories into the production target so SV_InitGameProgs,

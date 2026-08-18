@@ -243,10 +243,10 @@ std::uint32_t Sys_GetCpuCount();
 void Sys_InitMainThread();
 bool Sys_IsMainThread();
 char *Sys_GetClipboardData();
-int __cdecl Sys_SetClipboardData(const char *text);
+int KISAK_CDECL Sys_SetClipboardData(const char *text);
 void IN_Frame();
-void __cdecl IN_ShowSystemCursor(int show);
-void __cdecl Sys_OpenURL(const char *url, int doexit);
+void KISAK_CDECL IN_ShowSystemCursor(int show);
+void KISAK_CDECL Sys_OpenURL(const char *url, int doexit);
 void Sys_GetHardwareDescription(char *gpu, std::size_t gpuSize,
     char *cpuVendor, std::size_t cpuVendorSize,
     char *cpuName, std::size_t cpuNameSize);
