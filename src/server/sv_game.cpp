@@ -11,6 +11,7 @@
 #include <sound/snd_runtime_api.h>
 #include <qcommon/com_bsp.h>
 #include <qcommon/threads.h>
+#include <qcommon/engine_lifecycle_trace.h>
 #include <universal/com_math.h>
 
 #ifdef KISAK_MP
@@ -561,6 +562,7 @@ void __cdecl SV_ShutdownGameProgs()
 
 void __cdecl SV_InitGameVM(uint32_t randomSeed, int restart, int savegame, SaveGame **save, int loadScripts)
 {
+    EmitEngineLifecycleTrace(EngineLifecycleStage::ServerGameVmInitBegin);
     iassert(save);
 
     {
@@ -588,8 +590,11 @@ void __cdecl SV_InitGameVM(uint32_t randomSeed, int restart, int savegame, SaveG
     {
         PROF_SCOPED("Connecting");
         SV_DirectConnect();
+        EmitEngineLifecycleTrace(EngineLifecycleStage::ServerDirectConnectComplete);
         CL_ConnectResponse();
+        EmitEngineLifecycleTrace(EngineLifecycleStage::ClientConnectResponseComplete);
         SV_ClientEnterWorld(svs.clients);
+        EmitEngineLifecycleTrace(EngineLifecycleStage::ServerClientEnterWorldComplete);
     }
 
     if (!restart || !*save)
@@ -604,10 +609,13 @@ void __cdecl SV_InitGameVM(uint32_t randomSeed, int restart, int savegame, SaveG
         }
         {
             PROF_SCOPED("Load game level");
+            EmitEngineLifecycleTrace(EngineLifecycleStage::GameLoadLevelBegin);
             G_LoadLevel();
+            EmitEngineLifecycleTrace(EngineLifecycleStage::GameLoadLevelComplete);
         }
         R_EndRemoteScreenUpdate();
     }
+    EmitEngineLifecycleTrace(EngineLifecycleStage::ServerGameVmInitComplete);
 }
 
 void __cdecl SV_RestartGameProgs(uint32_t randomSeed, int savegame, SaveGame **save, int loadScripts)
@@ -628,9 +636,11 @@ void __cdecl SV_RestartGameProgs(uint32_t randomSeed, int savegame, SaveGame **s
 
 void __cdecl SV_InitGameProgs(uint32_t randomSeed, int savegame, SaveGame **save)
 {
+    EmitEngineLifecycleTrace(EngineLifecycleStage::ServerGameProgsInitBegin);
     iassert(save);
     gameInitialized = 1;
     SV_InitGameVM(randomSeed, 0, savegame, save, 1);
+    EmitEngineLifecycleTrace(EngineLifecycleStage::ServerGameProgsInitComplete);
 }
 
 

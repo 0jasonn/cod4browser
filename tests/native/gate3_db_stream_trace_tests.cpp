@@ -1,4 +1,6 @@
+#include <universal/q_shared.h>
 #include <database/database.h>
+#include <game/g_bsp.h>
 #include <database/db_registry_pools.h>
 #include <database/db_registry_publication.h>
 #include <database/db_runtime_prefix.h>
@@ -13,6 +15,7 @@
 #include <physics/phys_preset.h>
 #include <physics/phys_geom_types.h>
 #include <qcommon/qcommon.h>
+#include <qcommon/cm_types.h>
 #include <qcommon/com_world_types.h>
 #include <qcommon/system.h>
 #include <script/scr_stringlist.h>
@@ -38,6 +41,9 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+dvar_t g_testUseFastFile{};
+const dvar_t *useFastFile = &g_testUseFastFile;
 
 namespace
 {
@@ -1849,6 +1855,211 @@ std::vector<std::uint8_t> MakeScriptListXFile()
     return CompressXFile(inflated);
 }
 
+std::vector<std::uint8_t> MakeGameWorldSpXFile(bool invalidNodeCount = false)
+{
+    std::vector<std::uint8_t> inflated;
+    AppendU32(inflated, 16384);
+    AppendU32(inflated, 0);
+    for (const std::uint32_t size : std::array<std::uint32_t, 9>{
+        4096, 4096, 0, 0, 8192, 0, 0, 0, 0}) AppendU32(inflated, size);
+
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 1);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, ASSET_TYPE_GAMEWORLD_SP);
+    AppendU32(inflated, UINT32_MAX - 1u);
+
+    GameWorldSp world{};
+    world.name = PointerToken<const char>(UINT32_MAX);
+    world.path.nodeCount = invalidNodeCount ? PATH_MAX_NODES + 1u : 1u;
+    world.path.nodes = PointerToken<pathnode_t>(1u);
+    world.path.basenodes = PointerToken<pathbasenode_t>(1u);
+    world.path.chainNodeCount = 1u;
+    world.path.chainNodeForNode = PointerToken<std::uint16_t>(1u);
+    world.path.nodeForChainNode = PointerToken<std::uint16_t>(1u);
+    world.path.visBytes = 3;
+    world.path.pathVis = PointerToken<std::uint8_t>(1u);
+    world.path.nodeTreeCount = 1;
+    world.path.nodeTree = PointerToken<pathnode_tree_t>(1u);
+    AppendObject(inflated, world);
+    AppendCString(inflated, "maps/killhouse.d3dbsp");
+    if (invalidNodeCount) return CompressXFile(inflated);
+
+    pathnode_t node{};
+    node.constant.type = NODE_PATHNODE;
+    node.constant.totalLinkCount = 1;
+    node.constant.Links = PointerToken<pathlink_s>(1u);
+    AppendObject(inflated, node);
+    pathlink_s link{};
+    link.fDist = 64.0f;
+    link.nodeNum = 0;
+    AppendObject(inflated, link);
+
+    AppendU16(inflated, 0);
+    AppendU16(inflated, 0);
+    inflated.push_back(0x01);
+    inflated.push_back(0x02);
+    inflated.push_back(0x04);
+
+    pathnode_tree_t tree{};
+    tree.axis = -1;
+    tree.u.s.nodeCount = 1;
+    tree.u.s.nodes = PointerToken<std::uint16_t>(1u);
+    AppendObject(inflated, tree);
+    AppendU16(inflated, 0);
+    return CompressXFile(inflated);
+}
+
+std::vector<std::uint8_t> MakeClipMapXFile(bool invalidPlaneCount = false)
+{
+    constexpr const char *mapName = "maps/killhouse.d3dbsp";
+    constexpr const char *entities =
+        "{\n\"classname\" \"worldspawn\"\n}\n";
+    std::vector<std::uint8_t> inflated;
+    AppendU32(inflated, 32768);
+    AppendU32(inflated, 0);
+    for (const std::uint32_t size : std::array<std::uint32_t, 9>{
+        8192, 4096, 0, 0, 16384, 0, 0, 0, 0}) AppendU32(inflated, size);
+
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 0);
+    AppendU32(inflated, 1);
+    AppendU32(inflated, UINT32_MAX);
+    AppendU32(inflated, ASSET_TYPE_CLIPMAP);
+    AppendU32(inflated, UINT32_MAX - 1u);
+
+    clipMap_t clip{};
+    clip.name = PointerToken<const char>(UINT32_MAX);
+    clip.isInUse = 1;
+    clip.planeCount = invalidPlaneCount ? -1 : 1;
+    clip.planes = PointerToken<cplane_s>(UINT32_MAX);
+    clip.numMaterials = 1;
+    clip.materials = PointerToken<dmaterial_t>(1u);
+    clip.numBrushSides = 1;
+    clip.brushsides = PointerToken<cbrushside_t>(1u);
+    clip.numBrushEdges = 2;
+    clip.brushEdges = PointerToken<std::uint8_t>(1u);
+    clip.numNodes = 1;
+    clip.nodes = PointerToken<cNode_t>(1u);
+    clip.numLeafs = 1;
+    clip.leafs = PointerToken<cLeaf_t>(1u);
+    clip.leafbrushNodesCount = 1;
+    clip.leafbrushNodes = PointerToken<cLeafBrushNode_s>(1u);
+    clip.numLeafBrushes = 1;
+    clip.leafbrushes = PointerToken<std::uint16_t>(1u);
+    clip.numLeafSurfaces = 1;
+    clip.leafsurfaces = PointerToken<std::uint32_t>(1u);
+    clip.vertCount = 1;
+    clip.verts = PointerToken<float[3]>(1u);
+    clip.triCount = 1;
+    clip.triIndices = PointerToken<std::uint16_t>(1u);
+    clip.triEdgeIsWalkable = PointerToken<std::uint8_t>(1u);
+    clip.borderCount = 1;
+    clip.borders = PointerToken<CollisionBorder>(1u);
+    clip.partitionCount = 1;
+    clip.partitions = PointerToken<CollisionPartition>(1u);
+    clip.aabbTreeCount = 1;
+    clip.aabbTrees = PointerToken<CollisionAabbTree>(1u);
+    clip.numSubModels = 1;
+    clip.cmodels = PointerToken<cmodel_t>(1u);
+    clip.numBrushes = 1;
+    clip.brushes = PointerToken<cbrush_t>(1u);
+    clip.numClusters = 1;
+    clip.clusterBytes = 1;
+    clip.visibility = PointerToken<std::uint8_t>(1u);
+    clip.mapEnts = PointerToken<MapEnts>(UINT32_MAX - 1u);
+    clip.dynEntCount[0] = 1;
+    clip.dynEntPoseList[0] = PointerToken<DynEntityPose>(1u);
+    clip.dynEntClientList[0] = PointerToken<DynEntityClient>(1u);
+    clip.dynEntCollList[0] = PointerToken<DynEntityColl>(1u);
+    clip.checksum = 0x4b484f55u;
+    AppendObject(inflated, clip);
+    AppendCString(inflated, mapName);
+    if (invalidPlaneCount) return CompressXFile(inflated);
+
+    cplane_s plane{};
+    plane.normal[2] = 1.0f;
+    plane.dist = 32.0f;
+    plane.type = 2;
+    AppendObject(inflated, plane);
+
+    dmaterial_t material{};
+    std::memcpy(material.material, "concrete", 9);
+    material.contentFlags = 1;
+    AppendObject(inflated, material);
+
+    cbrushside_t side{};
+    side.plane = PointerToken<cplane_s>(UINT32_MAX);
+    side.materialNum = 0;
+    side.edgeCount = 1;
+    AppendObject(inflated, side);
+    AppendObject(inflated, plane);
+    inflated.push_back(3);
+    inflated.push_back(4);
+
+    cNode_t node{};
+    node.plane = PointerToken<cplane_s>(UINT32_MAX);
+    node.children[0] = -1;
+    node.children[1] = -1;
+    AppendObject(inflated, node);
+    AppendObject(inflated, plane);
+
+    cLeaf_t leaf{};
+    leaf.brushContents = 1;
+    leaf.cluster = 0;
+    AppendObject(inflated, leaf);
+    AppendU16(inflated, 0);
+
+    cLeafBrushNode_s leafNode{};
+    leafNode.leafBrushCount = 1;
+    leafNode.data.leaf.brushes = PointerToken<std::uint16_t>(UINT32_MAX);
+    AppendObject(inflated, leafNode);
+    AppendU16(inflated, 0);
+    AppendU32(inflated, 0);
+    AppendF32(inflated, 1.0f);
+    AppendF32(inflated, 2.0f);
+    AppendF32(inflated, 3.0f);
+    AppendU16(inflated, 0);
+    AppendU16(inflated, 0);
+    AppendU16(inflated, 0);
+    AppendU32(inflated, 1);
+
+    CollisionBorder border{};
+    border.length = 16.0f;
+    AppendObject(inflated, border);
+    CollisionPartition partition{};
+    partition.triCount = 1;
+    partition.borderCount = 1;
+    partition.borders = PointerToken<CollisionBorder>(UINT32_MAX);
+    AppendObject(inflated, partition);
+    AppendObject(inflated, border);
+    CollisionAabbTree tree{};
+    tree.halfSize[0] = 4.0f;
+    tree.childCount = 0;
+    AppendObject(inflated, tree);
+    cmodel_t model{};
+    model.radius = 64.0f;
+    AppendObject(inflated, model);
+    cbrush_t brush{};
+    brush.contents = 1;
+    AppendObject(inflated, brush);
+    inflated.push_back(0xff);
+
+    MapEnts mapEnts{};
+    mapEnts.name = PointerToken<const char>(UINT32_MAX);
+    mapEnts.entityString = PointerToken<char>(1u);
+    mapEnts.numEntityChars = static_cast<int>(std::strlen(entities) + 1u);
+    AppendObject(inflated, mapEnts);
+    AppendCString(inflated, mapName);
+    AppendCString(inflated, entities);
+
+    AppendZeros(inflated, 32);
+    AppendZeros(inflated, 12);
+    AppendZeros(inflated, 20);
+    return CompressXFile(inflated);
+}
+
 void Reset(const std::vector<std::uint8_t> &file)
 {
     g_file = file;
@@ -2134,6 +2345,64 @@ int main()
         ASSET_TYPE_RAWFILE, "tests/gate3_first.txt");
     assert(published.rawfile && published.rawfile->len == 5);
     assert(std::strcmp(published.rawfile->buffer, "first") == 0);
+
+    Run(MakeGameWorldSpXFile(), zone);
+    assert(g_trace.xassetListEnd && !g_trace.generatedLoadFailed);
+    assert(g_trace.assetType == ASSET_TYPE_GAMEWORLD_SP);
+    assert(std::strcmp(g_trace.assetName, "maps/killhouse.d3dbsp") == 0);
+    assert(g_trace.publicationBegin && g_trace.publicationEnd);
+    const XAssetHeader publishedGameWorld = DB_FindXAssetHeader(
+        ASSET_TYPE_GAMEWORLD_SP, "maps/killhouse.d3dbsp");
+    assert(publishedGameWorld.gameWorldSp ==
+        DB_XAssetPool[ASSET_TYPE_GAMEWORLD_SP]);
+    assert(publishedGameWorld.gameWorldSp->path.nodeCount == 1);
+    assert(publishedGameWorld.gameWorldSp->path.nodes);
+    assert(publishedGameWorld.gameWorldSp->path.nodes[0].constant.Links);
+    assert(publishedGameWorld.gameWorldSp->path.nodes[0].constant.Links[0].fDist == 64.0f);
+    assert(publishedGameWorld.gameWorldSp->path.basenodes[0].vOrigin[2] == 0.0f);
+    assert(publishedGameWorld.gameWorldSp->path.pathVis[2] == 0x04);
+    assert(publishedGameWorld.gameWorldSp->path.nodeTree[0].axis == -1);
+    assert(publishedGameWorld.gameWorldSp->path.nodeTree[0].u.s.nodes[0] == 0);
+    assert(std::strcmp(g_trace.stopStage,
+        "Load_XAssetHeader/next-family-closure") == 0);
+
+    Run(MakeGameWorldSpXFile(true), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage,
+        "GameWorldSp/invalid path counts") == 0);
+
+    Run(MakeClipMapXFile(), zone);
+    assert(g_trace.xassetListEnd && !g_trace.generatedLoadFailed);
+    assert(g_trace.assetType == ASSET_TYPE_CLIPMAP);
+    assert(std::strcmp(g_trace.assetName, "maps/killhouse.d3dbsp") == 0);
+    assert(g_trace.publicationBegin && g_trace.publicationEnd);
+    const XAssetHeader publishedClipMap = DB_FindXAssetHeader(
+        ASSET_TYPE_CLIPMAP, "maps/killhouse.d3dbsp");
+    assert(publishedClipMap.clipMap == DB_XAssetPool[ASSET_TYPE_CLIPMAP]);
+    assert(publishedClipMap.clipMap->planeCount == 1 &&
+        publishedClipMap.clipMap->planes[0].dist == 32.0f);
+    assert(publishedClipMap.clipMap->materials &&
+        std::strcmp(publishedClipMap.clipMap->materials[0].material,
+            "concrete") == 0);
+    assert(publishedClipMap.clipMap->brushsides[0].plane->type == 2);
+    assert(publishedClipMap.clipMap->nodes[0].plane->normal[2] == 1.0f);
+    assert(publishedClipMap.clipMap->leafbrushNodes[0]
+        .data.leaf.brushes[0] == 0);
+    assert(publishedClipMap.clipMap->partitions[0].borders->length == 16.0f);
+    assert(publishedClipMap.clipMap->cmodels[0].radius == 64.0f);
+    assert(publishedClipMap.clipMap->mapEnts);
+    assert(std::strcmp(publishedClipMap.clipMap->mapEnts->entityString,
+        "{\n\"classname\" \"worldspawn\"\n}\n") == 0);
+    assert(publishedClipMap.clipMap->dynEntPoseList[0] &&
+        publishedClipMap.clipMap->dynEntClientList[0] &&
+        publishedClipMap.clipMap->dynEntCollList[0]);
+    const XAssetHeader publishedMapEnts = DB_FindXAssetHeader(
+        ASSET_TYPE_MAP_ENTS, "maps/killhouse.d3dbsp");
+    assert(publishedMapEnts.mapEnts == publishedClipMap.clipMap->mapEnts);
+
+    Run(MakeClipMapXFile(true), zone);
+    assert(g_trace.generatedLoadFailed && !g_trace.publicationEnd);
+    assert(std::strcmp(g_trace.stopStage, "ClipMap/planes") == 0);
 
     const std::vector<std::uint8_t> physInsertAlias = MakePhysPresetXFile();
     Run(physInsertAlias, zone);

@@ -91,12 +91,14 @@ Demonstrated:
 
 The real `CM_LoadMap`, script/XAnim/DObj initialization, local-server command
 path, and their normalized x86/Wasm contracts are compiled and tested. The
-owned browser run still stops at the ordered `GameWorldSp` asset before
-ClipMap publication. The next architecture decision is how the Worker mount
-backs canonical `FS_InitFilesystem`, directory enumeration, and IWD/minizip
-access so full `CL_Init` can replace the bounded startup entry without
-duplicating browser asset state. Input, audio, cinematics, cgame, and a
-playable offline slice are not yet demonstrated.
+Worker mount now backs canonical `FS_InitFilesystem`, directory enumeration,
+and Kisak minizip access without duplicating search paths or pack state in
+JavaScript. Generated fixtures prove IWD order, collision precedence, loose
+reads, listing, size, seek, and missing-file behavior before the runtime
+continues through the existing DB-owned startup. The owned browser run still
+stops at the ordered `GameWorldSp` asset before ClipMap publication; full
+`CL_Init`, input, audio, cinematics, cgame, and a playable offline slice are
+not yet demonstrated.
 
 ## License
 

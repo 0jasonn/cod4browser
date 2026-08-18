@@ -1,8 +1,10 @@
 #include <universal/q_shared.h>
 #include "r_sky.h"
+#ifndef KISAK_WEB
 #include <universal/com_files.h>
 #include "r_init.h"
 #include <qcommon/cmd.h>
+#endif
 #include "r_dvars.h"
 
 
@@ -216,6 +218,7 @@ void __cdecl R_RegisterSunDvars()
         "Position in degrees of the sun effect");
 }
 
+#ifndef KISAK_WEB
 void __cdecl R_SetSunFromDvars(sunflare_t *sun)
 {
     iassert(sun);
@@ -344,4 +347,5 @@ void __cdecl R_FlushSun()
         sunFlare->lastVisibility = 0.0;
     }
 }
+#endif
 

@@ -462,11 +462,11 @@ void  Scr_KillThread(uint32_t parentId);
 void  Scr_CheckLeakRange(uint32_t begin, uint32_t end);
 void  Scr_CheckLeaks(void);
 
-int  ThreadInfoCompare(_DWORD* info1, _DWORD* info2);
+int  ThreadInfoCompare(uint32_t* info1, uint32_t* info2);
 //int  VariableInfoCompare(void const*, void const*);
-int VariableInfoFileNameCompare(_DWORD* info1, _DWORD* info2);
-int VariableInfoCountCompare(_DWORD* info1, _DWORD* info2);
-int VariableInfoFileLineCompare(_DWORD* info1, _DWORD* info2);
+int VariableInfoFileNameCompare(uint32_t* info1, uint32_t* info2);
+int VariableInfoCountCompare(uint32_t* info1, uint32_t* info2);
+int VariableInfoFileLineCompare(uint32_t* info1, uint32_t* info2);
 uint32_t  FindVariableIndexInternal2(uint32_t name, uint32_t index);
 uint32_t FindVariableIndexInternal(uint32_t parentId, uint32_t name);
 unsigned short  AllocVariable(void);

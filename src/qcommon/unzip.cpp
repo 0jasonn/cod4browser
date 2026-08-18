@@ -1063,6 +1063,26 @@ extern int unzOpenCurrentFile (unzFile file)
 */
 extern int unzReadCurrentFile  (unzFile file, void *buf, unsigned len)
 {
+	if (buf == NULL && len != 0)
+	{
+		unsigned char discard[4096];
+		unsigned total = 0;
+		while (total < len)
+		{
+			const unsigned remaining = len - total;
+			const unsigned chunk = remaining < sizeof(discard)
+				? remaining
+				: (unsigned)sizeof(discard);
+			const int read = unzReadCurrentFile(file, discard, chunk);
+			if (read <= 0)
+				return total ? (int)total : read;
+			total += (unsigned)read;
+			if ((unsigned)read != chunk)
+				break;
+		}
+		return (int)total;
+	}
+
 	int err=UNZ_OK;
 	uInt iRead = 0;
 	unz_s* s;

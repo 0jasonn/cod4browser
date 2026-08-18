@@ -6,7 +6,12 @@ const APP_DIRECTORY = "kisakcod-web";
 const IMPORTS_DIRECTORY = "imports";
 const STORAGE_LOCK_NAME = "kisakcod-web-assets";
 const STORAGE_CHANNEL_NAME = "kisakcod-web-assets";
-const MANIFEST_SCHEMA = 2;
+const MANIFEST_SCHEMA = 3;
+const MAX_IMPORTED_FILES = 8191;
+const MAX_IMPORTED_PATH_BYTES = 255;
+// Canonical Kisak filesystem sizes are signed int values even though the
+// Worker bridge uses unsigned offsets internally.
+const MAX_IMPORTED_FILE_SIZE = 0x7fff_ffff;
 const MAX_ADAPTER_READ = 1024 * 1024;
 const PROBE_WINDOW_SIZE = 4096;
 const ZIP_TAIL_WINDOW_SIZE = 22 + 0xffff;
@@ -73,10 +78,6 @@ export const REQUIRED_ASSETS = Object.freeze([
         kind: "fastfile",
     }),
 ]);
-
-const REQUIREMENT_BY_PATH = new Map(
-    REQUIRED_ASSETS.map((requirement) => [requirement.path, requirement]),
-);
 
 const PROBE_ERRORS = new Map([
     [1, "The browser passed an invalid probe window to WebAssembly."],
@@ -176,19 +177,22 @@ export function entriesFromFileList(fileList)
 
         const relativePath = segments.join("/");
         const foldedPath = relativePath.toLocaleLowerCase("en-US");
-        if (!REQUIREMENT_BY_PATH.has(foldedPath)) {
-            continue;
-        }
         if (selectedByPath.has(foldedPath)) {
             throw importError(
                 "DUPLICATE_PATH",
                 `The selected folder contains conflicting paths for ${relativePath}.`,
             );
         }
-        selectedByPath.set(foldedPath, file);
+        if (new TextEncoder().encode(foldedPath).byteLength > MAX_IMPORTED_PATH_BYTES) {
+            throw importError("UNSAFE_PATH", `The selected path is too long: ${relativePath}.`);
+        }
+        selectedByPath.set(foldedPath, requireFileLike(file, relativePath));
+        if (selectedByPath.size > MAX_IMPORTED_FILES) {
+            throw importError("TOO_MANY_FILES", "The selected installation contains too many files.");
+        }
     }
 
-    const canonical = new Map();
+    const canonical = new Map(selectedByPath);
     for (const requirement of REQUIRED_ASSETS) {
         const file = selectedByPath.get(requirement.path);
         if (!file) {
@@ -249,16 +253,29 @@ export async function entriesFromDirectoryHandle(directory)
         throw importError("INVALID_PICKER", "The browser returned an invalid directory handle.");
     }
     const entries = new Map();
-    const directoryCache = new Map([["", directory]]);
-    for (const requirement of REQUIRED_ASSETS) {
-        const handle = await getRequiredFileFromDirectory(
-            directory,
-            requirement.path,
-            directoryCache,
-        );
-        const file = await handle.getFile();
-        entries.set(requirement.path, requireFileLike(file, requirement.path));
+    async function visit(current, prefix)
+    {
+        for await (const [name, handle] of current.entries()) {
+            const relativePath = normalizeSelectionPath(prefix ? `${prefix}/${name}` : name);
+            const foldedPath = relativePath.toLocaleLowerCase("en-US");
+            if (new TextEncoder().encode(foldedPath).byteLength > MAX_IMPORTED_PATH_BYTES) {
+                throw importError("UNSAFE_PATH", `The selected path is too long: ${relativePath}.`);
+            }
+            if (handle.kind === "directory") {
+                await visit(handle, foldedPath);
+                continue;
+            }
+            if (handle.kind !== "file" || entries.has(foldedPath)) {
+                throw importError("DUPLICATE_PATH", `The selected folder contains conflicting paths for ${relativePath}.`);
+            }
+            entries.set(foldedPath, requireFileLike(await handle.getFile(), relativePath));
+            if (entries.size > MAX_IMPORTED_FILES) {
+                throw importError("TOO_MANY_FILES", "The selected installation contains too many files.");
+            }
+        }
     }
+    await visit(directory, "");
+    validateSelectedEntries(entries);
     return entries;
 }
 
@@ -380,7 +397,8 @@ function validateStoredManifest(manifest)
 {
     if (!manifest || typeof manifest !== "object" || Array.isArray(manifest) ||
         manifest.schema !== MANIFEST_SCHEMA || !Array.isArray(manifest.files) ||
-        manifest.files.length !== REQUIRED_ASSETS.length) {
+        manifest.files.length < REQUIRED_ASSETS.length ||
+        manifest.files.length > MAX_IMPORTED_FILES) {
         throw importError("INVALID_METADATA", "Stored asset metadata has an invalid shape.");
     }
     const importId = validateImportId(manifest.importId);
@@ -390,9 +408,11 @@ function validateStoredManifest(manifest)
             typeof entry.path !== "string" || !Number.isSafeInteger(entry.size)) {
             throw importError("INVALID_METADATA", "Stored asset file metadata is malformed.");
         }
-        const requirement = REQUIRED_ASSETS.find(({ path }) => path === entry.path);
-        if (!requirement || sizes.has(entry.path) || entry.size < requirement.minimumSize ||
-            entry.size > requirement.maximumSize) {
+        const normalizedPath = normalizeSelectionPath(entry.path).toLocaleLowerCase("en-US");
+        if (normalizedPath !== entry.path ||
+            new TextEncoder().encode(normalizedPath).byteLength > MAX_IMPORTED_PATH_BYTES ||
+            sizes.has(entry.path) || entry.size < 0 ||
+            entry.size > MAX_IMPORTED_FILE_SIZE) {
             throw importError("INVALID_METADATA", "Stored asset file metadata is inconsistent.");
         }
         sizes.set(entry.path, entry.size);
@@ -408,7 +428,24 @@ function validateSelectedEntries(entries)
     if (!(entries instanceof Map)) {
         throw importError("INVALID_SELECTION", "The asset selection is not a canonical file map.");
     }
+    if (entries.size < REQUIRED_ASSETS.length || entries.size > MAX_IMPORTED_FILES) {
+        throw importError("INVALID_SELECTION", "The selected installation has an invalid file count.");
+    }
     let totalSize = 0;
+    for (const [path, selectedFile] of entries) {
+        if (normalizeSelectionPath(path).toLocaleLowerCase("en-US") !== path ||
+            new TextEncoder().encode(path).byteLength > MAX_IMPORTED_PATH_BYTES) {
+            throw importError("UNSAFE_PATH", `The selected path is unsafe: ${path}.`);
+        }
+        const file = requireFileLike(selectedFile, path);
+        if (file.size > MAX_IMPORTED_FILE_SIZE) {
+            throw importError("INVALID_SIZE", `${path} is too large for the browser filesystem boundary.`);
+        }
+        totalSize += file.size;
+        if (!Number.isSafeInteger(totalSize)) {
+            throw importError("INVALID_SIZE", "The selected installation is too large.");
+        }
+    }
     for (const requirement of REQUIRED_ASSETS) {
         const file = requireFileLike(entries.get(requirement.path), requirement.path);
         if (file.size < requirement.minimumSize || file.size > requirement.maximumSize) {
@@ -417,7 +454,6 @@ function validateSelectedEntries(entries)
                 `${requirement.path} has an unexpected size (${file.size.toLocaleString()} bytes).`,
             );
         }
-        totalSize += file.size;
     }
     return totalSize;
 }
@@ -714,11 +750,13 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
 
     async function fileHandleFor(importId, path, create = false)
     {
-        if (!REQUIREMENT_BY_PATH.has(path)) {
+        const normalizedPath = normalizeSelectionPath(path).toLocaleLowerCase("en-US");
+        if (normalizedPath !== path ||
+            new TextEncoder().encode(normalizedPath).byteLength > MAX_IMPORTED_PATH_BYTES) {
             throw importError("UNSAFE_PATH", `The asset adapter does not allow ${path}.`);
         }
         const directory = await importDirectory(importId, create);
-        const segments = path.split("/");
+        const segments = normalizedPath.split("/");
         let current = directory;
         for (const segment of segments.slice(0, -1)) {
             current = await current.getDirectoryHandle(segment, { create });
@@ -775,9 +813,10 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
     async function probeStoredImport(importId, recordedManifest = null)
     {
         const entries = new Map();
-        for (const requirement of REQUIRED_ASSETS) {
-            const handle = await fileHandleFor(importId, requirement.path);
-            entries.set(requirement.path, await handle.getFile());
+        const recordedFiles = recordedManifest?.files ?? REQUIRED_ASSETS;
+        for (const entry of recordedFiles) {
+            const handle = await fileHandleFor(importId, entry.path);
+            entries.set(entry.path, await handle.getFile());
         }
         validateSelectedEntries(entries);
 
@@ -800,10 +839,7 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
         const probe = await probeInstallEntries(module, entries);
         return {
             ...probe,
-            files: REQUIRED_ASSETS.map((requirement) => ({
-                path: requirement.path,
-                size: entries.get(requirement.path).size,
-            })),
+            files: [...entries].map(([path, file]) => ({ path, size: file.size })),
         };
     }
 
@@ -1038,9 +1074,9 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
                     manifest: previousManifest,
                 });
 
-                for (const requirement of REQUIRED_ASSETS) {
-                    const destination = await fileHandleFor(stagedImportId, requirement.path, true);
-                    await copyFileToHandle(entries.get(requirement.path), destination, reportBytes);
+                for (const [logicalPath, file] of entries) {
+                    const destination = await fileHandleFor(stagedImportId, logicalPath, true);
+                    await copyFileToHandle(file, destination, reportBytes);
                 }
 
                 emit({
@@ -1051,11 +1087,15 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
                     progress: 1,
                     manifest: previousManifest,
                 });
-                const probe = await probeStoredImport(stagedImportId);
-                const manifest = {
+                const candidateManifest = {
                     schema: MANIFEST_SCHEMA,
                     importId: stagedImportId,
                     importedAt: new Date().toISOString(),
+                    files: [...entries].map(([path, file]) => ({ path, size: file.size })),
+                };
+                const probe = await probeStoredImport(stagedImportId, candidateManifest);
+                const manifest = {
+                    ...candidateManifest,
                     language: probe.language,
                     files: probe.files,
                     profile: probe.profile,

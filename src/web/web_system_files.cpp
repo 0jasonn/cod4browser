@@ -2,28 +2,30 @@
 
 #include <universal/com_memory.h>
 #include <universal/q_shared.h>
+#include <web/web_worker_filesystem.h>
 
 #include <algorithm>
-#include <filesystem>
+#include <cstring>
 #include <string>
 #include <vector>
 #include <array>
 
 namespace
 {
-namespace fs = std::filesystem;
-
-std::string NormalizePath(const fs::path &path)
+std::string JoinPath(const std::string &base, const char *name)
 {
-    return path.generic_string();
+    if (base.empty() || base == ".")
+        return name;
+    return base + "/" + name;
 }
 
-bool HasExtension(const fs::path &path, const char *extension)
+bool HasExtension(const char *name, const char *extension)
 {
     if (!extension || !*extension) return true;
     std::string expected = extension;
     if (expected.front() != '.') expected.insert(expected.begin(), '.');
-    return I_stricmp(path.extension().string().c_str(), expected.c_str()) == 0;
+    const char *dot = std::strrchr(name, '.');
+    return dot && I_stricmp(dot, expected.c_str()) == 0;
 }
 
 char **CopyFileList(const std::vector<std::string> &names, int *numfiles)
@@ -43,14 +45,47 @@ char **CopyFileList(const std::vector<std::string> &names, int *numfiles)
     list[names.size()] = nullptr;
     return list;
 }
+
+bool ListFilteredFiles(
+    const std::string &directory,
+    const std::string &relative,
+    const char *filter,
+    std::vector<std::string> &names)
+{
+    std::vector<WebWorkerDirectoryEntry> entries;
+    const std::string path = relative.empty()
+        ? directory
+        : JoinPath(directory, relative.c_str());
+    if (!WebWorkerFS_ListDirectory(path.c_str(), entries))
+        return false;
+    for (const WebWorkerDirectoryEntry &entry : entries)
+    {
+        const std::string child = relative.empty()
+            ? entry.name
+            : JoinPath(relative, entry.name);
+        if (entry.type == WebWorkerFileType::Directory)
+        {
+            if (!ListFilteredFiles(directory, child, filter, names))
+                return false;
+        }
+        else if (entry.type == WebWorkerFileType::File &&
+            Com_FilterPath(filter, child.c_str(), 0))
+        {
+            names.push_back(child);
+            if (names.size() == WEB_WORKER_MAX_DIRECTORY_ENTRIES)
+                return true;
+        }
+    }
+    return true;
+}
 }
 
 char *__cdecl Sys_Cwd()
 {
-    static std::array<char, 1024> currentDirectory{};
-    const std::string path = NormalizePath(fs::current_path());
-    I_strncpyz(currentDirectory.data(), path.c_str(),
-        static_cast<int>(currentDirectory.size()));
+    // The Worker mount exposes a logical installation root, never a private
+    // OPFS path. Canonical FS_BuildOSPath turns this into ./main/... and the
+    // platform adapter normalizes that logical spelling at its boundary.
+    static std::array<char, 2> currentDirectory{{'.', '\0'}};
     return currentDirectory.data();
 }
 
@@ -61,15 +96,13 @@ const char *__cdecl Sys_DefaultCDPath()
 
 void __cdecl Sys_Mkdir(const char *path)
 {
-    if (path && *path) std::filesystem::create_directory(path);
+    (void)path;
 }
 
 BOOL __cdecl Sys_RemoveDirTree(const char *path)
 {
-    if (!path || !*path) return 0;
-    std::error_code error;
-    std::filesystem::remove_all(path, error);
-    return error ? 0 : 1;
+    (void)path;
+    return 0;
 }
 
 int __cdecl Sys_CountFileList(char **list)
@@ -87,32 +120,25 @@ char **__cdecl Sys_ListFiles(const char *directory, const char *extension,
     if (!directory || !*directory) return nullptr;
 
     std::vector<std::string> names;
-    std::error_code error;
-    const fs::path base(directory);
     if (filter && *filter)
     {
-        for (fs::recursive_directory_iterator iterator(base, error), end;
-             !error && iterator != end; iterator.increment(error))
-        {
-            if (!iterator->is_regular_file(error)) continue;
-            const std::string relative = NormalizePath(
-                fs::relative(iterator->path(), base, error));
-            if (!error && Com_FilterPath(filter, relative.c_str(), 0))
-                names.push_back(relative);
-        }
+        if (!ListFilteredFiles(directory, "", filter, names))
+            return nullptr;
     }
     else
     {
         const bool directoriesOnly = wantsubs ||
             (extension && extension[0] == '/' && extension[1] == '\0');
-        for (fs::directory_iterator iterator(base, error), end;
-             !error && iterator != end; iterator.increment(error))
+        std::vector<WebWorkerDirectoryEntry> entries;
+        if (!WebWorkerFS_ListDirectory(directory, entries))
+            return nullptr;
+        for (const WebWorkerDirectoryEntry &entry : entries)
         {
-            const bool isDirectory = iterator->is_directory(error);
+            const bool isDirectory = entry.type == WebWorkerFileType::Directory;
             if (directoriesOnly != isDirectory) continue;
-            if (!directoriesOnly && !HasExtension(iterator->path(), extension))
+            if (!directoriesOnly && !HasExtension(entry.name, extension))
                 continue;
-            names.push_back(iterator->path().filename().string());
+            names.emplace_back(entry.name);
             if (names.size() == 0x1FFF) break;
         }
     }
@@ -123,7 +149,6 @@ char **__cdecl Sys_ListFiles(const char *directory, const char *extension,
 int __cdecl Sys_DirectoryHasContents(const char *directory)
 {
     if (!directory || !*directory) return 0;
-    std::error_code error;
-    return std::filesystem::directory_iterator(directory, error) !=
-        std::filesystem::directory_iterator{};
+    std::vector<WebWorkerDirectoryEntry> entries;
+    return WebWorkerFS_ListDirectory(directory, entries) && !entries.empty();
 }

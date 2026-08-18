@@ -1,4 +1,5 @@
 #include <qcommon/iwd_archive.h>
+#include <qcommon/unzip.h>
 #include "zlib_test_support.h"
 
 #include <zlib.h>
@@ -6,8 +7,10 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <limits>
@@ -18,6 +21,55 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+
+void *Z_Malloc(int size, const char *, int)
+{
+    return std::malloc(static_cast<std::size_t>(size));
+}
+
+void Z_Free(void *pointer, int)
+{
+    std::free(pointer);
+}
+
+void Com_Memcpy(void *destination, const void *source, const std::size_t count)
+{
+    std::memcpy(destination, source, count);
+}
+
+uint32_t __cdecl FS_FileRead(void *pointer, uint32_t length, FILE *stream)
+{
+    return static_cast<uint32_t>(std::fread(pointer, 1, length, stream));
+}
+
+FILE *__cdecl FS_FileOpenReadBinary(const char *filename)
+{
+    return std::fopen(filename, "rb");
+}
+
+void __cdecl FS_FileClose(FILE *stream)
+{
+    if (stream) std::fclose(stream);
+}
+
+int __cdecl FS_FileSeek(FILE *stream, int offset, int origin)
+{
+    // Kisak's file wrapper uses 0=current, 1=end, and 2=beginning.
+    static constexpr int origins[] = {SEEK_CUR, SEEK_END, SEEK_SET};
+    return origin >= 0 && origin < 3
+        ? std::fseek(stream, offset, origins[origin])
+        : -1;
+}
+
+int __cdecl FS_FileGetFileSize(FILE *stream)
+{
+    const long position = std::ftell(stream);
+    if (position < 0 || std::fseek(stream, 0, SEEK_END) != 0) return -1;
+    const long size = std::ftell(stream);
+    if (std::fseek(stream, position, SEEK_SET) != 0 || size < 0 ||
+        size > std::numeric_limits<int>::max()) return -1;
+    return static_cast<int>(size);
+}
 
 namespace
 {
@@ -296,6 +348,50 @@ Fixture BuildFixture(std::vector<EntrySpec> specifications, Bytes comment = {})
     AppendU16(fixture.archive, static_cast<uint16_t>(comment.size()));
     fixture.archive.insert(fixture.archive.end(), comment.begin(), comment.end());
     return fixture;
+}
+
+void TestCanonicalMinizipReadAndSeek()
+{
+#if defined(__EMSCRIPTEN__)
+    constexpr const char *fixturePath = "/canonical-minizip-fixture.iwd";
+#else
+    constexpr const char *fixturePath = "canonical-minizip-fixture.iwd";
+#endif
+    const Fixture fixture = BuildFixture({Deflated("seek.txt", "0123456789")});
+    {
+        std::ofstream output(fixturePath, std::ios::binary | std::ios::trunc);
+        Require(output.good(), "canonical minizip fixture opens for writing");
+        output.write(
+            reinterpret_cast<const char *>(fixture.archive.data()),
+            static_cast<std::streamsize>(fixture.archive.size()));
+        Require(output.good(), "canonical minizip fixture is written");
+    }
+
+    unzFile archive = unzOpen(fixturePath);
+    Require(archive != nullptr, "canonical minizip opens generated IWD");
+    Require(unzGoToFirstFile(archive) == UNZ_OK, "canonical minizip selects first member");
+    unz_file_info info{};
+    std::array<char, 32> filename{};
+    Require(unzGetCurrentFileInfo(
+        archive, &info, filename.data(), filename.size(), nullptr, 0, nullptr, 0) == UNZ_OK,
+        "canonical minizip reads member metadata");
+    Require(std::string_view(filename.data()) == "seek.txt", "canonical member name matches");
+    Require(info.uncompressed_size == 10, "canonical member size matches");
+    Require(unzOpenCurrentFile(archive) == UNZ_OK, "canonical member opens");
+
+    Require(unzReadCurrentFile(archive, nullptr, 4) == 4,
+        "canonical discard read advances compressed member");
+    std::array<char, 6> tail{};
+    Require(unzReadCurrentFile(archive, tail.data(), tail.size()) ==
+            static_cast<int>(tail.size()),
+        "canonical member tail reads after seek");
+    Require(std::string_view(tail.data(), tail.size()) == "456789",
+        "canonical compressed-member seek preserves bytes");
+    Require(unzReadCurrentFile(archive, tail.data(), 1) == 0,
+        "canonical member reports end of file");
+    Require(unzCloseCurrentFile(archive) == UNZ_OK, "canonical member closes cleanly");
+    Require(unzClose(archive) == UNZ_OK, "canonical IWD closes cleanly");
+    Require(std::remove(fixturePath) == 0, "canonical minizip fixture is removed");
 }
 
 CentralDirectoryLocator Locate(const Fixture &fixture, const Limits &limits = {})
@@ -915,6 +1011,7 @@ private:
 int main()
 {
     Runner runner;
+    runner.Run("canonical minizip read/seek", TestCanonicalMinizipReadAndSeek);
     runner.Run("stored/deflated happy path", TestHappyPath);
     runner.Run("EOCD locator rejections", TestLocatorRejections);
     runner.Run("central metadata rejections", TestCentralMetadataRejections);

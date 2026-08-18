@@ -196,7 +196,7 @@ double __cdecl Com_GetVolumeFalloffCurveValue(SndCurve *volumeFalloffCurve, floa
 void __cdecl Com_InitSoundDevGuiGraphs();
 void __cdecl Com_VolumeFalloffCurveGraphEventCallback(const DevGraph *graph, DevEventType event, int i);
 void Com_InitSoundDevGuiGraphs_FastFile();
-void __cdecl Com_GetGraphList(XAssetHeader header, int *data);
+void __cdecl Com_GetGraphList(XAssetHeader header, void *data);
 MSSChannelMap *__cdecl Com_GetSpeakerMap(SpeakerMap *speakerMap, int sourceChannelCount);
 snd_alias_list_t *__cdecl Com_TryFindSoundAlias(const char *name);
 snd_alias_list_t *__cdecl Com_TryFindSoundAlias_FastFile(const char *name);

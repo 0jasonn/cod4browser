@@ -84,11 +84,10 @@ code.
 | sound/cinematic calls | sound/browser-policy boundary | gate playback while retaining lifecycle state and explicit unlock/resume |
 | demo and remote-server commands | offline-unneeded feature | may remain gated during local SP bring-up |
 
-The first large client architecture boundary is now earlier: canonical
-`FS_InitFilesystem` must enumerate the Worker mount and open IWDs through the
-existing synchronous platform layer. Only then can the runtime enter full
-`CL_Init` and its input/renderer boundaries without browser-owned client or
-asset state.
+Canonical `FS_InitFilesystem` now enumerates the Worker mount and opens IWDs
+through the synchronous primitive layer while retaining C++ search-path
+ownership. Full `CL_Init` and its input/renderer boundaries are the next large
+client convergence step.
 
 ## Local server dependency classification
 
@@ -105,7 +104,7 @@ asset state.
 | `Com_LoadWorld` | canonical portable Kisak | the fastfile owner and global `comWorld` singleton are linked immediately after collision load |
 | save system | canonical portable Kisak | actual `savememory.cpp`, `savememory_init.cpp`, and `memfile.cpp` owners are compiled; both 1,572,864-byte global buffers and demo-save clearing have exact x86/Wasm evidence |
 | `Scr_InitVariables`, `Scr_Init`, `XAnimInit`, `DObjInit` | canonical portable Kisak | actual free lists, VM stack/temp value, 4,096-entry XAnim ring, notetrack string, and DObj duplicate-parts string initialization run in native order before `SV_Init` |
-| `SV_InitGameProgs -> SV_InitGameVM -> G_InitGame` | linked local-server closure | the real server/game units compile in the production Wasm target; the owned browser run remains fail-closed earlier because ClipMap is not yet published, with no manufactured server or game state |
+| `SV_InitGameProgs -> SV_InitGameVM -> G_InitGame` | reached local-server closure | the real server/game units execute in the production Wasm target through script compilation, entity/level initialization, `G_LoadLevel`, and the first server frame, with no manufactured server or game state |
 
 ## Current proof boundary
 
@@ -116,9 +115,10 @@ DB_LoadXZone`. The normal Worker filesystem opens
 `zone/english/killhouse.ff`; no browser DB entry point supplies the map name.
 
 The owned retail observation interns all 892 script strings and traverses the
-1,684-entry XAsset list through GfxWorld asset 772. It records 2,371 canonical
-publications and atomically publishes `maps/killhouse.d3dbsp` through the real
-Kisak DB. Address-independent world counts, inflated offset `86,162,172`, and
+entire 1,684-entry XAsset list through GfxWorld asset 772, GameWorldSp 773,
+MapEnts, ClipMap, and final RawFile asset 1,683 `killhouse`. It atomically
+publishes `maps/killhouse.d3dbsp` through the real Kisak DB. Address-independent
+world counts, inflated offset `86,162,172`, and
 the bounded surface selection (`6077`, 2,009 vertices, 128 triangles) match the
 frozen Gate 2 observation. The real DB resolves that surface's Material pointer
 to `wc/me_ground_mud1`; Gate 2 recorded `wc/decal_porterjustice8`. The oracle is
@@ -126,9 +126,9 @@ unchanged and the discrepancy remains explicit.
 
 The existing bounded world adapter consumes the DB-owned `GfxWorld` directly,
 submits 2,009 vertices and 384 indices, and records the subsequent WebGL2 draw.
-No second world representation is retained. Generated-loader convergence stops
-at the next ordered asset, 773, type 13 (`GameWorldSp`), with stream offsets
-`[0,509664,0,0,37146694,0,0,21693664,3128676]`.
+No second world representation is retained. Generated-loader convergence now
+ends naturally at asset 1,683 with stream offsets
+`[0,522928,0,0,47286243,0,0,26535904,3840644]` and no generated failure.
 
 The production target now compiles the actual `cm_load.cpp` owner and continues
 the real `SV_SpawnServer` body through `CM_LoadMap` and `Com_LoadWorld` only
@@ -146,16 +146,14 @@ An exact MSVC x86/Wasm differential invokes those real owners and records
 Com_LoadWorld > SaveMemory initialization`, including identical VM free-list,
 XAnim ring, DObj string, checksum, save-buffer, collision-thread, and Hunk
 allocation semantics. Production initialization now owns the native 10 MiB
-fastfile Hunk through the platform physical-memory boundary. The owned retail run still
-stops at `GameWorldSp` asset 773 before canonical ClipMap publication, and the
-browser assertion proves that neither collision nor common-world loading is
-entered prematurely. Once the remaining map-zone assets publish, the wired
-path will cross this boundary without a browser continuation or fabricated
-asset state. The save, script-VM, XAnim, and DObj initialization owners are now
-compiled and run before the local server path. Attempting the full native
-startup exposed the next architecture decision earlier than game startup:
-`FS_InitFilesystem` must consume the existing Worker mount for search paths,
-directory enumeration, and IWD/minizip access. It must not copy the legal
-installation into MEMFS or create a second browser asset registry. Once that
-boundary is canonical, full `CL_Init`, post-ClipMap `CM_LoadMap`, local game
-startup, and `CL_InitCGame`/`CG_Init` can execute through their linked owners.
+fastfile Hunk through the platform physical-memory boundary. The owned retail
+run publishes ClipMap into native `&cm` and executes `CM_LoadMap`,
+`Com_LoadWorld`, `SV_InitGameProgs`, `SV_InitGameVM`, `G_InitGame`,
+`G_LoadLevel`, `CL_InitCGame`, and `CG_Init` through their canonical owners.
+The save, script-VM, XAnim, and DObj initialization owners run before the local
+server path. Canonical `FS_InitFilesystem`
+now consumes the existing Worker mount for search paths, directory
+enumeration, and IWD/minizip access without copying the installation into
+MEMFS or creating a second browser asset registry. Full `CL_Init` is also
+reached. The next runtime boundary is the post-`CG_Init` start-level save and
+the still-unimplemented game-driven renderer submission.

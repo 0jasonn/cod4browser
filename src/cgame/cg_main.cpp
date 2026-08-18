@@ -23,6 +23,7 @@
 #include <game/g_local.h>
 #include <client/cl_scrn.h>
 #include <physics/phys_preset.h>
+#include <qcommon/engine_lifecycle_trace.h>
 
 UiContext cgDC;
 
@@ -1409,6 +1410,7 @@ void __cdecl CL_LoadSoundAliases(const char *loadspec)
 
 void __cdecl CG_Init(int localClientNum, int savegame)
 {
+    EmitEngineLifecycleTrace(EngineLifecycleStage::CGameInitBegin);
     const char *v5; // r10
     int v6; // r8
     int i; // r31
@@ -1551,6 +1553,7 @@ void __cdecl CG_Init(int localClientNum, int savegame)
     Dvar_SetFromStringByName("profile", (char*)"");
     Dvar_SetFromStringByName("profile", v10);
     CG_InitVehicleReticle(localClientNum);
+    EmitEngineLifecycleTrace(EngineLifecycleStage::CGameInitComplete);
 }
 
 void __cdecl CG_FreeWeapons(int localClientNum)

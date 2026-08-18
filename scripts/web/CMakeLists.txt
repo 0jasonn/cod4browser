@@ -128,6 +128,9 @@ add_executable(KisakCOD-web
     "${SRC_DIR}/database/db_generated_stringtable.cpp"
     "${SRC_DIR}/database/db_generated_comworld.cpp"
     "${SRC_DIR}/database/db_generated_gfxworld.cpp"
+    "${SRC_DIR}/database/db_generated_gameworld.cpp"
+    "${SRC_DIR}/database/db_generated_mapents.cpp"
+    "${SRC_DIR}/database/db_generated_clipmap.cpp"
     "${SRC_DIR}/database/db_generated_image.cpp"
     "${SRC_DIR}/database/db_generated_image_platform.cpp"
     "${SRC_DIR}/database/db_generated_localize.cpp"
@@ -158,6 +161,7 @@ add_executable(KisakCOD-web
     "${SRC_DIR}/EffectsCore/fx_fastfile_registration.cpp"
     "${SRC_DIR}/qcommon/iwi_image.cpp"
     "${SRC_DIR}/qcommon/engine_lifecycle_trace.cpp"
+    "${SRC_DIR}/qcommon/graph.cpp"
     "${SRC_DIR}/qcommon/common_runtime_state.cpp"
     "${SRC_DIR}/qcommon/common_runtime_continuation.cpp"
     "${SRC_DIR}/qcommon/cm_load.cpp"
@@ -209,6 +213,7 @@ add_executable(KisakCOD-web
     "${SRC_DIR}/web/web_system.cpp"
     "${SRC_DIR}/web/web_system_files.cpp"
     "${SRC_DIR}/web/web_thread_context.cpp"
+    "${SRC_DIR}/web/web_worker_filesystem.cpp"
     "${SRC_DIR}/web/web_main.cpp"
     # This is existing KisakCOD/ODE physics code, not a bootstrap substitute.
     "${SRC_DIR}/physics/ode/odemath.cpp"
@@ -263,6 +268,8 @@ target_sources(KisakCOD-web PRIVATE
     "${SRC_DIR}/universal/timing.cpp"
     "${SRC_DIR}/buildnumber.cpp"
     "${SRC_DIR}/gfx_d3d/r_fastfile_registration.cpp"
+    "${SRC_DIR}/gfx_d3d/r_dvars.cpp"
+    "${SRC_DIR}/gfx_d3d/r_sky.cpp"
     "${SRC_DIR}/qcommon/cm_showcollision.cpp"
     "${SRC_DIR}/qcommon/cm_mesh.cpp"
     "${SRC_DIR}/qcommon/cm_staticmodel.cpp"
@@ -305,7 +312,6 @@ target_compile_definitions(KisakCOD-web PRIVATE
     KISAK_GATE3_COM_INIT_PREFIX=1
     KISAK_CANONICAL_MAP_COMMANDS=1
     KISAK_DB_REGISTRY_LIFECYCLE_SLICE=1
-    KISAK_RUNTIME_MAP_DB_BOUNDARY=1
     KISAK_OPENAL=1
 )
 target_link_libraries(KisakCOD-web PRIVATE kisak_web_gate2_oracle)

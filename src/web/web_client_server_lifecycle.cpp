@@ -14,10 +14,12 @@
 #include <qcommon/threads.h>
 #include <server/server.h>
 #include <server/sv_public.h>
+#include <sound/snd_public.h>
 #include <script/scr_variable.h>
 #include <script/scr_vm_runtime.h>
 #include <stringed/stringed_hooks.h>
 #include <universal/dvar.h>
+#include <universal/com_files.h>
 #include <universal/com_memory.h>
 #include <universal/physicalmemory.h>
 #include <web/web_system.h>
@@ -29,6 +31,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <string>
 
 namespace
 {
@@ -57,6 +60,24 @@ EM_JS(
                 sync: sync | 0,
                 asyncify: false,
                 pthreads: false
+            }
+        }));
+    });
+
+EM_JS(
+    void,
+    DispatchCanonicalFilesystem,
+    (const char *searchPaths, std::uint32_t searchPathCount, std::uint32_t archiveCount),
+    {
+        globalThis.dispatchEvent(new CustomEvent("kisakcod:canonical-filesystem", {
+            detail: {
+                state: "ready",
+                searchPathCount: searchPathCount >>> 0,
+                archiveCount: archiveCount >>> 0,
+                searchPaths: UTF8ToString(searchPaths).split("\n").filter(Boolean),
+                canonical: true,
+                asyncify: false,
+                browserOwnedSearchPaths: false
             }
         }));
     });
@@ -90,6 +111,23 @@ void __cdecl Com_SyncThreads()
 {
     iassert(Sys_IsMainThread());
     Sys_SyncDatabase();
+}
+
+void __cdecl DB_SyncXAssets()
+{
+    Sys_SyncDatabase();
+}
+
+void __cdecl Com_LoadBsp(char *)
+{
+    Com_Error(ERR_DROP,
+        "Loose BSP loading is unavailable in the browser fastfile runtime");
+}
+
+void __cdecl Com_Shutdown(const char *)
+{
+    Com_Error(ERR_DROP,
+        "Native process shutdown is unavailable inside the browser Worker");
 }
 
 void __cdecl Com_Restart()
@@ -146,9 +184,38 @@ extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_StartCanonicalDbRuntimeCheck()
 
     SetEngineLifecycleTraceObserver(PublishLifecycle);
     Web_Log(WebLogLevel::Info,
-        "[kisakcod-web] Canonical runtime: initializing language, Hunk, and shared runtime owners.\n");
-    SEH_InitLanguage();
+        "[kisakcod-web] FS_InitFilesystem begin.\n");
+    FS_InitFilesystem();
+    std::uint32_t searchPathCount = 0;
+    std::uint32_t archiveCount = 0;
+    std::string searchPathEvidence;
+    for (const searchpath_s *search = fs_searchpaths; search; search = search->next)
+    {
+        ++searchPathCount;
+        if (search->iwd)
+        {
+            ++archiveCount;
+            searchPathEvidence += "iwd:";
+            searchPathEvidence += search->iwd->iwdBasename;
+        }
+        else if (search->dir)
+        {
+            searchPathEvidence += "dir:";
+            searchPathEvidence += search->dir->gamedir;
+        }
+        searchPathEvidence += '\n';
+    }
+    Web_Log(WebLogLevel::Info,
+        "[kisakcod-web] FS_InitFilesystem complete: search paths=%u, IWDs=%u.\n",
+        searchPathCount,
+        archiveCount);
+    DispatchCanonicalFilesystem(
+        searchPathEvidence.c_str(), searchPathCount, archiveCount);
+    Web_Log(WebLogLevel::Info,
+        "[kisakcod-web] Canonical runtime: initializing Hunk and shared runtime owners.\n");
     Com_InitHunkMemory();
+    Hunk_InitDebugMemory();
+    ProfLoad_Init();
     Scr_InitVariables();
     Scr_Init();
     Scr_Settings(
@@ -158,12 +225,21 @@ extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_StartCanonicalDbRuntimeCheck()
     XAnimInit();
     DObjInit();
     SV_Init();
+    CL_InitOnceForAllClients();
+    CL_Init(0);
+
+    // Preserve the native post-client sound ownership transition. Emscripten's
+    // OpenAL implementation owns the browser audio context and may leave it
+    // suspended until a user gesture; the engine sound state remains canonical.
+    SND_InitDriver();
+    iassert(!cls.soundStarted);
+    cls.soundStarted = 1;
+    SND_Init();
 
     // CL_InitRef is the canonical owner of the SP renderer configuration and
     // fastfile names. The native renderer consumes that configuration while
     // creating its device; WebGL2 is already platform-owned, so consume it at
     // the same boundary without mirroring the names in browser state.
-    CL_InitRef();
     iassert(g_rendererConfigured);
     Web_Log(WebLogLevel::Info,
         "[kisakcod-web] Canonical runtime: loading renderer prerequisite zones.\n");
@@ -183,10 +259,82 @@ extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_StartCanonicalDbRuntimeCheck()
         Sys_NotifyDatabase();
         Sys_SyncDatabase();
     }
+
+    // Native startup starts renderer-backed hunk users before a console map
+    // command can execute. The browser DB queue cannot publish these assets
+    // until the canonical $init scope above closes, so retain the native
+    // ownership phase immediately after the synchronous publication barrier.
+    CL_InitRenderer();
+    R_BeginRemoteScreenUpdate();
+    CL_StartHunkUsers();
+    R_EndRemoteScreenUpdate();
     g_clientLifecycleReady = true;
     Web_Log(
         WebLogLevel::Info,
         "[kisakcod-web] Canonical renderer prerequisite-zone request completed.\n");
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_CanonicalFsFileSize(
+    const char *logicalPath)
+{
+    if (!g_clientLifecycleReady || !logicalPath)
+        return -1;
+    int file = 0;
+    const int size = static_cast<int>(FS_FOpenFileRead(logicalPath, &file));
+    if (!file)
+        return -1;
+    FS_FCloseFile(file);
+    return size;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_CanonicalFsReadHash(
+    const char *logicalPath, std::uint32_t offset, std::uint32_t length)
+{
+    if (!g_clientLifecycleReady || !logicalPath || length > 1024u * 1024u)
+        return 0u;
+    int file = 0;
+    const std::uint32_t size = FS_FOpenFileRead(logicalPath, &file);
+    if (!file || offset > size || length > size - offset ||
+        (offset && FS_Seek(file, static_cast<int>(offset), 2) != 0))
+    {
+        if (file)
+            FS_FCloseFile(file);
+        return 0u;
+    }
+    std::uint32_t hash = 2166136261u;
+    std::uint8_t bytes[4096];
+    std::uint32_t remaining = length;
+    while (remaining)
+    {
+        const std::uint32_t chunk = remaining < sizeof(bytes)
+            ? remaining
+            : static_cast<std::uint32_t>(sizeof(bytes));
+        if (FS_Read(bytes, chunk, file) != chunk)
+        {
+            FS_FCloseFile(file);
+            return 0u;
+        }
+        for (std::uint32_t index = 0; index < chunk; ++index)
+        {
+            hash ^= bytes[index];
+            hash *= 16777619u;
+        }
+        remaining -= chunk;
+    }
+    FS_FCloseFile(file);
+    return hash;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_CanonicalFsListCount(
+    const char *logicalPath, const char *extension)
+{
+    if (!g_clientLifecycleReady || !logicalPath || !extension)
+        return -1;
+    int count = 0;
+    const char **files = FS_ListFiles(
+        logicalPath, extension, FS_LIST_ALL, &count);
+    FS_FreeFileList(files);
+    return count;
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_SubmitCanonicalCommand(

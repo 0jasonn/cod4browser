@@ -14,7 +14,9 @@
 #include <gfx_d3d/r_font.h>
 #include <physics/phys_preset.h>
 #include <qcommon/com_world_types.h>
+#include <qcommon/cm_types.h>
 #include <gfx_d3d/gfx_world_types.h>
+#include <game/g_bsp.h>
 #include <sound/snd_alias_types.h>
 #include <ui/ui_asset_types.h>
 #include <xanim/xmodel_types.h>
@@ -74,6 +76,16 @@ const char *AssetName(const XAsset &asset)
     case ASSET_TYPE_GFXWORLD:
         name = asset.header.gfxWorld ? asset.header.gfxWorld->name : nullptr;
         break;
+    case ASSET_TYPE_GAMEWORLD_SP:
+        name = asset.header.gameWorldSp ? asset.header.gameWorldSp->name : nullptr;
+        break;
+    case ASSET_TYPE_CLIPMAP:
+    case ASSET_TYPE_CLIPMAP_PVS:
+        name = asset.header.clipMap ? asset.header.clipMap->name : nullptr;
+        break;
+    case ASSET_TYPE_MAP_ENTS:
+        name = asset.header.mapEnts ? asset.header.mapEnts->name : nullptr;
+        break;
     case ASSET_TYPE_FONT:
         name = asset.header.font ? asset.header.font->fontName : nullptr;
         break;
@@ -128,6 +140,10 @@ std::size_t AssetSize(XAssetType type)
     case ASSET_TYPE_LOADED_SOUND: return sizeof(LoadedSound);
     case ASSET_TYPE_COMWORLD: return sizeof(ComWorld);
     case ASSET_TYPE_GFXWORLD: return sizeof(GfxWorld);
+    case ASSET_TYPE_GAMEWORLD_SP: return sizeof(GameWorldSp);
+    case ASSET_TYPE_CLIPMAP:
+    case ASSET_TYPE_CLIPMAP_PVS: return sizeof(clipMap_t);
+    case ASSET_TYPE_MAP_ENTS: return sizeof(MapEnts);
     case ASSET_TYPE_FONT: return sizeof(Font_s);
     case ASSET_TYPE_FX: return sizeof(FxEffectDef);
     case ASSET_TYPE_IMPACT_FX: return sizeof(FxImpactTable);
@@ -298,6 +314,47 @@ XAssetHeader DB_AddXAsset(XAssetType type, XAssetHeader header)
     return result;
 }
 
+int32_t __cdecl DB_GetAllXAssetOfType_FastFile(
+    XAssetType type, XAssetHeader *assets, int32_t maxCount)
+{
+    if (type < 0 || type >= ASSET_TYPE_COUNT || maxCount < 0)
+        return 0;
+    int32_t count = 0;
+    for (std::uint32_t hash = 0; hash < 0x8000u; ++hash)
+    {
+        for (std::uint32_t index = db_hashTable[hash]; index;
+            index = g_assetEntryPool[index].entry.nextHash)
+        {
+            const XAssetEntry &entry = g_assetEntryPool[index].entry;
+            if (entry.asset.type != type) continue;
+            if (assets)
+            {
+                if (count >= maxCount)
+                {
+                    DB_RuntimeGeneratedFailure(
+                        "registry/enumeration output capacity");
+                    return count;
+                }
+                assets[count] = entry.asset.header;
+            }
+            ++count;
+        }
+    }
+    return count;
+}
+
+int32_t __cdecl DB_GetAllXAssetOfType(
+    XAssetType type, XAssetHeader *assets, int32_t maxCount)
+{
+    if (!IsFastFileLoad())
+    {
+        Com_Error(ERR_DROP,
+            "Loose-object asset enumeration is unavailable in the browser runtime");
+        return 0;
+    }
+    return DB_GetAllXAssetOfType_FastFile(type, assets, maxCount);
+}
+
 void __cdecl Load_RawFileAsset(XAssetHeader *rawfile)
 {
     if (!rawfile || !rawfile->rawfile)
@@ -345,6 +402,47 @@ void __cdecl Load_GfxWorldAsset(XAssetHeader *gfxWorld)
     if (!published.data) return;
     *gfxWorld = published;
     DB_PlatformPublishGfxWorld(gfxWorld->gfxWorld);
+}
+
+void __cdecl Load_GameWorldSpAsset(XAssetHeader *gameWorldSp)
+{
+    if (!gameWorldSp || !gameWorldSp->gameWorldSp)
+    {
+        DB_RuntimeGeneratedFailure("publication/null GameWorldSp");
+        return;
+    }
+    XAssetHeader published = DB_AddXAsset(ASSET_TYPE_GAMEWORLD_SP, *gameWorldSp);
+    if (!published.data) return;
+    *gameWorldSp = published;
+}
+
+void __cdecl Load_ClipMapAsset(XAssetHeader *clipMap)
+{
+    if (!clipMap || !clipMap->clipMap)
+    {
+        DB_RuntimeGeneratedFailure("publication/null ClipMap");
+        return;
+    }
+#if defined(KISAK_MP)
+    constexpr XAssetType type = ASSET_TYPE_CLIPMAP_PVS;
+#else
+    constexpr XAssetType type = ASSET_TYPE_CLIPMAP;
+#endif
+    XAssetHeader published = DB_AddXAsset(type, *clipMap);
+    if (!published.data) return;
+    *clipMap = published;
+}
+
+void __cdecl Load_MapEntsAsset(XAssetHeader *mapEnts)
+{
+    if (!mapEnts || !mapEnts->mapEnts)
+    {
+        DB_RuntimeGeneratedFailure("publication/null MapEnts");
+        return;
+    }
+    XAssetHeader published = DB_AddXAsset(ASSET_TYPE_MAP_ENTS, *mapEnts);
+    if (!published.data) return;
+    *mapEnts = published;
 }
 
 void __cdecl Load_XModelAsset(XAssetHeader *model)

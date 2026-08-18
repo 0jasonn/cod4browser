@@ -42,34 +42,30 @@ prerequisite loading: a real `map` command reaches `SV_SpawnServer`, opens
 traversal as recorded in
 [`canonical-map-lifecycle.md`](canonical-map-lifecycle.md).
 
-That continuation now reaches and publishes Killhouse GfxWorld asset 772
-through the normal DB, matches the frozen Gate 2 world/geometry observations,
-and draws its bounded surface through WebGL2. The next ordered asset is
-GameWorldSp 773. Generated-loader expansion is paused there while the runtime
-pivots into the real runtime owners. Production now compiles and wires the
-actual `CM_LoadMap` and fastfile `Com_LoadWorld` path behind successful map DB
-completion. Their canonical singleton identities are `&cm` and `&comWorld`;
-the renderer world pool likewise publishes into `&s_world`. The current
-ordered map-zone stop intentionally prevents those calls until ClipMap has
-been published, and browser evidence asserts that no premature lifecycle event
-occurs.
+That continuation publishes Killhouse GfxWorld asset 772 through the normal DB,
+matches the frozen Gate 2 world/geometry observations, and retains its bounded
+WebGL2 draw as an oracle. Ordered loading now continues through GameWorldSp 773,
+MapEnts and ClipMap to final RawFile asset 1,683. Production publishes the
+canonical singleton identities `&cm`, `&comWorld`, and `&s_world`, then executes
+actual `CM_LoadMap`, fastfile `Com_LoadWorld`, the game-program closure, and
+`CL_InitCGame -> CG_Init`. No generated-loader stop or premature browser
+continuation remains at the old asset-773 boundary.
 
 ## Runtime pivot architecture boundary
 
 The production Wasm target now links the client, cgame, game/server, effects,
 ragdoll, physics, sound, collision, save, script, XAnim, and DObj source
-closures with no undefined symbols. Exact x86/Wasm tests enter the bounded
-runtime owners. The Worker startup adapter deliberately remains at
-`CL_InitRef` plus the shared renderer zone request: entering the complete
-native `FS_InitFilesystem -> CL_Init` sequence currently reaches host
-search-path/IWD behavior that is not backed by the Worker manifest.
+closures with no undefined production symbols. The retail Worker run enters
+those canonical owners through `G_InitGame`, `G_LoadLevel`, and `CG_Init`.
+Canonical `FS_InitFilesystem` runs first at its native pre-Hunk point, followed
+by full `CL_Init` and the shared renderer-zone request.
 
-The next architecture decision is therefore to make the existing synchronous
-Worker mount implement canonical filesystem search paths, directory
-enumeration, and minizip-backed IWD access. This must not introduce MEMFS
-copies, hard-coded zones, or a second browser-owned asset registry. Gate 2 and
-both shrink-only prefix files remain frozen/no-growth regression boundaries
-while that integration is designed.
+The synchronous Worker mount supplies only generic stat, enumeration, open,
+size, seek, read, and close primitives. Canonical C++ constructs search paths
+and discovers/opens IWDs through Kisak minizip before this startup-zone chain
+resumes. No MEMFS copy, hard-coded zone, or browser-owned search/archive
+registry was introduced. Gate 2 and both shrink-only prefix files remain
+frozen/no-growth regression boundaries.
 
 ## Differential and browser evidence
 

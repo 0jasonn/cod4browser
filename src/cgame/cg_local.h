@@ -693,7 +693,7 @@ struct visionSetVars_t // sizeof=0x50
 };
 void __cdecl CG_RegisterVisionSetsDvars();
 void __cdecl CG_InitVisionSetsMenu();
-void __cdecl CG_AddVisionSetMenuItem(XAssetHeader header);
+void __cdecl CG_AddVisionSetMenuItem(XAssetHeader header, void *data);
 void __cdecl CG_VisionSetsUpdate(int32_t localClientNum);
 void __cdecl UpdateVarsLerp(
     int32_t time,

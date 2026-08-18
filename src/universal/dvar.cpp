@@ -2747,12 +2747,7 @@ void __cdecl Dvar_SetDomainFunc(dvar_s *dvar, bool(__cdecl *customFunc)(dvar_s *
     dvar->domainFunc = customFunc;
     if (customFunc)
     {
-        if (!((uint8_t(__cdecl *)(dvar_s *, int, uint32_t, uint32_t, uint32_t))dvar->domainFunc)(
-            dvar,
-            dvar->current.integer,
-            LODWORD(dvar->current.vector[1]),
-            LODWORD(dvar->current.vector[2]),
-            LODWORD(dvar->current.vector[3])))
+        if (!dvar->domainFunc(dvar, dvar->current))
         {
             name = dvar->name;
             v2 = Dvar_ValueToString(dvar, dvar->current);

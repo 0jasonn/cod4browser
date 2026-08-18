@@ -1,5 +1,6 @@
 #include <qcommon/system.h>
 #include <qcommon/thread_context.h>
+#include <universal/q_shared.h>
 
 #include <array>
 #include <cstdint>
@@ -78,6 +79,7 @@ std::uint32_t Sys_GetCpuCount()
 void Sys_InitMainThread()
 {
     g_mainThreadInitialized = true;
+    Com_InitThreadData(THREAD_CONTEXT_MAIN);
 }
 
 bool Sys_IsMainThread()

@@ -194,6 +194,10 @@ char* __cdecl Z_TryVirtualAlloc(int32_t size, const char* name, int32_t type)
 {
     char* buf; // [esp+0h] [ebp-4h]
 
+    if (size <= 0)
+        MyAssertHandler(".\\universal\\com_memory.cpp", 650, 0,
+            "%s\n\t(size) = %i, (name) = %s", "(size > 0)", size,
+            name ? name : "<null>");
     buf = (char*)Z_TryVirtualAllocInternal(size);
     if (buf)
         track_z_commit((size + 4095) & 0xFFFFF000, type);
@@ -855,6 +859,10 @@ HunkUser* __cdecl Hunk_UserCreate(int32_t maxSize, const char* name, bool fixed,
 {
     HunkUser* user; // [esp+0h] [ebp-4h]
 
+    if (maxSize <= 0)
+        MyAssertHandler(".\\universal\\com_memory.cpp", 2833, 0,
+            "%s\n\t(maxSize) = %i, (name) = %s", "(maxSize > 0)",
+            maxSize, name ? name : "<null>");
     if (maxSize % 4096)
         MyAssertHandler(".\\universal\\com_memory.cpp", 2834, 0, "%s\n\t(maxSize) = %i", "(!(maxSize % (4*1024)))", maxSize);
     user = (HunkUser*)Z_VirtualReserve(maxSize);

@@ -5,6 +5,7 @@
 #include <universal/com_math.h>
 #include <qcommon/system_info.h>
 #include <qcommon/qcommon_math.h>
+#include <qcommon/sys_event_types.h>
 
 #include <emscripten.h>
 #include <emscripten/html5.h>
@@ -94,6 +95,15 @@ void PrintFormatted(FILE *stream, const char *format, va_list arguments)
 }
 } // namespace
 
+sysEvent_t *__cdecl Sys_GetEvent(sysEvent_t *result)
+{
+    iassert(result);
+    *result = {};
+    result->evTime = static_cast<int>(Sys_Milliseconds());
+    result->evType = SE_NONE;
+    return result;
+}
+
 SysInfo sys_info{
     1.0L, 1.0L, 1, 1, 1024, "WebGL2", true,
     "WebAssembly", "Browser Worker"
@@ -170,7 +180,15 @@ void *Sys_VirtualReserve(std::size_t size)
 {
     constexpr std::size_t alignment = 4096;
     const std::size_t alignedSize = (size + alignment - 1) & ~(alignment - 1);
-    return std::aligned_alloc(alignment, alignedSize);
+    void *memory = std::aligned_alloc(alignment, alignedSize);
+    if (memory)
+    {
+        // Native VirtualAlloc commit semantics expose zero-filled pages.
+        // Wasm cannot reserve address space without backing it, so establish
+        // that canonical allocator invariant at reservation time.
+        std::memset(memory, 0, alignedSize);
+    }
+    return memory;
 }
 
 bool Sys_VirtualCommit(void *memory, std::size_t size)
@@ -282,6 +300,22 @@ bool Sys_WaitServer() { return true; }
 void Sys_SetServerTimeout(int timeout) { g_serverTimeout = timeout; }
 bool Sys_WaitForSaveHistoryDone() { return true; }
 void Sys_SetSaveHistoryEvent() {}
+void Sys_WaitForSaveHistory() {}
+void Sys_SetSaveHistoryDoneEvent() {}
+int Sys_SpawnServerDemoThread(void(*)(std::uint32_t)) { return 0; }
+void Sys_InitServerEvents()
+{
+    g_allowClientMessages = true;
+    g_serverWakePending = false;
+    g_serverTimeout = 0;
+}
+void __cdecl Sys_EndLoadThreadPriorities() {}
+
+char *__cdecl Sys_DefaultInstallPath()
+{
+    static char path[] = "/";
+    return path;
+}
 
 void Sys_Sleep(std::uint32_t)
 {

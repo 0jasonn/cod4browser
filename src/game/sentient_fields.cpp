@@ -138,7 +138,7 @@ void __cdecl Scr_SetSentientField(sentient_s *sentient, unsigned int offset)
     v4 = &fields_2[offset];
     setter = v4->setter;
     if (setter)
-        ((void(__cdecl *)(sentient_s *))setter)(sentient);
+        setter(sentient, v4);
     else
         Scr_SetGenericField((unsigned __int8 *)sentient, v4->type, v4->ofs);
 }
@@ -160,7 +160,7 @@ void __cdecl Scr_GetSentientField(sentient_s *sentient, unsigned int offset)
     v4 = &fields_2[offset];
     getter = v4->getter;
     if (getter)
-        ((void(__cdecl *)(sentient_s *))getter)(sentient);
+        getter(sentient, v4);
     else
         Scr_GetGenericField((unsigned __int8 *)sentient, v4->type, v4->ofs);
 }

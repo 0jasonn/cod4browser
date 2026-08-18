@@ -1,9 +1,11 @@
+#include <universal/q_shared.h>
 #include <database/db_registry_pools.h>
 
 #include <qcommon/mem_track.h>
 #include <qcommon/com_world_types.h>
+#include <qcommon/cm_types.h>
 #include <gfx_d3d/gfx_world_types.h>
-#include <universal/q_shared.h>
+#include <game/g_bsp.h>
 
 
 #include <algorithm>
@@ -80,9 +82,9 @@ ASSERT_POOL_LAYOUT(g_StringTablePool, 16, 50);
 // DB_InitSingleton only validates a count of one. These stable identities are
 // replaced by their canonical subsystem-owned object bodies as those TUs join
 // the Web target; this prefix never decodes or publishes singleton assets.
-alignas(4) std::array<std::byte, 4> g_clipMapIdentity{};
+alignas(16) std::array<std::byte, sizeof(clipMap_t)> g_clipMapIdentity{};
 alignas(4) std::array<std::byte, sizeof(ComWorld)> g_comWorldIdentity{};
-alignas(4) std::array<std::byte, 4> g_gameWorldSpIdentity{};
+alignas(4) std::array<std::byte, sizeof(GameWorldSp)> g_gameWorldSpIdentity{};
 alignas(4) std::array<std::byte, sizeof(GfxWorld)> g_gfxWorldIdentity{};
 
 bool g_assetPoolsInitialized = false;
@@ -106,7 +108,7 @@ extern ComWorld comWorld;
 extern GfxWorld s_world;
 #endif
 
-#if !defined(KISAK_WEB) && !defined(KISAK_DB_POOL_STANDALONE)
+#if !defined(KISAK_DB_POOL_STANDALONE)
 #if defined(KISAK_MP)
 extern GameWorldMp gameWorldMp;
 #else
@@ -137,7 +139,7 @@ void *DB_XAssetPool[ASSET_TYPE_COUNT] = {
 #if defined(KISAK_MP)
     nullptr, g_gameWorldSpIdentity.data(),
 #else
-    g_gameWorldSpIdentity.data(), nullptr,
+    &gameWorldSp, nullptr,
 #endif
     &g_MapEntsPool, &s_world, &g_GfxLightDefPool, nullptr,
  #else

@@ -13,6 +13,7 @@
 #include <gfx_d3d/r_client_api.h>
 #include <gfx_d3d/r_dynentity_api.h>
 #include <gfx_d3d/r_drawsurf.h>
+#include <gfx_d3d/r_dvars.h>
 #include <gfx_d3d/r_effects_api.h>
 #include <gfx_d3d/r_font.h>
 #include <gfx_d3d/r_runtime_api.h>
@@ -20,6 +21,8 @@
 #include <gfx_d3d/r_statistics.h>
 #include <gfx_d3d/r_warning_types.h>
 #include <qcommon/qcommon.h>
+#include <qcommon/com_world_types.h>
+#include <qcommon/com_world_runtime.h>
 #include <qcommon/cmd.h>
 #include <stringed/stringed_hooks.h>
 #include <universal/com_math.h>
@@ -44,6 +47,20 @@ enum CubemapShot : int;
 
 extern GfxWorld s_world;
 
+// These owners live in the native window, warning, and material frontends.
+// The browser replaces those frontends but consumes the canonical renderer
+// dvar registry, so retain the same shared state at this platform boundary.
+const dvar_t *vid_xpos = nullptr;
+const dvar_t *vid_ypos = nullptr;
+const dvar_t *r_fullscreen = nullptr;
+const dvar_t *r_warningRepeatDelay = nullptr;
+bool g_generateOverrideTechniques = true;
+
+void __cdecl Material_PreventOverrideTechniqueGeneration()
+{
+    g_generateOverrideTechniques = false;
+}
+
 namespace
 {
 struct WebFog
@@ -64,6 +81,7 @@ float g_sunDirectionOverride[3]{};
 float g_sunDirectionTarget[3]{};
 bool g_hasSunLightOverride = false;
 bool g_hasSunDirectionOverride = false;
+bool g_rendererWorldReady = false;
 int g_sunLerpBeginTime = 0;
 int g_sunLerpEndTime = 0;
 trStatistics_t *g_statistics = nullptr;
@@ -103,6 +121,7 @@ const Glyph *GetGlyph(Font_s *font, std::uint32_t letter)
 void __cdecl R_BeginRegistration(vidConfig_t *configuration)
 {
     iassert(configuration);
+    R_RegisterDvars();
     std::memset(configuration, 0, sizeof(*configuration));
     Web_GetCanvasSize(&configuration->displayWidth,
         &configuration->displayHeight);
@@ -139,6 +158,29 @@ void __cdecl R_BeginSharedCmdList() {}
 void __cdecl R_AddCmdEndOfList() {}
 void __cdecl R_IssueRenderCommands(std::uint32_t) {}
 void __cdecl R_AddCmdProjectionSet2D() {}
+
+void __cdecl R_ClearFogs()
+{
+    g_fogs.fill({});
+    g_fogIndex = 0;
+}
+
+void __cdecl R_LoadWorld(char *name, int *checksum, int)
+{
+    iassert(name && *name);
+    GfxWorld *world = DB_FindXAssetHeader(
+        ASSET_TYPE_GFXWORLD, name).gfxWorld;
+    if (world != &s_world || !s_world.name)
+        Com_Error(ERR_DROP,
+            "R_LoadWorld: canonical GfxWorld '%s' is not published", name);
+    if (checksum) *checksum = static_cast<int>(s_world.checksum);
+    g_rendererWorldReady = true;
+}
+
+void __cdecl R_EndRegistration()
+{
+    iassert(g_rendererWorldReady);
+}
 
 Font_s *__cdecl R_RegisterFont(const char *name, int)
 {
@@ -279,6 +321,40 @@ void __cdecl R_AddCmdBlendSavedScreenShockFlashed(float, float, float, float,
 std::uint32_t __cdecl R_GetLocalClientNum() { return 0; }
 void __cdecl R_ClearScene(std::uint32_t) {}
 
+void __cdecl R_InitSceneData(int localClientNum)
+{
+    iassert(localClientNum == 0 && g_rendererWorldReady);
+    // Native DPVS scene buffers are renderer-backend storage. The WebGL2
+    // backend owns visibility submission and does not expose D3D scene bits.
+}
+
+void __cdecl R_InitPrimaryLights(GfxLight *primaryLights)
+{
+    iassert(primaryLights && comWorld.isInUse);
+    for (std::uint32_t index = 0; index < comWorld.primaryLightCount; ++index)
+    {
+        const ComPrimaryLight &input = comWorld.primaryLights[index];
+        GfxLight &output = primaryLights[index];
+        std::memset(&output, 0, sizeof(output));
+        output.type = input.type;
+        output.canUseShadowMap = input.canUseShadowMap;
+        std::memcpy(output.color, input.color, sizeof(output.color));
+        std::memcpy(output.dir, input.dir, sizeof(output.dir));
+        std::memcpy(output.origin, input.origin, sizeof(output.origin));
+        output.radius = input.radius;
+        output.cosHalfFovOuter = input.cosHalfFovOuter;
+        output.cosHalfFovInner = input.cosHalfFovInner;
+        output.exponent = input.exponent;
+        output.def = input.defName
+            ? DB_FindXAssetHeader(ASSET_TYPE_LIGHT_DEF, input.defName).lightDef
+            : nullptr;
+    }
+    if (s_world.sunPrimaryLightIndex && s_world.sunLight)
+        primaryLights[s_world.sunPrimaryLightIndex] = *s_world.sunLight;
+}
+
+void __cdecl R_ClearShadowedPrimaryLightHistory(int) {}
+
 char __cdecl R_ReserveCodeMeshVerts(int count, std::uint16_t *baseVertex)
 {
     if (count < 0 || !baseVertex ||
@@ -338,6 +414,7 @@ void __cdecl R_LinkBModelEntity(std::uint32_t, std::uint32_t,
     GfxBrushModel *) {}
 void __cdecl R_UnlinkEntity(std::uint32_t, std::uint32_t) {}
 void __cdecl R_UnlinkDynEnt(std::uint32_t, DynEntityDrawType) {}
+void __cdecl R_LinkDynEnt(std::uint32_t, DynEntityDrawType, float *, float *) {}
 
 void R_DObjReplaceMaterial(
     DObj_s *obj, int lod, int surfaceIndex, Material *material)
@@ -389,6 +466,11 @@ void R_LerpSunDirectionOverride(float *begin, float *end,
     g_sunLerpEndTime = endTime;
 }
 void R_ResetSunDirectionOverride() { g_hasSunDirectionOverride = false; }
+void R_ResetSunLightParseParams()
+{
+    R_ResetSunLightOverride();
+    R_ResetSunDirectionOverride();
+}
 
 void __cdecl R_InterpretSunLightParseParams(SunLightParseParams *sunParse)
 {
@@ -466,6 +548,17 @@ void __cdecl R_DebugAlloc(void **memory, int size, const char *name)
     iassert(memory && !*memory && size > 0 && !(size & 3));
     *memory = Z_TryVirtualAlloc(size, name, 0);
 }
+
+void __cdecl R_DebugFree(void **memory)
+{
+    if (memory && *memory)
+    {
+        Z_VirtualFree(*memory);
+        *memory = nullptr;
+    }
+}
+
+void __cdecl R_ShutdownDebug() {}
 
 void __cdecl R_CreateDevGui()
 {

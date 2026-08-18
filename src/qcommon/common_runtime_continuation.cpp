@@ -5,17 +5,23 @@
 #include <qcommon/qcommon.h>
 #include <qcommon/cmd.h>
 #include <qcommon/system.h>
+#include <qcommon/sys_event_types.h>
 #include <client/client.h>
 #include <stringed/stringed_hooks.h>
 #include <universal/com_memory.h>
 #include <universal/dvar.h>
 #include <universal/q_parse.h>
+#include <script/scr_vm_runtime.h>
 
 #include <csetjmp>
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
 
+int com_fixedConsolePosition;
+int com_consoleLogOpenFailed;
+int com_missingAssetOpenFailed;
+int com_lastFrameTime[4];
 float com_timescaleValue = 1.0f;
 int com_frameTime;
 const dvar_t *com_recommendedSet;
@@ -111,6 +117,56 @@ void __cdecl Com_LocalizedFloatToString(
 void __cdecl Com_FreeEvent(char *ptr)
 {
     Z_Free(ptr, 10);
+}
+
+void __cdecl Com_EventLoop()
+{
+    sysEvent_t storage{};
+    for (;;)
+    {
+        const sysEvent_t event = *Sys_GetEvent(&storage);
+        switch (event.evType)
+        {
+        case SE_NONE:
+            iassert(!event.evPtr);
+            return;
+        case SE_KEY:
+            iassert(!event.evPtr);
+            CL_KeyEvent(0, event.evValue, event.evValue2, event.evTime);
+            break;
+        case SE_CHAR:
+            iassert(!event.evPtr);
+            CL_CharEvent(0, event.evValue);
+            break;
+        case SE_CONSOLE:
+            iassert(event.evPtr);
+            Cbuf_AddText(0, static_cast<const char *>(event.evPtr));
+            Com_FreeEvent(static_cast<char *>(event.evPtr));
+            Cbuf_AddText(0, "\n");
+            break;
+        default:
+            iassert(!event.evPtr);
+            Com_Error(ERR_FATAL, "Com_EventLoop: bad event type %i",
+                event.evType);
+            break;
+        }
+    }
+}
+
+void __cdecl Com_SetScriptSettings()
+{
+    Scr_Settings(
+        com_developer->current.integer || com_logfile->current.integer,
+        com_developer_script->current.integer,
+        com_developer_script_abort_on_error->current.integer);
+}
+
+void Com_ResetFrametime()
+{
+    const int now = static_cast<int>(Sys_Milliseconds());
+    com_lastFrameTime[0] = now;
+    com_lastFrameTime[1] = now;
+    com_lastFrameTime[2] = now;
 }
 
 void Com_CheckError()

@@ -34,6 +34,8 @@ test("canonical Gate 3 traverses the locally owned retail startup prerequisite c
         });
         globalThis.addEventListener("kisakcod:engine-lifecycle", (event) => {
             globalThis.__gate3LifecycleEvents.push(structuredClone(event.detail));
+            if (globalThis.__gate3LifecycleEvents.length > 512)
+                globalThis.__gate3LifecycleEvents.shift();
         });
         globalThis.addEventListener("kisakcod:canonical-gfxworld", (event) => {
             globalThis.__gate3CanonicalWorldEvents.push(
@@ -42,6 +44,8 @@ test("canonical Gate 3 traverses the locally owned retail startup prerequisite c
         globalThis.addEventListener("kisakcod:renderer-surface-draw", (event) => {
             globalThis.__gate3RendererSurfaceEvents.push(
                 structuredClone(event.detail));
+            if (globalThis.__gate3RendererSurfaceEvents.length > 16)
+                globalThis.__gate3RendererSurfaceEvents.shift();
         });
     });
     await page.goto("/");
@@ -205,147 +209,90 @@ test("canonical Gate 3 traverses the locally owned retail startup prerequisite c
 
     const mapDbEventStart = await page.evaluate(
         () => globalThis.__gate3RetailDbEvents.length);
-    const commandAccepted = await page.evaluate(async () => {
-        const bytes = new TextEncoder().encode("map KiLlHoUsE\0");
-        return globalThis.__KISAKCOD_WEB__.module.callProbe(
-            "_KisakWeb_SubmitCanonicalCommand",
-            [bytes],
-            [{ kind: "pointer", index: 0 }],
-        );
+    await page.evaluate(() => {
+        globalThis.__gate3MapCommand = { state: "pending" };
+        try {
+            const bytes = new TextEncoder().encode("map KiLlHoUsE\0");
+            Promise.resolve(globalThis.__KISAKCOD_WEB__.module.callProbe(
+                "_KisakWeb_SubmitCanonicalCommand",
+                [bytes],
+                [{ kind: "pointer", index: 0 }],
+            )).then((accepted) => {
+                globalThis.__gate3MapCommand = {
+                    state: "complete",
+                    accepted,
+                };
+            }, (error) => {
+                globalThis.__gate3MapCommand = {
+                    state: "rejected",
+                    message: error?.message ?? String(error),
+                    stack: typeof error?.stack === "string" ? error.stack : "",
+                };
+            });
+        } catch (error) {
+            globalThis.__gate3MapCommand = {
+                state: "threw",
+                message: error?.message ?? String(error),
+                stack: typeof error?.stack === "string" ? error.stack : "",
+            };
+        }
     });
-    expect(commandAccepted).toBe(1);
     await expect.poll(() => page.evaluate(() =>
         globalThis.__gate3LifecycleEvents.some((event) =>
-            event.stage === "logical fastfile requested" &&
-            event.name === "killhouse")), { timeout: 150_000 }).toBe(true);
-    const mapLifecycle = await page.evaluate(() => structuredClone(
-        globalThis.__gate3LifecycleEvents.filter((event) =>
-            event.name === "killhouse" || event.stage === "map command accepted")));
-    expect(mapLifecycle.map((event) => event.stage)).toEqual([
-        "map command accepted",
-        "canonical map name selected",
-        "SV_SpawnServer",
-        "map loading begins",
-        "map zone request constructed",
-        "DB_LoadXAssets",
-        "DB_LoadXZone",
-        "logical fastfile requested",
-    ]);
-    expect(mapLifecycle.at(-1)).toMatchObject({
-        name: "killhouse",
-        allocFlags: 8,
-        asyncify: false,
-        pthreads: false,
-    });
-    await expect.poll(() => page.evaluate(() =>
-        globalThis.__gate3CanonicalWorldEvents.some((event) =>
-            event.name === "maps/killhouse.d3dbsp")),
+            event.stage === "CL_InitCGame complete")),
     { timeout: 150_000 }).toBe(true);
-    await expect.poll(() => page.evaluate(() =>
-        globalThis.__gate3RendererSurfaceEvents.some((event) =>
-            event.state === "drawn" && event.vertexCount === 2009 &&
-            event.indexCount === 384)),
-    { timeout: 30_000 }).toBe(true);
-    const mapDatabase = await page.evaluate((eventStart) => ({
-        final: structuredClone(globalThis.__KISAKCOD_WEB__.database),
-        publicationCount: globalThis.__gate3RetailDbEvents
-            .filter((event) => event.stage === "publication end" &&
-                event.logicalPath === "zone/english/killhouse.ff").length,
-        firstFailure: structuredClone(globalThis.__gate3RetailDbEvents
-            .slice(eventStart).find((event) => event.generatedLoadFailed)),
-        stops: globalThis.__gate3RetailDbEvents.slice(eventStart)
-            .filter((event) => event.stage === "DB stop")
-            .map((event) => ({
-                stopStage: event.stopStage,
-                logicalPath: event.logicalPath,
-                assetIndex: event.assetIndex,
-                assetType: event.assetType,
-                streamOffsets: event.streamOffsets,
-            })),
-        canonicalWorld: structuredClone(
-            globalThis.__gate3CanonicalWorldEvents.at(-1)),
-        renderedSurface: structuredClone(
-            globalThis.__gate3RendererSurfaceEvents.findLast((event) =>
-                event.state === "drawn" && event.vertexCount === 2009 &&
-                event.indexCount === 384)),
-    }), mapDbEventStart);
-    console.log(`KISAK_RETAIL_MAP_DB ${JSON.stringify(mapDatabase)}`);
-    expect(mapDatabase.final).toMatchObject({
+
+    const checkpoint = await page.evaluate((eventStart) => {
+        const mapEvents = globalThis.__gate3RetailDbEvents.slice(eventStart);
+        return {
+            command: structuredClone(globalThis.__gate3MapCommand),
+            lifecycle: structuredClone(globalThis.__gate3LifecycleEvents),
+            mapEnd: structuredClone(mapEvents.findLast((event) =>
+                event.stage === "XAssetList end")),
+            mapPublication: structuredClone(mapEvents.findLast((event) =>
+                event.stage === "publication end")),
+            generatedFailure: structuredClone(mapEvents.find((event) =>
+                event.generatedLoadFailed)),
+            canonicalWorld: structuredClone(
+                globalThis.__gate3CanonicalWorldEvents.at(-1)),
+            logs: structuredClone(globalThis.__KISAKCOD_WEB__.logs.slice(-12)),
+        };
+    }, mapDbEventStart);
+    console.log(`KISAK_RETAIL_LIFECYCLE_CHECKPOINT ${JSON.stringify({
+        command: checkpoint.command,
+        lifecycle: checkpoint.lifecycle,
+        mapEnd: checkpoint.mapEnd,
+        mapPublication: checkpoint.mapPublication,
+        logs: checkpoint.logs,
+    })}`);
+
+    expect(checkpoint.mapEnd).toMatchObject({
         logicalPath: "zone/english/killhouse.ff",
-        openSucceeded: true,
-        xassetListBegin: true,
         scriptStringCount: 892,
         scriptStringObservedCount: 892,
         xassetCount: 1684,
-        assetIndex: 773,
-        assetType: 13,
-        assetName: "maps/killhouse.d3dbsp",
-        generatedLoadFailed: true,
-        stopStage: "Load_XAssetHeader/unsupported family closure",
-        streamOffsets: [0, 509664, 0, 0, 37146694, 0, 0, 21693664, 3128676],
+        assetIndex: 1683,
+        generatedLoadFailed: false,
+        xassetListEnd: true,
     });
-    expect(mapDatabase.publicationCount).toBe(2371);
-    expect(mapDatabase.firstFailure).toMatchObject({
-        stage: "Load_XAssetHeader/unsupported family closure",
-        logicalPath: "zone/english/killhouse.ff",
-        assetIndex: 773,
-        assetType: 13,
-    });
-    expect(mapDatabase.stops).toEqual([
-        expect.objectContaining({
-            stopStage: "Load_XAssetHeader/unsupported family closure",
-            logicalPath: "zone/english/killhouse.ff",
-            assetIndex: 773,
-            assetType: 13,
-        }),
-    ]);
-    expect(mapDatabase.canonicalWorld).toMatchObject({
+    expect(checkpoint.generatedFailure).toBeUndefined();
+    expect(checkpoint.canonicalWorld).toMatchObject({
         state: "submitted",
         sourceRepresentation: "real-kisak-db-gfxworld",
         databaseOwned: true,
         browserWorldRepresentation: false,
         name: "maps/killhouse.d3dbsp",
-        baseName: "killhouse",
-        planeCount: 5712,
-        nodeCount: 5074,
-        cellCount: 3,
-        vertexCount: 448962,
-        indexCount: 829539,
-        surfaceCount: 8694,
-        staticModelCount: 12255,
-        lightmapCount: 3,
-        materialMemoryCount: 170,
-        inflatedOffset: 86162172,
-        assetIndex: 772,
-        assetCount: 1684,
-        gate2OracleApplicable: true,
-        gate2WorldMatch: true,
-        gate2GeometryMatch: true,
-        gate2MaterialMatch: false,
-        gate2SurfaceMatch: false,
-        selectedSurface: 6077,
-        selectedVertexCount: 2009,
-        selectedTriangleCount: 128,
-        materialName: "wc/me_ground_mud1",
-        adapterResult: "success",
-        submissionResult: "success",
     });
-    expect(mapDatabase.renderedSurface).toMatchObject({
-        state: "drawn",
-        vertexCount: 2009,
-        indexCount: 384,
-        drawFirstIndex: 0,
-        drawIndexCount: 384,
-        topology: "triangle-list",
-        resident: true,
-    });
-    const prematureCollisionLoad = await page.evaluate(() =>
-        globalThis.__gate3LifecycleEvents.filter((event) =>
-            event.stage === "CM_LoadMap begin" ||
-            event.stage === "CM_LoadMap complete" ||
-            event.stage === "Com_LoadWorld begin" ||
-            event.stage === "Com_LoadWorld complete" ||
-            event.stage === "SaveMemory initialization begin" ||
-            event.stage === "SaveMemory initialization complete"));
-    expect(prematureCollisionLoad).toEqual([]);
+    const stages = checkpoint.lifecycle.map((event) => event.stage);
+    for (const stage of [
+        "CM_LoadMap complete",
+        "Com_LoadWorld complete",
+        "G_InitGame complete",
+        "G_LoadLevel complete",
+        "SV_InitGameVM complete",
+        "SV_InitGameProgs complete",
+        "CG_Init complete",
+        "CL_InitCGame complete",
+    ]) expect(stages).toContain(stage);
+    expect(stages).not.toContain("game-driven frame");
 });

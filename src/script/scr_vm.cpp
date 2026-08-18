@@ -4154,8 +4154,15 @@ void __cdecl Scr_AddBool(uint32_t value)
 
 void IncInParam()
 {
-    if ((scrVmPub.top < (VariableValue*)&scrVmGlob - 1 || scrVmPub.top >(VariableValue*) & scrVmGlob)
-        && (scrVmPub.top < scrVmPub.stack || scrVmPub.top > scrVmPub.maxstack))
+    const std::uintptr_t topAddress = reinterpret_cast<std::uintptr_t>(scrVmPub.top);
+    const std::uintptr_t evalStackBegin = reinterpret_cast<std::uintptr_t>(scrVmGlob.eval_stack - 1);
+    const std::uintptr_t evalStackEnd = reinterpret_cast<std::uintptr_t>(&scrVmGlob.eval_stack[1]);
+    const std::uintptr_t vmStackBegin = reinterpret_cast<std::uintptr_t>(scrVmPub.stack);
+    const std::uintptr_t vmStackEnd = reinterpret_cast<std::uintptr_t>(scrVmPub.maxstack);
+    const bool onEvalStack = topAddress >= evalStackBegin && topAddress <= evalStackEnd;
+    const bool onVmStack = topAddress >= vmStackBegin && topAddress <= vmStackEnd;
+
+    if (!onEvalStack && !onVmStack)
     {
         MyAssertHandler(
             ".\\script\\scr_vm.cpp",
@@ -4166,12 +4173,14 @@ void IncInParam()
             "ub.stack) && (scrVmPub.top <= scrVmPub.maxstack))");
     }
     Scr_ClearOutParams();
-    if (scrVmPub.top == scrVmPub.maxstack)
+    if (!onEvalStack && scrVmPub.top == scrVmPub.maxstack)
         Sys_Error("Internal script stack overflow");
     ++scrVmPub.top;
     ++scrVmPub.inparamcount;
-    if ((scrVmPub.top < (VariableValue*)&scrVmGlob || scrVmPub.top > &scrVmGlob.eval_stack[1])
-        && (scrVmPub.top < scrVmPub.stack || scrVmPub.top > scrVmPub.maxstack))
+    const std::uintptr_t incrementedTopAddress = reinterpret_cast<std::uintptr_t>(scrVmPub.top);
+    if ((incrementedTopAddress < reinterpret_cast<std::uintptr_t>(scrVmGlob.eval_stack)
+            || incrementedTopAddress > evalStackEnd)
+        && (incrementedTopAddress < vmStackBegin || incrementedTopAddress > vmStackEnd))
     {
         MyAssertHandler(
             ".\\script\\scr_vm.cpp",

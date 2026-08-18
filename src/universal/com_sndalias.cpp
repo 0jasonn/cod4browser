@@ -115,9 +115,9 @@ double __cdecl Com_GetVolumeFalloffCurveValue(SndCurve *volumeFalloffCurve, floa
 void __cdecl Com_InitSoundDevGuiGraphs()
 {
     if (IsFastFileLoad())
-        ((void(__cdecl *)(void (*)()))Com_InitSoundDevGuiGraphs_FastFile)(Com_InitSoundDevGuiGraphs_FastFile);
+        Com_InitSoundDevGuiGraphs_FastFile();
     else
-        ((void(__cdecl *)(void (*)()))Com_InitSoundDevGuiGraphs_LoadObj)(Com_InitSoundDevGuiGraphs_LoadObj);
+        Com_InitSoundDevGuiGraphs_LoadObj();
 }
 
 void __cdecl Com_VolumeFalloffCurveGraphEventCallback(const DevGraph *graph, DevEventType event, int i)
@@ -155,27 +155,27 @@ void Com_InitSoundDevGuiGraphs_FastFile()
     int counter; // [esp+0h] [ebp-4h] BYREF
 
     counter = 0;
-    DB_EnumXAssets(ASSET_TYPE_SOUND_CURVE, (void(__cdecl *)(XAssetHeader, void *))Com_GetGraphList, &counter, 0);
+    DB_EnumXAssets(ASSET_TYPE_SOUND_CURVE, Com_GetGraphList, &counter, false);
 }
 
-void __cdecl Com_GetGraphList(XAssetHeader header, int *data)
+void __cdecl Com_GetGraphList(XAssetHeader header, void *data)
 {
     char devguiPath[256]; // [esp+0h] [ebp-110h] BYREF
     DevGraph *graph; // [esp+104h] [ebp-Ch]
     int index; // [esp+108h] [ebp-8h]
     int *count; // [esp+10Ch] [ebp-4h]
 
-    count = data;
-    index = *data;
+    count = static_cast<int *>(data);
+    index = *count;
     if (index < 16)
     {
         graph = &g_sa.curveDevGraphs[index];
-        if (header.xmodelPieces->name)
+        if (header.sndCurve->filename)
         {
-            snprintf(devguiPath, ARRAYSIZE(devguiPath), "Main:1/Snd:6/Volume Falloff Curves/%s:%d", header.xmodelPieces->name, index);
+            snprintf(devguiPath, ARRAYSIZE(devguiPath), "Main:1/Snd:6/Volume Falloff Curves/%s:%d", header.sndCurve->filename, index);
             graph->knotCountMax = 8;
-            graph->knots = (float (*)[2]) & header.xmodelPieces->pieces;
-            graph->knotCount = &header.xmodelPieces->numpieces;
+            graph->knots = header.sndCurve->knots;
+            graph->knotCount = &header.sndCurve->knotCount;
             graph->eventCallback = Com_VolumeFalloffCurveGraphEventCallback;
             graph->data = (void *)index;
             graph->disableEditingEndPoints = 1;

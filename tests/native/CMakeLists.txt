@@ -13,6 +13,7 @@ get_filename_component(KISAK_REPOSITORY_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." A
 add_executable(iwd_archive_tests
     "${CMAKE_CURRENT_LIST_DIR}/iwd_archive_tests.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/qcommon/iwd_archive.cpp"
+    "${KISAK_REPOSITORY_ROOT}/src/qcommon/unzip.cpp"
 )
 
 add_executable(iwi_image_tests
@@ -169,6 +170,9 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
         "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_stringtable.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_comworld.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_gfxworld.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_gameworld.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_mapents.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_clipmap.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_gfxworld_platform.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_image.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_image_platform.cpp"
@@ -204,7 +208,7 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
         target_compile_options(gate3_db_stream_trace_tests PRIVATE /UNDEBUG)
     else()
         target_compile_definitions(gate3_db_stream_trace_tests PRIVATE KISAK_WEB=1)
-        target_compile_options(gate3_db_stream_trace_tests PRIVATE -UNDEBUG)
+        target_compile_options(gate3_db_stream_trace_tests PRIVATE -UNDEBUG -fdeclspec)
     endif()
 endif()
 
@@ -297,7 +301,10 @@ if (TARGET gate3_db_stream_trace_tests)
 endif()
 
 target_compile_features(iwd_archive_tests PRIVATE cxx_std_20)
-target_include_directories(iwd_archive_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
+target_include_directories(iwd_archive_tests PRIVATE
+    "${KISAK_REPOSITORY_ROOT}/src"
+    "${KISAK_REPOSITORY_ROOT}/deps/zlib"
+    "${KISAK_REPOSITORY_ROOT}/deps")
 target_compile_features(iwi_image_tests PRIVATE cxx_std_20)
 target_include_directories(iwi_image_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
 target_compile_features(canonical_asset_abi_tests PRIVATE cxx_std_20)
@@ -330,6 +337,7 @@ target_include_directories(web_retail_fastfile_census_tests PRIVATE "${KISAK_REP
 
 if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     # Use Emscripten's maintained zlib port, matching the browser target.
+    target_compile_definitions(iwd_archive_tests PRIVATE KISAK_WEB=1)
     target_compile_options(kisak_test_fastfile_support PRIVATE "-sUSE_ZLIB=1")
     target_compile_options(iwd_archive_tests PRIVATE "-sUSE_ZLIB=1")
     target_link_options(iwd_archive_tests PRIVATE

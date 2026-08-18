@@ -377,6 +377,19 @@ static void Load_XAssetHeader(bool atStreamStart)
         varGfxWorldPtr = reinterpret_cast<GfxWorld **>(varXAssetHeader);
         Load_GfxWorldPtr(false);
         break;
+    case ASSET_TYPE_GAMEWORLD_SP:
+        varGameWorldSpPtr = reinterpret_cast<GameWorldSp **>(varXAssetHeader);
+        Load_GameWorldSpPtr(false);
+        break;
+    case ASSET_TYPE_CLIPMAP:
+    case ASSET_TYPE_CLIPMAP_PVS:
+        varclipMap_ptr = reinterpret_cast<clipMap_t **>(varXAssetHeader);
+        Load_clipMap_ptr(false);
+        break;
+    case ASSET_TYPE_MAP_ENTS:
+        varMapEntsPtr = reinterpret_cast<MapEnts **>(varXAssetHeader);
+        Load_MapEntsPtr(false);
+        break;
     case ASSET_TYPE_LOCALIZE_ENTRY:
         varLocalizeEntryPtr = reinterpret_cast<LocalizeEntry **>(
             varXAssetHeader);

@@ -43,6 +43,8 @@ async function childDirectory(root, segments)
 export function createWorkerSyncFilesystem()
 {
     const files = new Map();
+    const directories = new Set([""]);
+    const directoryEntries = new Map([["", new Map()]]);
     const descriptors = new Map();
     let nextDescriptor = 1;
     let mountedImport = null;
@@ -61,7 +63,47 @@ export function createWorkerSyncFilesystem()
             }
         }
         files.clear();
+        directories.clear();
+        directories.add("");
+        directoryEntries.clear();
+        directoryEntries.set("", new Map());
         mountedImport = null;
+    }
+
+    function addDirectory(logicalPath)
+    {
+        if (directories.has(logicalPath)) return;
+        const segments = logicalPath.split("/");
+        const name = segments.pop();
+        const parent = segments.join("/");
+        addDirectory(parent);
+        if (files.has(logicalPath) || directoryEntries.get(parent).has(name)) {
+            throw new Error(`The validated manifest contains a file/directory conflict: ${logicalPath}.`);
+        }
+        directories.add(logicalPath);
+        directoryEntries.set(logicalPath, new Map());
+        directoryEntries.get(parent).set(name, Object.freeze({
+            name,
+            type: "directory",
+            size: 0,
+        }));
+    }
+
+    function addFileEntry(file)
+    {
+        const segments = file.logicalPath.split("/");
+        const name = segments.pop();
+        const parent = segments.join("/");
+        addDirectory(parent);
+        if (directories.has(file.logicalPath) || files.has(file.logicalPath) ||
+            directoryEntries.get(parent).has(name)) {
+            throw new Error(`The validated manifest contains a duplicate path: ${file.logicalPath}.`);
+        }
+        directoryEntries.get(parent).set(name, Object.freeze({
+            name,
+            type: "file",
+            size: file.size,
+        }));
     }
 
     async function mount(manifest)
@@ -81,7 +123,6 @@ export function createWorkerSyncFilesystem()
             IMPORTS_DIRECTORY,
             manifest.importId,
         ]);
-        const opened = [];
         try {
             for (const entry of manifest.files) {
                 const logicalPath = normalizeLogicalPath(entry?.path);
@@ -111,7 +152,12 @@ export function createWorkerSyncFilesystem()
                     throw new Error(`Persisted size changed for ${logicalPath}.`);
                 }
                 const mounted = Object.freeze({ logicalPath, size, access });
-                opened.push(mounted);
+                try {
+                    addFileEntry(mounted);
+                } catch (error) {
+                    access.close();
+                    throw error;
+                }
                 files.set(logicalPath, mounted);
             }
             mountedImport = manifest.importId;
@@ -128,6 +174,16 @@ export function createWorkerSyncFilesystem()
         return logicalPath ? files.get(logicalPath) ?? null : null;
     }
 
+    function normalizeDirectoryPath(path)
+    {
+        if (typeof path !== "string" || path.includes("\0")) return null;
+        let normalized = path.replaceAll("\\", "/");
+        while (normalized.startsWith("./")) normalized = normalized.slice(2);
+        normalized = normalized.replace(/\/+$/u, "");
+        if (normalized === "" || normalized === ".") return "";
+        return normalizeLogicalPath(normalized);
+    }
+
     function readMounted(file, offset, destination)
     {
         if (!Number.isSafeInteger(offset) || offset < 0 ||
@@ -137,6 +193,12 @@ export function createWorkerSyncFilesystem()
         const readable = Math.min(destination.byteLength, file.size - offset);
         if (readable === 0) return 0;
         return file.access.read(destination.subarray(0, readable), { at: offset });
+    }
+
+    function controlledPath(name, logicalPath)
+    {
+        const configured = normalizeLogicalPath(testControl[name] ?? "");
+        return configured !== null && configured !== "" && configured === logicalPath;
     }
 
     function installForModule(wasmModule)
@@ -189,9 +251,26 @@ export function createWorkerSyncFilesystem()
         });
 
         globalThis[SYNC_GLOBAL] = Object.freeze({
+            stat(path) {
+                const logicalPath = normalizeDirectoryPath(path);
+                if (logicalPath === null) return null;
+                const file = files.get(logicalPath);
+                if (file) return { type: "file", size: file.size };
+                if (directories.has(logicalPath)) return { type: "directory", size: 0 };
+                return null;
+            },
+            list(path) {
+                const logicalPath = normalizeDirectoryPath(path);
+                if (logicalPath === null) return null;
+                if (controlledPath("failSyncListPath", logicalPath)) return null;
+                const entries = directoryEntries.get(logicalPath);
+                if (!entries) return null;
+                return [...entries.values()].sort((left, right) =>
+                    left.name.localeCompare(right.name, "en-US"));
+            },
             open(path) {
                 const file = lookup(path);
-                if (!file) return -1;
+                if (!file || controlledPath("failSyncOpenPath", file.logicalPath)) return -1;
                 const descriptor = nextDescriptor++;
                 descriptors.set(descriptor, { file, position: 0 });
                 return descriptor;
@@ -204,6 +283,7 @@ export function createWorkerSyncFilesystem()
                 if (!open || !Number.isSafeInteger(offset) || offset < 0 || offset > open.file.size) {
                     return false;
                 }
+                if (controlledPath("failSyncSeekPath", open.file.logicalPath)) return false;
                 open.position = offset;
                 return true;
             },
@@ -215,6 +295,7 @@ export function createWorkerSyncFilesystem()
                     length > module.HEAPU8.byteLength - destination) {
                     return -1;
                 }
+                if (controlledPath("failSyncReadPath", open.file.logicalPath)) return -1;
                 const bytesRead = readMounted(
                     open.file,
                     open.position,

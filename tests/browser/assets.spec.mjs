@@ -87,7 +87,7 @@ test("imports synthetic files through the portable picker and restores them afte
         state: "ready",
         source: "selection",
         manifest: {
-            schema: 2,
+            schema: 3,
             language: "english",
             profile: {
                 id: "sp-killhouse-english-v1",
@@ -100,8 +100,9 @@ test("imports synthetic files through the portable picker and restores them afte
         },
     });
     expect(await page.evaluate(
-        () => globalThis.__KISAKCOD_WEB__.assets.manifest.files.map(({ path: filePath }) => filePath),
-    )).toEqual(REQUIRED_ASSETS.map(({ path: assetPath }) => assetPath));
+        () => globalThis.__KISAKCOD_WEB__.assets.manifest.files
+            .map(({ path: filePath }) => filePath).sort(),
+    )).toEqual(REQUIRED_ASSETS.map(({ path: assetPath }) => assetPath).sort());
 
     await page.reload();
     await waitForEngine(page);

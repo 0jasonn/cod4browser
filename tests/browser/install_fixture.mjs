@@ -1008,6 +1008,7 @@ export async function createInstallDirectory(
         primaryIwd = createSyntheticIwd(),
         overrides = new Map(),
         omit = [],
+        extraFiles = new Map(),
     } = {},
 )
 {
@@ -1025,6 +1026,15 @@ export async function createInstallDirectory(
                 contents = localization;
             } else if (requirement.path === "main/iw_00.iwd") {
                 contents = primaryIwd;
+            } else if (requirement.path === "main/iw_13.iwd") {
+                // Canonical FS_InitFilesystem validates the base path through
+                // this ordinary archive lookup. Keep the legal fixture in a
+                // later base IWD so tests remain free to replace iw_00.
+                contents = createSyntheticIwd([{
+                    path: "fileSysCheck.cfg",
+                    contents: "synthetic filesystem validation\n",
+                    method: "deflate",
+                }]);
             } else if (requirement.kind === "iwd") {
                 contents = createSyntheticIwd();
             } else if (requirement.path === "zone/english/code_post_gfx.ff") {
@@ -1042,6 +1052,11 @@ export async function createInstallDirectory(
             contents,
             requirement.kind === "localization" ? "utf8" : undefined,
         );
+    }
+    for (const [relativePath, contents] of extraFiles) {
+        const target = path.join(directory, ...relativePath.split("/"));
+        await mkdir(path.dirname(target), { recursive: true });
+        await writeFile(target, contents);
     }
     return directory;
 }

@@ -23,6 +23,7 @@
 #include <game/savememory.h>
 #include <server/sv_game.h>
 #include <qcommon/com_bsp.h>
+#include <qcommon/engine_lifecycle_trace.h>
 
 char bigConfigString[8192];
 const float g_color_table[8][4]
@@ -846,6 +847,7 @@ void __cdecl CL_StartLoading(const char *mapname)
 
 void __cdecl CL_InitCGame(int localClientNum, int savegame)
 {
+    EmitEngineLifecycleTrace(EngineLifecycleStage::ClientCGameInitBegin);
     int startTime; // r22
     unsigned __int16 v5; // r11
     const char *info; // r31
@@ -953,6 +955,7 @@ void __cdecl CL_InitCGame(int localClientNum, int savegame)
     Con_ClearNotify(0);
     Con_InitMessageBuffer();
     Con_InitGameMsgChannels();
+    EmitEngineLifecycleTrace(EngineLifecycleStage::ClientCGameInitComplete);
 }
 
 void __cdecl CL_FirstSnapshot()

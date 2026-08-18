@@ -11,6 +11,7 @@ const forwardedEvents = [
     "kisakcod:canonical-gfxworld",
     "kisakcod:canonical-runtime-prefix",
     "kisakcod:engine-lifecycle",
+    "kisakcod:canonical-filesystem",
 ];
 
 if (typeof globalThis.CustomEvent !== "function") {
@@ -126,7 +127,10 @@ globalThis.addEventListener("message", (event) => {
             default: break;
             }
         } catch (error) {
-            reply(message.id, null, error?.message ?? String(error));
+            const detail = typeof error?.stack === "string" ? error.stack
+                : typeof error?.message === "string" ? error.message
+                    : String(error);
+            reply(message.id, null, detail);
         }
     })();
 });

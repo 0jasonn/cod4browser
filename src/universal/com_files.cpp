@@ -484,11 +484,6 @@ int __cdecl FS_CreatePath(char *OSPath)
     }
 }
 
-void __cdecl FS_FileClose(FILE *stream)
-{
-    fclose(stream);
-}
-
 void __cdecl FS_FCloseFile(int h)
 {
     FILE *f; // [esp+0h] [ebp-4h]
@@ -1963,8 +1958,15 @@ void __cdecl FS_Startup(char *gameName)
 
     Com_Printf(10, "----- FS_Startup -----\n");
     FS_RegisterDvars();
+#if defined(KISAK_WEB)
+    Com_Printf(10, "[kisakcod-web] FS dvars registered (base='%s', home='%s').\n",
+        fs_basepath->current.string, fs_homepath->current.string);
+#endif
     if (*(_BYTE *)fs_basepath->current.integer)
     {
+#if defined(KISAK_WEB)
+        Com_Printf(10, "[kisakcod-web] Adding canonical base search directories.\n");
+#endif
         FS_AddLocalizedGameDirectory((char *)fs_basepath->current.integer, (char*)"devraw_shared");
         FS_AddLocalizedGameDirectory((char *)fs_basepath->current.integer, (char*)"devraw");
         FS_AddLocalizedGameDirectory((char *)fs_basepath->current.integer, (char*)"raw_shared");
@@ -1988,6 +1990,9 @@ void __cdecl FS_Startup(char *gameName)
     }
     if (*(_BYTE *)fs_basepath->current.integer)
     {
+#if defined(KISAK_WEB)
+        Com_Printf(10, "[kisakcod-web] Adding canonical main search directories.\n");
+#endif
         v2 = va("%s_shared", gameName);
         FS_AddLocalizedGameDirectory((char *)fs_basepath->current.integer, v2);
         FS_AddLocalizedGameDirectory((char *)fs_basepath->current.integer, gameName);
@@ -2149,7 +2154,7 @@ uint32_t __cdecl FS_FTell(int f)
     if (fsh[f].zipFile)
         return unztell(fsh[f].handleFiles.file.z);
     v1 = FS_FileForHandle(f);
-    return ftell(v1);
+    return FS_FileTell(v1);
 }
 
 // Whether handle f refers to a file packed inside a zip/.iwd archive rather than a loose file on

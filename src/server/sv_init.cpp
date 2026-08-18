@@ -19,6 +19,7 @@
 #include <client/cl_scrn.h>
 #include <universal/profile.h>
 #include <qcommon/threads.h>
+#include <qcommon/engine_lifecycle_trace.h>
 #include <universal/com_files.h>
 #include <universal/q_parse.h>
 #include <sound/snd_alias_system.h>
@@ -158,6 +159,7 @@ void __cdecl SV_StartMap(int randomSeed)
 
 void __cdecl SV_Settle()
 {
+    EmitEngineLifecycleTrace(EngineLifecycleStage::ServerSettleBegin);
     int v0; // r30
 
     v0 = 5;
@@ -167,7 +169,9 @@ void __cdecl SV_Settle()
         if (sv.demo.forwardMsec < 0)
             sv.demo.forwardMsec = 0;
         SV_PreFrame();
+        EmitEngineLifecycleTrace(EngineLifecycleStage::ServerSettlePreFrameComplete);
         SV_RunFrame(SV_FRAME_DO_ALL, 0);
+        EmitEngineLifecycleTrace(EngineLifecycleStage::ServerSettleRunFrameComplete);
         --v0;
     } while (v0);
 }

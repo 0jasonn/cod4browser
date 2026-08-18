@@ -34,6 +34,7 @@
 #include <qcommon/cmd.h>
 #include <client/client.h>
 #include <qcommon/qcommon.h>
+#include <qcommon/engine_lifecycle_trace.h>
 #include <server/sv_world.h>
 
 const char *g_helicopterYawAltitudeControlsNames[4] =
@@ -1087,6 +1088,7 @@ void __cdecl G_InitGame(
     int savegame,
     SaveGame **save)
 {
+    EmitEngineLifecycleTrace(EngineLifecycleStage::GameInitBegin);
     int v17; // r30
     actorBackup_s *actorBackup; // r3
     const SaveHeader *Header; // r3
@@ -1137,9 +1139,11 @@ void __cdecl G_InitGame(
     }
     ProfLoad_Begin("GScr_LoadConsts");
     GScr_LoadConsts();
+    EmitEngineLifecycleTrace(EngineLifecycleStage::GameConstantsInitComplete);
     ProfLoad_End();
     ProfLoad_Begin("G_SetupWeaponDef");
     G_SetupWeaponDef();
+    EmitEngineLifecycleTrace(EngineLifecycleStage::GameWeaponsInitComplete);
     ProfLoad_End();
     if (!SV_InitDemoSavegame(save) || *save)
         CM_LinkWorld();
@@ -1201,6 +1205,7 @@ void __cdecl G_InitGame(
             "%s",
             "level.actorCorpseCount >= 1 && level.actorCorpseCount <= MAX_ACTOR_CORPSES");
     ProfLoad_Begin("Load scripts and anims");
+    EmitEngineLifecycleTrace(EngineLifecycleStage::GameScriptsInitBegin);
     if (!useLoadedSourceFiles)
         GScr_LoadScriptsAndAnims();
     if (*save)
@@ -1211,6 +1216,7 @@ void __cdecl G_InitGame(
             Com_Error(ERR_DROP, "Save game saved with different script files");
     }
     ProfLoad_End();
+    EmitEngineLifecycleTrace(EngineLifecycleStage::GameScriptsInitComplete);
     memset(g_entities, 0, sizeof(g_entities));
     level.gentities = g_entities;
     g_entities[ENTITYNUM_NONE].flags |= FL_OBSTACLE;
@@ -1288,6 +1294,7 @@ LABEL_43:
     G_PrintFastFileErrors(sv_mapname->current.string);
 #endif
     level.initializing = 0;
+    EmitEngineLifecycleTrace(EngineLifecycleStage::GameInitComplete);
 }
 
 void __cdecl G_ShutdownGame(int clearScripts)
@@ -2621,6 +2628,7 @@ void __cdecl G_LoadLevel()
         PROF_SCOPED("G_PrecacheDefaultModels");
         G_PrecacheDefaultModels();
     }
+    EmitEngineLifecycleTrace(EngineLifecycleStage::GameLoadLevelPrecacheComplete);
     {
         PROF_SCOPED("Scr_InitSystem");
         Scr_InitSystem(1);
@@ -2629,34 +2637,42 @@ void __cdecl G_LoadLevel()
         PROF_SCOPED("Scr_SetLoading");
         Scr_SetLoading(1);
     }
+    EmitEngineLifecycleTrace(EngineLifecycleStage::GameLoadLevelScriptSystemComplete);
     {
         PROF_SCOPED("Scr_AllocGameVariable");
         Scr_AllocGameVariable();
     }
+    EmitEngineLifecycleTrace(EngineLifecycleStage::GameLoadLevelGameVariableComplete);
     {
         PROF_SCOPED("ClientBegin");
         ClientBegin(0);
     }
+    EmitEngineLifecycleTrace(EngineLifecycleStage::GameLoadLevelClientBeginComplete);
     {
         PROF_SCOPED("G_LoadStructs");
         G_LoadStructs();
     }
+    EmitEngineLifecycleTrace(EngineLifecycleStage::GameLoadLevelStructsComplete);
     {
         PROF_SCOPED("Actor_FinishSpawningAll");
         Actor_FinishSpawningAll();
     }
+    EmitEngineLifecycleTrace(EngineLifecycleStage::GameLoadLevelActorsComplete);
     {
         PROF_SCOPED("Path_AutoDisconnectPaths");
         Path_AutoDisconnectPaths();
     }
+    EmitEngineLifecycleTrace(EngineLifecycleStage::GameLoadLevelPathsComplete);
     {
         PROF_SCOPED("Scr_LoadLevel");
         Scr_LoadLevel();
     }
+    EmitEngineLifecycleTrace(EngineLifecycleStage::GameLoadLevelScriptComplete);
     {
         PROF_SCOPED("G_RunFrame");
         G_RunFrame(SV_FRAME_DO_ALL, 0);
     }
+    EmitEngineLifecycleTrace(EngineLifecycleStage::GameLoadLevelFirstFrameComplete);
     {
         PROF_SCOPED("Scr_SetLoading");
         Scr_SetLoading(0);
@@ -2669,5 +2685,6 @@ void __cdecl G_LoadLevel()
         PROF_SCOPED("G_SendClientMessages");
         G_SendClientMessages();
     }
+    EmitEngineLifecycleTrace(EngineLifecycleStage::GameLoadLevelMessagesComplete);
 }
 

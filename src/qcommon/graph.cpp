@@ -4,7 +4,11 @@
 #include "qcommon.h"
 
 #include <universal/com_files.h>
+#if defined(KISAK_WEB)
+#include <qcommon/sys_paths.h>
+#else
 #include <win32/win_local.h>
+#endif
 #include <universal/q_parse.h>
 #include <devgui/devgui.h>
 
