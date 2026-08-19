@@ -1,5 +1,7 @@
 #include <web/web_system.h>
 
+#include <client/cl_input.h>
+#include <client/client.h>
 #include <qcommon/common_api.h>
 #include <universal/q_shared.h>
 #include <universal/com_math.h>
@@ -15,6 +17,7 @@
 #include <cstdio>
 #include <cmath>
 #include <cstring>
+#include <array>
 
 namespace
 {
@@ -26,6 +29,62 @@ bool g_framePumpStarted = false;
 uint32_t g_framePumpTicks = 0;
 WebFrameCallback g_frameCallback = nullptr;
 void *g_frameUserData = nullptr;
+
+enum class WebInputEventType : std::uint8_t
+{
+    Key,
+    MouseMove,
+};
+
+struct WebInputEvent
+{
+    WebInputEventType type = WebInputEventType::Key;
+    int value = 0;
+    int value2 = 0;
+    int value3 = 0;
+    int value4 = 0;
+    std::uint32_t time = 0u;
+};
+
+constexpr std::size_t INPUT_EVENT_CAPACITY = 512u;
+std::array<WebInputEvent, INPUT_EVENT_CAPACITY> g_inputEvents{};
+std::size_t g_inputReadIndex = 0u;
+std::size_t g_inputWriteIndex = 0u;
+std::size_t g_inputEventCount = 0u;
+bool g_inputOverflowReported = false;
+bool g_keyboardReceiptReported = false;
+bool g_mouseReceiptReported = false;
+bool g_mouseButtonReceiptReported = false;
+
+bool QueueInputEvent(const WebInputEvent &event)
+{
+    if (g_inputEventCount == INPUT_EVENT_CAPACITY)
+    {
+        if (!g_inputOverflowReported)
+        {
+            Web_Log(WebLogLevel::Error,
+                "[kisakcod-web] Browser input queue overflowed; dropping events.\n");
+            g_inputOverflowReported = true;
+        }
+        return false;
+    }
+    g_inputEvents[g_inputWriteIndex] = event;
+    g_inputWriteIndex = (g_inputWriteIndex + 1u) % INPUT_EVENT_CAPACITY;
+    ++g_inputEventCount;
+    return true;
+}
+
+bool DequeueInputEvent(WebInputEvent &event)
+{
+    if (g_inputEventCount == 0u)
+        return false;
+    event = g_inputEvents[g_inputReadIndex];
+    g_inputReadIndex = (g_inputReadIndex + 1u) % INPUT_EVENT_CAPACITY;
+    --g_inputEventCount;
+    if (g_inputEventCount == 0u)
+        g_inputOverflowReported = false;
+    return true;
+}
 
 EM_JS(void, DispatchRuntimeState, (const char *state, const char *message), {
     globalThis.dispatchEvent(new CustomEvent("kisakcod:state", {
@@ -229,15 +288,87 @@ int __cdecl Sys_SetClipboardData(const char *text)
 
 void IN_Frame()
 {
-    // Browser input is delivered by DOM event callbacks; there is no native
-    // device pump to service once per engine frame.
+    // The DOM lives on the main thread while the canonical engine owns an
+    // OffscreenCanvas in a Worker. Drain its narrow event queue at the same
+    // per-client input seam used by the native platform implementation.
+    WebInputEvent event{};
+    while (DequeueInputEvent(event))
+    {
+        if (event.type == WebInputEventType::Key)
+        {
+            // Pointer-lock activation arrives as K_MOUSE1 before the first
+            // physical keyboard event. Keep the one-shot keyboard proof for
+            // an actual keyboard key so gameplay tests identify its binding.
+            if (!g_keyboardReceiptReported && event.value < K_MOUSE1)
+            {
+                const char *binding = playerKeys[0].keys[event.value].binding;
+                Web_Log(WebLogLevel::Info,
+                    "[kisakcod-web] Browser keyboard reached canonical input "
+                    "(key=%d, binding=%s, catchers=0x%x).\n",
+                    event.value, binding ? binding : "<unbound>",
+                    clientUIActives[0].keyCatchers);
+                g_keyboardReceiptReported = true;
+            }
+            if (!g_mouseButtonReceiptReported && event.value == K_MOUSE1 &&
+                event.value2)
+            {
+                const char *binding = playerKeys[0].keys[event.value].binding;
+                Web_Log(WebLogLevel::Info,
+                    "[kisakcod-web] Browser mouse button reached canonical "
+                    "input (key=%d, binding=%s, catchers=0x%x).\n",
+                    event.value, binding ? binding : "<unbound>",
+                    clientUIActives[0].keyCatchers);
+                g_mouseButtonReceiptReported = true;
+            }
+            CL_KeyEvent(0, event.value, event.value2, event.time);
+        }
+        else
+        {
+            if (!g_mouseReceiptReported)
+            {
+                Web_Log(WebLogLevel::Info,
+                    "[kisakcod-web] Pointer-lock motion reached canonical input.\n");
+                g_mouseReceiptReported = true;
+            }
+            CL_MouseEvent(event.value, event.value2, event.value3, event.value4);
+        }
+    }
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_QueueKeyEvent(int key, int down)
+{
+    if (key <= 0 || key >= 0xDF)
+        return 0;
+    return QueueInputEvent({
+        WebInputEventType::Key,
+        key,
+        down ? 1 : 0,
+        0,
+        0,
+        Sys_Milliseconds(),
+    }) ? 1 : 0;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_QueueMouseMove(
+    int x, int y, int dx, int dy)
+{
+    if (dx == 0 && dy == 0)
+        return 1;
+    return QueueInputEvent({
+        WebInputEventType::MouseMove,
+        x,
+        y,
+        dx,
+        dy,
+        Sys_Milliseconds(),
+    }) ? 1 : 0;
 }
 
 EM_JS(void, Web_SetSystemCursorVisible, (int show), {
-    const canvas = Module.canvas;
-    if (canvas) {
-        canvas.style.cursor = show ? "default" : "none";
-    }
+    globalThis.postMessage({
+        type: "cursor",
+        visible: Boolean(show),
+    });
 });
 
 void __cdecl IN_ShowSystemCursor(int show)

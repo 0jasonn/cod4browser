@@ -513,6 +513,13 @@ void TestDxtMipOrderAndClipping()
 void TestDxtValidationAndAtomicFailure()
 {
     const Bytes block = MakeDxtColorBlock(0xf800u, 0x07e0u, 0u);
+    Rgba8Image policyImage{};
+    RequireError(kisak::iwi::DecodeRgba8(MakeDxtIwi(
+        kisak::iwi::FORMAT_DXT1, 4u, 4u, block,
+        kisak::iwi::FLAG_NO_MIPMAPS | kisak::iwi::FLAG_STREAMING |
+            kisak::iwi::FLAG_CLAMP_U | kisak::iwi::FLAG_CLAMP_V),
+        policyImage), Error::None,
+        "accept DXT streaming and address-policy flags");
     for (const uint8_t format : {
         kisak::iwi::FORMAT_DXT1,
         kisak::iwi::FORMAT_DXT3,
@@ -536,12 +543,100 @@ void TestDxtValidationAndAtomicFailure()
     RequireDecodeFailure(MakeIwi(
         kisak::iwi::FORMAT_DXT1,
         kisak::iwi::FLAG_NO_MIPMAPS,
-        2048u,
+        4096u,
         2048u,
         1u,
         8u),
         Error::DecodeOutputTooLarge,
         "reject DXT expansion above the RGBA recovery ceiling");
+
+    Bytes largePayload(2048u * 1024u / 2u, 0u);
+    Rgba8Image largeImage{};
+    RequireError(kisak::iwi::DecodeRgba8(MakeDxtIwi(
+        kisak::iwi::FORMAT_DXT1, 2048u, 1024u, largePayload), largeImage),
+        Error::None, "decode a bounded retail-scale DXT image");
+    Require(largeImage.pixels.size() == 2048u * 1024u * 4u,
+        "compressed input may expand beyond the archive-member ceiling");
+}
+
+void TestCanonicalLoadDefDecode()
+{
+    Bytes bgra{
+        0x10u, 0x20u, 0x30u, 0x40u,
+        0x50u, 0x60u, 0x70u, 0x80u,
+    };
+    Rgba8Image image{};
+    RequireError(kisak::iwi::DecodeLoadDefRgba8(
+        kisak::iwi::LOADDEF_FORMAT_A8R8G8B8,
+        kisak::iwi::FLAG_NO_MIPMAPS,
+        2u,
+        1u,
+        1u,
+        bgra,
+        image), Error::None, "decode canonical uncompressed load definition");
+    Require(image.pixels == Bytes({
+        0x30u, 0x20u, 0x10u, 0x40u,
+        0x70u, 0x60u, 0x50u, 0x80u,
+    }), "canonical A8R8G8B8 load definition is swizzled to RGBA8");
+
+    const Bytes luminance{0x10u, 0x80u, 0xffu, 0x00u};
+    RequireError(kisak::iwi::DecodeLoadDefRgba8(
+        kisak::iwi::LOADDEF_FORMAT_L8,
+        kisak::iwi::FLAG_NO_MIPMAPS,
+        2u,
+        2u,
+        1u,
+        luminance,
+        image), Error::None, "decode canonical L8 lightmap load definition");
+    Require(image.pixels == Bytes({
+        0x10u, 0x10u, 0x10u, 0xffu,
+        0x80u, 0x80u, 0x80u, 0xffu,
+        0xffu, 0xffu, 0xffu, 0xffu,
+        0x00u, 0x00u, 0x00u, 0xffu,
+    }), "canonical L8 lightmap expands to opaque RGBA8");
+
+    const Bytes red = MakeDxtColorBlock(0xf800u, 0x07e0u, 0u);
+    const Bytes blue = MakeDxtColorBlock(0x001fu, 0x07e0u, 0u);
+    Bytes nativeMipOrder;
+    Append(nativeMipOrder, blue); // 4x4 base level first.
+    Append(nativeMipOrder, red);  // 2x2 mip.
+    Append(nativeMipOrder, red);  // 1x1 mip.
+    RequireError(kisak::iwi::DecodeLoadDefRgba8(
+        kisak::iwi::LOADDEF_FORMAT_DXT1,
+        0u,
+        4u,
+        4u,
+        1u,
+        nativeMipOrder,
+        image), Error::None, "decode canonical largest-to-smallest DXT load definition");
+    Require(image.pixels.size() == 4u * 4u * 4u &&
+            image.pixels[0] == 0u && image.pixels[1] == 0u &&
+            image.pixels[2] == 255u && image.pixels[3] == 255u,
+        "canonical load-definition decode uses the leading base mip");
+
+    const Rgba8Image sentinel = MakeSentinelImage();
+    image = sentinel;
+    nativeMipOrder.pop_back();
+    RequireError(kisak::iwi::DecodeLoadDefRgba8(
+        kisak::iwi::LOADDEF_FORMAT_DXT1,
+        0u,
+        4u,
+        4u,
+        1u,
+        nativeMipOrder,
+        image), Error::DecodeInvalidLayout,
+        "reject truncated canonical load-definition mip chain");
+    Require(SameImage(image, sentinel),
+        "failed canonical load-definition decode is atomic");
+    RequireError(kisak::iwi::DecodeLoadDefRgba8(
+        0x12345678,
+        kisak::iwi::FLAG_NO_MIPMAPS,
+        4u,
+        4u,
+        1u,
+        red,
+        image), Error::DecodeUnsupportedFormat,
+        "reject an unsupported canonical load-definition format");
 }
 
 void TestRgba8DecodeRejectsUnsupportedSlice()
@@ -557,10 +652,8 @@ void TestRgba8DecodeRejectsUnsupportedSlice()
         uint8_t{0x03},
         uint8_t{0x04},
         uint8_t{0x08},
-        uint8_t{0x12},
+        uint8_t{0x06},
         uint8_t{0x22},
-        uint8_t{0x42},
-        uint8_t{0x82},
         uint8_t{0x40},
         uint8_t{0x80},
         uint8_t{0xff},
@@ -582,6 +675,13 @@ void TestRgba8DecodeRejectsUnsupportedSlice()
             32),
         Error::DecodeUnsupportedDimensions,
         "reject volume depth");
+
+    Bytes policyArgb = MakeIwi(kisak::iwi::FORMAT_ARGB,
+        kisak::iwi::FLAG_NO_MIPMAPS | kisak::iwi::FLAG_STREAMING |
+            kisak::iwi::FLAG_CLAMP_U | kisak::iwi::FLAG_CLAMP_V);
+    Rgba8Image policyImage{};
+    RequireError(kisak::iwi::DecodeRgba8(policyArgb, policyImage),
+        Error::None, "accept ARGB streaming and address-policy flags");
 
 }
 
@@ -612,7 +712,7 @@ void TestRgba8DecodeLayoutAndLimits()
         MakeIwi(
             kisak::iwi::FORMAT_ARGB,
             kisak::iwi::FLAG_NO_MIPMAPS,
-            2048,
+            4096,
             2048,
             1,
             4),
@@ -807,6 +907,7 @@ int main()
     runner.Run("DXT5 decode", TestDxt5Decode);
     runner.Run("DXT mip order and clipping", TestDxtMipOrderAndClipping);
     runner.Run("DXT validation and atomic failure", TestDxtValidationAndAtomicFailure);
+    runner.Run("canonical DB load-definition decode", TestCanonicalLoadDefDecode);
     runner.Run("RGBA8 unsupported slice", TestRgba8DecodeRejectsUnsupportedSlice);
     runner.Run("RGBA8 layout and limits", TestRgba8DecodeLayoutAndLimits);
     runner.Run("RGBA8 parser error propagation", TestRgba8DecodePropagatesParserErrors);

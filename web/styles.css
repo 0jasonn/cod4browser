@@ -211,6 +211,53 @@ body {
     white-space: pre-wrap;
 }
 
+.console-command {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--line);
+}
+
+.console-command label,
+#engine-command-status {
+    display: block;
+    color: var(--muted);
+    font: 10px/1.4 ui-monospace, "Cascadia Code", monospace;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.console-command-row {
+    display: flex;
+    gap: 10px;
+    margin-top: 7px;
+}
+
+#engine-command-input {
+    min-width: 0;
+    min-height: 40px;
+    flex: 1 1 auto;
+    padding: 9px 11px;
+    border: 1px solid var(--line);
+    border-radius: 0;
+    outline: none;
+    color: var(--ink);
+    background: #0d0f0c;
+    font: 12px/1.4 ui-monospace, "Cascadia Code", monospace;
+}
+
+#engine-command-input:focus {
+    border-color: var(--accent);
+}
+
+#engine-command-input:disabled {
+    opacity: 0.48;
+}
+
+#engine-command-status {
+    min-height: 14px;
+    margin-top: 7px;
+    text-transform: none;
+}
+
 @media (max-width: 620px) {
     .app-shell {
         width: calc(100% - 24px);

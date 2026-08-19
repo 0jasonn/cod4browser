@@ -398,9 +398,15 @@ Error DecodeRgba8(
     {
         return Error::DecodeUnsupportedFormat;
     }
-    if ((metadata.format == FORMAT_ARGB && metadata.flags != FLAG_NO_MIPMAPS) ||
+    constexpr std::uint8_t policyFlags =
+        FLAG_STREAMING | FLAG_CLAMP_U | FLAG_CLAMP_V;
+    if ((metadata.format == FORMAT_ARGB &&
+            ((metadata.flags & FLAG_NO_MIPMAPS) == 0u ||
+             (metadata.flags & static_cast<std::uint8_t>(
+                 ~(FLAG_NO_MIPMAPS | policyFlags))) != 0u)) ||
         (compressed && (metadata.flags &
-            static_cast<std::uint8_t>(~(FLAG_NO_PICMIP | FLAG_NO_MIPMAPS))) != 0u))
+            static_cast<std::uint8_t>(~(FLAG_NO_PICMIP | FLAG_NO_MIPMAPS |
+                policyFlags))) != 0u))
     {
         return Error::DecodeUnsupportedFlags;
     }
@@ -418,7 +424,8 @@ Error DecodeRgba8(
     {
         return Error::DecodeOutputTooLarge;
     }
-    if (bytes.size() > MAX_TEXTURE_MEMBER_BYTES || pixelBytes > MAX_TEXTURE_MEMBER_BYTES)
+    if (bytes.size() > MAX_TEXTURE_MEMBER_BYTES ||
+        pixelBytes > MAX_DECODED_RGBA8_BYTES)
     {
         return Error::DecodeOutputTooLarge;
     }
@@ -514,6 +521,152 @@ Error DecodeRgba8(
 
     image.width = metadata.width;
     image.height = metadata.height;
+    image.pixels.swap(rgba);
+    return Error::None;
+}
+
+Error DecodeLoadDefRgba8(
+    std::int32_t format,
+    std::uint8_t flags,
+    std::uint16_t width,
+    std::uint16_t height,
+    std::uint16_t depth,
+    std::span<const std::uint8_t> payload,
+    Rgba8Image &image) noexcept
+{
+    std::uint8_t iwiFormat = 0u;
+    std::size_t bytesPerBlock = 0u;
+    bool compressed = false;
+    bool luminance = false;
+    switch (format)
+    {
+    case LOADDEF_FORMAT_A8R8G8B8:
+        iwiFormat = FORMAT_ARGB;
+        break;
+    case LOADDEF_FORMAT_L8:
+        luminance = true;
+        break;
+    case LOADDEF_FORMAT_DXT1:
+        iwiFormat = FORMAT_DXT1;
+        bytesPerBlock = 8u;
+        compressed = true;
+        break;
+    case LOADDEF_FORMAT_DXT3:
+        iwiFormat = FORMAT_DXT3;
+        bytesPerBlock = 16u;
+        compressed = true;
+        break;
+    case LOADDEF_FORMAT_DXT5:
+        iwiFormat = FORMAT_DXT5;
+        bytesPerBlock = 16u;
+        compressed = true;
+        break;
+    default:
+        return Error::DecodeUnsupportedFormat;
+    }
+    if (width == 0u || height == 0u || depth != 1u)
+        return Error::DecodeUnsupportedDimensions;
+
+    std::size_t pixelCount = 0u;
+    std::size_t pixelBytes = 0u;
+    if (!CheckedMultiply(width, height, pixelCount) ||
+        !CheckedMultiply(pixelCount, RGBA_BYTES_PER_PIXEL, pixelBytes) ||
+        pixelBytes > MAX_LOADDEF_RGBA8_BYTES)
+    {
+        return Error::DecodeOutputTooLarge;
+    }
+
+    const std::uint32_t mipCount = CountMipmaps(flags, width, height, depth);
+    std::size_t expectedBytes = 0u;
+    std::size_t baseLevelBytes = 0u;
+    for (std::uint32_t mip = 0u; mip < mipCount; ++mip)
+    {
+        const std::uint32_t mipWidth = std::max<std::uint32_t>(width >> mip, 1u);
+        const std::uint32_t mipHeight = std::max<std::uint32_t>(height >> mip, 1u);
+        std::size_t levelBytes = 0u;
+        if (compressed)
+        {
+            if (!DxtLevelBytes(mipWidth, mipHeight, bytesPerBlock, levelBytes))
+                return Error::DecodeOutputTooLarge;
+        }
+        else
+        {
+            std::size_t mipPixels = 0u;
+            if (!CheckedMultiply(mipWidth, mipHeight, mipPixels) ||
+                !CheckedMultiply(
+                    mipPixels,
+                    luminance ? 1u : ARGB_BYTES_PER_PIXEL,
+                    levelBytes))
+            {
+                return Error::DecodeOutputTooLarge;
+            }
+        }
+        if (mip == 0u) baseLevelBytes = levelBytes;
+        if (!CheckedAdd(expectedBytes, levelBytes, expectedBytes))
+            return Error::DecodeOutputTooLarge;
+    }
+    if (payload.size() != expectedBytes || baseLevelBytes > payload.size())
+        return Error::DecodeInvalidLayout;
+
+    std::vector<std::uint8_t> rgba;
+    try
+    {
+        rgba.resize(pixelBytes);
+    }
+    catch (...)
+    {
+        return Error::DecodeAllocationFailed;
+    }
+    if (luminance)
+    {
+        const std::span<const std::uint8_t> l8 = payload.first(baseLevelBytes);
+        for (std::size_t pixel = 0u; pixel < pixelCount; ++pixel)
+        {
+            const std::size_t offset = pixel * RGBA_BYTES_PER_PIXEL;
+            rgba[offset] = l8[pixel];
+            rgba[offset + 1u] = l8[pixel];
+            rgba[offset + 2u] = l8[pixel];
+            rgba[offset + 3u] = 255u;
+        }
+    }
+    else if (!compressed)
+    {
+        const std::span<const std::uint8_t> bgra = payload.first(baseLevelBytes);
+        for (std::size_t offset = 0u; offset < pixelBytes;
+             offset += ARGB_BYTES_PER_PIXEL)
+        {
+            rgba[offset] = bgra[offset + 2u];
+            rgba[offset + 1u] = bgra[offset + 1u];
+            rgba[offset + 2u] = bgra[offset];
+            rgba[offset + 3u] = bgra[offset + 3u];
+        }
+    }
+    else
+    {
+        const std::uint32_t blocksWide =
+            (static_cast<std::uint32_t>(width) + 3u) / 4u;
+        const std::uint32_t blocksHigh =
+            (static_cast<std::uint32_t>(height) + 3u) / 4u;
+        std::size_t sourceOffset = 0u;
+        for (std::uint32_t blockY = 0u; blockY < blocksHigh; ++blockY)
+        {
+            for (std::uint32_t blockX = 0u; blockX < blocksWide; ++blockX)
+            {
+                DecodeDxtBlock(
+                    payload.subspan(sourceOffset, bytesPerBlock),
+                    iwiFormat,
+                    blockX,
+                    blockY,
+                    width,
+                    height,
+                    rgba);
+                sourceOffset += bytesPerBlock;
+            }
+        }
+    }
+
+    image.width = width;
+    image.height = height;
     image.pixels.swap(rgba);
     return Error::None;
 }

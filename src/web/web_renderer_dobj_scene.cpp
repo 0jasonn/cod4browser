@@ -1,0 +1,439 @@
+#include <web/web_renderer_dobj_scene.h>
+
+#include <cgame/cg_pose.h>
+#include <gfx_d3d/material_types.h>
+#include <universal/com_math.h>
+#include <xanim/dobj.h>
+#include <xanim/dobj_utils.h>
+#include <xanim/xmodel.h>
+#include <xanim/xmodel_types.h>
+#include <xanim/xsurface_types.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <new>
+#include <utility>
+#include <vector>
+
+void __cdecl Vec2UnpackTexCoords(PackedTexCoords in, float *out);
+
+namespace
+{
+constexpr float BYTE_TO_UNIT = 1.0f / 255.0f;
+constexpr float SHORT_WEIGHT_TO_UNIT = 1.0f / 65536.0f;
+constexpr std::uint32_t TECHNIQUE_UNLIT_INDEX = 4u;
+constexpr std::uint32_t TECHNIQUE_EMISSIVE_INDEX = 5u;
+constexpr std::uint32_t TECHNIQUE_LIT_INDEX = 7u;
+
+bool Finite3(const float value[3]) noexcept
+{
+    return std::isfinite(value[0]) && std::isfinite(value[1]) &&
+        std::isfinite(value[2]);
+}
+
+const GfxImage *FindBaseImage(
+    const Material *material, std::uint8_t &sampler) noexcept
+{
+    if (!material || !material->textureTable) return nullptr;
+    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
+    {
+        const MaterialTextureDef &texture = material->textureTable[index];
+        if (texture.semantic == 2u && texture.u.image)
+        {
+            sampler = texture.samplerState;
+            return texture.u.image;
+        }
+    }
+    return nullptr;
+}
+
+bool SelectTechnique(
+    const Material *material, std::uint32_t stateBits[2]) noexcept
+{
+    if (!material || !material->techniqueSet || !material->stateBitsTable)
+        return false;
+    for (const std::uint32_t type : {
+        TECHNIQUE_LIT_INDEX, TECHNIQUE_UNLIT_INDEX,
+        TECHNIQUE_EMISSIVE_INDEX})
+    {
+        const MaterialTechnique *technique =
+            material->techniqueSet->techniques[type];
+        const std::uint8_t entry = material->stateBitsEntry[type];
+        if (!technique || technique->passCount == 0u || entry == 0xffu ||
+            entry >= material->stateBitsCount)
+        {
+            continue;
+        }
+        stateBits[0] = material->stateBitsTable[entry].loadBits[0];
+        stateBits[1] = material->stateBitsTable[entry].loadBits[1];
+        return true;
+    }
+    return false;
+}
+
+void MultiplySkelMat(
+    const DObjSkelMat &left, const DObjSkelMat &right,
+    DObjSkelMat &output) noexcept
+{
+    for (std::size_t row = 0u; row < 3u; ++row)
+    {
+        for (std::size_t column = 0u; column < 3u; ++column)
+        {
+            output.axis[row][column] =
+                left.axis[row][0] * right.axis[0][column] +
+                left.axis[row][1] * right.axis[1][column] +
+                left.axis[row][2] * right.axis[2][column];
+        }
+        output.axis[row][3] = 0.0f;
+    }
+    for (std::size_t column = 0u; column < 3u; ++column)
+    {
+        output.origin[column] =
+            left.origin[0] * right.axis[0][column] +
+            left.origin[1] * right.axis[1][column] +
+            left.origin[2] * right.axis[2][column] +
+            right.origin[column];
+    }
+    output.origin[3] = 1.0f;
+}
+
+void TransformPosition(
+    const float input[3], const DObjSkelMat &matrix,
+    float output[3]) noexcept
+{
+    for (std::size_t column = 0u; column < 3u; ++column)
+    {
+        output[column] =
+            input[0] * matrix.axis[0][column] +
+            input[1] * matrix.axis[1][column] +
+            input[2] * matrix.axis[2][column] +
+            matrix.origin[column];
+    }
+}
+
+const DObjSkelMat *MatrixFromByteOffset(
+    const std::vector<DObjSkelMat> &matrices,
+    std::uint16_t byteOffset) noexcept
+{
+    if ((byteOffset % sizeof(DObjSkelMat)) != 0u) return nullptr;
+    const std::size_t index = byteOffset / sizeof(DObjSkelMat);
+    return index < matrices.size() ? &matrices[index] : nullptr;
+}
+
+bool SkinWeightedSurface(
+    const XSurface &surface,
+    const std::vector<DObjSkelMat> &matrices,
+    std::vector<float> &positions)
+{
+    if (!surface.vertInfo.vertsBlend) return false;
+    positions.resize(static_cast<std::size_t>(surface.vertCount) * 3u);
+    const std::uint16_t *blend = surface.vertInfo.vertsBlend;
+    std::uint32_t vertexIndex = 0u;
+    for (std::uint32_t influenceCount = 0u;
+         influenceCount < 4u; ++influenceCount)
+    {
+        const int signedCount = surface.vertInfo.vertCount[influenceCount];
+        if (signedCount < 0) return false;
+        const std::uint32_t count = static_cast<std::uint32_t>(signedCount);
+        for (std::uint32_t local = 0u; local < count; ++local, ++vertexIndex)
+        {
+            if (vertexIndex >= surface.vertCount) return false;
+            const GfxPackedVertex &vertex = surface.verts0[vertexIndex];
+            float transformed[3]{};
+            const DObjSkelMat *primary =
+                MatrixFromByteOffset(matrices, blend[0]);
+            if (!primary) return false;
+            TransformPosition(vertex.xyz, *primary, transformed);
+            float weightedSecondary[3]{};
+            float explicitWeight = 0.0f;
+            for (std::uint32_t influence = 0u;
+                 influence < influenceCount; ++influence)
+            {
+                const DObjSkelMat *secondary = MatrixFromByteOffset(
+                    matrices, blend[1u + influence * 2u]);
+                if (!secondary) return false;
+                const float weight = static_cast<float>(
+                    blend[2u + influence * 2u]) * SHORT_WEIGHT_TO_UNIT;
+                float secondaryPosition[3]{};
+                TransformPosition(vertex.xyz, *secondary, secondaryPosition);
+                for (std::size_t axis = 0u; axis < 3u; ++axis)
+                    weightedSecondary[axis] +=
+                        weight * secondaryPosition[axis];
+                explicitWeight += weight;
+            }
+            const float primaryWeight = 1.0f - explicitWeight;
+            for (std::size_t axis = 0u; axis < 3u; ++axis)
+            {
+                positions[vertexIndex * 3u + axis] =
+                    primaryWeight * transformed[axis] +
+                    weightedSecondary[axis];
+            }
+            blend += 1u + influenceCount * 2u;
+        }
+    }
+    return vertexIndex == surface.vertCount;
+}
+
+bool SkinRigidSurface(
+    const XSurface &surface,
+    const std::vector<DObjSkelMat> &matrices,
+    std::vector<float> &positions)
+{
+    if (!surface.vertList || surface.vertListCount == 0u) return false;
+    positions.resize(static_cast<std::size_t>(surface.vertCount) * 3u);
+    std::uint32_t vertexIndex = 0u;
+    for (std::uint32_t listIndex = 0u;
+         listIndex < surface.vertListCount; ++listIndex)
+    {
+        const XRigidVertList &list = surface.vertList[listIndex];
+        const DObjSkelMat *matrix =
+            MatrixFromByteOffset(matrices, list.boneOffset);
+        if (!matrix || list.vertCount > surface.vertCount - vertexIndex)
+            return false;
+        for (std::uint32_t local = 0u; local < list.vertCount;
+             ++local, ++vertexIndex)
+        {
+            TransformPosition(surface.verts0[vertexIndex].xyz, *matrix,
+                &positions[vertexIndex * 3u]);
+        }
+    }
+    return vertexIndex == surface.vertCount;
+}
+
+bool SurfaceHidden(
+    const XSurface &surface, const std::uint32_t hideBits[4],
+    std::uint32_t modelBoneOffset, std::uint32_t modelBoneCount) noexcept
+{
+    for (std::uint32_t localBone = 0u; localBone < modelBoneCount;
+         ++localBone)
+    {
+        const std::uint32_t localMask =
+            0x80000000u >> (localBone & 31u);
+        if ((static_cast<std::uint32_t>(
+                surface.partBits[localBone >> 5u]) & localMask) == 0u)
+        {
+            continue;
+        }
+        const std::uint32_t globalBone = modelBoneOffset + localBone;
+        if (globalBone < 128u &&
+            (hideBits[globalBone >> 5u] &
+             (0x80000000u >> (globalBone & 31u))) != 0u)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+WebRendererWorldBatchDesc MakeDraw(
+    const XModel &model, Material *material,
+    std::uint32_t modelSurfaceIndex, std::uint32_t firstIndex,
+    std::uint32_t indexCount) noexcept
+{
+    WebRendererWorldBatchDesc draw{};
+    draw.firstIndex = firstIndex;
+    draw.indexCount = indexCount;
+    draw.surfaceCount = 1u;
+    draw.firstSurfaceIndex = modelSurfaceIndex;
+    draw.lastSurfaceIndex = modelSurfaceIndex;
+    draw.materialIdentity = material;
+    draw.materialName = material && material->info.name
+        ? material->info.name : "<null-material>";
+    draw.modelIdentity = &model;
+    draw.modelName = model.name ? model.name : "<unnamed-xmodel>";
+    draw.firstInstanceIndex = UINT32_MAX;
+    draw.lastInstanceIndex = UINT32_MAX;
+    draw.lightmapIndex = 31u;
+    draw.sourceKind = WebRendererSceneBatchKind::DynamicDObj;
+    draw.baseImage = FindBaseImage(material, draw.samplerState);
+    // The WebGL compatibility technique is deliberately a base-color subset
+    // of the canonical material. Preserve canonical state when one of the
+    // common passes supplies it, but a DB-owned color image remains enough to
+    // use that supported subset even when the original shader itself is not.
+    SelectTechnique(material, draw.stateBits);
+    draw.technique = draw.baseImage
+        ? WebRendererWorldTechnique::BaseTexture
+        : WebRendererWorldTechnique::BackendFallback;
+    return draw;
+}
+} // namespace
+
+WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
+    const WebRendererDObjSubmission *submissions,
+    std::uint32_t submissionCount,
+    WebRendererDObjSceneCommand &destination)
+{
+    if (submissionCount == 0u) return WebRendererDObjSceneResult::NoDObj;
+    if (!submissions) return WebRendererDObjSceneResult::InvalidSubmission;
+
+    WebRendererDObjSceneCommand replacement;
+    try
+    {
+        for (std::uint32_t submissionIndex = 0u;
+             submissionIndex < submissionCount; ++submissionIndex)
+        {
+            const WebRendererDObjSubmission &submission =
+                submissions[submissionIndex];
+            const DObj_s *obj = submission.obj;
+            if (!obj || !submission.pose || obj->numModels == 0u ||
+                !obj->models)
+            {
+                return WebRendererDObjSceneResult::InvalidSubmission;
+            }
+
+            int posePartBits[4] = {-1, -1, -1, -1};
+            DObjAnimMat *posedMats =
+                CG_DObjCalcPose(submission.pose, obj, posePartBits);
+            if (!posedMats) return WebRendererDObjSceneResult::InvalidSubmission;
+            std::uint32_t hideBits[4]{};
+            DObjGetHidePartBits(obj, hideBits);
+            std::uint32_t globalBoneOffset = 0u;
+            bool submittedDObj = false;
+
+            for (std::uint32_t modelIndex = 0u;
+                 modelIndex < obj->numModels; ++modelIndex)
+            {
+                const XModel *model = DObjGetModel(obj, modelIndex);
+                if (!model || !model->surfs || !model->materialHandles ||
+                    !model->baseMat || model->numLods <= 0 ||
+                    model->numBones == 0u ||
+                    globalBoneOffset + model->numBones > obj->numBones)
+                {
+                    return WebRendererDObjSceneResult::InvalidModel;
+                }
+                const XModelLodInfo &lod = model->lodInfo[0];
+                if (lod.surfIndex > model->numsurfs ||
+                    lod.numsurfs > model->numsurfs - lod.surfIndex)
+                {
+                    return WebRendererDObjSceneResult::InvalidModel;
+                }
+
+                std::vector<DObjSkelMat> skinMatrices(model->numBones);
+                for (std::uint32_t bone = 0u; bone < model->numBones; ++bone)
+                {
+                    DObjSkelMat inverseBase{};
+                    DObjSkelMat current{};
+                    ConvertQuatToInverseSkelMat(
+                        &model->baseMat[bone], &inverseBase);
+                    ConvertQuatToSkelMat(
+                        &posedMats[globalBoneOffset + bone], &current);
+                    MultiplySkelMat(inverseBase, current, skinMatrices[bone]);
+                }
+
+                bool submittedModel = false;
+                for (std::uint32_t localSurface = 0u;
+                     localSurface < lod.numsurfs; ++localSurface)
+                {
+                    const std::uint32_t modelSurfaceIndex =
+                        lod.surfIndex + localSurface;
+                    const XSurface &surface = model->surfs[modelSurfaceIndex];
+                    if (surface.vertCount == 0u || surface.triCount == 0u)
+                        continue;
+                    if (!surface.verts0 || !surface.triIndices)
+                        return WebRendererDObjSceneResult::InvalidModel;
+                    if (SurfaceHidden(surface, hideBits, globalBoneOffset,
+                        model->numBones))
+                    {
+                        continue;
+                    }
+                    const std::uint32_t indexCount =
+                        static_cast<std::uint32_t>(surface.triCount) * 3u;
+                    if (replacement.vertices.size() + surface.vertCount >
+                            WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES ||
+                        replacement.indices.size() + indexCount >
+                            WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES)
+                    {
+                        return WebRendererDObjSceneResult::OutputTooLarge;
+                    }
+
+                    std::vector<float> positions;
+                    const bool skinned = surface.deformed
+                        ? SkinWeightedSurface(surface, skinMatrices, positions)
+                        : SkinRigidSurface(surface, skinMatrices, positions);
+                    if (!skinned)
+                        return WebRendererDObjSceneResult::InvalidModel;
+
+                    const std::uint32_t vertexBase = static_cast<std::uint32_t>(
+                        replacement.vertices.size());
+                    for (std::uint32_t vertexIndex = 0u;
+                         vertexIndex < surface.vertCount; ++vertexIndex)
+                    {
+                        const GfxPackedVertex &source =
+                            surface.verts0[vertexIndex];
+                        WebRendererSurfaceVertex vertex{};
+                        std::copy_n(&positions[vertexIndex * 3u], 3u,
+                            vertex.position);
+                        if (!Finite3(vertex.position))
+                            return WebRendererDObjSceneResult::InvalidModel;
+                        vertex.color[0] = static_cast<float>(
+                            (source.color.packed >> 16u) & 0xffu) * BYTE_TO_UNIT;
+                        vertex.color[1] = static_cast<float>(
+                            (source.color.packed >> 8u) & 0xffu) * BYTE_TO_UNIT;
+                        vertex.color[2] = static_cast<float>(
+                            source.color.packed & 0xffu) * BYTE_TO_UNIT;
+                        Vec2UnpackTexCoords(source.texCoord,
+                            vertex.textureCoordinate);
+                        if (!std::isfinite(vertex.textureCoordinate[0]) ||
+                            !std::isfinite(vertex.textureCoordinate[1]))
+                        {
+                            return WebRendererDObjSceneResult::InvalidModel;
+                        }
+                        replacement.vertices.push_back(vertex);
+                    }
+                    const std::uint32_t firstIndex = static_cast<std::uint32_t>(
+                        replacement.indices.size());
+                    for (std::uint32_t index = 0u; index < indexCount; ++index)
+                    {
+                        const std::uint32_t localIndex =
+                            surface.triIndices[index];
+                        if (localIndex >= surface.vertCount)
+                            return WebRendererDObjSceneResult::IndexOutOfRange;
+                        replacement.indices.push_back(vertexBase + localIndex);
+                    }
+                    replacement.batches.push_back(MakeDraw(
+                        *model, model->materialHandles[modelSurfaceIndex],
+                        modelSurfaceIndex, firstIndex, indexCount));
+                    ++replacement.surfaceCount;
+                    submittedModel = true;
+                    submittedDObj = true;
+                }
+                if (submittedModel) ++replacement.modelCount;
+                globalBoneOffset += model->numBones;
+            }
+            if (submittedDObj) ++replacement.dobjCount;
+        }
+    }
+    catch (const std::bad_alloc &)
+    {
+        return WebRendererDObjSceneResult::AllocationFailed;
+    }
+
+    if (replacement.batches.empty())
+        return WebRendererDObjSceneResult::NoDObj;
+    destination = std::move(replacement);
+    return WebRendererDObjSceneResult::Success;
+}
+
+const char *WebRenderer_DObjSceneResultString(
+    WebRendererDObjSceneResult result) noexcept
+{
+    switch (result)
+    {
+    case WebRendererDObjSceneResult::Success: return "success";
+    case WebRendererDObjSceneResult::NoDObj:
+        return "no renderable canonical DObj was submitted";
+    case WebRendererDObjSceneResult::InvalidSubmission:
+        return "canonical DObj submission is invalid";
+    case WebRendererDObjSceneResult::InvalidModel:
+        return "canonical DObj XModel or skin data is invalid";
+    case WebRendererDObjSceneResult::IndexOutOfRange:
+        return "canonical DObj XSurface index is outside its vertex range";
+    case WebRendererDObjSceneResult::OutputTooLarge:
+        return "dynamic DObj command exceeds backend limits";
+    case WebRendererDObjSceneResult::AllocationFailed:
+        return "dynamic DObj command allocation failed";
+    }
+    return "unknown DObj scene error";
+}

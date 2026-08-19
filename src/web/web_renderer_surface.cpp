@@ -60,6 +60,13 @@ WebRendererSurfaceResult WebRenderer_ValidateSurface(
                 return WebRendererSurfaceResult::NonFiniteVertex;
             }
         }
+        for (float component : vertex.lightmapCoordinate)
+        {
+            if (!std::isfinite(component))
+            {
+                return WebRendererSurfaceResult::NonFiniteVertex;
+            }
+        }
     }
 
     for (std::uint32_t index = 0; index < surface.indexCount; ++index)

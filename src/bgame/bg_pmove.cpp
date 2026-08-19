@@ -3080,6 +3080,33 @@ void __cdecl PM_GroundTrace(pmove_t *pm, pml_t *pml)
         }
         if (trace.fraction == 1.0)
         {
+#ifdef KISAK_SP
+            // SP can settle an integer-snapped standing hull slightly beyond
+            // the quarter-unit primary probe. Accept only a bounded walkable
+            // support plane; linked startup states, upward separation, and
+            // real ledge departures continue through PM_GroundTraceMissed.
+            if (ps->pm_type == PM_NORMAL)
+            {
+                point[0] = ps->origin[0];
+                point[1] = ps->origin[1];
+                point[2] = ps->origin[2] - 1.0f;
+                PM_playerTrace(
+                    pm, &trace, ps->origin, pm->mins, pm->maxs, point,
+                    ps->clientNum, pm->tracemask);
+                memcpy(&pml->groundTrace, &trace, sizeof(pml->groundTrace));
+                if (trace.fraction != 1.0f && trace.walkable &&
+                    (ps->velocity[2] <= 0.0f ||
+                     Vec3Dot(ps->velocity, trace.normal) <= 10.0f))
+                {
+                    pml->groundPlane = 1;
+                    pml->almostGroundPlane = 1;
+                    pml->walking = 1;
+                    ps->groundEntityNum = Trace_GetEntityHitId(&trace);
+                    PM_AddTouchEnt(pm, ps->groundEntityNum);
+                    return;
+                }
+            }
+#endif
             PM_GroundTraceMissed(pm, pml);
         }
         else
@@ -3108,19 +3135,23 @@ void __cdecl PM_GroundTrace(pmove_t *pm, pml_t *pml)
                     Jump_ClearState(ps);
                 }
             }
-#ifdef KISAK_MP
             else
             {
+#ifdef KISAK_MP
                 if (pm->cmd.forwardmove < 0)
                     BG_AnimScriptEvent(ps, ANIM_ET_JUMPBK, 0, 0);
                 else
                     BG_AnimScriptEvent(ps, ANIM_ET_JUMP, 0, 0);
+#endif
+                // Ground detachment is shared movement state, not an MP
+                // animation side effect. The SP linkage split used to omit
+                // this entire branch, leaving a stale ground entity whenever
+                // upward velocity separated the player from a slope.
                 pml->almostGroundPlane = 0;
                 ps->groundEntityNum = ENTITYNUM_NONE;
                 pml->groundPlane = 0;
                 pml->walking = 0;
             }
-#endif
         }
     }
 }

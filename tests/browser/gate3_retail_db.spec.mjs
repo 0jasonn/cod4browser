@@ -29,6 +29,8 @@ test("canonical Gate 3 traverses the locally owned retail startup prerequisite c
         globalThis.__gate3LifecycleEvents = [];
         globalThis.__gate3CanonicalWorldEvents = [];
         globalThis.__gate3RendererSurfaceEvents = [];
+        globalThis.__gate3RendererSceneViewEvents = [];
+        globalThis.__gate3RendererSceneFrameEvents = [];
         globalThis.addEventListener("kisakcod:database", (event) => {
             globalThis.__gate3RetailDbEvents.push(structuredClone(event.detail));
         });
@@ -46,6 +48,14 @@ test("canonical Gate 3 traverses the locally owned retail startup prerequisite c
                 structuredClone(event.detail));
             if (globalThis.__gate3RendererSurfaceEvents.length > 16)
                 globalThis.__gate3RendererSurfaceEvents.shift();
+        });
+        globalThis.addEventListener("kisakcod:renderer-scene-view", (event) => {
+            globalThis.__gate3RendererSceneViewEvents.push(
+                structuredClone(event.detail));
+        });
+        globalThis.addEventListener("kisakcod:renderer-scene-frame", (event) => {
+            globalThis.__gate3RendererSceneFrameEvents.push(
+                structuredClone(event.detail));
         });
     });
     await page.goto("/");
@@ -238,9 +248,49 @@ test("canonical Gate 3 traverses the locally owned retail startup prerequisite c
         }
     });
     await expect.poll(() => page.evaluate(() =>
-        globalThis.__gate3LifecycleEvents.some((event) =>
-            event.stage === "CL_InitCGame complete")),
+        globalThis.__gate3RendererSceneFrameEvents.some((event) =>
+            event.state === "drawn" && event.geometrySubmitted === true)),
     { timeout: 150_000 }).toBe(true);
+    await expect.poll(() => page.evaluate(() => {
+        const view = globalThis.__gate3RendererSceneViewEvents.at(-1);
+        return Boolean(view && view.submissionGeneration >= 120 &&
+            view.viewOrigin[2] > 50 && view.viewOrigin[2] < 90 &&
+            view.worldSurfaceCount === 8064 &&
+            view.worldVertexCount === 431747 &&
+            view.worldIndexCount === 793188);
+    }), { timeout: 30_000 }).toBe(true);
+
+    const beforeKeyboard = await page.evaluate(() => structuredClone(
+        globalThis.__gate3RendererSceneViewEvents.at(-1)));
+    const canvas = page.locator("#game-canvas");
+    await canvas.focus();
+    await page.keyboard.down("w");
+    await page.waitForTimeout(600);
+    await page.keyboard.up("w");
+    await expect.poll(() => page.evaluate((origin) => {
+        const current = globalThis.__gate3RendererSceneViewEvents.at(-1);
+        return current ? Math.hypot(
+            current.viewOrigin[0] - origin[0],
+            current.viewOrigin[1] - origin[1]) : 0;
+    }, beforeKeyboard.viewOrigin), { timeout: 15_000 }).toBeGreaterThan(20);
+
+    const beforeMouse = await page.evaluate(() => structuredClone(
+        globalThis.__gate3RendererSceneViewEvents.at(-1)));
+    const box = await canvas.boundingBox();
+    await canvas.click({ position: { x: box.width / 2, y: box.height / 2 } });
+    await expect.poll(() => page.evaluate(() =>
+        globalThis.__KISAKCOD_WEB__.input.pointerLocked),
+    { timeout: 5_000 }).toBe(true);
+    await page.mouse.move(
+        box.x + box.width / 2 + 100,
+        box.y + box.height / 2);
+    await expect.poll(() => page.evaluate((forward) => {
+        const current = globalThis.__gate3RendererSceneViewEvents.at(-1);
+        return current ? Math.hypot(
+            current.viewForward[0] - forward[0],
+            current.viewForward[1] - forward[1],
+            current.viewForward[2] - forward[2]) : 0;
+    }, beforeMouse.viewForward), { timeout: 15_000 }).toBeGreaterThan(0.05);
 
     const checkpoint = await page.evaluate((eventStart) => {
         const mapEvents = globalThis.__gate3RetailDbEvents.slice(eventStart);
@@ -255,7 +305,11 @@ test("canonical Gate 3 traverses the locally owned retail startup prerequisite c
                 event.generatedLoadFailed)),
             canonicalWorld: structuredClone(
                 globalThis.__gate3CanonicalWorldEvents.at(-1)),
-            logs: structuredClone(globalThis.__KISAKCOD_WEB__.logs.slice(-12)),
+            sceneView: structuredClone(
+                globalThis.__gate3RendererSceneViewEvents.at(-1)),
+            sceneFrame: structuredClone(
+                globalThis.__gate3RendererSceneFrameEvents.at(-1)),
+            logs: structuredClone(globalThis.__KISAKCOD_WEB__.logs.slice(-24)),
         };
     }, mapDbEventStart);
     console.log(`KISAK_RETAIL_LIFECYCLE_CHECKPOINT ${JSON.stringify({
@@ -264,7 +318,11 @@ test("canonical Gate 3 traverses the locally owned retail startup prerequisite c
         mapEnd: checkpoint.mapEnd,
         mapPublication: checkpoint.mapPublication,
         logs: checkpoint.logs,
+        sceneView: checkpoint.sceneView,
+        sceneFrame: checkpoint.sceneFrame,
     })}`);
+
+    expect(checkpoint.command).toEqual({ state: "complete", accepted: 1 });
 
     expect(checkpoint.mapEnd).toMatchObject({
         logicalPath: "zone/english/killhouse.ff",
@@ -283,6 +341,49 @@ test("canonical Gate 3 traverses the locally owned retail startup prerequisite c
         browserWorldRepresentation: false,
         name: "maps/killhouse.d3dbsp",
     });
+    expect(checkpoint.sceneView).toMatchObject({
+        state: "submitted",
+        source: "canonical-cgame-refdef",
+        worldName: "maps/killhouse.d3dbsp",
+        viewport: { x: 0, y: 0 },
+        localClientNum: 0,
+        geometrySubmitted: true,
+    });
+    expect(checkpoint.sceneView.viewport.width).toBeGreaterThan(0);
+    expect(checkpoint.sceneView.viewport.height).toBeGreaterThan(0);
+    expect(checkpoint.sceneView.tanHalfFovX).toBeGreaterThan(0);
+    expect(checkpoint.sceneView.tanHalfFovY).toBeGreaterThan(0);
+    expect(checkpoint.sceneView.zNear).toBeGreaterThan(0);
+    expect(checkpoint.sceneView.worldSurfaceCount).toBe(8064);
+    expect(checkpoint.sceneView.worldVertexCount).toBe(431747);
+    expect(checkpoint.sceneView.worldIndexCount).toBe(793188);
+    expect(checkpoint.sceneFrame).toMatchObject({
+        state: "drawn",
+        source: "canonical-cgame-refdef",
+        worldName: "maps/killhouse.d3dbsp",
+        geometrySubmitted: true,
+        backend: "webgl2",
+    });
+    expect(checkpoint.sceneView.submissionGeneration).toBeGreaterThan(1);
+    expect(checkpoint.sceneFrame.viewSubmissionGeneration).toBeGreaterThan(0);
+    expect(checkpoint.sceneFrame.viewSubmissionGeneration)
+        .toBeLessThanOrEqual(checkpoint.sceneView.submissionGeneration);
+    expect(checkpoint.sceneFrame.worldSurfaceCount).toBe(8064);
+    expect(checkpoint.sceneFrame.worldVertexCount).toBe(431747);
+    expect(checkpoint.sceneFrame.worldIndexCount).toBe(793188);
+    expect(checkpoint.sceneView.viewOrigin[2]).toBeGreaterThan(50);
+    expect(checkpoint.sceneView.viewOrigin[2]).toBeLessThan(90);
+    expect(checkpoint.sceneView.viewOrigin).not.toEqual(beforeKeyboard.viewOrigin);
+    expect(checkpoint.sceneView.viewForward).not.toEqual(beforeMouse.viewForward);
+    expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.input))
+        .toMatchObject({ pointerLocked: true });
+    expect(checkpoint.logs.some(({ text }) =>
+        text.includes("First cgame-driven maps/killhouse.d3dbsp frame rendered through WebGL2"),
+    )).toBe(true);
+    expect(checkpoint.logs.some(({ text }) =>
+        text.includes("514 batches: 429 lightmapped, 10 base-only") &&
+        text.includes("143/147 images"),
+    )).toBe(true);
     const stages = checkpoint.lifecycle.map((event) => event.stage);
     for (const stage of [
         "CM_LoadMap complete",
@@ -294,5 +395,5 @@ test("canonical Gate 3 traverses the locally owned retail startup prerequisite c
         "CG_Init complete",
         "CL_InitCGame complete",
     ]) expect(stages).toContain(stage);
-    expect(stages).not.toContain("game-driven frame");
+    expect(stages).toContain("game-driven frame");
 });

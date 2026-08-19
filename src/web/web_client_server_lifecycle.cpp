@@ -11,6 +11,7 @@
 #include <qcommon/cmd.h>
 #include <qcommon/engine_lifecycle_trace.h>
 #include <qcommon/qcommon.h>
+#include <qcommon/com_playerprofile.h>
 #include <qcommon/threads.h>
 #include <server/server.h>
 #include <server/sv_public.h>
@@ -18,6 +19,7 @@
 #include <script/scr_variable.h>
 #include <script/scr_vm_runtime.h>
 #include <stringed/stringed_hooks.h>
+#include <ui/keycodes.h>
 #include <universal/dvar.h>
 #include <universal/com_files.h>
 #include <universal/com_memory.h>
@@ -93,6 +95,37 @@ void PublishLifecycle(const EngineLifecycleTraceEvent &event, void *)
         event.sync);
 }
 
+void InstallBrowserProfileDefaultBindings()
+{
+    struct Binding
+    {
+        int key;
+        const char *command;
+    };
+    constexpr Binding DEFAULT_BINDINGS[] = {
+        {'w', "+forward"},
+        {'s', "+back"},
+        {'a', "+moveleft"},
+        {'d', "+moveright"},
+        {K_SPACE, "+gostand"},
+        {K_SHIFT, "+sprint"},
+        {K_MOUSE1, "+attack"},
+        {K_MOUSE2, "toggleads"},
+    };
+    std::uint32_t installed = 0u;
+    for (const Binding &binding : DEFAULT_BINDINGS)
+    {
+        const char *current = Key_GetBinding(0, binding.key);
+        if (current && *current)
+            continue;
+        Key_SetBinding(0, binding.key, const_cast<char *>(binding.command));
+        ++installed;
+    }
+    Web_Log(WebLogLevel::Info,
+        "[kisakcod-web] Browser profile installed %u missing canonical "
+        "default bindings.\n", installed);
+}
+
 } // namespace
 
 bool __cdecl DB_ModFileExists()
@@ -128,6 +161,11 @@ void __cdecl Com_Shutdown(const char *)
 {
     Com_Error(ERR_DROP,
         "Native process shutdown is unavailable inside the browser Worker");
+}
+
+void __cdecl Com_Quit_f()
+{
+    Com_Shutdown("EXE_SERVERQUIT");
 }
 
 void __cdecl Com_Restart()
@@ -211,6 +249,18 @@ extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_StartCanonicalDbRuntimeCheck()
         archiveCount);
     DispatchCanonicalFilesystem(
         searchPathEvidence.c_str(), searchPathCount, archiveCount);
+
+    // Resume the native post-filesystem startup sequence before any client or
+    // server command can observe profile-owned config and save paths. Browser
+    // storage has one local engine user until the launcher exposes profile
+    // selection, so provide that platform identity through the canonical
+    // profile owner rather than bypassing save construction.
+    Com_InitPlayerProfiles(0);
+    if (!Com_HasPlayerProfile())
+    {
+        char browserProfile[] = "browser";
+        Com_SetPlayerProfile(0, browserProfile);
+    }
     Web_Log(WebLogLevel::Info,
         "[kisakcod-web] Canonical runtime: initializing Hunk and shared runtime owners.\n");
     Com_InitHunkMemory();
@@ -225,21 +275,26 @@ extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_StartCanonicalDbRuntimeCheck()
     XAnimInit();
     DObjInit();
     SV_Init();
+    // The initial browser deployment is intentionally single-threaded. The
+    // canonical dvar defaults to an SMP server thread, but the Worker platform
+    // cannot run that native thread; leaving it enabled advances snapshot time
+    // without executing G_RunFrame or script-owned movers.
+    Dvar_SetBoolByName("sv_smp", false);
     CL_InitOnceForAllClients();
     CL_Init(0);
-
-    // Preserve the native post-client sound ownership transition. Emscripten's
-    // OpenAL implementation owns the browser audio context and may leave it
-    // suspended until a user gesture; the engine sound state remains canonical.
+    // Native renderer/console output enters CL_ConsolePrint during startup and
+    // lazily runs this canonical console owner before map scripts can call
+    // SetSavedDvar. Browser logging bypasses CL_ConsolePrint, so complete the
+    // same owner transition explicitly; otherwise Killhouse aborts at
+    // con_typewriterColorBase before its spawn mover can descend.
+    if (!con.initialized)
+        Con_OneTimeInit();
+    // Preserve the native post-client ownership transition:
+    // SND_InitDriver -> CL_InitRenderer -> SND_Init. Native renderer
+    // registration loads these prerequisite zones before sound consumes their
+    // rawfiles. The browser backend performs that renderer-owned load explicitly
+    // because WebGL2 was created by the platform host before this continuation.
     SND_InitDriver();
-    iassert(!cls.soundStarted);
-    cls.soundStarted = 1;
-    SND_Init();
-
-    // CL_InitRef is the canonical owner of the SP renderer configuration and
-    // fastfile names. The native renderer consumes that configuration while
-    // creating its device; WebGL2 is already platform-owned, so consume it at
-    // the same boundary without mirroring the names in browser state.
     iassert(g_rendererConfigured);
     Web_Log(WebLogLevel::Info,
         "[kisakcod-web] Canonical runtime: loading renderer prerequisite zones.\n");
@@ -260,11 +315,33 @@ extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_StartCanonicalDbRuntimeCheck()
         Sys_SyncDatabase();
     }
 
-    // Native startup starts renderer-backed hunk users before a console map
-    // command can execute. The browser DB queue cannot publish these assets
-    // until the canonical $init scope above closes, so retain the native
-    // ownership phase immediately after the synchronous publication barrier.
+    // The temporary Com_Init prefix reaches profile/config startup before the
+    // renderer prerequisite fastfiles exist, so its canonical `exec
+    // default.cfg` cannot yet resolve the RawFile. Repeat that same canonical
+    // config owner now that code_post_gfx/ui/common are published. This seeds
+    // any retail defaults available from the asset database.
+    Com_ExecStartupConfigs(0, nullptr);
+    // A fresh browser profile has no native config.cfg. Seed only absent core
+    // controls in the canonical binding table; imported or future persisted
+    // bindings always win, and movement remains owned by CL_Input/usercmd.
+    InstallBrowserProfileDefaultBindings();
+    // Native SP can hold the pregame menu for Bink playback. The browser
+    // backend deliberately omits Bink, so select the canonical UI
+    // auto-continue path after the retail defaults have been applied.
+    Dvar_SetBoolByName("ui_autoContinue", true);
+
+    // Complete the canonical renderer/sound transition only after the browser
+    // DB queue has published the renderer prerequisites. In particular,
+    // SND_InitEntChannels now resolves soundaliases/channels.def from the
+    // renderer-owned code_post_gfx zone just as it does in native startup.
     CL_InitRenderer();
+    iassert(!cls.soundStarted);
+    cls.soundStarted = 1;
+    SND_Init();
+
+    // Native startup starts renderer-backed hunk users before a console map
+    // command can execute. Retain that ownership phase after renderer and sound
+    // are both live.
     R_BeginRemoteScreenUpdate();
     CL_StartHunkUsers();
     R_EndRemoteScreenUpdate();

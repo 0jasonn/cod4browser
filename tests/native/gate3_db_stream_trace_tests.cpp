@@ -1,5 +1,6 @@
 #include <universal/q_shared.h>
 #include <database/database.h>
+#include <database/db_generated_image_platform.h>
 #include <game/g_bsp.h>
 #include <database/db_registry_pools.h>
 #include <database/db_registry_publication.h>
@@ -2738,6 +2739,10 @@ int main()
     assert(publishedImage.image->mapType == MAPTYPE_2D);
     assert(publishedImage.image->width == 4 && publishedImage.image->height == 4);
     assert(publishedImage.image->texture.basemap == nullptr);
+    WebDbImageLoadDef publishedImageLoadDef{};
+    assert(DB_WebGetImageLoadDef(publishedImage.image, publishedImageLoadDef));
+    assert(publishedImageLoadDef.format == 21);
+    assert(publishedImageLoadDef.byteLength == 4);
     const water_t *publishedWater =
         publishedMaterial.material->textureTable[1].u.water;
     assert(publishedWater && publishedWater->M == 2 && publishedWater->N == 2);

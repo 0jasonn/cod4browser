@@ -2,6 +2,7 @@
 
 
 char __cdecl Com_SetInitialPlayerProfile(int localClientNum);
+void __cdecl Com_SetPlayerProfile(int localClientNum, char *profileName);
 int Com_BuildPlayerProfilePath(char *path, int pathSize, const char *format, ...);
 void __cdecl Com_InitPlayerProfiles(int localClientNum);
 bool __cdecl Com_HasPlayerProfile();

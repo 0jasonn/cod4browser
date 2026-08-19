@@ -7,6 +7,9 @@
 #include <cstdint>
 
 struct WebFrameInfo;
+struct GfxImage;
+struct Material;
+struct XModel;
 
 // The bootstrap renderer deliberately keeps one bounded CPU-side RGBA8 copy
 // so its texture can be recreated after browser context loss. These limits
@@ -50,6 +53,145 @@ struct WebRendererShaderState
     bool retained;
     bool resident;
     bool firstDrawCompleted;
+};
+
+struct WebRendererSceneViewDesc
+{
+    std::uint32_t x;
+    std::uint32_t y;
+    std::uint32_t width;
+    std::uint32_t height;
+    float tanHalfFovX;
+    float tanHalfFovY;
+    float viewOrigin[3];
+    float viewAxis[3][3];
+    // Canonical Kisak row-vector view * projection matrix. WebGL receives the
+    // same contiguous values as a column-major uniform, which supplies the
+    // transpose required by GLSL's matrix * column-vector convention.
+    float viewProjectionMatrix[4][4];
+    std::int32_t time;
+    float zNear;
+    std::int32_t localClientNum;
+    const char *worldName;
+    std::uint32_t worldSurfaceCount;
+    std::uint32_t worldVertexCount;
+    std::uint32_t worldIndexCount;
+    bool geometrySubmitted;
+};
+
+// Static opaque-world command at the renderer backend boundary. Canonical BSP
+// surface indices are 16-bit local values plus firstVertex; combining many
+// surfaces into one fallback-material draw therefore requires 32-bit indices.
+// These limits are independent of the small retained Gate 2/bootstrap oracle.
+constexpr std::uint32_t WEB_RENDERER_MAX_WORLD_VERTICES = 1'000'000u;
+constexpr std::uint32_t WEB_RENDERER_MAX_WORLD_INDICES = 3'000'000u;
+constexpr std::uint32_t WEB_RENDERER_MAX_STATIC_MODEL_VERTICES = 500'000u;
+constexpr std::uint32_t WEB_RENDERER_MAX_STATIC_MODEL_INDICES = 1'500'000u;
+constexpr std::uint32_t WEB_RENDERER_MAX_STATIC_MODEL_INSTANCES = 20'000u;
+constexpr std::uint32_t WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES = 250'000u;
+constexpr std::uint32_t WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES = 500'000u;
+constexpr std::uint32_t WEB_RENDERER_MAX_UI_VERTICES = 65'536u;
+constexpr std::uint32_t WEB_RENDERER_MAX_UI_INDICES = 98'304u;
+
+struct WebRendererWorldSurfaceDesc
+{
+    const WebRendererSurfaceVertex *vertices;
+    std::uint32_t vertexCount;
+    const std::uint32_t *indices;
+    std::uint32_t indexCount;
+    const struct WebRendererWorldBatchDesc *batches;
+    std::uint32_t batchCount;
+};
+
+enum class WebRendererWorldTechnique : std::uint8_t
+{
+    BackendFallback = 0,
+    BaseTexture,
+    BaseTextureLightmap,
+};
+
+enum class WebRendererSceneBatchKind : std::uint8_t
+{
+    WorldSurface = 0,
+    StaticXModel,
+    DynamicDObj,
+};
+
+// Callback-scoped canonical identity and portable first-pass state for one
+// contiguous world draw. WebRenderer_SetWorldSurface copies names/state and
+// consumes the DB-owned image load definitions before returning.
+struct WebRendererWorldBatchDesc
+{
+    std::uint32_t firstIndex;
+    std::uint32_t indexCount;
+    std::uint32_t surfaceCount;
+    std::uint32_t firstSurfaceIndex;
+    std::uint32_t lastSurfaceIndex;
+    const Material *materialIdentity;
+    const char *materialName;
+    const XModel *modelIdentity;
+    const char *modelName;
+    std::uint32_t firstInstanceIndex;
+    std::uint32_t lastInstanceIndex;
+    const GfxImage *baseImage;
+    const GfxImage *lightmapImage;
+    std::uint32_t stateBits[2];
+    std::uint8_t samplerState;
+    std::uint8_t lightmapIndex;
+    WebRendererSceneBatchKind sourceKind;
+    WebRendererWorldTechnique technique;
+};
+
+// Static XModel geometry remains shared per canonical XModel/LOD. Placements
+// are carried separately so the WebGL2 backend can issue instanced draws
+// without duplicating the 12k Killhouse world-model meshes.
+struct WebRendererStaticModelInstanceDesc
+{
+    float axis[3][3];
+    float origin[3];
+    std::uint32_t canonicalInstanceIndex;
+};
+
+struct WebRendererStaticModelBatchDesc
+{
+    WebRendererWorldBatchDesc draw;
+    std::uint32_t instanceOffset;
+    std::uint32_t instanceCount;
+};
+
+struct WebRendererStaticModelSceneDesc
+{
+    const WebRendererSurfaceVertex *vertices;
+    std::uint32_t vertexCount;
+    const std::uint32_t *indices;
+    std::uint32_t indexCount;
+    const WebRendererStaticModelInstanceDesc *instances;
+    std::uint32_t instanceCount;
+    const WebRendererStaticModelBatchDesc *batches;
+    std::uint32_t batchCount;
+    std::uint32_t modelCount;
+    std::uint32_t surfaceCount;
+};
+
+struct WebRendererUiBatchDesc
+{
+    std::uint32_t firstIndex;
+    std::uint32_t indexCount;
+    const Material *materialIdentity;
+    const char *materialName;
+    const GfxImage *image;
+    std::uint8_t samplerState;
+    float color[4];
+};
+
+struct WebRendererUiSceneDesc
+{
+    const WebRendererSurfaceVertex *vertices;
+    std::uint32_t vertexCount;
+    const std::uint32_t *indices;
+    std::uint32_t indexCount;
+    const WebRendererUiBatchDesc *batches;
+    std::uint32_t batchCount;
 };
 
 enum class WebRendererShaderResult : std::uint8_t
@@ -112,6 +254,34 @@ WebRendererShaderResult WebRenderer_SetShaderCompatibility(
 bool WebRenderer_ClearShaderCompatibility();
 
 WebRendererShaderState WebRenderer_GetShaderCompatibilityState();
+
+// Accepts the backend-neutral view command produced by the canonical renderer
+// frontend. This does not select or convert world geometry; that remains a
+// renderer-frontend responsibility and is deliberately separate from the
+// frozen bounded world-surface adapter.
+bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view);
+
+// Atomically retains and uploads the renderer-frontend material-aware world
+// command. Geometry uses 32-bit indices; each batch preserves canonical
+// Material/GfxImage identity while GPU objects and fallback programs remain
+// private to the WebGL2 backend.
+WebRendererSurfaceResult WebRenderer_SetWorldSurface(
+    const WebRendererWorldSurfaceDesc &surface);
+
+// Retains shared canonical XSurface meshes plus immutable GfxWorld placements
+// and uploads them as an instanced static-model pass.
+WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
+    const WebRendererStaticModelSceneDesc &scene);
+
+// Replaces the current per-frame DObj surface command. Geometry has already
+// been posed/skinned by the canonical frontend; canonical model/material/image
+// identities remain attached to each batch.
+WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
+    const WebRendererWorldSurfaceDesc &scene);
+
+// Replaces the current frame's canonical 2D material/text command stream.
+WebRendererSurfaceResult WebRenderer_SetUiScene(
+    const WebRendererUiSceneDesc &scene);
 
 // Draws one non-blocking browser frame. Engine work remains outside this seam.
 void WebRenderer_DrawFrame(const WebFrameInfo &frame);

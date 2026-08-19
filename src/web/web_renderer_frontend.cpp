@@ -24,24 +24,32 @@
 #include <qcommon/com_world_types.h>
 #include <qcommon/com_world_runtime.h>
 #include <qcommon/cmd.h>
+#include <qcommon/engine_lifecycle_trace.h>
 #include <stringed/stringed_hooks.h>
 #include <universal/com_math.h>
 #include <universal/com_memory.h>
 #include <universal/memfile.h>
 #include <web/web_renderer.h>
+#include <web/web_renderer_dobj_scene.h>
+#include <web/web_renderer_static_model_scene.h>
+#include <web/web_renderer_world_scene.h>
 #include <web/web_system.h>
 #include <xanim/dobj.h>
 #include <xanim/dobj_utils.h>
 #include <xanim/xmodel.h>
+#include <xanim/xsurface_types.h>
 
 #include <emscripten.h>
 
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cfloat>
 #include <cstdarg>
 #include <cstdint>
 #include <cstring>
+#include <new>
+#include <vector>
 
 enum CubemapShot : int;
 
@@ -82,6 +90,16 @@ float g_sunDirectionTarget[3]{};
 bool g_hasSunLightOverride = false;
 bool g_hasSunDirectionOverride = false;
 bool g_rendererWorldReady = false;
+bool g_gameDrivenFrameReported = false;
+bool g_worldSceneSubmitted = false;
+bool g_staticModelSceneSubmitted = false;
+bool g_dynamicModelSceneReported = false;
+bool g_uiSceneReported = false;
+std::array<WebRendererDObjSubmission, 32> g_dobjSubmissions{};
+std::uint32_t g_dobjSubmissionCount = 0u;
+std::uint32_t g_worldSceneSurfaceCount = 0u;
+std::uint32_t g_worldSceneVertexCount = 0u;
+std::uint32_t g_worldSceneIndexCount = 0u;
 int g_sunLerpBeginTime = 0;
 int g_sunLerpEndTime = 0;
 trStatistics_t *g_statistics = nullptr;
@@ -91,6 +109,9 @@ std::array<r_double_index_t, 131072> g_codeMeshIndices{};
 std::uint32_t g_codeMeshVertCount = 0;
 std::uint32_t g_codeMeshIndexCount = 0;
 GfxParticleCloud g_particleCloud{};
+std::vector<WebRendererSurfaceVertex> g_uiVertices;
+std::vector<std::uint32_t> g_uiIndices;
+std::vector<WebRendererUiBatchDesc> g_uiBatches;
 
 EM_JS(void, Web_GetCanvasSize, (std::uint32_t *width, std::uint32_t *height), {
     const canvas = Module.canvas;
@@ -115,6 +136,161 @@ const Glyph *GetGlyph(Font_s *font, std::uint32_t letter)
             top = middle - 1;
     }
     return &font->glyphs[14];
+}
+
+const GfxImage *FindUiImage(Material *material, std::uint8_t &sampler)
+{
+    if (!material || !material->textureTable) return nullptr;
+    // Canonical HUD/font materials bind their atlas as TS_2D.  A few shared
+    // materials instead expose an ordinary color map, so retain that as the
+    // secondary choice without discarding the canonical material identity.
+    const MaterialTextureDef *colorMap = nullptr;
+    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
+    {
+        const MaterialTextureDef &texture = material->textureTable[index];
+        if (texture.semantic == 0u && texture.u.image)
+        {
+            sampler = texture.samplerState;
+            return texture.u.image;
+        }
+        if (!colorMap && texture.semantic == 2u && texture.u.image)
+            colorMap = &texture;
+    }
+    if (colorMap)
+    {
+        sampler = colorMap->samplerState;
+        return colorMap->u.image;
+    }
+    return nullptr;
+}
+
+void AppendUiQuadUvs(const float points[4][2], const float uvs[4][2],
+    const float *color, Material *material)
+{
+    if (g_uiVertices.size() + 4u > WEB_RENDERER_MAX_UI_VERTICES ||
+        g_uiIndices.size() + 6u > WEB_RENDERER_MAX_UI_INDICES)
+        return;
+    const float width = static_cast<float>(
+        std::max<std::uint32_t>(1u, cls.vidConfig.displayWidth));
+    const float height = static_cast<float>(
+        std::max<std::uint32_t>(1u, cls.vidConfig.displayHeight));
+    try
+    {
+        const std::uint32_t vertexBase =
+            static_cast<std::uint32_t>(g_uiVertices.size());
+        for (std::size_t index = 0u; index < 4u; ++index)
+        {
+            WebRendererSurfaceVertex vertex{};
+            vertex.position[0] = points[index][0] * 2.0f / width - 1.0f;
+            vertex.position[1] = 1.0f - points[index][1] * 2.0f / height;
+            vertex.position[2] = 0.0f;
+            vertex.color[0] = 1.0f;
+            vertex.color[1] = 1.0f;
+            vertex.color[2] = 1.0f;
+            vertex.textureCoordinate[0] = uvs[index][0];
+            vertex.textureCoordinate[1] = uvs[index][1];
+            g_uiVertices.push_back(vertex);
+        }
+        const std::uint32_t firstIndex =
+            static_cast<std::uint32_t>(g_uiIndices.size());
+        for (const std::uint32_t local : {0u, 1u, 2u, 0u, 2u, 3u})
+            g_uiIndices.push_back(vertexBase + local);
+        WebRendererUiBatchDesc batch{};
+        batch.firstIndex = firstIndex;
+        batch.indexCount = 6u;
+        batch.materialIdentity = material;
+        batch.materialName = material && material->info.name
+            ? material->info.name : "<null-ui-material>";
+        batch.image = FindUiImage(material, batch.samplerState);
+        for (std::size_t component = 0u; component < 4u; ++component)
+            batch.color[component] = color ? color[component] : 1.0f;
+        g_uiBatches.push_back(batch);
+    }
+    catch (const std::bad_alloc &)
+    {
+        // A dropped HUD primitive is recoverable; the canonical 3D frame must
+        // remain live if a transient overlay allocation cannot be satisfied.
+    }
+}
+
+void AppendUiQuad(const float points[4][2], float s0, float t0,
+    float s1, float t1, const float *color, Material *material)
+{
+    const float uvs[4][2] = {
+        {s0, t0}, {s1, t0}, {s1, t1}, {s0, t1}};
+    AppendUiQuadUvs(points, uvs, color, material);
+}
+
+void AppendUiRect(float x, float y, float w, float h,
+    float s0, float t0, float s1, float t1,
+    const float *color, Material *material)
+{
+    const float points[4][2] = {
+        {x, y}, {x + w, y}, {x + w, y + h}, {x, y + h}};
+    AppendUiQuad(points, s0, t0, s1, t1, color, material);
+}
+
+void AppendUiRotatedRect(float x, float y, float w, float h,
+    float rotation, float s0, float t0, float s1, float t1,
+    const float *color, Material *material)
+{
+    const float radians = rotation * (3.14159265358979323846f / 180.0f);
+    const float cosine = std::cos(radians);
+    const float sine = std::sin(radians);
+    const float centerX = x + w * 0.5f;
+    const float centerY = y + h * 0.5f;
+    const float local[4][2] = {
+        {-w * 0.5f, -h * 0.5f}, {w * 0.5f, -h * 0.5f},
+        {w * 0.5f, h * 0.5f}, {-w * 0.5f, h * 0.5f}};
+    float points[4][2]{};
+    for (std::size_t index = 0u; index < 4u; ++index)
+    {
+        points[index][0] = centerX +
+            local[index][0] * cosine - local[index][1] * sine;
+        points[index][1] = centerY +
+            local[index][0] * sine + local[index][1] * cosine;
+    }
+    AppendUiQuad(points, s0, t0, s1, t1, color, material);
+}
+
+void AppendUiText(const char *text, int maxChars, Font_s *font,
+    float x, float y, float xScale, float yScale, float rotation,
+    const float *color)
+{
+    if (!text || !font || !font->glyphs || !font->material) return;
+    if (maxChars <= 0) maxChars = 0x7fffffff;
+    const float startX = x;
+    int count = 0;
+    while (*text && count < maxChars)
+    {
+        const std::uint32_t letter = SEH_ReadCharFromString(&text, 0);
+        if (letter == '\n')
+        {
+            x = startX;
+            y += static_cast<float>(font->pixelHeight) * yScale;
+            continue;
+        }
+        if (letter == '\r')
+        {
+            x = startX;
+            continue;
+        }
+        if (letter == '^' && *text >= '0' && *text <= '9')
+        {
+            ++text;
+            continue;
+        }
+        const Glyph *glyph = GetGlyph(font, letter);
+        AppendUiRotatedRect(
+            x + static_cast<float>(glyph->x0) * xScale,
+            y + static_cast<float>(glyph->y0) * yScale,
+            static_cast<float>(glyph->pixelWidth) * xScale,
+            static_cast<float>(glyph->pixelHeight) * yScale,
+            rotation, glyph->s0, glyph->t0, glyph->s1, glyph->t1,
+            color, font->material);
+        x += static_cast<float>(glyph->dx) * xScale;
+        ++count;
+    }
 }
 }
 
@@ -151,6 +327,9 @@ void __cdecl R_BeginFrame()
     g_warned.fill(false);
     g_codeMeshVertCount = 0;
     g_codeMeshIndexCount = 0;
+    g_uiVertices.clear();
+    g_uiIndices.clear();
+    g_uiBatches.clear();
 }
 void __cdecl R_EndFrame() {}
 void __cdecl R_BeginClientCmdList2D() {}
@@ -175,6 +354,14 @@ void __cdecl R_LoadWorld(char *name, int *checksum, int)
             "R_LoadWorld: canonical GfxWorld '%s' is not published", name);
     if (checksum) *checksum = static_cast<int>(s_world.checksum);
     g_rendererWorldReady = true;
+    g_gameDrivenFrameReported = false;
+    g_worldSceneSubmitted = false;
+    g_staticModelSceneSubmitted = false;
+    g_dynamicModelSceneReported = false;
+    g_uiSceneReported = false;
+    g_worldSceneSurfaceCount = 0u;
+    g_worldSceneVertexCount = 0u;
+    g_worldSceneIndexCount = 0u;
 }
 
 void __cdecl R_EndRegistration()
@@ -283,24 +470,89 @@ int __cdecl R_ConsoleTextWidth(
     return width;
 }
 
-void __cdecl R_AddCmdDrawStretchPic(float, float, float, float,
-    float, float, float, float, const float *, Material *) {}
-void __cdecl R_AddCmdDrawStretchPicFlipST(float, float, float, float,
-    float, float, float, float, const float *, Material *) {}
-void __cdecl R_AddCmdDrawStretchPicRotateXY(float, float, float, float,
-    float, float, float, float, float, const float *, Material *) {}
-void __cdecl R_AddCmdDrawStretchPicRotateST(float, float, float, float,
-    float, float, float, float, float, float, const float *, Material *) {}
-void __cdecl R_AddCmdDrawQuadPic(const float (*)[2], const float *, Material *) {}
-void __cdecl R_AddCmdDrawText(const char *, int, Font_s *, float, float,
-    float, float, float, const float *, int) {}
-void __cdecl R_AddCmdDrawTextSubtitle(const char *, int, Font_s *, float,
-    float, float, float, float, const float *, int, const float *, bool) {}
-void __cdecl R_AddCmdDrawTextWithCursor(const char *, int, Font_s *, float,
-    float, float, float, float, const float *, int, int, char) {}
-void __cdecl R_AddCmdDrawTextWithEffects(const char *, int, Font_s *, float,
-    float, float, float, float, const float *, int, const float *, Material *,
-    Material *, int, int, int, int) {}
+void __cdecl R_AddCmdDrawStretchPic(float x, float y, float w, float h,
+    float s0, float t0, float s1, float t1, const float *color,
+    Material *material)
+{
+    AppendUiRect(x, y, w, h, s0, t0, s1, t1, color, material);
+}
+void __cdecl R_AddCmdDrawStretchPicFlipST(float x, float y, float w, float h,
+    float s0, float t0, float s1, float t1, const float *color,
+    Material *material)
+{
+    AppendUiRect(x, y, w, h, t0, s0, t1, s1, color, material);
+}
+void __cdecl R_AddCmdDrawStretchPicRotateXY(float x, float y, float w, float h,
+    float s0, float t0, float s1, float t1, float rotation,
+    const float *color, Material *material)
+{
+    AppendUiRotatedRect(x, y, w, h, rotation, s0, t0, s1, t1,
+        color, material);
+}
+void __cdecl R_AddCmdDrawStretchPicRotateST(float x, float y, float w, float h,
+    float centerS, float centerT, float radiusST, float scaleFinalS,
+    float scaleFinalT, float rotation,
+    const float *color, Material *material)
+{
+    const float radians = rotation * (3.14159265358979323846f / 180.0f);
+    const float cosine = std::cos(radians);
+    const float sine = std::sin(radians);
+    const float stepS[2] = {
+        radiusST * cosine * scaleFinalS,
+        radiusST * sine * scaleFinalT};
+    const float stepT[2] = {
+        -radiusST * sine * scaleFinalS,
+        radiusST * cosine * scaleFinalT};
+    const float points[4][2] = {
+        {x, y}, {x + w, y}, {x + w, y + h}, {x, y + h}};
+    const float uvs[4][2] = {
+        {centerS - stepS[0] - stepT[0], centerT - stepS[1] - stepT[1]},
+        {centerS + stepS[0] - stepT[0], centerT + stepS[1] - stepT[1]},
+        {centerS + stepS[0] + stepT[0], centerT + stepS[1] + stepT[1]},
+        {centerS - stepS[0] + stepT[0], centerT - stepS[1] + stepT[1]}};
+    AppendUiQuadUvs(points, uvs, color, material);
+}
+void __cdecl R_AddCmdDrawQuadPic(const float (*verts)[2], const float *color,
+    Material *material)
+{
+    if (verts) AppendUiQuad(verts, 0.0f, 0.0f, 1.0f, 1.0f,
+        color, material);
+}
+void __cdecl R_AddCmdDrawText(const char *text, int maxChars, Font_s *font,
+    float x, float y, float xScale, float yScale, float rotation,
+    const float *color, int)
+{
+    AppendUiText(text, maxChars, font, x, y, xScale, yScale, rotation, color);
+}
+void __cdecl R_AddCmdDrawTextSubtitle(const char *text, int maxChars,
+    Font_s *font, float x, float y, float xScale, float yScale,
+    float rotation, const float *color, int, const float *, bool)
+{
+    AppendUiText(text, maxChars, font, x, y, xScale, yScale, rotation, color);
+}
+void __cdecl R_AddCmdDrawTextWithCursor(const char *text, int maxChars,
+    Font_s *font, float x, float y, float xScale, float yScale,
+    float rotation, const float *color, int, int cursorPos, char cursor)
+{
+    AppendUiText(text, maxChars, font, x, y, xScale, yScale, rotation, color);
+    if (cursorPos >= 0 && text)
+    {
+        const int prefixCount = std::min<int>(cursorPos,
+            static_cast<int>(std::strlen(text)));
+        const float cursorX = x + static_cast<float>(
+            R_TextWidth(text, prefixCount, font)) * xScale;
+        const char cursorText[2] = {cursor, '\0'};
+        AppendUiText(cursorText, 1, font, cursorX, y, xScale, yScale,
+            rotation, color);
+    }
+}
+void __cdecl R_AddCmdDrawTextWithEffects(const char *text, int maxChars,
+    Font_s *font, float x, float y, float xScale, float yScale,
+    float rotation, const float *color, int, const float *, Material *,
+    Material *, int, int, int, int)
+{
+    AppendUiText(text, maxChars, font, x, y, xScale, yScale, rotation, color);
+}
 void __cdecl R_AddCmdDrawConsoleText(char *, int, int, int, Font_s *, float,
     float, float, float, const float *, int) {}
 void __cdecl R_AddCmdDrawConsoleTextSubtitle(char *, int, int, int, Font_s *,
@@ -319,7 +571,10 @@ void __cdecl R_AddCmdBlendSavedScreenShockFlashed(float, float, float, float,
     float, float) {}
 
 std::uint32_t __cdecl R_GetLocalClientNum() { return 0; }
-void __cdecl R_ClearScene(std::uint32_t) {}
+void __cdecl R_ClearScene(std::uint32_t)
+{
+    g_dobjSubmissionCount = 0u;
+}
 
 void __cdecl R_InitSceneData(int localClientNum)
 {
@@ -398,7 +653,359 @@ void __cdecl R_AddOmniLightToScene(const float *, float, float, float, float) {}
 void __cdecl R_AddSpotLightToScene(const float *, const float *, float,
     float, float, float) {}
 void __cdecl R_SetLodOrigin(const refdef_s *) {}
-void __cdecl R_RenderScene(const refdef_s *) {}
+void __cdecl R_RenderScene(const refdef_s *refdef)
+{
+    iassert(refdef->tanHalfFovX > 0.0f);
+    iassert(refdef->tanHalfFovY > 0.0f);
+    iassert(refdef->height > 0u);
+    iassert(refdef->width > 0u);
+    iassert(refdef->localClientNum == 0);
+    if (!g_rendererWorldReady || !s_world.name)
+        Com_Error(ERR_DROP, "R_RenderScene: NULL worldmodel");
+
+    WebRendererSceneViewDesc view{};
+    view.x = refdef->x;
+    view.y = refdef->y;
+    view.width = refdef->width;
+    view.height = refdef->height;
+    view.tanHalfFovX = refdef->tanHalfFovX;
+    view.tanHalfFovY = refdef->tanHalfFovY;
+    std::memcpy(view.viewOrigin, refdef->vieworg, sizeof(view.viewOrigin));
+    std::memcpy(view.viewAxis, refdef->viewaxis, sizeof(view.viewAxis));
+    view.time = refdef->time;
+    view.zNear = refdef->zNear > 0.0f
+        ? refdef->zNear
+        : std::max(0.01f, r_znear ? r_znear->current.value : 4.0f);
+    view.localClientNum = refdef->localClientNum;
+    view.worldName = s_world.name;
+
+    mat4x4 viewMatrix{};
+    mat4x4 projectionMatrix{};
+    mat4x4 d3dViewProjectionMatrix{};
+    mat4x4 depthRangeConversion{};
+    mat4x4 webglViewProjectionMatrix{};
+    MatrixForViewer(viewMatrix, view.viewOrigin, view.viewAxis);
+    InfinitePerspectiveMatrix(
+        projectionMatrix, view.tanHalfFovX, view.tanHalfFovY, view.zNear);
+    MatrixMultiply44(
+        viewMatrix, projectionMatrix, d3dViewProjectionMatrix);
+    // Kisak's D3D9 projection emits NDC depth [0, 1], while WebGL clips in
+    // [-1, 1]. Preserve the canonical view/projection and apply only the
+    // graphics-API depth-range conversion at the backend boundary.
+    depthRangeConversion[0][0] = 1.0f;
+    depthRangeConversion[1][1] = 1.0f;
+    depthRangeConversion[2][2] = 2.0f;
+    depthRangeConversion[3][2] = -1.0f;
+    depthRangeConversion[3][3] = 1.0f;
+    MatrixMultiply44(d3dViewProjectionMatrix, depthRangeConversion,
+        webglViewProjectionMatrix);
+    std::memcpy(view.viewProjectionMatrix, webglViewProjectionMatrix,
+        sizeof(view.viewProjectionMatrix));
+
+    if (!g_gameDrivenFrameReported)
+    {
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Cgame view axes: forward=(%.3f %.3f %.3f), "
+            "right=(%.3f %.3f %.3f), up=(%.3f %.3f %.3f).\n",
+            view.viewAxis[0][0], view.viewAxis[0][1], view.viewAxis[0][2],
+            view.viewAxis[1][0], view.viewAxis[1][1], view.viewAxis[1][2],
+            view.viewAxis[2][0], view.viewAxis[2][1], view.viewAxis[2][2]);
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Renderer world bounds: mins=(%.1f %.1f %.1f), "
+            "maxs=(%.1f %.1f %.1f), surfaces=%d, model surfaces=%u, sky=%d.\n",
+            s_world.mins[0], s_world.mins[1], s_world.mins[2],
+            s_world.maxs[0], s_world.maxs[1], s_world.maxs[2],
+            s_world.surfaceCount,
+            s_world.modelCount > 0 ? s_world.models[0].surfaceCount : 0u,
+            s_world.skySurfCount);
+        std::uint32_t indexedLightmapSurfaces = 0u;
+        std::uint32_t litTechniqueSurfaces = 0u;
+        std::uint32_t primaryLightmapSamplerSurfaces = 0u;
+        std::uint32_t primaryLightmapAnyPassSurfaces = 0u;
+        const std::uint32_t worldSurfaceCount = s_world.modelCount > 0
+            ? std::min<std::uint32_t>(s_world.models[0].surfaceCount,
+                static_cast<std::uint32_t>(s_world.surfaceCount))
+            : 0u;
+        for (std::uint32_t index = 0u; index < worldSurfaceCount; ++index)
+        {
+            const GfxSurface &surface = s_world.dpvs.surfaces[index];
+            if (surface.lightmapIndex != 31u) ++indexedLightmapSurfaces;
+            const MaterialTechnique *lit = surface.material &&
+                surface.material->techniqueSet
+                ? surface.material->techniqueSet->techniques[7] : nullptr;
+            if (!lit) continue;
+            ++litTechniqueSurfaces;
+            if (lit->passCount > 0u &&
+                (lit->passArray[0].customSamplerFlags & 2u) != 0u)
+            {
+                ++primaryLightmapSamplerSurfaces;
+            }
+            bool anyPrimary = false;
+            for (std::uint32_t pass = 0u; pass < lit->passCount; ++pass)
+                anyPrimary = anyPrimary ||
+                    (lit->passArray[pass].customSamplerFlags & 2u) != 0u;
+            if (anyPrimary) ++primaryLightmapAnyPassSurfaces;
+        }
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Canonical world lightmap inventory: %u/%u indexed, "
+            "%u lit-technique, %u primary-first-pass, %u primary-any-pass, "
+            "%u lightmap pairs.\n",
+            indexedLightmapSurfaces, worldSurfaceCount, litTechniqueSurfaces,
+            primaryLightmapSamplerSurfaces,
+            primaryLightmapAnyPassSurfaces, s_world.lightmapCount);
+    }
+
+    if (!g_worldSceneSubmitted)
+    {
+        WebRendererWorldSceneCommand command;
+        const WebRendererWorldSceneResult build =
+            WebRenderer_BuildWorldSceneCommand(s_world, view, command);
+        if (build == WebRendererWorldSceneResult::NoVisibleSurface)
+        {
+            g_worldSceneSurfaceCount = 0u;
+            g_worldSceneVertexCount = 0u;
+            g_worldSceneIndexCount = 0u;
+        }
+        else if (build != WebRendererWorldSceneResult::Success)
+        {
+            Com_Error(ERR_DROP, "R_RenderScene: %s",
+                WebRenderer_WorldSceneResultString(build));
+            return;
+        }
+        else
+        {
+            const WebRendererWorldSurfaceDesc surface{
+                command.vertices.data(),
+                static_cast<std::uint32_t>(command.vertices.size()),
+                command.indices.data(),
+                static_cast<std::uint32_t>(command.indices.size()),
+                command.batches.data(),
+                static_cast<std::uint32_t>(command.batches.size()),
+            };
+            const WebRendererSurfaceResult submission =
+                WebRenderer_SetWorldSurface(surface);
+            if (submission != WebRendererSurfaceResult::Success)
+            {
+                Com_Error(ERR_DROP,
+                    "R_RenderScene: portable world command %s",
+                    WebRenderer_SurfaceResultString(submission));
+                return;
+            }
+            g_worldSceneSurfaceCount = command.surfaceCount;
+            g_worldSceneVertexCount =
+                static_cast<std::uint32_t>(command.vertices.size());
+            g_worldSceneIndexCount =
+                static_cast<std::uint32_t>(command.indices.size());
+            g_worldSceneSubmitted = true;
+            Web_Log(WebLogLevel::Info,
+                "[kisakcod-web] Renderer frontend submitted %u opaque world "
+                "surfaces in %zu canonical material/lightmap batches "
+                "(%u vertices, %u indices) from cgame view.\n",
+                g_worldSceneSurfaceCount, command.batches.size(),
+                g_worldSceneVertexCount, g_worldSceneIndexCount);
+        }
+    }
+
+    if (!g_staticModelSceneSubmitted)
+    {
+        WebRendererStaticModelSceneCommand command;
+        const WebRendererStaticModelSceneResult build =
+            WebRenderer_BuildStaticModelSceneCommand(s_world, command);
+        if (build == WebRendererStaticModelSceneResult::NoStaticModels)
+        {
+            g_staticModelSceneSubmitted = true;
+        }
+        else if (build != WebRendererStaticModelSceneResult::Success)
+        {
+            Com_Error(ERR_DROP, "R_RenderScene static XModels: %s",
+                WebRenderer_StaticModelSceneResultString(build));
+            return;
+        }
+        else
+        {
+            const WebRendererStaticModelSceneDesc scene{
+                command.vertices.data(),
+                static_cast<std::uint32_t>(command.vertices.size()),
+                command.indices.data(),
+                static_cast<std::uint32_t>(command.indices.size()),
+                command.instances.data(),
+                static_cast<std::uint32_t>(command.instances.size()),
+                command.batches.data(),
+                static_cast<std::uint32_t>(command.batches.size()),
+                command.modelCount,
+                command.surfaceCount,
+            };
+            const WebRendererSurfaceResult submission =
+                WebRenderer_SetStaticModelScene(scene);
+            if (submission != WebRendererSurfaceResult::Success)
+            {
+                Com_Error(ERR_DROP,
+                    "R_RenderScene: portable static XModel command %s",
+                    WebRenderer_SurfaceResultString(submission));
+                return;
+            }
+            g_staticModelSceneSubmitted = true;
+            Web_Log(WebLogLevel::Info,
+                "[kisakcod-web] Renderer frontend submitted %u canonical "
+                "static XModels as %zu shared XSurface batches (%zu vertices, "
+                "%zu indices, %zu instances).\n",
+                command.modelCount,
+                command.batches.size(),
+                command.vertices.size(),
+                command.indices.size(),
+                command.instances.size());
+        }
+    }
+
+    WebRendererDObjSceneCommand dynamicCommand;
+    const WebRendererDObjSceneResult dynamicBuild =
+        WebRenderer_BuildDObjSceneCommand(
+            g_dobjSubmissions.data(), g_dobjSubmissionCount,
+            dynamicCommand);
+    if (dynamicBuild == WebRendererDObjSceneResult::NoDObj)
+    {
+        WebRenderer_SetDynamicModelScene({});
+    }
+    else if (dynamicBuild != WebRendererDObjSceneResult::Success)
+    {
+        Com_Error(ERR_DROP, "R_RenderScene dynamic DObj: %s",
+            WebRenderer_DObjSceneResultString(dynamicBuild));
+        return;
+    }
+    else
+    {
+        // Canonical DObj skeleton translations are maintained relative to
+        // refdef.viewOffset for floating-origin precision. Native skinned
+        // draws restore scene.def.viewOffset as their placement; do the same
+        // at this portable frontend/backend boundary.
+        for (WebRendererSurfaceVertex &vertex : dynamicCommand.vertices)
+        {
+            vertex.position[0] += refdef->viewOffset[0];
+            vertex.position[1] += refdef->viewOffset[1];
+            vertex.position[2] += refdef->viewOffset[2];
+        }
+        const WebRendererWorldSurfaceDesc scene{
+            dynamicCommand.vertices.data(),
+            static_cast<std::uint32_t>(dynamicCommand.vertices.size()),
+            dynamicCommand.indices.data(),
+            static_cast<std::uint32_t>(dynamicCommand.indices.size()),
+            dynamicCommand.batches.data(),
+            static_cast<std::uint32_t>(dynamicCommand.batches.size()),
+        };
+        const WebRendererSurfaceResult submission =
+            WebRenderer_SetDynamicModelScene(scene);
+        if (submission != WebRendererSurfaceResult::Success)
+        {
+            Com_Error(ERR_DROP, "R_RenderScene dynamic DObj command %s",
+                WebRenderer_SurfaceResultString(submission));
+            return;
+        }
+        if (!g_dynamicModelSceneReported)
+        {
+            g_dynamicModelSceneReported = true;
+            float mins[3] = {FLT_MAX, FLT_MAX, FLT_MAX};
+            float maxs[3] = {-FLT_MAX, -FLT_MAX, -FLT_MAX};
+            for (const WebRendererSurfaceVertex &vertex :
+                 dynamicCommand.vertices)
+            {
+                for (std::size_t axis = 0u; axis < 3u; ++axis)
+                {
+                    mins[axis] = std::min(mins[axis], vertex.position[axis]);
+                    maxs[axis] = std::max(maxs[axis], vertex.position[axis]);
+                }
+            }
+            Web_Log(WebLogLevel::Info,
+                "[kisakcod-web] Canonical dynamic DObj scene: %u DObjs, "
+                "%u models, %u surfaces; bounds=(%.1f %.1f %.1f)-(%.1f "
+                "%.1f %.1f), first model='%s', first material='%s', "
+                "techniques=%u/%u/%u, base=%d/%d/%d.\n",
+                dynamicCommand.dobjCount, dynamicCommand.modelCount,
+                dynamicCommand.surfaceCount,
+                mins[0], mins[1], mins[2], maxs[0], maxs[1], maxs[2],
+                dynamicCommand.batches[0].modelName,
+                dynamicCommand.batches[0].materialName,
+                static_cast<unsigned int>(
+                    dynamicCommand.batches[0].technique),
+                dynamicCommand.batches.size() > 1u
+                    ? static_cast<unsigned int>(
+                        dynamicCommand.batches[1].technique) : 99u,
+                dynamicCommand.batches.size() > 2u
+                    ? static_cast<unsigned int>(
+                        dynamicCommand.batches[2].technique) : 99u,
+                dynamicCommand.batches[0].baseImage != nullptr,
+                dynamicCommand.batches.size() > 1u &&
+                    dynamicCommand.batches[1].baseImage != nullptr,
+                dynamicCommand.batches.size() > 2u &&
+                    dynamicCommand.batches[2].baseImage != nullptr);
+        }
+    }
+    if (g_uiBatches.empty())
+    {
+        WebRenderer_SetUiScene({});
+    }
+    else
+    {
+        const WebRendererUiSceneDesc uiScene{
+            g_uiVertices.data(),
+            static_cast<std::uint32_t>(g_uiVertices.size()),
+            g_uiIndices.data(),
+            static_cast<std::uint32_t>(g_uiIndices.size()),
+            g_uiBatches.data(),
+            static_cast<std::uint32_t>(g_uiBatches.size()),
+        };
+        const WebRendererSurfaceResult uiSubmission =
+            WebRenderer_SetUiScene(uiScene);
+        if (uiSubmission != WebRendererSurfaceResult::Success)
+        {
+            Com_Error(ERR_DROP, "R_RenderScene canonical 2D command %s",
+                WebRenderer_SurfaceResultString(uiSubmission));
+            return;
+        }
+        if (!g_uiSceneReported)
+        {
+            g_uiSceneReported = true;
+            Web_Log(WebLogLevel::Info,
+                "[kisakcod-web] Renderer frontend submitted the first "
+                "canonical 2D scene (%zu quads, %zu batches).\n",
+                g_uiVertices.size() / 4u, g_uiBatches.size());
+            std::array<const Material *, 12> reportedMaterials{};
+            std::size_t reportedCount = 0u;
+            for (const WebRendererUiBatchDesc &batch : g_uiBatches)
+            {
+                bool duplicate = false;
+                for (std::size_t index = 0u; index < reportedCount; ++index)
+                    duplicate |= reportedMaterials[index] ==
+                        batch.materialIdentity;
+                if (duplicate || reportedCount == reportedMaterials.size())
+                    continue;
+                reportedMaterials[reportedCount++] = batch.materialIdentity;
+                Web_Log(WebLogLevel::Info,
+                    "[kisakcod-web] Canonical 2D material '%s': image='%s' "
+                    "map=%u size=%ux%u sampler=0x%02x.\n",
+                    batch.materialName,
+                    batch.image && batch.image->name
+                        ? batch.image->name : "<solid/fallback>",
+                    batch.image ? batch.image->mapType : 0u,
+                    batch.image ? batch.image->width : 0u,
+                    batch.image ? batch.image->height : 0u,
+                    batch.samplerState);
+            }
+        }
+    }
+    view.worldSurfaceCount = g_worldSceneSurfaceCount;
+    view.worldVertexCount = g_worldSceneVertexCount;
+    view.worldIndexCount = g_worldSceneIndexCount;
+    view.geometrySubmitted = g_worldSceneSubmitted;
+    if (!WebRenderer_SubmitSceneView(view))
+        Com_Error(ERR_DROP, "R_RenderScene: invalid cgame view command");
+
+    if (!g_gameDrivenFrameReported)
+    {
+        g_gameDrivenFrameReported = true;
+        EmitEngineLifecycleTrace(
+            EngineLifecycleStage::GameDrivenFrame, s_world.name);
+    }
+}
 
 GfxBrushModel *__cdecl R_GetBrushModel(std::uint32_t index)
 {
@@ -407,8 +1014,20 @@ GfxBrushModel *__cdecl R_GetBrushModel(std::uint32_t index)
 
 void __cdecl R_AddBrushModelToSceneFromAngles(
     const GfxBrushModel *, const float *, const float *, std::uint16_t) {}
-void __cdecl R_AddDObjToScene(const DObj_s *, const cpose_t *,
-    std::uint32_t, std::uint32_t, float *, float) {}
+void __cdecl R_AddDObjToScene(const DObj_s *obj, const cpose_t *pose,
+    std::uint32_t entityNumber, std::uint32_t renderFlags, float *, float)
+{
+    // The canonical weapon path marks first-person DObjs with flags 3. Keep
+    // the callback identity and pose intact until R_RenderScene consumes it
+    // synchronously; ordinary entity DObjs can follow through this seam later.
+    if ((renderFlags & 3u) != 3u || !obj || !pose ||
+        g_dobjSubmissionCount >= g_dobjSubmissions.size())
+    {
+        return;
+    }
+    g_dobjSubmissions[g_dobjSubmissionCount++] = {
+        obj, pose, entityNumber, renderFlags};
+}
 void __cdecl R_LinkDObjEntity(std::uint32_t, std::uint32_t, float *, float) {}
 void __cdecl R_LinkBModelEntity(std::uint32_t, std::uint32_t,
     GfxBrushModel *) {}

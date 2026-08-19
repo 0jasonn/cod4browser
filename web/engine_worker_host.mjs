@@ -53,6 +53,9 @@ export function createEngineWorkerHost(canvas, { onLog, onAbort } = {})
         case "event":
             globalThis.dispatchEvent(new CustomEvent(message.name, { detail: message.detail }));
             break;
+        case "cursor":
+            canvas.style.cursor = message.visible ? "default" : "none";
+            break;
         case "log": onLog?.(message.message, message.level); break;
         case "abort": onAbort?.(message.reason); break;
         case "startup-error": rejectReady(new Error(message.error)); break;
@@ -139,6 +142,7 @@ export function createEngineWorkerHost(canvas, { onLog, onAbort } = {})
             return serializeFilesystemMutation(releaseMountedFilesystem);
         },
         resize(width, height) { worker.postMessage({ type: "resize", width, height }); },
+        input(event) { worker.postMessage({ type: "input", event }); },
         callProbe(functionName, buffers, argumentLayout) {
             const transferred = buffers.map((bytes) => {
                 const copy = Uint8Array.from(bytes);

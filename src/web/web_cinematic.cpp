@@ -9,7 +9,9 @@ char g_currentName[256]{};
 char g_nextName[256]{};
 unsigned int g_nextFlags = 0;
 bool g_started = false;
-bool g_finished = false;
+// Match the canonical unavailable-cinematic backend: with no native Bink item
+// active, presentation is already complete rather than pending forever.
+bool g_finished = true;
 }
 
 void __cdecl R_Cinematic_SyncNow()
@@ -64,7 +66,7 @@ void R_Cinematic_StopPlayback()
 {
     g_currentName[0] = '\0';
     g_started = false;
-    g_finished = false;
+    g_finished = true;
 }
 
 void R_Cinematic_UnsetNextPlayback() { g_nextName[0] = '\0'; }

@@ -5,6 +5,7 @@ const forwardedEvents = [
     "kisakcod:renderer-shader", "kisakcod:schedule", "kisakcod:engine-asset",
     "kisakcod:renderer-texture", "kisakcod:engine-world-surface",
     "kisakcod:renderer-surface", "kisakcod:renderer-surface-draw",
+    "kisakcod:renderer-scene-view", "kisakcod:renderer-scene-frame",
     "kisakcod:state", "kisakcod:frame",
     "kisakcod:system", "kisakcod:engine", "kisakcod:runtime",
     "kisakcod:database",
@@ -124,6 +125,17 @@ globalThis.addEventListener("message", (event) => {
                     module.canvas.height = message.height;
                 }
                 break;
+            case "input": {
+                const input = message.event;
+                if (!input || !module) break;
+                if (input.type === "key") {
+                    module._KisakWeb_QueueKeyEvent?.(input.key, input.down ? 1 : 0);
+                } else if (input.type === "mouse-move") {
+                    module._KisakWeb_QueueMouseMove?.(
+                        input.x, input.y, input.dx, input.dy);
+                }
+                break;
+            }
             default: break;
             }
         } catch (error) {

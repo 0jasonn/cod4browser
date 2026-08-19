@@ -62,6 +62,26 @@
             <header class="panel-heading">
                 <h2 id="console-title">Console log</h2>
             </header>
+            <form id="engine-command-form" class="console-command">
+                <label for="engine-command-input">Engine command</label>
+                <div class="console-command-row">
+                    <input
+                        id="engine-command-input"
+                        type="text"
+                        maxlength="1023"
+                        autocomplete="off"
+                        autocapitalize="off"
+                        spellcheck="false"
+                        placeholder="map KiLlHoUsE"
+                        disabled>
+                    <button
+                        id="engine-command-submit"
+                        class="secondary-action"
+                        type="submit"
+                        disabled>Run</button>
+                </div>
+                <output id="engine-command-status" for="engine-command-input"></output>
+            </form>
             <pre id="boot-log" aria-live="polite"></pre>
         </section>
     </main>
@@ -75,6 +95,9 @@
         <span id="system-status"></span>
         <span id="archive-status"></span>
         <span id="engine-asset-status"></span>
+        <span id="renderer-scene-view-evidence"></span>
+        <span id="renderer-scene-frame-evidence"></span>
+        <span id="engine-lifecycle-evidence"></span>
         <dl id="asset-manifest"></dl>
         <p id="asset-retention"></p>
     </div>

@@ -1,7 +1,11 @@
 #include <ode/odemath.h>
+#include <client/cl_input.h>
+#include <client/cl_scrn.h>
+#include <client/client.h>
 #include <qcommon/cmd.h>
 #include <qcommon/com_init_trace.h>
 #include <qcommon/qcommon.h>
+#include <server/server.h>
 #include <qcommon/system.h>
 #include <universal/dvar.h>
 #include <web/web_archive_job.h>
@@ -15,6 +19,7 @@
 #include <web/web_renderer.h>
 #include <web/web_system.h>
 
+#include <algorithm>
 #include <cmath>
 #include <array>
 #include <cstdint>
@@ -35,6 +40,8 @@ enum class BootstrapPhase : std::uint8_t
 
 BootstrapPhase g_bootstrapPhase = BootstrapPhase::Initializing;
 WebFrameInfo g_scheduledFrame{};
+std::uint32_t g_lastCGameFrameMilliseconds = 0u;
+std::uint32_t g_cgameFrameAccumulatorMilliseconds = 0u;
 
 bool NearlyEqual(float actual, float expected, float tolerance = 0.0001f)
 {
@@ -240,6 +247,79 @@ CooperativeTaskResult CommandTask(
     return {CooperativeTaskState::Progress, 0u, 1u};
 }
 
+CooperativeTaskResult CGameFrameTask(
+    std::uint32_t,
+    const CooperativeTaskBudget &,
+    void *userData)
+{
+    static std::uint32_t activeFrameCount = 0u;
+    // CA_ACTIVE is enough to enter the native SP frame order. Do not wait for
+    // CL_IsCgameInitialized here: that flag is set by CL_FirstSnapshot, and the
+    // first snapshot itself is produced only after SV_Frame runs. Gating on
+    // both states deadlocks the authoritative server at the load-screen view.
+    if (!CL_IsLocalClientInGame(0))
+    {
+        g_lastCGameFrameMilliseconds = 0u;
+        g_cgameFrameAccumulatorMilliseconds = 0u;
+        return {CooperativeTaskState::Idle, 0u, 0u};
+    }
+
+    const auto *frame = static_cast<const WebFrameInfo *>(userData);
+    int frameMilliseconds = 16;
+    if (g_lastCGameFrameMilliseconds != 0u)
+    {
+        const std::uint32_t elapsed =
+            frame->monotonicMilliseconds - g_lastCGameFrameMilliseconds;
+        g_lastCGameFrameMilliseconds = frame->monotonicMilliseconds;
+
+        // An Emscripten main loop in an OffscreenCanvas Worker is not
+        // guaranteed to be display-vsynced. It can run several callbacks in
+        // one millisecond. Never invent a 1 ms engine step for those calls:
+        // doing so advances the authoritative SP clock faster than wall time,
+        // and the canonical integer velocity snap can then preserve small
+        // components indefinitely. Accumulate real time and keep gameplay at
+        // a maximum of 125 Hz while the renderer remains free to draw on every
+        // browser callback.
+        g_cgameFrameAccumulatorMilliseconds += std::min(elapsed, 100u);
+        if (g_cgameFrameAccumulatorMilliseconds < 8u)
+            return {CooperativeTaskState::Idle, 0u, 0u};
+
+        frameMilliseconds = static_cast<int>(
+            std::min(g_cgameFrameAccumulatorMilliseconds, 100u));
+        g_cgameFrameAccumulatorMilliseconds = 0u;
+    }
+    else
+    {
+        g_lastCGameFrameMilliseconds = frame->monotonicMilliseconds;
+    }
+    // Native Com_Frame refreshes this clock before the server/client frame.
+    // CL_CreateNewCommands derives frame_msec from it; leaving it unchanged
+    // makes the canonical mouse path discard motion as a zero-duration sample.
+    com_frameTime = static_cast<int>(frame->monotonicMilliseconds);
+
+    // The browser pump owns only timing. Preserve the native SP frame order.
+    // SV_Frame consumes the command produced by the previous cgame frame;
+    // CG_DrawActiveFrame calls canonical CL_Input while SCR_UpdateScreen builds
+    // this frame, producing the next command. Sending another command here
+    // would duplicate the same serverTime and Pmove would correctly ignore it.
+    frameMilliseconds = SV_Frame(frameMilliseconds);
+    CL_RunOncePerClientFrame(0, frameMilliseconds);
+    Cbuf_Execute(0, CL_ControllerIndexFromClientNum(0));
+    CL_Frame(0, frameMilliseconds);
+    SCR_UpdateScreen();
+    ++activeFrameCount;
+    if (activeFrameCount == 1u || activeFrameCount == 120u)
+    {
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Canonical SP pump frame %u: msec=%d, "
+            "levelTime=%d, paused=%d, firstSnapshot=%d.\n",
+            activeFrameCount, frameMilliseconds, sv.levelTime,
+            cl_paused ? cl_paused->current.integer : -1,
+            CL_IsCgameInitialized(0) ? 1 : 0);
+    }
+    return {CooperativeTaskState::Progress, 0u, 1u};
+}
+
 CooperativeTaskResult SurfaceTask(
     std::uint32_t,
     const CooperativeTaskBudget &,
@@ -284,6 +364,7 @@ CooperativeTaskResult RendererTask(
     void *userData)
 {
     const auto *frame = static_cast<const WebFrameInfo *>(userData);
+    (void)CGameFrameTask(0u, {0u, 1u}, userData);
     WebRenderer_DrawFrame(*frame);
     return {CooperativeTaskState::Progress, 0u, 1u};
 }

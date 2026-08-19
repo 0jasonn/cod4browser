@@ -21,6 +21,16 @@ const assetControl = document.querySelector(".asset-control");
 const assetRetention = document.querySelector("#asset-retention");
 const archiveStatus = document.querySelector("#archive-status");
 const engineAssetStatus = document.querySelector("#engine-asset-status");
+const engineCommandForm = document.querySelector("#engine-command-form");
+const engineCommandInput = document.querySelector("#engine-command-input");
+const engineCommandSubmit = document.querySelector("#engine-command-submit");
+const engineCommandStatus = document.querySelector("#engine-command-status");
+const rendererSceneViewEvidence = document.querySelector(
+    "#renderer-scene-view-evidence");
+const rendererSceneFrameEvidence = document.querySelector(
+    "#renderer-scene-frame-evidence");
+const engineLifecycleEvidence = document.querySelector(
+    "#engine-lifecycle-evidence");
 
 const runtime = {
     state: "loading",
@@ -60,8 +70,38 @@ const runtime = {
     rendererSurface: { state: "idle", message: "Waiting for an engine surface" },
     rendererTexture: { state: "idle", message: "Waiting for a supported engine image" },
     rendererShader: { state: "idle", message: "Waiting for a retail shader contract" },
+    rendererSceneView: null,
+    rendererSceneFrame: null,
+    engineLifecycle: [],
+    input: {
+        keyEvents: 0,
+        mouseEvents: 0,
+        pointerLocked: false,
+    },
 };
 globalThis.__KISAKCOD_WEB__ = runtime;
+
+async function submitCanonicalCommand(command) {
+    const text = String(command).trim();
+    if (!text || new TextEncoder().encode(text).byteLength > 1023) {
+        throw new Error("Enter a command between 1 and 1023 UTF-8 bytes.");
+    }
+    if (typeof runtime.module?.callProbe !== "function") {
+        throw new Error("The engine Worker is not ready.");
+    }
+    const bytes = new TextEncoder().encode(`${text}\0`);
+    const accepted = await runtime.module.callProbe(
+        "_KisakWeb_SubmitCanonicalCommand",
+        [bytes],
+        [{ kind: "pointer", index: 0 }],
+    );
+    if (accepted !== 1) {
+        throw new Error("The canonical client/server runtime is not ready.");
+    }
+    return accepted;
+}
+
+runtime.submitCanonicalCommand = submitCanonicalCommand;
 
 let assetStore = null;
 let filesystemBridge = null;
@@ -111,8 +151,8 @@ function setState(state, message) {
 function appendLog(message, level = "info") {
     const text = String(message);
     runtime.logs.push({ level, text });
-    if (runtime.logs.length > 80) {
-        runtime.logs.splice(0, runtime.logs.length - 80);
+    if (runtime.logs.length > 512) {
+        runtime.logs.splice(0, runtime.logs.length - 512);
     }
 
     bootLog.textContent = runtime.logs
@@ -650,6 +690,116 @@ function resizeCanvas() {
     runtime.module?.resize?.(width, height);
 }
 
+function browserKeyToEngineKey(event)
+{
+    const { code } = event;
+    if (/^Key[A-Z]$/.test(code)) return code.charCodeAt(3) + 32;
+    if (/^Digit[0-9]$/.test(code)) return code.charCodeAt(5);
+    if (/^F(?:[1-9]|1[0-5])$/.test(code)) return 0xA7 + Number(code.slice(1)) - 1;
+    const keys = {
+        Tab: 0x09, Enter: 0x0D, Escape: 0x1B, Space: 0x20,
+        Backspace: 0x7F, CapsLock: 0x97, Pause: 0x99,
+        ArrowUp: 0x9A, ArrowDown: 0x9B, ArrowLeft: 0x9C,
+        ArrowRight: 0x9D, AltLeft: 0x9E, AltRight: 0x9E,
+        ControlLeft: 0x9F, ControlRight: 0x9F,
+        ShiftLeft: 0xA0, ShiftRight: 0xA0, Insert: 0xA1,
+        Delete: 0xA2, PageDown: 0xA3, PageUp: 0xA4,
+        Home: 0xA5, End: 0xA6,
+        Minus: 0x2D, Equal: 0x3D, BracketLeft: 0x5B,
+        BracketRight: 0x5D, Backslash: 0x5C, Semicolon: 0x3B,
+        Quote: 0x27, Backquote: 0x60, Comma: 0x2C, Period: 0x2E,
+        Slash: 0x2F,
+        NumpadEnter: 0xBF, NumpadDivide: 0xC2, NumpadSubtract: 0xC3,
+        NumpadAdd: 0xC4, NumLock: 0xC5, NumpadMultiply: 0xC6,
+    };
+    return keys[code] ?? 0;
+}
+
+function installBrowserInput()
+{
+    const heldKeys = new Set();
+    const heldMouseButtons = new Set();
+    const sendKey = (key, down) => {
+        if (!key) return;
+        runtime.module?.input?.({ type: "key", key, down });
+        runtime.input.keyEvents += 1;
+    };
+    const mouseButtonKey = (button) => [0xC8, 0xCA, 0xC9, 0xCB, 0xCC][button] ?? 0;
+    const inputActive = () => document.pointerLockElement === canvas ||
+        document.activeElement === canvas;
+    const releaseHeldInput = () => {
+        for (const key of heldKeys) sendKey(key, false);
+        for (const key of heldMouseButtons) sendKey(key, false);
+        heldKeys.clear();
+        heldMouseButtons.clear();
+    };
+
+    globalThis.addEventListener("keydown", (event) => {
+        if (!inputActive()) return;
+        const key = browserKeyToEngineKey(event);
+        if (!key) return;
+        event.preventDefault();
+        if (heldKeys.has(key)) return;
+        heldKeys.add(key);
+        sendKey(key, true);
+    });
+    globalThis.addEventListener("keyup", (event) => {
+        const key = browserKeyToEngineKey(event);
+        if (!key || (!inputActive() && !heldKeys.has(key))) return;
+        event.preventDefault();
+        heldKeys.delete(key);
+        sendKey(key, false);
+    });
+    canvas.addEventListener("mousedown", (event) => {
+        canvas.focus();
+        event.preventDefault();
+        const key = mouseButtonKey(event.button);
+        if (key && !heldMouseButtons.has(key)) {
+            heldMouseButtons.add(key);
+            sendKey(key, true);
+        }
+        if (document.pointerLockElement !== canvas && canvas.requestPointerLock) {
+            try {
+                Promise.resolve(canvas.requestPointerLock({ unadjustedMovement: true }))
+                    .catch(() => canvas.requestPointerLock());
+            } catch (_) {
+                canvas.requestPointerLock();
+            }
+        }
+    });
+    globalThis.addEventListener("mouseup", (event) => {
+        const key = mouseButtonKey(event.button);
+        if (!key || !heldMouseButtons.has(key)) return;
+        event.preventDefault();
+        heldMouseButtons.delete(key);
+        sendKey(key, false);
+    });
+    globalThis.addEventListener("mousemove", (event) => {
+        if (document.pointerLockElement !== canvas ||
+            (!event.movementX && !event.movementY)) return;
+        runtime.module?.input?.({
+            type: "mouse-move",
+            x: Math.round(canvas.width * 0.5),
+            y: Math.round(canvas.height * 0.5),
+            dx: Math.round(event.movementX),
+            dy: Math.round(event.movementY),
+        });
+        runtime.input.mouseEvents += 1;
+    });
+    canvas.addEventListener("wheel", (event) => {
+        if (!inputActive() || event.deltaY === 0) return;
+        event.preventDefault();
+        const key = event.deltaY < 0 ? 0xCE : 0xCD;
+        sendKey(key, true);
+        sendKey(key, false);
+    }, { passive: false });
+    document.addEventListener("pointerlockchange", () => {
+        runtime.input.pointerLocked = document.pointerLockElement === canvas;
+        if (!runtime.input.pointerLocked) releaseHeldInput();
+    });
+    globalThis.addEventListener("blur", releaseHeldInput);
+}
+
 globalThis.addEventListener("kisakcod:state", (event) => {
     if (event.detail.state === "renderer-lost") {
         runtime.contextLosses += 1;
@@ -693,11 +843,50 @@ globalThis.addEventListener("kisakcod:database", (event) => {
     runtime.database = { ...runtime.database, ...event.detail };
 });
 
+globalThis.addEventListener("kisakcod:renderer-scene-view", (event) => {
+    runtime.rendererSceneView = structuredClone(event.detail);
+    rendererSceneViewEvidence.textContent = JSON.stringify(
+        runtime.rendererSceneView);
+});
+
+globalThis.addEventListener("kisakcod:renderer-scene-frame", (event) => {
+    runtime.rendererSceneFrame = structuredClone(event.detail);
+    rendererSceneFrameEvidence.textContent = JSON.stringify(
+        runtime.rendererSceneFrame);
+});
+
+globalThis.addEventListener("kisakcod:engine-lifecycle", (event) => {
+    runtime.engineLifecycle.push(structuredClone(event.detail));
+    if (runtime.engineLifecycle.length > 512) runtime.engineLifecycle.shift();
+    engineLifecycleEvidence.textContent = JSON.stringify(
+        runtime.engineLifecycle);
+});
+
 const resizeObserver = new ResizeObserver(resizeCanvas);
 resizeObserver.observe(canvas);
 resizeCanvas();
 
 appendLog("Launcher initialized; requesting the browser engine module.");
+
+engineCommandForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const command = engineCommandInput.value.trim();
+    engineCommandInput.disabled = true;
+    engineCommandSubmit.disabled = true;
+    engineCommandStatus.textContent = "Submitting to the engine Worker…";
+    try {
+        await submitCanonicalCommand(command);
+        engineCommandInput.value = "";
+        engineCommandStatus.textContent = `Accepted: ${command}`;
+        appendLog(`[kisakcod-web] Console accepted: ${command}`);
+    } catch (error) {
+        engineCommandStatus.textContent = error?.message ?? String(error);
+    } finally {
+        engineCommandInput.disabled = false;
+        engineCommandSubmit.disabled = false;
+        engineCommandInput.focus();
+    }
+});
 
 selectInstallButton.addEventListener("click", async () => {
     if (!assetStore) {
@@ -759,6 +948,9 @@ try {
         },
     });
     await runtime.module.ready;
+    installBrowserInput();
+    engineCommandInput.disabled = false;
+    engineCommandSubmit.disabled = false;
     assetStore = createBrowserAssetStore(runtime.module, { onState: publishAssetState });
     filesystemBridge = runtime.module;
     runtime.filesystemBridge = filesystemBridge;
