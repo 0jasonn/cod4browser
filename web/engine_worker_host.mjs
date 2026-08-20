@@ -157,7 +157,14 @@ export function createEngineWorkerHost(canvas, { onLog, onAbort, onAudioDiagnost
             return serializeFilesystemMutation(releaseMountedFilesystem);
         },
         resize(width, height) { worker.postMessage({ type: "resize", width, height }); },
-        input(event) { worker.postMessage({ type: "input", event }); },
+        input(event) {
+            // Boundary-only observability for browser input tests; canonical
+            // CL_KeyEvent remains the sole consumer of gameplay input.
+            globalThis.dispatchEvent(new CustomEvent("kisakcod:input", {
+                detail: { ...event },
+            }));
+            worker.postMessage({ type: "input", event });
+        },
         callProbe(functionName, buffers, argumentLayout) {
             const transferred = buffers.map((bytes) => {
                 const copy = Uint8Array.from(bytes);

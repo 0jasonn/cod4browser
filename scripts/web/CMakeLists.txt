@@ -188,6 +188,7 @@ add_executable(KisakCOD-web
     "${SRC_DIR}/universal/memfile.cpp"
     "${SRC_DIR}/web/web_archive_job.cpp"
     "${SRC_DIR}/web/web_client_server_lifecycle.cpp"
+    "${SRC_DIR}/web/web_browser_bindings.cpp"
     "${SRC_DIR}/web/web_canonical_gfxworld.cpp"
     "${SRC_DIR}/web/web_assertive.cpp"
     "${SRC_DIR}/web/web_cinematic.cpp"

@@ -19,12 +19,12 @@
 #include <script/scr_variable.h>
 #include <script/scr_vm_runtime.h>
 #include <stringed/stringed_hooks.h>
-#include <ui/keycodes.h>
 #include <universal/dvar.h>
 #include <universal/com_files.h>
 #include <universal/com_memory.h>
 #include <universal/physicalmemory.h>
 #include <web/web_system.h>
+#include <web/web_browser_bindings.h>
 #include <xanim/dobj_runtime_init.h>
 #include <xanim/xanim_runtime_init.h>
 
@@ -97,30 +97,13 @@ void PublishLifecycle(const EngineLifecycleTraceEvent &event, void *)
 
 void InstallBrowserProfileDefaultBindings()
 {
-    struct Binding
-    {
-        int key;
-        const char *command;
+    const auto lookup = [](std::uint32_t key) {
+        return Key_GetBinding(0, key);
     };
-    constexpr Binding DEFAULT_BINDINGS[] = {
-        {'w', "+forward"},
-        {'s', "+back"},
-        {'a', "+moveleft"},
-        {'d', "+moveright"},
-        {K_SPACE, "+gostand"},
-        {K_SHIFT, "+sprint"},
-        {K_MOUSE1, "+attack"},
-        {K_MOUSE2, "toggleads"},
+    const auto setter = [](std::uint32_t key, const char *command) {
+        Key_SetBinding(0, static_cast<int32_t>(key), const_cast<char *>(command));
     };
-    std::uint32_t installed = 0u;
-    for (const Binding &binding : DEFAULT_BINDINGS)
-    {
-        const char *current = Key_GetBinding(0, binding.key);
-        if (current && *current)
-            continue;
-        Key_SetBinding(0, binding.key, const_cast<char *>(binding.command));
-        ++installed;
-    }
+    const std::uint32_t installed = InstallWebBrowserDefaultBindings(lookup, setter);
     Web_Log(WebLogLevel::Info,
         "[kisakcod-web] Browser profile installed %u missing canonical "
         "default bindings.\n", installed);
