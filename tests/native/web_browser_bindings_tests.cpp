@@ -1,5 +1,8 @@
 #include "web/web_browser_bindings.h"
 
+#include <ui/keycodes.h>
+
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
@@ -30,10 +33,18 @@ int main()
 {
     std::size_t count = 0;
     const WebBrowserDefaultBinding *defaults = WebBrowserDefaultBindings(&count);
-    assert(count == 11);
-    assert(defaults[8].key == 'r' && std::strcmp(defaults[8].command, "+reload") == 0);
-    assert(defaults[9].key == 0xCE && std::strcmp(defaults[9].command, "weapnext") == 0);
-    assert(defaults[10].key == 0xCD && std::strcmp(defaults[10].command, "weapprev") == 0);
+    constexpr std::array<WebBrowserDefaultBinding, 11> expected = {{
+        {'w', "+forward"}, {'s', "+back"}, {'a', "+moveleft"},
+        {'d', "+moveright"}, {K_SPACE, "+gostand"}, {K_SHIFT, "+sprint"},
+        {K_MOUSE1, "+attack"}, {K_MOUSE2, "toggleads"}, {'r', "+reload"},
+        {K_MWHEELUP, "weapnext"}, {K_MWHEELDOWN, "weapprev"},
+    }};
+    assert(count == expected.size());
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        assert(defaults[i].key == expected[i].key);
+        assert(std::strcmp(defaults[i].command, expected[i].command) == 0);
+    }
 
     bindings.clear();
     writes.clear();
@@ -44,19 +55,25 @@ int main()
     bindings.clear();
     bindings['r'] = "+custom_reload";
     bindings[0xCE] = "weaplast";
+    bindings[0xCD] = "+custom_previous";
     writes.clear();
-    assert(InstallWebBrowserDefaultBindings(lookup, setter) == count - 2);
+    assert(InstallWebBrowserDefaultBindings(lookup, setter) == count - 3);
     assert(bindings['r'] == "+custom_reload");
     assert(bindings[0xCE] == "weaplast");
-    assert(writes.size() == count - 2);
+    assert(bindings[0xCD] == "+custom_previous");
+    assert(writes.size() == count - 3);
 
-    for (const WebBrowserDefaultBinding &binding :
-        std::vector<WebBrowserDefaultBinding>(defaults, defaults + count))
+    bindings.clear();
+    for (std::size_t i = 0; i < count; ++i)
     {
-        bindings[static_cast<std::uint32_t>(binding.key)] = binding.command;
+        const std::string custom = "custom_binding_" + std::to_string(i);
+        bindings[static_cast<std::uint32_t>(defaults[i].key)] = custom;
     }
     writes.clear();
     assert(InstallWebBrowserDefaultBindings(lookup, setter) == 0);
     assert(writes.empty());
+    for (std::size_t i = 0; i < count; ++i)
+        assert(bindings[static_cast<std::uint32_t>(defaults[i].key)] ==
+            "custom_binding_" + std::to_string(i));
     return 0;
 }

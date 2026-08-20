@@ -16,6 +16,7 @@ export function createEngineWorkerHost(canvas, { onLog, onAbort, onAudioDiagnost
     if (!canvas || typeof canvas.transferControlToOffscreen !== "function") {
         throw new Error("This browser does not support a Worker-owned OffscreenCanvas.");
     }
+    const observeInput = globalThis.__KISAKCOD_WORKER_TEST_CONFIG__?.observeInput === true;
     const worker = new Worker(new URL("./engine_worker.mjs", import.meta.url), {
         type: "module",
         name: "kisakcod-engine",
@@ -158,11 +159,13 @@ export function createEngineWorkerHost(canvas, { onLog, onAbort, onAudioDiagnost
         },
         resize(width, height) { worker.postMessage({ type: "resize", width, height }); },
         input(event) {
-            // Boundary-only observability for browser input tests; canonical
-            // CL_KeyEvent remains the sole consumer of gameplay input.
-            globalThis.dispatchEvent(new CustomEvent("kisakcod:input", {
-                detail: { ...event },
-            }));
+            if (observeInput) {
+                // Boundary-only observability for browser input tests; canonical
+                // CL_KeyEvent remains the sole consumer of gameplay input.
+                globalThis.dispatchEvent(new CustomEvent("kisakcod:input", {
+                    detail: { ...event },
+                }));
+            }
             worker.postMessage({ type: "input", event });
         },
         callProbe(functionName, buffers, argumentLayout) {
