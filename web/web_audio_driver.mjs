@@ -87,6 +87,9 @@ export class WebAudioDriver {
             return this.deleteBuffer(command.id);
         case "buffer-upload":
             return this.uploadBuffer(command);
+        case "device-reset":
+            this.resetResources();
+            return true;
         case "source-property":
         case "source-play":
         case "source-pause":
@@ -108,18 +111,21 @@ export class WebAudioDriver {
             this.sources.set(id, {
                 generation: 0, bufferId: 0, gain: 1, pitch: 1, looping: false,
                 offset: 0, x: 0, y: 0, z: 0, state: "stopped", node: null,
-                gainNode: null, panner: null, startedAt: 0,
+                gainNode: null, panner: null, startedAt: 0, activeBufferId: 0,
             });
         }
         return true;
     }
 
     cleanup(source) {
-        try { source.node?.stop(); } catch {}
-        source.node?.disconnect?.();
-        source.gainNode?.disconnect?.();
-        source.panner?.disconnect?.();
+        const node = source.node;
+        const gainNode = source.gainNode;
+        const panner = source.panner;
         source.node = source.gainNode = source.panner = null;
+        try { node?.stop(); } catch {}
+        node?.disconnect?.();
+        gainNode?.disconnect?.();
+        panner?.disconnect?.();
     }
 
     deleteSource(id) {
@@ -136,6 +142,13 @@ export class WebAudioDriver {
         if (!this.validId(id, MAX_BUFFERS)) return false;
         this.buffers.delete(id);
         for (const source of this.sources.values()) {
+            if (source.activeBufferId === id || source.bufferId === id) {
+                source.generation++;
+                this.cleanup(source);
+                source.state = "stopped";
+                source.offset = 0;
+                source.activeBufferId = 0;
+            }
             if (source.bufferId === id) source.bufferId = 0;
         }
         return true;
@@ -191,7 +204,12 @@ export class WebAudioDriver {
     startSource(source, generation) {
         const context = this.ensureContext();
         const buffer = this.buffers.get(source.bufferId);
-        if (!context || !buffer || !context.createBufferSource) return false;
+        if (!context || !buffer || !context.createBufferSource) {
+            this.cleanup(source);
+            source.activeBufferId = 0;
+            source.state = "stopped";
+            return false;
+        }
         this.cleanup(source);
         const node = context.createBufferSource();
         node.buffer = buffer;
@@ -199,10 +217,9 @@ export class WebAudioDriver {
         node.playbackRate.value = source.pitch;
         const gainNode = context.createGain?.();
         const panner = context.createPanner?.();
-        if (gainNode) {
-            gainNode.gain.value = source.gain;
-            node.connect(panner ?? gainNode);
-        }
+        if (gainNode) gainNode.gain.value = source.gain;
+        if (panner) node.connect(panner);
+        else if (gainNode) node.connect(gainNode);
         if (panner) {
             panner.panningModel = "equalpower";
             panner.distanceModel = "inverse";
@@ -211,28 +228,41 @@ export class WebAudioDriver {
             panner.rolloffFactor = 0;
             panner.connect(gainNode ?? context.destination);
         }
-        if (!panner && !gainNode) node.connect?.(context.destination);
+        if (gainNode) gainNode.connect(context.destination);
+        else if (!panner) node.connect?.(context.destination);
         const capturedGeneration = generation;
         node.onended = () => {
             if (source.generation !== capturedGeneration || source.node !== node) return;
+            node.disconnect?.();
+            gainNode?.disconnect?.();
+            panner?.disconnect?.();
             source.state = source.looping ? "playing" : "stopped";
+            source.activeBufferId = 0;
             source.node = source.gainNode = source.panner = null;
         };
         source.node = node;
         source.gainNode = gainNode;
         source.panner = panner;
+        source.activeBufferId = source.bufferId;
         source.state = "playing";
         source.startedAt = context.currentTime ?? 0;
         try { node.start(0, clamp(source.offset, 0, buffer.duration)); }
-        catch (error) { this.cleanup(source); source.state = "stopped"; this.diagnostic(error); return false; }
+        catch (error) {
+            this.cleanup(source); source.activeBufferId = 0;
+            source.state = "stopped"; this.diagnostic(error); return false;
+        }
         return true;
     }
 
     sourceCommand(command) {
         if (!this.validSource(command) || !this.createSource(command.sourceId)) return false;
+        if (!Number.isInteger(command.generation)) {
+            this.diagnostic("Rejected Web Audio source command without a generation.");
+            return false;
+        }
         const source = this.sources.get(command.sourceId);
-        if (Number.isInteger(command.generation) && command.generation < source.generation &&
-            command.op !== "source-property") return true;
+        if (command.generation < source.generation)
+            return true;
         if (Number.isFinite(command.gain)) source.gain = clamp(command.gain, 0, 16);
         if (Number.isFinite(command.pitch)) source.pitch = clamp(command.pitch, 0.001, 16);
         if (Number.isFinite(command.offset)) source.offset = Math.max(0, command.offset);
@@ -247,15 +277,24 @@ export class WebAudioDriver {
                 const current = this.context?.currentTime ?? source.startedAt;
                 source.offset += Math.max(0, current - source.startedAt) * source.pitch;
             }
-            this.cleanup(source); source.state = "paused"; return true;
+            this.cleanup(source); source.activeBufferId = 0;
+            source.state = "paused"; return true;
         }
-        this.cleanup(source); source.offset = 0; source.state = "stopped"; return true;
+        this.cleanup(source); source.offset = 0; source.activeBufferId = 0;
+        source.state = "stopped"; return true;
+    }
+
+    resetResources() {
+        for (const source of this.sources.values()) {
+            source.generation++;
+            this.cleanup(source);
+        }
+        this.sources.clear();
+        this.buffers.clear();
     }
 
     dispose() {
-        for (const source of this.sources.values()) this.cleanup(source);
-        this.sources.clear();
-        this.buffers.clear();
+        this.resetResources();
         if (this.gestureTarget && this.gestureHandler) {
             for (const type of ["pointerdown", "keydown", "touchstart"])
                 this.gestureTarget.removeEventListener(type, this.gestureHandler);

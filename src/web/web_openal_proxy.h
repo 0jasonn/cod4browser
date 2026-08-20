@@ -99,6 +99,9 @@ constexpr ALenum AL_EAXREVERB_ROOM_ROLLOFF_FACTOR = 0x0016;
 constexpr ALenum AL_EAXREVERB_DECAY_HFLIMIT = 0x0017;
 constexpr ALCenum ALC_FREQUENCY = 0x1007;
 
+// Pure timing helper shared by the proxy and deterministic native tests.
+double WebOpenAL_RebaseStarted(double nowSeconds, float offsetSeconds, float pitch);
+
 ALenum alGetError();
 void alDistanceModel(ALenum);
 void alListener3f(ALenum, ALfloat, ALfloat, ALfloat);

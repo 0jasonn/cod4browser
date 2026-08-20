@@ -90,12 +90,21 @@ void emit_simple(const char *op, ALuint id)
             self.postMessage({type: "audio-command", version: 1, op: UTF8ToString($0), id: $1});
     }, op, id);
 }
+
+void emit_reset()
+{
+    EM_ASM({
+        if (typeof self !== "undefined" && typeof self.postMessage === "function")
+            self.postMessage({type: "audio-command", version: 1, op: "device-reset"});
+    });
+}
 #else
 void emit_source(ALuint, const char *) {}
 void emit_simple(const char *, ALuint) {}
+void emit_reset() {}
 #endif
 
-void refresh_state(SourceState &source)
+void refresh_state_at(SourceState &source, double current)
 {
     if (source.state != AL_PLAYING || source.looping || !buffer_valid(source.buffer))
         return;
@@ -103,7 +112,7 @@ void refresh_state(SourceState &source)
     const int channels = buffer.format == AL_FORMAT_STEREO16 ? 2 : 1;
     const double frames = channels > 0 ? (buffer.bytes / (2.0 * channels)) : 0.0;
     const double duration = buffer.rate > 0 ? frames / buffer.rate : 0.0;
-    const double elapsed = (now_seconds() - source.started) * std::max(0.001f, source.pitch);
+    const double elapsed = (current - source.started) * std::max(0.001f, source.pitch);
     source.offset = static_cast<ALfloat>(std::max(0.0, elapsed));
     if (duration > 0.0 && elapsed >= duration)
     {
@@ -112,10 +121,21 @@ void refresh_state(SourceState &source)
     }
 }
 
+void refresh_state(SourceState &source)
+{
+    refresh_state_at(source, now_seconds());
+}
+
 void source_property(ALuint id)
 {
     emit_source(id, "source-property");
 }
+}
+
+double WebOpenAL_RebaseStarted(double nowSeconds, float offsetSeconds, float pitch)
+{
+    return nowSeconds - static_cast<double>(offsetSeconds) /
+        std::max(0.001f, pitch);
 }
 
 ALenum alGetError()
@@ -268,12 +288,21 @@ void alSourcef(ALuint id, ALenum parameter, ALfloat value)
         return;
     }
     auto &source = g_sources[id];
-    refresh_state(source);
+    const double mutationTime = now_seconds();
+    refresh_state_at(source, mutationTime);
     switch (parameter)
     {
     case AL_GAIN: source.gain = std::max(0.0f, value); break;
-    case AL_PITCH: source.pitch = std::max(0.001f, value); break;
-    case AL_SEC_OFFSET: source.offset = std::max(0.0f, value); break;
+    case AL_PITCH:
+        source.pitch = std::max(0.001f, value);
+        if (source.state == AL_PLAYING)
+            source.started = WebOpenAL_RebaseStarted(mutationTime, source.offset, source.pitch);
+        break;
+    case AL_SEC_OFFSET:
+        source.offset = std::max(0.0f, value);
+        if (source.state == AL_PLAYING)
+            source.started = WebOpenAL_RebaseStarted(mutationTime, source.offset, source.pitch);
+        break;
     default: fail(); return;
     }
     source_property(id);
@@ -287,6 +316,8 @@ void alSourcei(ALuint id, ALenum parameter, ALint value)
         return;
     }
     auto &source = g_sources[id];
+    const double mutationTime = now_seconds();
+    refresh_state_at(source, mutationTime);
     switch (parameter)
     {
     case AL_BUFFER:
@@ -295,7 +326,11 @@ void alSourcei(ALuint id, ALenum parameter, ALint value)
         source.offset = 0.0f;
         break;
     case AL_LOOPING: source.looping = value != AL_FALSE; break;
-    case AL_SEC_OFFSET: source.offset = std::max(0, value); break;
+    case AL_SEC_OFFSET:
+        source.offset = std::max(0, value);
+        if (source.state == AL_PLAYING)
+            source.started = WebOpenAL_RebaseStarted(mutationTime, source.offset, source.pitch);
+        break;
     default: fail(); return;
     }
     source_property(id);
@@ -413,17 +448,33 @@ struct ALCcontext {};
 static ALCdevice g_device;
 static ALCcontext g_context;
 
+void reset_proxy_state()
+{
+    g_sources.fill(SourceState{});
+    g_buffers.fill(BufferState{});
+    g_next_buffer = 1;
+    g_error = AL_NONE;
+    g_context_current = false;
+    emit_reset();
+}
+
 ALCdevice *alcOpenDevice(const ALCchar *) { return &g_device; }
 ALCboolean alcCloseDevice(ALCdevice *device) { return device == &g_device; }
 ALCcontext *alcCreateContext(ALCdevice *device, const ALCint *)
 {
     return device == &g_device ? &g_context : nullptr;
 }
-void alcDestroyContext(ALCcontext *context) { if (context == &g_context) g_context_current = false; }
+void alcDestroyContext(ALCcontext *context)
+{
+    if (context == &g_context)
+        reset_proxy_state();
+}
 ALCboolean alcMakeContextCurrent(ALCcontext *context)
 {
-    g_context_current = context == nullptr || context == &g_context;
-    return g_context_current;
+    if (context != nullptr && context != &g_context)
+        return AL_FALSE;
+    g_context_current = context == &g_context;
+    return AL_TRUE;
 }
 
 // Platform-only probe used by the served Worker smoke. It exercises the same
