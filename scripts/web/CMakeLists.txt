@@ -208,6 +208,7 @@ add_executable(KisakCOD-web
     "${SRC_DIR}/web/web_qcommon_runtime.cpp"
     "${SRC_DIR}/web/web_shader_compatibility.cpp"
     "${SRC_DIR}/web/web_renderer.cpp"
+    "${SRC_DIR}/web/web_openal_proxy.cpp"
       "${SRC_DIR}/web/web_renderer_frontend.cpp"
       "${SRC_DIR}/web/web_renderer_code_mesh.cpp"
       "${SRC_DIR}/web/web_renderer_dobj_scene.cpp"
@@ -365,7 +366,8 @@ add_custom_command(TARGET KisakCOD-web POST_BUILD
 # editing one refreshes the served site on the next incremental build.
 file(MAKE_DIRECTORY "${KISAK_WEB_SITE_DIR}")
 foreach(WEB_FILE index.html launcher.mjs asset_store.mjs filesystem_bridge.mjs
-        engine_worker.mjs engine_worker_host.mjs worker_sync_filesystem.mjs styles.css)
+        engine_worker.mjs engine_worker_host.mjs web_audio_driver.mjs
+        worker_sync_filesystem.mjs styles.css)
     configure_file(
         "${KISAK_WEB_SOURCE_DIR}/${WEB_FILE}"
         "${KISAK_WEB_SITE_DIR}/${WEB_FILE}"

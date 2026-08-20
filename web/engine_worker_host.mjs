@@ -1,14 +1,17 @@
+import { WebAudioDriver } from "./web_audio_driver.mjs";
+
 const EXPORTED_COMMANDS = [
     "_KisakWeb_StartArchiveJob", "_KisakWeb_CancelArchiveJob",
     "_KisakWeb_StartQcommonRuntime", "_KisakWeb_CancelQcommonRuntime",
     "_KisakWeb_StartRetailCensus", "_KisakWeb_CancelRetailCensus",
     "_KisakWeb_StartCanonicalDbRuntimeCheck",
     "_KisakWeb_SubmitCanonicalCommand",
+    "_KisakWeb_TestAudioProxyPcm",
     "_KisakWeb_TestLoseWebGLContext", "_KisakWeb_TestRestoreWebGLContext",
 ];
 const ENGINE_FILESYSTEM_LOCK = "kisakcod-web-engine-filesystem-v1";
 
-export function createEngineWorkerHost(canvas, { onLog, onAbort } = {})
+export function createEngineWorkerHost(canvas, { onLog, onAbort, onAudioDiagnostic } = {})
 {
     if (!canvas || typeof canvas.transferControlToOffscreen !== "function") {
         throw new Error("This browser does not support a Worker-owned OffscreenCanvas.");
@@ -17,6 +20,15 @@ export function createEngineWorkerHost(canvas, { onLog, onAbort } = {})
         type: "module",
         name: "kisakcod-engine",
     });
+    const audioDriver = new WebAudioDriver({
+        onDiagnostic: (message) => {
+            onAudioDiagnostic?.(message);
+            onLog?.(`[kisakcod-web] ${message}`, "warn");
+        },
+    });
+    // Gesture listeners only unlock the platform device. Keyboard/mouse
+    // ownership remains in the existing input forwarding path below.
+    audioDriver.attachGestureResume(canvas);
     const pending = new Map();
     let nextRequestId = 1;
     let releaseFilesystemLease = null;
@@ -52,6 +64,9 @@ export function createEngineWorkerHost(canvas, { onLog, onAbort } = {})
         }
         case "event":
             globalThis.dispatchEvent(new CustomEvent(message.name, { detail: message.detail }));
+            break;
+        case "audio-command":
+            audioDriver.handleCommand(message);
             break;
         case "cursor":
             canvas.style.cursor = message.visible ? "default" : "none";
@@ -155,6 +170,7 @@ export function createEngineWorkerHost(canvas, { onLog, onAbort } = {})
         },
         testControl(values) { return rpc("test-control", { values }); },
         dispose() {
+            audioDriver.dispose();
             worker.terminate();
             releaseFilesystemLease?.();
             releaseFilesystemLease = null;
@@ -164,6 +180,7 @@ export function createEngineWorkerHost(canvas, { onLog, onAbort } = {})
             pending.clear();
         },
     };
+    facade.audioDriver = audioDriver;
     for (const functionName of EXPORTED_COMMANDS) {
         facade[functionName] = (...arguments_) => {
             void facade.call(functionName, ...arguments_).catch((error) => onLog?.(
