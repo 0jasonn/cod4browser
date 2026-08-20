@@ -3196,13 +3196,14 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             const WebRendererRetainedWorldImage *base = RetainedImage(
                 g_renderer.retainedDynamicModelImages,
                 batch.baseImageIndex);
-            const bool fxCodeMesh = batch.sourceKind ==
-                WebRendererSceneBatchKind::FxCodeMesh;
+            const bool fxSceneGeometry = batch.sourceKind ==
+                    WebRendererSceneBatchKind::FxCodeMesh ||
+                batch.sourceKind == WebRendererSceneBatchKind::FxXModel;
             const bool fallback = batch.technique ==
                     WebRendererWorldTechnique::BackendFallback ||
                 !base;
             glUniform1f(g_renderer.sceneFallbackUniform,
-                fallback && !fxCodeMesh ? 1.0f : 0.0f);
+                fallback && !fxSceneGeometry ? 1.0f : 0.0f);
             glUniform1f(g_renderer.textureEnabledUniform,
                 fallback ? 0.0f : 1.0f);
             BindWorldTexture(GL_TEXTURE0,
