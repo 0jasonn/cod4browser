@@ -3,14 +3,14 @@ import { expect, test } from "@playwright/test";
 function expectProductionWorldSurfaceUploads(uploads)
 {
     const vertexUpload = uploads.find(
-        (upload) => upload.target === "array" && upload.byteLength === 160,
+        (upload) => upload.target === "array" && upload.byteLength === 176,
     );
     const indexUpload = uploads.find(
         (upload) => upload.target === "element-array" && upload.byteLength === 12,
     );
     expect(vertexUpload, "the converted world vertices should be uploaded").toBeTruthy();
     expect(indexUpload, "the converted world indices should be uploaded").toBeTruthy();
-    expect(vertexUpload.bytes).toHaveLength(160);
+    expect(vertexUpload.bytes).toHaveLength(176);
     expect(indexUpload.bytes).toHaveLength(12);
 
     const vertexValues = new Float32Array(Uint8Array.from(vertexUpload.bytes).buffer);
@@ -307,9 +307,9 @@ test("boots the headless engine slice and renders through WebGL2", { tag: "@smok
         indexCount: 6,
         drawFirstIndex: 0,
         drawIndexCount: 6,
-        vertexBytes: 160,
+        vertexBytes: 176,
         indexBytes: 12,
-        recoveryBytes: 172,
+        recoveryBytes: 188,
         topology: "triangle-list",
         textureBinding: "engine-image",
         resident: true,
@@ -330,12 +330,12 @@ test("boots the headless engine slice and renders through WebGL2", { tag: "@smok
     expect(runtimeSnapshot.surfaceEvents[retainedSurfaceIndex]).toMatchObject({
         submissionGeneration: runtimeSnapshot.rendererSurface.submissionGeneration,
         resourceGeneration: 0,
-        recoveryBytes: 172,
+        recoveryBytes: 188,
         resident: false,
     });
     expect(runtimeSnapshot.surfaceEvents[readySurfaceIndex]).toMatchObject({
         submissionGeneration: runtimeSnapshot.rendererSurface.submissionGeneration,
-        recoveryBytes: 172,
+        recoveryBytes: 188,
         resident: true,
     });
     expect(runtimeSnapshot.surfaceEvents[readySurfaceIndex].resourceGeneration)
@@ -497,7 +497,7 @@ test("reports and recovers from WebGL2 context loss", { tag: "@smoke" }, async (
     expect(lostSurface).toMatchObject({
         vertexCount: 4,
         indexCount: 6,
-        recoveryBytes: 172,
+        recoveryBytes: 188,
         submissionGeneration: beforeLoss.surface.submissionGeneration,
         resident: false,
     });
@@ -531,7 +531,7 @@ test("reports and recovers from WebGL2 context loss", { tag: "@smoke" }, async (
         state: "ready",
         vertexCount: 4,
         indexCount: 6,
-        recoveryBytes: 172,
+        recoveryBytes: 188,
         submissionGeneration: beforeLoss.surface.submissionGeneration,
         resident: true,
     });

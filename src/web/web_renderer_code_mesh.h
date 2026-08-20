@@ -13,6 +13,11 @@
 constexpr std::uint32_t WEB_RENDERER_MAX_CODE_MESH_VERTICES = 65'536u;
 constexpr std::uint32_t WEB_RENDERER_MAX_CODE_MESH_INDICES = 131'072u;
 
+// D3D9 GfxStateBits fallback for ordinary translucent FX: RGB/alpha writes,
+// additive src-alpha blending, LEQUAL depth testing, and no depth write.
+constexpr std::uint32_t WEB_RENDERER_FX_FALLBACK_STATE_BITS0 = 0x19650165u;
+constexpr std::uint32_t WEB_RENDERER_FX_FALLBACK_STATE_BITS1 = 0x0000000cu;
+
 enum class WebRendererCodeMeshResult : std::uint8_t
 {
     Success = 0,

@@ -85,6 +85,8 @@ WebRendererCodeMeshResult WebRenderer_AppendCodeMeshBatch(
 
     std::vector<WebRendererSurfaceVertex> convertedVertices;
     std::vector<std::uint32_t> convertedIndices;
+    const std::size_t originalVertexCount = verticesOut.size();
+    const std::size_t originalIndexCount = indicesOut.size();
     try
     {
         convertedIndices.reserve(sourceIndices.size());
@@ -120,15 +122,23 @@ WebRendererCodeMeshResult WebRenderer_AppendCodeMeshBatch(
             indicesOut.size() > WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES -
                 convertedIndices.size())
             return WebRendererCodeMeshResult::OutputTooLarge;
+        const std::uint32_t vertexBase = static_cast<std::uint32_t>(
+            originalVertexCount);
+        std::vector<std::uint32_t> outputIndices;
+        outputIndices.reserve(convertedIndices.size());
+        for (const std::uint32_t index : convertedIndices)
+            outputIndices.push_back(vertexBase + index);
+        verticesOut.reserve(originalVertexCount + convertedVertices.size());
+        indicesOut.reserve(originalIndexCount + outputIndices.size());
         verticesOut.insert(verticesOut.end(), convertedVertices.begin(),
             convertedVertices.end());
-        const std::uint32_t vertexBase = static_cast<std::uint32_t>(
-            verticesOut.size() - convertedVertices.size());
-        for (const std::uint32_t index : convertedIndices)
-            indicesOut.push_back(vertexBase + index);
+        indicesOut.insert(indicesOut.end(), outputIndices.begin(),
+            outputIndices.end());
     }
     catch (const std::bad_alloc &)
     {
+        verticesOut.resize(originalVertexCount);
+        indicesOut.resize(originalIndexCount);
         return WebRendererCodeMeshResult::AllocationFailed;
     }
     return WebRendererCodeMeshResult::Success;

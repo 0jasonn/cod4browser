@@ -1160,7 +1160,7 @@ bool CreateRendererResources()
                     (u_alpha_test == 2 && texel.a >= (128.0 / 255.0)) ||
                     (u_alpha_test == 3 && texel.a < (128.0 / 255.0)))
                     discard;
-                bootstrap_color = texel;
+                bootstrap_color = texel * v_color;
                 if (u_lightmap_enabled > 0.5)
                 {
                     vec3 lightmap = texture(u_lightmap, v_lightmap_coord).rgb;
@@ -3196,11 +3196,13 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             const WebRendererRetainedWorldImage *base = RetainedImage(
                 g_renderer.retainedDynamicModelImages,
                 batch.baseImageIndex);
+            const bool fxCodeMesh = batch.sourceKind ==
+                WebRendererSceneBatchKind::FxCodeMesh;
             const bool fallback = batch.technique ==
                     WebRendererWorldTechnique::BackendFallback ||
                 !base;
             glUniform1f(g_renderer.sceneFallbackUniform,
-                fallback ? 1.0f : 0.0f);
+                fallback && !fxCodeMesh ? 1.0f : 0.0f);
             glUniform1f(g_renderer.textureEnabledUniform,
                 fallback ? 0.0f : 1.0f);
             BindWorldTexture(GL_TEXTURE0,

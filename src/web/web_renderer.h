@@ -115,6 +115,7 @@ enum class WebRendererSceneBatchKind : std::uint8_t
     WorldSurface = 0,
     StaticXModel,
     DynamicDObj,
+    FxCodeMesh,
 };
 
 // Callback-scoped canonical identity and portable first-pass state for one

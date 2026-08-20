@@ -693,72 +693,83 @@ void __cdecl R_AddCodeMeshDrawSurf(Material *material,
         pairCount > (g_codeMeshIndexCount / 2u) - physicalOffset)
         return;
 
-    const WebRendererCodeMeshResult conversion =
-        WebRenderer_AppendCodeMeshBatch(
-            g_codeMeshVerts.data(), g_codeMeshVertCount,
-            reinterpret_cast<const std::uint32_t *>(indices), indexCount,
-            g_codeMeshRenderVertices, g_codeMeshRenderIndices);
-    if (conversion != WebRendererCodeMeshResult::Success)
-        return;
-
-    WebRendererWorldBatchDesc batch{};
-    batch.firstIndex = static_cast<std::uint32_t>(
-        g_codeMeshRenderIndices.size() - indexCount);
-    batch.indexCount = indexCount;
-    batch.surfaceCount = 1u;
-    batch.firstSurfaceIndex = 0u;
-    batch.lastSurfaceIndex = 0u;
-    batch.materialIdentity = material;
-    batch.materialName = material->info.name ? material->info.name : "<fx>";
-    batch.modelName = "<fx-code-mesh>";
-    batch.firstInstanceIndex = UINT32_MAX;
-    batch.lastInstanceIndex = UINT32_MAX;
-    batch.sourceKind = WebRendererSceneBatchKind::DynamicDObj;
-    batch.samplerState = 0u;
-    if (material->textureTable)
+    const std::size_t originalVertexCount = g_codeMeshRenderVertices.size();
+    const std::size_t originalIndexCount = g_codeMeshRenderIndices.size();
+    try
     {
-        const MaterialTextureDef *fallback = nullptr;
-        for (std::uint32_t textureIndex = 0u;
-             textureIndex < material->textureCount; ++textureIndex)
+        const WebRendererCodeMeshResult conversion =
+            WebRenderer_AppendCodeMeshBatch(
+                g_codeMeshVerts.data(), g_codeMeshVertCount,
+                reinterpret_cast<const std::uint32_t *>(indices), indexCount,
+                g_codeMeshRenderVertices, g_codeMeshRenderIndices);
+        if (conversion != WebRendererCodeMeshResult::Success)
+            return;
+
+        WebRendererWorldBatchDesc batch{};
+        batch.firstIndex = static_cast<std::uint32_t>(
+            g_codeMeshRenderIndices.size() - indexCount);
+        batch.indexCount = indexCount;
+        batch.surfaceCount = 1u;
+        batch.firstSurfaceIndex = 0u;
+        batch.lastSurfaceIndex = 0u;
+        batch.materialIdentity = material;
+        batch.materialName = material->info.name ? material->info.name : "<fx>";
+        batch.modelName = "<fx-code-mesh>";
+        batch.firstInstanceIndex = UINT32_MAX;
+        batch.lastInstanceIndex = UINT32_MAX;
+        batch.sourceKind = WebRendererSceneBatchKind::FxCodeMesh;
+        batch.samplerState = 0u;
+        if (material->textureTable)
         {
-            const MaterialTextureDef &texture =
-                material->textureTable[textureIndex];
-            if (!fallback && texture.semantic == 0u && texture.u.image)
-                fallback = &texture;
-            if (texture.semantic == 2u && texture.u.image)
+            const MaterialTextureDef *fallback = nullptr;
+            for (std::uint32_t textureIndex = 0u;
+                 textureIndex < material->textureCount; ++textureIndex)
             {
-                batch.baseImage = texture.u.image;
-                batch.samplerState = texture.samplerState;
-                break;
+                const MaterialTextureDef &texture =
+                    material->textureTable[textureIndex];
+                if (!fallback && texture.semantic == 0u && texture.u.image)
+                    fallback = &texture;
+                if (texture.semantic == 2u && texture.u.image)
+                {
+                    batch.baseImage = texture.u.image;
+                    batch.samplerState = texture.samplerState;
+                    break;
+                }
+            }
+            if (!batch.baseImage && fallback)
+            {
+                batch.baseImage = fallback->u.image;
+                batch.samplerState = fallback->samplerState;
             }
         }
-        if (!batch.baseImage && fallback)
+        constexpr std::uint32_t FX_TECHNIQUE_INDEX = 5u;
+        const std::uint8_t stateEntry = material->stateBitsEntry[
+            FX_TECHNIQUE_INDEX];
+        if (material->stateBitsTable && stateEntry != 0xffu &&
+            stateEntry < material->stateBitsCount)
         {
-            batch.baseImage = fallback->u.image;
-            batch.samplerState = fallback->samplerState;
+            batch.stateBits[0] = material->stateBitsTable[stateEntry].loadBits[0];
+            batch.stateBits[1] = material->stateBitsTable[stateEntry].loadBits[1];
         }
+        else
+        {
+            // Ordinary FX sprites are translucent and should test depth
+            // without writing it. This is the deterministic fallback when a
+            // synthetic or partially loaded material has no emissive state.
+            batch.stateBits[0] = WEB_RENDERER_FX_FALLBACK_STATE_BITS0;
+            batch.stateBits[1] = WEB_RENDERER_FX_FALLBACK_STATE_BITS1;
+        }
+        batch.technique = batch.baseImage
+            ? WebRendererWorldTechnique::BaseTexture
+            : WebRendererWorldTechnique::BackendFallback;
+        g_codeMeshRenderBatches.push_back(batch);
     }
-    constexpr std::uint32_t FX_TECHNIQUE_INDEX = 5u;
-    const std::uint8_t stateEntry = material->stateBitsEntry[
-        FX_TECHNIQUE_INDEX];
-    if (material->stateBitsTable && stateEntry != 0xffu &&
-        stateEntry < material->stateBitsCount)
+    catch (const std::bad_alloc &)
     {
-        batch.stateBits[0] = material->stateBitsTable[stateEntry].loadBits[0];
-        batch.stateBits[1] = material->stateBitsTable[stateEntry].loadBits[1];
+        g_codeMeshRenderVertices.resize(originalVertexCount);
+        g_codeMeshRenderIndices.resize(originalIndexCount);
+        return;
     }
-    else
-    {
-        // Ordinary FX sprites are translucent and should test depth without
-        // writing it. This is the deterministic fallback when a synthetic or
-        // partially loaded material has no emissive state table entry.
-        batch.stateBits[0] = 0x01650165u;
-        batch.stateBits[1] = 0x0000000cu;
-    }
-    batch.technique = batch.baseImage
-        ? WebRendererWorldTechnique::BaseTexture
-        : WebRendererWorldTechnique::BackendFallback;
-    g_codeMeshRenderBatches.push_back(batch);
 }
 
 GfxParticleCloud *__cdecl R_AddParticleCloudToScene(Material *)

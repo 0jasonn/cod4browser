@@ -17,14 +17,14 @@ const IWI_PATH = "images/synthetic_engine_asset.iwi";
 function expectProductionWorldSurfaceUploads(uploads)
 {
     const vertexUpload = uploads.find(
-        (upload) => upload.target === "array" && upload.byteLength === 160,
+        (upload) => upload.target === "array" && upload.byteLength === 176,
     );
     const indexUpload = uploads.find(
         (upload) => upload.target === "element-array" && upload.byteLength === 12,
     );
     expect(vertexUpload, "the converted world vertices should be uploaded").toBeTruthy();
     expect(indexUpload, "the converted world indices should be uploaded").toBeTruthy();
-    expect(vertexUpload.bytes).toHaveLength(160);
+    expect(vertexUpload.bytes).toHaveLength(176);
     expect(indexUpload.bytes).toHaveLength(12);
 
     const vertexValues = new Float32Array(Uint8Array.from(vertexUpload.bytes).buffer);
@@ -468,9 +468,9 @@ test("loads a stored IWI through the engine cache and releases its bytes", async
         indexCount: 6,
         drawFirstIndex: 0,
         drawIndexCount: 6,
-        vertexBytes: 160,
+        vertexBytes: 176,
         indexBytes: 12,
-        recoveryBytes: 172,
+        recoveryBytes: 188,
         drawCount: 1,
         topology: "triangle-list",
         textureBinding: "engine-image",
@@ -547,7 +547,7 @@ test("loads a stored IWI through the engine cache and releases its bytes", async
         state: "ready",
         vertexCount: 4,
         indexCount: 6,
-        recoveryBytes: 172,
+        recoveryBytes: 188,
         submissionGeneration: surfaceSubmissionGeneration,
         resident: true,
     });
@@ -587,12 +587,12 @@ test("loads a stored IWI through the engine cache and releases its bytes", async
     expect(surfaceLostIndex).toBeGreaterThanOrEqual(0);
     expect(surfaceReadyIndex).toBeGreaterThan(surfaceLostIndex);
     expect(surfaceLifecycle[surfaceLostIndex]).toMatchObject({
-        recoveryBytes: 172,
+        recoveryBytes: 188,
         submissionGeneration: surfaceSubmissionGeneration,
         resident: false,
     });
     expect(surfaceLifecycle[surfaceReadyIndex]).toMatchObject({
-        recoveryBytes: 172,
+        recoveryBytes: 188,
         submissionGeneration: surfaceSubmissionGeneration,
         resident: true,
     });
@@ -724,7 +724,7 @@ test("a synchronous ready listener cannot publish texture state after cancellati
         state: "ready",
         vertexCount: 4,
         indexCount: 6,
-        recoveryBytes: 172,
+        recoveryBytes: 188,
         resident: true,
     });
     expect(result.surfaceEvents.some((event) =>
