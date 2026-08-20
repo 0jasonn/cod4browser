@@ -44,9 +44,9 @@ Any task that cannot satisfy these invariants stops for architectural review.
 
 ## Current runtime boundary
 
-Baseline: `7b02d1b0` (`Harden Web Audio proxy lifecycle and timing`), following
-the implementation commit `38ffcc88` (`Bridge canonical loaded sounds to Web
-Audio`).
+Baseline: `b45df61e` (`Harden browser binding regression coverage`), following
+the implementation commit `bf3dd93b` (`Expose canonical reload and weapon
+cycle bindings`).
 
 The browser production target currently compiles and runs the canonical
 single-player filesystem, database, startup-zone loading, map loading,
@@ -77,6 +77,13 @@ The gameplay event chain is farther along than its presentation:
   source generation reuse, natural completion, buffer replacement, sound
   shutdown/re-init, and host disposal. Loaded PCM16 mono/stereo is supported;
   streaming and reverb remain later compatibility work.
+- fresh browser profiles now install `r -> +reload`, wheel-up -> `weapnext`,
+  and wheel-down -> `weapprev` only when each canonical key is unbound. DOM
+  events still flow through the Worker queue, `IN_Frame`, `CL_KeyEvent`, and
+  the native command/state machines. Native/Wasm tests prove deterministic
+  defaults and preservation of custom bindings; a focused browser test proves
+  the key pulses cross the host boundary. Retail ammo/animation/viewmodel
+  transition proof remains pending.
 
 Therefore the active boundary is **canonical fire/impact events and canonical
 FX geometry reaching WebGL2 plus a verified canonical LoadedSound-to-Web-Audio
@@ -96,8 +103,8 @@ retail-asset browser run:
 | Muzzle flash / brass | Canonical FX code-mesh consumption implemented; retail visibility proof pending | cgame/FX/renderer | Observe real fire event, effect definition, retained FX batch, and draw |
 | Bullet impact | Canonical trace/event/impact-table and FX renderer paths present; end-to-end result unproven | game/cgame/FX/renderer | Prove surface-dependent impact FX; audio follows the platform decision |
 | Weapon sound | Canonical loaded-sound bridge is implemented and lifecycle-tested; retail fire alias proof pending | cgame/audio/platform | Observe one real `WeaponDef` alias through channel selection, PCM upload, gesture-unlocked playback, and completion |
-| Reload | Canonical weapon state exists; browser key/action and animation/audio proof pending | input/game/cgame/audio | Exercise empty/partial reload without browser state |
-| Weapon switching | Canonical inventory/state exists; input and presentation proof pending | input/game/cgame | Exercise next/previous/direct selection and viewmodel transition |
+| Reload | Fresh profiles reach canonical `+reload`; retail state/animation/audio proof pending | input/game/cgame/audio | Exercise empty/partial reload and observe canonical ammo/state transitions |
+| Weapon switching | Fresh profiles reach canonical `weapnext`/`weapprev`; retail presentation proof pending | input/game/cgame | Exercise both directions and observe canonical inventory/viewmodel transition |
 | Basic combat interaction | Real bullet/game systems compiled; target damage/death/AI response unproven | game/script/cgame | Use real entities in F.N.G. or campaign content; no synthetic browser targets |
 
 ### Ordered work queue
@@ -116,8 +123,10 @@ retail-asset browser run:
    proves one trigger causes canonical server/cgame fire, recoil/ammo change,
    visible muzzle FX, a collision result, and an impact effect without owning
    any of those states in browser code.
-4. **Reload and weapon switching** — close input bindings and any missing
-   cgame/viewmodel/audio compatibility in canonical state machines.
+4. **Reload and weapon switching** — default browser reachability implemented
+   in `bf3dd93b` and regression-hardened in `b45df61e`. Native x64, direct Wasm,
+   focused browser input, production build, and exact boot checks pass. Retail
+   state, ammo, animation, viewmodel, and audio proof remains.
 5. **Basic combat interaction** — prove damage, reaction, death, and script/AI
    notification against real map entities.
 6. **F.N.G. parity pass** — load F.N.G., record the first blocker by subsystem,
@@ -255,7 +264,8 @@ Stop autonomous implementation when:
 | Complete | Textured/lightmapped world, static models, weapon DObj, HUD/input | `e652d43a` | General entity draws and audio proof |
 | Complete | Canonical FX code-mesh renderer closure | `41c6c8a5`, `b5d2c76e` | Retail muzzle/impact visibility proof; models/clouds/marks remain later FX families |
 | Complete | Browser loaded-sound platform bridge | `38ffcc88`, `7b02d1b0`; native/Wasm/browser lifecycle evidence | Retail weapon/impact alias proof; streaming/reverb later |
-| Active | Playable Killhouse/F.N.G. combat loop | FX renderer and loaded-sound device closures accepted | Retail fire/impact proof, reload/switching, combat interaction |
+| Complete | Reload and weapon-cycle input reachability | `bf3dd93b`, `b45df61e`; native/Wasm/browser boundary evidence | Retail state/animation/viewmodel/audio proof |
+| Active | Playable Killhouse/F.N.G. combat loop | FX renderer, loaded-sound device, and combat-input closures accepted | Retail fire/impact/reload/switch proof and combat interaction |
 | Pending | Recognizable COD4 presentation | — | Materials, remaining images, FX breadth, sky/fog |
 | Pending | Multiple maps and first campaign mission | — | Unknown until F.N.G./campaign probes |
 | Pending | Offline campaign runtime | — | Mission flow, saves/checkpoints, cinematics, breadth and performance |
