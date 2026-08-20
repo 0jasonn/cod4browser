@@ -44,9 +44,9 @@ Any task that cannot satisfy these invariants stops for architectural review.
 
 ## Current runtime boundary
 
-Baseline: `b5d2c76e` (`Harden FX mesh retention and renderer regressions`),
-following the implementation commit `41c6c8a5` (`Render canonical FX code
-meshes in WebGL2`).
+Baseline: `7b02d1b0` (`Harden Web Audio proxy lifecycle and timing`), following
+the implementation commit `38ffcc88` (`Bridge canonical loaded sounds to Web
+Audio`).
 
 The browser production target currently compiles and runs the canonical
 single-player filesystem, database, startup-zone loading, map loading,
@@ -69,15 +69,18 @@ The gameplay event chain is farther along than its presentation:
   vertex RGBA, order, alpha blend, and depth state. This closes the prior
   discarded-geometry boundary; a retail run must still prove the expected
   muzzle/impact definitions are spawned and visible.
-- sound assets and the OpenAL lifecycle compile, but the current deployment
-  cannot create an audio device: the production Wasm module lives in a
-  dedicated Worker, and the pinned Playwright Chromium exposes neither
-  `AudioContext` nor `document` there. Emscripten OpenAL therefore fails before
-  payload playback or browser unlock/resume can occur.
+- canonical sound assets, aliases, 53-channel selection, playback IDs,
+  attenuation, pitch/volume, and LoadedSound PCM remain Worker-owned. A
+  KISAK_WEB OpenAL-compatible proxy now transfers bounded PCM/device commands
+  to a main-thread Web Audio owner, which handles AudioContext policy and
+  AudioNode resources. Lifecycle hardening covers gesture resume, pause/stop,
+  source generation reuse, natural completion, buffer replacement, sound
+  shutdown/re-init, and host disposal. Loaded PCM16 mono/stereo is supported;
+  streaming and reverb remain later compatibility work.
 
 Therefore the active boundary is **canonical fire/impact events and canonical
-FX geometry reaching WebGL2, with retail effect visibility still to prove and
-browser audio blocked at an engine-wide platform-ownership decision**.
+FX geometry reaching WebGL2 plus a verified canonical LoadedSound-to-Web-Audio
+device path, with a retail fire/impact integration proof still required**.
 
 ## Active milestone: playable Killhouse / F.N.G. combat loop
 
@@ -92,7 +95,7 @@ retail-asset browser run:
 | Fire and ammo consumption | Canonical path reached; end-to-end behavior needs explicit evidence | game/cgame | Trace event, ammo delta, recoil, and frame continuity |
 | Muzzle flash / brass | Canonical FX code-mesh consumption implemented; retail visibility proof pending | cgame/FX/renderer | Observe real fire event, effect definition, retained FX batch, and draw |
 | Bullet impact | Canonical trace/event/impact-table and FX renderer paths present; end-to-end result unproven | game/cgame/FX/renderer | Prove surface-dependent impact FX; audio follows the platform decision |
-| Weapon sound | Alias/mixer/OpenAL code is present, but the Worker has no Web Audio API | cgame/audio/platform | Approve and implement a browser audio ownership boundary, then prove payload/channel playback |
+| Weapon sound | Canonical loaded-sound bridge is implemented and lifecycle-tested; retail fire alias proof pending | cgame/audio/platform | Observe one real `WeaponDef` alias through channel selection, PCM upload, gesture-unlocked playback, and completion |
 | Reload | Canonical weapon state exists; browser key/action and animation/audio proof pending | input/game/cgame/audio | Exercise empty/partial reload without browser state |
 | Weapon switching | Canonical inventory/state exists; input and presentation proof pending | input/game/cgame | Exercise next/previous/direct selection and viewmodel transition |
 | Basic combat interaction | Real bullet/game systems compiled; target damage/death/AI response unproven | game/script/cgame | Use real entities in F.N.G. or campaign content; no synthetic browser targets |
@@ -104,10 +107,11 @@ retail-asset browser run:
    deterministic material/image/UV/RGBA/order/depth/blend state and bounded,
    failure-atomic retention. Retail muzzle/impact observation remains part of
    the integration proof, not a second renderer implementation.
-2. **Weapon audio closure** — architecture review required. After a platform
-   design is approved, trace one real fire alias from `WeaponDef` through
-   `SND_PlaySoundAlias` to OpenAL buffer/source playback. Close only the first
-   actual missing lifecycle or payload-compatibility boundary discovered.
+2. **Weapon audio closure** — platform ownership selected and loaded-sound
+   bridge implemented in `38ffcc88`, then lifecycle/timing hardened in
+   `7b02d1b0`. Native x64, direct Wasm, focused browser bridge, exact boot, and
+   qcommon lifecycle checks pass. A retail run must still trace one real fire
+   alias from `WeaponDef` through `SND_PlaySoundAlias` to audible playback.
 3. **Fire/impact integration proof** — add focused browser observability that
    proves one trigger causes canonical server/cgame fire, recoil/ammo change,
    visible muzzle FX, a collision result, and an impact effect without owning
@@ -123,7 +127,7 @@ retail-asset browser run:
 After every completed item, re-audit the runtime rather than assuming the next
 listed item is still the highest-value blocker.
 
-## Pending architecture decision: browser audio ownership
+## Architecture decision: browser audio ownership
 
 Measured on the pinned toolchain and bundled Playwright Chromium:
 
@@ -136,9 +140,9 @@ Measured on the pinned toolchain and bundled Playwright Chromium:
 - consequently, the current Worker OpenAL driver cannot initialize or resume a
   browser audio context. This is not a missing weapon alias or payload bug.
 
-Options requiring review:
+Decision recorded after review:
 
-1. **Main-thread Web Audio command bridge (recommended).** Keep Kisak Wasm,
+1. **Main-thread Web Audio command bridge (selected).** Keep Kisak Wasm,
    canonical `SND_*` alias/channel/mixer state, filesystem, and rendering in the
    Worker. Replace only the browser audio-driver boundary with a typed,
    deterministic command stream to a main-thread Web Audio owner. The launcher
@@ -155,8 +159,20 @@ Options requiring review:
    DSP/protocol complexity before measurements justify it. Not recommended for
    the first playable slice.
 
-Do not implement an audio bridge until this choice is approved; it is a new
-permanent platform architecture with multiple viable designs.
+The selected design is implemented below the canonical OpenAL-facing driver.
+The Worker proxy mirrors only driver-visible device state and emits versioned
+FIFO commands; it does not own aliases, game channels, mixing, spatial
+calculations, or gameplay timing. Main-thread resources are bounded by 53
+source IDs, 512 buffer IDs, and a 16 MiB per-upload validation limit. The
+generated Worker module contains no Emscripten `AudioContext` or DOM access.
+
+Accepted verification for the platform slice:
+
+- native x64 and direct Wasm `web_openal_proxy_tests`;
+- two focused `web_audio_driver.spec.mjs` browser tests, including a Worker PCM
+  transfer;
+- the exact WebGL2 boot smoke and two qcommon lifecycle browser tests;
+- production Release build and `git diff --check`.
 
 ## Presentation milestone
 
@@ -238,8 +254,8 @@ Stop autonomous implementation when:
 | Complete | Real Killhouse map/game/cgame frame | See canonical lifecycle and browser evidence through `e652d43a` | Presentation and gameplay feedback gaps |
 | Complete | Textured/lightmapped world, static models, weapon DObj, HUD/input | `e652d43a` | General entity draws and audio proof |
 | Complete | Canonical FX code-mesh renderer closure | `41c6c8a5`, `b5d2c76e` | Retail muzzle/impact visibility proof; models/clouds/marks remain later FX families |
-| Blocked for review | Browser audio platform ownership | Worker capability probe on pinned Chromium; see decision section above | Select the permanent audio boundary |
-| Active | Playable Killhouse/F.N.G. combat loop | FX renderer closure accepted | Audio architecture, retail FX proof, reload/switching, combat interaction |
+| Complete | Browser loaded-sound platform bridge | `38ffcc88`, `7b02d1b0`; native/Wasm/browser lifecycle evidence | Retail weapon/impact alias proof; streaming/reverb later |
+| Active | Playable Killhouse/F.N.G. combat loop | FX renderer and loaded-sound device closures accepted | Retail fire/impact proof, reload/switching, combat interaction |
 | Pending | Recognizable COD4 presentation | — | Materials, remaining images, FX breadth, sky/fog |
 | Pending | Multiple maps and first campaign mission | — | Unknown until F.N.G./campaign probes |
 | Pending | Offline campaign runtime | — | Mission flow, saves/checkpoints, cinematics, breadth and performance |
