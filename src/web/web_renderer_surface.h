@@ -9,19 +9,22 @@
 constexpr std::uint32_t WEB_RENDERER_MAX_SURFACE_VERTICES = 4096u;
 constexpr std::uint32_t WEB_RENDERER_MAX_SURFACE_INDICES = 12288u;
 constexpr std::size_t WEB_RENDERER_MAX_RETAINED_SURFACE_BYTES =
-    static_cast<std::size_t>(WEB_RENDERER_MAX_SURFACE_VERTICES) * 10u * sizeof(float) +
+    static_cast<std::size_t>(WEB_RENDERER_MAX_SURFACE_VERTICES) * 11u * sizeof(float) +
     static_cast<std::size_t>(WEB_RENDERER_MAX_SURFACE_INDICES) * sizeof(std::uint16_t);
 
 struct WebRendererSurfaceVertex
 {
     float position[3];
-    float color[3];
+    // FX code meshes carry the canonical packed alpha as well as RGB. Keep
+    // the alpha in the portable vertex so sprite blending does not depend on
+    // a texture's alpha channel alone.
+    float color[4];
     float textureCoordinate[2];
     float lightmapCoordinate[2];
 };
 
 static_assert(std::is_standard_layout_v<WebRendererSurfaceVertex>);
-static_assert(sizeof(WebRendererSurfaceVertex) == 10u * sizeof(float));
+static_assert(sizeof(WebRendererSurfaceVertex) == 11u * sizeof(float));
 
 enum class WebRendererPrimitiveTopology : std::uint8_t
 {

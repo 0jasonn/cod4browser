@@ -859,7 +859,7 @@ bool CreateSurfaceObjects(
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(
         1,
-        3,
+        4,
         GL_FLOAT,
         GL_FALSE,
         sizeof(WebRendererSurfaceVertex),
@@ -1082,7 +1082,7 @@ bool CreateRendererResources()
     constexpr const char *vertexSource = R"glsl(#version 300 es
         precision highp float;
         layout(location = 0) in vec3 a_position;
-        layout(location = 1) in vec3 a_color;
+        layout(location = 1) in vec4 a_color;
         layout(location = 2) in vec2 a_texcoord;
         layout(location = 3) in vec2 a_lightmap_coord;
         layout(location = 4) in vec3 a_instance_axis0;
@@ -1093,7 +1093,7 @@ bool CreateRendererResources()
         uniform mat4 u_view_projection;
         uniform float u_scene_fallback;
         uniform float u_instance_enabled;
-        out vec3 v_color;
+        out vec4 v_color;
         out vec2 v_texcoord;
         out vec3 v_world_position;
         out vec2 v_lightmap_coord;
@@ -1120,7 +1120,7 @@ bool CreateRendererResources()
 
     constexpr const char *fragmentSource = R"glsl(#version 300 es
         precision highp float;
-        in vec3 v_color;
+        in vec4 v_color;
         in vec2 v_texcoord;
         in vec3 v_world_position;
         in vec2 v_lightmap_coord;
@@ -1136,7 +1136,7 @@ bool CreateRendererResources()
         void main()
         {
             vec4 texel = texture(u_texture, v_texcoord);
-            vec4 bootstrap_color = vec4(v_color, 1.0);
+            vec4 bootstrap_color = v_color;
             if (u_scene_fallback > 0.5)
             {
                 // The canonical world command currently has no compiled
@@ -1789,7 +1789,7 @@ WebRendererSurfaceResult CopyStaticModelCommand(
     {
         const WebRendererSurfaceVertex &vertex = scene.vertices[vertexIndex];
         const float *components = &vertex.position[0];
-        for (std::size_t component = 0u; component < 10u; ++component)
+        for (std::size_t component = 0u; component < 11u; ++component)
             if (!std::isfinite(components[component]))
                 return WebRendererSurfaceResult::NonFiniteVertex;
     }

@@ -238,6 +238,11 @@ add_executable(web_renderer_static_model_scene_tests
     "${KISAK_REPOSITORY_ROOT}/src/web/web_renderer_static_model_scene.cpp"
 )
 
+add_executable(web_renderer_code_mesh_tests
+    "${CMAKE_CURRENT_LIST_DIR}/web_renderer_code_mesh_tests.cpp"
+    "${KISAK_REPOSITORY_ROOT}/src/web/web_renderer_code_mesh.cpp"
+)
+
 add_executable(web_engine_world_surface_tests
     "${CMAKE_CURRENT_LIST_DIR}/web_engine_world_surface_tests.cpp"
 )
@@ -341,6 +346,8 @@ target_compile_features(web_renderer_world_scene_tests PRIVATE cxx_std_20)
 target_include_directories(web_renderer_world_scene_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
 target_compile_features(web_renderer_static_model_scene_tests PRIVATE cxx_std_20)
 target_include_directories(web_renderer_static_model_scene_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
+target_compile_features(web_renderer_code_mesh_tests PRIVATE cxx_std_20)
+target_include_directories(web_renderer_code_mesh_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
 target_compile_features(web_engine_world_surface_tests PRIVATE cxx_std_20)
 target_include_directories(web_engine_world_surface_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
 target_compile_features(web_fastfile_world_surface_tests PRIVATE cxx_std_20)
@@ -444,6 +451,11 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "-sEXIT_RUNTIME=1"
         "-sNO_DISABLE_EXCEPTION_CATCHING"
     )
+    target_link_options(web_renderer_code_mesh_tests PRIVATE
+        "-sENVIRONMENT=node"
+        "-sEXIT_RUNTIME=1"
+        "-sNO_DISABLE_EXCEPTION_CATCHING"
+    )
     target_link_options(web_engine_world_surface_tests PRIVATE
         "-sENVIRONMENT=node"
         "-sEXIT_RUNTIME=1"
@@ -516,6 +528,7 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     set_target_properties(web_renderer_surface_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_renderer_world_scene_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_renderer_static_model_scene_tests PROPERTIES SUFFIX ".cjs")
+    set_target_properties(web_renderer_code_mesh_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_engine_world_surface_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_fastfile_world_surface_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_fastfile_zone_stream_tests PROPERTIES SUFFIX ".cjs")
@@ -568,6 +581,8 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_renderer_world_scene_tests>")
     add_test(NAME web_renderer_static_model_scene_tests
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_renderer_static_model_scene_tests>")
+    add_test(NAME web_renderer_code_mesh_tests
+        COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_renderer_code_mesh_tests>")
     add_test(NAME web_engine_world_surface_tests
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_engine_world_surface_tests>")
     add_test(NAME web_fastfile_world_surface_tests
@@ -642,6 +657,7 @@ else()
     add_test(NAME web_renderer_surface_tests COMMAND web_renderer_surface_tests)
     add_test(NAME web_renderer_world_scene_tests COMMAND web_renderer_world_scene_tests)
     add_test(NAME web_renderer_static_model_scene_tests COMMAND web_renderer_static_model_scene_tests)
+    add_test(NAME web_renderer_code_mesh_tests COMMAND web_renderer_code_mesh_tests)
     add_test(NAME web_engine_world_surface_tests COMMAND web_engine_world_surface_tests)
     add_test(NAME web_fastfile_world_surface_tests COMMAND web_fastfile_world_surface_tests)
     add_test(NAME web_fastfile_zone_stream_tests COMMAND web_fastfile_zone_stream_tests)

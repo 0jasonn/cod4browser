@@ -239,6 +239,8 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
                         (source.color.packed >> 8u) & 0xffu) * BYTE_TO_UNIT;
                     vertex.color[2] = static_cast<float>(
                         source.color.packed & 0xffu) * BYTE_TO_UNIT;
+                    vertex.color[3] = static_cast<float>(
+                        (source.color.packed >> 24u) & 0xffu) * BYTE_TO_UNIT;
                     Vec2UnpackTexCoords(source.texCoord,
                         vertex.textureCoordinate);
                     if (!std::isfinite(vertex.textureCoordinate[0]) ||

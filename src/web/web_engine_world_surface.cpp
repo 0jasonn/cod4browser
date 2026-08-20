@@ -179,6 +179,8 @@ WebEngineWorldSurfaceResult WebEngine_ConvertWorldSurface(
                 static_cast<float>((sourceVertex.color >> 8u) & 0xffu) * BYTE_TO_UNIT;
             converted.color[2] =
                 static_cast<float>(sourceVertex.color & 0xffu) * BYTE_TO_UNIT;
+            converted.color[3] =
+                static_cast<float>((sourceVertex.color >> 24u) & 0xffu) * BYTE_TO_UNIT;
             converted.textureCoordinate[0] = sourceVertex.textureCoordinate[0];
             converted.textureCoordinate[1] = sourceVertex.textureCoordinate[1];
             replacement.vertices.push_back(converted);

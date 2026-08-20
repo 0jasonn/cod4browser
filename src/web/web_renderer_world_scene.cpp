@@ -294,6 +294,8 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
                     (source.color.packed >> 8u) & 0xffu) * BYTE_TO_UNIT;
                 vertex.color[2] = static_cast<float>(
                     source.color.packed & 0xffu) * BYTE_TO_UNIT;
+                vertex.color[3] = static_cast<float>(
+                    (source.color.packed >> 24u) & 0xffu) * BYTE_TO_UNIT;
                 vertex.textureCoordinate[0] = source.texCoord[0];
                 vertex.textureCoordinate[1] = source.texCoord[1];
                 vertex.lightmapCoordinate[0] = source.lmapCoord[0];

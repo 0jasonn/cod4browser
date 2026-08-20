@@ -30,6 +30,7 @@
 #include <universal/com_memory.h>
 #include <universal/memfile.h>
 #include <web/web_renderer.h>
+#include <web/web_renderer_code_mesh.h>
 #include <web/web_renderer_dobj_scene.h>
 #include <web/web_renderer_static_model_scene.h>
 #include <web/web_renderer_world_scene.h>
@@ -108,6 +109,11 @@ std::array<GfxPackedVertex, 65536> g_codeMeshVerts{};
 std::array<r_double_index_t, 131072> g_codeMeshIndices{};
 std::uint32_t g_codeMeshVertCount = 0;
 std::uint32_t g_codeMeshIndexCount = 0;
+std::array<float, 256u * 4u> g_codeMeshArgs{};
+std::uint32_t g_codeMeshArgCount = 0u;
+std::vector<WebRendererSurfaceVertex> g_codeMeshRenderVertices;
+std::vector<std::uint32_t> g_codeMeshRenderIndices;
+std::vector<WebRendererWorldBatchDesc> g_codeMeshRenderBatches;
 GfxParticleCloud g_particleCloud{};
 std::vector<WebRendererSurfaceVertex> g_uiVertices;
 std::vector<std::uint32_t> g_uiIndices;
@@ -187,6 +193,7 @@ void AppendUiQuadUvs(const float points[4][2], const float uvs[4][2],
             vertex.color[0] = 1.0f;
             vertex.color[1] = 1.0f;
             vertex.color[2] = 1.0f;
+            vertex.color[3] = 1.0f;
             vertex.textureCoordinate[0] = uvs[index][0];
             vertex.textureCoordinate[1] = uvs[index][1];
             g_uiVertices.push_back(vertex);
@@ -327,6 +334,10 @@ void __cdecl R_BeginFrame()
     g_warned.fill(false);
     g_codeMeshVertCount = 0;
     g_codeMeshIndexCount = 0;
+    g_codeMeshArgCount = 0u;
+    g_codeMeshRenderVertices.clear();
+    g_codeMeshRenderIndices.clear();
+    g_codeMeshRenderBatches.clear();
     g_uiVertices.clear();
     g_uiIndices.clear();
     g_uiBatches.clear();
@@ -613,8 +624,8 @@ void __cdecl R_ClearShadowedPrimaryLightHistory(int) {}
 char __cdecl R_ReserveCodeMeshVerts(int count, std::uint16_t *baseVertex)
 {
     if (count < 0 || !baseVertex ||
-        g_codeMeshVertCount + static_cast<std::uint32_t>(count) >
-            g_codeMeshVerts.size())
+        static_cast<std::uint32_t>(count) >
+            g_codeMeshVerts.size() - g_codeMeshVertCount)
         return 0;
     *baseVertex = static_cast<std::uint16_t>(g_codeMeshVertCount);
     g_codeMeshVertCount += count;
@@ -624,11 +635,11 @@ char __cdecl R_ReserveCodeMeshVerts(int count, std::uint16_t *baseVertex)
 char __cdecl R_ReserveCodeMeshIndices(int count,
     r_double_index_t **indicesOut)
 {
-    if (count < 0 || !indicesOut ||
-        g_codeMeshIndexCount + static_cast<std::uint32_t>(count) >
-            g_codeMeshIndices.size())
+    if (count < 0 || !indicesOut || (count & 1) != 0 ||
+        static_cast<std::uint32_t>(count) >
+            WEB_RENDERER_MAX_CODE_MESH_INDICES - g_codeMeshIndexCount)
         return 0;
-    *indicesOut = &g_codeMeshIndices[g_codeMeshIndexCount];
+    *indicesOut = &g_codeMeshIndices[g_codeMeshIndexCount / 2u];
     g_codeMeshIndexCount += count;
     return 1;
 }
@@ -638,8 +649,117 @@ GfxPackedVertex *__cdecl R_GetCodeMeshVerts(std::uint16_t baseVertex)
     return &g_codeMeshVerts[baseVertex];
 }
 
-void __cdecl R_AddCodeMeshDrawSurf(Material *, r_double_index_t *,
-    std::uint32_t, std::uint32_t, std::uint32_t, const char *) {}
+char __cdecl R_ReserveCodeMeshArgs(int count, std::uint32_t *argOffsetOut)
+{
+    if (count < 0 || !argOffsetOut ||
+        static_cast<std::uint32_t>(count) > 256u - g_codeMeshArgCount)
+        return 0;
+    *argOffsetOut = g_codeMeshArgCount;
+    g_codeMeshArgCount += static_cast<std::uint32_t>(count);
+    return 1;
+}
+
+float (*__cdecl R_GetCodeMeshArgs(std::uint32_t argOffset))[4]
+{
+    return argOffset < 256u ? reinterpret_cast<float (*)[4]>(
+        g_codeMeshArgs.data() + static_cast<std::size_t>(argOffset) * 4u)
+        : nullptr;
+}
+
+void __cdecl R_AddCodeMeshDrawSurf(Material *material,
+    r_double_index_t *indices, std::uint32_t indexCount,
+    std::uint32_t argOffset, std::uint32_t argCount, const char *fxName)
+{
+    (void)fxName;
+    if (!material || !indices || indexCount == 0u || (indexCount & 1u) != 0u ||
+        argOffset >= 256u || argCount > 256u - argOffset)
+        return;
+
+    const std::uintptr_t indexAddress =
+        reinterpret_cast<std::uintptr_t>(indices);
+    const std::uintptr_t storageBegin = reinterpret_cast<std::uintptr_t>(
+        g_codeMeshIndices.data());
+    const std::uintptr_t storageEnd = storageBegin +
+        sizeof(g_codeMeshIndices);
+    if (indexAddress < storageBegin || indexAddress >= storageEnd ||
+        (indexAddress - storageBegin) % sizeof(r_double_index_t) != 0u)
+        return;
+    const std::size_t physicalOffset = static_cast<std::size_t>(
+        (indexAddress - storageBegin) / sizeof(r_double_index_t));
+    const std::size_t pairCount = indexCount / 2u;
+    if (physicalOffset > g_codeMeshIndices.size() ||
+        pairCount > g_codeMeshIndices.size() - physicalOffset ||
+        physicalOffset > g_codeMeshIndexCount / 2u ||
+        pairCount > (g_codeMeshIndexCount / 2u) - physicalOffset)
+        return;
+
+    const WebRendererCodeMeshResult conversion =
+        WebRenderer_AppendCodeMeshBatch(
+            g_codeMeshVerts.data(), g_codeMeshVertCount,
+            reinterpret_cast<const std::uint32_t *>(indices), indexCount,
+            g_codeMeshRenderVertices, g_codeMeshRenderIndices);
+    if (conversion != WebRendererCodeMeshResult::Success)
+        return;
+
+    WebRendererWorldBatchDesc batch{};
+    batch.firstIndex = static_cast<std::uint32_t>(
+        g_codeMeshRenderIndices.size() - indexCount);
+    batch.indexCount = indexCount;
+    batch.surfaceCount = 1u;
+    batch.firstSurfaceIndex = 0u;
+    batch.lastSurfaceIndex = 0u;
+    batch.materialIdentity = material;
+    batch.materialName = material->info.name ? material->info.name : "<fx>";
+    batch.modelName = "<fx-code-mesh>";
+    batch.firstInstanceIndex = UINT32_MAX;
+    batch.lastInstanceIndex = UINT32_MAX;
+    batch.sourceKind = WebRendererSceneBatchKind::DynamicDObj;
+    batch.samplerState = 0u;
+    if (material->textureTable)
+    {
+        const MaterialTextureDef *fallback = nullptr;
+        for (std::uint32_t textureIndex = 0u;
+             textureIndex < material->textureCount; ++textureIndex)
+        {
+            const MaterialTextureDef &texture =
+                material->textureTable[textureIndex];
+            if (!fallback && texture.semantic == 0u && texture.u.image)
+                fallback = &texture;
+            if (texture.semantic == 2u && texture.u.image)
+            {
+                batch.baseImage = texture.u.image;
+                batch.samplerState = texture.samplerState;
+                break;
+            }
+        }
+        if (!batch.baseImage && fallback)
+        {
+            batch.baseImage = fallback->u.image;
+            batch.samplerState = fallback->samplerState;
+        }
+    }
+    constexpr std::uint32_t FX_TECHNIQUE_INDEX = 5u;
+    const std::uint8_t stateEntry = material->stateBitsEntry[
+        FX_TECHNIQUE_INDEX];
+    if (material->stateBitsTable && stateEntry != 0xffu &&
+        stateEntry < material->stateBitsCount)
+    {
+        batch.stateBits[0] = material->stateBitsTable[stateEntry].loadBits[0];
+        batch.stateBits[1] = material->stateBitsTable[stateEntry].loadBits[1];
+    }
+    else
+    {
+        // Ordinary FX sprites are translucent and should test depth without
+        // writing it. This is the deterministic fallback when a synthetic or
+        // partially loaded material has no emissive state table entry.
+        batch.stateBits[0] = 0x01650165u;
+        batch.stateBits[1] = 0x0000000cu;
+    }
+    batch.technique = batch.baseImage
+        ? WebRendererWorldTechnique::BaseTexture
+        : WebRendererWorldTechnique::BackendFallback;
+    g_codeMeshRenderBatches.push_back(batch);
+}
 
 GfxParticleCloud *__cdecl R_AddParticleCloudToScene(Material *)
 {
@@ -864,7 +984,8 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             dynamicCommand);
     if (dynamicBuild == WebRendererDObjSceneResult::NoDObj)
     {
-        WebRenderer_SetDynamicModelScene({});
+        // Keep the command empty for now; canonical code meshes below may
+        // provide the only dynamic pass for this frame.
     }
     else if (dynamicBuild != WebRendererDObjSceneResult::Success)
     {
@@ -884,6 +1005,51 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             vertex.position[1] += refdef->viewOffset[1];
             vertex.position[2] += refdef->viewOffset[2];
         }
+    }
+
+    // EffectsCore remains the sole producer of FX geometry. Append its
+    // already-converted canonical code-mesh spans to the existing dynamic
+    // command so the backend retains one ordered, copied scene submission.
+    const bool hasCodeMesh = !g_codeMeshRenderBatches.empty();
+    if (hasCodeMesh)
+    {
+        try
+        {
+            const std::uint32_t vertexBase = static_cast<std::uint32_t>(
+                dynamicCommand.vertices.size());
+            const std::uint32_t indexBase = static_cast<std::uint32_t>(
+                dynamicCommand.indices.size());
+            if (vertexBase > WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES -
+                    g_codeMeshRenderVertices.size() ||
+                indexBase > WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES -
+                    g_codeMeshRenderIndices.size())
+            {
+                Com_Error(ERR_DROP,
+                    "R_RenderScene canonical code mesh exceeds dynamic limits");
+                return;
+            }
+            dynamicCommand.vertices.insert(dynamicCommand.vertices.end(),
+                g_codeMeshRenderVertices.begin(), g_codeMeshRenderVertices.end());
+            for (const std::uint32_t index : g_codeMeshRenderIndices)
+                dynamicCommand.indices.push_back(vertexBase + index);
+            for (WebRendererWorldBatchDesc batch : g_codeMeshRenderBatches)
+            {
+                batch.firstIndex += indexBase;
+                dynamicCommand.batches.push_back(batch);
+            }
+            dynamicCommand.surfaceCount += static_cast<std::uint32_t>(
+                g_codeMeshRenderBatches.size());
+        }
+        catch (const std::bad_alloc &)
+        {
+            Com_Error(ERR_DROP,
+                "R_RenderScene canonical code mesh allocation failed");
+            return;
+        }
+    }
+
+    if (dynamicBuild == WebRendererDObjSceneResult::Success || hasCodeMesh)
+    {
         const WebRendererWorldSurfaceDesc scene{
             dynamicCommand.vertices.data(),
             static_cast<std::uint32_t>(dynamicCommand.vertices.size()),
@@ -896,10 +1062,18 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             WebRenderer_SetDynamicModelScene(scene);
         if (submission != WebRendererSurfaceResult::Success)
         {
-            Com_Error(ERR_DROP, "R_RenderScene dynamic DObj command %s",
+            Com_Error(ERR_DROP, "R_RenderScene dynamic/canonical FX command %s",
                 WebRenderer_SurfaceResultString(submission));
             return;
         }
+    }
+    else
+    {
+        WebRenderer_SetDynamicModelScene({});
+    }
+
+    if (dynamicBuild == WebRendererDObjSceneResult::Success)
+    {
         if (!g_dynamicModelSceneReported)
         {
             g_dynamicModelSceneReported = true;
