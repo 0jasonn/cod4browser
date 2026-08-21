@@ -68,12 +68,17 @@ identity behind the explicit backend fallback. Gate 2 remains a separate frozen
 oracle and is not invoked by this path.
 
 The same cgame frame now submits the world-owned static-model population and
-the first-person DObj without introducing a preview object model. The WebGL2
-boundary retains 238 canonical `XModel` identities as 359 shared XSurface
-batches (68,684 vertices, 135,492 indices, and 12,188 placements). The
-first-person path calls canonical DObj pose evaluation and skinning each frame;
-Chrome records one weapon/viewhands DObj containing two models, five surfaces,
-4,845 posed vertices, and 18,300 indices. Canonical 2D callbacks also retain HUD
+canonical ordinary and first-person DObjs without introducing a preview object
+model. The WebGL2 boundary retains 238 canonical `XModel` identities as 359
+shared XSurface batches (68,684 vertices, 135,492 indices, and 12,188
+placements). Commit `748112cc` retains ordinary entity DObjs through the fixed
+native 512-entry scene array; commit `de695b46` selects the canonical
+`XModelGetLodForDist` result from cpose/view origins so this broader submission
+does not force every model through LOD 0. Release Chrome records 64 DObjs, 102
+models, 147 surfaces, 16,435 posed vertices, and 33,672 indices in the first
+dynamic scene, with a visibly posed Gaz actor and continued scene submission.
+The first-person path still calls canonical DObj pose evaluation and skinning
+each frame. Canonical 2D callbacks also retain HUD
 quads and font glyphs, including the `gamefonts_pc` and `devfonts` `TS_2D`
 atlases. A clean Chrome run shows the weapon, hands, center reticle, readable
 HUD/ammo, compass, and mission text together, then records `mouse1 -> +attack`
@@ -501,3 +506,25 @@ indicators. Record whether it:
 - introduces a justified permanent platform implementation,
 - adds a native-vs-web semantic comparison, or
 - leaves convergence unchanged and why.
+
+## DObj renderer convergence update (commits `748112cc`, `de695b46`)
+
+The renderer frontend now retains ordinary entity DObjs through the canonical
+512-entry scene array and selects each model's LOD by delegating to
+`XModelGetLodForDist` with cpose/view origins. This closes the prior
+first-person-only boundary without adding browser entities, a browser world,
+or a duplicate scene system. Release Chrome records 64 DObjs, 102 models, 147
+surfaces, 16,435 vertices, and 33,672 indices in the first dynamic scene, with
+visibly posed Gaz. The same run retains `FxCodeMesh` (4 batches/44
+vertices/66 indices) and `FxXModel` (5 batches/188 vertices/234 indices).
+Canonical xanim/DObj ownership remains shared; only the LOD distance policy is
+owned by the narrow renderer compatibility seam. Focused native/Wasm coverage
+verifies canonical LOD delegation, distance calculation, invalid-input safety,
+and highest-LOD fallback.
+
+Trend delta: shared Kisak runtime ownership improves because ordinary DObj
+submission now reaches the same canonical frontend path as the weapon DObj;
+browser-only engine substitutes are unchanged, and permanent browser code is
+still limited to the renderer backend/platform seam. Native systems not yet
+compiled remain the deferred shader/postprocess and broader campaign families,
+not entity or world replacements.

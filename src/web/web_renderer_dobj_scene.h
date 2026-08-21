@@ -7,6 +7,7 @@
 
 struct DObj_s;
 struct cpose_t;
+struct XModel;
 
 struct WebRendererDObjSubmission
 {
@@ -55,6 +56,12 @@ enum class WebRendererDObjSceneResult : std::uint8_t
     OutputTooLarge,
     AllocationFailed,
 };
+
+// Keep distance validation at the portable renderer seam while delegating the
+// actual threshold decision to canonical XModelGetLodForDist.
+int WebRenderer_SelectDObjLod(
+    const XModel *model, const float poseOrigin[3],
+    const float viewOrigin[3]) noexcept;
 
 WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
     const WebRendererDObjSubmission *submissions,

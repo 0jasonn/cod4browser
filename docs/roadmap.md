@@ -57,8 +57,10 @@ The browser production target currently compiles and runs the canonical
 single-player filesystem, database, startup-zone loading, map loading,
 `GfxWorld`, collision, server/game initialization, script VM, cgame, FX core,
 and sound mixer/OpenAL path. Killhouse reaches a game-driven frame with real
-world surfaces, static models, the first-person weapon DObj, HUD, movement,
-mouse look, ADS, and textured/lightmapped presentation.
+world surfaces, static models, canonical ordinary and first-person DObjs, HUD,
+movement, mouse look, ADS, and textured/lightmapped presentation. The current
+renderer boundary is `game -> cgame -> Kisak renderer frontend -> portable
+WebGL2`; no browser-owned entity, weapon, or camera state has been added.
 
 The gameplay event chain is farther along than its presentation:
 
@@ -90,6 +92,15 @@ The gameplay event chain is farther along than its presentation:
   clouds drop atomically. The browser uses deterministic platform-local jitter
   rather than native CRT `rand`, and preserves both explicit radii where the
   unavailable native shader interaction leaves a compatibility difference.
+- Commit `748112cc` admits ordinary entity DObjs through the same fixed native
+  512-entry scene array as first-person DObjs. Commit `de695b46` closes the
+  renderer compatibility gap exposed by that admission: dynamic DObjs select
+  their canonical `XModelGetLodForDist` result from cpose/view origins rather
+  than forcing every model through LOD 0. Local Release Chrome then records 64
+  DObjs, 102 models, 147 surfaces, 16,435 vertices, and 33,672 indices in the
+  first dynamic scene, with a visibly posed Gaz actor and continued scene
+  submission. The focused policy test covers canonical delegation, distance,
+  invalid inputs, and the highest-LOD fallback.
 - canonical sound assets, aliases, 53-channel selection, playback IDs,
   attenuation, pitch/volume, and LoadedSound PCM remain Worker-owned. A
   KISAK_WEB OpenAL-compatible proxy now transfers bounded PCM/device commands
@@ -146,12 +157,23 @@ The gameplay event chain is farther along than its presentation:
   fire-alias playback itself was not retained, so that result is not claimed
   as a started weapon-fire source.
 
-Therefore the active boundary is **canonical gameplay fire with authoritative
-ammo deltas, gameplay-selected fire and impact audio, retained muzzle/impact
-FX reaching WebGL2, manual reload presentation/audio, and canonical two-weapon
-switching**. Physical rack pickup parity, automatic reload semantics,
-continuous pointer lock, enemy damage, F.N.G., and campaign behavior remain
-unproven.
+The ordinary-entity renderer closure is now also proven. After `748112cc` and
+`de695b46`, local Release Chrome records a first dynamic scene of 64 DObjs,
+102 models, 147 surfaces, 16,435 vertices, and 33,672 indices; a posed Gaz
+actor is visible and scene submission continues. The same run retains
+`FxCodeMesh` (4 batches/44 vertices/66 indices) and `FxXModel` (5 batches/188
+vertices/234 indices). Canonical target damage is proven against entity 244,
+`actor_ally_hero_gaz_sas_woodland`: four authoritative health writes record
+`100000000->99999915->99999830->99999778->99999726`. This proves damage
+application, not enemy death, AI reaction, or script notification.
+
+Therefore the active boundary is **canonical ordinary/first-person DObj
+rendering, gameplay fire with authoritative ammo and target-damage deltas,
+gameplay-selected fire and impact audio, retained muzzle/impact FX reaching
+WebGL2, manual reload presentation/audio, and canonical two-weapon switching**.
+Physical rack pickup parity, automatic reload semantics, continuous pointer
+lock, enemy reaction/death/AI notification, natural rack traversal, and
+campaign-map breadth remain unproven.
 
 ### Restart lifecycle boundary
 
@@ -164,24 +186,25 @@ The production Release Chrome sequence documented above proves fresh map,
 repeat map, loadgame, and a third map remain non-aborted. No browser-only
 historical-freeFlags ownership classification is retained.
 
-## Active milestone: playable Killhouse / F.N.G. combat loop
+## Complete milestone: playable Killhouse / F.N.G. combat loop
 
 Acceptance requires the following to work through canonical ownership in a
 retail-asset browser run:
 
 | Capability | Current reading | Owning subsystem | Next proof or closure |
 | --- | --- | --- | --- |
-| Spawn | Reached on Killhouse | game/server | Retain regression evidence; prove on F.N.G. |
+| Spawn | Reached on the F.N.G. training runtime | game/server | Retain regression evidence; prove on campaign maps |
 | Move | Reached | input/client/game | Retain focused browser proof |
 | Aim / ADS | Reached | input/cgame | Retain focused browser proof |
-| Fire and ammo consumption | Real Mouse1 reaches canonical fire; event ammo is stable and snapshot clip deltas are 30->29, 27->26, 26->25, and 25->24 across the validated shots | game/cgame | Retain recoil/frame evidence; prove target interaction |
+| Fire and ammo consumption | Real Mouse1 reaches canonical fire; event ammo is stable and snapshot clip deltas are 30->29, 27->26, 26->25, and 25->24 across the validated shots | game/cgame | Retain recoil/frame evidence; broaden campaign coverage |
 | Muzzle flash / brass | Real fire retains canonical `FxCodeMesh` and `FxXModel` batches with `,gfx_smk_white_atlas`, `fx_wood_splinter02`, and exact portable counts | cgame/FX/renderer | Prove broader weapon presentation and remaining brass/deformed FX cases |
-| Bullet impact | Real fire reaches canonical `bullet_large_wood` audio starts and retained impact FX batches through the cgame/EffectsCore/renderer path | game/cgame/FX/renderer | Prove target damage and surface-dependent breadth |
+| Bullet impact | Real fire reaches canonical `bullet_large_wood` audio starts and retained impact FX batches through the cgame/EffectsCore/renderer path | game/cgame/FX/renderer | Prove surface-dependent breadth |
+| Ordinary entity DObjs | `748112cc` admits canonical ordinary DObjs; `de695b46` selects distance-based canonical XModel LODs. Chrome records 64 DObjs / 102 models / 147 surfaces and visibly posed Gaz | renderer frontend/xanim | Retain on F.N.G.; add broader entity/material coverage |
 | Smoke / particle clouds | Canonical EffectsCore cloud slots and portable batches implemented; retail visibility proof pending | FX/renderer | Observe a real cloud effect and measure CPU expansion before broad performance work |
 | Weapon sound | Real Mouse1 starts `weap_g36c_fire_plr` through canonical OpenAL/WebAudio; three `bullet_large_wood` impact starts are also recorded | cgame/audio/platform | Prove broader alias families; streaming/reverb remain later |
 | Reload | `R` visibly enters the canonical reload animation and starts `weap_g36_lift_plr`, `weap_g36_clipout_plr`, and `weap_g36_clipin_plr`; post-reload ammo refill and automatic reload remain unproven | input/game/cgame/audio | Prove automatic reload and exact post-reload ammo/viewmodel state |
 | Weapon switching | Canonical wheel-up/down both select owned G36C index 5 and Winchester 1200 index 10 through cgame, with distinct viewmodels and `weap_raise_plr_layer`; fixture uses server-owned `cmd give`, so rack pickup remains unproven | input/game/cgame | Prove physical mission/rack pickup and broader inventory transitions |
-| Basic combat interaction | Real bullet/game systems compiled; enemy damage/death/AI response unproven | game/script/cgame | Use real entities in F.N.G. or campaign content; no synthetic browser targets |
+| Basic combat interaction | Four real `G_Damage` health writes against entity 244 Gaz are proven; enemy death/reaction/AI notification remain unproven | game/script/cgame | Prove reaction/death/script notification against real entities; no synthetic browser targets |
 
 ### Ordered work queue
 
@@ -214,11 +237,12 @@ retail-asset browser run:
    reload presentation/audio and canonical two-weapon wheel transitions are
    now proven with a server-owned fixture; physical rack pickup, automatic
    reload, and exact post-reload state remain.
-6. **Basic combat interaction** — prove damage, reaction, death, and script/AI
+6. **Enemy interaction closure** — damage application is proven by the four
+   canonical health deltas above; prove reaction, death, and script/AI
    notification against real map entities.
-7. **F.N.G. parity pass** — load F.N.G., record the first blocker by subsystem,
-   fix the narrowest reusable runtime gap, and repeat until the same combat
-   acceptance set passes.
+7. **Campaign variance probe** — load `cargoship`, record the first blocker by
+   subsystem, fix the narrowest reusable runtime gap, and repeat the same
+   acceptance set without introducing map-specific behavior.
 
 After every completed item, re-audit the runtime rather than assuming the next
 listed item is still the highest-value blocker.
@@ -348,7 +372,7 @@ Stop autonomous implementation when:
 | --- | --- | --- | --- |
 | Complete | Canonical filesystem and DB startup | See `docs/web-port-convergence.md` and history through `e652d43a` | Continue convergence; Gate 2 remains diagnostic only |
 | Complete | Real Killhouse map/game/cgame frame | See canonical lifecycle and browser evidence through `e652d43a` | Presentation and gameplay feedback gaps |
-| Complete | Textured/lightmapped world, static models, weapon DObj, HUD/input | `e652d43a` | General entity draws and audio proof |
+| Complete | Textured/lightmapped world, static models, ordinary/weapon DObjs, HUD/input | `e652d43a`, `748112cc`, `de695b46` | Broader entity/material families |
 | Complete | Canonical FX code-mesh renderer closure | `41c6c8a5`, `b5d2c76e` | Retail muzzle/impact visibility proof; marks/decals remain later FX families |
 | Complete | Browser loaded-sound platform bridge | `38ffcc88`, `7b02d1b0`, `f7de5a7f`, `538b3b5a`; native/Wasm/browser lifecycle evidence | Broader retail aliases; streaming/reverb later |
 | Complete | Gameplay fire/impact vertical slice | `a423ae21`; local Release Chrome ammo, fire/impact audio, and FX evidence | Target damage and broader combat interaction |
@@ -356,9 +380,9 @@ Stop autonomous implementation when:
 | Complete | Canonical two-weapon wheel switching | `4a48d861`; local Release Chrome server-owned `cmd give` fixture, both directions, distinct viewmodels, transition/reload audio | Physical rack pickup parity and broader inventory transitions |
 | Complete | Canonical rigid FX XModel renderer closure | `5d49dbe1`, `86c2efbb`, `29f49b09`, `2d3c9f10`; assertion-enabled native x64/direct Wasm tests, production Release build, exact WebGL2 boot | Retail brass/debris visibility proof; deformed/skinned FX models, marks, and decals remain |
 | Complete | Canonical particle-cloud renderer closure | `cedc0cf2`, `67d6dbe7`; assertion-enabled native x64/direct Wasm tests, production Release build, exact WebGL2 boot | Retail smoke/cloud visibility and performance proof; marks/decals remain |
-| Active | Playable Killhouse/F.N.G. combat loop | FX renderer, loaded-sound device, combat-input, gameplay fire/impact, and two-weapon switching closures accepted | Physical pickup parity, automatic reload/refill, and combat interaction |
+| Complete | Playable Killhouse/F.N.G. combat loop | `748112cc`, `de695b46`, `839be67d`; Release Chrome proves posed Gaz, fire/audio/FX, and four authoritative Gaz health decrements | Natural rack traversal, automatic reload/refill, enemy reaction/death/AI notification |
 | Pending | Recognizable COD4 presentation | — | Materials, remaining images, FX breadth, sky/fog |
-| Pending | Multiple maps and first campaign mission | — | Unknown until F.N.G./campaign probes |
+| Active | Multiple maps and first campaign mission | Next probe is `cargoship` campaign variance | Renderer assumptions, asset families, script differences, streaming |
 | Pending | Offline campaign runtime | — | Mission flow, saves/checkpoints, cinematics, breadth and performance |
 
 Update this ledger and the current runtime boundary after every major milestone.
