@@ -5,6 +5,7 @@
 #include <client/cl_fastfile_config.h>
 #include <client/client.h>
 #include <database/database.h>
+#include <database/db_registry_publication.h>
 #include <database/db_initialization.h>
 #include <gfx_d3d/r_asset_load.h>
 #include <gfx_d3d/r_configuration.h>
@@ -156,8 +157,11 @@ void __cdecl Com_Restart()
     // This is the exact canonical DB publication reset from Com_Restart. The
     // xanim, DObj, collision, script, and sound portions do not yet have
     // runtime owners. Hunk ownership is live and resets in native order.
+    DB_DiagnosePublishedSoundCurves("restart-before-release");
     DB_ReleaseXAssets();
+    DB_DiagnosePublishedSoundCurves("restart-after-release");
     Hunk_Clear();
+    DB_DiagnosePublishedSoundCurves("restart-after-hunk");
 }
 
 void __cdecl R_BeginRemoteScreenUpdate()

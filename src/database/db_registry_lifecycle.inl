@@ -55,7 +55,8 @@ bool IsSoundCurveHeaderFree(const XAssetHeader &header)
     return false;
 }
 
-void DiagnoseSoundCurveEntry(const XAssetEntryPoolEntry &entry)
+void DiagnoseSoundCurveEntry(const XAssetEntryPoolEntry &entry,
+    const char *phase)
 {
     if (g_invalidSoundCurveDiagnostics >= 16 ||
         entry.entry.asset.type != ASSET_TYPE_SOUND_CURVE)
@@ -69,9 +70,10 @@ void DiagnoseSoundCurveEntry(const XAssetEntryPoolEntry &entry)
     if (valid && !poolFree)
         return;
     Com_PrintWarning(9,
-        "[kisakcod-db] SndCurve enum diagnostic entry=%u zone=%u "
+        "[kisakcod-db] SndCurve %s diagnostic entry=%u zone=%u "
         "pool=%u free=%d inuse=%d nextHash=%u nextOverride=%u "
         "name=%p knots=%d filenamePtr=%p\n",
+        phase ? phase : "enum",
         static_cast<std::uint32_t>(&entry - g_assetEntryPool),
         static_cast<unsigned>(entry.entry.zoneIndex), poolIndex,
         poolFree ? 1 : 0, entry.entry.inuse ? 1 : 0,
@@ -83,6 +85,14 @@ void DiagnoseSoundCurveEntry(const XAssetEntryPoolEntry &entry)
         poolIndex == UINT32_MAX || !header.sndCurve
             ? nullptr : static_cast<const void *>(header.sndCurve->filename));
     ++g_invalidSoundCurveDiagnostics;
+}
+
+void DiagnosePublishedSoundCurves(const char *phase)
+{
+    for (std::uint32_t hash = 0; hash < 0x8000u; ++hash)
+        for (std::uint32_t index = db_hashTable[hash]; index;
+             index = g_assetEntryPool[index].entry.nextHash)
+            DiagnoseSoundCurveEntry(g_assetEntryPool[index], phase);
 }
 
 struct XZoneInfoInternal
@@ -310,6 +320,13 @@ void DB_LoadZone_f()
 }
 } // namespace
 
+void DB_DiagnosePublishedSoundCurves(const char *phase)
+{
+    Sys_LockWrite(&db_hashCritSect);
+    DiagnosePublishedSoundCurves(phase);
+    Sys_UnlockWrite(&db_hashCritSect);
+}
+
 void __cdecl DB_InitThread()
 {
     DB_RuntimeTraceStage("DB_InitThread");
@@ -399,7 +416,7 @@ void __cdecl DB_EnumXAssets_FastFile(
         {
             XAssetEntryPoolEntry *entry = &g_assetEntryPool[index];
             if (entry->entry.asset.type != type) continue;
-            DiagnoseSoundCurveEntry(*entry);
+            DiagnoseSoundCurveEntry(*entry, "enum");
             func(entry->entry.asset.header, inData);
             if (!includeOverride) continue;
             for (std::uint32_t overrideIndex = entry->entry.nextOverride;
@@ -407,7 +424,7 @@ void __cdecl DB_EnumXAssets_FastFile(
                  overrideIndex =
                      g_assetEntryPool[overrideIndex].entry.nextOverride)
             {
-                DiagnoseSoundCurveEntry(g_assetEntryPool[overrideIndex]);
+                DiagnoseSoundCurveEntry(g_assetEntryPool[overrideIndex], "enum");
                 func(g_assetEntryPool[overrideIndex].entry.asset.header,
                     inData);
             }
