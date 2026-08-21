@@ -119,6 +119,13 @@ enum class WebRendererSceneBatchKind : std::uint8_t
     FxXModel,
 };
 
+constexpr bool WebRenderer_IsFxVertexColorBatch(
+    WebRendererSceneBatchKind kind) noexcept
+{
+    return kind == WebRendererSceneBatchKind::FxCodeMesh ||
+        kind == WebRendererSceneBatchKind::FxXModel;
+}
+
 // Callback-scoped canonical identity and portable first-pass state for one
 // contiguous world draw. WebRenderer_SetWorldSurface copies names/state and
 // consumes the DB-owned image load definitions before returning.

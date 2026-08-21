@@ -141,6 +141,33 @@ WebRendererWorldBatchDesc MakeDraw(
 }
 } // namespace
 
+bool WebRenderer_FxModelPlacementIsValid(
+    const GfxScaledPlacement &placement) noexcept
+{
+    return PlacementIsValid(placement);
+}
+
+WebRendererFxModelRetainResult WebRenderer_RetainFxModelSubmission(
+    WebRendererFxModelSubmission *storage,
+    std::uint32_t *count,
+    const XModel *model,
+    const GfxScaledPlacement *placement,
+    std::uint16_t lod) noexcept
+{
+    if (!storage || !count || !model || !placement ||
+        !PlacementIsValid(*placement))
+    {
+        return WebRendererFxModelRetainResult::InvalidSubmission;
+    }
+    if (*count >= WEB_RENDERER_MAX_FX_MODEL_SUBMISSIONS)
+        return WebRendererFxModelRetainResult::LimitReached;
+    WebRendererFxModelSubmission &retained = storage[(*count)++];
+    retained.model = model;
+    retained.placement = *placement;
+    retained.lod = lod;
+    return WebRendererFxModelRetainResult::Accepted;
+}
+
 int WebRenderer_SelectFxModelLod(
     const XModel *model, const GfxScaledPlacement &placement,
     const float viewOrigin[3]) noexcept
@@ -164,12 +191,17 @@ int WebRenderer_SelectFxModelLod(
 WebRendererFxModelSceneResult WebRenderer_BuildFxModelSceneCommand(
     const WebRendererFxModelSubmission *submissions,
     std::uint32_t submissionCount,
-    WebRendererFxModelSceneCommand &destination)
+    WebRendererFxModelSceneCommand &destination,
+    std::uint32_t *droppedCount)
 {
+    if (droppedCount) *droppedCount = 0u;
     if (submissionCount == 0u) return WebRendererFxModelSceneResult::NoFxModel;
     if (!submissions) return WebRendererFxModelSceneResult::InvalidSubmission;
 
     WebRendererFxModelSceneCommand replacement;
+    const auto dropSubmission = [&]() {
+        if (droppedCount && *droppedCount != UINT32_MAX) ++*droppedCount;
+    };
     try
     {
         for (std::uint32_t submissionIndex = 0u;
@@ -182,17 +214,34 @@ WebRendererFxModelSceneResult WebRenderer_BuildFxModelSceneCommand(
                 model->numLods <= 0 || model->numLods > MAX_LODS ||
                 submission.lod >= static_cast<std::uint16_t>(model->numLods))
             {
-                return WebRendererFxModelSceneResult::InvalidModel;
+                dropSubmission();
+                continue;
             }
             if (!PlacementIsValid(submission.placement))
-                return WebRendererFxModelSceneResult::InvalidPlacement;
+            {
+                dropSubmission();
+                continue;
+            }
 
             const XModelLodInfo &lod = model->lodInfo[submission.lod];
             if (lod.surfIndex > model->numsurfs ||
                 lod.numsurfs > model->numsurfs - lod.surfIndex)
             {
-                return WebRendererFxModelSceneResult::InvalidModel;
+                dropSubmission();
+                continue;
             }
+            const std::size_t submissionVertexStart = replacement.vertices.size();
+            const std::size_t submissionIndexStart = replacement.indices.size();
+            const std::size_t submissionBatchStart = replacement.batches.size();
+            const auto rollbackSubmission = [&]() {
+                replacement.vertices.resize(submissionVertexStart);
+                replacement.indices.resize(submissionIndexStart);
+                replacement.batches.resize(submissionBatchStart);
+            };
+            const auto dropAndRollback = [&]() {
+                rollbackSubmission();
+                dropSubmission();
+            };
             float axis[3][3]{};
             UnitQuatToAxisExact(submission.placement.base.quat, axis);
             bool modelSubmitted = false;
@@ -202,13 +251,36 @@ WebRendererFxModelSceneResult WebRenderer_BuildFxModelSceneCommand(
                 const std::uint32_t surfaceIndex = lod.surfIndex + localSurface;
                 const XSurface &surface = model->surfs[surfaceIndex];
                 if (surface.deformed)
-                    return WebRendererFxModelSceneResult::UnsupportedSurface;
+                {
+                    dropAndRollback();
+                    modelSubmitted = false;
+                    break;
+                }
                 if (surface.vertCount == 0u || surface.triCount == 0u)
                     continue;
                 if (!surface.verts0 || !surface.triIndices)
-                    return WebRendererFxModelSceneResult::InvalidModel;
+                {
+                    dropAndRollback();
+                    modelSubmitted = false;
+                    break;
+                }
                 const std::uint32_t indexCount =
                     static_cast<std::uint32_t>(surface.triCount) * 3u;
+                bool indicesValid = true;
+                for (std::uint32_t index = 0u; index < indexCount; ++index)
+                {
+                    if (surface.triIndices[index] >= surface.vertCount)
+                    {
+                        indicesValid = false;
+                        break;
+                    }
+                }
+                if (!indicesValid)
+                {
+                    dropAndRollback();
+                    modelSubmitted = false;
+                    break;
+                }
                 if (replacement.vertices.size() >
                         WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES -
                         surface.vertCount ||
@@ -239,7 +311,11 @@ WebRendererFxModelSceneResult WebRenderer_BuildFxModelSceneCommand(
                         }
                     }
                     if (!Finite3(vertex.position))
-                        return WebRendererFxModelSceneResult::InvalidModel;
+                    {
+                        dropAndRollback();
+                        modelSubmitted = false;
+                        break;
+                    }
                     vertex.color[0] = static_cast<float>(
                         (source.color.packed >> 16u) & 0xffu) * BYTE_TO_UNIT;
                     vertex.color[1] = static_cast<float>(
@@ -253,18 +329,22 @@ WebRendererFxModelSceneResult WebRenderer_BuildFxModelSceneCommand(
                     if (!std::isfinite(vertex.textureCoordinate[0]) ||
                         !std::isfinite(vertex.textureCoordinate[1]))
                     {
-                        return WebRendererFxModelSceneResult::InvalidModel;
+                        dropAndRollback();
+                        modelSubmitted = false;
+                        break;
                     }
                     replacement.vertices.push_back(vertex);
                 }
+
+                if (!modelSubmitted && replacement.vertices.size() !=
+                    vertexBase + surface.vertCount)
+                    break;
 
                 const std::uint32_t firstIndex = static_cast<std::uint32_t>(
                     replacement.indices.size());
                 for (std::uint32_t index = 0u; index < indexCount; ++index)
                 {
                     const std::uint32_t localIndex = surface.triIndices[index];
-                    if (localIndex >= surface.vertCount)
-                        return WebRendererFxModelSceneResult::IndexOutOfRange;
                     replacement.indices.push_back(vertexBase + localIndex);
                 }
                 replacement.batches.push_back(MakeDraw(
@@ -285,6 +365,89 @@ WebRendererFxModelSceneResult WebRenderer_BuildFxModelSceneCommand(
         return WebRendererFxModelSceneResult::NoFxModel;
     destination = std::move(replacement);
     return WebRendererFxModelSceneResult::Success;
+}
+
+WebRendererFxModelAppendResult WebRenderer_ValidateFxModelAppendCounts(
+    std::size_t sourceVertexCount,
+    std::size_t sourceIndexCount,
+    std::size_t sourceBatchCount,
+    std::uint32_t sourceSurfaceCount,
+    std::size_t destinationVertexCount,
+    std::size_t destinationIndexCount,
+    std::size_t destinationBatchCount,
+    std::uint32_t destinationSurfaceCount) noexcept
+{
+    if (sourceVertexCount > WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES ||
+        sourceIndexCount > WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES ||
+        sourceBatchCount > WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES ||
+        destinationVertexCount > WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES -
+            sourceVertexCount ||
+        destinationIndexCount > WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES -
+            sourceIndexCount ||
+        destinationBatchCount > WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES -
+            sourceBatchCount ||
+        destinationSurfaceCount > UINT32_MAX - sourceSurfaceCount)
+    {
+        return WebRendererFxModelAppendResult::OutputTooLarge;
+    }
+    return WebRendererFxModelAppendResult::Success;
+}
+
+WebRendererFxModelAppendResult WebRenderer_AppendFxModelSceneCommand(
+    const WebRendererFxModelSceneCommand &source,
+    std::vector<WebRendererSurfaceVertex> &vertices,
+    std::vector<std::uint32_t> &indices,
+    std::vector<WebRendererWorldBatchDesc> &batches,
+    std::uint32_t &surfaceCount)
+{
+    const WebRendererFxModelAppendResult countResult =
+        WebRenderer_ValidateFxModelAppendCounts(
+            source.vertices.size(), source.indices.size(), source.batches.size(),
+            source.surfaceCount, vertices.size(), indices.size(), batches.size(),
+            surfaceCount);
+    if (countResult != WebRendererFxModelAppendResult::Success)
+        return countResult;
+    for (const std::uint32_t index : source.indices)
+        if (index >= source.vertices.size())
+            return WebRendererFxModelAppendResult::InvalidCommand;
+    for (const WebRendererWorldBatchDesc &batch : source.batches)
+    {
+        if (batch.firstIndex > source.indices.size() ||
+            batch.indexCount > source.indices.size() - batch.firstIndex)
+        {
+            return WebRendererFxModelAppendResult::InvalidCommand;
+        }
+    }
+    const std::size_t originalVertexCount = vertices.size();
+    const std::size_t originalIndexCount = indices.size();
+    const std::size_t originalBatchCount = batches.size();
+    const std::uint32_t originalSurfaceCount = surfaceCount;
+    try
+    {
+        vertices.reserve(originalVertexCount + source.vertices.size());
+        indices.reserve(originalIndexCount + source.indices.size());
+        batches.reserve(originalBatchCount + source.batches.size());
+        vertices.insert(vertices.end(), source.vertices.begin(),
+            source.vertices.end());
+        for (const std::uint32_t index : source.indices)
+            indices.push_back(static_cast<std::uint32_t>(originalVertexCount) +
+                index);
+        for (WebRendererWorldBatchDesc batch : source.batches)
+        {
+            batch.firstIndex += static_cast<std::uint32_t>(originalIndexCount);
+            batches.push_back(batch);
+        }
+        surfaceCount += source.surfaceCount;
+    }
+    catch (const std::bad_alloc &)
+    {
+        vertices.resize(originalVertexCount);
+        indices.resize(originalIndexCount);
+        batches.resize(originalBatchCount);
+        surfaceCount = originalSurfaceCount;
+        return WebRendererFxModelAppendResult::AllocationFailed;
+    }
+    return WebRendererFxModelAppendResult::Success;
 }
 
 const char *WebRenderer_FxModelSceneResultString(

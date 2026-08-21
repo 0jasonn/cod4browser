@@ -3196,9 +3196,8 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             const WebRendererRetainedWorldImage *base = RetainedImage(
                 g_renderer.retainedDynamicModelImages,
                 batch.baseImageIndex);
-            const bool fxSceneGeometry = batch.sourceKind ==
-                    WebRendererSceneBatchKind::FxCodeMesh ||
-                batch.sourceKind == WebRendererSceneBatchKind::FxXModel;
+            const bool fxSceneGeometry = WebRenderer_IsFxVertexColorBatch(
+                batch.sourceKind);
             const bool fallback = batch.technique ==
                     WebRendererWorldTechnique::BackendFallback ||
                 !base;

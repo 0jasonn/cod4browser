@@ -99,7 +99,8 @@ bool g_dynamicModelSceneReported = false;
 bool g_uiSceneReported = false;
 std::array<WebRendererDObjSubmission, 32> g_dobjSubmissions{};
 std::uint32_t g_dobjSubmissionCount = 0u;
-std::array<WebRendererFxModelSubmission, 256> g_fxModelSubmissions{};
+std::array<WebRendererFxModelSubmission,
+    WEB_RENDERER_MAX_FX_MODEL_SUBMISSIONS> g_fxModelSubmissions{};
 std::uint32_t g_fxModelSubmissionCount = 0u;
 std::uint32_t g_worldSceneSurfaceCount = 0u;
 std::uint32_t g_worldSceneVertexCount = 0u;
@@ -785,24 +786,20 @@ void __cdecl R_FilterXModelIntoScene(
     const XModel *model, const GfxScaledPlacement *placement,
     std::uint16_t, std::uint16_t *)
 {
-    if (!model || !placement || g_fxModelSubmissionCount >=
-        g_fxModelSubmissions.size())
+    const WebRendererFxModelRetainResult retained =
+        WebRenderer_RetainFxModelSubmission(
+            g_fxModelSubmissions.data(), &g_fxModelSubmissionCount,
+            model, placement, 0u);
+    if (retained == WebRendererFxModelRetainResult::LimitReached)
     {
+        R_WarnOncePerFrame(R_WARN_MAX_SCENE_MODEL_REFS);
         return;
     }
-    if (!std::isfinite(placement->scale) || placement->scale <= 0.0f ||
-        !std::isfinite(placement->base.origin[0]) ||
-        !std::isfinite(placement->base.origin[1]) ||
-        !std::isfinite(placement->base.origin[2]))
+    if (retained == WebRendererFxModelRetainResult::InvalidSubmission)
     {
+        R_WarnOncePerFrame(R_WARN_UNKNOWN_XMODEL_SHADER);
         return;
     }
-
-    WebRendererFxModelSubmission &submission =
-        g_fxModelSubmissions[g_fxModelSubmissionCount++];
-    submission.model = model;
-    submission.placement = *placement;
-    submission.lod = 0u;
 }
 
 void __cdecl R_AddOmniLightToScene(const float *, float, float, float, float) {}
@@ -1060,57 +1057,43 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     g_fxModelSubmissionCount = selectedFxModels;
 
     WebRendererFxModelSceneCommand fxModelCommand;
-    const WebRendererFxModelSceneResult fxModelBuild =
+    std::uint32_t droppedFxModels = 0u;
+    WebRendererFxModelSceneResult fxModelBuild =
         WebRenderer_BuildFxModelSceneCommand(
             g_fxModelSubmissions.data(), g_fxModelSubmissionCount,
-            fxModelCommand);
+            fxModelCommand, &droppedFxModels);
+    if (droppedFxModels != 0u)
+        R_WarnOncePerFrame(R_WARN_UNKNOWN_XMODEL_SHADER);
     if (fxModelBuild != WebRendererFxModelSceneResult::Success &&
         fxModelBuild != WebRendererFxModelSceneResult::NoFxModel)
     {
-        Com_Error(ERR_DROP, "R_RenderScene FX XModel: %s",
-            WebRenderer_FxModelSceneResultString(fxModelBuild));
-        return;
+        // FX model presentation is optional. Geometry/output exhaustion is a
+        // family-level drop, so DObj and code-mesh commands still render and
+        // the backend receives a fresh dynamic scene below.
+        R_WarnOncePerFrame(R_WARN_MAX_SCENE_MODEL_REFS);
+        fxModelCommand = {};
+        fxModelBuild = WebRendererFxModelSceneResult::NoFxModel;
     }
 
     // EffectsCore remains the sole producer of FX geometry. Append its
     // already-converted canonical code-mesh spans to the existing dynamic
     // command so the backend retains one ordered, copied scene submission.
     const bool hasCodeMesh = !g_codeMeshRenderBatches.empty();
-    const bool hasFxModel = fxModelBuild ==
+    bool hasFxModel = fxModelBuild ==
         WebRendererFxModelSceneResult::Success;
     if (hasFxModel)
     {
-        try
+        const WebRendererFxModelAppendResult appendResult =
+            WebRenderer_AppendFxModelSceneCommand(
+                fxModelCommand,
+                dynamicCommand.vertices,
+                dynamicCommand.indices,
+                dynamicCommand.batches,
+                dynamicCommand.surfaceCount);
+        if (appendResult != WebRendererFxModelAppendResult::Success)
         {
-            const std::uint32_t vertexBase = static_cast<std::uint32_t>(
-                dynamicCommand.vertices.size());
-            const std::uint32_t indexBase = static_cast<std::uint32_t>(
-                dynamicCommand.indices.size());
-            if (vertexBase > WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES -
-                    fxModelCommand.vertices.size() ||
-                indexBase > WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES -
-                    fxModelCommand.indices.size())
-            {
-                Com_Error(ERR_DROP,
-                    "R_RenderScene canonical FX XModel exceeds dynamic limits");
-                return;
-            }
-            dynamicCommand.vertices.insert(dynamicCommand.vertices.end(),
-                fxModelCommand.vertices.begin(), fxModelCommand.vertices.end());
-            for (const std::uint32_t index : fxModelCommand.indices)
-                dynamicCommand.indices.push_back(vertexBase + index);
-            for (WebRendererWorldBatchDesc batch : fxModelCommand.batches)
-            {
-                batch.firstIndex += indexBase;
-                dynamicCommand.batches.push_back(batch);
-            }
-            dynamicCommand.surfaceCount += fxModelCommand.surfaceCount;
-        }
-        catch (const std::bad_alloc &)
-        {
-            Com_Error(ERR_DROP,
-                "R_RenderScene canonical FX XModel allocation failed");
-            return;
+            R_WarnOncePerFrame(R_WARN_MAX_SCENE_MODEL_REFS);
+            hasFxModel = false;
         }
     }
     if (hasCodeMesh)

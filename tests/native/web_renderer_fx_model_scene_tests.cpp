@@ -200,8 +200,11 @@ void TestFailureLeavesDestinationUntouched()
 
     WebRendererFxModelSubmission invalid = valid;
     invalid.placement.scale = 0.0f;
-    assert(WebRenderer_BuildFxModelSceneCommand(&invalid, 1u, command) ==
-        WebRendererFxModelSceneResult::InvalidPlacement);
+    std::uint32_t dropped = 0u;
+    assert(WebRenderer_BuildFxModelSceneCommand(&invalid, 1u, command,
+        &dropped) ==
+        WebRendererFxModelSceneResult::NoFxModel);
+    assert(dropped == 1u);
     assert(command.vertices.size() == originalVertices.size());
     assert(std::memcmp(command.vertices.data(), originalVertices.data(),
         command.vertices.size() * sizeof(WebRendererSurfaceVertex)) == 0);
@@ -210,27 +213,137 @@ void TestFailureLeavesDestinationUntouched()
 
     invalid = valid;
     fixture.indices[1] = 99u;
-    assert(WebRenderer_BuildFxModelSceneCommand(&invalid, 1u, command) ==
-        WebRendererFxModelSceneResult::IndexOutOfRange);
+    dropped = 0u;
+    assert(WebRenderer_BuildFxModelSceneCommand(&invalid, 1u, command,
+        &dropped) ==
+        WebRendererFxModelSceneResult::NoFxModel);
     assert(command.vertices.size() == originalVertices.size());
     assert(std::memcmp(command.vertices.data(), originalVertices.data(),
         command.vertices.size() * sizeof(WebRendererSurfaceVertex)) == 0);
     assert(command.indices == originalIndices);
 
+    fixture.indices[1] = 2u;
     fixture.surfaces[0].deformed = true;
-    assert(WebRenderer_BuildFxModelSceneCommand(&valid, 1u, command) ==
-        WebRendererFxModelSceneResult::UnsupportedSurface);
+    dropped = 0u;
+    assert(WebRenderer_BuildFxModelSceneCommand(&valid, 1u, command,
+        &dropped) ==
+        WebRendererFxModelSceneResult::NoFxModel);
+    assert(dropped == 1u);
     assert(command.vertices.size() == originalVertices.size());
     assert(std::memcmp(command.vertices.data(), originalVertices.data(),
         command.vertices.size() * sizeof(WebRendererSurfaceVertex)) == 0);
+}
+
+void TestRetainCopyOverflowAndClear()
+{
+    Fixture fixture;
+    std::array<WebRendererFxModelSubmission,
+        WEB_RENDERER_MAX_FX_MODEL_SUBMISSIONS> storage{};
+    std::uint32_t count = 0u;
+    GfxScaledPlacement placement{};
+    placement.base.quat[3] = 1.0f;
+    placement.base.origin[0] = 7.0f;
+    placement.scale = 1.0f;
+    assert(WebRenderer_RetainFxModelSubmission(storage.data(), &count,
+        &fixture.model, &placement, 1u) ==
+        WebRendererFxModelRetainResult::Accepted);
+    placement.base.origin[0] = 99.0f;
+    assert(count == 1u);
+    assert(storage[0].placement.base.origin[0] == 7.0f);
+    placement.base.quat[3] = 0.0f;
+    assert(!WebRenderer_FxModelPlacementIsValid(placement));
+    assert(WebRenderer_RetainFxModelSubmission(storage.data(), &count,
+        &fixture.model, &placement, 0u) ==
+        WebRendererFxModelRetainResult::InvalidSubmission);
+    assert(count == 1u);
+    placement.base.quat[3] = 1.0f;
+    count = WEB_RENDERER_MAX_FX_MODEL_SUBMISSIONS;
+    assert(WebRenderer_RetainFxModelSubmission(storage.data(), &count,
+        &fixture.model, &placement, 0u) ==
+        WebRendererFxModelRetainResult::LimitReached);
+    assert(count == WEB_RENDERER_MAX_FX_MODEL_SUBMISSIONS);
+    count = 0u;
+    assert(count == 0u);
+}
+
+void TestAtomicCompositionAndOutputLimits()
+{
+    Fixture fixture;
+    const WebRendererFxModelSubmission submissions[2] = {
+        Submission(fixture), Submission(fixture, 1u)};
+    WebRendererFxModelSceneCommand fx;
+    const auto buildResult = WebRenderer_BuildFxModelSceneCommand(
+        submissions, 2u, fx);
+    assert(buildResult == WebRendererFxModelSceneResult::Success);
+
+    std::vector<WebRendererSurfaceVertex> vertices(1u);
+    std::vector<std::uint32_t> indices{0u};
+    WebRendererWorldBatchDesc dobjBatch{};
+    dobjBatch.firstIndex = 0u;
+    dobjBatch.indexCount = 1u;
+    dobjBatch.sourceKind = WebRendererSceneBatchKind::DynamicDObj;
+    std::vector<WebRendererWorldBatchDesc> batches{dobjBatch};
+    std::uint32_t surfaceCount = 1u;
+    const auto appendResult = WebRenderer_AppendFxModelSceneCommand(
+        fx, vertices, indices, batches, surfaceCount);
+    assert(appendResult == WebRendererFxModelAppendResult::Success);
+    assert(vertices.size() == 7u);
+    assert(indices.front() == 0u);
+    assert(indices[1] == 1u);
+    assert(batches.front().sourceKind == WebRendererSceneBatchKind::DynamicDObj);
+    assert(batches[1].firstIndex == 1u);
+    assert(batches[2].firstIndex == 4u);
+    assert(batches[1].sourceKind == WebRendererSceneBatchKind::FxXModel);
+    assert(batches[2].sourceKind == WebRendererSceneBatchKind::FxXModel);
+    assert(surfaceCount == 3u);
+    const std::size_t codeMeshIndexBase = indices.size();
+    indices.push_back(static_cast<std::uint32_t>(vertices.size() - 1u));
+    assert(codeMeshIndexBase == 7u);
+    assert(indices.back() >= codeMeshIndexBase - 1u);
+
+    const auto originalVertices = vertices;
+    const auto originalIndices = indices;
+    const auto originalBatches = batches;
+    const std::uint32_t originalSurfaceCount = surfaceCount;
+    WebRendererFxModelSceneCommand invalid = fx;
+    invalid.indices[0] = 999u;
+    assert(WebRenderer_AppendFxModelSceneCommand(invalid, vertices, indices,
+        batches, surfaceCount) == WebRendererFxModelAppendResult::InvalidCommand);
+    assert(vertices.size() == originalVertices.size());
+    assert(indices == originalIndices);
+    assert(batches.size() == originalBatches.size());
+    assert(surfaceCount == originalSurfaceCount);
+
+    assert(WebRenderer_ValidateFxModelAppendCounts(
+        WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES + 1u, 0u, 0u, 0u,
+        vertices.size(), indices.size(), batches.size(), surfaceCount) ==
+        WebRendererFxModelAppendResult::OutputTooLarge);
+    assert(WebRenderer_ValidateFxModelAppendCounts(
+        0u, 0u, 0u, 1u, WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES,
+        indices.size(), batches.size(), UINT32_MAX) ==
+        WebRendererFxModelAppendResult::OutputTooLarge);
+    assert(vertices.size() == originalVertices.size());
+    assert(indices == originalIndices);
+    assert(batches.size() == originalBatches.size());
+    assert(surfaceCount == originalSurfaceCount);
 }
 }
 
 int main()
 {
+    assert(WebRenderer_IsFxVertexColorBatch(
+        WebRendererSceneBatchKind::FxCodeMesh));
+    assert(WebRenderer_IsFxVertexColorBatch(
+        WebRendererSceneBatchKind::FxXModel));
+    assert(!WebRenderer_IsFxVertexColorBatch(
+        WebRendererSceneBatchKind::DynamicDObj));
+    assert(!WebRenderer_IsFxVertexColorBatch(
+        WebRendererSceneBatchKind::WorldSurface));
     TestIdentityAndCanonicalSurfaceData();
     TestDeterministicDistanceLodSelection();
     TestQuaternionScaleOriginAndOrder();
     TestFailureLeavesDestinationUntouched();
+    TestRetainCopyOverflowAndClear();
+    TestAtomicCompositionAndOutputLimits();
     return 0;
 }
