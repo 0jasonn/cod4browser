@@ -1021,6 +1021,31 @@ void __cdecl Load_SndCurveAsset(XAssetHeader *sndCurve)
         DB_RuntimeGeneratedFailure("publication/null SndCurve");
         return;
     }
+
+    // Generated fastfile data can carry an empty/zero-knot curve body while
+    // still providing a valid requested filename.  Resolve that malformed
+    // body at the DB publication boundary, before it becomes observable to
+    // DevGui or sound alias selection.  Copy the canonical default locally so
+    // the zone-owned input is never mutated; retain its filename so the
+    // published asset keeps the original registry identity.
+    SndCurve repairedCurve{};
+    if (!Com_IsValidSoundAliasVolumeFalloffCurve(sndCurve->sndCurve))
+    {
+        SndCurve *defaultCurve = Com_GetDefaultSoundAliasVolumeFalloffCurve();
+        if (!Com_IsValidSoundAliasVolumeFalloffCurve(defaultCurve))
+        {
+            Com_InitDefaultSoundAliasVolumeFalloffCurve(defaultCurve);
+        }
+        repairedCurve = *defaultCurve;
+        repairedCurve.filename = sndCurve->sndCurve->filename;
+        XAssetHeader repairedHeader{&repairedCurve};
+        XAssetHeader published = DB_AddXAsset(
+            ASSET_TYPE_SOUND_CURVE, repairedHeader);
+        if (!published.data) return;
+        *sndCurve = published;
+        return;
+    }
+
     XAssetHeader published = DB_AddXAsset(ASSET_TYPE_SOUND_CURVE, *sndCurve);
     if (!published.data) return;
     *sndCurve = published;

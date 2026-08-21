@@ -1041,8 +1041,9 @@ std::vector<std::uint8_t> MakeSndCurveXFile(
     AppendU32(inflated, 3);
     for (std::uint32_t knot = 0; knot < 8; ++knot)
     {
-        AppendF32(inflated, static_cast<float>(knot) / 7.0f);
-        AppendF32(inflated, 1.0f - static_cast<float>(knot) / 7.0f);
+        const float x = knot < 2 ? static_cast<float>(knot) * 0.5f : 1.0f;
+        AppendF32(inflated, x);
+        AppendF32(inflated, 1.0f - x);
     }
     if (options.filenamePointer == UINT32_MAX && options.includeFilename)
     {
@@ -2850,6 +2851,49 @@ int main()
         sizeof(sndCurveInsertion));
     assert(sndCurveInsertion == reinterpret_cast<std::uint32_t>(
         publishedSndCurve.sndCurve));
+
+    // Publication owns malformed curve repair.  The source body remains
+    // untouched, while the pooled header receives canonical two-knot values
+    // under the original requested filename.
+    static SndCurve malformedPublishedCurve{};
+    malformedPublishedCurve.filename = "soundcurves/publication_default";
+    malformedPublishedCurve.knotCount = 0;
+    XAssetHeader malformedPublishedHeader{&malformedPublishedCurve};
+    Load_SndCurveAsset(&malformedPublishedHeader);
+    assert(malformedPublishedCurve.knotCount == 0);
+    assert(malformedPublishedHeader.sndCurve);
+    assert(malformedPublishedHeader.sndCurve != &malformedPublishedCurve);
+    const SndCurve *stablePublishedCurve = malformedPublishedHeader.sndCurve;
+    assert(Com_IsValidSoundAliasVolumeFalloffCurve(stablePublishedCurve));
+    assert(stablePublishedCurve->knotCount == 2);
+    assert(stablePublishedCurve->knots[0][0] == 0.0f &&
+        stablePublishedCurve->knots[0][1] == 1.0f &&
+        stablePublishedCurve->knots[1][0] == 1.0f &&
+        stablePublishedCurve->knots[1][1] == 0.0f);
+    assert(std::strcmp(stablePublishedCurve->filename,
+        malformedPublishedCurve.filename) == 0);
+
+    // A higher-priority replacement keeps the pooled primary identity while
+    // replacing the repaired body with valid retail curve data.
+    g_zones[2].flags = 2;
+    DB_SetLoadingZoneIndex(2);
+    static SndCurve replacementPublishedCurve{};
+    replacementPublishedCurve.filename =
+        "soundcurves/publication_default";
+    replacementPublishedCurve.knotCount = 3;
+    replacementPublishedCurve.knots[0][0] = 0.0f;
+    replacementPublishedCurve.knots[0][1] = 1.0f;
+    replacementPublishedCurve.knots[1][0] = 0.5f;
+    replacementPublishedCurve.knots[1][1] = 0.5f;
+    replacementPublishedCurve.knots[2][0] = 1.0f;
+    replacementPublishedCurve.knots[2][1] = 0.0f;
+    XAssetHeader replacementPublishedHeader{&replacementPublishedCurve};
+    Load_SndCurveAsset(&replacementPublishedHeader);
+    assert(replacementPublishedHeader.sndCurve == stablePublishedCurve);
+    assert(replacementPublishedHeader.sndCurve->knotCount == 3);
+    assert(replacementPublishedHeader.sndCurve->knots[1][0] == 0.5f);
+    assert(std::strcmp(replacementPublishedHeader.sndCurve->filename,
+        replacementPublishedCurve.filename) == 0);
 
     SndCurveFixtureOptions sharedSndCurve{};
     sharedSndCurve.assetPointer = UINT32_MAX;

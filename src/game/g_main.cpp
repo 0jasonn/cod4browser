@@ -36,9 +36,6 @@
 #include <qcommon/qcommon.h>
 #include <qcommon/engine_lifecycle_trace.h>
 #include <server/sv_world.h>
-#if defined(KISAK_WEB)
-#include <database/db_registry_publication.h>
-#endif
 
 const char *g_helicopterYawAltitudeControlsNames[4] =
 {
@@ -1298,18 +1295,11 @@ LABEL_43:
 #endif
     level.initializing = 0;
     EmitEngineLifecycleTrace(EngineLifecycleStage::GameInitComplete);
-#if defined(KISAK_WEB)
-    DB_DiagnosePublishedSoundCurves("game-init");
-#endif
 }
 
 void __cdecl G_ShutdownGame(int clearScripts)
 {
     unsigned __int8 v2; // r11
-
-#if defined(KISAK_WEB)
-    DB_DiagnosePublishedSoundCurves("game-shutdown-before");
-#endif
 
     SV_ResetDemo();
     Com_DPrintf(15, "ShutdownGame:\n");
@@ -1345,9 +1335,6 @@ void __cdecl G_ShutdownGame(int clearScripts)
     if (!G_LoadErrorCleanup())
         EntHandle::Shutdown();
     SV_track_shutdown();
-#if defined(KISAK_WEB)
-    DB_DiagnosePublishedSoundCurves("game-shutdown-after");
-#endif
 }
 
 void G_ChangeLevel()

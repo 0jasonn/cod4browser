@@ -5,9 +5,6 @@
 #include <universal/com_files.h>
 #include <cgame/cg_local.h>
 #include <universal/com_sndalias.h>
-#if defined(KISAK_WEB)
-#include <database/db_registry_publication.h>
-#endif
 
 #ifdef KISAK_MP
 #include <client_mp/client_mp.h>
@@ -150,9 +147,6 @@ void __cdecl CL_CreateDevGui()
     Cbuf_InsertText(0, "exec devgui_main");
 #ifndef KISAK_NO_FASTFILES
     Com_InitSoundDevGuiGraphs();
-#if defined(KISAK_WEB)
-    DB_DiagnosePublishedSoundCurves("devgui-after-enum");
-#endif
 #endif
     CG_InitVisionSetsMenu();
 }

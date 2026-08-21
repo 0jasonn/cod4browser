@@ -14,7 +14,6 @@
 #include <qcommon/system.h>
 #include <qcommon/threads.h>
 #include <universal/physicalmemory.h>
-#include <universal/com_sndalias_curve.h>
 #include <universal/q_shared.h>
 #include <xanim/xmodel.h>
 #include <bgame/bg_local.h>
@@ -38,63 +37,6 @@ const char *g_assetNames[ASSET_TYPE_COUNT] =
 
 namespace
 {
-std::uint32_t g_invalidSoundCurveDiagnostics = 0;
-
-bool IsSoundCurveHeaderFree(const XAssetHeader &header)
-{
-    if (!header.sndCurve || DB_IsSingletonAssetPool(ASSET_TYPE_SOUND_CURVE))
-        return false;
-    void *freeHeader = *static_cast<void **>(
-        DB_XAssetPool[ASSET_TYPE_SOUND_CURVE]);
-    while (freeHeader)
-    {
-        if (freeHeader == header.data)
-            return true;
-        std::memcpy(&freeHeader, freeHeader, sizeof(freeHeader));
-    }
-    return false;
-}
-
-void DiagnoseSoundCurveEntry(const XAssetEntryPoolEntry &entry,
-    const char *phase)
-{
-    if (g_invalidSoundCurveDiagnostics >= 16 ||
-        entry.entry.asset.type != ASSET_TYPE_SOUND_CURVE)
-        return;
-    const XAssetHeader header = entry.entry.asset.header;
-    const std::uint32_t poolIndex = DB_GetAssetPoolIndex(
-        ASSET_TYPE_SOUND_CURVE, header);
-    const bool poolFree = IsSoundCurveHeaderFree(header);
-    const bool valid = poolIndex != UINT32_MAX &&
-        Com_IsValidSoundAliasVolumeFalloffCurve(header.sndCurve);
-    if (valid && !poolFree)
-        return;
-    Com_PrintWarning(9,
-        "[kisakcod-db] SndCurve %s diagnostic entry=%u zone=%u "
-        "pool=%u free=%d inuse=%d nextHash=%u nextOverride=%u "
-        "name=%p knots=%d filenamePtr=%p\n",
-        phase ? phase : "enum",
-        static_cast<std::uint32_t>(&entry - g_assetEntryPool),
-        static_cast<unsigned>(entry.entry.zoneIndex), poolIndex,
-        poolFree ? 1 : 0, entry.entry.inuse ? 1 : 0,
-        static_cast<unsigned>(entry.entry.nextHash),
-        static_cast<unsigned>(entry.entry.nextOverride),
-        header.sndCurve ? static_cast<const void *>(header.sndCurve) : nullptr,
-        poolIndex == UINT32_MAX || !header.sndCurve
-            ? 0 : header.sndCurve->knotCount,
-        poolIndex == UINT32_MAX || !header.sndCurve
-            ? nullptr : static_cast<const void *>(header.sndCurve->filename));
-    ++g_invalidSoundCurveDiagnostics;
-}
-
-void DiagnosePublishedSoundCurves(const char *phase)
-{
-    for (std::uint32_t hash = 0; hash < 0x8000u; ++hash)
-        for (std::uint32_t index = db_hashTable[hash]; index;
-             index = g_assetEntryPool[index].entry.nextHash)
-            DiagnoseSoundCurveEntry(g_assetEntryPool[index], phase);
-}
-
 struct XZoneInfoInternal
 {
     char name[64]{};
@@ -320,13 +262,6 @@ void DB_LoadZone_f()
 }
 } // namespace
 
-void DB_DiagnosePublishedSoundCurves(const char *phase)
-{
-    Sys_LockWrite(&db_hashCritSect);
-    DiagnosePublishedSoundCurves(phase);
-    Sys_UnlockWrite(&db_hashCritSect);
-}
-
 void __cdecl DB_InitThread()
 {
     DB_RuntimeTraceStage("DB_InitThread");
@@ -382,9 +317,6 @@ void __cdecl DB_LoadXAssets(
     g_sync = sync;
     DB_LoadXZone(zoneInfo, zoneCount);
     if (sync) Sys_SyncDatabase();
-#if defined(KISAK_WEB)
-    DB_DiagnosePublishedSoundCurves("db-load-published");
-#endif
 }
 
 void __cdecl DB_ReleaseXAssets()
@@ -419,7 +351,6 @@ void __cdecl DB_EnumXAssets_FastFile(
         {
             XAssetEntryPoolEntry *entry = &g_assetEntryPool[index];
             if (entry->entry.asset.type != type) continue;
-            DiagnoseSoundCurveEntry(*entry, "enum");
             func(entry->entry.asset.header, inData);
             if (!includeOverride) continue;
             for (std::uint32_t overrideIndex = entry->entry.nextOverride;
@@ -427,7 +358,6 @@ void __cdecl DB_EnumXAssets_FastFile(
                  overrideIndex =
                      g_assetEntryPool[overrideIndex].entry.nextOverride)
             {
-                DiagnoseSoundCurveEntry(g_assetEntryPool[overrideIndex], "enum");
                 func(g_assetEntryPool[overrideIndex].entry.asset.header,
                     inData);
             }
