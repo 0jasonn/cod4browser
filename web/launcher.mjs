@@ -33,6 +33,7 @@ const engineLifecycleEvidence = document.querySelector(
     "#engine-lifecycle-evidence");
 const rendererFxEvidence = document.querySelector("#renderer-fx-evidence");
 const audioPlaybackEvidence = document.querySelector("#audio-playback-evidence");
+const databaseEvidence = document.querySelector("#database-evidence");
 
 const runtime = {
     state: "loading",
@@ -845,6 +846,10 @@ globalThis.addEventListener("kisakcod:database", (event) => {
     // deterministic prefix state so the final stop publication describes the
     // initialization envelope as well as the last file operation.
     runtime.database = { ...runtime.database, ...event.detail };
+    // Keep the existing database trace observable without exposing or
+    // influencing engine state. This bounded mirror lets diagnostics inspect
+    // the first generated-loader failure after a map request.
+    databaseEvidence.textContent = JSON.stringify(runtime.database);
 });
 
 globalThis.addEventListener("kisakcod:renderer-scene-view", (event) => {

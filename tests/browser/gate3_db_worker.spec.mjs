@@ -50,6 +50,8 @@ test("Worker-hosted canonical DB streams an XFile into PMem and stops at generat
             (event) => event.stage === "DB stop" &&
                 event.logicalPath === "zone/english/code_post_gfx.ff")),
         events: structuredClone(globalThis.__databaseEvents),
+        domEvidence: JSON.parse(document.querySelector(
+            "#database-evidence").textContent),
     }));
     expect(result.current).toMatchObject({
         stage: "DB stop",
@@ -131,6 +133,7 @@ test("Worker-hosted canonical DB streams an XFile into PMem and stops at generat
         "XFile cleanup",
         "DB stop",
     ]));
+    expect(result.domEvidence).toEqual(result.current);
     expect(result.events.some((event) =>
         /(?:[a-z]:\\|users[/\\]|opfs|indexeddb|[0-9a-f]{8}-[0-9a-f]{4}-4)/iu
             .test(event.logicalPath))).toBe(false);
