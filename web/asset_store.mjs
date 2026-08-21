@@ -371,8 +371,11 @@ function selectFromInput(input)
     });
 }
 
-export async function selectInstallEntries(fallbackInput)
+export async function selectInstallEntries(fallbackInput, { portable = false } = {})
 {
+    if (portable) {
+        return selectFromInput(fallbackInput);
+    }
     if (typeof globalThis.showDirectoryPicker === "function") {
         try {
             const directory = await globalThis.showDirectoryPicker({

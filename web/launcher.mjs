@@ -11,6 +11,7 @@ const physicsStatus = document.querySelector("#physics-status");
 const rendererStatus = document.querySelector("#renderer-status");
 const systemStatus = document.querySelector("#system-status");
 const selectInstallButton = document.querySelector("#select-install-button");
+const portableInstallButton = document.querySelector("#portable-install-button");
 const clearAssetsButton = document.querySelector("#clear-assets-button");
 const installFolderInput = document.querySelector("#install-folder-input");
 const assetStateLabel = document.querySelector("#asset-state-label");
@@ -612,7 +613,9 @@ globalThis.addEventListener("kisakcod:assets", (event) => {
     const busy = assets.state === "checking" || assets.state === "selecting" ||
         assets.state === "validating" || assets.state === "importing" ||
         assets.state === "clearing";
-    selectInstallButton.disabled = busy || assets.state === "unsupported" || !assetStore;
+    const pickerDisabled = busy || assets.state === "unsupported" || !assetStore;
+    selectInstallButton.disabled = pickerDisabled;
+    portableInstallButton.disabled = pickerDisabled;
     selectInstallButton.textContent = assets.manifest
         ? "Choose a different installation"
         : "Choose COD4 installation";
@@ -916,7 +919,8 @@ engineCommandForm.addEventListener("submit", async (event) => {
     }
 });
 
-selectInstallButton.addEventListener("click", async () => {
+async function chooseInstallation({ portable = false } = {})
+{
     if (!assetStore) {
         return;
     }
@@ -928,7 +932,7 @@ selectInstallButton.addEventListener("click", async () => {
     });
     const persistenceRequest = assetStore.requestPersistence();
     try {
-        const entries = await selectInstallEntries(installFolderInput);
+        const entries = await selectInstallEntries(installFolderInput, { portable });
         await persistenceRequest;
         if (!entries) {
             publishAssetState(previousState);
@@ -949,7 +953,10 @@ selectInstallButton.addEventListener("click", async () => {
             });
         }
     }
-});
+}
+
+selectInstallButton.addEventListener("click", () => chooseInstallation());
+portableInstallButton.addEventListener("click", () => chooseInstallation({ portable: true }));
 
 clearAssetsButton.addEventListener("click", async () => {
     if (!assetStore || !globalThis.confirm(

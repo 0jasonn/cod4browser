@@ -53,6 +53,15 @@ async function chooseDirectory(page, directory)
     await chooser.setFiles(directory);
 }
 
+async function choosePortableDirectory(page, directory)
+{
+    const chooserPromise = page.waitForEvent("filechooser");
+    await page.locator("#portable-install-button").click();
+    const chooser = await chooserPromise;
+    expect(chooser.isMultiple()).toBe(true);
+    await chooser.setFiles(directory);
+}
+
 test("imports synthetic files through the portable picker and restores them after reload", { tag: "@smoke" }, async ({ page }, testInfo) => {
     await usePortableFolderPicker(page);
     const directory = await createInstallDirectory(testInfo, "synthetic-install");
@@ -319,6 +328,64 @@ test("uses the native directory picker boundary and admits only SP zone fastfile
         state: "ready",
         cargo: { path: "zone/english/cargoship.ff" },
     });
+});
+
+test("offers the explicit portable picker while retaining native picker priority", async ({ page }, testInfo) => {
+    await page.addInitScript(() => {
+        globalThis.__nativePickerInvocations = 0;
+        Object.defineProperty(globalThis, "showDirectoryPicker", {
+            configurable: true,
+            value: async () => {
+                globalThis.__nativePickerInvocations += 1;
+                throw new Error("native picker should not be used by portable action");
+            },
+        });
+    });
+    const directory = await createInstallDirectory(testInfo, "explicit-portable-install");
+
+    await page.goto("/");
+    await waitForEngine(page);
+    await waitForAssets(page, "empty");
+    await expect(page.locator("#portable-install-button")).toBeEnabled();
+    await choosePortableDirectory(page, directory);
+    await waitForAssets(page, "ready");
+    expect(await page.evaluate(() => ({
+        nativeInvocations: globalThis.__nativePickerInvocations,
+        source: globalThis.__KISAKCOD_WEB__.assets.source,
+        state: globalThis.__KISAKCOD_WEB__.assets.state,
+    }))).toEqual({ nativeInvocations: 0, source: "selection", state: "ready" });
+});
+
+test("portable picker cancellation retains the active installation", async ({ page }, testInfo) => {
+    await page.addInitScript(() => {
+        Object.defineProperty(globalThis, "showDirectoryPicker", {
+            configurable: true,
+            value: async () => {
+                throw new Error("native picker should not be used by portable action");
+            },
+        });
+    });
+    const directory = await createInstallDirectory(testInfo, "portable-cancel-install");
+
+    await page.goto("/");
+    await waitForEngine(page);
+    await waitForAssets(page, "empty");
+    await choosePortableDirectory(page, directory);
+    await waitForAssets(page, "ready");
+    const before = await page.evaluate(() => ({
+        importId: globalThis.__KISAKCOD_WEB__.assets.manifest.importId,
+        state: globalThis.__KISAKCOD_WEB__.assets.state,
+    }));
+
+    const chooserPromise = page.waitForEvent("filechooser");
+    await page.locator("#portable-install-button").click();
+    await chooserPromise;
+    await page.locator("#install-folder-input").dispatchEvent("cancel");
+    await waitForAssets(page, "ready");
+    expect(await page.evaluate(() => ({
+        importId: globalThis.__KISAKCOD_WEB__.assets.manifest.importId,
+        state: globalThis.__KISAKCOD_WEB__.assets.state,
+    }))).toEqual(before);
 });
 
 test("rejects a folder missing the required archive and persists nothing", async ({ page }, testInfo) => {
