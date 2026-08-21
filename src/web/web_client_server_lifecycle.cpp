@@ -153,11 +153,19 @@ void __cdecl Com_Quit_f()
 
 void __cdecl Com_Restart()
 {
-    // This is the exact canonical DB publication reset from Com_Restart. The
-    // xanim, DObj, collision, script, and sound portions do not yet have
-    // runtime owners. Hunk ownership is live and resets in native order.
+    // Hunk-backed fastfile objects cannot survive the browser's restart
+    // reset. Republish the renderer prerequisite zones before the map zone is
+    // requested so canonical DB-owned FX/material/image pointers used by a
+    // save/demo restore are live again. Native keeps these zones in their
+    // separate zone allocations; this is the web storage-lifetime equivalent
+    // at the existing DB/platform seam.
     DB_ReleaseXAssets();
     Hunk_Clear();
+    if (g_rendererConfigured)
+    {
+        R_LoadGraphicsAssetZones(g_rendererConfiguration);
+        DB_SyncXAssets();
+    }
 }
 
 void __cdecl R_BeginRemoteScreenUpdate()

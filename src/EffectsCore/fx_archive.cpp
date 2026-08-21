@@ -41,6 +41,7 @@ void __cdecl FX_RestoreEffectDefTable(MemoryFile *memFile, FxEffectDefTable *tab
     const FxEffectDef *effectDef; // [esp+4h] [ebp-Ch]
     uint32_t key; // [esp+8h] [ebp-8h]
     const char *effectDefName; // [esp+Ch] [ebp-4h]
+    uint32_t missingCount = 0;
 
     table->count = 0;
     while (1)
@@ -51,8 +52,16 @@ void __cdecl FX_RestoreEffectDefTable(MemoryFile *memFile, FxEffectDefTable *tab
         MemFile_ReadData(memFile, 4, (uint8_t *)&p);
         key = p;
         effectDef = FX_Register((char *)effectDefName);
+        if (!effectDef && missingCount++ < 4u)
+            Com_PrintWarning(21,
+                "FX_RestoreEffectDefTable: missing published effect '%s'\n",
+                effectDefName);
         FX_AddEffectDefTableEntry(table, key, effectDef);
     }
+    if (missingCount > 4u)
+        Com_PrintWarning(21,
+            "FX_RestoreEffectDefTable: %u additional published effects missing\n",
+            missingCount - 4u);
 }
 
 void __cdecl FX_AddEffectDefTableEntry(FxEffectDefTable *table, uint32_t key, const FxEffectDef *effectDef)
