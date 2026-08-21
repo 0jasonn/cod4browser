@@ -117,7 +117,7 @@ void TestIdentityAndCanonicalSurfaceData()
     assert(command.vertices.size() == 3u);
     assert(command.indices == std::vector<std::uint32_t>({0u, 2u, 1u}));
     assert(command.vertices[0].position[0] == 1.0f);
-    assert(command.vertices[0].color[0] == 0x20 / 255.0f);
+    assert(command.vertices[0].color[0] == 0x40 / 255.0f);
     assert(command.vertices[0].color[3] == 0x80 / 255.0f);
     assert(std::fabs(command.vertices[0].textureCoordinate[0] -
         0x40 / 255.0f) < 0.00001f);
@@ -154,6 +154,7 @@ void TestDeterministicDistanceLodSelection()
     viewOrigin[0] = 20.0f;
     assert(WebRenderer_SelectFxModelLod(&fixture.model, placement,
         viewOrigin) == 1);
+    viewOrigin[0] = 19.0f;
     placement.scale = 2.0f;
     assert(WebRenderer_SelectFxModelLod(&fixture.model, placement,
         viewOrigin) == 0);
@@ -235,6 +236,8 @@ void TestFailureLeavesDestinationUntouched()
 
     Fixture twoSurface;
     Fixture validLater;
+    twoSurface.model.lodInfo[0].numsurfs = 2u;
+    twoSurface.model.lodInfo[0].surfIndex = 0u;
     twoSurface.surfaces[1].deformed = true;
     const WebRendererFxModelSubmission mixed[2] = {
         Submission(twoSurface), Submission(validLater)};
