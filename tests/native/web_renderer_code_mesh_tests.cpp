@@ -62,6 +62,29 @@ void TestInvalidRangeLeavesExistingOutputUntouched()
     assert(vertices.size() == vertexSize && indices.size() == indexSize);
 }
 
+void TestFrameResetAllowsFreshCodeMeshOutput()
+{
+    GfxPackedVertex source{};
+    source.xyz[0] = 2.0f;
+    const std::uint32_t packed = 0u;
+    std::vector<WebRendererSurfaceVertex> vertices;
+    std::vector<std::uint32_t> indices;
+    assert(WebRenderer_AppendCodeMeshBatch(&source, 1u, &packed, 2u,
+        vertices, indices) == WebRendererCodeMeshResult::Success);
+    assert(vertices.size() == 1u && indices.size() == 2u);
+
+    // R_BeginFrame clears the frontend's retained vectors before the next
+    // canonical FX_GenerateVerts call. Model that pure storage seam here so
+    // a no-FX frame cannot retain a prior frame's code-mesh geometry.
+    vertices.clear();
+    indices.clear();
+    source.xyz[0] = 7.0f;
+    assert(WebRenderer_AppendCodeMeshBatch(&source, 1u, &packed, 2u,
+        vertices, indices) == WebRendererCodeMeshResult::Success);
+    assert(vertices.size() == 1u && indices.size() == 2u);
+    assert(vertices[0].position[0] == 7.0f);
+}
+
 void TestFallbackStateWritesAndBlends()
 {
     constexpr std::uint32_t state0 = WEB_RENDERER_FX_FALLBACK_STATE_BITS0;
@@ -94,6 +117,7 @@ int main()
 {
     TestConversionRetainsPackedColorAndOrdering();
     TestInvalidRangeLeavesExistingOutputUntouched();
+    TestFrameResetAllowsFreshCodeMeshOutput();
     TestFallbackStateWritesAndBlends();
     TestFxBatchHasDistinctRendererIdentity();
     return 0;

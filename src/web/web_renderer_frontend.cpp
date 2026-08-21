@@ -117,6 +117,7 @@ std::array<GfxPackedVertex, 65536> g_codeMeshVerts{};
 std::array<r_double_index_t, 131072> g_codeMeshIndices{};
 std::uint32_t g_codeMeshVertCount = 0;
 std::uint32_t g_codeMeshIndexCount = 0;
+bool g_processCodeMesh = false;
 std::array<float, 256u * 4u> g_codeMeshArgs{};
 std::uint32_t g_codeMeshArgCount = 0u;
 std::vector<WebRendererSurfaceVertex> g_codeMeshRenderVertices;
@@ -339,6 +340,7 @@ void __cdecl R_SyncRenderThread() {}
 void __cdecl R_BeginFrame()
 {
     g_warned.fill(false);
+    g_processCodeMesh = false;
     g_codeMeshVertCount = 0;
     g_codeMeshIndexCount = 0;
     g_codeMeshArgCount = 0u;
@@ -632,7 +634,7 @@ void __cdecl R_ClearShadowedPrimaryLightHistory(int) {}
 
 char __cdecl R_ReserveCodeMeshVerts(int count, std::uint16_t *baseVertex)
 {
-    if (count < 0 || !baseVertex ||
+    if (!g_processCodeMesh || count < 0 || !baseVertex ||
         static_cast<std::uint32_t>(count) >
             g_codeMeshVerts.size() - g_codeMeshVertCount)
         return 0;
@@ -644,7 +646,7 @@ char __cdecl R_ReserveCodeMeshVerts(int count, std::uint16_t *baseVertex)
 char __cdecl R_ReserveCodeMeshIndices(int count,
     r_double_index_t **indicesOut)
 {
-    if (count < 0 || !indicesOut || (count & 1) != 0 ||
+    if (!g_processCodeMesh || count < 0 || !indicesOut || (count & 1) != 0 ||
         static_cast<std::uint32_t>(count) >
             WEB_RENDERER_MAX_CODE_MESH_INDICES - g_codeMeshIndexCount)
         return 0;
@@ -655,12 +657,13 @@ char __cdecl R_ReserveCodeMeshIndices(int count,
 
 GfxPackedVertex *__cdecl R_GetCodeMeshVerts(std::uint16_t baseVertex)
 {
-    return &g_codeMeshVerts[baseVertex];
+    return g_processCodeMesh && baseVertex < g_codeMeshVertCount
+        ? &g_codeMeshVerts[baseVertex] : nullptr;
 }
 
 char __cdecl R_ReserveCodeMeshArgs(int count, std::uint32_t *argOffsetOut)
 {
-    if (count < 0 || !argOffsetOut ||
+    if (!g_processCodeMesh || count < 0 || !argOffsetOut ||
         static_cast<std::uint32_t>(count) > 256u - g_codeMeshArgCount)
         return 0;
     *argOffsetOut = g_codeMeshArgCount;
@@ -670,9 +673,21 @@ char __cdecl R_ReserveCodeMeshArgs(int count, std::uint32_t *argOffsetOut)
 
 float (*__cdecl R_GetCodeMeshArgs(std::uint32_t argOffset))[4]
 {
-    return argOffset < 256u ? reinterpret_cast<float (*)[4]>(
+    return g_processCodeMesh && argOffset < g_codeMeshArgCount
+        ? reinterpret_cast<float (*)[4]>(
         g_codeMeshArgs.data() + static_cast<std::size_t>(argOffset) * 4u)
         : nullptr;
+}
+
+void __cdecl R_BeginCodeMeshVerts()
+{
+    iassert(!g_processCodeMesh);
+    g_processCodeMesh = true;
+}
+
+void __cdecl R_EndCodeMeshVerts()
+{
+    g_processCodeMesh = false;
 }
 
 void __cdecl R_AddCodeMeshDrawSurf(Material *material,
@@ -1488,6 +1503,14 @@ void __cdecl R_UpdateRemainingEffects(FxCmd *cmd)
 {
     FX_UpdateRemaining(cmd);
     FX_EndUpdate(cmd->localClientNum);
+    FX_AddNonSpriteDrawSurfs(cmd);
+
+    // Native queues mark generation between non-sprite and FX-vertex work.
+    // The web renderer has no portable mark-mesh destination yet, so retain
+    // the canonical producer order while leaving that optional family out.
+    FxGenerateVertsCmd generateVertsCmd{};
+    FX_FillGenerateVertsCmd(cmd->localClientNum, &generateVertsCmd);
+    FX_GenerateVerts(&generateVertsCmd);
 }
 
 void __cdecl R_TrackStatistics(trStatistics_t *statistics)
