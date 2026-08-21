@@ -128,6 +128,18 @@ constexpr bool WebRenderer_IsFxVertexColorBatch(
         kind == WebRendererSceneBatchKind::FxParticleCloud;
 }
 
+constexpr std::size_t WebRenderer_FxDiagnosticIndex(
+    WebRendererSceneBatchKind kind) noexcept
+{
+    switch (kind)
+    {
+    case WebRendererSceneBatchKind::FxCodeMesh: return 0u;
+    case WebRendererSceneBatchKind::FxXModel: return 1u;
+    case WebRendererSceneBatchKind::FxParticleCloud: return 2u;
+    default: return 3u;
+    }
+}
+
 // Callback-scoped canonical identity and portable first-pass state for one
 // contiguous world draw. WebRenderer_SetWorldSurface copies names/state and
 // consumes the DB-owned image load definitions before returning.

@@ -501,6 +501,9 @@ int __cdecl SND_StartAlias2DSample(SndStartAliasInfo *startAliasInfo, int *pChan
         startAliasInfo->startDelay = 0;
 
     alSourcef(source, AL_SEC_OFFSET, start_msec / 1000.0f);
+#if defined(KISAK_WEB)
+    WebOpenAL_SetSourceAlias(source, startAliasInfo->alias0->aliasName);
+#endif
     if (!startAliasInfo->startDelay
         && (!g_snd.paused || !g_snd.pauseSettings[(startAliasInfo->alias0->flags & 0x3F00) >> 8]))
     {
@@ -624,6 +627,9 @@ int __cdecl SND_StartAlias3DSample(SndStartAliasInfo *startAliasInfo, int *pChan
         startAliasInfo->startDelay = 0;
 
     alSourcef(source, AL_SEC_OFFSET, start_msec / 1000.0f);
+#if defined(KISAK_WEB)
+    WebOpenAL_SetSourceAlias(source, startAliasInfo->alias0->aliasName);
+#endif
     if (!startAliasInfo->startDelay
         && (!g_snd.paused || !g_snd.pauseSettings[(startAliasInfo->alias0->flags & 0x3F00) >> 8]))
     {

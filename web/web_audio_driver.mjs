@@ -12,12 +12,13 @@ function clamp(value, low, high) {
 }
 
 export class WebAudioDriver {
-    constructor({ contextFactory, onDiagnostic } = {}) {
+    constructor({ contextFactory, onDiagnostic, onPlaybackStarted } = {}) {
         this.contextFactory = contextFactory ?? (() => {
             const Context = globalThis.AudioContext ?? globalThis.webkitAudioContext;
             return Context ? new Context() : null;
         });
         this.onDiagnostic = onDiagnostic;
+        this.onPlaybackStarted = onPlaybackStarted;
         this.context = null;
         this.sources = new Map();
         this.buffers = new Map();
@@ -112,6 +113,7 @@ export class WebAudioDriver {
                 generation: 0, bufferId: 0, gain: 1, pitch: 1, looping: false,
                 offset: 0, x: 0, y: 0, z: 0, state: "stopped", node: null,
                 gainNode: null, panner: null, startedAt: 0, activeBufferId: 0,
+                aliasName: "", sourceId: id,
             });
         }
         return true;
@@ -251,6 +253,15 @@ export class WebAudioDriver {
             this.cleanup(source); source.activeBufferId = 0;
             source.state = "stopped"; this.diagnostic(error); return false;
         }
+        try {
+            this.onPlaybackStarted?.({
+                sourceId: source.sourceId,
+                generation,
+                bufferId: source.activeBufferId,
+                aliasName: source.aliasName,
+                contextState: context.state ?? "unknown",
+            });
+        } catch {}
         return true;
     }
 
@@ -269,6 +280,8 @@ export class WebAudioDriver {
         if (Number.isFinite(command.x)) [source.x, source.y, source.z] = [command.x, command.y, command.z];
         if (typeof command.looping === "boolean") source.looping = command.looping;
         if (Number.isInteger(command.bufferId)) source.bufferId = command.bufferId;
+        if (typeof command.aliasName === "string")
+            source.aliasName = command.aliasName.slice(0, 128);
         if (Number.isInteger(command.generation)) source.generation = command.generation;
         if (command.op === "source-property") { this.applyProperties(source); return true; }
         if (command.op === "source-play") return this.startSource(source, source.generation);

@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <string>
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
@@ -37,6 +38,7 @@ struct SourceState
     double started = 0.0;
     std::uint32_t generation = 0;
     ALint queued = 0;
+    std::string diagnosticAlias;
 };
 
 std::array<BufferState, MAX_BUFFERS + 1> g_buffers;
@@ -76,11 +78,12 @@ void emit_source(ALuint id, const char *op)
         if (typeof self !== "undefined" && typeof self.postMessage === "function") {
             self.postMessage({type: "audio-command", version: 1, op: UTF8ToString($1),
                 sourceId: $0, generation: $2, bufferId: $3, gain: $4, pitch: $5,
-                looping: !!$6, offset: $7, x: $8, y: $9, z: $10});
+                looping: !!$6, offset: $7, x: $8, y: $9, z: $10,
+                aliasName: UTF8ToString($11)});
         }
     }, id, op, source.generation, source.buffer, source.gain, source.pitch,
        source.looping ? 1 : 0, source.offset, source.position[0], source.position[1],
-       source.position[2]);
+       source.position[2], source.diagnosticAlias.c_str());
 }
 
 void emit_simple(const char *op, ALuint id)
@@ -136,6 +139,15 @@ double WebOpenAL_RebaseStarted(double nowSeconds, float offsetSeconds, float pit
 {
     return nowSeconds - static_cast<double>(offsetSeconds) /
         std::max(0.001f, pitch);
+}
+
+void WebOpenAL_SetSourceAlias(ALuint source, const char *aliasName)
+{
+    if (!source_valid(source))
+        return;
+    const char *value = aliasName ? aliasName : "";
+    g_sources[source].diagnosticAlias.assign(
+        value, std::min(std::strlen(value), std::size_t(128u)));
 }
 
 ALenum alGetError()
@@ -462,7 +474,10 @@ ALCdevice *alcOpenDevice(const ALCchar *) { return &g_device; }
 ALCboolean alcCloseDevice(ALCdevice *device) { return device == &g_device; }
 ALCcontext *alcCreateContext(ALCdevice *device, const ALCint *)
 {
-    return device == &g_device ? &g_context : nullptr;
+    if (device != &g_device)
+        return nullptr;
+    reset_proxy_state();
+    return &g_context;
 }
 void alcDestroyContext(ALCcontext *context)
 {

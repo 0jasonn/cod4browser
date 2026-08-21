@@ -77,6 +77,16 @@ void TestFxBatchHasDistinctRendererIdentity()
 {
     assert(WebRendererSceneBatchKind::FxCodeMesh !=
         WebRendererSceneBatchKind::DynamicDObj);
+    assert(WebRenderer_FxDiagnosticIndex(
+        WebRendererSceneBatchKind::FxCodeMesh) == 0u);
+    assert(WebRenderer_FxDiagnosticIndex(
+        WebRendererSceneBatchKind::FxXModel) == 1u);
+    assert(WebRenderer_FxDiagnosticIndex(
+        WebRendererSceneBatchKind::FxParticleCloud) == 2u);
+    assert(WebRenderer_FxDiagnosticIndex(
+        WebRendererSceneBatchKind::DynamicDObj) == 3u);
+    assert(WebRenderer_FxDiagnosticIndex(
+        WebRendererSceneBatchKind::WorldSurface) == 3u);
 }
 } // namespace
 

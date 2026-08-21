@@ -26,6 +26,11 @@ export function createEngineWorkerHost(canvas, { onLog, onAbort, onAudioDiagnost
             onAudioDiagnostic?.(message);
             onLog?.(`[kisakcod-web] ${message}`, "warn");
         },
+        onPlaybackStarted: (detail) => {
+            globalThis.dispatchEvent(new CustomEvent("kisakcod:audio-playback", {
+                detail: { ...detail, state: "started", source: "canonical-openal-web-audio" },
+            }));
+        },
     });
     // Gesture listeners only unlock the platform device. Keyboard/mouse
     // ownership remains in the existing input forwarding path below.

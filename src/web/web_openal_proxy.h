@@ -102,6 +102,10 @@ constexpr ALCenum ALC_FREQUENCY = 0x1007;
 // Pure timing helper shared by the proxy and deterministic native tests.
 double WebOpenAL_RebaseStarted(double nowSeconds, float offsetSeconds, float pitch);
 
+// Retains only a bounded diagnostic identity for the next canonical source
+// commands. This never participates in OpenAL state or playback selection.
+void WebOpenAL_SetSourceAlias(ALuint source, const char *aliasName);
+
 ALenum alGetError();
 void alDistanceModel(ALenum);
 void alListener3f(ALenum, ALfloat, ALfloat, ALfloat);

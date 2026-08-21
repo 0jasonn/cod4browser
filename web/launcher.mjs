@@ -31,6 +31,8 @@ const rendererSceneFrameEvidence = document.querySelector(
     "#renderer-scene-frame-evidence");
 const engineLifecycleEvidence = document.querySelector(
     "#engine-lifecycle-evidence");
+const rendererFxEvidence = document.querySelector("#renderer-fx-evidence");
+const audioPlaybackEvidence = document.querySelector("#audio-playback-evidence");
 
 const runtime = {
     state: "loading",
@@ -72,6 +74,8 @@ const runtime = {
     rendererShader: { state: "idle", message: "Waiting for a retail shader contract" },
     rendererSceneView: null,
     rendererSceneFrame: null,
+    rendererFx: [],
+    audioPlayback: [],
     engineLifecycle: [],
     input: {
         keyEvents: 0,
@@ -853,6 +857,25 @@ globalThis.addEventListener("kisakcod:renderer-scene-frame", (event) => {
     runtime.rendererSceneFrame = structuredClone(event.detail);
     rendererSceneFrameEvidence.textContent = JSON.stringify(
         runtime.rendererSceneFrame);
+});
+
+globalThis.addEventListener("kisakcod:renderer-fx", (event) => {
+    runtime.rendererFx.push(structuredClone(event.detail));
+    if (runtime.rendererFx.length > 8) runtime.rendererFx.shift();
+    rendererFxEvidence.textContent = JSON.stringify(runtime.rendererFx);
+});
+
+globalThis.addEventListener("kisakcod:audio-playback", (event) => {
+    const detail = structuredClone(event.detail);
+    const alias = detail.aliasName || "<unnamed>";
+    const existing = runtime.audioPlayback.find((entry) => entry.aliasName === alias);
+    if (existing) {
+        existing.count += 1;
+        existing.last = detail;
+    } else if (runtime.audioPlayback.length < 32) {
+        runtime.audioPlayback.push({ aliasName: alias, count: 1, last: detail });
+    }
+    audioPlaybackEvidence.textContent = JSON.stringify(runtime.audioPlayback);
 });
 
 globalThis.addEventListener("kisakcod:engine-lifecycle", (event) => {

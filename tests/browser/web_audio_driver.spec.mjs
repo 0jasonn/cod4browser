@@ -28,7 +28,11 @@ test("Web Audio proxy accepts bounded PCM and ignores stale source generations",
             resume() { this.state = "running"; return Promise.resolve(); }
             close() { return Promise.resolve(); }
         }
-        const driver = new WebAudioDriver({ contextFactory: () => new Context() });
+        const startedEvents = [];
+        const driver = new WebAudioDriver({
+            contextFactory: () => new Context(),
+            onPlaybackStarted: (detail) => startedEvents.push(detail),
+        });
         const pcm = new Uint8Array([0, 0, 0, 0]).buffer;
         const accepted = [
             driver.handleCommand({ version: 1, op: "source-create", id: 1 }),
@@ -39,7 +43,7 @@ test("Web Audio proxy accepts bounded PCM and ignores stale source generations",
                 offset: 0, x: 0, y: 0, z: 0 }),
             driver.handleCommand({ version: 1, op: "source-play", sourceId: 1,
                 generation: 1, bufferId: 1, gain: 0.5, pitch: 1, looping: false,
-                offset: 0, x: 0, y: 0, z: 0 }),
+                offset: 0, x: 0, y: 0, z: 0, aliasName: "weapon_test_fire" }),
         ];
         const stateAfterPlay = driver.sources.get(1).state;
         const source = driver.sources.get(1);
@@ -132,12 +136,31 @@ test("Web Audio proxy accepts bounded PCM and ignores stale source generations",
             variant.dispose();
         }
         driver.dispose();
+        const failedStarts = [];
+        const failedDriver = new WebAudioDriver({
+            contextFactory: () => new Context(),
+            onPlaybackStarted: (detail) => failedStarts.push(detail),
+        });
+        failedDriver.handleCommand({ version: 1, op: "source-create", id: 1 });
+        failedDriver.handleCommand({ version: 1, op: "source-property", sourceId: 1,
+            generation: 0, bufferId: 1, aliasName: "failed" });
+        const failedStart = failedDriver.handleCommand({ version: 1, op: "source-play",
+            sourceId: 1, generation: 1, bufferId: 1, aliasName: "failed" });
         return { accepted, stateAfterPlay, graph, staleProperty, stalePropertyState, stale,
             naturalEnd, gestureResumed, invalid, paused, resumed, stopped, deleted, reset, reinit, graphVariants,
+            startedEvents, failedStart, failedStarts,
             disposed: driver.sources.size === 0 };
     });
     expect(result.accepted).toEqual([true, true, true, true]);
     expect(result.stateAfterPlay).toBe("playing");
+    expect(result.startedEvents).toEqual([
+        { sourceId: 1, generation: 1, bufferId: 1,
+            aliasName: "weapon_test_fire", contextState: "suspended" },
+        { sourceId: 1, generation: 2, bufferId: 1,
+            aliasName: "weapon_test_fire", contextState: "running" },
+        { sourceId: 1, generation: 1, bufferId: 1,
+            aliasName: "", contextState: "running" },
+    ]);
     expect(result.graph).toEqual({ sourceToPanner: true, pannerToGain: true,
         gainToDestination: true });
     expect(result.naturalEnd).toEqual({ state: "stopped", activeBufferId: 0, disconnected: true });
@@ -160,6 +183,8 @@ test("Web Audio proxy accepts bounded PCM and ignores stale source generations",
         { sourceToDestination: true, sourceToGain: false, sourceToPanner: false,
             gainToDestination: false, pannerToDestination: false },
     ]);
+    expect(result.failedStart).toBe(false);
+    expect(result.failedStarts).toEqual([]);
     expect(result.disposed).toBe(true);
 });
 

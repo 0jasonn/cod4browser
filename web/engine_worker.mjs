@@ -6,6 +6,7 @@ const forwardedEvents = [
     "kisakcod:renderer-texture", "kisakcod:engine-world-surface",
     "kisakcod:renderer-surface", "kisakcod:renderer-surface-draw",
     "kisakcod:renderer-scene-view", "kisakcod:renderer-scene-frame",
+    "kisakcod:renderer-fx",
     "kisakcod:state", "kisakcod:frame",
     "kisakcod:system", "kisakcod:engine", "kisakcod:runtime",
     "kisakcod:database",

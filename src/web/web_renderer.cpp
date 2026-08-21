@@ -137,6 +137,7 @@ struct WebRendererState
     std::vector<WebRendererRetainedWorldImage> retainedDynamicModelImages;
     bool dynamicModelSceneActive = false;
     bool dynamicModelFirstSubmissionReported = false;
+    bool dynamicFxSourceReported[3]{};
     GLuint uiVertexArray = 0u;
     GLuint uiVertexBuffer = 0u;
     GLuint uiIndexBuffer = 0u;
@@ -204,6 +205,101 @@ void DeleteSurfaceObjects(
 void DeleteStaticModelObjects(
     GLuint vertexArray, GLuint vertexBuffer, GLuint indexBuffer,
     GLuint instanceBuffer);
+
+EM_JS(
+    void,
+    DispatchRendererFxDiagnostic,
+    (const char *sourceKind,
+     std::uint32_t batchCount,
+     std::uint32_t vertexCount,
+     std::uint32_t indexCount,
+     const char *modelName,
+     const char *materialName),
+    {
+        globalThis.dispatchEvent(new CustomEvent("kisakcod:renderer-fx", {
+            detail: {
+                state: "retained",
+                source: "canonical-renderer-frontend",
+                sourceKind: UTF8ToString(sourceKind),
+                batchCount: batchCount >>> 0,
+                vertexCount: vertexCount >>> 0,
+                indexCount: indexCount >>> 0,
+                modelName: UTF8ToString(modelName),
+                materialName: UTF8ToString(materialName),
+                bounded: true
+            }
+        }));
+    });
+
+const char *FxSourceKindName(WebRendererSceneBatchKind kind) noexcept
+{
+    switch (kind)
+    {
+    case WebRendererSceneBatchKind::FxCodeMesh: return "FxCodeMesh";
+    case WebRendererSceneBatchKind::FxXModel: return "FxXModel";
+    case WebRendererSceneBatchKind::FxParticleCloud: return "FxParticleCloud";
+    default: return "";
+    }
+}
+
+void ReportRetainedDynamicFx()
+{
+    constexpr std::array<WebRendererSceneBatchKind, 3> fxKinds = {{
+        WebRendererSceneBatchKind::FxCodeMesh,
+        WebRendererSceneBatchKind::FxXModel,
+        WebRendererSceneBatchKind::FxParticleCloud,
+    }};
+    for (std::size_t kindIndex = 0u; kindIndex < fxKinds.size(); ++kindIndex)
+    {
+        if (g_renderer.dynamicFxSourceReported[
+                WebRenderer_FxDiagnosticIndex(fxKinds[kindIndex])])
+            continue;
+        const WebRendererSceneBatchKind kind = fxKinds[kindIndex];
+        std::uint32_t batchCount = 0u;
+        std::uint32_t vertexCount = 0u;
+        std::uint32_t indexCount = 0u;
+        std::string modelName;
+        std::string materialName;
+        for (const WebRendererRetainedWorldBatch &batch :
+             g_renderer.retainedDynamicModelBatches)
+        {
+            if (batch.sourceKind != kind)
+                continue;
+            ++batchCount;
+            indexCount += batch.indexCount;
+            if (modelName.empty() && !batch.modelName.empty())
+                modelName = batch.modelName;
+            if (materialName.empty() && !batch.materialName.empty())
+                materialName = batch.materialName;
+            if (batch.firstIndex > g_renderer.retainedDynamicModelIndices.size() ||
+                batch.indexCount > g_renderer.retainedDynamicModelIndices.size() -
+                    batch.firstIndex)
+                continue;
+            std::uint32_t batchMinVertex = UINT32_MAX;
+            std::uint32_t batchMaxVertex = 0u;
+            for (std::uint32_t index = 0u; index < batch.indexCount; ++index)
+            {
+                const std::uint32_t vertex = g_renderer.retainedDynamicModelIndices[
+                    batch.firstIndex + index];
+                if (vertex >= g_renderer.retainedDynamicModelVertices.size())
+                    continue;
+                batchMinVertex = std::min(batchMinVertex, vertex);
+                batchMaxVertex = std::max(batchMaxVertex, vertex);
+            }
+            if (batchMinVertex != UINT32_MAX)
+                vertexCount += batchMaxVertex - batchMinVertex + 1u;
+        }
+        if (batchCount == 0u)
+            continue;
+        const std::string model = modelName.empty() ? "<unnamed>" : modelName;
+        const std::string material = materialName.empty()
+            ? "<unnamed>" : materialName;
+        g_renderer.dynamicFxSourceReported[
+            WebRenderer_FxDiagnosticIndex(kind)] = true;
+        DispatchRendererFxDiagnostic(FxSourceKindName(kind), batchCount,
+            vertexCount, indexCount, model.c_str(), material.c_str());
+    }
+}
 
 EM_JS(
     void,
@@ -2233,6 +2329,7 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
             supportedImages,
             g_renderer.retainedDynamicModelImages.size());
     }
+    ReportRetainedDynamicFx();
     return WebRendererSurfaceResult::Success;
 }
 
