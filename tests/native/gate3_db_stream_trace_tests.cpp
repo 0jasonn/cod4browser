@@ -1,5 +1,6 @@
 #include <universal/q_shared.h>
 #include <database/database.h>
+#include <database/db_generated_loaders.h>
 #include <database/db_generated_image_platform.h>
 #include <game/g_bsp.h>
 #include <database/db_registry_pools.h>
@@ -2409,6 +2410,46 @@ int main()
     const XAssetHeader publishedMapEnts = DB_FindXAssetHeader(
         ASSET_TYPE_MAP_ENTS, "maps/killhouse.d3dbsp");
     assert(publishedMapEnts.mapEnts == publishedClipMap.clipMap->mapEnts);
+
+    // Exercise the generated loader's top-level alias path directly. An
+    // existing alias must be rebound to the registry singleton, and an alias
+    // whose old entry was retired must publish that same singleton again.
+    alignas(16) std::array<std::uint8_t, 64> aliasBlock{};
+    XZoneMemory aliasZone{};
+    aliasZone.blocks[0] = {aliasBlock.data(),
+        static_cast<std::uint32_t>(aliasBlock.size())};
+    DB_InitStreams(&aliasZone);
+    static clipMap_t existingAliasSource{};
+    existingAliasSource = *publishedClipMap.clipMap;
+    existingAliasSource.name = "maps/killhouse.d3dbsp";
+    *reinterpret_cast<std::uint32_t *>(aliasBlock.data() + 16) =
+        static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(
+            &existingAliasSource));
+    std::uint32_t existingAliasToken = 17;
+    clipMap_t *existingAlias = reinterpret_cast<clipMap_t *>(
+        static_cast<std::uintptr_t>(existingAliasToken));
+    varclipMap_ptr = &existingAlias;
+    Load_clipMap_ptr(false);
+    assert(existingAlias == publishedClipMap.clipMap);
+
+    std::strncpy(g_zones[2].name, "cargoship", sizeof(g_zones[2].name));
+    g_zones[2].flags = 8;
+    DB_SetLoadingZoneIndex(2);
+    static clipMap_t retiredAliasSource{};
+    retiredAliasSource = *publishedClipMap.clipMap;
+    retiredAliasSource.name = "maps/cargoship.d3dbsp";
+    *reinterpret_cast<std::uint32_t *>(aliasBlock.data() + 20) =
+        static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(
+            &retiredAliasSource));
+    std::uint32_t retiredAliasToken = 21;
+    clipMap_t *retiredAlias = reinterpret_cast<clipMap_t *>(
+        static_cast<std::uintptr_t>(retiredAliasToken));
+    varclipMap_ptr = &retiredAlias;
+    Load_clipMap_ptr(false);
+    assert(retiredAlias == DB_XAssetPool[ASSET_TYPE_CLIPMAP]);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_CLIPMAP,
+        "maps/cargoship.d3dbsp").clipMap ==
+        DB_XAssetPool[ASSET_TYPE_CLIPMAP]);
 
     Run(MakeClipMapXFile(true), zone);
     assert(g_trace.generatedLoadFailed && !g_trace.publicationEnd);

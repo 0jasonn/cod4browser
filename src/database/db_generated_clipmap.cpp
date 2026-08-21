@@ -439,10 +439,20 @@ void __cdecl Load_clipMap_ptr(bool atStreamStart)
 #else
                 constexpr XAssetType clipMapType = ASSET_TYPE_CLIPMAP;
 #endif
-                if (!DB_FindXAssetEntryCanonical(clipMapType,
-                    (*varclipMap_ptr)->name))
+                XAssetEntryPoolEntry *entry = DB_FindXAssetEntryCanonical(
+                    clipMapType, (*varclipMap_ptr)->name);
+                if (entry)
+                {
+                    // The alias is only a stream address. The XAsset header
+                    // must carry the registry's stable singleton identity
+                    // before any later client/server consumer observes it.
+                    *varclipMap_ptr = entry->entry.asset.header.clipMap;
+                }
+                else
+                {
                     Load_ClipMapAsset(reinterpret_cast<XAssetHeader *>(
                         varclipMap_ptr));
+                }
             }
         }
     }
