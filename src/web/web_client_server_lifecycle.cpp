@@ -10,6 +10,7 @@
 #include <gfx_d3d/r_asset_load.h>
 #include <gfx_d3d/r_configuration.h>
 #include <qcommon/cmd.h>
+#include <qcommon/com_world_runtime.h>
 #include <qcommon/engine_lifecycle_trace.h>
 #include <qcommon/qcommon.h>
 #include <qcommon/com_playerprofile.h>
@@ -154,9 +155,12 @@ void __cdecl Com_Quit_f()
 
 void __cdecl Com_Restart()
 {
-    // This is the exact canonical DB publication reset from Com_Restart. The
-    // xanim, DObj, collision, script, and sound portions do not yet have
-    // runtime owners. Hunk ownership is live and resets in native order.
+    // Match the native restart boundary for the owners that are active in the
+    // web runtime.  Collision and common-world assets are retired by
+    // DB_ReleaseXAssets, whose removal hooks require these canonical owners to
+    // have been shut down first.
+    Com_ShutdownWorld();
+    CM_Shutdown();
     DB_ReleaseXAssets();
     Hunk_Clear();
 }

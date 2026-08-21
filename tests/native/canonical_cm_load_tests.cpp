@@ -304,7 +304,11 @@ int main()
     assert(maxs[2] == 96.0f);
 
     const char *savedName = cm.name;
-    cm.isInUse = 0;
+    // Exercise the same active-owner ordering used by web Com_Restart before
+    // DB_ReleaseXAssets invokes the collision/world removal hooks.
+    comWorld.isInUse = 1;
+    Com_ShutdownWorld();
+    assert(!comWorld.isInUse);
     CM_Shutdown();
     assert(cm.name == savedName);
     assert(cm.checksum == 0);
