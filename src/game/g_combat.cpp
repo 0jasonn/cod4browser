@@ -11,6 +11,10 @@
 #include "actor_senses.h"
 #include "actor_events.h"
 
+#if defined(KISAK_WEB)
+#include <web/web_system.h>
+#endif
+
 unsigned char *bulletPriorityMap;
 unsigned char *riflePriorityMap;
 float g_fHitLocDamageMult[19]{ 0.0f };
@@ -59,6 +63,54 @@ const char *g_HitLocNames[19] =
 };
 
 unsigned __int16 g_HitLocConstNames[19]{ 0 };
+
+#if defined(KISAK_WEB)
+namespace
+{
+unsigned int g_webDamageEvidenceCount = 0;
+
+void WebReportCanonicalDamage(
+    const gentity_s *target,
+    const gentity_s *attacker,
+    int requestedDamage,
+    int appliedDamage,
+    int healthBefore,
+    int healthAfter,
+    int mod,
+    int weapon)
+{
+    if (!target || g_webDamageEvidenceCount >= 64u)
+        return;
+
+    const char *targetClass = target->classname
+        ? SL_ConvertToString(target->classname)
+        : "";
+    const char *weaponName = "";
+    if (weapon > 0 && weapon < BG_GetNumWeapons())
+    {
+        const WeaponDef *weaponDef = BG_GetWeaponDef(weapon);
+        if (weaponDef && weaponDef->szInternalName)
+            weaponName = weaponDef->szInternalName;
+    }
+
+    Web_Log(WebLogLevel::Info,
+        "[kisakcod-web] canonical damage target=%d class=%s attacker=%d "
+        "mod=%d weapon=%d weaponName=%s requested=%d applied=%d "
+        "health=%d->%d\n",
+        target->s.number,
+        targetClass ? targetClass : "",
+        attacker ? attacker->s.number : ENTITYNUM_NONE,
+        mod,
+        weapon,
+        weaponName,
+        requestedDamage,
+        appliedDamage,
+        healthBefore,
+        healthAfter);
+    ++g_webDamageEvidenceCount;
+}
+}
+#endif
 
 void __cdecl TRACK_g_combat()
 {
@@ -632,6 +684,10 @@ void __cdecl G_Damage(
     //float v87; // [sp+6Ch] [-94h]
     //float v88; // [sp+70h] [-90h]
 
+#if defined(KISAK_WEB)
+    const int requestedDamage = damage;
+#endif
+
     damage = damage;
 
     iassert(targ);
@@ -767,6 +823,17 @@ void __cdecl G_Damage(
                 }
                 v57 = targ->health;
                 targ->health = v57 - damage;
+#if defined(KISAK_WEB)
+                WebReportCanonicalDamage(
+                    targ,
+                    attacker,
+                    requestedDamage,
+                    damage,
+                    v57,
+                    targ->health,
+                    mod,
+                    weapon);
+#endif
                 if (client && client->invulnerableEnabled)
                     handleDeathInvulnerability(targ, v57, mod);
                 G_DamageNotify(
