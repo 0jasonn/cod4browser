@@ -17,6 +17,10 @@
 #include <EffectsCore/fx_system.h>
 #include <game/bullet.h>
 
+#if defined(KISAK_WEB)
+#include <web/web_system.h>
+#endif
+
 #ifdef KISAK_MP
 #include <cgame_mp/cg_local_mp.h>
 #include <server_mp/server_mp.h>
@@ -79,6 +83,43 @@ int32_t g_animRateOffsets[33] =
   -1,
   -1
 }; // idb
+
+#if defined(KISAK_WEB)
+namespace
+{
+std::uint32_t g_webCombatFireEvidenceCount = 0u;
+
+void WebReportCanonicalPlayerFire(
+    const WeaponDef *weaponDef,
+    const snd_alias_list_t *fireSound,
+    int event,
+    const playerState_s *eventState,
+    const snapshot_s *snapshot)
+{
+    if (g_webCombatFireEvidenceCount >= 32u)
+        return;
+
+    const int ammoIndex = weaponDef ? weaponDef->iAmmoIndex : -1;
+    const int clipIndex = weaponDef ? weaponDef->iClipIndex : -1;
+    const bool validAmmoIndex = ammoIndex >= 0 && ammoIndex < 128;
+    const bool validClipIndex = clipIndex >= 0 && clipIndex < 128;
+    const int eventAmmo = eventState && validAmmoIndex ? eventState->ammo[ammoIndex] : -1;
+    const int eventClip = eventState && validClipIndex ? eventState->ammoclip[clipIndex] : -1;
+    const int snapshotAmmo = snapshot && validAmmoIndex ? snapshot->ps.ammo[ammoIndex] : -1;
+    const int snapshotClip = snapshot && validClipIndex ? snapshot->ps.ammoclip[clipIndex] : -1;
+
+    Web_Log(WebLogLevel::Info,
+        "[kisakcod-web] canonical gameplay fire weapon=%s event=%d fireAlias=%s "
+        "eventAmmo=%d eventClip=%d snapshotAmmo=%d snapshotClip=%d shotCount=%u\n",
+        weaponDef && weaponDef->szInternalName ? weaponDef->szInternalName : "",
+        event,
+        fireSound && fireSound->aliasName ? fireSound->aliasName : "",
+        eventAmmo, eventClip, snapshotAmmo, snapshotClip,
+        eventState ? eventState->weaponShotCount : 0u);
+    ++g_webCombatFireEvidenceCount;
+}
+}
+#endif
 
 bool __cdecl CG_JavelinADS(int32_t localClientNum)
 {
@@ -2559,6 +2600,10 @@ void __cdecl CG_FireWeapon(
                     CG_CompassAddWeaponPingInfo(localClientNum, cent, origin, msec);
                 }
             }
+#if defined(KISAK_WEB)
+            if (isPlayer)
+                WebReportCanonicalPlayerFire(weaponDef, firesound, event, ps, nextSnap);
+#endif
             if (!BG_GetWeaponDef(weapon)->bBoltAction)
                 CG_EjectWeaponBrass(localClientNum, p_nextState, event);
 #ifdef KISAK_MP
