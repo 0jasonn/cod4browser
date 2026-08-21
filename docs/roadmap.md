@@ -109,8 +109,15 @@ The gameplay event chain is farther along than its presentation:
   events still flow through the Worker queue, `IN_Frame`, `CL_KeyEvent`, and
   the native command/state machines. Native/Wasm tests prove deterministic
   defaults and preservation of custom bindings; a focused browser test proves
-  the key pulses cross the host boundary. Retail ammo/animation/viewmodel
-  transition proof remains pending.
+  the key pulses cross the host boundary. The canonical two-weapon selection
+  path is now proven with a server-owned `cmd give` fixture (not a browser
+  inventory or a claim of physical rack-pickup parity): G36C index 5 and
+  Winchester 1200 index 10 both enter the owned inventory. Wheel-up selects
+  G36C with `owned=1` while predicted/viewmodel state is Winchester; wheel-down
+  selects Winchester with `owned=1` while predicted/viewmodel state is G36C.
+  Screenshots confirm distinct canonical viewmodels. `weap_raise_plr_layer`
+  starts on transition, and Winchester reload uses
+  `weap_winch1200_loop_plr`/`weap_winch1200_pump_plr`.
 - `e57331ba` corrected the FX archive callback ABI for Wasm, so archive names
   and canonical keys are serialized from the actual `XAssetHeader` rather than
   an incompatible aggregate-by-value callback. The subsequent lifecycle fixes
@@ -134,11 +141,17 @@ The gameplay event chain is farther along than its presentation:
   WeaponDef alias and authoritative event/snapshot ammo values without owning
   gameplay state in the browser.
 
+  A Winchester fire event also selects `weap_winch1200_fire_plr` with
+  snapshot clip 7 -> event clip 6 and produces metal impact audio/FX; the
+  fire-alias playback itself was not retained, so that result is not claimed
+  as a started weapon-fire source.
+
 Therefore the active boundary is **canonical gameplay fire with authoritative
 ammo deltas, gameplay-selected fire and impact audio, retained muzzle/impact
-FX reaching WebGL2, and manual reload presentation/audio**. Automatic reload
-semantics, weapon-switch presentation, continuous pointer lock, enemy damage,
-F.N.G., and campaign behavior remain unproven.
+FX reaching WebGL2, manual reload presentation/audio, and canonical two-weapon
+switching**. Physical rack pickup parity, automatic reload semantics,
+continuous pointer lock, enemy damage, F.N.G., and campaign behavior remain
+unproven.
 
 ### Restart lifecycle boundary
 
@@ -167,7 +180,7 @@ retail-asset browser run:
 | Smoke / particle clouds | Canonical EffectsCore cloud slots and portable batches implemented; retail visibility proof pending | FX/renderer | Observe a real cloud effect and measure CPU expansion before broad performance work |
 | Weapon sound | Real Mouse1 starts `weap_g36c_fire_plr` through canonical OpenAL/WebAudio; three `bullet_large_wood` impact starts are also recorded | cgame/audio/platform | Prove broader alias families; streaming/reverb remain later |
 | Reload | `R` visibly enters the canonical reload animation and starts `weap_g36_lift_plr`, `weap_g36_clipout_plr`, and `weap_g36_clipin_plr`; post-reload ammo refill and automatic reload remain unproven | input/game/cgame/audio | Prove automatic reload and exact post-reload ammo/viewmodel state |
-| Weapon switching | Fresh profiles reach canonical `weapnext`/`weapprev`; retail presentation remains unproven | input/game/cgame | Exercise both directions and observe canonical inventory/viewmodel transition |
+| Weapon switching | Canonical wheel-up/down both select owned G36C index 5 and Winchester 1200 index 10 through cgame, with distinct viewmodels and `weap_raise_plr_layer`; fixture uses server-owned `cmd give`, so rack pickup remains unproven | input/game/cgame | Prove physical mission/rack pickup and broader inventory transitions |
 | Basic combat interaction | Real bullet/game systems compiled; enemy damage/death/AI response unproven | game/script/cgame | Use real entities in F.N.G. or campaign content; no synthetic browser targets |
 
 ### Ordered work queue
@@ -198,8 +211,9 @@ retail-asset browser run:
 5. **Reload and weapon switching** — default browser reachability implemented
    in `bf3dd93b` and regression-hardened in `b45df61e`. Native x64, direct Wasm,
    focused browser input, production build, and exact boot checks pass. Manual
-   reload presentation/audio is now proven; automatic reload and weapon-switch
-   state transitions remain.
+   reload presentation/audio and canonical two-weapon wheel transitions are
+   now proven with a server-owned fixture; physical rack pickup, automatic
+   reload, and exact post-reload state remain.
 6. **Basic combat interaction** — prove damage, reaction, death, and script/AI
    notification against real map entities.
 7. **F.N.G. parity pass** — load F.N.G., record the first blocker by subsystem,
@@ -339,9 +353,10 @@ Stop autonomous implementation when:
 | Complete | Browser loaded-sound platform bridge | `38ffcc88`, `7b02d1b0`, `f7de5a7f`, `538b3b5a`; native/Wasm/browser lifecycle evidence | Broader retail aliases; streaming/reverb later |
 | Complete | Gameplay fire/impact vertical slice | `a423ae21`; local Release Chrome ammo, fire/impact audio, and FX evidence | Target damage and broader combat interaction |
 | Complete | Reload and weapon-cycle input reachability | `bf3dd93b`, `b45df61e`; native/Wasm/browser boundary evidence | Automatic reload/refill and retail weapon-switch presentation |
+| Complete | Canonical two-weapon wheel switching | `4a48d861`; local Release Chrome server-owned `cmd give` fixture, both directions, distinct viewmodels, transition/reload audio | Physical rack pickup parity and broader inventory transitions |
 | Complete | Canonical rigid FX XModel renderer closure | `5d49dbe1`, `86c2efbb`, `29f49b09`, `2d3c9f10`; assertion-enabled native x64/direct Wasm tests, production Release build, exact WebGL2 boot | Retail brass/debris visibility proof; deformed/skinned FX models, marks, and decals remain |
 | Complete | Canonical particle-cloud renderer closure | `cedc0cf2`, `67d6dbe7`; assertion-enabled native x64/direct Wasm tests, production Release build, exact WebGL2 boot | Retail smoke/cloud visibility and performance proof; marks/decals remain |
-| Active | Playable Killhouse/F.N.G. combat loop | FX renderer, loaded-sound device, combat-input, and gameplay fire/impact closures accepted | Automatic reload/refill, weapon switching, and combat interaction |
+| Active | Playable Killhouse/F.N.G. combat loop | FX renderer, loaded-sound device, combat-input, gameplay fire/impact, and two-weapon switching closures accepted | Physical pickup parity, automatic reload/refill, and combat interaction |
 | Pending | Recognizable COD4 presentation | — | Materials, remaining images, FX breadth, sky/fog |
 | Pending | Multiple maps and first campaign mission | — | Unknown until F.N.G./campaign probes |
 | Pending | Offline campaign runtime | — | Mission flow, saves/checkpoints, cinematics, breadth and performance |
