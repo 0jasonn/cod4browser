@@ -79,6 +79,8 @@ export const REQUIRED_ASSETS = Object.freeze([
     }),
 ]);
 
+const REQUIRED_ASSET_PATHS = new Set(REQUIRED_ASSETS.map(({ path }) => path));
+
 const PROBE_ERRORS = new Map([
     [1, "The browser passed an invalid probe window to WebAssembly."],
     [2, "The selected file is too large for this ZIP32 milestone."],
@@ -144,6 +146,36 @@ function requireFileLike(file, path)
     return file;
 }
 
+function isAdditionalSinglePlayerFastfile(path, language = M12_INSTALL_PROFILE.language)
+{
+    const prefix = `zone/${language}/`;
+    if (!path.startsWith(prefix) || path.length <= prefix.length ||
+        path.slice(prefix.length).includes("/") || !path.endsWith(".ff")) {
+        return false;
+    }
+    const name = path.slice(prefix.length, -3);
+    // Multiplayer fastfiles use both mp_* and *_mp naming families.  Keep the
+    // filter name-based so every campaign/SP map remains discoverable without
+    // a manifest of map names.
+    return !name.startsWith("mp_") && !name.endsWith("_mp");
+}
+
+function isSupportedImportedPath(path)
+{
+    return REQUIRED_ASSET_PATHS.has(path) || isAdditionalSinglePlayerFastfile(path);
+}
+
+function retainSupportedEntries(entries)
+{
+    const supported = new Map();
+    for (const [path, file] of entries) {
+        if (isSupportedImportedPath(path)) {
+            supported.set(path, file);
+        }
+    }
+    return supported;
+}
+
 export function entriesFromFileList(fileList)
 {
     const files = Array.from(fileList ?? []);
@@ -203,7 +235,7 @@ export function entriesFromFileList(fileList)
         }
         canonical.set(requirement.path, requireFileLike(file, requirement.path));
     }
-    return canonical;
+    return retainSupportedEntries(canonical);
 }
 
 async function getRequiredHandle(directory, kind, name, displayPath = name)
@@ -270,6 +302,43 @@ export async function entriesFromDirectoryHandle(directory)
             requirement.path,
             requireFileLike(await handle.getFile(), requirement.path),
         );
+    }
+
+    const languageDirectory = directoryCache.get(`zone/${M12_INSTALL_PROFILE.language}`);
+    if (!languageDirectory || typeof languageDirectory.entries !== "function") {
+        throw importError(
+            "INVALID_PICKER",
+            `The selected installation does not expose zone/${M12_INSTALL_PROFILE.language} files.`,
+        );
+    }
+    for await (const [name, handle] of languageDirectory.entries()) {
+        const lowerName = typeof name === "string" ? name.toLocaleLowerCase("en-US") : "";
+        if (!lowerName.endsWith(".ff")) {
+            continue;
+        }
+        const relativePath = normalizeSelectionPath(
+            `zone/${M12_INSTALL_PROFILE.language}/${name}`,
+        ).toLocaleLowerCase("en-US");
+        if (REQUIRED_ASSET_PATHS.has(relativePath) ||
+            !isAdditionalSinglePlayerFastfile(relativePath)) {
+            continue;
+        }
+        if (!handle || handle.kind !== "file" || typeof handle.getFile !== "function") {
+            throw importError(
+                "INVALID_FILE",
+                `${relativePath} is not a readable browser file handle.`,
+            );
+        }
+        if (entries.has(relativePath)) {
+            throw importError(
+                "DUPLICATE_PATH",
+                `The selected folder contains conflicting paths for ${relativePath}.`,
+            );
+        }
+        entries.set(relativePath, requireFileLike(await handle.getFile(), relativePath));
+        if (entries.size > MAX_IMPORTED_FILES) {
+            throw importError("TOO_MANY_FILES", "The selected installation contains too many files.");
+        }
     }
     validateSelectedEntries(entries);
     return entries;
@@ -407,6 +476,7 @@ function validateStoredManifest(manifest)
         const normalizedPath = normalizeSelectionPath(entry.path).toLocaleLowerCase("en-US");
         if (normalizedPath !== entry.path ||
             new TextEncoder().encode(normalizedPath).byteLength > MAX_IMPORTED_PATH_BYTES ||
+            !isSupportedImportedPath(normalizedPath) ||
             sizes.has(entry.path) || entry.size < 0 ||
             entry.size > MAX_IMPORTED_FILE_SIZE) {
             throw importError("INVALID_METADATA", "Stored asset file metadata is inconsistent.");
@@ -432,6 +502,9 @@ function validateSelectedEntries(entries)
         if (normalizeSelectionPath(path).toLocaleLowerCase("en-US") !== path ||
             new TextEncoder().encode(path).byteLength > MAX_IMPORTED_PATH_BYTES) {
             throw importError("UNSAFE_PATH", `The selected path is unsafe: ${path}.`);
+        }
+        if (!isSupportedImportedPath(path)) {
+            throw importError("UNSUPPORTED_FILE", `The selected file is outside the supported asset set: ${path}.`);
         }
         const file = requireFileLike(selectedFile, path);
         if (file.size > MAX_IMPORTED_FILE_SIZE) {
@@ -614,6 +687,7 @@ async function probeInstallEntries(module, entries)
     let entriesDeclared = 0;
     let archiveCount = 0;
     let zoneCount = 0;
+    const requiredFastfiles = new Set();
     for (const requirement of REQUIRED_ASSETS) {
         try {
             if (requirement.kind === "iwd") {
@@ -623,10 +697,27 @@ async function probeInstallEntries(module, entries)
             } else if (requirement.kind === "fastfile") {
                 await probeFastfile(module, entries.get(requirement.path));
                 zoneCount += 1;
+                requiredFastfiles.add(requirement.path);
             }
         } catch (error) {
             if (error instanceof AssetImportError && error.code.startsWith("PROBE_")) {
                 throw importError(error.code, `${requirement.path}: ${error.message}`, error);
+            }
+            throw error;
+        }
+    }
+    for (const [path, file] of entries) {
+        if (!isAdditionalSinglePlayerFastfile(path)) {
+            continue;
+        }
+        try {
+            if (!requiredFastfiles.has(path)) {
+                await probeFastfile(module, file);
+                zoneCount += 1;
+            }
+        } catch (error) {
+            if (error instanceof AssetImportError && error.code.startsWith("PROBE_")) {
+                throw importError(error.code, `${path}: ${error.message}`, error);
             }
             throw error;
         }

@@ -179,7 +179,7 @@ test("imports synthetic files through the portable picker and restores them afte
     expect(assetNetworkRequests).toEqual([]);
 });
 
-test("uses the native directory picker boundary without enumerating unrelated files", async ({ page }) => {
+test("uses the native directory picker boundary and admits only SP zone fastfiles", async ({ page }) => {
     const iwdBytes = Array.from(createSyntheticIwd());
     const fastfileBytes = Array.from(createSyntheticFastfileHeader());
     const descriptors = REQUIRED_ASSETS.map((requirement) => ({
@@ -189,8 +189,14 @@ test("uses the native directory picker boundary without enumerating unrelated fi
             ? iwdBytes
             : requirement.kind === "fastfile"
                 ? fastfileBytes
-                : null,
+            : null,
     }));
+    const additionalDescriptors = [
+        { path: "zone/english/cargoship.ff", kind: "fastfile", bytes: fastfileBytes },
+        { path: "zone/english/mp_test.ff", kind: "fastfile", bytes: fastfileBytes },
+        { path: "zone/english/readme.bin", kind: "other", bytes: [1, 2, 3] },
+    ];
+    const allDescriptors = [...descriptors, ...additionalDescriptors];
     const expectedAccesses = [];
     const seenDirectories = new Set();
     for (const descriptor of descriptors) {
@@ -205,6 +211,7 @@ test("uses the native directory picker boundary without enumerating unrelated fi
         }
         expectedAccesses.push(`file:${descriptor.path}`);
     }
+    expectedAccesses.push("entries:zone/english", "file:zone/english/cargoship.ff");
     await page.addInitScript(({ assets, localization }) => {
         const files = new Map(assets.map((asset) => [asset.path, new File(
             [asset.kind === "localization"
@@ -249,6 +256,26 @@ test("uses the native directory picker boundary without enumerating unrelated fi
                 }
                 return makeDirectoryHandle(child, name);
             },
+            async *entries() {
+                globalThis.__pickerAccesses.push(`entries:${prefix}`);
+                for (const asset of assets) {
+                    const assetSegments = asset.path.split("/");
+                    const assetParent = assetSegments.slice(0, -1).join("/");
+                    if (assetParent !== prefix) {
+                        continue;
+                    }
+                    const child = assetSegments.at(-1);
+                    const file = files.get(asset.path);
+                    yield [child, {
+                        kind: "file",
+                        name: child,
+                        async getFile() {
+                            globalThis.__pickerAccesses.push(`file:${asset.path}`);
+                            return file;
+                        },
+                    }];
+                }
+            },
         });
         const rootHandle = makeDirectoryHandle("", "Synthetic COD4");
         globalThis.showDirectoryPicker = async (options) => {
@@ -256,7 +283,7 @@ test("uses the native directory picker boundary without enumerating unrelated fi
             globalThis.__pickerOptions = options;
             return rootHandle;
         };
-    }, { assets: descriptors, localization: SYNTHETIC_LOCALIZATION });
+    }, { assets: allDescriptors, localization: SYNTHETIC_LOCALIZATION });
 
     await page.goto("/");
     await waitForEngine(page);
@@ -271,6 +298,26 @@ test("uses the native directory picker boundary without enumerating unrelated fi
         invocations: 1,
         accesses: expectedAccesses,
         options: { id: "kisakcod-install", mode: "read" },
+    });
+    expect(await page.evaluate(
+        () => globalThis.__KISAKCOD_WEB__.assets.manifest.files
+            .map(({ path: assetPath }) => assetPath),
+    )).toContain("zone/english/cargoship.ff");
+    expect(await page.evaluate(
+        () => globalThis.__KISAKCOD_WEB__.assets.manifest.profile.zoneCount,
+    )).toBe(5);
+    await page.reload();
+    await waitForEngine(page);
+    await waitForAssets(page, "ready");
+    expect(await page.evaluate(async () => {
+        const store = globalThis.__KISAKCOD_WEB__.assetStore;
+        return {
+            state: globalThis.__KISAKCOD_WEB__.assets.state,
+            cargo: await store.stat("zone/english/cargoship.ff"),
+        };
+    })).toMatchObject({
+        state: "ready",
+        cargo: { path: "zone/english/cargoship.ff" },
     });
 });
 
@@ -332,6 +379,50 @@ test("rejects malformed retail fastfile framing before persistence", { tag: "@na
     expect(await page.evaluate(
         () => globalThis.__KISAKCOD_WEB__.assets.error,
     )).toBe("PROBE_40");
+});
+
+test("rejects a malformed additional single-player fastfile before persistence", { tag: "@native-covered" }, async ({ page }) => {
+    await page.goto("/");
+    await waitForEngine(page);
+    await waitForAssets(page, "empty");
+    const result = await page.evaluate(async ({ localization, requirements, iwd, ff }) => {
+        const malformed = new Uint8Array(ff);
+        malformed[0] = 0x58;
+        const entries = new Map(requirements.map((requirement) => {
+            const contents = requirement.kind === "localization"
+                ? localization
+                : new Uint8Array(requirement.kind === "iwd" ? iwd : ff);
+            return [
+                requirement.path,
+                new File([contents], requirement.path.split("/").at(-1)),
+            ];
+        }));
+        entries.set(
+            "zone/english/cargoship.ff",
+            new File([malformed], "cargoship.ff"),
+        );
+        try {
+            await globalThis.__KISAKCOD_WEB__.assetStore.importEntries(entries);
+            return { code: "accepted" };
+        } catch (error) {
+            return {
+                code: error.code,
+                state: globalThis.__KISAKCOD_WEB__.assets,
+            };
+        }
+    }, {
+        localization: SYNTHETIC_LOCALIZATION,
+        requirements: REQUIRED_ASSETS.map(({ path: assetPath, kind }) => ({
+            path: assetPath,
+            kind,
+        })),
+        iwd: Array.from(createSyntheticIwd()),
+        ff: Array.from(createSyntheticFastfileHeader()),
+    });
+    expect(result).toMatchObject({
+        code: "PROBE_40",
+        state: { state: "failed", retained: false },
+    });
 });
 
 test("rejects an oversized map fastfile before reading or copying it", async ({ page }) => {
