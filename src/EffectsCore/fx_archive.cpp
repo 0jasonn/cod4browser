@@ -5,6 +5,30 @@
 
 #include <physics/phys_local.h>
 
+#include <cctype>
+#include <cstdint>
+#include <cstring>
+
+namespace
+{
+bool FX_IsDiagnosticNameSane(const char *name)
+{
+    if (!name || !*name)
+        return false;
+    for (std::size_t index = 0; index < 128u; ++index)
+    {
+        const unsigned char value = static_cast<unsigned char>(name[index]);
+        if (!value)
+            return true;
+        if (!std::isprint(value))
+            return false;
+    }
+    return false;
+}
+
+std::uint32_t g_fxSaveNameDiagnostics = 0u;
+}
+
 void __cdecl FX_Restore(int32_t clientIndex, MemoryFile *memFile)
 {
     int32_t v2; // [esp+0h] [ebp-201Ch] BYREF
@@ -54,8 +78,8 @@ void __cdecl FX_RestoreEffectDefTable(MemoryFile *memFile, FxEffectDefTable *tab
         effectDef = FX_Register((char *)effectDefName);
         if (!effectDef && missingCount++ < 4u)
             Com_PrintWarning(21,
-                "FX_RestoreEffectDefTable: missing published effect '%s'\n",
-                effectDefName);
+                "FX_RestoreEffectDefTable: missing published effect '%s' key 0x%08x\n",
+                effectDefName, key);
         FX_AddEffectDefTableEntry(table, key, effectDef);
     }
     if (missingCount > 4u)
@@ -231,6 +255,15 @@ void __cdecl FX_SaveEffectDefTableEntry_FileLoadObj(const FxEffectDef* effectDef
 {
     const FxEffectDef* p; // [esp+0h] [ebp-4h] BYREF
 
+    if (!FX_IsDiagnosticNameSane(effectDef ? effectDef->name : nullptr) &&
+        g_fxSaveNameDiagnostics++ < 4u)
+    {
+        std::uint32_t key = 0u;
+        std::memcpy(&key, &effectDef, sizeof(key));
+        Com_PrintWarning(21,
+            "FX_SaveEffectDefTable: malformed effect name at %p key 0x%08x\n",
+            effectDef, key);
+    }
     MemFile_WriteCString(data, (char*)effectDef->name);
     p = effectDef;
     MemFile_WriteData(data, 4, &p);
