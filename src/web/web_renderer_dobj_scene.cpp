@@ -33,6 +33,27 @@ bool Finite3(const float value[3]) noexcept
         std::isfinite(value[2]);
 }
 
+int SelectDObjLod(
+    const XModel &model, const cpose_t &pose, const float *viewOrigin) noexcept
+{
+    // R_GetBaseLodDist is owned by the native renderer state and is not
+    // available at this portable frontend seam.  The canonical XModel LOD
+    // thresholds are still useful when the frontend supplies the active view
+    // origin; retain LOD 0 for isolated callers/tests that have no view.
+    if (!viewOrigin || !Finite3(viewOrigin) || !Finite3(pose.origin) ||
+        model.numLods <= 0 || model.numLods > MAX_LODS)
+    {
+        return 0;
+    }
+    const float dx = viewOrigin[0] - pose.origin[0];
+    const float dy = viewOrigin[1] - pose.origin[1];
+    const float dz = viewOrigin[2] - pose.origin[2];
+    const float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+    if (!std::isfinite(distance)) return 0;
+    const int lod = XModelGetLodForDist(&model, distance);
+    return lod >= 0 ? lod : static_cast<int>(model.numLods - 1u);
+}
+
 const GfxImage *FindBaseImage(
     const Material *material, std::uint8_t &sampler) noexcept
 {
@@ -263,7 +284,8 @@ WebRendererWorldBatchDesc MakeDraw(
 WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
     const WebRendererDObjSubmission *submissions,
     std::uint32_t submissionCount,
-    WebRendererDObjSceneCommand &destination)
+    WebRendererDObjSceneCommand &destination,
+    const float *viewOrigin)
 {
     if (submissionCount == 0u) return WebRendererDObjSceneResult::NoDObj;
     if (!submissions) return WebRendererDObjSceneResult::InvalidSubmission;
@@ -303,7 +325,14 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                 {
                     return WebRendererDObjSceneResult::InvalidModel;
                 }
-                const XModelLodInfo &lod = model->lodInfo[0];
+                const int selectedLod = SelectDObjLod(
+                    *model, *submission.pose, viewOrigin);
+                if (selectedLod < 0 || selectedLod >= model->numLods ||
+                    selectedLod >= MAX_LODS)
+                {
+                    return WebRendererDObjSceneResult::InvalidModel;
+                }
+                const XModelLodInfo &lod = model->lodInfo[selectedLod];
                 if (lod.surfIndex > model->numsurfs ||
                     lod.numsurfs > model->numsurfs - lod.surfIndex)
                 {

@@ -59,7 +59,8 @@ enum class WebRendererDObjSceneResult : std::uint8_t
 WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
     const WebRendererDObjSubmission *submissions,
     std::uint32_t submissionCount,
-    WebRendererDObjSceneCommand &destination);
+    WebRendererDObjSceneCommand &destination,
+    const float *viewOrigin = nullptr);
 
 const char *WebRenderer_DObjSceneResultString(
     WebRendererDObjSceneResult result) noexcept;

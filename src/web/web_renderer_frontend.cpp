@@ -1041,7 +1041,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     const WebRendererDObjSceneResult dynamicBuild =
         WebRenderer_BuildDObjSceneCommand(
             g_dobjSubmissions.data(), g_dobjSubmissionCount,
-            dynamicCommand);
+            dynamicCommand, refdef->vieworg);
     if (dynamicBuild == WebRendererDObjSceneResult::NoDObj)
     {
         // Keep the command empty for now; canonical code meshes below may
