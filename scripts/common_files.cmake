@@ -548,6 +548,7 @@ set(UNIVERSAL
     "${SRC_DIR}/universal/com_memory.h"
     "${SRC_DIR}/universal/com_shared.cpp"
     "${SRC_DIR}/universal/com_sndalias.cpp"
+    "${SRC_DIR}/universal/com_sndalias_curve.cpp"
     "${SRC_DIR}/universal/com_sndalias.h"
     "${SRC_DIR}/universal/com_sndalias_load_obj.cpp"
     "${SRC_DIR}/universal/com_stringtable.cpp"

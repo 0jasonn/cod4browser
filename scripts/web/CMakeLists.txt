@@ -267,6 +267,7 @@ target_sources(KisakCOD-web PRIVATE
     "${SRC_DIR}/universal/com_loadutils.cpp"
     "${SRC_DIR}/universal/q_parse.cpp"
     "${SRC_DIR}/universal/com_sndalias.cpp"
+    "${SRC_DIR}/universal/com_sndalias_curve.cpp"
     "${SRC_DIR}/universal/com_stringtable.cpp"
     "${SRC_DIR}/universal/surfaceflags.cpp"
     "${SRC_DIR}/universal/com_files.cpp"

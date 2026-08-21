@@ -36,6 +36,11 @@ add_executable(qcommon_math_tests
     "${CMAKE_CURRENT_LIST_DIR}/qcommon_math_tests.cpp"
 )
 
+add_executable(sound_curve_validation_tests
+    "${CMAKE_CURRENT_LIST_DIR}/sound_curve_validation_tests.cpp"
+    "${KISAK_REPOSITORY_ROOT}/src/universal/com_sndalias_curve.cpp"
+)
+
 add_executable(canonical_startup_zone_tests
     "${CMAKE_CURRENT_LIST_DIR}/canonical_startup_zone_tests.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/client/cl_fastfile_config.cpp"
@@ -357,6 +362,13 @@ target_compile_features(canonical_asset_abi_tests PRIVATE cxx_std_20)
 target_include_directories(canonical_asset_abi_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
 target_compile_features(qcommon_math_tests PRIVATE cxx_std_20)
 target_include_directories(qcommon_math_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
+target_compile_features(sound_curve_validation_tests PRIVATE cxx_std_20)
+target_include_directories(sound_curve_validation_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
+if (MSVC)
+    target_compile_options(sound_curve_validation_tests PRIVATE /UNDEBUG)
+else()
+    target_compile_options(sound_curve_validation_tests PRIVATE -UNDEBUG)
+endif()
 target_compile_features(web_thread_context_tests PRIVATE cxx_std_20)
 target_include_directories(web_thread_context_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
 target_compile_definitions(web_thread_context_tests PRIVATE KISAK_SP=1)
@@ -559,6 +571,7 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     set_target_properties(iwi_image_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(canonical_asset_abi_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(qcommon_math_tests PROPERTIES SUFFIX ".cjs")
+    set_target_properties(sound_curve_validation_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(canonical_startup_zone_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_thread_context_tests PROPERTIES SUFFIX ".cjs")
     if (TARGET canonical_runtime_prefix_tests)
@@ -599,6 +612,8 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:canonical_asset_abi_tests>")
     add_test(NAME qcommon_math_tests
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:qcommon_math_tests>")
+    add_test(NAME sound_curve_validation_tests
+        COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:sound_curve_validation_tests>")
     add_test(NAME canonical_startup_zone_tests
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:canonical_startup_zone_tests>")
     add_test(NAME web_thread_context_tests
@@ -697,6 +712,7 @@ else()
     add_test(NAME iwi_image_tests COMMAND iwi_image_tests)
     add_test(NAME canonical_asset_abi_tests COMMAND canonical_asset_abi_tests)
     add_test(NAME qcommon_math_tests COMMAND qcommon_math_tests)
+    add_test(NAME sound_curve_validation_tests COMMAND sound_curve_validation_tests)
     add_test(NAME canonical_startup_zone_tests COMMAND canonical_startup_zone_tests)
     add_test(NAME web_thread_context_tests COMMAND web_thread_context_tests)
     if (TARGET canonical_runtime_prefix_tests)

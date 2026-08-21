@@ -112,6 +112,43 @@ double __cdecl Com_GetVolumeFalloffCurveValue(SndCurve *volumeFalloffCurve, floa
     return GraphGetValueFromFraction(volumeFalloffCurve->knotCount, volumeFalloffCurve->knots, fraction);
 }
 
+namespace
+{
+bool s_reportedInvalidFastFileCurve;
+}
+
+static SndCurve *Com_ResolveSelectedSoundAliasCurve(snd_alias_t *alias)
+{
+    SndCurve *defaultCurve = g_sa.volumeFalloffCurves;
+    if (!Com_IsValidSoundAliasVolumeFalloffCurve(defaultCurve))
+    {
+        // Fastfile aliases do not run the load-object curve catalog setup.
+        // Lazily establish the same canonical default storage before fixing
+        // an invalid DB alias pointer.
+        Com_InitDefaultSoundAliasVolumeFalloffCurve(defaultCurve);
+    }
+
+    SndCurve *resolved = Com_ResolveSoundAliasVolumeFalloffCurve(
+        alias->volumeFalloffCurve, defaultCurve);
+    if (resolved != alias->volumeFalloffCurve)
+        Com_ReportInvalidSoundAliasVolumeFalloffCurve(alias);
+    return resolved;
+}
+
+void Com_ReportInvalidSoundAliasVolumeFalloffCurve(const snd_alias_t *alias)
+{
+    if (s_reportedInvalidFastFileCurve)
+        return;
+    s_reportedInvalidFastFileCurve = true;
+    Com_PrintWarning(9,
+        "WARNING: sound alias '%s' had an invalid volume falloff curve "
+        "(%p, knots=%d); using the canonical default curve\n",
+        alias && alias->aliasName ? alias->aliasName : "<unnamed>",
+        alias ? static_cast<void *>(alias->volumeFalloffCurve) : nullptr,
+        alias && alias->volumeFalloffCurve
+            ? alias->volumeFalloffCurve->knotCount : 0);
+}
+
 void __cdecl Com_InitSoundDevGuiGraphs()
 {
     if (IsFastFileLoad())
@@ -425,6 +462,8 @@ snd_alias_t *__cdecl Com_PickSoundAliasFromList(snd_alias_list_t *aliasList)
             }
         }
         bestAlias->sequence = maxSequence + 1;
+        bestAlias->volumeFalloffCurve = Com_ResolveSelectedSoundAliasCurve(
+            bestAlias);
         return bestAlias;
     }
     else
@@ -740,16 +779,6 @@ void Com_InitEntChannels()
     if (FS_ReadFile("soundaliases/channels.def", (void **)&file) < 0)
         Com_Error(ERR_DROP, "unable to load entity channel file [%s].\n", "soundaliases/channels.def");
     Com_ParseEntChannelFile((const char*)file);
-}
-
-void __cdecl Com_InitDefaultSoundAliasVolumeFalloffCurve(SndCurve *sndCurve)
-{
-    sndCurve->filename = "";
-    sndCurve->knots[0][0] = 0.0;
-    sndCurve->knots[0][1] = 1.0;
-    sndCurve->knots[1][0] = 1.0;
-    sndCurve->knots[1][1] = 0.0;
-    sndCurve->knotCount = 2;
 }
 
 void __cdecl Com_InitDefaultSoundAliasSpeakerMap(SpeakerMapInfo *info)
