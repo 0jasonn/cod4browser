@@ -117,13 +117,15 @@ enum class WebRendererSceneBatchKind : std::uint8_t
     DynamicDObj,
     FxCodeMesh,
     FxXModel,
+    FxParticleCloud,
 };
 
 constexpr bool WebRenderer_IsFxVertexColorBatch(
     WebRendererSceneBatchKind kind) noexcept
 {
     return kind == WebRendererSceneBatchKind::FxCodeMesh ||
-        kind == WebRendererSceneBatchKind::FxXModel;
+        kind == WebRendererSceneBatchKind::FxXModel ||
+        kind == WebRendererSceneBatchKind::FxParticleCloud;
 }
 
 // Callback-scoped canonical identity and portable first-pass state for one

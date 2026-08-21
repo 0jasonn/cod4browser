@@ -33,6 +33,7 @@
 #include <web/web_renderer_code_mesh.h>
 #include <web/web_renderer_dobj_scene.h>
 #include <web/web_renderer_fx_model_scene.h>
+#include <web/web_renderer_particle_cloud_scene.h>
 #include <web/web_renderer_static_model_scene.h>
 #include <web/web_renderer_world_scene.h>
 #include <web/web_system.h>
@@ -102,6 +103,9 @@ std::uint32_t g_dobjSubmissionCount = 0u;
 std::array<WebRendererFxModelSubmission,
     WEB_RENDERER_MAX_FX_MODEL_SUBMISSIONS> g_fxModelSubmissions{};
 std::uint32_t g_fxModelSubmissionCount = 0u;
+std::array<WebRendererParticleCloudSubmission,
+    WEB_RENDERER_MAX_PARTICLE_CLOUD_SUBMISSIONS> g_particleCloudSubmissions{};
+std::uint32_t g_particleCloudSubmissionCount = 0u;
 std::uint32_t g_worldSceneSurfaceCount = 0u;
 std::uint32_t g_worldSceneVertexCount = 0u;
 std::uint32_t g_worldSceneIndexCount = 0u;
@@ -118,7 +122,6 @@ std::uint32_t g_codeMeshArgCount = 0u;
 std::vector<WebRendererSurfaceVertex> g_codeMeshRenderVertices;
 std::vector<std::uint32_t> g_codeMeshRenderIndices;
 std::vector<WebRendererWorldBatchDesc> g_codeMeshRenderBatches;
-GfxParticleCloud g_particleCloud{};
 std::vector<WebRendererSurfaceVertex> g_uiVertices;
 std::vector<std::uint32_t> g_uiIndices;
 std::vector<WebRendererUiBatchDesc> g_uiBatches;
@@ -590,6 +593,7 @@ void __cdecl R_ClearScene(std::uint32_t)
 {
     g_dobjSubmissionCount = 0u;
     WebRenderer_ClearFxModelSubmissions(&g_fxModelSubmissionCount);
+    WebRenderer_ClearParticleCloudSubmissions(&g_particleCloudSubmissionCount);
 }
 
 void __cdecl R_InitSceneData(int localClientNum)
@@ -777,9 +781,16 @@ void __cdecl R_AddCodeMeshDrawSurf(Material *material,
     }
 }
 
-GfxParticleCloud *__cdecl R_AddParticleCloudToScene(Material *)
+GfxParticleCloud *__cdecl R_AddParticleCloudToScene(Material *material)
 {
-    return &g_particleCloud;
+    GfxParticleCloud *cloud = nullptr;
+    const WebRendererParticleCloudRetainResult retained =
+        WebRenderer_RetainParticleCloudSubmission(
+            g_particleCloudSubmissions.data(),
+            &g_particleCloudSubmissionCount, material, &cloud);
+    if (retained == WebRendererParticleCloudRetainResult::LimitReached)
+        R_WarnOncePerFrame(R_WARN_MAX_CLOUDS);
+    return cloud;
 }
 
 void __cdecl R_FilterXModelIntoScene(
@@ -1156,8 +1167,48 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         }
     }
 
+    // EffectsCore remains the sole producer of particle-cloud state. Expand
+    // each retained canonical slot at this renderer boundary only after the
+    // required DObj, FX-model, and code-mesh families have been admitted.
+    // Each cloud is an all-or-nothing 1024-quad batch, so optional clouds can
+    // be dropped without displacing earlier canonical geometry.
+    WebRendererParticleCloudView particleCloudView{};
+    std::memcpy(particleCloudView.origin, refdef->vieworg,
+        sizeof(particleCloudView.origin));
+    std::memcpy(particleCloudView.axis, refdef->viewaxis,
+        sizeof(particleCloudView.axis));
+    bool hasParticleCloud = false;
+    std::uint32_t droppedParticleClouds = 0u;
+    for (std::uint32_t index = 0u;
+         index < g_particleCloudSubmissionCount; ++index)
+    {
+        WebRendererParticleCloudSceneCommand cloudCommand;
+        const WebRendererParticleCloudSceneResult build =
+            WebRenderer_BuildParticleCloudCommand(
+                g_particleCloudSubmissions[index], particleCloudView,
+                cloudCommand);
+        if (build != WebRendererParticleCloudSceneResult::Success)
+        {
+            if (droppedParticleClouds != UINT32_MAX) ++droppedParticleClouds;
+            continue;
+        }
+        const WebRendererParticleCloudAppendResult append =
+            WebRenderer_AppendParticleCloudCommand(
+                cloudCommand,
+                dynamicCommand.vertices,
+                dynamicCommand.indices,
+                dynamicCommand.batches,
+                dynamicCommand.surfaceCount);
+        if (append == WebRendererParticleCloudAppendResult::Success)
+            hasParticleCloud = true;
+        else if (droppedParticleClouds != UINT32_MAX)
+            ++droppedParticleClouds;
+    }
+    if (droppedParticleClouds != 0u)
+        R_WarnOncePerFrame(R_WARN_MAX_CLOUDS);
+
     if (dynamicBuild == WebRendererDObjSceneResult::Success ||
-        hasFxModel || hasCodeMesh)
+        hasFxModel || hasCodeMesh || hasParticleCloud)
     {
         const WebRendererWorldSurfaceDesc scene{
             dynamicCommand.vertices.data(),

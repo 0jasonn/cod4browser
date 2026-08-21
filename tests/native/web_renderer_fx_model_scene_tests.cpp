@@ -371,6 +371,8 @@ int main()
         WebRendererSceneBatchKind::FxCodeMesh));
     assert(WebRenderer_IsFxVertexColorBatch(
         WebRendererSceneBatchKind::FxXModel));
+    assert(WebRenderer_IsFxVertexColorBatch(
+        WebRendererSceneBatchKind::FxParticleCloud));
     assert(!WebRenderer_IsFxVertexColorBatch(
         WebRendererSceneBatchKind::DynamicDObj));
     assert(!WebRenderer_IsFxVertexColorBatch(
