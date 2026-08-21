@@ -1,5 +1,6 @@
 #include <universal/q_shared.h>
 #include "fx_system.h"
+#include "fx_emission_math.h"
 
 #include <xanim/xanim.h>
 #include <xanim/dobj.h>
@@ -1803,9 +1804,11 @@ uint8_t __cdecl FX_ProcessEmitting(
     while (1)
     {
         distLastEmit = distNextEmit;
-        distNextEmit = (double)rand() * 0.000030517578125 * elemDef->emitDistVariance.amplitude
-            + baseDistPerEmit
-            + distNextEmit;
+        distNextEmit = FX_EmissionDistanceWithVariance(
+            baseDistPerEmit,
+            elemDef->emitDistVariance.amplitude,
+            rand(),
+            RAND_MAX) + distNextEmit;
         if (distInUpdate < (double)distNextEmit)
             break;
         v9 = distNextEmit - 0.0;
