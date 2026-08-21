@@ -88,6 +88,45 @@ int32_t g_animRateOffsets[33] =
 namespace
 {
 std::uint32_t g_webCombatFireEvidenceCount = 0u;
+std::uint32_t g_webWeaponSelectionEvidenceCount = 0u;
+
+void WebReportCanonicalWeaponSelection(
+    const cg_s *cgameGlob,
+    std::uint32_t previousSelection,
+    std::uint32_t selectedWeapon)
+{
+    if (!cgameGlob || g_webWeaponSelectionEvidenceCount >= 64u)
+        return;
+
+    const std::uint32_t weaponCount = BG_GetNumWeapons();
+    const WeaponDef *selectedDef = selectedWeapon < weaponCount
+        ? BG_GetWeaponDef(selectedWeapon)
+        : nullptr;
+    const std::uint32_t viewmodelWeapon = BG_GetViewmodelWeaponIndex(
+        &cgameGlob->predictedPlayerState);
+    const WeaponDef *viewmodelDef = viewmodelWeapon < weaponCount
+        ? BG_GetWeaponDef(viewmodelWeapon)
+        : nullptr;
+    const bool selectedOwned = selectedWeapon < 128u && Com_BitCheckAssert(
+        cgameGlob->predictedPlayerState.weapons, selectedWeapon, 16);
+
+    Web_Log(WebLogLevel::Info,
+        "[kisakcod-web] canonical weapon selection previous=%u selected=%u "
+        "selectedName=%s owned=%d predicted=%u predictedName=%s viewmodel=%u "
+        "viewmodelName=%s\n",
+        previousSelection,
+        selectedWeapon,
+        selectedDef && selectedDef->szInternalName ? selectedDef->szInternalName : "",
+        selectedOwned ? 1 : 0,
+        cgameGlob->predictedPlayerState.weapon,
+        cgameGlob->predictedPlayerState.weapon < weaponCount
+            && BG_GetWeaponDef(cgameGlob->predictedPlayerState.weapon)->szInternalName
+            ? BG_GetWeaponDef(cgameGlob->predictedPlayerState.weapon)->szInternalName
+            : "",
+        viewmodelWeapon,
+        viewmodelDef && viewmodelDef->szInternalName ? viewmodelDef->szInternalName : "");
+    ++g_webWeaponSelectionEvidenceCount;
+}
 
 void WebReportCanonicalPlayerFire(
     const WeaponDef *weaponDef,
@@ -4057,6 +4096,9 @@ void __cdecl CG_SelectWeaponIndex(int32_t localClientNum, uint32_t weaponIndex)
     cgameGlob->weaponSelectTime = cgameGlob->time;
     if (cgameGlob->weaponSelect != weaponIndex)
     {
+#if defined(KISAK_WEB)
+        const std::uint32_t previousSelection = cgameGlob->weaponSelect;
+#endif
         v2 = weaponIndex && weaponIndex == BG_GetWeaponDef(cgameGlob->weaponSelect)->altWeaponIndex;
         validLatest = ValidLatestPrimaryWeapIdx(weaponIndex);
         if (validLatest)
@@ -4065,6 +4107,10 @@ void __cdecl CG_SelectWeaponIndex(int32_t localClientNum, uint32_t weaponIndex)
         CG_MenuShowNotify(localClientNum, 1);
         if (!v2)
             CL_SetADS(localClientNum, 0);
+#if defined(KISAK_WEB)
+        if (localClientNum == 0)
+            WebReportCanonicalWeaponSelection(cgameGlob, previousSelection, weaponIndex);
+#endif
     }
 }
 
