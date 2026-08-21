@@ -15,9 +15,7 @@ namespace
 {
 constexpr float BYTE_TO_UNIT = 1.0f / 255.0f;
 constexpr float EPSILON = 0.001f;
-constexpr std::uint32_t TECHNIQUE_UNLIT_INDEX = 4u;
 constexpr std::uint32_t TECHNIQUE_EMISSIVE_INDEX = 5u;
-constexpr std::uint32_t TECHNIQUE_LIT_INDEX = 7u;
 
 bool Finite3(const float value[3]) noexcept
 {
@@ -125,20 +123,20 @@ bool SelectTechnique(
 {
     if (!material || !material->techniqueSet || !material->stateBitsTable)
         return false;
-    for (const std::uint32_t type : {
-        TECHNIQUE_LIT_INDEX, TECHNIQUE_UNLIT_INDEX, TECHNIQUE_EMISSIVE_INDEX})
-    {
-        const MaterialTechnique *technique =
-            material->techniqueSet->techniques[type];
-        const std::uint8_t entry = material->stateBitsEntry[type];
-        if (!technique || technique->passCount == 0u || entry == 0xffu ||
-            entry >= material->stateBitsCount)
-            continue;
-        stateBits[0] = material->stateBitsTable[entry].loadBits[0];
-        stateBits[1] = material->stateBitsTable[entry].loadBits[1];
-        return true;
-    }
-    return false;
+    // Native R_AddParticleCloudDrawSurf gates this family on the active
+    // gfxDrawMethod.emissiveTechType. The current web compatibility contract
+    // maps that canonical slot to technique index 5; accepting lit/unlit here
+    // would make a cloud visible that native Kisak would reject before draw.
+    const MaterialTechnique *technique =
+        material->techniqueSet->techniques[TECHNIQUE_EMISSIVE_INDEX];
+    const std::uint8_t entry =
+        material->stateBitsEntry[TECHNIQUE_EMISSIVE_INDEX];
+    if (!technique || technique->passCount == 0u || entry == 0xffu ||
+        entry >= material->stateBitsCount)
+        return false;
+    stateBits[0] = material->stateBitsTable[entry].loadBits[0];
+    stateBits[1] = material->stateBitsTable[entry].loadBits[1];
+    return true;
 }
 
 WebRendererWorldBatchDesc MakeDraw(Material *material) noexcept
@@ -201,6 +199,14 @@ bool BuildCloudAxes(
         cloud.endpos[1] - cloud.placement.base.origin[1],
         cloud.endpos[2] - cloud.placement.base.origin[2],
     };
+    // Native RB_CreateParticleCloud2dAxis receives this direction in view
+    // space, writes rows {(-viewUp.y, -viewUp.x), (viewUp.x, viewUp.y)}, and
+    // the particle-cloud shader applies that 2x2 constant to each quad's
+    // corner offset. Bake the same sign convention into world-space axes
+    // using the refdef right/up rows. The native decompile has a radius
+    // conditional whose exact shader interaction is unavailable here; this
+    // compatibility subset preserves both explicit cloud radii while keeping
+    // the native directed-axis orientation and finite behavior.
     const bool directed = Normalize3(direction) &&
         (std::fabs(direction[0]) > EPSILON ||
          std::fabs(direction[1]) > EPSILON ||
@@ -248,6 +254,9 @@ WebRendererParticleCloudSceneResult BuildOne(
         !Finite3(cloud.endpos) || !Finite3(view.origin) ||
         !FiniteAxis(view.axis))
         return WebRendererParticleCloudSceneResult::InvalidSubmission;
+    std::uint32_t emissiveStateBits[2]{};
+    if (!SelectTechnique(submission.material, emissiveStateBits))
+        return WebRendererParticleCloudSceneResult::InvalidSubmission;
 
     float placementAxis[3][3]{};
     UnitQuatToAxisExact(cloud.placement.base.quat, placementAxis);
@@ -267,6 +276,15 @@ WebRendererParticleCloudSceneResult BuildOne(
     const std::size_t vertexStart = destination.vertices.size();
     const std::size_t indexStart = destination.indices.size();
     const std::size_t batchStart = destination.batches.size();
+    const std::uint32_t cloudStart = destination.cloudCount;
+    const std::uint32_t surfaceStart = destination.surfaceCount;
+    const auto rollback = [&]() {
+        destination.vertices.resize(vertexStart);
+        destination.indices.resize(indexStart);
+        destination.batches.resize(batchStart);
+        destination.cloudCount = cloudStart;
+        destination.surfaceCount = surfaceStart;
+    };
     try
     {
         destination.vertices.reserve(vertexStart +
@@ -332,9 +350,7 @@ WebRendererParticleCloudSceneResult BuildOne(
                         vertex.textureCoordinate[1] = texcoords[corner][1];
                         if (!Finite3(vertex.position))
                         {
-                            destination.vertices.resize(vertexStart);
-                            destination.indices.resize(indexStart);
-                            destination.batches.resize(batchStart);
+                            rollback();
                             return WebRendererParticleCloudSceneResult::
                                 InvalidSubmission;
                         }
@@ -356,9 +372,7 @@ WebRendererParticleCloudSceneResult BuildOne(
     }
     catch (const std::bad_alloc &)
     {
-        destination.vertices.resize(vertexStart);
-        destination.indices.resize(indexStart);
-        destination.batches.resize(batchStart);
+        rollback();
         return WebRendererParticleCloudSceneResult::AllocationFailed;
     }
 }

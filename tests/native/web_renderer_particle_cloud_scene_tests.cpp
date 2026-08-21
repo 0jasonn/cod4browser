@@ -11,6 +11,7 @@
 
 namespace
 {
+constexpr std::uint32_t TECHNIQUE_EMISSIVE_INDEX = 5u;
 constexpr std::uint32_t TECHNIQUE_LIT_INDEX = 7u;
 
 struct Fixture
@@ -30,12 +31,14 @@ struct Fixture
         texture.samplerState = 0x42u;
         texture.u.image = &image;
         technique.passCount = 1u;
+        techniqueSet.techniques[TECHNIQUE_EMISSIVE_INDEX] = &technique;
         techniqueSet.techniques[TECHNIQUE_LIT_INDEX] = &technique;
         stateBits[0].loadBits[0] = 0x18008800u;
         stateBits[0].loadBits[1] = 0x0000000du;
         material.textureCount = 1u;
         material.textureTable = &texture;
         material.techniqueSet = &techniqueSet;
+        material.stateBitsEntry[TECHNIQUE_EMISSIVE_INDEX] = 0u;
         material.stateBitsEntry[TECHNIQUE_LIT_INDEX] = 0u;
         material.stateBitsCount = 1u;
         material.stateBitsTable = stateBits;
@@ -147,6 +150,17 @@ void TestDeterministicLayoutAndMaterialData()
     assert(std::memcmp(first.vertices.data(), second.vertices.data(),
         first.vertices.size() * sizeof(WebRendererSurfaceVertex)) == 0);
     assert(first.indices == second.indices);
+
+    WebRendererParticleCloudSceneCommand preserved = first;
+    fixture.techniqueSet.techniques[TECHNIQUE_EMISSIVE_INDEX] = nullptr;
+    assert(WebRenderer_BuildParticleCloudCommand(fixture.submission, view,
+        preserved) == WebRendererParticleCloudSceneResult::InvalidSubmission);
+    assert(preserved.cloudCount == first.cloudCount);
+    assert(preserved.surfaceCount == first.surfaceCount);
+    assert(preserved.vertices.size() == first.vertices.size());
+    assert(preserved.indices == first.indices);
+    fixture.techniqueSet.techniques[TECHNIQUE_EMISSIVE_INDEX] =
+        &fixture.technique;
 }
 
 void TestDirectedAxisAndMultiCloudOrdering()
@@ -183,6 +197,36 @@ void TestDirectedAxisAndMultiCloudOrdering()
         WebRendererSceneBatchKind::FxParticleCloud);
     assert(command.vertices[0].position[0] !=
         command.vertices[1u * WEB_RENDERER_PARTICLE_CLOUD_VERTICES].position[0]);
+
+    const auto ReconstructAxis = [](const WebRendererSurfaceVertex &first,
+        const WebRendererSurfaceVertex &second, float out[3]) {
+        for (std::size_t component = 0u; component < 3u; ++component)
+            out[component] = (second.position[component] -
+                first.position[component]) * 0.5f;
+    };
+    float directedAxis0[3]{};
+    float directedAxis1[3]{};
+    ReconstructAxis(command.vertices[0], command.vertices[2], directedAxis0);
+    ReconstructAxis(command.vertices[0], command.vertices[1], directedAxis1);
+    assert(std::fabs(directedAxis0[0]) < 0.00001f);
+    assert(std::fabs(directedAxis0[1]) < 0.00001f);
+    assert(std::fabs(directedAxis0[2] + 1.0f) < 0.00001f);
+    assert(std::fabs(directedAxis1[0]) < 0.00001f);
+    assert(std::fabs(directedAxis1[1] - 4.0f) < 0.00001f);
+    assert(std::fabs(directedAxis1[2]) < 0.00001f);
+
+    float equalAxis0[3]{};
+    float equalAxis1[3]{};
+    ReconstructAxis(equalRadius.vertices[0], equalRadius.vertices[2],
+        equalAxis0);
+    ReconstructAxis(equalRadius.vertices[0], equalRadius.vertices[1],
+        equalAxis1);
+    assert(std::fabs(equalAxis0[0]) < 0.00001f);
+    assert(std::fabs(equalAxis0[1] - 1.0f) < 0.00001f);
+    assert(std::fabs(equalAxis0[2]) < 0.00001f);
+    assert(std::fabs(equalAxis1[0]) < 0.00001f);
+    assert(std::fabs(equalAxis1[1]) < 0.00001f);
+    assert(std::fabs(equalAxis1[2] - 1.0f) < 0.00001f);
 
 }
 
