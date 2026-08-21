@@ -114,7 +114,7 @@ The gameplay event chain is farther along than its presentation:
   HUD, movement changes the player origin, mouse input changes `viewForward`,
   five fire inputs retain `FxCodeMesh` (4 batches/40 vertices/60 indices,
   `,gfx_smk_white_atlas`) and `FxXModel` (`fx_wood_splinter01`,
-  `mc/mtl_fx_wood_splinter`), and `r` reaches the canonical automatic reload
+  `mc/mtl_fx_wood_splinter`), and `R` visibly enters the canonical reload
   animation. Audio evidence contains only UI aliases; retail weapon/fire,
   reload, and impact sound proof remains pending.
 
@@ -146,12 +146,12 @@ retail-asset browser run:
 | Spawn | Reached on Killhouse | game/server | Retain regression evidence; prove on F.N.G. |
 | Move | Reached | input/client/game | Retain focused browser proof |
 | Aim / ADS | Reached | input/cgame | Retain focused browser proof |
-| Fire and ammo consumption | Chrome proves Mouse1 reaches canonical fire and sustained input consumes ammo after restart | game/cgame | Retain recoil/frame evidence; prove target interaction |
+| Fire and ammo consumption | Canonical fire/FX was re-proven after restart; prior Chrome evidence supports ammo consumption, but a fresh precise ammo-delta trace remains pending | game/cgame | Retain recoil/frame evidence; prove target interaction |
 | Muzzle flash / brass | Five real fire inputs retain canonical `FxCodeMesh` and `FxXModel` batches with real material/model identities; final visible muzzle/brass proof remains pending | cgame/FX/renderer | Observe expected weapon effect definitions and draws |
 | Bullet impact | Canonical trace/event/impact-table and FX renderer paths present; end-to-end result unproven | game/cgame/FX/renderer | Prove surface-dependent impact FX; audio follows the platform decision |
 | Smoke / particle clouds | Canonical EffectsCore cloud slots and portable batches implemented; retail visibility proof pending | FX/renderer | Observe a real cloud effect and measure CPU expansion before broad performance work |
 | Weapon sound | Browser audio evidence contains only UI aliases; retail weapon/fire, reload, and impact alias proof is pending | cgame/audio/platform | Observe one real `WeaponDef` alias through channel selection, PCM upload, gesture-unlocked playback, and completion |
-| Reload | Chrome proves an empty magazine enters the canonical automatic reload animation; manual reload/audio transition proof remains pending | input/game/cgame/audio | Exercise manual and automatic reload state, ammo, viewmodel, and audio transitions |
+| Reload | Chrome visually proves an `R`-initiated canonical reload animation; automatic reload and audio transition proof remain pending | input/game/cgame/audio | Exercise manual and automatic reload state, ammo, viewmodel, and audio transitions |
 | Weapon switching | Fresh profiles reach canonical `weapnext`/`weapprev`; retail presentation remains unproven | input/game/cgame | Exercise both directions and observe canonical inventory/viewmodel transition |
 | Basic combat interaction | Real bullet/game systems compiled; enemy damage/death/AI response unproven | game/script/cgame | Use real entities in F.N.G. or campaign content; no synthetic browser targets |
 
