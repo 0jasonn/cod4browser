@@ -35,6 +35,7 @@ FILE *g_fileTimeHistory;
 server_demo_history_t *g_history;
 bool g_savingHistory;
 server_demo_history_t *volatile g_historySaving;
+bool g_historySaveThreadAvailable;
 
 void __cdecl TRACK_sv_demo()
 {
@@ -367,6 +368,12 @@ int __cdecl SV_WaitForSaveHistoryDone()
 {
     if (!g_savingHistory)
         return 1;
+    if (!g_historySaveThreadAvailable && g_historySaving)
+    {
+        SV_SaveHistoryOnce(g_historySaving);
+        g_savingHistory = 0;
+        return 1;
+    }
     if (Sys_WaitForSaveHistoryDone())
     {
         g_savingHistory = 0;
@@ -1165,6 +1172,16 @@ void __cdecl SV_SaveHistory(server_demo_history_t *history)
     //Profile_EndInternal(0);
 }
 
+void __cdecl SV_SaveHistoryOnce(server_demo_history_t *history)
+{
+    if (!history)
+        MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 2110, 0, "%s", "history");
+    SV_SaveHistory(history);
+    SV_FreeHistoryData(history);
+    if (g_historySaving == history)
+        g_historySaving = 0;
+}
+
 void __cdecl SV_SaveHistoryLoop(unsigned int threadContext)
 {
     iassert(threadContext == THREAD_CONTEXT_SERVER_DEMO);
@@ -1175,12 +1192,7 @@ void __cdecl SV_SaveHistoryLoop(unsigned int threadContext)
         if (!g_historySaving)
             MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 2114, 0, "%s", "g_historySaving");
         server_demo_history_t *volatile v1 = g_historySaving;
-        if (v1->manual)
-            SV_SaveHistoryMark(v1);
-        else
-            SV_SaveHistoryTime(v1);
-        SV_FreeHistoryData(g_historySaving);
-        g_historySaving = 0;
+        SV_SaveHistoryOnce(v1);
         Sys_SetSaveHistoryDoneEvent();
     }
 }
@@ -1198,7 +1210,7 @@ void __cdecl SV_InitDemoSystem()
         MyAssertHandler("c:\\trees\\cod3\\cod3src\\src\\server\\sv_demo.cpp", 2137, 0, "%s", "!g_fileMarkHistory");
     g_fileTimeHistory = SV_DemoOpenFile("timeHistory.cache");
     g_fileMarkHistory = SV_DemoOpenFile("markHistory.cache");
-    Sys_SpawnServerDemoThread((void(__cdecl *)(unsigned int))SV_SaveHistoryLoop);
+    g_historySaveThreadAvailable = SV_InitHistorySaveThread();
 }
 
 server_demo_history_t *__cdecl SV_DemoGetFreeBuffer()
@@ -1323,7 +1335,15 @@ server_demo_history_t *__cdecl SV_DemoGetBuffer()
             g_historySaving = v0;
             //__lwsync();
             g_savingHistory = 1;
-            Sys_SetSaveHistoryEvent();
+            if (g_historySaveThreadAvailable)
+            {
+                Sys_SetSaveHistoryEvent();
+            }
+            else
+            {
+                SV_SaveHistoryOnce(g_historySaving);
+                g_savingHistory = 0;
+            }
         }
     }
     v3 = &g_historyBuffers[1];

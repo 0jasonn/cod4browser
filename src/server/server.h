@@ -272,6 +272,7 @@ bool __cdecl SV_WriteHistory(_iobuf *fileHistory, const server_demo_history_t *h
 void __cdecl SV_SaveHistoryTime(server_demo_history_t *history);
 void __cdecl SV_SaveHistoryMark(const server_demo_history_t *history);
 void __cdecl SV_SaveHistory(server_demo_history_t *history);
+void __cdecl SV_SaveHistoryOnce(server_demo_history_t *history);
 void __cdecl  SV_SaveHistoryLoop(unsigned int threadContext);
 bool SV_InitHistorySaveThread();
 void __cdecl SV_InitDemoSystem();
