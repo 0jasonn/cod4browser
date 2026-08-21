@@ -30,11 +30,13 @@ bool Com_IsValidSoundAliasVolumeFalloffCurve(const SndCurve *curve)
             return false;
     }
 
-    // GraphGetValueFromFraction requires the final x coordinate.  Keep the
-    // DB boundary no stricter than that canonical runtime contract; the
-    // load-object parser separately normalizes its traditional (0,1)/(1,0)
-    // endpoints.
-    return curve->knots[curve->knotCount - 1][0] == 1.0f;
+    // GraphGetValueFromFraction evaluates fraction 0 against the first
+    // segment, so a first x above zero would trip its adjusted-fraction
+    // assertion. Keep the DB boundary no stricter than those runtime x
+    // requirements; the load-object parser separately normalizes its
+    // traditional (0,1)/(1,0) y endpoints.
+    return curve->knots[0][0] == 0.0f
+        && curve->knots[curve->knotCount - 1][0] == 1.0f;
 }
 
 SndCurve *Com_ResolveSoundAliasVolumeFalloffCurve(

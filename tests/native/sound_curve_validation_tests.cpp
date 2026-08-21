@@ -67,6 +67,9 @@ int main()
     SndCurve badEndpoints = validCurve;
     badEndpoints.knots[2][0] = 0.99f;
     assert(!Com_IsValidSoundAliasVolumeFalloffCurve(&badEndpoints));
+    SndCurve badStart = validCurve;
+    badStart.knots[0][0] = 0.01f;
+    assert(!Com_IsValidSoundAliasVolumeFalloffCurve(&badStart));
     SndCurve badNan = validCurve;
     badNan.knots[1][1] = NAN;
     assert(!Com_IsValidSoundAliasVolumeFalloffCurve(&badNan));
