@@ -33,9 +33,10 @@ int main()
 {
     std::size_t count = 0;
     const WebBrowserDefaultBinding *defaults = WebBrowserDefaultBindings(&count);
-    constexpr std::array<WebBrowserDefaultBinding, 11> expected = {{
+    constexpr std::array<WebBrowserDefaultBinding, 12> expected = {{
         {'w', "+forward"}, {'s', "+back"}, {'a', "+moveleft"},
-        {'d', "+moveright"}, {K_SPACE, "+gostand"}, {K_SHIFT, "+sprint"},
+        {'d', "+moveright"}, {'f', "+activate"}, {K_SPACE, "+gostand"},
+        {K_SHIFT, "+sprint"},
         {K_MOUSE1, "+attack"}, {K_MOUSE2, "toggleads"}, {'r', "+reload"},
         {K_MWHEELUP, "weapnext"}, {K_MWHEELDOWN, "weapprev"},
     }};
@@ -54,14 +55,16 @@ int main()
 
     bindings.clear();
     bindings['r'] = "+custom_reload";
+    bindings['f'] = "+custom_activate";
     bindings[0xCE] = "weaplast";
     bindings[0xCD] = "+custom_previous";
     writes.clear();
-    assert(InstallWebBrowserDefaultBindings(lookup, setter) == count - 3);
+    assert(InstallWebBrowserDefaultBindings(lookup, setter) == count - 4);
     assert(bindings['r'] == "+custom_reload");
+    assert(bindings['f'] == "+custom_activate");
     assert(bindings[0xCE] == "weaplast");
     assert(bindings[0xCD] == "+custom_previous");
-    assert(writes.size() == count - 3);
+    assert(writes.size() == count - 4);
 
     bindings.clear();
     for (std::size_t i = 0; i < count; ++i)

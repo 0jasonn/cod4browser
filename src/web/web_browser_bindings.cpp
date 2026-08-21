@@ -9,6 +9,7 @@ constexpr WebBrowserDefaultBinding DEFAULT_BINDINGS[] = {
     {'s', "+back"},
     {'a', "+moveleft"},
     {'d', "+moveright"},
+    {'f', "+activate"},
     {K_SPACE, "+gostand"},
     {K_SHIFT, "+sprint"},
     {K_MOUSE1, "+attack"},
