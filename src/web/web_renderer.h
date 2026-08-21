@@ -90,6 +90,10 @@ constexpr std::uint32_t WEB_RENDERER_MAX_STATIC_MODEL_INDICES = 1'500'000u;
 constexpr std::uint32_t WEB_RENDERER_MAX_STATIC_MODEL_INSTANCES = 20'000u;
 constexpr std::uint32_t WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES = 250'000u;
 constexpr std::uint32_t WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES = 500'000u;
+// Native GfxScene::sceneDObj is a fixed 512-entry array. Keep the same bound
+// at the browser frontend seam so ordinary entity DObjs are not silently
+// limited to a smaller browser-only subset.
+constexpr std::uint32_t WEB_RENDERER_MAX_DYNAMIC_DOBJ_SUBMISSIONS = 512u;
 constexpr std::uint32_t WEB_RENDERER_MAX_UI_VERTICES = 65'536u;
 constexpr std::uint32_t WEB_RENDERER_MAX_UI_INDICES = 98'304u;
 

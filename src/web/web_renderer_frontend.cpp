@@ -98,7 +98,8 @@ bool g_worldSceneSubmitted = false;
 bool g_staticModelSceneSubmitted = false;
 bool g_dynamicModelSceneReported = false;
 bool g_uiSceneReported = false;
-std::array<WebRendererDObjSubmission, 32> g_dobjSubmissions{};
+std::array<WebRendererDObjSubmission,
+    WEB_RENDERER_MAX_DYNAMIC_DOBJ_SUBMISSIONS> g_dobjSubmissions{};
 std::uint32_t g_dobjSubmissionCount = 0u;
 std::array<WebRendererFxModelSubmission,
     WEB_RENDERER_MAX_FX_MODEL_SUBMISSIONS> g_fxModelSubmissions{};
@@ -1366,16 +1367,24 @@ void __cdecl R_AddBrushModelToSceneFromAngles(
 void __cdecl R_AddDObjToScene(const DObj_s *obj, const cpose_t *pose,
     std::uint32_t entityNumber, std::uint32_t renderFlags, float *, float)
 {
-    // The canonical weapon path marks first-person DObjs with flags 3. Keep
-    // the callback identity and pose intact until R_RenderScene consumes it
-    // synchronously; ordinary entity DObjs can follow through this seam later.
-    if ((renderFlags & 3u) != 3u || !obj || !pose ||
-        g_dobjSubmissionCount >= g_dobjSubmissions.size())
+    // Keep the callback identity and pose intact until R_RenderScene consumes
+    // it synchronously. Native GfxScene admits ordinary and first-person
+    // DObjs through the same fixed 512-entry sceneDObj array.
+    const WebRendererDObjSubmission submission{
+        obj, pose, entityNumber, renderFlags};
+    const WebRendererDObjAdmissionResult admission =
+        WebRenderer_ValidateDObjSubmission(
+            submission, g_dobjSubmissionCount,
+            static_cast<std::uint32_t>(g_dobjSubmissions.size()));
+    if (admission == WebRendererDObjAdmissionResult::InvalidSubmission)
+        return;
+    if (admission == WebRendererDObjAdmissionResult::LimitReached)
     {
+        R_WarnOncePerFrame(R_WARN_MAX_SCENE_DOBJ_REFS,
+            static_cast<unsigned int>(g_dobjSubmissions.size()));
         return;
     }
-    g_dobjSubmissions[g_dobjSubmissionCount++] = {
-        obj, pose, entityNumber, renderFlags};
+    g_dobjSubmissions[g_dobjSubmissionCount++] = submission;
 }
 void __cdecl R_LinkDObjEntity(std::uint32_t, std::uint32_t, float *, float) {}
 void __cdecl R_LinkBModelEntity(std::uint32_t, std::uint32_t,

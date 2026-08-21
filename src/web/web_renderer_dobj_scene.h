@@ -16,6 +16,25 @@ struct WebRendererDObjSubmission
     std::uint32_t renderFlags;
 };
 
+enum class WebRendererDObjAdmissionResult : std::uint8_t
+{
+    Accepted = 0,
+    InvalidSubmission,
+    LimitReached,
+};
+
+inline WebRendererDObjAdmissionResult WebRenderer_ValidateDObjSubmission(
+    const WebRendererDObjSubmission &submission,
+    std::uint32_t currentCount,
+    std::uint32_t capacity = WEB_RENDERER_MAX_DYNAMIC_DOBJ_SUBMISSIONS) noexcept
+{
+    if (!submission.obj || !submission.pose)
+        return WebRendererDObjAdmissionResult::InvalidSubmission;
+    if (currentCount >= capacity)
+        return WebRendererDObjAdmissionResult::LimitReached;
+    return WebRendererDObjAdmissionResult::Accepted;
+}
+
 struct WebRendererDObjSceneCommand
 {
     std::vector<WebRendererSurfaceVertex> vertices;
