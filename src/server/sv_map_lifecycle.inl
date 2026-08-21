@@ -20,6 +20,9 @@
 #include <qcommon/threads.h>
 #include <universal/dvar.h>
 #include <universal/com_files.h>
+#if defined(KISAK_WEB)
+#include <database/db_registry_publication.h>
+#endif
 
 #include <cstring>
 
@@ -280,4 +283,7 @@ void __cdecl SV_SpawnServer(const char *mapname, int savegame)
 
     SaveGame *save = nullptr;
     SV_InitGameProgs(seed, savegame, &save);
+#if defined(KISAK_WEB)
+    DB_DiagnosePublishedSoundCurves("spawn-server-after-game");
+#endif
 }

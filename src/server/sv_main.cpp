@@ -19,6 +19,9 @@
 #include <client/cl_scrn.h>
 #include <game/savedevice.h>
 #include <qcommon/cmd.h>
+#if defined(KISAK_WEB)
+#include <database/db_registry_publication.h>
+#endif
 
 void __cdecl TRACK_sv_main()
 {
@@ -210,6 +213,10 @@ int __cdecl SV_ProcessPendingSaves()
 
 	pendingSaveGlob.count = 0;
 	pendingSaveGlob.isAutoSaving = 0;
+
+#if defined(KISAK_WEB)
+	DB_DiagnosePublishedSoundCurves("pending-saves-after");
+#endif
 
 	return anySaved;
 }

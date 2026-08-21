@@ -8,6 +8,9 @@
 #include <qcommon/cmd.h>
 #include <qcommon/engine_lifecycle_trace.h>
 #include <universal/dvar.h>
+#if defined(KISAK_WEB)
+#include <database/db_registry_publication.h>
+#endif
 
 extern const dvar_t *sv_loadMyChanges;
 int __cdecl CL_ControllerIndexFromClientNum(int clientIndex);
@@ -29,6 +32,9 @@ void SV_LoadLevelAssets(const char *mapname)
         zoneInfo.freeFlags,
         0);
     DB_LoadXAssets(&zoneInfo, 1, 0);
+#if defined(KISAK_WEB)
+    DB_DiagnosePublishedSoundCurves("map-assets-after-load");
+#endif
     if (sv_loadMyChanges->current.enabled)
     {
         Cbuf_ExecuteBuffer(

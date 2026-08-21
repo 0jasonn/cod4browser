@@ -13,6 +13,9 @@
 #include <qcommon/threads.h>
 #include <qcommon/engine_lifecycle_trace.h>
 #include <universal/com_math.h>
+#if defined(KISAK_WEB)
+#include <database/db_registry_publication.h>
+#endif
 
 #ifdef KISAK_MP
 #include <game_mp/g_main_mp.h>
@@ -533,12 +536,24 @@ static void SV_ShutdownGameVM(int clearScripts)
 {
     iassert(Sys_IsMainThread());
 #ifdef KISAK_MP// Can be used in SP as well.
+#if defined(KISAK_WEB)
+    DB_DiagnosePublishedSoundCurves("sv-shutdown-before-autosave");
+#endif
     SV_AutoSaveDemo("autosave/autoreplay", 0, 50, 0);
+#if defined(KISAK_WEB)
+    DB_DiagnosePublishedSoundCurves("sv-shutdown-after-autosave");
+#endif
+#endif
+#if defined(KISAK_WEB)
+    DB_DiagnosePublishedSoundCurves("sv-shutdown-before-game");
 #endif
     if (!sv.demo.nextLevelplaying)
         SV_ShutdownDemo();
     sv.state = SS_DEAD;
     G_ShutdownGame(clearScripts);
+#if defined(KISAK_WEB)
+    DB_DiagnosePublishedSoundCurves("sv-shutdown-after-game");
+#endif
     svs.clients->gentity = 0;
     SV_ClearReliableCommandsForGameVM(svs.clients);
 }
@@ -546,6 +561,10 @@ static void SV_ShutdownGameVM(int clearScripts)
 void __cdecl SV_ShutdownGameProgs()
 {
     iassert(Sys_IsMainThread());
+
+#if defined(KISAK_WEB)
+    DB_DiagnosePublishedSoundCurves("shutdown-game-progs-before");
+#endif
 
     Com_SyncThreads();
     if (gameInitialized)
@@ -558,6 +577,9 @@ void __cdecl SV_ShutdownGameProgs()
     {
         iassert(!sv.state);
     }
+#if defined(KISAK_WEB)
+    DB_DiagnosePublishedSoundCurves("shutdown-game-progs-after");
+#endif
 }
 
 void __cdecl SV_InitGameVM(uint32_t randomSeed, int restart, int savegame, SaveGame **save, int loadScripts)

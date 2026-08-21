@@ -382,6 +382,9 @@ void __cdecl DB_LoadXAssets(
     g_sync = sync;
     DB_LoadXZone(zoneInfo, zoneCount);
     if (sync) Sys_SyncDatabase();
+#if defined(KISAK_WEB)
+    DB_DiagnosePublishedSoundCurves("db-load-published");
+#endif
 }
 
 void __cdecl DB_ReleaseXAssets()
