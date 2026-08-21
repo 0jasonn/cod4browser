@@ -49,6 +49,9 @@ asset release). The accepted runtime history also includes `d671f4e7` for
 freeFlags unload/mark/promotion/default/removal and zone compaction,
 `ec9b3ddd` for malformed SndCurve body repair at publication, and `ac9c7682`
 for stable interned curve names plus empty identity -> canonical `default`.
+Sound-frame ownership is completed by `f7de5a7f` (canonical sound update during
+active cgame frames) and `538b3b5a` (the exact active/non-fullscreen/non-skipped
+frame predicate without the `cls.uiStarted` requirement).
 
 The browser production target currently compiles and runs the canonical
 single-player filesystem, database, startup-zone loading, map loading,
@@ -94,7 +97,11 @@ The gameplay event chain is farther along than its presentation:
   AudioNode resources. Lifecycle hardening covers gesture resume, pause/stop,
   source generation reuse, natural completion, buffer replacement, sound
   shutdown/re-init, and host disposal. Loaded PCM16 mono/stereo is supported;
-  streaming and reverb remain later compatibility work.
+  streaming and reverb remain later compatibility work. Production Release
+  Chrome now proves the console-triggered canonical
+  `snd_playLocal weap_g36c_fire_plr` path through PCM upload, source start, and
+  `source=canonical-openal-web-audio`; this is not yet proof that an actual
+  gameplay fire selected and played the WeaponDef alias.
 - fresh browser profiles now install `r -> +reload`, wheel-up -> `weapnext`,
   and wheel-down -> `weapprev` only when each canonical key is unbound. DOM
   events still flow through the Worker queue, `IN_Frame`, `CL_KeyEvent`, and
@@ -115,13 +122,15 @@ The gameplay event chain is farther along than its presentation:
   five fire inputs retain `FxCodeMesh` (4 batches/40 vertices/60 indices,
   `,gfx_smk_white_atlas`) and `FxXModel` (`fx_wood_splinter01`,
   `mc/mtl_fx_wood_splinter`), and `R` visibly enters the canonical reload
-  animation. Audio evidence contains only UI aliases; retail weapon/fire,
-  reload, and impact sound proof remains pending.
+  animation. Audio evidence now includes the console-triggered loaded G36C
+  alias proof above; actual gameplay-triggered weapon/fire, reload, and impact
+  sound proof remains pending.
 
 Therefore the active boundary is **canonical fire/impact events, sprite/beam
 code meshes, rigid FX XModels, and particle clouds reaching WebGL2 plus a
-verified canonical LoadedSound-to-Web-Audio device path, with retail weapon
-and impact audio still the highest-value blocker**. Weapon-switch
+verified canonical LoadedSound-to-Web-Audio device path (including a
+console-triggered G36C loaded-alias proof), while actual gameplay-triggered
+weapon/fire/reload/impact audio remains unproven**. Weapon-switch
 presentation, continuous pointer lock, enemy damage, F.N.G., and campaign
 behavior remain unproven.
 
@@ -150,7 +159,7 @@ retail-asset browser run:
 | Muzzle flash / brass | Five real fire inputs retain canonical `FxCodeMesh` and `FxXModel` batches with real material/model identities; final visible muzzle/brass proof remains pending | cgame/FX/renderer | Observe expected weapon effect definitions and draws |
 | Bullet impact | Canonical trace/event/impact-table and FX renderer paths present; end-to-end result unproven | game/cgame/FX/renderer | Prove surface-dependent impact FX; audio follows the platform decision |
 | Smoke / particle clouds | Canonical EffectsCore cloud slots and portable batches implemented; retail visibility proof pending | FX/renderer | Observe a real cloud effect and measure CPU expansion before broad performance work |
-| Weapon sound | Browser audio evidence contains only UI aliases; retail weapon/fire, reload, and impact alias proof is pending | cgame/audio/platform | Observe one real `WeaponDef` alias through channel selection, PCM upload, gesture-unlocked playback, and completion |
+| Weapon sound | Console-triggered `snd_playLocal weap_g36c_fire_plr` reaches PCM upload and `source=canonical-openal-web-audio`; actual gameplay-triggered fire/reload/impact alias proof remains pending | cgame/audio/platform | Capture a real `WeaponDef` alias from Mouse1 through channel selection, PCM upload, gesture-unlocked playback, and completion |
 | Reload | Chrome visually proves an `R`-initiated canonical reload animation; automatic reload and audio transition proof remain pending | input/game/cgame/audio | Exercise manual and automatic reload state, ammo, viewmodel, and audio transitions |
 | Weapon switching | Fresh profiles reach canonical `weapnext`/`weapprev`; retail presentation remains unproven | input/game/cgame | Exercise both directions and observe canonical inventory/viewmodel transition |
 | Basic combat interaction | Real bullet/game systems compiled; enemy damage/death/AI response unproven | game/script/cgame | Use real entities in F.N.G. or campaign content; no synthetic browser targets |
@@ -164,9 +173,11 @@ retail-asset browser run:
    the integration proof, not a second renderer implementation.
 2. **Weapon audio closure** — platform ownership selected and loaded-sound
    bridge implemented in `38ffcc88`, then lifecycle/timing hardened in
-   `7b02d1b0`. Native x64, direct Wasm, focused browser bridge, exact boot, and
-   qcommon lifecycle checks pass. A retail run must still trace one real fire
-   alias from `WeaponDef` through `SND_PlaySoundAlias` to audible playback.
+   `7b02d1b0`; active-frame sound ownership was fixed in `f7de5a7f` and
+   `538b3b5a`. Native x64, direct Wasm, focused browser bridge, exact boot,
+   qcommon lifecycle, and console-triggered `weap_g36c_fire_plr` source-start
+   checks pass. The remaining proof is an actual Mouse1 gameplay trigger,
+   ammo delta, and gameplay-selected fire/reload/impact aliases.
 3. **Rigid FX XModel rendering** — implemented in `5d49dbe1`, compatibility
    hardened in `86c2efbb` and `29f49b09`, and made assertion-authoritative in
    `2d3c9f10`. Canonical placements, XModel/XSurface/Material identities,
