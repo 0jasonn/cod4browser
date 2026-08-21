@@ -1022,6 +1022,25 @@ void __cdecl Load_SndCurveAsset(XAssetHeader *sndCurve)
         return;
     }
 
+    const char *requestedName = sndCurve->sndCurve->filename;
+    const bool missingName = !requestedName || !requestedName[0];
+    if (missingName)
+    {
+        // An empty XString is not a publishable asset identity.  Native DB
+        // uses the per-type default name for this fallback; reuse an already
+        // published default so repeated inline references do not create
+        // duplicate hash entries.
+        requestedName = g_defaultAssetName[ASSET_TYPE_SOUND_CURVE];
+        XAssetHeader existingDefault = DB_FindXAssetHeader(
+            ASSET_TYPE_SOUND_CURVE, requestedName);
+        if (existingDefault.sndCurve)
+        {
+            *sndCurve = existingDefault;
+            return;
+        }
+    }
+    const char *stableName = SL_ConvertToString(SL_GetString(requestedName, 4));
+
     // Generated fastfile data can carry an empty/zero-knot curve body while
     // still providing a valid requested filename.  Resolve that malformed
     // body at the DB publication boundary, before it becomes observable to
@@ -1037,7 +1056,7 @@ void __cdecl Load_SndCurveAsset(XAssetHeader *sndCurve)
             Com_InitDefaultSoundAliasVolumeFalloffCurve(defaultCurve);
         }
         repairedCurve = *defaultCurve;
-        repairedCurve.filename = sndCurve->sndCurve->filename;
+        repairedCurve.filename = stableName;
         XAssetHeader repairedHeader{&repairedCurve};
         XAssetHeader published = DB_AddXAsset(
             ASSET_TYPE_SOUND_CURVE, repairedHeader);
@@ -1046,7 +1065,10 @@ void __cdecl Load_SndCurveAsset(XAssetHeader *sndCurve)
         return;
     }
 
-    XAssetHeader published = DB_AddXAsset(ASSET_TYPE_SOUND_CURVE, *sndCurve);
+    SndCurve publishedCurve = *sndCurve->sndCurve;
+    publishedCurve.filename = stableName;
+    XAssetHeader published = DB_AddXAsset(
+        ASSET_TYPE_SOUND_CURVE, {&publishedCurve});
     if (!published.data) return;
     *sndCurve = published;
 }

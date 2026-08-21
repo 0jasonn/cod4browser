@@ -2873,6 +2873,33 @@ int main()
     assert(std::strcmp(stablePublishedCurve->filename,
         malformedPublishedCurve.filename) == 0);
 
+    static char mutableCurveName[] = "soundcurves/stable_name";
+    static SndCurve mutableNameCurve{};
+    mutableNameCurve.filename = mutableCurveName;
+    mutableNameCurve.knotCount = 2;
+    mutableNameCurve.knots[0][0] = 0.0f;
+    mutableNameCurve.knots[0][1] = 1.0f;
+    mutableNameCurve.knots[1][0] = 1.0f;
+    mutableNameCurve.knots[1][1] = 0.0f;
+    XAssetHeader mutableNameHeader{&mutableNameCurve};
+    Load_SndCurveAsset(&mutableNameHeader);
+    assert(mutableNameHeader.sndCurve);
+    mutableCurveName[0] = '\0';
+    assert(std::strcmp(mutableNameHeader.sndCurve->filename,
+        "soundcurves/stable_name") == 0);
+
+    static SndCurve emptyNameCurve{};
+    emptyNameCurve.filename = "";
+    emptyNameCurve.knotCount = 0;
+    XAssetHeader emptyNameHeader{&emptyNameCurve};
+    Load_SndCurveAsset(&emptyNameHeader);
+    assert(emptyNameHeader.sndCurve);
+    assert(std::strcmp(emptyNameHeader.sndCurve->filename, "default") == 0);
+    assert(Com_IsValidSoundAliasVolumeFalloffCurve(
+        emptyNameHeader.sndCurve));
+    assert(emptyNameHeader.sndCurve == DB_FindXAssetHeader(
+        ASSET_TYPE_SOUND_CURVE, "default").sndCurve);
+
     // A higher-priority replacement keeps the pooled primary identity while
     // replacing the repaired body with valid retail curve data.
     g_zones[2].flags = 2;
