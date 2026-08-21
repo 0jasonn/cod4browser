@@ -117,25 +117,8 @@ namespace
 bool s_reportedInvalidFastFileCurve;
 }
 
-static SndCurve *Com_ResolveSelectedSoundAliasCurve(snd_alias_t *alias)
-{
-    SndCurve *defaultCurve = g_sa.volumeFalloffCurves;
-    if (!Com_IsValidSoundAliasVolumeFalloffCurve(defaultCurve))
-    {
-        // Fastfile aliases do not run the load-object curve catalog setup.
-        // Lazily establish the same canonical default storage before fixing
-        // an invalid DB alias pointer.
-        Com_InitDefaultSoundAliasVolumeFalloffCurve(defaultCurve);
-    }
-
-    SndCurve *resolved = Com_ResolveSoundAliasVolumeFalloffCurve(
-        alias->volumeFalloffCurve, defaultCurve);
-    if (resolved != alias->volumeFalloffCurve)
-        Com_ReportInvalidSoundAliasVolumeFalloffCurve(alias);
-    return resolved;
-}
-
-void Com_ReportInvalidSoundAliasVolumeFalloffCurve(const snd_alias_t *alias)
+void Com_ReportInvalidSoundAliasVolumeFalloffCurve(
+    const snd_alias_t *alias, const SndCurve *originalCurve)
 {
     if (s_reportedInvalidFastFileCurve)
         return;
@@ -144,9 +127,8 @@ void Com_ReportInvalidSoundAliasVolumeFalloffCurve(const snd_alias_t *alias)
         "WARNING: sound alias '%s' had an invalid volume falloff curve "
         "(%p, knots=%d); using the canonical default curve\n",
         alias && alias->aliasName ? alias->aliasName : "<unnamed>",
-        alias ? static_cast<void *>(alias->volumeFalloffCurve) : nullptr,
-        alias && alias->volumeFalloffCurve
-            ? alias->volumeFalloffCurve->knotCount : 0);
+        static_cast<const void *>(originalCurve),
+        originalCurve ? originalCurve->knotCount : 0);
 }
 
 void __cdecl Com_InitSoundDevGuiGraphs()
@@ -462,8 +444,6 @@ snd_alias_t *__cdecl Com_PickSoundAliasFromList(snd_alias_list_t *aliasList)
             }
         }
         bestAlias->sequence = maxSequence + 1;
-        bestAlias->volumeFalloffCurve = Com_ResolveSelectedSoundAliasCurve(
-            bestAlias);
         return bestAlias;
     }
     else

@@ -18,8 +18,9 @@
 #include <gfx_d3d/gfx_world_types.h>
 #include <game/g_bsp.h>
 #include <sound/snd_alias_types.h>
-#if defined(KISAK_DB_REGISTRY_LIFECYCLE_SLICE)
-#include <universal/com_sndalias.h>
+#if defined(KISAK_DB_REGISTRY_LIFECYCLE_SLICE) \
+    || defined(KISAK_SOUND_CURVE_PUBLICATION_TEST)
+#include <universal/com_sndalias_curve.h>
 #endif
 #include <ui/ui_asset_types.h>
 #include <xanim/xmodel_types.h>
@@ -554,42 +555,26 @@ void __cdecl Load_snd_alias_list_Asset(XAssetHeader *sound)
         DB_RuntimeGeneratedFailure("publication/null sound alias list");
         return;
     }
+#if defined(KISAK_DB_REGISTRY_LIFECYCLE_SLICE) \
+    || defined(KISAK_SOUND_CURVE_PUBLICATION_TEST)
+    // Repair the incoming canonical alias list before DB_AddXAsset links it.
+    // Valid DB curve identity/data is preserved; malformed pointers resolve
+    // to the same default storage used by load-object aliases.
+    SndCurve *defaultCurve = Com_GetDefaultSoundAliasVolumeFalloffCurve();
+    if (!Com_IsValidSoundAliasVolumeFalloffCurve(defaultCurve))
+        Com_InitDefaultSoundAliasVolumeFalloffCurve(defaultCurve);
+    if (!Com_RepairSoundAliasVolumeFalloffCurves(
+        sound->sound, defaultCurve,
+        Com_ReportInvalidSoundAliasVolumeFalloffCurve))
+    {
+        DB_RuntimeGeneratedFailure("publication/invalid sound alias curves");
+        return;
+    }
+#endif
+
     XAssetHeader published = DB_AddXAsset(ASSET_TYPE_SOUND, *sound);
     if (!published.data) return;
     *sound = published;
-
-#if defined(KISAK_DB_REGISTRY_LIFECYCLE_SLICE)
-    // Fastfile aliases carry their curve pointer in the canonical asset.  Do
-    // this at publication, before any mixer frame can observe the alias; a
-    // malformed/null pointer falls back to the same default storage used by
-    // load-object aliases, while valid DB curve identity is preserved.
-    if (sound->sound->head && sound->sound->count > 0)
-    {
-        for (int index = 0; index < sound->sound->count; ++index)
-        {
-            snd_alias_t &alias = sound->sound->head[index];
-            SndCurve *defaultCurve = Com_GetDefaultSoundAliasVolumeFalloffCurve();
-            if (!Com_IsValidSoundAliasVolumeFalloffCurve(defaultCurve))
-            {
-                Com_InitDefaultSoundAliasVolumeFalloffCurve(defaultCurve);
-            }
-            if (!Com_IsValidSoundAliasVolumeFalloffCurve(
-                alias.volumeFalloffCurve))
-            {
-                Com_ReportInvalidSoundAliasVolumeFalloffCurve(&alias);
-            }
-            alias.volumeFalloffCurve =
-                Com_ResolveSoundAliasVolumeFalloffCurve(
-                    alias.volumeFalloffCurve, defaultCurve);
-            if (!alias.volumeFalloffCurve)
-            {
-                DB_RuntimeGeneratedFailure(
-                    "publication/no valid default SndCurve");
-                return;
-            }
-        }
-    }
-#endif
 }
 
 void __cdecl Load_LoadedSoundAsset(XAssetHeader *loadedSound)

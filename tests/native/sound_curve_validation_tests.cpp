@@ -6,6 +6,15 @@
 
 namespace
 {
+int reportedRepairCount;
+const SndCurve *reportedOriginal;
+
+void ReportRepair(const snd_alias_t *, const SndCurve *originalCurve)
+{
+    ++reportedRepairCount;
+    reportedOriginal = originalCurve;
+}
+
 float EvaluateLinear(const SndCurve &curve, float fraction)
 {
     for (int index = 1; index < curve.knotCount; ++index)
@@ -83,6 +92,20 @@ int main()
     Com_InitDefaultSoundAliasVolumeFalloffCurve(&resetDefault);
     assert(Com_ResolveSoundAliasVolumeFalloffCurve(
         &oneKnot, &resetDefault) == &resetDefault);
+
+    snd_alias_t aliases[2]{};
+    aliases[0].aliasName = "valid_alias";
+    aliases[0].volumeFalloffCurve = &validCurve;
+    aliases[1].aliasName = "malformed_alias";
+    aliases[1].volumeFalloffCurve = &zeroKnots;
+    snd_alias_list_t aliasList{"sound/test", aliases, 2};
+    reportedRepairCount = 0;
+    reportedOriginal = nullptr;
+    assert(Com_RepairSoundAliasVolumeFalloffCurves(
+        &aliasList, &defaultCurve, ReportRepair));
+    assert(aliases[0].volumeFalloffCurve == &validCurve);
+    assert(aliases[1].volumeFalloffCurve == &defaultCurve);
+    assert(reportedRepairCount == 1 && reportedOriginal == &zeroKnots);
 
     return 0;
 }

@@ -210,6 +210,8 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
         "${KISAK_REPOSITORY_ROOT}/src/database/db_memory.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_registry_pools.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_registry_publication.cpp"
+        "${CMAKE_CURRENT_LIST_DIR}/sound_curve_publication_test_stubs.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/universal/com_sndalias_curve.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_stream.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_stream_load.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_stringtable_load.cpp"
@@ -218,7 +220,8 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
     target_include_directories(gate3_db_stream_trace_tests PRIVATE
         "${KISAK_REPOSITORY_ROOT}/src" "${KISAK_REPOSITORY_ROOT}/deps")
     target_compile_definitions(gate3_db_stream_trace_tests PRIVATE
-        KISAK_SP=1 KISAK_DB_SYNC_FILE_TEST=1 KISAK_DB_POOL_STANDALONE=1 dNODEBUG=1)
+        KISAK_SP=1 KISAK_DB_SYNC_FILE_TEST=1 KISAK_DB_POOL_STANDALONE=1
+        KISAK_SOUND_CURVE_PUBLICATION_TEST=1 dNODEBUG=1)
     if (MSVC)
         target_compile_definitions(gate3_db_stream_trace_tests PRIVATE WIN32=1)
         target_compile_options(gate3_db_stream_trace_tests PRIVATE /UNDEBUG)

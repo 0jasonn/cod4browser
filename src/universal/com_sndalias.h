@@ -195,7 +195,8 @@ struct SoundAliasLoadGlobals // sizeof=0x1894
 
 double __cdecl Com_GetVolumeFalloffCurveValue(SndCurve *volumeFalloffCurve, float fraction);
 SndCurve *__cdecl Com_GetDefaultSoundAliasVolumeFalloffCurve();
-void Com_ReportInvalidSoundAliasVolumeFalloffCurve(const snd_alias_t *alias);
+void Com_ReportInvalidSoundAliasVolumeFalloffCurve(
+    const snd_alias_t *alias, const SndCurve *originalCurve);
 void __cdecl Com_InitSoundDevGuiGraphs();
 void __cdecl Com_VolumeFalloffCurveGraphEventCallback(const DevGraph *graph, DevEventType event, int i);
 void Com_InitSoundDevGuiGraphs_FastFile();

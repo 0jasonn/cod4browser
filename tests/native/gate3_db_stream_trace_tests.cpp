@@ -26,6 +26,7 @@
 #include <xanim/xanim_types.h>
 #include <xanim/xsurface_types.h>
 #include <universal/physicalmemory.h>
+#include <universal/com_sndalias_curve.h>
 #include <web/web_database_filesystem.h>
 
 #include <zlib/zlib.h>
@@ -2919,7 +2920,17 @@ int main()
         .filename.info.raw.dir, "sound") == 0);
     assert(std::strcmp(publishedSound.sound->head[0].soundFile->u.streamSnd
         .filename.info.raw.name, "gate3.wav") == 0);
+#if defined(KISAK_SOUND_CURVE_PUBLICATION_TEST)
+    SndCurve *publishedDefaultCurve =
+        Com_GetDefaultSoundAliasVolumeFalloffCurve();
+    assert(publishedSound.sound->head[0].volumeFalloffCurve
+        == publishedDefaultCurve);
+    assert(Com_IsValidSoundAliasVolumeFalloffCurve(publishedDefaultCurve));
+    // DB_FindXAssetHeader observes the repaired pointer; no selection-time
+    // mutation is involved.
+#else
     assert(!publishedSound.sound->head[0].volumeFalloffCurve);
+#endif
     assert(publishedSound.sound->head[0].speakerMap &&
         std::strcmp(publishedSound.sound->head[0].speakerMap->name,
             "speaker/gate3") == 0);

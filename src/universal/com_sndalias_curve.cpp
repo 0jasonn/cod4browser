@@ -47,3 +47,28 @@ SndCurve *Com_ResolveSoundAliasVolumeFalloffCurve(
     return Com_IsValidSoundAliasVolumeFalloffCurve(defaultCurve)
         ? defaultCurve : nullptr;
 }
+
+bool Com_RepairSoundAliasVolumeFalloffCurves(
+    snd_alias_list_t *aliasList, SndCurve *defaultCurve,
+    SoundAliasCurveRepairReporter reporter)
+{
+    if (!aliasList)
+        return false;
+    if (aliasList->count < 0 || (aliasList->count > 0 && !aliasList->head))
+        return false;
+    if (!Com_IsValidSoundAliasVolumeFalloffCurve(defaultCurve))
+        return false;
+
+    for (int index = 0; index < aliasList->count; ++index)
+    {
+        snd_alias_t &alias = aliasList->head[index];
+        SndCurve *originalCurve = alias.volumeFalloffCurve;
+        if (!Com_IsValidSoundAliasVolumeFalloffCurve(originalCurve))
+        {
+            if (reporter)
+                reporter(&alias, originalCurve);
+            alias.volumeFalloffCurve = defaultCurve;
+        }
+    }
+    return true;
+}

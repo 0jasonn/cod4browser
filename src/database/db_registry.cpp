@@ -584,26 +584,16 @@ void __cdecl Mark_GfxImageAsset(GfxImage *image)
 
 void __cdecl Load_snd_alias_list_Asset(XAssetHeader *sound)
 {
-    sound->xmodelPieces = DB_AddXAsset(ASSET_TYPE_SOUND, (XAssetHeader)sound->xmodelPieces).xmodelPieces;
-
-    if (sound && sound->sound && sound->sound->head && sound->sound->count > 0)
+    SndCurve *defaultCurve = Com_GetDefaultSoundAliasVolumeFalloffCurve();
+    if (!Com_IsValidSoundAliasVolumeFalloffCurve(defaultCurve))
+        Com_InitDefaultSoundAliasVolumeFalloffCurve(defaultCurve);
+    if (!Com_RepairSoundAliasVolumeFalloffCurves(
+        sound->sound, defaultCurve,
+        Com_ReportInvalidSoundAliasVolumeFalloffCurve))
     {
-        for (int index = 0; index < sound->sound->count; ++index)
-        {
-            snd_alias_t &alias = sound->sound->head[index];
-            SndCurve *defaultCurve = Com_GetDefaultSoundAliasVolumeFalloffCurve();
-            if (!Com_IsValidSoundAliasVolumeFalloffCurve(defaultCurve))
-                Com_InitDefaultSoundAliasVolumeFalloffCurve(defaultCurve);
-            if (!Com_IsValidSoundAliasVolumeFalloffCurve(
-                alias.volumeFalloffCurve))
-            {
-                Com_ReportInvalidSoundAliasVolumeFalloffCurve(&alias);
-            }
-            alias.volumeFalloffCurve =
-                Com_ResolveSoundAliasVolumeFalloffCurve(
-                    alias.volumeFalloffCurve, defaultCurve);
-        }
+        return;
     }
+    sound->xmodelPieces = DB_AddXAsset(ASSET_TYPE_SOUND, (XAssetHeader)sound->xmodelPieces).xmodelPieces;
 }
 
 void __cdecl Mark_snd_alias_list_Asset(snd_alias_list_t *sound)
