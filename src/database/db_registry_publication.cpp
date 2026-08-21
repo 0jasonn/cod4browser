@@ -437,6 +437,46 @@ XAssetEntryPoolEntry *FindDefaultEntry(XAssetType type, const char *name,
     return releasedFallback;
 }
 
+XAssetEntryPoolEntry *CreateDefaultEntry(XAssetType type, const char *name)
+{
+    if (!name || !name[0] || type < 0 || type >= ASSET_TYPE_COUNT ||
+        type == ASSET_TYPE_LOCALIZE_ENTRY || type == ASSET_TYPE_RAWFILE ||
+        !g_defaultAssetName[type][0] || DB_IsSingletonAssetPool(type))
+        return nullptr;
+
+    // Native DB_FindXAssetHeader materializes a named zone-0 default when a
+    // dependency is encountered before its real asset.  WeaponDef sound
+    // fields rely on that stable placeholder: a later sound publication can
+    // promote into the same pooled header without leaving the weapon's
+    // pointer stale.  Resolve the default through the normal hash chain so
+    // overrides retain their native precedence.
+    const std::array<bool, ASSET_TYPE_COUNT> noReleasedZones{};
+    XAssetEntryPoolEntry *defaultEntry = FindDefaultEntry(
+        type, g_defaultAssetName[type], noReleasedZones, nullptr);
+    if (!defaultEntry || !defaultEntry->entry.asset.header.data)
+        return nullptr;
+
+    XAssetEntryPoolEntry *entry = AllocAssetEntry(type, 0);
+    if (!entry)
+    {
+        DB_RuntimeGeneratedFailure("publication/default asset allocation");
+        return nullptr;
+    }
+    CloneAsset(defaultEntry->entry.asset, entry->entry.asset);
+    if (type == ASSET_TYPE_SOUND)
+    {
+        entry->entry.asset.header.sound->count = 0;
+        entry->entry.asset.header.sound->head = nullptr;
+    }
+    SetAssetName(entry->entry.asset, name);
+    const std::uint32_t hash = DB_HashForNameCanonical(name, type);
+    entry->entry.nextHash = db_hashTable[hash];
+    db_hashTable[hash] = static_cast<std::uint16_t>(entry - g_assetEntryPool);
+    entry->entry.inuse = true;
+    ++g_defaultAssetCount;
+    return entry;
+}
+
 bool IsReleasedZone(std::uint16_t zoneIndex,
     const std::array<bool, ASSET_TYPE_COUNT> &releaseZone)
 {
@@ -1226,7 +1266,11 @@ void __cdecl Load_LocalizeEntryAsset(XAssetHeader *localize)
 XAssetHeader __cdecl DB_FindXAssetHeader(XAssetType type, const char *name)
 {
     XAssetEntryPoolEntry *entry = DB_FindXAssetEntryCanonical(type, name);
-    if (!entry) return XAssetHeader{};
+    if (!entry)
+    {
+        entry = CreateDefaultEntry(type, name);
+        return entry ? entry->entry.asset.header : XAssetHeader{};
+    }
     entry->entry.inuse = true;
     return entry->entry.asset.header;
 }

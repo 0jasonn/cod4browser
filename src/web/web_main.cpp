@@ -307,6 +307,13 @@ CooperativeTaskResult CGameFrameTask(
     Cbuf_Execute(0, CL_ControllerIndexFromClientNum(0));
     CL_Frame(0, frameMilliseconds);
     SCR_UpdateScreen();
+    // Native SCR_UpdateFrame updates sound on non-cgame screens.  The web
+    // renderer reports every active SP frame as refreshed UI, so that native
+    // branch is never reached while gameplay is running.  Keep the canonical
+    // CL_UpdateSound pump at the existing frame boundary for active cgame
+    // frames; this also reconciles pause state and resumes delayed channels.
+    if (CL_IsCGameRendering() && !CL_SkipRendering())
+        CL_UpdateSound();
     ++activeFrameCount;
     if (activeFrameCount == 1u || activeFrameCount == 120u)
     {

@@ -4899,6 +4899,41 @@ int main()
     assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_SOUND_CURVE) ==
         freeCurvesAfterReplacement);
 
+    // WeaponDef may resolve a sound dependency before the real alias zone is
+    // published. Native DB_FindXAssetHeader creates a named zone-0 default
+    // in that case, and later publication promotes the real alias in place.
+    Reset({});
+    static snd_alias_list_t defaultSound{};
+    defaultSound.aliasName = "null";
+    g_zoneIndex = 0;
+    const snd_alias_list_t *publishedDefaultSound = DB_AddXAsset(
+        ASSET_TYPE_SOUND, {&defaultSound}).sound;
+    assert(publishedDefaultSound);
+    DB_SetLoadingZoneIndex(1);
+    const snd_alias_list_t *placeholderSound = DB_FindXAssetHeader(
+        ASSET_TYPE_SOUND, "sound/weapon_pending").sound;
+    assert(placeholderSound && placeholderSound != publishedDefaultSound);
+    assert(placeholderSound->count == 0 && placeholderSound->head == nullptr);
+    XAssetEntryPoolEntry *placeholderEntry = DB_FindXAssetEntryCanonical(
+        ASSET_TYPE_SOUND, "sound/weapon_pending");
+    assert(placeholderEntry && placeholderEntry->entry.zoneIndex == 0 &&
+        placeholderEntry->entry.inuse);
+    static snd_alias_t publishedWeaponAlias{};
+    publishedWeaponAlias.aliasName = "sound/weapon_pending";
+    static snd_alias_list_t publishedWeaponSound{};
+    publishedWeaponSound.aliasName = "sound/weapon_pending";
+    publishedWeaponSound.count = 1;
+    publishedWeaponSound.head = &publishedWeaponAlias;
+    const snd_alias_list_t *promotedWeaponSound = DB_AddXAsset(
+        ASSET_TYPE_SOUND, {&publishedWeaponSound}).sound;
+    assert(promotedWeaponSound == placeholderSound);
+    assert(promotedWeaponSound->count == 1 &&
+        promotedWeaponSound->head == &publishedWeaponAlias);
+    assert(!DB_FindXAssetHeader(ASSET_TYPE_LOCALIZE_ENTRY,
+        "localize/missing").data);
+    assert(!DB_FindXAssetHeader(ASSET_TYPE_RAWFILE,
+        "rawfile/missing").data);
+
     std::printf("gate3-db-stream rawfile=published physpreset=published xmodel=published weapon=published xanim=published stringtable=published technique-set=published material=published image=published water=loaded sound-curve=published sound-alias=published loaded-sound=published font=published fx=published impact-fx=published comworld=published gfxworld=published light-def=published menu=published menu-list=published snddriver=canonical-noop localize=published insert=-2 alias=block4:16 technique=block4:36 direct-xstring=block4:18 technique-children=block0:0,block4:251 material-children=block0:0,block4:248 sound-curve-children=block0:0,block4:38 sound-alias-children=block0:0,block4:586 loaded-sound-children=block0:0,block4:44 font-children=block0:0,block4:80 fx-children=block0:0,block4:502 impact-fx-children=block0:0,block4:1640 comworld-children=block0:0,block4:204 gfxworld-children=block0:0,block1:0,block4:248 light-def-children=block0:0,block4:59 menu-children=block0:0,block4:880 localize-children=block0:0,block4:51 image-entry=16 material-entry=17 sound-curve-entry=16 sound-alias-entry=16 loaded-sound-entry=16 font-entry=16 fx-entry=16 impact-fx-entry=17 comworld-entry=16 gfxworld-entry=16 light-def-entry=17 menu-entry=16 menu-list-entry=17 localize-entry=16 free=32752->32750 zone=1 stop=code-post-complete\n");
     return 0;
 }
