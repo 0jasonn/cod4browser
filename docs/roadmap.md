@@ -44,10 +44,11 @@ Any task that cannot satisfy these invariants stops for architectural review.
 
 ## Current runtime boundary
 
-Baseline: `e57331ba` (accepted FX archive Wasm ABI correction). The renderer,
-audio, input, and FX hardening commits documented below are included in the
-accepted runtime history. The current tip adds roadmap/build-list hygiene
-only and does not change runtime behavior.
+Baseline: `f706d307` (canonical collision/common-world shutdown before web
+asset release). The accepted runtime history also includes `d671f4e7` for
+freeFlags unload/mark/promotion/default/removal and zone compaction,
+`ec9b3ddd` for malformed SndCurve body repair at publication, and `ac9c7682`
+for stable interned curve names plus empty identity -> canonical `default`.
 
 The browser production target currently compiles and runs the canonical
 single-player filesystem, database, startup-zone loading, map loading,
@@ -103,34 +104,37 @@ The gameplay event chain is farther along than its presentation:
   transition proof remains pending.
 - `e57331ba` corrected the FX archive callback ABI for Wasm, so archive names
   and canonical keys are serialized from the actual `XAssetHeader` rather than
-  an incompatible aggregate-by-value callback. Local Chrome then validated a
-  first Killhouse load, movement, mouse look/aim, firing and reload reachability,
-  canonical FX code-mesh/XModel/particle-cloud evidence, and a `loadgame`
-  cycle. Weapon/impact audio outcome proof remains pending.
+  an incompatible aggregate-by-value callback. The subsequent lifecycle fixes
+  are `d671f4e7`, `ec9b3ddd`, `ac9c7682`, and `f706d307` as listed above.
+  Production Release Chrome now completes fresh `map killhouse`, a second
+  `map killhouse` at `resourceGeneration=5`, `loadgame autosave/killhouse`,
+  and a third `map killhouse` at `resourceGeneration=7` without aborting;
+  each reaches canonical cgame/refdef with 8064 surfaces, 431747 vertices,
+  and 793188 indices. After restart, F equips the real G36C with viewhands and
+  HUD, movement changes the player origin, mouse input changes `viewForward`,
+  five fire inputs retain `FxCodeMesh` (4 batches/40 vertices/60 indices,
+  `,gfx_smk_white_atlas`) and `FxXModel` (`fx_wood_splinter01`,
+  `mc/mtl_fx_wood_splinter`), and `r` reaches the canonical automatic reload
+  animation. Audio evidence contains only UI aliases; retail weapon/fire,
+  reload, and impact sound proof remains pending.
 
 Therefore the active boundary is **canonical fire/impact events, sprite/beam
 code meshes, rigid FX XModels, and particle clouds reaching WebGL2 plus a
-verified canonical LoadedSound-to-Web-Audio device path, with a retail
-fire/impact integration proof still required**.
+verified canonical LoadedSound-to-Web-Audio device path, with retail weapon
+and impact audio still the highest-value blocker**. Weapon-switch
+presentation, continuous pointer lock, enemy damage, F.N.G., and campaign
+behavior remain unproven.
 
 ### Restart lifecycle boundary
 
-The first Killhouse load and the validated `loadgame` path are distinct from a
-subsequent `map`/`devmap killhouse`. After shutdown/re-initialization, the
-second map currently reaches DevGui with an invalid primary `SndCurve` (empty
-path and zero knots) and aborts. A direct native-like freeFlags unload attempt
-invalidated shared startup/UI Menu and MenuList pointers because the required
-inuse/default preservation is missing; that implementation was not retained.
-A later experiment classified zones by the freeFlags value used by their
-original load request, which would have exempted startup/UI assets, but that
-browser-only ownership metadata also was rejected and is not current code.
-
-Native repair requires the complete `DB_FindXAssetHeader` usage marking,
-`DB_ReleaseXAssets`, `DB_UnloadXZone(zone, createDefault=true)`, stable-primary
-override promotion, `Mark_XAsset` relocation/copy handling, per-asset removal
-handlers, and published per-type default assets. The web registry does not yet
-provide that lifecycle for Menu/MenuList and SndCurve dependencies, so repeat
-map stability is an architecture-review blocker rather than a claimed fix.
+The restart boundary is now converged through `f706d307`: web
+`Com_Restart` shuts down `ComWorld` and collision before
+`DB_ReleaseXAssets`, preserving the native owner/removal-hook order. The
+accepted DB/SndCurve lifecycle fixes above preserve stable primary identity,
+valid default bodies, dependency marking, and replacement zone ownership.
+The production Release Chrome sequence documented above proves fresh map,
+repeat map, loadgame, and a third map remain non-aborted. No browser-only
+historical-freeFlags ownership classification is retained.
 
 ## Active milestone: playable Killhouse / F.N.G. combat loop
 
@@ -142,14 +146,14 @@ retail-asset browser run:
 | Spawn | Reached on Killhouse | game/server | Retain regression evidence; prove on F.N.G. |
 | Move | Reached | input/client/game | Retain focused browser proof |
 | Aim / ADS | Reached | input/cgame | Retain focused browser proof |
-| Fire and ammo consumption | Chrome proves Mouse1 reaches canonical fire and sustained input consumes ammo; full integration evidence remains pending | game/cgame | Trace event, ammo delta, recoil, and frame continuity |
-| Muzzle flash / brass | Canonical FX code-mesh and rigid FX XModel consumption implemented; retail visibility proof pending | cgame/FX/renderer | Observe real fire event, effect definition, retained sprite/model batches, and draws |
+| Fire and ammo consumption | Chrome proves Mouse1 reaches canonical fire and sustained input consumes ammo after restart | game/cgame | Retain recoil/frame evidence; prove target interaction |
+| Muzzle flash / brass | Five real fire inputs retain canonical `FxCodeMesh` and `FxXModel` batches with real material/model identities; final visible muzzle/brass proof remains pending | cgame/FX/renderer | Observe expected weapon effect definitions and draws |
 | Bullet impact | Canonical trace/event/impact-table and FX renderer paths present; end-to-end result unproven | game/cgame/FX/renderer | Prove surface-dependent impact FX; audio follows the platform decision |
 | Smoke / particle clouds | Canonical EffectsCore cloud slots and portable batches implemented; retail visibility proof pending | FX/renderer | Observe a real cloud effect and measure CPU expansion before broad performance work |
-| Weapon sound | Canonical loaded-sound bridge is implemented and lifecycle-tested; retail fire alias proof pending | cgame/audio/platform | Observe one real `WeaponDef` alias through channel selection, PCM upload, gesture-unlocked playback, and completion |
+| Weapon sound | Browser audio evidence contains only UI aliases; retail weapon/fire, reload, and impact alias proof is pending | cgame/audio/platform | Observe one real `WeaponDef` alias through channel selection, PCM upload, gesture-unlocked playback, and completion |
 | Reload | Chrome proves an empty magazine enters the canonical automatic reload animation; manual reload/audio transition proof remains pending | input/game/cgame/audio | Exercise manual and automatic reload state, ammo, viewmodel, and audio transitions |
-| Weapon switching | Fresh profiles reach canonical `weapnext`/`weapprev`; retail presentation proof pending | input/game/cgame | Exercise both directions and observe canonical inventory/viewmodel transition |
-| Basic combat interaction | Real bullet/game systems compiled; target damage/death/AI response unproven | game/script/cgame | Use real entities in F.N.G. or campaign content; no synthetic browser targets |
+| Weapon switching | Fresh profiles reach canonical `weapnext`/`weapprev`; retail presentation remains unproven | input/game/cgame | Exercise both directions and observe canonical inventory/viewmodel transition |
+| Basic combat interaction | Real bullet/game systems compiled; enemy damage/death/AI response unproven | game/script/cgame | Use real entities in F.N.G. or campaign content; no synthetic browser targets |
 
 ### Ordered work queue
 
