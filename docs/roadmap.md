@@ -44,9 +44,9 @@ Any task that cannot satisfy these invariants stops for architectural review.
 
 ## Current runtime boundary
 
-Baseline: `b45df61e` (`Harden browser binding regression coverage`), following
-the implementation commit `bf3dd93b` (`Expose canonical reload and weapon
-cycle bindings`).
+Baseline: `2d3c9f10` (`Enable FX model regression assertions`), following the
+rigid FX XModel implementation and hardening commits `5d49dbe1`, `86c2efbb`,
+and `29f49b09`.
 
 The browser production target currently compiles and runs the canonical
 single-player filesystem, database, startup-zone loading, map loading,
@@ -69,6 +69,13 @@ The gameplay event chain is farther along than its presentation:
   vertex RGBA, order, alpha blend, and depth state. This closes the prior
   discarded-geometry boundary; a retail run must still prove the expected
   muzzle/impact definitions are spawned and visible.
+- `R_FilterXModelIntoScene` now retains canonical rigid XModel placements for
+  ejected-brass/debris-style FX elements. The renderer selects a deterministic
+  view-distance LOD, transforms the canonical XSurface once, and appends
+  `FxXModel` batches between dynamic DObjs and code meshes. Invalid, deformed,
+  over-limit, or allocation-failed optional model effects are bounded drops;
+  they cannot abort the frame, displace canonical code meshes, or leave stale
+  backend scene data. Skinned/deformed FX models remain a compatibility gap.
 - canonical sound assets, aliases, 53-channel selection, playback IDs,
   attenuation, pitch/volume, and LoadedSound PCM remain Worker-owned. A
   KISAK_WEB OpenAL-compatible proxy now transfers bounded PCM/device commands
@@ -85,9 +92,10 @@ The gameplay event chain is farther along than its presentation:
   the key pulses cross the host boundary. Retail ammo/animation/viewmodel
   transition proof remains pending.
 
-Therefore the active boundary is **canonical fire/impact events and canonical
-FX geometry reaching WebGL2 plus a verified canonical LoadedSound-to-Web-Audio
-device path, with a retail fire/impact integration proof still required**.
+Therefore the active boundary is **canonical fire/impact events, sprite/beam
+code meshes, and rigid FX XModels reaching WebGL2 plus a verified canonical
+LoadedSound-to-Web-Audio device path, with a retail fire/impact integration
+proof still required**.
 
 ## Active milestone: playable Killhouse / F.N.G. combat loop
 
@@ -100,7 +108,7 @@ retail-asset browser run:
 | Move | Reached | input/client/game | Retain focused browser proof |
 | Aim / ADS | Reached | input/cgame | Retain focused browser proof |
 | Fire and ammo consumption | Canonical path reached; end-to-end behavior needs explicit evidence | game/cgame | Trace event, ammo delta, recoil, and frame continuity |
-| Muzzle flash / brass | Canonical FX code-mesh consumption implemented; retail visibility proof pending | cgame/FX/renderer | Observe real fire event, effect definition, retained FX batch, and draw |
+| Muzzle flash / brass | Canonical FX code-mesh and rigid FX XModel consumption implemented; retail visibility proof pending | cgame/FX/renderer | Observe real fire event, effect definition, retained sprite/model batches, and draws |
 | Bullet impact | Canonical trace/event/impact-table and FX renderer paths present; end-to-end result unproven | game/cgame/FX/renderer | Prove surface-dependent impact FX; audio follows the platform decision |
 | Weapon sound | Canonical loaded-sound bridge is implemented and lifecycle-tested; retail fire alias proof pending | cgame/audio/platform | Observe one real `WeaponDef` alias through channel selection, PCM upload, gesture-unlocked playback, and completion |
 | Reload | Fresh profiles reach canonical `+reload`; retail state/animation/audio proof pending | input/game/cgame/audio | Exercise empty/partial reload and observe canonical ammo/state transitions |
@@ -119,17 +127,23 @@ retail-asset browser run:
    `7b02d1b0`. Native x64, direct Wasm, focused browser bridge, exact boot, and
    qcommon lifecycle checks pass. A retail run must still trace one real fire
    alias from `WeaponDef` through `SND_PlaySoundAlias` to audible playback.
-3. **Fire/impact integration proof** — add focused browser observability that
+3. **Rigid FX XModel rendering** — implemented in `5d49dbe1`, compatibility
+   hardened in `86c2efbb` and `29f49b09`, and made assertion-authoritative in
+   `2d3c9f10`. Canonical placements, XModel/XSurface/Material identities,
+   deterministic LOD, transforms, ordering, and failure-atomic admission are
+   covered in native x64 and direct Wasm tests. Retail brass/debris visibility
+   remains part of integration proof; deformed/skinned effects are not faked.
+4. **Fire/impact integration proof** — add focused browser observability that
    proves one trigger causes canonical server/cgame fire, recoil/ammo change,
    visible muzzle FX, a collision result, and an impact effect without owning
    any of those states in browser code.
-4. **Reload and weapon switching** — default browser reachability implemented
+5. **Reload and weapon switching** — default browser reachability implemented
    in `bf3dd93b` and regression-hardened in `b45df61e`. Native x64, direct Wasm,
    focused browser input, production build, and exact boot checks pass. Retail
    state, ammo, animation, viewmodel, and audio proof remains.
-5. **Basic combat interaction** — prove damage, reaction, death, and script/AI
+6. **Basic combat interaction** — prove damage, reaction, death, and script/AI
    notification against real map entities.
-6. **F.N.G. parity pass** — load F.N.G., record the first blocker by subsystem,
+7. **F.N.G. parity pass** — load F.N.G., record the first blocker by subsystem,
    fix the narrowest reusable runtime gap, and repeat until the same combat
    acceptance set passes.
 
@@ -265,6 +279,7 @@ Stop autonomous implementation when:
 | Complete | Canonical FX code-mesh renderer closure | `41c6c8a5`, `b5d2c76e` | Retail muzzle/impact visibility proof; models/clouds/marks remain later FX families |
 | Complete | Browser loaded-sound platform bridge | `38ffcc88`, `7b02d1b0`; native/Wasm/browser lifecycle evidence | Retail weapon/impact alias proof; streaming/reverb later |
 | Complete | Reload and weapon-cycle input reachability | `bf3dd93b`, `b45df61e`; native/Wasm/browser boundary evidence | Retail state/animation/viewmodel/audio proof |
+| Complete | Canonical rigid FX XModel renderer closure | `5d49dbe1`, `86c2efbb`, `29f49b09`, `2d3c9f10`; assertion-enabled native x64/direct Wasm tests, production Release build, exact WebGL2 boot | Retail brass/debris visibility proof; deformed/skinned FX models, clouds, marks, and decals remain |
 | Active | Playable Killhouse/F.N.G. combat loop | FX renderer, loaded-sound device, and combat-input closures accepted | Retail fire/impact/reload/switch proof and combat interaction |
 | Pending | Recognizable COD4 presentation | — | Materials, remaining images, FX breadth, sky/fog |
 | Pending | Multiple maps and first campaign mission | — | Unknown until F.N.G./campaign probes |
