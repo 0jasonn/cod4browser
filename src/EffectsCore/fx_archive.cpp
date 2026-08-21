@@ -1,90 +1,12 @@
 #include <universal/q_shared.h>
 #include "fx_system.h"
+#include "fx_archive_callbacks.h"
 
 #include <database/database.h>
-#include <database/db_registry_pools.h>
-#include <database/db_registry_publication.h>
 
 #include <physics/phys_local.h>
 
-#include <cctype>
 #include <cstdint>
-#include <cstring>
-
-namespace
-{
-bool FX_IsDiagnosticNameSane(const char *name)
-{
-    if (!name || !*name)
-        return false;
-    for (std::size_t index = 0; index < 128u; ++index)
-    {
-        const unsigned char value = static_cast<unsigned char>(name[index]);
-        if (!value)
-            return true;
-        if (!std::isprint(value))
-            return false;
-    }
-    return false;
-}
-
-std::uint32_t g_fxSaveNameDiagnostics = 0u;
-
-struct FxRegistryDiagnostic
-{
-    std::uint32_t entryIndex = 0;
-    std::uint32_t hashBucket = 0;
-    std::uint32_t zoneIndex = 0;
-    bool inuse = false;
-    std::uint32_t poolIndex = UINT32_MAX;
-    std::uint32_t nameZone = UINT32_MAX;
-    std::uint32_t nameBlock = UINT32_MAX;
-    std::uint32_t nameOffset = 0;
-};
-
-FxRegistryDiagnostic FX_FindRegistryDiagnostic(const FxEffectDef *effectDef)
-{
-    if (!effectDef) return {};
-    for (std::uint32_t bucket = 0; bucket < 0x8000u; ++bucket)
-    {
-        for (std::uint32_t index = db_hashTable[bucket]; index;
-             index = g_assetEntryPool[index].entry.nextHash)
-        {
-            const XAssetEntry &entry = g_assetEntryPool[index].entry;
-            if (entry.asset.type == ASSET_TYPE_FX &&
-                entry.asset.header.fx == effectDef)
-            {
-                FxRegistryDiagnostic result{index, bucket, entry.zoneIndex,
-                    entry.inuse, DB_GetAssetPoolIndex(ASSET_TYPE_FX,
-                        entry.asset.header), UINT32_MAX, UINT32_MAX, 0};
-                const std::uintptr_t nameAddress =
-                    reinterpret_cast<std::uintptr_t>(effectDef->name);
-                for (std::uint32_t zone = 0; zone < ASSET_TYPE_COUNT; ++zone)
-                {
-                    for (std::uint32_t block = 0; block < 9; ++block)
-                    {
-                        const XBlock &candidate = g_zones[zone].mem.blocks[block];
-                        if (!candidate.data || !candidate.size) continue;
-                        const std::uintptr_t begin =
-                            reinterpret_cast<std::uintptr_t>(candidate.data);
-                        const std::uintptr_t end = begin + candidate.size;
-                        if (nameAddress >= begin && nameAddress < end)
-                        {
-                            result.nameZone = zone;
-                            result.nameBlock = block;
-                            result.nameOffset = static_cast<std::uint32_t>(
-                                nameAddress - begin);
-                            return result;
-                        }
-                    }
-                }
-                return result;
-            }
-        }
-    }
-    return {};
-}
-}
 
 void __cdecl FX_Restore(int32_t clientIndex, MemoryFile *memFile)
 {
@@ -308,41 +230,40 @@ void __cdecl FX_SaveEffectDefTable(FxSystem *system, MemoryFile *memFile)
     MemFile_WriteCString(memFile, "");
 }
 
-void __cdecl FX_SaveEffectDefTableEntry_FileLoadObj(const FxEffectDef* effectDef, MemoryFile* data)
+void __cdecl FX_SaveEffectDefTableEntry_FileLoadObj(
+    const FxEffectDef *effectDef, MemoryFile *data)
 {
     const FxEffectDef* p; // [esp+0h] [ebp-4h] BYREF
 
-    if (!FX_IsDiagnosticNameSane(effectDef ? effectDef->name : nullptr) &&
-        g_fxSaveNameDiagnostics++ < 4u)
-    {
-        std::uint32_t key = 0u;
-        const FxRegistryDiagnostic registry =
-            FX_FindRegistryDiagnostic(effectDef);
-        std::memcpy(&key, &effectDef, sizeof(key));
-        Com_PrintWarning(21,
-            "FX_SaveEffectDefTable: malformed effect name at %p name %p key "
-            "0x%08x pool %u entry %u bucket %u zone %u inuse %u nameZone "
-            "%u block %u offset %u\n",
-            effectDef, effectDef ? effectDef->name : nullptr, key,
-            registry.poolIndex, registry.entryIndex, registry.hashBucket,
-            registry.zoneIndex, registry.inuse ? 1u : 0u, registry.nameZone,
-            registry.nameBlock, registry.nameOffset);
-    }
     MemFile_WriteCString(data, (char*)effectDef->name);
     p = effectDef;
     MemFile_WriteData(data, 4, &p);
 }
 
+void __cdecl FX_SaveEffectDefTableEntry_Callback(
+    const FxEffectDef *effectDef, void *data)
+{
+    FX_SaveEffectDefTableEntry_FileLoadObj(
+        effectDef, static_cast<MemoryFile *>(data));
+}
+
+void __cdecl FX_SaveEffectDefTableEntry_XAsset(
+    XAssetHeader header, void *data)
+{
+    FX_ArchiveDispatchEffectDefAsset(
+        header, data, FX_SaveEffectDefTableEntry_Callback);
+}
+
 void __cdecl FX_SaveEffectDefTable_LoadObj(MemoryFile* memFile)
 {
-    FX_ForEachEffectDef((void(__cdecl*)(const FxEffectDef*, void*))FX_SaveEffectDefTableEntry_FileLoadObj, memFile);
+    FX_ForEachEffectDef(FX_SaveEffectDefTableEntry_Callback, memFile);
 }
 
 void __cdecl FX_SaveEffectDefTable_FastFile(MemoryFile *memFile)
 {
     DB_EnumXAssets(
         ASSET_TYPE_FX,
-        (void(__cdecl *)(XAssetHeader, void *))FX_SaveEffectDefTableEntry_FileLoadObj,
+        FX_SaveEffectDefTableEntry_XAsset,
         memFile,
         0);
 }
