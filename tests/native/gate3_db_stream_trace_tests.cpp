@@ -2097,6 +2097,10 @@ void Run(const std::vector<std::uint8_t> &file, XZoneMemory &zone)
 } // namespace
 
 WebDatabaseFile WebDatabaseFS_Open(const char *) { return 0; }
+void __cdecl PMem_Free(const char *, std::uint32_t) {}
+void __cdecl CM_Unload() {}
+void __cdecl Com_UnloadWorld() {}
+void __cdecl R_UnloadWorld() {}
 std::int64_t WebDatabaseFS_Size(WebDatabaseFile) { return static_cast<std::int64_t>(g_file.size()); }
 bool WebDatabaseFS_Seek(WebDatabaseFile, std::uint32_t offset)
 {
@@ -4529,6 +4533,300 @@ int main()
     Run(generated, zone);
     assert(g_trace.publicationEnd && g_trace.cleanupComplete);
     assert(std::strcmp(g_trace.stopStage, "Load_XAssetHeader/next-family-closure") == 0);
+
+    // DB_Find marks only the requested root. Dependency marking is deferred
+    // to the native unload mark walk, so a live sound can protect a curve in
+    // another zone without making every lookup recursively in-use.
+    Reset({});
+    std::strncpy(g_zones[1].name, "sound-primary", sizeof(g_zones[1].name));
+    g_zones[1].flags = 8;
+    std::strncpy(g_zones[2].name, "sound-dependency", sizeof(g_zones[2].name));
+    g_zones[2].flags = 2;
+    static SndCurve dependencyCurve{};
+    dependencyCurve.filename = "curve/dependency";
+    dependencyCurve.knotCount = 2;
+    dependencyCurve.knots[0][0] = 0.0f;
+    dependencyCurve.knots[0][1] = 1.0f;
+    dependencyCurve.knots[1][0] = 1.0f;
+    dependencyCurve.knots[1][1] = 0.0f;
+    DB_SetLoadingZoneIndex(2);
+    const SndCurve *publishedDependencyCurve =
+        DB_AddXAsset(ASSET_TYPE_SOUND_CURVE, {&dependencyCurve}).sndCurve;
+    assert(publishedDependencyCurve);
+    static snd_alias_t dependencyAlias{};
+    dependencyAlias.volumeFalloffCurve = const_cast<SndCurve *>(
+        publishedDependencyCurve);
+    static snd_alias_list_t dependencySound{};
+    dependencySound.aliasName = "sound/dependency";
+    dependencySound.count = 1;
+    dependencySound.head = &dependencyAlias;
+    DB_SetLoadingZoneIndex(1);
+    assert(DB_AddXAsset(ASSET_TYPE_SOUND, {&dependencySound}).sound);
+    XAssetEntryPoolEntry *dependencyEntry = DB_FindXAssetEntryCanonical(
+        ASSET_TYPE_SOUND_CURVE, "curve/dependency");
+    XAssetEntryPoolEntry *rootEntry = DB_FindXAssetEntryCanonical(
+        ASSET_TYPE_SOUND, "sound/dependency");
+    assert(dependencyEntry && rootEntry && !dependencyEntry->entry.inuse &&
+        !rootEntry->entry.inuse);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_SOUND, "sound/dependency").sound);
+    assert(rootEntry->entry.inuse && !dependencyEntry->entry.inuse);
+    const SndCurve *dependencyIdentity =
+        dependencyEntry->entry.asset.header.sndCurve;
+    assert(dependencyIdentity && dependencyIdentity != &dependencyCurve);
+    const std::uint32_t dependencyFreeBefore =
+        DB_GetAssetPoolFreeCount(ASSET_TYPE_SOUND_CURVE);
+    DB_UnloadXZonesForFreeFlags(8);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_SOUND, "sound/dependency").data == nullptr);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_SOUND_CURVE,
+        "curve/dependency").sndCurve == dependencyIdentity);
+    assert(dependencyEntry->entry.inuse);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_SOUND_CURVE) ==
+        dependencyFreeBefore);
+
+    // Menu promotion uses the native dynamic-clone step: the stable primary
+    // keeps its window/item focus state while the replacement body is copied.
+    Reset({});
+    std::strncpy(g_zones[1].name, "menu-primary", sizeof(g_zones[1].name));
+    g_zones[1].flags = 8;
+    std::strncpy(g_zones[2].name, "menu-override", sizeof(g_zones[2].name));
+    g_zones[2].flags = 2;
+    static itemDef_s oldMenuItem{};
+    static itemDef_s newMenuItem{};
+    oldMenuItem.window.name = "menu-item";
+    oldMenuItem.window.dynamicFlags[0] = 7;
+    newMenuItem.window.name = "menu-item";
+    newMenuItem.window.dynamicFlags[0] = 0x40;
+    static itemDef_s *oldMenuItems[] = {&oldMenuItem};
+    static itemDef_s *newMenuItems[] = {&newMenuItem};
+    static menuDef_t oldMenu{};
+    static menuDef_t newMenu{};
+    oldMenu.window.name = "menu/dynamic";
+    oldMenu.window.dynamicFlags[0] = 7;
+    oldMenu.itemCount = 1;
+    oldMenu.items = oldMenuItems;
+    newMenu.window.name = "menu/dynamic";
+    newMenu.window.dynamicFlags[0] = 0x40;
+    newMenu.itemCount = 1;
+    newMenu.items = newMenuItems;
+    DB_SetLoadingZoneIndex(1);
+    const menuDef_t *menuIdentity =
+        DB_AddXAsset(ASSET_TYPE_MENU, {&oldMenu}).menu;
+    assert(menuIdentity);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_MENU,
+        "menu/dynamic").menu == menuIdentity);
+    DB_SetLoadingZoneIndex(2);
+    assert(DB_AddXAsset(ASSET_TYPE_MENU, {&newMenu}).menu);
+    DB_UnloadXZonesForFreeFlags(8);
+    const menuDef_t *promotedMenu = DB_FindXAssetHeader(
+        ASSET_TYPE_MENU, "menu/dynamic").menu;
+    assert(promotedMenu == menuIdentity);
+    assert(promotedMenu->window.dynamicFlags[0] == 7);
+    assert(promotedMenu->items[0]->window.dynamicFlags[0] == 5);
+
+    // The MenuList -> Menu -> Material/Sound -> SndCurve graph is marked only
+    // when the in-use root is retired, matching native DB_UnloadXZone.
+    Reset({});
+    std::strncpy(g_zones[1].name, "menu-root", sizeof(g_zones[1].name));
+    g_zones[1].flags = 8;
+    std::strncpy(g_zones[2].name, "menu-dependencies", sizeof(g_zones[2].name));
+    g_zones[2].flags = 2;
+    static SndCurve menuCurve{};
+    menuCurve.filename = "curve/menu-dependency";
+    menuCurve.knotCount = 2;
+    menuCurve.knots[0][1] = 1.0f;
+    menuCurve.knots[1][0] = 1.0f;
+    DB_SetLoadingZoneIndex(2);
+    const SndCurve *publishedMenuCurve = DB_AddXAsset(
+        ASSET_TYPE_SOUND_CURVE, {&menuCurve}).sndCurve;
+    static snd_alias_t menuSoundAlias{};
+    menuSoundAlias.volumeFalloffCurve = const_cast<SndCurve *>(
+        publishedMenuCurve);
+    static snd_alias_list_t menuSound{};
+    menuSound.aliasName = "sound/menu-dependency";
+    menuSound.count = 1;
+    menuSound.head = &menuSoundAlias;
+    const snd_alias_list_t *publishedMenuSound = DB_AddXAsset(
+        ASSET_TYPE_SOUND, {&menuSound}).sound;
+    static Material menuMaterial{};
+    menuMaterial.info.name = "material/menu-dependency";
+    const Material *publishedMenuMaterial = DB_AddXAsset(
+        ASSET_TYPE_MATERIAL, {&menuMaterial}).material;
+    assert(publishedMenuCurve && publishedMenuSound && publishedMenuMaterial);
+    static itemDef_s dependencyItem{};
+    dependencyItem.window.name = "dependency-item";
+    dependencyItem.window.background = const_cast<Material *>(
+        publishedMenuMaterial);
+    dependencyItem.focusSound = const_cast<snd_alias_list_t *>(
+        publishedMenuSound);
+    static itemDef_s *dependencyItems[] = {&dependencyItem};
+    static menuDef_t dependencyMenu{};
+    dependencyMenu.window.name = "menu/dependency";
+    dependencyMenu.itemCount = 1;
+    dependencyMenu.items = dependencyItems;
+    dependencyMenu.window.background = const_cast<Material *>(
+        publishedMenuMaterial);
+    DB_SetLoadingZoneIndex(1);
+    const menuDef_t *publishedDependencyMenu = DB_AddXAsset(
+        ASSET_TYPE_MENU, {&dependencyMenu}).menu;
+    static menuDef_t *dependencyMenus[] = {
+        const_cast<menuDef_t *>(publishedDependencyMenu)};
+    static MenuList dependencyMenuList{};
+    dependencyMenuList.name = "menus/dependency";
+    dependencyMenuList.menuCount = 1;
+    dependencyMenuList.menus = dependencyMenus;
+    assert(DB_AddXAsset(ASSET_TYPE_MENULIST,
+        {&dependencyMenuList}).menuList);
+    XAssetEntryPoolEntry *menuRootEntry = DB_FindXAssetEntryCanonical(
+        ASSET_TYPE_MENULIST, "menus/dependency");
+    XAssetEntryPoolEntry *menuDependencyEntry = DB_FindXAssetEntryCanonical(
+        ASSET_TYPE_MENU, "menu/dependency");
+    XAssetEntryPoolEntry *menuMaterialEntry = DB_FindXAssetEntryCanonical(
+        ASSET_TYPE_MATERIAL, "material/menu-dependency");
+    XAssetEntryPoolEntry *menuSoundEntry = DB_FindXAssetEntryCanonical(
+        ASSET_TYPE_SOUND, "sound/menu-dependency");
+    XAssetEntryPoolEntry *menuCurveEntry = DB_FindXAssetEntryCanonical(
+        ASSET_TYPE_SOUND_CURVE, "curve/menu-dependency");
+    assert(menuRootEntry && menuDependencyEntry && menuMaterialEntry &&
+        menuSoundEntry && menuCurveEntry);
+    assert(!menuRootEntry->entry.inuse && !menuDependencyEntry->entry.inuse &&
+        !menuMaterialEntry->entry.inuse && !menuSoundEntry->entry.inuse &&
+        !menuCurveEntry->entry.inuse);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_MENULIST,
+        "menus/dependency").menuList);
+    assert(menuRootEntry->entry.inuse && !menuDependencyEntry->entry.inuse);
+    const MenuList *retainedDependencyList = DB_FindXAssetHeader(
+        ASSET_TYPE_MENULIST, "menus/dependency").menuList;
+    assert(retainedDependencyList->menus[0] == publishedDependencyMenu);
+    DB_UnloadXZonesForFreeFlags(8);
+    assert(menuMaterialEntry->entry.inuse && menuSoundEntry->entry.inuse &&
+        menuCurveEntry->entry.inuse);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_MATERIAL,
+        "material/menu-dependency").material);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_SOUND,
+        "sound/menu-dependency").sound);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_SOUND_CURVE,
+        "curve/menu-dependency").sndCurve);
+
+    // A surviving zone-backed root is traversed even before first lookup;
+    // otherwise its released-zone dependency would become a stale pointer.
+    Reset({});
+    std::strncpy(g_zones[1].name, "retained-dependency", sizeof(g_zones[1].name));
+    g_zones[1].flags = 8;
+    std::strncpy(g_zones[2].name, "retained-root", sizeof(g_zones[2].name));
+    g_zones[2].flags = 2;
+    static SndCurve retainedCurve{};
+    retainedCurve.filename = "curve/retained";
+    retainedCurve.knotCount = 2;
+    DB_SetLoadingZoneIndex(1);
+    const SndCurve *publishedRetainedCurve = DB_AddXAsset(
+        ASSET_TYPE_SOUND_CURVE, {&retainedCurve}).sndCurve;
+    static SndCurve retainedDefault{};
+    retainedDefault.filename = "default";
+    retainedDefault.knotCount = 2;
+    retainedDefault.knots[1][0] = 1.0f;
+    DB_SetLoadingZoneIndex(2);
+    assert(DB_AddXAsset(ASSET_TYPE_SOUND_CURVE,
+        {&retainedDefault}).sndCurve);
+    static snd_alias_t retainedAlias{};
+    retainedAlias.volumeFalloffCurve = const_cast<SndCurve *>(
+        publishedRetainedCurve);
+    static snd_alias_list_t retainedSound{};
+    retainedSound.aliasName = "sound/retained";
+    retainedSound.count = 1;
+    retainedSound.head = &retainedAlias;
+    DB_SetLoadingZoneIndex(2);
+    assert(DB_AddXAsset(ASSET_TYPE_SOUND, {&retainedSound}).sound);
+    XAssetEntryPoolEntry *retainedCurveEntry = DB_FindXAssetEntryCanonical(
+        ASSET_TYPE_SOUND_CURVE, "curve/retained");
+    XAssetEntryPoolEntry *retainedRootEntry = DB_FindXAssetEntryCanonical(
+        ASSET_TYPE_SOUND, "sound/retained");
+    assert(retainedCurveEntry && retainedRootEntry &&
+        !retainedCurveEntry->entry.inuse && !retainedRootEntry->entry.inuse);
+    DB_UnloadXZonesForFreeFlags(8);
+    assert(retainedCurveEntry->entry.inuse);
+    const XAssetHeader retainedAfterUnload = DB_FindXAssetHeader(
+        ASSET_TYPE_SOUND_CURVE, "curve/retained");
+    assert(retainedAfterUnload.sndCurve == publishedRetainedCurve);
+    assert(retainedAfterUnload.sndCurve->knotCount == 2);
+    assert(std::strcmp(retainedAfterUnload.sndCurve->filename,
+        "curve/retained") == 0);
+
+    // Native unload keeps the pooled primary address while replacing a live
+    // zone asset with the published per-type default. A later same-name load
+    // must overwrite that default in place rather than creating a default
+    // override.
+    Reset(sndCurveInsertAlias);
+    std::strncpy(g_zones[1].name, "map-one", sizeof(g_zones[1].name));
+    g_zones[1].flags = 8;
+    DB_SetLoadingZoneIndex(1);
+    RunPrepared(zone);
+    const XAssetHeader curveBefore = DB_FindXAssetHeader(
+        ASSET_TYPE_SOUND_CURVE, "soundcurves/gate3");
+    assert(curveBefore.sndCurve && curveBefore.sndCurve->knotCount == 3);
+    const std::uintptr_t curveIdentity =
+        reinterpret_cast<std::uintptr_t>(curveBefore.sndCurve);
+
+    static SndCurve defaultCurve{};
+    defaultCurve.filename = "default";
+    defaultCurve.knotCount = 2;
+    defaultCurve.knots[0][0] = 0.0f;
+    defaultCurve.knots[0][1] = 1.0f;
+    defaultCurve.knots[1][0] = 1.0f;
+    defaultCurve.knots[1][1] = 0.0f;
+    std::strncpy(g_zones[2].name, "code-post", sizeof(g_zones[2].name));
+    g_zones[2].flags = 2;
+    DB_SetLoadingZoneIndex(2);
+    DB_AddXAsset(ASSET_TYPE_SOUND_CURVE, {&defaultCurve});
+    static SndCurve lowerDefaultCurve{};
+    lowerDefaultCurve.filename = "default";
+    lowerDefaultCurve.knotCount = 4;
+    std::strncpy(g_zones[5].name, "code-lower", sizeof(g_zones[5].name));
+    g_zones[5].flags = 1;
+    DB_SetLoadingZoneIndex(5);
+    DB_AddXAsset(ASSET_TYPE_SOUND_CURVE, {&lowerDefaultCurve});
+
+    DB_UnloadXZonesForFreeFlags(8);
+    const XAssetHeader fallbackCurve = DB_FindXAssetHeader(
+        ASSET_TYPE_SOUND_CURVE, "soundcurves/gate3");
+    assert(reinterpret_cast<std::uintptr_t>(fallbackCurve.sndCurve) ==
+        curveIdentity);
+    assert(fallbackCurve.sndCurve->knotCount == 4);
+    assert(std::strcmp(fallbackCurve.sndCurve->filename,
+        "soundcurves/gate3") == 0);
+    assert(g_zones[1].name[0] == '\0');
+
+    std::strncpy(g_zones[3].name, "map-two", sizeof(g_zones[3].name));
+    g_zones[3].flags = 8;
+    DB_SetLoadingZoneIndex(3);
+    g_filePosition = 0;
+    RunPrepared(zone);
+    const XAssetHeader curveReplacement = DB_FindXAssetHeader(
+        ASSET_TYPE_SOUND_CURVE, "soundcurves/gate3");
+    assert(reinterpret_cast<std::uintptr_t>(curveReplacement.sndCurve) ==
+        curveIdentity);
+    assert(curveReplacement.sndCurve->knotCount == 3);
+    assert(DB_FindXAssetEntryCanonical(
+        ASSET_TYPE_SOUND_CURVE, "soundcurves/gate3")->entry.nextOverride == 0);
+    const std::uint32_t freeEntriesAfterReplacement =
+        DB_GetFreeAssetEntryCount();
+    const std::uint32_t freeCurvesAfterReplacement =
+        DB_GetAssetPoolFreeCount(ASSET_TYPE_SOUND_CURVE);
+    DB_UnloadXZonesForFreeFlags(8);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_SOUND_CURVE,
+        "soundcurves/gate3").sndCurve->knotCount == 4);
+    std::strncpy(g_zones[4].name, "map-three", sizeof(g_zones[4].name));
+    g_zones[4].flags = 8;
+    DB_SetLoadingZoneIndex(4);
+    g_filePosition = 0;
+    RunPrepared(zone);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_SOUND_CURVE,
+        "soundcurves/gate3").sndCurve->knotCount == 3);
+    DB_UnloadXZonesForFreeFlags(8);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_SOUND_CURVE,
+        "soundcurves/gate3").sndCurve->knotCount == 4);
+    assert(DB_GetFreeAssetEntryCount() == freeEntriesAfterReplacement);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_SOUND_CURVE) ==
+        freeCurvesAfterReplacement);
 
     std::printf("gate3-db-stream rawfile=published physpreset=published xmodel=published weapon=published xanim=published stringtable=published technique-set=published material=published image=published water=loaded sound-curve=published sound-alias=published loaded-sound=published font=published fx=published impact-fx=published comworld=published gfxworld=published light-def=published menu=published menu-list=published snddriver=canonical-noop localize=published insert=-2 alias=block4:16 technique=block4:36 direct-xstring=block4:18 technique-children=block0:0,block4:251 material-children=block0:0,block4:248 sound-curve-children=block0:0,block4:38 sound-alias-children=block0:0,block4:586 loaded-sound-children=block0:0,block4:44 font-children=block0:0,block4:80 fx-children=block0:0,block4:502 impact-fx-children=block0:0,block4:1640 comworld-children=block0:0,block4:204 gfxworld-children=block0:0,block1:0,block4:248 light-def-children=block0:0,block4:59 menu-children=block0:0,block4:880 localize-children=block0:0,block4:51 image-entry=16 material-entry=17 sound-curve-entry=16 sound-alias-entry=16 loaded-sound-entry=16 font-entry=16 fx-entry=16 impact-fx-entry=17 comworld-entry=16 gfxworld-entry=16 light-def-entry=17 menu-entry=16 menu-list-entry=17 localize-entry=16 free=32752->32750 zone=1 stop=code-post-complete\n");
     return 0;

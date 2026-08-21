@@ -218,6 +218,7 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
         "${KISAK_REPOSITORY_ROOT}/src/database/db_memory.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_registry_pools.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_registry_publication.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_assetnames.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/sound_curve_publication_test_stubs.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/universal/com_sndalias_curve.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_stream.cpp"

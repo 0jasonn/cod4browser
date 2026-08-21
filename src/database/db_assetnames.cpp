@@ -1,12 +1,28 @@
 #include <universal/q_shared.h>
 #include "database.h"
 #include <game/g_bsp.h>
+#include <bgame/weapon_types.h>
+#include <EffectsCore/fx_types.h>
+#include <database/localize_types.h>
+#include <gfx_d3d/gfx_image_types.h>
+#include <gfx_d3d/gfx_light_types.h>
+#include <gfx_d3d/material_types.h>
+#include <gfx_d3d/r_font.h>
+#include <physics/phys_preset.h>
+#include <qcommon/com_world_types.h>
+#include <qcommon/cm_types.h>
+#include <gfx_d3d/gfx_world_types.h>
+#include <sound/snd_alias_types.h>
+#include <ui/ui_asset_types.h>
+#include <xanim/xmodel_types.h>
+#include <xanim/xmodel.h>
+#include <xanim/xanim_types.h>
 
 //int32_t marker_db_assetnames 828ddeec     db_assetnames.obj
 
-const char *__cdecl DB_StringTableGetName(const XAssetHeader *header);
-const char *__cdecl DB_LocalizeEntryGetName(const XAssetHeader *header);
-const char *__cdecl DB_ImageGetName(const XAssetHeader *header);
+static const char *__cdecl DB_StringTableGetName(const XAssetHeader *header);
+static const char *__cdecl DB_LocalizeEntryGetName(const XAssetHeader *header);
+static const char *__cdecl DB_ImageGetName(const XAssetHeader *header);
 
 const char *(__cdecl *DB_XAssetGetNameHandler[33])(const XAssetHeader *) =
 {
@@ -46,9 +62,9 @@ const char *(__cdecl *DB_XAssetGetNameHandler[33])(const XAssetHeader *) =
     DB_StringTableGetName
 };
 
-void __cdecl DB_StringTableSetName(XAssetHeader *header, const char *name);
-void __cdecl DB_ImageSetName(XAssetHeader *header, const char *name);
-void __cdecl DB_LocalizeEntrySetName(XAssetHeader *header, const char *name);
+static void __cdecl DB_StringTableSetName(XAssetHeader *header, const char *name);
+static void __cdecl DB_ImageSetName(XAssetHeader *header, const char *name);
+static void __cdecl DB_LocalizeEntrySetName(XAssetHeader *header, const char *name);
 
 void(__cdecl *DB_XAssetSetNameHandler[33])(XAssetHeader *, const char *) =
 {
@@ -268,10 +284,12 @@ int32_t __cdecl DB_GetXAssetTypeSize(int32_t type)
     return DB_GetXAssetSizeHandler[type]();
 }
 
+#if !defined(KISAK_DB_REGISTRY_LIFECYCLE_SLICE)
 const char *__cdecl DB_GetXAssetTypeName(uint32_t type)
 {
     if (type > 0x20)
         MyAssertHandler(".\\database\\db_assetnames.cpp", 621, 0, "%s", "type >= 0 && type < ASSET_TYPE_COUNT");
     return g_assetNames[type];
 }
+#endif
 

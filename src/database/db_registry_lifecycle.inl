@@ -58,6 +58,20 @@ bool g_databaseThreadEntered = false;
 alignas(16) std::array<std::uint8_t, 0x80000> g_fileBuf{};
 cmd_function_s DB_LoadZone_f_VAR{};
 
+void CompactReleasedZoneHandles()
+{
+    std::int32_t writeIndex = 0;
+    for (std::int32_t readIndex = 0; readIndex < g_zoneCount; ++readIndex)
+    {
+        const std::uint8_t handle = g_zoneHandles[readIndex];
+        if (handle && g_zones[handle].name[0])
+            g_zoneHandles[writeIndex++] = handle;
+    }
+    for (std::int32_t index = writeIndex; index < g_zoneCount; ++index)
+        g_zoneHandles[index] = 0;
+    g_zoneCount = writeIndex;
+}
+
 void DB_BuildOSPath(const char *zoneName, std::uint32_t size, char *filename)
 {
     DB_PlatformBuildZonePath(zoneName, size, filename);
@@ -288,9 +302,18 @@ void __cdecl DB_LoadXAssets(
         Cmd_AddCommandInternal("loadzone", DB_LoadZone_f, &DB_LoadZone_f_VAR);
     }
 
-    // Browser SP has no previously loaded zone in this slice, so the native
-    // renderer/archive/unload branch has no work. Keep its ownership gated
-    // until those engine subsystems compile rather than substituting behavior.
+    // Match native DB_LoadXAssets: retire all zones selected by the incoming
+    // freeFlags mask before queuing replacement files.  Publication keeps
+    // live primary header identity and promotes defaults/overrides at this
+    // boundary; request history is not used as ownership metadata.
+    for (std::uint32_t index = 0; index < zoneCount; ++index)
+        if (zoneInfo[index].name)
+            DB_UnloadXZonesForFreeFlags(zoneInfo[index].freeFlags);
+    CompactReleasedZoneHandles();
+
+    // The web client can retain startup/UI and map zones across repeated map
+    // requests. Their canonical publication/unload work is complete before
+    // this replacement queue is entered; no browser-side zone policy is used.
     g_sync = sync;
     DB_LoadXZone(zoneInfo, zoneCount);
     if (sync) Sys_SyncDatabase();

@@ -2171,6 +2171,43 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
     return WebRendererSurfaceResult::Success;
 }
 
+// Canonical DB unload calls this native renderer hook before retiring a
+// GfxWorld. The web backend keeps the same invariant by dropping the retained
+// world command and its GPU objects; the next map publication re-submits it.
+void __cdecl R_UnloadWorld()
+{
+    if (g_renderer.initialized && !g_renderer.contextLost)
+    {
+        DeleteWorldTextureObjects(g_renderer.retainedWorldImages);
+        DeleteSurfaceObjects(
+            g_renderer.vertexArray, g_renderer.vertexBuffer,
+            g_renderer.indexBuffer);
+    }
+    g_renderer.vertexArray = 0u;
+    g_renderer.vertexBuffer = 0u;
+    g_renderer.indexBuffer = 0u;
+    g_renderer.retainedVertices.clear();
+    g_renderer.retainedIndices.clear();
+    g_renderer.retainedWorldIndices.clear();
+    g_renderer.retainedWorldBatches.clear();
+    g_renderer.retainedWorldImages.clear();
+    g_renderer.surfaceActive = false;
+    g_renderer.worldSurfaceActive = false;
+    g_renderer.sceneViewActive = false;
+    g_renderer.sceneViewGeometrySubmitted = false;
+    g_renderer.sceneViewWorldName.clear();
+    g_renderer.sceneViewSurfaceCount = 0u;
+    g_renderer.sceneViewVertexCount = 0u;
+    g_renderer.sceneViewIndexCount = 0u;
+    g_renderer.sceneViewSurfaceSubmissionGeneration = 0u;
+    g_renderer.sceneViewDrawnSubmissionGeneration = 0u;
+    g_renderer.sceneViewFirstDrawCompleted = false;
+    g_renderer.sceneViewX = 0u;
+    g_renderer.sceneViewY = 0u;
+    g_renderer.sceneViewWidth = 0u;
+    g_renderer.sceneViewHeight = 0u;
+}
+
 WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
     const WebRendererStaticModelSceneDesc &scene)
 {
