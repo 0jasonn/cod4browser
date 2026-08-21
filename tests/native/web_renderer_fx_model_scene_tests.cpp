@@ -232,6 +232,20 @@ void TestFailureLeavesDestinationUntouched()
     assert(command.vertices.size() == originalVertices.size());
     assert(std::memcmp(command.vertices.data(), originalVertices.data(),
         command.vertices.size() * sizeof(WebRendererSurfaceVertex)) == 0);
+
+    Fixture twoSurface;
+    Fixture validLater;
+    twoSurface.surfaces[1].deformed = true;
+    const WebRendererFxModelSubmission mixed[2] = {
+        Submission(twoSurface), Submission(validLater)};
+    dropped = 0u;
+    assert(WebRenderer_BuildFxModelSceneCommand(mixed, 2u, command,
+        &dropped) == WebRendererFxModelSceneResult::Success);
+    assert(dropped == 1u);
+    assert(command.modelCount == 1u);
+    assert(command.surfaceCount == 1u);
+    assert(command.batches.size() == 1u);
+    assert(command.batches[0].modelIdentity == &validLater.model);
 }
 
 void TestRetainCopyOverflowAndClear()
@@ -262,7 +276,7 @@ void TestRetainCopyOverflowAndClear()
         &fixture.model, &placement, 0u) ==
         WebRendererFxModelRetainResult::LimitReached);
     assert(count == WEB_RENDERER_MAX_FX_MODEL_SUBMISSIONS);
-    count = 0u;
+    WebRenderer_ClearFxModelSubmissions(&count);
     assert(count == 0u);
 }
 
@@ -296,10 +310,29 @@ void TestAtomicCompositionAndOutputLimits()
     assert(batches[1].sourceKind == WebRendererSceneBatchKind::FxXModel);
     assert(batches[2].sourceKind == WebRendererSceneBatchKind::FxXModel);
     assert(surfaceCount == 3u);
+    assert(WebRenderer_ValidateFxModelAdmissionCounts(
+        1u, 1u, 1u, 1u, 6u, 6u, 2u, 2u, 3u, 3u, 1u, 1u) ==
+        WebRendererFxModelAppendResult::Success);
+    vertices.resize(10u);
     const std::size_t codeMeshIndexBase = indices.size();
-    indices.push_back(static_cast<std::uint32_t>(vertices.size() - 1u));
+    indices.insert(indices.end(), {7u, 8u, 9u});
+    WebRendererWorldBatchDesc codeMeshBatch{};
+    codeMeshBatch.firstIndex = static_cast<std::uint32_t>(codeMeshIndexBase);
+    codeMeshBatch.indexCount = 3u;
+    codeMeshBatch.sourceKind = WebRendererSceneBatchKind::FxCodeMesh;
+    batches.push_back(codeMeshBatch);
+    ++surfaceCount;
     assert(codeMeshIndexBase == 7u);
-    assert(indices.back() >= codeMeshIndexBase - 1u);
+    assert(batches.size() == 4u);
+    assert(batches[3].firstIndex == 7u);
+    assert(batches[3].sourceKind == WebRendererSceneBatchKind::FxCodeMesh);
+    assert(indices[7] == 7u && indices[8] == 8u && indices[9] == 9u);
+    assert(surfaceCount == 4u);
+
+    assert(WebRenderer_ValidateFxModelAdmissionCounts(
+        WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES - 3u, 0u, 0u, 0u,
+        2u, 0u, 0u, 0u, 2u, 0u, 0u, 0u) ==
+        WebRendererFxModelAppendResult::OutputTooLarge);
 
     const auto originalVertices = vertices;
     const auto originalIndices = indices;

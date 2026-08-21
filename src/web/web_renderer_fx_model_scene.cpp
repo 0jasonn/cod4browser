@@ -168,6 +168,11 @@ WebRendererFxModelRetainResult WebRenderer_RetainFxModelSubmission(
     return WebRendererFxModelRetainResult::Accepted;
 }
 
+void WebRenderer_ClearFxModelSubmissions(std::uint32_t *count) noexcept
+{
+    if (count) *count = 0u;
+}
+
 int WebRenderer_SelectFxModelLod(
     const XModel *model, const GfxScaledPlacement &placement,
     const float viewOrigin[3]) noexcept
@@ -233,10 +238,12 @@ WebRendererFxModelSceneResult WebRenderer_BuildFxModelSceneCommand(
             const std::size_t submissionVertexStart = replacement.vertices.size();
             const std::size_t submissionIndexStart = replacement.indices.size();
             const std::size_t submissionBatchStart = replacement.batches.size();
+            const std::uint32_t submissionSurfaceStart = replacement.surfaceCount;
             const auto rollbackSubmission = [&]() {
                 replacement.vertices.resize(submissionVertexStart);
                 replacement.indices.resize(submissionIndexStart);
                 replacement.batches.resize(submissionBatchStart);
+                replacement.surfaceCount = submissionSurfaceStart;
             };
             const auto dropAndRollback = [&]() {
                 rollbackSubmission();
@@ -387,6 +394,47 @@ WebRendererFxModelAppendResult WebRenderer_ValidateFxModelAppendCounts(
         destinationBatchCount > WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES -
             sourceBatchCount ||
         destinationSurfaceCount > UINT32_MAX - sourceSurfaceCount)
+    {
+        return WebRendererFxModelAppendResult::OutputTooLarge;
+    }
+    return WebRendererFxModelAppendResult::Success;
+}
+
+WebRendererFxModelAppendResult WebRenderer_ValidateFxModelAdmissionCounts(
+    std::size_t destinationVertexCount,
+    std::size_t destinationIndexCount,
+    std::size_t destinationBatchCount,
+    std::uint32_t destinationSurfaceCount,
+    std::size_t fxVertexCount,
+    std::size_t fxIndexCount,
+    std::size_t fxBatchCount,
+    std::uint32_t fxSurfaceCount,
+    std::size_t codeMeshVertexCount,
+    std::size_t codeMeshIndexCount,
+    std::size_t codeMeshBatchCount,
+    std::uint32_t codeMeshSurfaceCount) noexcept
+{
+    if (fxVertexCount > WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES ||
+        fxIndexCount > WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES ||
+        fxBatchCount > WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES ||
+        codeMeshVertexCount > WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES ||
+        codeMeshIndexCount > WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES ||
+        codeMeshBatchCount > WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES ||
+        destinationVertexCount > WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES -
+            fxVertexCount ||
+        destinationVertexCount + fxVertexCount >
+            WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES - codeMeshVertexCount ||
+        destinationIndexCount > WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES -
+            fxIndexCount ||
+        destinationIndexCount + fxIndexCount >
+            WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES - codeMeshIndexCount ||
+        destinationBatchCount > WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES -
+            fxBatchCount ||
+        destinationBatchCount + fxBatchCount >
+            WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES - codeMeshBatchCount ||
+        destinationSurfaceCount > UINT32_MAX - fxSurfaceCount ||
+        destinationSurfaceCount + fxSurfaceCount >
+            UINT32_MAX - codeMeshSurfaceCount)
     {
         return WebRendererFxModelAppendResult::OutputTooLarge;
     }

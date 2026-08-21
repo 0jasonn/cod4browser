@@ -589,7 +589,7 @@ std::uint32_t __cdecl R_GetLocalClientNum() { return 0; }
 void __cdecl R_ClearScene(std::uint32_t)
 {
     g_dobjSubmissionCount = 0u;
-    g_fxModelSubmissionCount = 0u;
+    WebRenderer_ClearFxModelSubmissions(&g_fxModelSubmissionCount);
 }
 
 void __cdecl R_InitSceneData(int localClientNum)
@@ -1045,16 +1045,23 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     // thresholds from active refdef distance, scaled by placement, as the
     // deterministic rigid FX compatibility subset.
     std::uint32_t selectedFxModels = 0u;
+    std::uint32_t droppedFxSelections = 0u;
     for (std::uint32_t index = 0u; index < g_fxModelSubmissionCount; ++index)
     {
         WebRendererFxModelSubmission submission = g_fxModelSubmissions[index];
         const int lod = WebRenderer_SelectFxModelLod(
             submission.model, submission.placement, refdef->vieworg);
-        if (lod < 0) continue;
+        if (lod < 0)
+        {
+            if (droppedFxSelections != UINT32_MAX) ++droppedFxSelections;
+            continue;
+        }
         submission.lod = static_cast<std::uint16_t>(lod);
         g_fxModelSubmissions[selectedFxModels++] = submission;
     }
     g_fxModelSubmissionCount = selectedFxModels;
+    if (droppedFxSelections != 0u)
+        R_WarnOncePerFrame(R_WARN_UNKNOWN_XMODEL_SHADER);
 
     WebRendererFxModelSceneCommand fxModelCommand;
     std::uint32_t droppedFxModels = 0u;
@@ -1083,13 +1090,29 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         WebRendererFxModelSceneResult::Success;
     if (hasFxModel)
     {
-        const WebRendererFxModelAppendResult appendResult =
-            WebRenderer_AppendFxModelSceneCommand(
+        const WebRendererFxModelAppendResult admission =
+            WebRenderer_ValidateFxModelAdmissionCounts(
+                dynamicCommand.vertices.size(),
+                dynamicCommand.indices.size(),
+                dynamicCommand.batches.size(),
+                dynamicCommand.surfaceCount,
+                fxModelCommand.vertices.size(),
+                fxModelCommand.indices.size(),
+                fxModelCommand.batches.size(),
+                fxModelCommand.surfaceCount,
+                g_codeMeshRenderVertices.size(),
+                g_codeMeshRenderIndices.size(),
+                g_codeMeshRenderBatches.size(),
+                static_cast<std::uint32_t>(g_codeMeshRenderBatches.size()));
+        const WebRendererFxModelAppendResult appendResult = admission ==
+            WebRendererFxModelAppendResult::Success
+            ? WebRenderer_AppendFxModelSceneCommand(
                 fxModelCommand,
                 dynamicCommand.vertices,
                 dynamicCommand.indices,
                 dynamicCommand.batches,
-                dynamicCommand.surfaceCount);
+                dynamicCommand.surfaceCount)
+            : admission;
         if (appendResult != WebRendererFxModelAppendResult::Success)
         {
             R_WarnOncePerFrame(R_WARN_MAX_SCENE_MODEL_REFS);

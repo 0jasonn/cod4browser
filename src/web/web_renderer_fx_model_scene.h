@@ -41,6 +41,8 @@ WebRendererFxModelRetainResult WebRenderer_RetainFxModelSubmission(
     const GfxScaledPlacement *placement,
     std::uint16_t lod) noexcept;
 
+void WebRenderer_ClearFxModelSubmissions(std::uint32_t *count) noexcept;
+
 struct WebRendererFxModelSceneCommand
 {
     std::vector<WebRendererSurfaceVertex> vertices;
@@ -80,6 +82,20 @@ WebRendererFxModelAppendResult WebRenderer_ValidateFxModelAppendCounts(
     std::size_t destinationIndexCount,
     std::size_t destinationBatchCount,
     std::uint32_t destinationSurfaceCount) noexcept;
+
+WebRendererFxModelAppendResult WebRenderer_ValidateFxModelAdmissionCounts(
+    std::size_t destinationVertexCount,
+    std::size_t destinationIndexCount,
+    std::size_t destinationBatchCount,
+    std::uint32_t destinationSurfaceCount,
+    std::size_t fxVertexCount,
+    std::size_t fxIndexCount,
+    std::size_t fxBatchCount,
+    std::uint32_t fxSurfaceCount,
+    std::size_t codeMeshVertexCount,
+    std::size_t codeMeshIndexCount,
+    std::size_t codeMeshBatchCount,
+    std::uint32_t codeMeshSurfaceCount) noexcept;
 
 WebRendererFxModelSceneResult WebRenderer_BuildFxModelSceneCommand(
     const WebRendererFxModelSubmission *submissions,
