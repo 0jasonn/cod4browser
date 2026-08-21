@@ -49,6 +49,7 @@ test("Worker-hosted canonical DB streams an XFile into PMem and stops at generat
         current: structuredClone(globalThis.__databaseEvents.findLast(
             (event) => event.stage === "DB stop" &&
                 event.logicalPath === "zone/english/code_post_gfx.ff")),
+        runtime: structuredClone(globalThis.__KISAKCOD_WEB__.database),
         events: structuredClone(globalThis.__databaseEvents),
         domEvidence: JSON.parse(document.querySelector(
             "#database-evidence").textContent),
@@ -133,7 +134,7 @@ test("Worker-hosted canonical DB streams an XFile into PMem and stops at generat
         "XFile cleanup",
         "DB stop",
     ]));
-    expect(result.domEvidence).toEqual(result.current);
+    expect(result.domEvidence).toEqual(result.runtime);
     expect(result.events.some((event) =>
         /(?:[a-z]:\\|users[/\\]|opfs|indexeddb|[0-9a-f]{8}-[0-9a-f]{4}-4)/iu
             .test(event.logicalPath))).toBe(false);
