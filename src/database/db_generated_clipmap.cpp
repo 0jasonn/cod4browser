@@ -1,6 +1,7 @@
 #include <universal/q_shared.h>
 #include <database/database.h>
 #include <database/db_generated_loaders.h>
+#include <database/db_registry_publication.h>
 #include <database/db_runtime_prefix.h>
 #include <DynEntity/DynEntity_client.h>
 #include <qcommon/cm_types.h>
@@ -423,6 +424,26 @@ void __cdecl Load_clipMap_ptr(bool atStreamStart)
         {
             DB_ConvertOffsetToAlias(reinterpret_cast<std::uint32_t *>(
                 varclipMap_ptr));
+            // A top-level XAsset can legally alias a ClipMap loaded by an
+            // earlier stream. Native DB state already has an entry for that
+            // alias, but a web zone replacement may have retired the entry
+            // while the canonical pointer remains reachable. Rebind the
+            // existing engine-owned singleton only when the name has no
+            // registry entry; existing aliases keep native no-publication
+            // semantics and are not duplicated.
+            if (!DB_RuntimeGeneratedLoadFailed() && *varclipMap_ptr &&
+                (*varclipMap_ptr)->name)
+            {
+#if defined(KISAK_MP)
+                constexpr XAssetType clipMapType = ASSET_TYPE_CLIPMAP_PVS;
+#else
+                constexpr XAssetType clipMapType = ASSET_TYPE_CLIPMAP;
+#endif
+                if (!DB_FindXAssetEntryCanonical(clipMapType,
+                    (*varclipMap_ptr)->name))
+                    Load_ClipMapAsset(reinterpret_cast<XAssetHeader *>(
+                        varclipMap_ptr));
+            }
         }
     }
     DB_PopStreamPos();

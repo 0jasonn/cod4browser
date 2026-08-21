@@ -522,6 +522,76 @@ void RemoveOverrideChain(std::uint16_t overrideIndex,
     }
 }
 
+bool IsClipMapSingleton(XAssetType type)
+{
+    return type == ASSET_TYPE_CLIPMAP || type == ASSET_TYPE_CLIPMAP_PVS;
+}
+
+XAssetEntryPoolEntry *FindAnySingletonEntry(XAssetType type)
+{
+    if (!IsClipMapSingleton(type)) return nullptr;
+    for (std::uint32_t hash = 0; hash < 0x8000u; ++hash)
+        for (std::uint32_t index = db_hashTable[hash]; index;
+             index = g_assetEntryPool[index].entry.nextHash)
+        {
+            XAssetEntryPoolEntry *entry = &g_assetEntryPool[index];
+            if (entry->entry.asset.type == type) return entry;
+        }
+    return nullptr;
+}
+
+void UnlinkAssetEntryFromHash(XAssetEntryPoolEntry *target)
+{
+    if (!target) return;
+    // A previous singleton replacement may have overwritten the body/name
+    // while its entry still sat in the old bucket. Search by entry identity so
+    // cleanup does not rely on the mutable singleton name.
+    for (std::uint32_t hash = 0; hash < 0x8000u; ++hash)
+    {
+        std::uint16_t *link = &db_hashTable[hash];
+        while (*link)
+        {
+            if (&g_assetEntryPool[*link] == target)
+            {
+                *link = target->entry.nextHash;
+                target->entry.nextHash = 0;
+                return;
+            }
+            link = &g_assetEntryPool[*link].entry.nextHash;
+        }
+    }
+}
+
+XAssetEntryPoolEntry *ReplaceClipMapSingleton(
+    XAssetEntryPoolEntry *existing, const XAsset &asset,
+    std::uint32_t hash)
+{
+    if (!existing) return nullptr;
+
+    // CLIPMAP and CLIPMAP_PVS are represented by the one engine-owned cm
+    // object. Never retain an override chain whose entries all alias that
+    // object: publishing another map would overwrite every entry's name and
+    // leave the hash table pointing at stale ownership.
+    UnlinkAssetEntryFromHash(existing);
+    std::uint16_t overrideIndex = existing->entry.nextOverride;
+    existing->entry.nextOverride = 0;
+    while (overrideIndex)
+    {
+        XAssetEntryPoolEntry &overrideEntry = g_assetEntryPool[overrideIndex];
+        const std::uint16_t nextOverride = overrideEntry.entry.nextOverride;
+        ReturnAssetEntry(overrideIndex);
+        overrideIndex = nextOverride;
+    }
+    RemoveAsset(existing->entry.asset.type, existing->entry.asset.header);
+    CloneAsset(asset, existing->entry.asset);
+    existing->entry.zoneIndex = static_cast<std::uint8_t>(g_zoneIndex);
+    existing->entry.inuse = false;
+    existing->entry.nextHash = db_hashTable[hash];
+    db_hashTable[hash] = static_cast<std::uint16_t>(
+        existing - g_assetEntryPool);
+    return existing;
+}
+
 XAssetEntryPoolEntry *DB_LinkXAssetEntry(
     XAssetEntryPoolEntry *newEntry, std::int32_t allowOverride)
 {
@@ -531,6 +601,16 @@ XAssetEntryPoolEntry *DB_LinkXAssetEntry(
     if (!name) return nullptr;
     const std::uint32_t hash = DB_HashForNameCanonical(name, asset.type);
     XAssetEntryPoolEntry *existing = DB_FindXAssetEntryCanonical(asset.type, name);
+    if (!existing) existing = FindAnySingletonEntry(asset.type);
+    if (IsClipMapSingleton(asset.type) && existing)
+    {
+        if (existing->entry.zoneIndex == g_zoneIndex)
+        {
+            DB_RuntimeGeneratedFailure("publication/duplicate ClipMap zone");
+            return nullptr;
+        }
+        return ReplaceClipMapSingleton(existing, asset, hash);
+    }
     if (existing && existing->entry.zoneIndex == g_zoneIndex)
     {
         DB_RuntimeGeneratedFailure("publication/duplicate asset in one zone");
@@ -806,7 +886,21 @@ XAssetEntryPoolEntry *DB_FindXAssetEntryCanonical(XAssetType type, const char *n
         if (entry->entry.asset.type == type)
         {
             const char *entryName = AssetName(entry->entry.asset);
-            if (entryName && !I_stricmp(entryName, name)) return entry;
+            if (entryName)
+            {
+                const char *left = entryName;
+                const char *right = name;
+                for (;; ++left, ++right)
+                {
+                    unsigned char leftChar = static_cast<unsigned char>(*left);
+                    unsigned char rightChar = static_cast<unsigned char>(*right);
+                    if (leftChar == '\\') leftChar = '/';
+                    if (rightChar == '\\') rightChar = '/';
+                    if (std::tolower(leftChar) != std::tolower(rightChar))
+                        break;
+                    if (!leftChar) return entry;
+                }
+            }
         }
         index = entry->entry.nextHash;
     }

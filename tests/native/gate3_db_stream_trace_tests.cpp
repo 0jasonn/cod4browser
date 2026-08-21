@@ -4934,6 +4934,62 @@ int main()
     assert(!DB_FindXAssetHeader(ASSET_TYPE_RAWFILE,
         "rawfile/missing").data);
 
+    // ClipMap is a true engine singleton, not a per-zone pool entry. A map
+    // replacement must retire the previous name before reusing &cm; otherwise
+    // the old hash bucket points at a body whose name was overwritten by the
+    // replacement. Path separators are canonicalized consistently with the
+    // DB hash used by the native lookup.
+    Reset({});
+    std::strncpy(g_zones[1].name, "killhouse", sizeof(g_zones[1].name));
+    g_zones[1].flags = 1;
+    DB_SetLoadingZoneIndex(1);
+    static clipMap_t firstClipMap{};
+    firstClipMap = {};
+    firstClipMap.name = "maps/killhouse.d3dbsp";
+    assert(DB_AddXAsset(ASSET_TYPE_CLIPMAP, {&firstClipMap}).clipMap ==
+        DB_XAssetPool[ASSET_TYPE_CLIPMAP]);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_CLIPMAP,
+        "maps\\killhouse.d3dbsp").clipMap ==
+        DB_XAssetPool[ASSET_TYPE_CLIPMAP]);
+
+    // Normal map teardown retires the old zone before its replacement is
+    // queued. Keep this explicit in the regression so a stale singleton entry
+    // cannot accidentally make a clean transition appear valid.
+    DB_UnloadXZonesForFreeFlags(1);
+    assert(!DB_FindXAssetHeader(ASSET_TYPE_CLIPMAP,
+        "maps/killhouse.d3dbsp").data);
+
+    std::strncpy(g_zones[2].name, "cargoship", sizeof(g_zones[2].name));
+    g_zones[2].flags = 8;
+    DB_SetLoadingZoneIndex(2);
+    static clipMap_t secondClipMap{};
+    secondClipMap = {};
+    secondClipMap.name = "maps/cargoship.d3dbsp";
+    assert(DB_AddXAsset(ASSET_TYPE_CLIPMAP, {&secondClipMap}).clipMap ==
+        DB_XAssetPool[ASSET_TYPE_CLIPMAP]);
+    assert(!DB_FindXAssetHeader(ASSET_TYPE_CLIPMAP,
+        "maps/killhouse.d3dbsp").data);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_CLIPMAP,
+        "maps\\cargoship.d3dbsp").clipMap ==
+        DB_XAssetPool[ASSET_TYPE_CLIPMAP]);
+    std::strncpy(g_zones[3].name, "campaign-next", sizeof(g_zones[3].name));
+    g_zones[3].flags = 16;
+    DB_SetLoadingZoneIndex(3);
+    static clipMap_t thirdClipMap{};
+    thirdClipMap = {};
+    thirdClipMap.name = "maps/campaign_next.d3dbsp";
+    assert(DB_AddXAsset(ASSET_TYPE_CLIPMAP, {&thirdClipMap}).clipMap ==
+        DB_XAssetPool[ASSET_TYPE_CLIPMAP]);
+    assert(!DB_FindXAssetHeader(ASSET_TYPE_CLIPMAP,
+        "maps/cargoship.d3dbsp").data);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_CLIPMAP,
+        "maps\\campaign_next.d3dbsp").clipMap ==
+        DB_XAssetPool[ASSET_TYPE_CLIPMAP]);
+    DB_UnloadXZonesForFreeFlags(16);
+    assert(!DB_FindXAssetHeader(ASSET_TYPE_CLIPMAP,
+        "maps/campaign_next.d3dbsp").data);
+    DB_UnloadXZonesForFreeFlags(8);
+
     std::printf("gate3-db-stream rawfile=published physpreset=published xmodel=published weapon=published xanim=published stringtable=published technique-set=published material=published image=published water=loaded sound-curve=published sound-alias=published loaded-sound=published font=published fx=published impact-fx=published comworld=published gfxworld=published light-def=published menu=published menu-list=published snddriver=canonical-noop localize=published insert=-2 alias=block4:16 technique=block4:36 direct-xstring=block4:18 technique-children=block0:0,block4:251 material-children=block0:0,block4:248 sound-curve-children=block0:0,block4:38 sound-alias-children=block0:0,block4:586 loaded-sound-children=block0:0,block4:44 font-children=block0:0,block4:80 fx-children=block0:0,block4:502 impact-fx-children=block0:0,block4:1640 comworld-children=block0:0,block4:204 gfxworld-children=block0:0,block1:0,block4:248 light-def-children=block0:0,block4:59 menu-children=block0:0,block4:880 localize-children=block0:0,block4:51 image-entry=16 material-entry=17 sound-curve-entry=16 sound-alias-entry=16 loaded-sound-entry=16 font-entry=16 fx-entry=16 impact-fx-entry=17 comworld-entry=16 gfxworld-entry=16 light-def-entry=17 menu-entry=16 menu-list-entry=17 localize-entry=16 free=32752->32750 zone=1 stop=code-post-complete\n");
     return 0;
 }
