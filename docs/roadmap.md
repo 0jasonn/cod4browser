@@ -44,9 +44,9 @@ Any task that cannot satisfy these invariants stops for architectural review.
 
 ## Current runtime boundary
 
-Baseline: `2d3c9f10` (`Enable FX model regression assertions`), following the
-rigid FX XModel implementation and hardening commits `5d49dbe1`, `86c2efbb`,
-and `29f49b09`.
+Baseline: `67d6dbe7` (`Harden particle cloud material and axis
+compatibility`), following the particle-cloud implementation commit
+`cedc0cf2`.
 
 The browser production target currently compiles and runs the canonical
 single-player filesystem, database, startup-zone loading, map loading,
@@ -76,6 +76,15 @@ The gameplay event chain is farther along than its presentation:
   over-limit, or allocation-failed optional model effects are bounded drops;
   they cannot abort the frame, displace canonical code meshes, or leave stale
   backend scene data. Skinned/deformed FX models remain a compatibility gap.
+- `R_AddParticleCloudToScene` now retains 256 independent canonical cloud
+  slots instead of returning one overwritten singleton. At the renderer seam,
+  each admitted cloud expands the native 8x8x16 particle field into one
+  complete `FxParticleCloud` batch after DObjs, FX XModels, and code meshes.
+  Canonical emissive Material/image/state, packed color, view-facing radii,
+  placement, UVs, and deterministic order reach WebGL2; invalid or over-budget
+  clouds drop atomically. The browser uses deterministic platform-local jitter
+  rather than native CRT `rand`, and preserves both explicit radii where the
+  unavailable native shader interaction leaves a compatibility difference.
 - canonical sound assets, aliases, 53-channel selection, playback IDs,
   attenuation, pitch/volume, and LoadedSound PCM remain Worker-owned. A
   KISAK_WEB OpenAL-compatible proxy now transfers bounded PCM/device commands
@@ -93,9 +102,9 @@ The gameplay event chain is farther along than its presentation:
   transition proof remains pending.
 
 Therefore the active boundary is **canonical fire/impact events, sprite/beam
-code meshes, and rigid FX XModels reaching WebGL2 plus a verified canonical
-LoadedSound-to-Web-Audio device path, with a retail fire/impact integration
-proof still required**.
+code meshes, rigid FX XModels, and particle clouds reaching WebGL2 plus a
+verified canonical LoadedSound-to-Web-Audio device path, with a retail
+fire/impact integration proof still required**.
 
 ## Active milestone: playable Killhouse / F.N.G. combat loop
 
@@ -110,6 +119,7 @@ retail-asset browser run:
 | Fire and ammo consumption | Canonical path reached; end-to-end behavior needs explicit evidence | game/cgame | Trace event, ammo delta, recoil, and frame continuity |
 | Muzzle flash / brass | Canonical FX code-mesh and rigid FX XModel consumption implemented; retail visibility proof pending | cgame/FX/renderer | Observe real fire event, effect definition, retained sprite/model batches, and draws |
 | Bullet impact | Canonical trace/event/impact-table and FX renderer paths present; end-to-end result unproven | game/cgame/FX/renderer | Prove surface-dependent impact FX; audio follows the platform decision |
+| Smoke / particle clouds | Canonical EffectsCore cloud slots and portable batches implemented; retail visibility proof pending | FX/renderer | Observe a real cloud effect and measure CPU expansion before broad performance work |
 | Weapon sound | Canonical loaded-sound bridge is implemented and lifecycle-tested; retail fire alias proof pending | cgame/audio/platform | Observe one real `WeaponDef` alias through channel selection, PCM upload, gesture-unlocked playback, and completion |
 | Reload | Fresh profiles reach canonical `+reload`; retail state/animation/audio proof pending | input/game/cgame/audio | Exercise empty/partial reload and observe canonical ammo/state transitions |
 | Weapon switching | Fresh profiles reach canonical `weapnext`/`weapprev`; retail presentation proof pending | input/game/cgame | Exercise both directions and observe canonical inventory/viewmodel transition |
@@ -133,17 +143,22 @@ retail-asset browser run:
    deterministic LOD, transforms, ordering, and failure-atomic admission are
    covered in native x64 and direct Wasm tests. Retail brass/debris visibility
    remains part of integration proof; deformed/skinned effects are not faked.
-4. **Fire/impact integration proof** — add focused browser observability that
+4. **Particle-cloud rendering** — implemented in `cedc0cf2` and hardened in
+   `67d6dbe7`. Independent canonical slots expand into complete 1,024-quad
+   batches with emissive material identity, view-dependent axes, deterministic
+   jitter, atomic capacity admission, and assertion-enabled native/Wasm
+   coverage. Retail smoke/cloud visibility and measured CPU cost remain.
+5. **Fire/impact integration proof** — add focused browser observability that
    proves one trigger causes canonical server/cgame fire, recoil/ammo change,
    visible muzzle FX, a collision result, and an impact effect without owning
    any of those states in browser code.
-5. **Reload and weapon switching** — default browser reachability implemented
+6. **Reload and weapon switching** — default browser reachability implemented
    in `bf3dd93b` and regression-hardened in `b45df61e`. Native x64, direct Wasm,
    focused browser input, production build, and exact boot checks pass. Retail
    state, ammo, animation, viewmodel, and audio proof remains.
-6. **Basic combat interaction** — prove damage, reaction, death, and script/AI
+7. **Basic combat interaction** — prove damage, reaction, death, and script/AI
    notification against real map entities.
-7. **F.N.G. parity pass** — load F.N.G., record the first blocker by subsystem,
+8. **F.N.G. parity pass** — load F.N.G., record the first blocker by subsystem,
    fix the narrowest reusable runtime gap, and repeat until the same combat
    acceptance set passes.
 
@@ -276,10 +291,11 @@ Stop autonomous implementation when:
 | Complete | Canonical filesystem and DB startup | See `docs/web-port-convergence.md` and history through `e652d43a` | Continue convergence; Gate 2 remains diagnostic only |
 | Complete | Real Killhouse map/game/cgame frame | See canonical lifecycle and browser evidence through `e652d43a` | Presentation and gameplay feedback gaps |
 | Complete | Textured/lightmapped world, static models, weapon DObj, HUD/input | `e652d43a` | General entity draws and audio proof |
-| Complete | Canonical FX code-mesh renderer closure | `41c6c8a5`, `b5d2c76e` | Retail muzzle/impact visibility proof; models/clouds/marks remain later FX families |
+| Complete | Canonical FX code-mesh renderer closure | `41c6c8a5`, `b5d2c76e` | Retail muzzle/impact visibility proof; marks/decals remain later FX families |
 | Complete | Browser loaded-sound platform bridge | `38ffcc88`, `7b02d1b0`; native/Wasm/browser lifecycle evidence | Retail weapon/impact alias proof; streaming/reverb later |
 | Complete | Reload and weapon-cycle input reachability | `bf3dd93b`, `b45df61e`; native/Wasm/browser boundary evidence | Retail state/animation/viewmodel/audio proof |
-| Complete | Canonical rigid FX XModel renderer closure | `5d49dbe1`, `86c2efbb`, `29f49b09`, `2d3c9f10`; assertion-enabled native x64/direct Wasm tests, production Release build, exact WebGL2 boot | Retail brass/debris visibility proof; deformed/skinned FX models, clouds, marks, and decals remain |
+| Complete | Canonical rigid FX XModel renderer closure | `5d49dbe1`, `86c2efbb`, `29f49b09`, `2d3c9f10`; assertion-enabled native x64/direct Wasm tests, production Release build, exact WebGL2 boot | Retail brass/debris visibility proof; deformed/skinned FX models, marks, and decals remain |
+| Complete | Canonical particle-cloud renderer closure | `cedc0cf2`, `67d6dbe7`; assertion-enabled native x64/direct Wasm tests, production Release build, exact WebGL2 boot | Retail smoke/cloud visibility and performance proof; marks/decals remain |
 | Active | Playable Killhouse/F.N.G. combat loop | FX renderer, loaded-sound device, and combat-input closures accepted | Retail fire/impact/reload/switch proof and combat interaction |
 | Pending | Recognizable COD4 presentation | — | Materials, remaining images, FX breadth, sky/fog |
 | Pending | Multiple maps and first campaign mission | — | Unknown until F.N.G./campaign probes |
