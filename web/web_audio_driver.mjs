@@ -398,10 +398,11 @@ export class WebAudioDriver {
                 this.diagnostic("Rejected out-of-order Web Audio stream unqueue.");
                 return false;
             }
-            if (entry.node) {
-                try { entry.node.stop?.(); } catch {}
-                entry.node.disconnect?.();
-                const at = source.streamNodes.indexOf(entry.node);
+            const node = entry.node;
+            if (node) {
+                try { node.stop?.(); } catch {}
+                node.disconnect?.();
+                const at = source.streamNodes.indexOf(node);
                 if (at >= 0) source.streamNodes.splice(at, 1);
             }
         }
