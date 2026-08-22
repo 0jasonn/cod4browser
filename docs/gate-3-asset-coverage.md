@@ -55,8 +55,8 @@ still appear inside Gate 2 oracle results, but they are no longer census-only.
 - Renderer-disabled `Load_Texture`, shader/material post-load, and
   `Load_PicmipWater` adapters preserve native signatures until the canonical
   renderer frontend/backend path owns those operations.
-- `DB_PlatformSetLoadedSoundData` retains zone-owned LoadedSound bytes until a
-  browser audio backend owns the native copy/resample boundary.
+- `DB_PlatformSetLoadedSoundData` hands transient fastfile bytes to the sound
+  driver's native copy/resample boundary before stream loading advances.
 - The launcher, Worker mount, synchronous filesystem adapter and WebGL backend
   remain legitimate browser platform boundaries.
 

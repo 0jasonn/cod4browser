@@ -26,8 +26,8 @@ array, strings and children are in block 4. Each alias preserves native order:
 The alias list is published only after all dependencies succeed. LoadedSound
 uses the canonical 44-byte body, name XString, block-0 payload, `-1`/`-2`
 payload insertion and real type-9 publication. The narrow
-`DB_PlatformSetLoadedSoundData` seam retains zone-owned payload bytes until the
-browser audio backend owns the native copy/resample operation.
+`DB_PlatformSetLoadedSoundData` seam copies transient stream payloads through
+the sound driver's native ownership/resample operation before loading advances.
 
 The native dispatcher has no `ASSET_TYPE_SNDDRIVER_GLOBALS` case. The shared
 dispatcher therefore preserves its exact no-consumption behavior rather than

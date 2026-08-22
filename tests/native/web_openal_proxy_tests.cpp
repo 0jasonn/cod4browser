@@ -36,7 +36,33 @@ int main()
     assert(state == AL_PLAYING || state == AL_STOPPED);
 
     alSourceStop(source);
+    alSourcei(source, AL_BUFFER, 0);
     alDeleteBuffers(1, &buffer);
+
+    // Queued streaming buffers retain order and become unqueueable once a
+    // stopped source reports them as processed, matching the refill contract
+    // used by SND_FillStreamBuffers.
+    ALuint streamBuffers[2] = {};
+    alGenBuffers(2, streamBuffers);
+    assert(streamBuffers[0] != 0 && streamBuffers[1] != 0);
+    alBufferData(streamBuffers[0], AL_FORMAT_MONO16, pcm, sizeof(pcm), 44100);
+    alBufferData(streamBuffers[1], AL_FORMAT_MONO16, pcm, sizeof(pcm), 44100);
+    alSourceQueueBuffers(source, 2, streamBuffers);
+    ALint queued = 0;
+    alGetSourcei(source, AL_BUFFERS_QUEUED, &queued);
+    assert(queued == 2);
+    alSourcePlay(source);
+    alSourceStop(source);
+    ALint processed = 0;
+    alGetSourcei(source, AL_BUFFERS_PROCESSED, &processed);
+    assert(processed == 2);
+    ALuint unqueued[2] = {};
+    alSourceUnqueueBuffers(source, 2, unqueued);
+    assert(unqueued[0] == streamBuffers[0]);
+    assert(unqueued[1] == streamBuffers[1]);
+    alGetSourcei(source, AL_BUFFERS_QUEUED, &queued);
+    assert(queued == 0);
+    alDeleteBuffers(2, streamBuffers);
     alDeleteSources(1, &source);
 
     // Context teardown is a bounded reset, so a fresh init deterministically

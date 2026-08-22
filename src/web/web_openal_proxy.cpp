@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <deque>
 #include <string>
 
 #if defined(__EMSCRIPTEN__)
@@ -34,10 +35,14 @@ struct SourceState
     ALfloat pitch = 1.0f;
     ALfloat offset = 0.0f;
     ALfloat position[3] = {};
+    bool spatialized = false;
     bool looping = false;
     double started = 0.0;
+    double lastRefresh = 0.0;
     std::uint32_t generation = 0;
-    ALint queued = 0;
+    std::deque<ALuint> queue;
+    std::size_t processed = 0;
+    double queueOffset = 0.0;
     std::string diagnosticAlias;
 };
 
@@ -79,11 +84,14 @@ void emit_source(ALuint id, const char *op)
             self.postMessage({type: "audio-command", version: 1, op: UTF8ToString($1),
                 sourceId: $0, generation: $2, bufferId: $3, gain: $4, pitch: $5,
                 looping: !!$6, offset: $7, x: $8, y: $9, z: $10,
-                aliasName: UTF8ToString($11)});
+                aliasName: UTF8ToString($11), spatialized: !!$12,
+                queueProcessed: $13});
         }
     }, id, op, source.generation, source.buffer, source.gain, source.pitch,
        source.looping ? 1 : 0, source.offset, source.position[0], source.position[1],
-       source.position[2], source.diagnosticAlias.c_str());
+       source.position[2], source.diagnosticAlias.c_str(),
+       source.spatialized ? 1 : 0,
+       static_cast<ALint>(source.processed));
 }
 
 void emit_simple(const char *op, ALuint id)
@@ -92,6 +100,20 @@ void emit_simple(const char *op, ALuint id)
         if (typeof self !== "undefined" && typeof self.postMessage === "function")
             self.postMessage({type: "audio-command", version: 1, op: UTF8ToString($0), id: $1});
     }, op, id);
+}
+
+void emit_buffer_list(ALuint id, const char *op, const ALuint *buffers,
+    ALsizei count)
+{
+    const SourceState &source = g_sources[id];
+    EM_ASM({
+        if (typeof self !== "undefined" && typeof self.postMessage === "function") {
+            const begin = $3 >>> 2;
+            self.postMessage({type: "audio-command", version: 1,
+                op: UTF8ToString($1), sourceId: $0, generation: $2,
+                bufferIds: Array.from(HEAPU32.subarray(begin, begin + $4))});
+        }
+    }, id, op, source.generation, buffers, count);
 }
 
 void emit_reset()
@@ -104,12 +126,50 @@ void emit_reset()
 #else
 void emit_source(ALuint, const char *) {}
 void emit_simple(const char *, ALuint) {}
+void emit_buffer_list(ALuint, const char *, const ALuint *, ALsizei) {}
 void emit_reset() {}
 #endif
 
+double buffer_duration(ALuint id)
+{
+    if (!buffer_valid(id)) return 0.0;
+    const BufferState &buffer = g_buffers[id];
+    const int channels = buffer.format == AL_FORMAT_STEREO16 ? 2 : 1;
+    const double frames = channels > 0
+        ? buffer.bytes / (2.0 * channels) : 0.0;
+    return buffer.rate > 0 ? frames / buffer.rate : 0.0;
+}
+
 void refresh_state_at(SourceState &source, double current)
 {
-    if (source.state != AL_PLAYING || source.looping || !buffer_valid(source.buffer))
+    if (source.state != AL_PLAYING)
+        return;
+    if (!source.queue.empty())
+    {
+        const double elapsed = std::max(0.0, current - source.lastRefresh) *
+            std::max(0.001f, source.pitch);
+        source.lastRefresh = current;
+        source.queueOffset += elapsed;
+        while (source.processed < source.queue.size())
+        {
+            const double duration = buffer_duration(
+                source.queue[source.processed]);
+            if (duration > 0.0 && source.queueOffset < duration)
+                break;
+            source.queueOffset = duration > 0.0
+                ? std::max(0.0, source.queueOffset - duration) : 0.0;
+            ++source.processed;
+        }
+        source.offset = static_cast<ALfloat>(source.queueOffset);
+        if (source.processed >= source.queue.size())
+        {
+            source.offset = 0.0f;
+            source.queueOffset = 0.0;
+            source.state = AL_STOPPED;
+        }
+        return;
+    }
+    if (source.looping || !buffer_valid(source.buffer))
         return;
     const BufferState &buffer = g_buffers[source.buffer];
     const int channels = buffer.format == AL_FORMAT_STEREO16 ? 2 : 1;
@@ -284,6 +344,7 @@ void alSource3f(ALuint id, ALenum parameter, ALfloat x, ALfloat y, ALfloat z)
     source.position[0] = x;
     source.position[1] = y;
     source.position[2] = z;
+    source.spatialized = true;
     source_property(id);
 }
 
@@ -307,12 +368,13 @@ void alSourcef(ALuint id, ALenum parameter, ALfloat value)
     case AL_GAIN: source.gain = std::max(0.0f, value); break;
     case AL_PITCH:
         source.pitch = std::max(0.001f, value);
-        if (source.state == AL_PLAYING)
+        if (source.state == AL_PLAYING && source.queue.empty())
             source.started = WebOpenAL_RebaseStarted(mutationTime, source.offset, source.pitch);
         break;
     case AL_SEC_OFFSET:
         source.offset = std::max(0.0f, value);
-        if (source.state == AL_PLAYING)
+        source.queueOffset = source.offset;
+        if (source.state == AL_PLAYING && source.queue.empty())
             source.started = WebOpenAL_RebaseStarted(mutationTime, source.offset, source.pitch);
         break;
     default: fail(); return;
@@ -336,11 +398,13 @@ void alSourcei(ALuint id, ALenum parameter, ALint value)
         if (value && !buffer_valid(static_cast<ALuint>(value))) { fail(); return; }
         source.buffer = static_cast<ALuint>(value);
         source.offset = 0.0f;
+        source.queueOffset = 0.0;
         break;
     case AL_LOOPING: source.looping = value != AL_FALSE; break;
     case AL_SEC_OFFSET:
         source.offset = std::max(0, value);
-        if (source.state == AL_PLAYING)
+        source.queueOffset = source.offset;
+        if (source.state == AL_PLAYING && source.queue.empty())
             source.started = WebOpenAL_RebaseStarted(mutationTime, source.offset, source.pitch);
         break;
     default: fail(); return;
@@ -390,8 +454,12 @@ void alGetSourcei(ALuint id, ALenum parameter, ALint *value)
     switch (parameter)
     {
     case AL_SOURCE_STATE: *value = source.state; break;
-    case AL_BUFFERS_QUEUED: *value = source.queued; break;
-    case AL_BUFFERS_PROCESSED: *value = 0; break;
+    case AL_BUFFERS_QUEUED:
+        *value = static_cast<ALint>(source.queue.size());
+        break;
+    case AL_BUFFERS_PROCESSED:
+        *value = static_cast<ALint>(source.processed);
+        break;
     default: fail(); break;
     }
 }
@@ -401,7 +469,9 @@ void alSourcePlay(ALuint id)
     if (!source_valid(id)) { fail(); return; }
     auto &source = g_sources[id];
     source.state = AL_PLAYING;
-    source.started = now_seconds() - source.offset / std::max(0.001f, source.pitch);
+    const double current = now_seconds();
+    source.started = current - source.offset / std::max(0.001f, source.pitch);
+    source.lastRefresh = current;
     ++source.generation;
     emit_source(id, "source-play");
 }
@@ -421,6 +491,9 @@ void alSourceStop(ALuint id)
     auto &source = g_sources[id];
     source.state = AL_STOPPED;
     source.offset = 0.0f;
+    source.queueOffset = 0.0;
+    if (!source.queue.empty())
+        source.processed = source.queue.size();
     ++source.generation;
     emit_source(id, "source-stop");
 }
@@ -430,16 +503,26 @@ void alSourceQueueBuffers(ALuint id, ALsizei count, const ALuint *buffers)
     if (!source_valid(id) || count < 0 || (count > 0 && !buffers)) { fail(); return; }
     for (ALsizei i = 0; i < count; ++i)
         if (!buffer_valid(buffers[i])) { fail(); return; }
-    g_sources[id].queued += count;
-    emit_source(id, "source-queue");
+    auto &source = g_sources[id];
+    for (ALsizei i = 0; i < count; ++i)
+        source.queue.push_back(buffers[i]);
+    emit_buffer_list(id, "source-queue", buffers, count);
 }
 
 void alSourceUnqueueBuffers(ALuint id, ALsizei count, ALuint *buffers)
 {
     if (!source_valid(id) || count < 0 || (count > 0 && !buffers)) { fail(); return; }
-    const ALint removed = std::min<ALint>(count, g_sources[id].queued);
-    for (ALint i = 0; i < removed; ++i) buffers[i] = 0;
-    g_sources[id].queued -= removed;
+    auto &source = g_sources[id];
+    const ALsizei removed = std::min<ALsizei>(count,
+        static_cast<ALsizei>(source.processed));
+    if (removed != count) { fail(); return; }
+    for (ALsizei i = 0; i < removed; ++i)
+    {
+        buffers[i] = source.queue.front();
+        source.queue.pop_front();
+    }
+    source.processed -= removed;
+    emit_buffer_list(id, "source-unqueue", buffers, removed);
 }
 
 void alEffectf(ALuint, ALenum, ALfloat) {}

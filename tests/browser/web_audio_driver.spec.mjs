@@ -11,7 +11,9 @@ test("Web Audio proxy accepts bounded PCM and ignores stale source generations",
             }
             connect(target) { this.connections.push(target); }
             disconnect() { this.disconnected = true; }
-            start() { this.started = true; }
+            start(when = 0, offset = 0) {
+                this.started = true; this.startWhen = when; this.startOffset = offset;
+            }
             stop() { this.onended?.(); }
         }
         class Context {
@@ -22,9 +24,20 @@ test("Web Audio proxy accepts bounded PCM and ignores stale source generations",
             createBuffer(channels, frames, rate) {
                 return { duration: frames / rate, getChannelData: () => new Float32Array(frames) };
             }
-            createBufferSource() { const node = new Node(); this.lastSource = node; return node; }
+            createBufferSource() {
+                const node = new Node(); this.lastSource = node;
+                (this.sources ??= []).push(node); return node;
+            }
             createGain() { if (!this.hasGain) return null; const node = new Node(); this.lastGain = node; return node; }
-            createPanner() { if (!this.hasPanner) return null; const node = new Node(); this.lastPanner = node; return node; }
+            createPanner() {
+                if (!this.hasPanner) return null;
+                const node = new Node();
+                node.positionX = { value: 0 };
+                node.positionY = { value: 0 };
+                node.positionZ = { value: 0 };
+                this.lastPanner = node;
+                return node;
+            }
             resume() { this.state = "running"; return Promise.resolve(); }
             close() { return Promise.resolve(); }
         }
@@ -40,10 +53,10 @@ test("Web Audio proxy accepts bounded PCM and ignores stale source generations",
                 format: 0x1101, bytes: 4, rate: 44100, pcm }),
             driver.handleCommand({ version: 1, op: "source-property", sourceId: 1,
                 generation: 0, bufferId: 1, gain: 0.5, pitch: 1, looping: false,
-                offset: 0, x: 0, y: 0, z: 0 }),
+                offset: 0, x: 12, y: -4, z: 3, spatialized: true }),
             driver.handleCommand({ version: 1, op: "source-play", sourceId: 1,
                 generation: 1, bufferId: 1, gain: 0.5, pitch: 1, looping: false,
-                offset: 0, x: 0, y: 0, z: 0, aliasName: "weapon_test_fire" }),
+                offset: 0, x: 12, y: -4, z: 3, aliasName: "weapon_test_fire" }),
         ];
         const stateAfterPlay = driver.sources.get(1).state;
         const source = driver.sources.get(1);
@@ -51,6 +64,9 @@ test("Web Audio proxy accepts bounded PCM and ignores stale source generations",
             sourceToPanner: driver.context.lastSource.connections.includes(driver.context.lastPanner),
             pannerToGain: driver.context.lastPanner.connections.includes(driver.context.lastGain),
             gainToDestination: driver.context.lastGain.connections.includes(driver.context.destination),
+            position: [driver.context.lastPanner.positionX.value,
+                driver.context.lastPanner.positionY.value,
+                driver.context.lastPanner.positionZ.value],
         };
         const firstNodes = {
             source: driver.context.lastSource,
@@ -93,7 +109,7 @@ test("Web Audio proxy accepts bounded PCM and ignores stale source generations",
             format: 0x1101, bytes: 4, rate: 44100, pcm });
         driver.handleCommand({ version: 1, op: "source-property", sourceId: 1,
             generation: 0, bufferId: 1, gain: 0.5, pitch: 1, looping: false,
-            offset: 0, x: 0, y: 0, z: 0 });
+            offset: 0, x: 0, y: 0, z: 0, spatialized: true });
         driver.handleCommand({ version: 1, op: "source-play", sourceId: 1,
             generation: 1, bufferId: 1, gain: 0.5, pitch: 1, looping: false,
             offset: 0, x: 0, y: 0, z: 0 });
@@ -118,7 +134,7 @@ test("Web Audio proxy accepts bounded PCM and ignores stale source generations",
                 format: 0x1101, bytes: 4, rate: 44100, pcm });
             variant.handleCommand({ version: 1, op: "source-property", sourceId: 1,
                 generation: 0, bufferId: 1, gain: 1, pitch: 1, looping: false,
-                offset: 0, x: 0, y: 0, z: 0 });
+                offset: 0, x: 0, y: 0, z: 0, spatialized: true });
             variant.handleCommand({ version: 1, op: "source-play", sourceId: 1,
                 generation: 1, bufferId: 1, gain: 1, pitch: 1, looping: false,
                 offset: 0, x: 0, y: 0, z: 0 });
@@ -135,6 +151,74 @@ test("Web Audio proxy accepts bounded PCM and ignores stale source generations",
             });
             variant.dispose();
         }
+        const direct2D = new WebAudioDriver({ contextFactory: () => new Context() });
+        direct2D.handleCommand({ version: 1, op: "source-create", id: 1 });
+        direct2D.handleCommand({ version: 1, op: "buffer-upload", bufferId: 1,
+            format: 0x1103, bytes: 4, rate: 44100, pcm });
+        direct2D.handleCommand({ version: 1, op: "source-property", sourceId: 1,
+            generation: 0, bufferId: 1, gain: 1, pitch: 1, looping: false,
+            offset: 0, x: 0, y: 0, z: 0, spatialized: false });
+        direct2D.handleCommand({ version: 1, op: "source-play", sourceId: 1,
+            generation: 1, bufferId: 1, gain: 1, pitch: 1, looping: false,
+            offset: 0, x: 0, y: 0, z: 0 });
+        const direct2DGraph = {
+            pannerCreated: Boolean(direct2D.context.lastPanner),
+            sourceToGain: direct2D.context.lastSource.connections.includes(
+                direct2D.context.lastGain),
+            gainToDestination: direct2D.context.lastGain.connections.includes(
+                direct2D.context.destination),
+        };
+        direct2D.dispose();
+        const streamStarted = [];
+        const stream = new WebAudioDriver({
+            contextFactory: () => new Context(),
+            onPlaybackStarted: (detail) => streamStarted.push(detail),
+        });
+        stream.handleCommand({ version: 1, op: "source-create", id: 1 });
+        for (const bufferId of [1, 2, 3]) {
+            stream.handleCommand({ version: 1, op: "buffer-upload", bufferId,
+                format: 0x1101, bytes: 4, rate: 4, pcm });
+        }
+        const queued = stream.handleCommand({ version: 1, op: "source-queue",
+            sourceId: 1, generation: 0, bufferIds: [1, 2] });
+        stream.handleCommand({ version: 1, op: "source-property", sourceId: 1,
+            generation: 0, bufferId: 0, gain: 0.25, pitch: 1, looping: false,
+            offset: 0, x: 0, y: 0, z: 0, spatialized: false,
+            queueProcessed: 0 });
+        const streamPlayed = stream.handleCommand({ version: 1, op: "source-play",
+            sourceId: 1, generation: 1, bufferId: 0, gain: 0.25, pitch: 1,
+            looping: false, offset: 0, x: 0, y: 0, z: 0,
+            aliasName: "voice_test", spatialized: false, queueProcessed: 0 });
+        const refilled = stream.handleCommand({ version: 1, op: "source-queue",
+            sourceId: 1, generation: 1, bufferIds: [3] });
+        const streamSource = stream.sources.get(1);
+        const streamGraph = {
+            queued: streamSource.queue.map((entry) => entry.bufferId),
+            nodeCount: stream.context.sources.length,
+            starts: stream.context.sources.map((node) => node.startWhen),
+            allToGain: stream.context.sources.every((node) =>
+                node.connections.includes(stream.context.lastGain)),
+        };
+        stream.context.currentTime = 0.25;
+        stream.handleCommand({ version: 1, op: "source-pause", sourceId: 1,
+            generation: 1, offset: 0.25, queueProcessed: 0 });
+        const streamPaused = streamSource.state;
+        const streamResumed = stream.handleCommand({ version: 1, op: "source-play",
+            sourceId: 1, generation: 2, bufferId: 0, gain: 0.25, pitch: 1,
+            looping: false, offset: 0.25, x: 0, y: 0, z: 0,
+            aliasName: "voice_test", spatialized: false, queueProcessed: 0 });
+        const resumedNodes = stream.context.sources.slice(3);
+        const streamPauseResume = {
+            paused: streamPaused,
+            resumed: streamSource.state,
+            accepted: streamResumed,
+            starts: resumedNodes.map((node) => node.startWhen),
+            offsets: resumedNodes.map((node) => node.startOffset),
+        };
+        const unqueued = stream.handleCommand({ version: 1,
+            op: "source-unqueue", sourceId: 1, generation: 2, bufferIds: [1] });
+        const queueAfterUnqueue = streamSource.queue.map((entry) => entry.bufferId);
+        stream.dispose();
         driver.dispose();
         const failedStarts = [];
         const failedDriver = new WebAudioDriver({
@@ -148,6 +232,8 @@ test("Web Audio proxy accepts bounded PCM and ignores stale source generations",
             sourceId: 1, generation: 1, bufferId: 1, aliasName: "failed" });
         return { accepted, stateAfterPlay, graph, staleProperty, stalePropertyState, stale,
             naturalEnd, gestureResumed, invalid, paused, resumed, stopped, deleted, reset, reinit, graphVariants,
+            direct2DGraph, queued, streamPlayed, refilled, streamGraph,
+            streamStarted, streamPauseResume, unqueued, queueAfterUnqueue,
             startedEvents, failedStart, failedStarts,
             disposed: driver.sources.size === 0 };
     });
@@ -155,14 +241,20 @@ test("Web Audio proxy accepts bounded PCM and ignores stale source generations",
     expect(result.stateAfterPlay).toBe("playing");
     expect(result.startedEvents).toEqual([
         { sourceId: 1, generation: 1, bufferId: 1,
-            aliasName: "weapon_test_fire", contextState: "suspended" },
+            aliasName: "weapon_test_fire", spatialized: true,
+            position: { x: 12, y: -4, z: 3 }, gain: 0.5, pitch: 1,
+            contextState: "suspended" },
         { sourceId: 1, generation: 2, bufferId: 1,
-            aliasName: "weapon_test_fire", contextState: "running" },
+            aliasName: "weapon_test_fire", spatialized: true,
+            position: { x: 0, y: 0, z: 0 }, gain: 0.5, pitch: 1,
+            contextState: "running" },
         { sourceId: 1, generation: 1, bufferId: 1,
-            aliasName: "", contextState: "running" },
+            aliasName: "", spatialized: false,
+            position: { x: 0, y: 0, z: 0 }, gain: 0.5, pitch: 1,
+            contextState: "running" },
     ]);
     expect(result.graph).toEqual({ sourceToPanner: true, pannerToGain: true,
-        gainToDestination: true });
+        gainToDestination: true, position: [12, -4, 3] });
     expect(result.naturalEnd).toEqual({ state: "stopped", activeBufferId: 0, disconnected: true });
     expect(result.gestureResumed).toBe(true);
     expect(result.staleProperty).toBe(true);
@@ -183,6 +275,37 @@ test("Web Audio proxy accepts bounded PCM and ignores stale source generations",
         { sourceToDestination: true, sourceToGain: false, sourceToPanner: false,
             gainToDestination: false, pannerToDestination: false },
     ]);
+    expect(result.direct2DGraph).toEqual({
+        pannerCreated: false,
+        sourceToGain: true,
+        gainToDestination: true,
+    });
+    expect(result.queued).toBe(true);
+    expect(result.streamPlayed).toBe(true);
+    expect(result.refilled).toBe(true);
+    expect(result.streamGraph).toEqual({
+        queued: [1, 2, 3],
+        nodeCount: 3,
+        starts: [0, 0.5, 1],
+        allToGain: true,
+    });
+    expect(result.streamStarted).toEqual([{
+        sourceId: 1, generation: 1, bufferId: 1,
+        aliasName: "voice_test", spatialized: false,
+        position: { x: 0, y: 0, z: 0 }, gain: 0.25, pitch: 1,
+        streaming: true, contextState: "suspended",
+    }, {
+        sourceId: 1, generation: 2, bufferId: 1,
+        aliasName: "voice_test", spatialized: false,
+        position: { x: 0, y: 0, z: 0 }, gain: 0.25, pitch: 1,
+        streaming: true, contextState: "suspended",
+    }]);
+    expect(result.streamPauseResume).toEqual({
+        paused: "paused", resumed: "playing", accepted: true,
+        starts: [0.25, 0.5, 1], offsets: [0.25, 0, 0],
+    });
+    expect(result.unqueued).toBe(true);
+    expect(result.queueAfterUnqueue).toEqual([2, 3]);
     expect(result.failedStart).toBe(false);
     expect(result.failedStarts).toEqual([]);
     expect(result.disposed).toBe(true);

@@ -828,12 +828,9 @@ int __cdecl SND_StartAliasStreamOnChannel(SndStartAliasInfo *startAliasInfo, int
     }
 
     SND_FillStreamBuffers(index);
-
-    if (!startAliasInfo->startDelay
-        && (!g_snd.paused || !g_snd.pauseSettings[(startAliasInfo->alias0->flags & 0x3F00) >> 8]))
-    {
-        alSourcePlay(source);
-    }
+#if defined(KISAK_WEB)
+    WebOpenAL_SetSourceAlias(source, startAliasInfo->alias0->aliasName);
+#endif
 
     int totalMsecForChan = total_msec + startAliasInfo->startDelay;
     if ((startAliasInfo->alias0->flags & 1) != 0)
@@ -858,6 +855,16 @@ int __cdecl SND_StartAliasStreamOnChannel(SndStartAliasInfo *startAliasInfo, int
         SND_ApplyChannelMap(source, startAliasInfo->alias0, srcChannelCount);
     }
     SND_SetStreamChannelVolume(index, realVolume);
+
+    // Publish the complete stream graph before playback. In particular, web
+    // needs the canonical 2D/3D classification and final gain before it
+    // schedules the first queued PCM chunk on the main-thread AudioContext.
+    if (!startAliasInfo->startDelay
+        && (!g_snd.paused || !g_snd.pauseSettings[
+            (startAliasInfo->alias0->flags & 0x3F00) >> 8]))
+    {
+        alSourcePlay(source);
+    }
 
     int playbackId = SND_AcquirePlaybackId(index, totalMsecForChan);
     if (playbackId != -1)
@@ -1138,14 +1145,19 @@ float __cdecl SND_Get3DChannelVolume(int index)
 
     ALfloat gain;
     alGetSourcef(alGlob.source[index], AL_GAIN, &gain);
-    return gain;
+    if (g_snd.chaninfo[index].soundFileInfo.srcChannelCount == 2)
+        return gain;
+    return gain * 2.0f;
 }
 
 void __cdecl SND_Set3DChannelVolume(int index, float volume)
 {
     iassert(index >= (0 + 8) && index < (0 + 8) + g_snd.max_3D_channels);
 
-    alSourcef(alGlob.source[index], AL_GAIN, volume);
+    if (g_snd.chaninfo[index].soundFileInfo.srcChannelCount == 2)
+        alSourcef(alGlob.source[index], AL_GAIN, volume);
+    else
+        alSourcef(alGlob.source[index], AL_GAIN, volume * 0.5f);
 }
 
 float __cdecl SND_GetStreamChannelVolume(int index)
@@ -1154,14 +1166,29 @@ float __cdecl SND_GetStreamChannelVolume(int index)
 
     ALfloat gain;
     alGetSourcef(alGlob.source[index], AL_GAIN, &gain);
-    return gain;
+    if (g_snd.chaninfo[index].soundFileInfo.srcChannelCount == 2 ||
+        !SND_IsAliasChannel3D(SNDALIASFLAGS_GET_CHANNEL(
+            g_snd.chaninfo[index].alias0->flags)))
+    {
+        return gain;
+    }
+    return gain * 2.0f;
 }
 
 void __cdecl SND_SetStreamChannelVolume(int index, float volume)
 {
     iassert(index >= SND_FIRST_STREAM_CHANNEL && index < SND_FIRST_STREAM_CHANNEL + g_snd.max_stream_channels);
 
-    alSourcef(alGlob.source[index], AL_GAIN, volume);
+    if (g_snd.chaninfo[index].soundFileInfo.srcChannelCount == 2 ||
+        !SND_IsAliasChannel3D(SNDALIASFLAGS_GET_CHANNEL(
+            g_snd.chaninfo[index].alias0->flags)))
+    {
+        alSourcef(alGlob.source[index], AL_GAIN, volume);
+    }
+    else
+    {
+        alSourcef(alGlob.source[index], AL_GAIN, volume * 0.5f);
+    }
 }
 
 int __cdecl SND_Get2DChannelPlaybackRate(int index)
@@ -1499,6 +1526,7 @@ void __cdecl SND_UpdateStreamChannel(int i, int frametime)
         bool hasMoreToPlay = SND_FillStreamBuffers(i);
         ALint state;
         alGetSourcei(alGlob.source[i], AL_SOURCE_STATE, &state);
+        const bool needsRestart = !g_snd.chaninfo[i].startDelay && hasMoreToPlay && state == AL_STOPPED;
         bool stillPlaying = g_snd.chaninfo[i].startDelay || hasMoreToPlay || state != AL_STOPPED;
         if (stillPlaying)
         {
@@ -1528,6 +1556,14 @@ void __cdecl SND_UpdateStreamChannel(int i, int frametime)
                 {
                     alSourcePlay(alGlob.source[i]);
                 }
+            }
+            else if (needsRestart)
+            {
+                // A backgrounded browser tab can miss several refill intervals and
+                // exhaust every queued Web Audio buffer. Once refill catches up,
+                // explicitly resume the canonical stream instead of leaving the
+                // newly queued data attached to a stopped source.
+                alSourcePlay(alGlob.source[i]);
             }
         }
         else
