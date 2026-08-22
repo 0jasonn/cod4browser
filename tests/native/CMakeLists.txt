@@ -250,6 +250,11 @@ add_executable(web_renderer_world_scene_tests
     "${KISAK_REPOSITORY_ROOT}/src/web/web_renderer_world_scene.cpp"
 )
 
+add_executable(web_renderer_comparison_tests
+    "${CMAKE_CURRENT_LIST_DIR}/web_renderer_comparison_tests.cpp"
+    "${KISAK_REPOSITORY_ROOT}/src/web/web_renderer_comparison.cpp"
+)
+
 add_executable(web_renderer_static_model_scene_tests
     "${CMAKE_CURRENT_LIST_DIR}/web_renderer_static_model_scene_tests.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_renderer_static_model_scene.cpp"
@@ -414,6 +419,13 @@ target_compile_features(web_renderer_surface_tests PRIVATE cxx_std_20)
 target_include_directories(web_renderer_surface_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
 target_compile_features(web_renderer_world_scene_tests PRIVATE cxx_std_20)
 target_include_directories(web_renderer_world_scene_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
+target_compile_features(web_renderer_comparison_tests PRIVATE cxx_std_20)
+target_include_directories(web_renderer_comparison_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
+if (MSVC)
+    target_compile_options(web_renderer_comparison_tests PRIVATE /UNDEBUG)
+else()
+    target_compile_options(web_renderer_comparison_tests PRIVATE -UNDEBUG)
+endif()
 target_compile_features(web_renderer_static_model_scene_tests PRIVATE cxx_std_20)
 target_include_directories(web_renderer_static_model_scene_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
 target_compile_features(web_renderer_fx_model_scene_tests PRIVATE cxx_std_20)
@@ -812,6 +824,7 @@ else()
     endif()
     add_test(NAME web_renderer_surface_tests COMMAND web_renderer_surface_tests)
     add_test(NAME web_renderer_world_scene_tests COMMAND web_renderer_world_scene_tests)
+    add_test(NAME web_renderer_comparison_tests COMMAND web_renderer_comparison_tests)
     add_test(NAME web_renderer_static_model_scene_tests COMMAND web_renderer_static_model_scene_tests)
     add_test(NAME web_renderer_fx_model_scene_tests COMMAND web_renderer_fx_model_scene_tests)
     add_test(NAME web_renderer_particle_cloud_scene_tests COMMAND web_renderer_particle_cloud_scene_tests)

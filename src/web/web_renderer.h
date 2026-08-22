@@ -162,11 +162,17 @@ struct WebRendererWorldBatchDesc
     std::uint32_t lastInstanceIndex;
     const GfxImage *baseImage;
     const GfxImage *lightmapImage;
+    const GfxImage *secondaryLightmapImage;
     std::uint32_t stateBits[2];
     std::uint8_t samplerState;
     std::uint8_t lightmapIndex;
     WebRendererSceneBatchKind sourceKind;
     WebRendererWorldTechnique technique;
+    // Canonical frontend technique identity. The backend copies the name and
+    // numeric slot for diagnostics; it never retains the technique pointer or
+    // treats the name as a browser shader identifier.
+    const char *techniqueName;
+    std::uint8_t techniqueType;
 };
 
 // Static XModel geometry remains shared per canonical XModel/LOD. Placements

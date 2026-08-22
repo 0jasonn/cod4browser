@@ -3,6 +3,7 @@
 #include <gfx_d3d/gfx_world_types.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -100,24 +101,40 @@ const GfxImage *FindBaseImage(const Material *material, std::uint8_t &sampler) n
     return nullptr;
 }
 
+bool TechniqueUsesPrimaryLightmap(
+    const MaterialTechnique *technique) noexcept;
+
 struct TechniqueSelection
 {
     std::uint32_t type = TECHNIQUE_NONE_INDEX;
     const MaterialTechnique *technique = nullptr;
+    const char *identityName = nullptr;
+    bool usesPrimaryLightmap = false;
     std::uint32_t stateBits[2]{};
 };
+
+bool IsCanonicalWorldColorLitAlias(const MaterialTechniqueSet *techniqueSet)
+    noexcept
+{
+    return techniqueSet && techniqueSet->name &&
+        std::strncmp(techniqueSet->name, ",wc_l_", 6u) == 0;
+}
 
 TechniqueSelection SelectTechnique(const Material *material) noexcept
 {
     TechniqueSelection selection;
     if (!material || !material->techniqueSet || !material->stateBitsTable)
         return selection;
+    const MaterialTechniqueSet *techniqueSet =
+        material->techniqueSet->remappedTechniqueSet
+            ? material->techniqueSet->remappedTechniqueSet
+            : material->techniqueSet;
     for (const std::uint32_t type : {
         TECHNIQUE_LIT_INDEX, TECHNIQUE_UNLIT_INDEX,
         TECHNIQUE_EMISSIVE_INDEX})
     {
         const MaterialTechnique *technique =
-            material->techniqueSet->techniques[type];
+            techniqueSet->techniques[type];
         const std::uint8_t entry = material->stateBitsEntry[type];
         if (!technique || technique->passCount == 0u ||
             entry == 0xffu || entry >= material->stateBitsCount)
@@ -126,9 +143,31 @@ TechniqueSelection SelectTechnique(const Material *material) noexcept
         }
         selection.type = type;
         selection.technique = technique;
+        selection.identityName = technique->name;
+        selection.usesPrimaryLightmap =
+            type == TECHNIQUE_LIT_INDEX &&
+            TechniqueUsesPrimaryLightmap(technique);
         selection.stateBits[0] = material->stateBitsTable[entry].loadBits[0];
         selection.stateBits[1] = material->stateBitsTable[entry].loadBits[1];
         return selection;
+    }
+    // Retail world-color aliases preserve canonical material/state identity
+    // but intentionally omit their D3D pass pointers. Native recognizes this
+    // named lit family during technique remapping. Carry the same family into
+    // the portable diffuse/lightmap pass instead of turning the surface into
+    // backend fallback geometry.
+    const std::uint8_t litEntry =
+        material->stateBitsEntry[TECHNIQUE_LIT_INDEX];
+    if (IsCanonicalWorldColorLitAlias(material->techniqueSet) &&
+        litEntry != 0xffu && litEntry < material->stateBitsCount)
+    {
+        selection.type = TECHNIQUE_LIT_INDEX;
+        selection.identityName = material->techniqueSet->name;
+        selection.usesPrimaryLightmap = true;
+        selection.stateBits[0] =
+            material->stateBitsTable[litEntry].loadBits[0];
+        selection.stateBits[1] =
+            material->stateBitsTable[litEntry].loadBits[1];
     }
     return selection;
 }
@@ -172,16 +211,23 @@ WebRendererWorldBatchDesc MakeBatch(
     batch.samplerState = 0u;
     batch.baseImage = FindBaseImage(surface.material, batch.samplerState);
     const TechniqueSelection technique = SelectTechnique(surface.material);
+    batch.techniqueName = technique.identityName
+        ? technique.identityName : "<unsupported-technique>";
+    batch.techniqueType = static_cast<std::uint8_t>(technique.type);
     batch.stateBits[0] = technique.stateBits[0];
     batch.stateBits[1] = technique.stateBits[1];
-    const bool supportsPrimaryLightmap = technique.technique &&
+    const bool supportsPrimaryLightmap = technique.identityName &&
         technique.type == TECHNIQUE_LIT_INDEX &&
-        TechniqueUsesPrimaryLightmap(technique.technique) &&
+        technique.usesPrimaryLightmap &&
         surface.lightmapIndex != 31u &&
         surface.lightmapIndex < world.lightmapCount && world.lightmaps;
     if (supportsPrimaryLightmap)
+    {
         batch.lightmapImage = world.lightmaps[surface.lightmapIndex].primary;
-    if (!technique.technique || !batch.baseImage)
+        batch.secondaryLightmapImage =
+            world.lightmaps[surface.lightmapIndex].secondary;
+    }
+    if (!technique.identityName || !batch.baseImage)
         batch.technique = WebRendererWorldTechnique::BackendFallback;
     else if (batch.lightmapImage)
         batch.technique = WebRendererWorldTechnique::BaseTextureLightmap;
@@ -199,6 +245,7 @@ bool BatchMatches(
         batch.sourceKind == candidate.sourceKind &&
         batch.baseImage == candidate.baseImage &&
         batch.lightmapImage == candidate.lightmapImage &&
+        batch.secondaryLightmapImage == candidate.secondaryLightmapImage &&
         batch.stateBits[0] == candidate.stateBits[0] &&
         batch.stateBits[1] == candidate.stateBits[1] &&
         batch.samplerState == candidate.samplerState &&
@@ -223,14 +270,50 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
         return WebRendererWorldSceneResult::InvalidView;
 
     const GfxBrushModel &worldModel = world.models[0];
-    const std::uint32_t firstSurface = worldModel.startSurfIndex;
-    const std::uint32_t surfaceCount = worldModel.surfaceCountNoDecal != 0u
-        ? worldModel.surfaceCountNoDecal
-        : worldModel.surfaceCount;
-    if (firstSurface > static_cast<std::uint32_t>(world.surfaceCount) ||
-        surfaceCount > static_cast<std::uint32_t>(world.surfaceCount) - firstSurface)
+    const std::uint32_t modelBegin = worldModel.startSurfIndex;
+    const std::uint32_t modelEnd = modelBegin + worldModel.surfaceCount;
+    if (modelBegin > static_cast<std::uint32_t>(world.surfaceCount) ||
+        worldModel.surfaceCount >
+            static_cast<std::uint32_t>(world.surfaceCount) - modelBegin)
     {
         return WebRendererWorldSceneResult::InvalidSurfaceRange;
+    }
+
+    struct SurfaceRange
+    {
+        std::uint32_t begin;
+        std::uint32_t end;
+    };
+    std::array<SurfaceRange, 3u> ranges{};
+    std::size_t rangeCount = 0u;
+    const bool canonicalRangesValid =
+        world.dpvs.litSurfsBegin >= modelBegin &&
+        world.dpvs.litSurfsBegin <= world.dpvs.litSurfsEnd &&
+        world.dpvs.litSurfsEnd <= world.dpvs.decalSurfsBegin &&
+        world.dpvs.decalSurfsBegin <= world.dpvs.decalSurfsEnd &&
+        world.dpvs.decalSurfsEnd <= world.dpvs.emissiveSurfsBegin &&
+        world.dpvs.emissiveSurfsBegin <= world.dpvs.emissiveSurfsEnd &&
+        world.dpvs.emissiveSurfsEnd <= modelEnd &&
+        world.dpvs.litSurfsEnd > world.dpvs.litSurfsBegin;
+    if (canonicalRangesValid)
+    {
+        ranges[rangeCount++] = {
+            world.dpvs.litSurfsBegin, world.dpvs.litSurfsEnd};
+        if (world.dpvs.decalSurfsEnd > world.dpvs.decalSurfsBegin)
+            ranges[rangeCount++] = {
+                world.dpvs.decalSurfsBegin, world.dpvs.decalSurfsEnd};
+        if (world.dpvs.emissiveSurfsEnd > world.dpvs.emissiveSurfsBegin)
+            ranges[rangeCount++] = {
+                world.dpvs.emissiveSurfsBegin,
+                world.dpvs.emissiveSurfsEnd};
+    }
+    else
+    {
+        const std::uint32_t fallbackCount =
+            worldModel.surfaceCountNoDecal != 0u
+                ? worldModel.surfaceCountNoDecal
+                : worldModel.surfaceCount;
+        ranges[rangeCount++] = {modelBegin, modelBegin + fallbackCount};
     }
 
     WebRendererWorldSceneCommand replacement;
@@ -240,10 +323,12 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
             world.vertexCount, std::numeric_limits<std::uint32_t>::max());
         replacement.vertices.reserve(world.vertexCount);
         replacement.indices.reserve(static_cast<std::size_t>(world.indexCount));
-        for (std::uint32_t localSurface = 0u;
-             localSurface < surfaceCount; ++localSurface)
+        for (std::size_t rangeIndex = 0u;
+             rangeIndex < rangeCount; ++rangeIndex)
         {
-            const std::uint32_t surfaceIndex = firstSurface + localSurface;
+          for (std::uint32_t surfaceIndex = ranges[rangeIndex].begin;
+               surfaceIndex < ranges[rangeIndex].end; ++surfaceIndex)
+          {
             const GfxSurface &surface = world.dpvs.surfaces[surfaceIndex];
             if (SurfaceUsesSkyPass(surface) ||
                 surface.tris.vertexCount == 0u || surface.tris.triCount == 0u)
@@ -329,6 +414,7 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
                 replacement.firstSurfaceIndex = surfaceIndex;
             replacement.lastSurfaceIndex = surfaceIndex;
             ++replacement.surfaceCount;
+          }
         }
 
     }

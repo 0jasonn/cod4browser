@@ -33,6 +33,8 @@ const rendererSceneFrameEvidence = document.querySelector(
 const engineLifecycleEvidence = document.querySelector(
     "#engine-lifecycle-evidence");
 const rendererFxEvidence = document.querySelector("#renderer-fx-evidence");
+const rendererComparisonEvidence = document.querySelector(
+    "#renderer-comparison-evidence");
 const audioPlaybackEvidence = document.querySelector("#audio-playback-evidence");
 const databaseEvidence = document.querySelector("#database-evidence");
 
@@ -77,6 +79,8 @@ const runtime = {
     rendererSceneView: null,
     rendererSceneFrame: null,
     rendererFx: [],
+    rendererComparison: null,
+    rendererComparisonRecords: [],
     audioPlayback: [],
     engineLifecycle: [],
     input: {
@@ -871,6 +875,26 @@ globalThis.addEventListener("kisakcod:renderer-fx", (event) => {
     runtime.rendererFx.push(structuredClone(event.detail));
     if (runtime.rendererFx.length > 8) runtime.rendererFx.shift();
     rendererFxEvidence.textContent = JSON.stringify(runtime.rendererFx);
+});
+
+globalThis.addEventListener("kisakcod:renderer-comparison", (event) => {
+    runtime.rendererComparison = structuredClone(event.detail);
+    runtime.rendererComparisonRecords = [];
+    rendererComparisonEvidence.textContent = JSON.stringify({
+        summary: runtime.rendererComparison,
+        records: runtime.rendererComparisonRecords,
+    });
+});
+
+globalThis.addEventListener("kisakcod:renderer-comparison-record", (event) => {
+    runtime.rendererComparisonRecords.push(structuredClone(event.detail));
+    if (runtime.rendererComparisonRecords.length ===
+        runtime.rendererComparison?.actualDrawCount) {
+        rendererComparisonEvidence.textContent = JSON.stringify({
+            summary: runtime.rendererComparison,
+            records: runtime.rendererComparisonRecords,
+        });
+    }
 });
 
 globalThis.addEventListener("kisakcod:audio-playback", (event) => {

@@ -28,6 +28,10 @@ void __cdecl Load_CreateMaterialPixelShader(
 void __cdecl Material_OriginalRemapTechniqueSet(MaterialTechniqueSet *techSet)
 {
     iassert(techSet);
+    // The complete alias graph is not necessarily published when the
+    // generated loader invokes this hook. Keep the asset usable immediately;
+    // The web renderer frontend performs native's renderer remap once
+    // DB_LoadXZone has atomically published the zone.
     techSet->remappedTechniqueSet = techSet;
 }
 

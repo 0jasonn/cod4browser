@@ -1,4 +1,5 @@
 #include <web/web_renderer.h>
+#include <web/web_renderer_comparison.h>
 
 #include <web/web_renderer_surface_storage.h>
 #include <web/web_system.h>
@@ -57,6 +58,7 @@ struct WebRendererRetainedWorldBatch
     std::uint32_t lastInstanceIndex = UINT32_MAX;
     std::uint32_t baseImageIndex = INVALID_WORLD_IMAGE;
     std::uint32_t lightmapImageIndex = INVALID_WORLD_IMAGE;
+    std::uint32_t secondaryLightmapImageIndex = INVALID_WORLD_IMAGE;
     std::uint32_t stateBits[2]{};
     std::uint8_t samplerState = 0u;
     std::uint8_t lightmapIndex = 31u;
@@ -64,6 +66,8 @@ struct WebRendererRetainedWorldBatch
         WebRendererSceneBatchKind::WorldSurface;
     WebRendererWorldTechnique technique =
         WebRendererWorldTechnique::BackendFallback;
+    std::string techniqueName;
+    std::uint8_t techniqueType = 0xffu;
 };
 
 struct WebRendererRetainedStaticModelBatch
@@ -100,6 +104,9 @@ struct WebRendererState
     GLint sceneFallbackUniform = -1;
     GLint lightmapUniform = -1;
     GLint lightmapEnabledUniform = -1;
+    GLint secondaryLightmapUniform = -1;
+    GLint secondaryLightmapEnabledUniform = -1;
+    GLint premultiplyAlphaUniform = -1;
     GLint alphaTestUniform = -1;
     GLint instanceEnabledUniform = -1;
     GLint uiColorUniform = -1;
@@ -231,6 +238,98 @@ EM_JS(
         }));
     });
 
+EM_JS(
+    void,
+    DispatchRendererComparisonSummary,
+    (std::uint32_t intendedDrawCount,
+     std::uint32_t actualDrawCount,
+     std::uint32_t surfaceCount,
+     std::uint32_t lightmappedDrawCount,
+     std::uint32_t fallbackDrawCount,
+     std::uint32_t alphaTestedDrawCount,
+     std::uint32_t blendedDrawCount,
+     std::uint32_t divergentDrawCount),
+    {
+        globalThis.dispatchEvent(new CustomEvent(
+            "kisakcod:renderer-comparison", { detail: {
+                state: "captured",
+                source: "canonical-frontend-vs-webgl-backend",
+                intendedDrawCount: intendedDrawCount >>> 0,
+                actualDrawCount: actualDrawCount >>> 0,
+                surfaceCount: surfaceCount >>> 0,
+                lightmappedDrawCount: lightmappedDrawCount >>> 0,
+                fallbackDrawCount: fallbackDrawCount >>> 0,
+                alphaTestedDrawCount: alphaTestedDrawCount >>> 0,
+                blendedDrawCount: blendedDrawCount >>> 0,
+                divergentDrawCount: divergentDrawCount >>> 0,
+                normalized: true,
+                containsGpuHandles: false,
+                containsObjectAddresses: false
+            }}));
+    });
+
+EM_JS(
+    void,
+    DispatchRendererComparisonRecord,
+    (std::uint32_t drawOrder,
+     const char *sourceKind,
+     const char *materialName,
+     const char *techniqueName,
+     std::uint32_t techniqueType,
+     const char *intendedPortableTechnique,
+     const char *actualPortableTechnique,
+     std::uint32_t surfaceCount,
+     std::uint32_t firstSurfaceIndex,
+     std::uint32_t lastSurfaceIndex,
+     std::uint32_t stateBits0,
+     std::uint32_t stateBits1,
+     const char *baseImageName,
+     const char *lightmapImageName,
+     const char *secondaryLightmapImageName,
+     std::uint32_t lightmapIndex,
+     const char *alphaTest,
+     const char *cull,
+     const char *depthFunction,
+     bool blendEnabled,
+     bool depthTestEnabled,
+     bool depthWriteEnabled,
+     bool baseImageUsed,
+     bool lightmapUsed,
+     bool secondaryLightmapUsed,
+     std::uint32_t samplerState,
+     std::uint32_t divergenceFields),
+    {
+        globalThis.dispatchEvent(new CustomEvent(
+            "kisakcod:renderer-comparison-record", { detail: {
+                drawOrder: drawOrder >>> 0,
+                sourceKind: UTF8ToString(sourceKind),
+                materialName: UTF8ToString(materialName),
+                techniqueName: UTF8ToString(techniqueName),
+                techniqueType: techniqueType >>> 0,
+                intendedPortableTechnique: UTF8ToString(intendedPortableTechnique),
+                actualPortableTechnique: UTF8ToString(actualPortableTechnique),
+                surfaceCount: surfaceCount >>> 0,
+                firstSurfaceIndex: firstSurfaceIndex >>> 0,
+                lastSurfaceIndex: lastSurfaceIndex >>> 0,
+                stateBits: [stateBits0 >>> 0, stateBits1 >>> 0],
+                baseImageName: UTF8ToString(baseImageName),
+                lightmapImageName: UTF8ToString(lightmapImageName),
+                secondaryLightmapImageName: UTF8ToString(secondaryLightmapImageName),
+                lightmapIndex: lightmapIndex >>> 0,
+                alphaTest: UTF8ToString(alphaTest),
+                cull: UTF8ToString(cull),
+                depthFunction: UTF8ToString(depthFunction),
+                blendEnabled: Boolean(blendEnabled),
+                depthTestEnabled: Boolean(depthTestEnabled),
+                depthWriteEnabled: Boolean(depthWriteEnabled),
+                baseImageUsed: Boolean(baseImageUsed),
+                lightmapUsed: Boolean(lightmapUsed),
+                secondaryLightmapUsed: Boolean(secondaryLightmapUsed),
+                samplerState: samplerState >>> 0,
+                divergenceFields: divergenceFields >>> 0
+            }}));
+    });
+
 const char *FxSourceKindName(WebRendererSceneBatchKind kind) noexcept
 {
     switch (kind)
@@ -239,6 +338,452 @@ const char *FxSourceKindName(WebRendererSceneBatchKind kind) noexcept
     case WebRendererSceneBatchKind::FxXModel: return "FxXModel";
     case WebRendererSceneBatchKind::FxParticleCloud: return "FxParticleCloud";
     default: return "";
+    }
+}
+
+const char *ComparisonSourceKindName(WebRendererSceneBatchKind kind) noexcept
+{
+    switch (kind)
+    {
+    case WebRendererSceneBatchKind::WorldSurface: return "WorldSurface";
+    case WebRendererSceneBatchKind::StaticXModel: return "StaticXModel";
+    case WebRendererSceneBatchKind::DynamicDObj: return "DynamicDObj";
+    case WebRendererSceneBatchKind::FxCodeMesh: return "FxCodeMesh";
+    case WebRendererSceneBatchKind::FxXModel: return "FxXModel";
+    case WebRendererSceneBatchKind::FxParticleCloud: return "FxParticleCloud";
+    }
+    return "Unknown";
+}
+
+const char *ComparisonPortableTechniqueName(
+    WebRendererWorldTechnique technique) noexcept
+{
+    switch (technique)
+    {
+    case WebRendererWorldTechnique::BackendFallback: return "backend-fallback";
+    case WebRendererWorldTechnique::BaseTexture: return "base-texture";
+    case WebRendererWorldTechnique::BaseTextureLightmap:
+        return "base-texture-lightmap";
+    }
+    return "unknown";
+}
+
+const WebRendererRetainedWorldImage *RetainedWorldImageIdentity(
+    std::uint32_t index) noexcept
+{
+    if (index == INVALID_WORLD_IMAGE ||
+        index >= g_renderer.retainedWorldImages.size())
+        return nullptr;
+    return &g_renderer.retainedWorldImages[index];
+}
+
+void EmitWorldComparison(
+    const WebRendererComparisonCapture &intended)
+{
+    WebRendererComparisonCapture actual;
+    try
+    {
+        const std::size_t count = g_renderer.retainedWorldBatches.size();
+        std::vector<GfxImage> baseIdentities(count);
+        std::vector<GfxImage> lightmapIdentities(count);
+        std::vector<GfxImage> secondaryLightmapIdentities(count);
+        std::vector<WebRendererWorldBatchDesc> descriptors(count);
+        for (std::size_t index = 0u; index < count; ++index)
+        {
+            const WebRendererRetainedWorldBatch &source =
+                g_renderer.retainedWorldBatches[index];
+            WebRendererWorldBatchDesc &destination = descriptors[index];
+            destination.firstIndex = source.firstIndex;
+            destination.indexCount = source.indexCount;
+            destination.surfaceCount = source.surfaceCount;
+            destination.firstSurfaceIndex = source.firstSurfaceIndex;
+            destination.lastSurfaceIndex = source.lastSurfaceIndex;
+            destination.materialName = source.materialName.c_str();
+            destination.modelName = source.modelName.c_str();
+            destination.firstInstanceIndex = source.firstInstanceIndex;
+            destination.lastInstanceIndex = source.lastInstanceIndex;
+            destination.stateBits[0] = source.stateBits[0];
+            destination.stateBits[1] = source.stateBits[1];
+            destination.samplerState = source.samplerState;
+            destination.lightmapIndex = source.lightmapIndex;
+            destination.sourceKind = source.sourceKind;
+            destination.technique = source.technique;
+            destination.techniqueName = source.techniqueName.c_str();
+            destination.techniqueType = source.techniqueType;
+            if (const WebRendererRetainedWorldImage *image =
+                    RetainedWorldImageIdentity(source.baseImageIndex))
+            {
+                baseIdentities[index].name = image->canonicalName.c_str();
+                destination.baseImage = &baseIdentities[index];
+            }
+            if (const WebRendererRetainedWorldImage *image =
+                    RetainedWorldImageIdentity(source.lightmapImageIndex))
+            {
+                lightmapIdentities[index].name = image->canonicalName.c_str();
+                destination.lightmapImage = &lightmapIdentities[index];
+            }
+            if (const WebRendererRetainedWorldImage *image =
+                    RetainedWorldImageIdentity(
+                        source.secondaryLightmapImageIndex))
+            {
+                secondaryLightmapIdentities[index].name =
+                    image->canonicalName.c_str();
+                destination.secondaryLightmapImage =
+                    &secondaryLightmapIdentities[index];
+            }
+        }
+        const WebRendererWorldSurfaceDesc comparisonSurface{
+            nullptr, 0u, nullptr, 0u, descriptors.data(),
+            static_cast<std::uint32_t>(descriptors.size())};
+        if (!WebRenderer_CaptureComparison(comparisonSurface, actual))
+            return;
+    }
+    catch (const std::bad_alloc &)
+    {
+        return;
+    }
+
+    const std::vector<WebRendererComparisonDelta> deltas =
+        WebRenderer_CompareCaptures(intended, actual);
+    std::vector<std::uint32_t> differenceFields(
+        std::max(intended.records.size(), actual.records.size()), 0u);
+    for (const WebRendererComparisonDelta &delta : deltas)
+    {
+        if (delta.drawOrder < differenceFields.size())
+            differenceFields[delta.drawOrder] |= delta.fields;
+    }
+    DispatchRendererComparisonSummary(
+        static_cast<std::uint32_t>(intended.records.size()),
+        static_cast<std::uint32_t>(actual.records.size()),
+        actual.surfaceCount,
+        actual.lightmappedDrawCount,
+        actual.fallbackDrawCount,
+        actual.alphaTestedDrawCount,
+        actual.blendedDrawCount,
+        static_cast<std::uint32_t>(deltas.size()));
+    const std::size_t count = std::min(
+        intended.records.size(), actual.records.size());
+    for (std::size_t index = 0u; index < count; ++index)
+    {
+        const WebRendererComparisonRecord &expected = intended.records[index];
+        const WebRendererComparisonRecord &retained = actual.records[index];
+        DispatchRendererComparisonRecord(
+            expected.drawOrder,
+            ComparisonSourceKindName(expected.sourceKind),
+            expected.materialName.c_str(),
+            expected.techniqueName.c_str(),
+            expected.techniqueType,
+            ComparisonPortableTechniqueName(expected.portableTechnique),
+            ComparisonPortableTechniqueName(retained.portableTechnique),
+            expected.surfaceCount,
+            expected.firstSurfaceIndex,
+            expected.lastSurfaceIndex,
+            expected.stateBits[0],
+            expected.stateBits[1],
+            expected.baseImageName.c_str(),
+            expected.lightmapImageName.c_str(),
+            expected.secondaryLightmapImageName.c_str(),
+            expected.lightmapIndex,
+            WebRenderer_ComparisonAlphaTestString(expected.alphaTest),
+            WebRenderer_ComparisonCullString(expected.cull),
+            WebRenderer_ComparisonDepthFunctionString(expected.depthFunction),
+            expected.blendEnabled,
+            expected.depthTestEnabled,
+            expected.depthWriteEnabled,
+            retained.baseImageUsed,
+            retained.lightmapUsed,
+            retained.secondaryLightmapUsed,
+            expected.samplerState,
+            differenceFields[index]);
+    }
+}
+
+void LogWorldVertexColorInventory(
+    const WebRendererWorldSurfaceDesc &surface)
+{
+    struct ColorStats
+    {
+        double sum[3]{};
+        float minimum[3]{1.0f, 1.0f, 1.0f};
+        float maximum[3]{};
+        std::uint64_t samples = 0u;
+    };
+    std::array<ColorStats, 3> stats{};
+    for (std::uint32_t batchIndex = 0u;
+         batchIndex < surface.batchCount; ++batchIndex)
+    {
+        const WebRendererWorldBatchDesc &batch = surface.batches[batchIndex];
+        const std::size_t techniqueIndex =
+            static_cast<std::size_t>(batch.technique);
+        if (techniqueIndex >= stats.size() ||
+            batch.firstIndex > surface.indexCount ||
+            batch.indexCount > surface.indexCount - batch.firstIndex)
+            continue;
+        ColorStats &entry = stats[techniqueIndex];
+        for (std::uint32_t offset = 0u; offset < batch.indexCount; ++offset)
+        {
+            const std::uint32_t vertexIndex =
+                surface.indices[batch.firstIndex + offset];
+            if (vertexIndex >= surface.vertexCount)
+                continue;
+            const WebRendererSurfaceVertex &vertex =
+                surface.vertices[vertexIndex];
+            for (std::size_t channel = 0u; channel < 3u; ++channel)
+            {
+                entry.sum[channel] += vertex.color[channel];
+                entry.minimum[channel] = std::min(
+                    entry.minimum[channel], vertex.color[channel]);
+                entry.maximum[channel] = std::max(
+                    entry.maximum[channel], vertex.color[channel]);
+            }
+            ++entry.samples;
+        }
+    }
+    constexpr std::array<const char *, 3> techniqueNames{{
+        "fallback", "base", "lightmapped"}};
+    for (std::size_t index = 0u; index < stats.size(); ++index)
+    {
+        const ColorStats &entry = stats[index];
+        if (entry.samples == 0u)
+            continue;
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Renderer comparison vertex colors %s: "
+            "samples=%llu avg=(%.4f %.4f %.4f) min=(%.4f %.4f %.4f) "
+            "max=(%.4f %.4f %.4f).\n",
+            techniqueNames[index],
+            static_cast<unsigned long long>(entry.samples),
+            entry.sum[0] / entry.samples,
+            entry.sum[1] / entry.samples,
+            entry.sum[2] / entry.samples,
+            entry.minimum[0], entry.minimum[1], entry.minimum[2],
+            entry.maximum[0], entry.maximum[1], entry.maximum[2]);
+    }
+}
+
+void LogRetainedLightmapInventory(
+    const WebRendererWorldSurfaceDesc &surface)
+{
+    std::vector<std::uint32_t> indices;
+    for (const WebRendererRetainedWorldBatch &batch :
+         g_renderer.retainedWorldBatches)
+    {
+        if (batch.lightmapImageIndex != INVALID_WORLD_IMAGE &&
+            std::find(indices.begin(), indices.end(),
+                batch.lightmapImageIndex) == indices.end())
+            indices.push_back(batch.lightmapImageIndex);
+        if (batch.secondaryLightmapImageIndex != INVALID_WORLD_IMAGE &&
+            std::find(indices.begin(), indices.end(),
+                batch.secondaryLightmapImageIndex) == indices.end())
+            indices.push_back(batch.secondaryLightmapImageIndex);
+    }
+    for (const std::uint32_t index : indices)
+    {
+        const WebRendererRetainedWorldImage *image =
+            RetainedWorldImageIdentity(index);
+        if (!image || !image->supported || image->pixels.size() < 4u)
+            continue;
+        std::uint8_t minimum[4]{255u, 255u, 255u, 255u};
+        std::uint8_t maximum[4]{};
+        std::uint64_t sum[4]{};
+        std::uint64_t samples = 0u;
+        for (std::size_t offset = 0u; offset + 3u < image->pixels.size();
+             offset += 4u)
+        {
+            for (std::size_t channel = 0u; channel < 4u; ++channel)
+            {
+                const std::uint8_t value = image->pixels[offset + channel];
+                minimum[channel] = std::min(minimum[channel], value);
+                maximum[channel] = std::max(maximum[channel], value);
+                sum[channel] += value;
+            }
+            ++samples;
+        }
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Renderer comparison lightmap '%s': "
+            "%ux%u RGBA8 samples=%llu avg=(%.2f %.2f %.2f %.2f) "
+            "min=(%u %u %u %u) max=(%u %u %u %u).\n",
+            image->canonicalName.c_str(), image->width, image->height,
+            static_cast<unsigned long long>(samples),
+            samples ? static_cast<double>(sum[0]) / samples : 0.0,
+            samples ? static_cast<double>(sum[1]) / samples : 0.0,
+            samples ? static_cast<double>(sum[2]) / samples : 0.0,
+            samples ? static_cast<double>(sum[3]) / samples : 0.0,
+            static_cast<unsigned int>(minimum[0]),
+            static_cast<unsigned int>(minimum[1]),
+            static_cast<unsigned int>(minimum[2]),
+            static_cast<unsigned int>(minimum[3]),
+            static_cast<unsigned int>(maximum[0]),
+            static_cast<unsigned int>(maximum[1]),
+            static_cast<unsigned int>(maximum[2]),
+            static_cast<unsigned int>(maximum[3]));
+    }
+
+    std::uint64_t currentSum = 0u;
+    std::uint64_t flippedSum = 0u;
+    std::uint64_t currentBlack = 0u;
+    std::uint64_t flippedBlack = 0u;
+    std::uint64_t secondarySum[2][4]{};
+    std::uint64_t secondaryBlack[2]{};
+    std::uint64_t secondarySamples = 0u;
+    std::uint64_t coordinateSamples = 0u;
+    for (std::uint32_t batchIndex = 0u;
+         batchIndex < surface.batchCount; ++batchIndex)
+    {
+        const WebRendererWorldBatchDesc &batch = surface.batches[batchIndex];
+        if (batch.technique !=
+                WebRendererWorldTechnique::BaseTextureLightmap ||
+            batch.firstIndex > surface.indexCount ||
+            batch.indexCount > surface.indexCount - batch.firstIndex)
+            continue;
+        const WebRendererRetainedWorldBatch &retained =
+            g_renderer.retainedWorldBatches[batchIndex];
+        const WebRendererRetainedWorldImage *image =
+            RetainedWorldImageIdentity(retained.lightmapImageIndex);
+        const WebRendererRetainedWorldImage *secondary =
+            RetainedWorldImageIdentity(
+                retained.secondaryLightmapImageIndex);
+        if (!image || !image->supported || image->width == 0u ||
+            image->height == 0u)
+            continue;
+        for (std::uint32_t offset = 0u; offset < batch.indexCount; ++offset)
+        {
+            const std::uint32_t vertexIndex =
+                surface.indices[batch.firstIndex + offset];
+            if (vertexIndex >= surface.vertexCount)
+                continue;
+            const WebRendererSurfaceVertex &vertex =
+                surface.vertices[vertexIndex];
+            const float u = std::clamp(
+                vertex.lightmapCoordinate[0], 0.0f, 1.0f);
+            const float v = std::clamp(
+                vertex.lightmapCoordinate[1], 0.0f, 1.0f);
+            const std::uint32_t x = static_cast<std::uint32_t>(
+                u * static_cast<float>(image->width - 1u) + 0.5f);
+            const std::uint32_t currentY = static_cast<std::uint32_t>(
+                v * static_cast<float>(image->height - 1u) + 0.5f);
+            const std::uint32_t flippedY = image->height - 1u - currentY;
+            const std::uint8_t current = image->pixels[
+                (static_cast<std::size_t>(currentY) * image->width + x) * 4u];
+            const std::uint8_t flipped = image->pixels[
+                (static_cast<std::size_t>(flippedY) * image->width + x) * 4u];
+            currentSum += current;
+            flippedSum += flipped;
+            currentBlack += current <= 4u ? 1u : 0u;
+            flippedBlack += flipped <= 4u ? 1u : 0u;
+            if (secondary && secondary->supported &&
+                secondary->width != 0u && secondary->height != 0u)
+            {
+                const std::uint32_t secondaryX =
+                    static_cast<std::uint32_t>(u * static_cast<float>(
+                        secondary->width - 1u) + 0.5f);
+                const std::uint32_t secondaryY[2]{
+                    static_cast<std::uint32_t>(v * 0.5f *
+                        static_cast<float>(secondary->height - 1u) + 0.5f),
+                    static_cast<std::uint32_t>((0.5f + v * 0.5f) *
+                        static_cast<float>(secondary->height - 1u) + 0.5f),
+                };
+                for (std::size_t lobe = 0u; lobe < 2u; ++lobe)
+                {
+                    const std::size_t pixel =
+                        (static_cast<std::size_t>(secondaryY[lobe]) *
+                            secondary->width + secondaryX) * 4u;
+                    for (std::size_t channel = 0u; channel < 4u; ++channel)
+                        secondarySum[lobe][channel] +=
+                            secondary->pixels[pixel + channel];
+                    secondaryBlack[lobe] +=
+                        secondary->pixels[pixel] <= 4u &&
+                        secondary->pixels[pixel + 1u] <= 4u &&
+                        secondary->pixels[pixel + 2u] <= 4u ? 1u : 0u;
+                }
+                ++secondarySamples;
+            }
+            ++coordinateSamples;
+        }
+    }
+    if (coordinateSamples != 0u)
+    {
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Renderer comparison lightmap vertex samples: "
+            "count=%llu current(avg=%.2f black<=4=%.2f%%) "
+            "v-flipped(avg=%.2f black<=4=%.2f%%).\n",
+            static_cast<unsigned long long>(coordinateSamples),
+            static_cast<double>(currentSum) / coordinateSamples,
+            100.0 * static_cast<double>(currentBlack) / coordinateSamples,
+            static_cast<double>(flippedSum) / coordinateSamples,
+            100.0 * static_cast<double>(flippedBlack) / coordinateSamples);
+    }
+    if (secondarySamples != 0u)
+    {
+        for (std::size_t lobe = 0u; lobe < 2u; ++lobe)
+        {
+            Web_Log(WebLogLevel::Info,
+                "[kisakcod-web] Renderer comparison secondary lightmap "
+                "lobe %zu vertex samples: count=%llu avg=(%.2f %.2f %.2f "
+                "%.2f) blackRGB<=4=%.2f%%.\n",
+                lobe,
+                static_cast<unsigned long long>(secondarySamples),
+                static_cast<double>(secondarySum[lobe][0]) / secondarySamples,
+                static_cast<double>(secondarySum[lobe][1]) / secondarySamples,
+                static_cast<double>(secondarySum[lobe][2]) / secondarySamples,
+                static_cast<double>(secondarySum[lobe][3]) / secondarySamples,
+                100.0 * static_cast<double>(secondaryBlack[lobe]) /
+                    secondarySamples);
+        }
+    }
+}
+
+void LogWorldColorImageInventory()
+{
+    std::vector<std::uint32_t> indices;
+    for (const WebRendererRetainedWorldBatch &batch :
+         g_renderer.retainedWorldBatches)
+    {
+        if (!batch.techniqueName.starts_with(",wc_l_") ||
+            batch.baseImageIndex == INVALID_WORLD_IMAGE ||
+            std::find(indices.begin(), indices.end(), batch.baseImageIndex) !=
+                indices.end())
+        {
+            continue;
+        }
+        indices.push_back(batch.baseImageIndex);
+    }
+    for (const std::uint32_t index : indices)
+    {
+        const WebRendererRetainedWorldImage *image =
+            RetainedWorldImageIdentity(index);
+        if (!image || !image->supported || image->pixels.size() < 4u)
+            continue;
+        std::uint64_t alphaSum = 0u;
+        std::uint64_t transparent = 0u;
+        std::uint64_t opaque = 0u;
+        std::uint8_t alphaMin = 255u;
+        std::uint8_t alphaMax = 0u;
+        const std::size_t pixelCount = image->pixels.size() / 4u;
+        for (std::size_t pixel = 0u; pixel < pixelCount; ++pixel)
+        {
+            const std::uint8_t alpha = image->pixels[pixel * 4u + 3u];
+            alphaSum += alpha;
+            alphaMin = std::min(alphaMin, alpha);
+            alphaMax = std::max(alphaMax, alpha);
+            if (alpha <= 4u) ++transparent;
+            if (alpha >= 250u) ++opaque;
+        }
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Renderer comparison world-color image '%s': "
+            "%ux%u alpha(avg=%.2f min=%u max=%u transparent<=4=%.2f%% "
+            "opaque>=250=%.2f%%).\n",
+            image->canonicalName.c_str(), image->width, image->height,
+            pixelCount > 0u
+                ? static_cast<double>(alphaSum) /
+                    static_cast<double>(pixelCount) : 0.0,
+            static_cast<unsigned int>(alphaMin),
+            static_cast<unsigned int>(alphaMax),
+            pixelCount > 0u
+                ? 100.0 * static_cast<double>(transparent) /
+                    static_cast<double>(pixelCount) : 0.0,
+            pixelCount > 0u
+                ? 100.0 * static_cast<double>(opaque) /
+                    static_cast<double>(pixelCount) : 0.0);
     }
 }
 
@@ -660,6 +1205,9 @@ void ResetGpuHandles()
     g_renderer.sceneFallbackUniform = -1;
     g_renderer.lightmapUniform = -1;
     g_renderer.lightmapEnabledUniform = -1;
+    g_renderer.secondaryLightmapUniform = -1;
+    g_renderer.secondaryLightmapEnabledUniform = -1;
+    g_renderer.premultiplyAlphaUniform = -1;
     g_renderer.alphaTestUniform = -1;
     g_renderer.instanceEnabledUniform = -1;
     g_renderer.uiColorUniform = -1;
@@ -1222,8 +1770,11 @@ bool CreateRendererResources()
         in vec2 v_lightmap_coord;
         uniform sampler2D u_texture;
         uniform sampler2D u_lightmap;
+        uniform sampler2D u_secondary_lightmap;
         uniform float u_texture_enabled;
         uniform float u_lightmap_enabled;
+        uniform float u_secondary_lightmap_enabled;
+        uniform float u_premultiply_alpha;
         uniform float u_scene_fallback;
         uniform int u_alpha_test;
         uniform vec4 u_ui_color;
@@ -1259,11 +1810,29 @@ bool CreateRendererResources()
                 bootstrap_color = texel * v_color;
                 if (u_lightmap_enabled > 0.5)
                 {
-                    vec3 lightmap = texture(u_lightmap, v_lightmap_coord).rgb;
-                    bootstrap_color.rgb *= min(lightmap * 2.0, vec3(1.5));
+                    vec3 primary_lightmap =
+                        texture(u_lightmap, v_lightmap_coord).rgb;
+                    vec3 lighting = primary_lightmap * 2.0;
+                    if (u_secondary_lightmap_enabled > 0.5)
+                    {
+                        // IW3 packs two half-height RGBA lighting lobes into
+                        // the secondary image. The first is the low-frequency
+                        // color term used by this portable diffuse pass. The
+                        // second remains owned by the directional material
+                        // path once normal/tangent inputs are available.
+                        vec3 secondary_lobe = texture(
+                            u_secondary_lightmap,
+                            vec2(v_lightmap_coord.x,
+                                v_lightmap_coord.y * 0.5)).rgb;
+                        lighting = primary_lightmap + secondary_lobe;
+                    }
+                    bootstrap_color.rgb *= min(lighting, vec3(1.5));
                 }
             }
-            out_color = bootstrap_color * u_ui_color;
+            vec4 final_color = bootstrap_color * u_ui_color;
+            if (u_premultiply_alpha > 0.5)
+                final_color.rgb *= final_color.a;
+            out_color = final_color;
         }
     )glsl";
 
@@ -1285,6 +1854,12 @@ bool CreateRendererResources()
     const GLint lightmapUniform = glGetUniformLocation(program, "u_lightmap");
     const GLint lightmapEnabledUniform =
         glGetUniformLocation(program, "u_lightmap_enabled");
+    const GLint secondaryLightmapUniform =
+        glGetUniformLocation(program, "u_secondary_lightmap");
+    const GLint secondaryLightmapEnabledUniform =
+        glGetUniformLocation(program, "u_secondary_lightmap_enabled");
+    const GLint premultiplyAlphaUniform =
+        glGetUniformLocation(program, "u_premultiply_alpha");
     const GLint alphaTestUniform = glGetUniformLocation(program, "u_alpha_test");
     const GLint instanceEnabledUniform =
         glGetUniformLocation(program, "u_instance_enabled");
@@ -1380,6 +1955,9 @@ bool CreateRendererResources()
     if (aspectUniform < 0 || textureUniform < 0 || textureEnabledUniform < 0 ||
         viewProjectionUniform < 0 || sceneFallbackUniform < 0 ||
         lightmapUniform < 0 || lightmapEnabledUniform < 0 ||
+        secondaryLightmapUniform < 0 ||
+        secondaryLightmapEnabledUniform < 0 ||
+        premultiplyAlphaUniform < 0 ||
         alphaTestUniform < 0 || instanceEnabledUniform < 0 ||
         uiColorUniform < 0 ||
         pipelineError != GL_NO_ERROR ||
@@ -1438,6 +2016,10 @@ bool CreateRendererResources()
     g_renderer.sceneFallbackUniform = sceneFallbackUniform;
     g_renderer.lightmapUniform = lightmapUniform;
     g_renderer.lightmapEnabledUniform = lightmapEnabledUniform;
+    g_renderer.secondaryLightmapUniform = secondaryLightmapUniform;
+    g_renderer.secondaryLightmapEnabledUniform =
+        secondaryLightmapEnabledUniform;
+    g_renderer.premultiplyAlphaUniform = premultiplyAlphaUniform;
     g_renderer.alphaTestUniform = alphaTestUniform;
     g_renderer.instanceEnabledUniform = instanceEnabledUniform;
     g_renderer.uiColorUniform = uiColorUniform;
@@ -1662,7 +2244,15 @@ std::uint32_t RetainCanonicalWorldImage(
     kisak::iwi::Rgba8Image decoded;
     kisak::iwi::Error decodeError = kisak::iwi::Error::None;
     bool attemptedDecode = false;
-    if (canonical->mapType == MAPTYPE_2D && hasLoadDef &&
+    if (retained.canonicalName == ",$white" ||
+        retained.canonicalName == "$white")
+    {
+        decoded.width = 1u;
+        decoded.height = 1u;
+        decoded.pixels = {255u, 255u, 255u, 255u};
+        attemptedDecode = true;
+    }
+    else if (canonical->mapType == MAPTYPE_2D && hasLoadDef &&
         loadDef.byteLength > 0 && loadDef.dimensions[0] > 0 &&
         loadDef.dimensions[1] > 0 && loadDef.dimensions[2] == 1)
     {
@@ -1834,10 +2424,15 @@ WebRendererSurfaceResult CopyWorldCommand(
             batch.lightmapIndex = source.lightmapIndex;
             batch.sourceKind = source.sourceKind;
             batch.technique = source.technique;
+            batch.techniqueName = source.techniqueName
+                ? source.techniqueName : "<unsupported-technique>";
+            batch.techniqueType = source.techniqueType;
             batch.baseImageIndex = RetainCanonicalWorldImage(
                 source.baseImage, images, retainedPixelBytes);
             batch.lightmapImageIndex = RetainCanonicalWorldImage(
                 source.lightmapImage, images, retainedPixelBytes);
+            batch.secondaryLightmapImageIndex = RetainCanonicalWorldImage(
+                source.secondaryLightmapImage, images, retainedPixelBytes);
             const bool baseSupported =
                 batch.baseImageIndex != INVALID_WORLD_IMAGE &&
                 images[batch.baseImageIndex].supported;
@@ -1958,6 +2553,9 @@ WebRendererSurfaceResult CopyStaticModelCommand(
             batch.draw.lightmapIndex = 31u;
             batch.draw.sourceKind = draw.sourceKind;
             batch.draw.technique = draw.technique;
+            batch.draw.techniqueName = draw.techniqueName
+                ? draw.techniqueName : "<unsupported-technique>";
+            batch.draw.techniqueType = draw.techniqueType;
             batch.draw.baseImageIndex = RetainCanonicalWorldImage(
                 draw.baseImage, images, retainedPixelBytes);
             const bool baseSupported =
@@ -2087,6 +2685,15 @@ WebRendererSurfaceResult WebRenderer_SetSurface(
 WebRendererSurfaceResult WebRenderer_SetWorldSurface(
     const WebRendererWorldSurfaceDesc &surface)
 {
+    WebRendererComparisonCapture intendedComparison;
+    const bool comparisonCaptured = WebRenderer_CaptureComparison(
+        surface, intendedComparison);
+    if (!comparisonCaptured)
+    {
+        Web_Log(WebLogLevel::Error,
+            "[kisakcod-web] Renderer comparison capture was unavailable for "
+            "this world command.\n");
+    }
     std::vector<WebRendererSurfaceVertex> retainedVertices;
     std::vector<std::uint32_t> retainedIndices;
     std::vector<WebRendererRetainedWorldBatch> retainedBatches;
@@ -2161,6 +2768,12 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
         [](const WebRendererRetainedWorldBatch &batch) {
             return batch.technique == WebRendererWorldTechnique::BaseTexture;
         }));
+    if (comparisonCaptured)
+    {
+        LogWorldVertexColorInventory(surface);
+        LogRetainedLightmapInventory(surface);
+        LogWorldColorImageInventory();
+    }
     Web_Log(WebLogLevel::Info,
         "[kisakcod-web] Renderer retained canonical material world command "
         "(%u vertices, %u indices, %u batches: %zu lightmapped, %zu base-only; "
@@ -2168,6 +2781,8 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
         surface.vertexCount, surface.indexCount, surface.batchCount,
         lightmappedBatches, baseTextureBatches, supportedImages,
         g_renderer.retainedWorldImages.size(), retainedBytes);
+    if (comparisonCaptured)
+        EmitWorldComparison(intendedComparison);
     return WebRendererSurfaceResult::Success;
 }
 
@@ -2275,16 +2890,29 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
         [](const WebRendererRetainedWorldImage &image) {
             return image.supported;
         }));
+    const std::size_t fallbackBatches = static_cast<std::size_t>(std::count_if(
+        g_renderer.retainedStaticModelBatches.begin(),
+        g_renderer.retainedStaticModelBatches.end(),
+        [&](const WebRendererRetainedStaticModelBatch &batch) {
+            return batch.draw.technique ==
+                    WebRendererWorldTechnique::BackendFallback ||
+                batch.draw.baseImageIndex == INVALID_WORLD_IMAGE ||
+                batch.draw.baseImageIndex >=
+                    g_renderer.retainedStaticModelImages.size() ||
+                !g_renderer.retainedStaticModelImages[
+                    batch.draw.baseImageIndex].supported;
+        }));
     Web_Log(WebLogLevel::Info,
         "[kisakcod-web] Renderer retained canonical static XModel command "
         "(%u models, %u surfaces, %u shared vertices, %u indices, %u "
-        "instances, %u batches; %zu/%zu images).\n",
+        "instances, %u batches, %zu fallback; %zu/%zu images).\n",
         scene.modelCount,
         scene.surfaceCount,
         scene.vertexCount,
         scene.indexCount,
         scene.instanceCount,
         scene.batchCount,
+        fallbackBatches,
         supportedImages,
         g_renderer.retainedStaticModelImages.size());
     return WebRendererSurfaceResult::Success;
@@ -2986,6 +3614,12 @@ void ApplyWorldMaterialState(const WebRendererRetainedWorldBatch &batch)
     {
         glDisable(GL_BLEND);
     }
+    const bool shaderPremultipliesAlpha =
+        (state0 & 0x700u) != 0u &&
+        (state0 & 0xfu) == 2u &&
+        ((state0 >> 4u) & 0xfu) == 6u;
+    glUniform1f(g_renderer.premultiplyAlphaUniform,
+        shaderPremultipliesAlpha ? 1.0f : 0.0f);
 
     if (hasCanonicalState && (state1 & 2u) != 0u)
     {
@@ -3189,6 +3823,9 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             sceneGeometryDraw ? 1.0f : 0.0f);
         glUniform1i(g_renderer.textureUniform, 0);
         glUniform1i(g_renderer.lightmapUniform, 1);
+        glUniform1i(g_renderer.secondaryLightmapUniform, 2);
+        glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.premultiplyAlphaUniform, 0.0f);
         glUniform1f(g_renderer.instanceEnabledUniform, 0.0f);
         glUniform4f(g_renderer.uiColorUniform, 1.0f, 1.0f, 1.0f, 1.0f);
     }
@@ -3214,18 +3851,24 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 WorldImage(batch.baseImageIndex);
             const WebRendererRetainedWorldImage *lightmap =
                 WorldImage(batch.lightmapImageIndex);
+            const WebRendererRetainedWorldImage *secondaryLightmap =
+                WorldImage(batch.secondaryLightmapImageIndex);
             const bool fallback = batch.technique ==
                     WebRendererWorldTechnique::BackendFallback ||
                 !base;
             const bool lightmapped = !fallback && lightmap &&
                 batch.technique ==
                     WebRendererWorldTechnique::BaseTextureLightmap;
+            const bool secondaryLightmapped =
+                lightmapped && secondaryLightmap;
             glUniform1f(g_renderer.sceneFallbackUniform,
                 fallback ? 1.0f : 0.0f);
             glUniform1f(g_renderer.textureEnabledUniform,
                 fallback ? 0.0f : 1.0f);
             glUniform1f(g_renderer.lightmapEnabledUniform,
                 lightmapped ? 1.0f : 0.0f);
+            glUniform1f(g_renderer.secondaryLightmapEnabledUniform,
+                secondaryLightmapped ? 1.0f : 0.0f);
             BindWorldTexture(
                 GL_TEXTURE0,
                 base ? base->texture : g_renderer.texture,
@@ -3233,6 +3876,11 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             BindWorldTexture(
                 GL_TEXTURE1,
                 lightmap ? lightmap->texture : g_renderer.texture,
+                0x62u);
+            BindWorldTexture(
+                GL_TEXTURE2,
+                secondaryLightmap
+                    ? secondaryLightmap->texture : g_renderer.texture,
                 0x62u);
             const std::uintptr_t indexOffset =
                 static_cast<std::uintptr_t>(batch.firstIndex) *
@@ -3259,7 +3907,10 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                             WebRendererTextureBinding::EngineImage
                     ? 1.0f : 0.0f);
             glUniform1f(g_renderer.lightmapEnabledUniform, 0.0f);
+            glUniform1f(
+                g_renderer.secondaryLightmapEnabledUniform, 0.0f);
             glUniform1i(g_renderer.alphaTestUniform, 0);
+            glUniform1f(g_renderer.premultiplyAlphaUniform, 0.0f);
         }
         glBindTexture(GL_TEXTURE_2D, g_renderer.texture);
         const std::uintptr_t indexOffset =
@@ -3282,6 +3933,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glBindVertexArray(g_renderer.staticModelVertexArray);
         glUniform1f(g_renderer.instanceEnabledUniform, 1.0f);
         glUniform1f(g_renderer.lightmapEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
         for (const WebRendererRetainedStaticModelBatch &batch :
              g_renderer.retainedStaticModelBatches)
         {
@@ -3323,6 +3975,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glBindVertexArray(g_renderer.dynamicModelVertexArray);
         glUniform1f(g_renderer.instanceEnabledUniform, 0.0f);
         glUniform1f(g_renderer.lightmapEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
         for (const WebRendererRetainedWorldBatch &batch :
              g_renderer.retainedDynamicModelBatches)
         {
@@ -3363,8 +4016,10 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1f(g_renderer.aspectUniform, 1.0f);
         glUniform1f(g_renderer.sceneFallbackUniform, 0.0f);
         glUniform1f(g_renderer.lightmapEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.instanceEnabledUniform, 0.0f);
         glUniform1i(g_renderer.alphaTestUniform, 0);
+        glUniform1f(g_renderer.premultiplyAlphaUniform, 0.0f);
         glDisable(GL_DEPTH_TEST);
         glDepthMask(GL_FALSE);
         glDisable(GL_CULL_FACE);

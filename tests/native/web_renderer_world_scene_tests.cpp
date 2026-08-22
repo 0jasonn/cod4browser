@@ -135,6 +135,7 @@ void TestCanonicalMaterialAndLightmapIdentitySplitBatches()
     GfxImage baseImageA{};
     GfxImage baseImageB{};
     GfxImage lightmapImage{};
+    GfxImage secondaryLightmapImage{};
     MaterialTextureDef textureA{};
     textureA.semantic = 2u;
     textureA.samplerState = 0x22u;
@@ -154,7 +155,7 @@ void TestCanonicalMaterialAndLightmapIdentitySplitBatches()
     materialB.info.name = "material/b";
     materialB.textureTable = &textureB;
     materialB.stateBitsEntry[TECHNIQUE_LIT_INDEX] = 1u;
-    GfxLightmapArray lightmap{&lightmapImage, nullptr};
+    GfxLightmapArray lightmap{&lightmapImage, &secondaryLightmapImage};
     fixture.world.lightmapCount = 1;
     fixture.world.lightmaps = &lightmap;
     fixture.surfaces[0].material = &materialA;
@@ -174,6 +175,7 @@ void TestCanonicalMaterialAndLightmapIdentitySplitBatches()
     assert(std::strcmp(first.materialName, "material/a") == 0);
     assert(first.baseImage == &baseImageA);
     assert(first.lightmapImage == &lightmapImage);
+    assert(first.secondaryLightmapImage == &secondaryLightmapImage);
     assert(first.samplerState == 0x22u);
     assert(first.stateBits[0] == stateBits[0].loadBits[0]);
     assert(first.stateBits[1] == stateBits[0].loadBits[1]);
@@ -232,6 +234,100 @@ void TestCanonicalLmTechniqueNameSelectsPrimaryLightmap()
         WebRendererWorldTechnique::BaseTextureLightmap);
 }
 
+void TestRemappedTechniqueSetDrivesPortableSelection()
+{
+    Fixture fixture;
+    MaterialTechnique litTechnique{};
+    litTechnique.name = "lm_remapped_world";
+    litTechnique.passCount = 1u;
+    MaterialTechniqueSet directTechniqueSet{};
+    MaterialTechniqueSet remappedTechniqueSet{};
+    remappedTechniqueSet.techniques[TECHNIQUE_LIT_INDEX] = &litTechnique;
+    directTechniqueSet.remappedTechniqueSet = &remappedTechniqueSet;
+    GfxStateBits stateBits[1]{{{0x18008800u, 0x0000000du}}};
+    GfxImage baseImage{};
+    GfxImage lightmapImage{};
+    GfxImage secondaryLightmapImage{};
+    MaterialTextureDef texture{};
+    texture.semantic = 2u;
+    texture.u.image = &baseImage;
+    Material material{};
+    material.info.name = "material/remapped";
+    material.textureCount = 1u;
+    material.textureTable = &texture;
+    material.techniqueSet = &directTechniqueSet;
+    material.stateBitsEntry[TECHNIQUE_LIT_INDEX] = 0u;
+    material.stateBitsCount = 1u;
+    material.stateBitsTable = stateBits;
+    GfxLightmapArray lightmap{&lightmapImage, &secondaryLightmapImage};
+    fixture.world.lightmapCount = 1;
+    fixture.world.lightmaps = &lightmap;
+    for (GfxSurface &surface : fixture.surfaces)
+    {
+        surface.material = &material;
+        surface.lightmapIndex = 0u;
+    }
+
+    WebRendererWorldSceneCommand command;
+    assert(WebRenderer_BuildWorldSceneCommand(
+        fixture.world, fixture.view, command) ==
+        WebRendererWorldSceneResult::Success);
+    assert(command.batches.size() == 1u);
+    assert(command.batches[0].technique ==
+        WebRendererWorldTechnique::BaseTextureLightmap);
+    assert(std::strcmp(command.batches[0].techniqueName,
+        "lm_remapped_world") == 0);
+    assert(command.batches[0].secondaryLightmapImage ==
+        &secondaryLightmapImage);
+}
+
+void TestCanonicalWorldColorAliasUsesLitStateAndLightmaps()
+{
+    Fixture fixture;
+    MaterialTechniqueSet techniqueSet{};
+    techniqueSet.name = ",wc_l_sm_b0c0n0s0";
+    GfxStateBits stateBits[2]{{{0u, 0u}},
+                              {{0x18008812u, 0x0000000du}}};
+    GfxImage baseImage{};
+    GfxImage lightmapImage{};
+    GfxImage secondaryLightmapImage{};
+    MaterialTextureDef texture{};
+    texture.semantic = 2u;
+    texture.u.image = &baseImage;
+    Material material{};
+    material.info.name = "wc/material";
+    material.textureCount = 1u;
+    material.textureTable = &texture;
+    material.techniqueSet = &techniqueSet;
+    std::fill(std::begin(material.stateBitsEntry),
+        std::end(material.stateBitsEntry), 0xffu);
+    material.stateBitsEntry[TECHNIQUE_LIT_INDEX] = 1u;
+    material.stateBitsCount = 2u;
+    material.stateBitsTable = stateBits;
+    GfxLightmapArray lightmap{&lightmapImage, &secondaryLightmapImage};
+    fixture.world.lightmapCount = 1;
+    fixture.world.lightmaps = &lightmap;
+    for (GfxSurface &surface : fixture.surfaces)
+    {
+        surface.material = &material;
+        surface.lightmapIndex = 0u;
+    }
+
+    WebRendererWorldSceneCommand command;
+    assert(WebRenderer_BuildWorldSceneCommand(
+        fixture.world, fixture.view, command) ==
+        WebRendererWorldSceneResult::Success);
+    assert(command.batches.size() == 1u);
+    const WebRendererWorldBatchDesc &batch = command.batches[0];
+    assert(batch.technique ==
+        WebRendererWorldTechnique::BaseTextureLightmap);
+    assert(std::strcmp(batch.techniqueName, ",wc_l_sm_b0c0n0s0") == 0);
+    assert(batch.stateBits[0] == 0x18008812u);
+    assert(batch.stateBits[1] == 0x0000000du);
+    assert(batch.lightmapImage == &lightmapImage);
+    assert(batch.secondaryLightmapImage == &secondaryLightmapImage);
+}
+
 void TestMalformedLocalIndexIsRejectedAtomically()
 {
     Fixture fixture;
@@ -278,6 +374,25 @@ void TestConservativeVisibilityIsDisabledForMovingCanonicalView()
         WebRendererWorldSceneResult::Success);
     assert(command.surfaceCount == 3u);
 }
+
+void TestCanonicalDpvsRangesOverrideNonContiguousModelCount()
+{
+    Fixture fixture;
+    fixture.model.surfaceCountNoDecal = 1u;
+    fixture.world.dpvs.litSurfsBegin = 0u;
+    fixture.world.dpvs.litSurfsEnd = 2u;
+    fixture.world.dpvs.decalSurfsBegin = 2u;
+    fixture.world.dpvs.decalSurfsEnd = 3u;
+    fixture.world.dpvs.emissiveSurfsBegin = 3u;
+    fixture.world.dpvs.emissiveSurfsEnd = 3u;
+    WebRendererWorldSceneCommand command;
+    assert(WebRenderer_BuildWorldSceneCommand(
+        fixture.world, fixture.view, command) ==
+        WebRendererWorldSceneResult::Success);
+    assert(command.surfaceCount == 3u);
+    assert(command.firstSurfaceIndex == 0u);
+    assert(command.lastSurfaceIndex == 2u);
+}
 } // namespace
 
 int main()
@@ -285,8 +400,11 @@ int main()
     TestCanonicalOpaqueSurfacesAreBatchedInWorldOrder();
     TestCanonicalMaterialAndLightmapIdentitySplitBatches();
     TestCanonicalLmTechniqueNameSelectsPrimaryLightmap();
+    TestRemappedTechniqueSetDrivesPortableSelection();
+    TestCanonicalWorldColorAliasUsesLitStateAndLightmaps();
     TestMalformedLocalIndexIsRejectedAtomically();
     TestSkyPassIsNotFoldedIntoOpaqueWorldBatch();
     TestConservativeVisibilityIsDisabledForMovingCanonicalView();
+    TestCanonicalDpvsRangesOverrideNonContiguousModelCount();
     return 0;
 }

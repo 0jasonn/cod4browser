@@ -215,6 +215,7 @@ add_executable(KisakCOD-web
     "${SRC_DIR}/web/web_openal_proxy.cpp"
       "${SRC_DIR}/web/web_renderer_frontend.cpp"
       "${SRC_DIR}/web/web_renderer_code_mesh.cpp"
+      "${SRC_DIR}/web/web_renderer_comparison.cpp"
       "${SRC_DIR}/web/web_renderer_dobj_scene.cpp"
       "${SRC_DIR}/web/web_renderer_dobj_lod.cpp"
       "${SRC_DIR}/web/web_renderer_surface.cpp"

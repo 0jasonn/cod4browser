@@ -52,11 +52,54 @@
 #include <cstdint>
 #include <cstring>
 #include <new>
+#include <string>
 #include <vector>
 
 enum CubemapShot : int;
 
 extern GfxWorld s_world;
+
+namespace
+{
+void __cdecl CollectTechniqueSet(XAssetHeader header, void *context)
+{
+    if (!header.techniqueSet || !context) return;
+    static_cast<std::vector<MaterialTechniqueSet *> *>(context)->push_back(
+        header.techniqueSet);
+}
+
+std::uint32_t ResolveTechniqueSetRemaps()
+{
+    std::vector<MaterialTechniqueSet *> techniqueSets;
+    DB_EnumXAssets(ASSET_TYPE_TECHNIQUE_SET,
+        CollectTechniqueSet, &techniqueSets, true);
+
+    std::uint32_t remappedCount = 0u;
+    for (MaterialTechniqueSet *source : techniqueSets)
+    {
+        if (!source || !source->name ||
+            std::strncmp(source->name, "sm2/", 4u) == 0)
+        {
+            if (source) source->remappedTechniqueSet = source;
+            continue;
+        }
+        const std::string targetName = std::string("sm2/") + source->name;
+        const auto target = std::find_if(techniqueSets.begin(),
+            techniqueSets.end(), [&targetName](const MaterialTechniqueSet *set)
+            {
+                return set && set->name && targetName == set->name;
+            });
+        if (target == techniqueSets.end())
+        {
+            source->remappedTechniqueSet = source;
+            continue;
+        }
+        source->remappedTechniqueSet = *target;
+        ++remappedCount;
+    }
+    return remappedCount;
+}
+}
 
 // These owners live in the native window, warning, and material frontends.
 // The browser replaces those frontends but consumes the canonical renderer
@@ -374,6 +417,12 @@ void __cdecl R_LoadWorld(char *name, int *checksum, int)
         Com_Error(ERR_DROP,
             "R_LoadWorld: canonical GfxWorld '%s' is not published", name);
     if (checksum) *checksum = static_cast<int>(s_world.checksum);
+    const std::uint32_t remappedTechniqueSets =
+        ResolveTechniqueSetRemaps();
+    Web_Log(WebLogLevel::Info,
+        "[kisakcod-web] Resolved %u canonical technique-set SM2 aliases "
+        "after zone publication.\n",
+        remappedTechniqueSets);
     g_rendererWorldReady = true;
     g_gameDrivenFrameReported = false;
     g_worldSceneSubmitted = false;
@@ -898,6 +947,14 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             s_world.surfaceCount,
             s_world.modelCount > 0 ? s_world.models[0].surfaceCount : 0u,
             s_world.skySurfCount);
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Canonical world draw ranges: lit=[%u,%u), "
+            "decal=[%u,%u), emissive=[%u,%u), model-no-decal=%u.\n",
+            s_world.dpvs.litSurfsBegin, s_world.dpvs.litSurfsEnd,
+            s_world.dpvs.decalSurfsBegin, s_world.dpvs.decalSurfsEnd,
+            s_world.dpvs.emissiveSurfsBegin, s_world.dpvs.emissiveSurfsEnd,
+            s_world.modelCount > 0
+                ? s_world.models[0].surfaceCountNoDecal : 0u);
         std::uint32_t indexedLightmapSurfaces = 0u;
         std::uint32_t litTechniqueSurfaces = 0u;
         std::uint32_t primaryLightmapSamplerSurfaces = 0u;
@@ -971,6 +1028,47 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                     WebRenderer_SurfaceResultString(submission));
                 return;
             }
+            std::vector<const Material *> unsupportedMaterials;
+            for (const WebRendererWorldBatchDesc &batch : command.batches)
+            {
+                if (batch.technique !=
+                        WebRendererWorldTechnique::BackendFallback ||
+                    !batch.materialIdentity ||
+                    std::find(unsupportedMaterials.begin(),
+                        unsupportedMaterials.end(), batch.materialIdentity) !=
+                        unsupportedMaterials.end())
+                {
+                    continue;
+                }
+                unsupportedMaterials.push_back(batch.materialIdentity);
+                const Material *material = batch.materialIdentity;
+                const MaterialTechniqueSet *direct = material->techniqueSet;
+                const MaterialTechniqueSet *remapped = direct
+                    ? direct->remappedTechniqueSet : nullptr;
+                std::uint64_t directMask = 0u;
+                std::uint64_t remappedMask = 0u;
+                for (std::uint32_t type = 0u; type < 34u; ++type)
+                {
+                    if (direct && direct->techniques[type])
+                        directMask |= std::uint64_t{1u} << type;
+                    if (remapped && remapped->techniques[type])
+                        remappedMask |= std::uint64_t{1u} << type;
+                }
+                Web_Log(WebLogLevel::Info,
+                    "[kisakcod-web] Unsupported world material '%s': "
+                    "sort=%u stateCount=%u entries(unlit=%u emissive=%u "
+                    "lit=%u) techniqueMasks(direct=%08x remapped=%08x), "
+                    "techniqueSet='%s', remapped='%s'.\n",
+                    material->info.name ? material->info.name : "<unnamed>",
+                    material->info.sortKey, material->stateBitsCount,
+                    material->stateBitsEntry[4],
+                    material->stateBitsEntry[5],
+                    material->stateBitsEntry[7],
+                    static_cast<std::uint32_t>(directMask),
+                    static_cast<std::uint32_t>(remappedMask),
+                    direct && direct->name ? direct->name : "<none>",
+                    remapped && remapped->name ? remapped->name : "<none>");
+            }
             g_worldSceneSurfaceCount = command.surfaceCount;
             g_worldSceneVertexCount =
                 static_cast<std::uint32_t>(command.vertices.size());
@@ -978,7 +1076,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                 static_cast<std::uint32_t>(command.indices.size());
             g_worldSceneSubmitted = true;
             Web_Log(WebLogLevel::Info,
-                "[kisakcod-web] Renderer frontend submitted %u opaque world "
+                "[kisakcod-web] Renderer frontend submitted %u canonical world "
                 "surfaces in %zu canonical material/lightmap batches "
                 "(%u vertices, %u indices) from cgame view.\n",
                 g_worldSceneSurfaceCount, command.batches.size(),

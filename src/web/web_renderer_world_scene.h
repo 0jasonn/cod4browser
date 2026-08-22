@@ -33,8 +33,10 @@ enum class WebRendererWorldSceneResult : std::uint8_t
 };
 
 // Builds material/lightmap-aware portable world batches from the canonical
-// renderer-owned GfxWorld. Surface order follows the Kisak world-model range
-// and contiguous batches preserve that order while exposing Material identity,
+// renderer-owned GfxWorld. Surface order follows Kisak's canonical lit, decal,
+// and emissive camera ranges; fixtures without initialized DPVS ranges fall
+// back to the world-model range. Contiguous batches preserve that order while
+// exposing Material identity,
 // first-pass state bits, base GfxImage identity, and lightmap GfxImage identity.
 // Conservative visibility is deliberately disabled for this initial WebGL2
 // backend: the static command remains valid as the canonical cgame camera

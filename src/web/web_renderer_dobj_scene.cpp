@@ -50,16 +50,21 @@ const GfxImage *FindBaseImage(
 }
 
 bool SelectTechnique(
-    const Material *material, std::uint32_t stateBits[2]) noexcept
+    const Material *material, std::uint32_t stateBits[2],
+    const char *&techniqueName, std::uint8_t &techniqueType) noexcept
 {
     if (!material || !material->techniqueSet || !material->stateBitsTable)
         return false;
+    const MaterialTechniqueSet *techniqueSet =
+        material->techniqueSet->remappedTechniqueSet
+            ? material->techniqueSet->remappedTechniqueSet
+            : material->techniqueSet;
     for (const std::uint32_t type : {
         TECHNIQUE_LIT_INDEX, TECHNIQUE_UNLIT_INDEX,
         TECHNIQUE_EMISSIVE_INDEX})
     {
         const MaterialTechnique *technique =
-            material->techniqueSet->techniques[type];
+            techniqueSet->techniques[type];
         const std::uint8_t entry = material->stateBitsEntry[type];
         if (!technique || technique->passCount == 0u || entry == 0xffu ||
             entry >= material->stateBitsCount)
@@ -68,7 +73,26 @@ bool SelectTechnique(
         }
         stateBits[0] = material->stateBitsTable[entry].loadBits[0];
         stateBits[1] = material->stateBitsTable[entry].loadBits[1];
+        techniqueName = technique->name;
+        techniqueType = static_cast<std::uint8_t>(type);
         return true;
+    }
+    if (material->techniqueSet->name &&
+        material->techniqueSet->name[0] == ',')
+    {
+        for (const std::uint32_t type : {
+            TECHNIQUE_LIT_INDEX, TECHNIQUE_UNLIT_INDEX,
+            TECHNIQUE_EMISSIVE_INDEX})
+        {
+            const std::uint8_t entry = material->stateBitsEntry[type];
+            if (entry == 0xffu || entry >= material->stateBitsCount)
+                continue;
+            stateBits[0] = material->stateBitsTable[entry].loadBits[0];
+            stateBits[1] = material->stateBitsTable[entry].loadBits[1];
+            techniqueName = material->techniqueSet->name;
+            techniqueType = static_cast<std::uint8_t>(type);
+            return true;
+        }
     }
     return false;
 }
@@ -252,7 +276,8 @@ WebRendererWorldBatchDesc MakeDraw(
     // of the canonical material. Preserve canonical state when one of the
     // common passes supplies it, but a DB-owned color image remains enough to
     // use that supported subset even when the original shader itself is not.
-    SelectTechnique(material, draw.stateBits);
+    SelectTechnique(material, draw.stateBits,
+        draw.techniqueName, draw.techniqueType);
     draw.technique = draw.baseImage
         ? WebRendererWorldTechnique::BaseTexture
         : WebRendererWorldTechnique::BackendFallback;
