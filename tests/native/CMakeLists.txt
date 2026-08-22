@@ -650,6 +650,7 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "-sENVIRONMENT=node"
         "-sEXIT_RUNTIME=1"
         "-sNO_DISABLE_EXCEPTION_CATCHING"
+        "-sALLOW_MEMORY_GROWTH=1"
     )
     target_link_options(web_renderer_mark_mesh_tests PRIVATE
         "-sENVIRONMENT=node"

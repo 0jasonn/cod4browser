@@ -1,7 +1,10 @@
 #include <database/db_generated_sound_platform.h>
 #include <sound/snd_alias_types.h>
-#include <sound/snd_public.h>
 #include <universal/q_shared.h>
+
+#if defined(KISAK_WEB) && defined(KISAK_OPENAL)
+void __cdecl SND_SetData(MssSoundCOD4 *sound, void *sourceData);
+#endif
 
 void DB_PlatformSetLoadedSoundData(MssSoundCOD4 *sound, void *sourceData)
 {

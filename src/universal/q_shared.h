@@ -46,7 +46,7 @@
 #define _vsnprintf vsnprintf
 #define CPUSTRING "web-wasm32"
 using BOOL = int;
-#ifndef __forceinline
+#if !defined(_MSC_VER) && !defined(__forceinline)
 #define __forceinline inline __attribute__((always_inline))
 #endif
 #endif
