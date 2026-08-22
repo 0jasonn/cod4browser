@@ -284,7 +284,8 @@ int32_t __cdecl DB_GetXAssetTypeSize(int32_t type)
     return DB_GetXAssetSizeHandler[type]();
 }
 
-#if !defined(KISAK_DB_REGISTRY_LIFECYCLE_SLICE)
+#if !defined(KISAK_DB_REGISTRY_LIFECYCLE_SLICE) \
+    && !defined(KISAK_DB_POOL_STANDALONE)
 const char *__cdecl DB_GetXAssetTypeName(uint32_t type)
 {
     if (type > 0x20)

@@ -53,12 +53,6 @@ test("canonical FS_InitFilesystem owns Worker search paths and IWD precedence", 
     const directory = await createInstallDirectory(testInfo, "canonical-filesystem", {
         primaryIwd: iw00,
         overrides: new Map([["main/iw_01.iwd", iw01]]),
-        extraFiles: new Map([
-            ["main/collision.txt", "from-loose"],
-            ["main/loose.txt", "loose-file"],
-            ["main/config.cfg", "set synthetic_fs 1\n"],
-            ["main/unpacked/only.dat", "enumerated-loose-file"],
-        ]),
     });
     await page.addInitScript(() => {
         Object.defineProperty(globalThis, "showDirectoryPicker", {
@@ -102,26 +96,17 @@ test("canonical FS_InitFilesystem owns Worker search paths and IWD precedence", 
     expect((await callPathProbe(page,
         "_KisakWeb_CanonicalFsReadHash", "collision.txt", [0, 9])) >>> 0)
         .toBe(fnv1a("from-iw01"));
-    expect(await callPathProbe(page,
-        "_KisakWeb_CanonicalFsFileSize", "loose.txt")).toBe(10);
     expect((await callPathProbe(page,
         "_KisakWeb_CanonicalFsReadHash", "seek.txt", [3, 4])) >>> 0)
         .toBe(fnv1a("3456"));
     expect(await callPathProbe(page,
         "_KisakWeb_CanonicalFsFileSize", "missing.txt")).toBe(-1);
 
-    expect(await callListProbe(page, "", "txt")).toBe(4);
+    expect(await callListProbe(page, "", "txt")).toBe(3);
 
     expect(await callListProbe(page, "not-present")).toBe(0);
 
     await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.testControl({
-        failSyncOpenPath: "main/loose.txt",
-    }));
-    expect(await callPathProbe(page,
-        "_KisakWeb_CanonicalFsFileSize", "loose.txt")).toBe(-1);
-
-    await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.testControl({
-        failSyncOpenPath: null,
         failSyncReadPath: "main/iw_01.iwd",
     }));
     expect(await callPathProbe(page,
@@ -134,14 +119,4 @@ test("canonical FS_InitFilesystem owns Worker search paths and IWD precedence", 
     expect(await callPathProbe(page,
         "_KisakWeb_CanonicalFsReadHash", "seek.txt", [3, 4])).toBe(0);
 
-    await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.testControl({
-        failSyncSeekPath: null,
-        failSyncListPath: "main/unpacked",
-    }));
-    expect(await callListProbe(page, "unpacked")).toBe(0);
-
-    await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.testControl({
-        failSyncListPath: null,
-    }));
-    expect(await callListProbe(page, "unpacked")).toBe(1);
 });

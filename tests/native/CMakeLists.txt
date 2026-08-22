@@ -10,6 +10,14 @@ option(KISAK_BUILD_FUZZERS "Build the native imported-asset parser fuzz target" 
 
 get_filename_component(KISAK_REPOSITORY_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 
+# The portable Linux test host compiles selected IW3 headers without the
+# Win32 platform preamble that normally provides this calling-convention
+# keyword. On non-MSVC native hosts it has no ABI effect.
+if (NOT MSVC AND NOT EMSCRIPTEN AND
+    NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    add_compile_definitions(__cdecl=)
+endif()
+
 add_executable(iwd_archive_tests
     "${CMAKE_CURRENT_LIST_DIR}/iwd_archive_tests.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/qcommon/iwd_archive.cpp"
@@ -671,6 +679,7 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     endif()
     set_target_properties(web_renderer_surface_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_renderer_world_scene_tests PROPERTIES SUFFIX ".cjs")
+    set_target_properties(web_renderer_comparison_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_renderer_static_model_scene_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_renderer_fx_model_scene_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_renderer_particle_cloud_scene_tests PROPERTIES SUFFIX ".cjs")
@@ -734,6 +743,8 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_renderer_surface_tests>")
     add_test(NAME web_renderer_world_scene_tests
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_renderer_world_scene_tests>")
+    add_test(NAME web_renderer_comparison_tests
+        COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_renderer_comparison_tests>")
     add_test(NAME web_renderer_static_model_scene_tests
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_renderer_static_model_scene_tests>")
     add_test(NAME web_renderer_fx_model_scene_tests
