@@ -17,22 +17,22 @@ const IWI_PATH = "images/synthetic_engine_asset.iwi";
 function expectProductionWorldSurfaceUploads(uploads)
 {
     const vertexUpload = uploads.find(
-        (upload) => upload.target === "array" && upload.byteLength === 224,
+        (upload) => upload.target === "array" && upload.byteLength === 288,
     );
     const indexUpload = uploads.find(
         (upload) => upload.target === "element-array" && upload.byteLength === 12,
     );
     expect(vertexUpload, "the converted world vertices should be uploaded").toBeTruthy();
     expect(indexUpload, "the converted world indices should be uploaded").toBeTruthy();
-    expect(vertexUpload.bytes).toHaveLength(224);
+    expect(vertexUpload.bytes).toHaveLength(288);
     expect(indexUpload.bytes).toHaveLength(12);
 
     const vertexValues = new Float32Array(Uint8Array.from(vertexUpload.bytes).buffer);
     const expectedVertices = [
-        [-0.5, 0.5, 0, 224 / 255, 96 / 255, 32 / 255, 0, 0, 0, 0, 0, 0, 0],
-        [-0.5, -0.5, 0, 48 / 255, 176 / 255, 80 / 255, 0, 1, 0, 1, 0, 0, 0],
-        [0.5, -0.5, 0, 64 / 255, 112 / 255, 232 / 255, 1, 1, 1, 1, 0, 0, 0],
-        [0.5, 0.5, 0, 240 / 255, 208 / 255, 72 / 255, 1, 0, 1, 0, 0, 0, 0],
+        [-0.5, 0.5, 0, 224 / 255, 96 / 255, 32 / 255, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [-0.5, -0.5, 0, 48 / 255, 176 / 255, 80 / 255, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+        [0.5, -0.5, 0, 64 / 255, 112 / 255, 232 / 255, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0],
+        [0.5, 0.5, 0, 240 / 255, 208 / 255, 72 / 255, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
     ].flat();
     expect([...vertexValues]).toHaveLength(expectedVertices.length);
     for (let index = 0; index < expectedVertices.length; index += 1) {
@@ -468,9 +468,9 @@ test("loads a stored IWI through the engine cache and releases its bytes", async
         indexCount: 6,
         drawFirstIndex: 0,
         drawIndexCount: 6,
-        vertexBytes: 224,
+        vertexBytes: 288,
         indexBytes: 12,
-        recoveryBytes: 236,
+        recoveryBytes: 300,
         drawCount: 1,
         topology: "triangle-list",
         textureBinding: "engine-image",
@@ -547,7 +547,7 @@ test("loads a stored IWI through the engine cache and releases its bytes", async
         state: "ready",
         vertexCount: 4,
         indexCount: 6,
-        recoveryBytes: 236,
+        recoveryBytes: 300,
         submissionGeneration: surfaceSubmissionGeneration,
         resident: true,
     });
@@ -587,12 +587,12 @@ test("loads a stored IWI through the engine cache and releases its bytes", async
     expect(surfaceLostIndex).toBeGreaterThanOrEqual(0);
     expect(surfaceReadyIndex).toBeGreaterThan(surfaceLostIndex);
     expect(surfaceLifecycle[surfaceLostIndex]).toMatchObject({
-        recoveryBytes: 236,
+        recoveryBytes: 300,
         submissionGeneration: surfaceSubmissionGeneration,
         resident: false,
     });
     expect(surfaceLifecycle[surfaceReadyIndex]).toMatchObject({
-        recoveryBytes: 236,
+        recoveryBytes: 300,
         submissionGeneration: surfaceSubmissionGeneration,
         resident: true,
     });
@@ -724,7 +724,7 @@ test("a synchronous ready listener cannot publish texture state after cancellati
         state: "ready",
         vertexCount: 4,
         indexCount: 6,
-        recoveryBytes: 236,
+        recoveryBytes: 300,
         resident: true,
     });
     expect(result.surfaceEvents.some((event) =>
