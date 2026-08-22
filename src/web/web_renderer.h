@@ -69,6 +69,10 @@ struct WebRendererSceneViewDesc
     // same contiguous values as a column-major uniform, which supplies the
     // transpose required by GLSL's matrix * column-vector convention.
     float viewProjectionMatrix[4][4];
+    // Native renderFxFlags bit 1 selects a smaller near clip and a reserved
+    // depth range for first-person models. Keep the alternate projection at
+    // the renderer boundary so ordinary scene geometry remains unchanged.
+    float depthHackViewProjectionMatrix[4][4];
     std::int32_t time;
     float zNear;
     std::int32_t localClientNum;
@@ -199,6 +203,7 @@ struct WebRendererWorldBatchDesc
     std::uint8_t techniqueType;
     std::uint8_t customSamplerFlags;
     std::uint16_t techniqueFlags;
+    bool depthHack;
     const char *pixelShaderName;
     std::uint32_t pixelShaderProgramHash;
     // CONST_SRC_CODE_BASE_LIGHTING_COORDS for non-instanced DObj draws.

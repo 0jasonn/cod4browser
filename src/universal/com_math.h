@@ -1,6 +1,7 @@
 #pragma once
 
 #include <universal/assertive.h>
+#include <universal/com_random.h>
 #include <universal/cplane_types.h>
 #include <universal/packed_unit_vec.h>
 

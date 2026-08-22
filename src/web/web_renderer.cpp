@@ -73,6 +73,7 @@ struct WebRendererRetainedWorldBatch
     std::uint8_t techniqueType = 0xffu;
     std::uint8_t customSamplerFlags = 0u;
     std::uint16_t techniqueFlags = 0u;
+    bool depthHack = false;
     std::string pixelShaderName;
     std::uint32_t pixelShaderProgramHash = 0u;
     float modelLightingCoordinates[3]{};
@@ -214,6 +215,7 @@ struct WebRendererState
     std::uint32_t sceneViewVertexCount = 0u;
     std::uint32_t sceneViewIndexCount = 0u;
     std::array<float, 16> sceneViewProjection{};
+    std::array<float, 16> sceneDepthHackViewProjection{};
     std::uint32_t sceneViewX = 0u;
     std::uint32_t sceneViewY = 0u;
     std::uint32_t sceneViewWidth = 0u;
@@ -591,6 +593,7 @@ void EmitWorldComparison(
             destination.techniqueType = source.techniqueType;
             destination.customSamplerFlags = source.customSamplerFlags;
             destination.techniqueFlags = source.techniqueFlags;
+            destination.depthHack = source.depthHack;
             destination.pixelShaderName = source.pixelShaderName.c_str();
             destination.pixelShaderProgramHash =
                 source.pixelShaderProgramHash;
@@ -2723,6 +2726,7 @@ WebRendererSurfaceResult CopyWorldCommand(
             batch.techniqueType = source.techniqueType;
             batch.customSamplerFlags = source.customSamplerFlags;
             batch.techniqueFlags = source.techniqueFlags;
+            batch.depthHack = source.depthHack;
             batch.pixelShaderName = source.pixelShaderName
                 ? source.pixelShaderName : "<unavailable-pixel-shader>";
             batch.pixelShaderProgramHash = source.pixelShaderProgramHash;
@@ -3829,9 +3833,12 @@ bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
         if (!std::isfinite(axis[index])) return false;
     }
     const float *const viewProjection = &view.viewProjectionMatrix[0][0];
+    const float *const depthHackViewProjection =
+        &view.depthHackViewProjectionMatrix[0][0];
     for (std::size_t index = 0; index < 16u; ++index)
     {
-        if (!std::isfinite(viewProjection[index])) return false;
+        if (!std::isfinite(viewProjection[index]) ||
+            !std::isfinite(depthHackViewProjection[index])) return false;
     }
     if (!std::isfinite(view.tanHalfFovX) ||
         !std::isfinite(view.tanHalfFovY) || !std::isfinite(view.zNear) ||
@@ -3860,6 +3867,8 @@ bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
     g_renderer.sceneViewHeight = view.height;
     std::copy(viewProjection, viewProjection + 16u,
         g_renderer.sceneViewProjection.begin());
+    std::copy(depthHackViewProjection, depthHackViewProjection + 16u,
+        g_renderer.sceneDepthHackViewProjection.begin());
     g_renderer.sceneViewWorldName = view.worldName;
     if (view.geometrySubmitted)
     {
@@ -4383,6 +4392,11 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         for (const WebRendererRetainedWorldBatch &batch :
              g_renderer.retainedDynamicModelBatches)
         {
+            glUniformMatrix4fv(g_renderer.viewProjectionUniform, 1, GL_FALSE,
+                batch.depthHack
+                    ? g_renderer.sceneDepthHackViewProjection.data()
+                    : g_renderer.sceneViewProjection.data());
+            glDepthRangef(0.0f, batch.depthHack ? 0.015625f : 1.0f);
             ApplyWorldMaterialState(batch);
             const WebRendererRetainedWorldImage *base = RetainedImage(
                 g_renderer.retainedDynamicModelImages,
@@ -4433,6 +4447,9 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 reinterpret_cast<const void *>(indexOffset));
             ++completedDraws;
         }
+        glDepthRangef(0.0f, 1.0f);
+        glUniformMatrix4fv(g_renderer.viewProjectionUniform, 1, GL_FALSE,
+            g_renderer.sceneViewProjection.data());
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         glActiveTexture(GL_TEXTURE0);
     }

@@ -3098,6 +3098,13 @@ void __cdecl PM_GroundTrace(pmove_t *pm, pml_t *pml)
                     (ps->velocity[2] <= 0.0f ||
                      Vec3Dot(ps->velocity, trace.normal) <= 10.0f))
                 {
+                    // This wider probe exists only to close a sub-unit settle
+                    // gap. Move the hull onto its support just as the primary
+                    // sweep does; otherwise it remains suspended above the
+                    // plane and walk projection can turn slope speed upward.
+                    Vec3Lerp(ps->origin, point, trace.fraction, ps->origin);
+                    if (ps->groundEntityNum == ENTITYNUM_NONE)
+                        PM_CrashLand(ps, pml);
                     pml->groundPlane = 1;
                     pml->almostGroundPlane = 1;
                     pml->walking = 1;

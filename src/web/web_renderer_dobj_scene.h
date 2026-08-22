@@ -19,6 +19,12 @@ struct WebRendererDObjSubmission
     float lightingOrigin[3];
 };
 
+constexpr bool WebRenderer_DObjUsesDepthHack(
+    std::uint32_t renderFlags) noexcept
+{
+    return (renderFlags & 2u) != 0u;
+}
+
 enum class WebRendererDObjAdmissionResult : std::uint8_t
 {
     Accepted = 0,

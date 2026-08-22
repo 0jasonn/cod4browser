@@ -202,7 +202,9 @@ void __cdecl TRACK_com_math()
 
 float __cdecl Q_random()
 {
-    return (rand() / 32768.0);
+    return Q_RandomToUnitFloat(
+        static_cast<std::uint32_t>(rand()),
+        static_cast<std::uint32_t>(RAND_MAX));
 }
 
 float __cdecl crandom()

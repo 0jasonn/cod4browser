@@ -310,7 +310,7 @@ WebRendererWorldBatchDesc MakeDraw(
     std::uint32_t modelSurfaceIndex, std::uint32_t firstIndex,
     std::uint32_t indexCount,
     const float modelLightingCoordinates[3],
-    bool modelLightingEnabled) noexcept
+    bool modelLightingEnabled, bool depthHack) noexcept
 {
     WebRendererWorldBatchDesc draw{};
     draw.firstIndex = firstIndex;
@@ -327,6 +327,7 @@ WebRendererWorldBatchDesc MakeDraw(
     draw.lastInstanceIndex = UINT32_MAX;
     draw.lightmapIndex = 31u;
     draw.sourceKind = WebRendererSceneBatchKind::DynamicDObj;
+    draw.depthHack = depthHack;
     draw.baseImage = FindBaseImage(material, draw.samplerState);
     // The WebGL compatibility technique is deliberately a base-color subset
     // of the canonical material. Preserve canonical state when one of the
@@ -528,7 +529,9 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                         *model, model->materialHandles[modelSurfaceIndex],
                         modelSurfaceIndex, firstIndex, indexCount,
                         modelLightingCoordinates,
-                        submissionLightingReady));
+                        submissionLightingReady,
+                        WebRenderer_DObjUsesDepthHack(
+                            submission.renderFlags)));
                     ++replacement.surfaceCount;
                     submittedModel = true;
                     submittedDObj = true;

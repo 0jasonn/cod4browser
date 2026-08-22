@@ -1261,14 +1261,23 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
 
     mat4x4 viewMatrix{};
     mat4x4 projectionMatrix{};
+    mat4x4 depthHackProjectionMatrix{};
     mat4x4 d3dViewProjectionMatrix{};
+    mat4x4 d3dDepthHackViewProjectionMatrix{};
     mat4x4 depthRangeConversion{};
     mat4x4 webglViewProjectionMatrix{};
+    mat4x4 webglDepthHackViewProjectionMatrix{};
     MatrixForViewer(viewMatrix, view.viewOrigin, view.viewAxis);
     InfinitePerspectiveMatrix(
         projectionMatrix, view.tanHalfFovX, view.tanHalfFovY, view.zNear);
+    InfinitePerspectiveMatrix(depthHackProjectionMatrix,
+        view.tanHalfFovX, view.tanHalfFovY,
+        std::max(0.01f,
+            r_znear_depthhack ? r_znear_depthhack->current.value : 0.1f));
     MatrixMultiply44(
         viewMatrix, projectionMatrix, d3dViewProjectionMatrix);
+    MatrixMultiply44(viewMatrix, depthHackProjectionMatrix,
+        d3dDepthHackViewProjectionMatrix);
     // Kisak's D3D9 projection emits NDC depth [0, 1], while WebGL clips in
     // [-1, 1]. Preserve the canonical view/projection and apply only the
     // graphics-API depth-range conversion at the backend boundary.
@@ -1279,8 +1288,13 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     depthRangeConversion[3][3] = 1.0f;
     MatrixMultiply44(d3dViewProjectionMatrix, depthRangeConversion,
         webglViewProjectionMatrix);
+    MatrixMultiply44(d3dDepthHackViewProjectionMatrix,
+        depthRangeConversion, webglDepthHackViewProjectionMatrix);
     std::memcpy(view.viewProjectionMatrix, webglViewProjectionMatrix,
         sizeof(view.viewProjectionMatrix));
+    std::memcpy(view.depthHackViewProjectionMatrix,
+        webglDepthHackViewProjectionMatrix,
+        sizeof(view.depthHackViewProjectionMatrix));
 
     if (!g_gameDrivenFrameReported)
     {

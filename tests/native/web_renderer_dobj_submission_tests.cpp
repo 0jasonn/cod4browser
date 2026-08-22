@@ -44,6 +44,16 @@ void TestOrdinaryAndViewmodelFlagsShareAdmission()
     }
 }
 
+void TestNativeDepthHackBitIsPreservedAtPortableBoundary()
+{
+    assert(!WebRenderer_DObjUsesDepthHack(0u));
+    assert(!WebRenderer_DObjUsesDepthHack(1u));
+    assert(WebRenderer_DObjUsesDepthHack(2u));
+    assert(WebRenderer_DObjUsesDepthHack(3u));
+    assert(!WebRenderer_DObjUsesDepthHack(4u));
+    assert(WebRenderer_DObjUsesDepthHack(7u));
+}
+
 void TestInvalidAndCapacityAdmissionIsDeterministic()
 {
     const DObj_s *object = reinterpret_cast<const DObj_s *>(0x1u);
@@ -64,6 +74,7 @@ int main()
 {
     TestLodDelegatesToCanonicalXModelPolicy();
     TestOrdinaryAndViewmodelFlagsShareAdmission();
+    TestNativeDepthHackBitIsPreservedAtPortableBoundary();
     TestInvalidAndCapacityAdmissionIsDeterministic();
     return 0;
 }
