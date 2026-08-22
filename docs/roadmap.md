@@ -175,6 +175,48 @@ Physical rack pickup parity, automatic reload semantics, continuous pointer
 lock, enemy reaction/death/AI notification, natural rack traversal, and
 campaign-map breadth remain unproven.
 
+### Campaign variance boundary
+
+The first `map cargoship` probe did not reach campaign asset parsing. It
+stopped at the collision singleton assertion, but the bounded database trace
+added in `10b99bad` and regression-covered in `607f5650` identified the
+earlier causal boundary: opening `zone/english/cargoship.ff` failed in the
+platform filesystem. The retained DB asset evidence still described
+`common.ff`, so the assertion was a downstream symptom rather than proof of a
+campaign `ClipMap` incompatibility.
+
+The canonical singleton corrections remain accepted reusable work:
+`55fc1282` restores `clipMap == &cm` lifecycle ownership and `7144b7d4`
+rebinds aliased `ClipMap` publication to that singleton. Direct Wasm DB-stream
+coverage passes those changes. They do not substitute for loading the missing
+campaign fastfile.
+
+Commit `acc5aa26` closes the importer discovery gap without a map manifest: a
+selected installation now contributes every supported single-player `.ff`
+directly under `zone/english`, while multiplayer and unrelated/nested files
+remain excluded. The same size, path, count, fastfile probe, OPFS generation,
+and atomic replacement rules apply. The currently reopened Chrome generation
+is still the earlier 26-file profile (21 IWDs and four fastfiles: startup zones
+plus Killhouse), so Cargoship remains unverified until a legal installation is
+re-imported through the expanded importer. Commit `9530656b` exposes the
+existing standards-based `webkitdirectory` boundary as an explicit compatible
+picker while retaining File System Access as the primary action. Both actions
+share one import orchestration path and therefore the same retained-generation
+cancellation/failure behavior. All 19 focused asset-store browser tests pass,
+including native-picker priority, explicit portable success/cancellation, SP
+fastfile discovery, malformed-input rejection, and atomic rollback; the
+production Release build and runtime-prefix guard also pass. Local Chrome
+shows the new action and opens its file chooser. On that same rebuilt Release
+site, a fresh `map killhouse` reaches `G_LoadLevel`, `CG_Init`, and the
+game-driven frame; WebGL2 draws 8,064 world surfaces, 431,747 vertices, and
+793,188 indices, while the dynamic scene retains 64 DObjs, 102 models, and 151
+surfaces. The prior black-screen failure is not present. The attached Chrome
+verification extension currently rejects setting the installation directory
+until its file-URL access permission is enabled. The persisted browser
+generation therefore remains the earlier Killhouse-only profile, and
+rerunning Cargoship is the next integration action once that local permission
+is changed or the folder is selected manually.
+
 ### Restart lifecycle boundary
 
 The restart boundary is now converged through `f706d307`: web
