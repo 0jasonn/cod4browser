@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <new>
 #include <utility>
 #include <vector>
@@ -43,6 +44,22 @@ const GfxImage *FindBaseImage(
     {
         const MaterialTextureDef &texture = material->textureTable[index];
         if (texture.semantic == 2u && texture.u.image)
+        {
+            sampler = texture.samplerState;
+            return texture.u.image;
+        }
+    }
+    return nullptr;
+}
+
+const GfxImage *FindNormalImage(
+    const Material *material, std::uint8_t &sampler) noexcept
+{
+    if (!material || !material->textureTable) return nullptr;
+    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
+    {
+        const MaterialTextureDef &texture = material->textureTable[index];
+        if (texture.semantic == 5u && texture.u.image)
         {
             sampler = texture.samplerState;
             return texture.u.image;
@@ -177,11 +194,13 @@ bool SkinWeightedSurface(
     const XSurface &surface,
     const std::vector<DObjSkelMat> &matrices,
     std::vector<float> &positions,
-    std::vector<float> &normals)
+    std::vector<float> &normals,
+    std::vector<float> &tangents)
 {
     if (!surface.vertInfo.vertsBlend) return false;
     positions.resize(static_cast<std::size_t>(surface.vertCount) * 3u);
     normals.resize(static_cast<std::size_t>(surface.vertCount) * 3u);
+    tangents.resize(static_cast<std::size_t>(surface.vertCount) * 3u);
     const std::uint16_t *blend = surface.vertInfo.vertsBlend;
     std::uint32_t vertexIndex = 0u;
     for (std::uint32_t influenceCount = 0u;
@@ -195,17 +214,23 @@ bool SkinWeightedSurface(
             if (vertexIndex >= surface.vertCount) return false;
             const GfxPackedVertex &vertex = surface.verts0[vertexIndex];
             float unpackedNormal[3]{};
+            float unpackedTangent[3]{};
             Vec3UnpackUnitVec(vertex.normal, unpackedNormal);
-            if (!Finite3(unpackedNormal)) return false;
+            Vec3UnpackUnitVec(vertex.tangent, unpackedTangent);
+            if (!Finite3(unpackedNormal) || !Finite3(unpackedTangent))
+                return false;
             float transformed[3]{};
             float transformedNormal[3]{};
+            float transformedTangent[3]{};
             const DObjSkelMat *primary =
                 MatrixFromByteOffset(matrices, blend[0]);
             if (!primary) return false;
             TransformPosition(vertex.xyz, *primary, transformed);
             TransformDirection(unpackedNormal, *primary, transformedNormal);
+            TransformDirection(unpackedTangent, *primary, transformedTangent);
             float weightedSecondary[3]{};
             float weightedSecondaryNormal[3]{};
+            float weightedSecondaryTangent[3]{};
             float explicitWeight = 0.0f;
             for (std::uint32_t influence = 0u;
                  influence < influenceCount; ++influence)
@@ -217,15 +242,20 @@ bool SkinWeightedSurface(
                     blend[2u + influence * 2u]) * SHORT_WEIGHT_TO_UNIT;
                 float secondaryPosition[3]{};
                 float secondaryNormal[3]{};
+                float secondaryTangent[3]{};
                 TransformPosition(vertex.xyz, *secondary, secondaryPosition);
                 TransformDirection(
                     unpackedNormal, *secondary, secondaryNormal);
+                TransformDirection(
+                    unpackedTangent, *secondary, secondaryTangent);
                 for (std::size_t axis = 0u; axis < 3u; ++axis)
                 {
                     weightedSecondary[axis] +=
                         weight * secondaryPosition[axis];
                     weightedSecondaryNormal[axis] +=
                         weight * secondaryNormal[axis];
+                    weightedSecondaryTangent[axis] +=
+                        weight * secondaryTangent[axis];
                 }
                 explicitWeight += weight;
             }
@@ -238,8 +268,13 @@ bool SkinWeightedSurface(
                 normals[vertexIndex * 3u + axis] =
                     primaryWeight * transformedNormal[axis] +
                     weightedSecondaryNormal[axis];
+                tangents[vertexIndex * 3u + axis] =
+                    primaryWeight * transformedTangent[axis] +
+                    weightedSecondaryTangent[axis];
             }
-            if (!NormalizeDirection(&normals[vertexIndex * 3u])) return false;
+            if (!NormalizeDirection(&normals[vertexIndex * 3u]) ||
+                !NormalizeDirection(&tangents[vertexIndex * 3u]))
+                return false;
             blend += 1u + influenceCount * 2u;
         }
     }
@@ -250,11 +285,13 @@ bool SkinRigidSurface(
     const XSurface &surface,
     const std::vector<DObjSkelMat> &matrices,
     std::vector<float> &positions,
-    std::vector<float> &normals)
+    std::vector<float> &normals,
+    std::vector<float> &tangents)
 {
     if (!surface.vertList || surface.vertListCount == 0u) return false;
     positions.resize(static_cast<std::size_t>(surface.vertCount) * 3u);
     normals.resize(static_cast<std::size_t>(surface.vertCount) * 3u);
+    tangents.resize(static_cast<std::size_t>(surface.vertCount) * 3u);
     std::uint32_t vertexIndex = 0u;
     for (std::uint32_t listIndex = 0u;
          listIndex < surface.vertListCount; ++listIndex)
@@ -274,7 +311,14 @@ bool SkinRigidSurface(
                 surface.verts0[vertexIndex].normal, unpackedNormal);
             TransformDirection(unpackedNormal, *matrix,
                 &normals[vertexIndex * 3u]);
-            if (!NormalizeDirection(&normals[vertexIndex * 3u])) return false;
+            float unpackedTangent[3]{};
+            Vec3UnpackUnitVec(
+                surface.verts0[vertexIndex].tangent, unpackedTangent);
+            TransformDirection(unpackedTangent, *matrix,
+                &tangents[vertexIndex * 3u]);
+            if (!NormalizeDirection(&normals[vertexIndex * 3u]) ||
+                !NormalizeDirection(&tangents[vertexIndex * 3u]))
+                return false;
         }
     }
     return vertexIndex == surface.vertCount;
@@ -329,12 +373,16 @@ WebRendererWorldBatchDesc MakeDraw(
     draw.sourceKind = WebRendererSceneBatchKind::DynamicDObj;
     draw.depthHack = depthHack;
     draw.baseImage = FindBaseImage(material, draw.samplerState);
+    draw.normalImage = FindNormalImage(material, draw.normalSamplerState);
     // The WebGL compatibility technique is deliberately a base-color subset
     // of the canonical material. Preserve canonical state when one of the
     // common passes supplies it, but a DB-owned color image remains enough to
     // use that supported subset even when the original shader itself is not.
     SelectTechnique(material, draw.stateBits,
         draw.techniqueName, draw.techniqueType);
+    if (!draw.techniqueName ||
+        std::strstr(draw.techniqueName, "n0") == nullptr)
+        draw.normalImage = nullptr;
     draw.technique = draw.baseImage
         ? WebRendererWorldTechnique::BaseTexture
         : WebRendererWorldTechnique::BackendFallback;
@@ -476,11 +524,14 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
 
                     std::vector<float> positions;
                     std::vector<float> normals;
+                    std::vector<float> tangents;
                     const bool skinned = surface.deformed
                         ? SkinWeightedSurface(
-                            surface, skinMatrices, positions, normals)
+                            surface, skinMatrices, positions, normals,
+                            tangents)
                         : SkinRigidSurface(
-                            surface, skinMatrices, positions, normals);
+                            surface, skinMatrices, positions, normals,
+                            tangents);
                     if (!skinned)
                         return WebRendererDObjSceneResult::InvalidModel;
 
@@ -496,7 +547,12 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                             vertex.position);
                         std::copy_n(&normals[vertexIndex * 3u], 3u,
                             vertex.normal);
-                        if (!Finite3(vertex.position) || !Finite3(vertex.normal))
+                        std::copy_n(&tangents[vertexIndex * 3u], 3u,
+                            vertex.tangent);
+                        vertex.binormalSign = source.binormalSign;
+                        if (!Finite3(vertex.position) || !Finite3(vertex.normal) ||
+                            !Finite3(vertex.tangent) ||
+                            !std::isfinite(vertex.binormalSign))
                             return WebRendererDObjSceneResult::InvalidModel;
                         vertex.color[0] = static_cast<float>(
                             (source.color.packed >> 16u) & 0xffu) * BYTE_TO_UNIT;

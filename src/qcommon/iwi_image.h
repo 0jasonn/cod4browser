@@ -20,6 +20,7 @@ constexpr std::uint8_t FLAG_NO_PICMIP = 0x01u;
 constexpr std::uint8_t FLAG_NO_MIPMAPS = 0x02u;
 constexpr std::uint8_t FLAG_CUBEMAP = 0x04u;
 constexpr std::uint8_t FLAG_STREAMING = 0x10u;
+constexpr std::uint8_t FLAG_LEGACY_NORMALS = 0x20u;
 constexpr std::uint8_t FLAG_CLAMP_U = 0x40u;
 constexpr std::uint8_t FLAG_CLAMP_V = 0x80u;
 constexpr std::int32_t LOADDEF_FORMAT_A8R8G8B8 = 0x00000015;
@@ -39,6 +40,9 @@ constexpr std::size_t MAX_DECODED_RGBA8_BYTES = 16u * 1024u * 1024u;
 // Retail lightmap load definitions include 2048x2048 L8 atlases, which expand
 // to exactly 16 MiB of RGBA8 while retaining only a 4 MiB DB payload.
 constexpr std::size_t MAX_LOADDEF_RGBA8_BYTES = 16u * 1024u * 1024u;
+// A 2048-square RGBA8 cubemap occupies exactly 96 MiB across six faces.
+// Keep the canonical sky recovery seam bounded independently of 2D atlases.
+constexpr std::size_t MAX_CUBE_RGBA8_BYTES = 96u * 1024u * 1024u;
 
 enum class Error : std::uint32_t
 {
@@ -78,6 +82,14 @@ struct Rgba8Image
     std::vector<std::uint8_t> pixels;
 };
 
+struct Rgba8Cube
+{
+    std::uint16_t edgeLength = 0;
+    // Native Image_CubemapFace preserves D3D's +X, -X, +Y, -Y, +Z, -Z
+    // order. The portable decoder keeps that order for the backend boundary.
+    std::array<std::vector<std::uint8_t>, 6> faces;
+};
+
 // Parses the 28-byte CoD4 IWI header from a complete decoded member. The
 // input remains owned by the caller and output is replaced only on success.
 Error Parse(std::span<const std::uint8_t> bytes, Metadata &metadata) noexcept;
@@ -94,6 +106,13 @@ Error DecodeRgba8(
     std::span<const std::uint8_t> bytes,
     Rgba8Image &image) noexcept;
 
+// Decodes the largest mip of all six faces from a bounded COD4 IWI cubemap.
+// IWI cubemaps are mip-major and store +X, -X, +Y, -Y, +Z, -Z for each
+// smallest-to-largest mip. The destination is replaced only on success.
+Error DecodeCubeRgba8(
+    std::span<const std::uint8_t> bytes,
+    Rgba8Cube &cube) noexcept;
+
 // Decodes the largest two-dimensional mip from a canonical DB-owned
 // GfxImageLoadDef payload. Unlike an IWI member, this payload has no file
 // header and stores mip levels in native upload order (largest to smallest).
@@ -109,5 +128,17 @@ Error DecodeLoadDefRgba8(
     std::uint16_t depth,
     std::span<const std::uint8_t> payload,
     Rgba8Image &image) noexcept;
+
+// Decodes a canonical DB-owned cubemap load definition. Native Load_Texture
+// stores this payload face-major, with each face containing its complete
+// largest-to-smallest mip chain.
+Error DecodeLoadDefCubeRgba8(
+    std::int32_t format,
+    std::uint8_t flags,
+    std::uint16_t width,
+    std::uint16_t height,
+    std::uint16_t depth,
+    std::span<const std::uint8_t> payload,
+    Rgba8Cube &cube) noexcept;
 
 } // namespace kisak::iwi

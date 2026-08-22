@@ -57,8 +57,9 @@ from renderer-owned `code_post_gfx` instead of leaving `com_errorEntered` set.
 The browser pump now preserves real SP frame ordering through `SV_Frame ->
 CL_RunOncePerClientFrame -> CL_Frame -> SCR_UpdateScreen`. `R_RenderScene`
 constructs the canonical view/projection matrix, traverses renderer-owned
-`GfxWorld` lit/decal/emissive camera ranges, skips the separate sky pass, and emits portable
-material-aware indexed batches. Chrome records the canonical `refdef_s` for
+`GfxWorld` lit/decal/emissive camera ranges, emits portable material-aware
+indexed batches, and supplies the canonical `s_world.skyImage` to a WebGL2
+cubemap pass. Chrome records the canonical `refdef_s` for
 `maps/killhouse.d3dbsp`, followed by a successful WebGL2 draw of 8,475 canonical
 surfaces, 445,369 retained vertices, and 823,464 32-bit indices in 581 batches
 after the scripted start mover descends into the world view. Of those batches,
@@ -68,9 +69,11 @@ lightmap pairs and 38 use base textures only. Two draws (nine
 image fallback. Gate 2 remains a separate frozen
 oracle and is not invoked by this path.
 
-The same cgame frame now submits the world-owned static-model population and
-canonical ordinary and first-person DObjs without introducing a preview object
-model. The WebGL2 boundary retains 238 canonical `XModel` identities as 359
+The same cgame frame now submits the world-owned static-model population,
+canonical ordinary and first-person DObjs, and live canonical model/brush
+DynEntities without introducing a preview object model. This restores map
+movers such as the Killhouse firing targets and exit door. The WebGL2 boundary
+retains 238 canonical `XModel` identities as 359
 shared XSurface batches (68,684 vertices, 135,492 indices, and 12,188
 placements). Commit `748112cc` retains ordinary entity DObjs through the fixed
 native 512-entry scene array; commit `de695b46` selects the canonical
@@ -196,7 +199,7 @@ and WebGL seams. The exhaustive browser suite remains explicitly available.
 | Database initialization | `MODIFIED KISAK` / reached map closure | The web target compiles real `db_registry.cpp` ownership for `DB_BuildOSPath`, `DB_TryLoadXFileInternal`, `DB_TryLoadXFile`, `DB_Thread`, `DB_LoadXZone`, `DB_LoadZone_f`, `DB_InitThread`, and `DB_LoadXAssets`. Shared client configuration and renderer request construction submit `code_post_gfx`, `ui`, and `common` in native order; all 8,176 startup assets complete. A real runtime `map` command then submits `killhouse`, interns 892 script strings, and completes all 1,684 assets through asset 1,683 without seeking or a generated-loader failure. Narrow synchronous file and Sys context adapters own the platform boundary. |
 | Canonical database asset ABI | `SHARED KISAK` / partial | `RawFile`, `XAssetHeader`, `XAssetType`, and `XAsset` remain renderer-free. The canonical 44-byte `PhysPreset` is shared from `physics/phys_preset.h`. Canonical Material/TechniqueSet records, texture and constant definitions, state bits, water, flexible techniques/passes, shader definitions, and arguments are shared from `gfx_d3d/material_types.h`; GfxImage/load-definition records remain in `gfx_image_types.h`. Database-facing menu, item, window, type-data, and expression records now live in lightweight `ui/ui_asset_types.h`, avoiding the unrelated gameplay/parser graph formerly pulled in through `ui_shared.h`. Native x86/Wasm tests cover exact 32-bit sizes and offsets. Canonical `XAnimParts`, `WeaponDef`, `LocalizeEntry`, XModel, FX, collision, world, and light structures remain shared lightweight ABI declarations. |
 | IWD/ZIP reading | `MODIFIED KISAK` / canonical runtime reached plus oracle | Normal Worker startup uses Kisak `FS_LoadZipFile` and `qcommon/unzip.cpp` with zlib through the generic file primitive. Canonical C++ owns central-directory indexing, hashes, checksums, clones, member inflate, lookup, and lifetime. Gate 2 remains an independent bounded oracle. |
-| IWI decoding | `MODIFIED KISAK` / canonical renderer path reached | The strict decoder handles retail ARGB/DXT IWI members and canonical DB load definitions, including the bounded 2048-square L8 lightmap atlas case and compressed 2048x1024 images that expand to 8 MiB of RGBA8. Streaming and U/V clamp policy bits are accepted because they do not change the 2D payload layout; cubemap, volume, legacy-normal, unknown-layout, malformed, and over-budget inputs still fail closed. The WebGL backend reads external `images/<GfxImage name>.iwi` through canonical FS/IWD ownership when a fastfile load definition intentionally has no pixels. |
+| IWI decoding | `MODIFIED KISAK` / canonical renderer path reached | The strict decoder handles retail ARGB/DXT IWI members and canonical DB load definitions, including the bounded 2048-square L8 lightmap atlas case, compressed 2048x1024 images that expand to 8 MiB of RGBA8, and bounded six-face cubemaps in canonical `+X,-X,+Y,-Y,+Z,-Z` order. Streaming, U/V clamp, and compressed-texture legacy-normal policy bits are accepted because they do not change the payload layout; volume, unknown-layout, malformed, and over-budget inputs still fail closed. The WebGL backend reads external `images/<GfxImage name>.iwi` through canonical FS/IWD ownership when a fastfile load definition intentionally has no pixels. |
 | Fastfile framing and zone stream machine | `TEMPORARY WEB SUBSTITUTE` | It accurately models blocks, rewind/high-water behavior, pointer classes, aliases, and bounded streaming. Use it as differential evidence and migrate reusable mechanics toward the Kisak DB loader. |
 | Asset registry | `MODIFIED KISAK` / partial plus `TEMPORARY WEB SUBSTITUTE` oracle | All generated families reached across the three startup prerequisites consume the canonical 32-bit asset-entry pool, per-type pools, free chain, normalized hash table, and zone ownership through `DB_AddXAsset`/`DB_LinkXAssetEntry`. The owned chain records 9,637 publications through entry 9,652, with free entries 32,752 -> 23,115. Gate 2 remains a frozen oracle and is not called by the generated path. |
 | Retail loader dispatcher | `TEMPORARY WEB SUBSTITUTE` / frozen Gate 2 oracle | `web_retail_fastfile_census.*` remains the orchestration vehicle, but normal startup no longer executes it. The source has an explicit freeze contract and is isolated with its diagnostic dependencies in `kisak_web_gate2_oracle`; canonical DB code must not call it. It remains linked only until canonical DB can reproduce equivalent asset/world evidence. |
@@ -219,12 +222,12 @@ and WebGL seams. The exhaustive browser suite remains explicitly available.
 | `GfxWorld` | `MODIFIED KISAK` / canonical reached closure | `db_generated_gfxworld.cpp` follows the native generated closure through names, indices, images, cells/portals, lightmaps/grid, vertices/layers, models, shadow/light regions, DPVS static/dynamic, block-1 runtime allocations, and nested canonical dependencies before final real-DB publication into the renderer-owned `&s_world`. Native x86/Wasm fixtures are byte-for-byte identical. The normal Killhouse run publishes asset 772 with Gate 2-matching structural counts and inflated offset. `WebEngine_BuildGfxWorldSurface` consumes that DB-owned object through a final-publication platform notification and WebGL2 draws surface 6077 without a browser world model. The frozen Gate 2 material label differs from the real DB Material pointer and remains recorded rather than normalized away. `web_retail_load_gfxworld.*` is oracle-only. |
 | XModel/model preview scene | `RETIRED` | Removed after Gate 2: no selectable-model UI/state, retained preview geometry, preview camera/projection, preview material bridge, or multi-draw command path remains. Canonical XModel loading/publication and dependencies remain available to `GfxWorld`, `WeaponDef`, FX, and later runtime consumers. |
 | Renderer frontend | `MODIFIED KISAK` / textured, lightmapped, model-lit gameplay and world marks reached | The production Wasm target links the real client/cgame/effects/ragdoll/physics closure against a narrow renderer-frontend platform implementation. `R_RenderScene` validates canonical `refdef_s`, constructs Kisak view/projection matrices, and traverses the canonical DPVS lit, decal, and emissive ranges in native stage order rather than treating `surfaceCountNoDecal` as a contiguous endpoint. It emits 581 material-aware batches with canonical `Material*`, technique identity, base `GfxImage*`, state bits, sampler state, lightmap index, base UV, and lightmap UV. Static instances sample the canonical `GfxWorld::lightGrid` at their native bounds centers or retain encoded ground lighting. Ordinary and first-person `R_AddDObjToScene` submissions retain the caller's lighting origin, canonical pose evaluation, cpose/view-origin LOD selection delegated to `XModelGetLodForDist`, and rigid/weighted position plus normal skinning. EffectsCore code-mesh, XModel, particle-cloud, and persistent world-mark submissions remain appended in canonical order and do not enter the model-lighting branch. The mark-fragment seam clips canonical `GfxWorld` receiver triangles against the six native mark planes and retains Material/lightmap identity; attached DObj/BModel and particle marks remain later families. Unsupported/deformed standalone FX model surfaces, invalid/over-capacity clouds, broader material families, and deferred shader/postprocess features remain compatibility gaps. The minimum 2D callback set retains canonical Material/Font identities. |
-| WebGL2 backend and context recovery | `WEB PLATFORM IMPLEMENTATION` | Permanent platform boundary. It converts D3D9 NDC depth `[0,1]` to WebGL `[-1,1]`, retains 32-bit indices, uploads canonical external IWI and DB load-definition pixels (including encountered BGR8/X8R8G8B8 images), and mirrors the encountered Killhouse `lm_r0c0_sm2` secondary-directional decode. Model draws additionally upload the native 4x4x4-per-entry RGBA8 model-lighting volume layout. First-person DObj batches preserve native `renderFxFlags & 2`, use `r_znear_depthhack`, and draw in the reserved viewmodel depth range. The encountered `lp_t0c0[_n0]_sm2` base pass cube-projects the transformed geometric normal by its maximum absolute component, samples that volume with native lookup scale, and computes `base * vertex * modelLighting * 2` before deferred fog. Static entries are per instance and dynamic DObj entries are refreshed from their retained lighting origins. Native normal-map perturbation for `n0` techniques and additive primary-light passes remain later material-technique work; shadows and post-processing remain explicitly deferred. Canonical cull, depth, color-write, alpha-test/blend, addressing, and filtering states remain per batch. GPU handles stay backend-only; 2D textures, 3D lighting volumes, geometry, and instance buffers are recreated after context loss. |
+| WebGL2 backend and context recovery | `WEB PLATFORM IMPLEMENTATION` | Permanent platform boundary. It converts D3D9 NDC depth `[0,1]` to WebGL `[-1,1]`, retains 32-bit indices, uploads canonical external IWI and DB load-definition pixels (including encountered BGR8/X8R8G8B8 images), draws the canonical world sky cubemap from the current view axes/FOV, and mirrors the encountered Killhouse `lm_r0c0_sm2` secondary-directional decode. Model draws additionally upload the native 4x4x4-per-entry RGBA8 model-lighting volume layout. First-person DObj batches preserve native `renderFxFlags & 2`, use `r_znear_depthhack`, and draw in the reserved viewmodel depth range. The encountered `lp_t0c0[_n0]_sm2` base pass cube-projects the transformed normal by its maximum absolute component, samples that volume with native lookup scale, and computes `base * vertex * modelLighting * 2`; `n0` draws now retain semantic-5 images, reconstruct DXT5nm alpha/green normals, and apply the canonical tangent/binormal basis. Static entries are per instance; ordinary DObj and live DynEntity model entries are refreshed from their retained/canonical lighting origins. Dynamic brush batches preserve their canonical materials and directional lightmaps. The frontend advances the canonical five-slot campaign fog state and the backend applies the scripted exponential visibility/color blend to world and model geometry. The resolved RGBA8 scene now consumes the exact `R_UpdateColorManipulation` constants in a canonical film pass before 2D; a second target composites the HUD before the final display-mapping pass. `R_SetColorMappings` remains capability-correct: browser registration reports `deviceSupportsGamma=false`, so `r_gamma` is retained and tested but does not incorrectly darken the composited canvas. Additive primary-light passes, glow/DOF, and shadows remain later material/post-effect work. Canonical cull, depth, color-write, alpha-test/blend, addressing, and filtering states remain per batch. GPU handles stay backend-only; 2D/cubemap textures, 3D lighting volumes, post-effect targets, geometry, and instance buffers are recreated after context loss. |
 | D3D9 renderer backend | `NATIVE ONLY` | Retain for native builds and use as behavioral reference; do not compile Direct3D objects into Wasm. |
 | Shader compatibility | `MODIFIED KISAK` / `WEB PLATFORM IMPLEMENTATION` boundary | Native material/shader contracts should remain canonical; selecting or translating to built-in GLSL belongs at the backend seam. |
 | ODE math | `SHARED KISAK` | `src/physics/ode/odemath.cpp` is compiled directly. Expand shared ODE/collision code based on compile inventory and measured needs. |
 | Collision and `CM_LoadMap` | `SHARED KISAK` / reached runtime owner | Production compiles actual `cm_load.cpp`; the DB ClipMap singleton pool is `&cm`, and successful retail map DB completion continues through real `CM_LoadMap`. It initializes canonical collision thread data and publishes checksum/in-use state, followed by real `Com_LoadWorld`. An exact MSVC x86/Wasm differential invokes the owner and matches all normalized results. |
-| xanim and DObj runtime | `SHARED KISAK` / canonical ordinary and first-person poses consumed | `xanim_init.cpp` and `dobj_init.cpp` own the actual 4,096-entry `XAnimInfo` free ring, `end` notetrack ScriptString, and duplicate-parts ScriptString initialization. Lightweight runtime headers expose the same canonical structs without importing D3D. Production executes them in native `Com_Init` order; exact x86/Wasm evidence covers the ring and handles. The renderer frontend invokes canonical `CG_DObjCalcPose`, derives base-to-current skin matrices, delegates cpose/view-origin LOD thresholds to canonical `XModelGetLodForDist`, and submits rigid and weighted ordinary and first-person XSurfaces while preserving DObj/XModel/Material identity. Broader entity/material families, skinned FX models, and campaign coverage remain future compatibility work. |
+| xanim and DObj runtime | `SHARED KISAK` / canonical ordinary and first-person poses consumed | `xanim_init.cpp` and `dobj_init.cpp` own the actual 4,096-entry `XAnimInfo` free ring, `end` notetrack ScriptString, and duplicate-parts ScriptString initialization. Lightweight runtime headers expose the same canonical structs without importing D3D. Production executes them in native `Com_Init` order; exact x86/Wasm evidence covers the ring and handles. The renderer frontend invokes canonical `CG_DObjCalcPose`, derives base-to-current skin matrices, delegates cpose/view-origin LOD thresholds to canonical `XModelGetLodForDist`, and submits rigid and weighted ordinary and first-person XSurfaces while preserving DObj/XModel/Material identity. It also consumes live canonical DynEntity client poses/visibility for rigid XModels and brush models, rather than inventing browser entity ownership. Broader entity/material families, skinned FX models, and campaign coverage remain future compatibility work. |
 | Script VM and `Scr_Init` | `SHARED KISAK` / reached game closure | Actual variable-range setup, `AllocValue`, `Scr_Init`, `Scr_VM_Init`, and `Scr_Settings` run in production. Canonical VM/compiler/anim public state layouts were moved to renderer-free headers, not replaced. Retail execution resolves RawFiles/scripts through canonical DB/FS, compiles the game scripts, and completes `G_InitGame` and `G_LoadLevel` with native script-string and VM ownership. A pointer-range portability correction preserves the native eval-stack/main-stack distinction on Wasm. |
 | Client and `CL_Init` | `MODIFIED KISAK` / reached lifecycle owner | `cl_initialization.cpp` owns the canonical `CL_Init` body and client globals, and a Win32 x86/Wasm differential runs its normalized contract identically. Production enters full `CL_Init` after canonical filesystem initialization and later completes `CL_InitCGame`. No browser-owned client state substitutes for it. |
 | cgame and `CG_Init` | `SHARED KISAK` / playable renderer milestone proved | The linked cgame closure executes through real `CL_InitCGame -> CG_Init` for the local SP client. Once active, the browser scheduler supplies only elapsed time while canonical `SV_Frame -> CL_RunOncePerClientFrame -> CL_Frame -> SCR_UpdateScreen` owns state advancement, weapon pose, HUD construction, and view construction. `Q_random` maps wider platform `RAND_MAX` values back to COD's native 15-bit buckets before recoil consumes them; this prevents Wasm libc values from producing six-figure weapon angular velocities. Chrome records the successful material/lightmap world draw, static XModels, posed weapon/viewhands, canonical 2D HUD/font stream, and bounded hip/ADS attack recoil for `maps/killhouse.d3dbsp`. Gate 2 is not invoked. |
@@ -499,7 +502,7 @@ Update this section when a milestone changes architectural ownership.
 | Shared or narrowly modified Kisak code in the web target | Increase | Improving: 45 of 77 production translation units are outside `src/web`, now including real `db_registry.cpp`, the DB file-platform seam, generated RawFile/PhysPreset/TechniqueSet/Material/Image/water/LocalizeEntry/Sound/Font/FX/Impact/Light/Menu loading, and canonical registry publication. |
 | Browser-only engine substitutes | Decrease after their validation purpose is met | High but falling: `dvar_core.cpp` and `cmd_core.cpp` are retired from production. The VFS qcommon oracle, retail DB traversal, and temporary nested asset records remain substitutes. The XModel preview frontend is retired. |
 | Permanent browser platform code | Stable and isolated | Good: launcher, storage, lifecycle, filesystem bridge, DB texture-upload boundary, and WebGL2 material/lightmap resources remain under explicit platform ownership. |
-| Native engine systems not compiled | Decrease sharply after the GfxWorld proof | High but falling: qcommon, the full Killhouse generated-family order, filesystem, collision, script VM, xanim/DObj, server/game, client/cgame, effects, ragdoll, physics, sound, and canonical renderer-dvar owners now compile and execute through gameplay. Static XModels, ordinary plus first-person dynamic DObjs, code-mesh/shell FX, and clipped world impact marks are submitted through the canonical frontend; remaining renderer gaps are broader material/entity families, attached/skinned FX marks, campaign variance, and deliberately deferred shader/postprocessing features, not a parallel browser world or camera owner. |
+| Native engine systems not compiled | Decrease sharply after the GfxWorld proof | High but falling: qcommon, the full Killhouse generated-family order, filesystem, collision, script VM, xanim/DObj, server/game, client/cgame, effects, ragdoll, physics, sound, and canonical renderer-dvar owners now compile and execute through gameplay. Static XModels, ordinary plus first-person dynamic DObjs, live DynEntity XModels/brushes, code-mesh/shell FX, and clipped world impact marks are submitted through the canonical frontend; remaining renderer gaps are broader material/entity families, attached/skinned FX marks, campaign variance, and deliberately deferred shader/postprocessing features, not a parallel browser world or camera owner. |
 | Native-vs-web semantic comparisons | Increase | The Gate 3 startup closure matches under Win32 x86 and Wasm through RawFile, PhysPreset, TechniqueSet, Material, nested/top-level images, water, LocalizeEntry, SoundCurve, sound aliases, LoadedSound, Font, FX, Impact, Light, MenuList, and Menu. Fixtures cover `-1`, `-2`, insertion, aliases, direct/inline/interior XStrings, dependency ordering, payloads, final-only publication, failure atomicity, and deterministic pool/free-chain deltas. |
 | Viewer-only feature work | Stop after world proof | Retired: the canonical world-to-WebGL2 seam is proven and the XModel preview UI, state, bridge, retained geometry, and multi-draw path have been removed. |
 
@@ -547,8 +550,9 @@ principally one unsupported format, one malformed load definition, and images
 deferred by the bounded 256 MiB static texture-recovery budget. At the time of
 this capture, sky/fog, display gamma/vision processing, water-specific shading,
 light-grid/model lighting, and the remaining `,crater_blacktop` image were
-explicit renderer gaps; the later model-lighting update below closes that one
-gap. The corrected world pass keeps the draw count and three texture fetches
+explicit renderer gaps. Later work closes the sky, fog, and model-lighting
+gaps, including lighting for live DynEntity XModels. The corrected world pass keeps
+the draw count and three texture fetches
 per pixel unchanged versus the previous approximation while avoiding retention
 or upload of 28 MiB of expanded primary-lightmap RGBA8 data.
 
@@ -573,6 +577,76 @@ browser-only engine substitutes are unchanged, and permanent browser code is
 still limited to the renderer backend/platform seam. Native systems not yet
 compiled remain the deferred shader/postprocess and broader campaign families,
 not entity or world replacements.
+
+## Sky and DynEntity renderer convergence update (2026-08-22)
+
+The frontend now reads live model and brush DynEntities directly from the
+canonical `DynEntityClient` pose/visibility arrays. Rigid XModels use canonical
+LOD selection and the native per-DynEntity primary-light/light-grid inputs;
+brush models transform canonical `GfxBrushModel` surface ranges while retaining
+their Material and directional-lightmap identities. These are bounded portable
+draw commands at the renderer seam, not duplicate browser game entities. This
+restores the scripted firing-range targets, the exit-door brush mover, and
+other map-owned dynamic props.
+
+The backend now decodes the canonical six-face sky image from either its DB
+load definition or external IWI payload, uploads it as a WebGL cubemap, and
+reconstructs view rays from the canonical view axes and field of view. It draws
+the sky before world geometry and recreates the cubemap after context loss.
+Malformed or over-budget cube payloads fail atomically. Focused native tests
+cover cube face ordering, rigid model/brush transforms, source tagging,
+directional-lightmap retention, DynEntity model-lighting coordinates, atlas
+merging, invalid-input safety, and submission limits.
+
+Static-model base-color retention no longer stops at the former 256 MiB
+bootstrap ceiling encountered by Killhouse. The bounded scene allowance is
+512 MiB, and a malformed or unsupported DB load definition now falls back to
+the same canonical external `images/<name>.iwi` lookup native asset ownership
+provides before the batch is downgraded. This targets the 29 static-model
+fallback batches recorded in the earlier capture rather than accepting their
+orientation-colored substitute as a model-rendering result.
+
+The same scene boundary now advances the web frontend's canonical five-slot
+fog state with the byte-wise interpolation used by `R_UpdateFrameFog`. World,
+static-model, DObj, DynEntity-model, and brush-model pixels use the scripted
+start/density/color and radial exponential visibility; HUD and explicitly
+vertex-color FX remain unfogged. Instanced static models also carry their
+transformed world position into this calculation rather than their local
+XSurface vertex position.
+
+This milestone deliberately does not add guessed ambient or sun terms to the
+encountered baked world technique. Remaining lighting parity work is the
+native material pipeline still absent from the WebGL backend: additive
+primary-light passes, glow/DOF, shadows, and broader post-processing. Campaign
+film color manipulation, capability-gated display gamma, and the encountered
+model normal-map path now follow the native renderer.
+
+## Campaign film and display mapping convergence update (2026-08-22)
+
+`R_RenderScene` now carries the active canonical `GfxFilm` payload through the
+renderer frontend. It mirrors `R_SetFilmInfo`, including the tweak override and
+the `r_desaturation`, `r_contrast`, and `r_brightness` adjustments, then emits
+the exact color-bias/tint-base/tint-delta constants calculated by
+`R_UpdateColorManipulation`. The WebGL backend resolves 3D into RGBA8 and
+applies the native `postfx_color` intensity/desaturation/tint equation before
+submitting the retained canonical 2D command. A second RGBA8 target preserves
+the native order so HUD colors are not film-tinted.
+
+The final pass also models the `R_CalcGammaRamp` exponent, but applies it only
+when the canonical `vidConfig.deviceSupportsGamma` capability is true and
+`r_ignorehwgamma` is false. The browser registration deliberately reports the
+capability false because a composited canvas cannot install D3D9's display
+LUT. A Chrome comparison with `r_gamma 0.8` forced in the shader proved that
+ignoring this gate substantially over-darkened Killhouse; the capability-
+correct neutral pass matches the native unsupported-device behavior.
+
+The focused native lighting test now covers the color-manipulation constants,
+invert and disabled forms, plus the exact display-gamma exponent oracle. The
+Release Chrome run reached a live Killhouse frame with canonical film values,
+fog, the six-face sky, 49 dynamic brush models, and 22 visible DynEntity
+XModels; shader compilation, post-effect target creation, and scene drawing
+reported no failures. Glow remains disabled by the active Killhouse vision set
+in the captured frame, so no browser-only bloom approximation was introduced.
 
 ## Native model-lighting convergence update (2026-08-22)
 
@@ -614,10 +688,29 @@ changes while moving between dark and bright cells. Keyboard, pointer-lock
 mouse, ADS, firing, compass, and HUD continue through the existing real
 client/cgame input and 2D paths.
 
-This milestone does not add normal-map perturbation for `n0` techniques,
-additive primary-light passes, shadows, reflections, SSAO, bloom, or other
-post-processing. Those remain material-technique or later renderer work; the
-canonical light-grid data flow and base model-lighting contract are no longer
+The subsequent material refinement carries packed tangent and binormal sign
+from GfxPackedVertex through rigid, weighted, instanced, and DynEntity model
+draws. Semantic-5 DXT5 normal images retain only after all base-color images,
+preserving base coverage under the bounded recovery allowance. The WebGL
+`n0` branch decodes tangent X from alpha, tangent Y from green, reconstructs
+positive Z, and perturbs the same normal used for the model-lighting-volume
+lookup. COD4 IWI legacy-normal metadata is accepted as native layout metadata
+rather than rejected as an unknown payload flag.
+
+The final Release Chrome Killhouse capture retains 337 of 340 static-model
+images and 61 of 64 first-frame DObj images while preserving the existing
+three static base-material fallbacks. The same existing `127.0.0.1:8000` tab
+reaches the first cgame-driven frame with 238 static model types, 12,188
+instances, 64 DObjs, 49 dynamic brush models, and 22 visible DynEntity
+XModels. Shader compilation, post-effect target creation, and scene drawing
+report no failures. Draw topology and batch counts are unchanged; only `n0`
+model fragments pay the additional normal-texture sample and tangent-basis
+reconstruction.
+
+This milestone still does not add additive primary-light passes, shadows,
+reflections, SSAO, bloom, or other post-processing. Those remain
+material-technique or later renderer work; the canonical light-grid data flow,
+normal-mapped model lookup, and base model-lighting contract are no longer
 gaps.
 
 ## Gameplay FX, materials, and audio convergence update (2026-08-22)

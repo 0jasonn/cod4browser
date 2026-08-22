@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <limits>
+#include <utility>
 
 namespace kisak::iwi
 {
@@ -401,13 +402,17 @@ Error DecodeRgba8(
     }
     constexpr std::uint8_t policyFlags =
         FLAG_STREAMING | FLAG_CLAMP_U | FLAG_CLAMP_V;
+    const std::uint8_t compressedPolicyFlags = static_cast<std::uint8_t>(
+        policyFlags | FLAG_LEGACY_NORMALS);
     if ((metadata.format == FORMAT_ARGB &&
             ((metadata.flags & FLAG_NO_MIPMAPS) == 0u ||
              (metadata.flags & static_cast<std::uint8_t>(
                  ~(FLAG_NO_MIPMAPS | policyFlags))) != 0u)) ||
-        ((rgb8 || compressed) && (metadata.flags &
-            static_cast<std::uint8_t>(~(FLAG_NO_PICMIP | FLAG_NO_MIPMAPS |
-                policyFlags))) != 0u))
+        (rgb8 && (metadata.flags & static_cast<std::uint8_t>(
+            ~(FLAG_NO_PICMIP | FLAG_NO_MIPMAPS | policyFlags))) != 0u) ||
+        (compressed && (metadata.flags & static_cast<std::uint8_t>(
+            ~(FLAG_NO_PICMIP | FLAG_NO_MIPMAPS |
+                compressedPolicyFlags))) != 0u))
     {
         return Error::DecodeUnsupportedFlags;
     }
@@ -570,6 +575,155 @@ Error DecodeRgba8(
     return Error::None;
 }
 
+Error DecodeCubeRgba8(
+    std::span<const std::uint8_t> bytes,
+    Rgba8Cube &cube) noexcept
+{
+    Metadata metadata{};
+    const Error parseError = Parse(bytes, metadata);
+    if (parseError != Error::None) return parseError;
+
+    const bool rgb8 = metadata.format == FORMAT_RGB8;
+    const bool compressed = metadata.format == FORMAT_DXT1 ||
+        metadata.format == FORMAT_DXT3 || metadata.format == FORMAT_DXT5;
+    if (metadata.format != FORMAT_ARGB && !rgb8 && !compressed)
+        return Error::DecodeUnsupportedFormat;
+    constexpr std::uint8_t policyFlags =
+        FLAG_STREAMING | FLAG_CLAMP_U | FLAG_CLAMP_V;
+    const std::uint8_t allowedFlags = FLAG_CUBEMAP | FLAG_NO_PICMIP |
+        FLAG_NO_MIPMAPS | policyFlags;
+    if ((metadata.flags & FLAG_CUBEMAP) == 0u ||
+        (metadata.flags & static_cast<std::uint8_t>(~allowedFlags)) != 0u)
+        return Error::DecodeUnsupportedFlags;
+    if (metadata.depth != 1u || metadata.width != metadata.height)
+        return Error::DecodeUnsupportedDimensions;
+
+    std::size_t facePixelCount = 0u;
+    std::size_t facePixelBytes = 0u;
+    std::size_t totalPixelBytes = 0u;
+    if (!CheckedMultiply(metadata.width, metadata.height, facePixelCount) ||
+        !CheckedMultiply(facePixelCount, RGBA_BYTES_PER_PIXEL,
+            facePixelBytes) ||
+        !CheckedMultiply(facePixelBytes, 6u, totalPixelBytes) ||
+        totalPixelBytes > MAX_CUBE_RGBA8_BYTES ||
+        bytes.size() > MAX_TEXTURE_MEMBER_BYTES)
+    {
+        return Error::DecodeOutputTooLarge;
+    }
+
+    const std::size_t bytesPerBlock = metadata.format == FORMAT_DXT1
+        ? 8u : 16u;
+    const std::uint32_t mipCount = Count2dStoredMipmaps(
+        metadata.flags, metadata.width, metadata.height);
+    std::size_t payloadBytes = 0u;
+    std::size_t baseFaceBytes = 0u;
+    std::size_t baseMipOffset = HEADER_SIZE;
+    for (std::uint32_t mip = mipCount; mip > 0u; --mip)
+    {
+        const std::uint32_t level = mip - 1u;
+        const std::uint32_t width = std::max<std::uint32_t>(
+            static_cast<std::uint32_t>(metadata.width) >> level, 1u);
+        const std::uint32_t height = std::max<std::uint32_t>(
+            static_cast<std::uint32_t>(metadata.height) >> level, 1u);
+        std::size_t levelFaceBytes = 0u;
+        if (compressed)
+        {
+            if (!DxtLevelBytes(width, height, bytesPerBlock,
+                    levelFaceBytes))
+                return Error::DecodeOutputTooLarge;
+        }
+        else
+        {
+            std::size_t levelPixels = 0u;
+            if (!CheckedMultiply(width, height, levelPixels) ||
+                !CheckedMultiply(levelPixels, rgb8 ? 3u : 4u,
+                    levelFaceBytes))
+                return Error::DecodeOutputTooLarge;
+        }
+        std::size_t levelBytes = 0u;
+        if (!CheckedMultiply(levelFaceBytes, 6u, levelBytes) ||
+            !CheckedAdd(payloadBytes, levelBytes, payloadBytes))
+            return Error::DecodeOutputTooLarge;
+        if (level == 0u)
+        {
+            baseFaceBytes = levelFaceBytes;
+            baseMipOffset = HEADER_SIZE + payloadBytes - levelBytes;
+        }
+    }
+    std::size_t expectedMemberBytes = 0u;
+    if (!CheckedAdd(HEADER_SIZE, payloadBytes, expectedMemberBytes) ||
+        expectedMemberBytes != bytes.size() || baseFaceBytes == 0u)
+        return Error::DecodeInvalidLayout;
+
+    Rgba8Cube decoded{};
+    decoded.edgeLength = metadata.width;
+    try
+    {
+        for (auto &face : decoded.faces) face.resize(facePixelBytes);
+    }
+    catch (...)
+    {
+        return Error::DecodeAllocationFailed;
+    }
+
+    for (std::size_t faceIndex = 0u; faceIndex < decoded.faces.size();
+         ++faceIndex)
+    {
+        const std::size_t sourceStart =
+            baseMipOffset + faceIndex * baseFaceBytes;
+        if (sourceStart > bytes.size() ||
+            baseFaceBytes > bytes.size() - sourceStart)
+            return Error::DecodeInvalidLayout;
+        const std::span<const std::uint8_t> source = bytes.subspan(
+            sourceStart, baseFaceBytes);
+        std::vector<std::uint8_t> &rgba = decoded.faces[faceIndex];
+        if (rgb8)
+        {
+            for (std::size_t pixel = 0u; pixel < facePixelCount; ++pixel)
+            {
+                const std::size_t sourceOffset = pixel * 3u;
+                const std::size_t targetOffset = pixel * 4u;
+                rgba[targetOffset] = source[sourceOffset + 2u];
+                rgba[targetOffset + 1u] = source[sourceOffset + 1u];
+                rgba[targetOffset + 2u] = source[sourceOffset];
+                rgba[targetOffset + 3u] = 255u;
+            }
+        }
+        else if (!compressed)
+        {
+            for (std::size_t offset = 0u; offset < facePixelBytes;
+                 offset += 4u)
+            {
+                rgba[offset] = source[offset + 2u];
+                rgba[offset + 1u] = source[offset + 1u];
+                rgba[offset + 2u] = source[offset];
+                rgba[offset + 3u] = source[offset + 3u];
+            }
+        }
+        else
+        {
+            const std::uint32_t blocksWide =
+                (static_cast<std::uint32_t>(metadata.width) + 3u) / 4u;
+            const std::uint32_t blocksHigh =
+                (static_cast<std::uint32_t>(metadata.height) + 3u) / 4u;
+            std::size_t sourceOffset = 0u;
+            for (std::uint32_t blockY = 0u; blockY < blocksHigh; ++blockY)
+            {
+                for (std::uint32_t blockX = 0u; blockX < blocksWide;
+                     ++blockX)
+                {
+                    DecodeDxtBlock(source.subspan(sourceOffset,
+                        bytesPerBlock), metadata.format, blockX, blockY,
+                        metadata.width, metadata.height, rgba);
+                    sourceOffset += bytesPerBlock;
+                }
+            }
+        }
+    }
+    cube = std::move(decoded);
+    return Error::None;
+}
+
 Error DecodeLoadDefRgba8(
     std::int32_t format,
     std::uint8_t flags,
@@ -718,6 +872,52 @@ Error DecodeLoadDefRgba8(
     image.width = width;
     image.height = height;
     image.pixels.swap(rgba);
+    return Error::None;
+}
+
+Error DecodeLoadDefCubeRgba8(
+    std::int32_t format,
+    std::uint8_t flags,
+    std::uint16_t width,
+    std::uint16_t height,
+    std::uint16_t depth,
+    std::span<const std::uint8_t> payload,
+    Rgba8Cube &cube) noexcept
+{
+    if (width == 0u || width != height || depth != 1u)
+        return Error::DecodeUnsupportedDimensions;
+    std::size_t facePixels = 0u;
+    std::size_t faceRgbaBytes = 0u;
+    std::size_t totalRgbaBytes = 0u;
+    if (!CheckedMultiply(width, height, facePixels) ||
+        !CheckedMultiply(facePixels, RGBA_BYTES_PER_PIXEL,
+            faceRgbaBytes) ||
+        !CheckedMultiply(faceRgbaBytes, 6u, totalRgbaBytes) ||
+        totalRgbaBytes > MAX_CUBE_RGBA8_BYTES ||
+        payload.size() % 6u != 0u)
+    {
+        return Error::DecodeOutputTooLarge;
+    }
+    const std::size_t facePayloadBytes = payload.size() / 6u;
+    if (facePayloadBytes == 0u) return Error::DecodeInvalidLayout;
+
+    Rgba8Cube decoded{};
+    decoded.edgeLength = width;
+    for (std::size_t faceIndex = 0u; faceIndex < decoded.faces.size();
+         ++faceIndex)
+    {
+        Rgba8Image face{};
+        const Error error = DecodeLoadDefRgba8(
+            format, flags, width, height, depth,
+            payload.subspan(faceIndex * facePayloadBytes,
+                facePayloadBytes), face);
+        if (error != Error::None) return error;
+        if (face.width != width || face.height != height ||
+            face.pixels.size() != faceRgbaBytes)
+            return Error::DecodeInvalidLayout;
+        decoded.faces[faceIndex] = std::move(face.pixels);
+    }
+    cube = std::move(decoded);
     return Error::None;
 }
 

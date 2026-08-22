@@ -16,6 +16,14 @@ constexpr std::uint32_t MODEL_LIGHTING_WIDTH = 256u;
 constexpr std::uint32_t MODEL_LIGHTING_DEPTH = 4u;
 constexpr std::uint32_t ENTRIES_PER_ROW = 64u;
 
+std::uint8_t LerpFogByte(
+    std::uint8_t from, std::uint8_t to, float fraction) noexcept
+{
+    return static_cast<std::uint8_t>(static_cast<int>(
+        static_cast<double>(from) +
+        static_cast<double>(static_cast<int>(to) - from) * fraction));
+}
+
 struct LightGridRow
 {
     std::uint16_t colStart;
@@ -33,6 +41,72 @@ bool ValidGrid(const GfxLightGrid &grid) noexcept
         grid.rawRowData && grid.entries && grid.colors &&
         grid.rawRowDataSize >= sizeof(LightGridRow) &&
         grid.entryCount != 0u && grid.colorCount != 0u;
+}
+
+bool UpdateFrameFogInternal(
+    std::array<WebRendererFog, 5> &fogStates,
+    std::uint32_t fogIndex,
+    std::int32_t sceneTime,
+    WebRendererFog &frameFog) noexcept
+{
+    if (fogIndex >= fogStates.size())
+    {
+        frameFog = {};
+        return false;
+    }
+
+    WebRendererFog &current = fogStates[2];
+    const WebRendererFog &last = fogStates[3];
+    const WebRendererFog &target = fogStates[4];
+    if (sceneTime < target.finishTime)
+    {
+        const std::int32_t transitionTime = std::max(
+            target.finishTime - target.startTime, 1);
+        const float fraction = std::min(1.0f,
+            static_cast<float>(sceneTime - target.startTime) /
+                static_cast<float>(transitionTime));
+        current.fogStart = last.fogStart +
+            (target.fogStart - last.fogStart) * fraction;
+        current.density = last.density +
+            (target.density - last.density) * fraction;
+        for (std::size_t channel = 0u; channel < 4u; ++channel)
+        {
+            const std::uint8_t from = static_cast<std::uint8_t>(
+                last.color >> (channel * 8u));
+            const std::uint8_t to = static_cast<std::uint8_t>(
+                target.color >> (channel * 8u));
+            current.color &= ~(0xffu << (channel * 8u));
+            current.color |= static_cast<std::uint32_t>(
+                LerpFogByte(from, to, fraction)) << (channel * 8u);
+        }
+    }
+    else
+    {
+        current = target;
+    }
+
+    if (fogIndex == 0u)
+    {
+        frameFog = {};
+        return false;
+    }
+    frameFog = current;
+    return std::isfinite(frameFog.fogStart) &&
+        std::isfinite(frameFog.density) && frameFog.density > 0.0f;
+}
+
+float EvaluateFogVisibilityInternal(
+    float distance,
+    const WebRendererFog &fog) noexcept
+{
+    if (!std::isfinite(distance) || !std::isfinite(fog.fogStart) ||
+        !std::isfinite(fog.density) || fog.density <= 0.0f)
+    {
+        return 1.0f;
+    }
+    return std::clamp(std::exp(
+        (fog.fogStart - std::max(distance, 0.0f)) * fog.density),
+        0.0f, 1.0f);
 }
 
 const GfxLightGridEntry *EntryAt(
@@ -359,6 +433,96 @@ std::uint32_t NextPowerOfTwo(std::uint32_t value) noexcept
 }
 } // namespace
 
+bool WebRenderer_UpdateFrameFog(
+    std::array<WebRendererFog, 5> &fogStates,
+    std::uint32_t fogIndex,
+    std::int32_t sceneTime,
+    WebRendererFog &frameFog) noexcept
+{
+    return UpdateFrameFogInternal(
+        fogStates, fogIndex, sceneTime, frameFog);
+}
+
+float WebRenderer_EvaluateFogVisibility(
+    float distance,
+    const WebRendererFog &fog) noexcept
+{
+    return EvaluateFogVisibilityInternal(distance, fog);
+}
+
+bool WebRenderer_CalculateColorManipulationConstants(
+    const WebRendererFilmSettings &film,
+    WebRendererColorManipulationConstants &constants) noexcept
+{
+    const auto finite3 = [](const float values[3]) noexcept
+    {
+        return std::isfinite(values[0]) && std::isfinite(values[1]) &&
+            std::isfinite(values[2]);
+    };
+    if (!std::isfinite(film.brightness) ||
+        !std::isfinite(film.contrast) ||
+        !std::isfinite(film.desaturation) ||
+        !finite3(film.tintDark) || !finite3(film.tintLight))
+    {
+        constants = {};
+        return false;
+    }
+
+    WebRendererColorManipulationConstants replacement{};
+    replacement.enabled = film.enabled;
+    if (!film.enabled)
+    {
+        replacement.colorBias[3] = 4095.0f;
+        replacement.colorTintBase[0] = 1.0f / 4096.0f;
+        replacement.colorTintBase[1] = 1.0f / 4096.0f;
+        replacement.colorTintBase[2] = 1.0f / 4096.0f;
+        constants = replacement;
+        return true;
+    }
+
+    const float desaturation = std::max(
+        film.desaturation, 1.0f / 4096.0f);
+    const float desaturationScale = 1.0f / desaturation - 1.0f;
+    float tintScale = film.contrast * desaturation;
+    float tintBias = film.brightness + 0.5f - film.contrast * 0.5f;
+    if (film.invert)
+    {
+        tintScale = -tintScale;
+        tintBias += 1.0f;
+    }
+    replacement.colorBias[0] = tintBias;
+    replacement.colorBias[1] = tintBias;
+    replacement.colorBias[2] = tintBias;
+    replacement.colorBias[3] = desaturationScale;
+    for (std::size_t channel = 0u; channel < 3u; ++channel)
+    {
+        replacement.colorTintBase[channel] =
+            film.tintDark[channel] * tintScale;
+        replacement.colorTintDelta[channel] =
+            (film.tintLight[channel] - film.tintDark[channel]) * tintScale;
+    }
+    constants = replacement;
+    return true;
+}
+
+float WebRenderer_EvaluateDisplayGamma(
+    float displayValue, float gamma) noexcept
+{
+    if (!std::isfinite(displayValue) || !std::isfinite(gamma) ||
+        gamma <= 0.0f)
+        return 0.0f;
+    return std::pow(std::clamp(displayValue, 0.0f, 1.0f), 1.0f / gamma);
+}
+
+std::array<float, 3> WebRenderer_DecodeDxt5Normal(
+    const std::array<float, 4> &sample) noexcept
+{
+    const float x = sample[3] * 2.0f - 1.0f;
+    const float y = sample[1] * 2.0f - 1.0f;
+    const float z = std::sqrt(std::max(1.0f - x * x - y * y, 0.0f));
+    return {x, y, z};
+}
+
 std::array<float, 3> WebRenderer_EvaluateSecondaryDirectionalLighting(
     const std::array<float, 4> &base,
     const std::array<float, 4> &vertexColor,
@@ -564,6 +728,54 @@ bool WebRenderer_SetModelGroundLightingAtlasEntry(
         groundLighting >> 24u);
     return WebRenderer_SetModelLightingAtlasEntry(
         atlas, entryIndex, colors, alpha);
+}
+
+bool WebRenderer_CopyModelLightingAtlasEntries(
+    const WebRendererModelLightingAtlas &source,
+    WebRendererModelLightingAtlas &destination,
+    std::uint32_t destinationEntryOffset) noexcept
+{
+    if (source.width != 256u || source.depth != 4u ||
+        source.height < 4u || source.pixels.empty() ||
+        destination.width != 256u || destination.depth != 4u ||
+        destination.height < 4u || destination.pixels.empty() ||
+        destinationEntryOffset > destination.entryCount ||
+        source.entryCount >
+            destination.entryCount - destinationEntryOffset)
+    {
+        return false;
+    }
+    for (std::uint32_t entry = 0u; entry < source.entryCount; ++entry)
+    {
+        const std::uint32_t destinationEntry =
+            destinationEntryOffset + entry;
+        const std::uint32_t sourceBaseX = (entry & 63u) * 4u;
+        const std::uint32_t sourceBaseY = (entry >> 6u) * 4u;
+        const std::uint32_t destinationBaseX =
+            (destinationEntry & 63u) * 4u;
+        const std::uint32_t destinationBaseY =
+            (destinationEntry >> 6u) * 4u;
+        if (sourceBaseY + 4u > source.height ||
+            destinationBaseY + 4u > destination.height)
+            return false;
+        for (std::uint32_t z = 0u; z < 4u; ++z)
+        {
+            for (std::uint32_t row = 0u; row < 4u; ++row)
+            {
+                const std::size_t sourceOffset =
+                    ((static_cast<std::size_t>(z) * source.height +
+                        sourceBaseY + row) * source.width +
+                        sourceBaseX) * 4u;
+                const std::size_t destinationOffset =
+                    ((static_cast<std::size_t>(z) * destination.height +
+                        destinationBaseY + row) * destination.width +
+                        destinationBaseX) * 4u;
+                std::copy_n(source.pixels.data() + sourceOffset, 16u,
+                    destination.pixels.data() + destinationOffset);
+            }
+        }
+    }
+    return true;
 }
 
 void WebRenderer_GetModelLightingCoordinates(

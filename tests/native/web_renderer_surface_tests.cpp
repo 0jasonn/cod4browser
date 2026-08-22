@@ -88,7 +88,7 @@ void TestValidTriangle()
         WebRenderer_ValidateSurface(surface, untextured),
         WebRendererSurfaceResult::Success,
         "valid untextured indexed triangle");
-    Require(sizeof(WebRendererSurfaceVertex) == 56u,
+    Require(sizeof(WebRendererSurfaceVertex) == 72u,
         "fixed vertex layout carries RGBA color and canonical normal");
 }
 
@@ -142,7 +142,7 @@ void TestBoundsBeforeDereference()
         "oversized index count");
     Require(
         WEB_RENDERER_MAX_RETAINED_SURFACE_BYTES ==
-            static_cast<std::size_t>(WEB_RENDERER_MAX_SURFACE_VERTICES) * 56u +
+            static_cast<std::size_t>(WEB_RENDERER_MAX_SURFACE_VERTICES) * 72u +
             static_cast<std::size_t>(WEB_RENDERER_MAX_SURFACE_INDICES) * 2u,
         "surface recovery ceiling covers both bounded arrays");
 }

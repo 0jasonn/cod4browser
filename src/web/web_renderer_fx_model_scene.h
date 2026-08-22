@@ -20,6 +20,12 @@ struct WebRendererFxModelSubmission
     const XModel *model = nullptr;
     GfxScaledPlacement placement{};
     std::uint16_t lod = 0u;
+    // EffectsCore uses FxXModel. Canonical renderer-owned DynEntity models
+    // reuse the same rigid XSurface expansion without being classified as FX.
+    WebRendererSceneBatchKind sourceKind =
+        WebRendererSceneBatchKind::FxXModel;
+    bool modelLightingEnabled = false;
+    float modelLightingCoordinates[3]{};
 };
 
 constexpr std::uint32_t WEB_RENDERER_MAX_FX_MODEL_SUBMISSIONS = 256u;

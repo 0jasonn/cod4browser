@@ -75,6 +75,20 @@ struct WebRendererSceneViewDesc
     float depthHackViewProjectionMatrix[4][4];
     std::int32_t time;
     float zNear;
+    // Canonical frame fog after R_UpdateFrameFog interpolation. Color is
+    // unpacked from GfxFog's BGRA byte layout at the frontend boundary.
+    float fogColor[4];
+    float fogStart;
+    float fogDensity;
+    bool fogEnabled;
+    // Canonical CONST_SRC_CODE_COLOR_* values calculated by the renderer
+    // frontend from the active campaign vision set. Film is applied to the
+    // resolved 3D scene before 2D; display gamma is applied after 2D.
+    float colorBias[4];
+    float colorTintBase[4];
+    float colorTintDelta[4];
+    float displayGammaExponent;
+    bool filmEnabled;
     std::int32_t localClientNum;
     const char *worldName;
     std::uint32_t worldSurfaceCount;
@@ -98,6 +112,8 @@ constexpr std::uint32_t WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES = 500'000u;
 // at the browser frontend seam so ordinary entity DObjs are not silently
 // limited to a smaller browser-only subset.
 constexpr std::uint32_t WEB_RENDERER_MAX_DYNAMIC_DOBJ_SUBMISSIONS = 512u;
+// Native GfxScene::sceneBrush is a separate fixed 512-entry array.
+constexpr std::uint32_t WEB_RENDERER_MAX_DYNAMIC_BMODEL_SUBMISSIONS = 512u;
 constexpr std::uint32_t WEB_RENDERER_MAX_UI_VERTICES = 65'536u;
 constexpr std::uint32_t WEB_RENDERER_MAX_UI_INDICES = 98'304u;
 
@@ -143,6 +159,8 @@ enum class WebRendererSceneBatchKind : std::uint8_t
     WorldSurface = 0,
     StaticXModel,
     DynamicDObj,
+    DynamicXModel,
+    DynamicBModel,
     FxCodeMesh,
     FxXModel,
     FxParticleCloud,
@@ -188,10 +206,12 @@ struct WebRendererWorldBatchDesc
     std::uint32_t firstInstanceIndex;
     std::uint32_t lastInstanceIndex;
     const GfxImage *baseImage;
+    const GfxImage *normalImage;
     const GfxImage *lightmapImage;
     const GfxImage *secondaryLightmapImage;
     std::uint32_t stateBits[2];
     std::uint8_t samplerState;
+    std::uint8_t normalSamplerState;
     std::uint8_t lightmapIndex;
     WebRendererSceneBatchKind sourceKind;
     WebRendererWorldTechnique technique;
@@ -331,6 +351,13 @@ WebRendererShaderState WebRenderer_GetShaderCompatibilityState();
 // renderer-frontend responsibility and is deliberately separate from the
 // frozen bounded world-surface adapter.
 bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view);
+
+// Retains the canonical GfxWorld sky cubemap at the renderer/backend boundary.
+// The DB image identity remains canonical; only decoded face pixels and the
+// WebGL cubemap object are backend-owned.
+WebRendererTextureResult WebRenderer_SetSkyImage(
+    const GfxImage *image,
+    std::uint8_t samplerState);
 
 // Atomically retains and uploads the renderer-frontend material-aware world
 // command. Geometry uses 32-bit indices; each batch preserves canonical

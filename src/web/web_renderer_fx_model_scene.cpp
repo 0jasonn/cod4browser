@@ -13,6 +13,7 @@
 #include <utility>
 
 void __cdecl Vec2UnpackTexCoords(PackedTexCoords in, float *out);
+void __cdecl Vec3UnpackUnitVec(PackedUnitVec in, float *out);
 int __cdecl XModelGetLodForDist(const XModel *model, float dist);
 
 namespace
@@ -90,8 +91,25 @@ const GfxImage *FindBaseImage(
     return nullptr;
 }
 
+const GfxImage *FindNormalImage(
+    const Material *material, std::uint8_t &sampler) noexcept
+{
+    if (!material || !material->textureTable) return nullptr;
+    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
+    {
+        const MaterialTextureDef &texture = material->textureTable[index];
+        if (texture.semantic == 5u && texture.u.image)
+        {
+            sampler = texture.samplerState;
+            return texture.u.image;
+        }
+    }
+    return nullptr;
+}
+
 bool SelectTechnique(
-    const Material *material, std::uint32_t stateBits[2]) noexcept
+    const Material *material, std::uint32_t stateBits[2],
+    const char *&techniqueName, std::uint8_t &techniqueType) noexcept
 {
     if (!material || !material->techniqueSet || !material->stateBitsTable)
         return false;
@@ -108,6 +126,8 @@ bool SelectTechnique(
         }
         stateBits[0] = material->stateBitsTable[entry].loadBits[0];
         stateBits[1] = material->stateBitsTable[entry].loadBits[1];
+        techniqueName = technique->name;
+        techniqueType = static_cast<std::uint8_t>(type);
         return true;
     }
     return false;
@@ -115,7 +135,8 @@ bool SelectTechnique(
 
 WebRendererWorldBatchDesc MakeDraw(
     const XModel &model, Material *material, std::uint32_t surfaceIndex,
-    std::uint32_t firstIndex, std::uint32_t indexCount) noexcept
+    std::uint32_t firstIndex, std::uint32_t indexCount,
+    const WebRendererFxModelSubmission &submission) noexcept
 {
     WebRendererWorldBatchDesc draw{};
     draw.firstIndex = firstIndex;
@@ -131,12 +152,23 @@ WebRendererWorldBatchDesc MakeDraw(
     draw.firstInstanceIndex = UINT32_MAX;
     draw.lastInstanceIndex = UINT32_MAX;
     draw.lightmapIndex = 31u;
-    draw.sourceKind = WebRendererSceneBatchKind::FxXModel;
+    draw.sourceKind = submission.sourceKind;
     draw.baseImage = FindBaseImage(material, draw.samplerState);
-    const bool hasTechnique = SelectTechnique(material, draw.stateBits);
+    draw.normalImage = FindNormalImage(material, draw.normalSamplerState);
+    const bool hasTechnique = SelectTechnique(material, draw.stateBits,
+        draw.techniqueName, draw.techniqueType);
+    if (!draw.techniqueName ||
+        std::strstr(draw.techniqueName, "n0") == nullptr)
+        draw.normalImage = nullptr;
     draw.technique = hasTechnique && draw.baseImage
         ? WebRendererWorldTechnique::BaseTexture
         : WebRendererWorldTechnique::BackendFallback;
+    if (submission.modelLightingEnabled)
+    {
+        draw.lightingMode = WebRendererWorldLightingMode::ModelLightGrid;
+        std::copy_n(submission.modelLightingCoordinates, 3u,
+            draw.modelLightingCoordinates);
+    }
     return draw;
 }
 } // namespace
@@ -165,6 +197,7 @@ WebRendererFxModelRetainResult WebRenderer_RetainFxModelSubmission(
     retained.model = model;
     retained.placement = *placement;
     retained.lod = lod;
+    retained.sourceKind = WebRendererSceneBatchKind::FxXModel;
     return WebRendererFxModelRetainResult::Accepted;
 }
 
@@ -340,6 +373,45 @@ WebRendererFxModelSceneResult WebRenderer_BuildFxModelSceneCommand(
                         modelSubmitted = false;
                         break;
                     }
+                    float sourceNormal[3]{};
+                    float sourceTangent[3]{};
+                    Vec3UnpackUnitVec(source.normal, sourceNormal);
+                    Vec3UnpackUnitVec(source.tangent, sourceTangent);
+                    float normalLengthSquared = 0.0f;
+                    float tangentLengthSquared = 0.0f;
+                    for (std::size_t row = 0u; row < 3u; ++row)
+                    {
+                        for (std::size_t column = 0u; column < 3u; ++column)
+                        {
+                            vertex.normal[row] +=
+                                sourceNormal[column] * axis[column][row];
+                            vertex.tangent[row] +=
+                                sourceTangent[column] * axis[column][row];
+                        }
+                        normalLengthSquared +=
+                            vertex.normal[row] * vertex.normal[row];
+                        tangentLengthSquared +=
+                            vertex.tangent[row] * vertex.tangent[row];
+                    }
+                    if (!std::isfinite(normalLengthSquared) ||
+                        normalLengthSquared <= 0.000001f ||
+                        !std::isfinite(tangentLengthSquared) ||
+                        tangentLengthSquared <= 0.000001f ||
+                        !std::isfinite(source.binormalSign))
+                    {
+                        dropAndRollback();
+                        modelSubmitted = false;
+                        break;
+                    }
+                    const float inverseNormalLength =
+                        1.0f / std::sqrt(normalLengthSquared);
+                    for (float &component : vertex.normal)
+                        component *= inverseNormalLength;
+                    const float inverseTangentLength =
+                        1.0f / std::sqrt(tangentLengthSquared);
+                    for (float &component : vertex.tangent)
+                        component *= inverseTangentLength;
+                    vertex.binormalSign = source.binormalSign;
                     replacement.vertices.push_back(vertex);
                 }
 
@@ -356,7 +428,7 @@ WebRendererFxModelSceneResult WebRenderer_BuildFxModelSceneCommand(
                 }
                 replacement.batches.push_back(MakeDraw(
                     *model, model->materialHandles[surfaceIndex], surfaceIndex,
-                    firstIndex, indexCount));
+                    firstIndex, indexCount, submission));
                 ++replacement.surfaceCount;
                 modelSubmitted = true;
             }

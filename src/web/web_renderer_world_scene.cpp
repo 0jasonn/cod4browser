@@ -12,7 +12,6 @@
 #include <new>
 #include <utility>
 
-
 namespace
 {
 constexpr float BYTE_TO_UNIT = 1.0f / 255.0f;
@@ -20,6 +19,15 @@ constexpr std::uint32_t TECHNIQUE_UNLIT_INDEX = 4u;
 constexpr std::uint32_t TECHNIQUE_EMISSIVE_INDEX = 5u;
 constexpr std::uint32_t TECHNIQUE_LIT_INDEX = 7u;
 constexpr std::uint32_t TECHNIQUE_NONE_INDEX = 36u;
+
+void UnpackUnitVec(PackedUnitVec packed, float output[3]) noexcept
+{
+    const float scale =
+        (static_cast<float>(packed.array[3]) + 192.0f) / 32385.0f;
+    output[0] = (static_cast<float>(packed.array[0]) - 127.0f) * scale;
+    output[1] = (static_cast<float>(packed.array[1]) - 127.0f) * scale;
+    output[2] = (static_cast<float>(packed.array[2]) - 127.0f) * scale;
+}
 
 bool Finite3(const float value[3]) noexcept
 {
@@ -62,8 +70,9 @@ bool SurfaceUsesSkyPass(const GfxSurface &surface) noexcept
 {
     // R_LoadWorld marks sky materials with gameFlags bit 3 and canonical
     // traversal submits them through R_AddSkySurfacesDpvs, not the ordinary
-    // opaque world-surface pass. The WebGL sky pass is not part of this first
-    // cgame frame slice, so do not let its enclosing geometry hide the world.
+    // opaque world-surface pass. The backend draws s_world.skyImage as a
+    // cubemap before opaque geometry, so its enclosing geometry must not hide
+    // the world.
     return surface.material && (surface.material->info.gameFlags & 8u) != 0u;
 }
 
@@ -93,6 +102,22 @@ const GfxImage *FindBaseImage(const Material *material, std::uint8_t &sampler) n
     {
         const MaterialTextureDef &texture = material->textureTable[index];
         if (texture.semantic == 2u && texture.u.image)
+        {
+            sampler = texture.samplerState;
+            return texture.u.image;
+        }
+    }
+    return nullptr;
+}
+
+const GfxImage *FindNormalImage(
+    const Material *material, std::uint8_t &sampler) noexcept
+{
+    if (!material || !material->textureTable) return nullptr;
+    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
+    {
+        const MaterialTextureDef &texture = material->textureTable[index];
+        if (texture.semantic == 5u && texture.u.image)
         {
             sampler = texture.samplerState;
             return texture.u.image;
@@ -222,6 +247,8 @@ WebRendererWorldBatchDesc MakeBatch(
     batch.sourceKind = WebRendererSceneBatchKind::WorldSurface;
     batch.samplerState = 0u;
     batch.baseImage = FindBaseImage(surface.material, batch.samplerState);
+    batch.normalImage = FindNormalImage(
+        surface.material, batch.normalSamplerState);
     const TechniqueSelection technique = SelectTechnique(surface.material);
     batch.techniqueName = technique.identityName
         ? technique.identityName : "<unsupported-technique>";
@@ -267,6 +294,7 @@ bool BatchMatches(
         batch.modelIdentity == candidate.modelIdentity &&
         batch.sourceKind == candidate.sourceKind &&
         batch.baseImage == candidate.baseImage &&
+        batch.normalImage == candidate.normalImage &&
         batch.lightmapImage == candidate.lightmapImage &&
         batch.secondaryLightmapImage == candidate.secondaryLightmapImage &&
         batch.lightingMode == candidate.lightingMode &&
@@ -276,6 +304,7 @@ bool BatchMatches(
         batch.stateBits[0] == candidate.stateBits[0] &&
         batch.stateBits[1] == candidate.stateBits[1] &&
         batch.samplerState == candidate.samplerState &&
+        batch.normalSamplerState == candidate.normalSamplerState &&
         batch.lightmapIndex == candidate.lightmapIndex &&
         batch.technique == candidate.technique;
 }
@@ -412,6 +441,14 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
                 vertex.textureCoordinate[1] = source.texCoord[1];
                 vertex.lightmapCoordinate[0] = source.lmapCoord[0];
                 vertex.lightmapCoordinate[1] = source.lmapCoord[1];
+                UnpackUnitVec(source.normal, vertex.normal);
+                UnpackUnitVec(source.tangent, vertex.tangent);
+                vertex.binormalSign = source.binormalSign;
+                if (!Finite3(vertex.normal) || !Finite3(vertex.tangent) ||
+                    !std::isfinite(vertex.binormalSign))
+                {
+                    return WebRendererWorldSceneResult::InvalidSurfaceBounds;
+                }
                 destinationIndex =
                     static_cast<std::uint32_t>(replacement.vertices.size());
                 replacement.vertices.push_back(vertex);
@@ -450,6 +487,208 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
         return WebRendererWorldSceneResult::AllocationFailed;
     }
 
+    if (replacement.surfaceCount == 0u)
+        return WebRendererWorldSceneResult::NoVisibleSurface;
+    destination = std::move(replacement);
+    return WebRendererWorldSceneResult::Success;
+}
+
+WebRendererWorldSceneResult WebRenderer_BuildBrushModelSceneCommand(
+    const GfxWorld &world,
+    const WebRendererBrushModelSubmission *submissions,
+    std::uint32_t submissionCount,
+    WebRendererBrushModelSceneCommand &destination)
+{
+    if (world.surfaceCount <= 0 || world.vertexCount == 0u ||
+        world.indexCount <= 0 || !world.vd.vertices || !world.indices ||
+        !world.dpvs.surfaces || world.modelCount <= 0 || !world.models)
+    {
+        return WebRendererWorldSceneResult::InvalidWorld;
+    }
+    if (submissionCount == 0u)
+        return WebRendererWorldSceneResult::NoVisibleSurface;
+    if (!submissions ||
+        submissionCount > WEB_RENDERER_MAX_DYNAMIC_BMODEL_SUBMISSIONS)
+    {
+        return WebRendererWorldSceneResult::InvalidSurfaceRange;
+    }
+
+    WebRendererBrushModelSceneCommand replacement;
+    try
+    {
+        constexpr std::uint32_t UNMAPPED =
+            std::numeric_limits<std::uint32_t>::max();
+        std::vector<std::uint32_t> vertexRemap(world.vertexCount, UNMAPPED);
+        std::vector<std::uint32_t> touchedVertices;
+        for (std::uint32_t submissionIndex = 0u;
+             submissionIndex < submissionCount; ++submissionIndex)
+        {
+            const WebRendererBrushModelSubmission &submission =
+                submissions[submissionIndex];
+            const GfxBrushModel *model = submission.model;
+            if (!model || !Finite3(submission.origin))
+                return WebRendererWorldSceneResult::InvalidSurfaceRange;
+            for (const auto &axis : submission.axis)
+                if (!Finite3(axis))
+                    return WebRendererWorldSceneResult::InvalidSurfaceBounds;
+
+            const std::uint32_t surfaceBegin = model->startSurfIndex;
+            const std::uint32_t surfaceEnd =
+                surfaceBegin + model->surfaceCount;
+            if (surfaceBegin > static_cast<std::uint32_t>(world.surfaceCount) ||
+                model->surfaceCount >
+                    static_cast<std::uint32_t>(world.surfaceCount) -
+                        surfaceBegin)
+            {
+                return WebRendererWorldSceneResult::InvalidSurfaceRange;
+            }
+            const std::size_t firstSubmissionBatch =
+                replacement.batches.size();
+            std::uint32_t emittedSurfaces = 0u;
+            for (std::uint32_t surfaceIndex = surfaceBegin;
+                 surfaceIndex < surfaceEnd; ++surfaceIndex)
+            {
+                const GfxSurface &surface = world.dpvs.surfaces[surfaceIndex];
+                if (SurfaceUsesSkyPass(surface) ||
+                    surface.tris.vertexCount == 0u ||
+                    surface.tris.triCount == 0u)
+                {
+                    continue;
+                }
+                if (!SurfaceBoundsAreFinite(surface))
+                    return WebRendererWorldSceneResult::InvalidSurfaceBounds;
+                if (!SurfaceRangeIsValid(world, surface))
+                    return WebRendererWorldSceneResult::InvalidSurfaceRange;
+
+                const std::uint32_t vertexCount = surface.tris.vertexCount;
+                const std::uint32_t indexCount =
+                    static_cast<std::uint32_t>(surface.tris.triCount) * 3u;
+                const std::uint32_t firstSourceIndex =
+                    static_cast<std::uint32_t>(surface.tris.baseIndex);
+                const std::uint32_t sourceVertexBase =
+                    static_cast<std::uint32_t>(surface.tris.firstVertex);
+                if (replacement.indices.size() >
+                    WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES - indexCount)
+                {
+                    return WebRendererWorldSceneResult::OutputTooLarge;
+                }
+                const std::uint32_t firstDestinationIndex =
+                    static_cast<std::uint32_t>(replacement.indices.size());
+                for (std::uint32_t index = 0u; index < indexCount; ++index)
+                {
+                    const std::uint32_t localIndex =
+                        world.indices[firstSourceIndex + index];
+                    if (localIndex >= vertexCount)
+                        return WebRendererWorldSceneResult::IndexOutOfRange;
+                    const std::uint32_t sourceVertexIndex =
+                        sourceVertexBase + localIndex;
+                    std::uint32_t &destinationIndex =
+                        vertexRemap[sourceVertexIndex];
+                    if (destinationIndex == UNMAPPED)
+                    {
+                        if (replacement.vertices.size() >=
+                            WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES)
+                        {
+                            return WebRendererWorldSceneResult::OutputTooLarge;
+                        }
+                        const GfxWorldVertex &source =
+                            world.vd.vertices[sourceVertexIndex];
+                        if (!Finite3(source.xyz) ||
+                            !std::isfinite(source.texCoord[0]) ||
+                            !std::isfinite(source.texCoord[1]) ||
+                            !std::isfinite(source.lmapCoord[0]) ||
+                            !std::isfinite(source.lmapCoord[1]))
+                        {
+                            return WebRendererWorldSceneResult::InvalidSurfaceBounds;
+                        }
+                        WebRendererSurfaceVertex vertex{};
+                        for (std::size_t component = 0u;
+                             component < 3u; ++component)
+                        {
+                            vertex.position[component] =
+                                source.xyz[0] * submission.axis[0][component] +
+                                source.xyz[1] * submission.axis[1][component] +
+                                source.xyz[2] * submission.axis[2][component] +
+                                submission.origin[component];
+                        }
+                        vertex.color[0] = static_cast<float>(
+                            (source.color.packed >> 16u) & 0xffu) * BYTE_TO_UNIT;
+                        vertex.color[1] = static_cast<float>(
+                            (source.color.packed >> 8u) & 0xffu) * BYTE_TO_UNIT;
+                        vertex.color[2] = static_cast<float>(
+                            source.color.packed & 0xffu) * BYTE_TO_UNIT;
+                        vertex.color[3] = static_cast<float>(
+                            (source.color.packed >> 24u) & 0xffu) * BYTE_TO_UNIT;
+                        std::copy_n(source.texCoord, 2u,
+                            vertex.textureCoordinate);
+                        std::copy_n(source.lmapCoord, 2u,
+                            vertex.lightmapCoordinate);
+                        float sourceNormal[3]{};
+                        float sourceTangent[3]{};
+                        UnpackUnitVec(source.normal, sourceNormal);
+                        UnpackUnitVec(source.tangent, sourceTangent);
+                        for (std::size_t component = 0u;
+                             component < 3u; ++component)
+                        {
+                            vertex.normal[component] =
+                                sourceNormal[0] * submission.axis[0][component] +
+                                sourceNormal[1] * submission.axis[1][component] +
+                                sourceNormal[2] * submission.axis[2][component];
+                            vertex.tangent[component] =
+                                sourceTangent[0] * submission.axis[0][component] +
+                                sourceTangent[1] * submission.axis[1][component] +
+                                sourceTangent[2] * submission.axis[2][component];
+                        }
+                        vertex.binormalSign = source.binormalSign;
+                        if (!Finite3(vertex.normal) ||
+                            !Finite3(vertex.tangent) ||
+                            !std::isfinite(vertex.binormalSign))
+                        {
+                            return WebRendererWorldSceneResult::InvalidSurfaceBounds;
+                        }
+                        destinationIndex = static_cast<std::uint32_t>(
+                            replacement.vertices.size());
+                        replacement.vertices.push_back(vertex);
+                        touchedVertices.push_back(sourceVertexIndex);
+                    }
+                    replacement.indices.push_back(destinationIndex);
+                }
+
+                WebRendererWorldBatchDesc candidate = MakeBatch(
+                    world, surface, surfaceIndex, firstDestinationIndex);
+                candidate.indexCount = indexCount;
+                candidate.sourceKind =
+                    WebRendererSceneBatchKind::DynamicBModel;
+                candidate.modelName = "<brush-model>";
+                if (replacement.batches.size() > firstSubmissionBatch &&
+                    BatchMatches(replacement.batches.back(), candidate) &&
+                    replacement.batches.back().firstIndex +
+                        replacement.batches.back().indexCount ==
+                            candidate.firstIndex)
+                {
+                    WebRendererWorldBatchDesc &batch =
+                        replacement.batches.back();
+                    batch.indexCount += candidate.indexCount;
+                    ++batch.surfaceCount;
+                    batch.lastSurfaceIndex = surfaceIndex;
+                }
+                else
+                {
+                    replacement.batches.push_back(candidate);
+                }
+                ++replacement.surfaceCount;
+                ++emittedSurfaces;
+            }
+            for (const std::uint32_t sourceVertexIndex : touchedVertices)
+                vertexRemap[sourceVertexIndex] = UNMAPPED;
+            touchedVertices.clear();
+            if (emittedSurfaces != 0u) ++replacement.modelCount;
+        }
+    }
+    catch (const std::bad_alloc &)
+    {
+        return WebRendererWorldSceneResult::AllocationFailed;
+    }
     if (replacement.surfaceCount == 0u)
         return WebRendererWorldSceneResult::NoVisibleSurface;
     destination = std::move(replacement);

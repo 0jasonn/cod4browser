@@ -6,6 +6,77 @@
 
 struct GfxLightGrid;
 
+// Canonical 20-byte GfxFog payload retained without importing the native
+// backend command graph. The browser frontend receives the same server fog
+// commands and advances this state once per rendered scene.
+struct WebRendererFog
+{
+    std::int32_t startTime = 0;
+    std::int32_t finishTime = 0;
+    std::uint32_t color = 0u;
+    float fogStart = 0.0f;
+    float density = 0.0f;
+};
+static_assert(sizeof(WebRendererFog) == 20u);
+
+// Mirrors R_UpdateFrameFog, including byte-wise color interpolation and the
+// native one-millisecond minimum transition span. Returns false for FOG_NONE
+// and writes a disabled payload to frameFog in that case.
+bool WebRenderer_UpdateFrameFog(
+    std::array<WebRendererFog, 5> &fogStates,
+    std::uint32_t fogIndex,
+    std::int32_t sceneTime,
+    WebRendererFog &frameFog) noexcept;
+
+// CPU reference for the native exponential-fog visibility used by the WebGL
+// fragment shader. One means fully scene-colored; zero means fully fog-colored.
+float WebRenderer_EvaluateFogVisibility(
+    float distance,
+    const WebRendererFog &fog) noexcept;
+
+// Portable form of the canonical GfxFilm payload after R_SetFilmInfo has
+// applied the renderer adjustment dvars. Keeping this at the frontend/backend
+// seam preserves the campaign vision-set values without exposing GfxViewInfo
+// or native command-buffer constants to WebGL.
+struct WebRendererFilmSettings
+{
+    bool enabled = false;
+    float brightness = 0.0f;
+    float contrast = 1.0f;
+    float desaturation = 0.0f;
+    bool invert = false;
+    float tintDark[3]{1.0f, 1.0f, 1.0f};
+    float tintLight[3]{1.0f, 1.0f, 1.0f};
+};
+
+// Exact CONST_SRC_CODE_COLOR_* values emitted by
+// R_UpdateColorManipulation. The eventual WebGL post-effect pass consumes
+// these normalized constants rather than independently interpreting vision
+// settings in the platform backend.
+struct WebRendererColorManipulationConstants
+{
+    float colorBias[4]{};
+    float colorTintBase[4]{};
+    float colorTintDelta[4]{};
+    bool enabled = false;
+};
+
+bool WebRenderer_CalculateColorManipulationConstants(
+    const WebRendererFilmSettings &film,
+    WebRendererColorManipulationConstants &constants) noexcept;
+
+// CPU oracle for the native hardware gamma ramp. D3D9 applies
+// pow(displayValue, 1 / r_gamma) after rendering; WebGL must reproduce that
+// at the final framebuffer boundary rather than altering lightmap samples.
+float WebRenderer_EvaluateDisplayGamma(
+    float displayValue, float gamma) noexcept;
+
+// CPU oracle for the DXT5nm channel convention used by IW3 n0 material
+// programs: tangent X is alpha, tangent Y is green, and positive Z is
+// reconstructed after expanding the stored channels from [0,1] to [-1,1].
+std::array<float, 3> WebRenderer_DecodeDxt5Normal(
+    const std::array<float, 4> &sample) noexcept;
+
 struct WebRendererLightGridColors
 {
     std::uint8_t rgb[56][3];
@@ -84,6 +155,14 @@ bool WebRenderer_SetModelGroundLightingAtlasEntry(
     WebRendererModelLightingAtlas &atlas,
     std::uint32_t entryIndex,
     std::uint32_t groundLighting) noexcept;
+
+// Copies complete 4x4x4 native lighting entries between atlases whose heights
+// may differ. Used when per-frame canonical entity families share one backend
+// volume texture.
+bool WebRenderer_CopyModelLightingAtlasEntries(
+    const WebRendererModelLightingAtlas &source,
+    WebRendererModelLightingAtlas &destination,
+    std::uint32_t destinationEntryOffset) noexcept;
 
 void WebRenderer_GetModelLightingCoordinates(
     const WebRendererModelLightingAtlas &atlas,

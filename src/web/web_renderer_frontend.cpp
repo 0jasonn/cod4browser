@@ -5,6 +5,7 @@
 
 #include <client/client.h>
 #include <database/database.h>
+#include <DynEntity/DynEntity_client.h>
 #include <EffectsCore/fx_system.h>
 #include <gfx_d3d/fxprimitives.h>
 #include <gfx_d3d/gfx_light_types.h>
@@ -35,6 +36,7 @@
 #include <web/web_renderer_code_mesh.h>
 #include <web/web_renderer_dobj_scene.h>
 #include <web/web_renderer_fx_model_scene.h>
+#include <web/web_renderer_lighting.h>
 #include <web/web_renderer_mark_mesh.h>
 #include <web/web_renderer_particle_cloud_scene.h>
 #include <web/web_renderer_static_model_scene.h>
@@ -65,6 +67,55 @@ extern GfxWorld s_world;
 
 namespace
 {
+EM_JS(
+    void,
+    DispatchRendererVisionLighting,
+    (bool filmEnabled,
+     float filmBrightness,
+     float filmContrast,
+     float filmDesaturation,
+     bool filmInvert,
+     const float *filmTintDark,
+     const float *filmTintLight,
+     bool glowEnabled,
+     float glowBloomCutoff,
+     float glowBloomDesaturation,
+     float glowBloomIntensity,
+     float glowRadius,
+     float gamma),
+    {
+        const detail = {
+            source: "canonical-refdef",
+            film: {
+                enabled: Boolean(filmEnabled),
+                brightness: filmBrightness,
+                contrast: filmContrast,
+                desaturation: filmDesaturation,
+                invert: Boolean(filmInvert),
+                tintDark: [HEAPF32[filmTintDark >> 2],
+                    HEAPF32[(filmTintDark >> 2) + 1],
+                    HEAPF32[(filmTintDark >> 2) + 2]],
+                tintLight: [HEAPF32[filmTintLight >> 2],
+                    HEAPF32[(filmTintLight >> 2) + 1],
+                    HEAPF32[(filmTintLight >> 2) + 2]]
+            },
+            glow: {
+                enabled: Boolean(glowEnabled),
+                bloomCutoff: glowBloomCutoff,
+                bloomDesaturation: glowBloomDesaturation,
+                bloomIntensity: glowBloomIntensity,
+                radius: glowRadius
+            },
+            gamma,
+            normalized: true,
+            containsGpuHandles: false,
+            containsObjectAddresses: false
+        };
+        globalThis.__KISAKCOD_RENDERER_VISION_LIGHTING__ = detail;
+        globalThis.dispatchEvent(new CustomEvent(
+            "kisakcod:renderer-vision-lighting", { detail }));
+    });
+
 bool CanonicalLightGridSampleVisible(
     const float samplePosition[3], const float gridPosition[3],
     void *) noexcept
@@ -167,17 +218,7 @@ void __cdecl Material_PreventOverrideTechniqueGeneration()
 
 namespace
 {
-struct WebFog
-{
-    int startTime;
-    int finishTime;
-    std::uint32_t color;
-    float fogStart;
-    float density;
-};
-static_assert(sizeof(WebFog) == 20);
-
-std::array<WebFog, 5> g_fogs{};
+std::array<WebRendererFog, 5> g_fogs{};
 std::uint32_t g_fogIndex = 0;
 float g_cullDistance = 0.0f;
 float g_sunLightOverride[3]{};
@@ -187,13 +228,19 @@ bool g_hasSunLightOverride = false;
 bool g_hasSunDirectionOverride = false;
 bool g_rendererWorldReady = false;
 bool g_gameDrivenFrameReported = false;
+bool g_visionLightingReported = false;
 bool g_worldSceneSubmitted = false;
 bool g_staticModelSceneSubmitted = false;
 bool g_dynamicModelSceneReported = false;
+bool g_dynamicBrushSceneReported = false;
+bool g_dynamicEntityModelSceneReported = false;
 bool g_uiSceneReported = false;
 std::array<WebRendererDObjSubmission,
     WEB_RENDERER_MAX_DYNAMIC_DOBJ_SUBMISSIONS> g_dobjSubmissions{};
 std::uint32_t g_dobjSubmissionCount = 0u;
+std::array<WebRendererBrushModelSubmission,
+    WEB_RENDERER_MAX_DYNAMIC_BMODEL_SUBMISSIONS> g_brushModelSubmissions{};
+std::uint32_t g_brushModelSubmissionCount = 0u;
 std::array<WebRendererFxModelSubmission,
     WEB_RENDERER_MAX_FX_MODEL_SUBMISSIONS> g_fxModelSubmissions{};
 std::uint32_t g_fxModelSubmissionCount = 0u;
@@ -658,6 +705,7 @@ void __cdecl R_LoadWorld(char *name, int *checksum, int)
         remappedTechniqueSets);
     g_rendererWorldReady = true;
     g_gameDrivenFrameReported = false;
+    g_visionLightingReported = false;
     g_worldSceneSubmitted = false;
     g_staticModelSceneSubmitted = false;
     g_dynamicModelSceneReported = false;
@@ -877,6 +925,7 @@ std::uint32_t __cdecl R_GetLocalClientNum() { return 0; }
 void __cdecl R_ClearScene(std::uint32_t)
 {
     g_dobjSubmissionCount = 0u;
+    g_brushModelSubmissionCount = 0u;
     WebRenderer_ClearFxModelSubmissions(&g_fxModelSubmissionCount);
     WebRenderer_ClearParticleCloudSubmissions(&g_particleCloudSubmissionCount);
 }
@@ -1256,6 +1305,110 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     view.zNear = refdef->zNear > 0.0f
         ? refdef->zNear
         : std::max(0.01f, r_znear ? r_znear->current.value : 4.0f);
+    WebRendererFog frameFog{};
+    view.fogEnabled = WebRenderer_UpdateFrameFog(
+        g_fogs, g_fogIndex, refdef->time, frameFog) &&
+        (!r_fog || r_fog->current.enabled);
+    view.fogStart = frameFog.fogStart;
+    view.fogDensity = frameFog.density;
+    constexpr float BYTE_TO_UNIT = 1.0f / 255.0f;
+    view.fogColor[0] = static_cast<float>(
+        (frameFog.color >> 16u) & 0xffu) * BYTE_TO_UNIT;
+    view.fogColor[1] = static_cast<float>(
+        (frameFog.color >> 8u) & 0xffu) * BYTE_TO_UNIT;
+    view.fogColor[2] = static_cast<float>(
+        frameFog.color & 0xffu) * BYTE_TO_UNIT;
+    view.fogColor[3] = static_cast<float>(
+        (frameFog.color >> 24u) & 0xffu) * BYTE_TO_UNIT;
+
+    WebRendererFilmSettings film{};
+    if (r_filmUseTweaks && r_filmUseTweaks->current.enabled)
+    {
+        film.enabled = r_filmTweakEnable->current.enabled;
+        film.brightness = r_filmTweakBrightness->current.value;
+        film.contrast = r_filmTweakContrast->current.value;
+        film.desaturation = r_filmTweakDesaturation->current.value;
+        film.invert = r_filmTweakInvert->current.enabled;
+        std::copy_n(r_filmTweakDarkTint->current.vector, 3u,
+            film.tintDark);
+        std::copy_n(r_filmTweakLightTint->current.vector, 3u,
+            film.tintLight);
+    }
+    else
+    {
+        film.enabled = refdef->film.enabled;
+        film.brightness = refdef->film.brightness;
+        film.contrast = refdef->film.contrast;
+        film.desaturation = refdef->film.desaturation;
+        film.invert = refdef->film.invert;
+        std::copy_n(refdef->film.tintDark, 3u, film.tintDark);
+        std::copy_n(refdef->film.tintLight, 3u, film.tintLight);
+    }
+    const float globalDesaturation = r_desaturation
+        ? r_desaturation->current.value : 1.0f;
+    const float desaturationScale =
+        (1.0f - film.desaturation) * globalDesaturation +
+        film.desaturation;
+    film.desaturation *= desaturationScale;
+    film.contrast *= r_contrast ? r_contrast->current.value : 1.0f;
+    film.brightness += r_brightness ? r_brightness->current.value : 0.0f;
+    WebRendererColorManipulationConstants colorManipulation{};
+    if (!WebRenderer_CalculateColorManipulationConstants(
+            film, colorManipulation))
+    {
+        Com_Error(ERR_DROP,
+            "R_RenderScene: invalid canonical film color constants");
+        return;
+    }
+    std::copy_n(colorManipulation.colorBias, 4u, view.colorBias);
+    std::copy_n(colorManipulation.colorTintBase, 4u,
+        view.colorTintBase);
+    std::copy_n(colorManipulation.colorTintDelta, 4u,
+        view.colorTintDelta);
+    view.filmEnabled = colorManipulation.enabled;
+    const float displayGamma = r_gamma ? r_gamma->current.value : 0.8f;
+    // R_SetColorMappings is gated by vidConfig.deviceSupportsGamma. The
+    // browser registration deliberately reports false because a composited
+    // WebGL canvas cannot install the D3D9 display LUT. Preserve r_gamma for
+    // diagnostics/screenshots, but do not darken the scene in a shader when
+    // the canonical device capability says the hardware ramp is unavailable.
+    view.displayGammaExponent = cls.vidConfig.deviceSupportsGamma &&
+            (!r_ignoreHwGamma || !r_ignoreHwGamma->current.enabled)
+        ? 1.0f / std::max(displayGamma, 0.001f)
+        : 1.0f;
+    if (!g_visionLightingReported)
+    {
+        g_visionLightingReported = true;
+        DispatchRendererVisionLighting(
+            refdef->film.enabled, refdef->film.brightness,
+            refdef->film.contrast, refdef->film.desaturation,
+            refdef->film.invert, refdef->film.tintDark,
+            refdef->film.tintLight, refdef->glow.enabled,
+            refdef->glow.bloomCutoff,
+            refdef->glow.bloomDesaturation,
+            refdef->glow.bloomIntensity, refdef->glow.radius,
+            r_gamma ? r_gamma->current.value : 0.8f);
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Canonical vision lighting: film=%d "
+            "brightness=%.6f contrast=%.6f desaturation=%.6f invert=%d "
+            "dark=(%.6f %.6f %.6f) light=(%.6f %.6f %.6f); "
+            "glow=%d cutoff=%.6f desaturation=%.6f intensity=%.6f "
+            "radius=%.6f; gamma=%.6f; fog=%d start=%.6f density=%.9f "
+            "color=(%.6f %.6f %.6f %.6f).\n",
+            refdef->film.enabled, refdef->film.brightness,
+            refdef->film.contrast, refdef->film.desaturation,
+            refdef->film.invert,
+            refdef->film.tintDark[0], refdef->film.tintDark[1],
+            refdef->film.tintDark[2], refdef->film.tintLight[0],
+            refdef->film.tintLight[1], refdef->film.tintLight[2],
+            refdef->glow.enabled, refdef->glow.bloomCutoff,
+            refdef->glow.bloomDesaturation,
+            refdef->glow.bloomIntensity, refdef->glow.radius,
+            r_gamma ? r_gamma->current.value : 0.8f,
+            view.fogEnabled, view.fogStart, view.fogDensity,
+            view.fogColor[0], view.fogColor[1], view.fogColor[2],
+            view.fogColor[3]);
+    }
     view.localClientNum = refdef->localClientNum;
     view.worldName = s_world.name;
 
@@ -1392,6 +1545,16 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                     "R_RenderScene: portable world command %s",
                     WebRenderer_SurfaceResultString(submission));
                 return;
+            }
+            const WebRendererTextureResult skySubmission =
+                WebRenderer_SetSkyImage(
+                    s_world.skySurfCount > 0 ? s_world.skyImage : nullptr,
+                    s_world.skySamplerState);
+            if (skySubmission != WebRendererTextureResult::Success)
+            {
+                Web_Log(WebLogLevel::Error,
+                    "[kisakcod-web] Canonical sky submission failed: %s.\n",
+                    WebRenderer_TextureResultString(skySubmission));
             }
             std::vector<const Material *> unsupportedMaterials;
             for (const WebRendererWorldBatchDesc &batch : command.batches)
@@ -1542,6 +1705,255 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             vertex.position[0] += refdef->viewOffset[0];
             vertex.position[1] += refdef->viewOffset[1];
             vertex.position[2] += refdef->viewOffset[2];
+        }
+    }
+
+    std::vector<WebRendererBrushModelSubmission> activeBrushModels;
+    try
+    {
+        activeBrushModels.assign(g_brushModelSubmissions.begin(),
+            g_brushModelSubmissions.begin() + g_brushModelSubmissionCount);
+        const std::uint16_t dynamicBrushCount =
+            DynEnt_GetEntityCount(DYNENT_COLL_CLIENT_BRUSH);
+        activeBrushModels.reserve(activeBrushModels.size() +
+            dynamicBrushCount);
+        for (std::uint32_t dynEntId = 0u;
+             dynEntId < dynamicBrushCount; ++dynEntId)
+        {
+            const DynEntityClient *client = DynEnt_GetClientEntity(
+                static_cast<std::uint16_t>(dynEntId), DYNENT_DRAW_BRUSH);
+            const DynEntityDef *definition = DynEnt_GetEntityDef(
+                static_cast<std::uint16_t>(dynEntId), DYNENT_DRAW_BRUSH);
+            DynEntityPose *pose = DynEnt_GetClientPose(
+                static_cast<std::uint16_t>(dynEntId), DYNENT_DRAW_BRUSH);
+            if (!client || !definition || !pose ||
+                (client->flags & DYNENT_CL_VISIBLE) == 0u ||
+                definition->brushModel >= s_world.modelCount ||
+                activeBrushModels.size() >=
+                    WEB_RENDERER_MAX_DYNAMIC_BMODEL_SUBMISSIONS)
+            {
+                continue;
+            }
+            WebRendererBrushModelSubmission submission{};
+            submission.model = &s_world.models[definition->brushModel];
+            submission.entityNumber = static_cast<std::uint16_t>(dynEntId);
+            std::copy_n(pose->pose.origin, 3u, submission.origin);
+            UnitQuatToAxis(pose->pose.quat, submission.axis);
+            activeBrushModels.push_back(submission);
+        }
+    }
+    catch (const std::bad_alloc &)
+    {
+        Com_Error(ERR_DROP,
+            "R_RenderScene canonical brush collection allocation failed");
+        return;
+    }
+
+    WebRendererBrushModelSceneCommand brushCommand;
+    const WebRendererWorldSceneResult brushBuild =
+        WebRenderer_BuildBrushModelSceneCommand(
+            s_world, activeBrushModels.data(),
+            static_cast<std::uint32_t>(activeBrushModels.size()),
+            brushCommand);
+    const bool hasBrushModels =
+        brushBuild == WebRendererWorldSceneResult::Success;
+    if (brushBuild != WebRendererWorldSceneResult::Success &&
+        brushBuild != WebRendererWorldSceneResult::NoVisibleSurface)
+    {
+        Com_Error(ERR_DROP, "R_RenderScene dynamic brush model: %s",
+            WebRenderer_WorldSceneResultString(brushBuild));
+        return;
+    }
+    if (hasBrushModels)
+    {
+        try
+        {
+            const std::uint32_t vertexBase = static_cast<std::uint32_t>(
+                dynamicCommand.vertices.size());
+            const std::uint32_t indexBase = static_cast<std::uint32_t>(
+                dynamicCommand.indices.size());
+            if (vertexBase > WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES -
+                    brushCommand.vertices.size() ||
+                indexBase > WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES -
+                    brushCommand.indices.size())
+            {
+                Com_Error(ERR_DROP,
+                    "R_RenderScene canonical brush models exceed dynamic limits");
+                return;
+            }
+            dynamicCommand.vertices.insert(dynamicCommand.vertices.end(),
+                brushCommand.vertices.begin(), brushCommand.vertices.end());
+            for (const std::uint32_t index : brushCommand.indices)
+                dynamicCommand.indices.push_back(vertexBase + index);
+            for (WebRendererWorldBatchDesc batch : brushCommand.batches)
+            {
+                batch.firstIndex += indexBase;
+                dynamicCommand.batches.push_back(batch);
+            }
+            dynamicCommand.surfaceCount += brushCommand.surfaceCount;
+        }
+        catch (const std::bad_alloc &)
+        {
+            Com_Error(ERR_DROP,
+                "R_RenderScene canonical brush model allocation failed");
+            return;
+        }
+    }
+
+    std::vector<WebRendererFxModelSubmission> dynamicEntityModels;
+    std::vector<std::uint16_t> dynamicEntityModelIds;
+    try
+    {
+        const std::uint16_t dynamicModelCount =
+            DynEnt_GetEntityCount(DYNENT_COLL_CLIENT_MODEL);
+        dynamicEntityModels.reserve(dynamicModelCount);
+        dynamicEntityModelIds.reserve(dynamicModelCount);
+        for (std::uint32_t dynEntId = 0u;
+             dynEntId < dynamicModelCount; ++dynEntId)
+        {
+            const DynEntityClient *client = DynEnt_GetClientEntity(
+                static_cast<std::uint16_t>(dynEntId), DYNENT_DRAW_MODEL);
+            const DynEntityDef *definition = DynEnt_GetEntityDef(
+                static_cast<std::uint16_t>(dynEntId), DYNENT_DRAW_MODEL);
+            DynEntityPose *pose = DynEnt_GetClientPose(
+                static_cast<std::uint16_t>(dynEntId), DYNENT_DRAW_MODEL);
+            if (!client || !definition || !pose || !definition->xModel ||
+                (client->flags & DYNENT_CL_VISIBLE) == 0u)
+            {
+                continue;
+            }
+            WebRendererFxModelSubmission submission{};
+            submission.model = definition->xModel;
+            submission.placement.base = pose->pose;
+            submission.placement.scale = 1.0f;
+            submission.sourceKind =
+                WebRendererSceneBatchKind::DynamicXModel;
+            const int lod = WebRenderer_SelectFxModelLod(
+                submission.model, submission.placement, refdef->vieworg);
+            if (lod < 0) continue;
+            submission.lod = static_cast<std::uint16_t>(lod);
+            dynamicEntityModels.push_back(submission);
+            dynamicEntityModelIds.push_back(
+                static_cast<std::uint16_t>(dynEntId));
+        }
+    }
+    catch (const std::bad_alloc &)
+    {
+        Com_Error(ERR_DROP,
+            "R_RenderScene canonical DynEntity model allocation failed");
+        return;
+    }
+
+    if (!dynamicEntityModels.empty())
+    {
+        const std::uint32_t previousLightingEntries =
+            dynamicCommand.modelLightingAtlas.entryCount;
+        const std::uint32_t totalLightingEntries = previousLightingEntries +
+            static_cast<std::uint32_t>(dynamicEntityModels.size());
+        WebRendererModelLightingAtlas combinedLighting;
+        bool combinedLightingReady =
+            totalLightingEntries >= previousLightingEntries &&
+            WebRenderer_InitializeModelLightingAtlas(
+                totalLightingEntries, combinedLighting);
+        if (combinedLightingReady && previousLightingEntries != 0u)
+        {
+            combinedLightingReady =
+                WebRenderer_CopyModelLightingAtlasEntries(
+                    dynamicCommand.modelLightingAtlas,
+                    combinedLighting, 0u);
+        }
+        if (combinedLightingReady)
+        {
+            if (previousLightingEntries != 0u)
+            {
+                const WebRendererModelLightingAtlas &previous =
+                    dynamicCommand.modelLightingAtlas;
+                for (WebRendererWorldBatchDesc &batch :
+                     dynamicCommand.batches)
+                {
+                    if (batch.lightingMode !=
+                            WebRendererWorldLightingMode::ModelLightGrid)
+                        continue;
+                    const int centerX = static_cast<int>(std::lround(
+                        batch.modelLightingCoordinates[0] * previous.width));
+                    const int centerY = static_cast<int>(std::lround(
+                        batch.modelLightingCoordinates[1] * previous.height));
+                    if (centerX < 2 || centerY < 2) continue;
+                    const std::uint32_t entry =
+                        static_cast<std::uint32_t>((centerY - 2) / 4) * 64u +
+                        static_cast<std::uint32_t>((centerX - 2) / 4);
+                    WebRenderer_GetModelLightingCoordinates(
+                        combinedLighting, entry,
+                        batch.modelLightingCoordinates);
+                }
+            }
+            for (std::uint32_t index = 0u;
+                 index < dynamicEntityModels.size(); ++index)
+            {
+                const std::uint16_t dynEntId =
+                    dynamicEntityModelIds[index];
+                const std::uint32_t nonSunPrimaryLight =
+                    s_world.nonSunPrimaryLightForModelDynEnt &&
+                        dynEntId < DynEnt_GetEntityCount(
+                            DYNENT_COLL_CLIENT_MODEL)
+                    ? s_world.nonSunPrimaryLightForModelDynEnt[dynEntId]
+                    : 0u;
+                WebRendererModelLightingSample sample{};
+                const std::uint32_t lightingEntry =
+                    previousLightingEntries + index;
+                WebRendererFxModelSubmission &submission =
+                    dynamicEntityModels[index];
+                submission.modelLightingEnabled =
+                    WebRenderer_EvaluateModelLighting(
+                        s_world.lightGrid,
+                        submission.placement.base.origin,
+                        nonSunPrimaryLight,
+                        &MODEL_LIGHTING_CALLBACKS, sample) &&
+                    WebRenderer_SetModelLightingAtlasEntry(
+                        combinedLighting, lightingEntry, sample.colors,
+                        sample.primaryLightWeight);
+                if (submission.modelLightingEnabled)
+                {
+                    WebRenderer_GetModelLightingCoordinates(
+                        combinedLighting, lightingEntry,
+                        submission.modelLightingCoordinates);
+                }
+            }
+            dynamicCommand.modelLightingAtlas =
+                std::move(combinedLighting);
+        }
+    }
+
+    WebRendererFxModelSceneCommand dynamicEntityModelCommand;
+    std::uint32_t droppedDynamicEntityModels = 0u;
+    const WebRendererFxModelSceneResult dynamicEntityModelBuild =
+        WebRenderer_BuildFxModelSceneCommand(
+            dynamicEntityModels.data(),
+            static_cast<std::uint32_t>(dynamicEntityModels.size()),
+            dynamicEntityModelCommand, &droppedDynamicEntityModels);
+    const bool hasDynamicEntityModels = dynamicEntityModelBuild ==
+        WebRendererFxModelSceneResult::Success;
+    if (dynamicEntityModelBuild != WebRendererFxModelSceneResult::Success &&
+        dynamicEntityModelBuild != WebRendererFxModelSceneResult::NoFxModel)
+    {
+        Com_Error(ERR_DROP, "R_RenderScene DynEntity model: %s",
+            WebRenderer_FxModelSceneResultString(dynamicEntityModelBuild));
+        return;
+    }
+    if (hasDynamicEntityModels)
+    {
+        const WebRendererFxModelAppendResult append =
+            WebRenderer_AppendFxModelSceneCommand(
+                dynamicEntityModelCommand,
+                dynamicCommand.vertices,
+                dynamicCommand.indices,
+                dynamicCommand.batches,
+                dynamicCommand.surfaceCount);
+        if (append != WebRendererFxModelAppendResult::Success)
+        {
+            Com_Error(ERR_DROP,
+                "R_RenderScene DynEntity model append failed");
+            return;
         }
     }
 
@@ -1744,6 +2156,8 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         R_WarnOncePerFrame(R_WARN_MAX_CLOUDS);
 
     if (dynamicBuild == WebRendererDObjSceneResult::Success ||
+        hasBrushModels ||
+        hasDynamicEntityModels ||
         hasFxModel || hasMarkMesh || hasCodeMesh || hasParticleCloud)
     {
         const WebRendererModelLightingAtlasDesc lightingAtlas{
@@ -1819,6 +2233,29 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                     dynamicCommand.batches[2].baseImage != nullptr);
         }
     }
+    if (hasBrushModels && !g_dynamicBrushSceneReported)
+    {
+        g_dynamicBrushSceneReported = true;
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Canonical dynamic brush scene: %u models, "
+            "%u surfaces, %zu batches.\n",
+            brushCommand.modelCount, brushCommand.surfaceCount,
+            brushCommand.batches.size());
+    }
+    if (hasDynamicEntityModels && !g_dynamicEntityModelSceneReported)
+    {
+        g_dynamicEntityModelSceneReported = true;
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Canonical DynEntity model scene: %u models, "
+            "%u surfaces, %zu batches, dropped=%u, first='%s'.\n",
+            dynamicEntityModelCommand.modelCount,
+            dynamicEntityModelCommand.surfaceCount,
+            dynamicEntityModelCommand.batches.size(),
+            droppedDynamicEntityModels,
+            dynamicEntityModelCommand.batches.empty()
+                ? "<none>"
+                : dynamicEntityModelCommand.batches[0].modelName);
+    }
     if (g_uiBatches.empty())
     {
         WebRenderer_SetUiScene({});
@@ -1893,7 +2330,27 @@ GfxBrushModel *__cdecl R_GetBrushModel(std::uint32_t index)
 }
 
 void __cdecl R_AddBrushModelToSceneFromAngles(
-    const GfxBrushModel *, const float *, const float *, std::uint16_t) {}
+    const GfxBrushModel *model, const float *origin, const float *angles,
+    std::uint16_t entityNumber)
+{
+    if (!model || !origin || !angles || model->surfaceCount == 0u ||
+        g_brushModelSubmissionCount >= g_brushModelSubmissions.size())
+    {
+        if (model && model->surfaceCount != 0u &&
+            g_brushModelSubmissionCount >= g_brushModelSubmissions.size())
+        {
+            R_WarnOncePerFrame(R_WARN_MAX_SCENE_BRUSH_REFS,
+                static_cast<unsigned int>(g_brushModelSubmissions.size()));
+        }
+        return;
+    }
+    WebRendererBrushModelSubmission &submission =
+        g_brushModelSubmissions[g_brushModelSubmissionCount++];
+    submission.model = model;
+    submission.entityNumber = entityNumber;
+    std::copy_n(origin, 3u, submission.origin);
+    AnglesToAxis(angles, submission.axis);
+}
 void __cdecl R_AddDObjToScene(const DObj_s *obj, const cpose_t *pose,
     std::uint32_t entityNumber, std::uint32_t renderFlags,
     float *lightingOrigin, float)

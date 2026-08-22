@@ -57,7 +57,7 @@ void ConvertPackedVertex(
 bool FiniteVertex(const WebRendererSurfaceVertex &vertex) noexcept
 {
     const float *components = &vertex.position[0];
-    for (std::size_t index = 0u; index < 14u; ++index)
+    for (std::size_t index = 0u; index < 18u; ++index)
         if (!std::isfinite(components[index])) return false;
     return true;
 }

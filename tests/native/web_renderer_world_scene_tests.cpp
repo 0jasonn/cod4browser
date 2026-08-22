@@ -20,6 +20,7 @@ WebRendererSceneViewDesc MakeView()
     view.viewAxis[1][1] = 1.0f;
     view.viewAxis[2][2] = 1.0f;
     view.zNear = 1.0f;
+    view.displayGammaExponent = 1.0f;
     view.localClientNum = 0;
     view.worldName = "maps/test.d3dbsp";
     return view;
@@ -405,6 +406,63 @@ void TestCanonicalDpvsRangesOverrideNonContiguousModelCount()
     assert(command.firstSurfaceIndex == 0u);
     assert(command.lastSurfaceIndex == 2u);
 }
+
+void TestDynamicBrushModelUsesCanonicalSurfaceRangeAndPlacement()
+{
+    Fixture fixture;
+    std::array<GfxBrushModel, 2> models{};
+    models[0] = fixture.model;
+    models[1].startSurfIndex = 2u;
+    models[1].surfaceCount = 1u;
+    fixture.world.models = models.data();
+    fixture.world.modelCount = static_cast<int>(models.size());
+
+    WebRendererBrushModelSubmission submission{};
+    submission.model = &models[1];
+    submission.origin[0] = 100.0f;
+    submission.origin[1] = 200.0f;
+    submission.origin[2] = 300.0f;
+    submission.axis[0][0] = 1.0f;
+    submission.axis[1][1] = 1.0f;
+    submission.axis[2][2] = 1.0f;
+    submission.entityNumber = 42u;
+
+    WebRendererBrushModelSceneCommand command;
+    assert(WebRenderer_BuildBrushModelSceneCommand(
+        fixture.world, &submission, 1u, command) ==
+        WebRendererWorldSceneResult::Success);
+    assert(command.modelCount == 1u);
+    assert(command.surfaceCount == 1u);
+    assert(command.vertices.size() == 3u);
+    assert(command.indices == std::vector<std::uint32_t>({0u, 1u, 2u}));
+    assert(command.vertices[0].position[0] == 112.0f);
+    assert(command.vertices[0].position[1] == 199.0f);
+    assert(command.vertices[0].position[2] == 299.0f);
+    assert(command.batches.size() == 1u);
+    assert(command.batches[0].sourceKind ==
+        WebRendererSceneBatchKind::DynamicBModel);
+    assert(command.batches[0].firstSurfaceIndex == 2u);
+    assert(command.batches[0].lastSurfaceIndex == 2u);
+}
+
+void TestMalformedDynamicBrushRangeIsRejectedAtomically()
+{
+    Fixture fixture;
+    GfxBrushModel model{};
+    model.startSurfIndex = 2u;
+    model.surfaceCount = 2u;
+    WebRendererBrushModelSubmission submission{};
+    submission.model = &model;
+    submission.axis[0][0] = 1.0f;
+    submission.axis[1][1] = 1.0f;
+    submission.axis[2][2] = 1.0f;
+    WebRendererBrushModelSceneCommand command;
+    command.surfaceCount = 99u;
+    assert(WebRenderer_BuildBrushModelSceneCommand(
+        fixture.world, &submission, 1u, command) ==
+        WebRendererWorldSceneResult::InvalidSurfaceRange);
+    assert(command.surfaceCount == 99u);
+}
 } // namespace
 
 int main()
@@ -418,5 +476,7 @@ int main()
     TestSkyPassIsNotFoldedIntoOpaqueWorldBatch();
     TestConservativeVisibilityIsDisabledForMovingCanonicalView();
     TestCanonicalDpvsRangesOverrideNonContiguousModelCount();
+    TestDynamicBrushModelUsesCanonicalSurfaceRangeAndPlacement();
+    TestMalformedDynamicBrushRangeIsRejectedAtomically();
     return 0;
 }

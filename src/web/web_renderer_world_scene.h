@@ -6,6 +6,7 @@
 #include <vector>
 
 struct GfxWorld;
+struct GfxBrushModel;
 
 struct WebRendererWorldSceneCommand
 {
@@ -17,6 +18,23 @@ struct WebRendererWorldSceneCommand
     std::uint32_t staticModelSurfaceCount = 0u;
     std::uint32_t firstSurfaceIndex = UINT32_MAX;
     std::uint32_t lastSurfaceIndex = UINT32_MAX;
+};
+
+struct WebRendererBrushModelSubmission
+{
+    const GfxBrushModel *model = nullptr;
+    float origin[3]{};
+    float axis[3][3]{};
+    std::uint16_t entityNumber = 0u;
+};
+
+struct WebRendererBrushModelSceneCommand
+{
+    std::vector<WebRendererSurfaceVertex> vertices;
+    std::vector<std::uint32_t> indices;
+    std::vector<WebRendererWorldBatchDesc> batches;
+    std::uint32_t modelCount = 0u;
+    std::uint32_t surfaceCount = 0u;
 };
 
 enum class WebRendererWorldSceneResult : std::uint8_t
@@ -47,6 +65,15 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
     const GfxWorld &world,
     const WebRendererSceneViewDesc &view,
     WebRendererWorldSceneCommand &destination);
+
+// Expands canonical scene-brush submissions from their GfxBrushModel surface
+// ranges. Native retains the placement separately; the portable boundary
+// applies that same rigid transform while preserving material/lightmap state.
+WebRendererWorldSceneResult WebRenderer_BuildBrushModelSceneCommand(
+    const GfxWorld &world,
+    const WebRendererBrushModelSubmission *submissions,
+    std::uint32_t submissionCount,
+    WebRendererBrushModelSceneCommand &destination);
 
 const char *WebRenderer_WorldSceneResultString(
     WebRendererWorldSceneResult result) noexcept;

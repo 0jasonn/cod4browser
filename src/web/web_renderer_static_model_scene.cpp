@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <new>
 #include <utility>
 #include <vector>
@@ -56,6 +57,22 @@ const GfxImage *FindBaseImage(
     {
         const MaterialTextureDef &texture = material->textureTable[index];
         if (texture.semantic == 2u && texture.u.image)
+        {
+            sampler = texture.samplerState;
+            return texture.u.image;
+        }
+    }
+    return nullptr;
+}
+
+const GfxImage *FindNormalImage(
+    const Material *material, std::uint8_t &sampler) noexcept
+{
+    if (!material || !material->textureTable) return nullptr;
+    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
+    {
+        const MaterialTextureDef &texture = material->textureTable[index];
+        if (texture.semantic == 5u && texture.u.image)
         {
             sampler = texture.samplerState;
             return texture.u.image;
@@ -158,8 +175,12 @@ WebRendererWorldBatchDesc MakeDraw(
     draw.lightmapIndex = 31u;
     draw.sourceKind = WebRendererSceneBatchKind::StaticXModel;
     draw.baseImage = FindBaseImage(material, draw.samplerState);
+    draw.normalImage = FindNormalImage(material, draw.normalSamplerState);
     const bool hasTechnique = SelectTechnique(material, draw.stateBits,
         draw.techniqueName, draw.techniqueType);
+    if (!draw.techniqueName ||
+        std::strstr(draw.techniqueName, "n0") == nullptr)
+        draw.normalImage = nullptr;
     draw.technique = hasTechnique && draw.baseImage
         ? WebRendererWorldTechnique::BaseTexture
         : WebRendererWorldTechnique::BackendFallback;
@@ -339,9 +360,12 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
                     Vec2UnpackTexCoords(source.texCoord,
                         vertex.textureCoordinate);
                     Vec3UnpackUnitVec(source.normal, vertex.normal);
+                    Vec3UnpackUnitVec(source.tangent, vertex.tangent);
+                    vertex.binormalSign = source.binormalSign;
                     if (!std::isfinite(vertex.textureCoordinate[0]) ||
                         !std::isfinite(vertex.textureCoordinate[1]) ||
-                        !Finite3(vertex.normal))
+                        !Finite3(vertex.normal) || !Finite3(vertex.tangent) ||
+                        !std::isfinite(vertex.binormalSign))
                     {
                         return WebRendererStaticModelSceneResult::InvalidModel;
                     }

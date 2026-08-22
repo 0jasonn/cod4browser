@@ -18,6 +18,7 @@ namespace
 using Bytes = std::vector<uint8_t>;
 using kisak::iwi::Error;
 using kisak::iwi::Metadata;
+using kisak::iwi::Rgba8Cube;
 using kisak::iwi::Rgba8Image;
 
 class TestFailure final : public std::runtime_error
@@ -545,6 +546,12 @@ void TestDxtValidationAndAtomicFailure()
             kisak::iwi::FLAG_CLAMP_U | kisak::iwi::FLAG_CLAMP_V),
         policyImage), Error::None,
         "accept DXT streaming and address-policy flags");
+    RequireError(kisak::iwi::DecodeRgba8(MakeDxtIwi(
+        kisak::iwi::FORMAT_DXT1, 4u, 4u, block,
+        kisak::iwi::FLAG_NO_MIPMAPS |
+            kisak::iwi::FLAG_LEGACY_NORMALS),
+        policyImage), Error::None,
+        "accept native legacy-normal metadata without changing layout");
     for (const uint8_t format : {
         kisak::iwi::FORMAT_DXT1,
         kisak::iwi::FORMAT_DXT3,
@@ -582,6 +589,86 @@ void TestDxtValidationAndAtomicFailure()
         Error::None, "decode a bounded retail-scale DXT image");
     Require(largeImage.pixels.size() == 2048u * 1024u * 4u,
         "compressed input may expand beyond the archive-member ceiling");
+}
+
+void TestCubemapDecodeAndNativeFaceOrder()
+{
+    constexpr std::array<std::uint16_t, 6> colors{
+        0xf800u, 0x07e0u, 0x001fu, 0xffe0u, 0xf81fu, 0x07ffu};
+    Bytes payload;
+    for (const std::uint16_t color : colors)
+        Append(payload, MakeDxtColorBlock(color, color, 0u));
+    const Bytes iwi = MakeDxtIwi(kisak::iwi::FORMAT_DXT1,
+        4u, 4u, payload, kisak::iwi::FLAG_CUBEMAP |
+            kisak::iwi::FLAG_NO_MIPMAPS);
+    Rgba8Cube cube{};
+    RequireError(kisak::iwi::DecodeCubeRgba8(iwi, cube), Error::None,
+        "decode IWI cubemap");
+    Require(cube.edgeLength == 4u,
+        "cubemap retains its canonical edge length");
+    for (std::size_t face = 0u; face < cube.faces.size(); ++face)
+    {
+        Require(cube.faces[face].size() == 4u * 4u * 4u,
+            "cubemap face expands to tight RGBA8");
+        const Bytes expectedBlock = MakeDxtColorBlock(
+            colors[face], colors[face], 0u);
+        Bytes singlePayload(expectedBlock);
+        Rgba8Image expected{};
+        RequireError(kisak::iwi::DecodeRgba8(MakeDxtIwi(
+            kisak::iwi::FORMAT_DXT1, 4u, 4u, singlePayload), expected),
+            Error::None, "decode expected cubemap face");
+        Require(cube.faces[face] == expected.pixels,
+            "cubemap preserves native +X,-X,+Y,-Y,+Z,-Z face order");
+    }
+
+    Rgba8Cube sentinel{};
+    sentinel.edgeLength = 7u;
+    sentinel.faces[0] = {1u, 2u, 3u};
+    const Rgba8Cube before = sentinel;
+    Bytes truncated = iwi;
+    truncated.pop_back();
+    for (std::size_t picmip = 0u; picmip < 4u; ++picmip)
+        PatchU32(truncated, 12u + picmip * 4u,
+            static_cast<std::uint32_t>(truncated.size()));
+    RequireError(kisak::iwi::DecodeCubeRgba8(truncated, sentinel),
+        Error::DecodeInvalidLayout, "reject truncated cubemap");
+    Require(sentinel.edgeLength == before.edgeLength &&
+        sentinel.faces == before.faces,
+        "failed cubemap decode leaves the destination unchanged");
+}
+
+void TestCanonicalLoadDefCubemapDecode()
+{
+    Bytes payload;
+    constexpr std::array<std::uint16_t, 6> colors{
+        0xf800u, 0x07e0u, 0x001fu, 0xffe0u, 0xf81fu, 0x07ffu};
+    for (const std::uint16_t color : colors)
+        Append(payload, MakeDxtColorBlock(color, color, 0u));
+    Rgba8Cube cube{};
+    RequireError(kisak::iwi::DecodeLoadDefCubeRgba8(
+        kisak::iwi::LOADDEF_FORMAT_DXT1,
+        kisak::iwi::FLAG_CUBEMAP | kisak::iwi::FLAG_NO_MIPMAPS,
+        4u, 4u, 1u, payload, cube), Error::None,
+        "decode canonical face-major load-definition cubemap");
+    Require(cube.edgeLength == 4u && cube.faces.size() == 6u,
+        "canonical cubemap retains all six faces");
+    Require(cube.faces[0][0] > 240u && cube.faces[1][1] > 240u &&
+        cube.faces[2][2] > 240u,
+        "canonical cubemap decodes distinct RGB faces in native order");
+
+    Rgba8Cube sentinel{};
+    sentinel.edgeLength = 9u;
+    sentinel.faces[5] = {9u};
+    const Rgba8Cube before = sentinel;
+    payload.pop_back();
+    RequireError(kisak::iwi::DecodeLoadDefCubeRgba8(
+        kisak::iwi::LOADDEF_FORMAT_DXT1,
+        kisak::iwi::FLAG_CUBEMAP | kisak::iwi::FLAG_NO_MIPMAPS,
+        4u, 4u, 1u, payload, sentinel), Error::DecodeOutputTooLarge,
+        "reject uneven canonical cubemap payload");
+    Require(sentinel.edgeLength == before.edgeLength &&
+        sentinel.faces == before.faces,
+        "failed canonical cubemap decode is atomic");
 }
 
 void TestCanonicalLoadDefDecode()
@@ -941,6 +1028,8 @@ int main()
     runner.Run("DXT5 decode", TestDxt5Decode);
     runner.Run("DXT mip order and clipping", TestDxtMipOrderAndClipping);
     runner.Run("DXT validation and atomic failure", TestDxtValidationAndAtomicFailure);
+    runner.Run("IWI cubemap decode and face order", TestCubemapDecodeAndNativeFaceOrder);
+    runner.Run("canonical cubemap load-definition decode", TestCanonicalLoadDefCubemapDecode);
     runner.Run("canonical DB load-definition decode", TestCanonicalLoadDefDecode);
     runner.Run("RGBA8 unsupported slice", TestRgba8DecodeRejectsUnsupportedSlice);
     runner.Run("RGBA8 layout and limits", TestRgba8DecodeLayoutAndLimits);

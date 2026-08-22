@@ -43,6 +43,112 @@ void TestZeroDirectionalLobeLeavesLowFrequencyLobe()
     assert(Near(result[2], 0.5f));
 }
 
+void TestCanonicalFrameFogTransition()
+{
+    std::array<WebRendererFog, 5> states{};
+    states[3] = {0, 0, 0xff102030u, 100.0f, 0.001f};
+    states[4] = {1000, 2000, 0xff506070u, 300.0f, 0.003f};
+    WebRendererFog frame{};
+    assert(WebRenderer_UpdateFrameFog(states, 1u, 1500, frame));
+    assert(frame.color == 0xff304050u);
+    assert(Near(frame.fogStart, 200.0f));
+    assert(Near(frame.density, 0.002f));
+    assert(states[2].color == frame.color);
+
+    assert(WebRenderer_UpdateFrameFog(states, 1u, 2000, frame));
+    assert(frame.color == states[4].color);
+    assert(Near(frame.fogStart, 300.0f));
+    assert(Near(frame.density, 0.003f));
+
+    frame = states[4];
+    assert(!WebRenderer_UpdateFrameFog(states, 0u, 2000, frame));
+    assert(frame.color == 0u && frame.density == 0.0f);
+    assert(!WebRenderer_UpdateFrameFog(states, 5u, 2000, frame));
+}
+
+void TestNativeExponentialFogVisibility()
+{
+    WebRendererFog fog{};
+    fog.fogStart = 100.0f;
+    fog.density = 0.69314718056f / 200.0f;
+    assert(Near(WebRenderer_EvaluateFogVisibility(50.0f, fog), 1.0f));
+    assert(Near(WebRenderer_EvaluateFogVisibility(100.0f, fog), 1.0f));
+    assert(Near(WebRenderer_EvaluateFogVisibility(300.0f, fog), 0.5f));
+    fog.density = 0.0f;
+    assert(Near(WebRenderer_EvaluateFogVisibility(10000.0f, fog), 1.0f));
+}
+
+void TestNativeColorManipulationConstants()
+{
+    WebRendererFilmSettings film{};
+    film.enabled = true;
+    film.brightness = 0.1f;
+    film.contrast = 1.2f;
+    film.desaturation = 0.25f;
+    film.invert = false;
+    film.tintDark[0] = 0.5f;
+    film.tintDark[1] = 0.75f;
+    film.tintDark[2] = 1.0f;
+    film.tintLight[0] = 1.0f;
+    film.tintLight[1] = 0.75f;
+    film.tintLight[2] = 0.5f;
+    WebRendererColorManipulationConstants constants{};
+    assert(WebRenderer_CalculateColorManipulationConstants(film, constants));
+    assert(constants.enabled);
+    assert(Near(constants.colorBias[0], 0.0f));
+    assert(Near(constants.colorBias[1], 0.0f));
+    assert(Near(constants.colorBias[2], 0.0f));
+    assert(Near(constants.colorBias[3], 3.0f));
+    assert(Near(constants.colorTintBase[0], 0.15f));
+    assert(Near(constants.colorTintBase[1], 0.225f));
+    assert(Near(constants.colorTintBase[2], 0.3f));
+    assert(Near(constants.colorTintDelta[0], 0.15f));
+    assert(Near(constants.colorTintDelta[1], 0.0f));
+    assert(Near(constants.colorTintDelta[2], -0.15f));
+
+    film.invert = true;
+    assert(WebRenderer_CalculateColorManipulationConstants(film, constants));
+    assert(Near(constants.colorBias[0], 1.0f));
+    assert(Near(constants.colorTintBase[0], -0.15f));
+    assert(Near(constants.colorTintDelta[0], -0.15f));
+
+    film.enabled = false;
+    assert(WebRenderer_CalculateColorManipulationConstants(film, constants));
+    assert(!constants.enabled);
+    assert(Near(constants.colorBias[3], 4095.0f));
+    assert(Near(constants.colorTintBase[0], 1.0f / 4096.0f));
+}
+
+void TestNativeDisplayGammaRamp()
+{
+    assert(Near(WebRenderer_EvaluateDisplayGamma(0.0f, 0.8f), 0.0f));
+    assert(Near(WebRenderer_EvaluateDisplayGamma(1.0f, 0.8f), 1.0f));
+    assert(Near(WebRenderer_EvaluateDisplayGamma(0.5f, 1.0f), 0.5f));
+    assert(Near(WebRenderer_EvaluateDisplayGamma(0.5f, 0.8f),
+        0.42044821f));
+    assert(Near(WebRenderer_EvaluateDisplayGamma(-1.0f, 0.8f), 0.0f));
+    assert(Near(WebRenderer_EvaluateDisplayGamma(2.0f, 0.8f), 1.0f));
+}
+
+void TestNativeDxt5NormalDecode()
+{
+    const std::array<float, 3> identity =
+        WebRenderer_DecodeDxt5Normal({0.0f, 0.5f, 0.0f, 0.5f});
+    assert(Near(identity[0], 0.0f));
+    assert(Near(identity[1], 0.0f));
+    assert(Near(identity[2], 1.0f));
+
+    const std::array<float, 3> tilted =
+        WebRenderer_DecodeDxt5Normal({0.0f, 0.75f, 0.0f, 0.75f});
+    assert(Near(tilted[0], 0.5f));
+    assert(Near(tilted[1], 0.5f));
+    assert(Near(tilted[2], std::sqrt(0.5f)));
+
+    const std::array<float, 3> saturated =
+        WebRenderer_DecodeDxt5Normal({0.0f, 1.0f, 0.0f, 1.0f});
+    assert(Near(saturated[2], 0.0f));
+}
+
 struct GridFixture
 {
     std::uint16_t rowDataStart[2]{0u, 4u};
@@ -158,14 +264,47 @@ void TestNativeModelLightingShaderComposition()
     assert(Near(result[1], 0.375f));
     assert(Near(result[2], 0.375f));
 }
+
+void TestModelLightingAtlasEntryCopyAcrossHeights()
+{
+    WebRendererModelLightingAtlas source;
+    WebRendererModelLightingAtlas destination;
+    assert(WebRenderer_InitializeModelLightingAtlas(1u, source));
+    assert(WebRenderer_InitializeModelLightingAtlas(65u, destination));
+    WebRendererLightGridColors colors{};
+    for (auto &rgb : colors.rgb)
+    {
+        rgb[0] = 17u;
+        rgb[1] = 34u;
+        rgb[2] = 51u;
+    }
+    assert(WebRenderer_SetModelLightingAtlasEntry(
+        source, 0u, colors, 68u));
+    assert(WebRenderer_CopyModelLightingAtlasEntries(
+        source, destination, 64u));
+    const std::size_t copied =
+        ((0u * destination.height + 4u) * destination.width + 0u) * 4u;
+    assert(destination.pixels[copied + 0u] == 17u);
+    assert(destination.pixels[copied + 1u] == 34u);
+    assert(destination.pixels[copied + 2u] == 51u);
+    assert(destination.pixels[copied + 3u] == 68u);
+    assert(!WebRenderer_CopyModelLightingAtlasEntries(
+        source, destination, 65u));
+}
 } // namespace
 
 int main()
 {
     TestNativeSecondaryDirectionalDecode();
     TestZeroDirectionalLobeLeavesLowFrequencyLobe();
+    TestCanonicalFrameFogTransition();
+    TestNativeExponentialFogVisibility();
+    TestNativeColorManipulationConstants();
+    TestNativeDisplayGammaRamp();
+    TestNativeDxt5NormalDecode();
     TestNativeLightGridRleAndFixedPointBlend();
     TestNativeModelLightingAtlasLayoutAndCoordinates();
     TestNativeModelLightingShaderComposition();
+    TestModelLightingAtlasEntryCopyAcrossHeights();
     return 0;
 }
