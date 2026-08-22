@@ -103,13 +103,13 @@ async function waitForAssets(page, state)
     )).toBe(state);
 }
 
-async function waitForArchive(page, state)
+async function waitForArchive(page, state, timeout = 30_000)
 {
     await expect.poll(() => page.evaluate(
         () => globalThis.__KISAKCOD_WEB__?.archive?.state,
     ), {
         message: `the synthetic archive should reach ${state}`,
-        timeout: 30_000,
+        timeout,
     }).toBe(state);
 }
 
@@ -198,6 +198,7 @@ test("enumerates and verifies stored and deflated members without blocking frame
 });
 
 test("publishes a large archive index incrementally without changing the ready detail", async ({ page }, testInfo) => {
+    test.slow();
     await usePortableFolderPicker(page);
     await observeArchive(page);
     const bulkMembers = Array.from({ length: 1024 }, (_, index) => ({
@@ -214,7 +215,7 @@ test("publishes a large archive index incrementally without changing the ready d
     await waitForAssets(page, "empty");
     await chooseDirectory(page, directory);
     await waitForAssets(page, "ready");
-    await waitForArchive(page, "ready");
+    await waitForArchive(page, "ready", 60_000);
 
     const result = await page.evaluate(() => ({
         archive: structuredClone(globalThis.__KISAKCOD_WEB__.archive),

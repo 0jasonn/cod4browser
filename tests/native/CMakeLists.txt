@@ -283,10 +283,15 @@ add_executable(web_renderer_code_mesh_tests
     "${KISAK_REPOSITORY_ROOT}/src/web/web_renderer_code_mesh.cpp"
 )
 
-add_executable(web_renderer_dobj_submission_tests
-    "${CMAKE_CURRENT_LIST_DIR}/web_renderer_dobj_submission_tests.cpp"
-    "${KISAK_REPOSITORY_ROOT}/src/web/web_renderer_dobj_lod.cpp"
-)
+if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR
+    CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    # This seam deliberately consumes canonical XModel fields. Its layout
+    # assertions require the 32-bit IW3 ABI used by Win32 and Wasm32.
+    add_executable(web_renderer_dobj_submission_tests
+        "${CMAKE_CURRENT_LIST_DIR}/web_renderer_dobj_submission_tests.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/web/web_renderer_dobj_lod.cpp"
+    )
+endif()
 
 add_executable(web_openal_proxy_tests
     "${CMAKE_CURRENT_LIST_DIR}/web_openal_proxy_tests.cpp"
@@ -452,21 +457,23 @@ else()
 endif()
 target_compile_features(web_renderer_code_mesh_tests PRIVATE cxx_std_20)
 target_include_directories(web_renderer_code_mesh_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
-target_compile_features(web_renderer_dobj_submission_tests PRIVATE cxx_std_20)
-target_include_directories(web_renderer_dobj_submission_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
-target_compile_definitions(web_renderer_dobj_submission_tests PRIVATE
-    KISAK_SP=1 dNODEBUG=1)
-if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+if (TARGET web_renderer_dobj_submission_tests)
+    target_compile_features(web_renderer_dobj_submission_tests PRIVATE cxx_std_20)
+    target_include_directories(web_renderer_dobj_submission_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
     target_compile_definitions(web_renderer_dobj_submission_tests PRIVATE
-        KISAK_WEB=1
-        __int64=long\ long __int32=int __int16=short __int8=char)
-    target_compile_options(web_renderer_dobj_submission_tests PRIVATE
-        -fdeclspec)
-endif()
-if (MSVC)
-    target_compile_options(web_renderer_dobj_submission_tests PRIVATE /UNDEBUG)
-else()
-    target_compile_options(web_renderer_dobj_submission_tests PRIVATE -UNDEBUG)
+        KISAK_SP=1 dNODEBUG=1)
+    if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+        target_compile_definitions(web_renderer_dobj_submission_tests PRIVATE
+            KISAK_WEB=1
+            __int64=long\ long __int32=int __int16=short __int8=char)
+        target_compile_options(web_renderer_dobj_submission_tests PRIVATE
+            -fdeclspec)
+    endif()
+    if (MSVC)
+        target_compile_options(web_renderer_dobj_submission_tests PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(web_renderer_dobj_submission_tests PRIVATE -UNDEBUG)
+    endif()
 endif()
 target_compile_features(web_openal_proxy_tests PRIVATE cxx_std_20)
 target_include_directories(web_openal_proxy_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
@@ -840,7 +847,9 @@ else()
     add_test(NAME web_renderer_fx_model_scene_tests COMMAND web_renderer_fx_model_scene_tests)
     add_test(NAME web_renderer_particle_cloud_scene_tests COMMAND web_renderer_particle_cloud_scene_tests)
     add_test(NAME web_renderer_code_mesh_tests COMMAND web_renderer_code_mesh_tests)
-    add_test(NAME web_renderer_dobj_submission_tests COMMAND web_renderer_dobj_submission_tests)
+    if (TARGET web_renderer_dobj_submission_tests)
+        add_test(NAME web_renderer_dobj_submission_tests COMMAND web_renderer_dobj_submission_tests)
+    endif()
     add_test(NAME web_openal_proxy_tests COMMAND web_openal_proxy_tests)
     add_test(NAME web_browser_bindings_tests COMMAND web_browser_bindings_tests)
     add_test(NAME web_engine_world_surface_tests COMMAND web_engine_world_surface_tests)
