@@ -9,10 +9,8 @@ namespace
 WebRendererWorldBatchDesc MakeBatch()
 {
     static GfxImage base{};
-    static GfxImage lightmap{};
     static GfxImage secondaryLightmap{};
     base.name = "images/concrete";
-    lightmap.name = "*lightmap0_primary";
     secondaryLightmap.name = "*lightmap0_secondary";
     WebRendererWorldBatchDesc batch{};
     batch.firstIndex = 0u;
@@ -24,13 +22,18 @@ WebRendererWorldBatchDesc MakeBatch()
     batch.techniqueName = "lm_l_sm_r0c0n0s0";
     batch.techniqueType = 7u;
     batch.baseImage = &base;
-    batch.lightmapImage = &lightmap;
     batch.secondaryLightmapImage = &secondaryLightmap;
     batch.stateBits[0] = 0x18008800u;
     batch.stateBits[1] = 0x0000000du;
     batch.samplerState = 0x52u;
     batch.lightmapIndex = 0u;
     batch.technique = WebRendererWorldTechnique::BaseTextureLightmap;
+    batch.lightingMode =
+        WebRendererWorldLightingMode::SecondaryDirectional;
+    batch.customSamplerFlags = 4u;
+    batch.techniqueFlags = 0x1234u;
+    batch.pixelShaderName = "lm_r0c0_sm2.hlsl";
+    batch.pixelShaderProgramHash = 0x89abcdefu;
     return batch;
 }
 
@@ -50,8 +53,14 @@ void TestCaptureContainsOnlyStableNormalizedIdentityAndState()
     assert(record.materialName == "mc/killhouse/concrete");
     assert(record.techniqueName == "lm_l_sm_r0c0n0s0");
     assert(record.baseImageName == "images/concrete");
-    assert(record.lightmapImageName == "*lightmap0_primary");
+    assert(record.lightmapImageName.empty());
     assert(record.secondaryLightmapImageName == "*lightmap0_secondary");
+    assert(record.lightingMode ==
+        WebRendererWorldLightingMode::SecondaryDirectional);
+    assert(record.customSamplerFlags == 4u);
+    assert(record.techniqueFlags == 0x1234u);
+    assert(record.pixelShaderName == "lm_r0c0_sm2.hlsl");
+    assert(record.pixelShaderProgramHash == 0x89abcdefu);
     assert(record.cull == WebRendererComparisonCull::Back);
     assert(record.alphaTest == WebRendererComparisonAlphaTest::Disabled);
     assert(record.depthTestEnabled && record.depthWriteEnabled);
@@ -68,6 +77,7 @@ void TestComparisonPinpointsBackendFallbackWithoutAddresses()
     WebRendererWorldBatchDesc actualBatch = intendedBatch;
     actualBatch.technique = WebRendererWorldTechnique::BackendFallback;
     actualBatch.lightmapImage = nullptr;
+    actualBatch.secondaryLightmapImage = nullptr;
     WebRendererWorldSurfaceDesc intendedSurface{};
     intendedSurface.batches = &intendedBatch;
     intendedSurface.batchCount = 1u;

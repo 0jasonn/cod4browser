@@ -66,8 +66,14 @@ struct WebRendererRetainedWorldBatch
         WebRendererSceneBatchKind::WorldSurface;
     WebRendererWorldTechnique technique =
         WebRendererWorldTechnique::BackendFallback;
+    WebRendererWorldLightingMode lightingMode =
+        WebRendererWorldLightingMode::None;
     std::string techniqueName;
     std::uint8_t techniqueType = 0xffu;
+    std::uint8_t customSamplerFlags = 0u;
+    std::uint16_t techniqueFlags = 0u;
+    std::string pixelShaderName;
+    std::uint32_t pixelShaderProgramHash = 0u;
 };
 
 struct WebRendererRetainedStaticModelBatch
@@ -102,7 +108,6 @@ struct WebRendererState
     GLint textureEnabledUniform = -1;
     GLint viewProjectionUniform = -1;
     GLint sceneFallbackUniform = -1;
-    GLint lightmapUniform = -1;
     GLint lightmapEnabledUniform = -1;
     GLint secondaryLightmapUniform = -1;
     GLint secondaryLightmapEnabledUniform = -1;
@@ -278,6 +283,11 @@ EM_JS(
      std::uint32_t techniqueType,
      const char *intendedPortableTechnique,
      const char *actualPortableTechnique,
+     const char *lightingMode,
+     std::uint32_t customSamplerFlags,
+     std::uint32_t techniqueFlags,
+     const char *pixelShaderName,
+     std::uint32_t pixelShaderProgramHash,
      std::uint32_t surfaceCount,
      std::uint32_t firstSurfaceIndex,
      std::uint32_t lastSurfaceIndex,
@@ -308,6 +318,21 @@ EM_JS(
                 techniqueType: techniqueType >>> 0,
                 intendedPortableTechnique: UTF8ToString(intendedPortableTechnique),
                 actualPortableTechnique: UTF8ToString(actualPortableTechnique),
+                lightingMode: UTF8ToString(lightingMode),
+                customSamplerFlags: customSamplerFlags >>> 0,
+                techniqueFlags: techniqueFlags >>> 0,
+                pixelShaderName: UTF8ToString(pixelShaderName),
+                pixelShaderProgramHash: pixelShaderProgramHash >>> 0,
+                lightingInputs: {
+                    colorSpace: "normalized-rgba8-direct",
+                    baseColor: "base-texture*vertex-color",
+                    secondaryUvTransforms: [
+                        { scale: [1.0, 0.5], bias: [0.0, 0.0] },
+                        { scale: [1.0, 0.5], bias: [0.0, 0.5] }
+                    ],
+                    composition:
+                        "base*vertex*(secondary0+secondary1*rsqrt(encodedAlphaDot+1))"
+                },
                 surfaceCount: surfaceCount >>> 0,
                 firstSurfaceIndex: firstSurfaceIndex >>> 0,
                 lastSurfaceIndex: lastSurfaceIndex >>> 0,
@@ -368,6 +393,55 @@ const char *ComparisonPortableTechniqueName(
     return "unknown";
 }
 
+const char *ComparisonLightingModeName(
+    WebRendererWorldLightingMode mode) noexcept
+{
+    switch (mode)
+    {
+    case WebRendererWorldLightingMode::None: return "none";
+    case WebRendererWorldLightingMode::SecondaryDirectional:
+        return "secondary-directional";
+    }
+    return "unknown";
+}
+
+void LogNormalizedWorldLightingTrace(
+    const WebRendererWorldSurfaceDesc &surface)
+{
+    for (std::uint32_t index = 0u; index < surface.batchCount; ++index)
+    {
+        const WebRendererWorldBatchDesc &batch = surface.batches[index];
+        if (batch.lightingMode !=
+                WebRendererWorldLightingMode::SecondaryDirectional)
+            continue;
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Normalized lighting trace: material='%s' "
+            "technique='%s' type=%u flags=0x%04x shader='%s' "
+            "shaderHash=0x%08x samplerFlags=0x%02x lightmapIndex=%u "
+            "primary='%s' secondary='%s' secondaryUv="
+            "[(1,0.5)+(0,0),(1,0.5)+(0,0.5)] colorSpace="
+            "normalized-rgba8-direct inputs=base*vertex "
+            "composition=secondary0+secondary1*rsqrt(encodedAlphaDot+1) "
+            "output=pre-fog-linear-rgb.\n",
+            batch.materialName ? batch.materialName : "<null-material>",
+            batch.techniqueName ? batch.techniqueName :
+                "<unsupported-technique>",
+            static_cast<unsigned int>(batch.techniqueType),
+            static_cast<unsigned int>(batch.techniqueFlags),
+            batch.pixelShaderName ? batch.pixelShaderName :
+                "<unavailable-pixel-shader>",
+            static_cast<unsigned int>(batch.pixelShaderProgramHash),
+            static_cast<unsigned int>(batch.customSamplerFlags),
+            static_cast<unsigned int>(batch.lightmapIndex),
+            batch.lightmapImage && batch.lightmapImage->name
+                ? batch.lightmapImage->name : "<not-sampled>",
+            batch.secondaryLightmapImage &&
+                    batch.secondaryLightmapImage->name
+                ? batch.secondaryLightmapImage->name : "<missing>");
+        return;
+    }
+}
+
 const WebRendererRetainedWorldImage *RetainedWorldImageIdentity(
     std::uint32_t index) noexcept
 {
@@ -408,8 +482,14 @@ void EmitWorldComparison(
             destination.lightmapIndex = source.lightmapIndex;
             destination.sourceKind = source.sourceKind;
             destination.technique = source.technique;
+            destination.lightingMode = source.lightingMode;
             destination.techniqueName = source.techniqueName.c_str();
             destination.techniqueType = source.techniqueType;
+            destination.customSamplerFlags = source.customSamplerFlags;
+            destination.techniqueFlags = source.techniqueFlags;
+            destination.pixelShaderName = source.pixelShaderName.c_str();
+            destination.pixelShaderProgramHash =
+                source.pixelShaderProgramHash;
             if (const WebRendererRetainedWorldImage *image =
                     RetainedWorldImageIdentity(source.baseImageIndex))
             {
@@ -475,6 +555,11 @@ void EmitWorldComparison(
             expected.techniqueType,
             ComparisonPortableTechniqueName(expected.portableTechnique),
             ComparisonPortableTechniqueName(retained.portableTechnique),
+            ComparisonLightingModeName(expected.lightingMode),
+            expected.customSamplerFlags,
+            expected.techniqueFlags,
+            expected.pixelShaderName.c_str(),
+            expected.pixelShaderProgramHash,
             expected.surfaceCount,
             expected.firstSurfaceIndex,
             expected.lastSurfaceIndex,
@@ -1203,7 +1288,6 @@ void ResetGpuHandles()
     g_renderer.textureEnabledUniform = -1;
     g_renderer.viewProjectionUniform = -1;
     g_renderer.sceneFallbackUniform = -1;
-    g_renderer.lightmapUniform = -1;
     g_renderer.lightmapEnabledUniform = -1;
     g_renderer.secondaryLightmapUniform = -1;
     g_renderer.secondaryLightmapEnabledUniform = -1;
@@ -1769,7 +1853,6 @@ bool CreateRendererResources()
         in vec3 v_world_position;
         in vec2 v_lightmap_coord;
         uniform sampler2D u_texture;
-        uniform sampler2D u_lightmap;
         uniform sampler2D u_secondary_lightmap;
         uniform float u_texture_enabled;
         uniform float u_lightmap_enabled;
@@ -1808,25 +1891,31 @@ bool CreateRendererResources()
                     (u_alpha_test == 3 && texel.a < (128.0 / 255.0)))
                     discard;
                 bootstrap_color = texel * v_color;
-                if (u_lightmap_enabled > 0.5)
+                if (u_lightmap_enabled > 0.5 &&
+                    u_secondary_lightmap_enabled > 0.5)
                 {
-                    vec3 primary_lightmap =
-                        texture(u_lightmap, v_lightmap_coord).rgb;
-                    vec3 lighting = primary_lightmap * 2.0;
-                    if (u_secondary_lightmap_enabled > 0.5)
-                    {
-                        // IW3 packs two half-height RGBA lighting lobes into
-                        // the secondary image. The first is the low-frequency
-                        // color term used by this portable diffuse pass. The
-                        // second remains owned by the directional material
-                        // path once normal/tangent inputs are available.
-                        vec3 secondary_lobe = texture(
-                            u_secondary_lightmap,
-                            vec2(v_lightmap_coord.x,
-                                v_lightmap_coord.y * 0.5)).rgb;
-                        lighting = primary_lightmap + secondary_lobe;
-                    }
-                    bootstrap_color.rgb *= min(lighting, vec3(1.5));
+                    // Exact pre-fog math from native lm_r0c0_sm2. The
+                    // secondary RGBA atlas stores two vertically stacked
+                    // lobes; their alpha channels encode the directional
+                    // weighting. D3D9 samples these normalized values
+                    // directly, without an sRGB sampler conversion.
+                    vec4 secondary_lobe0 = texture(
+                        u_secondary_lightmap,
+                        vec2(v_lightmap_coord.x,
+                            v_lightmap_coord.y * 0.5));
+                    vec4 secondary_lobe1 = texture(
+                        u_secondary_lightmap,
+                        vec2(v_lightmap_coord.x,
+                            v_lightmap_coord.y * 0.5 + 0.5));
+                    vec2 encoded_direction = vec2(
+                        secondary_lobe0.a * 4.08 - 2.08,
+                        secondary_lobe1.a * 4.06451607 - 2.06451607);
+                    float directional_weight = clamp(inversesqrt(
+                        dot(encoded_direction, encoded_direction) + 1.0),
+                        0.0, 1.0);
+                    vec3 lighting = secondary_lobe0.rgb +
+                        secondary_lobe1.rgb * directional_weight;
+                    bootstrap_color.rgb *= lighting;
                 }
             }
             vec4 final_color = bootstrap_color * u_ui_color;
@@ -1851,7 +1940,6 @@ bool CreateRendererResources()
         glGetUniformLocation(program, "u_view_projection");
     const GLint sceneFallbackUniform =
         glGetUniformLocation(program, "u_scene_fallback");
-    const GLint lightmapUniform = glGetUniformLocation(program, "u_lightmap");
     const GLint lightmapEnabledUniform =
         glGetUniformLocation(program, "u_lightmap_enabled");
     const GLint secondaryLightmapUniform =
@@ -1954,7 +2042,7 @@ bool CreateRendererResources()
             compatibilityTexture);
     if (aspectUniform < 0 || textureUniform < 0 || textureEnabledUniform < 0 ||
         viewProjectionUniform < 0 || sceneFallbackUniform < 0 ||
-        lightmapUniform < 0 || lightmapEnabledUniform < 0 ||
+        lightmapEnabledUniform < 0 ||
         secondaryLightmapUniform < 0 ||
         secondaryLightmapEnabledUniform < 0 ||
         premultiplyAlphaUniform < 0 ||
@@ -2014,7 +2102,6 @@ bool CreateRendererResources()
     g_renderer.textureEnabledUniform = textureEnabledUniform;
     g_renderer.viewProjectionUniform = viewProjectionUniform;
     g_renderer.sceneFallbackUniform = sceneFallbackUniform;
-    g_renderer.lightmapUniform = lightmapUniform;
     g_renderer.lightmapEnabledUniform = lightmapEnabledUniform;
     g_renderer.secondaryLightmapUniform = secondaryLightmapUniform;
     g_renderer.secondaryLightmapEnabledUniform =
@@ -2424,9 +2511,15 @@ WebRendererSurfaceResult CopyWorldCommand(
             batch.lightmapIndex = source.lightmapIndex;
             batch.sourceKind = source.sourceKind;
             batch.technique = source.technique;
+            batch.lightingMode = source.lightingMode;
             batch.techniqueName = source.techniqueName
                 ? source.techniqueName : "<unsupported-technique>";
             batch.techniqueType = source.techniqueType;
+            batch.customSamplerFlags = source.customSamplerFlags;
+            batch.techniqueFlags = source.techniqueFlags;
+            batch.pixelShaderName = source.pixelShaderName
+                ? source.pixelShaderName : "<unavailable-pixel-shader>";
+            batch.pixelShaderProgramHash = source.pixelShaderProgramHash;
             batch.baseImageIndex = RetainCanonicalWorldImage(
                 source.baseImage, images, retainedPixelBytes);
             batch.lightmapImageIndex = RetainCanonicalWorldImage(
@@ -2436,14 +2529,16 @@ WebRendererSurfaceResult CopyWorldCommand(
             const bool baseSupported =
                 batch.baseImageIndex != INVALID_WORLD_IMAGE &&
                 images[batch.baseImageIndex].supported;
-            const bool lightmapSupported =
-                batch.lightmapImageIndex != INVALID_WORLD_IMAGE &&
-                images[batch.lightmapImageIndex].supported;
+            const bool secondaryLightmapSupported =
+                batch.secondaryLightmapImageIndex != INVALID_WORLD_IMAGE &&
+                images[batch.secondaryLightmapImageIndex].supported;
             if (!baseSupported)
                 batch.technique = WebRendererWorldTechnique::BackendFallback;
             else if (batch.technique ==
                     WebRendererWorldTechnique::BaseTextureLightmap &&
-                !lightmapSupported)
+                (batch.lightingMode !=
+                        WebRendererWorldLightingMode::SecondaryDirectional ||
+                    !secondaryLightmapSupported))
                 batch.technique = WebRendererWorldTechnique::BaseTexture;
             batches.push_back(std::move(batch));
         }
@@ -2770,6 +2865,7 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
         }));
     if (comparisonCaptured)
     {
+        LogNormalizedWorldLightingTrace(surface);
         LogWorldVertexColorInventory(surface);
         LogRetainedLightmapInventory(surface);
         LogWorldColorImageInventory();
@@ -3822,7 +3918,6 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             g_renderer.sceneFallbackUniform,
             sceneGeometryDraw ? 1.0f : 0.0f);
         glUniform1i(g_renderer.textureUniform, 0);
-        glUniform1i(g_renderer.lightmapUniform, 1);
         glUniform1i(g_renderer.secondaryLightmapUniform, 2);
         glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.premultiplyAlphaUniform, 0.0f);
@@ -3849,18 +3944,16 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             ApplyWorldMaterialState(batch);
             const WebRendererRetainedWorldImage *base =
                 WorldImage(batch.baseImageIndex);
-            const WebRendererRetainedWorldImage *lightmap =
-                WorldImage(batch.lightmapImageIndex);
             const WebRendererRetainedWorldImage *secondaryLightmap =
                 WorldImage(batch.secondaryLightmapImageIndex);
             const bool fallback = batch.technique ==
                     WebRendererWorldTechnique::BackendFallback ||
                 !base;
-            const bool lightmapped = !fallback && lightmap &&
+            const bool lightmapped = !fallback && secondaryLightmap &&
                 batch.technique ==
-                    WebRendererWorldTechnique::BaseTextureLightmap;
-            const bool secondaryLightmapped =
-                lightmapped && secondaryLightmap;
+                    WebRendererWorldTechnique::BaseTextureLightmap &&
+                batch.lightingMode ==
+                    WebRendererWorldLightingMode::SecondaryDirectional;
             glUniform1f(g_renderer.sceneFallbackUniform,
                 fallback ? 1.0f : 0.0f);
             glUniform1f(g_renderer.textureEnabledUniform,
@@ -3868,15 +3961,11 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             glUniform1f(g_renderer.lightmapEnabledUniform,
                 lightmapped ? 1.0f : 0.0f);
             glUniform1f(g_renderer.secondaryLightmapEnabledUniform,
-                secondaryLightmapped ? 1.0f : 0.0f);
+                lightmapped ? 1.0f : 0.0f);
             BindWorldTexture(
                 GL_TEXTURE0,
                 base ? base->texture : g_renderer.texture,
                 batch.samplerState);
-            BindWorldTexture(
-                GL_TEXTURE1,
-                lightmap ? lightmap->texture : g_renderer.texture,
-                0x62u);
             BindWorldTexture(
                 GL_TEXTURE2,
                 secondaryLightmap

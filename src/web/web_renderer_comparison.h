@@ -44,6 +44,12 @@ struct WebRendererComparisonRecord
     std::uint8_t techniqueType = 0xffu;
     WebRendererWorldTechnique portableTechnique =
         WebRendererWorldTechnique::BackendFallback;
+    WebRendererWorldLightingMode lightingMode =
+        WebRendererWorldLightingMode::None;
+    std::uint8_t customSamplerFlags = 0u;
+    std::uint16_t techniqueFlags = 0u;
+    std::string pixelShaderName;
+    std::uint32_t pixelShaderProgramHash = 0u;
     std::uint32_t surfaceCount = 0u;
     std::uint32_t firstSurfaceIndex = 0u;
     std::uint32_t lastSurfaceIndex = 0u;

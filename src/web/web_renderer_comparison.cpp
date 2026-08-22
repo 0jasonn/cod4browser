@@ -96,6 +96,12 @@ bool WebRenderer_CaptureComparison(
                 batch.techniqueName, "<unsupported-technique>");
             record.techniqueType = batch.techniqueType;
             record.portableTechnique = batch.technique;
+            record.lightingMode = batch.lightingMode;
+            record.customSamplerFlags = batch.customSamplerFlags;
+            record.techniqueFlags = batch.techniqueFlags;
+            record.pixelShaderName = NameOr(
+                batch.pixelShaderName, "<unavailable-pixel-shader>");
+            record.pixelShaderProgramHash = batch.pixelShaderProgramHash;
             record.surfaceCount = batch.surfaceCount;
             record.firstSurfaceIndex = batch.firstSurfaceIndex;
             record.lastSurfaceIndex = batch.lastSurfaceIndex;
@@ -149,7 +155,9 @@ bool WebRenderer_CaptureComparison(
             record.samplerClampU = (batch.samplerState & 0x20u) != 0u;
             record.samplerClampV = (batch.samplerState & 0x40u) != 0u;
             replacement.surfaceCount += batch.surfaceCount;
-            if (record.lightmapUsed) ++replacement.lightmappedDrawCount;
+            if (record.secondaryLightmapUsed && record.lightingMode ==
+                    WebRendererWorldLightingMode::SecondaryDirectional)
+                ++replacement.lightmappedDrawCount;
             if (record.portableTechnique ==
                 WebRendererWorldTechnique::BackendFallback)
                 ++replacement.fallbackDrawCount;
@@ -185,7 +193,10 @@ std::vector<WebRendererComparisonDelta> WebRenderer_CompareCaptures(
             fields |= WEB_RENDERER_COMPARISON_MATERIAL;
         if (left.techniqueName != right.techniqueName ||
             left.techniqueType != right.techniqueType ||
-            left.portableTechnique != right.portableTechnique)
+            left.portableTechnique != right.portableTechnique ||
+            left.techniqueFlags != right.techniqueFlags ||
+            left.pixelShaderName != right.pixelShaderName ||
+            left.pixelShaderProgramHash != right.pixelShaderProgramHash)
             fields |= WEB_RENDERER_COMPARISON_TECHNIQUE;
         if (left.drawOrder != right.drawOrder ||
             left.surfaceCount != right.surfaceCount ||
@@ -204,7 +215,9 @@ std::vector<WebRendererComparisonDelta> WebRenderer_CompareCaptures(
             left.secondaryLightmapImageName !=
                 right.secondaryLightmapImageName ||
             left.secondaryLightmapUsed != right.secondaryLightmapUsed ||
-            left.lightmapIndex != right.lightmapIndex)
+            left.lightmapIndex != right.lightmapIndex ||
+            left.lightingMode != right.lightingMode ||
+            left.customSamplerFlags != right.customSamplerFlags)
             fields |= WEB_RENDERER_COMPARISON_LIGHTMAP;
         if (left.samplerFilter != right.samplerFilter ||
             left.samplerMipmap != right.samplerMipmap ||

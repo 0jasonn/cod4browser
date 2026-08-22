@@ -213,7 +213,7 @@ and WebGL seams. The exhaustive browser suite remains explicitly available.
 | `GfxWorld` | `MODIFIED KISAK` / canonical reached closure | `db_generated_gfxworld.cpp` follows the native generated closure through names, indices, images, cells/portals, lightmaps/grid, vertices/layers, models, shadow/light regions, DPVS static/dynamic, block-1 runtime allocations, and nested canonical dependencies before final real-DB publication into the renderer-owned `&s_world`. Native x86/Wasm fixtures are byte-for-byte identical. The normal Killhouse run publishes asset 772 with Gate 2-matching structural counts and inflated offset. `WebEngine_BuildGfxWorldSurface` consumes that DB-owned object through a final-publication platform notification and WebGL2 draws surface 6077 without a browser world model. The frozen Gate 2 material label differs from the real DB Material pointer and remains recorded rather than normalized away. `web_retail_load_gfxworld.*` is oracle-only. |
 | XModel/model preview scene | `RETIRED` | Removed after Gate 2: no selectable-model UI/state, retained preview geometry, preview camera/projection, preview material bridge, or multi-draw command path remains. Canonical XModel loading/publication and dependencies remain available to `GfxWorld`, `WeaponDef`, FX, and later runtime consumers. |
 | Renderer frontend | `MODIFIED KISAK` / textured, lightmapped gameplay scene reached | The production Wasm target links the real client/cgame/effects/ragdoll/physics closure against a narrow renderer-frontend platform implementation. `R_RenderScene` validates canonical `refdef_s`, constructs Kisak view/projection matrices, and traverses the canonical DPVS lit, decal, and emissive ranges in native stage order rather than treating `surfaceCountNoDecal` as a contiguous endpoint. It emits 581 material-aware batches with canonical `Material*`, technique identity, base `GfxImage*`, state bits, sampler state, lightmap index, base UV, and lightmap UV. It additionally groups `GfxStaticModelDrawInst` placements by canonical `XModel`, retains shared LOD XSurfaces, and consumes cgame's ordinary and first-person `R_AddDObjToScene` submissions through canonical pose evaluation, cpose/view-origin LOD selection delegated to `XModelGetLodForDist`, and rigid/weighted skinning. Release Chrome records 64 DObjs and a visibly posed actor/viewmodel. EffectsCore code-mesh, XModel, and particle-cloud submissions remain appended in canonical order. Unsupported/deformed standalone FX model surfaces, invalid/over-capacity clouds, particle marks, broader material families, and deferred shader/postprocess features remain compatibility gaps. The minimum 2D callback set retains canonical Material/Font identities. |
-| WebGL2 backend and context recovery | `WEB PLATFORM IMPLEMENTATION` | Permanent platform boundary. It converts D3D9 NDC depth `[0,1]` to WebGL `[-1,1]`, retains 32-bit indices, uploads canonical external IWI and DB load-definition pixels, composes the primary L8 atlas with the first packed secondary-lightmap color lobe, and applies the encountered Killhouse cull, depth, color-write, alpha-test/blend, addressing, and filtering states per material batch. `ONE / INV_SRC_ALPHA` techniques premultiply final RGB at this boundary to preserve their shader/blend contract. Static XSurface geometry is instanced from canonical placements, posed DObj geometry and rigid `FxXModel` geometry are refreshed per frame, and the 2D pass uses canonical image/font atlases with alpha blending. The built-in `,$white` image is backend-owned; unsupported image identities otherwise remain explicit fallback. GPU handles remain backend-only and all texture/geometry objects are recreated after context loss. |
+| WebGL2 backend and context recovery | `WEB PLATFORM IMPLEMENTATION` | Permanent platform boundary. It converts D3D9 NDC depth `[0,1]` to WebGL `[-1,1]`, retains 32-bit indices, uploads canonical external IWI and DB load-definition pixels, and mirrors the encountered Killhouse `lm_r0c0_sm2` secondary-directional decode: two half-height RGBA lobes are sampled with the native UV transforms and combined using their alpha-encoded reciprocal-square-root weight. The pass samples no primary L8 atlas. It also applies the encountered cull, depth, color-write, alpha-test/blend, addressing, and filtering states per material batch. `ONE / INV_SRC_ALPHA` techniques premultiply final RGB at this boundary to preserve their shader/blend contract. Static XSurface geometry is instanced from canonical placements, posed DObj geometry and rigid `FxXModel` geometry are refreshed per frame, and the 2D pass uses canonical image/font atlases with alpha blending. The built-in `,$white` image is backend-owned; unsupported image identities otherwise remain explicit fallback. GPU handles remain backend-only and all texture/geometry objects are recreated after context loss. |
 | D3D9 renderer backend | `NATIVE ONLY` | Retain for native builds and use as behavioral reference; do not compile Direct3D objects into Wasm. |
 | Shader compatibility | `MODIFIED KISAK` / `WEB PLATFORM IMPLEMENTATION` boundary | Native material/shader contracts should remain canonical; selecting or translating to built-in GLSL belongs at the backend seam. |
 | ODE math | `SHARED KISAK` | `src/physics/ode/odemath.cpp` is compiled directly. Expand shared ODE/collision code based on compile inventory and measured needs. |
@@ -519,23 +519,31 @@ object addresses. A Release Chrome Killhouse run records 581 intended and 581
 actual draws, 8,475 surfaces, 538 lightmapped draws, 123 alpha-tested draws,
 148 blended draws, and two image-support divergences.
 
-The lighting fix preserves the canonical pair layout loaded by
-`R_LoadLightmaps`: the full-resolution primary scalar atlas is added to the
-first half-height RGB lobe of the secondary atlas. The second packed lobe is
-reserved for the directional/normal-aware path because the current portable
-vertex contract does not yet carry the required normal/tangent inputs. A
-tested V-coordinate flip was rejected because it increased black samples from
-68.00% to 73.43% and visibly corrupted the scene.
+The lighting fix now follows the actual D3D9 program selected by Killhouse.
+`R_DrawBspDrawSurfsLit` supplies custom sampler flag `0x04`, so
+`lm_r0c0_sm2.hlsl` samples the secondary atlas only. Its two packed lobes use
+UV transforms `(u, v * 0.5)` and `(u, v * 0.5 + 0.5)`; their alpha channels
+are decoded with the native constants and reciprocal-square-root weight before
+the result multiplies `base texture * vertex color`. The former browser-only
+`primary + first secondary lobe` approximation and `1.5` clamp are removed.
+The primary L8 atlas remains canonical DB data but is neither retained nor
+sampled for this pass. No D3D9 sRGB sampler/write state is selected here, so
+RGBA8 samples remain direct normalized values; native `r_gamma` is a later
+display-ramp concern, not a lightmap decode step. A tested V-coordinate flip
+was rejected because it increased black samples and visibly corrupted the
+scene.
 
 Canonical SM2 remapping and leading-comma material-family selection reduce
 world fallback from 70 draws/443 surfaces in the former 8,064-surface command
 to two draws/nine surfaces in the complete canonical ranges. Static XModel
 fallback falls from 304 of 359 batches to 29; the remainder is image support,
 principally one unsupported format, one malformed load definition, and images
-deferred by the bounded 256 MiB static texture-recovery budget. Sky/fog, the
-second directional lightmap lobe, water-specific shading, light-grid/static
+deferred by the bounded 256 MiB static texture-recovery budget. Sky/fog,
+display gamma/vision processing, water-specific shading, light-grid/static
 model lighting, and the remaining `,crater_blacktop` image are still explicit
-renderer gaps.
+renderer gaps. The corrected world pass keeps the draw count and three texture
+fetches per pixel unchanged versus the previous approximation while avoiding
+retention/upload of 28 MiB of expanded primary-lightmap RGBA8 data.
 
 ## DObj renderer convergence update (commits `748112cc`, `de695b46`)
 

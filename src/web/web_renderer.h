@@ -114,6 +114,14 @@ enum class WebRendererWorldTechnique : std::uint8_t
     BaseTextureLightmap,
 };
 
+// Portable description of the native pixel-lighting path selected by the
+// canonical material pass. This is intent data, not a WebGL shader handle.
+enum class WebRendererWorldLightingMode : std::uint8_t
+{
+    None = 0,
+    SecondaryDirectional,
+};
+
 enum class WebRendererSceneBatchKind : std::uint8_t
 {
     WorldSurface = 0,
@@ -168,11 +176,16 @@ struct WebRendererWorldBatchDesc
     std::uint8_t lightmapIndex;
     WebRendererSceneBatchKind sourceKind;
     WebRendererWorldTechnique technique;
+    WebRendererWorldLightingMode lightingMode;
     // Canonical frontend technique identity. The backend copies the name and
     // numeric slot for diagnostics; it never retains the technique pointer or
     // treats the name as a browser shader identifier.
     const char *techniqueName;
     std::uint8_t techniqueType;
+    std::uint8_t customSamplerFlags;
+    std::uint16_t techniqueFlags;
+    const char *pixelShaderName;
+    std::uint32_t pixelShaderProgramHash;
 };
 
 // Static XModel geometry remains shared per canonical XModel/LOD. Placements

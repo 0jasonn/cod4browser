@@ -101,15 +101,36 @@ const GfxImage *FindBaseImage(const Material *material, std::uint8_t &sampler) n
     return nullptr;
 }
 
-bool TechniqueUsesPrimaryLightmap(
-    const MaterialTechnique *technique) noexcept;
+std::uint32_t HashPixelShaderProgram(
+    const MaterialPixelShader *shader) noexcept
+{
+    if (!shader || !shader->prog.loadDef.program ||
+        shader->prog.loadDef.programSize == 0u)
+    {
+        return 0u;
+    }
+    constexpr std::uint32_t FNV_OFFSET = 2166136261u;
+    constexpr std::uint32_t FNV_PRIME = 16777619u;
+    std::uint32_t hash = FNV_OFFSET;
+    const auto *bytes = reinterpret_cast<const std::uint8_t *>(
+        shader->prog.loadDef.program);
+    const std::size_t byteCount =
+        static_cast<std::size_t>(shader->prog.loadDef.programSize) *
+        sizeof(std::uint32_t);
+    for (std::size_t index = 0u; index < byteCount; ++index)
+        hash = (hash ^ bytes[index]) * FNV_PRIME;
+    return hash;
+}
 
 struct TechniqueSelection
 {
     std::uint32_t type = TECHNIQUE_NONE_INDEX;
     const MaterialTechnique *technique = nullptr;
     const char *identityName = nullptr;
-    bool usesPrimaryLightmap = false;
+    const char *pixelShaderName = nullptr;
+    std::uint32_t pixelShaderProgramHash = 0u;
+    std::uint8_t customSamplerFlags = 0u;
+    std::uint16_t techniqueFlags = 0u;
     std::uint32_t stateBits[2]{};
 };
 
@@ -144,9 +165,14 @@ TechniqueSelection SelectTechnique(const Material *material) noexcept
         selection.type = type;
         selection.technique = technique;
         selection.identityName = technique->name;
-        selection.usesPrimaryLightmap =
-            type == TECHNIQUE_LIT_INDEX &&
-            TechniqueUsesPrimaryLightmap(technique);
+        selection.techniqueFlags = technique->flags;
+        for (std::uint32_t pass = 0u; pass < technique->passCount; ++pass)
+            selection.customSamplerFlags |=
+                technique->passArray[pass].customSamplerFlags;
+        const MaterialPixelShader *pixelShader =
+            technique->passArray[0u].pixelShader;
+        selection.pixelShaderName = pixelShader ? pixelShader->name : nullptr;
+        selection.pixelShaderProgramHash = HashPixelShaderProgram(pixelShader);
         selection.stateBits[0] = material->stateBitsTable[entry].loadBits[0];
         selection.stateBits[1] = material->stateBitsTable[entry].loadBits[1];
         return selection;
@@ -163,29 +189,15 @@ TechniqueSelection SelectTechnique(const Material *material) noexcept
     {
         selection.type = TECHNIQUE_LIT_INDEX;
         selection.identityName = material->techniqueSet->name;
-        selection.usesPrimaryLightmap = true;
+        // Killhouse resolves this alias to the same lm_r0c0_sm2 native family
+        // whose pass requests sampler bit 0x04 (secondary lightmap only).
+        selection.customSamplerFlags = 4u;
         selection.stateBits[0] =
             material->stateBitsTable[litEntry].loadBits[0];
         selection.stateBits[1] =
             material->stateBitsTable[litEntry].loadBits[1];
     }
     return selection;
-}
-
-bool TechniqueUsesPrimaryLightmap(
-    const MaterialTechnique *technique) noexcept
-{
-    if (!technique) return false;
-    for (std::uint32_t pass = 0u; pass < technique->passCount; ++pass)
-    {
-        if ((technique->passArray[pass].customSamplerFlags & 2u) != 0u)
-            return true;
-    }
-    // Native RB_UploadMaterialTechnique uses the canonical lm_ technique-name
-    // contract to select the world vertex declaration. Some retail technique
-    // sets do not serialize the otherwise redundant custom-sampler bit, so
-    // preserve that same contract for the minimum browser lightmap path.
-    return technique->name && std::strncmp(technique->name, "lm_", 3u) == 0;
 }
 
 WebRendererWorldBatchDesc MakeBatch(
@@ -214,22 +226,33 @@ WebRendererWorldBatchDesc MakeBatch(
     batch.techniqueName = technique.identityName
         ? technique.identityName : "<unsupported-technique>";
     batch.techniqueType = static_cast<std::uint8_t>(technique.type);
+    batch.customSamplerFlags = technique.customSamplerFlags;
+    batch.techniqueFlags = technique.techniqueFlags;
+    batch.pixelShaderName = technique.pixelShaderName
+        ? technique.pixelShaderName : "<unavailable-pixel-shader>";
+    batch.pixelShaderProgramHash = technique.pixelShaderProgramHash;
     batch.stateBits[0] = technique.stateBits[0];
     batch.stateBits[1] = technique.stateBits[1];
-    const bool supportsPrimaryLightmap = technique.identityName &&
+    const bool hasCanonicalLightmap = technique.identityName &&
         technique.type == TECHNIQUE_LIT_INDEX &&
-        technique.usesPrimaryLightmap &&
         surface.lightmapIndex != 31u &&
         surface.lightmapIndex < world.lightmapCount && world.lightmaps;
-    if (supportsPrimaryLightmap)
+    if (hasCanonicalLightmap)
     {
-        batch.lightmapImage = world.lightmaps[surface.lightmapIndex].primary;
-        batch.secondaryLightmapImage =
-            world.lightmaps[surface.lightmapIndex].secondary;
+        if ((technique.customSamplerFlags & 2u) != 0u)
+            batch.lightmapImage =
+                world.lightmaps[surface.lightmapIndex].primary;
+        if ((technique.customSamplerFlags & 4u) != 0u)
+            batch.secondaryLightmapImage =
+                world.lightmaps[surface.lightmapIndex].secondary;
+        if (batch.secondaryLightmapImage)
+            batch.lightingMode =
+                WebRendererWorldLightingMode::SecondaryDirectional;
     }
     if (!technique.identityName || !batch.baseImage)
         batch.technique = WebRendererWorldTechnique::BackendFallback;
-    else if (batch.lightmapImage)
+    else if (batch.lightingMode ==
+            WebRendererWorldLightingMode::SecondaryDirectional)
         batch.technique = WebRendererWorldTechnique::BaseTextureLightmap;
     else
         batch.technique = WebRendererWorldTechnique::BaseTexture;
@@ -246,6 +269,10 @@ bool BatchMatches(
         batch.baseImage == candidate.baseImage &&
         batch.lightmapImage == candidate.lightmapImage &&
         batch.secondaryLightmapImage == candidate.secondaryLightmapImage &&
+        batch.lightingMode == candidate.lightingMode &&
+        batch.customSamplerFlags == candidate.customSamplerFlags &&
+        batch.techniqueFlags == candidate.techniqueFlags &&
+        batch.pixelShaderProgramHash == candidate.pixelShaderProgramHash &&
         batch.stateBits[0] == candidate.stateBits[0] &&
         batch.stateBits[1] == candidate.stateBits[1] &&
         batch.samplerState == candidate.samplerState &&

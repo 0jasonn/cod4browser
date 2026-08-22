@@ -127,7 +127,8 @@ void TestCanonicalMaterialAndLightmapIdentitySplitBatches()
     Fixture fixture;
     MaterialTechnique litTechnique{};
     litTechnique.passCount = 1u;
-    litTechnique.passArray[0].customSamplerFlags = 2u;
+    litTechnique.name = "lm_r0c0_sm2";
+    litTechnique.passArray[0].customSamplerFlags = 4u;
     MaterialTechniqueSet techniqueSet{};
     techniqueSet.techniques[TECHNIQUE_LIT_INDEX] = &litTechnique;
     GfxStateBits stateBits[2]{{{0x18008800u, 0x0000000du}},
@@ -174,8 +175,11 @@ void TestCanonicalMaterialAndLightmapIdentitySplitBatches()
     assert(first.materialIdentity == &materialA);
     assert(std::strcmp(first.materialName, "material/a") == 0);
     assert(first.baseImage == &baseImageA);
-    assert(first.lightmapImage == &lightmapImage);
+    assert(first.lightmapImage == nullptr);
     assert(first.secondaryLightmapImage == &secondaryLightmapImage);
+    assert(first.lightingMode ==
+        WebRendererWorldLightingMode::SecondaryDirectional);
+    assert(first.customSamplerFlags == 4u);
     assert(first.samplerState == 0x22u);
     assert(first.stateBits[0] == stateBits[0].loadBits[0]);
     assert(first.stateBits[1] == stateBits[0].loadBits[1]);
@@ -193,7 +197,7 @@ void TestCanonicalMaterialAndLightmapIdentitySplitBatches()
         fixture.vertices[0].lmapCoord[0]);
 }
 
-void TestCanonicalLmTechniqueNameSelectsPrimaryLightmap()
+void TestCanonicalLmTechniqueNameDoesNotInventLightmapSamplers()
 {
     Fixture fixture;
     MaterialTechnique litTechnique{};
@@ -229,9 +233,12 @@ void TestCanonicalLmTechniqueNameSelectsPrimaryLightmap()
         fixture.world, MakeView(), command) ==
         WebRendererWorldSceneResult::Success);
     assert(command.batches.size() == 1u);
-    assert(command.batches[0].lightmapImage == &lightmapImage);
+    assert(command.batches[0].lightmapImage == nullptr);
+    assert(command.batches[0].secondaryLightmapImage == nullptr);
+    assert(command.batches[0].lightingMode ==
+        WebRendererWorldLightingMode::None);
     assert(command.batches[0].technique ==
-        WebRendererWorldTechnique::BaseTextureLightmap);
+        WebRendererWorldTechnique::BaseTexture);
 }
 
 void TestRemappedTechniqueSetDrivesPortableSelection()
@@ -240,6 +247,7 @@ void TestRemappedTechniqueSetDrivesPortableSelection()
     MaterialTechnique litTechnique{};
     litTechnique.name = "lm_remapped_world";
     litTechnique.passCount = 1u;
+    litTechnique.passArray[0].customSamplerFlags = 4u;
     MaterialTechniqueSet directTechniqueSet{};
     MaterialTechniqueSet remappedTechniqueSet{};
     remappedTechniqueSet.techniques[TECHNIQUE_LIT_INDEX] = &litTechnique;
@@ -270,7 +278,7 @@ void TestRemappedTechniqueSetDrivesPortableSelection()
 
     WebRendererWorldSceneCommand command;
     assert(WebRenderer_BuildWorldSceneCommand(
-        fixture.world, fixture.view, command) ==
+        fixture.world, MakeView(), command) ==
         WebRendererWorldSceneResult::Success);
     assert(command.batches.size() == 1u);
     assert(command.batches[0].technique ==
@@ -279,6 +287,7 @@ void TestRemappedTechniqueSetDrivesPortableSelection()
         "lm_remapped_world") == 0);
     assert(command.batches[0].secondaryLightmapImage ==
         &secondaryLightmapImage);
+    assert(command.batches[0].lightmapImage == nullptr);
 }
 
 void TestCanonicalWorldColorAliasUsesLitStateAndLightmaps()
@@ -315,7 +324,7 @@ void TestCanonicalWorldColorAliasUsesLitStateAndLightmaps()
 
     WebRendererWorldSceneCommand command;
     assert(WebRenderer_BuildWorldSceneCommand(
-        fixture.world, fixture.view, command) ==
+        fixture.world, MakeView(), command) ==
         WebRendererWorldSceneResult::Success);
     assert(command.batches.size() == 1u);
     const WebRendererWorldBatchDesc &batch = command.batches[0];
@@ -324,8 +333,11 @@ void TestCanonicalWorldColorAliasUsesLitStateAndLightmaps()
     assert(std::strcmp(batch.techniqueName, ",wc_l_sm_b0c0n0s0") == 0);
     assert(batch.stateBits[0] == 0x18008812u);
     assert(batch.stateBits[1] == 0x0000000du);
-    assert(batch.lightmapImage == &lightmapImage);
+    assert(batch.lightmapImage == nullptr);
     assert(batch.secondaryLightmapImage == &secondaryLightmapImage);
+    assert(batch.customSamplerFlags == 4u);
+    assert(batch.lightingMode ==
+        WebRendererWorldLightingMode::SecondaryDirectional);
 }
 
 void TestMalformedLocalIndexIsRejectedAtomically()
@@ -387,7 +399,7 @@ void TestCanonicalDpvsRangesOverrideNonContiguousModelCount()
     fixture.world.dpvs.emissiveSurfsEnd = 3u;
     WebRendererWorldSceneCommand command;
     assert(WebRenderer_BuildWorldSceneCommand(
-        fixture.world, fixture.view, command) ==
+        fixture.world, MakeView(), command) ==
         WebRendererWorldSceneResult::Success);
     assert(command.surfaceCount == 3u);
     assert(command.firstSurfaceIndex == 0u);
@@ -399,7 +411,7 @@ int main()
 {
     TestCanonicalOpaqueSurfacesAreBatchedInWorldOrder();
     TestCanonicalMaterialAndLightmapIdentitySplitBatches();
-    TestCanonicalLmTechniqueNameSelectsPrimaryLightmap();
+    TestCanonicalLmTechniqueNameDoesNotInventLightmapSamplers();
     TestRemappedTechniqueSetDrivesPortableSelection();
     TestCanonicalWorldColorAliasUsesLitStateAndLightmaps();
     TestMalformedLocalIndexIsRejectedAtomically();
