@@ -21,6 +21,7 @@
 #include <gfx_d3d/r_statistics.h>
 #include <gfx_d3d/r_warning_types.h>
 #include <qcommon/qcommon.h>
+#include <qcommon/com_bsp.h>
 #include <qcommon/com_world_types.h>
 #include <qcommon/com_world_runtime.h>
 #include <qcommon/cmd.h>
@@ -48,6 +49,7 @@
 #include <array>
 #include <cctype>
 #include <cfloat>
+#include <cmath>
 #include <cstdarg>
 #include <cstdint>
 #include <cstring>
@@ -61,6 +63,52 @@ extern GfxWorld s_world;
 
 namespace
 {
+bool CanonicalLightGridSampleVisible(
+    const float samplePosition[3], const float gridPosition[3],
+    void *) noexcept
+{
+    float direction[3]{
+        samplePosition[0] - gridPosition[0],
+        samplePosition[1] - gridPosition[1],
+        samplePosition[2] - gridPosition[2],
+    };
+    const float lengthSquared = direction[0] * direction[0] +
+        direction[1] * direction[1] + direction[2] * direction[2];
+    if (lengthSquared > 0.000001f)
+    {
+        const float inverseLength = 1.0f / std::sqrt(lengthSquared);
+        for (float &component : direction) component *= inverseLength;
+    }
+    const float nudgedGridPosition[3]{
+        gridPosition[0] + direction[0] * 0.01f,
+        gridPosition[1] + direction[1] * 0.01f,
+        gridPosition[2] + direction[2] * 0.01f,
+    };
+    return CM_BoxSightTrace(
+        0, samplePosition, nudgedGridPosition,
+        vec3_origin, vec3_origin, 0u, 8193) == 0;
+}
+
+bool CanonicalPrimaryLightInfluences(
+    std::uint32_t primaryLightIndex, const float position[3],
+    void *) noexcept
+{
+    if (primaryLightIndex == 0u ||
+        primaryLightIndex >= Com_GetPrimaryLightCount())
+        return false;
+    const ComPrimaryLight *light =
+        &comWorld.primaryLights[primaryLightIndex];
+    if (light->type == 1u) return true;
+    return Com_CanPrimaryLightAffectPoint(
+        light, position) != 0;
+}
+
+const WebRendererModelLightingCallbacks MODEL_LIGHTING_CALLBACKS{
+    CanonicalLightGridSampleVisible,
+    CanonicalPrimaryLightInfluences,
+    nullptr,
+};
+
 void __cdecl CollectTechniqueSet(XAssetHeader header, void *context)
 {
     if (!header.techniqueSet || !context) return;
@@ -1088,7 +1136,8 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     {
         WebRendererStaticModelSceneCommand command;
         const WebRendererStaticModelSceneResult build =
-            WebRenderer_BuildStaticModelSceneCommand(s_world, command);
+            WebRenderer_BuildStaticModelSceneCommand(
+                s_world, command, &MODEL_LIGHTING_CALLBACKS);
         if (build == WebRendererStaticModelSceneResult::NoStaticModels)
         {
             g_staticModelSceneSubmitted = true;
@@ -1101,6 +1150,14 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         }
         else
         {
+            const WebRendererModelLightingAtlasDesc lightingAtlas{
+                command.modelLightingAtlas.pixels.data(),
+                command.modelLightingAtlas.width,
+                command.modelLightingAtlas.height,
+                command.modelLightingAtlas.depth,
+                command.modelLightingAtlas.entryCount,
+                command.modelLightingAtlas.pixels.size(),
+            };
             const WebRendererStaticModelSceneDesc scene{
                 command.vertices.data(),
                 static_cast<std::uint32_t>(command.vertices.size()),
@@ -1112,6 +1169,8 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                 static_cast<std::uint32_t>(command.batches.size()),
                 command.modelCount,
                 command.surfaceCount,
+                command.modelLightingAtlas.pixels.empty()
+                    ? nullptr : &lightingAtlas,
             };
             const WebRendererSurfaceResult submission =
                 WebRenderer_SetStaticModelScene(scene);
@@ -1126,12 +1185,15 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             Web_Log(WebLogLevel::Info,
                 "[kisakcod-web] Renderer frontend submitted %u canonical "
                 "static XModels as %zu shared XSurface batches (%zu vertices, "
-                "%zu indices, %zu instances).\n",
+                "%zu indices, %zu instances; model-lighting source=%s, "
+                "failures=%u).\n",
                 command.modelCount,
                 command.batches.size(),
                 command.vertices.size(),
                 command.indices.size(),
-                command.instances.size());
+                command.instances.size(),
+                command.modelLightingSourceAvailable ? "yes" : "no",
+                command.modelLightingFailureCount);
         }
     }
 
@@ -1139,7 +1201,8 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     const WebRendererDObjSceneResult dynamicBuild =
         WebRenderer_BuildDObjSceneCommand(
             g_dobjSubmissions.data(), g_dobjSubmissionCount,
-            dynamicCommand, refdef->vieworg);
+            dynamicCommand, refdef->vieworg, &s_world.lightGrid,
+            &MODEL_LIGHTING_CALLBACKS);
     if (dynamicBuild == WebRendererDObjSceneResult::NoDObj)
     {
         // Keep the command empty for now; canonical code meshes below may
@@ -1324,6 +1387,14 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     if (dynamicBuild == WebRendererDObjSceneResult::Success ||
         hasFxModel || hasCodeMesh || hasParticleCloud)
     {
+        const WebRendererModelLightingAtlasDesc lightingAtlas{
+            dynamicCommand.modelLightingAtlas.pixels.data(),
+            dynamicCommand.modelLightingAtlas.width,
+            dynamicCommand.modelLightingAtlas.height,
+            dynamicCommand.modelLightingAtlas.depth,
+            dynamicCommand.modelLightingAtlas.entryCount,
+            dynamicCommand.modelLightingAtlas.pixels.size(),
+        };
         const WebRendererWorldSurfaceDesc scene{
             dynamicCommand.vertices.data(),
             static_cast<std::uint32_t>(dynamicCommand.vertices.size()),
@@ -1331,6 +1402,8 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             static_cast<std::uint32_t>(dynamicCommand.indices.size()),
             dynamicCommand.batches.data(),
             static_cast<std::uint32_t>(dynamicCommand.batches.size()),
+            dynamicCommand.modelLightingAtlas.pixels.empty()
+                ? nullptr : &lightingAtlas,
         };
         const WebRendererSurfaceResult submission =
             WebRenderer_SetDynamicModelScene(scene);
@@ -1463,13 +1536,20 @@ GfxBrushModel *__cdecl R_GetBrushModel(std::uint32_t index)
 void __cdecl R_AddBrushModelToSceneFromAngles(
     const GfxBrushModel *, const float *, const float *, std::uint16_t) {}
 void __cdecl R_AddDObjToScene(const DObj_s *obj, const cpose_t *pose,
-    std::uint32_t entityNumber, std::uint32_t renderFlags, float *, float)
+    std::uint32_t entityNumber, std::uint32_t renderFlags,
+    float *lightingOrigin, float)
 {
     // Keep the callback identity and pose intact until R_RenderScene consumes
     // it synchronously. Native GfxScene admits ordinary and first-person
     // DObjs through the same fixed 512-entry sceneDObj array.
-    const WebRendererDObjSubmission submission{
-        obj, pose, entityNumber, renderFlags};
+    WebRendererDObjSubmission submission{};
+    submission.obj = obj;
+    submission.pose = pose;
+    submission.entityNumber = entityNumber;
+    submission.renderFlags = renderFlags;
+    const float *sourceLightingOrigin = lightingOrigin
+        ? lightingOrigin : (pose ? pose->origin : vec3_origin);
+    std::copy_n(sourceLightingOrigin, 3u, submission.lightingOrigin);
     const WebRendererDObjAdmissionResult admission =
         WebRenderer_ValidateDObjSubmission(
             submission, g_dobjSubmissionCount,

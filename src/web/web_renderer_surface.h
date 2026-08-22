@@ -9,7 +9,7 @@
 constexpr std::uint32_t WEB_RENDERER_MAX_SURFACE_VERTICES = 4096u;
 constexpr std::uint32_t WEB_RENDERER_MAX_SURFACE_INDICES = 12288u;
 constexpr std::size_t WEB_RENDERER_MAX_RETAINED_SURFACE_BYTES =
-    static_cast<std::size_t>(WEB_RENDERER_MAX_SURFACE_VERTICES) * 11u * sizeof(float) +
+    static_cast<std::size_t>(WEB_RENDERER_MAX_SURFACE_VERTICES) * 14u * sizeof(float) +
     static_cast<std::size_t>(WEB_RENDERER_MAX_SURFACE_INDICES) * sizeof(std::uint16_t);
 
 struct WebRendererSurfaceVertex
@@ -21,10 +21,14 @@ struct WebRendererSurfaceVertex
     float color[4];
     float textureCoordinate[2];
     float lightmapCoordinate[2];
+    // Canonical GfxPackedVertex/GfxWorldVertex unit normal. Model commands
+    // consume it for native light-grid lookup; non-model producers leave it
+    // zero and never enable the model-lighting shader branch.
+    float normal[3];
 };
 
 static_assert(std::is_standard_layout_v<WebRendererSurfaceVertex>);
-static_assert(sizeof(WebRendererSurfaceVertex) == 11u * sizeof(float));
+static_assert(sizeof(WebRendererSurfaceVertex) == 14u * sizeof(float));
 
 enum class WebRendererPrimitiveTopology : std::uint8_t
 {

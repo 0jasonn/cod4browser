@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <new>
 #include <span>
 #include <string>
@@ -74,6 +75,17 @@ struct WebRendererRetainedWorldBatch
     std::uint16_t techniqueFlags = 0u;
     std::string pixelShaderName;
     std::uint32_t pixelShaderProgramHash = 0u;
+    float modelLightingCoordinates[3]{};
+};
+
+struct WebRendererRetainedModelLightingAtlas
+{
+    std::vector<std::uint8_t> pixels;
+    std::uint32_t width = 0u;
+    std::uint32_t height = 0u;
+    std::uint32_t depth = 0u;
+    std::uint32_t entryCount = 0u;
+    GLuint texture = 0u;
 };
 
 struct WebRendererRetainedStaticModelBatch
@@ -111,6 +123,10 @@ struct WebRendererState
     GLint lightmapEnabledUniform = -1;
     GLint secondaryLightmapUniform = -1;
     GLint secondaryLightmapEnabledUniform = -1;
+    GLint modelLightingUniform = -1;
+    GLint modelLightingEnabledUniform = -1;
+    GLint modelLightingBaseCoordinatesUniform = -1;
+    GLint modelLightingLookupScaleUniform = -1;
     GLint premultiplyAlphaUniform = -1;
     GLint alphaTestUniform = -1;
     GLint instanceEnabledUniform = -1;
@@ -137,6 +153,7 @@ struct WebRendererState
     std::vector<WebRendererStaticModelInstanceDesc> retainedStaticModelInstances;
     std::vector<WebRendererRetainedStaticModelBatch> retainedStaticModelBatches;
     std::vector<WebRendererRetainedWorldImage> retainedStaticModelImages;
+    WebRendererRetainedModelLightingAtlas retainedStaticModelLighting;
     std::uint32_t staticModelCount = 0u;
     std::uint32_t staticModelSurfaceCount = 0u;
     bool staticModelSceneActive = false;
@@ -147,6 +164,7 @@ struct WebRendererState
     std::vector<std::uint32_t> retainedDynamicModelIndices;
     std::vector<WebRendererRetainedWorldBatch> retainedDynamicModelBatches;
     std::vector<WebRendererRetainedWorldImage> retainedDynamicModelImages;
+    WebRendererRetainedModelLightingAtlas retainedDynamicModelLighting;
     bool dynamicModelSceneActive = false;
     bool dynamicModelFirstSubmissionReported = false;
     bool dynamicFxSourceReported[3]{};
@@ -366,6 +384,88 @@ const char *FxSourceKindName(WebRendererSceneBatchKind kind) noexcept
     }
 }
 
+void DeleteModelLightingTexture(
+    WebRendererRetainedModelLightingAtlas &atlas)
+{
+    if (atlas.texture != 0u)
+        glDeleteTextures(1, &atlas.texture);
+    atlas.texture = 0u;
+}
+
+bool CopyModelLightingAtlas(
+    const WebRendererModelLightingAtlasDesc *source,
+    WebRendererRetainedModelLightingAtlas &destination)
+{
+    if (!source)
+    {
+        destination = {};
+        return true;
+    }
+    const std::uint64_t expectedBytes =
+        static_cast<std::uint64_t>(source->width) * source->height *
+        source->depth * 4u;
+    if (!source->pixels || source->width != 256u ||
+        source->height < 4u || source->height > 4096u ||
+        source->depth != 4u || source->entryCount == 0u ||
+        source->entryCount > (source->width / 4u) *
+            (source->height / 4u) ||
+        expectedBytes != source->byteLength ||
+        expectedBytes > std::numeric_limits<std::size_t>::max())
+        return false;
+    WebRendererRetainedModelLightingAtlas replacement;
+    try
+    {
+        replacement.pixels.assign(
+            source->pixels, source->pixels + source->byteLength);
+    }
+    catch (const std::bad_alloc &)
+    {
+        return false;
+    }
+    replacement.width = source->width;
+    replacement.height = source->height;
+    replacement.depth = source->depth;
+    replacement.entryCount = source->entryCount;
+    destination = std::move(replacement);
+    return true;
+}
+
+bool CreateModelLightingTexture(
+    WebRendererRetainedModelLightingAtlas &atlas)
+{
+    if (atlas.pixels.empty()) return true;
+    if (atlas.texture != 0u) return true;
+    while (glGetError() != GL_NO_ERROR)
+    {
+    }
+    GLuint texture = 0u;
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_3D, texture);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    glTexImage3D(
+        GL_TEXTURE_3D, 0, GL_RGBA8,
+        static_cast<GLsizei>(atlas.width),
+        static_cast<GLsizei>(atlas.height),
+        static_cast<GLsizei>(atlas.depth),
+        0, GL_RGBA, GL_UNSIGNED_BYTE, atlas.pixels.data());
+    const GLenum error = glGetError();
+    if (texture == 0u || error != GL_NO_ERROR)
+    {
+        if (texture != 0u) glDeleteTextures(1, &texture);
+        Web_Log(WebLogLevel::Error,
+            "[kisakcod-web] WebGL2 model-lighting volume upload failed "
+            "(0x%x).\n", static_cast<unsigned int>(error));
+        return false;
+    }
+    atlas.texture = texture;
+    return true;
+}
+
 const char *ComparisonSourceKindName(WebRendererSceneBatchKind kind) noexcept
 {
     switch (kind)
@@ -401,6 +501,8 @@ const char *ComparisonLightingModeName(
     case WebRendererWorldLightingMode::None: return "none";
     case WebRendererWorldLightingMode::SecondaryDirectional:
         return "secondary-directional";
+    case WebRendererWorldLightingMode::ModelLightGrid:
+        return "model-light-grid";
     }
     return "unknown";
 }
@@ -1291,6 +1393,10 @@ void ResetGpuHandles()
     g_renderer.lightmapEnabledUniform = -1;
     g_renderer.secondaryLightmapUniform = -1;
     g_renderer.secondaryLightmapEnabledUniform = -1;
+    g_renderer.modelLightingUniform = -1;
+    g_renderer.modelLightingEnabledUniform = -1;
+    g_renderer.modelLightingBaseCoordinatesUniform = -1;
+    g_renderer.modelLightingLookupScaleUniform = -1;
     g_renderer.premultiplyAlphaUniform = -1;
     g_renderer.alphaTestUniform = -1;
     g_renderer.instanceEnabledUniform = -1;
@@ -1310,6 +1416,8 @@ void ResetGpuHandles()
         image.texture = 0u;
     for (WebRendererRetainedWorldImage &image : g_renderer.retainedUiImages)
         image.texture = 0u;
+    g_renderer.retainedStaticModelLighting.texture = 0u;
+    g_renderer.retainedDynamicModelLighting.texture = 0u;
 }
 
 GLuint CompileShader(GLenum type, const char *source)
@@ -1419,6 +1527,9 @@ bool CreateCompatibilityProgram(
     return true;
 }
 
+void DeleteModelLightingTexture(
+    WebRendererRetainedModelLightingAtlas &atlas);
+
 void DeletePipelineObjects(
     GLuint program,
     GLuint compatibilityProgram,
@@ -1479,6 +1590,8 @@ void DestroyWebGLContext()
         DeleteWorldTextureObjects(g_renderer.retainedStaticModelImages);
         DeleteWorldTextureObjects(g_renderer.retainedDynamicModelImages);
         DeleteWorldTextureObjects(g_renderer.retainedUiImages);
+        DeleteModelLightingTexture(g_renderer.retainedStaticModelLighting);
+        DeleteModelLightingTexture(g_renderer.retainedDynamicModelLighting);
         if (g_renderer.staticModelInstanceBuffer != 0u)
             glDeleteBuffers(1, &g_renderer.staticModelInstanceBuffer);
         DeleteSurfaceObjects(
@@ -1608,6 +1721,15 @@ bool CreateSurfaceObjects(
         GL_FALSE,
         sizeof(WebRendererSurfaceVertex),
         reinterpret_cast<const void *>(offsetof(WebRendererSurfaceVertex, lightmapCoordinate)));
+    glEnableVertexAttribArray(8);
+    glVertexAttribPointer(
+        8,
+        3,
+        GL_FLOAT,
+        GL_FALSE,
+        sizeof(WebRendererSurfaceVertex),
+        reinterpret_cast<const void *>(
+            offsetof(WebRendererSurfaceVertex, normal)));
 
     const GLenum error = glGetError();
     if (vertexArray == 0 || vertexBuffer == 0 || indexBuffer == 0 ||
@@ -1680,6 +1802,17 @@ bool CreateStaticModelObjects(
         reinterpret_cast<const void *>(
             offsetof(WebRendererStaticModelInstanceDesc, origin)));
     glVertexAttribDivisor(7u, 1u);
+    glEnableVertexAttribArray(9u);
+    glVertexAttribPointer(
+        9u,
+        3,
+        GL_FLOAT,
+        GL_FALSE,
+        sizeof(WebRendererStaticModelInstanceDesc),
+        reinterpret_cast<const void *>(offsetof(
+            WebRendererStaticModelInstanceDesc,
+            modelLightingCoordinates)));
+    glVertexAttribDivisor(9u, 1u);
     const GLenum error = glGetError();
     if (instanceBuffer == 0u || error != GL_NO_ERROR)
     {
@@ -1817,24 +1950,37 @@ bool CreateRendererResources()
         layout(location = 5) in vec3 a_instance_axis1;
         layout(location = 6) in vec3 a_instance_axis2;
         layout(location = 7) in vec3 a_instance_origin;
+        layout(location = 8) in vec3 a_normal;
+        layout(location = 9) in vec3 a_instance_model_lighting_coords;
         uniform float u_aspect;
         uniform mat4 u_view_projection;
         uniform float u_scene_fallback;
         uniform float u_instance_enabled;
+        uniform vec3 u_model_lighting_base_coords;
         out vec4 v_color;
         out vec2 v_texcoord;
         out vec3 v_world_position;
         out vec2 v_lightmap_coord;
+        out vec3 v_model_normal;
+        out vec3 v_model_lighting_coords;
 
         void main()
         {
             vec3 position = a_position;
+            vec3 model_normal = a_normal;
+            v_model_lighting_coords = u_model_lighting_base_coords;
             if (u_instance_enabled > 0.5)
             {
                 position = a_instance_origin +
                     a_position.x * a_instance_axis0 +
                     a_position.y * a_instance_axis1 +
                     a_position.z * a_instance_axis2;
+                model_normal =
+                    a_normal.x * a_instance_axis0 +
+                    a_normal.y * a_instance_axis1 +
+                    a_normal.z * a_instance_axis2;
+                v_model_lighting_coords =
+                    a_instance_model_lighting_coords;
             }
             position.x *= min(1.0, u_aspect);
             position.y *= min(1.0, 1.0 / u_aspect);
@@ -1843,20 +1989,27 @@ bool CreateRendererResources()
             v_texcoord = a_texcoord;
             v_world_position = a_position;
             v_lightmap_coord = a_lightmap_coord;
+            v_model_normal = model_normal;
         }
     )glsl";
 
     constexpr const char *fragmentSource = R"glsl(#version 300 es
         precision highp float;
+        precision highp sampler3D;
         in vec4 v_color;
         in vec2 v_texcoord;
         in vec3 v_world_position;
         in vec2 v_lightmap_coord;
+        in vec3 v_model_normal;
+        in vec3 v_model_lighting_coords;
         uniform sampler2D u_texture;
         uniform sampler2D u_secondary_lightmap;
+        uniform sampler3D u_model_lighting;
         uniform float u_texture_enabled;
         uniform float u_lightmap_enabled;
         uniform float u_secondary_lightmap_enabled;
+        uniform float u_model_lighting_enabled;
+        uniform vec3 u_model_lighting_lookup_scale;
         uniform float u_premultiply_alpha;
         uniform float u_scene_fallback;
         uniform int u_alpha_test;
@@ -1917,6 +2070,22 @@ bool CreateRendererResources()
                         secondary_lobe1.rgb * directional_weight;
                     bootstrap_color.rgb *= lighting;
                 }
+                if (u_model_lighting_enabled > 0.5)
+                {
+                    // Native lp_t0c0[_n0]_sm2 cube-projects the world normal
+                    // into the entry's 4x4x4 model-lighting block. D3D9 then
+                    // multiplies base*vertex*lighting by two before fog.
+                    vec3 model_normal = normalize(v_model_normal);
+                    float major_axis = max(max(abs(model_normal.x),
+                        abs(model_normal.y)), abs(model_normal.z));
+                    vec3 lookup_direction = model_normal /
+                        max(major_axis, 0.000001);
+                    vec3 model_lighting = texture(
+                        u_model_lighting,
+                        v_model_lighting_coords + lookup_direction *
+                            u_model_lighting_lookup_scale).rgb;
+                    bootstrap_color.rgb *= model_lighting * 2.0;
+                }
             }
             vec4 final_color = bootstrap_color * u_ui_color;
             if (u_premultiply_alpha > 0.5)
@@ -1946,6 +2115,14 @@ bool CreateRendererResources()
         glGetUniformLocation(program, "u_secondary_lightmap");
     const GLint secondaryLightmapEnabledUniform =
         glGetUniformLocation(program, "u_secondary_lightmap_enabled");
+    const GLint modelLightingUniform =
+        glGetUniformLocation(program, "u_model_lighting");
+    const GLint modelLightingEnabledUniform =
+        glGetUniformLocation(program, "u_model_lighting_enabled");
+    const GLint modelLightingBaseCoordinatesUniform =
+        glGetUniformLocation(program, "u_model_lighting_base_coords");
+    const GLint modelLightingLookupScaleUniform =
+        glGetUniformLocation(program, "u_model_lighting_lookup_scale");
     const GLint premultiplyAlphaUniform =
         glGetUniformLocation(program, "u_premultiply_alpha");
     const GLint alphaTestUniform = glGetUniformLocation(program, "u_alpha_test");
@@ -2005,6 +2182,10 @@ bool CreateRendererResources()
     const bool staticModelTexturesReady = staticModelObjectsReady &&
         (!g_renderer.staticModelSceneActive ||
          CreateWorldTextureObjects(g_renderer.retainedStaticModelImages));
+    const bool staticModelLightingReady = staticModelTexturesReady &&
+        (!g_renderer.staticModelSceneActive ||
+         CreateModelLightingTexture(
+            g_renderer.retainedStaticModelLighting));
     GLuint dynamicModelVertexArray = 0u;
     GLuint dynamicModelVertexBuffer = 0u;
     GLuint dynamicModelIndexBuffer = 0u;
@@ -2018,6 +2199,10 @@ bool CreateRendererResources()
     const bool dynamicModelTexturesReady = dynamicModelObjectsReady &&
         (!g_renderer.dynamicModelSceneActive ||
          CreateWorldTextureObjects(g_renderer.retainedDynamicModelImages));
+    const bool dynamicModelLightingReady = dynamicModelTexturesReady &&
+        (!g_renderer.dynamicModelSceneActive ||
+         CreateModelLightingTexture(
+            g_renderer.retainedDynamicModelLighting));
     GLuint uiVertexArray = 0u;
     GLuint uiVertexBuffer = 0u;
     GLuint uiIndexBuffer = 0u;
@@ -2045,13 +2230,18 @@ bool CreateRendererResources()
         lightmapEnabledUniform < 0 ||
         secondaryLightmapUniform < 0 ||
         secondaryLightmapEnabledUniform < 0 ||
+        modelLightingUniform < 0 || modelLightingEnabledUniform < 0 ||
+        modelLightingBaseCoordinatesUniform < 0 ||
+        modelLightingLookupScaleUniform < 0 ||
         premultiplyAlphaUniform < 0 ||
         alphaTestUniform < 0 || instanceEnabledUniform < 0 ||
         uiColorUniform < 0 ||
         pipelineError != GL_NO_ERROR ||
         !surfaceReady || !textureReady || !worldTexturesReady ||
         !staticModelObjectsReady || !staticModelTexturesReady ||
+        !staticModelLightingReady ||
         !dynamicModelObjectsReady || !dynamicModelTexturesReady ||
+        !dynamicModelLightingReady ||
         !uiObjectsReady || !uiTexturesReady ||
         !compatibilityReady)
     {
@@ -2070,6 +2260,8 @@ bool CreateRendererResources()
         DeleteWorldTextureObjects(g_renderer.retainedStaticModelImages);
         DeleteWorldTextureObjects(g_renderer.retainedDynamicModelImages);
         DeleteWorldTextureObjects(g_renderer.retainedUiImages);
+        DeleteModelLightingTexture(g_renderer.retainedStaticModelLighting);
+        DeleteModelLightingTexture(g_renderer.retainedDynamicModelLighting);
         DeleteStaticModelObjects(
             staticModelVertexArray,
             staticModelVertexBuffer,
@@ -2106,6 +2298,12 @@ bool CreateRendererResources()
     g_renderer.secondaryLightmapUniform = secondaryLightmapUniform;
     g_renderer.secondaryLightmapEnabledUniform =
         secondaryLightmapEnabledUniform;
+    g_renderer.modelLightingUniform = modelLightingUniform;
+    g_renderer.modelLightingEnabledUniform = modelLightingEnabledUniform;
+    g_renderer.modelLightingBaseCoordinatesUniform =
+        modelLightingBaseCoordinatesUniform;
+    g_renderer.modelLightingLookupScaleUniform =
+        modelLightingLookupScaleUniform;
     g_renderer.premultiplyAlphaUniform = premultiplyAlphaUniform;
     g_renderer.alphaTestUniform = alphaTestUniform;
     g_renderer.instanceEnabledUniform = instanceEnabledUniform;
@@ -2461,6 +2659,9 @@ WebRendererSurfaceResult CopyWorldCommand(
         for (const float component : vertex.lightmapCoordinate)
             if (!std::isfinite(component))
                 return WebRendererSurfaceResult::NonFiniteVertex;
+        for (const float component : vertex.normal)
+            if (!std::isfinite(component))
+                return WebRendererSurfaceResult::NonFiniteVertex;
     }
     for (std::uint32_t index = 0u; index < surface.indexCount; ++index)
         if (surface.indices[index] >= surface.vertexCount)
@@ -2486,7 +2687,9 @@ WebRendererSurfaceResult CopyWorldCommand(
                 source.firstIndex > surface.indexCount ||
                 source.indexCount > surface.indexCount - source.firstIndex ||
                 source.firstSurfaceIndex > source.lastSurfaceIndex ||
-                source.technique > WebRendererWorldTechnique::BaseTextureLightmap)
+                source.technique > WebRendererWorldTechnique::BaseTextureLightmap ||
+                source.lightingMode >
+                    WebRendererWorldLightingMode::ModelLightGrid)
             {
                 return WebRendererSurfaceResult::InvalidDescriptor;
             }
@@ -2520,6 +2723,11 @@ WebRendererSurfaceResult CopyWorldCommand(
             batch.pixelShaderName = source.pixelShaderName
                 ? source.pixelShaderName : "<unavailable-pixel-shader>";
             batch.pixelShaderProgramHash = source.pixelShaderProgramHash;
+            std::copy_n(source.modelLightingCoordinates, 3u,
+                batch.modelLightingCoordinates);
+            for (const float component : batch.modelLightingCoordinates)
+                if (!std::isfinite(component))
+                    return WebRendererSurfaceResult::NonFiniteVertex;
             batch.baseImageIndex = RetainCanonicalWorldImage(
                 source.baseImage, images, retainedPixelBytes);
             batch.lightmapImageIndex = RetainCanonicalWorldImage(
@@ -2575,7 +2783,7 @@ WebRendererSurfaceResult CopyStaticModelCommand(
     {
         const WebRendererSurfaceVertex &vertex = scene.vertices[vertexIndex];
         const float *components = &vertex.position[0];
-        for (std::size_t component = 0u; component < 11u; ++component)
+        for (std::size_t component = 0u; component < 14u; ++component)
             if (!std::isfinite(components[component]))
                 return WebRendererSurfaceResult::NonFiniteVertex;
     }
@@ -2592,6 +2800,9 @@ WebRendererSurfaceResult CopyStaticModelCommand(
             if (!std::isfinite(axis[component]))
                 return WebRendererSurfaceResult::NonFiniteVertex;
         for (const float component : instance.origin)
+            if (!std::isfinite(component))
+                return WebRendererSurfaceResult::NonFiniteVertex;
+        for (const float component : instance.modelLightingCoordinates)
             if (!std::isfinite(component))
                 return WebRendererSurfaceResult::NonFiniteVertex;
     }
@@ -2621,7 +2832,9 @@ WebRendererSurfaceResult CopyStaticModelCommand(
                 source.instanceOffset > scene.instanceCount ||
                 source.instanceCount >
                     scene.instanceCount - source.instanceOffset ||
-                draw.technique > WebRendererWorldTechnique::BaseTexture)
+                draw.technique > WebRendererWorldTechnique::BaseTexture ||
+                draw.lightingMode >
+                    WebRendererWorldLightingMode::ModelLightGrid)
             {
                 return WebRendererSurfaceResult::InvalidDescriptor;
             }
@@ -2648,9 +2861,15 @@ WebRendererSurfaceResult CopyStaticModelCommand(
             batch.draw.lightmapIndex = 31u;
             batch.draw.sourceKind = draw.sourceKind;
             batch.draw.technique = draw.technique;
+            batch.draw.lightingMode = draw.lightingMode;
             batch.draw.techniqueName = draw.techniqueName
                 ? draw.techniqueName : "<unsupported-technique>";
             batch.draw.techniqueType = draw.techniqueType;
+            batch.draw.customSamplerFlags = draw.customSamplerFlags;
+            batch.draw.techniqueFlags = draw.techniqueFlags;
+            batch.draw.pixelShaderName = draw.pixelShaderName
+                ? draw.pixelShaderName : "<unavailable-pixel-shader>";
+            batch.draw.pixelShaderProgramHash = draw.pixelShaderProgramHash;
             batch.draw.baseImageIndex = RetainCanonicalWorldImage(
                 draw.baseImage, images, retainedPixelBytes);
             const bool baseSupported =
@@ -2927,6 +3146,7 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
     std::vector<WebRendererStaticModelInstanceDesc> retainedInstances;
     std::vector<WebRendererRetainedStaticModelBatch> retainedBatches;
     std::vector<WebRendererRetainedWorldImage> retainedImages;
+    WebRendererRetainedModelLightingAtlas retainedLighting;
     const WebRendererSurfaceResult copy = CopyStaticModelCommand(
         scene,
         retainedVertices,
@@ -2935,6 +3155,17 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
         retainedBatches,
         retainedImages);
     if (copy != WebRendererSurfaceResult::Success) return copy;
+    if (!CopyModelLightingAtlas(
+            scene.modelLightingAtlas, retainedLighting))
+        return WebRendererSurfaceResult::InvalidDescriptor;
+    const bool staticNeedsLighting = std::any_of(
+        retainedBatches.begin(), retainedBatches.end(),
+        [](const WebRendererRetainedStaticModelBatch &batch) {
+            return batch.draw.lightingMode ==
+                WebRendererWorldLightingMode::ModelLightGrid;
+        });
+    if (staticNeedsLighting && retainedLighting.pixels.empty())
+        return WebRendererSurfaceResult::InvalidDescriptor;
 
     GLuint vertexArray = 0u;
     GLuint vertexBuffer = 0u;
@@ -2958,6 +3189,13 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
             vertexArray, vertexBuffer, indexBuffer, instanceBuffer);
         return WebRendererSurfaceResult::BackendFailure;
     }
+    if (hasContext && !CreateModelLightingTexture(retainedLighting))
+    {
+        DeleteWorldTextureObjects(retainedImages);
+        DeleteStaticModelObjects(
+            vertexArray, vertexBuffer, indexBuffer, instanceBuffer);
+        return WebRendererSurfaceResult::BackendFailure;
+    }
     if (hasContext)
     {
         DeleteWorldTextureObjects(g_renderer.retainedStaticModelImages);
@@ -2966,6 +3204,8 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
             g_renderer.staticModelVertexBuffer,
             g_renderer.staticModelIndexBuffer,
             g_renderer.staticModelInstanceBuffer);
+        DeleteModelLightingTexture(
+            g_renderer.retainedStaticModelLighting);
         g_renderer.staticModelVertexArray = vertexArray;
         g_renderer.staticModelVertexBuffer = vertexBuffer;
         g_renderer.staticModelIndexBuffer = indexBuffer;
@@ -2976,6 +3216,7 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
     g_renderer.retainedStaticModelInstances = std::move(retainedInstances);
     g_renderer.retainedStaticModelBatches = std::move(retainedBatches);
     g_renderer.retainedStaticModelImages = std::move(retainedImages);
+    g_renderer.retainedStaticModelLighting = std::move(retainedLighting);
     g_renderer.staticModelCount = scene.modelCount;
     g_renderer.staticModelSurfaceCount = scene.surfaceCount;
     g_renderer.staticModelSceneActive = true;
@@ -3001,7 +3242,8 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
     Web_Log(WebLogLevel::Info,
         "[kisakcod-web] Renderer retained canonical static XModel command "
         "(%u models, %u surfaces, %u shared vertices, %u indices, %u "
-        "instances, %u batches, %zu fallback; %zu/%zu images).\n",
+        "instances, %u batches, %zu fallback; %zu/%zu images; "
+        "model-lighting=%ux%ux%u entries=%u).\n",
         scene.modelCount,
         scene.surfaceCount,
         scene.vertexCount,
@@ -3010,7 +3252,11 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
         scene.batchCount,
         fallbackBatches,
         supportedImages,
-        g_renderer.retainedStaticModelImages.size());
+        g_renderer.retainedStaticModelImages.size(),
+        g_renderer.retainedStaticModelLighting.width,
+        g_renderer.retainedStaticModelLighting.height,
+        g_renderer.retainedStaticModelLighting.depth,
+        g_renderer.retainedStaticModelLighting.entryCount);
     return WebRendererSurfaceResult::Success;
 }
 
@@ -3020,8 +3266,13 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
     if (scene.vertexCount == 0u && scene.indexCount == 0u &&
         scene.batchCount == 0u)
     {
-        if (scene.vertices || scene.indices || scene.batches)
+        if (scene.vertices || scene.indices || scene.batches ||
+            scene.modelLightingAtlas)
             return WebRendererSurfaceResult::InvalidDescriptor;
+        if (g_renderer.initialized && !g_renderer.contextLost)
+            DeleteModelLightingTexture(
+                g_renderer.retainedDynamicModelLighting);
+        g_renderer.retainedDynamicModelLighting = {};
         g_renderer.dynamicModelSceneActive = false;
         return WebRendererSurfaceResult::Success;
     }
@@ -3034,6 +3285,7 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
     std::vector<WebRendererSurfaceVertex> retainedVertices;
     std::vector<std::uint32_t> retainedIndices;
     std::vector<WebRendererRetainedWorldBatch> retainedBatches;
+    WebRendererRetainedModelLightingAtlas retainedLighting;
     // Dynamic image ownership is persistent across frames. CopyWorldCommand
     // finds canonical identities already present here, so an animated weapon
     // uploads geometry each frame without re-reading or re-decoding its IWI.
@@ -3041,6 +3293,17 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
         scene, retainedVertices, retainedIndices, retainedBatches,
         g_renderer.retainedDynamicModelImages);
     if (copy != WebRendererSurfaceResult::Success) return copy;
+    if (!CopyModelLightingAtlas(
+            scene.modelLightingAtlas, retainedLighting))
+        return WebRendererSurfaceResult::InvalidDescriptor;
+    const bool dynamicNeedsLighting = std::any_of(
+        retainedBatches.begin(), retainedBatches.end(),
+        [](const WebRendererRetainedWorldBatch &batch) {
+            return batch.lightingMode ==
+                WebRendererWorldLightingMode::ModelLightGrid;
+        });
+    if (dynamicNeedsLighting && retainedLighting.pixels.empty())
+        return WebRendererSurfaceResult::InvalidDescriptor;
 
     GLuint vertexArray = 0u;
     GLuint vertexBuffer = 0u;
@@ -3058,12 +3321,19 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
         DeleteSurfaceObjects(vertexArray, vertexBuffer, indexBuffer);
         return WebRendererSurfaceResult::BackendFailure;
     }
+    if (hasContext && !CreateModelLightingTexture(retainedLighting))
+    {
+        DeleteSurfaceObjects(vertexArray, vertexBuffer, indexBuffer);
+        return WebRendererSurfaceResult::BackendFailure;
+    }
     if (hasContext)
     {
         DeleteSurfaceObjects(
             g_renderer.dynamicModelVertexArray,
             g_renderer.dynamicModelVertexBuffer,
             g_renderer.dynamicModelIndexBuffer);
+        DeleteModelLightingTexture(
+            g_renderer.retainedDynamicModelLighting);
         g_renderer.dynamicModelVertexArray = vertexArray;
         g_renderer.dynamicModelVertexBuffer = vertexBuffer;
         g_renderer.dynamicModelIndexBuffer = indexBuffer;
@@ -3071,6 +3341,7 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
     g_renderer.retainedDynamicModelVertices = std::move(retainedVertices);
     g_renderer.retainedDynamicModelIndices = std::move(retainedIndices);
     g_renderer.retainedDynamicModelBatches = std::move(retainedBatches);
+    g_renderer.retainedDynamicModelLighting = std::move(retainedLighting);
     g_renderer.dynamicModelSceneActive = true;
 
     if (!g_renderer.dynamicModelFirstSubmissionReported)
@@ -3085,10 +3356,15 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
                 }));
         Web_Log(WebLogLevel::Info,
             "[kisakcod-web] Renderer retained first canonical dynamic DObj "
-            "command (%u vertices, %u indices, %u batches; %zu/%zu images).\n",
+            "command (%u vertices, %u indices, %u batches; %zu/%zu images; "
+            "model-lighting=%ux%ux%u entries=%u).\n",
             scene.vertexCount, scene.indexCount, scene.batchCount,
             supportedImages,
-            g_renderer.retainedDynamicModelImages.size());
+            g_renderer.retainedDynamicModelImages.size(),
+            g_renderer.retainedDynamicModelLighting.width,
+            g_renderer.retainedDynamicModelLighting.height,
+            g_renderer.retainedDynamicModelLighting.depth,
+            g_renderer.retainedDynamicModelLighting.entryCount);
     }
     ReportRetainedDynamicFx();
     return WebRendererSurfaceResult::Success;
@@ -3771,6 +4047,17 @@ void BindWorldTexture(
         (samplerState & 0x40u) != 0u ? GL_CLAMP_TO_EDGE : GL_REPEAT);
 }
 
+void BindModelLightingTexture(
+    const WebRendererRetainedModelLightingAtlas &atlas)
+{
+    glActiveTexture(GL_TEXTURE3);
+    glBindTexture(GL_TEXTURE_3D, atlas.texture);
+    glUniform3f(g_renderer.modelLightingLookupScaleUniform,
+        atlas.width ? 1.5f / static_cast<float>(atlas.width) : 0.0f,
+        atlas.height ? 1.5f / static_cast<float>(atlas.height) : 0.0f,
+        atlas.depth ? 1.5f / static_cast<float>(atlas.depth) : 0.0f);
+}
+
 const WebRendererRetainedWorldImage *RetainedImage(
     const std::vector<WebRendererRetainedWorldImage> &images,
     std::uint32_t index) noexcept
@@ -3814,6 +4101,15 @@ void BindStaticModelInstanceRange(std::uint32_t instanceOffset)
         sizeof(WebRendererStaticModelInstanceDesc),
         reinterpret_cast<const void *>(
             base + offsetof(WebRendererStaticModelInstanceDesc, origin)));
+    glVertexAttribPointer(
+        9u,
+        3,
+        GL_FLOAT,
+        GL_FALSE,
+        sizeof(WebRendererStaticModelInstanceDesc),
+        reinterpret_cast<const void *>(base + offsetof(
+            WebRendererStaticModelInstanceDesc,
+            modelLightingCoordinates)));
 }
 } // namespace
 
@@ -3919,7 +4215,13 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             sceneGeometryDraw ? 1.0f : 0.0f);
         glUniform1i(g_renderer.textureUniform, 0);
         glUniform1i(g_renderer.secondaryLightmapUniform, 2);
+        glUniform1i(g_renderer.modelLightingUniform, 3);
         glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.modelLightingEnabledUniform, 0.0f);
+        glUniform3f(g_renderer.modelLightingBaseCoordinatesUniform,
+            0.0f, 0.0f, 0.0f);
+        glUniform3f(g_renderer.modelLightingLookupScaleUniform,
+            0.0f, 0.0f, 0.0f);
         glUniform1f(g_renderer.premultiplyAlphaUniform, 0.0f);
         glUniform1f(g_renderer.instanceEnabledUniform, 0.0f);
         glUniform4f(g_renderer.uiColorUniform, 1.0f, 1.0f, 1.0f, 1.0f);
@@ -3962,6 +4264,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 lightmapped ? 1.0f : 0.0f);
             glUniform1f(g_renderer.secondaryLightmapEnabledUniform,
                 lightmapped ? 1.0f : 0.0f);
+            glUniform1f(g_renderer.modelLightingEnabledUniform, 0.0f);
             BindWorldTexture(
                 GL_TEXTURE0,
                 base ? base->texture : g_renderer.texture,
@@ -3998,6 +4301,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             glUniform1f(g_renderer.lightmapEnabledUniform, 0.0f);
             glUniform1f(
                 g_renderer.secondaryLightmapEnabledUniform, 0.0f);
+            glUniform1f(g_renderer.modelLightingEnabledUniform, 0.0f);
             glUniform1i(g_renderer.alphaTestUniform, 0);
             glUniform1f(g_renderer.premultiplyAlphaUniform, 0.0f);
         }
@@ -4023,6 +4327,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1f(g_renderer.instanceEnabledUniform, 1.0f);
         glUniform1f(g_renderer.lightmapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
+        BindModelLightingTexture(g_renderer.retainedStaticModelLighting);
         for (const WebRendererRetainedStaticModelBatch &batch :
              g_renderer.retainedStaticModelBatches)
         {
@@ -4033,10 +4338,16 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             const bool fallback = batch.draw.technique ==
                     WebRendererWorldTechnique::BackendFallback ||
                 !base;
+            const bool modelLit = !fallback &&
+                batch.draw.lightingMode ==
+                    WebRendererWorldLightingMode::ModelLightGrid &&
+                g_renderer.retainedStaticModelLighting.texture != 0u;
             glUniform1f(g_renderer.sceneFallbackUniform,
                 fallback ? 1.0f : 0.0f);
             glUniform1f(g_renderer.textureEnabledUniform,
                 fallback ? 0.0f : 1.0f);
+            glUniform1f(g_renderer.modelLightingEnabledUniform,
+                modelLit ? 1.0f : 0.0f);
             BindWorldTexture(
                 GL_TEXTURE0,
                 base ? base->texture : g_renderer.texture,
@@ -4065,6 +4376,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1f(g_renderer.instanceEnabledUniform, 0.0f);
         glUniform1f(g_renderer.lightmapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
+        BindModelLightingTexture(g_renderer.retainedDynamicModelLighting);
         for (const WebRendererRetainedWorldBatch &batch :
              g_renderer.retainedDynamicModelBatches)
         {
@@ -4077,10 +4389,18 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             const bool fallback = batch.technique ==
                     WebRendererWorldTechnique::BackendFallback ||
                 !base;
+            const bool modelLit = !fallback && !fxSceneGeometry &&
+                batch.lightingMode ==
+                    WebRendererWorldLightingMode::ModelLightGrid &&
+                g_renderer.retainedDynamicModelLighting.texture != 0u;
             glUniform1f(g_renderer.sceneFallbackUniform,
                 fallback && !fxSceneGeometry ? 1.0f : 0.0f);
             glUniform1f(g_renderer.textureEnabledUniform,
                 fallback ? 0.0f : 1.0f);
+            glUniform1f(g_renderer.modelLightingEnabledUniform,
+                modelLit ? 1.0f : 0.0f);
+            glUniform3fv(g_renderer.modelLightingBaseCoordinatesUniform,
+                1, batch.modelLightingCoordinates);
             BindWorldTexture(GL_TEXTURE0,
                 base ? base->texture : g_renderer.texture,
                 batch.samplerState);
@@ -4106,6 +4426,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1f(g_renderer.sceneFallbackUniform, 0.0f);
         glUniform1f(g_renderer.lightmapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.modelLightingEnabledUniform, 0.0f);
         glUniform1f(g_renderer.instanceEnabledUniform, 0.0f);
         glUniform1i(g_renderer.alphaTestUniform, 0);
         glUniform1f(g_renderer.premultiplyAlphaUniform, 0.0f);

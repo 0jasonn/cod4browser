@@ -14,6 +14,7 @@
 #include <vector>
 
 void __cdecl Vec2UnpackTexCoords(PackedTexCoords in, float *out);
+void __cdecl Vec3UnpackUnitVec(PackedUnitVec in, float *out);
 
 namespace
 {
@@ -115,7 +116,8 @@ bool SelectTechnique(
 
 WebRendererStaticModelInstanceDesc MakeInstance(
     const GfxPackedPlacement &placement,
-    std::uint32_t canonicalIndex) noexcept
+    std::uint32_t canonicalIndex,
+    const float modelLightingCoordinates[3]) noexcept
 {
     WebRendererStaticModelInstanceDesc instance{};
     for (std::size_t row = 0u; row < 3u; ++row)
@@ -124,6 +126,9 @@ WebRendererStaticModelInstanceDesc MakeInstance(
                 placement.axis[row][column] * placement.scale;
     std::copy(std::begin(placement.origin), std::end(placement.origin),
         std::begin(instance.origin));
+    if (modelLightingCoordinates)
+        std::copy_n(modelLightingCoordinates, 3u,
+            instance.modelLightingCoordinates);
     instance.canonicalInstanceIndex = canonicalIndex;
     return instance;
 }
@@ -164,7 +169,8 @@ WebRendererWorldBatchDesc MakeDraw(
 
 WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
     const GfxWorld &world,
-    WebRendererStaticModelSceneCommand &destination)
+    WebRendererStaticModelSceneCommand &destination,
+    const WebRendererModelLightingCallbacks *lightingCallbacks)
 {
     if (world.dpvs.smodelCount == 0u)
         return WebRendererStaticModelSceneResult::NoStaticModels;
@@ -173,6 +179,9 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
 
     WebRendererStaticModelSceneCommand replacement;
     replacement.canonicalInstanceCount = world.dpvs.smodelCount;
+    replacement.modelLightingSourceAvailable =
+        world.dpvs.smodelInsts != nullptr;
+    bool modelLightingComplete = false;
     try
     {
         std::vector<ModelGroup> groups;
@@ -202,6 +211,14 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
             group->instanceIndices.push_back(instanceIndex);
         }
 
+        std::uint32_t submittedInstanceCount = 0u;
+        for (const ModelGroup &group : groups)
+            submittedInstanceCount += static_cast<std::uint32_t>(
+                group.instanceIndices.size());
+        modelLightingComplete = replacement.modelLightingSourceAvailable &&
+            WebRenderer_InitializeModelLightingAtlas(
+                submittedInstanceCount, replacement.modelLightingAtlas);
+
         for (const ModelGroup &group : groups)
         {
             const XModel &model = *group.model;
@@ -221,9 +238,61 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
                 return WebRendererStaticModelSceneResult::OutputTooLarge;
             }
             for (const std::uint32_t canonicalIndex : group.instanceIndices)
+            {
+                float lightingCoordinates[3]{};
+                bool lightingReady = modelLightingComplete;
+                const std::uint32_t lightingEntry =
+                    static_cast<std::uint32_t>(replacement.instances.size());
+                if (lightingReady)
+                {
+                    const GfxStaticModelInst &modelInstance =
+                        world.dpvs.smodelInsts[canonicalIndex];
+                    if (modelInstance.groundLighting.packed != 0u)
+                    {
+                        lightingReady =
+                            WebRenderer_SetModelGroundLightingAtlasEntry(
+                                replacement.modelLightingAtlas,
+                                lightingEntry,
+                                modelInstance.groundLighting.packed);
+                    }
+                    else
+                    {
+                        const float lightingOrigin[3]{
+                            (modelInstance.mins[0] + modelInstance.maxs[0]) *
+                                0.5f,
+                            (modelInstance.mins[1] + modelInstance.maxs[1]) *
+                                0.5f,
+                            (modelInstance.mins[2] + modelInstance.maxs[2]) *
+                                0.5f,
+                        };
+                        WebRendererModelLightingSample sample{};
+                        lightingReady = WebRenderer_EvaluateModelLighting(
+                            world.lightGrid,
+                            lightingOrigin,
+                            world.dpvs.smodelDrawInsts[canonicalIndex]
+                                .primaryLightIndex,
+                            lightingCallbacks,
+                            sample) &&
+                            WebRenderer_SetModelLightingAtlasEntry(
+                                replacement.modelLightingAtlas,
+                                lightingEntry,
+                                sample.colors,
+                                sample.primaryLightWeight);
+                    }
+                    if (lightingReady)
+                        WebRenderer_GetModelLightingCoordinates(
+                            replacement.modelLightingAtlas,
+                            lightingEntry,
+                            lightingCoordinates);
+                }
+                if (!lightingReady)
+                    ++replacement.modelLightingFailureCount;
+                modelLightingComplete = modelLightingComplete && lightingReady;
                 replacement.instances.push_back(MakeInstance(
                     world.dpvs.smodelDrawInsts[canonicalIndex].placement,
-                    canonicalIndex));
+                    canonicalIndex,
+                    lightingCoordinates));
+            }
 
             bool modelSubmitted = false;
             for (std::uint32_t localSurface = 0u;
@@ -269,8 +338,10 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
                         (source.color.packed >> 24u) & 0xffu) * BYTE_TO_UNIT;
                     Vec2UnpackTexCoords(source.texCoord,
                         vertex.textureCoordinate);
+                    Vec3UnpackUnitVec(source.normal, vertex.normal);
                     if (!std::isfinite(vertex.textureCoordinate[0]) ||
-                        !std::isfinite(vertex.textureCoordinate[1]))
+                        !std::isfinite(vertex.textureCoordinate[1]) ||
+                        !Finite3(vertex.normal))
                     {
                         return WebRendererStaticModelSceneResult::InvalidModel;
                     }
@@ -312,6 +383,21 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
 
     if (replacement.batches.empty())
         return WebRendererStaticModelSceneResult::NoStaticModels;
+    if (modelLightingComplete &&
+        replacement.modelLightingAtlas.entryCount ==
+            replacement.instances.size())
+    {
+        for (WebRendererStaticModelBatchDesc &batch : replacement.batches)
+            batch.draw.lightingMode =
+                WebRendererWorldLightingMode::ModelLightGrid;
+    }
+    else
+    {
+        replacement.modelLightingAtlas = {};
+        for (WebRendererStaticModelInstanceDesc &instance :
+             replacement.instances)
+            std::fill_n(instance.modelLightingCoordinates, 3u, 0.0f);
+    }
     destination = std::move(replacement);
     return WebRendererStaticModelSceneResult::Success;
 }

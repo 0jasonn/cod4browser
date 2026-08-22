@@ -1,6 +1,7 @@
 #pragma once
 
 #include <web/web_renderer.h>
+#include <web/web_renderer_lighting.h>
 
 #include <cstdint>
 #include <vector>
@@ -15,6 +16,7 @@ struct WebRendererDObjSubmission
     const cpose_t *pose;
     std::uint32_t entityNumber;
     std::uint32_t renderFlags;
+    float lightingOrigin[3];
 };
 
 enum class WebRendererDObjAdmissionResult : std::uint8_t
@@ -41,6 +43,7 @@ struct WebRendererDObjSceneCommand
     std::vector<WebRendererSurfaceVertex> vertices;
     std::vector<std::uint32_t> indices;
     std::vector<WebRendererWorldBatchDesc> batches;
+    WebRendererModelLightingAtlas modelLightingAtlas;
     std::uint32_t dobjCount = 0u;
     std::uint32_t modelCount = 0u;
     std::uint32_t surfaceCount = 0u;
@@ -67,7 +70,9 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
     const WebRendererDObjSubmission *submissions,
     std::uint32_t submissionCount,
     WebRendererDObjSceneCommand &destination,
-    const float *viewOrigin = nullptr);
+    const float *viewOrigin = nullptr,
+    const GfxLightGrid *lightGrid = nullptr,
+    const WebRendererModelLightingCallbacks *lightingCallbacks = nullptr);
 
 const char *WebRenderer_DObjSceneResultString(
     WebRendererDObjSceneResult result) noexcept;

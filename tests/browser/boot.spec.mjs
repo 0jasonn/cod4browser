@@ -3,22 +3,22 @@ import { expect, test } from "@playwright/test";
 function expectProductionWorldSurfaceUploads(uploads)
 {
     const vertexUpload = uploads.find(
-        (upload) => upload.target === "array" && upload.byteLength === 176,
+        (upload) => upload.target === "array" && upload.byteLength === 224,
     );
     const indexUpload = uploads.find(
         (upload) => upload.target === "element-array" && upload.byteLength === 12,
     );
     expect(vertexUpload, "the converted world vertices should be uploaded").toBeTruthy();
     expect(indexUpload, "the converted world indices should be uploaded").toBeTruthy();
-    expect(vertexUpload.bytes).toHaveLength(176);
+    expect(vertexUpload.bytes).toHaveLength(224);
     expect(indexUpload.bytes).toHaveLength(12);
 
     const vertexValues = new Float32Array(Uint8Array.from(vertexUpload.bytes).buffer);
     const expectedVertices = [
-        [-0.5, 0.5, 0, 224 / 255, 96 / 255, 32 / 255, 0, 0, 0, 0],
-        [-0.5, -0.5, 0, 48 / 255, 176 / 255, 80 / 255, 0, 1, 0, 1],
-        [0.5, -0.5, 0, 64 / 255, 112 / 255, 232 / 255, 1, 1, 1, 1],
-        [0.5, 0.5, 0, 240 / 255, 208 / 255, 72 / 255, 1, 0, 1, 0],
+        [-0.5, 0.5, 0, 224 / 255, 96 / 255, 32 / 255, 0, 0, 0, 0, 0, 0, 0],
+        [-0.5, -0.5, 0, 48 / 255, 176 / 255, 80 / 255, 0, 1, 0, 1, 0, 0, 0],
+        [0.5, -0.5, 0, 64 / 255, 112 / 255, 232 / 255, 1, 1, 1, 1, 0, 0, 0],
+        [0.5, 0.5, 0, 240 / 255, 208 / 255, 72 / 255, 1, 0, 1, 0, 0, 0, 0],
     ].flat();
     expect([...vertexValues]).toHaveLength(expectedVertices.length);
     for (let index = 0; index < expectedVertices.length; index += 1) {
@@ -307,9 +307,9 @@ test("boots the headless engine slice and renders through WebGL2", { tag: "@smok
         indexCount: 6,
         drawFirstIndex: 0,
         drawIndexCount: 6,
-        vertexBytes: 176,
+        vertexBytes: 224,
         indexBytes: 12,
-        recoveryBytes: 188,
+        recoveryBytes: 236,
         topology: "triangle-list",
         textureBinding: "engine-image",
         resident: true,
@@ -330,12 +330,12 @@ test("boots the headless engine slice and renders through WebGL2", { tag: "@smok
     expect(runtimeSnapshot.surfaceEvents[retainedSurfaceIndex]).toMatchObject({
         submissionGeneration: runtimeSnapshot.rendererSurface.submissionGeneration,
         resourceGeneration: 0,
-        recoveryBytes: 188,
+        recoveryBytes: 236,
         resident: false,
     });
     expect(runtimeSnapshot.surfaceEvents[readySurfaceIndex]).toMatchObject({
         submissionGeneration: runtimeSnapshot.rendererSurface.submissionGeneration,
-        recoveryBytes: 188,
+        recoveryBytes: 236,
         resident: true,
     });
     expect(runtimeSnapshot.surfaceEvents[readySurfaceIndex].resourceGeneration)
@@ -497,7 +497,7 @@ test("reports and recovers from WebGL2 context loss", { tag: "@smoke" }, async (
     expect(lostSurface).toMatchObject({
         vertexCount: 4,
         indexCount: 6,
-        recoveryBytes: 188,
+        recoveryBytes: 236,
         submissionGeneration: beforeLoss.surface.submissionGeneration,
         resident: false,
     });
@@ -531,7 +531,7 @@ test("reports and recovers from WebGL2 context loss", { tag: "@smoke" }, async (
         state: "ready",
         vertexCount: 4,
         indexCount: 6,
-        recoveryBytes: 188,
+        recoveryBytes: 236,
         submissionGeneration: beforeLoss.surface.submissionGeneration,
         resident: true,
     });

@@ -15,6 +15,13 @@ void __cdecl Vec2UnpackTexCoords(PackedTexCoords in, float *out)
     out[1] = static_cast<float>((in.packed >> 8u) & 0xffu) / 255.0f;
 }
 
+void __cdecl Vec3UnpackUnitVec(PackedUnitVec, float *out)
+{
+    out[0] = 0.0f;
+    out[1] = 0.0f;
+    out[2] = 1.0f;
+}
+
 namespace
 {
 constexpr std::uint32_t TECHNIQUE_LIT_INDEX = 7u;
@@ -32,7 +39,8 @@ struct Fixture
     Material material{};
     Material *materials[1]{&material};
     XModel model{};
-    std::array<GfxStaticModelDrawInst, 2> instances{};
+    std::array<GfxStaticModelDrawInst, 3> instances{};
+    std::array<GfxStaticModelInst, 3> lightingInstances{};
     GfxWorld world{};
 
     Fixture()
@@ -81,9 +89,12 @@ struct Fixture
                 static_cast<float>(instance) * 10.0f;
             for (std::size_t axis = 0u; axis < 3u; ++axis)
                 instances[instance].placement.axis[axis][axis] = 1.0f;
+            lightingInstances[instance].groundLighting.packed =
+                0xff204080u;
         }
-        world.dpvs.smodelCount = static_cast<std::uint32_t>(instances.size());
+        world.dpvs.smodelCount = 2u;
         world.dpvs.smodelDrawInsts = instances.data();
+        world.dpvs.smodelInsts = lightingInstances.data();
     }
 };
 
@@ -111,13 +122,38 @@ void TestCanonicalInstancesShareOneMaterialSurfaceBatch()
     assert(batch.draw.baseImage == &fixture.image);
     assert(batch.draw.samplerState == 0x42u);
     assert(batch.draw.technique == WebRendererWorldTechnique::BaseTexture);
+    assert(batch.draw.lightingMode ==
+        WebRendererWorldLightingMode::ModelLightGrid);
     assert(batch.draw.firstInstanceIndex == 0u);
     assert(batch.draw.lastInstanceIndex == 1u);
     assert(command.instances[1].origin[0] == 10.0f);
     assert(command.instances[1].axis[0][0] == 2.0f);
     assert(command.instances[1].canonicalInstanceIndex == 1u);
+    assert(command.modelLightingAtlas.entryCount == 2u);
+    assert(command.instances[0].modelLightingCoordinates[0] !=
+        command.instances[1].modelLightingCoordinates[0]);
+    assert(command.modelLightingAtlas.pixels[0] == 0x20u);
+    assert(command.modelLightingAtlas.pixels[1] == 0x40u);
+    assert(command.modelLightingAtlas.pixels[2] == 0x80u);
     assert(std::fabs(command.vertices[0].textureCoordinate[0] -
         64.0f / 255.0f) < 0.0001f);
+    assert(command.vertices[0].normal[2] == 1.0f);
+}
+
+void TestLightingAtlasCountsOnlySubmittedCanonicalPlacements()
+{
+    Fixture fixture;
+    fixture.world.dpvs.smodelCount = 3u;
+    fixture.instances[2].model = nullptr;
+    WebRendererStaticModelSceneCommand command;
+    assert(WebRenderer_BuildStaticModelSceneCommand(fixture.world, command) ==
+        WebRendererStaticModelSceneResult::Success);
+    assert(command.canonicalInstanceCount == 3u);
+    assert(command.instances.size() == 2u);
+    assert(command.modelLightingFailureCount == 0u);
+    assert(command.modelLightingAtlas.entryCount == 2u);
+    assert(command.batches[0].draw.lightingMode ==
+        WebRendererWorldLightingMode::ModelLightGrid);
 }
 
 void TestMalformedIndexAndPlacementFailAtomically()
@@ -141,6 +177,7 @@ void TestMalformedIndexAndPlacementFailAtomically()
 int main()
 {
     TestCanonicalInstancesShareOneMaterialSurfaceBatch();
+    TestLightingAtlasCountsOnlySubmittedCanonicalPlacements();
     TestMalformedIndexAndPlacementFailAtomically();
     return 0;
 }

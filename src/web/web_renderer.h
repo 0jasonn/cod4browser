@@ -97,6 +97,16 @@ constexpr std::uint32_t WEB_RENDERER_MAX_DYNAMIC_DOBJ_SUBMISSIONS = 512u;
 constexpr std::uint32_t WEB_RENDERER_MAX_UI_VERTICES = 65'536u;
 constexpr std::uint32_t WEB_RENDERER_MAX_UI_INDICES = 98'304u;
 
+struct WebRendererModelLightingAtlasDesc
+{
+    const std::uint8_t *pixels;
+    std::uint32_t width;
+    std::uint32_t height;
+    std::uint32_t depth;
+    std::uint32_t entryCount;
+    std::size_t byteLength;
+};
+
 struct WebRendererWorldSurfaceDesc
 {
     const WebRendererSurfaceVertex *vertices;
@@ -105,6 +115,7 @@ struct WebRendererWorldSurfaceDesc
     std::uint32_t indexCount;
     const struct WebRendererWorldBatchDesc *batches;
     std::uint32_t batchCount;
+    const WebRendererModelLightingAtlasDesc *modelLightingAtlas;
 };
 
 enum class WebRendererWorldTechnique : std::uint8_t
@@ -120,6 +131,7 @@ enum class WebRendererWorldLightingMode : std::uint8_t
 {
     None = 0,
     SecondaryDirectional,
+    ModelLightGrid,
 };
 
 enum class WebRendererSceneBatchKind : std::uint8_t
@@ -186,6 +198,9 @@ struct WebRendererWorldBatchDesc
     std::uint16_t techniqueFlags;
     const char *pixelShaderName;
     std::uint32_t pixelShaderProgramHash;
+    // CONST_SRC_CODE_BASE_LIGHTING_COORDS for non-instanced DObj draws.
+    // Static XModels carry the same value per instance below.
+    float modelLightingCoordinates[3];
 };
 
 // Static XModel geometry remains shared per canonical XModel/LOD. Placements
@@ -195,6 +210,7 @@ struct WebRendererStaticModelInstanceDesc
 {
     float axis[3][3];
     float origin[3];
+    float modelLightingCoordinates[3];
     std::uint32_t canonicalInstanceIndex;
 };
 
@@ -217,6 +233,7 @@ struct WebRendererStaticModelSceneDesc
     std::uint32_t batchCount;
     std::uint32_t modelCount;
     std::uint32_t surfaceCount;
+    const WebRendererModelLightingAtlasDesc *modelLightingAtlas;
 };
 
 struct WebRendererUiBatchDesc

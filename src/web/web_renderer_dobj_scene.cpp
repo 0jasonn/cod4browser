@@ -1,6 +1,7 @@
 #include <web/web_renderer_dobj_scene.h>
 
 #include <cgame/cg_pose.h>
+#include <gfx_d3d/gfx_world_types.h>
 #include <gfx_d3d/material_types.h>
 #include <universal/com_math.h>
 #include <xanim/dobj.h>
@@ -18,6 +19,7 @@
 #include <vector>
 
 void __cdecl Vec2UnpackTexCoords(PackedTexCoords in, float *out);
+void __cdecl Vec3UnpackUnitVec(PackedUnitVec in, float *out);
 
 namespace
 {
@@ -137,6 +139,31 @@ void TransformPosition(
     }
 }
 
+void TransformDirection(
+    const float input[3], const DObjSkelMat &matrix,
+    float output[3]) noexcept
+{
+    for (std::size_t column = 0u; column < 3u; ++column)
+    {
+        output[column] =
+            input[0] * matrix.axis[0][column] +
+            input[1] * matrix.axis[1][column] +
+            input[2] * matrix.axis[2][column];
+    }
+}
+
+bool NormalizeDirection(float direction[3]) noexcept
+{
+    const float lengthSquared = direction[0] * direction[0] +
+        direction[1] * direction[1] + direction[2] * direction[2];
+    if (!std::isfinite(lengthSquared) || lengthSquared <= 0.000001f)
+        return false;
+    const float inverseLength = 1.0f / std::sqrt(lengthSquared);
+    for (std::size_t axis = 0u; axis < 3u; ++axis)
+        direction[axis] *= inverseLength;
+    return Finite3(direction);
+}
+
 const DObjSkelMat *MatrixFromByteOffset(
     const std::vector<DObjSkelMat> &matrices,
     std::uint16_t byteOffset) noexcept
@@ -149,10 +176,12 @@ const DObjSkelMat *MatrixFromByteOffset(
 bool SkinWeightedSurface(
     const XSurface &surface,
     const std::vector<DObjSkelMat> &matrices,
-    std::vector<float> &positions)
+    std::vector<float> &positions,
+    std::vector<float> &normals)
 {
     if (!surface.vertInfo.vertsBlend) return false;
     positions.resize(static_cast<std::size_t>(surface.vertCount) * 3u);
+    normals.resize(static_cast<std::size_t>(surface.vertCount) * 3u);
     const std::uint16_t *blend = surface.vertInfo.vertsBlend;
     std::uint32_t vertexIndex = 0u;
     for (std::uint32_t influenceCount = 0u;
@@ -165,12 +194,18 @@ bool SkinWeightedSurface(
         {
             if (vertexIndex >= surface.vertCount) return false;
             const GfxPackedVertex &vertex = surface.verts0[vertexIndex];
+            float unpackedNormal[3]{};
+            Vec3UnpackUnitVec(vertex.normal, unpackedNormal);
+            if (!Finite3(unpackedNormal)) return false;
             float transformed[3]{};
+            float transformedNormal[3]{};
             const DObjSkelMat *primary =
                 MatrixFromByteOffset(matrices, blend[0]);
             if (!primary) return false;
             TransformPosition(vertex.xyz, *primary, transformed);
+            TransformDirection(unpackedNormal, *primary, transformedNormal);
             float weightedSecondary[3]{};
+            float weightedSecondaryNormal[3]{};
             float explicitWeight = 0.0f;
             for (std::uint32_t influence = 0u;
                  influence < influenceCount; ++influence)
@@ -181,10 +216,17 @@ bool SkinWeightedSurface(
                 const float weight = static_cast<float>(
                     blend[2u + influence * 2u]) * SHORT_WEIGHT_TO_UNIT;
                 float secondaryPosition[3]{};
+                float secondaryNormal[3]{};
                 TransformPosition(vertex.xyz, *secondary, secondaryPosition);
+                TransformDirection(
+                    unpackedNormal, *secondary, secondaryNormal);
                 for (std::size_t axis = 0u; axis < 3u; ++axis)
+                {
                     weightedSecondary[axis] +=
                         weight * secondaryPosition[axis];
+                    weightedSecondaryNormal[axis] +=
+                        weight * secondaryNormal[axis];
+                }
                 explicitWeight += weight;
             }
             const float primaryWeight = 1.0f - explicitWeight;
@@ -193,7 +235,11 @@ bool SkinWeightedSurface(
                 positions[vertexIndex * 3u + axis] =
                     primaryWeight * transformed[axis] +
                     weightedSecondary[axis];
+                normals[vertexIndex * 3u + axis] =
+                    primaryWeight * transformedNormal[axis] +
+                    weightedSecondaryNormal[axis];
             }
+            if (!NormalizeDirection(&normals[vertexIndex * 3u])) return false;
             blend += 1u + influenceCount * 2u;
         }
     }
@@ -203,10 +249,12 @@ bool SkinWeightedSurface(
 bool SkinRigidSurface(
     const XSurface &surface,
     const std::vector<DObjSkelMat> &matrices,
-    std::vector<float> &positions)
+    std::vector<float> &positions,
+    std::vector<float> &normals)
 {
     if (!surface.vertList || surface.vertListCount == 0u) return false;
     positions.resize(static_cast<std::size_t>(surface.vertCount) * 3u);
+    normals.resize(static_cast<std::size_t>(surface.vertCount) * 3u);
     std::uint32_t vertexIndex = 0u;
     for (std::uint32_t listIndex = 0u;
          listIndex < surface.vertListCount; ++listIndex)
@@ -221,6 +269,12 @@ bool SkinRigidSurface(
         {
             TransformPosition(surface.verts0[vertexIndex].xyz, *matrix,
                 &positions[vertexIndex * 3u]);
+            float unpackedNormal[3]{};
+            Vec3UnpackUnitVec(
+                surface.verts0[vertexIndex].normal, unpackedNormal);
+            TransformDirection(unpackedNormal, *matrix,
+                &normals[vertexIndex * 3u]);
+            if (!NormalizeDirection(&normals[vertexIndex * 3u])) return false;
         }
     }
     return vertexIndex == surface.vertCount;
@@ -254,7 +308,9 @@ bool SurfaceHidden(
 WebRendererWorldBatchDesc MakeDraw(
     const XModel &model, Material *material,
     std::uint32_t modelSurfaceIndex, std::uint32_t firstIndex,
-    std::uint32_t indexCount) noexcept
+    std::uint32_t indexCount,
+    const float modelLightingCoordinates[3],
+    bool modelLightingEnabled) noexcept
 {
     WebRendererWorldBatchDesc draw{};
     draw.firstIndex = firstIndex;
@@ -281,6 +337,12 @@ WebRendererWorldBatchDesc MakeDraw(
     draw.technique = draw.baseImage
         ? WebRendererWorldTechnique::BaseTexture
         : WebRendererWorldTechnique::BackendFallback;
+    if (modelLightingEnabled)
+    {
+        draw.lightingMode = WebRendererWorldLightingMode::ModelLightGrid;
+        std::copy_n(modelLightingCoordinates, 3u,
+            draw.modelLightingCoordinates);
+    }
     return draw;
 }
 } // namespace
@@ -289,12 +351,17 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
     const WebRendererDObjSubmission *submissions,
     std::uint32_t submissionCount,
     WebRendererDObjSceneCommand &destination,
-    const float *viewOrigin)
+    const float *viewOrigin,
+    const GfxLightGrid *lightGrid,
+    const WebRendererModelLightingCallbacks *lightingCallbacks)
 {
     if (submissionCount == 0u) return WebRendererDObjSceneResult::NoDObj;
     if (!submissions) return WebRendererDObjSceneResult::InvalidSubmission;
 
     WebRendererDObjSceneCommand replacement;
+    bool modelLightingComplete = lightGrid != nullptr &&
+        WebRenderer_InitializeModelLightingAtlas(
+            submissionCount, replacement.modelLightingAtlas);
     try
     {
         for (std::uint32_t submissionIndex = 0u;
@@ -308,6 +375,31 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
             {
                 return WebRendererDObjSceneResult::InvalidSubmission;
             }
+
+            float modelLightingCoordinates[3]{};
+            bool submissionLightingReady = modelLightingComplete;
+            if (submissionLightingReady)
+            {
+                WebRendererModelLightingSample lightingSample{};
+                submissionLightingReady = WebRenderer_EvaluateModelLighting(
+                    *lightGrid,
+                    submission.lightingOrigin,
+                    lightGrid->sunPrimaryLightIndex,
+                    lightingCallbacks,
+                    lightingSample) &&
+                    WebRenderer_SetModelLightingAtlasEntry(
+                        replacement.modelLightingAtlas,
+                        submissionIndex,
+                        lightingSample.colors,
+                        lightingSample.primaryLightWeight);
+                if (submissionLightingReady)
+                    WebRenderer_GetModelLightingCoordinates(
+                        replacement.modelLightingAtlas,
+                        submissionIndex,
+                        modelLightingCoordinates);
+            }
+            modelLightingComplete =
+                modelLightingComplete && submissionLightingReady;
 
             int posePartBits[4] = {-1, -1, -1, -1};
             DObjAnimMat *posedMats =
@@ -382,9 +474,12 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                     }
 
                     std::vector<float> positions;
+                    std::vector<float> normals;
                     const bool skinned = surface.deformed
-                        ? SkinWeightedSurface(surface, skinMatrices, positions)
-                        : SkinRigidSurface(surface, skinMatrices, positions);
+                        ? SkinWeightedSurface(
+                            surface, skinMatrices, positions, normals)
+                        : SkinRigidSurface(
+                            surface, skinMatrices, positions, normals);
                     if (!skinned)
                         return WebRendererDObjSceneResult::InvalidModel;
 
@@ -398,7 +493,9 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                         WebRendererSurfaceVertex vertex{};
                         std::copy_n(&positions[vertexIndex * 3u], 3u,
                             vertex.position);
-                        if (!Finite3(vertex.position))
+                        std::copy_n(&normals[vertexIndex * 3u], 3u,
+                            vertex.normal);
+                        if (!Finite3(vertex.position) || !Finite3(vertex.normal))
                             return WebRendererDObjSceneResult::InvalidModel;
                         vertex.color[0] = static_cast<float>(
                             (source.color.packed >> 16u) & 0xffu) * BYTE_TO_UNIT;
@@ -429,7 +526,9 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                     }
                     replacement.batches.push_back(MakeDraw(
                         *model, model->materialHandles[modelSurfaceIndex],
-                        modelSurfaceIndex, firstIndex, indexCount));
+                        modelSurfaceIndex, firstIndex, indexCount,
+                        modelLightingCoordinates,
+                        submissionLightingReady));
                     ++replacement.surfaceCount;
                     submittedModel = true;
                     submittedDObj = true;
@@ -447,6 +546,15 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
 
     if (replacement.batches.empty())
         return WebRendererDObjSceneResult::NoDObj;
+    if (!modelLightingComplete)
+    {
+        replacement.modelLightingAtlas = {};
+        for (WebRendererWorldBatchDesc &batch : replacement.batches)
+        {
+            batch.lightingMode = WebRendererWorldLightingMode::None;
+            std::fill_n(batch.modelLightingCoordinates, 3u, 0.0f);
+        }
+    }
     destination = std::move(replacement);
     return WebRendererDObjSceneResult::Success;
 }

@@ -271,6 +271,7 @@ add_executable(web_renderer_lighting_tests
 add_executable(web_renderer_static_model_scene_tests
     "${CMAKE_CURRENT_LIST_DIR}/web_renderer_static_model_scene_tests.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_renderer_static_model_scene.cpp"
+    "${KISAK_REPOSITORY_ROOT}/src/web/web_renderer_lighting.cpp"
 )
 
 add_executable(web_renderer_fx_model_scene_tests

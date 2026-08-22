@@ -212,8 +212,8 @@ and WebGL seams. The exhaustive browser suite remains explicitly available.
 | `GfxImage` | `MODIFIED KISAK` / canonical renderer consumption reached; native backend `NATIVE ONLY` | The generated family loads 36-byte image bodies, XString names, texture load definitions/payloads, aliases, insertion cells, and canonical DB publication. At the native `Load_Texture` boundary, Web copies transient block-zero payloads into bounded platform storage before clearing the GPU union; external-pixel images retain their canonical name/metadata and are resolved through FS/IWD at submission. WebGL texture creation and context recovery remain backend-owned and canonical `GfxImage*` identity is retained even when decoding falls back. |
 | `GfxWorld` | `MODIFIED KISAK` / canonical reached closure | `db_generated_gfxworld.cpp` follows the native generated closure through names, indices, images, cells/portals, lightmaps/grid, vertices/layers, models, shadow/light regions, DPVS static/dynamic, block-1 runtime allocations, and nested canonical dependencies before final real-DB publication into the renderer-owned `&s_world`. Native x86/Wasm fixtures are byte-for-byte identical. The normal Killhouse run publishes asset 772 with Gate 2-matching structural counts and inflated offset. `WebEngine_BuildGfxWorldSurface` consumes that DB-owned object through a final-publication platform notification and WebGL2 draws surface 6077 without a browser world model. The frozen Gate 2 material label differs from the real DB Material pointer and remains recorded rather than normalized away. `web_retail_load_gfxworld.*` is oracle-only. |
 | XModel/model preview scene | `RETIRED` | Removed after Gate 2: no selectable-model UI/state, retained preview geometry, preview camera/projection, preview material bridge, or multi-draw command path remains. Canonical XModel loading/publication and dependencies remain available to `GfxWorld`, `WeaponDef`, FX, and later runtime consumers. |
-| Renderer frontend | `MODIFIED KISAK` / textured, lightmapped gameplay scene reached | The production Wasm target links the real client/cgame/effects/ragdoll/physics closure against a narrow renderer-frontend platform implementation. `R_RenderScene` validates canonical `refdef_s`, constructs Kisak view/projection matrices, and traverses the canonical DPVS lit, decal, and emissive ranges in native stage order rather than treating `surfaceCountNoDecal` as a contiguous endpoint. It emits 581 material-aware batches with canonical `Material*`, technique identity, base `GfxImage*`, state bits, sampler state, lightmap index, base UV, and lightmap UV. It additionally groups `GfxStaticModelDrawInst` placements by canonical `XModel`, retains shared LOD XSurfaces, and consumes cgame's ordinary and first-person `R_AddDObjToScene` submissions through canonical pose evaluation, cpose/view-origin LOD selection delegated to `XModelGetLodForDist`, and rigid/weighted skinning. Release Chrome records 64 DObjs and a visibly posed actor/viewmodel. EffectsCore code-mesh, XModel, and particle-cloud submissions remain appended in canonical order. Unsupported/deformed standalone FX model surfaces, invalid/over-capacity clouds, particle marks, broader material families, and deferred shader/postprocess features remain compatibility gaps. The minimum 2D callback set retains canonical Material/Font identities. |
-| WebGL2 backend and context recovery | `WEB PLATFORM IMPLEMENTATION` | Permanent platform boundary. It converts D3D9 NDC depth `[0,1]` to WebGL `[-1,1]`, retains 32-bit indices, uploads canonical external IWI and DB load-definition pixels, and mirrors the encountered Killhouse `lm_r0c0_sm2` secondary-directional decode: two half-height RGBA lobes are sampled with the native UV transforms and combined using their alpha-encoded reciprocal-square-root weight. The pass samples no primary L8 atlas. It also applies the encountered cull, depth, color-write, alpha-test/blend, addressing, and filtering states per material batch. `ONE / INV_SRC_ALPHA` techniques premultiply final RGB at this boundary to preserve their shader/blend contract. Static XSurface geometry is instanced from canonical placements, posed DObj geometry and rigid `FxXModel` geometry are refreshed per frame, and the 2D pass uses canonical image/font atlases with alpha blending. The built-in `,$white` image is backend-owned; unsupported image identities otherwise remain explicit fallback. GPU handles remain backend-only and all texture/geometry objects are recreated after context loss. |
+| Renderer frontend | `MODIFIED KISAK` / textured, lightmapped, model-lit gameplay scene reached | The production Wasm target links the real client/cgame/effects/ragdoll/physics closure against a narrow renderer-frontend platform implementation. `R_RenderScene` validates canonical `refdef_s`, constructs Kisak view/projection matrices, and traverses the canonical DPVS lit, decal, and emissive ranges in native stage order rather than treating `surfaceCountNoDecal` as a contiguous endpoint. It emits 581 material-aware batches with canonical `Material*`, technique identity, base `GfxImage*`, state bits, sampler state, lightmap index, base UV, and lightmap UV. Static instances sample the canonical `GfxWorld::lightGrid` at their native bounds centers or retain encoded ground lighting. Ordinary and first-person `R_AddDObjToScene` submissions retain the caller's lighting origin, canonical pose evaluation, cpose/view-origin LOD selection delegated to `XModelGetLodForDist`, and rigid/weighted position plus normal skinning. EffectsCore code-mesh, XModel, and particle-cloud submissions remain appended in canonical order and do not enter the model-lighting branch. Unsupported/deformed standalone FX model surfaces, invalid/over-capacity clouds, particle marks, broader material families, and deferred shader/postprocess features remain compatibility gaps. The minimum 2D callback set retains canonical Material/Font identities. |
+| WebGL2 backend and context recovery | `WEB PLATFORM IMPLEMENTATION` | Permanent platform boundary. It converts D3D9 NDC depth `[0,1]` to WebGL `[-1,1]`, retains 32-bit indices, uploads canonical external IWI and DB load-definition pixels, and mirrors the encountered Killhouse `lm_r0c0_sm2` secondary-directional decode. Model draws additionally upload the native 4x4x4-per-entry RGBA8 model-lighting volume layout. The encountered `lp_t0c0[_n0]_sm2` base pass cube-projects the transformed geometric normal by its maximum absolute component, samples that volume with native lookup scale, and computes `base * vertex * modelLighting * 2` before deferred fog. Static entries are per instance and dynamic DObj entries are refreshed from their retained lighting origins. Native normal-map perturbation for `n0` techniques and additive primary-light passes remain later material-technique work; shadows and post-processing remain explicitly deferred. Canonical cull, depth, color-write, alpha-test/blend, addressing, and filtering states remain per batch. GPU handles stay backend-only; 2D textures, 3D lighting volumes, geometry, and instance buffers are recreated after context loss. |
 | D3D9 renderer backend | `NATIVE ONLY` | Retain for native builds and use as behavioral reference; do not compile Direct3D objects into Wasm. |
 | Shader compatibility | `MODIFIED KISAK` / `WEB PLATFORM IMPLEMENTATION` boundary | Native material/shader contracts should remain canonical; selecting or translating to built-in GLSL belongs at the backend seam. |
 | ODE math | `SHARED KISAK` | `src/physics/ode/odemath.cpp` is compiled directly. Expand shared ODE/collision code based on compile inventory and measured needs. |
@@ -538,12 +538,13 @@ world fallback from 70 draws/443 surfaces in the former 8,064-surface command
 to two draws/nine surfaces in the complete canonical ranges. Static XModel
 fallback falls from 304 of 359 batches to 29; the remainder is image support,
 principally one unsupported format, one malformed load definition, and images
-deferred by the bounded 256 MiB static texture-recovery budget. Sky/fog,
-display gamma/vision processing, water-specific shading, light-grid/static
-model lighting, and the remaining `,crater_blacktop` image are still explicit
-renderer gaps. The corrected world pass keeps the draw count and three texture
-fetches per pixel unchanged versus the previous approximation while avoiding
-retention/upload of 28 MiB of expanded primary-lightmap RGBA8 data.
+deferred by the bounded 256 MiB static texture-recovery budget. At the time of
+this capture, sky/fog, display gamma/vision processing, water-specific shading,
+light-grid/model lighting, and the remaining `,crater_blacktop` image were
+explicit renderer gaps; the later model-lighting update below closes that one
+gap. The corrected world pass keeps the draw count and three texture fetches
+per pixel unchanged versus the previous approximation while avoiding retention
+or upload of 28 MiB of expanded primary-lightmap RGBA8 data.
 
 ## DObj renderer convergence update (commits `748112cc`, `de695b46`)
 
@@ -566,3 +567,49 @@ browser-only engine substitutes are unchanged, and permanent browser code is
 still limited to the renderer backend/platform seam. Native systems not yet
 compiled remain the deferred shader/postprocess and broader campaign families,
 not entity or world replacements.
+
+## Native model-lighting convergence update (2026-08-22)
+
+The model-lighting seam follows the native renderer rather than defining a
+browser lighting model. Native `R_AddDObjToScene` retains the caller's lighting
+origin. Camera surface expansion allocates box model lighting for DObjs and
+sphere model lighting for static models, then `R_CalcModelLighting` delegates
+to `R_GetLightingAtPoint`. Static instances use the center of canonical
+`GfxStaticModelInst::mins/maxs` or their packed ground-lighting sample. Dynamic
+DObjs use the retained submission origin. Directional primary lights are
+accepted without an influence trace; other primary types preserve the native
+`Com_CanPrimaryLightAffectPoint` decision at the frontend boundary.
+
+The portable evaluator consumes the published `GfxWorld::lightGrid` directly.
+It preserves the native 32-unit XY and 64-unit Z cell transform, RLE row
+selection, eight-corner trilinear weights, fixed-point merging of duplicate
+color indices, and the corner-visibility trace through `CM_BoxSightTrace`.
+Its output is the canonical 56 RGB direction samples plus primary visibility,
+not a browser probe or a Killhouse-specific approximation. Publication is
+atomic: a complete static or dynamic lighting atlas is submitted, or model
+lighting stays disabled for that command.
+
+At the WebGL platform boundary, every entry is packed into the native 4x4x4
+RGBA8 layout in a 256-wide 3D texture. Coordinates use the native entry-center
+and scale transforms. Rigid and weighted XSurface normals follow the same
+canonical bone transforms and blend weights as positions. The encountered
+`lp_t0c0_sm2` and `lp_t0c0n0_sm2` base programs cube-project the normalized
+geometric normal, sample the volume, and evaluate `base * vertex * lighting *
+2`. Static instances carry per-instance lighting coordinates; the dynamic
+volume is rebuilt from the current DObj submissions each frame. The backend
+owns all 3D texture handles and recreates them after context loss.
+
+Focused native tests cover light-grid RLE traversal and eight-corner blending,
+exact volume packing and coordinates, shader composition, static ground-light
+publication, normal retention, and bounded surface copies. A Release Chrome
+Killhouse run verifies canonical world lightmaps alongside 12,188 lit static
+instances and 64 lit DObjs, including the weapon/viewmodel, with lighting that
+changes while moving between dark and bright cells. Keyboard, pointer-lock
+mouse, ADS, firing, compass, and HUD continue through the existing real
+client/cgame input and 2D paths.
+
+This milestone does not add normal-map perturbation for `n0` techniques,
+additive primary-light passes, shadows, reflections, SSAO, bloom, or other
+post-processing. Those remain material-technique or later renderer work; the
+canonical light-grid data flow and base model-lighting contract are no longer
+gaps.
