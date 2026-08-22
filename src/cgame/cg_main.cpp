@@ -1222,6 +1222,33 @@ int __cdecl CG_PlaySoundAlias(int localClientNum, SndEntHandle entitynum, const 
         return -1;
 
     playbackId = SND_PlaySoundAlias(alias, entitynum, origin, 0, SASYS_CGAME);
+#if defined(KISAK_WEB)
+    static std::uint32_t webWeaponSoundDiagnostics = 0u;
+    if (webWeaponSoundDiagnostics < 8u && aliasList && aliasList->aliasName &&
+        !I_strnicmp(aliasList->aliasName, "weap_", 5u))
+    {
+        const SoundFile *file = alias->soundFile;
+        const LoadedSound *loaded = file && file->type == SAT_LOADED
+            ? file->u.loadSnd : nullptr;
+        Com_DPrintf(9,
+            "[kisakcod-web] weapon sound playback list=%s selected=%s "
+            "playback=%d type=%d exists=%d loaded=%p data=%p bytes=%u "
+            "rate=%u bits=%d channels=%d samples=%u\n",
+            aliasList->aliasName,
+            alias->aliasName ? alias->aliasName : "",
+            playbackId,
+            file ? static_cast<int>(file->type) : -1,
+            file ? static_cast<int>(file->exists) : -1,
+            static_cast<const void *>(loaded),
+            loaded ? static_cast<const void *>(loaded->sound.data) : nullptr,
+            loaded ? loaded->sound.info.data_len : 0u,
+            loaded ? loaded->sound.info.rate : 0u,
+            loaded ? loaded->sound.info.bits : 0,
+            loaded ? loaded->sound.info.channels : 0,
+            loaded ? loaded->sound.info.samples : 0u);
+        ++webWeaponSoundDiagnostics;
+    }
+#endif
     SND_AddLengthNotify(playbackId, alias, SndLengthNotify_Subtitle);
 
     return playbackId;

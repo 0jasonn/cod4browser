@@ -28,6 +28,13 @@ enum class WebRendererCodeMeshResult : std::uint8_t
     AllocationFailed,
 };
 
+// Fastfile comma-prefixed material names are native DB reference stubs. The
+// browser DB currently retains those serialized bodies for loader validation,
+// so the FX frontend uses this narrow lookup key to recover the already-
+// published canonical material without changing DB ownership.
+const char *WebRenderer_CodeMeshMaterialLookupName(
+    const char *serializedName) noexcept;
+
 // Converts one canonical R_AddCodeMeshDrawSurf span into retained, backend-
 // neutral vertices and 32-bit indices. The packed index ABI stores two
 // uint16 indices per packed uint32; indexCount remains the canonical count of

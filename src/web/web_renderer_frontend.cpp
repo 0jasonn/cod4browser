@@ -6,6 +6,7 @@
 #include <client/client.h>
 #include <database/database.h>
 #include <EffectsCore/fx_system.h>
+#include <gfx_d3d/fxprimitives.h>
 #include <gfx_d3d/gfx_light_types.h>
 #include <gfx_d3d/material_types.h>
 #include <gfx_d3d/r_cgame_api.h>
@@ -34,6 +35,7 @@
 #include <web/web_renderer_code_mesh.h>
 #include <web/web_renderer_dobj_scene.h>
 #include <web/web_renderer_fx_model_scene.h>
+#include <web/web_renderer_mark_mesh.h>
 #include <web/web_renderer_particle_cloud_scene.h>
 #include <web/web_renderer_static_model_scene.h>
 #include <web/web_renderer_world_scene.h>
@@ -215,6 +217,30 @@ std::uint32_t g_codeMeshArgCount = 0u;
 std::vector<WebRendererSurfaceVertex> g_codeMeshRenderVertices;
 std::vector<std::uint32_t> g_codeMeshRenderIndices;
 std::vector<WebRendererWorldBatchDesc> g_codeMeshRenderBatches;
+std::array<const Material *, 24u> g_reportedCodeMeshMaterials{};
+std::uint32_t g_reportedCodeMeshMaterialCount = 0u;
+std::array<GfxWorldVertex, WEB_RENDERER_MAX_MARK_MESH_VERTICES>
+    g_markMeshVerts{};
+std::array<r_double_index_t, WEB_RENDERER_MAX_MARK_MESH_INDICES / 2u>
+    g_markMeshIndices{};
+std::uint32_t g_markMeshVertCount = 0u;
+std::uint32_t g_markMeshIndexCount = 0u;
+bool g_processMarkMesh = false;
+struct WebPendingMarkDraw
+{
+    Material *material;
+    GfxMarkContext context;
+    std::uint32_t firstIndex;
+    std::uint32_t indexCount;
+};
+constexpr std::uint32_t WEB_RENDERER_MAX_MARK_DRAWS = 0x600u;
+std::array<WebPendingMarkDraw, WEB_RENDERER_MAX_MARK_DRAWS>
+    g_pendingMarkDraws{};
+std::uint32_t g_pendingMarkDrawCount = 0u;
+std::uint32_t g_pendingMarkDrawBegin = 0u;
+std::vector<WebRendererSurfaceVertex> g_markMeshRenderVertices;
+std::vector<std::uint32_t> g_markMeshRenderIndices;
+std::vector<WebRendererWorldBatchDesc> g_markMeshRenderBatches;
 std::vector<WebRendererSurfaceVertex> g_uiVertices;
 std::vector<std::uint32_t> g_uiIndices;
 std::vector<WebRendererUiBatchDesc> g_uiBatches;
@@ -268,6 +294,157 @@ const GfxImage *FindUiImage(Material *material, std::uint8_t &sampler)
         return colorMap->u.image;
     }
     return nullptr;
+}
+
+const GfxImage *FindFxImage(Material *material, std::uint8_t &sampler)
+{
+    if (!material || !material->textureTable) return nullptr;
+    const MaterialTextureDef *fallback = nullptr;
+    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
+    {
+        const MaterialTextureDef &texture = material->textureTable[index];
+        if (!fallback && texture.semantic == 0u && texture.u.image)
+            fallback = &texture;
+        if (texture.semantic == 2u && texture.u.image)
+        {
+            sampler = texture.samplerState;
+            return texture.u.image;
+        }
+    }
+    if (!fallback) return nullptr;
+    sampler = fallback->samplerState;
+    return fallback->u.image;
+}
+
+std::uint32_t HashFxPixelShaderProgram(
+    const MaterialPixelShader *shader) noexcept
+{
+    if (!shader || !shader->prog.loadDef.program ||
+        shader->prog.loadDef.programSize == 0u)
+        return 0u;
+    constexpr std::uint32_t FNV_OFFSET = 2166136261u;
+    constexpr std::uint32_t FNV_PRIME = 16777619u;
+    std::uint32_t hash = FNV_OFFSET;
+    const auto *bytes = reinterpret_cast<const std::uint8_t *>(
+        shader->prog.loadDef.program);
+    const std::size_t byteCount =
+        static_cast<std::size_t>(shader->prog.loadDef.programSize) *
+        sizeof(std::uint32_t);
+    for (std::size_t index = 0u; index < byteCount; ++index)
+        hash = (hash ^ bytes[index]) * FNV_PRIME;
+    return hash;
+}
+
+const MaterialTechnique *FindMarkTechnique(const Material *material) noexcept
+{
+    constexpr std::uint32_t MARK_TECHNIQUE_INDEX = 7u;
+    if (!material || !material->techniqueSet) return nullptr;
+    const MaterialTechniqueSet *set =
+        material->techniqueSet->remappedTechniqueSet
+            ? material->techniqueSet->remappedTechniqueSet
+            : material->techniqueSet;
+    return set->techniques[MARK_TECHNIQUE_INDEX];
+}
+
+void ConfigureMarkBatch(WebRendererWorldBatchDesc &batch,
+    Material *material, const GfxMarkContext &context) noexcept
+{
+    constexpr std::uint32_t MARK_TECHNIQUE_INDEX = 7u;
+    batch.materialIdentity = material;
+    batch.materialName = material && material->info.name
+        ? material->info.name : "<mark>";
+    batch.modelName = "<fx-mark-mesh>";
+    batch.firstInstanceIndex = UINT32_MAX;
+    batch.lastInstanceIndex = UINT32_MAX;
+    batch.sourceKind = WebRendererSceneBatchKind::FxMarkMesh;
+    batch.lightmapIndex = context.lmapIndex;
+    batch.baseImage = FindFxImage(material, batch.samplerState);
+    const MaterialTechnique *technique = FindMarkTechnique(material);
+    batch.techniqueName = technique && technique->name
+        ? technique->name : "<unsupported-mark-technique>";
+    batch.techniqueType = MARK_TECHNIQUE_INDEX;
+    if (technique)
+    {
+        batch.techniqueFlags = technique->flags;
+        for (std::uint32_t pass = 0u; pass < technique->passCount; ++pass)
+            batch.customSamplerFlags |=
+                technique->passArray[pass].customSamplerFlags;
+        if (technique->passCount != 0u)
+        {
+            const MaterialPixelShader *shader =
+                technique->passArray[0u].pixelShader;
+            batch.pixelShaderName = shader && shader->name
+                ? shader->name : "<unavailable-pixel-shader>";
+            batch.pixelShaderProgramHash = HashFxPixelShaderProgram(shader);
+        }
+    }
+    if (material && material->stateBitsTable)
+    {
+        const std::uint8_t entry =
+            material->stateBitsEntry[MARK_TECHNIQUE_INDEX];
+        if (entry != 0xffu && entry < material->stateBitsCount)
+        {
+            batch.stateBits[0] = material->stateBitsTable[entry].loadBits[0];
+            batch.stateBits[1] = material->stateBitsTable[entry].loadBits[1];
+        }
+    }
+    if (context.lmapIndex != 31u && context.lmapIndex < s_world.lightmapCount &&
+        s_world.lightmaps)
+    {
+        if ((batch.customSamplerFlags & 2u) != 0u)
+            batch.lightmapImage = s_world.lightmaps[context.lmapIndex].primary;
+        if ((batch.customSamplerFlags & 4u) != 0u)
+            batch.secondaryLightmapImage =
+                s_world.lightmaps[context.lmapIndex].secondary;
+        if (batch.secondaryLightmapImage)
+            batch.lightingMode =
+                WebRendererWorldLightingMode::SecondaryDirectional;
+    }
+    if (!batch.baseImage || !technique)
+        batch.technique = WebRendererWorldTechnique::BackendFallback;
+    else if (batch.lightingMode ==
+            WebRendererWorldLightingMode::SecondaryDirectional)
+        batch.technique = WebRendererWorldTechnique::BaseTextureLightmap;
+    else
+        batch.technique = WebRendererWorldTechnique::BaseTexture;
+}
+
+void ConvertPendingMarkDraws(std::uint32_t firstDraw) noexcept
+{
+    for (std::uint32_t drawIndex = firstDraw;
+         drawIndex < g_pendingMarkDrawCount; ++drawIndex)
+    {
+        const WebPendingMarkDraw &draw = g_pendingMarkDraws[drawIndex];
+        const std::size_t originalVertexCount =
+            g_markMeshRenderVertices.size();
+        const std::size_t originalIndexCount = g_markMeshRenderIndices.size();
+        const WebRendererMarkMeshResult converted =
+            WebRenderer_AppendMarkMeshBatch(
+                g_markMeshVerts.data(), g_markMeshVertCount,
+                reinterpret_cast<const std::uint16_t *>(
+                    g_markMeshIndices.data()) + draw.firstIndex,
+                draw.indexCount,
+                (draw.context.modelTypeAndSurf & 0xc0u) == 0u,
+                g_markMeshRenderVertices, g_markMeshRenderIndices);
+        if (converted != WebRendererMarkMeshResult::Success) continue;
+        try
+        {
+            WebRendererWorldBatchDesc batch{};
+            batch.firstIndex = static_cast<std::uint32_t>(
+                g_markMeshRenderIndices.size() - draw.indexCount);
+            batch.indexCount = draw.indexCount;
+            batch.surfaceCount = 1u;
+            batch.firstSurfaceIndex = draw.context.modelIndex;
+            batch.lastSurfaceIndex = draw.context.modelIndex;
+            ConfigureMarkBatch(batch, draw.material, draw.context);
+            g_markMeshRenderBatches.push_back(batch);
+        }
+        catch (const std::bad_alloc &)
+        {
+            g_markMeshRenderVertices.resize(originalVertexCount);
+            g_markMeshRenderIndices.resize(originalIndexCount);
+        }
+    }
 }
 
 void AppendUiQuadUvs(const float points[4][2], const float uvs[4][2],
@@ -439,6 +616,14 @@ void __cdecl R_BeginFrame()
     g_codeMeshRenderVertices.clear();
     g_codeMeshRenderIndices.clear();
     g_codeMeshRenderBatches.clear();
+    g_processMarkMesh = false;
+    g_markMeshVertCount = 0u;
+    g_markMeshIndexCount = 0u;
+    g_pendingMarkDrawCount = 0u;
+    g_pendingMarkDrawBegin = 0u;
+    g_markMeshRenderVertices.clear();
+    g_markMeshRenderIndices.clear();
+    g_markMeshRenderBatches.clear();
     g_uiVertices.clear();
     g_uiIndices.clear();
     g_uiBatches.clear();
@@ -792,10 +977,21 @@ void __cdecl R_AddCodeMeshDrawSurf(Material *material,
     r_double_index_t *indices, std::uint32_t indexCount,
     std::uint32_t argOffset, std::uint32_t argCount, const char *fxName)
 {
-    (void)fxName;
     if (!material || !indices || indexCount == 0u || (indexCount & 1u) != 0u ||
         argOffset >= 256u || argCount > 256u - argOffset)
         return;
+
+    // Native DB_LinkXAssetEntry resolves comma-prefixed dependency stubs to
+    // the same-name canonical material before EffectsCore observes them. The
+    // current browser loader intentionally retains those stub records, so do
+    // the equivalent name resolution only at this material-evaluation seam.
+    if (const char *lookupName =
+            WebRenderer_CodeMeshMaterialLookupName(material->info.name))
+    {
+        if (Material *canonical = DB_FindXAssetHeader(
+                ASSET_TYPE_MATERIAL, lookupName).material)
+            material = canonical;
+    }
 
     const std::uintptr_t indexAddress =
         reinterpret_cast<std::uintptr_t>(indices);
@@ -884,6 +1080,29 @@ void __cdecl R_AddCodeMeshDrawSurf(Material *material,
         batch.technique = batch.baseImage
             ? WebRendererWorldTechnique::BaseTexture
             : WebRendererWorldTechnique::BackendFallback;
+        bool materialReported = false;
+        for (std::uint32_t index = 0u;
+             index < g_reportedCodeMeshMaterialCount; ++index)
+            materialReported |= g_reportedCodeMeshMaterials[index] == material;
+        if (!materialReported &&
+            g_reportedCodeMeshMaterialCount <
+                g_reportedCodeMeshMaterials.size())
+        {
+            g_reportedCodeMeshMaterials[g_reportedCodeMeshMaterialCount++] =
+                material;
+            Web_Log(WebLogLevel::Info,
+                "[kisakcod-web] Canonical FX material '%s': effect='%s' "
+                "image='%s' map=%u size=%ux%u semantic=%u sampler=0x%02x "
+                "state=0x%08x/0x%08x.\n",
+                batch.materialName, fxName ? fxName : "<unnamed-effect>",
+                batch.baseImage && batch.baseImage->name
+                    ? batch.baseImage->name : "<missing>",
+                batch.baseImage ? batch.baseImage->mapType : 0u,
+                batch.baseImage ? batch.baseImage->width : 0u,
+                batch.baseImage ? batch.baseImage->height : 0u,
+                batch.baseImage ? batch.baseImage->semantic : 0u,
+                batch.samplerState, batch.stateBits[0], batch.stateBits[1]);
+        }
         g_codeMeshRenderBatches.push_back(batch);
     }
     catch (const std::bad_alloc &)
@@ -892,6 +1111,90 @@ void __cdecl R_AddCodeMeshDrawSurf(Material *material,
         g_codeMeshRenderIndices.resize(originalIndexCount);
         return;
     }
+}
+
+char __cdecl R_ReserveMarkMeshVerts(int count, std::uint16_t *baseVertex)
+{
+    if (!g_processMarkMesh || count < 0 || !baseVertex ||
+        static_cast<std::uint32_t>(count) >
+            g_markMeshVerts.size() - g_markMeshVertCount)
+    {
+        R_WarnOncePerFrame(R_WARN_MAX_MARK_VERTS);
+        return 0;
+    }
+    *baseVertex = static_cast<std::uint16_t>(g_markMeshVertCount);
+    g_markMeshVertCount += static_cast<std::uint32_t>(count);
+    return 1;
+}
+
+char __cdecl R_ReserveMarkMeshIndices(int count,
+    r_double_index_t **indicesOut)
+{
+    if (!g_processMarkMesh || count < 0 || !indicesOut || (count & 1) != 0 ||
+        static_cast<std::uint32_t>(count) >
+            WEB_RENDERER_MAX_MARK_MESH_INDICES - g_markMeshIndexCount)
+    {
+        R_WarnOncePerFrame(R_WARN_MAX_MARK_INDS);
+        return 0;
+    }
+    *indicesOut = &g_markMeshIndices[g_markMeshIndexCount / 2u];
+    g_markMeshIndexCount += static_cast<std::uint32_t>(count);
+    return 1;
+}
+
+GfxWorldVertex *__cdecl R_GetMarkMeshVerts(std::uint16_t baseVertex)
+{
+    return g_processMarkMesh && baseVertex < g_markMeshVertCount
+        ? &g_markMeshVerts[baseVertex] : nullptr;
+}
+
+void __cdecl R_BeginMarkMeshVerts()
+{
+    iassert(!g_processMarkMesh);
+    g_processMarkMesh = true;
+    g_pendingMarkDrawBegin = g_pendingMarkDrawCount;
+}
+
+void __cdecl R_EndMarkMeshVerts()
+{
+    iassert(g_processMarkMesh);
+    ConvertPendingMarkDraws(g_pendingMarkDrawBegin);
+    g_processMarkMesh = false;
+}
+
+void __cdecl R_AddMarkMeshDrawSurf(Material *material,
+    const GfxMarkContext *context, std::uint16_t *indices,
+    std::uint32_t indexCount)
+{
+    if (!g_processMarkMesh || !material || !context || !indices ||
+        indexCount == 0u || indexCount % 3u != 0u)
+        return;
+    if (!FindMarkTechnique(material))
+    {
+        R_WarnOncePerFrame(R_WARN_NONLIGHTMAP_MARK_MATERIAL);
+        return;
+    }
+    const std::uintptr_t address = reinterpret_cast<std::uintptr_t>(indices);
+    const std::uintptr_t begin = reinterpret_cast<std::uintptr_t>(
+        g_markMeshIndices.data());
+    const std::uintptr_t usedEnd = begin +
+        static_cast<std::uintptr_t>(g_markMeshIndexCount) *
+        sizeof(std::uint16_t);
+    if (address < begin || address >= usedEnd ||
+        (address - begin) % sizeof(std::uint16_t) != 0u)
+        return;
+    const std::uint32_t firstIndex = static_cast<std::uint32_t>(
+        (address - begin) / sizeof(std::uint16_t));
+    if (firstIndex > g_markMeshIndexCount ||
+        indexCount > g_markMeshIndexCount - firstIndex)
+        return;
+    if (g_pendingMarkDrawCount >= g_pendingMarkDraws.size())
+    {
+        R_WarnOncePerFrame(R_WARN_GFX_MARK_MESH_LIMIT);
+        return;
+    }
+    g_pendingMarkDraws[g_pendingMarkDrawCount++] = {
+        material, *context, firstIndex, indexCount};
 }
 
 GfxParticleCloud *__cdecl R_AddParticleCloudToScene(Material *material)
@@ -1233,7 +1536,6 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     // thresholds from active refdef distance, scaled by placement, as the
     // deterministic rigid FX compatibility subset.
     std::uint32_t selectedFxModels = 0u;
-    std::uint32_t droppedFxSelections = 0u;
     for (std::uint32_t index = 0u; index < g_fxModelSubmissionCount; ++index)
     {
         WebRendererFxModelSubmission submission = g_fxModelSubmissions[index];
@@ -1241,15 +1543,15 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             submission.model, submission.placement, refdef->vieworg);
         if (lod < 0)
         {
-            if (droppedFxSelections != UINT32_MAX) ++droppedFxSelections;
+            // XModelGetLodForDist returns -1 when a model has passed its
+            // farthest configured LOD. This is ordinary distance culling
+            // (not an unknown shader), notably for ejected shell effects.
             continue;
         }
         submission.lod = static_cast<std::uint16_t>(lod);
         g_fxModelSubmissions[selectedFxModels++] = submission;
     }
     g_fxModelSubmissionCount = selectedFxModels;
-    if (droppedFxSelections != 0u)
-        R_WarnOncePerFrame(R_WARN_UNKNOWN_XMODEL_SHADER);
 
     WebRendererFxModelSceneCommand fxModelCommand;
     std::uint32_t droppedFxModels = 0u;
@@ -1271,8 +1573,9 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     }
 
     // EffectsCore remains the sole producer of FX geometry. Append its
-    // already-converted canonical code-mesh spans to the existing dynamic
-    // command so the backend retains one ordered, copied scene submission.
+    // already-converted canonical mark/code-mesh spans to the existing
+    // dynamic command so the backend retains one ordered, copied submission.
+    const bool hasMarkMesh = !g_markMeshRenderBatches.empty();
     const bool hasCodeMesh = !g_codeMeshRenderBatches.empty();
     bool hasFxModel = fxModelBuild ==
         WebRendererFxModelSceneResult::Success;
@@ -1288,10 +1591,15 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                 fxModelCommand.indices.size(),
                 fxModelCommand.batches.size(),
                 fxModelCommand.surfaceCount,
-                g_codeMeshRenderVertices.size(),
-                g_codeMeshRenderIndices.size(),
-                g_codeMeshRenderBatches.size(),
-                static_cast<std::uint32_t>(g_codeMeshRenderBatches.size()));
+                g_markMeshRenderVertices.size() +
+                    g_codeMeshRenderVertices.size(),
+                g_markMeshRenderIndices.size() +
+                    g_codeMeshRenderIndices.size(),
+                g_markMeshRenderBatches.size() +
+                    g_codeMeshRenderBatches.size(),
+                static_cast<std::uint32_t>(
+                    g_markMeshRenderBatches.size() +
+                    g_codeMeshRenderBatches.size()));
         const WebRendererFxModelAppendResult appendResult = admission ==
             WebRendererFxModelAppendResult::Success
             ? WebRenderer_AppendFxModelSceneCommand(
@@ -1305,6 +1613,43 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         {
             R_WarnOncePerFrame(R_WARN_MAX_SCENE_MODEL_REFS);
             hasFxModel = false;
+        }
+    }
+    if (hasMarkMesh)
+    {
+        try
+        {
+            const std::uint32_t vertexBase = static_cast<std::uint32_t>(
+                dynamicCommand.vertices.size());
+            const std::uint32_t indexBase = static_cast<std::uint32_t>(
+                dynamicCommand.indices.size());
+            if (vertexBase > WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES -
+                    g_markMeshRenderVertices.size() ||
+                indexBase > WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES -
+                    g_markMeshRenderIndices.size())
+            {
+                Com_Error(ERR_DROP,
+                    "R_RenderScene canonical mark mesh exceeds dynamic limits");
+                return;
+            }
+            dynamicCommand.vertices.insert(dynamicCommand.vertices.end(),
+                g_markMeshRenderVertices.begin(),
+                g_markMeshRenderVertices.end());
+            for (const std::uint32_t index : g_markMeshRenderIndices)
+                dynamicCommand.indices.push_back(vertexBase + index);
+            for (WebRendererWorldBatchDesc batch : g_markMeshRenderBatches)
+            {
+                batch.firstIndex += indexBase;
+                dynamicCommand.batches.push_back(batch);
+            }
+            dynamicCommand.surfaceCount += static_cast<std::uint32_t>(
+                g_markMeshRenderBatches.size());
+        }
+        catch (const std::bad_alloc &)
+        {
+            Com_Error(ERR_DROP,
+                "R_RenderScene canonical mark mesh allocation failed");
+            return;
         }
     }
     if (hasCodeMesh)
@@ -1385,7 +1730,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         R_WarnOncePerFrame(R_WARN_MAX_CLOUDS);
 
     if (dynamicBuild == WebRendererDObjSceneResult::Success ||
-        hasFxModel || hasCodeMesh || hasParticleCloud)
+        hasFxModel || hasMarkMesh || hasCodeMesh || hasParticleCloud)
     {
         const WebRendererModelLightingAtlasDesc lightingAtlas{
             dynamicCommand.modelLightingAtlas.pixels.data(),
@@ -1691,10 +2036,7 @@ void __cdecl R_UpdateRemainingEffects(FxCmd *cmd)
     FX_UpdateRemaining(cmd);
     FX_EndUpdate(cmd->localClientNum);
     FX_AddNonSpriteDrawSurfs(cmd);
-
-    // Native queues mark generation between non-sprite and FX-vertex work.
-    // The web renderer has no portable mark-mesh destination yet, so retain
-    // the canonical producer order while leaving that optional family out.
+    FX_GenerateMarkVertsForWorld(cmd->localClientNum);
     FxGenerateVertsCmd generateVertsCmd{};
     FX_FillGenerateVertsCmd(cmd->localClientNum, &generateVertsCmd);
     FX_GenerateVerts(&generateVertsCmd);
@@ -1744,21 +2086,6 @@ std::uint32_t R_GetDebugReflectionProbeLocs(
 void __cdecl R_CalcCubeMapViewValues(refdef_s *, CubemapShot, int) {}
 int __cdecl R_PickMaterial(int, const float *, const float *, char *, char *,
     char *, std::uint32_t) { return 0; }
-
-void __cdecl R_MarkFragments_Begin(MarkInfo *info,
-    MarkFragmentsAgainstEnum, const float *, const float (*)[3], float,
-    const float *, Material *)
-{
-    if (info) std::memset(info, 0, sizeof(*info));
-}
-char __cdecl R_MarkFragments_AddDObj(
-    MarkInfo *, DObj_s *, cpose_t *, std::uint16_t) { return 0; }
-char __cdecl R_MarkFragments_AddBModel(
-    MarkInfo *, GfxBrushModel *, cpose_t *, std::uint16_t) { return 0; }
-void __cdecl R_MarkFragments_Go(MarkInfo *,
-    void(__cdecl *)(void *, int, FxMarkTri *, int, FxMarkPoint *,
-        const float *, const float *),
-    void *, int, FxMarkTri *, int, FxMarkPoint *) {}
 
 void __cdecl Material_DirtyTechniqueSetOverrides() {}
 

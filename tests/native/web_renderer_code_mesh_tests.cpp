@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 namespace
@@ -111,6 +112,16 @@ void TestFxBatchHasDistinctRendererIdentity()
     assert(WebRenderer_FxDiagnosticIndex(
         WebRendererSceneBatchKind::WorldSurface) == 3u);
 }
+
+void TestCommaMaterialUsesCanonicalLookupName()
+{
+    assert(std::strcmp(WebRenderer_CodeMeshMaterialLookupName(
+        ",gfx_muzflash_m16"), "gfx_muzflash_m16") == 0);
+    assert(WebRenderer_CodeMeshMaterialLookupName(
+        "gfx_muzflash_m16") == nullptr);
+    assert(WebRenderer_CodeMeshMaterialLookupName(",") == nullptr);
+    assert(WebRenderer_CodeMeshMaterialLookupName(nullptr) == nullptr);
+}
 } // namespace
 
 int main()
@@ -120,5 +131,6 @@ int main()
     TestFrameResetAllowsFreshCodeMeshOutput();
     TestFallbackStateWritesAndBlends();
     TestFxBatchHasDistinctRendererIdentity();
+    TestCommaMaterialUsesCanonicalLookupName();
     return 0;
 }

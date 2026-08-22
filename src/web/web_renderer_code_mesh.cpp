@@ -52,6 +52,13 @@ bool IsFiniteVertex(const WebRendererSurfaceVertex &vertex) noexcept
 }
 } // namespace
 
+const char *WebRenderer_CodeMeshMaterialLookupName(
+    const char *serializedName) noexcept
+{
+    return serializedName && serializedName[0] == ',' && serializedName[1]
+        ? serializedName + 1 : nullptr;
+}
+
 WebRendererCodeMeshResult WebRenderer_AppendCodeMeshBatch(
     const GfxPackedVertex *vertices,
     std::uint32_t vertexCount,

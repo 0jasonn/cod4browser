@@ -167,7 +167,7 @@ struct WebRendererState
     WebRendererRetainedModelLightingAtlas retainedDynamicModelLighting;
     bool dynamicModelSceneActive = false;
     bool dynamicModelFirstSubmissionReported = false;
-    bool dynamicFxSourceReported[3]{};
+    bool dynamicFxSourceReported[4]{};
     GLuint uiVertexArray = 0u;
     GLuint uiVertexBuffer = 0u;
     GLuint uiIndexBuffer = 0u;
@@ -380,6 +380,7 @@ const char *FxSourceKindName(WebRendererSceneBatchKind kind) noexcept
     case WebRendererSceneBatchKind::FxCodeMesh: return "FxCodeMesh";
     case WebRendererSceneBatchKind::FxXModel: return "FxXModel";
     case WebRendererSceneBatchKind::FxParticleCloud: return "FxParticleCloud";
+    case WebRendererSceneBatchKind::FxMarkMesh: return "FxMarkMesh";
     default: return "";
     }
 }
@@ -476,6 +477,7 @@ const char *ComparisonSourceKindName(WebRendererSceneBatchKind kind) noexcept
     case WebRendererSceneBatchKind::FxCodeMesh: return "FxCodeMesh";
     case WebRendererSceneBatchKind::FxXModel: return "FxXModel";
     case WebRendererSceneBatchKind::FxParticleCloud: return "FxParticleCloud";
+    case WebRendererSceneBatchKind::FxMarkMesh: return "FxMarkMesh";
     }
     return "Unknown";
 }
@@ -976,10 +978,11 @@ void LogWorldColorImageInventory()
 
 void ReportRetainedDynamicFx()
 {
-    constexpr std::array<WebRendererSceneBatchKind, 3> fxKinds = {{
+    constexpr std::array<WebRendererSceneBatchKind, 4> fxKinds = {{
         WebRendererSceneBatchKind::FxCodeMesh,
         WebRendererSceneBatchKind::FxXModel,
         WebRendererSceneBatchKind::FxParticleCloud,
+        WebRendererSceneBatchKind::FxMarkMesh,
     }};
     for (std::size_t kindIndex = 0u; kindIndex < fxKinds.size(); ++kindIndex)
     {
@@ -4384,11 +4387,20 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             const WebRendererRetainedWorldImage *base = RetainedImage(
                 g_renderer.retainedDynamicModelImages,
                 batch.baseImageIndex);
+            const WebRendererRetainedWorldImage *secondaryLightmap =
+                RetainedImage(g_renderer.retainedDynamicModelImages,
+                    batch.secondaryLightmapImageIndex);
             const bool fxSceneGeometry = WebRenderer_IsFxVertexColorBatch(
                 batch.sourceKind);
             const bool fallback = batch.technique ==
                     WebRendererWorldTechnique::BackendFallback ||
                 !base;
+            const bool markLightmapped = !fallback && secondaryLightmap &&
+                batch.sourceKind == WebRendererSceneBatchKind::FxMarkMesh &&
+                batch.technique ==
+                    WebRendererWorldTechnique::BaseTextureLightmap &&
+                batch.lightingMode ==
+                    WebRendererWorldLightingMode::SecondaryDirectional;
             const bool modelLit = !fallback && !fxSceneGeometry &&
                 batch.lightingMode ==
                     WebRendererWorldLightingMode::ModelLightGrid &&
@@ -4397,6 +4409,10 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 fallback && !fxSceneGeometry ? 1.0f : 0.0f);
             glUniform1f(g_renderer.textureEnabledUniform,
                 fallback ? 0.0f : 1.0f);
+            glUniform1f(g_renderer.lightmapEnabledUniform,
+                markLightmapped ? 1.0f : 0.0f);
+            glUniform1f(g_renderer.secondaryLightmapEnabledUniform,
+                markLightmapped ? 1.0f : 0.0f);
             glUniform1f(g_renderer.modelLightingEnabledUniform,
                 modelLit ? 1.0f : 0.0f);
             glUniform3fv(g_renderer.modelLightingBaseCoordinatesUniform,
@@ -4404,6 +4420,10 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             BindWorldTexture(GL_TEXTURE0,
                 base ? base->texture : g_renderer.texture,
                 batch.samplerState);
+            BindWorldTexture(GL_TEXTURE2,
+                secondaryLightmap
+                    ? secondaryLightmap->texture : g_renderer.texture,
+                0x62u);
             const std::uintptr_t indexOffset =
                 static_cast<std::uintptr_t>(batch.firstIndex) *
                 sizeof(std::uint32_t);

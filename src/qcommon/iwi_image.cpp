@@ -392,9 +392,10 @@ Error DecodeRgba8(
         return parseError;
     }
 
+    const bool rgb8 = metadata.format == FORMAT_RGB8;
     const bool compressed = metadata.format == FORMAT_DXT1 ||
         metadata.format == FORMAT_DXT3 || metadata.format == FORMAT_DXT5;
-    if (metadata.format != FORMAT_ARGB && !compressed)
+    if (metadata.format != FORMAT_ARGB && !rgb8 && !compressed)
     {
         return Error::DecodeUnsupportedFormat;
     }
@@ -404,7 +405,7 @@ Error DecodeRgba8(
             ((metadata.flags & FLAG_NO_MIPMAPS) == 0u ||
              (metadata.flags & static_cast<std::uint8_t>(
                  ~(FLAG_NO_MIPMAPS | policyFlags))) != 0u)) ||
-        (compressed && (metadata.flags &
+        ((rgb8 || compressed) && (metadata.flags &
             static_cast<std::uint8_t>(~(FLAG_NO_PICMIP | FLAG_NO_MIPMAPS |
                 policyFlags))) != 0u))
     {
@@ -430,13 +431,43 @@ Error DecodeRgba8(
         return Error::DecodeOutputTooLarge;
     }
     std::size_t baseLevelOffset = HEADER_SIZE;
-    if (!compressed)
+    if (!compressed && !rgb8)
     {
         if (!CheckedAdd(HEADER_SIZE, pixelBytes, expectedMemberBytes) ||
             bytes.size() != expectedMemberBytes)
         {
             return Error::DecodeInvalidLayout;
         }
+    }
+    else if (rgb8)
+    {
+        const std::uint32_t storedMipCount = Count2dStoredMipmaps(
+            metadata.flags, metadata.width, metadata.height);
+        std::size_t payloadBytes = 0u;
+        std::size_t baseLevelBytes = 0u;
+        for (std::uint32_t mip = storedMipCount; mip > 0u; --mip)
+        {
+            const std::uint32_t level = mip - 1u;
+            const std::uint32_t width = std::max<std::uint32_t>(
+                static_cast<std::uint32_t>(metadata.width) >> level, 1u);
+            const std::uint32_t height = std::max<std::uint32_t>(
+                static_cast<std::uint32_t>(metadata.height) >> level, 1u);
+            std::size_t levelPixels = 0u;
+            std::size_t levelBytes = 0u;
+            if (!CheckedMultiply(width, height, levelPixels) ||
+                !CheckedMultiply(levelPixels, 3u, levelBytes) ||
+                !CheckedAdd(payloadBytes, levelBytes, payloadBytes))
+            {
+                return Error::DecodeOutputTooLarge;
+            }
+            if (level == 0u) baseLevelBytes = levelBytes;
+        }
+        if (!CheckedAdd(HEADER_SIZE, payloadBytes, expectedMemberBytes) ||
+            bytes.size() != expectedMemberBytes || baseLevelBytes > payloadBytes)
+        {
+            return Error::DecodeInvalidLayout;
+        }
+        baseLevelOffset = HEADER_SIZE + payloadBytes - baseLevelBytes;
     }
     else
     {
@@ -483,9 +514,23 @@ Error DecodeRgba8(
         return Error::DecodeAllocationFailed;
     }
 
-    if (!compressed)
+    if (rgb8)
     {
-        const std::span<const std::uint8_t> bgra = bytes.subspan(HEADER_SIZE);
+        const std::span<const std::uint8_t> bgr = bytes.subspan(
+            baseLevelOffset, pixelCount * 3u);
+        for (std::size_t pixel = 0u; pixel < pixelCount; ++pixel)
+        {
+            const std::size_t sourceOffset = pixel * 3u;
+            const std::size_t targetOffset = pixel * RGBA_BYTES_PER_PIXEL;
+            rgba[targetOffset] = bgr[sourceOffset + 2u];
+            rgba[targetOffset + 1u] = bgr[sourceOffset + 1u];
+            rgba[targetOffset + 2u] = bgr[sourceOffset];
+            rgba[targetOffset + 3u] = 255u;
+        }
+    }
+    else if (!compressed)
+    {
+        const std::span<const std::uint8_t> bgra = bytes.subspan(baseLevelOffset);
         for (std::size_t offset = 0u; offset < pixelBytes; offset += ARGB_BYTES_PER_PIXEL)
         {
             rgba[offset] = bgra[offset + 2u];
@@ -538,10 +583,15 @@ Error DecodeLoadDefRgba8(
     std::size_t bytesPerBlock = 0u;
     bool compressed = false;
     bool luminance = false;
+    bool opaqueBgra = false;
     switch (format)
     {
     case LOADDEF_FORMAT_A8R8G8B8:
         iwiFormat = FORMAT_ARGB;
+        break;
+    case LOADDEF_FORMAT_X8R8G8B8:
+        iwiFormat = FORMAT_ARGB;
+        opaqueBgra = true;
         break;
     case LOADDEF_FORMAT_L8:
         luminance = true;
@@ -638,7 +688,7 @@ Error DecodeLoadDefRgba8(
             rgba[offset] = bgra[offset + 2u];
             rgba[offset + 1u] = bgra[offset + 1u];
             rgba[offset + 2u] = bgra[offset];
-            rgba[offset + 3u] = bgra[offset + 3u];
+            rgba[offset + 3u] = opaqueBgra ? 255u : bgra[offset + 3u];
         }
     }
     else

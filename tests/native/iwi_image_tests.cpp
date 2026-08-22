@@ -383,6 +383,31 @@ void TestRgba8DecodeAndSwizzle()
         "aliased decode commits only after conversion is complete");
 }
 
+void TestRgb8DecodeAndMipOrder()
+{
+    Bytes payload(3u + 12u + 48u, 0u);
+    // Retail bitmap IWIs store mip levels from smallest to largest. Seed the
+    // first texel of the final 4x4 level as BGR and ensure only that base level
+    // is expanded for the renderer.
+    payload[15u] = 0x10u;
+    payload[16u] = 0x20u;
+    payload[17u] = 0x30u;
+    Bytes fixture = MakeIwi(
+        kisak::iwi::FORMAT_RGB8, 0u, 4u, 4u, 1u, payload.size());
+    std::copy(payload.begin(), payload.end(),
+        fixture.begin() + kisak::iwi::HEADER_SIZE);
+
+    Rgba8Image image = MakeSentinelImage();
+    RequireError(kisak::iwi::DecodeRgba8(fixture, image), Error::None,
+        "decode opaque BGR8 mip chain");
+    Require(image.width == 4u && image.height == 4u &&
+            image.pixels.size() == 4u * 4u * 4u,
+        "BGR8 decode retains base dimensions");
+    Require(image.pixels[0] == 0x30u && image.pixels[1] == 0x20u &&
+            image.pixels[2] == 0x10u && image.pixels[3] == 0xffu,
+        "BGR8 base texel is swizzled to opaque RGBA8");
+}
+
 void TestDxt1Decode()
 {
     const Bytes opaqueBlock = MakeDxtColorBlock(0xf800u, 0x07e0u, 0xe4e4e4e4u);
@@ -579,6 +604,19 @@ void TestCanonicalLoadDefDecode()
         0x70u, 0x60u, 0x50u, 0x80u,
     }), "canonical A8R8G8B8 load definition is swizzled to RGBA8");
 
+    RequireError(kisak::iwi::DecodeLoadDefRgba8(
+        kisak::iwi::LOADDEF_FORMAT_X8R8G8B8,
+        kisak::iwi::FLAG_NO_MIPMAPS,
+        2u,
+        1u,
+        1u,
+        bgra,
+        image), Error::None, "decode canonical opaque BGRX load definition");
+    Require(image.pixels == Bytes({
+        0x30u, 0x20u, 0x10u, 0xffu,
+        0x70u, 0x60u, 0x50u, 0xffu,
+    }), "canonical X8R8G8B8 ignores the unused source alpha byte");
+
     const Bytes luminance{0x10u, 0x80u, 0xffu, 0x00u};
     RequireError(kisak::iwi::DecodeLoadDefRgba8(
         kisak::iwi::LOADDEF_FORMAT_L8,
@@ -641,11 +679,6 @@ void TestCanonicalLoadDefDecode()
 
 void TestRgba8DecodeRejectsUnsupportedSlice()
 {
-    RequireDecodeFailure(
-        MakeIwi(2, kisak::iwi::FLAG_NO_MIPMAPS),
-        Error::DecodeUnsupportedFormat,
-        "reject non-ARGB format");
-
     for (const uint8_t flags : {
         uint8_t{0x00},
         uint8_t{0x01},
@@ -902,6 +935,7 @@ int main()
     runner.Run("header validation", TestHeaderValidation);
     runner.Run("file-size validation", TestFileSizeValidation);
     runner.Run("RGBA8 decode and swizzle", TestRgba8DecodeAndSwizzle);
+    runner.Run("RGB8 decode and mip order", TestRgb8DecodeAndMipOrder);
     runner.Run("DXT1 decode", TestDxt1Decode);
     runner.Run("DXT3 decode", TestDxt3Decode);
     runner.Run("DXT5 decode", TestDxt5Decode);

@@ -289,6 +289,19 @@ add_executable(web_renderer_code_mesh_tests
     "${KISAK_REPOSITORY_ROOT}/src/web/web_renderer_code_mesh.cpp"
 )
 
+add_executable(web_renderer_mark_mesh_tests
+    "${CMAKE_CURRENT_LIST_DIR}/web_renderer_mark_mesh_tests.cpp"
+    "${KISAK_REPOSITORY_ROOT}/src/web/web_renderer_mark_mesh.cpp"
+)
+
+if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR
+    CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    add_executable(web_renderer_mark_fragments_tests
+        "${CMAKE_CURRENT_LIST_DIR}/web_renderer_mark_fragments_tests.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/web/web_renderer_mark_fragments.cpp"
+    )
+endif()
+
 if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR
     CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     # This seam deliberately consumes canonical XModel fields. Its layout
@@ -410,6 +423,21 @@ if (MSVC)
 else()
     target_compile_options(fx_emission_math_tests PRIVATE -UNDEBUG)
 endif()
+if (TARGET web_renderer_mark_fragments_tests)
+    target_compile_features(web_renderer_mark_fragments_tests PRIVATE cxx_std_20)
+    target_include_directories(web_renderer_mark_fragments_tests PRIVATE
+        "${KISAK_REPOSITORY_ROOT}/src")
+    target_compile_definitions(web_renderer_mark_fragments_tests PRIVATE
+        KISAK_SP=1 KISAK_WEB=1)
+    if (MSVC)
+        target_compile_options(web_renderer_mark_fragments_tests PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(web_renderer_mark_fragments_tests PRIVATE -UNDEBUG)
+    endif()
+    if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+        target_compile_options(web_renderer_mark_fragments_tests PRIVATE -fdeclspec)
+    endif()
+endif()
 target_compile_features(fx_archive_callback_tests PRIVATE cxx_std_20)
 target_include_directories(fx_archive_callback_tests PRIVATE
     "${KISAK_REPOSITORY_ROOT}/src"
@@ -471,6 +499,13 @@ else()
 endif()
 target_compile_features(web_renderer_code_mesh_tests PRIVATE cxx_std_20)
 target_include_directories(web_renderer_code_mesh_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
+target_compile_features(web_renderer_mark_mesh_tests PRIVATE cxx_std_20)
+target_include_directories(web_renderer_mark_mesh_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
+if (MSVC)
+    target_compile_options(web_renderer_mark_mesh_tests PRIVATE /UNDEBUG)
+else()
+    target_compile_options(web_renderer_mark_mesh_tests PRIVATE -UNDEBUG)
+endif()
 if (TARGET web_renderer_dobj_submission_tests)
     target_compile_features(web_renderer_dobj_submission_tests PRIVATE cxx_std_20)
     target_include_directories(web_renderer_dobj_submission_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
@@ -616,6 +651,16 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "-sEXIT_RUNTIME=1"
         "-sNO_DISABLE_EXCEPTION_CATCHING"
     )
+    target_link_options(web_renderer_mark_mesh_tests PRIVATE
+        "-sENVIRONMENT=node"
+        "-sEXIT_RUNTIME=1"
+        "-sNO_DISABLE_EXCEPTION_CATCHING"
+    )
+    target_link_options(web_renderer_mark_fragments_tests PRIVATE
+        "-sENVIRONMENT=node"
+        "-sEXIT_RUNTIME=1"
+        "-sNO_DISABLE_EXCEPTION_CATCHING"
+    )
     target_link_options(web_renderer_dobj_submission_tests PRIVATE
         "-sENVIRONMENT=node"
         "-sEXIT_RUNTIME=1"
@@ -711,6 +756,8 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     set_target_properties(web_renderer_fx_model_scene_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_renderer_particle_cloud_scene_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_renderer_code_mesh_tests PROPERTIES SUFFIX ".cjs")
+    set_target_properties(web_renderer_mark_mesh_tests PROPERTIES SUFFIX ".cjs")
+    set_target_properties(web_renderer_mark_fragments_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_renderer_dobj_submission_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_openal_proxy_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_browser_bindings_tests PROPERTIES SUFFIX ".cjs")
@@ -782,6 +829,10 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_renderer_particle_cloud_scene_tests>")
     add_test(NAME web_renderer_code_mesh_tests
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_renderer_code_mesh_tests>")
+    add_test(NAME web_renderer_mark_mesh_tests
+        COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_renderer_mark_mesh_tests>")
+    add_test(NAME web_renderer_mark_fragments_tests
+        COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_renderer_mark_fragments_tests>")
     add_test(NAME web_renderer_dobj_submission_tests
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_renderer_dobj_submission_tests>")
     add_test(NAME web_openal_proxy_tests
@@ -870,6 +921,10 @@ else()
     add_test(NAME web_renderer_fx_model_scene_tests COMMAND web_renderer_fx_model_scene_tests)
     add_test(NAME web_renderer_particle_cloud_scene_tests COMMAND web_renderer_particle_cloud_scene_tests)
     add_test(NAME web_renderer_code_mesh_tests COMMAND web_renderer_code_mesh_tests)
+    add_test(NAME web_renderer_mark_mesh_tests COMMAND web_renderer_mark_mesh_tests)
+    if (TARGET web_renderer_mark_fragments_tests)
+        add_test(NAME web_renderer_mark_fragments_tests COMMAND web_renderer_mark_fragments_tests)
+    endif()
     if (TARGET web_renderer_dobj_submission_tests)
         add_test(NAME web_renderer_dobj_submission_tests COMMAND web_renderer_dobj_submission_tests)
     endif()

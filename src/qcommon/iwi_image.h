@@ -12,6 +12,7 @@ namespace kisak::iwi
 constexpr std::uint32_t HEADER_SIZE = 28u;
 constexpr std::uint8_t COD4_VERSION = 6u;
 constexpr std::uint8_t FORMAT_ARGB = 1u;
+constexpr std::uint8_t FORMAT_RGB8 = 2u;
 constexpr std::uint8_t FORMAT_DXT1 = 11u;
 constexpr std::uint8_t FORMAT_DXT3 = 12u;
 constexpr std::uint8_t FORMAT_DXT5 = 13u;
@@ -22,6 +23,7 @@ constexpr std::uint8_t FLAG_STREAMING = 0x10u;
 constexpr std::uint8_t FLAG_CLAMP_U = 0x40u;
 constexpr std::uint8_t FLAG_CLAMP_V = 0x80u;
 constexpr std::int32_t LOADDEF_FORMAT_A8R8G8B8 = 0x00000015;
+constexpr std::int32_t LOADDEF_FORMAT_X8R8G8B8 = 0x00000016;
 constexpr std::int32_t LOADDEF_FORMAT_L8 = 0x00000032;
 constexpr std::int32_t LOADDEF_FORMAT_DXT1 = 0x31545844;
 constexpr std::int32_t LOADDEF_FORMAT_DXT3 = 0x33545844;
@@ -82,8 +84,8 @@ Error Parse(std::span<const std::uint8_t> bytes, Metadata &metadata) noexcept;
 
 // Decodes one bounded two-dimensional IWI v6 image into RGBA8. Format 1 (named
 // ARGB by the engine, serialized as BGRA) retains its original strict one-mip
-// boundary. DXT1, DXT3, and DXT5 accept an exact 2D mip chain in COD4's
-// smallest-to-largest file order and decode only the largest level. The
+// boundary. Format 2 (opaque BGR8), DXT1, DXT3, and DXT5 accept an exact 2D
+// mip chain in COD4's smallest-to-largest file order and decode only the largest level. The
 // streaming and U/V clamp policy bits do not alter that layout and are
 // accepted. Cubemaps, volumes, unknown flags, malformed block layouts, and
 // output above the shared recovery ceiling fail closed. Input and output may alias; output is
