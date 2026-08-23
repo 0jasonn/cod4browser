@@ -33,6 +33,7 @@
 #include <universal/com_memory.h>
 #include <universal/memfile.h>
 #include <web/web_renderer.h>
+#include <web/web_renderer_image_reference.h>
 #include <web/web_renderer_code_mesh.h>
 #include <web/web_renderer_dobj_scene.h>
 #include <web/web_renderer_fx_model_scene.h>
@@ -150,6 +151,31 @@ Material *ResolveRendererMaterial(Material *material) noexcept
             ASSET_TYPE_MATERIAL, lookupName).material)
         return canonical;
     return material;
+}
+
+const GfxImage *FindRendererImage(const char *lookupName) noexcept
+{
+    GfxImage *canonical = DB_FindXAssetHeader(
+        ASSET_TYPE_IMAGE, lookupName).image;
+    return canonical && canonical->name &&
+            I_stricmp(canonical->name, lookupName) == 0
+        ? canonical : nullptr;
+}
+
+const GfxImage *ResolveRendererImage(const GfxImage *image) noexcept
+{
+    return WebRenderer_ResolveImageReference(image, FindRendererImage);
+}
+
+void ResolveRendererBatchImages(WebRendererWorldBatchDesc &batch) noexcept
+{
+    batch.baseImage = ResolveRendererImage(batch.baseImage);
+    batch.normalImage = ResolveRendererImage(batch.normalImage);
+    batch.lightmapImage = ResolveRendererImage(batch.lightmapImage);
+    batch.secondaryLightmapImage =
+        ResolveRendererImage(batch.secondaryLightmapImage);
+    batch.reflectionProbeImage =
+        ResolveRendererImage(batch.reflectionProbeImage);
 }
 
 bool CanonicalPrimaryLightInfluences(
@@ -1609,6 +1635,8 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         }
         else
         {
+            for (WebRendererWorldBatchDesc &batch : command.batches)
+                ResolveRendererBatchImages(batch);
             const WebRendererWorldSurfaceDesc surface{
                 command.vertices.data(),
                 static_cast<std::uint32_t>(command.vertices.size()),
@@ -1834,6 +1862,8 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         }
         else
         {
+            for (WebRendererStaticModelBatchDesc &batch : command.batches)
+                ResolveRendererBatchImages(batch.draw);
             const WebRendererModelLightingAtlasDesc lightingAtlas{
                 command.modelLightingAtlas.pixels.data(),
                 command.modelLightingAtlas.width,
@@ -2371,6 +2401,8 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         hasDynamicEntityModels ||
         hasFxModel || hasMarkMesh || hasCodeMesh || hasParticleCloud)
     {
+        for (WebRendererWorldBatchDesc &batch : dynamicCommand.batches)
+            ResolveRendererBatchImages(batch);
         const WebRendererModelLightingAtlasDesc lightingAtlas{
             dynamicCommand.modelLightingAtlas.pixels.data(),
             dynamicCommand.modelLightingAtlas.width,

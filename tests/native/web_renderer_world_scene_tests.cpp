@@ -1,5 +1,6 @@
 #include <gfx_d3d/gfx_world_types.h>
 #include <web/web_renderer_world_scene.h>
+#include <web/web_renderer_image_reference.h>
 
 #include <algorithm>
 #include <array>
@@ -9,6 +10,14 @@
 
 namespace
 {
+GfxImage g_resolvedImage{};
+
+const GfxImage *LookupResolvedImage(const char *name) noexcept
+{
+    return name && std::strcmp(name, "crater_blacktop") == 0
+        ? &g_resolvedImage : nullptr;
+}
+
 constexpr std::uint32_t TECHNIQUE_LIT_INDEX = 7u;
 constexpr std::uint32_t TECHNIQUE_LIT_SUN_SHADOW_INDEX = 9u;
 WebRendererSceneViewDesc MakeView()
@@ -123,6 +132,20 @@ void TestCanonicalOpaqueSurfacesAreBatchedInWorldOrder()
     assert(command.vertices[6].position[0] == 12.0f);
     assert(command.vertices[0].color[0] > command.vertices[0].color[1]);
     assert(command.vertices[0].color[1] > command.vertices[0].color[2]);
+}
+
+void TestCommaPrefixedImageReferenceResolvesAtRendererBoundary()
+{
+    GfxImage reference{};
+    reference.name = ",crater_blacktop";
+    GfxImage ordinary{};
+    ordinary.name = "ordinary";
+    assert(WebRenderer_ResolveImageReference(
+        &reference, LookupResolvedImage) == &g_resolvedImage);
+    assert(WebRenderer_ResolveImageReference(
+        &ordinary, LookupResolvedImage) == &ordinary);
+    assert(WebRenderer_ResolveImageReference(
+        &reference, nullptr) == &reference);
 }
 
 void TestCanonicalMaterialAndLightmapIdentitySplitBatches()
@@ -701,6 +724,7 @@ void TestMalformedDynamicBrushRangeIsRejectedAtomically()
 
 int main()
 {
+    TestCommaPrefixedImageReferenceResolvesAtRendererBoundary();
     TestCanonicalOpaqueSurfacesAreBatchedInWorldOrder();
     TestCanonicalMaterialAndLightmapIdentitySplitBatches();
     TestCanonicalLmTechniqueNameDoesNotInventLightmapSamplers();
