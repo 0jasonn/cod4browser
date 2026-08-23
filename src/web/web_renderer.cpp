@@ -348,6 +348,7 @@ struct WebRendererState
     bool sceneFilmEnabled = false;
     bool sceneSunShadowEnabled = false;
     bool sceneViewFirstDrawCompleted = false;
+    bool sceneViewWaitReported = false;
 };
 
 WebRendererState g_renderer;
@@ -3932,7 +3933,8 @@ WebRendererSurfaceResult CopyWorldCommand(
     std::vector<WebRendererRetainedWorldBatch> &batches,
     std::vector<WebRendererRetainedWorldImage> &images,
     std::vector<WebRendererRetainedPrimaryLight> &primaryLights,
-    std::uint32_t &sunPrimaryLightIndex)
+    std::uint32_t &sunPrimaryLightIndex,
+    std::uint32_t inheritedPrimaryLightCount)
 {
     if (!surface.vertices || !surface.indices || !surface.batches ||
         surface.vertexCount == 0u || surface.indexCount == 0u ||
@@ -3950,6 +3952,14 @@ WebRendererSurfaceResult CopyWorldCommand(
     {
         return WebRendererSurfaceResult::InvalidDescriptor;
     }
+    // Moving brush-model batches keep the GfxWorld primary-light indices
+    // selected by the canonical frontend. Dynamic commands do not duplicate
+    // that immutable table, so validate those references against the world
+    // table already retained by the backend.
+    const std::uint32_t primaryLightReferenceCount =
+        surface.primaryLightCount != 0u
+        ? surface.primaryLightCount
+        : inheritedPrimaryLightCount;
     for (std::uint32_t vertexIndex = 0u;
          vertexIndex < surface.vertexCount; ++vertexIndex)
     {
@@ -4047,10 +4057,10 @@ WebRendererSurfaceResult CopyWorldCommand(
                     WebRendererWorldTechnique::NativeTechniqueUnavailable ||
                 source.lightingMode >
                     WebRendererWorldLightingMode::ModelLightGrid ||
-                (surface.primaryLightCount == 0u
+                (primaryLightReferenceCount == 0u
                     ? source.primaryLightIndex != 0u
                     : source.primaryLightIndex >=
-                        surface.primaryLightCount))
+                        primaryLightReferenceCount))
             {
                 return WebRendererSurfaceResult::InvalidDescriptor;
             }
@@ -4551,7 +4561,7 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
     const WebRendererSurfaceResult copy = CopyWorldCommand(
         surface, retainedVertices, retainedIndices, retainedBatches,
         retainedImages, retainedPrimaryLights,
-        retainedSunPrimaryLightIndex);
+        retainedSunPrimaryLightIndex, 0u);
     if (copy != WebRendererSurfaceResult::Success) return copy;
 
     GLuint replacementVertexArray = 0;
@@ -4727,6 +4737,7 @@ void __cdecl R_UnloadWorld()
     g_renderer.sceneViewSurfaceSubmissionGeneration = 0u;
     g_renderer.sceneViewDrawnSubmissionGeneration = 0u;
     g_renderer.sceneViewFirstDrawCompleted = false;
+    g_renderer.sceneViewWaitReported = false;
     g_renderer.sceneViewX = 0u;
     g_renderer.sceneViewY = 0u;
     g_renderer.sceneViewWidth = 0u;
@@ -4922,7 +4933,9 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
     const WebRendererSurfaceResult copy = CopyWorldCommand(
         scene, retainedVertices, retainedIndices, retainedBatches,
         g_renderer.retainedDynamicModelImages, ignoredPrimaryLights,
-        ignoredSunPrimaryLightIndex);
+        ignoredSunPrimaryLightIndex,
+        static_cast<std::uint32_t>(
+            g_renderer.retainedPrimaryLights.size()));
     if (copy != WebRendererSurfaceResult::Success) return copy;
     if (!CopyModelLightingAtlas(
             scene.modelLightingAtlas, retainedLighting))
@@ -5659,6 +5672,7 @@ bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
     if (worldChanged)
     {
         g_renderer.sceneViewFirstDrawCompleted = false;
+        g_renderer.sceneViewWaitReported = false;
         g_renderer.sceneViewDrawnSubmissionGeneration = 0u;
     }
     const bool firstSceneViewSubmission =
@@ -5692,12 +5706,18 @@ bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
             view.worldVertexCount,
             view.worldIndexCount,
             view.geometrySubmitted);
-        if (firstSceneViewSubmission)
+        if (firstSceneViewSubmission || firstGeometryViewSubmission)
         {
             Web_Log(
                 WebLogLevel::Info,
-                "[kisakcod-web] Canonical cgame view reached R_RenderScene for %s.\n",
-                view.worldName);
+                "[kisakcod-web] Canonical cgame view reached R_RenderScene "
+                "for %s (view=%u, geometry=%u, viewSurfaceGeneration=%u, "
+                "surfaceGeneration=%u).\n",
+                view.worldName,
+                g_renderer.sceneViewSubmissionGeneration,
+                view.geometrySubmitted ? 1u : 0u,
+                g_renderer.sceneViewSurfaceSubmissionGeneration,
+                g_renderer.surfaceSubmissionGeneration);
         }
     }
     return true;
@@ -6189,6 +6209,22 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         g_renderer.sceneViewGeometrySubmitted &&
         g_renderer.sceneViewSurfaceSubmissionGeneration ==
             g_renderer.surfaceSubmissionGeneration;
+    if (g_renderer.sceneViewActive && !sceneGeometryDraw &&
+        !g_renderer.sceneViewFirstDrawCompleted &&
+        !g_renderer.sceneViewWaitReported &&
+        g_renderer.sceneViewSubmissionGeneration != 0u)
+    {
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Cgame scene draw is waiting: active=%u "
+            "geometry=%u viewSurfaceGeneration=%u surfaceGeneration=%u "
+            "surfaceActive=%u.\n",
+            g_renderer.sceneViewActive ? 1u : 0u,
+            g_renderer.sceneViewGeometrySubmitted ? 1u : 0u,
+            g_renderer.sceneViewSurfaceSubmissionGeneration,
+            g_renderer.surfaceSubmissionGeneration,
+            g_renderer.surfaceActive ? 1u : 0u);
+        g_renderer.sceneViewWaitReported = true;
+    }
     const bool postProcessDraw = sceneGeometryDraw &&
         g_renderer.postProcessProgram != 0u &&
         CreatePostProcessTargets(width, height);
