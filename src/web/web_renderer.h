@@ -98,6 +98,9 @@ struct WebRendererSceneViewDesc
     float colorTintDelta[4];
     float displayGammaExponent;
     bool filmEnabled;
+    // Canonical refdef blur radius. Native applies this to the resolved 3D
+    // scene before the HUD, so the backend must not blur 2D commands.
+    float blurRadius;
     std::int32_t localClientNum;
     const char *worldName;
     std::uint32_t worldSurfaceCount;

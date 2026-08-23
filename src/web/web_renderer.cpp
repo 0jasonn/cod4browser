@@ -209,6 +209,7 @@ struct WebRendererState
     GLint postProcessColorTintBaseUniform = -1;
     GLint postProcessColorTintDeltaUniform = -1;
     GLint postProcessGammaExponentUniform = -1;
+    GLint postProcessBlurScaleUniform = -1;
     GLint compatibilityViewProjectionUniform = -1;
     GLint compatibilityWorldUniform = -1;
     GLint compatibilityTextureUniform = -1;
@@ -311,6 +312,7 @@ struct WebRendererState
     std::array<float, 4> sceneColorTintBase{};
     std::array<float, 4> sceneColorTintDelta{};
     float sceneDisplayGammaExponent = 1.0f;
+    float sceneBlurRadius = 0.0f;
     std::uint32_t sceneViewX = 0u;
     std::uint32_t sceneViewY = 0u;
     std::uint32_t sceneViewWidth = 0u;
@@ -1604,6 +1606,7 @@ void ResetGpuHandles()
     g_renderer.postProcessColorTintBaseUniform = -1;
     g_renderer.postProcessColorTintDeltaUniform = -1;
     g_renderer.postProcessGammaExponentUniform = -1;
+    g_renderer.postProcessBlurScaleUniform = -1;
     g_renderer.compatibilityViewProjectionUniform = -1;
     g_renderer.compatibilityWorldUniform = -1;
     g_renderer.compatibilityTextureUniform = -1;
@@ -2953,10 +2956,44 @@ bool CreateRendererResources()
         uniform vec4 u_color_tint_base;
         uniform vec4 u_color_tint_delta;
         uniform float u_gamma_exponent;
+        uniform vec2 u_blur_scale;
         out vec4 out_color;
         void main()
         {
-            vec4 source = texture(u_source, v_ndc * 0.5 + 0.5);
+            vec2 uv = v_ndc * 0.5 + 0.5;
+            vec4 source = texture(u_source, uv);
+            if (max(u_blur_scale.x, u_blur_scale.y) > 0.0)
+            {
+                // Native RB_BlurScreen applies a Gaussian filter to the
+                // resolved 3D scene before 2D. A bounded disk kernel keeps
+                // that ownership/order in one WebGL2 pass while scaling the
+                // authored 640x480 radius to the actual scene target.
+                source *= 0.38;
+                source += texture(u_source,
+                    uv + vec2( u_blur_scale.x * 0.5, 0.0)) * 0.09;
+                source += texture(u_source,
+                    uv + vec2(-u_blur_scale.x * 0.5, 0.0)) * 0.09;
+                source += texture(u_source,
+                    uv + vec2(0.0,  u_blur_scale.y * 0.5)) * 0.09;
+                source += texture(u_source,
+                    uv + vec2(0.0, -u_blur_scale.y * 0.5)) * 0.09;
+                source += texture(u_source,
+                    uv + vec2( u_blur_scale.x, 0.0)) * 0.04;
+                source += texture(u_source,
+                    uv + vec2(-u_blur_scale.x, 0.0)) * 0.04;
+                source += texture(u_source,
+                    uv + vec2(0.0,  u_blur_scale.y)) * 0.04;
+                source += texture(u_source,
+                    uv + vec2(0.0, -u_blur_scale.y)) * 0.04;
+                source += texture(u_source,
+                    uv + vec2( u_blur_scale.x,  u_blur_scale.y) * 0.7) * 0.025;
+                source += texture(u_source,
+                    uv + vec2(-u_blur_scale.x,  u_blur_scale.y) * 0.7) * 0.025;
+                source += texture(u_source,
+                    uv + vec2( u_blur_scale.x, -u_blur_scale.y) * 0.7) * 0.025;
+                source += texture(u_source,
+                    uv + vec2(-u_blur_scale.x, -u_blur_scale.y) * 0.7) * 0.025;
+            }
             vec3 color = source.rgb;
             if (u_film_enabled > 0.5)
             {
@@ -3104,6 +3141,8 @@ bool CreateRendererResources()
         glGetUniformLocation(postProcessProgram, "u_color_tint_delta");
     const GLint postProcessGammaExponentUniform =
         glGetUniformLocation(postProcessProgram, "u_gamma_exponent");
+    const GLint postProcessBlurScaleUniform =
+        glGetUniformLocation(postProcessProgram, "u_blur_scale");
     const GLenum pipelineError = glGetError();
 
     const std::uint8_t *texturePixels = FALLBACK_TEXTURE_RGBA;
@@ -3240,6 +3279,7 @@ bool CreateRendererResources()
         postProcessColorTintBaseUniform < 0 ||
         postProcessColorTintDeltaUniform < 0 ||
         postProcessGammaExponentUniform < 0 ||
+        postProcessBlurScaleUniform < 0 ||
         pipelineError != GL_NO_ERROR ||
         !surfaceReady || !textureReady || !worldTexturesReady ||
         !waterTexturesReady ||
@@ -3367,6 +3407,7 @@ bool CreateRendererResources()
         postProcessColorTintDeltaUniform;
     g_renderer.postProcessGammaExponentUniform =
         postProcessGammaExponentUniform;
+    g_renderer.postProcessBlurScaleUniform = postProcessBlurScaleUniform;
     g_renderer.compatibilityViewProjectionUniform = compatibilityViewProjection;
     g_renderer.compatibilityWorldUniform = compatibilityWorld;
     g_renderer.compatibilityTextureUniform = compatibilityTexture;
@@ -5296,7 +5337,8 @@ bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
         }
     }
     if (!std::isfinite(view.displayGammaExponent) ||
-        view.displayGammaExponent <= 0.0f)
+        view.displayGammaExponent <= 0.0f ||
+        !std::isfinite(view.blurRadius) || view.blurRadius < 0.0f)
     {
         return false;
     }
@@ -5363,6 +5405,7 @@ bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
     std::copy_n(view.colorTintDelta, 4u,
         g_renderer.sceneColorTintDelta.begin());
     g_renderer.sceneDisplayGammaExponent = view.displayGammaExponent;
+    g_renderer.sceneBlurRadius = view.blurRadius;
     g_renderer.sceneFilmEnabled = view.filmEnabled;
     g_renderer.sceneViewWorldName = view.worldName;
     if (view.geometrySubmitted)
@@ -5844,7 +5887,8 @@ void DrawPostProcessPass(
     int width,
     int height,
     bool filmEnabled,
-    float gammaExponent)
+    float gammaExponent,
+    float blurRadius)
 {
     glBindFramebuffer(GL_FRAMEBUFFER, destinationFramebuffer);
     glViewport(0, 0, width, height);
@@ -5865,6 +5909,11 @@ void DrawPostProcessPass(
         g_renderer.sceneColorTintDelta.data());
     glUniform1f(g_renderer.postProcessGammaExponentUniform,
         gammaExponent);
+    const float scaledBlurRadius = blurRadius *
+        static_cast<float>(height) / 480.0f;
+    glUniform2f(g_renderer.postProcessBlurScaleUniform,
+        width > 0 ? scaledBlurRadius / static_cast<float>(width) : 0.0f,
+        height > 0 ? scaledBlurRadius / static_cast<float>(height) : 0.0f);
     glActiveTexture(GL_TEXTURE5);
     glBindTexture(GL_TEXTURE_2D, sourceTexture);
     glBindVertexArray(g_renderer.vertexArray);
@@ -6354,7 +6403,8 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             width,
             height,
             g_renderer.sceneFilmEnabled,
-            1.0f);
+            1.0f,
+            g_renderer.sceneBlurRadius);
     }
     if (sceneGeometryDraw && !compatibilityDraw &&
         g_renderer.uiSceneActive && g_renderer.uiVertexArray != 0u)
@@ -6407,7 +6457,8 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             width,
             height,
             false,
-            g_renderer.sceneDisplayGammaExponent);
+            g_renderer.sceneDisplayGammaExponent,
+            0.0f);
     }
     GLenum sceneDrawError = GL_NO_ERROR;
     if (firstSceneDrawPending)

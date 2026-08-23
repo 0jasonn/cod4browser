@@ -265,6 +265,7 @@ bool g_hasSunDirectionOverride = false;
 bool g_rendererWorldReady = false;
 bool g_gameDrivenFrameReported = false;
 bool g_visionLightingReported = false;
+bool g_sceneBlurReported = false;
 bool g_worldSceneSubmitted = false;
 bool g_staticModelSceneSubmitted = false;
 bool g_dynamicModelSceneReported = false;
@@ -811,6 +812,7 @@ void __cdecl R_LoadWorld(char *name, int *checksum, int)
     g_rendererWorldReady = true;
     g_gameDrivenFrameReported = false;
     g_visionLightingReported = false;
+    g_sceneBlurReported = false;
     g_worldSceneSubmitted = false;
     g_staticModelSceneSubmitted = false;
     g_dynamicModelSceneReported = false;
@@ -1463,6 +1465,15 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     std::copy_n(colorManipulation.colorTintDelta, 4u,
         view.colorTintDelta);
     view.filmEnabled = colorManipulation.enabled;
+    view.blurRadius = refdef->blurRadius;
+    if (!g_sceneBlurReported && refdef->blurRadius > 0.0f)
+    {
+        g_sceneBlurReported = true;
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Canonical resolved-scene blur active: "
+            "radius=%.6f before 2D composition.\n",
+            refdef->blurRadius);
+    }
     const float displayGamma = r_gamma ? r_gamma->current.value : 0.8f;
     // R_SetColorMappings is gated by vidConfig.deviceSupportsGamma. The
     // browser registration deliberately reports false because a composited
@@ -1490,7 +1501,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             "brightness=%.6f contrast=%.6f desaturation=%.6f invert=%d "
             "dark=(%.6f %.6f %.6f) light=(%.6f %.6f %.6f); "
             "glow=%d cutoff=%.6f desaturation=%.6f intensity=%.6f "
-            "radius=%.6f; gamma=%.6f; fog=%d start=%.6f density=%.9f "
+            "radius=%.6f; blur=%.6f gamma=%.6f; fog=%d start=%.6f density=%.9f "
             "color=(%.6f %.6f %.6f %.6f).\n",
             refdef->film.enabled, refdef->film.brightness,
             refdef->film.contrast, refdef->film.desaturation,
@@ -1501,6 +1512,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             refdef->glow.enabled, refdef->glow.bloomCutoff,
             refdef->glow.bloomDesaturation,
             refdef->glow.bloomIntensity, refdef->glow.radius,
+            refdef->blurRadius,
             r_gamma ? r_gamma->current.value : 0.8f,
             view.fogEnabled, view.fogStart, view.fogDensity,
             view.fogColor[0], view.fogColor[1], view.fogColor[2],
