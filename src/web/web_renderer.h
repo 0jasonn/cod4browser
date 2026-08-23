@@ -10,6 +10,7 @@ struct WebFrameInfo;
 struct GfxImage;
 struct Material;
 struct XModel;
+struct water_t;
 
 // The bootstrap renderer deliberately keeps one bounded CPU-side RGBA8 copy
 // so its texture can be recreated after browser context loss. These limits
@@ -154,6 +155,9 @@ enum class WebRendererWorldTechnique : std::uint8_t
     BaseTextureLightmapNormal,
     VertexColorMultiply,
     VertexColorAdditive,
+    // Canonical water_l_sun pass: animated FFT height field, reflection
+    // probe, Fresnel water color, sun specular, and fog.
+    WaterLitSun,
     // Portable subset of IW3's reflexsight shader. Its DXT1 color texture is
     // intentionally opaque; source opacity is reconstructed from intensity.
     ReflexSight,
@@ -242,9 +246,13 @@ struct WebRendererWorldBatchDesc
     const GfxImage *normalImage;
     const GfxImage *lightmapImage;
     const GfxImage *secondaryLightmapImage;
+    const water_t *water;
+    const GfxImage *reflectionProbeImage;
     std::uint32_t stateBits[2];
     std::uint8_t samplerState;
     std::uint8_t normalSamplerState;
+    std::uint8_t waterSamplerState;
+    std::uint8_t reflectionProbeIndex;
     std::uint8_t lightmapIndex;
     WebRendererSceneBatchKind sourceKind;
     WebRendererWorldTechnique technique;
@@ -262,6 +270,8 @@ struct WebRendererWorldBatchDesc
     bool castsSunShadow;
     const char *pixelShaderName;
     std::uint32_t pixelShaderProgramHash;
+    float envMapParms[4];
+    float waterColor[4];
     // CONST_SRC_CODE_BASE_LIGHTING_COORDS for non-instanced DObj draws.
     // Static XModels carry the same value per instance below.
     float modelLightingCoordinates[3];

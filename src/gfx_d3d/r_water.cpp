@@ -1,11 +1,17 @@
 #include <universal/q_shared.h>
 #include "r_water.h"
+#ifndef KISAK_WEB
 #include <qcommon/mem_track.h>
 #include "r_image.h"
-#include <universal/fft.h>
 #include "r_dvars.h"
 #include <qcommon/qcommon.h>
 #include <universal/profile.h>
+#endif
+#include <universal/fft.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstring>
 
 WaterGlob waterGlob;
 WaterGlobStatic waterGlobStatic;
@@ -17,9 +23,12 @@ long volatile g_waterLock;//          85b3ac80     gfx_d3d : r_water.obj
 
 void __cdecl TRACK_r_water()
 {
+#ifndef KISAK_WEB
     track_static_alloc_internal(&waterGlob, 36864, "waterGlob", 18);
+#endif
 }
 
+#ifndef KISAK_WEB
 void __cdecl R_UploadWaterTextureInternal(water_t **data)
 {
     water_t *water; // [esp+68h] [ebp-4h]
@@ -47,6 +56,7 @@ void __cdecl R_UploadWaterTextureInternal(water_t **data)
 
     InterlockedExchangeAdd(&g_waterLock, -1);
 }
+#endif
 
 void __cdecl WaterFrequenciesAtTime(complex_s *H, const water_t *water, float t)
 {
@@ -235,6 +245,7 @@ void __cdecl WaterPixelsFromAmplitudes(GfxColor *pixels, complex_s *H, const wat
     }
 }
 
+#ifndef KISAK_WEB
 void __cdecl GenerateMipMaps(_D3DFORMAT format, uint8_t *pixels, water_t *water)
 {
     int srcWidth;
@@ -273,6 +284,7 @@ void __cdecl R_UploadWaterTexture(water_t *water, float floatTime)
         R_UploadWaterTextureInternal(&water);
     }
 }
+#endif
 
 void __cdecl R_InitWater()
 {
@@ -289,6 +301,7 @@ void __cdecl R_InitWater()
     FFT_Init(waterGlobStatic.fftBitswap, waterGlobStatic.fftTrigTable);
 }
 
+#ifndef KISAK_WEB
 void __cdecl Load_PicmipWater(water_t **waterRef)
 {
     complex_s *H0; // edx
@@ -335,5 +348,38 @@ void __cdecl Load_PicmipWater(water_t **waterRef)
             srcIndex += v6 * downsample * (downsample - 1);
         }
     }
+}
+#endif
+
+bool R_GenerateWaterPixelsR8(
+    const water_t *water,
+    float floatTime,
+    std::uint8_t *pixels,
+    std::size_t pixelCapacity)
+{
+    if (!water || !pixels || !water->H0 || !water->wTerm ||
+        water->M < 4 || water->M > 64 || water->N != water->M ||
+        (water->M & (water->M - 1)) != 0)
+    {
+        return false;
+    }
+    const std::size_t count = static_cast<std::size_t>(water->M) *
+        static_cast<std::size_t>(water->N);
+    if (count > HCOUNT || count > pixelCapacity || (count & 3u) != 0u)
+        return false;
+
+    // Browser startup does not run the native D3D renderer initializer, so
+    // initialize the exact shared lookup tables on first portable use.
+    static bool initialized = false;
+    if (!initialized)
+    {
+        R_InitWater();
+        initialized = true;
+    }
+    WaterFrequenciesAtTime(waterGlob.H, water, floatTime);
+    WaterAmplitudesFromFrequencies(waterGlob.H, water);
+    WaterPixelsFromAmplitudes(
+        reinterpret_cast<GfxColor *>(pixels), waterGlob.H, water);
+    return true;
 }
 

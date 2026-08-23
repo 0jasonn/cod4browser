@@ -1,6 +1,7 @@
 #include <gfx_d3d/gfx_world_types.h>
 #include <web/web_renderer_world_scene.h>
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstdint>
@@ -498,6 +499,108 @@ void TestSkyPassIsNotFoldedIntoOpaqueWorldBatch()
     assert(command.vertices.size() == 6u);
 }
 
+void TestSpecialSurfaceInventoryUsesCanonicalMaterialData()
+{
+    Fixture fixture;
+    MaterialTechnique technique{};
+    technique.name = "special";
+    technique.flags = 3u;
+    technique.passCount = 1u;
+    MaterialTechniqueSet techniqueSet{};
+    techniqueSet.techniques[4] = &technique;
+    GfxStateBits stateBits{};
+    GfxImage baseImage{};
+    water_t water{};
+    MaterialTextureDef textures[2]{};
+    textures[0].semantic = 2u;
+    textures[0].u.image = &baseImage;
+    textures[1].semantic = 11u;
+    textures[1].u.water = &water;
+    Material material{};
+    material.textureCount = 2u;
+    material.textureTable = textures;
+    material.techniqueSet = &techniqueSet;
+    material.stateBitsEntry[4] = 0u;
+    material.stateBitsCount = 1u;
+    material.stateBitsTable = &stateBits;
+    fixture.surfaces[0].material = &material;
+    fixture.surfaces[1].material = &material;
+
+    WebRendererWorldSceneCommand command;
+    assert(WebRenderer_BuildWorldSceneCommand(
+        fixture.world, MakeView(), command) ==
+        WebRendererWorldSceneResult::Success);
+    assert(command.waterSurfaceCount == 2u);
+    assert(command.waterMaterialCount == 1u);
+    assert(command.resolvedSceneSurfaceCount == 2u);
+    assert(command.resolvedPostSunSurfaceCount == 2u);
+}
+
+void TestCanonicalWaterPassCarriesSimulationAndReflectionInputs()
+{
+    Fixture fixture;
+    MaterialPixelShader pixelShader{};
+    pixelShader.name = "water_l_sun.hlsl";
+    MaterialTechnique technique{};
+    technique.name = "water_l_sun";
+    technique.passCount = 1u;
+    technique.passArray[0].pixelShader = &pixelShader;
+    technique.passArray[0].customSamplerFlags = 1u;
+    MaterialTechniqueSet techniqueSet{};
+    techniqueSet.techniques[TECHNIQUE_LIT_INDEX] = &technique;
+    GfxStateBits stateBits{{0x19288065u, 12u}};
+    std::array<complex_s, 16> h0{};
+    std::array<float, 16> wTerm{};
+    water_t water{};
+    water.H0 = h0.data();
+    water.wTerm = wTerm.data();
+    water.M = 4;
+    water.N = 4;
+    MaterialTextureDef waterTexture{};
+    waterTexture.semantic = 11u;
+    waterTexture.samplerState = 2u;
+    waterTexture.u.water = &water;
+    MaterialConstantDef constants[2]{};
+    constants[0].nameHash = 0x3d9994dcu;
+    const float envMapParms[4]{0.0f, 0.5f, 4.25f, 2.5f};
+    std::copy_n(envMapParms, 4u, constants[0].literal);
+    constants[1].nameHash = 0xb82a51e8u;
+    const float waterColor[4]{0.53f, 0.47f, 0.40f, 1.0f};
+    std::copy_n(waterColor, 4u, constants[1].literal);
+    Material material{};
+    material.info.name = "wc/kh_water_mud";
+    material.textureCount = 1u;
+    material.textureTable = &waterTexture;
+    material.constantCount = 2u;
+    material.constantTable = constants;
+    material.techniqueSet = &techniqueSet;
+    material.stateBitsEntry[TECHNIQUE_LIT_INDEX] = 0u;
+    material.stateBitsCount = 1u;
+    material.stateBitsTable = &stateBits;
+    GfxImage reflectionImage{};
+    GfxReflectionProbe reflectionProbe{};
+    reflectionProbe.reflectionImage = &reflectionImage;
+    fixture.world.reflectionProbeCount = 1u;
+    fixture.world.reflectionProbes = &reflectionProbe;
+    fixture.surfaces[0].material = &material;
+    fixture.surfaces[0].reflectionProbeIndex = 0u;
+
+    WebRendererWorldSceneCommand command;
+    assert(WebRenderer_BuildWorldSceneCommand(
+        fixture.world, MakeView(), command) ==
+        WebRendererWorldSceneResult::Success);
+    const WebRendererWorldBatchDesc &batch = command.batches[0];
+    assert(batch.technique == WebRendererWorldTechnique::WaterLitSun);
+    assert(batch.water == &water);
+    assert(batch.waterSamplerState == 2u);
+    assert(batch.reflectionProbeImage == &reflectionImage);
+    assert(batch.reflectionProbeIndex == 0u);
+    assert(std::memcmp(batch.envMapParms, envMapParms,
+        sizeof(envMapParms)) == 0);
+    assert(std::memcmp(batch.waterColor, waterColor,
+        sizeof(waterColor)) == 0);
+}
+
 void TestConservativeVisibilityIsDisabledForMovingCanonicalView()
 {
     Fixture fixture;
@@ -566,8 +669,9 @@ void TestDynamicBrushModelUsesCanonicalSurfaceRangeAndPlacement()
     assert(command.vertices.size() == 3u);
     assert(command.indices == std::vector<std::uint32_t>({0u, 1u, 2u}));
     assert(command.vertices[0].position[0] == 112.0f);
-    assert(command.vertices[0].position[1] == 199.0f);
-    assert(command.vertices[0].position[2] == 299.0f);
+    // Surface 2's canonical index order starts at local vertex 2.
+    assert(command.vertices[0].position[1] == 200.0f);
+    assert(command.vertices[0].position[2] == 301.0f);
     assert(command.batches.size() == 1u);
     assert(command.batches[0].sourceKind ==
         WebRendererSceneBatchKind::DynamicBModel);
@@ -606,6 +710,8 @@ int main()
     TestSunShadowTechniqueAndCanonicalCasterBitsSplitBatches();
     TestMalformedLocalIndexIsRejectedAtomically();
     TestSkyPassIsNotFoldedIntoOpaqueWorldBatch();
+    TestSpecialSurfaceInventoryUsesCanonicalMaterialData();
+    TestCanonicalWaterPassCarriesSimulationAndReflectionInputs();
     TestConservativeVisibilityIsDisabledForMovingCanonicalView();
     TestCanonicalDpvsRangesOverrideNonContiguousModelCount();
     TestDynamicBrushModelUsesCanonicalSurfaceRangeAndPlacement();

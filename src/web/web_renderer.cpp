@@ -5,6 +5,8 @@
 #include <web/web_system.h>
 
 #include <gfx_d3d/gfx_image_types.h>
+#include <universal/q_shared.h>
+#include <gfx_d3d/r_water.h>
 #include <database/db_generated_image_platform.h>
 #include <qcommon/iwi_image.h>
 #include <universal/com_files.h>
@@ -94,6 +96,19 @@ struct WebRendererRetainedWorldBatch
     std::string pixelShaderName;
     std::uint32_t pixelShaderProgramHash = 0u;
     float modelLightingCoordinates[3]{};
+    std::vector<complex_s> waterH0;
+    std::vector<float> waterWTerm;
+    std::vector<std::uint8_t> waterPixels;
+    std::int32_t waterM = 0;
+    std::int32_t waterN = 0;
+    std::uint8_t waterSamplerState = 0u;
+    std::uint8_t reflectionProbeIndex = 0u;
+    float envMapParms[4]{};
+    float waterColor[4]{};
+    kisak::iwi::Rgba8Cube reflectionCube;
+    GLuint waterTexture = 0u;
+    GLuint reflectionTexture = 0u;
+    float waterTextureTime = std::numeric_limits<float>::quiet_NaN();
 };
 
 struct WebRendererRetainedModelLightingAtlas
@@ -174,6 +189,10 @@ struct WebRendererState
     GLint sunShadowEnabledUniform = -1;
     GLint sunDirectionUniform = -1;
     GLint sunColorUniform = -1;
+    GLint waterMapUniform = -1;
+    GLint reflectionProbeUniform = -1;
+    GLint envMapParmsUniform = -1;
+    GLint waterColorUniform = -1;
     GLint shadowDepthMatrixUniform = -1;
     GLint shadowDepthTextureUniform = -1;
     GLint shadowDepthTextureEnabledUniform = -1;
@@ -283,6 +302,7 @@ struct WebRendererState
     std::array<float, 2> sceneFogParams{};
     std::array<float, 3> sceneSunDirection{};
     std::array<float, 3> sceneSunColor{};
+    float sceneViewTimeSeconds = 0.0f;
     std::array<float, 3> sceneWorldMins{};
     std::array<float, 3> sceneWorldMaxs{};
     std::array<float, 16> sceneSunShadowMatrix{};
@@ -309,6 +329,8 @@ bool HandleWebGLContextLost(int, const void *, void *);
 bool HandleWebGLContextRestored(int, const void *, void *);
 void DeleteWorldTextureObjects(
     std::vector<WebRendererRetainedWorldImage> &images);
+void DeleteWaterTextureObjects(
+    std::vector<WebRendererRetainedWorldBatch> &batches);
 void DeleteSurfaceObjects(
     GLuint vertexArray, GLuint vertexBuffer, GLuint indexBuffer);
 void DeleteStaticModelObjects(
@@ -582,6 +604,7 @@ const char *ComparisonPortableTechniqueName(
         return "vertex-color-multiply";
     case WebRendererWorldTechnique::VertexColorAdditive:
         return "vertex-color-additive";
+    case WebRendererWorldTechnique::WaterLitSun: return "water-lit-sun";
     case WebRendererWorldTechnique::ReflexSight: return "reflex-sight";
     }
     return "unknown";
@@ -620,6 +643,8 @@ const char *ComparisonCompositionName(
         return "mix(white,base*vertexRgb,vertexAlpha), ZERO/SRC_COLOR blend";
     case WebRendererWorldTechnique::VertexColorAdditive:
         return "fog(base*vertex)*baseAlpha*vertexAlpha, ONE/ONE blend";
+    case WebRendererWorldTechnique::WaterLitSun:
+        return "fresnel(waterColor*normalZ,reflectionProbe)+sunSpecular";
     default:
         return "base*vertex";
     }
@@ -860,7 +885,7 @@ void LogWorldVertexColorInventory(
     }
     constexpr std::array<const char *, techniqueCount> techniqueNames{{
         "fallback", "base", "lightmapped", "lightmapped-normal",
-        "multiply", "additive", "reflex-sight"}};
+        "multiply", "additive", "water-lit-sun", "reflex-sight"}};
     for (std::size_t index = 0u; index < stats.size(); ++index)
     {
         const ColorStats &entry = stats[index];
@@ -1557,6 +1582,10 @@ void ResetGpuHandles()
     g_renderer.sunShadowEnabledUniform = -1;
     g_renderer.sunDirectionUniform = -1;
     g_renderer.sunColorUniform = -1;
+    g_renderer.waterMapUniform = -1;
+    g_renderer.reflectionProbeUniform = -1;
+    g_renderer.envMapParmsUniform = -1;
+    g_renderer.waterColorUniform = -1;
     g_renderer.shadowDepthMatrixUniform = -1;
     g_renderer.shadowDepthTextureUniform = -1;
     g_renderer.shadowDepthTextureEnabledUniform = -1;
@@ -1589,6 +1618,13 @@ void ResetGpuHandles()
         image.texture = 0u;
     for (WebRendererRetainedWorldImage &image : g_renderer.retainedUiImages)
         image.texture = 0u;
+    for (WebRendererRetainedWorldBatch &batch :
+         g_renderer.retainedWorldBatches)
+    {
+        batch.waterTexture = 0u;
+        batch.reflectionTexture = 0u;
+        batch.waterTextureTime = std::numeric_limits<float>::quiet_NaN();
+    }
     g_renderer.retainedSky.texture = 0u;
     g_renderer.retainedStaticModelLighting.texture = 0u;
     g_renderer.retainedDynamicModelLighting.texture = 0u;
@@ -1803,6 +1839,7 @@ void DestroyWebGLContext()
         EMSCRIPTEN_RESULT_SUCCESS)
     {
         DeleteWorldTextureObjects(g_renderer.retainedWorldImages);
+        DeleteWaterTextureObjects(g_renderer.retainedWorldBatches);
         DeleteWorldTextureObjects(g_renderer.retainedStaticModelImages);
         DeleteWorldTextureObjects(g_renderer.retainedDynamicModelImages);
         DeleteWorldTextureObjects(g_renderer.retainedUiImages);
@@ -1885,6 +1922,21 @@ void DeleteWorldTextureObjects(
         if (image.texture != 0u)
             glDeleteTextures(1, &image.texture);
         image.texture = 0u;
+    }
+}
+
+void DeleteWaterTextureObjects(
+    std::vector<WebRendererRetainedWorldBatch> &batches)
+{
+    for (WebRendererRetainedWorldBatch &batch : batches)
+    {
+        if (batch.waterTexture != 0u)
+            glDeleteTextures(1, &batch.waterTexture);
+        if (batch.reflectionTexture != 0u)
+            glDeleteTextures(1, &batch.reflectionTexture);
+        batch.waterTexture = 0u;
+        batch.reflectionTexture = 0u;
+        batch.waterTextureTime = std::numeric_limits<float>::quiet_NaN();
     }
 }
 
@@ -2154,14 +2206,19 @@ bool CreateTextureObject(
     return true;
 }
 
-bool CreateSkyTextureObject(WebRendererRetainedSkyImage &sky)
+bool CreateCubeTextureObject(
+    const kisak::iwi::Rgba8Cube &cube,
+    std::uint8_t samplerState,
+    GLenum textureUnit,
+    const char *label,
+    GLuint &textureOut)
 {
-    if (!sky.active || sky.cube.edgeLength == 0u) return true;
-    if (sky.texture != 0u) return true;
+    if (cube.edgeLength == 0u) return false;
+    if (textureOut != 0u) return true;
     const std::size_t expectedFaceBytes =
-        static_cast<std::size_t>(sky.cube.edgeLength) *
-        sky.cube.edgeLength * 4u;
-    for (const auto &face : sky.cube.faces)
+        static_cast<std::size_t>(cube.edgeLength) *
+        cube.edgeLength * 4u;
+    for (const auto &face : cube.faces)
         if (face.size() != expectedFaceBytes) return false;
 
     while (glGetError() != GL_NO_ERROR)
@@ -2169,9 +2226,9 @@ bool CreateSkyTextureObject(WebRendererRetainedSkyImage &sky)
     }
     GLuint texture = 0u;
     glGenTextures(1, &texture);
-    glActiveTexture(GL_TEXTURE4);
+    glActiveTexture(textureUnit);
     glBindTexture(GL_TEXTURE_CUBE_MAP, texture);
-    const std::uint8_t filter = sky.samplerState & 0x07u;
+    const std::uint8_t filter = samplerState & 0x07u;
     const GLint glFilter = filter == 1u ? GL_NEAREST : GL_LINEAR;
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, glFilter);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, glFilter);
@@ -2179,13 +2236,13 @@ bool CreateSkyTextureObject(WebRendererRetainedSkyImage &sky)
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    for (std::size_t face = 0u; face < sky.cube.faces.size(); ++face)
+    for (std::size_t face = 0u; face < cube.faces.size(); ++face)
     {
         glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X +
                 static_cast<GLenum>(face),
-            0, GL_RGBA8, static_cast<GLsizei>(sky.cube.edgeLength),
-            static_cast<GLsizei>(sky.cube.edgeLength), 0, GL_RGBA,
-            GL_UNSIGNED_BYTE, sky.cube.faces[face].data());
+            0, GL_RGBA8, static_cast<GLsizei>(cube.edgeLength),
+            static_cast<GLsizei>(cube.edgeLength), 0, GL_RGBA,
+            GL_UNSIGNED_BYTE, cube.faces[face].data());
     }
     glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
     const GLenum error = glGetError();
@@ -2194,11 +2251,73 @@ bool CreateSkyTextureObject(WebRendererRetainedSkyImage &sky)
     {
         if (texture != 0u) glDeleteTextures(1, &texture);
         Web_Log(WebLogLevel::Error,
-            "[kisakcod-web] WebGL2 sky cubemap upload failed (0x%x).\n",
+            "[kisakcod-web] WebGL2 %s cubemap upload failed (0x%x).\n",
+            label,
             static_cast<unsigned int>(error));
         return false;
     }
-    sky.texture = texture;
+    textureOut = texture;
+    return true;
+}
+
+bool CreateSkyTextureObject(WebRendererRetainedSkyImage &sky)
+{
+    if (!sky.active) return true;
+    return CreateCubeTextureObject(sky.cube, sky.samplerState, GL_TEXTURE4,
+        "sky", sky.texture);
+}
+
+bool CreateWaterTextureObjects(
+    std::vector<WebRendererRetainedWorldBatch> &batches)
+{
+    for (WebRendererRetainedWorldBatch &batch : batches)
+    {
+        if (batch.technique != WebRendererWorldTechnique::WaterLitSun)
+            continue;
+        water_t water{};
+        water.H0 = batch.waterH0.data();
+        water.wTerm = batch.waterWTerm.data();
+        water.M = batch.waterM;
+        water.N = batch.waterN;
+        if (!R_GenerateWaterPixelsR8(&water, 0.0f,
+                batch.waterPixels.data(), batch.waterPixels.size()))
+            return false;
+
+        glGenTextures(1, &batch.waterTexture);
+        glActiveTexture(GL_TEXTURE7);
+        glBindTexture(GL_TEXTURE_2D, batch.waterTexture);
+        const std::uint8_t filter = batch.waterSamplerState & 0x07u;
+        const GLint glFilter = filter == 1u ? GL_NEAREST : GL_LINEAR;
+        const bool mipped =
+            (batch.waterSamplerState & 0x18u) != 0u;
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+            mipped
+                ? (glFilter == GL_LINEAR
+                    ? GL_LINEAR_MIPMAP_LINEAR
+                    : GL_NEAREST_MIPMAP_NEAREST)
+                : glFilter);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, glFilter);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,
+            (batch.waterSamplerState & 0x20u) != 0u
+                ? GL_CLAMP_TO_EDGE : GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,
+            (batch.waterSamplerState & 0x40u) != 0u
+                ? GL_CLAMP_TO_EDGE : GL_REPEAT);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, batch.waterM, batch.waterN,
+            0, GL_RED, GL_UNSIGNED_BYTE, batch.waterPixels.data());
+        glGenerateMipmap(GL_TEXTURE_2D);
+        batch.waterTextureTime = 0.0f;
+        if (!CreateCubeTextureObject(batch.reflectionCube, 2u, GL_TEXTURE8,
+                "reflection-probe", batch.reflectionTexture) ||
+            batch.waterTexture == 0u || glGetError() != GL_NO_ERROR)
+        {
+            DeleteWaterTextureObjects(batches);
+            return false;
+        }
+    }
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    glActiveTexture(GL_TEXTURE0);
     return true;
 }
 
@@ -2477,11 +2596,22 @@ bool CreateRendererResources()
         uniform vec3 u_fog_color;
         uniform vec2 u_fog_params;
         uniform sampler2D u_shadow_map;
+        uniform sampler2D u_water_map;
+        uniform samplerCube u_reflection_probe;
         uniform mat4 u_shadow_matrix;
         uniform float u_sun_shadow_enabled;
         uniform vec3 u_sun_direction;
         uniform vec3 u_sun_color;
+        uniform vec4 u_env_map_parms;
+        uniform vec4 u_water_color;
         out vec4 out_color;
+
+        float water_height(vec2 uv)
+        {
+            return texture(u_water_map, uv).r +
+                texture(u_water_map, uv * 3.7).r * 0.6 +
+                texture(u_water_map, uv * 13.69).r * 0.36;
+        }
 
         float sample_sun_shadow(vec3 world_position)
         {
@@ -2532,6 +2662,51 @@ bool CreateRendererResources()
                 vec3 fallback_color =
                     (vec3(0.28, 0.34, 0.39) + orientation * 0.20) * light;
                 bootstrap_color = vec4(fallback_color, 1.0);
+            }
+            else if (u_material_mode == 3)
+            {
+                // Exact arithmetic recovered from IW3 water_l_sun. The
+                // animated L8 field is generated by the shared native FFT
+                // implementation; this branch owns only the WebGL boundary.
+                vec3 view_direction = normalize(
+                    v_world_position - u_view_origin);
+                float parallax_height = texture(
+                    u_water_map, v_texcoord * 0.5).r;
+                vec2 water_uv = v_texcoord +
+                    (0.5 - parallax_height) * view_direction.xy *
+                    (3.0 / 128.0);
+                float center = water_height(water_uv);
+                vec2 slope = vec2(
+                    water_height(water_uv + vec2(1.0 / 256.0, 0.0)) -
+                        center,
+                    water_height(water_uv + vec2(0.0, 1.0 / 256.0)) -
+                        center);
+                vec3 water_normal = normalize(vec3(slope, 1.0));
+                float view_normal = dot(view_direction, water_normal);
+                vec3 reflection_direction = view_direction -
+                    water_normal * (2.0 * view_normal);
+                vec4 reflection_sample = texture(u_reflection_probe,
+                    vec3(reflection_direction.xy,
+                        abs(reflection_direction.z)));
+                vec3 reflection_color = clamp(
+                    reflection_sample.a * reflection_sample.rgb * 4.0,
+                    0.0, 1.0);
+                vec3 water_base = u_water_color.rgb * water_normal.z;
+                float fresnel_power = pow(
+                    1.0 - abs(view_normal), u_env_map_parms.z);
+                float fresnel = clamp(mix(
+                    u_env_map_parms.x, u_env_map_parms.y,
+                    fresnel_power), 0.0, 1.0);
+                vec3 water_lighting = mix(
+                    water_base, reflection_color, fresnel);
+                float sun_reflection = max(dot(
+                    reflection_direction,
+                    normalize(u_sun_direction)) + 0.00075, 0.0);
+                float sun_specular = pow(
+                    fresnel * sun_reflection, 64.0);
+                water_lighting += u_sun_color * sun_specular *
+                    u_env_map_parms.w;
+                bootstrap_color = vec4(water_lighting, v_color.a);
             }
             else if (u_texture_enabled > 0.5)
             {
@@ -2872,6 +3047,14 @@ bool CreateRendererResources()
         glGetUniformLocation(program, "u_sun_direction");
     const GLint sunColorUniform =
         glGetUniformLocation(program, "u_sun_color");
+    const GLint waterMapUniform =
+        glGetUniformLocation(program, "u_water_map");
+    const GLint reflectionProbeUniform =
+        glGetUniformLocation(program, "u_reflection_probe");
+    const GLint envMapParmsUniform =
+        glGetUniformLocation(program, "u_env_map_parms");
+    const GLint waterColorUniform =
+        glGetUniformLocation(program, "u_water_color");
     const GLint shadowDepthMatrixUniform =
         glGetUniformLocation(shadowProgram, "u_shadow_depth_matrix");
     const GLint shadowDepthTextureUniform =
@@ -2939,7 +3122,10 @@ bool CreateRendererResources()
     const bool worldTexturesReady = textureReady &&
         (!g_renderer.worldSurfaceActive ||
          CreateWorldTextureObjects(g_renderer.retainedWorldImages));
-    const bool skyTextureReady = worldTexturesReady &&
+    const bool waterTexturesReady = worldTexturesReady &&
+        (!g_renderer.worldSurfaceActive ||
+         CreateWaterTextureObjects(g_renderer.retainedWorldBatches));
+    const bool skyTextureReady = waterTexturesReady &&
         CreateSkyTextureObject(g_renderer.retainedSky);
     GLuint staticModelVertexArray = 0u;
     GLuint staticModelVertexBuffer = 0u;
@@ -3021,6 +3207,8 @@ bool CreateRendererResources()
         fogParamsUniform < 0 || shadowMapUniform < 0 ||
         shadowMatrixUniform < 0 || sunShadowEnabledUniform < 0 ||
         sunDirectionUniform < 0 || sunColorUniform < 0 ||
+        waterMapUniform < 0 || reflectionProbeUniform < 0 ||
+        envMapParmsUniform < 0 || waterColorUniform < 0 ||
         shadowDepthMatrixUniform < 0 || shadowDepthTextureUniform < 0 ||
         shadowDepthTextureEnabledUniform < 0 ||
         shadowDepthAlphaTestUniform < 0 ||
@@ -3034,6 +3222,7 @@ bool CreateRendererResources()
         postProcessGammaExponentUniform < 0 ||
         pipelineError != GL_NO_ERROR ||
         !surfaceReady || !textureReady || !worldTexturesReady ||
+        !waterTexturesReady ||
         !skyTextureReady ||
         !staticModelObjectsReady || !staticModelTexturesReady ||
         !staticModelLightingReady ||
@@ -3059,6 +3248,7 @@ bool CreateRendererResources()
         DeleteShadowObjects(
             shadowFramebuffer, shadowDepthTexture, shadowProgram);
         DeleteWorldTextureObjects(g_renderer.retainedWorldImages);
+        DeleteWaterTextureObjects(g_renderer.retainedWorldBatches);
         DeleteWorldTextureObjects(g_renderer.retainedStaticModelImages);
         DeleteWorldTextureObjects(g_renderer.retainedDynamicModelImages);
         DeleteWorldTextureObjects(g_renderer.retainedUiImages);
@@ -3131,6 +3321,10 @@ bool CreateRendererResources()
     g_renderer.sunShadowEnabledUniform = sunShadowEnabledUniform;
     g_renderer.sunDirectionUniform = sunDirectionUniform;
     g_renderer.sunColorUniform = sunColorUniform;
+    g_renderer.waterMapUniform = waterMapUniform;
+    g_renderer.reflectionProbeUniform = reflectionProbeUniform;
+    g_renderer.envMapParmsUniform = envMapParmsUniform;
+    g_renderer.waterColorUniform = waterColorUniform;
     g_renderer.shadowDepthMatrixUniform = shadowDepthMatrixUniform;
     g_renderer.shadowDepthTextureUniform = shadowDepthTextureUniform;
     g_renderer.shadowDepthTextureEnabledUniform =
@@ -3391,6 +3585,56 @@ bool DecodeExternalCanonicalImage(
     return true;
 }
 
+bool DecodeCanonicalCubeImage(
+    const GfxImage *canonical,
+    kisak::iwi::Rgba8Cube &decoded,
+    kisak::iwi::Error &decodeError)
+{
+    if (!canonical || canonical->mapType != MAPTYPE_CUBE ||
+        !canonical->name || !canonical->name[0] ||
+        std::strlen(canonical->name) > 240u)
+    {
+        return false;
+    }
+    WebDbImageLoadDef loadDef{};
+    if (DB_WebGetImageLoadDef(canonical, loadDef) &&
+        loadDef.byteLength > 0u && loadDef.dimensions[0] > 0 &&
+        loadDef.dimensions[0] == loadDef.dimensions[1] &&
+        loadDef.dimensions[2] == 1)
+    {
+        decodeError = kisak::iwi::DecodeLoadDefCubeRgba8(
+            loadDef.format, loadDef.flags,
+            static_cast<std::uint16_t>(loadDef.dimensions[0]),
+            static_cast<std::uint16_t>(loadDef.dimensions[1]),
+            static_cast<std::uint16_t>(loadDef.dimensions[2]),
+            std::span<const std::uint8_t>(loadDef.data,
+                loadDef.byteLength), decoded);
+        return true;
+    }
+
+    const std::string path =
+        std::string("images/") + canonical->name + ".iwi";
+    int file = 0;
+    const int fileSize = FS_FOpenFileReadDatabase(path.c_str(), &file);
+    if (fileSize < 0) return false;
+    if (fileSize > 0 && static_cast<std::size_t>(fileSize) <=
+            kisak::iwi::MAX_TEXTURE_MEMBER_BYTES)
+    {
+        std::vector<std::uint8_t> bytes(static_cast<std::size_t>(fileSize));
+        const std::uint32_t read = FS_Read(bytes.data(),
+            static_cast<std::uint32_t>(bytes.size()), file);
+        decodeError = read == bytes.size()
+            ? kisak::iwi::DecodeCubeRgba8(bytes, decoded)
+            : kisak::iwi::Error::InvalidFileSize;
+    }
+    else
+    {
+        decodeError = kisak::iwi::Error::InvalidFileSize;
+    }
+    FS_FCloseFile(file);
+    return true;
+}
+
 std::uint32_t RetainCanonicalWorldImage(
     const GfxImage *canonical,
     std::vector<WebRendererRetainedWorldImage> &images,
@@ -3600,9 +3844,57 @@ WebRendererSurfaceResult CopyWorldCommand(
             batch.pixelShaderProgramHash = source.pixelShaderProgramHash;
             std::copy_n(source.modelLightingCoordinates, 3u,
                 batch.modelLightingCoordinates);
+            batch.waterSamplerState = source.waterSamplerState;
+            batch.reflectionProbeIndex = source.reflectionProbeIndex;
+            std::copy_n(source.envMapParms, 4u, batch.envMapParms);
+            std::copy_n(source.waterColor, 4u, batch.waterColor);
             for (const float component : batch.modelLightingCoordinates)
                 if (!std::isfinite(component))
                     return WebRendererSurfaceResult::NonFiniteVertex;
+            for (const float component : batch.envMapParms)
+                if (!std::isfinite(component))
+                    return WebRendererSurfaceResult::NonFiniteVertex;
+            for (const float component : batch.waterColor)
+                if (!std::isfinite(component))
+                    return WebRendererSurfaceResult::NonFiniteVertex;
+            bool waterSupported = false;
+            if (source.technique == WebRendererWorldTechnique::WaterLitSun)
+            {
+                if (!source.water || !source.water->H0 ||
+                    !source.water->wTerm || source.water->M < 4 ||
+                    source.water->M > 64 ||
+                    source.water->N != source.water->M ||
+                    (source.water->M & (source.water->M - 1)) != 0 ||
+                    !source.reflectionProbeImage)
+                {
+                    return WebRendererSurfaceResult::InvalidDescriptor;
+                }
+                const std::size_t waterCount =
+                    static_cast<std::size_t>(source.water->M) *
+                    static_cast<std::size_t>(source.water->N);
+                batch.waterM = source.water->M;
+                batch.waterN = source.water->N;
+                batch.waterH0.assign(
+                    source.water->H0, source.water->H0 + waterCount);
+                batch.waterWTerm.assign(
+                    source.water->wTerm, source.water->wTerm + waterCount);
+                batch.waterPixels.resize(waterCount);
+                kisak::iwi::Error reflectionError =
+                    kisak::iwi::Error::None;
+                waterSupported = DecodeCanonicalCubeImage(
+                    source.reflectionProbeImage, batch.reflectionCube,
+                    reflectionError) &&
+                    reflectionError == kisak::iwi::Error::None;
+                if (!waterSupported)
+                {
+                    Web_Log(WebLogLevel::Info,
+                        "[kisakcod-web] Canonical water reflection probe "
+                        "'%s' uses backend fallback: %s.\n",
+                        source.reflectionProbeImage->name
+                            ? source.reflectionProbeImage->name : "<unnamed>",
+                        kisak::iwi::ErrorString(reflectionError));
+                }
+            }
             batch.baseImageIndex = RetainCanonicalWorldImage(
                 source.baseImage, images, retainedPixelBytes);
             if (source.lightingMode ==
@@ -3625,7 +3917,14 @@ WebRendererSurfaceResult CopyWorldCommand(
             const bool normalMapSupported =
                 batch.normalImageIndex != INVALID_WORLD_IMAGE &&
                 images[batch.normalImageIndex].supported;
-            if (!baseSupported)
+            if (source.technique == WebRendererWorldTechnique::WaterLitSun &&
+                !waterSupported)
+            {
+                batch.technique = WebRendererWorldTechnique::BackendFallback;
+            }
+            else if (source.technique !=
+                    WebRendererWorldTechnique::WaterLitSun &&
+                !baseSupported)
                 batch.technique = WebRendererWorldTechnique::BackendFallback;
             else if (WebRenderer_UsesSecondaryDirectionalLightmap(
                     batch.technique) &&
@@ -3856,58 +4155,17 @@ WebRendererTextureResult WebRenderer_SetSkyImage(
     replacement.canonicalName = canonical->name;
     replacement.samplerState = samplerState;
     WebDbImageLoadDef loadDef{};
-    const bool hasLoadDef = DB_WebGetImageLoadDef(canonical, loadDef);
+    (void)DB_WebGetImageLoadDef(canonical, loadDef);
     kisak::iwi::Error decodeError = kisak::iwi::Error::None;
     bool attemptedDecode = false;
-    if (hasLoadDef && loadDef.byteLength > 0u &&
-        loadDef.dimensions[0] > 0 &&
-        loadDef.dimensions[0] == loadDef.dimensions[1] &&
-        loadDef.dimensions[2] == 1)
+    try
     {
-        attemptedDecode = true;
-        decodeError = kisak::iwi::DecodeLoadDefCubeRgba8(
-            loadDef.format, loadDef.flags,
-            static_cast<std::uint16_t>(loadDef.dimensions[0]),
-            static_cast<std::uint16_t>(loadDef.dimensions[1]),
-            static_cast<std::uint16_t>(loadDef.dimensions[2]),
-            std::span<const std::uint8_t>(loadDef.data,
-                loadDef.byteLength), replacement.cube);
+        attemptedDecode = DecodeCanonicalCubeImage(
+            canonical, replacement.cube, decodeError);
     }
-    else
+    catch (const std::bad_alloc &)
     {
-        const std::string path =
-            std::string("images/") + canonical->name + ".iwi";
-        int file = 0;
-        const int fileSize = FS_FOpenFileReadDatabase(path.c_str(), &file);
-        if (fileSize >= 0)
-        {
-            attemptedDecode = true;
-            if (fileSize > 0 && static_cast<std::size_t>(fileSize) <=
-                    kisak::iwi::MAX_TEXTURE_MEMBER_BYTES)
-            {
-                try
-                {
-                    std::vector<std::uint8_t> bytes(
-                        static_cast<std::size_t>(fileSize));
-                    const std::uint32_t read = FS_Read(bytes.data(),
-                        static_cast<std::uint32_t>(bytes.size()), file);
-                    decodeError = read == bytes.size()
-                        ? kisak::iwi::DecodeCubeRgba8(
-                            bytes, replacement.cube)
-                        : kisak::iwi::Error::InvalidFileSize;
-                }
-                catch (const std::bad_alloc &)
-                {
-                    FS_FCloseFile(file);
-                    return WebRendererTextureResult::AllocationFailed;
-                }
-            }
-            else
-            {
-                decodeError = kisak::iwi::Error::InvalidFileSize;
-            }
-            FS_FCloseFile(file);
-        }
+        return WebRendererTextureResult::AllocationFailed;
     }
     if (!attemptedDecode || decodeError != kisak::iwi::Error::None)
     {
@@ -3980,6 +4238,7 @@ WebRendererSurfaceResult WebRenderer_SetSurface(
     if (replacementVertexArray != 0)
     {
         DeleteWorldTextureObjects(g_renderer.retainedWorldImages);
+        DeleteWaterTextureObjects(g_renderer.retainedWorldBatches);
         DeleteSurfaceObjects(
             g_renderer.vertexArray,
             g_renderer.vertexBuffer,
@@ -4053,9 +4312,17 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
             replacementIndexBuffer);
         return WebRendererSurfaceResult::BackendFailure;
     }
+    if (hasContext && !CreateWaterTextureObjects(retainedBatches))
+    {
+        DeleteWorldTextureObjects(retainedImages);
+        DeleteSurfaceObjects(replacementVertexArray, replacementVertexBuffer,
+            replacementIndexBuffer);
+        return WebRendererSurfaceResult::BackendFailure;
+    }
     if (replacementVertexArray != 0)
     {
         DeleteWorldTextureObjects(g_renderer.retainedWorldImages);
+        DeleteWaterTextureObjects(g_renderer.retainedWorldBatches);
         DeleteSurfaceObjects(
             g_renderer.vertexArray,
             g_renderer.vertexBuffer,
@@ -4129,6 +4396,7 @@ void __cdecl R_UnloadWorld()
     if (g_renderer.initialized && !g_renderer.contextLost)
     {
         DeleteWorldTextureObjects(g_renderer.retainedWorldImages);
+        DeleteWaterTextureObjects(g_renderer.retainedWorldBatches);
         if (g_renderer.retainedSky.texture != 0u)
             glDeleteTextures(1, &g_renderer.retainedSky.texture);
         DeleteSurfaceObjects(
@@ -5015,6 +5283,8 @@ bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
     g_renderer.sceneViewY = view.y;
     g_renderer.sceneViewWidth = view.width;
     g_renderer.sceneViewHeight = view.height;
+    g_renderer.sceneViewTimeSeconds =
+        static_cast<float>(view.time) * 0.001f;
     std::copy(viewProjection, viewProjection + 16u,
         g_renderer.sceneViewProjection.begin());
     std::copy(depthHackViewProjection, depthHackViewProjection + 16u,
@@ -5194,7 +5464,10 @@ void ApplyWorldMaterialState(const WebRendererRetainedWorldBatch &batch)
             ? 1
             : (batch.technique ==
                     WebRendererWorldTechnique::VertexColorAdditive
-                ? 2 : 0));
+                ? 2
+                : (batch.technique ==
+                        WebRendererWorldTechnique::WaterLitSun
+                    ? 3 : 0)));
 
     if (hasCanonicalState && (state1 & 2u) != 0u)
     {
@@ -5296,6 +5569,38 @@ void BindWorldTexture(
         (samplerState & 0x20u) != 0u ? GL_CLAMP_TO_EDGE : GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,
         (samplerState & 0x40u) != 0u ? GL_CLAMP_TO_EDGE : GL_REPEAT);
+}
+
+bool BindWaterTextures(WebRendererRetainedWorldBatch &batch, float floatTime)
+{
+    if (batch.waterTexture == 0u || batch.reflectionTexture == 0u)
+        return false;
+    if (batch.waterTextureTime != floatTime)
+    {
+        water_t water{};
+        water.H0 = batch.waterH0.data();
+        water.wTerm = batch.waterWTerm.data();
+        water.M = batch.waterM;
+        water.N = batch.waterN;
+        if (!R_GenerateWaterPixelsR8(&water, floatTime,
+                batch.waterPixels.data(), batch.waterPixels.size()))
+            return false;
+        glActiveTexture(GL_TEXTURE7);
+        glBindTexture(GL_TEXTURE_2D, batch.waterTexture);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
+            batch.waterM, batch.waterN, GL_RED, GL_UNSIGNED_BYTE,
+            batch.waterPixels.data());
+        glGenerateMipmap(GL_TEXTURE_2D);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        batch.waterTextureTime = floatTime;
+    }
+    glActiveTexture(GL_TEXTURE7);
+    glBindTexture(GL_TEXTURE_2D, batch.waterTexture);
+    glActiveTexture(GL_TEXTURE8);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, batch.reflectionTexture);
+    glActiveTexture(GL_TEXTURE0);
+    return glGetError() == GL_NO_ERROR;
 }
 
 void BindModelLightingTexture(
@@ -5592,6 +5897,8 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1i(g_renderer.secondaryLightmapUniform, 2);
         glUniform1i(g_renderer.modelLightingUniform, 3);
         glUniform1i(g_renderer.shadowMapUniform, 6);
+        glUniform1i(g_renderer.waterMapUniform, 7);
+        glUniform1i(g_renderer.reflectionProbeUniform, 8);
         glUniformMatrix4fv(g_renderer.shadowMatrixUniform, 1, GL_FALSE,
             g_renderer.sceneSunShadowMatrix.data());
         glUniform3fv(g_renderer.sunDirectionUniform, 1,
@@ -5614,6 +5921,10 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1f(g_renderer.premultiplyAlphaUniform, 0.0f);
         glUniform1f(g_renderer.colorIntensityAlphaUniform, 0.0f);
         glUniform1i(g_renderer.materialModeUniform, 0);
+        glUniform4f(g_renderer.envMapParmsUniform,
+            0.0f, 0.0f, 0.0f, 0.0f);
+        glUniform4f(g_renderer.waterColorUniform,
+            0.0f, 0.0f, 0.0f, 1.0f);
         glUniform1f(g_renderer.instanceEnabledUniform, 0.0f);
         glUniform4f(g_renderer.uiColorUniform, 1.0f, 1.0f, 1.0f, 1.0f);
         glUniform1f(g_renderer.fogEnabledUniform,
@@ -5639,7 +5950,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         g_renderer.worldSurfaceActive && !compatibilityDraw;
     if (worldBatchDraw)
     {
-        for (const WebRendererRetainedWorldBatch &batch :
+        for (WebRendererRetainedWorldBatch &batch :
              g_renderer.retainedWorldBatches)
         {
             ApplyWorldMaterialState(batch);
@@ -5649,9 +5960,14 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 WorldImage(batch.secondaryLightmapImageIndex);
             const WebRendererRetainedWorldImage *normal =
                 WorldImage(batch.normalImageIndex);
-            const bool fallback = batch.technique ==
-                    WebRendererWorldTechnique::BackendFallback ||
-                !base;
+            const bool water = batch.technique ==
+                WebRendererWorldTechnique::WaterLitSun;
+            const bool waterReady = water && BindWaterTextures(
+                batch, g_renderer.sceneViewTimeSeconds);
+            const bool fallback = water
+                ? !waterReady
+                : batch.technique ==
+                        WebRendererWorldTechnique::BackendFallback || !base;
             const bool lightmapped = !fallback && secondaryLightmap &&
                 WebRenderer_UsesSecondaryDirectionalLightmap(
                     batch.technique) &&
@@ -5662,7 +5978,18 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             glUniform1f(g_renderer.sceneFallbackUniform,
                 fallback ? 1.0f : 0.0f);
             glUniform1f(g_renderer.textureEnabledUniform,
-                fallback ? 0.0f : 1.0f);
+                fallback || water ? 0.0f : 1.0f);
+            if (waterReady)
+            {
+                glUniform4fv(g_renderer.envMapParmsUniform, 1,
+                    batch.envMapParms);
+                glUniform4fv(g_renderer.waterColorUniform, 1,
+                    batch.waterColor);
+            }
+            else if (water)
+            {
+                glUniform1i(g_renderer.materialModeUniform, 0);
+            }
             glUniform1f(g_renderer.lightmapEnabledUniform,
                 lightmapped ? 1.0f : 0.0f);
             glUniform1f(g_renderer.secondaryLightmapEnabledUniform,

@@ -173,6 +173,8 @@ add_executable(KisakCOD-web
     "${SRC_DIR}/xanim/xanim_init.cpp"
     "${SRC_DIR}/xanim/dobj_init.cpp"
     "${SRC_DIR}/gfx_d3d/r_asset_load.cpp"
+    "${SRC_DIR}/gfx_d3d/r_water.cpp"
+    "${SRC_DIR}/universal/fft.cpp"
     "${SRC_DIR}/gfx_d3d/gfx_world_runtime.cpp"
     "${SRC_DIR}/game/savememory.cpp"
     "${SRC_DIR}/game/savememory_init.cpp"

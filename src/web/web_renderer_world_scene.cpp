@@ -77,6 +77,51 @@ bool SurfaceUsesSkyPass(const GfxSurface &surface) noexcept
     return surface.material && (surface.material->info.gameFlags & 8u) != 0u;
 }
 
+bool MaterialUsesWater(const Material *material) noexcept
+{
+    if (!material || !material->textureTable) return false;
+    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
+    {
+        const MaterialTextureDef &texture = material->textureTable[index];
+        if (texture.semantic == 11u && texture.u.water) return true;
+    }
+    return false;
+}
+
+const water_t *FindWater(
+    const Material *material, std::uint8_t &sampler) noexcept
+{
+    if (!material || !material->textureTable) return nullptr;
+    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
+    {
+        const MaterialTextureDef &texture = material->textureTable[index];
+        if (texture.semantic == 11u && texture.u.water)
+        {
+            sampler = texture.samplerState;
+            return texture.u.water;
+        }
+    }
+    return nullptr;
+}
+
+bool CopyMaterialConstant(
+    const Material *material,
+    std::uint32_t nameHash,
+    float output[4]) noexcept
+{
+    if (!material || !material->constantTable) return false;
+    for (std::uint32_t index = 0u; index < material->constantCount; ++index)
+    {
+        const MaterialConstantDef &constant = material->constantTable[index];
+        if (constant.nameHash == nameHash)
+        {
+            std::copy_n(constant.literal, 4u, output);
+            return true;
+        }
+    }
+    return false;
+}
+
 bool SurfaceRangeIsValid(const GfxWorld &world, const GfxSurface &surface) noexcept
 {
     if (surface.tris.firstVertex < 0 || surface.tris.baseIndex < 0 ||
@@ -283,6 +328,15 @@ WebRendererWorldBatchDesc MakeBatch(
     batch.baseImage = FindBaseImage(surface.material, batch.samplerState);
     batch.normalImage = FindNormalImage(
         surface.material, batch.normalSamplerState);
+    batch.water = FindWater(surface.material, batch.waterSamplerState);
+    if (batch.water &&
+        surface.reflectionProbeIndex < world.reflectionProbeCount &&
+        world.reflectionProbes)
+    {
+        batch.reflectionProbeIndex = surface.reflectionProbeIndex;
+        batch.reflectionProbeImage = world.reflectionProbes[
+            surface.reflectionProbeIndex].reflectionImage;
+    }
     const TechniqueSelection technique = SelectTechnique(
         surface.material, sunShadowEnabled);
     batch.techniqueName = technique.identityName
@@ -312,7 +366,17 @@ WebRendererWorldBatchDesc MakeBatch(
             batch.lightingMode =
                 WebRendererWorldLightingMode::SecondaryDirectional;
     }
-    if (!technique.identityName || !batch.baseImage)
+    constexpr std::uint32_t ENV_MAP_PARMS_HASH = 0x3d9994dcu;
+    constexpr std::uint32_t WATER_COLOR_HASH = 0xb82a51e8u;
+    const bool canonicalWater = ShaderNameIs(technique, "water_l_sun.hlsl") &&
+        batch.water && batch.reflectionProbeImage &&
+        CopyMaterialConstant(surface.material, ENV_MAP_PARMS_HASH,
+            batch.envMapParms) &&
+        CopyMaterialConstant(surface.material, WATER_COLOR_HASH,
+            batch.waterColor);
+    if (canonicalWater)
+        batch.technique = WebRendererWorldTechnique::WaterLitSun;
+    else if (!technique.identityName || !batch.baseImage)
         batch.technique = WebRendererWorldTechnique::BackendFallback;
     else if (ShaderNameIs(technique, "mul.hlsl"))
         batch.technique = WebRendererWorldTechnique::VertexColorMultiply;
@@ -344,6 +408,8 @@ bool BatchMatches(
         batch.normalImage == candidate.normalImage &&
         batch.lightmapImage == candidate.lightmapImage &&
         batch.secondaryLightmapImage == candidate.secondaryLightmapImage &&
+        batch.water == candidate.water &&
+        batch.reflectionProbeImage == candidate.reflectionProbeImage &&
         batch.lightingMode == candidate.lightingMode &&
         batch.customSamplerFlags == candidate.customSamplerFlags &&
         batch.techniqueFlags == candidate.techniqueFlags &&
@@ -352,8 +418,14 @@ bool BatchMatches(
         batch.stateBits[1] == candidate.stateBits[1] &&
         batch.samplerState == candidate.samplerState &&
         batch.normalSamplerState == candidate.normalSamplerState &&
+        batch.waterSamplerState == candidate.waterSamplerState &&
+        batch.reflectionProbeIndex == candidate.reflectionProbeIndex &&
         batch.lightmapIndex == candidate.lightmapIndex &&
         batch.technique == candidate.technique &&
+        std::memcmp(batch.envMapParms, candidate.envMapParms,
+            sizeof(batch.envMapParms)) == 0 &&
+        std::memcmp(batch.waterColor, candidate.waterColor,
+            sizeof(batch.waterColor)) == 0 &&
         batch.castsSunShadow == candidate.castsSunShadow;
 }
 
@@ -425,6 +497,7 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
     {
         std::vector<std::uint32_t> vertexRemap(
             world.vertexCount, std::numeric_limits<std::uint32_t>::max());
+        std::vector<const Material *> waterMaterials;
         replacement.vertices.reserve(world.vertexCount);
         replacement.indices.reserve(static_cast<std::size_t>(world.indexCount));
         for (std::size_t rangeIndex = 0u;
@@ -509,6 +582,21 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
                 static_cast<std::uint32_t>(replacement.indices.size() - indexCount),
                 view.sunShadowEnabled);
             candidate.indexCount = indexCount;
+            if (MaterialUsesWater(surface.material))
+            {
+                ++replacement.waterSurfaceCount;
+                if (std::find(waterMaterials.begin(), waterMaterials.end(),
+                        surface.material) == waterMaterials.end())
+                {
+                    waterMaterials.push_back(surface.material);
+                    replacement.waterMaterialCount =
+                        static_cast<std::uint32_t>(waterMaterials.size());
+                }
+            }
+            if ((candidate.techniqueFlags & 2u) != 0u)
+                ++replacement.resolvedSceneSurfaceCount;
+            if ((candidate.techniqueFlags & 1u) != 0u)
+                ++replacement.resolvedPostSunSurfaceCount;
             if (!replacement.batches.empty() &&
                 BatchMatches(replacement.batches.back(), candidate) &&
                 replacement.batches.back().firstIndex +

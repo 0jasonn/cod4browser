@@ -1636,6 +1636,130 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                     "[kisakcod-web] Canonical sky submission failed: %s.\n",
                     WebRenderer_TextureResultString(skySubmission));
             }
+            Web_Log(WebLogLevel::Info,
+                "[kisakcod-web] Canonical special-surface inventory: "
+                "water=%u surfaces/%u materials, resolved-scene=%u, "
+                "resolved-post-sun=%u.\n",
+                command.waterSurfaceCount, command.waterMaterialCount,
+                command.resolvedSceneSurfaceCount,
+                command.resolvedPostSunSurfaceCount);
+            std::vector<const Material *> reportedWaterMaterials;
+            for (const WebRendererWorldBatchDesc &batch : command.batches)
+            {
+                const Material *material = batch.materialIdentity;
+                if (!material || !material->textureTable ||
+                    std::find(reportedWaterMaterials.begin(),
+                        reportedWaterMaterials.end(), material) !=
+                        reportedWaterMaterials.end())
+                {
+                    continue;
+                }
+                const water_t *water = nullptr;
+                std::uint8_t waterSampler = 0u;
+                for (std::uint32_t textureIndex = 0u;
+                    textureIndex < material->textureCount; ++textureIndex)
+                {
+                    const MaterialTextureDef &texture =
+                        material->textureTable[textureIndex];
+                    if (texture.semantic == 11u && texture.u.water)
+                    {
+                        water = texture.u.water;
+                        waterSampler = texture.samplerState;
+                        break;
+                    }
+                }
+                if (!water) continue;
+                reportedWaterMaterials.push_back(material);
+                Web_Log(WebLogLevel::Info,
+                    "[kisakcod-web] Canonical water material '%s': "
+                    "technique='%s' shader='%s' type=%u sampler=0x%02x "
+                    "grid=%dx%d world=(%.3f %.3f) gravity=%.3f "
+                    "wind=%.3f dir=(%.3f %.3f) amplitude=%.6f "
+                    "code=(%.6f %.6f %.6f %.6f) image='%s'.\n",
+                    batch.materialName ? batch.materialName : "<unnamed>",
+                    batch.techniqueName ? batch.techniqueName : "<none>",
+                    batch.pixelShaderName ? batch.pixelShaderName : "<none>",
+                    batch.techniqueType, waterSampler, water->M, water->N,
+                    water->Lx, water->Lz, water->gravity, water->windvel,
+                    water->winddir[0], water->winddir[1], water->amplitude,
+                    water->codeConstant[0], water->codeConstant[1],
+                    water->codeConstant[2], water->codeConstant[3],
+                    water->image && water->image->name
+                        ? water->image->name : "<none>");
+                for (std::uint32_t textureIndex = 0u;
+                    textureIndex < material->textureCount; ++textureIndex)
+                {
+                    const MaterialTextureDef &texture =
+                        material->textureTable[textureIndex];
+                    const GfxImage *image = texture.semantic == 11u
+                        ? (texture.u.water ? texture.u.water->image : nullptr)
+                        : texture.u.image;
+                    Web_Log(WebLogLevel::Info,
+                        "[kisakcod-web] Canonical water texture[%u]: "
+                        "hash=0x%08x name='%c%c' semantic=%u sampler=0x%02x "
+                        "image='%s' map=%u size=%ux%u.\n",
+                        textureIndex, texture.nameHash,
+                        texture.nameStart ? texture.nameStart : '?',
+                        texture.nameEnd ? texture.nameEnd : '?',
+                        texture.semantic, texture.samplerState,
+                        image && image->name ? image->name : "<none>",
+                        image ? image->mapType : 0u,
+                        image ? image->width : 0u,
+                        image ? image->height : 0u);
+                }
+                for (std::uint32_t constantIndex = 0u;
+                    constantIndex < material->constantCount; ++constantIndex)
+                {
+                    const MaterialConstantDef &constant =
+                        material->constantTable[constantIndex];
+                    Web_Log(WebLogLevel::Info,
+                        "[kisakcod-web] Canonical water constant[%u]: "
+                        "hash=0x%08x name='%.12s' value=(%.6f %.6f %.6f %.6f).\n",
+                        constantIndex, constant.nameHash, constant.name,
+                        constant.literal[0], constant.literal[1],
+                        constant.literal[2], constant.literal[3]);
+                }
+                const MaterialTechniqueSet *techniqueSet =
+                    material->techniqueSet &&
+                        material->techniqueSet->remappedTechniqueSet
+                    ? material->techniqueSet->remappedTechniqueSet
+                    : material->techniqueSet;
+                const MaterialTechnique *technique = techniqueSet &&
+                        batch.techniqueType < 34u
+                    ? techniqueSet->techniques[batch.techniqueType] : nullptr;
+                if (technique && technique->passCount > 0u)
+                {
+                    const MaterialPass &pass = technique->passArray[0u];
+                    const std::uint32_t argumentCount =
+                        static_cast<std::uint32_t>(pass.perPrimArgCount) +
+                        pass.perObjArgCount + pass.stableArgCount;
+                    Web_Log(WebLogLevel::Info,
+                        "[kisakcod-web] Canonical water pass: args=%u "
+                        "perPrim=%u perObj=%u stable=%u customSamplers=0x%02x "
+                        "vertexShader='%s' vertexDwords=%u pixelDwords=%u.\n",
+                        argumentCount, pass.perPrimArgCount,
+                        pass.perObjArgCount, pass.stableArgCount,
+                        pass.customSamplerFlags,
+                        pass.vertexShader && pass.vertexShader->name
+                            ? pass.vertexShader->name : "<none>",
+                        pass.vertexShader
+                            ? pass.vertexShader->prog.loadDef.programSize : 0u,
+                        pass.pixelShader
+                            ? pass.pixelShader->prog.loadDef.programSize : 0u);
+                    for (std::uint32_t argumentIndex = 0u;
+                        argumentIndex < argumentCount && pass.args;
+                        ++argumentIndex)
+                    {
+                        const MaterialShaderArgument &argument =
+                            pass.args[argumentIndex];
+                        Web_Log(WebLogLevel::Info,
+                            "[kisakcod-web] Canonical water arg[%u]: "
+                            "type=%u dest=%u payload=0x%08x.\n",
+                            argumentIndex, argument.type, argument.dest,
+                            argument.u.nameHash);
+                    }
+                }
+            }
             std::vector<const Material *> unsupportedMaterials;
             for (const WebRendererWorldBatchDesc &batch : command.batches)
             {

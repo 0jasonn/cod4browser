@@ -16,6 +16,10 @@ struct WebRendererWorldSceneCommand
     std::uint32_t surfaceCount = 0u;
     std::uint32_t staticModelInstanceCount = 0u;
     std::uint32_t staticModelSurfaceCount = 0u;
+    std::uint32_t waterSurfaceCount = 0u;
+    std::uint32_t waterMaterialCount = 0u;
+    std::uint32_t resolvedSceneSurfaceCount = 0u;
+    std::uint32_t resolvedPostSunSurfaceCount = 0u;
     std::uint32_t firstSurfaceIndex = UINT32_MAX;
     std::uint32_t lastSurfaceIndex = UINT32_MAX;
 };
