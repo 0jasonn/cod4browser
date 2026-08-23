@@ -8,6 +8,8 @@
 
 struct XModel;
 
+using WebRendererFxMaterialResolver = Material *(*)(Material *) noexcept;
+
 // The WebGL scene is assembled after refdef is available. This keeps the
 // retained R_FilterXModelIntoScene submission free of raw view pointers while
 // choosing a deterministic rigid-model LOD from the active view distance.
@@ -107,7 +109,8 @@ WebRendererFxModelSceneResult WebRenderer_BuildFxModelSceneCommand(
     const WebRendererFxModelSubmission *submissions,
     std::uint32_t submissionCount,
     WebRendererFxModelSceneCommand &destination,
-    std::uint32_t *droppedCount = nullptr);
+    std::uint32_t *droppedCount = nullptr,
+    WebRendererFxMaterialResolver materialResolver = nullptr);
 
 WebRendererFxModelAppendResult WebRenderer_AppendFxModelSceneCommand(
     const WebRendererFxModelSceneCommand &source,

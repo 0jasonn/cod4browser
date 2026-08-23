@@ -1189,20 +1189,23 @@ char __cdecl DynEntCl_DynEntImpactEvent(
     }
     if (DynEnt_GetEntityProps(dynEntDef->type)->usePhysics)
     {
+        const PhysPreset *physPreset = DynEnt_GetPhysicsPreset(dynEntDef);
         dynEntPose = DynEnt_GetClientPose(dynEntId, drawType);
-        if (!dynEntClient->physObjId)
+        if (physPreset && !dynEntClient->physObjId)
         {
             PhysObj = DynEntCl_CreatePhysObj(dynEntDef, &dynEntPose->pose);
             dynEntClient->physObjId = (int)PhysObj;
         }
-        if (dynEntClient->physObjId)
+        if (physPreset && dynEntClient->physObjId)
+        {
             Phys_ObjBulletImpact(
                 PHYS_WORLD_DYNENT,
                 (dxBody *)dynEntClient->physObjId,
                 hitPos,
                 hitDir,
                 dynEnt_bulletForce->current.value,
-                dynEntDef->physPreset->bulletForceScale);
+                physPreset->bulletForceScale);
+        }
     }
     if (DynEnt_GetEntityProps(dynEntDef->type)->destroyable)
     {
@@ -1227,11 +1230,22 @@ dxBody *__cdecl DynEntCl_CreatePhysObj(const DynEntityDef *dynEntDef, const GfxP
             0,
             "%s",
             "DynEnt_GetEntityProps( dynEntDef->type )->usePhysics");
-    if (!dynEntDef->physPreset)
+    const PhysPreset *physPreset = DynEnt_GetPhysicsPreset(dynEntDef);
+#ifndef KISAK_WEB
+    if (!physPreset)
         MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 796, 0, "%s", "dynEntDef->physPreset");
+#endif
     if (!dynEnt_active->current.enabled)
         MyAssertHandler(".\\DynEntity\\DynEntity_client.cpp", 799, 0, "%s", "dynEnt_active->current.enabled");
-    physId = Phys_ObjCreate(PHYS_WORLD_DYNENT, (float*)pose->origin, (float*)pose->quat, (float *)vec3_origin, dynEntDef->physPreset);
+    if (!physPreset)
+    {
+        Com_PrintWarning(1,
+            "DynEntCl_CreatePhysObj: '%s' has no usable physics preset.\n",
+            dynEntDef->xModel && dynEntDef->xModel->name
+                ? dynEntDef->xModel->name : "<brushmodel>");
+        return nullptr;
+    }
+    physId = Phys_ObjCreate(PHYS_WORLD_DYNENT, (float*)pose->origin, (float*)pose->quat, (float *)vec3_origin, physPreset);
     if (physId)
     {
         DynEnt_SetPhysObjCollision(dynEntDef, physId);
@@ -1470,7 +1484,10 @@ void __cdecl DynEntCl_ExplosionEvent(
                     iassert(scale >= 0.0f);
 
                     dynEntDef = (DynEntityDef *)DynEnt_GetEntityDef(hitEnts[i], drawType);
-                    v30 = scale * dynEntDef->physPreset->explosiveForceScale * dynEnt_explodeForce->current.value;
+                    const PhysPreset *physPreset =
+                        DynEnt_GetPhysicsPreset(dynEntDef);
+                    if (!physPreset) continue;
+                    v30 = scale * physPreset->explosiveForceScale * dynEnt_explodeForce->current.value;
                     if (*impulse == 0.0 && impulse[1] == 0.0 && impulse[2] == 0.0)
                     {
                         if (dynEnt_explodeMinForce->current.value > (double)v30)

@@ -5273,78 +5273,93 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1f(g_renderer.lightmapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
         BindModelLightingTexture(g_renderer.retainedDynamicModelLighting);
-        for (const WebRendererRetainedWorldBatch &batch :
-             g_renderer.retainedDynamicModelBatches)
+        // The portable command combines ordinary DObjs, moving brush models,
+        // DynEnts, and first-person DObjs in one buffer. Native draw-surf
+        // generation keeps depth-hacked first-person surfaces in their camera
+        // pass; drawing the append order directly lets a later moving brush
+        // overwrite transparent viewmodel surfaces such as the G36C reflex
+        // dot (which intentionally does not write depth). Draw ordinary scene
+        // geometry first, then the reserved-depth first-person pass.
+        for (std::uint32_t cameraPass = 0u; cameraPass < 2u; ++cameraPass)
         {
-            glUniformMatrix4fv(g_renderer.viewProjectionUniform, 1, GL_FALSE,
-                batch.depthHack
-                    ? g_renderer.sceneDepthHackViewProjection.data()
-                    : g_renderer.sceneViewProjection.data());
-            glDepthRangef(0.0f, batch.depthHack ? 0.015625f : 1.0f);
-            ApplyWorldMaterialState(batch);
-            const WebRendererRetainedWorldImage *base = RetainedImage(
-                g_renderer.retainedDynamicModelImages,
-                batch.baseImageIndex);
-            const WebRendererRetainedWorldImage *secondaryLightmap =
-                RetainedImage(g_renderer.retainedDynamicModelImages,
-                    batch.secondaryLightmapImageIndex);
-            const WebRendererRetainedWorldImage *normal = RetainedImage(
-                g_renderer.retainedDynamicModelImages,
-                batch.normalImageIndex);
-            const bool fxSceneGeometry = WebRenderer_IsFxVertexColorBatch(
-                batch.sourceKind);
-            const bool fallback = batch.technique ==
-                    WebRendererWorldTechnique::BackendFallback ||
-                !base;
-            const bool dynamicLightmapped = !fallback && secondaryLightmap &&
-                (batch.sourceKind == WebRendererSceneBatchKind::FxMarkMesh ||
-                 batch.sourceKind ==
-                    WebRendererSceneBatchKind::DynamicBModel) &&
-                batch.technique ==
-                    WebRendererWorldTechnique::BaseTextureLightmap &&
-                batch.lightingMode ==
-                    WebRendererWorldLightingMode::SecondaryDirectional;
-            const bool modelLit = !fallback && !fxSceneGeometry &&
-                batch.lightingMode ==
-                    WebRendererWorldLightingMode::ModelLightGrid &&
-                g_renderer.retainedDynamicModelLighting.texture != 0u;
-            const bool normalMapped = modelLit && normal &&
-                normal->texture != 0u;
-            glUniform1f(g_renderer.fogEnabledUniform,
-                g_renderer.sceneFogEnabled && !fxSceneGeometry
-                    ? 1.0f : 0.0f);
-            glUniform1f(g_renderer.sceneFallbackUniform,
-                fallback && !fxSceneGeometry ? 1.0f : 0.0f);
-            glUniform1f(g_renderer.textureEnabledUniform,
-                fallback ? 0.0f : 1.0f);
-            glUniform1f(g_renderer.lightmapEnabledUniform,
-                dynamicLightmapped ? 1.0f : 0.0f);
-            glUniform1f(g_renderer.secondaryLightmapEnabledUniform,
-                dynamicLightmapped ? 1.0f : 0.0f);
-            glUniform1f(g_renderer.modelLightingEnabledUniform,
-                modelLit ? 1.0f : 0.0f);
-            glUniform1f(g_renderer.normalMapEnabledUniform,
-                normalMapped ? 1.0f : 0.0f);
-            glUniform3fv(g_renderer.modelLightingBaseCoordinatesUniform,
-                1, batch.modelLightingCoordinates);
-            BindWorldTexture(GL_TEXTURE0,
-                base ? base->texture : g_renderer.texture,
-                batch.samplerState);
-            BindWorldTexture(GL_TEXTURE1,
-                normal ? normal->texture : g_renderer.texture,
-                batch.normalSamplerState);
-            BindWorldTexture(GL_TEXTURE2,
-                secondaryLightmap
-                    ? secondaryLightmap->texture : g_renderer.texture,
-                0x62u);
-            const std::uintptr_t indexOffset =
-                static_cast<std::uintptr_t>(batch.firstIndex) *
-                sizeof(std::uint32_t);
-            glDrawElements(GL_TRIANGLES,
-                static_cast<GLsizei>(batch.indexCount),
-                GL_UNSIGNED_INT,
-                reinterpret_cast<const void *>(indexOffset));
-            ++completedDraws;
+            const bool depthHackPass = cameraPass != 0u;
+            for (const WebRendererRetainedWorldBatch &batch :
+                 g_renderer.retainedDynamicModelBatches)
+            {
+                if (batch.depthHack != depthHackPass) continue;
+                glUniformMatrix4fv(g_renderer.viewProjectionUniform, 1,
+                    GL_FALSE,
+                    batch.depthHack
+                        ? g_renderer.sceneDepthHackViewProjection.data()
+                        : g_renderer.sceneViewProjection.data());
+                glDepthRangef(0.0f, batch.depthHack ? 0.015625f : 1.0f);
+                ApplyWorldMaterialState(batch);
+                const WebRendererRetainedWorldImage *base = RetainedImage(
+                    g_renderer.retainedDynamicModelImages,
+                    batch.baseImageIndex);
+                const WebRendererRetainedWorldImage *secondaryLightmap =
+                    RetainedImage(g_renderer.retainedDynamicModelImages,
+                        batch.secondaryLightmapImageIndex);
+                const WebRendererRetainedWorldImage *normal = RetainedImage(
+                    g_renderer.retainedDynamicModelImages,
+                    batch.normalImageIndex);
+                const bool fxSceneGeometry =
+                    WebRenderer_IsFxVertexColorBatch(batch.sourceKind);
+                const bool fallback = batch.technique ==
+                        WebRendererWorldTechnique::BackendFallback ||
+                    !base;
+                const bool dynamicLightmapped = !fallback &&
+                    secondaryLightmap &&
+                    (batch.sourceKind ==
+                            WebRendererSceneBatchKind::FxMarkMesh ||
+                     batch.sourceKind ==
+                            WebRendererSceneBatchKind::DynamicBModel) &&
+                    batch.technique ==
+                        WebRendererWorldTechnique::BaseTextureLightmap &&
+                    batch.lightingMode ==
+                        WebRendererWorldLightingMode::SecondaryDirectional;
+                const bool modelLit = !fallback && !fxSceneGeometry &&
+                    batch.lightingMode ==
+                        WebRendererWorldLightingMode::ModelLightGrid &&
+                    g_renderer.retainedDynamicModelLighting.texture != 0u;
+                const bool normalMapped = modelLit && normal &&
+                    normal->texture != 0u;
+                glUniform1f(g_renderer.fogEnabledUniform,
+                    g_renderer.sceneFogEnabled && !fxSceneGeometry
+                        ? 1.0f : 0.0f);
+                glUniform1f(g_renderer.sceneFallbackUniform,
+                    fallback && !fxSceneGeometry ? 1.0f : 0.0f);
+                glUniform1f(g_renderer.textureEnabledUniform,
+                    fallback ? 0.0f : 1.0f);
+                glUniform1f(g_renderer.lightmapEnabledUniform,
+                    dynamicLightmapped ? 1.0f : 0.0f);
+                glUniform1f(g_renderer.secondaryLightmapEnabledUniform,
+                    dynamicLightmapped ? 1.0f : 0.0f);
+                glUniform1f(g_renderer.modelLightingEnabledUniform,
+                    modelLit ? 1.0f : 0.0f);
+                glUniform1f(g_renderer.normalMapEnabledUniform,
+                    normalMapped ? 1.0f : 0.0f);
+                glUniform3fv(g_renderer.modelLightingBaseCoordinatesUniform,
+                    1, batch.modelLightingCoordinates);
+                BindWorldTexture(GL_TEXTURE0,
+                    base ? base->texture : g_renderer.texture,
+                    batch.samplerState);
+                BindWorldTexture(GL_TEXTURE1,
+                    normal ? normal->texture : g_renderer.texture,
+                    batch.normalSamplerState);
+                BindWorldTexture(GL_TEXTURE2,
+                    secondaryLightmap
+                        ? secondaryLightmap->texture : g_renderer.texture,
+                    0x62u);
+                const std::uintptr_t indexOffset =
+                    static_cast<std::uintptr_t>(batch.firstIndex) *
+                    sizeof(std::uint32_t);
+                glDrawElements(GL_TRIANGLES,
+                    static_cast<GLsizei>(batch.indexCount),
+                    GL_UNSIGNED_INT,
+                    reinterpret_cast<const void *>(indexOffset));
+                ++completedDraws;
+            }
         }
         glDepthRangef(0.0f, 1.0f);
         glUniformMatrix4fv(g_renderer.viewProjectionUniform, 1, GL_FALSE,

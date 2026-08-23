@@ -113,11 +113,15 @@ bool SelectTechnique(
 {
     if (!material || !material->techniqueSet || !material->stateBitsTable)
         return false;
+    const MaterialTechniqueSet *techniqueSet =
+        material->techniqueSet->remappedTechniqueSet
+            ? material->techniqueSet->remappedTechniqueSet
+            : material->techniqueSet;
     for (const std::uint32_t type : {
         TECHNIQUE_LIT_INDEX, TECHNIQUE_UNLIT_INDEX, TECHNIQUE_EMISSIVE_INDEX})
     {
         const MaterialTechnique *technique =
-            material->techniqueSet->techniques[type];
+            techniqueSet->techniques[type];
         const std::uint8_t entry = material->stateBitsEntry[type];
         if (!technique || technique->passCount == 0u || entry == 0xffu ||
             entry >= material->stateBitsCount)
@@ -130,14 +134,39 @@ bool SelectTechnique(
         techniqueType = static_cast<std::uint8_t>(type);
         return true;
     }
+    // A leading comma denotes a serialized material reference body. Retain
+    // its authored state while the caller resolves the canonical asset name.
+    if (material->techniqueSet->name &&
+        material->techniqueSet->name[0] == ',')
+    {
+        for (const std::uint32_t type : {
+            TECHNIQUE_LIT_INDEX, TECHNIQUE_UNLIT_INDEX,
+            TECHNIQUE_EMISSIVE_INDEX})
+        {
+            const std::uint8_t entry = material->stateBitsEntry[type];
+            if (entry == 0xffu || entry >= material->stateBitsCount)
+                continue;
+            stateBits[0] = material->stateBitsTable[entry].loadBits[0];
+            stateBits[1] = material->stateBitsTable[entry].loadBits[1];
+            techniqueName = material->techniqueSet->name;
+            techniqueType = static_cast<std::uint8_t>(type);
+            return true;
+        }
+    }
     return false;
 }
 
 WebRendererWorldBatchDesc MakeDraw(
     const XModel &model, Material *material, std::uint32_t surfaceIndex,
     std::uint32_t firstIndex, std::uint32_t indexCount,
-    const WebRendererFxModelSubmission &submission) noexcept
+    const WebRendererFxModelSubmission &submission,
+    WebRendererFxMaterialResolver materialResolver) noexcept
 {
+    if (materialResolver)
+    {
+        if (Material *canonical = materialResolver(material))
+            material = canonical;
+    }
     WebRendererWorldBatchDesc draw{};
     draw.firstIndex = firstIndex;
     draw.indexCount = indexCount;
@@ -230,7 +259,8 @@ WebRendererFxModelSceneResult WebRenderer_BuildFxModelSceneCommand(
     const WebRendererFxModelSubmission *submissions,
     std::uint32_t submissionCount,
     WebRendererFxModelSceneCommand &destination,
-    std::uint32_t *droppedCount)
+    std::uint32_t *droppedCount,
+    WebRendererFxMaterialResolver materialResolver)
 {
     if (droppedCount) *droppedCount = 0u;
     if (submissionCount == 0u) return WebRendererFxModelSceneResult::NoFxModel;
@@ -428,7 +458,7 @@ WebRendererFxModelSceneResult WebRenderer_BuildFxModelSceneCommand(
                 }
                 replacement.batches.push_back(MakeDraw(
                     *model, model->materialHandles[surfaceIndex], surfaceIndex,
-                    firstIndex, indexCount, submission));
+                    firstIndex, indexCount, submission, materialResolver));
                 ++replacement.surfaceCount;
                 modelSubmitted = true;
             }

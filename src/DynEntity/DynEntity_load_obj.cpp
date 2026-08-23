@@ -5,6 +5,10 @@
 #include <EffectsCore/fx_system.h>
 #include <universal/q_parse.h>
 #include <qcommon/com_bsp.h>
+#include <database/database.h>
+#include <physics/phys_preset.h>
+
+#include <cmath>
 
 const char *dynEntClassNames[2] =
 {
@@ -18,6 +22,54 @@ const DynEntityProps dynEntProps[3] =
     { "clutter", true, false, true, false },
     { "destruct", true, false, true, true }
 };
+
+namespace
+{
+bool PhysPresetIsUsable(const PhysPreset *preset) noexcept
+{
+    return preset && std::isfinite(preset->mass) && preset->mass > 0.0f &&
+        std::isfinite(preset->bounce) && std::isfinite(preset->friction) &&
+        std::isfinite(preset->bulletForceScale) &&
+        std::isfinite(preset->explosiveForceScale);
+}
+
+const PhysPreset *ResolvePublishedPhysPreset(const PhysPreset *preset)
+{
+    if (!preset || !preset->name || !preset->name[0]) return nullptr;
+    const char *publishedName = preset->name[0] == ','
+        ? preset->name + 1 : preset->name;
+    if (!publishedName[0]) return nullptr;
+    return DB_FindXAssetHeader(
+        ASSET_TYPE_PHYSPRESET, publishedName).physPreset;
+}
+}
+
+const PhysPreset *__cdecl DynEnt_GetPhysicsPreset(
+    const DynEntityDef *dynEntDef)
+{
+    if (!dynEntDef) return nullptr;
+    if (PhysPresetIsUsable(dynEntDef->physPreset))
+        return dynEntDef->physPreset;
+#ifdef KISAK_WEB
+    if (const PhysPreset *published =
+            ResolvePublishedPhysPreset(dynEntDef->physPreset);
+        PhysPresetIsUsable(published))
+    {
+        return published;
+    }
+    const PhysPreset *modelPreset = dynEntDef->xModel
+        ? dynEntDef->xModel->physPreset : nullptr;
+    if (PhysPresetIsUsable(modelPreset)) return modelPreset;
+    if (const PhysPreset *published = ResolvePublishedPhysPreset(modelPreset);
+        PhysPresetIsUsable(published))
+    {
+        return published;
+    }
+    return nullptr;
+#else
+    return dynEntDef->physPreset;
+#endif
+}
 
 uint8_t *__cdecl DynEnt_AllocXModel(int32_t size)
 {

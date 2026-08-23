@@ -790,7 +790,8 @@ void __cdecl DynEnt_SetPhysObjCollision(const DynEntityDef *dynEntDef, dxBody *p
     else
     {
         DynEnt_GetLocalBounds(dynEntDef, mins, maxs);
-        if (dynEntDef->physPreset->tempDefaultToCylinder)
+        const PhysPreset *physPreset = DynEnt_GetPhysicsPreset(dynEntDef);
+        if (physPreset && physPreset->tempDefaultToCylinder)
             Phys_ObjAddGeomCylinder(PHYS_WORLD_DYNENT, physId, mins, maxs);
         else
             Phys_ObjAddGeomBox(PHYS_WORLD_DYNENT, physId, mins, maxs);

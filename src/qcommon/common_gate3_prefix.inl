@@ -188,7 +188,11 @@ void __cdecl Com_StartupVariable(const char *match)
 
 void Com_InitDvars()
 {
+#if defined(KISAK_WEB)
+    com_maxfps = Dvar_RegisterInt("com_maxfps", 60, 0, 1000, DVAR_ARCHIVE, "Cap frames per second");
+#else
     com_maxfps = Dvar_RegisterInt("com_maxfps", 0, 0, 1000, DVAR_ARCHIVE, "Cap frames per second");
+#endif
     TraceDvar("com_maxfps");
     useFastFile = Dvar_RegisterBool("useFastFile", true, DVAR_INIT, "Enables loading data from fast files. Only tools can run without fast files.");
     TraceDvar("useFastFile");

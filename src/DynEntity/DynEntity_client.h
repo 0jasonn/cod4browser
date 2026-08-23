@@ -109,6 +109,9 @@ struct pointtrace_t;
 struct trace_t;
 struct moveclip_t;
 
+const PhysPreset *__cdecl DynEnt_GetPhysicsPreset(
+    const DynEntityDef *dynEntDef);
+
 void __cdecl DynEntCl_RegisterDvars();
 void __cdecl DynEntCl_InitEntities(int32_t localClientNum);
 void __cdecl DynEntCl_LinkModel(uint16_t dynEntId);

@@ -41,6 +41,12 @@ int __cdecl XModelGetLodForDist(const XModel *model, float distance)
 namespace
 {
 constexpr std::uint32_t TECHNIQUE_LIT_INDEX = 7u;
+Material *g_resolvedMaterial = nullptr;
+
+Material *ResolveMaterial(Material *) noexcept
+{
+    return g_resolvedMaterial;
+}
 
 struct Fixture
 {
@@ -165,6 +171,35 @@ void TestIdentityAndCanonicalSurfaceData()
     assert(command.batches[0].sourceKind == WebRendererSceneBatchKind::FxXModel);
     assert(command.batches[0].technique ==
         WebRendererWorldTechnique::BackendFallback);
+}
+
+void TestCanonicalMaterialResolutionAndTechniqueRemap()
+{
+    Fixture source;
+    Fixture canonical;
+    canonical.material.info.name = "canonical/dynent-material";
+    canonical.image.name = "canonical/dynent-image";
+    const WebRendererFxModelSubmission submission = Submission(source);
+    WebRendererFxModelSceneCommand command;
+
+    g_resolvedMaterial = &canonical.material;
+    assert(WebRenderer_BuildFxModelSceneCommand(
+        &submission, 1u, command, nullptr, ResolveMaterial) ==
+        WebRendererFxModelSceneResult::Success);
+    assert(command.batches[0].materialIdentity == &canonical.material);
+    assert(command.batches[0].baseImage == &canonical.image);
+    assert(command.batches[0].technique ==
+        WebRendererWorldTechnique::BaseTexture);
+    g_resolvedMaterial = nullptr;
+
+    source.techniqueSet.techniques[TECHNIQUE_LIT_INDEX] = nullptr;
+    source.techniqueSet.remappedTechniqueSet = &canonical.techniqueSet;
+    command = {};
+    assert(WebRenderer_BuildFxModelSceneCommand(
+        &submission, 1u, command) ==
+        WebRendererFxModelSceneResult::Success);
+    assert(command.batches[0].technique ==
+        WebRendererWorldTechnique::BaseTexture);
 }
 
 void TestDeterministicDistanceLodSelection()
@@ -405,6 +440,7 @@ int main()
     assert(!WebRenderer_IsFxVertexColorBatch(
         WebRendererSceneBatchKind::WorldSurface));
     TestIdentityAndCanonicalSurfaceData();
+    TestCanonicalMaterialResolutionAndTechniqueRemap();
     TestDeterministicDistanceLodSelection();
     TestQuaternionScaleOriginAndOrder();
     TestFailureLeavesDestinationUntouched();

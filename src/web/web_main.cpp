@@ -278,11 +278,17 @@ CooperativeTaskResult CGameFrameTask(
         // one millisecond. Never invent a 1 ms engine step for those calls:
         // doing so advances the authoritative SP clock faster than wall time,
         // and the canonical integer velocity snap can then preserve small
-        // components indefinitely. Accumulate real time and keep gameplay at
-        // a maximum of 125 Hz while the renderer remains free to draw on every
-        // browser callback.
+        // components indefinitely. Accumulate real time without blocking the
+        // browser and honor the canonical com_maxfps dvar. An uncapped value
+        // retains the web safety ceiling of 125 Hz.
         g_cgameFrameAccumulatorMilliseconds += std::min(elapsed, 100u);
-        if (g_cgameFrameAccumulatorMilliseconds < 8u)
+        const int configuredMaxFps = com_maxfps
+            ? com_maxfps->current.integer : 0;
+        const std::uint32_t minimumFrameMilliseconds = configuredMaxFps > 0
+            ? static_cast<std::uint32_t>(
+                std::max(1, 1000 / configuredMaxFps))
+            : 8u;
+        if (g_cgameFrameAccumulatorMilliseconds < minimumFrameMilliseconds)
             return {CooperativeTaskState::Idle, 0u, 0u};
 
         frameMilliseconds = static_cast<int>(
@@ -376,8 +382,16 @@ CooperativeTaskResult RendererTask(
     void *userData)
 {
     const auto *frame = static_cast<const WebFrameInfo *>(userData);
-    (void)CGameFrameTask(0u, {0u, 1u}, userData);
-    WebRenderer_DrawFrame(*frame);
+    const CooperativeTaskResult gameplayFrame =
+        CGameFrameTask(0u, {0u, 1u}, userData);
+    // Before a local game is active the renderer remains responsible for the
+    // launcher/bootstrap surface. During gameplay, presentation follows the
+    // same non-blocking com_maxfps admission decision as the engine frame.
+    if (!CL_IsLocalClientInGame(0) ||
+        gameplayFrame.state != CooperativeTaskState::Idle)
+    {
+        WebRenderer_DrawFrame(*frame);
+    }
     return {CooperativeTaskState::Progress, 0u, 1u};
 }
 

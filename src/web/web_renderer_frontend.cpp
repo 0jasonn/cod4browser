@@ -639,6 +639,62 @@ void AppendUiText(const char *text, int maxChars, Font_s *font,
         ++count;
     }
 }
+
+void SubmitUiScene()
+{
+    if (g_uiBatches.empty())
+    {
+        WebRenderer_SetUiScene({});
+        return;
+    }
+
+    const WebRendererUiSceneDesc uiScene{
+        g_uiVertices.data(),
+        static_cast<std::uint32_t>(g_uiVertices.size()),
+        g_uiIndices.data(),
+        static_cast<std::uint32_t>(g_uiIndices.size()),
+        g_uiBatches.data(),
+        static_cast<std::uint32_t>(g_uiBatches.size()),
+    };
+    const WebRendererSurfaceResult uiSubmission =
+        WebRenderer_SetUiScene(uiScene);
+    if (uiSubmission != WebRendererSurfaceResult::Success)
+    {
+        Com_Error(ERR_DROP, "R_EndFrame canonical 2D command %s",
+            WebRenderer_SurfaceResultString(uiSubmission));
+        return;
+    }
+    if (!g_uiSceneReported)
+    {
+        g_uiSceneReported = true;
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Renderer frontend submitted the first "
+            "canonical 2D scene (%zu quads, %zu batches).\n",
+            g_uiVertices.size() / 4u, g_uiBatches.size());
+        std::array<const Material *, 12> reportedMaterials{};
+        std::size_t reportedCount = 0u;
+        for (const WebRendererUiBatchDesc &batch : g_uiBatches)
+        {
+            bool duplicate = false;
+            for (std::size_t index = 0u; index < reportedCount; ++index)
+                duplicate |= reportedMaterials[index] ==
+                    batch.materialIdentity;
+            if (duplicate || reportedCount == reportedMaterials.size())
+                continue;
+            reportedMaterials[reportedCount++] = batch.materialIdentity;
+            Web_Log(WebLogLevel::Info,
+                "[kisakcod-web] Canonical 2D material '%s': image='%s' "
+                "map=%u size=%ux%u sampler=0x%02x.\n",
+                batch.materialName,
+                batch.image && batch.image->name
+                    ? batch.image->name : "<solid/fallback>",
+                batch.image ? batch.image->mapType : 0u,
+                batch.image ? batch.image->width : 0u,
+                batch.image ? batch.image->height : 0u,
+                batch.samplerState);
+        }
+    }
+}
 }
 
 void __cdecl R_BeginRegistration(vidConfig_t *configuration)
@@ -691,7 +747,14 @@ void __cdecl R_BeginFrame()
     g_uiIndices.clear();
     g_uiBatches.clear();
 }
-void __cdecl R_EndFrame() {}
+void __cdecl R_EndFrame()
+{
+    // UI_Refresh runs after the cgame's R_RenderScene call and is also the
+    // only draw producer on fullscreen/script-menu frames. Publish 2D work at
+    // the real frame boundary so menus cannot capture input without becoming
+    // visible, and so HUD commands belong to the frame that produced them.
+    SubmitUiScene();
+}
 void __cdecl R_BeginClientCmdList2D() {}
 void __cdecl R_BeginSharedCmdList() {}
 void __cdecl R_AddCmdEndOfList() {}
@@ -1716,6 +1779,12 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         }
     }
 
+    // Native R_RenderScene advances the EffectsCore and DynEntity physics
+    // worlds before it consumes their current poses for scene submission.
+    // Keep that runtime ownership and ordering at the browser frontend seam.
+    FX_RunPhysics(refdef->localClientNum);
+    DynEntCl_ProcessEntities(refdef->localClientNum);
+
     std::vector<WebRendererBrushModelSubmission> activeBrushModels;
     try
     {
@@ -1938,7 +2007,8 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         WebRenderer_BuildFxModelSceneCommand(
             dynamicEntityModels.data(),
             static_cast<std::uint32_t>(dynamicEntityModels.size()),
-            dynamicEntityModelCommand, &droppedDynamicEntityModels);
+            dynamicEntityModelCommand, &droppedDynamicEntityModels,
+            ResolveRendererMaterial);
     const bool hasDynamicEntityModels = dynamicEntityModelBuild ==
         WebRendererFxModelSceneResult::Success;
     if (dynamicEntityModelBuild != WebRendererFxModelSceneResult::Success &&
@@ -1992,7 +2062,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     WebRendererFxModelSceneResult fxModelBuild =
         WebRenderer_BuildFxModelSceneCommand(
             g_fxModelSubmissions.data(), g_fxModelSubmissionCount,
-            fxModelCommand, &droppedFxModels);
+            fxModelCommand, &droppedFxModels, ResolveRendererMaterial);
     if (droppedFxModels != 0u)
         R_WarnOncePerFrame(R_WARN_UNKNOWN_XMODEL_SHADER);
     if (fxModelBuild != WebRendererFxModelSceneResult::Success &&
@@ -2263,59 +2333,6 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             dynamicEntityModelCommand.batches.empty()
                 ? "<none>"
                 : dynamicEntityModelCommand.batches[0].modelName);
-    }
-    if (g_uiBatches.empty())
-    {
-        WebRenderer_SetUiScene({});
-    }
-    else
-    {
-        const WebRendererUiSceneDesc uiScene{
-            g_uiVertices.data(),
-            static_cast<std::uint32_t>(g_uiVertices.size()),
-            g_uiIndices.data(),
-            static_cast<std::uint32_t>(g_uiIndices.size()),
-            g_uiBatches.data(),
-            static_cast<std::uint32_t>(g_uiBatches.size()),
-        };
-        const WebRendererSurfaceResult uiSubmission =
-            WebRenderer_SetUiScene(uiScene);
-        if (uiSubmission != WebRendererSurfaceResult::Success)
-        {
-            Com_Error(ERR_DROP, "R_RenderScene canonical 2D command %s",
-                WebRenderer_SurfaceResultString(uiSubmission));
-            return;
-        }
-        if (!g_uiSceneReported)
-        {
-            g_uiSceneReported = true;
-            Web_Log(WebLogLevel::Info,
-                "[kisakcod-web] Renderer frontend submitted the first "
-                "canonical 2D scene (%zu quads, %zu batches).\n",
-                g_uiVertices.size() / 4u, g_uiBatches.size());
-            std::array<const Material *, 12> reportedMaterials{};
-            std::size_t reportedCount = 0u;
-            for (const WebRendererUiBatchDesc &batch : g_uiBatches)
-            {
-                bool duplicate = false;
-                for (std::size_t index = 0u; index < reportedCount; ++index)
-                    duplicate |= reportedMaterials[index] ==
-                        batch.materialIdentity;
-                if (duplicate || reportedCount == reportedMaterials.size())
-                    continue;
-                reportedMaterials[reportedCount++] = batch.materialIdentity;
-                Web_Log(WebLogLevel::Info,
-                    "[kisakcod-web] Canonical 2D material '%s': image='%s' "
-                    "map=%u size=%ux%u sampler=0x%02x.\n",
-                    batch.materialName,
-                    batch.image && batch.image->name
-                        ? batch.image->name : "<solid/fallback>",
-                    batch.image ? batch.image->mapType : 0u,
-                    batch.image ? batch.image->width : 0u,
-                    batch.image ? batch.image->height : 0u,
-                    batch.samplerState);
-            }
-        }
     }
     view.worldSurfaceCount = g_worldSceneSurfaceCount;
     view.worldVertexCount = g_worldSceneVertexCount;

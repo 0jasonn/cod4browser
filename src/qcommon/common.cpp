@@ -1526,7 +1526,11 @@ void Com_InitDvars()
 #ifdef KISAK_MP
     com_maxfps = Dvar_RegisterInt("com_maxfps", 85, 0, 1000, DVAR_ARCHIVE, "Cap frames per second");
 #elif KISAK_SP
+    #if defined(KISAK_WEB)
+    com_maxfps = Dvar_RegisterInt("com_maxfps", 60, 0, 1000, DVAR_ARCHIVE, "Cap frames per second");
+    #else
     com_maxfps = Dvar_RegisterInt("com_maxfps", 0, 0, 1000, DVAR_ARCHIVE, "Cap frames per second");
+    #endif
 #endif
 
     useFastFile = Dvar_RegisterBool(
