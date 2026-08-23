@@ -23,10 +23,12 @@ constexpr float BYTE_TO_UNIT = 1.0f / 255.0f;
 constexpr std::uint32_t TECHNIQUE_UNLIT_INDEX = 4u;
 constexpr std::uint32_t TECHNIQUE_EMISSIVE_INDEX = 5u;
 constexpr std::uint32_t TECHNIQUE_LIT_INDEX = 7u;
+constexpr std::uint32_t ENV_MAP_PARMS_HASH = 0x3d9994dcu;
 
 struct ModelGroup
 {
     const XModel *model = nullptr;
+    std::uint8_t reflectionProbeIndex = 0u;
     std::vector<std::uint32_t> instanceIndices;
 };
 
@@ -81,11 +83,56 @@ const GfxImage *FindNormalImage(
     return nullptr;
 }
 
+const GfxImage *FindSpecularImage(
+    const Material *material, std::uint8_t &sampler) noexcept
+{
+    if (!material || !material->textureTable) return nullptr;
+    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
+    {
+        const MaterialTextureDef &texture = material->textureTable[index];
+        if (texture.semantic == 8u && texture.u.image)
+        {
+            sampler = texture.samplerState;
+            return texture.u.image;
+        }
+    }
+    return nullptr;
+}
+
+bool CopyMaterialConstant(const Material *material, std::uint32_t nameHash,
+    float output[4]) noexcept
+{
+    if (!material || !material->constantTable) return false;
+    for (std::uint32_t index = 0u; index < material->constantCount; ++index)
+    {
+        const MaterialConstantDef &constant = material->constantTable[index];
+        if (constant.nameHash == nameHash)
+        {
+            std::copy_n(constant.literal, 4u, output);
+            return true;
+        }
+    }
+    return false;
+}
+
+std::uint32_t HashPixelShaderProgram(
+    const MaterialPixelShader *shader) noexcept
+{
+    if (!shader || !shader->prog.loadDef.program ||
+        shader->prog.loadDef.programSize == 0u) return 0u;
+    std::uint32_t hash = 2166136261u;
+    const auto *bytes = reinterpret_cast<const std::uint8_t *>(
+        shader->prog.loadDef.program);
+    const std::size_t byteCount =
+        static_cast<std::size_t>(shader->prog.loadDef.programSize) * 4u;
+    for (std::size_t index = 0u; index < byteCount; ++index)
+        hash = (hash ^ bytes[index]) * 16777619u;
+    return hash;
+}
+
 bool SelectTechnique(
     const Material *material,
-    std::uint32_t stateBits[2],
-    const char *&techniqueName,
-    std::uint8_t &techniqueType) noexcept
+    WebRendererWorldBatchDesc &draw) noexcept
 {
     if (!material || !material->techniqueSet || !material->stateBitsTable)
         return false;
@@ -105,10 +152,18 @@ bool SelectTechnique(
         {
             continue;
         }
-        stateBits[0] = material->stateBitsTable[entry].loadBits[0];
-        stateBits[1] = material->stateBitsTable[entry].loadBits[1];
-        techniqueName = technique->name;
-        techniqueType = static_cast<std::uint8_t>(type);
+        draw.stateBits[0] = material->stateBitsTable[entry].loadBits[0];
+        draw.stateBits[1] = material->stateBitsTable[entry].loadBits[1];
+        draw.techniqueName = technique->name;
+        draw.techniqueType = static_cast<std::uint8_t>(type);
+        draw.techniqueFlags = technique->flags;
+        for (std::uint32_t pass = 0u; pass < technique->passCount; ++pass)
+            draw.customSamplerFlags |=
+                technique->passArray[pass].customSamplerFlags;
+        const MaterialPixelShader *pixelShader =
+            technique->passArray[0u].pixelShader;
+        draw.pixelShaderName = pixelShader ? pixelShader->name : nullptr;
+        draw.pixelShaderProgramHash = HashPixelShaderProgram(pixelShader);
         return true;
     }
     if (material->techniqueSet->name &&
@@ -121,10 +176,10 @@ bool SelectTechnique(
             const std::uint8_t entry = material->stateBitsEntry[type];
             if (entry == 0xffu || entry >= material->stateBitsCount)
                 continue;
-            stateBits[0] = material->stateBitsTable[entry].loadBits[0];
-            stateBits[1] = material->stateBitsTable[entry].loadBits[1];
-            techniqueName = material->techniqueSet->name;
-            techniqueType = static_cast<std::uint8_t>(type);
+            draw.stateBits[0] = material->stateBitsTable[entry].loadBits[0];
+            draw.stateBits[1] = material->stateBitsTable[entry].loadBits[1];
+            draw.techniqueName = material->techniqueSet->name;
+            draw.techniqueType = static_cast<std::uint8_t>(type);
             return true;
         }
     }
@@ -151,13 +206,15 @@ WebRendererStaticModelInstanceDesc MakeInstance(
 }
 
 WebRendererWorldBatchDesc MakeDraw(
+    const GfxWorld &world,
     const XModel &model,
     Material *material,
     std::uint32_t modelSurfaceIndex,
     std::uint32_t firstIndex,
     std::uint32_t indexCount,
     std::uint32_t firstInstance,
-    std::uint32_t lastInstance) noexcept
+    std::uint32_t lastInstance,
+    std::uint8_t reflectionProbeIndex) noexcept
 {
     WebRendererWorldBatchDesc draw{};
     draw.firstIndex = firstIndex;
@@ -178,14 +235,30 @@ WebRendererWorldBatchDesc MakeDraw(
         (material->info.gameFlags & 0x40u) != 0u;
     draw.baseImage = FindBaseImage(material, draw.samplerState);
     draw.normalImage = FindNormalImage(material, draw.normalSamplerState);
-    const bool hasTechnique = SelectTechnique(material, draw.stateBits,
-        draw.techniqueName, draw.techniqueType);
-    if (!draw.techniqueName ||
-        std::strstr(draw.techniqueName, "n0") == nullptr)
+    draw.specularImage = FindSpecularImage(
+        material, draw.specularSamplerState);
+    draw.reflectionProbeIndex = reflectionProbeIndex;
+    if (world.reflectionProbes &&
+        reflectionProbeIndex < world.reflectionProbeCount)
+        draw.reflectionProbeImage =
+            world.reflectionProbes[reflectionProbeIndex].reflectionImage;
+    const bool hasTechnique = SelectTechnique(material, draw);
+    const bool normalMapped = draw.pixelShaderName &&
+        std::strstr(draw.pixelShaderName, "n0") != nullptr;
+    if (!normalMapped)
         draw.normalImage = nullptr;
-    draw.technique = hasTechnique && draw.baseImage
-        ? WebRendererWorldTechnique::BaseTexture
-        : WebRendererWorldTechnique::BackendFallback;
+    const bool environmentSpecular = hasTechnique && draw.pixelShaderName &&
+        std::strncmp(draw.pixelShaderName, "lp_", 3u) == 0 &&
+        std::strstr(draw.pixelShaderName, "s0_sm3.hlsl") != nullptr &&
+        draw.specularImage && draw.reflectionProbeImage &&
+        CopyMaterialConstant(material, ENV_MAP_PARMS_HASH, draw.envMapParms);
+    draw.technique = !hasTechnique || !draw.baseImage
+        ? WebRendererWorldTechnique::BackendFallback
+        : environmentSpecular
+            ? (normalMapped
+                ? WebRendererWorldTechnique::BaseTextureNormalSpecular
+                : WebRendererWorldTechnique::BaseTextureSpecular)
+            : WebRendererWorldTechnique::BaseTexture;
     return draw;
 }
 } // namespace
@@ -224,18 +297,23 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
             if (!PlacementIsFinite(instance.placement))
                 return WebRendererStaticModelSceneResult::InvalidPlacement;
             auto group = std::find_if(groups.begin(), groups.end(),
-                [model](const ModelGroup &candidate) {
-                    return candidate.model == model;
+                [model, &instance](const ModelGroup &candidate) {
+                    return candidate.model == model &&
+                        candidate.reflectionProbeIndex ==
+                            instance.reflectionProbeIndex;
                 });
             if (group == groups.end())
             {
-                groups.push_back({model, {}});
+                groups.push_back({
+                    model, instance.reflectionProbeIndex, {}});
                 group = std::prev(groups.end());
             }
             group->instanceIndices.push_back(instanceIndex);
         }
 
         std::uint32_t submittedInstanceCount = 0u;
+        std::vector<const XModel *> submittedModels;
+        submittedModels.reserve(groups.size());
         for (const ModelGroup &group : groups)
             submittedInstanceCount += static_cast<std::uint32_t>(
                 group.instanceIndices.size());
@@ -392,13 +470,15 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
                         material = canonical;
                 }
                 batch.draw = MakeDraw(
+                    world,
                     model,
                     material,
                     modelSurfaceIndex,
                     firstIndex,
                     indexCount,
                     group.instanceIndices.front(),
-                    group.instanceIndices.back());
+                    group.instanceIndices.back(),
+                    group.reflectionProbeIndex);
                 batch.instanceOffset = instanceOffset;
                 batch.instanceCount = static_cast<std::uint32_t>(
                     group.instanceIndices.size());
@@ -406,8 +486,12 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
                 ++replacement.surfaceCount;
                 modelSubmitted = true;
             }
-            if (modelSubmitted)
+            if (modelSubmitted && std::find(submittedModels.begin(),
+                    submittedModels.end(), &model) == submittedModels.end())
+            {
+                submittedModels.push_back(&model);
                 ++replacement.modelCount;
+            }
         }
     }
     catch (const std::bad_alloc &)

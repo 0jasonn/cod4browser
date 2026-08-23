@@ -185,6 +185,77 @@ void TestMaterialReferencesResolveAtRendererEvaluation()
     g_resolvedMaterial = nullptr;
 }
 
+void TestSm3SpecularRetainsCanonicalProbeAndSplitsProbeGroups()
+{
+    Fixture fixture;
+    GfxImage normalImage{};
+    GfxImage specularImage{};
+    GfxImage probeImages[2]{};
+    std::array<MaterialTextureDef, 3> textures{};
+    textures[0] = fixture.texture;
+    textures[1].semantic = 5u;
+    textures[1].samplerState = 0x0bu;
+    textures[1].u.image = &normalImage;
+    textures[2].semantic = 8u;
+    textures[2].samplerState = 0x2bu;
+    textures[2].u.image = &specularImage;
+    fixture.material.textureCount =
+        static_cast<std::uint8_t>(textures.size());
+    fixture.material.textureTable = textures.data();
+
+    MaterialConstantDef envMapParms{};
+    envMapParms.nameHash = 0x3d9994dcu;
+    envMapParms.literal[0] = 0.4f;
+    envMapParms.literal[1] = 10.0f;
+    envMapParms.literal[2] = 2.5f;
+    envMapParms.literal[3] = 0.625f;
+    fixture.material.constantCount = 1u;
+    fixture.material.constantTable = &envMapParms;
+
+    std::uint32_t shaderWords[2]{0xffff0300u, 0x0000ffffu};
+    MaterialPixelShader pixelShader{};
+    pixelShader.name = "lp_r0c0n0s0_sm3.hlsl";
+    pixelShader.prog.loadDef.program = shaderWords;
+    pixelShader.prog.loadDef.programSize = 2u;
+    fixture.technique.name = "lp_r0c0n0s0_dtex_sm3";
+    fixture.technique.flags = 0x1234u;
+    fixture.technique.passArray[0].pixelShader = &pixelShader;
+    fixture.technique.passArray[0].customSamplerFlags = 1u;
+
+    GfxReflectionProbe probes[2]{};
+    probes[0].reflectionImage = &probeImages[0];
+    probes[1].reflectionImage = &probeImages[1];
+    fixture.world.reflectionProbeCount = 2u;
+    fixture.world.reflectionProbes = probes;
+    fixture.instances[0].reflectionProbeIndex = 0u;
+    fixture.instances[1].reflectionProbeIndex = 1u;
+
+    WebRendererStaticModelSceneCommand command;
+    assert(WebRenderer_BuildStaticModelSceneCommand(fixture.world, command) ==
+        WebRendererStaticModelSceneResult::Success);
+    assert(command.batches.size() == 2u);
+    assert(command.instances.size() == 2u);
+    for (std::size_t index = 0u; index < command.batches.size(); ++index)
+    {
+        const WebRendererWorldBatchDesc &draw = command.batches[index].draw;
+        assert(draw.technique ==
+            WebRendererWorldTechnique::BaseTextureNormalSpecular);
+        assert(draw.normalImage == &normalImage);
+        assert(draw.specularImage == &specularImage);
+        assert(draw.specularSamplerState == 0x2bu);
+        assert(draw.reflectionProbeIndex == index);
+        assert(draw.reflectionProbeImage == &probeImages[index]);
+        assert(draw.envMapParms[0] == 0.4f);
+        assert(draw.envMapParms[2] == 2.5f);
+        assert(draw.techniqueFlags == 0x1234u);
+        assert(draw.customSamplerFlags == 1u);
+        assert(std::strcmp(draw.pixelShaderName,
+            "lp_r0c0n0s0_sm3.hlsl") == 0);
+        assert(draw.pixelShaderProgramHash != 0u);
+        assert(WebRenderer_UsesModelEnvironmentSpecular(draw.technique));
+    }
+}
+
 void TestMalformedIndexAndPlacementFailAtomically()
 {
     Fixture fixture;
@@ -208,6 +279,7 @@ int main()
     TestCanonicalInstancesShareOneMaterialSurfaceBatch();
     TestLightingAtlasCountsOnlySubmittedCanonicalPlacements();
     TestMaterialReferencesResolveAtRendererEvaluation();
+    TestSm3SpecularRetainsCanonicalProbeAndSplitsProbeGroups();
     TestMalformedIndexAndPlacementFailAtomically();
     return 0;
 }

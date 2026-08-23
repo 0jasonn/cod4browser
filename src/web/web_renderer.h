@@ -183,6 +183,11 @@ enum class WebRendererWorldTechnique : std::uint8_t
     // instead of collapsing the pass to its shader-model-2 diffuse subset.
     BaseTextureLightmapSpecular,
     BaseTextureLightmapNormalSpecular,
+    // Canonical lp_*s0_sm3 XModel passes. These use the model-light-grid
+    // volume rather than a world lightmap, but share the authored semantic-8
+    // specular/reflection-probe environment term.
+    BaseTextureSpecular,
+    BaseTextureNormalSpecular,
     VertexColorMultiply,
     VertexColorAdditive,
     // Canonical water_l_sun pass: animated FFT height field, reflection
@@ -219,7 +224,8 @@ constexpr bool WebRenderer_UsesWorldNormalMap(
 {
     return technique == WebRendererWorldTechnique::BaseTextureLightmapNormal ||
         technique ==
-            WebRendererWorldTechnique::BaseTextureLightmapNormalSpecular;
+            WebRendererWorldTechnique::BaseTextureLightmapNormalSpecular ||
+        technique == WebRendererWorldTechnique::BaseTextureNormalSpecular;
 }
 
 constexpr bool WebRenderer_UsesWorldSpecularMap(
@@ -227,7 +233,16 @@ constexpr bool WebRenderer_UsesWorldSpecularMap(
 {
     return technique == WebRendererWorldTechnique::BaseTextureLightmapSpecular ||
         technique ==
-            WebRendererWorldTechnique::BaseTextureLightmapNormalSpecular;
+            WebRendererWorldTechnique::BaseTextureLightmapNormalSpecular ||
+        technique == WebRendererWorldTechnique::BaseTextureSpecular ||
+        technique == WebRendererWorldTechnique::BaseTextureNormalSpecular;
+}
+
+constexpr bool WebRenderer_UsesModelEnvironmentSpecular(
+    WebRendererWorldTechnique technique) noexcept
+{
+    return technique == WebRendererWorldTechnique::BaseTextureSpecular ||
+        technique == WebRendererWorldTechnique::BaseTextureNormalSpecular;
 }
 
 constexpr bool WebRenderer_UsesColorIntensityOpacity(

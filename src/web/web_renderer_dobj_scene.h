@@ -35,6 +35,8 @@ struct WebRendererDObjSubmission
     std::uint32_t entityNumber;
     std::uint32_t renderFlags;
     float lightingOrigin[3];
+    std::uint8_t reflectionProbeIndex = 0u;
+    const GfxImage *reflectionProbeImage = nullptr;
 };
 
 constexpr bool WebRenderer_DObjUsesDepthHack(

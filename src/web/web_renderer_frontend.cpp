@@ -33,6 +33,7 @@
 #include <universal/com_memory.h>
 #include <universal/memfile.h>
 #include <web/web_renderer.h>
+#include <limits>
 #include <web/web_renderer_image_reference.h>
 #include <web/web_renderer_code_mesh.h>
 #include <web/web_renderer_dobj_scene.h>
@@ -69,6 +70,81 @@ extern GfxWorld s_world;
 
 namespace
 {
+std::uint32_t WebRenderer_CalcReflectionProbeIndex(
+    const GfxWorld &world, const float origin[3]) noexcept
+{
+    if (!world.reflectionProbes || world.reflectionProbeCount <= 1u)
+        return 0u;
+
+    const auto nearestFromList = [&](const std::uint8_t *indices,
+                                     std::uint32_t count) noexcept
+    {
+        std::uint32_t bestIndex = 0u;
+        float bestDistance = std::numeric_limits<float>::max();
+        for (std::uint32_t entry = 0u; entry < count; ++entry)
+        {
+            const std::uint32_t index = indices ? indices[entry] : entry + 1u;
+            if (index >= world.reflectionProbeCount) continue;
+            float distance = 0.0f;
+            for (std::size_t axis = 0u; axis < 3u; ++axis)
+            {
+                const float delta = origin[axis] -
+                    world.reflectionProbes[index].origin[axis];
+                distance += delta * delta;
+            }
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                bestIndex = index;
+            }
+        }
+        return bestIndex;
+    };
+
+    // Mirror native R_CellForPoint and then restrict the probe search to the
+    // canonical cell list. Bound the traversal count so invalid cycles fall
+    // back to the global nearest-probe search.
+    if (world.dpvsPlanes.nodes && world.dpvsPlanes.planes && world.cells &&
+        world.dpvsPlanes.cellCount > 0)
+    {
+        const mnode_t *node = reinterpret_cast<const mnode_t *>(
+            world.dpvsPlanes.nodes);
+        const int cellLimit = world.dpvsPlanes.cellCount + 1;
+        for (std::uint32_t step = 0u; step < 65536u; ++step)
+        {
+            const int nodeIndex = node->cellIndex;
+            if (nodeIndex < cellLimit)
+            {
+                const int cellIndex = nodeIndex - 1;
+                if (cellIndex >= 0 &&
+                    cellIndex < world.dpvsPlanes.cellCount)
+                {
+                    const GfxCell &cell = world.cells[cellIndex];
+                    if (cell.reflectionProbes &&
+                        cell.reflectionProbeCount > 0u)
+                        return nearestFromList(cell.reflectionProbes,
+                            cell.reflectionProbeCount);
+                }
+                break;
+            }
+            const cplane_s &plane =
+                world.dpvsPlanes.planes[nodeIndex - cellLimit];
+            const float distance = origin[0] * plane.normal[0] +
+                origin[1] * plane.normal[1] +
+                origin[2] * plane.normal[2] - plane.dist;
+            if (distance <= 0.0f && node->rightChildOffset < 2u)
+                break;
+            const std::uint16_t offset = distance <= 0.0f
+                ? static_cast<std::uint16_t>(node->rightChildOffset - 2u)
+                : 0u;
+            node = reinterpret_cast<const mnode_t *>(
+                reinterpret_cast<const std::uint8_t *>(node) +
+                offset * 2u + 4u);
+        }
+    }
+    return nearestFromList(nullptr, world.reflectionProbeCount - 1u);
+}
+
 EM_JS(
     void,
     DispatchRendererVisionLighting,
@@ -172,6 +248,7 @@ void ResolveRendererBatchImages(WebRendererWorldBatchDesc &batch) noexcept
 {
     batch.baseImage = ResolveRendererImage(batch.baseImage);
     batch.normalImage = ResolveRendererImage(batch.normalImage);
+    batch.specularImage = ResolveRendererImage(batch.specularImage);
     batch.lightmapImage = ResolveRendererImage(batch.lightmapImage);
     batch.secondaryLightmapImage =
         ResolveRendererImage(batch.secondaryLightmapImage);
@@ -275,13 +352,29 @@ std::uint32_t ResolveTechniqueSetRemaps()
         CollectTechniqueSet, &techniqueSets, true);
 
     std::uint32_t shaderModel3Count = 0u;
+    std::uint32_t referenceCount = 0u;
     for (MaterialTechniqueSet *source : techniqueSets)
     {
         if (!source) continue;
+        if (source->name && source->name[0] == ',' && source->name[1] != '\0')
+        {
+            MaterialTechniqueSet *canonical = DB_FindXAssetHeader(
+                ASSET_TYPE_TECHNIQUE_SET, source->name + 1).techniqueSet;
+            if (canonical && canonical->name &&
+                I_stricmp(canonical->name, source->name + 1) == 0)
+            {
+                source->remappedTechniqueSet = canonical;
+                ++referenceCount;
+                continue;
+            }
+        }
         source->remappedTechniqueSet = source;
         if (source->name && std::strncmp(source->name, "sm2/", 4u) != 0)
             ++shaderModel3Count;
     }
+    Web_Log(WebLogLevel::Info,
+        "[kisakcod-web] Resolved %u canonical leading-comma TechniqueSet "
+        "references at the renderer-evaluation seam.\n", referenceCount);
     return shaderModel3Count;
 }
 }
@@ -2788,6 +2881,19 @@ void __cdecl R_AddDObjToScene(const DObj_s *obj, const cpose_t *pose,
     const float *sourceLightingOrigin = lightingOrigin
         ? lightingOrigin : (pose ? pose->origin : vec3_origin);
     std::copy_n(sourceLightingOrigin, 3u, submission.lightingOrigin);
+    if (s_world.reflectionProbes && s_world.reflectionProbeCount != 0u)
+    {
+        const std::uint32_t probeIndex =
+            WebRenderer_CalcReflectionProbeIndex(
+                s_world, sourceLightingOrigin);
+        if (probeIndex < s_world.reflectionProbeCount)
+        {
+            submission.reflectionProbeIndex =
+                static_cast<std::uint8_t>(probeIndex);
+            submission.reflectionProbeImage =
+                s_world.reflectionProbes[probeIndex].reflectionImage;
+        }
+    }
     const WebRendererDObjAdmissionResult admission =
         WebRenderer_ValidateDObjSubmission(
             submission, g_dobjSubmissionCount,

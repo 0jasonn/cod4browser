@@ -106,6 +106,14 @@ void TestReflexSightTechniqueSelectsIntensityOpacitySubset()
         WebRendererWorldTechnique::ReflexSight));
     assert(!WebRenderer_UsesColorIntensityOpacity(
         WebRendererWorldTechnique::BaseTexture));
+    assert(WebRenderer_UsesModelEnvironmentSpecular(
+        WebRendererWorldTechnique::BaseTextureSpecular));
+    assert(WebRenderer_UsesModelEnvironmentSpecular(
+        WebRendererWorldTechnique::BaseTextureNormalSpecular));
+    assert(WebRenderer_UsesWorldNormalMap(
+        WebRendererWorldTechnique::BaseTextureNormalSpecular));
+    assert(!WebRenderer_UsesSecondaryDirectionalLightmap(
+        WebRendererWorldTechnique::BaseTextureNormalSpecular));
 }
 } // namespace
 

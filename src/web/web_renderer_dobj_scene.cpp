@@ -29,6 +29,7 @@ constexpr float SHORT_WEIGHT_TO_UNIT = 1.0f / 65536.0f;
 constexpr std::uint32_t TECHNIQUE_UNLIT_INDEX = 4u;
 constexpr std::uint32_t TECHNIQUE_EMISSIVE_INDEX = 5u;
 constexpr std::uint32_t TECHNIQUE_LIT_INDEX = 7u;
+constexpr std::uint32_t ENV_MAP_PARMS_HASH = 0x3d9994dcu;
 
 bool Finite3(const float value[3]) noexcept
 {
@@ -68,9 +69,55 @@ const GfxImage *FindNormalImage(
     return nullptr;
 }
 
+const GfxImage *FindSpecularImage(
+    const Material *material, std::uint8_t &sampler) noexcept
+{
+    if (!material || !material->textureTable) return nullptr;
+    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
+    {
+        const MaterialTextureDef &texture = material->textureTable[index];
+        if (texture.semantic == 8u && texture.u.image)
+        {
+            sampler = texture.samplerState;
+            return texture.u.image;
+        }
+    }
+    return nullptr;
+}
+
+bool CopyMaterialConstant(const Material *material, std::uint32_t nameHash,
+    float output[4]) noexcept
+{
+    if (!material || !material->constantTable) return false;
+    for (std::uint32_t index = 0u; index < material->constantCount; ++index)
+    {
+        const MaterialConstantDef &constant = material->constantTable[index];
+        if (constant.nameHash == nameHash)
+        {
+            std::copy_n(constant.literal, 4u, output);
+            return true;
+        }
+    }
+    return false;
+}
+
+std::uint32_t HashPixelShaderProgram(
+    const MaterialPixelShader *shader) noexcept
+{
+    if (!shader || !shader->prog.loadDef.program ||
+        shader->prog.loadDef.programSize == 0u) return 0u;
+    std::uint32_t hash = 2166136261u;
+    const auto *bytes = reinterpret_cast<const std::uint8_t *>(
+        shader->prog.loadDef.program);
+    const std::size_t byteCount =
+        static_cast<std::size_t>(shader->prog.loadDef.programSize) * 4u;
+    for (std::size_t index = 0u; index < byteCount; ++index)
+        hash = (hash ^ bytes[index]) * 16777619u;
+    return hash;
+}
+
 bool SelectTechnique(
-    const Material *material, std::uint32_t stateBits[2],
-    const char *&techniqueName, std::uint8_t &techniqueType) noexcept
+    const Material *material, WebRendererWorldBatchDesc &draw) noexcept
 {
     if (!material || !material->techniqueSet || !material->stateBitsTable)
         return false;
@@ -90,10 +137,18 @@ bool SelectTechnique(
         {
             continue;
         }
-        stateBits[0] = material->stateBitsTable[entry].loadBits[0];
-        stateBits[1] = material->stateBitsTable[entry].loadBits[1];
-        techniqueName = technique->name;
-        techniqueType = static_cast<std::uint8_t>(type);
+        draw.stateBits[0] = material->stateBitsTable[entry].loadBits[0];
+        draw.stateBits[1] = material->stateBitsTable[entry].loadBits[1];
+        draw.techniqueName = technique->name;
+        draw.techniqueType = static_cast<std::uint8_t>(type);
+        draw.techniqueFlags = technique->flags;
+        for (std::uint32_t pass = 0u; pass < technique->passCount; ++pass)
+            draw.customSamplerFlags |=
+                technique->passArray[pass].customSamplerFlags;
+        const MaterialPixelShader *pixelShader =
+            technique->passArray[0u].pixelShader;
+        draw.pixelShaderName = pixelShader ? pixelShader->name : nullptr;
+        draw.pixelShaderProgramHash = HashPixelShaderProgram(pixelShader);
         return true;
     }
     if (material->techniqueSet->name &&
@@ -106,10 +161,10 @@ bool SelectTechnique(
             const std::uint8_t entry = material->stateBitsEntry[type];
             if (entry == 0xffu || entry >= material->stateBitsCount)
                 continue;
-            stateBits[0] = material->stateBitsTable[entry].loadBits[0];
-            stateBits[1] = material->stateBitsTable[entry].loadBits[1];
-            techniqueName = material->techniqueSet->name;
-            techniqueType = static_cast<std::uint8_t>(type);
+            draw.stateBits[0] = material->stateBitsTable[entry].loadBits[0];
+            draw.stateBits[1] = material->stateBitsTable[entry].loadBits[1];
+            draw.techniqueName = material->techniqueSet->name;
+            draw.techniqueType = static_cast<std::uint8_t>(type);
             return true;
         }
     }
@@ -355,6 +410,8 @@ WebRendererWorldBatchDesc MakeDraw(
     std::uint32_t indexCount,
     const float modelLightingCoordinates[3],
     bool modelLightingEnabled, bool depthHack, bool castsSunShadow,
+    std::uint8_t reflectionProbeIndex,
+    const GfxImage *reflectionProbeImage,
     WebRendererMaterialResolver materialResolver) noexcept
 {
     material = WebRenderer_ResolveDObjMaterial(material, materialResolver);
@@ -378,20 +435,33 @@ WebRendererWorldBatchDesc MakeDraw(
         (material->info.gameFlags & 0x40u) != 0u;
     draw.baseImage = FindBaseImage(material, draw.samplerState);
     draw.normalImage = FindNormalImage(material, draw.normalSamplerState);
+    draw.specularImage = FindSpecularImage(
+        material, draw.specularSamplerState);
+    draw.reflectionProbeIndex = reflectionProbeIndex;
+    draw.reflectionProbeImage = reflectionProbeImage;
     // The WebGL compatibility technique is deliberately a base-color subset
     // of the canonical material. Preserve canonical state when one of the
     // common passes supplies it, but a DB-owned color image remains enough to
     // use that supported subset even when the original shader itself is not.
-    SelectTechnique(material, draw.stateBits,
-        draw.techniqueName, draw.techniqueType);
-    if (!draw.techniqueName ||
-        std::strstr(draw.techniqueName, "n0") == nullptr)
+    SelectTechnique(material, draw);
+    const bool normalMapped = draw.pixelShaderName &&
+        std::strstr(draw.pixelShaderName, "n0") != nullptr;
+    if (!normalMapped)
         draw.normalImage = nullptr;
+    const bool environmentSpecular = draw.pixelShaderName &&
+        std::strncmp(draw.pixelShaderName, "lp_", 3u) == 0 &&
+        std::strstr(draw.pixelShaderName, "s0_sm3.hlsl") != nullptr &&
+        draw.specularImage && draw.reflectionProbeImage &&
+        CopyMaterialConstant(material, ENV_MAP_PARMS_HASH, draw.envMapParms);
     draw.technique = !draw.baseImage
         ? WebRendererWorldTechnique::BackendFallback
         : WebRenderer_IsReflexSightTechnique(draw.techniqueName)
             ? WebRendererWorldTechnique::ReflexSight
-            : WebRendererWorldTechnique::BaseTexture;
+            : environmentSpecular
+                ? (normalMapped
+                    ? WebRendererWorldTechnique::BaseTextureNormalSpecular
+                    : WebRendererWorldTechnique::BaseTextureSpecular)
+                : WebRendererWorldTechnique::BaseTexture;
     // Only the canonical lit pass consumes the model-light-grid constants.
     // Unlit reflex sights must preserve their emissive color and derived
     // opacity instead of being darkened by the viewmodel's lighting sample.
@@ -601,6 +671,8 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                             submission.renderFlags),
                         WebRenderer_DObjIsSunShadowCandidate(
                             submission.renderFlags),
+                        submission.reflectionProbeIndex,
+                        submission.reflectionProbeImage,
                         materialResolver));
                     ++replacement.surfaceCount;
                     submittedModel = true;
