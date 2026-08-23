@@ -410,8 +410,7 @@ EM_JS(
      std::uint32_t blendedDrawCount,
      std::uint32_t divergentDrawCount),
     {
-        globalThis.dispatchEvent(new CustomEvent(
-            "kisakcod:renderer-comparison", { detail: {
+        const detail = {
                 state: "captured",
                 source: "canonical-frontend-vs-webgl-backend",
                 intendedDrawCount: intendedDrawCount >>> 0,
@@ -425,7 +424,13 @@ EM_JS(
                 normalized: true,
                 containsGpuHandles: false,
                 containsObjectAddresses: false
-            }}));
+            };
+        globalThis.__KISAKCOD_RENDERER_COMPARISON__ = {
+            summary: detail,
+            records: []
+        };
+        globalThis.dispatchEvent(new CustomEvent(
+            "kisakcod:renderer-comparison", { detail }));
     });
 
 EM_JS(
@@ -467,8 +472,7 @@ EM_JS(
      const char *composition,
      std::uint32_t divergenceFields),
     {
-        globalThis.dispatchEvent(new CustomEvent(
-            "kisakcod:renderer-comparison-record", { detail: {
+        const detail = {
                 drawOrder: drawOrder >>> 0,
                 sourceKind: UTF8ToString(sourceKind),
                 materialName: UTF8ToString(materialName),
@@ -511,7 +515,12 @@ EM_JS(
                 secondaryLightmapUsed: Boolean(secondaryLightmapUsed),
                 samplerState: samplerState >>> 0,
                 divergenceFields: divergenceFields >>> 0
-            }}));
+            };
+        const capture = globalThis.__KISAKCOD_RENDERER_COMPARISON__;
+        if (capture && Array.isArray(capture.records))
+            capture.records.push(detail);
+        globalThis.dispatchEvent(new CustomEvent(
+            "kisakcod:renderer-comparison-record", { detail }));
     });
 
 const char *FxSourceKindName(WebRendererSceneBatchKind kind) noexcept
@@ -936,10 +945,6 @@ void LogWorldVertexColorInventory(
             ++entry.samples;
         }
     }
-    constexpr std::array<const char *, techniqueCount> techniqueNames{{
-        "fallback", "base", "lightmapped", "lightmapped-normal",
-        "multiply", "additive", "water-lit-sun", "reflex-sight",
-        "native-technique-unavailable"}};
     for (std::size_t index = 0u; index < stats.size(); ++index)
     {
         const ColorStats &entry = stats[index];
@@ -949,13 +954,88 @@ void LogWorldVertexColorInventory(
             "[kisakcod-web] Renderer comparison vertex colors %s: "
             "samples=%llu avg=(%.4f %.4f %.4f) min=(%.4f %.4f %.4f) "
             "max=(%.4f %.4f %.4f).\n",
-            techniqueNames[index],
+            ComparisonPortableTechniqueName(
+                static_cast<WebRendererWorldTechnique>(index)),
             static_cast<unsigned long long>(entry.samples),
             entry.sum[0] / entry.samples,
             entry.sum[1] / entry.samples,
             entry.sum[2] / entry.samples,
             entry.minimum[0], entry.minimum[1], entry.minimum[2],
             entry.maximum[0], entry.maximum[1], entry.maximum[2]);
+    }
+}
+
+void LogWorldTechniqueInventory(const WebRendererWorldSurfaceDesc &surface)
+{
+    struct Entry
+    {
+        std::string techniqueName;
+        std::string pixelShaderName;
+        WebRendererWorldTechnique portableTechnique =
+            WebRendererWorldTechnique::BackendFallback;
+        std::uint8_t techniqueType = 0u;
+        std::uint32_t stateBits0 = 0u;
+        std::uint32_t batchCount = 0u;
+        std::uint32_t surfaceCount = 0u;
+    };
+    std::vector<Entry> inventory;
+    try
+    {
+        for (std::uint32_t index = 0u; index < surface.batchCount; ++index)
+        {
+            const WebRendererWorldBatchDesc &batch = surface.batches[index];
+            const std::string_view techniqueName = batch.techniqueName
+                ? batch.techniqueName : "<unsupported-technique>";
+            const std::string_view pixelShaderName = batch.pixelShaderName
+                ? batch.pixelShaderName : "<unavailable-pixel-shader>";
+            auto entry = std::find_if(inventory.begin(), inventory.end(),
+                [&](const Entry &candidate) {
+                    return candidate.techniqueName == techniqueName &&
+                        candidate.pixelShaderName == pixelShaderName &&
+                        candidate.portableTechnique == batch.technique &&
+                        candidate.techniqueType == batch.techniqueType &&
+                        candidate.stateBits0 == batch.stateBits[0];
+                });
+            if (entry == inventory.end())
+            {
+                inventory.push_back({std::string(techniqueName),
+                    std::string(pixelShaderName), batch.technique,
+                    batch.techniqueType, batch.stateBits[0], 0u, 0u});
+                entry = std::prev(inventory.end());
+            }
+            ++entry->batchCount;
+            entry->surfaceCount += batch.surfaceCount;
+        }
+        std::stable_sort(inventory.begin(), inventory.end(),
+            [](const Entry &left, const Entry &right) {
+                return left.surfaceCount > right.surfaceCount;
+            });
+    }
+    catch (const std::bad_alloc &)
+    {
+        Web_Log(WebLogLevel::Error,
+            "[kisakcod-web] Canonical material-technique inventory could "
+            "not be retained.\n");
+        return;
+    }
+    Web_Log(WebLogLevel::Info,
+        "[kisakcod-web] Canonical material-technique inventory: %zu "
+        "encountered world variants ordered by surface frequency.\n",
+        inventory.size());
+    for (std::size_t rank = 0u; rank < inventory.size(); ++rank)
+    {
+        const Entry &entry = inventory[rank];
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Material technique #%zu: surfaces=%u batches=%u "
+            "nativeType=%u native='%s' shader='%s' portable='%s' "
+            "alphaTest=%u blend=%u state0=0x%08x.\n",
+            rank + 1u, entry.surfaceCount, entry.batchCount,
+            static_cast<unsigned int>(entry.techniqueType),
+            entry.techniqueName.c_str(), entry.pixelShaderName.c_str(),
+            ComparisonPortableTechniqueName(entry.portableTechnique),
+            static_cast<unsigned int>((entry.stateBits0 >> 12u) & 3u),
+            (entry.stateBits0 & 0x700u) != 0u ? 1u : 0u,
+            entry.stateBits0);
     }
 }
 
@@ -4908,6 +4988,7 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
     {
         LogNormalizedWorldLightingTrace(surface);
         LogWorldVertexColorInventory(surface);
+        LogWorldTechniqueInventory(surface);
         LogRetainedLightmapInventory(surface);
         LogWorldColorImageInventory();
     }
