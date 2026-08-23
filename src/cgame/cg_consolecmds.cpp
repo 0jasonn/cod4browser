@@ -297,99 +297,31 @@ void CG_UFO_f()
 
 void __cdecl CG_SetViewPos_f()
 {
-    int v0; // r30
-    float *origin; // r31
-    const char *v2; // r3
-    long double v3; // fp2
-    unsigned int nesting; // r7
-    const char *v5; // r3
-    long double v6; // fp2
-    int v7; // r7
-    const char *v8; // r3
-    long double v9; // fp2
-    float v10[20]; // [sp+50h] [-50h] BYREF
-
-    if (cgArray[0].nextSnap)
+    if (!cgArray[0].nextSnap) return;
+    if (!cgArray[0].predictedPlayerState.pm_type)
     {
-        if (cmd_args.nesting >= 8u)
-            MyAssertHandler(
-                "c:\\trees\\cod3\\cod3src\\src\\cgame\\../qcommon/cmd.h",
-                191,
-                0,
-                "cmd_args.nesting doesn't index CMD_MAX_NESTING\n\t%i not in [0, %i)",
-                cmd_args.nesting,
-                8);
-        if (!cgArray[0].predictedPlayerState.pm_type)
-            Com_Printf(
-                0,
-                "\"cg_setviewpos\" isn't very useful when server controlled.  Use cg_ufo/cg_noclip or use \"setviewpos\"\n");
-        if (Cmd_Argc() == 4 || Cmd_Argc() == 6)
-        {
-            v0 = 0;
-            origin = cgArray[0].predictedPlayerState.origin;
-            do
-            {
-                v2 = Cmd_Argv(++v0);
-                v3 = atof(v2);
-                *origin++ = *(double *)&v3;
-            } while ((int)origin < (int)cgArray[0].predictedPlayerState.velocity);
-            nesting = cmd_args.nesting;
-            if (cmd_args.nesting >= 8u)
-            {
-                MyAssertHandler(
-                    "c:\\trees\\cod3\\cod3src\\src\\cgame\\../qcommon/cmd.h",
-                    160,
-                    0,
-                    "cmd_args.nesting doesn't index CMD_MAX_NESTING\n\t%i not in [0, %i)",
-                    cmd_args.nesting,
-                    8);
-                nesting = cmd_args.nesting;
-            }
-            if (cmd_args.argc[nesting] == 6)
-            {
-                if (nesting >= 8)
-                {
-                    MyAssertHandler(
-                        "c:\\trees\\cod3\\cod3src\\src\\cgame\\../qcommon/cmd.h",
-                        174,
-                        0,
-                        "cmd_args.nesting doesn't index CMD_MAX_NESTING\n\t%i not in [0, %i)",
-                        nesting,
-                        8);
-                    nesting = cmd_args.nesting;
-                }
-                if (cmd_args.argc[nesting] <= 4)
-                    v5 = "";
-                else
-                    v5 = (const char *)*((unsigned int *)cmd_args.argv[nesting] + 4);
-                v6 = atof(v5);
-                v7 = cmd_args.nesting;
-                v10[1] = *(double *)&v6;
-                if (cmd_args.nesting >= 8u)
-                {
-                    MyAssertHandler(
-                        "c:\\trees\\cod3\\cod3src\\src\\cgame\\../qcommon/cmd.h",
-                        174,
-                        0,
-                        "cmd_args.nesting doesn't index CMD_MAX_NESTING\n\t%i not in [0, %i)",
-                        cmd_args.nesting,
-                        8);
-                    v7 = cmd_args.nesting;
-                }
-                if (cmd_args.argc[v7] <= 5)
-                    v8 = "";
-                else
-                    v8 = (const char *)*((unsigned int *)cmd_args.argv[v7] + 5);
-                v9 = atof(v8);
-                v10[2] = 0.0;
-                v10[0] = *(double *)&v9;
-                CG_SetDebugAngles(v10);
-            }
-        }
-        else
-        {
-            Com_Printf(0, "USAGE: cg_setviewpos x y z [yaw pitch]\n");
-        }
+        Com_Printf(0,
+            "\"cg_setviewpos\" isn't very useful when server controlled.  "
+            "Use cg_ufo/cg_noclip or use \"setviewpos\"\n");
+    }
+
+    const int argumentCount = Cmd_Argc();
+    if (argumentCount != 4 && argumentCount != 6)
+    {
+        Com_Printf(0, "USAGE: cg_setviewpos x y z [yaw pitch]\n");
+        return;
+    }
+    for (int component = 0; component < 3; ++component)
+    {
+        cgArray[0].predictedPlayerState.origin[component] =
+            static_cast<float>(atof(Cmd_Argv(component + 1)));
+    }
+    if (argumentCount == 6)
+    {
+        float angles[3]{};
+        angles[1] = static_cast<float>(atof(Cmd_Argv(4)));
+        angles[0] = static_cast<float>(atof(Cmd_Argv(5)));
+        CG_SetDebugAngles(angles);
     }
 }
 
