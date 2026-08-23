@@ -536,6 +536,56 @@ bool WebRenderer_CalculateGlowConstants(
     return true;
 }
 
+bool WebRenderer_ValidateDepthOfFieldSettings(
+    const WebRendererDepthOfFieldSettings &dof) noexcept
+{
+    const float values[] = {
+        dof.viewModelStart, dof.viewModelEnd,
+        dof.nearStart, dof.nearEnd,
+        dof.farStart, dof.farEnd,
+        dof.nearBlur, dof.farBlur,
+    };
+    for (const float value : values)
+        if (!std::isfinite(value) || value < 0.0f) return false;
+    return !dof.enabled || dof.nearBlur >= 4.0f;
+}
+
+float WebRenderer_EvaluateDepthOfFieldBlur(
+    const WebRendererDepthOfFieldSettings &dof,
+    float viewDistance,
+    bool viewModel) noexcept
+{
+    if (!WebRenderer_ValidateDepthOfFieldSettings(dof) || !dof.enabled ||
+        !std::isfinite(viewDistance) || viewDistance < 0.0f)
+        return 0.0f;
+    if (viewModel)
+    {
+        if (dof.viewModelEnd <= dof.viewModelStart + 1.0f)
+            return 0.0f;
+        const float coc = std::clamp(
+            (dof.viewModelEnd - viewDistance) /
+                (dof.viewModelEnd - dof.viewModelStart),
+            0.0f, 1.0f);
+        return coc * dof.nearBlur;
+    }
+    float radius = 0.0f;
+    if (dof.nearEnd > dof.nearStart + 1.0f)
+    {
+        radius = std::clamp(
+            (dof.nearEnd - viewDistance) /
+                (dof.nearEnd - dof.nearStart),
+            0.0f, 1.0f) * dof.nearBlur;
+    }
+    if (dof.farEnd > dof.farStart + 1.0f && dof.farBlur > 0.0f)
+    {
+        radius = std::max(radius, std::clamp(
+            (viewDistance - dof.farStart) /
+                (dof.farEnd - dof.farStart),
+            0.0f, 1.0f) * dof.farBlur);
+    }
+    return radius;
+}
+
 float WebRenderer_EvaluateDisplayGamma(
     float displayValue, float gamma) noexcept
 {

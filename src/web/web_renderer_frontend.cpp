@@ -2002,6 +2002,43 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     view.glowBloomDesaturation = glowConstants.bloomDesaturation;
     view.glowBloomIntensity = glowConstants.bloomIntensity;
     view.glowRadius = glowConstants.radius;
+    GfxDepthOfField depthOfField{};
+    if (r_dof_tweak && r_dof_tweak->current.enabled)
+    {
+        depthOfField.viewModelStart = r_dof_viewModelStart->current.value;
+        depthOfField.viewModelEnd = r_dof_viewModelEnd->current.value;
+        depthOfField.nearStart = r_dof_nearStart->current.value;
+        depthOfField.nearEnd = r_dof_nearEnd->current.value;
+        depthOfField.farStart = r_dof_farStart->current.value;
+        depthOfField.farEnd = r_dof_farEnd->current.value;
+        depthOfField.nearBlur = r_dof_nearBlur->current.value;
+        depthOfField.farBlur = r_dof_farBlur->current.value;
+    }
+    else if (!r_dof_enable || r_dof_enable->current.enabled)
+    {
+        depthOfField = refdef->dof;
+    }
+    view.depthOfField.viewModelStart = depthOfField.viewModelStart;
+    view.depthOfField.viewModelEnd = depthOfField.viewModelEnd;
+    view.depthOfField.nearStart = depthOfField.nearStart;
+    view.depthOfField.nearEnd = depthOfField.nearEnd;
+    view.depthOfField.farStart = depthOfField.farStart;
+    view.depthOfField.farEnd = depthOfField.farEnd;
+    view.depthOfField.nearBlur = depthOfField.nearBlur;
+    view.depthOfField.farBlur = depthOfField.farBlur;
+    view.depthOfField.enabled =
+        depthOfField.viewModelEnd > depthOfField.viewModelStart + 1.0f ||
+        depthOfField.nearEnd > depthOfField.nearStart + 1.0f ||
+        (depthOfField.farEnd > depthOfField.farStart + 1.0f &&
+            depthOfField.farBlur > 0.0f);
+    if (!WebRenderer_ValidateDepthOfFieldSettings(view.depthOfField))
+    {
+        Com_Error(ERR_DROP,
+            "R_RenderScene: invalid canonical depth-of-field settings");
+        return;
+    }
+    view.depthHackZNear = std::max(0.01f,
+        r_znear_depthhack ? r_znear_depthhack->current.value : 0.1f);
     view.blurRadius = refdef->blurRadius;
     if (!g_sceneBlurReported && refdef->blurRadius > 0.0f)
     {
@@ -2063,6 +2100,20 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             view.glowBloomCutoffRescale,
             view.glowBloomDesaturation,
             view.glowBloomIntensity, view.glowRadius);
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Canonical depth of field: active=%d "
+            "viewmodel=(%.6f %.6f) near=(%.6f %.6f %.6f) "
+            "far=(%.6f %.6f %.6f), znear=(%.6f %.6f).\n",
+            view.depthOfField.enabled,
+            view.depthOfField.viewModelStart,
+            view.depthOfField.viewModelEnd,
+            view.depthOfField.nearStart,
+            view.depthOfField.nearEnd,
+            view.depthOfField.nearBlur,
+            view.depthOfField.farStart,
+            view.depthOfField.farEnd,
+            view.depthOfField.farBlur,
+            view.zNear, view.depthHackZNear);
     }
     view.localClientNum = refdef->localClientNum;
     view.worldName = s_world.name;
@@ -2089,8 +2140,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         projectionMatrix, view.tanHalfFovX, view.tanHalfFovY, view.zNear);
     InfinitePerspectiveMatrix(depthHackProjectionMatrix,
         view.tanHalfFovX, view.tanHalfFovY,
-        std::max(0.01f,
-            r_znear_depthhack ? r_znear_depthhack->current.value : 0.1f));
+        view.depthHackZNear);
     MatrixMultiply44(
         viewMatrix, projectionMatrix, d3dViewProjectionMatrix);
     MatrixMultiply44(viewMatrix, depthHackProjectionMatrix,

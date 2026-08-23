@@ -277,6 +277,12 @@ struct WebRendererState
     GLint postProcessGlareLightenUniform = -1;
     GLint postProcessGlowTextureUniform = -1;
     GLint postProcessGlowIntensityUniform = -1;
+    GLint postProcessDepthTextureUniform = -1;
+    GLint postProcessDofEnabledUniform = -1;
+    GLint postProcessDofViewModelUniform = -1;
+    GLint postProcessDofNearUniform = -1;
+    GLint postProcessDofFarUniform = -1;
+    GLint postProcessDofDepthUniform = -1;
     GLint glowTextureUniform = -1;
     GLint glowModeUniform = -1;
     GLint glowTexelDeltaUniform = -1;
@@ -393,6 +399,9 @@ struct WebRendererState
     float sceneGlowBloomDesaturation = 0.0f;
     float sceneGlowBloomIntensity = 0.0f;
     float sceneGlowRadius = 0.0f;
+    WebRendererDepthOfFieldSettings sceneDepthOfField{};
+    float sceneZNear = 4.0f;
+    float sceneDepthHackZNear = 0.1f;
     std::uint32_t sceneViewX = 0u;
     std::uint32_t sceneViewY = 0u;
     std::uint32_t sceneViewWidth = 0u;
@@ -1861,6 +1870,12 @@ void ResetGpuHandles()
     g_renderer.postProcessGlareLightenUniform = -1;
     g_renderer.postProcessGlowTextureUniform = -1;
     g_renderer.postProcessGlowIntensityUniform = -1;
+    g_renderer.postProcessDepthTextureUniform = -1;
+    g_renderer.postProcessDofEnabledUniform = -1;
+    g_renderer.postProcessDofViewModelUniform = -1;
+    g_renderer.postProcessDofNearUniform = -1;
+    g_renderer.postProcessDofFarUniform = -1;
+    g_renderer.postProcessDofDepthUniform = -1;
     g_renderer.glowTextureUniform = -1;
     g_renderer.glowModeUniform = -1;
     g_renderer.glowTexelDeltaUniform = -1;
@@ -3510,12 +3525,62 @@ bool CreateRendererResources()
         uniform float u_glare_lighten;
         uniform sampler2D u_glow;
         uniform float u_glow_intensity;
+        uniform sampler2D u_depth;
+        uniform float u_dof_enabled;
+        uniform vec4 u_dof_view_model;
+        uniform vec4 u_dof_near;
+        uniform vec4 u_dof_far;
+        uniform vec4 u_dof_depth;
         out vec4 out_color;
         void main()
         {
             vec2 uv = v_ndc * 0.5 + 0.5;
             vec4 source = texture(u_source, uv);
-            if (max(u_blur_scale.x, u_blur_scale.y) > 0.0)
+            vec2 blur_scale = u_blur_scale;
+            if (u_dof_enabled > 0.5)
+            {
+                const float infinite_scale = 2047.0 / 2048.0;
+                const float viewmodel_depth_range = 1.0 / 64.0;
+                float stored_depth = texture(u_depth, uv).r;
+                bool viewmodel =
+                    u_dof_view_model.y > u_dof_view_model.x + 1.0 &&
+                    stored_depth < viewmodel_depth_range;
+                float normalized_depth = viewmodel
+                    ? stored_depth / viewmodel_depth_range : stored_depth;
+                float near_clip = viewmodel
+                    ? u_dof_depth.y : u_dof_depth.x;
+                float view_distance = near_clip * infinite_scale /
+                    max(infinite_scale - normalized_depth, 0.000001);
+                float coc_radius = 0.0;
+                if (viewmodel)
+                {
+                    coc_radius = clamp(
+                        (u_dof_view_model.y - view_distance) /
+                        (u_dof_view_model.y - u_dof_view_model.x),
+                        0.0, 1.0) * u_dof_view_model.z;
+                }
+                else
+                {
+                    if (u_dof_near.y > u_dof_near.x + 1.0)
+                    {
+                        coc_radius = clamp(
+                            (u_dof_near.y - view_distance) /
+                            (u_dof_near.y - u_dof_near.x),
+                            0.0, 1.0) * u_dof_near.z;
+                    }
+                    if (u_dof_far.y > u_dof_far.x + 1.0 &&
+                        u_dof_far.z > 0.0)
+                    {
+                        coc_radius = max(coc_radius, clamp(
+                            (view_distance - u_dof_far.x) /
+                            (u_dof_far.y - u_dof_far.x),
+                            0.0, 1.0) * u_dof_far.z);
+                    }
+                }
+                blur_scale = max(blur_scale,
+                    coc_radius * u_dof_depth.zw);
+            }
+            if (max(blur_scale.x, blur_scale.y) > 0.0)
             {
                 // Native RB_BlurScreen applies a Gaussian filter to the
                 // resolved 3D scene before 2D. A bounded disk kernel keeps
@@ -3523,29 +3588,29 @@ bool CreateRendererResources()
                 // authored 640x480 radius to the actual scene target.
                 source *= 0.38;
                 source += texture(u_source,
-                    uv + vec2( u_blur_scale.x * 0.5, 0.0)) * 0.09;
+                    uv + vec2( blur_scale.x * 0.5, 0.0)) * 0.09;
                 source += texture(u_source,
-                    uv + vec2(-u_blur_scale.x * 0.5, 0.0)) * 0.09;
+                    uv + vec2(-blur_scale.x * 0.5, 0.0)) * 0.09;
                 source += texture(u_source,
-                    uv + vec2(0.0,  u_blur_scale.y * 0.5)) * 0.09;
+                    uv + vec2(0.0,  blur_scale.y * 0.5)) * 0.09;
                 source += texture(u_source,
-                    uv + vec2(0.0, -u_blur_scale.y * 0.5)) * 0.09;
+                    uv + vec2(0.0, -blur_scale.y * 0.5)) * 0.09;
                 source += texture(u_source,
-                    uv + vec2( u_blur_scale.x, 0.0)) * 0.04;
+                    uv + vec2( blur_scale.x, 0.0)) * 0.04;
                 source += texture(u_source,
-                    uv + vec2(-u_blur_scale.x, 0.0)) * 0.04;
+                    uv + vec2(-blur_scale.x, 0.0)) * 0.04;
                 source += texture(u_source,
-                    uv + vec2(0.0,  u_blur_scale.y)) * 0.04;
+                    uv + vec2(0.0,  blur_scale.y)) * 0.04;
                 source += texture(u_source,
-                    uv + vec2(0.0, -u_blur_scale.y)) * 0.04;
+                    uv + vec2(0.0, -blur_scale.y)) * 0.04;
                 source += texture(u_source,
-                    uv + vec2( u_blur_scale.x,  u_blur_scale.y) * 0.7) * 0.025;
+                    uv + vec2( blur_scale.x,  blur_scale.y) * 0.7) * 0.025;
                 source += texture(u_source,
-                    uv + vec2(-u_blur_scale.x,  u_blur_scale.y) * 0.7) * 0.025;
+                    uv + vec2(-blur_scale.x,  blur_scale.y) * 0.7) * 0.025;
                 source += texture(u_source,
-                    uv + vec2( u_blur_scale.x, -u_blur_scale.y) * 0.7) * 0.025;
+                    uv + vec2( blur_scale.x, -blur_scale.y) * 0.7) * 0.025;
                 source += texture(u_source,
-                    uv + vec2(-u_blur_scale.x, -u_blur_scale.y) * 0.7) * 0.025;
+                    uv + vec2(-blur_scale.x, -blur_scale.y) * 0.7) * 0.025;
             }
             vec3 color = source.rgb;
             if (u_film_enabled > 0.5)
@@ -3788,6 +3853,18 @@ bool CreateRendererResources()
         glGetUniformLocation(postProcessProgram, "u_glow");
     const GLint postProcessGlowIntensityUniform =
         glGetUniformLocation(postProcessProgram, "u_glow_intensity");
+    const GLint postProcessDepthTextureUniform =
+        glGetUniformLocation(postProcessProgram, "u_depth");
+    const GLint postProcessDofEnabledUniform =
+        glGetUniformLocation(postProcessProgram, "u_dof_enabled");
+    const GLint postProcessDofViewModelUniform =
+        glGetUniformLocation(postProcessProgram, "u_dof_view_model");
+    const GLint postProcessDofNearUniform =
+        glGetUniformLocation(postProcessProgram, "u_dof_near");
+    const GLint postProcessDofFarUniform =
+        glGetUniformLocation(postProcessProgram, "u_dof_far");
+    const GLint postProcessDofDepthUniform =
+        glGetUniformLocation(postProcessProgram, "u_dof_depth");
     const GLint glowTextureUniform =
         glGetUniformLocation(glowProgram, "u_source");
     const GLint glowModeUniform =
@@ -3956,6 +4033,12 @@ bool CreateRendererResources()
         postProcessGlareLightenUniform < 0 ||
         postProcessGlowTextureUniform < 0 ||
         postProcessGlowIntensityUniform < 0 ||
+        postProcessDepthTextureUniform < 0 ||
+        postProcessDofEnabledUniform < 0 ||
+        postProcessDofViewModelUniform < 0 ||
+        postProcessDofNearUniform < 0 ||
+        postProcessDofFarUniform < 0 ||
+        postProcessDofDepthUniform < 0 ||
         glowTextureUniform < 0 || glowModeUniform < 0 ||
         glowTexelDeltaUniform < 0 || glowWeightsUniform < 0 ||
         glowSetupUniform < 0 ||
@@ -4119,6 +4202,15 @@ bool CreateRendererResources()
         postProcessGlowTextureUniform;
     g_renderer.postProcessGlowIntensityUniform =
         postProcessGlowIntensityUniform;
+    g_renderer.postProcessDepthTextureUniform =
+        postProcessDepthTextureUniform;
+    g_renderer.postProcessDofEnabledUniform =
+        postProcessDofEnabledUniform;
+    g_renderer.postProcessDofViewModelUniform =
+        postProcessDofViewModelUniform;
+    g_renderer.postProcessDofNearUniform = postProcessDofNearUniform;
+    g_renderer.postProcessDofFarUniform = postProcessDofFarUniform;
+    g_renderer.postProcessDofDepthUniform = postProcessDofDepthUniform;
     g_renderer.glowTextureUniform = glowTextureUniform;
     g_renderer.glowModeUniform = glowModeUniform;
     g_renderer.glowTexelDeltaUniform = glowTexelDeltaUniform;
@@ -5581,6 +5673,9 @@ void __cdecl R_UnloadWorld()
     g_renderer.sceneGlowBloomDesaturation = 0.0f;
     g_renderer.sceneGlowBloomIntensity = 0.0f;
     g_renderer.sceneGlowRadius = 0.0f;
+    g_renderer.sceneDepthOfField = {};
+    g_renderer.sceneZNear = 4.0f;
+    g_renderer.sceneDepthHackZNear = 0.1f;
     g_renderer.sceneFilmEnabled = false;
     g_renderer.sceneGlowEnabled = false;
     g_renderer.sceneSunShadowEnabled = false;
@@ -6467,7 +6562,9 @@ bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
     }
     if (!std::isfinite(view.displayGammaExponent) ||
         view.displayGammaExponent <= 0.0f ||
-        !std::isfinite(view.blurRadius) || view.blurRadius < 0.0f)
+        !std::isfinite(view.blurRadius) || view.blurRadius < 0.0f ||
+        !std::isfinite(view.depthHackZNear) || view.depthHackZNear <= 0.0f ||
+        !WebRenderer_ValidateDepthOfFieldSettings(view.depthOfField))
     {
         return false;
     }
@@ -6561,6 +6658,9 @@ bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
     g_renderer.sceneGlowBloomDesaturation = view.glowBloomDesaturation;
     g_renderer.sceneGlowBloomIntensity = view.glowBloomIntensity;
     g_renderer.sceneGlowRadius = view.glowRadius;
+    g_renderer.sceneDepthOfField = view.depthOfField;
+    g_renderer.sceneZNear = view.zNear;
+    g_renderer.sceneDepthHackZNear = view.depthHackZNear;
     g_renderer.sceneFilmEnabled = view.filmEnabled;
     g_renderer.sceneGlowEnabled = view.glowEnabled;
     g_renderer.sceneViewWorldName = view.worldName;
@@ -7251,6 +7351,7 @@ void DrawPostProcessPass(
     int width,
     int height,
     bool filmEnabled,
+    bool depthOfFieldEnabled,
     float gammaExponent,
     float blurRadius,
     float blindDarken,
@@ -7285,11 +7386,37 @@ void DrawPostProcessPass(
     glUniform1f(g_renderer.postProcessGlareLightenUniform, glareLighten);
     glUniform1i(g_renderer.postProcessGlowTextureUniform, 6);
     glUniform1f(g_renderer.postProcessGlowIntensityUniform, glowIntensity);
+    glUniform1i(g_renderer.postProcessDepthTextureUniform, 7);
+    glUniform1f(g_renderer.postProcessDofEnabledUniform,
+        depthOfFieldEnabled ? 1.0f : 0.0f);
+    glUniform4f(g_renderer.postProcessDofViewModelUniform,
+        g_renderer.sceneDepthOfField.viewModelStart,
+        g_renderer.sceneDepthOfField.viewModelEnd,
+        g_renderer.sceneDepthOfField.nearBlur, 0.0f);
+    glUniform4f(g_renderer.postProcessDofNearUniform,
+        g_renderer.sceneDepthOfField.nearStart,
+        g_renderer.sceneDepthOfField.nearEnd,
+        g_renderer.sceneDepthOfField.nearBlur, 0.0f);
+    glUniform4f(g_renderer.postProcessDofFarUniform,
+        g_renderer.sceneDepthOfField.farStart,
+        g_renderer.sceneDepthOfField.farEnd,
+        g_renderer.sceneDepthOfField.farBlur, 0.0f);
+    glUniform4f(g_renderer.postProcessDofDepthUniform,
+        g_renderer.sceneZNear,
+        g_renderer.sceneDepthHackZNear,
+        width > 0
+            ? static_cast<float>(height) /
+                (480.0f * static_cast<float>(width)) : 0.0f,
+        1.0f / 480.0f);
     glActiveTexture(GL_TEXTURE5);
     glBindTexture(GL_TEXTURE_2D, sourceTexture);
     glActiveTexture(GL_TEXTURE6);
     glBindTexture(GL_TEXTURE_2D,
         glowTexture != 0u ? glowTexture : sourceTexture);
+    glActiveTexture(GL_TEXTURE7);
+    glBindTexture(GL_TEXTURE_2D,
+        depthOfFieldEnabled
+            ? g_renderer.sceneDepthTexture : sourceTexture);
     glBindVertexArray(g_renderer.vertexArray);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glActiveTexture(GL_TEXTURE0);
@@ -8102,6 +8229,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             width,
             height,
             g_renderer.sceneFilmEnabled,
+            g_renderer.sceneDepthOfField.enabled,
             1.0f,
             g_renderer.sceneBlurRadius,
             g_renderer.sunBlindDarken,
@@ -8232,6 +8360,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             0u,
             width,
             height,
+            false,
             false,
             g_renderer.sceneDisplayGammaExponent,
             0.0f,

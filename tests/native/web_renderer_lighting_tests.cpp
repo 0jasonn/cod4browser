@@ -182,6 +182,35 @@ void TestNativeGlowConstants()
     assert(!WebRenderer_CalculateGlowConstants(glow, constants));
 }
 
+void TestNativeDepthOfFieldBlur()
+{
+    WebRendererDepthOfFieldSettings dof{};
+    dof.enabled = true;
+    dof.viewModelStart = 2.0f;
+    dof.viewModelEnd = 8.0f;
+    dof.nearStart = 10.0f;
+    dof.nearEnd = 60.0f;
+    dof.farStart = 1000.0f;
+    dof.farEnd = 7000.0f;
+    dof.nearBlur = 6.0f;
+    dof.farBlur = 1.8f;
+    assert(WebRenderer_ValidateDepthOfFieldSettings(dof));
+    assert(Near(WebRenderer_EvaluateDepthOfFieldBlur(
+        dof, 2.0f, true), 6.0f));
+    assert(Near(WebRenderer_EvaluateDepthOfFieldBlur(
+        dof, 8.0f, true), 0.0f));
+    assert(Near(WebRenderer_EvaluateDepthOfFieldBlur(
+        dof, 10.0f, false), 6.0f));
+    assert(Near(WebRenderer_EvaluateDepthOfFieldBlur(
+        dof, 60.0f, false), 0.0f));
+    assert(Near(WebRenderer_EvaluateDepthOfFieldBlur(
+        dof, 4000.0f, false), 0.9f));
+    assert(Near(WebRenderer_EvaluateDepthOfFieldBlur(
+        dof, 7000.0f, false), 1.8f));
+    dof.nearBlur = 3.0f;
+    assert(!WebRenderer_ValidateDepthOfFieldSettings(dof));
+}
+
 void TestNativeDisplayGammaRamp()
 {
     assert(Near(WebRenderer_EvaluateDisplayGamma(0.0f, 0.8f), 0.0f));
@@ -366,6 +395,7 @@ int main()
     TestNativeExponentialFogVisibility();
     TestNativeColorManipulationConstants();
     TestNativeGlowConstants();
+    TestNativeDepthOfFieldBlur();
     TestNativeDisplayGammaRamp();
     TestNativeDxt5NormalDecode();
     TestNativeLightGridRleAndFixedPointBlend();

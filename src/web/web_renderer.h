@@ -2,6 +2,7 @@
 
 #include <web/web_renderer_surface.h>
 #include <web/web_shader_compatibility.h>
+#include <web/web_renderer_lighting.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -107,6 +108,9 @@ struct WebRendererSceneViewDesc
     float glowBloomIntensity;
     float glowRadius;
     bool glowEnabled;
+    // Canonical GfxDepthOfField after R_SetDepthOfField's tweak/enable gate.
+    WebRendererDepthOfFieldSettings depthOfField;
+    float depthHackZNear;
     // Canonical refdef blur radius. Native applies this to the resolved 3D
     // scene before the HUD, so the backend must not blur 2D commands.
     float blurRadius;

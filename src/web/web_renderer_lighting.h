@@ -89,6 +89,28 @@ bool WebRenderer_CalculateGlowConstants(
     const WebRendererGlowSettings &glow,
     WebRendererGlowConstants &constants) noexcept;
 
+struct WebRendererDepthOfFieldSettings
+{
+    float viewModelStart = 0.0f;
+    float viewModelEnd = 0.0f;
+    float nearStart = 0.0f;
+    float nearEnd = 0.0f;
+    float farStart = 0.0f;
+    float farEnd = 0.0f;
+    float nearBlur = 0.0f;
+    float farBlur = 0.0f;
+    bool enabled = false;
+};
+
+bool WebRenderer_ValidateDepthOfFieldSettings(
+    const WebRendererDepthOfFieldSettings &dof) noexcept;
+
+// CPU oracle for the scene/viewmodel CoC radius consumed by the WebGL pass.
+float WebRenderer_EvaluateDepthOfFieldBlur(
+    const WebRendererDepthOfFieldSettings &dof,
+    float viewDistance,
+    bool viewModel) noexcept;
+
 // CPU oracle for the native hardware gamma ramp. D3D9 applies
 // pow(displayValue, 1 / r_gamma) after rendering; WebGL must reproduce that
 // at the final framebuffer boundary rather than altering lightmap samples.
