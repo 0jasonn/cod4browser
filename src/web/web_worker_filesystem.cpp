@@ -15,6 +15,12 @@ EM_JS(int, WebWorkerFS_OpenJs, (const char *path), {
     return fs && typeof fs.open === "function" ? fs.open(UTF8ToString(path)) : -1;
 });
 
+EM_JS(int, WebWorkerFS_OpenWriteJs, (const char *path, int append), {
+    const fs = globalThis.__KISAKCOD_SYNC_FS__;
+    return fs && typeof fs.openWrite === "function"
+        ? fs.openWrite(UTF8ToString(path), Boolean(append)) : -1;
+});
+
 EM_JS(double, WebWorkerFS_SizeJs, (int file), {
     const fs = globalThis.__KISAKCOD_SYNC_FS__;
     return fs && typeof fs.size === "function" ? fs.size(file) : -1;
@@ -32,9 +38,34 @@ EM_JS(int, WebWorkerFS_ReadJs, (int file, void *destination, std::uint32_t lengt
         : -1;
 });
 
+EM_JS(int, WebWorkerFS_WriteJs,
+    (int file, const void *source, std::uint32_t length), {
+        const fs = globalThis.__KISAKCOD_SYNC_FS__;
+        return fs && typeof fs.write === "function"
+            ? fs.write(file, source >>> 0, length >>> 0) : -1;
+    });
+
 EM_JS(void, WebWorkerFS_CloseJs, (int file), {
     const fs = globalThis.__KISAKCOD_SYNC_FS__;
     if (fs && typeof fs.close === "function") fs.close(file);
+});
+
+EM_JS(int, WebWorkerFS_MkdirJs, (const char *path), {
+    const fs = globalThis.__KISAKCOD_SYNC_FS__;
+    return fs && typeof fs.mkdir === "function" &&
+        fs.mkdir(UTF8ToString(path)) ? 1 : 0;
+});
+
+EM_JS(int, WebWorkerFS_RemoveJs, (const char *path), {
+    const fs = globalThis.__KISAKCOD_SYNC_FS__;
+    return fs && typeof fs.remove === "function" &&
+        fs.remove(UTF8ToString(path)) ? 1 : 0;
+});
+
+EM_JS(int, WebWorkerFS_RenameJs, (const char *from, const char *to), {
+    const fs = globalThis.__KISAKCOD_SYNC_FS__;
+    return fs && typeof fs.rename === "function" &&
+        fs.rename(UTF8ToString(from), UTF8ToString(to)) ? 1 : 0;
 });
 
 EM_JS(int, WebWorkerFS_StatJs,
@@ -81,6 +112,13 @@ WebWorkerFile WebWorkerFS_Open(const char *logicalPath)
     return logicalPath ? WebWorkerFS_OpenJs(logicalPath) : WEB_WORKER_INVALID_FILE;
 }
 
+WebWorkerFile WebWorkerFS_OpenWrite(const char *logicalPath, bool append)
+{
+    return logicalPath
+        ? WebWorkerFS_OpenWriteJs(logicalPath, append ? 1 : 0)
+        : WEB_WORKER_INVALID_FILE;
+}
+
 std::int64_t WebWorkerFS_Size(WebWorkerFile file)
 {
     return static_cast<std::int64_t>(WebWorkerFS_SizeJs(file));
@@ -101,10 +139,35 @@ std::int32_t WebWorkerFS_Read(
     return WebWorkerFS_ReadJs(file, destination, length);
 }
 
+std::int32_t WebWorkerFS_Write(
+    WebWorkerFile file, const void *source, std::uint32_t length)
+{
+    if (!source && length)
+        return -1;
+    if (!length)
+        return 0;
+    return WebWorkerFS_WriteJs(file, source, length);
+}
+
 void WebWorkerFS_Close(WebWorkerFile file)
 {
     if (file != WEB_WORKER_INVALID_FILE)
         WebWorkerFS_CloseJs(file);
+}
+
+bool WebWorkerFS_Mkdir(const char *logicalPath)
+{
+    return logicalPath && WebWorkerFS_MkdirJs(logicalPath) != 0;
+}
+
+bool WebWorkerFS_Remove(const char *logicalPath)
+{
+    return logicalPath && WebWorkerFS_RemoveJs(logicalPath) != 0;
+}
+
+bool WebWorkerFS_Rename(const char *from, const char *to)
+{
+    return from && to && WebWorkerFS_RenameJs(from, to) != 0;
 }
 
 bool WebWorkerFS_Stat(const char *logicalPath, WebWorkerFileStat &stat)

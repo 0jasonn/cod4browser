@@ -7,6 +7,7 @@
 
 #include <web/web_worker_filesystem.h>
 
+#include <algorithm>
 #include <limits>
 #include <new>
 
@@ -17,6 +18,7 @@ struct WebFileHandle
     WebWorkerFile file = WEB_WORKER_INVALID_FILE;
     std::uint32_t size = 0;
     std::uint32_t position = 0;
+    bool writable = false;
 };
 
 WebFileHandle *AsWebFile(FILE *file)
@@ -24,11 +26,14 @@ WebFileHandle *AsWebFile(FILE *file)
     return reinterpret_cast<WebFileHandle *>(file);
 }
 
-FILE *OpenWebFile(const char *filename)
+FILE *OpenWebFile(const char *filename, bool writable = false,
+    bool append = false)
 {
     if (!filename || !*filename)
         return nullptr;
-    const WebWorkerFile descriptor = WebWorkerFS_Open(filename);
+    const WebWorkerFile descriptor = writable
+        ? WebWorkerFS_OpenWrite(filename, append)
+        : WebWorkerFS_Open(filename);
     if (descriptor == WEB_WORKER_INVALID_FILE)
         return nullptr;
     const std::int64_t size = WebWorkerFS_Size(descriptor);
@@ -41,7 +46,8 @@ FILE *OpenWebFile(const char *filename)
         return nullptr;
     }
     WebFileHandle *handle = new (std::nothrow) WebFileHandle{
-        descriptor, static_cast<std::uint32_t>(size), 0u};
+        descriptor, static_cast<std::uint32_t>(size),
+        append ? static_cast<std::uint32_t>(size) : 0u, writable};
     if (!handle)
     {
         WebWorkerFS_Close(descriptor);
@@ -70,11 +76,19 @@ uint32_t __cdecl FS_FileRead(void *ptr, uint32_t len, FILE *stream)
     return static_cast<std::uint32_t>(read);
 }
 
-uint32_t __cdecl FS_FileWrite(const void *, uint32_t, FILE *)
+uint32_t __cdecl FS_FileWrite(const void *ptr, uint32_t len, FILE *stream)
 {
-    // Imported installation data is read-only. Browser save/config storage
-    // will enter through a separate writable home-path primitive.
-    return 0;
+    if (!stream || (!ptr && len))
+        return static_cast<std::uint32_t>(-1);
+    WebFileHandle *file = AsWebFile(stream);
+    if (!file->writable)
+        return static_cast<std::uint32_t>(-1);
+    const std::int32_t written = WebWorkerFS_Write(file->file, ptr, len);
+    if (written < 0)
+        return static_cast<std::uint32_t>(-1);
+    file->position += static_cast<std::uint32_t>(written);
+    file->size = std::max(file->size, file->position);
+    return static_cast<std::uint32_t>(written);
 }
 
 FILE *__cdecl FS_FileOpenReadBinary(const char *filename)
@@ -90,10 +104,22 @@ FILE *__cdecl FS_FileOpenReadText(const char *filename)
     return FS_FileOpenReadBinary(filename);
 }
 
-FILE *__cdecl FS_FileOpenWriteBinary(const char *) { return nullptr; }
-FILE *__cdecl FS_FileOpenAppendText(const char *) { return nullptr; }
-FILE *__cdecl FS_FileOpenWriteText(const char *) { return nullptr; }
-FILE *FS_FileOpenWriteReadBinary(const char *) { return nullptr; }
+FILE *__cdecl FS_FileOpenWriteBinary(const char *filename)
+{
+    return OpenWebFile(filename, true, false);
+}
+FILE *__cdecl FS_FileOpenAppendText(const char *filename)
+{
+    return OpenWebFile(filename, true, true);
+}
+FILE *__cdecl FS_FileOpenWriteText(const char *filename)
+{
+    return OpenWebFile(filename, true, false);
+}
+FILE *FS_FileOpenWriteReadBinary(const char *filename)
+{
+    return OpenWebFile(filename, true, false);
+}
 
 void __cdecl FS_FileClose(FILE *stream)
 {

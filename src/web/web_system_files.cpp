@@ -96,7 +96,8 @@ const char *__cdecl Sys_DefaultCDPath()
 
 void __cdecl Sys_Mkdir(const char *path)
 {
-    (void)path;
+    if (path && *path)
+        WebWorkerFS_Mkdir(path);
 }
 
 BOOL __cdecl Sys_RemoveDirTree(const char *path)

@@ -15,6 +15,9 @@
 #include <qcommon/cmd.h>
 #include <qcommon/files.h>
 #include <sound/snd_public.h>
+#if defined(KISAK_WEB)
+#include <web/web_worker_filesystem.h>
+#endif
 #if defined(_WIN32)
 #include <io.h>
 #else
@@ -963,7 +966,11 @@ bool __cdecl FS_Delete(const char *filename)
     if (!*filename)
         return 0;
     FS_BuildOSPath((char *)fs_homepath->current.integer, fs_gamedir, filename, ospath);
+#if defined(KISAK_WEB)
+    return WebWorkerFS_Remove(ospath);
+#else
     return remove(ospath) != -1;
+#endif
 }
 
 uint32_t __cdecl FS_Read(uint8_t *buffer, uint32_t len, int h)
@@ -2741,7 +2748,11 @@ void __cdecl FS_CopyFile(char *fromOSPath, char *toOSPath)
 
 void __cdecl FS_Remove(const char *osPath)
 {
+#if defined(KISAK_WEB)
+    WebWorkerFS_Remove(osPath);
+#else
     remove(osPath);
+#endif
 }
 
 void __cdecl FS_SV_Rename(char *from, char *to)
@@ -2759,7 +2770,11 @@ void __cdecl FS_SV_Rename(char *from, char *to)
     to_ospath[&to_ospath[strlen(to_ospath) + 1] - &to_ospath[1] - 1] = 0;
     if (fs_debug->current.integer)
         Com_Printf(10, "FS_SV_Rename: %s --> %s\n", from_ospath, to_ospath);
+#if defined(KISAK_WEB)
+    if (!WebWorkerFS_Rename(from_ospath, to_ospath))
+#else
     if (rename(from_ospath, to_ospath))
+#endif
     {
         FS_CopyFile(from_ospath, to_ospath);
         FS_Remove(from_ospath);
@@ -2967,7 +2982,11 @@ bool __cdecl FS_DeleteInDir(char *filename, char *dir)
     if (!*filename)
         return 0;
     FS_BuildOSPath(fs_homepath->current.string, dir, filename, ospath);
+#if defined(KISAK_WEB)
+    return WebWorkerFS_Remove(ospath);
+#else
     return remove(ospath) != -1;
+#endif
 }
 
 void __cdecl FS_Rename(char *from, char *fromDir, char *to, char *toDir)
@@ -2980,6 +2999,17 @@ void __cdecl FS_Rename(char *from, char *fromDir, char *to, char *toDir)
     FS_BuildOSPath(fs_homepath->current.string, toDir, to, to_ospath);
     if (fs_debug->current.integer)
         Com_Printf(10, "FS_Rename: %s --> %s\n", from_ospath, to_ospath);
+#if defined(KISAK_WEB)
+    if (!WebWorkerFS_Rename(from_ospath, to_ospath))
+    {
+        WebWorkerFS_Remove(to_ospath);
+        if (!WebWorkerFS_Rename(from_ospath, to_ospath))
+        {
+            FS_CopyFile(from_ospath, to_ospath);
+            FS_Remove(from_ospath);
+        }
+    }
+#else
     if (rename(from_ospath, to_ospath))
     {
         FS_Remove(to_ospath);
@@ -2989,4 +3019,5 @@ void __cdecl FS_Rename(char *from, char *fromDir, char *to, char *toDir)
             FS_Remove(from_ospath);
         }
     }
+#endif
 }

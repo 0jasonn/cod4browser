@@ -119,4 +119,39 @@ test("canonical FS_InitFilesystem owns Worker search paths and IWD precedence", 
     expect(await callPathProbe(page,
         "_KisakWeb_CanonicalFsReadHash", "seek.txt", [3, 4])).toBe(0);
 
+    await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.testControl({
+        failSyncSeekPath: null,
+    }));
+    const writablePayload = new TextEncoder().encode("browser-home-round-trip");
+    const wroteAndRenamed = await page.evaluate(async ({ payload }) => {
+        const encoder = new TextEncoder();
+        const temporary = encoder.encode("web-tests/write-temp.bin\0");
+        const final = encoder.encode("web-tests/write-final.bin\0");
+        return globalThis.__KISAKCOD_WEB__.module.callProbe(
+            "_KisakWeb_CanonicalFsWriteRename",
+            [temporary, final, new Uint8Array(payload)],
+            [
+                { kind: "pointer", index: 0 },
+                { kind: "pointer", index: 1 },
+                { kind: "pointer", index: 2 },
+                { kind: "value", value: payload.byteLength },
+            ],
+        );
+    }, { payload: writablePayload });
+    expect(wroteAndRenamed).toBe(1);
+    expect((await callPathProbe(page,
+        "_KisakWeb_CanonicalFsReadHash", "web-tests/write-final.bin",
+        [0, writablePayload.byteLength])) >>> 0)
+        .toBe(fnv1a("browser-home-round-trip"));
+
+    await page.reload();
+    await expect.poll(() => page.evaluate(() =>
+        globalThis.__canonicalFsEvents.at(-1)?.state)).toBe("ready");
+    await expect.poll(() => page.evaluate(() =>
+        globalThis.__KISAKCOD_WEB__?.database?.stopStage)).not.toBe("");
+    expect((await callPathProbe(page,
+        "_KisakWeb_CanonicalFsReadHash", "web-tests/write-final.bin",
+        [0, writablePayload.byteLength])) >>> 0)
+        .toBe(fnv1a("browser-home-round-trip"));
+
 });

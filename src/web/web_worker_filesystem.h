@@ -30,11 +30,18 @@ struct WebWorkerDirectoryEntry
 };
 
 WebWorkerFile WebWorkerFS_Open(const char *logicalPath);
+WebWorkerFile WebWorkerFS_OpenWrite(const char *logicalPath, bool append);
 std::int64_t WebWorkerFS_Size(WebWorkerFile file);
 bool WebWorkerFS_Seek(WebWorkerFile file, std::uint32_t offset);
 std::int32_t WebWorkerFS_Read(
     WebWorkerFile file, void *destination, std::uint32_t length);
+std::int32_t WebWorkerFS_Write(
+    WebWorkerFile file, const void *source, std::uint32_t length);
 void WebWorkerFS_Close(WebWorkerFile file);
+
+bool WebWorkerFS_Mkdir(const char *logicalPath);
+bool WebWorkerFS_Remove(const char *logicalPath);
+bool WebWorkerFS_Rename(const char *from, const char *to);
 
 bool WebWorkerFS_Stat(const char *logicalPath, WebWorkerFileStat &stat);
 bool WebWorkerFS_ListDirectory(

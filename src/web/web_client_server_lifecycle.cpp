@@ -402,6 +402,33 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_CanonicalFsListCount(
     return count;
 }
 
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_CanonicalFsWriteRename(
+    const char *temporaryPath, const char *finalPath,
+    const std::uint8_t *bytes, std::uint32_t length)
+{
+    if (!g_clientLifecycleReady || !temporaryPath || !*temporaryPath ||
+        !finalPath || !*finalPath || (!bytes && length) ||
+        length > 1024u * 1024u)
+    {
+        return 0;
+    }
+    int file = FS_FOpenFileWrite(temporaryPath);
+    if (!file)
+        return 0;
+    const bool wrote = FS_Write(
+        reinterpret_cast<const char *>(bytes), length, file) == length;
+    FS_FCloseFile(file);
+    if (!wrote)
+        return 0;
+    FS_Rename(const_cast<char *>(temporaryPath), fs_gamedir,
+        const_cast<char *>(finalPath), fs_gamedir);
+    int verify = 0;
+    const std::uint32_t size = FS_FOpenFileRead(finalPath, &verify);
+    if (verify)
+        FS_FCloseFile(verify);
+    return verify && size == length ? 1 : 0;
+}
+
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_SubmitCanonicalCommand(
     const char *command)
 {

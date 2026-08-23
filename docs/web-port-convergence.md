@@ -190,8 +190,8 @@ and WebGL seams. The exhaustive browser suite remains explicitly available.
 | --- | --- | --- |
 | Emscripten build and packaging | `WEB PLATFORM IMPLEMENTATION` | Explicit `web` target, pinned toolchain, generated site, and HTTP server. Keep isolated from native target selection. |
 | Browser launcher and legal asset selection | `WEB PLATFORM IMPLEMENTATION` | DOM file picker, minimum retail-profile validation, complete selected-root manifest, and restore UI are genuine browser responsibilities. The host persists generic logical paths; it does not select runtime search paths or packs. |
-| OPFS/IndexedDB asset persistence | `WEB PLATFORM IMPLEMENTATION` | Keep storage asynchronous in the host and hidden behind the filesystem boundary. |
-| Wasm filesystem bridge | `WEB PLATFORM IMPLEMENTATION` / reached read-only closure | The engine Worker mounts every validated logical-root entry through synchronous OPFS access handles and exposes stat/type, direct-child enumeration, open, size, seek, read, and close primitives. Import IDs and browser handles remain platform-only. Canonical `FS_InitFilesystem` now consumes this boundary and owns every search path and IWD; writable home storage remains future work. |
+| OPFS/IndexedDB asset persistence | `WEB PLATFORM IMPLEMENTATION` | Keep storage asynchronous in the host and hidden behind the filesystem boundary. Validated installation files remain immutable; the separate bounded browser home tree restores from and persists to OPFS. |
+| Wasm filesystem bridge | `WEB PLATFORM IMPLEMENTATION` / reached read/write closure | The engine Worker mounts every validated logical-root entry through read-only synchronous OPFS access handles and exposes stat/type, direct-child enumeration, open, size, seek, read, and close primitives. A separate synchronous-looking writable overlay owns directory creation, truncate/append, bounded writes, remove, and rename for canonical `fs_homepath` calls, snapshots closed files to OPFS asynchronously, and restores them before engine mount. Import IDs and browser handles remain platform-only. Canonical `FS_InitFilesystem`, `FS_CreatePath`, and the ordinary save/config APIs consume this boundary without Asyncify. |
 | Browser lifecycle, logging, and timing | `WEB PLATFORM IMPLEMENTATION` | Event-loop and page-lifecycle handling remain in `src/web`. `common.cpp` now owns engine print formatting while `Sys_Print`/`Sys_Error` remain narrow platform sinks. |
 | System/thread context | `WEB PLATFORM IMPLEMENTATION` / partial | KisakCOD Wasm now runs in a dedicated engine Worker. The first DB model is synchronous within that Worker but enters a distinct logical `THREAD_CONTEXT_DATABASE`, preserves separate value slots plus wake/completion ordering, and reports no render/server thread or pthread concurrency. |
 | Cooperative scheduler | `TEMPORARY WEB SUBSTITUTE` | It currently advances bootstrap jobs and protects the main thread. Retain it for the present traversal, but do not spread its state machines through shared engine code. Long term, stage browser I/O outside a Worker-hosted synchronous-looking engine. |
@@ -1044,10 +1044,29 @@ surfaces and zero generic fallback batches.
 Focused native image and world-scene tests, the Release build, the 17-test
 browser smoke tier, and the non-overlap remainder tier (41 passed, 1 skipped)
 pass. Chrome compiles and submits the translated shader without WebGL,
-framebuffer, or draw errors. The current browser home path is still read-only,
-so Killhouse's start-level save fails and stalls cgame at `levelTime=450`;
-this prevents a valid same-camera visual capture until the separate writable
-home-path platform milestone lands.
+framebuffer, or draw errors. At this renderer milestone the browser home path
+was still read-only, so Killhouse's start-level save failed and the valid
+same-camera visual capture remained blocked pending the writable-home update
+below.
+
+## Browser writable home-path update (2026-08-23)
+
+Canonical filesystem writes now use a separate browser-owned home overlay;
+validated installation files and their read-only OPFS access handles remain
+immutable. The Worker provides synchronous-looking directory creation,
+truncate/append open, bounded read/write/seek, remove, and rename operations to
+the existing `FS_*` APIs. Closed home files are snapshotted to a distinct
+`kisakcod-web/home` OPFS tree and restored before the next engine mount. A
+single file is capped at 64 MiB and the restored/live tree at 128 MiB.
+
+The focused browser filesystem test writes and renames a file through
+`FS_FOpenFileWrite`, `FS_Write`, `FS_Rename`, and `FS_FOpenFileRead`, then
+reloads the Worker and verifies the same bytes after OPFS restoration. In the
+owned Chrome Killhouse run, `G_WriteGame 'killhouse' 'Start Level Save'` now
+completes without the former `WriteSaveToDevice`/save-error messages. The live
+canvas remains black behind the canonical cursor, so valid same-camera visual
+comparison is still blocked by a later render/UI lifecycle issue rather than
+filesystem write failure.
 
 ## Canonical resolved-scene blur update (2026-08-23)
 
