@@ -928,7 +928,9 @@ DXT3/DXT5 mip chain occupies about 5.34 MiB, so the former 4 MiB ceiling
 discarded the authored `mtl_uaz_van_col`, `mtl_uaz_van_nml`, and
 `ch46e_body_damaged_nml` payloads before WebGL upload. The decoded RGBA8 limit
 remains independently bounded at 16 MiB. Wasm-native boundary coverage runs
-with a 32 MiB test heap so the near-8-MiB input and its decode can coexist.
+with a 32 MiB test heap so the near-8-MiB input and its decode can coexist. The
+browser oversized-member fixture uses the same 8 MiB constant and proves that
+an 8 MiB plus one byte declaration is rejected before any archive read.
 
 A Release build loaded through the existing Chrome session now reports all
 341 distinct static-model images retained, while the canonical world comparison

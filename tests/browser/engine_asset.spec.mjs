@@ -12,7 +12,9 @@ import {
     ZIP_METHOD_STORE,
 } from "./synthetic_iwd.mjs";
 
-const ENGINE_ASSET_CACHE_LIMIT = 4 * 1024 * 1024;
+// Keep browser fixtures aligned with kisak::iwi::MAX_TEXTURE_MEMBER_BYTES.
+// Max-quality 2048-square DXT3/DXT5 mip chains require the shared 8 MiB path.
+const ENGINE_ASSET_CACHE_LIMIT = 8 * 1024 * 1024;
 const IWI_PATH = "images/synthetic_engine_asset.iwi";
 function expectProductionWorldSurfaceUploads(uploads)
 {
