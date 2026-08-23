@@ -180,6 +180,8 @@ struct WebRendererState
     GLuint compositeColorTexture = 0;
     GLuint shadowFramebuffer = 0;
     GLuint shadowDepthTexture = 0;
+    GLuint shadowFarFramebuffer = 0;
+    GLuint shadowFarDepthTexture = 0;
     GLuint vertexArray = 0;
     GLuint vertexBuffer = 0;
     GLuint indexBuffer = 0;
@@ -214,7 +216,9 @@ struct WebRendererState
     GLint fogColorUniform = -1;
     GLint fogParamsUniform = -1;
     GLint shadowMapUniform = -1;
+    GLint shadowFarMapUniform = -1;
     GLint shadowMatrixUniform = -1;
+    GLint shadowFarMatrixUniform = -1;
     GLint sunShadowEnabledUniform = -1;
     GLint sunDirectionUniform = -1;
     GLint sunColorUniform = -1;
@@ -346,6 +350,7 @@ struct WebRendererState
     std::array<float, 3> sceneWorldMins{};
     std::array<float, 3> sceneWorldMaxs{};
     std::array<float, 16> sceneSunShadowMatrix{};
+    std::array<float, 16> sceneSunShadowFarMatrix{};
     std::array<float, 4> sceneColorBias{};
     std::array<float, 4> sceneColorTintBase{};
     std::array<float, 4> sceneColorTintDelta{};
@@ -1707,6 +1712,8 @@ void ResetGpuHandles()
     g_renderer.compositeColorTexture = 0;
     g_renderer.shadowFramebuffer = 0;
     g_renderer.shadowDepthTexture = 0;
+    g_renderer.shadowFarFramebuffer = 0;
+    g_renderer.shadowFarDepthTexture = 0;
     g_renderer.vertexArray = 0;
     g_renderer.vertexBuffer = 0;
     g_renderer.indexBuffer = 0;
@@ -1751,7 +1758,9 @@ void ResetGpuHandles()
     g_renderer.fogColorUniform = -1;
     g_renderer.fogParamsUniform = -1;
     g_renderer.shadowMapUniform = -1;
+    g_renderer.shadowFarMapUniform = -1;
     g_renderer.shadowMatrixUniform = -1;
+    g_renderer.shadowFarMatrixUniform = -1;
     g_renderer.sunShadowEnabledUniform = -1;
     g_renderer.sunDirectionUniform = -1;
     g_renderer.sunColorUniform = -1;
@@ -2059,6 +2068,10 @@ void DestroyWebGLContext()
             g_renderer.shadowFramebuffer,
             g_renderer.shadowDepthTexture,
             g_renderer.shadowProgram);
+        DeleteShadowObjects(
+            g_renderer.shadowFarFramebuffer,
+            g_renderer.shadowFarDepthTexture,
+            0u);
         DeletePipelineObjects(
             g_renderer.program,
             g_renderer.skyProgram,
@@ -2842,11 +2855,13 @@ bool CreateRendererResources()
         uniform vec3 u_fog_color;
         uniform vec2 u_fog_params;
         uniform sampler2D u_shadow_map;
+        uniform sampler2D u_shadow_far_map;
         uniform sampler2D u_primary_lightmap;
         uniform sampler2D u_primary_light_attenuation;
         uniform sampler2D u_water_map;
         uniform samplerCube u_reflection_probe;
         uniform mat4 u_shadow_matrix;
+        uniform mat4 u_shadow_far_matrix;
         uniform float u_sun_shadow_enabled;
         uniform vec3 u_sun_direction;
         uniform vec3 u_sun_color;
@@ -2866,16 +2881,8 @@ bool CreateRendererResources()
                 texture(u_water_map, uv * 13.69).r * 0.36;
         }
 
-        float sample_sun_shadow(vec3 world_position)
+        float sample_near_sun_shadow(vec2 uv, float receiver_depth)
         {
-            vec4 clip = u_shadow_matrix * vec4(world_position, 1.0);
-            vec3 projected = clip.xyz / clip.w;
-            vec2 uv = projected.xy * 0.5 + 0.5;
-            float receiver_depth = projected.z * 0.5 + 0.5;
-            if (uv.x <= 0.0 || uv.x >= 1.0 ||
-                uv.y <= 0.0 || uv.y >= 1.0 ||
-                receiver_depth <= 0.0 || receiver_depth >= 1.0)
-                return 1.0;
             // lm_sm_sun_* performs four manual depth comparisons. Preserve
             // that 2x2 PCF shape at the WebGL texture boundary.
             const vec2 texel = vec2(1.0 / 1024.0);
@@ -2890,6 +2897,50 @@ bool CreateRendererResources()
             visibility += biased_depth <= texture(
                 u_shadow_map, uv + texel * vec2( 0.5,  0.5)).r ? 1.0 : 0.0;
             return visibility * 0.25;
+        }
+
+        float sample_far_sun_shadow(vec2 uv, float receiver_depth)
+        {
+            const vec2 texel = vec2(1.0 / 1024.0);
+            float biased_depth = receiver_depth - 0.0015;
+            float visibility = 0.0;
+            visibility += biased_depth <= texture(
+                u_shadow_far_map, uv + texel * vec2(-0.5, -0.5)).r
+                ? 1.0 : 0.0;
+            visibility += biased_depth <= texture(
+                u_shadow_far_map, uv + texel * vec2( 0.5, -0.5)).r
+                ? 1.0 : 0.0;
+            visibility += biased_depth <= texture(
+                u_shadow_far_map, uv + texel * vec2(-0.5,  0.5)).r
+                ? 1.0 : 0.0;
+            visibility += biased_depth <= texture(
+                u_shadow_far_map, uv + texel * vec2( 0.5,  0.5)).r
+                ? 1.0 : 0.0;
+            return visibility * 0.25;
+        }
+
+        float sample_sun_shadow(vec3 world_position)
+        {
+            vec3 near_projected = (u_shadow_matrix *
+                vec4(world_position, 1.0)).xyz;
+            vec2 near_uv = near_projected.xy * 0.5 + 0.5;
+            float near_depth = near_projected.z * 0.5 + 0.5;
+            const float border = 1.0 / 1024.0;
+            if (near_uv.x > border && near_uv.x < 1.0 - border &&
+                near_uv.y > border && near_uv.y < 1.0 - border &&
+                near_depth > 0.0 && near_depth < 1.0)
+            {
+                return sample_near_sun_shadow(near_uv, near_depth);
+            }
+            vec3 far_projected = (u_shadow_far_matrix *
+                vec4(world_position, 1.0)).xyz;
+            vec2 far_uv = far_projected.xy * 0.5 + 0.5;
+            float far_depth = far_projected.z * 0.5 + 0.5;
+            if (far_uv.x <= border || far_uv.x >= 1.0 - border ||
+                far_uv.y <= border || far_uv.y >= 1.0 - border ||
+                far_depth <= 0.0 || far_depth >= 1.0)
+                return 1.0;
+            return sample_far_sun_shadow(far_uv, far_depth);
         }
 
         void main()
@@ -3464,8 +3515,12 @@ bool CreateRendererResources()
         glGetUniformLocation(program, "u_fog_params");
     const GLint shadowMapUniform =
         glGetUniformLocation(program, "u_shadow_map");
+    const GLint shadowFarMapUniform =
+        glGetUniformLocation(program, "u_shadow_far_map");
     const GLint shadowMatrixUniform =
         glGetUniformLocation(program, "u_shadow_matrix");
+    const GLint shadowFarMatrixUniform =
+        glGetUniformLocation(program, "u_shadow_far_matrix");
     const GLint sunShadowEnabledUniform =
         glGetUniformLocation(program, "u_sun_shadow_enabled");
     const GLint sunDirectionUniform =
@@ -3622,8 +3677,13 @@ bool CreateRendererResources()
          CreateWorldTextureObjects(g_renderer.retainedUiImages));
     GLuint shadowFramebuffer = 0u;
     GLuint shadowDepthTexture = 0u;
+    GLuint shadowFarFramebuffer = 0u;
+    GLuint shadowFarDepthTexture = 0u;
     const bool shadowTargetReady = CreateSunShadowTarget(
         shadowFramebuffer, shadowDepthTexture);
+    const bool shadowFarTargetReady = shadowTargetReady &&
+        CreateSunShadowTarget(
+            shadowFarFramebuffer, shadowFarDepthTexture);
     GLuint compatibilityProgram = 0;
     GLint compatibilityViewProjection = -1;
     GLint compatibilityWorld = -1;
@@ -3653,7 +3713,8 @@ bool CreateRendererResources()
         uiColorUniform < 0 || fogEnabledUniform < 0 ||
         viewOriginUniform < 0 || fogColorUniform < 0 ||
         fogParamsUniform < 0 || shadowMapUniform < 0 ||
-        shadowMatrixUniform < 0 || sunShadowEnabledUniform < 0 ||
+        shadowFarMapUniform < 0 || shadowMatrixUniform < 0 ||
+        shadowFarMatrixUniform < 0 || sunShadowEnabledUniform < 0 ||
         sunDirectionUniform < 0 || sunColorUniform < 0 ||
         primaryLightmapUniform < 0 ||
         primaryLightAttenuationUniform < 0 ||
@@ -3686,7 +3747,7 @@ bool CreateRendererResources()
         !dynamicModelObjectsReady || !dynamicModelTexturesReady ||
         !dynamicModelLightingReady ||
         !uiObjectsReady || !uiTexturesReady ||
-        !shadowTargetReady ||
+        !shadowTargetReady || !shadowFarTargetReady ||
         !compatibilityReady)
     {
         Web_Log(
@@ -3704,6 +3765,8 @@ bool CreateRendererResources()
             texture);
         DeleteShadowObjects(
             shadowFramebuffer, shadowDepthTexture, shadowProgram);
+        DeleteShadowObjects(
+            shadowFarFramebuffer, shadowFarDepthTexture, 0u);
         DeleteWorldTextureObjects(g_renderer.retainedWorldImages);
         DeleteWaterTextureObjects(g_renderer.retainedWorldBatches);
         DeleteWorldTextureObjects(g_renderer.retainedStaticModelImages);
@@ -3746,6 +3809,8 @@ bool CreateRendererResources()
     g_renderer.texture = texture;
     g_renderer.shadowFramebuffer = shadowFramebuffer;
     g_renderer.shadowDepthTexture = shadowDepthTexture;
+    g_renderer.shadowFarFramebuffer = shadowFarFramebuffer;
+    g_renderer.shadowFarDepthTexture = shadowFarDepthTexture;
     g_renderer.aspectUniform = aspectUniform;
     g_renderer.textureUniform = textureUniform;
     g_renderer.textureEnabledUniform = textureEnabledUniform;
@@ -3779,7 +3844,9 @@ bool CreateRendererResources()
     g_renderer.fogColorUniform = fogColorUniform;
     g_renderer.fogParamsUniform = fogParamsUniform;
     g_renderer.shadowMapUniform = shadowMapUniform;
+    g_renderer.shadowFarMapUniform = shadowFarMapUniform;
     g_renderer.shadowMatrixUniform = shadowMatrixUniform;
+    g_renderer.shadowFarMatrixUniform = shadowFarMatrixUniform;
     g_renderer.sunShadowEnabledUniform = sunShadowEnabledUniform;
     g_renderer.sunDirectionUniform = sunDirectionUniform;
     g_renderer.sunColorUniform = sunColorUniform;
@@ -5922,8 +5989,9 @@ WebRendererShaderState WebRenderer_GetShaderCompatibilityState()
 
 namespace
 {
-bool BuildNearSunShadowMatrix(
+bool BuildSunShadowMatrix(
     const WebRendererSceneViewDesc &view,
+    float sampleSize,
     std::array<float, 16> &matrix) noexcept
 {
     auto normalize = [](std::array<float, 3> value) {
@@ -5957,15 +6025,16 @@ bool BuildNearSunShadowMatrix(
     const std::array<float, 3> right = normalize(cross(upSeed, forward));
     const std::array<float, 3> up = cross(forward, right);
 
-    // sm_sunSampleSizeNear defaults to 0.25 world units per texel on a
-    // 1024 map. Snap the viewer-centred projection to that texel grid, as
-    // R_SetupSunShadowMapProjection does to prevent crawling.
-    constexpr float SAMPLE_SIZE = 0.25f;
-    constexpr float HALF_EXTENT = SAMPLE_SIZE * 1024.0f * 0.5f;
+    // Native uses 0.25 world units per texel for the near partition and
+    // multiplies it by the default partition ratio of four for the far map.
+    // Snap each viewer-centred projection to its own texel grid, matching
+    // R_SetupSunShadowMapProjection's anti-crawling rule.
+    if (!(sampleSize > 0.0f) || !std::isfinite(sampleSize)) return false;
+    const float halfExtent = sampleSize * 1024.0f * 0.5f;
     const float centerRight = std::round(dot(view.viewOrigin, right) /
-        SAMPLE_SIZE) * SAMPLE_SIZE;
+        sampleSize) * sampleSize;
     const float centerUp = std::round(dot(view.viewOrigin, up) /
-        SAMPLE_SIZE) * SAMPLE_SIZE;
+        sampleSize) * sampleSize;
     float minDepth = std::numeric_limits<float>::max();
     float maxDepth = -std::numeric_limits<float>::max();
     for (std::uint32_t corner = 0u; corner < 8u; ++corner)
@@ -5987,14 +6056,14 @@ bool BuildNearSunShadowMatrix(
     if (!(depthRange > 0.0f) || !std::isfinite(depthRange)) return false;
 
     matrix.fill(0.0f);
-    matrix[0] = right[0] / HALF_EXTENT;
-    matrix[4] = right[1] / HALF_EXTENT;
-    matrix[8] = right[2] / HALF_EXTENT;
-    matrix[12] = -centerRight / HALF_EXTENT;
-    matrix[1] = up[0] / HALF_EXTENT;
-    matrix[5] = up[1] / HALF_EXTENT;
-    matrix[9] = up[2] / HALF_EXTENT;
-    matrix[13] = -centerUp / HALF_EXTENT;
+    matrix[0] = right[0] / halfExtent;
+    matrix[4] = right[1] / halfExtent;
+    matrix[8] = right[2] / halfExtent;
+    matrix[12] = -centerRight / halfExtent;
+    matrix[1] = up[0] / halfExtent;
+    matrix[5] = up[1] / halfExtent;
+    matrix[9] = up[2] / halfExtent;
+    matrix[13] = -centerUp / halfExtent;
     matrix[2] = forward[0] * 2.0f / depthRange;
     matrix[6] = forward[1] * 2.0f / depthRange;
     matrix[10] = forward[2] * 2.0f / depthRange;
@@ -6105,7 +6174,10 @@ bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
     g_renderer.sceneFogParams = {view.fogStart, view.fogDensity};
     g_renderer.sceneFogEnabled = view.fogEnabled;
     g_renderer.sceneSunShadowEnabled = view.sunShadowEnabled &&
-        BuildNearSunShadowMatrix(view, g_renderer.sceneSunShadowMatrix);
+        BuildSunShadowMatrix(
+            view, 0.25f, g_renderer.sceneSunShadowMatrix) &&
+        BuildSunShadowMatrix(
+            view, 1.0f, g_renderer.sceneSunShadowFarMatrix);
     std::copy_n(view.sunDirection, 3u,
         g_renderer.sceneSunDirection.begin());
     std::copy_n(view.sunColor, 3u, g_renderer.sceneSunColor.begin());
@@ -6456,20 +6528,21 @@ const WebRendererRetainedWorldImage *WorldImage(
     return RetainedImage(g_renderer.retainedWorldImages, index);
 }
 
-bool DrawNearSunShadowMap()
+bool DrawSunShadowPartition(
+    GLuint framebuffer,
+    const std::array<float, 16> &matrix)
 {
     if (!g_renderer.sceneSunShadowEnabled ||
         g_renderer.shadowProgram == 0u ||
-        g_renderer.shadowFramebuffer == 0u ||
-        g_renderer.shadowDepthTexture == 0u ||
+        framebuffer == 0u ||
         !g_renderer.worldSurfaceActive)
         return false;
 
-    glBindFramebuffer(GL_FRAMEBUFFER, g_renderer.shadowFramebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
     glViewport(0, 0, 1024, 1024);
     glUseProgram(g_renderer.shadowProgram);
     glUniformMatrix4fv(g_renderer.shadowDepthMatrixUniform, 1, GL_FALSE,
-        g_renderer.sceneSunShadowMatrix.data());
+        matrix.data());
     glUniform1i(g_renderer.shadowDepthTextureUniform, 0);
     glUniform1f(g_renderer.shadowDepthInstanceEnabledUniform, 0.0f);
     glEnable(GL_DEPTH_TEST);
@@ -6569,6 +6642,19 @@ bool DrawNearSunShadowMap()
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glActiveTexture(GL_TEXTURE0);
     return glGetError() == GL_NO_ERROR;
+}
+
+bool DrawSunShadowMaps()
+{
+    if (g_renderer.shadowDepthTexture == 0u ||
+        g_renderer.shadowFarDepthTexture == 0u)
+        return false;
+    return DrawSunShadowPartition(
+            g_renderer.shadowFramebuffer,
+            g_renderer.sceneSunShadowMatrix) &&
+        DrawSunShadowPartition(
+            g_renderer.shadowFarFramebuffer,
+            g_renderer.sceneSunShadowFarMatrix);
 }
 
 void BindStaticModelInstanceRange(std::uint32_t instanceOffset)
@@ -6693,7 +6779,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         g_renderer.postProcessProgram != 0u &&
         CreatePostProcessTargets(width, height);
     const bool shadowMapDrawn = sceneGeometryDraw &&
-        DrawNearSunShadowMap();
+        DrawSunShadowMaps();
     glBindFramebuffer(GL_FRAMEBUFFER,
         postProcessDraw ? g_renderer.sceneFramebuffer : 0u);
 
@@ -6807,12 +6893,15 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1i(g_renderer.secondaryLightmapUniform, 2);
         glUniform1i(g_renderer.modelLightingUniform, 3);
         glUniform1i(g_renderer.shadowMapUniform, 6);
+        glUniform1i(g_renderer.shadowFarMapUniform, 11);
         glUniform1i(g_renderer.waterMapUniform, 7);
         glUniform1i(g_renderer.reflectionProbeUniform, 8);
         glUniform1i(g_renderer.primaryLightmapUniform, 9);
         glUniform1i(g_renderer.primaryLightAttenuationUniform, 10);
         glUniformMatrix4fv(g_renderer.shadowMatrixUniform, 1, GL_FALSE,
             g_renderer.sceneSunShadowMatrix.data());
+        glUniformMatrix4fv(g_renderer.shadowFarMatrixUniform, 1, GL_FALSE,
+            g_renderer.sceneSunShadowFarMatrix.data());
         glUniform3fv(g_renderer.sunDirectionUniform, 1,
             g_renderer.sceneSunDirection.data());
         glUniform3fv(g_renderer.sunColorUniform, 1,
@@ -6822,6 +6911,10 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glActiveTexture(GL_TEXTURE6);
         glBindTexture(GL_TEXTURE_2D,
             shadowMapDrawn ? g_renderer.shadowDepthTexture :
+                g_renderer.texture);
+        glActiveTexture(GL_TEXTURE11);
+        glBindTexture(GL_TEXTURE_2D,
+            shadowMapDrawn ? g_renderer.shadowFarDepthTexture :
                 g_renderer.texture);
         glActiveTexture(GL_TEXTURE0);
         glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
