@@ -18,7 +18,10 @@ constexpr float BYTE_TO_UNIT = 1.0f / 255.0f;
 constexpr std::uint32_t TECHNIQUE_UNLIT_INDEX = 4u;
 constexpr std::uint32_t TECHNIQUE_EMISSIVE_INDEX = 5u;
 constexpr std::uint32_t TECHNIQUE_LIT_INDEX = 7u;
+constexpr std::uint32_t TECHNIQUE_LIT_SUN_INDEX = 8u;
 constexpr std::uint32_t TECHNIQUE_LIT_SUN_SHADOW_INDEX = 9u;
+constexpr std::uint32_t TECHNIQUE_LIT_SPOT_INDEX = 10u;
+constexpr std::uint32_t TECHNIQUE_LIT_OMNI_INDEX = 12u;
 constexpr std::uint32_t TECHNIQUE_NONE_INDEX = 36u;
 
 void UnpackUnitVec(PackedUnitVec packed, float output[3]) noexcept
@@ -227,6 +230,10 @@ bool UsesDirectionalNormalMap(
     if (ShaderNameIs(technique, "lm_r0c0n0_sm2.hlsl") ||
         ShaderNameIs(technique, "lm_t0c0n0_sm2.hlsl") ||
         (technique.pixelShaderName &&
+            std::strncmp(technique.pixelShaderName,
+                "lm_spot_", 8u) == 0 &&
+            std::strstr(technique.pixelShaderName, "n0") != nullptr) ||
+        (technique.pixelShaderName &&
             std::strncmp(technique.pixelShaderName, "lm_sm_sun_", 10u) == 0 &&
             std::strstr(technique.pixelShaderName, "n0") != nullptr))
     {
@@ -237,8 +244,38 @@ bool UsesDirectionalNormalMap(
         std::strstr(technique.identityName, "n0") != nullptr;
 }
 
+std::uint32_t SelectLitTechniqueType(
+    std::uint8_t primaryLightIndex,
+    const WebRendererWorldLightTechniqueContext *lightContext,
+    bool sunShadowEnabled) noexcept
+{
+    if (!lightContext || !lightContext->primaryLights ||
+        primaryLightIndex >= lightContext->primaryLightCount)
+    {
+        return sunShadowEnabled
+            ? TECHNIQUE_LIT_SUN_SHADOW_INDEX : TECHNIQUE_LIT_INDEX;
+    }
+    const WebRendererPrimaryLightDesc &light =
+        lightContext->primaryLights[primaryLightIndex];
+    switch (light.type)
+    {
+    case 0u:
+        return TECHNIQUE_LIT_INDEX;
+    case 1u:
+        return lightContext->sunShadowEnabled &&
+                primaryLightIndex == lightContext->sunPrimaryLightIndex
+            ? TECHNIQUE_LIT_SUN_SHADOW_INDEX : TECHNIQUE_LIT_SUN_INDEX;
+    case 2u:
+        return TECHNIQUE_LIT_SPOT_INDEX;
+    case 3u:
+        return TECHNIQUE_LIT_OMNI_INDEX;
+    default:
+        return TECHNIQUE_NONE_INDEX;
+    }
+}
+
 TechniqueSelection SelectTechnique(
-    const Material *material, bool sunShadowEnabled) noexcept
+    const Material *material, std::uint32_t litTechniqueType) noexcept
 {
     TechniqueSelection selection;
     if (!material || !material->techniqueSet || !material->stateBitsTable)
@@ -247,13 +284,15 @@ TechniqueSelection SelectTechnique(
         material->techniqueSet->remappedTechniqueSet
             ? material->techniqueSet->remappedTechniqueSet
             : material->techniqueSet;
-    const std::array<std::uint32_t, 4u> types = sunShadowEnabled
+    const bool localLight = litTechniqueType == TECHNIQUE_LIT_SPOT_INDEX ||
+        litTechniqueType == TECHNIQUE_LIT_OMNI_INDEX;
+    const std::array<std::uint32_t, 4u> types = localLight
         ? std::array<std::uint32_t, 4u>{
-            TECHNIQUE_LIT_SUN_SHADOW_INDEX, TECHNIQUE_LIT_INDEX,
-            TECHNIQUE_UNLIT_INDEX, TECHNIQUE_EMISSIVE_INDEX}
+            litTechniqueType, TECHNIQUE_NONE_INDEX,
+            TECHNIQUE_NONE_INDEX, TECHNIQUE_NONE_INDEX}
         : std::array<std::uint32_t, 4u>{
-            TECHNIQUE_LIT_INDEX, TECHNIQUE_UNLIT_INDEX,
-            TECHNIQUE_EMISSIVE_INDEX, TECHNIQUE_NONE_INDEX};
+            litTechniqueType, TECHNIQUE_LIT_INDEX,
+            TECHNIQUE_UNLIT_INDEX, TECHNIQUE_EMISSIVE_INDEX};
     for (const std::uint32_t type : types)
     {
         if (type == TECHNIQUE_NONE_INDEX) continue;
@@ -287,7 +326,8 @@ TechniqueSelection SelectTechnique(
     // backend fallback geometry.
     const std::uint8_t litEntry =
         material->stateBitsEntry[TECHNIQUE_LIT_INDEX];
-    if (IsCanonicalWorldColorLitAlias(material->techniqueSet) &&
+    if (litTechniqueType == TECHNIQUE_LIT_INDEX &&
+        IsCanonicalWorldColorLitAlias(material->techniqueSet) &&
         litEntry != 0xffu && litEntry < material->stateBitsCount)
     {
         selection.type = TECHNIQUE_LIT_INDEX;
@@ -308,7 +348,8 @@ WebRendererWorldBatchDesc MakeBatch(
     const GfxSurface &surface,
     std::uint32_t surfaceIndex,
     std::uint32_t firstIndex,
-    bool sunShadowEnabled) noexcept
+    bool sunShadowEnabled,
+    const WebRendererWorldLightTechniqueContext *lightContext) noexcept
 {
     WebRendererWorldBatchDesc batch{};
     batch.firstIndex = firstIndex;
@@ -338,8 +379,9 @@ WebRendererWorldBatchDesc MakeBatch(
         batch.reflectionProbeImage = world.reflectionProbes[
             surface.reflectionProbeIndex].reflectionImage;
     }
-    const TechniqueSelection technique = SelectTechnique(
-        surface.material, sunShadowEnabled);
+    const TechniqueSelection technique = SelectTechnique(surface.material,
+        SelectLitTechniqueType(surface.primaryLightIndex, lightContext,
+            sunShadowEnabled));
     batch.techniqueName = technique.identityName
         ? technique.identityName : "<unsupported-technique>";
     batch.techniqueType = static_cast<std::uint8_t>(technique.type);
@@ -351,8 +393,8 @@ WebRendererWorldBatchDesc MakeBatch(
     batch.stateBits[0] = technique.stateBits[0];
     batch.stateBits[1] = technique.stateBits[1];
     const bool hasCanonicalLightmap = technique.identityName &&
-        (technique.type == TECHNIQUE_LIT_INDEX ||
-            technique.type == TECHNIQUE_LIT_SUN_SHADOW_INDEX) &&
+        technique.type >= TECHNIQUE_LIT_INDEX &&
+        technique.type <= 13u &&
         surface.lightmapIndex != 31u &&
         surface.lightmapIndex < world.lightmapCount && world.lightmaps;
     if (hasCanonicalLightmap)
@@ -422,6 +464,7 @@ bool BatchMatches(
         batch.waterSamplerState == candidate.waterSamplerState &&
         batch.reflectionProbeIndex == candidate.reflectionProbeIndex &&
         batch.lightmapIndex == candidate.lightmapIndex &&
+        batch.primaryLightIndex == candidate.primaryLightIndex &&
         batch.technique == candidate.technique &&
         std::memcmp(batch.envMapParms, candidate.envMapParms,
             sizeof(batch.envMapParms)) == 0 &&
@@ -435,7 +478,8 @@ bool BatchMatches(
 WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
     const GfxWorld &world,
     const WebRendererSceneViewDesc &view,
-    WebRendererWorldSceneCommand &destination)
+    WebRendererWorldSceneCommand &destination,
+    const WebRendererWorldLightTechniqueContext *lightContext)
 {
     if (world.surfaceCount <= 0 || world.vertexCount == 0u ||
         world.indexCount <= 0 || !world.vd.vertices || !world.indices ||
@@ -581,7 +625,7 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
                 surface,
                 surfaceIndex,
                 static_cast<std::uint32_t>(replacement.indices.size() - indexCount),
-                view.sunShadowEnabled);
+                view.sunShadowEnabled, lightContext);
             candidate.indexCount = indexCount;
             if (MaterialUsesWater(surface.material))
             {
@@ -604,8 +648,6 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
                     replacement.batches.back().indexCount == candidate.firstIndex)
             {
                 WebRendererWorldBatchDesc &batch = replacement.batches.back();
-                if (batch.primaryLightIndex != candidate.primaryLightIndex)
-                    batch.primaryLightIndex = 0u;
                 batch.indexCount += candidate.indexCount;
                 ++batch.surfaceCount;
                 batch.lastSurfaceIndex = surfaceIndex;
@@ -796,7 +838,7 @@ WebRendererWorldSceneResult WebRenderer_BuildBrushModelSceneCommand(
 
                 WebRendererWorldBatchDesc candidate = MakeBatch(
                     world, surface, surfaceIndex, firstDestinationIndex,
-                    false);
+                    false, nullptr);
                 candidate.indexCount = indexCount;
                 candidate.sourceKind =
                     WebRendererSceneBatchKind::DynamicBModel;
@@ -809,8 +851,6 @@ WebRendererWorldSceneResult WebRenderer_BuildBrushModelSceneCommand(
                 {
                     WebRendererWorldBatchDesc &batch =
                         replacement.batches.back();
-                    if (batch.primaryLightIndex != candidate.primaryLightIndex)
-                        batch.primaryLightIndex = 0u;
                     batch.indexCount += candidate.indexCount;
                     ++batch.surfaceCount;
                     batch.lastSurfaceIndex = surfaceIndex;

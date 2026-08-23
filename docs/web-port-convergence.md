@@ -225,7 +225,7 @@ and WebGL seams. The exhaustive browser suite remains explicitly available.
 | `GfxWorld` | `MODIFIED KISAK` / canonical reached closure | `db_generated_gfxworld.cpp` follows the native generated closure through names, indices, images, cells/portals, lightmaps/grid, vertices/layers, models, shadow/light regions, DPVS static/dynamic, block-1 runtime allocations, and nested canonical dependencies before final real-DB publication into the renderer-owned `&s_world`. Native x86/Wasm fixtures are byte-for-byte identical. The normal Killhouse run publishes asset 772 with Gate 2-matching structural counts and inflated offset. `WebEngine_BuildGfxWorldSurface` consumes that DB-owned object through a final-publication platform notification and WebGL2 draws surface 6077 without a browser world model. The frozen Gate 2 material label differs from the real DB Material pointer and remains recorded rather than normalized away. `web_retail_load_gfxworld.*` is oracle-only. |
 | XModel/model preview scene | `RETIRED` | Removed after Gate 2: no selectable-model UI/state, retained preview geometry, preview camera/projection, preview material bridge, or multi-draw command path remains. Canonical XModel loading/publication and dependencies remain available to `GfxWorld`, `WeaponDef`, FX, and later runtime consumers. |
 | Renderer frontend | `MODIFIED KISAK` / textured, lightmapped, shadowed, model-lit gameplay and canonical marks reached | The production Wasm target links the real client/cgame/effects/ragdoll/physics closure against a narrow renderer-frontend platform implementation. `R_RenderScene` validates canonical `refdef_s`, constructs Kisak view/projection matrices, and traverses the canonical DPVS lit, decal, and emissive ranges in native stage order rather than treating `surfaceCountNoDecal` as a contiguous endpoint. It emits 581 material-aware batches with canonical `Material*`, technique identity, base `GfxImage*`, state bits, sampler state, lightmap index, base UV, and lightmap UV. Sun-enabled world draws prefer canonical `TECHNIQUE_LIT_SUN_SHADOW`; caster membership comes directly from `GfxWorldDpvsStatic::surfaceCastsSunShadow`. Static instances sample the canonical `GfxWorld::lightGrid` at their native bounds centers or retain encoded ground lighting. Ordinary and first-person `R_AddDObjToScene` submissions retain the caller's lighting origin, canonical pose evaluation, cpose/view-origin LOD selection delegated to `XModelGetLodForDist`, and rigid/weighted position plus normal skinning. EffectsCore code-mesh, XModel, particle-cloud, and persistent mark submissions remain appended in canonical order and do not enter the model-lighting branch. The mark-fragment seam clips canonical `GfxWorld` world-brush, moving-brush, static-XModel, and rigid animated-DObj receiver triangles against the six native mark planes and retains Material/lightmap/model-context identity; particle marks remain a later family. Unsupported/deformed standalone FX model surfaces, invalid/over-capacity clouds, broader material families, and deferred shader/postprocess features remain compatibility gaps. The minimum 2D callback set retains canonical Material/Font identities and publishes at `R_EndFrame`, including UI-only fullscreen and script-popup frames. |
-| WebGL2 backend and context recovery | `WEB PLATFORM IMPLEMENTATION` | Permanent platform boundary. It converts D3D9 NDC depth `[0,1]` to WebGL `[-1,1]`, retains 32-bit indices, uploads canonical external IWI and DB load-definition pixels (including encountered BGR8, A8L8, L8, and X8R8G8B8 images), draws the canonical world sky cubemap from the current view axes/FOV, and mirrors the encountered Killhouse `lm_r0c0_sm2` secondary-directional decode. The first sun-shadow slice owns a 1024-square depth target, native-default 0.25-world-unit near sampling, view-centred texel snapping, world-bound depth extents, alpha-tested canonical world/static-XModel/ordinary-DObj/DynEntity/moving-brush casters, and four-comparison PCF. Encountered `lm_sm_sun_*` receivers add the native `N dot sun * sunDiffuse` term under that real depth map; the far partition and exact per-partition static/entity DPVS culling remain explicit gaps. The encountered `water_l_sun` pass retains canonical `water_t` frequency inputs and each surface's reflection-probe image, runs the shared IW3 FFT/amplitude conversion, and reproduces the native parallax, multi-scale normal, Fresnel water color, reflection, sun-specular, and fog arithmetic. Model draws additionally upload the native 4x4x4-per-entry RGBA8 model-lighting volume layout. First-person DObj batches preserve native `renderFxFlags & 2`, use `r_znear_depthhack`, and draw in the reserved viewmodel depth range. The encountered `lp_t0c0[_n0]_sm2` base pass cube-projects the transformed normal by its maximum absolute component, samples that volume with native lookup scale, and computes `base * vertex * modelLighting * 2`; `n0` draws now retain semantic-5 images, reconstruct DXT5nm alpha/green normals, and apply the canonical tangent/binormal basis. Static entries are per instance; ordinary DObj and live DynEntity model entries are refreshed from their retained/canonical lighting origins. Dynamic brush batches preserve their canonical materials and directional lightmaps. The frontend advances the canonical five-slot campaign fog state and the backend applies the scripted exponential visibility/color blend to world and model geometry. The resolved RGBA8 scene consumes the exact `R_UpdateColorManipulation` constants and canonical `refdef.blurRadius` before 2D; a second target composites the sharp HUD before the final display-mapping pass. `R_SetColorMappings` remains capability-correct: browser registration reports `deviceSupportsGamma=false`, so `r_gamma` is retained and tested but does not incorrectly darken the composited canvas. Non-sun primary-light technique passes, glow, and depth-aware DOF remain later work. Canonical cull, depth, color-write, alpha-test/blend, addressing, and filtering states remain per batch. GPU handles stay backend-only; 2D/cubemap textures, water fields, reflection probes, 3D lighting volumes, shadow/post-effect targets, geometry, and instance buffers are recreated after context loss. |
+| WebGL2 backend and context recovery | `WEB PLATFORM IMPLEMENTATION` | Permanent platform boundary. It converts D3D9 NDC depth `[0,1]` to WebGL `[-1,1]`, retains 32-bit indices, uploads canonical external IWI and DB load-definition pixels (including encountered BGR8, A8L8, L8, and X8R8G8B8 images), draws the canonical world sky cubemap from the current view axes/FOV, and mirrors the encountered Killhouse `lm_r0c0_sm2` secondary-directional decode. The first sun-shadow slice owns a 1024-square depth target, native-default 0.25-world-unit near sampling, view-centred texel snapping, world-bound depth extents, alpha-tested canonical world/static-XModel/ordinary-DObj/DynEntity/moving-brush casters, and four-comparison PCF. Encountered `lm_sm_sun_*` receivers add the native `N dot sun * sunDiffuse` term under that real depth map; the far partition and exact per-partition static/entity DPVS culling remain explicit gaps. Encountered `lm_spot_r0c0[_n0]_sm2` and `lm_spot_t0c0n0_sm2` world batches preserve their per-surface light identity, both lightmaps, authored L8 falloff, cone, radius, color, and normal basis, and reproduce the native baked-plus-spot diffuse arithmetic; spot-shadow and omni variants remain gaps. The encountered `water_l_sun` pass retains canonical `water_t` frequency inputs and each surface's reflection-probe image, runs the shared IW3 FFT/amplitude conversion, and reproduces the native parallax, multi-scale normal, Fresnel water color, reflection, sun-specular, and fog arithmetic. Model draws additionally upload the native 4x4x4-per-entry RGBA8 model-lighting volume layout. First-person DObj batches preserve native `renderFxFlags & 2`, use `r_znear_depthhack`, and draw in the reserved viewmodel depth range. The encountered `lp_t0c0[_n0]_sm2` base pass cube-projects the transformed normal by its maximum absolute component, samples that volume with native lookup scale, and computes `base * vertex * modelLighting * 2`; `n0` draws now retain semantic-5 images, reconstruct DXT5nm alpha/green normals, and apply the canonical tangent/binormal basis. Static entries are per instance; ordinary DObj and live DynEntity model entries are refreshed from their retained/canonical lighting origins. Dynamic brush batches preserve their canonical materials and directional lightmaps. The frontend advances the canonical five-slot campaign fog state and the backend applies the scripted exponential visibility/color blend to world and model geometry. The resolved RGBA8 scene consumes the exact `R_UpdateColorManipulation` constants and canonical `refdef.blurRadius` before 2D; a second target composites the sharp HUD before the final display-mapping pass. `R_SetColorMappings` remains capability-correct: browser registration reports `deviceSupportsGamma=false`, so `r_gamma` is retained and tested but does not incorrectly darken the composited canvas. Glow and depth-aware DOF remain later work. Canonical cull, depth, color-write, alpha-test/blend, addressing, and filtering states remain per batch. GPU handles stay backend-only; 2D/cubemap textures, water fields, reflection probes, 3D lighting volumes, shadow/post-effect targets, geometry, and instance buffers are recreated after context loss. |
 | D3D9 renderer backend | `NATIVE ONLY` | Retain for native builds and use as behavioral reference; do not compile Direct3D objects into Wasm. |
 | Shader compatibility | `MODIFIED KISAK` / `WEB PLATFORM IMPLEMENTATION` boundary | Native material/shader contracts should remain canonical; selecting or translating to built-in GLSL belongs at the backend seam. |
 | ODE math | `SHARED KISAK` | `src/physics/ode/odemath.cpp` is compiled directly. Expand shared ODE/collision code based on compile inventory and measured needs. |
@@ -1004,30 +1004,46 @@ draws and zero divergent draws.
 
 The world command now retains the canonical `ComPrimaryLight` values,
 `GfxLightDef` attenuation image, sampler state, and each `GfxDrawSurf`
-primary-light identity at the renderer boundary. This does not split the
-proven base material/lightmap draw ordering: adjacent surfaces with different
-local-light identities continue to share their base batch and that mixed
-batch carries no single local-light selection. Batches whose surfaces
-unanimously select the same light preserve that index for a future native
-technique pass list.
+primary-light identity at the renderer boundary. Native `R_SetupMaterial`
+selects the lit technique directly from that per-surface identity, so it now
+participates in portable world batching rather than being collapsed into a
+shared base batch. Killhouse consequently moves from 581 to 585 canonical
+material/lightmap/light-identity batches over the same 8,475 surfaces.
 
 The bounded external IWI decoder now also accepts COD4 format 4 (`L8`),
 preserves the native smallest-to-largest mip order, and expands each texel to
 opaque `L,L,L`. In the owned Killhouse runtime, this resolves the authored
 32-by-1 `falloff_linear` image used by every encountered local light. Chrome
 reports 24 canonical primary lights: sun index 1, 22 spot lights, no omni
-lights, and 172 unanimous base batches retaining a non-sun identity. The
-world remains the established 581 base batches over 8,475 surfaces, and all
-246 encountered world images decode without a backend fallback.
+lights, and 178 world batches/380 surfaces assigned to them. Of those, 143
+batches/335 surfaces select a real type-10 material technique. The encountered
+shader family is `lm_spot_r0c0[_n0]_sm2` plus one
+`lm_spot_t0c0n0_sm2` material; two decal materials select the native
+`vertcol_mul_fog` type-10 technique. The remaining 35 batches/45 decal or
+glass surfaces have no type-10 technique in their canonical remapped set;
+native skips those material groups, and their temporary backend fallback is
+still an explicit gap. All 246 encountered world images decode successfully.
 
-Visible local lighting is intentionally not folded into the base WebGL
-shader. Native Kisak selects `TECHNIQUE_LIT_SPOT` per draw surf, so activation
-is deferred until the portable frontend carries the corresponding independent
-technique/pass list, including mixed-light surfaces. This milestone therefore
-ships canonical ownership and exact authored attenuation data without a
-browser-specific lighting approximation. Focused native image and world-scene
-tests, the Release build, the 17-test browser smoke tier, and the non-overlap
-remainder tier (41 passed, 1 skipped) all pass.
+The WebGL translation follows the authored `lm_spot` D3D9 token arithmetic:
+it retains both lightmap samplers, decodes the existing two-lobe baked term,
+then adds `primary visibility * falloff * spot cone * saturated N dot L *
+light diffuse`. Normal variants reconstruct the authored slope-space normal
+through the world tangent basis. The exact 32-sample L8 falloff and canonical
+light radius, color, direction, cone cosines, and exponent drive the shader;
+no map-specific constants or browser-only light model are introduced. Omni
+lights and spot-shadow variants remain unencountered/unimplemented.
+
+The backend activates this translation for 132 encountered `lm_spot` batches;
+the remainder of the 143 type-10 batches are native multiply passes or do not
+carry the complete lightmap/image inputs required by this shader family.
+
+Focused native image and world-scene tests, the Release build, the 17-test
+browser smoke tier, and the non-overlap remainder tier (41 passed, 1 skipped)
+pass. Chrome compiles and submits the translated shader without WebGL,
+framebuffer, or draw errors. The current browser home path is still read-only,
+so Killhouse's start-level save fails and stalls cgame at `levelTime=450`;
+this prevents a valid same-camera visual capture until the separate writable
+home-path platform milestone lands.
 
 ## Canonical resolved-scene blur update (2026-08-23)
 

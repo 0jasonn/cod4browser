@@ -204,6 +204,13 @@ struct WebRendererState
     GLint sunShadowEnabledUniform = -1;
     GLint sunDirectionUniform = -1;
     GLint sunColorUniform = -1;
+    GLint primaryLightmapUniform = -1;
+    GLint primaryLightAttenuationUniform = -1;
+    GLint primaryLightEnabledUniform = -1;
+    GLint primaryLightPositionRadiusUniform = -1;
+    GLint primaryLightDiffuseUniform = -1;
+    GLint primaryLightSpotDirectionUniform = -1;
+    GLint primaryLightSpotFactorsUniform = -1;
     GLint waterMapUniform = -1;
     GLint reflectionProbeUniform = -1;
     GLint envMapParmsUniform = -1;
@@ -1603,6 +1610,13 @@ void ResetGpuHandles()
     g_renderer.sunShadowEnabledUniform = -1;
     g_renderer.sunDirectionUniform = -1;
     g_renderer.sunColorUniform = -1;
+    g_renderer.primaryLightmapUniform = -1;
+    g_renderer.primaryLightAttenuationUniform = -1;
+    g_renderer.primaryLightEnabledUniform = -1;
+    g_renderer.primaryLightPositionRadiusUniform = -1;
+    g_renderer.primaryLightDiffuseUniform = -1;
+    g_renderer.primaryLightSpotDirectionUniform = -1;
+    g_renderer.primaryLightSpotFactorsUniform = -1;
     g_renderer.waterMapUniform = -1;
     g_renderer.reflectionProbeUniform = -1;
     g_renderer.envMapParmsUniform = -1;
@@ -2619,12 +2633,19 @@ bool CreateRendererResources()
         uniform vec3 u_fog_color;
         uniform vec2 u_fog_params;
         uniform sampler2D u_shadow_map;
+        uniform sampler2D u_primary_lightmap;
+        uniform sampler2D u_primary_light_attenuation;
         uniform sampler2D u_water_map;
         uniform samplerCube u_reflection_probe;
         uniform mat4 u_shadow_matrix;
         uniform float u_sun_shadow_enabled;
         uniform vec3 u_sun_direction;
         uniform vec3 u_sun_color;
+        uniform float u_primary_light_enabled;
+        uniform vec4 u_primary_light_position_radius;
+        uniform vec3 u_primary_light_diffuse;
+        uniform vec3 u_primary_light_spot_direction;
+        uniform vec3 u_primary_light_spot_factors;
         uniform vec4 u_env_map_parms;
         uniform vec4 u_water_color;
         out vec4 out_color;
@@ -2798,6 +2819,55 @@ bool CreateRendererResources()
                             inverse_light_length, 0.0, 1.0);
                         lighting = secondary_lobe0.rgb +
                             secondary_lobe1.rgb * directional_weight;
+                    }
+                    if (u_primary_light_enabled > 0.5)
+                    {
+                        // Native lm_spot_[rt]0c0[n0]_sm2 selects this path
+                        // from the draw surf's primary-light index. Its D3D9
+                        // token stream multiplies the authored L8 falloff by
+                        // the surface's primary lightmap visibility, the spot
+                        // cone, and saturated N dot L before adding the result
+                        // to the decoded two-lobe baked lighting above.
+                        vec3 delta_to_light =
+                            u_primary_light_position_radius.xyz -
+                            v_world_position;
+                        float distance_to_light = length(delta_to_light);
+                        vec3 light_direction = delta_to_light /
+                            max(distance_to_light, 0.000001);
+                        float spot_coordinate = dot(light_direction,
+                                u_primary_light_spot_direction) *
+                                u_primary_light_spot_factors.x +
+                            u_primary_light_spot_factors.y;
+                        float spot_attenuation = pow(max(
+                            spot_coordinate, 0.0),
+                            u_primary_light_spot_factors.z);
+                        float radial_attenuation = texture(
+                            u_primary_light_attenuation,
+                            vec2(clamp(distance_to_light *
+                                u_primary_light_position_radius.w,
+                                0.0, 1.0), 0.5)).r;
+                        float primary_visibility = texture(
+                            u_primary_lightmap, v_lightmap_coord).r;
+                        vec3 primary_normal = normalize(v_model_normal);
+                        if (u_normal_map_enabled > 0.5)
+                        {
+                            vec4 normal_texel = texture(
+                                u_normal_map, v_texcoord);
+                            vec2 encoded_normal = vec2(
+                                normal_texel.a * 4.08 - 2.08,
+                                normal_texel.g * 4.06451607 - 2.06451607);
+                            vec3 tangent = normalize(v_model_tangent);
+                            vec3 binormal = normalize(cross(
+                                primary_normal, tangent)) * v_binormal_sign;
+                            primary_normal = normalize(primary_normal +
+                                tangent * encoded_normal.x +
+                                binormal * encoded_normal.y);
+                        }
+                        float diffuse = max(dot(
+                            light_direction, primary_normal), 0.0);
+                        lighting += u_primary_light_diffuse * diffuse *
+                            spot_attenuation * radial_attenuation *
+                            primary_visibility;
                     }
                     if (u_sun_shadow_enabled > 0.5)
                     {
@@ -3117,6 +3187,20 @@ bool CreateRendererResources()
         glGetUniformLocation(program, "u_sun_direction");
     const GLint sunColorUniform =
         glGetUniformLocation(program, "u_sun_color");
+    const GLint primaryLightmapUniform =
+        glGetUniformLocation(program, "u_primary_lightmap");
+    const GLint primaryLightAttenuationUniform =
+        glGetUniformLocation(program, "u_primary_light_attenuation");
+    const GLint primaryLightEnabledUniform =
+        glGetUniformLocation(program, "u_primary_light_enabled");
+    const GLint primaryLightPositionRadiusUniform =
+        glGetUniformLocation(program, "u_primary_light_position_radius");
+    const GLint primaryLightDiffuseUniform =
+        glGetUniformLocation(program, "u_primary_light_diffuse");
+    const GLint primaryLightSpotDirectionUniform =
+        glGetUniformLocation(program, "u_primary_light_spot_direction");
+    const GLint primaryLightSpotFactorsUniform =
+        glGetUniformLocation(program, "u_primary_light_spot_factors");
     const GLint waterMapUniform =
         glGetUniformLocation(program, "u_water_map");
     const GLint reflectionProbeUniform =
@@ -3282,6 +3366,13 @@ bool CreateRendererResources()
         fogParamsUniform < 0 || shadowMapUniform < 0 ||
         shadowMatrixUniform < 0 || sunShadowEnabledUniform < 0 ||
         sunDirectionUniform < 0 || sunColorUniform < 0 ||
+        primaryLightmapUniform < 0 ||
+        primaryLightAttenuationUniform < 0 ||
+        primaryLightEnabledUniform < 0 ||
+        primaryLightPositionRadiusUniform < 0 ||
+        primaryLightDiffuseUniform < 0 ||
+        primaryLightSpotDirectionUniform < 0 ||
+        primaryLightSpotFactorsUniform < 0 ||
         waterMapUniform < 0 || reflectionProbeUniform < 0 ||
         envMapParmsUniform < 0 || waterColorUniform < 0 ||
         shadowDepthMatrixUniform < 0 || shadowDepthTextureUniform < 0 ||
@@ -3398,6 +3489,17 @@ bool CreateRendererResources()
     g_renderer.sunShadowEnabledUniform = sunShadowEnabledUniform;
     g_renderer.sunDirectionUniform = sunDirectionUniform;
     g_renderer.sunColorUniform = sunColorUniform;
+    g_renderer.primaryLightmapUniform = primaryLightmapUniform;
+    g_renderer.primaryLightAttenuationUniform =
+        primaryLightAttenuationUniform;
+    g_renderer.primaryLightEnabledUniform = primaryLightEnabledUniform;
+    g_renderer.primaryLightPositionRadiusUniform =
+        primaryLightPositionRadiusUniform;
+    g_renderer.primaryLightDiffuseUniform = primaryLightDiffuseUniform;
+    g_renderer.primaryLightSpotDirectionUniform =
+        primaryLightSpotDirectionUniform;
+    g_renderer.primaryLightSpotFactorsUniform =
+        primaryLightSpotFactorsUniform;
     g_renderer.waterMapUniform = waterMapUniform;
     g_renderer.reflectionProbeUniform = reflectionProbeUniform;
     g_renderer.envMapParmsUniform = envMapParmsUniform;
@@ -4545,10 +4647,32 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
                     batch.primaryLightIndex !=
                         g_renderer.retainedSunPrimaryLightIndex;
             }));
+    const std::size_t retainedNativeSpotBatches = static_cast<std::size_t>(
+        std::count_if(g_renderer.retainedWorldBatches.begin(),
+            g_renderer.retainedWorldBatches.end(),
+            [](const WebRendererRetainedWorldBatch &batch) {
+                if (batch.techniqueType != 10u ||
+                    batch.pixelShaderName.rfind("lm_spot_", 0u) != 0u ||
+                    batch.lightmapImageIndex == INVALID_WORLD_IMAGE ||
+                    batch.secondaryLightmapImageIndex ==
+                        INVALID_WORLD_IMAGE ||
+                    batch.primaryLightIndex >=
+                        g_renderer.retainedPrimaryLights.size())
+                {
+                    return false;
+                }
+                const WebRendererRetainedPrimaryLight &light =
+                    g_renderer.retainedPrimaryLights[
+                        batch.primaryLightIndex];
+                return light.type == 2u &&
+                    light.attenuationImageIndex != INVALID_WORLD_IMAGE;
+            }));
     Web_Log(WebLogLevel::Info,
         "[kisakcod-web] Renderer retained %zu canonical local primary lights "
-        "for %zu unanimous world batches (sun=%u).\n",
+        "for %zu native-identity world batches, including %zu translated "
+        "lm_spot batches (sun=%u).\n",
         retainedLocalLights, retainedPrimaryLitBatches,
+        retainedNativeSpotBatches,
         g_renderer.retainedSunPrimaryLightIndex);
     if (comparisonCaptured)
         EmitWorldComparison(intendedComparison);
@@ -6173,6 +6297,8 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1i(g_renderer.shadowMapUniform, 6);
         glUniform1i(g_renderer.waterMapUniform, 7);
         glUniform1i(g_renderer.reflectionProbeUniform, 8);
+        glUniform1i(g_renderer.primaryLightmapUniform, 9);
+        glUniform1i(g_renderer.primaryLightAttenuationUniform, 10);
         glUniformMatrix4fv(g_renderer.shadowMatrixUniform, 1, GL_FALSE,
             g_renderer.sceneSunShadowMatrix.data());
         glUniform3fv(g_renderer.sunDirectionUniform, 1,
@@ -6180,6 +6306,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform3fv(g_renderer.sunColorUniform, 1,
             g_renderer.sceneSunColor.data());
         glUniform1f(g_renderer.sunShadowEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.primaryLightEnabledUniform, 0.0f);
         glActiveTexture(GL_TEXTURE6);
         glBindTexture(GL_TEXTURE_2D,
             shadowMapDrawn ? g_renderer.shadowDepthTexture :
@@ -6232,6 +6359,8 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 WorldImage(batch.baseImageIndex);
             const WebRendererRetainedWorldImage *secondaryLightmap =
                 WorldImage(batch.secondaryLightmapImageIndex);
+            const WebRendererRetainedWorldImage *primaryLightmap =
+                WorldImage(batch.lightmapImageIndex);
             const WebRendererRetainedWorldImage *normal =
                 WorldImage(batch.normalImageIndex);
             const bool water = batch.technique ==
@@ -6249,6 +6378,18 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                     WebRendererWorldLightingMode::SecondaryDirectional;
             const bool normalMapped = lightmapped && normal &&
                 WebRenderer_UsesWorldNormalMap(batch.technique);
+            const WebRendererRetainedPrimaryLight *primaryLight =
+                batch.primaryLightIndex <
+                        g_renderer.retainedPrimaryLights.size()
+                ? &g_renderer.retainedPrimaryLights[
+                    batch.primaryLightIndex]
+                : nullptr;
+            const WebRendererRetainedWorldImage *attenuation = primaryLight
+                ? WorldImage(primaryLight->attenuationImageIndex) : nullptr;
+            const bool primaryLit = lightmapped && primaryLightmap &&
+                primaryLight && primaryLight->type == 2u && attenuation &&
+                batch.techniqueType == 10u &&
+                batch.pixelShaderName.rfind("lm_spot_", 0u) == 0u;
             glUniform1f(g_renderer.sceneFallbackUniform,
                 fallback ? 1.0f : 0.0f);
             glUniform1f(g_renderer.textureEnabledUniform,
@@ -6275,6 +6416,25 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 shadowMapDrawn && lightmapped &&
                         batch.techniqueType == 9u
                     ? 1.0f : 0.0f);
+            glUniform1f(g_renderer.primaryLightEnabledUniform,
+                primaryLit ? 1.0f : 0.0f);
+            if (primaryLit)
+            {
+                glUniform4f(g_renderer.primaryLightPositionRadiusUniform,
+                    primaryLight->origin[0], primaryLight->origin[1],
+                    primaryLight->origin[2], 1.0f / primaryLight->radius);
+                glUniform3fv(g_renderer.primaryLightDiffuseUniform, 1,
+                    primaryLight->color);
+                glUniform3fv(g_renderer.primaryLightSpotDirectionUniform, 1,
+                    primaryLight->direction);
+                const float spotScale = 1.0f /
+                    (primaryLight->cosHalfFovInner -
+                        primaryLight->cosHalfFovOuter);
+                glUniform3f(g_renderer.primaryLightSpotFactorsUniform,
+                    spotScale,
+                    -spotScale * primaryLight->cosHalfFovOuter,
+                    static_cast<float>(primaryLight->exponent));
+            }
             BindWorldTexture(
                 GL_TEXTURE0,
                 base ? base->texture : g_renderer.texture,
@@ -6288,6 +6448,15 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 secondaryLightmap
                     ? secondaryLightmap->texture : g_renderer.texture,
                 0x62u);
+            BindWorldTexture(
+                GL_TEXTURE9,
+                primaryLightmap
+                    ? primaryLightmap->texture : g_renderer.texture,
+                0x62u);
+            BindWorldTexture(
+                GL_TEXTURE10,
+                attenuation ? attenuation->texture : g_renderer.texture,
+                primaryLight ? primaryLight->samplerState : 0u);
             const std::uintptr_t indexOffset =
                 static_cast<std::uintptr_t>(batch.firstIndex) *
                 sizeof(std::uint32_t);

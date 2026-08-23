@@ -56,6 +56,14 @@ enum class WebRendererWorldSceneResult : std::uint8_t
     AllocationFailed,
 };
 
+struct WebRendererWorldLightTechniqueContext
+{
+    const WebRendererPrimaryLightDesc *primaryLights = nullptr;
+    std::uint32_t primaryLightCount = 0u;
+    std::uint32_t sunPrimaryLightIndex = 0u;
+    bool sunShadowEnabled = false;
+};
+
 // Builds material/lightmap-aware portable world batches from the canonical
 // renderer-owned GfxWorld. Surface order follows Kisak's canonical lit, decal,
 // and emissive camera ranges; fixtures without initialized DPVS ranges fall
@@ -70,7 +78,8 @@ enum class WebRendererWorldSceneResult : std::uint8_t
 WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
     const GfxWorld &world,
     const WebRendererSceneViewDesc &view,
-    WebRendererWorldSceneCommand &destination);
+    WebRendererWorldSceneCommand &destination,
+    const WebRendererWorldLightTechniqueContext *lightContext = nullptr);
 
 // Expands canonical scene-brush submissions from their GfxBrushModel surface
 // ranges. Native retains the placement separately; the portable boundary

@@ -20,6 +20,7 @@ const GfxImage *LookupResolvedImage(const char *name) noexcept
 
 constexpr std::uint32_t TECHNIQUE_LIT_INDEX = 7u;
 constexpr std::uint32_t TECHNIQUE_LIT_SUN_SHADOW_INDEX = 9u;
+constexpr std::uint32_t TECHNIQUE_LIT_SPOT_INDEX = 10u;
 WebRendererSceneViewDesc MakeView()
 {
     WebRendererSceneViewDesc view{};
@@ -134,7 +135,7 @@ void TestCanonicalOpaqueSurfacesAreBatchedInWorldOrder()
     assert(command.vertices[0].color[1] > command.vertices[0].color[2]);
 }
 
-void TestMixedPrimaryLightIdentityDoesNotSplitBaseWorldBatch()
+void TestPrimaryLightIdentitySplitsNativeLitBatches()
 {
     Fixture fixture;
     fixture.surfaces[0].primaryLightIndex = 2u;
@@ -144,9 +145,11 @@ void TestMixedPrimaryLightIdentityDoesNotSplitBaseWorldBatch()
     assert(WebRenderer_BuildWorldSceneCommand(
         fixture.world, MakeView(), command) ==
         WebRendererWorldSceneResult::Success);
-    assert(command.batches.size() == 1u);
-    assert(command.batches[0].primaryLightIndex == 0u);
-    assert(command.batches[0].surfaceCount == 3u);
+    assert(command.batches.size() == 2u);
+    assert(command.batches[0].primaryLightIndex == 2u);
+    assert(command.batches[0].surfaceCount == 2u);
+    assert(command.batches[1].primaryLightIndex == 3u);
+    assert(command.batches[1].surfaceCount == 1u);
 
     fixture.surfaces[2].primaryLightIndex = 2u;
     assert(WebRenderer_BuildWorldSceneCommand(
@@ -154,6 +157,71 @@ void TestMixedPrimaryLightIdentityDoesNotSplitBaseWorldBatch()
         WebRendererWorldSceneResult::Success);
     assert(command.batches.size() == 1u);
     assert(command.batches[0].primaryLightIndex == 2u);
+}
+
+void TestSpotPrimaryLightSelectsNativeMaterialTechnique()
+{
+    Fixture fixture;
+    MaterialTechnique litTechnique{};
+    litTechnique.passCount = 1u;
+    litTechnique.name = "lit";
+    MaterialTechnique spotTechnique{};
+    spotTechnique.passCount = 1u;
+    spotTechnique.name = "lit_spot";
+    spotTechnique.passArray[0u].customSamplerFlags = 6u;
+    MaterialPixelShader spotPixelShader{};
+    spotPixelShader.name = "lm_spot_r0c0n0_sm2.hlsl";
+    spotTechnique.passArray[0u].pixelShader = &spotPixelShader;
+    MaterialTechniqueSet techniqueSet{};
+    techniqueSet.techniques[TECHNIQUE_LIT_INDEX] = &litTechnique;
+    techniqueSet.techniques[TECHNIQUE_LIT_SPOT_INDEX] = &spotTechnique;
+    GfxStateBits stateBits[2]{};
+    GfxImage baseImage{};
+    GfxImage normalImage{};
+    GfxImage primaryLightmap{};
+    GfxImage secondaryLightmap{};
+    GfxLightmapArray lightmap{&primaryLightmap, &secondaryLightmap};
+    fixture.world.lightmapCount = 1u;
+    fixture.world.lightmaps = &lightmap;
+    std::array<MaterialTextureDef, 2u> textures{};
+    textures[0u].semantic = 2u;
+    textures[0u].u.image = &baseImage;
+    textures[1u].semantic = 5u;
+    textures[1u].u.image = &normalImage;
+    Material material{};
+    material.info.name = "spot/material";
+    material.techniqueSet = &techniqueSet;
+    material.textureCount = static_cast<std::uint8_t>(textures.size());
+    material.textureTable = textures.data();
+    material.stateBitsCount = 2u;
+    material.stateBitsTable = stateBits;
+    std::fill(std::begin(material.stateBitsEntry),
+        std::end(material.stateBitsEntry), 0xffu);
+    material.stateBitsEntry[TECHNIQUE_LIT_INDEX] = 0u;
+    material.stateBitsEntry[TECHNIQUE_LIT_SPOT_INDEX] = 1u;
+    for (GfxSurface &surface : fixture.surfaces)
+    {
+        surface.material = &material;
+        surface.primaryLightIndex = 2u;
+        surface.lightmapIndex = 0u;
+    }
+    std::array<WebRendererPrimaryLightDesc, 3u> lights{};
+    lights[2].type = 2u;
+    const WebRendererWorldLightTechniqueContext lightContext{
+        lights.data(), static_cast<std::uint32_t>(lights.size()), 1u, false};
+    WebRendererWorldSceneCommand command;
+    assert(WebRenderer_BuildWorldSceneCommand(
+        fixture.world, MakeView(), command, &lightContext) ==
+        WebRendererWorldSceneResult::Success);
+    assert(command.batches.size() == 1u);
+    assert(command.batches[0].primaryLightIndex == 2u);
+    assert(command.batches[0].techniqueType == TECHNIQUE_LIT_SPOT_INDEX);
+    assert(std::strcmp(command.batches[0].techniqueName, "lit_spot") == 0);
+    assert(command.batches[0].lightmapImage == &primaryLightmap);
+    assert(command.batches[0].secondaryLightmapImage == &secondaryLightmap);
+    assert(command.batches[0].normalImage == &normalImage);
+    assert(command.batches[0].technique ==
+        WebRendererWorldTechnique::BaseTextureLightmapNormal);
 }
 
 void TestCommaPrefixedImageReferenceResolvesAtRendererBoundary()
@@ -748,7 +816,8 @@ int main()
 {
     TestCommaPrefixedImageReferenceResolvesAtRendererBoundary();
     TestCanonicalOpaqueSurfacesAreBatchedInWorldOrder();
-    TestMixedPrimaryLightIdentityDoesNotSplitBaseWorldBatch();
+    TestPrimaryLightIdentitySplitsNativeLitBatches();
+    TestSpotPrimaryLightSelectsNativeMaterialTechnique();
     TestCanonicalMaterialAndLightmapIdentitySplitBatches();
     TestCanonicalLmTechniqueNameDoesNotInventLightmapSamplers();
     TestRemappedTechniqueSetDrivesPortableSelection();

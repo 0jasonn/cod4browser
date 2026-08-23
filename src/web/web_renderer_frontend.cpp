@@ -60,6 +60,7 @@
 #include <cstring>
 #include <new>
 #include <string>
+#include <utility>
 #include <vector>
 
 enum CubemapShot : int;
@@ -179,7 +180,8 @@ void ResolveRendererBatchImages(WebRendererWorldBatchDesc &batch) noexcept
 }
 
 bool BuildRendererPrimaryLights(
-    WebRendererWorldSceneCommand &command) noexcept
+    std::vector<WebRendererPrimaryLightDesc> &primaryLights,
+    std::uint32_t &sunPrimaryLightIndex) noexcept
 {
     if (!comWorld.isInUse || !comWorld.primaryLights ||
         comWorld.primaryLightCount > WEB_RENDERER_MAX_PRIMARY_LIGHTS)
@@ -188,18 +190,22 @@ bool BuildRendererPrimaryLights(
     }
     try
     {
-        command.primaryLights.clear();
-        command.primaryLights.resize(comWorld.primaryLightCount);
-        command.sunPrimaryLightIndex = s_world.sunPrimaryLightIndex;
+        primaryLights.clear();
+        primaryLights.resize(comWorld.primaryLightCount);
+        sunPrimaryLightIndex = s_world.sunPrimaryLightIndex;
         for (std::uint32_t index = 0u;
              index < comWorld.primaryLightCount; ++index)
         {
             const ComPrimaryLight &source = comWorld.primaryLights[index];
             WebRendererPrimaryLightDesc &destination =
-                command.primaryLights[index];
+                primaryLights[index];
             destination.type = source.type;
             destination.exponent = source.exponent;
-            std::copy_n(source.color, 3u, destination.color);
+            const float diffuseScale = r_diffuseColorScale
+                ? r_diffuseColorScale->current.value : 1.0f;
+            for (std::size_t component = 0u; component < 3u; ++component)
+                destination.color[component] =
+                    source.color[component] * diffuseScale;
             std::copy_n(source.dir, 3u, destination.direction);
             std::copy_n(source.origin, 3u, destination.origin);
             destination.radius = source.radius;
@@ -218,11 +224,11 @@ bool BuildRendererPrimaryLights(
                 }
             }
         }
-        if (s_world.sunPrimaryLightIndex < command.primaryLights.size() &&
+        if (s_world.sunPrimaryLightIndex < primaryLights.size() &&
             s_world.sunLight)
         {
             WebRendererPrimaryLightDesc &sun =
-                command.primaryLights[s_world.sunPrimaryLightIndex];
+                primaryLights[s_world.sunPrimaryLightIndex];
             sun.type = s_world.sunLight->type;
             std::copy_n(s_world.sunLight->color, 3u, sun.color);
             std::copy_n(s_world.sunLight->dir, 3u, sun.direction);
@@ -1687,9 +1693,25 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
 
     if (!g_worldSceneSubmitted)
     {
+        std::vector<WebRendererPrimaryLightDesc> primaryLights;
+        std::uint32_t sunPrimaryLightIndex = 0u;
+        if (!BuildRendererPrimaryLights(
+                primaryLights, sunPrimaryLightIndex))
+        {
+            Com_Error(ERR_DROP,
+                "R_RenderScene: invalid canonical primary lights");
+            return;
+        }
+        const WebRendererWorldLightTechniqueContext lightContext{
+            primaryLights.data(),
+            static_cast<std::uint32_t>(primaryLights.size()),
+            sunPrimaryLightIndex,
+            view.sunShadowEnabled,
+        };
         WebRendererWorldSceneCommand command;
         const WebRendererWorldSceneResult build =
-            WebRenderer_BuildWorldSceneCommand(s_world, view, command);
+            WebRenderer_BuildWorldSceneCommand(
+                s_world, view, command, &lightContext);
         if (build == WebRendererWorldSceneResult::NoVisibleSurface)
         {
             g_worldSceneSurfaceCount = 0u;
@@ -1704,14 +1726,77 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         }
         else
         {
-            if (!BuildRendererPrimaryLights(command))
-            {
-                Com_Error(ERR_DROP,
-                    "R_RenderScene: invalid canonical primary lights");
-                return;
-            }
+            command.primaryLights = std::move(primaryLights);
+            command.sunPrimaryLightIndex = sunPrimaryLightIndex;
             for (WebRendererWorldBatchDesc &batch : command.batches)
                 ResolveRendererBatchImages(batch);
+            std::array<std::uint32_t, 37u> techniqueBatchCounts{};
+            std::array<std::uint32_t, 37u> techniqueSurfaceCounts{};
+            std::uint32_t localLightBatchCount = 0u;
+            std::uint32_t localLightSurfaceCount = 0u;
+            std::uint32_t localLightFallbackBatchCount = 0u;
+            std::uint32_t localLightFallbackSurfaceCount = 0u;
+            std::vector<const Material *> loggedLocalMaterials;
+            for (const WebRendererWorldBatchDesc &batch : command.batches)
+            {
+                if (batch.techniqueType < techniqueBatchCounts.size())
+                {
+                    ++techniqueBatchCounts[batch.techniqueType];
+                    techniqueSurfaceCounts[batch.techniqueType] +=
+                        batch.surfaceCount;
+                }
+                const bool localLight = batch.primaryLightIndex <
+                        command.primaryLights.size() &&
+                    (command.primaryLights[batch.primaryLightIndex].type == 2u ||
+                        command.primaryLights[batch.primaryLightIndex].type == 3u);
+                if (!localLight) continue;
+                ++localLightBatchCount;
+                localLightSurfaceCount += batch.surfaceCount;
+                if (batch.technique ==
+                    WebRendererWorldTechnique::BackendFallback)
+                {
+                    ++localLightFallbackBatchCount;
+                    localLightFallbackSurfaceCount += batch.surfaceCount;
+                }
+                if (std::find(loggedLocalMaterials.begin(),
+                        loggedLocalMaterials.end(), batch.materialIdentity) ==
+                    loggedLocalMaterials.end())
+                {
+                    loggedLocalMaterials.push_back(batch.materialIdentity);
+                    const MaterialTechniqueSet *techniqueSet =
+                        batch.materialIdentity
+                        ? batch.materialIdentity->techniqueSet : nullptr;
+                    if (techniqueSet && techniqueSet->remappedTechniqueSet)
+                        techniqueSet = techniqueSet->remappedTechniqueSet;
+                    const bool hasSpotTechnique = techniqueSet &&
+                        techniqueSet->techniques[10u] != nullptr;
+                    const std::uint8_t spotStateEntry = batch.materialIdentity
+                        ? batch.materialIdentity->stateBitsEntry[10u] : 0xffu;
+                    Web_Log(WebLogLevel::Info,
+                        "[kisakcod-web] Canonical local-light material: "
+                        "material='%s' light=%u technique='%s' type=%u "
+                        "shader='%s' samplerFlags=0x%02x portable=%u "
+                        "spotTechnique=%u stateEntry=%u.\n",
+                        batch.materialName,
+                        static_cast<unsigned int>(batch.primaryLightIndex),
+                        batch.techniqueName,
+                        static_cast<unsigned int>(batch.techniqueType),
+                        batch.pixelShaderName,
+                        static_cast<unsigned int>(batch.customSamplerFlags),
+                        static_cast<unsigned int>(batch.technique),
+                        hasSpotTechnique ? 1u : 0u,
+                        static_cast<unsigned int>(spotStateEntry));
+                }
+            }
+            Web_Log(WebLogLevel::Info,
+                "[kisakcod-web] Canonical local-light technique coverage: "
+                "%u batches/%u surfaces; exact spot=%u/%u, exact omni=%u/%u, "
+                "fallback=%u/%u, unique materials=%zu.\n",
+                localLightBatchCount, localLightSurfaceCount,
+                techniqueBatchCounts[10u], techniqueSurfaceCounts[10u],
+                techniqueBatchCounts[12u], techniqueSurfaceCounts[12u],
+                localLightFallbackBatchCount, localLightFallbackSurfaceCount,
+                loggedLocalMaterials.size());
             std::array<std::uint32_t, WEB_RENDERER_MAX_PRIMARY_LIGHTS>
                 primaryLightSurfaceCounts{};
             for (const WebRendererWorldBatchDesc &batch : command.batches)
