@@ -75,11 +75,13 @@ struct WebRendererRetainedWorldBatch
     std::uint32_t lastInstanceIndex = UINT32_MAX;
     std::uint32_t baseImageIndex = INVALID_WORLD_IMAGE;
     std::uint32_t normalImageIndex = INVALID_WORLD_IMAGE;
+    std::uint32_t specularImageIndex = INVALID_WORLD_IMAGE;
     std::uint32_t lightmapImageIndex = INVALID_WORLD_IMAGE;
     std::uint32_t secondaryLightmapImageIndex = INVALID_WORLD_IMAGE;
     std::uint32_t stateBits[2]{};
     std::uint8_t samplerState = 0u;
     std::uint8_t normalSamplerState = 0u;
+    std::uint8_t specularSamplerState = 0u;
     std::uint8_t lightmapIndex = 31u;
     std::uint8_t primaryLightIndex = 0u;
     WebRendererSceneBatchKind sourceKind =
@@ -109,6 +111,7 @@ struct WebRendererRetainedWorldBatch
     kisak::iwi::Rgba8Cube reflectionCube;
     GLuint waterTexture = 0u;
     GLuint reflectionTexture = 0u;
+    bool ownsReflectionTexture = false;
     float waterTextureTime = std::numeric_limits<float>::quiet_NaN();
 };
 
@@ -180,6 +183,8 @@ struct WebRendererState
     GLint textureEnabledUniform = -1;
     GLint normalMapUniform = -1;
     GLint normalMapEnabledUniform = -1;
+    GLint specularMapUniform = -1;
+    GLint specularMapEnabledUniform = -1;
     GLint viewProjectionUniform = -1;
     GLint sceneFallbackUniform = -1;
     GLint lightmapEnabledUniform = -1;
@@ -629,6 +634,10 @@ const char *ComparisonPortableTechniqueName(
         return "base-texture-lightmap";
     case WebRendererWorldTechnique::BaseTextureLightmapNormal:
         return "base-texture-lightmap-normal";
+    case WebRendererWorldTechnique::BaseTextureLightmapSpecular:
+        return "base-texture-lightmap-specular";
+    case WebRendererWorldTechnique::BaseTextureLightmapNormalSpecular:
+        return "base-texture-lightmap-normal-specular";
     case WebRendererWorldTechnique::VertexColorMultiply:
         return "vertex-color-multiply";
     case WebRendererWorldTechnique::VertexColorAdditive:
@@ -667,6 +676,12 @@ const char *ComparisonCompositionName(
     case WebRendererWorldTechnique::BaseTextureLightmapNormal:
         return "base*vertex*(secondary0*rsqrt(normalSlopeDot+1)+"
             "secondary1*saturate(dot(lightSlope,normalSlope)+1))";
+    case WebRendererWorldTechnique::BaseTextureLightmapNormalSpecular:
+        return "base*vertex*directionalBaked+"
+            "probeRgbm*specular*envFresnel(normalMap)";
+    case WebRendererWorldTechnique::BaseTextureLightmapSpecular:
+        return "base*vertex*directionalBaked+"
+            "probeRgbm*specular*envFresnel(geometricNormal)";
     case WebRendererWorldTechnique::BaseTextureLightmap:
         return "base*vertex*(secondary0+secondary1*"
             "rsqrt(lightSlopeDot+1))";
@@ -1591,6 +1606,8 @@ void ResetGpuHandles()
     g_renderer.textureEnabledUniform = -1;
     g_renderer.normalMapUniform = -1;
     g_renderer.normalMapEnabledUniform = -1;
+    g_renderer.specularMapUniform = -1;
+    g_renderer.specularMapEnabledUniform = -1;
     g_renderer.viewProjectionUniform = -1;
     g_renderer.sceneFallbackUniform = -1;
     g_renderer.lightmapEnabledUniform = -1;
@@ -1665,6 +1682,7 @@ void ResetGpuHandles()
     {
         batch.waterTexture = 0u;
         batch.reflectionTexture = 0u;
+        batch.ownsReflectionTexture = false;
         batch.waterTextureTime = std::numeric_limits<float>::quiet_NaN();
     }
     g_renderer.retainedSky.texture = 0u;
@@ -1974,10 +1992,11 @@ void DeleteWaterTextureObjects(
     {
         if (batch.waterTexture != 0u)
             glDeleteTextures(1, &batch.waterTexture);
-        if (batch.reflectionTexture != 0u)
+        if (batch.ownsReflectionTexture && batch.reflectionTexture != 0u)
             glDeleteTextures(1, &batch.reflectionTexture);
         batch.waterTexture = 0u;
         batch.reflectionTexture = 0u;
+        batch.ownsReflectionTexture = false;
         batch.waterTextureTime = std::numeric_limits<float>::quiet_NaN();
     }
 }
@@ -2312,47 +2331,82 @@ bool CreateSkyTextureObject(WebRendererRetainedSkyImage &sky)
 bool CreateWaterTextureObjects(
     std::vector<WebRendererRetainedWorldBatch> &batches)
 {
-    for (WebRendererRetainedWorldBatch &batch : batches)
+    for (std::size_t batchIndex = 0u;
+         batchIndex < batches.size(); ++batchIndex)
     {
-        if (batch.technique != WebRendererWorldTechnique::WaterLitSun)
-            continue;
-        water_t water{};
-        water.H0 = batch.waterH0.data();
-        water.wTerm = batch.waterWTerm.data();
-        water.M = batch.waterM;
-        water.N = batch.waterN;
-        if (!R_GenerateWaterPixelsR8(&water, 0.0f,
-                batch.waterPixels.data(), batch.waterPixels.size()))
-            return false;
+        WebRendererRetainedWorldBatch &batch = batches[batchIndex];
+        if (batch.technique == WebRendererWorldTechnique::WaterLitSun)
+        {
+            water_t water{};
+            water.H0 = batch.waterH0.data();
+            water.wTerm = batch.waterWTerm.data();
+            water.M = batch.waterM;
+            water.N = batch.waterN;
+            if (!R_GenerateWaterPixelsR8(&water, 0.0f,
+                    batch.waterPixels.data(), batch.waterPixels.size()))
+                return false;
 
-        glGenTextures(1, &batch.waterTexture);
-        glActiveTexture(GL_TEXTURE7);
-        glBindTexture(GL_TEXTURE_2D, batch.waterTexture);
-        const std::uint8_t filter = batch.waterSamplerState & 0x07u;
-        const GLint glFilter = filter == 1u ? GL_NEAREST : GL_LINEAR;
-        const bool mipped =
-            (batch.waterSamplerState & 0x18u) != 0u;
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
-            mipped
-                ? (glFilter == GL_LINEAR
-                    ? GL_LINEAR_MIPMAP_LINEAR
-                    : GL_NEAREST_MIPMAP_NEAREST)
-                : glFilter);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, glFilter);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,
-            (batch.waterSamplerState & 0x20u) != 0u
-                ? GL_CLAMP_TO_EDGE : GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,
-            (batch.waterSamplerState & 0x40u) != 0u
-                ? GL_CLAMP_TO_EDGE : GL_REPEAT);
-        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, batch.waterM, batch.waterN,
-            0, GL_RED, GL_UNSIGNED_BYTE, batch.waterPixels.data());
-        glGenerateMipmap(GL_TEXTURE_2D);
-        batch.waterTextureTime = 0.0f;
-        if (!CreateCubeTextureObject(batch.reflectionCube, 2u, GL_TEXTURE8,
-                "reflection-probe", batch.reflectionTexture) ||
-            batch.waterTexture == 0u || glGetError() != GL_NO_ERROR)
+            glGenTextures(1, &batch.waterTexture);
+            glActiveTexture(GL_TEXTURE7);
+            glBindTexture(GL_TEXTURE_2D, batch.waterTexture);
+            const std::uint8_t filter = batch.waterSamplerState & 0x07u;
+            const GLint glFilter = filter == 1u ? GL_NEAREST : GL_LINEAR;
+            const bool mipped =
+                (batch.waterSamplerState & 0x18u) != 0u;
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                mipped
+                    ? (glFilter == GL_LINEAR
+                        ? GL_LINEAR_MIPMAP_LINEAR
+                        : GL_NEAREST_MIPMAP_NEAREST)
+                    : glFilter);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, glFilter);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,
+                (batch.waterSamplerState & 0x20u) != 0u
+                    ? GL_CLAMP_TO_EDGE : GL_REPEAT);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,
+                (batch.waterSamplerState & 0x40u) != 0u
+                    ? GL_CLAMP_TO_EDGE : GL_REPEAT);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, batch.waterM, batch.waterN,
+                0, GL_RED, GL_UNSIGNED_BYTE, batch.waterPixels.data());
+            glGenerateMipmap(GL_TEXTURE_2D);
+            batch.waterTextureTime = 0.0f;
+        }
+        if (batch.reflectionCube.edgeLength != 0u)
+        {
+            if (!CreateCubeTextureObject(batch.reflectionCube, 2u,
+                    GL_TEXTURE8, "reflection-probe",
+                    batch.reflectionTexture))
+            {
+                DeleteWaterTextureObjects(batches);
+                return false;
+            }
+            batch.ownsReflectionTexture = true;
+        }
+        else if (batch.technique == WebRendererWorldTechnique::WaterLitSun ||
+            WebRenderer_UsesWorldSpecularMap(batch.technique))
+        {
+            const auto shared = std::find_if(batches.begin(),
+                batches.begin() + static_cast<std::ptrdiff_t>(batchIndex),
+                [&batch](const WebRendererRetainedWorldBatch &candidate)
+                {
+                    return candidate.reflectionProbeIndex ==
+                            batch.reflectionProbeIndex &&
+                        candidate.reflectionTexture != 0u;
+                });
+            if (shared != batches.begin() +
+                    static_cast<std::ptrdiff_t>(batchIndex))
+            {
+                batch.reflectionTexture = shared->reflectionTexture;
+            }
+        }
+        const bool requiresReflection =
+            batch.technique == WebRendererWorldTechnique::WaterLitSun ||
+            WebRenderer_UsesWorldSpecularMap(batch.technique);
+        if ((batch.technique == WebRendererWorldTechnique::WaterLitSun &&
+                batch.waterTexture == 0u) ||
+            (requiresReflection && batch.reflectionTexture == 0u) ||
+            glGetError() != GL_NO_ERROR)
         {
             DeleteWaterTextureObjects(batches);
             return false;
@@ -2621,11 +2675,13 @@ bool CreateRendererResources()
         uniform sampler2D u_secondary_lightmap;
         uniform sampler3D u_model_lighting;
         uniform sampler2D u_normal_map;
+        uniform sampler2D u_specular_map;
         uniform float u_texture_enabled;
         uniform float u_lightmap_enabled;
         uniform float u_secondary_lightmap_enabled;
         uniform float u_model_lighting_enabled;
         uniform float u_normal_map_enabled;
+        uniform float u_specular_map_enabled;
         uniform vec3 u_model_lighting_lookup_scale;
         uniform float u_premultiply_alpha;
         uniform float u_color_intensity_alpha;
@@ -2900,6 +2956,52 @@ bool CreateRendererResources()
                     bootstrap_color.rgb *= lighting;
                 }
                 if (u_material_mode != 1 &&
+                    u_specular_map_enabled > 0.5)
+                {
+                    // Exact lm_r0c0n0s0_sm3 environment term recovered from
+                    // the retail D3D9 bytecode. Semantic-8 alpha selects the
+                    // reflection-probe mip, RGB tints the RGBM probe sample,
+                    // and envMapParms controls the authored Fresnel curve.
+                    vec3 world_normal = normalize(v_model_normal);
+                    if (u_normal_map_enabled > 0.5)
+                    {
+                        vec4 normal_texel = texture(
+                            u_normal_map, v_texcoord);
+                        vec2 normal_slope = vec2(
+                            normal_texel.a * 4.08 - 2.08,
+                            normal_texel.g * 4.06451607 - 2.06451607);
+                        float inverse_normal_length = inversesqrt(
+                            dot(normal_slope, normal_slope) + 1.0);
+                        vec3 tangent = normalize(v_model_tangent);
+                        vec3 binormal = normalize(cross(
+                            world_normal, tangent)) * v_binormal_sign;
+                        world_normal = normalize(
+                            tangent * normal_slope.x * inverse_normal_length +
+                            binormal * normal_slope.y * inverse_normal_length +
+                            world_normal * inverse_normal_length);
+                    }
+                    vec3 view_direction = normalize(
+                        v_world_position - u_view_origin);
+                    float view_normal = dot(view_direction, world_normal);
+                    vec3 reflection_direction = view_direction -
+                        world_normal * (2.0 * view_normal);
+                    vec4 specular_sample = texture(
+                        u_specular_map, v_texcoord);
+                    float reflection_lod =
+                        specular_sample.a * -8.0 + 6.0;
+                    vec4 reflection_sample = textureLod(
+                        u_reflection_probe, reflection_direction,
+                        reflection_lod);
+                    float fresnel_power = pow(
+                        1.0 - abs(view_normal), u_env_map_parms.z);
+                    float reflection_factor = mix(
+                        u_env_map_parms.x, u_env_map_parms.y,
+                        fresnel_power);
+                    bootstrap_color.rgb += reflection_sample.rgb *
+                        reflection_sample.a * specular_sample.rgb *
+                        reflection_factor;
+                }
+                if (u_material_mode != 1 &&
                     u_model_lighting_enabled > 0.5)
                 {
                     // Native lp_t0c0[_n0]_sm2 cube-projects the world normal
@@ -3146,6 +3248,10 @@ bool CreateRendererResources()
         glGetUniformLocation(program, "u_normal_map");
     const GLint normalMapEnabledUniform =
         glGetUniformLocation(program, "u_normal_map_enabled");
+    const GLint specularMapUniform =
+        glGetUniformLocation(program, "u_specular_map");
+    const GLint specularMapEnabledUniform =
+        glGetUniformLocation(program, "u_specular_map_enabled");
     const GLint viewProjectionUniform =
         glGetUniformLocation(program, "u_view_projection");
     const GLint sceneFallbackUniform =
@@ -3356,6 +3462,7 @@ bool CreateRendererResources()
             compatibilityTexture);
     if (aspectUniform < 0 || textureUniform < 0 || textureEnabledUniform < 0 ||
         normalMapUniform < 0 || normalMapEnabledUniform < 0 ||
+        specularMapUniform < 0 || specularMapEnabledUniform < 0 ||
         viewProjectionUniform < 0 || sceneFallbackUniform < 0 ||
         lightmapEnabledUniform < 0 ||
         secondaryLightmapUniform < 0 ||
@@ -3467,6 +3574,8 @@ bool CreateRendererResources()
     g_renderer.textureEnabledUniform = textureEnabledUniform;
     g_renderer.normalMapUniform = normalMapUniform;
     g_renderer.normalMapEnabledUniform = normalMapEnabledUniform;
+    g_renderer.specularMapUniform = specularMapUniform;
+    g_renderer.specularMapEnabledUniform = specularMapEnabledUniform;
     g_renderer.viewProjectionUniform = viewProjectionUniform;
     g_renderer.sceneFallbackUniform = sceneFallbackUniform;
     g_renderer.lightmapEnabledUniform = lightmapEnabledUniform;
@@ -4083,6 +4192,7 @@ WebRendererSurfaceResult CopyWorldCommand(
             batch.stateBits[1] = source.stateBits[1];
             batch.samplerState = source.samplerState;
             batch.normalSamplerState = source.normalSamplerState;
+            batch.specularSamplerState = source.specularSamplerState;
             batch.lightmapIndex = source.lightmapIndex;
             batch.primaryLightIndex = source.primaryLightIndex;
             batch.sourceKind = source.sourceKind;
@@ -4113,6 +4223,8 @@ WebRendererSurfaceResult CopyWorldCommand(
             for (const float component : batch.waterColor)
                 if (!std::isfinite(component))
                     return WebRendererSurfaceResult::NonFiniteVertex;
+            bool reflectionSupported =
+                !WebRenderer_UsesWorldSpecularMap(source.technique);
             bool waterSupported = false;
             if (source.technique == WebRendererWorldTechnique::WaterLitSun)
             {
@@ -4135,22 +4247,42 @@ WebRendererSurfaceResult CopyWorldCommand(
                 batch.waterWTerm.assign(
                     source.water->wTerm, source.water->wTerm + waterCount);
                 batch.waterPixels.resize(waterCount);
-                kisak::iwi::Error reflectionError =
-                    kisak::iwi::Error::None;
-                waterSupported = DecodeCanonicalCubeImage(
-                    source.reflectionProbeImage, batch.reflectionCube,
-                    reflectionError) &&
-                    reflectionError == kisak::iwi::Error::None;
-                if (!waterSupported)
+                waterSupported = true;
+            }
+            if ((source.technique == WebRendererWorldTechnique::WaterLitSun ||
+                    WebRenderer_UsesWorldSpecularMap(source.technique)) &&
+                source.reflectionProbeImage)
+            {
+                const auto retainedProbe = std::find_if(
+                    batches.begin(), batches.end(),
+                    [&source](const WebRendererRetainedWorldBatch &candidate)
+                    {
+                        return candidate.reflectionProbeIndex ==
+                                source.reflectionProbeIndex &&
+                            candidate.reflectionCube.edgeLength != 0u;
+                    });
+                reflectionSupported = retainedProbe != batches.end();
+                if (!reflectionSupported)
                 {
-                    Web_Log(WebLogLevel::Info,
-                        "[kisakcod-web] Canonical water reflection probe "
-                        "'%s' uses backend fallback: %s.\n",
-                        source.reflectionProbeImage->name
-                            ? source.reflectionProbeImage->name : "<unnamed>",
-                        kisak::iwi::ErrorString(reflectionError));
+                    kisak::iwi::Error reflectionError =
+                        kisak::iwi::Error::None;
+                    reflectionSupported = DecodeCanonicalCubeImage(
+                            source.reflectionProbeImage, batch.reflectionCube,
+                            reflectionError) &&
+                        reflectionError == kisak::iwi::Error::None;
+                    if (!reflectionSupported)
+                    {
+                        Web_Log(WebLogLevel::Info,
+                            "[kisakcod-web] Canonical material reflection "
+                            "probe '%s' uses backend fallback: %s.\n",
+                            source.reflectionProbeImage->name
+                                ? source.reflectionProbeImage->name
+                                : "<unnamed>",
+                            kisak::iwi::ErrorString(reflectionError));
+                    }
                 }
             }
+            waterSupported = waterSupported && reflectionSupported;
             batch.baseImageIndex = RetainCanonicalWorldImage(
                 source.baseImage, images, retainedPixelBytes);
             if (source.lightingMode ==
@@ -4159,6 +4291,11 @@ WebRendererSurfaceResult CopyWorldCommand(
             {
                 batch.normalImageIndex = RetainCanonicalWorldImage(
                     source.normalImage, images, retainedPixelBytes);
+            }
+            if (WebRenderer_UsesWorldSpecularMap(source.technique))
+            {
+                batch.specularImageIndex = RetainCanonicalWorldImage(
+                    source.specularImage, images, retainedPixelBytes);
             }
             batch.lightmapImageIndex = RetainCanonicalWorldImage(
                 source.lightmapImage, images, retainedPixelBytes);
@@ -4173,6 +4310,9 @@ WebRendererSurfaceResult CopyWorldCommand(
             const bool normalMapSupported =
                 batch.normalImageIndex != INVALID_WORLD_IMAGE &&
                 images[batch.normalImageIndex].supported;
+            const bool specularMapSupported =
+                batch.specularImageIndex != INVALID_WORLD_IMAGE &&
+                images[batch.specularImageIndex].supported;
             if (WebRenderer_SkipsNativeDraw(source.technique))
             {
                 // Keep native R_SetupMaterial failure as an intentional skip.
@@ -4196,8 +4336,17 @@ WebRendererSurfaceResult CopyWorldCommand(
                 batch.technique = WebRendererWorldTechnique::BaseTexture;
             else if (WebRenderer_UsesWorldNormalMap(batch.technique) &&
                 !normalMapSupported)
-                batch.technique =
-                    WebRendererWorldTechnique::BaseTextureLightmap;
+                batch.technique = WebRenderer_UsesWorldSpecularMap(
+                        batch.technique) && specularMapSupported &&
+                        reflectionSupported
+                    ? WebRendererWorldTechnique::BaseTextureLightmapSpecular
+                    : WebRendererWorldTechnique::BaseTextureLightmap;
+            else if (WebRenderer_UsesWorldSpecularMap(batch.technique) &&
+                (!specularMapSupported || !reflectionSupported))
+                batch.technique = WebRenderer_UsesWorldNormalMap(
+                        batch.technique)
+                    ? WebRendererWorldTechnique::BaseTextureLightmapNormal
+                    : WebRendererWorldTechnique::BaseTextureLightmap;
             batches.push_back(std::move(batch));
         }
         if (expectedFirstIndex != surface.indexCount)
@@ -4634,6 +4783,12 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
             return WebRenderer_UsesSecondaryDirectionalLightmap(
                 batch.technique);
         }));
+    const std::size_t specularBatches = static_cast<std::size_t>(std::count_if(
+        g_renderer.retainedWorldBatches.begin(),
+        g_renderer.retainedWorldBatches.end(),
+        [](const WebRendererRetainedWorldBatch &batch) {
+            return WebRenderer_UsesWorldSpecularMap(batch.technique);
+        }));
     const std::size_t baseTextureBatches = static_cast<std::size_t>(std::count_if(
         g_renderer.retainedWorldBatches.begin(),
         g_renderer.retainedWorldBatches.end(),
@@ -4649,10 +4804,11 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
     }
     Web_Log(WebLogLevel::Info,
         "[kisakcod-web] Renderer retained canonical material world command "
-        "(%u vertices, %u indices, %u batches: %zu lightmapped, %zu base-only; "
+        "(%u vertices, %u indices, %u batches: %zu lightmapped, "
+        "%zu SM3 specular, %zu base-only; "
         "%zu/%zu images, %zu geometry bytes).\n",
         surface.vertexCount, surface.indexCount, surface.batchCount,
-        lightmappedBatches, baseTextureBatches, supportedImages,
+        lightmappedBatches, specularBatches, baseTextureBatches, supportedImages,
         g_renderer.retainedWorldImages.size(), retainedBytes);
     const std::size_t retainedLocalLights = static_cast<std::size_t>(
         std::count_if(g_renderer.retainedPrimaryLights.begin(),
@@ -6339,6 +6495,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             sceneGeometryDraw ? 1.0f : 0.0f);
         glUniform1i(g_renderer.textureUniform, 0);
         glUniform1i(g_renderer.normalMapUniform, 1);
+        glUniform1i(g_renderer.specularMapUniform, 5);
         glUniform1i(g_renderer.secondaryLightmapUniform, 2);
         glUniform1i(g_renderer.modelLightingUniform, 3);
         glUniform1i(g_renderer.shadowMapUniform, 6);
@@ -6362,6 +6519,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.modelLightingEnabledUniform, 0.0f);
         glUniform1f(g_renderer.normalMapEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.specularMapEnabledUniform, 0.0f);
         glUniform3f(g_renderer.modelLightingBaseCoordinatesUniform,
             0.0f, 0.0f, 0.0f);
         glUniform3f(g_renderer.modelLightingLookupScaleUniform,
@@ -6412,6 +6570,8 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 WorldImage(batch.lightmapImageIndex);
             const WebRendererRetainedWorldImage *normal =
                 WorldImage(batch.normalImageIndex);
+            const WebRendererRetainedWorldImage *specular =
+                WorldImage(batch.specularImageIndex);
             const bool water = batch.technique ==
                 WebRendererWorldTechnique::WaterLitSun;
             const bool waterReady = water && BindWaterTextures(
@@ -6427,6 +6587,9 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                     WebRendererWorldLightingMode::SecondaryDirectional;
             const bool normalMapped = lightmapped && normal &&
                 WebRenderer_UsesWorldNormalMap(batch.technique);
+            const bool specularMapped = lightmapped && specular &&
+                batch.reflectionTexture != 0u &&
+                WebRenderer_UsesWorldSpecularMap(batch.technique);
             const WebRendererRetainedPrimaryLight *primaryLight =
                 batch.primaryLightIndex <
                         g_renderer.retainedPrimaryLights.size()
@@ -6454,6 +6617,20 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             {
                 glUniform1i(g_renderer.materialModeUniform, 0);
             }
+            else if (specularMapped)
+            {
+                glUniform4fv(g_renderer.envMapParmsUniform, 1,
+                    batch.envMapParms);
+                glActiveTexture(GL_TEXTURE8);
+                glBindTexture(GL_TEXTURE_CUBE_MAP,
+                    batch.reflectionTexture);
+                glActiveTexture(GL_TEXTURE0);
+            }
+            else
+            {
+                glUniform4f(g_renderer.envMapParmsUniform,
+                    0.0f, 0.0f, 0.0f, 0.0f);
+            }
             glUniform1f(g_renderer.lightmapEnabledUniform,
                 lightmapped ? 1.0f : 0.0f);
             glUniform1f(g_renderer.secondaryLightmapEnabledUniform,
@@ -6461,6 +6638,8 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             glUniform1f(g_renderer.modelLightingEnabledUniform, 0.0f);
             glUniform1f(g_renderer.normalMapEnabledUniform,
                 normalMapped ? 1.0f : 0.0f);
+            glUniform1f(g_renderer.specularMapEnabledUniform,
+                specularMapped ? 1.0f : 0.0f);
             glUniform1f(g_renderer.sunShadowEnabledUniform,
                 shadowMapDrawn && lightmapped &&
                         batch.techniqueType == 9u
@@ -6497,6 +6676,10 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 secondaryLightmap
                     ? secondaryLightmap->texture : g_renderer.texture,
                 0x62u);
+            BindWorldTexture(
+                GL_TEXTURE5,
+                specular ? specular->texture : g_renderer.texture,
+                batch.specularSamplerState);
             BindWorldTexture(
                 GL_TEXTURE9,
                 primaryLightmap
@@ -6535,6 +6718,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 g_renderer.secondaryLightmapEnabledUniform, 0.0f);
             glUniform1f(g_renderer.modelLightingEnabledUniform, 0.0f);
             glUniform1f(g_renderer.normalMapEnabledUniform, 0.0f);
+            glUniform1f(g_renderer.specularMapEnabledUniform, 0.0f);
             glUniform1i(g_renderer.alphaTestUniform, 0);
             glUniform1f(g_renderer.premultiplyAlphaUniform, 0.0f);
             glUniform1i(g_renderer.materialModeUniform, 0);
@@ -6562,6 +6746,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1f(g_renderer.instanceEnabledUniform, 1.0f);
         glUniform1f(g_renderer.lightmapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.specularMapEnabledUniform, 0.0f);
         BindModelLightingTexture(g_renderer.retainedStaticModelLighting);
         for (const WebRendererRetainedStaticModelBatch &batch :
              g_renderer.retainedStaticModelBatches)
@@ -6623,6 +6808,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1f(g_renderer.instanceEnabledUniform, 0.0f);
         glUniform1f(g_renderer.lightmapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.specularMapEnabledUniform, 0.0f);
         BindModelLightingTexture(g_renderer.retainedDynamicModelLighting);
         // The portable command combines ordinary DObjs, moving brush models,
         // DynEnts, and first-person DObjs in one buffer. Native draw-surf
@@ -6793,6 +6979,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.modelLightingEnabledUniform, 0.0f);
         glUniform1f(g_renderer.normalMapEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.specularMapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.sunShadowEnabledUniform, 0.0f);
         glUniform1f(g_renderer.instanceEnabledUniform, 0.0f);
         glBindVertexArray(g_renderer.uiVertexArray);

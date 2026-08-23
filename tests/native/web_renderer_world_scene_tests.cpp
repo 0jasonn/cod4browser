@@ -604,6 +604,81 @@ void TestSunShadowTechniqueAndCanonicalCasterBitsSplitBatches()
     }
 }
 
+void TestShaderModel3SpecularPassCarriesCanonicalInputs()
+{
+    Fixture fixture;
+    MaterialPixelShader pixelShader{};
+    pixelShader.name = "lm_r0c0n0s0_sm3.hlsl";
+    MaterialTechnique technique{};
+    technique.name = "lm_r0c0n0s0_sm3";
+    technique.passCount = 1u;
+    technique.passArray[0].customSamplerFlags = 5u;
+    technique.passArray[0].pixelShader = &pixelShader;
+    MaterialTechniqueSet techniqueSet{};
+    techniqueSet.techniques[TECHNIQUE_LIT_INDEX] = &technique;
+    GfxStateBits stateBits[1]{{{0x18008800u, 0x0000000du}}};
+    GfxImage baseImage{};
+    GfxImage normalImage{};
+    GfxImage specularImage{};
+    GfxImage secondaryLightmap{};
+    GfxImage reflectionImage{};
+    std::array<MaterialTextureDef, 3u> textures{};
+    textures[0].semantic = 2u;
+    textures[0].u.image = &baseImage;
+    textures[1].semantic = 5u;
+    textures[1].samplerState = 0x22u;
+    textures[1].u.image = &normalImage;
+    textures[2].semantic = 8u;
+    textures[2].samplerState = 0x32u;
+    textures[2].u.image = &specularImage;
+    MaterialConstantDef envMapParms{};
+    envMapParms.nameHash = 0x3d9994dcu;
+    const float expectedEnvMapParms[4]{0.0f, 4.0f, 1.0f, 0.625f};
+    std::copy_n(expectedEnvMapParms, 4u, envMapParms.literal);
+    Material material{};
+    material.info.name = "wc/com_plastic_wall";
+    material.textureCount = static_cast<std::uint8_t>(textures.size());
+    material.textureTable = textures.data();
+    material.constantCount = 1u;
+    material.constantTable = &envMapParms;
+    material.techniqueSet = &techniqueSet;
+    material.stateBitsEntry[TECHNIQUE_LIT_INDEX] = 0u;
+    material.stateBitsCount = 1u;
+    material.stateBitsTable = stateBits;
+    GfxLightmapArray lightmap{nullptr, &secondaryLightmap};
+    fixture.world.lightmapCount = 1u;
+    fixture.world.lightmaps = &lightmap;
+    GfxReflectionProbe reflectionProbe{};
+    reflectionProbe.reflectionImage = &reflectionImage;
+    fixture.world.reflectionProbeCount = 1u;
+    fixture.world.reflectionProbes = &reflectionProbe;
+    for (GfxSurface &surface : fixture.surfaces)
+    {
+        surface.material = &material;
+        surface.lightmapIndex = 0u;
+        surface.reflectionProbeIndex = 0u;
+    }
+
+    WebRendererWorldSceneCommand command;
+    assert(WebRenderer_BuildWorldSceneCommand(
+        fixture.world, MakeView(), command) ==
+        WebRendererWorldSceneResult::Success);
+    assert(command.batches.size() == 1u);
+    const WebRendererWorldBatchDesc &batch = command.batches[0];
+    assert(batch.technique ==
+        WebRendererWorldTechnique::BaseTextureLightmapNormalSpecular);
+    assert(batch.baseImage == &baseImage);
+    assert(batch.normalImage == &normalImage);
+    assert(batch.specularImage == &specularImage);
+    assert(batch.specularSamplerState == 0x32u);
+    assert(batch.secondaryLightmapImage == &secondaryLightmap);
+    assert(batch.reflectionProbeImage == &reflectionImage);
+    assert(batch.reflectionProbeIndex == 0u);
+    assert(std::memcmp(batch.envMapParms, expectedEnvMapParms,
+        sizeof(expectedEnvMapParms)) == 0);
+    assert(WebRenderer_UsesWorldSpecularMap(batch.technique));
+}
+
 void TestMalformedLocalIndexIsRejectedAtomically()
 {
     Fixture fixture;
@@ -857,6 +932,7 @@ int main()
     TestCanonicalWorldColorAliasUsesLitStateAndLightmaps();
     TestNativePixelShaderFamiliesSelectPortableMaterialTechniques();
     TestSunShadowTechniqueAndCanonicalCasterBitsSplitBatches();
+    TestShaderModel3SpecularPassCarriesCanonicalInputs();
     TestMalformedLocalIndexIsRejectedAtomically();
     TestSkyPassIsNotFoldedIntoOpaqueWorldBatch();
     TestSpecialSurfaceInventoryUsesCanonicalMaterialData();

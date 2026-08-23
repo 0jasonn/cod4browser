@@ -274,30 +274,15 @@ std::uint32_t ResolveTechniqueSetRemaps()
     DB_EnumXAssets(ASSET_TYPE_TECHNIQUE_SET,
         CollectTechniqueSet, &techniqueSets, true);
 
-    std::uint32_t remappedCount = 0u;
+    std::uint32_t shaderModel3Count = 0u;
     for (MaterialTechniqueSet *source : techniqueSets)
     {
-        if (!source || !source->name ||
-            std::strncmp(source->name, "sm2/", 4u) == 0)
-        {
-            if (source) source->remappedTechniqueSet = source;
-            continue;
-        }
-        const std::string targetName = std::string("sm2/") + source->name;
-        const auto target = std::find_if(techniqueSets.begin(),
-            techniqueSets.end(), [&targetName](const MaterialTechniqueSet *set)
-            {
-                return set && set->name && targetName == set->name;
-            });
-        if (target == techniqueSets.end())
-        {
-            source->remappedTechniqueSet = source;
-            continue;
-        }
-        source->remappedTechniqueSet = *target;
-        ++remappedCount;
+        if (!source) continue;
+        source->remappedTechniqueSet = source;
+        if (source->name && std::strncmp(source->name, "sm2/", 4u) != 0)
+            ++shaderModel3Count;
     }
-    return remappedCount;
+    return shaderModel3Count;
 }
 }
 
@@ -791,6 +776,10 @@ void __cdecl R_BeginRegistration(vidConfig_t *configuration)
 {
     iassert(configuration);
     R_RegisterDvars();
+    // WebGL2 exceeds IW3's shader-model-3 feature floor. Select the same
+    // canonical best path as a max-graphics D3D9 client before zone assets
+    // are loaded, so shader programs and technique sets remain coherent.
+    Dvar_SetInt(r_rendererInUse, 1);
     std::memset(configuration, 0, sizeof(*configuration));
     Web_GetCanvasSize(&configuration->displayWidth,
         &configuration->displayHeight);
@@ -866,12 +855,12 @@ void __cdecl R_LoadWorld(char *name, int *checksum, int)
         Com_Error(ERR_DROP,
             "R_LoadWorld: canonical GfxWorld '%s' is not published", name);
     if (checksum) *checksum = static_cast<int>(s_world.checksum);
-    const std::uint32_t remappedTechniqueSets =
+    const std::uint32_t shaderModel3TechniqueSets =
         ResolveTechniqueSetRemaps();
     Web_Log(WebLogLevel::Info,
-        "[kisakcod-web] Resolved %u canonical technique-set SM2 aliases "
-        "after zone publication.\n",
-        remappedTechniqueSets);
+        "[kisakcod-web] Selected %u canonical shader-model-3 technique sets "
+        "for the WebGL2 renderer after zone publication.\n",
+        shaderModel3TechniqueSets);
     g_rendererWorldReady = true;
     g_gameDrivenFrameReported = false;
     g_visionLightingReported = false;

@@ -178,6 +178,11 @@ enum class WebRendererWorldTechnique : std::uint8_t
     BaseTexture,
     BaseTextureLightmap,
     BaseTextureLightmapNormal,
+    // Canonical shader-model-3 lightmapped material families. These retain
+    // the authored semantic-8 specular map and per-surface reflection probe
+    // instead of collapsing the pass to its shader-model-2 diffuse subset.
+    BaseTextureLightmapSpecular,
+    BaseTextureLightmapNormalSpecular,
     VertexColorMultiply,
     VertexColorAdditive,
     // Canonical water_l_sun pass: animated FFT height field, reflection
@@ -203,13 +208,26 @@ constexpr bool WebRenderer_UsesSecondaryDirectionalLightmap(
     WebRendererWorldTechnique technique) noexcept
 {
     return technique == WebRendererWorldTechnique::BaseTextureLightmap ||
-        technique == WebRendererWorldTechnique::BaseTextureLightmapNormal;
+        technique == WebRendererWorldTechnique::BaseTextureLightmapNormal ||
+        technique == WebRendererWorldTechnique::BaseTextureLightmapSpecular ||
+        technique ==
+            WebRendererWorldTechnique::BaseTextureLightmapNormalSpecular;
 }
 
 constexpr bool WebRenderer_UsesWorldNormalMap(
     WebRendererWorldTechnique technique) noexcept
 {
-    return technique == WebRendererWorldTechnique::BaseTextureLightmapNormal;
+    return technique == WebRendererWorldTechnique::BaseTextureLightmapNormal ||
+        technique ==
+            WebRendererWorldTechnique::BaseTextureLightmapNormalSpecular;
+}
+
+constexpr bool WebRenderer_UsesWorldSpecularMap(
+    WebRendererWorldTechnique technique) noexcept
+{
+    return technique == WebRendererWorldTechnique::BaseTextureLightmapSpecular ||
+        technique ==
+            WebRendererWorldTechnique::BaseTextureLightmapNormalSpecular;
 }
 
 constexpr bool WebRenderer_UsesColorIntensityOpacity(
@@ -280,6 +298,7 @@ struct WebRendererWorldBatchDesc
     std::uint32_t lastInstanceIndex;
     const GfxImage *baseImage;
     const GfxImage *normalImage;
+    const GfxImage *specularImage;
     const GfxImage *lightmapImage;
     const GfxImage *secondaryLightmapImage;
     const water_t *water;
@@ -287,6 +306,7 @@ struct WebRendererWorldBatchDesc
     std::uint32_t stateBits[2];
     std::uint8_t samplerState;
     std::uint8_t normalSamplerState;
+    std::uint8_t specularSamplerState;
     std::uint8_t waterSamplerState;
     std::uint8_t reflectionProbeIndex;
     std::uint8_t lightmapIndex;

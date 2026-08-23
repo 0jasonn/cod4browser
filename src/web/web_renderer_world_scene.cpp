@@ -175,6 +175,22 @@ const GfxImage *FindNormalImage(
     return nullptr;
 }
 
+const GfxImage *FindSpecularImage(
+    const Material *material, std::uint8_t &sampler) noexcept
+{
+    if (!material || !material->textureTable) return nullptr;
+    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
+    {
+        const MaterialTextureDef &texture = material->textureTable[index];
+        if (texture.semantic == 8u && texture.u.image)
+        {
+            sampler = texture.samplerState;
+            return texture.u.image;
+        }
+    }
+    return nullptr;
+}
+
 std::uint32_t HashPixelShaderProgram(
     const MaterialPixelShader *shader) noexcept
 {
@@ -230,6 +246,10 @@ bool UsesDirectionalNormalMap(
     if (ShaderNameIs(technique, "lm_r0c0n0_sm2.hlsl") ||
         ShaderNameIs(technique, "lm_t0c0n0_sm2.hlsl") ||
         (technique.pixelShaderName &&
+            std::strncmp(technique.pixelShaderName, "lm_", 3u) == 0 &&
+            std::strstr(technique.pixelShaderName, "n0") != nullptr &&
+            std::strstr(technique.pixelShaderName, "_sm3.hlsl") != nullptr) ||
+        (technique.pixelShaderName &&
             std::strncmp(technique.pixelShaderName,
                 "lm_spot_", 8u) == 0 &&
             std::strstr(technique.pixelShaderName, "n0") != nullptr) ||
@@ -242,6 +262,15 @@ bool UsesDirectionalNormalMap(
     return technique.identityName &&
         std::strncmp(technique.identityName, ",wc_l_", 6u) == 0 &&
         std::strstr(technique.identityName, "n0") != nullptr;
+}
+
+bool UsesSm3EnvironmentSpecular(
+    const TechniqueSelection &technique,
+    const GfxImage *specularImage) noexcept
+{
+    return specularImage && technique.pixelShaderName &&
+        std::strncmp(technique.pixelShaderName, "lm_", 3u) == 0 &&
+        std::strstr(technique.pixelShaderName, "s0_sm3.hlsl") != nullptr;
 }
 
 std::uint32_t SelectLitTechniqueType(
@@ -370,9 +399,10 @@ WebRendererWorldBatchDesc MakeBatch(
     batch.baseImage = FindBaseImage(surface.material, batch.samplerState);
     batch.normalImage = FindNormalImage(
         surface.material, batch.normalSamplerState);
+    batch.specularImage = FindSpecularImage(
+        surface.material, batch.specularSamplerState);
     batch.water = FindWater(surface.material, batch.waterSamplerState);
-    if (batch.water &&
-        surface.reflectionProbeIndex < world.reflectionProbeCount &&
+    if (surface.reflectionProbeIndex < world.reflectionProbeCount &&
         world.reflectionProbes)
     {
         batch.reflectionProbeIndex = surface.reflectionProbeIndex;
@@ -412,6 +442,11 @@ WebRendererWorldBatchDesc MakeBatch(
     }
     constexpr std::uint32_t ENV_MAP_PARMS_HASH = 0x3d9994dcu;
     constexpr std::uint32_t WATER_COLOR_HASH = 0xb82a51e8u;
+    const bool canonicalSm3Specular = UsesSm3EnvironmentSpecular(
+            technique, batch.specularImage) &&
+        batch.reflectionProbeImage &&
+        CopyMaterialConstant(surface.material, ENV_MAP_PARMS_HASH,
+            batch.envMapParms);
     const bool canonicalWater = ShaderNameIs(technique, "water_l_sun.hlsl") &&
         batch.water && batch.reflectionProbeImage &&
         CopyMaterialConstant(surface.material, ENV_MAP_PARMS_HASH,
@@ -436,10 +471,17 @@ WebRendererWorldBatchDesc MakeBatch(
         batch.technique = WebRendererWorldTechnique::VertexColorAdditive;
     else if (batch.lightingMode ==
             WebRendererWorldLightingMode::SecondaryDirectional)
-        batch.technique = UsesDirectionalNormalMap(
-                technique, batch.normalImage)
-            ? WebRendererWorldTechnique::BaseTextureLightmapNormal
-            : WebRendererWorldTechnique::BaseTextureLightmap;
+    {
+        const bool normalMapped = UsesDirectionalNormalMap(
+            technique, batch.normalImage);
+        batch.technique = canonicalSm3Specular
+            ? (normalMapped
+                ? WebRendererWorldTechnique::BaseTextureLightmapNormalSpecular
+                : WebRendererWorldTechnique::BaseTextureLightmapSpecular)
+            : (normalMapped
+                ? WebRendererWorldTechnique::BaseTextureLightmapNormal
+                : WebRendererWorldTechnique::BaseTextureLightmap);
+    }
     else
         batch.technique = WebRendererWorldTechnique::BaseTexture;
     batch.castsSunShadow = world.dpvs.surfaceCastsSunShadow &&
@@ -457,6 +499,7 @@ bool BatchMatches(
         batch.sourceKind == candidate.sourceKind &&
         batch.baseImage == candidate.baseImage &&
         batch.normalImage == candidate.normalImage &&
+        batch.specularImage == candidate.specularImage &&
         batch.lightmapImage == candidate.lightmapImage &&
         batch.secondaryLightmapImage == candidate.secondaryLightmapImage &&
         batch.water == candidate.water &&
@@ -469,6 +512,7 @@ bool BatchMatches(
         batch.stateBits[1] == candidate.stateBits[1] &&
         batch.samplerState == candidate.samplerState &&
         batch.normalSamplerState == candidate.normalSamplerState &&
+        batch.specularSamplerState == candidate.specularSamplerState &&
         batch.waterSamplerState == candidate.waterSamplerState &&
         batch.reflectionProbeIndex == candidate.reflectionProbeIndex &&
         batch.lightmapIndex == candidate.lightmapIndex &&
