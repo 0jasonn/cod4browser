@@ -675,8 +675,8 @@ bool AppendSunSprite(WebRendererDObjSceneCommand &command,
     Vec3Sub(sun, rightDown, directions[3]);
 
     constexpr float uvs[4][2] = {
-        {1.0f, 0.0f}, {1.0f, 1.0f},
-        {0.0f, 1.0f}, {0.0f, 0.0f},
+        {0.0f, 0.0f}, {1.0f, 0.0f},
+        {1.0f, 1.0f}, {0.0f, 1.0f},
     };
     try
     {
@@ -753,6 +753,8 @@ bool AppendSunSprite(WebRendererDObjSceneCommand &command,
         if (!reported)
         {
             reported = true;
+            Material *flareMaterial = s_world.sun.flareMaterial
+                ? ResolveRendererMaterial(s_world.sun.flareMaterial) : nullptr;
             Web_Log(WebLogLevel::Info,
                 "[kisakcod-web] Canonical sun sprite: material='%s' "
                 "image='%s' size=%.3f direction=(%.5f %.5f %.5f) "
@@ -762,7 +764,168 @@ bool AppendSunSprite(WebRendererDObjSceneCommand &command,
                 s_world.sun.spriteSize,
                 sun[0], sun[1], sun[2], samplerState,
                 batch.stateBits[0], batch.stateBits[1]);
+            Web_Log(WebLogLevel::Info,
+                "[kisakcod-web] Canonical sun post-effects: flare='%s' "
+                "size=(%.3f %.3f) dot=(%.5f %.5f) alpha=%.5f "
+                "fade=(%d %d); blind=(%.5f %.5f %.5f %d %d) "
+                "glare=(%.5f %.5f %.5f %d %d).\n",
+                flareMaterial && flareMaterial->info.name
+                    ? flareMaterial->info.name : "<none>",
+                s_world.sun.flareMinSize, s_world.sun.flareMaxSize,
+                s_world.sun.flareMinDot, s_world.sun.flareMaxDot,
+                s_world.sun.flareMaxAlpha,
+                s_world.sun.flareFadeInTime,
+                s_world.sun.flareFadeOutTime,
+                s_world.sun.blindMinDot, s_world.sun.blindMaxDot,
+                s_world.sun.blindMaxDarken,
+                s_world.sun.blindFadeInTime,
+                s_world.sun.blindFadeOutTime,
+                s_world.sun.glareMinDot, s_world.sun.glareMaxDot,
+                s_world.sun.glareMaxLighten,
+                s_world.sun.glareFadeInTime,
+                s_world.sun.glareFadeOutTime);
         }
+        return true;
+    }
+    catch (const std::bad_alloc &)
+    {
+        return false;
+    }
+}
+
+bool AppendSunFlare(WebRendererDObjSceneCommand &command,
+    const WebRendererSceneViewDesc &view) noexcept
+{
+    if (!s_world.sun.hasValidData || !s_world.sun.flareMaterial ||
+        s_world.sun.flareMaxAlpha <= 0.0f)
+        return false;
+    const float sunDot = Vec3Dot(s_world.sun.sunFxPosition, view.viewAxis[0]);
+    if (sunDot <= s_world.sun.flareMinDot)
+        return false;
+    float lerp = 1.0f;
+    if (sunDot < s_world.sun.flareMaxDot &&
+        s_world.sun.flareMaxDot > s_world.sun.flareMinDot)
+    {
+        lerp = (sunDot - s_world.sun.flareMinDot) /
+            (s_world.sun.flareMaxDot - s_world.sun.flareMinDot);
+    }
+    lerp = std::clamp(lerp, 0.0f, 1.0f);
+    const float alpha = lerp * s_world.sun.flareMaxAlpha;
+    const float size = s_world.sun.flareMinSize +
+        lerp * s_world.sun.flareMaxSize;
+    if (alpha <= 0.0f || size <= 0.0f)
+        return false;
+
+    Material *material = ResolveRendererMaterial(s_world.sun.flareMaterial);
+    if (!material) return false;
+    std::uint8_t samplerState = 0u;
+    const GfxImage *image = FindFxImage(material, samplerState);
+    if (!image) return false;
+
+    float clip[4]{};
+    for (std::size_t column = 0u; column < 4u; ++column)
+    {
+        clip[column] =
+            s_world.sun.sunFxPosition[0] *
+                view.viewProjectionMatrix[0][column] +
+            s_world.sun.sunFxPosition[1] *
+                view.viewProjectionMatrix[1][column] +
+            s_world.sun.sunFxPosition[2] *
+                view.viewProjectionMatrix[2][column];
+    }
+    if (!std::isfinite(clip[3]) || clip[3] <= 0.0f)
+        return false;
+    const float centerX = clip[0] / clip[3];
+    const float centerY = clip[1] / clip[3];
+    const float centerZ = clip[2] / clip[3];
+    const float centerU = centerX * 0.5f + 0.5f;
+    const float centerV = centerY * 0.5f + 0.5f;
+    if (centerU < 0.0f || centerU > 1.0f ||
+        centerV < 0.0f || centerV > 1.0f)
+        return false;
+
+    try
+    {
+        if (command.vertices.size() + 4u >
+                WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES ||
+            command.indices.size() + 6u >
+                WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES)
+            return false;
+        const std::uint32_t vertexBase = static_cast<std::uint32_t>(
+            command.vertices.size());
+        const std::uint32_t firstIndex = static_cast<std::uint32_t>(
+            command.indices.size());
+        const float halfWidth = size / 640.0f;
+        const float halfHeight = size / 480.0f;
+        constexpr float offsets[4][2] = {
+            {1.0f, 1.0f}, {1.0f, -1.0f},
+            {-1.0f, -1.0f}, {-1.0f, 1.0f},
+        };
+        constexpr float uvs[4][2] = {
+            {0.0f, 0.0f}, {1.0f, 0.0f},
+            {1.0f, 1.0f}, {0.0f, 1.0f},
+        };
+        for (std::size_t vertexIndex = 0u; vertexIndex < 4u; ++vertexIndex)
+        {
+            WebRendererSurfaceVertex vertex{};
+            vertex.position[0] = centerX + offsets[vertexIndex][0] * halfWidth;
+            vertex.position[1] = centerY + offsets[vertexIndex][1] * halfHeight;
+            // RB_TessSunBillboard offsets D3D depth by -0.0005. The view
+            // matrix supplied here has already converted D3D [0,1] NDC to
+            // WebGL [-1,1], so preserve the authored offset at double scale.
+            vertex.position[2] = centerZ - 0.0010000000474974513f;
+            vertex.textureCoordinate[0] = uvs[vertexIndex][0];
+            vertex.textureCoordinate[1] = uvs[vertexIndex][1];
+            vertex.color[0] = alpha;
+            vertex.color[1] = alpha;
+            vertex.color[2] = alpha;
+            vertex.color[3] = 1.0f;
+            command.vertices.push_back(vertex);
+        }
+        constexpr std::uint32_t localIndices[6] = {
+            3u, 0u, 2u, 2u, 0u, 1u,
+        };
+        for (const std::uint32_t index : localIndices)
+            command.indices.push_back(vertexBase + index);
+
+        WebRendererWorldBatchDesc batch{};
+        batch.firstIndex = firstIndex;
+        batch.indexCount = 6u;
+        batch.surfaceCount = 1u;
+        batch.materialIdentity = material;
+        batch.materialName = material->info.name
+            ? material->info.name : "<sun-flare>";
+        batch.modelName = "<sun-flare>";
+        batch.firstInstanceIndex = UINT32_MAX;
+        batch.lastInstanceIndex = UINT32_MAX;
+        batch.baseImage = image;
+        batch.samplerState = samplerState;
+        batch.sourceKind = WebRendererSceneBatchKind::SunFlare;
+        batch.technique = WebRendererWorldTechnique::BaseTexture;
+        batch.techniqueType = 4u;
+        const MaterialTechnique *technique = material->techniqueSet
+            ? material->techniqueSet->techniques[4u] : nullptr;
+        batch.techniqueName = technique && technique->name
+            ? technique->name : "<sun-flare-unlit>";
+        if (material->stateBitsTable)
+        {
+            const std::uint8_t entry = material->stateBitsEntry[4u];
+            if (entry != 0xffu && entry < material->stateBitsCount)
+            {
+                batch.stateBits[0] = material->stateBitsTable[entry].loadBits[0];
+                batch.stateBits[1] = material->stateBitsTable[entry].loadBits[1];
+            }
+        }
+        // The post-effect pass samples the resolved scene depth at the native
+        // 16-pixel query center.  Keep that platform-owned visibility input in
+        // an existing portable constant payload rather than exposing a GL
+        // query handle through the frontend seam.
+        batch.falloffParms[0] = centerU;
+        batch.falloffParms[1] = centerV;
+        batch.falloffParms[2] =
+            (centerZ - 0.0010000000474974513f) * 0.5f + 0.5f;
+        command.batches.push_back(batch);
+        ++command.surfaceCount;
         return true;
     }
     catch (const std::bad_alloc &)
@@ -2944,12 +3107,13 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         R_WarnOncePerFrame(R_WARN_MAX_CLOUDS);
 
     const bool hasSunSprite = AppendSunSprite(dynamicCommand, view);
+    const bool hasSunFlare = AppendSunFlare(dynamicCommand, view);
 
     if (dynamicBuild == WebRendererDObjSceneResult::Success ||
         hasBrushModels ||
         hasDynamicEntityModels ||
         hasFxModel || hasMarkMesh || hasCodeMesh || hasParticleCloud ||
-        hasSunSprite)
+        hasSunSprite || hasSunFlare)
     {
         for (WebRendererWorldBatchDesc &batch : dynamicCommand.batches)
             ResolveRendererBatchImages(batch);

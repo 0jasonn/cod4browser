@@ -438,6 +438,16 @@ int main()
         WebRendererSceneBatchKind::FxXModel));
     assert(WebRenderer_IsFxVertexColorBatch(
         WebRendererSceneBatchKind::FxParticleCloud));
+    assert(WebRenderer_IsFxVertexColorBatch(
+        WebRendererSceneBatchKind::SunSprite));
+    assert(WebRenderer_IsFxVertexColorBatch(
+        WebRendererSceneBatchKind::SunFlare));
+    assert(WebRenderer_IsSunBillboardBatch(
+        WebRendererSceneBatchKind::SunSprite));
+    assert(WebRenderer_IsSunBillboardBatch(
+        WebRendererSceneBatchKind::SunFlare));
+    assert(!WebRenderer_IsSunBillboardBatch(
+        WebRendererSceneBatchKind::FxParticleCloud));
     assert(!WebRenderer_IsFxVertexColorBatch(
         WebRendererSceneBatchKind::DynamicDObj));
     assert(!WebRenderer_IsFxVertexColorBatch(

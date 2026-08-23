@@ -175,7 +175,7 @@ struct WebRendererState
     GLuint compatibilityProgram = 0;
     GLuint sceneFramebuffer = 0;
     GLuint sceneColorTexture = 0;
-    GLuint sceneDepthRenderbuffer = 0;
+    GLuint sceneDepthTexture = 0;
     GLuint compositeFramebuffer = 0;
     GLuint compositeColorTexture = 0;
     GLuint shadowFramebuffer = 0;
@@ -205,6 +205,7 @@ struct WebRendererState
     GLint premultiplyAlphaUniform = -1;
     GLint colorIntensityAlphaUniform = -1;
     GLint materialModeUniform = -1;
+    GLint sceneDepthUniform = -1;
     GLint falloffParmsUniform = -1;
     GLint falloffBeginColorUniform = -1;
     GLint falloffEndColorUniform = -1;
@@ -549,6 +550,7 @@ const char *FxSourceKindName(WebRendererSceneBatchKind kind) noexcept
     case WebRendererSceneBatchKind::FxParticleCloud: return "FxParticleCloud";
     case WebRendererSceneBatchKind::FxMarkMesh: return "FxMarkMesh";
     case WebRendererSceneBatchKind::SunSprite: return "SunSprite";
+    case WebRendererSceneBatchKind::SunFlare: return "SunFlare";
     default: return "";
     }
 }
@@ -649,6 +651,7 @@ const char *ComparisonSourceKindName(WebRendererSceneBatchKind kind) noexcept
     case WebRendererSceneBatchKind::FxParticleCloud: return "FxParticleCloud";
     case WebRendererSceneBatchKind::FxMarkMesh: return "FxMarkMesh";
     case WebRendererSceneBatchKind::SunSprite: return "SunSprite";
+    case WebRendererSceneBatchKind::SunFlare: return "SunFlare";
     }
     return "Unknown";
 }
@@ -1709,7 +1712,7 @@ void ResetGpuHandles()
     g_renderer.compatibilityProgram = 0;
     g_renderer.sceneFramebuffer = 0;
     g_renderer.sceneColorTexture = 0;
-    g_renderer.sceneDepthRenderbuffer = 0;
+    g_renderer.sceneDepthTexture = 0;
     g_renderer.compositeFramebuffer = 0;
     g_renderer.compositeColorTexture = 0;
     g_renderer.shadowFramebuffer = 0;
@@ -1749,6 +1752,7 @@ void ResetGpuHandles()
     g_renderer.premultiplyAlphaUniform = -1;
     g_renderer.colorIntensityAlphaUniform = -1;
     g_renderer.materialModeUniform = -1;
+    g_renderer.sceneDepthUniform = -1;
     g_renderer.falloffParmsUniform = -1;
     g_renderer.falloffBeginColorUniform = -1;
     g_renderer.falloffEndColorUniform = -1;
@@ -1987,7 +1991,7 @@ void DeletePipelineObjects(
 void DeletePostProcessTargetObjects(
     GLuint sceneFramebuffer,
     GLuint sceneColorTexture,
-    GLuint sceneDepthRenderbuffer,
+    GLuint sceneDepthTexture,
     GLuint compositeFramebuffer,
     GLuint compositeColorTexture)
 {
@@ -1995,8 +1999,8 @@ void DeletePostProcessTargetObjects(
         glDeleteFramebuffers(1, &sceneFramebuffer);
     if (compositeFramebuffer != 0u)
         glDeleteFramebuffers(1, &compositeFramebuffer);
-    if (sceneDepthRenderbuffer != 0u)
-        glDeleteRenderbuffers(1, &sceneDepthRenderbuffer);
+    if (sceneDepthTexture != 0u)
+        glDeleteTextures(1, &sceneDepthTexture);
     if (sceneColorTexture != 0u)
         glDeleteTextures(1, &sceneColorTexture);
     if (compositeColorTexture != 0u)
@@ -2063,7 +2067,7 @@ void DestroyWebGLContext()
         DeletePostProcessTargetObjects(
             g_renderer.sceneFramebuffer,
             g_renderer.sceneColorTexture,
-            g_renderer.sceneDepthRenderbuffer,
+            g_renderer.sceneDepthTexture,
             g_renderer.compositeFramebuffer,
             g_renderer.compositeColorTexture);
         DeleteShadowObjects(
@@ -2598,12 +2602,12 @@ bool CreatePostProcessTargets(int width, int height)
     DeletePostProcessTargetObjects(
         g_renderer.sceneFramebuffer,
         g_renderer.sceneColorTexture,
-        g_renderer.sceneDepthRenderbuffer,
+        g_renderer.sceneDepthTexture,
         g_renderer.compositeFramebuffer,
         g_renderer.compositeColorTexture);
     g_renderer.sceneFramebuffer = 0u;
     g_renderer.sceneColorTexture = 0u;
-    g_renderer.sceneDepthRenderbuffer = 0u;
+    g_renderer.sceneDepthTexture = 0u;
     g_renderer.compositeFramebuffer = 0u;
     g_renderer.compositeColorTexture = 0u;
     g_renderer.postProcessWidth = 0;
@@ -2611,7 +2615,7 @@ bool CreatePostProcessTargets(int width, int height)
 
     GLuint sceneFramebuffer = 0u;
     GLuint sceneColorTexture = 0u;
-    GLuint sceneDepthRenderbuffer = 0u;
+    GLuint sceneDepthTexture = 0u;
     GLuint compositeFramebuffer = 0u;
     GLuint compositeColorTexture = 0u;
     while (glGetError() != GL_NO_ERROR)
@@ -2626,16 +2630,20 @@ bool CreatePostProcessTargets(int width, int height)
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0,
         GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
 
-    glGenRenderbuffers(1, &sceneDepthRenderbuffer);
-    glBindRenderbuffer(GL_RENDERBUFFER, sceneDepthRenderbuffer);
-    glRenderbufferStorage(
-        GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, width, height);
+    glGenTextures(1, &sceneDepthTexture);
+    glBindTexture(GL_TEXTURE_2D, sceneDepthTexture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, width, height, 0,
+        GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, nullptr);
     glGenFramebuffers(1, &sceneFramebuffer);
     glBindFramebuffer(GL_FRAMEBUFFER, sceneFramebuffer);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
         GL_TEXTURE_2D, sceneColorTexture, 0);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-        GL_RENDERBUFFER, sceneDepthRenderbuffer);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+        GL_TEXTURE_2D, sceneDepthTexture, 0);
     const GLenum sceneStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
 
     glGenTextures(1, &compositeColorTexture);
@@ -2653,18 +2661,17 @@ bool CreatePostProcessTargets(int width, int height)
     const GLenum compositeStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
     const GLenum error = glGetError();
     glBindFramebuffer(GL_FRAMEBUFFER, 0u);
-    glBindRenderbuffer(GL_RENDERBUFFER, 0u);
     glBindTexture(GL_TEXTURE_2D, 0u);
 
     if (sceneFramebuffer == 0u || sceneColorTexture == 0u ||
-        sceneDepthRenderbuffer == 0u || compositeFramebuffer == 0u ||
+        sceneDepthTexture == 0u || compositeFramebuffer == 0u ||
         compositeColorTexture == 0u ||
         sceneStatus != GL_FRAMEBUFFER_COMPLETE ||
         compositeStatus != GL_FRAMEBUFFER_COMPLETE ||
         error != GL_NO_ERROR)
     {
         DeletePostProcessTargetObjects(sceneFramebuffer, sceneColorTexture,
-            sceneDepthRenderbuffer, compositeFramebuffer,
+            sceneDepthTexture, compositeFramebuffer,
             compositeColorTexture);
         Web_Log(WebLogLevel::Error,
             "[kisakcod-web] WebGL2 post-effect target creation failed "
@@ -2677,7 +2684,7 @@ bool CreatePostProcessTargets(int width, int height)
 
     g_renderer.sceneFramebuffer = sceneFramebuffer;
     g_renderer.sceneColorTexture = sceneColorTexture;
-    g_renderer.sceneDepthRenderbuffer = sceneDepthRenderbuffer;
+    g_renderer.sceneDepthTexture = sceneDepthTexture;
     g_renderer.compositeFramebuffer = compositeFramebuffer;
     g_renderer.compositeColorTexture = compositeColorTexture;
     g_renderer.postProcessWidth = width;
@@ -2849,6 +2856,8 @@ bool CreateRendererResources()
         uniform float u_premultiply_alpha;
         uniform float u_color_intensity_alpha;
         uniform int u_material_mode;
+        uniform sampler2D u_scene_depth;
+        uniform vec4 u_falloff_parms;
         uniform float u_scene_fallback;
         uniform int u_alpha_test;
         uniform vec4 u_ui_color;
@@ -3273,6 +3282,16 @@ bool CreateRendererResources()
                 final_color.rgb = mix(
                     u_fog_color, final_color.rgb, visibility);
             }
+            if (u_material_mode == 5)
+            {
+                // RB_DrawSunFlare consumes the previous sun-query result.
+                // At the WebGL boundary the scene depth texture supplies the
+                // same visibility decision after the 3D scene is resolved.
+                float receiver_depth = texture(
+                    u_scene_depth, u_falloff_parms.xy).r;
+                if (u_falloff_parms.z > receiver_depth + 0.000001)
+                    discard;
+            }
             if (u_premultiply_alpha > 0.5)
                 final_color.rgb *= final_color.a;
             out_color = final_color;
@@ -3497,6 +3516,8 @@ bool CreateRendererResources()
         glGetUniformLocation(program, "u_color_intensity_alpha");
     const GLint materialModeUniform =
         glGetUniformLocation(program, "u_material_mode");
+    const GLint sceneDepthUniform =
+        glGetUniformLocation(program, "u_scene_depth");
     const GLint falloffParmsUniform =
         glGetUniformLocation(program, "u_falloff_parms");
     const GLint falloffBeginColorUniform =
@@ -3709,7 +3730,8 @@ bool CreateRendererResources()
         modelLightingBaseCoordinatesUniform < 0 ||
         modelLightingLookupScaleUniform < 0 ||
         premultiplyAlphaUniform < 0 || colorIntensityAlphaUniform < 0 ||
-        materialModeUniform < 0 || falloffParmsUniform < 0 ||
+        materialModeUniform < 0 || sceneDepthUniform < 0 ||
+        falloffParmsUniform < 0 ||
         falloffBeginColorUniform < 0 || falloffEndColorUniform < 0 ||
         alphaTestUniform < 0 || instanceEnabledUniform < 0 ||
         uiColorUniform < 0 || fogEnabledUniform < 0 ||
@@ -3835,6 +3857,7 @@ bool CreateRendererResources()
     g_renderer.premultiplyAlphaUniform = premultiplyAlphaUniform;
     g_renderer.colorIntensityAlphaUniform = colorIntensityAlphaUniform;
     g_renderer.materialModeUniform = materialModeUniform;
+    g_renderer.sceneDepthUniform = sceneDepthUniform;
     g_renderer.falloffParmsUniform = falloffParmsUniform;
     g_renderer.falloffBeginColorUniform = falloffBeginColorUniform;
     g_renderer.falloffEndColorUniform = falloffEndColorUniform;
@@ -6356,7 +6379,9 @@ void ApplyWorldMaterialState(const WebRendererRetainedWorldBatch &batch)
     glUniform4fv(g_renderer.falloffEndColorUniform, 1,
         batch.falloffEndColor);
     glUniform1i(g_renderer.materialModeUniform,
-        batch.technique == WebRendererWorldTechnique::VertexColorMultiply
+        batch.sourceKind == WebRendererSceneBatchKind::SunFlare
+            ? 5
+            : batch.technique == WebRendererWorldTechnique::VertexColorMultiply
             ? 1
             : (batch.technique ==
                     WebRendererWorldTechnique::VertexColorAdditive
@@ -6900,6 +6925,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1i(g_renderer.reflectionProbeUniform, 8);
         glUniform1i(g_renderer.primaryLightmapUniform, 9);
         glUniform1i(g_renderer.primaryLightAttenuationUniform, 10);
+        glUniform1i(g_renderer.sceneDepthUniform, 12);
         glUniformMatrix4fv(g_renderer.shadowMatrixUniform, 1, GL_FALSE,
             g_renderer.sceneSunShadowMatrix.data());
         glUniformMatrix4fv(g_renderer.shadowFarMatrixUniform, 1, GL_FALSE,
@@ -7253,6 +7279,8 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                  g_renderer.retainedDynamicModelBatches)
             {
                 if (batch.depthHack != depthHackPass) continue;
+                if (batch.sourceKind == WebRendererSceneBatchKind::SunFlare)
+                    continue;
                 const bool sunSprite = batch.sourceKind ==
                     WebRendererSceneBatchKind::SunSprite;
                 glUniformMatrix4fv(g_renderer.viewProjectionUniform, 1,
@@ -7436,6 +7464,73 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             g_renderer.sceneFilmEnabled,
             1.0f,
             g_renderer.sceneBlurRadius);
+    }
+    if (postProcessDraw && sceneGeometryDraw && !compatibilityDraw &&
+        g_renderer.dynamicModelSceneActive &&
+        g_renderer.dynamicModelVertexArray != 0u)
+    {
+        glUseProgram(g_renderer.program);
+        glUniformMatrix4fv(g_renderer.viewProjectionUniform, 1, GL_FALSE,
+            IDENTITY_MATRIX);
+        glUniform1f(g_renderer.aspectUniform, 1.0f);
+        glUniform1f(g_renderer.sceneFallbackUniform, 0.0f);
+        glUniform1f(g_renderer.fogEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.lightmapEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.modelLightingEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.normalMapEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.specularMapEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.sunShadowEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.primaryLightEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.instanceEnabledUniform, 0.0f);
+        glUniform1i(g_renderer.sceneDepthUniform, 12);
+        glUniform4f(g_renderer.uiColorUniform, 1.0f, 1.0f, 1.0f, 1.0f);
+        glActiveTexture(GL_TEXTURE12);
+        glBindTexture(GL_TEXTURE_2D, g_renderer.sceneDepthTexture);
+        glActiveTexture(GL_TEXTURE0);
+        glBindVertexArray(g_renderer.dynamicModelVertexArray);
+        static bool sunFlareDrawReported = false;
+        for (const WebRendererRetainedWorldBatch &batch :
+             g_renderer.retainedDynamicModelBatches)
+        {
+            if (batch.sourceKind != WebRendererSceneBatchKind::SunFlare)
+                continue;
+            ApplyWorldMaterialState(batch);
+            const WebRendererRetainedWorldImage *base = RetainedImage(
+                g_renderer.retainedDynamicModelImages,
+                batch.baseImageIndex);
+            glUniform1f(g_renderer.textureEnabledUniform,
+                base ? 1.0f : 0.0f);
+            glDisable(GL_DEPTH_TEST);
+            glDepthMask(GL_FALSE);
+            BindWorldTexture(GL_TEXTURE0,
+                base ? base->texture : g_renderer.texture,
+                batch.samplerState);
+            const std::uintptr_t indexOffset =
+                static_cast<std::uintptr_t>(batch.firstIndex) *
+                sizeof(std::uint32_t);
+            glDrawElements(GL_TRIANGLES,
+                static_cast<GLsizei>(batch.indexCount),
+                GL_UNSIGNED_INT,
+                reinterpret_cast<const void *>(indexOffset));
+            glDepthMask(GL_TRUE);
+            if (!sunFlareDrawReported)
+            {
+                sunFlareDrawReported = true;
+                Web_Log(WebLogLevel::Info,
+                    "[kisakcod-web] Canonical sun flare draw: "
+                    "material='%s' center=(%.5f %.5f) queryDepth=%.6f "
+                    "state=0x%08x/0x%08x.\n",
+                    batch.materialName.c_str(),
+                    batch.falloffParms[0], batch.falloffParms[1],
+                    batch.falloffParms[2],
+                    batch.stateBits[0], batch.stateBits[1]);
+            }
+            ++completedDraws;
+        }
+        glActiveTexture(GL_TEXTURE12);
+        glBindTexture(GL_TEXTURE_2D, 0u);
+        glActiveTexture(GL_TEXTURE0);
     }
     if (sceneGeometryDraw && !compatibilityDraw &&
         g_renderer.uiSceneActive && g_renderer.uiVertexArray != 0u)

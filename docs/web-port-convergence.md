@@ -1213,14 +1213,24 @@ the renderer boundary.
 The WebGL backend draws the sprite with the canonical material sampler and
 blend state, no fog or depth writes, and far-depth receiver testing against the
 already-populated scene depth. Indoor Killhouse validation therefore retains
-roof occlusion rather than leaking the sun through geometry. Native animated
-occlusion-query visibility, flare, blind, and glare post-effects remain the
-next environment-specific convergence gap.
+roof occlusion rather than leaking the sun through geometry.
 
-The Release build and focused world-scene, comparison, and DObj-submission
-Wasm-native tests pass. In the reopened Chrome tab, Killhouse publishes the
+The same boundary now reproduces the authored `RB_DrawSunFlare` core after the
+resolved color-manipulation pass and before HUD composition. It uses
+`sun_flare_icbm`, the canonical 640x480-relative size interpolation, view-dot
+thresholds, maximum alpha, packed RGB intensity convention, UVs, winding, and
+D3D-to-WebGL query-depth offset. The scene framebuffer's platform-owned depth
+attachment is now a sampleable depth texture; the flare samples its 16-pixel
+query center after the 3D resolve, so roof/world occlusion applies to the whole
+post-effect without exposing API objects through portable commands. The same
+depth texture is the required platform seam for later depth-aware DOF. Native
+temporal query fade and the authored blind darkening remain the next
+environment-specific gaps; Killhouse's authored glare maximum is zero.
+
+The Release build and focused world-scene, comparison, FX-model-scene, and
+DObj-submission Wasm-native tests pass. In the reopened Chrome tab, Killhouse
+publishes the
 1024-square six-face `sp_killhouse_ft` cubemap plus the authored `sun` material,
 `sun` image, 14.606 sprite size, and canonical direction with no assertion,
-shader, context, descriptor, or draw errors. A four-second live sample in the
-developer-camera run advances 210 frames in 4.028 seconds (52.14 fps); the
-ordinary spawn view separately sustains 59.78 fps.
+shader, framebuffer, context, descriptor, or draw errors. The ordinary spawn
+view advances 240 frames in 4.015 seconds (59.78 fps).
