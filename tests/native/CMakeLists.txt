@@ -426,7 +426,8 @@ endif()
 if (TARGET web_renderer_mark_fragments_tests)
     target_compile_features(web_renderer_mark_fragments_tests PRIVATE cxx_std_20)
     target_include_directories(web_renderer_mark_fragments_tests PRIVATE
-        "${KISAK_REPOSITORY_ROOT}/src")
+        "${KISAK_REPOSITORY_ROOT}/src"
+        "${KISAK_REPOSITORY_ROOT}/deps")
     target_compile_definitions(web_renderer_mark_fragments_tests PRIVATE
         KISAK_SP=1 KISAK_WEB=1)
     if (MSVC)

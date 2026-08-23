@@ -1,15 +1,17 @@
 // Browser renderer boundary for canonical EffectsCore impact-mark fragments.
-// This is the world-brush, entity-brush, and static-XModel subset of
-// gfx_d3d/r_marks.cpp adapted to consume the published GfxWorld directly.
-// EffectsCore still owns mark allocation, lifetime, material choice, vertex
-// expansion, and draw generation.
+// This is the world-brush, entity-brush, static-XModel, and rigid animated
+// DObj subset of gfx_d3d/r_marks.cpp adapted to consume the published scene
+// directly. EffectsCore still owns mark allocation, lifetime, material choice,
+// vertex expansion, and draw generation.
 
 #include <EffectsCore/fx_system.h>
 #include <bgame/bg_local.h>
+#include <cgame/cg_pose.h>
 #include <gfx_d3d/material_types.h>
 #include <gfx_d3d/r_bsp.h>
 #include <universal/com_math.h>
 #include <web/web_renderer_mark_fragments.h>
+#include <xanim/dobj_utils.h>
 #include <xanim/xmodel_types.h>
 #include <xanim/xsurface_types.h>
 
@@ -603,6 +605,264 @@ bool GenerateStaticModelFragments(MarkInfo &info) noexcept
     }
     return true;
 }
+
+void MultiplySkelMat(const DObjSkelMat &left, const DObjSkelMat &right,
+    DObjSkelMat &output) noexcept
+{
+    for (std::size_t row = 0u; row < 3u; ++row)
+    {
+        for (std::size_t column = 0u; column < 3u; ++column)
+        {
+            output.axis[row][column] =
+                left.axis[row][0] * right.axis[0][column] +
+                left.axis[row][1] * right.axis[1][column] +
+                left.axis[row][2] * right.axis[2][column];
+        }
+        output.axis[row][3] = 0.0f;
+    }
+    for (std::size_t column = 0u; column < 3u; ++column)
+    {
+        output.origin[column] =
+            left.origin[0] * right.axis[0][column] +
+            left.origin[1] * right.axis[1][column] +
+            left.origin[2] * right.axis[2][column] +
+            right.origin[column];
+    }
+    output.origin[3] = 1.0f;
+}
+
+void TransformPlanesToSkelLocal(const float worldPlanes[6][4],
+    const DObjSkelMat &matrix, float localPlanes[6][4]) noexcept
+{
+    for (std::size_t plane = 0u; plane < 6u; ++plane)
+    {
+        for (std::size_t axis = 0u; axis < 3u; ++axis)
+        {
+            localPlanes[plane][axis] =
+                worldPlanes[plane][0] * matrix.axis[axis][0] +
+                worldPlanes[plane][1] * matrix.axis[axis][1] +
+                worldPlanes[plane][2] * matrix.axis[axis][2];
+        }
+        localPlanes[plane][3] = worldPlanes[plane][3] -
+            Vec3Dot(worldPlanes[plane], matrix.origin);
+    }
+}
+
+void TransformDirectionToSkelLocal(const float worldDirection[3],
+    const DObjSkelMat &matrix, float localDirection[3]) noexcept
+{
+    for (std::size_t axis = 0u; axis < 3u; ++axis)
+    {
+        localDirection[axis] =
+            worldDirection[0] * matrix.axis[axis][0] +
+            worldDirection[1] * matrix.axis[axis][1] +
+            worldDirection[2] * matrix.axis[axis][2];
+    }
+}
+
+void TransformPointToSkelLocal(const float worldPoint[3],
+    const DObjSkelMat &matrix, float localPoint[3]) noexcept
+{
+    float offset[3]{};
+    Vec3Sub(worldPoint, matrix.origin, offset);
+    TransformDirectionToSkelLocal(offset, matrix, localPoint);
+}
+
+bool AppendDObjVertList(MarkInfo &info, const XSurface &surface,
+    const XRigidVertList &vertList, const DObjSkelMat &skinMatrix,
+    const GfxMarkContext &context) noexcept
+{
+    const std::uint32_t triangleBegin = vertList.triOffset;
+    const std::uint32_t triangleEnd = triangleBegin + vertList.triCount;
+    if (!surface.verts0 || !surface.triIndices || surface.deformed ||
+        triangleBegin > surface.triCount || triangleEnd > surface.triCount)
+        return true;
+
+    float localPlanes[6][4]{};
+    TransformPlanesToSkelLocal(info.planes, skinMatrix, localPlanes);
+    float localMarkDirection[3]{};
+    TransformDirectionToSkelLocal(
+        info.axis[0], skinMatrix, localMarkDirection);
+    for (std::uint32_t triangle = triangleBegin;
+         triangle < triangleEnd; ++triangle)
+    {
+        const std::uint16_t *indices =
+            surface.triIndices + triangle * 3u;
+        if (indices[0] >= surface.vertCount ||
+            indices[1] >= surface.vertCount ||
+            indices[2] >= surface.vertCount)
+            continue;
+        WebWorldMarkPoint clipPoints[2][MARK_CLIP_POINT_CAPACITY]{};
+        float normals[3][3]{};
+        for (std::size_t vertex = 0u; vertex < 3u; ++vertex)
+        {
+            const GfxPackedVertex &source = surface.verts0[indices[vertex]];
+            std::copy_n(source.xyz, 3u, clipPoints[0][vertex].xyz);
+            clipPoints[0][vertex].vertWeights[vertex] = 1.0f;
+            Vec3UnpackUnitVec(source.normal, normals[vertex]);
+        }
+        if (TriangleRejected(localMarkDirection, clipPoints[0][0].xyz,
+                clipPoints[0][1].xyz, clipPoints[0][2].xyz))
+            continue;
+        int pingPong = 0;
+        int fragmentPointCount = 3;
+        for (int plane = 0; plane < MARK_CLIP_PLANE_COUNT; ++plane)
+        {
+            fragmentPointCount = ChopWorldPolyBehindPlane(
+                fragmentPointCount, clipPoints[pingPong],
+                clipPoints[pingPong ^ 1], localPlanes[plane]);
+            if (fragmentPointCount == 0) break;
+            pingPong ^= 1;
+        }
+        if (fragmentPointCount == 0) continue;
+        const int fragmentTriCount = fragmentPointCount - 2;
+        if (fragmentPointCount > info.maxPoints - info.usedPointCount ||
+            fragmentTriCount > info.maxTris - info.usedTriCount)
+            return false;
+        const int basePoint = info.usedPointCount;
+        for (int point = 2; point < fragmentPointCount; ++point)
+        {
+            FxMarkTri &triangleOut = info.tris[info.usedTriCount++];
+            triangleOut.indices[0] = static_cast<std::uint16_t>(
+                basePoint + point - 1);
+            triangleOut.indices[1] = static_cast<std::uint16_t>(
+                basePoint + point);
+            triangleOut.indices[2] = static_cast<std::uint16_t>(basePoint);
+            triangleOut.context = context;
+        }
+        for (int point = 0; point < fragmentPointCount; ++point)
+        {
+            const WebWorldMarkPoint &clip = clipPoints[pingPong][point];
+            FxMarkPoint &destination =
+                info.points[info.usedPointCount + point];
+            std::copy_n(clip.xyz, 3u, destination.xyz);
+            destination.lmapCoord[0] = 0.0f;
+            destination.lmapCoord[1] = 0.0f;
+            for (std::size_t component = 0u; component < 3u; ++component)
+            {
+                destination.normal[component] =
+                    clip.vertWeights[0] * normals[0][component] +
+                    clip.vertWeights[1] * normals[1][component] +
+                    clip.vertWeights[2] * normals[2][component];
+            }
+        }
+        info.usedPointCount += fragmentPointCount;
+    }
+    return true;
+}
+
+bool GenerateDObjFragments(MarkInfo &info) noexcept
+{
+    for (int collision = 0;
+         collision < info.sceneDObjCollidedCount; ++collision)
+    {
+        const MarkInfoCollidedDObj &collided =
+            info.sceneDObjsCollided[collision];
+        DObj_s *object = collided.dObj;
+        if (!object || !collided.pose || object->numModels == 0u ||
+            object->numModels > DOBJ_MAX_SUBMODELS ||
+            object->numBones > DOBJ_MAX_PARTS || !object->models)
+            continue;
+
+        char zeroLods[DOBJ_MAX_SUBMODELS]{};
+        int posePartBits[DOBJ_MAX_PART_BITS]{};
+        if (DObjGetSurfaces(object, posePartBits, zeroLods) <= 0)
+            continue;
+        DObjLock(object);
+        DObjAnimMat *posedMats =
+            CG_DObjCalcPose(collided.pose, object, posePartBits);
+        DObjUnlock(object);
+        if (!posedMats ||
+            !DObjSkelAreBonesUpToDate(object, posePartBits))
+            continue;
+        std::uint32_t hideBits[DOBJ_MAX_PART_BITS]{};
+        DObjGetHidePartBits(object, hideBits);
+
+        std::uint32_t globalBoneOffset = 0u;
+        for (std::uint32_t modelIndex = 0u;
+             modelIndex < object->numModels && modelIndex <= 63u;
+             ++modelIndex)
+        {
+            const XModel *model = object->models[modelIndex];
+            if (!model || !model->surfs || !model->materialHandles ||
+                !model->baseMat || model->numLods <= 0 ||
+                globalBoneOffset + model->numBones > object->numBones)
+            {
+                break;
+            }
+            const XModelLodInfo &lod = model->lodInfo[0];
+            if (lod.surfIndex > model->numsurfs ||
+                lod.numsurfs > model->numsurfs - lod.surfIndex)
+            {
+                globalBoneOffset += model->numBones;
+                continue;
+            }
+            GfxMarkContext context{};
+            context.modelIndex = collided.entnum;
+            context.modelTypeAndSurf = static_cast<std::uint8_t>(
+                0xc0u | modelIndex);
+            for (std::uint32_t localSurface = 0u;
+                 localSurface < lod.numsurfs; ++localSurface)
+            {
+                const std::uint32_t surfaceIndex =
+                    lod.surfIndex + localSurface;
+                const XSurface &surface = model->surfs[surfaceIndex];
+                if (surface.deformed || !surface.vertList ||
+                    surface.vertListCount == 0u ||
+                    !MaterialAllowsMark(
+                        model->materialHandles[surfaceIndex], info.material))
+                    continue;
+                for (std::uint32_t listIndex = 0u;
+                     listIndex < surface.vertListCount; ++listIndex)
+                {
+                    const XRigidVertList &vertList =
+                        surface.vertList[listIndex];
+                    if ((vertList.boneOffset % sizeof(DObjSkelMat)) != 0u)
+                        continue;
+                    const std::uint32_t boneIndex =
+                        vertList.boneOffset / sizeof(DObjSkelMat);
+                    if (boneIndex >= model->numBones ||
+                        globalBoneOffset + boneIndex >= object->numBones)
+                        continue;
+                    const std::uint32_t hideBit = globalBoneOffset + boneIndex;
+                    if ((hideBits[hideBit >> 5u] &
+                            (0x80000000u >> (hideBit & 31u))) != 0u)
+                        continue;
+                    DObjSkelMat inverseBase{};
+                    DObjSkelMat current{};
+                    DObjAnimMat posedWithViewOffset =
+                        posedMats[globalBoneOffset + boneIndex];
+                    for (std::size_t axis = 0u; axis < 3u; ++axis)
+                        posedWithViewOffset.trans[axis] += info.viewOffset[axis];
+                    ConvertQuatToInverseSkelMat(
+                        &model->baseMat[boneIndex], &inverseBase);
+                    ConvertQuatToSkelMat(&posedWithViewOffset, &current);
+                    DObjSkelMat skinMatrix{};
+                    MultiplySkelMat(inverseBase, current, skinMatrix);
+                    context.lmapIndex = static_cast<std::uint8_t>(boneIndex);
+                    if (!AppendDObjVertList(info, surface, vertList,
+                            skinMatrix, context))
+                        return false;
+                    if (info.usedTriCount == 0 || info.usedPointCount == 0)
+                        continue;
+                    float localOrigin[3]{};
+                    float localTexCoordAxis[3]{};
+                    TransformPointToSkelLocal(
+                        info.origin, skinMatrix, localOrigin);
+                    TransformDirectionToSkelLocal(
+                        info.axis[1], skinMatrix, localTexCoordAxis);
+                    info.callback(info.callbackContext, info.usedTriCount,
+                        info.tris, info.usedPointCount, info.points,
+                        localOrigin, localTexCoordAxis);
+                    info.usedTriCount = 0;
+                    info.usedPointCount = 0;
+                }
+            }
+            globalBoneOffset += model->numBones;
+        }
+    }
+    return true;
+}
 } // namespace
 
 void __cdecl R_MarkFragments_Begin(MarkInfo *info,
@@ -673,8 +933,8 @@ void __cdecl R_MarkFragments_Go(MarkInfo *info,
     }
     else if (info->markAgainst == MARK_FRAGMENTS_AGAINST_MODELS)
     {
-        if (!GenerateStaticModelFragments(*info)) return;
-        // Animated DObj fragment skinning remains the last model-receiver
-        // subset. EffectsCore still owns those impacts and their lifetimes.
+        if (!GenerateStaticModelFragments(*info) ||
+            !GenerateDObjFragments(*info))
+            return;
     }
 }
