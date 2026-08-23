@@ -341,6 +341,70 @@ void TestCanonicalWorldColorAliasUsesLitStateAndLightmaps()
         WebRendererWorldLightingMode::SecondaryDirectional);
 }
 
+void TestNativePixelShaderFamiliesSelectPortableMaterialTechniques()
+{
+    Fixture fixture;
+    MaterialPixelShader pixelShader{};
+    pixelShader.name = "lm_r0c0n0_sm2.hlsl";
+    MaterialTechnique litTechnique{};
+    litTechnique.name = "lm_r0c0n0_sm2";
+    litTechnique.passCount = 1u;
+    litTechnique.passArray[0].customSamplerFlags = 4u;
+    litTechnique.passArray[0].pixelShader = &pixelShader;
+    MaterialTechniqueSet techniqueSet{};
+    techniqueSet.techniques[TECHNIQUE_LIT_INDEX] = &litTechnique;
+    GfxStateBits stateBits[1]{{{0x18008800u, 0x0000000du}}};
+    GfxImage baseImage{};
+    GfxImage normalImage{};
+    GfxImage secondaryLightmapImage{};
+    std::array<MaterialTextureDef, 2> textures{};
+    textures[0].semantic = 2u;
+    textures[0].u.image = &baseImage;
+    textures[1].semantic = 5u;
+    textures[1].samplerState = 0x22u;
+    textures[1].u.image = &normalImage;
+    Material material{};
+    material.info.name = "material/native-families";
+    material.textureCount = static_cast<std::uint8_t>(textures.size());
+    material.textureTable = textures.data();
+    material.techniqueSet = &techniqueSet;
+    material.stateBitsEntry[TECHNIQUE_LIT_INDEX] = 0u;
+    material.stateBitsCount = 1u;
+    material.stateBitsTable = stateBits;
+    GfxLightmapArray lightmap{nullptr, &secondaryLightmapImage};
+    fixture.world.lightmapCount = 1;
+    fixture.world.lightmaps = &lightmap;
+    for (GfxSurface &surface : fixture.surfaces)
+    {
+        surface.material = &material;
+        surface.lightmapIndex = 0u;
+    }
+
+    WebRendererWorldSceneCommand command;
+    assert(WebRenderer_BuildWorldSceneCommand(
+        fixture.world, MakeView(), command) ==
+        WebRendererWorldSceneResult::Success);
+    assert(command.batches.size() == 1u);
+    assert(command.batches[0].technique ==
+        WebRendererWorldTechnique::BaseTextureLightmapNormal);
+    assert(command.batches[0].normalImage == &normalImage);
+    assert(command.batches[0].normalSamplerState == 0x22u);
+
+    pixelShader.name = "mul.hlsl";
+    assert(WebRenderer_BuildWorldSceneCommand(
+        fixture.world, MakeView(), command) ==
+        WebRendererWorldSceneResult::Success);
+    assert(command.batches[0].technique ==
+        WebRendererWorldTechnique::VertexColorMultiply);
+
+    pixelShader.name = "vertcol_simple_add_fog.hlsl";
+    assert(WebRenderer_BuildWorldSceneCommand(
+        fixture.world, MakeView(), command) ==
+        WebRendererWorldSceneResult::Success);
+    assert(command.batches[0].technique ==
+        WebRendererWorldTechnique::VertexColorAdditive);
+}
+
 void TestMalformedLocalIndexIsRejectedAtomically()
 {
     Fixture fixture;
@@ -472,6 +536,7 @@ int main()
     TestCanonicalLmTechniqueNameDoesNotInventLightmapSamplers();
     TestRemappedTechniqueSetDrivesPortableSelection();
     TestCanonicalWorldColorAliasUsesLitStateAndLightmaps();
+    TestNativePixelShaderFamiliesSelectPortableMaterialTechniques();
     TestMalformedLocalIndexIsRejectedAtomically();
     TestSkyPassIsNotFoldedIntoOpaqueWorldBatch();
     TestConservativeVisibilityIsDisabledForMovingCanonicalView();

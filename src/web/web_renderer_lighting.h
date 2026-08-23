@@ -90,6 +90,16 @@ std::array<float, 3> WebRenderer_EvaluateSecondaryDirectionalLighting(
     const std::array<float, 4> &secondaryLobe0,
     const std::array<float, 4> &secondaryLobe1) noexcept;
 
+// CPU reference for native lm_[rt]0c0n0_sm2. Both the light direction and
+// DXT5nm surface normal are decoded as slopes before the two lightmap lobes
+// are combined. The browser fragment shader mirrors this helper.
+std::array<float, 3> WebRenderer_EvaluateSecondaryDirectionalNormalLighting(
+    const std::array<float, 4> &base,
+    const std::array<float, 4> &vertexColor,
+    const std::array<float, 4> &secondaryLobe0,
+    const std::array<float, 4> &secondaryLobe1,
+    const std::array<float, 4> &normalSample) noexcept;
+
 // Native R_LightGridLookup uses a collision sight trace only for corners
 // carrying the corresponding needsTrace bit. The callback returns true when
 // that corner is visible from samplePosition. A null callback preserves the

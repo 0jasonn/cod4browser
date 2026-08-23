@@ -57,9 +57,11 @@ struct WebRendererComparisonRecord
     std::uint32_t indexCount = 0u;
     std::uint32_t stateBits[2]{};
     std::string baseImageName;
+    std::string normalImageName;
     std::string lightmapImageName;
     std::string secondaryLightmapImageName;
     bool baseImageUsed = false;
+    bool normalImageUsed = false;
     bool lightmapUsed = false;
     bool secondaryLightmapUsed = false;
     std::uint8_t lightmapIndex = 31u;
@@ -106,6 +108,7 @@ enum WebRendererComparisonDifference : std::uint32_t
     WEB_RENDERER_COMPARISON_LIGHTMAP = 1u << 5u,
     WEB_RENDERER_COMPARISON_SAMPLER = 1u << 6u,
     WEB_RENDERER_COMPARISON_DRAW_COUNT = 1u << 7u,
+    WEB_RENDERER_COMPARISON_NORMAL_IMAGE = 1u << 8u,
 };
 
 struct WebRendererComparisonDelta

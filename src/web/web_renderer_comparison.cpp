@@ -111,6 +111,10 @@ bool WebRenderer_CaptureComparison(
             record.stateBits[1] = batch.stateBits[1];
             record.baseImageName = batch.baseImage
                 ? NameOr(batch.baseImage->name, "<unnamed-image>") : "";
+            record.normalImageUsed = batch.normalImage != nullptr &&
+                WebRenderer_UsesWorldNormalMap(batch.technique);
+            record.normalImageName = record.normalImageUsed
+                ? NameOr(batch.normalImage->name, "<unnamed-normal-map>") : "";
             record.lightmapImageName = batch.lightmapImage
                 ? NameOr(batch.lightmapImage->name, "<unnamed-lightmap>") : "";
             record.secondaryLightmapImageName = batch.secondaryLightmapImage
@@ -119,11 +123,10 @@ bool WebRenderer_CaptureComparison(
             record.baseImageUsed = batch.baseImage != nullptr &&
                 batch.technique != WebRendererWorldTechnique::BackendFallback;
             record.lightmapUsed = batch.lightmapImage != nullptr &&
-                batch.technique == WebRendererWorldTechnique::BaseTextureLightmap;
+                WebRenderer_UsesSecondaryDirectionalLightmap(batch.technique);
             record.secondaryLightmapUsed =
                 batch.secondaryLightmapImage != nullptr &&
-                batch.technique ==
-                    WebRendererWorldTechnique::BaseTextureLightmap;
+                WebRenderer_UsesSecondaryDirectionalLightmap(batch.technique);
             record.lightmapIndex = batch.lightmapIndex;
             const std::uint32_t state0 = batch.stateBits[0];
             const std::uint32_t state1 = batch.stateBits[1];
@@ -210,6 +213,9 @@ std::vector<WebRendererComparisonDelta> WebRenderer_CompareCaptures(
         if (left.baseImageName != right.baseImageName ||
             left.baseImageUsed != right.baseImageUsed)
             fields |= WEB_RENDERER_COMPARISON_BASE_IMAGE;
+        if (left.normalImageName != right.normalImageName ||
+            left.normalImageUsed != right.normalImageUsed)
+            fields |= WEB_RENDERER_COMPARISON_NORMAL_IMAGE;
         if (left.lightmapImageName != right.lightmapImageName ||
             left.lightmapUsed != right.lightmapUsed ||
             left.secondaryLightmapImageName !=

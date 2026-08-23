@@ -63,8 +63,11 @@ cubemap pass. Chrome records the canonical `refdef_s` for
 `maps/killhouse.d3dbsp`, followed by a successful WebGL2 draw of 8,475 canonical
 surfaces, 445,369 retained vertices, and 823,464 32-bit indices in 581 batches
 after the scripted start mover descends into the world view. Of those batches,
-538 consume canonical base textures plus both members of the three DB-owned
-lightmap pairs and 38 use base textures only. Two draws (nine
+125 draws (3,448 surfaces) use the native non-normal directional-lightmap
+equation, 413 draws (4,819 surfaces) use its DXT5nm slope-space normal variant,
+22 draws (58 surfaces) use native framebuffer multiplication, 14 draws (74
+surfaces) use the native premultiplied additive effect, and five draws (67
+surfaces) use base textures only. Two draws (nine
 `wc/com_crater_blacktop` surfaces) retain canonical identity behind explicit
 image fallback. Gate 2 remains a separate frozen
 oracle and is not invoked by this path.
@@ -555,6 +558,38 @@ gaps, including lighting for live DynEntity XModels. The corrected world pass ke
 the draw count and three texture fetches
 per pixel unchanged versus the previous approximation while avoiding retention
 or upload of 28 MiB of expanded primary-lightmap RGBA8 data.
+
+## Native material-family parity update (2026-08-23)
+
+The WebGL2 backend now distinguishes portable execution techniques from the
+unchanged canonical Material/TechniqueSet identity. Disassembly of the retail
+D3D9 pixel programs established the exact equations used here; no browser-only
+material object model was added. The `lm_r0c0n0_sm2` and `lm_t0c0n0_sm2`
+families decode both the secondary-lightmap direction and DXT5nm AG surface
+normal as slopes, normalize each implicit `(x,y,1)` vector, and combine the two
+lightmap lobes before multiplying base and vertex color. Leading-comma
+`wc_l_*n0*` aliases use the same backend equivalent while retaining their
+native names and state bits. This covers 413 draws and 4,819 Killhouse
+surfaces; the existing non-normal equation covers another 125 draws and 3,448
+surfaces.
+
+The encountered `mul.hlsl` family now emits the native white-to-texture
+control color before fixed-function `ZERO/SRC_COLOR` blending, including the
+vertex-alpha control. The encountered `vertcol_simple_add_fog.hlsl` family
+applies canonical fog and premultiplies RGB by texture/vertex alpha before its
+additive blend. These paths cover 22 draws/58 surfaces and 14 draws/74 surfaces
+respectively. Only five ordinary base-texture draws/67 surfaces and the two
+known `wc/com_crater_blacktop` fallback draws remain outside those material
+families in the captured world command.
+
+Focused native tests fix the numerical slope-space decode and material-family
+selection. The normalized frontend/backend comparison also carries normal-map
+identity and usage, plus a technique-specific composition description. Release
+Chrome validates all 581 intended/retained draws, 8,475 surfaces, 538
+directional-lightmapped draws, 123 alpha-tested draws, and 148 blended draws;
+the only two divergences remain the nine surfaces whose canonical
+`,crater_blacktop` image has no usable load definition. The supplied Steam
+screenshots are local visual references only and are not repository assets.
 
 ## DObj renderer convergence update (commits `748112cc`, `de695b46`)
 

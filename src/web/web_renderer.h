@@ -143,10 +143,26 @@ enum class WebRendererWorldTechnique : std::uint8_t
     BackendFallback = 0,
     BaseTexture,
     BaseTextureLightmap,
+    BaseTextureLightmapNormal,
+    VertexColorMultiply,
+    VertexColorAdditive,
     // Portable subset of IW3's reflexsight shader. Its DXT1 color texture is
     // intentionally opaque; source opacity is reconstructed from intensity.
     ReflexSight,
 };
+
+constexpr bool WebRenderer_UsesSecondaryDirectionalLightmap(
+    WebRendererWorldTechnique technique) noexcept
+{
+    return technique == WebRendererWorldTechnique::BaseTextureLightmap ||
+        technique == WebRendererWorldTechnique::BaseTextureLightmapNormal;
+}
+
+constexpr bool WebRenderer_UsesWorldNormalMap(
+    WebRendererWorldTechnique technique) noexcept
+{
+    return technique == WebRendererWorldTechnique::BaseTextureLightmapNormal;
+}
 
 constexpr bool WebRenderer_UsesColorIntensityOpacity(
     WebRendererWorldTechnique technique) noexcept

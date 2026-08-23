@@ -546,6 +546,37 @@ std::array<float, 3> WebRenderer_EvaluateSecondaryDirectionalLighting(
     return result;
 }
 
+std::array<float, 3> WebRenderer_EvaluateSecondaryDirectionalNormalLighting(
+    const std::array<float, 4> &base,
+    const std::array<float, 4> &vertexColor,
+    const std::array<float, 4> &secondaryLobe0,
+    const std::array<float, 4> &secondaryLobe1,
+    const std::array<float, 4> &normalSample) noexcept
+{
+    const float lightX = secondaryLobe0[3] * 4.08f - 2.08f;
+    const float lightY = secondaryLobe1[3] * 4.06451607f - 2.06451607f;
+    const float inverseLightLength = 1.0f / std::sqrt(
+        lightX * lightX + lightY * lightY + 1.0f);
+    const float normalX = normalSample[3] * 4.08f - 2.08f;
+    const float normalY = normalSample[1] * 4.06451607f - 2.06451607f;
+    const float inverseNormalLength = 1.0f / std::sqrt(
+        normalX * normalX + normalY * normalY + 1.0f);
+    const float directionalWeight = std::clamp(
+        (lightX * normalX + lightY * normalY + 1.0f) *
+            inverseLightLength * inverseNormalLength,
+        0.0f,
+        1.0f);
+    std::array<float, 3> result{};
+    for (std::size_t channel = 0u; channel < result.size(); ++channel)
+    {
+        const float lighting =
+            secondaryLobe0[channel] * inverseNormalLength +
+            secondaryLobe1[channel] * directionalWeight;
+        result[channel] = base[channel] * vertexColor[channel] * lighting;
+    }
+    return result;
+}
+
 bool WebRenderer_EvaluateModelLighting(
     const GfxLightGrid &lightGrid,
     const float samplePosition[3],

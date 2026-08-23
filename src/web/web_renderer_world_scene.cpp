@@ -166,6 +166,28 @@ bool IsCanonicalWorldColorLitAlias(const MaterialTechniqueSet *techniqueSet)
         std::strncmp(techniqueSet->name, ",wc_l_", 6u) == 0;
 }
 
+bool ShaderNameIs(const TechniqueSelection &technique, const char *name)
+    noexcept
+{
+    return technique.pixelShaderName &&
+        std::strcmp(technique.pixelShaderName, name) == 0;
+}
+
+bool UsesDirectionalNormalMap(
+    const TechniqueSelection &technique,
+    const GfxImage *normalImage) noexcept
+{
+    if (!normalImage) return false;
+    if (ShaderNameIs(technique, "lm_r0c0n0_sm2.hlsl") ||
+        ShaderNameIs(technique, "lm_t0c0n0_sm2.hlsl"))
+    {
+        return true;
+    }
+    return technique.identityName &&
+        std::strncmp(technique.identityName, ",wc_l_", 6u) == 0 &&
+        std::strstr(technique.identityName, "n0") != nullptr;
+}
+
 TechniqueSelection SelectTechnique(const Material *material) noexcept
 {
     TechniqueSelection selection;
@@ -278,9 +300,17 @@ WebRendererWorldBatchDesc MakeBatch(
     }
     if (!technique.identityName || !batch.baseImage)
         batch.technique = WebRendererWorldTechnique::BackendFallback;
+    else if (ShaderNameIs(technique, "mul.hlsl"))
+        batch.technique = WebRendererWorldTechnique::VertexColorMultiply;
+    else if (ShaderNameIs(
+            technique, "vertcol_simple_add_fog.hlsl"))
+        batch.technique = WebRendererWorldTechnique::VertexColorAdditive;
     else if (batch.lightingMode ==
             WebRendererWorldLightingMode::SecondaryDirectional)
-        batch.technique = WebRendererWorldTechnique::BaseTextureLightmap;
+        batch.technique = UsesDirectionalNormalMap(
+                technique, batch.normalImage)
+            ? WebRendererWorldTechnique::BaseTextureLightmapNormal
+            : WebRendererWorldTechnique::BaseTextureLightmap;
     else
         batch.technique = WebRendererWorldTechnique::BaseTexture;
     return batch;

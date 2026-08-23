@@ -9,8 +9,10 @@ namespace
 WebRendererWorldBatchDesc MakeBatch()
 {
     static GfxImage base{};
+    static GfxImage normal{};
     static GfxImage secondaryLightmap{};
     base.name = "images/concrete";
+    normal.name = "images/concrete_nml";
     secondaryLightmap.name = "*lightmap0_secondary";
     WebRendererWorldBatchDesc batch{};
     batch.firstIndex = 0u;
@@ -22,12 +24,13 @@ WebRendererWorldBatchDesc MakeBatch()
     batch.techniqueName = "lm_l_sm_r0c0n0s0";
     batch.techniqueType = 7u;
     batch.baseImage = &base;
+    batch.normalImage = &normal;
     batch.secondaryLightmapImage = &secondaryLightmap;
     batch.stateBits[0] = 0x18008800u;
     batch.stateBits[1] = 0x0000000du;
     batch.samplerState = 0x52u;
     batch.lightmapIndex = 0u;
-    batch.technique = WebRendererWorldTechnique::BaseTextureLightmap;
+    batch.technique = WebRendererWorldTechnique::BaseTextureLightmapNormal;
     batch.lightingMode =
         WebRendererWorldLightingMode::SecondaryDirectional;
     batch.customSamplerFlags = 4u;
@@ -53,6 +56,8 @@ void TestCaptureContainsOnlyStableNormalizedIdentityAndState()
     assert(record.materialName == "mc/killhouse/concrete");
     assert(record.techniqueName == "lm_l_sm_r0c0n0s0");
     assert(record.baseImageName == "images/concrete");
+    assert(record.normalImageName == "images/concrete_nml");
+    assert(record.normalImageUsed);
     assert(record.lightmapImageName.empty());
     assert(record.secondaryLightmapImageName == "*lightmap0_secondary");
     assert(record.lightingMode ==
@@ -78,6 +83,7 @@ void TestComparisonPinpointsBackendFallbackWithoutAddresses()
     actualBatch.technique = WebRendererWorldTechnique::BackendFallback;
     actualBatch.lightmapImage = nullptr;
     actualBatch.secondaryLightmapImage = nullptr;
+    actualBatch.normalImage = nullptr;
     WebRendererWorldSurfaceDesc intendedSurface{};
     intendedSurface.batches = &intendedBatch;
     intendedSurface.batchCount = 1u;
@@ -94,6 +100,7 @@ void TestComparisonPinpointsBackendFallbackWithoutAddresses()
     assert((deltas[0].fields & WEB_RENDERER_COMPARISON_TECHNIQUE) != 0u);
     assert((deltas[0].fields & WEB_RENDERER_COMPARISON_BASE_IMAGE) != 0u);
     assert((deltas[0].fields & WEB_RENDERER_COMPARISON_LIGHTMAP) != 0u);
+    assert((deltas[0].fields & WEB_RENDERER_COMPARISON_NORMAL_IMAGE) != 0u);
     assert((deltas[0].fields & WEB_RENDERER_COMPARISON_RENDER_STATE) == 0u);
 }
 } // namespace

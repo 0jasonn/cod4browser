@@ -43,6 +43,38 @@ void TestZeroDirectionalLobeLeavesLowFrequencyLobe()
     assert(Near(result[2], 0.5f));
 }
 
+void TestNativeSecondaryDirectionalNormalDecode()
+{
+    const std::array<float, 4> base{0.8f, 0.6f, 0.4f, 1.0f};
+    const std::array<float, 4> vertex{0.5f, 0.75f, 1.0f, 1.0f};
+    const std::array<float, 4> lobe0{0.2f, 0.3f, 0.4f, 0.75f};
+    const std::array<float, 4> lobe1{0.6f, 0.4f, 0.2f, 0.25f};
+    const std::array<float, 4> normal{0.0f, 0.8f, 0.0f, 0.9f};
+    const std::array<float, 3> result =
+        WebRenderer_EvaluateSecondaryDirectionalNormalLighting(
+            base, vertex, lobe0, lobe1, normal);
+    assert(Near(result[0], 0.11716839f));
+    assert(Near(result[1], 0.12160789f));
+    assert(Near(result[2], 0.09902341f));
+}
+
+void TestNeutralSlopeNormalMatchesNonNormalDirectionalDecode()
+{
+    const std::array<float, 4> base{0.8f, 0.6f, 0.4f, 1.0f};
+    const std::array<float, 4> vertex{0.5f, 0.75f, 1.0f, 1.0f};
+    const std::array<float, 4> lobe0{0.2f, 0.3f, 0.4f, 0.5f};
+    const std::array<float, 4> lobe1{0.6f, 0.4f, 0.2f, 0.5f};
+    const std::array<float, 4> neutralNormal{
+        0.0f, 2.06451607f / 4.06451607f, 0.0f, 2.08f / 4.08f};
+    const auto expected = WebRenderer_EvaluateSecondaryDirectionalLighting(
+        base, vertex, lobe0, lobe1);
+    const auto actual =
+        WebRenderer_EvaluateSecondaryDirectionalNormalLighting(
+            base, vertex, lobe0, lobe1, neutralNormal);
+    for (std::size_t channel = 0u; channel < actual.size(); ++channel)
+        assert(Near(actual[channel], expected[channel]));
+}
+
 void TestCanonicalFrameFogTransition()
 {
     std::array<WebRendererFog, 5> states{};
@@ -297,6 +329,8 @@ int main()
 {
     TestNativeSecondaryDirectionalDecode();
     TestZeroDirectionalLobeLeavesLowFrequencyLobe();
+    TestNativeSecondaryDirectionalNormalDecode();
+    TestNeutralSlopeNormalMatchesNonNormalDirectionalDecode();
     TestCanonicalFrameFogTransition();
     TestNativeExponentialFogVisibility();
     TestNativeColorManipulationConstants();
