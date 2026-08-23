@@ -466,6 +466,7 @@ std::uint32_t g_pendingMarkDrawBegin = 0u;
 std::vector<WebRendererSurfaceVertex> g_markMeshRenderVertices;
 std::vector<std::uint32_t> g_markMeshRenderIndices;
 std::vector<WebRendererWorldBatchDesc> g_markMeshRenderBatches;
+std::vector<std::uint8_t> g_staticMarkVisibility;
 std::vector<WebRendererSurfaceVertex> g_uiVertices;
 std::vector<std::uint32_t> g_uiIndices;
 std::vector<WebRendererUiBatchDesc> g_uiBatches;
@@ -2258,6 +2259,31 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     FX_RunPhysics(refdef->localClientNum);
     DynEntCl_ProcessEntities(refdef->localClientNum);
 
+    // Native camera-scene ordering waits for world-mark generation, advances
+    // physics, then expands persistent marks for visible static and dynamic
+    // receivers before the decal draw list is consumed.  The browser already
+    // receives world marks from R_UpdateRemainingEffects; complete the other
+    // canonical receiver families here.  Static geometry is conservatively
+    // all-visible at this boundary, matching the current no-DPVS portable
+    // world/static commands while homogeneous clipping remains in WebGL.
+    if (fx_marks && fx_marks->current.enabled && fx_marks_smodels &&
+        fx_marks_smodels->current.enabled && s_world.dpvs.smodelCount != 0u)
+    {
+        try
+        {
+            g_staticMarkVisibility.assign(
+                s_world.dpvs.smodelCount, std::uint8_t{1u});
+            FX_GenerateMarkVertsForStaticModels(
+                refdef->localClientNum,
+                static_cast<int>(s_world.dpvs.smodelCount),
+                g_staticMarkVisibility.data());
+        }
+        catch (const std::bad_alloc &)
+        {
+            R_WarnOncePerFrame(R_WARN_GFX_MARK_MESH_LIMIT);
+        }
+    }
+
     std::vector<WebRendererBrushModelSubmission> activeBrushModels;
     try
     {
@@ -2297,6 +2323,66 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         Com_Error(ERR_DROP,
             "R_RenderScene canonical brush collection allocation failed");
         return;
+    }
+
+    if (fx_marks && fx_marks->current.enabled && fx_marks_ents &&
+        fx_marks_ents->current.enabled)
+    {
+        std::uint32_t markIndexCount = 0u;
+        FX_BeginGeneratingMarkVertsForEntModels(
+            refdef->localClientNum, &markIndexCount);
+        for (std::uint32_t index = 0u;
+             index < g_dobjSubmissionCount; ++index)
+        {
+            const WebRendererDObjSubmission &submission =
+                g_dobjSubmissions[index];
+            if (!submission.obj || !submission.pose ||
+                submission.entityNumber >= MAX_GENTITIES ||
+                WebRenderer_DObjUsesDepthHack(submission.renderFlags))
+            {
+                continue;
+            }
+            // EffectsCore retains this handle only in the generated draw
+            // context.  The portable backend does not consume native model-
+            // lighting handles yet, but zero is reserved by the canonical
+            // mark path, so preserve a stable per-submission nonzero identity.
+            const std::uint16_t lightingHandle = static_cast<std::uint16_t>(
+                std::min<std::uint32_t>(index + 1u, UINT16_MAX));
+            FX_GenerateMarkVertsForEntDObj(
+                refdef->localClientNum,
+                static_cast<int>(submission.entityNumber),
+                &markIndexCount,
+                lightingHandle,
+                submission.reflectionProbeIndex,
+                submission.obj,
+                submission.pose);
+        }
+        for (std::uint32_t index = 0u;
+             index < g_brushModelSubmissionCount; ++index)
+        {
+            const WebRendererBrushModelSubmission &submission =
+                g_brushModelSubmissions[index];
+            if (!submission.model ||
+                submission.entityNumber >= MAX_GENTITIES)
+            {
+                continue;
+            }
+            GfxPlacement placement{};
+            AxisToQuat(submission.axis, placement.quat);
+            std::copy_n(submission.origin, 3u, placement.origin);
+            const std::uint8_t reflectionProbeIndex =
+                static_cast<std::uint8_t>(std::min<std::uint32_t>(
+                    WebRenderer_CalcReflectionProbeIndex(
+                        s_world, submission.origin),
+                    UINT8_MAX));
+            FX_GenerateMarkVertsForEntBrush(
+                refdef->localClientNum,
+                static_cast<int>(submission.entityNumber),
+                &markIndexCount,
+                reflectionProbeIndex,
+                &placement);
+        }
+        FX_EndGeneratingMarkVertsForEntModels(refdef->localClientNum);
     }
 
     std::vector<WebRendererPrimaryLightDesc> brushPrimaryLights;

@@ -23,6 +23,28 @@
 
 extern GfxWorld s_world;
 
+void __cdecl DObjSkelMatToMatrix43(
+    const DObjSkelMat *input, float (*output)[3])
+{
+    iassert(input && output);
+    for (std::size_t row = 0u; row < 3u; ++row)
+        std::copy_n(input->axis[row], 3u, output[row]);
+    std::copy_n(input->origin, 3u, output[3]);
+}
+
+void __cdecl R_MarkUtil_GetDObjAnimMatAndHideParts(
+    const DObj_s *object,
+    const cpose_t *pose,
+    const DObjAnimMat **boneMatrices,
+    std::uint32_t *hidePartBits)
+{
+    iassert(object && pose && boneMatrices && hidePartBits);
+    int partBits[4] = {-1, -1, -1, -1};
+    *boneMatrices = CG_DObjCalcPose(pose, object, partBits);
+    iassert(*boneMatrices);
+    DObjGetHidePartBits(object, hidePartBits);
+}
+
 namespace
 {
 constexpr int MARK_CLIP_PLANE_COUNT = 6;

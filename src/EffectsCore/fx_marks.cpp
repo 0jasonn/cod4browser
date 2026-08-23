@@ -28,6 +28,28 @@ FxMarkPoint g_fxMarkPoints[765];
 
 static uint g_markThread[1];
 
+static void FX_EnterMarkThread(int32_t localClientNum)
+{
+    const uint threadCount =
+        InterlockedIncrement(&g_markThread[localClientNum]);
+    if (threadCount != 1u)
+    {
+        MyAssertHandler(".\\EffectsCore\\fx_marks.cpp", 0, 0, "%s",
+            "Sys_InterlockedIncrement( &g_markThread[localClientNum] ) == 1");
+    }
+}
+
+static void FX_LeaveMarkThread(int32_t localClientNum)
+{
+    const uint threadCount =
+        InterlockedDecrement(&g_markThread[localClientNum]);
+    if (threadCount != 0u)
+    {
+        MyAssertHandler(".\\EffectsCore\\fx_marks.cpp", 0, 0, "%s",
+            "Sys_InterlockedDecrement( &g_markThread[localClientNum] ) == 0");
+    }
+}
+
 void __cdecl TRACK_fx_marks()
 {
     track_static_alloc_internal(g_fxMarkPoints, 24480, "g_fxMarkPoints", 8);
@@ -456,7 +478,7 @@ static void __cdecl FX_AllocAndConstructMark(
 
     Sys_EnterCriticalSection(CRITSECT_ALLOC_MARK);
 
-    iassert(Sys_InterlockedIncrement(&g_markThread[localClientNum]) == 1);
+    FX_EnterMarkThread(localClientNum);
 
     marksSystem = FX_GetMarksSystem(localClientNum);
     tris = FX_AllocMarkTris(marksSystem, markTris, triCount);
@@ -519,7 +541,7 @@ static void __cdecl FX_AllocAndConstructMark(
     newMark->pointCount = pointCount;
 
     iassert(newMark->pointCount == pointCount);
-    iassert(Sys_InterlockedDecrement(&g_markThread[localClientNum]) == 0);
+    FX_LeaveMarkThread(localClientNum);
 
     Sys_LeaveCriticalSection(CRITSECT_ALLOC_MARK);
     FX_CopyMarkTris(marksSystem, markTris, newMark->tris, triCount);
@@ -1516,13 +1538,7 @@ void __cdecl FX_BeginGeneratingMarkVertsForEntModels(int32_t localClientNum, uin
             "fx_marks->current.enabled && fx_marks_ents->current.enabled");
     PROF_SCOPED("FX_GenMarkVertsEnt");
     R_BeginMarkMeshVerts();
-    if (InterlockedIncrement((LONG*) & g_markThread[localClientNum]) != 1)
-        MyAssertHandler(
-            ".\\EffectsCore\\fx_marks.cpp",
-            1638,
-            0,
-            "%s",
-            "Sys_InterlockedIncrement( &g_markThread[localClientNum] ) == 1");
+    FX_EnterMarkThread(localClientNum);
 
     FxMarksSystem *marksSystem = FX_GetMarksSystem(localClientNum);
     marksSystem->hasCarryIndex = 0;
@@ -1627,7 +1643,7 @@ void __cdecl FX_EndGeneratingMarkVertsForEntModels(int32_t localClientNum)
     FxMarksSystem *marksSystem = FX_GetMarksSystem(localClientNum);
     FX_FinishGeneratingMarkVerts(marksSystem);
 
-    iassert(Sys_InterlockedDecrement(&g_markThread[localClientNum]) == 0);
+    FX_LeaveMarkThread(localClientNum);
     R_EndMarkMeshVerts();
 }
 
@@ -1854,7 +1870,7 @@ void __cdecl FX_GenerateMarkVertsForStaticModels(
 
     PROF_SCOPED("FX_GenMarkVertsStaticModel");
     R_BeginMarkMeshVerts();
-    iassert(Sys_InterlockedIncrement(&g_markThread[localClientNum]) == 1);
+    FX_EnterMarkThread(localClientNum);
 
     FxMarksSystem *marksSystem = FX_GetMarksSystem(localClientNum);
     system = FX_GetSystem(localClientNum);
@@ -1874,7 +1890,7 @@ void __cdecl FX_GenerateMarkVertsForStaticModels(
     }
 
     FX_FinishGeneratingMarkVerts(marksSystem);
-    iassert(Sys_InterlockedDecrement(&g_markThread[localClientNum]) == 0);
+    FX_LeaveMarkThread(localClientNum);
     R_EndMarkMeshVerts();
 }
 
@@ -1884,7 +1900,7 @@ void __cdecl FX_GenerateMarkVertsForWorld(int32_t localClientNum)
     {
         PROF_SCOPED("FX_GenMarkVertsWorld");
         R_BeginMarkMeshVerts();
-        iassert(Sys_InterlockedIncrement(&g_markThread[localClientNum]) == 1);
+        FX_EnterMarkThread(localClientNum);
 
         FxMarksSystem *marksSystem = FX_GetMarksSystem(localClientNum);
 
@@ -1897,7 +1913,7 @@ void __cdecl FX_GenerateMarkVertsForWorld(int32_t localClientNum)
             &indexCount);
         FX_FinishGeneratingMarkVerts(marksSystem);
 
-        iassert(Sys_InterlockedDecrement(&g_markThread[localClientNum]) == 0);
+        FX_LeaveMarkThread(localClientNum);
         R_EndMarkMeshVerts();
     }
 }
