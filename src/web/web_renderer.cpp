@@ -2843,8 +2843,8 @@ bool CreateRendererResources()
                                 u_primary_light_spot_direction) *
                                 u_primary_light_spot_factors.x +
                             u_primary_light_spot_factors.y;
-                        float spot_attenuation = pow(max(
-                            spot_coordinate, 0.0),
+                        float spot_attenuation = pow(clamp(
+                            spot_coordinate, 0.0, 1.0),
                             u_primary_light_spot_factors.z);
                         float radial_attenuation = texture(
                             u_primary_light_attenuation,

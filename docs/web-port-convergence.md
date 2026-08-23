@@ -1028,7 +1028,7 @@ geometry. All 246 encountered world images decode successfully.
 
 The WebGL translation follows the authored `lm_spot` D3D9 token arithmetic:
 it retains both lightmap samplers, decodes the existing two-lobe baked term,
-then adds `primary visibility * falloff * spot cone * saturated N dot L *
+then adds `primary visibility * falloff * saturated spot cone * saturated N dot L *
 light diffuse`. Normal variants reconstruct the authored slope-space normal
 through the world tangent basis. The exact 32-sample L8 falloff and canonical
 light radius, color, direction, cone cosines, and exponent drive the shader;
