@@ -65,6 +65,30 @@ bool WebRenderer_CalculateColorManipulationConstants(
     const WebRendererFilmSettings &film,
     WebRendererColorManipulationConstants &constants) noexcept;
 
+struct WebRendererGlowSettings
+{
+    bool enabled = false;
+    float bloomCutoff = 0.0f;
+    float bloomDesaturation = 0.0f;
+    float bloomIntensity = 0.0f;
+    float radius = 0.0f;
+};
+
+// Exact CONST_SRC_CODE_GLOW_SETUP/APPLY values emitted by R_SetGlowInfo.
+struct WebRendererGlowConstants
+{
+    float bloomCutoff = 0.0f;
+    float bloomCutoffRescale = 0.0f;
+    float bloomDesaturation = 0.0f;
+    float bloomIntensity = 0.0f;
+    float radius = 0.0f;
+    bool enabled = false;
+};
+
+bool WebRenderer_CalculateGlowConstants(
+    const WebRendererGlowSettings &glow,
+    WebRendererGlowConstants &constants) noexcept;
+
 // CPU oracle for the native hardware gamma ramp. D3D9 applies
 // pow(displayValue, 1 / r_gamma) after rendering; WebGL must reproduce that
 // at the final framebuffer boundary rather than altering lightmap samples.

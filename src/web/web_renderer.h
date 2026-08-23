@@ -98,6 +98,15 @@ struct WebRendererSceneViewDesc
     float colorTintDelta[4];
     float displayGammaExponent;
     bool filmEnabled;
+    // Canonical GfxGlow after R_SetGlowInfo's tweak and renderer-dvar gates.
+    // The backend owns the quarter-resolution filter targets; these values
+    // remain authored campaign vision data rather than a browser effect model.
+    float glowBloomCutoff;
+    float glowBloomCutoffRescale;
+    float glowBloomDesaturation;
+    float glowBloomIntensity;
+    float glowRadius;
+    bool glowEnabled;
     // Canonical refdef blur radius. Native applies this to the resolved 3D
     // scene before the HUD, so the backend must not blur 2D commands.
     float blurRadius;

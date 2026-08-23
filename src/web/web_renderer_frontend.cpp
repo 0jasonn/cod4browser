@@ -1965,6 +1965,43 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     std::copy_n(colorManipulation.colorTintDelta, 4u,
         view.colorTintDelta);
     view.filmEnabled = colorManipulation.enabled;
+    GfxGlow glow = refdef->glow;
+    if (r_glowUseTweaks && r_glowUseTweaks->current.enabled)
+    {
+        glow.enabled = r_glowTweakEnable->current.enabled;
+        glow.radius = r_glowTweakRadius->current.value;
+        glow.bloomIntensity = r_glowTweakBloomIntensity->current.value;
+        glow.bloomCutoff = r_glowTweakBloomCutoff->current.value;
+        glow.bloomDesaturation =
+            r_glowTweakBloomDesaturation->current.value;
+    }
+    const bool glowAllowed =
+        (!r_glow_allowed || r_glow_allowed->current.enabled) ||
+        (r_glow_allowed_script_forced &&
+            r_glow_allowed_script_forced->current.enabled);
+    WebRendererGlowSettings glowSettings{};
+    glowSettings.enabled = glowAllowed && glow.enabled &&
+        (!r_fullbright || !r_fullbright->current.enabled) &&
+        (!r_glow || r_glow->current.enabled) &&
+        glow.bloomIntensity > 0.0f && glow.radius > 0.0f;
+    glowSettings.bloomCutoff = glow.bloomCutoff;
+    glowSettings.bloomDesaturation = glow.bloomDesaturation;
+    glowSettings.bloomIntensity = glow.bloomIntensity;
+    glowSettings.radius = glow.radius;
+    WebRendererGlowConstants glowConstants{};
+    if (!WebRenderer_CalculateGlowConstants(glowSettings, glowConstants))
+    {
+        Com_Error(ERR_DROP,
+            "R_RenderScene: invalid canonical glow constants");
+        return;
+    }
+    view.glowEnabled = glowConstants.enabled;
+    view.glowBloomCutoff = glowConstants.bloomCutoff;
+    view.glowBloomCutoffRescale =
+        glowConstants.bloomCutoffRescale;
+    view.glowBloomDesaturation = glowConstants.bloomDesaturation;
+    view.glowBloomIntensity = glowConstants.bloomIntensity;
+    view.glowRadius = glowConstants.radius;
     view.blurRadius = refdef->blurRadius;
     if (!g_sceneBlurReported && refdef->blurRadius > 0.0f)
     {
@@ -2017,6 +2054,15 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             view.fogEnabled, view.fogStart, view.fogDensity,
             view.fogColor[0], view.fogColor[1], view.fogColor[2],
             view.fogColor[3]);
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Canonical glow filter: active=%d "
+            "cutoff=%.6f rescale=%.6f desaturation=%.6f "
+            "intensity=%.6f radius=%.6f, quarter-resolution Gaussian "
+            "before HUD.\n",
+            view.glowEnabled, view.glowBloomCutoff,
+            view.glowBloomCutoffRescale,
+            view.glowBloomDesaturation,
+            view.glowBloomIntensity, view.glowRadius);
     }
     view.localClientNum = refdef->localClientNum;
     view.worldName = s_world.name;

@@ -505,6 +505,37 @@ bool WebRenderer_CalculateColorManipulationConstants(
     return true;
 }
 
+bool WebRenderer_CalculateGlowConstants(
+    const WebRendererGlowSettings &glow,
+    WebRendererGlowConstants &constants) noexcept
+{
+    if (!std::isfinite(glow.bloomCutoff) ||
+        !std::isfinite(glow.bloomDesaturation) ||
+        !std::isfinite(glow.bloomIntensity) ||
+        !std::isfinite(glow.radius) ||
+        glow.bloomCutoff < 0.0f || glow.bloomCutoff > 1.0f ||
+        glow.bloomDesaturation < 0.0f ||
+        glow.bloomDesaturation > 1.0f ||
+        glow.bloomIntensity < 0.0f || glow.radius < 0.0f)
+    {
+        constants = {};
+        return false;
+    }
+
+    WebRendererGlowConstants replacement{};
+    replacement.bloomCutoff = glow.bloomCutoff;
+    replacement.bloomDesaturation = glow.bloomDesaturation;
+    replacement.bloomIntensity = glow.bloomIntensity;
+    replacement.radius = glow.radius;
+    replacement.enabled = glow.enabled && glow.bloomCutoff < 1.0f &&
+        glow.bloomIntensity > 0.0f && glow.radius > 0.0f;
+    if (replacement.enabled)
+        replacement.bloomCutoffRescale =
+            1.0f / (1.0f - replacement.bloomCutoff);
+    constants = replacement;
+    return true;
+}
+
 float WebRenderer_EvaluateDisplayGamma(
     float displayValue, float gamma) noexcept
 {

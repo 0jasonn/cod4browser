@@ -171,6 +171,7 @@ struct WebRendererState
     GLuint program = 0;
     GLuint skyProgram = 0;
     GLuint postProcessProgram = 0;
+    GLuint glowProgram = 0;
     GLuint shadowProgram = 0;
     GLuint compatibilityProgram = 0;
     GLuint sceneFramebuffer = 0;
@@ -178,6 +179,8 @@ struct WebRendererState
     GLuint sceneDepthTexture = 0;
     GLuint compositeFramebuffer = 0;
     GLuint compositeColorTexture = 0;
+    GLuint glowFramebuffers[2]{};
+    GLuint glowColorTextures[2]{};
     GLuint shadowFramebuffer = 0;
     GLuint shadowDepthTexture = 0;
     GLuint shadowFarFramebuffer = 0;
@@ -272,6 +275,13 @@ struct WebRendererState
     GLint postProcessBlurScaleUniform = -1;
     GLint postProcessBlindDarkenUniform = -1;
     GLint postProcessGlareLightenUniform = -1;
+    GLint postProcessGlowTextureUniform = -1;
+    GLint postProcessGlowIntensityUniform = -1;
+    GLint glowTextureUniform = -1;
+    GLint glowModeUniform = -1;
+    GLint glowTexelDeltaUniform = -1;
+    GLint glowWeightsUniform = -1;
+    GLint glowSetupUniform = -1;
     GLint compatibilityViewProjectionUniform = -1;
     GLint compatibilityWorldUniform = -1;
     GLint compatibilityTextureUniform = -1;
@@ -378,6 +388,11 @@ struct WebRendererState
     std::array<float, 4> sceneColorTintDelta{};
     float sceneDisplayGammaExponent = 1.0f;
     float sceneBlurRadius = 0.0f;
+    float sceneGlowBloomCutoff = 0.0f;
+    float sceneGlowBloomCutoffRescale = 0.0f;
+    float sceneGlowBloomDesaturation = 0.0f;
+    float sceneGlowBloomIntensity = 0.0f;
+    float sceneGlowRadius = 0.0f;
     std::uint32_t sceneViewX = 0u;
     std::uint32_t sceneViewY = 0u;
     std::uint32_t sceneViewWidth = 0u;
@@ -387,6 +402,7 @@ struct WebRendererState
     bool sceneViewGeometrySubmitted = false;
     bool sceneFogEnabled = false;
     bool sceneFilmEnabled = false;
+    bool sceneGlowEnabled = false;
     bool sceneSunShadowEnabled = false;
     bool sceneViewFirstDrawCompleted = false;
     bool sceneViewWaitReported = false;
@@ -1729,6 +1745,7 @@ void ResetGpuHandles()
     g_renderer.program = 0;
     g_renderer.skyProgram = 0;
     g_renderer.postProcessProgram = 0;
+    g_renderer.glowProgram = 0;
     g_renderer.shadowProgram = 0;
     g_renderer.compatibilityProgram = 0;
     g_renderer.sceneFramebuffer = 0;
@@ -1736,6 +1753,8 @@ void ResetGpuHandles()
     g_renderer.sceneDepthTexture = 0;
     g_renderer.compositeFramebuffer = 0;
     g_renderer.compositeColorTexture = 0;
+    std::fill_n(g_renderer.glowFramebuffers, 2u, 0u);
+    std::fill_n(g_renderer.glowColorTextures, 2u, 0u);
     g_renderer.shadowFramebuffer = 0;
     g_renderer.shadowDepthTexture = 0;
     g_renderer.shadowFarFramebuffer = 0;
@@ -1840,6 +1859,13 @@ void ResetGpuHandles()
     g_renderer.postProcessBlurScaleUniform = -1;
     g_renderer.postProcessBlindDarkenUniform = -1;
     g_renderer.postProcessGlareLightenUniform = -1;
+    g_renderer.postProcessGlowTextureUniform = -1;
+    g_renderer.postProcessGlowIntensityUniform = -1;
+    g_renderer.glowTextureUniform = -1;
+    g_renderer.glowModeUniform = -1;
+    g_renderer.glowTexelDeltaUniform = -1;
+    g_renderer.glowWeightsUniform = -1;
+    g_renderer.glowSetupUniform = -1;
     g_renderer.compatibilityViewProjectionUniform = -1;
     g_renderer.compatibilityWorldUniform = -1;
     g_renderer.compatibilityTextureUniform = -1;
@@ -1990,6 +2016,7 @@ void DeletePipelineObjects(
     GLuint program,
     GLuint skyProgram,
     GLuint postProcessProgram,
+    GLuint glowProgram,
     GLuint compatibilityProgram,
     GLuint vertexArray,
     GLuint vertexBuffer,
@@ -2024,10 +2051,23 @@ void DeletePipelineObjects(
     {
         glDeleteProgram(postProcessProgram);
     }
+    if (glowProgram != 0)
+    {
+        glDeleteProgram(glowProgram);
+    }
     if (compatibilityProgram != 0)
     {
         glDeleteProgram(compatibilityProgram);
     }
+}
+
+void DeleteGlowTargetObjects(
+    const GLuint framebuffers[2], const GLuint textures[2])
+{
+    if (framebuffers[0] != 0u || framebuffers[1] != 0u)
+        glDeleteFramebuffers(2, framebuffers);
+    if (textures[0] != 0u || textures[1] != 0u)
+        glDeleteTextures(2, textures);
 }
 
 void DeletePostProcessTargetObjects(
@@ -2112,6 +2152,8 @@ void DestroyWebGLContext()
             g_renderer.sceneDepthTexture,
             g_renderer.compositeFramebuffer,
             g_renderer.compositeColorTexture);
+        DeleteGlowTargetObjects(
+            g_renderer.glowFramebuffers, g_renderer.glowColorTextures);
         DeleteShadowObjects(
             g_renderer.shadowFramebuffer,
             g_renderer.shadowDepthTexture,
@@ -2129,6 +2171,7 @@ void DestroyWebGLContext()
             g_renderer.program,
             g_renderer.skyProgram,
             g_renderer.postProcessProgram,
+            g_renderer.glowProgram,
             g_renderer.compatibilityProgram,
             g_renderer.vertexArray,
             g_renderer.vertexBuffer,
@@ -2642,6 +2685,8 @@ bool CreatePostProcessTargets(int width, int height)
     if (width <= 0 || height <= 0) return false;
     if (g_renderer.sceneFramebuffer != 0u &&
         g_renderer.compositeFramebuffer != 0u &&
+        g_renderer.glowFramebuffers[0] != 0u &&
+        g_renderer.glowFramebuffers[1] != 0u &&
         g_renderer.postProcessWidth == width &&
         g_renderer.postProcessHeight == height)
         return true;
@@ -2652,11 +2697,15 @@ bool CreatePostProcessTargets(int width, int height)
         g_renderer.sceneDepthTexture,
         g_renderer.compositeFramebuffer,
         g_renderer.compositeColorTexture);
+    DeleteGlowTargetObjects(
+        g_renderer.glowFramebuffers, g_renderer.glowColorTextures);
     g_renderer.sceneFramebuffer = 0u;
     g_renderer.sceneColorTexture = 0u;
     g_renderer.sceneDepthTexture = 0u;
     g_renderer.compositeFramebuffer = 0u;
     g_renderer.compositeColorTexture = 0u;
+    std::fill_n(g_renderer.glowFramebuffers, 2u, 0u);
+    std::fill_n(g_renderer.glowColorTextures, 2u, 0u);
     g_renderer.postProcessWidth = 0;
     g_renderer.postProcessHeight = 0;
 
@@ -2665,6 +2714,8 @@ bool CreatePostProcessTargets(int width, int height)
     GLuint sceneDepthTexture = 0u;
     GLuint compositeFramebuffer = 0u;
     GLuint compositeColorTexture = 0u;
+    GLuint glowFramebuffers[2]{};
+    GLuint glowColorTextures[2]{};
     while (glGetError() != GL_NO_ERROR)
     {
     }
@@ -2706,6 +2757,25 @@ bool CreatePostProcessTargets(int width, int height)
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
         GL_TEXTURE_2D, compositeColorTexture, 0);
     const GLenum compositeStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    const int glowWidth = std::max(1, width / 4);
+    const int glowHeight = std::max(1, height / 4);
+    GLenum glowStatus[2]{};
+    glGenTextures(2, glowColorTextures);
+    glGenFramebuffers(2, glowFramebuffers);
+    for (std::size_t index = 0u; index < 2u; ++index)
+    {
+        glBindTexture(GL_TEXTURE_2D, glowColorTextures[index]);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8,
+            glowWidth, glowHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glBindFramebuffer(GL_FRAMEBUFFER, glowFramebuffers[index]);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+            GL_TEXTURE_2D, glowColorTextures[index], 0);
+        glowStatus[index] = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    }
     const GLenum error = glGetError();
     glBindFramebuffer(GL_FRAMEBUFFER, 0u);
     glBindTexture(GL_TEXTURE_2D, 0u);
@@ -2713,18 +2783,25 @@ bool CreatePostProcessTargets(int width, int height)
     if (sceneFramebuffer == 0u || sceneColorTexture == 0u ||
         sceneDepthTexture == 0u || compositeFramebuffer == 0u ||
         compositeColorTexture == 0u ||
+        glowFramebuffers[0] == 0u || glowFramebuffers[1] == 0u ||
+        glowColorTextures[0] == 0u || glowColorTextures[1] == 0u ||
         sceneStatus != GL_FRAMEBUFFER_COMPLETE ||
         compositeStatus != GL_FRAMEBUFFER_COMPLETE ||
+        glowStatus[0] != GL_FRAMEBUFFER_COMPLETE ||
+        glowStatus[1] != GL_FRAMEBUFFER_COMPLETE ||
         error != GL_NO_ERROR)
     {
         DeletePostProcessTargetObjects(sceneFramebuffer, sceneColorTexture,
             sceneDepthTexture, compositeFramebuffer,
             compositeColorTexture);
+        DeleteGlowTargetObjects(glowFramebuffers, glowColorTextures);
         Web_Log(WebLogLevel::Error,
             "[kisakcod-web] WebGL2 post-effect target creation failed "
-            "(scene=0x%x composite=0x%x error=0x%x).\n",
+            "(scene=0x%x composite=0x%x glow=0x%x/0x%x error=0x%x).\n",
             static_cast<unsigned int>(sceneStatus),
             static_cast<unsigned int>(compositeStatus),
+            static_cast<unsigned int>(glowStatus[0]),
+            static_cast<unsigned int>(glowStatus[1]),
             static_cast<unsigned int>(error));
         return false;
     }
@@ -2734,6 +2811,8 @@ bool CreatePostProcessTargets(int width, int height)
     g_renderer.sceneDepthTexture = sceneDepthTexture;
     g_renderer.compositeFramebuffer = compositeFramebuffer;
     g_renderer.compositeColorTexture = compositeColorTexture;
+    std::copy_n(glowFramebuffers, 2u, g_renderer.glowFramebuffers);
+    std::copy_n(glowColorTextures, 2u, g_renderer.glowColorTextures);
     g_renderer.postProcessWidth = width;
     g_renderer.postProcessHeight = height;
     return true;
@@ -3429,6 +3508,8 @@ bool CreateRendererResources()
         uniform vec2 u_blur_scale;
         uniform float u_blind_darken;
         uniform float u_glare_lighten;
+        uniform sampler2D u_glow;
+        uniform float u_glow_intensity;
         out vec4 out_color;
         void main()
         {
@@ -3481,11 +3562,55 @@ bool CreateRendererResources()
                     u_color_tint_delta.rgb * intensity;
                 color = desaturated * tint + u_color_bias.rgb;
             }
+            color += texture(u_glow, uv).rgb * u_glow_intensity;
             color = pow(clamp(color, 0.0, 1.0),
                 vec3(u_gamma_exponent));
             color = color * (1.0 - clamp(u_blind_darken, 0.0, 1.0)) +
                 vec3(clamp(u_glare_lighten, 0.0, 1.0));
             out_color = vec4(color, source.a);
+        }
+    )glsl";
+
+    constexpr const char *glowFragmentSource = R"glsl(#version 300 es
+        precision highp float;
+        in vec2 v_ndc;
+        uniform sampler2D u_source;
+        uniform int u_mode;
+        uniform vec2 u_texel_delta;
+        uniform float u_weights[9];
+        uniform vec4 u_setup;
+        out vec4 out_color;
+        void main()
+        {
+            vec2 uv = v_ndc * 0.5 + 0.5;
+            if (u_mode == 0)
+            {
+                vec3 source = (
+                    texture(u_source, uv + vec2(
+                        u_texel_delta.x, u_texel_delta.y)).rgb +
+                    texture(u_source, uv + vec2(
+                       -u_texel_delta.x, u_texel_delta.y)).rgb +
+                    texture(u_source, uv + vec2(
+                        u_texel_delta.x, -u_texel_delta.y)).rgb +
+                    texture(u_source, uv - u_texel_delta).rgb) * 0.25;
+                vec3 bloom = clamp(
+                    (source - vec3(u_setup.x)) * u_setup.y,
+                    0.0, 1.0);
+                float intensity = dot(bloom,
+                    vec3(0.2989, 0.5870, 0.1140));
+                bloom = mix(bloom, vec3(intensity),
+                    clamp(u_setup.w, 0.0, 1.0));
+                out_color = vec4(bloom, 1.0);
+                return;
+            }
+            vec4 filtered = texture(u_source, uv) * u_weights[0];
+            for (int tap = 1; tap < 9; ++tap)
+            {
+                vec2 offset = u_texel_delta * float(tap);
+                filtered += (texture(u_source, uv + offset) +
+                    texture(u_source, uv - offset)) * u_weights[tap];
+            }
+            out_color = filtered;
         }
     )glsl";
 
@@ -3513,6 +3638,16 @@ bool CreateRendererResources()
         glDeleteProgram(program);
         glDeleteProgram(skyProgram);
         glDeleteProgram(shadowProgram);
+        return false;
+    }
+    GLuint glowProgram = 0u;
+    if (!LinkProgram("canonical glow", skyVertexSource,
+            glowFragmentSource, glowProgram))
+    {
+        glDeleteProgram(program);
+        glDeleteProgram(skyProgram);
+        glDeleteProgram(shadowProgram);
+        glDeleteProgram(postProcessProgram);
         return false;
     }
 
@@ -3649,6 +3784,20 @@ bool CreateRendererResources()
         glGetUniformLocation(postProcessProgram, "u_blind_darken");
     const GLint postProcessGlareLightenUniform =
         glGetUniformLocation(postProcessProgram, "u_glare_lighten");
+    const GLint postProcessGlowTextureUniform =
+        glGetUniformLocation(postProcessProgram, "u_glow");
+    const GLint postProcessGlowIntensityUniform =
+        glGetUniformLocation(postProcessProgram, "u_glow_intensity");
+    const GLint glowTextureUniform =
+        glGetUniformLocation(glowProgram, "u_source");
+    const GLint glowModeUniform =
+        glGetUniformLocation(glowProgram, "u_mode");
+    const GLint glowTexelDeltaUniform =
+        glGetUniformLocation(glowProgram, "u_texel_delta");
+    const GLint glowWeightsUniform =
+        glGetUniformLocation(glowProgram, "u_weights[0]");
+    const GLint glowSetupUniform =
+        glGetUniformLocation(glowProgram, "u_setup");
     const GLenum pipelineError = glGetError();
 
     const std::uint8_t *texturePixels = FALLBACK_TEXTURE_RGBA;
@@ -3805,6 +3954,11 @@ bool CreateRendererResources()
         postProcessBlurScaleUniform < 0 ||
         postProcessBlindDarkenUniform < 0 ||
         postProcessGlareLightenUniform < 0 ||
+        postProcessGlowTextureUniform < 0 ||
+        postProcessGlowIntensityUniform < 0 ||
+        glowTextureUniform < 0 || glowModeUniform < 0 ||
+        glowTexelDeltaUniform < 0 || glowWeightsUniform < 0 ||
+        glowSetupUniform < 0 ||
         pipelineError != GL_NO_ERROR ||
         !surfaceReady || !textureReady || !worldTexturesReady ||
         !waterTexturesReady ||
@@ -3825,6 +3979,7 @@ bool CreateRendererResources()
             program,
             skyProgram,
             postProcessProgram,
+            glowProgram,
             compatibilityProgram,
             vertexArray,
             vertexBuffer,
@@ -3858,6 +4013,7 @@ bool CreateRendererResources()
     g_renderer.program = program;
     g_renderer.skyProgram = skyProgram;
     g_renderer.postProcessProgram = postProcessProgram;
+    g_renderer.glowProgram = glowProgram;
     g_renderer.shadowProgram = shadowProgram;
     g_renderer.compatibilityProgram = compatibilityProgram;
     g_renderer.vertexArray = vertexArray;
@@ -3959,6 +4115,15 @@ bool CreateRendererResources()
         postProcessBlindDarkenUniform;
     g_renderer.postProcessGlareLightenUniform =
         postProcessGlareLightenUniform;
+    g_renderer.postProcessGlowTextureUniform =
+        postProcessGlowTextureUniform;
+    g_renderer.postProcessGlowIntensityUniform =
+        postProcessGlowIntensityUniform;
+    g_renderer.glowTextureUniform = glowTextureUniform;
+    g_renderer.glowModeUniform = glowModeUniform;
+    g_renderer.glowTexelDeltaUniform = glowTexelDeltaUniform;
+    g_renderer.glowWeightsUniform = glowWeightsUniform;
+    g_renderer.glowSetupUniform = glowSetupUniform;
     g_renderer.compatibilityViewProjectionUniform = compatibilityViewProjection;
     g_renderer.compatibilityWorldUniform = compatibilityWorld;
     g_renderer.compatibilityTextureUniform = compatibilityTexture;
@@ -5411,7 +5576,13 @@ void __cdecl R_UnloadWorld()
     g_renderer.sceneColorTintDelta = {};
     g_renderer.sceneDisplayGammaExponent = 1.0f;
     g_renderer.sceneBlurRadius = 0.0f;
+    g_renderer.sceneGlowBloomCutoff = 0.0f;
+    g_renderer.sceneGlowBloomCutoffRescale = 0.0f;
+    g_renderer.sceneGlowBloomDesaturation = 0.0f;
+    g_renderer.sceneGlowBloomIntensity = 0.0f;
+    g_renderer.sceneGlowRadius = 0.0f;
     g_renderer.sceneFilmEnabled = false;
+    g_renderer.sceneGlowEnabled = false;
     g_renderer.sceneSunShadowEnabled = false;
     std::fill_n(g_renderer.sunVisibilityQueries, 2u, 0u);
     std::fill_n(g_renderer.sunVisibilityQueryIssued, 2u, false);
@@ -6300,6 +6471,23 @@ bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
     {
         return false;
     }
+    if (!std::isfinite(view.glowBloomCutoff) ||
+        !std::isfinite(view.glowBloomCutoffRescale) ||
+        !std::isfinite(view.glowBloomDesaturation) ||
+        !std::isfinite(view.glowBloomIntensity) ||
+        !std::isfinite(view.glowRadius) ||
+        view.glowBloomCutoff < 0.0f || view.glowBloomCutoff > 1.0f ||
+        view.glowBloomCutoffRescale < 0.0f ||
+        view.glowBloomDesaturation < 0.0f ||
+        view.glowBloomDesaturation > 1.0f ||
+        view.glowBloomIntensity < 0.0f || view.glowRadius < 0.0f ||
+        (view.glowEnabled &&
+            (view.glowBloomCutoff >= 1.0f ||
+             view.glowBloomCutoffRescale <= 0.0f ||
+             view.glowBloomIntensity <= 0.0f || view.glowRadius <= 0.0f)))
+    {
+        return false;
+    }
     if (view.sunShadowEnabled)
     {
         for (std::size_t component = 0u; component < 3u; ++component)
@@ -6367,7 +6555,14 @@ bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
         g_renderer.sceneColorTintDelta.begin());
     g_renderer.sceneDisplayGammaExponent = view.displayGammaExponent;
     g_renderer.sceneBlurRadius = view.blurRadius;
+    g_renderer.sceneGlowBloomCutoff = view.glowBloomCutoff;
+    g_renderer.sceneGlowBloomCutoffRescale =
+        view.glowBloomCutoffRescale;
+    g_renderer.sceneGlowBloomDesaturation = view.glowBloomDesaturation;
+    g_renderer.sceneGlowBloomIntensity = view.glowBloomIntensity;
+    g_renderer.sceneGlowRadius = view.glowRadius;
     g_renderer.sceneFilmEnabled = view.filmEnabled;
+    g_renderer.sceneGlowEnabled = view.glowEnabled;
     g_renderer.sceneViewWorldName = view.worldName;
     if (view.geometrySubmitted)
     {
@@ -6963,8 +7158,95 @@ void UpdateSunPostEffectState() noexcept
         g_renderer.sunGlareMaxLighten;
 }
 
+GLuint DrawGlowImage(int width, int height)
+{
+    if (!g_renderer.sceneGlowEnabled || g_renderer.glowProgram == 0u ||
+        g_renderer.glowFramebuffers[0] == 0u ||
+        g_renderer.glowFramebuffers[1] == 0u)
+        return 0u;
+
+    const int glowWidth = std::max(1, width / 4);
+    const int glowHeight = std::max(1, height / 4);
+    glUseProgram(g_renderer.glowProgram);
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+    glDisable(GL_BLEND);
+    glDisable(GL_CULL_FACE);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glUniform1i(g_renderer.glowTextureUniform, 5);
+    glBindVertexArray(g_renderer.vertexArray);
+
+    // glow_consistent_setup thresholds the resolved scene while reducing it
+    // to one quarter in each dimension. Four symmetric source taps keep the
+    // reduction stable across native scene resolutions.
+    glBindFramebuffer(GL_FRAMEBUFFER, g_renderer.glowFramebuffers[0]);
+    glViewport(0, 0, glowWidth, glowHeight);
+    glUniform1i(g_renderer.glowModeUniform, 0);
+    glUniform2f(g_renderer.glowTexelDeltaUniform,
+        width > 0 ? 1.5f / static_cast<float>(width) : 0.0f,
+        height > 0 ? 1.5f / static_cast<float>(height) : 0.0f);
+    glUniform4f(g_renderer.glowSetupUniform,
+        g_renderer.sceneGlowBloomCutoff,
+        g_renderer.sceneGlowBloomCutoffRescale,
+        0.0f,
+        g_renderer.sceneGlowBloomDesaturation);
+    glActiveTexture(GL_TEXTURE5);
+    glBindTexture(GL_TEXTURE_2D, g_renderer.sceneColorTexture);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+
+    const float filterRadius = g_renderer.sceneGlowRadius *
+        static_cast<float>(glowHeight) / 480.0f;
+    const float sigma = std::max(filterRadius / 3.0f, 0.5f);
+    std::array<float, 9> weights{};
+    weights[0] = 1.0f;
+    float weightSum = weights[0];
+    for (std::size_t tap = 1u; tap < weights.size(); ++tap)
+    {
+        const float distance = static_cast<float>(tap);
+        weights[tap] = std::exp(
+            -(distance * distance) / (2.0f * sigma * sigma));
+        weightSum += 2.0f * weights[tap];
+    }
+    for (float &weight : weights) weight /= weightSum;
+    glUniform1fv(g_renderer.glowWeightsUniform,
+        static_cast<GLsizei>(weights.size()), weights.data());
+    glUniform1i(g_renderer.glowModeUniform, 1);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, g_renderer.glowFramebuffers[1]);
+    glUniform2f(g_renderer.glowTexelDeltaUniform,
+        1.0f / static_cast<float>(glowWidth), 0.0f);
+    glBindTexture(GL_TEXTURE_2D, g_renderer.glowColorTextures[0]);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, g_renderer.glowFramebuffers[0]);
+    glUniform2f(g_renderer.glowTexelDeltaUniform,
+        0.0f, 1.0f / static_cast<float>(glowHeight));
+    glBindTexture(GL_TEXTURE_2D, g_renderer.glowColorTextures[1]);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    static bool glowDrawReported = false;
+    if (!glowDrawReported)
+    {
+        glowDrawReported = true;
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Canonical glow draw: source=%dx%d "
+            "filter=%dx%d cutoff=%.6f rescale=%.6f "
+            "desaturation=%.6f intensity=%.6f radius=%.6f "
+            "sigma=%.6f.\n",
+            width, height, glowWidth, glowHeight,
+            g_renderer.sceneGlowBloomCutoff,
+            g_renderer.sceneGlowBloomCutoffRescale,
+            g_renderer.sceneGlowBloomDesaturation,
+            g_renderer.sceneGlowBloomIntensity,
+            g_renderer.sceneGlowRadius, sigma);
+    }
+    glActiveTexture(GL_TEXTURE0);
+    glDepthMask(GL_TRUE);
+    return g_renderer.glowColorTextures[0];
+}
+
 void DrawPostProcessPass(
     GLuint sourceTexture,
+    GLuint glowTexture,
     GLuint destinationFramebuffer,
     int width,
     int height,
@@ -6972,7 +7254,8 @@ void DrawPostProcessPass(
     float gammaExponent,
     float blurRadius,
     float blindDarken,
-    float glareLighten)
+    float glareLighten,
+    float glowIntensity)
 {
     glBindFramebuffer(GL_FRAMEBUFFER, destinationFramebuffer);
     glViewport(0, 0, width, height);
@@ -7000,8 +7283,13 @@ void DrawPostProcessPass(
         height > 0 ? scaledBlurRadius / static_cast<float>(height) : 0.0f);
     glUniform1f(g_renderer.postProcessBlindDarkenUniform, blindDarken);
     glUniform1f(g_renderer.postProcessGlareLightenUniform, glareLighten);
+    glUniform1i(g_renderer.postProcessGlowTextureUniform, 6);
+    glUniform1f(g_renderer.postProcessGlowIntensityUniform, glowIntensity);
     glActiveTexture(GL_TEXTURE5);
     glBindTexture(GL_TEXTURE_2D, sourceTexture);
+    glActiveTexture(GL_TEXTURE6);
+    glBindTexture(GL_TEXTURE_2D,
+        glowTexture != 0u ? glowTexture : sourceTexture);
     glBindVertexArray(g_renderer.vertexArray);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glActiveTexture(GL_TEXTURE0);
@@ -7800,13 +8088,16 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
     }
     if (sceneGeometryDraw && !compatibilityDraw)
         UpdateSunPostEffectState();
+    GLuint glowImage = 0u;
     if (postProcessDraw)
     {
+        glowImage = DrawGlowImage(width, height);
         // COD4 resolves and color-manipulates the 3D scene before any 2D
         // commands. Keep the pass separate from the final display gamma so
         // campaign vision tint never contaminates HUD colors.
         DrawPostProcessPass(
             g_renderer.sceneColorTexture,
+            glowImage,
             g_renderer.compositeFramebuffer,
             width,
             height,
@@ -7814,7 +8105,9 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             1.0f,
             g_renderer.sceneBlurRadius,
             g_renderer.sunBlindDarken,
-            g_renderer.sunGlareLighten);
+            g_renderer.sunGlareLighten,
+            glowImage != 0u
+                ? g_renderer.sceneGlowBloomIntensity : 0.0f);
     }
     if (postProcessDraw && sceneGeometryDraw && !compatibilityDraw &&
         g_renderer.dynamicModelSceneActive &&
@@ -7936,10 +8229,12 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         DrawPostProcessPass(
             g_renderer.compositeColorTexture,
             0u,
+            0u,
             width,
             height,
             false,
             g_renderer.sceneDisplayGammaExponent,
+            0.0f,
             0.0f,
             0.0f,
             0.0f);

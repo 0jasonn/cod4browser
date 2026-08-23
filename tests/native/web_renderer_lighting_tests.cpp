@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <vector>
 
 namespace
@@ -149,6 +150,36 @@ void TestNativeColorManipulationConstants()
     assert(!constants.enabled);
     assert(Near(constants.colorBias[3], 4095.0f));
     assert(Near(constants.colorTintBase[0], 1.0f / 4096.0f));
+}
+
+void TestNativeGlowConstants()
+{
+    WebRendererGlowSettings glow{};
+    glow.enabled = true;
+    glow.bloomCutoff = 0.812775f;
+    glow.bloomDesaturation = 0.0f;
+    glow.bloomIntensity = 0.5f;
+    glow.radius = 9.2f;
+    WebRendererGlowConstants constants{};
+    assert(WebRenderer_CalculateGlowConstants(glow, constants));
+    assert(constants.enabled);
+    assert(Near(constants.bloomCutoff, 0.812775f));
+    assert(Near(constants.bloomCutoffRescale,
+        1.0f / (1.0f - 0.812775f)));
+    assert(Near(constants.bloomIntensity, 0.5f));
+    assert(Near(constants.radius, 9.2f));
+
+    glow.enabled = false;
+    assert(WebRenderer_CalculateGlowConstants(glow, constants));
+    assert(!constants.enabled);
+    assert(Near(constants.bloomCutoffRescale, 0.0f));
+
+    glow.enabled = true;
+    glow.bloomCutoff = 1.0f;
+    assert(WebRenderer_CalculateGlowConstants(glow, constants));
+    assert(!constants.enabled);
+    glow.bloomCutoff = std::numeric_limits<float>::quiet_NaN();
+    assert(!WebRenderer_CalculateGlowConstants(glow, constants));
 }
 
 void TestNativeDisplayGammaRamp()
@@ -334,6 +365,7 @@ int main()
     TestCanonicalFrameFogTransition();
     TestNativeExponentialFogVisibility();
     TestNativeColorManipulationConstants();
+    TestNativeGlowConstants();
     TestNativeDisplayGammaRamp();
     TestNativeDxt5NormalDecode();
     TestNativeLightGridRleAndFixedPointBlend();
