@@ -548,6 +548,7 @@ const char *FxSourceKindName(WebRendererSceneBatchKind kind) noexcept
     case WebRendererSceneBatchKind::FxXModel: return "FxXModel";
     case WebRendererSceneBatchKind::FxParticleCloud: return "FxParticleCloud";
     case WebRendererSceneBatchKind::FxMarkMesh: return "FxMarkMesh";
+    case WebRendererSceneBatchKind::SunSprite: return "SunSprite";
     default: return "";
     }
 }
@@ -647,6 +648,7 @@ const char *ComparisonSourceKindName(WebRendererSceneBatchKind kind) noexcept
     case WebRendererSceneBatchKind::FxXModel: return "FxXModel";
     case WebRendererSceneBatchKind::FxParticleCloud: return "FxParticleCloud";
     case WebRendererSceneBatchKind::FxMarkMesh: return "FxMarkMesh";
+    case WebRendererSceneBatchKind::SunSprite: return "SunSprite";
     }
     return "Unknown";
 }
@@ -7251,9 +7253,13 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                  g_renderer.retainedDynamicModelBatches)
             {
                 if (batch.depthHack != depthHackPass) continue;
+                const bool sunSprite = batch.sourceKind ==
+                    WebRendererSceneBatchKind::SunSprite;
                 glUniformMatrix4fv(g_renderer.viewProjectionUniform, 1,
                     GL_FALSE,
-                    batch.depthHack
+                    sunSprite
+                        ? IDENTITY_MATRIX
+                        : batch.depthHack
                         ? g_renderer.sceneDepthHackViewProjection.data()
                         : g_renderer.sceneViewProjection.data());
                 glDepthRangef(0.0f, batch.depthHack ? 0.015625f : 1.0f);
@@ -7316,7 +7322,8 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                     batch.techniqueType == 10u &&
                     batch.pixelShaderName.rfind("lm_spot_", 0u) == 0u;
                 glUniform1f(g_renderer.fogEnabledUniform,
-                    g_renderer.sceneFogEnabled && !fxSceneGeometry
+                    g_renderer.sceneFogEnabled && !fxSceneGeometry &&
+                        !sunSprite
                         ? 1.0f : 0.0f);
                 glUniform1f(g_renderer.sceneFallbackUniform,
                     fallback && !fxSceneGeometry ? 1.0f : 0.0f);
@@ -7368,6 +7375,17 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 }
                 glUniform3fv(g_renderer.modelLightingBaseCoordinatesUniform,
                     1, batch.modelLightingCoordinates);
+                if (sunSprite)
+                {
+                    // Native visibility is derived from an occlusion query.
+                    // The portable command sits at D3D far depth, so the
+                    // already-populated WebGL depth buffer provides the same
+                    // receiver test without exposing a query object across
+                    // the renderer boundary.
+                    glEnable(GL_DEPTH_TEST);
+                    glDepthFunc(GL_LEQUAL);
+                    glDepthMask(GL_FALSE);
+                }
                 BindWorldTexture(GL_TEXTURE0,
                     base ? base->texture : g_renderer.texture,
                     batch.samplerState);
@@ -7395,6 +7413,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                     static_cast<GLsizei>(batch.indexCount),
                     GL_UNSIGNED_INT,
                     reinterpret_cast<const void *>(indexOffset));
+                if (sunSprite) glDepthMask(GL_TRUE);
                 ++completedDraws;
             }
         }

@@ -1199,3 +1199,28 @@ or draw failures. Static/DObj receiver marks currently use the material's
 canonical type-7 pass and geometry but do not yet copy the receiver's exact
 model-lighting atlas entry into the dynamic mark command; that lighting handoff
 is the remaining mark-specific fidelity gap.
+
+## Canonical sun-sprite update (2026-08-23)
+
+The browser scene frontend now reproduces `RB_DrawSunSprite` from the published
+`GfxWorld::sun` record. It resolves the canonical sprite `Material` and
+`GfxImage`, uses the authored angular size and `sunFxPosition`, constructs the
+same orthogonal direction-space billboard, and retains `RB_SetTessQuad`'s UVs
+and triangle winding. The frontend projects that direction-only quad into a
+portable clip-space `SunSprite` batch, so no D3D query or WebGL handle crosses
+the renderer boundary.
+
+The WebGL backend draws the sprite with the canonical material sampler and
+blend state, no fog or depth writes, and far-depth receiver testing against the
+already-populated scene depth. Indoor Killhouse validation therefore retains
+roof occlusion rather than leaking the sun through geometry. Native animated
+occlusion-query visibility, flare, blind, and glare post-effects remain the
+next environment-specific convergence gap.
+
+The Release build and focused world-scene, comparison, and DObj-submission
+Wasm-native tests pass. In the reopened Chrome tab, Killhouse publishes the
+1024-square six-face `sp_killhouse_ft` cubemap plus the authored `sun` material,
+`sun` image, 14.606 sprite size, and canonical direction with no assertion,
+shader, context, descriptor, or draw errors. A four-second live sample in the
+developer-camera run advances 210 frames in 4.028 seconds (52.14 fps); the
+ordinary spawn view separately sustains 59.78 fps.

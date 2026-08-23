@@ -635,6 +635,142 @@ void ConfigureMarkBatch(WebRendererWorldBatchDesc &batch,
         batch.technique = WebRendererWorldTechnique::BaseTexture;
 }
 
+bool AppendSunSprite(WebRendererDObjSceneCommand &command,
+    const WebRendererSceneViewDesc &view) noexcept
+{
+    static bool reported = false;
+    if (!s_world.sun.hasValidData || !s_world.sun.spriteMaterial ||
+        s_world.sun.spriteSize <= 0.0f)
+        return false;
+    Material *material = ResolveRendererMaterial(s_world.sun.spriteMaterial);
+    if (!material) return false;
+    std::uint8_t samplerState = 0u;
+    const GfxImage *image = FindFxImage(material, samplerState);
+    if (!image) return false;
+
+    float perpendicular[3]{};
+    const float *sun = s_world.sun.sunFxPosition;
+    if (sun[2] * sun[2] <= 0.99000001f)
+    {
+        perpendicular[0] = sun[1];
+        perpendicular[1] = -sun[0];
+    }
+    else
+        perpendicular[0] = 1.0f;
+    float right[3]{};
+    Vec3Cross(sun, perpendicular, right);
+    if (Vec3Normalize(right) <= 0.0f) return false;
+    Vec3Scale(right,
+        s_world.sun.spriteSize * 0.001311092986725271f, right);
+    float up[3]{};
+    Vec3Cross(right, sun, up);
+    float rightUp[3]{};
+    float rightDown[3]{};
+    Vec3Add(right, up, rightUp);
+    Vec3Sub(right, up, rightDown);
+    float directions[4][3]{};
+    Vec3Add(sun, rightUp, directions[0]);
+    Vec3Add(sun, rightDown, directions[1]);
+    Vec3Sub(sun, rightUp, directions[2]);
+    Vec3Sub(sun, rightDown, directions[3]);
+
+    constexpr float uvs[4][2] = {
+        {1.0f, 0.0f}, {1.0f, 1.0f},
+        {0.0f, 1.0f}, {0.0f, 0.0f},
+    };
+    try
+    {
+        if (command.vertices.size() + 4u >
+                WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES ||
+            command.indices.size() + 6u >
+                WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES)
+            return false;
+        const std::uint32_t vertexBase = static_cast<std::uint32_t>(
+            command.vertices.size());
+        const std::uint32_t firstIndex = static_cast<std::uint32_t>(
+            command.indices.size());
+        for (std::size_t vertexIndex = 0u; vertexIndex < 4u; ++vertexIndex)
+        {
+            float clip[4]{};
+            for (std::size_t column = 0u; column < 4u; ++column)
+            {
+                clip[column] =
+                    directions[vertexIndex][0] *
+                        view.viewProjectionMatrix[0][column] +
+                    directions[vertexIndex][1] *
+                        view.viewProjectionMatrix[1][column] +
+                    directions[vertexIndex][2] *
+                        view.viewProjectionMatrix[2][column];
+            }
+            if (!std::isfinite(clip[3]) || clip[3] <= 0.0f)
+                return false;
+            WebRendererSurfaceVertex vertex{};
+            vertex.position[0] = clip[0] / clip[3];
+            vertex.position[1] = clip[1] / clip[3];
+            vertex.position[2] = clip[2] / clip[3];
+            vertex.textureCoordinate[0] = uvs[vertexIndex][0];
+            vertex.textureCoordinate[1] = uvs[vertexIndex][1];
+            std::fill_n(vertex.color, 4u, 1.0f);
+            command.vertices.push_back(vertex);
+        }
+        // Match RB_SetTessQuad's canonical winding exactly.  The authored sun
+        // material retains its native cull state, so reversing these triangles
+        // makes the otherwise-valid billboard disappear.
+        constexpr std::uint32_t localIndices[6] = {3u, 0u, 2u, 2u, 0u, 1u};
+        for (const std::uint32_t index : localIndices)
+            command.indices.push_back(vertexBase + index);
+
+        WebRendererWorldBatchDesc batch{};
+        batch.firstIndex = firstIndex;
+        batch.indexCount = 6u;
+        batch.surfaceCount = 1u;
+        batch.materialIdentity = material;
+        batch.materialName = material->info.name
+            ? material->info.name : "<sun-sprite>";
+        batch.modelName = "<sun-sprite>";
+        batch.firstInstanceIndex = UINT32_MAX;
+        batch.lastInstanceIndex = UINT32_MAX;
+        batch.baseImage = image;
+        batch.samplerState = samplerState;
+        batch.sourceKind = WebRendererSceneBatchKind::SunSprite;
+        batch.technique = WebRendererWorldTechnique::BaseTexture;
+        batch.techniqueType = 4u;
+        const MaterialTechnique *technique = material->techniqueSet
+            ? material->techniqueSet->techniques[4u] : nullptr;
+        batch.techniqueName = technique && technique->name
+            ? technique->name : "<sun-unlit>";
+        if (material->stateBitsTable)
+        {
+            const std::uint8_t entry = material->stateBitsEntry[4u];
+            if (entry != 0xffu && entry < material->stateBitsCount)
+            {
+                batch.stateBits[0] = material->stateBitsTable[entry].loadBits[0];
+                batch.stateBits[1] = material->stateBitsTable[entry].loadBits[1];
+            }
+        }
+        command.batches.push_back(batch);
+        ++command.surfaceCount;
+        if (!reported)
+        {
+            reported = true;
+            Web_Log(WebLogLevel::Info,
+                "[kisakcod-web] Canonical sun sprite: material='%s' "
+                "image='%s' size=%.3f direction=(%.5f %.5f %.5f) "
+                "sampler=0x%02x state=0x%08x/0x%08x.\n",
+                batch.materialName,
+                image->name ? image->name : "<unnamed>",
+                s_world.sun.spriteSize,
+                sun[0], sun[1], sun[2], samplerState,
+                batch.stateBits[0], batch.stateBits[1]);
+        }
+        return true;
+    }
+    catch (const std::bad_alloc &)
+    {
+        return false;
+    }
+}
+
 void ConvertPendingMarkDraws(std::uint32_t firstDraw) noexcept
 {
     for (std::uint32_t drawIndex = firstDraw;
@@ -2807,10 +2943,13 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     if (droppedParticleClouds != 0u)
         R_WarnOncePerFrame(R_WARN_MAX_CLOUDS);
 
+    const bool hasSunSprite = AppendSunSprite(dynamicCommand, view);
+
     if (dynamicBuild == WebRendererDObjSceneResult::Success ||
         hasBrushModels ||
         hasDynamicEntityModels ||
-        hasFxModel || hasMarkMesh || hasCodeMesh || hasParticleCloud)
+        hasFxModel || hasMarkMesh || hasCodeMesh || hasParticleCloud ||
+        hasSunSprite)
     {
         for (WebRendererWorldBatchDesc &batch : dynamicCommand.batches)
             ResolveRendererBatchImages(batch);

@@ -275,6 +275,7 @@ enum class WebRendererSceneBatchKind : std::uint8_t
     FxXModel,
     FxParticleCloud,
     FxMarkMesh,
+    SunSprite,
 };
 
 constexpr bool WebRenderer_IsFxVertexColorBatch(
@@ -283,7 +284,8 @@ constexpr bool WebRenderer_IsFxVertexColorBatch(
     return kind == WebRendererSceneBatchKind::FxCodeMesh ||
         kind == WebRendererSceneBatchKind::FxXModel ||
         kind == WebRendererSceneBatchKind::FxParticleCloud ||
-        kind == WebRendererSceneBatchKind::FxMarkMesh;
+        kind == WebRendererSceneBatchKind::FxMarkMesh ||
+        kind == WebRendererSceneBatchKind::SunSprite;
 }
 
 constexpr std::size_t WebRenderer_FxDiagnosticIndex(
