@@ -30,10 +30,10 @@ constexpr std::int32_t LOADDEF_FORMAT_DXT1 = 0x31545844;
 constexpr std::int32_t LOADDEF_FORMAT_DXT3 = 0x33545844;
 constexpr std::int32_t LOADDEF_FORMAT_DXT5 = 0x35545844;
 
-// The browser engine filesystem retains at most one complete 4 MiB member.
-// Keep the portable texture boundary at the same limit so callers never need
-// a second, less constrained path before handing bytes to the renderer.
-constexpr std::size_t MAX_TEXTURE_MEMBER_BYTES = 4u * 1024u * 1024u;
+// A 2048-square DXT3/DXT5 retail image with its complete mip chain occupies
+// about 5.34 MiB. Keep one bounded 8 MiB member path through the browser VFS
+// and decoder so max-quality authored images do not lose their base mip.
+constexpr std::size_t MAX_TEXTURE_MEMBER_BYTES = 8u * 1024u * 1024u;
 // A compressed IWI member can legitimately expand beyond its archive byte
 // limit. 2048x1024 RGBA8 weapon/world images require 8 MiB after decode.
 constexpr std::size_t MAX_DECODED_RGBA8_BYTES = 16u * 1024u * 1024u;

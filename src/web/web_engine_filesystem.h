@@ -12,7 +12,7 @@
 // whose storage exists only while the completion callback is running.
 using WebEngineFsRequestId = uint32_t;
 
-inline constexpr uint32_t WEB_ENGINE_FS_MAX_CACHED_MEMBER_BYTES = 4u * 1024u * 1024u;
+inline constexpr uint32_t WEB_ENGINE_FS_MAX_CACHED_MEMBER_BYTES = 8u * 1024u * 1024u;
 
 enum class WebEngineFsOperation : uint8_t
 {

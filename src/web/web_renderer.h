@@ -17,7 +17,7 @@ struct water_t;
 // bound that recovery allocation independently of the active graphics backend.
 constexpr std::uint32_t WEB_RENDERER_MAX_RGBA8_DIMENSION = 2048u;
 constexpr std::size_t WEB_RENDERER_MAX_RETAINED_TEXTURE_BYTES =
-    4u * 1024u * 1024u;
+    8u * 1024u * 1024u;
 
 struct WebRendererRgba8TextureDesc
 {

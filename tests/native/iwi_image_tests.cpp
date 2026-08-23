@@ -839,14 +839,16 @@ void TestRgba8DecodeLayoutAndLimits()
         Error::DecodeOutputTooLarge,
         "reject dimensions whose checked RGBA8 layout exceeds the bound");
 
-    // 579 * 1811 * 4 + 28 is exactly the shared 4 MiB member ceiling.
-    constexpr uint16_t BOUNDARY_WIDTH = 579u;
-    constexpr uint16_t BOUNDARY_HEIGHT = 1811u;
+    // Exercise a raw image immediately below the shared 8 MiB member ceiling.
+    constexpr uint16_t BOUNDARY_WIDTH = 1024u;
+    constexpr uint16_t BOUNDARY_HEIGHT = 2047u;
     constexpr std::size_t BOUNDARY_PAYLOAD =
         static_cast<std::size_t>(BOUNDARY_WIDTH) * BOUNDARY_HEIGHT * 4u;
     static_assert(
-        BOUNDARY_PAYLOAD + kisak::iwi::HEADER_SIZE ==
-        kisak::iwi::MAX_TEXTURE_MEMBER_BYTES);
+        BOUNDARY_PAYLOAD + kisak::iwi::HEADER_SIZE <
+            kisak::iwi::MAX_TEXTURE_MEMBER_BYTES &&
+        BOUNDARY_PAYLOAD + kisak::iwi::HEADER_SIZE >
+            kisak::iwi::MAX_TEXTURE_MEMBER_BYTES - 4096u);
 
     const Bytes boundary = MakeIwi(
         kisak::iwi::FORMAT_ARGB,
@@ -867,10 +869,10 @@ void TestRgba8DecodeLayoutAndLimits()
         MakeIwi(
             kisak::iwi::FORMAT_ARGB,
             kisak::iwi::FLAG_NO_MIPMAPS,
-            580,
+            1025,
             BOUNDARY_HEIGHT,
             1,
-            static_cast<std::size_t>(580u) * BOUNDARY_HEIGHT * 4u),
+            static_cast<std::size_t>(1025u) * BOUNDARY_HEIGHT * 4u),
         Error::DecodeOutputTooLarge,
         "reject an exact layout above the shared cache ceiling");
 }
