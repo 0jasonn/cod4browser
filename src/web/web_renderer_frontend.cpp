@@ -178,6 +178,63 @@ void ResolveRendererBatchImages(WebRendererWorldBatchDesc &batch) noexcept
         ResolveRendererImage(batch.reflectionProbeImage);
 }
 
+bool BuildRendererPrimaryLights(
+    WebRendererWorldSceneCommand &command) noexcept
+{
+    if (!comWorld.isInUse || !comWorld.primaryLights ||
+        comWorld.primaryLightCount > WEB_RENDERER_MAX_PRIMARY_LIGHTS)
+    {
+        return false;
+    }
+    try
+    {
+        command.primaryLights.clear();
+        command.primaryLights.resize(comWorld.primaryLightCount);
+        command.sunPrimaryLightIndex = s_world.sunPrimaryLightIndex;
+        for (std::uint32_t index = 0u;
+             index < comWorld.primaryLightCount; ++index)
+        {
+            const ComPrimaryLight &source = comWorld.primaryLights[index];
+            WebRendererPrimaryLightDesc &destination =
+                command.primaryLights[index];
+            destination.type = source.type;
+            destination.exponent = source.exponent;
+            std::copy_n(source.color, 3u, destination.color);
+            std::copy_n(source.dir, 3u, destination.direction);
+            std::copy_n(source.origin, 3u, destination.origin);
+            destination.radius = source.radius;
+            destination.cosHalfFovOuter = source.cosHalfFovOuter;
+            destination.cosHalfFovInner = source.cosHalfFovInner;
+            if (source.defName)
+            {
+                const GfxLightDef *definition = DB_FindXAssetHeader(
+                    ASSET_TYPE_LIGHT_DEF, source.defName).lightDef;
+                if (definition)
+                {
+                    destination.attenuationImage = ResolveRendererImage(
+                        definition->attenuation.image);
+                    destination.samplerState =
+                        definition->attenuation.samplerState;
+                }
+            }
+        }
+        if (s_world.sunPrimaryLightIndex < command.primaryLights.size() &&
+            s_world.sunLight)
+        {
+            WebRendererPrimaryLightDesc &sun =
+                command.primaryLights[s_world.sunPrimaryLightIndex];
+            sun.type = s_world.sunLight->type;
+            std::copy_n(s_world.sunLight->color, 3u, sun.color);
+            std::copy_n(s_world.sunLight->dir, 3u, sun.direction);
+        }
+    }
+    catch (const std::bad_alloc &)
+    {
+        return false;
+    }
+    return true;
+}
+
 bool CanonicalPrimaryLightInfluences(
     std::uint32_t primaryLightIndex, const float position[3],
     void *) noexcept
@@ -1647,8 +1704,69 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         }
         else
         {
+            if (!BuildRendererPrimaryLights(command))
+            {
+                Com_Error(ERR_DROP,
+                    "R_RenderScene: invalid canonical primary lights");
+                return;
+            }
             for (WebRendererWorldBatchDesc &batch : command.batches)
                 ResolveRendererBatchImages(batch);
+            std::array<std::uint32_t, WEB_RENDERER_MAX_PRIMARY_LIGHTS>
+                primaryLightSurfaceCounts{};
+            for (const WebRendererWorldBatchDesc &batch : command.batches)
+            {
+                if (batch.primaryLightIndex <
+                    primaryLightSurfaceCounts.size())
+                {
+                    primaryLightSurfaceCounts[batch.primaryLightIndex] +=
+                        batch.surfaceCount;
+                }
+            }
+            std::uint32_t spotLightCount = 0u;
+            std::uint32_t omniLightCount = 0u;
+            std::uint32_t resolvedAttenuationCount = 0u;
+            std::uint32_t assignedLocalLightCount = 0u;
+            std::uint32_t assignedLocalSurfaceCount = 0u;
+            for (std::uint32_t index = 0u;
+                 index < command.primaryLights.size(); ++index)
+            {
+                const WebRendererPrimaryLightDesc &light =
+                    command.primaryLights[index];
+                if (light.type == 2u) ++spotLightCount;
+                if (light.type == 3u) ++omniLightCount;
+                if (light.attenuationImage) ++resolvedAttenuationCount;
+                if ((light.type == 2u || light.type == 3u) &&
+                    index != command.sunPrimaryLightIndex &&
+                    primaryLightSurfaceCounts[index] != 0u)
+                {
+                    ++assignedLocalLightCount;
+                    assignedLocalSurfaceCount +=
+                        primaryLightSurfaceCounts[index];
+                    Web_Log(WebLogLevel::Info,
+                        "[kisakcod-web] Canonical primary light %u: "
+                        "type=%u surfaces=%u origin=(%.3f %.3f %.3f) "
+                        "radius=%.3f color=(%.3f %.3f %.3f) "
+                        "attenuation='%s'.\n",
+                        index, static_cast<unsigned int>(light.type),
+                        primaryLightSurfaceCounts[index],
+                        light.origin[0], light.origin[1], light.origin[2],
+                        light.radius, light.color[0], light.color[1],
+                        light.color[2],
+                        light.attenuationImage &&
+                                light.attenuationImage->name
+                            ? light.attenuationImage->name : "<none>");
+                }
+            }
+            Web_Log(WebLogLevel::Info,
+                "[kisakcod-web] Canonical primary-light inventory: "
+                "%zu total, sun=%u, spot=%u, omni=%u, "
+                "%u attenuation images, %u local lights assigned to "
+                "%u world surfaces.\n",
+                command.primaryLights.size(),
+                command.sunPrimaryLightIndex, spotLightCount,
+                omniLightCount, resolvedAttenuationCount,
+                assignedLocalLightCount, assignedLocalSurfaceCount);
             const WebRendererWorldSurfaceDesc surface{
                 command.vertices.data(),
                 static_cast<std::uint32_t>(command.vertices.size()),
@@ -1656,6 +1774,10 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                 static_cast<std::uint32_t>(command.indices.size()),
                 command.batches.data(),
                 static_cast<std::uint32_t>(command.batches.size()),
+                nullptr,
+                command.primaryLights.data(),
+                static_cast<std::uint32_t>(command.primaryLights.size()),
+                command.sunPrimaryLightIndex,
             };
             const WebRendererSurfaceResult submission =
                 WebRenderer_SetWorldSurface(surface);

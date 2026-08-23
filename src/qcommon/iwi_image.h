@@ -14,6 +14,7 @@ constexpr std::uint8_t COD4_VERSION = 6u;
 constexpr std::uint8_t FORMAT_ARGB = 1u;
 constexpr std::uint8_t FORMAT_RGB8 = 2u;
 constexpr std::uint8_t FORMAT_A8L8 = 3u;
+constexpr std::uint8_t FORMAT_L8 = 4u;
 constexpr std::uint8_t FORMAT_DXT1 = 11u;
 constexpr std::uint8_t FORMAT_DXT3 = 12u;
 constexpr std::uint8_t FORMAT_DXT5 = 13u;

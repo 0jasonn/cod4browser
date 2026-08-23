@@ -128,6 +128,7 @@ constexpr std::uint32_t WEB_RENDERER_MAX_DYNAMIC_DOBJ_SUBMISSIONS = 512u;
 constexpr std::uint32_t WEB_RENDERER_MAX_DYNAMIC_BMODEL_SUBMISSIONS = 512u;
 constexpr std::uint32_t WEB_RENDERER_MAX_UI_VERTICES = 65'536u;
 constexpr std::uint32_t WEB_RENDERER_MAX_UI_INDICES = 98'304u;
+constexpr std::uint32_t WEB_RENDERER_MAX_PRIMARY_LIGHTS = 255u;
 
 struct WebRendererModelLightingAtlasDesc
 {
@@ -139,6 +140,24 @@ struct WebRendererModelLightingAtlasDesc
     std::size_t byteLength;
 };
 
+// Canonical non-sun primary-light state retained with the world command.
+// The frontend owns light selection and GfxLightDef resolution; the backend
+// owns only portable constants plus the attenuation image upload.
+struct WebRendererPrimaryLightDesc
+{
+    const GfxImage *attenuationImage;
+    float color[3];
+    float direction[3];
+    float origin[3];
+    float radius;
+    float cosHalfFovOuter;
+    float cosHalfFovInner;
+    std::uint8_t type;
+    std::uint8_t exponent;
+    std::uint8_t samplerState;
+    std::uint8_t padding;
+};
+
 struct WebRendererWorldSurfaceDesc
 {
     const WebRendererSurfaceVertex *vertices;
@@ -148,6 +167,9 @@ struct WebRendererWorldSurfaceDesc
     const struct WebRendererWorldBatchDesc *batches;
     std::uint32_t batchCount;
     const WebRendererModelLightingAtlasDesc *modelLightingAtlas;
+    const WebRendererPrimaryLightDesc *primaryLights = nullptr;
+    std::uint32_t primaryLightCount = 0u;
+    std::uint32_t sunPrimaryLightIndex = 0u;
 };
 
 enum class WebRendererWorldTechnique : std::uint8_t
@@ -257,6 +279,10 @@ struct WebRendererWorldBatchDesc
     std::uint8_t waterSamplerState;
     std::uint8_t reflectionProbeIndex;
     std::uint8_t lightmapIndex;
+    // Canonical GfxDrawSurf primary-light selection for this surface group.
+    // Zero is unlit, the world sun index selects the sun family, and higher
+    // values select the matching spot/omni light retained with the world.
+    std::uint8_t primaryLightIndex;
     WebRendererSceneBatchKind sourceKind;
     WebRendererWorldTechnique technique;
     WebRendererWorldLightingMode lightingMode;

@@ -81,6 +81,7 @@ struct WebRendererRetainedWorldBatch
     std::uint8_t samplerState = 0u;
     std::uint8_t normalSamplerState = 0u;
     std::uint8_t lightmapIndex = 31u;
+    std::uint8_t primaryLightIndex = 0u;
     WebRendererSceneBatchKind sourceKind =
         WebRendererSceneBatchKind::WorldSurface;
     WebRendererWorldTechnique technique =
@@ -109,6 +110,20 @@ struct WebRendererRetainedWorldBatch
     GLuint waterTexture = 0u;
     GLuint reflectionTexture = 0u;
     float waterTextureTime = std::numeric_limits<float>::quiet_NaN();
+};
+
+struct WebRendererRetainedPrimaryLight
+{
+    std::uint32_t attenuationImageIndex = INVALID_WORLD_IMAGE;
+    float color[3]{};
+    float direction[3]{};
+    float origin[3]{};
+    float radius = 0.0f;
+    float cosHalfFovOuter = 0.0f;
+    float cosHalfFovInner = 0.0f;
+    std::uint8_t type = 0u;
+    std::uint8_t exponent = 0u;
+    std::uint8_t samplerState = 0u;
 };
 
 struct WebRendererRetainedModelLightingAtlas
@@ -225,6 +240,8 @@ struct WebRendererState
     std::vector<std::uint32_t> retainedWorldIndices;
     std::vector<WebRendererRetainedWorldBatch> retainedWorldBatches;
     std::vector<WebRendererRetainedWorldImage> retainedWorldImages;
+    std::vector<WebRendererRetainedPrimaryLight> retainedPrimaryLights;
+    std::uint32_t retainedSunPrimaryLightIndex = 0u;
     WebRendererRetainedSkyImage retainedSky;
     GLuint staticModelVertexArray = 0u;
     GLuint staticModelVertexBuffer = 0u;
@@ -3807,13 +3824,23 @@ WebRendererSurfaceResult CopyWorldCommand(
     std::vector<WebRendererSurfaceVertex> &vertices,
     std::vector<std::uint32_t> &indices,
     std::vector<WebRendererRetainedWorldBatch> &batches,
-    std::vector<WebRendererRetainedWorldImage> &images)
+    std::vector<WebRendererRetainedWorldImage> &images,
+    std::vector<WebRendererRetainedPrimaryLight> &primaryLights,
+    std::uint32_t &sunPrimaryLightIndex)
 {
     if (!surface.vertices || !surface.indices || !surface.batches ||
         surface.vertexCount == 0u || surface.indexCount == 0u ||
         surface.batchCount == 0u ||
         surface.vertexCount > WEB_RENDERER_MAX_WORLD_VERTICES ||
         surface.indexCount > WEB_RENDERER_MAX_WORLD_INDICES)
+    {
+        return WebRendererSurfaceResult::InvalidDescriptor;
+    }
+    if (surface.primaryLightCount > WEB_RENDERER_MAX_PRIMARY_LIGHTS ||
+        (surface.primaryLightCount != 0u && !surface.primaryLights) ||
+        (surface.primaryLightCount == 0u && surface.primaryLights) ||
+        (surface.primaryLightCount != 0u &&
+            surface.sunPrimaryLightIndex >= surface.primaryLightCount))
     {
         return WebRendererSurfaceResult::InvalidDescriptor;
     }
@@ -3855,6 +3882,50 @@ WebRendererSurfaceResult CopyWorldCommand(
         indices.assign(surface.indices, surface.indices + surface.indexCount);
         batches.reserve(surface.batchCount);
         images.reserve(surface.batchCount * 3u);
+        primaryLights.reserve(surface.primaryLightCount);
+        for (std::uint32_t index = 0u;
+             index < surface.primaryLightCount; ++index)
+        {
+            const WebRendererPrimaryLightDesc &source =
+                surface.primaryLights[index];
+            WebRendererRetainedPrimaryLight light;
+            light.type = source.type;
+            light.exponent = source.exponent;
+            light.samplerState = source.samplerState;
+            light.radius = source.radius;
+            light.cosHalfFovOuter = source.cosHalfFovOuter;
+            light.cosHalfFovInner = source.cosHalfFovInner;
+            std::copy_n(source.color, 3u, light.color);
+            std::copy_n(source.direction, 3u, light.direction);
+            std::copy_n(source.origin, 3u, light.origin);
+            const bool localLight = light.type == 2u || light.type == 3u;
+            for (std::size_t component = 0u; component < 3u; ++component)
+            {
+                if (!std::isfinite(light.color[component]) ||
+                    !std::isfinite(light.direction[component]) ||
+                    !std::isfinite(light.origin[component]))
+                {
+                    return WebRendererSurfaceResult::NonFiniteVertex;
+                }
+            }
+            if (!std::isfinite(light.radius) ||
+                !std::isfinite(light.cosHalfFovOuter) ||
+                !std::isfinite(light.cosHalfFovInner) ||
+                (localLight && (light.radius <= 0.0f ||
+                    !source.attenuationImage)) ||
+                (light.type == 2u && light.cosHalfFovInner <=
+                    light.cosHalfFovOuter))
+            {
+                return WebRendererSurfaceResult::InvalidDescriptor;
+            }
+            if (localLight)
+            {
+                light.attenuationImageIndex = RetainCanonicalWorldImage(
+                    source.attenuationImage, images, retainedPixelBytes);
+            }
+            primaryLights.push_back(light);
+        }
+        sunPrimaryLightIndex = surface.sunPrimaryLightIndex;
         std::uint32_t expectedFirstIndex = 0u;
         for (std::uint32_t index = 0u; index < surface.batchCount; ++index)
         {
@@ -3868,7 +3939,11 @@ WebRendererSurfaceResult CopyWorldCommand(
                 source.firstSurfaceIndex > source.lastSurfaceIndex ||
                 source.technique > WebRendererWorldTechnique::ReflexSight ||
                 source.lightingMode >
-                    WebRendererWorldLightingMode::ModelLightGrid)
+                    WebRendererWorldLightingMode::ModelLightGrid ||
+                (surface.primaryLightCount == 0u
+                    ? source.primaryLightIndex != 0u
+                    : source.primaryLightIndex >=
+                        surface.primaryLightCount))
             {
                 return WebRendererSurfaceResult::InvalidDescriptor;
             }
@@ -3892,6 +3967,7 @@ WebRendererSurfaceResult CopyWorldCommand(
             batch.samplerState = source.samplerState;
             batch.normalSamplerState = source.normalSamplerState;
             batch.lightmapIndex = source.lightmapIndex;
+            batch.primaryLightIndex = source.primaryLightIndex;
             batch.sourceKind = source.sourceKind;
             batch.technique = source.technique;
             batch.lightingMode = source.lightingMode;
@@ -4317,6 +4393,8 @@ WebRendererSurfaceResult WebRenderer_SetSurface(
     g_renderer.retainedWorldIndices.clear();
     g_renderer.retainedWorldBatches.clear();
     g_renderer.retainedWorldImages.clear();
+    g_renderer.retainedPrimaryLights.clear();
+    g_renderer.retainedSunPrimaryLightIndex = 0u;
     g_renderer.draw = retainedSurface.draw;
     g_renderer.surfaceActive = true;
     g_renderer.worldSurfaceActive = false;
@@ -4355,9 +4433,12 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
     std::vector<std::uint32_t> retainedIndices;
     std::vector<WebRendererRetainedWorldBatch> retainedBatches;
     std::vector<WebRendererRetainedWorldImage> retainedImages;
+    std::vector<WebRendererRetainedPrimaryLight> retainedPrimaryLights;
+    std::uint32_t retainedSunPrimaryLightIndex = 0u;
     const WebRendererSurfaceResult copy = CopyWorldCommand(
         surface, retainedVertices, retainedIndices, retainedBatches,
-        retainedImages);
+        retainedImages, retainedPrimaryLights,
+        retainedSunPrimaryLightIndex);
     if (copy != WebRendererSurfaceResult::Success) return copy;
 
     GLuint replacementVertexArray = 0;
@@ -4400,6 +4481,9 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
     g_renderer.retainedWorldIndices = std::move(retainedIndices);
     g_renderer.retainedWorldBatches = std::move(retainedBatches);
     g_renderer.retainedWorldImages = std::move(retainedImages);
+    g_renderer.retainedPrimaryLights = std::move(retainedPrimaryLights);
+    g_renderer.retainedSunPrimaryLightIndex =
+        retainedSunPrimaryLightIndex;
     g_renderer.retainedIndices.clear();
     g_renderer.draw = {
         WebRendererPrimitiveTopology::TriangleList,
@@ -4447,6 +4531,25 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
         surface.vertexCount, surface.indexCount, surface.batchCount,
         lightmappedBatches, baseTextureBatches, supportedImages,
         g_renderer.retainedWorldImages.size(), retainedBytes);
+    const std::size_t retainedLocalLights = static_cast<std::size_t>(
+        std::count_if(g_renderer.retainedPrimaryLights.begin(),
+            g_renderer.retainedPrimaryLights.end(),
+            [](const WebRendererRetainedPrimaryLight &light) {
+                return light.type == 2u || light.type == 3u;
+            }));
+    const std::size_t retainedPrimaryLitBatches = static_cast<std::size_t>(
+        std::count_if(g_renderer.retainedWorldBatches.begin(),
+            g_renderer.retainedWorldBatches.end(),
+            [](const WebRendererRetainedWorldBatch &batch) {
+                return batch.primaryLightIndex != 0u &&
+                    batch.primaryLightIndex !=
+                        g_renderer.retainedSunPrimaryLightIndex;
+            }));
+    Web_Log(WebLogLevel::Info,
+        "[kisakcod-web] Renderer retained %zu canonical local primary lights "
+        "for %zu unanimous world batches (sun=%u).\n",
+        retainedLocalLights, retainedPrimaryLitBatches,
+        g_renderer.retainedSunPrimaryLightIndex);
     if (comparisonCaptured)
         EmitWorldComparison(intendedComparison);
     return WebRendererSurfaceResult::Success;
@@ -4475,6 +4578,8 @@ void __cdecl R_UnloadWorld()
     g_renderer.retainedWorldIndices.clear();
     g_renderer.retainedWorldBatches.clear();
     g_renderer.retainedWorldImages.clear();
+    g_renderer.retainedPrimaryLights.clear();
+    g_renderer.retainedSunPrimaryLightIndex = 0u;
     g_renderer.retainedSky = {};
     g_renderer.surfaceActive = false;
     g_renderer.worldSurfaceActive = false;
@@ -4673,13 +4778,16 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
     std::vector<WebRendererSurfaceVertex> retainedVertices;
     std::vector<std::uint32_t> retainedIndices;
     std::vector<WebRendererRetainedWorldBatch> retainedBatches;
+    std::vector<WebRendererRetainedPrimaryLight> ignoredPrimaryLights;
+    std::uint32_t ignoredSunPrimaryLightIndex = 0u;
     WebRendererRetainedModelLightingAtlas retainedLighting;
     // Dynamic image ownership is persistent across frames. CopyWorldCommand
     // finds canonical identities already present here, so an animated weapon
     // uploads geometry each frame without re-reading or re-decoding its IWI.
     const WebRendererSurfaceResult copy = CopyWorldCommand(
         scene, retainedVertices, retainedIndices, retainedBatches,
-        g_renderer.retainedDynamicModelImages);
+        g_renderer.retainedDynamicModelImages, ignoredPrimaryLights,
+        ignoredSunPrimaryLightIndex);
     if (copy != WebRendererSurfaceResult::Success) return copy;
     if (!CopyModelLightingAtlas(
             scene.modelLightingAtlas, retainedLighting))

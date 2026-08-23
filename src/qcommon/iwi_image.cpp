@@ -395,9 +395,11 @@ Error DecodeRgba8(
 
     const bool rgb8 = metadata.format == FORMAT_RGB8;
     const bool a8l8 = metadata.format == FORMAT_A8L8;
+    const bool l8 = metadata.format == FORMAT_L8;
     const bool compressed = metadata.format == FORMAT_DXT1 ||
         metadata.format == FORMAT_DXT3 || metadata.format == FORMAT_DXT5;
-    if (metadata.format != FORMAT_ARGB && !rgb8 && !a8l8 && !compressed)
+    if (metadata.format != FORMAT_ARGB && !rgb8 && !a8l8 && !l8 &&
+        !compressed)
     {
         return Error::DecodeUnsupportedFormat;
     }
@@ -409,8 +411,9 @@ Error DecodeRgba8(
             ((metadata.flags & FLAG_NO_MIPMAPS) == 0u ||
              (metadata.flags & static_cast<std::uint8_t>(
                  ~(FLAG_NO_MIPMAPS | policyFlags))) != 0u)) ||
-        ((rgb8 || a8l8) && (metadata.flags & static_cast<std::uint8_t>(
-            ~(FLAG_NO_PICMIP | FLAG_NO_MIPMAPS | policyFlags))) != 0u) ||
+        ((rgb8 || a8l8 || l8) &&
+            (metadata.flags & static_cast<std::uint8_t>(
+                ~(FLAG_NO_PICMIP | FLAG_NO_MIPMAPS | policyFlags))) != 0u) ||
         (compressed && (metadata.flags & static_cast<std::uint8_t>(
             ~(FLAG_NO_PICMIP | FLAG_NO_MIPMAPS |
                 compressedPolicyFlags))) != 0u))
@@ -437,7 +440,7 @@ Error DecodeRgba8(
         return Error::DecodeOutputTooLarge;
     }
     std::size_t baseLevelOffset = HEADER_SIZE;
-    if (!compressed && !rgb8 && !a8l8)
+    if (!compressed && !rgb8 && !a8l8 && !l8)
     {
         if (!CheckedAdd(HEADER_SIZE, pixelBytes, expectedMemberBytes) ||
             bytes.size() != expectedMemberBytes)
@@ -445,7 +448,7 @@ Error DecodeRgba8(
             return Error::DecodeInvalidLayout;
         }
     }
-    else if (rgb8 || a8l8)
+    else if (rgb8 || a8l8 || l8)
     {
         const std::uint32_t storedMipCount = Count2dStoredMipmaps(
             metadata.flags, metadata.width, metadata.height);
@@ -461,7 +464,8 @@ Error DecodeRgba8(
             std::size_t levelPixels = 0u;
             std::size_t levelBytes = 0u;
             if (!CheckedMultiply(width, height, levelPixels) ||
-                !CheckedMultiply(levelPixels, rgb8 ? 3u : 2u, levelBytes) ||
+                !CheckedMultiply(levelPixels,
+                    rgb8 ? 3u : (a8l8 ? 2u : 1u), levelBytes) ||
                 !CheckedAdd(payloadBytes, levelBytes, payloadBytes))
             {
                 return Error::DecodeOutputTooLarge;
@@ -547,6 +551,19 @@ Error DecodeRgba8(
             rgba[targetOffset + 1u] = luminance;
             rgba[targetOffset + 2u] = luminance;
             rgba[targetOffset + 3u] = luminanceAlpha[sourceOffset + 1u];
+        }
+    }
+    else if (l8)
+    {
+        const std::span<const std::uint8_t> luminance = bytes.subspan(
+            baseLevelOffset, pixelCount);
+        for (std::size_t pixel = 0u; pixel < pixelCount; ++pixel)
+        {
+            const std::size_t targetOffset = pixel * RGBA_BYTES_PER_PIXEL;
+            rgba[targetOffset] = luminance[pixel];
+            rgba[targetOffset + 1u] = luminance[pixel];
+            rgba[targetOffset + 2u] = luminance[pixel];
+            rgba[targetOffset + 3u] = 255u;
         }
     }
     else if (!compressed)

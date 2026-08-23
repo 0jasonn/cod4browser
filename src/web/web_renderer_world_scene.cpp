@@ -319,6 +319,7 @@ WebRendererWorldBatchDesc MakeBatch(
     batch.materialName = surface.material && surface.material->info.name
         ? surface.material->info.name : "<null-material>";
     batch.lightmapIndex = surface.lightmapIndex;
+    batch.primaryLightIndex = surface.primaryLightIndex;
     batch.modelIdentity = nullptr;
     batch.modelName = "<world>";
     batch.firstInstanceIndex = UINT32_MAX;
@@ -603,6 +604,8 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
                     replacement.batches.back().indexCount == candidate.firstIndex)
             {
                 WebRendererWorldBatchDesc &batch = replacement.batches.back();
+                if (batch.primaryLightIndex != candidate.primaryLightIndex)
+                    batch.primaryLightIndex = 0u;
                 batch.indexCount += candidate.indexCount;
                 ++batch.surfaceCount;
                 batch.lastSurfaceIndex = surfaceIndex;
@@ -806,6 +809,8 @@ WebRendererWorldSceneResult WebRenderer_BuildBrushModelSceneCommand(
                 {
                     WebRendererWorldBatchDesc &batch =
                         replacement.batches.back();
+                    if (batch.primaryLightIndex != candidate.primaryLightIndex)
+                        batch.primaryLightIndex = 0u;
                     batch.indexCount += candidate.indexCount;
                     ++batch.surfaceCount;
                     batch.lastSurfaceIndex = surfaceIndex;

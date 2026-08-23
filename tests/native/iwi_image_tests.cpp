@@ -436,6 +436,30 @@ void TestA8L8DecodeAndMipOrder()
         "A8L8 decode uses the final base mip and preserves luminance and alpha");
 }
 
+void TestL8DecodeAndMipOrder()
+{
+    Bytes payload{
+        0xffu, // 1x1 mip.
+        0x00u, 0x40u, 0x80u, 0xffu,
+    };
+    Bytes fixture = MakeIwi(
+        kisak::iwi::FORMAT_L8, 0u, 2u, 2u, 1u, payload.size());
+    std::copy(payload.begin(), payload.end(),
+        fixture.begin() + kisak::iwi::HEADER_SIZE);
+
+    Rgba8Image image = MakeSentinelImage();
+    RequireError(kisak::iwi::DecodeRgba8(fixture, image), Error::None,
+        "decode L8 mip chain");
+    Require(image.width == 2u && image.height == 2u &&
+            image.pixels == Bytes({
+                0x00u, 0x00u, 0x00u, 0xffu,
+                0x40u, 0x40u, 0x40u, 0xffu,
+                0x80u, 0x80u, 0x80u, 0xffu,
+                0xffu, 0xffu, 0xffu, 0xffu,
+            }),
+        "L8 decode uses the final base mip and expands opaque luminance");
+}
+
 void TestDxt1Decode()
 {
     const Bytes opaqueBlock = MakeDxtColorBlock(0xf800u, 0x07e0u, 0xe4e4e4e4u);
@@ -1074,6 +1098,7 @@ int main()
     runner.Run("RGBA8 decode and swizzle", TestRgba8DecodeAndSwizzle);
     runner.Run("RGB8 decode and mip order", TestRgb8DecodeAndMipOrder);
     runner.Run("A8L8 decode and mip order", TestA8L8DecodeAndMipOrder);
+    runner.Run("L8 decode and mip order", TestL8DecodeAndMipOrder);
     runner.Run("DXT1 decode", TestDxt1Decode);
     runner.Run("DXT3 decode", TestDxt3Decode);
     runner.Run("DXT5 decode", TestDxt5Decode);

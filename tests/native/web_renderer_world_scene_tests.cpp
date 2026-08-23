@@ -134,6 +134,28 @@ void TestCanonicalOpaqueSurfacesAreBatchedInWorldOrder()
     assert(command.vertices[0].color[1] > command.vertices[0].color[2]);
 }
 
+void TestMixedPrimaryLightIdentityDoesNotSplitBaseWorldBatch()
+{
+    Fixture fixture;
+    fixture.surfaces[0].primaryLightIndex = 2u;
+    fixture.surfaces[1].primaryLightIndex = 2u;
+    fixture.surfaces[2].primaryLightIndex = 3u;
+    WebRendererWorldSceneCommand command;
+    assert(WebRenderer_BuildWorldSceneCommand(
+        fixture.world, MakeView(), command) ==
+        WebRendererWorldSceneResult::Success);
+    assert(command.batches.size() == 1u);
+    assert(command.batches[0].primaryLightIndex == 0u);
+    assert(command.batches[0].surfaceCount == 3u);
+
+    fixture.surfaces[2].primaryLightIndex = 2u;
+    assert(WebRenderer_BuildWorldSceneCommand(
+        fixture.world, MakeView(), command) ==
+        WebRendererWorldSceneResult::Success);
+    assert(command.batches.size() == 1u);
+    assert(command.batches[0].primaryLightIndex == 2u);
+}
+
 void TestCommaPrefixedImageReferenceResolvesAtRendererBoundary()
 {
     GfxImage reference{};
@@ -726,6 +748,7 @@ int main()
 {
     TestCommaPrefixedImageReferenceResolvesAtRendererBoundary();
     TestCanonicalOpaqueSurfacesAreBatchedInWorldOrder();
+    TestMixedPrimaryLightIdentityDoesNotSplitBaseWorldBatch();
     TestCanonicalMaterialAndLightmapIdentitySplitBatches();
     TestCanonicalLmTechniqueNameDoesNotInventLightmapSamplers();
     TestRemappedTechniqueSetDrivesPortableSelection();
