@@ -1,18 +1,23 @@
 // Browser renderer boundary for canonical EffectsCore impact-mark fragments.
-// This is the world-brush subset of gfx_d3d/r_marks.cpp adapted to consume the
-// published GfxWorld directly. EffectsCore still owns mark allocation,
-// lifetime, material choice, vertex expansion, and draw generation.
+// This is the world-brush, entity-brush, and static-XModel subset of
+// gfx_d3d/r_marks.cpp adapted to consume the published GfxWorld directly.
+// EffectsCore still owns mark allocation, lifetime, material choice, vertex
+// expansion, and draw generation.
 
 #include <EffectsCore/fx_system.h>
+#include <bgame/bg_local.h>
 #include <gfx_d3d/material_types.h>
 #include <gfx_d3d/r_bsp.h>
 #include <universal/com_math.h>
 #include <web/web_renderer_mark_fragments.h>
+#include <xanim/xmodel_types.h>
+#include <xanim/xsurface_types.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 
 extern GfxWorld s_world;
 
@@ -54,6 +59,16 @@ bool MaterialAllowsMark(const Material *receiver,
         return false;
     return (receiver->info.surfaceTypeBits & mark->info.surfaceTypeBits) ==
         mark->info.surfaceTypeBits;
+}
+
+bool BoundsOverlapRanges(const float lhsMins[3], const float lhsMaxs[3],
+    const float rhsMins[3], const float rhsMaxs[3]) noexcept
+{
+    for (std::size_t axis = 0u; axis < 3u; ++axis)
+        if (lhsMaxs[axis] < rhsMins[axis] ||
+            lhsMins[axis] > rhsMaxs[axis])
+            return false;
+    return true;
 }
 
 void GetFragmentBounds(const float origin[3], const float axis[3][3],
@@ -183,6 +198,8 @@ int ChopWorldPolyBehindPlane(int inputCount,
 }
 
 bool AppendBrushSurface(MarkInfo &info, const GfxSurface &surface,
+    const float clipPlanes[MARK_CLIP_PLANE_COUNT][4],
+    const float markDirection[3], const GfxMarkContext &context,
     bool &anyMarks) noexcept
 {
     if (!s_world.vd.vertices || !s_world.indices || !surface.material ||
@@ -202,15 +219,15 @@ bool AppendBrushSurface(MarkInfo &info, const GfxSurface &surface,
             firstIndex)
         return true;
 
-    GfxMarkContext context{};
-    context.lmapIndex = surface.lightmapIndex;
-    if (info.markHasLightmap != (context.lmapIndex != 31u)) return true;
-    context.reflectionProbeIndex = surface.reflectionProbeIndex;
-    if (info.markHasReflection != (context.reflectionProbeIndex != 0u))
+    GfxMarkContext surfaceContext = context;
+    surfaceContext.lmapIndex = surface.lightmapIndex;
+    if (info.markHasLightmap != (surfaceContext.lmapIndex != 31u))
         return true;
-    context.primaryLightIndex = surface.primaryLightIndex;
-    context.modelTypeAndSurf = 0u;
-    context.modelIndex = 0u;
+    surfaceContext.reflectionProbeIndex = surface.reflectionProbeIndex;
+    if (info.markHasReflection !=
+        (surfaceContext.reflectionProbeIndex != 0u))
+        return true;
+    surfaceContext.primaryLightIndex = surface.primaryLightIndex;
 
     const GfxWorldVertex *vertices = s_world.vd.vertices + firstVertex;
     const std::uint16_t *indices = s_world.indices + firstIndex;
@@ -221,7 +238,7 @@ bool AppendBrushSurface(MarkInfo &info, const GfxSurface &surface,
             indices[1] >= surface.tris.vertexCount ||
             indices[2] >= surface.tris.vertexCount)
             continue;
-        if (TriangleRejected(info.axis[0], vertices[indices[0]].xyz,
+        if (TriangleRejected(markDirection, vertices[indices[0]].xyz,
                 vertices[indices[1]].xyz, vertices[indices[2]].xyz))
             continue;
 
@@ -233,7 +250,7 @@ bool AppendBrushSurface(MarkInfo &info, const GfxSurface &surface,
         {
             fragmentPointCount = ChopWorldPolyBehindPlane(
                 fragmentPointCount, clipPoints[pingPong],
-                clipPoints[pingPong ^ 1], info.planes[plane]);
+                clipPoints[pingPong ^ 1], clipPlanes[plane]);
             if (fragmentPointCount == 0) break;
             pingPong ^= 1;
         }
@@ -252,7 +269,7 @@ bool AppendBrushSurface(MarkInfo &info, const GfxSurface &surface,
             triangleOut.indices[1] = static_cast<std::uint16_t>(
                 basePoint + point);
             triangleOut.indices[2] = static_cast<std::uint16_t>(basePoint);
-            triangleOut.context = context;
+            triangleOut.context = surfaceContext;
         }
 
         float lightmapCoordinates[3][2]{};
@@ -293,20 +310,294 @@ bool GenerateWorldBrushFragments(MarkInfo &info) noexcept
 {
     if (!s_world.dpvs.surfaces || s_world.surfaceCount <= 0)
         return true;
+    std::uint32_t surfaceBegin = 0u;
+    std::uint32_t surfaceEnd = static_cast<std::uint32_t>(
+        s_world.surfaceCount);
+    if (s_world.models && s_world.modelCount > 0)
+    {
+        surfaceBegin = s_world.models[0].startSurfIndex;
+        surfaceEnd = surfaceBegin + s_world.models[0].surfaceCount;
+        if (surfaceBegin > static_cast<std::uint32_t>(s_world.surfaceCount) ||
+            surfaceEnd > static_cast<std::uint32_t>(s_world.surfaceCount))
+            return true;
+    }
     bool anyMarks = false;
-    for (int surfaceIndex = 0; surfaceIndex < s_world.surfaceCount;
+    GfxMarkContext context{};
+    for (std::uint32_t surfaceIndex = surfaceBegin;
+         surfaceIndex < surfaceEnd;
          ++surfaceIndex)
     {
         const GfxSurface &surface = s_world.dpvs.surfaces[surfaceIndex];
         if (!BoundsOverlap(surface.bounds, info.mins, info.maxs) ||
             !MaterialAllowsMark(surface.material, info.material))
             continue;
-        if (!AppendBrushSurface(info, surface, anyMarks)) return false;
+        if (!AppendBrushSurface(info, surface, info.planes, info.axis[0],
+                context, anyMarks))
+            return false;
     }
     if (anyMarks)
     {
         info.callback(info.callbackContext, info.usedTriCount, info.tris,
             info.usedPointCount, info.points, info.origin, info.axis[1]);
+        info.usedTriCount = 0;
+        info.usedPointCount = 0;
+    }
+    return true;
+}
+
+void TransformPlanesToPoseLocal(const float worldPlanes[6][4],
+    const float poseAxis[3][3], const float poseOrigin[3],
+    float localPlanes[6][4]) noexcept
+{
+    for (std::size_t plane = 0u; plane < 6u; ++plane)
+    {
+        for (std::size_t axis = 0u; axis < 3u; ++axis)
+            localPlanes[plane][axis] =
+                Vec3Dot(worldPlanes[plane], poseAxis[axis]);
+        localPlanes[plane][3] = worldPlanes[plane][3] -
+            Vec3Dot(worldPlanes[plane], poseOrigin);
+    }
+}
+
+void TransformDirectionToPoseLocal(const float worldDirection[3],
+    const float poseAxis[3][3], float localDirection[3]) noexcept
+{
+    for (std::size_t axis = 0u; axis < 3u; ++axis)
+        localDirection[axis] = Vec3Dot(worldDirection, poseAxis[axis]);
+}
+
+void TransformPointToPoseLocal(const float worldPoint[3],
+    const float poseAxis[3][3], const float poseOrigin[3],
+    float localPoint[3]) noexcept
+{
+    float offset[3]{};
+    Vec3Sub(worldPoint, poseOrigin, offset);
+    TransformDirectionToPoseLocal(offset, poseAxis, localPoint);
+}
+
+bool GenerateEntityBrushFragments(MarkInfo &info) noexcept
+{
+    if (!s_world.dpvs.surfaces || s_world.surfaceCount <= 0)
+        return true;
+    for (int collision = 0;
+         collision < info.sceneBModelCollidedCount; ++collision)
+    {
+        const MarkInfoCollidedBModel &collided =
+            info.sceneBModelsCollided[collision];
+        if (!collided.brushModel || !collided.pose) continue;
+        const std::uint32_t surfaceBegin =
+            collided.brushModel->startSurfIndex;
+        const std::uint32_t surfaceEnd = surfaceBegin +
+            collided.brushModel->surfaceCount;
+        if (surfaceBegin > static_cast<std::uint32_t>(s_world.surfaceCount) ||
+            surfaceEnd > static_cast<std::uint32_t>(s_world.surfaceCount))
+            continue;
+
+        float poseAxis[3][3]{};
+        AnglesToAxis(collided.pose->angles, poseAxis);
+        float localPlanes[6][4]{};
+        TransformPlanesToPoseLocal(info.planes, poseAxis,
+            collided.pose->origin, localPlanes);
+        float localMarkDirection[3]{};
+        TransformDirectionToPoseLocal(
+            info.axis[0], poseAxis, localMarkDirection);
+        GfxMarkContext context{};
+        context.modelTypeAndSurf = 0x80u;
+        context.modelIndex = collided.entnum;
+        bool anyMarks = false;
+        for (std::uint32_t surfaceIndex = surfaceBegin;
+             surfaceIndex < surfaceEnd; ++surfaceIndex)
+        {
+            const GfxSurface &surface =
+                s_world.dpvs.surfaces[surfaceIndex];
+            if (!MaterialAllowsMark(surface.material, info.material))
+                continue;
+            if (!AppendBrushSurface(info, surface, localPlanes,
+                    localMarkDirection, context, anyMarks))
+                return false;
+        }
+        if (!anyMarks) continue;
+        float localOrigin[3]{};
+        float localTexCoordAxis[3]{};
+        TransformPointToPoseLocal(info.origin, poseAxis,
+            collided.pose->origin, localOrigin);
+        TransformDirectionToPoseLocal(
+            info.axis[1], poseAxis, localTexCoordAxis);
+        info.callback(info.callbackContext, info.usedTriCount, info.tris,
+            info.usedPointCount, info.points, localOrigin,
+            localTexCoordAxis);
+        info.usedTriCount = 0;
+        info.usedPointCount = 0;
+    }
+    return true;
+}
+
+void TransformStaticModelPosition(const GfxPackedPlacement &placement,
+    const float local[3], float world[3]) noexcept
+{
+    for (std::size_t component = 0u; component < 3u; ++component)
+    {
+        world[component] = placement.origin[component] + placement.scale *
+            (local[0] * placement.axis[0][component] +
+             local[1] * placement.axis[1][component] +
+             local[2] * placement.axis[2][component]);
+    }
+}
+
+void TransformStaticModelNormal(const GfxPackedPlacement &placement,
+    PackedUnitVec packed, float world[3]) noexcept
+{
+    float local[3]{};
+    Vec3UnpackUnitVec(packed, local);
+    for (std::size_t component = 0u; component < 3u; ++component)
+    {
+        world[component] =
+            local[0] * placement.axis[0][component] +
+            local[1] * placement.axis[1][component] +
+            local[2] * placement.axis[2][component];
+    }
+}
+
+bool AppendStaticModelSurface(MarkInfo &info, const XSurface &surface,
+    const GfxPackedPlacement &placement,
+    const GfxMarkContext &context) noexcept
+{
+    if (!surface.verts0 || !surface.triIndices || surface.deformed ||
+        surface.vertCount == 0u || surface.triCount == 0u)
+        return true;
+    for (std::uint32_t triangle = 0u;
+         triangle < surface.triCount; ++triangle)
+    {
+        const std::uint16_t *indices =
+            surface.triIndices + triangle * 3u;
+        if (indices[0] >= surface.vertCount ||
+            indices[1] >= surface.vertCount ||
+            indices[2] >= surface.vertCount)
+            continue;
+        WebWorldMarkPoint clipPoints[2][MARK_CLIP_POINT_CAPACITY]{};
+        float normals[3][3]{};
+        for (std::size_t vertex = 0u; vertex < 3u; ++vertex)
+        {
+            const GfxPackedVertex &source = surface.verts0[indices[vertex]];
+            TransformStaticModelPosition(
+                placement, source.xyz, clipPoints[0][vertex].xyz);
+            clipPoints[0][vertex].vertWeights[vertex] = 1.0f;
+            TransformStaticModelNormal(
+                placement, source.normal, normals[vertex]);
+        }
+        if (TriangleRejected(info.axis[0], clipPoints[0][0].xyz,
+                clipPoints[0][1].xyz, clipPoints[0][2].xyz))
+            continue;
+        int pingPong = 0;
+        int fragmentPointCount = 3;
+        for (int plane = 0; plane < MARK_CLIP_PLANE_COUNT; ++plane)
+        {
+            fragmentPointCount = ChopWorldPolyBehindPlane(
+                fragmentPointCount, clipPoints[pingPong],
+                clipPoints[pingPong ^ 1], info.planes[plane]);
+            if (fragmentPointCount == 0) break;
+            pingPong ^= 1;
+        }
+        if (fragmentPointCount == 0) continue;
+        const int fragmentTriCount = fragmentPointCount - 2;
+        if (fragmentPointCount > info.maxPoints - info.usedPointCount ||
+            fragmentTriCount > info.maxTris - info.usedTriCount)
+            return false;
+        const int basePoint = info.usedPointCount;
+        for (int point = 2; point < fragmentPointCount; ++point)
+        {
+            FxMarkTri &triangleOut = info.tris[info.usedTriCount++];
+            triangleOut.indices[0] = static_cast<std::uint16_t>(
+                basePoint + point - 1);
+            triangleOut.indices[1] = static_cast<std::uint16_t>(
+                basePoint + point);
+            triangleOut.indices[2] = static_cast<std::uint16_t>(basePoint);
+            triangleOut.context = context;
+        }
+        for (int point = 0; point < fragmentPointCount; ++point)
+        {
+            const WebWorldMarkPoint &clip = clipPoints[pingPong][point];
+            FxMarkPoint &destination =
+                info.points[info.usedPointCount + point];
+            std::copy_n(clip.xyz, 3u, destination.xyz);
+            destination.lmapCoord[0] = 0.0f;
+            destination.lmapCoord[1] = 0.0f;
+            for (std::size_t component = 0u; component < 3u; ++component)
+            {
+                destination.normal[component] =
+                    clip.vertWeights[0] * normals[0][component] +
+                    clip.vertWeights[1] * normals[1][component] +
+                    clip.vertWeights[2] * normals[2][component];
+            }
+        }
+        info.usedPointCount += fragmentPointCount;
+    }
+    return true;
+}
+
+void CollectStaticModelCollisions(MarkInfo &info) noexcept
+{
+    info.smodelCollidedCount = 0;
+    if (!s_world.dpvs.smodelInsts || !s_world.dpvs.smodelDrawInsts)
+        return;
+    for (std::uint32_t index = 0u;
+         index < s_world.dpvs.smodelCount &&
+         info.smodelCollidedCount < 32; ++index)
+    {
+        if (index > std::numeric_limits<std::uint16_t>::max()) break;
+        const GfxStaticModelInst &instance =
+            s_world.dpvs.smodelInsts[index];
+        if (!BoundsOverlapRanges(instance.mins, instance.maxs,
+                info.mins, info.maxs))
+            continue;
+        info.smodelsCollided[info.smodelCollidedCount++] =
+            static_cast<std::uint16_t>(index);
+    }
+}
+
+bool GenerateStaticModelFragments(MarkInfo &info) noexcept
+{
+    if (!s_world.dpvs.smodelDrawInsts) return true;
+    for (int collision = 0; collision < info.smodelCollidedCount;
+         ++collision)
+    {
+        const std::uint32_t instanceIndex =
+            info.smodelsCollided[collision];
+        if (instanceIndex >= s_world.dpvs.smodelCount) continue;
+        const GfxStaticModelDrawInst &instance =
+            s_world.dpvs.smodelDrawInsts[instanceIndex];
+        const XModel *model = instance.model;
+        if (!model || !model->surfs || !model->materialHandles ||
+            model->numLods <= 0)
+            continue;
+        const XModelLodInfo &lod = model->lodInfo[0];
+        if (lod.surfIndex > model->numsurfs ||
+            lod.numsurfs > model->numsurfs - lod.surfIndex)
+            continue;
+        GfxMarkContext context{};
+        context.lmapIndex = 31u;
+        context.reflectionProbeIndex = instance.reflectionProbeIndex;
+        context.primaryLightIndex = instance.primaryLightIndex;
+        context.modelIndex = static_cast<std::uint16_t>(instanceIndex);
+        for (std::uint32_t surfaceIndex = 0u;
+             surfaceIndex < lod.numsurfs && surfaceIndex <= 63u;
+             ++surfaceIndex)
+        {
+            Material *material =
+                model->materialHandles[lod.surfIndex + surfaceIndex];
+            if (!MaterialAllowsMark(material, info.material)) continue;
+            context.modelTypeAndSurf = static_cast<std::uint8_t>(
+                0x40u | surfaceIndex);
+            if (!AppendStaticModelSurface(info,
+                    model->surfs[lod.surfIndex + surfaceIndex],
+                    instance.placement, context))
+                return false;
+        }
+        if (info.usedTriCount != 0 && info.usedPointCount != 0)
+        {
+            info.callback(info.callbackContext, info.usedTriCount, info.tris,
+                info.usedPointCount, info.points, info.origin, info.axis[1]);
+        }
         info.usedTriCount = 0;
         info.usedPointCount = 0;
     }
@@ -335,6 +626,8 @@ void __cdecl R_MarkFragments_Begin(MarkInfo *info,
     GetFragmentBounds(info->origin, info->axis, radius,
         info->mins, info->maxs);
     GetFragmentClipPlanes(info->origin, info->axis, radius, info->planes);
+    if (markAgainst == MARK_FRAGMENTS_AGAINST_MODELS)
+        CollectStaticModelCollisions(*info);
 }
 
 char __cdecl R_MarkFragments_AddDObj(MarkInfo *info,
@@ -373,8 +666,15 @@ void __cdecl R_MarkFragments_Go(MarkInfo *info,
     info->callback = callback;
     info->callbackContext = callbackContext;
     if (info->markAgainst == MARK_FRAGMENTS_AGAINST_BRUSHES)
-        GenerateWorldBrushFragments(*info);
-    // Attached DObj/static-model fragment clipping remains native-only in
-    // this slice. EffectsCore still receives and owns every model impact FX;
-    // only the persistent decal polygon is omitted for those receivers.
+    {
+        if (!GenerateWorldBrushFragments(*info) ||
+            !GenerateEntityBrushFragments(*info))
+            return;
+    }
+    else if (info->markAgainst == MARK_FRAGMENTS_AGAINST_MODELS)
+    {
+        if (!GenerateStaticModelFragments(*info)) return;
+        // Animated DObj fragment skinning remains the last model-receiver
+        // subset. EffectsCore still owns those impacts and their lifetimes.
+    }
 }
