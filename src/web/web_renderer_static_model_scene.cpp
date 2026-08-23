@@ -174,6 +174,8 @@ WebRendererWorldBatchDesc MakeDraw(
     draw.lastInstanceIndex = lastInstance;
     draw.lightmapIndex = 31u;
     draw.sourceKind = WebRendererSceneBatchKind::StaticXModel;
+    draw.castsSunShadow = material &&
+        (material->info.gameFlags & 0x40u) != 0u;
     draw.baseImage = FindBaseImage(material, draw.samplerState);
     draw.normalImage = FindNormalImage(material, draw.normalSamplerState);
     const bool hasTechnique = SelectTechnique(material, draw.stateBits,

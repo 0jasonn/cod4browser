@@ -61,6 +61,14 @@ void TestNativeDepthHackBitIsPreservedAtPortableBoundary()
     assert(WebRenderer_DObjUsesDepthHack(7u));
 }
 
+void TestNativeSunShadowCullBitIsPreservedAtPortableBoundary()
+{
+    assert(WebRenderer_DObjIsSunShadowCandidate(0u));
+    assert(!WebRenderer_DObjIsSunShadowCandidate(1u));
+    assert(WebRenderer_DObjIsSunShadowCandidate(2u));
+    assert(!WebRenderer_DObjIsSunShadowCandidate(3u));
+}
+
 void TestInvalidAndCapacityAdmissionIsDeterministic()
 {
     const DObj_s *object = reinterpret_cast<const DObj_s *>(0x1u);
@@ -106,6 +114,7 @@ int main()
     TestLodDelegatesToCanonicalXModelPolicy();
     TestOrdinaryAndViewmodelFlagsShareAdmission();
     TestNativeDepthHackBitIsPreservedAtPortableBoundary();
+    TestNativeSunShadowCullBitIsPreservedAtPortableBoundary();
     TestInvalidAndCapacityAdmissionIsDeterministic();
     TestDObjMaterialResolutionPreservesCanonicalFallback();
     TestReflexSightTechniqueSelectsIntensityOpacitySubset();

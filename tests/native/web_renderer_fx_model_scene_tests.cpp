@@ -140,12 +140,14 @@ void TestIdentityAndCanonicalSurfaceData()
     assert(command.batches[0].samplerState == 0x42u);
     assert(command.batches[0].stateBits[0] == 0x18008800u);
     assert(command.batches[0].sourceKind == WebRendererSceneBatchKind::FxXModel);
+    assert(!command.batches[0].castsSunShadow);
     assert(command.batches[0].technique == WebRendererWorldTechnique::BaseTexture);
     assert(command.vertices[0].normal[2] == 1.0f);
 
     WebRendererFxModelSubmission dynamicSubmission = submission;
     dynamicSubmission.sourceKind =
         WebRendererSceneBatchKind::DynamicXModel;
+    fixture.material.info.gameFlags = 0x40u;
     dynamicSubmission.modelLightingEnabled = true;
     dynamicSubmission.modelLightingCoordinates[0] = 0.25f;
     dynamicSubmission.modelLightingCoordinates[1] = 0.5f;
@@ -156,6 +158,7 @@ void TestIdentityAndCanonicalSurfaceData()
         WebRendererFxModelSceneResult::Success);
     assert(command.batches[0].sourceKind ==
         WebRendererSceneBatchKind::DynamicXModel);
+    assert(command.batches[0].castsSunShadow);
     assert(command.batches[0].lightingMode ==
         WebRendererWorldLightingMode::ModelLightGrid);
     assert(command.batches[0].modelLightingCoordinates[0] == 0.25f);

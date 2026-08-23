@@ -72,6 +72,7 @@ struct Fixture
         stateBits[0].loadBits[0] = 0x18008800u;
         stateBits[0].loadBits[1] = 0x0000000du;
         material.info.name = "model/material";
+        material.info.gameFlags = 0x40u;
         material.textureCount = 1u;
         material.textureTable = &texture;
         material.techniqueSet = &techniqueSet;
@@ -128,6 +129,7 @@ void TestCanonicalInstancesShareOneMaterialSurfaceBatch()
     assert(batch.draw.baseImage == &fixture.image);
     assert(batch.draw.samplerState == 0x42u);
     assert(batch.draw.technique == WebRendererWorldTechnique::BaseTexture);
+    assert(batch.draw.castsSunShadow);
     assert(batch.draw.lightingMode ==
         WebRendererWorldLightingMode::ModelLightGrid);
     assert(batch.draw.firstInstanceIndex == 0u);

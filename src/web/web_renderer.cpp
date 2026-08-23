@@ -197,6 +197,7 @@ struct WebRendererState
     GLint shadowDepthTextureUniform = -1;
     GLint shadowDepthTextureEnabledUniform = -1;
     GLint shadowDepthAlphaTestUniform = -1;
+    GLint shadowDepthInstanceEnabledUniform = -1;
     GLint skyTextureUniform = -1;
     GLint skyTanHalfFovUniform = -1;
     GLint skyForwardUniform = -1;
@@ -336,6 +337,7 @@ void DeleteSurfaceObjects(
 void DeleteStaticModelObjects(
     GLuint vertexArray, GLuint vertexBuffer, GLuint indexBuffer,
     GLuint instanceBuffer);
+void BindStaticModelInstanceRange(std::uint32_t instanceOffset);
 
 EM_JS(
     void,
@@ -1590,6 +1592,7 @@ void ResetGpuHandles()
     g_renderer.shadowDepthTextureUniform = -1;
     g_renderer.shadowDepthTextureEnabledUniform = -1;
     g_renderer.shadowDepthAlphaTestUniform = -1;
+    g_renderer.shadowDepthInstanceEnabledUniform = -1;
     g_renderer.skyTextureUniform = -1;
     g_renderer.skyTanHalfFovUniform = -1;
     g_renderer.skyForwardUniform = -1;
@@ -2862,11 +2865,24 @@ bool CreateRendererResources()
         precision highp float;
         layout(location = 0) in vec3 a_position;
         layout(location = 2) in vec2 a_texcoord;
+        layout(location = 4) in vec3 a_instance_axis0;
+        layout(location = 5) in vec3 a_instance_axis1;
+        layout(location = 6) in vec3 a_instance_axis2;
+        layout(location = 7) in vec3 a_instance_origin;
         uniform mat4 u_shadow_depth_matrix;
+        uniform float u_shadow_depth_instance_enabled;
         out vec2 v_shadow_texcoord;
         void main()
         {
-            gl_Position = u_shadow_depth_matrix * vec4(a_position, 1.0);
+            vec3 position = a_position;
+            if (u_shadow_depth_instance_enabled > 0.5)
+            {
+                position = a_instance_origin +
+                    a_position.x * a_instance_axis0 +
+                    a_position.y * a_instance_axis1 +
+                    a_position.z * a_instance_axis2;
+            }
+            gl_Position = u_shadow_depth_matrix * vec4(position, 1.0);
             v_shadow_texcoord = a_texcoord;
         }
     )glsl";
@@ -3064,6 +3080,9 @@ bool CreateRendererResources()
             "u_shadow_depth_texture_enabled");
     const GLint shadowDepthAlphaTestUniform =
         glGetUniformLocation(shadowProgram, "u_shadow_depth_alpha_test");
+    const GLint shadowDepthInstanceEnabledUniform =
+        glGetUniformLocation(
+            shadowProgram, "u_shadow_depth_instance_enabled");
     const GLint skyTextureUniform =
         glGetUniformLocation(skyProgram, "u_sky");
     const GLint skyTanHalfFovUniform =
@@ -3212,6 +3231,7 @@ bool CreateRendererResources()
         shadowDepthMatrixUniform < 0 || shadowDepthTextureUniform < 0 ||
         shadowDepthTextureEnabledUniform < 0 ||
         shadowDepthAlphaTestUniform < 0 ||
+        shadowDepthInstanceEnabledUniform < 0 ||
         skyTextureUniform < 0 || skyTanHalfFovUniform < 0 ||
         skyForwardUniform < 0 || skyRightUniform < 0 ||
         skyUpUniform < 0 || postProcessTextureUniform < 0 ||
@@ -3330,6 +3350,8 @@ bool CreateRendererResources()
     g_renderer.shadowDepthTextureEnabledUniform =
         shadowDepthTextureEnabledUniform;
     g_renderer.shadowDepthAlphaTestUniform = shadowDepthAlphaTestUniform;
+    g_renderer.shadowDepthInstanceEnabledUniform =
+        shadowDepthInstanceEnabledUniform;
     g_renderer.skyTextureUniform = skyTextureUniform;
     g_renderer.skyTanHalfFovUniform = skyTanHalfFovUniform;
     g_renderer.skyForwardUniform = skyForwardUniform;
@@ -4056,6 +4078,7 @@ WebRendererSurfaceResult CopyStaticModelCommand(
             batch.draw.techniqueType = draw.techniqueType;
             batch.draw.customSamplerFlags = draw.customSamplerFlags;
             batch.draw.techniqueFlags = draw.techniqueFlags;
+            batch.draw.castsSunShadow = draw.castsSunShadow;
             batch.draw.pixelShaderName = draw.pixelShaderName
                 ? draw.pixelShaderName : "<unavailable-pixel-shader>";
             batch.draw.pixelShaderProgramHash = draw.pixelShaderProgramHash;
@@ -4542,13 +4565,21 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
     const std::size_t fallbackBatches = static_cast<std::size_t>(std::count_if(
         g_renderer.retainedStaticModelBatches.begin(),
         g_renderer.retainedStaticModelBatches.end(), isFallbackBatch));
+    const std::size_t shadowCasterBatches = static_cast<std::size_t>(
+        std::count_if(
+            g_renderer.retainedStaticModelBatches.begin(),
+            g_renderer.retainedStaticModelBatches.end(),
+            [](const WebRendererRetainedStaticModelBatch &batch) {
+                return batch.draw.castsSunShadow;
+            }));
     const auto firstFallback = std::find_if(
         g_renderer.retainedStaticModelBatches.begin(),
         g_renderer.retainedStaticModelBatches.end(), isFallbackBatch);
     Web_Log(WebLogLevel::Info,
         "[kisakcod-web] Renderer retained canonical static XModel command "
         "(%u models, %u surfaces, %u shared vertices, %u indices, %u "
-        "instances, %u batches, %zu fallback; %zu/%zu images; "
+        "instances, %u batches, %zu fallback, %zu shadow-caster; "
+        "%zu/%zu images; "
         "model-lighting=%ux%ux%u entries=%u).\n",
         scene.modelCount,
         scene.surfaceCount,
@@ -4557,6 +4588,7 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
         scene.instanceCount,
         scene.batchCount,
         fallbackBatches,
+        shadowCasterBatches,
         supportedImages,
         g_renderer.retainedStaticModelImages.size(),
         g_renderer.retainedStaticModelLighting.width,
@@ -4669,11 +4701,21 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
                 [](const WebRendererRetainedWorldImage &image) {
                     return image.supported;
                 }));
+        const std::size_t shadowCasterBatches = static_cast<std::size_t>(
+            std::count_if(
+                g_renderer.retainedDynamicModelBatches.begin(),
+                g_renderer.retainedDynamicModelBatches.end(),
+                [](const WebRendererRetainedWorldBatch &batch) {
+                    return batch.castsSunShadow && !batch.depthHack &&
+                        !WebRenderer_IsFxVertexColorBatch(batch.sourceKind);
+                }));
         Web_Log(WebLogLevel::Info,
             "[kisakcod-web] Renderer retained first canonical dynamic DObj "
-            "command (%u vertices, %u indices, %u batches; %zu/%zu images; "
+            "command (%u vertices, %u indices, %u batches, %zu "
+            "shadow-caster; %zu/%zu images; "
             "model-lighting=%ux%ux%u entries=%u).\n",
             scene.vertexCount, scene.indexCount, scene.batchCount,
+            shadowCasterBatches,
             supportedImages,
             g_renderer.retainedDynamicModelImages.size(),
             g_renderer.retainedDynamicModelLighting.width,
@@ -5659,6 +5701,7 @@ bool DrawNearSunShadowMap()
     glUniformMatrix4fv(g_renderer.shadowDepthMatrixUniform, 1, GL_FALSE,
         g_renderer.sceneSunShadowMatrix.data());
     glUniform1i(g_renderer.shadowDepthTextureUniform, 0);
+    glUniform1f(g_renderer.shadowDepthInstanceEnabledUniform, 0.0f);
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
     glDepthMask(GL_TRUE);
@@ -5691,6 +5734,67 @@ bool DrawNearSunShadowMap()
             static_cast<GLsizei>(batch.indexCount), GL_UNSIGNED_INT,
             reinterpret_cast<const void *>(indexOffset));
     }
+    if (g_renderer.staticModelSceneActive &&
+        g_renderer.staticModelVertexArray != 0u &&
+        g_renderer.staticModelInstanceBuffer != 0u)
+    {
+        glBindVertexArray(g_renderer.staticModelVertexArray);
+        glUniform1f(g_renderer.shadowDepthInstanceEnabledUniform, 1.0f);
+        for (const WebRendererRetainedStaticModelBatch &batch :
+             g_renderer.retainedStaticModelBatches)
+        {
+            if (!batch.draw.castsSunShadow) continue;
+            const WebRendererRetainedWorldImage *base = RetainedImage(
+                g_renderer.retainedStaticModelImages,
+                batch.draw.baseImageIndex);
+            glUniform1f(g_renderer.shadowDepthTextureEnabledUniform,
+                base ? 1.0f : 0.0f);
+            glUniform1i(g_renderer.shadowDepthAlphaTestUniform,
+                WorldAlphaTestMode(batch.draw.stateBits[0]));
+            BindWorldTexture(GL_TEXTURE0,
+                base ? base->texture : g_renderer.texture,
+                batch.draw.samplerState);
+            BindStaticModelInstanceRange(batch.instanceOffset);
+            const std::uintptr_t indexOffset =
+                static_cast<std::uintptr_t>(batch.draw.firstIndex) *
+                sizeof(std::uint32_t);
+            glDrawElementsInstanced(GL_TRIANGLES,
+                static_cast<GLsizei>(batch.draw.indexCount),
+                GL_UNSIGNED_INT,
+                reinterpret_cast<const void *>(indexOffset),
+                static_cast<GLsizei>(batch.instanceCount));
+        }
+    }
+    if (g_renderer.dynamicModelSceneActive &&
+        g_renderer.dynamicModelVertexArray != 0u)
+    {
+        glBindVertexArray(g_renderer.dynamicModelVertexArray);
+        glUniform1f(g_renderer.shadowDepthInstanceEnabledUniform, 0.0f);
+        for (const WebRendererRetainedWorldBatch &batch :
+             g_renderer.retainedDynamicModelBatches)
+        {
+            if (!batch.castsSunShadow || batch.depthHack ||
+                WebRenderer_IsFxVertexColorBatch(batch.sourceKind))
+                continue;
+            const WebRendererRetainedWorldImage *base = RetainedImage(
+                g_renderer.retainedDynamicModelImages,
+                batch.baseImageIndex);
+            glUniform1f(g_renderer.shadowDepthTextureEnabledUniform,
+                base ? 1.0f : 0.0f);
+            glUniform1i(g_renderer.shadowDepthAlphaTestUniform,
+                WorldAlphaTestMode(batch.stateBits[0]));
+            BindWorldTexture(GL_TEXTURE0,
+                base ? base->texture : g_renderer.texture,
+                batch.samplerState);
+            const std::uintptr_t indexOffset =
+                static_cast<std::uintptr_t>(batch.firstIndex) *
+                sizeof(std::uint32_t);
+            glDrawElements(GL_TRIANGLES,
+                static_cast<GLsizei>(batch.indexCount), GL_UNSIGNED_INT,
+                reinterpret_cast<const void *>(indexOffset));
+        }
+    }
+    glUniform1f(g_renderer.shadowDepthInstanceEnabledUniform, 0.0f);
     glDisable(GL_POLYGON_OFFSET_FILL);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glActiveTexture(GL_TEXTURE0);

@@ -43,6 +43,13 @@ constexpr bool WebRenderer_DObjUsesDepthHack(
     return (renderFlags & 2u) != 0u;
 }
 
+constexpr bool WebRenderer_DObjIsSunShadowCandidate(
+    std::uint32_t renderFlags) noexcept
+{
+    // Native sun-shadow DPVS uses renderFxFlagsCull=1.
+    return (renderFlags & 1u) == 0u;
+}
+
 enum class WebRendererDObjAdmissionResult : std::uint8_t
 {
     Accepted = 0,

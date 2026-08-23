@@ -182,6 +182,9 @@ WebRendererWorldBatchDesc MakeDraw(
     draw.lastInstanceIndex = UINT32_MAX;
     draw.lightmapIndex = 31u;
     draw.sourceKind = submission.sourceKind;
+    draw.castsSunShadow =
+        submission.sourceKind == WebRendererSceneBatchKind::DynamicXModel &&
+        material && (material->info.gameFlags & 0x40u) != 0u;
     draw.baseImage = FindBaseImage(material, draw.samplerState);
     draw.normalImage = FindNormalImage(material, draw.normalSamplerState);
     const bool hasTechnique = SelectTechnique(material, draw.stateBits,

@@ -354,7 +354,7 @@ WebRendererWorldBatchDesc MakeDraw(
     std::uint32_t modelSurfaceIndex, std::uint32_t firstIndex,
     std::uint32_t indexCount,
     const float modelLightingCoordinates[3],
-    bool modelLightingEnabled, bool depthHack,
+    bool modelLightingEnabled, bool depthHack, bool castsSunShadow,
     WebRendererMaterialResolver materialResolver) noexcept
 {
     material = WebRenderer_ResolveDObjMaterial(material, materialResolver);
@@ -374,6 +374,8 @@ WebRendererWorldBatchDesc MakeDraw(
     draw.lightmapIndex = 31u;
     draw.sourceKind = WebRendererSceneBatchKind::DynamicDObj;
     draw.depthHack = depthHack;
+    draw.castsSunShadow = castsSunShadow && material &&
+        (material->info.gameFlags & 0x40u) != 0u;
     draw.baseImage = FindBaseImage(material, draw.samplerState);
     draw.normalImage = FindNormalImage(material, draw.normalSamplerState);
     // The WebGL compatibility technique is deliberately a base-color subset
@@ -596,6 +598,8 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                         modelLightingCoordinates,
                         submissionLightingReady,
                         WebRenderer_DObjUsesDepthHack(
+                            submission.renderFlags),
+                        WebRenderer_DObjIsSunShadowCandidate(
                             submission.renderFlags),
                         materialResolver));
                     ++replacement.surfaceCount;
