@@ -394,9 +394,10 @@ Error DecodeRgba8(
     }
 
     const bool rgb8 = metadata.format == FORMAT_RGB8;
+    const bool a8l8 = metadata.format == FORMAT_A8L8;
     const bool compressed = metadata.format == FORMAT_DXT1 ||
         metadata.format == FORMAT_DXT3 || metadata.format == FORMAT_DXT5;
-    if (metadata.format != FORMAT_ARGB && !rgb8 && !compressed)
+    if (metadata.format != FORMAT_ARGB && !rgb8 && !a8l8 && !compressed)
     {
         return Error::DecodeUnsupportedFormat;
     }
@@ -408,7 +409,7 @@ Error DecodeRgba8(
             ((metadata.flags & FLAG_NO_MIPMAPS) == 0u ||
              (metadata.flags & static_cast<std::uint8_t>(
                  ~(FLAG_NO_MIPMAPS | policyFlags))) != 0u)) ||
-        (rgb8 && (metadata.flags & static_cast<std::uint8_t>(
+        ((rgb8 || a8l8) && (metadata.flags & static_cast<std::uint8_t>(
             ~(FLAG_NO_PICMIP | FLAG_NO_MIPMAPS | policyFlags))) != 0u) ||
         (compressed && (metadata.flags & static_cast<std::uint8_t>(
             ~(FLAG_NO_PICMIP | FLAG_NO_MIPMAPS |
@@ -436,7 +437,7 @@ Error DecodeRgba8(
         return Error::DecodeOutputTooLarge;
     }
     std::size_t baseLevelOffset = HEADER_SIZE;
-    if (!compressed && !rgb8)
+    if (!compressed && !rgb8 && !a8l8)
     {
         if (!CheckedAdd(HEADER_SIZE, pixelBytes, expectedMemberBytes) ||
             bytes.size() != expectedMemberBytes)
@@ -444,7 +445,7 @@ Error DecodeRgba8(
             return Error::DecodeInvalidLayout;
         }
     }
-    else if (rgb8)
+    else if (rgb8 || a8l8)
     {
         const std::uint32_t storedMipCount = Count2dStoredMipmaps(
             metadata.flags, metadata.width, metadata.height);
@@ -460,7 +461,7 @@ Error DecodeRgba8(
             std::size_t levelPixels = 0u;
             std::size_t levelBytes = 0u;
             if (!CheckedMultiply(width, height, levelPixels) ||
-                !CheckedMultiply(levelPixels, 3u, levelBytes) ||
+                !CheckedMultiply(levelPixels, rgb8 ? 3u : 2u, levelBytes) ||
                 !CheckedAdd(payloadBytes, levelBytes, payloadBytes))
             {
                 return Error::DecodeOutputTooLarge;
@@ -531,6 +532,21 @@ Error DecodeRgba8(
             rgba[targetOffset + 1u] = bgr[sourceOffset + 1u];
             rgba[targetOffset + 2u] = bgr[sourceOffset];
             rgba[targetOffset + 3u] = 255u;
+        }
+    }
+    else if (a8l8)
+    {
+        const std::span<const std::uint8_t> luminanceAlpha = bytes.subspan(
+            baseLevelOffset, pixelCount * 2u);
+        for (std::size_t pixel = 0u; pixel < pixelCount; ++pixel)
+        {
+            const std::size_t sourceOffset = pixel * 2u;
+            const std::size_t targetOffset = pixel * RGBA_BYTES_PER_PIXEL;
+            const std::uint8_t luminance = luminanceAlpha[sourceOffset];
+            rgba[targetOffset] = luminance;
+            rgba[targetOffset + 1u] = luminance;
+            rgba[targetOffset + 2u] = luminance;
+            rgba[targetOffset + 3u] = luminanceAlpha[sourceOffset + 1u];
         }
     }
     else if (!compressed)
@@ -737,6 +753,7 @@ Error DecodeLoadDefRgba8(
     std::size_t bytesPerBlock = 0u;
     bool compressed = false;
     bool luminance = false;
+    bool luminanceAlpha = false;
     bool opaqueBgra = false;
     switch (format)
     {
@@ -749,6 +766,9 @@ Error DecodeLoadDefRgba8(
         break;
     case LOADDEF_FORMAT_L8:
         luminance = true;
+        break;
+    case LOADDEF_FORMAT_A8L8:
+        luminanceAlpha = true;
         break;
     case LOADDEF_FORMAT_DXT1:
         iwiFormat = FORMAT_DXT1;
@@ -799,7 +819,8 @@ Error DecodeLoadDefRgba8(
             if (!CheckedMultiply(mipWidth, mipHeight, mipPixels) ||
                 !CheckedMultiply(
                     mipPixels,
-                    luminance ? 1u : ARGB_BYTES_PER_PIXEL,
+                    luminance ? 1u :
+                        (luminanceAlpha ? 2u : ARGB_BYTES_PER_PIXEL),
                     levelBytes))
             {
                 return Error::DecodeOutputTooLarge;
@@ -831,6 +852,20 @@ Error DecodeLoadDefRgba8(
             rgba[offset + 1u] = l8[pixel];
             rgba[offset + 2u] = l8[pixel];
             rgba[offset + 3u] = 255u;
+        }
+    }
+    else if (luminanceAlpha)
+    {
+        const std::span<const std::uint8_t> a8l8 = payload.first(baseLevelBytes);
+        for (std::size_t pixel = 0u; pixel < pixelCount; ++pixel)
+        {
+            const std::size_t sourceOffset = pixel * 2u;
+            const std::size_t targetOffset = pixel * RGBA_BYTES_PER_PIXEL;
+            const std::uint8_t luminanceValue = a8l8[sourceOffset];
+            rgba[targetOffset] = luminanceValue;
+            rgba[targetOffset + 1u] = luminanceValue;
+            rgba[targetOffset + 2u] = luminanceValue;
+            rgba[targetOffset + 3u] = a8l8[sourceOffset + 1u];
         }
     }
     else if (!compressed)

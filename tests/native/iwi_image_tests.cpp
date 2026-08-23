@@ -409,6 +409,33 @@ void TestRgb8DecodeAndMipOrder()
         "BGR8 base texel is swizzled to opaque RGBA8");
 }
 
+void TestA8L8DecodeAndMipOrder()
+{
+    Bytes payload{
+        0xffu, 0x00u, // 1x1 mip.
+        0x10u, 0x20u,
+        0x40u, 0x80u,
+        0x7fu, 0xffu,
+        0xffu, 0x00u,
+    };
+    Bytes fixture = MakeIwi(
+        kisak::iwi::FORMAT_A8L8, 0u, 2u, 2u, 1u, payload.size());
+    std::copy(payload.begin(), payload.end(),
+        fixture.begin() + kisak::iwi::HEADER_SIZE);
+
+    Rgba8Image image = MakeSentinelImage();
+    RequireError(kisak::iwi::DecodeRgba8(fixture, image), Error::None,
+        "decode A8L8 mip chain");
+    Require(image.width == 2u && image.height == 2u &&
+            image.pixels == Bytes({
+                0x10u, 0x10u, 0x10u, 0x20u,
+                0x40u, 0x40u, 0x40u, 0x80u,
+                0x7fu, 0x7fu, 0x7fu, 0xffu,
+                0xffu, 0xffu, 0xffu, 0x00u,
+            }),
+        "A8L8 decode uses the final base mip and preserves luminance and alpha");
+}
+
 void TestDxt1Decode()
 {
     const Bytes opaqueBlock = MakeDxtColorBlock(0xf800u, 0x07e0u, 0xe4e4e4e4u);
@@ -720,6 +747,27 @@ void TestCanonicalLoadDefDecode()
         0x00u, 0x00u, 0x00u, 0xffu,
     }), "canonical L8 lightmap expands to opaque RGBA8");
 
+    const Bytes luminanceAlpha{
+        0x10u, 0x20u,
+        0x40u, 0x80u,
+        0x7fu, 0xffu,
+        0xffu, 0x00u,
+    };
+    RequireError(kisak::iwi::DecodeLoadDefRgba8(
+        kisak::iwi::LOADDEF_FORMAT_A8L8,
+        kisak::iwi::FLAG_NO_MIPMAPS,
+        2u,
+        2u,
+        1u,
+        luminanceAlpha,
+        image), Error::None, "decode canonical A8L8 load definition");
+    Require(image.pixels == Bytes({
+        0x10u, 0x10u, 0x10u, 0x20u,
+        0x40u, 0x40u, 0x40u, 0x80u,
+        0x7fu, 0x7fu, 0x7fu, 0xffu,
+        0xffu, 0xffu, 0xffu, 0x00u,
+    }), "canonical A8L8 expands luminance and preserves alpha");
+
     const Bytes red = MakeDxtColorBlock(0xf800u, 0x07e0u, 0u);
     const Bytes blue = MakeDxtColorBlock(0x001fu, 0x07e0u, 0u);
     Bytes nativeMipOrder;
@@ -1025,6 +1073,7 @@ int main()
     runner.Run("file-size validation", TestFileSizeValidation);
     runner.Run("RGBA8 decode and swizzle", TestRgba8DecodeAndSwizzle);
     runner.Run("RGB8 decode and mip order", TestRgb8DecodeAndMipOrder);
+    runner.Run("A8L8 decode and mip order", TestA8L8DecodeAndMipOrder);
     runner.Run("DXT1 decode", TestDxt1Decode);
     runner.Run("DXT3 decode", TestDxt3Decode);
     runner.Run("DXT5 decode", TestDxt5Decode);
