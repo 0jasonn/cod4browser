@@ -88,7 +88,8 @@ WebRendererWorldSceneResult WebRenderer_BuildBrushModelSceneCommand(
     const GfxWorld &world,
     const WebRendererBrushModelSubmission *submissions,
     std::uint32_t submissionCount,
-    WebRendererBrushModelSceneCommand &destination);
+    WebRendererBrushModelSceneCommand &destination,
+    const WebRendererWorldLightTechniqueContext *lightContext = nullptr);
 
 const char *WebRenderer_WorldSceneResultString(
     WebRendererWorldSceneResult result) noexcept;

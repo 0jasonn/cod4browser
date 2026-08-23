@@ -6651,9 +6651,22 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 const WebRendererRetainedWorldImage *secondaryLightmap =
                     RetainedImage(g_renderer.retainedDynamicModelImages,
                         batch.secondaryLightmapImageIndex);
+                const WebRendererRetainedWorldImage *primaryLightmap =
+                    RetainedImage(g_renderer.retainedDynamicModelImages,
+                        batch.lightmapImageIndex);
                 const WebRendererRetainedWorldImage *normal = RetainedImage(
                     g_renderer.retainedDynamicModelImages,
                     batch.normalImageIndex);
+                const WebRendererRetainedPrimaryLight *primaryLight =
+                    batch.primaryLightIndex <
+                            g_renderer.retainedPrimaryLights.size()
+                    ? &g_renderer.retainedPrimaryLights[
+                        batch.primaryLightIndex]
+                    : nullptr;
+                const WebRendererRetainedWorldImage *attenuation =
+                    primaryLight
+                    ? WorldImage(primaryLight->attenuationImageIndex)
+                    : nullptr;
                 const bool fxSceneGeometry =
                     WebRenderer_IsFxVertexColorBatch(batch.sourceKind);
                 const bool fallback = batch.technique ==
@@ -6673,8 +6686,14 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                     batch.lightingMode ==
                         WebRendererWorldLightingMode::ModelLightGrid &&
                     g_renderer.retainedDynamicModelLighting.texture != 0u;
-                const bool normalMapped = modelLit && normal &&
-                    normal->texture != 0u;
+                const bool normalMapped = normal && normal->texture != 0u &&
+                    (modelLit || (dynamicLightmapped &&
+                        WebRenderer_UsesWorldNormalMap(batch.technique)));
+                const bool primaryLit = dynamicLightmapped &&
+                    primaryLightmap && primaryLight &&
+                    primaryLight->type == 2u && attenuation &&
+                    batch.techniqueType == 10u &&
+                    batch.pixelShaderName.rfind("lm_spot_", 0u) == 0u;
                 glUniform1f(g_renderer.fogEnabledUniform,
                     g_renderer.sceneFogEnabled && !fxSceneGeometry
                         ? 1.0f : 0.0f);
@@ -6690,6 +6709,28 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                     modelLit ? 1.0f : 0.0f);
                 glUniform1f(g_renderer.normalMapEnabledUniform,
                     normalMapped ? 1.0f : 0.0f);
+                glUniform1f(g_renderer.primaryLightEnabledUniform,
+                    primaryLit ? 1.0f : 0.0f);
+                if (primaryLit)
+                {
+                    glUniform4f(
+                        g_renderer.primaryLightPositionRadiusUniform,
+                        primaryLight->origin[0], primaryLight->origin[1],
+                        primaryLight->origin[2],
+                        1.0f / primaryLight->radius);
+                    glUniform3fv(g_renderer.primaryLightDiffuseUniform, 1,
+                        primaryLight->color);
+                    glUniform3fv(
+                        g_renderer.primaryLightSpotDirectionUniform, 1,
+                        primaryLight->direction);
+                    const float spotScale = 1.0f /
+                        (primaryLight->cosHalfFovInner -
+                            primaryLight->cosHalfFovOuter);
+                    glUniform3f(g_renderer.primaryLightSpotFactorsUniform,
+                        spotScale,
+                        -spotScale * primaryLight->cosHalfFovOuter,
+                        static_cast<float>(primaryLight->exponent));
+                }
                 glUniform3fv(g_renderer.modelLightingBaseCoordinatesUniform,
                     1, batch.modelLightingCoordinates);
                 BindWorldTexture(GL_TEXTURE0,
@@ -6702,6 +6743,13 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                     secondaryLightmap
                         ? secondaryLightmap->texture : g_renderer.texture,
                     0x62u);
+                BindWorldTexture(GL_TEXTURE9,
+                    primaryLightmap
+                        ? primaryLightmap->texture : g_renderer.texture,
+                    0x62u);
+                BindWorldTexture(GL_TEXTURE10,
+                    attenuation ? attenuation->texture : g_renderer.texture,
+                    primaryLight ? primaryLight->samplerState : 0u);
                 const std::uintptr_t indexOffset =
                     static_cast<std::uintptr_t>(batch.firstIndex) *
                     sizeof(std::uint32_t);

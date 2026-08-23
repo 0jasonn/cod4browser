@@ -2217,12 +2217,27 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         return;
     }
 
+    std::vector<WebRendererPrimaryLightDesc> brushPrimaryLights;
+    std::uint32_t brushSunPrimaryLightIndex = 0u;
+    if (!BuildRendererPrimaryLights(
+            brushPrimaryLights, brushSunPrimaryLightIndex))
+    {
+        Com_Error(ERR_DROP,
+            "R_RenderScene: invalid canonical brush primary lights");
+        return;
+    }
+    const WebRendererWorldLightTechniqueContext brushLightContext{
+        brushPrimaryLights.data(),
+        static_cast<std::uint32_t>(brushPrimaryLights.size()),
+        brushSunPrimaryLightIndex,
+        false,
+    };
     WebRendererBrushModelSceneCommand brushCommand;
     const WebRendererWorldSceneResult brushBuild =
         WebRenderer_BuildBrushModelSceneCommand(
             s_world, activeBrushModels.data(),
             static_cast<std::uint32_t>(activeBrushModels.size()),
-            brushCommand);
+            brushCommand, &brushLightContext);
     const bool hasBrushModels =
         brushBuild == WebRendererWorldSceneResult::Success;
     if (brushBuild != WebRendererWorldSceneResult::Success &&

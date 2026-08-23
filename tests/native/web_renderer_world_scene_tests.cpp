@@ -809,6 +809,19 @@ void TestDynamicBrushModelUsesCanonicalSurfaceRangeAndPlacement()
         WebRendererSceneBatchKind::DynamicBModel);
     assert(command.batches[0].firstSurfaceIndex == 2u);
     assert(command.batches[0].lastSurfaceIndex == 2u);
+
+    fixture.surfaces[2].primaryLightIndex = 2u;
+    std::array<WebRendererPrimaryLightDesc, 3u> lights{};
+    lights[2u].type = 2u;
+    const WebRendererWorldLightTechniqueContext lightContext{
+        lights.data(), static_cast<std::uint32_t>(lights.size()), 1u, false};
+    assert(WebRenderer_BuildBrushModelSceneCommand(
+        fixture.world, &submission, 1u, command, &lightContext) ==
+        WebRendererWorldSceneResult::Success);
+    assert(command.batches[0].primaryLightIndex == 2u);
+    assert(command.batches[0].techniqueType == 36u);
+    assert(command.batches[0].technique ==
+        WebRendererWorldTechnique::NativeTechniqueUnavailable);
 }
 
 void TestMalformedDynamicBrushRangeIsRejectedAtomically()

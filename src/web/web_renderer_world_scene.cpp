@@ -687,7 +687,8 @@ WebRendererWorldSceneResult WebRenderer_BuildBrushModelSceneCommand(
     const GfxWorld &world,
     const WebRendererBrushModelSubmission *submissions,
     std::uint32_t submissionCount,
-    WebRendererBrushModelSceneCommand &destination)
+    WebRendererBrushModelSceneCommand &destination,
+    const WebRendererWorldLightTechniqueContext *lightContext)
 {
     if (world.surfaceCount <= 0 || world.vertexCount == 0u ||
         world.indexCount <= 0 || !world.vd.vertices || !world.indices ||
@@ -846,7 +847,7 @@ WebRendererWorldSceneResult WebRenderer_BuildBrushModelSceneCommand(
 
                 WebRendererWorldBatchDesc candidate = MakeBatch(
                     world, surface, surfaceIndex, firstDestinationIndex,
-                    false, nullptr);
+                    false, lightContext);
                 candidate.indexCount = indexCount;
                 candidate.sourceKind =
                     WebRendererSceneBatchKind::DynamicBModel;
