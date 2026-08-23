@@ -99,6 +99,10 @@ bool WebRenderer_CaptureComparison(
             record.lightingMode = batch.lightingMode;
             record.customSamplerFlags = batch.customSamplerFlags;
             record.techniqueFlags = batch.techniqueFlags;
+            record.vertexShaderName = NameOr(
+                batch.vertexShaderName, "<unavailable-vertex-shader>");
+            record.vertexShaderProgramHash =
+                batch.vertexShaderProgramHash;
             record.pixelShaderName = NameOr(
                 batch.pixelShaderName, "<unavailable-pixel-shader>");
             record.pixelShaderProgramHash = batch.pixelShaderProgramHash;
@@ -199,6 +203,9 @@ std::vector<WebRendererComparisonDelta> WebRenderer_CompareCaptures(
             left.techniqueType != right.techniqueType ||
             left.portableTechnique != right.portableTechnique ||
             left.techniqueFlags != right.techniqueFlags ||
+            left.vertexShaderName != right.vertexShaderName ||
+            left.vertexShaderProgramHash !=
+                right.vertexShaderProgramHash ||
             left.pixelShaderName != right.pixelShaderName ||
             left.pixelShaderProgramHash != right.pixelShaderProgramHash)
             fields |= WEB_RENDERER_COMPARISON_TECHNIQUE;

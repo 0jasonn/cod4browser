@@ -212,11 +212,34 @@ std::uint32_t HashPixelShaderProgram(
     return hash;
 }
 
+std::uint32_t HashVertexShaderProgram(
+    const MaterialVertexShader *shader) noexcept
+{
+    if (!shader || !shader->prog.loadDef.program ||
+        shader->prog.loadDef.programSize == 0u)
+    {
+        return 0u;
+    }
+    constexpr std::uint32_t FNV_OFFSET = 2166136261u;
+    constexpr std::uint32_t FNV_PRIME = 16777619u;
+    std::uint32_t hash = FNV_OFFSET;
+    const auto *bytes = reinterpret_cast<const std::uint8_t *>(
+        shader->prog.loadDef.program);
+    const std::size_t byteCount =
+        static_cast<std::size_t>(shader->prog.loadDef.programSize) *
+        sizeof(std::uint32_t);
+    for (std::size_t index = 0u; index < byteCount; ++index)
+        hash = (hash ^ bytes[index]) * FNV_PRIME;
+    return hash;
+}
+
 struct TechniqueSelection
 {
     std::uint32_t type = TECHNIQUE_NONE_INDEX;
     const MaterialTechnique *technique = nullptr;
     const char *identityName = nullptr;
+    const char *vertexShaderName = nullptr;
+    std::uint32_t vertexShaderProgramHash = 0u;
     const char *pixelShaderName = nullptr;
     std::uint32_t pixelShaderProgramHash = 0u;
     std::uint8_t customSamplerFlags = 0u;
@@ -236,6 +259,13 @@ bool ShaderNameIs(const TechniqueSelection &technique, const char *name)
 {
     return technique.pixelShaderName &&
         std::strcmp(technique.pixelShaderName, name) == 0;
+}
+
+bool VertexShaderNameIs(
+    const TechniqueSelection &technique, const char *name) noexcept
+{
+    return technique.vertexShaderName &&
+        std::strcmp(technique.vertexShaderName, name) == 0;
 }
 
 bool UsesDirectionalNormalMap(
@@ -342,6 +372,12 @@ TechniqueSelection SelectTechnique(
                 technique->passArray[pass].customSamplerFlags;
         const MaterialPixelShader *pixelShader =
             technique->passArray[0u].pixelShader;
+        const MaterialVertexShader *vertexShader =
+            technique->passArray[0u].vertexShader;
+        selection.vertexShaderName =
+            vertexShader ? vertexShader->name : nullptr;
+        selection.vertexShaderProgramHash =
+            HashVertexShaderProgram(vertexShader);
         selection.pixelShaderName = pixelShader ? pixelShader->name : nullptr;
         selection.pixelShaderProgramHash = HashPixelShaderProgram(pixelShader);
         selection.stateBits[0] = material->stateBitsTable[entry].loadBits[0];
@@ -418,6 +454,9 @@ WebRendererWorldBatchDesc MakeBatch(
     batch.techniqueType = static_cast<std::uint8_t>(technique.type);
     batch.customSamplerFlags = technique.customSamplerFlags;
     batch.techniqueFlags = technique.techniqueFlags;
+    batch.vertexShaderName = technique.vertexShaderName
+        ? technique.vertexShaderName : "<unavailable-vertex-shader>";
+    batch.vertexShaderProgramHash = technique.vertexShaderProgramHash;
     batch.pixelShaderName = technique.pixelShaderName
         ? technique.pixelShaderName : "<unavailable-pixel-shader>";
     batch.pixelShaderProgramHash = technique.pixelShaderProgramHash;
@@ -442,6 +481,9 @@ WebRendererWorldBatchDesc MakeBatch(
     }
     constexpr std::uint32_t ENV_MAP_PARMS_HASH = 0x3d9994dcu;
     constexpr std::uint32_t WATER_COLOR_HASH = 0xb82a51e8u;
+    constexpr std::uint32_t FALLOFF_PARMS_HASH = 0xbdde5cf5u;
+    constexpr std::uint32_t FALLOFF_BEGIN_COLOR_HASH = 0x3d05a1f2u;
+    constexpr std::uint32_t FALLOFF_END_COLOR_HASH = 0x6b1da6fau;
     const bool canonicalSm3Specular = UsesSm3EnvironmentSpecular(
             technique, batch.specularImage) &&
         batch.reflectionProbeImage &&
@@ -453,6 +495,14 @@ WebRendererWorldBatchDesc MakeBatch(
             batch.envMapParms) &&
         CopyMaterialConstant(surface.material, WATER_COLOR_HASH,
             batch.waterColor);
+    const bool canonicalDistanceFalloff = VertexShaderNameIs(
+            technique, "vertcol_simple_fog_df.hlsl") &&
+        CopyMaterialConstant(surface.material, FALLOFF_PARMS_HASH,
+            batch.falloffParms) &&
+        CopyMaterialConstant(surface.material, FALLOFF_BEGIN_COLOR_HASH,
+            batch.falloffBeginColor) &&
+        CopyMaterialConstant(surface.material, FALLOFF_END_COLOR_HASH,
+            batch.falloffEndColor);
     if (canonicalWater)
         batch.technique = WebRendererWorldTechnique::WaterLitSun;
     else if (!technique.identityName &&
@@ -464,6 +514,9 @@ WebRendererWorldBatchDesc MakeBatch(
     }
     else if (!technique.identityName || !batch.baseImage)
         batch.technique = WebRendererWorldTechnique::BackendFallback;
+    else if (canonicalDistanceFalloff)
+        batch.technique =
+            WebRendererWorldTechnique::VertexColorDistanceFalloff;
     else if (ShaderNameIs(technique, "mul.hlsl"))
         batch.technique = WebRendererWorldTechnique::VertexColorMultiply;
     else if (ShaderNameIs(
@@ -507,6 +560,8 @@ bool BatchMatches(
         batch.lightingMode == candidate.lightingMode &&
         batch.customSamplerFlags == candidate.customSamplerFlags &&
         batch.techniqueFlags == candidate.techniqueFlags &&
+        batch.vertexShaderProgramHash ==
+            candidate.vertexShaderProgramHash &&
         batch.pixelShaderProgramHash == candidate.pixelShaderProgramHash &&
         batch.stateBits[0] == candidate.stateBits[0] &&
         batch.stateBits[1] == candidate.stateBits[1] &&
@@ -522,6 +577,12 @@ bool BatchMatches(
             sizeof(batch.envMapParms)) == 0 &&
         std::memcmp(batch.waterColor, candidate.waterColor,
             sizeof(batch.waterColor)) == 0 &&
+        std::memcmp(batch.falloffParms, candidate.falloffParms,
+            sizeof(batch.falloffParms)) == 0 &&
+        std::memcmp(batch.falloffBeginColor, candidate.falloffBeginColor,
+            sizeof(batch.falloffBeginColor)) == 0 &&
+        std::memcmp(batch.falloffEndColor, candidate.falloffEndColor,
+            sizeof(batch.falloffEndColor)) == 0 &&
         batch.castsSunShadow == candidate.castsSunShadow;
 }
 

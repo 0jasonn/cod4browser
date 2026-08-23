@@ -190,6 +190,10 @@ enum class WebRendererWorldTechnique : std::uint8_t
     BaseTextureNormalSpecular,
     VertexColorMultiply,
     VertexColorAdditive,
+    // Native vertcol_simple_fog_df vertex program. It attenuates authored
+    // vertex color/alpha between two material colors by camera distance
+    // before the ordinary fogged texture pass and canonical blend state.
+    VertexColorDistanceFalloff,
     // Canonical water_l_sun pass: animated FFT height field, reflection
     // probe, Fresnel water color, sun specular, and fog.
     WaterLitSun,
@@ -343,10 +347,15 @@ struct WebRendererWorldBatchDesc
     // Canonical GfxWorldDpvsStatic::surfaceCastsSunShadow membership. This is
     // frontend visibility intent, not a backend material heuristic.
     bool castsSunShadow;
+    const char *vertexShaderName;
+    std::uint32_t vertexShaderProgramHash;
     const char *pixelShaderName;
     std::uint32_t pixelShaderProgramHash;
     float envMapParms[4];
     float waterColor[4];
+    float falloffParms[4];
+    float falloffBeginColor[4];
+    float falloffEndColor[4];
     // CONST_SRC_CODE_BASE_LIGHTING_COORDS for non-instanced DObj draws.
     // Static XModels carry the same value per instance below.
     float modelLightingCoordinates[3];

@@ -539,6 +539,74 @@ void TestNativePixelShaderFamiliesSelectPortableMaterialTechniques()
         WebRendererWorldTechnique::VertexColorAdditive);
 }
 
+void TestDistanceFalloffVertexShaderCarriesCanonicalMaterialConstants()
+{
+    Fixture fixture;
+    MaterialVertexShader vertexShader{};
+    vertexShader.name = "vertcol_simple_fog_df.hlsl";
+    const std::uint32_t vertexProgram[]{0xfffe0300u, 0x0000ffffu};
+    vertexShader.prog.loadDef.program =
+        const_cast<std::uint32_t *>(vertexProgram);
+    vertexShader.prog.loadDef.programSize =
+        static_cast<std::uint16_t>(std::size(vertexProgram));
+    MaterialPixelShader pixelShader{};
+    pixelShader.name = "vertcol_simple_fog.hlsl";
+    MaterialTechnique technique{};
+    technique.name = "vertcol_simple_dfalloff_fog";
+    technique.passCount = 1u;
+    technique.passArray[0u].vertexShader = &vertexShader;
+    technique.passArray[0u].pixelShader = &pixelShader;
+    MaterialTechniqueSet techniqueSet{};
+    techniqueSet.techniques[TECHNIQUE_LIT_INDEX] = &technique;
+    GfxStateBits stateBits[1]{{{0x19288939u, 0x0000000cu}}};
+    GfxImage baseImage{};
+    MaterialTextureDef texture{};
+    texture.semantic = 2u;
+    texture.u.image = &baseImage;
+    std::array<MaterialConstantDef, 3u> constants{};
+    constants[0u].nameHash = 0xbdde5cf5u;
+    constants[1u].nameHash = 0x3d05a1f2u;
+    constants[2u].nameHash = 0x6b1da6fau;
+    const float falloffParms[4]{-0.01f, 1.0f, 0.0f, 0.0f};
+    const float beginColor[4]{0.8f, 0.7f, 0.6f, 1.0f};
+    const float endColor[4]{0.2f, 0.3f, 0.4f, 1.0f};
+    std::copy_n(falloffParms, 4u, constants[0u].literal);
+    std::copy_n(beginColor, 4u, constants[1u].literal);
+    std::copy_n(endColor, 4u, constants[2u].literal);
+    Material material{};
+    material.info.name = "wc/hdrportal_darken";
+    material.textureCount = 1u;
+    material.textureTable = &texture;
+    material.constantCount = static_cast<std::uint8_t>(constants.size());
+    material.constantTable = constants.data();
+    material.techniqueSet = &techniqueSet;
+    material.stateBitsEntry[TECHNIQUE_LIT_INDEX] = 0u;
+    material.stateBitsCount = 1u;
+    material.stateBitsTable = stateBits;
+    for (GfxSurface &surface : fixture.surfaces)
+        surface.material = &material;
+
+    WebRendererWorldSceneCommand command;
+    assert(WebRenderer_BuildWorldSceneCommand(
+        fixture.world, MakeView(), command) ==
+        WebRendererWorldSceneResult::Success);
+    assert(command.batches.size() == 1u);
+    const WebRendererWorldBatchDesc &batch = command.batches[0u];
+    assert(batch.technique ==
+        WebRendererWorldTechnique::VertexColorDistanceFalloff);
+    assert(std::strcmp(batch.vertexShaderName,
+        "vertcol_simple_fog_df.hlsl") == 0);
+    assert(batch.vertexShaderProgramHash != 0u);
+    assert(std::strcmp(batch.pixelShaderName,
+        "vertcol_simple_fog.hlsl") == 0);
+    assert(std::memcmp(batch.falloffParms, falloffParms,
+        sizeof(falloffParms)) == 0);
+    assert(std::memcmp(batch.falloffBeginColor, beginColor,
+        sizeof(beginColor)) == 0);
+    assert(std::memcmp(batch.falloffEndColor, endColor,
+        sizeof(endColor)) == 0);
+}
+
 void TestSunShadowTechniqueAndCanonicalCasterBitsSplitBatches()
 {
     Fixture fixture;
@@ -931,6 +999,7 @@ int main()
     TestRemappedTechniqueSetDrivesPortableSelection();
     TestCanonicalWorldColorAliasUsesLitStateAndLightmaps();
     TestNativePixelShaderFamiliesSelectPortableMaterialTechniques();
+    TestDistanceFalloffVertexShaderCarriesCanonicalMaterialConstants();
     TestSunShadowTechniqueAndCanonicalCasterBitsSplitBatches();
     TestShaderModel3SpecularPassCarriesCanonicalInputs();
     TestMalformedLocalIndexIsRejectedAtomically();

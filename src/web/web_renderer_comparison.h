@@ -48,6 +48,8 @@ struct WebRendererComparisonRecord
         WebRendererWorldLightingMode::None;
     std::uint8_t customSamplerFlags = 0u;
     std::uint16_t techniqueFlags = 0u;
+    std::string vertexShaderName;
+    std::uint32_t vertexShaderProgramHash = 0u;
     std::string pixelShaderName;
     std::uint32_t pixelShaderProgramHash = 0u;
     std::uint32_t surfaceCount = 0u;

@@ -97,6 +97,8 @@ struct WebRendererRetainedWorldBatch
     std::uint16_t techniqueFlags = 0u;
     bool depthHack = false;
     bool castsSunShadow = false;
+    std::string vertexShaderName;
+    std::uint32_t vertexShaderProgramHash = 0u;
     std::string pixelShaderName;
     std::uint32_t pixelShaderProgramHash = 0u;
     float modelLightingCoordinates[3]{};
@@ -109,6 +111,9 @@ struct WebRendererRetainedWorldBatch
     std::uint8_t reflectionProbeIndex = 0u;
     float envMapParms[4]{};
     float waterColor[4]{};
+    float falloffParms[4]{};
+    float falloffBeginColor[4]{};
+    float falloffEndColor[4]{};
     kisak::iwi::Rgba8Cube reflectionCube;
     GLuint waterTexture = 0u;
     GLuint reflectionTexture = 0u;
@@ -198,6 +203,9 @@ struct WebRendererState
     GLint premultiplyAlphaUniform = -1;
     GLint colorIntensityAlphaUniform = -1;
     GLint materialModeUniform = -1;
+    GLint falloffParmsUniform = -1;
+    GLint falloffBeginColorUniform = -1;
+    GLint falloffEndColorUniform = -1;
     GLint alphaTestUniform = -1;
     GLint instanceEnabledUniform = -1;
     GLint uiColorUniform = -1;
@@ -446,6 +454,8 @@ EM_JS(
      const char *lightingMode,
      std::uint32_t customSamplerFlags,
      std::uint32_t techniqueFlags,
+     const char *vertexShaderName,
+     std::uint32_t vertexShaderProgramHash,
      const char *pixelShaderName,
      std::uint32_t pixelShaderProgramHash,
      std::uint32_t surfaceCount,
@@ -483,6 +493,8 @@ EM_JS(
                 lightingMode: UTF8ToString(lightingMode),
                 customSamplerFlags: customSamplerFlags >>> 0,
                 techniqueFlags: techniqueFlags >>> 0,
+                vertexShaderName: UTF8ToString(vertexShaderName),
+                vertexShaderProgramHash: vertexShaderProgramHash >>> 0,
                 pixelShaderName: UTF8ToString(pixelShaderName),
                 pixelShaderProgramHash: pixelShaderProgramHash >>> 0,
                 lightingInputs: {
@@ -657,6 +669,8 @@ const char *ComparisonPortableTechniqueName(
         return "vertex-color-multiply";
     case WebRendererWorldTechnique::VertexColorAdditive:
         return "vertex-color-additive";
+    case WebRendererWorldTechnique::VertexColorDistanceFalloff:
+        return "vertex-color-distance-falloff";
     case WebRendererWorldTechnique::WaterLitSun: return "water-lit-sun";
     case WebRendererWorldTechnique::ReflexSight: return "reflex-sight";
     case WebRendererWorldTechnique::NativeTechniqueUnavailable:
@@ -704,6 +718,9 @@ const char *ComparisonCompositionName(
         return "mix(white,base*vertexRgb,vertexAlpha), ZERO/SRC_COLOR blend";
     case WebRendererWorldTechnique::VertexColorAdditive:
         return "fog(base*vertex)*baseAlpha*vertexAlpha, ONE/ONE blend";
+    case WebRendererWorldTechnique::VertexColorDistanceFalloff:
+        return "fog(base*vertex*mix(falloffEnd,falloffBegin,distanceFactor)), "
+            "DST_COLOR/SRC_COLOR blend";
     case WebRendererWorldTechnique::WaterLitSun:
         return "fresnel(waterColor*normalZ,reflectionProbe)+sunSpecular";
     default:
@@ -795,9 +812,18 @@ void EmitWorldComparison(
             destination.customSamplerFlags = source.customSamplerFlags;
             destination.techniqueFlags = source.techniqueFlags;
             destination.depthHack = source.depthHack;
+            destination.vertexShaderName = source.vertexShaderName.c_str();
+            destination.vertexShaderProgramHash =
+                source.vertexShaderProgramHash;
             destination.pixelShaderName = source.pixelShaderName.c_str();
             destination.pixelShaderProgramHash =
                 source.pixelShaderProgramHash;
+            std::copy_n(source.falloffParms, 4u,
+                destination.falloffParms);
+            std::copy_n(source.falloffBeginColor, 4u,
+                destination.falloffBeginColor);
+            std::copy_n(source.falloffEndColor, 4u,
+                destination.falloffEndColor);
             if (const WebRendererRetainedWorldImage *image =
                     RetainedWorldImageIdentity(source.baseImageIndex))
             {
@@ -872,6 +898,8 @@ void EmitWorldComparison(
             ComparisonLightingModeName(expected.lightingMode),
             expected.customSamplerFlags,
             expected.techniqueFlags,
+            expected.vertexShaderName.c_str(),
+            expected.vertexShaderProgramHash,
             expected.pixelShaderName.c_str(),
             expected.pixelShaderProgramHash,
             expected.surfaceCount,
@@ -970,6 +998,7 @@ void LogWorldTechniqueInventory(const WebRendererWorldSurfaceDesc &surface)
     struct Entry
     {
         std::string techniqueName;
+        std::string vertexShaderName;
         std::string pixelShaderName;
         WebRendererWorldTechnique portableTechnique =
             WebRendererWorldTechnique::BackendFallback;
@@ -988,9 +1017,12 @@ void LogWorldTechniqueInventory(const WebRendererWorldSurfaceDesc &surface)
                 ? batch.techniqueName : "<unsupported-technique>";
             const std::string_view pixelShaderName = batch.pixelShaderName
                 ? batch.pixelShaderName : "<unavailable-pixel-shader>";
+            const std::string_view vertexShaderName = batch.vertexShaderName
+                ? batch.vertexShaderName : "<unavailable-vertex-shader>";
             auto entry = std::find_if(inventory.begin(), inventory.end(),
                 [&](const Entry &candidate) {
                     return candidate.techniqueName == techniqueName &&
+                        candidate.vertexShaderName == vertexShaderName &&
                         candidate.pixelShaderName == pixelShaderName &&
                         candidate.portableTechnique == batch.technique &&
                         candidate.techniqueType == batch.techniqueType &&
@@ -999,6 +1031,7 @@ void LogWorldTechniqueInventory(const WebRendererWorldSurfaceDesc &surface)
             if (entry == inventory.end())
             {
                 inventory.push_back({std::string(techniqueName),
+                    std::string(vertexShaderName),
                     std::string(pixelShaderName), batch.technique,
                     batch.techniqueType, batch.stateBits[0], 0u, 0u});
                 entry = std::prev(inventory.end());
@@ -1027,11 +1060,12 @@ void LogWorldTechniqueInventory(const WebRendererWorldSurfaceDesc &surface)
         const Entry &entry = inventory[rank];
         Web_Log(WebLogLevel::Info,
             "[kisakcod-web] Material technique #%zu: surfaces=%u batches=%u "
-            "nativeType=%u native='%s' shader='%s' portable='%s' "
+            "nativeType=%u native='%s' vertex='%s' pixel='%s' portable='%s' "
             "alphaTest=%u blend=%u state0=0x%08x.\n",
             rank + 1u, entry.surfaceCount, entry.batchCount,
             static_cast<unsigned int>(entry.techniqueType),
-            entry.techniqueName.c_str(), entry.pixelShaderName.c_str(),
+            entry.techniqueName.c_str(), entry.vertexShaderName.c_str(),
+            entry.pixelShaderName.c_str(),
             ComparisonPortableTechniqueName(entry.portableTechnique),
             static_cast<unsigned int>((entry.stateBits0 >> 12u) & 3u),
             (entry.stateBits0 & 0x700u) != 0u ? 1u : 0u,
@@ -1706,6 +1740,9 @@ void ResetGpuHandles()
     g_renderer.premultiplyAlphaUniform = -1;
     g_renderer.colorIntensityAlphaUniform = -1;
     g_renderer.materialModeUniform = -1;
+    g_renderer.falloffParmsUniform = -1;
+    g_renderer.falloffBeginColorUniform = -1;
+    g_renderer.falloffEndColorUniform = -1;
     g_renderer.alphaTestUniform = -1;
     g_renderer.instanceEnabledUniform = -1;
     g_renderer.uiColorUniform = -1;
@@ -2689,6 +2726,7 @@ bool CreateRendererResources()
 
     constexpr const char *vertexSource = R"glsl(#version 300 es
         precision highp float;
+        precision highp int;
         layout(location = 0) in vec3 a_position;
         layout(location = 1) in vec4 a_color;
         layout(location = 2) in vec2 a_texcoord;
@@ -2706,6 +2744,11 @@ bool CreateRendererResources()
         uniform float u_scene_fallback;
         uniform float u_instance_enabled;
         uniform vec3 u_model_lighting_base_coords;
+        uniform int u_material_mode;
+        uniform vec3 u_view_origin;
+        uniform vec4 u_falloff_parms;
+        uniform vec4 u_falloff_begin_color;
+        uniform vec4 u_falloff_end_color;
         out vec4 v_color;
         out vec2 v_texcoord;
         out vec3 v_world_position;
@@ -2743,6 +2786,18 @@ bool CreateRendererResources()
             position.y *= min(1.0, 1.0 / u_aspect);
             gl_Position = u_view_projection * vec4(position, 1.0);
             v_color = a_color;
+            if (u_material_mode == 4)
+            {
+                // Exact vertcol_simple_fog_df vertex arithmetic. The native
+                // declaration routes the same TEXCOORD0 pair used for the
+                // base texture into the horizontal distance calculation.
+                float falloff = clamp(u_falloff_parms.x *
+                    length(u_view_origin.xy - a_texcoord.xy) +
+                    u_falloff_parms.y, 0.0, 1.0);
+                v_color.rgb *= mix(u_falloff_end_color.rgb,
+                    u_falloff_begin_color.rgb, falloff);
+                v_color.a *= falloff;
+            }
             v_texcoord = a_texcoord;
             v_world_position = world_position;
             v_lightmap_coord = a_lightmap_coord;
@@ -2754,6 +2809,7 @@ bool CreateRendererResources()
 
     constexpr const char *fragmentSource = R"glsl(#version 300 es
         precision highp float;
+        precision highp int;
         precision highp sampler3D;
         in vec4 v_color;
         in vec2 v_texcoord;
@@ -3388,6 +3444,12 @@ bool CreateRendererResources()
         glGetUniformLocation(program, "u_color_intensity_alpha");
     const GLint materialModeUniform =
         glGetUniformLocation(program, "u_material_mode");
+    const GLint falloffParmsUniform =
+        glGetUniformLocation(program, "u_falloff_parms");
+    const GLint falloffBeginColorUniform =
+        glGetUniformLocation(program, "u_falloff_begin_color");
+    const GLint falloffEndColorUniform =
+        glGetUniformLocation(program, "u_falloff_end_color");
     const GLint alphaTestUniform = glGetUniformLocation(program, "u_alpha_test");
     const GLint instanceEnabledUniform =
         glGetUniformLocation(program, "u_instance_enabled");
@@ -3585,7 +3647,8 @@ bool CreateRendererResources()
         modelLightingBaseCoordinatesUniform < 0 ||
         modelLightingLookupScaleUniform < 0 ||
         premultiplyAlphaUniform < 0 || colorIntensityAlphaUniform < 0 ||
-        materialModeUniform < 0 ||
+        materialModeUniform < 0 || falloffParmsUniform < 0 ||
+        falloffBeginColorUniform < 0 || falloffEndColorUniform < 0 ||
         alphaTestUniform < 0 || instanceEnabledUniform < 0 ||
         uiColorUniform < 0 || fogEnabledUniform < 0 ||
         viewOriginUniform < 0 || fogColorUniform < 0 ||
@@ -3705,6 +3768,9 @@ bool CreateRendererResources()
     g_renderer.premultiplyAlphaUniform = premultiplyAlphaUniform;
     g_renderer.colorIntensityAlphaUniform = colorIntensityAlphaUniform;
     g_renderer.materialModeUniform = materialModeUniform;
+    g_renderer.falloffParmsUniform = falloffParmsUniform;
+    g_renderer.falloffBeginColorUniform = falloffBeginColorUniform;
+    g_renderer.falloffEndColorUniform = falloffEndColorUniform;
     g_renderer.alphaTestUniform = alphaTestUniform;
     g_renderer.instanceEnabledUniform = instanceEnabledUniform;
     g_renderer.uiColorUniform = uiColorUniform;
@@ -4351,6 +4417,9 @@ WebRendererSurfaceResult CopyWorldCommand(
             batch.techniqueFlags = source.techniqueFlags;
             batch.depthHack = source.depthHack;
             batch.castsSunShadow = source.castsSunShadow;
+            batch.vertexShaderName = source.vertexShaderName
+                ? source.vertexShaderName : "<unavailable-vertex-shader>";
+            batch.vertexShaderProgramHash = source.vertexShaderProgramHash;
             batch.pixelShaderName = source.pixelShaderName
                 ? source.pixelShaderName : "<unavailable-pixel-shader>";
             batch.pixelShaderProgramHash = source.pixelShaderProgramHash;
@@ -4360,6 +4429,11 @@ WebRendererSurfaceResult CopyWorldCommand(
             batch.reflectionProbeIndex = source.reflectionProbeIndex;
             std::copy_n(source.envMapParms, 4u, batch.envMapParms);
             std::copy_n(source.waterColor, 4u, batch.waterColor);
+            std::copy_n(source.falloffParms, 4u, batch.falloffParms);
+            std::copy_n(source.falloffBeginColor, 4u,
+                batch.falloffBeginColor);
+            std::copy_n(source.falloffEndColor, 4u,
+                batch.falloffEndColor);
             for (const float component : batch.modelLightingCoordinates)
                 if (!std::isfinite(component))
                     return WebRendererSurfaceResult::NonFiniteVertex;
@@ -4367,6 +4441,15 @@ WebRendererSurfaceResult CopyWorldCommand(
                 if (!std::isfinite(component))
                     return WebRendererSurfaceResult::NonFiniteVertex;
             for (const float component : batch.waterColor)
+                if (!std::isfinite(component))
+                    return WebRendererSurfaceResult::NonFiniteVertex;
+            for (const float component : batch.falloffParms)
+                if (!std::isfinite(component))
+                    return WebRendererSurfaceResult::NonFiniteVertex;
+            for (const float component : batch.falloffBeginColor)
+                if (!std::isfinite(component))
+                    return WebRendererSurfaceResult::NonFiniteVertex;
+            for (const float component : batch.falloffEndColor)
                 if (!std::isfinite(component))
                     return WebRendererSurfaceResult::NonFiniteVertex;
             bool reflectionSupported =
@@ -4632,6 +4715,10 @@ WebRendererSurfaceResult CopyStaticModelCommand(
             batch.draw.customSamplerFlags = draw.customSamplerFlags;
             batch.draw.techniqueFlags = draw.techniqueFlags;
             batch.draw.castsSunShadow = draw.castsSunShadow;
+            batch.draw.vertexShaderName = draw.vertexShaderName
+                ? draw.vertexShaderName : "<unavailable-vertex-shader>";
+            batch.draw.vertexShaderProgramHash =
+                draw.vertexShaderProgramHash;
             batch.draw.pixelShaderName = draw.pixelShaderName
                 ? draw.pixelShaderName : "<unavailable-pixel-shader>";
             batch.draw.pixelShaderProgramHash = draw.pixelShaderProgramHash;
@@ -4640,6 +4727,12 @@ WebRendererSurfaceResult CopyStaticModelCommand(
                 FindRetainedWorldReflectionTexture(
                     draw.reflectionProbeIndex);
             std::copy_n(draw.envMapParms, 4u, batch.draw.envMapParms);
+            std::copy_n(draw.falloffParms, 4u,
+                batch.draw.falloffParms);
+            std::copy_n(draw.falloffBeginColor, 4u,
+                batch.draw.falloffBeginColor);
+            std::copy_n(draw.falloffEndColor, 4u,
+                batch.draw.falloffEndColor);
             batch.draw.baseImageIndex = RetainCanonicalWorldImage(
                 draw.baseImage, images, retainedPixelBytes);
             const bool baseSupported =
@@ -6183,6 +6276,11 @@ void ApplyWorldMaterialState(const WebRendererRetainedWorldBatch &batch)
         shaderPremultipliesAlpha ? 1.0f : 0.0f);
     glUniform1f(g_renderer.colorIntensityAlphaUniform,
         WebRenderer_UsesColorIntensityOpacity(batch.technique) ? 1.0f : 0.0f);
+    glUniform4fv(g_renderer.falloffParmsUniform, 1, batch.falloffParms);
+    glUniform4fv(g_renderer.falloffBeginColorUniform, 1,
+        batch.falloffBeginColor);
+    glUniform4fv(g_renderer.falloffEndColorUniform, 1,
+        batch.falloffEndColor);
     glUniform1i(g_renderer.materialModeUniform,
         batch.technique == WebRendererWorldTechnique::VertexColorMultiply
             ? 1
@@ -6191,7 +6289,10 @@ void ApplyWorldMaterialState(const WebRendererRetainedWorldBatch &batch)
                 ? 2
                 : (batch.technique ==
                         WebRendererWorldTechnique::WaterLitSun
-                    ? 3 : 0)));
+                    ? 3
+                    : (batch.technique == WebRendererWorldTechnique::
+                            VertexColorDistanceFalloff
+                        ? 4 : 0))));
 
     if (hasCanonicalState && (state1 & 2u) != 0u)
     {

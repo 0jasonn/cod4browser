@@ -35,6 +35,8 @@ WebRendererWorldBatchDesc MakeBatch()
         WebRendererWorldLightingMode::SecondaryDirectional;
     batch.customSamplerFlags = 4u;
     batch.techniqueFlags = 0x1234u;
+    batch.vertexShaderName = "world_vertex.hlsl";
+    batch.vertexShaderProgramHash = 0x12345678u;
     batch.pixelShaderName = "lm_r0c0_sm2.hlsl";
     batch.pixelShaderProgramHash = 0x89abcdefu;
     return batch;
@@ -64,6 +66,8 @@ void TestCaptureContainsOnlyStableNormalizedIdentityAndState()
         WebRendererWorldLightingMode::SecondaryDirectional);
     assert(record.customSamplerFlags == 4u);
     assert(record.techniqueFlags == 0x1234u);
+    assert(record.vertexShaderName == "world_vertex.hlsl");
+    assert(record.vertexShaderProgramHash == 0x12345678u);
     assert(record.pixelShaderName == "lm_r0c0_sm2.hlsl");
     assert(record.pixelShaderProgramHash == 0x89abcdefu);
     assert(record.cull == WebRendererComparisonCull::Back);
