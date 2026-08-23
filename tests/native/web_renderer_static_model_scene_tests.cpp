@@ -25,6 +25,12 @@ void __cdecl Vec3UnpackUnitVec(PackedUnitVec, float *out)
 namespace
 {
 constexpr std::uint32_t TECHNIQUE_LIT_INDEX = 7u;
+Material *g_resolvedMaterial = nullptr;
+
+Material *ResolveMaterial(Material *) noexcept
+{
+    return g_resolvedMaterial;
+}
 
 struct Fixture
 {
@@ -156,6 +162,27 @@ void TestLightingAtlasCountsOnlySubmittedCanonicalPlacements()
         WebRendererWorldLightingMode::ModelLightGrid);
 }
 
+void TestMaterialReferencesResolveAtRendererEvaluation()
+{
+    Fixture fixture;
+    Material reference{};
+    reference.info.name = ",model/material";
+    fixture.materials[0] = &reference;
+    g_resolvedMaterial = &fixture.material;
+
+    WebRendererStaticModelSceneCommand command;
+    assert(WebRenderer_BuildStaticModelSceneCommand(
+        fixture.world, command, nullptr, ResolveMaterial) ==
+        WebRendererStaticModelSceneResult::Success);
+    assert(command.batches.size() == 1u);
+    assert(command.batches[0].draw.materialIdentity == &fixture.material);
+    assert(command.batches[0].draw.baseImage == &fixture.image);
+    assert(command.batches[0].draw.technique ==
+        WebRendererWorldTechnique::BaseTexture);
+
+    g_resolvedMaterial = nullptr;
+}
+
 void TestMalformedIndexAndPlacementFailAtomically()
 {
     Fixture fixture;
@@ -178,6 +205,7 @@ int main()
 {
     TestCanonicalInstancesShareOneMaterialSurfaceBatch();
     TestLightingAtlasCountsOnlySubmittedCanonicalPlacements();
+    TestMaterialReferencesResolveAtRendererEvaluation();
     TestMalformedIndexAndPlacementFailAtomically();
     return 0;
 }

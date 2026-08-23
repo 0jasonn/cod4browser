@@ -1849,7 +1849,8 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         WebRendererStaticModelSceneCommand command;
         const WebRendererStaticModelSceneResult build =
             WebRenderer_BuildStaticModelSceneCommand(
-                s_world, command, &MODEL_LIGHTING_CALLBACKS);
+                s_world, command, &MODEL_LIGHTING_CALLBACKS,
+                ResolveRendererMaterial);
         if (build == WebRendererStaticModelSceneResult::NoStaticModels)
         {
             g_staticModelSceneSubmitted = true;

@@ -220,7 +220,7 @@ and WebGL seams. The exhaustive browser suite remains explicitly available.
 | FxImpactTable asset loading | `MODIFIED KISAK` / canonical reached closure | `db_generated_fx_impact.cpp` owns the eight-byte root body, fixed 12-entry table, 29 non-flesh plus four flesh FxEffectDef handles per entry, aliases, insertion cells, child-before-parent ordering, and final type-26 publication. Retail publishes `default` before advancing to LightDef. |
 | MenuList/Menu asset loading | `MODIFIED KISAK` / canonical reached closure | Dedicated menu and expression units preserve the 12-byte list, 284-byte Menu, 372-byte items, windows, recursive key handlers, type-specific list/edit/multi records, statement/operand trees, Material and sound dependencies, root aliases, insertion cells, Menu-before-MenuList publication, and native item-parent reparenting. The complete prerequisite chain records five MenuList and 141 Menu publications. |
 | `XModel` | `MODIFIED KISAK` / canonical reached closure | Dedicated generated units own the canonical 220-byte model, skeleton arrays, XSurface block-7 vertices/block-8 indices, rigid collision trees, Materials, model collision surfaces, bone information, PhysPreset, and physical geometry/brush graph. Root null/shared/insertion/prior forms and dependency-before-parent publication use real DB ownership. The complete prerequisite chain records 37 XModel publications; Gate 2 retains separate broader Killhouse evidence only. |
-| `Material` and techniques | `MODIFIED KISAK` / partial | The canonical generated path owns Material and TechniqueSet bodies, names, tables, techniques/passes, shader records/bytecode, texture/image and water dependencies, constants, state bits, pointer aliases, insertion cells, and dependency-ordered final DB publication. After zone publication the web renderer hook performs Kisak's SM2 alias resolution across the published technique-set registry. Named leading-comma world/model aliases retain their canonical identity and state table while selecting the supported portable diffuse/lightmap subset; the 2D frontend resolves the same native reference stubs at its material-evaluation seam, allowing weapon reticles to use their shared canonical textures without replacing cgame spread geometry. The complete prerequisite chain records 395 Material and 192 TechniqueSet publications. Gate 2's broader records remain oracle-only. |
+| `Material` and techniques | `MODIFIED KISAK` / partial | The canonical generated path owns Material and TechniqueSet bodies, names, tables, techniques/passes, shader records/bytecode, texture/image and water dependencies, constants, state bits, pointer aliases, insertion cells, and dependency-ordered final DB publication. After zone publication the web renderer hook performs Kisak's SM2 alias resolution across the published technique-set registry. Named leading-comma world/static-XModel/dynamic-DObj aliases resolve to the already-published same-name Material at the renderer-evaluation seam, preserving DB ownership while selecting the supported portable diffuse/lightmap subset; the 2D frontend resolves the same native reference stubs, allowing weapon reticles to use their shared canonical textures without replacing cgame spread geometry. The complete prerequisite chain records 395 Material and 192 TechniqueSet publications. Gate 2's broader records remain oracle-only. |
 | `GfxImage` | `MODIFIED KISAK` / canonical renderer consumption reached; native backend `NATIVE ONLY` | The generated family loads 36-byte image bodies, XString names, texture load definitions/payloads, aliases, insertion cells, and canonical DB publication. At the native `Load_Texture` boundary, Web copies transient block-zero payloads into bounded platform storage before clearing the GPU union; external-pixel images retain their canonical name/metadata and are resolved through FS/IWD at submission. The browser filesystem, IWI decoder, and retained texture input share an 8 MiB per-member ceiling so authored 2048-square DXT3/DXT5 mip chains remain intact; decoded RGBA8 output keeps its independent 16 MiB ceiling. Comma-prefixed serialized reference bodies resolve to the already-published same-name image only at renderer evaluation, preserving DB ownership while allowing world and DObj materials to consume the prerequisite-zone payload. WebGL texture creation and context recovery remain backend-owned and canonical `GfxImage*` identity is retained even when decoding falls back. |
 | `GfxWorld` | `MODIFIED KISAK` / canonical reached closure | `db_generated_gfxworld.cpp` follows the native generated closure through names, indices, images, cells/portals, lightmaps/grid, vertices/layers, models, shadow/light regions, DPVS static/dynamic, block-1 runtime allocations, and nested canonical dependencies before final real-DB publication into the renderer-owned `&s_world`. Native x86/Wasm fixtures are byte-for-byte identical. The normal Killhouse run publishes asset 772 with Gate 2-matching structural counts and inflated offset. `WebEngine_BuildGfxWorldSurface` consumes that DB-owned object through a final-publication platform notification and WebGL2 draws surface 6077 without a browser world model. The frozen Gate 2 material label differs from the real DB Material pointer and remains recorded rather than normalized away. `web_retail_load_gfxworld.*` is oracle-only. |
 | XModel/model preview scene | `RETIRED` | Removed after Gate 2: no selectable-model UI/state, retained preview geometry, preview camera/projection, preview material bridge, or multi-draw command path remains. Canonical XModel loading/publication and dependencies remain available to `GfxWorld`, `WeaponDef`, FX, and later runtime consumers. |
@@ -931,7 +931,7 @@ remains independently bounded at 16 MiB. Wasm-native boundary coverage runs
 with a 32 MiB test heap so the near-8-MiB input and its decode can coexist.
 
 A Release build loaded through the existing Chrome session now reports all
-340 distinct static-model images retained, while the canonical world comparison
+341 distinct static-model images retained, while the canonical world comparison
 remains 581 intended/actual draws, 8,475 surfaces, zero fallback draws, and
 zero divergent draws. The user's legally owned Steam max-graphics Killhouse
 captures are local visual references only and are not repository assets. They
@@ -939,3 +939,20 @@ set the presentation target beyond structural parity: authored surface detail,
 directional contrast, sun shafts/hotspots, fog, shadows, reflection/wetness,
 weapon/viewmodel lighting, and final display mapping must converge without
 introducing a browser-specific scene representation.
+
+## Canonical static-XModel material-reference update (2026-08-23)
+
+Static XModel command construction now accepts the same narrow Material
+resolver used by the DObj and FX-model paths. Resolution occurs only while the
+renderer evaluates each canonical `model.materialHandles` entry: a successful
+same-name DB lookup supplies the published Material, while null resolution
+preserves the serialized pointer. No canonical model, surface, or DB record is
+mutated.
+
+This resolves the Killhouse `weapon_m60_mg_setup` reference from
+`,mc/mtl_weapon_saw` to the published `mc/mtl_weapon_saw` material and its
+canonical image/state/technique data. Focused Wasm-native coverage proves the
+resolver seam. Release Chrome now retains 359 of 359 static batches with zero
+fallbacks and 341 of 341 images; the world comparison remains 581 intended and
+actual draws, 8,475 surfaces, zero fallback draws, and zero divergent draws,
+with no WebGL, shader, texture, or framebuffer errors.

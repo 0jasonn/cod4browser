@@ -191,7 +191,8 @@ WebRendererWorldBatchDesc MakeDraw(
 WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
     const GfxWorld &world,
     WebRendererStaticModelSceneCommand &destination,
-    const WebRendererModelLightingCallbacks *lightingCallbacks)
+    const WebRendererModelLightingCallbacks *lightingCallbacks,
+    WebRendererStaticMaterialResolver materialResolver)
 {
     if (world.dpvs.smodelCount == 0u)
         return WebRendererStaticModelSceneResult::NoStaticModels;
@@ -381,9 +382,16 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
                     replacement.indices.push_back(vertexBase + localIndex);
                 }
                 WebRendererStaticModelBatchDesc batch{};
+                Material *material =
+                    model.materialHandles[modelSurfaceIndex];
+                if (materialResolver)
+                {
+                    if (Material *canonical = materialResolver(material))
+                        material = canonical;
+                }
                 batch.draw = MakeDraw(
                     model,
-                    model.materialHandles[modelSurfaceIndex],
+                    material,
                     modelSurfaceIndex,
                     firstIndex,
                     indexCount,

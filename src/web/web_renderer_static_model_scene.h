@@ -8,6 +8,8 @@
 
 struct GfxWorld;
 
+using WebRendererStaticMaterialResolver = Material *(*)(Material *) noexcept;
+
 struct WebRendererStaticModelSceneCommand
 {
     std::vector<WebRendererSurfaceVertex> vertices;
@@ -37,7 +39,8 @@ enum class WebRendererStaticModelSceneResult : std::uint8_t
 WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
     const GfxWorld &world,
     WebRendererStaticModelSceneCommand &destination,
-    const WebRendererModelLightingCallbacks *lightingCallbacks = nullptr);
+    const WebRendererModelLightingCallbacks *lightingCallbacks = nullptr,
+    WebRendererStaticMaterialResolver materialResolver = nullptr);
 
 const char *WebRenderer_StaticModelSceneResultString(
     WebRendererStaticModelSceneResult result) noexcept;

@@ -4529,9 +4529,7 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
         [](const WebRendererRetainedWorldImage &image) {
             return image.supported;
         }));
-    const std::size_t fallbackBatches = static_cast<std::size_t>(std::count_if(
-        g_renderer.retainedStaticModelBatches.begin(),
-        g_renderer.retainedStaticModelBatches.end(),
+    const auto isFallbackBatch =
         [&](const WebRendererRetainedStaticModelBatch &batch) {
             return batch.draw.technique ==
                     WebRendererWorldTechnique::BackendFallback ||
@@ -4540,7 +4538,13 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
                     g_renderer.retainedStaticModelImages.size() ||
                 !g_renderer.retainedStaticModelImages[
                     batch.draw.baseImageIndex].supported;
-        }));
+        };
+    const std::size_t fallbackBatches = static_cast<std::size_t>(std::count_if(
+        g_renderer.retainedStaticModelBatches.begin(),
+        g_renderer.retainedStaticModelBatches.end(), isFallbackBatch));
+    const auto firstFallback = std::find_if(
+        g_renderer.retainedStaticModelBatches.begin(),
+        g_renderer.retainedStaticModelBatches.end(), isFallbackBatch);
     Web_Log(WebLogLevel::Info,
         "[kisakcod-web] Renderer retained canonical static XModel command "
         "(%u models, %u surfaces, %u shared vertices, %u indices, %u "
@@ -4559,6 +4563,15 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
         g_renderer.retainedStaticModelLighting.height,
         g_renderer.retainedStaticModelLighting.depth,
         g_renderer.retainedStaticModelLighting.entryCount);
+    if (firstFallback != g_renderer.retainedStaticModelBatches.end())
+    {
+        const WebRendererRetainedWorldBatch &draw = firstFallback->draw;
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] First canonical static XModel fallback: "
+            "model='%s' material='%s' technique='%s' imageIndex=%u.\n",
+            draw.modelName.c_str(), draw.materialName.c_str(),
+            draw.techniqueName.c_str(), draw.baseImageIndex);
+    }
     return WebRendererSurfaceResult::Success;
 }
 
