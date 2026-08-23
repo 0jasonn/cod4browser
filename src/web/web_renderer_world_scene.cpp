@@ -18,6 +18,7 @@ constexpr float BYTE_TO_UNIT = 1.0f / 255.0f;
 constexpr std::uint32_t TECHNIQUE_UNLIT_INDEX = 4u;
 constexpr std::uint32_t TECHNIQUE_EMISSIVE_INDEX = 5u;
 constexpr std::uint32_t TECHNIQUE_LIT_INDEX = 7u;
+constexpr std::uint32_t TECHNIQUE_LIT_SUN_SHADOW_INDEX = 9u;
 constexpr std::uint32_t TECHNIQUE_NONE_INDEX = 36u;
 
 void UnpackUnitVec(PackedUnitVec packed, float output[3]) noexcept
@@ -179,7 +180,10 @@ bool UsesDirectionalNormalMap(
 {
     if (!normalImage) return false;
     if (ShaderNameIs(technique, "lm_r0c0n0_sm2.hlsl") ||
-        ShaderNameIs(technique, "lm_t0c0n0_sm2.hlsl"))
+        ShaderNameIs(technique, "lm_t0c0n0_sm2.hlsl") ||
+        (technique.pixelShaderName &&
+            std::strncmp(technique.pixelShaderName, "lm_sm_sun_", 10u) == 0 &&
+            std::strstr(technique.pixelShaderName, "n0") != nullptr))
     {
         return true;
     }
@@ -188,7 +192,8 @@ bool UsesDirectionalNormalMap(
         std::strstr(technique.identityName, "n0") != nullptr;
 }
 
-TechniqueSelection SelectTechnique(const Material *material) noexcept
+TechniqueSelection SelectTechnique(
+    const Material *material, bool sunShadowEnabled) noexcept
 {
     TechniqueSelection selection;
     if (!material || !material->techniqueSet || !material->stateBitsTable)
@@ -197,10 +202,16 @@ TechniqueSelection SelectTechnique(const Material *material) noexcept
         material->techniqueSet->remappedTechniqueSet
             ? material->techniqueSet->remappedTechniqueSet
             : material->techniqueSet;
-    for (const std::uint32_t type : {
-        TECHNIQUE_LIT_INDEX, TECHNIQUE_UNLIT_INDEX,
-        TECHNIQUE_EMISSIVE_INDEX})
+    const std::array<std::uint32_t, 4u> types = sunShadowEnabled
+        ? std::array<std::uint32_t, 4u>{
+            TECHNIQUE_LIT_SUN_SHADOW_INDEX, TECHNIQUE_LIT_INDEX,
+            TECHNIQUE_UNLIT_INDEX, TECHNIQUE_EMISSIVE_INDEX}
+        : std::array<std::uint32_t, 4u>{
+            TECHNIQUE_LIT_INDEX, TECHNIQUE_UNLIT_INDEX,
+            TECHNIQUE_EMISSIVE_INDEX, TECHNIQUE_NONE_INDEX};
+    for (const std::uint32_t type : types)
     {
+        if (type == TECHNIQUE_NONE_INDEX) continue;
         const MaterialTechnique *technique =
             techniqueSet->techniques[type];
         const std::uint8_t entry = material->stateBitsEntry[type];
@@ -251,7 +262,8 @@ WebRendererWorldBatchDesc MakeBatch(
     const GfxWorld &world,
     const GfxSurface &surface,
     std::uint32_t surfaceIndex,
-    std::uint32_t firstIndex) noexcept
+    std::uint32_t firstIndex,
+    bool sunShadowEnabled) noexcept
 {
     WebRendererWorldBatchDesc batch{};
     batch.firstIndex = firstIndex;
@@ -271,7 +283,8 @@ WebRendererWorldBatchDesc MakeBatch(
     batch.baseImage = FindBaseImage(surface.material, batch.samplerState);
     batch.normalImage = FindNormalImage(
         surface.material, batch.normalSamplerState);
-    const TechniqueSelection technique = SelectTechnique(surface.material);
+    const TechniqueSelection technique = SelectTechnique(
+        surface.material, sunShadowEnabled);
     batch.techniqueName = technique.identityName
         ? technique.identityName : "<unsupported-technique>";
     batch.techniqueType = static_cast<std::uint8_t>(technique.type);
@@ -283,7 +296,8 @@ WebRendererWorldBatchDesc MakeBatch(
     batch.stateBits[0] = technique.stateBits[0];
     batch.stateBits[1] = technique.stateBits[1];
     const bool hasCanonicalLightmap = technique.identityName &&
-        technique.type == TECHNIQUE_LIT_INDEX &&
+        (technique.type == TECHNIQUE_LIT_INDEX ||
+            technique.type == TECHNIQUE_LIT_SUN_SHADOW_INDEX) &&
         surface.lightmapIndex != 31u &&
         surface.lightmapIndex < world.lightmapCount && world.lightmaps;
     if (hasCanonicalLightmap)
@@ -313,6 +327,9 @@ WebRendererWorldBatchDesc MakeBatch(
             : WebRendererWorldTechnique::BaseTextureLightmap;
     else
         batch.technique = WebRendererWorldTechnique::BaseTexture;
+    batch.castsSunShadow = world.dpvs.surfaceCastsSunShadow &&
+        (world.dpvs.surfaceCastsSunShadow[surfaceIndex >> 5u] &
+            (1u << (surfaceIndex & 31u))) != 0u;
     return batch;
 }
 
@@ -336,7 +353,8 @@ bool BatchMatches(
         batch.samplerState == candidate.samplerState &&
         batch.normalSamplerState == candidate.normalSamplerState &&
         batch.lightmapIndex == candidate.lightmapIndex &&
-        batch.technique == candidate.technique;
+        batch.technique == candidate.technique &&
+        batch.castsSunShadow == candidate.castsSunShadow;
 }
 
 } // namespace
@@ -488,7 +506,8 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
                 world,
                 surface,
                 surfaceIndex,
-                static_cast<std::uint32_t>(replacement.indices.size() - indexCount));
+                static_cast<std::uint32_t>(replacement.indices.size() - indexCount),
+                view.sunShadowEnabled);
             candidate.indexCount = indexCount;
             if (!replacement.batches.empty() &&
                 BatchMatches(replacement.batches.back(), candidate) &&
@@ -685,7 +704,8 @@ WebRendererWorldSceneResult WebRenderer_BuildBrushModelSceneCommand(
                 }
 
                 WebRendererWorldBatchDesc candidate = MakeBatch(
-                    world, surface, surfaceIndex, firstDestinationIndex);
+                    world, surface, surfaceIndex, firstDestinationIndex,
+                    false);
                 candidate.indexCount = indexCount;
                 candidate.sourceKind =
                     WebRendererSceneBatchKind::DynamicBModel;

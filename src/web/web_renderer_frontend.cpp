@@ -1482,6 +1482,15 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     }
     view.localClientNum = refdef->localClientNum;
     view.worldName = s_world.name;
+    view.sunShadowEnabled = sm_enable && sm_enable->current.enabled &&
+        s_world.sunLight && s_world.sunLight->type == 1u;
+    if (view.sunShadowEnabled)
+    {
+        std::copy_n(s_world.sunLight->dir, 3u, view.sunDirection);
+        std::copy_n(s_world.sunLight->color, 3u, view.sunColor);
+        std::copy_n(s_world.mins, 3u, view.worldMins);
+        std::copy_n(s_world.maxs, 3u, view.worldMaxs);
+    }
 
     mat4x4 viewMatrix{};
     mat4x4 projectionMatrix{};

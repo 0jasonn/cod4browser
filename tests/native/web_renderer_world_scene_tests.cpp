@@ -9,6 +9,7 @@
 namespace
 {
 constexpr std::uint32_t TECHNIQUE_LIT_INDEX = 7u;
+constexpr std::uint32_t TECHNIQUE_LIT_SUN_SHADOW_INDEX = 9u;
 WebRendererSceneViewDesc MakeView()
 {
     WebRendererSceneViewDesc view{};
@@ -405,6 +406,71 @@ void TestNativePixelShaderFamiliesSelectPortableMaterialTechniques()
         WebRendererWorldTechnique::VertexColorAdditive);
 }
 
+void TestSunShadowTechniqueAndCanonicalCasterBitsSplitBatches()
+{
+    Fixture fixture;
+    MaterialPixelShader pixelShader{};
+    pixelShader.name = "lm_sm_sun_r0c0n0_sm2.hlsl";
+    MaterialTechnique shadowTechnique{};
+    shadowTechnique.name = "lm_sm_sun_r0c0n0_sm2";
+    shadowTechnique.passCount = 1u;
+    shadowTechnique.passArray[0].customSamplerFlags = 6u;
+    shadowTechnique.passArray[0].pixelShader = &pixelShader;
+    MaterialTechniqueSet techniqueSet{};
+    techniqueSet.techniques[TECHNIQUE_LIT_SUN_SHADOW_INDEX] =
+        &shadowTechnique;
+    GfxStateBits stateBits[1]{{{0x18008812u, 0x0000000du}}};
+    GfxImage baseImage{};
+    GfxImage normalImage{};
+    GfxImage primaryLightmap{};
+    GfxImage secondaryLightmap{};
+    std::array<MaterialTextureDef, 2u> textures{};
+    textures[0].semantic = 2u;
+    textures[0].u.image = &baseImage;
+    textures[1].semantic = 5u;
+    textures[1].u.image = &normalImage;
+    Material material{};
+    material.info.name = "material/sun-shadow";
+    material.textureCount = static_cast<std::uint8_t>(textures.size());
+    material.textureTable = textures.data();
+    material.techniqueSet = &techniqueSet;
+    std::fill(std::begin(material.stateBitsEntry),
+        std::end(material.stateBitsEntry), 0xffu);
+    material.stateBitsEntry[TECHNIQUE_LIT_SUN_SHADOW_INDEX] = 0u;
+    material.stateBitsCount = 1u;
+    material.stateBitsTable = stateBits;
+    GfxLightmapArray lightmap{&primaryLightmap, &secondaryLightmap};
+    fixture.world.lightmapCount = 1;
+    fixture.world.lightmaps = &lightmap;
+    std::uint32_t casterBits = 0x5u;
+    fixture.world.dpvs.surfaceCastsSunShadow = &casterBits;
+    for (GfxSurface &surface : fixture.surfaces)
+    {
+        surface.material = &material;
+        surface.lightmapIndex = 0u;
+    }
+    WebRendererSceneViewDesc view = MakeView();
+    view.sunShadowEnabled = true;
+
+    WebRendererWorldSceneCommand command;
+    assert(WebRenderer_BuildWorldSceneCommand(
+        fixture.world, view, command) ==
+        WebRendererWorldSceneResult::Success);
+    assert(command.batches.size() == 3u);
+    assert(command.batches[0].castsSunShadow);
+    assert(!command.batches[1].castsSunShadow);
+    assert(command.batches[2].castsSunShadow);
+    for (const WebRendererWorldBatchDesc &batch : command.batches)
+    {
+        assert(batch.techniqueType == TECHNIQUE_LIT_SUN_SHADOW_INDEX);
+        assert(batch.technique ==
+            WebRendererWorldTechnique::BaseTextureLightmapNormal);
+        assert(batch.lightmapImage == &primaryLightmap);
+        assert(batch.secondaryLightmapImage == &secondaryLightmap);
+        assert(batch.normalImage == &normalImage);
+    }
+}
+
 void TestMalformedLocalIndexIsRejectedAtomically()
 {
     Fixture fixture;
@@ -537,6 +603,7 @@ int main()
     TestRemappedTechniqueSetDrivesPortableSelection();
     TestCanonicalWorldColorAliasUsesLitStateAndLightmaps();
     TestNativePixelShaderFamiliesSelectPortableMaterialTechniques();
+    TestSunShadowTechniqueAndCanonicalCasterBitsSplitBatches();
     TestMalformedLocalIndexIsRejectedAtomically();
     TestSkyPassIsNotFoldedIntoOpaqueWorldBatch();
     TestConservativeVisibilityIsDisabledForMovingCanonicalView();

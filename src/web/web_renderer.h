@@ -81,6 +81,14 @@ struct WebRendererSceneViewDesc
     float fogStart;
     float fogDensity;
     bool fogEnabled;
+    // Canonical directional light selected by R_InitPrimaryLights. The WebGL
+    // backend owns shadow-map allocation and API depth conversion, while the
+    // light identity and world bounds remain frontend/DB data.
+    float sunDirection[3];
+    float sunColor[3];
+    float worldMins[3];
+    float worldMaxs[3];
+    bool sunShadowEnabled;
     // Canonical CONST_SRC_CODE_COLOR_* values calculated by the renderer
     // frontend from the active campaign vision set. Film is applied to the
     // resolved 3D scene before 2D; display gamma is applied after 2D.
@@ -249,6 +257,9 @@ struct WebRendererWorldBatchDesc
     std::uint8_t customSamplerFlags;
     std::uint16_t techniqueFlags;
     bool depthHack;
+    // Canonical GfxWorldDpvsStatic::surfaceCastsSunShadow membership. This is
+    // frontend visibility intent, not a backend material heuristic.
+    bool castsSunShadow;
     const char *pixelShaderName;
     std::uint32_t pixelShaderProgramHash;
     // CONST_SRC_CODE_BASE_LIGHTING_COORDS for non-instanced DObj draws.
