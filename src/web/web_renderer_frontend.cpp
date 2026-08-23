@@ -1736,6 +1736,8 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             std::uint32_t localLightSurfaceCount = 0u;
             std::uint32_t localLightFallbackBatchCount = 0u;
             std::uint32_t localLightFallbackSurfaceCount = 0u;
+            std::uint32_t localLightSkippedBatchCount = 0u;
+            std::uint32_t localLightSkippedSurfaceCount = 0u;
             std::vector<const Material *> loggedLocalMaterials;
             for (const WebRendererWorldBatchDesc &batch : command.batches)
             {
@@ -1757,6 +1759,11 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                 {
                     ++localLightFallbackBatchCount;
                     localLightFallbackSurfaceCount += batch.surfaceCount;
+                }
+                if (WebRenderer_SkipsNativeDraw(batch.technique))
+                {
+                    ++localLightSkippedBatchCount;
+                    localLightSkippedSurfaceCount += batch.surfaceCount;
                 }
                 if (std::find(loggedLocalMaterials.begin(),
                         loggedLocalMaterials.end(), batch.materialIdentity) ==
@@ -1791,10 +1798,11 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             Web_Log(WebLogLevel::Info,
                 "[kisakcod-web] Canonical local-light technique coverage: "
                 "%u batches/%u surfaces; exact spot=%u/%u, exact omni=%u/%u, "
-                "fallback=%u/%u, unique materials=%zu.\n",
+                "native-skip=%u/%u, fallback=%u/%u, unique materials=%zu.\n",
                 localLightBatchCount, localLightSurfaceCount,
                 techniqueBatchCounts[10u], techniqueSurfaceCounts[10u],
                 techniqueBatchCounts[12u], techniqueSurfaceCounts[12u],
+                localLightSkippedBatchCount, localLightSkippedSurfaceCount,
                 localLightFallbackBatchCount, localLightFallbackSurfaceCount,
                 loggedLocalMaterials.size());
             std::array<std::uint32_t, WEB_RENDERER_MAX_PRIMARY_LIGHTS>

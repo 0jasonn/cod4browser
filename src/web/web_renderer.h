@@ -186,7 +186,18 @@ enum class WebRendererWorldTechnique : std::uint8_t
     // Portable subset of IW3's reflexsight shader. Its DXT1 color texture is
     // intentionally opaque; source opacity is reconstructed from intensity.
     ReflexSight,
+    // Native R_SetupMaterial skips the complete material group when the
+    // primary-light-selected technique is absent. Retain that negative
+    // selection explicitly so the backend does not invent fallback geometry.
+    NativeTechniqueUnavailable,
 };
+
+constexpr bool WebRenderer_SkipsNativeDraw(
+    WebRendererWorldTechnique technique) noexcept
+{
+    return technique ==
+        WebRendererWorldTechnique::NativeTechniqueUnavailable;
+}
 
 constexpr bool WebRenderer_UsesSecondaryDirectionalLightmap(
     WebRendererWorldTechnique technique) noexcept

@@ -224,6 +224,25 @@ void TestSpotPrimaryLightSelectsNativeMaterialTechnique()
         WebRendererWorldTechnique::BaseTextureLightmapNormal);
 }
 
+void TestMissingSpotTechniqueRetainsNativeSkipIntent()
+{
+    Fixture fixture;
+    std::array<WebRendererPrimaryLightDesc, 3u> lights{};
+    lights[2u].type = 2u;
+    for (GfxSurface &surface : fixture.surfaces)
+        surface.primaryLightIndex = 2u;
+    const WebRendererWorldLightTechniqueContext lightContext{
+        lights.data(), static_cast<std::uint32_t>(lights.size()), 1u, false};
+    WebRendererWorldSceneCommand command;
+    assert(WebRenderer_BuildWorldSceneCommand(
+        fixture.world, MakeView(), command, &lightContext) ==
+        WebRendererWorldSceneResult::Success);
+    assert(command.batches.size() == 1u);
+    assert(command.batches[0u].technique ==
+        WebRendererWorldTechnique::NativeTechniqueUnavailable);
+    assert(command.batches[0u].techniqueType == 36u);
+}
+
 void TestCommaPrefixedImageReferenceResolvesAtRendererBoundary()
 {
     GfxImage reference{};
@@ -818,6 +837,7 @@ int main()
     TestCanonicalOpaqueSurfacesAreBatchedInWorldOrder();
     TestPrimaryLightIdentitySplitsNativeLitBatches();
     TestSpotPrimaryLightSelectsNativeMaterialTechnique();
+    TestMissingSpotTechniqueRetainsNativeSkipIntent();
     TestCanonicalMaterialAndLightmapIdentitySplitBatches();
     TestCanonicalLmTechniqueNameDoesNotInventLightmapSamplers();
     TestRemappedTechniqueSetDrivesPortableSelection();

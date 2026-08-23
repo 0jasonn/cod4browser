@@ -121,7 +121,8 @@ bool WebRenderer_CaptureComparison(
                 ? NameOr(batch.secondaryLightmapImage->name,
                     "<unnamed-secondary-lightmap>") : "";
             record.baseImageUsed = batch.baseImage != nullptr &&
-                batch.technique != WebRendererWorldTechnique::BackendFallback;
+                batch.technique != WebRendererWorldTechnique::BackendFallback &&
+                !WebRenderer_SkipsNativeDraw(batch.technique);
             record.lightmapUsed = batch.lightmapImage != nullptr &&
                 WebRenderer_UsesSecondaryDirectionalLightmap(batch.technique);
             record.secondaryLightmapUsed =

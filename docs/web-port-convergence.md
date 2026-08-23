@@ -1000,7 +1000,7 @@ log reports zero backend image fallbacks. The canonical world comparison
 remains 581 intended and actual draws over 8,475 surfaces with zero fallback
 draws and zero divergent draws.
 
-## Canonical non-sun primary-light retention update (2026-08-23)
+## Canonical non-sun primary-light technique update (2026-08-23)
 
 The world command now retains the canonical `ComPrimaryLight` values,
 `GfxLightDef` attenuation image, sampler state, and each `GfxDrawSurf`
@@ -1021,8 +1021,10 @@ shader family is `lm_spot_r0c0[_n0]_sm2` plus one
 `lm_spot_t0c0n0_sm2` material; two decal materials select the native
 `vertcol_mul_fog` type-10 technique. The remaining 35 batches/45 decal or
 glass surfaces have no type-10 technique in their canonical remapped set;
-native skips those material groups, and their temporary backend fallback is
-still an explicit gap. All 246 encountered world images decode successfully.
+the portable command now marks those material groups as
+`NativeTechniqueUnavailable`, and the backend follows native
+`R_SetupMaterial` failure by skipping them instead of inventing fallback
+geometry. All 246 encountered world images decode successfully.
 
 The WebGL translation follows the authored `lm_spot` D3D9 token arithmetic:
 it retains both lightmap samplers, decodes the existing two-lobe baked term,
@@ -1036,6 +1038,8 @@ lights and spot-shadow variants remain unencountered/unimplemented.
 The backend activates this translation for 132 encountered `lm_spot` batches;
 the remainder of the 143 type-10 batches are native multiply passes or do not
 carry the complete lightmap/image inputs required by this shader family.
+The local-light inventory consequently reports 35 native-skip batches/45
+surfaces and zero generic fallback batches.
 
 Focused native image and world-scene tests, the Release build, the 17-test
 browser smoke tier, and the non-overlap remainder tier (41 passed, 1 skipped)

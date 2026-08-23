@@ -634,6 +634,8 @@ const char *ComparisonPortableTechniqueName(
         return "vertex-color-additive";
     case WebRendererWorldTechnique::WaterLitSun: return "water-lit-sun";
     case WebRendererWorldTechnique::ReflexSight: return "reflex-sight";
+    case WebRendererWorldTechnique::NativeTechniqueUnavailable:
+        return "native-technique-unavailable";
     }
     return "unknown";
 }
@@ -879,7 +881,8 @@ void LogWorldVertexColorInventory(
         std::uint64_t samples = 0u;
     };
     constexpr std::size_t techniqueCount =
-        static_cast<std::size_t>(WebRendererWorldTechnique::ReflexSight) + 1u;
+        static_cast<std::size_t>(
+            WebRendererWorldTechnique::NativeTechniqueUnavailable) + 1u;
     std::array<ColorStats, techniqueCount> stats{};
     for (std::uint32_t batchIndex = 0u;
          batchIndex < surface.batchCount; ++batchIndex)
@@ -913,7 +916,8 @@ void LogWorldVertexColorInventory(
     }
     constexpr std::array<const char *, techniqueCount> techniqueNames{{
         "fallback", "base", "lightmapped", "lightmapped-normal",
-        "multiply", "additive", "water-lit-sun", "reflex-sight"}};
+        "multiply", "additive", "water-lit-sun", "reflex-sight",
+        "native-technique-unavailable"}};
     for (std::size_t index = 0u; index < stats.size(); ++index)
     {
         const ColorStats &entry = stats[index];
@@ -4039,7 +4043,8 @@ WebRendererSurfaceResult CopyWorldCommand(
                 source.firstIndex > surface.indexCount ||
                 source.indexCount > surface.indexCount - source.firstIndex ||
                 source.firstSurfaceIndex > source.lastSurfaceIndex ||
-                source.technique > WebRendererWorldTechnique::ReflexSight ||
+                source.technique >
+                    WebRendererWorldTechnique::NativeTechniqueUnavailable ||
                 source.lightingMode >
                     WebRendererWorldLightingMode::ModelLightGrid ||
                 (surface.primaryLightCount == 0u
@@ -4158,7 +4163,13 @@ WebRendererSurfaceResult CopyWorldCommand(
             const bool normalMapSupported =
                 batch.normalImageIndex != INVALID_WORLD_IMAGE &&
                 images[batch.normalImageIndex].supported;
-            if (source.technique == WebRendererWorldTechnique::WaterLitSun &&
+            if (WebRenderer_SkipsNativeDraw(source.technique))
+            {
+                // Keep native R_SetupMaterial failure as an intentional skip.
+                // Missing image recovery must never turn it into a draw.
+            }
+            else if (source.technique ==
+                    WebRendererWorldTechnique::WaterLitSun &&
                 !waterSupported)
             {
                 batch.technique = WebRendererWorldTechnique::BackendFallback;
@@ -6354,6 +6365,8 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         for (WebRendererRetainedWorldBatch &batch :
              g_renderer.retainedWorldBatches)
         {
+            if (WebRenderer_SkipsNativeDraw(batch.technique))
+                continue;
             ApplyWorldMaterialState(batch);
             const WebRendererRetainedWorldImage *base =
                 WorldImage(batch.baseImageIndex);

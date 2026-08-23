@@ -379,9 +379,10 @@ WebRendererWorldBatchDesc MakeBatch(
         batch.reflectionProbeImage = world.reflectionProbes[
             surface.reflectionProbeIndex].reflectionImage;
     }
-    const TechniqueSelection technique = SelectTechnique(surface.material,
-        SelectLitTechniqueType(surface.primaryLightIndex, lightContext,
-            sunShadowEnabled));
+    const std::uint32_t requestedTechniqueType = SelectLitTechniqueType(
+        surface.primaryLightIndex, lightContext, sunShadowEnabled);
+    const TechniqueSelection technique = SelectTechnique(
+        surface.material, requestedTechniqueType);
     batch.techniqueName = technique.identityName
         ? technique.identityName : "<unsupported-technique>";
     batch.techniqueType = static_cast<std::uint8_t>(technique.type);
@@ -419,6 +420,13 @@ WebRendererWorldBatchDesc MakeBatch(
             batch.waterColor);
     if (canonicalWater)
         batch.technique = WebRendererWorldTechnique::WaterLitSun;
+    else if (!technique.identityName &&
+        (requestedTechniqueType == TECHNIQUE_LIT_SPOT_INDEX ||
+            requestedTechniqueType == TECHNIQUE_LIT_OMNI_INDEX))
+    {
+        batch.technique =
+            WebRendererWorldTechnique::NativeTechniqueUnavailable;
+    }
     else if (!technique.identityName || !batch.baseImage)
         batch.technique = WebRendererWorldTechnique::BackendFallback;
     else if (ShaderNameIs(technique, "mul.hlsl"))
