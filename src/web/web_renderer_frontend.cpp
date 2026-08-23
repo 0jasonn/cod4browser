@@ -142,6 +142,16 @@ bool CanonicalLightGridSampleVisible(
         vec3_origin, vec3_origin, 0u, 8193) == 0;
 }
 
+Material *ResolveRendererMaterial(Material *material) noexcept
+{
+    const char *lookupName = WebRenderer_MaterialLookupName(material);
+    if (!lookupName) return material;
+    if (Material *canonical = DB_FindXAssetHeader(
+            ASSET_TYPE_MATERIAL, lookupName).material)
+        return canonical;
+    return material;
+}
+
 bool CanonicalPrimaryLightInfluences(
     std::uint32_t primaryLightIndex, const float position[3],
     void *) noexcept
@@ -504,6 +514,10 @@ void AppendUiQuadUvs(const float points[4][2], const float uvs[4][2],
         std::max<std::uint32_t>(1u, cls.vidConfig.displayWidth));
     const float height = static_cast<float>(
         std::max<std::uint32_t>(1u, cls.vidConfig.displayHeight));
+    // WeaponDef reticles can retain a DB reference body serialized in a later
+    // zone. Resolve it at material evaluation so the prerequisite-zone asset
+    // supplies its texture, sampler, and authored unlit state.
+    material = ResolveRendererMaterial(material);
     try
     {
         const std::uint32_t vertexBase =
@@ -533,6 +547,8 @@ void AppendUiQuadUvs(const float points[4][2], const float uvs[4][2],
         batch.materialName = material && material->info.name
             ? material->info.name : "<null-ui-material>";
         batch.image = FindUiImage(material, batch.samplerState);
+        batch.hasMaterialState = WebRenderer_UnlitMaterialStateBits(
+            material, batch.stateBits);
         for (std::size_t component = 0u; component < 4u; ++component)
             batch.color[component] = color ? color[component] : 1.0f;
         g_uiBatches.push_back(batch);
@@ -1030,17 +1046,10 @@ void __cdecl R_AddCodeMeshDrawSurf(Material *material,
         argOffset >= 256u || argCount > 256u - argOffset)
         return;
 
-    // Native DB_LinkXAssetEntry resolves comma-prefixed dependency stubs to
-    // the same-name canonical material before EffectsCore observes them. The
-    // current browser loader intentionally retains those stub records, so do
-    // the equivalent name resolution only at this material-evaluation seam.
-    if (const char *lookupName =
-            WebRenderer_CodeMeshMaterialLookupName(material->info.name))
-    {
-        if (Material *canonical = DB_FindXAssetHeader(
-                ASSET_TYPE_MATERIAL, lookupName).material)
-            material = canonical;
-    }
+    // Native DB_LinkXAssetEntry resolves dependency records before
+    // EffectsCore observes them. Keep the browser compatibility lookup at
+    // this material-evaluation seam rather than changing DB ownership.
+    material = ResolveRendererMaterial(material);
 
     const std::uintptr_t indexAddress =
         reinterpret_cast<std::uintptr_t>(indices);
@@ -1291,7 +1300,6 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     iassert(refdef->localClientNum == 0);
     if (!g_rendererWorldReady || !s_world.name)
         Com_Error(ERR_DROP, "R_RenderScene: NULL worldmodel");
-
     WebRendererSceneViewDesc view{};
     view.x = refdef->x;
     view.y = refdef->y;
@@ -1682,7 +1690,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         WebRenderer_BuildDObjSceneCommand(
             g_dobjSubmissions.data(), g_dobjSubmissionCount,
             dynamicCommand, refdef->vieworg, &s_world.lightGrid,
-            &MODEL_LIGHTING_CALLBACKS);
+            &MODEL_LIGHTING_CALLBACKS, ResolveRendererMaterial);
     if (dynamicBuild == WebRendererDObjSceneResult::NoDObj)
     {
         // Keep the command empty for now; canonical code meshes below may

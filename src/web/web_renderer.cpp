@@ -120,6 +120,8 @@ struct WebRendererRetainedUiBatch
     std::string materialName;
     std::uint32_t imageIndex = INVALID_WORLD_IMAGE;
     std::uint8_t samplerState = 0u;
+    bool hasMaterialState = false;
+    std::uint32_t stateBits[2]{};
     float color[4]{1.0f, 1.0f, 1.0f, 1.0f};
 };
 
@@ -154,6 +156,7 @@ struct WebRendererState
     GLint modelLightingBaseCoordinatesUniform = -1;
     GLint modelLightingLookupScaleUniform = -1;
     GLint premultiplyAlphaUniform = -1;
+    GLint colorIntensityAlphaUniform = -1;
     GLint alphaTestUniform = -1;
     GLint instanceEnabledUniform = -1;
     GLint uiColorUniform = -1;
@@ -549,6 +552,7 @@ const char *ComparisonPortableTechniqueName(
     case WebRendererWorldTechnique::BaseTexture: return "base-texture";
     case WebRendererWorldTechnique::BaseTextureLightmap:
         return "base-texture-lightmap";
+    case WebRendererWorldTechnique::ReflexSight: return "reflex-sight";
     }
     return "unknown";
 }
@@ -1469,6 +1473,7 @@ void ResetGpuHandles()
     g_renderer.modelLightingBaseCoordinatesUniform = -1;
     g_renderer.modelLightingLookupScaleUniform = -1;
     g_renderer.premultiplyAlphaUniform = -1;
+    g_renderer.colorIntensityAlphaUniform = -1;
     g_renderer.alphaTestUniform = -1;
     g_renderer.instanceEnabledUniform = -1;
     g_renderer.uiColorUniform = -1;
@@ -2321,6 +2326,7 @@ bool CreateRendererResources()
         uniform float u_normal_map_enabled;
         uniform vec3 u_model_lighting_lookup_scale;
         uniform float u_premultiply_alpha;
+        uniform float u_color_intensity_alpha;
         uniform float u_scene_fallback;
         uniform int u_alpha_test;
         uniform vec4 u_ui_color;
@@ -2333,6 +2339,9 @@ bool CreateRendererResources()
         void main()
         {
             vec4 texel = texture(u_texture, v_texcoord);
+            float source_alpha = u_color_intensity_alpha > 0.5
+                ? max(texel.r, max(texel.g, texel.b))
+                : texel.a;
             vec4 bootstrap_color = v_color;
             if (u_scene_fallback > 0.5)
             {
@@ -2353,11 +2362,11 @@ bool CreateRendererResources()
             }
             else if (u_texture_enabled > 0.5)
             {
-                if ((u_alpha_test == 1 && texel.a <= 0.0) ||
-                    (u_alpha_test == 2 && texel.a >= (128.0 / 255.0)) ||
-                    (u_alpha_test == 3 && texel.a < (128.0 / 255.0)))
+                if ((u_alpha_test == 1 && source_alpha <= 0.0) ||
+                    (u_alpha_test == 2 && source_alpha >= (128.0 / 255.0)) ||
+                    (u_alpha_test == 3 && source_alpha < (128.0 / 255.0)))
                     discard;
-                bootstrap_color = texel * v_color;
+                bootstrap_color = vec4(texel.rgb, source_alpha) * v_color;
                 if (u_lightmap_enabled > 0.5 &&
                     u_secondary_lightmap_enabled > 0.5)
                 {
@@ -2559,6 +2568,8 @@ bool CreateRendererResources()
         glGetUniformLocation(program, "u_model_lighting_lookup_scale");
     const GLint premultiplyAlphaUniform =
         glGetUniformLocation(program, "u_premultiply_alpha");
+    const GLint colorIntensityAlphaUniform =
+        glGetUniformLocation(program, "u_color_intensity_alpha");
     const GLint alphaTestUniform = glGetUniformLocation(program, "u_alpha_test");
     const GLint instanceEnabledUniform =
         glGetUniformLocation(program, "u_instance_enabled");
@@ -2699,7 +2710,7 @@ bool CreateRendererResources()
         modelLightingUniform < 0 || modelLightingEnabledUniform < 0 ||
         modelLightingBaseCoordinatesUniform < 0 ||
         modelLightingLookupScaleUniform < 0 ||
-        premultiplyAlphaUniform < 0 ||
+        premultiplyAlphaUniform < 0 || colorIntensityAlphaUniform < 0 ||
         alphaTestUniform < 0 || instanceEnabledUniform < 0 ||
         uiColorUniform < 0 || fogEnabledUniform < 0 ||
         viewOriginUniform < 0 || fogColorUniform < 0 ||
@@ -2791,6 +2802,7 @@ bool CreateRendererResources()
     g_renderer.modelLightingLookupScaleUniform =
         modelLightingLookupScaleUniform;
     g_renderer.premultiplyAlphaUniform = premultiplyAlphaUniform;
+    g_renderer.colorIntensityAlphaUniform = colorIntensityAlphaUniform;
     g_renderer.alphaTestUniform = alphaTestUniform;
     g_renderer.instanceEnabledUniform = instanceEnabledUniform;
     g_renderer.uiColorUniform = uiColorUniform;
@@ -3221,7 +3233,7 @@ WebRendererSurfaceResult CopyWorldCommand(
                 source.firstIndex > surface.indexCount ||
                 source.indexCount > surface.indexCount - source.firstIndex ||
                 source.firstSurfaceIndex > source.lastSurfaceIndex ||
-                source.technique > WebRendererWorldTechnique::BaseTextureLightmap ||
+                source.technique > WebRendererWorldTechnique::ReflexSight ||
                 source.lightingMode >
                     WebRendererWorldLightingMode::ModelLightGrid)
             {
@@ -4121,6 +4133,9 @@ WebRendererSurfaceResult WebRenderer_SetUiScene(
             batch.imageIndex = RetainCanonicalWorldImage(source.image,
                 g_renderer.retainedUiImages, retainedPixelBytes);
             batch.samplerState = source.samplerState;
+            batch.hasMaterialState = source.hasMaterialState;
+            batch.stateBits[0] = source.stateBits[0];
+            batch.stateBits[1] = source.stateBits[1];
             for (std::size_t component = 0u; component < 4u; ++component)
             {
                 if (!std::isfinite(source.color[component]))
@@ -4721,6 +4736,8 @@ void ApplyWorldMaterialState(const WebRendererRetainedWorldBatch &batch)
         ((state0 >> 4u) & 0xfu) == 6u;
     glUniform1f(g_renderer.premultiplyAlphaUniform,
         shaderPremultipliesAlpha ? 1.0f : 0.0f);
+    glUniform1f(g_renderer.colorIntensityAlphaUniform,
+        WebRenderer_UsesColorIntensityOpacity(batch.technique) ? 1.0f : 0.0f);
 
     if (hasCanonicalState && (state1 & 2u) != 0u)
     {
@@ -4739,6 +4756,64 @@ void ApplyWorldMaterialState(const WebRendererRetainedWorldBatch &batch)
     }
     glDepthMask(!hasCanonicalState || (state1 & 1u) != 0u
         ? GL_TRUE : GL_FALSE);
+
+    std::int32_t alphaTest = 0;
+    if ((state0 & 0x800u) == 0u)
+    {
+        switch (state0 & 0x3000u)
+        {
+        case 0x1000u: alphaTest = 1; break;
+        case 0x2000u: alphaTest = 2; break;
+        case 0x3000u: alphaTest = 3; break;
+        default: break;
+        }
+    }
+    glUniform1i(g_renderer.alphaTestUniform, alphaTest);
+}
+
+void ApplyUiMaterialState(const WebRendererRetainedUiBatch &batch)
+{
+    glUniform1f(g_renderer.colorIntensityAlphaUniform, 0.0f);
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+    glDisable(GL_CULL_FACE);
+    if (!batch.hasMaterialState)
+    {
+        glEnable(GL_BLEND);
+        glBlendEquation(GL_FUNC_ADD);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glUniform1i(g_renderer.alphaTestUniform, 0);
+        glUniform1f(g_renderer.premultiplyAlphaUniform, 0.0f);
+        return;
+    }
+
+    const std::uint32_t state0 = batch.stateBits[0];
+    const bool rgbWrite = (state0 & 0x08000000u) != 0u;
+    glColorMask(rgbWrite, rgbWrite, rgbWrite,
+        (state0 & 0x10000000u) != 0u);
+    if ((state0 & 0x700u) != 0u)
+    {
+        glEnable(GL_BLEND);
+        glBlendEquationSeparate(
+            WorldBlendEquation((state0 >> 8u) & 7u),
+            WorldBlendEquation((state0 >> 24u) & 7u));
+        glBlendFuncSeparate(
+            WorldBlendFactor(state0 & 0xfu),
+            WorldBlendFactor((state0 >> 4u) & 0xfu),
+            WorldBlendFactor((state0 >> 16u) & 0xfu),
+            WorldBlendFactor((state0 >> 20u) & 0xfu));
+    }
+    else
+    {
+        glDisable(GL_BLEND);
+    }
+    const bool shaderPremultipliesAlpha =
+        (state0 & 0x700u) != 0u &&
+        (state0 & 0xfu) == 2u &&
+        ((state0 >> 4u) & 0xfu) == 6u;
+    glUniform1f(g_renderer.premultiplyAlphaUniform,
+        shaderPremultipliesAlpha ? 1.0f : 0.0f);
 
     std::int32_t alphaTest = 0;
     if ((state0 & 0x800u) == 0u)
@@ -5022,6 +5097,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform3f(g_renderer.modelLightingLookupScaleUniform,
             0.0f, 0.0f, 0.0f);
         glUniform1f(g_renderer.premultiplyAlphaUniform, 0.0f);
+        glUniform1f(g_renderer.colorIntensityAlphaUniform, 0.0f);
         glUniform1f(g_renderer.instanceEnabledUniform, 0.0f);
         glUniform4f(g_renderer.uiColorUniform, 1.0f, 1.0f, 1.0f, 1.0f);
         glUniform1f(g_renderer.fogEnabledUniform,
@@ -5303,19 +5379,11 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1f(g_renderer.modelLightingEnabledUniform, 0.0f);
         glUniform1f(g_renderer.normalMapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.instanceEnabledUniform, 0.0f);
-        glUniform1i(g_renderer.alphaTestUniform, 0);
-        glUniform1f(g_renderer.premultiplyAlphaUniform, 0.0f);
-        glDisable(GL_DEPTH_TEST);
-        glDepthMask(GL_FALSE);
-        glDisable(GL_CULL_FACE);
-        glEnable(GL_BLEND);
-        glBlendEquation(GL_FUNC_ADD);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         glBindVertexArray(g_renderer.uiVertexArray);
         for (const WebRendererRetainedUiBatch &batch :
              g_renderer.retainedUiBatches)
         {
+            ApplyUiMaterialState(batch);
             const WebRendererRetainedWorldImage *image = RetainedImage(
                 g_renderer.retainedUiImages, batch.imageIndex);
             glUniform1f(g_renderer.textureEnabledUniform,

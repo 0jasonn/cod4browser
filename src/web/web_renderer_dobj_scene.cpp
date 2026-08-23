@@ -354,8 +354,10 @@ WebRendererWorldBatchDesc MakeDraw(
     std::uint32_t modelSurfaceIndex, std::uint32_t firstIndex,
     std::uint32_t indexCount,
     const float modelLightingCoordinates[3],
-    bool modelLightingEnabled, bool depthHack) noexcept
+    bool modelLightingEnabled, bool depthHack,
+    WebRendererMaterialResolver materialResolver) noexcept
 {
+    material = WebRenderer_ResolveDObjMaterial(material, materialResolver);
     WebRendererWorldBatchDesc draw{};
     draw.firstIndex = firstIndex;
     draw.indexCount = indexCount;
@@ -383,10 +385,16 @@ WebRendererWorldBatchDesc MakeDraw(
     if (!draw.techniqueName ||
         std::strstr(draw.techniqueName, "n0") == nullptr)
         draw.normalImage = nullptr;
-    draw.technique = draw.baseImage
-        ? WebRendererWorldTechnique::BaseTexture
-        : WebRendererWorldTechnique::BackendFallback;
-    if (modelLightingEnabled)
+    draw.technique = !draw.baseImage
+        ? WebRendererWorldTechnique::BackendFallback
+        : WebRenderer_IsReflexSightTechnique(draw.techniqueName)
+            ? WebRendererWorldTechnique::ReflexSight
+            : WebRendererWorldTechnique::BaseTexture;
+    // Only the canonical lit pass consumes the model-light-grid constants.
+    // Unlit reflex sights must preserve their emissive color and derived
+    // opacity instead of being darkened by the viewmodel's lighting sample.
+    if (modelLightingEnabled &&
+        draw.techniqueType == TECHNIQUE_LIT_INDEX)
     {
         draw.lightingMode = WebRendererWorldLightingMode::ModelLightGrid;
         std::copy_n(modelLightingCoordinates, 3u,
@@ -402,7 +410,8 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
     WebRendererDObjSceneCommand &destination,
     const float *viewOrigin,
     const GfxLightGrid *lightGrid,
-    const WebRendererModelLightingCallbacks *lightingCallbacks)
+    const WebRendererModelLightingCallbacks *lightingCallbacks,
+    WebRendererMaterialResolver materialResolver)
 {
     if (submissionCount == 0u) return WebRendererDObjSceneResult::NoDObj;
     if (!submissions) return WebRendererDObjSceneResult::InvalidSubmission;
@@ -587,7 +596,8 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                         modelLightingCoordinates,
                         submissionLightingReady,
                         WebRenderer_DObjUsesDepthHack(
-                            submission.renderFlags)));
+                            submission.renderFlags),
+                        materialResolver));
                     ++replacement.surfaceCount;
                     submittedModel = true;
                     submittedDObj = true;

@@ -1,4 +1,5 @@
 #include <web/web_renderer_dobj_scene.h>
+#include <gfx_d3d/material_types.h>
 #include <universal/q_shared.h>
 #include <xanim/xmodel.h>
 
@@ -9,6 +10,12 @@ namespace
 {
 float g_lodDistance = -1.0f;
 int g_canonicalLod = 2;
+Material *g_resolvedMaterial = nullptr;
+
+Material *ResolveMaterial(Material *) noexcept
+{
+    return g_resolvedMaterial;
+}
 
 void TestLodDelegatesToCanonicalXModelPolicy()
 {
@@ -68,6 +75,30 @@ void TestInvalidAndCapacityAdmissionIsDeterministic()
     assert(WebRenderer_ValidateDObjSubmission(valid, 512u, 512u) ==
         WebRendererDObjAdmissionResult::LimitReached);
 }
+
+void TestDObjMaterialResolutionPreservesCanonicalFallback()
+{
+    Material alias{};
+    Material canonical{};
+    g_resolvedMaterial = &canonical;
+    assert(WebRenderer_ResolveDObjMaterial(&alias, ResolveMaterial) ==
+        &canonical);
+    g_resolvedMaterial = nullptr;
+    assert(WebRenderer_ResolveDObjMaterial(&alias, ResolveMaterial) == &alias);
+    assert(WebRenderer_ResolveDObjMaterial(&alias, nullptr) == &alias);
+}
+
+void TestReflexSightTechniqueSelectsIntensityOpacitySubset()
+{
+    assert(WebRenderer_IsReflexSightTechnique("reflexsight_dtex"));
+    assert(WebRenderer_IsReflexSightTechnique("reflexsight"));
+    assert(!WebRenderer_IsReflexSightTechnique("lp_t0c0_sm2"));
+    assert(!WebRenderer_IsReflexSightTechnique(nullptr));
+    assert(WebRenderer_UsesColorIntensityOpacity(
+        WebRendererWorldTechnique::ReflexSight));
+    assert(!WebRenderer_UsesColorIntensityOpacity(
+        WebRendererWorldTechnique::BaseTexture));
+}
 } // namespace
 
 int main()
@@ -76,6 +107,8 @@ int main()
     TestOrdinaryAndViewmodelFlagsShareAdmission();
     TestNativeDepthHackBitIsPreservedAtPortableBoundary();
     TestInvalidAndCapacityAdmissionIsDeterministic();
+    TestDObjMaterialResolutionPreservesCanonicalFallback();
+    TestReflexSightTechniqueSelectsIntensityOpacitySubset();
     return 0;
 }
 

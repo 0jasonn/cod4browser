@@ -1,6 +1,8 @@
 #include <gfx_d3d/gfx_packed_vertex_types.h>
+#include <gfx_d3d/material_types.h>
 #include <web/web_renderer_code_mesh.h>
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cmath>
@@ -115,12 +117,64 @@ void TestFxBatchHasDistinctRendererIdentity()
 
 void TestCommaMaterialUsesCanonicalLookupName()
 {
-    assert(std::strcmp(WebRenderer_CodeMeshMaterialLookupName(
+    assert(std::strcmp(WebRenderer_SerializedMaterialLookupName(
         ",gfx_muzflash_m16"), "gfx_muzflash_m16") == 0);
-    assert(WebRenderer_CodeMeshMaterialLookupName(
+    assert(std::strcmp(WebRenderer_SerializedMaterialLookupName(
+        ",reticle_side_small"), "reticle_side_small") == 0);
+    assert(WebRenderer_SerializedMaterialLookupName(
         "gfx_muzflash_m16") == nullptr);
-    assert(WebRenderer_CodeMeshMaterialLookupName(",") == nullptr);
-    assert(WebRenderer_CodeMeshMaterialLookupName(nullptr) == nullptr);
+    assert(WebRenderer_SerializedMaterialLookupName(",") == nullptr);
+    assert(WebRenderer_SerializedMaterialLookupName(nullptr) == nullptr);
+}
+
+void TestIncompleteMaterialAliasUsesCanonicalLookupName()
+{
+    Material alias{};
+    alias.info.name = "mc/mtl_weapon_reflex_lens";
+    assert(std::strcmp(WebRenderer_MaterialLookupName(&alias),
+        "mc/mtl_weapon_reflex_lens") == 0);
+
+    MaterialTechniqueSet techniqueSet{};
+    alias.techniqueSet = &techniqueSet;
+    assert(WebRenderer_MaterialLookupName(&alias) == nullptr);
+
+    alias.textureCount = 1u;
+    assert(std::strcmp(WebRenderer_MaterialLookupName(&alias),
+        "mc/mtl_weapon_reflex_lens") == 0);
+    MaterialTextureDef texture{};
+    alias.textureTable = &texture;
+    assert(WebRenderer_MaterialLookupName(&alias) == nullptr);
+
+    alias.info.name = ",mc/mtl_weapon_reflex_lens";
+    assert(std::strcmp(WebRenderer_MaterialLookupName(&alias),
+        "mc/mtl_weapon_reflex_lens") == 0);
+    assert(WebRenderer_MaterialLookupName(nullptr) == nullptr);
+}
+
+void TestUnlitMaterialStateUsesCanonicalEntry()
+{
+    Material material{};
+    std::fill(std::begin(material.stateBitsEntry),
+        std::end(material.stateBitsEntry), 0xffu);
+    std::array<GfxStateBits, 2> table{{
+        {{0x19650165u, 0x00000002u}},
+        {{0x19850112u, 0x00000002u}},
+    }};
+    material.stateBitsTable = table.data();
+    material.stateBitsCount = static_cast<std::uint8_t>(table.size());
+    material.stateBitsEntry[4] = 1u;
+    std::uint32_t stateBits[2]{0xaaaaaaaau, 0xbbbbbbbbu};
+    assert(WebRenderer_UnlitMaterialStateBits(&material, stateBits));
+    assert(stateBits[0] == table[1].loadBits[0]);
+    assert(stateBits[1] == table[1].loadBits[1]);
+
+    material.stateBitsEntry[4] = 0xffu;
+    assert(!WebRenderer_UnlitMaterialStateBits(&material, stateBits));
+    assert(stateBits[0] == 0u && stateBits[1] == 0u);
+    material.stateBitsEntry[4] = 2u;
+    assert(!WebRenderer_UnlitMaterialStateBits(&material, stateBits));
+    assert(!WebRenderer_UnlitMaterialStateBits(nullptr, stateBits));
+    assert(!WebRenderer_UnlitMaterialStateBits(&material, nullptr));
 }
 } // namespace
 
@@ -132,5 +186,7 @@ int main()
     TestFallbackStateWritesAndBlends();
     TestFxBatchHasDistinctRendererIdentity();
     TestCommaMaterialUsesCanonicalLookupName();
+    TestIncompleteMaterialAliasUsesCanonicalLookupName();
+    TestUnlitMaterialStateUsesCanonicalEntry();
     return 0;
 }

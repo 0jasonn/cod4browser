@@ -1,5 +1,7 @@
 #include <web/web_renderer_code_mesh.h>
 
+#include <gfx_d3d/material_types.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -52,11 +54,44 @@ bool IsFiniteVertex(const WebRendererSurfaceVertex &vertex) noexcept
 }
 } // namespace
 
-const char *WebRenderer_CodeMeshMaterialLookupName(
+const char *WebRenderer_SerializedMaterialLookupName(
     const char *serializedName) noexcept
 {
     return serializedName && serializedName[0] == ',' && serializedName[1]
         ? serializedName + 1 : nullptr;
+}
+
+const char *WebRenderer_MaterialLookupName(
+    const Material *material) noexcept
+{
+    if (!material || !material->info.name || !material->info.name[0])
+        return nullptr;
+    if (const char *name = WebRenderer_SerializedMaterialLookupName(
+            material->info.name))
+        return name;
+    if (!material->techniqueSet ||
+        (material->textureCount != 0u && !material->textureTable) ||
+        (material->stateBitsCount != 0u && !material->stateBitsTable))
+        return material->info.name;
+    return nullptr;
+}
+
+bool WebRenderer_UnlitMaterialStateBits(
+    const Material *material, std::uint32_t stateBits[2]) noexcept
+{
+    if (!stateBits) return false;
+    stateBits[0] = 0u;
+    stateBits[1] = 0u;
+    constexpr std::uint32_t TECHNIQUE_UNLIT_INDEX = 4u;
+    if (!material || !material->stateBitsTable)
+        return false;
+    const std::uint8_t entry =
+        material->stateBitsEntry[TECHNIQUE_UNLIT_INDEX];
+    if (entry == 0xffu || entry >= material->stateBitsCount)
+        return false;
+    stateBits[0] = material->stateBitsTable[entry].loadBits[0];
+    stateBits[1] = material->stateBitsTable[entry].loadBits[1];
+    return true;
 }
 
 WebRendererCodeMeshResult WebRenderer_AppendCodeMeshBatch(

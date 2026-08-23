@@ -143,7 +143,16 @@ enum class WebRendererWorldTechnique : std::uint8_t
     BackendFallback = 0,
     BaseTexture,
     BaseTextureLightmap,
+    // Portable subset of IW3's reflexsight shader. Its DXT1 color texture is
+    // intentionally opaque; source opacity is reconstructed from intensity.
+    ReflexSight,
 };
+
+constexpr bool WebRenderer_UsesColorIntensityOpacity(
+    WebRendererWorldTechnique technique) noexcept
+{
+    return technique == WebRendererWorldTechnique::ReflexSight;
+}
 
 // Portable description of the native pixel-lighting path selected by the
 // canonical material pass. This is intent data, not a WebGL shader handle.
@@ -272,6 +281,8 @@ struct WebRendererUiBatchDesc
     const char *materialName;
     const GfxImage *image;
     std::uint8_t samplerState;
+    bool hasMaterialState;
+    std::uint32_t stateBits[2];
     float color[4];
 };
 

@@ -30,10 +30,24 @@ enum class WebRendererCodeMeshResult : std::uint8_t
 
 // Fastfile comma-prefixed material names are native DB reference stubs. The
 // browser DB currently retains those serialized bodies for loader validation,
-// so the FX frontend uses this narrow lookup key to recover the already-
+// so renderer frontends use this narrow lookup key to recover the already-
 // published canonical material without changing DB ownership.
-const char *WebRenderer_CodeMeshMaterialLookupName(
+const char *WebRenderer_SerializedMaterialLookupName(
     const char *serializedName) noexcept;
+
+// XModel dependencies from a later zone can retain a name-bearing Material
+// alias body while the canonical prerequisite-zone Material lives in the DB.
+// Return the DB lookup key only for those incomplete records (or the explicit
+// comma-prefixed form), leaving complete canonical materials untouched.
+const char *WebRenderer_MaterialLookupName(
+    const Material *material) noexcept;
+
+// R_AddCmdDrawStretchPic always selects TECHNIQUE_UNLIT. Preserve that
+// technique's canonical D3D9 state at the portable 2D frontend/backend seam;
+// some HUD images intentionally carry opaque black pixels and depend on the
+// material's additive blend state rather than texture alpha for transparency.
+bool WebRenderer_UnlitMaterialStateBits(
+    const Material *material, std::uint32_t stateBits[2]) noexcept;
 
 // Converts one canonical R_AddCodeMeshDrawSurf span into retained, backend-
 // neutral vertices and 32-bit indices. The packed index ABI stores two

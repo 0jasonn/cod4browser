@@ -4,11 +4,29 @@
 #include <web/web_renderer_lighting.h>
 
 #include <cstdint>
+#include <string_view>
 #include <vector>
 
 struct DObj_s;
 struct cpose_t;
 struct XModel;
+
+using WebRendererMaterialResolver = Material *(*)(Material *) noexcept;
+
+inline Material *WebRenderer_ResolveDObjMaterial(
+    Material *material, WebRendererMaterialResolver resolver) noexcept
+{
+    if (!resolver) return material;
+    Material *canonical = resolver(material);
+    return canonical ? canonical : material;
+}
+
+inline bool WebRenderer_IsReflexSightTechnique(
+    const char *techniqueName) noexcept
+{
+    return techniqueName &&
+        std::string_view(techniqueName).starts_with("reflexsight");
+}
 
 struct WebRendererDObjSubmission
 {
@@ -78,7 +96,8 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
     WebRendererDObjSceneCommand &destination,
     const float *viewOrigin = nullptr,
     const GfxLightGrid *lightGrid = nullptr,
-    const WebRendererModelLightingCallbacks *lightingCallbacks = nullptr);
+    const WebRendererModelLightingCallbacks *lightingCallbacks = nullptr,
+    WebRendererMaterialResolver materialResolver = nullptr);
 
 const char *WebRenderer_DObjSceneResultString(
     WebRendererDObjSceneResult result) noexcept;

@@ -15,6 +15,7 @@ constexpr WebBrowserDefaultBinding DEFAULT_BINDINGS[] = {
     {K_MOUSE1, "+attack"},
     {K_MOUSE2, "toggleads"},
     {'r', "+reload"},
+    {'v', "+melee"},
     {K_MWHEELUP, "weapnext"},
     {K_MWHEELDOWN, "weapprev"},
 };
