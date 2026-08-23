@@ -1219,13 +1219,25 @@ The same boundary now reproduces the authored `RB_DrawSunFlare` core after the
 resolved color-manipulation pass and before HUD composition. It uses
 `sun_flare_icbm`, the canonical 640x480-relative size interpolation, view-dot
 thresholds, maximum alpha, packed RGB intensity convention, UVs, winding, and
-D3D-to-WebGL query-depth offset. The scene framebuffer's platform-owned depth
-attachment is now a sampleable depth texture; the flare samples its 16-pixel
-query center after the 3D resolve, so roof/world occlusion applies to the whole
-post-effect without exposing API objects through portable commands. The same
-depth texture is the required platform seam for later depth-aware DOF. Native
-temporal query fade and the authored blind darkening remain the next
-environment-specific gaps; Killhouse's authored glare maximum is zero.
+D3D-to-WebGL query-depth offset. Two backend-owned asynchronous
+`ANY_SAMPLES_PASSED_CONSERVATIVE` queries ping-pong over the native 16-pixel
+sun rectangle after opaque world/model depth is complete. Their result owns
+visibility when query objects are available; the canonical `CM_BoxSightTrace`
+path remains the no-query fallback. Query handles never cross the portable
+frontend seam.
+
+Flare, blind, and glare intensities now use the authored independent fade-in
+and fade-out times against canonical cgame scene time. The resolved 3D color
+reproduces the `$glare_blind` composition before the sharp HUD: blind alpha
+darkens the scene and glare RGB lightens it. Killhouse authors a zero glare
+maximum but retains a 0.18502 maximum blind term. A corrected portable
+`cg_setviewpos` float parser allowed the live view to align exactly with the
+published `(0.262003,-0.719846,0.642788)` sun direction. Chrome then reports
+view-dot 1.0, transitions query/collision visibility from zero to one, and
+visually draws the authored centred flare over the Killhouse sky without a
+shader, framebuffer, context, descriptor, or draw error. The scene depth
+attachment remains sampleable as the required platform seam for later
+depth-aware DOF.
 
 The Release build and focused world-scene, comparison, FX-model-scene, and
 DObj-submission Wasm-native tests pass. In the reopened Chrome tab, Killhouse
@@ -1234,3 +1246,24 @@ publishes the
 `sun` image, 14.606 sprite size, and canonical direction with no assertion,
 shader, framebuffer, context, descriptor, or draw errors. The ordinary spawn
 view advances 240 frames in 4.015 seconds (59.78 fps).
+
+## Canonical renderer map-unload update (2026-08-23)
+
+`R_UnloadWorld` now retires every renderer command that owns or identifies
+assets from the outgoing zone before DB frees that zone. In addition to world
+geometry, water, sky, and primary lights, the boundary deletes static-XModel,
+dynamic-model, UI, model-lighting, and sun-query GPU objects; releases their
+decoded recovery pixels and geometry allocations; and resets scene,
+post-effect, and first-publication state. The 800 MiB max-graphics static
+texture budget is unchanged.
+
+Previously a second map constructed its complete replacement static-XModel
+image set while the first map's roughly 766 MiB decoded set was still retained.
+The temporary double allocation failed while decoding
+`mtl_truck_trailer_col`; `WebRenderer_SetStaticModelScene` never completed, so
+the new scene view was not published and the frame pump cleared the canvas to
+black. Chrome now proves `devmap killhouse` followed by a second
+`devmap killhouse`: the unload trace occurs before zone retirement, both loads
+retain all 518/518 static images with zero fallback, both submit 238 XModels in
+567 batches, and the second cgame view advances the surface generation from 3
+to 5 before rendering all 8,475 world surfaces and 823,464 indices.

@@ -182,6 +182,26 @@ struct WebRendererState
     GLuint shadowDepthTexture = 0;
     GLuint shadowFarFramebuffer = 0;
     GLuint shadowFarDepthTexture = 0;
+    GLuint sunVisibilityQueries[2]{};
+    bool sunVisibilityQueryIssued[2]{};
+    std::uint32_t sunVisibilityQueryIndex = 0u;
+    float sunVisibility = 0.0f;
+    float sunFlareIntensity = 0.0f;
+    float sunBlindIntensity = 0.0f;
+    float sunBlindDarken = 0.0f;
+    float sunGlareIntensity = 0.0f;
+    float sunGlareLighten = 0.0f;
+    double sunEffectLastMilliseconds = 0.0;
+    float sunFlareFadeInMilliseconds = 0.0f;
+    float sunFlareFadeOutMilliseconds = 0.0f;
+    float sunBlindLerp = 0.0f;
+    float sunBlindMaxDarken = 0.0f;
+    float sunBlindFadeInMilliseconds = 0.0f;
+    float sunBlindFadeOutMilliseconds = 0.0f;
+    float sunGlareLerp = 0.0f;
+    float sunGlareMaxLighten = 0.0f;
+    float sunGlareFadeInMilliseconds = 0.0f;
+    float sunGlareFadeOutMilliseconds = 0.0f;
     GLuint vertexArray = 0;
     GLuint vertexBuffer = 0;
     GLuint indexBuffer = 0;
@@ -205,7 +225,6 @@ struct WebRendererState
     GLint premultiplyAlphaUniform = -1;
     GLint colorIntensityAlphaUniform = -1;
     GLint materialModeUniform = -1;
-    GLint sceneDepthUniform = -1;
     GLint falloffParmsUniform = -1;
     GLint falloffBeginColorUniform = -1;
     GLint falloffEndColorUniform = -1;
@@ -251,6 +270,8 @@ struct WebRendererState
     GLint postProcessColorTintDeltaUniform = -1;
     GLint postProcessGammaExponentUniform = -1;
     GLint postProcessBlurScaleUniform = -1;
+    GLint postProcessBlindDarkenUniform = -1;
+    GLint postProcessGlareLightenUniform = -1;
     GLint compatibilityViewProjectionUniform = -1;
     GLint compatibilityWorldUniform = -1;
     GLint compatibilityTextureUniform = -1;
@@ -1719,6 +1740,26 @@ void ResetGpuHandles()
     g_renderer.shadowDepthTexture = 0;
     g_renderer.shadowFarFramebuffer = 0;
     g_renderer.shadowFarDepthTexture = 0;
+    std::fill_n(g_renderer.sunVisibilityQueries, 2u, 0u);
+    std::fill_n(g_renderer.sunVisibilityQueryIssued, 2u, false);
+    g_renderer.sunVisibilityQueryIndex = 0u;
+    g_renderer.sunVisibility = 0.0f;
+    g_renderer.sunFlareIntensity = 0.0f;
+    g_renderer.sunBlindIntensity = 0.0f;
+    g_renderer.sunBlindDarken = 0.0f;
+    g_renderer.sunGlareIntensity = 0.0f;
+    g_renderer.sunGlareLighten = 0.0f;
+    g_renderer.sunEffectLastMilliseconds = 0.0;
+    g_renderer.sunFlareFadeInMilliseconds = 0.0f;
+    g_renderer.sunFlareFadeOutMilliseconds = 0.0f;
+    g_renderer.sunBlindLerp = 0.0f;
+    g_renderer.sunBlindMaxDarken = 0.0f;
+    g_renderer.sunBlindFadeInMilliseconds = 0.0f;
+    g_renderer.sunBlindFadeOutMilliseconds = 0.0f;
+    g_renderer.sunGlareLerp = 0.0f;
+    g_renderer.sunGlareMaxLighten = 0.0f;
+    g_renderer.sunGlareFadeInMilliseconds = 0.0f;
+    g_renderer.sunGlareFadeOutMilliseconds = 0.0f;
     g_renderer.vertexArray = 0;
     g_renderer.vertexBuffer = 0;
     g_renderer.indexBuffer = 0;
@@ -1752,7 +1793,6 @@ void ResetGpuHandles()
     g_renderer.premultiplyAlphaUniform = -1;
     g_renderer.colorIntensityAlphaUniform = -1;
     g_renderer.materialModeUniform = -1;
-    g_renderer.sceneDepthUniform = -1;
     g_renderer.falloffParmsUniform = -1;
     g_renderer.falloffBeginColorUniform = -1;
     g_renderer.falloffEndColorUniform = -1;
@@ -1798,6 +1838,8 @@ void ResetGpuHandles()
     g_renderer.postProcessColorTintDeltaUniform = -1;
     g_renderer.postProcessGammaExponentUniform = -1;
     g_renderer.postProcessBlurScaleUniform = -1;
+    g_renderer.postProcessBlindDarkenUniform = -1;
+    g_renderer.postProcessGlareLightenUniform = -1;
     g_renderer.compatibilityViewProjectionUniform = -1;
     g_renderer.compatibilityWorldUniform = -1;
     g_renderer.compatibilityTextureUniform = -1;
@@ -2078,6 +2120,11 @@ void DestroyWebGLContext()
             g_renderer.shadowFarFramebuffer,
             g_renderer.shadowFarDepthTexture,
             0u);
+        if (g_renderer.sunVisibilityQueries[0] != 0u ||
+            g_renderer.sunVisibilityQueries[1] != 0u)
+        {
+            glDeleteQueries(2, g_renderer.sunVisibilityQueries);
+        }
         DeletePipelineObjects(
             g_renderer.program,
             g_renderer.skyProgram,
@@ -2856,7 +2903,6 @@ bool CreateRendererResources()
         uniform float u_premultiply_alpha;
         uniform float u_color_intensity_alpha;
         uniform int u_material_mode;
-        uniform sampler2D u_scene_depth;
         uniform vec4 u_falloff_parms;
         uniform float u_scene_fallback;
         uniform int u_alpha_test;
@@ -3282,16 +3328,6 @@ bool CreateRendererResources()
                 final_color.rgb = mix(
                     u_fog_color, final_color.rgb, visibility);
             }
-            if (u_material_mode == 5)
-            {
-                // RB_DrawSunFlare consumes the previous sun-query result.
-                // At the WebGL boundary the scene depth texture supplies the
-                // same visibility decision after the 3D scene is resolved.
-                float receiver_depth = texture(
-                    u_scene_depth, u_falloff_parms.xy).r;
-                if (u_falloff_parms.z > receiver_depth + 0.000001)
-                    discard;
-            }
             if (u_premultiply_alpha > 0.5)
                 final_color.rgb *= final_color.a;
             out_color = final_color;
@@ -3391,6 +3427,8 @@ bool CreateRendererResources()
         uniform vec4 u_color_tint_delta;
         uniform float u_gamma_exponent;
         uniform vec2 u_blur_scale;
+        uniform float u_blind_darken;
+        uniform float u_glare_lighten;
         out vec4 out_color;
         void main()
         {
@@ -3445,6 +3483,8 @@ bool CreateRendererResources()
             }
             color = pow(clamp(color, 0.0, 1.0),
                 vec3(u_gamma_exponent));
+            color = color * (1.0 - clamp(u_blind_darken, 0.0, 1.0)) +
+                vec3(clamp(u_glare_lighten, 0.0, 1.0));
             out_color = vec4(color, source.a);
         }
     )glsl";
@@ -3516,8 +3556,6 @@ bool CreateRendererResources()
         glGetUniformLocation(program, "u_color_intensity_alpha");
     const GLint materialModeUniform =
         glGetUniformLocation(program, "u_material_mode");
-    const GLint sceneDepthUniform =
-        glGetUniformLocation(program, "u_scene_depth");
     const GLint falloffParmsUniform =
         glGetUniformLocation(program, "u_falloff_parms");
     const GLint falloffBeginColorUniform =
@@ -3607,6 +3645,10 @@ bool CreateRendererResources()
         glGetUniformLocation(postProcessProgram, "u_gamma_exponent");
     const GLint postProcessBlurScaleUniform =
         glGetUniformLocation(postProcessProgram, "u_blur_scale");
+    const GLint postProcessBlindDarkenUniform =
+        glGetUniformLocation(postProcessProgram, "u_blind_darken");
+    const GLint postProcessGlareLightenUniform =
+        glGetUniformLocation(postProcessProgram, "u_glare_lighten");
     const GLenum pipelineError = glGetError();
 
     const std::uint8_t *texturePixels = FALLBACK_TEXTURE_RGBA;
@@ -3730,8 +3772,7 @@ bool CreateRendererResources()
         modelLightingBaseCoordinatesUniform < 0 ||
         modelLightingLookupScaleUniform < 0 ||
         premultiplyAlphaUniform < 0 || colorIntensityAlphaUniform < 0 ||
-        materialModeUniform < 0 || sceneDepthUniform < 0 ||
-        falloffParmsUniform < 0 ||
+        materialModeUniform < 0 || falloffParmsUniform < 0 ||
         falloffBeginColorUniform < 0 || falloffEndColorUniform < 0 ||
         alphaTestUniform < 0 || instanceEnabledUniform < 0 ||
         uiColorUniform < 0 || fogEnabledUniform < 0 ||
@@ -3762,6 +3803,8 @@ bool CreateRendererResources()
         postProcessColorTintDeltaUniform < 0 ||
         postProcessGammaExponentUniform < 0 ||
         postProcessBlurScaleUniform < 0 ||
+        postProcessBlindDarkenUniform < 0 ||
+        postProcessGlareLightenUniform < 0 ||
         pipelineError != GL_NO_ERROR ||
         !surfaceReady || !textureReady || !worldTexturesReady ||
         !waterTexturesReady ||
@@ -3857,7 +3900,6 @@ bool CreateRendererResources()
     g_renderer.premultiplyAlphaUniform = premultiplyAlphaUniform;
     g_renderer.colorIntensityAlphaUniform = colorIntensityAlphaUniform;
     g_renderer.materialModeUniform = materialModeUniform;
-    g_renderer.sceneDepthUniform = sceneDepthUniform;
     g_renderer.falloffParmsUniform = falloffParmsUniform;
     g_renderer.falloffBeginColorUniform = falloffBeginColorUniform;
     g_renderer.falloffEndColorUniform = falloffEndColorUniform;
@@ -3913,6 +3955,10 @@ bool CreateRendererResources()
     g_renderer.postProcessGammaExponentUniform =
         postProcessGammaExponentUniform;
     g_renderer.postProcessBlurScaleUniform = postProcessBlurScaleUniform;
+    g_renderer.postProcessBlindDarkenUniform =
+        postProcessBlindDarkenUniform;
+    g_renderer.postProcessGlareLightenUniform =
+        postProcessGlareLightenUniform;
     g_renderer.compatibilityViewProjectionUniform = compatibilityViewProjection;
     g_renderer.compatibilityWorldUniform = compatibilityWorld;
     g_renderer.compatibilityTextureUniform = compatibilityTexture;
@@ -5240,23 +5286,104 @@ void __cdecl R_UnloadWorld()
     {
         DeleteWorldTextureObjects(g_renderer.retainedWorldImages);
         DeleteWaterTextureObjects(g_renderer.retainedWorldBatches);
+        DeleteWorldTextureObjects(g_renderer.retainedStaticModelImages);
+        DeleteWorldTextureObjects(g_renderer.retainedDynamicModelImages);
+        DeleteWorldTextureObjects(g_renderer.retainedUiImages);
         if (g_renderer.retainedSky.texture != 0u)
             glDeleteTextures(1, &g_renderer.retainedSky.texture);
         DeleteSurfaceObjects(
             g_renderer.vertexArray, g_renderer.vertexBuffer,
             g_renderer.indexBuffer);
+        DeleteStaticModelObjects(
+            g_renderer.staticModelVertexArray,
+            g_renderer.staticModelVertexBuffer,
+            g_renderer.staticModelIndexBuffer,
+            g_renderer.staticModelInstanceBuffer);
+        DeleteSurfaceObjects(
+            g_renderer.dynamicModelVertexArray,
+            g_renderer.dynamicModelVertexBuffer,
+            g_renderer.dynamicModelIndexBuffer);
+        DeleteSurfaceObjects(
+            g_renderer.uiVertexArray,
+            g_renderer.uiVertexBuffer,
+            g_renderer.uiIndexBuffer);
+        DeleteModelLightingTexture(g_renderer.retainedStaticModelLighting);
+        DeleteModelLightingTexture(g_renderer.retainedDynamicModelLighting);
+        if (g_renderer.sunVisibilityQueries[0] != 0u ||
+            g_renderer.sunVisibilityQueries[1] != 0u)
+        {
+            glDeleteQueries(2, g_renderer.sunVisibilityQueries);
+        }
     }
     g_renderer.vertexArray = 0u;
     g_renderer.vertexBuffer = 0u;
     g_renderer.indexBuffer = 0u;
-    g_renderer.retainedVertices.clear();
-    g_renderer.retainedIndices.clear();
-    g_renderer.retainedWorldIndices.clear();
-    g_renderer.retainedWorldBatches.clear();
-    g_renderer.retainedWorldImages.clear();
-    g_renderer.retainedPrimaryLights.clear();
+    g_renderer.staticModelVertexArray = 0u;
+    g_renderer.staticModelVertexBuffer = 0u;
+    g_renderer.staticModelIndexBuffer = 0u;
+    g_renderer.staticModelInstanceBuffer = 0u;
+    g_renderer.dynamicModelVertexArray = 0u;
+    g_renderer.dynamicModelVertexBuffer = 0u;
+    g_renderer.dynamicModelIndexBuffer = 0u;
+    g_renderer.uiVertexArray = 0u;
+    g_renderer.uiVertexBuffer = 0u;
+    g_renderer.uiIndexBuffer = 0u;
+
+    // These retained commands contain canonical asset identities and decoded
+    // recovery pixels owned by the retiring zone. Release their allocations at
+    // the native world-unload boundary. Keeping the previous static-XModel
+    // image set until its replacement was ready made a map transition require
+    // almost two full max-graphics texture sets at once; the second decode then
+    // ran out of Wasm memory and prevented the new scene view from publishing.
+    decltype(g_renderer.retainedVertices){}.swap(
+        g_renderer.retainedVertices);
+    decltype(g_renderer.retainedIndices){}.swap(
+        g_renderer.retainedIndices);
+    decltype(g_renderer.retainedWorldIndices){}.swap(
+        g_renderer.retainedWorldIndices);
+    decltype(g_renderer.retainedWorldBatches){}.swap(
+        g_renderer.retainedWorldBatches);
+    decltype(g_renderer.retainedWorldImages){}.swap(
+        g_renderer.retainedWorldImages);
+    decltype(g_renderer.retainedPrimaryLights){}.swap(
+        g_renderer.retainedPrimaryLights);
+    decltype(g_renderer.retainedStaticModelVertices){}.swap(
+        g_renderer.retainedStaticModelVertices);
+    decltype(g_renderer.retainedStaticModelIndices){}.swap(
+        g_renderer.retainedStaticModelIndices);
+    decltype(g_renderer.retainedStaticModelInstances){}.swap(
+        g_renderer.retainedStaticModelInstances);
+    decltype(g_renderer.retainedStaticModelBatches){}.swap(
+        g_renderer.retainedStaticModelBatches);
+    decltype(g_renderer.retainedStaticModelImages){}.swap(
+        g_renderer.retainedStaticModelImages);
+    decltype(g_renderer.retainedDynamicModelVertices){}.swap(
+        g_renderer.retainedDynamicModelVertices);
+    decltype(g_renderer.retainedDynamicModelIndices){}.swap(
+        g_renderer.retainedDynamicModelIndices);
+    decltype(g_renderer.retainedDynamicModelBatches){}.swap(
+        g_renderer.retainedDynamicModelBatches);
+    decltype(g_renderer.retainedDynamicModelImages){}.swap(
+        g_renderer.retainedDynamicModelImages);
+    decltype(g_renderer.retainedUiVertices){}.swap(
+        g_renderer.retainedUiVertices);
+    decltype(g_renderer.retainedUiIndices){}.swap(
+        g_renderer.retainedUiIndices);
+    decltype(g_renderer.retainedUiBatches){}.swap(
+        g_renderer.retainedUiBatches);
+    decltype(g_renderer.retainedUiImages){}.swap(
+        g_renderer.retainedUiImages);
     g_renderer.retainedSunPrimaryLightIndex = 0u;
     g_renderer.retainedSky = {};
+    g_renderer.retainedStaticModelLighting = {};
+    g_renderer.retainedDynamicModelLighting = {};
+    g_renderer.staticModelCount = 0u;
+    g_renderer.staticModelSurfaceCount = 0u;
+    g_renderer.staticModelSceneActive = false;
+    g_renderer.dynamicModelSceneActive = false;
+    g_renderer.dynamicModelFirstSubmissionReported = false;
+    std::fill_n(g_renderer.dynamicFxSourceReported, 4u, false);
+    g_renderer.uiSceneActive = false;
     g_renderer.surfaceActive = false;
     g_renderer.worldSurfaceActive = false;
     g_renderer.sceneViewActive = false;
@@ -5283,7 +5410,32 @@ void __cdecl R_UnloadWorld()
     g_renderer.sceneColorTintBase = {};
     g_renderer.sceneColorTintDelta = {};
     g_renderer.sceneDisplayGammaExponent = 1.0f;
+    g_renderer.sceneBlurRadius = 0.0f;
     g_renderer.sceneFilmEnabled = false;
+    g_renderer.sceneSunShadowEnabled = false;
+    std::fill_n(g_renderer.sunVisibilityQueries, 2u, 0u);
+    std::fill_n(g_renderer.sunVisibilityQueryIssued, 2u, false);
+    g_renderer.sunVisibilityQueryIndex = 0u;
+    g_renderer.sunVisibility = 0.0f;
+    g_renderer.sunFlareIntensity = 0.0f;
+    g_renderer.sunBlindIntensity = 0.0f;
+    g_renderer.sunBlindDarken = 0.0f;
+    g_renderer.sunGlareIntensity = 0.0f;
+    g_renderer.sunGlareLighten = 0.0f;
+    g_renderer.sunEffectLastMilliseconds = 0.0;
+    g_renderer.sunFlareFadeInMilliseconds = 0.0f;
+    g_renderer.sunFlareFadeOutMilliseconds = 0.0f;
+    g_renderer.sunBlindLerp = 0.0f;
+    g_renderer.sunBlindMaxDarken = 0.0f;
+    g_renderer.sunBlindFadeInMilliseconds = 0.0f;
+    g_renderer.sunBlindFadeOutMilliseconds = 0.0f;
+    g_renderer.sunGlareLerp = 0.0f;
+    g_renderer.sunGlareMaxLighten = 0.0f;
+    g_renderer.sunGlareFadeInMilliseconds = 0.0f;
+    g_renderer.sunGlareFadeOutMilliseconds = 0.0f;
+    Web_Log(WebLogLevel::Info,
+        "[kisakcod-web] Renderer released world-owned retained commands "
+        "before canonical zone retirement.\n");
 }
 
 WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
@@ -6721,6 +6873,96 @@ void BindStaticModelInstanceRange(std::uint32_t instanceOffset)
             modelLightingCoordinates)));
 }
 
+float UpdateSunEffectOverTime(float current, float goal,
+    float fadeInMilliseconds, float fadeOutMilliseconds,
+    float frameMilliseconds) noexcept
+{
+    if (goal > current)
+    {
+        if (fadeInMilliseconds <= 0.0f) return goal;
+        return std::min(goal,
+            current + frameMilliseconds / fadeInMilliseconds);
+    }
+    if (goal < current)
+    {
+        if (fadeOutMilliseconds <= 0.0f) return goal;
+        return std::max(goal,
+            current - frameMilliseconds / fadeOutMilliseconds);
+    }
+    return current;
+}
+
+void UpdateSunPostEffectState() noexcept
+{
+    const WebRendererRetainedWorldBatch *flare = nullptr;
+    for (const WebRendererRetainedWorldBatch &batch :
+         g_renderer.retainedDynamicModelBatches)
+    {
+        if (batch.sourceKind == WebRendererSceneBatchKind::SunFlare)
+        {
+            flare = &batch;
+            break;
+        }
+    }
+    if (flare)
+    {
+        g_renderer.sunFlareFadeInMilliseconds = std::max(
+            0.0f, flare->falloffBeginColor[0]);
+        g_renderer.sunFlareFadeOutMilliseconds = std::max(
+            0.0f, flare->falloffBeginColor[1]);
+        g_renderer.sunBlindLerp = std::clamp(
+            flare->envMapParms[0], 0.0f, 1.0f);
+        g_renderer.sunBlindMaxDarken = std::max(
+            0.0f, flare->envMapParms[1]);
+        g_renderer.sunBlindFadeInMilliseconds = std::max(
+            0.0f, flare->envMapParms[2]);
+        g_renderer.sunBlindFadeOutMilliseconds = std::max(
+            0.0f, flare->envMapParms[3]);
+        g_renderer.sunGlareLerp = std::clamp(
+            flare->waterColor[0], 0.0f, 1.0f);
+        g_renderer.sunGlareMaxLighten = std::max(
+            0.0f, flare->waterColor[1]);
+        g_renderer.sunGlareFadeInMilliseconds = std::max(
+            0.0f, flare->waterColor[2]);
+        g_renderer.sunGlareFadeOutMilliseconds = std::max(
+            0.0f, flare->waterColor[3]);
+    }
+    const double now = static_cast<double>(
+        g_renderer.sceneViewTimeSeconds) * 1000.0;
+    float frameMilliseconds = 10.0f;
+    if (g_renderer.sunEffectLastMilliseconds > 0.0 &&
+        now >= g_renderer.sunEffectLastMilliseconds)
+    {
+        frameMilliseconds = static_cast<float>(
+            now - g_renderer.sunEffectLastMilliseconds);
+    }
+    g_renderer.sunEffectLastMilliseconds = now;
+    const float visibilityGoal = flare
+        ? std::clamp(g_renderer.sunVisibility, 0.0f, 1.0f) : 0.0f;
+    g_renderer.sunFlareIntensity = UpdateSunEffectOverTime(
+        g_renderer.sunFlareIntensity,
+        visibilityGoal,
+        g_renderer.sunFlareFadeInMilliseconds,
+        g_renderer.sunFlareFadeOutMilliseconds,
+        frameMilliseconds);
+    g_renderer.sunBlindIntensity = UpdateSunEffectOverTime(
+        g_renderer.sunBlindIntensity,
+        visibilityGoal * g_renderer.sunBlindLerp,
+        g_renderer.sunBlindFadeInMilliseconds,
+        g_renderer.sunBlindFadeOutMilliseconds,
+        frameMilliseconds);
+    g_renderer.sunBlindDarken = g_renderer.sunBlindIntensity *
+        g_renderer.sunBlindMaxDarken;
+    g_renderer.sunGlareIntensity = UpdateSunEffectOverTime(
+        g_renderer.sunGlareIntensity,
+        visibilityGoal * g_renderer.sunGlareLerp,
+        g_renderer.sunGlareFadeInMilliseconds,
+        g_renderer.sunGlareFadeOutMilliseconds,
+        frameMilliseconds);
+    g_renderer.sunGlareLighten = g_renderer.sunGlareIntensity *
+        g_renderer.sunGlareMaxLighten;
+}
+
 void DrawPostProcessPass(
     GLuint sourceTexture,
     GLuint destinationFramebuffer,
@@ -6728,7 +6970,9 @@ void DrawPostProcessPass(
     int height,
     bool filmEnabled,
     float gammaExponent,
-    float blurRadius)
+    float blurRadius,
+    float blindDarken,
+    float glareLighten)
 {
     glBindFramebuffer(GL_FRAMEBUFFER, destinationFramebuffer);
     glViewport(0, 0, width, height);
@@ -6754,6 +6998,8 @@ void DrawPostProcessPass(
     glUniform2f(g_renderer.postProcessBlurScaleUniform,
         width > 0 ? scaledBlurRadius / static_cast<float>(width) : 0.0f,
         height > 0 ? scaledBlurRadius / static_cast<float>(height) : 0.0f);
+    glUniform1f(g_renderer.postProcessBlindDarkenUniform, blindDarken);
+    glUniform1f(g_renderer.postProcessGlareLightenUniform, glareLighten);
     glActiveTexture(GL_TEXTURE5);
     glBindTexture(GL_TEXTURE_2D, sourceTexture);
     glBindVertexArray(g_renderer.vertexArray);
@@ -6925,7 +7171,6 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1i(g_renderer.reflectionProbeUniform, 8);
         glUniform1i(g_renderer.primaryLightmapUniform, 9);
         glUniform1i(g_renderer.primaryLightAttenuationUniform, 10);
-        glUniform1i(g_renderer.sceneDepthUniform, 12);
         glUniformMatrix4fv(g_renderer.shadowMatrixUniform, 1, GL_FALSE,
             g_renderer.sceneSunShadowMatrix.data());
         glUniformMatrix4fv(g_renderer.shadowFarMatrixUniform, 1, GL_FALSE,
@@ -7280,7 +7525,109 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             {
                 if (batch.depthHack != depthHackPass) continue;
                 if (batch.sourceKind == WebRendererSceneBatchKind::SunFlare)
+                {
+                    if (depthHackPass) continue;
+                    if (g_renderer.sunVisibilityQueries[0] == 0u &&
+                        g_renderer.sunVisibilityQueries[1] == 0u)
+                    {
+                        glGenQueries(2, g_renderer.sunVisibilityQueries);
+                    }
+                    if (g_renderer.sunVisibilityQueries[0] == 0u &&
+                        g_renderer.sunVisibilityQueries[1] == 0u)
+                    {
+                        // Match RB_UpdateSunVisibilityWithoutQuery when a
+                        // backend cannot supply asynchronous query objects.
+                        g_renderer.sunVisibility =
+                            batch.falloffParms[3] > 0.5f ? 1.0f : 0.0f;
+                        continue;
+                    }
+                    const std::uint32_t queryIndex =
+                        g_renderer.sunVisibilityQueryIndex++ & 1u;
+                    const GLuint query =
+                        g_renderer.sunVisibilityQueries[queryIndex];
+                    bool canIssue = query != 0u;
+                    if (canIssue &&
+                        g_renderer.sunVisibilityQueryIssued[queryIndex])
+                    {
+                        GLuint available = GL_FALSE;
+                        glGetQueryObjectuiv(query,
+                            GL_QUERY_RESULT_AVAILABLE, &available);
+                        if (available == GL_TRUE)
+                        {
+                            GLuint passed = GL_FALSE;
+                            glGetQueryObjectuiv(query,
+                                GL_QUERY_RESULT, &passed);
+                            const int queryVisibility =
+                                passed != GL_FALSE ? 1 : 0;
+                            const int collisionVisibility =
+                                batch.falloffParms[3] > 0.5f ? 1 : 0;
+                            g_renderer.sunVisibility =
+                                queryVisibility ? 1.0f : 0.0f;
+                            static int reportedSunVisibility = -1;
+                            const int visibility =
+                                g_renderer.sunVisibility > 0.5f ? 1 : 0;
+                            if (reportedSunVisibility != visibility)
+                            {
+                                reportedSunVisibility = visibility;
+                                Web_Log(WebLogLevel::Info,
+                                    "[kisakcod-web] Canonical asynchronous "
+                                    "sun visibility: visible=%d "
+                                    "query=%d collision=%d.\n",
+                                    visibility, queryVisibility,
+                                    collisionVisibility);
+                            }
+                            g_renderer.sunVisibilityQueryIssued[queryIndex] =
+                                false;
+                        }
+                        else
+                            canIssue = false;
+                    }
+                    if (canIssue)
+                    {
+                        glUniformMatrix4fv(g_renderer.viewProjectionUniform,
+                            1, GL_FALSE, IDENTITY_MATRIX);
+                        glUniform1f(g_renderer.aspectUniform, 1.0f);
+                        glUniform1f(g_renderer.sceneFallbackUniform, 0.0f);
+                        glUniform1f(g_renderer.textureEnabledUniform, 0.0f);
+                        glUniform1f(g_renderer.fogEnabledUniform, 0.0f);
+                        glUniform1i(g_renderer.materialModeUniform, 0);
+                        glUniform1i(g_renderer.alphaTestUniform, 0);
+                        glEnable(GL_DEPTH_TEST);
+                        glDepthFunc(GL_LEQUAL);
+                        glDepthMask(GL_FALSE);
+                        glDisable(GL_CULL_FACE);
+                        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+                        const int centerX = static_cast<int>(
+                            batch.falloffParms[0] *
+                            static_cast<float>(width));
+                        const int centerY = static_cast<int>(
+                            batch.falloffParms[1] *
+                            static_cast<float>(height));
+                        const int queryX = std::clamp(centerX - 8,
+                            0, std::max(0, width - 16));
+                        const int queryY = std::clamp(centerY - 8,
+                            0, std::max(0, height - 16));
+                        glEnable(GL_SCISSOR_TEST);
+                        glScissor(queryX, queryY,
+                            std::min(16, width), std::min(16, height));
+                        glBeginQuery(
+                            GL_ANY_SAMPLES_PASSED_CONSERVATIVE, query);
+                        const std::uintptr_t queryOffset =
+                            static_cast<std::uintptr_t>(batch.firstIndex) *
+                            sizeof(std::uint32_t);
+                        glDrawElements(GL_TRIANGLES,
+                            static_cast<GLsizei>(batch.indexCount),
+                            GL_UNSIGNED_INT,
+                            reinterpret_cast<const void *>(queryOffset));
+                        glEndQuery(GL_ANY_SAMPLES_PASSED_CONSERVATIVE);
+                        g_renderer.sunVisibilityQueryIssued[queryIndex] = true;
+                        glDisable(GL_SCISSOR_TEST);
+                        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+                        glDepthMask(GL_TRUE);
+                        ++completedDraws;
+                    }
                     continue;
+                }
                 const bool sunSprite = batch.sourceKind ==
                     WebRendererSceneBatchKind::SunSprite;
                 glUniformMatrix4fv(g_renderer.viewProjectionUniform, 1,
@@ -7451,6 +7798,8 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         glActiveTexture(GL_TEXTURE0);
     }
+    if (sceneGeometryDraw && !compatibilityDraw)
+        UpdateSunPostEffectState();
     if (postProcessDraw)
     {
         // COD4 resolves and color-manipulates the 3D scene before any 2D
@@ -7463,7 +7812,9 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             height,
             g_renderer.sceneFilmEnabled,
             1.0f,
-            g_renderer.sceneBlurRadius);
+            g_renderer.sceneBlurRadius,
+            g_renderer.sunBlindDarken,
+            g_renderer.sunGlareLighten);
     }
     if (postProcessDraw && sceneGeometryDraw && !compatibilityDraw &&
         g_renderer.dynamicModelSceneActive &&
@@ -7483,11 +7834,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1f(g_renderer.sunShadowEnabledUniform, 0.0f);
         glUniform1f(g_renderer.primaryLightEnabledUniform, 0.0f);
         glUniform1f(g_renderer.instanceEnabledUniform, 0.0f);
-        glUniform1i(g_renderer.sceneDepthUniform, 12);
         glUniform4f(g_renderer.uiColorUniform, 1.0f, 1.0f, 1.0f, 1.0f);
-        glActiveTexture(GL_TEXTURE12);
-        glBindTexture(GL_TEXTURE_2D, g_renderer.sceneDepthTexture);
-        glActiveTexture(GL_TEXTURE0);
         glBindVertexArray(g_renderer.dynamicModelVertexArray);
         static bool sunFlareDrawReported = false;
         for (const WebRendererRetainedWorldBatch &batch :
@@ -7501,6 +7848,11 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 batch.baseImageIndex);
             glUniform1f(g_renderer.textureEnabledUniform,
                 base ? 1.0f : 0.0f);
+            glUniform4f(g_renderer.uiColorUniform,
+                g_renderer.sunFlareIntensity,
+                g_renderer.sunFlareIntensity,
+                g_renderer.sunFlareIntensity,
+                1.0f);
             glDisable(GL_DEPTH_TEST);
             glDepthMask(GL_FALSE);
             BindWorldTexture(GL_TEXTURE0,
@@ -7514,22 +7866,25 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 GL_UNSIGNED_INT,
                 reinterpret_cast<const void *>(indexOffset));
             glDepthMask(GL_TRUE);
-            if (!sunFlareDrawReported)
+            if (!sunFlareDrawReported &&
+                g_renderer.sunFlareIntensity > 0.0f)
             {
                 sunFlareDrawReported = true;
                 Web_Log(WebLogLevel::Info,
                     "[kisakcod-web] Canonical sun flare draw: "
                     "material='%s' center=(%.5f %.5f) queryDepth=%.6f "
+                    "intensity=%.5f blind=%.5f glare=%.5f "
                     "state=0x%08x/0x%08x.\n",
                     batch.materialName.c_str(),
                     batch.falloffParms[0], batch.falloffParms[1],
                     batch.falloffParms[2],
+                    g_renderer.sunFlareIntensity,
+                    g_renderer.sunBlindDarken,
+                    g_renderer.sunGlareLighten,
                     batch.stateBits[0], batch.stateBits[1]);
             }
             ++completedDraws;
         }
-        glActiveTexture(GL_TEXTURE12);
-        glBindTexture(GL_TEXTURE_2D, 0u);
         glActiveTexture(GL_TEXTURE0);
     }
     if (sceneGeometryDraw && !compatibilityDraw &&
@@ -7585,6 +7940,8 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             height,
             false,
             g_renderer.sceneDisplayGammaExponent,
+            0.0f,
+            0.0f,
             0.0f);
     }
     GLenum sceneDrawError = GL_NO_ERROR;

@@ -767,6 +767,7 @@ bool AppendSunSprite(WebRendererDObjSceneCommand &command,
             Web_Log(WebLogLevel::Info,
                 "[kisakcod-web] Canonical sun post-effects: flare='%s' "
                 "size=(%.3f %.3f) dot=(%.5f %.5f) alpha=%.5f "
+                "viewDot=%.5f "
                 "fade=(%d %d); blind=(%.5f %.5f %.5f %d %d) "
                 "glare=(%.5f %.5f %.5f %d %d).\n",
                 flareMaterial && flareMaterial->info.name
@@ -774,6 +775,7 @@ bool AppendSunSprite(WebRendererDObjSceneCommand &command,
                 s_world.sun.flareMinSize, s_world.sun.flareMaxSize,
                 s_world.sun.flareMinDot, s_world.sun.flareMaxDot,
                 s_world.sun.flareMaxAlpha,
+                Vec3Dot(sun, view.viewAxis[0]),
                 s_world.sun.flareFadeInTime,
                 s_world.sun.flareFadeOutTime,
                 s_world.sun.blindMinDot, s_world.sun.blindMaxDot,
@@ -924,6 +926,57 @@ bool AppendSunFlare(WebRendererDObjSceneCommand &command,
         batch.falloffParms[1] = centerV;
         batch.falloffParms[2] =
             (centerZ - 0.0010000000474974513f) * 0.5f + 0.5f;
+        float sunTraceEnd[3]{};
+        Vec3Mad(view.viewOrigin, 262144.0f,
+            s_world.sun.sunFxPosition, sunTraceEnd);
+        batch.falloffParms[3] = CM_BoxSightTrace(
+            0, view.viewOrigin, sunTraceEnd,
+            vec3_origin, vec3_origin, 0u, 8195) == 0
+            ? 1.0f : 0.0f;
+        batch.falloffBeginColor[0] = static_cast<float>(
+            s_world.sun.flareFadeInTime);
+        batch.falloffBeginColor[1] = static_cast<float>(
+            s_world.sun.flareFadeOutTime);
+        float blindLerp = 0.0f;
+        if (s_world.sun.blindMaxDarken > 0.0f &&
+            sunDot > s_world.sun.blindMinDot)
+        {
+            blindLerp = 1.0f;
+            if (sunDot < s_world.sun.blindMaxDot &&
+                s_world.sun.blindMaxDot > s_world.sun.blindMinDot)
+            {
+                blindLerp = (sunDot - s_world.sun.blindMinDot) /
+                    (s_world.sun.blindMaxDot - s_world.sun.blindMinDot);
+            }
+            blindLerp = std::clamp(blindLerp, 0.0f, 1.0f);
+        }
+        batch.envMapParms[0] = blindLerp;
+        batch.envMapParms[1] = std::max(0.0f,
+            s_world.sun.blindMaxDarken);
+        batch.envMapParms[2] = static_cast<float>(
+            s_world.sun.blindFadeInTime);
+        batch.envMapParms[3] = static_cast<float>(
+            s_world.sun.blindFadeOutTime);
+        float glareLerp = 0.0f;
+        if (s_world.sun.glareMaxLighten > 0.0f &&
+            sunDot > s_world.sun.glareMinDot)
+        {
+            glareLerp = 1.0f;
+            if (sunDot < s_world.sun.glareMaxDot &&
+                s_world.sun.glareMaxDot > s_world.sun.glareMinDot)
+            {
+                glareLerp = (sunDot - s_world.sun.glareMinDot) /
+                    (s_world.sun.glareMaxDot - s_world.sun.glareMinDot);
+            }
+            glareLerp = std::clamp(glareLerp, 0.0f, 1.0f);
+        }
+        batch.waterColor[0] = glareLerp;
+        batch.waterColor[1] = std::max(0.0f,
+            s_world.sun.glareMaxLighten);
+        batch.waterColor[2] = static_cast<float>(
+            s_world.sun.glareFadeInTime);
+        batch.waterColor[3] = static_cast<float>(
+            s_world.sun.glareFadeOutTime);
         command.batches.push_back(batch);
         ++command.surfaceCount;
         return true;
@@ -1261,6 +1314,8 @@ void __cdecl R_LoadWorld(char *name, int *checksum, int)
     g_worldSceneSubmitted = false;
     g_staticModelSceneSubmitted = false;
     g_dynamicModelSceneReported = false;
+    g_dynamicBrushSceneReported = false;
+    g_dynamicEntityModelSceneReported = false;
     g_uiSceneReported = false;
     g_worldSceneSurfaceCount = 0u;
     g_worldSceneVertexCount = 0u;
@@ -2028,6 +2083,17 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             s_world.surfaceCount,
             s_world.modelCount > 0 ? s_world.models[0].surfaceCount : 0u,
             s_world.skySurfCount);
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Canonical world sun: valid=%u "
+            "fxDirection=(%.6f %.6f %.6f) sprite='%s' flare='%s'.\n",
+            s_world.sun.hasValidData ? 1u : 0u,
+            s_world.sun.sunFxPosition[0],
+            s_world.sun.sunFxPosition[1],
+            s_world.sun.sunFxPosition[2],
+            s_world.sun.spriteMaterial && s_world.sun.spriteMaterial->info.name
+                ? s_world.sun.spriteMaterial->info.name : "<none>",
+            s_world.sun.flareMaterial && s_world.sun.flareMaterial->info.name
+                ? s_world.sun.flareMaterial->info.name : "<none>");
         Web_Log(WebLogLevel::Info,
             "[kisakcod-web] Canonical world draw ranges: lit=[%u,%u), "
             "decal=[%u,%u), emissive=[%u,%u), model-no-decal=%u.\n",
