@@ -568,7 +568,7 @@ void CollectStaticModelCollisions(MarkInfo &info) noexcept
          index < s_world.dpvs.smodelCount &&
          info.smodelCollidedCount < 32; ++index)
     {
-        if (index > std::numeric_limits<std::uint16_t>::max()) break;
+        if (index > (std::numeric_limits<std::uint16_t>::max)()) break;
         const GfxStaticModelInst &instance =
             s_world.dpvs.smodelInsts[index];
         if (!BoundsOverlapRanges(instance.mins, instance.maxs,
