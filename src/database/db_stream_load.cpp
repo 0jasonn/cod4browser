@@ -3,6 +3,7 @@
 #define KISAK_WEB 1
 #endif
 #include "database.h"
+#include <database/db_registry_publication.h>
 #include <script/scr_stringlist.h>
 #if defined(KISAK_WEB)
 #include <database/db_runtime_prefix.h>
@@ -119,7 +120,11 @@ void __cdecl Load_TempStringCustom(char **str)
 
     Load_XStringCustom(str);
     if (*str)
-        string = (const char*)SL_GetString(*str, 4u); // KISAKTODO: this seems way wrong but it's what the decomp is showing
+    {
+        const std::uint32_t stringValue = SL_GetString(*str, 4u);
+        DB_RegisterStringZoneOwnership(stringValue, g_zoneIndex);
+        string = reinterpret_cast<const char *>(stringValue);
+    }
     else
         string= 0;
     *str = (char *)string;

@@ -58,6 +58,7 @@ std::uint32_t g_lowPosition = 0;
 std::uint32_t g_highPosition = static_cast<std::uint32_t>(g_arena.size());
 std::string g_scriptString;
 std::uint32_t g_databaseStringShutdownCount = 0;
+std::uint32_t g_databaseStringRemoveUserCount = 0;
 
 void AppendU32(std::vector<std::uint8_t> &bytes, std::uint32_t value)
 {
@@ -2276,7 +2277,17 @@ const char *SL_ConvertToString(std::uint32_t value)
 {
     return value == 1 ? g_scriptString.c_str() : "";
 }
+std::uint32_t SL_ConvertFromString(const char *value)
+{
+    return value && value == g_scriptString.c_str() ? 1u : 0u;
+}
 void SL_AddUser(std::uint32_t, std::uint32_t) {}
+void SL_RemoveUser(std::uint32_t stringValue, std::uint32_t user)
+{
+    assert(stringValue);
+    assert(user == 4u);
+    ++g_databaseStringRemoveUserCount;
+}
 void SL_ShutdownSystem(std::uint32_t user)
 {
     assert(user == 4u);
@@ -2318,6 +2329,14 @@ const PhysicalMemory *PMem_GetState()
 
 int main()
 {
+    DB_RegisterStringZoneOwnership(100u, 1u);
+    DB_RegisterStringZoneOwnership(100u, 2u);
+    DB_RegisterStringZoneOwnership(101u, 1u);
+    DB_ReleaseStringZoneOwnership(std::uint64_t{1} << 1u);
+    assert(g_databaseStringRemoveUserCount == 1u);
+    DB_ReleaseStringZoneOwnership(std::uint64_t{1} << 2u);
+    assert(g_databaseStringRemoveUserCount == 2u);
+
     XZoneMemory zone{};
     const std::array<std::uint32_t, 9> prefixBlocks{
         4096, 0, 0, 0, 4096, 0, 0, 0, 0};

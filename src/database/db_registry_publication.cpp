@@ -262,11 +262,19 @@ void CloneAssetEntry(const XAssetEntryPoolEntry &from,
     to.entry.zoneIndex = from.entry.zoneIndex;
 }
 
-void SetAssetName(XAsset &asset, const char *name)
+const char *InternZoneString(const char *name, std::uint32_t zoneIndex)
+{
+    if (!name) return nullptr;
+    const std::uint32_t stringValue = SL_GetString(name, 4u);
+    DB_RegisterStringZoneOwnership(stringValue, zoneIndex);
+    return SL_ConvertToString(stringValue);
+}
+
+void SetAssetName(
+    XAsset &asset, const char *name, std::uint32_t ownerZoneIndex)
 {
     if (!name) return;
-    DB_SetXAssetName(&asset,
-        SL_ConvertToString(SL_GetString(name, 4)));
+    DB_SetXAssetName(&asset, InternZoneString(name, ownerZoneIndex));
 }
 
 XAssetEntryPoolEntry *FindAssetByHeader(XAssetType type, XAssetHeader header)
@@ -383,7 +391,7 @@ bool ReleasesEveryLoadedZone(
     return foundLoadedZone;
 }
 
-void RemoveUnusedDefaultEntriesAfterFullRetirement()
+void RemoveUnusedDefaultEntries()
 {
     for (std::uint32_t hash = 0; hash < 0x8000u; ++hash)
     {
@@ -399,11 +407,17 @@ void RemoveUnusedDefaultEntriesAfterFullRetirement()
             }
 
             iassert(!entry.entry.nextOverride);
+            const char *name = AssetName(entry.entry.asset);
+            const std::uint32_t stringValue = name
+                ? SL_ConvertFromString(name)
+                : 0u;
             *link = entry.entry.nextHash;
             entry.entry.nextHash = 0;
             ReturnAssetEntry(index);
             iassert(g_defaultAssetCount > 0);
             --g_defaultAssetCount;
+            if (stringValue)
+                DB_UnregisterDefaultStringOwnership(stringValue);
         }
     }
 }
@@ -507,7 +521,7 @@ XAssetEntryPoolEntry *CreateDefaultEntry(XAssetType type, const char *name)
         entry->entry.asset.header.sound->count = 0;
         entry->entry.asset.header.sound->head = nullptr;
     }
-    SetAssetName(entry->entry.asset, name);
+    SetAssetName(entry->entry.asset, name, 0u);
     const std::uint32_t hash = DB_HashForNameCanonical(name, type);
     entry->entry.nextHash = db_hashTable[hash];
     db_hashTable[hash] = static_cast<std::uint16_t>(entry - g_assetEntryPool);
@@ -676,6 +690,9 @@ XAssetEntryPoolEntry *DB_LinkXAssetEntry(
     if (existing->entry.zoneIndex == 0)
     {
         const char *existingName = AssetName(existing->entry.asset);
+        const std::uint32_t defaultStringValue = existingName
+            ? SL_ConvertFromString(existingName)
+            : 0u;
         iassert(existing->entry.nextOverride == 0);
         if (existing->entry.inuse)
             MarkDependencies(existing->entry.asset.type,
@@ -683,7 +700,10 @@ XAssetEntryPoolEntry *DB_LinkXAssetEntry(
         CloneAssetEntry(*entry, *existing);
         existing->entry.nextOverride = 0;
         if (existingName)
-            SetAssetName(existing->entry.asset, existingName);
+            SetAssetName(existing->entry.asset, existingName,
+                existing->entry.zoneIndex);
+        if (defaultStringValue)
+            DB_UnregisterDefaultStringOwnership(defaultStringValue);
         if (g_defaultAssetCount > 0) --g_defaultAssetCount;
         ReturnAssetEntry(static_cast<std::uint32_t>(entry - g_assetEntryPool));
         return existing;
@@ -821,7 +841,8 @@ void DB_UnloadXZonesForFreeFlags(int freeFlags)
                     CloneAssetEntry(replacement, entry);
                     entry.entry.nextOverride = replacement.entry.nextOverride;
                     if (name)
-                        SetAssetName(entry.entry.asset, name);
+                        SetAssetName(entry.entry.asset, name,
+                            entry.entry.zoneIndex);
                     ReturnAssetEntry(promoted);
                     previous = index;
                     index = nextHash;
@@ -840,7 +861,7 @@ void DB_UnloadXZonesForFreeFlags(int freeFlags)
                     CloneAssetEntry(*defaultEntry, entry);
                     entry.entry.zoneIndex = 0;
                     entry.entry.nextOverride = 0;
-                    if (name) SetAssetName(entry.entry.asset, name);
+                    if (name) SetAssetName(entry.entry.asset, name, 0u);
                     // FindDefaultEntry may have selected a retiring
                     // override. Clone it before reclaiming the old chain,
                     // then release every old override now detached from the
@@ -888,17 +909,25 @@ void DB_UnloadXZonesForFreeFlags(int freeFlags)
             index = nextHash;
         }
     }
-    if (releasesEveryLoadedZone)
-        RemoveUnusedDefaultEntriesAfterFullRetirement();
+    RemoveUnusedDefaultEntries();
     Sys_UnlockWrite(&db_hashCritSect);
+
+    std::uint64_t releaseZoneMask = 0u;
+    for (std::uint32_t zoneIndex = 1; zoneIndex < releaseZone.size();
+         ++zoneIndex)
+    {
+        if (releaseZone[zoneIndex])
+            releaseZoneMask |= std::uint64_t{1} << zoneIndex;
+    }
+    DB_ReleaseStringZoneOwnership(releaseZoneMask);
 
     // Native DB_FreeUnusedResources transfers DB-owned strings to a temporary
     // user, re-marks every surviving zone, and then releases the temporary
-    // user. This browser slice has no surviving zone when the complete loaded
-    // set is retired, so there is nothing to re-mark: release user 4 directly
-    // after its zone/default entries have been unlinked. Without this boundary
-    // each map permanently consumed script-string hash slots; a later map
-    // could fill the fixed native 20,000-entry table while parsing level GSC.
+    // user. The browser stream records equivalent zone ownership when those
+    // strings are interned, so the partial release above preserves startup and
+    // common-zone owners without a second XAsset traversal. If no zone
+    // survives, finish with the canonical whole-user shutdown as a safety net
+    // for any legacy user-4 string that predates ownership registration.
     if (releasesEveryLoadedZone)
         SL_ShutdownSystem(4u);
 
@@ -1226,7 +1255,7 @@ void __cdecl Load_SndCurveAsset(XAssetHeader *sndCurve)
             return;
         }
     }
-    const char *stableName = SL_ConvertToString(SL_GetString(requestedName, 4));
+    const char *stableName = InternZoneString(requestedName, g_zoneIndex);
 
     // Generated fastfile data can carry an empty/zero-knot curve body while
     // still providing a valid requested filename.  Resolve that malformed

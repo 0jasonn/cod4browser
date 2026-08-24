@@ -194,6 +194,24 @@ void SL_ShutdownSystem(uint32_t user)
 	Sys_LeaveCriticalSection(CRITSECT_SCRIPT_STRING);
 }
 
+void SL_RemoveUser(uint32_t stringValue, uint32_t user)
+{
+	iassert(stringValue);
+	iassert(user);
+
+	Sys_EnterCriticalSection(CRITSECT_SCRIPT_STRING);
+	RefString *refStr = GetRefString(stringValue);
+	if ((refStr->user & static_cast<uint8_t>(user)) != 0)
+	{
+		refStr->data =
+			(static_cast<uint8_t>(~static_cast<uint8_t>(user) & refStr->user) << 16) |
+			(refStr->data & 0xFF00FFFF);
+		scrStringGlob.nextFreeEntry = nullptr;
+		SL_RemoveRefToString(stringValue);
+	}
+	Sys_LeaveCriticalSection(CRITSECT_SCRIPT_STRING);
+}
+
 int SL_IsLowercaseString(uint32_t stringValue)
 {
 	iassert(stringValue);

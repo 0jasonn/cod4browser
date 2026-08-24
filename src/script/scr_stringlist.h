@@ -81,6 +81,7 @@ void SL_InitCheckLeaks();
 
 void SL_Shutdown();
 void SL_ShutdownSystem(uint32_t user);
+void SL_RemoveUser(uint32_t stringValue, uint32_t user);
 
 void SL_TransferSystem(uint32_t from, uint32_t to);
 

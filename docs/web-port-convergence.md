@@ -1341,25 +1341,26 @@ Release Chrome verifies that queued `map killhouse` constructs the correct
 `CS_SERVERINFO` map name, completes `CL_InitCGame -> CG_Init`, reaches the first
 game-driven frame, and renders the canonical world. A subsequent
 `map cargoship` passes fastfile publication, collision, common-world, and
-renderer-world replacement. The later server/client transition remains open
-and is not classified as a renderer-lifecycle fix.
+renderer-world replacement, completes the server/client transition, and
+advances active Cargoship gameplay frames.
 
-## Full-zone database string retirement checkpoint (2026-08-24)
+## Per-zone database string retirement checkpoint (2026-08-24)
 
-The browser database registry now performs the safe no-survivor subset of
-native `DB_FreeUnusedResources` when a request retires every loaded zone. It
-unlinks unused zone-zero default entries, then releases database user-4 script
-strings after no published zone can still reference them. Partial-zone unloads
-remain on the existing dependency-mark path until the browser slice imports
-the complete native XAsset string-mark walk.
+The browser database stream records zone ownership when the canonical
+ScriptStringList interns a database user-4 string. Publication records the same
+ownership for stable asset names it interns, including zone-zero defaults.
+Zone retirement removes only the retiring owners and releases user 4 from a
+string once no surviving zone/default owns it. Unused defaults are collected
+on partial as well as complete unloads. This provides the browser registry's
+equivalent of native `DB_FreeUnusedResources` without releasing strings owned
+by the surviving code/common zones.
 
 This prevents successive maps from permanently consuming slots in IW3's fixed
-20,000-entry script-string table. A native/Wasm registry test proves that
-retiring only one of two zones preserves the table and that retiring the final
-zone performs exactly one database-string shutdown. Release build and runtime
-prefix checks pass, and Chrome verifies that `map killhouse` followed by
-`map cargoship` now passes the former `maps/cargoship_code.gsc` exhaustion,
-publishes `maps/cargoship.d3dbsp`, and reaches canonical weapon setup. It still
-does not reach `CG_Init`; the remaining command-guard/client-init stall is a
-separate open lifecycle issue. The 800 MiB max-graphics texture tier is
+20,000-entry script-string table. A native/Wasm registry test proves that a
+string shared by two zones survives the first retirement and is released with
+the final owner, while a single-zone string is released immediately. Release
+build and runtime-prefix checks pass. Chrome verifies `map killhouse` followed
+by `map cargoship` passes `maps/cargoship_code.gsc`, completes game/cgame
+initialization, renders the Cargoship first-person view, and continues pumping
+thousands of gameplay frames. The 800 MiB max-graphics texture tier is
 unchanged.
