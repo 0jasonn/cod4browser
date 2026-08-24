@@ -3447,15 +3447,14 @@ bool CreateRendererResources()
                 receiver_depth <= 0.0 || receiver_depth >= 1.0)
                 return 1.0;
             const vec2 texel = vec2(1.0 / 512.0);
-            float biased_depth = receiver_depth - 0.002;
             float visibility = 0.0;
-            visibility += biased_depth <= texture(u_spot_shadow_map,
+            visibility += receiver_depth <= texture(u_spot_shadow_map,
                 uv + texel * vec2(-0.5, -0.5)).r ? 1.0 : 0.0;
-            visibility += biased_depth <= texture(u_spot_shadow_map,
+            visibility += receiver_depth <= texture(u_spot_shadow_map,
                 uv + texel * vec2( 0.5, -0.5)).r ? 1.0 : 0.0;
-            visibility += biased_depth <= texture(u_spot_shadow_map,
+            visibility += receiver_depth <= texture(u_spot_shadow_map,
                 uv + texel * vec2(-0.5,  0.5)).r ? 1.0 : 0.0;
-            visibility += biased_depth <= texture(u_spot_shadow_map,
+            visibility += receiver_depth <= texture(u_spot_shadow_map,
                 uv + texel * vec2( 0.5,  0.5)).r ? 1.0 : 0.0;
             return visibility * 0.25;
         }
@@ -3627,13 +3626,22 @@ bool CreateRendererResources()
                             u_primary_light_position_radius.w, 0.0, 1.0) *
                             u_primary_light_falloff_placement.x +
                             u_primary_light_falloff_placement.y;
-                        float radial_attenuation = texture(
+                        vec3 radial_attenuation = texture(
                             u_secondary_lightmap,
-                            vec2(radial_coordinate, 0.0)).r;
+                            vec2(radial_coordinate, 0.0)).rgb;
                         // The native vertex program forwards the authored
                         // primary-lightmap coordinates unchanged.
                         float primary_visibility = texture(
                             u_primary_lightmap, v_lightmap_coord).r;
+                        // lm_spot_sm replaces the authored primary-lightmap
+                        // visibility with the dynamic shadow comparison once
+                        // its one-second native fade has completed. It does
+                        // not multiply the two masks together; doing so made
+                        // broad, hard-edged dark/light patches on receivers.
+                        float local_visibility = mix(
+                            primary_visibility,
+                            sample_spot_shadow(v_world_position),
+                            clamp(u_spot_shadow_enabled, 0.0, 1.0));
                         vec3 primary_normal = normalize(v_model_normal);
                         if (u_normal_map_enabled > 0.5)
                         {
@@ -3653,8 +3661,7 @@ bool CreateRendererResources()
                             light_direction, primary_normal), 0.0);
                         lighting += u_primary_light_diffuse * diffuse *
                             spot_attenuation * radial_attenuation *
-                            primary_visibility *
-                            sample_spot_shadow(v_world_position);
+                            local_visibility;
                     }
                     if (u_sun_shadow_enabled > 0.5)
                     {

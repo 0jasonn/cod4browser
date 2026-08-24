@@ -145,6 +145,47 @@ std::uint32_t WebRenderer_CalcReflectionProbeIndex(
     return nearestFromList(nullptr, world.reflectionProbeCount - 1u);
 }
 
+bool RebuildWorldSurfaceRuntimeData() noexcept
+{
+    if (!s_world.models) return false;
+    const std::uint32_t surfaceCount = s_world.models[0].surfaceCount;
+    if (surfaceCount == 0u) return true;
+    const std::uint32_t casterWordCount = (surfaceCount + 31u) >> 5u;
+    if (!s_world.dpvs.surfaces || !s_world.dpvs.surfaceMaterials ||
+        !s_world.dpvs.surfaceCastsSunShadow ||
+        surfaceCount > s_world.dpvs.staticSurfaceCount ||
+        casterWordCount > s_world.dpvs.surfaceVisDataCount)
+    {
+        return false;
+    }
+
+    std::fill_n(s_world.dpvs.surfaceCastsSunShadow,
+        s_world.dpvs.surfaceVisDataCount, 0u);
+    std::uint32_t casterCount = 0u;
+    for (std::uint32_t surfaceIndex = 0u;
+         surfaceIndex < surfaceCount; ++surfaceIndex)
+    {
+        const GfxSurface &surface = s_world.dpvs.surfaces[surfaceIndex];
+        if (!surface.material) return false;
+        GfxDrawSurf drawSurf = surface.material->info.drawSurf;
+        if (drawSurf.fields.primaryLightIndex != 0u) return false;
+        drawSurf.fields.primaryLightIndex = surface.primaryLightIndex;
+        s_world.dpvs.surfaceMaterials[surfaceIndex] = drawSurf;
+        if (drawSurf.fields.customIndex != 0u &&
+            (surface.flags & 1u) != 0u)
+        {
+            s_world.dpvs.surfaceCastsSunShadow[surfaceIndex >> 5u] |=
+                1u << (surfaceIndex & 31u);
+            ++casterCount;
+        }
+    }
+    Web_Log(WebLogLevel::Info,
+        "[kisakcod-web] Rebuilt canonical world draw-surface runtime data "
+        "(%u surfaces, %u sun-shadow casters).\n",
+        surfaceCount, casterCount);
+    return true;
+}
+
 EM_JS(
     void,
     DispatchRendererVisionLighting,
@@ -1322,6 +1363,10 @@ void __cdecl R_LoadWorld(char *name, int *checksum, int)
         Com_Error(ERR_DROP,
             "R_LoadWorld: canonical GfxWorld '%s' is not published", name);
     if (checksum) *checksum = static_cast<int>(s_world.checksum);
+    if (!RebuildWorldSurfaceRuntimeData())
+        Com_Error(ERR_DROP,
+            "R_LoadWorld: canonical GfxWorld '%s' has invalid world "
+            "draw-surface runtime storage", name);
     const std::uint32_t shaderModel3TechniqueSets =
         ResolveTechniqueSetRemaps();
     Web_Log(WebLogLevel::Info,
