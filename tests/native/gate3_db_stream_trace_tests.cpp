@@ -57,6 +57,7 @@ alignas(4096) std::array<std::uint8_t, 4 * 1024 * 1024> g_arena{};
 std::uint32_t g_lowPosition = 0;
 std::uint32_t g_highPosition = static_cast<std::uint32_t>(g_arena.size());
 std::string g_scriptString;
+std::uint32_t g_databaseStringShutdownCount = 0;
 
 void AppendU32(std::vector<std::uint8_t> &bytes, std::uint32_t value)
 {
@@ -2276,6 +2277,11 @@ const char *SL_ConvertToString(std::uint32_t value)
     return value == 1 ? g_scriptString.c_str() : "";
 }
 void SL_AddUser(std::uint32_t, std::uint32_t) {}
+void SL_ShutdownSystem(std::uint32_t user)
+{
+    assert(user == 4u);
+    ++g_databaseStringShutdownCount;
+}
 void Load_GetCurrentZoneHandle(std::uint8_t *handle)
 {
     assert(handle);
@@ -5029,7 +5035,10 @@ int main()
     DB_UnloadXZonesForFreeFlags(16);
     assert(!DB_FindXAssetHeader(ASSET_TYPE_CLIPMAP,
         "maps/campaign_next.d3dbsp").data);
+    const std::uint32_t shutdownsBeforeFinalZone =
+        g_databaseStringShutdownCount;
     DB_UnloadXZonesForFreeFlags(8);
+    assert(g_databaseStringShutdownCount == shutdownsBeforeFinalZone + 1u);
 
     std::printf("gate3-db-stream rawfile=published physpreset=published xmodel=published weapon=published xanim=published stringtable=published technique-set=published material=published image=published water=loaded sound-curve=published sound-alias=published loaded-sound=published font=published fx=published impact-fx=published comworld=published gfxworld=published light-def=published menu=published menu-list=published snddriver=canonical-noop localize=published insert=-2 alias=block4:16 technique=block4:36 direct-xstring=block4:18 technique-children=block0:0,block4:251 material-children=block0:0,block4:248 sound-curve-children=block0:0,block4:38 sound-alias-children=block0:0,block4:586 loaded-sound-children=block0:0,block4:44 font-children=block0:0,block4:80 fx-children=block0:0,block4:502 impact-fx-children=block0:0,block4:1640 comworld-children=block0:0,block4:204 gfxworld-children=block0:0,block1:0,block4:248 light-def-children=block0:0,block4:59 menu-children=block0:0,block4:880 localize-children=block0:0,block4:51 image-entry=16 material-entry=17 sound-curve-entry=16 sound-alias-entry=16 loaded-sound-entry=16 font-entry=16 fx-entry=16 impact-fx-entry=17 comworld-entry=16 gfxworld-entry=16 light-def-entry=17 menu-entry=16 menu-list-entry=17 localize-entry=16 free=32752->32750 zone=1 stop=code-post-complete\n");
     return 0;

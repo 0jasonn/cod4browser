@@ -1340,7 +1340,26 @@ continuing into collision with a partially retired map.
 Release Chrome verifies that queued `map killhouse` constructs the correct
 `CS_SERVERINFO` map name, completes `CL_InitCGame -> CG_Init`, reaches the first
 game-driven frame, and renders the canonical world. A subsequent
-`map cargoship` now passes fastfile publication, collision, common-world, and
-renderer-world replacement, but currently stops during `G_InitGame` script
-initialization. That campaign script-VM transition remains open and is not
-classified as a renderer-lifecycle fix.
+`map cargoship` passes fastfile publication, collision, common-world, and
+renderer-world replacement. The later server/client transition remains open
+and is not classified as a renderer-lifecycle fix.
+
+## Full-zone database string retirement checkpoint (2026-08-24)
+
+The browser database registry now performs the safe no-survivor subset of
+native `DB_FreeUnusedResources` when a request retires every loaded zone. It
+unlinks unused zone-zero default entries, then releases database user-4 script
+strings after no published zone can still reference them. Partial-zone unloads
+remain on the existing dependency-mark path until the browser slice imports
+the complete native XAsset string-mark walk.
+
+This prevents successive maps from permanently consuming slots in IW3's fixed
+20,000-entry script-string table. A native/Wasm registry test proves that
+retiring only one of two zones preserves the table and that retiring the final
+zone performs exactly one database-string shutdown. Release build and runtime
+prefix checks pass, and Chrome verifies that `map killhouse` followed by
+`map cargoship` now passes the former `maps/cargoship_code.gsc` exhaustion,
+publishes `maps/cargoship.d3dbsp`, and reaches canonical weapon setup. It still
+does not reach `CG_Init`; the remaining command-guard/client-init stall is a
+separate open lifecycle issue. The 800 MiB max-graphics texture tier is
+unchanged.

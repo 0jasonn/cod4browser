@@ -369,6 +369,45 @@ void ReturnAssetEntry(std::uint32_t index)
     g_freeAssetEntryHead = &entry;
 }
 
+bool ReleasesEveryLoadedZone(
+    const std::array<bool, ASSET_TYPE_COUNT> &releaseZone)
+{
+    bool foundLoadedZone = false;
+    for (std::uint32_t zoneIndex = 1; zoneIndex < ASSET_TYPE_COUNT;
+         ++zoneIndex)
+    {
+        if (!g_zones[zoneIndex].name[0]) continue;
+        foundLoadedZone = true;
+        if (!releaseZone[zoneIndex]) return false;
+    }
+    return foundLoadedZone;
+}
+
+void RemoveUnusedDefaultEntriesAfterFullRetirement()
+{
+    for (std::uint32_t hash = 0; hash < 0x8000u; ++hash)
+    {
+        std::uint16_t *link = &db_hashTable[hash];
+        while (*link)
+        {
+            const std::uint16_t index = *link;
+            XAssetEntryPoolEntry &entry = g_assetEntryPool[index];
+            if (entry.entry.zoneIndex != 0 || entry.entry.inuse)
+            {
+                link = &entry.entry.nextHash;
+                continue;
+            }
+
+            iassert(!entry.entry.nextOverride);
+            *link = entry.entry.nextHash;
+            entry.entry.nextHash = 0;
+            ReturnAssetEntry(index);
+            iassert(g_defaultAssetCount > 0);
+            --g_defaultAssetCount;
+        }
+    }
+}
+
 void RemoveAsset(XAssetType type, XAssetHeader header)
 {
     // These are the only native removal handlers whose owners are compiled in
@@ -729,6 +768,8 @@ void DB_UnloadXZonesForFreeFlags(int freeFlags)
          ++zoneIndex)
         releaseZone[zoneIndex] = g_zones[zoneIndex].name[0] != '\0' &&
             (g_zones[zoneIndex].flags & freeFlags) != 0;
+    const bool releasesEveryLoadedZone =
+        ReleasesEveryLoadedZone(releaseZone);
 
     Sys_LockWrite(&db_hashCritSect);
     // Complete the live-root mark walk before any released entry is returned
@@ -847,7 +888,19 @@ void DB_UnloadXZonesForFreeFlags(int freeFlags)
             index = nextHash;
         }
     }
+    if (releasesEveryLoadedZone)
+        RemoveUnusedDefaultEntriesAfterFullRetirement();
     Sys_UnlockWrite(&db_hashCritSect);
+
+    // Native DB_FreeUnusedResources transfers DB-owned strings to a temporary
+    // user, re-marks every surviving zone, and then releases the temporary
+    // user. This browser slice has no surviving zone when the complete loaded
+    // set is retired, so there is nothing to re-mark: release user 4 directly
+    // after its zone/default entries have been unlinked. Without this boundary
+    // each map permanently consumed script-string hash slots; a later map
+    // could fill the fixed native 20,000-entry table while parsing level GSC.
+    if (releasesEveryLoadedZone)
+        SL_ShutdownSystem(4u);
 
     for (std::uint32_t zoneIndex = 1; zoneIndex < ASSET_TYPE_COUNT;
          ++zoneIndex)
