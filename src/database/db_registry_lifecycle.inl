@@ -80,6 +80,41 @@ void DB_BuildOSPath(const char *zoneName, std::uint32_t size, char *filename)
     DB_RuntimeTraceStage("resolved logical path");
 }
 
+bool DB_PreflightXFile(const char *zoneName)
+{
+    char filename[256]{};
+    DB_BuildOSPath(zoneName, sizeof(filename), filename);
+    DB_RuntimeTraceStage("FS/platform preflight");
+
+    const DBPlatformFile zoneFile = DB_PlatformOpenFile(filename);
+    if (zoneFile == DB_PLATFORM_INVALID_FILE)
+    {
+        DB_FailXFileLoad("FS/platform preflight failed");
+        Com_Printf(CON_CHANNEL_ERROR,
+            "Could not open required fastfile '%s'. Re-select the owned "
+            "installation if this map was added after the current browser "
+            "import. The currently published world was preserved.\n",
+            filename);
+        DB_RuntimeTraceStop("FS/platform preflight failed");
+        return false;
+    }
+
+    const std::int64_t fileSize = DB_PlatformFileSize(zoneFile);
+    DB_PlatformCloseFile(zoneFile);
+    if (fileSize < 14 || fileSize > UINT32_MAX)
+    {
+        DB_FailXFileLoad("zone file preflight size invalid");
+        Com_Printf(CON_CHANNEL_ERROR,
+            "Required fastfile '%s' has an invalid size. The currently "
+            "published world was preserved.\n",
+            filename);
+        DB_RuntimeTraceStop("zone file preflight size invalid");
+        return false;
+    }
+
+    return true;
+}
+
 std::int32_t DB_GetZoneAllocType(std::int32_t zoneFlags)
 {
     switch (zoneFlags)
@@ -111,6 +146,12 @@ std::int32_t DB_TryLoadXFileInternal(char *zoneName, std::int32_t zoneFlags)
     const DBPlatformFile zoneFile = DB_PlatformOpenFile(filename);
     if (zoneFile == DB_PLATFORM_INVALID_FILE)
     {
+        DB_FailXFileLoad("FS/platform open failed");
+        Com_Printf(CON_CHANNEL_ERROR,
+            "Could not open required fastfile '%s'. Re-select the owned "
+            "installation if this map was added after the current browser "
+            "import.\n",
+            filename);
         DB_RuntimeTraceStop("FS/platform open failed");
         return 0;
     }
@@ -121,6 +162,9 @@ std::int32_t DB_TryLoadXFileInternal(char *zoneName, std::int32_t zoneFlags)
     if (fileSize < 14 || fileSize > UINT32_MAX)
     {
         DB_PlatformCloseFile(zoneFile);
+        DB_FailXFileLoad("zone file size invalid");
+        Com_Printf(CON_CHANNEL_ERROR,
+            "Required fastfile '%s' has an invalid size.\n", filename);
         DB_RuntimeTraceStop("zone file size invalid");
         return 0;
     }
@@ -301,6 +345,14 @@ void __cdecl DB_LoadXAssets(
         DB_RuntimeTraceStage("asset-pool initialization");
         Cmd_AddCommandInternal("loadzone", DB_LoadZone_f, &DB_LoadZone_f_VAR);
     }
+
+    // Validate the complete replacement set before retiring any live zone.
+    // Browser imports can legitimately predate a newly requested campaign
+    // fastfile; in that case keep the last published renderer world intact and
+    // let the server load-failure path return without touching collision state.
+    for (std::uint32_t index = 0; index < zoneCount; ++index)
+        if (zoneInfo[index].name && !DB_PreflightXFile(zoneInfo[index].name))
+            return;
 
     // Match native DB_LoadXAssets: retire all zones selected by the incoming
     // freeFlags mask before queuing replacement files.  Publication keeps

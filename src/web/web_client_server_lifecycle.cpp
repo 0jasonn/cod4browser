@@ -27,11 +27,13 @@
 #include <universal/physicalmemory.h>
 #include <web/web_system.h>
 #include <web/web_browser_bindings.h>
+#include <web/web_client_server_lifecycle.h>
 #include <xanim/dobj_runtime_init.h>
 #include <xanim/xanim_runtime_init.h>
 
 #include <emscripten.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -43,6 +45,11 @@ GfxConfiguration g_rendererConfiguration{};
 bool g_rendererConfigured = false;
 bool g_clientLifecycleReady = false;
 std::uint32_t g_remoteScreenDepth = 0;
+constexpr std::size_t PENDING_COMMAND_CAPACITY = 8u;
+std::array<std::array<char, 1024>, PENDING_COMMAND_CAPACITY>
+    g_pendingCanonicalCommands{};
+std::size_t g_pendingCanonicalCommandRead = 0u;
+std::size_t g_pendingCanonicalCommandCount = 0u;
 
 EM_JS(
     void,
@@ -112,6 +119,19 @@ void InstallBrowserProfileDefaultBindings()
 }
 
 } // namespace
+
+bool Web_TakePendingCanonicalCommand(char *command, std::size_t capacity)
+{
+    if (!command || !capacity || !g_pendingCanonicalCommandCount)
+        return false;
+    const auto &pending =
+        g_pendingCanonicalCommands[g_pendingCanonicalCommandRead];
+    I_strncpyz(command, pending.data(), static_cast<int>(capacity));
+    g_pendingCanonicalCommandRead =
+        (g_pendingCanonicalCommandRead + 1u) % PENDING_COMMAND_CAPACITY;
+    --g_pendingCanonicalCommandCount;
+    return true;
+}
 
 bool __cdecl DB_ModFileExists()
 {
@@ -437,9 +457,18 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_SubmitCanonicalCommand(
     const std::size_t length = std::strlen(command);
     if (!length || length > 1023u)
         return 0;
-    Cbuf_ExecuteBuffer(
-        0,
-        CL_ControllerIndexFromClientNum(0),
-        command);
+
+    // RPC callbacks run between cooperative engine frames. Retain the text at
+    // this platform boundary and let CommandTask execute it at the next frame
+    // boundary, outside Cbuf_Execute's global nesting guard. A synchronous map
+    // load constructs server info while that guard must remain available to
+    // canonical config/command code.
+    if (g_pendingCanonicalCommandCount == PENDING_COMMAND_CAPACITY)
+        return 0;
+    const std::size_t write =
+        (g_pendingCanonicalCommandRead + g_pendingCanonicalCommandCount) %
+        PENDING_COMMAND_CAPACITY;
+    std::memcpy(g_pendingCanonicalCommands[write].data(), command, length + 1u);
+    ++g_pendingCanonicalCommandCount;
     return 1;
 }

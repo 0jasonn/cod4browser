@@ -11,6 +11,7 @@
 #include <ui/ui.h>
 #include <web/web_archive_job.h>
 #include <web/web_cooperative_scheduler.h>
+#include <web/web_client_server_lifecycle.h>
 #include <web/web_engine_asset.h>
 #include <web/web_engine_surface.h>
 #include <web/web_engine_scheduler.h>
@@ -43,6 +44,7 @@ BootstrapPhase g_bootstrapPhase = BootstrapPhase::Initializing;
 WebFrameInfo g_scheduledFrame{};
 std::uint32_t g_lastCGameFrameMilliseconds = 0u;
 std::uint32_t g_cgameFrameAccumulatorMilliseconds = 0u;
+bool g_reentrantCommandPumpReported = false;
 
 bool NearlyEqual(float actual, float expected, float tolerance = 0.0001f)
 {
@@ -231,7 +233,21 @@ CooperativeTaskResult CommandTask(
     void *userData)
 {
     const auto *frame = static_cast<const WebFrameInfo *>(userData);
-    Cbuf_Execute(0, 0);
+    char browserCommand[1024]{};
+    if (Web_TakePendingCanonicalCommand(
+            browserCommand, sizeof(browserCommand)))
+    {
+        Cbuf_ExecuteBuffer(
+            0, CL_ControllerIndexFromClientNum(0), browserCommand);
+    }
+    if (!Cbuf_TryExecute(0, 0) && !g_reentrantCommandPumpReported)
+    {
+        g_reentrantCommandPumpReported = true;
+        Web_Log(
+            WebLogLevel::Info,
+            "[kisakcod-web] Deferred a re-entrant command-buffer pump to "
+            "the next browser frame.\n");
+    }
     if (!g_frameCommandReported &&
         std::strcmp(Dvar_GetString("web_frame_command"), "executed") == 0)
     {
@@ -311,7 +327,15 @@ CooperativeTaskResult CGameFrameTask(
     // would duplicate the same serverTime and Pmove would correctly ignore it.
     frameMilliseconds = SV_Frame(frameMilliseconds);
     CL_RunOncePerClientFrame(0, frameMilliseconds);
-    Cbuf_Execute(0, CL_ControllerIndexFromClientNum(0));
+    if (!Cbuf_TryExecute(0, CL_ControllerIndexFromClientNum(0)) &&
+        !g_reentrantCommandPumpReported)
+    {
+        g_reentrantCommandPumpReported = true;
+        Web_Log(
+            WebLogLevel::Info,
+            "[kisakcod-web] Deferred a re-entrant command-buffer pump to "
+            "the next browser frame.\n");
+    }
     CL_Frame(0, frameMilliseconds);
     SCR_UpdateScreen();
     // Native SCR_UpdateFrame updates sound on non-cgame screens. The web

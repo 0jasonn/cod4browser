@@ -783,6 +783,17 @@ void __cdecl Cbuf_Execute(int32_t  localClientNum, int32_t  controllerIndex)
 #endif
 }
 
+bool __cdecl Cbuf_TryExecute(
+    int32_t localClientNum,
+    int32_t controllerIndex)
+{
+    iassert(localClientNum >= 0 && localClientNum < 1);
+    if (cmd_insideCBufExecute[localClientNum])
+        return false;
+    Cbuf_Execute(localClientNum, controllerIndex);
+    return true;
+}
+
 void __cdecl Cbuf_ExecuteInternal(int32_t  localClientNum, int32_t  controllerIndex)
 {
     char v2; // [esp+0h] [ebp-1014h]

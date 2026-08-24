@@ -1321,3 +1321,26 @@ selecting the native tweak defaults activates all three depth ranges and
 visibly softens the depth-separated scene while the G36C pickup prompt remains
 sharp. The active and restored paths report no shader, framebuffer, context,
 descriptor, or draw error, and `r_dof_tweak` is disabled again after the check.
+
+## Browser map-command lifecycle checkpoint (2026-08-24)
+
+Browser console RPC now retains commands in a bounded platform queue and
+executes one at the cooperative engine-frame boundary. The command itself is
+still dispatched by canonical `Cbuf_ExecuteBuffer`, but a synchronous `map`
+load no longer runs while `cmd_insideCBufExecute` is held for the entire load.
+Normal engine command-buffer pumps use `Cbuf_TryExecute` to defer an attempted
+nested pump to the following frame while preserving the canonical assertion in
+`Cbuf_Execute`. A native/Wasm oracle covers that deferral contract.
+
+The database path now preflights the complete requested fastfile replacement
+set before retiring the published zone. Missing or invalid files set the real
+DB load-failure state and preserve the current renderer world rather than
+continuing into collision with a partially retired map.
+
+Release Chrome verifies that queued `map killhouse` constructs the correct
+`CS_SERVERINFO` map name, completes `CL_InitCGame -> CG_Init`, reaches the first
+game-driven frame, and renders the canonical world. A subsequent
+`map cargoship` now passes fastfile publication, collision, common-world, and
+renderer-world replacement, but currently stops during `G_InitGame` script
+initialization. That campaign script-VM transition remains open and is not
+classified as a renderer-lifecycle fix.

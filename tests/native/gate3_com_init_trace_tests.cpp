@@ -23,6 +23,7 @@ std::array<void *, 4> g_values{};
 bool g_mainThreadInitialized = false;
 int g_probeCount = 0;
 int g_databaseThreadInitCount = 0;
+bool g_nestedTryExecuteDeferred = false;
 std::array<std::array<char, 32>, 2> g_probeArguments{};
 
 void __cdecl ProbeCommand()
@@ -36,6 +37,11 @@ void __cdecl ProbeCommand()
         "%s",
         Cmd_Argv(1));
     ++g_probeCount;
+}
+
+void __cdecl TryExecuteCommand()
+{
+    g_nestedTryExecuteDeferred = !Cbuf_TryExecute(0, 0);
 }
 } // namespace
 
@@ -183,6 +189,14 @@ int main()
     assert(std::strcmp(g_probeArguments[1].data(), "second") == 0);
     Cmd_RemoveCommand("gate3_probe");
     assert(Cmd_FindCommand("gate3_probe") == nullptr);
+
+    static cmd_function_s tryExecuteCommand{};
+    Cmd_AddCommandInternal(
+        "gate3_try_execute", TryExecuteCommand, &tryExecuteCommand);
+    Cbuf_AddText(0, "gate3_try_execute\n");
+    assert(Cbuf_TryExecute(0, 0));
+    assert(g_nestedTryExecuteDeferred);
+    Cmd_RemoveCommand("gate3_try_execute");
 
     char limitedTokens[] = "first second token with spaces";
     Cmd_TokenizeStringWithLimit(limitedTokens, 2);
