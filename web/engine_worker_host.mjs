@@ -8,6 +8,7 @@ const EXPORTED_COMMANDS = [
     "_KisakWeb_SubmitCanonicalCommand",
     "_KisakWeb_TestAudioProxyPcm",
     "_KisakWeb_TestLoseWebGLContext", "_KisakWeb_TestRestoreWebGLContext",
+    "_KisakWeb_TestSetAaSamples",
 ];
 const ENGINE_FILESYSTEM_LOCK = "kisakcod-web-engine-filesystem-v1";
 
@@ -74,8 +75,18 @@ export function createEngineWorkerHost(canvas, { onLog, onAbort, onAudioDiagnost
         case "audio-command":
             audioDriver.handleCommand(message);
             break;
-        case "cursor":
-            canvas.style.cursor = message.visible ? "default" : "none";
+        case "cursor": {
+            const visible = message.visible === true;
+            canvas.style.cursor = visible ? "default" : "none";
+            globalThis.dispatchEvent(new CustomEvent("kisakcod:cursor", {
+                detail: { visible },
+            }));
+            break;
+        }
+        case "mouse-mode":
+            globalThis.dispatchEvent(new CustomEvent("kisakcod:mouse-mode", {
+                detail: { absolute: message.absolute === true },
+            }));
             break;
         case "log": onLog?.(message.message, message.level); break;
         case "abort": onAbort?.(message.reason); break;

@@ -257,6 +257,7 @@ void ResolveRendererBatchImages(WebRendererWorldBatchDesc &batch) noexcept
 }
 
 bool BuildRendererPrimaryLights(
+    const GfxLight *frameLights,
     std::vector<WebRendererPrimaryLightDesc> &primaryLights,
     std::uint32_t &sunPrimaryLightIndex) noexcept
 {
@@ -273,35 +274,55 @@ bool BuildRendererPrimaryLights(
         for (std::uint32_t index = 0u;
              index < comWorld.primaryLightCount; ++index)
         {
-            const ComPrimaryLight &source = comWorld.primaryLights[index];
+            const ComPrimaryLight &worldLight = comWorld.primaryLights[index];
+            const GfxLight *frameLight = frameLights
+                ? &frameLights[index] : nullptr;
             WebRendererPrimaryLightDesc &destination =
                 primaryLights[index];
-            destination.type = source.type;
-            destination.exponent = source.exponent;
+            destination.canUseShadowMap = frameLight
+                ? frameLight->canUseShadowMap : worldLight.canUseShadowMap;
+            destination.type = frameLight
+                ? frameLight->type : worldLight.type;
+            destination.exponent = static_cast<std::uint8_t>(std::clamp(
+                frameLight ? frameLight->exponent
+                           : static_cast<int>(worldLight.exponent),
+                0, 255));
             const float diffuseScale = r_diffuseColorScale
                 ? r_diffuseColorScale->current.value : 1.0f;
             for (std::size_t component = 0u; component < 3u; ++component)
                 destination.color[component] =
-                    source.color[component] * diffuseScale;
-            std::copy_n(source.dir, 3u, destination.direction);
-            std::copy_n(source.origin, 3u, destination.origin);
-            destination.radius = source.radius;
-            destination.cosHalfFovOuter = source.cosHalfFovOuter;
-            destination.cosHalfFovInner = source.cosHalfFovInner;
-            if (source.defName)
+                    (frameLight ? frameLight->color[component]
+                                : worldLight.color[component]) * diffuseScale;
+            std::copy_n(frameLight ? frameLight->dir : worldLight.dir,
+                3u, destination.direction);
+            std::copy_n(frameLight ? frameLight->origin : worldLight.origin,
+                3u, destination.origin);
+            destination.radius = frameLight
+                ? frameLight->radius : worldLight.radius;
+            destination.cosHalfFovOuter = frameLight
+                ? frameLight->cosHalfFovOuter : worldLight.cosHalfFovOuter;
+            destination.cosHalfFovInner = frameLight
+                ? frameLight->cosHalfFovInner : worldLight.cosHalfFovInner;
+            const GfxLightDef *definition = frameLight
+                ? frameLight->def : nullptr;
+            if (!definition && worldLight.defName)
             {
-                const GfxLightDef *definition = DB_FindXAssetHeader(
-                    ASSET_TYPE_LIGHT_DEF, source.defName).lightDef;
-                if (definition)
-                {
-                    destination.attenuationImage = ResolveRendererImage(
-                        definition->attenuation.image);
-                    destination.samplerState =
-                        definition->attenuation.samplerState;
-                }
+                definition = DB_FindXAssetHeader(
+                    ASSET_TYPE_LIGHT_DEF, worldLight.defName).lightDef;
+            }
+            if (definition)
+            {
+                const GfxImage *attenuation = ResolveRendererImage(
+                    definition->attenuation.image);
+                destination.falloffScale = attenuation
+                    ? static_cast<float>(attenuation->width) / 512.0f
+                    : 0.0f;
+                destination.falloffShift =
+                    static_cast<float>(definition->lmapLookupStart) / 512.0f;
             }
         }
-        if (s_world.sunPrimaryLightIndex < primaryLights.size() &&
+        if (!frameLights &&
+            s_world.sunPrimaryLightIndex < primaryLights.size() &&
             s_world.sunLight)
         {
             WebRendererPrimaryLightDesc &sun =
@@ -1891,6 +1912,36 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     iassert(refdef->localClientNum == 0);
     if (!g_rendererWorldReady || !s_world.name)
         Com_Error(ERR_DROP, "R_RenderScene: NULL worldmodel");
+
+    // Native R_SetTestLods runs at the render-command boundary before every
+    // scene. Preserve developer overrides as well as authored XModel ranges.
+    if (r_forceLod->current.integer == r_forceLod->reset.integer)
+    {
+        XModelSetTestLods(0u, r_highLodDist->current.value);
+        XModelSetTestLods(1u, r_mediumLodDist->current.value);
+        XModelSetTestLods(2u, r_lowLodDist->current.value);
+        XModelSetTestLods(3u, r_lowestLodDist->current.value);
+    }
+    else
+    {
+        for (std::uint32_t lod = 0u; lod < MAX_LODS; ++lod)
+            XModelSetTestLods(lod,
+                lod == static_cast<std::uint32_t>(
+                    r_forceLod->current.integer) ? 0.0f : 0.001f);
+    }
+    WebRendererLodParms lodParms{};
+    if (!WebRenderer_BuildLodParms(
+            refdef->vieworg,
+            refdef->tanHalfFovY,
+            r_lodScaleRigid->current.value,
+            r_lodBiasRigid->current.value,
+            r_lodScaleSkinned->current.value,
+            r_lodBiasSkinned->current.value,
+            lodParms))
+    {
+        Com_Error(ERR_DROP, "R_RenderScene: invalid canonical LOD parameters");
+        return;
+    }
     WebRendererSceneViewDesc view{};
     view.x = refdef->x;
     view.y = refdef->y;
@@ -2117,12 +2168,28 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     }
     view.localClientNum = refdef->localClientNum;
     view.worldName = s_world.name;
+    std::vector<WebRendererPrimaryLightDesc> framePrimaryLights;
+    std::uint32_t sunPrimaryLightIndex = 0u;
+    if (!BuildRendererPrimaryLights(
+            refdef->primaryLights, framePrimaryLights,
+            sunPrimaryLightIndex))
+    {
+        Com_Error(ERR_DROP,
+            "R_RenderScene: invalid canonical frame primary lights");
+        return;
+    }
+    view.primaryLights = framePrimaryLights.data();
+    view.primaryLightCount = static_cast<std::uint32_t>(
+        framePrimaryLights.size());
     view.sunShadowEnabled = sm_enable && sm_enable->current.enabled &&
-        s_world.sunLight && s_world.sunLight->type == 1u;
+        sunPrimaryLightIndex < framePrimaryLights.size() &&
+        framePrimaryLights[sunPrimaryLightIndex].type == 1u;
     if (view.sunShadowEnabled)
     {
-        std::copy_n(s_world.sunLight->dir, 3u, view.sunDirection);
-        std::copy_n(s_world.sunLight->color, 3u, view.sunColor);
+        const WebRendererPrimaryLightDesc &sun =
+            framePrimaryLights[sunPrimaryLightIndex];
+        std::copy_n(sun.direction, 3u, view.sunDirection);
+        std::copy_n(sun.color, 3u, view.sunColor);
         std::copy_n(s_world.mins, 3u, view.worldMins);
         std::copy_n(s_world.maxs, 3u, view.worldMaxs);
     }
@@ -2237,18 +2304,9 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
 
     if (!g_worldSceneSubmitted)
     {
-        std::vector<WebRendererPrimaryLightDesc> primaryLights;
-        std::uint32_t sunPrimaryLightIndex = 0u;
-        if (!BuildRendererPrimaryLights(
-                primaryLights, sunPrimaryLightIndex))
-        {
-            Com_Error(ERR_DROP,
-                "R_RenderScene: invalid canonical primary lights");
-            return;
-        }
         const WebRendererWorldLightTechniqueContext lightContext{
-            primaryLights.data(),
-            static_cast<std::uint32_t>(primaryLights.size()),
+            framePrimaryLights.data(),
+            static_cast<std::uint32_t>(framePrimaryLights.size()),
             sunPrimaryLightIndex,
             view.sunShadowEnabled,
         };
@@ -2270,7 +2328,6 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         }
         else
         {
-            command.primaryLights = std::move(primaryLights);
             command.sunPrimaryLightIndex = sunPrimaryLightIndex;
             for (WebRendererWorldBatchDesc &batch : command.batches)
                 ResolveRendererBatchImages(batch);
@@ -2292,9 +2349,9 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                         batch.surfaceCount;
                 }
                 const bool localLight = batch.primaryLightIndex <
-                        command.primaryLights.size() &&
-                    (command.primaryLights[batch.primaryLightIndex].type == 2u ||
-                        command.primaryLights[batch.primaryLightIndex].type == 3u);
+                        framePrimaryLights.size() &&
+                    (framePrimaryLights[batch.primaryLightIndex].type == 2u ||
+                        framePrimaryLights[batch.primaryLightIndex].type == 3u);
                 if (!localLight) continue;
                 ++localLightBatchCount;
                 localLightSurfaceCount += batch.surfaceCount;
@@ -2366,13 +2423,14 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             std::uint32_t assignedLocalLightCount = 0u;
             std::uint32_t assignedLocalSurfaceCount = 0u;
             for (std::uint32_t index = 0u;
-                 index < command.primaryLights.size(); ++index)
+                 index < framePrimaryLights.size(); ++index)
             {
                 const WebRendererPrimaryLightDesc &light =
-                    command.primaryLights[index];
+                    framePrimaryLights[index];
                 if (light.type == 2u) ++spotLightCount;
                 if (light.type == 3u) ++omniLightCount;
-                if (light.attenuationImage) ++resolvedAttenuationCount;
+                if (light.falloffScale > 0.0f)
+                    ++resolvedAttenuationCount;
                 if ((light.type == 2u || light.type == 3u) &&
                     index != command.sunPrimaryLightIndex &&
                     primaryLightSurfaceCounts[index] != 0u)
@@ -2384,15 +2442,13 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                         "[kisakcod-web] Canonical primary light %u: "
                         "type=%u surfaces=%u origin=(%.3f %.3f %.3f) "
                         "radius=%.3f color=(%.3f %.3f %.3f) "
-                        "attenuation='%s'.\n",
+                        "falloff=(%.6f %.6f).\n",
                         index, static_cast<unsigned int>(light.type),
                         primaryLightSurfaceCounts[index],
                         light.origin[0], light.origin[1], light.origin[2],
                         light.radius, light.color[0], light.color[1],
-                        light.color[2],
-                        light.attenuationImage &&
-                                light.attenuationImage->name
-                            ? light.attenuationImage->name : "<none>");
+                        light.color[2], light.falloffScale,
+                        light.falloffShift);
                 }
             }
             Web_Log(WebLogLevel::Info,
@@ -2400,7 +2456,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                 "%zu total, sun=%u, spot=%u, omni=%u, "
                 "%u attenuation images, %u local lights assigned to "
                 "%u world surfaces.\n",
-                command.primaryLights.size(),
+                framePrimaryLights.size(),
                 command.sunPrimaryLightIndex, spotLightCount,
                 omniLightCount, resolvedAttenuationCount,
                 assignedLocalLightCount, assignedLocalSurfaceCount);
@@ -2412,8 +2468,8 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                 command.batches.data(),
                 static_cast<std::uint32_t>(command.batches.size()),
                 nullptr,
-                command.primaryLights.data(),
-                static_cast<std::uint32_t>(command.primaryLights.size()),
+                framePrimaryLights.data(),
+                static_cast<std::uint32_t>(framePrimaryLights.size()),
                 command.sunPrimaryLightIndex,
             };
             const WebRendererSurfaceResult submission =
@@ -2617,6 +2673,9 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
 
     if (!g_staticModelSceneSubmitted)
     {
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Building the canonical static XModel command "
+            "with every authored LOD.\n");
         WebRendererStaticModelSceneCommand command;
         const WebRendererStaticModelSceneResult build =
             WebRenderer_BuildStaticModelSceneCommand(
@@ -2634,6 +2693,12 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         }
         else
         {
+            Web_Log(WebLogLevel::Info,
+                "[kisakcod-web] Built canonical static XModel LOD geometry "
+                "(%zu batches, %zu vertices, %zu indices, %zu instances); "
+                "resolving material images.\n",
+                command.batches.size(), command.vertices.size(),
+                command.indices.size(), command.instances.size());
             for (WebRendererStaticModelBatchDesc &batch : command.batches)
                 ResolveRendererBatchImages(batch.draw);
             const WebRendererModelLightingAtlasDesc lightingAtlas{
@@ -2687,7 +2752,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     const WebRendererDObjSceneResult dynamicBuild =
         WebRenderer_BuildDObjSceneCommand(
             g_dobjSubmissions.data(), g_dobjSubmissionCount,
-            dynamicCommand, refdef->vieworg, &s_world.lightGrid,
+            dynamicCommand, &lodParms, &s_world.lightGrid,
             &MODEL_LIGHTING_CALLBACKS, ResolveRendererMaterial);
     if (dynamicBuild == WebRendererDObjSceneResult::NoDObj)
     {
@@ -2846,19 +2911,10 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         FX_EndGeneratingMarkVertsForEntModels(refdef->localClientNum);
     }
 
-    std::vector<WebRendererPrimaryLightDesc> brushPrimaryLights;
-    std::uint32_t brushSunPrimaryLightIndex = 0u;
-    if (!BuildRendererPrimaryLights(
-            brushPrimaryLights, brushSunPrimaryLightIndex))
-    {
-        Com_Error(ERR_DROP,
-            "R_RenderScene: invalid canonical brush primary lights");
-        return;
-    }
     const WebRendererWorldLightTechniqueContext brushLightContext{
-        brushPrimaryLights.data(),
-        static_cast<std::uint32_t>(brushPrimaryLights.size()),
-        brushSunPrimaryLightIndex,
+        framePrimaryLights.data(),
+        static_cast<std::uint32_t>(framePrimaryLights.size()),
+        sunPrimaryLightIndex,
         false,
     };
     WebRendererBrushModelSceneCommand brushCommand;
@@ -2941,7 +2997,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             submission.sourceKind =
                 WebRendererSceneBatchKind::DynamicXModel;
             const int lod = WebRenderer_SelectFxModelLod(
-                submission.model, submission.placement, refdef->vieworg);
+                submission.model, submission.placement, &lodParms);
             if (lod < 0) continue;
             submission.lod = static_cast<std::uint16_t>(lod);
             dynamicEntityModels.push_back(submission);
@@ -3070,16 +3126,14 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         }
     }
 
-    // The exact native R_SkinXModel LOD ramp depends on renderer-global FOV
-    // dvars that are not compiled into this frontend. Select the same model
-    // thresholds from active refdef distance, scaled by placement, as the
-    // deterministic rigid FX compatibility subset.
+    // Use the same scene-wide FOV-adjusted rigid/skinned LOD parameters as
+    // DObjs, DynEntities, and static models.
     std::uint32_t selectedFxModels = 0u;
     for (std::uint32_t index = 0u; index < g_fxModelSubmissionCount; ++index)
     {
         WebRendererFxModelSubmission submission = g_fxModelSubmissions[index];
         const int lod = WebRenderer_SelectFxModelLod(
-            submission.model, submission.placement, refdef->vieworg);
+            submission.model, submission.placement, &lodParms);
         if (lod < 0)
         {
             // XModelGetLodForDist returns -1 when a model has passed its

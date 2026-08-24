@@ -76,6 +76,7 @@ const runtime = {
     rendererSurface: { state: "idle", message: "Waiting for an engine surface" },
     rendererTexture: { state: "idle", message: "Waiting for a supported engine image" },
     rendererShader: { state: "idle", message: "Waiting for a retail shader contract" },
+    rendererAa: { state: "idle", message: "Waiting for the scene sample target" },
     rendererSceneView: null,
     rendererSceneFrame: null,
     rendererFx: [],
@@ -87,6 +88,8 @@ const runtime = {
         keyEvents: 0,
         mouseEvents: 0,
         pointerLocked: false,
+        cursorVisible: false,
+        absoluteMouse: false,
     },
 };
 globalThis.__KISAKCOD_WEB__ = runtime;
@@ -325,6 +328,20 @@ globalThis.addEventListener("kisakcod:renderer-shader", (event) => {
         rendererStatus.textContent = "WebGL2 shader context lost";
     } else if (event.detail.state === "cleared") {
         rendererStatus.textContent = "WebGL2 + world surface ready";
+    }
+});
+
+globalThis.addEventListener("kisakcod:renderer-aa", (event) => {
+    const previousGeneration = runtime.rendererAa?.resourceGeneration ?? 0;
+    runtime.rendererAa = structuredClone(event.detail);
+    if (event.detail.state === "ready" &&
+        event.detail.resourceGeneration > previousGeneration) {
+        appendLog(
+            `[kisakcod-web] Using ${event.detail.activeSamples}x anti-aliasing; ` +
+            `the scene resolves before post effects and UI.`,
+        );
+    } else if (event.detail.state === "fallback" || event.detail.state === "failed") {
+        appendLog(`[kisakcod-web] Anti-aliasing: ${event.detail.message}`, "warn");
     }
 });
 
@@ -731,6 +748,13 @@ function installBrowserInput()
 {
     const heldKeys = new Set();
     const heldMouseButtons = new Set();
+    let systemCursorVisible = false;
+    let absoluteMouse = false;
+    let pointerWasLocked = document.pointerLockElement === canvas;
+    let programmaticUnlock = false;
+    let lastForwardedEscape = Number.NEGATIVE_INFINITY;
+    let lastSyntheticEscape = Number.NEGATIVE_INFINITY;
+    const escapeDeduplicationMilliseconds = 100;
     const sendKey = (key, down) => {
         if (!key) return;
         runtime.module?.input?.({ type: "key", key, down });
@@ -745,20 +769,35 @@ function installBrowserInput()
         heldKeys.clear();
         heldMouseButtons.clear();
     };
+    const releasePointerLock = () => {
+        if (document.pointerLockElement !== canvas) return;
+        programmaticUnlock = true;
+        document.exitPointerLock?.();
+    };
 
     globalThis.addEventListener("keydown", (event) => {
         if (!inputActive()) return;
         const key = browserKeyToEngineKey(event);
         if (!key) return;
         event.preventDefault();
+        if (key === 0x1B &&
+            performance.now() - lastSyntheticEscape < escapeDeduplicationMilliseconds) {
+            return;
+        }
         if (heldKeys.has(key)) return;
         heldKeys.add(key);
+        if (key === 0x1B) lastForwardedEscape = performance.now();
         sendKey(key, true);
     });
     globalThis.addEventListener("keyup", (event) => {
         const key = browserKeyToEngineKey(event);
-        if (!key || (!inputActive() && !heldKeys.has(key))) return;
+        if (!key || !heldKeys.has(key)) return;
         event.preventDefault();
+        if (key === 0x1B &&
+            performance.now() - lastSyntheticEscape < escapeDeduplicationMilliseconds) {
+            heldKeys.delete(key);
+            return;
+        }
         heldKeys.delete(key);
         sendKey(key, false);
     });
@@ -770,7 +809,8 @@ function installBrowserInput()
             heldMouseButtons.add(key);
             sendKey(key, true);
         }
-        if (document.pointerLockElement !== canvas && canvas.requestPointerLock) {
+        if (!absoluteMouse &&
+            document.pointerLockElement !== canvas && canvas.requestPointerLock) {
             try {
                 Promise.resolve(canvas.requestPointerLock({ unadjustedMovement: true }))
                     .catch(() => canvas.requestPointerLock());
@@ -787,14 +827,22 @@ function installBrowserInput()
         sendKey(key, false);
     });
     globalThis.addEventListener("mousemove", (event) => {
-        if (document.pointerLockElement !== canvas ||
-            (!event.movementX && !event.movementY)) return;
+        const pointerLocked = document.pointerLockElement === canvas;
+        if (!pointerLocked && (!absoluteMouse || event.target !== canvas)) return;
+        if (pointerLocked && !event.movementX && !event.movementY) return;
+        const bounds = canvas.getBoundingClientRect();
+        const x = pointerLocked
+            ? Math.round(canvas.width * 0.5)
+            : Math.round((event.clientX - bounds.left) * canvas.width / bounds.width);
+        const y = pointerLocked
+            ? Math.round(canvas.height * 0.5)
+            : Math.round((event.clientY - bounds.top) * canvas.height / bounds.height);
         runtime.module?.input?.({
             type: "mouse-move",
-            x: Math.round(canvas.width * 0.5),
-            y: Math.round(canvas.height * 0.5),
-            dx: Math.round(event.movementX),
-            dy: Math.round(event.movementY),
+            x: Math.max(0, Math.min(canvas.width, x)),
+            y: Math.max(0, Math.min(canvas.height, y)),
+            dx: pointerLocked ? Math.round(event.movementX) : 0,
+            dy: pointerLocked ? Math.round(event.movementY) : 0,
         });
         runtime.input.mouseEvents += 1;
     });
@@ -806,8 +854,31 @@ function installBrowserInput()
         sendKey(key, false);
     }, { passive: false });
     document.addEventListener("pointerlockchange", () => {
-        runtime.input.pointerLocked = document.pointerLockElement === canvas;
-        if (!runtime.input.pointerLocked) releaseHeldInput();
+        const pointerLocked = document.pointerLockElement === canvas;
+        runtime.input.pointerLocked = pointerLocked;
+        if (pointerWasLocked && !pointerLocked) {
+            const intendedUnlock = programmaticUnlock;
+            programmaticUnlock = false;
+            if (!intendedUnlock && document.hasFocus() &&
+                performance.now() - lastForwardedEscape >=
+                    escapeDeduplicationMilliseconds) {
+                lastSyntheticEscape = performance.now();
+                sendKey(0x1B, true);
+                sendKey(0x1B, false);
+            }
+            releaseHeldInput();
+        }
+        pointerWasLocked = pointerLocked;
+    });
+    globalThis.addEventListener("kisakcod:cursor", (event) => {
+        systemCursorVisible = event.detail?.visible === true;
+        runtime.input.cursorVisible = systemCursorVisible;
+        if (systemCursorVisible) releasePointerLock();
+    });
+    globalThis.addEventListener("kisakcod:mouse-mode", (event) => {
+        absoluteMouse = event.detail?.absolute === true;
+        runtime.input.absoluteMouse = absoluteMouse;
+        if (absoluteMouse) releasePointerLock();
     });
     globalThis.addEventListener("blur", releaseHeldInput);
 }

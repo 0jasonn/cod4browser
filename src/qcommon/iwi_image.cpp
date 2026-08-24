@@ -279,6 +279,93 @@ void DecodeDxtBlock(
         }
     }
 }
+
+Error DecodeIwiCubeFaceLevel(
+    std::uint8_t format,
+    std::uint32_t edgeLength,
+    std::span<const std::uint8_t> source,
+    std::vector<std::uint8_t> &pixels) noexcept
+{
+    const bool rgb8 = format == FORMAT_RGB8;
+    const bool compressed = format == FORMAT_DXT1 ||
+        format == FORMAT_DXT3 || format == FORMAT_DXT5;
+    const std::size_t bytesPerBlock = format == FORMAT_DXT1 ? 8u : 16u;
+    std::size_t pixelCount = 0u;
+    std::size_t pixelBytes = 0u;
+    if (!CheckedMultiply(edgeLength, edgeLength, pixelCount) ||
+        !CheckedMultiply(pixelCount, RGBA_BYTES_PER_PIXEL, pixelBytes))
+        return Error::DecodeOutputTooLarge;
+    try
+    {
+        pixels.resize(pixelBytes);
+    }
+    catch (...)
+    {
+        return Error::DecodeAllocationFailed;
+    }
+    if (rgb8)
+    {
+        for (std::size_t pixel = 0u; pixel < pixelCount; ++pixel)
+        {
+            const std::size_t sourceOffset = pixel * 3u;
+            const std::size_t targetOffset = pixel * 4u;
+            pixels[targetOffset] = source[sourceOffset + 2u];
+            pixels[targetOffset + 1u] = source[sourceOffset + 1u];
+            pixels[targetOffset + 2u] = source[sourceOffset];
+            pixels[targetOffset + 3u] = 255u;
+        }
+    }
+    else if (!compressed)
+    {
+        for (std::size_t offset = 0u; offset < pixelBytes; offset += 4u)
+        {
+            pixels[offset] = source[offset + 2u];
+            pixels[offset + 1u] = source[offset + 1u];
+            pixels[offset + 2u] = source[offset];
+            pixels[offset + 3u] = source[offset + 3u];
+        }
+    }
+    else
+    {
+        const std::uint32_t blocksWide = (edgeLength + 3u) / 4u;
+        const std::uint32_t blocksHigh = (edgeLength + 3u) / 4u;
+        std::size_t sourceOffset = 0u;
+        for (std::uint32_t blockY = 0u; blockY < blocksHigh; ++blockY)
+        {
+            for (std::uint32_t blockX = 0u; blockX < blocksWide; ++blockX)
+            {
+                DecodeDxtBlock(source.subspan(sourceOffset, bytesPerBlock),
+                    format, blockX, blockY, edgeLength, edgeLength, pixels);
+                sourceOffset += bytesPerBlock;
+            }
+        }
+    }
+    return Error::None;
+}
+
+Error LoadDefLevelBytes(
+    std::int32_t format,
+    std::uint32_t width,
+    std::uint32_t height,
+    std::size_t &bytes) noexcept
+{
+    if (format == LOADDEF_FORMAT_DXT1)
+        return DxtLevelBytes(width, height, 8u, bytes)
+            ? Error::None : Error::DecodeOutputTooLarge;
+    if (format == LOADDEF_FORMAT_DXT3 || format == LOADDEF_FORMAT_DXT5)
+        return DxtLevelBytes(width, height, 16u, bytes)
+            ? Error::None : Error::DecodeOutputTooLarge;
+    std::size_t pixels = 0u;
+    const std::size_t bytesPerPixel = format == LOADDEF_FORMAT_L8 ? 1u :
+        (format == LOADDEF_FORMAT_A8L8 ? 2u : 4u);
+    if (format != LOADDEF_FORMAT_A8R8G8B8 &&
+        format != LOADDEF_FORMAT_X8R8G8B8 &&
+        format != LOADDEF_FORMAT_L8 && format != LOADDEF_FORMAT_A8L8)
+        return Error::DecodeUnsupportedFormat;
+    return CheckedMultiply(width, height, pixels) &&
+            CheckedMultiply(pixels, bytesPerPixel, bytes)
+        ? Error::None : Error::DecodeOutputTooLarge;
+}
 } // namespace
 
 const char *ErrorString(Error error) noexcept
@@ -631,126 +718,98 @@ Error DecodeCubeRgba8(
     if (metadata.depth != 1u || metadata.width != metadata.height)
         return Error::DecodeUnsupportedDimensions;
 
-    std::size_t facePixelCount = 0u;
-    std::size_t facePixelBytes = 0u;
-    std::size_t totalPixelBytes = 0u;
-    if (!CheckedMultiply(metadata.width, metadata.height, facePixelCount) ||
-        !CheckedMultiply(facePixelCount, RGBA_BYTES_PER_PIXEL,
-            facePixelBytes) ||
-        !CheckedMultiply(facePixelBytes, 6u, totalPixelBytes) ||
-        totalPixelBytes > MAX_CUBE_RGBA8_BYTES ||
-        bytes.size() > MAX_TEXTURE_MEMBER_BYTES)
-    {
-        return Error::DecodeOutputTooLarge;
-    }
-
     const std::size_t bytesPerBlock = metadata.format == FORMAT_DXT1
         ? 8u : 16u;
     const std::uint32_t mipCount = Count2dStoredMipmaps(
         metadata.flags, metadata.width, metadata.height);
+    struct LevelLayout
+    {
+        std::uint32_t level = 0u;
+        std::uint32_t edgeLength = 0u;
+        std::size_t faceBytes = 0u;
+        std::size_t offset = 0u;
+    };
+    std::vector<LevelLayout> layouts;
+    try
+    {
+        layouts.reserve(mipCount);
+    }
+    catch (...)
+    {
+        return Error::DecodeAllocationFailed;
+    }
     std::size_t payloadBytes = 0u;
-    std::size_t baseFaceBytes = 0u;
-    std::size_t baseMipOffset = HEADER_SIZE;
+    std::size_t totalPixelBytes = 0u;
     for (std::uint32_t mip = mipCount; mip > 0u; --mip)
     {
         const std::uint32_t level = mip - 1u;
-        const std::uint32_t width = std::max<std::uint32_t>(
+        const std::uint32_t edgeLength = std::max<std::uint32_t>(
             static_cast<std::uint32_t>(metadata.width) >> level, 1u);
-        const std::uint32_t height = std::max<std::uint32_t>(
-            static_cast<std::uint32_t>(metadata.height) >> level, 1u);
         std::size_t levelFaceBytes = 0u;
         if (compressed)
         {
-            if (!DxtLevelBytes(width, height, bytesPerBlock,
+            if (!DxtLevelBytes(edgeLength, edgeLength, bytesPerBlock,
                     levelFaceBytes))
                 return Error::DecodeOutputTooLarge;
         }
         else
         {
             std::size_t levelPixels = 0u;
-            if (!CheckedMultiply(width, height, levelPixels) ||
+            if (!CheckedMultiply(edgeLength, edgeLength, levelPixels) ||
                 !CheckedMultiply(levelPixels, rgb8 ? 3u : 4u,
                     levelFaceBytes))
                 return Error::DecodeOutputTooLarge;
         }
         std::size_t levelBytes = 0u;
+        std::size_t rgbaFaceBytes = 0u;
+        std::size_t rgbaLevelBytes = 0u;
+        if (!CheckedMultiply(edgeLength, edgeLength, rgbaFaceBytes) ||
+            !CheckedMultiply(rgbaFaceBytes, RGBA_BYTES_PER_PIXEL,
+                rgbaFaceBytes) ||
+            !CheckedMultiply(rgbaFaceBytes, 6u, rgbaLevelBytes) ||
+            !CheckedAdd(totalPixelBytes, rgbaLevelBytes, totalPixelBytes))
+            return Error::DecodeOutputTooLarge;
+        const std::size_t levelOffset = HEADER_SIZE + payloadBytes;
         if (!CheckedMultiply(levelFaceBytes, 6u, levelBytes) ||
             !CheckedAdd(payloadBytes, levelBytes, payloadBytes))
             return Error::DecodeOutputTooLarge;
-        if (level == 0u)
-        {
-            baseFaceBytes = levelFaceBytes;
-            baseMipOffset = HEADER_SIZE + payloadBytes - levelBytes;
-        }
+        layouts.push_back({level, edgeLength, levelFaceBytes, levelOffset});
     }
     std::size_t expectedMemberBytes = 0u;
     if (!CheckedAdd(HEADER_SIZE, payloadBytes, expectedMemberBytes) ||
-        expectedMemberBytes != bytes.size() || baseFaceBytes == 0u)
+        expectedMemberBytes != bytes.size())
         return Error::DecodeInvalidLayout;
+    if (totalPixelBytes > MAX_CUBE_RGBA8_BYTES ||
+        bytes.size() > MAX_TEXTURE_MEMBER_BYTES)
+        return Error::DecodeOutputTooLarge;
 
     Rgba8Cube decoded{};
     decoded.edgeLength = metadata.width;
     try
     {
-        for (auto &face : decoded.faces) face.resize(facePixelBytes);
+        decoded.mipFaces.resize(mipCount - 1u);
     }
     catch (...)
     {
         return Error::DecodeAllocationFailed;
     }
-
-    for (std::size_t faceIndex = 0u; faceIndex < decoded.faces.size();
-         ++faceIndex)
+    for (const LevelLayout &layout : layouts)
     {
-        const std::size_t sourceStart =
-            baseMipOffset + faceIndex * baseFaceBytes;
-        if (sourceStart > bytes.size() ||
-            baseFaceBytes > bytes.size() - sourceStart)
-            return Error::DecodeInvalidLayout;
-        const std::span<const std::uint8_t> source = bytes.subspan(
-            sourceStart, baseFaceBytes);
-        std::vector<std::uint8_t> &rgba = decoded.faces[faceIndex];
-        if (rgb8)
+        auto &targetFaces = layout.level == 0u
+            ? decoded.faces : decoded.mipFaces[layout.level - 1u];
+        for (std::size_t faceIndex = 0u; faceIndex < targetFaces.size();
+             ++faceIndex)
         {
-            for (std::size_t pixel = 0u; pixel < facePixelCount; ++pixel)
-            {
-                const std::size_t sourceOffset = pixel * 3u;
-                const std::size_t targetOffset = pixel * 4u;
-                rgba[targetOffset] = source[sourceOffset + 2u];
-                rgba[targetOffset + 1u] = source[sourceOffset + 1u];
-                rgba[targetOffset + 2u] = source[sourceOffset];
-                rgba[targetOffset + 3u] = 255u;
-            }
-        }
-        else if (!compressed)
-        {
-            for (std::size_t offset = 0u; offset < facePixelBytes;
-                 offset += 4u)
-            {
-                rgba[offset] = source[offset + 2u];
-                rgba[offset + 1u] = source[offset + 1u];
-                rgba[offset + 2u] = source[offset];
-                rgba[offset + 3u] = source[offset + 3u];
-            }
-        }
-        else
-        {
-            const std::uint32_t blocksWide =
-                (static_cast<std::uint32_t>(metadata.width) + 3u) / 4u;
-            const std::uint32_t blocksHigh =
-                (static_cast<std::uint32_t>(metadata.height) + 3u) / 4u;
-            std::size_t sourceOffset = 0u;
-            for (std::uint32_t blockY = 0u; blockY < blocksHigh; ++blockY)
-            {
-                for (std::uint32_t blockX = 0u; blockX < blocksWide;
-                     ++blockX)
-                {
-                    DecodeDxtBlock(source.subspan(sourceOffset,
-                        bytesPerBlock), metadata.format, blockX, blockY,
-                        metadata.width, metadata.height, rgba);
-                    sourceOffset += bytesPerBlock;
-                }
-            }
+            const std::size_t sourceStart =
+                layout.offset + faceIndex * layout.faceBytes;
+            if (sourceStart > bytes.size() ||
+                layout.faceBytes > bytes.size() - sourceStart)
+                return Error::DecodeInvalidLayout;
+            const Error decodeError = DecodeIwiCubeFaceLevel(
+                metadata.format, layout.edgeLength,
+                bytes.subspan(sourceStart, layout.faceBytes),
+                targetFaces[faceIndex]);
+            if (decodeError != Error::None) return decodeError;
         }
     }
     cube = std::move(decoded);
@@ -938,36 +997,84 @@ Error DecodeLoadDefCubeRgba8(
 {
     if (width == 0u || width != height || depth != 1u)
         return Error::DecodeUnsupportedDimensions;
-    std::size_t facePixels = 0u;
-    std::size_t faceRgbaBytes = 0u;
-    std::size_t totalRgbaBytes = 0u;
-    if (!CheckedMultiply(width, height, facePixels) ||
-        !CheckedMultiply(facePixels, RGBA_BYTES_PER_PIXEL,
-            faceRgbaBytes) ||
-        !CheckedMultiply(faceRgbaBytes, 6u, totalRgbaBytes) ||
-        totalRgbaBytes > MAX_CUBE_RGBA8_BYTES ||
-        payload.size() % 6u != 0u)
-    {
+    if (payload.size() % 6u != 0u)
         return Error::DecodeOutputTooLarge;
-    }
     const std::size_t facePayloadBytes = payload.size() / 6u;
     if (facePayloadBytes == 0u) return Error::DecodeInvalidLayout;
 
+    const std::uint32_t mipCount = CountMipmaps(flags, width, height, depth);
+    std::vector<std::size_t> levelBytes;
+    try
+    {
+        levelBytes.resize(mipCount);
+    }
+    catch (...)
+    {
+        return Error::DecodeAllocationFailed;
+    }
+    std::size_t expectedFaceBytes = 0u;
+    std::size_t totalRgbaBytes = 0u;
+    for (std::uint32_t mip = 0u; mip < mipCount; ++mip)
+    {
+        const std::uint32_t edgeLength = std::max<std::uint32_t>(
+            static_cast<std::uint32_t>(width) >> mip, 1u);
+        const Error sizeError = LoadDefLevelBytes(
+            format, edgeLength, edgeLength, levelBytes[mip]);
+        if (sizeError != Error::None) return sizeError;
+        std::size_t rgbaFaceBytes = 0u;
+        std::size_t rgbaLevelBytes = 0u;
+        if (!CheckedAdd(expectedFaceBytes, levelBytes[mip],
+                expectedFaceBytes) ||
+            !CheckedMultiply(edgeLength, edgeLength, rgbaFaceBytes) ||
+            !CheckedMultiply(rgbaFaceBytes, RGBA_BYTES_PER_PIXEL,
+                rgbaFaceBytes) ||
+            !CheckedMultiply(rgbaFaceBytes, 6u, rgbaLevelBytes) ||
+            !CheckedAdd(totalRgbaBytes, rgbaLevelBytes, totalRgbaBytes))
+            return Error::DecodeOutputTooLarge;
+    }
+    if (expectedFaceBytes != facePayloadBytes)
+        return Error::DecodeInvalidLayout;
+    if (totalRgbaBytes > MAX_CUBE_RGBA8_BYTES)
+        return Error::DecodeOutputTooLarge;
+
     Rgba8Cube decoded{};
     decoded.edgeLength = width;
+    try
+    {
+        decoded.mipFaces.resize(mipCount - 1u);
+    }
+    catch (...)
+    {
+        return Error::DecodeAllocationFailed;
+    }
     for (std::size_t faceIndex = 0u; faceIndex < decoded.faces.size();
          ++faceIndex)
     {
-        Rgba8Image face{};
-        const Error error = DecodeLoadDefRgba8(
-            format, flags, width, height, depth,
-            payload.subspan(faceIndex * facePayloadBytes,
-                facePayloadBytes), face);
-        if (error != Error::None) return error;
-        if (face.width != width || face.height != height ||
-            face.pixels.size() != faceRgbaBytes)
-            return Error::DecodeInvalidLayout;
-        decoded.faces[faceIndex] = std::move(face.pixels);
+        std::size_t faceOffset = faceIndex * facePayloadBytes;
+        for (std::uint32_t mip = 0u; mip < mipCount; ++mip)
+        {
+            const std::uint32_t edgeLength = std::max<std::uint32_t>(
+                static_cast<std::uint32_t>(width) >> mip, 1u);
+            Rgba8Image face{};
+            const Error error = DecodeLoadDefRgba8(
+                format, static_cast<std::uint8_t>(flags | FLAG_NO_MIPMAPS),
+                static_cast<std::uint16_t>(edgeLength),
+                static_cast<std::uint16_t>(edgeLength), depth,
+                payload.subspan(faceOffset, levelBytes[mip]), face);
+            if (error != Error::None) return error;
+            std::size_t expectedRgbaBytes = 0u;
+            if (!CheckedMultiply(edgeLength, edgeLength,
+                    expectedRgbaBytes) ||
+                !CheckedMultiply(expectedRgbaBytes, RGBA_BYTES_PER_PIXEL,
+                    expectedRgbaBytes) ||
+                face.width != edgeLength || face.height != edgeLength ||
+                face.pixels.size() != expectedRgbaBytes)
+                return Error::DecodeInvalidLayout;
+            auto &targetFaces = mip == 0u
+                ? decoded.faces : decoded.mipFaces[mip - 1u];
+            targetFaces[faceIndex] = std::move(face.pixels);
+            faceOffset += levelBytes[mip];
+        }
     }
     cube = std::move(decoded);
     return Error::None;

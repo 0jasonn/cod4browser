@@ -214,15 +214,23 @@ void TestDeterministicDistanceLodSelection()
     placement.base.quat[3] = 1.0f;
     placement.scale = 1.0f;
     float viewOrigin[3] = {5.0f, 0.0f, 0.0f};
+    WebRendererLodParms parms{};
+    constexpr float NATIVE_FOV_BASIS = 2.118673086166382f;
+    assert(WebRenderer_BuildLodParms(viewOrigin, 1.0f / NATIVE_FOV_BASIS,
+        1.0f, 0.0f, 1.0f, 0.0f, parms));
     assert(WebRenderer_SelectFxModelLod(&fixture.model, placement,
-        viewOrigin) == 0);
+        &parms) == 0);
     viewOrigin[0] = 20.0f;
+    assert(WebRenderer_BuildLodParms(viewOrigin, 1.0f / NATIVE_FOV_BASIS,
+        1.0f, 0.0f, 1.0f, 0.0f, parms));
     assert(WebRenderer_SelectFxModelLod(&fixture.model, placement,
-        viewOrigin) == 1);
+        &parms) == 1);
     viewOrigin[0] = 19.0f;
     placement.scale = 2.0f;
+    assert(WebRenderer_BuildLodParms(viewOrigin, 1.0f / NATIVE_FOV_BASIS,
+        1.0f, 0.0f, 1.0f, 0.0f, parms));
     assert(WebRenderer_SelectFxModelLod(&fixture.model, placement,
-        viewOrigin) == 0);
+        &parms) == 0);
 }
 
 void TestQuaternionScaleOriginAndOrder()

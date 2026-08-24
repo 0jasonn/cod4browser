@@ -4,6 +4,7 @@
 #include <xanim/xmodel.h>
 
 #include <cassert>
+#include <cmath>
 #include <cstdint>
 
 namespace
@@ -23,18 +24,47 @@ void TestLodDelegatesToCanonicalXModelPolicy()
     model.numLods = 3;
     const float poseOrigin[3] = {3.0f, 4.0f, 0.0f};
     const float viewOrigin[3] = {0.0f, 0.0f, 0.0f};
+    WebRendererLodParms parms{};
+    constexpr float NATIVE_FOV_BASIS = 2.118673086166382f;
+    assert(WebRenderer_BuildLodParms(viewOrigin, 1.0f / NATIVE_FOV_BASIS,
+        1.0f, 0.0f, 1.0f, 0.0f, parms));
 
     g_lodDistance = -1.0f;
     g_canonicalLod = 2;
     assert(WebRenderer_SelectDObjLod(
-        &model, poseOrigin, viewOrigin) == 2);
+        &model, poseOrigin, &parms) == 2);
     assert(g_lodDistance == 5.0f);
 
     g_canonicalLod = -1;
     assert(WebRenderer_SelectDObjLod(
-        &model, poseOrigin, viewOrigin) == 2);
-    assert(WebRenderer_SelectDObjLod(&model, poseOrigin, nullptr) == 0);
-    assert(WebRenderer_SelectDObjLod(nullptr, poseOrigin, viewOrigin) == 0);
+        &model, poseOrigin, &parms) == -1);
+    assert(WebRenderer_SelectDObjLod(&model, poseOrigin, nullptr) == -1);
+    assert(WebRenderer_SelectDObjLod(nullptr, poseOrigin, &parms) == -1);
+
+    g_canonicalLod = 1;
+    assert(WebRenderer_BuildLodParms(viewOrigin, 1.0f / NATIVE_FOV_BASIS,
+        2.0f, 3.0f, 4.0f, 5.0f, parms));
+    model.lodRampType = 0u;
+    assert(WebRenderer_SelectDObjLod(&model, poseOrigin, &parms) == 1);
+    assert(std::fabs(g_lodDistance - 13.0f) < 0.0001f);
+    model.lodRampType = 1u;
+    assert(WebRenderer_SelectDObjLod(&model, poseOrigin, &parms) == 1);
+    assert(std::fabs(g_lodDistance - 25.0f) < 0.0001f);
+
+    model.lodRampType = 0u;
+    assert(WebRenderer_SelectModelLod(
+        &model, poseOrigin, 2.0f, parms) == 1);
+    assert(std::fabs(g_lodDistance - 8.0f) < 0.0001f);
+    assert(WebRenderer_SelectStaticModelLod(
+        &model, poseOrigin, 2.0f, 20.0f, parms) == 1);
+    assert(std::fabs(g_lodDistance - 6.5f) < 0.0001f);
+    assert(WebRenderer_SelectStaticModelLod(
+        &model, poseOrigin, 2.0f, 12.0f, parms) == -1);
+
+    WebRendererLodParms invalid{};
+    assert(!WebRenderer_BuildLodParms(
+        nullptr, 1.0f, 1.0f, 0.0f, 1.0f, 0.0f, invalid));
+    assert(WebRenderer_SelectDObjLod(&model, poseOrigin, &invalid) == -1);
 }
 
 void TestOrdinaryAndViewmodelFlagsShareAdmission()

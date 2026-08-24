@@ -671,6 +671,28 @@ void TestCubemapDecodeAndNativeFaceOrder()
         Require(cube.faces[face] == expected.pixels,
             "cubemap preserves native +X,-X,+Y,-Y,+Z,-Z face order");
     }
+    Require(cube.mipFaces.empty(),
+        "no-mipmap cubemap does not invent authored levels");
+
+    Bytes mipPayload;
+    for (std::size_t face = 0u; face < 6u; ++face)
+        Append(mipPayload, MakeDxtColorBlock(0x001fu, 0x001fu, 0u));
+    for (std::size_t face = 0u; face < 6u; ++face)
+        Append(mipPayload, MakeDxtColorBlock(0x07e0u, 0x07e0u, 0u));
+    for (const std::uint16_t color : colors)
+        Append(mipPayload, MakeDxtColorBlock(color, color, 0u));
+    Rgba8Cube mippedCube{};
+    RequireError(kisak::iwi::DecodeCubeRgba8(MakeDxtIwi(
+        kisak::iwi::FORMAT_DXT1, 4u, 4u, mipPayload,
+        kisak::iwi::FLAG_CUBEMAP), mippedCube), Error::None,
+        "decode complete smallest-to-largest IWI cubemap mip chain");
+    Require(mippedCube.mipFaces.size() == 2u,
+        "IWI cubemap retains every authored level after the base face");
+    Require(mippedCube.mipFaces[0][0].size() == 2u * 2u * 4u &&
+        mippedCube.mipFaces[0][0][1] > 240u &&
+        mippedCube.mipFaces[1][0].size() == 4u &&
+        mippedCube.mipFaces[1][0][2] > 240u,
+        "IWI cubemap levels preserve their authored colors and dimensions");
 
     Rgba8Cube sentinel{};
     sentinel.edgeLength = 7u;
@@ -684,7 +706,7 @@ void TestCubemapDecodeAndNativeFaceOrder()
     RequireError(kisak::iwi::DecodeCubeRgba8(truncated, sentinel),
         Error::DecodeInvalidLayout, "reject truncated cubemap");
     Require(sentinel.edgeLength == before.edgeLength &&
-        sentinel.faces == before.faces,
+        sentinel.faces == before.faces && sentinel.mipFaces == before.mipFaces,
         "failed cubemap decode leaves the destination unchanged");
 }
 
@@ -706,6 +728,28 @@ void TestCanonicalLoadDefCubemapDecode()
     Require(cube.faces[0][0] > 240u && cube.faces[1][1] > 240u &&
         cube.faces[2][2] > 240u,
         "canonical cubemap decodes distinct RGB faces in native order");
+    Require(cube.mipFaces.empty(),
+        "no-mipmap load definition does not invent authored levels");
+
+    Bytes mippedPayload;
+    for (const std::uint16_t color : colors)
+    {
+        Append(mippedPayload, MakeDxtColorBlock(color, color, 0u));
+        Append(mippedPayload, MakeDxtColorBlock(0x07e0u, 0x07e0u, 0u));
+        Append(mippedPayload, MakeDxtColorBlock(0x001fu, 0x001fu, 0u));
+    }
+    Rgba8Cube mippedCube{};
+    RequireError(kisak::iwi::DecodeLoadDefCubeRgba8(
+        kisak::iwi::LOADDEF_FORMAT_DXT1,
+        kisak::iwi::FLAG_CUBEMAP,
+        4u, 4u, 1u, mippedPayload, mippedCube), Error::None,
+        "decode complete face-major load-definition cubemap mip chain");
+    Require(mippedCube.mipFaces.size() == 2u &&
+        mippedCube.mipFaces[0][0].size() == 2u * 2u * 4u &&
+        mippedCube.mipFaces[0][0][1] > 240u &&
+        mippedCube.mipFaces[1][0].size() == 4u &&
+        mippedCube.mipFaces[1][0][2] > 240u,
+        "load-definition cubemap retains authored roughness levels");
 
     Rgba8Cube sentinel{};
     sentinel.edgeLength = 9u;
@@ -718,7 +762,7 @@ void TestCanonicalLoadDefCubemapDecode()
         4u, 4u, 1u, payload, sentinel), Error::DecodeOutputTooLarge,
         "reject uneven canonical cubemap payload");
     Require(sentinel.edgeLength == before.edgeLength &&
-        sentinel.faces == before.faces,
+        sentinel.faces == before.faces && sentinel.mipFaces == before.mipFaces,
         "failed canonical cubemap decode is atomic");
 }
 

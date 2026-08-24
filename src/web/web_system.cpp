@@ -55,6 +55,8 @@ bool g_inputOverflowReported = false;
 bool g_keyboardReceiptReported = false;
 bool g_mouseReceiptReported = false;
 bool g_mouseButtonReceiptReported = false;
+bool g_mouseModePublished = false;
+bool g_absoluteMouseMode = false;
 
 bool QueueInputEvent(const WebInputEvent &event)
 {
@@ -84,6 +86,25 @@ bool DequeueInputEvent(WebInputEvent &event)
     if (g_inputEventCount == 0u)
         g_inputOverflowReported = false;
     return true;
+}
+
+EM_JS(void, Web_PublishMouseMode, (int absolute), {
+    globalThis.postMessage({
+        type: "mouse-mode",
+        absolute: Boolean(absolute),
+    });
+});
+
+void PublishMouseModeIfChanged()
+{
+    constexpr int ABSOLUTE_MOUSE_CATCHERS = 0x2 | 0x10;
+    const bool absolute =
+        (clientUIActives[0].keyCatchers & ABSOLUTE_MOUSE_CATCHERS) != 0;
+    if (g_mouseModePublished && absolute == g_absoluteMouseMode)
+        return;
+    g_mouseModePublished = true;
+    g_absoluteMouseMode = absolute;
+    Web_PublishMouseMode(absolute ? 1 : 0);
 }
 
 EM_JS(void, DispatchRuntimeState, (const char *state, const char *message), {
@@ -333,6 +354,11 @@ void IN_Frame()
             CL_MouseEvent(event.value, event.value2, event.value3, event.value4);
         }
     }
+    // Cursor visibility is not an input-mode signal: the canonical UI hides
+    // the host cursor while drawing its own cursor inside the game viewport.
+    // Publish the key-catcher-owned mode separately so the DOM host can keep
+    // absolute menu motion unlocked without recapturing on a menu click.
+    PublishMouseModeIfChanged();
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_QueueKeyEvent(int key, int down)
@@ -352,8 +378,6 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_QueueKeyEvent(int key, int down)
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_QueueMouseMove(
     int x, int y, int dx, int dy)
 {
-    if (dx == 0 && dy == 0)
-        return 1;
     return QueueInputEvent({
         WebInputEventType::MouseMove,
         x,

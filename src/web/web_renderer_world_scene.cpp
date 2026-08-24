@@ -1,5 +1,4 @@
 #include <web/web_renderer_world_scene.h>
-
 #include <gfx_d3d/gfx_world_types.h>
 
 #include <algorithm>
@@ -31,6 +30,49 @@ void UnpackUnitVec(PackedUnitVec packed, float output[3]) noexcept
     output[0] = (static_cast<float>(packed.array[0]) - 127.0f) * scale;
     output[1] = (static_cast<float>(packed.array[1]) - 127.0f) * scale;
     output[2] = (static_cast<float>(packed.array[2]) - 127.0f) * scale;
+}
+
+bool ValidatePrimaryLightFrame(
+    const WebRendererPrimaryLightDesc *primaryLights,
+    std::uint32_t primaryLightCount) noexcept
+{
+    if (primaryLightCount > WEB_RENDERER_MAX_PRIMARY_LIGHTS ||
+        (primaryLightCount == 0u) != (primaryLights == nullptr))
+    {
+        return false;
+    }
+    for (std::uint32_t index = 0u; index < primaryLightCount; ++index)
+    {
+        const WebRendererPrimaryLightDesc &light = primaryLights[index];
+        if (light.type > 3u || !std::isfinite(light.radius) ||
+            !std::isfinite(light.cosHalfFovOuter) ||
+            !std::isfinite(light.cosHalfFovInner) ||
+            !std::isfinite(light.falloffScale) ||
+            !std::isfinite(light.falloffShift))
+        {
+            return false;
+        }
+        for (std::size_t component = 0u; component < 3u; ++component)
+        {
+            if (!std::isfinite(light.color[component]) ||
+                !std::isfinite(light.direction[component]) ||
+                !std::isfinite(light.origin[component]))
+            {
+                return false;
+            }
+        }
+        const bool localLight = light.type == 2u || light.type == 3u;
+        if ((localLight && (light.radius <= 0.0f ||
+                light.falloffScale <= 0.0f ||
+                light.falloffShift < 0.0f ||
+                light.falloffShift + light.falloffScale > 1.0f)) ||
+            (light.type == 2u &&
+                light.cosHalfFovInner <= light.cosHalfFovOuter))
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool Finite3(const float value[3]) noexcept
@@ -587,6 +629,13 @@ bool BatchMatches(
 }
 
 } // namespace
+
+bool WebRenderer_ValidatePrimaryLightFrame(
+    const WebRendererPrimaryLightDesc *primaryLights,
+    std::uint32_t primaryLightCount) noexcept
+{
+    return ValidatePrimaryLightFrame(primaryLights, primaryLightCount);
+}
 
 WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
     const GfxWorld &world,

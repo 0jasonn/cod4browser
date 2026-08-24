@@ -240,22 +240,17 @@ void WebRenderer_ClearFxModelSubmissions(std::uint32_t *count) noexcept
 
 int WebRenderer_SelectFxModelLod(
     const XModel *model, const GfxScaledPlacement &placement,
-    const float viewOrigin[3]) noexcept
+    const WebRendererLodParms *lodParms) noexcept
 {
-    if (!model || !viewOrigin || model->numLods <= 0 ||
-        model->numLods > MAX_LODS || !Finite3(viewOrigin) ||
+    if (!model || !lodParms || model->numLods <= 0 ||
+        model->numLods > MAX_LODS ||
         !Finite3(placement.base.origin) || !std::isfinite(placement.scale) ||
         placement.scale <= 0.0f)
     {
         return -1;
     }
-    const float dx = viewOrigin[0] - placement.base.origin[0];
-    const float dy = viewOrigin[1] - placement.base.origin[1];
-    const float dz = viewOrigin[2] - placement.base.origin[2];
-    const float distance = std::sqrt(dx * dx + dy * dy + dz * dz) /
-        placement.scale;
-    if (!std::isfinite(distance)) return -1;
-    return XModelGetLodForDist(model, distance);
+    return WebRenderer_SelectModelLod(
+        model, placement.base.origin, placement.scale, *lodParms);
 }
 
 WebRendererFxModelSceneResult WebRenderer_BuildFxModelSceneCommand(

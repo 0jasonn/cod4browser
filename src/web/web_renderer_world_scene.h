@@ -64,6 +64,13 @@ struct WebRendererWorldLightTechniqueContext
     bool sunShadowEnabled = false;
 };
 
+// Validates the per-scene primary-light constants copied from refdef. Unlike
+// world-command validation this deliberately does not require attenuation
+// images: those immutable resources are already retained by light index.
+bool WebRenderer_ValidatePrimaryLightFrame(
+    const WebRendererPrimaryLightDesc *primaryLights,
+    std::uint32_t primaryLightCount) noexcept;
+
 // Builds material/lightmap-aware portable world batches from the canonical
 // renderer-owned GfxWorld. Surface order follows Kisak's canonical lit, decal,
 // and emissive camera ranges; fixtures without initialized DPVS ranges fall

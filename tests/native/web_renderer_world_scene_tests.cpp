@@ -224,6 +224,32 @@ void TestSpotPrimaryLightSelectsNativeMaterialTechnique()
         WebRendererWorldTechnique::BaseTextureLightmapNormal);
 }
 
+void TestPrimaryLightFrameAcceptsScriptedLightState()
+{
+    std::array<WebRendererPrimaryLightDesc, 3u> lights{};
+    lights[1u].type = 1u;
+    lights[1u].direction[2] = -1.0f;
+    lights[2u].type = 2u;
+    lights[2u].radius = 256.0f;
+    lights[2u].cosHalfFovOuter = 0.7f;
+    lights[2u].cosHalfFovInner = 0.8f;
+    lights[2u].falloffScale = 32.0f / 512.0f;
+    lights[2u].falloffShift = 1.0f / 512.0f;
+    // A scripted primary light is disabled by fading its frame color to zero;
+    // it remains a valid indexed spotlight with retained attenuation data.
+    assert(WebRenderer_ValidatePrimaryLightFrame(
+        lights.data(), static_cast<std::uint32_t>(lights.size())));
+
+    lights[2u].radius = 0.0f;
+    assert(!WebRenderer_ValidatePrimaryLightFrame(
+        lights.data(), static_cast<std::uint32_t>(lights.size())));
+    lights[2u].radius = 256.0f;
+    lights[2u].cosHalfFovInner = lights[2u].cosHalfFovOuter;
+    assert(!WebRenderer_ValidatePrimaryLightFrame(
+        lights.data(), static_cast<std::uint32_t>(lights.size())));
+    assert(!WebRenderer_ValidatePrimaryLightFrame(nullptr, 1u));
+}
+
 void TestMissingSpotTechniqueRetainsNativeSkipIntent()
 {
     Fixture fixture;
@@ -993,6 +1019,7 @@ int main()
     TestCanonicalOpaqueSurfacesAreBatchedInWorldOrder();
     TestPrimaryLightIdentitySplitsNativeLitBatches();
     TestSpotPrimaryLightSelectsNativeMaterialTechnique();
+    TestPrimaryLightFrameAcceptsScriptedLightState();
     TestMissingSpotTechniqueRetainsNativeSkipIntent();
     TestCanonicalMaterialAndLightmapIdentitySplitBatches();
     TestCanonicalLmTechniqueNameDoesNotInventLightmapSamplers();

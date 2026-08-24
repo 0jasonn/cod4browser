@@ -57,6 +57,8 @@ struct WebRendererShaderState
     bool firstDrawCompleted;
 };
 
+struct WebRendererPrimaryLightDesc;
+
 struct WebRendererSceneViewDesc
 {
     std::uint32_t x;
@@ -120,6 +122,12 @@ struct WebRendererSceneViewDesc
     std::uint32_t worldVertexCount;
     std::uint32_t worldIndexCount;
     bool geometrySubmitted;
+    // Native consumes refdef.primaryLights for every scene, after cgame has
+    // applied scripted color, radius, direction, and position changes. The
+    // world command owns immutable geometry and attenuation images; this
+    // frame payload keeps its light constants synchronized with cgame.
+    const WebRendererPrimaryLightDesc *primaryLights = nullptr;
+    std::uint32_t primaryLightCount = 0u;
 };
 
 // Static opaque-world command at the renderer backend boundary. Canonical BSP
@@ -128,8 +136,11 @@ struct WebRendererSceneViewDesc
 // These limits are independent of the small retained Gate 2/bootstrap oracle.
 constexpr std::uint32_t WEB_RENDERER_MAX_WORLD_VERTICES = 1'000'000u;
 constexpr std::uint32_t WEB_RENDERER_MAX_WORLD_INDICES = 3'000'000u;
-constexpr std::uint32_t WEB_RENDERER_MAX_STATIC_MODEL_VERTICES = 500'000u;
-constexpr std::uint32_t WEB_RENDERER_MAX_STATIC_MODEL_INDICES = 1'500'000u;
+// The all-authored-LOD command retains each canonical XSurface only once.
+// One million vertices / three million indices bounds that immutable geometry
+// at roughly 81 MiB while covering the measured Killhouse model population.
+constexpr std::uint32_t WEB_RENDERER_MAX_STATIC_MODEL_VERTICES = 1'000'000u;
+constexpr std::uint32_t WEB_RENDERER_MAX_STATIC_MODEL_INDICES = 3'000'000u;
 constexpr std::uint32_t WEB_RENDERER_MAX_STATIC_MODEL_INSTANCES = 20'000u;
 constexpr std::uint32_t WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES = 250'000u;
 constexpr std::uint32_t WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES = 500'000u;
@@ -153,21 +164,24 @@ struct WebRendererModelLightingAtlasDesc
     std::size_t byteLength;
 };
 
-// Canonical non-sun primary-light state retained with the world command.
-// The frontend owns light selection and GfxLightDef resolution; the backend
-// owns only portable constants plus the attenuation image upload.
+// Canonical primary-light state. Attenuation identity is retained with the
+// world command, while the remaining fields are refreshed from the current
+// refdef every scene because scripts can animate or disable primary lights.
 struct WebRendererPrimaryLightDesc
 {
-    const GfxImage *attenuationImage;
     float color[3];
     float direction[3];
     float origin[3];
     float radius;
     float cosHalfFovOuter;
     float cosHalfFovInner;
+    // Native copies every light definition's 1D attenuation curve into the
+    // secondary lightmap atlas and samples it with this normalized placement.
+    float falloffScale;
+    float falloffShift;
     std::uint8_t type;
     std::uint8_t exponent;
-    std::uint8_t samplerState;
+    std::uint8_t canUseShadowMap;
     std::uint8_t padding;
 };
 
@@ -393,6 +407,8 @@ struct WebRendererStaticModelInstanceDesc
     float axis[3][3];
     float origin[3];
     float modelLightingCoordinates[3];
+    float modelScale;
+    float modelCullDistance;
     std::uint32_t canonicalInstanceIndex;
 };
 
@@ -401,6 +417,7 @@ struct WebRendererStaticModelBatchDesc
     WebRendererWorldBatchDesc draw;
     std::uint32_t instanceOffset;
     std::uint32_t instanceCount;
+    std::uint8_t lodIndex;
 };
 
 struct WebRendererStaticModelSceneDesc

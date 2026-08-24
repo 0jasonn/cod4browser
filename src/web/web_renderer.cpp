@@ -2,9 +2,13 @@
 #include <web/web_renderer_comparison.h>
 
 #include <web/web_renderer_surface_storage.h>
+#include <web/web_renderer_lod.h>
+#include <web/web_renderer_world_scene.h>
 #include <web/web_system.h>
 
+#include <qcommon/qcommon.h>
 #include <gfx_d3d/gfx_image_types.h>
+#include <gfx_d3d/r_dvars.h>
 #include <universal/q_shared.h>
 #include <gfx_d3d/r_water.h>
 #include <database/db_generated_image_platform.h>
@@ -32,6 +36,9 @@
 namespace
 {
 constexpr std::uint32_t INVALID_WORLD_IMAGE = UINT32_MAX;
+constexpr std::size_t MAX_SPOT_SHADOWS = 4u;
+constexpr GLsizei SUN_SHADOW_SIZE = 1024;
+constexpr GLsizei SPOT_SHADOW_SIZE = 512;
 // Retail Killhouse's full static XModel base/normal/specular material set
 // expands to roughly 766 MiB after canonical DXT textures cross the portable
 // RGBA8 boundary. Keep the max-graphics recovery copy bounded just above that
@@ -123,16 +130,17 @@ struct WebRendererRetainedWorldBatch
 
 struct WebRendererRetainedPrimaryLight
 {
-    std::uint32_t attenuationImageIndex = INVALID_WORLD_IMAGE;
     float color[3]{};
     float direction[3]{};
     float origin[3]{};
     float radius = 0.0f;
     float cosHalfFovOuter = 0.0f;
     float cosHalfFovInner = 0.0f;
+    float falloffScale = 0.0f;
+    float falloffShift = 0.0f;
     std::uint8_t type = 0u;
     std::uint8_t exponent = 0u;
-    std::uint8_t samplerState = 0u;
+    bool canUseShadowMap = false;
 };
 
 struct WebRendererRetainedModelLightingAtlas
@@ -148,8 +156,11 @@ struct WebRendererRetainedModelLightingAtlas
 struct WebRendererRetainedStaticModelBatch
 {
     WebRendererRetainedWorldBatch draw;
+    std::uint32_t sourceInstanceOffset = 0u;
+    std::uint32_t sourceInstanceCount = 0u;
     std::uint32_t instanceOffset = 0u;
     std::uint32_t instanceCount = 0u;
+    std::uint8_t lodIndex = 0u;
 };
 
 struct WebRendererRetainedUiBatch
@@ -177,6 +188,9 @@ struct WebRendererState
     GLuint sceneFramebuffer = 0;
     GLuint sceneColorTexture = 0;
     GLuint sceneDepthTexture = 0;
+    GLuint multisampleFramebuffer = 0;
+    GLuint multisampleColorRenderbuffer = 0;
+    GLuint multisampleDepthRenderbuffer = 0;
     GLuint compositeFramebuffer = 0;
     GLuint compositeColorTexture = 0;
     GLuint glowFramebuffers[2]{};
@@ -185,6 +199,8 @@ struct WebRendererState
     GLuint shadowDepthTexture = 0;
     GLuint shadowFarFramebuffer = 0;
     GLuint shadowFarDepthTexture = 0;
+    std::array<GLuint, MAX_SPOT_SHADOWS> spotShadowFramebuffers{};
+    std::array<GLuint, MAX_SPOT_SHADOWS> spotShadowDepthTextures{};
     GLuint sunVisibilityQueries[2]{};
     bool sunVisibilityQueryIssued[2]{};
     std::uint32_t sunVisibilityQueryIndex = 0u;
@@ -246,12 +262,15 @@ struct WebRendererState
     GLint sunDirectionUniform = -1;
     GLint sunColorUniform = -1;
     GLint primaryLightmapUniform = -1;
-    GLint primaryLightAttenuationUniform = -1;
+    GLint primaryLightFalloffPlacementUniform = -1;
     GLint primaryLightEnabledUniform = -1;
     GLint primaryLightPositionRadiusUniform = -1;
     GLint primaryLightDiffuseUniform = -1;
     GLint primaryLightSpotDirectionUniform = -1;
     GLint primaryLightSpotFactorsUniform = -1;
+    GLint spotShadowMapUniform = -1;
+    GLint spotShadowMatrixUniform = -1;
+    GLint spotShadowEnabledUniform = -1;
     GLint waterMapUniform = -1;
     GLint reflectionProbeUniform = -1;
     GLint envMapParmsUniform = -1;
@@ -296,6 +315,13 @@ struct WebRendererState
     int canvasHeight = 0;
     int postProcessWidth = 0;
     int postProcessHeight = 0;
+    int multisampleWidth = 0;
+    int multisampleHeight = 0;
+    int aaConfiguredSamples = -1;
+    int aaRequestedSamples = 1;
+    int aaActiveSamples = 1;
+    int aaMaxSamples = 1;
+    std::uint32_t aaResourceGeneration = 0u;
     bool contextLost = false;
     bool initialized = false;
     std::vector<WebRendererSurfaceVertex> retainedVertices;
@@ -312,7 +338,10 @@ struct WebRendererState
     GLuint staticModelInstanceBuffer = 0u;
     std::vector<WebRendererSurfaceVertex> retainedStaticModelVertices;
     std::vector<std::uint32_t> retainedStaticModelIndices;
+    std::vector<WebRendererStaticModelInstanceDesc>
+        retainedStaticModelSourceInstances;
     std::vector<WebRendererStaticModelInstanceDesc> retainedStaticModelInstances;
+    std::vector<std::int8_t> retainedStaticModelSelectedLods;
     std::vector<WebRendererRetainedStaticModelBatch> retainedStaticModelBatches;
     std::vector<WebRendererRetainedWorldImage> retainedStaticModelImages;
     WebRendererRetainedModelLightingAtlas retainedStaticModelLighting;
@@ -389,6 +418,10 @@ struct WebRendererState
     std::array<float, 3> sceneWorldMaxs{};
     std::array<float, 16> sceneSunShadowMatrix{};
     std::array<float, 16> sceneSunShadowFarMatrix{};
+    std::array<std::array<float, 16>, MAX_SPOT_SHADOWS>
+        sceneSpotShadowMatrices{};
+    std::array<std::uint32_t, MAX_SPOT_SHADOWS> sceneSpotShadowLightIndices{};
+    std::uint32_t sceneSpotShadowCount = 0u;
     std::array<float, 4> sceneColorBias{};
     std::array<float, 4> sceneColorTintBase{};
     std::array<float, 4> sceneColorTintDelta{};
@@ -1447,6 +1480,38 @@ EM_JS(
 
 EM_JS(
     void,
+    DispatchRendererAaLifecycle,
+    (const char *state,
+     const char *message,
+     std::int32_t configuredSamples,
+     std::int32_t requestedSamples,
+     std::int32_t activeSamples,
+     std::int32_t maxSamples,
+     std::int32_t width,
+     std::int32_t height,
+     std::uint32_t resourceGeneration,
+     bool resident),
+    {
+        globalThis.dispatchEvent(new CustomEvent("kisakcod:renderer-aa", {
+            detail: {
+                state: UTF8ToString(state),
+                message: UTF8ToString(message),
+                configuredSamples: configuredSamples | 0,
+                requestedSamples: requestedSamples | 0,
+                activeSamples: activeSamples | 0,
+                maxSamples: maxSamples | 0,
+                width: width | 0,
+                height: height | 0,
+                resourceGeneration: resourceGeneration >>> 0,
+                resident: Boolean(resident),
+                backend: "webgl2-multisample-renderbuffer",
+                resolveBoundary: "scene-before-postfx-and-ui"
+            }
+        }));
+    });
+
+EM_JS(
+    void,
     DispatchRendererShaderLifecycle,
     (const char *state,
      const char *message,
@@ -1643,6 +1708,14 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestRestoreWebGLContext()
     return HandleWebGLContextRestored(0, nullptr, nullptr) ? 1 : 0;
 }
 
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestSetAaSamples(int samples)
+{
+    if (!r_aaSamples)
+        return 0;
+    Dvar_SetInt(r_aaSamples, samples);
+    return r_aaSamples->current.integer;
+}
+
 const char *SurfaceTextureBindingString(WebRendererTextureBinding binding) noexcept
 {
     switch (binding)
@@ -1760,6 +1833,9 @@ void ResetGpuHandles()
     g_renderer.sceneFramebuffer = 0;
     g_renderer.sceneColorTexture = 0;
     g_renderer.sceneDepthTexture = 0;
+    g_renderer.multisampleFramebuffer = 0;
+    g_renderer.multisampleColorRenderbuffer = 0;
+    g_renderer.multisampleDepthRenderbuffer = 0;
     g_renderer.compositeFramebuffer = 0;
     g_renderer.compositeColorTexture = 0;
     std::fill_n(g_renderer.glowFramebuffers, 2u, 0u);
@@ -1768,6 +1844,8 @@ void ResetGpuHandles()
     g_renderer.shadowDepthTexture = 0;
     g_renderer.shadowFarFramebuffer = 0;
     g_renderer.shadowFarDepthTexture = 0;
+    g_renderer.spotShadowFramebuffers.fill(0u);
+    g_renderer.spotShadowDepthTextures.fill(0u);
     std::fill_n(g_renderer.sunVisibilityQueries, 2u, 0u);
     std::fill_n(g_renderer.sunVisibilityQueryIssued, 2u, false);
     g_renderer.sunVisibilityQueryIndex = 0u;
@@ -1839,12 +1917,15 @@ void ResetGpuHandles()
     g_renderer.sunDirectionUniform = -1;
     g_renderer.sunColorUniform = -1;
     g_renderer.primaryLightmapUniform = -1;
-    g_renderer.primaryLightAttenuationUniform = -1;
+    g_renderer.primaryLightFalloffPlacementUniform = -1;
     g_renderer.primaryLightEnabledUniform = -1;
     g_renderer.primaryLightPositionRadiusUniform = -1;
     g_renderer.primaryLightDiffuseUniform = -1;
     g_renderer.primaryLightSpotDirectionUniform = -1;
     g_renderer.primaryLightSpotFactorsUniform = -1;
+    g_renderer.spotShadowMapUniform = -1;
+    g_renderer.spotShadowMatrixUniform = -1;
+    g_renderer.spotShadowEnabledUniform = -1;
     g_renderer.waterMapUniform = -1;
     g_renderer.reflectionProbeUniform = -1;
     g_renderer.envMapParmsUniform = -1;
@@ -1888,6 +1969,14 @@ void ResetGpuHandles()
     g_renderer.canvasHeight = 0;
     g_renderer.postProcessWidth = 0;
     g_renderer.postProcessHeight = 0;
+    g_renderer.multisampleWidth = 0;
+    g_renderer.multisampleHeight = 0;
+    g_renderer.aaConfiguredSamples = -1;
+    g_renderer.aaRequestedSamples = 1;
+    g_renderer.aaActiveSamples = 1;
+    g_renderer.aaMaxSamples = 1;
+    g_renderer.sceneSpotShadowCount = 0u;
+    g_renderer.sceneSpotShadowLightIndices.fill(0u);
     for (WebRendererRetainedWorldImage &image : g_renderer.retainedWorldImages)
         image.texture = 0u;
     for (WebRendererRetainedWorldImage &image :
@@ -2104,6 +2193,19 @@ void DeletePostProcessTargetObjects(
         glDeleteTextures(1, &compositeColorTexture);
 }
 
+void DeleteMultisampleTargetObjects(
+    GLuint framebuffer,
+    GLuint colorRenderbuffer,
+    GLuint depthRenderbuffer)
+{
+    if (framebuffer != 0u)
+        glDeleteFramebuffers(1, &framebuffer);
+    if (colorRenderbuffer != 0u)
+        glDeleteRenderbuffers(1, &colorRenderbuffer);
+    if (depthRenderbuffer != 0u)
+        glDeleteRenderbuffers(1, &depthRenderbuffer);
+}
+
 void DeleteShadowObjects(
     GLuint shadowFramebuffer,
     GLuint shadowDepthTexture,
@@ -2167,6 +2269,10 @@ void DestroyWebGLContext()
             g_renderer.sceneDepthTexture,
             g_renderer.compositeFramebuffer,
             g_renderer.compositeColorTexture);
+        DeleteMultisampleTargetObjects(
+            g_renderer.multisampleFramebuffer,
+            g_renderer.multisampleColorRenderbuffer,
+            g_renderer.multisampleDepthRenderbuffer);
         DeleteGlowTargetObjects(
             g_renderer.glowFramebuffers, g_renderer.glowColorTextures);
         DeleteShadowObjects(
@@ -2177,6 +2283,11 @@ void DestroyWebGLContext()
             g_renderer.shadowFarFramebuffer,
             g_renderer.shadowFarDepthTexture,
             0u);
+        for (std::size_t index = 0u; index < MAX_SPOT_SHADOWS; ++index)
+        {
+            DeleteShadowObjects(g_renderer.spotShadowFramebuffers[index],
+                g_renderer.spotShadowDepthTextures[index], 0u);
+        }
         if (g_renderer.sunVisibilityQueries[0] != 0u ||
             g_renderer.sunVisibilityQueries[1] != 0u)
         {
@@ -2390,7 +2501,7 @@ bool CreateStaticModelObjects(
         static_cast<GLsizeiptr>(
             instances.size() * sizeof(WebRendererStaticModelInstanceDesc)),
         instances.data(),
-        GL_STATIC_DRAW);
+        GL_DYNAMIC_DRAW);
     constexpr std::size_t AXIS_OFFSET =
         offsetof(WebRendererStaticModelInstanceDesc, axis);
     for (GLuint row = 0u; row < 3u; ++row)
@@ -2534,6 +2645,15 @@ bool CreateCubeTextureObject(
         cube.edgeLength * 4u;
     for (const auto &face : cube.faces)
         if (face.size() != expectedFaceBytes) return false;
+    for (std::size_t mip = 0u; mip < cube.mipFaces.size(); ++mip)
+    {
+        const std::uint32_t edgeLength = std::max<std::uint32_t>(
+            static_cast<std::uint32_t>(cube.edgeLength) >> (mip + 1u), 1u);
+        const std::size_t expectedMipFaceBytes =
+            static_cast<std::size_t>(edgeLength) * edgeLength * 4u;
+        for (const auto &face : cube.mipFaces[mip])
+            if (face.size() != expectedMipFaceBytes) return false;
+    }
 
     while (glGetError() != GL_NO_ERROR)
     {
@@ -2544,7 +2664,12 @@ bool CreateCubeTextureObject(
     glBindTexture(GL_TEXTURE_CUBE_MAP, texture);
     const std::uint8_t filter = samplerState & 0x07u;
     const GLint glFilter = filter == 1u ? GL_NEAREST : GL_LINEAR;
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, glFilter);
+    const bool hasMipmaps = cube.edgeLength > 1u;
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER,
+        hasMipmaps
+            ? (glFilter == GL_LINEAR
+                ? GL_LINEAR_MIPMAP_LINEAR : GL_NEAREST_MIPMAP_NEAREST)
+            : glFilter);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, glFilter);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -2558,7 +2683,22 @@ bool CreateCubeTextureObject(
             static_cast<GLsizei>(cube.edgeLength), 0, GL_RGBA,
             GL_UNSIGNED_BYTE, cube.faces[face].data());
     }
-    glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
+    for (std::size_t mip = 0u; mip < cube.mipFaces.size(); ++mip)
+    {
+        const std::uint32_t edgeLength = std::max<std::uint32_t>(
+            static_cast<std::uint32_t>(cube.edgeLength) >> (mip + 1u), 1u);
+        for (std::size_t face = 0u; face < cube.faces.size(); ++face)
+        {
+            glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X +
+                    static_cast<GLenum>(face),
+                static_cast<GLint>(mip + 1u), GL_RGBA8,
+                static_cast<GLsizei>(edgeLength),
+                static_cast<GLsizei>(edgeLength), 0, GL_RGBA,
+                GL_UNSIGNED_BYTE, cube.mipFaces[mip][face].data());
+        }
+    }
+    if (hasMipmaps && cube.mipFaces.empty())
+        glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
     const GLenum error = glGetError();
     glActiveTexture(GL_TEXTURE0);
     if (texture == 0u || error != GL_NO_ERROR)
@@ -2693,6 +2833,198 @@ bool CreateWorldTextureObjects(
         }
     }
     return true;
+}
+
+bool CreateMultisampleTarget(int width, int height)
+{
+    if (width <= 0 || height <= 0)
+        return false;
+
+    const int configuredSamples = r_aaSamples
+        ? std::max(1, r_aaSamples->current.integer)
+        : 1;
+    const int requestedSamples = std::min(configuredSamples, 4);
+    if (g_renderer.aaConfiguredSamples == configuredSamples &&
+        g_renderer.multisampleWidth == width &&
+        g_renderer.multisampleHeight == height)
+    {
+        return g_renderer.aaActiveSamples > 1 &&
+            g_renderer.multisampleFramebuffer != 0u;
+    }
+
+    DeleteMultisampleTargetObjects(
+        g_renderer.multisampleFramebuffer,
+        g_renderer.multisampleColorRenderbuffer,
+        g_renderer.multisampleDepthRenderbuffer);
+    g_renderer.multisampleFramebuffer = 0u;
+    g_renderer.multisampleColorRenderbuffer = 0u;
+    g_renderer.multisampleDepthRenderbuffer = 0u;
+    g_renderer.multisampleWidth = width;
+    g_renderer.multisampleHeight = height;
+    g_renderer.aaConfiguredSamples = configuredSamples;
+    g_renderer.aaRequestedSamples = requestedSamples;
+    g_renderer.aaActiveSamples = 1;
+
+    GLint maxSamples = 1;
+    glGetIntegerv(GL_MAX_SAMPLES, &maxSamples);
+    g_renderer.aaMaxSamples = std::max(1, static_cast<int>(maxSamples));
+
+    if (configuredSamples > 4)
+    {
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] r_aaSamples=%d is capped to the browser "
+            "port's supported 4x maximum.\n",
+            configuredSamples);
+    }
+
+    if (requestedSamples <= 1)
+    {
+        DispatchRendererAaLifecycle(
+            "disabled",
+            "Anti-aliasing is disabled because r_aaSamples is 1",
+            configuredSamples,
+            requestedSamples,
+            1,
+            g_renderer.aaMaxSamples,
+            width,
+            height,
+            g_renderer.aaResourceGeneration,
+            false);
+        return false;
+    }
+
+    const int firstCandidate = std::min(
+        requestedSamples, g_renderer.aaMaxSamples);
+    while (glGetError() != GL_NO_ERROR)
+    {
+        // Framebuffer allocation reports its own error below. Do not let a
+        // stale error from an unrelated draw reject a supported sample count.
+    }
+    for (int samples = firstCandidate; samples >= 2; --samples)
+    {
+        GLuint framebuffer = 0u;
+        GLuint colorRenderbuffer = 0u;
+        GLuint depthRenderbuffer = 0u;
+        glGenFramebuffers(1, &framebuffer);
+        glGenRenderbuffers(1, &colorRenderbuffer);
+        glGenRenderbuffers(1, &depthRenderbuffer);
+
+        glBindRenderbuffer(GL_RENDERBUFFER, colorRenderbuffer);
+        glRenderbufferStorageMultisample(
+            GL_RENDERBUFFER, samples, GL_RGBA8, width, height);
+        glBindRenderbuffer(GL_RENDERBUFFER, depthRenderbuffer);
+        glRenderbufferStorageMultisample(
+            GL_RENDERBUFFER, samples, GL_DEPTH_COMPONENT24, width, height);
+        glBindRenderbuffer(GL_RENDERBUFFER, 0u);
+
+        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+            GL_RENDERBUFFER, colorRenderbuffer);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+            GL_RENDERBUFFER, depthRenderbuffer);
+        const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        const GLenum error = glGetError();
+        glBindFramebuffer(GL_FRAMEBUFFER, 0u);
+
+        if (status == GL_FRAMEBUFFER_COMPLETE && error == GL_NO_ERROR)
+        {
+            g_renderer.multisampleFramebuffer = framebuffer;
+            g_renderer.multisampleColorRenderbuffer = colorRenderbuffer;
+            g_renderer.multisampleDepthRenderbuffer = depthRenderbuffer;
+            g_renderer.aaActiveSamples = samples;
+            ++g_renderer.aaResourceGeneration;
+            Web_Log(WebLogLevel::Info,
+                "[kisakcod-web] Using %dx anti-aliasing "
+                "(requested=%d, WebGL2 max=%d, %dx%d).\n",
+                samples, requestedSamples, g_renderer.aaMaxSamples,
+                width, height);
+            DispatchRendererAaLifecycle(
+                "ready",
+                "COD4 scene multisampling is active and resolves before post effects",
+                configuredSamples,
+                requestedSamples,
+                samples,
+                g_renderer.aaMaxSamples,
+                width,
+                height,
+                g_renderer.aaResourceGeneration,
+                true);
+            return true;
+        }
+
+        DeleteMultisampleTargetObjects(
+            framebuffer, colorRenderbuffer, depthRenderbuffer);
+    }
+
+    Web_Log(WebLogLevel::Info,
+        "[kisakcod-web] WebGL2 could not create the requested %dx "
+        "anti-aliasing target; rendering without anti-aliasing.\n",
+        requestedSamples);
+    DispatchRendererAaLifecycle(
+        "fallback",
+        "WebGL2 rejected every multisample count, so rendering fell back to 1x",
+        configuredSamples,
+        requestedSamples,
+        1,
+        g_renderer.aaMaxSamples,
+        width,
+        height,
+        g_renderer.aaResourceGeneration,
+        false);
+    return false;
+}
+
+bool ResolveMultisampleTarget(
+    GLuint destinationFramebuffer,
+    int width,
+    int height,
+    bool resolveDepth)
+{
+    if (g_renderer.multisampleFramebuffer == 0u ||
+        g_renderer.aaActiveSamples <= 1)
+        return false;
+
+    glBindFramebuffer(
+        GL_READ_FRAMEBUFFER, g_renderer.multisampleFramebuffer);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, destinationFramebuffer);
+    const GLbitfield mask = GL_COLOR_BUFFER_BIT |
+        (resolveDepth ? GL_DEPTH_BUFFER_BIT : 0u);
+    glBlitFramebuffer(
+        0, 0, width, height,
+        0, 0, width, height,
+        mask, GL_NEAREST);
+    glBindFramebuffer(GL_FRAMEBUFFER, destinationFramebuffer);
+    const GLenum error = glGetError();
+    if (error == GL_NO_ERROR)
+        return true;
+
+    Web_Log(WebLogLevel::Error,
+        "[kisakcod-web] %dx anti-aliasing resolve failed (0x%x); "
+        "the target will be rebuilt.\n",
+        g_renderer.aaActiveSamples,
+        static_cast<unsigned int>(error));
+    const int configuredSamples = g_renderer.aaConfiguredSamples;
+    DeleteMultisampleTargetObjects(
+        g_renderer.multisampleFramebuffer,
+        g_renderer.multisampleColorRenderbuffer,
+        g_renderer.multisampleDepthRenderbuffer);
+    g_renderer.multisampleFramebuffer = 0u;
+    g_renderer.multisampleColorRenderbuffer = 0u;
+    g_renderer.multisampleDepthRenderbuffer = 0u;
+    g_renderer.aaConfiguredSamples = -1;
+    g_renderer.aaActiveSamples = 1;
+    DispatchRendererAaLifecycle(
+        "failed",
+        "The multisample resolve failed and the target will be rebuilt",
+        configuredSamples,
+        g_renderer.aaRequestedSamples,
+        1,
+        g_renderer.aaMaxSamples,
+        width,
+        height,
+        g_renderer.aaResourceGeneration,
+        false);
+    return false;
 }
 
 bool CreatePostProcessTargets(int width, int height)
@@ -2833,9 +3165,12 @@ bool CreatePostProcessTargets(int width, int height)
     return true;
 }
 
-bool CreateSunShadowTarget(GLuint &framebufferOut, GLuint &depthTextureOut)
+bool CreateShadowTarget(
+    GLsizei shadowSize,
+    const char *label,
+    GLuint &framebufferOut,
+    GLuint &depthTextureOut)
 {
-    constexpr GLsizei SHADOW_SIZE = 1024;
     GLuint framebuffer = 0u;
     GLuint depthTexture = 0u;
     while (glGetError() != GL_NO_ERROR)
@@ -2848,7 +3183,7 @@ bool CreateSunShadowTarget(GLuint &framebufferOut, GLuint &depthTextureOut)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24,
-        SHADOW_SIZE, SHADOW_SIZE, 0, GL_DEPTH_COMPONENT,
+        shadowSize, shadowSize, 0, GL_DEPTH_COMPONENT,
         GL_UNSIGNED_INT, nullptr);
     glGenFramebuffers(1, &framebuffer);
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
@@ -2866,8 +3201,9 @@ bool CreateSunShadowTarget(GLuint &framebufferOut, GLuint &depthTextureOut)
     {
         DeleteShadowObjects(framebuffer, depthTexture, 0u);
         Web_Log(WebLogLevel::Error,
-            "[kisakcod-web] WebGL2 sun-shadow target creation failed "
+            "[kisakcod-web] WebGL2 %s-shadow target creation failed "
             "(status=0x%x error=0x%x).\n",
+            label,
             static_cast<unsigned int>(status),
             static_cast<unsigned int>(error));
         return false;
@@ -3008,7 +3344,7 @@ bool CreateRendererResources()
         uniform sampler2D u_shadow_map;
         uniform sampler2D u_shadow_far_map;
         uniform sampler2D u_primary_lightmap;
-        uniform sampler2D u_primary_light_attenuation;
+        uniform vec2 u_primary_light_falloff_placement;
         uniform sampler2D u_water_map;
         uniform samplerCube u_reflection_probe;
         uniform mat4 u_shadow_matrix;
@@ -3021,6 +3357,9 @@ bool CreateRendererResources()
         uniform vec3 u_primary_light_diffuse;
         uniform vec3 u_primary_light_spot_direction;
         uniform vec3 u_primary_light_spot_factors;
+        uniform sampler2D u_spot_shadow_map;
+        uniform mat4 u_spot_shadow_matrix;
+        uniform float u_spot_shadow_enabled;
         uniform vec4 u_env_map_parms;
         uniform vec4 u_water_color;
         out vec4 out_color;
@@ -3092,6 +3431,33 @@ bool CreateRendererResources()
                 far_depth <= 0.0 || far_depth >= 1.0)
                 return 1.0;
             return sample_far_sun_shadow(far_uv, far_depth);
+        }
+
+        float sample_spot_shadow(vec3 world_position)
+        {
+            if (u_spot_shadow_enabled < 0.5) return 1.0;
+            vec4 clip = u_spot_shadow_matrix * vec4(world_position, 1.0);
+            if (clip.w <= 0.0) return 1.0;
+            vec3 projected = clip.xyz / clip.w;
+            vec2 uv = projected.xy * 0.5 + 0.5;
+            float receiver_depth = projected.z * 0.5 + 0.5;
+            const float border = 1.0 / 512.0;
+            if (uv.x <= border || uv.x >= 1.0 - border ||
+                uv.y <= border || uv.y >= 1.0 - border ||
+                receiver_depth <= 0.0 || receiver_depth >= 1.0)
+                return 1.0;
+            const vec2 texel = vec2(1.0 / 512.0);
+            float biased_depth = receiver_depth - 0.002;
+            float visibility = 0.0;
+            visibility += biased_depth <= texture(u_spot_shadow_map,
+                uv + texel * vec2(-0.5, -0.5)).r ? 1.0 : 0.0;
+            visibility += biased_depth <= texture(u_spot_shadow_map,
+                uv + texel * vec2( 0.5, -0.5)).r ? 1.0 : 0.0;
+            visibility += biased_depth <= texture(u_spot_shadow_map,
+                uv + texel * vec2(-0.5,  0.5)).r ? 1.0 : 0.0;
+            visibility += biased_depth <= texture(u_spot_shadow_map,
+                uv + texel * vec2( 0.5,  0.5)).r ? 1.0 : 0.0;
+            return visibility * 0.25;
         }
 
         void main()
@@ -3253,11 +3619,19 @@ bool CreateRendererResources()
                         float spot_attenuation = pow(clamp(
                             spot_coordinate, 0.0, 1.0),
                             u_primary_light_spot_factors.z);
+                        // Native lm_spot samples the attenuation curve copied
+                        // into the secondary lightmap atlas. c10 is
+                        // (width/512, 0, lmapLookupStart/512, 0); it does not
+                        // sample the standalone GfxLightDef image here.
+                        float radial_coordinate = clamp(distance_to_light *
+                            u_primary_light_position_radius.w, 0.0, 1.0) *
+                            u_primary_light_falloff_placement.x +
+                            u_primary_light_falloff_placement.y;
                         float radial_attenuation = texture(
-                            u_primary_light_attenuation,
-                            vec2(clamp(distance_to_light *
-                                u_primary_light_position_radius.w,
-                                0.0, 1.0), 0.5)).r;
+                            u_secondary_lightmap,
+                            vec2(radial_coordinate, 0.0)).r;
+                        // The native vertex program forwards the authored
+                        // primary-lightmap coordinates unchanged.
                         float primary_visibility = texture(
                             u_primary_lightmap, v_lightmap_coord).r;
                         vec3 primary_normal = normalize(v_model_normal);
@@ -3279,7 +3653,8 @@ bool CreateRendererResources()
                             light_direction, primary_normal), 0.0);
                         lighting += u_primary_light_diffuse * diffuse *
                             spot_attenuation * radial_attenuation *
-                            primary_visibility;
+                            primary_visibility *
+                            sample_spot_shadow(v_world_position);
                     }
                     if (u_sun_shadow_enabled > 0.5)
                     {
@@ -3790,8 +4165,8 @@ bool CreateRendererResources()
         glGetUniformLocation(program, "u_sun_color");
     const GLint primaryLightmapUniform =
         glGetUniformLocation(program, "u_primary_lightmap");
-    const GLint primaryLightAttenuationUniform =
-        glGetUniformLocation(program, "u_primary_light_attenuation");
+    const GLint primaryLightFalloffPlacementUniform =
+        glGetUniformLocation(program, "u_primary_light_falloff_placement");
     const GLint primaryLightEnabledUniform =
         glGetUniformLocation(program, "u_primary_light_enabled");
     const GLint primaryLightPositionRadiusUniform =
@@ -3802,6 +4177,12 @@ bool CreateRendererResources()
         glGetUniformLocation(program, "u_primary_light_spot_direction");
     const GLint primaryLightSpotFactorsUniform =
         glGetUniformLocation(program, "u_primary_light_spot_factors");
+    const GLint spotShadowMapUniform =
+        glGetUniformLocation(program, "u_spot_shadow_map");
+    const GLint spotShadowMatrixUniform =
+        glGetUniformLocation(program, "u_spot_shadow_matrix");
+    const GLint spotShadowEnabledUniform =
+        glGetUniformLocation(program, "u_spot_shadow_enabled");
     const GLint waterMapUniform =
         glGetUniformLocation(program, "u_water_map");
     const GLint reflectionProbeUniform =
@@ -3970,11 +4351,21 @@ bool CreateRendererResources()
     GLuint shadowDepthTexture = 0u;
     GLuint shadowFarFramebuffer = 0u;
     GLuint shadowFarDepthTexture = 0u;
-    const bool shadowTargetReady = CreateSunShadowTarget(
-        shadowFramebuffer, shadowDepthTexture);
+    const bool shadowTargetReady = CreateShadowTarget(
+        SUN_SHADOW_SIZE, "sun", shadowFramebuffer, shadowDepthTexture);
     const bool shadowFarTargetReady = shadowTargetReady &&
-        CreateSunShadowTarget(
+        CreateShadowTarget(SUN_SHADOW_SIZE, "sun-far",
             shadowFarFramebuffer, shadowFarDepthTexture);
+    std::array<GLuint, MAX_SPOT_SHADOWS> spotShadowFramebuffers{};
+    std::array<GLuint, MAX_SPOT_SHADOWS> spotShadowDepthTextures{};
+    bool spotShadowTargetsReady = shadowFarTargetReady;
+    for (std::size_t index = 0u;
+         spotShadowTargetsReady && index < MAX_SPOT_SHADOWS; ++index)
+    {
+        spotShadowTargetsReady = CreateShadowTarget(
+            SPOT_SHADOW_SIZE, "spot",
+            spotShadowFramebuffers[index], spotShadowDepthTextures[index]);
+    }
     GLuint compatibilityProgram = 0;
     GLint compatibilityViewProjection = -1;
     GLint compatibilityWorld = -1;
@@ -4008,12 +4399,14 @@ bool CreateRendererResources()
         shadowFarMatrixUniform < 0 || sunShadowEnabledUniform < 0 ||
         sunDirectionUniform < 0 || sunColorUniform < 0 ||
         primaryLightmapUniform < 0 ||
-        primaryLightAttenuationUniform < 0 ||
+        primaryLightFalloffPlacementUniform < 0 ||
         primaryLightEnabledUniform < 0 ||
         primaryLightPositionRadiusUniform < 0 ||
         primaryLightDiffuseUniform < 0 ||
         primaryLightSpotDirectionUniform < 0 ||
         primaryLightSpotFactorsUniform < 0 ||
+        spotShadowMapUniform < 0 || spotShadowMatrixUniform < 0 ||
+        spotShadowEnabledUniform < 0 ||
         waterMapUniform < 0 || reflectionProbeUniform < 0 ||
         envMapParmsUniform < 0 || waterColorUniform < 0 ||
         shadowDepthMatrixUniform < 0 || shadowDepthTextureUniform < 0 ||
@@ -4052,6 +4445,7 @@ bool CreateRendererResources()
         !dynamicModelLightingReady ||
         !uiObjectsReady || !uiTexturesReady ||
         !shadowTargetReady || !shadowFarTargetReady ||
+        !spotShadowTargetsReady ||
         !compatibilityReady)
     {
         Web_Log(
@@ -4072,6 +4466,9 @@ bool CreateRendererResources()
             shadowFramebuffer, shadowDepthTexture, shadowProgram);
         DeleteShadowObjects(
             shadowFarFramebuffer, shadowFarDepthTexture, 0u);
+        for (std::size_t index = 0u; index < MAX_SPOT_SHADOWS; ++index)
+            DeleteShadowObjects(spotShadowFramebuffers[index],
+                spotShadowDepthTextures[index], 0u);
         DeleteWorldTextureObjects(g_renderer.retainedWorldImages);
         DeleteWaterTextureObjects(g_renderer.retainedWorldBatches);
         DeleteWorldTextureObjects(g_renderer.retainedStaticModelImages);
@@ -4117,6 +4514,8 @@ bool CreateRendererResources()
     g_renderer.shadowDepthTexture = shadowDepthTexture;
     g_renderer.shadowFarFramebuffer = shadowFarFramebuffer;
     g_renderer.shadowFarDepthTexture = shadowFarDepthTexture;
+    g_renderer.spotShadowFramebuffers = spotShadowFramebuffers;
+    g_renderer.spotShadowDepthTextures = spotShadowDepthTextures;
     g_renderer.aspectUniform = aspectUniform;
     g_renderer.textureUniform = textureUniform;
     g_renderer.textureEnabledUniform = textureEnabledUniform;
@@ -4157,8 +4556,8 @@ bool CreateRendererResources()
     g_renderer.sunDirectionUniform = sunDirectionUniform;
     g_renderer.sunColorUniform = sunColorUniform;
     g_renderer.primaryLightmapUniform = primaryLightmapUniform;
-    g_renderer.primaryLightAttenuationUniform =
-        primaryLightAttenuationUniform;
+    g_renderer.primaryLightFalloffPlacementUniform =
+        primaryLightFalloffPlacementUniform;
     g_renderer.primaryLightEnabledUniform = primaryLightEnabledUniform;
     g_renderer.primaryLightPositionRadiusUniform =
         primaryLightPositionRadiusUniform;
@@ -4167,6 +4566,9 @@ bool CreateRendererResources()
         primaryLightSpotDirectionUniform;
     g_renderer.primaryLightSpotFactorsUniform =
         primaryLightSpotFactorsUniform;
+    g_renderer.spotShadowMapUniform = spotShadowMapUniform;
+    g_renderer.spotShadowMatrixUniform = spotShadowMatrixUniform;
+    g_renderer.spotShadowEnabledUniform = spotShadowEnabledUniform;
     g_renderer.waterMapUniform = waterMapUniform;
     g_renderer.reflectionProbeUniform = reflectionProbeUniform;
     g_renderer.envMapParmsUniform = envMapParmsUniform;
@@ -4239,6 +4641,17 @@ bool HandleWebGLContextLost(int, const void *, void *)
     }
 
     g_renderer.contextLost = true;
+    DispatchRendererAaLifecycle(
+        "lost",
+        "The multisample scene target was lost with the WebGL2 context",
+        g_renderer.aaConfiguredSamples,
+        g_renderer.aaRequestedSamples,
+        g_renderer.aaActiveSamples,
+        g_renderer.aaMaxSamples,
+        g_renderer.multisampleWidth,
+        g_renderer.multisampleHeight,
+        g_renderer.aaResourceGeneration,
+        false);
     ResetGpuHandles();
     EmitSurfaceLifecycle(
         "lost",
@@ -4351,7 +4764,10 @@ bool CreateWebGLContext()
     attributes.alpha = EM_FALSE;
     attributes.depth = EM_TRUE;
     attributes.stencil = EM_FALSE;
-    attributes.antialias = EM_TRUE;
+    // COD4 controls multisampling through r_aaSamples and resolves its scene
+    // target before post effects. Browser-owned default-framebuffer AA cannot
+    // cover that offscreen scene and would also make the 1x setting dishonest.
+    attributes.antialias = EM_FALSE;
     attributes.premultipliedAlpha = EM_FALSE;
     attributes.preserveDrawingBuffer = EM_FALSE;
     attributes.enableExtensionsByDefault = EM_TRUE;
@@ -4723,10 +5139,12 @@ WebRendererSurfaceResult CopyWorldCommand(
             WebRendererRetainedPrimaryLight light;
             light.type = source.type;
             light.exponent = source.exponent;
-            light.samplerState = source.samplerState;
+            light.canUseShadowMap = source.canUseShadowMap != 0u;
             light.radius = source.radius;
             light.cosHalfFovOuter = source.cosHalfFovOuter;
             light.cosHalfFovInner = source.cosHalfFovInner;
+            light.falloffScale = source.falloffScale;
+            light.falloffShift = source.falloffShift;
             std::copy_n(source.color, 3u, light.color);
             std::copy_n(source.direction, 3u, light.direction);
             std::copy_n(source.origin, 3u, light.origin);
@@ -4743,17 +5161,16 @@ WebRendererSurfaceResult CopyWorldCommand(
             if (!std::isfinite(light.radius) ||
                 !std::isfinite(light.cosHalfFovOuter) ||
                 !std::isfinite(light.cosHalfFovInner) ||
+                !std::isfinite(light.falloffScale) ||
+                !std::isfinite(light.falloffShift) ||
                 (localLight && (light.radius <= 0.0f ||
-                    !source.attenuationImage)) ||
+                    light.falloffScale <= 0.0f ||
+                    light.falloffShift < 0.0f ||
+                    light.falloffShift + light.falloffScale > 1.0f)) ||
                 (light.type == 2u && light.cosHalfFovInner <=
                     light.cosHalfFovOuter))
             {
                 return WebRendererSurfaceResult::InvalidDescriptor;
-            }
-            if (localLight)
-            {
-                light.attenuationImageIndex = RetainCanonicalWorldImage(
-                    source.attenuationImage, images, retainedPixelBytes);
             }
             primaryLights.push_back(light);
         }
@@ -5038,6 +5455,9 @@ WebRendererSurfaceResult CopyStaticModelCommand(
         for (const float component : instance.modelLightingCoordinates)
             if (!std::isfinite(component))
                 return WebRendererSurfaceResult::NonFiniteVertex;
+        if (!std::isfinite(instance.modelScale) || instance.modelScale <= 0.0f ||
+            !std::isfinite(instance.modelCullDistance))
+            return WebRendererSurfaceResult::InvalidDescriptor;
     }
 
     std::size_t retainedPixelBytes = 0u;
@@ -5049,7 +5469,6 @@ WebRendererSurfaceResult CopyStaticModelCommand(
             scene.instances, scene.instances + scene.instanceCount);
         batches.reserve(scene.batchCount);
         images.reserve(scene.batchCount);
-        std::uint32_t expectedFirstIndex = 0u;
         for (std::uint32_t index = 0u; index < scene.batchCount; ++index)
         {
             const WebRendererStaticModelBatchDesc &source = scene.batches[index];
@@ -5064,7 +5483,6 @@ WebRendererSurfaceResult CopyStaticModelCommand(
             if (draw.sourceKind != WebRendererSceneBatchKind::StaticXModel ||
                 !draw.modelIdentity || draw.indexCount == 0u ||
                 draw.surfaceCount == 0u || source.instanceCount == 0u ||
-                draw.firstIndex != expectedFirstIndex ||
                 (draw.firstIndex % 3u) != 0u ||
                 (draw.indexCount % 3u) != 0u ||
                 draw.firstIndex > scene.indexCount ||
@@ -5072,16 +5490,20 @@ WebRendererSurfaceResult CopyStaticModelCommand(
                 source.instanceOffset > scene.instanceCount ||
                 source.instanceCount >
                     scene.instanceCount - source.instanceOffset ||
+                source.lodIndex >= draw.modelIdentity->numLods ||
+                source.lodIndex >= MAX_LODS ||
                 !staticModelTechnique ||
                 draw.lightingMode >
                     WebRendererWorldLightingMode::ModelLightGrid)
             {
                 return WebRendererSurfaceResult::InvalidDescriptor;
             }
-            expectedFirstIndex += draw.indexCount;
             WebRendererRetainedStaticModelBatch batch;
+            batch.sourceInstanceOffset = source.instanceOffset;
+            batch.sourceInstanceCount = source.instanceCount;
             batch.instanceOffset = source.instanceOffset;
             batch.instanceCount = source.instanceCount;
+            batch.lodIndex = source.lodIndex;
             batch.draw.firstIndex = draw.firstIndex;
             batch.draw.indexCount = draw.indexCount;
             batch.draw.surfaceCount = draw.surfaceCount;
@@ -5138,8 +5560,6 @@ WebRendererSurfaceResult CopyStaticModelCommand(
                     WebRendererWorldTechnique::BackendFallback;
             batches.push_back(std::move(batch));
         }
-        if (expectedFirstIndex != scene.indexCount)
-            return WebRendererSurfaceResult::InvalidDescriptor;
         // Preserve base-color and authored normal coverage before spending the
         // bounded recovery allowance on the new SM3 specular tier.
         for (std::uint32_t index = 0u; index < scene.batchCount; ++index)
@@ -5285,10 +5705,11 @@ WebRendererTextureResult WebRenderer_SetSkyImage(
     g_renderer.retainedSky = std::move(replacement);
     Web_Log(WebLogLevel::Info,
         "[kisakcod-web] Renderer retained canonical sky cubemap '%s' "
-        "(%ux%u, six RGBA8 faces, sampler=0x%02x).\n",
+        "(%ux%u, six RGBA8 faces, %zu authored levels, sampler=0x%02x).\n",
         g_renderer.retainedSky.canonicalName.c_str(),
         g_renderer.retainedSky.cube.edgeLength,
         g_renderer.retainedSky.cube.edgeLength,
+        1u + g_renderer.retainedSky.cube.mipFaces.size(),
         static_cast<unsigned int>(g_renderer.retainedSky.samplerState));
     return WebRendererTextureResult::Success;
 }
@@ -5472,6 +5893,15 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
         [](const WebRendererRetainedWorldBatch &batch) {
             return batch.technique == WebRendererWorldTechnique::BaseTexture;
         }));
+    std::size_t reflectionProbeCount = 0u;
+    std::size_t reflectionProbeLevelCount = 0u;
+    for (const WebRendererRetainedWorldBatch &batch :
+         g_renderer.retainedWorldBatches)
+    {
+        if (batch.reflectionCube.edgeLength == 0u) continue;
+        ++reflectionProbeCount;
+        reflectionProbeLevelCount += 1u + batch.reflectionCube.mipFaces.size();
+    }
     if (comparisonCaptured)
     {
         LogNormalizedWorldLightingTrace(surface);
@@ -5484,10 +5914,12 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
         "[kisakcod-web] Renderer retained canonical material world command "
         "(%u vertices, %u indices, %u batches: %zu lightmapped, "
         "%zu SM3 specular, %zu base-only; "
-        "%zu/%zu images, %zu geometry bytes).\n",
+        "%zu/%zu images, %zu reflection probes/%zu authored levels, "
+        "%zu geometry bytes).\n",
         surface.vertexCount, surface.indexCount, surface.batchCount,
         lightmappedBatches, specularBatches, baseTextureBatches, supportedImages,
-        g_renderer.retainedWorldImages.size(), retainedBytes);
+        g_renderer.retainedWorldImages.size(), reflectionProbeCount,
+        reflectionProbeLevelCount, retainedBytes);
     const std::size_t retainedLocalLights = static_cast<std::size_t>(
         std::count_if(g_renderer.retainedPrimaryLights.begin(),
             g_renderer.retainedPrimaryLights.end(),
@@ -5519,8 +5951,7 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
                 const WebRendererRetainedPrimaryLight &light =
                     g_renderer.retainedPrimaryLights[
                         batch.primaryLightIndex];
-                return light.type == 2u &&
-                    light.attenuationImageIndex != INVALID_WORLD_IMAGE;
+                return light.type == 2u && light.falloffScale > 0.0f;
             }));
     Web_Log(WebLogLevel::Info,
         "[kisakcod-web] Renderer retained %zu canonical local primary lights "
@@ -5608,8 +6039,12 @@ void __cdecl R_UnloadWorld()
         g_renderer.retainedStaticModelVertices);
     decltype(g_renderer.retainedStaticModelIndices){}.swap(
         g_renderer.retainedStaticModelIndices);
+    decltype(g_renderer.retainedStaticModelSourceInstances){}.swap(
+        g_renderer.retainedStaticModelSourceInstances);
     decltype(g_renderer.retainedStaticModelInstances){}.swap(
         g_renderer.retainedStaticModelInstances);
+    decltype(g_renderer.retainedStaticModelSelectedLods){}.swap(
+        g_renderer.retainedStaticModelSelectedLods);
     decltype(g_renderer.retainedStaticModelBatches){}.swap(
         g_renderer.retainedStaticModelBatches);
     decltype(g_renderer.retainedStaticModelImages){}.swap(
@@ -5721,6 +6156,17 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
         retainedBatches,
         retainedImages);
     if (copy != WebRendererSurfaceResult::Success) return copy;
+    std::vector<WebRendererStaticModelInstanceDesc> sourceInstances;
+    std::vector<std::int8_t> selectedLods;
+    try
+    {
+        sourceInstances = retainedInstances;
+        selectedLods.assign(retainedInstances.size(), -2);
+    }
+    catch (const std::bad_alloc &)
+    {
+        return WebRendererSurfaceResult::AllocationFailed;
+    }
     if (!CopyModelLightingAtlas(
             scene.modelLightingAtlas, retainedLighting))
         return WebRendererSurfaceResult::InvalidDescriptor;
@@ -5779,7 +6225,10 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
     }
     g_renderer.retainedStaticModelVertices = std::move(retainedVertices);
     g_renderer.retainedStaticModelIndices = std::move(retainedIndices);
+    g_renderer.retainedStaticModelSourceInstances =
+        std::move(sourceInstances);
     g_renderer.retainedStaticModelInstances = std::move(retainedInstances);
+    g_renderer.retainedStaticModelSelectedLods = std::move(selectedLods);
     g_renderer.retainedStaticModelBatches = std::move(retainedBatches);
     g_renderer.retainedStaticModelImages = std::move(retainedImages);
     g_renderer.retainedStaticModelLighting = std::move(retainedLighting);
@@ -6107,6 +6556,11 @@ bool WebRenderer_Initialize()
     {
         return true;
     }
+
+    // The bootstrap surface is rendered before canonical R_BeginRegistration
+    // is reached. Register the same archived/latched renderer dvars here so
+    // r_aaSamples owns both bootstrap and gameplay from the first frame.
+    R_RegisterDvars();
 
     if (!g_renderer.surfaceActive)
     {
@@ -6514,6 +6968,176 @@ bool BuildSunShadowMatrix(
     matrix[15] = 1.0f;
     return true;
 }
+
+bool BuildSpotShadowMatrix(
+    const WebRendererRetainedPrimaryLight &light,
+    std::array<float, 16> &matrix) noexcept
+{
+    auto normalize = [](std::array<float, 3> value) {
+        const float length = std::sqrt(value[0] * value[0] +
+            value[1] * value[1] + value[2] * value[2]);
+        if (!(length > 0.000001f) || !std::isfinite(length))
+            return std::array<float, 3>{};
+        for (float &component : value) component /= length;
+        return value;
+    };
+    auto cross = [](const std::array<float, 3> &a,
+                    const std::array<float, 3> &b) {
+        return std::array<float, 3>{
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0]};
+    };
+    const std::array<float, 3> axis0 = normalize({
+        -light.direction[0], -light.direction[1], -light.direction[2]});
+    if (axis0 == std::array<float, 3>{} ||
+        !(light.cosHalfFovOuter > 0.0f &&
+          light.cosHalfFovOuter < 1.0f) || light.radius <= 1.0f)
+        return false;
+    std::size_t perpendicularComponent =
+        axis0[0] * axis0[0] > axis0[1] * axis0[1] ? 1u : 0u;
+    if (axis0[perpendicularComponent] * axis0[perpendicularComponent] >
+        axis0[2] * axis0[2])
+        perpendicularComponent = 2u;
+    std::array<float, 3> axis2{
+        -axis0[perpendicularComponent] * axis0[0],
+        -axis0[perpendicularComponent] * axis0[1],
+        -axis0[perpendicularComponent] * axis0[2]};
+    axis2[perpendicularComponent] += 1.0f;
+    axis2 = normalize(axis2);
+    const std::array<float, 3> axis1 = cross(axis2, axis0);
+    const float tangent = std::sqrt(std::max(
+        0.0f, 1.0f - light.cosHalfFovOuter * light.cosHalfFovOuter)) /
+        light.cosHalfFovOuter;
+    if (!(tangent > 0.0f) || !std::isfinite(tangent)) return false;
+
+    // Preserve the canonical MatrixForViewer axis convention. The row-major
+    // Kisak matrix is uploaded unchanged; WebGL's column-major interpretation
+    // supplies the transpose needed by GLSL column-vector multiplication.
+    std::array<float, 16> view{};
+    view[0] = -axis1[0]; view[4] = -axis1[1]; view[8] = -axis1[2];
+    view[1] = axis2[0]; view[5] = axis2[1]; view[9] = axis2[2];
+    view[2] = axis0[0]; view[6] = axis0[1]; view[10] = axis0[2];
+    view[12] = -(light.origin[0] * view[0] +
+        light.origin[1] * view[4] + light.origin[2] * view[8]);
+    view[13] = -(light.origin[0] * view[1] +
+        light.origin[1] * view[5] + light.origin[2] * view[9]);
+    view[14] = -(light.origin[0] * view[2] +
+        light.origin[1] * view[6] + light.origin[2] * view[10]);
+    view[15] = 1.0f;
+
+    constexpr float nearPlane = 1.0f;
+    std::array<float, 16> projection{};
+    projection[0] = 1.0f / tangent;
+    projection[5] = 1.0f / tangent;
+    // Native uses D3D's [0,1] finite perspective. Convert only its depth
+    // coefficients to WebGL's [-1,1] clip range at this backend boundary.
+    projection[10] = (light.radius + nearPlane) /
+        (light.radius - nearPlane);
+    projection[11] = 1.0f;
+    projection[14] = (-2.0f * light.radius * nearPlane) /
+        (light.radius - nearPlane);
+
+    matrix.fill(0.0f);
+    for (std::size_t column = 0u; column < 4u; ++column)
+        for (std::size_t row = 0u; row < 4u; ++row)
+            for (std::size_t inner = 0u; inner < 4u; ++inner)
+                matrix[row * 4u + column] +=
+                    view[row * 4u + inner] *
+                    projection[inner * 4u + column];
+    return std::all_of(matrix.begin(), matrix.end(),
+        [](float value) { return std::isfinite(value); });
+}
+
+void SelectSpotShadowLights() noexcept
+{
+    struct Candidate { std::uint32_t lightIndex; float score; };
+    std::array<bool, WEB_RENDERER_MAX_PRIMARY_LIGHTS> used{};
+    for (const WebRendererRetainedWorldBatch &batch :
+         g_renderer.retainedWorldBatches)
+        if (batch.primaryLightIndex < used.size())
+            used[batch.primaryLightIndex] = true;
+    for (const WebRendererRetainedWorldBatch &batch :
+         g_renderer.retainedDynamicModelBatches)
+        if (batch.primaryLightIndex < used.size())
+            used[batch.primaryLightIndex] = true;
+
+    std::vector<Candidate> candidates;
+    candidates.reserve(g_renderer.retainedPrimaryLights.size());
+    const float eyeProjectDistance = sm_lightScore_eyeProjectDist
+        ? sm_lightScore_eyeProjectDist->current.value : 64.0f;
+    const float spotProjectFraction = sm_lightScore_spotProjectFrac
+        ? sm_lightScore_spotProjectFrac->current.value : 0.125f;
+    const float eyeReference[3]{
+        g_renderer.sceneViewOrigin[0] + eyeProjectDistance *
+            g_renderer.sceneViewAxis[0],
+        g_renderer.sceneViewOrigin[1] + eyeProjectDistance *
+            g_renderer.sceneViewAxis[1],
+        g_renderer.sceneViewOrigin[2] + eyeProjectDistance *
+            g_renderer.sceneViewAxis[2]};
+    for (std::uint32_t index = 1u;
+         index < g_renderer.retainedPrimaryLights.size() &&
+             index < used.size(); ++index)
+    {
+        const WebRendererRetainedPrimaryLight &light =
+            g_renderer.retainedPrimaryLights[index];
+        if (!used[index] || light.type != 2u || !light.canUseShadowMap ||
+            light.radius <= 1.0f ||
+            (sm_spotEnable && !sm_spotEnable->current.enabled))
+            continue;
+        float focusDelta[3]{};
+        for (std::size_t component = 0u; component < 3u; ++component)
+            focusDelta[component] = light.origin[component] -
+                eyeReference[component] - light.radius *
+                spotProjectFraction * light.direction[component];
+        const float distance = std::sqrt(focusDelta[0] * focusDelta[0] +
+            focusDelta[1] * focusDelta[1] +
+            focusDelta[2] * focusDelta[2]);
+        const float intensity = light.color[0] * 0.2989f +
+            light.color[1] * 0.587f + light.color[2] * 0.114f;
+        candidates.push_back({index,
+            light.radius * intensity / (distance + 1.0f)});
+    }
+    std::stable_sort(candidates.begin(), candidates.end(),
+        [](const Candidate &left, const Candidate &right) {
+            return left.score > right.score;
+        });
+    const std::uint32_t configuredLimit = sm_maxLights
+        ? static_cast<std::uint32_t>(std::clamp(
+            sm_maxLights->current.integer, 0,
+            static_cast<int>(MAX_SPOT_SHADOWS)))
+        : static_cast<std::uint32_t>(MAX_SPOT_SHADOWS);
+    g_renderer.sceneSpotShadowCount = 0u;
+    for (const Candidate &candidate : candidates)
+    {
+        if (g_renderer.sceneSpotShadowCount >= configuredLimit) break;
+        const std::size_t slot = g_renderer.sceneSpotShadowCount;
+        if (!BuildSpotShadowMatrix(
+                g_renderer.retainedPrimaryLights[candidate.lightIndex],
+                g_renderer.sceneSpotShadowMatrices[slot]))
+            continue;
+        g_renderer.sceneSpotShadowLightIndices[slot] = candidate.lightIndex;
+        ++g_renderer.sceneSpotShadowCount;
+    }
+    static std::uint32_t reportedCount = UINT32_MAX;
+    if (reportedCount != g_renderer.sceneSpotShadowCount)
+    {
+        reportedCount = g_renderer.sceneSpotShadowCount;
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Selected %u/%zu eligible primary spot shadow "
+            "maps (configured limit %u, indices=%u/%u/%u/%u).\n",
+            g_renderer.sceneSpotShadowCount, candidates.size(),
+            configuredLimit,
+            g_renderer.sceneSpotShadowCount > 0u
+                ? g_renderer.sceneSpotShadowLightIndices[0] : 0u,
+            g_renderer.sceneSpotShadowCount > 1u
+                ? g_renderer.sceneSpotShadowLightIndices[1] : 0u,
+            g_renderer.sceneSpotShadowCount > 2u
+                ? g_renderer.sceneSpotShadowLightIndices[2] : 0u,
+            g_renderer.sceneSpotShadowCount > 3u
+                ? g_renderer.sceneSpotShadowLightIndices[3] : 0u);
+    }
+}
 } // namespace
 
 bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
@@ -6611,6 +7235,34 @@ bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
     {
         return false;
     }
+    if (!WebRenderer_ValidatePrimaryLightFrame(
+            view.primaryLights, view.primaryLightCount) ||
+        view.primaryLightCount != g_renderer.retainedPrimaryLights.size())
+    {
+        return false;
+    }
+    for (std::uint32_t index = 0u;
+         index < view.primaryLightCount; ++index)
+    {
+        const WebRendererPrimaryLightDesc &source =
+            view.primaryLights[index];
+        WebRendererRetainedPrimaryLight &destination =
+            g_renderer.retainedPrimaryLights[index];
+        // Primary-light type and attenuation definition are authored world
+        // identity. Cgame animates the other GfxLight fields, and native picks
+        // the material technique from the same stable indexed light.
+        if (source.type != destination.type) return false;
+        destination.exponent = source.exponent;
+        destination.canUseShadowMap = source.canUseShadowMap != 0u;
+        destination.radius = source.radius;
+        destination.cosHalfFovOuter = source.cosHalfFovOuter;
+        destination.cosHalfFovInner = source.cosHalfFovInner;
+        destination.falloffScale = source.falloffScale;
+        destination.falloffShift = source.falloffShift;
+        std::copy_n(source.color, 3u, destination.color);
+        std::copy_n(source.direction, 3u, destination.direction);
+        std::copy_n(source.origin, 3u, destination.origin);
+    }
 
     const bool worldChanged = g_renderer.sceneViewWorldName != view.worldName;
     ++g_renderer.sceneViewSubmissionGeneration;
@@ -6632,6 +7284,7 @@ bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
     g_renderer.sceneTanHalfFov = {view.tanHalfFovX, view.tanHalfFovY};
     std::copy(axis, axis + 9u, g_renderer.sceneViewAxis.begin());
     std::copy_n(view.viewOrigin, 3u, g_renderer.sceneViewOrigin.begin());
+    SelectSpotShadowLights();
     std::copy_n(view.fogColor, 4u, g_renderer.sceneFogColor.begin());
     g_renderer.sceneFogParams = {view.fogStart, view.fogDensity};
     g_renderer.sceneFogEnabled = view.fogEnabled;
@@ -7002,18 +7655,19 @@ const WebRendererRetainedWorldImage *WorldImage(
     return RetainedImage(g_renderer.retainedWorldImages, index);
 }
 
-bool DrawSunShadowPartition(
+bool DrawShadowPartition(
     GLuint framebuffer,
-    const std::array<float, 16> &matrix)
+    const std::array<float, 16> &matrix,
+    GLsizei shadowSize,
+    bool requireSunCaster)
 {
-    if (!g_renderer.sceneSunShadowEnabled ||
-        g_renderer.shadowProgram == 0u ||
+    if (g_renderer.shadowProgram == 0u ||
         framebuffer == 0u ||
         !g_renderer.worldSurfaceActive)
         return false;
 
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-    glViewport(0, 0, 1024, 1024);
+    glViewport(0, 0, shadowSize, shadowSize);
     glUseProgram(g_renderer.shadowProgram);
     glUniformMatrix4fv(g_renderer.shadowDepthMatrixUniform, 1, GL_FALSE,
         matrix.data());
@@ -7033,7 +7687,8 @@ bool DrawSunShadowPartition(
     for (const WebRendererRetainedWorldBatch &batch :
          g_renderer.retainedWorldBatches)
     {
-        if (!batch.castsSunShadow || (batch.stateBits[0] & 0x700u) != 0u)
+        if ((requireSunCaster && !batch.castsSunShadow) ||
+            (batch.stateBits[0] & 0x700u) != 0u)
             continue;
         const WebRendererRetainedWorldImage *base =
             WorldImage(batch.baseImageIndex);
@@ -7060,7 +7715,7 @@ bool DrawSunShadowPartition(
         for (const WebRendererRetainedStaticModelBatch &batch :
              g_renderer.retainedStaticModelBatches)
         {
-            if (!batch.draw.castsSunShadow) continue;
+            if (requireSunCaster && !batch.draw.castsSunShadow) continue;
             const WebRendererRetainedWorldImage *base = RetainedImage(
                 g_renderer.retainedStaticModelImages,
                 batch.draw.baseImageIndex);
@@ -7071,6 +7726,7 @@ bool DrawSunShadowPartition(
             BindWorldTexture(GL_TEXTURE0,
                 base ? base->texture : g_renderer.texture,
                 batch.draw.samplerState);
+            if (batch.instanceCount == 0u) continue;
             BindStaticModelInstanceRange(batch.instanceOffset);
             const std::uintptr_t indexOffset =
                 static_cast<std::uintptr_t>(batch.draw.firstIndex) *
@@ -7090,7 +7746,8 @@ bool DrawSunShadowPartition(
         for (const WebRendererRetainedWorldBatch &batch :
              g_renderer.retainedDynamicModelBatches)
         {
-            if (!batch.castsSunShadow || batch.depthHack ||
+            if ((requireSunCaster && !batch.castsSunShadow) ||
+                batch.depthHack ||
                 WebRenderer_IsFxVertexColorBatch(batch.sourceKind))
                 continue;
             const WebRendererRetainedWorldImage *base = RetainedImage(
@@ -7120,15 +7777,57 @@ bool DrawSunShadowPartition(
 
 bool DrawSunShadowMaps()
 {
-    if (g_renderer.shadowDepthTexture == 0u ||
+    if (!g_renderer.sceneSunShadowEnabled ||
+        g_renderer.shadowDepthTexture == 0u ||
         g_renderer.shadowFarDepthTexture == 0u)
         return false;
-    return DrawSunShadowPartition(
+    return DrawShadowPartition(
             g_renderer.shadowFramebuffer,
-            g_renderer.sceneSunShadowMatrix) &&
-        DrawSunShadowPartition(
+            g_renderer.sceneSunShadowMatrix, SUN_SHADOW_SIZE, true) &&
+        DrawShadowPartition(
             g_renderer.shadowFarFramebuffer,
-            g_renderer.sceneSunShadowFarMatrix);
+            g_renderer.sceneSunShadowFarMatrix, SUN_SHADOW_SIZE, true);
+}
+
+bool DrawSpotShadowMaps()
+{
+    if (g_renderer.sceneSpotShadowCount == 0u) return false;
+    for (std::size_t slot = 0u;
+         slot < g_renderer.sceneSpotShadowCount; ++slot)
+    {
+        if (g_renderer.spotShadowDepthTextures[slot] == 0u ||
+            !DrawShadowPartition(g_renderer.spotShadowFramebuffers[slot],
+                g_renderer.sceneSpotShadowMatrices[slot],
+                SPOT_SHADOW_SIZE, false))
+            return false;
+    }
+    return true;
+}
+
+void BindSpotShadowForPrimaryLight(
+    std::uint8_t primaryLightIndex,
+    bool primaryLit,
+    bool spotShadowMapsDrawn)
+{
+    if (primaryLit && spotShadowMapsDrawn)
+    {
+        for (std::size_t slot = 0u;
+             slot < g_renderer.sceneSpotShadowCount; ++slot)
+        {
+            if (g_renderer.sceneSpotShadowLightIndices[slot] !=
+                primaryLightIndex)
+                continue;
+            glUniform1f(g_renderer.spotShadowEnabledUniform, 1.0f);
+            glUniformMatrix4fv(g_renderer.spotShadowMatrixUniform, 1,
+                GL_FALSE, g_renderer.sceneSpotShadowMatrices[slot].data());
+            glActiveTexture(GL_TEXTURE10);
+            glBindTexture(GL_TEXTURE_2D,
+                g_renderer.spotShadowDepthTextures[slot]);
+            glActiveTexture(GL_TEXTURE0);
+            return;
+        }
+    }
+    glUniform1f(g_renderer.spotShadowEnabledUniform, 0.0f);
 }
 
 void BindStaticModelInstanceRange(std::uint32_t instanceOffset)
@@ -7166,6 +7865,134 @@ void BindStaticModelInstanceRange(std::uint32_t instanceOffset)
         reinterpret_cast<const void *>(base + offsetof(
             WebRendererStaticModelInstanceDesc,
             modelLightingCoordinates)));
+}
+
+bool UpdateStaticModelLods()
+{
+    if (!g_renderer.staticModelSceneActive ||
+        g_renderer.staticModelInstanceBuffer == 0u ||
+        g_renderer.retainedStaticModelSourceInstances.empty())
+        return true;
+
+    if (g_renderer.retainedStaticModelInstances.size() !=
+            g_renderer.retainedStaticModelSourceInstances.size() ||
+        g_renderer.retainedStaticModelSelectedLods.size() !=
+            g_renderer.retainedStaticModelSourceInstances.size())
+        return false;
+
+    WebRendererLodParms parms{};
+    if (!WebRenderer_BuildLodParms(
+            g_renderer.sceneViewOrigin.data(),
+            g_renderer.sceneTanHalfFov[1],
+            r_lodScaleRigid ? r_lodScaleRigid->current.value : 1.0f,
+            r_lodBiasRigid ? r_lodBiasRigid->current.value : 0.0f,
+            r_lodScaleSkinned ? r_lodScaleSkinned->current.value : 1.0f,
+            r_lodBiasSkinned ? r_lodBiasSkinned->current.value : 0.0f,
+            parms))
+        return false;
+
+    bool changed = false;
+    std::size_t firstBatch = 0u;
+    while (firstBatch < g_renderer.retainedStaticModelBatches.size())
+    {
+        WebRendererRetainedStaticModelBatch &first =
+            g_renderer.retainedStaticModelBatches[firstBatch];
+        const std::uint32_t sourceOffset = first.sourceInstanceOffset;
+        const std::uint32_t sourceCount = first.sourceInstanceCount;
+        const XModel *model = first.draw.modelIdentity;
+        if (!model || sourceOffset >
+                g_renderer.retainedStaticModelSourceInstances.size() ||
+            sourceCount >
+                g_renderer.retainedStaticModelSourceInstances.size() -
+                    sourceOffset)
+            return false;
+
+        std::size_t endBatch = firstBatch + 1u;
+        while (endBatch < g_renderer.retainedStaticModelBatches.size())
+        {
+            const WebRendererRetainedStaticModelBatch &next =
+                g_renderer.retainedStaticModelBatches[endBatch];
+            if (next.sourceInstanceOffset != sourceOffset ||
+                next.sourceInstanceCount != sourceCount ||
+                next.draw.modelIdentity != model)
+                break;
+            ++endBatch;
+        }
+
+        std::array<std::uint32_t, MAX_LODS> lodCounts{};
+        for (std::uint32_t index = 0u; index < sourceCount; ++index)
+        {
+            const std::size_t sourceIndex = sourceOffset + index;
+            const WebRendererStaticModelInstanceDesc &instance =
+                g_renderer.retainedStaticModelSourceInstances[sourceIndex];
+            const int selectedLod = WebRenderer_SelectStaticModelLod(
+                model, instance.origin, instance.modelScale,
+                instance.modelCullDistance, parms);
+            if (selectedLod < -1 || selectedLod >= MAX_LODS)
+                return false;
+            if (g_renderer.retainedStaticModelSelectedLods[sourceIndex] !=
+                    selectedLod)
+            {
+                g_renderer.retainedStaticModelSelectedLods[sourceIndex] =
+                    static_cast<std::int8_t>(selectedLod);
+                changed = true;
+            }
+            if (selectedLod >= 0)
+                ++lodCounts[static_cast<std::size_t>(selectedLod)];
+        }
+
+        std::array<std::uint32_t, MAX_LODS> lodOffsets{};
+        std::uint32_t writeOffset = sourceOffset;
+        for (std::size_t lod = 0u; lod < MAX_LODS; ++lod)
+        {
+            lodOffsets[lod] = writeOffset;
+            for (std::uint32_t index = 0u; index < sourceCount; ++index)
+            {
+                const std::size_t sourceIndex = sourceOffset + index;
+                if (g_renderer.retainedStaticModelSelectedLods[sourceIndex] ==
+                        static_cast<std::int8_t>(lod))
+                {
+                    g_renderer.retainedStaticModelInstances[writeOffset++] =
+                        g_renderer.retainedStaticModelSourceInstances[
+                            sourceIndex];
+                }
+            }
+        }
+        for (std::uint32_t index = 0u; index < sourceCount; ++index)
+        {
+            const std::size_t sourceIndex = sourceOffset + index;
+            if (g_renderer.retainedStaticModelSelectedLods[sourceIndex] < 0)
+            {
+                g_renderer.retainedStaticModelInstances[writeOffset++] =
+                    g_renderer.retainedStaticModelSourceInstances[sourceIndex];
+            }
+        }
+        if (writeOffset != sourceOffset + sourceCount)
+            return false;
+
+        for (std::size_t batchIndex = firstBatch;
+             batchIndex < endBatch; ++batchIndex)
+        {
+            WebRendererRetainedStaticModelBatch &batch =
+                g_renderer.retainedStaticModelBatches[batchIndex];
+            batch.instanceOffset = lodOffsets[batch.lodIndex];
+            batch.instanceCount = lodCounts[batch.lodIndex];
+        }
+        firstBatch = endBatch;
+    }
+    if (!changed)
+        return true;
+
+    glBindBuffer(GL_ARRAY_BUFFER, g_renderer.staticModelInstanceBuffer);
+    glBufferSubData(
+        GL_ARRAY_BUFFER,
+        0,
+        static_cast<GLsizeiptr>(
+            g_renderer.retainedStaticModelInstances.size() *
+            sizeof(WebRendererStaticModelInstanceDesc)),
+        g_renderer.retainedStaticModelInstances.data());
+    glBindBuffer(GL_ARRAY_BUFFER, 0u);
+    return glGetError() == GL_NO_ERROR;
 }
 
 float UpdateSunEffectOverTime(float current, float goal,
@@ -7463,13 +8290,37 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             g_renderer.surfaceActive ? 1u : 0u);
         g_renderer.sceneViewWaitReported = true;
     }
-    const bool postProcessDraw = sceneGeometryDraw &&
+    const bool multisampleDraw = CreateMultisampleTarget(width, height);
+    const bool postProcessTargetsReady =
         g_renderer.postProcessProgram != 0u &&
+        (sceneGeometryDraw || multisampleDraw) &&
         CreatePostProcessTargets(width, height);
-    const bool shadowMapDrawn = sceneGeometryDraw &&
+    const bool postProcessDraw = sceneGeometryDraw &&
+        postProcessTargetsReady;
+    const bool directAaResolveDraw = multisampleDraw &&
+        !postProcessDraw && postProcessTargetsReady;
+    const bool staticModelLodsReady = !sceneGeometryDraw ||
+        UpdateStaticModelLods();
+    static bool staticModelLodFailureReported = false;
+    if (!staticModelLodsReady && !staticModelLodFailureReported)
+    {
+        Web_Log(WebLogLevel::Error,
+            "[kisakcod-web] Static XModel LOD selection or instance-buffer "
+            "update failed; static models are suppressed.\n");
+        staticModelLodFailureReported = true;
+    }
+    else if (staticModelLodsReady)
+    {
+        staticModelLodFailureReported = false;
+    }
+    const bool shadowMapDrawn = sceneGeometryDraw && staticModelLodsReady &&
         DrawSunShadowMaps();
+    const bool spotShadowMapsDrawn = sceneGeometryDraw &&
+        staticModelLodsReady && DrawSpotShadowMaps();
     glBindFramebuffer(GL_FRAMEBUFFER,
-        postProcessDraw ? g_renderer.sceneFramebuffer : 0u);
+        multisampleDraw
+            ? g_renderer.multisampleFramebuffer
+            : postProcessDraw ? g_renderer.sceneFramebuffer : 0u);
 
     const double elapsed = static_cast<double>(frame.monotonicMilliseconds) / 1000.0;
     const float wave = static_cast<float>(0.5 + 0.5 * std::sin(elapsed * 0.35));
@@ -7585,7 +8436,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1i(g_renderer.waterMapUniform, 7);
         glUniform1i(g_renderer.reflectionProbeUniform, 8);
         glUniform1i(g_renderer.primaryLightmapUniform, 9);
-        glUniform1i(g_renderer.primaryLightAttenuationUniform, 10);
+        glUniform1i(g_renderer.spotShadowMapUniform, 10);
         glUniformMatrix4fv(g_renderer.shadowMatrixUniform, 1, GL_FALSE,
             g_renderer.sceneSunShadowMatrix.data());
         glUniformMatrix4fv(g_renderer.shadowFarMatrixUniform, 1, GL_FALSE,
@@ -7596,6 +8447,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             g_renderer.sceneSunColor.data());
         glUniform1f(g_renderer.sunShadowEnabledUniform, 0.0f);
         glUniform1f(g_renderer.primaryLightEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.spotShadowEnabledUniform, 0.0f);
         glActiveTexture(GL_TEXTURE6);
         glBindTexture(GL_TEXTURE_2D,
             shadowMapDrawn ? g_renderer.shadowDepthTexture :
@@ -7685,10 +8537,9 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 ? &g_renderer.retainedPrimaryLights[
                     batch.primaryLightIndex]
                 : nullptr;
-            const WebRendererRetainedWorldImage *attenuation = primaryLight
-                ? WorldImage(primaryLight->attenuationImageIndex) : nullptr;
             const bool primaryLit = lightmapped && primaryLightmap &&
-                primaryLight && primaryLight->type == 2u && attenuation &&
+                primaryLight && primaryLight->type == 2u &&
+                primaryLight->falloffScale > 0.0f &&
                 batch.techniqueType == 10u &&
                 batch.pixelShaderName.rfind("lm_spot_", 0u) == 0u;
             glUniform1f(g_renderer.sceneFallbackUniform,
@@ -7751,7 +8602,13 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                     spotScale,
                     -spotScale * primaryLight->cosHalfFovOuter,
                     static_cast<float>(primaryLight->exponent));
+                glUniform2f(
+                    g_renderer.primaryLightFalloffPlacementUniform,
+                    primaryLight->falloffScale,
+                    primaryLight->falloffShift);
             }
+            BindSpotShadowForPrimaryLight(batch.primaryLightIndex,
+                primaryLit, spotShadowMapsDrawn);
             BindWorldTexture(
                 GL_TEXTURE0,
                 base ? base->texture : g_renderer.texture,
@@ -7774,10 +8631,6 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 primaryLightmap
                     ? primaryLightmap->texture : g_renderer.texture,
                 0x62u);
-            BindWorldTexture(
-                GL_TEXTURE10,
-                attenuation ? attenuation->texture : g_renderer.texture,
-                primaryLight ? primaryLight->samplerState : 0u);
             const std::uintptr_t indexOffset =
                 static_cast<std::uintptr_t>(batch.firstIndex) *
                 sizeof(std::uint32_t);
@@ -7825,7 +8678,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             reinterpret_cast<const void *>(indexOffset));
         completedDraws = 1u;
     }
-    if (sceneGeometryDraw && !compatibilityDraw &&
+    if (sceneGeometryDraw && staticModelLodsReady && !compatibilityDraw &&
         g_renderer.staticModelSceneActive &&
         g_renderer.staticModelVertexArray != 0u &&
         g_renderer.staticModelInstanceBuffer != 0u)
@@ -7898,6 +8751,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 GL_TEXTURE5,
                 specular ? specular->texture : g_renderer.texture,
                 batch.draw.specularSamplerState);
+            if (batch.instanceCount == 0u) continue;
             BindStaticModelInstanceRange(batch.instanceOffset);
             const std::uintptr_t indexOffset =
                 static_cast<std::uintptr_t>(batch.draw.firstIndex) *
@@ -8075,10 +8929,6 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                     ? &g_renderer.retainedPrimaryLights[
                         batch.primaryLightIndex]
                     : nullptr;
-                const WebRendererRetainedWorldImage *attenuation =
-                    primaryLight
-                    ? WorldImage(primaryLight->attenuationImageIndex)
-                    : nullptr;
                 const bool fxSceneGeometry =
                     WebRenderer_IsFxVertexColorBatch(batch.sourceKind);
                 const bool fallback = batch.technique ==
@@ -8108,7 +8958,8 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                         batch.technique);
                 const bool primaryLit = dynamicLightmapped &&
                     primaryLightmap && primaryLight &&
-                    primaryLight->type == 2u && attenuation &&
+                    primaryLight->type == 2u &&
+                    primaryLight->falloffScale > 0.0f &&
                     batch.techniqueType == 10u &&
                     batch.pixelShaderName.rfind("lm_spot_", 0u) == 0u;
                 glUniform1f(g_renderer.fogEnabledUniform,
@@ -8162,7 +9013,13 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                         spotScale,
                         -spotScale * primaryLight->cosHalfFovOuter,
                         static_cast<float>(primaryLight->exponent));
+                    glUniform2f(
+                        g_renderer.primaryLightFalloffPlacementUniform,
+                        primaryLight->falloffScale,
+                        primaryLight->falloffShift);
                 }
+                BindSpotShadowForPrimaryLight(batch.primaryLightIndex,
+                    primaryLit, spotShadowMapsDrawn);
                 glUniform3fv(g_renderer.modelLightingBaseCoordinatesUniform,
                     1, batch.modelLightingCoordinates);
                 if (sunSprite)
@@ -8193,9 +9050,6 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                     primaryLightmap
                         ? primaryLightmap->texture : g_renderer.texture,
                     0x62u);
-                BindWorldTexture(GL_TEXTURE10,
-                    attenuation ? attenuation->texture : g_renderer.texture,
-                    primaryLight ? primaryLight->samplerState : 0u);
                 const std::uintptr_t indexOffset =
                     static_cast<std::uintptr_t>(batch.firstIndex) *
                     sizeof(std::uint32_t);
@@ -8215,6 +9069,36 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
     }
     if (sceneGeometryDraw && !compatibilityDraw)
         UpdateSunPostEffectState();
+    if (multisampleDraw)
+    {
+        // Native COD4 resolves the multisampled 3D scene into a texture before
+        // post effects and draws 2D afterward. Preserve depth for the DOF pass.
+        ResolveMultisampleTarget(
+            (postProcessDraw || directAaResolveDraw)
+                ? g_renderer.sceneFramebuffer : 0u,
+            width,
+            height,
+            postProcessDraw);
+    }
+    if (directAaResolveDraw)
+    {
+        // Chromium's opaque default framebuffer is not required to have the
+        // RGBA8 format needed for a legal multisample resolve. Native COD4
+        // likewise resolves to an A8R8G8B8 scene texture before presentation.
+        DrawPostProcessPass(
+            g_renderer.sceneColorTexture,
+            0u,
+            0u,
+            width,
+            height,
+            false,
+            false,
+            1.0f,
+            0.0f,
+            0.0f,
+            0.0f,
+            0.0f);
+    }
     GLuint glowImage = 0u;
     if (postProcessDraw)
     {
@@ -8254,6 +9138,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1f(g_renderer.specularMapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.sunShadowEnabledUniform, 0.0f);
         glUniform1f(g_renderer.primaryLightEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.spotShadowEnabledUniform, 0.0f);
         glUniform1f(g_renderer.instanceEnabledUniform, 0.0f);
         glUniform4f(g_renderer.uiColorUniform, 1.0f, 1.0f, 1.0f, 1.0f);
         glBindVertexArray(g_renderer.dynamicModelVertexArray);

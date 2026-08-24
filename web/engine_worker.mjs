@@ -4,6 +4,7 @@ const forwardedEvents = [
     "kisakcod:archive", "kisakcod:archive-progress", "kisakcod:qcommon", "kisakcod:retail-census",
     "kisakcod:renderer-shader", "kisakcod:schedule", "kisakcod:engine-asset",
     "kisakcod:renderer-texture", "kisakcod:engine-world-surface",
+    "kisakcod:renderer-aa", "kisakcod:test-webgl-aa",
     "kisakcod:renderer-surface", "kisakcod:renderer-surface-draw",
     "kisakcod:renderer-scene-view", "kisakcod:renderer-scene-frame",
     "kisakcod:renderer-fx", "kisakcod:renderer-comparison",
@@ -44,6 +45,23 @@ function reply(id, result, error = null)
 
 function installWorkerTestControls()
 {
+    const canvasPrototype = globalThis.OffscreenCanvas?.prototype;
+    if (canvasPrototype && !canvasPrototype.__kisakcodWorkerContextTestControls) {
+        Object.defineProperty(canvasPrototype,
+            "__kisakcodWorkerContextTestControls", { value: true });
+        const getContext = canvasPrototype.getContext;
+        canvasPrototype.getContext = function(type, attributes) {
+            if (testControl.observeAa && type === "webgl2") {
+                globalThis.dispatchEvent(new CustomEvent("kisakcod:test-webgl-aa", {
+                    detail: {
+                        operation: "create-context",
+                        antialias: attributes?.antialias === true,
+                    },
+                }));
+            }
+            return getContext.call(this, type, attributes);
+        };
+    }
     const prototype = globalThis.WebGL2RenderingContext?.prototype;
     if (!prototype || prototype.__kisakcodWorkerTestControls) return;
     Object.defineProperty(prototype, "__kisakcodWorkerTestControls", { value: true });
@@ -69,6 +87,42 @@ function installWorkerTestControls()
             return bufferData.call(this, arguments_[0], -1, arguments_[2]);
         }
         return bufferData.apply(this, arguments_);
+    };
+    const renderbufferStorageMultisample = prototype.renderbufferStorageMultisample;
+    prototype.renderbufferStorageMultisample = function(
+        target, samples, internalFormat, width, height) {
+        if (testControl.observeAa) {
+            globalThis.dispatchEvent(new CustomEvent("kisakcod:test-webgl-aa", {
+                detail: {
+                    operation: "renderbuffer-storage-multisample",
+                    target, samples, internalFormat, width, height,
+                },
+            }));
+        }
+        return renderbufferStorageMultisample.call(
+            this, target, samples, internalFormat, width, height);
+    };
+    const blitFramebuffer = prototype.blitFramebuffer;
+    prototype.blitFramebuffer = function(...arguments_) {
+        if (testControl.observeAa) {
+            globalThis.dispatchEvent(new CustomEvent("kisakcod:test-webgl-aa", {
+                detail: {
+                    operation: "blit-framebuffer",
+                    source: arguments_.slice(0, 4),
+                    destination: arguments_.slice(4, 8),
+                    mask: arguments_[8],
+                    filter: arguments_[9],
+                },
+            }));
+        }
+        return blitFramebuffer.apply(this, arguments_);
+    };
+    const getParameter = prototype.getParameter;
+    prototype.getParameter = function(parameter) {
+        if (parameter === 0x8D57 && Number.isInteger(testControl.maxAaSamples)) {
+            return Math.max(1, testControl.maxAaSamples);
+        }
+        return getParameter.call(this, parameter);
     };
 }
 

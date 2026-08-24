@@ -43,9 +43,11 @@ constexpr std::size_t MAX_DECODED_RGBA8_BYTES = 16u * 1024u * 1024u;
 // Retail lightmap load definitions include 2048x2048 L8 atlases, which expand
 // to exactly 16 MiB of RGBA8 while retaining only a 4 MiB DB payload.
 constexpr std::size_t MAX_LOADDEF_RGBA8_BYTES = 16u * 1024u * 1024u;
-// A 2048-square RGBA8 cubemap occupies exactly 96 MiB across six faces.
-// Keep the canonical sky recovery seam bounded independently of 2D atlases.
-constexpr std::size_t MAX_CUBE_RGBA8_BYTES = 96u * 1024u * 1024u;
+// A 2048-square RGBA8 cubemap with its complete authored mip chain occupies
+// just under 128 MiB across six faces. Keep the canonical cube recovery seam
+// bounded independently of 2D atlases while retaining the roughness levels
+// selected explicitly by the retail environment shaders.
+constexpr std::size_t MAX_CUBE_RGBA8_BYTES = 128u * 1024u * 1024u;
 
 enum class Error : std::uint32_t
 {
@@ -91,6 +93,11 @@ struct Rgba8Cube
     // Native Image_CubemapFace preserves D3D's +X, -X, +Y, -Y, +Z, -Z
     // order. The portable decoder keeps that order for the backend boundary.
     std::array<std::vector<std::uint8_t>, 6> faces;
+    // Authored levels after the largest face, in D3D/WebGL mip order. Level
+    // n has edge max(edgeLength >> n, 1). Keeping these bytes is essential:
+    // lm_*s0/lp_*s0 select the probe mip from specular alpha, and rebuilding
+    // the chain from level zero changes material roughness and brightness.
+    std::vector<std::array<std::vector<std::uint8_t>, 6>> mipFaces;
 };
 
 // Parses the 28-byte CoD4 IWI header from a complete decoded member. The
@@ -110,7 +117,8 @@ Error DecodeRgba8(
     std::span<const std::uint8_t> bytes,
     Rgba8Image &image) noexcept;
 
-// Decodes the largest mip of all six faces from a bounded COD4 IWI cubemap.
+// Decodes the complete authored mip chain of all six faces from a bounded
+// COD4 IWI cubemap.
 // IWI cubemaps are mip-major and store +X, -X, +Y, -Y, +Z, -Z for each
 // smallest-to-largest mip. The destination is replaced only on success.
 Error DecodeCubeRgba8(
@@ -133,9 +141,9 @@ Error DecodeLoadDefRgba8(
     std::span<const std::uint8_t> payload,
     Rgba8Image &image) noexcept;
 
-// Decodes a canonical DB-owned cubemap load definition. Native Load_Texture
-// stores this payload face-major, with each face containing its complete
-// largest-to-smallest mip chain.
+// Decodes the complete authored chain from a canonical DB-owned cubemap load
+// definition. Native Load_Texture stores this payload face-major, with each
+// face containing its complete largest-to-smallest mip chain.
 Error DecodeLoadDefCubeRgba8(
     std::int32_t format,
     std::uint8_t flags,

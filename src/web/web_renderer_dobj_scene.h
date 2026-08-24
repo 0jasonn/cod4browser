@@ -2,6 +2,7 @@
 
 #include <web/web_renderer.h>
 #include <web/web_renderer_lighting.h>
+#include <web/web_renderer_lod.h>
 
 #include <cstdint>
 #include <string_view>
@@ -97,13 +98,13 @@ enum class WebRendererDObjSceneResult : std::uint8_t
 // actual threshold decision to canonical XModelGetLodForDist.
 int WebRenderer_SelectDObjLod(
     const XModel *model, const float poseOrigin[3],
-    const float viewOrigin[3]) noexcept;
+    const WebRendererLodParms *lodParms) noexcept;
 
 WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
     const WebRendererDObjSubmission *submissions,
     std::uint32_t submissionCount,
     WebRendererDObjSceneCommand &destination,
-    const float *viewOrigin = nullptr,
+    const WebRendererLodParms *lodParms = nullptr,
     const GfxLightGrid *lightGrid = nullptr,
     const WebRendererModelLightingCallbacks *lightingCallbacks = nullptr,
     WebRendererMaterialResolver materialResolver = nullptr);

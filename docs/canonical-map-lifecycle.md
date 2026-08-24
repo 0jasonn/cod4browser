@@ -80,7 +80,7 @@ code.
 | Native `CL_Init` segment | Classification | Browser convergence |
 | --- | --- | --- |
 | console state, client state, dvar and command registration | canonical portable Kisak | compiled, covered by the native/Wasm contract, and entered by Worker startup |
-| `CL_InitInput` | browser platform boundary | DOM keyboard and pointer-lock events cross a bounded Worker queue into canonical `CL_KeyEvent` / `CL_MouseEvent`; cgame `CL_Input`, usercmd creation, server think, and `Pmove` remain native owners. Gamepad input remains future work. |
+| `CL_InitInput` | browser platform boundary | DOM keyboard, pointer-lock deltas, and visible-cursor canvas coordinates cross a bounded Worker queue into canonical `CL_KeyEvent` / `CL_MouseEvent`; cgame `CL_Input`, usercmd creation, server think, and `Pmove` remain native owners. Gamepad input remains future work. |
 | `CL_InitRef` configuration | canonical portable Kisak | shared configuration and renderer request construction now execute in production |
 | `R_ConfigureRenderer`, `CL_InitRenderer` | renderer frontend boundary | the Worker consumes `CL_InitRef` configuration at the native asset-load boundary, publishes renderer prerequisites, completes frontend registration, and only then enters `SND_Init` |
 | `SCR_Init`, UI command setup | canonical portable plus renderer frontend | lifecycle boundary is linked; fuller frontend behavior remains gated |
@@ -90,7 +90,8 @@ code.
 Canonical `FS_InitFilesystem` now enumerates the Worker mount and opens IWDs
 through the synchronous primitive layer while retaining C++ search-path
 ownership. Full `CL_Init` is reached, including renderer startup and the
-keyboard/pointer-lock input boundary; gamepad and fuller UI policy remain.
+keyboard/pointer-lock/absolute-cursor input boundary; gamepad and fuller UI
+policy remain.
 
 ## Local server dependency classification
 
@@ -194,7 +195,11 @@ a server step. The pump does not duplicate cgame's `CL_Input` or the server's
 and player `Pmove`, while pointer-lock deltas flow through the existing
 sensitivity, usercmd, prediction, and cgame-camera path. Cursor visibility
 remains a main-thread DOM operation requested by the Worker rather than touching
-`OffscreenCanvas.style`.
+`OffscreenCanvas.style`; showing it releases pointer lock and sends scaled
+canvas coordinates back through canonical `CL_MouseEvent` for menus. The web
+platform publishes absolute/relative mode from the canonical key catchers rather
+than inferring it from system-cursor visibility, and a browser-consumed Escape
+lock exit is forwarded once to `CL_KeyEvent`.
 
 Single-player `PM_GroundTrace` retains the canonical quarter-unit probe and
 uses a one-unit walkable-support fallback only for an ordinary, non-separating

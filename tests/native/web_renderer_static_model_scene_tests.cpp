@@ -91,6 +91,7 @@ struct Fixture
         for (std::size_t instance = 0u; instance < instances.size(); ++instance)
         {
             instances[instance].model = &model;
+            instances[instance].cullDist = 1000.0f;
             instances[instance].placement.scale = instance == 0u ? 1.0f : 2.0f;
             instances[instance].placement.origin[0] =
                 static_cast<float>(instance) * 10.0f;
@@ -121,6 +122,7 @@ void TestCanonicalInstancesShareOneMaterialSurfaceBatch()
 
     const WebRendererStaticModelBatchDesc &batch = command.batches[0];
     assert(batch.instanceOffset == 0u && batch.instanceCount == 2u);
+    assert(batch.lodIndex == 0u);
     assert(batch.draw.sourceKind == WebRendererSceneBatchKind::StaticXModel);
     assert(batch.draw.materialIdentity == &fixture.material);
     assert(batch.draw.modelIdentity == &fixture.model);
@@ -136,6 +138,8 @@ void TestCanonicalInstancesShareOneMaterialSurfaceBatch()
     assert(batch.draw.lastInstanceIndex == 1u);
     assert(command.instances[1].origin[0] == 10.0f);
     assert(command.instances[1].axis[0][0] == 2.0f);
+    assert(command.instances[1].modelScale == 2.0f);
+    assert(command.instances[1].modelCullDistance == 1000.0f);
     assert(command.instances[1].canonicalInstanceIndex == 1u);
     assert(command.modelLightingAtlas.entryCount == 2u);
     assert(command.instances[0].modelLightingCoordinates[0] !=
@@ -146,6 +150,37 @@ void TestCanonicalInstancesShareOneMaterialSurfaceBatch()
     assert(std::fabs(command.vertices[0].textureCoordinate[0] -
         64.0f / 255.0f) < 0.0001f);
     assert(command.vertices[0].normal[2] == 1.0f);
+}
+
+void TestEveryAuthoredLodIsRetainedForRuntimeSelection()
+{
+    Fixture fixture;
+    std::array<XSurface, 2> surfaces{fixture.surface, fixture.surface};
+    Material *materials[2]{&fixture.material, &fixture.material};
+    fixture.model.numsurfs = 2u;
+    fixture.model.numLods = 2;
+    fixture.model.surfs = surfaces.data();
+    fixture.model.materialHandles = materials;
+    fixture.model.lodInfo[0].surfIndex = 0u;
+    fixture.model.lodInfo[0].numsurfs = 1u;
+    fixture.model.lodInfo[1].surfIndex = 1u;
+    fixture.model.lodInfo[1].numsurfs = 1u;
+
+    WebRendererStaticModelSceneCommand command;
+    assert(WebRenderer_BuildStaticModelSceneCommand(fixture.world, command) ==
+        WebRendererStaticModelSceneResult::Success);
+    assert(command.modelCount == 1u);
+    assert(command.surfaceCount == 2u);
+    assert(command.vertices.size() == 6u);
+    assert(command.indices.size() == 6u);
+    assert(command.instances.size() == 2u);
+    assert(command.batches.size() == 2u);
+    assert(command.batches[0].lodIndex == 0u);
+    assert(command.batches[1].lodIndex == 1u);
+    assert(command.batches[0].instanceOffset == 0u);
+    assert(command.batches[1].instanceOffset == 0u);
+    assert(command.batches[0].instanceCount == 2u);
+    assert(command.batches[1].instanceCount == 2u);
 }
 
 void TestLightingAtlasCountsOnlySubmittedCanonicalPlacements()
@@ -235,6 +270,10 @@ void TestSm3SpecularRetainsCanonicalProbeAndSplitsProbeGroups()
         WebRendererStaticModelSceneResult::Success);
     assert(command.batches.size() == 2u);
     assert(command.instances.size() == 2u);
+    assert(command.vertices.size() == 3u);
+    assert(command.indices.size() == 3u);
+    assert(command.batches[0].draw.firstIndex == 0u);
+    assert(command.batches[1].draw.firstIndex == 0u);
     for (std::size_t index = 0u; index < command.batches.size(); ++index)
     {
         const WebRendererWorldBatchDesc &draw = command.batches[index].draw;
@@ -277,6 +316,7 @@ void TestMalformedIndexAndPlacementFailAtomically()
 int main()
 {
     TestCanonicalInstancesShareOneMaterialSurfaceBatch();
+    TestEveryAuthoredLodIsRetainedForRuntimeSelection();
     TestLightingAtlasCountsOnlySubmittedCanonicalPlacements();
     TestMaterialReferencesResolveAtRendererEvaluation();
     TestSm3SpecularRetainsCanonicalProbeAndSplitsProbeGroups();

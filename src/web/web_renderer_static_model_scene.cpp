@@ -32,6 +32,14 @@ struct ModelGroup
     std::vector<std::uint32_t> instanceIndices;
 };
 
+struct ModelSurfaceGeometry
+{
+    const XModel *model = nullptr;
+    std::uint32_t modelSurfaceIndex = 0u;
+    std::uint32_t firstIndex = 0u;
+    std::uint32_t indexCount = 0u;
+};
+
 bool Finite3(const float value[3]) noexcept
 {
     return std::isfinite(value[0]) && std::isfinite(value[1]) &&
@@ -188,6 +196,7 @@ bool SelectTechnique(
 
 WebRendererStaticModelInstanceDesc MakeInstance(
     const GfxPackedPlacement &placement,
+    float cullDistance,
     std::uint32_t canonicalIndex,
     const float modelLightingCoordinates[3]) noexcept
 {
@@ -201,6 +210,8 @@ WebRendererStaticModelInstanceDesc MakeInstance(
     if (modelLightingCoordinates)
         std::copy_n(modelLightingCoordinates, 3u,
             instance.modelLightingCoordinates);
+    instance.modelScale = placement.scale;
+    instance.modelCullDistance = cullDistance;
     instance.canonicalInstanceIndex = canonicalIndex;
     return instance;
 }
@@ -294,7 +305,8 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
             {
                 continue;
             }
-            if (!PlacementIsFinite(instance.placement))
+            if (!PlacementIsFinite(instance.placement) ||
+                !std::isfinite(instance.cullDist))
                 return WebRendererStaticModelSceneResult::InvalidPlacement;
             auto group = std::find_if(groups.begin(), groups.end(),
                 [model, &instance](const ModelGroup &candidate) {
@@ -314,6 +326,8 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
         std::uint32_t submittedInstanceCount = 0u;
         std::vector<const XModel *> submittedModels;
         submittedModels.reserve(groups.size());
+        std::vector<ModelSurfaceGeometry> retainedGeometry;
+        retainedGeometry.reserve(512u);
         for (const ModelGroup &group : groups)
             submittedInstanceCount += static_cast<std::uint32_t>(
                 group.instanceIndices.size());
@@ -324,14 +338,8 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
         for (const ModelGroup &group : groups)
         {
             const XModel &model = *group.model;
-            const std::uint32_t lod = static_cast<std::uint32_t>(
-                std::min<int>(model.numLods - 1, MAX_LODS - 1));
-            const XModelLodInfo &lodInfo = model.lodInfo[lod];
-            if (lodInfo.surfIndex > model.numsurfs ||
-                lodInfo.numsurfs > model.numsurfs - lodInfo.surfIndex)
-            {
-                return WebRendererStaticModelSceneResult::InvalidModel;
-            }
+            const std::uint32_t lodCount = static_cast<std::uint32_t>(
+                std::min<int>(model.numLods, MAX_LODS));
             const std::uint32_t instanceOffset =
                 static_cast<std::uint32_t>(replacement.instances.size());
             if (replacement.instances.size() + group.instanceIndices.size() >
@@ -392,99 +400,138 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
                 modelLightingComplete = modelLightingComplete && lightingReady;
                 replacement.instances.push_back(MakeInstance(
                     world.dpvs.smodelDrawInsts[canonicalIndex].placement,
+                    world.dpvs.smodelDrawInsts[canonicalIndex].cullDist,
                     canonicalIndex,
                     lightingCoordinates));
             }
 
             bool modelSubmitted = false;
-            for (std::uint32_t localSurface = 0u;
-                 localSurface < lodInfo.numsurfs; ++localSurface)
+            for (std::uint32_t lod = 0u; lod < lodCount; ++lod)
             {
-                const std::uint32_t modelSurfaceIndex =
-                    lodInfo.surfIndex + localSurface;
-                const XSurface &surface = model.surfs[modelSurfaceIndex];
-                if (surface.deformed || surface.vertCount == 0u ||
-                    surface.triCount == 0u)
+                const XModelLodInfo &lodInfo = model.lodInfo[lod];
+                if (lodInfo.surfIndex > model.numsurfs ||
+                    lodInfo.numsurfs > model.numsurfs - lodInfo.surfIndex)
                 {
-                    continue;
-                }
-                if (!surface.verts0 || !surface.triIndices)
                     return WebRendererStaticModelSceneResult::InvalidModel;
-                const std::uint32_t indexCount =
-                    static_cast<std::uint32_t>(surface.triCount) * 3u;
-                if (replacement.vertices.size() + surface.vertCount >
-                        WEB_RENDERER_MAX_STATIC_MODEL_VERTICES ||
-                    replacement.indices.size() + indexCount >
-                        WEB_RENDERER_MAX_STATIC_MODEL_INDICES)
-                {
-                    return WebRendererStaticModelSceneResult::OutputTooLarge;
                 }
-                const std::uint32_t vertexBase =
-                    static_cast<std::uint32_t>(replacement.vertices.size());
-                for (std::uint32_t vertexIndex = 0u;
-                     vertexIndex < surface.vertCount; ++vertexIndex)
+                for (std::uint32_t localSurface = 0u;
+                     localSurface < lodInfo.numsurfs; ++localSurface)
                 {
-                    const GfxPackedVertex &source = surface.verts0[vertexIndex];
-                    if (!Finite3(source.xyz))
-                        return WebRendererStaticModelSceneResult::InvalidModel;
-                    WebRendererSurfaceVertex vertex{};
-                    std::copy(std::begin(source.xyz), std::end(source.xyz),
-                        std::begin(vertex.position));
-                    vertex.color[0] = static_cast<float>(
-                        (source.color.packed >> 16u) & 0xffu) * BYTE_TO_UNIT;
-                    vertex.color[1] = static_cast<float>(
-                        (source.color.packed >> 8u) & 0xffu) * BYTE_TO_UNIT;
-                    vertex.color[2] = static_cast<float>(
-                        source.color.packed & 0xffu) * BYTE_TO_UNIT;
-                    vertex.color[3] = static_cast<float>(
-                        (source.color.packed >> 24u) & 0xffu) * BYTE_TO_UNIT;
-                    Vec2UnpackTexCoords(source.texCoord,
-                        vertex.textureCoordinate);
-                    Vec3UnpackUnitVec(source.normal, vertex.normal);
-                    Vec3UnpackUnitVec(source.tangent, vertex.tangent);
-                    vertex.binormalSign = source.binormalSign;
-                    if (!std::isfinite(vertex.textureCoordinate[0]) ||
-                        !std::isfinite(vertex.textureCoordinate[1]) ||
-                        !Finite3(vertex.normal) || !Finite3(vertex.tangent) ||
-                        !std::isfinite(vertex.binormalSign))
+                    const std::uint32_t modelSurfaceIndex =
+                        lodInfo.surfIndex + localSurface;
+                    const XSurface &surface = model.surfs[modelSurfaceIndex];
+                    if (surface.deformed || surface.vertCount == 0u ||
+                        surface.triCount == 0u)
                     {
-                        return WebRendererStaticModelSceneResult::InvalidModel;
+                        continue;
                     }
-                    replacement.vertices.push_back(vertex);
+                    if (!surface.verts0 || !surface.triIndices)
+                        return WebRendererStaticModelSceneResult::InvalidModel;
+                    const std::uint32_t indexCount =
+                        static_cast<std::uint32_t>(surface.triCount) * 3u;
+                    auto retained = std::find_if(
+                        retainedGeometry.begin(), retainedGeometry.end(),
+                        [&model, modelSurfaceIndex](
+                            const ModelSurfaceGeometry &candidate) {
+                            return candidate.model == &model &&
+                                candidate.modelSurfaceIndex ==
+                                    modelSurfaceIndex;
+                        });
+                    std::uint32_t firstIndex = 0u;
+                    if (retained != retainedGeometry.end())
+                    {
+                        firstIndex = retained->firstIndex;
+                    }
+                    else
+                    {
+                        if (replacement.vertices.size() + surface.vertCount >
+                                WEB_RENDERER_MAX_STATIC_MODEL_VERTICES ||
+                            replacement.indices.size() + indexCount >
+                                WEB_RENDERER_MAX_STATIC_MODEL_INDICES)
+                        {
+                            return WebRendererStaticModelSceneResult::OutputTooLarge;
+                        }
+                        const std::uint32_t vertexBase =
+                            static_cast<std::uint32_t>(
+                                replacement.vertices.size());
+                        for (std::uint32_t vertexIndex = 0u;
+                             vertexIndex < surface.vertCount; ++vertexIndex)
+                        {
+                            const GfxPackedVertex &source =
+                                surface.verts0[vertexIndex];
+                            if (!Finite3(source.xyz))
+                                return WebRendererStaticModelSceneResult::InvalidModel;
+                            WebRendererSurfaceVertex vertex{};
+                            std::copy(std::begin(source.xyz),
+                                std::end(source.xyz),
+                                std::begin(vertex.position));
+                            vertex.color[0] = static_cast<float>(
+                                (source.color.packed >> 16u) & 0xffu) *
+                                BYTE_TO_UNIT;
+                            vertex.color[1] = static_cast<float>(
+                                (source.color.packed >> 8u) & 0xffu) *
+                                BYTE_TO_UNIT;
+                            vertex.color[2] = static_cast<float>(
+                                source.color.packed & 0xffu) * BYTE_TO_UNIT;
+                            vertex.color[3] = static_cast<float>(
+                                (source.color.packed >> 24u) & 0xffu) *
+                                BYTE_TO_UNIT;
+                            Vec2UnpackTexCoords(source.texCoord,
+                                vertex.textureCoordinate);
+                            Vec3UnpackUnitVec(source.normal, vertex.normal);
+                            Vec3UnpackUnitVec(source.tangent, vertex.tangent);
+                            vertex.binormalSign = source.binormalSign;
+                            if (!std::isfinite(vertex.textureCoordinate[0]) ||
+                                !std::isfinite(vertex.textureCoordinate[1]) ||
+                                !Finite3(vertex.normal) ||
+                                !Finite3(vertex.tangent) ||
+                                !std::isfinite(vertex.binormalSign))
+                            {
+                                return WebRendererStaticModelSceneResult::InvalidModel;
+                            }
+                            replacement.vertices.push_back(vertex);
+                        }
+                        firstIndex = static_cast<std::uint32_t>(
+                            replacement.indices.size());
+                        for (std::uint32_t index = 0u; index < indexCount;
+                             ++index)
+                        {
+                            const std::uint32_t localIndex =
+                                surface.triIndices[index];
+                            if (localIndex >= surface.vertCount)
+                                return WebRendererStaticModelSceneResult::IndexOutOfRange;
+                            replacement.indices.push_back(
+                                vertexBase + localIndex);
+                        }
+                        retainedGeometry.push_back({
+                            &model, modelSurfaceIndex, firstIndex, indexCount});
+                    }
+                    WebRendererStaticModelBatchDesc batch{};
+                    Material *material =
+                        model.materialHandles[modelSurfaceIndex];
+                    if (materialResolver)
+                    {
+                        if (Material *canonical = materialResolver(material))
+                            material = canonical;
+                    }
+                    batch.draw = MakeDraw(
+                        world,
+                        model,
+                        material,
+                        modelSurfaceIndex,
+                        firstIndex,
+                        indexCount,
+                        group.instanceIndices.front(),
+                        group.instanceIndices.back(),
+                        group.reflectionProbeIndex);
+                    batch.instanceOffset = instanceOffset;
+                    batch.instanceCount = static_cast<std::uint32_t>(
+                        group.instanceIndices.size());
+                    batch.lodIndex = static_cast<std::uint8_t>(lod);
+                    replacement.batches.push_back(batch);
+                    ++replacement.surfaceCount;
+                    modelSubmitted = true;
                 }
-                const std::uint32_t firstIndex =
-                    static_cast<std::uint32_t>(replacement.indices.size());
-                for (std::uint32_t index = 0u; index < indexCount; ++index)
-                {
-                    const std::uint32_t localIndex = surface.triIndices[index];
-                    if (localIndex >= surface.vertCount)
-                        return WebRendererStaticModelSceneResult::IndexOutOfRange;
-                    replacement.indices.push_back(vertexBase + localIndex);
-                }
-                WebRendererStaticModelBatchDesc batch{};
-                Material *material =
-                    model.materialHandles[modelSurfaceIndex];
-                if (materialResolver)
-                {
-                    if (Material *canonical = materialResolver(material))
-                        material = canonical;
-                }
-                batch.draw = MakeDraw(
-                    world,
-                    model,
-                    material,
-                    modelSurfaceIndex,
-                    firstIndex,
-                    indexCount,
-                    group.instanceIndices.front(),
-                    group.instanceIndices.back(),
-                    group.reflectionProbeIndex);
-                batch.instanceOffset = instanceOffset;
-                batch.instanceCount = static_cast<std::uint32_t>(
-                    group.instanceIndices.size());
-                replacement.batches.push_back(batch);
-                ++replacement.surfaceCount;
-                modelSubmitted = true;
             }
             if (modelSubmitted && std::find(submittedModels.begin(),
                     submittedModels.end(), &model) == submittedModels.end())

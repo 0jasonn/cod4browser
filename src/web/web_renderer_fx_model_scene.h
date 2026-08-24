@@ -2,6 +2,7 @@
 
 #include <gfx_d3d/gfx_placement_types.h>
 #include <web/web_renderer.h>
+#include <web/web_renderer_lod.h>
 
 #include <cstdint>
 #include <vector>
@@ -12,10 +13,10 @@ using WebRendererFxMaterialResolver = Material *(*)(Material *) noexcept;
 
 // The WebGL scene is assembled after refdef is available. This keeps the
 // retained R_FilterXModelIntoScene submission free of raw view pointers while
-// choosing a deterministic rigid-model LOD from the active view distance.
+// choosing the canonical FOV-, ramp-, and placement-adjusted model LOD.
 int WebRenderer_SelectFxModelLod(
     const XModel *model, const GfxScaledPlacement &placement,
-    const float viewOrigin[3]) noexcept;
+    const WebRendererLodParms *lodParms) noexcept;
 
 struct WebRendererFxModelSubmission
 {

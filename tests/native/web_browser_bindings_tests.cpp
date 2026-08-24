@@ -33,12 +33,15 @@ int main()
 {
     std::size_t count = 0;
     const WebBrowserDefaultBinding *defaults = WebBrowserDefaultBindings(&count);
-    constexpr std::array<WebBrowserDefaultBinding, 13> expected = {{
+    constexpr std::array<WebBrowserDefaultBinding, 21> expected = {{
         {'w', "+forward"}, {'s', "+back"}, {'a', "+moveleft"},
-        {'d', "+moveright"}, {'f', "+activate"}, {K_SPACE, "+gostand"},
+        {'d', "+moveright"}, {'q', "+leanleft"}, {'e', "+leanright"},
+        {'c', "togglecrouch"}, {K_CTRL, "goprone"},
+        {'f', "+activate"}, {K_SPACE, "+gostand"},
         {K_SHIFT, "+sprint"},
         {K_MOUSE1, "+attack"}, {K_MOUSE2, "toggleads"}, {'r', "+reload"},
-        {'v', "+melee"},
+        {'v', "+melee"}, {'g', "+frag"}, {'4', "+smoke"},
+        {'n', "+nightvision"}, {K_TAB, "+scores"},
         {K_MWHEELUP, "weapnext"}, {K_MWHEELDOWN, "weapprev"},
     }};
     assert(count == expected.size());
@@ -54,21 +57,27 @@ int main()
     assert(writes.size() == count);
     assert(bindings[static_cast<std::uint32_t>('r')] == "+reload");
     assert(bindings[static_cast<std::uint32_t>('v')] == "+melee");
+    assert(bindings[static_cast<std::uint32_t>('c')] == "togglecrouch");
+    assert(bindings[static_cast<std::uint32_t>('q')] == "+leanleft");
+    assert(bindings[static_cast<std::uint32_t>('e')] == "+leanright");
+    assert(bindings[static_cast<std::uint32_t>(K_CTRL)] == "goprone");
 
     bindings.clear();
     bindings['r'] = "+custom_reload";
     bindings['v'] = "+custom_melee";
     bindings['f'] = "+custom_activate";
+    bindings['c'] = "+custom_stance";
     bindings[0xCE] = "weaplast";
     bindings[0xCD] = "+custom_previous";
     writes.clear();
-    assert(InstallWebBrowserDefaultBindings(lookup, setter) == count - 5);
+    assert(InstallWebBrowserDefaultBindings(lookup, setter) == count - 6);
     assert(bindings['r'] == "+custom_reload");
     assert(bindings['v'] == "+custom_melee");
     assert(bindings['f'] == "+custom_activate");
+    assert(bindings['c'] == "+custom_stance");
     assert(bindings[0xCE] == "weaplast");
     assert(bindings[0xCD] == "+custom_previous");
-    assert(writes.size() == count - 5);
+    assert(writes.size() == count - 6);
 
     bindings.clear();
     for (std::size_t i = 0; i < count; ++i)

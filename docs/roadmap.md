@@ -78,7 +78,8 @@ The gameplay event chain is farther along than its presentation:
   muzzle/impact definitions are spawned and visible.
 - `R_FilterXModelIntoScene` now retains canonical rigid XModel placements for
   ejected-brass/debris-style FX elements. The renderer selects a deterministic
-  view-distance LOD, transforms the canonical XSurface once, and appends
+  native FOV/ramp/placement-adjusted LOD, transforms the canonical XSurface
+  once, and appends
   `FxXModel` batches between dynamic DObjs and code meshes. Invalid, deformed,
   over-limit, or allocation-failed optional model effects are bounded drops;
   they cannot abort the frame, displace canonical code meshes, or leave stale
@@ -100,7 +101,17 @@ The gameplay event chain is farther along than its presentation:
   DObjs, 102 models, 147 surfaces, 16,435 vertices, and 33,672 indices in the
   first dynamic scene, with a visibly posed Gaz actor and continued scene
   submission. The focused policy test covers canonical delegation, distance,
-  invalid inputs, and the highest-LOD fallback.
+  invalid inputs, and canonical far-distance culling.
+- Static world XModels now retain every authored LOD instead of permanently
+  choosing `numLods - 1`. A shared native-compatible policy applies FOV,
+  rigid/skinned scale and bias, placement scale, static authored cull distance,
+  `XModelGetLodForDist`, and developer forced-LOD overrides across static
+  models, DObjs, DynEntities, and FX. The backend partitions static instances
+  by selected LOD per frame and shares those compact ranges between camera and
+  sun-shadow passes; there is no Killhouse-specific model or distance rule.
+  Release Chrome retains Killhouse as 238 models / 1,965 all-LOD batches /
+  603,502 shared vertices / 1,306,836 indices / 12,188 instances, with 539/539
+  images supported, zero model-lighting failures, and no material fallback.
 - canonical sound assets, aliases, 53-channel selection, playback IDs,
   attenuation, pitch/volume, and LoadedSound PCM remain Worker-owned. A
   KISAK_WEB OpenAL-compatible proxy now transfers bounded PCM/device commands
@@ -115,12 +126,14 @@ The gameplay event chain is farther along than its presentation:
   `weap_g36c_fire_plr` reaches the same started source path; repeated shots
   also produce `bullet_large_wood` impact starts. A real `R` reload now starts
   `weap_g36_lift_plr`, `weap_g36_clipout_plr`, and `weap_g36_clipin_plr`.
-- fresh browser profiles now install `r -> +reload`, wheel-up -> `weapnext`,
-  and wheel-down -> `weapprev` only when each canonical key is unbound. DOM
-  events still flow through the Worker queue, `IN_Frame`, `CL_KeyEvent`, and
-  the native command/state machines. Native/Wasm tests prove deterministic
-  defaults and preservation of custom bindings; a focused browser test proves
-  the key pulses cross the host boundary. The canonical two-weapon selection
+- fresh browser profiles now install the standard movement, stance, lean,
+  combat, grenade, night-vision, objective, reload, melee, and weapon-cycle
+  controls only when each canonical key is unbound. DOM events still flow
+  through the Worker queue, `IN_Frame`, `CL_KeyEvent`, and the native command
+  and state machines. Native/Wasm tests prove deterministic defaults and
+  preservation of custom bindings; focused browser tests prove key pulses,
+  one-press Escape handoff from pointer lock, and unlocked absolute cursor
+  movement cross the host boundary. The canonical two-weapon selection
   path is now proven with a server-owned `cmd give` fixture (not a browser
   inventory or a claim of physical rack-pickup parity): G36C index 5 and
   Winchester 1200 index 10 both enter the owned inventory. Wheel-up selects
@@ -241,7 +254,7 @@ retail-asset browser run:
 | Fire and ammo consumption | Real Mouse1 reaches canonical fire; event ammo is stable and snapshot clip deltas are 30->29, 27->26, 26->25, and 25->24 across the validated shots | game/cgame | Retain recoil/frame evidence; broaden campaign coverage |
 | Muzzle flash / brass | Real fire retains canonical `FxCodeMesh` and `FxXModel` batches with `,gfx_smk_white_atlas`, `fx_wood_splinter02`, and exact portable counts | cgame/FX/renderer | Prove broader weapon presentation and remaining brass/deformed FX cases |
 | Bullet impact | Real fire reaches canonical `bullet_large_wood` audio starts and retained impact FX batches through the cgame/EffectsCore/renderer path | game/cgame/FX/renderer | Prove surface-dependent breadth |
-| Ordinary entity DObjs | `748112cc` admits canonical ordinary DObjs; `de695b46` selects distance-based canonical XModel LODs. Chrome records 64 DObjs / 102 models / 147 surfaces and visibly posed Gaz | renderer frontend/xanim | Retain on F.N.G.; add broader entity/material coverage |
+| XModel LODs | Static models, DObjs, DynEntities, and FX use one native-compatible FOV/ramp/scale/threshold policy; static models retain all authored LOD geometry and compact instances per selected LOD each frame | renderer frontend/xanim/WebGL2 backend | Retain Killhouse weapon-rack visual proof and broaden campaign coverage |
 | Smoke / particle clouds | Canonical EffectsCore cloud slots and portable batches implemented; retail visibility proof pending | FX/renderer | Observe a real cloud effect and measure CPU expansion before broad performance work |
 | Weapon sound | Real Mouse1 starts `weap_g36c_fire_plr` through canonical OpenAL/WebAudio; three `bullet_large_wood` impact starts are also recorded | cgame/audio/platform | Prove broader alias families; streaming/reverb remain later |
 | Reload | `R` visibly enters the canonical reload animation and starts `weap_g36_lift_plr`, `weap_g36_clipout_plr`, and `weap_g36_clipin_plr`; post-reload ammo refill and automatic reload remain unproven | input/game/cgame/audio | Prove automatic reload and exact post-reload ammo/viewmodel state |
@@ -422,6 +435,7 @@ Stop autonomous implementation when:
 | Complete | Canonical two-weapon wheel switching | `4a48d861`; local Release Chrome server-owned `cmd give` fixture, both directions, distinct viewmodels, transition/reload audio | Physical rack pickup parity and broader inventory transitions |
 | Complete | Canonical rigid FX XModel renderer closure | `5d49dbe1`, `86c2efbb`, `29f49b09`, `2d3c9f10`; assertion-enabled native x64/direct Wasm tests, production Release build, exact WebGL2 boot | Retail brass/debris visibility proof; deformed/skinned FX models, marks, and decals remain |
 | Complete | Canonical particle-cloud renderer closure | `cedc0cf2`, `67d6dbe7`; assertion-enabled native x64/direct Wasm tests, production Release build, exact WebGL2 boot | Retail smoke/cloud visibility and performance proof; marks/decals remain |
+| Complete | COD4 scene anti-aliasing through 4× | Canonical `r_aaSamples`; WebGL2 RGBA8/depth24 multisample target and pre-postfx resolve; focused 1×/4×, cap, fallback, resize, and recovery browser evidence | Retail graphics-menu/`vid_restart` interaction remains part of ordinary gameplay coverage |
 | Complete | Playable Killhouse/F.N.G. combat loop | `748112cc`, `de695b46`, `839be67d`; Release Chrome proves posed Gaz, fire/audio/FX, and four authoritative Gaz health decrements | Natural rack traversal, automatic reload/refill, enemy reaction/death/AI notification |
 | Pending | Recognizable COD4 presentation | — | Materials, remaining images, FX breadth, sky/fog |
 | Active | Multiple maps and first campaign mission | Next probe is `cargoship` campaign variance | Renderer assumptions, asset families, script differences, streaming |

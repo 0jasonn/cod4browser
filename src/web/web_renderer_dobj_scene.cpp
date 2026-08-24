@@ -480,7 +480,7 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
     const WebRendererDObjSubmission *submissions,
     std::uint32_t submissionCount,
     WebRendererDObjSceneCommand &destination,
-    const float *viewOrigin,
+    const WebRendererLodParms *lodParms,
     const GfxLightGrid *lightGrid,
     const WebRendererModelLightingCallbacks *lightingCallbacks,
     WebRendererMaterialResolver materialResolver)
@@ -552,8 +552,13 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                     return WebRendererDObjSceneResult::InvalidModel;
                 }
                 const int selectedLod = WebRenderer_SelectDObjLod(
-                    model, submission.pose->origin, viewOrigin);
-                if (selectedLod < 0 || selectedLod >= model->numLods ||
+                    model, submission.pose->origin, lodParms);
+                if (selectedLod < 0)
+                {
+                    globalBoneOffset += model->numBones;
+                    continue;
+                }
+                if (selectedLod >= model->numLods ||
                     selectedLod >= MAX_LODS)
                 {
                     return WebRendererDObjSceneResult::InvalidModel;

@@ -42,7 +42,7 @@ function(kisak_configure_web_target TARGET_NAME)
         "-sALLOW_MEMORY_GROWTH=1"
         "-sEXIT_RUNTIME=0"
         "-sERROR_ON_UNDEFINED_SYMBOLS=1"
-        "-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_KisakWeb_ProbeLocalization,_KisakWeb_ProbeIwd,_KisakWeb_ProbeFastfileHeader,_KisakWeb_CompleteFsStat,_KisakWeb_CompleteFsRead,_KisakWeb_StartArchiveJob,_KisakWeb_CancelArchiveJob,_KisakWeb_StartQcommonRuntime,_KisakWeb_CancelQcommonRuntime,_KisakWeb_StartRetailCensus,_KisakWeb_CancelRetailCensus,_KisakWeb_StartCanonicalDbRuntimeCheck,_KisakWeb_SubmitCanonicalCommand,_KisakWeb_TestAudioProxyPcm,_KisakWeb_TestLoseWebGLContext,_KisakWeb_TestRestoreWebGLContext"
+        "-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_KisakWeb_ProbeLocalization,_KisakWeb_ProbeIwd,_KisakWeb_ProbeFastfileHeader,_KisakWeb_CompleteFsStat,_KisakWeb_CompleteFsRead,_KisakWeb_StartArchiveJob,_KisakWeb_CancelArchiveJob,_KisakWeb_StartQcommonRuntime,_KisakWeb_CancelQcommonRuntime,_KisakWeb_StartRetailCensus,_KisakWeb_CancelRetailCensus,_KisakWeb_StartCanonicalDbRuntimeCheck,_KisakWeb_SubmitCanonicalCommand,_KisakWeb_TestAudioProxyPcm,_KisakWeb_TestLoseWebGLContext,_KisakWeb_TestRestoreWebGLContext,_KisakWeb_TestSetAaSamples"
         "-sEXPORTED_RUNTIME_METHODS=HEAPU8"
         "$<$<CONFIG:Debug>:-sASSERTIONS=2>"
         "$<$<CONFIG:Debug>:-sGL_ASSERTIONS=1>"
