@@ -16,6 +16,7 @@ namespace
 constexpr float BYTE_TO_UNIT = 1.0f / 255.0f;
 constexpr std::uint32_t TECHNIQUE_UNLIT_INDEX = 4u;
 constexpr std::uint32_t TECHNIQUE_EMISSIVE_INDEX = 5u;
+constexpr std::uint32_t TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX = 2u;
 constexpr std::uint32_t TECHNIQUE_LIT_INDEX = 7u;
 constexpr std::uint32_t TECHNIQUE_LIT_SUN_INDEX = 8u;
 constexpr std::uint32_t TECHNIQUE_LIT_SUN_SHADOW_INDEX = 9u;
@@ -1006,6 +1007,16 @@ WebRendererWorldSceneResult WebRenderer_BuildBrushModelSceneCommand(
                 candidate.sourceKind =
                     WebRendererSceneBatchKind::DynamicBModel;
                 candidate.modelName = "<brush-model>";
+                // Native R_AddBModelSurfaces admits a moving brush to the
+                // sun pass by its build-shadowmap technique. The world-only
+                // surfaceCastsSunShadow bitset does not own submodel indices.
+                const MaterialTechniqueSet *shadowSet =
+                    surface.material ? surface.material->techniqueSet : nullptr;
+                if (shadowSet && shadowSet->remappedTechniqueSet)
+                    shadowSet = shadowSet->remappedTechniqueSet;
+                candidate.castsSunShadow = shadowSet &&
+                    shadowSet->techniques[
+                        TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX];
                 if (replacement.batches.size() > firstSubmissionBatch &&
                     BatchMatches(replacement.batches.back(), candidate) &&
                     replacement.batches.back().firstIndex +

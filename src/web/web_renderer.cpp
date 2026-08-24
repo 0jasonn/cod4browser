@@ -3376,7 +3376,9 @@ bool CreateRendererResources()
             // lm_sm_sun_* performs four manual depth comparisons. Preserve
             // that 2x2 PCF shape at the WebGL texture boundary.
             const vec2 texel = vec2(1.0 / 1024.0);
-            float biased_depth = receiver_depth - 0.0015;
+            // Retail compares the projected receiver depth directly. Bias is
+            // applied while rasterizing casters, not subtracted here.
+            float biased_depth = receiver_depth;
             float visibility = 0.0;
             visibility += biased_depth <= texture(
                 u_shadow_map, uv + texel * vec2(-0.5, -0.5)).r ? 1.0 : 0.0;
@@ -3392,7 +3394,7 @@ bool CreateRendererResources()
         float sample_far_sun_shadow(vec2 uv, float receiver_depth)
         {
             const vec2 texel = vec2(1.0 / 1024.0);
-            float biased_depth = receiver_depth - 0.0015;
+            float biased_depth = receiver_depth;
             float visibility = 0.0;
             visibility += biased_depth <= texture(
                 u_shadow_far_map, uv + texel * vec2(-0.5, -0.5)).r
@@ -3409,8 +3411,14 @@ bool CreateRendererResources()
             return visibility * 0.25;
         }
 
-        float sample_sun_shadow(vec3 world_position)
+        float sample_sun_shadow(
+            vec3 world_position, float authored_visibility)
         {
+            // lm_sm_sun_* first samples the primary lightmap. A zero texel
+            // bypasses all dynamic comparisons, and uncovered partition
+            // borders fall back to that authored visibility instead of
+            // becoming fully lit.
+            if (authored_visibility <= 0.0) return 0.0;
             vec3 near_projected = (u_shadow_matrix *
                 vec4(world_position, 1.0)).xyz;
             vec2 near_uv = near_projected.xy * 0.5 + 0.5;
@@ -3429,7 +3437,7 @@ bool CreateRendererResources()
             if (far_uv.x <= border || far_uv.x >= 1.0 - border ||
                 far_uv.y <= border || far_uv.y >= 1.0 - border ||
                 far_depth <= 0.0 || far_depth >= 1.0)
-                return 1.0;
+                return authored_visibility;
             return sample_far_sun_shadow(far_uv, far_depth);
         }
 
@@ -3683,8 +3691,11 @@ bool CreateRendererResources()
                         }
                         float sun_amount = max(dot(
                             normalize(u_sun_direction), sun_normal), 0.0);
+                        float authored_sun_visibility = texture(
+                            u_primary_lightmap, v_lightmap_coord).r;
                         lighting += u_sun_color * sun_amount *
-                            sample_sun_shadow(v_world_position);
+                            sample_sun_shadow(v_world_position,
+                                authored_sun_visibility);
                     }
                     bootstrap_color.rgb *= lighting;
                 }
@@ -7695,7 +7706,7 @@ bool DrawShadowPartition(
          g_renderer.retainedWorldBatches)
     {
         if ((requireSunCaster && !batch.castsSunShadow) ||
-            (batch.stateBits[0] & 0x700u) != 0u)
+            (!requireSunCaster && (batch.stateBits[0] & 0x700u) != 0u))
             continue;
         const WebRendererRetainedWorldImage *base =
             WorldImage(batch.baseImageIndex);

@@ -605,11 +605,13 @@ near projection follows the native default 0.25-world-unit sample size, sun
 axis construction, view-centred texel snapping, and world-bound depth range.
 Canonical caster-bit world batches and material-qualified model batches enter
 the depth pass, with authored alpha-test state and base opacity preserved.
-Receivers perform the four manual
-depth comparisons seen in the retail `lm_sm_sun_*` shader and add
-`N dot sun * sunDiffuse * visibility` to the existing baked directional
-light. Detailed receivers use their retained DXT5nm normal for the sun dot
-product as well as the established native slope-space lightmap equation.
+Receivers perform the four manual depth comparisons seen in the retail
+`lm_sm_sun_*` shader and add `N dot sun * sunDiffuse * visibility` to the
+existing baked directional light. The primary lightmap supplies the native
+zero-visibility early out and the fallback outside usable shadow coverage;
+receiver depth is compared directly because bias belongs to caster
+rasterization. Detailed receivers use their retained DXT5nm normal for the sun
+dot product as well as the established native slope-space lightmap equation.
 
 Focused native coverage verifies slot-9 preference, primary/secondary/normal
 retention, and caster-bit batch splitting. The Release Wasm build and existing
@@ -1225,14 +1227,33 @@ and moving-brush caster commands.
 
 `lm_sm_sun_*` receivers use near coverage when valid and fall through to the
 far map outside its usable texel border. Both maps keep the recovered four-tap
-comparison shape and existing receiver bias. This closes the former missing
-far-partition coverage without introducing a browser shadow object model;
+comparison shape and direct receiver-depth comparison. This closes the former
+missing far-partition coverage without introducing a browser shadow object model;
 native per-partition DPVS caster filtering remains future convergence work.
 
 After the Release build, the existing Chrome Killhouse tab renders the first
 cgame-driven frame over 8,475 surfaces and 823,464 indices with no shader,
 resource, context, or draw failure. A three-second live sample advances 180
 frames in 3,025 ms (59.50 fps).
+
+## Canonical dynamic sun-caster qualification update (2026-08-24)
+
+A bounded disassembly of the legally supplied `lm_sm_sun_*` program recovered
+two missing receiver rules: an authored primary-lightmap zero bypass and
+authored visibility fallback outside usable partition coverage. The same
+program compares projected receiver depth directly, so WebGL no longer
+invents a second receiver bias on top of caster rasterization. The temporary
+bytecode diagnostic was removed; no retail program bytes are stored here.
+
+Native scene DObjs, dynamic XModels, and moving brush models enter the sun pass
+when their material exposes `TECHNIQUE_BUILD_SHADOWMAP_DEPTH`; they are not
+owned by the world-only `surfaceCastsSunShadow` bitset. The portable DObj and
+brush commands now preserve that distinction. World materials already marked
+as sun casters also keep their dedicated shadow technique even when their
+camera pass is blended. This closes the Killhouse indoor leak where the moving
+door/model blocker was omitted and a hard-edged bright floor patch appeared.
+Chrome verification at the supplied comparison area retains the baked floor
+lighting without that patch.
 
 ## Canonical persistent receiver-mark generation update (2026-08-23)
 

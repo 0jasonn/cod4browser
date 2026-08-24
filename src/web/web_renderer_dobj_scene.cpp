@@ -26,6 +26,7 @@ namespace
 {
 constexpr float BYTE_TO_UNIT = 1.0f / 255.0f;
 constexpr float SHORT_WEIGHT_TO_UNIT = 1.0f / 65536.0f;
+constexpr std::uint32_t TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX = 2u;
 constexpr std::uint32_t TECHNIQUE_UNLIT_INDEX = 4u;
 constexpr std::uint32_t TECHNIQUE_EMISSIVE_INDEX = 5u;
 constexpr std::uint32_t TECHNIQUE_LIT_INDEX = 7u;
@@ -431,8 +432,15 @@ WebRendererWorldBatchDesc MakeDraw(
     draw.lightmapIndex = 31u;
     draw.sourceKind = WebRendererSceneBatchKind::DynamicDObj;
     draw.depthHack = depthHack;
-    draw.castsSunShadow = castsSunShadow && material &&
-        (material->info.gameFlags & 0x40u) != 0u;
+    const MaterialTechniqueSet *shadowSet =
+        material ? material->techniqueSet : nullptr;
+    if (shadowSet && shadowSet->remappedTechniqueSet)
+        shadowSet = shadowSet->remappedTechniqueSet;
+    // Native R_AddXModelSurfaces checks the requested build-shadowmap
+    // technique for scene and dynamic models; the material game flag is the
+    // specialized static-model shortcut and must not reject these draws.
+    draw.castsSunShadow = castsSunShadow && shadowSet &&
+        shadowSet->techniques[TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX];
     draw.baseImage = FindBaseImage(material, draw.samplerState);
     draw.normalImage = FindNormalImage(material, draw.normalSamplerState);
     draw.specularImage = FindSpecularImage(

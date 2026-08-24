@@ -21,6 +21,7 @@ const GfxImage *LookupResolvedImage(const char *name) noexcept
 constexpr std::uint32_t TECHNIQUE_LIT_INDEX = 7u;
 constexpr std::uint32_t TECHNIQUE_LIT_SUN_SHADOW_INDEX = 9u;
 constexpr std::uint32_t TECHNIQUE_LIT_SPOT_INDEX = 10u;
+constexpr std::uint32_t TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX = 2u;
 WebRendererSceneViewDesc MakeView()
 {
     WebRendererSceneViewDesc view{};
@@ -944,6 +945,13 @@ void TestCanonicalDpvsRangesOverrideNonContiguousModelCount()
 void TestDynamicBrushModelUsesCanonicalSurfaceRangeAndPlacement()
 {
     Fixture fixture;
+    MaterialTechnique shadowTechnique{};
+    MaterialTechniqueSet shadowTechniqueSet{};
+    shadowTechniqueSet.techniques[
+        TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX] = &shadowTechnique;
+    Material brushMaterial{};
+    brushMaterial.techniqueSet = &shadowTechniqueSet;
+    fixture.surfaces[2].material = &brushMaterial;
     std::array<GfxBrushModel, 2> models{};
     models[0] = fixture.model;
     models[1].startSurfIndex = 2u;
@@ -978,6 +986,7 @@ void TestDynamicBrushModelUsesCanonicalSurfaceRangeAndPlacement()
         WebRendererSceneBatchKind::DynamicBModel);
     assert(command.batches[0].firstSurfaceIndex == 2u);
     assert(command.batches[0].lastSurfaceIndex == 2u);
+    assert(command.batches[0].castsSunShadow);
 
     fixture.surfaces[2].primaryLightIndex = 2u;
     std::array<WebRendererPrimaryLightDesc, 3u> lights{};
