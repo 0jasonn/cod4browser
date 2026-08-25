@@ -6,28 +6,56 @@ export const WEB_AUDIO_PROTOCOL_VERSION = 1;
 const MAX_SOURCES = 53;
 const MAX_BUFFERS = 512;
 const MAX_PCM_BYTES = 16 * 1024 * 1024;
+const MAX_DECODED_PCM_BYTES = 64 * 1024 * 1024;
+const MAX_QUEUED_BUFFERS_PER_SOURCE = 128;
 
 function clamp(value, low, high) {
     return Math.min(high, Math.max(low, Number.isFinite(value) ? value : low));
 }
 
 export class WebAudioDriver {
-    constructor({ contextFactory, onDiagnostic, onPlaybackStarted } = {}) {
+    constructor({
+        contextFactory,
+        onDiagnostic,
+        onPlaybackStarted,
+        onTelemetry,
+        decodedPcmBudgetBytes = MAX_DECODED_PCM_BYTES,
+        maxQueuedBuffersPerSource = MAX_QUEUED_BUFFERS_PER_SOURCE,
+    } = {}) {
         this.contextFactory = contextFactory ?? (() => {
             const Context = globalThis.AudioContext ?? globalThis.webkitAudioContext;
             return Context ? new Context() : null;
         });
         this.onDiagnostic = onDiagnostic;
         this.onPlaybackStarted = onPlaybackStarted;
+        this.onTelemetry = onTelemetry;
+        this.decodedPcmBudgetBytes = decodedPcmBudgetBytes;
+        this.maxQueuedBuffersPerSource = maxQueuedBuffersPerSource;
         this.context = null;
         this.sources = new Map();
         this.buffers = new Map();
+        this.bufferMetadata = new Map();
+        this.decodedPcmBytes = 0;
+        this.telemetry = { underruns: 0, overruns: 0, evictions: 0 };
         this.gestureTarget = null;
         this.gestureHandler = null;
     }
 
     diagnostic(message) {
         this.onDiagnostic?.(String(message));
+    }
+
+    publishTelemetry() {
+        const detail = Object.freeze({
+            decodedPcmBytes: this.decodedPcmBytes,
+            decodedPcmBudgetBytes: this.decodedPcmBudgetBytes,
+            bufferCount: this.buffers.size,
+            sourceCount: this.sources.size,
+            ...this.telemetry,
+        });
+        this.onTelemetry?.(detail);
+        globalThis.dispatchEvent?.(new CustomEvent("kisakcod:audio-telemetry", { detail }));
+        return detail;
     }
 
     ensureContext() {
@@ -149,6 +177,8 @@ export class WebAudioDriver {
 
     deleteBuffer(id) {
         if (!this.validId(id, MAX_BUFFERS)) return false;
+        this.decodedPcmBytes -= this.bufferMetadata.get(id)?.bytes ?? 0;
+        this.bufferMetadata.delete(id);
         this.buffers.delete(id);
         for (const source of this.sources.values()) {
             if (source.activeBufferId === id || source.bufferId === id) {
@@ -159,6 +189,38 @@ export class WebAudioDriver {
                 source.activeBufferId = 0;
             }
             if (source.bufferId === id) source.bufferId = 0;
+        }
+        this.publishTelemetry();
+        return true;
+    }
+
+    bufferReferenced(id) {
+        for (const source of this.sources.values()) {
+            if (source.bufferId === id || source.activeBufferId === id ||
+                source.queue.some((entry) => entry.bufferId === id)) return true;
+        }
+        return false;
+    }
+
+    makeDecodedRoom(bytes, replacingId) {
+        const replacedBytes = this.bufferMetadata.get(replacingId)?.bytes ?? 0;
+        let projected = this.decodedPcmBytes - replacedBytes + bytes;
+        if (projected <= this.decodedPcmBudgetBytes) return true;
+        const candidates = [...this.bufferMetadata]
+            .filter(([id]) => id !== replacingId && !this.bufferReferenced(id))
+            .sort((left, right) => left[1].lastUsed - right[1].lastUsed);
+        for (const [id, metadata] of candidates) {
+            this.buffers.delete(id);
+            this.bufferMetadata.delete(id);
+            this.decodedPcmBytes -= metadata.bytes;
+            projected -= metadata.bytes;
+            ++this.telemetry.evictions;
+            if (projected <= this.decodedPcmBudgetBytes) break;
+        }
+        if (projected > this.decodedPcmBudgetBytes) {
+            ++this.telemetry.overruns;
+            this.publishTelemetry();
+            return false;
         }
         return true;
     }
@@ -190,7 +252,19 @@ export class WebAudioDriver {
                     output[frame] = sample < 0 ? sample / 32768 : sample / 32767;
                 }
             }
+            const decodedBytes = frames * channels * Float32Array.BYTES_PER_ELEMENT;
+            if (!this.makeDecodedRoom(decodedBytes, command.bufferId)) {
+                this.diagnostic("Rejected Web Audio PCM upload: decoded-audio budget exhausted.");
+                return false;
+            }
+            this.decodedPcmBytes -= this.bufferMetadata.get(command.bufferId)?.bytes ?? 0;
             this.buffers.set(command.bufferId, buffer);
+            this.bufferMetadata.set(command.bufferId, {
+                bytes: decodedBytes,
+                lastUsed: performance.now(),
+            });
+            this.decodedPcmBytes += decodedBytes;
+            this.publishTelemetry();
             return true;
         } catch (error) {
             this.diagnostic(`Web Audio PCM upload failed: ${error?.message ?? error}`);
@@ -240,11 +314,15 @@ export class WebAudioDriver {
         const context = this.ensureContext();
         const buffer = this.buffers.get(source.bufferId);
         if (!context || !buffer || !context.createBufferSource) {
+            ++this.telemetry.underruns;
+            this.publishTelemetry();
             this.cleanup(source);
             source.activeBufferId = 0;
             source.state = "stopped";
             return false;
         }
+        const metadata = this.bufferMetadata.get(source.bufferId);
+        if (metadata) metadata.lastUsed = performance.now();
         this.cleanup(source);
         const node = context.createBufferSource();
         node.buffer = buffer;
@@ -304,7 +382,13 @@ export class WebAudioDriver {
             const entry = source.queue[index];
             if (entry.node || entry.completed) continue;
             const buffer = this.buffers.get(entry.bufferId);
-            if (!buffer) return false;
+            if (!buffer) {
+                ++this.telemetry.underruns;
+                this.publishTelemetry();
+                return false;
+            }
+            const metadata = this.bufferMetadata.get(entry.bufferId);
+            if (metadata) metadata.lastUsed = performance.now();
             const node = context.createBufferSource();
             node.buffer = buffer;
             node.loop = false;
@@ -385,6 +469,13 @@ export class WebAudioDriver {
         if (command.generation < source.generation) return true;
         source.generation = command.generation;
         if (command.op === "source-queue") {
+            if (source.queue.length + command.bufferIds.length >
+                this.maxQueuedBuffersPerSource) {
+                ++this.telemetry.overruns;
+                this.publishTelemetry();
+                this.diagnostic("Rejected Web Audio stream queue: source queue limit exceeded.");
+                return false;
+            }
             if (command.bufferIds.some((id) => !this.buffers.has(id))) return false;
             for (const bufferId of command.bufferIds)
                 source.queue.push({ bufferId, node: null, completed: false });
@@ -459,6 +550,9 @@ export class WebAudioDriver {
         }
         this.sources.clear();
         this.buffers.clear();
+        this.bufferMetadata.clear();
+        this.decodedPcmBytes = 0;
+        this.publishTelemetry();
     }
 
     dispose() {

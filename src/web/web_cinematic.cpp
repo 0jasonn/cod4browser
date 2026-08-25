@@ -1,10 +1,23 @@
 #include <gfx_d3d/r_cinematic_api.h>
 #include <universal/q_shared.h>
 
+#include <emscripten.h>
+
 #include <cstring>
 
 namespace
 {
+EM_JS(void, PublishCinematicOmission, (const char *name), {
+    globalThis.dispatchEvent(new CustomEvent("kisakcod:cinematic", {
+        detail: {
+            state: "skipped",
+            name: name ? UTF8ToString(name) : "",
+            reason: "native-bink-unavailable",
+            message: "Cinematic playback is unavailable in the browser build; continuing gameplay"
+        }
+    }));
+});
+
 char g_currentName[256]{};
 char g_nextName[256]{};
 unsigned int g_nextFlags = 0;
@@ -45,6 +58,7 @@ void __cdecl R_Cinematic_StartPlayback(
     // cinematic as a graceful, immediately completed presentation item.
     g_started = true;
     g_finished = true;
+    PublishCinematicOmission(g_currentName);
 }
 
 void R_Cinematic_SetNextPlayback(const char *name, unsigned int flags)
@@ -72,3 +86,12 @@ void R_Cinematic_StopPlayback()
 void R_Cinematic_UnsetNextPlayback() { g_nextName[0] = '\0'; }
 void __cdecl R_Cinematic_DrawStretchPic_Letterboxed() {}
 void __cdecl R_Cinematic_SetPaused(CinematicEnum) {}
+
+#if KISAK_WEB_DIAGNOSTICS
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_DiagnosticCinematicOmission()
+{
+    char name[] = "diagnostic_intro";
+    R_Cinematic_StartPlayback(name, 0u, 1.0f);
+    return R_Cinematic_IsFinished() ? 1 : 0;
+}
+#endif

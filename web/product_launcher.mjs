@@ -3,6 +3,7 @@ import { createEngineWorkerHost } from "./engine_worker_host.mjs";
 
 const canvas = document.querySelector("#game-canvas");
 const frameCounter = document.querySelector("#frame-counter");
+const cinematicStatus = document.querySelector("#cinematic-status");
 const bootLog = document.querySelector("#boot-log");
 const assetControl = document.querySelector(".asset-control");
 const assetStateLabel = document.querySelector("#asset-state-label");
@@ -227,6 +228,11 @@ globalThis.addEventListener("kisakcod:database", (event) => {
     if (event.detail?.state === "failed") {
         appendLog(`[kisakcod-web] Database: ${event.detail.message}`, "error");
     }
+});
+globalThis.addEventListener("kisakcod:cinematic", (event) => {
+    cinematicStatus.hidden = false;
+    cinematicStatus.textContent = event.detail.message;
+    appendLog(`[kisakcod-web] Cinematic '${event.detail.name}' skipped: ${event.detail.reason}.`);
 });
 
 selectInstallButton.addEventListener("click", () => { void chooseInstallation(false); });

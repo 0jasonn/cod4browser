@@ -13,6 +13,7 @@ const EXPORTED_COMMANDS = [
     "_KisakWeb_StartRetailCensus", "_KisakWeb_CancelRetailCensus",
     "_KisakWeb_StartCanonicalDbRuntimeCheck",
     "_KisakWeb_SubmitCanonicalCommand",
+    "_KisakWeb_DiagnosticCinematicOmission",
     "_KisakWeb_TestAudioProxyPcm",
     "_KisakWeb_TestLoseWebGLContext", "_KisakWeb_TestRestoreWebGLContext",
     "_KisakWeb_TestSetAaSamples",

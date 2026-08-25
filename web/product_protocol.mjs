@@ -12,6 +12,7 @@ export const PRODUCT_HOST_EVENTS = new Set([
     "kisakcod:canonical-runtime-prefix",
     "kisakcod:engine-lifecycle",
     "kisakcod:canonical-filesystem",
+    "kisakcod:cinematic",
     "kisakcod:renderer-shader",
     "kisakcod:renderer-texture",
     "kisakcod:renderer-aa",

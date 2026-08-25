@@ -21,6 +21,7 @@ const forwardedEvents = [
     "kisakcod:canonical-runtime-prefix",
     "kisakcod:engine-lifecycle",
     "kisakcod:canonical-filesystem",
+    "kisakcod:cinematic",
 ];
 
 if (typeof globalThis.CustomEvent !== "function") {

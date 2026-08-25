@@ -70,6 +70,12 @@ body {
     text-transform: uppercase;
 }
 
+#cinematic-status {
+    max-width: 56ch;
+    color: var(--accent-soft);
+    font-size: 11px;
+}
+
 .renderer-controls {
     display: flex;
     align-items: center;

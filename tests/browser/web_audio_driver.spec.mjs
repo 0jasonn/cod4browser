@@ -311,6 +311,69 @@ test("Web Audio proxy accepts bounded PCM and ignores stale source generations",
     expect(result.disposed).toBe(true);
 });
 
+test("Web Audio proxy bounds decoded PCM and per-source stream queues", async ({ page }) => {
+    await page.goto("/");
+    const result = await page.evaluate(async () => {
+        const { WebAudioDriver } = await import("/web_audio_driver.mjs");
+        class Context {
+            constructor() {
+                this.currentTime = 0;
+                this.state = "running";
+                this.destination = {};
+            }
+            createBuffer(channels, frames, rate) {
+                return { duration: frames / rate,
+                    getChannelData: () => new Float32Array(frames) };
+            }
+            close() { return Promise.resolve(); }
+        }
+        const telemetry = [];
+        const driver = new WebAudioDriver({
+            contextFactory: () => new Context(),
+            decodedPcmBudgetBytes: 16,
+            maxQueuedBuffersPerSource: 1,
+            onTelemetry: (detail) => telemetry.push(detail),
+        });
+        const pcm = new Uint8Array([0, 0, 0, 0]).buffer;
+        const upload = (bufferId) => driver.handleCommand({
+            version: 1, op: "buffer-upload", bufferId,
+            format: 0x1101, bytes: 4, rate: 44100, pcm,
+        });
+        const uploaded = [upload(1), upload(2), upload(3)];
+        const afterEviction = [...driver.buffers.keys()];
+        driver.handleCommand({ version: 1, op: "source-create", id: 1 });
+        driver.handleCommand({ version: 1, op: "source-property", sourceId: 1,
+            generation: 0, bufferId: 2, gain: 1, pitch: 1, looping: false,
+            offset: 0, x: 0, y: 0, z: 0 });
+        const firstQueue = driver.handleCommand({ version: 1, op: "source-queue",
+            sourceId: 1, generation: 0, bufferIds: [3] });
+        const queueOverrun = driver.handleCommand({ version: 1, op: "source-queue",
+            sourceId: 1, generation: 0, bufferIds: [3] });
+        const oversizedPcm = new Uint8Array(10).buffer;
+        const memoryOverrun = driver.handleCommand({
+            version: 1, op: "buffer-upload", bufferId: 4,
+            format: 0x1101, bytes: 10, rate: 44100, pcm: oversizedPcm,
+        });
+        const finalTelemetry = telemetry.at(-1);
+        driver.dispose();
+        return { uploaded, afterEviction, firstQueue, queueOverrun,
+            memoryOverrun, finalTelemetry };
+    });
+    expect(result.uploaded).toEqual([true, true, true]);
+    expect(result.afterEviction).toEqual([2, 3]);
+    expect(result.firstQueue).toBe(true);
+    expect(result.queueOverrun).toBe(false);
+    expect(result.memoryOverrun).toBe(false);
+    expect(result.finalTelemetry).toMatchObject({
+        decodedPcmBytes: 16,
+        decodedPcmBudgetBytes: 16,
+        bufferCount: 2,
+        sourceCount: 1,
+        evictions: 1,
+        overruns: 2,
+    });
+});
+
 test("Worker audio proxy crosses one platform PCM command without gameplay state", async ({ page }) => {
     await page.goto("/");
     await page.waitForFunction(() => globalThis.__KISAKCOD_WEB__?.module?.ready);
@@ -329,4 +392,25 @@ test("Worker audio proxy crosses one platform PCM command without gameplay state
         return { accepted, crossed };
     });
     expect(result).toEqual({ accepted: 1, crossed: true });
+});
+
+test("Unavailable native cinematics complete and publish an explicit omission", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForFunction(() => globalThis.__KISAKCOD_WEB__?.module?.ready);
+    const result = await page.evaluate(async () => {
+        const event = new Promise((resolve) => globalThis.addEventListener(
+            "kisakcod:cinematic", ({ detail }) => resolve(detail), { once: true }));
+        const finished = await globalThis.__KISAKCOD_WEB__.module.call(
+            "_KisakWeb_DiagnosticCinematicOmission");
+        return { finished, detail: await event };
+    });
+    expect(result).toEqual({
+        finished: 1,
+        detail: {
+            state: "skipped",
+            name: "diagnostic_intro",
+            reason: "native-bink-unavailable",
+            message: "Cinematic playback is unavailable in the browser build; continuing gameplay",
+        },
+    });
 });
