@@ -1,47 +1,39 @@
-const capability = (label, status, available) => ({ label, available,
+const capability = (label, available, status = "required") => ({ label, available,
     status: available === null ? "not-checked" : available ? status : "unsupported" });
 
-async function workerHasSyncAccess()
+async function hasSyncAccess()
 {
     const worker = new Worker(new URL("./capability_probe_worker.mjs", import.meta.url),
         { type: "module" });
     try {
-        return await Promise.race([
-            new Promise((resolve) => {
-                worker.onmessage = (event) => resolve(event.data?.syncAccessHandle === true);
-                worker.onerror = () => resolve(false);
-            }),
-            new Promise((resolve) => setTimeout(() => resolve(false), 3_000)),
-        ]);
+        const reply = new Promise((resolve) => {
+            worker.onmessage = ({ data }) => resolve(data?.syncAccessHandle === true);
+            worker.onerror = () => resolve(false);
+        });
+        return await Promise.race([reply,
+            new Promise((resolve) => setTimeout(resolve, 3_000, false))]);
     } finally { worker.terminate(); }
 }
 
 export async function detectBrowserCapabilities()
 {
     const canvas = document.createElement("canvas");
-    let webgl2 = false;
-    try { webgl2 = Boolean(canvas.getContext("webgl2")); } catch {}
-    /** @type {[string, string, boolean][]} */
+    let webgl2;
+    try { webgl2 = Boolean(canvas.getContext("webgl2")); } catch { webgl2 = false; }
     const required = [
-        ["wasm", "WebAssembly", typeof WebAssembly === "object"],
-        ["webgl2", "WebGL 2", webgl2],
-        ["worker", "Worker", typeof Worker === "function"],
-        ["offscreenCanvas", "OffscreenCanvas", typeof OffscreenCanvas === "function" && typeof canvas.transferControlToOffscreen === "function"],
-        ["indexedDb", "IndexedDB", typeof indexedDB === "object"],
-        ["opfs", "OPFS", typeof navigator.storage?.getDirectory === "function"],
-        ["webAudio", "Web Audio", typeof AudioContext === "function"],
-        ["pointerLock", "pointer lock", typeof canvas.requestPointerLock === "function" && typeof document.exitPointerLock === "function"],
+        ["wasm", "WebAssembly", typeof WebAssembly === "object"], ["webgl2", "WebGL 2", webgl2],
+        ["worker", "Worker", typeof Worker === "function"], ["offscreenCanvas", "OffscreenCanvas", typeof OffscreenCanvas === "function" && typeof canvas.transferControlToOffscreen === "function"],
+        ["indexedDb", "IndexedDB", typeof indexedDB === "object"], ["opfs", "OPFS", typeof navigator.storage?.getDirectory === "function"],
+        ["webAudio", "Web Audio", typeof AudioContext === "function"], ["pointerLock", "pointer lock", typeof canvas.requestPointerLock === "function" && typeof document.exitPointerLock === "function"],
     ];
     const capabilities = Object.fromEntries(required.map(([name, label, available]) =>
-        [name, capability(label, "required", available)]));
-    let missingRequired = required.filter(([name]) =>
-        capabilities[name].status === "unsupported").map(([name]) => name);
-    capabilities.persistentStorage = capability("persistent storage", "optional",
-        typeof navigator.storage?.persist === "function" && typeof navigator.storage?.persisted === "function");
-    capabilities.opfsSyncAccess = capability("Worker OPFS sync access", "required",
-        missingRequired.length ? null : await workerHasSyncAccess());
-    if (capabilities.opfsSyncAccess.status === "unsupported") {
-        missingRequired = [...missingRequired, "opfsSyncAccess"];
-    }
-    return { supported: missingRequired.length === 0, capabilities, missingRequired };
+        [name, capability(label, available)]));
+    const missing = required.filter(([, , available]) => !available).map(([name]) => name);
+    capabilities.persistentStorage = capability("persistent storage",
+        typeof navigator.storage?.persist === "function" &&
+        typeof navigator.storage?.persisted === "function", "optional");
+    capabilities.opfsSyncAccess = capability("Worker OPFS sync access",
+        missing.length ? null : await hasSyncAccess());
+    if (capabilities.opfsSyncAccess.available === false) missing.push("opfsSyncAccess");
+    return { supported: !missing.length, capabilities, missingRequired: missing };
 }
