@@ -149,3 +149,24 @@ must keep their native/Wasm tests available.
 Renderer decomposition, memory-budget changes, campaign expansion, and audio
 budget changes are intentionally downstream of those correctness and artifact
 boundaries.
+
+## Cleanup outcome
+
+The implementation endpoint before the final report is
+`a3a8004d207f144444f2fbf0dbaf51bd2446657b`. Production and diagnostics are
+now distinct targets and sites, with `KISAK_WEB_DIAGNOSTICS=OFF` by default.
+The production boundary checks its exact file allowlist, link map, forbidden
+JavaScript and C++ identities, low-level Wasm export count, and size budgets.
+
+| Measure | Baseline | Cleanup | Change |
+| --- | ---: | ---: | ---: |
+| Wasm | 3,730,562 B | 3,180,909 B | -549,653 B (-14.73%) |
+| JavaScript modules | 553,678 B | 281,469 B | -272,209 B (-49.16%) |
+| Served site | 4,294,371 B | 3,471,428 B | -822,943 B (-19.16%) |
+| Named web entry points | 23 | 9 | -14 (-60.87%) |
+| Low-level Wasm exports | 38 | 24 | -14 (-36.84%) |
+
+The baseline durability failure is fixed and covered across open dirty files,
+queued generations, rename/remove, injected failure/retry, reload, and
+exclusive-writer tests. Final synthetic/native results and the explicitly
+unperformed local retail matrix are in [CLEANUP_REPORT.md](../CLEANUP_REPORT.md).

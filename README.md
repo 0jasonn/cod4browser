@@ -6,13 +6,14 @@ platform port: portable engine behavior stays close to KisakCOD, while browser
 storage, lifecycle, filesystem hosting, and WebGL2 live behind explicit
 platform boundaries.
 
-The current build is an architecture and compatibility proof, not a playable
-game. A dedicated Worker executes the canonical `Com_Init` prefix, physical
-memory, database pools, XFile streaming, and every generated family required
-to complete the canonical `code_post_gfx`, `ui`, and `common` startup-zone
-request. The normal DB path then opens Killhouse, publishes the canonical
-`GfxWorld`, compares it with the frozen Gate 2 oracle, and renders its bounded
-world surface through WebGL2. Normal startup does not use the census as DB.
+The Release product runs in a dedicated Worker and follows the canonical Kisak
+path through `Com_Init`, database/XFile loading, ClipMap, server/game, local
+client/cgame, renderer-frontend commands, and actual WebGL2 world frames. The
+validated Killhouse slice includes input, HUD, effects, and Web Audio. It is
+still an incomplete port, not a generally compatible COD4 release.
+
+The frozen Gate 2 census/oracle and synthetic proof controls are built only by
+the opt-in diagnostics target. They are not linked or served by production.
 
 ## Legal asset boundary
 
@@ -68,7 +69,17 @@ After `npm.cmd ci` and Playwright browser installation:
 npm.cmd run test:browser            # @smoke
 npm.cmd run test:browser:remainder  # not @smoke and not @native-covered
 npm.cmd run test:browser:full       # explicit exhaustive browser suite
+npm.cmd run check:web:static        # ESLint and typed protocol check
+npm.cmd run test:protocol           # protocol/profile/lifecycle unit tests
+npm.cmd run check:web:product       # production files, symbols, exports, sizes
 ```
+
+Build the separate diagnostic site with `tools/build_web.ps1 -Diagnostics`.
+It is emitted under `build/web-diagnostics/site-diagnostics`.
+
+The opt-in [local retail validation](docs/local-retail-validation.md) exercises
+the Killhouse/CargoShip, persistence, input/audio, and context-loss matrix with
+legally owned files.
 
 Routine CI runs smoke and remainder once each against the exact Release
 artifact it uploads. Tests tagged `@native-covered` remain available in the
@@ -85,20 +96,18 @@ Demonstrated:
 - canonical command/dvar behavior, 128 MiB PMem, DB pools, XFile streaming,
   completion of all 8,176 ordered assets in the three engine-requested startup
   prerequisite zones, and normalized native/Wasm traces;
-- an opt-in Gate 2 oracle retaining the retail census, canonical Killhouse
-  `GfxWorld`, and bounded WebGL2 world-surface proof; and
+- a separate opt-in diagnostic artifact retaining the Gate 2 census/oracle,
+  synthetic proofs, context controls, and comparison evidence; and
 - synthetic Linux, MSVC x86, Wasm, browser, sanitizer, and fuzz validation.
 
 The real `CM_LoadMap`, script/XAnim/DObj initialization, local-server command
-path, and their normalized x86/Wasm contracts are compiled and tested. The
-Worker mount now backs canonical `FS_InitFilesystem`, directory enumeration,
-and Kisak minizip access without duplicating search paths or pack state in
-JavaScript. Generated fixtures prove IWD order, collision precedence, loose
-reads, listing, size, seek, and missing-file behavior before the runtime
-continues through the existing DB-owned startup. The owned browser run still
-stops at the ordered `GameWorldSp` asset before ClipMap publication; full
-`CL_Init`, input, audio, cinematics, cgame, and a playable offline slice are
-not yet demonstrated.
+path, `CL_Init`, `CG_Init`, and normalized x86/Wasm contracts are compiled and
+tested. The Worker mount backs canonical `FS_InitFilesystem`, directory
+enumeration, and Kisak minizip access without duplicating search paths or pack
+state in JavaScript. Browser input and bounded Web Audio are demonstrated.
+Native Bink playback is intentionally omitted with a visible structured skip;
+gamepad support, full cinematics, advanced audio parity, broader campaign
+validation, and remaining material families are outstanding.
 
 ## License
 

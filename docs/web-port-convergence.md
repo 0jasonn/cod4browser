@@ -143,20 +143,17 @@ been removed.
 
 ### Runtime/oracle separation
 
-Normal launcher startup mounts the validated import, starts qcommon, and runs
-the canonical database/runtime check. It leaves the census, archive probe,
-engine-asset proof, canonical retail world, and bounded Killhouse draw idle.
-`runtime.startGate2Oracle()` explicitly enables that retained diagnostic path;
-every dependent browser test requests it. The oracle remains linked for now so
-the same production artifact can prove compatibility, but its sources are
-isolated in the `kisak_web_gate2_oracle` static library.
+Normal launcher startup mounts the validated import and follows the canonical
+database/runtime path. Production does not link or serve the census, archive
+proof, engine-asset proof, renderer comparison, generic calls, or test
+controls. The separate diagnostic target retains those paths and links the
+`kisak_web_gate2_oracle` library for parity investigation.
 
-Gate 2-only production sources are the retail census/load dispatcher,
+Gate 2-only diagnostic sources are the retail census/load dispatcher,
 archive/engine-asset job chain, sound catalog/job, and their bounded renderer
-proof. They are frozen regression infrastructure. Canonical DB/runtime sources
-must not call them. The eventual split is a runtime artifact without that
-library plus a diagnostic/test artifact that retains it, once canonical DB can
-reproduce the same asset/world evidence.
+proof. They are frozen regression infrastructure. CI checks the production
+link map, generated JavaScript, Wasm export count, and exact site allowlist so
+canonical production cannot silently regain them.
 
 ### Prefix, build, and test ownership
 
@@ -205,7 +202,7 @@ and WebGL seams. The exhaustive browser suite remains explicitly available.
 | IWI decoding | `MODIFIED KISAK` / canonical renderer path reached | The strict decoder handles retail ARGB, BGR8, A8L8, and DXT IWI members and canonical DB load definitions, including the bounded 2048-square L8 lightmap atlas case, complete 2048-square DXT3/DXT5 mip chains under the shared 8 MiB compressed-member ceiling, compressed 2048x1024 images that expand to 8 MiB of RGBA8, and bounded six-face cubemaps in canonical `+X,-X,+Y,-Y,+Z,-Z` order. Streaming, U/V clamp, and compressed-texture legacy-normal policy bits are accepted because they do not change the payload layout; volume, unknown-layout, malformed, and over-budget inputs still fail closed. The WebGL backend reads external `images/<GfxImage name>.iwi` through canonical FS/IWD ownership when a fastfile load definition intentionally has no pixels. |
 | Fastfile framing and zone stream machine | `TEMPORARY WEB SUBSTITUTE` | It accurately models blocks, rewind/high-water behavior, pointer classes, aliases, and bounded streaming. Use it as differential evidence and migrate reusable mechanics toward the Kisak DB loader. |
 | Asset registry | `MODIFIED KISAK` / partial plus `TEMPORARY WEB SUBSTITUTE` oracle | All generated families reached across the three startup prerequisites consume the canonical 32-bit asset-entry pool, per-type pools, free chain, normalized hash table, and zone ownership through `DB_AddXAsset`/`DB_LinkXAssetEntry`. The owned chain records 9,637 publications through entry 9,652, with free entries 32,752 -> 23,115. Gate 2 remains a frozen oracle and is not called by the generated path. |
-| Retail loader dispatcher | `TEMPORARY WEB SUBSTITUTE` / frozen Gate 2 oracle | `web_retail_fastfile_census.*` remains the orchestration vehicle, but normal startup no longer executes it. The source has an explicit freeze contract and is isolated with its diagnostic dependencies in `kisak_web_gate2_oracle`; canonical DB code must not call it. It remains linked only until canonical DB can reproduce equivalent asset/world evidence. |
+| Retail loader dispatcher | `TEMPORARY WEB SUBSTITUTE` / diagnostic-only Gate 2 oracle | `web_retail_fastfile_census.*` is isolated with its dependencies in `kisak_web_gate2_oracle` and linked only by the diagnostic target. Canonical production does not call or link it. |
 | `clipMap_t` asset loading | `MODIFIED KISAK` / canonical reached closure | The dedicated family transcribes the 284-byte `Load_clipMap_t` record, block-4 child order, block-1 zero-fill dynamic client allocations, root insertion/alias handling, bounded ownership, and atomic canonical publication for `col_map_sp`/`col_map_mp`. Synthetic MSVC/Wasm coverage exercises empty and populated child graphs under one-byte traversal budgets. Retail traversal now publishes directly into native `&cm`; real `CM_LoadMap` consumes that owner. Type 12 `com_map` remains correctly distinct and is handled by the canonical ComWorld family. |
 | `ComWorld` asset loading | `MODIFIED KISAK` / canonical reached closure | `db_generated_comworld.cpp` owns native root null/inline/shared/prior-alias handling, the canonical body, name and 68-byte primary-light array, per-light `defName` XStrings, checked bounds, and final real-DB publication. Production publishes into the subsystem-owned `&comWorld`, and `com_world_runtime.cpp` supplies the real fastfile lookup/unload owner used after `CM_LoadMap`. Native x86/Wasm fixtures and runtime lookup evidence are exact. The normal Killhouse run publishes asset 704; `web_retail_load_comworld.*` remains frozen Gate 2 evidence only. |
 | `GfxLightDef` asset loading | `MODIFIED KISAK` / canonical reached closure plus Gate 2 oracle | `db_generated_light.cpp` now owns normal generated loading: four-byte root cells, null/inline/shared/prior aliases, block-0 16-byte bodies, block-4 names, embedded 8-byte light images, canonical `GfxImage*` dependencies, insertion cells, and final-only real DB publication. Retail startup publishes two LightDefs. The independent `web_retail_load_lightdef.*` path remains frozen Gate 2 evidence for Killhouse asset 705; no rendering, attenuation evaluation, shadow behavior, or primary-light linking is implemented. |
