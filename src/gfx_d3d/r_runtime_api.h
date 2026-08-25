@@ -8,6 +8,7 @@ struct vidConfig_t;
 void __cdecl R_BeginRegistration(vidConfig_t *vidConfigOut);
 void __cdecl R_ConfigureRenderer(const GfxConfiguration *config);
 void __cdecl R_Shutdown(int destroyWindow);
+void __cdecl R_UnloadWorld();
 void R_ShutdownDirect3D();
 void __cdecl R_SyncRenderThread();
 Font_s *__cdecl R_RegisterFont(const char *name, int imageTrack);

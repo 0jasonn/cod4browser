@@ -38,6 +38,7 @@
 #include <web/web_renderer_code_mesh.h>
 #include <web/web_renderer_dobj_scene.h>
 #include <web/web_renderer_fx_model_scene.h>
+#include <web/web_renderer_frontend_lifecycle.h>
 #include <web/web_renderer_lighting.h>
 #include <web/web_renderer_mark_mesh.h>
 #include <web/web_renderer_particle_cloud_scene.h>
@@ -63,8 +64,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-
-void __cdecl R_UnloadWorld();
 
 enum CubemapShot : int;
 
@@ -468,7 +467,7 @@ float g_sunDirectionOverride[3]{};
 float g_sunDirectionTarget[3]{};
 bool g_hasSunLightOverride = false;
 bool g_hasSunDirectionOverride = false;
-bool g_rendererWorldReady = false;
+WebRendererFrontendLifecycle g_rendererLifecycle;
 bool g_gameDrivenFrameReported = false;
 bool g_visionLightingReported = false;
 bool g_sceneBlurReported = false;
@@ -535,6 +534,52 @@ std::vector<std::uint8_t> g_staticMarkVisibility;
 std::vector<WebRendererSurfaceVertex> g_uiVertices;
 std::vector<std::uint32_t> g_uiIndices;
 std::vector<WebRendererUiBatchDesc> g_uiBatches;
+
+void ResetFrontendWorldState()
+{
+    g_gameDrivenFrameReported = false;
+    g_visionLightingReported = false;
+    g_sceneBlurReported = false;
+    g_worldSceneSubmitted = false;
+    g_staticModelSceneSubmitted = false;
+    g_dynamicModelSceneReported = false;
+    g_dynamicBrushSceneReported = false;
+    g_dynamicEntityModelSceneReported = false;
+    g_uiSceneReported = false;
+    g_dobjSubmissions.fill({});
+    g_dobjSubmissionCount = 0u;
+    g_brushModelSubmissions.fill({});
+    g_brushModelSubmissionCount = 0u;
+    g_fxModelSubmissions.fill({});
+    g_fxModelSubmissionCount = 0u;
+    g_particleCloudSubmissions.fill({});
+    g_particleCloudSubmissionCount = 0u;
+    g_worldSceneSurfaceCount = 0u;
+    g_worldSceneVertexCount = 0u;
+    g_worldSceneIndexCount = 0u;
+    g_codeMeshVertCount = 0u;
+    g_codeMeshIndexCount = 0u;
+    g_codeMeshArgCount = 0u;
+    g_processCodeMesh = false;
+    decltype(g_codeMeshRenderVertices){}.swap(g_codeMeshRenderVertices);
+    decltype(g_codeMeshRenderIndices){}.swap(g_codeMeshRenderIndices);
+    decltype(g_codeMeshRenderBatches){}.swap(g_codeMeshRenderBatches);
+    g_reportedCodeMeshMaterials.fill(nullptr);
+    g_reportedCodeMeshMaterialCount = 0u;
+    g_markMeshVertCount = 0u;
+    g_markMeshIndexCount = 0u;
+    g_processMarkMesh = false;
+    g_pendingMarkDraws.fill({});
+    g_pendingMarkDrawCount = 0u;
+    g_pendingMarkDrawBegin = 0u;
+    decltype(g_markMeshRenderVertices){}.swap(g_markMeshRenderVertices);
+    decltype(g_markMeshRenderIndices){}.swap(g_markMeshRenderIndices);
+    decltype(g_markMeshRenderBatches){}.swap(g_markMeshRenderBatches);
+    decltype(g_staticMarkVisibility){}.swap(g_staticMarkVisibility);
+    decltype(g_uiVertices){}.swap(g_uiVertices);
+    decltype(g_uiIndices){}.swap(g_uiIndices);
+    decltype(g_uiBatches){}.swap(g_uiBatches);
+}
 
 EM_JS(void, Web_GetCanvasSize, (std::uint32_t *width, std::uint32_t *height), {
     const canvas = Module.canvas;
@@ -1316,9 +1361,40 @@ void __cdecl R_BeginRegistration(vidConfig_t *configuration)
 void __cdecl R_Shutdown(int destroyWindow)
 {
     if (destroyWindow)
+    {
+        if (g_rendererLifecycle.WorldReady()) R_UnloadWorld();
         WebRenderer_Shutdown();
+        iassert(g_rendererLifecycle.FullShutdown(
+            !WebRenderer_HasLiveContext()));
+    }
     else
         R_UnloadWorld();
+}
+
+void __cdecl R_UnloadWorld()
+{
+    if (!g_rendererLifecycle.WorldReady())
+    {
+        iassert(g_rendererLifecycle.World() == nullptr);
+        WebRenderer_UnloadWorldResources();
+        return;
+    }
+
+    iassert(g_rendererLifecycle.World() == &s_world);
+    iassert(WebRenderer_HasLiveContext());
+    iassert(g_rendererLifecycle.BeginWorldUnload());
+    Web_Log(WebLogLevel::Info,
+        "[kisakcod-web] Renderer frontend beginning world unload.\n");
+    ResetFrontendWorldState();
+    WebRenderer_UnloadWorldResources();
+    iassert(!WebRenderer_HasWorldResources());
+    iassert(WebRenderer_HasLiveContext());
+    iassert(g_rendererLifecycle.CompleteWorldUnload(
+        !WebRenderer_HasWorldResources(), WebRenderer_HasLiveContext()));
+    iassert(g_rendererLifecycle.World() == nullptr);
+    Web_Log(WebLogLevel::Info,
+        "[kisakcod-web] Renderer frontend completed world unload while "
+        "preserving the WebGL2 context.\n");
 }
 void R_ShutdownDirect3D() { WebRenderer_Shutdown(); }
 void __cdecl R_SyncRenderThread() {}
@@ -1367,6 +1443,13 @@ void __cdecl R_ClearFogs()
 void __cdecl R_LoadWorld(char *name, int *checksum, int)
 {
     iassert(name && *name);
+    iassert(!g_rendererLifecycle.WorldReady() &&
+        g_rendererLifecycle.World() == nullptr);
+    if (g_rendererLifecycle.State() == WebRendererFrontendState::Cold)
+        iassert(g_rendererLifecycle.Initialize(WebRenderer_HasLiveContext()));
+    iassert(g_rendererLifecycle.State() == WebRendererFrontendState::Ready);
+    if (g_rendererLifecycle.PublicationGeneration() != 0u)
+        iassert(!WebRenderer_HasWorldResources());
     GfxWorld *world = DB_FindXAssetHeader(
         ASSET_TYPE_GFXWORLD, name).gfxWorld;
     if (world != &s_world || !s_world.name)
@@ -1383,7 +1466,11 @@ void __cdecl R_LoadWorld(char *name, int *checksum, int)
         "[kisakcod-web] Selected %u canonical shader-model-3 technique sets "
         "for the WebGL2 renderer after zone publication.\n",
         shaderModel3TechniqueSets);
-    g_rendererWorldReady = true;
+    iassert(g_rendererLifecycle.PublishWorld(&s_world));
+    Web_Log(WebLogLevel::Info,
+        "[kisakcod-web] Renderer frontend published canonical world '%s' "
+        "(generation %u).\n", s_world.name,
+        g_rendererLifecycle.PublicationGeneration());
     g_gameDrivenFrameReported = false;
     g_visionLightingReported = false;
     g_sceneBlurReported = false;
@@ -1400,7 +1487,8 @@ void __cdecl R_LoadWorld(char *name, int *checksum, int)
 
 void __cdecl R_EndRegistration()
 {
-    iassert(g_rendererWorldReady);
+    iassert(g_rendererLifecycle.WorldReady() &&
+        g_rendererLifecycle.World() == &s_world);
 }
 
 Font_s *__cdecl R_RegisterFont(const char *name, int)
@@ -1615,7 +1703,7 @@ void __cdecl R_ClearScene(std::uint32_t)
 
 void __cdecl R_InitSceneData(int localClientNum)
 {
-    iassert(localClientNum == 0 && g_rendererWorldReady);
+    iassert(localClientNum == 0 && g_rendererLifecycle.WorldReady());
     // Native DPVS scene buffers are renderer-backend storage. The WebGL2
     // backend owns visibility submission and does not expose D3D scene bits.
 }
@@ -1965,7 +2053,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     iassert(refdef->height > 0u);
     iassert(refdef->width > 0u);
     iassert(refdef->localClientNum == 0);
-    if (!g_rendererWorldReady || !s_world.name)
+    if (!g_rendererLifecycle.WorldReady() || !s_world.name)
         Com_Error(ERR_DROP, "R_RenderScene: NULL worldmodel");
 
     // Native R_SetTestLods runs at the render-command boundary before every

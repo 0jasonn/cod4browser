@@ -6327,11 +6327,13 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
     return WebRendererSurfaceResult::Success;
 }
 
-// Canonical DB unload calls this native renderer hook before retiring a
-// GfxWorld. The web backend keeps the same invariant by dropping the retained
-// world command and its GPU objects; the next map publication re-submits it.
-void __cdecl R_UnloadWorld()
+// The canonical frontend calls this backend seam before retiring a GfxWorld.
+// Drop the retained world command and GPU objects without touching context
+// ownership; the next map publication re-submits them.
+void WebRenderer_UnloadWorldResources()
 {
+    const EMSCRIPTEN_WEBGL_CONTEXT_HANDLE contextBefore = g_renderer.context;
+    const bool initializedBefore = g_renderer.initialized;
     if (g_renderer.initialized && !g_renderer.contextLost)
     {
         DeleteWorldTextureObjects(g_renderer.retainedWorldImages);
@@ -6505,7 +6507,32 @@ void __cdecl R_UnloadWorld()
         "before canonical zone retirement.\n");
     iassert(!g_renderer.surfaceActive && !g_renderer.worldSurfaceActive &&
         g_renderer.retainedWorldImages.empty());
+    iassert(g_renderer.context == contextBefore &&
+        g_renderer.initialized == initializedBefore);
     EmitRendererMemory("world-unloaded");
+}
+
+bool WebRenderer_HasLiveContext()
+{
+    return g_renderer.initialized && g_renderer.context > 0;
+}
+
+bool WebRenderer_HasWorldResources()
+{
+    return g_renderer.surfaceActive || g_renderer.worldSurfaceActive ||
+        g_renderer.staticModelSceneActive || g_renderer.dynamicModelSceneActive ||
+        g_renderer.uiSceneActive || g_renderer.sceneViewActive ||
+        g_renderer.vertexArray != 0u || g_renderer.staticModelVertexArray != 0u ||
+        g_renderer.dynamicModelVertexArray != 0u || g_renderer.uiVertexArray != 0u ||
+        !g_renderer.retainedVertices.empty() ||
+        !g_renderer.retainedWorldBatches.empty() ||
+        !g_renderer.retainedWorldImages.empty() ||
+        !g_renderer.retainedStaticModelVertices.empty() ||
+        !g_renderer.retainedStaticModelImages.empty() ||
+        !g_renderer.retainedDynamicModelVertices.empty() ||
+        !g_renderer.retainedDynamicModelImages.empty() ||
+        !g_renderer.retainedUiVertices.empty() ||
+        !g_renderer.retainedUiImages.empty();
 }
 
 WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
@@ -6981,7 +7008,7 @@ bool WebRenderer_Initialize()
 
 void WebRenderer_Shutdown()
 {
-    R_UnloadWorld();
+    WebRenderer_UnloadWorldResources();
     DestroyWebGLContext();
     iassert(g_renderer.context == 0 && !g_renderer.initialized);
     EmitRendererMemory("shutdown");
