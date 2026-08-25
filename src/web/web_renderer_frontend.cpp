@@ -64,6 +64,8 @@
 #include <utility>
 #include <vector>
 
+void __cdecl R_UnloadWorld();
+
 enum CubemapShot : int;
 
 extern GfxWorld s_world;
@@ -1311,7 +1313,13 @@ void __cdecl R_BeginRegistration(vidConfig_t *configuration)
     configuration->deviceSupportsGamma = false;
 }
 
-void __cdecl R_Shutdown(int) { WebRenderer_Shutdown(); }
+void __cdecl R_Shutdown(int destroyWindow)
+{
+    if (destroyWindow)
+        WebRenderer_Shutdown();
+    else
+        R_UnloadWorld();
+}
 void R_ShutdownDirect3D() { WebRenderer_Shutdown(); }
 void __cdecl R_SyncRenderThread() {}
 void __cdecl R_BeginFrame()
