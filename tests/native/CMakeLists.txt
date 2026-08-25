@@ -258,13 +258,6 @@ add_executable(web_renderer_world_scene_tests
     "${KISAK_REPOSITORY_ROOT}/src/web/web_renderer_world_scene.cpp"
 )
 
-add_executable(web_renderer_frontend_lifecycle_tests
-    "${CMAKE_CURRENT_LIST_DIR}/web_renderer_frontend_lifecycle_tests.cpp"
-)
-target_compile_features(web_renderer_frontend_lifecycle_tests PRIVATE cxx_std_20)
-target_include_directories(web_renderer_frontend_lifecycle_tests PRIVATE
-    "${KISAK_REPOSITORY_ROOT}/src")
-
 if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR
     CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     # The native water implementation consumes canonical Material and world
@@ -783,7 +776,6 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     endif()
     set_target_properties(web_renderer_surface_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_renderer_world_scene_tests PROPERTIES SUFFIX ".cjs")
-    set_target_properties(web_renderer_frontend_lifecycle_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(r_water_simulation_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_renderer_lighting_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_renderer_comparison_tests PROPERTIES SUFFIX ".cjs")
@@ -852,8 +844,6 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_renderer_surface_tests>")
     add_test(NAME web_renderer_world_scene_tests
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_renderer_world_scene_tests>")
-    add_test(NAME web_renderer_frontend_lifecycle_tests
-        COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_renderer_frontend_lifecycle_tests>")
     add_test(NAME r_water_simulation_tests
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:r_water_simulation_tests>")
     add_test(NAME web_renderer_lighting_tests
@@ -954,7 +944,6 @@ else()
     endif()
     add_test(NAME web_renderer_surface_tests COMMAND web_renderer_surface_tests)
     add_test(NAME web_renderer_world_scene_tests COMMAND web_renderer_world_scene_tests)
-    add_test(NAME web_renderer_frontend_lifecycle_tests COMMAND web_renderer_frontend_lifecycle_tests)
     if (TARGET r_water_simulation_tests)
         add_test(NAME r_water_simulation_tests COMMAND r_water_simulation_tests)
     endif()

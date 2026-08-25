@@ -538,8 +538,6 @@ WebRendererSurfaceResult WebRenderer_SetSurface(
 bool WebRenderer_Initialize();
 void WebRenderer_Shutdown();
 void WebRenderer_UnloadWorldResources();
-bool WebRenderer_HasLiveContext();
-bool WebRenderer_HasWorldResources();
 
 // Copies a tightly packed RGBA8 image into bounded renderer-owned recovery
 // storage and displays it on a submitted surface that requests the engine-image

@@ -55,11 +55,9 @@ Fifteen lifecycle tests prove successful and failed mount/flush, late timeout re
 
 ## Renderer lifecycle
 
-Normal map unload is frontend-owned. `R_UnloadWorld` clears world-ready state, canonical world pointers, cached scene submissions, material/resource references, and map-specific flags, then invokes `WebRenderer_UnloadWorldResources`. The backend deletes map textures, geometry/buffers/VAOs, lighting/shadow state, visibility resources, recovery sources, and other map-scoped resources while retaining the canvas, WebGL context, context-loss handlers, and reusable process renderer state.
+Normal map unload remains database-owned. `R_UnloadWorld` invokes `WebRenderer_UnloadWorldResources`, which deletes map textures, geometry/buffers/VAOs, lighting/shadow state, visibility resources, recovery sources, and other map-scoped resources while retaining the canvas, WebGL context, context-loss handlers, reusable process renderer state, and the frontend's canonical world publication. The next `R_LoadWorld` refreshes that publication after the database publishes the replacement world.
 
-Full renderer shutdown remains separate and destroys backend-global resources, handlers, caches, and context ownership. Lifecycle assertions reject publication over retained frontend state, impossible unload state, failure to clear the frontend pointer, failure to release backend map state, loss of context during partial unload, and incomplete full shutdown.
-
-The new `web_renderer_frontend_lifecycle_tests` runs identically under native Clang and Wasm: publish A, create map resources, unload A, prove map state released and context generation preserved, publish B, unload B, then fully shut down and prove global context ownership is released.
+`R_Shutdown(false)` is inert because the database already owns the canonical map-retirement boundary. Full renderer shutdown remains separate and destroys backend-global resources, handlers, caches, and context ownership only when the window is destroyed.
 
 ## Boundary and CI
 

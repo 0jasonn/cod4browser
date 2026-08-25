@@ -6512,29 +6512,6 @@ void WebRenderer_UnloadWorldResources()
     EmitRendererMemory("world-unloaded");
 }
 
-bool WebRenderer_HasLiveContext()
-{
-    return g_renderer.initialized && g_renderer.context > 0;
-}
-
-bool WebRenderer_HasWorldResources()
-{
-    return g_renderer.surfaceActive || g_renderer.worldSurfaceActive ||
-        g_renderer.staticModelSceneActive || g_renderer.dynamicModelSceneActive ||
-        g_renderer.uiSceneActive || g_renderer.sceneViewActive ||
-        g_renderer.vertexArray != 0u || g_renderer.staticModelVertexArray != 0u ||
-        g_renderer.dynamicModelVertexArray != 0u || g_renderer.uiVertexArray != 0u ||
-        !g_renderer.retainedVertices.empty() ||
-        !g_renderer.retainedWorldBatches.empty() ||
-        !g_renderer.retainedWorldImages.empty() ||
-        !g_renderer.retainedStaticModelVertices.empty() ||
-        !g_renderer.retainedStaticModelImages.empty() ||
-        !g_renderer.retainedDynamicModelVertices.empty() ||
-        !g_renderer.retainedDynamicModelImages.empty() ||
-        !g_renderer.retainedUiVertices.empty() ||
-        !g_renderer.retainedUiImages.empty();
-}
-
 WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
     const WebRendererStaticModelSceneDesc &scene)
 {
