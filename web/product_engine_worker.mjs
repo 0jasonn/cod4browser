@@ -135,6 +135,15 @@ function submitCanonicalCommand(command)
     }
 }
 
+function queueInput(input)
+{
+    if (input.type === "key") {
+        module._KisakWeb_QueueKeyEvent(input.key, input.down ? 1 : 0);
+    } else {
+        module._KisakWeb_QueueMouseMove(input.x, input.y, input.dx, input.dy);
+    }
+}
+
 globalThis.addEventListener("message", (event) => {
     const message = event.data;
     void (async () => {
@@ -148,6 +157,11 @@ globalThis.addEventListener("message", (event) => {
             if (!module) throw Object.assign(new Error("The engine is not ready."), {
                 code: "ENGINE_NOT_READY",
             });
+
+            if (message.type === "input-event") {
+                queueInput(message.event);
+                return;
+            }
 
             switch (message.type) {
             case "mountAssets": {
@@ -188,17 +202,6 @@ globalThis.addEventListener("message", (event) => {
                 module.canvas.height = message.height;
                 reply(message.id, message.type, true);
                 break;
-            case "input": {
-                const input = message.event;
-                if (input?.type === "key" && Number.isInteger(input.key)) {
-                    module._KisakWeb_QueueKeyEvent(input.key, input.down ? 1 : 0);
-                } else if (input?.type === "mouse-move" &&
-                    [input.x, input.y, input.dx, input.dy].every(Number.isInteger)) {
-                    module._KisakWeb_QueueMouseMove(input.x, input.y, input.dx, input.dy);
-                }
-                reply(message.id, message.type, true);
-                break;
-            }
             case "runtimeStatus":
                 reply(message.id, message.type, { state });
                 break;
@@ -214,6 +217,14 @@ globalThis.addEventListener("message", (event) => {
             }
         } catch (error) {
             const details = error?.stack ?? String(error);
+            if (message?.type === "input-event") {
+                globalThis.postMessage({
+                    type: "log",
+                    level: "error",
+                    message: `[kisakcod-web] Rejected input event: ${error?.message ?? error}`,
+                });
+                return;
+            }
             reply(message.id, message?.type ?? "unknown", null, protocolError(
                 error?.name === "QuotaExceededError"
                     ? "STORAGE_QUOTA"

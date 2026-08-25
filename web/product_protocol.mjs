@@ -18,10 +18,11 @@ export const PRODUCT_OPERATIONS = new Set([
     "probeAsset",
     "submitCanonicalCommand",
     "resize",
-    "input",
     "runtimeStatus",
     "shutdown",
 ]);
+
+export const PRODUCT_ONE_WAY_OPERATIONS = new Set(["input-event"]);
 
 export const PRODUCT_HOST_EVENTS = new Set([
     "kisakcod:state",
@@ -83,13 +84,17 @@ export function validateProductRequest(message, {
             code: "PROTOCOL_VERSION", operation: operation ?? "unknown",
         });
     }
-    if (!PRODUCT_OPERATIONS.has(operation)) {
+    if (!PRODUCT_OPERATIONS.has(operation) && !PRODUCT_ONE_WAY_OPERATIONS.has(operation)) {
         throw Object.assign(new Error(`Unknown Worker operation: ${operation}.`), {
             code: "UNKNOWN_OPERATION", operation: operation ?? "unknown",
         });
     }
     if (operation === "init") {
         if (!isCanvas(message.canvas)) invalid(operation, "A transferable canvas is required.");
+        return message;
+    }
+    if (operation === "input-event") {
+        validateInput(operation, message.event);
         return message;
     }
     if (typeof message.id !== "number" || !Number.isInteger(message.id) ||
@@ -130,22 +135,22 @@ export function validateProductRequest(message, {
             invalid(operation, "Canvas dimensions must be 1..16384.");
         }
         break;
-    case "input": {
-        const input = message.event;
-        const validKey = input?.type === "key" && typeof input.key === "number" &&
-            Number.isInteger(input.key) &&
-            input.key >= 0 && input.key <= 0xffff && typeof input.down === "boolean";
-        const values = [input?.x, input?.y, input?.dx, input?.dy];
-        const validMouse = input?.type === "mouse-move" &&
-            values.every((value) => typeof value === "number" &&
-                Number.isInteger(value) && Math.abs(value) <= 1_000_000);
-        if (!validKey && !validMouse) invalid(operation, "The input event is invalid.");
-        break;
-    }
     default:
         break;
     }
     return message;
+}
+
+function validateInput(operation, input)
+{
+    const validKey = input?.type === "key" && typeof input.key === "number" &&
+        Number.isInteger(input.key) &&
+        input.key >= 0 && input.key <= 0xffff && typeof input.down === "boolean";
+    const values = [input?.x, input?.y, input?.dx, input?.dy];
+    const validMouse = input?.type === "mouse-move" &&
+        values.every((value) => typeof value === "number" &&
+            Number.isInteger(value) && Math.abs(value) <= 1_000_000);
+    if (!validKey && !validMouse) invalid(operation, "The input event is invalid.");
 }
 
 export class EngineWorkerError extends Error

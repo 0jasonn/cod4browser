@@ -68,7 +68,7 @@ test("production input covers canonical keyboard, mouse, focus, and pointer-lock
         globalThis.Worker = class extends NativeWorker {
             postMessage(message, transfer)
             {
-                if (message?.type === "input") {
+                if (message?.type === "input-event") {
                     globalThis.__productInputMessages.push(structuredClone(message.event));
                 }
                 return super.postMessage(message, transfer);
@@ -146,12 +146,18 @@ test("production input covers canonical keyboard, mouse, focus, and pointer-lock
         .toBe("game-canvas");
     await page.evaluate(() => {
         globalThis.__productInputMessages = [];
-        const movement = new MouseEvent("mousemove");
-        Object.defineProperties(movement, {
-            movementX: { value: 7 },
-            movementY: { value: -4 },
+        const firstMovement = new MouseEvent("mousemove");
+        Object.defineProperties(firstMovement, {
+            movementX: { value: 3 },
+            movementY: { value: -1 },
         });
-        globalThis.dispatchEvent(movement);
+        globalThis.dispatchEvent(firstMovement);
+        const secondMovement = new MouseEvent("mousemove");
+        Object.defineProperties(secondMovement, {
+            movementX: { value: 4 },
+            movementY: { value: -3 },
+        });
+        globalThis.dispatchEvent(secondMovement);
         document.querySelector("#game-canvas").dispatchEvent(
             new MouseEvent("mousedown", { button: 2, bubbles: true }));
         document.exitPointerLock();

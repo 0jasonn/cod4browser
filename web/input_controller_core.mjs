@@ -45,6 +45,9 @@ export function createInputControllerCore({
     let programmaticUnlock = false;
     let lastForwardedEscape = Number.NEGATIVE_INFINITY;
     let lastSyntheticEscape = Number.NEGATIVE_INFINITY;
+    let movementScheduled = false;
+    let pendingMovementX = 0;
+    let pendingMovementY = 0;
     const escapeDeduplicationMilliseconds = 100;
 
     const send = (event) => {
@@ -70,6 +73,18 @@ export function createInputControllerCore({
         if (document.pointerLockElement !== canvas) return;
         programmaticUnlock = true;
         document.exitPointerLock?.();
+    };
+    const flushRelativeMovement = () => {
+        if (!pendingMovementX && !pendingMovementY) return;
+        send({
+            type: "mouse-move",
+            x: Math.round(canvas.width * 0.5),
+            y: Math.round(canvas.height * 0.5),
+            dx: Math.round(pendingMovementX),
+            dy: Math.round(pendingMovementY),
+        });
+        pendingMovementX = 0;
+        pendingMovementY = 0;
     };
 
     const handleKeyDown = (event) => {
@@ -126,19 +141,29 @@ export function createInputControllerCore({
         const pointerLocked = document.pointerLockElement === canvas;
         if (!pointerLocked && (!absoluteMouse || event.target !== canvas)) return;
         if (pointerLocked && !event.movementX && !event.movementY) return;
+        if (pointerLocked) {
+            pendingMovementX += event.movementX;
+            pendingMovementY += event.movementY;
+            if (!movementScheduled) {
+                movementScheduled = true;
+                requestAnimationFrame(() => {
+                    movementScheduled = false;
+                    flushRelativeMovement();
+                });
+            }
+            return;
+        }
         const bounds = canvas.getBoundingClientRect();
-        const x = pointerLocked ? Math.round(canvas.width * 0.5) :
-            Math.round((event.clientX - bounds.left) * canvas.width /
-                Math.max(1, bounds.width));
-        const y = pointerLocked ? Math.round(canvas.height * 0.5) :
-            Math.round((event.clientY - bounds.top) * canvas.height /
-                Math.max(1, bounds.height));
+        const x = Math.round((event.clientX - bounds.left) * canvas.width /
+            Math.max(1, bounds.width));
+        const y = Math.round((event.clientY - bounds.top) * canvas.height /
+            Math.max(1, bounds.height));
         send({
             type: "mouse-move",
             x: Math.max(0, Math.min(canvas.width, x)),
             y: Math.max(0, Math.min(canvas.height, y)),
-            dx: pointerLocked ? Math.round(event.movementX) : 0,
-            dy: pointerLocked ? Math.round(event.movementY) : 0,
+            dx: 0,
+            dy: 0,
         });
     };
     const handleWheel = (event) => {
@@ -152,6 +177,7 @@ export function createInputControllerCore({
         const pointerLocked = document.pointerLockElement === canvas;
         onState({ pointerLocked });
         if (pointerWasLocked && !pointerLocked) {
+            flushRelativeMovement();
             const intendedUnlock = programmaticUnlock;
             programmaticUnlock = false;
             if (!intendedUnlock && document.hasFocus() &&
@@ -196,6 +222,7 @@ export function createInputControllerCore({
     return Object.freeze({
         dispose() {
             if (disposed) return;
+            flushRelativeMovement();
             releaseHeldInput();
             releasePointerLock();
             disposed = true;

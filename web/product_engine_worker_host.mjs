@@ -415,9 +415,25 @@ export function createEngineWorkerHost(canvas, {
             });
         },
         input(event, options) {
-            return rpc("input", { event }, [], {
-                timeoutMs: options?.timeoutMs ?? requestTimeoutMs,
-            });
+            if (options?.signal?.aborted) {
+                return Promise.reject(new DOMException(
+                    "The input event was aborted.", "AbortError"));
+            }
+            if (shuttingDown || disposed || workerUnavailable) {
+                return Promise.reject(new EngineWorkerError(protocolError(
+                    "WORKER_SHUTTING_DOWN", "input-event",
+                    "The engine Worker is shutting down.")));
+            }
+            try {
+                worker.postMessage({
+                    protocolVersion: ENGINE_PROTOCOL_VERSION,
+                    type: "input-event",
+                    event,
+                });
+                return Promise.resolve(true);
+            } catch (error) {
+                return Promise.reject(error);
+            }
         },
         checkpoint(options) {
             return serializeFilesystemMutation(async () => {

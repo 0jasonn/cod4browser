@@ -4,6 +4,7 @@ import test from "node:test";
 import {
     ENGINE_PROTOCOL_VERSION,
     PRODUCT_OPERATIONS,
+    PRODUCT_ONE_WAY_OPERATIONS,
     validateProductRequest,
 } from "../../web/product_protocol.mjs";
 
@@ -33,15 +34,18 @@ test("the production protocol accepts only its explicit operations", () => {
     })).type, "submitCanonicalCommand");
     assert.equal(validateProductRequest(request("resize", { width: 1280, height: 720 })).type,
         "resize");
-    assert.equal(validateProductRequest(request("input", {
-        event: { type: "key", key: 32, down: true },
-    })).type, "input");
     assert.equal(validateProductRequest(request("runtimeStatus")).type, "runtimeStatus");
     assert.equal(validateProductRequest(request("shutdown")).type, "shutdown");
     assert.deepEqual(new Set(PRODUCT_OPERATIONS), new Set([
         "init", "mountAssets", "flushAndUnmount", "checkpoint", "probeAsset",
-        "submitCanonicalCommand", "resize", "input", "runtimeStatus", "shutdown",
+        "submitCanonicalCommand", "resize", "runtimeStatus", "shutdown",
     ]));
+    assert.deepEqual(new Set(PRODUCT_ONE_WAY_OPERATIONS), new Set(["input-event"]));
+    assert.equal(validateProductRequest({
+        protocolVersion: ENGINE_PROTOCOL_VERSION,
+        type: "input-event",
+        event: { type: "key", key: 0xC8, down: true },
+    }).type, "input-event");
 });
 
 test("the production protocol rejects malformed and diagnostic requests", () => {
@@ -52,9 +56,17 @@ test("the production protocol rejects malformed and diagnostic requests", () => 
         [request("test-control"), "UNKNOWN_OPERATION"],
         [request("runtimeStatus", { id: 0 }), "INVALID_PAYLOAD"],
         [request("resize", { width: 0, height: 720 }), "INVALID_PAYLOAD"],
-        [request("input", { event: { type: "key", key: -1, down: true } }),
+        [{
+            protocolVersion: ENGINE_PROTOCOL_VERSION,
+            type: "input-event",
+            event: { type: "key", key: -1, down: true },
+        },
             "INVALID_PAYLOAD"],
-        [request("input", { event: { type: "mouse-move", x: 0, y: 0, dx: Infinity, dy: 0 } }),
+        [{
+            protocolVersion: ENGINE_PROTOCOL_VERSION,
+            type: "input-event",
+            event: { type: "mouse-move", x: 0, y: 0, dx: Infinity, dy: 0 },
+        },
             "INVALID_PAYLOAD"],
         [request("probeAsset", {
             kind: "iwd", buffers: [new ArrayBuffer(1)], metadata: {},
