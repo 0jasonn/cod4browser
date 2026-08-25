@@ -54,11 +54,14 @@ export class WebAudioDriver {
     }
 
     publishTelemetry() {
+        const queuedBufferCount = [...this.sources.values()].reduce(
+            (total, source) => total + source.queue.length, 0);
         const detail = Object.freeze({
             decodedPcmBytes: this.decodedPcmBytes,
             decodedPcmBudgetBytes: this.decodedPcmBudgetBytes,
             bufferCount: this.buffers.size,
             sourceCount: this.sources.size,
+            queuedBufferCount,
             ...this.telemetry,
         });
         this.onTelemetry?.(detail);

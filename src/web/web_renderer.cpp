@@ -20,6 +20,9 @@
 
 #include <GLES3/gl3.h>
 #include <emscripten.h>
+#if KISAK_WEB_DIAGNOSTICS
+#include <emscripten/heap.h>
+#endif
 #include <emscripten/html5.h>
 #include <webgl/webgl1_ext.h>
 
@@ -1760,6 +1763,11 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestUnloadWorldResources()
 {
     WebRenderer_UnloadWorldResources();
     return 1;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE double KisakWeb_TestHeapBytes()
+{
+    return static_cast<double>(emscripten_get_heap_size());
 }
 #endif
 

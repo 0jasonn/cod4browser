@@ -369,6 +369,7 @@ test("Web Audio proxy bounds decoded PCM and per-source stream queues", async ({
         decodedPcmBudgetBytes: 16,
         bufferCount: 2,
         sourceCount: 1,
+        queuedBufferCount: 1,
         evictions: 1,
         overruns: 2,
     });

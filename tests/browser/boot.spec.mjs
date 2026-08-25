@@ -577,6 +577,8 @@ test("world unload releases retained bytes without replacing the WebGL context",
         .toBe("running");
 
     expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.call(
+        "_KisakWeb_TestHeapBytes"))).toBeGreaterThan(0);
+    expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.call(
         "_KisakWeb_TestUnloadWorldResources"))).toBe(1);
     await expect.poll(() => page.evaluate(() =>
         globalThis.__rendererLifecycle.findLast((event) => event.state === "worldUnloadEnd")))
