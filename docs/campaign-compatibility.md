@@ -1,14 +1,30 @@
 # Campaign compatibility matrix
 
-Discovery means a selected fastfile passed the bounded header probe and was
-recorded in the versioned offline-SP profile. It does not mean the map boots.
+This ledger records execution evidence, not filenames. An imported fastfile is
+only asset discovery. `LOADS`, `RENDERS`, and `PLAYABLE` require progressively
+stronger canonical runtime evidence.
 
-| Zone | Discovered by profile | Runtime evidence | Compatibility claim |
-| --- | --- | --- | --- |
-| `killhouse` | Required | Prior local user-owned run reached sustained world frames, input, HUD, effects, and audio | Validated development slice |
-| `cargoship` | Optional SP discovery | Prior import/probe coverage only; no cleanup-run transition evidence | Untested |
-| Other non-`mp_*`/non-`*_mp` SP zones | Optional SP discovery | Header probe only when selected | Untested |
-| Multiplayer zones | Not admitted | None | Out of offline-product scope |
+| Map | Asset discovered | DB load | Clip/world | Server | Game | CGame | First frame | 60s stable | Input | Audio | Transition in | Transition out | Save/load | Context recovery | Peak memory | Result | Failure class | Evidence |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `killhouse` | Yes; required profile zone | Pass | Pass | Pass | Pass | Pass | Pass | Not recorded | Pass | Pass | Pass; fresh/repeat/loadgame | Pass; prior transition to `cargoship` | Pass | Not recorded on retail | ~766 MiB decoded recovery before the unload fix; current quantitative run pending | PLAYABLE | — | Prior legally owned Release Chrome runs summarized in [web-port-convergence.md](web-port-convergence.md) and [roadmap.md](roadmap.md); not rerun on 2026-08-25 because no retail root was supplied. |
+| `cargoship` | Yes; optional discovered SP zone in prior local import | Pass | Pass | Pass | Pass | Pass | Pass | Not recorded | Not recorded | Not recorded | Pass; prior `killhouse` → `cargoship` | Not recorded | Not recorded | Not recorded | Not recorded | RENDERS | — | Prior legally owned Release Chrome reached the first-person view and thousands of frames, recorded in [web-port-convergence.md](web-port-convergence.md). The strengthened lifecycle/gameplay matrix was not run on 2026-08-25. |
+| Other directly selected non-`mp_*`/non-`*_mp` SP zones | Not measured | Not run | Not run | Not run | Not run | Not run | Not run | Not run | Not run | Not run | Not run | Not run | Not run | Not run | Not recorded | UNTESTED | unknown | The importer admits bounded direct `zone/english/*.ff` SP candidates, but discovery or a header probe is not compatibility evidence. Add one row per map only after a legal local run identifies it. |
 
-No proprietary assets are used in hosted CI. Update this matrix only from a
-local run using legally owned files and record the exact build/browser.
+Result definitions:
+
+- `UNTESTED`: no retail execution evidence.
+- `LOADS`: canonical database/world loading completes, without a proven world frame.
+- `RENDERS`: at least one actual canonical world frame is produced.
+- `PLAYABLE`: sustained frames, functional player input, and no fatal error are
+  observed during the validation window.
+- `BLOCKED`: a deterministic failure is reproduced and classified.
+- `REGRESSION`: a previously passing result fails on the current build.
+
+Failure classes are `database`, `filesystem`, `renderer`, `material`, `entity`,
+`fx`, `audio`, `cgame`, `memory`, `lifecycle`, or `unknown`.
+
+No proprietary assets are used in hosted CI. Promote a row only from a local
+run against legally owned files, recording the exact commit, browser, date, and
+machine-readable `KISAK_RETAIL_RESULT`. The current local validator requires
+both `killhouse.ff` and `cargoship.ff`; it measures 60-second stability, input,
+audio, persistence, transition retirement, memory, and context recovery.

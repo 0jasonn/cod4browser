@@ -17,12 +17,19 @@ uses the normal importer and canonical runtime. It requires both
 `killhouse.ff` and `cargoship.ff` and checks:
 
 - installation import, persistence, and canonical mount;
-- canonical `map killhouse` command acceptance and 120 submitted world frames;
-- keyboard movement and a gameplay action that reaches Web Audio;
-- `writeconfig`, awaited Worker shutdown, reload, and persisted config exec;
-- canonical `map cargoship` acceptance and 120 submitted world frames;
-- forced WebGL2 context loss, recovery, resumed CargoShip frames, and renderer
-  memory telemetry.
+- canonical `map killhouse` completion through `CG_Init`, a real world frame,
+  and a 60-second stability window;
+- visible W/A/S/D movement, jump, mouse look, primary-fire audio, secondary aim,
+  wheel pulses, Escape/menu, and pointer-lock recovery through the canonical
+  input queue;
+- checkpoint duration and persisted-byte evidence after `writeconfig`;
+- an in-process `killhouse` → `cargoship` transition with ordered unload begin,
+  unload end, and new-world publication events on one WebGL context;
+- the same CGame/frame/stability/input/audio/checkpoint checks on `cargoship`;
+- forced WebGL2 context loss, recovery, resumed CargoShip frames and input;
+- heap, renderer recovery/GPU/geometry/upload/program, frame-percentile, audio,
+  transition-peak, shutdown-flush, and reload evidence in one non-proprietary
+  `KISAK_RETAIL_RESULT` JSON record.
 
 The command is intentionally skipped unless `KISAK_COD4_RETAIL_ROOT` is set.
 Record the exact commit, browser version, matrix result, and renderer-memory
