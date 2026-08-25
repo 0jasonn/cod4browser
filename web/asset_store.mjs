@@ -245,7 +245,7 @@ export async function entriesFromDirectoryHandle(directory)
         const relativePath = normalizeSelectionPath(
             `zone/${M12_INSTALL_PROFILE.language}/${name}`,
         ).toLocaleLowerCase("en-US");
-        if (REQUIRED_ASSET_PATHS.has(relativePath) ||
+        if (entries.has(relativePath) ||
             !isAdditionalSinglePlayerFastfile(relativePath)) {
             continue;
         }

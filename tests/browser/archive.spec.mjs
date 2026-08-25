@@ -240,7 +240,7 @@ test("publishes a large archive index incrementally without changing the ready d
     );
 });
 
-test("reports a member CRC failure without invalidating the outer asset import", async ({ page }, testInfo) => {
+test("reports a member CRC failure without invalidating the outer asset import", async ({ page, baseURL }, testInfo) => {
     await usePortableFolderPicker(page);
     await observeArchive(page);
     const expectedCrc = crc32(DEFLATED_MEMBER.contents) >>> 0;
@@ -252,7 +252,7 @@ test("reports a member CRC failure without invalidating the outer asset import",
         },
     ]);
     const directory = await createInstallDirectory(testInfo, "archive-crc-failure", archive);
-    const assetNetworkRequests = collectAssetNetworkRequests(page);
+    const assetNetworkRequests = collectAssetNetworkRequests(page, new URL(baseURL).origin);
 
     await page.goto("/");
     await waitForEngine(page);
