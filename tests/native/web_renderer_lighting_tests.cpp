@@ -220,14 +220,6 @@ void TestNativeDisplayGammaRamp()
         0.42044821f));
     assert(Near(WebRenderer_EvaluateDisplayGamma(-1.0f, 0.8f), 0.0f));
     assert(Near(WebRenderer_EvaluateDisplayGamma(2.0f, 0.8f), 1.0f));
-    assert(Near(WebRenderer_GetDisplayGammaExponent(
-        true, false, 0.8f), 1.25f));
-    assert(Near(WebRenderer_GetDisplayGammaExponent(
-        false, false, 0.8f), 1.0f));
-    assert(Near(WebRenderer_GetDisplayGammaExponent(
-        true, true, 0.8f), 1.0f));
-    assert(Near(WebRenderer_GetDisplayGammaExponent(
-        true, false, 0.0f), 1.0f));
 }
 
 void TestNativeDxt5NormalDecode()
@@ -247,6 +239,25 @@ void TestNativeDxt5NormalDecode()
     const std::array<float, 3> saturated =
         WebRenderer_DecodeDxt5Normal({0.0f, 1.0f, 0.0f, 1.0f});
     assert(Near(saturated[2], 0.0f));
+}
+
+void TestFractionalShadowComparisonReconstruction()
+{
+    const std::array<float, 4> diagonal{0.0f, 1.0f, 0.0f, 1.0f};
+    assert(Near(WebRenderer_EvaluateBilinearShadowVisibility(
+        diagonal, 0.0f, 0.25f), 0.0f));
+    assert(Near(WebRenderer_EvaluateBilinearShadowVisibility(
+        diagonal, 0.25f, 0.75f), 0.25f));
+    assert(Near(WebRenderer_EvaluateBilinearShadowVisibility(
+        diagonal, 0.75f, 0.25f), 0.75f));
+    assert(Near(WebRenderer_EvaluateBilinearShadowVisibility(
+        diagonal, 1.0f, 0.75f), 1.0f));
+
+    const std::array<float, 4> corner{0.0f, 0.0f, 0.0f, 1.0f};
+    assert(Near(WebRenderer_EvaluateBilinearShadowVisibility(
+        corner, 0.5f, 0.5f), 0.25f));
+    assert(Near(WebRenderer_EvaluateBilinearShadowVisibility(
+        corner, -1.0f, 2.0f), 0.0f));
 }
 
 struct GridFixture
@@ -419,6 +430,7 @@ int main()
     TestNativeDepthOfFieldBlur();
     TestNativeDisplayGammaRamp();
     TestNativeDxt5NormalDecode();
+    TestFractionalShadowComparisonReconstruction();
     TestNativeLightGridRleAndFixedPointBlend();
     TestNativeModelLightingAtlasLayoutAndCoordinates();
     TestNativeModelLightingShaderComposition();

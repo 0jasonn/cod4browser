@@ -595,17 +595,6 @@ float WebRenderer_EvaluateDisplayGamma(
     return std::pow(std::clamp(displayValue, 0.0f, 1.0f), 1.0f / gamma);
 }
 
-float WebRenderer_GetDisplayGammaExponent(
-    bool gammaRampSupported,
-    bool ignoreGammaRamp,
-    float gamma) noexcept
-{
-    if (!gammaRampSupported || ignoreGammaRamp || !std::isfinite(gamma) ||
-        gamma <= 0.0f)
-        return 1.0f;
-    return 1.0f / gamma;
-}
-
 std::array<float, 3> WebRenderer_DecodeDxt5Normal(
     const std::array<float, 4> &sample) noexcept
 {
@@ -613,6 +602,20 @@ std::array<float, 3> WebRenderer_DecodeDxt5Normal(
     const float y = sample[1] * 2.0f - 1.0f;
     const float z = std::sqrt(std::max(1.0f - x * x - y * y, 0.0f));
     return {x, y, z};
+}
+
+float WebRenderer_EvaluateBilinearShadowVisibility(
+    const std::array<float, 4> &comparisons,
+    float fractionX,
+    float fractionY) noexcept
+{
+    const float x = std::clamp(fractionX, 0.0f, 1.0f);
+    const float y = std::clamp(fractionY, 0.0f, 1.0f);
+    const float top = comparisons[0] +
+        (comparisons[1] - comparisons[0]) * x;
+    const float bottom = comparisons[2] +
+        (comparisons[3] - comparisons[2]) * x;
+    return std::clamp(top + (bottom - top) * y, 0.0f, 1.0f);
 }
 
 std::array<float, 3> WebRenderer_EvaluateSecondaryDirectionalLighting(

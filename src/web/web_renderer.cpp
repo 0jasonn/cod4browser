@@ -111,6 +111,7 @@ struct WebRendererRetainedWorldBatch
     bool depthHack = false;
     bool ambientProbeLighting = false;
     bool castsSunShadow = false;
+    std::uint32_t shadowStateBits0 = 0u;
     std::string vertexShaderName;
     std::uint32_t vertexShaderProgramHash = 0u;
     std::string pixelShaderName;
@@ -150,6 +151,11 @@ struct WebRendererRetainedPrimaryLight
     std::uint8_t exponent = 0u;
     bool canUseShadowMap = false;
 };
+
+using WebRendererRetainedSpotShadowCaster =
+    WebRendererSpotShadowCasterDesc;
+using WebRendererRetainedSpotShadowStaticModel =
+    WebRendererSpotShadowStaticModelDesc;
 
 struct WebRendererRetainedModelLightingAtlas
 {
@@ -341,6 +347,10 @@ struct WebRendererState
     std::vector<std::uint16_t> retainedIndices;
     std::vector<std::uint32_t> retainedWorldIndices;
     std::vector<WebRendererRetainedWorldBatch> retainedWorldBatches;
+    std::vector<WebRendererRetainedSpotShadowCaster>
+        retainedWorldSpotShadowCasters;
+    std::vector<WebRendererRetainedSpotShadowStaticModel>
+        retainedWorldSpotShadowStaticModels;
     std::vector<WebRendererRetainedWorldImage> retainedWorldImages;
     std::vector<WebRendererRetainedPrimaryLight> retainedPrimaryLights;
     std::uint32_t retainedSunPrimaryLightIndex = 0u;
@@ -3233,10 +3243,13 @@ bool CreateShadowTarget(
     }
     glGenTextures(1, &depthTexture);
     glBindTexture(GL_TEXTURE_2D, depthTexture);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE,
+        GL_COMPARE_REF_TO_TEXTURE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24,
         shadowSize, shadowSize, 0, GL_DEPTH_COMPONENT,
         GL_UNSIGNED_INT, nullptr);
@@ -3399,8 +3412,8 @@ bool CreateRendererResources()
         uniform vec3 u_view_origin;
         uniform vec3 u_fog_color;
         uniform vec2 u_fog_params;
-        uniform sampler2D u_shadow_map;
-        uniform sampler2D u_shadow_far_map;
+        uniform highp sampler2DShadow u_shadow_map;
+        uniform highp sampler2DShadow u_shadow_far_map;
         uniform sampler2D u_primary_lightmap;
         uniform vec2 u_primary_light_falloff_placement;
         uniform sampler2D u_water_map;
@@ -3415,7 +3428,7 @@ bool CreateRendererResources()
         uniform vec3 u_primary_light_diffuse;
         uniform vec3 u_primary_light_spot_direction;
         uniform vec3 u_primary_light_spot_factors;
-        uniform sampler2D u_spot_shadow_map;
+        uniform highp sampler2DShadow u_spot_shadow_map;
         uniform mat4 u_spot_shadow_matrix;
         uniform float u_spot_shadow_enabled;
         uniform vec4 u_env_map_parms;
@@ -3431,41 +3444,35 @@ bool CreateRendererResources()
 
         float sample_near_sun_shadow(vec2 uv, float receiver_depth)
         {
-            // lm_sm_sun_* performs four manual depth comparisons. Preserve
-            // that 2x2 PCF shape at the WebGL texture boundary.
+            // lm_sm_sun_* issues four taps. Each tap goes through D3D9's
+            // linear hardware shadow sampler and therefore already owns a
+            // 2x2 PCF footprint. The previous implementation reconstructed
+            // only one of those taps, leaving a one-texel staircase.
             const vec2 texel = vec2(1.0 / 1024.0);
-            // Retail compares the projected receiver depth directly. Bias is
-            // applied while rasterizing casters, not subtracted here.
-            float biased_depth = receiver_depth;
             float visibility = 0.0;
-            visibility += biased_depth <= texture(
-                u_shadow_map, uv + texel * vec2(-0.5, -0.5)).r ? 1.0 : 0.0;
-            visibility += biased_depth <= texture(
-                u_shadow_map, uv + texel * vec2( 0.5, -0.5)).r ? 1.0 : 0.0;
-            visibility += biased_depth <= texture(
-                u_shadow_map, uv + texel * vec2(-0.5,  0.5)).r ? 1.0 : 0.0;
-            visibility += biased_depth <= texture(
-                u_shadow_map, uv + texel * vec2( 0.5,  0.5)).r ? 1.0 : 0.0;
+            visibility += texture(u_shadow_map, vec3(
+                uv + texel * vec2(-0.5, -0.5), receiver_depth));
+            visibility += texture(u_shadow_map, vec3(
+                uv + texel * vec2( 0.5, -0.5), receiver_depth));
+            visibility += texture(u_shadow_map, vec3(
+                uv + texel * vec2(-0.5,  0.5), receiver_depth));
+            visibility += texture(u_shadow_map, vec3(
+                uv + texel * vec2( 0.5,  0.5), receiver_depth));
             return visibility * 0.25;
         }
 
         float sample_far_sun_shadow(vec2 uv, float receiver_depth)
         {
             const vec2 texel = vec2(1.0 / 1024.0);
-            float biased_depth = receiver_depth;
             float visibility = 0.0;
-            visibility += biased_depth <= texture(
-                u_shadow_far_map, uv + texel * vec2(-0.5, -0.5)).r
-                ? 1.0 : 0.0;
-            visibility += biased_depth <= texture(
-                u_shadow_far_map, uv + texel * vec2( 0.5, -0.5)).r
-                ? 1.0 : 0.0;
-            visibility += biased_depth <= texture(
-                u_shadow_far_map, uv + texel * vec2(-0.5,  0.5)).r
-                ? 1.0 : 0.0;
-            visibility += biased_depth <= texture(
-                u_shadow_far_map, uv + texel * vec2( 0.5,  0.5)).r
-                ? 1.0 : 0.0;
+            visibility += texture(u_shadow_far_map, vec3(
+                uv + texel * vec2(-0.5, -0.5), receiver_depth));
+            visibility += texture(u_shadow_far_map, vec3(
+                uv + texel * vec2( 0.5, -0.5), receiver_depth));
+            visibility += texture(u_shadow_far_map, vec3(
+                uv + texel * vec2(-0.5,  0.5), receiver_depth));
+            visibility += texture(u_shadow_far_map, vec3(
+                uv + texel * vec2( 0.5,  0.5), receiver_depth));
             return visibility * 0.25;
         }
 
@@ -3514,14 +3521,18 @@ bool CreateRendererResources()
                 return 1.0;
             const vec2 texel = vec2(1.0 / 512.0);
             float visibility = 0.0;
-            visibility += receiver_depth <= texture(u_spot_shadow_map,
-                uv + texel * vec2(-0.5, -0.5)).r ? 1.0 : 0.0;
-            visibility += receiver_depth <= texture(u_spot_shadow_map,
-                uv + texel * vec2( 0.5, -0.5)).r ? 1.0 : 0.0;
-            visibility += receiver_depth <= texture(u_spot_shadow_map,
-                uv + texel * vec2(-0.5,  0.5)).r ? 1.0 : 0.0;
-            visibility += receiver_depth <= texture(u_spot_shadow_map,
-                uv + texel * vec2( 0.5,  0.5)).r ? 1.0 : 0.0;
+            // The native shadow sampler is linear for spot maps too. Each of
+            // the four lm_spot_sm taps must interpolate binary comparisons;
+            // comparing one nearest depth per tap creates the jagged indoor
+            // light wedge seen in Killhouse.
+            visibility += texture(u_spot_shadow_map, vec3(
+                uv + texel * vec2(-0.5, -0.5), receiver_depth));
+            visibility += texture(u_spot_shadow_map, vec3(
+                uv + texel * vec2( 0.5, -0.5), receiver_depth));
+            visibility += texture(u_spot_shadow_map, vec3(
+                uv + texel * vec2(-0.5,  0.5), receiver_depth));
+            visibility += texture(u_spot_shadow_map, vec3(
+                uv + texel * vec2( 0.5,  0.5), receiver_depth));
             return visibility * 0.25;
         }
 
@@ -3706,11 +3717,9 @@ bool CreateRendererResources()
                         // primary-lightmap coordinates unchanged.
                         float primary_visibility = texture(
                             u_primary_lightmap, v_lightmap_coord).r;
-                        // lm_spot_sm replaces the authored primary-lightmap
-                        // visibility with the dynamic shadow comparison once
-                        // its one-second native fade has completed. It does
-                        // not multiply the two masks together; doing so made
-                        // broad, hard-edged dark/light patches on receivers.
+                        // The retail lm_spot_sm program selects the dynamic
+                        // comparison when a shadow map is active; without one
+                        // it keeps the authored primary-lightmap visibility.
                         float local_visibility = mix(
                             primary_visibility,
                             sample_spot_shadow(v_world_position),
@@ -5219,7 +5228,10 @@ WebRendererSurfaceResult CopyWorldCommand(
     std::vector<WebRendererRetainedWorldImage> &images,
     std::vector<WebRendererRetainedPrimaryLight> &primaryLights,
     std::uint32_t &sunPrimaryLightIndex,
-    std::uint32_t inheritedPrimaryLightCount)
+    std::uint32_t inheritedPrimaryLightCount,
+    std::vector<WebRendererRetainedSpotShadowCaster> *spotShadowCasters,
+    std::vector<WebRendererRetainedSpotShadowStaticModel> *
+        spotShadowStaticModels)
 {
     if (!surface.vertices || !surface.indices || !surface.batches ||
         surface.vertexCount == 0u || surface.indexCount == 0u ||
@@ -5234,6 +5246,20 @@ WebRendererSurfaceResult CopyWorldCommand(
         (surface.primaryLightCount == 0u && surface.primaryLights) ||
         (surface.primaryLightCount != 0u &&
             surface.sunPrimaryLightIndex >= surface.primaryLightCount))
+    {
+        return WebRendererSurfaceResult::InvalidDescriptor;
+    }
+    if ((surface.spotShadowCasterCount != 0u &&
+            !surface.spotShadowCasters) ||
+        (surface.spotShadowCasterCount == 0u &&
+            surface.spotShadowCasters))
+    {
+        return WebRendererSurfaceResult::InvalidDescriptor;
+    }
+    if ((surface.spotShadowStaticModelCount != 0u &&
+            !surface.spotShadowStaticModels) ||
+        (surface.spotShadowStaticModelCount == 0u &&
+            surface.spotShadowStaticModels))
     {
         return WebRendererSurfaceResult::InvalidDescriptor;
     }
@@ -5385,6 +5411,7 @@ WebRendererSurfaceResult CopyWorldCommand(
             batch.depthHack = source.depthHack;
             batch.ambientProbeLighting = source.ambientProbeLighting;
             batch.castsSunShadow = source.castsSunShadow;
+            batch.shadowStateBits0 = source.shadowStateBits0;
             batch.vertexShaderName = source.vertexShaderName
                 ? source.vertexShaderName : "<unavailable-vertex-shader>";
             batch.vertexShaderProgramHash = source.vertexShaderProgramHash;
@@ -5562,6 +5589,72 @@ WebRendererSurfaceResult CopyWorldCommand(
                         : WebRendererWorldTechnique::BaseTextureLightmap);
             batches.push_back(std::move(batch));
         }
+        if (spotShadowCasters)
+        {
+            spotShadowCasters->reserve(surface.spotShadowCasterCount);
+            for (std::uint32_t index = 0u;
+                 index < surface.spotShadowCasterCount; ++index)
+            {
+                const WebRendererSpotShadowCasterDesc &caster =
+                    surface.spotShadowCasters[index];
+                if (caster.primaryLightIndex >= primaryLightReferenceCount ||
+                    caster.batchIndex >= batches.size() ||
+                    caster.indexCount == 0u ||
+                    (caster.firstIndex % 3u) != 0u ||
+                    (caster.indexCount % 3u) != 0u ||
+                    caster.firstIndex > surface.indexCount ||
+                    caster.indexCount >
+                        surface.indexCount - caster.firstIndex)
+                {
+                    return WebRendererSurfaceResult::InvalidDescriptor;
+                }
+                const WebRendererRetainedWorldBatch &batch =
+                    batches[caster.batchIndex];
+                if (caster.firstIndex < batch.firstIndex ||
+                    caster.firstIndex + caster.indexCount >
+                        batch.firstIndex + batch.indexCount)
+                {
+                    return WebRendererSurfaceResult::InvalidDescriptor;
+                }
+                spotShadowCasters->push_back(caster);
+            }
+        }
+        else if (surface.spotShadowCasterCount != 0u)
+        {
+            return WebRendererSurfaceResult::InvalidDescriptor;
+        }
+        if (spotShadowStaticModels)
+        {
+            spotShadowStaticModels->reserve(
+                surface.spotShadowStaticModelCount);
+            for (std::uint32_t index = 0u;
+                 index < surface.spotShadowStaticModelCount; ++index)
+            {
+                const WebRendererSpotShadowStaticModelDesc &model =
+                    surface.spotShadowStaticModels[index];
+                if (model.primaryLightIndex >= primaryLightReferenceCount ||
+                    model.canonicalInstanceIndex >=
+                        WEB_RENDERER_MAX_STATIC_MODEL_INSTANCES)
+                {
+                    return WebRendererSurfaceResult::InvalidDescriptor;
+                }
+                spotShadowStaticModels->push_back(model);
+            }
+            std::sort(spotShadowStaticModels->begin(),
+                spotShadowStaticModels->end(),
+                [](const WebRendererRetainedSpotShadowStaticModel &left,
+                   const WebRendererRetainedSpotShadowStaticModel &right)
+                {
+                    if (left.primaryLightIndex != right.primaryLightIndex)
+                        return left.primaryLightIndex < right.primaryLightIndex;
+                    return left.canonicalInstanceIndex <
+                        right.canonicalInstanceIndex;
+                });
+        }
+        else if (surface.spotShadowStaticModelCount != 0u)
+        {
+            return WebRendererSurfaceResult::InvalidDescriptor;
+        }
         if (expectedFirstIndex != surface.indexCount)
             return WebRendererSurfaceResult::InvalidDescriptor;
     }
@@ -5697,6 +5790,7 @@ WebRendererSurfaceResult CopyStaticModelCommand(
             batch.draw.cameraRegion = draw.cameraRegion;
             batch.draw.ambientProbeLighting = draw.ambientProbeLighting;
             batch.draw.castsSunShadow = draw.castsSunShadow;
+            batch.draw.shadowStateBits0 = draw.shadowStateBits0;
             batch.draw.vertexShaderName = draw.vertexShaderName
                 ? draw.vertexShaderName : "<unavailable-vertex-shader>";
             batch.draw.vertexShaderProgramHash =
@@ -5932,6 +6026,8 @@ WebRendererSurfaceResult WebRenderer_SetSurface(
     g_renderer.retainedIndices = std::move(retainedSurface.indices);
     g_renderer.retainedWorldIndices.clear();
     g_renderer.retainedWorldBatches.clear();
+    g_renderer.retainedWorldSpotShadowCasters.clear();
+    g_renderer.retainedWorldSpotShadowStaticModels.clear();
     g_renderer.retainedWorldImages.clear();
     g_renderer.retainedPrimaryLights.clear();
     g_renderer.retainedSunPrimaryLightIndex = 0u;
@@ -5974,11 +6070,16 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
     std::vector<WebRendererRetainedWorldBatch> retainedBatches;
     std::vector<WebRendererRetainedWorldImage> retainedImages;
     std::vector<WebRendererRetainedPrimaryLight> retainedPrimaryLights;
+    std::vector<WebRendererRetainedSpotShadowCaster>
+        retainedSpotShadowCasters;
+    std::vector<WebRendererRetainedSpotShadowStaticModel>
+        retainedSpotShadowStaticModels;
     std::uint32_t retainedSunPrimaryLightIndex = 0u;
     const WebRendererSurfaceResult copy = CopyWorldCommand(
         surface, retainedVertices, retainedIndices, retainedBatches,
         retainedImages, retainedPrimaryLights,
-        retainedSunPrimaryLightIndex, 0u);
+        retainedSunPrimaryLightIndex, 0u, &retainedSpotShadowCasters,
+        &retainedSpotShadowStaticModels);
     if (copy != WebRendererSurfaceResult::Success) return copy;
 
     GLuint replacementVertexArray = 0;
@@ -6020,6 +6121,10 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
     g_renderer.retainedVertices = std::move(retainedVertices);
     g_renderer.retainedWorldIndices = std::move(retainedIndices);
     g_renderer.retainedWorldBatches = std::move(retainedBatches);
+    g_renderer.retainedWorldSpotShadowCasters =
+        std::move(retainedSpotShadowCasters);
+    g_renderer.retainedWorldSpotShadowStaticModels =
+        std::move(retainedSpotShadowStaticModels);
     g_renderer.retainedWorldImages = std::move(retainedImages);
     g_renderer.retainedPrimaryLights = std::move(retainedPrimaryLights);
     g_renderer.retainedSunPrimaryLightIndex =
@@ -6202,6 +6307,10 @@ void __cdecl R_UnloadWorld()
         g_renderer.retainedWorldIndices);
     decltype(g_renderer.retainedWorldBatches){}.swap(
         g_renderer.retainedWorldBatches);
+    decltype(g_renderer.retainedWorldSpotShadowCasters){}.swap(
+        g_renderer.retainedWorldSpotShadowCasters);
+    decltype(g_renderer.retainedWorldSpotShadowStaticModels){}.swap(
+        g_renderer.retainedWorldSpotShadowStaticModels);
     decltype(g_renderer.retainedWorldImages){}.swap(
         g_renderer.retainedWorldImages);
     decltype(g_renderer.retainedPrimaryLights){}.swap(
@@ -6513,7 +6622,7 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
         g_renderer.retainedDynamicModelImages, ignoredPrimaryLights,
         ignoredSunPrimaryLightIndex,
         static_cast<std::uint32_t>(
-            g_renderer.retainedPrimaryLights.size()));
+            g_renderer.retainedPrimaryLights.size()), nullptr, nullptr);
     if (copy != WebRendererSurfaceResult::Success) return copy;
     if (!CopyModelLightingAtlas(
             scene.modelLightingAtlas, retainedLighting))
@@ -7858,7 +7967,8 @@ bool DrawShadowPartition(
     GLuint framebuffer,
     const std::array<float, 16> &matrix,
     GLsizei shadowSize,
-    bool requireSunCaster)
+    bool requireSunCaster,
+    std::uint32_t spotPrimaryLightIndex = UINT32_MAX)
 {
     if (g_renderer.shadowProgram == 0u ||
         framebuffer == 0u ||
@@ -7883,15 +7993,41 @@ bool DrawShadowPartition(
     glClearDepthf(1.0f);
     glClear(GL_DEPTH_BUFFER_BIT);
     glBindVertexArray(g_renderer.vertexArray);
-    for (const WebRendererRetainedWorldBatch &batch :
-         g_renderer.retainedWorldBatches)
+    const auto applySpotShadowCull = [](std::uint32_t stateBits0)
     {
-        if ((requireSunCaster && !batch.castsSunShadow) ||
-            (!requireSunCaster && (batch.stateBits[0] & 0x700u) != 0u))
-            continue;
+        switch (stateBits0 & 0xc000u)
+        {
+        case 0x8000u:
+            glEnable(GL_CULL_FACE);
+            glFrontFace(GL_CW);
+            glCullFace(GL_BACK);
+            break;
+        case 0xc000u:
+            glEnable(GL_CULL_FACE);
+            glFrontFace(GL_CW);
+            glCullFace(GL_FRONT);
+            break;
+        default:
+            glDisable(GL_CULL_FACE);
+            break;
+        }
+    };
+    const auto drawWorldRange =
+        [requireSunCaster, &applySpotShadowCull](
+        const WebRendererRetainedWorldBatch &batch,
+        std::uint32_t firstIndex,
+        std::uint32_t indexCount,
+        std::uint32_t shadowStateBits0)
+    {
+        // Native shadow-map draws use TECHNIQUE_BUILD_SHADOWMAP_DEPTH state,
+        // not the receiver's lit state. In particular, preserving its cull
+        // mode prevents coplanar back faces from self-shadowing the floor.
+        if (!requireSunCaster)
+            applySpotShadowCull(shadowStateBits0);
         const WebRendererRetainedWorldImage *base =
             WorldImage(batch.baseImageIndex);
-        const std::int32_t alphaTest = WorldAlphaTestMode(batch.stateBits[0]);
+        const std::int32_t alphaTest = WorldAlphaTestMode(
+            requireSunCaster ? batch.stateBits[0] : shadowStateBits0);
         glUniform1f(g_renderer.shadowDepthTextureEnabledUniform,
             base ? 1.0f : 0.0f);
         glUniform1i(g_renderer.shadowDepthAlphaTestUniform, alphaTest);
@@ -7899,11 +8035,33 @@ bool DrawShadowPartition(
             base ? base->texture : g_renderer.texture,
             batch.samplerState);
         const std::uintptr_t indexOffset =
-            static_cast<std::uintptr_t>(batch.firstIndex) *
+            static_cast<std::uintptr_t>(firstIndex) *
             sizeof(std::uint32_t);
         glDrawElements(GL_TRIANGLES,
-            static_cast<GLsizei>(batch.indexCount), GL_UNSIGNED_INT,
+            static_cast<GLsizei>(indexCount), GL_UNSIGNED_INT,
             reinterpret_cast<const void *>(indexOffset));
+    };
+    if (requireSunCaster)
+    {
+        for (const WebRendererRetainedWorldBatch &batch :
+             g_renderer.retainedWorldBatches)
+        {
+            if (!batch.castsSunShadow) continue;
+            drawWorldRange(batch, batch.firstIndex, batch.indexCount,
+                batch.stateBits[0]);
+        }
+    }
+    else
+    {
+        for (const WebRendererRetainedSpotShadowCaster &caster :
+             g_renderer.retainedWorldSpotShadowCasters)
+        {
+            if (caster.primaryLightIndex != spotPrimaryLightIndex) continue;
+            const WebRendererRetainedWorldBatch &batch =
+                g_renderer.retainedWorldBatches[caster.batchIndex];
+            drawWorldRange(batch, caster.firstIndex, caster.indexCount,
+                caster.stateBits0);
+        }
     }
     if (g_renderer.staticModelSceneActive &&
         g_renderer.staticModelVertexArray != 0u &&
@@ -7915,29 +8073,85 @@ bool DrawShadowPartition(
              g_renderer.retainedStaticModelBatches)
         {
             if (requireSunCaster && !batch.draw.castsSunShadow) continue;
+            if (!requireSunCaster)
+                applySpotShadowCull(batch.draw.shadowStateBits0);
             const WebRendererRetainedWorldImage *base = RetainedImage(
                 g_renderer.retainedStaticModelImages,
                 batch.draw.baseImageIndex);
             glUniform1f(g_renderer.shadowDepthTextureEnabledUniform,
                 base ? 1.0f : 0.0f);
             glUniform1i(g_renderer.shadowDepthAlphaTestUniform,
-                WorldAlphaTestMode(batch.draw.stateBits[0]));
+                WorldAlphaTestMode(requireSunCaster
+                    ? batch.draw.stateBits[0]
+                    : batch.draw.shadowStateBits0));
             BindWorldTexture(GL_TEXTURE0,
                 base ? base->texture : g_renderer.texture,
                 batch.draw.samplerState);
             if (batch.instanceCount == 0u) continue;
-            BindStaticModelInstanceRange(batch.instanceOffset);
             const std::uintptr_t indexOffset =
                 static_cast<std::uintptr_t>(batch.draw.firstIndex) *
                 sizeof(std::uint32_t);
-            glDrawElementsInstanced(GL_TRIANGLES,
-                static_cast<GLsizei>(batch.draw.indexCount),
-                GL_UNSIGNED_INT,
-                reinterpret_cast<const void *>(indexOffset),
-                static_cast<GLsizei>(batch.instanceCount));
+            if (requireSunCaster)
+            {
+                BindStaticModelInstanceRange(batch.instanceOffset);
+                glDrawElementsInstanced(GL_TRIANGLES,
+                    static_cast<GLsizei>(batch.draw.indexCount),
+                    GL_UNSIGNED_INT,
+                    reinterpret_cast<const void *>(indexOffset),
+                    static_cast<GLsizei>(batch.instanceCount));
+                continue;
+            }
+
+            const auto castsForSpot = [spotPrimaryLightIndex](
+                std::uint32_t canonicalInstanceIndex)
+            {
+                const WebRendererRetainedSpotShadowStaticModel target{
+                    spotPrimaryLightIndex,
+                    canonicalInstanceIndex,
+                };
+                return std::binary_search(
+                    g_renderer.retainedWorldSpotShadowStaticModels.begin(),
+                    g_renderer.retainedWorldSpotShadowStaticModels.end(),
+                    target,
+                    [](const WebRendererRetainedSpotShadowStaticModel &left,
+                       const WebRendererRetainedSpotShadowStaticModel &right)
+                    {
+                        if (left.primaryLightIndex != right.primaryLightIndex)
+                            return left.primaryLightIndex <
+                                right.primaryLightIndex;
+                        return left.canonicalInstanceIndex <
+                            right.canonicalInstanceIndex;
+                    });
+            };
+            const std::uint32_t instanceEnd =
+                batch.instanceOffset + batch.instanceCount;
+            std::uint32_t instanceIndex = batch.instanceOffset;
+            while (instanceIndex < instanceEnd)
+            {
+                while (instanceIndex < instanceEnd &&
+                    !castsForSpot(g_renderer.retainedStaticModelInstances[
+                        instanceIndex].canonicalInstanceIndex))
+                {
+                    ++instanceIndex;
+                }
+                const std::uint32_t runBegin = instanceIndex;
+                while (instanceIndex < instanceEnd &&
+                    castsForSpot(g_renderer.retainedStaticModelInstances[
+                        instanceIndex].canonicalInstanceIndex))
+                {
+                    ++instanceIndex;
+                }
+                if (instanceIndex == runBegin) continue;
+                BindStaticModelInstanceRange(runBegin);
+                glDrawElementsInstanced(GL_TRIANGLES,
+                    static_cast<GLsizei>(batch.draw.indexCount),
+                    GL_UNSIGNED_INT,
+                    reinterpret_cast<const void *>(indexOffset),
+                    static_cast<GLsizei>(instanceIndex - runBegin));
+            }
         }
     }
-    if (g_renderer.dynamicModelSceneActive &&
+    if (requireSunCaster && g_renderer.dynamicModelSceneActive &&
         g_renderer.dynamicModelVertexArray != 0u)
     {
         glBindVertexArray(g_renderer.dynamicModelVertexArray);
@@ -7949,6 +8163,8 @@ bool DrawShadowPartition(
                 batch.depthHack ||
                 WebRenderer_IsFxVertexColorBatch(batch.sourceKind))
                 continue;
+            if (!requireSunCaster)
+                applySpotShadowCull(batch.stateBits[0]);
             const WebRendererRetainedWorldImage *base = RetainedImage(
                 g_renderer.retainedDynamicModelImages,
                 batch.baseImageIndex);
@@ -7997,7 +8213,8 @@ bool DrawSpotShadowMaps()
         if (g_renderer.spotShadowDepthTextures[slot] == 0u ||
             !DrawShadowPartition(g_renderer.spotShadowFramebuffers[slot],
                 g_renderer.sceneSpotShadowMatrices[slot],
-                SPOT_SHADOW_SIZE, false))
+                SPOT_SHADOW_SIZE, false,
+                g_renderer.sceneSpotShadowLightIndices[slot]))
             return false;
     }
     return true;
@@ -8019,7 +8236,7 @@ void BindSpotShadowForPrimaryLight(
             glUniform1f(g_renderer.spotShadowEnabledUniform, 1.0f);
             glUniformMatrix4fv(g_renderer.spotShadowMatrixUniform, 1,
                 GL_FALSE, g_renderer.sceneSpotShadowMatrices[slot].data());
-            glActiveTexture(GL_TEXTURE10);
+            glActiveTexture(GL_TEXTURE14);
             glBindTexture(GL_TEXTURE_2D,
                 g_renderer.spotShadowDepthTextures[slot]);
             glActiveTexture(GL_TEXTURE0);
@@ -8631,12 +8848,12 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1i(g_renderer.specularMapUniform, 5);
         glUniform1i(g_renderer.secondaryLightmapUniform, 2);
         glUniform1i(g_renderer.modelLightingUniform, 3);
-        glUniform1i(g_renderer.shadowMapUniform, 6);
-        glUniform1i(g_renderer.shadowFarMapUniform, 11);
+        glUniform1i(g_renderer.shadowMapUniform, 12);
+        glUniform1i(g_renderer.shadowFarMapUniform, 13);
         glUniform1i(g_renderer.waterMapUniform, 7);
         glUniform1i(g_renderer.reflectionProbeUniform, 8);
         glUniform1i(g_renderer.primaryLightmapUniform, 9);
-        glUniform1i(g_renderer.spotShadowMapUniform, 10);
+        glUniform1i(g_renderer.spotShadowMapUniform, 14);
         glUniformMatrix4fv(g_renderer.shadowMatrixUniform, 1, GL_FALSE,
             g_renderer.sceneSunShadowMatrix.data());
         glUniformMatrix4fv(g_renderer.shadowFarMatrixUniform, 1, GL_FALSE,
@@ -8648,14 +8865,19 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1f(g_renderer.sunShadowEnabledUniform, 0.0f);
         glUniform1f(g_renderer.primaryLightEnabledUniform, 0.0f);
         glUniform1f(g_renderer.spotShadowEnabledUniform, 0.0f);
-        glActiveTexture(GL_TEXTURE6);
+        glActiveTexture(GL_TEXTURE12);
         glBindTexture(GL_TEXTURE_2D,
-            shadowMapDrawn ? g_renderer.shadowDepthTexture :
-                g_renderer.texture);
-        glActiveTexture(GL_TEXTURE11);
+            g_renderer.shadowDepthTexture);
+        glActiveTexture(GL_TEXTURE13);
         glBindTexture(GL_TEXTURE_2D,
-            shadowMapDrawn ? g_renderer.shadowFarDepthTexture :
-                g_renderer.texture);
+            g_renderer.shadowFarDepthTexture);
+        // sampler2DShadow units must remain depth-comparison complete even
+        // while the corresponding branch is disabled. A color fallback (or
+        // an unbound spot unit) makes every WebGL draw invalid before dynamic
+        // branching is considered.
+        glActiveTexture(GL_TEXTURE14);
+        glBindTexture(GL_TEXTURE_2D,
+            g_renderer.spotShadowDepthTextures[0]);
         glActiveTexture(GL_TEXTURE0);
         glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.detailMapEnabledUniform, 0.0f);

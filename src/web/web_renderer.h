@@ -185,6 +185,24 @@ struct WebRendererPrimaryLightDesc
     std::uint8_t padding;
 };
 
+// One canonical BSP surface selected by GfxWorld::shadowGeom for a local
+// primary light. The range points into the portable world index buffer and
+// batchIndex preserves the material state needed by alpha-tested casters.
+struct WebRendererSpotShadowCasterDesc
+{
+    std::uint32_t primaryLightIndex;
+    std::uint32_t firstIndex;
+    std::uint32_t indexCount;
+    std::uint32_t batchIndex;
+    std::uint32_t stateBits0;
+};
+
+struct WebRendererSpotShadowStaticModelDesc
+{
+    std::uint32_t primaryLightIndex;
+    std::uint32_t canonicalInstanceIndex;
+};
+
 struct WebRendererWorldSurfaceDesc
 {
     const WebRendererSurfaceVertex *vertices;
@@ -197,6 +215,11 @@ struct WebRendererWorldSurfaceDesc
     const WebRendererPrimaryLightDesc *primaryLights = nullptr;
     std::uint32_t primaryLightCount = 0u;
     std::uint32_t sunPrimaryLightIndex = 0u;
+    const WebRendererSpotShadowCasterDesc *spotShadowCasters = nullptr;
+    std::uint32_t spotShadowCasterCount = 0u;
+    const WebRendererSpotShadowStaticModelDesc *spotShadowStaticModels =
+        nullptr;
+    std::uint32_t spotShadowStaticModelCount = 0u;
 };
 
 enum class WebRendererWorldTechnique : std::uint8_t
@@ -403,6 +426,9 @@ struct WebRendererWorldBatchDesc
     // Canonical GfxWorldDpvsStatic::surfaceCastsSunShadow membership. This is
     // frontend visibility intent, not a backend material heuristic.
     bool castsSunShadow;
+    // State from TECHNIQUE_BUILD_SHADOWMAP_DEPTH, kept separate from the
+    // visible receiver technique selected for the camera pass.
+    std::uint32_t shadowStateBits0;
     const char *vertexShaderName;
     std::uint32_t vertexShaderProgramHash;
     const char *pixelShaderName;

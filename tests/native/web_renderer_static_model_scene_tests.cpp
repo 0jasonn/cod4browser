@@ -25,6 +25,9 @@ void __cdecl Vec3UnpackUnitVec(PackedUnitVec, float *out)
 namespace
 {
 constexpr std::uint32_t TECHNIQUE_LIT_INDEX = 7u;
+constexpr std::uint32_t TECHNIQUE_LIT_INSTANCED_INDEX = 14u;
+constexpr std::uint32_t TECHNIQUE_LIT_INSTANCED_SUN_INDEX = 15u;
+constexpr std::uint32_t TECHNIQUE_LIT_INSTANCED_SUN_SHADOW_INDEX = 16u;
 Material *g_resolvedMaterial = nullptr;
 
 Material *ResolveMaterial(Material *) noexcept
@@ -214,6 +217,56 @@ void TestAmbientProbeShaderIdentitySurvivesPortableBoundary()
     assert(command.batches[0].draw.ambientProbeLighting);
     assert(std::strcmp(command.batches[0].draw.pixelShaderName,
         "lp_amb_t0c0_sm3.hlsl") == 0);
+}
+
+void TestCanonicalStaticModelInstancedTechniqueSelection()
+{
+    Fixture fixture;
+    MaterialTechnique instanced{};
+    MaterialTechnique instancedSun{};
+    MaterialTechnique instancedSunShadow{};
+    MaterialPixelShader ambientPixel{};
+    MaterialPixelShader sunPixel{};
+    ambientPixel.name = "lp_i_amb_t0c0_sm3.hlsl";
+    sunPixel.name = "lp_i_amb_sun_t0c0_sm3.hlsl";
+    instanced.name = "lprobe_i_amb_t0c0_dtex_sm3";
+    instanced.passCount = 1u;
+    instanced.passArray[0].pixelShader = &ambientPixel;
+    instancedSun.name = "lprobe_i_amb_sun_t0c0_dtex_sm3";
+    instancedSun.passCount = 1u;
+    instancedSun.passArray[0].pixelShader = &sunPixel;
+    instancedSunShadow = instancedSun;
+    fixture.techniqueSet.techniques[TECHNIQUE_LIT_INSTANCED_INDEX] =
+        &instanced;
+    fixture.techniqueSet.techniques[TECHNIQUE_LIT_INSTANCED_SUN_INDEX] =
+        &instancedSun;
+    fixture.techniqueSet.techniques[
+        TECHNIQUE_LIT_INSTANCED_SUN_SHADOW_INDEX] = &instancedSunShadow;
+    fixture.material.stateBitsEntry[TECHNIQUE_LIT_INSTANCED_INDEX] = 0u;
+    fixture.material.stateBitsEntry[TECHNIQUE_LIT_INSTANCED_SUN_INDEX] = 0u;
+    fixture.material.stateBitsEntry[
+        TECHNIQUE_LIT_INSTANCED_SUN_SHADOW_INDEX] = 0u;
+
+    WebRendererStaticModelSceneCommand command;
+    assert(WebRenderer_BuildStaticModelSceneCommand(fixture.world, command) ==
+        WebRendererStaticModelSceneResult::Success);
+    assert(command.batches.size() == 1u);
+    assert(command.batches[0].draw.techniqueType ==
+        TECHNIQUE_LIT_INSTANCED_INDEX);
+    assert(command.batches[0].draw.ambientProbeLighting);
+
+    fixture.world.sunPrimaryLightIndex = 1u;
+    fixture.instances[0].primaryLightIndex = 1u;
+    fixture.instances[1].primaryLightIndex = 1u;
+    command = {};
+    assert(WebRenderer_BuildStaticModelSceneCommand(fixture.world, command) ==
+        WebRendererStaticModelSceneResult::Success);
+    assert(command.batches.size() == 1u);
+    assert(command.batches[0].draw.techniqueType ==
+        TECHNIQUE_LIT_INSTANCED_SUN_SHADOW_INDEX);
+    assert(std::strcmp(command.batches[0].draw.pixelShaderName,
+        "lp_i_amb_sun_t0c0_sm3.hlsl") == 0);
+    assert(command.batches[0].draw.ambientProbeLighting);
 }
 
 void TestNamedDetailMapAndScaleSurvivePortableBoundary()
@@ -408,6 +461,7 @@ int main()
     TestEveryAuthoredLodIsRetainedForRuntimeSelection();
     TestCanonicalPrimaryLightSplitsStaticInstanceGroups();
     TestAmbientProbeShaderIdentitySurvivesPortableBoundary();
+    TestCanonicalStaticModelInstancedTechniqueSelection();
     TestNamedDetailMapAndScaleSurvivePortableBoundary();
     TestLightingAtlasCountsOnlySubmittedCanonicalPlacements();
     TestMaterialReferencesResolveAtRendererEvaluation();

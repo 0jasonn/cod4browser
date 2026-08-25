@@ -942,6 +942,57 @@ void TestCanonicalDpvsRangesOverrideNonContiguousModelCount()
     assert(command.lastSurfaceIndex == 2u);
 }
 
+void TestSpotShadowCommandPreservesAuthoredCasterMembership()
+{
+    Fixture fixture;
+    MaterialTechnique shadowTechnique{};
+    shadowTechnique.passCount = 1u;
+    MaterialTechniqueSet techniqueSet{};
+    techniqueSet.techniques[TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX] =
+        &shadowTechnique;
+    GfxStateBits shadowState{};
+    shadowState.loadBits[0] = 0x1234c000u;
+    Material material{};
+    material.techniqueSet = &techniqueSet;
+    material.stateBitsCount = 1u;
+    material.stateBitsTable = &shadowState;
+    std::fill(std::begin(material.stateBitsEntry),
+        std::end(material.stateBitsEntry), 0xffu);
+    material.stateBitsEntry[TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX] = 0u;
+    for (GfxSurface &surface : fixture.surfaces)
+        surface.material = &material;
+
+    std::array<std::uint16_t, 2u> casterSurfaces{2u, 0u};
+    std::array<std::uint16_t, 2u> casterModels{4u, 1u};
+    std::array<GfxShadowGeometry, 3u> shadowGeometry{};
+    shadowGeometry[2u].surfaceCount =
+        static_cast<std::uint16_t>(casterSurfaces.size());
+    shadowGeometry[2u].sortedSurfIndex = casterSurfaces.data();
+    shadowGeometry[2u].smodelCount =
+        static_cast<std::uint16_t>(casterModels.size());
+    shadowGeometry[2u].smodelIndex = casterModels.data();
+    fixture.world.primaryLightCount =
+        static_cast<std::uint32_t>(shadowGeometry.size());
+    fixture.world.shadowGeom = shadowGeometry.data();
+    fixture.world.dpvs.smodelCount = 5u;
+
+    WebRendererWorldSceneCommand command;
+    assert(WebRenderer_BuildWorldSceneCommand(
+        fixture.world, MakeView(), command) ==
+        WebRendererWorldSceneResult::Success);
+    assert(command.spotShadowCasters.size() == 2u);
+    assert(command.spotShadowCasters[0u].primaryLightIndex == 2u);
+    assert(command.spotShadowCasters[0u].firstIndex == 6u);
+    assert(command.spotShadowCasters[0u].indexCount == 3u);
+    assert(command.spotShadowCasters[0u].batchIndex == 0u);
+    assert(command.spotShadowCasters[0u].stateBits0 == 0x1234c000u);
+    assert(command.spotShadowCasters[1u].firstIndex == 0u);
+    assert(command.spotShadowStaticModels.size() == 2u);
+    assert(command.spotShadowStaticModels[0u].primaryLightIndex == 2u);
+    assert(command.spotShadowStaticModels[0u].canonicalInstanceIndex == 4u);
+    assert(command.spotShadowStaticModels[1u].canonicalInstanceIndex == 1u);
+}
+
 void TestDynamicBrushModelUsesCanonicalSurfaceRangeAndPlacement()
 {
     Fixture fixture;
@@ -1044,6 +1095,7 @@ int main()
     TestCanonicalWaterPassCarriesSimulationAndReflectionInputs();
     TestConservativeVisibilityIsDisabledForMovingCanonicalView();
     TestCanonicalDpvsRangesOverrideNonContiguousModelCount();
+    TestSpotShadowCommandPreservesAuthoredCasterMembership();
     TestDynamicBrushModelUsesCanonicalSurfaceRangeAndPlacement();
     TestMalformedDynamicBrushRangeIsRejectedAtomically();
     return 0;

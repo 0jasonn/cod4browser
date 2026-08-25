@@ -6,6 +6,7 @@
 #include <xanim/xsurface_types.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -20,9 +21,13 @@ void __cdecl Vec3UnpackUnitVec(PackedUnitVec in, float *out);
 namespace
 {
 constexpr float BYTE_TO_UNIT = 1.0f / 255.0f;
+constexpr std::uint32_t TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX = 2u;
 constexpr std::uint32_t TECHNIQUE_UNLIT_INDEX = 4u;
 constexpr std::uint32_t TECHNIQUE_EMISSIVE_INDEX = 5u;
 constexpr std::uint32_t TECHNIQUE_LIT_INDEX = 7u;
+constexpr std::uint32_t TECHNIQUE_LIT_INSTANCED_INDEX = 14u;
+constexpr std::uint32_t TECHNIQUE_LIT_INSTANCED_SUN_INDEX = 15u;
+constexpr std::uint32_t TECHNIQUE_LIT_INSTANCED_SUN_SHADOW_INDEX = 16u;
 constexpr std::uint32_t ENV_MAP_PARMS_HASH = 0x3d9994dcu;
 constexpr std::uint32_t COLOR_MAP_HASH = 0xa0ab1041u;
 constexpr std::uint32_t DETAIL_MAP_HASH = 0xeb529b4du;
@@ -169,6 +174,7 @@ std::uint32_t HashPixelShaderProgram(
 
 bool SelectTechnique(
     const Material *material,
+    bool directionalPrimaryLight,
     WebRendererWorldBatchDesc &draw) noexcept
 {
     if (!material || !material->techniqueSet || !material->stateBitsTable)
@@ -177,9 +183,23 @@ bool SelectTechnique(
         material->techniqueSet->remappedTechniqueSet
             ? material->techniqueSet->remappedTechniqueSet
             : material->techniqueSet;
-    for (const std::uint32_t type : {
-        TECHNIQUE_LIT_INDEX, TECHNIQUE_UNLIT_INDEX,
-        TECHNIQUE_EMISSIVE_INDEX})
+    const std::array<std::uint32_t, 6u> preferredTypes =
+        directionalPrimaryLight
+        ? std::array<std::uint32_t, 6u>{
+            TECHNIQUE_LIT_INSTANCED_SUN_SHADOW_INDEX,
+            TECHNIQUE_LIT_INSTANCED_SUN_INDEX,
+            TECHNIQUE_LIT_INSTANCED_INDEX,
+            TECHNIQUE_LIT_INDEX,
+            TECHNIQUE_UNLIT_INDEX,
+            TECHNIQUE_EMISSIVE_INDEX}
+        : std::array<std::uint32_t, 6u>{
+            TECHNIQUE_LIT_INSTANCED_INDEX,
+            TECHNIQUE_LIT_INDEX,
+            TECHNIQUE_UNLIT_INDEX,
+            TECHNIQUE_EMISSIVE_INDEX,
+            TECHNIQUE_LIT_INSTANCED_SUN_INDEX,
+            TECHNIQUE_LIT_INSTANCED_SUN_SHADOW_INDEX};
+    for (const std::uint32_t type : preferredTypes)
     {
         const MaterialTechnique *technique =
             techniqueSet->techniques[type];
@@ -276,6 +296,18 @@ WebRendererWorldBatchDesc MakeDraw(
     draw.cameraRegion = material ? material->cameraRegion : 0u;
     draw.castsSunShadow = material &&
         (material->info.gameFlags & 0x40u) != 0u;
+    if (material && material->stateBitsTable)
+    {
+        const std::uint8_t shadowStateEntry =
+            material->stateBitsEntry[
+                TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX];
+        if (shadowStateEntry != 0xffu &&
+            shadowStateEntry < material->stateBitsCount)
+        {
+            draw.shadowStateBits0 =
+                material->stateBitsTable[shadowStateEntry].loadBits[0];
+        }
+    }
     draw.baseImage = FindBaseImage(material, draw.samplerState);
     draw.normalImage = FindNormalImage(material, draw.normalSamplerState);
     draw.specularImage = FindSpecularImage(
@@ -285,9 +317,13 @@ WebRendererWorldBatchDesc MakeDraw(
         reflectionProbeIndex < world.reflectionProbeCount)
         draw.reflectionProbeImage =
             world.reflectionProbes[reflectionProbeIndex].reflectionImage;
-    const bool hasTechnique = SelectTechnique(material, draw);
+    const bool directionalPrimaryLight = primaryLightIndex != 0u &&
+        primaryLightIndex == world.sunPrimaryLightIndex;
+    const bool hasTechnique = SelectTechnique(
+        material, directionalPrimaryLight, draw);
     draw.ambientProbeLighting = draw.pixelShaderName &&
-        std::strncmp(draw.pixelShaderName, "lp_amb_", 7u) == 0;
+        (std::strncmp(draw.pixelShaderName, "lp_amb_", 7u) == 0 ||
+            std::strncmp(draw.pixelShaderName, "lp_i_amb_", 9u) == 0);
     if (draw.pixelShaderName &&
         std::strstr(draw.pixelShaderName, "d0") != nullptr &&
         CopyMaterialConstant(material, DETAIL_SCALE_HASH, draw.detailScale))

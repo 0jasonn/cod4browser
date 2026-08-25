@@ -739,6 +739,14 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
     WebRendererWorldSceneCommand replacement;
     try
     {
+        struct EmittedSurfaceRange
+        {
+            std::uint32_t firstIndex = UINT32_MAX;
+            std::uint32_t indexCount = 0u;
+            std::uint32_t batchIndex = UINT32_MAX;
+        };
+        std::vector<EmittedSurfaceRange> emittedSurfaces(
+            static_cast<std::size_t>(world.surfaceCount));
         std::vector<std::uint32_t> vertexRemap(
             world.vertexCount, std::numeric_limits<std::uint32_t>::max());
         std::vector<const Material *> waterMaterials;
@@ -855,11 +863,82 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
             {
                 replacement.batches.push_back(candidate);
             }
+            emittedSurfaces[surfaceIndex] = {
+                candidate.firstIndex,
+                candidate.indexCount,
+                static_cast<std::uint32_t>(replacement.batches.size() - 1u),
+            };
             if (replacement.surfaceCount == 0u)
                 replacement.firstSurfaceIndex = surfaceIndex;
             replacement.lastSurfaceIndex = surfaceIndex;
             ++replacement.surfaceCount;
           }
+        }
+
+        // Native spot-shadow submission does not render every opaque BSP
+        // surface. Each light owns an authored list of sorted surface indices
+        // in GfxWorld::shadowGeom; preserve that exact membership at the
+        // frontend/backend boundary while translating to uploaded ranges.
+        if (world.shadowGeom)
+        {
+            for (std::uint32_t lightIndex = 0u;
+                 lightIndex < world.primaryLightCount; ++lightIndex)
+            {
+                const GfxShadowGeometry &geometry =
+                    world.shadowGeom[lightIndex];
+                if (geometry.surfaceCount != 0u &&
+                    !geometry.sortedSurfIndex)
+                {
+                    return WebRendererWorldSceneResult::InvalidSurfaceRange;
+                }
+                for (std::uint32_t casterIndex = 0u;
+                     casterIndex < geometry.surfaceCount; ++casterIndex)
+                {
+                    const std::uint32_t surfaceIndex =
+                        geometry.sortedSurfIndex[casterIndex];
+                    if (surfaceIndex >= emittedSurfaces.size())
+                        return WebRendererWorldSceneResult::InvalidSurfaceRange;
+                    const EmittedSurfaceRange &emitted =
+                        emittedSurfaces[surfaceIndex];
+                    // Shadow geometry can include brush-model or otherwise
+                    // non-world ranges submitted through another scene path.
+                    if (emitted.firstIndex == UINT32_MAX) continue;
+                    const Material *material =
+                        world.dpvs.surfaces[surfaceIndex].material;
+                    if (!material || !material->stateBitsTable)
+                        return WebRendererWorldSceneResult::InvalidSurfaceRange;
+                    const std::uint8_t shadowStateEntry =
+                        material->stateBitsEntry[
+                            TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX];
+                    if (shadowStateEntry == 0xffu ||
+                        shadowStateEntry >= material->stateBitsCount)
+                    {
+                        return WebRendererWorldSceneResult::InvalidSurfaceRange;
+                    }
+                    replacement.spotShadowCasters.push_back({
+                        lightIndex,
+                        emitted.firstIndex,
+                        emitted.indexCount,
+                        emitted.batchIndex,
+                        material->stateBitsTable[
+                            shadowStateEntry].loadBits[0],
+                    });
+                }
+                if (geometry.smodelCount != 0u && !geometry.smodelIndex)
+                    return WebRendererWorldSceneResult::InvalidSurfaceRange;
+                for (std::uint32_t modelIndex = 0u;
+                     modelIndex < geometry.smodelCount; ++modelIndex)
+                {
+                    const std::uint32_t canonicalInstanceIndex =
+                        geometry.smodelIndex[modelIndex];
+                    if (canonicalInstanceIndex >= world.dpvs.smodelCount)
+                        return WebRendererWorldSceneResult::InvalidSurfaceRange;
+                    replacement.spotShadowStaticModels.push_back({
+                        lightIndex,
+                        canonicalInstanceIndex,
+                    });
+                }
+            }
         }
 
     }

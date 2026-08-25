@@ -14,6 +14,8 @@ struct WebRendererWorldSceneCommand
     std::vector<std::uint32_t> indices;
     std::vector<WebRendererWorldBatchDesc> batches;
     std::vector<WebRendererPrimaryLightDesc> primaryLights;
+    std::vector<WebRendererSpotShadowCasterDesc> spotShadowCasters;
+    std::vector<WebRendererSpotShadowStaticModelDesc> spotShadowStaticModels;
     std::uint32_t sunPrimaryLightIndex = 0u;
     std::uint32_t surfaceCount = 0u;
     std::uint32_t staticModelInstanceCount = 0u;
