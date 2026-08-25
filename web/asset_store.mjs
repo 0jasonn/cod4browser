@@ -652,7 +652,6 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
     let activeManifest = null;
     let persistenceGranted = null;
     let storageEstimate = { usage: null, quota: null };
-    let lastStateDetail = null;
     let operationActive = false;
     let pendingExternalSync = false;
     let disposed = false;
@@ -667,7 +666,6 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
     const flushEngine = () => module?.flushAndUnmount?.() ?? module?.unmount?.();
 
     const emit = (detail) => {
-        lastStateDetail = detail;
         onState({ persistenceGranted, storageEstimate, ...detail });
     };
 
@@ -1012,7 +1010,6 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
             persistenceGranted = false;
         }
         await refreshStorageEstimate();
-        if (lastStateDetail) emit(lastStateDetail);
         return persistenceGranted;
     }
 
@@ -1384,5 +1381,6 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
         readSource: (source, options) => track(() => readSource(source, options)),
         dispose,
         get manifest() { return activeManifest; },
+        get storageStatus() { return { persistenceGranted, storageEstimate }; },
     });
 }

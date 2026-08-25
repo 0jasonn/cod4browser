@@ -177,7 +177,7 @@ async function chooseInstallation(portable = false)
         const entries = await selectInstallEntries(installFolderInput, { portable });
         await persistence;
         if (!entries) {
-            renderAssetState(previous);
+            renderAssetState({ ...previous, ...assetStore.storageStatus });
             return;
         }
         await assetStore.importEntries(entries);
@@ -254,6 +254,7 @@ const handleRetryPersistence = async () => {
     retryPersistenceButton.disabled = true;
     try {
         const granted = await assetStore.requestPersistence();
+        renderAssetState({ ...assetState, ...assetStore.storageStatus });
         appendLog(`[kisakcod-web] Persistent storage ${granted ? "granted" : "not granted"}.`);
     } catch (error) {
         appendLog(`[kisakcod-web] Persistence request: ${error.message}`, "error");
