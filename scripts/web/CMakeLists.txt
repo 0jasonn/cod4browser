@@ -458,7 +458,7 @@ file(REMOVE
     "${KISAK_WEB_SITE_DIR}/filesystem_bridge.mjs"
     "${KISAK_WEB_SITE_DIR}/kisakcod-next.mjs"
     "${KISAK_WEB_SITE_DIR}/kisakcod-next.wasm")
-foreach(WEB_FILE asset_profile.mjs asset_store.mjs web_audio_driver.mjs
+foreach(WEB_FILE asset_profile.mjs asset_store.mjs input_controller_core.mjs web_audio_driver.mjs
         worker_sync_filesystem.mjs styles.css)
     configure_file(
         "${KISAK_WEB_SOURCE_DIR}/${WEB_FILE}"
@@ -482,7 +482,7 @@ configure_file("${KISAK_WEB_SOURCE_DIR}/product_protocol.mjs"
 if (KISAK_WEB_DIAGNOSTICS)
     set(KISAK_WEB_DIAGNOSTIC_SITE_DIR "${CMAKE_BINARY_DIR}/site-diagnostics")
     file(MAKE_DIRECTORY "${KISAK_WEB_DIAGNOSTIC_SITE_DIR}")
-    foreach(WEB_FILE index.html launcher.mjs asset_profile.mjs asset_store.mjs
+    foreach(WEB_FILE index.html launcher.mjs asset_profile.mjs asset_store.mjs input_controller_core.mjs
             engine_worker.mjs engine_worker_host.mjs engine_protocol.mjs
             web_audio_driver.mjs worker_sync_filesystem.mjs styles.css)
         configure_file(

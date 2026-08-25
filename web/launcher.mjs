@@ -1,5 +1,6 @@
 import { createBrowserAssetStore, selectInstallEntries } from "./asset_store.mjs";
 import { createEngineWorkerHost } from "./engine_worker_host.mjs";
+import { createInputControllerCore } from "./input_controller_core.mjs";
 
 const canvas = document.querySelector("#game-canvas");
 const runtimeLabel = document.querySelector("#runtime-label");
@@ -726,168 +727,17 @@ function resizeCanvas() {
     runtime.module?.resize?.(width, height);
 }
 
-function browserKeyToEngineKey(event)
-{
-    const { code } = event;
-    if (/^Key[A-Z]$/.test(code)) return code.charCodeAt(3) + 32;
-    if (/^Digit[0-9]$/.test(code)) return code.charCodeAt(5);
-    if (/^F(?:[1-9]|1[0-5])$/.test(code)) return 0xA7 + Number(code.slice(1)) - 1;
-    const keys = {
-        Tab: 0x09, Enter: 0x0D, Escape: 0x1B, Space: 0x20,
-        Backspace: 0x7F, CapsLock: 0x97, Pause: 0x99,
-        ArrowUp: 0x9A, ArrowDown: 0x9B, ArrowLeft: 0x9C,
-        ArrowRight: 0x9D, AltLeft: 0x9E, AltRight: 0x9E,
-        ControlLeft: 0x9F, ControlRight: 0x9F,
-        ShiftLeft: 0xA0, ShiftRight: 0xA0, Insert: 0xA1,
-        Delete: 0xA2, PageDown: 0xA3, PageUp: 0xA4,
-        Home: 0xA5, End: 0xA6,
-        Minus: 0x2D, Equal: 0x3D, BracketLeft: 0x5B,
-        BracketRight: 0x5D, Backslash: 0x5C, Semicolon: 0x3B,
-        Quote: 0x27, Backquote: 0x60, Comma: 0x2C, Period: 0x2E,
-        Slash: 0x2F,
-        NumpadEnter: 0xBF, NumpadDivide: 0xC2, NumpadSubtract: 0xC3,
-        NumpadAdd: 0xC4, NumLock: 0xC5, NumpadMultiply: 0xC6,
-    };
-    return keys[code] ?? 0;
-}
-
 function installBrowserInput()
 {
-    const heldKeys = new Set();
-    const heldMouseButtons = new Set();
-    let systemCursorVisible = false;
-    let absoluteMouse = false;
-    let pointerWasLocked = document.pointerLockElement === canvas;
-    let programmaticUnlock = false;
-    let lastForwardedEscape = Number.NEGATIVE_INFINITY;
-    let lastSyntheticEscape = Number.NEGATIVE_INFINITY;
-    const escapeDeduplicationMilliseconds = 100;
-    const sendKey = (key, down) => {
-        if (!key) return;
-        runtime.module?.input?.({ type: "key", key, down });
-        runtime.input.keyEvents += 1;
-    };
-    const mouseButtonKey = (button) => [0xC8, 0xCA, 0xC9, 0xCB, 0xCC][button] ?? 0;
-    const inputActive = () => document.pointerLockElement === canvas ||
-        document.activeElement === canvas;
-    const releaseHeldInput = () => {
-        for (const key of heldKeys) sendKey(key, false);
-        for (const key of heldMouseButtons) sendKey(key, false);
-        heldKeys.clear();
-        heldMouseButtons.clear();
-    };
-    const releasePointerLock = () => {
-        if (document.pointerLockElement !== canvas) return;
-        programmaticUnlock = true;
-        document.exitPointerLock?.();
-    };
-
-    globalThis.addEventListener("keydown", (event) => {
-        if (!inputActive()) return;
-        const key = browserKeyToEngineKey(event);
-        if (!key) return;
-        event.preventDefault();
-        if (key === 0x1B &&
-            performance.now() - lastSyntheticEscape < escapeDeduplicationMilliseconds) {
-            return;
-        }
-        if (heldKeys.has(key)) return;
-        heldKeys.add(key);
-        if (key === 0x1B) lastForwardedEscape = performance.now();
-        sendKey(key, true);
+    createInputControllerCore({
+        canvas,
+        sendInput(event) {
+            runtime.module?.input?.(event);
+            if (event.type === "key") runtime.input.keyEvents += 1;
+            else runtime.input.mouseEvents += 1;
+        },
+        onState(state) { Object.assign(runtime.input, state); },
     });
-    globalThis.addEventListener("keyup", (event) => {
-        const key = browserKeyToEngineKey(event);
-        if (!key || !heldKeys.has(key)) return;
-        event.preventDefault();
-        if (key === 0x1B &&
-            performance.now() - lastSyntheticEscape < escapeDeduplicationMilliseconds) {
-            heldKeys.delete(key);
-            return;
-        }
-        heldKeys.delete(key);
-        sendKey(key, false);
-    });
-    canvas.addEventListener("mousedown", (event) => {
-        canvas.focus();
-        event.preventDefault();
-        const key = mouseButtonKey(event.button);
-        if (key && !heldMouseButtons.has(key)) {
-            heldMouseButtons.add(key);
-            sendKey(key, true);
-        }
-        if (!absoluteMouse &&
-            document.pointerLockElement !== canvas && canvas.requestPointerLock) {
-            try {
-                Promise.resolve(canvas.requestPointerLock({ unadjustedMovement: true }))
-                    .catch(() => canvas.requestPointerLock());
-            } catch (_) {
-                canvas.requestPointerLock();
-            }
-        }
-    });
-    globalThis.addEventListener("mouseup", (event) => {
-        const key = mouseButtonKey(event.button);
-        if (!key || !heldMouseButtons.has(key)) return;
-        event.preventDefault();
-        heldMouseButtons.delete(key);
-        sendKey(key, false);
-    });
-    globalThis.addEventListener("mousemove", (event) => {
-        const pointerLocked = document.pointerLockElement === canvas;
-        if (!pointerLocked && (!absoluteMouse || event.target !== canvas)) return;
-        if (pointerLocked && !event.movementX && !event.movementY) return;
-        const bounds = canvas.getBoundingClientRect();
-        const x = pointerLocked
-            ? Math.round(canvas.width * 0.5)
-            : Math.round((event.clientX - bounds.left) * canvas.width / bounds.width);
-        const y = pointerLocked
-            ? Math.round(canvas.height * 0.5)
-            : Math.round((event.clientY - bounds.top) * canvas.height / bounds.height);
-        runtime.module?.input?.({
-            type: "mouse-move",
-            x: Math.max(0, Math.min(canvas.width, x)),
-            y: Math.max(0, Math.min(canvas.height, y)),
-            dx: pointerLocked ? Math.round(event.movementX) : 0,
-            dy: pointerLocked ? Math.round(event.movementY) : 0,
-        });
-        runtime.input.mouseEvents += 1;
-    });
-    canvas.addEventListener("wheel", (event) => {
-        if (!inputActive() || event.deltaY === 0) return;
-        event.preventDefault();
-        const key = event.deltaY < 0 ? 0xCE : 0xCD;
-        sendKey(key, true);
-        sendKey(key, false);
-    }, { passive: false });
-    document.addEventListener("pointerlockchange", () => {
-        const pointerLocked = document.pointerLockElement === canvas;
-        runtime.input.pointerLocked = pointerLocked;
-        if (pointerWasLocked && !pointerLocked) {
-            const intendedUnlock = programmaticUnlock;
-            programmaticUnlock = false;
-            if (!intendedUnlock && document.hasFocus() &&
-                performance.now() - lastForwardedEscape >=
-                    escapeDeduplicationMilliseconds) {
-                lastSyntheticEscape = performance.now();
-                sendKey(0x1B, true);
-                sendKey(0x1B, false);
-            }
-            releaseHeldInput();
-        }
-        pointerWasLocked = pointerLocked;
-    });
-    globalThis.addEventListener("kisakcod:cursor", (event) => {
-        systemCursorVisible = event.detail?.visible === true;
-        runtime.input.cursorVisible = systemCursorVisible;
-        if (systemCursorVisible) releasePointerLock();
-    });
-    globalThis.addEventListener("kisakcod:mouse-mode", (event) => {
-        absoluteMouse = event.detail?.absolute === true;
-        runtime.input.absoluteMouse = absoluteMouse;
-        if (absoluteMouse) releasePointerLock();
-    });
-    globalThis.addEventListener("blur", releaseHeldInput);
 }
 
 globalThis.addEventListener("kisakcod:state", (event) => {
