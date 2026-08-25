@@ -691,6 +691,13 @@ globalThis.addEventListener("kisakcod:assets", (event) => {
                 runtime.module._KisakWeb_StartCanonicalDbRuntimeCheck?.();
             } catch (error) {
                 appendLog(`[kisakcod-web] Engine filesystem mount: ${error.message}`, "error");
+                publishAssetState({
+                    ...runtime.assets,
+                    state: "failed",
+                    message: error.message,
+                    error: error.code ?? "ENGINE_MOUNT_FAILED",
+                    retained: true,
+                });
             } finally {
                 if (mountingImportId === readyImportId) mountingImportId = null;
             }

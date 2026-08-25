@@ -378,7 +378,7 @@ add_custom_command(TARGET KisakCOD-web POST_BUILD
 # editing one refreshes the served site on the next incremental build.
 file(MAKE_DIRECTORY "${KISAK_WEB_SITE_DIR}")
 foreach(WEB_FILE index.html launcher.mjs asset_store.mjs filesystem_bridge.mjs
-        engine_worker.mjs engine_worker_host.mjs web_audio_driver.mjs
+        engine_worker.mjs engine_worker_host.mjs engine_protocol.mjs web_audio_driver.mjs
         worker_sync_filesystem.mjs styles.css)
     configure_file(
         "${KISAK_WEB_SOURCE_DIR}/${WEB_FILE}"

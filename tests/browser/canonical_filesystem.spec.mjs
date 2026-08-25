@@ -154,4 +154,72 @@ test("canonical FS_InitFilesystem owns Worker search paths and IWD precedence", 
         [0, writablePayload.byteLength])) >>> 0)
         .toBe(fnv1a("browser-home-round-trip"));
 
+    await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.testControl({
+        failPersistence: true,
+    }));
+    const failedPayload = new TextEncoder().encode("retry-after-quota");
+    const failure = await page.evaluate(async ({ payload }) => {
+        const encoder = new TextEncoder();
+        try {
+            await globalThis.__KISAKCOD_WEB__.module.callProbe(
+                "_KisakWeb_CanonicalFsWriteRename",
+                [
+                    encoder.encode("web-tests/retry-temp.bin\0"),
+                    encoder.encode("web-tests/retry-final.bin\0"),
+                    new Uint8Array(payload),
+                ],
+                [
+                    { kind: "pointer", index: 0 },
+                    { kind: "pointer", index: 1 },
+                    { kind: "pointer", index: 2 },
+                    { kind: "value", value: payload.byteLength },
+                ],
+            );
+            return null;
+        } catch (error) {
+            return {
+                code: error.code,
+                operation: error.operation,
+                recoverable: error.recoverable,
+            };
+        }
+    }, { payload: failedPayload });
+    expect(failure).toEqual({
+        code: "STORAGE_QUOTA",
+        operation: "probe",
+        recoverable: true,
+    });
+    await page.evaluate(async () => {
+        await globalThis.__KISAKCOD_WEB__.module.testControl({ failPersistence: false });
+        await globalThis.__KISAKCOD_WEB__.module.checkpoint();
+    });
+    await page.reload();
+    await expect.poll(() => page.evaluate(() =>
+        globalThis.__canonicalFsEvents.at(-1)?.state)).toBe("ready");
+    expect((await callPathProbe(page,
+        "_KisakWeb_CanonicalFsReadHash", "web-tests/retry-final.bin",
+        [0, failedPayload.byteLength])) >>> 0)
+        .toBe(fnv1a("retry-after-quota"));
+
+});
+
+test("a second tab cannot acquire the writable home profile", async ({ page }, testInfo) => {
+    const directory = await createInstallDirectory(testInfo, "home-writer-conflict");
+    await page.addInitScript(() => {
+        Object.defineProperty(globalThis, "showDirectoryPicker", {
+            configurable: true,
+            value: undefined,
+        });
+    });
+    await page.goto("/");
+    const chooserPromise = page.waitForEvent("filechooser");
+    await page.locator("#select-install-button").click();
+    await (await chooserPromise).setFiles(directory);
+    await expect.poll(() => page.evaluate(() =>
+        globalThis.__KISAKCOD_WEB__?.assets?.state)).toBe("ready");
+
+    const secondPage = await page.context().newPage();
+    await secondPage.goto("/");
+    await expect.poll(() => secondPage.evaluate(() =>
+        globalThis.__KISAKCOD_WEB__?.assets?.error)).toBe("HOME_WRITER_CONFLICT");
 });

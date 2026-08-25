@@ -1,4 +1,9 @@
 import { createWorkerSyncFilesystem } from "./worker_sync_filesystem.mjs";
+import {
+    ENGINE_PROTOCOL_VERSION,
+    HOST_EVENTS,
+    protocolError,
+} from "./engine_protocol.mjs";
 
 const forwardedEvents = [
     "kisakcod:archive", "kisakcod:archive-progress", "kisakcod:qcommon", "kisakcod:retail-census",
@@ -27,8 +32,14 @@ if (typeof globalThis.CustomEvent !== "function") {
     };
 }
 for (const name of forwardedEvents) {
+    if (!HOST_EVENTS.has(name)) throw new Error(`Worker event is not allowed: ${name}.`);
     globalThis.addEventListener(name, (event) => {
-        globalThis.postMessage({ type: "event", name, detail: event.detail });
+        globalThis.postMessage({
+            protocolVersion: ENGINE_PROTOCOL_VERSION,
+            type: "event",
+            name,
+            detail: event.detail,
+        });
     });
 }
 
@@ -38,9 +49,16 @@ let module = null;
 let resolveInitialization;
 const initialization = new Promise((resolve) => { resolveInitialization = resolve; });
 
-function reply(id, result, error = null)
+function reply(id, operation, result, error = null)
 {
-    globalThis.postMessage({ type: "reply", id, result, error });
+    globalThis.postMessage({
+        protocolVersion: ENGINE_PROTOCOL_VERSION,
+        type: "reply",
+        id,
+        result,
+        error,
+        operation,
+    });
 }
 
 function installWorkerTestControls()
@@ -153,6 +171,11 @@ globalThis.addEventListener("message", (event) => {
     if (!message || typeof message !== "object") return;
     void (async () => {
         try {
+            if (message.protocolVersion !== ENGINE_PROTOCOL_VERSION) {
+                throw Object.assign(new Error("Unsupported engine protocol version."), {
+                    code: "PROTOCOL_VERSION",
+                });
+            }
             switch (message.type) {
             case "init":
                 globalThis.__KISAKCOD_OFFSCREEN_CANVAS__ = message.canvas;
@@ -160,45 +183,78 @@ globalThis.addEventListener("message", (event) => {
                 installWorkerTestControls();
                 resolveInitialization();
                 break;
-            case "mount": reply(message.id, await filesystem.mount(message.manifest)); break;
-            case "unmount": filesystem.unmount(); reply(message.id, true); break;
-            case "probe": reply(message.id, await probe(
-                message.functionName, message.buffers, message.argumentLayout)); break;
+            case "mount": reply(message.id, message.type, await filesystem.mount(message.manifest)); break;
+            case "unmount": reply(message.id, message.type, await filesystem.flushAndUnmount()); break;
+            case "checkpoint": reply(message.id, message.type, await filesystem.checkpoint()); break;
+            case "shutdown": reply(message.id, message.type, await filesystem.flushAndUnmount()); break;
+            case "probe": {
+                const result = await probe(
+                    message.functionName, message.buffers, message.argumentLayout);
+                await filesystem.checkpoint();
+                reply(message.id, message.type, result);
+                break;
+            }
             case "call": {
                 const fn = module?.[message.functionName];
                 if (typeof fn !== "function") throw new Error(`Missing export ${message.functionName}.`);
-                reply(message.id, fn(...(message.arguments ?? [])));
+                const result = fn(...(message.arguments ?? []));
+                await filesystem.checkpoint();
+                reply(message.id, message.type, result);
                 break;
             }
             case "test-control":
                 Object.assign(testControl, message.values ?? {});
                 filesystem.setTestControl(message.values ?? {});
-                reply(message.id, true);
+                reply(message.id, message.type, true);
                 break;
             case "resize":
+                if (!Number.isInteger(message.width) || !Number.isInteger(message.height) ||
+                    message.width < 1 || message.height < 1 ||
+                    message.width > 16384 || message.height > 16384) {
+                    throw Object.assign(new RangeError("Canvas dimensions must be 1..16384."), {
+                        code: "INVALID_PAYLOAD",
+                    });
+                }
                 if (module?.canvas) {
                     module.canvas.width = message.width;
                     module.canvas.height = message.height;
                 }
+                reply(message.id, message.type, true);
                 break;
             case "input": {
                 const input = message.event;
-                if (!input || !module) break;
+                if (!input || !module) {
+                    throw Object.assign(new TypeError("A ready engine input event is required."), {
+                        code: "INVALID_PAYLOAD",
+                    });
+                }
                 if (input.type === "key") {
                     module._KisakWeb_QueueKeyEvent?.(input.key, input.down ? 1 : 0);
                 } else if (input.type === "mouse-move") {
                     module._KisakWeb_QueueMouseMove?.(
                         input.x, input.y, input.dx, input.dy);
                 }
+                reply(message.id, message.type, true);
                 break;
             }
-            default: break;
+            default:
+                throw Object.assign(new Error(`Unknown Worker operation: ${message.type}.`), {
+                    code: "UNKNOWN_OPERATION",
+                });
             }
         } catch (error) {
             const detail = typeof error?.stack === "string" ? error.stack
                 : typeof error?.message === "string" ? error.message
                     : String(error);
-            reply(message.id, null, detail);
+            reply(message.id, message?.type ?? "unknown", null, protocolError(
+                error?.name === "QuotaExceededError"
+                    ? "STORAGE_QUOTA"
+                    : error?.code ?? "OPERATION_FAILED",
+                message?.type ?? "unknown",
+                error?.message ?? String(error),
+                error?.name === "QuotaExceededError",
+                detail,
+            ));
         }
     })();
 });
@@ -214,7 +270,13 @@ try {
         onAbort(reason) { globalThis.postMessage({ type: "abort", reason: String(reason) }); },
     });
     filesystem.installForModule(module);
-    globalThis.postMessage({ type: "ready" });
+    globalThis.postMessage({ protocolVersion: ENGINE_PROTOCOL_VERSION, type: "ready" });
 } catch (error) {
-    globalThis.postMessage({ type: "startup-error", error: error?.stack ?? String(error) });
+    globalThis.postMessage({
+        protocolVersion: ENGINE_PROTOCOL_VERSION,
+        type: "startup-error",
+        error: protocolError(
+            "STARTUP_FAILED", "initialize", error?.message ?? String(error), false,
+            error?.stack ?? String(error)),
+    });
 }

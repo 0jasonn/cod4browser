@@ -57,6 +57,11 @@ export function createWorkerSyncFilesystem()
     let homeDirectory = null;
     let homeLoaded = false;
     let persistChain = Promise.resolve();
+    const pendingPersistence = [];
+    const queuedWrites = new Map();
+    let acceptingWrites = true;
+    let flushPromise = null;
+    let homeBytes = 0;
     let module = null;
     const testControl = Object.create(null);
 
@@ -137,8 +142,15 @@ export function createWorkerSyncFilesystem()
             }
             const bytes = new Uint8Array(await blob.arrayBuffer());
             budget.bytes += bytes.byteLength;
-            publishHomeFile({ logicalPath, bytes, size: bytes.byteLength, version: 0 });
+            publishHomeFile({
+                logicalPath,
+                bytes,
+                size: bytes.byteLength,
+                version: 0,
+                persistedVersion: 0,
+            });
         }
+        homeBytes = budget.bytes;
     }
 
     async function initializeHome(root)
@@ -153,6 +165,10 @@ export function createWorkerSyncFilesystem()
     async function persistHomeFile(logicalPath, bytes, version)
     {
         if (!homeDirectory) return;
+        if (testControl.failPersistence === true) {
+            throw new DOMException(
+                "Injected browser home persistence failure.", "QuotaExceededError");
+        }
         const segments = logicalPath.split("/");
         const name = segments.pop();
         const directory = await childDirectory(homeDirectory, segments, true);
@@ -165,14 +181,48 @@ export function createWorkerSyncFilesystem()
         if (current && current.version === version) current.persistedVersion = version;
     }
 
+    function drainPersistence()
+    {
+        persistChain = persistChain.catch(() => {}).then(async () => {
+            while (pendingPersistence.length > 0) {
+                const operation = pendingPersistence[0];
+                operation.started = true;
+                await operation.run();
+                pendingPersistence.shift();
+                if (operation.key && queuedWrites.get(operation.key) === operation) {
+                    queuedWrites.delete(operation.key);
+                }
+            }
+        });
+        return persistChain;
+    }
+
+    function schedulePersistence(run, key = null)
+    {
+        const queued = key ? queuedWrites.get(key) : null;
+        if (queued && !queued.started) {
+            queued.run = run;
+            const running = drainPersistence();
+            void running.catch(() => {});
+            return running;
+        }
+        const operation = { key, run, started: false };
+        pendingPersistence.push(operation);
+        if (key) queuedWrites.set(key, operation);
+        const running = drainPersistence();
+        void running.catch(() => {});
+        return running;
+    }
+
     function scheduleHomeFilePersistence(file)
     {
+        const logicalPath = file.logicalPath;
         const snapshot = file.bytes.slice(0, file.size);
         const version = file.version;
-        persistChain = persistChain.then(() =>
-            persistHomeFile(file.logicalPath, snapshot, version)).catch((error) => {
-                console.error("[kisakcod-web] Browser home persistence failed:", error);
-            });
+        return schedulePersistence(
+            () => persistHomeFile(logicalPath, snapshot, version),
+            `write:${logicalPath}`,
+        );
     }
 
     function addDirectory(logicalPath)
@@ -222,6 +272,7 @@ export function createWorkerSyncFilesystem()
         }
 
         closeAll();
+        acceptingWrites = true;
         const root = await navigator.storage.getDirectory();
         await initializeHome(root);
         const importDirectory = await childDirectory(root, [
@@ -322,6 +373,7 @@ export function createWorkerSyncFilesystem()
 
     function openWritable(path, append)
     {
+        if (!acceptingWrites) return -1;
         const logicalPath = normalizeLogicalPath(path);
         if (!logicalPath) return -1;
         const segments = logicalPath.split("/");
@@ -330,9 +382,16 @@ export function createWorkerSyncFilesystem()
             homeDirectories.has(logicalPath)) return -1;
         let file = homeFiles.get(logicalPath);
         if (!file) {
-            file = { logicalPath, bytes: new Uint8Array(256), size: 0, version: 0 };
+            file = {
+                logicalPath,
+                bytes: new Uint8Array(256),
+                size: 0,
+                version: 0,
+                persistedVersion: -1,
+            };
             publishHomeFile(file);
         } else if (!append) {
+            homeBytes -= file.size;
             file.size = 0;
             ++file.version;
         }
@@ -347,15 +406,17 @@ export function createWorkerSyncFilesystem()
 
     function removeHomePath(path)
     {
+        if (!acceptingWrites) return false;
         const logicalPath = normalizeLogicalPath(path);
         const file = logicalPath ? homeFiles.get(logicalPath) : null;
         if (!file) return false;
         if ([...descriptors.values()].some((open) => open.file === file)) return false;
         homeFiles.delete(logicalPath);
+        homeBytes -= file.size;
         const segments = logicalPath.split("/");
         const name = segments.pop();
         homeDirectoryEntries.get(segments.join("/"))?.delete(name);
-        persistChain = persistChain.then(async () => {
+        void schedulePersistence(async () => {
             if (!homeDirectory) return;
             try {
                 const directory = await childDirectory(homeDirectory, segments);
@@ -363,14 +424,13 @@ export function createWorkerSyncFilesystem()
             } catch (error) {
                 if (error?.name !== "NotFoundError") throw error;
             }
-        }).catch((error) => {
-            console.error("[kisakcod-web] Browser home removal failed:", error);
         });
         return true;
     }
 
     function renameHomePath(from, to)
     {
+        if (!acceptingWrites) return false;
         const sourcePath = normalizeLogicalPath(from);
         const destinationPath = normalizeLogicalPath(to);
         const source = sourcePath ? homeFiles.get(sourcePath) : null;
@@ -393,7 +453,7 @@ export function createWorkerSyncFilesystem()
         scheduleHomeFilePersistence(source);
         // The destination snapshot is durable before the obsolete source is
         // removed from OPFS because both operations share persistChain.
-        persistChain = persistChain.then(async () => {
+        void schedulePersistence(async () => {
             if (!homeDirectory) return;
             try {
                 const directory = await childDirectory(homeDirectory, sourceSegments);
@@ -401,10 +461,48 @@ export function createWorkerSyncFilesystem()
             } catch (error) {
                 if (error?.name !== "NotFoundError") throw error;
             }
-        }).catch((error) => {
-            console.error("[kisakcod-web] Browser home rename cleanup failed:", error);
         });
         return true;
+    }
+
+    function scheduleDirtyOpenFiles()
+    {
+        const dirty = new Set();
+        for (const open of descriptors.values()) {
+            if (open.writable && open.file.version !== open.file.persistedVersion) {
+                dirty.add(open.file);
+            }
+        }
+        for (const file of dirty) scheduleHomeFilePersistence(file);
+    }
+
+    async function checkpoint()
+    {
+        scheduleDirtyOpenFiles();
+        await drainPersistence();
+        return {
+            filesPersisted: [...homeFiles.values()].filter(
+                (file) => file.persistedVersion === file.version).length,
+            bytesPersisted: homeBytes,
+        };
+    }
+
+    function flushAndUnmount()
+    {
+        if (flushPromise) return flushPromise;
+        acceptingWrites = false;
+        flushPromise = (async () => {
+            scheduleDirtyOpenFiles();
+            await drainPersistence();
+            const summary = {
+                filesPersisted: [...homeFiles.values()].filter(
+                    (file) => file.persistedVersion === file.version).length,
+                bytesPersisted: homeBytes,
+            };
+            closeAll();
+            return summary;
+        })();
+        return flushPromise.finally(() => { flushPromise = null; });
     }
 
     function controlledPath(name, logicalPath)
@@ -529,6 +627,7 @@ export function createWorkerSyncFilesystem()
                 return bytesRead;
             },
             write(descriptor, source, length) {
+                if (!acceptingWrites) return -1;
                 const open = descriptors.get(descriptor);
                 if (!open?.writable || !Number.isInteger(source) || source <= 0 ||
                     !Number.isInteger(length) || length < 0 ||
@@ -536,14 +635,13 @@ export function createWorkerSyncFilesystem()
                     length > module.HEAPU8.byteLength - source) return -1;
                 const required = open.position + length;
                 const growth = Math.max(0, required - open.file.size);
-                const homeBytes = [...homeFiles.values()].reduce(
-                    (total, file) => total + file.size, 0);
                 if (homeBytes + growth > MAX_HOME_TOTAL_BYTES ||
                     !ensureHomeCapacity(open.file, required)) return -1;
                 open.file.bytes.set(
                     module.HEAPU8.subarray(source, source + length), open.position);
                 open.position = required;
                 open.file.size = Math.max(open.file.size, required);
+                homeBytes += growth;
                 ++open.file.version;
                 return length;
             },
@@ -555,17 +653,16 @@ export function createWorkerSyncFilesystem()
                 return true;
             },
             mkdir(path) {
+                if (!acceptingWrites) return false;
                 const logicalPath = normalizeDirectoryPath(path);
                 if (logicalPath === null || files.has(logicalPath) ||
                     homeFiles.has(logicalPath)) return false;
                 addHomeDirectory(logicalPath);
-                persistChain = persistChain.then(() => childDirectory(
+                void schedulePersistence(() => childDirectory(
                     homeDirectory,
                     logicalPath ? logicalPath.split("/") : [],
                     true,
-                )).catch((error) => {
-                    console.error("[kisakcod-web] Browser home directory persistence failed:", error);
-                });
+                ));
                 return true;
             },
             remove(path) { return removeHomePath(path); },
@@ -578,5 +675,12 @@ export function createWorkerSyncFilesystem()
         Object.assign(testControl, values);
     }
 
-    return Object.freeze({ mount, unmount: closeAll, installForModule, setTestControl });
+    return Object.freeze({
+        mount,
+        unmount: closeAll,
+        checkpoint,
+        flushAndUnmount,
+        installForModule,
+        setTestControl,
+    });
 }
