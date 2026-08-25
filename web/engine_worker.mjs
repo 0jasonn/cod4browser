@@ -22,6 +22,7 @@ const forwardedEvents = [
     "kisakcod:engine-lifecycle",
     "kisakcod:canonical-filesystem",
     "kisakcod:cinematic",
+    "kisakcod:renderer-memory",
 ];
 
 if (typeof globalThis.CustomEvent !== "function") {

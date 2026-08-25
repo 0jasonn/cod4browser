@@ -536,6 +536,7 @@ WebRendererSurfaceResult WebRenderer_SetSurface(
 // Creates the browser renderer and backend resources from any retained surface
 // and texture descriptions.
 bool WebRenderer_Initialize();
+void WebRenderer_Shutdown();
 
 // Copies a tightly packed RGBA8 image into bounded renderer-owned recovery
 // storage and displays it on a submitted surface that requests the engine-image

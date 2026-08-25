@@ -1311,8 +1311,8 @@ void __cdecl R_BeginRegistration(vidConfig_t *configuration)
     configuration->deviceSupportsGamma = false;
 }
 
-void __cdecl R_Shutdown(int) {}
-void R_ShutdownDirect3D() {}
+void __cdecl R_Shutdown(int) { WebRenderer_Shutdown(); }
+void R_ShutdownDirect3D() { WebRenderer_Shutdown(); }
 void __cdecl R_SyncRenderThread() {}
 void __cdecl R_BeginFrame()
 {

@@ -15,6 +15,7 @@ export const HOST_EVENTS = new Set([
     "kisakcod:canonical-runtime-prefix", "kisakcod:engine-lifecycle",
     "kisakcod:canonical-filesystem",
     "kisakcod:cinematic",
+    "kisakcod:renderer-memory",
 ]);
 
 export function protocolError(code, operation, message, recoverable = false, details)

@@ -1862,6 +1862,109 @@ void EmitShaderLifecycle(const char *state, const char *message)
         g_renderer.compatibilityFirstDrawCompleted);
 }
 
+EM_JS(void, DispatchRendererMemory, (
+    const char *state,
+    double decodedTextureSourceBytes,
+    double gpuTextureEstimateBytes,
+    double geometryBytes,
+    double recoveryCopyBytes,
+    double shaderProgramCacheEstimateBytes,
+    double temporaryUploadBytes,
+    double recoveryBudgetBytes), {
+        globalThis.dispatchEvent(new CustomEvent("kisakcod:renderer-memory", {
+            detail: {
+                state: UTF8ToString(state),
+                decodedTextureSourceBytes,
+                gpuTextureEstimateBytes,
+                geometryBytes,
+                recoveryCopyBytes,
+                shaderProgramCacheEstimateBytes,
+                temporaryUploadBytes,
+                recoveryBudgetBytes
+            }
+        }));
+    });
+
+std::size_t RetainedCubeBytes(const kisak::iwi::Rgba8Cube &cube)
+{
+    std::size_t bytes = 0u;
+    for (const auto &face : cube.faces) bytes += face.size();
+    for (const auto &level : cube.mipFaces)
+        for (const auto &face : level) bytes += face.size();
+    return bytes;
+}
+
+std::size_t RetainedImageBytes(
+    const std::vector<WebRendererRetainedWorldImage> &images)
+{
+    std::size_t bytes = 0u;
+    for (const WebRendererRetainedWorldImage &image : images)
+    {
+        bytes += image.pixels.size();
+        for (const auto &mip : image.mipPixels) bytes += mip.size();
+    }
+    return bytes;
+}
+
+void EmitRendererMemory(const char *state)
+{
+    const std::size_t geometryBytes =
+        g_renderer.retainedVertices.size() * sizeof(WebRendererSurfaceVertex) +
+        g_renderer.retainedIndices.size() * sizeof(std::uint16_t) +
+        g_renderer.retainedWorldIndices.size() * sizeof(std::uint32_t) +
+        g_renderer.retainedStaticModelVertices.size() * sizeof(WebRendererSurfaceVertex) +
+        g_renderer.retainedStaticModelIndices.size() * sizeof(std::uint32_t) +
+        g_renderer.retainedStaticModelInstances.size() *
+            sizeof(WebRendererStaticModelInstanceDesc) +
+        g_renderer.retainedDynamicModelVertices.size() * sizeof(WebRendererSurfaceVertex) +
+        g_renderer.retainedDynamicModelIndices.size() * sizeof(std::uint32_t) +
+        g_renderer.retainedUiVertices.size() * sizeof(WebRendererSurfaceVertex) +
+        g_renderer.retainedUiIndices.size() * sizeof(std::uint32_t);
+    std::size_t decodedTextureSourceBytes =
+        RetainedImageBytes(g_renderer.retainedWorldImages) +
+        RetainedImageBytes(g_renderer.retainedStaticModelImages) +
+        RetainedImageBytes(g_renderer.retainedDynamicModelImages) +
+        RetainedImageBytes(g_renderer.retainedUiImages) +
+        RetainedCubeBytes(g_renderer.retainedSky.cube) +
+        g_renderer.retainedStaticModelLighting.pixels.size() +
+        g_renderer.retainedDynamicModelLighting.pixels.size() +
+        g_renderer.retainedPixels.size();
+    for (const WebRendererRetainedWorldBatch &batch : g_renderer.retainedWorldBatches)
+    {
+        decodedTextureSourceBytes += batch.waterPixels.size();
+        decodedTextureSourceBytes += RetainedCubeBytes(batch.reflectionCube);
+    }
+    const std::size_t shaderProgramCacheEstimateBytes =
+        g_renderer.compatibilityId.size() +
+        g_renderer.compatibilityVertexSource.size() +
+        g_renderer.compatibilityFragmentSource.size();
+    std::size_t renderTargetEstimateBytes = 0u;
+    if (g_renderer.initialized && !g_renderer.contextLost)
+    {
+        const std::size_t width = static_cast<std::size_t>(
+            std::max(g_renderer.postProcessWidth, 0));
+        const std::size_t height = static_cast<std::size_t>(
+            std::max(g_renderer.postProcessHeight, 0));
+        // Scene RGBA8 + depth, composite RGBA8, and two quarter-size glow targets.
+        renderTargetEstimateBytes = width * height * 10u;
+        renderTargetEstimateBytes +=
+            static_cast<std::size_t>(SUN_SHADOW_SIZE) * SUN_SHADOW_SIZE * 8u;
+        renderTargetEstimateBytes += MAX_SPOT_SHADOWS *
+            static_cast<std::size_t>(SPOT_SHADOW_SIZE) * SPOT_SHADOW_SIZE * 4u;
+    }
+    const std::size_t recoveryCopyBytes =
+        decodedTextureSourceBytes + geometryBytes + shaderProgramCacheEstimateBytes;
+    DispatchRendererMemory(
+        state,
+        static_cast<double>(decodedTextureSourceBytes),
+        static_cast<double>(decodedTextureSourceBytes + renderTargetEstimateBytes),
+        static_cast<double>(geometryBytes),
+        static_cast<double>(recoveryCopyBytes),
+        static_cast<double>(shaderProgramCacheEstimateBytes),
+        0.0,
+        static_cast<double>(WEB_RENDERER_MAX_WORLD_TEXTURE_BYTES));
+}
+
 void ResetGpuHandles()
 {
     g_renderer.program = 0;
@@ -4764,6 +4867,7 @@ bool HandleWebGLContextLost(int, const void *, void *)
     }
 
     g_renderer.contextLost = true;
+    iassert(g_renderer.contextLost && g_renderer.context > 0);
     DispatchRendererAaLifecycle(
         "lost",
         "The multisample scene target was lost with the WebGL2 context",
@@ -4792,6 +4896,7 @@ bool HandleWebGLContextLost(int, const void *, void *)
     Web_EmitRuntimeState(
         "renderer-lost",
         "WebGL2 context lost; waiting for the browser to restore it");
+    EmitRendererMemory("context-lost");
 
     // Returning true allows the browser to later deliver a restoration event.
     return true;
@@ -4863,6 +4968,7 @@ bool HandleWebGLContextRestored(int, const void *, void *)
     }
 
     g_renderer.contextLost = false;
+    iassert(g_renderer.initialized && !g_renderer.contextLost);
     if (g_renderer.surfaceActive)
     {
         ++g_renderer.surfaceRecoveryCount;
@@ -4889,6 +4995,7 @@ bool HandleWebGLContextRestored(int, const void *, void *)
     }
     Web_Log(WebLogLevel::Info, "[kisakcod-web] WebGL2 context restored; renderer rebuilt.\n");
     Web_EmitRuntimeState("running", "WebGL2 context restored and rendering resumed");
+    EmitRendererMemory("context-restored");
     return true;
 }
 
@@ -4905,6 +5012,7 @@ bool CreateWebGLContext()
             static_cast<unsigned long>(g_renderer.context));
         return false;
     }
+    iassert(g_renderer.context > 0);
     InitializeTextureFilteringCapabilities();
     return true;
 }
@@ -6111,6 +6219,7 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
     };
     g_renderer.surfaceActive = true;
     g_renderer.worldSurfaceActive = true;
+    iassert(g_renderer.surfaceActive && g_renderer.worldSurfaceActive);
     ++g_renderer.surfaceSubmissionGeneration;
 
     const std::size_t retainedBytes =
@@ -6214,6 +6323,7 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
     if (comparisonCaptured)
         EmitWorldComparison(intendedComparison);
 #endif
+    EmitRendererMemory("world-submitted");
     return WebRendererSurfaceResult::Success;
 }
 
@@ -6393,6 +6503,9 @@ void __cdecl R_UnloadWorld()
     Web_Log(WebLogLevel::Info,
         "[kisakcod-web] Renderer released world-owned retained commands "
         "before canonical zone retirement.\n");
+    iassert(!g_renderer.surfaceActive && !g_renderer.worldSurfaceActive &&
+        g_renderer.retainedWorldImages.empty());
+    EmitRendererMemory("world-unloaded");
 }
 
 WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
@@ -6559,6 +6672,7 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
             draw.modelName.c_str(), draw.materialName.c_str(),
             draw.techniqueName.c_str(), draw.baseImageIndex);
     }
+    EmitRendererMemory("static-models-submitted");
     return WebRendererSurfaceResult::Success;
 }
 
@@ -6805,6 +6919,7 @@ WebRendererSurfaceResult WebRenderer_SetUiScene(
     g_renderer.retainedUiIndices = std::move(indices);
     g_renderer.retainedUiBatches = std::move(batches);
     g_renderer.uiSceneActive = true;
+    EmitRendererMemory("ui-submitted");
     return WebRendererSurfaceResult::Success;
 }
 
@@ -6844,6 +6959,7 @@ bool WebRenderer_Initialize()
     }
 
     g_renderer.initialized = true;
+    iassert(g_renderer.context > 0 && !g_renderer.contextLost);
     if (g_renderer.surfaceActive)
     {
         EmitSurfaceLifecycle(
@@ -6859,7 +6975,16 @@ bool WebRenderer_Initialize()
             "ready",
             "The renderer compiled the retained WebGL2 shader contract during initialization");
     }
+    EmitRendererMemory("initialized");
     return true;
+}
+
+void WebRenderer_Shutdown()
+{
+    R_UnloadWorld();
+    DestroyWebGLContext();
+    iassert(g_renderer.context == 0 && !g_renderer.initialized);
+    EmitRendererMemory("shutdown");
 }
 
 WebRendererTextureResult WebRenderer_SetBootstrapTexture(
