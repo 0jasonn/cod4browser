@@ -20,6 +20,10 @@ jobs:
           python-version: "3.14"
       - name: Install pinned dependencies
         run: npm.cmd ci
+      - name: Check product JavaScript and protocol types
+        run: npm.cmd run check:web:static
+      - name: Test product protocol validation
+        run: npm.cmd run test:protocol
       - name: Install Chromium
         run: npx.cmd playwright install chromium
       - name: Bootstrap pinned web toolchain

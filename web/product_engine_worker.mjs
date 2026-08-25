@@ -3,6 +3,7 @@ import {
     ENGINE_PROTOCOL_VERSION,
     PRODUCT_HOST_EVENTS,
     protocolError,
+    validateProductRequest,
 } from "./engine_protocol.mjs";
 
 if (typeof globalThis.CustomEvent !== "function") {
@@ -136,20 +137,10 @@ function submitCanonicalCommand(command)
 
 globalThis.addEventListener("message", (event) => {
     const message = event.data;
-    if (!message || typeof message !== "object") return;
     void (async () => {
         try {
-            if (message.protocolVersion !== ENGINE_PROTOCOL_VERSION) {
-                throw Object.assign(new Error("Unsupported engine protocol version."), {
-                    code: "PROTOCOL_VERSION",
-                });
-            }
+            validateProductRequest(message);
             if (message.type === "init") {
-                if (!(message.canvas instanceof OffscreenCanvas)) {
-                    throw Object.assign(new TypeError("A transferable canvas is required."), {
-                        code: "INVALID_PAYLOAD",
-                    });
-                }
                 globalThis.__KISAKCOD_OFFSCREEN_CANVAS__ = message.canvas;
                 resolveInitialization();
                 return;
@@ -190,13 +181,6 @@ globalThis.addEventListener("message", (event) => {
                 break;
             }
             case "resize":
-                if (!Number.isInteger(message.width) || !Number.isInteger(message.height) ||
-                    message.width < 1 || message.height < 1 ||
-                    message.width > 16384 || message.height > 16384) {
-                    throw Object.assign(new RangeError("Canvas dimensions must be 1..16384."), {
-                        code: "INVALID_PAYLOAD",
-                    });
-                }
                 module.canvas.width = message.width;
                 module.canvas.height = message.height;
                 reply(message.id, message.type, true);
@@ -208,10 +192,6 @@ globalThis.addEventListener("message", (event) => {
                 } else if (input?.type === "mouse-move" &&
                     [input.x, input.y, input.dx, input.dy].every(Number.isInteger)) {
                     module._KisakWeb_QueueMouseMove(input.x, input.y, input.dx, input.dy);
-                } else {
-                    throw Object.assign(new TypeError("The input event is invalid."), {
-                        code: "INVALID_PAYLOAD",
-                    });
                 }
                 reply(message.id, message.type, true);
                 break;

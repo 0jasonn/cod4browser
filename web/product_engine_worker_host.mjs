@@ -3,6 +3,7 @@ import {
     DEFAULT_REQUEST_TIMEOUT_MS,
     ENGINE_PROTOCOL_VERSION,
     EngineWorkerError,
+    MAX_REQUEST_TIMEOUT_MS,
     PRODUCT_HOST_EVENTS,
     protocolError,
 } from "./engine_protocol.mjs";
@@ -14,6 +15,7 @@ export function createEngineWorkerHost(canvas, {
     onLog,
     onAbort,
     requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+    managePageLifecycle = true,
 } = {})
 {
     if (!canvas || typeof canvas.transferControlToOffscreen !== "function") {
@@ -54,6 +56,7 @@ export function createEngineWorkerHost(canvas, {
             : new EngineWorkerError(error);
         for (const request of pending.values()) {
             clearTimeout(request.timeout);
+            request.signal?.removeEventListener("abort", request.abort);
             request.reject(failure);
         }
         pending.clear();
@@ -70,24 +73,39 @@ export function createEngineWorkerHost(canvas, {
             "REQUEST_ID_EXHAUSTED", "request", "No Worker request IDs are available."));
     }
 
-    function rpc(type, payload = {}, transfer = [], timeoutMs = requestTimeoutMs)
+    function rpc(type, payload = {}, transfer = [], {
+        timeoutMs = requestTimeoutMs,
+        signal,
+    } = {})
     {
         if ((shuttingDown && type !== "shutdown") || disposed) {
             return Promise.reject(new EngineWorkerError(protocolError(
                 "WORKER_SHUTTING_DOWN", type, "The engine Worker is shutting down.")));
         }
-        if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 120_000) {
-            return Promise.reject(new RangeError("Worker request timeout must be 1..120000 ms."));
+        if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 ||
+            timeoutMs > MAX_REQUEST_TIMEOUT_MS) {
+            return Promise.reject(new RangeError(
+                `Worker request timeout must be 1..${MAX_REQUEST_TIMEOUT_MS} ms.`));
+        }
+        if (signal?.aborted) {
+            return Promise.reject(new DOMException("The Worker request was aborted.", "AbortError"));
         }
         const id = allocateRequestId();
         const promise = new Promise((resolve, reject) => {
+            const abort = () => {
+                if (!pending.delete(id)) return;
+                clearTimeout(timeout);
+                reject(new DOMException("The Worker request was aborted.", "AbortError"));
+            };
             const timeout = setTimeout(() => {
                 if (!pending.delete(id)) return;
+                signal?.removeEventListener("abort", abort);
                 reject(new EngineWorkerError(protocolError(
                     "REQUEST_TIMEOUT", type,
                     `The engine Worker did not answer within ${timeoutMs} ms.`, true)));
             }, timeoutMs);
-            pending.set(id, { resolve, reject, timeout });
+            pending.set(id, { resolve, reject, timeout, signal, abort });
+            signal?.addEventListener("abort", abort, { once: true });
         });
         try {
             worker.postMessage({ protocolVersion: ENGINE_PROTOCOL_VERSION, type, id, ...payload }, transfer);
@@ -95,12 +113,13 @@ export function createEngineWorkerHost(canvas, {
             const request = pending.get(id);
             pending.delete(id);
             clearTimeout(request?.timeout);
+            request?.signal?.removeEventListener("abort", request.abort);
             request?.reject(error);
         }
         return promise;
     }
 
-    worker.addEventListener("message", (event) => {
+    const handleMessage = (event) => {
         const message = event.data;
         if (["ready", "reply", "event", "startup-error"].includes(message?.type) &&
             message.protocolVersion !== ENGINE_PROTOCOL_VERSION) {
@@ -118,6 +137,7 @@ export function createEngineWorkerHost(canvas, {
             if (!request) break;
             pending.delete(message.id);
             clearTimeout(request.timeout);
+            request.signal?.removeEventListener("abort", request.abort);
             if (message.error) request.reject(new EngineWorkerError(message.error));
             else request.resolve(message.result);
             break;
@@ -152,15 +172,18 @@ export function createEngineWorkerHost(canvas, {
         }
         default: break;
         }
-    });
-    worker.addEventListener("error", (event) => {
+    };
+    const handleError = (event) => {
         const error = protocolError(
             "WORKER_ERROR", "worker", event.error?.message ?? event.message ?? "Worker failed.");
         rejectReady(new EngineWorkerError(error));
         rejectPending(error);
-    });
-    worker.addEventListener("messageerror", () => rejectPending(protocolError(
-        "MESSAGE_ERROR", "message", "The engine Worker sent an unreadable message.")));
+    };
+    const handleMessageError = () => rejectPending(protocolError(
+        "MESSAGE_ERROR", "message", "The engine Worker sent an unreadable message."));
+    worker.addEventListener("message", handleMessage);
+    worker.addEventListener("error", handleError);
+    worker.addEventListener("messageerror", handleMessageError);
 
     const offscreen = canvas.transferControlToOffscreen();
     worker.postMessage({
@@ -259,12 +282,14 @@ export function createEngineWorkerHost(canvas, {
 
     const facade = {
         ready,
-        mountAssets(manifest) {
+        mountAssets(manifest, options) {
             return serializeFilesystemMutation(async () => {
                 await flushMountedFilesystem();
                 await acquireLeases();
                 try {
-                    const result = await rpc("mountAssets", { manifest });
+                    const result = await rpc("mountAssets", { manifest }, [], {
+                        timeoutMs: options?.timeoutMs ?? requestTimeoutMs,
+                    });
                     mounted = true;
                     return result;
                 } catch (error) {
@@ -276,16 +301,27 @@ export function createEngineWorkerHost(canvas, {
         flushAndUnmount() {
             return serializeFilesystemMutation(flushMountedFilesystem);
         },
-        probeAsset(kind, buffers, metadata = {}) {
+        probeAsset(kind, buffers, metadata = {}, options) {
             const transferred = buffers.map((bytes) => Uint8Array.from(bytes).buffer);
-            return rpc("probeAsset", { kind, buffers: transferred, metadata }, transferred);
+            return rpc("probeAsset", { kind, buffers: transferred, metadata },
+                transferred, options);
         },
-        submitCanonicalCommand(command) {
-            return rpc("submitCanonicalCommand", { command });
+        submitCanonicalCommand(command, options) {
+            return rpc("submitCanonicalCommand", { command }, [], {
+                timeoutMs: options?.timeoutMs ?? requestTimeoutMs,
+            });
         },
-        resize(width, height) { return rpc("resize", { width, height }); },
-        input(event) { return rpc("input", { event }); },
-        runtimeStatus() { return rpc("runtimeStatus"); },
+        resize(width, height, options) {
+            return rpc("resize", { width, height }, [], {
+                timeoutMs: options?.timeoutMs ?? requestTimeoutMs,
+            });
+        },
+        input(event, options) {
+            return rpc("input", { event }, [], {
+                timeoutMs: options?.timeoutMs ?? requestTimeoutMs,
+            });
+        },
+        runtimeStatus(options) { return rpc("runtimeStatus", {}, [], options); },
         dispose() {
             if (disposePromise) return disposePromise;
             shuttingDown = true;
@@ -297,15 +333,24 @@ export function createEngineWorkerHost(canvas, {
                     mounted = false;
                     disposed = true;
                     await releaseLeases();
+                    if (managePageLifecycle) {
+                        globalThis.removeEventListener("pagehide", handlePageHide);
+                    }
+                    worker.removeEventListener("message", handleMessage);
+                    worker.removeEventListener("error", handleError);
+                    worker.removeEventListener("messageerror", handleMessageError);
                     audioDriver.dispose();
-                    worker.terminate();
                     rejectPending(protocolError(
                         "WORKER_TERMINATED", "shutdown", "The engine Worker was terminated."));
+                    worker.terminate();
                 }
             })();
             return disposePromise;
         },
     };
-    globalThis.addEventListener("pagehide", () => { void facade.dispose(); }, { once: true });
+    const handlePageHide = () => { void facade.dispose(); };
+    if (managePageLifecycle) {
+        globalThis.addEventListener("pagehide", handlePageHide, { once: true });
+    }
     return Object.freeze(facade);
 }
