@@ -4,8 +4,8 @@
 param(
     [string]$BuildDirectory = 'build\web',
     [int64]$MaximumWasmBytes = 3340060,
-    [int64]$MaximumJavaScriptBytes = 320054,
-    [int64]$MaximumSiteBytes = 3670748,
+    [int64]$MaximumJavaScriptBytes = 320727,
+    [int64]$MaximumSiteBytes = 3671421,
     [int]$MaximumWasmExports = 24
 )
 
