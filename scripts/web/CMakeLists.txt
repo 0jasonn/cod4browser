@@ -455,6 +455,7 @@ add_custom_command(TARGET KisakCOD-web POST_BUILD
 # separate site when explicitly requested.
 file(MAKE_DIRECTORY "${KISAK_WEB_SITE_DIR}")
 file(REMOVE
+    "${KISAK_WEB_SITE_DIR}/engine_protocol.mjs"
     "${KISAK_WEB_SITE_DIR}/filesystem_bridge.mjs"
     "${KISAK_WEB_SITE_DIR}/kisakcod-next.mjs"
     "${KISAK_WEB_SITE_DIR}/kisakcod-next.wasm")
@@ -477,7 +478,7 @@ configure_file("${KISAK_WEB_SOURCE_DIR}/product_engine_worker.mjs"
 configure_file("${KISAK_WEB_SOURCE_DIR}/product_engine_worker_host.mjs"
     "${KISAK_WEB_SITE_DIR}/engine_worker_host.mjs" COPYONLY)
 configure_file("${KISAK_WEB_SOURCE_DIR}/product_protocol.mjs"
-    "${KISAK_WEB_SITE_DIR}/engine_protocol.mjs" COPYONLY)
+    "${KISAK_WEB_SITE_DIR}/product_protocol.mjs" COPYONLY)
 
 if (KISAK_WEB_DIAGNOSTICS)
     set(KISAK_WEB_DIAGNOSTIC_SITE_DIR "${CMAKE_BINARY_DIR}/site-diagnostics")

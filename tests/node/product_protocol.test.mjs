@@ -24,6 +24,7 @@ test("the production protocol accepts only its explicit operations", () => {
     assert.equal(validateProductRequest(request("mountAssets", { manifest: {} })).type,
         "mountAssets");
     assert.equal(validateProductRequest(request("flushAndUnmount")).type, "flushAndUnmount");
+    assert.equal(validateProductRequest(request("checkpoint")).type, "checkpoint");
     assert.equal(validateProductRequest(request("probeAsset", {
         kind: "fastfile", buffers: [new ArrayBuffer(8)], metadata: {},
     })).type, "probeAsset");
@@ -38,7 +39,7 @@ test("the production protocol accepts only its explicit operations", () => {
     assert.equal(validateProductRequest(request("runtimeStatus")).type, "runtimeStatus");
     assert.equal(validateProductRequest(request("shutdown")).type, "shutdown");
     assert.deepEqual(new Set(PRODUCT_OPERATIONS), new Set([
-        "init", "mountAssets", "flushAndUnmount", "probeAsset",
+        "init", "mountAssets", "flushAndUnmount", "checkpoint", "probeAsset",
         "submitCanonicalCommand", "resize", "input", "runtimeStatus", "shutdown",
     ]));
 });

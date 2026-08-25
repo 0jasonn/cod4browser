@@ -4,7 +4,7 @@ import {
     PRODUCT_HOST_EVENTS,
     protocolError,
     validateProductRequest,
-} from "./engine_protocol.mjs";
+} from "./product_protocol.mjs";
 
 if (typeof globalThis.CustomEvent !== "function") {
     globalThis.CustomEvent = class CustomEvent extends Event {
@@ -167,6 +167,9 @@ globalThis.addEventListener("message", (event) => {
             case "flushAndUnmount":
                 reply(message.id, message.type, await filesystem.flushAndUnmount());
                 state = "ready";
+                break;
+            case "checkpoint":
+                reply(message.id, message.type, await filesystem.checkpoint());
                 break;
             case "probeAsset": {
                 const result = await probeAsset(message.kind, message.buffers, message.metadata);

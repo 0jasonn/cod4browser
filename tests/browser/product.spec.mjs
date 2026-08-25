@@ -34,7 +34,7 @@ test("production artifact boots without diagnostic browser APIs @product", async
 test("production JavaScript exposes only named product operations @product", async ({ request }) => {
     const files = [
         "asset_store.mjs",
-        "engine_protocol.mjs",
+        "product_protocol.mjs",
         "engine_worker.mjs",
         "engine_worker_host.mjs",
         "launcher.mjs",

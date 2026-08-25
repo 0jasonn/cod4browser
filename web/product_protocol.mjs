@@ -14,6 +14,7 @@ export const PRODUCT_OPERATIONS = new Set([
     "init",
     "mountAssets",
     "flushAndUnmount",
+    "checkpoint",
     "probeAsset",
     "submitCanonicalCommand",
     "resize",
