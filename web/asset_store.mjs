@@ -558,49 +558,12 @@ async function readWindow(file, offset, length)
     return new Uint8Array(await file.slice(offset, Math.min(file.size, offset + length)).arrayBuffer());
 }
 
-async function callWasmProbe(module, functionName, buffers, buildArguments)
+async function runAssetProbe(module, kind, buffers, metadata)
 {
-    if (typeof module?.callProbe === "function") {
-        const symbolicPointers = buffers.map((_, index) =>
-            Object.freeze({ pointerIndex: index }));
-        const argumentLayout = buildArguments(symbolicPointers).map((argument) =>
-            argument && typeof argument === "object" &&
-                Number.isInteger(argument.pointerIndex)
-                ? { kind: "pointer", index: argument.pointerIndex }
-                : { kind: "value", value: argument });
-        return module.callProbe(functionName, buffers, argumentLayout);
-    }
-    const probe = module?.[functionName];
-    if (typeof probe !== "function" || typeof module?._malloc !== "function" ||
-        typeof module?._free !== "function") {
+    if (typeof module?.probeAsset !== "function") {
         throw importError("WASM_API", "The WebAssembly asset-probe API is unavailable.");
     }
-
-    const allocations = [];
-    try {
-        for (const buffer of buffers) {
-            const pointer = module._malloc(Math.max(1, buffer.byteLength));
-            if (!pointer) {
-                throw importError("WASM_MEMORY", "WebAssembly could not allocate an asset probe window.");
-            }
-            allocations.push({ pointer, buffer });
-        }
-        const heap = module.HEAPU8;
-        if (!heap) {
-            throw importError("WASM_API", "The WebAssembly byte heap is unavailable.");
-        }
-        for (const { pointer, buffer } of allocations) {
-            if (buffer.byteLength > 0) {
-                heap.set(buffer, pointer);
-            }
-        }
-        const pointers = allocations.map(({ pointer }) => pointer);
-        return probe(...buildArguments(pointers));
-    } finally {
-        for (const { pointer } of allocations) {
-            module._free(pointer);
-        }
-    }
+    return module.probeAsset(kind, buffers, metadata);
 }
 
 function assertProbeSucceeded(result)
@@ -616,12 +579,8 @@ function assertProbeSucceeded(result)
 async function probeLocalization(module, file)
 {
     const bytes = await readWindow(file, 0, file.size);
-    const result = await callWasmProbe(
-        module,
-        "_KisakWeb_ProbeLocalization",
-        [bytes],
-        ([data]) => [data, bytes.byteLength, file.size],
-    );
+    const result = await runAssetProbe(
+        module, "localization", [bytes], { fileSize: file.size });
     assertProbeSucceeded(result);
     const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     return text.split(/\r?\n/u, 1)[0];
@@ -642,22 +601,11 @@ async function probeIwd(module, file)
     const central = centralOffset <= file.size
         ? await readWindow(file, centralOffset, requestedCentralLength)
         : new Uint8Array();
-    const result = await callWasmProbe(
-        module,
-        "_KisakWeb_ProbeIwd",
-        [head, tail, central],
-        ([headPointer, tailPointer, centralPointer]) => [
-            headPointer,
-            head.byteLength,
-            tailPointer,
-            tail.byteLength,
-            tailOffset,
-            centralPointer,
-            central.byteLength,
-            centralOffset,
-            file.size,
-        ],
-    );
+    const result = await runAssetProbe(module, "iwd", [head, tail, central], {
+        tailOffset,
+        centralOffset,
+        fileSize: file.size,
+    });
     assertProbeSucceeded(result);
     return {
         entriesDeclared: eocd?.entriesDeclared ?? 0,
@@ -667,12 +615,8 @@ async function probeIwd(module, file)
 async function probeFastfile(module, file)
 {
     const head = await readWindow(file, 0, Math.min(file.size, 14));
-    const result = await callWasmProbe(
-        module,
-        "_KisakWeb_ProbeFastfileHeader",
-        [head],
-        ([data]) => [data, head.byteLength, file.size],
-    );
+    const result = await runAssetProbe(
+        module, "fastfile", [head], { fileSize: file.size });
     assertProbeSucceeded(result);
     return { version: 5, compression: "zlib" };
 }
@@ -777,6 +721,8 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
         : null;
     const engineFilesystemLock = "kisakcod-web-engine-filesystem-v1";
 
+    const flushEngine = () => module?.flushAndUnmount?.() ?? module?.unmount?.();
+
     const emit = (detail) => onState({
         persistenceGranted,
         ...detail,
@@ -799,7 +745,7 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
     async function releaseEngineFilesForMutation()
     {
         storageChannel?.postMessage({ type: "release-engine-files" });
-        await module?.unmount?.();
+        await flushEngine();
         // Every mounted engine tab holds this lock in shared mode.  Waiting for
         // an exclusive turn proves their Worker SyncAccessHandles have closed
         // before OPFS directories are replaced or removed.
@@ -1418,7 +1364,7 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
 
     storageChannel?.addEventListener("message", (event) => {
         if (event.data?.type === "release-engine-files") {
-            void module?.unmount?.().catch(() => {});
+            void flushEngine()?.catch(() => {});
             return;
         }
         if (event.data?.type !== "changed") {

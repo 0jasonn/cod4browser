@@ -223,7 +223,7 @@ void __cdecl CM_LoadMapData_LoadObj(const char *)
         "Loose BSP collision loading is unavailable in the browser fastfile runtime");
 }
 
-extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_StartCanonicalDbRuntimeCheck()
+extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_MountCanonicalRuntime()
 {
     if (g_clientLifecycleReady)
         return;
@@ -359,6 +359,14 @@ extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_StartCanonicalDbRuntimeCheck()
         "[kisakcod-web] Canonical renderer prerequisite-zone request completed.\n");
 }
 
+#if KISAK_WEB_DIAGNOSTICS
+extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_StartCanonicalDbRuntimeCheck()
+{
+    KisakWeb_MountCanonicalRuntime();
+}
+#endif
+
+#if KISAK_WEB_DIAGNOSTICS
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_CanonicalFsFileSize(
     const char *logicalPath)
 {
@@ -448,6 +456,8 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_CanonicalFsWriteRename(
         FS_FCloseFile(verify);
     return verify && size == length ? 1 : 0;
 }
+
+#endif
 
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_SubmitCanonicalCommand(
     const char *command)

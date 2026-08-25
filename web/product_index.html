@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en" data-runtime-state="loading">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+        http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'">
+    <meta name="theme-color" content="#0d0f0c">
+    <link rel="icon" href="data:,">
+    <title>KisakCOD</title>
+    <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+    <main class="app-shell">
+        <section class="viewport-panel" aria-labelledby="renderer-title">
+            <header class="panel-heading">
+                <h1 id="renderer-title">KisakCOD</h1>
+                <span id="frame-counter">Starting engine</span>
+            </header>
+            <div class="canvas-wrap">
+                <canvas id="game-canvas" width="960" height="540" tabindex="0">
+                    A browser with WebGL2 and OffscreenCanvas support is required.
+                </canvas>
+            </div>
+        </section>
+
+        <section class="asset-panel" aria-labelledby="asset-title">
+            <header class="panel-heading"><h2 id="asset-title">COD4 installation</h2></header>
+            <div class="asset-control" data-asset-state="checking">
+                <div class="asset-status" role="status" aria-live="polite">
+                    <span class="asset-status-mark" aria-hidden="true"></span>
+                    <div>
+                        <small id="asset-state-label">Checking browser storage</small>
+                        <strong id="asset-message">Waiting for the engine</strong>
+                    </div>
+                </div>
+                <progress id="asset-progress" max="1" value="0" hidden></progress>
+                <div class="asset-actions">
+                    <button id="select-install-button" class="primary-action" type="button" disabled>
+                        Choose COD4 installation
+                    </button>
+                    <button id="portable-install-button" class="secondary-action" type="button" disabled>
+                        Use compatible folder picker
+                    </button>
+                    <button id="clear-assets-button" class="secondary-action" type="button" hidden>
+                        Remove browser copy
+                    </button>
+                </div>
+                <input id="install-folder-input" type="file" webkitdirectory directory multiple hidden>
+            </div>
+        </section>
+
+        <section class="console-panel" aria-labelledby="console-title">
+            <header class="panel-heading"><h2 id="console-title">Engine console</h2></header>
+            <form id="engine-command-form" class="console-command">
+                <label for="engine-command-input">Command</label>
+                <div class="console-command-row">
+                    <input id="engine-command-input" type="text" maxlength="1023"
+                        autocomplete="off" autocapitalize="off" spellcheck="false"
+                        placeholder="map killhouse" disabled>
+                    <button id="engine-command-submit" class="secondary-action"
+                        type="submit" disabled>Run</button>
+                </div>
+                <output id="engine-command-status" for="engine-command-input"></output>
+            </form>
+            <pre id="boot-log" aria-live="polite"></pre>
+        </section>
+    </main>
+    <script type="module" src="./launcher.mjs"></script>
+</body>
+</html>

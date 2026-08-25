@@ -2,9 +2,12 @@ message("----- KisakCOD Browser Platform Slice -----")
 
 project(KisakCOD-web LANGUAGES C CXX)
 
+option(KISAK_WEB_DIAGNOSTICS "Build the separate browser diagnostic artifact" OFF)
+
 include(${PLATFORM_DIR}/web/platform.cmake)
 include(${SCRIPTS_DIR}/common_files.cmake)
 include(${SCRIPTS_DIR}/sp/sp_files.cmake)
+list(REMOVE_DUPLICATES CGAME)
 
 # Loose-source XAnim parsing is a native development path. Browser startup is
 # fastfile-only; keep the canonical runtime XAnim owners while excluding the
@@ -57,9 +60,9 @@ list(REMOVE_ITEM SCRIPT
 set(KISAK_WEB_SITE_DIR "${CMAKE_BINARY_DIR}/site")
 set(KISAK_WEB_SOURCE_DIR "${CMAKE_SOURCE_DIR}/web")
 
-# Compile the canonical qcommon/runtime prefix once. The production Worker and
-# the strict Node runtime check intentionally link the same Wasm objects; only
-# their entry points and link environments differ.
+# List the canonical qcommon/runtime prefix once. It is intentionally compiled
+# into two object variants because the production runtime admits the map/DB
+# boundary while the strict Node check must stop before that boundary.
 set(KISAK_WEB_RUNTIME_PREFIX_SOURCES
     "${SRC_DIR}/database/db_initialization.cpp"
     "${SRC_DIR}/qcommon/com_init_trace.cpp"
@@ -93,24 +96,38 @@ kisak_configure_web_compile_target(kisak_web_runtime_prefix_check)
 target_compile_definitions(kisak_web_runtime_prefix_check PRIVATE
     KISAK_GATE3_COM_INIT_PREFIX=1)
 
-# Gate 2 remains linked for an explicitly requested diagnostic/oracle run. Keep
-# its large census implementation isolated so a future target can omit this
-# library once canonical DB loading reproduces the proof.
-add_library(kisak_web_gate2_oracle STATIC
-    "${SRC_DIR}/web/web_retail_fastfile_census.cpp"
-    "${SRC_DIR}/web/web_retail_load_clipmap.cpp"
-    "${SRC_DIR}/web/web_retail_load_comworld.cpp"
-    "${SRC_DIR}/web/web_retail_load_gfxworld.cpp"
-    "${SRC_DIR}/web/web_retail_load_image.cpp"
-    "${SRC_DIR}/web/web_retail_load_lightdef.cpp"
-    "${SRC_DIR}/web/web_retail_load_weapon.cpp"
-    "${SRC_DIR}/web/web_sound_alias_catalog.cpp"
-    "${SRC_DIR}/web/web_retail_census_job.cpp"
+set(KISAK_WEB_DIAGNOSTIC_SOURCES
+    "${SRC_DIR}/web/web_archive_job.cpp"
+    "${SRC_DIR}/web/web_engine_asset.cpp"
+    "${SRC_DIR}/web/web_engine_surface.cpp"
+    "${SRC_DIR}/web/web_fastfile_source_stream.cpp"
+    "${SRC_DIR}/web/web_fastfile_world_surface.cpp"
+    "${SRC_DIR}/web/web_fastfile_zone_registry.cpp"
+    "${SRC_DIR}/web/web_fastfile_zone_stream.cpp"
+    "${SRC_DIR}/web/web_qcommon_preinit.cpp"
+    "${SRC_DIR}/web/web_qcommon_runtime.cpp"
+    "${SRC_DIR}/web/web_renderer_comparison.cpp"
 )
-target_include_directories(kisak_web_gate2_oracle PRIVATE "${SRC_DIR}" "${DEPS_DIR}")
-kisak_configure_web_compile_target(kisak_web_gate2_oracle)
 
-add_executable(KisakCOD-web
+# Gate 2 remains available only when the separate diagnostic artifact is
+# requested. The normal production graph never creates or links this target.
+if (KISAK_WEB_DIAGNOSTICS)
+    add_library(kisak_web_gate2_oracle STATIC
+        "${SRC_DIR}/web/web_retail_fastfile_census.cpp"
+        "${SRC_DIR}/web/web_retail_load_clipmap.cpp"
+        "${SRC_DIR}/web/web_retail_load_comworld.cpp"
+        "${SRC_DIR}/web/web_retail_load_gfxworld.cpp"
+        "${SRC_DIR}/web/web_retail_load_image.cpp"
+        "${SRC_DIR}/web/web_retail_load_lightdef.cpp"
+        "${SRC_DIR}/web/web_retail_load_weapon.cpp"
+        "${SRC_DIR}/web/web_sound_alias_catalog.cpp"
+        "${SRC_DIR}/web/web_retail_census_job.cpp")
+    target_include_directories(kisak_web_gate2_oracle PRIVATE
+        "${SRC_DIR}" "${DEPS_DIR}")
+    kisak_configure_web_compile_target(kisak_web_gate2_oracle)
+endif()
+
+set(KISAK_WEB_CANONICAL_RUNTIME_SOURCES
     "${SRC_DIR}/client/cl_fastfile_config.cpp"
     "${SRC_DIR}/client/cl_controller.cpp"
     "${SRC_DIR}/client/cl_cin.cpp"
@@ -168,73 +185,74 @@ add_executable(KisakCOD-web
     "${SRC_DIR}/qcommon/cm_load.cpp"
     "${SRC_DIR}/qcommon/cm_memory.cpp"
     "${SRC_DIR}/qcommon/com_world_runtime.cpp"
-    "${SRC_DIR}/script/scr_variable_init.cpp"
-    "${SRC_DIR}/script/scr_vm_init.cpp"
-    "${SRC_DIR}/xanim/xanim_init.cpp"
-    "${SRC_DIR}/xanim/dobj_init.cpp"
     "${SRC_DIR}/gfx_d3d/r_asset_load.cpp"
     "${SRC_DIR}/gfx_d3d/r_water.cpp"
     "${SRC_DIR}/universal/fft.cpp"
     "${SRC_DIR}/gfx_d3d/gfx_world_runtime.cpp"
-    "${SRC_DIR}/game/savememory.cpp"
-    "${SRC_DIR}/game/savememory_init.cpp"
-    "${SRC_DIR}/game/g_main.cpp"
-    "${SRC_DIR}/server/sv_init.cpp"
-    "${SRC_DIR}/server/sv_game.cpp"
-    "${SRC_DIR}/server/sv_map_assets.cpp"
-    "${SRC_DIR}/server/sv_map_command.cpp"
-    "${SRC_DIR}/server/sv_state.cpp"
     "${SRC_DIR}/ui/mission.cpp"
     "${SRC_DIR}/universal/filesystem_path.cpp"
     "${SRC_DIR}/universal/com_memory.cpp"
     "${SRC_DIR}/universal/dvar_runtime_io.cpp"
     "${SRC_DIR}/universal/memfile.cpp"
-    "${SRC_DIR}/web/web_archive_job.cpp"
+    # Existing KisakCOD/ODE physics code, not a bootstrap substitute.
+    "${SRC_DIR}/physics/ode/odemath.cpp"
+    $<TARGET_OBJECTS:kisak_web_runtime_prefix>
+)
+
+set(KISAK_WEB_CANONICAL_ADAPTER_SOURCES
     "${SRC_DIR}/web/web_client_server_lifecycle.cpp"
-    "${SRC_DIR}/web/web_browser_bindings.cpp"
-    "${SRC_DIR}/web/web_renderer_fx_model_scene.cpp"
-    "${SRC_DIR}/web/web_renderer_particle_cloud_scene.cpp"
     "${SRC_DIR}/web/web_canonical_gfxworld.cpp"
+    "${SRC_DIR}/web/web_database_filesystem.cpp"
+    "${SRC_DIR}/web/web_engine_filesystem.cpp"
+    "${SRC_DIR}/web/web_engine_world_surface.cpp"
+    "${SRC_DIR}/web/web_renderer_frontend.cpp"
+    "${SRC_DIR}/web/web_system_files.cpp"
+)
+
+set(KISAK_WEB_PLATFORM_SOURCES
+    "${SRC_DIR}/web/web_browser_bindings.cpp"
     "${SRC_DIR}/web/web_assertive.cpp"
     "${SRC_DIR}/web/web_cinematic.cpp"
     "${SRC_DIR}/web/web_asset_probe.cpp"
     "${SRC_DIR}/web/web_cooperative_scheduler.cpp"
-    "${SRC_DIR}/web/web_database_filesystem.cpp"
-    "${SRC_DIR}/web/web_engine_asset.cpp"
-    "${SRC_DIR}/web/web_engine_filesystem.cpp"
     "${SRC_DIR}/web/web_engine_scheduler.cpp"
-    "${SRC_DIR}/web/web_engine_surface.cpp"
-    "${SRC_DIR}/web/web_engine_world_surface.cpp"
-    "${SRC_DIR}/web/web_fastfile_world_surface.cpp"
-    "${SRC_DIR}/web/web_fastfile_source_stream.cpp"
-    "${SRC_DIR}/web/web_fastfile_zone_registry.cpp"
-    "${SRC_DIR}/web/web_fastfile_zone_stream.cpp"
     "${SRC_DIR}/web/web_filesystem.cpp"
-    "${SRC_DIR}/web/web_qcommon_preinit.cpp"
-    "${SRC_DIR}/web/web_qcommon_runtime.cpp"
     "${SRC_DIR}/web/web_shader_compatibility.cpp"
-    "${SRC_DIR}/web/web_renderer.cpp"
-    "${SRC_DIR}/web/web_openal_proxy.cpp"
-      "${SRC_DIR}/web/web_renderer_frontend.cpp"
-      "${SRC_DIR}/web/web_renderer_code_mesh.cpp"
-      "${SRC_DIR}/web/web_renderer_mark_mesh.cpp"
-      "${SRC_DIR}/web/web_renderer_mark_fragments.cpp"
-      "${SRC_DIR}/web/web_renderer_comparison.cpp"
-      "${SRC_DIR}/web/web_renderer_lighting.cpp"
-      "${SRC_DIR}/web/web_renderer_dobj_scene.cpp"
-      "${SRC_DIR}/web/web_renderer_dobj_lod.cpp"
-      "${SRC_DIR}/web/web_renderer_surface.cpp"
-    "${SRC_DIR}/web/web_renderer_world_scene.cpp"
-    "${SRC_DIR}/web/web_renderer_static_model_scene.cpp"
     "${SRC_DIR}/web/web_system.cpp"
-    "${SRC_DIR}/web/web_system_files.cpp"
     "${SRC_DIR}/web/web_thread_context.cpp"
     "${SRC_DIR}/web/web_worker_filesystem.cpp"
-    "${SRC_DIR}/web/web_main.cpp"
-    # This is existing KisakCOD/ODE physics code, not a bootstrap substitute.
-    "${SRC_DIR}/physics/ode/odemath.cpp"
-    $<TARGET_OBJECTS:kisak_web_runtime_prefix>
 )
+
+set(KISAK_WEB_RENDERER_SOURCES
+    "${SRC_DIR}/web/web_renderer.cpp"
+    "${SRC_DIR}/web/web_renderer_code_mesh.cpp"
+    "${SRC_DIR}/web/web_renderer_dobj_lod.cpp"
+    "${SRC_DIR}/web/web_renderer_dobj_scene.cpp"
+    "${SRC_DIR}/web/web_renderer_fx_model_scene.cpp"
+    "${SRC_DIR}/web/web_renderer_lighting.cpp"
+    "${SRC_DIR}/web/web_renderer_mark_fragments.cpp"
+    "${SRC_DIR}/web/web_renderer_mark_mesh.cpp"
+    "${SRC_DIR}/web/web_renderer_particle_cloud_scene.cpp"
+    "${SRC_DIR}/web/web_renderer_static_model_scene.cpp"
+    "${SRC_DIR}/web/web_renderer_surface.cpp"
+    "${SRC_DIR}/web/web_renderer_world_scene.cpp"
+)
+
+set(KISAK_WEB_AUDIO_SOURCES
+    "${SRC_DIR}/web/web_openal_proxy.cpp"
+)
+
+set(KISAK_WEB_PRODUCT_SOURCES
+    "${SRC_DIR}/web/web_main.cpp"
+)
+
+add_executable(KisakCOD-web
+    ${KISAK_WEB_CANONICAL_RUNTIME_SOURCES}
+    ${KISAK_WEB_CANONICAL_ADAPTER_SOURCES}
+    ${KISAK_WEB_PLATFORM_SOURCES}
+    ${KISAK_WEB_RENDERER_SOURCES}
+    ${KISAK_WEB_AUDIO_SOURCES}
+    ${KISAK_WEB_PRODUCT_SOURCES})
 add_dependencies(KisakCOD-web update_build_number)
 
 # The post-DB runtime is no longer a browser-owned bootstrap. Pull the real SP
@@ -330,15 +348,72 @@ target_compile_definitions(KisakCOD-web PRIVATE
     KISAK_CANONICAL_MAP_COMMANDS=1
     KISAK_DB_REGISTRY_LIFECYCLE_SLICE=1
     KISAK_OPENAL=1
+    KISAK_WEB_DIAGNOSTICS=0
 )
-target_link_libraries(KisakCOD-web PRIVATE kisak_web_gate2_oracle)
+target_link_options(KisakCOD-web PRIVATE
+    "-Wl,-Map=${CMAKE_BINARY_DIR}/kisakcod-production.map")
+
+function(kisak_assert_unique_target_sources TARGET_NAME)
+    get_target_property(target_sources ${TARGET_NAME} SOURCES)
+    set(seen_sources)
+    set(duplicate_sources)
+    foreach(source IN LISTS target_sources)
+        if (source MATCHES "^\\$<")
+            continue()
+        endif()
+        cmake_path(ABSOLUTE_PATH source NORMALIZE OUTPUT_VARIABLE normalized_source)
+        if (normalized_source IN_LIST seen_sources)
+            list(APPEND duplicate_sources "${normalized_source}")
+            continue()
+        endif()
+        list(APPEND seen_sources "${normalized_source}")
+    endforeach()
+    if (duplicate_sources)
+        list(JOIN duplicate_sources "\n  " duplicate_list)
+        message(FATAL_ERROR
+            "${TARGET_NAME} owns duplicate translation units:\n  ${duplicate_list}")
+    endif()
+endfunction()
+
+kisak_assert_unique_target_sources(KisakCOD-web)
+
+if (KISAK_WEB_DIAGNOSTICS)
+    get_target_property(KISAK_WEB_PRODUCTION_SOURCES KisakCOD-web SOURCES)
+    add_executable(KisakCOD-web-diagnostics
+        ${KISAK_WEB_PRODUCTION_SOURCES}
+        ${KISAK_WEB_DIAGNOSTIC_SOURCES})
+    add_dependencies(KisakCOD-web-diagnostics update_build_number)
+    target_include_directories(KisakCOD-web-diagnostics PRIVATE
+        "${SRC_DIR}" "${DEPS_DIR}")
+    set_target_properties(KisakCOD-web-diagnostics PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/site-diagnostics")
+    kisak_configure_web_target(KisakCOD-web-diagnostics DIAGNOSTICS)
+    target_link_options(KisakCOD-web-diagnostics PRIVATE
+        "-flto"
+        "-Wl,--error-limit=0"
+        "-Wl,-Map=${CMAKE_BINARY_DIR}/kisakcod-diagnostics.map")
+    target_compile_definitions(KisakCOD-web-diagnostics PRIVATE
+        KISAK_GATE3_COM_INIT_PREFIX=1
+        KISAK_CANONICAL_MAP_COMMANDS=1
+        KISAK_DB_REGISTRY_LIFECYCLE_SLICE=1
+        KISAK_OPENAL=1
+        KISAK_WEB_DIAGNOSTICS=1)
+    target_link_libraries(KisakCOD-web-diagnostics PRIVATE kisak_web_gate2_oracle)
+    kisak_assert_unique_target_sources(KisakCOD-web-diagnostics)
+    add_custom_command(TARGET KisakCOD-web-diagnostics POST_BUILD
+        BYPRODUCTS "${CMAKE_BINARY_DIR}/site-diagnostics/kisakcod.wasm"
+        COMMAND "${CMAKE_COMMAND}" -E true
+        VERBATIM)
+endif()
 
 # A small, strict-link inventory executable for the canonical common.cpp
 # prefix. It is intentionally independent of the browser launcher and Gate 2
 # runtime so accidental undefined symbols cannot hide behind that larger link.
-add_executable(KisakCOD-web-runtime-prefix-check EXCLUDE_FROM_ALL
+set(KISAK_WEB_TEST_SOURCES
     "${CMAKE_SOURCE_DIR}/tests/native/gate3_com_init_trace_tests.cpp"
-    "${SRC_DIR}/universal/com_memory_string.cpp"
+    "${SRC_DIR}/universal/com_memory_string.cpp")
+add_executable(KisakCOD-web-runtime-prefix-check EXCLUDE_FROM_ALL
+    ${KISAK_WEB_TEST_SOURCES}
     $<TARGET_OBJECTS:kisak_web_runtime_prefix_check>
 )
 target_compile_features(KisakCOD-web-runtime-prefix-check PRIVATE cxx_std_20)
@@ -374,15 +449,45 @@ add_custom_command(TARGET KisakCOD-web POST_BUILD
     VERBATIM
 )
 
-# configure_file registers these launcher files as configure dependencies, so
-# editing one refreshes the served site on the next incremental build.
+# The production site receives only the narrow product launcher and Worker
+# protocol. Diagnostic launcher code and browser test controls are copied to a
+# separate site when explicitly requested.
 file(MAKE_DIRECTORY "${KISAK_WEB_SITE_DIR}")
-foreach(WEB_FILE index.html launcher.mjs asset_store.mjs filesystem_bridge.mjs
-        engine_worker.mjs engine_worker_host.mjs engine_protocol.mjs web_audio_driver.mjs
-        worker_sync_filesystem.mjs styles.css)
+file(REMOVE
+    "${KISAK_WEB_SITE_DIR}/filesystem_bridge.mjs"
+    "${KISAK_WEB_SITE_DIR}/kisakcod-next.mjs"
+    "${KISAK_WEB_SITE_DIR}/kisakcod-next.wasm")
+foreach(WEB_FILE asset_store.mjs web_audio_driver.mjs worker_sync_filesystem.mjs styles.css)
     configure_file(
         "${KISAK_WEB_SOURCE_DIR}/${WEB_FILE}"
         "${KISAK_WEB_SITE_DIR}/${WEB_FILE}"
         COPYONLY
     )
 endforeach()
+configure_file("${KISAK_WEB_SOURCE_DIR}/product_index.html"
+    "${KISAK_WEB_SITE_DIR}/index.html" COPYONLY)
+configure_file("${KISAK_WEB_SOURCE_DIR}/product_launcher.mjs"
+    "${KISAK_WEB_SITE_DIR}/launcher.mjs" COPYONLY)
+configure_file("${KISAK_WEB_SOURCE_DIR}/product_engine_worker.mjs"
+    "${KISAK_WEB_SITE_DIR}/engine_worker.mjs" COPYONLY)
+configure_file("${KISAK_WEB_SOURCE_DIR}/product_engine_worker_host.mjs"
+    "${KISAK_WEB_SITE_DIR}/engine_worker_host.mjs" COPYONLY)
+configure_file("${KISAK_WEB_SOURCE_DIR}/product_protocol.mjs"
+    "${KISAK_WEB_SITE_DIR}/engine_protocol.mjs" COPYONLY)
+
+if (KISAK_WEB_DIAGNOSTICS)
+    set(KISAK_WEB_DIAGNOSTIC_SITE_DIR "${CMAKE_BINARY_DIR}/site-diagnostics")
+    file(MAKE_DIRECTORY "${KISAK_WEB_DIAGNOSTIC_SITE_DIR}")
+    foreach(WEB_FILE index.html launcher.mjs asset_store.mjs
+            engine_worker.mjs engine_worker_host.mjs engine_protocol.mjs
+            web_audio_driver.mjs worker_sync_filesystem.mjs styles.css)
+        configure_file(
+            "${KISAK_WEB_SOURCE_DIR}/${WEB_FILE}"
+            "${KISAK_WEB_DIAGNOSTIC_SITE_DIR}/${WEB_FILE}"
+            COPYONLY)
+    endforeach()
+    configure_file(
+        "${CMAKE_SOURCE_DIR}/tests/browser/support/filesystem_bridge.mjs"
+        "${KISAK_WEB_DIAGNOSTIC_SITE_DIR}/filesystem_bridge.mjs"
+        COPYONLY)
+endif()

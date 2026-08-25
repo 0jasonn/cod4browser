@@ -3,62 +3,42 @@ import {
     DEFAULT_REQUEST_TIMEOUT_MS,
     ENGINE_PROTOCOL_VERSION,
     EngineWorkerError,
-    HOST_EVENTS,
+    PRODUCT_HOST_EVENTS,
     protocolError,
 } from "./engine_protocol.mjs";
 
-const EXPORTED_COMMANDS = [
-    "_KisakWeb_StartArchiveJob", "_KisakWeb_CancelArchiveJob",
-    "_KisakWeb_StartQcommonRuntime", "_KisakWeb_CancelQcommonRuntime",
-    "_KisakWeb_StartRetailCensus", "_KisakWeb_CancelRetailCensus",
-    "_KisakWeb_StartCanonicalDbRuntimeCheck",
-    "_KisakWeb_SubmitCanonicalCommand",
-    "_KisakWeb_TestAudioProxyPcm",
-    "_KisakWeb_TestLoseWebGLContext", "_KisakWeb_TestRestoreWebGLContext",
-    "_KisakWeb_TestSetAaSamples",
-];
 const ENGINE_FILESYSTEM_LOCK = "kisakcod-web-engine-filesystem-v1";
 const HOME_WRITER_LOCK = "kisakcod-web-home-writer-v1";
 
 export function createEngineWorkerHost(canvas, {
     onLog,
     onAbort,
-    onAudioDiagnostic,
     requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
 } = {})
 {
     if (!canvas || typeof canvas.transferControlToOffscreen !== "function") {
         throw new Error("This browser does not support a Worker-owned OffscreenCanvas.");
     }
-    const observeInput = globalThis.__KISAKCOD_WORKER_TEST_CONFIG__?.observeInput === true;
+
     const worker = new Worker(new URL("./engine_worker.mjs", import.meta.url), {
         type: "module",
         name: "kisakcod-engine",
     });
     const audioDriver = new WebAudioDriver({
-        onDiagnostic: (message) => {
-            onAudioDiagnostic?.(message);
-            onLog?.(`[kisakcod-web] ${message}`, "warn");
-        },
-        onPlaybackStarted: (detail) => {
-            globalThis.dispatchEvent(new CustomEvent("kisakcod:audio-playback", {
-                detail: { ...detail, state: "started", source: "canonical-openal-web-audio" },
-            }));
-        },
+        onDiagnostic: (message) => onLog?.(`[kisakcod-web] ${message}`, "warn"),
     });
-    // Gesture listeners only unlock the platform device. Keyboard/mouse
-    // ownership remains in the existing input forwarding path below.
     audioDriver.attachGestureResume(canvas);
+
     const pending = new Map();
     let nextRequestId = 1;
     let releaseFilesystemLease = null;
     let filesystemLeaseCompletion = null;
     let releaseHomeWriterLease = null;
     let homeWriterLeaseCompletion = null;
-    let unmounting = null;
     let filesystemMutation = Promise.resolve();
-    let disposed = false;
+    let mounted = false;
     let shuttingDown = false;
+    let disposed = false;
     let disposePromise = null;
     let resolveReady;
     let rejectReady;
@@ -74,7 +54,6 @@ export function createEngineWorkerHost(canvas, {
             : new EngineWorkerError(error);
         for (const request of pending.values()) {
             clearTimeout(request.timeout);
-            request.signal?.removeEventListener("abort", request.abort);
             request.reject(failure);
         }
         pending.clear();
@@ -91,7 +70,7 @@ export function createEngineWorkerHost(canvas, {
             "REQUEST_ID_EXHAUSTED", "request", "No Worker request IDs are available."));
     }
 
-    function rpc(type, payload = {}, transfer = [], { signal, timeoutMs = requestTimeoutMs } = {})
+    function rpc(type, payload = {}, transfer = [], timeoutMs = requestTimeoutMs)
     {
         if ((shuttingDown && type !== "shutdown") || disposed) {
             return Promise.reject(new EngineWorkerError(protocolError(
@@ -100,29 +79,15 @@ export function createEngineWorkerHost(canvas, {
         if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 120_000) {
             return Promise.reject(new RangeError("Worker request timeout must be 1..120000 ms."));
         }
-        if (signal?.aborted) {
-            return Promise.reject(new DOMException("The Worker request was aborted.", "AbortError"));
-        }
         const id = allocateRequestId();
         const promise = new Promise((resolve, reject) => {
-            const abort = () => {
-                const request = pending.get(id);
-                if (!request) return;
-                pending.delete(id);
-                clearTimeout(request.timeout);
-                reject(new DOMException("The Worker request was aborted.", "AbortError"));
-            };
             const timeout = setTimeout(() => {
-                const request = pending.get(id);
-                if (!request) return;
-                pending.delete(id);
-                signal?.removeEventListener("abort", abort);
+                if (!pending.delete(id)) return;
                 reject(new EngineWorkerError(protocolError(
                     "REQUEST_TIMEOUT", type,
                     `The engine Worker did not answer within ${timeoutMs} ms.`, true)));
             }, timeoutMs);
-            pending.set(id, { resolve, reject, timeout, signal, abort, operation: type });
-            signal?.addEventListener("abort", abort, { once: true });
+            pending.set(id, { resolve, reject, timeout });
         });
         try {
             worker.postMessage({ protocolVersion: ENGINE_PROTOCOL_VERSION, type, id, ...payload }, transfer);
@@ -130,7 +95,6 @@ export function createEngineWorkerHost(canvas, {
             const request = pending.get(id);
             pending.delete(id);
             clearTimeout(request?.timeout);
-            signal?.removeEventListener("abort", request?.abort);
             request?.reject(error);
         }
         return promise;
@@ -154,30 +118,25 @@ export function createEngineWorkerHost(canvas, {
             if (!request) break;
             pending.delete(message.id);
             clearTimeout(request.timeout);
-            request.signal?.removeEventListener("abort", request.abort);
             if (message.error) request.reject(new EngineWorkerError(message.error));
             else request.resolve(message.result);
             break;
         }
         case "event":
-            if (!HOST_EVENTS.has(message.name)) {
+            if (!PRODUCT_HOST_EVENTS.has(message.name)) {
                 rejectPending(protocolError(
                     "EVENT_NOT_ALLOWED", "event", `Worker event is not allowed: ${message.name}.`));
                 break;
             }
             globalThis.dispatchEvent(new CustomEvent(message.name, { detail: message.detail }));
             break;
-        case "audio-command":
-            audioDriver.handleCommand(message);
-            break;
-        case "cursor": {
-            const visible = message.visible === true;
-            canvas.style.cursor = visible ? "default" : "none";
+        case "audio-command": audioDriver.handleCommand(message); break;
+        case "cursor":
+            canvas.style.cursor = message.visible === true ? "default" : "none";
             globalThis.dispatchEvent(new CustomEvent("kisakcod:cursor", {
-                detail: { visible },
+                detail: { visible: message.visible === true },
             }));
             break;
-        }
         case "mouse-mode":
             globalThis.dispatchEvent(new CustomEvent("kisakcod:mouse-mode", {
                 detail: { absolute: message.absolute === true },
@@ -208,12 +167,12 @@ export function createEngineWorkerHost(canvas, {
         protocolVersion: ENGINE_PROTOCOL_VERSION,
         type: "init",
         canvas: offscreen,
-        testConfig: globalThis.__KISAKCOD_WORKER_TEST_CONFIG__ ?? null,
     }, [offscreen]);
 
-    async function acquireFilesystemLease()
+    async function acquireLeases()
     {
         if (releaseFilesystemLease || !navigator.locks?.request) return;
+
         let markHomeAcquired;
         let releaseHome;
         const homeAcquired = new Promise((resolve) => { markHomeAcquired = resolve; });
@@ -234,25 +193,26 @@ export function createEngineWorkerHost(canvas, {
         if (!await homeAcquired) {
             await homeWriterLeaseCompletion;
             homeWriterLeaseCompletion = null;
-            const error = new Error("Another tab owns the writable browser profile.");
-            error.code = "HOME_WRITER_CONFLICT";
-            throw error;
+            throw Object.assign(new Error("Another tab owns the writable browser profile."), {
+                code: "HOME_WRITER_CONFLICT",
+            });
         }
-        let markAcquired;
-        let release;
-        const acquired = new Promise((resolve) => { markAcquired = resolve; });
-        const held = new Promise((resolve) => { release = resolve; });
+
+        let markFilesystemAcquired;
+        let releaseFilesystem;
+        const filesystemAcquired = new Promise((resolve) => { markFilesystemAcquired = resolve; });
+        const filesystemHeld = new Promise((resolve) => { releaseFilesystem = resolve; });
         try {
             filesystemLeaseCompletion = navigator.locks.request(
                 ENGINE_FILESYSTEM_LOCK,
                 { mode: "shared" },
                 async () => {
-                    releaseFilesystemLease = release;
-                    markAcquired();
-                    await held;
+                    releaseFilesystemLease = releaseFilesystem;
+                    markFilesystemAcquired();
+                    await filesystemHeld;
                 },
             );
-            await acquired;
+            await filesystemAcquired;
         } catch (error) {
             releaseHomeWriterLease?.();
             await homeWriterLeaseCompletion;
@@ -264,34 +224,16 @@ export function createEngineWorkerHost(canvas, {
 
     async function releaseLeases()
     {
-        const release = releaseFilesystemLease;
-        const completion = filesystemLeaseCompletion;
-        const releaseHome = releaseHomeWriterLease;
-        const homeCompletion = homeWriterLeaseCompletion;
-        releaseFilesystemLease = null;
+        const completions = [filesystemLeaseCompletion, homeWriterLeaseCompletion]
+            .filter(Boolean);
+        const releases = [releaseFilesystemLease, releaseHomeWriterLease]
+            .filter(Boolean);
         filesystemLeaseCompletion = null;
-        releaseHomeWriterLease = null;
         homeWriterLeaseCompletion = null;
-        release?.();
-        releaseHome?.();
-        await Promise.all([completion, homeCompletion].filter(Boolean));
-    }
-
-    async function releaseMountedFilesystem()
-    {
-        if (unmounting) return unmounting;
-        unmounting = (async () => {
-            try {
-                await rpc("unmount");
-            } finally {
-                await releaseLeases();
-            }
-        })();
-        try {
-            return await unmounting;
-        } finally {
-            unmounting = null;
-        }
+        releaseFilesystemLease = null;
+        releaseHomeWriterLease = null;
+        for (const release of releases) release();
+        await Promise.all(completions);
     }
 
     function serializeFilesystemMutation(callback)
@@ -301,105 +243,58 @@ export function createEngineWorkerHost(canvas, {
         return result;
     }
 
+    async function flushMountedFilesystem()
+    {
+        if (!mounted) {
+            await releaseLeases();
+            return { mounted: false };
+        }
+        try {
+            return await rpc("flushAndUnmount");
+        } finally {
+            mounted = false;
+            await releaseLeases();
+        }
+    }
+
     const facade = {
         ready,
-        async mount(manifest) {
+        mountAssets(manifest) {
             return serializeFilesystemMutation(async () => {
-                await releaseMountedFilesystem();
-                await acquireFilesystemLease();
+                await flushMountedFilesystem();
+                await acquireLeases();
                 try {
-                    return await rpc("mount", { manifest });
+                    const result = await rpc("mountAssets", { manifest });
+                    mounted = true;
+                    return result;
                 } catch (error) {
-                    await releaseMountedFilesystem();
+                    await releaseLeases();
                     throw error;
                 }
             });
         },
-        unmount() {
-            return serializeFilesystemMutation(releaseMountedFilesystem);
-        },
-        mountAssets(manifest) { return facade.mount(manifest); },
-        flushAndUnmount() { return facade.unmount(); },
-        invalidate() {
-            return serializeFilesystemMutation(releaseMountedFilesystem);
-        },
-        resize(width, height) { return rpc("resize", { width, height }); },
-        input(event) {
-            if (observeInput) {
-                // Boundary-only observability for browser input tests; canonical
-                // CL_KeyEvent remains the sole consumer of gameplay input.
-                globalThis.dispatchEvent(new CustomEvent("kisakcod:input", {
-                    detail: { ...event },
-                }));
-            }
-            return rpc("input", { event });
-        },
-        callProbe(functionName, buffers, argumentLayout) {
-            const transferred = buffers.map((bytes) => {
-                const copy = Uint8Array.from(bytes);
-                return copy.buffer;
-            });
-            return rpc("probe", { functionName, buffers: transferred, argumentLayout }, transferred);
+        flushAndUnmount() {
+            return serializeFilesystemMutation(flushMountedFilesystem);
         },
         probeAsset(kind, buffers, metadata = {}) {
-            const definitions = {
-                localization: {
-                    functionName: "_KisakWeb_ProbeLocalization",
-                    layout: [
-                        { kind: "pointer", index: 0 },
-                        { kind: "buffer-size", index: 0 },
-                        { kind: "metadata", name: "fileSize" },
-                    ],
-                },
-                iwd: {
-                    functionName: "_KisakWeb_ProbeIwd",
-                    layout: [
-                        { kind: "pointer", index: 0 },
-                        { kind: "buffer-size", index: 0 },
-                        { kind: "pointer", index: 1 },
-                        { kind: "buffer-size", index: 1 },
-                        { kind: "metadata", name: "tailOffset" },
-                        { kind: "pointer", index: 2 },
-                        { kind: "buffer-size", index: 2 },
-                        { kind: "metadata", name: "centralOffset" },
-                        { kind: "metadata", name: "fileSize" },
-                    ],
-                },
-                fastfile: {
-                    functionName: "_KisakWeb_ProbeFastfileHeader",
-                    layout: [
-                        { kind: "pointer", index: 0 },
-                        { kind: "buffer-size", index: 0 },
-                        { kind: "metadata", name: "fileSize" },
-                    ],
-                },
-            };
-            const definition = definitions[kind];
-            if (!definition) return Promise.reject(new TypeError(`Unknown asset probe: ${kind}.`));
-            const argumentLayout = definition.layout.map((item) => {
-                if (item.kind === "pointer") return item;
-                if (item.kind === "buffer-size") {
-                    return { kind: "value", value: buffers[item.index]?.byteLength ?? -1 };
-                }
-                return { kind: "value", value: metadata[item.name] };
-            });
-            return facade.callProbe(definition.functionName, buffers, argumentLayout);
+            const transferred = buffers.map((bytes) => Uint8Array.from(bytes).buffer);
+            return rpc("probeAsset", { kind, buffers: transferred, metadata }, transferred);
         },
-        call(functionName, ...arguments_) {
-            return rpc("call", { functionName, arguments: arguments_ });
+        submitCanonicalCommand(command) {
+            return rpc("submitCanonicalCommand", { command });
         },
-        testControl(values) { return rpc("test-control", { values }); },
-        checkpoint() { return rpc("checkpoint"); },
+        resize(width, height) { return rpc("resize", { width, height }); },
+        input(event) { return rpc("input", { event }); },
+        runtimeStatus() { return rpc("runtimeStatus"); },
         dispose() {
             if (disposePromise) return disposePromise;
             shuttingDown = true;
             disposePromise = (async () => {
                 try {
-                    await serializeFilesystemMutation(async () => {
-                        await rpc("shutdown");
-                        await releaseLeases();
-                    });
+                    await filesystemMutation.catch(() => {});
+                    await rpc("shutdown");
                 } finally {
+                    mounted = false;
                     disposed = true;
                     await releaseLeases();
                     audioDriver.dispose();
@@ -411,10 +306,6 @@ export function createEngineWorkerHost(canvas, {
             return disposePromise;
         },
     };
-    facade.audioDriver = audioDriver;
-    for (const functionName of EXPORTED_COMMANDS) {
-        facade[functionName] = (...arguments_) => facade.call(functionName, ...arguments_);
-    }
     globalThis.addEventListener("pagehide", () => { void facade.dispose(); }, { once: true });
     return Object.freeze(facade);
 }

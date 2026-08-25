@@ -43,8 +43,31 @@ for (const name of forwardedEvents) {
     });
 }
 
-const filesystem = createWorkerSyncFilesystem();
 const testControl = Object.create(null);
+const faultControlNames = Object.freeze({
+    read: "failReadPath",
+    list: "failSyncListPath",
+    open: "failSyncOpenPath",
+    seek: "failSyncSeekPath",
+    "sync-read": "failSyncReadPath",
+});
+function normalizeFaultPath(path)
+{
+    return String(path ?? "").replaceAll("\\", "/")
+        .replace(/^\.\//u, "").toLocaleLowerCase("en-US");
+}
+const filesystem = createWorkerSyncFilesystem({
+    async beforePersist() {
+        if (testControl.failPersistence === true) {
+            throw new DOMException(
+                "Injected browser home persistence failure.", "QuotaExceededError");
+        }
+    },
+    reject(operation, logicalPath) {
+        const configured = normalizeFaultPath(testControl[faultControlNames[operation]]);
+        return configured !== "" && configured === logicalPath;
+    },
+});
 let module = null;
 let resolveInitialization;
 const initialization = new Promise((resolve) => { resolveInitialization = resolve; });
@@ -204,7 +227,6 @@ globalThis.addEventListener("message", (event) => {
             }
             case "test-control":
                 Object.assign(testControl, message.values ?? {});
-                filesystem.setTestControl(message.values ?? {});
                 reply(message.id, message.type, true);
                 break;
             case "resize":

@@ -1,4 +1,3 @@
-#include <ode/odemath.h>
 #include <client/cl_input.h>
 #include <client/cl_scrn.h>
 #include <client/client.h>
@@ -9,17 +8,21 @@
 #include <qcommon/system.h>
 #include <universal/dvar.h>
 #include <ui/ui.h>
-#include <web/web_archive_job.h>
 #include <web/web_cooperative_scheduler.h>
 #include <web/web_client_server_lifecycle.h>
-#include <web/web_engine_asset.h>
-#include <web/web_engine_surface.h>
 #include <web/web_engine_scheduler.h>
 #include <web/web_filesystem.h>
-#include <web/web_qcommon_runtime.h>
-#include <web/web_retail_census_job.h>
 #include <web/web_renderer.h>
 #include <web/web_system.h>
+
+#if KISAK_WEB_DIAGNOSTICS
+#include <ode/odemath.h>
+#include <web/web_archive_job.h>
+#include <web/web_engine_asset.h>
+#include <web/web_engine_surface.h>
+#include <web/web_qcommon_runtime.h>
+#include <web/web_retail_census_job.h>
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -46,6 +49,7 @@ std::uint32_t g_lastCGameFrameMilliseconds = 0u;
 std::uint32_t g_cgameFrameAccumulatorMilliseconds = 0u;
 bool g_reentrantCommandPumpReported = false;
 
+#if KISAK_WEB_DIAGNOSTICS
 bool NearlyEqual(float actual, float expected, float tolerance = 0.0001f)
 {
     return std::fabs(actual - expected) <= tolerance;
@@ -85,15 +89,21 @@ bool RunPhysicsMathSmokeTest()
         NearlyEqual(Dot3(tangent, tangent), 1.0f) &&
         NearlyEqual(Dot3(bitangent, bitangent), 1.0f);
 }
+#endif
 
-bool InitializeHeadlessEngineSlice()
+bool InitializeCanonicalEngine()
 {
     // Match the native entry envelope: dvars precede the canonical Com_Init
     // error boundary, while command and core initialization remain owned by
     // common.cpp in their native order.
     Dvar_Init();
+#if KISAK_WEB_DIAGNOSTICS
     char commandLine[] = "+set gate3_startup wasm +seta gate3_archive 1";
+#else
+    char commandLine[] = "";
+#endif
     Com_Init(commandLine);
+#if KISAK_WEB_DIAGNOSTICS
     const ComInitTraceSnapshot &trace = Com_GetInitTrace();
     if (!trace.stopStage ||
         std::strcmp(trace.stopStage, "DB_LoadXAssets/engine-filesystem-mount") != 0 ||
@@ -147,6 +157,9 @@ bool InitializeHeadlessEngineSlice()
         "set web_frame_command queued\n"
         "wait\n"
         "set web_frame_command executed\n");
+#else
+    Web_EmitEngineState("initialized", "canonical", "pending", 0);
+#endif
     return true;
 }
 
@@ -170,6 +183,7 @@ void CancelFilesystemTask(void *)
     WebFs_CancelAll();
 }
 
+#if KISAK_WEB_DIAGNOSTICS
 CooperativeTaskResult QcommonTask(
     std::uint32_t,
     const CooperativeTaskBudget &,
@@ -226,6 +240,7 @@ void CancelEngineAssetTask(void *)
 {
     (void)WebEngineAsset_Cancel();
 }
+#endif
 
 CooperativeTaskResult CommandTask(
     std::uint32_t,
@@ -362,6 +377,7 @@ CooperativeTaskResult CGameFrameTask(
     return {CooperativeTaskState::Progress, 0u, 1u};
 }
 
+#if KISAK_WEB_DIAGNOSTICS
 CooperativeTaskResult SurfaceTask(
     std::uint32_t,
     const CooperativeTaskBudget &,
@@ -399,6 +415,7 @@ CooperativeTaskResult SurfaceTask(
     }
     return {CooperativeTaskState::Idle, 0u, 0u};
 }
+#endif
 
 CooperativeTaskResult RendererTask(
     std::uint32_t,
@@ -425,6 +442,7 @@ bool InitializeEngineScheduler()
     {
         return false;
     }
+#if KISAK_WEB_DIAGNOSTICS
     constexpr std::size_t TASK_COUNT = 8u;
     const std::array<CooperativeTaskSpec, TASK_COUNT> tasks = {{
         {"filesystem-completions", 10u, {0u, 8u}, FilesystemTask, CancelFilesystemTask, nullptr},
@@ -436,6 +454,14 @@ bool InitializeEngineScheduler()
         {"world-surface", 70u, {64u * 1024u, 64u}, SurfaceTask, nullptr, &g_scheduledFrame},
         {"renderer", 80u, {0u, 1u}, RendererTask, nullptr, &g_scheduledFrame},
     }};
+#else
+    constexpr std::size_t TASK_COUNT = 3u;
+    const std::array<CooperativeTaskSpec, TASK_COUNT> tasks = {{
+        {"filesystem-completions", 10u, {0u, 8u}, FilesystemTask, CancelFilesystemTask, nullptr},
+        {"command-buffer", 20u, {4u * 1024u, 1u}, CommandTask, nullptr, &g_scheduledFrame},
+        {"renderer", 30u, {0u, 1u}, RendererTask, nullptr, &g_scheduledFrame},
+    }};
+#endif
     std::array<CooperativeTaskHandle, TASK_COUNT> handles{};
     for (std::size_t index = 0u; index < tasks.size(); ++index)
     {
@@ -469,6 +495,7 @@ int main()
     Web_Log(WebLogLevel::Info, "[kisakcod-web] Browser system layer starting.\n");
     Web_EmitRuntimeState("loading", "Validating portable engine code");
 
+#if KISAK_WEB_DIAGNOSTICS
     if (!RunPhysicsMathSmokeTest())
     {
         Web_Log(WebLogLevel::Error, "[kisakcod-web] ODE physics math smoke test failed.\n");
@@ -476,14 +503,16 @@ int main()
         return 1;
     }
     Web_Log(WebLogLevel::Info, "[kisakcod-web] ODE physics math verified in WebAssembly.\n");
+#endif
 
-    if (!InitializeHeadlessEngineSlice())
+    if (!InitializeCanonicalEngine())
     {
         Web_Log(WebLogLevel::Error, "[kisakcod-web] qcommon command/dvar smoke test failed.\n");
         Web_EmitRuntimeState("failed", "The headless command/dvar slice failed to initialize");
         return 1;
     }
 
+#if KISAK_WEB_DIAGNOSTICS
     if (!WebEngineSurface_Start())
     {
         Web_EmitRuntimeState(
@@ -492,6 +521,17 @@ int main()
         return 1;
     }
     g_bootstrapPhase = BootstrapPhase::ExtractingSurface;
+#else
+    if (!WebRenderer_Initialize())
+    {
+        Web_EmitRuntimeState("failed", "The WebGL2 renderer could not initialize");
+        return 1;
+    }
+    g_bootstrapPhase = BootstrapPhase::Running;
+    Web_EmitRuntimeState(
+        "runtime-ready",
+        "Canonical runtime and browser platform boundaries are initialized");
+#endif
     if (!InitializeEngineScheduler())
     {
         Web_EmitRuntimeState("failed", "The cooperative engine scheduler could not initialize");
@@ -503,5 +543,10 @@ int main()
         Web_EmitRuntimeState("failed", "The browser frame pump could not start");
         return 1;
     }
+#if !KISAK_WEB_DIAGNOSTICS
+    Web_EmitRuntimeState(
+        "running",
+        "The browser frame pump and WebGL2 backend are ready for canonical assets");
+#endif
     return 0;
 }

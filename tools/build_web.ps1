@@ -3,7 +3,8 @@
 [CmdletBinding()]
 param(
     [ValidateSet('Debug', 'Release')]
-    [string]$Configuration = 'Release'
+    [string]$Configuration = 'Release',
+    [switch]$Diagnostics
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,7 +25,12 @@ $emscriptenConfig = Join-Path $emsdkRoot '.emscripten'
 $cmakeExecutable = Join-Path $emsdkRoot "cmake\$($webToolchain.cmake)_64bit\bin\cmake.exe"
 $ninjaExecutable = Join-Path $emsdkRoot "ninja\$($webToolchain.ninja)_64bit\ninja.exe"
 $emscriptenToolchain = Join-Path $emsdkRoot 'upstream\emscripten\cmake\Modules\Platform\Emscripten.cmake'
-$buildDirectory = Join-Path $repositoryRoot 'build\web'
+$buildDirectory = Join-Path $repositoryRoot $(if ($Diagnostics) {
+    'build\web-diagnostics'
+} else {
+    'build\web'
+})
+$target = if ($Diagnostics) { 'KisakCOD-web-diagnostics' } else { 'KisakCOD-web' }
 
 foreach ($requiredPath in @(
     $emscriptenConfig,
@@ -49,6 +55,7 @@ $stepTimer = [Diagnostics.Stopwatch]::StartNew()
     "-DCMAKE_TOOLCHAIN_FILE=$emscriptenToolchain" `
     "-DCMAKE_MAKE_PROGRAM=$ninjaExecutable" `
     '-DKISAK_PLATFORM=web' `
+    "-DKISAK_WEB_DIAGNOSTICS=$($Diagnostics.IsPresent.ToString().ToUpperInvariant())" `
     "-DCMAKE_BUILD_TYPE=$Configuration"
 if ($LASTEXITCODE -ne 0) {
     throw 'Failed to configure the web target.'
@@ -57,7 +64,7 @@ $stepTimer.Stop()
 Write-Host ("KISAK_TIMING web_configure_seconds={0:N3}" -f $stepTimer.Elapsed.TotalSeconds)
 
 $stepTimer.Restart()
-& $cmakeExecutable --build $buildDirectory --target KisakCOD-web --parallel $buildJobs
+& $cmakeExecutable --build $buildDirectory --target $target --parallel $buildJobs
 if ($LASTEXITCODE -ne 0) {
     throw 'Failed to build the web target.'
 }
@@ -74,22 +81,25 @@ $stepTimer.Stop()
 Write-Host ("KISAK_TIMING runtime_prefix_check_seconds={0:N3} jobs={1}" -f `
     $stepTimer.Elapsed.TotalSeconds, $buildJobs)
 
-$siteDirectory = Join-Path $buildDirectory 'site'
-foreach ($requiredOutput in @(
+$siteDirectory = Join-Path $buildDirectory $(if ($Diagnostics) { 'site-diagnostics' } else { 'site' })
+$requiredOutputs = @(
     'index.html',
     'launcher.mjs',
     'asset_store.mjs',
-    'filesystem_bridge.mjs',
     'styles.css',
     'kisakcod.mjs',
     'kisakcod.wasm'
-)) {
+)
+if ($Diagnostics) {
+    $requiredOutputs += 'filesystem_bridge.mjs'
+}
+foreach ($requiredOutput in $requiredOutputs) {
     $outputPath = Join-Path $siteDirectory $requiredOutput
     if (-not (Test-Path -LiteralPath $outputPath -PathType Leaf)) {
         throw "The web build completed without required output: $outputPath"
     }
 }
 
-Write-Host "Browser build ready at $buildDirectory\site\index.html"
+Write-Host "Browser build ready at $siteDirectory\index.html"
 $totalTimer.Stop()
 Write-Host ("KISAK_TIMING web_build_total_seconds={0:N3}" -f $totalTimer.Elapsed.TotalSeconds)

@@ -43,7 +43,7 @@ async function childDirectory(root, segments, create = false)
     return current;
 }
 
-export function createWorkerSyncFilesystem()
+export function createWorkerSyncFilesystem(faults = null)
 {
     const files = new Map();
     const directories = new Set([""]);
@@ -63,7 +63,6 @@ export function createWorkerSyncFilesystem()
     let flushPromise = null;
     let homeBytes = 0;
     let module = null;
-    const testControl = Object.create(null);
 
     function closeAll()
     {
@@ -165,10 +164,7 @@ export function createWorkerSyncFilesystem()
     async function persistHomeFile(logicalPath, bytes, version)
     {
         if (!homeDirectory) return;
-        if (testControl.failPersistence === true) {
-            throw new DOMException(
-                "Injected browser home persistence failure.", "QuotaExceededError");
-        }
+        await faults?.beforePersist?.(logicalPath);
         const segments = logicalPath.split("/");
         const name = segments.pop();
         const directory = await childDirectory(homeDirectory, segments, true);
@@ -505,12 +501,6 @@ export function createWorkerSyncFilesystem()
         return flushPromise.finally(() => { flushPromise = null; });
     }
 
-    function controlledPath(name, logicalPath)
-    {
-        const configured = normalizeLogicalPath(testControl[name] ?? "");
-        return configured !== null && configured !== "" && configured === logicalPath;
-    }
-
     function installForModule(wasmModule)
     {
         module = wasmModule;
@@ -534,8 +524,7 @@ export function createWorkerSyncFilesystem()
                     );
                     return true;
                 }
-                if (normalizeLogicalPath(path) ===
-                    normalizeLogicalPath(testControl.failReadPath ?? "")) {
+                if (faults?.reject?.("read", normalizeLogicalPath(path))) {
                     module._KisakWeb_CompleteFsRead(requestId >>> 0, STATUS.IO_ERROR, 0);
                     return true;
                 }
@@ -574,7 +563,7 @@ export function createWorkerSyncFilesystem()
             list(path) {
                 const logicalPath = normalizeDirectoryPath(path);
                 if (logicalPath === null) return null;
-                if (controlledPath("failSyncListPath", logicalPath)) return null;
+                if (faults?.reject?.("list", logicalPath)) return null;
                 const importedEntries = directoryEntries.get(logicalPath);
                 const writableEntries = homeDirectoryEntries.get(logicalPath);
                 if (!importedEntries && !writableEntries) return null;
@@ -589,7 +578,7 @@ export function createWorkerSyncFilesystem()
             },
             open(path) {
                 const file = lookup(path);
-                if (!file || controlledPath("failSyncOpenPath", file.logicalPath)) return -1;
+                if (!file || faults?.reject?.("open", file.logicalPath)) return -1;
                 const descriptor = nextDescriptor++;
                 descriptors.set(descriptor, { file, position: 0, writable: false });
                 return descriptor;
@@ -605,7 +594,7 @@ export function createWorkerSyncFilesystem()
                 if (!open || !Number.isSafeInteger(offset) || offset < 0 || offset > open.file.size) {
                     return false;
                 }
-                if (controlledPath("failSyncSeekPath", open.file.logicalPath)) return false;
+                if (faults?.reject?.("seek", open.file.logicalPath)) return false;
                 open.position = offset;
                 return true;
             },
@@ -617,7 +606,7 @@ export function createWorkerSyncFilesystem()
                     length > module.HEAPU8.byteLength - destination) {
                     return -1;
                 }
-                if (controlledPath("failSyncReadPath", open.file.logicalPath)) return -1;
+                if (faults?.reject?.("sync-read", open.file.logicalPath)) return -1;
                 const bytesRead = readMounted(
                     open.file,
                     open.position,
@@ -670,17 +659,11 @@ export function createWorkerSyncFilesystem()
         });
     }
 
-    function setTestControl(values)
-    {
-        Object.assign(testControl, values);
-    }
-
     return Object.freeze({
         mount,
         unmount: closeAll,
         checkpoint,
         flushAndUnmount,
         installForModule,
-        setTestControl,
     });
 }

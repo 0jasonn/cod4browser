@@ -1,5 +1,7 @@
 #include <web/web_renderer.h>
+#if KISAK_WEB_DIAGNOSTICS
 #include <web/web_renderer_comparison.h>
+#endif
 
 #include <web/web_renderer_surface_storage.h>
 #include <web/web_renderer_lod.h>
@@ -489,6 +491,7 @@ void DeleteStaticModelObjects(
 void BindStaticModelInstanceRange(std::uint32_t instanceOffset);
 void AttachRetainedWorldReflectionTextures() noexcept;
 
+#if KISAK_WEB_DIAGNOSTICS
 EM_JS(
     void,
     DispatchRendererFxDiagnostic,
@@ -513,7 +516,9 @@ EM_JS(
             }
         }));
     });
+#endif
 
+#if KISAK_WEB_DIAGNOSTICS
 EM_JS(
     void,
     DispatchRendererComparisonSummary,
@@ -642,6 +647,7 @@ EM_JS(
         globalThis.dispatchEvent(new CustomEvent(
             "kisakcod:renderer-comparison-record", { detail }));
     });
+#endif
 
 const char *FxSourceKindName(WebRendererSceneBatchKind kind) noexcept
 {
@@ -886,6 +892,7 @@ const WebRendererRetainedWorldImage *RetainedWorldImageIdentity(
     return &g_renderer.retainedWorldImages[index];
 }
 
+#if KISAK_WEB_DIAGNOSTICS
 void EmitWorldComparison(
     const WebRendererComparisonCapture &intended)
 {
@@ -1044,6 +1051,7 @@ void EmitWorldComparison(
             differenceFields[index]);
     }
 }
+#endif
 
 void LogWorldVertexColorInventory(
     const WebRendererWorldSurfaceDesc &surface)
@@ -1415,6 +1423,7 @@ void LogWorldColorImageInventory()
     }
 }
 
+#if KISAK_WEB_DIAGNOSTICS
 void ReportRetainedDynamicFx()
 {
     constexpr std::array<WebRendererSceneBatchKind, 4> fxKinds = {{
@@ -1474,6 +1483,7 @@ void ReportRetainedDynamicFx()
             vertexCount, indexCount, model.c_str(), material.c_str());
     }
 }
+#endif
 
 EM_JS(
     void,
@@ -1725,6 +1735,7 @@ const char *SurfaceTopologyString(WebRendererPrimitiveTopology topology) noexcep
         : "unsupported";
 }
 
+#if KISAK_WEB_DIAGNOSTICS
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestLoseWebGLContext()
 {
     return HandleWebGLContextLost(0, nullptr, nullptr) ? 1 : 0;
@@ -1742,6 +1753,7 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestSetAaSamples(int samples)
     Dvar_SetInt(r_aaSamples, samples);
     return r_aaSamples->current.integer;
 }
+#endif
 
 const char *SurfaceTextureBindingString(WebRendererTextureBinding binding) noexcept
 {
@@ -3283,14 +3295,6 @@ bool CreateShadowTarget(
 
 bool CreateRendererResources()
 {
-    if (!g_renderer.surfaceActive)
-    {
-        Web_Log(
-            WebLogLevel::Error,
-            "[kisakcod-web] Renderer initialization requires an engine surface.\n");
-        return false;
-    }
-
     constexpr const char *vertexSource = R"glsl(#version 300 es
         precision highp float;
         precision highp int;
@@ -4390,22 +4394,23 @@ bool CreateRendererResources()
     GLuint vertexArray = 0;
     GLuint vertexBuffer = 0;
     GLuint indexBuffer = 0;
-    const bool surfaceReady = g_renderer.worldSurfaceActive
-        ? CreateSurfaceObjects(
-            g_renderer.retainedVertices,
-            g_renderer.retainedWorldIndices,
-            vertexArray,
-            vertexBuffer,
-            indexBuffer)
-        : CreateSurfaceObjects(
-            g_renderer.retainedVertices,
-            g_renderer.retainedIndices,
-            vertexArray,
-            vertexBuffer,
-            indexBuffer);
+    const bool surfaceReady = !g_renderer.surfaceActive ||
+        (g_renderer.worldSurfaceActive
+            ? CreateSurfaceObjects(
+                g_renderer.retainedVertices,
+                g_renderer.retainedWorldIndices,
+                vertexArray,
+                vertexBuffer,
+                indexBuffer)
+            : CreateSurfaceObjects(
+                g_renderer.retainedVertices,
+                g_renderer.retainedIndices,
+                vertexArray,
+                vertexBuffer,
+                indexBuffer));
 
     GLuint texture = 0;
-    const bool textureReady = surfaceReady && CreateTextureObject(
+    const bool textureReady = CreateTextureObject(
         texturePixels, textureWidth, textureHeight, textureSamplerState, texture);
     const bool worldTexturesReady = textureReady &&
         (!g_renderer.worldSurfaceActive ||
@@ -6056,6 +6061,7 @@ WebRendererSurfaceResult WebRenderer_SetSurface(
 WebRendererSurfaceResult WebRenderer_SetWorldSurface(
     const WebRendererWorldSurfaceDesc &surface)
 {
+#if KISAK_WEB_DIAGNOSTICS
     WebRendererComparisonCapture intendedComparison;
     const bool comparisonCaptured = WebRenderer_CaptureComparison(
         surface, intendedComparison);
@@ -6065,6 +6071,7 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
             "[kisakcod-web] Renderer comparison capture was unavailable for "
             "this world command.\n");
     }
+#endif
     std::vector<WebRendererSurfaceVertex> retainedVertices;
     std::vector<std::uint32_t> retainedIndices;
     std::vector<WebRendererRetainedWorldBatch> retainedBatches;
@@ -6178,6 +6185,7 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
         ++reflectionProbeCount;
         reflectionProbeLevelCount += 1u + batch.reflectionCube.mipFaces.size();
     }
+#if KISAK_WEB_DIAGNOSTICS
     if (comparisonCaptured)
     {
         LogNormalizedWorldLightingTrace(surface);
@@ -6186,6 +6194,7 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
         LogRetainedLightmapInventory(surface);
         LogWorldColorImageInventory();
     }
+#endif
     Web_Log(WebLogLevel::Info,
         "[kisakcod-web] Renderer retained canonical material world command "
         "(%u vertices, %u indices, %u batches: %zu lightmapped, "
@@ -6236,8 +6245,10 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
         retainedLocalLights, retainedPrimaryLitBatches,
         retainedNativeSpotBatches,
         g_renderer.retainedSunPrimaryLightIndex);
+#if KISAK_WEB_DIAGNOSTICS
     if (comparisonCaptured)
         EmitWorldComparison(intendedComparison);
+#endif
     return WebRendererSurfaceResult::Success;
 }
 
@@ -6715,7 +6726,9 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
             g_renderer.retainedDynamicModelLighting.depth,
             g_renderer.retainedDynamicModelLighting.entryCount);
     }
+#if KISAK_WEB_DIAGNOSTICS
     ReportRetainedDynamicFx();
+#endif
     return WebRendererSurfaceResult::Success;
 }
 
@@ -6842,17 +6855,6 @@ bool WebRenderer_Initialize()
     // r_aaSamples owns both bootstrap and gameplay from the first frame.
     R_RegisterDvars();
 
-    if (!g_renderer.surfaceActive)
-    {
-        Web_Log(
-            WebLogLevel::Error,
-            "[kisakcod-web] Renderer initialization requires an engine surface.\n");
-        Web_EmitRuntimeState(
-            "failed",
-            "The renderer cannot initialize without an engine surface");
-        return false;
-    }
-
     if (!CreateWebGLContext())
     {
         DestroyWebGLContext();
@@ -6877,9 +6879,12 @@ bool WebRenderer_Initialize()
     }
 
     g_renderer.initialized = true;
-    EmitSurfaceLifecycle(
-        "ready",
-        "The engine-owned indexed surface is resident in the graphics backend");
+    if (g_renderer.surfaceActive)
+    {
+        EmitSurfaceLifecycle(
+            "ready",
+            "The engine-owned indexed surface is resident in the graphics backend");
+    }
     EmitTextureLifecycle(
         "ready",
         "The renderer uploaded its retained texture during initialization");

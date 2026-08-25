@@ -95,13 +95,13 @@ noted otherwise.
 
 | Classification | `src/web` units |
 | --- | --- |
-| Canonical adapter | `web_canonical_gfxworld.cpp`, `web_client_server_lifecycle.cpp`, `web_database_filesystem.cpp`, `web_engine_filesystem.cpp`, `web_renderer_frontend.cpp`, `web_system_files.cpp` |
+| Canonical adapter | `web_canonical_gfxworld.cpp`, `web_client_server_lifecycle.cpp`, `web_database_filesystem.cpp`, `web_engine_filesystem.cpp`, `web_engine_world_surface.cpp`, `web_renderer_frontend.cpp`, `web_system_files.cpp` |
 | Browser platform implementation | `web_assertive.cpp`, `web_browser_bindings.cpp`, `web_cinematic.cpp`, `web_cooperative_scheduler.cpp`, `web_engine_scheduler.cpp`, `web_filesystem.cpp`, `web_openal_proxy.cpp`, `web_shader_compatibility.cpp`, `web_system.cpp`, `web_thread_context.cpp`, `web_worker_filesystem.cpp` |
 | Production product code | `web_asset_probe.cpp`, `web_main.cpp` |
 | Renderer backend/platform implementation | `web_renderer.cpp`, `web_renderer_code_mesh.cpp`, `web_renderer_dobj_lod.cpp`, `web_renderer_dobj_scene.cpp`, `web_renderer_fx_model_scene.cpp`, `web_renderer_lighting.cpp`, `web_renderer_mark_fragments.cpp`, `web_renderer_mark_mesh.cpp`, `web_renderer_particle_cloud_scene.cpp`, `web_renderer_static_model_scene.cpp`, `web_renderer_surface.cpp`, `web_renderer_world_scene.cpp` |
 | Diagnostics | `web_archive_job.cpp`, `web_engine_asset.cpp`, `web_engine_surface.cpp`, `web_qcommon_preinit.cpp`, `web_qcommon_runtime.cpp`, `web_renderer_comparison.cpp` |
 | Gate 2 diagnostic/oracle | `web_retail_census_job.cpp`, `web_retail_fastfile_census.cpp`, `web_retail_load_clipmap.cpp`, `web_retail_load_comworld.cpp`, `web_retail_load_gfxworld.cpp`, `web_retail_load_image.cpp`, `web_retail_load_lightdef.cpp`, `web_retail_load_weapon.cpp`, `web_sound_alias_catalog.cpp` |
-| Temporary convergence code | `web_engine_world_surface.cpp`, `web_fastfile_source_stream.cpp`, `web_fastfile_world_surface.cpp`, `web_fastfile_zone_registry.cpp`, `web_fastfile_zone_stream.cpp` |
+| Temporary convergence code | `web_fastfile_source_stream.cpp`, `web_fastfile_world_surface.cpp`, `web_fastfile_zone_registry.cpp`, `web_fastfile_zone_stream.cpp` |
 | Test support | `web_gate2_killhouse_oracle.h`, `web_renderer_surface_storage.h` |
 | Apparently unreachable | None proven. Filename-based deletion is not justified. |
 
@@ -124,7 +124,7 @@ reachability evidence, not call counts.
 | `web_fastfile_world_surface.cpp` | 41 | Move behind diagnostics with the synthetic surface path; do not delete. |
 | `web_fastfile_zone_registry.cpp` | 36 | Preserve as temporary convergence evidence until canonical DB parity replaces its tests. |
 | `web_fastfile_zone_stream.cpp` | 11 | Preserve with the temporary zone-stream diagnostic tests. |
-| `web_engine_world_surface.cpp` | 23 | Move behind diagnostics with the converted-surface proof; do not delete. |
+| `web_engine_world_surface.cpp` | 23 | Retain in production: the canonical `GfxWorld` publication adapter requires this backend-neutral surface conversion seam. |
 | `web_canonical_gfxworld.cpp` | 3 | Retain in production as the canonical `GfxWorld` publication boundary. |
 | `web_renderer_comparison.cpp` | 14 | Isolate as diagnostics after its call sites are compile-gated. |
 | `web_retail_fastfile_census.cpp` | 650 | Preserve only in Gate 2 diagnostics. |
