@@ -595,6 +595,17 @@ float WebRenderer_EvaluateDisplayGamma(
     return std::pow(std::clamp(displayValue, 0.0f, 1.0f), 1.0f / gamma);
 }
 
+float WebRenderer_GetDisplayGammaExponent(
+    bool gammaRampSupported,
+    bool ignoreGammaRamp,
+    float gamma) noexcept
+{
+    if (!gammaRampSupported || ignoreGammaRamp || !std::isfinite(gamma) ||
+        gamma <= 0.0f)
+        return 1.0f;
+    return 1.0f / gamma;
+}
+
 std::array<float, 3> WebRenderer_DecodeDxt5Normal(
     const std::array<float, 4> &sample) noexcept
 {
@@ -917,5 +928,24 @@ std::array<float, 3> WebRenderer_EvaluateModelLightingShader(
         base[0] * vertexColor[0] * sampledLighting[0] * 2.0f,
         base[1] * vertexColor[1] * sampledLighting[1] * 2.0f,
         base[2] * vertexColor[2] * sampledLighting[2] * 2.0f,
+    }};
+}
+
+std::array<float, 3> WebRenderer_EvaluateAmbientProbeLightingShader(
+    const std::array<float, 4> &base,
+    const std::array<float, 4> &vertexColor,
+    const std::array<float, 4> &sampledLighting,
+    const std::array<float, 3> &sunDiffuse) noexcept
+{
+    return {{
+        base[0] * vertexColor[0] *
+            (sampledLighting[0] * 2.0f +
+                sampledLighting[3] * sunDiffuse[0]),
+        base[1] * vertexColor[1] *
+            (sampledLighting[1] * 2.0f +
+                sampledLighting[3] * sunDiffuse[1]),
+        base[2] * vertexColor[2] *
+            (sampledLighting[2] * 2.0f +
+                sampledLighting[3] * sunDiffuse[2]),
     }};
 }

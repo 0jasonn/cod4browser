@@ -288,6 +288,7 @@ const GfxImage *ResolveRendererImage(const GfxImage *image) noexcept
 void ResolveRendererBatchImages(WebRendererWorldBatchDesc &batch) noexcept
 {
     batch.baseImage = ResolveRendererImage(batch.baseImage);
+    batch.detailImage = ResolveRendererImage(batch.detailImage);
     batch.normalImage = ResolveRendererImage(batch.normalImage);
     batch.specularImage = ResolveRendererImage(batch.specularImage);
     batch.lightmapImage = ResolveRendererImage(batch.lightmapImage);
@@ -603,6 +604,7 @@ const GfxImage *FindFxImage(Material *material, std::uint8_t &sampler)
     sampler = fallback->samplerState;
     return fallback->u.image;
 }
+
 
 std::uint32_t HashFxPixelShaderProgram(
     const MaterialPixelShader *shader) noexcept
@@ -1306,7 +1308,10 @@ void __cdecl R_BeginRegistration(vidConfig_t *configuration)
     configuration->aspectRatioDisplayPixel = 1.0f;
     configuration->maxTextureSize = WEB_RENDERER_MAX_RGBA8_DIMENSION;
     configuration->maxTextureMaps = 16;
-    configuration->deviceSupportsGamma = false;
+    // The WebGL backend reproduces the D3D9 gamma ramp in its final
+    // framebuffer pass. Advertise that equivalent platform capability so
+    // the canonical r_gamma gate supplies the authored display exponent.
+    configuration->deviceSupportsGamma = true;
 }
 
 void __cdecl R_Shutdown(int) {}
@@ -2145,15 +2150,14 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             refdef->blurRadius);
     }
     const float displayGamma = r_gamma ? r_gamma->current.value : 0.8f;
-    // R_SetColorMappings is gated by vidConfig.deviceSupportsGamma. The
-    // browser registration deliberately reports false because a composited
-    // WebGL canvas cannot install the D3D9 display LUT. Preserve r_gamma for
-    // diagnostics/screenshots, but do not darken the scene in a shader when
-    // the canonical device capability says the hardware ramp is unavailable.
-    view.displayGammaExponent = cls.vidConfig.deviceSupportsGamma &&
-            (!r_ignoreHwGamma || !r_ignoreHwGamma->current.enabled)
-        ? 1.0f / std::max(displayGamma, 0.001f)
-        : 1.0f;
+    // R_SetColorMappings is gated by vidConfig.deviceSupportsGamma. WebGL
+    // cannot install a display LUT, but the backend implements the same ramp
+    // over the finished frame, including 2D, so the browser advertises the
+    // equivalent capability and forwards the canonical exponent.
+    view.displayGammaExponent = WebRenderer_GetDisplayGammaExponent(
+        cls.vidConfig.deviceSupportsGamma,
+        r_ignoreHwGamma && r_ignoreHwGamma->current.enabled,
+        displayGamma);
     if (!g_visionLightingReported)
     {
         g_visionLightingReported = true;

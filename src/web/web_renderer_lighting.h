@@ -117,6 +117,14 @@ float WebRenderer_EvaluateDepthOfFieldBlur(
 float WebRenderer_EvaluateDisplayGamma(
     float displayValue, float gamma) noexcept;
 
+// Mirrors R_SetColorMappings' capability and r_ignoreHwGamma gate. A WebGL
+// backend that applies the ramp in its final framebuffer pass reports the
+// equivalent capability even though it cannot install a display-wide LUT.
+float WebRenderer_GetDisplayGammaExponent(
+    bool gammaRampSupported,
+    bool ignoreGammaRamp,
+    float gamma) noexcept;
+
 // CPU oracle for the DXT5nm channel convention used by IW3 n0 material
 // programs: tangent X is alpha, tangent Y is green, and positive Z is
 // reconstructed after expanding the stored channels from [0,1] to [-1,1].
@@ -229,3 +237,9 @@ std::array<float, 3> WebRenderer_EvaluateModelLightingShader(
     const std::array<float, 4> &base,
     const std::array<float, 4> &vertexColor,
     const std::array<float, 3> &sampledLighting) noexcept;
+
+std::array<float, 3> WebRenderer_EvaluateAmbientProbeLightingShader(
+    const std::array<float, 4> &base,
+    const std::array<float, 4> &vertexColor,
+    const std::array<float, 4> &sampledLighting,
+    const std::array<float, 3> &sunDiffuse) noexcept;

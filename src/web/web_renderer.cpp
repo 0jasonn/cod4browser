@@ -18,6 +18,7 @@
 #include <GLES3/gl3.h>
 #include <emscripten.h>
 #include <emscripten/html5.h>
+#include <webgl/webgl1_ext.h>
 
 #include <algorithm>
 #include <array>
@@ -52,9 +53,11 @@ struct WebRendererRetainedWorldImage
     const GfxImage *canonicalIdentity = nullptr;
     std::string canonicalName;
     std::vector<std::uint8_t> pixels;
+    std::vector<std::vector<std::uint8_t>> mipPixels;
     std::uint32_t width = 0u;
     std::uint32_t height = 0u;
     GLuint texture = 0u;
+    bool mipmapsAllowed = true;
     bool supported = false;
 };
 
@@ -82,12 +85,14 @@ struct WebRendererRetainedWorldBatch
     std::uint32_t firstInstanceIndex = UINT32_MAX;
     std::uint32_t lastInstanceIndex = UINT32_MAX;
     std::uint32_t baseImageIndex = INVALID_WORLD_IMAGE;
+    std::uint32_t detailImageIndex = INVALID_WORLD_IMAGE;
     std::uint32_t normalImageIndex = INVALID_WORLD_IMAGE;
     std::uint32_t specularImageIndex = INVALID_WORLD_IMAGE;
     std::uint32_t lightmapImageIndex = INVALID_WORLD_IMAGE;
     std::uint32_t secondaryLightmapImageIndex = INVALID_WORLD_IMAGE;
     std::uint32_t stateBits[2]{};
     std::uint8_t samplerState = 0u;
+    std::uint8_t detailSamplerState = 0u;
     std::uint8_t normalSamplerState = 0u;
     std::uint8_t specularSamplerState = 0u;
     std::uint8_t lightmapIndex = 31u;
@@ -102,7 +107,9 @@ struct WebRendererRetainedWorldBatch
     std::uint8_t techniqueType = 0xffu;
     std::uint8_t customSamplerFlags = 0u;
     std::uint16_t techniqueFlags = 0u;
+    std::uint8_t cameraRegion = 0u;
     bool depthHack = false;
+    bool ambientProbeLighting = false;
     bool castsSunShadow = false;
     std::string vertexShaderName;
     std::uint32_t vertexShaderProgramHash = 0u;
@@ -117,6 +124,7 @@ struct WebRendererRetainedWorldBatch
     std::uint8_t waterSamplerState = 0u;
     std::uint8_t reflectionProbeIndex = 0u;
     float envMapParms[4]{};
+    float detailScale[4]{};
     float waterColor[4]{};
     float falloffParms[4]{};
     float falloffBeginColor[4]{};
@@ -179,6 +187,8 @@ struct WebRendererRetainedUiBatch
 struct WebRendererState
 {
     EMSCRIPTEN_WEBGL_CONTEXT_HANDLE context = 0;
+    float maxTextureAnisotropy = 1.0f;
+    bool textureAnisotropySupported = false;
     GLuint program = 0;
     GLuint skyProgram = 0;
     GLuint postProcessProgram = 0;
@@ -228,6 +238,9 @@ struct WebRendererState
     GLint aspectUniform = -1;
     GLint textureUniform = -1;
     GLint textureEnabledUniform = -1;
+    GLint detailMapUniform = -1;
+    GLint detailMapEnabledUniform = -1;
+    GLint detailScaleUniform = -1;
     GLint normalMapUniform = -1;
     GLint normalMapEnabledUniform = -1;
     GLint specularMapUniform = -1;
@@ -892,6 +905,7 @@ void EmitWorldComparison(
             destination.stateBits[0] = source.stateBits[0];
             destination.stateBits[1] = source.stateBits[1];
             destination.samplerState = source.samplerState;
+            destination.detailSamplerState = source.detailSamplerState;
             destination.lightmapIndex = source.lightmapIndex;
             destination.sourceKind = source.sourceKind;
             destination.technique = source.technique;
@@ -901,6 +915,8 @@ void EmitWorldComparison(
             destination.customSamplerFlags = source.customSamplerFlags;
             destination.techniqueFlags = source.techniqueFlags;
             destination.depthHack = source.depthHack;
+            destination.ambientProbeLighting =
+                source.ambientProbeLighting;
             destination.vertexShaderName = source.vertexShaderName.c_str();
             destination.vertexShaderProgramHash =
                 source.vertexShaderProgramHash;
@@ -909,6 +925,7 @@ void EmitWorldComparison(
                 source.pixelShaderProgramHash;
             std::copy_n(source.falloffParms, 4u,
                 destination.falloffParms);
+            std::copy_n(source.detailScale, 4u, destination.detailScale);
             std::copy_n(source.falloffBeginColor, 4u,
                 destination.falloffBeginColor);
             std::copy_n(source.falloffEndColor, 4u,
@@ -1883,6 +1900,9 @@ void ResetGpuHandles()
     g_renderer.aspectUniform = -1;
     g_renderer.textureUniform = -1;
     g_renderer.textureEnabledUniform = -1;
+    g_renderer.detailMapUniform = -1;
+    g_renderer.detailMapEnabledUniform = -1;
+    g_renderer.detailScaleUniform = -1;
     g_renderer.normalMapUniform = -1;
     g_renderer.normalMapEnabledUniform = -1;
     g_renderer.specularMapUniform = -1;
@@ -2825,7 +2845,42 @@ bool CreateWorldTextureObjects(
             return false;
         }
         glBindTexture(GL_TEXTURE_2D, image.texture);
-        glGenerateMipmap(GL_TEXTURE_2D);
+        if (image.mipPixels.empty() && image.mipmapsAllowed)
+        {
+            glGenerateMipmap(GL_TEXTURE_2D);
+        }
+        else if (image.mipPixels.empty())
+        {
+            // Native Load_Texture creates a one-level D3D texture when the
+            // canonical load definition carries IMG_FLAG_NOMIPMAPS. Do not
+            // manufacture averaged levels at the WebGL boundary: alpha-cutout
+            // art deliberately relies on its authored base-level coverage.
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+        }
+        else
+        {
+            for (std::size_t mip = 0u; mip < image.mipPixels.size(); ++mip)
+            {
+                const std::uint32_t width = std::max<std::uint32_t>(
+                    image.width >> (mip + 1u), 1u);
+                const std::uint32_t height = std::max<std::uint32_t>(
+                    image.height >> (mip + 1u), 1u);
+                const std::size_t expectedBytes =
+                    static_cast<std::size_t>(width) * height * 4u;
+                if (image.mipPixels[mip].size() != expectedBytes)
+                {
+                    DeleteWorldTextureObjects(images);
+                    return false;
+                }
+                glTexImage2D(GL_TEXTURE_2D,
+                    static_cast<GLint>(mip + 1u), GL_RGBA8,
+                    static_cast<GLsizei>(width),
+                    static_cast<GLsizei>(height), 0, GL_RGBA,
+                    GL_UNSIGNED_BYTE, image.mipPixels[mip].data());
+            }
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL,
+                static_cast<GLint>(image.mipPixels.size()));
+        }
         if (glGetError() != GL_NO_ERROR)
         {
             DeleteWorldTextureObjects(images);
@@ -3319,11 +3374,14 @@ bool CreateRendererResources()
         in float v_binormal_sign;
         in vec3 v_model_lighting_coords;
         uniform sampler2D u_texture;
+        uniform sampler2D u_detail_map;
         uniform sampler2D u_secondary_lightmap;
         uniform sampler3D u_model_lighting;
         uniform sampler2D u_normal_map;
         uniform sampler2D u_specular_map;
         uniform float u_texture_enabled;
+        uniform float u_detail_map_enabled;
+        uniform vec4 u_detail_scale;
         uniform float u_lightmap_enabled;
         uniform float u_secondary_lightmap_enabled;
         uniform float u_model_lighting_enabled;
@@ -3470,6 +3528,13 @@ bool CreateRendererResources()
         void main()
         {
             vec4 texel = texture(u_texture, v_texcoord);
+            if (u_detail_map_enabled > 0.5)
+            {
+                // Exact d0 arithmetic: detail and color are added, biased by
+                // -0.5, then multiplied by vertex and lighting downstream.
+                texel.rgb += texture(
+                    u_detail_map, v_texcoord * u_detail_scale.xy).rgb - 0.5;
+            }
             float source_alpha = u_color_intensity_alpha > 0.5
                 ? max(texel.r, max(texel.g, texel.b))
                 : texel.a;
@@ -3790,11 +3855,30 @@ bool CreateRendererResources()
                         abs(model_normal.y)), abs(model_normal.z));
                     vec3 lookup_direction = model_normal /
                         max(major_axis, 0.000001);
-                    vec3 model_lighting = texture(
+                    vec4 model_lighting = texture(
                         u_model_lighting,
                         v_model_lighting_coords + lookup_direction *
-                            u_model_lighting_lookup_scale).rgb;
-                    bootstrap_color.rgb *= model_lighting * 2.0;
+                            u_model_lighting_lookup_scale);
+                    vec3 model_lighting_factor = model_lighting.rgb * 2.0;
+                    if (u_primary_light_enabled > 0.5 ||
+                        u_material_mode == 6)
+                    {
+                        // The model-lighting volume stores canonical primary
+                        // visibility in alpha. Native lp_amb_* adds sunDiffuse
+                        // after doubling ambient model lighting and without a
+                        // normal term; the remaining lp_* programs retain
+                        // their directional N dot L contribution inside x2.
+                        float primary_diffuse = u_material_mode == 6
+                            ? 1.0
+                            : max(dot(normalize(u_sun_direction),
+                                model_normal), 0.0);
+                        vec3 primary_lighting = u_sun_color *
+                            model_lighting.a * primary_diffuse;
+                        model_lighting_factor += u_material_mode == 6
+                            ? primary_lighting
+                            : primary_lighting * 2.0;
+                    }
+                    bootstrap_color.rgb *= model_lighting_factor;
                 }
                 // Retail lp_* bytecode adds the environment term after
                 // base*vertex*modelLighting*2. World passes have no model
@@ -4117,6 +4201,12 @@ bool CreateRendererResources()
     const GLint textureUniform = glGetUniformLocation(program, "u_texture");
     const GLint textureEnabledUniform =
         glGetUniformLocation(program, "u_texture_enabled");
+    const GLint detailMapUniform =
+        glGetUniformLocation(program, "u_detail_map");
+    const GLint detailMapEnabledUniform =
+        glGetUniformLocation(program, "u_detail_map_enabled");
+    const GLint detailScaleUniform =
+        glGetUniformLocation(program, "u_detail_scale");
     const GLint normalMapUniform =
         glGetUniformLocation(program, "u_normal_map");
     const GLint normalMapEnabledUniform =
@@ -4397,6 +4487,8 @@ bool CreateRendererResources()
             compatibilityWorld,
             compatibilityTexture);
     if (aspectUniform < 0 || textureUniform < 0 || textureEnabledUniform < 0 ||
+        detailMapUniform < 0 || detailMapEnabledUniform < 0 ||
+        detailScaleUniform < 0 ||
         normalMapUniform < 0 || normalMapEnabledUniform < 0 ||
         specularMapUniform < 0 || specularMapEnabledUniform < 0 ||
         viewProjectionUniform < 0 || sceneFallbackUniform < 0 ||
@@ -4537,6 +4629,9 @@ bool CreateRendererResources()
     g_renderer.aspectUniform = aspectUniform;
     g_renderer.textureUniform = textureUniform;
     g_renderer.textureEnabledUniform = textureEnabledUniform;
+    g_renderer.detailMapUniform = detailMapUniform;
+    g_renderer.detailMapEnabledUniform = detailMapEnabledUniform;
+    g_renderer.detailScaleUniform = detailScaleUniform;
     g_renderer.normalMapUniform = normalMapUniform;
     g_renderer.normalMapEnabledUniform = normalMapEnabledUniform;
     g_renderer.specularMapUniform = specularMapUniform;
@@ -4692,6 +4787,23 @@ bool HandleWebGLContextLost(int, const void *, void *)
     return true;
 }
 
+void InitializeTextureFilteringCapabilities()
+{
+    g_renderer.maxTextureAnisotropy = 1.0f;
+    g_renderer.textureAnisotropySupported =
+        emscripten_webgl_enable_extension(
+            g_renderer.context, "EXT_texture_filter_anisotropic");
+    if (g_renderer.textureAnisotropySupported)
+    {
+        GLfloat maximum = 1.0f;
+        glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &maximum);
+        if (glGetError() == GL_NO_ERROR && std::isfinite(maximum))
+            g_renderer.maxTextureAnisotropy = std::max(maximum, 1.0f);
+        else
+            g_renderer.textureAnisotropySupported = false;
+    }
+}
+
 bool HandleWebGLContextRestored(int, const void *, void *)
 {
     if (!g_renderer.initialized || g_renderer.context <= 0)
@@ -4717,6 +4829,7 @@ bool HandleWebGLContextRestored(int, const void *, void *)
         Web_EmitRuntimeState("failed", "The restored WebGL2 context could not be made current");
         return true;
     }
+    InitializeTextureFilteringCapabilities();
 
     // Every WebGL object became invalid at context loss. Rebuild the pipeline,
     // indexed surface, and texture from renderer-owned, bounded descriptions.
@@ -4801,12 +4914,12 @@ bool CreateWebGLContext()
             static_cast<unsigned long>(g_renderer.context));
         return false;
     }
-
     if (emscripten_webgl_make_context_current(g_renderer.context) !=
         EMSCRIPTEN_RESULT_SUCCESS)
     {
         return false;
     }
+    InitializeTextureFilteringCapabilities();
 
     const EMSCRIPTEN_RESULT lostCallbackResult = emscripten_set_webglcontextlost_callback(
         "#canvas", nullptr, EM_TRUE, HandleWebGLContextLost);
@@ -4943,7 +5056,8 @@ bool DecodeCanonicalCubeImage(
 std::uint32_t RetainCanonicalWorldImage(
     const GfxImage *canonical,
     std::vector<WebRendererRetainedWorldImage> &images,
-    std::size_t &retainedPixelBytes)
+    std::size_t &retainedPixelBytes,
+    bool retainAuthoredMipChain = false)
 {
     if (!canonical) return INVALID_WORLD_IMAGE;
     for (std::uint32_t index = 0u; index < images.size(); ++index)
@@ -4954,6 +5068,8 @@ std::uint32_t RetainCanonicalWorldImage(
     retained.canonicalName = canonical->name ? canonical->name : "<unnamed-image>";
     WebDbImageLoadDef loadDef{};
     const bool hasLoadDef = DB_WebGetImageLoadDef(canonical, loadDef);
+    retained.mipmapsAllowed = !hasLoadDef ||
+        (loadDef.flags & kisak::iwi::FLAG_NO_MIPMAPS) == 0u;
     kisak::iwi::Rgba8Image decoded;
     kisak::iwi::Error decodeError = kisak::iwi::Error::None;
     bool attemptedDecode = false;
@@ -4963,6 +5079,7 @@ std::uint32_t RetainCanonicalWorldImage(
         decoded.width = 1u;
         decoded.height = 1u;
         decoded.pixels = {255u, 255u, 255u, 255u};
+        retained.mipmapsAllowed = false;
         attemptedDecode = true;
     }
     else if (canonical->mapType == MAPTYPE_2D && hasLoadDef &&
@@ -4999,16 +5116,34 @@ std::uint32_t RetainCanonicalWorldImage(
         }
     }
 
+    std::size_t decodedBytes = decoded.pixels.size();
+    if (retainAuthoredMipChain)
+    {
+        for (const std::vector<std::uint8_t> &mip : decoded.mipPixels)
+        {
+            if (mip.size() > std::numeric_limits<std::size_t>::max() -
+                    decodedBytes)
+            {
+                decodedBytes = std::numeric_limits<std::size_t>::max();
+                break;
+            }
+            decodedBytes += mip.size();
+        }
+    }
     if (attemptedDecode && decodeError == kisak::iwi::Error::None &&
-        decoded.pixels.size() <=
+        decodedBytes <=
             WEB_RENDERER_MAX_WORLD_TEXTURE_BYTES -
                 std::min(retainedPixelBytes,
                     WEB_RENDERER_MAX_WORLD_TEXTURE_BYTES))
     {
         retained.width = decoded.width;
         retained.height = decoded.height;
-        retainedPixelBytes += decoded.pixels.size();
+        if (retained.width <= 1u && retained.height <= 1u)
+            retained.mipmapsAllowed = false;
+        retainedPixelBytes += decodedBytes;
         retained.pixels = std::move(decoded.pixels);
+        if (retainAuthoredMipChain)
+            retained.mipPixels = std::move(decoded.mipPixels);
         retained.supported = true;
     }
     else if (attemptedDecode)
@@ -5233,6 +5368,7 @@ WebRendererSurfaceResult CopyWorldCommand(
             batch.stateBits[0] = source.stateBits[0];
             batch.stateBits[1] = source.stateBits[1];
             batch.samplerState = source.samplerState;
+            batch.detailSamplerState = source.detailSamplerState;
             batch.normalSamplerState = source.normalSamplerState;
             batch.specularSamplerState = source.specularSamplerState;
             batch.lightmapIndex = source.lightmapIndex;
@@ -5245,7 +5381,9 @@ WebRendererSurfaceResult CopyWorldCommand(
             batch.techniqueType = source.techniqueType;
             batch.customSamplerFlags = source.customSamplerFlags;
             batch.techniqueFlags = source.techniqueFlags;
+            batch.cameraRegion = source.cameraRegion;
             batch.depthHack = source.depthHack;
+            batch.ambientProbeLighting = source.ambientProbeLighting;
             batch.castsSunShadow = source.castsSunShadow;
             batch.vertexShaderName = source.vertexShaderName
                 ? source.vertexShaderName : "<unavailable-vertex-shader>";
@@ -5258,6 +5396,7 @@ WebRendererSurfaceResult CopyWorldCommand(
             batch.waterSamplerState = source.waterSamplerState;
             batch.reflectionProbeIndex = source.reflectionProbeIndex;
             std::copy_n(source.envMapParms, 4u, batch.envMapParms);
+            std::copy_n(source.detailScale, 4u, batch.detailScale);
             std::copy_n(source.waterColor, 4u, batch.waterColor);
             std::copy_n(source.falloffParms, 4u, batch.falloffParms);
             std::copy_n(source.falloffBeginColor, 4u,
@@ -5349,7 +5488,12 @@ WebRendererSurfaceResult CopyWorldCommand(
             }
             waterSupported = waterSupported && reflectionSupported;
             batch.baseImageIndex = RetainCanonicalWorldImage(
-                source.baseImage, images, retainedPixelBytes);
+                source.baseImage, images, retainedPixelBytes,
+                (source.stateBits[0] & 0x800u) == 0u &&
+                    (source.stateBits[0] & 0x3000u) != 0u &&
+                    (source.samplerState & 0x18u) != 0u);
+            batch.detailImageIndex = RetainCanonicalWorldImage(
+                source.detailImage, images, retainedPixelBytes);
             if (source.lightingMode ==
                     WebRendererWorldLightingMode::ModelLightGrid ||
                 WebRenderer_UsesWorldNormalMap(source.technique))
@@ -5538,6 +5682,7 @@ WebRendererSurfaceResult CopyStaticModelCommand(
             batch.draw.stateBits[0] = draw.stateBits[0];
             batch.draw.stateBits[1] = draw.stateBits[1];
             batch.draw.samplerState = draw.samplerState;
+            batch.draw.detailSamplerState = draw.detailSamplerState;
             batch.draw.normalSamplerState = draw.normalSamplerState;
             batch.draw.specularSamplerState = draw.specularSamplerState;
             batch.draw.lightmapIndex = 31u;
@@ -5549,6 +5694,8 @@ WebRendererSurfaceResult CopyStaticModelCommand(
             batch.draw.techniqueType = draw.techniqueType;
             batch.draw.customSamplerFlags = draw.customSamplerFlags;
             batch.draw.techniqueFlags = draw.techniqueFlags;
+            batch.draw.cameraRegion = draw.cameraRegion;
+            batch.draw.ambientProbeLighting = draw.ambientProbeLighting;
             batch.draw.castsSunShadow = draw.castsSunShadow;
             batch.draw.vertexShaderName = draw.vertexShaderName
                 ? draw.vertexShaderName : "<unavailable-vertex-shader>";
@@ -5562,6 +5709,7 @@ WebRendererSurfaceResult CopyStaticModelCommand(
                 FindRetainedWorldReflectionTexture(
                     draw.reflectionProbeIndex);
             std::copy_n(draw.envMapParms, 4u, batch.draw.envMapParms);
+            std::copy_n(draw.detailScale, 4u, batch.draw.detailScale);
             std::copy_n(draw.falloffParms, 4u,
                 batch.draw.falloffParms);
             std::copy_n(draw.falloffBeginColor, 4u,
@@ -5569,7 +5717,12 @@ WebRendererSurfaceResult CopyStaticModelCommand(
             std::copy_n(draw.falloffEndColor, 4u,
                 batch.draw.falloffEndColor);
             batch.draw.baseImageIndex = RetainCanonicalWorldImage(
-                draw.baseImage, images, retainedPixelBytes);
+                draw.baseImage, images, retainedPixelBytes,
+                (draw.stateBits[0] & 0x800u) == 0u &&
+                    (draw.stateBits[0] & 0x3000u) != 0u &&
+                    (draw.samplerState & 0x18u) != 0u);
+            batch.draw.detailImageIndex = RetainCanonicalWorldImage(
+                draw.detailImage, images, retainedPixelBytes);
             const bool baseSupported =
                 batch.draw.baseImageIndex != INVALID_WORLD_IMAGE &&
                 images[batch.draw.baseImageIndex].supported;
@@ -7444,6 +7597,17 @@ void ApplyWorldMaterialState(const WebRendererRetainedWorldBatch &batch)
     const std::uint32_t state1 = batch.stateBits[1];
     const bool hasCanonicalState = batch.materialIdentity != nullptr &&
         (state0 != 0u || state1 != 0u);
+    // R_SetAlphaAntiAliasingState enables the selected transparency-AA mode
+    // only for opaque alpha-tested state when the scene target is
+    // multisampled. SAMPLE_ALPHA_TO_COVERAGE is the WebGL2 boundary for that
+    // D3D9 coverage-mask behavior.
+    const bool alphaToCoverage = g_renderer.aaActiveSamples > 1 &&
+        r_aaAlpha && r_aaAlpha->current.integer != 0 &&
+        (state0 & 0x0f00u) == 0u;
+    if (alphaToCoverage)
+        glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+    else
+        glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
     switch (state0 & 0xc000u)
     {
     case 0x8000u:
@@ -7499,6 +7663,8 @@ void ApplyWorldMaterialState(const WebRendererRetainedWorldBatch &batch)
     glUniform1i(g_renderer.materialModeUniform,
         batch.sourceKind == WebRendererSceneBatchKind::SunFlare
             ? 5
+            : batch.ambientProbeLighting
+            ? 6
             : batch.technique == WebRendererWorldTechnique::VertexColorMultiply
             ? 1
             : (batch.technique ==
@@ -7534,6 +7700,8 @@ void ApplyWorldMaterialState(const WebRendererRetainedWorldBatch &batch)
 
 void ApplyUiMaterialState(const WebRendererRetainedUiBatch &batch)
 {
+    glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+    glUniform1f(g_renderer.detailMapEnabledUniform, 0.0f);
     glUniform1f(g_renderer.colorIntensityAlphaUniform, 0.0f);
     glUniform1i(g_renderer.materialModeUniform, 0);
     glDisable(GL_DEPTH_TEST);
@@ -7594,19 +7762,32 @@ void ApplyUiMaterialState(const WebRendererRetainedUiBatch &batch)
 void BindWorldTexture(
     GLenum unit,
     GLuint texture,
-    std::uint8_t samplerState)
+    std::uint8_t samplerState,
+    bool mipmapsAvailable = true)
 {
     glActiveTexture(unit);
     glBindTexture(GL_TEXTURE_2D, texture);
     const std::uint8_t filter = samplerState & 7u;
     const bool linear = filter == 2u || filter == 3u || filter == 4u;
-    const bool mipped = (samplerState & 0x18u) != 0u;
+    const std::uint8_t mipMode = mipmapsAvailable
+        ? samplerState & 0x18u : 0u;
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
         linear ? GL_LINEAR : GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
-        mipped
-            ? (linear ? GL_LINEAR_MIPMAP_LINEAR : GL_NEAREST_MIPMAP_NEAREST)
-            : (linear ? GL_LINEAR : GL_NEAREST));
+    GLint minFilter = linear ? GL_LINEAR : GL_NEAREST;
+    if (mipMode == 0x08u)
+        minFilter = linear ? GL_LINEAR_MIPMAP_NEAREST
+                           : GL_NEAREST_MIPMAP_NEAREST;
+    else if (mipMode == 0x10u)
+        minFilter = linear ? GL_LINEAR_MIPMAP_LINEAR
+                           : GL_NEAREST_MIPMAP_LINEAR;
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, minFilter);
+    if (g_renderer.textureAnisotropySupported)
+    {
+        const float requested = filter == 4u ? 4.0f :
+            (filter == 3u ? 2.0f : 1.0f);
+        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT,
+            std::min(requested, g_renderer.maxTextureAnisotropy));
+    }
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,
         (samplerState & 0x20u) != 0u ? GL_CLAMP_TO_EDGE : GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,
@@ -8445,6 +8626,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             g_renderer.sceneFallbackUniform,
             sceneGeometryDraw ? 1.0f : 0.0f);
         glUniform1i(g_renderer.textureUniform, 0);
+        glUniform1i(g_renderer.detailMapUniform, 4);
         glUniform1i(g_renderer.normalMapUniform, 1);
         glUniform1i(g_renderer.specularMapUniform, 5);
         glUniform1i(g_renderer.secondaryLightmapUniform, 2);
@@ -8476,6 +8658,9 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 g_renderer.texture);
         glActiveTexture(GL_TEXTURE0);
         glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.detailMapEnabledUniform, 0.0f);
+        glUniform4f(g_renderer.detailScaleUniform,
+            0.0f, 0.0f, 0.0f, 0.0f);
         glUniform1f(g_renderer.modelLightingEnabledUniform, 0.0f);
         glUniform1f(g_renderer.normalMapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.specularMapEnabledUniform, 0.0f);
@@ -8523,6 +8708,8 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             ApplyWorldMaterialState(batch);
             const WebRendererRetainedWorldImage *base =
                 WorldImage(batch.baseImageIndex);
+            const WebRendererRetainedWorldImage *detail =
+                WorldImage(batch.detailImageIndex);
             const WebRendererRetainedWorldImage *secondaryLightmap =
                 WorldImage(batch.secondaryLightmapImageIndex);
             const WebRendererRetainedWorldImage *primaryLightmap =
@@ -8539,6 +8726,8 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 ? !waterReady
                 : batch.technique ==
                         WebRendererWorldTechnique::BackendFallback || !base;
+            const bool detailMapped = !fallback && detail &&
+                detail->texture != 0u;
             const bool lightmapped = !fallback && secondaryLightmap &&
                 WebRenderer_UsesSecondaryDirectionalLightmap(
                     batch.technique) &&
@@ -8594,6 +8783,10 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             glUniform1f(g_renderer.secondaryLightmapEnabledUniform,
                 lightmapped ? 1.0f : 0.0f);
             glUniform1f(g_renderer.modelLightingEnabledUniform, 0.0f);
+            glUniform1f(g_renderer.detailMapEnabledUniform,
+                detailMapped ? 1.0f : 0.0f);
+            glUniform4fv(g_renderer.detailScaleUniform, 1,
+                batch.detailScale);
             glUniform1f(g_renderer.normalMapEnabledUniform,
                 normalMapped ? 1.0f : 0.0f);
             glUniform1f(g_renderer.specularMapEnabledUniform,
@@ -8636,6 +8829,10 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 normal ? normal->texture : g_renderer.texture,
                 batch.normalSamplerState);
             BindWorldTexture(
+                GL_TEXTURE4,
+                detail ? detail->texture : g_renderer.texture,
+                batch.detailSamplerState);
+            BindWorldTexture(
                 GL_TEXTURE2,
                 secondaryLightmap
                     ? secondaryLightmap->texture : g_renderer.texture,
@@ -8677,6 +8874,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             glUniform1f(
                 g_renderer.secondaryLightmapEnabledUniform, 0.0f);
             glUniform1f(g_renderer.modelLightingEnabledUniform, 0.0f);
+            glUniform1f(g_renderer.detailMapEnabledUniform, 0.0f);
             glUniform1f(g_renderer.normalMapEnabledUniform, 0.0f);
             glUniform1f(g_renderer.specularMapEnabledUniform, 0.0f);
             glUniform1i(g_renderer.alphaTestUniform, 0);
@@ -8711,10 +8909,19 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         for (const WebRendererRetainedStaticModelBatch &batch :
              g_renderer.retainedStaticModelBatches)
         {
+            // R_AddXModelSurfacesCamera reserves camera region 3 for geometry
+            // that participates in shadow passes only (tree shadow facades
+            // are the common retail example).
+            if (!WebRenderer_IsCameraVisibleXModelSurface(
+                    batch.draw.sourceKind, batch.draw.cameraRegion))
+                continue;
             ApplyWorldMaterialState(batch.draw);
             const WebRendererRetainedWorldImage *base = RetainedImage(
                 g_renderer.retainedStaticModelImages,
                 batch.draw.baseImageIndex);
+            const WebRendererRetainedWorldImage *detail = RetainedImage(
+                g_renderer.retainedStaticModelImages,
+                batch.draw.detailImageIndex);
             const WebRendererRetainedWorldImage *normal = RetainedImage(
                 g_renderer.retainedStaticModelImages,
                 batch.draw.normalImageIndex);
@@ -8728,6 +8935,8 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 batch.draw.lightingMode ==
                     WebRendererWorldLightingMode::ModelLightGrid &&
                 g_renderer.retainedStaticModelLighting.texture != 0u;
+            const bool detailMapped = !fallback && detail &&
+                detail->texture != 0u;
             const bool normalMapped = modelLit && normal &&
                 normal->texture != 0u;
             const bool specularMapped = modelLit && specular &&
@@ -8735,16 +8944,30 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 batch.draw.reflectionTexture != 0u &&
                 WebRenderer_UsesModelEnvironmentSpecular(
                     batch.draw.technique);
+            const WebRendererRetainedPrimaryLight *primaryLight =
+                batch.draw.primaryLightIndex <
+                        g_renderer.retainedPrimaryLights.size()
+                ? &g_renderer.retainedPrimaryLights[
+                    batch.draw.primaryLightIndex]
+                : nullptr;
+            const bool directionalPrimaryLit = modelLit && primaryLight &&
+                primaryLight->type == 1u;
             glUniform1f(g_renderer.sceneFallbackUniform,
                 fallback ? 1.0f : 0.0f);
             glUniform1f(g_renderer.textureEnabledUniform,
                 fallback ? 0.0f : 1.0f);
             glUniform1f(g_renderer.modelLightingEnabledUniform,
                 modelLit ? 1.0f : 0.0f);
+            glUniform1f(g_renderer.detailMapEnabledUniform,
+                detailMapped ? 1.0f : 0.0f);
+            glUniform4fv(g_renderer.detailScaleUniform, 1,
+                batch.draw.detailScale);
             glUniform1f(g_renderer.normalMapEnabledUniform,
                 normalMapped ? 1.0f : 0.0f);
             glUniform1f(g_renderer.specularMapEnabledUniform,
                 specularMapped ? 1.0f : 0.0f);
+            glUniform1f(g_renderer.primaryLightEnabledUniform,
+                directionalPrimaryLit ? 1.0f : 0.0f);
             if (specularMapped)
             {
                 glUniform4fv(g_renderer.envMapParmsUniform, 1,
@@ -8760,11 +8983,16 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             BindWorldTexture(
                 GL_TEXTURE0,
                 base ? base->texture : g_renderer.texture,
-                batch.draw.samplerState);
+                batch.draw.samplerState,
+                base && base->mipmapsAllowed);
             BindWorldTexture(
                 GL_TEXTURE1,
                 normal ? normal->texture : g_renderer.texture,
                 batch.draw.normalSamplerState);
+            BindWorldTexture(
+                GL_TEXTURE4,
+                detail ? detail->texture : g_renderer.texture,
+                batch.draw.detailSamplerState);
             BindWorldTexture(
                 GL_TEXTURE5,
                 specular ? specular->texture : g_renderer.texture,
@@ -8811,6 +9039,9 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                  g_renderer.retainedDynamicModelBatches)
             {
                 if (batch.depthHack != depthHackPass) continue;
+                if (!WebRenderer_IsCameraVisibleXModelSurface(
+                        batch.sourceKind, batch.cameraRegion))
+                    continue;
                 if (batch.sourceKind == WebRendererSceneBatchKind::SunFlare)
                 {
                     if (depthHackPass) continue;
@@ -8929,6 +9160,9 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 const WebRendererRetainedWorldImage *base = RetainedImage(
                     g_renderer.retainedDynamicModelImages,
                     batch.baseImageIndex);
+                const WebRendererRetainedWorldImage *detail = RetainedImage(
+                    g_renderer.retainedDynamicModelImages,
+                    batch.detailImageIndex);
                 const WebRendererRetainedWorldImage *secondaryLightmap =
                     RetainedImage(g_renderer.retainedDynamicModelImages,
                         batch.secondaryLightmapImageIndex);
@@ -8966,6 +9200,8 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                     batch.lightingMode ==
                         WebRendererWorldLightingMode::ModelLightGrid &&
                     g_renderer.retainedDynamicModelLighting.texture != 0u;
+                const bool detailMapped = !fallback && detail &&
+                    detail->texture != 0u;
                 const bool normalMapped = normal && normal->texture != 0u &&
                     (modelLit || (dynamicLightmapped &&
                         WebRenderer_UsesWorldNormalMap(batch.technique)));
@@ -8980,6 +9216,8 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                     primaryLight->falloffScale > 0.0f &&
                     batch.techniqueType == 10u &&
                     batch.pixelShaderName.rfind("lm_spot_", 0u) == 0u;
+                const bool directionalPrimaryLit = modelLit && primaryLight &&
+                    primaryLight->type == 1u;
                 glUniform1f(g_renderer.fogEnabledUniform,
                     g_renderer.sceneFogEnabled && !fxSceneGeometry &&
                         !sunSprite
@@ -8994,6 +9232,10 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                     dynamicLightmapped ? 1.0f : 0.0f);
                 glUniform1f(g_renderer.modelLightingEnabledUniform,
                     modelLit ? 1.0f : 0.0f);
+                glUniform1f(g_renderer.detailMapEnabledUniform,
+                    detailMapped ? 1.0f : 0.0f);
+                glUniform4fv(g_renderer.detailScaleUniform, 1,
+                    batch.detailScale);
                 glUniform1f(g_renderer.normalMapEnabledUniform,
                     normalMapped ? 1.0f : 0.0f);
                 glUniform1f(g_renderer.specularMapEnabledUniform,
@@ -9011,7 +9253,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                     glUniform4f(g_renderer.envMapParmsUniform,
                         0.0f, 0.0f, 0.0f, 0.0f);
                 glUniform1f(g_renderer.primaryLightEnabledUniform,
-                    primaryLit ? 1.0f : 0.0f);
+                    primaryLit || directionalPrimaryLit ? 1.0f : 0.0f);
                 if (primaryLit)
                 {
                     glUniform4f(
@@ -9057,6 +9299,9 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 BindWorldTexture(GL_TEXTURE1,
                     normal ? normal->texture : g_renderer.texture,
                     batch.normalSamplerState);
+                BindWorldTexture(GL_TEXTURE4,
+                    detail ? detail->texture : g_renderer.texture,
+                    batch.detailSamplerState);
                 BindWorldTexture(GL_TEXTURE5,
                     specular ? specular->texture : g_renderer.texture,
                     batch.specularSamplerState);
@@ -9152,6 +9397,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1f(g_renderer.lightmapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.modelLightingEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.detailMapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.normalMapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.specularMapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.sunShadowEnabledUniform, 0.0f);
@@ -9223,6 +9469,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1f(g_renderer.lightmapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.modelLightingEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.detailMapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.normalMapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.specularMapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.sunShadowEnabledUniform, 0.0f);

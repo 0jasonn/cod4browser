@@ -306,6 +306,15 @@ enum class WebRendererSceneBatchKind : std::uint8_t
     SunFlare,
 };
 
+constexpr bool WebRenderer_IsCameraVisibleXModelSurface(
+    WebRendererSceneBatchKind kind, std::uint8_t cameraRegion) noexcept
+{
+    const bool cameraXModel =
+        kind == WebRendererSceneBatchKind::StaticXModel ||
+        kind == WebRendererSceneBatchKind::DynamicDObj;
+    return !cameraXModel || cameraRegion != 3u;
+}
+
 constexpr bool WebRenderer_IsFxVertexColorBatch(
     WebRendererSceneBatchKind kind) noexcept
 {
@@ -354,6 +363,7 @@ struct WebRendererWorldBatchDesc
     std::uint32_t firstInstanceIndex;
     std::uint32_t lastInstanceIndex;
     const GfxImage *baseImage;
+    const GfxImage *detailImage;
     const GfxImage *normalImage;
     const GfxImage *specularImage;
     const GfxImage *lightmapImage;
@@ -362,6 +372,7 @@ struct WebRendererWorldBatchDesc
     const GfxImage *reflectionProbeImage;
     std::uint32_t stateBits[2];
     std::uint8_t samplerState;
+    std::uint8_t detailSamplerState;
     std::uint8_t normalSamplerState;
     std::uint8_t specularSamplerState;
     std::uint8_t waterSamplerState;
@@ -381,7 +392,14 @@ struct WebRendererWorldBatchDesc
     std::uint8_t techniqueType;
     std::uint8_t customSamplerFlags;
     std::uint16_t techniqueFlags;
+    // Native XModel camera region 3 is reserved for shadow-only geometry.
+    // The backend keeps it resident for shadow draws but omits it from the
+    // visible camera pass.
+    std::uint8_t cameraRegion;
     bool depthHack;
+    // Native lp_amb_* adds model-lighting alpha times sun diffuse without
+    // the normal-dependent term used by the other lp_* families.
+    bool ambientProbeLighting;
     // Canonical GfxWorldDpvsStatic::surfaceCastsSunShadow membership. This is
     // frontend visibility intent, not a backend material heuristic.
     bool castsSunShadow;
@@ -390,6 +408,7 @@ struct WebRendererWorldBatchDesc
     const char *pixelShaderName;
     std::uint32_t pixelShaderProgramHash;
     float envMapParms[4];
+    float detailScale[4];
     float waterColor[4];
     float falloffParms[4];
     float falloffBeginColor[4];

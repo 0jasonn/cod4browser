@@ -23,6 +23,9 @@ constexpr std::uint32_t TECHNIQUE_LIT_SUN_SHADOW_INDEX = 9u;
 constexpr std::uint32_t TECHNIQUE_LIT_SPOT_INDEX = 10u;
 constexpr std::uint32_t TECHNIQUE_LIT_OMNI_INDEX = 12u;
 constexpr std::uint32_t TECHNIQUE_NONE_INDEX = 36u;
+constexpr std::uint32_t COLOR_MAP_HASH = 0xa0ab1041u;
+constexpr std::uint32_t DETAIL_MAP_HASH = 0xeb529b4du;
+constexpr std::uint32_t DETAIL_SCALE_HASH = 0x08d36a09u;
 
 void UnpackUnitVec(PackedUnitVec packed, float output[3]) noexcept
 {
@@ -193,7 +196,32 @@ const GfxImage *FindBaseImage(const Material *material, std::uint8_t &sampler) n
     for (std::uint32_t index = 0u; index < material->textureCount; ++index)
     {
         const MaterialTextureDef &texture = material->textureTable[index];
+        if (texture.nameHash == COLOR_MAP_HASH && texture.u.image)
+        {
+            sampler = texture.samplerState;
+            return texture.u.image;
+        }
+    }
+    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
+    {
+        const MaterialTextureDef &texture = material->textureTable[index];
         if (texture.semantic == 2u && texture.u.image)
+        {
+            sampler = texture.samplerState;
+            return texture.u.image;
+        }
+    }
+    return nullptr;
+}
+
+const GfxImage *FindDetailImage(
+    const Material *material, std::uint8_t &sampler) noexcept
+{
+    if (!material || !material->textureTable) return nullptr;
+    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
+    {
+        const MaterialTextureDef &texture = material->textureTable[index];
+        if (texture.nameHash == DETAIL_MAP_HASH && texture.u.image)
         {
             sampler = texture.samplerState;
             return texture.u.image;
@@ -503,6 +531,14 @@ WebRendererWorldBatchDesc MakeBatch(
     batch.pixelShaderName = technique.pixelShaderName
         ? technique.pixelShaderName : "<unavailable-pixel-shader>";
     batch.pixelShaderProgramHash = technique.pixelShaderProgramHash;
+    if (batch.pixelShaderName &&
+        std::strstr(batch.pixelShaderName, "d0") != nullptr &&
+        CopyMaterialConstant(surface.material, DETAIL_SCALE_HASH,
+            batch.detailScale))
+    {
+        batch.detailImage = FindDetailImage(
+            surface.material, batch.detailSamplerState);
+    }
     batch.stateBits[0] = technique.stateBits[0];
     batch.stateBits[1] = technique.stateBits[1];
     const bool hasCanonicalLightmap = technique.identityName &&

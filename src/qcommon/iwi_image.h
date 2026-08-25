@@ -85,6 +85,11 @@ struct Rgba8Image
     std::uint16_t width = 0;
     std::uint16_t height = 0;
     std::vector<std::uint8_t> pixels;
+    // Authored levels after the largest image, in D3D/WebGL order. Keeping
+    // these levels is especially important for alpha-tested foliage: generic
+    // RGBA downsampling mixes transparent black texels into the canopy and
+    // changes both its coverage and its color at distance.
+    std::vector<std::vector<std::uint8_t>> mipPixels;
 };
 
 struct Rgba8Cube
@@ -125,9 +130,10 @@ Error DecodeCubeRgba8(
     std::span<const std::uint8_t> bytes,
     Rgba8Cube &cube) noexcept;
 
-// Decodes the largest two-dimensional mip from a canonical DB-owned
-// GfxImageLoadDef payload. Unlike an IWI member, this payload has no file
-// header and stores mip levels in native upload order (largest to smallest).
+// Decodes the complete authored two-dimensional mip chain from a canonical
+// DB-owned GfxImageLoadDef payload. Unlike an IWI member, this payload has no
+// file header and stores mip levels in native upload order (largest to
+// smallest).
 // Canonical L8 and A8L8 load definitions expand luminance into RGBA8 and the
 // output is bounded by MAX_LOADDEF_RGBA8_BYTES for retail lightmap atlases.
 // The scalar arguments mirror GfxImageLoadDef so qcommon remains independent

@@ -24,11 +24,15 @@ constexpr std::uint32_t TECHNIQUE_UNLIT_INDEX = 4u;
 constexpr std::uint32_t TECHNIQUE_EMISSIVE_INDEX = 5u;
 constexpr std::uint32_t TECHNIQUE_LIT_INDEX = 7u;
 constexpr std::uint32_t ENV_MAP_PARMS_HASH = 0x3d9994dcu;
+constexpr std::uint32_t COLOR_MAP_HASH = 0xa0ab1041u;
+constexpr std::uint32_t DETAIL_MAP_HASH = 0xeb529b4du;
+constexpr std::uint32_t DETAIL_SCALE_HASH = 0x08d36a09u;
 
 struct ModelGroup
 {
     const XModel *model = nullptr;
     std::uint8_t reflectionProbeIndex = 0u;
+    std::uint8_t primaryLightIndex = 0u;
     std::vector<std::uint32_t> instanceIndices;
 };
 
@@ -66,7 +70,32 @@ const GfxImage *FindBaseImage(
     for (std::uint32_t index = 0u; index < material->textureCount; ++index)
     {
         const MaterialTextureDef &texture = material->textureTable[index];
+        if (texture.nameHash == COLOR_MAP_HASH && texture.u.image)
+        {
+            sampler = texture.samplerState;
+            return texture.u.image;
+        }
+    }
+    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
+    {
+        const MaterialTextureDef &texture = material->textureTable[index];
         if (texture.semantic == 2u && texture.u.image)
+        {
+            sampler = texture.samplerState;
+            return texture.u.image;
+        }
+    }
+    return nullptr;
+}
+
+const GfxImage *FindDetailImage(
+    const Material *material, std::uint8_t &sampler) noexcept
+{
+    if (!material || !material->textureTable) return nullptr;
+    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
+    {
+        const MaterialTextureDef &texture = material->textureTable[index];
+        if (texture.nameHash == DETAIL_MAP_HASH && texture.u.image)
         {
             sampler = texture.samplerState;
             return texture.u.image;
@@ -225,7 +254,8 @@ WebRendererWorldBatchDesc MakeDraw(
     std::uint32_t indexCount,
     std::uint32_t firstInstance,
     std::uint32_t lastInstance,
-    std::uint8_t reflectionProbeIndex) noexcept
+    std::uint8_t reflectionProbeIndex,
+    std::uint8_t primaryLightIndex) noexcept
 {
     WebRendererWorldBatchDesc draw{};
     draw.firstIndex = firstIndex;
@@ -241,7 +271,9 @@ WebRendererWorldBatchDesc MakeDraw(
     draw.firstInstanceIndex = firstInstance;
     draw.lastInstanceIndex = lastInstance;
     draw.lightmapIndex = 31u;
+    draw.primaryLightIndex = primaryLightIndex;
     draw.sourceKind = WebRendererSceneBatchKind::StaticXModel;
+    draw.cameraRegion = material ? material->cameraRegion : 0u;
     draw.castsSunShadow = material &&
         (material->info.gameFlags & 0x40u) != 0u;
     draw.baseImage = FindBaseImage(material, draw.samplerState);
@@ -254,6 +286,15 @@ WebRendererWorldBatchDesc MakeDraw(
         draw.reflectionProbeImage =
             world.reflectionProbes[reflectionProbeIndex].reflectionImage;
     const bool hasTechnique = SelectTechnique(material, draw);
+    draw.ambientProbeLighting = draw.pixelShaderName &&
+        std::strncmp(draw.pixelShaderName, "lp_amb_", 7u) == 0;
+    if (draw.pixelShaderName &&
+        std::strstr(draw.pixelShaderName, "d0") != nullptr &&
+        CopyMaterialConstant(material, DETAIL_SCALE_HASH, draw.detailScale))
+    {
+        draw.detailImage = FindDetailImage(
+            material, draw.detailSamplerState);
+    }
     const bool normalMapped = draw.pixelShaderName &&
         std::strstr(draw.pixelShaderName, "n0") != nullptr;
     if (!normalMapped)
@@ -312,12 +353,15 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
                 [model, &instance](const ModelGroup &candidate) {
                     return candidate.model == model &&
                         candidate.reflectionProbeIndex ==
-                            instance.reflectionProbeIndex;
+                            instance.reflectionProbeIndex &&
+                        candidate.primaryLightIndex ==
+                            instance.primaryLightIndex;
                 });
             if (group == groups.end())
             {
                 groups.push_back({
-                    model, instance.reflectionProbeIndex, {}});
+                    model, instance.reflectionProbeIndex,
+                    instance.primaryLightIndex, {}});
                 group = std::prev(groups.end());
             }
             group->instanceIndices.push_back(instanceIndex);
@@ -523,7 +567,8 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
                         indexCount,
                         group.instanceIndices.front(),
                         group.instanceIndices.back(),
-                        group.reflectionProbeIndex);
+                        group.reflectionProbeIndex,
+                        group.primaryLightIndex);
                     batch.instanceOffset = instanceOffset;
                     batch.instanceCount = static_cast<std::uint32_t>(
                         group.instanceIndices.size());

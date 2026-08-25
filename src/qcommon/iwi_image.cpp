@@ -15,6 +15,8 @@ constexpr std::uint8_t MAX_FORMAT = 13u;
 constexpr std::uint16_t MIN_PICMIP_DIMENSION = 32u;
 constexpr std::size_t ARGB_BYTES_PER_PIXEL = 4u;
 constexpr std::size_t RGBA_BYTES_PER_PIXEL = 4u;
+constexpr std::size_t MAX_LOADDEF_MIP_CHAIN_RGBA8_BYTES =
+    24u * 1024u * 1024u;
 
 std::uint16_t ReadLe16(std::span<const std::uint8_t> bytes, std::size_t offset) noexcept
 {
@@ -879,11 +881,14 @@ Error DecodeLoadDefRgba8(
     const std::uint32_t mipCount = CountMipmaps(flags, width, height, depth);
     std::size_t expectedBytes = 0u;
     std::size_t baseLevelBytes = 0u;
+    std::size_t totalRgbaBytes = 0u;
     for (std::uint32_t mip = 0u; mip < mipCount; ++mip)
     {
         const std::uint32_t mipWidth = std::max<std::uint32_t>(width >> mip, 1u);
         const std::uint32_t mipHeight = std::max<std::uint32_t>(height >> mip, 1u);
         std::size_t levelBytes = 0u;
+        std::size_t levelPixels = 0u;
+        std::size_t levelRgbaBytes = 0u;
         if (compressed)
         {
             if (!DxtLevelBytes(mipWidth, mipHeight, bytesPerBlock, levelBytes))
@@ -903,11 +908,17 @@ Error DecodeLoadDefRgba8(
             }
         }
         if (mip == 0u) baseLevelBytes = levelBytes;
-        if (!CheckedAdd(expectedBytes, levelBytes, expectedBytes))
+        if (!CheckedMultiply(mipWidth, mipHeight, levelPixels) ||
+            !CheckedMultiply(levelPixels, RGBA_BYTES_PER_PIXEL,
+                levelRgbaBytes) ||
+            !CheckedAdd(totalRgbaBytes, levelRgbaBytes, totalRgbaBytes) ||
+            !CheckedAdd(expectedBytes, levelBytes, expectedBytes))
             return Error::DecodeOutputTooLarge;
     }
     if (payload.size() != expectedBytes || baseLevelBytes > payload.size())
         return Error::DecodeInvalidLayout;
+    if (totalRgbaBytes > MAX_LOADDEF_MIP_CHAIN_RGBA8_BYTES)
+        return Error::DecodeOutputTooLarge;
 
     std::vector<std::uint8_t> rgba;
     try
@@ -980,9 +991,46 @@ Error DecodeLoadDefRgba8(
         }
     }
 
-    image.width = width;
-    image.height = height;
-    image.pixels.swap(rgba);
+    Rgba8Image decoded{};
+    decoded.width = width;
+    decoded.height = height;
+    decoded.pixels.swap(rgba);
+    if (mipCount > 1u)
+    {
+        try
+        {
+            decoded.mipPixels.reserve(mipCount - 1u);
+        }
+        catch (...)
+        {
+            return Error::DecodeAllocationFailed;
+        }
+        std::size_t sourceOffset = baseLevelBytes;
+        for (std::uint32_t mip = 1u; mip < mipCount; ++mip)
+        {
+            const std::uint32_t mipWidth = std::max<std::uint32_t>(
+                static_cast<std::uint32_t>(width) >> mip, 1u);
+            const std::uint32_t mipHeight = std::max<std::uint32_t>(
+                static_cast<std::uint32_t>(height) >> mip, 1u);
+            std::size_t levelBytes = 0u;
+            const Error sizeError = LoadDefLevelBytes(
+                format, mipWidth, mipHeight, levelBytes);
+            if (sizeError != Error::None) return sizeError;
+            Rgba8Image level{};
+            const Error levelError = DecodeLoadDefRgba8(
+                format,
+                static_cast<std::uint8_t>(flags | FLAG_NO_MIPMAPS),
+                static_cast<std::uint16_t>(mipWidth),
+                static_cast<std::uint16_t>(mipHeight), depth,
+                payload.subspan(sourceOffset, levelBytes), level);
+            if (levelError != Error::None) return levelError;
+            decoded.mipPixels.push_back(std::move(level.pixels));
+            sourceOffset += levelBytes;
+        }
+        if (sourceOffset != payload.size())
+            return Error::DecodeInvalidLayout;
+    }
+    image = std::move(decoded);
     return Error::None;
 }
 

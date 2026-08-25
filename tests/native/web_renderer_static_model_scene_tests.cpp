@@ -183,6 +183,73 @@ void TestEveryAuthoredLodIsRetainedForRuntimeSelection()
     assert(command.batches[1].instanceCount == 2u);
 }
 
+void TestCanonicalPrimaryLightSplitsStaticInstanceGroups()
+{
+    Fixture fixture;
+    fixture.instances[0].primaryLightIndex = 1u;
+    fixture.instances[1].primaryLightIndex = 2u;
+
+    WebRendererStaticModelSceneCommand command;
+    assert(WebRenderer_BuildStaticModelSceneCommand(fixture.world, command) ==
+        WebRendererStaticModelSceneResult::Success);
+    assert(command.batches.size() == 2u);
+    assert(command.instances.size() == 2u);
+    assert(command.batches[0].instanceCount == 1u);
+    assert(command.batches[1].instanceCount == 1u);
+    assert(command.batches[0].draw.primaryLightIndex == 1u);
+    assert(command.batches[1].draw.primaryLightIndex == 2u);
+}
+
+void TestAmbientProbeShaderIdentitySurvivesPortableBoundary()
+{
+    Fixture fixture;
+    MaterialPixelShader pixelShader{};
+    pixelShader.name = "lp_amb_t0c0_sm3.hlsl";
+    fixture.technique.passArray[0].pixelShader = &pixelShader;
+
+    WebRendererStaticModelSceneCommand command;
+    assert(WebRenderer_BuildStaticModelSceneCommand(fixture.world, command) ==
+        WebRendererStaticModelSceneResult::Success);
+    assert(command.batches.size() == 1u);
+    assert(command.batches[0].draw.ambientProbeLighting);
+    assert(std::strcmp(command.batches[0].draw.pixelShaderName,
+        "lp_amb_t0c0_sm3.hlsl") == 0);
+}
+
+void TestNamedDetailMapAndScaleSurvivePortableBoundary()
+{
+    Fixture fixture;
+    GfxImage detailImage{};
+    std::array<MaterialTextureDef, 2> textures{};
+    textures[0].nameHash = 0xeb529b4du;
+    textures[0].semantic = 2u;
+    textures[0].samplerState = 0x13u;
+    textures[0].u.image = &detailImage;
+    textures[1] = fixture.texture;
+    textures[1].nameHash = 0xa0ab1041u;
+    fixture.material.textureCount = 2u;
+    fixture.material.textureTable = textures.data();
+    MaterialConstantDef detailScale{};
+    detailScale.nameHash = 0x08d36a09u;
+    detailScale.literal[0] = 8.0f;
+    detailScale.literal[1] = 16.0f;
+    fixture.material.constantCount = 1u;
+    fixture.material.constantTable = &detailScale;
+    MaterialPixelShader pixelShader{};
+    pixelShader.name = "lp_r0c0d0_sm3.hlsl";
+    fixture.technique.passArray[0].pixelShader = &pixelShader;
+
+    WebRendererStaticModelSceneCommand command;
+    assert(WebRenderer_BuildStaticModelSceneCommand(fixture.world, command) ==
+        WebRendererStaticModelSceneResult::Success);
+    const WebRendererWorldBatchDesc &draw = command.batches[0].draw;
+    assert(draw.baseImage == &fixture.image);
+    assert(draw.detailImage == &detailImage);
+    assert(draw.detailSamplerState == 0x13u);
+    assert(draw.detailScale[0] == 8.0f);
+    assert(draw.detailScale[1] == 16.0f);
+}
+
 void TestLightingAtlasCountsOnlySubmittedCanonicalPlacements()
 {
     Fixture fixture;
@@ -218,6 +285,28 @@ void TestMaterialReferencesResolveAtRendererEvaluation()
         WebRendererWorldTechnique::BaseTexture);
 
     g_resolvedMaterial = nullptr;
+}
+
+void TestCameraRegionThreeRemainsShadowOnly()
+{
+    Fixture fixture;
+    fixture.material.cameraRegion = 3u;
+
+    WebRendererStaticModelSceneCommand command;
+    assert(WebRenderer_BuildStaticModelSceneCommand(fixture.world, command) ==
+        WebRendererStaticModelSceneResult::Success);
+    assert(command.batches.size() == 1u);
+    const WebRendererWorldBatchDesc &draw = command.batches[0].draw;
+    assert(draw.cameraRegion == 3u);
+    assert(!WebRenderer_IsCameraVisibleXModelSurface(
+        draw.sourceKind, draw.cameraRegion));
+    assert(WebRenderer_IsCameraVisibleXModelSurface(
+        WebRendererSceneBatchKind::StaticXModel, 2u));
+    assert(WebRenderer_IsCameraVisibleXModelSurface(
+        WebRendererSceneBatchKind::FxXModel, 3u));
+    // The batch is deliberately retained so the backend's shadow partition
+    // can still submit its canonical build-shadowmap technique.
+    assert(draw.castsSunShadow);
 }
 
 void TestSm3SpecularRetainsCanonicalProbeAndSplitsProbeGroups()
@@ -317,8 +406,12 @@ int main()
 {
     TestCanonicalInstancesShareOneMaterialSurfaceBatch();
     TestEveryAuthoredLodIsRetainedForRuntimeSelection();
+    TestCanonicalPrimaryLightSplitsStaticInstanceGroups();
+    TestAmbientProbeShaderIdentitySurvivesPortableBoundary();
+    TestNamedDetailMapAndScaleSurvivePortableBoundary();
     TestLightingAtlasCountsOnlySubmittedCanonicalPlacements();
     TestMaterialReferencesResolveAtRendererEvaluation();
+    TestCameraRegionThreeRemainsShadowOnly();
     TestSm3SpecularRetainsCanonicalProbeAndSplitsProbeGroups();
     TestMalformedIndexAndPlacementFailAtomically();
     return 0;

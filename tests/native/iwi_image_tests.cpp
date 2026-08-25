@@ -137,7 +137,8 @@ bool SameImage(const Rgba8Image &left, const Rgba8Image &right)
 {
     return left.width == right.width &&
         left.height == right.height &&
-        left.pixels == right.pixels;
+        left.pixels == right.pixels &&
+        left.mipPixels == right.mipPixels;
 }
 
 Rgba8Image MakeSentinelImage()
@@ -854,6 +855,14 @@ void TestCanonicalLoadDefDecode()
             image.pixels[0] == 0u && image.pixels[1] == 0u &&
             image.pixels[2] == 255u && image.pixels[3] == 255u,
         "canonical load-definition decode uses the leading base mip");
+    Require(image.mipPixels.size() == 2u &&
+            image.mipPixels[0].size() == 2u * 2u * 4u &&
+            image.mipPixels[0][0] == 255u &&
+            image.mipPixels[0][1] == 0u &&
+            image.mipPixels[0][2] == 0u &&
+            image.mipPixels[1].size() == 4u &&
+            image.mipPixels[1][0] == 255u,
+        "canonical load-definition decode retains authored 2D mip levels");
 
     const Rgba8Image sentinel = MakeSentinelImage();
     image = sentinel;

@@ -31,6 +31,9 @@ constexpr std::uint32_t TECHNIQUE_UNLIT_INDEX = 4u;
 constexpr std::uint32_t TECHNIQUE_EMISSIVE_INDEX = 5u;
 constexpr std::uint32_t TECHNIQUE_LIT_INDEX = 7u;
 constexpr std::uint32_t ENV_MAP_PARMS_HASH = 0x3d9994dcu;
+constexpr std::uint32_t COLOR_MAP_HASH = 0xa0ab1041u;
+constexpr std::uint32_t DETAIL_MAP_HASH = 0xeb529b4du;
+constexpr std::uint32_t DETAIL_SCALE_HASH = 0x08d36a09u;
 
 bool Finite3(const float value[3]) noexcept
 {
@@ -45,7 +48,32 @@ const GfxImage *FindBaseImage(
     for (std::uint32_t index = 0u; index < material->textureCount; ++index)
     {
         const MaterialTextureDef &texture = material->textureTable[index];
+        if (texture.nameHash == COLOR_MAP_HASH && texture.u.image)
+        {
+            sampler = texture.samplerState;
+            return texture.u.image;
+        }
+    }
+    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
+    {
+        const MaterialTextureDef &texture = material->textureTable[index];
         if (texture.semantic == 2u && texture.u.image)
+        {
+            sampler = texture.samplerState;
+            return texture.u.image;
+        }
+    }
+    return nullptr;
+}
+
+const GfxImage *FindDetailImage(
+    const Material *material, std::uint8_t &sampler) noexcept
+{
+    if (!material || !material->textureTable) return nullptr;
+    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
+    {
+        const MaterialTextureDef &texture = material->textureTable[index];
+        if (texture.nameHash == DETAIL_MAP_HASH && texture.u.image)
         {
             sampler = texture.samplerState;
             return texture.u.image;
@@ -411,6 +439,7 @@ WebRendererWorldBatchDesc MakeDraw(
     std::uint32_t indexCount,
     const float modelLightingCoordinates[3],
     bool modelLightingEnabled, bool depthHack, bool castsSunShadow,
+    std::uint8_t primaryLightIndex,
     std::uint8_t reflectionProbeIndex,
     const GfxImage *reflectionProbeImage,
     WebRendererMaterialResolver materialResolver) noexcept
@@ -430,7 +459,9 @@ WebRendererWorldBatchDesc MakeDraw(
     draw.firstInstanceIndex = UINT32_MAX;
     draw.lastInstanceIndex = UINT32_MAX;
     draw.lightmapIndex = 31u;
+    draw.primaryLightIndex = primaryLightIndex;
     draw.sourceKind = WebRendererSceneBatchKind::DynamicDObj;
+    draw.cameraRegion = material ? material->cameraRegion : 0u;
     draw.depthHack = depthHack;
     const MaterialTechniqueSet *shadowSet =
         material ? material->techniqueSet : nullptr;
@@ -452,6 +483,15 @@ WebRendererWorldBatchDesc MakeDraw(
     // common passes supplies it, but a DB-owned color image remains enough to
     // use that supported subset even when the original shader itself is not.
     SelectTechnique(material, draw);
+    draw.ambientProbeLighting = draw.pixelShaderName &&
+        std::strncmp(draw.pixelShaderName, "lp_amb_", 7u) == 0;
+    if (draw.pixelShaderName &&
+        std::strstr(draw.pixelShaderName, "d0") != nullptr &&
+        CopyMaterialConstant(material, DETAIL_SCALE_HASH, draw.detailScale))
+    {
+        draw.detailImage = FindDetailImage(
+            material, draw.detailSamplerState);
+    }
     const bool normalMapped = draw.pixelShaderName &&
         std::strstr(draw.pixelShaderName, "n0") != nullptr;
     if (!normalMapped)
@@ -515,6 +555,7 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
             }
 
             float modelLightingCoordinates[3]{};
+            std::uint8_t modelPrimaryLightIndex = 0u;
             bool submissionLightingReady = modelLightingComplete;
             if (submissionLightingReady)
             {
@@ -530,6 +571,8 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                         submissionIndex,
                         lightingSample.colors,
                         lightingSample.primaryLightWeight);
+                if (submissionLightingReady)
+                    modelPrimaryLightIndex = lightingSample.primaryLightIndex;
                 if (submissionLightingReady)
                     WebRenderer_GetModelLightingCoordinates(
                         replacement.modelLightingAtlas,
@@ -684,6 +727,7 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                             submission.renderFlags),
                         WebRenderer_DObjIsSunShadowCandidate(
                             submission.renderFlags),
+                        modelPrimaryLightIndex,
                         submission.reflectionProbeIndex,
                         submission.reflectionProbeImage,
                         materialResolver));

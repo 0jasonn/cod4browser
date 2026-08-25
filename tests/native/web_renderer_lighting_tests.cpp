@@ -220,6 +220,14 @@ void TestNativeDisplayGammaRamp()
         0.42044821f));
     assert(Near(WebRenderer_EvaluateDisplayGamma(-1.0f, 0.8f), 0.0f));
     assert(Near(WebRenderer_EvaluateDisplayGamma(2.0f, 0.8f), 1.0f));
+    assert(Near(WebRenderer_GetDisplayGammaExponent(
+        true, false, 0.8f), 1.25f));
+    assert(Near(WebRenderer_GetDisplayGammaExponent(
+        false, false, 0.8f), 1.0f));
+    assert(Near(WebRenderer_GetDisplayGammaExponent(
+        true, true, 0.8f), 1.0f));
+    assert(Near(WebRenderer_GetDisplayGammaExponent(
+        true, false, 0.0f), 1.0f));
 }
 
 void TestNativeDxt5NormalDecode()
@@ -357,6 +365,19 @@ void TestNativeModelLightingShaderComposition()
     assert(Near(result[2], 0.375f));
 }
 
+void TestNativeAmbientProbeLightingComposition()
+{
+    const std::array<float, 4> base{0.8f, 0.5f, 0.25f, 1.0f};
+    const std::array<float, 4> vertex{0.5f, 0.75f, 1.0f, 1.0f};
+    const std::array<float, 4> lighting{0.25f, 0.5f, 0.75f, 0.5f};
+    const std::array<float, 3> sun{0.4f, 0.2f, 0.1f};
+    const auto result = WebRenderer_EvaluateAmbientProbeLightingShader(
+        base, vertex, lighting, sun);
+    assert(Near(result[0], 0.28f));
+    assert(Near(result[1], 0.4125f));
+    assert(Near(result[2], 0.3875f));
+}
+
 void TestModelLightingAtlasEntryCopyAcrossHeights()
 {
     WebRendererModelLightingAtlas source;
@@ -401,6 +422,7 @@ int main()
     TestNativeLightGridRleAndFixedPointBlend();
     TestNativeModelLightingAtlasLayoutAndCoordinates();
     TestNativeModelLightingShaderComposition();
+    TestNativeAmbientProbeLightingComposition();
     TestModelLightingAtlasEntryCopyAcrossHeights();
     return 0;
 }
