@@ -199,6 +199,10 @@ export function createInputControllerCore({
     const handleWheel = (event) => {
         if (!inputActive() || event.deltaY === 0) return;
         event.preventDefault();
+        // The engine consumes discrete wheel keys. One browser event is one
+        // pulse regardless of whether its delta is expressed in pixels,
+        // lines, or pages; magnitude must not make hardware scroll rates leak
+        // into gameplay bindings.
         const key = event.deltaY < 0 ? 0xCE : 0xCD;
         sendKey(key, true);
         sendKey(key, false);
@@ -250,6 +254,7 @@ export function createInputControllerCore({
     document.addEventListener("visibilitychange", handleVisibility);
     canvas.addEventListener("mousedown", handleMouseDown);
     canvas.addEventListener("wheel", handleWheel, { passive: false });
+    canvas.addEventListener("auxclick", preventDefault);
     canvas.addEventListener("contextmenu", preventDefault);
 
     return Object.freeze({
@@ -270,6 +275,7 @@ export function createInputControllerCore({
             document.removeEventListener("visibilitychange", handleVisibility);
             canvas.removeEventListener("mousedown", handleMouseDown);
             canvas.removeEventListener("wheel", handleWheel);
+            canvas.removeEventListener("auxclick", preventDefault);
             canvas.removeEventListener("contextmenu", preventDefault);
         },
     });

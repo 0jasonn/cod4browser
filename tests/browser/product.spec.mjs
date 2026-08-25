@@ -155,12 +155,17 @@ test("production input covers canonical keyboard, mouse, focus, and pointer-lock
             detail: { absolute: true },
         }));
         const canvasElement = document.querySelector("#game-canvas");
-        for (const button of [0, 2, 1]) {
+        for (const button of [0, 2, 1, 3, 4]) {
             canvasElement.dispatchEvent(new MouseEvent("mousedown", { button, bubbles: true }));
             globalThis.dispatchEvent(new MouseEvent("mouseup", { button }));
         }
-        canvasElement.dispatchEvent(new WheelEvent("wheel", { deltaY: -1, bubbles: true }));
-        canvasElement.dispatchEvent(new WheelEvent("wheel", { deltaY: 1, bubbles: true }));
+        globalThis.__auxClickPrevented = !canvasElement.dispatchEvent(
+            new MouseEvent("auxclick", { button: 3, bubbles: true, cancelable: true }));
+        for (const [deltaY, deltaMode] of [[-1, 0], [3, 1], [-1, 2]]) {
+            canvasElement.dispatchEvent(new WheelEvent("wheel", {
+                deltaY, deltaMode, bubbles: true, cancelable: true,
+            }));
+        }
         const bounds = canvasElement.getBoundingClientRect();
         canvasElement.dispatchEvent(new MouseEvent("mousemove", {
             clientX: bounds.left + bounds.width * 0.25,
@@ -176,12 +181,19 @@ test("production input covers canonical keyboard, mouse, focus, and pointer-lock
             { type: "key", key: 0xC9, down: false },
             { type: "key", key: 0xCA, down: true },
             { type: "key", key: 0xCA, down: false },
+            { type: "key", key: 0xCB, down: true },
+            { type: "key", key: 0xCB, down: false },
+            { type: "key", key: 0xCC, down: true },
+            { type: "key", key: 0xCC, down: false },
             { type: "key", key: 0xCE, down: true },
             { type: "key", key: 0xCE, down: false },
             { type: "key", key: 0xCD, down: true },
             { type: "key", key: 0xCD, down: false },
+            { type: "key", key: 0xCE, down: true },
+            { type: "key", key: 0xCE, down: false },
             expect.objectContaining({ type: "mouse-move", dx: 0, dy: 0 }),
         ]);
+    expect(await page.evaluate(() => globalThis.__auxClickPrevented)).toBe(true);
 
     await page.evaluate(() => {
         globalThis.__productInputMessages = [];
