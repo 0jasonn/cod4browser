@@ -59,6 +59,7 @@ export function createWorkerSyncFilesystem(faults = null)
     let persistChain = Promise.resolve();
     const pendingPersistence = [];
     const queuedWrites = new Map();
+    const persistenceObservers = new Set();
     let acceptingWrites = true;
     let flushPromise = null;
     let homeBytes = 0;
@@ -120,7 +121,8 @@ export function createWorkerSyncFilesystem(faults = null)
         });
     }
 
-    async function loadHomeDirectory(directory, relative = "", budget = { bytes: 0, files: 0 })
+    async function loadHomeDirectory(directory, relative = "", budget = { bytes: 0, files: 0 },
+        report = null)
     {
         for await (const [name, handle] of directory.entries()) {
             const logicalPath = normalizeLogicalPath(
@@ -128,7 +130,7 @@ export function createWorkerSyncFilesystem(faults = null)
             if (!logicalPath) continue;
             if (handle.kind === "directory") {
                 addHomeDirectory(logicalPath);
-                await loadHomeDirectory(handle, logicalPath, budget);
+                await loadHomeDirectory(handle, logicalPath, budget, report);
                 continue;
             }
             if (handle.kind !== "file" || ++budget.files > 8191) {
@@ -148,16 +150,21 @@ export function createWorkerSyncFilesystem(faults = null)
                 version: 0,
                 persistedVersion: 0,
             });
+            report?.({
+                phase: "recovering-home",
+                filesProcessed: budget.files,
+                bytesProcessed: budget.bytes,
+            });
         }
         homeBytes = budget.bytes;
     }
 
-    async function initializeHome(root)
+    async function initializeHome(root, report)
     {
         if (homeLoaded) return;
         const appDirectory = await childDirectory(root, [APP_DIRECTORY], true);
         homeDirectory = await childDirectory(appDirectory, [HOME_DIRECTORY], true);
-        await loadHomeDirectory(homeDirectory);
+        await loadHomeDirectory(homeDirectory, "", { bytes: 0, files: 0 }, report);
         homeLoaded = true;
     }
 
@@ -188,21 +195,25 @@ export function createWorkerSyncFilesystem(faults = null)
                 if (operation.key && queuedWrites.get(operation.key) === operation) {
                     queuedWrites.delete(operation.key);
                 }
+                for (const observer of persistenceObservers) observer(operation.progress);
             }
         });
         return persistChain;
     }
 
-    function schedulePersistence(run, key = null)
+    function schedulePersistence(run, key = null, progress = {
+        phase: "persisting", files: 0, bytes: 0,
+    })
     {
         const queued = key ? queuedWrites.get(key) : null;
         if (queued && !queued.started) {
             queued.run = run;
+            queued.progress = progress;
             const running = drainPersistence();
             void running.catch(() => {});
             return running;
         }
-        const operation = { key, run, started: false };
+        const operation = { key, run, progress, started: false };
         pendingPersistence.push(operation);
         if (key) queuedWrites.set(key, operation);
         const running = drainPersistence();
@@ -218,7 +229,29 @@ export function createWorkerSyncFilesystem(faults = null)
         return schedulePersistence(
             () => persistHomeFile(logicalPath, snapshot, version),
             `write:${logicalPath}`,
+            { phase: "persisting", files: 1, bytes: snapshot.byteLength },
         );
+    }
+
+    async function drainPersistenceWithProgress(report)
+    {
+        let filesProcessed = 0;
+        let bytesProcessed = 0;
+        const observer = (progress) => {
+            filesProcessed += progress.files;
+            bytesProcessed += progress.bytes;
+            report?.({
+                phase: progress.phase,
+                filesProcessed,
+                bytesProcessed,
+            });
+        };
+        persistenceObservers.add(observer);
+        try {
+            await drainPersistence();
+        } finally {
+            persistenceObservers.delete(observer);
+        }
     }
 
     function addDirectory(logicalPath)
@@ -257,7 +290,7 @@ export function createWorkerSyncFilesystem(faults = null)
         }));
     }
 
-    async function mount(manifest)
+    async function mount(manifest, report = null)
     {
         if (!manifest || typeof manifest.importId !== "string" ||
             !Array.isArray(manifest.files)) {
@@ -269,14 +302,25 @@ export function createWorkerSyncFilesystem(faults = null)
 
         closeAll();
         acceptingWrites = true;
+        const totalBytes = manifest.files.reduce((sum, entry) =>
+            sum + (Number.isSafeInteger(entry?.size) && entry.size >= 0 ? entry.size : 0), 0);
+        report?.({
+            phase: "preparing",
+            filesProcessed: 0,
+            bytesProcessed: 0,
+            totalFiles: manifest.files.length,
+            totalBytes,
+        });
         const root = await navigator.storage.getDirectory();
-        await initializeHome(root);
+        await initializeHome(root, report);
         const importDirectory = await childDirectory(root, [
             APP_DIRECTORY,
             IMPORTS_DIRECTORY,
             manifest.importId,
         ]);
         try {
+            let filesProcessed = 0;
+            let bytesProcessed = 0;
             for (const entry of manifest.files) {
                 const logicalPath = normalizeLogicalPath(entry?.path);
                 if (!logicalPath || !Number.isSafeInteger(entry?.size) || entry.size < 0) {
@@ -312,8 +356,24 @@ export function createWorkerSyncFilesystem(faults = null)
                     throw error;
                 }
                 files.set(logicalPath, mounted);
+                ++filesProcessed;
+                bytesProcessed += size;
+                report?.({
+                    phase: "mounting",
+                    filesProcessed,
+                    bytesProcessed,
+                    totalFiles: manifest.files.length,
+                    totalBytes,
+                });
             }
             mountedImport = manifest.importId;
+            report?.({
+                phase: "complete",
+                filesProcessed,
+                bytesProcessed,
+                totalFiles: manifest.files.length,
+                totalBytes,
+            });
             return { fileCount: files.size };
         } catch (error) {
             closeAll();
@@ -386,10 +446,12 @@ export function createWorkerSyncFilesystem(faults = null)
                 persistedVersion: -1,
             };
             publishHomeFile(file);
+            faults?.onDirty?.();
         } else if (!append) {
             homeBytes -= file.size;
             file.size = 0;
             ++file.version;
+            faults?.onDirty?.();
         }
         const descriptor = nextDescriptor++;
         descriptors.set(descriptor, {
@@ -420,7 +482,8 @@ export function createWorkerSyncFilesystem(faults = null)
             } catch (error) {
                 if (error?.name !== "NotFoundError") throw error;
             }
-        });
+        }, null, { phase: "removing", files: 1, bytes: 0 });
+        faults?.onDirty?.();
         return true;
     }
 
@@ -457,7 +520,8 @@ export function createWorkerSyncFilesystem(faults = null)
             } catch (error) {
                 if (error?.name !== "NotFoundError") throw error;
             }
-        });
+        }, null, { phase: "removing", files: 1, bytes: 0 });
+        faults?.onDirty?.();
         return true;
     }
 
@@ -472,30 +536,53 @@ export function createWorkerSyncFilesystem(faults = null)
         for (const file of dirty) scheduleHomeFilePersistence(file);
     }
 
-    async function checkpoint()
+    async function checkpoint(report = null)
     {
+        report?.({ phase: "snapshotting", filesProcessed: 0, bytesProcessed: 0 });
         scheduleDirtyOpenFiles();
-        await drainPersistence();
-        return {
+        await drainPersistenceWithProgress(report);
+        const summary = {
             filesPersisted: [...homeFiles.values()].filter(
                 (file) => file.persistedVersion === file.version).length,
             bytesPersisted: homeBytes,
         };
+        report?.({
+            phase: "complete",
+            filesProcessed: summary.filesPersisted,
+            bytesProcessed: summary.bytesPersisted,
+        });
+        return summary;
     }
 
-    function flushAndUnmount()
+    function flushAndUnmount(report = null)
     {
         if (flushPromise) return flushPromise;
         acceptingWrites = false;
         flushPromise = (async () => {
+            report?.({ phase: "snapshotting", filesProcessed: 0, bytesProcessed: 0 });
             scheduleDirtyOpenFiles();
-            await drainPersistence();
+            await drainPersistenceWithProgress(report);
             const summary = {
                 filesPersisted: [...homeFiles.values()].filter(
                     (file) => file.persistedVersion === file.version).length,
                 bytesPersisted: homeBytes,
             };
+            report?.({
+                phase: "closing-handles",
+                filesProcessed: summary.filesPersisted,
+                bytesProcessed: summary.bytesPersisted,
+            });
             closeAll();
+            report?.({
+                phase: "unmounting",
+                filesProcessed: summary.filesPersisted,
+                bytesProcessed: summary.bytesPersisted,
+            });
+            report?.({
+                phase: "complete",
+                filesProcessed: summary.filesPersisted,
+                bytesProcessed: summary.bytesPersisted,
+            });
             return summary;
         })();
         return flushPromise.finally(() => { flushPromise = null; });
@@ -632,6 +719,7 @@ export function createWorkerSyncFilesystem(faults = null)
                 open.file.size = Math.max(open.file.size, required);
                 homeBytes += growth;
                 ++open.file.version;
+                faults?.onDirty?.();
                 return length;
             },
             close(descriptor) {
@@ -651,7 +739,8 @@ export function createWorkerSyncFilesystem(faults = null)
                     homeDirectory,
                     logicalPath ? logicalPath.split("/") : [],
                     true,
-                ));
+                ), null, { phase: "persisting", files: 1, bytes: 0 });
+                faults?.onDirty?.();
                 return true;
             },
             remove(path) { return removeHomePath(path); },

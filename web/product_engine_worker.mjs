@@ -28,7 +28,56 @@ for (const name of PRODUCT_HOST_EVENTS) {
     });
 }
 
-const filesystem = createWorkerSyncFilesystem();
+let lastDirtyNotice = 0;
+let dirtyNoticeTimer = null;
+
+function postFilesystemDirty()
+{
+    lastDirtyNotice = Date.now();
+    dirtyNoticeTimer = null;
+    globalThis.postMessage({
+        protocolVersion: ENGINE_PROTOCOL_VERSION,
+        type: "filesystem-dirty",
+    });
+}
+
+function notifyFilesystemDirty()
+{
+    const remaining = 250 - (Date.now() - lastDirtyNotice);
+    if (remaining <= 0 && dirtyNoticeTimer === null) {
+        postFilesystemDirty();
+    } else if (dirtyNoticeTimer === null) {
+        dirtyNoticeTimer = setTimeout(postFilesystemDirty, Math.max(0, remaining));
+    }
+}
+
+function createProgressReporter(message)
+{
+    let lastSent = 0;
+    let lastPhase = "";
+    let lastFiles = 0;
+    let lastBytes = 0;
+    return (progress) => {
+        const now = Date.now();
+        const phaseChanged = progress.phase !== lastPhase;
+        const meaningfulDelta = progress.filesProcessed - lastFiles >= 64 ||
+            progress.bytesProcessed - lastBytes >= 16 * 1024 * 1024;
+        if (!phaseChanged && !meaningfulDelta && now - lastSent < 250) return;
+        lastSent = now;
+        lastPhase = progress.phase;
+        lastFiles = progress.filesProcessed;
+        lastBytes = progress.bytesProcessed;
+        globalThis.postMessage({
+            protocolVersion: ENGINE_PROTOCOL_VERSION,
+            type: "filesystem-progress",
+            id: message.id,
+            operation: message.type,
+            progress,
+        });
+    };
+}
+
+const filesystem = createWorkerSyncFilesystem({ onDirty: notifyFilesystemDirty });
 let module = null;
 let state = "starting";
 let resolveInitialization;
@@ -166,25 +215,30 @@ globalThis.addEventListener("message", (event) => {
 
             switch (message.type) {
             case "mountAssets": {
+                const report = createProgressReporter(message);
                 try {
-                    const mounted = await filesystem.mount(message.manifest);
+                    const mounted = await filesystem.mount(message.manifest, report);
                     module._KisakWeb_MountCanonicalRuntime();
-                    await filesystem.checkpoint();
+                    await filesystem.checkpoint(report);
                     state = "mounted";
                     reply(message.id, message.type, { mounted, runtime: true });
                 } catch (error) {
-                    await filesystem.flushAndUnmount().catch(() => {});
+                    await filesystem.flushAndUnmount(report).catch(() => {});
                     state = "ready";
                     throw error;
                 }
                 break;
             }
-            case "flushAndUnmount":
-                reply(message.id, message.type, await filesystem.flushAndUnmount());
+            case "flushAndUnmount": {
+                const result = await filesystem.flushAndUnmount(
+                    createProgressReporter(message));
+                reply(message.id, message.type, result);
                 state = "ready";
                 break;
+            }
             case "checkpoint":
-                reply(message.id, message.type, await filesystem.checkpoint());
+                reply(message.id, message.type, await filesystem.checkpoint(
+                    createProgressReporter(message)));
                 break;
             case "probeAsset": {
                 const result = await probeAsset(message.kind, message.buffers, message.metadata);
@@ -208,7 +262,8 @@ globalThis.addEventListener("message", (event) => {
                 break;
             case "shutdown":
                 state = "stopping";
-                reply(message.id, message.type, await filesystem.flushAndUnmount());
+                reply(message.id, message.type, await filesystem.flushAndUnmount(
+                    createProgressReporter(message)));
                 state = "stopped";
                 break;
             default:

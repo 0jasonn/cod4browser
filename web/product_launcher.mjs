@@ -327,6 +327,7 @@ try {
             document.documentElement.dataset.runtimeState = "failed";
             appendLog(`[kisakcod-web] WebAssembly aborted: ${reason}`, "error");
         },
+        onFilesystemDirty() { checkpointController?.markDirty(); },
     });
     await engine.ready;
     checkpointController = createVisibilityCheckpoint({

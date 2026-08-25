@@ -98,6 +98,17 @@ class WorkerDouble
         } }, evenIfTerminated), delay);
     }
 
+    progress(request, progress, delay = 0, evenIfTerminated = false)
+    {
+        setTimeout(() => this.emit("message", { data: {
+            protocolVersion: ENGINE_PROTOCOL_VERSION,
+            type: "filesystem-progress",
+            id: request.id,
+            operation: request.type,
+            progress,
+        } }, evenIfTerminated), delay);
+    }
+
     crash(message = "worker crashed")
     {
         this.emit("error", { error: new Error(message), message });
@@ -127,7 +138,15 @@ const failure = (operation, code = "OPERATION_FAILED") => ({
     code, operation, message: `${operation} failed`, recoverable: true,
 });
 
-function createHarness({ behavior, locks = new LockManager(), timeout = 25, onState } = {})
+function createHarness({
+    behavior,
+    locks = new LockManager(),
+    timeout = 25,
+    absoluteTimeout = Math.max(100, timeout),
+    onState,
+    onProgress,
+    onLifecycle,
+} = {})
 {
     const log = locks.log;
     const defaultBehavior = (message, worker) => {
@@ -152,7 +171,11 @@ function createHarness({ behavior, locks = new LockManager(), timeout = 25, onSt
         lockManager: locks,
         mountTimeoutMs: timeout,
         flushTimeoutMs: timeout,
+        filesystemStallTimeoutMs: timeout,
+        filesystemAbsoluteTimeoutMs: absoluteTimeout,
         managePageLifecycle: false,
+        onFilesystemProgress: onProgress,
+        onFilesystemLifecycleEvent: onLifecycle,
         onFilesystemState(state) {
             states.push(state);
             log.push(`state:${state}`);
@@ -197,6 +220,85 @@ test("filesystem lifecycle: late mount reply cannot survive timeout recovery", a
     assert.equal(worker.terminated, true);
     assert.equal(host.filesystemState, FILESYSTEM_STATES.TERMINATED);
     assert.equal(states.at(-1), FILESYSTEM_STATES.TERMINATED);
+    await host.dispose();
+});
+
+test("filesystem lifecycle: progress extends the stall watchdog", async () => {
+    const progress = [];
+    const { host } = createHarness({
+        timeout: 12,
+        absoluteTimeout: 80,
+        onProgress: (item) => progress.push(item),
+        behavior(message, worker) {
+            if (message.type === "mountAssets") {
+                for (let index = 1; index <= 3; ++index) {
+                    worker.progress(message, {
+                        phase: "mounting",
+                        filesProcessed: index,
+                        bytesProcessed: index * 1024,
+                    }, index * 8);
+                }
+                worker.reply(message, { mounted: true }, null, 32);
+            } else worker.reply(message, { mounted: false });
+        },
+    });
+    await host.ready;
+    await host.mountAssets(manifest);
+    assert.equal(host.filesystemState, FILESYSTEM_STATES.MOUNTED);
+    assert.equal(progress.length, 3);
+    await host.dispose();
+});
+
+test("filesystem lifecycle: late progress cannot revive a timed-out request", async () => {
+    const progress = [];
+    const { host } = createHarness({
+        timeout: 5,
+        onProgress: (item) => progress.push(item),
+        behavior(message, worker) {
+            worker.progress(message, {
+                phase: "mounting", filesProcessed: 1, bytesProcessed: 1024,
+            }, 20, true);
+        },
+    });
+    await host.ready;
+    await assert.rejects(host.mountAssets(manifest),
+        (error) => error.code === "REQUEST_TIMEOUT");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(progress.length, 0);
+    assert.equal(host.filesystemState, FILESYSTEM_STATES.TERMINATED);
+    await host.dispose();
+});
+
+test("filesystem lifecycle: absolute watchdog wins despite continued progress", async () => {
+    let timer;
+    const { host } = createHarness({
+        timeout: 30,
+        absoluteTimeout: 80,
+        behavior(message, worker) {
+            if (message.type !== "mountAssets") {
+                worker.reply(message, { mounted: false });
+                return;
+            }
+            let filesProcessed = 0;
+            timer = setInterval(() => worker.progress(message, {
+                phase: "mounting",
+                filesProcessed: ++filesProcessed,
+                bytesProcessed: filesProcessed * 1024,
+            }, 0, true), 6);
+        },
+    });
+    await host.ready;
+    let timeoutError;
+    try {
+        await host.mountAssets(manifest);
+    } catch (error) {
+        timeoutError = error;
+    } finally {
+        clearInterval(timer);
+    }
+    assert.equal(timeoutError?.code, "REQUEST_TIMEOUT");
+    assert.match(timeoutError?.message ?? "", /absolute limit/u);
+    assert.equal(host.filesystemState, FILESYSTEM_STATES.TERMINATED);
     await host.dispose();
 });
 

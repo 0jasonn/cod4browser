@@ -10,7 +10,9 @@ import {
 
 const ENGINE_FILESYSTEM_LOCK = "kisakcod-web-engine-filesystem-v1";
 const HOME_WRITER_LOCK = "kisakcod-web-home-writer-v1";
-const FILESYSTEM_OPERATION_TIMEOUT_MS = 60_000;
+const FILESYSTEM_STALL_TIMEOUT_MS = 30_000;
+const FILESYSTEM_ABSOLUTE_TIMEOUT_MS = 5 * 60_000;
+const MAX_FILESYSTEM_TIMEOUT_MS = 10 * 60_000;
 
 export const FILESYSTEM_STATES = Object.freeze({
     UNMOUNTED: "unmounted",
@@ -29,7 +31,12 @@ export const FILESYSTEM_STATES = Object.freeze({
  * @param {{onLog?: (message: string, level?: string) => void,
  *   onAbort?: (reason: unknown) => void,
  *   onFilesystemState?: (state: string) => void,
- *   requestTimeoutMs?: number, mountTimeoutMs?: number, flushTimeoutMs?: number,
+ *   onFilesystemProgress?: (progress: object) => void,
+ *   onFilesystemDirty?: () => void,
+ *   onFilesystemLifecycleEvent?: (event: string) => void,
+ *   requestTimeoutMs?: number, filesystemStallTimeoutMs?: number,
+ *   filesystemAbsoluteTimeoutMs?: number, mountTimeoutMs?: number,
+ *   flushTimeoutMs?: number,
  *   managePageLifecycle?: boolean,
  *   workerFactory?: (url: URL, options: WorkerOptions) => Worker,
  *   audioDriverFactory?: (options: object) => WebAudioDriver,
@@ -39,10 +46,15 @@ export function createEngineWorkerHost(canvas, {
     onLog,
     onAbort,
     requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
-    mountTimeoutMs = FILESYSTEM_OPERATION_TIMEOUT_MS,
-    flushTimeoutMs = FILESYSTEM_OPERATION_TIMEOUT_MS,
+    filesystemStallTimeoutMs = FILESYSTEM_STALL_TIMEOUT_MS,
+    filesystemAbsoluteTimeoutMs = FILESYSTEM_ABSOLUTE_TIMEOUT_MS,
+    mountTimeoutMs,
+    flushTimeoutMs,
     managePageLifecycle = true,
     onFilesystemState,
+    onFilesystemProgress,
+    onFilesystemDirty,
+    onFilesystemLifecycleEvent,
     workerFactory = (url, options) => new Worker(url, options),
     audioDriverFactory = (options) => new WebAudioDriver(options),
     lockManager = navigator.locks,
@@ -91,15 +103,35 @@ export function createEngineWorkerHost(canvas, {
         onFilesystemState?.(state);
     }
 
+    function emitFilesystemLifecycle(event)
+    {
+        try {
+            onFilesystemLifecycleEvent?.(event);
+        } catch (error) {
+            onLog?.(`[kisakcod-web] Filesystem lifecycle observer failed: ${error}`, "warn");
+        }
+    }
+
     function validateFilesystemTimeout(timeoutMs, name)
     {
         if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 ||
-            timeoutMs > MAX_REQUEST_TIMEOUT_MS) {
-            throw new RangeError(`${name} timeout must be 1..${MAX_REQUEST_TIMEOUT_MS} ms.`);
+            timeoutMs > MAX_FILESYSTEM_TIMEOUT_MS) {
+            throw new RangeError(`${name} timeout must be 1..${MAX_FILESYSTEM_TIMEOUT_MS} ms.`);
         }
     }
-    validateFilesystemTimeout(mountTimeoutMs, "Mount");
-    validateFilesystemTimeout(flushTimeoutMs, "Flush");
+    validateFilesystemTimeout(filesystemStallTimeoutMs, "Filesystem stall");
+    validateFilesystemTimeout(filesystemAbsoluteTimeoutMs, "Filesystem absolute");
+    if (filesystemAbsoluteTimeoutMs < filesystemStallTimeoutMs) {
+        throw new RangeError("Filesystem absolute timeout must be at least the stall timeout.");
+    }
+    if (mountTimeoutMs !== undefined) validateFilesystemTimeout(mountTimeoutMs, "Mount stall");
+    if (flushTimeoutMs !== undefined) validateFilesystemTimeout(flushTimeoutMs, "Flush stall");
+
+    function clearRequestTimers(request)
+    {
+        clearTimeout(request.timeout);
+        clearTimeout(request.absoluteTimeout);
+    }
 
     function rejectPending(error)
     {
@@ -107,7 +139,7 @@ export function createEngineWorkerHost(canvas, {
             ? error
             : new EngineWorkerError(error);
         for (const request of pending.values()) {
-            clearTimeout(request.timeout);
+            clearRequestTimers(request);
             request.signal?.removeEventListener("abort", request.abort);
             request.reject(failure);
         }
@@ -129,43 +161,71 @@ export function createEngineWorkerHost(canvas, {
      * @param {string} type
      * @param {object} [payload]
      * @param {Transferable[]} [transfer]
-     * @param {{timeoutMs?: number, signal?: AbortSignal}} [options]
+     * @param {{timeoutMs?: number, signal?: AbortSignal,
+     *   stallTimeoutMs?: number, absoluteTimeoutMs?: number}} [options]
      */
     function rpc(type, payload = {}, transfer = [], {
         timeoutMs = requestTimeoutMs,
         signal,
+        stallTimeoutMs,
+        absoluteTimeoutMs,
     } = {})
     {
         if ((shuttingDown && type !== "shutdown") || disposed || workerUnavailable) {
             return Promise.reject(new EngineWorkerError(protocolError(
                 "WORKER_SHUTTING_DOWN", type, "The engine Worker is shutting down.")));
         }
-        if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 ||
-            timeoutMs > MAX_REQUEST_TIMEOUT_MS) {
+        const usesProgressWatchdog = stallTimeoutMs !== undefined;
+        if (!usesProgressWatchdog && (!Number.isFinite(timeoutMs) || timeoutMs <= 0 ||
+            timeoutMs > MAX_REQUEST_TIMEOUT_MS)) {
             return Promise.reject(new RangeError(
                 `Worker request timeout must be 1..${MAX_REQUEST_TIMEOUT_MS} ms.`));
+        }
+        if (usesProgressWatchdog) {
+            try {
+                validateFilesystemTimeout(stallTimeoutMs, "Filesystem stall");
+                validateFilesystemTimeout(absoluteTimeoutMs, "Filesystem absolute");
+            } catch (error) {
+                return Promise.reject(error);
+            }
+            if (absoluteTimeoutMs < stallTimeoutMs) {
+                return Promise.reject(new RangeError(
+                    "Filesystem absolute timeout must be at least the stall timeout."));
+            }
         }
         if (signal?.aborted) {
             return Promise.reject(new DOMException("The Worker request was aborted.", "AbortError"));
         }
         const id = allocateRequestId();
         const promise = new Promise((resolve, reject) => {
-            const abort = () => {
+            const expire = (message) => {
                 if (!pending.delete(id)) return;
-                clearTimeout(timeout);
-                reject(new DOMException("The Worker request was aborted.", "AbortError"));
-            };
-            const timeout = setTimeout(() => {
-                if (!pending.delete(id)) return;
+                clearRequestTimers(request);
                 signal?.removeEventListener("abort", abort);
                 reject(new EngineWorkerError(protocolError(
-                    "REQUEST_TIMEOUT", type,
-                    `The engine Worker did not answer within ${timeoutMs} ms.`, true)));
-            }, timeoutMs);
-            pending.set(id, {
-                resolve, reject, timeout, signal, abort,
+                    "REQUEST_TIMEOUT", type, message, true)));
+            };
+            const abort = () => {
+                if (!pending.delete(id)) return;
+                clearRequestTimers(request);
+                reject(new DOMException("The Worker request was aborted.", "AbortError"));
+            };
+            const request = {
+                resolve, reject, timeout: null, signal, abort,
+                absoluteTimeout: null,
+                stallTimeoutMs,
                 generation: workerGeneration,
-            });
+            };
+            request.timeout = setTimeout(() => expire(usesProgressWatchdog
+                ? `The engine Worker made no filesystem progress for ${stallTimeoutMs} ms.`
+                : `The engine Worker did not answer within ${timeoutMs} ms.`),
+            usesProgressWatchdog ? stallTimeoutMs : timeoutMs);
+            if (usesProgressWatchdog) {
+                request.absoluteTimeout = setTimeout(() => expire(
+                    `The filesystem operation exceeded its ${absoluteTimeoutMs} ms absolute limit.`),
+                absoluteTimeoutMs);
+            }
+            pending.set(id, request);
             signal?.addEventListener("abort", abort, { once: true });
         });
         try {
@@ -173,7 +233,7 @@ export function createEngineWorkerHost(canvas, {
         } catch (error) {
             const request = pending.get(id);
             pending.delete(id);
-            clearTimeout(request?.timeout);
+            if (request) clearRequestTimers(request);
             request?.signal?.removeEventListener("abort", request.abort);
             request?.reject(error);
         }
@@ -182,7 +242,8 @@ export function createEngineWorkerHost(canvas, {
 
     const handleMessage = (event) => {
         const message = event.data;
-        if (["ready", "reply", "event", "startup-error"].includes(message?.type) &&
+        if (["ready", "reply", "event", "startup-error", "filesystem-progress",
+            "filesystem-dirty"].includes(message?.type) &&
             message.protocolVersion !== ENGINE_PROTOCOL_VERSION) {
             const error = protocolError(
                 "PROTOCOL_VERSION", "message",
@@ -197,12 +258,32 @@ export function createEngineWorkerHost(canvas, {
             const request = pending.get(message.id);
             if (!request || request.generation !== workerGeneration) break;
             pending.delete(message.id);
-            clearTimeout(request.timeout);
+            clearRequestTimers(request);
             request.signal?.removeEventListener("abort", request.abort);
             if (message.error) request.reject(new EngineWorkerError(message.error));
             else request.resolve(message.result);
             break;
         }
+        case "filesystem-progress": {
+            const request = pending.get(message.id);
+            if (!request || request.generation !== workerGeneration ||
+                request.stallTimeoutMs === undefined) break;
+            clearTimeout(request.timeout);
+            request.timeout = setTimeout(() => {
+                if (!pending.delete(message.id)) return;
+                clearRequestTimers(request);
+                request.signal?.removeEventListener("abort", request.abort);
+                request.reject(new EngineWorkerError(protocolError(
+                    "REQUEST_TIMEOUT", message.operation,
+                    `The engine Worker made no filesystem progress for ${request.stallTimeoutMs} ms.`,
+                    true)));
+            }, request.stallTimeoutMs);
+            onFilesystemProgress?.(message.progress);
+            break;
+        }
+        case "filesystem-dirty":
+            if (!workerUnavailable) onFilesystemDirty?.();
+            break;
         case "event":
             if (!PRODUCT_HOST_EVENTS.has(message.name)) {
                 rejectPending(protocolError(
@@ -276,6 +357,7 @@ export function createEngineWorkerHost(canvas, {
                 }
                 releaseHomeWriterLease = releaseHome;
                 markHomeAcquired(true);
+                emitFilesystemLifecycle("writerLeaseAcquired");
                 await homeHeld;
             },
         );
@@ -313,6 +395,7 @@ export function createEngineWorkerHost(canvas, {
 
     async function releaseLeases()
     {
+        const releasedWriter = Boolean(releaseHomeWriterLease);
         const completions = [filesystemLeaseCompletion, homeWriterLeaseCompletion]
             .filter(Boolean);
         const releases = [releaseFilesystemLease, releaseHomeWriterLease]
@@ -323,6 +406,7 @@ export function createEngineWorkerHost(canvas, {
         releaseHomeWriterLease = null;
         for (const release of releases) release();
         await Promise.all(completions);
+        if (releasedWriter) emitFilesystemLifecycle("writerLeaseReleased");
     }
 
     function workerOwnershipUnknown(error)
@@ -344,7 +428,9 @@ export function createEngineWorkerHost(canvas, {
             rejectPending(protocolError(
                 "WORKER_TERMINATED", operation,
                 "The engine Worker was terminated to end uncertain filesystem ownership."));
+            emitFilesystemLifecycle("workerTerminationStarted");
             worker.terminate();
+            emitFilesystemLifecycle("workerTerminated");
             await releaseLeases();
             setFilesystemState(FILESYSTEM_STATES.TERMINATED);
         })();
@@ -374,7 +460,8 @@ export function createEngineWorkerHost(canvas, {
         setFilesystemState(FILESYSTEM_STATES.FLUSHING);
         try {
             const result = await rpc("flushAndUnmount", {}, [], {
-                timeoutMs: flushTimeoutMs,
+                stallTimeoutMs: flushTimeoutMs ?? filesystemStallTimeoutMs,
+                absoluteTimeoutMs: filesystemAbsoluteTimeoutMs,
             });
             setFilesystemState(FILESYSTEM_STATES.UNMOUNTED);
             await releaseLeases();
@@ -401,7 +488,10 @@ export function createEngineWorkerHost(canvas, {
                     await acquireLeases();
                     setFilesystemState(FILESYSTEM_STATES.MOUNTING);
                     const result = await rpc("mountAssets", { manifest }, [], {
-                        timeoutMs: options?.timeoutMs ?? mountTimeoutMs,
+                        stallTimeoutMs: options?.stallTimeoutMs ?? options?.timeoutMs ??
+                            mountTimeoutMs ?? filesystemStallTimeoutMs,
+                        absoluteTimeoutMs: options?.absoluteTimeoutMs ??
+                            filesystemAbsoluteTimeoutMs,
                     });
                     setFilesystemState(FILESYSTEM_STATES.MOUNTED);
                     return result;
@@ -470,9 +560,19 @@ export function createEngineWorkerHost(canvas, {
                 let result;
                 do {
                     checkpointQueued = false;
-                    result = await rpc("checkpoint", {}, [], {
-                        timeoutMs: options?.timeoutMs ?? flushTimeoutMs,
-                    });
+                    try {
+                        result = await rpc("checkpoint", {}, [], {
+                            stallTimeoutMs: options?.stallTimeoutMs ?? options?.timeoutMs ??
+                                flushTimeoutMs ?? filesystemStallTimeoutMs,
+                            absoluteTimeoutMs: options?.absoluteTimeoutMs ??
+                                filesystemAbsoluteTimeoutMs,
+                        });
+                    } catch (error) {
+                        if (workerOwnershipUnknown(error)) {
+                            await recoverWorkerOwnership("checkpoint", error);
+                        }
+                        throw error;
+                    }
                 } while (checkpointQueued);
                 return result;
             });
@@ -491,7 +591,10 @@ export function createEngineWorkerHost(canvas, {
                 try {
                     await filesystemMutation.catch(() => {});
                     if (!workerUnavailable) {
-                        await rpc("shutdown", {}, [], { timeoutMs: flushTimeoutMs });
+                        await rpc("shutdown", {}, [], {
+                            stallTimeoutMs: flushTimeoutMs ?? filesystemStallTimeoutMs,
+                            absoluteTimeoutMs: filesystemAbsoluteTimeoutMs,
+                        });
                         setFilesystemState(FILESYSTEM_STATES.UNMOUNTED);
                     }
                 } catch (error) {
