@@ -4,6 +4,7 @@
 #endif
 
 #include <web/web_renderer_surface_storage.h>
+#include <web/web_renderer_context.h>
 #include <web/web_renderer_lod.h>
 #include <web/web_renderer_world_scene.h>
 #include <web/web_system.h>
@@ -2275,13 +2276,9 @@ void DestroyWebGLContext()
     // both handlers before destroying the context so a queued loss/restore
     // event cannot publish a recovered runtime for an initialization that
     // never completed.
-    (void)emscripten_set_webglcontextlost_callback(
-        "#canvas", nullptr, EM_TRUE, nullptr);
-    (void)emscripten_set_webglcontextrestored_callback(
-        "#canvas", nullptr, EM_TRUE, nullptr);
+    WebRendererContext_UnregisterCallbacks();
 
-    if (emscripten_webgl_make_context_current(g_renderer.context) ==
-        EMSCRIPTEN_RESULT_SUCCESS)
+    if (WebRendererContext_MakeCurrent(g_renderer.context))
     {
         DeleteWorldTextureObjects(g_renderer.retainedWorldImages);
         DeleteWaterTextureObjects(g_renderer.retainedWorldBatches);
@@ -2347,8 +2344,7 @@ void DestroyWebGLContext()
             g_renderer.texture);
     }
     ResetGpuHandles();
-    (void)emscripten_webgl_destroy_context(g_renderer.context);
-    g_renderer.context = 0;
+    WebRendererContext_Destroy(g_renderer.context);
     g_renderer.contextLost = false;
     g_renderer.initialized = false;
 }
@@ -4898,29 +4894,10 @@ bool HandleWebGLContextRestored(int, const void *, void *)
 
 bool CreateWebGLContext()
 {
-    EM_ASM({
-        const canvas = globalThis.__KISAKCOD_OFFSCREEN_CANVAS__;
-        if (canvas && typeof GL === "object" && GL.offscreenCanvases) {
-            GL.offscreenCanvases.canvas = canvas;
-        }
-    });
-    EmscriptenWebGLContextAttributes attributes;
-    emscripten_webgl_init_context_attributes(&attributes);
-    attributes.alpha = EM_FALSE;
-    attributes.depth = EM_TRUE;
-    attributes.stencil = EM_FALSE;
-    // COD4 controls multisampling through r_aaSamples and resolves its scene
-    // target before post effects. Browser-owned default-framebuffer AA cannot
-    // cover that offscreen scene and would also make the 1x setting dishonest.
-    attributes.antialias = EM_FALSE;
-    attributes.premultipliedAlpha = EM_FALSE;
-    attributes.preserveDrawingBuffer = EM_FALSE;
-    attributes.enableExtensionsByDefault = EM_TRUE;
-    attributes.majorVersion = 2;
-    attributes.minorVersion = 0;
-
-    g_renderer.context = emscripten_webgl_create_context("#canvas", &attributes);
-    if (g_renderer.context <= 0)
+    const bool created = WebRendererContext_Create(
+        g_renderer.context,
+        {HandleWebGLContextLost, HandleWebGLContextRestored});
+    if (!created)
     {
         Web_Log(
             WebLogLevel::Error,
@@ -4928,20 +4905,8 @@ bool CreateWebGLContext()
             static_cast<unsigned long>(g_renderer.context));
         return false;
     }
-    if (emscripten_webgl_make_context_current(g_renderer.context) !=
-        EMSCRIPTEN_RESULT_SUCCESS)
-    {
-        return false;
-    }
     InitializeTextureFilteringCapabilities();
-
-    const EMSCRIPTEN_RESULT lostCallbackResult = emscripten_set_webglcontextlost_callback(
-        "#canvas", nullptr, EM_TRUE, HandleWebGLContextLost);
-    const EMSCRIPTEN_RESULT restoredCallbackResult =
-        emscripten_set_webglcontextrestored_callback(
-            "#canvas", nullptr, EM_TRUE, HandleWebGLContextRestored);
-    return lostCallbackResult == EMSCRIPTEN_RESULT_SUCCESS &&
-        restoredCallbackResult == EMSCRIPTEN_RESULT_SUCCESS;
+    return true;
 }
 
 WebRendererTextureResult ValidateTextureDesc(
