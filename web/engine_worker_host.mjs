@@ -17,6 +17,7 @@ const EXPORTED_COMMANDS = [
     "_KisakWeb_TestAudioProxyPcm",
     "_KisakWeb_TestLoseWebGLContext", "_KisakWeb_TestRestoreWebGLContext",
     "_KisakWeb_TestSetAaSamples",
+    "_KisakWeb_TestUnloadWorldResources",
 ];
 const ENGINE_FILESYSTEM_LOCK = "kisakcod-web-engine-filesystem-v1";
 const HOME_WRITER_LOCK = "kisakcod-web-home-writer-v1";

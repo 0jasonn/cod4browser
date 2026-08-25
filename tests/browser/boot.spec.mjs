@@ -565,6 +565,42 @@ test("reports and recovers from WebGL2 context loss", { tag: "@smoke" }, async (
     expect(recovered.engineEvents).toHaveLength(beforeLoss.engineEventCount);
 });
 
+test("world unload releases retained bytes without replacing the WebGL context", async ({ page }) => {
+    await page.addInitScript(() => {
+        globalThis.__rendererLifecycle = [];
+        globalThis.addEventListener("kisakcod:renderer-lifecycle", (event) => {
+            globalThis.__rendererLifecycle.push(structuredClone(event.detail));
+        });
+    });
+    await page.goto("/");
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state))
+        .toBe("running");
+
+    expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.call(
+        "_KisakWeb_TestUnloadWorldResources"))).toBe(1);
+    await expect.poll(() => page.evaluate(() =>
+        globalThis.__rendererLifecycle.findLast((event) => event.state === "worldUnloadEnd")))
+        .toBeTruthy();
+    const lifecycle = await page.evaluate(() => structuredClone(
+        globalThis.__rendererLifecycle.filter((event) =>
+            event.state === "worldUnloadBegin" || event.state === "worldUnloadEnd")));
+    expect(lifecycle).toHaveLength(2);
+    expect(lifecycle[0]).toMatchObject({
+        state: "worldUnloadBegin",
+        oldMapBytesReleased: 0,
+        contextGenerationUnchanged: true,
+    });
+    expect(lifecycle[1]).toMatchObject({
+        state: "worldUnloadEnd",
+        contextGenerationUnchanged: true,
+    });
+    expect(lifecycle[0].recoveryBytes).toBeGreaterThan(0);
+    expect(lifecycle[1].oldMapBytesReleased).toBeGreaterThan(0);
+    expect(lifecycle[1].recoveryBytes).toBeLessThan(lifecycle[0].recoveryBytes);
+    expect(lifecycle[1].contextGenerationBefore)
+        .toBe(lifecycle[1].contextGenerationAfter);
+});
+
 test("does not resume when indexed surface recovery fails", async ({ page }) => {
     await page.addInitScript(() => {
         globalThis.__KISAKCOD_FAIL_SURFACE_RESTORE__ = false;

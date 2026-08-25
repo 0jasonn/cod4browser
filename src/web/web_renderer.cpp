@@ -344,6 +344,7 @@ struct WebRendererState
     int aaActiveSamples = 1;
     int aaMaxSamples = 1;
     std::uint32_t aaResourceGeneration = 0u;
+    std::uint32_t contextGeneration = 0u;
     bool contextLost = false;
     bool initialized = false;
     std::vector<WebRendererSurfaceVertex> retainedVertices;
@@ -1754,6 +1755,12 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestSetAaSamples(int samples)
     Dvar_SetInt(r_aaSamples, samples);
     return r_aaSamples->current.integer;
 }
+
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestUnloadWorldResources()
+{
+    WebRenderer_UnloadWorldResources();
+    return 1;
+}
 #endif
 
 const char *SurfaceTextureBindingString(WebRendererTextureBinding binding) noexcept
@@ -1885,6 +1892,30 @@ EM_JS(void, DispatchRendererMemory, (
         }));
     });
 
+#if KISAK_WEB_DIAGNOSTICS
+EM_JS(void, DispatchRendererLifecycle, (
+    const char *state, double oldMapBytesReleased,
+    std::uint32_t contextGenerationBefore,
+    std::uint32_t contextGenerationAfter, double recoveryBytes), {
+        globalThis.dispatchEvent(new CustomEvent("kisakcod:renderer-lifecycle", {
+            detail: {
+                state: UTF8ToString(state),
+                oldMapBytesReleased,
+                contextGenerationBefore: contextGenerationBefore >>> 0,
+                contextGenerationAfter: contextGenerationAfter >>> 0,
+                recoveryBytes,
+                contextGenerationUnchanged:
+                    contextGenerationBefore === contextGenerationAfter
+            }
+        }));
+    });
+#else
+void DispatchRendererLifecycle(
+    const char *, double, std::uint32_t, std::uint32_t, double)
+{
+}
+#endif
+
 std::size_t RetainedCubeBytes(const kisak::iwi::Rgba8Cube &cube)
 {
     std::size_t bytes = 0u;
@@ -1906,7 +1937,7 @@ std::size_t RetainedImageBytes(
     return bytes;
 }
 
-void EmitRendererMemory(const char *state)
+std::size_t EmitRendererMemory(const char *state)
 {
     const std::size_t geometryBytes =
         g_renderer.retainedVertices.size() * sizeof(WebRendererSurfaceVertex) +
@@ -1963,6 +1994,7 @@ void EmitRendererMemory(const char *state)
         static_cast<double>(shaderProgramCacheEstimateBytes),
         0.0,
         static_cast<double>(WEB_RENDERER_MAX_WORLD_TEXTURE_BYTES));
+    return recoveryCopyBytes;
 }
 
 void ResetGpuHandles()
@@ -4967,6 +4999,7 @@ bool HandleWebGLContextRestored(int, const void *, void *)
         return true;
     }
 
+    ++g_renderer.contextGeneration;
     g_renderer.contextLost = false;
     iassert(g_renderer.initialized && !g_renderer.contextLost);
     if (g_renderer.surfaceActive)
@@ -6323,7 +6356,11 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
     if (comparisonCaptured)
         EmitWorldComparison(intendedComparison);
 #endif
-    EmitRendererMemory("world-submitted");
+    const std::size_t recoveryBytes = EmitRendererMemory("world-submitted");
+    DispatchRendererLifecycle(
+        "newWorldPublished", 0.0,
+        g_renderer.contextGeneration, g_renderer.contextGeneration,
+        static_cast<double>(recoveryBytes));
     return WebRendererSurfaceResult::Success;
 }
 
@@ -6334,6 +6371,13 @@ void WebRenderer_UnloadWorldResources()
 {
     const EMSCRIPTEN_WEBGL_CONTEXT_HANDLE contextBefore = g_renderer.context;
     const bool initializedBefore = g_renderer.initialized;
+    const std::uint32_t contextGenerationBefore = g_renderer.contextGeneration;
+    const std::size_t recoveryBytesBefore =
+        EmitRendererMemory("world-unload-begin");
+    DispatchRendererLifecycle(
+        "worldUnloadBegin", 0.0,
+        contextGenerationBefore, g_renderer.contextGeneration,
+        static_cast<double>(recoveryBytesBefore));
     if (g_renderer.initialized && !g_renderer.contextLost)
     {
         DeleteWorldTextureObjects(g_renderer.retainedWorldImages);
@@ -6509,7 +6553,14 @@ void WebRenderer_UnloadWorldResources()
         g_renderer.retainedWorldImages.empty());
     iassert(g_renderer.context == contextBefore &&
         g_renderer.initialized == initializedBefore);
-    EmitRendererMemory("world-unloaded");
+    const std::size_t recoveryBytesAfter = EmitRendererMemory("world-unloaded");
+    const std::size_t oldMapBytesReleased = recoveryBytesBefore > recoveryBytesAfter
+        ? recoveryBytesBefore - recoveryBytesAfter
+        : 0u;
+    DispatchRendererLifecycle(
+        "worldUnloadEnd", static_cast<double>(oldMapBytesReleased),
+        contextGenerationBefore, g_renderer.contextGeneration,
+        static_cast<double>(recoveryBytesAfter));
 }
 
 WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
@@ -6962,6 +7013,7 @@ bool WebRenderer_Initialize()
         return false;
     }
 
+    ++g_renderer.contextGeneration;
     g_renderer.initialized = true;
     iassert(g_renderer.context > 0 && !g_renderer.contextLost);
     if (g_renderer.surfaceActive)
