@@ -141,6 +141,7 @@ export function validateProductRequest(message, {
     return message;
 }
 
+/** @param {string} operation @param {ProductInput | undefined} input */
 function validateInput(operation, input)
 {
     const validKey = input?.type === "key" && typeof input.key === "number" &&

@@ -57,6 +57,7 @@ export const REQUIRED_ASSETS = Object.freeze([
 const REQUIRED_ASSET_PATHS = new Set(REQUIRED_ASSETS.map(({ path }) => path));
 
 export function isAdditionalSinglePlayerFastfile(
+    /** @type {string} */
     path, language = M12_INSTALL_PROFILE.language)
 {
     const prefix = `zone/${language}/`;
@@ -67,6 +68,7 @@ export function isAdditionalSinglePlayerFastfile(
     return !name.startsWith("mp_") && !name.endsWith("_mp");
 }
 
+/** @param {string} path */
 export function isSupportedImportedPath(path)
 {
     return REQUIRED_ASSET_PATHS.has(path) || isAdditionalSinglePlayerFastfile(path);

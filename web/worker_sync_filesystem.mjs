@@ -433,7 +433,7 @@ export function createWorkerSyncFilesystem(faults = null)
         if (!source || !destinationPath || sourcePath === destinationPath ||
             [...descriptors.values()].some((open) => open.file === source)) return false;
         const destinationSegments = destinationPath.split("/");
-        const destinationName = destinationSegments.pop();
+        destinationSegments.pop();
         const destinationParent = destinationSegments.join("/");
         if (!homeDirectories.has(destinationParent) ||
             homeDirectories.has(destinationPath)) return false;

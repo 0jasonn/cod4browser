@@ -7,13 +7,14 @@ import {
 } from "./product_protocol.mjs";
 
 if (typeof globalThis.CustomEvent !== "function") {
-    globalThis.CustomEvent = class CustomEvent extends Event {
+    globalThis.CustomEvent = /** @type {typeof CustomEvent} */ (/** @type {unknown} */ (class
+        extends Event {
         constructor(type, options = {})
         {
             super(type, options);
             this.detail = options.detail;
         }
-    };
+    }));
 }
 
 for (const name of PRODUCT_HOST_EVENTS) {
@@ -22,7 +23,7 @@ for (const name of PRODUCT_HOST_EVENTS) {
             protocolVersion: ENGINE_PROTOCOL_VERSION,
             type: "event",
             name,
-            detail: event.detail,
+            detail: /** @type {CustomEvent} */ (event).detail,
         });
     });
 }

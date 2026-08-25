@@ -14,6 +14,14 @@ function clamp(value, low, high) {
 }
 
 export class WebAudioDriver {
+    /**
+     * @param {{contextFactory?: () => AudioContext | null,
+     *   onDiagnostic?: (message: string) => void,
+     *   onPlaybackStarted?: (detail: object) => void,
+     *   onTelemetry?: (detail: object) => void,
+     *   decodedPcmBudgetBytes?: number,
+     *   maxQueuedBuffersPerSource?: number}} [options]
+     */
     constructor({
         contextFactory,
         onDiagnostic,
@@ -72,6 +80,7 @@ export class WebAudioDriver {
         return this.context;
     }
 
+    /** @param {EventTarget} [target] */
     attachGestureResume(target = globalThis) {
         if (this.gestureTarget || !target?.addEventListener) return;
         this.gestureTarget = target;
