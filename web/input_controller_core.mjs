@@ -199,10 +199,6 @@ export function createInputControllerCore({
     const handleWheel = (event) => {
         if (!inputActive() || event.deltaY === 0) return;
         event.preventDefault();
-        // The engine consumes discrete wheel keys. One browser event is one
-        // pulse regardless of whether its delta is expressed in pixels,
-        // lines, or pages; magnitude must not make hardware scroll rates leak
-        // into gameplay bindings.
         const key = event.deltaY < 0 ? 0xCE : 0xCD;
         sendKey(key, true);
         sendKey(key, false);

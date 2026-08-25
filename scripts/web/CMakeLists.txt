@@ -463,7 +463,8 @@ file(REMOVE
     "${KISAK_WEB_SITE_DIR}/filesystem_bridge.mjs"
     "${KISAK_WEB_SITE_DIR}/kisakcod-next.mjs"
     "${KISAK_WEB_SITE_DIR}/kisakcod-next.wasm")
-foreach(WEB_FILE asset_profile.mjs asset_store.mjs input_controller_core.mjs web_audio_driver.mjs
+foreach(WEB_FILE asset_profile.mjs asset_store.mjs browser_capabilities.mjs
+        capability_probe_worker.mjs input_controller_core.mjs web_audio_driver.mjs
         worker_sync_filesystem.mjs styles.css)
     configure_file(
         "${KISAK_WEB_SOURCE_DIR}/${WEB_FILE}"

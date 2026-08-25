@@ -18,6 +18,8 @@ $mapPath = Join-Path $resolvedBuild 'kisakcod-production.map'
 $allowedFiles = @(
     'asset_profile.mjs',
     'asset_store.mjs',
+    'browser_capabilities.mjs',
+    'capability_probe_worker.mjs',
     'engine_worker.mjs',
     'index.html',
     'input_controller_core.mjs',

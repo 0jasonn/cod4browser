@@ -34,6 +34,8 @@ test("production artifact boots without diagnostic browser APIs @product", async
 test("production JavaScript exposes only named product operations @product", async ({ request }) => {
     const files = [
         "asset_store.mjs",
+        "browser_capabilities.mjs",
+        "capability_probe_worker.mjs",
         "product_protocol.mjs",
         "engine_worker.mjs",
         "product_engine_worker_host.mjs",
@@ -60,6 +62,38 @@ test("production JavaScript exposes only named product operations @product", asy
     ]) {
         expect(source).toContain(operation);
     }
+});
+
+test("missing required capability blocks engine and asset startup @product", async ({ page }) => {
+    await page.addInitScript(() => {
+        const getContext = HTMLCanvasElement.prototype.getContext;
+        HTMLCanvasElement.prototype.getContext = function(type, options) {
+            return type === "webgl2" ? null : getContext.call(this, type, options);
+        };
+        const NativeWorker = globalThis.Worker;
+        globalThis.__capabilityWorkerConstructions = 0;
+        globalThis.Worker = class extends NativeWorker {
+            constructor(...args)
+            {
+                ++globalThis.__capabilityWorkerConstructions;
+                super(...args);
+            }
+        };
+        const storage = navigator.storage;
+        const getDirectory = storage.getDirectory.bind(storage);
+        globalThis.__capabilityStorageAccesses = 0;
+        storage.getDirectory = (...args) => {
+            ++globalThis.__capabilityStorageAccesses;
+            return getDirectory(...args);
+        };
+    });
+    await page.goto("/");
+    await expect(page.locator("html")).toHaveAttribute("data-runtime-state", "unsupported");
+    await expect(page.locator("#asset-state-label")).toHaveText("Browser storage unsupported");
+    await expect(page.locator("#asset-message")).toContainText("WebGL 2");
+    await expect(page.locator("#select-install-button")).toBeDisabled();
+    expect(await page.evaluate(() => globalThis.__capabilityWorkerConstructions)).toBe(0);
+    expect(await page.evaluate(() => globalThis.__capabilityStorageAccesses)).toBe(0);
 });
 
 test("production storage status is honest and persistence can be retried @product", async ({ page }) => {

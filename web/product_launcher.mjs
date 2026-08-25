@@ -1,4 +1,5 @@
 import { createBrowserAssetStore, selectInstallEntries } from "./asset_store.mjs";
+import { detectBrowserCapabilities } from "./browser_capabilities.mjs";
 import { createEngineWorkerHost } from "./product_engine_worker_host.mjs";
 import { createVisibilityCheckpoint } from "./product_checkpoint_controller.mjs";
 import { createInputController } from "./product_input_controller.mjs";
@@ -232,6 +233,19 @@ const handleCinematic = (event) => {
     appendLog(`[kisakcod-web] Cinematic '${event.detail.name}' skipped: ${event.detail.reason}.`);
 };
 
+const capabilityReport = await detectBrowserCapabilities();
+if (!capabilityReport.supported) {
+    const missing = capabilityReport.missingRequired.map(
+        (name) => capabilityReport.capabilities[name].label);
+    document.documentElement.dataset.runtimeState = "unsupported";
+    frameCounter.textContent = "Unsupported browser";
+    appendLog(`[kisakcod-web] Missing browser features: ${missing.join(", ")}.`, "error");
+    renderAssetState({
+        state: "unsupported",
+        message: `This browser is missing: ${missing.join(", ")}. Use a current Chromium-based browser.`,
+        error: "BROWSER_CAPABILITIES",
+    });
+} else {
 globalThis.addEventListener("kisakcod:state", handleRuntimeState);
 globalThis.addEventListener("kisakcod:frame", handleFrame);
 globalThis.addEventListener("kisakcod:system", handleSystem);
@@ -362,4 +376,5 @@ try {
         message: "The browser engine could not start",
         error: error?.code ?? "STARTUP_FAILED",
     });
+}
 }

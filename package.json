@@ -10,7 +10,7 @@
     "build:web:diagnostics": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/build_web.ps1 -Diagnostics",
     "serve:web": "python tools/serve_web.py --directory build/web/site",
     "check:web:product": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/check_web_product_boundary.ps1",
-    "check:web:lint": "eslint web/product_*.mjs web/asset_profile.mjs web/asset_store.mjs web/input_controller_core.mjs web/web_audio_driver.mjs web/worker_sync_filesystem.mjs tests/node/*.mjs",
+    "check:web:lint": "eslint web/product_*.mjs web/asset_profile.mjs web/asset_store.mjs web/browser_capabilities.mjs web/capability_probe_worker.mjs web/input_controller_core.mjs web/web_audio_driver.mjs web/worker_sync_filesystem.mjs tests/node/*.mjs",
     "check:web:types": "npm run check:web:types:strict && npm run check:web:types:runtime",
     "check:web:types:strict": "tsc --allowJs --checkJs --noEmit --target ES2024 --module NodeNext --moduleResolution NodeNext --lib ES2024,DOM,DOM.Iterable web/asset_profile.mjs web/input_controller_core.mjs web/product_checkpoint_controller.mjs web/product_input_controller.mjs web/product_protocol.mjs",
     "check:web:types:runtime": "tsc --allowJs --checkJs --noEmit --strict false --target ES2024 --module NodeNext --moduleResolution NodeNext --lib ES2024,DOM,DOM.Iterable web/asset_store.mjs web/worker_sync_filesystem.mjs web/web_audio_driver.mjs web/product_engine_worker_host.mjs web/product_engine_worker.mjs web/product_launcher.mjs",

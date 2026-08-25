@@ -26,35 +26,19 @@ export const FILESYSTEM_STATES = Object.freeze({
     TERMINATED: "terminated",
 });
 
-/**
- * @param {HTMLCanvasElement} canvas
- * @param {{onLog?: (message: string, level?: string) => void,
- *   onAbort?: (reason: unknown) => void,
- *   onFilesystemState?: (state: string) => void,
- *   onFilesystemProgress?: (progress: object) => void,
- *   onFilesystemDirty?: () => void,
- *   onFilesystemLifecycleEvent?: (event: string) => void,
- *   requestTimeoutMs?: number, filesystemStallTimeoutMs?: number,
- *   filesystemAbsoluteTimeoutMs?: number, mountTimeoutMs?: number,
- *   flushTimeoutMs?: number,
- *   managePageLifecycle?: boolean,
- *   workerFactory?: (url: URL, options: WorkerOptions) => Worker,
- *   audioDriverFactory?: (options: object) => WebAudioDriver,
- *   lockManager?: LockManager}} [options]
- */
 export function createEngineWorkerHost(canvas, {
-    onLog,
-    onAbort,
+    onLog = undefined,
+    onAbort = undefined,
     requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
     filesystemStallTimeoutMs = FILESYSTEM_STALL_TIMEOUT_MS,
     filesystemAbsoluteTimeoutMs = FILESYSTEM_ABSOLUTE_TIMEOUT_MS,
-    mountTimeoutMs,
-    flushTimeoutMs,
+    mountTimeoutMs = undefined,
+    flushTimeoutMs = undefined,
     managePageLifecycle = true,
-    onFilesystemState,
-    onFilesystemProgress,
-    onFilesystemDirty,
-    onFilesystemLifecycleEvent,
+    onFilesystemState = undefined,
+    onFilesystemProgress = undefined,
+    onFilesystemDirty = undefined,
+    onFilesystemLifecycleEvent = undefined,
     workerFactory = (url, options) => new Worker(url, options),
     audioDriverFactory = (options) => new WebAudioDriver(options),
     lockManager = navigator.locks,
