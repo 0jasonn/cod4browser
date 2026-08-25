@@ -1,3 +1,13 @@
+import {
+    isAdditionalSinglePlayerFastfile,
+    isSupportedImportedPath,
+    M12_INSTALL_PROFILE,
+    MAP_ZONE,
+    REQUIRED_ASSETS,
+} from "./asset_profile.mjs";
+
+export { M12_INSTALL_PROFILE, REQUIRED_ASSETS } from "./asset_profile.mjs";
+
 const DATABASE_NAME = "kisakcod-web";
 const DATABASE_VERSION = 1;
 const METADATA_STORE = "metadata";
@@ -15,71 +25,6 @@ const MAX_IMPORTED_FILE_SIZE = 0x7fff_ffff;
 const MAX_ADAPTER_READ = 1024 * 1024;
 const PROBE_WINDOW_SIZE = 4096;
 const ZIP_TAIL_WINDOW_SIZE = 22 + 0xffff;
-
-const BASE_ARCHIVES = Object.freeze(Array.from(
-    { length: 14 },
-    (_, index) => `main/iw_${String(index).padStart(2, "0")}.iwd`,
-));
-const LOCALIZED_ARCHIVES = Object.freeze(Array.from(
-    { length: 7 },
-    (_, index) => `main/localized_english_iw${String(index).padStart(2, "0")}.iwd`,
-));
-const STARTUP_ZONES = Object.freeze([
-    "zone/english/code_post_gfx.ff",
-    "zone/english/ui.ff",
-    "zone/english/common.ff",
-]);
-const MAP_ZONE = "zone/english/killhouse.ff";
-
-export const M12_INSTALL_PROFILE = Object.freeze({
-    id: "sp-killhouse-english-v1",
-    language: "english",
-    map: "killhouse",
-    baseArchives: BASE_ARCHIVES,
-    localizedArchives: LOCALIZED_ARCHIVES,
-    startupZones: STARTUP_ZONES,
-    mapZone: MAP_ZONE,
-});
-
-export const REQUIRED_ASSETS = Object.freeze([
-    Object.freeze({
-        path: "localization.txt",
-        minimumSize: 1,
-        maximumSize: 4095,
-        label: "Localization configuration",
-        kind: "localization",
-    }),
-    ...BASE_ARCHIVES.map((path) => Object.freeze({
-        path,
-        minimumSize: 100,
-        maximumSize: 512 * 1024 * 1024,
-        label: "Base asset archive",
-        kind: "iwd",
-    })),
-    ...LOCALIZED_ARCHIVES.map((path) => Object.freeze({
-        path,
-        minimumSize: 100,
-        maximumSize: 512 * 1024 * 1024,
-        label: "English localized asset archive",
-        kind: "iwd",
-    })),
-    ...STARTUP_ZONES.map((path) => Object.freeze({
-        path,
-        minimumSize: 14,
-        maximumSize: 512 * 1024 * 1024,
-        label: "Single-player startup fastfile",
-        kind: "fastfile",
-    })),
-    Object.freeze({
-        path: MAP_ZONE,
-        minimumSize: 14,
-        maximumSize: 512 * 1024 * 1024,
-        label: "F.N.G. map fastfile",
-        kind: "fastfile",
-    }),
-]);
-
-const REQUIRED_ASSET_PATHS = new Set(REQUIRED_ASSETS.map(({ path }) => path));
 
 const PROBE_ERRORS = new Map([
     [1, "The browser passed an invalid probe window to WebAssembly."],
@@ -144,25 +89,6 @@ function requireFileLike(file, path)
         throw importError("INVALID_FILE", `${path} is not a readable browser File.`);
     }
     return file;
-}
-
-function isAdditionalSinglePlayerFastfile(path, language = M12_INSTALL_PROFILE.language)
-{
-    const prefix = `zone/${language}/`;
-    if (!path.startsWith(prefix) || path.length <= prefix.length ||
-        path.slice(prefix.length).includes("/") || !path.endsWith(".ff")) {
-        return false;
-    }
-    const name = path.slice(prefix.length, -3);
-    // Multiplayer fastfiles use both mp_* and *_mp naming families.  Keep the
-    // filter name-based so every campaign/SP map remains discoverable without
-    // a manifest of map names.
-    return !name.startsWith("mp_") && !name.endsWith("_mp");
-}
-
-function isSupportedImportedPath(path)
-{
-    return REQUIRED_ASSET_PATHS.has(path) || isAdditionalSinglePlayerFastfile(path);
 }
 
 function retainSupportedEntries(entries)
@@ -634,6 +560,7 @@ async function probeInstallEntries(module, entries)
     let entriesDeclared = 0;
     let archiveCount = 0;
     let zoneCount = 0;
+    const availableSinglePlayerZones = [];
     const requiredFastfiles = new Set();
     for (const requirement of REQUIRED_ASSETS) {
         try {
@@ -645,6 +572,9 @@ async function probeInstallEntries(module, entries)
                 await probeFastfile(module, entries.get(requirement.path));
                 zoneCount += 1;
                 requiredFastfiles.add(requirement.path);
+                if (requirement.path === MAP_ZONE) {
+                    availableSinglePlayerZones.push(requirement.path);
+                }
             }
         } catch (error) {
             if (error instanceof AssetImportError && error.code.startsWith("PROBE_")) {
@@ -661,6 +591,7 @@ async function probeInstallEntries(module, entries)
             if (!requiredFastfiles.has(path)) {
                 await probeFastfile(module, file);
                 zoneCount += 1;
+                availableSinglePlayerZones.push(path);
             }
         } catch (error) {
             if (error instanceof AssetImportError && error.code.startsWith("PROBE_")) {
@@ -672,10 +603,13 @@ async function probeInstallEntries(module, entries)
     return {
         language,
         profile: {
+            version: M12_INSTALL_PROFILE.version,
             id: M12_INSTALL_PROFILE.id,
+            product: M12_INSTALL_PROFILE.product,
             map: M12_INSTALL_PROFILE.map,
             archiveCount,
             zoneCount,
+            availableSinglePlayerZones: availableSinglePlayerZones.sort(),
         },
         archiveProbe: { entriesDeclared, archivesProbed: archiveCount },
         zoneProbe: { filesProbed: zoneCount, version: 5, compression: "zlib" },
@@ -715,6 +649,9 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
     let persistenceGranted = null;
     let operationActive = false;
     let pendingExternalSync = false;
+    let disposed = false;
+    let disposePromise = null;
+    const pendingOperations = new Set();
     const readSources = new WeakSet();
     const storageChannel = typeof BroadcastChannel === "function"
         ? new BroadcastChannel(STORAGE_CHANNEL_NAME)
@@ -754,11 +691,23 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
 
     function scheduleExternalSync()
     {
-        if (!pendingExternalSync || operationActive) {
+        if (disposed || !pendingExternalSync || operationActive) {
             return;
         }
         pendingExternalSync = false;
-        queueMicrotask(() => initialize().catch(() => {}));
+        queueMicrotask(() => track(initialize).catch(() => {}));
+    }
+
+    function track(callback)
+    {
+        if (disposed) {
+            return Promise.reject(importError(
+                "STORE_DISPOSED", "The browser asset store has been disposed."));
+        }
+        const operation = Promise.resolve().then(callback);
+        pendingOperations.add(operation);
+        operation.finally(() => pendingOperations.delete(operation)).catch(() => {});
+        return operation;
     }
 
     async function ensureBackend()
@@ -1362,7 +1311,8 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
         return readWindow(file, offset, requestedLength);
     }
 
-    storageChannel?.addEventListener("message", (event) => {
+    const handleStorageMessage = (event) => {
+        if (disposed) return;
         if (event.data?.type === "release-engine-files") {
             void flushEngine()?.catch(() => {});
             return;
@@ -1372,17 +1322,39 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
         }
         pendingExternalSync = true;
         scheduleExternalSync();
-    });
+    };
+    storageChannel?.addEventListener("message", handleStorageMessage);
+
+    function dispose()
+    {
+        if (disposePromise) return disposePromise;
+        disposed = true;
+        disposePromise = (async () => {
+            await Promise.allSettled([...pendingOperations]);
+            try {
+                await flushEngine();
+            } finally {
+                storageChannel?.removeEventListener("message", handleStorageMessage);
+                storageChannel?.close();
+                database?.close();
+                database = null;
+                importsRoot = null;
+                activeManifest = null;
+            }
+        })();
+        return disposePromise;
+    }
 
     return Object.freeze({
-        initialize,
-        requestPersistence,
-        importEntries,
-        clear,
-        stat,
-        read,
-        openSource,
-        readSource,
+        initialize: () => track(initialize),
+        requestPersistence: () => track(requestPersistence),
+        importEntries: (entries) => track(() => importEntries(entries)),
+        clear: () => track(clear),
+        stat: (path) => track(() => stat(path)),
+        read: (path, options) => track(() => read(path, options)),
+        openSource: (path) => track(() => openSource(path)),
+        readSource: (source, options) => track(() => readSource(source, options)),
+        dispose,
         get manifest() { return activeManifest; },
     });
 }

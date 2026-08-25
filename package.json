@@ -13,7 +13,7 @@
     "check:web:lint": "eslint web/product_*.mjs web/asset_profile.mjs tests/node/*.mjs",
     "check:web:types": "tsc --allowJs --checkJs --noEmit --target ES2024 --module NodeNext --moduleResolution NodeNext web/product_protocol.mjs",
     "check:web:static": "npm run check:web:lint && npm run check:web:types",
-    "test:protocol": "node --test tests/node/product_protocol.test.mjs",
+    "test:protocol": "node --test tests/node/*.test.mjs",
     "test:browser": "playwright test --grep @smoke",
     "test:browser:product": "set KISAK_WEB_SITE=build/web/site&& set KISAK_WEB_TEST_PORT=8018&& set KISAK_WEB_PRODUCT_TEST=1&& playwright test tests/browser/product.spec.mjs",
     "test:browser:remainder": "playwright test --grep-invert \"@smoke|@native-covered\"",
