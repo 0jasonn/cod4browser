@@ -109,19 +109,22 @@ set(KISAK_WEB_DIAGNOSTIC_SOURCES
     "${SRC_DIR}/web/web_renderer_comparison.cpp"
 )
 
+set(KISAK_WEB_GATE2_DIAGNOSTIC_SOURCES
+    "${SRC_DIR}/web/web_retail_fastfile_census.cpp"
+    "${SRC_DIR}/web/web_retail_load_clipmap.cpp"
+    "${SRC_DIR}/web/web_retail_load_comworld.cpp"
+    "${SRC_DIR}/web/web_retail_load_gfxworld.cpp"
+    "${SRC_DIR}/web/web_retail_load_image.cpp"
+    "${SRC_DIR}/web/web_retail_load_lightdef.cpp"
+    "${SRC_DIR}/web/web_retail_load_weapon.cpp"
+    "${SRC_DIR}/web/web_sound_alias_catalog.cpp"
+    "${SRC_DIR}/web/web_retail_census_job.cpp")
+
 # Gate 2 remains available only when the separate diagnostic artifact is
 # requested. The normal production graph never creates or links this target.
 if (KISAK_WEB_DIAGNOSTICS)
     add_library(kisak_web_gate2_oracle STATIC
-        "${SRC_DIR}/web/web_retail_fastfile_census.cpp"
-        "${SRC_DIR}/web/web_retail_load_clipmap.cpp"
-        "${SRC_DIR}/web/web_retail_load_comworld.cpp"
-        "${SRC_DIR}/web/web_retail_load_gfxworld.cpp"
-        "${SRC_DIR}/web/web_retail_load_image.cpp"
-        "${SRC_DIR}/web/web_retail_load_lightdef.cpp"
-        "${SRC_DIR}/web/web_retail_load_weapon.cpp"
-        "${SRC_DIR}/web/web_sound_alias_catalog.cpp"
-        "${SRC_DIR}/web/web_retail_census_job.cpp")
+        ${KISAK_WEB_GATE2_DIAGNOSTIC_SOURCES})
     target_include_directories(kisak_web_gate2_oracle PRIVATE
         "${SRC_DIR}" "${DEPS_DIR}")
     kisak_configure_web_compile_target(kisak_web_gate2_oracle)
