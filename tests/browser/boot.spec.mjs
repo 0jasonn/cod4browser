@@ -159,7 +159,7 @@ async function observeIndexedSurface(page)
     });
 }
 
-test("boots the headless engine slice and renders through WebGL2", { tag: "@smoke" }, async ({ page }) => {
+test("boots the headless engine slice and renders through WebGL2", { tag: "@smoke" }, async ({ page, baseURL }) => {
     await observeIndexedSurface(page);
     const pageErrors = [];
     const consoleErrors = [];
@@ -174,7 +174,8 @@ test("boots the headless engine slice and renders through WebGL2", { tag: "@smok
     });
     page.on("request", (request) => {
         const url = new URL(request.url());
-        if (url.protocol !== "data:" && url.protocol !== "blob:" && url.origin !== "http://127.0.0.1:8000") {
+        if (url.protocol !== "data:" && url.protocol !== "blob:" &&
+            url.origin !== new URL(baseURL).origin) {
             foreignRequests.push(request.url());
         }
     });

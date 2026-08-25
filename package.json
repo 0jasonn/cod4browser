@@ -7,8 +7,11 @@
   "packageManager": "npm@11.16.0",
   "scripts": {
     "build:web": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/build_web.ps1",
+    "build:web:diagnostics": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/build_web.ps1 -Diagnostics",
     "serve:web": "python tools/serve_web.py --directory build/web/site",
+    "check:web:product": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/check_web_product_boundary.ps1",
     "test:browser": "playwright test --grep @smoke",
+    "test:browser:product": "set KISAK_WEB_SITE=build/web/site&& set KISAK_WEB_TEST_PORT=8018&& set KISAK_WEB_PRODUCT_TEST=1&& playwright test tests/browser/product.spec.mjs",
     "test:browser:remainder": "playwright test --grep-invert \"@smoke|@native-covered\"",
     "test:browser:full": "playwright test"
   },

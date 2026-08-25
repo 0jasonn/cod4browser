@@ -134,14 +134,14 @@ async function chooseDirectory(page, directory)
     await chooser.setFiles(directory);
 }
 
-function collectAssetNetworkRequests(page)
+function collectAssetNetworkRequests(page, allowedOrigin)
 {
     const requests = [];
     page.on("request", (request) => {
         const url = new URL(request.url());
         const pathName = url.pathname.toLowerCase();
         if (url.protocol !== "data:" && url.protocol !== "blob:" &&
-            (url.origin !== "http://127.0.0.1:8000" ||
+            (url.origin !== allowedOrigin ||
                 pathName.endsWith("/localization.txt") || pathName.endsWith(".iwd") ||
                 pathName.endsWith(".ff"))) {
             requests.push(`${request.method()} ${request.url()}`);
@@ -155,7 +155,7 @@ function entryPath(entry)
     return typeof entry === "string" ? entry : entry.path;
 }
 
-test("enumerates and verifies stored and deflated members without blocking frames", { tag: "@smoke" }, async ({ page }, testInfo) => {
+test("enumerates and verifies stored and deflated members without blocking frames", { tag: "@smoke" }, async ({ page, baseURL }, testInfo) => {
     await usePortableFolderPicker(page);
     await observeArchive(page);
     const archive = createSyntheticIwd([
@@ -164,7 +164,7 @@ test("enumerates and verifies stored and deflated members without blocking frame
         TAIL_WINDOW_PADDING_MEMBER,
     ]);
     const directory = await createInstallDirectory(testInfo, "archive-success", archive);
-    const assetNetworkRequests = collectAssetNetworkRequests(page);
+    const assetNetworkRequests = collectAssetNetworkRequests(page, new URL(baseURL).origin);
 
     await page.goto("/");
     await waitForEngine(page);

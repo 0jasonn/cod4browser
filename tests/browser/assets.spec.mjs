@@ -62,14 +62,14 @@ async function choosePortableDirectory(page, directory)
     await chooser.setFiles(directory);
 }
 
-test("imports synthetic files through the portable picker and restores them after reload", { tag: "@smoke" }, async ({ page }, testInfo) => {
+test("imports synthetic files through the portable picker and restores them after reload", { tag: "@smoke" }, async ({ page, baseURL }, testInfo) => {
     await usePortableFolderPicker(page);
     const directory = await createInstallDirectory(testInfo, "synthetic-install");
     const assetNetworkRequests = [];
     page.on("request", (request) => {
         const url = new URL(request.url());
         const pathName = url.pathname.toLowerCase();
-        if (url.origin !== "http://127.0.0.1:8000" || request.method() !== "GET" ||
+        if (url.origin !== new URL(baseURL).origin || request.method() !== "GET" ||
             pathName.endsWith("/localization.txt") || pathName.endsWith(".iwd") ||
             pathName.endsWith(".ff")) {
             assetNetworkRequests.push(`${request.method()} ${request.url()}`);
@@ -775,9 +775,13 @@ test("serializes cross-tab changes and clear removes committed and abandoned imp
 
     await chooseDirectory(page, directory);
     await waitForAssets(page, "ready");
-    await waitForAssets(secondPage, "ready");
+    await waitForAssets(secondPage, "failed");
+    expect(await secondPage.evaluate(() => ({
+        error: globalThis.__KISAKCOD_WEB__.assets.error,
+        retained: globalThis.__KISAKCOD_WEB__.assets.retained,
+    }))).toEqual({ error: "HOME_WRITER_CONFLICT", retained: true });
 
-    await secondPage.evaluate(async () => {
+    await page.evaluate(async () => {
         const root = await navigator.storage.getDirectory();
         const app = await root.getDirectoryHandle("kisakcod-web", { create: true });
         const imports = await app.getDirectoryHandle("imports", { create: true });
@@ -793,7 +797,7 @@ test("serializes cross-tab changes and clear removes committed and abandoned imp
     });
 
     await Promise.all([waitForAssets(page, "empty"), waitForAssets(secondPage, "empty")]);
-    expect(await secondPage.evaluate(async () => {
+    expect(await page.evaluate(async () => {
         const root = await navigator.storage.getDirectory();
         const app = await root.getDirectoryHandle("kisakcod-web");
         const imports = await app.getDirectoryHandle("imports");

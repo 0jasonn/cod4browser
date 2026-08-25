@@ -1,6 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const browserChannel = process.env.KISAK_BROWSER_CHANNEL;
+const siteDirectory = process.env.KISAK_WEB_SITE ?? "build/web-diagnostics/site-diagnostics";
+const serverPort = Number(process.env.KISAK_WEB_TEST_PORT ?? 8000);
+const baseURL = `http://127.0.0.1:${serverPort}`;
 
 export default defineConfig({
     testDir: "./tests/browser",
@@ -14,13 +17,13 @@ export default defineConfig({
         timeout: 10_000,
     },
     use: {
-        baseURL: "http://127.0.0.1:8000",
+        baseURL,
         trace: "retain-on-failure",
         viewport: { width: 1440, height: 1000 },
     },
     webServer: {
-        command: "python tools/serve_web.py --directory build/web/site --port 8000",
-        url: "http://127.0.0.1:8000",
+        command: `python tools/serve_web.py --directory ${siteDirectory} --port ${serverPort}`,
+        url: baseURL,
         reuseExistingServer: !process.env.CI,
         timeout: 15_000,
     },

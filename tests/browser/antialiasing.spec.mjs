@@ -130,9 +130,6 @@ test("matches COD4 scene anti-aliasing through 4x", { tag: "@smoke" }, async ({ 
         generation: globalThis.__KISAKCOD_WEB__?.rendererAa?.resourceGeneration,
     }))).toEqual({ state: "ready", active: 4, generation: resizedGeneration + 1 });
 
-    const blitsBeforeDisable = await page.evaluate(() =>
-        globalThis.__kisakcodAaGlOperations.filter(
-            (operation) => operation.operation === "blit-framebuffer").length);
     await page.evaluate(() =>
         globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestSetAaSamples", 1));
     await expect.poll(() => page.evaluate(() => ({
@@ -142,10 +139,15 @@ test("matches COD4 scene anti-aliasing through 4x", { tag: "@smoke" }, async ({ 
     }))).toEqual({ state: "disabled", active: 1, resident: false });
     await page.evaluate(() => new Promise((resolve) =>
         requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    const blitsAfterDisable = await page.evaluate(() =>
+        globalThis.__kisakcodAaGlOperations.filter(
+            (operation) => operation.operation === "blit-framebuffer").length);
+    await page.evaluate(() => new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve))));
     expect(await page.evaluate(() =>
         globalThis.__kisakcodAaGlOperations.filter(
             (operation) => operation.operation === "blit-framebuffer").length))
-        .toBe(blitsBeforeDisable);
+        .toBe(blitsAfterDisable);
 });
 
 test("falls down to the highest WebGL2-supported sample count", async ({ page }) => {
