@@ -641,12 +641,18 @@ async function copyFileToHandle(source, destinationHandle, reportBytes)
     }
 }
 
+/**
+ * @param {any} module
+ * @param {{onState?: (detail: any) => void}} [options]
+ */
 export function createBrowserAssetStore(module, { onState = () => {} } = {})
 {
     let database = null;
     let importsRoot = null;
     let activeManifest = null;
     let persistenceGranted = null;
+    let storageEstimate = { usage: null, quota: null };
+    let lastStateDetail = null;
     let operationActive = false;
     let pendingExternalSync = false;
     let disposed = false;
@@ -660,11 +666,30 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
 
     const flushEngine = () => module?.flushAndUnmount?.() ?? module?.unmount?.();
 
-    const emit = (detail) => onState({
-        persistenceGranted,
-        ...detail,
-    });
+    const emit = (detail) => {
+        lastStateDetail = detail;
+        onState({ persistenceGranted, storageEstimate, ...detail });
+    };
 
+    async function refreshStorageEstimate()
+    {
+        if (typeof navigator.storage?.estimate !== "function") {
+            storageEstimate = { usage: null, quota: null };
+            return storageEstimate;
+        }
+        try {
+            const estimate = await navigator.storage.estimate();
+            storageEstimate = {
+                usage: Number.isFinite(estimate.usage) ? estimate.usage : null,
+                quota: Number.isFinite(estimate.quota) ? estimate.quota : null,
+            };
+        } catch {
+            storageEstimate = { usage: null, quota: null };
+        }
+        return storageEstimate;
+    }
+
+    /** @param {LockGrantedCallback} callback @param {LockMode} [mode] */
     async function withStorageLock(callback, mode = "exclusive")
     {
         return navigator.locks.request(
@@ -846,6 +871,7 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
             if (typeof navigator.storage?.persisted === "function") {
                 persistenceGranted = await navigator.storage.persisted().catch(() => false);
             }
+            await refreshStorageEstimate();
         } catch (error) {
             const wrapped = error instanceof AssetImportError
                 ? error
@@ -985,6 +1011,8 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
         } catch {
             persistenceGranted = false;
         }
+        await refreshStorageEstimate();
+        if (lastStateDetail) emit(lastStateDetail);
         return persistenceGranted;
     }
 
@@ -1015,15 +1043,13 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
                 previousManifest = activeManifest?.importId === storedBeforeImport?.importId
                     ? activeManifest
                     : storedBeforeImport;
-                if (typeof navigator.storage?.estimate === "function") {
-                    const estimate = await navigator.storage.estimate();
-                    if (Number.isFinite(estimate.quota) && Number.isFinite(estimate.usage) &&
-                        estimate.quota - estimate.usage < totalSize) {
-                        throw importError(
-                            "QUOTA",
-                            "Browser storage does not have enough free space for the selected files.",
-                        );
-                    }
+                const estimate = await refreshStorageEstimate();
+                if (estimate.quota !== null && estimate.usage !== null &&
+                    estimate.quota - estimate.usage < totalSize) {
+                    throw importError(
+                        "QUOTA",
+                        "Browser storage does not have enough free space for the selected files.",
+                    );
                 }
 
                 stagedImportId = crypto.randomUUID();
@@ -1091,6 +1117,7 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
                 activeManifest = manifest;
                 stagedImportId = null;
                 await collectGarbage(manifest.importId).catch(() => {});
+                await refreshStorageEstimate();
                 emit({
                     state: "ready",
                     source: "selection",
@@ -1160,6 +1187,7 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
                 }
                 await databaseDelete(database, ACTIVE_IMPORT_KEY);
                 activeManifest = null;
+                await refreshStorageEstimate();
                 emit({ state: "empty", message: "Local imported files were removed" });
                 broadcastChange();
             });

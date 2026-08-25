@@ -24,6 +24,17 @@ export const FILESYSTEM_STATES = Object.freeze({
     TERMINATED: "terminated",
 });
 
+/**
+ * @param {HTMLCanvasElement} canvas
+ * @param {{onLog?: (message: string, level?: string) => void,
+ *   onAbort?: (reason: unknown) => void,
+ *   onFilesystemState?: (state: string) => void,
+ *   requestTimeoutMs?: number, mountTimeoutMs?: number, flushTimeoutMs?: number,
+ *   managePageLifecycle?: boolean,
+ *   workerFactory?: (url: URL, options: WorkerOptions) => Worker,
+ *   audioDriverFactory?: (options: object) => WebAudioDriver,
+ *   lockManager?: LockManager}} [options]
+ */
 export function createEngineWorkerHost(canvas, {
     onLog,
     onAbort,
@@ -57,6 +68,8 @@ export function createEngineWorkerHost(canvas, {
     let releaseHomeWriterLease = null;
     let homeWriterLeaseCompletion = null;
     let filesystemMutation = Promise.resolve();
+    let checkpointPromise = null;
+    /** @type {string} */
     let filesystemState = FILESYSTEM_STATES.UNMOUNTED;
     let workerGeneration = 1;
     let workerUnavailable = false;
@@ -111,6 +124,12 @@ export function createEngineWorkerHost(canvas, {
             "REQUEST_ID_EXHAUSTED", "request", "No Worker request IDs are available."));
     }
 
+    /**
+     * @param {string} type
+     * @param {object} [payload]
+     * @param {Transferable[]} [transfer]
+     * @param {{timeoutMs?: number, signal?: AbortSignal}} [options]
+     */
     function rpc(type, payload = {}, transfer = [], {
         timeoutMs = requestTimeoutMs,
         signal,
@@ -344,8 +363,8 @@ export function createEngineWorkerHost(canvas, {
             await releaseLeases();
             return { mounted: false };
         }
-        if (![FILESYSTEM_STATES.MOUNTED,
-            FILESYSTEM_STATES.FLUSH_FAILED_RETRYABLE].includes(filesystemState)) {
+        if (filesystemState !== FILESYSTEM_STATES.MOUNTED &&
+            filesystemState !== FILESYSTEM_STATES.FLUSH_FAILED_RETRYABLE) {
             throw Object.assign(new Error(
                 `Cannot flush the filesystem while it is ${filesystemState}.`), {
                 code: "FILESYSTEM_STATE",
@@ -436,9 +455,10 @@ export function createEngineWorkerHost(canvas, {
             }
         },
         checkpoint(options) {
-            return serializeFilesystemMutation(async () => {
-                if (![FILESYSTEM_STATES.MOUNTED,
-                    FILESYSTEM_STATES.FLUSH_FAILED_RETRYABLE].includes(filesystemState)) {
+            if (checkpointPromise) return checkpointPromise;
+            const operation = serializeFilesystemMutation(async () => {
+                if (filesystemState !== FILESYSTEM_STATES.MOUNTED &&
+                    filesystemState !== FILESYSTEM_STATES.FLUSH_FAILED_RETRYABLE) {
                     throw Object.assign(new Error("The writable browser profile is not mounted."), {
                         code: "FILESYSTEM_NOT_MOUNTED",
                     });
@@ -447,6 +467,11 @@ export function createEngineWorkerHost(canvas, {
                     timeoutMs: options?.timeoutMs ?? flushTimeoutMs,
                 });
             });
+            checkpointPromise = operation;
+            operation.finally(() => {
+                if (checkpointPromise === operation) checkpointPromise = null;
+            }).catch(() => {});
+            return operation;
         },
         runtimeStatus(options) { return rpc("runtimeStatus", {}, [], options); },
         get filesystemState() { return filesystemState; },

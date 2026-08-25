@@ -70,10 +70,19 @@ body {
     text-transform: uppercase;
 }
 
-#cinematic-status {
+#cinematic-status,
+#save-status {
     max-width: 56ch;
     color: var(--accent-soft);
     font-size: 11px;
+}
+
+#save-status[data-state="saved"] {
+    color: var(--success);
+}
+
+#save-status[data-state="failed"] {
+    color: var(--danger);
 }
 
 .renderer-controls {
@@ -157,6 +166,28 @@ body {
     margin: 18px 0 0;
     border: 0;
     accent-color: var(--accent);
+}
+
+.storage-summary {
+    display: grid;
+    gap: 5px;
+    margin-top: 16px;
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.storage-summary strong {
+    color: var(--ink);
+    font-weight: 600;
+}
+
+.storage-warning {
+    color: var(--danger);
+}
+
+.storage-summary .secondary-action {
+    justify-self: start;
+    margin-top: 5px;
 }
 
 .asset-actions {

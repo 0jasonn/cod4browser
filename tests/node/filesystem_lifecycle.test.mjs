@@ -210,6 +210,47 @@ test("filesystem lifecycle: successful flush unmounts and releases", async () =>
     await host.dispose();
 });
 
+test("filesystem lifecycle: concurrent checkpoints share one Worker request", async () => {
+    let checkpoints = 0;
+    const { host, locks } = createHarness({
+        behavior(message, worker) {
+            if (message.type === "checkpoint") {
+                ++checkpoints;
+                worker.reply(message, { mounted: true }, null, 10);
+            } else worker.reply(message, { mounted: true });
+        },
+    });
+    await host.ready;
+    await host.mountAssets(manifest);
+    const first = host.checkpoint();
+    const second = host.checkpoint();
+    assert.equal(first, second);
+    await Promise.all([first, second]);
+    assert.equal(checkpoints, 1);
+    assert.equal(locks.held(HOME_LOCK), true);
+    await host.dispose();
+});
+
+test("filesystem lifecycle: failed checkpoint retains ownership and can retry", async () => {
+    let checkpoints = 0;
+    const { host, locks } = createHarness({
+        behavior(message, worker) {
+            if (message.type === "checkpoint" && ++checkpoints === 1) {
+                worker.reply(message, null, failure(message.type));
+            } else worker.reply(message, { mounted: true });
+        },
+    });
+    await host.ready;
+    await host.mountAssets(manifest);
+    await assert.rejects(host.checkpoint());
+    assert.equal(host.filesystemState, FILESYSTEM_STATES.MOUNTED);
+    assert.equal(locks.held(HOME_LOCK), true);
+    await host.checkpoint();
+    assert.equal(checkpoints, 2);
+    assert.equal(locks.held(HOME_LOCK), true);
+    await host.dispose();
+});
+
 test("filesystem lifecycle: recoverable flush failure retains ownership", async () => {
     const { host, locks } = createHarness({
         behavior(message, worker) {

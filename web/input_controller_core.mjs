@@ -1,4 +1,4 @@
-const KEY_CODES = Object.freeze({
+const KEY_CODES = /** @type {Readonly<Record<string, number>>} */ (Object.freeze({
     Tab: 0x09, Enter: 0x0D, Escape: 0x1B, Space: 0x20,
     Backspace: 0x7F, CapsLock: 0x97, Pause: 0x99,
     ArrowUp: 0x9A, ArrowDown: 0x9B, ArrowLeft: 0x9C, ArrowRight: 0x9D,
@@ -16,8 +16,9 @@ const KEY_CODES = Object.freeze({
     NumpadEnter: 0xBF, Numpad0: 0xC0, NumpadDecimal: 0xC1,
     NumpadDivide: 0xC2, NumpadSubtract: 0xC3, NumpadAdd: 0xC4,
     NumLock: 0xC5, NumpadMultiply: 0xC6, NumpadEqual: 0xC7,
-});
+}));
 
+/** @param {KeyboardEvent} event */
 export function browserKeyToEngineKey(event)
 {
     if (/^Key[A-Z]$/.test(event.code)) return event.code.charCodeAt(3) + 32;
@@ -28,19 +29,30 @@ export function browserKeyToEngineKey(event)
     return KEY_CODES[event.code] ?? 0;
 }
 
+/** @param {number} button */
 const mouseButtonKey = (button) => [0xC8, 0xCA, 0xC9, 0xCB, 0xCC][button] ?? 0;
 
+/**
+ * @typedef {{type: "key", key: number, down: boolean} |
+ *   {type: "mouse-move", x: number, y: number, dx: number, dy: number}} EngineInput
+ * @param {{canvas: HTMLCanvasElement, commandInput?: HTMLElement | null,
+ *   sendInput: (event: EngineInput) => unknown,
+ *   onState?: (state: Record<string, boolean>) => void,
+ *   onFailure?: (error: unknown) => void}} options
+ */
 export function createInputControllerCore({
     canvas,
     commandInput = null,
     sendInput,
     onState = () => {},
+    onFailure = () => {},
 })
 {
     const heldKeys = new Set();
     const heldMouseButtons = new Set();
     let absoluteMouse = false;
     let disposed = false;
+    let deliveryFailed = false;
     let pointerWasLocked = document.pointerLockElement === canvas;
     let programmaticUnlock = false;
     let lastForwardedEscape = Number.NEGATIVE_INFINITY;
@@ -50,14 +62,26 @@ export function createInputControllerCore({
     let pendingMovementY = 0;
     const escapeDeduplicationMilliseconds = 100;
 
+    /** @param {unknown} error */
+    const failDelivery = (error) => {
+        if (deliveryFailed || disposed) return;
+        deliveryFailed = true;
+        heldKeys.clear();
+        heldMouseButtons.clear();
+        pendingMovementX = 0;
+        pendingMovementY = 0;
+        onFailure(error);
+    };
+    /** @param {EngineInput} event */
     const send = (event) => {
-        if (disposed) return;
+        if (disposed || deliveryFailed) return;
         try {
-            Promise.resolve(sendInput(event)).catch(() => {});
-        } catch (_) {
-            // Input delivery is best effort while the engine Worker is stopping.
+            Promise.resolve(sendInput(event)).catch(failDelivery);
+        } catch (error) {
+            failDelivery(error);
         }
     };
+    /** @param {number} key @param {boolean} down */
     const sendKey = (key, down) => {
         if (key) send({ type: "key", key, down });
     };
@@ -87,6 +111,7 @@ export function createInputControllerCore({
         pendingMovementY = 0;
     };
 
+    /** @param {KeyboardEvent} event */
     const handleKeyDown = (event) => {
         if (event.target === commandInput || !inputActive()) return;
         const key = browserKeyToEngineKey(event);
@@ -99,6 +124,7 @@ export function createInputControllerCore({
         if (key === 0x1B) lastForwardedEscape = performance.now();
         sendKey(key, true);
     };
+    /** @param {KeyboardEvent} event */
     const handleKeyUp = (event) => {
         const key = browserKeyToEngineKey(event);
         if (!key || !heldKeys.has(key)) return;
@@ -108,6 +134,7 @@ export function createInputControllerCore({
             performance.now() - lastSyntheticEscape < escapeDeduplicationMilliseconds) return;
         sendKey(key, false);
     };
+    /** @param {MouseEvent} event */
     const handleMouseDown = (event) => {
         canvas.focus();
         event.preventDefault();
@@ -131,12 +158,14 @@ export function createInputControllerCore({
             }
         }
     };
+    /** @param {MouseEvent} event */
     const handleMouseUp = (event) => {
         const key = mouseButtonKey(event.button);
         if (!key || !heldMouseButtons.delete(key)) return;
         event.preventDefault();
         sendKey(key, false);
     };
+    /** @param {MouseEvent} event */
     const handleMouseMove = (event) => {
         const pointerLocked = document.pointerLockElement === canvas;
         if (!pointerLocked && (!absoluteMouse || event.target !== canvas)) return;
@@ -166,6 +195,7 @@ export function createInputControllerCore({
             dy: 0,
         });
     };
+    /** @param {WheelEvent} event */
     const handleWheel = (event) => {
         if (!inputActive() || event.deltaY === 0) return;
         event.preventDefault();
@@ -191,19 +221,22 @@ export function createInputControllerCore({
         }
         pointerWasLocked = pointerLocked;
     };
+    /** @param {Event} event */
     const handleCursor = (event) => {
-        const cursorVisible = event.detail?.visible === true;
+        const cursorVisible = /** @type {CustomEvent} */ (event).detail?.visible === true;
         onState({ cursorVisible });
         if (cursorVisible) releasePointerLock();
     };
+    /** @param {Event} event */
     const handleMouseMode = (event) => {
-        absoluteMouse = event.detail?.absolute === true;
+        absoluteMouse = /** @type {CustomEvent} */ (event).detail?.absolute === true;
         onState({ absoluteMouse });
         if (absoluteMouse) releasePointerLock();
     };
     const handleVisibility = () => {
         if (document.visibilityState === "hidden") releaseHeldInput();
     };
+    /** @param {Event} event */
     function preventDefault(event) { event.preventDefault(); }
 
     globalThis.addEventListener("keydown", handleKeyDown);

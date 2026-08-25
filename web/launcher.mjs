@@ -732,11 +732,15 @@ function installBrowserInput()
     createInputControllerCore({
         canvas,
         sendInput(event) {
-            runtime.module?.input?.(event);
+            const result = runtime.module?.input?.(event);
             if (event.type === "key") runtime.input.keyEvents += 1;
             else runtime.input.mouseEvents += 1;
+            return result;
         },
         onState(state) { Object.assign(runtime.input, state); },
+        onFailure(error) {
+            setState("failed", `Input transport failed: ${error?.message ?? error}`);
+        },
     });
 }
 

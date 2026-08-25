@@ -458,6 +458,7 @@ add_custom_command(TARGET KisakCOD-web POST_BUILD
 # separate site when explicitly requested.
 file(MAKE_DIRECTORY "${KISAK_WEB_SITE_DIR}")
 file(REMOVE
+    "${KISAK_WEB_SITE_DIR}/engine_worker_host.mjs"
     "${KISAK_WEB_SITE_DIR}/engine_protocol.mjs"
     "${KISAK_WEB_SITE_DIR}/filesystem_bridge.mjs"
     "${KISAK_WEB_SITE_DIR}/kisakcod-next.mjs"
@@ -476,10 +477,12 @@ configure_file("${KISAK_WEB_SOURCE_DIR}/product_launcher.mjs"
     "${KISAK_WEB_SITE_DIR}/launcher.mjs" COPYONLY)
 configure_file("${KISAK_WEB_SOURCE_DIR}/product_input_controller.mjs"
     "${KISAK_WEB_SITE_DIR}/product_input_controller.mjs" COPYONLY)
+configure_file("${KISAK_WEB_SOURCE_DIR}/product_checkpoint_controller.mjs"
+    "${KISAK_WEB_SITE_DIR}/product_checkpoint_controller.mjs" COPYONLY)
 configure_file("${KISAK_WEB_SOURCE_DIR}/product_engine_worker.mjs"
     "${KISAK_WEB_SITE_DIR}/engine_worker.mjs" COPYONLY)
 configure_file("${KISAK_WEB_SOURCE_DIR}/product_engine_worker_host.mjs"
-    "${KISAK_WEB_SITE_DIR}/engine_worker_host.mjs" COPYONLY)
+    "${KISAK_WEB_SITE_DIR}/product_engine_worker_host.mjs" COPYONLY)
 configure_file("${KISAK_WEB_SOURCE_DIR}/product_protocol.mjs"
     "${KISAK_WEB_SITE_DIR}/product_protocol.mjs" COPYONLY)
 

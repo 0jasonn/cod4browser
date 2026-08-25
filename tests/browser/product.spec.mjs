@@ -36,8 +36,9 @@ test("production JavaScript exposes only named product operations @product", asy
         "asset_store.mjs",
         "product_protocol.mjs",
         "engine_worker.mjs",
-        "engine_worker_host.mjs",
+        "product_engine_worker_host.mjs",
         "launcher.mjs",
+        "product_checkpoint_controller.mjs",
         "input_controller_core.mjs",
         "worker_sync_filesystem.mjs",
     ];
@@ -59,6 +60,53 @@ test("production JavaScript exposes only named product operations @product", asy
     ]) {
         expect(source).toContain(operation);
     }
+});
+
+test("production storage status is honest and persistence can be retried @product", async ({ page }) => {
+    await page.addInitScript(() => {
+        navigator.storage.persisted = async () => false;
+        navigator.storage.persist = async () => true;
+        navigator.storage.estimate = async () => ({
+            usage: 256 * 1024 * 1024,
+            quota: 1024 * 1024 * 1024,
+        });
+    });
+    await page.goto("/");
+    await expect(page.locator("#storage-retention"))
+        .toContainText("Persistent storage not granted");
+    await expect(page.locator("#storage-capacity"))
+        .toHaveText("256.0 MiB used of 1.0 GiB (25%).");
+    await expect(page.locator("#storage-warning")).toBeVisible();
+    await page.locator("#retry-persistence-button").click();
+    await expect(page.locator("#storage-retention"))
+        .toContainText("Persistent storage granted");
+    await expect(page.locator("#retry-persistence-button")).toBeHidden();
+});
+
+test("production input transport failure marks the runtime unavailable @product", async ({ page }) => {
+    await page.addInitScript(() => {
+        const NativeWorker = globalThis.Worker;
+        globalThis.__inputAttempts = 0;
+        globalThis.Worker = class extends NativeWorker {
+            postMessage(message, transfer)
+            {
+                if (message?.type === "input-event") {
+                    ++globalThis.__inputAttempts;
+                    throw new Error("input transport unavailable");
+                }
+                return super.postMessage(message, transfer);
+            }
+        };
+    });
+    await page.goto("/");
+    await expect(page.locator("html")).toHaveAttribute("data-runtime-state", "running");
+    const canvas = page.locator("#game-canvas");
+    await canvas.focus();
+    await page.keyboard.press("KeyW");
+    await expect(page.locator("html")).toHaveAttribute("data-runtime-state", "failed");
+    await expect(page.locator("#boot-log")).toContainText("Input transport failed");
+    await page.keyboard.press("Space");
+    expect(await page.evaluate(() => globalThis.__inputAttempts)).toBe(1);
 });
 
 test("production input covers canonical keyboard, mouse, focus, and pointer-lock lifecycles @product", async ({ page }) => {
