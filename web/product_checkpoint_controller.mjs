@@ -13,13 +13,22 @@ export function createVisibilityCheckpoint({
 {
     /** @type {Promise<boolean> | null} */
     let inFlight = null;
+    let checkpointQueued = false;
     let disposed = false;
 
     const request = () => {
         if (disposed || !isMounted()) return Promise.resolve(false);
-        if (inFlight) return inFlight;
+        if (inFlight) {
+            checkpointQueued = true;
+            return inFlight;
+        }
         onStatus({ state: "saving", message: "Saving browser profile" });
-        const operation = Promise.resolve().then(checkpoint).then(() => {
+        const operation = Promise.resolve().then(async () => {
+            do {
+                checkpointQueued = false;
+                await checkpoint();
+            } while (checkpointQueued && !disposed && isMounted());
+        }).then(() => {
             onStatus({ state: "saved", message: "Browser profile saved" });
             return true;
         }, (error) => {

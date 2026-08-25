@@ -14,15 +14,22 @@ class DocumentDouble extends EventTarget
     }
 }
 
-test("visibility checkpoint coalesces hidden notifications", async () => {
+test("visibility checkpoint coalesces hidden notifications into one follow-up", async () => {
     const documentTarget = new DocumentDouble();
     let checkpoints = 0;
+    let concurrent = 0;
+    let maximumConcurrent = 0;
     let finish;
     const pending = new Promise((resolve) => { finish = resolve; });
     const controller = createVisibilityCheckpoint({
         documentTarget,
         isMounted: () => true,
-        checkpoint: () => { ++checkpoints; return pending; },
+        checkpoint: async () => {
+            ++checkpoints;
+            maximumConcurrent = Math.max(maximumConcurrent, ++concurrent);
+            await pending;
+            --concurrent;
+        },
     });
     documentTarget.hide();
     documentTarget.hide();
@@ -30,6 +37,8 @@ test("visibility checkpoint coalesces hidden notifications", async () => {
     assert.equal(checkpoints, 1);
     finish();
     assert.equal(await controller.request(), true);
+    assert.equal(checkpoints, 2);
+    assert.equal(maximumConcurrent, 1);
     controller.dispose();
 });
 

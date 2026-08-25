@@ -69,6 +69,7 @@ export function createEngineWorkerHost(canvas, {
     let homeWriterLeaseCompletion = null;
     let filesystemMutation = Promise.resolve();
     let checkpointPromise = null;
+    let checkpointQueued = false;
     /** @type {string} */
     let filesystemState = FILESYSTEM_STATES.UNMOUNTED;
     let workerGeneration = 1;
@@ -455,7 +456,10 @@ export function createEngineWorkerHost(canvas, {
             }
         },
         checkpoint(options) {
-            if (checkpointPromise) return checkpointPromise;
+            if (checkpointPromise) {
+                checkpointQueued = true;
+                return checkpointPromise;
+            }
             const operation = serializeFilesystemMutation(async () => {
                 if (filesystemState !== FILESYSTEM_STATES.MOUNTED &&
                     filesystemState !== FILESYSTEM_STATES.FLUSH_FAILED_RETRYABLE) {
@@ -463,9 +467,14 @@ export function createEngineWorkerHost(canvas, {
                         code: "FILESYSTEM_NOT_MOUNTED",
                     });
                 }
-                return rpc("checkpoint", {}, [], {
-                    timeoutMs: options?.timeoutMs ?? flushTimeoutMs,
-                });
+                let result;
+                do {
+                    checkpointQueued = false;
+                    result = await rpc("checkpoint", {}, [], {
+                        timeoutMs: options?.timeoutMs ?? flushTimeoutMs,
+                    });
+                } while (checkpointQueued);
+                return result;
             });
             checkpointPromise = operation;
             operation.finally(() => {

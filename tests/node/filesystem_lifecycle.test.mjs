@@ -210,7 +210,7 @@ test("filesystem lifecycle: successful flush unmounts and releases", async () =>
     await host.dispose();
 });
 
-test("filesystem lifecycle: concurrent checkpoints share one Worker request", async () => {
+test("filesystem lifecycle: concurrent checkpoints queue one non-overlapping follow-up", async () => {
     let checkpoints = 0;
     const { host, locks } = createHarness({
         behavior(message, worker) {
@@ -223,10 +223,11 @@ test("filesystem lifecycle: concurrent checkpoints share one Worker request", as
     await host.ready;
     await host.mountAssets(manifest);
     const first = host.checkpoint();
+    while (checkpoints === 0) await new Promise((resolve) => setTimeout(resolve, 0));
     const second = host.checkpoint();
     assert.equal(first, second);
     await Promise.all([first, second]);
-    assert.equal(checkpoints, 1);
+    assert.equal(checkpoints, 2);
     assert.equal(locks.held(HOME_LOCK), true);
     await host.dispose();
 });
