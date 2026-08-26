@@ -13,22 +13,31 @@
 - Gate production files, map objects/symbols, Wasm export count, and artifact
   sizes in CI.
 
-## Next, in order
+## Completed roadmap evidence
 
-The 2026-08-26 execution completed the non-retail baseline and is blocked
-before step 1 because `KISAK_COD4_RETAIL_ROOT` was not supplied. See the
+The 2026-08-26 execution preserved the non-retail Phase 0 baseline and
+completed the local Killhouse/CargoShip matrix at clean source SHA
+`ac063bb20cbc4027497841322d87c2069d736939`. Both maps are currently PLAYABLE
+under the matrix. Transition retirement, configuration checkpoint/reload,
+audio, input, memory telemetry, and forced context recovery passed. See the
 [progress report](../ROADMAP_PROGRESS_REPORT.md).
 
-1. Run the documented local retail matrix for Killhouse and CargoShip with
-   user-owned assets, including transition, persistence, audio, input, and
-   context recovery.
-2. Use measured telemetry to classify reloadable/non-reloadable recovery
-   data, then evaluate compressed-source retention, deduplication, or LRU.
-3. Validate campaign zones individually and update the compatibility matrix;
+Phase 2 retained the existing previous-map recovery eviction and made no new
+optimization. It released 1,521,922,580 B of old-map aggregate CPU recovery to
+zero before new-world publication, with no old/new recovery overlap. Keep
+800 MiB as the per retained-image-pool admission cap: the Killhouse
+static-model pool used 817,908,800 of 838,860,800 B (97.50%). Wasm capacity is
+monotonic allocator capacity, not a retained-resource measurement. No
+unobserved before/after (A/B) timing was inferred.
+
+## Next, in order
+
+1. Validate campaign zones individually and update the compatibility matrix;
    discovery is not compatibility.
-4. Close remaining renderer/material and advanced audio parity gaps.
-5. Add gamepad support behind the existing input boundary.
-6. Design a browser-compatible cinematic path only as a narrow, independently
+2. Close remaining renderer/material and advanced audio parity gaps found by
+   those measured scenes.
+3. Add gamepad support behind the existing input boundary.
+4. Design a browser-compatible cinematic path only as a narrow, independently
    tested subsystem.
-7. Consider multiplayer only with a documented WebSocket/WebTransport relay;
+5. Consider multiplayer only with a documented WebSocket/WebTransport relay;
    browsers cannot use COD4 UDP directly.

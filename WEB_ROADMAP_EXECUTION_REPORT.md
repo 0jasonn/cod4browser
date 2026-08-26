@@ -1,6 +1,6 @@
 # Web roadmap execution report
 
-## Baseline
+## Phase 0 baseline (historical)
 
 | Field | Value |
 | --- | --- |
@@ -24,15 +24,17 @@ runs, 40 production browser tests, 12 diagnostic smoke tests, and 34 passing
 diagnostic remainder tests with two expected retail-root skips. All applicable
 non-retail gates passed.
 
-## Retail availability
+## Phase 1 retail execution
 
-`KISAK_COD4_RETAIL_ROOT supplied: NO`
+`KISAK_COD4_RETAIL_ROOT supplied: YES`
 
-No current retail compatibility claim is made.
-
-The repository validator requires an explicitly supplied legal retail root.
-No machine search, inferred installation path, download, or historical result
-was substituted for current execution.
+An explicit, legally owned retail root was supplied to the repository
+validator. The clean run completed 1/1 in 4.6 minutes at source SHA
+`ac063bb20cbc4027497841322d87c2069d736939` with no dirty-tree inputs. It used
+the Release diagnostics build, Playwright Chromium 149.0.7827.55, and Windows
+11 x64. The machine-readable record is
+[retail-phase1-ac063bb2.json](docs/evidence/retail-phase1-ac063bb2.json); it
+contains no retail paths or proprietary content.
 
 ## Current map results
 
@@ -40,81 +42,125 @@ was substituted for current execution.
 
 | Evidence field | Current result |
 | --- | --- |
-| DB | Not run — `RETAIL_ROOT_MISSING` |
-| Clip/world | Not run — `RETAIL_ROOT_MISSING` |
-| Server | Not run — `RETAIL_ROOT_MISSING` |
-| Game | Not run — `RETAIL_ROOT_MISSING` |
-| CGame | Not run — `RETAIL_ROOT_MISSING` |
-| First frame | Not run — `RETAIL_ROOT_MISSING` |
-| 60s stable | Not run — `RETAIL_ROOT_MISSING` |
-| Input | Not run — `RETAIL_ROOT_MISSING` |
-| Audio | Not run — `RETAIL_ROOT_MISSING` |
-| Transition in | Not run — `RETAIL_ROOT_MISSING` |
-| Transition out | Not run — `RETAIL_ROOT_MISSING` |
-| Save/load | Not run — `RETAIL_ROOT_MISSING` |
-| Context recovery | Not run — `RETAIL_ROOT_MISSING` |
-| Peak memory | Not measured — `RETAIL_ROOT_MISSING` |
-| Result | No current result; historical ledger unchanged |
-| Failure class | N/A |
+| DB / CGame / world | Pass |
+| Clip / Server / Game | Canonical SP path reached; not separate booleans in the structured result |
+| First world frame | Pass; 6,797.800 ms after map command |
+| 60s stable | Pass; 60,025.385 ms and 94 frames |
+| Frame time | 643.155 ms average; 683.800 ms p95; 737.735 ms p99 |
+| Input | Pass; movement, mouse look, primary-fire audio, secondary action |
+| Audio | Pass; 5,881,060 B decoded, 15 buffers queued |
+| Transition out | Pass; old recovery retired before CargoShip publication |
+| Configuration checkpoint/reload | Checkpoint passed: 2 files, 3,154,912 B, 238.69 ms; aggregate reload passed after CargoShip |
+| Context recovery | Not separately measured on Killhouse; the forced recovery ran on CargoShip |
+| Stability-end Wasm capacity | 2,013,724,672 B |
+| Aggregate CPU / decoded / GPU estimate / geometry | 1,517,951,436 / 1,426,285,608 / 1,447,485,000 / 91,665,828 B |
+| Temporary upload / shader program | 0 / 0 B |
+| Result | PLAYABLE |
+| Failure class | None |
 
 ### CargoShip
 
 | Evidence field | Current result |
 | --- | --- |
-| DB | Not run — `RETAIL_ROOT_MISSING` |
-| Clip/world | Not run — `RETAIL_ROOT_MISSING` |
-| Server | Not run — `RETAIL_ROOT_MISSING` |
-| Game | Not run — `RETAIL_ROOT_MISSING` |
-| CGame | Not run — `RETAIL_ROOT_MISSING` |
-| First frame | Not run — `RETAIL_ROOT_MISSING` |
-| 60s stable | Not run — `RETAIL_ROOT_MISSING` |
-| Input | Not run — `RETAIL_ROOT_MISSING` |
-| Audio | Not run — `RETAIL_ROOT_MISSING` |
-| Transition in | Not run — `RETAIL_ROOT_MISSING` |
-| Transition out | Not run — `RETAIL_ROOT_MISSING` |
-| Save/load | Not run — `RETAIL_ROOT_MISSING` |
-| Context recovery | Not run — `RETAIL_ROOT_MISSING` |
-| Peak memory | Not measured — `RETAIL_ROOT_MISSING` |
-| Result | No current result; historical ledger unchanged |
-| Failure class | N/A |
+| DB / CGame / world | Pass |
+| Clip / Server / Game | Canonical SP path reached; not separate booleans in the structured result |
+| First world frame | Pass; 10,838.495 ms after map command |
+| 60s stable | Pass; 60,091.810 ms and 67 frames |
+| Frame time | 897.914 ms average; 1,235.010 ms p95; 1,416.035 ms p99 |
+| Input | Pass; movement, mouse look, primary-fire audio, secondary action |
+| Audio | Pass; 1,582,592 B decoded, 12 buffers queued |
+| Transition in | Pass; Killhouse to CargoShip |
+| Transition out | No second map transition measured; explicit shutdown passed |
+| Configuration checkpoint/reload | Pass; 7 files, 7,091,210 B, 408.28 ms; shutdown reload passed |
+| Context recovery | Pass; recovered world frame in 1,779.19 ms and input resumed |
+| Stability-end Wasm capacity | 2,013,724,672 B |
+| Aggregate CPU / decoded / GPU estimate / geometry | 753,839,840 / 679,402,508 / 700,601,900 / 74,437,332 B |
+| Temporary upload / shader program | 0 / 0 B |
+| Result | PLAYABLE |
+| Failure class | None |
+
+Retained texture recovery was admitted independently per image pool:
+
+| Image recovery pool | Killhouse | CargoShip |
+| --- | ---: | ---: |
+| World | 285,524,036 B | 135,217,216 B |
+| Static models | 817,908,800 B | 207,635,520 B |
+| Dynamic models | 289,375,232 B | 303,781,952 B |
+| UI | 2,478,084 B | 2,359,300 B |
+| Supplemental textures | 30,999,456 B | 30,408,520 B |
+| Per-pool admission cap | 838,860,800 B | 838,860,800 B |
 
 ## Fixes
 
-No runtime failure was reproduced and no runtime fix was implemented. The
-diagnostic browser suite was rerun on isolated ports after the first attempt
-reused a pre-existing production server on port 8000. The Windows fuzz smoke
-used Debug to match the iterator-debug level of the bundled libFuzzer runtime.
-Neither adjustment changed repository source.
+Phase 1 reproduced and fixed three runtime-boundary defects:
 
-Killhouse regression, CargoShip regression, and the retail full matrix were
-not run because `KISAK_COD4_RETAIL_ROOT` was absent.
+| Commit | Reproduction and earliest boundary | Smallest implementation | Focused regression |
+| --- | --- | --- | --- |
+| `1826e037` | Generated DB loading published unresolved leading-comma asset stubs; the earliest defect was canonical DB alias/default resolution. | Strip and resolve the stub through the normal DB path without enlarging pools. | `gate3_db_stream_trace_tests` passed in direct Wasm and MSVC. |
+| `5c3b0fce` | CargoShip reported `duration must be greater than 0`; the earliest defect was the Wasm ABI conversion in `GScr_Earthquake`. | Preserve the native floor conversion without type-punning an 8-byte double through a 16-byte `long double`. | The retail assertion passed and the complete two-map matrix contained no matching error. |
+| `a6d09fe1` | The canonical `writeconfig` command was absent after startup; the earliest defect was the split common-initialization continuation. | Resume `quit`, `writeconfig`, and `writedefaults` registration and canonical configuration serialization after `ProfLoad_Init`, matching native order. | Strict-prefix checks passed in direct Wasm and Win32 MSVC. |
 
-## Memory
+After each runtime fix, the established Killhouse path was rerun before the
+CargoShip transition. The final clean Phase 1 matrix then passed both complete
+60-second map regressions, transition retirement, context recovery, shutdown,
+and reload at `ac063bb2`.
 
-The following values were not measured in this execution because no retail map
-was loaded:
+Commit `ac063bb2` hardened the renderer telemetry and validator so the clean
+run records exact DB, cgame, frame, input, audio, checkpoint, transition,
+context-recovery, shutdown, source-SHA, and dirty-tree evidence.
 
-| Metric | Result |
-| --- | --- |
-| Wasm heap | Not measured |
-| Decoded recovery | Not measured |
-| GPU estimate | Not measured |
-| Geometry | Not measured |
-| Temporary upload | Not measured |
-| Program/shader | Not measured |
-| Audio | Not measured |
-| Transition peak | Not measured |
-| Bytes released at unload | Not measured |
+## Memory and Phase 2 decision
 
-Historical values were not reused as current evidence.
+The Killhouse-to-CargoShip transition passed with WebGL context generation
+unchanged at 1. Old-map decoded texture recovery fell from 1,430,575,400 B to
+zero and old-map aggregate CPU recovery fell from 1,521,922,580 B to zero
+before the new world was published. Peak aggregate CPU recovery was exactly
+1,521,922,580 B, so the run observed no old/new recovery overlap. CargoShip
+world publication began with 175,806,748 B of aggregate CPU recovery.
+
+| Transition peak metric | Bytes |
+| --- | ---: |
+| Decoded texture recovery | 1,430,575,400 |
+| Aggregate CPU recovery | 1,521,922,580 |
+| Estimated GPU textures | 1,451,774,792 |
+| Geometry | 91,347,180 |
+| Temporary uploads | 0 |
+| Shader programs | 0 |
+| Wasm linear-memory capacity | 2,013,724,672 |
+
+Retain the existing previous-map recovery eviction and add no optimization.
+Wasm linear-memory capacity remained 2,013,724,672 B because allocator capacity
+is monotonic; that is not an eviction failure.
+
+Keep 800 MiB (838,860,800 B) as the per retained-image-pool admission cap, not
+an aggregate decoded-recovery ceiling. Killhouse's static-model image pool was
+817,908,800 B, 97.50% of the cap, with 20,952,000 B (about 19.98 MiB) of
+headroom. Lowering the cap is not supported by this run.
+
+| Class | Meaning | Observed resources |
+| --- | --- | --- |
+| A | Irreplaceable | None observed |
+| B | Regenerable | All classified renderer/audio resources below |
+| C | Reloadable from user storage | Decoded textures and audio |
+| D | Cross-pool/content duplicate | Not measured |
+| E | Intentionally global | Render targets, fixed pipeline programs, shader source/cache |
+| F | Map-local | Decoded textures, geometry/draw commands, GPU map resources, temporary uploads, predominantly audio |
+
+Decoded world/static/dynamic/UI/supplemental textures are B/C/F. Retained
+geometry and portable draw commands are B/F; GPU map textures and buffers are
+B/F; render targets and fixed pipeline programs are B/E; shader source/cache
+is B/E (0 B measured); temporary uploads are B/F (0 B measured); and audio is
+B/C and predominantly F. Wasm capacity is allocator capacity, not a retained
+renderer resource class. This is a measured baseline only; no unobserved
+before/after (A/B) memory or timing result is claimed.
 
 ## Artifact
 
 | Metric | Fresh actual | Budget/cap | Result |
 | --- | ---: | ---: | --- |
-| Wasm bytes | 3,166,484 | 3,324,821 | Pass |
-| Application JavaScript bytes | 339,255 | 341,401 | Pass |
-| Total site bytes | 3,516,270 | 3,676,856 | Pass |
+| Wasm bytes | 3,168,351 | 3,324,821 | Pass |
+| Application JavaScript bytes | 339,533 | 341,401 | Pass |
+| Total site bytes | 3,518,415 | 3,676,856 | Pass |
 | Site files | 17 | exact allowlist of 17 | Pass |
 | Raw Wasm exports | 24 | 24 | Pass |
 | Named application exports | 9 | exact allowlist of 9 | Pass |
@@ -127,28 +173,28 @@ Current promotions from this execution:
 
 | Result | Count |
 | --- | ---: |
-| PLAYABLE | 0 |
+| PLAYABLE | 2 |
 | RENDERS | 0 |
 | LOADS | 0 |
 | BLOCKED | 0 |
 | REGRESSION | 0 |
 | UNTESTED | 0 new rows |
 
-The separate historical ledger remains unchanged: Killhouse is recorded as
-historical PLAYABLE evidence, CargoShip as historical RENDERS evidence, and
-other directly selected SP zones as a grouped historical UNTESTED entry. None
-was promoted or demoted by this execution.
+Killhouse remains PLAYABLE with current stronger evidence. CargoShip is
+promoted from historical RENDERS to current PLAYABLE. Other directly selected
+SP zones remain grouped as UNTESTED until each receives its own legal run.
 
 ## Remaining work
 
 | Category | Remaining work |
 | --- | --- |
-| Current blocker | Supply `KISAK_COD4_RETAIL_ROOT` explicitly and rerun the canonical local retail validator |
-| Next map batch | None selected until Killhouse and CargoShip satisfy the current Phase 1 matrix |
+| Current blocker | None in the Phase 1 two-map boundary |
+| Next map batch | Validate one representative campaign map at a time; discovery is not compatibility |
 | Renderer/material gap | No current retail failure observed; do not speculate |
 | Audio gap | No current retail failure observed; do not speculate |
-| Future product feature | Phases 2 through 7 remain gated on current Killhouse-to-CargoShip evidence |
+| Memory | Keep current eviction and per-pool cap; gather comparable evidence before another change |
+| Future product feature | Proceed incrementally from the measured two-map baseline |
 
 ## Final recommendation
 
-`BLOCKED BY MISSING RETAIL ROOT`
+`READY FOR NEXT ROADMAP PHASE`

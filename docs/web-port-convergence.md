@@ -27,9 +27,9 @@ oracle.
 
 | System | Current ownership |
 | --- | --- |
-| Common startup | Canonical `Dvar_Init` and `Com_Init` run in native order. |
+| Common startup | Canonical `Dvar_Init` and the strict `Com_Init` prefix run in native order; the host mounts browser storage at the filesystem boundary, then the continuation restores canonical common-command registration before script/server/client startup. |
 | Filesystem | Canonical search paths, IWD/minizip behavior, config/profile calls and synchronous engine-facing operations use Worker file primitives. |
-| Database | Canonical XFile stream, allocation blocks, generated loaders, pointer aliases, registry pools, dependency ordering and final publication own runtime assets. |
+| Database | Canonical XFile stream, allocation blocks, generated loaders, pointer aliases, registry pools, dependency ordering and final publication own runtime assets, including native-compatible leading-comma asset-stub resolution. |
 | World/runtime | Canonical `GfxWorld`, collision, server/game, client/cgame, script VM, XAnim/DObj, effects, ragdoll, physics and sound code are in the browser link closure. |
 | Frame order | The browser supplies elapsed time; canonical `SV_Frame`, client frame work and `SCR_UpdateScreen` advance gameplay. |
 | Renderer frontend | Kisak world, model, effect and UI state is translated only at the portable draw-command boundary. |
@@ -41,6 +41,7 @@ oracle.
 | Seam | Why it differs |
 | --- | --- |
 | `database/db_file_platform.cpp` | Maps DB file operations to the Worker filesystem. |
+| `qcommon/common_runtime_commands.cpp` | Keeps the post-mount common-command continuation canonical and separate from browser hosting. |
 | `web_client_server_lifecycle.cpp` | Continues synchronous-looking native startup after the main-thread host mounts user files. |
 | `web_canonical_gfxworld.cpp` | Observes final DB publication and submits the bounded compatibility surface; the full renderer frontend remains the long-term owner. |
 | `web_renderer_frontend.cpp` | Converts canonical renderer state into backend-neutral commands. |
@@ -89,10 +90,47 @@ proof jobs are retired. Canonical runtime tests replace their useful coverage.
   canonical scenes, without introducing browser asset types.
 - Add a legal browser cinematic path or a documented graceful omission.
 - Add gamepad input when it becomes a product requirement.
-- Profile memory, streaming and Worker scheduling before considering pthreads.
+- Carry the measured Phase 2 renderer-resource classifications forward and
+  gather comparable map evidence before changing recovery policy; profile
+  streaming and Worker scheduling before considering pthreads.
 - Design and document a gateway before compiling multiplayer transport code.
 - Retire the bounded `web_engine_world_surface` compatibility path once its
   remaining tests are covered by the canonical frontend.
+
+## Current retail and memory evidence
+
+The strengthened Killhouse/CargoShip matrix passed on 2026-08-26 at clean
+source SHA `ac063bb20cbc4027497841322d87c2069d736939`. Both maps reached
+canonical DB publication, cgame initialization, real world frames, at least
+60 seconds of sustained rendering, input, audio, and configuration
+checkpoint/reload. The transition and forced WebGL context recovery also
+passed. Exact values are in
+[retail-phase1-ac063bb2.json](evidence/retail-phase1-ac063bb2.json).
+
+The renderer telemetry categories are disjoint. Their current lifecycle
+classification is:
+
+| Resource | Lifecycle/ownership |
+| --- | --- |
+| Decoded world/static/dynamic/UI/supplemental textures | Regenerable, reloadable from user storage, map-local |
+| Retained geometry and portable draw commands | Regenerable, map-local |
+| GPU map textures and buffers | Regenerable, map-local |
+| Render targets and fixed pipeline programs | Regenerable, intentionally global |
+| Shader source/cache | Regenerable, intentionally global; 0 B measured in Phase 1 |
+| Temporary uploads | Regenerable, map-local; 0 B measured in Phase 1 |
+| Audio data | Regenerable, reloadable, predominantly map-local |
+| Wasm linear-memory capacity | Allocator capacity; outside retained renderer ownership |
+
+No irreplaceable retained resource was observed; cross-pool/content duplicates
+were not measured. Phase 2 keeps the existing previous-map recovery eviction:
+old aggregate CPU recovery fell from 1,521,922,580 B to zero before new-world
+publication, so no old/new overlap was observed. The 800 MiB limit remains a
+per retained-image-pool admission cap. Killhouse's static-model pool reached
+817,908,800 of 838,860,800 B (97.50%, 20,952,000 B headroom), so lowering it
+would be unsupported. Wasm capacity remaining at 2,013,724,672 B reflects
+monotonic allocator capacity, not an eviction failure. These measurements are
+a baseline; no unmeasured before/after (A/B) timing is claimed. Authored mip
+levels are included in dynamic/UI pool admission.
 
 ## Verification
 

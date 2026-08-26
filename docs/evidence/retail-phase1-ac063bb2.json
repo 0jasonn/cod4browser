@@ -1,0 +1,224 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "commitSha": "ac063bb20cbc4027497841322d87c2069d736939",
+    "dirty": false
+  },
+  "recordedAtUtc": "2026-08-26T18:13:03.783Z",
+  "environment": {
+    "browser": {
+      "name": "chromium",
+      "version": "149.0.7827.55",
+      "channel": null
+    },
+    "operatingSystem": {
+      "platform": "win32",
+      "release": "10.0.26200",
+      "version": "Windows 11 Pro",
+      "architecture": "x64"
+    },
+    "build": "Release diagnostics"
+  },
+  "validationResult": "pass",
+  "failureStage": null,
+  "failureClass": null,
+  "maps": {
+    "killhouse": {
+      "map": "killhouse",
+      "validationResult": "pass",
+      "failureStage": null,
+      "failureClass": null,
+      "checks": {
+        "commandAccepted": true,
+        "databaseCompleted": true,
+        "cgameInitialized": true,
+        "worldFrameProduced": true,
+        "stability60s": true,
+        "input": true,
+        "audio": true,
+        "checkpoint": true,
+        "noFatalError": true
+      },
+      "mapCommandTimeMs": 22675.044999986887,
+      "databaseStartTimeMs": 22731.080000013113,
+      "databaseCompletionTimeMs": 25132.705000013113,
+      "cgameInitTimeMs": 25289.02500000596,
+      "firstRealWorldFrameTimeMs": 29472.844999998808,
+      "mapToFirstFrameMs": 6797.800000011921,
+      "averageFrameTimeMs": 643.1547849463519,
+      "p95FrameTimeMs": 683.8000000119209,
+      "p99FrameTimeMs": 737.7350000143051,
+      "framesRenderedDuringStabilityWindow": 94,
+      "stability": {
+        "requestedDurationMs": 60000,
+        "observedDurationMs": 60025.38499999046,
+        "startedMs": 101361.89500001073,
+        "endedMs": 161387.2800000012,
+        "firstGeneration": 121,
+        "finalGeneration": 215
+      },
+      "wasmLinearMemoryCapacityBytes": {
+        "beforeMapLoad": 316801024,
+        "afterCGameInit": 1708130304,
+        "afterWorldPublication": 1910177792,
+        "atStabilityEnd": 2013724672
+      },
+      "decodedTextureRecoveryBytes": 1426285608,
+      "aggregateCpuRecoveryBytes": 1517951436,
+      "estimatedGpuTextureBytes": 1447485000,
+      "geometryBytes": 91665828,
+      "temporaryUploadBytes": 0,
+      "shaderProgramBytes": 0,
+      "imagePoolRecoveryBytes": {
+        "world": 285524036,
+        "staticModels": 817908800,
+        "dynamicModels": 289375232,
+        "ui": 2478084,
+        "perPoolAdmissionLimit": 838860800
+      },
+      "supplementalTextureRecoveryBytes": 30999456,
+      "audioDecodedBytes": 5881060,
+      "audioQueuedBuffers": 15,
+      "input": {
+        "eventCount": 22,
+        "movement": true,
+        "mouseLook": true,
+        "primaryFireAudio": true,
+        "secondaryAction": true
+      },
+      "checkpoint": {
+        "filesPersisted": 2,
+        "bytesPersisted": 3154912,
+        "durationMs": 238.6899999976158
+      }
+    },
+    "cargoship": {
+      "map": "cargoship",
+      "validationResult": "pass",
+      "failureStage": null,
+      "failureClass": null,
+      "checks": {
+        "commandAccepted": true,
+        "databaseCompleted": true,
+        "cgameInitialized": true,
+        "worldFrameProduced": true,
+        "stability60s": true,
+        "input": true,
+        "audio": true,
+        "checkpoint": true,
+        "noFatalError": true
+      },
+      "mapCommandTimeMs": 171046.5149999857,
+      "databaseStartTimeMs": 171455.3300000131,
+      "databaseCompletionTimeMs": 175572.2949999869,
+      "cgameInitTimeMs": 176669.65000000596,
+      "firstRealWorldFrameTimeMs": 181885.00999999046,
+      "mapToFirstFrameMs": 10838.495000004768,
+      "averageFrameTimeMs": 897.9140151513345,
+      "p95FrameTimeMs": 1235.0100000202656,
+      "p99FrameTimeMs": 1416.035000026226,
+      "framesRenderedDuringStabilityWindow": 67,
+      "stability": {
+        "requestedDurationMs": 60000,
+        "observedDurationMs": 60091.810000002384,
+        "startedMs": 182952.96000000834,
+        "endedMs": 243044.77000001073,
+        "firstGeneration": 241,
+        "finalGeneration": 308
+      },
+      "wasmLinearMemoryCapacityBytes": {
+        "beforeMapLoad": 2013724672,
+        "afterCGameInit": 2013724672,
+        "afterWorldPublication": 2013724672,
+        "atStabilityEnd": 2013724672
+      },
+      "decodedTextureRecoveryBytes": 679402508,
+      "aggregateCpuRecoveryBytes": 753839840,
+      "estimatedGpuTextureBytes": 700601900,
+      "geometryBytes": 74437332,
+      "temporaryUploadBytes": 0,
+      "shaderProgramBytes": 0,
+      "imagePoolRecoveryBytes": {
+        "world": 135217216,
+        "staticModels": 207635520,
+        "dynamicModels": 303781952,
+        "ui": 2359300,
+        "perPoolAdmissionLimit": 838860800
+      },
+      "supplementalTextureRecoveryBytes": 30408520,
+      "audioDecodedBytes": 1582592,
+      "audioQueuedBuffers": 12,
+      "input": {
+        "eventCount": 22,
+        "movement": true,
+        "mouseLook": true,
+        "primaryFireAudio": true,
+        "secondaryAction": true
+      },
+      "checkpoint": {
+        "filesPersisted": 7,
+        "bytesPersisted": 7091210,
+        "durationMs": 408.2800000011921
+      }
+    }
+  },
+  "transition": {
+    "validationResult": "pass",
+    "durationToFirstWorldFrameMs": 10838.495000004768,
+    "contextGenerationBefore": 1,
+    "contextGenerationAfter": 1,
+    "oldMap": {
+      "decodedTextureRecoveryBytesBeforeUnload": 1430575400,
+      "decodedTextureRecoveryBytesAfterUnload": 0,
+      "aggregateCpuRecoveryBytesBeforeUnload": 1521922580,
+      "aggregateCpuRecoveryBytesAfterUnload": 0,
+      "aggregateCpuRecoveryBytesReleased": 1521922580
+    },
+    "newMapAggregateCpuRecoveryBytesAtWorldPublication": 175806748,
+    "peakObserved": {
+      "decodedTextureRecoveryBytes": 1430575400,
+      "aggregateCpuRecoveryBytes": 1521922580,
+      "estimatedGpuTextureBytes": 1451774792,
+      "geometryBytes": 91347180,
+      "boundaryRetainedTemporaryUploadBytes": 0,
+      "shaderProgramBytes": 0,
+      "imagePoolRecoveryBytes": {
+        "world": 285524036,
+        "staticModels": 817908800,
+        "dynamicModels": 294536256,
+        "ui": 6767876,
+        "perPoolAdmissionLimit": 838860800
+      },
+      "wasmLinearMemoryCapacityBytes": 2013724672
+    },
+    "lifecycleOrder": [
+      "worldUnloadBegin",
+      "worldUnloadEnd",
+      "newWorldPublished"
+    ]
+  },
+  "contextRecovery": {
+    "validationResult": "pass",
+    "durationToFirstRecoveredWorldFrameMs": 1779.1899999976158,
+    "contextLossesBefore": 0,
+    "contextLossesAfter": 1,
+    "surfaceRecoveryCountBefore": 0,
+    "surfaceRecoveryCountAfter": 1,
+    "resourceGenerationBefore": 4,
+    "resourceGenerationAfter": 5,
+    "framesResumed": true,
+    "inputResumed": {
+      "eventCount": 22,
+      "movement": true,
+      "mouseLook": true,
+      "primaryFireAudio": true,
+      "secondaryAction": true
+    }
+  },
+  "shutdown": {
+    "flushDurationMs": 228.1400000154972,
+    "reloadResult": "pass",
+    "persistedProfileReady": true,
+    "persistedConfigLoaded": true
+  }
+}
