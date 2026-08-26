@@ -103,7 +103,7 @@ export function createWorkerSyncFilesystem(faults = null)
     let homeBytes = 0;
     let module = null;
 
-    function closeAll()
+    function closeMountedFilesystem()
     {
         descriptors.clear();
         for (const file of files.values()) {
@@ -120,6 +120,18 @@ export function createWorkerSyncFilesystem(faults = null)
         directoryEntries.clear();
         directoryEntries.set("", new Map());
         mountedImport = null;
+    }
+
+    function resetHomeCache()
+    {
+        homeFiles.clear();
+        homeDirectories.clear();
+        homeDirectories.add("");
+        homeDirectoryEntries.clear();
+        homeDirectoryEntries.set("", new Map());
+        homeDirectory = null;
+        homeLoaded = false;
+        homeBytes = 0;
     }
 
     function addHomeDirectory(logicalPath)
@@ -200,10 +212,16 @@ export function createWorkerSyncFilesystem(faults = null)
     async function initializeHome(root, report)
     {
         if (homeLoaded) return;
-        const appDirectory = await childDirectory(root, [APP_DIRECTORY], true);
-        homeDirectory = await childDirectory(appDirectory, [HOME_DIRECTORY], true);
-        await loadHomeDirectory(homeDirectory, "", { bytes: 0, files: 0 }, report);
-        homeLoaded = true;
+        resetHomeCache();
+        try {
+            const appDirectory = await childDirectory(root, [APP_DIRECTORY], true);
+            homeDirectory = await childDirectory(appDirectory, [HOME_DIRECTORY], true);
+            await loadHomeDirectory(homeDirectory, "", { bytes: 0, files: 0 }, report);
+            homeLoaded = true;
+        } catch (error) {
+            resetHomeCache();
+            throw error;
+        }
     }
 
     async function persistHomeFile(file, logicalPath, bytes, version)
@@ -325,7 +343,15 @@ export function createWorkerSyncFilesystem(faults = null)
             throw new Error("Worker OPFS is unavailable.");
         }
 
-        closeAll();
+        if (flushPromise) await flushPromise;
+        if (!acceptingWrites && homeLoaded) {
+            throw Object.assign(new Error(
+                "Browser home persistence must be retried before remounting."), {
+                code: "HOME_FLUSH_RETRY_REQUIRED",
+            });
+        }
+
+        closeMountedFilesystem();
         acceptingWrites = true;
         const totalBytes = manifest.files.reduce((sum, entry) =>
             sum + (Number.isSafeInteger(entry?.size) && entry.size >= 0 ? entry.size : 0), 0);
@@ -401,7 +427,7 @@ export function createWorkerSyncFilesystem(faults = null)
             });
             return { fileCount: files.size };
         } catch (error) {
-            closeAll();
+            closeMountedFilesystem();
             throw error;
         }
     }
@@ -589,7 +615,7 @@ export function createWorkerSyncFilesystem(faults = null)
     {
         if (flushPromise) return flushPromise;
         acceptingWrites = false;
-        flushPromise = (async () => {
+        const operation = (async () => {
             report?.({ phase: "snapshotting", filesProcessed: 0, bytesProcessed: 0 });
             scheduleDirtyOpenFiles();
             await drainPersistenceWithProgress(report);
@@ -599,12 +625,13 @@ export function createWorkerSyncFilesystem(faults = null)
                 filesProcessed: summary.filesPersisted,
                 bytesProcessed: summary.bytesPersisted,
             });
-            closeAll();
+            closeMountedFilesystem();
             report?.({
                 phase: "unmounting",
                 filesProcessed: summary.filesPersisted,
                 bytesProcessed: summary.bytesPersisted,
             });
+            resetHomeCache();
             report?.({
                 phase: "complete",
                 filesProcessed: summary.filesPersisted,
@@ -612,7 +639,11 @@ export function createWorkerSyncFilesystem(faults = null)
             });
             return summary;
         })();
-        return flushPromise.finally(() => { flushPromise = null; });
+        const tracked = operation.finally(() => {
+            if (flushPromise === tracked) flushPromise = null;
+        });
+        flushPromise = tracked;
+        return tracked;
     }
 
     function installForModule(wasmModule)
@@ -659,8 +690,8 @@ export function createWorkerSyncFilesystem(faults = null)
                 return true;
             },
             cancel() { return true; },
-            invalidate: closeAll,
-            dispose: closeAll,
+            invalidate: closeMountedFilesystem,
+            dispose: closeMountedFilesystem,
         });
 
         globalThis[SYNC_GLOBAL] = Object.freeze({
@@ -777,7 +808,7 @@ export function createWorkerSyncFilesystem(faults = null)
 
     return Object.freeze({
         mount,
-        unmount: closeAll,
+        unmount: closeMountedFilesystem,
         checkpoint,
         flushAndUnmount,
         installForModule,
