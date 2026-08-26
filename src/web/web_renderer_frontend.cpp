@@ -2536,6 +2536,9 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                 WebRenderer_SetWorldSurface(surface);
             if (submission != WebRendererSurfaceResult::Success)
             {
+                Web_Log(WebLogLevel::Error,
+                    "[kisakcod-web] Canonical world submission failed: %s.\n",
+                    WebRenderer_SurfaceResultString(submission));
                 Com_Error(ERR_DROP,
                     "R_RenderScene: portable world command %s",
                     WebRenderer_SurfaceResultString(submission));
