@@ -7137,17 +7137,15 @@ void GScr_IsCinematicPlaying()
 void GScr_Earthquake()
 {
     double Float; // fp30
-    long double v1; // fp2
-    long double v2; // fp2
     double v3; // fp29
     gentity_s *v4; // r3
     int v5; // [sp+50h] [-40h]
     float v6[4]; // [sp+58h] [-38h] BYREF
 
     Float = Scr_GetFloat(0);
-    *(double *)&v1 = (float)((float)(Scr_GetFloat(1) * (float)1000.0) + (float)0.5);
-    v2 = floor(v1);
-    v5 = (int)(float)*(double *)&v2;
+    // Do not type-pun an 8-byte double through Wasm's 16-byte long double.
+    v5 = static_cast<int>(floor(
+        Scr_GetFloat(1) * 1000.0f + 0.5f));
     Scr_GetVector(2u, v6);
     v3 = Scr_GetFloat(3);
     if (Float <= 0.0)
