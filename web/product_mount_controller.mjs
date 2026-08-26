@@ -56,6 +56,18 @@ export function createLatestMountController({
         }
     }
 
+    function ensureDrain()
+    {
+        if (disposed || draining || !pending) return;
+        const operation = drain();
+        draining = operation;
+        operation.finally(() => {
+            if (draining !== operation) return;
+            draining = null;
+            ensureDrain();
+        }).catch(() => {});
+    }
+
     function schedule(manifest)
     {
         if (disposed) {
@@ -68,13 +80,7 @@ export function createLatestMountController({
         const completion = new Promise((resolve, reject) => {
             pending = { manifest, generation, resolve, reject };
         });
-        if (!draining) {
-            const operation = drain();
-            draining = operation;
-            operation.finally(() => {
-                if (draining === operation) draining = null;
-            }).catch(() => {});
-        }
+        ensureDrain();
         return completion;
     }
 
@@ -100,6 +106,6 @@ export function createLatestMountController({
             await draining;
         },
         get activeImportId() { return activeImportId; },
-        get busy() { return Boolean(draining); },
+        get busy() { return Boolean(draining || pending); },
     });
 }
