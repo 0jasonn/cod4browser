@@ -432,6 +432,24 @@ res/
 
 .idea/*
 .claude/*
+
+# Local AI assistant instructions
+AGENTS.md
+AGENTS.override.md
+CLAUDE.md
+CLAUDE.local.md
+GEMINI.md
+COPILOT.md
+CURSOR.md
+WINDSURF.md
+AIDER.md
+AI_INSTRUCTIONS.md
+.github/copilot-instructions.md
+.github/instructions/*.instructions.md
+.cursor/**/*.md
+.codex/**/*.md
+.windsurf/**/*.md
+
 IDA/*
 KisakCOD/.idea/*
 build-radiant/
