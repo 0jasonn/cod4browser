@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <vector>
 
 void __cdecl Vec2UnpackTexCoords(PackedTexCoords in, float *out)
 {
@@ -319,6 +320,26 @@ void TestLightingAtlasCountsOnlySubmittedCanonicalPlacements()
         WebRendererWorldLightingMode::ModelLightGrid);
 }
 
+void TestNativeStaticModelCardinalityIsAccepted()
+{
+    Fixture fixture;
+    std::vector<GfxStaticModelDrawInst> instances(
+        WEB_RENDERER_MAX_STATIC_MODEL_INSTANCES, fixture.instances[0]);
+    fixture.world.dpvs.smodelCount = static_cast<std::uint32_t>(
+        instances.size());
+    fixture.world.dpvs.smodelDrawInsts = instances.data();
+    fixture.world.dpvs.smodelInsts = nullptr;
+
+    WebRendererStaticModelSceneCommand command;
+    assert(WebRenderer_BuildStaticModelSceneCommand(fixture.world, command) ==
+        WebRendererStaticModelSceneResult::Success);
+    assert(command.canonicalInstanceCount ==
+        WEB_RENDERER_MAX_STATIC_MODEL_INSTANCES);
+    assert(command.instances.size() ==
+        WEB_RENDERER_MAX_STATIC_MODEL_INSTANCES);
+    assert(command.instances.back().canonicalInstanceIndex == 65'535u);
+}
+
 void TestMaterialReferencesResolveAtRendererEvaluation()
 {
     Fixture fixture;
@@ -464,6 +485,7 @@ int main()
     TestCanonicalStaticModelInstancedTechniqueSelection();
     TestNamedDetailMapAndScaleSurvivePortableBoundary();
     TestLightingAtlasCountsOnlySubmittedCanonicalPlacements();
+    TestNativeStaticModelCardinalityIsAccepted();
     TestMaterialReferencesResolveAtRendererEvaluation();
     TestCameraRegionThreeRemainsShadowOnly();
     TestSm3SpecularRetainsCanonicalProbeAndSplitsProbeGroups();

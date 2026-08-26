@@ -138,10 +138,11 @@ constexpr std::uint32_t WEB_RENDERER_MAX_WORLD_VERTICES = 1'000'000u;
 constexpr std::uint32_t WEB_RENDERER_MAX_WORLD_INDICES = 3'000'000u;
 // The all-authored-LOD command retains each canonical XSurface only once.
 // One million vertices / three million indices bounds that immutable geometry
-// at roughly 81 MiB while covering the measured Killhouse model population.
+// at roughly 81 MiB. Native IW3 permits up to 65,536 static model instances;
+// preserve that canonical cardinality at the portable renderer boundary.
 constexpr std::uint32_t WEB_RENDERER_MAX_STATIC_MODEL_VERTICES = 1'000'000u;
 constexpr std::uint32_t WEB_RENDERER_MAX_STATIC_MODEL_INDICES = 3'000'000u;
-constexpr std::uint32_t WEB_RENDERER_MAX_STATIC_MODEL_INSTANCES = 20'000u;
+constexpr std::uint32_t WEB_RENDERER_MAX_STATIC_MODEL_INSTANCES = 65'536u;
 constexpr std::uint32_t WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES = 250'000u;
 constexpr std::uint32_t WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES = 500'000u;
 // Native GfxScene::sceneDObj is a fixed 512-entry array. Keep the same bound
