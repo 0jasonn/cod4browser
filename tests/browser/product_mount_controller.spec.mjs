@@ -141,3 +141,99 @@ test("disposal cancels a queued remount @product", async ({ page }) => {
         active: globalThis.mountRace.controller.activeImportId,
     }))).toEqual({ calls: ["mount:A"], mounted: [], active: null });
 });
+
+test("sequential awaited selections cannot strand the second mount @product", async ({ page }) => {
+    await installHarness(page);
+    const beforeSecondCompletion = await page.evaluate(async () => {
+        globalThis.mountRace.sequence = (async () => {
+            await globalThis.mountRace.select("A");
+            return globalThis.mountRace.select("B");
+        })();
+        globalThis.mountRace.resolve("mount:A");
+        for (let turn = 0; turn < 10; ++turn) await Promise.resolve();
+        return {
+            calls: globalThis.mountRace.events.calls,
+            busy: globalThis.mountRace.controller.busy,
+        };
+    });
+    expect(beforeSecondCompletion).toEqual({ calls: ["mount:A", "mount:B"], busy: true });
+    await page.evaluate(async () => {
+        globalThis.mountRace.resolve("mount:B");
+        await globalThis.mountRace.sequence;
+    });
+    expect(await page.evaluate(() => ({
+        active: globalThis.mountRace.controller.activeImportId,
+        busy: globalThis.mountRace.controller.busy,
+    }))).toEqual({ active: "B", busy: false });
+});
+
+test("an awaited clear after select cannot be stranded @product", async ({ page }) => {
+    await installHarness(page);
+    const beforeClearCompletion = await page.evaluate(async () => {
+        globalThis.mountRace.sequence = (async () => {
+            await globalThis.mountRace.select("A");
+            return globalThis.mountRace.controller.clear();
+        })();
+        globalThis.mountRace.resolve("mount:A");
+        for (let turn = 0; turn < 10; ++turn) await Promise.resolve();
+        return {
+            calls: globalThis.mountRace.events.calls,
+            busy: globalThis.mountRace.controller.busy,
+        };
+    });
+    expect(beforeClearCompletion).toEqual({ calls: ["mount:A", "unmount"], busy: true });
+    await page.evaluate(async () => {
+        globalThis.mountRace.resolve("unmount", { mounted: false });
+        await globalThis.mountRace.sequence;
+    });
+    expect(await page.evaluate(() => ({
+        active: globalThis.mountRace.controller.activeImportId,
+        cleared: globalThis.mountRace.events.cleared,
+        busy: globalThis.mountRace.controller.busy,
+    }))).toEqual({ active: null, cleared: 1, busy: false });
+});
+
+test("a selection submitted directly from a settled Promise continues draining @product", async ({ page }) => {
+    await installHarness(page);
+    const state = await page.evaluate(async () => {
+        globalThis.mountRace.continuation = globalThis.mountRace.select("A")
+            .then(() => globalThis.mountRace.select("B"));
+        globalThis.mountRace.resolve("mount:A");
+        for (let turn = 0; turn < 10; ++turn) await Promise.resolve();
+        return {
+            calls: globalThis.mountRace.events.calls,
+            busy: globalThis.mountRace.controller.busy,
+        };
+    });
+    expect(state).toEqual({ calls: ["mount:A", "mount:B"], busy: true });
+    await page.evaluate(async () => {
+        globalThis.mountRace.resolve("mount:B");
+        await globalThis.mountRace.continuation;
+    });
+});
+
+test("disposal from a request continuation leaves no pending work @product", async ({ page }) => {
+    await installHarness(page);
+    const state = await page.evaluate(async () => {
+        const disposing = globalThis.mountRace.select("A")
+            .then(() => globalThis.mountRace.controller.dispose());
+        globalThis.mountRace.resolve("mount:A");
+        await disposing;
+        let disposedCode = null;
+        try {
+            await globalThis.mountRace.select("B");
+        } catch (error) {
+            disposedCode = error.code;
+        }
+        return {
+            calls: globalThis.mountRace.events.calls,
+            busy: globalThis.mountRace.controller.busy,
+            disposedCode,
+        };
+    });
+    expect(state).toEqual({
+        calls: ["mount:A"],
+        busy: false,
+        disposedCode: "MOUNT_CONTROLLER_DISPOSED",
+    });
+});
