@@ -455,8 +455,12 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_CanonicalFsWriteRename(
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_SubmitCanonicalCommand(
     const char *command)
 {
-    if (!g_clientLifecycleReady || !command)
+    if (!command)
         return 0;
+#if !KISAK_WEB_DIAGNOSTICS
+    if (!g_clientLifecycleReady)
+        return 0;
+#endif
     const std::size_t length = std::strlen(command);
     if (!length || length > 1023u)
         return 0;

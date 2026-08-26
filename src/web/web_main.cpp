@@ -16,11 +16,18 @@
 #include <cstdint>
 #include <csetjmp>
 
+#if KISAK_WEB_DIAGNOSTICS
+#include <emscripten/emscripten.h>
+#endif
+
 namespace
 {
 std::uint32_t g_lastCGameFrameMilliseconds = 0u;
 std::uint32_t g_cgameFrameAccumulatorMilliseconds = 0u;
 bool g_reentrantCommandPumpReported = false;
+#if KISAK_WEB_DIAGNOSTICS
+std::uint32_t g_testSlowCommandMilliseconds = 0u;
+#endif
 
 bool InitializeCanonicalEngine()
 {
@@ -42,6 +49,15 @@ void RunCommands()
     {
         Cbuf_ExecuteBuffer(
             0, CL_ControllerIndexFromClientNum(0), browserCommand);
+#if KISAK_WEB_DIAGNOSTICS
+        const std::uint32_t delay = g_testSlowCommandMilliseconds;
+        g_testSlowCommandMilliseconds = 0u;
+        const std::uint32_t started = Sys_Milliseconds();
+        while (Sys_Milliseconds() - started < delay)
+        {
+            // Diagnostic-only evidence for a long canonical command frame.
+        }
+#endif
     }
     if (!Cbuf_TryExecute(0, 0) && !g_reentrantCommandPumpReported)
     {
@@ -159,6 +175,16 @@ void RenderFrame(const WebFrameInfo &frame, void *)
         WebRenderer_DrawFrame(frame);
 }
 } // namespace
+
+#if KISAK_WEB_DIAGNOSTICS
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestSlowNextCommand(int milliseconds)
+{
+    if (milliseconds < 1 || milliseconds > 250)
+        return 0;
+    g_testSlowCommandMilliseconds = static_cast<std::uint32_t>(milliseconds);
+    return 1;
+}
+#endif
 
 int main()
 {

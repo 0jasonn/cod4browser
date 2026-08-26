@@ -11,6 +11,7 @@ const EXPORTED_COMMANDS = [
     "_KisakWeb_SubmitCanonicalCommand",
     "_KisakWeb_DiagnosticCinematicOmission",
     "_KisakWeb_TestAudioProxyPcm",
+    "_KisakWeb_TestSlowNextCommand",
     "_KisakWeb_TestLoseWebGLContext", "_KisakWeb_TestRestoreWebGLContext",
     "_KisakWeb_TestSetAaSamples", "_KisakWeb_TestSubmitSurface",
     "_KisakWeb_TestUnloadWorldResources", "_KisakWeb_TestHeapBytes",

@@ -125,13 +125,15 @@ EM_JS(void, DispatchFrameStats, (int frame, int width, int height, double elapse
 EM_JS(
     void,
     DispatchSystemStatus,
-    (const char *state, uint32_t monotonicMilliseconds, uint32_t framePumpTicks),
+    (const char *state, uint32_t monotonicMilliseconds, uint32_t framePumpTicks,
+     uint32_t callbackMilliseconds),
     {
         globalThis.dispatchEvent(new CustomEvent("kisakcod:system", {
             detail: {
                 state: UTF8ToString(state),
                 monotonicMilliseconds,
-                framePumpTicks
+                framePumpTicks,
+                callbackMilliseconds
             }
         }));
     });
@@ -158,11 +160,15 @@ void FramePumpTrampoline(void *)
 {
     ++g_framePumpTicks;
     const WebFrameInfo frame{g_framePumpTicks, Sys_Milliseconds()};
-    if (frame.pumpTick <= 2 || frame.pumpTick % 30 == 0)
-    {
-        DispatchSystemStatus("running", frame.monotonicMilliseconds, frame.pumpTick);
-    }
+    const uint32_t callbackStart = Sys_Milliseconds();
     g_frameCallback(frame, g_frameUserData);
+    const uint32_t callbackMilliseconds = Sys_Milliseconds() - callbackStart;
+    if (frame.pumpTick <= 2 || frame.pumpTick % 30 == 0 ||
+        callbackMilliseconds >= 16u)
+    {
+        DispatchSystemStatus("running", frame.monotonicMilliseconds,
+            frame.pumpTick, callbackMilliseconds);
+    }
 }
 
 void PrintFormatted(FILE *stream, const char *format, va_list arguments)
@@ -541,7 +547,7 @@ bool Web_StartFramePump(WebFrameCallback callback, void *userData)
     g_frameUserData = userData;
     g_framePumpStarted = true;
     g_framePumpTicks = 0;
-    DispatchSystemStatus("ready", Sys_Milliseconds(), 0);
+    DispatchSystemStatus("ready", Sys_Milliseconds(), 0, 0);
     emscripten_set_main_loop_arg(FramePumpTrampoline, nullptr, 0, EM_FALSE);
     return true;
 }
