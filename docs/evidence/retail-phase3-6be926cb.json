@@ -1,0 +1,281 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "commitSha": "6be926cb4e78693f9f6e638c348b0ee0f908b45f",
+    "dirty": false
+  },
+  "recordedAtUtc": "2026-08-26T19:18:41.927Z",
+  "environment": {
+    "browser": {
+      "name": "chromium",
+      "version": "149.0.7827.55",
+      "channel": null
+    },
+    "operatingSystem": {
+      "platform": "win32",
+      "release": "10.0.26200",
+      "version": "Windows 11 Pro",
+      "architecture": "x64"
+    },
+    "build": "Release diagnostics"
+  },
+  "validationResult": "pass",
+  "failureStage": null,
+  "failureClass": null,
+  "targetMap": "blackout",
+  "baseline": {
+    "map": "cargoship",
+    "commandAccepted": true,
+    "mapCommandTimeMs": 23098.930000007153,
+    "firstRealWorldFrameTimeMs": 30573.97999998927,
+    "canonicalLifecycle": [
+      {
+        "stage": "CM_LoadMap complete",
+        "observedMs": 27180.625
+      },
+      {
+        "stage": "Com_LoadWorld complete",
+        "observedMs": 27180.669999986887
+      },
+      {
+        "stage": "G_InitGame complete",
+        "observedMs": 27191.375
+      },
+      {
+        "stage": "G_LoadLevel complete",
+        "observedMs": 27410.889999985695
+      },
+      {
+        "stage": "SV_InitGameVM complete",
+        "observedMs": 27410.919999986887
+      },
+      {
+        "stage": "SV_InitGameProgs complete",
+        "observedMs": 27410.94999998808
+      },
+      {
+        "stage": "CG_Init complete",
+        "observedMs": 27478.344999998808
+      },
+      {
+        "stage": "CL_InitCGame complete",
+        "observedMs": 27502.62999999523
+      }
+    ]
+  },
+  "map": {
+    "map": "blackout",
+    "validationResult": "pass",
+    "failureStage": null,
+    "failureClass": null,
+    "checks": {
+      "commandAccepted": true,
+      "databaseCompleted": true,
+      "cgameInitialized": true,
+      "worldFrameProduced": true,
+      "stability60s": true,
+      "input": true,
+      "audio": true,
+      "checkpoint": true,
+      "noFatalError": true
+    },
+    "mapCommandTimeMs": 33883.4849999845,
+    "databaseStartTimeMs": 34783.739999979734,
+    "databaseCompletionTimeMs": 39361.784999996424,
+    "cgameInitTimeMs": 40967.01999998093,
+    "firstRealWorldFrameTimeMs": 45028.46999999881,
+    "mapToFirstFrameMs": 11144.985000014305,
+    "averageFrameTimeMs": 823.7650000001821,
+    "p95FrameTimeMs": 932.9750000238419,
+    "p99FrameTimeMs": 967.9299999773502,
+    "framesRenderedDuringStabilityWindow": 73,
+    "stability": {
+      "requestedDurationMs": 60000,
+      "observedDurationMs": 60022.685000002384,
+      "startedMs": 45854.92499998212,
+      "endedMs": 105877.6099999845,
+      "firstGeneration": 14,
+      "finalGeneration": 87
+    },
+    "wasmLinearMemoryCapacityBytes": {
+      "beforeMapLoad": 1058537472,
+      "afterCGameInit": 1675165696,
+      "afterWorldPublication": 1675165696,
+      "atStabilityEnd": 1776091136
+    },
+    "decodedTextureRecoveryBytes": 1233813448,
+    "aggregateCpuRecoveryBytes": 1300761988,
+    "estimatedGpuTextureBytes": 1255012840,
+    "geometryBytes": 66948540,
+    "temporaryUploadBytes": 0,
+    "shaderProgramBytes": 0,
+    "imagePoolRecoveryBytes": {
+      "world": 332809216,
+      "staticModels": 592563200,
+      "dynamicModels": 267329536,
+      "ui": 2359552,
+      "perPoolAdmissionLimit": 838860800
+    },
+    "supplementalTextureRecoveryBytes": 38751944,
+    "audioDecodedBytes": 3678608,
+    "audioQueuedBuffers": 15,
+    "input": {
+      "eventCount": 22,
+      "movement": true,
+      "mouseLook": true,
+      "primaryFireAudio": true,
+      "secondaryAction": true
+    },
+    "checkpoint": {
+      "filesPersisted": 7,
+      "bytesPersisted": 7687388,
+      "durationMs": 974.9249999821186
+    },
+    "canonicalLifecycle": [
+      {
+        "stage": "CM_LoadMap complete",
+        "observedMs": 39379.32499998808
+      },
+      {
+        "stage": "Com_LoadWorld complete",
+        "observedMs": 39379.409999996424
+      },
+      {
+        "stage": "G_InitGame complete",
+        "observedMs": 39483.97499999404
+      },
+      {
+        "stage": "G_LoadLevel complete",
+        "observedMs": 40443.064999997616
+      },
+      {
+        "stage": "SV_InitGameVM complete",
+        "observedMs": 40443.1099999845
+      },
+      {
+        "stage": "SV_InitGameProgs complete",
+        "observedMs": 40443.15500000119
+      },
+      {
+        "stage": "CG_Init complete",
+        "observedMs": 40967.01999998093
+      },
+      {
+        "stage": "CL_InitCGame complete",
+        "observedMs": 41086.27500000596
+      }
+    ]
+  },
+  "transitionIn": {
+    "from": "cargoship",
+    "to": "blackout",
+    "validationResult": "pass",
+    "durationToFirstWorldFrameMs": 11144.985000014305,
+    "contextGenerationBefore": 1,
+    "contextGenerationAfter": 1,
+    "oldMap": {
+      "aggregateCpuRecoveryBytesBeforeUnload": 742024672,
+      "aggregateCpuRecoveryBytesAfterUnload": 0,
+      "aggregateCpuRecoveryBytesReleased": 742024672
+    },
+    "newMapAggregateCpuRecoveryBytesAtWorldPublication": 365173268,
+    "peakObserved": {
+      "decodedTextureRecoveryBytes": 1120643784,
+      "aggregateCpuRecoveryBytes": 1185984324,
+      "estimatedGpuTextureBytes": 1141843176,
+      "geometryBytes": 71863764,
+      "boundaryRetainedTemporaryUploadBytes": 0,
+      "shaderProgramBytes": 0
+    },
+    "lifecycleOrder": [
+      "worldUnloadBegin",
+      "worldUnloadEnd",
+      "newWorldPublished"
+    ]
+  },
+  "contextRecovery": {
+    "validationResult": "pass",
+    "durationToFirstRecoveredWorldFrameMs": 2149.594999998808,
+    "contextLossesBefore": 0,
+    "contextLossesAfter": 1,
+    "surfaceRecoveryCountBefore": 0,
+    "surfaceRecoveryCountAfter": 1,
+    "resourceGenerationBefore": 4,
+    "resourceGenerationAfter": 5,
+    "framesResumed": true,
+    "inputResumed": {
+      "eventCount": 22,
+      "movement": true,
+      "mouseLook": true,
+      "primaryFireAudio": true,
+      "secondaryAction": true
+    }
+  },
+  "transitionOut": {
+    "from": "blackout",
+    "to": "killhouse",
+    "validationResult": "pass",
+    "durationToFirstWorldFrameMs": 7062.174999982119,
+    "contextGenerationBefore": 2,
+    "contextGenerationAfter": 2,
+    "oldMap": {
+      "aggregateCpuRecoveryBytesBeforeUnload": 1315887176,
+      "aggregateCpuRecoveryBytesAfterUnload": 0,
+      "aggregateCpuRecoveryBytesReleased": 1315887176
+    },
+    "newMapAggregateCpuRecoveryBytesAtWorldPublication": 322458252,
+    "peakObserved": {
+      "decodedTextureRecoveryBytes": 1248876620,
+      "aggregateCpuRecoveryBytes": 1334750040,
+      "estimatedGpuTextureBytes": 1270076012,
+      "geometryBytes": 87103284,
+      "boundaryRetainedTemporaryUploadBytes": 0,
+      "shaderProgramBytes": 0
+    },
+    "lifecycleOrder": [
+      "worldUnloadBegin",
+      "worldUnloadEnd",
+      "newWorldPublished"
+    ],
+    "destinationCanonicalLifecycle": [
+      {
+        "stage": "CM_LoadMap complete",
+        "observedMs": 126944.87999999523
+      },
+      {
+        "stage": "Com_LoadWorld complete",
+        "observedMs": 126944.93999999762
+      },
+      {
+        "stage": "G_InitGame complete",
+        "observedMs": 127014.30500000715
+      },
+      {
+        "stage": "G_LoadLevel complete",
+        "observedMs": 127318.37999999523
+      },
+      {
+        "stage": "SV_InitGameVM complete",
+        "observedMs": 127318.41999998689
+      },
+      {
+        "stage": "SV_InitGameProgs complete",
+        "observedMs": 127318.45499998331
+      },
+      {
+        "stage": "CG_Init complete",
+        "observedMs": 127544.19999998808
+      },
+      {
+        "stage": "CL_InitCGame complete",
+        "observedMs": 127608.07499998808
+      }
+    ]
+  },
+  "shutdown": {
+    "flushDurationMs": 887.3599999845028,
+    "reloadResult": "pass",
+    "persistedProfileReady": true,
+    "persistedConfigLoaded": true
+  }
+}

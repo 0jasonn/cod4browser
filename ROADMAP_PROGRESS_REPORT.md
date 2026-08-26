@@ -135,7 +135,7 @@ common runtime command registration and configuration writing resumed
 
 Phase 1 exit criteria passed. Proceed to Phase 2.
 
-## Current production artifact
+## Phase 1 production artifact (historical)
 
 The production Release artifact was rebuilt after the Phase 1 fixes and still
 passes the unchanged checked-in boundary.
@@ -184,3 +184,130 @@ unobserved before/after (A/B) timing or memory result was invented.
 
 Phase 2 exit decision: retain the measured eviction and proceed to the next
 one-map campaign batch without a speculative memory change.
+
+## Phase 3 Blackout campaign batch
+
+| Field | Value |
+| --- | --- |
+| Starting Phase 3 validator SHA | `8b2dc65c476a48cf9ae668ba8c6d3c35202b9be3` |
+| Validated ending runtime SHA | `6be926cb4e78693f9f6e638c348b0ee0f908b45f` |
+| Runtime-fix SHA | `164fc1f27b3f3536cf190df94e3313a8ed810ff3` |
+| Date | 2026-08-26 |
+| Retail root supplied | YES |
+| Build configuration | Release diagnostics |
+| Browser / host | Playwright Chromium 149.0.7827.55 / Windows 11 x64 |
+
+An explicit, legally owned retail root was supplied. The clean Blackout
+validator completed 1/1 in 2.4 minutes at source SHA
+`6be926cb4e78693f9f6e638c348b0ee0f908b45f`, using the Release diagnostics
+build on Playwright Chromium 149.0.7827.55 and Windows 11 x64. The structured
+record is
+[retail-phase3-6be926cb.json](docs/evidence/retail-phase3-6be926cb.json); it
+contains no retail paths or proprietary content.
+
+The validator established a fresh CargoShip baseline, transitioned in-process
+to Blackout, exercised the full canonical ClipMap/server/game/client/cgame
+lifecycle, rendered for at least 60 seconds, verified keyboard/mouse input and
+audio, checkpointed configuration, recovered a forced WebGL context loss,
+transitioned out to Killhouse, and completed shutdown/reload persistence.
+
+| Metric | Blackout |
+| --- | ---: |
+| Result | PLAYABLE |
+| Map command to first world frame | 11,144.985 ms |
+| Stability window | 60,022.685 ms / 73 frames |
+| Average / p95 / p99 frame time | 823.765 / 932.975 / 967.930 ms |
+| Wasm linear-memory capacity before load / after cgame / after world / stability end | 1,058,537,472 / 1,675,165,696 / 1,675,165,696 / 1,776,091,136 B |
+| Decoded texture recovery | 1,233,813,448 B |
+| Aggregate CPU recovery | 1,300,761,988 B |
+| Estimated GPU textures | 1,255,012,840 B |
+| Geometry | 66,948,540 B |
+| Temporary uploads / shader programs | 0 B / 0 B |
+| Audio decoded / queued buffers | 3,678,608 B / 15 |
+| Configuration checkpoint | 7 files / 7,687,388 B / 974.925 ms |
+
+The CargoShip-to-Blackout transition released all 742,024,672 B of old-map
+aggregate CPU recovery before Blackout publication and kept WebGL context
+generation 1. Its observed transition peak was 1,185,984,324 B aggregate CPU
+recovery, 1,120,643,784 B decoded texture recovery, 1,141,843,176 B estimated
+GPU textures, and 71,863,764 B geometry. Blackout context recovery restored a
+real world frame in 2,149.595 ms, advanced renderer resource generation from 4
+to 5, and resumed input. The Blackout-to-Killhouse transition released all
+1,315,887,176 B of old-map aggregate CPU recovery before Killhouse publication;
+its peak was 1,334,750,040 B. Shutdown flushed in 887.360 ms, and the persisted
+profile and configuration reloaded successfully.
+
+### Phase 3 diagnostic and fix chain
+
+The initial clean Blackout run completed canonical DB and cgame startup but did
+not produce a world frame. The earliest failing boundary was portable world
+command validation, not the launcher or canonical game systems.
+
+| Commit | Role and evidence |
+| --- | --- |
+| `1305f4b8` | Published the existing world-submission result before the canonical renderer drop, exposing the first portable-boundary failure. |
+| `5a0225a8` | Made the retail validator fail immediately when that submission error appeared instead of waiting for the five-minute frame timeout. |
+| `c810b995` | Classified invalid world-descriptor branches and identified the rejected canonical spot-shadow static-model instance at the browser-only 20,000-instance limit. |
+| `164fc1f2` | Raised the portable static-model cardinality to native IW3's bounded 65,536 instances and added focused native/direct-Wasm coverage for the maximum accepted instance set. |
+| `6be926cb` | Made the retail validator await the canonical filesystem mount after asset readiness, removing a reload-only test race before persisted configuration execution. |
+
+The final clean Blackout run passed after the canonical cardinality fix and
+validator mount synchronization. No map-specific behavior, proprietary
+fixture, synthetic world, weakened assertion, or production artifact-budget
+change was introduced. The Phase 3 selected batch is PLAYABLE, satisfying the
+campaign-batch exit condition.
+
+## Final regression matrix
+
+The final source state passed the complete applicable non-retail matrix and
+both authoritative retail validators.
+
+| Gate | Final result |
+| --- | --- |
+| Node syntax | Pass; all 18 listed web modules plus the retail validator |
+| ESLint | Pass; repository static set plus the retail validator |
+| Strict `checkJs` | Pass |
+| Runtime/gradual `checkJs` | Pass |
+| Node protocol/lifecycle/filesystem | Pass; 74/74 |
+| Native Clang portable | Pass; 21/21 |
+| Native MSVC x86 portable | Pass; 29/29 |
+| Direct Wasm portable | Pass; 29/29 |
+| Sanitized parser fuzz smoke | Pass; 256 runs |
+| Production Playwright | Pass; 40/40 |
+| Diagnostic smoke | Pass; 12/12 |
+| Diagnostic remainder | Pass; 35 passed and exactly 2 expected `RETAIL_ROOT_MISSING` skips |
+| Authoritative Phase 1 Killhouse/CargoShip validator | Pass; 1/1 in 4.8 minutes |
+| Authoritative Phase 3 Blackout validator | Pass; 1/1 in 2.4 minutes |
+| Production Release build and boundary | Pass |
+| Diagnostics Release build | Pass |
+| `git diff --check` | Pass before report handoff |
+
+## Final production artifact
+
+| Metric | Final actual | Budget/cap |
+| --- | ---: | ---: |
+| Wasm bytes | 3,170,512 | 3,324,821 |
+| Application JavaScript bytes | 339,533 | 341,401 |
+| Total site bytes | 3,520,576 | 3,676,856 |
+| Site files | 17 | exact allowlist of 17 |
+| Raw Wasm exports | 24 | 24 |
+| Named application exports | 9 | exact allowlist of 9 |
+
+All final artifact values remain inside the unchanged reviewed boundary.
+
+## Later-phase decision
+
+| Phase | Classification after the Blackout pass |
+| --- | --- |
+| Phase 4: renderer/material/entity/FX/audio | No further observed retail defect. The one observed Blackout renderer incompatibility was fixed at its portable boundary; additional work remains evidence-gated to a real map or gameplay event. |
+| Phase 5: gamepad | Future product feature. The stable keyboard/mouse campaign slice makes it eligible as later work, but support and retail gameplay evidence do not yet exist. |
+| Phase 6: browser cinematics | Explicitly deferred until campaign progression reaches a cinematic boundary that requires legal browser playback. Keep the tested visible omission. |
+| Phase 7: launcher/map UX | Future product feature now evidence-eligible after multiple playable maps. Existing installation/storage foundations remain; normal-user map selection and compatibility labels are not claimed complete. |
+
+No current roadmap blocker remains. The next execution should continue from
+current evidence, not add speculative renderer, audio, cinematic, or launcher
+systems.
+
+## Final recommendation
+
+`READY FOR NEXT ROADMAP PHASE`

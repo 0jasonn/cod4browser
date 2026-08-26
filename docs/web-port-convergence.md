@@ -32,7 +32,7 @@ oracle.
 | Database | Canonical XFile stream, allocation blocks, generated loaders, pointer aliases, registry pools, dependency ordering and final publication own runtime assets, including native-compatible leading-comma asset-stub resolution. |
 | World/runtime | Canonical `GfxWorld`, collision, server/game, client/cgame, script VM, XAnim/DObj, effects, ragdoll, physics and sound code are in the browser link closure. |
 | Frame order | The browser supplies elapsed time; canonical `SV_Frame`, client frame work and `SCR_UpdateScreen` advance gameplay. |
-| Renderer frontend | Kisak world, model, effect and UI state is translated only at the portable draw-command boundary. |
+| Renderer frontend | Kisak world, model, effect and UI state is translated only at the portable draw-command boundary. Native IW3's bounded 65,536 static-model cardinality is preserved across that seam. |
 | Input | Browser events enter canonical key/mouse queues, bindings, usercmd creation and movement/weapon code. |
 | Audio | Canonical mixer and OpenAL-facing state feed a browser Web Audio device boundary. |
 
@@ -106,6 +106,17 @@ canonical DB publication, cgame initialization, real world frames, at least
 checkpoint/reload. The transition and forced WebGL context recovery also
 passed. Exact values are in
 [retail-phase1-ac063bb2.json](evidence/retail-phase1-ac063bb2.json).
+
+The first Phase 3 campaign batch then validated Blackout as PLAYABLE on the
+same date at clean source SHA
+`6be926cb4e78693f9f6e638c348b0ee0f908b45f`. A browser-only 20,000
+static-model-instance ceiling initially rejected canonical spot-shadow
+instance 20,000 after DB/server/game/cgame startup. Commit `164fc1f2` restored
+native IW3's 65,536-instance bound at the portable renderer seam. CargoShip to
+Blackout to Killhouse transitions, a 60-second Blackout window, input, audio,
+configuration persistence, context recovery, and shutdown/reload then passed.
+Exact values are in
+[retail-phase3-6be926cb.json](evidence/retail-phase3-6be926cb.json).
 
 The renderer telemetry categories are disjoint. Their current lifecycle
 classification is:
