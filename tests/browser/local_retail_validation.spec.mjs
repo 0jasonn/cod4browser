@@ -1,6 +1,36 @@
-import { expect, test } from "@playwright/test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { chromium, expect, test as base } from "@playwright/test";
 
 const retailRoot = process.env.KISAK_COD4_RETAIL_ROOT;
+const browserChannel = process.env.KISAK_BROWSER_CHANNEL;
+
+const test = base.extend({
+    retailPage: async ({}, use, testInfo) => {
+        const profile = await mkdtemp(join(tmpdir(), "kisakcod-retail-"));
+        const context = await chromium.launchPersistentContext(profile, {
+            baseURL: testInfo.project.use.baseURL,
+            headless: testInfo.project.use.headless ?? true,
+            viewport: testInfo.project.use.viewport,
+            ...(browserChannel ? { channel: browserChannel } : {}),
+        });
+        const page = context.pages()[0] ?? await context.newPage();
+        try {
+            await use(page);
+        } finally {
+            try {
+                await context.close();
+            } finally {
+                await rm(profile, { recursive: true, force: true, maxRetries: 5 });
+            }
+        }
+    },
+});
+
+test.skip(!retailRoot,
+    "Set KISAK_COD4_RETAIL_ROOT to a legally owned COD4 installation");
 
 async function waitForAssets(page, state)
 {
@@ -239,9 +269,7 @@ async function exerciseRetailInput(page)
         primaryFireAudio: true, secondaryAim: true };
 }
 
-test("local retail validation matrix", { tag: "@retail" }, async ({ page }) => {
-    test.skip(!retailRoot,
-        "Set KISAK_COD4_RETAIL_ROOT to a legally owned COD4 installation");
+test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: page }) => {
     test.setTimeout(900_000);
 
     await page.addInitScript(() => {
