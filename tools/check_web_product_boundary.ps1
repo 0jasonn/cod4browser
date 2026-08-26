@@ -3,10 +3,7 @@
 [CmdletBinding()]
 param(
     [string]$BuildDirectory = 'build\web',
-    [int64]$MaximumWasmBytes = 3340060,
-    [int64]$MaximumJavaScriptBytes = 320727,
-    [int64]$MaximumSiteBytes = 3671421,
-    [int]$MaximumWasmExports = 24
+    [string]$BaselinePath = 'tools\web_product_size_baseline.json'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -14,6 +11,32 @@ $repositoryRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Pat
 $resolvedBuild = Join-Path $repositoryRoot $BuildDirectory
 $siteDirectory = Join-Path $resolvedBuild 'site'
 $mapPath = Join-Path $resolvedBuild 'kisakcod-production.map'
+$resolvedBaseline = if ([IO.Path]::IsPathRooted($BaselinePath)) {
+    $BaselinePath
+} else {
+    Join-Path $repositoryRoot $BaselinePath
+}
+if (-not (Test-Path -LiteralPath $resolvedBaseline -PathType Leaf)) {
+    throw "Production size baseline is missing: $resolvedBaseline"
+}
+$baseline = Get-Content -Raw -LiteralPath $resolvedBaseline | ConvertFrom-Json
+$headroomPercent = [double]$baseline.headroomPercent
+$artifactBudgets = @{}
+foreach ($name in @('wasm', 'javascript', 'site')) {
+    $entry = $baseline.artifacts.$name
+    $baselineBytes = [int64]$entry.baselineBytes
+    $budgetBytes = [int64]$entry.budgetBytes
+    $expectedBudget = [int64][math]::Ceiling(
+        $baselineBytes * (1.0 + $headroomPercent / 100.0))
+    if ($baselineBytes -le 0 -or $budgetBytes -ne $expectedBudget) {
+        throw "Invalid $name size baseline or headroom budget in $resolvedBaseline."
+    }
+    $artifactBudgets[$name] = @{
+        Baseline = $baselineBytes
+        Budget = $budgetBytes
+    }
+}
+$maximumWasmExports = [int]$baseline.rawWasmExportCap
 
 $allowedFiles = @(
     'asset_profile.mjs',
@@ -93,17 +116,7 @@ try {
     Remove-Item -LiteralPath $wasmTextPath -Force -ErrorAction SilentlyContinue
 }
 
-$expectedApplicationExports = @(
-    '_KisakWeb_CompleteFsRead',
-    '_KisakWeb_CompleteFsStat',
-    '_KisakWeb_MountCanonicalRuntime',
-    '_KisakWeb_ProbeFastfileHeader',
-    '_KisakWeb_ProbeIwd',
-    '_KisakWeb_ProbeLocalization',
-    '_KisakWeb_QueueKeyEvent',
-    '_KisakWeb_QueueMouseMove',
-    '_KisakWeb_SubmitCanonicalCommand'
-)
+$expectedApplicationExports = @($baseline.applicationExportAllowlist)
 $generatedModule = Get-Content -Raw -LiteralPath (Join-Path $siteDirectory 'kisakcod.mjs')
 $applicationExports = @(
     [regex]::Matches(
@@ -126,25 +139,35 @@ $javaScriptBytes = ($javascriptFiles | Measure-Object -Property Length -Sum).Sum
 $siteBytes = (Get-ChildItem -LiteralPath $siteDirectory -File |
     Measure-Object -Property Length -Sum).Sum
 
-function Write-BudgetMetric([string]$Name, [int64]$Current, [int64]$Budget) {
-    $difference = $Current - $Budget
-    $percentDifference = if ($Budget -eq 0) { 0.0 } else {
-        100.0 * $difference / $Budget
+function Write-BudgetMetric(
+    [string]$Name,
+    [int64]$Current,
+    [int64]$Baseline,
+    [int64]$Budget
+) {
+    $difference = $Current - $Baseline
+    $percentDifference = if ($Baseline -eq 0) { 0.0 } else {
+        100.0 * $difference / $Baseline
     }
-    Write-Host ("KISAK_PRODUCT_SIZE name={0} current_bytes={1} budget_bytes={2} difference_bytes={3} percentage_difference={4:N2}%" -f
-        $Name, $Current, $Budget, $difference, $percentDifference)
+    Write-Host ("KISAK_PRODUCT_SIZE name={0} current_bytes={1} baseline_bytes={2} budget_bytes={3} difference_bytes={4} percentage_difference={5:N2}%" -f
+        $Name, $Current, $Baseline, $Budget, $difference, $percentDifference)
 }
-Write-BudgetMetric 'wasm' $wasmBytes $MaximumWasmBytes
-Write-BudgetMetric 'javascript' $javaScriptBytes $MaximumJavaScriptBytes
-Write-BudgetMetric 'site' $siteBytes $MaximumSiteBytes
-if ($wasmBytes -gt $MaximumWasmBytes) {
-    throw "Production Wasm is $wasmBytes bytes; budget is $MaximumWasmBytes."
+Write-Host ("KISAK_PRODUCT_BASELINE approved_commit={0} headroom_percent={1} reason={2}" -f
+    $baseline.approvedCommit, $headroomPercent, $baseline.reason)
+Write-BudgetMetric 'wasm' $wasmBytes `
+    $artifactBudgets.wasm.Baseline $artifactBudgets.wasm.Budget
+Write-BudgetMetric 'javascript' $javaScriptBytes `
+    $artifactBudgets.javascript.Baseline $artifactBudgets.javascript.Budget
+Write-BudgetMetric 'site' $siteBytes `
+    $artifactBudgets.site.Baseline $artifactBudgets.site.Budget
+if ($wasmBytes -gt $artifactBudgets.wasm.Budget) {
+    throw "Production Wasm is $wasmBytes bytes; budget is $($artifactBudgets.wasm.Budget)."
 }
-if ($javaScriptBytes -gt $MaximumJavaScriptBytes) {
-    throw "Production JavaScript is $javaScriptBytes bytes; budget is $MaximumJavaScriptBytes."
+if ($javaScriptBytes -gt $artifactBudgets.javascript.Budget) {
+    throw "Production JavaScript is $javaScriptBytes bytes; budget is $($artifactBudgets.javascript.Budget)."
 }
-if ($siteBytes -gt $MaximumSiteBytes) {
-    throw "Production site is $siteBytes bytes; budget is $MaximumSiteBytes."
+if ($siteBytes -gt $artifactBudgets.site.Budget) {
+    throw "Production site is $siteBytes bytes; budget is $($artifactBudgets.site.Budget)."
 }
 
 Write-Host "KISAK_PRODUCT_BOUNDARY wasm_bytes=$wasmBytes javascript_bytes=$javaScriptBytes site_bytes=$siteBytes wasm_exports=$wasmExportCount application_exports=$($applicationExports.Count) files=$($allowedFiles.Count)"

@@ -1,0 +1,31 @@
+{
+  "approvedCommit": "7a32cba07527d1179001fc088d72244eaab00411",
+  "reason": "Post-correctness baseline after filesystem ordering, ownership, capability, input, audio, and regression-coverage fixes.",
+  "headroomPercent": 5,
+  "artifacts": {
+    "wasm": {
+      "baselineBytes": 3166496,
+      "budgetBytes": 3324821
+    },
+    "javascript": {
+      "baselineBytes": 325143,
+      "budgetBytes": 341401
+    },
+    "site": {
+      "baselineBytes": 3501767,
+      "budgetBytes": 3676856
+    }
+  },
+  "rawWasmExportCap": 24,
+  "applicationExportAllowlist": [
+    "_KisakWeb_CompleteFsRead",
+    "_KisakWeb_CompleteFsStat",
+    "_KisakWeb_MountCanonicalRuntime",
+    "_KisakWeb_ProbeFastfileHeader",
+    "_KisakWeb_ProbeIwd",
+    "_KisakWeb_ProbeLocalization",
+    "_KisakWeb_QueueKeyEvent",
+    "_KisakWeb_QueueMouseMove",
+    "_KisakWeb_SubmitCanonicalCommand"
+  ]
+}
