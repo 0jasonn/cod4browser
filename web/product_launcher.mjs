@@ -3,6 +3,7 @@ import { detectBrowserCapabilities } from "./browser_capabilities.mjs";
 import { createEngineWorkerHost } from "./product_engine_worker_host.mjs";
 import { createVisibilityCheckpoint } from "./product_checkpoint_controller.mjs";
 import { createInputControllerCore } from "./input_controller_core.mjs";
+import { createLatestMountController } from "./product_mount_controller.mjs";
 
 /** @template {Element} T @param {string} selector @returns {T} */
 function requiredElement(selector)
@@ -41,8 +42,7 @@ const commandStatus = /** @type {HTMLOutputElement} */ (requiredElement("#engine
 
 let engine = null;
 let assetStore = null;
-let activeImportId = null;
-let mountInFlight = null;
+let mountController = null;
 let inputController = null;
 let checkpointController = null;
 let resizeObserver = null;
@@ -139,29 +139,11 @@ function renderAssetState(detail)
     assetProgress.value = Number.isFinite(detail.progress) ? detail.progress : 0;
     renderStorageStatus(detail);
 
-    const importId = detail.state === "ready" ? detail.manifest?.importId : null;
-    if (importId && importId !== activeImportId && !mountInFlight) {
-        mountInFlight = engine.mountAssets(detail.manifest)
-            .then(({ runtime }) => {
-                if (assetState.state !== "ready" ||
-                    assetState.manifest?.importId !== importId) return;
-                if (runtime !== true) throw Object.assign(
-                    new Error("The canonical runtime did not accept the mounted installation."),
-                    { code: "RUNTIME_MOUNT_FAILED" });
-                activeImportId = importId;
-                appendLog("[kisakcod-web] Local installation mounted; canonical runtime started.");
-            })
-            .catch((error) => {
-                appendLog(`[kisakcod-web] Engine mount: ${error.message}`, "error");
-                renderAssetState({
-                    ...assetState,
-                    state: "failed",
-                    message: error.message,
-                    error: error.code ?? "ENGINE_MOUNT_FAILED",
-                    retained: true,
-                });
-            })
-            .finally(() => { mountInFlight = null; });
+    if (detail.state === "ready" && detail.manifest?.importId &&
+        detail.manifest.importId !== mountController?.activeImportId) {
+        void mountController?.select(detail.manifest).catch(() => {});
+    } else if (detail.state !== "ready") {
+        mountController?.invalidate();
     }
 }
 
@@ -257,8 +239,7 @@ const handlePortableInstall = () => { void chooseInstallation(true); };
 const handleClearAssets = async () => {
     if (!confirm("Remove the imported COD4 files from this browser?")) return;
     try {
-        await engine.flushAndUnmount();
-        activeImportId = null;
+        await mountController.clear();
         await assetStore.clear();
     } catch (error) {
         appendLog(`[kisakcod-web] Remove browser copy: ${error.message}`, "error");
@@ -319,7 +300,7 @@ function disposeApp()
     commandForm.removeEventListener("submit", handleCommand);
     globalThis.removeEventListener("pagehide", handlePageHide);
     disposePromise = (async () => {
-        await mountInFlight?.catch(() => {});
+        await mountController?.dispose();
         try {
             await assetStore?.dispose();
         } finally {
@@ -344,6 +325,26 @@ try {
         onFilesystemDirty() { checkpointController?.markDirty(); },
     });
     await engine.ready;
+    mountController = createLatestMountController({
+        mount: (manifest) => engine.mountAssets(manifest),
+        unmount: () => engine.flushAndUnmount(),
+        onMounted() {
+            appendLog("[kisakcod-web] Local installation mounted; canonical runtime started.");
+        },
+        onFailed(error, manifest) {
+            appendLog(`[kisakcod-web] Engine mount: ${error.message}`, "error");
+            if (assetState.state === "ready" &&
+                assetState.manifest?.importId === manifest?.importId) {
+                renderAssetState({
+                    ...assetState,
+                    state: "failed",
+                    message: error.message,
+                    error: error.code ?? "ENGINE_MOUNT_FAILED",
+                    retained: true,
+                });
+            }
+        },
+    });
     checkpointController = createVisibilityCheckpoint({
         checkpoint: () => engine.checkpoint(),
         isMounted: () => ["mounted", "flush-failed-retryable"]

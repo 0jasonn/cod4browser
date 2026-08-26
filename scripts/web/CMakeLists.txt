@@ -425,6 +425,8 @@ configure_file("${KISAK_WEB_SOURCE_DIR}/product_launcher.mjs"
     "${KISAK_WEB_SITE_DIR}/launcher.mjs" COPYONLY)
 configure_file("${KISAK_WEB_SOURCE_DIR}/product_checkpoint_controller.mjs"
     "${KISAK_WEB_SITE_DIR}/product_checkpoint_controller.mjs" COPYONLY)
+configure_file("${KISAK_WEB_SOURCE_DIR}/product_mount_controller.mjs"
+    "${KISAK_WEB_SITE_DIR}/product_mount_controller.mjs" COPYONLY)
 configure_file("${KISAK_WEB_SOURCE_DIR}/product_engine_worker.mjs"
     "${KISAK_WEB_SITE_DIR}/engine_worker.mjs" COPYONLY)
 configure_file("${KISAK_WEB_SOURCE_DIR}/product_engine_worker_host.mjs"

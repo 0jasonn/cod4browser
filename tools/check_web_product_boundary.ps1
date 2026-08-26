@@ -28,6 +28,7 @@ $allowedFiles = @(
     'launcher.mjs',
     'product_checkpoint_controller.mjs',
     'product_engine_worker_host.mjs',
+    'product_mount_controller.mjs',
     'product_protocol.mjs',
     'styles.css',
     'web_audio_driver.mjs',

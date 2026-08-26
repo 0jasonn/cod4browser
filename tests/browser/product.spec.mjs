@@ -39,6 +39,7 @@ test("production JavaScript exposes only named product operations @product", asy
         "product_protocol.mjs",
         "engine_worker.mjs",
         "product_engine_worker_host.mjs",
+        "product_mount_controller.mjs",
         "launcher.mjs",
         "product_checkpoint_controller.mjs",
         "input_controller_core.mjs",
