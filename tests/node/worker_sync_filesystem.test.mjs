@@ -43,6 +43,7 @@ class MemoryDirectoryHandle
         this.kind = "directory";
         this.name = name;
         this.children = new Map();
+        this.entriesRead = 0;
     }
 
     async getDirectoryHandle(name, { create = false } = {})
@@ -72,6 +73,7 @@ class MemoryDirectoryHandle
 
     async *entries()
     {
+        ++this.entriesRead;
         yield* this.children.entries();
     }
 }
@@ -120,6 +122,30 @@ async function mount(root, faults = null)
         io: globalThis.__KISAKCOD_SYNC_FS__,
         heap: module.HEAPU8,
     };
+}
+
+async function remount(root, harness)
+{
+    Object.defineProperty(globalThis, "navigator", {
+        configurable: true,
+        value: { storage: { async getDirectory() { return root; } } },
+    });
+    await harness.filesystem.mount({ importId: IMPORT_ID, files: [] });
+    return harness;
+}
+
+async function writeDurableText(root, path, text)
+{
+    const segments = path.split("/");
+    const name = segments.pop();
+    const home = await childDirectory(root, "kisakcod-web/home", true);
+    const directory = await childDirectory(home, segments.join("/"), true);
+    const handle = await directory.getFileHandle(name, { create: true });
+    const writable = await handle.createWritable();
+    const bytes = new TextEncoder().encode(text);
+    await writable.write(bytes);
+    await writable.truncate(bytes.byteLength);
+    await writable.close();
 }
 
 function writeText(harness, path, text)
@@ -356,4 +382,201 @@ test("every mutation sequence survives a fresh Worker filesystem instance", asyn
     harness = await mount(root);
     assert.equal(readText(harness, "profile.cfg"), "three");
     assert.equal(harness.io.stat("profile.tmp"), null);
+});
+
+test("a returning writer reloads changes from the intervening writer", async () => {
+    const root = await createRoot();
+    const writerA = await mount(root);
+    writeText(writerA, "config.cfg", "A");
+    await writerA.filesystem.flushAndUnmount();
+
+    const writerB = await mount(root);
+    assert.equal(readText(writerB, "config.cfg"), "A");
+    writeText(writerB, "config.cfg", "B");
+    await writerB.filesystem.flushAndUnmount();
+
+    await remount(root, writerA);
+    assert.equal(readText(writerA, "config.cfg"), "B");
+});
+
+test("a returning writer observes an intervening removal", async () => {
+    const root = await createRoot();
+    const writerA = await mount(root);
+    writeText(writerA, "removed.cfg", "present");
+    await writerA.filesystem.flushAndUnmount();
+
+    const writerB = await mount(root);
+    assert.equal(writerB.io.remove("removed.cfg"), true);
+    await writerB.filesystem.flushAndUnmount();
+
+    await remount(root, writerA);
+    assert.equal(readText(writerA, "removed.cfg"), null);
+});
+
+test("a returning writer observes an intervening rename replacement", async () => {
+    const root = await createRoot();
+    const writerA = await mount(root);
+    writeText(writerA, "config.cfg", "old");
+    await writerA.filesystem.flushAndUnmount();
+
+    const writerB = await mount(root);
+    writeText(writerB, "config.tmp", "replacement");
+    assert.equal(writerB.io.rename("config.tmp", "config.cfg"), true);
+    await writerB.filesystem.flushAndUnmount();
+
+    await remount(root, writerA);
+    assert.equal(readText(writerA, "config.cfg"), "replacement");
+    assert.equal(writerA.io.stat("config.tmp"), null);
+});
+
+test("a clean remount reloads the same durable home", async () => {
+    const root = await createRoot();
+    const writer = await mount(root);
+    writeText(writer, "config.cfg", "durable");
+    await writer.filesystem.flushAndUnmount();
+
+    await remount(root, writer);
+    assert.equal(readText(writer, "config.cfg"), "durable");
+});
+
+test("a failed flush retains dirty in-memory home state", async () => {
+    const root = await createRoot();
+    let fail = true;
+    const writer = await mount(root, {
+        async beforePersist(path) {
+            if (fail && path === "dirty.cfg") throw domError("QuotaExceededError");
+        },
+    });
+    writeText(writer, "dirty.cfg", "retryable");
+
+    await assert.rejects(writer.filesystem.flushAndUnmount(), {
+        name: "QuotaExceededError",
+    });
+    assert.equal(readText(writer, "dirty.cfg"), "retryable");
+    fail = false;
+    await writer.filesystem.flushAndUnmount();
+});
+
+test("a failed flush can be retried and then remounted durably", async () => {
+    const root = await createRoot();
+    let fail = true;
+    const writer = await mount(root, {
+        async beforePersist(path) {
+            if (fail && path === "retry.cfg") throw domError("QuotaExceededError");
+        },
+    });
+    writeText(writer, "retry.cfg", "saved-on-retry");
+
+    await assert.rejects(writer.filesystem.flushAndUnmount(), {
+        name: "QuotaExceededError",
+    });
+    fail = false;
+    await writer.filesystem.flushAndUnmount();
+    await remount(root, writer);
+    assert.equal(readText(writer, "retry.cfg"), "saved-on-retry");
+});
+
+test("a failed flush cannot discard its cache by remounting", async () => {
+    const root = await createRoot();
+    let fail = true;
+    const writer = await mount(root, {
+        async beforePersist(path) {
+            if (fail && path === "owned.cfg") throw domError("QuotaExceededError");
+        },
+    });
+    const home = await childDirectory(root, "kisakcod-web/home");
+    const loadsBeforeFlush = home.entriesRead;
+    writeText(writer, "owned.cfg", "owned");
+
+    await assert.rejects(writer.filesystem.flushAndUnmount(), {
+        name: "QuotaExceededError",
+    });
+    await assert.rejects(remount(root, writer));
+    assert.equal(home.entriesRead, loadsBeforeFlush);
+    assert.equal(readText(writer, "owned.cfg"), "owned");
+    fail = false;
+    await writer.filesystem.flushAndUnmount();
+});
+
+test("durable home reload waits for the next writer tenure", async () => {
+    const root = await createRoot();
+    const writer = await mount(root);
+    const home = await childDirectory(root, "kisakcod-web/home");
+    writeText(writer, "config.cfg", "old");
+    await writer.filesystem.flushAndUnmount();
+    const loadsAfterFlush = home.entriesRead;
+
+    await writeDurableText(root, "config.cfg", "new");
+    assert.equal(home.entriesRead, loadsAfterFlush);
+    assert.equal(writer.io.stat("config.cfg"), null);
+
+    await remount(root, writer);
+    assert.ok(home.entriesRead > loadsAfterFlush);
+    assert.equal(readText(writer, "config.cfg"), "new");
+});
+
+test("a remount waits for old-tenure persistence to finish", async () => {
+    const root = await createRoot();
+    const blocked = deferred();
+    const started = deferred();
+    const writer = await mount(root, {
+        async beforePersist(path) {
+            if (path === "config.cfg") {
+                started.resolve();
+                await blocked.promise;
+            }
+        },
+    });
+    writeText(writer, "config.cfg", "old-tenure");
+    await started.promise;
+
+    const flushing = writer.filesystem.flushAndUnmount();
+    let remounted = false;
+    const remounting = remount(root, writer).then(() => { remounted = true; });
+    for (let turn = 0; turn < 10; ++turn) await Promise.resolve();
+    assert.equal(remounted, false);
+    blocked.resolve();
+    await flushing;
+    await remounting;
+    assert.equal(readText(writer, "config.cfg"), "old-tenure");
+
+    writeText(writer, "config.cfg", "new-tenure");
+    await writer.filesystem.flushAndUnmount();
+    const verifier = await mount(root);
+    assert.equal(readText(verifier, "config.cfg"), "new-tenure");
+});
+
+test("reload rebuilds byte and directory accounting from durable state", async () => {
+    const root = await createRoot();
+    const writerA = await mount(root);
+    assert.equal(writerA.io.mkdir("profiles"), true);
+    writeText(writerA, "profiles/config.cfg", "old");
+    await writerA.filesystem.flushAndUnmount();
+
+    const writerB = await mount(root);
+    writeText(writerB, "profiles/config.cfg", "newer");
+    assert.equal(writerB.io.mkdir("saves"), true);
+    writeText(writerB, "saves/slot.dat", "four");
+    await writerB.filesystem.flushAndUnmount();
+
+    await remount(root, writerA);
+    assert.deepEqual(writerA.io.list("profiles"), [{
+        name: "config.cfg", type: "file", size: 5,
+    }]);
+    assert.deepEqual(writerA.io.list("saves"), [{
+        name: "slot.dat", type: "file", size: 4,
+    }]);
+    assert.deepEqual(await writerA.filesystem.checkpoint(), {
+        filesPersisted: 2,
+        bytesPersisted: 9,
+    });
+
+    writeText(writerA, "profiles/config.cfg", "ok");
+    assert.deepEqual(await writerA.filesystem.flushAndUnmount(), {
+        filesPersisted: 2,
+        bytesPersisted: 6,
+    });
+    const verifier = await mount(root);
+    assert.equal(readText(verifier, "profiles/config.cfg"), "ok");
+    assert.equal(readText(verifier, "saves/slot.dat"), "four");
 });
