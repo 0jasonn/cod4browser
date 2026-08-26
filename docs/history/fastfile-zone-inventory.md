@@ -1,5 +1,8 @@
 # Historical fastfile and `GfxWorld` zone inventory
 
+> **Historical, non-authoritative checkpoint.** This report describes the
+> repository state when recorded. See the [current convergence inventory](../web-port-convergence.md).
+
 ## Status and scope
 
 This document records the Milestone 8 inventory of the upstream

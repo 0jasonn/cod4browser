@@ -1,5 +1,8 @@
 # Gate 3 `Com_Init` inventory
 
+> **Historical, non-authoritative checkpoint.** This report describes the
+> repository state when recorded. See the [current convergence inventory](../web-port-convergence.md).
+
 This inventory records the second executable Gate 3 runtime slice. The browser
 target now executes canonical qcommon command behavior and the native physical
 memory/database-initializing prefix. It does not claim that the Kisak database

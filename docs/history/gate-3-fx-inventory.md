@@ -1,5 +1,8 @@
 # Historical Gate 3 canonical FxEffectDef inventory
 
+> **Historical, non-authoritative checkpoint.** This report describes the
+> repository state when recorded. See the [current convergence inventory](../web-port-convergence.md).
+
 This slice compiles the native generated FX ordering into the normal database
 path. It does not use the Gate 2 census or introduce a browser FX type.
 

@@ -1,5 +1,8 @@
 # Historical canonical single-player map lifecycle
 
+> **Historical, non-authoritative checkpoint.** This report describes the
+> repository state when recorded. See the [current convergence inventory](../web-port-convergence.md).
+
 This inventory follows the current Kisak SP sources after the renderer startup
 zone request. It is the authority for the browser continuation; the old web
 bootstrap does not select the next subsystem or a map zone.

@@ -1,5 +1,8 @@
 # Historical Gate 3 SoundCurve, sound alias, LoadedSound and Font inventory
 
+> **Historical, non-authoritative checkpoint.** This report describes the
+> repository state when recorded. See the [current convergence inventory](../web-port-convergence.md).
+
 This checkpoint follows the native generated implementation in
 `src/database/db_load.cpp` and normal owned `code_post_gfx.ff` traversal.
 

@@ -1,5 +1,8 @@
 # Historical canonical runtime prefix retirement inventory
 
+> **Historical, non-authoritative checkpoint.** This report describes the
+> repository state when recorded. See the [current convergence inventory](../web-port-convergence.md).
+
 The current Wasm runtime compiles canonical command/dvar behavior, PMem,
 database pools, XFile streaming, generated RawFile, PhysPreset,
 MaterialTechniqueSet, Material, GfxImage, water, LocalizeEntry, SoundCurve,

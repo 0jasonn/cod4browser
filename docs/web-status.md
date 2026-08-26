@@ -8,6 +8,11 @@ canonical runtime has been observed through DB publication, ClipMap,
 server/game, local client/cgame, Killhouse world frames, static and dynamic
 models, HUD, keyboard/mouse input, effects, and Web Audio.
 
+That retail evidence is historical: it was catalogued at
+`887f1c8775356c3b2c689cae1a8b3b0cb9df87d9` on 2026-08-25 and was not rerun
+on 2026-08-26 because no retail root was supplied. Current CI evidence is
+synthetic and does not promote the campaign compatibility matrix.
+
 Production contains only named Worker operations and a versioned protocol.
 The writable home filesystem has one cross-tab owner and an awaited,
 retryable `flushAndUnmount` path that persists dirty open files before handles

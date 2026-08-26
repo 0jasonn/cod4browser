@@ -1,5 +1,8 @@
 # Historical Gate 3 canonical LocalizeEntry inventory
 
+> **Historical, non-authoritative checkpoint.** This report describes the
+> repository state when recorded. See the [current convergence inventory](../web-port-convergence.md).
+
 This inventory records the exact KisakCOD generated closure used by the normal
 database path. The authoritative source is `src/database/db_load.cpp`, not the
 Gate 2 retail census.

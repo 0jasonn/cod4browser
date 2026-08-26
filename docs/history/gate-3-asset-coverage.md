@@ -1,5 +1,8 @@
 # Historical Gate 3 canonical asset coverage
 
+> **Historical, non-authoritative checkpoint.** This report describes the
+> repository state when recorded. See the [current convergence inventory](../web-port-convergence.md).
+
 This is the current ownership map for normal canonical DB execution. Gate 2
 remains an explicitly started oracle and does not supply assets to this path.
 

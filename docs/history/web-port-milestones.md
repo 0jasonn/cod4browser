@@ -1,5 +1,8 @@
 # Browser port status
 
+> **Historical, non-authoritative checkpoint.** This report describes the
+> repository state when recorded. See the [current convergence inventory](../web-port-convergence.md).
+
 The browser port starts from KisakCOD upstream commit
 `1c03702cbe176e9274e486d295edcd035b3c2b5f` (7 August 2026). The local
 `web-port` branch retains upstream history and tracks `upstream/master`.

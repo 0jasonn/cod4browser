@@ -33,8 +33,8 @@ highest-value blocker in the canonical gameplay flow.
   engine assets retain their canonical identities to a genuine platform seam.
 - Browser asynchrony stays at filesystem, launcher, audio-policy, and frame-pump
   boundaries. Portable engine operations remain synchronous-looking.
-- Gate 2 and other frozen oracles are diagnostic evidence only. Production
-  runtime behavior must never execute through them.
+- Gate 2 and the frozen proof oracles are retired. Their reports are historical
+  evidence only; neither production nor diagnostics may execute through them.
 - Do not add a browser world representation, debug camera, fake scene, fake
   entities, hard-coded Killhouse behavior, or a duplicate gameplay/FX/audio
   system.
@@ -44,7 +44,12 @@ Any task that cannot satisfy these invariants stops for architectural review.
 
 ## Current runtime boundary
 
-Baseline: `f706d307` (canonical collision/common-world shutdown before web
+The current ownership source is `docs/web-port-convergence.md`. The following
+retail/runtime evidence is historical: it was catalogued through
+`887f1c8775356c3b2c689cae1a8b3b0cb9df87d9` on 2026-08-25 and was not rerun
+for the 2026-08-26 cleanup because no retail root was supplied.
+
+That evidence includes `f706d307` (canonical collision/common-world shutdown before web
 asset release). The accepted runtime history also includes `d671f4e7` for
 freeFlags unload/mark/promotion/default/removal and zone compaction,
 `ec9b3ddd` for malformed SndCurve body repair at publication, and `ac9c7682`
@@ -425,7 +430,7 @@ Stop autonomous implementation when:
 
 | State | Milestone | Evidence / commits | Remaining blocker |
 | --- | --- | --- | --- |
-| Complete | Canonical filesystem and DB startup | See `docs/web-port-convergence.md` and history through `e652d43a` | Continue convergence; Gate 2 remains diagnostic only |
+| Complete | Canonical filesystem and DB startup | See `docs/web-port-convergence.md` and history through `e652d43a` | Continue canonical convergence; retired Gate 2 stays absent |
 | Complete | Real Killhouse map/game/cgame frame | See canonical lifecycle and browser evidence through `e652d43a` | Presentation and gameplay feedback gaps |
 | Complete | Textured/lightmapped world, static models, ordinary/weapon DObjs, HUD/input | `e652d43a`, `748112cc`, `de695b46` | Broader entity/material families |
 | Complete | Canonical FX code-mesh renderer closure | `41c6c8a5`, `b5d2c76e` | Retail muzzle/impact visibility proof; marks/decals remain later FX families |

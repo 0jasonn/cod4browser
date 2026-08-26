@@ -1,5 +1,8 @@
 # Historical Gate 3 canonical startup-zone chain
 
+> **Historical, non-authoritative checkpoint.** This report describes the
+> repository state when recorded. See the [current convergence inventory](../web-port-convergence.md).
+
 ## Engine-owned request order
 
 The browser no longer starts the real database with a handwritten single-zone

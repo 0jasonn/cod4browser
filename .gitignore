@@ -305,6 +305,7 @@ node_modules/
 playwright-report/
 test-results/
 blob-report/
+cod4browser-*.zip
 
 # Visual Studio 6 build log
 *.plg

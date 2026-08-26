@@ -202,8 +202,8 @@ int main()
 
     if (!InitializeCanonicalEngine())
     {
-        Web_Log(WebLogLevel::Error, "[kisakcod-web] qcommon command/dvar smoke test failed.\n");
-        Web_EmitRuntimeState("failed", "The headless command/dvar slice failed to initialize");
+        Web_Log(WebLogLevel::Error, "[kisakcod-web] Canonical engine initialization failed.\n");
+        Web_EmitRuntimeState("failed", "The canonical engine failed to initialize");
         return 1;
     }
 

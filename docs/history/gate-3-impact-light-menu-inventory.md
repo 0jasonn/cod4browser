@@ -1,5 +1,8 @@
 # Historical Gate 3 Impact, Light, and Menu inventory
 
+> **Historical, non-authoritative checkpoint.** This report describes the
+> repository state when recorded. See the [current convergence inventory](../web-port-convergence.md).
+
 This checkpoint follows the canonical FX closure. Normal DB execution remains
 independent of the Gate 2 census and renderer oracle.
 

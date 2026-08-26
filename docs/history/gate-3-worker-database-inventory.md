@@ -1,5 +1,8 @@
 # Gate 3 Worker/database execution inventory
 
+> **Historical, non-authoritative checkpoint.** This report describes the
+> repository state when recorded. See the [current convergence inventory](../web-port-convergence.md).
+
 This slice starts at the prior canonical stop:
 
 ```text

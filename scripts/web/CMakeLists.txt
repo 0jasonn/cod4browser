@@ -407,7 +407,6 @@ file(REMOVE
     "${KISAK_WEB_SITE_DIR}/engine_worker_host.mjs"
     "${KISAK_WEB_SITE_DIR}/engine_protocol.mjs"
     "${KISAK_WEB_SITE_DIR}/filesystem_bridge.mjs"
-    "${KISAK_WEB_SITE_DIR}/product_input_controller.mjs"
     "${KISAK_WEB_SITE_DIR}/kisakcod-next.mjs"
     "${KISAK_WEB_SITE_DIR}/kisakcod-next.wasm")
 foreach(WEB_FILE asset_profile.mjs asset_store.mjs browser_capabilities.mjs

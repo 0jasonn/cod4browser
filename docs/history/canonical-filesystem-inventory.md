@@ -1,5 +1,8 @@
 # Historical canonical filesystem initialization inventory
 
+> **Historical, non-authoritative checkpoint.** This report describes the
+> repository state when recorded. See the [current convergence inventory](../web-port-convergence.md).
+
 This inventory records the Worker-hosted `FS_InitFilesystem` closure now used
 by normal browser startup. Native Kisak remains the behavioral oracle and owns
 all search-path and archive policy.

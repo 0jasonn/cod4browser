@@ -1,5 +1,8 @@
 # Gate 3 generated loader and first publication inventory
 
+> **Historical, non-authoritative checkpoint.** This report describes the
+> repository state when recorded. See the [current convergence inventory](../web-port-convergence.md).
+
 This slice starts at the previously proven `DB_InitStreams` boundary. It does
 not call the retail census, `WebRetailLoadContext`, or the Gate 2 registry.
 

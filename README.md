@@ -8,9 +8,11 @@ platform boundaries.
 
 The Release product runs in a dedicated Worker and follows the canonical Kisak
 path through `Com_Init`, database/XFile loading, ClipMap, server/game, local
-client/cgame, renderer-frontend commands, and actual WebGL2 world frames. The
-validated Killhouse slice includes input, HUD, effects, and Web Audio. It is
-still an incomplete port, not a generally compatible COD4 release.
+client/cgame, renderer-frontend commands, and actual WebGL2 world frames.
+Historical local retail evidence catalogued at commit `887f1c87` on 2026-08-25
+includes Killhouse input, HUD, effects, and Web Audio; it was not rerun during
+the 2026-08-26 cleanup because no retail root was supplied. This is still an
+incomplete port, not a generally compatible COD4 release.
 
 The opt-in diagnostics target builds the same runtime with browser-only test
 controls and telemetry. Production does not expose those controls.
@@ -109,5 +111,5 @@ validation, and remaining material families are outstanding.
 
 ## License
 
-KisakCOD and this port are GPL-3.0. See [LICENSE.md](LICENSE.md). Call of Duty is
+KisakCOD and this port are GPL-3.0. See [LICENSE](LICENSE). Call of Duty is
 a trademark of Activision; this project is unaffiliated with Activision.

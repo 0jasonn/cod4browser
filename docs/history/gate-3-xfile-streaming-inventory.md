@@ -1,5 +1,8 @@
 # Gate 3 canonical XFile streaming inventory
 
+> **Historical, non-authoritative checkpoint.** This report describes the
+> repository state when recorded. See the [current convergence inventory](../web-port-convergence.md).
+
 This slice continues immediately after the prior IWff magic/version/framing
 probe. The repository implementation, rather than the temporary retail census,
 defines the execution order.

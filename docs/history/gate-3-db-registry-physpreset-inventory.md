@@ -1,5 +1,8 @@
 # Historical Gate 3 DB registry convergence and PhysPreset inventory
 
+> **Historical, non-authoritative checkpoint.** This report describes the
+> repository state when recorded. See the [current convergence inventory](../web-port-convergence.md).
+
 ## Ownership result
 
 The production Wasm target now compiles `src/database/db_registry.cpp` with a

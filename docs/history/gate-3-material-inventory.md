@@ -1,5 +1,8 @@
 # Historical Gate 3 Material generated-loader inventory
 
+> **Historical, non-authoritative checkpoint.** This report describes the
+> repository state when recorded. See the [current convergence inventory](../web-port-convergence.md).
+
 ## Source of truth
 
 This slice follows `src/database/db_load.cpp` exactly from

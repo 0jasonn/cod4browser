@@ -1,5 +1,8 @@
 # Historical Gate 3 MaterialTechniqueSet generated-loader inventory
 
+> **Historical, non-authoritative checkpoint.** This report describes the
+> repository state when recorded. See the [current convergence inventory](../web-port-convergence.md).
+
 ## Source of truth
 
 This slice follows the generated implementation in
