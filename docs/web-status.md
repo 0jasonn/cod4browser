@@ -13,6 +13,11 @@ That retail evidence is historical: it was catalogued at
 on 2026-08-26 because no retail root was supplied. Current CI evidence is
 synthetic and does not promote the campaign compatibility matrix.
 
+The 2026-08-26 roadmap execution completed the fresh non-retail baseline at
+runtime SHA `10000c094a940d7a1e7807df19dd3007e5ce6c8c` and stopped at
+`RETAIL_ROOT_MISSING`. See the
+[execution report](../WEB_ROADMAP_EXECUTION_REPORT.md).
+
 Production contains only named Worker operations and a versioned protocol.
 The writable home filesystem has one cross-tab owner and an awaited,
 retryable `flushAndUnmount` path that persists dirty open files before handles

@@ -15,6 +15,10 @@
 
 ## Next, in order
 
+The 2026-08-26 execution completed the non-retail baseline and is blocked
+before step 1 because `KISAK_COD4_RETAIL_ROOT` was not supplied. See the
+[progress report](../ROADMAP_PROGRESS_REPORT.md).
+
 1. Run the documented local retail matrix for Killhouse and CargoShip with
    user-owned assets, including transition, persistence, audio, input, and
    context recovery.

@@ -10,6 +10,11 @@ claim about the current branch: the strengthened matrix was not rerun on
 2026-08-26 because no retail root was supplied. New results must record their
 own exact commit, date, browser, and machine-readable result.
 
+The current roadmap execution at runtime SHA
+`10000c094a940d7a1e7807df19dd3007e5ce6c8c` completed the non-retail
+baseline but did not receive `KISAK_COD4_RETAIL_ROOT`; no row changed. See the
+[execution report](../WEB_ROADMAP_EXECUTION_REPORT.md).
+
 | Map | Asset discovered | DB load | Clip/world | Server | Game | CGame | First frame | 60s stable | Input | Audio | Transition in | Transition out | Save/load | Context recovery | Peak memory | Result | Failure class | Evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `killhouse` | Yes; required profile zone | Pass | Pass | Pass | Pass | Pass | Pass | Not recorded | Pass | Pass | Pass; fresh/repeat/loadgame | Pass; prior transition to `cargoship` | Pass | Not recorded on retail | ~766 MiB decoded recovery before the unload fix; current quantitative run pending | PLAYABLE | — | Historical legally owned Release Chrome runs summarized in [web-port-convergence.md](web-port-convergence.md) and [roadmap.md](roadmap.md); catalogued at the commit/date above. |
