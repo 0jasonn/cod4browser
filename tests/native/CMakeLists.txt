@@ -99,6 +99,7 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
         "${KISAK_REPOSITORY_ROOT}/src/qcommon/com_init_trace.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_initialization.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/qcommon/common.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/qcommon/common_runtime_commands.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/qcommon/cmd.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/script/scr_memorytree.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/script/scr_stringlist.cpp"
@@ -113,7 +114,8 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
     target_compile_features(canonical_runtime_prefix_tests PRIVATE cxx_std_20)
     target_include_directories(canonical_runtime_prefix_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
     target_compile_definitions(canonical_runtime_prefix_tests PRIVATE
-        KISAK_SP=1 KISAK_GATE3_COM_INIT_PREFIX=1 dNODEBUG=1)
+        KISAK_SP=1 KISAK_GATE3_COM_INIT_PREFIX=1
+        KISAK_RUNTIME_COMMANDS_TEST=1 dNODEBUG=1)
     if (MSVC)
         target_compile_definitions(canonical_runtime_prefix_tests PRIVATE WIN32=1)
         target_compile_options(canonical_runtime_prefix_tests PRIVATE /Gy /Gw /Zc:inline)

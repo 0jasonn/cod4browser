@@ -54,6 +54,17 @@ void __cdecl MemFile_WriteData(MemoryFile *, int, const void *) {}
 void __cdecl MemFile_WriteCString(MemoryFile *, const char *) {}
 const char *__cdecl MemFile_ReadCString(MemoryFile *) { return ""; }
 void __cdecl MemFile_ReadData(MemoryFile *, int, std::uint8_t *) {}
+#if KISAK_RUNTIME_COMMANDS_TEST
+void __cdecl Com_Quit_f() {}
+int __cdecl FS_FOpenFileWrite(const char *) { return 0; }
+int __cdecl FS_FOpenFileWriteToDir(const char *, const char *) { return 0; }
+void FS_Printf(int, const char *, ...) {}
+void __cdecl FS_FCloseFile(int) {}
+void __cdecl Key_WriteBindings(int32_t, int32_t) {}
+void __cdecl Con_WriteFilterConfigString(int32_t) {}
+void __cdecl Dvar_WriteVariables(int) {}
+void __cdecl Dvar_WriteDefaults(int) {}
+#endif
 
 void Sys_InitializeCriticalSections() {}
 void Sys_EnterCriticalSection(int) {}
@@ -189,6 +200,16 @@ int main()
     assert(std::strcmp(g_probeArguments[1].data(), "second") == 0);
     Cmd_RemoveCommand("gate3_probe");
     assert(Cmd_FindCommand("gate3_probe") == nullptr);
+
+#if KISAK_RUNTIME_COMMANDS_TEST
+    // The web runtime resumes the native common.cpp command registration
+    // immediately after the filesystem/profile boundary.
+    Com_RegisterRuntimeCommands();
+    assert(Cmd_FindCommand("quit") != nullptr);
+    assert(Cmd_FindCommand("writeconfig") != nullptr);
+    assert(Cmd_FindCommand("writeconfig")->function == Com_WriteConfig_f);
+    assert(Cmd_FindCommand("writedefaults") != nullptr);
+#endif
 
     static cmd_function_s tryExecuteCommand{};
     Cmd_AddCommandInternal(

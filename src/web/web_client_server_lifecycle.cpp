@@ -274,6 +274,7 @@ extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_MountCanonicalRuntime()
     Com_InitHunkMemory();
     Hunk_InitDebugMemory();
     ProfLoad_Init();
+    Com_RegisterRuntimeCommands();
     Scr_InitVariables();
     Scr_Init();
     Scr_Settings(

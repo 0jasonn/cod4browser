@@ -271,6 +271,7 @@ void __cdecl Com_WriteDefaultsToFile(char* filename);
 void __cdecl Com_WriteConfig_f();
 void __cdecl Com_WriteConfigToFile(int localClientNum, char* filename);
 void __cdecl Com_WriteDefaults_f();
+void Com_RegisterRuntimeCommands();
 double __cdecl Com_GetTimescaleForSnd();
 void __cdecl Com_AdjustMaxFPS(int* maxFPS);
 void __cdecl Com_Frame_Try_Block_Function();

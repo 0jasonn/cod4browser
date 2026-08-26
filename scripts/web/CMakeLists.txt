@@ -143,6 +143,7 @@ set(KISAK_WEB_CANONICAL_RUNTIME_SOURCES
     "${SRC_DIR}/qcommon/graph.cpp"
     "${SRC_DIR}/qcommon/common_runtime_state.cpp"
     "${SRC_DIR}/qcommon/common_runtime_continuation.cpp"
+    "${SRC_DIR}/qcommon/common_runtime_commands.cpp"
     "${SRC_DIR}/qcommon/cm_load.cpp"
     "${SRC_DIR}/qcommon/cm_memory.cpp"
     "${SRC_DIR}/qcommon/com_world_runtime.cpp"

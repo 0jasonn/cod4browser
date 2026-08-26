@@ -129,7 +129,8 @@ void __cdecl Dvar_GetCombinedString(char *combined, int first)
     }
 }
 
-#ifndef KISAK_GATE3_COM_INIT_PREFIX
+#if !defined(KISAK_GATE3_COM_INIT_PREFIX) || \
+    defined(KISAK_RUNTIME_MAP_DB_BOUNDARY)
 void __cdecl Dvar_WriteVariables(int f)
 {
     Dvar_ForEach((void(__cdecl *)(const dvar_s *, void *))Dvar_WriteSingleVariable, &f);
