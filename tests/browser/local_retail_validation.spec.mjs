@@ -7,6 +7,10 @@ import { chromium, expect, test as base } from "@playwright/test";
 
 const retailRoot = process.env.KISAK_COD4_RETAIL_ROOT;
 const browserChannel = process.env.KISAK_BROWSER_CHANNEL;
+const phase3TargetMap = process.env.KISAK_RETAIL_PHASE3_MAP?.trim().toLowerCase();
+if (phase3TargetMap && phase3TargetMap !== "blackout") {
+    throw new Error("KISAK_RETAIL_PHASE3_MAP currently supports only blackout");
+}
 const sourceCommit = execFileSync(
     "git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 const sourceDirty = execFileSync(
@@ -56,11 +60,14 @@ const test = base.extend({
 });
 
 test.skip(!retailRoot,
-    "Set KISAK_COD4_RETAIL_ROOT to a legally owned COD4 installation");
+    "RETAIL_ROOT_MISSING: set KISAK_COD4_RETAIL_ROOT to a legally owned COD4 installation");
 
 test.afterEach(async ({}, testInfo) => {
     if (testInfo.status === testInfo.expectedStatus) return;
-    console.log(`KISAK_RETAIL_RESULT ${JSON.stringify({
+    const phase3 = testInfo.tags.includes("@retail-phase3");
+    const prefix = phase3
+        ? "KISAK_RETAIL_PHASE3_RESULT" : "KISAK_RETAIL_RESULT";
+    console.log(`${prefix} ${JSON.stringify({
         schemaVersion: 1,
         source: { commitSha: sourceCommit, dirty: sourceDirty },
         recordedAtUtc: new Date().toISOString(),
@@ -72,8 +79,80 @@ test.afterEach(async ({}, testInfo) => {
         validationResult: "fail",
         failureStage,
         failureClass,
+        ...(phase3 ? { targetMap: phase3TargetMap } : {}),
     })}`);
 });
+
+async function installRetailObservers(page)
+{
+    await page.addInitScript(() => {
+        globalThis.__KISAKCOD_WORKER_TEST_CONFIG__ = { observeInput: true };
+        Object.defineProperty(globalThis, "showDirectoryPicker", {
+            configurable: true,
+            value: undefined,
+        });
+        globalThis.__retailValidationFrames = [];
+        globalThis.__retailValidationViews = [];
+        globalThis.__retailValidationMemory = [];
+        globalThis.__retailRendererLifecycle = [];
+        globalThis.__retailValidationInput = [];
+        globalThis.__retailLifecycle = [];
+        globalThis.__retailDatabase = [];
+        globalThis.__retailAudioTelemetry = [];
+        globalThis.__retailLogs = [];
+        globalThis.addEventListener("kisakcod:log", (event) => {
+            globalThis.__retailLogs.push(structuredClone(event.detail));
+        });
+        globalThis.addEventListener("kisakcod:renderer-scene-frame", (event) => {
+            globalThis.__retailValidationFrames.push({
+                ...structuredClone(event.detail), observedMs: performance.now(),
+            });
+            if (globalThis.__retailValidationFrames.length > 20_000)
+                globalThis.__retailValidationFrames.shift();
+        });
+        globalThis.addEventListener("kisakcod:renderer-scene-view", (event) => {
+            globalThis.__retailValidationViews.push({
+                ...structuredClone(event.detail), observedMs: performance.now(),
+            });
+            if (globalThis.__retailValidationViews.length > 20_000)
+                globalThis.__retailValidationViews.shift();
+        });
+        globalThis.addEventListener("kisakcod:renderer-memory", (event) => {
+            globalThis.__retailValidationMemory.push({
+                ...structuredClone(event.detail), observedMs: performance.now(),
+            });
+        });
+        globalThis.addEventListener("kisakcod:renderer-lifecycle", (event) => {
+            globalThis.__retailRendererLifecycle.push({
+                ...structuredClone(event.detail), observedMs: performance.now(),
+            });
+        });
+        globalThis.addEventListener("kisakcod:input", (event) => {
+            globalThis.__retailValidationInput.push(structuredClone(event.detail));
+        });
+        globalThis.addEventListener("kisakcod:engine-lifecycle", (event) => {
+            globalThis.__retailLifecycle.push({
+                ...structuredClone(event.detail), observedMs: performance.now(),
+            });
+        });
+        globalThis.addEventListener("kisakcod:database", (event) => {
+            if (event.detail.stage === "XAssetList begin" ||
+                event.detail.stage === "XAssetList end" || event.detail.generatedLoadFailed) {
+                globalThis.__retailDatabase.push({
+                    stage: event.detail.stage,
+                    logicalPath: event.detail.logicalPath,
+                    generatedLoadFailed: event.detail.generatedLoadFailed,
+                    observedMs: performance.now(),
+                });
+            }
+        });
+        globalThis.addEventListener("kisakcod:audio-telemetry", (event) => {
+            globalThis.__retailAudioTelemetry.push({
+                ...structuredClone(event.detail), observedMs: performance.now(),
+            });
+        });
+    });
+}
 
 async function waitForAssets(page, state)
 {
@@ -350,6 +429,190 @@ function assertMapEvidence(evidence, memorySnapshot)
     expect(evidence.checkpoint.durationMs).toBeGreaterThanOrEqual(0);
 }
 
+const canonicalMapLifecycleStages = [
+    "CM_LoadMap complete",
+    "Com_LoadWorld complete",
+    "G_InitGame complete",
+    "G_LoadLevel complete",
+    "SV_InitGameVM complete",
+    "SV_InitGameProgs complete",
+    "CG_Init complete",
+    "CL_InitCGame complete",
+];
+
+async function waitForLifecycleStages(page, lifecycleCursor, requiredStages)
+{
+    await expect.poll(() => page.evaluate(({ cursor, required }) => {
+        const observed = new Set(globalThis.__retailLifecycle.slice(cursor)
+            .map((event) => event.stage));
+        return required.filter((stage) => !observed.has(stage));
+    }, { cursor: lifecycleCursor, required: requiredStages }), {
+        timeout: 300_000,
+    }).toEqual([]);
+}
+
+async function lifecycleEvidence(page, lifecycleCursor)
+{
+    return page.evaluate(({ cursor, required }) => structuredClone(
+        globalThis.__retailLifecycle.slice(cursor)
+            .filter((event) => required.includes(event.stage))
+            .map((event) => ({
+                stage: event.stage,
+                observedMs: event.observedMs,
+            }))), {
+        cursor: lifecycleCursor,
+        required: canonicalMapLifecycleStages,
+    });
+}
+
+async function firstWorldFrameEvidence(page, mapName, frameCursor)
+{
+    await waitForWorldFrames(page, mapName);
+    const frame = await page.evaluate(({ cursor, name }) => structuredClone(
+        globalThis.__retailValidationFrames.slice(cursor).find(
+            (entry) => entry.state === "drawn" && entry.geometrySubmitted === true &&
+                entry.worldName?.toLowerCase().includes(name)) ?? null), {
+        cursor: frameCursor,
+        name: mapName,
+    });
+    expect(frame).not.toBeNull();
+    return frame;
+}
+
+async function rendererTransitionEvidence(page, lifecycleCursor, startedMs, endedMs)
+{
+    const lifecycle = await page.evaluate((cursor) => structuredClone(
+        globalThis.__retailRendererLifecycle.slice(cursor)), lifecycleCursor);
+    const unloadBeginIndex = lifecycle.findIndex(
+        (event) => event.state === "worldUnloadBegin");
+    const unloadEndIndex = lifecycle.findIndex(
+        (event, index) => index > unloadBeginIndex && event.state === "worldUnloadEnd");
+    const publishedIndex = lifecycle.findIndex(
+        (event, index) => index > unloadEndIndex && event.state === "newWorldPublished");
+    expect(unloadBeginIndex).toBeGreaterThanOrEqual(0);
+    expect(unloadEndIndex).toBeGreaterThan(unloadBeginIndex);
+    expect(publishedIndex).toBeGreaterThan(unloadEndIndex);
+    expect(lifecycle[unloadEndIndex].oldMapBytesReleased).toBeGreaterThan(0);
+    expect(lifecycle[unloadEndIndex].contextGenerationUnchanged).toBe(true);
+    expect(lifecycle[unloadEndIndex].contextGenerationAfter)
+        .toBe(lifecycle[publishedIndex].contextGenerationAfter);
+
+    const memory = await page.evaluate(({ start, end }) => structuredClone(
+        globalThis.__retailValidationMemory.filter((entry) =>
+            entry.observedMs >= start && entry.observedMs <= end)), {
+        start: startedMs,
+        end: endedMs,
+    });
+    expect(memory.length).toBeGreaterThanOrEqual(3);
+    for (const sample of memory) assertMemoryTelemetry(sample);
+    const unloadBegin = memory.find((entry) => entry.state === "world-unload-begin");
+    const unloadEnd = memory.find((entry) => entry.state === "world-unloaded");
+    const newWorld = memory.find((entry) => entry.state === "world-submitted" &&
+        entry.observedMs > unloadEnd?.observedMs);
+    expect(unloadBegin).toBeTruthy();
+    expect(unloadEnd).toBeTruthy();
+    expect(newWorld).toBeTruthy();
+    expect(unloadEnd.worldImageRecoveryBytes).toBe(0);
+    expect(unloadEnd.staticModelImageRecoveryBytes).toBe(0);
+    expect(unloadEnd.dynamicModelImageRecoveryBytes).toBe(0);
+    expect(unloadEnd.uiImageRecoveryBytes).toBe(0);
+    expect(unloadEnd.supplementalTextureRecoveryBytes).toBe(0);
+    expect(unloadEnd.decodedTextureSourceBytes).toBe(0);
+    expect(unloadEnd.geometryBytes).toBe(0);
+    expect(lifecycle[unloadEndIndex].oldMapBytesReleased)
+        .toBe(unloadBegin.recoveryCopyBytes - unloadEnd.recoveryCopyBytes);
+    const maximum = (key) => Math.max(...memory.map((entry) => entry[key]));
+    return {
+        validationResult: "pass",
+        durationToFirstWorldFrameMs: endedMs - startedMs,
+        contextGenerationBefore: lifecycle[unloadEndIndex].contextGenerationBefore,
+        contextGenerationAfter: lifecycle[unloadEndIndex].contextGenerationAfter,
+        oldMap: {
+            aggregateCpuRecoveryBytesBeforeUnload: unloadBegin.recoveryCopyBytes,
+            aggregateCpuRecoveryBytesAfterUnload: unloadEnd.recoveryCopyBytes,
+            aggregateCpuRecoveryBytesReleased:
+                lifecycle[unloadEndIndex].oldMapBytesReleased,
+        },
+        newMapAggregateCpuRecoveryBytesAtWorldPublication:
+            newWorld.recoveryCopyBytes,
+        peakObserved: {
+            decodedTextureRecoveryBytes: maximum("decodedTextureSourceBytes"),
+            aggregateCpuRecoveryBytes: maximum("recoveryCopyBytes"),
+            estimatedGpuTextureBytes: maximum("gpuTextureEstimateBytes"),
+            geometryBytes: maximum("geometryBytes"),
+            boundaryRetainedTemporaryUploadBytes: maximum("temporaryUploadBytes"),
+            shaderProgramBytes: maximum("shaderProgramCacheEstimateBytes"),
+        },
+        lifecycleOrder: ["worldUnloadBegin", "worldUnloadEnd", "newWorldPublished"],
+    };
+}
+
+async function recoverMapContext(page, mapName)
+{
+    const before = await page.evaluate((name) => ({
+        startedMs: performance.now(),
+        contextLosses: globalThis.__KISAKCOD_WEB__.contextLosses,
+        surfaceRecoveryCount:
+            globalThis.__KISAKCOD_WEB__.rendererSurface.recoveryCount ?? 0,
+        frame: structuredClone(globalThis.__retailValidationFrames.findLast(
+            (entry) => entry.worldName?.toLowerCase().includes(name))),
+    }), mapName);
+    expect(before.frame).toBeTruthy();
+    expect(await page.evaluate(() =>
+        globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestLoseWebGLContext")))
+        .toBeTruthy();
+    await expect.poll(() => page.evaluate(() => ({
+        runtime: globalThis.__KISAKCOD_WEB__.state,
+        surface: globalThis.__KISAKCOD_WEB__.rendererSurface.state,
+    }))).toEqual({ runtime: "renderer-lost", surface: "lost" });
+    expect(await page.evaluate(() =>
+        globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestRestoreWebGLContext")))
+        .toBeTruthy();
+    await expect.poll(() => page.evaluate(({ previous, name }) => ({
+        runtime: globalThis.__KISAKCOD_WEB__.state,
+        contextLossRecorded:
+            globalThis.__KISAKCOD_WEB__.contextLosses > previous.contextLosses,
+        surface: globalThis.__KISAKCOD_WEB__.rendererSurface.state,
+        surfaceRecovered:
+            globalThis.__KISAKCOD_WEB__.rendererSurface.recoveryCount >
+                previous.surfaceRecoveryCount,
+        canonicalResourcesRebuilt:
+            (globalThis.__retailValidationFrames.findLast((entry) =>
+                entry.worldName?.toLowerCase().includes(name))
+                ?.resourceGeneration ?? 0) >
+                    (previous.frame?.resourceGeneration ?? 0),
+    }), { previous: before, name: mapName }), { timeout: 30_000 }).toEqual({
+        runtime: "running",
+        contextLossRecorded: true,
+        surface: "ready",
+        surfaceRecovered: true,
+        canonicalResourcesRebuilt: true,
+    });
+    await waitForWorldFrames(page, mapName,
+        before.frame.viewSubmissionGeneration + 1);
+    const completedMs = await page.evaluate(() => performance.now());
+    const input = await exerciseRetailInput(page);
+    const after = await page.evaluate((name) => ({
+        contextLosses: globalThis.__KISAKCOD_WEB__.contextLosses,
+        surfaceRecoveryCount:
+            globalThis.__KISAKCOD_WEB__.rendererSurface.recoveryCount ?? 0,
+        frame: structuredClone(globalThis.__retailValidationFrames.findLast(
+            (entry) => entry.worldName?.toLowerCase().includes(name))),
+    }), mapName);
+    return {
+        validationResult: "pass",
+        durationToFirstRecoveredWorldFrameMs: completedMs - before.startedMs,
+        contextLossesBefore: before.contextLosses,
+        contextLossesAfter: after.contextLosses,
+        surfaceRecoveryCountBefore: before.surfaceRecoveryCount,
+        surfaceRecoveryCountAfter: after.surfaceRecoveryCount,
+        resourceGenerationBefore: before.frame.resourceGeneration,
+        resourceGenerationAfter: after.frame.resourceGeneration,
+        framesResumed: true,
+        inputResumed: input,
+    };
+}
+
 async function exerciseRetailInput(page)
 {
     const canvas = page.locator("#game-canvas");
@@ -470,74 +733,7 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
     };
     const pageErrors = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
-
-    await page.addInitScript(() => {
-        globalThis.__KISAKCOD_WORKER_TEST_CONFIG__ = { observeInput: true };
-        Object.defineProperty(globalThis, "showDirectoryPicker", {
-            configurable: true,
-            value: undefined,
-        });
-        globalThis.__retailValidationFrames = [];
-        globalThis.__retailValidationViews = [];
-        globalThis.__retailValidationMemory = [];
-        globalThis.__retailRendererLifecycle = [];
-        globalThis.__retailValidationInput = [];
-        globalThis.__retailLifecycle = [];
-        globalThis.__retailDatabase = [];
-        globalThis.__retailAudioTelemetry = [];
-        globalThis.__retailLogs = [];
-        globalThis.addEventListener("kisakcod:log", (event) => {
-            globalThis.__retailLogs.push(structuredClone(event.detail));
-        });
-        globalThis.addEventListener("kisakcod:renderer-scene-frame", (event) => {
-            globalThis.__retailValidationFrames.push({
-                ...structuredClone(event.detail), observedMs: performance.now(),
-            });
-            if (globalThis.__retailValidationFrames.length > 20_000)
-                globalThis.__retailValidationFrames.shift();
-        });
-        globalThis.addEventListener("kisakcod:renderer-scene-view", (event) => {
-            globalThis.__retailValidationViews.push({
-                ...structuredClone(event.detail), observedMs: performance.now(),
-            });
-            if (globalThis.__retailValidationViews.length > 20_000)
-                globalThis.__retailValidationViews.shift();
-        });
-        globalThis.addEventListener("kisakcod:renderer-memory", (event) => {
-            globalThis.__retailValidationMemory.push({
-                ...structuredClone(event.detail), observedMs: performance.now(),
-            });
-        });
-        globalThis.addEventListener("kisakcod:renderer-lifecycle", (event) => {
-            globalThis.__retailRendererLifecycle.push({
-                ...structuredClone(event.detail), observedMs: performance.now(),
-            });
-        });
-        globalThis.addEventListener("kisakcod:input", (event) => {
-            globalThis.__retailValidationInput.push(structuredClone(event.detail));
-        });
-        globalThis.addEventListener("kisakcod:engine-lifecycle", (event) => {
-            globalThis.__retailLifecycle.push({
-                ...structuredClone(event.detail), observedMs: performance.now(),
-            });
-        });
-        globalThis.addEventListener("kisakcod:database", (event) => {
-            if (event.detail.stage === "XAssetList begin" ||
-                event.detail.stage === "XAssetList end" || event.detail.generatedLoadFailed) {
-                globalThis.__retailDatabase.push({
-                    stage: event.detail.stage,
-                    logicalPath: event.detail.logicalPath,
-                    generatedLoadFailed: event.detail.generatedLoadFailed,
-                    observedMs: performance.now(),
-                });
-            }
-        });
-        globalThis.addEventListener("kisakcod:audio-telemetry", (event) => {
-            globalThis.__retailAudioTelemetry.push({
-                ...structuredClone(event.detail), observedMs: performance.now(),
-            });
-        });
-    });
+    await installRetailObservers(page);
 
     failureStage = "runtime bootstrap";
     failureClass = "lifecycle";
@@ -830,3 +1026,222 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
     };
     console.log(`KISAK_RETAIL_RESULT ${JSON.stringify(validationRecord)}`);
 });
+
+if (phase3TargetMap) {
+    test("local retail Phase 3 campaign map", { tag: "@retail-phase3" },
+        async ({ retailPage: page }) => {
+            test.setTimeout(900_000);
+            failureStage = "Phase 3 test setup";
+            failureClass = "unknown";
+            expect(sourceDirty,
+                "authoritative retail validation requires a clean source commit")
+                .toBe(false);
+            const browser = page.context().browser();
+            retailBrowserMetadata = {
+                name: browser?.browserType().name() ?? "unknown",
+                version: browser?.version() ?? "unknown",
+                channel: browserChannel ?? null,
+            };
+            const pageErrors = [];
+            page.on("pageerror", (error) => pageErrors.push(error.message));
+            await installRetailObservers(page);
+
+            failureStage = "Phase 3 runtime bootstrap";
+            failureClass = "lifecycle";
+            await page.goto("/");
+            await expect.poll(() => page.evaluate(
+                () => globalThis.__KISAKCOD_WEB__?.state,
+            )).toBe("running");
+            await waitForAssets(page, "empty");
+
+            failureStage = "Phase 3 installation/profile validation";
+            failureClass = "filesystem";
+            const chooserPromise = page.waitForEvent("filechooser");
+            await page.locator("#portable-install-button").click();
+            const chooser = await chooserPromise;
+            await chooser.setFiles(retailRoot);
+            await waitForAssets(page, "ready");
+
+            failureStage = "CargoShip baseline database load";
+            failureClass = "database";
+            const cargoshipCursor = await captureMapCursor(page);
+            const cargoshipCommandMs = await submitCommand(page, "map cargoship");
+            await waitForDatabaseCompletion(
+                page, "cargoship", cargoshipCursor.database);
+            failureStage = "CargoShip baseline canonical lifecycle";
+            failureClass = "cgame";
+            await waitForLifecycleStages(
+                page, cargoshipCursor.lifecycle, canonicalMapLifecycleStages);
+            failureStage = "CargoShip baseline first world frame";
+            failureClass = "renderer";
+            const cargoshipFrame = await firstWorldFrameEvidence(
+                page, "cargoship", cargoshipCursor.frames);
+            const cargoshipLifecycle = await lifecycleEvidence(
+                page, cargoshipCursor.lifecycle);
+
+            failureStage = `CargoShip to ${phase3TargetMap} transition`;
+            failureClass = "lifecycle";
+            const transitionInCursor = await page.evaluate(() =>
+                globalThis.__retailRendererLifecycle.length);
+            const targetCursor = await captureMapCursor(page);
+            const targetHeapBefore = await heapBytes(page);
+            const targetCommandMs = await submitCommand(
+                page, `map ${phase3TargetMap}`);
+
+            failureStage = `${phase3TargetMap} database load`;
+            failureClass = "database";
+            await waitForDatabaseCompletion(
+                page, phase3TargetMap, targetCursor.database);
+            failureStage = `${phase3TargetMap} ClipMap/world initialization`;
+            await waitForLifecycleStages(page, targetCursor.lifecycle, [
+                "CM_LoadMap complete",
+                "Com_LoadWorld complete",
+            ]);
+            failureStage = `${phase3TargetMap} server/game initialization`;
+            failureClass = "cgame";
+            await waitForLifecycleStages(page, targetCursor.lifecycle, [
+                "G_InitGame complete",
+                "G_LoadLevel complete",
+                "SV_InitGameVM complete",
+                "SV_InitGameProgs complete",
+            ]);
+            failureStage = `${phase3TargetMap} client/cgame initialization`;
+            await waitForLifecycleStages(page, targetCursor.lifecycle, [
+                "CG_Init complete",
+                "CL_InitCGame complete",
+            ]);
+            const targetHeapAfterLoad = await heapBytes(page);
+            failureStage = `${phase3TargetMap} first world frame`;
+            failureClass = "renderer";
+            const targetFrame = await firstWorldFrameEvidence(
+                page, phase3TargetMap, targetCursor.frames);
+            const targetHeapAfterWorld = await heapBytes(page);
+            const transitionIn = await rendererTransitionEvidence(
+                page, transitionInCursor, targetCommandMs, targetFrame.observedMs);
+
+            failureStage = `${phase3TargetMap} 60-second stability`;
+            const targetStability = await sustainWorldFrames(
+                page, phase3TargetMap, 60_000);
+            const targetHeapAtStabilityEnd = await heapBytes(page);
+            failureStage = `${phase3TargetMap} renderer memory`;
+            failureClass = "memory";
+            const targetMemory = await rendererMemorySnapshot(page);
+            failureStage = `${phase3TargetMap} gameplay input/audio`;
+            failureClass = "unknown";
+            const targetInput = await exerciseRetailInput(page);
+            const targetAudio = await page.evaluate(() => structuredClone(
+                globalThis.__retailAudioTelemetry.at(-1) ?? null));
+            expect(targetAudio?.decodedPcmBytes ?? 0).toBeGreaterThan(0);
+            failureStage = `${phase3TargetMap} config checkpoint`;
+            failureClass = "lifecycle";
+            const targetCheckpoint = await writeConfigAndCheckpoint(page);
+            const targetEvidence = await mapEvidence(
+                page, phase3TargetMap, targetCursor, targetCommandMs,
+                targetHeapBefore, targetHeapAfterLoad, targetHeapAfterWorld,
+                targetHeapAtStabilityEnd, targetStability, targetMemory,
+                targetAudio, targetInput, targetCheckpoint);
+            targetEvidence.canonicalLifecycle = await lifecycleEvidence(
+                page, targetCursor.lifecycle);
+            assertMapEvidence(targetEvidence, targetMemory);
+
+            failureStage = `${phase3TargetMap} WebGL context recovery`;
+            failureClass = "renderer";
+            const contextRecovery = await recoverMapContext(page, phase3TargetMap);
+
+            failureStage = `${phase3TargetMap} to Killhouse transition`;
+            failureClass = "lifecycle";
+            const transitionOutCursor = await page.evaluate(() =>
+                globalThis.__retailRendererLifecycle.length);
+            const killhouseCursor = await captureMapCursor(page);
+            const killhouseCommandMs = await submitCommand(page, "map killhouse");
+            failureStage = "Killhouse transition-out database load";
+            failureClass = "database";
+            await waitForDatabaseCompletion(
+                page, "killhouse", killhouseCursor.database);
+            failureStage = "Killhouse transition-out canonical lifecycle";
+            failureClass = "cgame";
+            await waitForLifecycleStages(
+                page, killhouseCursor.lifecycle, canonicalMapLifecycleStages);
+            failureStage = "Killhouse transition-out first world frame";
+            failureClass = "renderer";
+            const killhouseFrame = await firstWorldFrameEvidence(
+                page, "killhouse", killhouseCursor.frames);
+            const transitionOut = await rendererTransitionEvidence(
+                page, transitionOutCursor, killhouseCommandMs,
+                killhouseFrame.observedMs);
+            const killhouseLifecycle = await lifecycleEvidence(
+                page, killhouseCursor.lifecycle);
+            expect(pageErrors).toEqual([]);
+
+            failureStage = "Phase 3 shutdown flush";
+            failureClass = "lifecycle";
+            const shutdownFlushDurationMs = await page.evaluate(async () => {
+                const startedMs = performance.now();
+                await globalThis.__KISAKCOD_WEB__.module.dispose();
+                return performance.now() - startedMs;
+            });
+            await page.reload();
+            await expect.poll(() => page.evaluate(() =>
+                globalThis.__KISAKCOD_WEB__?.state)).toBe("running");
+            await waitForAssets(page, "ready");
+            failureStage = "Phase 3 reload persistence";
+            const reloadLogStart = await page.evaluate(() =>
+                globalThis.__retailLogs.length);
+            await submitCommand(page, "exec cleanup-validation.cfg");
+            await expect.poll(() => page.evaluate((start) => {
+                const messages = globalThis.__retailLogs.slice(start)
+                    .map(({ text }) => text);
+                if (messages.some((text) =>
+                    text.includes("couldn't exec cleanup-validation.cfg"))) return "failed";
+                if (messages.some((text) =>
+                    text.includes("execing cleanup-validation.cfg from disk"))) return "loaded";
+                return "pending";
+            }, reloadLogStart), { timeout: 30_000 }).toBe("loaded");
+            expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.state))
+                .toBe("running");
+            expect(pageErrors).toEqual([]);
+
+            const validationRecord = {
+                schemaVersion: 1,
+                source: { commitSha: sourceCommit, dirty: sourceDirty },
+                recordedAtUtc: new Date().toISOString(),
+                environment: {
+                    browser: retailBrowserMetadata,
+                    operatingSystem,
+                    build: "Release diagnostics",
+                },
+                validationResult: "pass",
+                failureStage: null,
+                failureClass: null,
+                targetMap: phase3TargetMap,
+                baseline: {
+                    map: "cargoship",
+                    commandAccepted: true,
+                    mapCommandTimeMs: cargoshipCommandMs,
+                    firstRealWorldFrameTimeMs: cargoshipFrame.observedMs,
+                    canonicalLifecycle: cargoshipLifecycle,
+                },
+                map: targetEvidence,
+                transitionIn: {
+                    from: "cargoship",
+                    to: phase3TargetMap,
+                    ...transitionIn,
+                },
+                contextRecovery,
+                transitionOut: {
+                    from: phase3TargetMap,
+                    to: "killhouse",
+                    ...transitionOut,
+                    destinationCanonicalLifecycle: killhouseLifecycle,
+                },
+                shutdown: {
+                    flushDurationMs: shutdownFlushDurationMs,
+                    reloadResult: "pass",
+                    persistedProfileReady: true,
+                    persistedConfigLoaded: true,
+                },
+            };
+            console.log(`KISAK_RETAIL_PHASE3_RESULT ${JSON.stringify(
+                validationRecord)}`);
+        });
+}

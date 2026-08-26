@@ -34,3 +34,24 @@ uses the normal importer and canonical runtime. It requires both
 The command is intentionally skipped unless `KISAK_COD4_RETAIL_ROOT` is set.
 Record the exact commit, browser version, matrix result, and renderer-memory
 events before changing the recovery budget or compatibility matrix.
+
+## Phase 3 campaign map
+
+After the two-map matrix and memory review pass, validate the first additional
+campaign map with:
+
+```powershell
+.\tools\validate_web_campaign_map.ps1 `
+    -RetailRoot 'D:\Games\Call of Duty 4' `
+    -Map blackout
+```
+
+The wrapper currently accepts only `blackout`. It starts with a fresh browser
+profile, reaches a CargoShip world frame, transitions into Blackout, verifies
+the exact canonical DB and runtime lifecycle, runs Blackout for at least 60
+seconds, exercises gameplay input/audio/config persistence, records memory,
+forces WebGL2 context recovery, and transitions out to Killhouse before clean
+shutdown and reload. It emits one non-proprietary
+`KISAK_RETAIL_PHASE3_RESULT` JSON record. This opt-in test is not registered
+without an explicit campaign-map request, so routine browser-suite skip counts
+and the authoritative Killhouse-to-CargoShip matrix remain unchanged.
