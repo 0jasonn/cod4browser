@@ -18,7 +18,7 @@
     "check:web:static": "npm run check:web:syntax && npm run check:web:lint && npm run check:web:types",
     "test:protocol": "node --test tests/node/*.test.mjs",
     "test:browser": "playwright test --grep @smoke",
-    "test:browser:product": "set KISAK_WEB_SITE=build/web/site&& set KISAK_WEB_TEST_PORT=8018&& set KISAK_WEB_PRODUCT_TEST=1&& playwright test tests/browser/product.spec.mjs tests/browser/product_filesystem_lease.spec.mjs tests/browser/product_input_scaling.spec.mjs tests/browser/product_mount_controller.spec.mjs",
+    "test:browser:product": "set KISAK_WEB_SITE=build/web/site&& set KISAK_WEB_TEST_PORT=8018&& set KISAK_WEB_PRODUCT_TEST=1&& playwright test tests/browser/product.spec.mjs tests/browser/product_capabilities.spec.mjs tests/browser/product_filesystem_lease.spec.mjs tests/browser/product_input_scaling.spec.mjs tests/browser/product_mount_controller.spec.mjs",
     "test:browser:remainder": "playwright test --grep-invert \"@smoke|@product\"",
     "test:browser:full": "playwright test"
   },
