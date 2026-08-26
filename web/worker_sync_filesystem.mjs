@@ -58,7 +58,6 @@ export function createWorkerSyncFilesystem(faults = null)
     let homeLoaded = false;
     let persistChain = Promise.resolve();
     const pendingPersistence = [];
-    const queuedWrites = new Map();
     const persistenceObservers = new Set();
     let acceptingWrites = true;
     let flushPromise = null;
@@ -168,7 +167,7 @@ export function createWorkerSyncFilesystem(faults = null)
         homeLoaded = true;
     }
 
-    async function persistHomeFile(logicalPath, bytes, version)
+    async function persistHomeFile(file, logicalPath, bytes, version)
     {
         if (!homeDirectory) return;
         await faults?.beforePersist?.(logicalPath);
@@ -181,7 +180,8 @@ export function createWorkerSyncFilesystem(faults = null)
         await writable.truncate(bytes.byteLength);
         await writable.close();
         const current = homeFiles.get(logicalPath);
-        if (current && current.version === version) current.persistedVersion = version;
+        if (current === file && file.logicalPath === logicalPath &&
+            current.version === version) current.persistedVersion = version;
     }
 
     function drainPersistence()
@@ -189,33 +189,20 @@ export function createWorkerSyncFilesystem(faults = null)
         persistChain = persistChain.catch(() => {}).then(async () => {
             while (pendingPersistence.length > 0) {
                 const operation = pendingPersistence[0];
-                operation.started = true;
                 await operation.run();
                 pendingPersistence.shift();
-                if (operation.key && queuedWrites.get(operation.key) === operation) {
-                    queuedWrites.delete(operation.key);
-                }
                 for (const observer of persistenceObservers) observer(operation.progress);
             }
         });
         return persistChain;
     }
 
-    function schedulePersistence(run, key = null, progress = {
+    function schedulePersistence(run, progress = {
         phase: "persisting", files: 0, bytes: 0,
     })
     {
-        const queued = key ? queuedWrites.get(key) : null;
-        if (queued && !queued.started) {
-            queued.run = run;
-            queued.progress = progress;
-            const running = drainPersistence();
-            void running.catch(() => {});
-            return running;
-        }
-        const operation = { key, run, progress, started: false };
+        const operation = { run, progress };
         pendingPersistence.push(operation);
-        if (key) queuedWrites.set(key, operation);
         const running = drainPersistence();
         void running.catch(() => {});
         return running;
@@ -227,8 +214,7 @@ export function createWorkerSyncFilesystem(faults = null)
         const snapshot = file.bytes.slice(0, file.size);
         const version = file.version;
         return schedulePersistence(
-            () => persistHomeFile(logicalPath, snapshot, version),
-            `write:${logicalPath}`,
+            () => persistHomeFile(file, logicalPath, snapshot, version),
             { phase: "persisting", files: 1, bytes: snapshot.byteLength },
         );
     }
@@ -482,7 +468,7 @@ export function createWorkerSyncFilesystem(faults = null)
             } catch (error) {
                 if (error?.name !== "NotFoundError") throw error;
             }
-        }, null, { phase: "removing", files: 1, bytes: 0 });
+        }, { phase: "removing", files: 1, bytes: 0 });
         faults?.onDirty?.();
         return true;
     }
@@ -520,7 +506,7 @@ export function createWorkerSyncFilesystem(faults = null)
             } catch (error) {
                 if (error?.name !== "NotFoundError") throw error;
             }
-        }, null, { phase: "removing", files: 1, bytes: 0 });
+        }, { phase: "removing", files: 1, bytes: 0 });
         faults?.onDirty?.();
         return true;
     }
@@ -536,16 +522,22 @@ export function createWorkerSyncFilesystem(faults = null)
         for (const file of dirty) scheduleHomeFilePersistence(file);
     }
 
+    function persistenceSummary()
+    {
+        const persisted = [...homeFiles.values()].filter(
+            (file) => file.persistedVersion === file.version);
+        return {
+            filesPersisted: persisted.length,
+            bytesPersisted: persisted.reduce((sum, file) => sum + file.size, 0),
+        };
+    }
+
     async function checkpoint(report = null)
     {
         report?.({ phase: "snapshotting", filesProcessed: 0, bytesProcessed: 0 });
         scheduleDirtyOpenFiles();
         await drainPersistenceWithProgress(report);
-        const summary = {
-            filesPersisted: [...homeFiles.values()].filter(
-                (file) => file.persistedVersion === file.version).length,
-            bytesPersisted: homeBytes,
-        };
+        const summary = persistenceSummary();
         report?.({
             phase: "complete",
             filesProcessed: summary.filesPersisted,
@@ -562,11 +554,7 @@ export function createWorkerSyncFilesystem(faults = null)
             report?.({ phase: "snapshotting", filesProcessed: 0, bytesProcessed: 0 });
             scheduleDirtyOpenFiles();
             await drainPersistenceWithProgress(report);
-            const summary = {
-                filesPersisted: [...homeFiles.values()].filter(
-                    (file) => file.persistedVersion === file.version).length,
-                bytesPersisted: homeBytes,
-            };
+            const summary = persistenceSummary();
             report?.({
                 phase: "closing-handles",
                 filesProcessed: summary.filesPersisted,
@@ -739,7 +727,7 @@ export function createWorkerSyncFilesystem(faults = null)
                     homeDirectory,
                     logicalPath ? logicalPath.split("/") : [],
                     true,
-                ), null, { phase: "persisting", files: 1, bytes: 0 });
+                ), { phase: "persisting", files: 1, bytes: 0 });
                 faults?.onDirty?.();
                 return true;
             },
