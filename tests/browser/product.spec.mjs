@@ -97,6 +97,78 @@ test("missing required capability blocks engine and asset startup @product", asy
     expect(await page.evaluate(() => globalThis.__capabilityStorageAccesses)).toBe(0);
 });
 
+for (const [missingCapability, label, expectedWorkers] of [
+    ["web-locks", "Web Locks", 0],
+    ["broadcast-channel", "BroadcastChannel", 0],
+    ["offscreen-transfer", "transferable OffscreenCanvas", 0],
+    ["opfs", "OPFS", 0],
+    ["sync-access", "Worker OPFS sync access", 1],
+]) {
+    test(`missing ${label} fails before asset import @product`, async ({ page }) => {
+        await page.addInitScript((missing) => {
+            const NativeWorker = globalThis.Worker;
+            globalThis.__capabilityWorkerConstructions = 0;
+            globalThis.__capabilityStorageAccesses = 0;
+            const storage = navigator.storage;
+            const getDirectory = storage.getDirectory?.bind(storage);
+            if (getDirectory) {
+                storage.getDirectory = (...arguments_) => {
+                    ++globalThis.__capabilityStorageAccesses;
+                    return getDirectory(...arguments_);
+                };
+            }
+            if (missing === "web-locks") {
+                Object.defineProperty(navigator, "locks", {
+                    configurable: true,
+                    value: undefined,
+                });
+            } else if (missing === "broadcast-channel") {
+                Object.defineProperty(globalThis, "BroadcastChannel", {
+                    configurable: true,
+                    value: undefined,
+                });
+            } else if (missing === "offscreen-transfer") {
+                HTMLCanvasElement.prototype.transferControlToOffscreen = () => {
+                    throw new DOMException("transfer disabled", "NotSupportedError");
+                };
+            } else if (missing === "opfs") {
+                Object.defineProperty(storage, "getDirectory", {
+                    configurable: true,
+                    value: undefined,
+                });
+            }
+            if (missing === "sync-access") {
+                globalThis.Worker = class {
+                    constructor() { ++globalThis.__capabilityWorkerConstructions; }
+                    postMessage(message) {
+                        queueMicrotask(() => this.onmessage?.({ data: {
+                            offscreenCanvas: true,
+                            syncAccessHandle: false,
+                            canvas: message.canvas,
+                        } }));
+                    }
+                    terminate() {}
+                };
+            } else {
+                globalThis.Worker = class extends NativeWorker {
+                    constructor(...arguments_) {
+                        ++globalThis.__capabilityWorkerConstructions;
+                        super(...arguments_);
+                    }
+                };
+            }
+        }, missingCapability);
+        await page.goto("/");
+        await expect(page.locator("html"))
+            .toHaveAttribute("data-runtime-state", "unsupported");
+        await expect(page.locator("#asset-message")).toContainText(label);
+        await expect(page.locator("#select-install-button")).toBeDisabled();
+        expect(await page.evaluate(() => globalThis.__capabilityWorkerConstructions))
+            .toBe(expectedWorkers);
+        expect(await page.evaluate(() => globalThis.__capabilityStorageAccesses)).toBe(0);
+    });
+}
+
 test("production storage status is honest and persistence can be retried @product", async ({ page }) => {
     await page.addInitScript(() => {
         navigator.storage.persisted = async () => false;

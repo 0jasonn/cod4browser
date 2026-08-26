@@ -736,10 +736,11 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
     async function ensureBackend()
     {
         if (!globalThis.indexedDB || typeof navigator.storage?.getDirectory !== "function" ||
-            typeof navigator.locks?.request !== "function") {
+            typeof navigator.locks?.request !== "function" ||
+            typeof BroadcastChannel !== "function") {
             throw importError(
                 "STORAGE_UNSUPPORTED",
-                "This browser does not provide OPFS, IndexedDB, and Web Locks for safe local imports.",
+                "This browser does not provide OPFS, IndexedDB, Web Locks, and BroadcastChannel for safe local imports.",
             );
         }
         database ??= await openDatabase();

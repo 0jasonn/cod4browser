@@ -1,17 +1,36 @@
 const capability = (label, available, status = "required") => ({ label, available,
     status: available === null ? "not-checked" : available ? status : "unsupported" });
 
-async function hasSyncAccess()
+async function probeWorkerCapabilities(canvas)
 {
-    const worker = new Worker(new URL("./capability_probe_worker.mjs", import.meta.url),
-        { type: "module" });
+    let offscreen;
+    try {
+        offscreen = canvas.transferControlToOffscreen();
+    } catch {
+        return { offscreenCanvas: false, syncAccessHandle: null };
+    }
+    const worker = new Worker(new URL("./capability_probe_worker.mjs", import.meta.url), {
+        type: "module",
+    });
     try {
         const reply = new Promise((resolve) => {
-            worker.onmessage = ({ data }) => resolve(data?.syncAccessHandle === true);
-            worker.onerror = () => resolve(false);
+            worker.onmessage = ({ data }) => resolve({
+                offscreenCanvas: data?.offscreenCanvas === true &&
+                    data.canvas instanceof OffscreenCanvas,
+                syncAccessHandle: data?.syncAccessHandle === true,
+            });
+            worker.onerror = () => resolve({
+                offscreenCanvas: false,
+                syncAccessHandle: false,
+            });
         });
-        return await Promise.race([reply,
-            new Promise((resolve) => setTimeout(resolve, 3_000, false))]);
+        try {
+            worker.postMessage({ canvas: offscreen }, [offscreen]);
+        } catch {
+            return { offscreenCanvas: false, syncAccessHandle: null };
+        }
+        return await Promise.race([reply, new Promise((resolve) => setTimeout(resolve,
+            3_000, { offscreenCanvas: false, syncAccessHandle: false }))]);
     } finally { worker.terminate(); }
 }
 
@@ -24,6 +43,8 @@ export async function detectBrowserCapabilities()
         ["wasm", "WebAssembly", typeof WebAssembly === "object"], ["webgl2", "WebGL 2", webgl2],
         ["worker", "Worker", typeof Worker === "function"], ["offscreenCanvas", "OffscreenCanvas", typeof OffscreenCanvas === "function" && typeof canvas.transferControlToOffscreen === "function"],
         ["indexedDb", "IndexedDB", typeof indexedDB === "object"], ["opfs", "OPFS", typeof navigator.storage?.getDirectory === "function"],
+        ["webLocks", "Web Locks", typeof navigator.locks?.request === "function"],
+        ["broadcastChannel", "BroadcastChannel", typeof BroadcastChannel === "function"],
         ["webAudio", "Web Audio", typeof AudioContext === "function"], ["pointerLock", "pointer lock", typeof canvas.requestPointerLock === "function" && typeof document.exitPointerLock === "function"],
     ];
     const capabilities = Object.fromEntries(required.map(([name, label, available]) =>
@@ -32,8 +53,14 @@ export async function detectBrowserCapabilities()
     capabilities.persistentStorage = capability("persistent storage",
         typeof navigator.storage?.persist === "function" &&
         typeof navigator.storage?.persisted === "function", "optional");
+    const workerProbe = missing.length ? null
+        : await probeWorkerCapabilities(document.createElement("canvas"));
+    if (workerProbe && !workerProbe.offscreenCanvas) {
+        capabilities.offscreenCanvas = capability("transferable OffscreenCanvas", false);
+        missing.push("offscreenCanvas");
+    }
     capabilities.opfsSyncAccess = capability("Worker OPFS sync access",
-        missing.length ? null : await hasSyncAccess());
+        workerProbe?.syncAccessHandle ?? null);
     if (capabilities.opfsSyncAccess.available === false) missing.push("opfsSyncAccess");
     return { supported: !missing.length, capabilities, missingRequired: missing };
 }
