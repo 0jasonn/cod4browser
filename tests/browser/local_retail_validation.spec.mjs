@@ -196,15 +196,18 @@ async function waitForDatabaseCompletion(page, mapName, databaseCursor)
 
 async function waitForWorldFrames(page, mapName, minimumGeneration = 1)
 {
-    await expect.poll(() => page.evaluate(({ name, generation }) => {
+    const outcome = await page.waitForFunction(({ name, generation }) => {
         const frame = globalThis.__retailValidationFrames?.findLast(
             (entry) => entry.state === "drawn" && entry.geometrySubmitted === true &&
                 entry.worldName?.toLowerCase().includes(name));
-        return frame?.viewSubmissionGeneration >= generation;
-    }, { name: mapName, generation: minimumGeneration }), {
-        timeout: 300_000,
-        message: `${mapName} should publish sustained canonical world frames`,
-    }).toBe(true);
+        if (frame?.viewSubmissionGeneration >= generation) return "drawn";
+        return globalThis.__retailLogs?.findLast((entry) =>
+            entry.text?.includes("Canonical world submission failed:"))?.text ?? null;
+    }, { name: mapName, generation: minimumGeneration }, { timeout: 300_000 });
+    const result = await outcome.jsonValue();
+    await outcome.dispose();
+    expect(result, `${mapName} should publish sustained canonical world frames`)
+        .toBe("drawn");
 }
 
 async function sustainWorldFrames(page, mapName, durationMs = 60_000)
