@@ -1089,6 +1089,11 @@ void EmitShaderLifecycle(const char *state, const char *message)
 
 EM_JS(void, DispatchRendererMemory, (
     const char *state,
+    double worldImageRecoveryBytes,
+    double staticModelImageRecoveryBytes,
+    double dynamicModelImageRecoveryBytes,
+    double uiImageRecoveryBytes,
+    double supplementalTextureRecoveryBytes,
     double decodedTextureSourceBytes,
     double gpuTextureEstimateBytes,
     double geometryBytes,
@@ -1099,6 +1104,11 @@ EM_JS(void, DispatchRendererMemory, (
         globalThis.dispatchEvent(new CustomEvent("kisakcod:renderer-memory", {
             detail: {
                 state: UTF8ToString(state),
+                worldImageRecoveryBytes,
+                staticModelImageRecoveryBytes,
+                dynamicModelImageRecoveryBytes,
+                uiImageRecoveryBytes,
+                supplementalTextureRecoveryBytes,
                 decodedTextureSourceBytes,
                 gpuTextureEstimateBytes,
                 geometryBytes,
@@ -1169,20 +1179,28 @@ std::size_t EmitRendererMemory(const char *state)
         g_renderer.retainedDynamicModelIndices.size() * sizeof(std::uint32_t) +
         g_renderer.retainedUiVertices.size() * sizeof(WebRendererSurfaceVertex) +
         g_renderer.retainedUiIndices.size() * sizeof(std::uint32_t);
-    std::size_t decodedTextureSourceBytes =
-        RetainedImageBytes(g_renderer.retainedWorldImages) +
-        RetainedImageBytes(g_renderer.retainedStaticModelImages) +
-        RetainedImageBytes(g_renderer.retainedDynamicModelImages) +
-        RetainedImageBytes(g_renderer.retainedUiImages) +
+    const std::size_t worldImageRecoveryBytes =
+        RetainedImageBytes(g_renderer.retainedWorldImages);
+    const std::size_t staticModelImageRecoveryBytes =
+        RetainedImageBytes(g_renderer.retainedStaticModelImages);
+    const std::size_t dynamicModelImageRecoveryBytes =
+        RetainedImageBytes(g_renderer.retainedDynamicModelImages);
+    const std::size_t uiImageRecoveryBytes =
+        RetainedImageBytes(g_renderer.retainedUiImages);
+    std::size_t supplementalTextureRecoveryBytes =
         RetainedCubeBytes(g_renderer.retainedSky.cube) +
         g_renderer.retainedStaticModelLighting.pixels.size() +
         g_renderer.retainedDynamicModelLighting.pixels.size() +
         g_renderer.retainedPixels.size();
     for (const WebRendererRetainedWorldBatch &batch : g_renderer.retainedWorldBatches)
     {
-        decodedTextureSourceBytes += batch.waterPixels.size();
-        decodedTextureSourceBytes += RetainedCubeBytes(batch.reflectionCube);
+        supplementalTextureRecoveryBytes += batch.waterPixels.size();
+        supplementalTextureRecoveryBytes += RetainedCubeBytes(batch.reflectionCube);
     }
+    const std::size_t decodedTextureSourceBytes =
+        worldImageRecoveryBytes + staticModelImageRecoveryBytes +
+        dynamicModelImageRecoveryBytes + uiImageRecoveryBytes +
+        supplementalTextureRecoveryBytes;
     const std::size_t shaderProgramCacheEstimateBytes =
         g_renderer.compatibilityId.size() +
         g_renderer.compatibilityVertexSource.size() +
@@ -1205,6 +1223,11 @@ std::size_t EmitRendererMemory(const char *state)
         decodedTextureSourceBytes + geometryBytes + shaderProgramCacheEstimateBytes;
     DispatchRendererMemory(
         state,
+        static_cast<double>(worldImageRecoveryBytes),
+        static_cast<double>(staticModelImageRecoveryBytes),
+        static_cast<double>(dynamicModelImageRecoveryBytes),
+        static_cast<double>(uiImageRecoveryBytes),
+        static_cast<double>(supplementalTextureRecoveryBytes),
         static_cast<double>(decodedTextureSourceBytes),
         static_cast<double>(decodedTextureSourceBytes + renderTargetEstimateBytes),
         static_cast<double>(geometryBytes),
@@ -1214,6 +1237,13 @@ std::size_t EmitRendererMemory(const char *state)
         static_cast<double>(WEB_RENDERER_MAX_WORLD_TEXTURE_BYTES));
     return recoveryCopyBytes;
 }
+
+#if KISAK_WEB_DIAGNOSTICS
+extern "C" EMSCRIPTEN_KEEPALIVE double KisakWeb_TestEmitRendererMemory()
+{
+    return static_cast<double>(EmitRendererMemory("diagnostic-snapshot"));
+}
+#endif
 
 void ResetGpuHandles()
 {
@@ -4629,9 +4659,10 @@ WebRendererSurfaceResult CopyWorldCommand(
         if (surface.indices[index] >= surface.vertexCount)
             return WebRendererSurfaceResult::IndexOutOfRange;
 
-    std::size_t retainedPixelBytes = 0u;
-    for (const WebRendererRetainedWorldImage &image : images)
-        retainedPixelBytes += image.pixels.size();
+    // Dynamic scenes reuse this vector across frames. Count authored mip
+    // levels already in the pool as well as base pixels before admitting a
+    // new image against the per-pool recovery allowance.
+    std::size_t retainedPixelBytes = RetainedImageBytes(images);
     try
     {
         vertices.assign(surface.vertices, surface.vertices + surface.vertexCount);
@@ -6094,10 +6125,8 @@ WebRendererSurfaceResult WebRenderer_SetUiScene(
     std::vector<WebRendererSurfaceVertex> vertices;
     std::vector<std::uint32_t> indices;
     std::vector<WebRendererRetainedUiBatch> batches;
-    std::size_t retainedPixelBytes = 0u;
-    for (const WebRendererRetainedWorldImage &image :
-         g_renderer.retainedUiImages)
-        retainedPixelBytes += image.pixels.size();
+    std::size_t retainedPixelBytes =
+        RetainedImageBytes(g_renderer.retainedUiImages);
     try
     {
         vertices.assign(scene.vertices, scene.vertices + scene.vertexCount);
@@ -6957,8 +6986,12 @@ bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
     const bool firstGeometryViewSubmission =
         view.geometrySubmitted && !g_renderer.sceneViewFirstDrawCompleted;
     const bool settledSceneViewSubmission =
+#if KISAK_WEB_DIAGNOSTICS
+        true;
+#else
         g_renderer.sceneViewSubmissionGeneration == 30u ||
         g_renderer.sceneViewSubmissionGeneration % 60u == 0u;
+#endif
     if (firstSceneViewSubmission || firstGeometryViewSubmission ||
         settledSceneViewSubmission)
     {
@@ -9115,6 +9148,26 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 static_cast<unsigned int>(sceneDrawError));
         }
     }
+#if KISAK_WEB_DIAGNOSTICS
+    else if (sceneGeometryDraw &&
+        g_renderer.sceneViewDrawnSubmissionGeneration !=
+            g_renderer.sceneViewSubmissionGeneration)
+    {
+        // Retail validation needs one event per newly submitted canonical view
+        // to measure sustained frames. Keep that Worker-message traffic out of
+        // the production artifact; production retains the first-draw proof.
+        g_renderer.sceneViewDrawnSubmissionGeneration =
+            g_renderer.sceneViewSubmissionGeneration;
+        DispatchRendererSceneFrame(
+            g_renderer.sceneViewWorldName.c_str(),
+            g_renderer.sceneViewDrawnSubmissionGeneration,
+            g_renderer.sceneViewSurfaceSubmissionGeneration,
+            g_renderer.surfaceResourceGeneration,
+            g_renderer.sceneViewSurfaceCount,
+            g_renderer.sceneViewVertexCount,
+            g_renderer.sceneViewIndexCount);
+    }
+#endif
 
     if (g_renderer.surfaceDrawnSubmissionGeneration !=
         g_renderer.surfaceSubmissionGeneration)

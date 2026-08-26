@@ -1,11 +1,37 @@
+import { execFileSync } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { platform, release, tmpdir, version } from "node:os";
 import { join } from "node:path";
 
 import { chromium, expect, test as base } from "@playwright/test";
 
 const retailRoot = process.env.KISAK_COD4_RETAIL_ROOT;
 const browserChannel = process.env.KISAK_BROWSER_CHANNEL;
+const sourceCommit = execFileSync(
+    "git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+const sourceDirty = execFileSync(
+    "git", ["status", "--porcelain"], { encoding: "utf8" }).trim().length > 0;
+const allowDirty = process.env.KISAK_RETAIL_ALLOW_DIRTY === "1";
+const requestedExploratoryStabilityMs = Number(
+    process.env.KISAK_RETAIL_EXPLORATORY_STABILITY_MS ?? 60_000);
+const stabilityDurationMs = allowDirty &&
+    Number.isInteger(requestedExploratoryStabilityMs) &&
+    requestedExploratoryStabilityMs >= 1_000 &&
+    requestedExploratoryStabilityMs <= 60_000
+    ? requestedExploratoryStabilityMs : 60_000;
+const operatingSystem = {
+    platform: platform(),
+    release: release(),
+    version: version(),
+    architecture: process.arch,
+};
+let failureStage = "test setup";
+let failureClass = "unknown";
+let retailBrowserMetadata = {
+    name: "chromium",
+    version: null,
+    channel: browserChannel ?? null,
+};
 
 const test = base.extend({
     retailPage: async ({}, use, testInfo) => {
@@ -32,6 +58,23 @@ const test = base.extend({
 test.skip(!retailRoot,
     "Set KISAK_COD4_RETAIL_ROOT to a legally owned COD4 installation");
 
+test.afterEach(async ({}, testInfo) => {
+    if (testInfo.status === testInfo.expectedStatus) return;
+    console.log(`KISAK_RETAIL_RESULT ${JSON.stringify({
+        schemaVersion: 1,
+        source: { commitSha: sourceCommit, dirty: sourceDirty },
+        recordedAtUtc: new Date().toISOString(),
+        environment: {
+            browser: retailBrowserMetadata,
+            operatingSystem,
+            build: "Release diagnostics",
+        },
+        validationResult: "fail",
+        failureStage,
+        failureClass,
+    })}`);
+});
+
 async function waitForAssets(page, state)
 {
     await expect.poll(() => page.evaluate(
@@ -49,6 +92,29 @@ async function submitCommand(page, command)
     return commandTimeMs;
 }
 
+async function waitForDatabaseCompletion(page, mapName, databaseCursor)
+{
+    const logicalPath = `zone/english/${mapName}.ff`;
+    await expect.poll(() => page.evaluate(({ cursor, path }) => {
+        const terminal = globalThis.__retailDatabase.slice(cursor).findLast(
+            (event) => event.logicalPath.toLowerCase() === path &&
+                (event.stage === "XAssetList end" || event.generatedLoadFailed));
+        return terminal ? "terminal" : "pending";
+    }, { cursor: databaseCursor, path: logicalPath }), {
+        timeout: 300_000,
+        message: `${mapName} should reach a canonical database terminal event`,
+    }).toBe("terminal");
+    const events = await page.evaluate(({ cursor, path }) => structuredClone(
+        globalThis.__retailDatabase.slice(cursor).filter(
+            (event) => event.logicalPath.toLowerCase() === path)), {
+        cursor: databaseCursor,
+        path: logicalPath,
+    });
+    expect(events.some((event) => event.stage === "XAssetList begin")).toBe(true);
+    expect(events.find((event) => event.generatedLoadFailed)).toBeUndefined();
+    expect(events.some((event) => event.stage === "XAssetList end")).toBe(true);
+}
+
 async function waitForWorldFrames(page, mapName, minimumGeneration = 1)
 {
     await expect.poll(() => page.evaluate(({ name, generation }) => {
@@ -64,19 +130,30 @@ async function waitForWorldFrames(page, mapName, minimumGeneration = 1)
 
 async function sustainWorldFrames(page, mapName, durationMs = 60_000)
 {
-    const firstGeneration = await page.evaluate((name) =>
-        globalThis.__retailValidationFrames.findLast((entry) =>
+    const started = await page.evaluate((name) => ({
+        observedMs: performance.now(),
+        generation: globalThis.__retailValidationFrames.findLast((entry) =>
             entry.state === "drawn" && entry.geometrySubmitted === true &&
             entry.worldName?.toLowerCase().includes(name))?.viewSubmissionGeneration ?? 0,
-    mapName);
+    }), mapName);
     await page.waitForTimeout(durationMs);
-    const finalGeneration = await page.evaluate((name) =>
-        globalThis.__retailValidationFrames.findLast((entry) =>
+    const ended = await page.evaluate((name) => ({
+        observedMs: performance.now(),
+        generation: globalThis.__retailValidationFrames.findLast((entry) =>
             entry.state === "drawn" && entry.geometrySubmitted === true &&
             entry.worldName?.toLowerCase().includes(name))?.viewSubmissionGeneration ?? 0,
-    mapName);
-    expect(finalGeneration - firstGeneration).toBeGreaterThanOrEqual(60);
-    return { durationMs, firstGeneration, finalGeneration };
+    }), mapName);
+    expect(ended.observedMs - started.observedMs).toBeGreaterThanOrEqual(durationMs);
+    expect(ended.generation - started.generation)
+        .toBeGreaterThanOrEqual(Math.max(1, Math.floor(durationMs / 1000)));
+    return {
+        requestedDurationMs: durationMs,
+        observedDurationMs: ended.observedMs - started.observedMs,
+        startedMs: started.observedMs,
+        endedMs: ended.observedMs,
+        firstGeneration: started.generation,
+        finalGeneration: ended.generation,
+    };
 }
 
 async function heapBytes(page)
@@ -94,6 +171,42 @@ async function checkpoint(page)
     });
 }
 
+async function writeConfigAndCheckpoint(page)
+{
+    const logStart = await page.evaluate(() =>
+        globalThis.__retailLogs.length);
+    await submitCommand(page, "writeconfig cleanup-validation.cfg");
+    await expect.poll(() => page.evaluate((start) => {
+        const messages = globalThis.__retailLogs.slice(start)
+            .map(({ text }) => text)
+            .filter((text) => text.toLowerCase().includes("cleanup-validation"));
+        return messages.some((text) =>
+            text.includes("Writing cleanup-validation.cfg."))
+            ? "written" : messages.join(" | ") || "pending";
+    }, logStart), {
+        timeout: 30_000,
+    }).toBe("written");
+    return checkpoint(page);
+}
+
+async function rendererMemorySnapshot(page)
+{
+    const before = await page.evaluate(() =>
+        globalThis.__retailValidationMemory.length);
+    const recoveryCopyBytes = await page.evaluate(() =>
+        globalThis.__KISAKCOD_WEB__.module.call(
+            "_KisakWeb_TestEmitRendererMemory"));
+    await expect.poll(() => page.evaluate((start) =>
+        globalThis.__retailValidationMemory.slice(start).some(
+            (entry) => entry.state === "diagnostic-snapshot"), before)).toBe(true);
+    const snapshot = await page.evaluate((start) => structuredClone(
+        globalThis.__retailValidationMemory.slice(start).findLast(
+            (entry) => entry.state === "diagnostic-snapshot")), before);
+    expect(snapshot.state).toBe("diagnostic-snapshot");
+    expect(snapshot.recoveryCopyBytes).toBe(recoveryCopyBytes);
+    return snapshot;
+}
+
 async function captureMapCursor(page)
 {
     return page.evaluate(() => ({
@@ -105,38 +218,53 @@ async function captureMapCursor(page)
 }
 
 async function mapEvidence(page, map, cursor, commandTimeMs, heapBeforeMapLoad,
-    heapAfterMapLoad, heapAfterWorldPublication, stability, input, checkpointResult)
+    heapAfterMapLoad, heapAfterWorldPublication, heapAtStabilityEnd, stability,
+    memorySnapshot, audioSnapshot, input, checkpointResult)
 {
     return page.evaluate(({ map, cursor, commandTimeMs, heapBeforeMapLoad,
-        heapAfterMapLoad, heapAfterWorldPublication, stability, input,
-        checkpointResult }) => {
+        heapAfterMapLoad, heapAfterWorldPublication, heapAtStabilityEnd,
+        stability, memorySnapshot, audioSnapshot, input, checkpointResult }) => {
         const frames = globalThis.__retailValidationFrames.slice(cursor.frames)
             .filter((entry) => entry.state === "drawn" &&
                 entry.geometrySubmitted === true &&
                 entry.worldName?.toLowerCase().includes(map));
-        const intervals = frames.slice(1).map((entry, index) =>
-            entry.observedMs - frames[index].observedMs).filter((value) => value >= 0);
+        const stabilityFrames = frames.filter((entry) =>
+            entry.observedMs >= stability.startedMs &&
+            entry.observedMs <= stability.endedMs);
+        const intervals = stabilityFrames.slice(1).map((entry, index) =>
+            entry.observedMs - stabilityFrames[index].observedMs)
+            .filter((value) => value >= 0);
         const sorted = [...intervals].sort((left, right) => left - right);
         const percentile = (fraction) => sorted.length
             ? sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * fraction) - 1)]
             : null;
         const lifecycle = globalThis.__retailLifecycle.slice(cursor.lifecycle);
         const database = globalThis.__retailDatabase.slice(cursor.database);
-        const memory = globalThis.__retailValidationMemory.slice(cursor.memory);
         const firstFrame = frames[0];
         const cgame = lifecycle.find((event) => event.stage === "CG_Init complete");
-        const dbStart = database.find((event) => event.stage === "XAssetList begin");
-        const dbComplete = database.findLast((event) => event.stage === "XAssetList end" &&
-            (!firstFrame || event.observedMs <= firstFrame.observedMs));
-        const latestMemory = memory.findLast((entry) =>
-            entry.state === "world-submitted") ?? memory.at(-1);
-        const memoryTotal = (entry) => entry ?
-            entry.recoveryCopyBytes + entry.gpuTextureEstimateBytes +
-                entry.geometryBytes + entry.temporaryUploadBytes +
-                entry.shaderProgramCacheEstimateBytes : 0;
-        const audio = globalThis.__retailAudioTelemetry.at(-1) ?? null;
+        const logicalPath = `zone/english/${map}.ff`;
+        const mapDatabase = database.filter((event) =>
+            event.logicalPath.toLowerCase() === logicalPath);
+        const dbStart = mapDatabase.find(
+            (event) => event.stage === "XAssetList begin");
+        const dbComplete = mapDatabase.findLast(
+            (event) => event.stage === "XAssetList end" && !event.generatedLoadFailed);
         return {
             map,
+            validationResult: "pass",
+            failureStage: null,
+            failureClass: null,
+            checks: {
+                commandAccepted: true,
+                databaseCompleted: dbComplete !== undefined,
+                cgameInitialized: cgame !== undefined,
+                worldFrameProduced: firstFrame !== undefined,
+                stability60s: stabilityFrames.length >= 60,
+                input: Boolean(input) && Object.values(input).every(Boolean),
+                audio: (audioSnapshot?.decodedPcmBytes ?? 0) > 0,
+                checkpoint: checkpointResult.bytesPersisted > 0,
+                noFatalError: globalThis.__KISAKCOD_WEB__.state === "running",
+            },
             mapCommandTimeMs: commandTimeMs,
             databaseStartTimeMs: dbStart?.observedMs ?? null,
             databaseCompletionTimeMs: dbComplete?.observedMs ?? null,
@@ -147,24 +275,79 @@ async function mapEvidence(page, map, cursor, commandTimeMs, heapBeforeMapLoad,
                 ? intervals.reduce((sum, value) => sum + value, 0) / intervals.length : null,
             p95FrameTimeMs: percentile(0.95),
             p99FrameTimeMs: percentile(0.99),
-            framesRenderedDuringStabilityWindow: frames.length,
+            framesRenderedDuringStabilityWindow: stabilityFrames.length,
             stability,
-            wasmHeapBeforeMapLoad: heapBeforeMapLoad,
-            wasmHeapAfterMapLoad: heapAfterMapLoad,
-            wasmHeapAfterWorldPublication: heapAfterWorldPublication,
-            decodedTextureRecoveryBytes: latestMemory?.recoveryCopyBytes ?? null,
-            estimatedGpuTextureBytes: latestMemory?.gpuTextureEstimateBytes ?? null,
-            geometryBytes: latestMemory?.geometryBytes ?? null,
-            temporaryUploadBytes: latestMemory?.temporaryUploadBytes ?? null,
-            shaderProgramBytes: latestMemory?.shaderProgramCacheEstimateBytes ?? null,
-            peakMapMemoryBytes: Math.max(0, ...memory.map(memoryTotal)),
-            audioDecodedBytes: audio?.decodedPcmBytes ?? null,
-            audioQueuedBuffers: audio?.queuedBufferCount ?? null,
+            wasmLinearMemoryCapacityBytes: {
+                beforeMapLoad: heapBeforeMapLoad,
+                afterCGameInit: heapAfterMapLoad,
+                afterWorldPublication: heapAfterWorldPublication,
+                atStabilityEnd: heapAtStabilityEnd,
+            },
+            decodedTextureRecoveryBytes: memorySnapshot.decodedTextureSourceBytes,
+            aggregateCpuRecoveryBytes: memorySnapshot.recoveryCopyBytes,
+            estimatedGpuTextureBytes: memorySnapshot.gpuTextureEstimateBytes,
+            geometryBytes: memorySnapshot.geometryBytes,
+            temporaryUploadBytes: memorySnapshot.temporaryUploadBytes,
+            shaderProgramBytes: memorySnapshot.shaderProgramCacheEstimateBytes,
+            imagePoolRecoveryBytes: {
+                world: memorySnapshot.worldImageRecoveryBytes,
+                staticModels: memorySnapshot.staticModelImageRecoveryBytes,
+                dynamicModels: memorySnapshot.dynamicModelImageRecoveryBytes,
+                ui: memorySnapshot.uiImageRecoveryBytes,
+                perPoolAdmissionLimit: memorySnapshot.recoveryBudgetBytes,
+            },
+            supplementalTextureRecoveryBytes:
+                memorySnapshot.supplementalTextureRecoveryBytes,
+            audioDecodedBytes: audioSnapshot?.decodedPcmBytes ?? null,
+            audioQueuedBuffers: audioSnapshot?.queuedBufferCount ?? null,
             input,
             checkpoint: checkpointResult,
         };
     }, { map, cursor, commandTimeMs, heapBeforeMapLoad, heapAfterMapLoad,
-        heapAfterWorldPublication, stability, input, checkpointResult });
+        heapAfterWorldPublication, heapAtStabilityEnd, stability,
+        memorySnapshot, audioSnapshot, input, checkpointResult });
+}
+
+function assertMemoryTelemetry(sample)
+{
+    const imagePoolBytes = [
+        sample.worldImageRecoveryBytes,
+        sample.staticModelImageRecoveryBytes,
+        sample.dynamicModelImageRecoveryBytes,
+        sample.uiImageRecoveryBytes,
+    ];
+    expect(imagePoolBytes.reduce((sum, bytes) => sum + bytes, 0) +
+        sample.supplementalTextureRecoveryBytes)
+        .toBe(sample.decodedTextureSourceBytes);
+    expect(sample.decodedTextureSourceBytes + sample.geometryBytes +
+        sample.shaderProgramCacheEstimateBytes)
+        .toBe(sample.recoveryCopyBytes);
+    expect(sample.gpuTextureEstimateBytes)
+        .toBeGreaterThanOrEqual(sample.decodedTextureSourceBytes);
+    for (const bytes of imagePoolBytes) {
+        expect(bytes).toBeLessThanOrEqual(sample.recoveryBudgetBytes);
+    }
+}
+
+function assertMapEvidence(evidence, memorySnapshot)
+{
+    assertMemoryTelemetry(memorySnapshot);
+    expect(Object.values(evidence.checks).every(Boolean)).toBe(true);
+    expect(evidence.databaseStartTimeMs).not.toBeNull();
+    expect(evidence.databaseCompletionTimeMs).not.toBeNull();
+    expect(evidence.databaseCompletionTimeMs)
+        .toBeGreaterThanOrEqual(evidence.databaseStartTimeMs);
+    expect(evidence.cgameInitTimeMs).not.toBeNull();
+    expect(evidence.firstRealWorldFrameTimeMs).not.toBeNull();
+    expect(evidence.framesRenderedDuringStabilityWindow).toBeGreaterThanOrEqual(60);
+    expect(evidence.averageFrameTimeMs).not.toBeNull();
+    expect(evidence.p95FrameTimeMs).not.toBeNull();
+    expect(evidence.p99FrameTimeMs).not.toBeNull();
+    expect(evidence.audioDecodedBytes).toBeGreaterThan(0);
+    expect(evidence.audioQueuedBuffers).toBeGreaterThanOrEqual(0);
+    expect(evidence.checkpoint.filesPersisted).toBeGreaterThan(0);
+    expect(evidence.checkpoint.bytesPersisted).toBeGreaterThan(0);
+    expect(evidence.checkpoint.durationMs).toBeGreaterThanOrEqual(0);
 }
 
 async function exerciseRetailInput(page)
@@ -183,32 +366,35 @@ async function exerciseRetailInput(page)
     await expect.poll(() => page.evaluate(() => document.pointerLockElement?.id))
         .toBe("game-canvas");
     await page.evaluate(() => { globalThis.__retailValidationInput = []; });
-    await page.keyboard.down("w");
-    await page.waitForTimeout(500);
-    await page.keyboard.up("w");
-    await expect.poll(() => page.evaluate((origin) => {
-        const current = globalThis.__retailValidationViews.at(-1)?.viewOrigin;
-        return current ? Math.hypot(
-            current[0] - origin[0], current[1] - origin[1], current[2] - origin[2]) : 0;
-    }, beforeMove)).toBeGreaterThan(1);
+    const holdUntilMoved = async (key, origin, minimumDistance) => {
+        await page.keyboard.down(key);
+        try {
+            await expect.poll(() => page.evaluate((previous) => {
+                const current = globalThis.__retailValidationViews.at(-1)?.viewOrigin;
+                return current ? Math.hypot(...current.map(
+                    (value, index) => value - previous[index])) : 0;
+            }, origin), { timeout: 15_000 }).toBeGreaterThan(minimumDistance);
+        } finally {
+            await page.keyboard.up(key);
+        }
+    };
+
+    await holdUntilMoved("w", beforeMove, 1);
     for (const key of ["s", "a", "d"]) {
         const origin = await page.evaluate(() => structuredClone(
             globalThis.__retailValidationViews.at(-1)?.viewOrigin));
-        await page.keyboard.down(key);
-        await page.waitForTimeout(350);
-        await page.keyboard.up(key);
-        await expect.poll(() => page.evaluate((previous) => {
-            const current = globalThis.__retailValidationViews.at(-1)?.viewOrigin;
-            return current ? Math.hypot(...current.map(
-                (value, index) => value - previous[index])) : 0;
-        }, origin)).toBeGreaterThan(0.25);
+        await holdUntilMoved(key, origin, 0.25);
     }
     const beforeJump = await page.evaluate(() =>
         globalThis.__retailValidationViews.at(-1)?.viewOrigin[2]);
-    await page.keyboard.press("Space");
-    await expect.poll(() => page.evaluate((previous) => Math.abs(
-        (globalThis.__retailValidationViews.at(-1)?.viewOrigin[2] ?? previous) - previous),
-    beforeJump)).toBeGreaterThan(0.25);
+    await page.keyboard.down("Space");
+    try {
+        await expect.poll(() => page.evaluate((previous) => Math.abs(
+            (globalThis.__retailValidationViews.at(-1)?.viewOrigin[2] ?? previous) - previous),
+        beforeJump), { timeout: 15_000 }).toBeGreaterThan(0.25);
+    } finally {
+        await page.keyboard.up("Space");
+    }
 
     const audioBefore = await page.evaluate(() =>
         globalThis.__KISAKCOD_WEB__.audioPlayback.reduce(
@@ -218,13 +404,16 @@ async function exerciseRetailInput(page)
     await canvas.click({ position: { x: box.width / 2, y: box.height / 2 } });
     await expect.poll(() => page.evaluate(() => document.pointerLockElement?.id))
         .toBe("game-canvas");
-    const fovBefore = await page.evaluate(() =>
-        globalThis.__retailValidationViews.at(-1)?.tanHalfFovX);
+    const adsBefore = await page.evaluate(() =>
+        globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestUsingAds"));
     await page.mouse.down({ button: "right" });
-    await page.mouse.up({ button: "right" });
-    await expect.poll(() => page.evaluate((previous) => Math.abs(
-        (globalThis.__retailValidationViews.at(-1)?.tanHalfFovX ?? previous) - previous),
-    fovBefore)).toBeGreaterThan(0.0001);
+    try {
+        await expect.poll(() => page.evaluate(() =>
+            globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestUsingAds")),
+        { timeout: 15_000 }).not.toBe(adsBefore);
+    } finally {
+        await page.mouse.up({ button: "right" });
+    }
     await page.mouse.wheel(0, -120);
     await page.mouse.wheel(0, 120);
     const lookBefore = await page.evaluate(() => structuredClone(
@@ -266,11 +455,21 @@ async function exerciseRetailInput(page)
     await expect.poll(() => page.evaluate(() =>
         globalThis.__KISAKCOD_WEB__.input.absoluteMouse)).toBe(false);
     return { eventCount: inputs.length, movement: true, mouseLook: true,
-        primaryFireAudio: true, secondaryAim: true };
+        primaryFireAudio: true, secondaryAction: true };
 }
 
 test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: page }) => {
     test.setTimeout(900_000);
+    if (!allowDirty) expect(sourceDirty,
+        "authoritative retail validation requires a clean source commit").toBe(false);
+    const browser = page.context().browser();
+    retailBrowserMetadata = {
+        name: browser?.browserType().name() ?? "unknown",
+        version: browser?.version() ?? "unknown",
+        channel: browserChannel ?? null,
+    };
+    const pageErrors = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
 
     await page.addInitScript(() => {
         globalThis.__KISAKCOD_WORKER_TEST_CONFIG__ = { observeInput: true };
@@ -286,6 +485,10 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
         globalThis.__retailLifecycle = [];
         globalThis.__retailDatabase = [];
         globalThis.__retailAudioTelemetry = [];
+        globalThis.__retailLogs = [];
+        globalThis.addEventListener("kisakcod:log", (event) => {
+            globalThis.__retailLogs.push(structuredClone(event.detail));
+        });
         globalThis.addEventListener("kisakcod:renderer-scene-frame", (event) => {
             globalThis.__retailValidationFrames.push({
                 ...structuredClone(event.detail), observedMs: performance.now(),
@@ -336,21 +539,30 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
         });
     });
 
+    failureStage = "runtime bootstrap";
+    failureClass = "lifecycle";
     await page.goto("/");
     await expect.poll(() => page.evaluate(
         () => globalThis.__KISAKCOD_WEB__?.state,
     )).toBe("running");
     await waitForAssets(page, "empty");
 
+    failureStage = "installation/profile validation";
+    failureClass = "filesystem";
     const chooserPromise = page.waitForEvent("filechooser");
     await page.locator("#portable-install-button").click();
     const chooser = await chooserPromise;
     await chooser.setFiles(retailRoot);
     await waitForAssets(page, "ready");
 
+    failureStage = "Killhouse database load";
+    failureClass = "database";
     const killhouseCursor = await captureMapCursor(page);
     const killhouseHeapBefore = await heapBytes(page);
     const killhouseCommandMs = await submitCommand(page, "map killhouse");
+    await waitForDatabaseCompletion(page, "killhouse", killhouseCursor.database);
+    failureStage = "Killhouse CGame initialization";
+    failureClass = "cgame";
     await expect.poll(() => page.evaluate((start) =>
         globalThis.__retailLifecycle.slice(start).some(
             (event) => event.stage === "CG_Init complete"), killhouseCursor.lifecycle), {
@@ -359,21 +571,35 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
     const killhouseHeapAfterLoad = await heapBytes(page);
     await waitForWorldFrames(page, "killhouse", 120);
     const killhouseHeapAfterWorld = await heapBytes(page);
-    const killhouseStability = await sustainWorldFrames(page, "killhouse");
+    const killhouseStability = await sustainWorldFrames(
+        page, "killhouse", stabilityDurationMs);
+    const killhouseHeapAtStabilityEnd = await heapBytes(page);
+    const killhouseMemory = await rendererMemorySnapshot(page);
+    const killhouseAudio = await page.evaluate(() => structuredClone(
+        globalThis.__retailAudioTelemetry.at(-1) ?? null));
 
+    failureStage = "Killhouse gameplay validation";
     const killhouseInput = await exerciseRetailInput(page);
-
-    await submitCommand(page, "writeconfig cleanup-validation.cfg");
-    const killhouseCheckpoint = await checkpoint(page);
+    failureStage = "Killhouse checkpoint";
+    failureClass = "lifecycle";
+    const killhouseCheckpoint = await writeConfigAndCheckpoint(page);
     const killhouseEvidence = await mapEvidence(page, "killhouse", killhouseCursor,
         killhouseCommandMs, killhouseHeapBefore, killhouseHeapAfterLoad,
-        killhouseHeapAfterWorld, killhouseStability, killhouseInput,
-        killhouseCheckpoint);
+        killhouseHeapAfterWorld, killhouseHeapAtStabilityEnd, killhouseStability,
+        killhouseMemory, killhouseAudio, killhouseInput, killhouseCheckpoint);
+    assertMapEvidence(killhouseEvidence, killhouseMemory);
+    failureStage = "Killhouse to CargoShip transition";
+    failureClass = "lifecycle";
     const transitionStart = await page.evaluate(() =>
         globalThis.__retailRendererLifecycle.length);
     const cargoshipCursor = await captureMapCursor(page);
     const cargoshipHeapBefore = await heapBytes(page);
     const cargoshipCommandMs = await submitCommand(page, "map cargoship");
+    failureStage = "CargoShip database load";
+    failureClass = "database";
+    await waitForDatabaseCompletion(page, "cargoship", cargoshipCursor.database);
+    failureStage = "CargoShip CGame initialization";
+    failureClass = "cgame";
     await expect.poll(() => page.evaluate((start) =>
         globalThis.__retailLifecycle.slice(start).some(
             (event) => event.stage === "CG_Init complete"), cargoshipCursor.lifecycle), {
@@ -382,7 +608,15 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
     const cargoshipHeapAfterLoad = await heapBytes(page);
     await waitForWorldFrames(page, "cargoship", 120);
     const cargoshipHeapAfterWorld = await heapBytes(page);
-    const cargoshipStability = await sustainWorldFrames(page, "cargoship");
+    const cargoshipStability = await sustainWorldFrames(
+        page, "cargoship", stabilityDurationMs);
+    const cargoshipHeapAtStabilityEnd = await heapBytes(page);
+    const cargoshipMemory = await rendererMemorySnapshot(page);
+    const cargoshipAudio = await page.evaluate(() => structuredClone(
+        globalThis.__retailAudioTelemetry.at(-1) ?? null));
+    expect(await page.evaluate(() => globalThis.__retailLogs
+        .filter(({ text }) => text.includes("duration must be greater than 0"))
+        .map(({ text }) => text))).toEqual([]);
 
     const transition = await page.evaluate((start) => structuredClone(
         globalThis.__retailRendererLifecycle.slice(start)), transitionStart);
@@ -399,75 +633,142 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
     expect(transition[unloadEndIndex].contextGenerationUnchanged).toBe(true);
     expect(transition[unloadEndIndex].contextGenerationAfter)
         .toBe(transition[publishedIndex].contextGenerationAfter);
+    failureStage = "CargoShip gameplay validation";
     const cargoshipInput = await exerciseRetailInput(page);
-    await submitCommand(page, "writeconfig cleanup-validation.cfg");
-    const cargoshipCheckpoint = await checkpoint(page);
+    failureStage = "CargoShip checkpoint";
+    failureClass = "lifecycle";
+    const cargoshipCheckpoint = await writeConfigAndCheckpoint(page);
 
+    failureStage = "CargoShip WebGL context recovery";
+    failureClass = "renderer";
     const recoveryBefore = await page.evaluate(() => ({
-        count: globalThis.__KISAKCOD_WEB__.rendererShader.recoveryCount ?? 0,
-        frame: globalThis.__retailValidationFrames.findLast(
-            (entry) => entry.worldName?.toLowerCase().includes("cargoship"))
-            ?.viewSubmissionGeneration ?? 0,
+        startedMs: performance.now(),
+        contextLosses: globalThis.__KISAKCOD_WEB__.contextLosses,
+        surfaceRecoveryCount:
+            globalThis.__KISAKCOD_WEB__.rendererSurface.recoveryCount ?? 0,
+        frame: structuredClone(globalThis.__retailValidationFrames.findLast(
+            (entry) => entry.worldName?.toLowerCase().includes("cargoship"))),
     }));
     expect(await page.evaluate(() =>
         globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestLoseWebGLContext")))
         .toBeTruthy();
-    await expect.poll(() => page.evaluate(
-        () => globalThis.__KISAKCOD_WEB__.rendererShader.state,
-    )).toBe("lost");
-    await page.evaluate(() =>
-        globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestRestoreWebGLContext"));
+    await expect.poll(() => page.evaluate(() => ({
+        runtime: globalThis.__KISAKCOD_WEB__.state,
+        surface: globalThis.__KISAKCOD_WEB__.rendererSurface.state,
+    }))).toEqual({ runtime: "renderer-lost", surface: "lost" });
+    expect(await page.evaluate(() =>
+        globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestRestoreWebGLContext")))
+        .toBeTruthy();
     await expect.poll(() => page.evaluate((before) => ({
-        state: globalThis.__KISAKCOD_WEB__.rendererShader.state,
-        recovered: globalThis.__KISAKCOD_WEB__.rendererShader.recoveryCount > before,
-    }), recoveryBefore.count), { timeout: 30_000 })
-        .toEqual({ state: "ready", recovered: true });
-    await waitForWorldFrames(page, "cargoship", recoveryBefore.frame + 1);
+        runtime: globalThis.__KISAKCOD_WEB__.state,
+        contextLossRecorded:
+            globalThis.__KISAKCOD_WEB__.contextLosses > before.contextLosses,
+        surface: globalThis.__KISAKCOD_WEB__.rendererSurface.state,
+        surfaceRecovered: globalThis.__KISAKCOD_WEB__.rendererSurface.recoveryCount >
+            before.surfaceRecoveryCount,
+        canonicalResourcesRebuilt:
+            (globalThis.__retailValidationFrames.findLast((entry) =>
+                entry.worldName?.toLowerCase().includes("cargoship"))
+                ?.resourceGeneration ?? 0) > (before.frame?.resourceGeneration ?? 0),
+    }), recoveryBefore), { timeout: 30_000 }).toEqual({
+        runtime: "running",
+        contextLossRecorded: true,
+        surface: "ready",
+        surfaceRecovered: true,
+        canonicalResourcesRebuilt: true,
+    });
+    await waitForWorldFrames(page, "cargoship",
+        recoveryBefore.frame.viewSubmissionGeneration + 1);
+    const recoveryCompletedMs = await page.evaluate(() => performance.now());
     const recoveryInput = await exerciseRetailInput(page);
 
     const cargoshipEvidence = await mapEvidence(page, "cargoship", cargoshipCursor,
         cargoshipCommandMs, cargoshipHeapBefore, cargoshipHeapAfterLoad,
-        cargoshipHeapAfterWorld, cargoshipStability, cargoshipInput,
-        cargoshipCheckpoint);
+        cargoshipHeapAfterWorld, cargoshipHeapAtStabilityEnd, cargoshipStability,
+        cargoshipMemory, cargoshipAudio, cargoshipInput, cargoshipCheckpoint);
+    assertMapEvidence(cargoshipEvidence, cargoshipMemory);
 
-    const transitionEvidence = await page.evaluate(({ transitionStart,
-        unloadBeginIndex, unloadEndIndex, publishedIndex }) => {
-        const memory = globalThis.__retailValidationMemory;
-        const lifecycle = globalThis.__retailRendererLifecycle.slice(transitionStart);
-        const unloadBegin = lifecycle[unloadBeginIndex];
-        const unload = lifecycle[unloadEndIndex];
-        const published = lifecycle[publishedIndex];
-        const firstMemoryIndex = memory.findLastIndex((entry) =>
-            entry.state === "world-unload-begin" &&
-            entry.observedMs <= unloadBegin.observedMs);
-        const transitionMemory = memory.slice(Math.max(0, firstMemoryIndex))
-            .filter((entry) => entry.observedMs <= published.observedMs);
-        const total = (entry) => entry.recoveryCopyBytes +
-            entry.gpuTextureEstimateBytes + entry.geometryBytes +
-            entry.temporaryUploadBytes + entry.shaderProgramCacheEstimateBytes;
-        return {
-            contextGenerationBefore: unload.contextGenerationBefore,
-            contextGenerationAfter: unload.contextGenerationAfter,
-            oldMapDecodedBytesBeforeUnload: unloadBegin.recoveryBytes,
-            oldMapDecodedBytesAfterUnload: unload.recoveryBytes,
-            oldMapDecodedBytesBeforeNewWorldPublication: unload.recoveryBytes,
-            decodedBytesAfterNewWorldPublication: published.recoveryBytes,
-            oldMapBytesReleased: unload.oldMapBytesReleased,
-            peakTransitionBytes: Math.max(0, ...transitionMemory.map(total)),
-            peakDecodedRecoveryBytes: Math.max(0, ...transitionMemory.map(
-                (entry) => entry.recoveryCopyBytes)),
-            recoveryBudgetBytes: memory.at(-1)?.recoveryBudgetBytes ?? 0,
-            unloadEndIndex,
-            publishedIndex,
-        };
-    }, { transitionStart, unloadBeginIndex, unloadEndIndex, publishedIndex });
-    expect(Math.max(killhouseEvidence.decodedTextureRecoveryBytes,
-        cargoshipEvidence.decodedTextureRecoveryBytes,
-        transitionEvidence.peakDecodedRecoveryBytes))
-        .toBeLessThanOrEqual(transitionEvidence.recoveryBudgetBytes);
+    const transitionMemory = await page.evaluate(({ startedMs, endedMs }) =>
+        structuredClone(globalThis.__retailValidationMemory.filter((entry) =>
+            entry.observedMs >= startedMs && entry.observedMs <= endedMs)), {
+        startedMs: cargoshipCommandMs,
+        endedMs: cargoshipEvidence.firstRealWorldFrameTimeMs,
+    });
+    expect(transitionMemory.length).toBeGreaterThanOrEqual(3);
+    for (const sample of transitionMemory) assertMemoryTelemetry(sample);
+    const unloadBeginMemory = transitionMemory.find(
+        (entry) => entry.state === "world-unload-begin");
+    const unloadEndMemory = transitionMemory.find(
+        (entry) => entry.state === "world-unloaded");
+    const newWorldMemory = transitionMemory.find(
+        (entry) => entry.state === "world-submitted" &&
+            entry.observedMs > unloadEndMemory?.observedMs);
+    expect(unloadBeginMemory).toBeTruthy();
+    expect(unloadEndMemory).toBeTruthy();
+    expect(newWorldMemory).toBeTruthy();
+    expect(unloadEndMemory.worldImageRecoveryBytes).toBe(0);
+    expect(unloadEndMemory.staticModelImageRecoveryBytes).toBe(0);
+    expect(unloadEndMemory.dynamicModelImageRecoveryBytes).toBe(0);
+    expect(unloadEndMemory.uiImageRecoveryBytes).toBe(0);
+    expect(unloadEndMemory.geometryBytes).toBe(0);
+    expect(transition[unloadEndIndex].oldMapBytesReleased)
+        .toBe(unloadBeginMemory.recoveryCopyBytes - unloadEndMemory.recoveryCopyBytes);
+    const maximum = (key) => Math.max(...transitionMemory.map(
+        (entry) => entry[key]));
+    const transitionEvidence = {
+        validationResult: "pass",
+        durationToFirstWorldFrameMs:
+            cargoshipEvidence.firstRealWorldFrameTimeMs - cargoshipCommandMs,
+        contextGenerationBefore: transition[unloadEndIndex].contextGenerationBefore,
+        contextGenerationAfter: transition[unloadEndIndex].contextGenerationAfter,
+        oldMap: {
+            decodedTextureRecoveryBytesBeforeUnload:
+                unloadBeginMemory.decodedTextureSourceBytes,
+            decodedTextureRecoveryBytesAfterUnload:
+                unloadEndMemory.decodedTextureSourceBytes,
+            aggregateCpuRecoveryBytesBeforeUnload:
+                unloadBeginMemory.recoveryCopyBytes,
+            aggregateCpuRecoveryBytesAfterUnload:
+                unloadEndMemory.recoveryCopyBytes,
+            aggregateCpuRecoveryBytesReleased:
+                transition[unloadEndIndex].oldMapBytesReleased,
+        },
+        newMapAggregateCpuRecoveryBytesAtWorldPublication:
+            newWorldMemory.recoveryCopyBytes,
+        peakObserved: {
+            decodedTextureRecoveryBytes: maximum("decodedTextureSourceBytes"),
+            aggregateCpuRecoveryBytes: maximum("recoveryCopyBytes"),
+            estimatedGpuTextureBytes: maximum("gpuTextureEstimateBytes"),
+            geometryBytes: maximum("geometryBytes"),
+            boundaryRetainedTemporaryUploadBytes: maximum("temporaryUploadBytes"),
+            shaderProgramBytes: maximum("shaderProgramCacheEstimateBytes"),
+            imagePoolRecoveryBytes: {
+                world: maximum("worldImageRecoveryBytes"),
+                staticModels: maximum("staticModelImageRecoveryBytes"),
+                dynamicModels: maximum("dynamicModelImageRecoveryBytes"),
+                ui: maximum("uiImageRecoveryBytes"),
+                perPoolAdmissionLimit: unloadBeginMemory.recoveryBudgetBytes,
+            },
+            wasmLinearMemoryCapacityBytes: Math.max(
+                cargoshipEvidence.wasmLinearMemoryCapacityBytes.beforeMapLoad,
+                cargoshipEvidence.wasmLinearMemoryCapacityBytes.afterCGameInit,
+                cargoshipEvidence.wasmLinearMemoryCapacityBytes.afterWorldPublication),
+        },
+        lifecycleOrder: ["worldUnloadBegin", "worldUnloadEnd", "newWorldPublished"],
+    };
 
-    const recoveryAfter = await page.evaluate(() =>
-        globalThis.__KISAKCOD_WEB__.rendererShader.recoveryCount ?? 0);
+    const recoveryAfter = await page.evaluate(() => ({
+        contextLosses: globalThis.__KISAKCOD_WEB__.contextLosses,
+        surfaceRecoveryCount:
+            globalThis.__KISAKCOD_WEB__.rendererSurface.recoveryCount ?? 0,
+        frame: structuredClone(globalThis.__retailValidationFrames.findLast(
+            (entry) => entry.worldName?.toLowerCase().includes("cargoship"))),
+    }));
+    expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.state))
+        .toBe("running");
+    expect(pageErrors).toEqual([]);
+    failureStage = "shutdown flush";
+    failureClass = "lifecycle";
     const shutdownFlushDurationMs = await page.evaluate(async () => {
         const startedMs = performance.now();
         await globalThis.__KISAKCOD_WEB__.module.dispose();
@@ -477,19 +778,55 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
     await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state))
         .toBe("running");
     await waitForAssets(page, "ready");
+    failureStage = "reload persistence";
+    const reloadLogStart = await page.evaluate(() =>
+        globalThis.__retailLogs.length);
     await submitCommand(page, "exec cleanup-validation.cfg");
-    expect(await page.locator("#boot-log").textContent())
-        .not.toContain("couldn't exec cleanup-validation.cfg");
-    console.log(`KISAK_RETAIL_RESULT ${JSON.stringify({
+    await expect.poll(() => page.evaluate((start) => {
+        const messages = globalThis.__retailLogs.slice(start)
+            .map(({ text }) => text);
+        if (messages.some((text) =>
+            text.includes("couldn't exec cleanup-validation.cfg"))) return "failed";
+        if (messages.some((text) =>
+            text.includes("execing cleanup-validation.cfg from disk"))) return "loaded";
+        return "pending";
+    }, reloadLogStart), { timeout: 30_000 }).toBe("loaded");
+    expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.state))
+        .toBe("running");
+    expect(pageErrors).toEqual([]);
+    const validationRecord = {
+        schemaVersion: 1,
+        source: { commitSha: sourceCommit, dirty: sourceDirty },
+        recordedAtUtc: new Date().toISOString(),
+        environment: {
+            browser: retailBrowserMetadata,
+            operatingSystem,
+            build: "Release diagnostics",
+        },
+        validationResult: "pass",
+        failureStage: null,
+        failureClass: null,
         maps: { killhouse: killhouseEvidence, cargoship: cargoshipEvidence },
         transition: transitionEvidence,
         contextRecovery: {
-            countBefore: recoveryBefore.count,
-            countAfter: recoveryAfter,
+            validationResult: "pass",
+            durationToFirstRecoveredWorldFrameMs:
+                recoveryCompletedMs - recoveryBefore.startedMs,
+            contextLossesBefore: recoveryBefore.contextLosses,
+            contextLossesAfter: recoveryAfter.contextLosses,
+            surfaceRecoveryCountBefore: recoveryBefore.surfaceRecoveryCount,
+            surfaceRecoveryCountAfter: recoveryAfter.surfaceRecoveryCount,
+            resourceGenerationBefore: recoveryBefore.frame.resourceGeneration,
+            resourceGenerationAfter: recoveryAfter.frame.resourceGeneration,
             framesResumed: true,
             inputResumed: recoveryInput,
         },
-        shutdownFlushDurationMs,
-        saveReloadVerified: true,
-    })}`);
+        shutdown: {
+            flushDurationMs: shutdownFlushDurationMs,
+            reloadResult: "pass",
+            persistedProfileReady: true,
+            persistedConfigLoaded: true,
+        },
+    };
+    console.log(`KISAK_RETAIL_RESULT ${JSON.stringify(validationRecord)}`);
 });

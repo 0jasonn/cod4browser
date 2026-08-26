@@ -112,6 +112,9 @@ function setState(state, message) {
 
 function appendLog(message, level = "info") {
     const text = String(message);
+    globalThis.dispatchEvent(new CustomEvent("kisakcod:log", {
+        detail: { level, text },
+    }));
     runtime.logs.push({ level, text });
     if (runtime.logs.length > 512) {
         runtime.logs.splice(0, runtime.logs.length - 512);

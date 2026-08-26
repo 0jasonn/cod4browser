@@ -151,6 +151,40 @@ test("world unload releases renderer recovery data without replacing the context
     expect(lifecycle[1].recoveryBytes).toBeLessThan(lifecycle[0].recoveryBytes);
 });
 
+test("reports disjoint renderer recovery memory categories", async ({ page }) => {
+    await page.addInitScript(() => {
+        globalThis.__rendererMemory = [];
+        globalThis.addEventListener("kisakcod:renderer-memory", (event) => {
+            globalThis.__rendererMemory.push(structuredClone(event.detail));
+        });
+    });
+    await boot(page);
+    await submitTestSurface(page);
+    const before = await page.evaluate(() => globalThis.__rendererMemory.length);
+    const recoveryCopyBytes = await page.evaluate(() =>
+        globalThis.__KISAKCOD_WEB__.module.call(
+            "_KisakWeb_TestEmitRendererMemory"));
+    await expect.poll(() => page.evaluate((start) =>
+        globalThis.__rendererMemory.slice(start).some(
+            (entry) => entry.state === "diagnostic-snapshot"), before)).toBe(true);
+    const sample = await page.evaluate((start) => structuredClone(
+        globalThis.__rendererMemory.slice(start).findLast(
+            (entry) => entry.state === "diagnostic-snapshot")), before);
+    expect(sample.state).toBe("diagnostic-snapshot");
+    expect(sample.recoveryCopyBytes).toBe(recoveryCopyBytes);
+    expect(sample.worldImageRecoveryBytes +
+        sample.staticModelImageRecoveryBytes +
+        sample.dynamicModelImageRecoveryBytes +
+        sample.uiImageRecoveryBytes +
+        sample.supplementalTextureRecoveryBytes)
+        .toBe(sample.decodedTextureSourceBytes);
+    expect(sample.decodedTextureSourceBytes + sample.geometryBytes +
+        sample.shaderProgramCacheEstimateBytes)
+        .toBe(sample.recoveryCopyBytes);
+    expect(sample.gpuTextureEstimateBytes)
+        .toBeGreaterThanOrEqual(sample.decodedTextureSourceBytes);
+});
+
 test("keeps an initial WebGL pipeline failure terminal", async ({ page }) => {
     await page.addInitScript(() => {
         globalThis.__KISAKCOD_WORKER_TEST_CONFIG__ = { failInitialShader: true };

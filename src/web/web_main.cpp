@@ -47,6 +47,12 @@ void RunCommands()
     if (Web_TakePendingCanonicalCommand(
             browserCommand, sizeof(browserCommand)))
     {
+#if KISAK_WEB_DIAGNOSTICS
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Canonical command executing: %s (nesting=%d).\n",
+            browserCommand,
+            cmd_args.nesting);
+#endif
         Cbuf_ExecuteBuffer(
             0, CL_ControllerIndexFromClientNum(0), browserCommand);
 #if KISAK_WEB_DIAGNOSTICS
@@ -183,6 +189,11 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestSlowNextCommand(int millisecond
         return 0;
     g_testSlowCommandMilliseconds = static_cast<std::uint32_t>(milliseconds);
     return 1;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestUsingAds()
+{
+    return clients[0].usingAds ? 1 : 0;
 }
 #endif
 

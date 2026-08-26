@@ -15,6 +15,7 @@ const EXPORTED_COMMANDS = [
     "_KisakWeb_TestLoseWebGLContext", "_KisakWeb_TestRestoreWebGLContext",
     "_KisakWeb_TestSetAaSamples", "_KisakWeb_TestSubmitSurface",
     "_KisakWeb_TestUnloadWorldResources", "_KisakWeb_TestHeapBytes",
+    "_KisakWeb_TestEmitRendererMemory", "_KisakWeb_TestUsingAds",
 ];
 const ENGINE_FILESYSTEM_LOCK = "kisakcod-web-engine-filesystem-v1";
 const HOME_WRITER_LOCK = "kisakcod-web-home-writer-v1";
