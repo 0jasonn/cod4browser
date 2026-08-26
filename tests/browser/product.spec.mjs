@@ -140,11 +140,23 @@ for (const [missingCapability, label, expectedWorkers] of [
             if (missing === "sync-access") {
                 globalThis.Worker = class {
                     constructor() { ++globalThis.__capabilityWorkerConstructions; }
-                    postMessage(message) {
+                    postMessage() {
                         queueMicrotask(() => this.onmessage?.({ data: {
-                            offscreenCanvas: true,
-                            syncAccessHandle: false,
-                            canvas: message.canvas,
+                            type: "kisak-capability-probe-result",
+                            offscreenCanvas: {
+                                supported: true,
+                                capability: "offscreenCanvas",
+                                code: "OK",
+                                message: "Available",
+                                detail: "",
+                            },
+                            opfsSyncAccess: {
+                                supported: false,
+                                capability: "opfsSyncAccessHandle",
+                                code: "SYNC_ACCESS_HANDLE_OPEN_FAILED",
+                                message: "Unavailable",
+                                detail: "test",
+                            },
                         } }));
                     }
                     terminate() {}
