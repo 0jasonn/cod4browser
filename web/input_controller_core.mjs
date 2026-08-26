@@ -38,7 +38,9 @@ const mouseButtonKey = (button) => [0xC8, 0xCA, 0xC9, 0xCB, 0xCC][button] ?? 0;
  * @param {{canvas: HTMLCanvasElement, commandInput?: HTMLElement | null,
  *   sendInput: (event: EngineInput) => unknown,
  *   onState?: (state: Record<string, boolean>) => void,
- *   onFailure?: (error: unknown) => void}} options
+ *   onFailure?: (error: unknown) => void,
+ *   requestFrame?: (callback: FrameRequestCallback) => number,
+ *   cancelFrame?: (handle: number) => void}} options
  */
 export function createInputControllerCore({
     canvas,
@@ -46,6 +48,8 @@ export function createInputControllerCore({
     sendInput,
     onState = () => {},
     onFailure = () => {},
+    requestFrame = (callback) => requestAnimationFrame(callback),
+    cancelFrame = (handle) => cancelAnimationFrame(handle),
 })
 {
     const heldKeys = new Set();
@@ -57,19 +61,25 @@ export function createInputControllerCore({
     let programmaticUnlock = false;
     let lastForwardedEscape = Number.NEGATIVE_INFINITY;
     let lastSyntheticEscape = Number.NEGATIVE_INFINITY;
-    let movementScheduled = false;
+    /** @type {number | null} */
+    let movementFrame = null;
     let pendingMovementX = 0;
     let pendingMovementY = 0;
     const escapeDeduplicationMilliseconds = 100;
 
+    const clearRelativeMovement = () => {
+        if (movementFrame !== null) cancelFrame(movementFrame);
+        movementFrame = null;
+        pendingMovementX = 0;
+        pendingMovementY = 0;
+    };
     /** @param {unknown} error */
     const failDelivery = (error) => {
         if (deliveryFailed || disposed) return;
         deliveryFailed = true;
+        clearRelativeMovement();
         heldKeys.clear();
         heldMouseButtons.clear();
-        pendingMovementX = 0;
-        pendingMovementY = 0;
         onFailure(error);
     };
     /** @param {EngineInput} event */
@@ -102,8 +112,8 @@ export function createInputControllerCore({
         if (!pendingMovementX && !pendingMovementY) return;
         send({
             type: "mouse-move",
-            x: Math.round(canvas.width * 0.5),
-            y: Math.round(canvas.height * 0.5),
+            x: Math.max(0, Math.round((canvas.width - 1) * 0.5)),
+            y: Math.max(0, Math.round((canvas.height - 1) * 0.5)),
             dx: Math.round(pendingMovementX),
             dy: Math.round(pendingMovementY),
         });
@@ -173,24 +183,25 @@ export function createInputControllerCore({
         if (pointerLocked) {
             pendingMovementX += event.movementX;
             pendingMovementY += event.movementY;
-            if (!movementScheduled) {
-                movementScheduled = true;
-                requestAnimationFrame(() => {
-                    movementScheduled = false;
+            if (movementFrame === null) {
+                movementFrame = requestFrame(() => {
+                    movementFrame = null;
                     flushRelativeMovement();
                 });
             }
             return;
         }
         const bounds = canvas.getBoundingClientRect();
+        if (canvas.width <= 0 || canvas.height <= 0 ||
+            bounds.width <= 0 || bounds.height <= 0) return;
         const x = Math.round((event.clientX - bounds.left) * canvas.width /
-            Math.max(1, bounds.width));
+            bounds.width);
         const y = Math.round((event.clientY - bounds.top) * canvas.height /
-            Math.max(1, bounds.height));
+            bounds.height);
         send({
             type: "mouse-move",
-            x: Math.max(0, Math.min(canvas.width, x)),
-            y: Math.max(0, Math.min(canvas.height, y)),
+            x: Math.max(0, Math.min(canvas.width - 1, x)),
+            y: Math.max(0, Math.min(canvas.height - 1, y)),
             dx: 0,
             dy: 0,
         });
@@ -234,7 +245,13 @@ export function createInputControllerCore({
         if (absoluteMouse) releasePointerLock();
     };
     const handleVisibility = () => {
-        if (document.visibilityState === "hidden") releaseHeldInput();
+        if (document.visibilityState !== "hidden") return;
+        clearRelativeMovement();
+        releaseHeldInput();
+    };
+    const handleBlur = () => {
+        clearRelativeMovement();
+        releaseHeldInput();
     };
     /** @param {Event} event */
     function preventDefault(event) { event.preventDefault(); }
@@ -243,7 +260,7 @@ export function createInputControllerCore({
     globalThis.addEventListener("keyup", handleKeyUp);
     globalThis.addEventListener("mouseup", handleMouseUp);
     globalThis.addEventListener("mousemove", handleMouseMove);
-    globalThis.addEventListener("blur", releaseHeldInput);
+    globalThis.addEventListener("blur", handleBlur);
     globalThis.addEventListener("kisakcod:cursor", handleCursor);
     globalThis.addEventListener("kisakcod:mouse-mode", handleMouseMode);
     document.addEventListener("pointerlockchange", handlePointerLockChange);
@@ -256,7 +273,7 @@ export function createInputControllerCore({
     return Object.freeze({
         dispose() {
             if (disposed) return;
-            flushRelativeMovement();
+            clearRelativeMovement();
             releaseHeldInput();
             releasePointerLock();
             disposed = true;
@@ -264,7 +281,7 @@ export function createInputControllerCore({
             globalThis.removeEventListener("keyup", handleKeyUp);
             globalThis.removeEventListener("mouseup", handleMouseUp);
             globalThis.removeEventListener("mousemove", handleMouseMove);
-            globalThis.removeEventListener("blur", releaseHeldInput);
+            globalThis.removeEventListener("blur", handleBlur);
             globalThis.removeEventListener("kisakcod:cursor", handleCursor);
             globalThis.removeEventListener("kisakcod:mouse-mode", handleMouseMode);
             document.removeEventListener("pointerlockchange", handlePointerLockChange);
