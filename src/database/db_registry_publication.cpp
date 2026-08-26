@@ -652,8 +652,13 @@ XAssetEntryPoolEntry *DB_LinkXAssetEntry(
     const XAsset &asset = newEntry->entry.asset;
     const char *name = AssetName(asset);
     if (!name) return nullptr;
+    // Native comma-prefixed records resolve a canonical asset or named default.
+    const bool isStubAsset = name[0] == ',';
+    if (isStubAsset) ++name;
     const std::uint32_t hash = DB_HashForNameCanonical(name, asset.type);
     XAssetEntryPoolEntry *existing = DB_FindXAssetEntryCanonical(asset.type, name);
+    if (isStubAsset)
+        return existing ? existing : CreateDefaultEntry(asset.type, name);
     if (!existing) existing = FindAnySingletonEntry(asset.type);
     if (IsClipMapSingleton(asset.type) && existing)
     {

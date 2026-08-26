@@ -4965,6 +4965,36 @@ int main()
     assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_SOUND_CURVE) ==
         freeCurvesAfterReplacement);
 
+    // Native leading-comma assets are references to the stripped canonical
+    // asset, not additional zone publications. CargoShip relies on this for
+    // FX references when the fixed-size FX pool is otherwise full.
+    Reset({});
+    static FxEffectDef stubTargetFx{};
+    stubTargetFx.name = "fx/stub-target";
+    stubTargetFx.flags = 0x1234;
+    DB_SetLoadingZoneIndex(1);
+    const FxEffectDef *stubTargetIdentity = DB_AddXAsset(
+        ASSET_TYPE_FX, {&stubTargetFx}).fx;
+    assert(stubTargetIdentity && stubTargetIdentity->flags == 0x1234);
+    const std::uint32_t freeEntriesBeforeStub = DB_GetFreeAssetEntryCount();
+    const std::uint32_t freeFxBeforeStub =
+        DB_GetAssetPoolFreeCount(ASSET_TYPE_FX);
+    static FxEffectDef stubReferenceFx{};
+    stubReferenceFx.name = ",fx/stub-target";
+    stubReferenceFx.flags = 0x5678;
+    g_zones[2].flags = 2;
+    DB_SetLoadingZoneIndex(2);
+    assert(DB_AddXAsset(ASSET_TYPE_FX, {&stubReferenceFx}).fx ==
+        stubTargetIdentity);
+    assert(stubTargetIdentity->flags == 0x1234);
+    assert(DB_GetFreeAssetEntryCount() == freeEntriesBeforeStub);
+    assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_FX) == freeFxBeforeStub);
+    assert(DB_FindXAssetEntryCanonical(ASSET_TYPE_FX,
+        "fx/stub-target")->entry.asset.header.fx == stubTargetIdentity);
+    assert(!DB_FindXAssetEntryCanonical(ASSET_TYPE_FX,
+        ",fx/stub-target"));
+    assert(!DB_RuntimeGeneratedLoadFailed());
+
     // WeaponDef may resolve a sound dependency before the real alias zone is
     // published. Native DB_FindXAssetHeader creates a named zone-0 default
     // in that case, and later publication promotes the real alias in place.
