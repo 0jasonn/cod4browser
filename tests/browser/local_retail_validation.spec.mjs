@@ -159,6 +159,14 @@ async function waitForAssets(page, state)
     await expect.poll(() => page.evaluate(
         () => globalThis.__KISAKCOD_WEB__?.assets?.state,
     ), { timeout: 300_000 }).toBe(state);
+    if (state === "ready") {
+        await expect.poll(() => page.evaluate(() =>
+            globalThis.__KISAKCOD_WEB__?.module?.filesystemState,
+        ), {
+            timeout: 300_000,
+            message: "canonical filesystem should finish mounting",
+        }).toBe("mounted");
+    }
 }
 
 async function submitCommand(page, command)
