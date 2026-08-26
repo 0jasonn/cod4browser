@@ -1,4 +1,7 @@
-import { createWorkerSyncFilesystem } from "./worker_sync_filesystem.mjs";
+import {
+    createWorkerSyncFilesystem,
+    mountWorkerFilesystem,
+} from "./worker_sync_filesystem.mjs";
 import {
     ENGINE_PROTOCOL_VERSION,
     HOST_EVENTS,
@@ -207,9 +210,11 @@ globalThis.addEventListener("message", (event) => {
                 resolveInitialization();
                 break;
             case "mount": {
-                const mounted = await filesystem.mount(message.manifest);
-                module._KisakWeb_MountCanonicalRuntime();
-                await filesystem.checkpoint();
+                const mounted = await mountWorkerFilesystem(
+                    filesystem,
+                    message.manifest,
+                    () => module._KisakWeb_MountCanonicalRuntime(),
+                );
                 reply(message.id, message.type, mounted);
                 break;
             }

@@ -199,13 +199,66 @@ test("filesystem lifecycle: successful mount", async () => {
 test("filesystem lifecycle: explicit mount failure releases leases", async () => {
     const { host, locks } = createHarness({
         behavior(message, worker) {
-            worker.reply(message, null, failure(message.type));
+            worker.reply(message, null, failure(message.type, "MOUNT_FAILED_CLEAN"));
         },
     });
     await host.ready;
     await assert.rejects(host.mountAssets(manifest));
     assert.equal(host.filesystemState, FILESYSTEM_STATES.UNMOUNTED);
     assert.equal(locks.held(HOME_LOCK), false);
+    await host.dispose();
+});
+
+test("filesystem lifecycle: cleanup failure terminates before lease release", async () => {
+    const { host, worker, locks, log } = createHarness({
+        behavior(message, target) {
+            target.reply(message, null, failure(message.type, "MOUNT_CLEANUP_FAILED"));
+        },
+    });
+    await host.ready;
+    await assert.rejects(host.mountAssets(manifest),
+        (error) => error.code === "MOUNT_CLEANUP_FAILED");
+    assert.equal(worker.terminated, true);
+    assert.equal(host.filesystemState, FILESYSTEM_STATES.TERMINATED);
+    assert.equal(locks.held(HOME_LOCK), false);
+    assert.ok(log.indexOf("worker:terminate") < log.indexOf(`lock:${HOME_LOCK}:release`));
+    await host.dispose();
+});
+
+test("filesystem lifecycle: unknown canonical ownership terminates the Worker", async () => {
+    const { host, worker, states } = createHarness({
+        behavior(message, target) {
+            target.reply(message, null,
+                failure(message.type, "FILESYSTEM_OWNERSHIP_UNKNOWN"));
+        },
+    });
+    await host.ready;
+    await assert.rejects(host.mountAssets(manifest),
+        (error) => error.code === "FILESYSTEM_OWNERSHIP_UNKNOWN");
+    assert.equal(worker.terminated, true);
+    assert.equal(states.at(-1), FILESYSTEM_STATES.TERMINATED);
+    await host.dispose();
+});
+
+test("filesystem lifecycle: second writer stays excluded during cleanup recovery", async () => {
+    const locks = new LockManager();
+    let secondAttempt;
+    const { host } = createHarness({
+        locks,
+        behavior(message, target) {
+            target.reply(message, null, failure(message.type, "MOUNT_CLEANUP_FAILED"));
+        },
+        onLifecycle(event) {
+            if (event === "workerTerminationStarted") {
+                secondAttempt = locks.request(HOME_LOCK, {
+                    mode: "exclusive", ifAvailable: true,
+                }, (lock) => Boolean(lock));
+            }
+        },
+    });
+    await host.ready;
+    await assert.rejects(host.mountAssets(manifest));
+    assert.equal(await secondAttempt, false);
     await host.dispose();
 });
 

@@ -18,22 +18,39 @@ const EXPORTED_COMMANDS = [
 const ENGINE_FILESYSTEM_LOCK = "kisakcod-web-engine-filesystem-v1";
 const HOME_WRITER_LOCK = "kisakcod-web-home-writer-v1";
 
+export const DIAGNOSTIC_FILESYSTEM_STATES = Object.freeze({
+    UNMOUNTED: "unmounted",
+    ACQUIRING: "acquiring",
+    MOUNTING: "mounting",
+    MOUNTED: "mounted",
+    FLUSHING: "flushing",
+    UNKNOWN: "ownership-unknown",
+    TERMINATING: "terminating",
+    TERMINATED: "terminated",
+});
+
 export function createEngineWorkerHost(canvas, {
     onLog,
     onAbort,
     onAudioDiagnostic,
     requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+    managePageLifecycle = true,
+    onFilesystemState,
+    onFilesystemLifecycleEvent,
+    workerFactory = (url, options) => new Worker(url, options),
+    audioDriverFactory = (options) => new WebAudioDriver(options),
+    lockManager = navigator.locks,
 } = {})
 {
     if (!canvas || typeof canvas.transferControlToOffscreen !== "function") {
         throw new Error("This browser does not support a Worker-owned OffscreenCanvas.");
     }
     const observeInput = globalThis.__KISAKCOD_WORKER_TEST_CONFIG__?.observeInput === true;
-    const worker = new Worker(new URL("./engine_worker.mjs", import.meta.url), {
+    const worker = workerFactory(new URL("./engine_worker.mjs", import.meta.url), {
         type: "module",
         name: "kisakcod-engine",
     });
-    const audioDriver = new WebAudioDriver({
+    const audioDriver = audioDriverFactory({
         onDiagnostic: (message) => {
             onAudioDiagnostic?.(message);
             onLog?.(`[kisakcod-web] ${message}`, "warn");
@@ -55,6 +72,10 @@ export function createEngineWorkerHost(canvas, {
     let homeWriterLeaseCompletion = null;
     let unmounting = null;
     let filesystemMutation = Promise.resolve();
+    let filesystemState = DIAGNOSTIC_FILESYSTEM_STATES.UNMOUNTED;
+    let workerGeneration = 1;
+    let workerUnavailable = false;
+    let recoveryPromise = null;
     let disposed = false;
     let shuttingDown = false;
     let disposePromise = null;
@@ -64,6 +85,21 @@ export function createEngineWorkerHost(canvas, {
         resolveReady = resolve;
         rejectReady = reject;
     });
+
+    function setFilesystemState(state)
+    {
+        filesystemState = state;
+        onFilesystemState?.(state);
+    }
+
+    function emitFilesystemLifecycle(event)
+    {
+        try {
+            onFilesystemLifecycleEvent?.(event);
+        } catch (error) {
+            onLog?.(`[kisakcod-web] Filesystem lifecycle observer failed: ${error}`, "warn");
+        }
+    }
 
     function rejectPending(error)
     {
@@ -91,7 +127,7 @@ export function createEngineWorkerHost(canvas, {
 
     function rpc(type, payload = {}, transfer = [], { signal, timeoutMs = requestTimeoutMs } = {})
     {
-        if ((shuttingDown && type !== "shutdown") || disposed) {
+        if ((shuttingDown && type !== "shutdown") || disposed || workerUnavailable) {
             return Promise.reject(new EngineWorkerError(protocolError(
                 "WORKER_SHUTTING_DOWN", type, "The engine Worker is shutting down.")));
         }
@@ -119,7 +155,10 @@ export function createEngineWorkerHost(canvas, {
                     "REQUEST_TIMEOUT", type,
                     `The engine Worker did not answer within ${timeoutMs} ms.`, true)));
             }, timeoutMs);
-            pending.set(id, { resolve, reject, timeout, signal, abort, operation: type });
+            pending.set(id, {
+                resolve, reject, timeout, signal, abort, operation: type,
+                generation: workerGeneration,
+            });
             signal?.addEventListener("abort", abort, { once: true });
         });
         try {
@@ -134,7 +173,7 @@ export function createEngineWorkerHost(canvas, {
         return promise;
     }
 
-    worker.addEventListener("message", (event) => {
+    const handleMessage = (event) => {
         const message = event.data;
         if (["ready", "reply", "event", "startup-error"].includes(message?.type) &&
             message.protocolVersion !== ENGINE_PROTOCOL_VERSION) {
@@ -149,7 +188,7 @@ export function createEngineWorkerHost(canvas, {
         case "ready": resolveReady(message); break;
         case "reply": {
             const request = pending.get(message.id);
-            if (!request) break;
+            if (!request || request.generation !== workerGeneration) break;
             pending.delete(message.id);
             clearTimeout(request.timeout);
             request.signal?.removeEventListener("abort", request.abort);
@@ -191,15 +230,23 @@ export function createEngineWorkerHost(canvas, {
         }
         default: break;
         }
-    });
-    worker.addEventListener("error", (event) => {
+    };
+    const handleError = (event) => {
         const error = protocolError(
             "WORKER_ERROR", "worker", event.error?.message ?? event.message ?? "Worker failed.");
         rejectReady(new EngineWorkerError(error));
         rejectPending(error);
-    });
-    worker.addEventListener("messageerror", () => rejectPending(protocolError(
-        "MESSAGE_ERROR", "message", "The engine Worker sent an unreadable message.")));
+        void recoverWorkerOwnership("worker-error", new EngineWorkerError(error));
+    };
+    const handleMessageError = () => {
+        const error = protocolError(
+            "MESSAGE_ERROR", "message", "The engine Worker sent an unreadable message.");
+        rejectPending(error);
+        void recoverWorkerOwnership("message-error", new EngineWorkerError(error));
+    };
+    worker.addEventListener("message", handleMessage);
+    worker.addEventListener("error", handleError);
+    worker.addEventListener("messageerror", handleMessageError);
 
     const offscreen = canvas.transferControlToOffscreen();
     worker.postMessage({
@@ -211,12 +258,12 @@ export function createEngineWorkerHost(canvas, {
 
     async function acquireFilesystemLease()
     {
-        if (releaseFilesystemLease || !navigator.locks?.request) return;
+        if (releaseFilesystemLease || !lockManager?.request) return;
         let markHomeAcquired;
         let releaseHome;
         const homeAcquired = new Promise((resolve) => { markHomeAcquired = resolve; });
         const homeHeld = new Promise((resolve) => { releaseHome = resolve; });
-        homeWriterLeaseCompletion = navigator.locks.request(
+        homeWriterLeaseCompletion = lockManager.request(
             HOME_WRITER_LOCK,
             { mode: "exclusive", ifAvailable: true },
             async (lock) => {
@@ -226,6 +273,7 @@ export function createEngineWorkerHost(canvas, {
                 }
                 releaseHomeWriterLease = releaseHome;
                 markHomeAcquired(true);
+                emitFilesystemLifecycle("writerLeaseAcquired");
                 await homeHeld;
             },
         );
@@ -241,7 +289,7 @@ export function createEngineWorkerHost(canvas, {
         const acquired = new Promise((resolve) => { markAcquired = resolve; });
         const held = new Promise((resolve) => { release = resolve; });
         try {
-            filesystemLeaseCompletion = navigator.locks.request(
+            filesystemLeaseCompletion = lockManager.request(
                 ENGINE_FILESYSTEM_LOCK,
                 { mode: "shared" },
                 async () => {
@@ -262,6 +310,7 @@ export function createEngineWorkerHost(canvas, {
 
     async function releaseLeases()
     {
+        const releasedWriter = Boolean(releaseHomeWriterLease);
         const release = releaseFilesystemLease;
         const completion = filesystemLeaseCompletion;
         const releaseHome = releaseHomeWriterLease;
@@ -273,16 +322,60 @@ export function createEngineWorkerHost(canvas, {
         release?.();
         releaseHome?.();
         await Promise.all([completion, homeCompletion].filter(Boolean));
+        if (releasedWriter) emitFilesystemLifecycle("writerLeaseReleased");
+    }
+
+    function workerOwnershipUnknown(error)
+    {
+        return [
+            "REQUEST_TIMEOUT", "WORKER_ERROR", "MESSAGE_ERROR", "WORKER_TERMINATED",
+            "MOUNT_CLEANUP_FAILED", "FILESYSTEM_OWNERSHIP_UNKNOWN",
+        ].includes(error?.code);
+    }
+
+    function recoverWorkerOwnership(operation, error)
+    {
+        if (recoveryPromise) return recoveryPromise;
+        recoveryPromise = (async () => {
+            setFilesystemState(DIAGNOSTIC_FILESYSTEM_STATES.UNKNOWN);
+            setFilesystemState(DIAGNOSTIC_FILESYSTEM_STATES.TERMINATING);
+            workerUnavailable = true;
+            ++workerGeneration;
+            rejectPending(protocolError(
+                "WORKER_TERMINATED", operation,
+                `The diagnostic Worker was terminated after ${error?.code ?? "uncertain ownership"}.`));
+            emitFilesystemLifecycle("workerTerminationStarted");
+            worker.terminate();
+            emitFilesystemLifecycle("workerTerminated");
+            await releaseLeases();
+            setFilesystemState(DIAGNOSTIC_FILESYSTEM_STATES.TERMINATED);
+        })();
+        return recoveryPromise;
     }
 
     async function releaseMountedFilesystem()
     {
         if (unmounting) return unmounting;
+        if (filesystemState === DIAGNOSTIC_FILESYSTEM_STATES.UNMOUNTED) {
+            await releaseLeases();
+            return { mounted: false };
+        }
+        if (filesystemState !== DIAGNOSTIC_FILESYSTEM_STATES.MOUNTED) {
+            throw Object.assign(new Error(
+                `Cannot unmount the diagnostic filesystem while it is ${filesystemState}.`), {
+                code: "FILESYSTEM_STATE",
+            });
+        }
         unmounting = (async () => {
+            setFilesystemState(DIAGNOSTIC_FILESYSTEM_STATES.FLUSHING);
             try {
-                await rpc("unmount");
-            } finally {
+                const result = await rpc("unmount");
+                setFilesystemState(DIAGNOSTIC_FILESYSTEM_STATES.UNMOUNTED);
                 await releaseLeases();
+                return result;
+            } catch (error) {
+                await recoverWorkerOwnership("unmount", error);
+                throw error;
             }
         })();
         try {
@@ -303,12 +396,25 @@ export function createEngineWorkerHost(canvas, {
         ready,
         async mount(manifest) {
             return serializeFilesystemMutation(async () => {
-                await releaseMountedFilesystem();
-                await acquireFilesystemLease();
-                try {
-                    return await rpc("mount", { manifest });
-                } catch (error) {
+                if (filesystemState !== DIAGNOSTIC_FILESYSTEM_STATES.UNMOUNTED) {
                     await releaseMountedFilesystem();
+                }
+                setFilesystemState(DIAGNOSTIC_FILESYSTEM_STATES.ACQUIRING);
+                let mountRequestStarted = false;
+                try {
+                    await acquireFilesystemLease();
+                    setFilesystemState(DIAGNOSTIC_FILESYSTEM_STATES.MOUNTING);
+                    mountRequestStarted = true;
+                    const result = await rpc("mount", { manifest });
+                    setFilesystemState(DIAGNOSTIC_FILESYSTEM_STATES.MOUNTED);
+                    return result;
+                } catch (error) {
+                    if (mountRequestStarted && error?.code !== "MOUNT_FAILED_CLEAN") {
+                        await recoverWorkerOwnership("mount", error);
+                    } else {
+                        setFilesystemState(DIAGNOSTIC_FILESYSTEM_STATES.UNMOUNTED);
+                        await releaseLeases();
+                    }
                     throw error;
                 }
             });
@@ -387,21 +493,47 @@ export function createEngineWorkerHost(canvas, {
             return rpc("call", { functionName, arguments: arguments_ });
         },
         testControl(values) { return rpc("test-control", { values }); },
-        checkpoint() { return rpc("checkpoint"); },
+        checkpoint() {
+            return serializeFilesystemMutation(async () => {
+                try {
+                    return await rpc("checkpoint");
+                } catch (error) {
+                    if (workerOwnershipUnknown(error)) {
+                        await recoverWorkerOwnership("checkpoint", error);
+                    }
+                    throw error;
+                }
+            });
+        },
+        get filesystemState() { return filesystemState; },
         dispose() {
             if (disposePromise) return disposePromise;
             shuttingDown = true;
             disposePromise = (async () => {
                 try {
-                    await serializeFilesystemMutation(async () => {
+                    await filesystemMutation.catch(() => {});
+                    if (!workerUnavailable) {
                         await rpc("shutdown");
-                        await releaseLeases();
-                    });
+                        setFilesystemState(DIAGNOSTIC_FILESYSTEM_STATES.UNMOUNTED);
+                    }
+                } catch (error) {
+                    await recoverWorkerOwnership("shutdown", error);
                 } finally {
                     disposed = true;
-                    await releaseLeases();
+                    if (!workerUnavailable) {
+                        workerUnavailable = true;
+                        ++workerGeneration;
+                        worker.terminate();
+                        await releaseLeases();
+                        setFilesystemState(DIAGNOSTIC_FILESYSTEM_STATES.TERMINATED);
+                    }
+                    if (managePageLifecycle) {
+                        globalThis.removeEventListener("pagehide", handlePageHide);
+                    }
+                    worker.removeEventListener("message", handleMessage);
+                    worker.removeEventListener("error", handleError);
+                    worker.removeEventListener("messageerror", handleMessageError);
                     audioDriver.dispose();
-                    worker.terminate();
                     rejectPending(protocolError(
                         "WORKER_TERMINATED", "shutdown", "The engine Worker was terminated."));
                 }
@@ -413,6 +545,9 @@ export function createEngineWorkerHost(canvas, {
     for (const functionName of EXPORTED_COMMANDS) {
         facade[functionName] = (...arguments_) => facade.call(functionName, ...arguments_);
     }
-    globalThis.addEventListener("pagehide", () => { void facade.dispose(); }, { once: true });
+    const handlePageHide = () => { void facade.dispose(); };
+    if (managePageLifecycle) {
+        globalThis.addEventListener("pagehide", handlePageHide, { once: true });
+    }
     return Object.freeze(facade);
 }

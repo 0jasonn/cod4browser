@@ -1,4 +1,7 @@
-import { createWorkerSyncFilesystem } from "./worker_sync_filesystem.mjs";
+import {
+    createWorkerSyncFilesystem,
+    mountWorkerFilesystem,
+} from "./worker_sync_filesystem.mjs";
 import {
     ENGINE_PROTOCOL_VERSION,
     PRODUCT_HOST_EVENTS,
@@ -217,14 +220,16 @@ globalThis.addEventListener("message", (event) => {
             case "mountAssets": {
                 const report = createProgressReporter(message);
                 try {
-                    const mounted = await filesystem.mount(message.manifest, report);
-                    module._KisakWeb_MountCanonicalRuntime();
-                    await filesystem.checkpoint(report);
+                    const mounted = await mountWorkerFilesystem(
+                        filesystem,
+                        message.manifest,
+                        () => module._KisakWeb_MountCanonicalRuntime(),
+                        report,
+                    );
                     state = "mounted";
                     reply(message.id, message.type, { mounted, runtime: true });
                 } catch (error) {
-                    await filesystem.flushAndUnmount(report).catch(() => {});
-                    state = "ready";
+                    state = error?.code === "MOUNT_FAILED_CLEAN" ? "ready" : "failed";
                     throw error;
                 }
                 break;

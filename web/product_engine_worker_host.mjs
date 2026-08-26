@@ -395,8 +395,10 @@ export function createEngineWorkerHost(canvas, {
 
     function workerOwnershipUnknown(error)
     {
-        return ["REQUEST_TIMEOUT", "WORKER_ERROR", "MESSAGE_ERROR", "WORKER_TERMINATED"]
-            .includes(error?.code);
+        return [
+            "REQUEST_TIMEOUT", "WORKER_ERROR", "MESSAGE_ERROR", "WORKER_TERMINATED",
+            "MOUNT_CLEANUP_FAILED", "FILESYSTEM_OWNERSHIP_UNKNOWN",
+        ].includes(error?.code);
     }
 
     function recoverWorkerOwnership(operation, error)
@@ -468,9 +470,11 @@ export function createEngineWorkerHost(canvas, {
                     await flushMountedFilesystem();
                 }
                 setFilesystemState(FILESYSTEM_STATES.ACQUIRING);
+                let mountRequestStarted = false;
                 try {
                     await acquireLeases();
                     setFilesystemState(FILESYSTEM_STATES.MOUNTING);
+                    mountRequestStarted = true;
                     const result = await rpc("mountAssets", { manifest }, [], {
                         stallTimeoutMs: options?.stallTimeoutMs ?? options?.timeoutMs ??
                             mountTimeoutMs ?? filesystemStallTimeoutMs,
@@ -480,7 +484,7 @@ export function createEngineWorkerHost(canvas, {
                     setFilesystemState(FILESYSTEM_STATES.MOUNTED);
                     return result;
                 } catch (error) {
-                    if (workerOwnershipUnknown(error)) {
+                    if (mountRequestStarted && error?.code !== "MOUNT_FAILED_CLEAN") {
                         await recoverWorkerOwnership("mountAssets", error);
                     } else {
                         setFilesystemState(FILESYSTEM_STATES.UNMOUNTED);

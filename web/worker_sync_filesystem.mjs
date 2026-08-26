@@ -43,6 +43,45 @@ async function childDirectory(root, segments, create = false)
     return current;
 }
 
+function mountFailure(code, error, cleanupError = null)
+{
+    const cleanup = cleanupError
+        ? ` Cleanup also failed: ${cleanupError?.message ?? cleanupError}.`
+        : "";
+    return Object.assign(new Error(
+        `Engine filesystem mount failed: ${error?.message ?? error}.${cleanup}`), {
+        code,
+        cause: error,
+    });
+}
+
+export async function mountWorkerFilesystem(
+    filesystem, manifest, mountRuntime, report = null)
+{
+    let runtimeMountStarted = false;
+    try {
+        const mounted = await filesystem.mount(manifest, report);
+        runtimeMountStarted = true;
+        mountRuntime();
+        await filesystem.checkpoint(report);
+        return mounted;
+    } catch (error) {
+        let cleanupError = null;
+        try {
+            await filesystem.flushAndUnmount(report);
+        } catch (failure) {
+            cleanupError = failure;
+        }
+        if (cleanupError) {
+            throw mountFailure("MOUNT_CLEANUP_FAILED", error, cleanupError);
+        }
+        if (runtimeMountStarted) {
+            throw mountFailure("FILESYSTEM_OWNERSHIP_UNKNOWN", error);
+        }
+        throw mountFailure("MOUNT_FAILED_CLEAN", error);
+    }
+}
+
 export function createWorkerSyncFilesystem(faults = null)
 {
     const files = new Map();
