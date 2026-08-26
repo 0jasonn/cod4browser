@@ -479,7 +479,6 @@ export class WebAudioDriver {
         }
         const source = this.sources.get(command.sourceId);
         if (command.generation < source.generation) return true;
-        source.generation = command.generation;
         if (command.op === "source-queue") {
             if (source.queue.length + command.bufferIds.length >
                 this.maxQueuedBuffersPerSource) {
@@ -489,18 +488,22 @@ export class WebAudioDriver {
                 return false;
             }
             if (command.bufferIds.some((id) => !this.buffers.has(id))) return false;
+            source.generation = command.generation;
             for (const bufferId of command.bufferIds)
                 source.queue.push({ bufferId, node: null, completed: false });
             if (source.state === "playing")
                 return this.scheduleQueuedBuffers(source, source.generation);
             return true;
         }
-        for (const bufferId of command.bufferIds) {
-            const entry = source.queue.shift();
-            if (!entry || entry.bufferId !== bufferId) {
-                this.diagnostic("Rejected out-of-order Web Audio stream unqueue.");
-                return false;
-            }
+        if (command.bufferIds.length > source.queue.length ||
+            command.bufferIds.some((bufferId, index) =>
+                source.queue[index].bufferId !== bufferId)) {
+            this.diagnostic("Rejected out-of-order Web Audio stream unqueue.");
+            return false;
+        }
+        source.generation = command.generation;
+        const removed = source.queue.splice(0, command.bufferIds.length);
+        for (const entry of removed) {
             const node = entry.node;
             if (node) {
                 try { node.stop?.(); } catch {}
@@ -524,10 +527,17 @@ export class WebAudioDriver {
         const source = this.sources.get(command.sourceId);
         if (command.generation < source.generation)
             return true;
+        const hasPosition = command.x !== undefined || command.y !== undefined ||
+            command.z !== undefined;
+        if (hasPosition && !(Number.isFinite(command.x) &&
+            Number.isFinite(command.y) && Number.isFinite(command.z))) {
+            this.diagnostic("Rejected Web Audio source command with an invalid position.");
+            return false;
+        }
         if (Number.isFinite(command.gain)) source.gain = clamp(command.gain, 0, 16);
         if (Number.isFinite(command.pitch)) source.pitch = clamp(command.pitch, 0.001, 16);
         if (Number.isFinite(command.offset)) source.offset = Math.max(0, command.offset);
-        if (Number.isFinite(command.x)) [source.x, source.y, source.z] = [command.x, command.y, command.z];
+        if (hasPosition) [source.x, source.y, source.z] = [command.x, command.y, command.z];
         if (typeof command.looping === "boolean") source.looping = command.looping;
         if (typeof command.spatialized === "boolean")
             source.spatialized = command.spatialized;
