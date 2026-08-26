@@ -4598,6 +4598,12 @@ WebRendererSurfaceResult CopyWorldCommand(
         surface.vertexCount > WEB_RENDERER_MAX_WORLD_VERTICES ||
         surface.indexCount > WEB_RENDERER_MAX_WORLD_INDICES)
     {
+        Web_Log(WebLogLevel::Error,
+            "[kisakcod-web] Invalid canonical world descriptor header: "
+            "vertices=%u/%u indices=%u/%u batches=%u.\n",
+            surface.vertexCount, WEB_RENDERER_MAX_WORLD_VERTICES,
+            surface.indexCount, WEB_RENDERER_MAX_WORLD_INDICES,
+            surface.batchCount);
         return WebRendererSurfaceResult::InvalidDescriptor;
     }
     if (surface.primaryLightCount > WEB_RENDERER_MAX_PRIMARY_LIGHTS ||
@@ -4606,6 +4612,11 @@ WebRendererSurfaceResult CopyWorldCommand(
         (surface.primaryLightCount != 0u &&
             surface.sunPrimaryLightIndex >= surface.primaryLightCount))
     {
+        Web_Log(WebLogLevel::Error,
+            "[kisakcod-web] Invalid canonical world primary-light header: "
+            "lights=%u/%u sun=%u.\n",
+            surface.primaryLightCount, WEB_RENDERER_MAX_PRIMARY_LIGHTS,
+            surface.sunPrimaryLightIndex);
         return WebRendererSurfaceResult::InvalidDescriptor;
     }
     if ((surface.spotShadowCasterCount != 0u &&
@@ -4613,6 +4624,9 @@ WebRendererSurfaceResult CopyWorldCommand(
         (surface.spotShadowCasterCount == 0u &&
             surface.spotShadowCasters))
     {
+        Web_Log(WebLogLevel::Error,
+            "[kisakcod-web] Invalid canonical world spot-shadow caster "
+            "header: count=%u.\n", surface.spotShadowCasterCount);
         return WebRendererSurfaceResult::InvalidDescriptor;
     }
     if ((surface.spotShadowStaticModelCount != 0u &&
@@ -4620,6 +4634,9 @@ WebRendererSurfaceResult CopyWorldCommand(
         (surface.spotShadowStaticModelCount == 0u &&
             surface.spotShadowStaticModels))
     {
+        Web_Log(WebLogLevel::Error,
+            "[kisakcod-web] Invalid canonical world spot-shadow static-model "
+            "header: count=%u.\n", surface.spotShadowStaticModelCount);
         return WebRendererSurfaceResult::InvalidDescriptor;
     }
     // Moving brush-model batches keep the GfxWorld primary-light indices
@@ -4709,6 +4726,12 @@ WebRendererSurfaceResult CopyWorldCommand(
                 (light.type == 2u && light.cosHalfFovInner <=
                     light.cosHalfFovOuter))
             {
+                Web_Log(WebLogLevel::Error,
+                    "[kisakcod-web] Invalid canonical primary light %u: "
+                    "type=%u radius=%g fov=(%g %g) falloff=(%g %g).\n",
+                    index, static_cast<unsigned int>(light.type), light.radius,
+                    light.cosHalfFovOuter, light.cosHalfFovInner,
+                    light.falloffScale, light.falloffShift);
                 return WebRendererSurfaceResult::InvalidDescriptor;
             }
             primaryLights.push_back(light);
@@ -4734,6 +4757,17 @@ WebRendererSurfaceResult CopyWorldCommand(
                     : source.primaryLightIndex >=
                         primaryLightReferenceCount))
             {
+                Web_Log(WebLogLevel::Error,
+                    "[kisakcod-web] Invalid canonical world batch %u: "
+                    "indices=%u+%u expected=%u/%u surfaces=%u[%u,%u] "
+                    "technique=%u lighting=%u primaryLight=%u/%u.\n",
+                    index, source.firstIndex, source.indexCount,
+                    expectedFirstIndex, surface.indexCount,
+                    source.surfaceCount, source.firstSurfaceIndex,
+                    source.lastSurfaceIndex,
+                    static_cast<unsigned int>(source.technique),
+                    static_cast<unsigned int>(source.lightingMode),
+                    source.primaryLightIndex, primaryLightReferenceCount);
                 return WebRendererSurfaceResult::InvalidDescriptor;
             }
             expectedFirstIndex += source.indexCount;
@@ -4820,6 +4854,11 @@ WebRendererSurfaceResult CopyWorldCommand(
                     (source.water->M & (source.water->M - 1)) != 0 ||
                     !source.reflectionProbeImage)
                 {
+                    Web_Log(WebLogLevel::Error,
+                        "[kisakcod-web] Invalid canonical water batch %u: "
+                        "grid=%dx%d.\n", index,
+                        source.water ? source.water->M : 0,
+                        source.water ? source.water->N : 0);
                     return WebRendererSurfaceResult::InvalidDescriptor;
                 }
                 const std::size_t waterCount =
@@ -4966,6 +5005,13 @@ WebRendererSurfaceResult CopyWorldCommand(
                     caster.indexCount >
                         surface.indexCount - caster.firstIndex)
                 {
+                    Web_Log(WebLogLevel::Error,
+                        "[kisakcod-web] Invalid canonical spot-shadow caster "
+                        "%u: light=%u/%u batch=%u/%zu indices=%u+%u/%u.\n",
+                        index, caster.primaryLightIndex,
+                        primaryLightReferenceCount, caster.batchIndex,
+                        batches.size(), caster.firstIndex, caster.indexCount,
+                        surface.indexCount);
                     return WebRendererSurfaceResult::InvalidDescriptor;
                 }
                 const WebRendererRetainedWorldBatch &batch =
@@ -4974,6 +5020,9 @@ WebRendererSurfaceResult CopyWorldCommand(
                     caster.firstIndex + caster.indexCount >
                         batch.firstIndex + batch.indexCount)
                 {
+                    Web_Log(WebLogLevel::Error,
+                        "[kisakcod-web] Canonical spot-shadow caster %u lies "
+                        "outside batch %u.\n", index, caster.batchIndex);
                     return WebRendererSurfaceResult::InvalidDescriptor;
                 }
                 spotShadowCasters->push_back(caster);
@@ -4996,6 +5045,13 @@ WebRendererSurfaceResult CopyWorldCommand(
                     model.canonicalInstanceIndex >=
                         WEB_RENDERER_MAX_STATIC_MODEL_INSTANCES)
                 {
+                    Web_Log(WebLogLevel::Error,
+                        "[kisakcod-web] Invalid canonical spot-shadow static "
+                        "model %u: light=%u/%u instance=%u/%u.\n",
+                        index, model.primaryLightIndex,
+                        primaryLightReferenceCount,
+                        model.canonicalInstanceIndex,
+                        WEB_RENDERER_MAX_STATIC_MODEL_INSTANCES);
                     return WebRendererSurfaceResult::InvalidDescriptor;
                 }
                 spotShadowStaticModels->push_back(model);
@@ -5016,7 +5072,13 @@ WebRendererSurfaceResult CopyWorldCommand(
             return WebRendererSurfaceResult::InvalidDescriptor;
         }
         if (expectedFirstIndex != surface.indexCount)
+        {
+            Web_Log(WebLogLevel::Error,
+                "[kisakcod-web] Invalid canonical world index coverage: "
+                "batches=%u indices=%u/%u.\n", surface.batchCount,
+                expectedFirstIndex, surface.indexCount);
             return WebRendererSurfaceResult::InvalidDescriptor;
+        }
     }
     catch (const std::bad_alloc &)
     {
