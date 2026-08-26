@@ -81,6 +81,52 @@ test("recovers the retained surface after WebGL2 context loss", { tag: "@smoke" 
     expect(after.resident).toBe(true);
 });
 
+test("surface restoration failure remains terminal and non-resident", async ({ page }) => {
+    await page.addInitScript(() => {
+        globalThis.__rendererStates = [];
+        globalThis.__rendererFrames = [];
+        globalThis.addEventListener("kisakcod:state", (event) => {
+            globalThis.__rendererStates.push(structuredClone(event.detail));
+        });
+        globalThis.addEventListener("kisakcod:frame", (event) => {
+            globalThis.__rendererFrames.push(structuredClone(event.detail));
+        });
+    });
+    await boot(page);
+    await submitTestSurface(page);
+    await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.testControl({
+        failSurfaceRestore: true,
+    }));
+
+    expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.call(
+        "_KisakWeb_TestLoseWebGLContext"))).toBe(1);
+    await expect.poll(() => page.evaluate(
+        () => globalThis.__KISAKCOD_WEB__?.state)).toBe("renderer-lost");
+    expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.call(
+        "_KisakWeb_TestRestoreWebGLContext"))).toBe(1);
+    await expect.poll(() => page.evaluate(
+        () => globalThis.__KISAKCOD_WEB__?.state)).toBe("failed");
+
+    const evidence = await page.evaluate(async () => {
+        const failedIndex = globalThis.__rendererStates.findLastIndex(
+            ({ state }) => state === "failed");
+        const framesAtFailure = globalThis.__rendererFrames.length;
+        await new Promise((resolve) => requestAnimationFrame(() =>
+            requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        return {
+            surface: structuredClone(globalThis.__KISAKCOD_WEB__.rendererSurface),
+            statesAfterFailure: globalThis.__rendererStates.slice(failedIndex + 1),
+            framesAtFailure,
+            framesAfterWait: globalThis.__rendererFrames.length,
+            state: globalThis.__KISAKCOD_WEB__.state,
+        };
+    });
+    expect(evidence.state).toBe("failed");
+    expect(evidence.surface).toMatchObject({ resident: false });
+    expect(evidence.statesAfterFailure.some(({ state }) => state === "running")).toBe(false);
+    expect(evidence.framesAfterWait).toBe(evidence.framesAtFailure);
+});
+
 test("world unload releases renderer recovery data without replacing the context", async ({ page }) => {
     await page.addInitScript(() => {
         globalThis.__rendererLifecycle = [];
@@ -108,6 +154,14 @@ test("world unload releases renderer recovery data without replacing the context
 test("keeps an initial WebGL pipeline failure terminal", async ({ page }) => {
     await page.addInitScript(() => {
         globalThis.__KISAKCOD_WORKER_TEST_CONFIG__ = { failInitialShader: true };
+        globalThis.__rendererStates = [];
+        globalThis.__rendererFrames = [];
+        globalThis.addEventListener("kisakcod:state", (event) => {
+            globalThis.__rendererStates.push(structuredClone(event.detail));
+        });
+        globalThis.addEventListener("kisakcod:frame", (event) => {
+            globalThis.__rendererFrames.push(structuredClone(event.detail));
+        });
     });
     await page.goto("/");
     await expect.poll(() => page.evaluate(
@@ -116,8 +170,19 @@ test("keeps an initial WebGL pipeline failure terminal", async ({ page }) => {
     await page.evaluate(async () => {
         await globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestLoseWebGLContext");
         await globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestRestoreWebGLContext");
+        await new Promise((resolve) => requestAnimationFrame(() =>
+            requestAnimationFrame(() => requestAnimationFrame(resolve))));
     });
-    expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.state)).toBe("failed");
+    const evidence = await page.evaluate(() => ({
+        state: globalThis.__KISAKCOD_WEB__.state,
+        states: structuredClone(globalThis.__rendererStates),
+        frames: globalThis.__rendererFrames.length,
+    }));
+    expect(evidence.state).toBe("failed");
+    expect(evidence.frames).toBe(0);
+    expect(evidence.states.some(({ state }) => state === "running")).toBe(false);
+    expect(evidence.states.some(({ state }) => state === "renderer-lost")).toBe(false);
+    expect(evidence.states.at(-1)?.state).toBe("failed");
 });
 
 test("shows a useful failure when the generated module is missing", { tag: "@smoke" }, async ({ page }) => {
