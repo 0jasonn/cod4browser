@@ -14,5 +14,5 @@ only at the recorded checkpoint.
   — later Worker, XFile, and generated-loader checkpoint inventories.
 
 Use [`../web-port-convergence.md`](../web-port-convergence.md) for current
-architecture and [`../canonical-runtime-prefix-inventory.md`](../canonical-runtime-prefix-inventory.md)
-for the active prefix retirement inventory.
+architecture. The other files in this directory are retained only as historical
+checkpoint inventories.

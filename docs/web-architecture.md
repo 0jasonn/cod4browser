@@ -41,6 +41,6 @@ and terminates the Worker last.
 
 `KisakCOD-web` and `build/web/site` are production. With
 `KISAK_WEB_DIAGNOSTICS=ON`, `KisakCOD-web-diagnostics` and
-`build/web-diagnostics/site-diagnostics` retain the frozen oracle and test
-controls. Both share portable runtime/platform code, but diagnostic source
-inventories and exports cannot enter production.
+`build/web-diagnostics/site-diagnostics` expose browser-only test controls and
+telemetry. Both artifacts compile the same runtime sources; diagnostic exports
+cannot enter production.

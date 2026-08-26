@@ -1,7 +1,7 @@
 #include <database/db_file_platform.h>
 
 #if defined(KISAK_WEB) || defined(KISAK_DB_SYNC_FILE_TEST)
-#include <web/web_database_filesystem.h>
+#include <web/web_worker_filesystem.h>
 
 #include <cstdio>
 
@@ -15,23 +15,23 @@ void DB_PlatformBuildZonePath(
 
 DBPlatformFile DB_PlatformOpenFile(const char *logicalPath)
 {
-    return WebDatabaseFS_Open(logicalPath);
+    return WebWorkerFS_Open(logicalPath);
 }
 
 std::int64_t DB_PlatformFileSize(DBPlatformFile file)
 {
-    return WebDatabaseFS_Size(file);
+    return WebWorkerFS_Size(file);
 }
 
 std::int32_t DB_PlatformReadFile(
     DBPlatformFile file, void *destination, std::uint32_t length)
 {
-    return WebDatabaseFS_Read(file, destination, length);
+    return WebWorkerFS_Read(file, destination, length);
 }
 
 void DB_PlatformCloseFile(DBPlatformFile file)
 {
-    WebDatabaseFS_Close(file);
+    WebWorkerFS_Close(file);
 }
 
 void *DB_PlatformFileToOpaque(DBPlatformFile file)

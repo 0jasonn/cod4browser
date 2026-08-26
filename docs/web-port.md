@@ -9,12 +9,9 @@ milestone log is preserved in
 ## Current runtime modes
 
 Normal mode mounts a validated installation in the engine Worker and follows
-the canonical runtime through generated loading, ClipMap, game/cgame, and
-renderer frontend. It does not contain the retail census or Gate 2 proof.
-
-The separate diagnostics target retains the census, canonical `GfxWorld`
-proof, and bounded WebGL2 draw as a regression oracle. It is frozen
-infrastructure, not the product object model.
+the canonical runtime through generated loading, ClipMap, game/cgame, and the
+renderer frontend. The separate diagnostics target compiles those same
+sources with browser-only failure and recovery controls.
 
 ## Toolchain and build
 
@@ -47,10 +44,9 @@ npm.cmd run check:web:product
 ```
 
 - `test:browser` runs fast `@smoke` browser-platform confidence.
-- `test:browser:remainder` runs scenarios that are neither smoke nor
-  `@native-covered`; it does not repeat smoke.
-- `test:browser:full` is the explicit exhaustive browser suite, including
-  native-authoritative duplicates useful for boundary diagnostics.
+- `test:browser:remainder` runs non-smoke browser-boundary scenarios without
+  repeating smoke.
+- `test:browser:full` is the explicit exhaustive browser suite.
 - `tools/validate_web_retail.ps1 -RetailRoot <path>` runs the opt-in local
   [retail validation matrix](local-retail-validation.md); it is never hosted CI.
 
@@ -74,5 +70,5 @@ must not fetch or embed retail data.
 
 The next work is evidence-driven compatibility and memory reduction: run the
 local Killhouse/CargoShip transition matrix, measure recovery telemetry, then
-reduce reloadable retained data without changing canonical traversal. Do not
-expand the Gate 2 viewer or add a browser-owned engine model.
+reduce reloadable retained data without changing canonical traversal or adding
+a browser-owned engine model.

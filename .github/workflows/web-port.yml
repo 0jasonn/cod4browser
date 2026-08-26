@@ -2,7 +2,7 @@ name: Web port synthetic CI
 
 on:
   push:
-    branches: [master, web-port]
+    branches: [master, web-port, "codex/**"]
   pull_request:
   workflow_dispatch:
 
@@ -30,8 +30,8 @@ jobs:
       - name: Run legal synthetic native suite
         run: ctest --test-dir build/portable --output-on-failure --parallel 2
 
-  dispatcher-fuzz:
-    name: Sanitized parser and dispatcher fuzz smoke
+  parser-fuzz:
+    name: Sanitized parser fuzz smoke
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -45,15 +45,10 @@ jobs:
           -DCMAKE_BUILD_TYPE=RelWithDebInfo
           -DKISAK_PORTABLE_TESTS_ONLY=ON
           -DKISAK_BUILD_FUZZERS=ON
-      - name: Build fuzz targets
-        run: cmake --build build/fuzz --target asset_parsers_fuzz retail_fastfile_dispatcher_fuzz --parallel 2
+      - name: Build fuzz target
+        run: cmake --build build/fuzz --target asset_parsers_fuzz --parallel 2
       - name: Exercise imported-asset parsers
         run: ./build/fuzz/tests/native/asset_parsers_fuzz -runs=256 -max_len=262144 -timeout=10
-      - name: Exercise ordered retail dispatcher corpus
-        run: >-
-          ./build/fuzz/tests/native/retail_fastfile_dispatcher_fuzz
-          tests/fuzz/corpus/retail_fastfile_dispatcher
-          -runs=512 -max_len=262144 -timeout=10
 
   windows-portable:
     name: Native portable (Windows MSVC x86)
@@ -84,6 +79,10 @@ jobs:
         run: tools/bootstrap_web_toolchain.ps1
       - name: Install JavaScript dependencies
         run: npm.cmd ci
+      - name: Check JavaScript and protocol types
+        run: npm.cmd run check:web:static
+      - name: Test protocol validation
+        run: npm.cmd run test:protocol
       - name: Build tested production browser target
         shell: powershell
         run: tools/build_web.ps1 -Configuration Release
@@ -114,6 +113,13 @@ jobs:
           $total.Stop(); Write-Host ("KISAK_TIMING wasm_test_total_seconds={0:N3}" -f $total.Elapsed.TotalSeconds)
       - name: Install Chromium
         run: npx.cmd playwright install chromium
+      - name: Enforce production artifact boundary
+        run: npm.cmd run check:web:product
+      - name: Test production boot and protocol surface
+        run: npm.cmd run test:browser:product
+      - name: Build diagnostic browser target
+        shell: powershell
+        run: tools/build_web.ps1 -Configuration Release -Diagnostics
       - name: Run tagged browser smoke suite
         run: npm.cmd run test:browser
       - name: Run non-duplicated browser remainder

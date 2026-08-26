@@ -8,7 +8,6 @@ const runtimeMessage = document.querySelector("#runtime-message");
 const bootLog = document.querySelector("#boot-log");
 const frameCounter = document.querySelector("#frame-counter");
 const canvasSize = document.querySelector("#canvas-size");
-const physicsStatus = document.querySelector("#physics-status");
 const rendererStatus = document.querySelector("#renderer-status");
 const systemStatus = document.querySelector("#system-status");
 const selectInstallButton = document.querySelector("#select-install-button");
@@ -21,7 +20,6 @@ const assetProgress = document.querySelector("#asset-progress");
 const assetManifest = document.querySelector("#asset-manifest");
 const assetControl = document.querySelector(".asset-control");
 const assetRetention = document.querySelector("#asset-retention");
-const archiveStatus = document.querySelector("#archive-status");
 const engineAssetStatus = document.querySelector("#engine-asset-status");
 const engineCommandForm = document.querySelector("#engine-command-form");
 const engineCommandInput = document.querySelector("#engine-command-input");
@@ -34,8 +32,6 @@ const rendererSceneFrameEvidence = document.querySelector(
 const engineLifecycleEvidence = document.querySelector(
     "#engine-lifecycle-evidence");
 const rendererFxEvidence = document.querySelector("#renderer-fx-evidence");
-const rendererComparisonEvidence = document.querySelector(
-    "#renderer-comparison-evidence");
 const audioPlaybackEvidence = document.querySelector("#audio-playback-evidence");
 const databaseEvidence = document.querySelector("#database-evidence");
 
@@ -47,32 +43,11 @@ const runtime = {
     contextLosses: 0,
     engine: null,
     database: { stage: "idle", stopStage: "" },
-    qcommon: {
-        state: "idle",
-        stage: "idle",
-        message: "Waiting for a validated local installation",
-    },
-    retailCensus: {
-        state: "idle",
-        stage: "idle",
-        message: "Gate 2 diagnostic/oracle mode has not been requested",
-    },
-    scheduler: {
-        state: "idle",
-        message: "Waiting for the cooperative frame scheduler",
-    },
-    schedulerSamples: [],
     system: null,
     systemSamples: [],
     assets: {
         state: "checking",
         message: "Waiting for the WebAssembly asset probe",
-    },
-    archive: { state: "idle", message: "Waiting for a validated local archive" },
-    engineAsset: { state: "idle", message: "Waiting for a mounted engine archive" },
-    engineWorldSurface: {
-        state: "idle",
-        message: "Waiting for a fastfile world-surface extraction",
     },
     rendererSurface: { state: "idle", message: "Waiting for an engine surface" },
     rendererTexture: { state: "idle", message: "Waiting for a supported engine image" },
@@ -81,8 +56,6 @@ const runtime = {
     rendererSceneView: null,
     rendererSceneFrame: null,
     rendererFx: [],
-    rendererComparison: null,
-    rendererComparisonRecords: [],
     audioPlayback: [],
     engineLifecycle: [],
     input: {
@@ -119,33 +92,8 @@ runtime.submitCanonicalCommand = submitCanonicalCommand;
 
 let assetStore = null;
 let filesystemBridge = null;
-let archiveImportId = null;
-let qcommonImportId = null;
-let retailCensusImportId = null;
+let mountedImportId = null;
 let mountingImportId = null;
-let gate2OracleEnabled = false;
-let schedulerWarningsReported = 0;
-let schedulerViolationsReported = 0;
-
-function maybeStartGate2Oracle()
-{
-    const readyImportId = runtime.assets.state === "ready"
-        ? runtime.assets.manifest?.importId ?? null
-        : null;
-    if (!gate2OracleEnabled || !readyImportId || readyImportId !== qcommonImportId ||
-        runtime.qcommon.state !== "ready" || readyImportId === retailCensusImportId ||
-        typeof runtime.module?._KisakWeb_StartRetailCensus !== "function") {
-        return false;
-    }
-    retailCensusImportId = readyImportId;
-    runtime.module._KisakWeb_StartRetailCensus();
-    return true;
-}
-
-runtime.startGate2Oracle = () => {
-    gate2OracleEnabled = true;
-    return maybeStartGate2Oracle();
-};
 
 const stateLabels = {
     loading: "Runtime loading",
@@ -174,13 +122,8 @@ function appendLog(message, level = "info") {
         .join("\n");
     bootLog.scrollTop = bootLog.scrollHeight;
 
-    if (text.includes("ODE physics math verified")) {
-        physicsStatus.textContent = "ODE verified; commands pending";
-    }
     if (text.startsWith("[kisakcod-web] Renderer:")) {
-        rendererStatus.textContent = runtime.engineWorldSurface.state === "ready"
-            ? "WebGL2 + world surface ready"
-            : "WebGL2 initialized";
+        rendererStatus.textContent = "WebGL2 initialized";
     }
 }
 
@@ -205,111 +148,6 @@ function publishAssetState(detail) {
         detail: runtime.assets,
     }));
 }
-
-function publishArchiveState(detail) {
-    runtime.archive = { ...detail };
-}
-
-globalThis.addEventListener("kisakcod:archive", (event) => {
-    publishArchiveState(event.detail);
-    archiveStatus.textContent = event.detail.state === "ready"
-        ? `${event.detail.recordCount.toLocaleString()} entries; members verified`
-        : event.detail.state === "failed"
-            ? "Archive verification failed"
-            : event.detail.state === "idle"
-                ? "Waiting for local assets"
-                : "Reading archive asynchronously";
-    if (event.detail.state === "ready") {
-        appendLog(
-            `[kisakcod-web] Enumerated ${event.detail.recordCount} IWD records and ` +
-            `verified ${event.detail.verifiedMembers.length} member(s).`,
-        );
-    } else if (event.detail.state === "failed") {
-        appendLog(`[kisakcod-web] Archive reader: ${event.detail.message}`, "error");
-    }
-});
-
-globalThis.addEventListener("kisakcod:qcommon", (event) => {
-    runtime.qcommon = { ...event.detail };
-    if (event.detail.state === "ready") {
-        physicsStatus.textContent = "ODE + qcommon pre-database ready";
-        appendLog(
-            `[kisakcod-web] Qcommon checked ${event.detail.filesChecked}/` +
-            `${event.detail.totalFiles} startup files through the cooperative VFS.`,
-        );
-        maybeStartGate2Oracle();
-    } else if (event.detail.state === "failed") {
-        physicsStatus.textContent = "Qcommon startup failed";
-        appendLog(`[kisakcod-web] Qcommon startup: ${event.detail.message}`, "error");
-    } else if (event.detail.state === "loading") {
-        physicsStatus.textContent = `Qcommon startup: ${event.detail.stage}`;
-    }
-});
-
-globalThis.addEventListener("kisakcod:retail-census", (event) => {
-    runtime.retailCensus = structuredClone(event.detail);
-    if (event.detail.state === "ready") {
-        const firstXModel = event.detail.worldInventory.firstXModel;
-        const secondXModel = event.detail.worldInventory.xmodels?.[1];
-        const postXModelTechniqueSet =
-            event.detail.worldInventory.postXModelTechniqueSet;
-        const postXModelTechniqueSetRun =
-            event.detail.worldInventory.postXModelTechniqueSetRun;
-        const publishedTechniqueSets = event.detail.worldInventory.techniqueSets
-            .filter((entry) => entry.published).length;
-        appendLog(
-            `[kisakcod-web] Counted ${event.detail.assetCount.toLocaleString()} ` +
-            `code_post_gfx assets; material ${event.detail.materialName} selected ` +
-            `${event.detail.materialImagePath} with ${event.detail.shaderSubstitutionId}. ` +
-            `Killhouse contains ${event.detail.worldInventory.assetCount.toLocaleString()} ` +
-            `assets; its first GfxWorld is table index ` +
-            `${event.detail.worldInventory.firstGfxWorldAssetIndex}. ` +
-            `Published ${publishedTechniqueSets} bounded ` +
-            `map technique sets, then traversed XModel ${firstXModel?.name ?? "unknown"} ` +
-            `(${firstXModel?.totals?.vertices ?? 0} vertices, ` +
-            `${firstXModel?.totals?.triangles ?? 0} triangles, ` +
-            `${firstXModel?.surfaceCount ?? 0} surfaces, ` +
-            `${firstXModel?.materials?.length ?? 0} inline materials, and ` +
-            `${firstXModel?.totals?.collisionTriangles ?? 0} collision triangles) ` +
-            `and published its checked dependency boundary. ` +
-            (postXModelTechniqueSet?.published
-                ? `M31 published ${postXModelTechniqueSetRun?.completedCount ?? 1} ` +
-                    `post-model technique set(s), beginning with ` +
-                    `${postXModelTechniqueSet.name} at asset ` +
-                    `${postXModelTechniqueSet.assetIndex}, and stopped at asset ` +
-                    `${postXModelTechniqueSetRun?.nextBodyIndex ?? "unknown"} ` +
-                    `(type ${postXModelTechniqueSetRun?.nextBodyType ?? "unknown"}). `
-                : `The post-model technique-set run remains unpublished. `) +
-            (secondXModel?.headerTraversed
-                ? `M34 ${secondXModel.published ? "published" : "traversed"} ` +
-                    `XModel ${secondXModel.name} at asset ` +
-                    `${secondXModel.assetIndex} ` +
-                    `(${secondXModel.numBones} bones, ` +
-                    `${secondXModel.surfaces?.length ?? 0}/` +
-                    `${secondXModel.surfaceCount} surfaces, ` +
-                    `${secondXModel.materials?.length ?? 0} inline material(s)). `
-                : `The second XModel header remains untouched. `) +
-            (event.detail.worldInventory.gfxWorld?.rendererSurface?.submissionState ===
-                "submitted"
-                ? `Submitted bounded canonical GfxWorld surface ` +
-                    `${event.detail.worldInventory.gfxWorld.rendererSurface.surfaceIndex} ` +
-                    `(${event.detail.worldInventory.gfxWorld.rendererSurface.vertexCount} vertices).`
-                : `The bootstrap surface remains active until a canonical GfxWorld ` +
-                    `surface is available.`),
-        );
-        const readyImportId = runtime.assets.state === "ready"
-            ? runtime.assets.manifest?.importId ?? null
-            : null;
-        if (readyImportId && readyImportId === retailCensusImportId &&
-            readyImportId !== archiveImportId &&
-            typeof runtime.module?._KisakWeb_StartArchiveJob === "function") {
-            archiveImportId = readyImportId;
-            runtime.module._KisakWeb_StartArchiveJob();
-        }
-    } else if (event.detail.state === "failed") {
-        appendLog(`[kisakcod-web] Retail fastfile census: ${event.detail.message}`, "error");
-    }
-});
 
 globalThis.addEventListener("kisakcod:renderer-shader", (event) => {
     const previousFirstDraw = runtime.rendererShader?.firstDrawCompleted === true;
@@ -343,58 +181,6 @@ globalThis.addEventListener("kisakcod:renderer-aa", (event) => {
         );
     } else if (event.detail.state === "fallback" || event.detail.state === "failed") {
         appendLog(`[kisakcod-web] Anti-aliasing: ${event.detail.message}`, "warn");
-    }
-});
-
-globalThis.addEventListener("kisakcod:schedule", (event) => {
-    runtime.scheduler = structuredClone(event.detail);
-    runtime.schedulerSamples.push(runtime.scheduler);
-    if (runtime.schedulerSamples.length > 80) {
-        runtime.schedulerSamples.splice(0, runtime.schedulerSamples.length - 80);
-    }
-    if (event.detail.protocolViolations > schedulerViolationsReported) {
-        appendLog(
-            `[kisakcod-web] Scheduler quarantined ${event.detail.protocolViolations} ` +
-            `task protocol violation(s).`,
-            "error",
-        );
-        schedulerViolationsReported = event.detail.protocolViolations;
-    }
-    if (event.detail.starvationWarnings > schedulerWarningsReported) {
-        appendLog(
-            `[kisakcod-web] Scheduler observed ${event.detail.starvationWarnings} ` +
-            `repeated starvation condition(s).`,
-            "error",
-        );
-        schedulerWarningsReported = event.detail.starvationWarnings;
-    }
-});
-
-globalThis.addEventListener("kisakcod:engine-asset", (event) => {
-    runtime.engineAsset = { ...event.detail };
-    switch (event.detail.state) {
-    case "ready":
-        engineAssetStatus.textContent =
-            `${event.detail.width}×${event.detail.height} IWI loaded`;
-        appendLog(
-            `[kisakcod-web] Engine asset ${event.detail.path}: ` +
-            `${event.detail.width}×${event.detail.height}×${event.detail.depth}, ` +
-            `${formatBytes(event.detail.size)}; request cache released.`,
-        );
-        break;
-    case "failed":
-        engineAssetStatus.textContent = "Engine asset rejected";
-        appendLog(`[kisakcod-web] Engine asset: ${event.detail.message}`, "error");
-        break;
-    case "unavailable":
-        engineAssetStatus.textContent = "No bounded IWI member found";
-        break;
-    case "loading":
-        engineAssetStatus.textContent = "Reading one IWI asynchronously";
-        break;
-    default:
-        engineAssetStatus.textContent = "Waiting for mounted archive";
-        break;
     }
 });
 
@@ -452,99 +238,6 @@ globalThis.addEventListener("kisakcod:renderer-texture", (event) => {
         break;
     default:
         engineAssetStatus.textContent = "Waiting for mounted archive";
-        break;
-    }
-});
-
-globalThis.addEventListener("kisakcod:engine-world-surface", (event) => {
-    runtime.engineWorldSurface = {
-        state: event.detail.state,
-        pipelineStage: event.detail.pipelineStage,
-        message: event.detail.message,
-        sourceRepresentation: event.detail.sourceRepresentation,
-        sourceContainer: event.detail.sourceContainer,
-        vertexFormat: event.detail.vertexFormat,
-        projection: event.detail.projection,
-        synthetic: event.detail.synthetic,
-        extractionGeneration: event.detail.extractionGeneration,
-        conversionGeneration: event.detail.conversionGeneration,
-        framePumpTick: event.detail.framePumpTick,
-        stepCount: event.detail.stepCount,
-        stepInputBytes: event.detail.stepInputBytes,
-        stepOutputBytes: event.detail.stepOutputBytes,
-        stepParsedBytes: event.detail.stepParsedBytes,
-        stepRecords: event.detail.stepRecords,
-        stepSourceBytes: event.detail.stepSourceBytes,
-        sourceFeedCount: event.detail.sourceFeedCount,
-        sourceBytesReceived: event.detail.sourceBytesReceived,
-        sourceBytesConsumed: event.detail.sourceBytesConsumed,
-        maxSourceChunkBytes: event.detail.maxSourceChunkBytes,
-        needsSource: event.detail.needsSource,
-        compressedBytesConsumed: event.detail.compressedBytesConsumed,
-        inflatedBytesProduced: event.detail.inflatedBytesProduced,
-        parsedBytes: event.detail.parsedBytes,
-        recordsProcessed: event.detail.recordsProcessed,
-        maxStepBytes: event.detail.maxStepBytes,
-        maxStepRecords: event.detail.maxStepRecords,
-        fastfileVersion: event.detail.fastfileVersion,
-        fastfileBytes: event.detail.fastfileBytes,
-        compressedBytes: event.detail.compressedBytes,
-        inflatedBytes: event.detail.inflatedBytes,
-        declaredZoneBytes: event.detail.declaredZoneBytes,
-        zoneBlock0Bytes: event.detail.zoneBlock0Bytes,
-        zoneBlock4Bytes: event.detail.zoneBlock4Bytes,
-        sourceAssetCount: event.detail.sourceAssetCount,
-        materialAssetIndex: event.detail.materialAssetIndex,
-        worldAssetIndex: event.detail.worldAssetIndex,
-        materialIdentity: event.detail.materialIdentity,
-        worldIdentity: event.detail.worldIdentity,
-        registeredAssetCount: event.detail.registeredAssetCount,
-        sourceSurfaceIndex: event.detail.sourceSurfaceIndex,
-        worldVertexCount: event.detail.worldVertexCount,
-        worldIndexCount: event.detail.worldIndexCount,
-        worldSurfaceCount: event.detail.worldSurfaceCount,
-        firstVertex: event.detail.firstVertex,
-        vertexCount: event.detail.vertexCount,
-        baseIndex: event.detail.baseIndex,
-        triangleCount: event.detail.triangleCount,
-        materialReferenceKind: event.detail.materialReferenceKind,
-        materialName: event.detail.materialName,
-        convertedVertexCount: event.detail.convertedVertexCount,
-        convertedIndexCount: event.detail.convertedIndexCount,
-    };
-    switch (event.detail.state) {
-    case "loading":
-        rendererStatus.textContent = event.detail.pipelineStage === "begin"
-            ? "Preparing incremental fastfile extraction"
-            : event.detail.pipelineStage === "source-wait"
-                ? "Waiting for the next bounded fastfile chunk"
-            : event.detail.pipelineStage === "inflate"
-                ? "Inflating fastfile incrementally"
-                : "Traversing fastfile incrementally";
-        break;
-    case "ready":
-        rendererStatus.textContent = event.detail.synthetic
-            ? "Fastfile world surface extracted"
-            : "Fastfile GfxWorld surface extracted";
-        appendLog(
-            `[kisakcod-web] Extracted and converted one ` +
-            `${event.detail.synthetic ? "synthetic " : ""}` +
-            `${event.detail.sourceContainer} v${event.detail.fastfileVersion} ` +
-            `${event.detail.sourceRepresentation} surface: ` +
-            `${event.detail.convertedVertexCount} vertices, ` +
-            `${event.detail.convertedIndexCount} local indices, material ` +
-            `'${event.detail.materialName}'.`,
-        );
-        break;
-    case "failed":
-        rendererStatus.textContent = "Fastfile world-surface extraction failed";
-        appendLog(
-            `[kisakcod-web] Engine world surface (${event.detail.pipelineStage}): ` +
-            `${event.detail.message}`,
-            "error",
-        );
-        break;
-    default:
         break;
     }
 });
@@ -660,36 +353,18 @@ globalThis.addEventListener("kisakcod:assets", (event) => {
     renderAssetManifest(assets.manifest);
 
     const readyImportId = assets.state === "ready" ? assets.manifest?.importId ?? null : null;
-    // A replacement is staged under a new ID, so the previously validated
-    // import remains readable throughout selection and copying. Keep its
-    // archive result unless the store explicitly begins removing it.
-    const preserveExistingArchive = assets.manifest?.importId === archiveImportId &&
+    const preserveExistingMount = assets.manifest?.importId === mountedImportId &&
         ["checking", "selecting", "validating", "importing", "failed", "ready"]
             .includes(assets.state);
-    if (readyImportId && readyImportId !== qcommonImportId &&
-        readyImportId !== mountingImportId && filesystemBridge &&
-        typeof runtime.module?._KisakWeb_StartQcommonRuntime === "function") {
+    if (readyImportId && readyImportId !== mountedImportId &&
+        readyImportId !== mountingImportId && filesystemBridge) {
         mountingImportId = readyImportId;
         void (async () => {
             try {
-                if (archiveImportId !== null) {
-                    archiveImportId = null;
-                    runtime.module?._KisakWeb_CancelArchiveJob?.();
-                    publishArchiveState({
-                        state: "idle",
-                        message: "Waiting for an explicit Gate 2 diagnostic/oracle request",
-                    });
-                }
-                if (retailCensusImportId !== null) {
-                    retailCensusImportId = null;
-                    runtime.module?._KisakWeb_CancelRetailCensus?.();
-                }
                 await runtime.module.mount(assets.manifest);
                 if (runtime.assets.state !== "ready" ||
                     runtime.assets.manifest?.importId !== readyImportId) return;
-                qcommonImportId = readyImportId;
-                runtime.module._KisakWeb_StartQcommonRuntime();
-                runtime.module._KisakWeb_StartCanonicalDbRuntimeCheck?.();
+                mountedImportId = readyImportId;
             } catch (error) {
                 appendLog(`[kisakcod-web] Engine filesystem mount: ${error.message}`, "error");
                 publishAssetState({
@@ -703,15 +378,9 @@ globalThis.addEventListener("kisakcod:assets", (event) => {
                 if (mountingImportId === readyImportId) mountingImportId = null;
             }
         })();
-    } else if (!readyImportId && qcommonImportId !== null && !preserveExistingArchive) {
-        qcommonImportId = null;
-        retailCensusImportId = null;
-        archiveImportId = null;
+    } else if (!readyImportId && mountedImportId !== null && !preserveExistingMount) {
+        mountedImportId = null;
         filesystemBridge?.invalidate();
-        runtime.module?._KisakWeb_CancelQcommonRuntime?.();
-        runtime.module?._KisakWeb_CancelRetailCensus?.();
-        runtime.module?._KisakWeb_CancelArchiveJob?.();
-        publishArchiveState({ state: "idle", message: "Waiting for a validated local archive" });
     }
 });
 
@@ -775,9 +444,6 @@ globalThis.addEventListener("kisakcod:system", (event) => {
 
 globalThis.addEventListener("kisakcod:engine", (event) => {
     runtime.engine = { ...event.detail };
-    physicsStatus.textContent = event.detail.state === "ready"
-        ? "ODE + qcommon verified"
-        : "ODE + commands initialized";
 });
 
 globalThis.addEventListener("kisakcod:database", (event) => {
@@ -807,26 +473,6 @@ globalThis.addEventListener("kisakcod:renderer-fx", (event) => {
     runtime.rendererFx.push(structuredClone(event.detail));
     if (runtime.rendererFx.length > 8) runtime.rendererFx.shift();
     rendererFxEvidence.textContent = JSON.stringify(runtime.rendererFx);
-});
-
-globalThis.addEventListener("kisakcod:renderer-comparison", (event) => {
-    runtime.rendererComparison = structuredClone(event.detail);
-    runtime.rendererComparisonRecords = [];
-    rendererComparisonEvidence.textContent = JSON.stringify({
-        summary: runtime.rendererComparison,
-        records: runtime.rendererComparisonRecords,
-    });
-});
-
-globalThis.addEventListener("kisakcod:renderer-comparison-record", (event) => {
-    runtime.rendererComparisonRecords.push(structuredClone(event.detail));
-    if (runtime.rendererComparisonRecords.length ===
-        runtime.rendererComparison?.actualDrawCount) {
-        rendererComparisonEvidence.textContent = JSON.stringify({
-            summary: runtime.rendererComparison,
-            records: runtime.rendererComparisonRecords,
-        });
-    }
 });
 
 globalThis.addEventListener("kisakcod:audio-playback", (event) => {

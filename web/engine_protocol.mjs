@@ -2,14 +2,11 @@ export const ENGINE_PROTOCOL_VERSION = 1;
 export const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 
 export const HOST_EVENTS = new Set([
-    "kisakcod:archive", "kisakcod:archive-progress", "kisakcod:qcommon",
-    "kisakcod:retail-census", "kisakcod:renderer-shader", "kisakcod:schedule",
-    "kisakcod:engine-asset", "kisakcod:renderer-texture",
-    "kisakcod:engine-world-surface", "kisakcod:renderer-aa",
+    "kisakcod:renderer-shader", "kisakcod:renderer-texture",
+    "kisakcod:renderer-aa",
     "kisakcod:test-webgl-aa", "kisakcod:renderer-surface",
     "kisakcod:renderer-surface-draw", "kisakcod:renderer-scene-view",
     "kisakcod:renderer-scene-frame", "kisakcod:renderer-fx",
-    "kisakcod:renderer-comparison", "kisakcod:renderer-comparison-record",
     "kisakcod:state", "kisakcod:frame", "kisakcod:system", "kisakcod:engine",
     "kisakcod:runtime", "kisakcod:database", "kisakcod:canonical-gfxworld",
     "kisakcod:canonical-runtime-prefix", "kisakcod:engine-lifecycle",

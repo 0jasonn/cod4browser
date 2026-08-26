@@ -18,12 +18,19 @@ async function observeAntiAliasing(page)
     });
 }
 
+async function submitTestSurface(page)
+{
+    expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.call(
+        "_KisakWeb_TestSubmitSurface"))).toBe(1);
+}
+
 test("matches COD4 scene anti-aliasing through 4x", { tag: "@smoke" }, async ({ page }) => {
     await observeAntiAliasing(page);
     await page.goto("/");
     await expect.poll(
         () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state),
     ).toBe("running");
+    await submitTestSurface(page);
     await expect.poll(() => page.evaluate(
         () => globalThis.__KISAKCOD_WEB__?.rendererAa?.state,
     )).toBe("disabled");
@@ -159,6 +166,7 @@ test("falls down to the highest WebGL2-supported sample count", async ({ page })
     await expect.poll(
         () => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state),
     ).toBe("running");
+    await submitTestSurface(page);
 
     await page.evaluate(() =>
         globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestSetAaSamples", 4));

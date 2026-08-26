@@ -28,7 +28,7 @@
 #include <xanim/xsurface_types.h>
 #include <universal/physicalmemory.h>
 #include <universal/com_sndalias_curve.h>
-#include <web/web_database_filesystem.h>
+#include <web/web_worker_filesystem.h>
 
 #include <zlib/zlib.h>
 
@@ -2100,26 +2100,26 @@ void Run(const std::vector<std::uint8_t> &file, XZoneMemory &zone)
 }
 } // namespace
 
-WebDatabaseFile WebDatabaseFS_Open(const char *) { return 0; }
+WebWorkerFile WebWorkerFS_Open(const char *) { return 0; }
 void __cdecl PMem_Free(const char *, std::uint32_t) {}
 void __cdecl CM_Unload() {}
 void __cdecl Com_UnloadWorld() {}
 void __cdecl R_UnloadWorld() {}
-std::int64_t WebDatabaseFS_Size(WebDatabaseFile) { return static_cast<std::int64_t>(g_file.size()); }
-bool WebDatabaseFS_Seek(WebDatabaseFile, std::uint32_t offset)
+std::int64_t WebWorkerFS_Size(WebWorkerFile) { return static_cast<std::int64_t>(g_file.size()); }
+bool WebWorkerFS_Seek(WebWorkerFile, std::uint32_t offset)
 {
     if (offset > g_file.size()) return false;
     g_filePosition = offset;
     return true;
 }
-std::int32_t WebDatabaseFS_Read(WebDatabaseFile, void *destination, std::uint32_t length)
+std::int32_t WebWorkerFS_Read(WebWorkerFile, void *destination, std::uint32_t length)
 {
     const std::size_t count = std::min<std::size_t>(length, g_file.size() - g_filePosition);
     if (count) std::memcpy(destination, g_file.data() + g_filePosition, count);
     g_filePosition += count;
     return static_cast<std::int32_t>(count);
 }
-void WebDatabaseFS_Close(WebDatabaseFile) {}
+void WebWorkerFS_Close(WebWorkerFile) {}
 
 void DB_RuntimeTraceStage(const char *) {}
 void DB_RuntimeTraceStop(const char *stage)

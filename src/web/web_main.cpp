@@ -2,94 +2,25 @@
 #include <client/cl_scrn.h>
 #include <client/client.h>
 #include <qcommon/cmd.h>
-#include <qcommon/com_init_trace.h>
 #include <qcommon/qcommon.h>
 #include <server/server.h>
 #include <qcommon/system.h>
 #include <universal/dvar.h>
 #include <ui/ui.h>
-#include <web/web_cooperative_scheduler.h>
 #include <web/web_client_server_lifecycle.h>
-#include <web/web_engine_scheduler.h>
 #include <web/web_filesystem.h>
 #include <web/web_renderer.h>
 #include <web/web_system.h>
 
-#if KISAK_WEB_DIAGNOSTICS
-#include <ode/odemath.h>
-#include <web/web_archive_job.h>
-#include <web/web_engine_asset.h>
-#include <web/web_engine_surface.h>
-#include <web/web_qcommon_runtime.h>
-#include <web/web_retail_census_job.h>
-#endif
-
 #include <algorithm>
-#include <cmath>
-#include <array>
 #include <cstdint>
-#include <cstring>
 #include <csetjmp>
 
 namespace
 {
-bool g_frameCommandReported = false;
-
-enum class BootstrapPhase : std::uint8_t
-{
-    Initializing = 0,
-    ExtractingSurface,
-    Running,
-    Failed,
-};
-
-BootstrapPhase g_bootstrapPhase = BootstrapPhase::Initializing;
-WebFrameInfo g_scheduledFrame{};
 std::uint32_t g_lastCGameFrameMilliseconds = 0u;
 std::uint32_t g_cgameFrameAccumulatorMilliseconds = 0u;
 bool g_reentrantCommandPumpReported = false;
-
-#if KISAK_WEB_DIAGNOSTICS
-bool NearlyEqual(float actual, float expected, float tolerance = 0.0001f)
-{
-    return std::fabs(actual - expected) <= tolerance;
-}
-
-float Dot3(const dVector3 lhs, const dVector3 rhs)
-{
-    return lhs[0] * rhs[0] + lhs[1] * rhs[1] + lhs[2] * rhs[2];
-}
-
-bool RunPhysicsMathSmokeTest()
-{
-    dVector3 normalized = {3.0f, 4.0f, 0.0f, 0.0f};
-    dNormalize3(normalized);
-    if (!NearlyEqual(normalized[0], 0.6f) || !NearlyEqual(normalized[1], 0.8f) ||
-        !NearlyEqual(normalized[2], 0.0f))
-    {
-        return false;
-    }
-
-    dVector3 zero = {0.0f, 0.0f, 0.0f, 0.0f};
-    dNormalize3(zero);
-    if (!NearlyEqual(zero[0], 1.0f) || !NearlyEqual(zero[1], 0.0f) ||
-        !NearlyEqual(zero[2], 0.0f))
-    {
-        return false;
-    }
-
-    dVector3 normal = {0.0f, 0.0f, 1.0f, 0.0f};
-    dVector3 tangent = {};
-    dVector3 bitangent = {};
-    dPlaneSpace(normal, tangent, bitangent);
-
-    return NearlyEqual(Dot3(normal, tangent), 0.0f) &&
-        NearlyEqual(Dot3(normal, bitangent), 0.0f) &&
-        NearlyEqual(Dot3(tangent, bitangent), 0.0f) &&
-        NearlyEqual(Dot3(tangent, tangent), 1.0f) &&
-        NearlyEqual(Dot3(bitangent, bitangent), 1.0f);
-}
-#endif
 
 bool InitializeCanonicalEngine()
 {
@@ -97,157 +28,14 @@ bool InitializeCanonicalEngine()
     // error boundary, while command and core initialization remain owned by
     // common.cpp in their native order.
     Dvar_Init();
-#if KISAK_WEB_DIAGNOSTICS
-    char commandLine[] = "+set gate3_startup wasm +seta gate3_archive 1";
-#else
     char commandLine[] = "";
-#endif
     Com_Init(commandLine);
-#if KISAK_WEB_DIAGNOSTICS
-    const ComInitTraceSnapshot &trace = Com_GetInitTrace();
-    if (!trace.stopStage ||
-        std::strcmp(trace.stopStage, "DB_LoadXAssets/engine-filesystem-mount") != 0 ||
-        trace.physicalMemorySize != 0x8000000u || trace.pmemLowPosition != 0 ||
-        trace.pmemHighPosition != 0x8000000u || trace.pmemHighAllocationCount != 1 ||
-        !trace.databaseInitializing ||
-        std::strcmp(Dvar_GetString("gate3_startup"), "wasm") != 0 ||
-        std::strcmp(Dvar_GetString("gate3_archive"), "1") != 0)
-    {
-        return false;
-    }
-
-    char limitedTokens[] = "first second token with spaces";
-    Cmd_TokenizeStringWithLimit(limitedTokens, 2);
-    const bool limitedTokenBehaviorMatches =
-        Cmd_Argc() == 2 && std::strcmp(Cmd_Argv(0), "first") == 0 &&
-        std::strcmp(Cmd_Argv(1), "second token with spaces") == 0;
-    Cmd_EndTokenizedString();
-    if (!limitedTokenBehaviorMatches)
-    {
-        return false;
-    }
-
-    Cbuf_ExecuteBuffer(
-        0,
-        0,
-        "set web_qcommon ready;"
-        "set web_quoted \"value with spaces;still quoted\";"
-        "set web_escaped \"value with \\\"quotes\\\"\";"
-        "set web_comment /* ignored */ ready;"
-        "SET web_case MixedCase;"
-        "web_qcommon");
-    if (std::strcmp(Dvar_GetString("web_qcommon"), "ready") != 0 ||
-        std::strcmp(Dvar_GetString("web_quoted"), "value with spaces;still quoted") != 0 ||
-        std::strcmp(Dvar_GetString("web_escaped"), "value with \"quotes\"") != 0 ||
-        std::strcmp(Dvar_GetString("web_comment"), "ready") != 0 ||
-        std::strcmp(Dvar_GetString("WEB_CASE"), "MixedCase") != 0)
-    {
-        return false;
-    }
-
-    Web_Log(
-        WebLogLevel::Info,
-        "[kisakcod-web] qcommon command/dvar smoke test passed.\n");
-    Web_EmitEngineState("initialized", Dvar_GetString("web_qcommon"), "pending", 0);
-
-    // This sequence deliberately crosses frame boundaries.  `wait` leaves
-    // the final set command queued until the next browser frame pump tick.
-    Cbuf_AddText(
-        0,
-        "set web_frame_command queued\n"
-        "wait\n"
-        "set web_frame_command executed\n");
-#else
     Web_EmitEngineState("initialized", "canonical", "pending", 0);
-#endif
     return true;
 }
 
-using kisak::web::CooperativeTaskBudget;
-using kisak::web::CooperativeTaskHandle;
-using kisak::web::CooperativeTaskResult;
-using kisak::web::CooperativeTaskSpec;
-using kisak::web::CooperativeTaskState;
-
-CooperativeTaskResult FilesystemTask(
-    std::uint32_t,
-    const CooperativeTaskBudget &,
-    void *)
+void RunCommands()
 {
-    WebFs_PumpCompletions();
-    return {CooperativeTaskState::Progress, 0u, 0u};
-}
-
-void CancelFilesystemTask(void *)
-{
-    WebFs_CancelAll();
-}
-
-#if KISAK_WEB_DIAGNOSTICS
-CooperativeTaskResult QcommonTask(
-    std::uint32_t,
-    const CooperativeTaskBudget &,
-    void *userData)
-{
-    const auto *frame = static_cast<const WebFrameInfo *>(userData);
-    WebQcommonRuntime_Frame(*frame);
-    return {CooperativeTaskState::Progress, 0u, 0u};
-}
-
-void CancelQcommonTask(void *)
-{
-    KisakWeb_CancelQcommonRuntime();
-}
-
-CooperativeTaskResult RetailCensusTask(
-    std::uint32_t,
-    const CooperativeTaskBudget &,
-    void *)
-{
-    const WebRetailCensusFrameResult result = WebRetailCensusJob_Frame();
-    return {CooperativeTaskState::Progress, result.bytesUsed, result.recordsUsed};
-}
-
-void CancelRetailCensusTask(void *)
-{
-    WebRetailCensusJob_Cancel();
-}
-
-CooperativeTaskResult ArchiveTask(
-    std::uint32_t,
-    const CooperativeTaskBudget &,
-    void *)
-{
-    WebArchiveJob_Frame();
-    return {CooperativeTaskState::Progress, 0u, 0u};
-}
-
-void CancelArchiveTask(void *)
-{
-    WebArchiveJob_Cancel();
-}
-
-CooperativeTaskResult EngineAssetTask(
-    std::uint32_t,
-    const CooperativeTaskBudget &,
-    void *)
-{
-    WebEngineAsset_Frame();
-    return {CooperativeTaskState::Progress, 0u, 0u};
-}
-
-void CancelEngineAssetTask(void *)
-{
-    (void)WebEngineAsset_Cancel();
-}
-#endif
-
-CooperativeTaskResult CommandTask(
-    std::uint32_t,
-    const CooperativeTaskBudget &,
-    void *userData)
-{
-    const auto *frame = static_cast<const WebFrameInfo *>(userData);
     char browserCommand[1024]{};
     if (Web_TakePendingCanonicalCommand(
             browserCommand, sizeof(browserCommand)))
@@ -263,26 +51,9 @@ CooperativeTaskResult CommandTask(
             "[kisakcod-web] Deferred a re-entrant command-buffer pump to "
             "the next browser frame.\n");
     }
-    if (!g_frameCommandReported &&
-        std::strcmp(Dvar_GetString("web_frame_command"), "executed") == 0)
-    {
-        g_frameCommandReported = true;
-        Web_Log(
-            WebLogLevel::Info,
-            "[kisakcod-web] Command buffer advanced across browser frames.\n");
-        Web_EmitEngineState(
-            "ready",
-            Dvar_GetString("web_qcommon"),
-            Dvar_GetString("web_frame_command"),
-            frame->pumpTick);
-    }
-    return {CooperativeTaskState::Progress, 0u, 1u};
 }
 
-CooperativeTaskResult CGameFrameTask(
-    std::uint32_t,
-    const CooperativeTaskBudget &,
-    void *userData)
+bool RunCGameFrame(const WebFrameInfo &frame)
 {
     static std::uint32_t activeFrameCount = 0u;
     // CA_ACTIVE is enough to enter the native SP frame order. Do not wait for
@@ -293,16 +64,15 @@ CooperativeTaskResult CGameFrameTask(
     {
         g_lastCGameFrameMilliseconds = 0u;
         g_cgameFrameAccumulatorMilliseconds = 0u;
-        return {CooperativeTaskState::Idle, 0u, 0u};
+        return false;
     }
 
-    const auto *frame = static_cast<const WebFrameInfo *>(userData);
     int frameMilliseconds = 16;
     if (g_lastCGameFrameMilliseconds != 0u)
     {
         const std::uint32_t elapsed =
-            frame->monotonicMilliseconds - g_lastCGameFrameMilliseconds;
-        g_lastCGameFrameMilliseconds = frame->monotonicMilliseconds;
+            frame.monotonicMilliseconds - g_lastCGameFrameMilliseconds;
+        g_lastCGameFrameMilliseconds = frame.monotonicMilliseconds;
 
         // An Emscripten main loop in an OffscreenCanvas Worker is not
         // guaranteed to be display-vsynced. It can run several callbacks in
@@ -320,7 +90,7 @@ CooperativeTaskResult CGameFrameTask(
                 std::max(1, 1000 / configuredMaxFps))
             : 8u;
         if (g_cgameFrameAccumulatorMilliseconds < minimumFrameMilliseconds)
-            return {CooperativeTaskState::Idle, 0u, 0u};
+            return false;
 
         frameMilliseconds = static_cast<int>(
             std::min(g_cgameFrameAccumulatorMilliseconds, 100u));
@@ -328,12 +98,12 @@ CooperativeTaskResult CGameFrameTask(
     }
     else
     {
-        g_lastCGameFrameMilliseconds = frame->monotonicMilliseconds;
+        g_lastCGameFrameMilliseconds = frame.monotonicMilliseconds;
     }
     // Native Com_Frame refreshes this clock before the server/client frame.
     // CL_CreateNewCommands derives frame_msec from it; leaving it unchanged
     // makes the canonical mouse path discard motion as a zero-duration sample.
-    com_frameTime = static_cast<int>(frame->monotonicMilliseconds);
+    com_frameTime = static_cast<int>(frame.monotonicMilliseconds);
 
     // The browser pump owns only timing. Preserve the native SP frame order.
     // SV_Frame consumes the command produced by the previous cgame frame;
@@ -374,110 +144,19 @@ CooperativeTaskResult CGameFrameTask(
             cl_paused ? cl_paused->current.integer : -1,
             CL_IsCgameInitialized(0) ? 1 : 0);
     }
-    return {CooperativeTaskState::Progress, 0u, 1u};
-}
-
-#if KISAK_WEB_DIAGNOSTICS
-CooperativeTaskResult SurfaceTask(
-    std::uint32_t,
-    const CooperativeTaskBudget &,
-    void *userData)
-{
-    const auto *frame = static_cast<const WebFrameInfo *>(userData);
-    if (g_bootstrapPhase == BootstrapPhase::ExtractingSurface)
-    {
-        const WebEngineSurfaceFrameResult surfaceResult =
-            WebEngineSurface_Frame(*frame);
-        if (surfaceResult == WebEngineSurfaceFrameResult::Ready)
-        {
-            if (WebRenderer_Initialize())
-            {
-                g_bootstrapPhase = BootstrapPhase::Running;
-                Web_EmitRuntimeState(
-                    "runtime-ready",
-                    "Timing, commands, physics, incremental fastfile extraction, and WebGL2 are initialized");
-            }
-            else
-            {
-                g_bootstrapPhase = BootstrapPhase::Failed;
-            }
-            return {CooperativeTaskState::Complete, 0u, 1u};
-        }
-        else if (surfaceResult == WebEngineSurfaceFrameResult::Failed)
-        {
-            g_bootstrapPhase = BootstrapPhase::Failed;
-            Web_EmitRuntimeState(
-                "failed",
-                "The bounded synthetic fastfile surface could not be incrementally extracted, converted, and submitted");
-            return {CooperativeTaskState::Failed, 0u, 1u};
-        }
-        return {CooperativeTaskState::Progress, 0u, 1u};
-    }
-    return {CooperativeTaskState::Idle, 0u, 0u};
-}
-#endif
-
-CooperativeTaskResult RendererTask(
-    std::uint32_t,
-    const CooperativeTaskBudget &,
-    void *userData)
-{
-    const auto *frame = static_cast<const WebFrameInfo *>(userData);
-    const CooperativeTaskResult gameplayFrame =
-        CGameFrameTask(0u, {0u, 1u}, userData);
-    // Before a local game is active the renderer remains responsible for the
-    // launcher/bootstrap surface. During gameplay, presentation follows the
-    // same non-blocking com_maxfps admission decision as the engine frame.
-    if (!CL_IsLocalClientInGame(0) ||
-        gameplayFrame.state != CooperativeTaskState::Idle)
-    {
-        WebRenderer_DrawFrame(*frame);
-    }
-    return {CooperativeTaskState::Progress, 0u, 1u};
-}
-
-bool InitializeEngineScheduler()
-{
-    if (!WebEngineScheduler_Initialize())
-    {
-        return false;
-    }
-#if KISAK_WEB_DIAGNOSTICS
-    constexpr std::size_t TASK_COUNT = 8u;
-    const std::array<CooperativeTaskSpec, TASK_COUNT> tasks = {{
-        {"filesystem-completions", 10u, {0u, 8u}, FilesystemTask, CancelFilesystemTask, nullptr},
-        {"qcommon", 20u, {14u, 1u}, QcommonTask, CancelQcommonTask, &g_scheduledFrame},
-        {"retail-census", 30u, {64u * 1024u, 64u}, RetailCensusTask, CancelRetailCensusTask, nullptr},
-        {"archive", 40u, {64u * 1024u, 64u}, ArchiveTask, CancelArchiveTask, nullptr},
-        {"engine-asset", 50u, {64u * 1024u, 64u}, EngineAssetTask, CancelEngineAssetTask, nullptr},
-        {"command-buffer", 60u, {4u * 1024u, 1u}, CommandTask, nullptr, &g_scheduledFrame},
-        {"world-surface", 70u, {64u * 1024u, 64u}, SurfaceTask, nullptr, &g_scheduledFrame},
-        {"renderer", 80u, {0u, 1u}, RendererTask, nullptr, &g_scheduledFrame},
-    }};
-#else
-    constexpr std::size_t TASK_COUNT = 3u;
-    const std::array<CooperativeTaskSpec, TASK_COUNT> tasks = {{
-        {"filesystem-completions", 10u, {0u, 8u}, FilesystemTask, CancelFilesystemTask, nullptr},
-        {"command-buffer", 20u, {4u * 1024u, 1u}, CommandTask, nullptr, &g_scheduledFrame},
-        {"renderer", 30u, {0u, 1u}, RendererTask, nullptr, &g_scheduledFrame},
-    }};
-#endif
-    std::array<CooperativeTaskHandle, TASK_COUNT> handles{};
-    for (std::size_t index = 0u; index < tasks.size(); ++index)
-    {
-        if (!WebEngineScheduler_Register(tasks[index], handles[index]))
-        {
-            WebEngineScheduler_Shutdown();
-            return false;
-        }
-    }
     return true;
 }
 
 void RenderFrame(const WebFrameInfo &frame, void *)
 {
-    g_scheduledFrame = frame;
-    WebEngineScheduler_RunFrame(frame);
+    WebFs_PumpCompletions();
+    RunCommands();
+    const bool gameplayFrame = RunCGameFrame(frame);
+    // Before a local game is active the renderer remains responsible for the
+    // launcher/bootstrap surface. During gameplay, presentation follows the
+    // same non-blocking com_maxfps admission decision as the engine frame.
+    if (!CL_IsLocalClientInGame(0) || gameplayFrame)
+        WebRenderer_DrawFrame(frame);
 }
 } // namespace
 
@@ -495,16 +174,6 @@ int main()
     Web_Log(WebLogLevel::Info, "[kisakcod-web] Browser system layer starting.\n");
     Web_EmitRuntimeState("loading", "Validating portable engine code");
 
-#if KISAK_WEB_DIAGNOSTICS
-    if (!RunPhysicsMathSmokeTest())
-    {
-        Web_Log(WebLogLevel::Error, "[kisakcod-web] ODE physics math smoke test failed.\n");
-        Web_EmitRuntimeState("failed", "ODE physics math validation failed");
-        return 1;
-    }
-    Web_Log(WebLogLevel::Info, "[kisakcod-web] ODE physics math verified in WebAssembly.\n");
-#endif
-
     if (!InitializeCanonicalEngine())
     {
         Web_Log(WebLogLevel::Error, "[kisakcod-web] qcommon command/dvar smoke test failed.\n");
@@ -512,41 +181,22 @@ int main()
         return 1;
     }
 
-#if KISAK_WEB_DIAGNOSTICS
-    if (!WebEngineSurface_Start())
-    {
-        Web_EmitRuntimeState(
-            "failed",
-            "The bounded synthetic fastfile extraction job could not start");
-        return 1;
-    }
-    g_bootstrapPhase = BootstrapPhase::ExtractingSurface;
-#else
     if (!WebRenderer_Initialize())
     {
         Web_EmitRuntimeState("failed", "The WebGL2 renderer could not initialize");
         return 1;
     }
-    g_bootstrapPhase = BootstrapPhase::Running;
     Web_EmitRuntimeState(
         "runtime-ready",
         "Canonical runtime and browser platform boundaries are initialized");
-#endif
-    if (!InitializeEngineScheduler())
-    {
-        Web_EmitRuntimeState("failed", "The cooperative engine scheduler could not initialize");
-        return 1;
-    }
     if (!Web_StartFramePump(RenderFrame, nullptr))
     {
-        WebEngineScheduler_Shutdown();
+        WebFs_CancelAll();
         Web_EmitRuntimeState("failed", "The browser frame pump could not start");
         return 1;
     }
-#if !KISAK_WEB_DIAGNOSTICS
     Web_EmitRuntimeState(
         "running",
         "The browser frame pump and WebGL2 backend are ready for canonical assets");
-#endif
     return 0;
 }

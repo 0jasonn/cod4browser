@@ -2,7 +2,7 @@ import { createBrowserAssetStore, selectInstallEntries } from "./asset_store.mjs
 import { detectBrowserCapabilities } from "./browser_capabilities.mjs";
 import { createEngineWorkerHost } from "./product_engine_worker_host.mjs";
 import { createVisibilityCheckpoint } from "./product_checkpoint_controller.mjs";
-import { createInputController } from "./product_input_controller.mjs";
+import { createInputControllerCore } from "./input_controller_core.mjs";
 
 /** @template {Element} T @param {string} selector @returns {T} */
 function requiredElement(selector)
@@ -350,10 +350,10 @@ try {
             .includes(engine.filesystemState),
         onStatus: renderCheckpointStatus,
     });
-    inputController = createInputController({
+    inputController = createInputControllerCore({
         canvas,
         commandInput,
-        engine,
+        sendInput: (event) => engine.input(event),
         onFailure(error) {
             document.documentElement.dataset.runtimeState = "failed";
             appendLog(`[kisakcod-web] Input transport failed: ${

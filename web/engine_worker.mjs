@@ -6,14 +6,11 @@ import {
 } from "./engine_protocol.mjs";
 
 const forwardedEvents = [
-    "kisakcod:archive", "kisakcod:archive-progress", "kisakcod:qcommon", "kisakcod:retail-census",
-    "kisakcod:renderer-shader", "kisakcod:schedule", "kisakcod:engine-asset",
-    "kisakcod:renderer-texture", "kisakcod:engine-world-surface",
+    "kisakcod:renderer-shader", "kisakcod:renderer-texture",
     "kisakcod:renderer-aa", "kisakcod:test-webgl-aa",
     "kisakcod:renderer-surface", "kisakcod:renderer-surface-draw",
     "kisakcod:renderer-scene-view", "kisakcod:renderer-scene-frame",
-    "kisakcod:renderer-fx", "kisakcod:renderer-comparison",
-    "kisakcod:renderer-comparison-record",
+    "kisakcod:renderer-fx",
     "kisakcod:state", "kisakcod:frame",
     "kisakcod:system", "kisakcod:engine", "kisakcod:runtime",
     "kisakcod:database",
@@ -209,7 +206,13 @@ globalThis.addEventListener("message", (event) => {
                 installWorkerTestControls();
                 resolveInitialization();
                 break;
-            case "mount": reply(message.id, message.type, await filesystem.mount(message.manifest)); break;
+            case "mount": {
+                const mounted = await filesystem.mount(message.manifest);
+                module._KisakWeb_MountCanonicalRuntime();
+                await filesystem.checkpoint();
+                reply(message.id, message.type, mounted);
+                break;
+            }
             case "unmount": reply(message.id, message.type, await filesystem.flushAndUnmount()); break;
             case "checkpoint": reply(message.id, message.type, await filesystem.checkpoint()); break;
             case "shutdown": reply(message.id, message.type, await filesystem.flushAndUnmount()); break;

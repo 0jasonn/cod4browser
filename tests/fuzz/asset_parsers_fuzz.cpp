@@ -1,6 +1,5 @@
 #include <qcommon/iwd_archive.h>
 #include <qcommon/iwi_image.h>
-#include <web/web_fastfile_world_surface.h>
 #include <web/web_shader_compatibility.h>
 
 #include <algorithm>
@@ -18,22 +17,6 @@ void ExerciseIwi(std::span<const std::uint8_t> bytes)
     (void)kisak::iwi::Parse(bytes, metadata);
     kisak::iwi::Rgba8Image image;
     (void)kisak::iwi::DecodeRgba8(bytes, image);
-}
-
-void ExerciseFastfile(std::span<const std::uint8_t> bytes)
-{
-    kisak::fastfile::Limits limits;
-    // Keep fuzz executions independently bounded below the browser-facing
-    // defaults while still exercising framing, zlib, record traversal, and
-    // geometry validation.
-    limits.maxFileBytes = 1024u * 1024u;
-    limits.maxInflatedBytes = 2u * 1024u * 1024u;
-    limits.maxBlockBytes = 2u * 1024u * 1024u;
-    limits.maxTotalBlockBytes = 2u * 1024u * 1024u;
-    limits.maxWorldVertices = 8192u;
-    limits.maxWorldIndices = 32768u;
-    kisak::fastfile::ExtractedWorldSurface surface;
-    (void)kisak::fastfile::ExtractWorldSurface(bytes, limits, surface);
 }
 
 void ExerciseShader(std::span<const std::uint8_t> bytes)
@@ -171,7 +154,6 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
     const std::span<const std::uint8_t> bytes(data, size);
     ExerciseIwi(bytes);
     ExerciseIwd(bytes);
-    ExerciseFastfile(bytes);
     ExerciseShader(bytes);
     return 0;
 }

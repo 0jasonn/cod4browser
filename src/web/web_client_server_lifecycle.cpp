@@ -360,13 +360,6 @@ extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_MountCanonicalRuntime()
 }
 
 #if KISAK_WEB_DIAGNOSTICS
-extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_StartCanonicalDbRuntimeCheck()
-{
-    KisakWeb_MountCanonicalRuntime();
-}
-#endif
-
-#if KISAK_WEB_DIAGNOSTICS
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_CanonicalFsFileSize(
     const char *logicalPath)
 {

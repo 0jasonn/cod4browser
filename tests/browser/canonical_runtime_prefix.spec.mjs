@@ -16,7 +16,7 @@ test("real Com_Init publishes the canonical runtime-prefix trace", { tag: "@smok
     expect(trace).toMatchObject({
         stopStage: "DB_LoadXAssets/engine-filesystem-mount",
         stageCount: 14,
-        startupVariableCount: 3,
+        startupVariableCount: 1,
         commandCount: 6,
         dvarCount: 22,
         commands: ["wait", "vstr", "exec", "cmdlist", "seta", "set"],

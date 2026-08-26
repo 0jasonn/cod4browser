@@ -28,14 +28,6 @@ list(REMOVE_ITEM CLIENT
     "${SRC_DIR}/client/cl_controller.cpp")
 list(REMOVE_ITEM UI "${SRC_DIR}/ui/mission.cpp")
 
-# These sources were pulled in explicitly while the runtime closure was still
-# narrow.  The complete inventories below now own them; keep one translation
-# unit per canonical implementation.
-list(REMOVE_ITEM CGAME
-    "${SRC_DIR}/cgame/cg_ents.cpp"
-    "${SRC_DIR}/cgame/cg_weapons.cpp"
-    "${SRC_DIR}/cgame/cg_view.cpp"
-    "${SRC_DIR}/cgame/cg_world.cpp")
 list(REMOVE_ITEM PHYSICS_ODE "${SRC_DIR}/physics/ode/odemath.cpp")
 # Loose editor FX parsing is a native development path. Runtime registration
 # is owned by the canonical fastfile-backed frontend implementation.
@@ -95,40 +87,6 @@ target_include_directories(kisak_web_runtime_prefix_check PRIVATE
 kisak_configure_web_compile_target(kisak_web_runtime_prefix_check)
 target_compile_definitions(kisak_web_runtime_prefix_check PRIVATE
     KISAK_GATE3_COM_INIT_PREFIX=1)
-
-set(KISAK_WEB_DIAGNOSTIC_SOURCES
-    "${SRC_DIR}/web/web_archive_job.cpp"
-    "${SRC_DIR}/web/web_engine_asset.cpp"
-    "${SRC_DIR}/web/web_engine_surface.cpp"
-    "${SRC_DIR}/web/web_fastfile_source_stream.cpp"
-    "${SRC_DIR}/web/web_fastfile_world_surface.cpp"
-    "${SRC_DIR}/web/web_fastfile_zone_registry.cpp"
-    "${SRC_DIR}/web/web_fastfile_zone_stream.cpp"
-    "${SRC_DIR}/web/web_qcommon_preinit.cpp"
-    "${SRC_DIR}/web/web_qcommon_runtime.cpp"
-    "${SRC_DIR}/web/web_renderer_comparison.cpp"
-)
-
-set(KISAK_WEB_GATE2_DIAGNOSTIC_SOURCES
-    "${SRC_DIR}/web/web_retail_fastfile_census.cpp"
-    "${SRC_DIR}/web/web_retail_load_clipmap.cpp"
-    "${SRC_DIR}/web/web_retail_load_comworld.cpp"
-    "${SRC_DIR}/web/web_retail_load_gfxworld.cpp"
-    "${SRC_DIR}/web/web_retail_load_image.cpp"
-    "${SRC_DIR}/web/web_retail_load_lightdef.cpp"
-    "${SRC_DIR}/web/web_retail_load_weapon.cpp"
-    "${SRC_DIR}/web/web_sound_alias_catalog.cpp"
-    "${SRC_DIR}/web/web_retail_census_job.cpp")
-
-# Gate 2 remains available only when the separate diagnostic artifact is
-# requested. The normal production graph never creates or links this target.
-if (KISAK_WEB_DIAGNOSTICS)
-    add_library(kisak_web_gate2_oracle STATIC
-        ${KISAK_WEB_GATE2_DIAGNOSTIC_SOURCES})
-    target_include_directories(kisak_web_gate2_oracle PRIVATE
-        "${SRC_DIR}" "${DEPS_DIR}")
-    kisak_configure_web_compile_target(kisak_web_gate2_oracle)
-endif()
 
 set(KISAK_WEB_CANONICAL_RUNTIME_SOURCES
     "${SRC_DIR}/client/cl_fastfile_config.cpp"
@@ -205,7 +163,6 @@ set(KISAK_WEB_CANONICAL_RUNTIME_SOURCES
 set(KISAK_WEB_CANONICAL_ADAPTER_SOURCES
     "${SRC_DIR}/web/web_client_server_lifecycle.cpp"
     "${SRC_DIR}/web/web_canonical_gfxworld.cpp"
-    "${SRC_DIR}/web/web_database_filesystem.cpp"
     "${SRC_DIR}/web/web_engine_filesystem.cpp"
     "${SRC_DIR}/web/web_engine_world_surface.cpp"
     "${SRC_DIR}/web/web_renderer_frontend.cpp"
@@ -217,8 +174,6 @@ set(KISAK_WEB_PLATFORM_SOURCES
     "${SRC_DIR}/web/web_assertive.cpp"
     "${SRC_DIR}/web/web_cinematic.cpp"
     "${SRC_DIR}/web/web_asset_probe.cpp"
-    "${SRC_DIR}/web/web_cooperative_scheduler.cpp"
-    "${SRC_DIR}/web/web_engine_scheduler.cpp"
     "${SRC_DIR}/web/web_filesystem.cpp"
     "${SRC_DIR}/web/web_shader_compatibility.cpp"
     "${SRC_DIR}/web/web_system.cpp"
@@ -282,13 +237,6 @@ target_sources(KisakCOD-web PRIVATE
     ${PHYSICS}
     ${PHYSICS_ODE}
     ${SOUND}
-
-    # These four were removed from CGAME above because they entered the target
-    # during the first narrow cgame closure.
-    "${SRC_DIR}/cgame/cg_ents.cpp"
-    "${SRC_DIR}/cgame/cg_weapons.cpp"
-    "${SRC_DIR}/cgame/cg_view.cpp"
-    "${SRC_DIR}/cgame/cg_world.cpp"
 
     # Canonical portable owners reached from G_InitGame. Keep this curated so
     # native Win32 files and already-compiled prefix sources are not admitted.
@@ -384,8 +332,7 @@ kisak_assert_unique_target_sources(KisakCOD-web)
 if (KISAK_WEB_DIAGNOSTICS)
     get_target_property(KISAK_WEB_PRODUCTION_SOURCES KisakCOD-web SOURCES)
     add_executable(KisakCOD-web-diagnostics
-        ${KISAK_WEB_PRODUCTION_SOURCES}
-        ${KISAK_WEB_DIAGNOSTIC_SOURCES})
+        ${KISAK_WEB_PRODUCTION_SOURCES})
     add_dependencies(KisakCOD-web-diagnostics update_build_number)
     target_include_directories(KisakCOD-web-diagnostics PRIVATE
         "${SRC_DIR}" "${DEPS_DIR}")
@@ -402,7 +349,6 @@ if (KISAK_WEB_DIAGNOSTICS)
         KISAK_DB_REGISTRY_LIFECYCLE_SLICE=1
         KISAK_OPENAL=1
         KISAK_WEB_DIAGNOSTICS=1)
-    target_link_libraries(KisakCOD-web-diagnostics PRIVATE kisak_web_gate2_oracle)
     kisak_assert_unique_target_sources(KisakCOD-web-diagnostics)
     add_custom_command(TARGET KisakCOD-web-diagnostics POST_BUILD
         BYPRODUCTS "${CMAKE_BINARY_DIR}/site-diagnostics/kisakcod.wasm"
@@ -461,6 +407,7 @@ file(REMOVE
     "${KISAK_WEB_SITE_DIR}/engine_worker_host.mjs"
     "${KISAK_WEB_SITE_DIR}/engine_protocol.mjs"
     "${KISAK_WEB_SITE_DIR}/filesystem_bridge.mjs"
+    "${KISAK_WEB_SITE_DIR}/product_input_controller.mjs"
     "${KISAK_WEB_SITE_DIR}/kisakcod-next.mjs"
     "${KISAK_WEB_SITE_DIR}/kisakcod-next.wasm")
 foreach(WEB_FILE asset_profile.mjs asset_store.mjs browser_capabilities.mjs
@@ -476,8 +423,6 @@ configure_file("${KISAK_WEB_SOURCE_DIR}/product_index.html"
     "${KISAK_WEB_SITE_DIR}/index.html" COPYONLY)
 configure_file("${KISAK_WEB_SOURCE_DIR}/product_launcher.mjs"
     "${KISAK_WEB_SITE_DIR}/launcher.mjs" COPYONLY)
-configure_file("${KISAK_WEB_SOURCE_DIR}/product_input_controller.mjs"
-    "${KISAK_WEB_SITE_DIR}/product_input_controller.mjs" COPYONLY)
 configure_file("${KISAK_WEB_SOURCE_DIR}/product_checkpoint_controller.mjs"
     "${KISAK_WEB_SITE_DIR}/product_checkpoint_controller.mjs" COPYONLY)
 configure_file("${KISAK_WEB_SOURCE_DIR}/product_engine_worker.mjs"

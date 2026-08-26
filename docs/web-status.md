@@ -14,9 +14,9 @@ retryable `flushAndUnmount` path that persists dirty open files before handles
 and leases are released. Page lifecycle hooks are best effort; explicit async
 shutdown owns durability.
 
-The separate diagnostics build retains Gate 2/oracle sources, proof jobs,
-generic diagnostic calls, test exports, renderer comparison, and browser test
-support. Production startup has no synthetic world or proof-job dependency.
+The separate diagnostics build uses the production runtime sources plus
+browser-only test exports and telemetry. The retired Gate 2 loader, proof jobs,
+renderer comparison, synthetic world extraction, and scheduler are gone.
 
 ## Product boundaries
 

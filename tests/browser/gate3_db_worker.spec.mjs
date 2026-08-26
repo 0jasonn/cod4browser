@@ -140,54 +140,6 @@ test("Worker-hosted canonical DB streams an XFile into PMem and stops at generat
             .test(event.logicalPath))).toBe(false);
 });
 
-test("canonical generated prefix loads an empty XAssetList", { tag: "@native-covered" }, async ({ page }, testInfo) => {
-    const fastfile = createSyntheticGeneratedPrefixFastfile();
-    await importWithCodePost(page, testInfo, "gate3-db-empty-list", fastfile);
-    await expect.poll(() => page.evaluate(
-        () => globalThis.__KISAKCOD_WEB__?.database?.stopStage,
-    )).toBe("Load_XAssetHeader/next-family-closure");
-    const trace = await page.evaluate(() => structuredClone(
-        globalThis.__KISAKCOD_WEB__.database));
-    expect(trace).toMatchObject({
-        decompressedBytesProduced: 60,
-        xassetListBegin: true,
-        xassetListEnd: true,
-        scriptStringCount: 0,
-        scriptStringObservedCount: 0,
-        xassetCount: 0,
-        publicationBegin: false,
-        publicationEnd: false,
-        freeEntryCountAfter: 0,
-        streamOffsets: [0, 0, 0, 0, 0, 0, 0, 0, 0],
-        generatedLoadFailed: false,
-    });
-});
-
-test("canonical generated prefix interns an ordered ScriptStringList", { tag: "@native-covered" }, async ({ page }, testInfo) => {
-    const fastfile = createSyntheticGeneratedPrefixFastfile({
-        scriptStrings: ["gate3_alpha", "gate3_beta"],
-    });
-    await importWithCodePost(page, testInfo, "gate3-db-string-list", fastfile);
-    await expect.poll(() => page.evaluate(
-        () => globalThis.__KISAKCOD_WEB__?.database?.stopStage,
-    )).toBe("Load_XAssetHeader/next-family-closure");
-    const result = await page.evaluate(() => ({
-        trace: structuredClone(globalThis.__KISAKCOD_WEB__.database),
-        strings: globalThis.__databaseEvents
-            .filter((event) => event.stage === "script string")
-            .map((event) => event.scriptStringIdentity),
-    }));
-    expect(result.trace).toMatchObject({
-        scriptStringCount: 2,
-        scriptStringObservedCount: 2,
-        scriptStringIdentity: "gate3_beta",
-        xassetCount: 0,
-        streamOffsets: [0, 0, 0, 0, 31, 0, 0, 0, 0],
-        generatedLoadFailed: false,
-    });
-    expect(result.strings).toEqual(["gate3_alpha", "gate3_beta"]);
-});
-
 test("canonical generated prefix rejects a truncated XAssetList", async ({ page }, testInfo) => {
     const complete = createSyntheticGeneratedPrefixFastfile({ compressionLevel: 0 });
     const fastfile = complete.slice(0, 12 + 2 + 5 + 52);
@@ -275,44 +227,6 @@ test("canonical generated prefix rejects a malformed asset alias", async ({ page
         () => globalThis.__KISAKCOD_WEB__.database.publicationEnd)).toBe(false);
 });
 
-test("canonical generated prefix does not publish a half-loaded RawFile", { tag: "@native-covered" }, async ({ page }, testInfo) => {
-    const complete = createSyntheticGeneratedPrefixFastfile({
-        rawFiles: [{ name: "tests/half_loaded.txt", contents: "payload" }],
-        compressionLevel: 0,
-    });
-    const fastfile = complete.slice(0, 12 + 2 + 5 + 44 + 16 + 8 + 12 + 5);
-    await importWithCodePost(page, testInfo, "gate3-db-half-asset", fastfile);
-    await expect.poll(() => page.evaluate(
-        () => globalThis.__KISAKCOD_WEB__?.database?.stopStage,
-    )).toBe("inflate/premature EOF");
-    const trace = await page.evaluate(() => structuredClone(
-        globalThis.__KISAKCOD_WEB__.database));
-    expect(trace.publicationBegin).toBe(false);
-    expect(trace.publicationEnd).toBe(false);
-    expect(trace.freeAssetEntryCount).toBe(32752);
-    expect(trace.cleanupComplete).toBe(true);
-});
-
-test("canonical DB reports a premature zlib stream end and cleans up", { tag: "@native-covered" }, async ({ page }, testInfo) => {
-    const compressed = deflateSync(Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8]));
-    const fastfile = Uint8Array.from([
-        ...Buffer.from("IWffu100", "ascii"), 5, 0, 0, 0, ...compressed,
-    ]);
-    await importWithCodePost(page, testInfo, "gate3-db-truncated", fastfile);
-    await expect.poll(() => page.evaluate(
-        () => globalThis.__KISAKCOD_WEB__?.database?.stopStage,
-    )).toBe("inflate/premature end of stream");
-    const trace = await page.evaluate(() => structuredClone(
-        globalThis.__KISAKCOD_WEB__.database));
-    expect(trace).toMatchObject({
-        inflateInitialized: true,
-        streamInitialized: false,
-        cleanupComplete: true,
-        stopStage: "inflate/premature end of stream",
-    });
-    expect(trace.decompressedBytesProduced).toBe(8);
-});
-
 test("canonical DB reports truncated compressed input and cleans up", async ({ page }, testInfo) => {
     const complete = createSyntheticCanonicalXFile();
     // Keep a syntactically plausible zlib prefix but remove the compressed
@@ -359,57 +273,4 @@ test("canonical DB preserves the 256 KiB alternating input refill contract", asy
         xassetCount: 0,
     });
     expect(trace.compressedBytesConsumed).toBeGreaterThan(0x40000 - 12);
-});
-
-test("canonical DB rejects corrupt zlib data and cleans up", { tag: "@native-covered" }, async ({ page }, testInfo) => {
-    const fastfile = Uint8Array.from([
-        ...Buffer.from("IWffu100", "ascii"), 5, 0, 0, 0,
-        0x78, 0xda, 0xff, 0xff, 0xff, 0xff,
-    ]);
-    await importWithCodePost(page, testInfo, "gate3-db-corrupt", fastfile);
-    await expect.poll(() => page.evaluate(
-        () => globalThis.__KISAKCOD_WEB__?.database?.stopStage,
-    )).toBe("inflate/corrupt zlib data");
-    await expect(page.evaluate(() => ({
-        cleanupComplete: globalThis.__KISAKCOD_WEB__.database.cleanupComplete,
-        streamInitialized: globalThis.__KISAKCOD_WEB__.database.streamInitialized,
-    }))).resolves.toEqual({ cleanupComplete: true, streamInitialized: false });
-});
-
-test("canonical DB rejects XFile block allocation exhaustion atomically", { tag: "@native-covered" }, async ({ page }, testInfo) => {
-    const fastfile = createSyntheticCanonicalXFile({
-        blockSizes: [0x0800_0001, 0, 0, 0, 0, 0, 0, 0, 0],
-    });
-    await importWithCodePost(page, testInfo, "gate3-db-oversized", fastfile);
-    await expect.poll(() => page.evaluate(
-        () => globalThis.__KISAKCOD_WEB__?.database?.stopStage,
-    )).toBe("XFile/block allocation exhaustion");
-    const trace = await page.evaluate(() => structuredClone(
-        globalThis.__KISAKCOD_WEB__.database));
-    expect(trace).toMatchObject({
-        blockSizes: [0x0800_0001, 0, 0, 0, 0, 0, 0, 0, 0],
-        blockAllocationCount: 0,
-        blockAllocationBytes: 0,
-        streamInitialized: false,
-        cleanupComplete: true,
-    });
-});
-
-test("canonical DB rejects XFile block arithmetic overflow atomically", { tag: "@native-covered" }, async ({ page }, testInfo) => {
-    const fastfile = createSyntheticCanonicalXFile({
-        blockSizes: [0xffff_fff8, 0, 0, 0, 0, 0, 0, 0, 0],
-    });
-    await importWithCodePost(page, testInfo, "gate3-db-overflow", fastfile);
-    await expect.poll(() => page.evaluate(
-        () => globalThis.__KISAKCOD_WEB__?.database?.stopStage,
-    )).toBe("XFile/block allocation exhaustion");
-    const trace = await page.evaluate(() => structuredClone(
-        globalThis.__KISAKCOD_WEB__.database));
-    expect(trace).toMatchObject({
-        blockSizes: [0xffff_fff8, 0, 0, 0, 0, 0, 0, 0, 0],
-        blockAllocationCount: 0,
-        blockAllocationBytes: 0,
-        streamInitialized: false,
-        cleanupComplete: true,
-    });
 });

@@ -12,8 +12,8 @@ client/cgame, renderer-frontend commands, and actual WebGL2 world frames. The
 validated Killhouse slice includes input, HUD, effects, and Web Audio. It is
 still an incomplete port, not a generally compatible COD4 release.
 
-The frozen Gate 2 census/oracle and synthetic proof controls are built only by
-the opt-in diagnostics target. They are not linked or served by production.
+The opt-in diagnostics target builds the same runtime with browser-only test
+controls and telemetry. Production does not expose those controls.
 
 ## Legal asset boundary
 
@@ -37,9 +37,8 @@ COD4 fastfile
 
 Current permanent browser ownership is limited to the launcher/import flow,
 OPFS and Worker filesystem host, page/Worker lifecycle, Emscripten system
-adapters, and the WebGL2 backend. The cooperative qcommon shell, retail census,
-and extracted prefix files are temporary regression or integration scaffolds
-with explicit retirement contracts.
+adapters, input/audio hosts, and the WebGL2 backend. Canonical Kisak code owns
+the engine, assets, game state, filesystem semantics, and renderer frontend.
 
 The authoritative component classification and current blockers are in
 [docs/web-port-convergence.md](docs/web-port-convergence.md). Concise build and
@@ -67,7 +66,7 @@ After `npm.cmd ci` and Playwright browser installation:
 
 ```powershell
 npm.cmd run test:browser            # @smoke
-npm.cmd run test:browser:remainder  # not @smoke and not @native-covered
+npm.cmd run test:browser:remainder  # non-smoke browser-boundary scenarios
 npm.cmd run test:browser:full       # explicit exhaustive browser suite
 npm.cmd run check:web:static        # ESLint and typed protocol check
 npm.cmd run test:protocol           # protocol/profile/lifecycle unit tests
@@ -81,10 +80,9 @@ The opt-in [local retail validation](docs/local-retail-validation.md) exercises
 the Killhouse/CargoShip, persistence, input/audio, and context-loss matrix with
 legally owned files.
 
-Routine CI runs smoke and remainder once each against the exact Release
-artifact it uploads. Tests tagged `@native-covered` remain available in the
-exhaustive command, but their parser/database semantics are authoritative in
-the direct native and Wasm suites.
+Routine CI runs smoke and remainder once each against the exact diagnostic
+Release artifact. Parser/database semantics stay in the direct native and Wasm
+suites instead of being repeated in a browser.
 
 ## Project status
 
@@ -96,8 +94,8 @@ Demonstrated:
 - canonical command/dvar behavior, 128 MiB PMem, DB pools, XFile streaming,
   completion of all 8,176 ordered assets in the three engine-requested startup
   prerequisite zones, and normalized native/Wasm traces;
-- a separate opt-in diagnostic artifact retaining the Gate 2 census/oracle,
-  synthetic proofs, context controls, and comparison evidence; and
+- a separate opt-in diagnostic artifact for browser-only context, audio,
+  filesystem, input, storage, and failure controls; and
 - synthetic Linux, MSVC x86, Wasm, browser, sanitizer, and fuzz validation.
 
 The real `CM_LoadMap`, script/XAnim/DObj initialization, local-server command

@@ -124,16 +124,6 @@ test("imports synthetic files through the portable picker and restores them afte
     await expect(page.locator("#asset-message")).toHaveText(
         "Persisted installation reopened and verified",
     );
-    await expect.poll(() => page.evaluate(
-        () => globalThis.__KISAKCOD_WEB__?.engineWorldSurface?.state,
-    )).toBe("ready");
-    const worldBeforeVfsReads = await page.evaluate(() => ({
-        extractionGeneration:
-            globalThis.__KISAKCOD_WEB__.engineWorldSurface.extractionGeneration,
-        conversionGeneration:
-            globalThis.__KISAKCOD_WEB__.engineWorldSurface.conversionGeneration,
-        synthetic: globalThis.__KISAKCOD_WEB__.engineWorldSurface.synthetic,
-    }));
     const adapterProbe = await page.evaluate(async () => {
         const store = globalThis.__KISAKCOD_WEB__.assetStore;
         const localizationStat = await store.stat("localization.txt");
@@ -176,14 +166,6 @@ test("imports synthetic files through the portable picker and restores them afte
         0x49, 0x57, 0x66, 0x66, 0x75, 0x31, 0x30, 0x30,
         0x05, 0x00, 0x00, 0x00, 0x78, 0xda,
     ]);
-    expect(await page.evaluate(() => ({
-        extractionGeneration:
-            globalThis.__KISAKCOD_WEB__.engineWorldSurface.extractionGeneration,
-        conversionGeneration:
-            globalThis.__KISAKCOD_WEB__.engineWorldSurface.conversionGeneration,
-        synthetic: globalThis.__KISAKCOD_WEB__.engineWorldSurface.synthetic,
-    }))).toEqual(worldBeforeVfsReads);
-    expect(worldBeforeVfsReads.synthetic).toBe(true);
     expect(adapterProbe.invalidRange).toBe("INVALID_RANGE");
     expect(assetNetworkRequests).toEqual([]);
 });
@@ -424,74 +406,6 @@ test("requires the selected single-player map fastfile", async ({ page }, testIn
     );
 });
 
-test("rejects malformed retail fastfile framing before persistence", { tag: "@native-covered" }, async ({ page }, testInfo) => {
-    await usePortableFolderPicker(page);
-    const malformed = createSyntheticFastfileHeader();
-    malformed[0] = 0x58;
-    const directory = await createM12InstallDirectory(
-        testInfo,
-        "malformed-killhouse-zone",
-        { overrides: new Map([["zone/english/killhouse.ff", malformed]]) },
-    );
-
-    await page.goto("/");
-    await waitForEngine(page);
-    await waitForAssets(page, "empty");
-    await chooseDirectory(page, directory);
-    await waitForAssets(page, "failed");
-    await expect(page.locator("#asset-message")).toContainText(
-        "zone/english/killhouse.ff",
-    );
-    await expect(page.locator("#asset-message")).toContainText("IWffu100 header");
-    expect(await page.evaluate(
-        () => globalThis.__KISAKCOD_WEB__.assets.error,
-    )).toBe("PROBE_40");
-});
-
-test("rejects a malformed additional single-player fastfile before persistence", { tag: "@native-covered" }, async ({ page }) => {
-    await page.goto("/");
-    await waitForEngine(page);
-    await waitForAssets(page, "empty");
-    const result = await page.evaluate(async ({ localization, requirements, iwd, ff }) => {
-        const malformed = new Uint8Array(ff);
-        malformed[0] = 0x58;
-        const entries = new Map(requirements.map((requirement) => {
-            const contents = requirement.kind === "localization"
-                ? localization
-                : new Uint8Array(requirement.kind === "iwd" ? iwd : ff);
-            return [
-                requirement.path,
-                new File([contents], requirement.path.split("/").at(-1)),
-            ];
-        }));
-        entries.set(
-            "zone/english/cargoship.ff",
-            new File([malformed], "cargoship.ff"),
-        );
-        try {
-            await globalThis.__KISAKCOD_WEB__.assetStore.importEntries(entries);
-            return { code: "accepted" };
-        } catch (error) {
-            return {
-                code: error.code,
-                state: globalThis.__KISAKCOD_WEB__.assets,
-            };
-        }
-    }, {
-        localization: SYNTHETIC_LOCALIZATION,
-        requirements: REQUIRED_ASSETS.map(({ path: assetPath, kind }) => ({
-            path: assetPath,
-            kind,
-        })),
-        iwd: Array.from(createSyntheticIwd()),
-        ff: Array.from(createSyntheticFastfileHeader()),
-    });
-    expect(result).toMatchObject({
-        code: "PROBE_40",
-        state: { state: "failed", retained: false },
-    });
-});
-
 test("rejects an oversized map fastfile before reading or copying it", async ({ page }) => {
     await page.goto("/");
     await waitForEngine(page);
@@ -566,88 +480,6 @@ test("rejects an unsupported localization marker and commits no active import", 
     await expect(page.locator("#asset-message")).toHaveText(
         "No local installation has been imported",
     );
-});
-
-test("rejects a plausible IWD with a malformed central-directory envelope", { tag: "@native-covered" }, async ({ page }, testInfo) => {
-    await usePortableFolderPicker(page);
-    const malformedIwd = createSyntheticIwd();
-    malformedIwd.writeUInt32LE(0, malformedIwd.length - 22);
-    const directory = await createInstallDirectory(testInfo, "bad-iwd", { iwd: malformedIwd });
-
-    await page.goto("/");
-    await waitForEngine(page);
-    await waitForAssets(page, "empty");
-    await chooseDirectory(page, directory);
-    await waitForAssets(page, "failed");
-    await expect(page.locator("#asset-message")).toContainText(
-        "no valid ZIP end-of-central-directory record",
-    );
-});
-
-test("the Wasm probe rejects unsafe synthetic ZIP32 variants before copying", { tag: "@native-covered" }, async ({ page }) => {
-    await page.goto("/");
-    await waitForEngine(page);
-    await waitForAssets(page, "empty");
-
-    const variants = [];
-    const multiDisk = createSyntheticIwd();
-    multiDisk.writeUInt16LE(1, multiDisk.length - 18);
-    variants.push({ name: "multi-disk", bytes: Array.from(multiDisk), code: "PROBE_22" });
-
-    const badRange = createSyntheticIwd();
-    badRange.writeUInt32LE(0xfffffff0, badRange.length - 6);
-    variants.push({ name: "central-range", bytes: Array.from(badRange), code: "PROBE_25" });
-
-    const encrypted = createSyntheticIwd();
-    encrypted.writeUInt16LE(1, 6);
-    encrypted.writeUInt16LE(1, 31 + 8);
-    variants.push({ name: "encrypted", bytes: Array.from(encrypted), code: "PROBE_29" });
-
-    const unsupportedCompression = createSyntheticIwd();
-    unsupportedCompression.writeUInt16LE(99, 8);
-    unsupportedCompression.writeUInt16LE(99, 31 + 10);
-    variants.push({
-        name: "compression",
-        bytes: Array.from(unsupportedCompression),
-        code: "PROBE_30",
-    });
-
-    const results = await page.evaluate(async ({ localization, cases, requirements, iwd, ff }) => {
-        const output = [];
-        for (const variant of cases) {
-            const entries = new Map(requirements.map((requirement) => {
-                const bytes = requirement.path === "main/iw_00.iwd"
-                    ? variant.bytes
-                    : requirement.kind === "iwd"
-                        ? iwd
-                        : ff;
-                const contents = requirement.kind === "localization"
-                    ? localization
-                    : new Uint8Array(bytes);
-                return [
-                    requirement.path,
-                    new File([contents], requirement.path.split("/").at(-1)),
-                ];
-            }));
-            try {
-                await globalThis.__KISAKCOD_WEB__.assetStore.importEntries(entries);
-                output.push({ name: variant.name, code: "accepted" });
-            } catch (error) {
-                output.push({ name: variant.name, code: error.code });
-            }
-        }
-        return output;
-    }, {
-        localization: SYNTHETIC_LOCALIZATION,
-        cases: variants,
-        requirements: REQUIRED_ASSETS.map(({ path: assetPath, kind }) => ({
-            path: assetPath,
-            kind,
-        })),
-        iwd: Array.from(createSyntheticIwd()),
-        ff: Array.from(createSyntheticFastfileHeader()),
-    });
-    expect(results).toEqual(variants.map(({ name, code }) => ({ name, code })));
 });
 
 test("a failed replacement preserves the previously committed installation", async ({ page }, testInfo) => {

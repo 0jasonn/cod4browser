@@ -28,7 +28,6 @@ $allowedFiles = @(
     'launcher.mjs',
     'product_checkpoint_controller.mjs',
     'product_engine_worker_host.mjs',
-    'product_input_controller.mjs',
     'product_protocol.mjs',
     'styles.css',
     'web_audio_driver.mjs',
@@ -75,34 +74,6 @@ if (-not (Test-Path -LiteralPath $mapPath -PathType Leaf)) {
     throw "Production linker map is missing: $mapPath"
 }
 $map = Get-Content -Raw -LiteralPath $mapPath
-$webCMakePath = Join-Path $repositoryRoot 'scripts\web\CMakeLists.txt'
-$webCMake = Get-Content -Raw -LiteralPath $webCMakePath
-$forbiddenObjects = @()
-foreach ($listName in @(
-    'KISAK_WEB_DIAGNOSTIC_SOURCES',
-    'KISAK_WEB_GATE2_DIAGNOSTIC_SOURCES'
-)) {
-    $list = [regex]::Match(
-        $webCMake,
-        "(?ms)set\($listName\s+(?<body>.*?)\)")
-    if (-not $list.Success) {
-        throw "Canonical diagnostic source list is missing: $listName"
-    }
-    $forbiddenObjects += [regex]::Matches(
-        $list.Groups['body'].Value,
-        '"\$\{SRC_DIR\}/[^"/]+/(?<name>[^"/]+\.cpp)"') |
-        ForEach-Object { $_.Groups['name'].Value }
-}
-$forbiddenObjects = @($forbiddenObjects | Sort-Object -Unique)
-if ($forbiddenObjects.Count -eq 0) {
-    throw 'Canonical diagnostic source lists did not contain any translation units.'
-}
-foreach ($name in $forbiddenObjects) {
-    if ($map.Contains($name)) {
-        throw "Production linker map contains diagnostic object: $name"
-    }
-}
-
 $wasmPath = Join-Path $siteDirectory 'kisakcod.wasm'
 $wasmDis = Join-Path $repositoryRoot '.tools\emsdk\upstream\bin\wasm-dis.exe'
 if (-not (Test-Path -LiteralPath $wasmDis -PathType Leaf)) {
@@ -175,4 +146,4 @@ if ($siteBytes -gt $MaximumSiteBytes) {
     throw "Production site is $siteBytes bytes; budget is $MaximumSiteBytes."
 }
 
-Write-Host "KISAK_PRODUCT_BOUNDARY wasm_bytes=$wasmBytes javascript_bytes=$javaScriptBytes site_bytes=$siteBytes wasm_exports=$wasmExportCount application_exports=$($applicationExports.Count) diagnostic_sources=$($forbiddenObjects.Count) files=$($allowedFiles.Count)"
+Write-Host "KISAK_PRODUCT_BOUNDARY wasm_bytes=$wasmBytes javascript_bytes=$javaScriptBytes site_bytes=$siteBytes wasm_exports=$wasmExportCount application_exports=$($applicationExports.Count) files=$($allowedFiles.Count)"
