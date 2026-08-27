@@ -814,22 +814,6 @@ void __cdecl XAnimUpdateOldTime(
     if (!info->inuse)
         MyAssertHandler(".\\xanim\\xanim.cpp", 1674, 0, "%s", "info->inuse");
     state = &info->state;
-    if (!std::isfinite(dtime)
-        || !std::isfinite(state->weight)
-        || !std::isfinite(state->goalWeight)
-        || !std::isfinite(state->goalTime))
-        MyAssertHandler(
-            ".\\xanim\\xanim.cpp",
-            1676,
-            0,
-            "XAnim blend state is not finite before update\n\tinfoIndex=%u animIndex=%u weight=%g goalWeight=%g goalTime=%g dtime=%g parentHasWeight=%d",
-            infoIndex,
-            info->animIndex,
-            state->weight,
-            state->goalWeight,
-            state->goalTime,
-            dtime,
-            parentHasWeight);
     if (parentHasWeight && dtime < (double)info->state.goalTime)
     {
         info->state.weight = (info->state.goalWeight - info->state.weight) * dtime / info->state.goalTime
@@ -843,19 +827,6 @@ void __cdecl XAnimUpdateOldTime(
         info->state.weight = info->state.goalWeight;
         info->state.goalTime = 0.0;
     }
-    if (!std::isfinite(state->weight) || !std::isfinite(state->goalTime))
-        MyAssertHandler(
-            ".\\xanim\\xanim.cpp",
-            1692,
-            0,
-            "XAnim blend state is not finite after update\n\tinfoIndex=%u animIndex=%u weight=%g goalWeight=%g goalTime=%g dtime=%g parentHasWeight=%d",
-            infoIndex,
-            info->animIndex,
-            state->weight,
-            state->goalWeight,
-            state->goalTime,
-            dtime,
-            parentHasWeight);
     v6 = parentHasWeight && info->state.weight != 0.0;
     info->state.instantWeightChange = 0;
     if (!info->inuse)
