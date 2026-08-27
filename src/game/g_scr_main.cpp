@@ -5529,40 +5529,40 @@ void Scr_RandomFloatRange()
 
 void GScr_sin()
 {
-    long double v0; // fp2
-    long double v1; // fp2
+    double v0; // fp2
+    double v1; // fp2
 
-    *(double *)&v0 = (float)(DEG2RAD( Scr_GetFloat(0) ));
+    v0 = (float)(DEG2RAD( Scr_GetFloat(0) ));
     v1 = sin(v0);
-    Scr_AddFloat((float)*(double *)&v1);
+    Scr_AddFloat((float)v1);
 }
 
 void GScr_cos()
 {
-    long double v0; // fp2
-    long double v1; // fp2
+    double v0; // fp2
+    double v1; // fp2
 
-    *(double *)&v0 = (float)(DEG2RAD( Scr_GetFloat(0) ));
+    v0 = (float)(DEG2RAD( Scr_GetFloat(0) ));
     v1 = cos(v0);
-    Scr_AddFloat((float)*(double *)&v1);
+    Scr_AddFloat((float)v1);
 }
 
 void GScr_tan()
 {
     double v0; // fp31
-    long double v1; // fp2
-    long double v2; // fp2
+    double v1; // fp2
+    double v2; // fp2
     double v3; // fp30
-    long double v4; // fp2
+    double v4; // fp2
     double v5; // fp31
 
     v0 = (float)(DEG2RAD( Scr_GetFloat(0) ));
-    *(double *)&v1 = v0;
+    v1 = v0;
     v2 = sin(v1);
-    v3 = (float)*(double *)&v2;
-    *(double *)&v2 = v0;
+    v3 = (float)v2;
+    v2 = v0;
     v4 = cos(v2);
-    v5 = (float)*(double *)&v4;
+    v5 = (float)v4;
     if (v5 == 0.0)
         Scr_Error("divide by 0");
     Scr_AddFloat((float)((float)v3 / (float)v5));
@@ -5570,50 +5570,50 @@ void GScr_tan()
 
 void GScr_asin()
 {
-    long double v0; // fp2
+    double v0; // fp2
     double v1; // fp31
     const char *v2; // r3
-    long double v3; // fp2
+    double v3; // fp2
 
-    *(double *)&v0 = Scr_GetFloat(0);
-    v1 = *(double *)&v0;
-    if (*(double *)&v0 < -1.0 || *(double *)&v0 > 1.0)
+    v0 = Scr_GetFloat(0);
+    v1 = v0;
+    if (v0 < -1.0 || v0 > 1.0)
     {
-        v2 = va("%g out of range", *(double *)&v0);
+        v2 = va("%g out of range", v0);
         Scr_Error(v2);
     }
-    *(double *)&v0 = v1;
+    v0 = v1;
     v3 = asin(v0);
-    Scr_AddFloat((float)RAD2DEG( (float)*(double *)&v3 ));
+    Scr_AddFloat((float)RAD2DEG( (float)v3 ));
 }
 
 void GScr_acos()
 {
-    long double v0; // fp2
+    double v0; // fp2
     double v1; // fp31
     const char *v2; // r3
-    long double v3; // fp2
+    double v3; // fp2
 
-    *(double *)&v0 = Scr_GetFloat(0);
-    v1 = *(double *)&v0;
-    if (*(double *)&v0 < -1.0 || *(double *)&v0 > 1.0)
+    v0 = Scr_GetFloat(0);
+    v1 = v0;
+    if (v0 < -1.0 || v0 > 1.0)
     {
-        v2 = va("%g out of range", *(double *)&v0);
+        v2 = va("%g out of range", v0);
         Scr_Error(v2);
     }
-    *(double *)&v0 = v1;
+    v0 = v1;
     v3 = acos(v0);
-    Scr_AddFloat((float)RAD2DEG( (float)*(double *)&v3 ));
+    Scr_AddFloat((float)RAD2DEG( (float)v3 ));
 }
 
 void GScr_atan()
 {
-    long double v0; // fp2
-    long double v1; // fp2
+    double v0; // fp2
+    double v1; // fp2
 
-    *(double *)&v0 = Scr_GetFloat(0);
+    v0 = Scr_GetFloat(0);
     v1 = atan(v0);
-    Scr_AddFloat((float)RAD2DEG( (float)*(double *)&v1 ));
+    Scr_AddFloat((float)RAD2DEG( (float)v1 ));
 }
 
 void GScr_CastInt()
