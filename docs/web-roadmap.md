@@ -42,17 +42,18 @@ records do. See the [execution report](../WEB_ROADMAP_EXECUTION_REPORT.md).
    functional and performance matrices. Opaque shadow texture/sampler binds
    were removed, reducing six-map average shadow CPU time by 36.91% and binds
    by 32.49%, while every lifecycle gate remained green.
-2. Add the smallest diagnostics-only canonical state probe and one opt-in
-   headed retail mission validator, then prove one representative mission
-   through AI/scripts/objectives,
-   combat, checkpoint, death/restart, browser shutdown, save reload, and
-   continued progression.
+2. **Completed at `da1e592c`:** the smallest diagnostics-only canonical state
+   probe and one opt-in headed Airplane mission validator prove live
+   AI/scripts/objectives, combat, a natural checkpoint, named game save,
+   death/restart, browser shutdown, fresh-runtime save reload, restored state,
+   and continued progression.
 3. Continue renderer work only from the current measured bottleneck. World and
    shadow drawing now average 7.11/7.14 ms across the six maps, static models
    average 6.48 ms, and CargoShip remains the worst case. Do not combine this
    next optimization with the mission validator.
 4. Measure encoded-image inspection/decode/upload/recovery work and improve it
    only if duplicate work is demonstrated without giving back the memory win.
-5. After the mission and performance gates are stable, select the next two or
-   three discovered SP
-   maps by coverage value. Discovery remains `UNTESTED`.
+5. The next prepared batch is `scoutsniper` (outdoor and long-range AI),
+   `village_assault` (dense scripts/objectives/triggers), and `ac130` (vehicle,
+   thermal, FX, and material paths). Preparation does not promote compatibility;
+   discovery remains `UNTESTED` until each legal local runtime gate passes.

@@ -35,7 +35,11 @@ record is [retail-profile-9e75a9dd.json](evidence/retail-profile-9e75a9dd.json).
 | `bog_a` | 20.830 | 61.505 ms | 21.608 ms | **FUNCTIONAL** |
 
 These results refresh performance and regression status; they do not promote
-configuration checkpoints to complete gameplay save/load evidence.
+configuration checkpoints to complete gameplay save/load evidence. Separate
+clean evidence at `da1e592c` proves one complete Airplane mission loop through
+live AI/scripts/objective state, combat, natural and named saves, death/restart,
+browser shutdown, fresh-runtime load, restored state, and continued play:
+[retail-mission-da1e592c.json](evidence/retail-mission-da1e592c.json).
 
 The final clean baseline at `f5229806` ran
 `killhouse` -> `cargoship` -> `blackout` -> `killhouse` in headed branded
@@ -111,4 +115,5 @@ No proprietary assets are used in hosted CI. Promote a row only from a local
 run against legally owned files, recording the exact commit, browser, date,
 reference host, foreground validity, and sanitized machine-readable result.
 Configuration checkpoints demonstrate config persistence, not complete
-gameplay save/load parity.
+gameplay save/load parity. The Airplane `da1e592c` mission record is the sole
+current complete gameplay save/load proof; do not generalize it to other maps.

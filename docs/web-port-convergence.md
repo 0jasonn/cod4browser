@@ -44,6 +44,14 @@ texture binds 32.49%. Full measurements are in
 not introduce an intermediate asset model or move shadow/material ownership
 out of Kisak's renderer frontend.
 
+Commit `da1e592c` adds no browser gameplay state. Its diagnostic export reads
+canonical server player state, objectives, actors, script threads, and the
+game-owned save header/body. The headed Airplane validator then drives the
+normal input, `devsave`, `kill`, restart, shutdown, and `loadgame` paths. A
+fresh browser runtime restored the named save and continued canonical play;
+the sanitized evidence is
+[retail-mission-da1e592c.json](evidence/retail-mission-da1e592c.json).
+
 ## Shared Kisak systems
 
 | System | Current ownership |
@@ -56,6 +64,7 @@ out of Kisak's renderer frontend.
 | Renderer frontend | Kisak world, model, effect and UI state is translated only at the portable draw-command boundary. Native IW3's bounded 65,536 static-model cardinality is preserved across that seam. |
 | Input | Browser events enter canonical key/mouse queues, bindings, usercmd creation and movement/weapon code. |
 | Audio | Canonical mixer and OpenAL-facing state feed a browser Web Audio device boundary. |
+| Save/persistence | Canonical game save serialization and load own gameplay state; the browser host only persists and flushes the engine filesystem at the platform boundary. |
 
 ## Modified Kisak seams
 

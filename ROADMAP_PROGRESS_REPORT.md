@@ -1,9 +1,10 @@
 # Web retail roadmap progress
 
-## 2026-08-27 six-map profiling and one renderer optimization
+## 2026-08-27 six-map profiling, one renderer optimization, and mission proof
 
-An explicit legally owned retail root was supplied. Work was integrated on
-`web-port` and pushed to `origin/web-port`; no extra roadmap branch remains.
+An explicit legally owned retail root was supplied. The six-map and renderer
+work is integrated on `web-port`; the mission proof is isolated on
+`codex/web-mission-progression` pending integration.
 
 CargoShip -> Bog A initially failed in canonical XAnim because Wasm uses a
 16-byte `long double` where several native decompilation patterns assumed an
@@ -31,13 +32,18 @@ CargoShip, Blackout, Hunted, and Bog A remain `FUNCTIONAL`. Evidence:
 | Browser smoke | 12/12 pass |
 | Browser remainder | 36 pass, 2 expected retail-only skips |
 | Production boundary | 3,173,476 B Wasm; 340,615 B JS; 3,524,622 B site; 17 files; 24 raw/9 named exports; pass |
+| Headed Airplane mission flow | Pass at clean `da1e592c` |
 
-The representative objective/AI/combat/death/game-save reload gate is not yet
-automated and was not claimed. Existing campaign validators verify configuration
-checkpoints and shutdown/config reload only. The next truthful evidence step is
-a narrow diagnostics-only canonical-state probe and one opt-in headed mission
-validator, followed by the next measured renderer fix. Current classification:
-`PERFORMANCE BOTTLENECK IDENTIFIED — NEXT FIX REQUIRED`.
+Commit `da1e592c` adds a diagnostics-only view of canonical mission state and
+an opt-in headed validator. Airplane passed live actors and scripts, an active
+objective, actor-state change, canonical movement/fire with an enemy-damage
+event, a natural checkpoint, a 236,562-byte named game save, canonical death
+and restart, full browser shutdown, fresh-runtime `loadgame`, restored mission
+state, and continued movement/fire. Evidence:
+[retail-mission-da1e592c.json](docs/evidence/retail-mission-da1e592c.json).
+The next measured renderer change remains separate. The prepared next campaign
+batch is `scoutsniper`, `village_assault`, and `ac130`; all remain `UNTESTED`.
+Current classification: `PERFORMANCE BOTTLENECK IDENTIFIED — NEXT FIX REQUIRED`.
 
 ## Phase 0 baseline
 

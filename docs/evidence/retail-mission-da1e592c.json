@@ -1,0 +1,194 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "commitSha": "da1e592c7caf26a9a56bbde302b1e44f82a15aa1",
+    "dirty": false
+  },
+  "recordedAtUtc": "2026-08-27T17:33:20.106Z",
+  "environment": {
+    "browser": {
+      "name": "chrome",
+      "version": "151.0.7922.174",
+      "channel": "chrome",
+      "headless": false
+    },
+    "operatingSystem": {
+      "platform": "win32",
+      "release": "10.0.26200",
+      "version": "Windows 11 Pro",
+      "architecture": "x64"
+    },
+    "referenceHardware": {
+      "processor": "AMD Ryzen 7 7800X3D 8-Core Processor",
+      "logicalProcessorCount": 16,
+      "totalSystemMemoryBytes": 33944879104
+    },
+    "build": "Release diagnostics"
+  },
+  "validationResult": "pass",
+  "targetMap": "airplane",
+  "canonicalSystems": {
+    "initialState": {
+      "serverHealth": 100,
+      "serverPmType": 0,
+      "objectiveHash": -14408069,
+      "activeActors": 6,
+      "aliveActors": 6,
+      "actorFingerprint": 2043723927,
+      "scriptThreads": 476,
+      "levelTime": 1950,
+      "levelFrame": 39,
+      "missionFlags": 0,
+      "committedSave": true,
+      "saveWrittenToDevice": true,
+      "saveHealth": 100,
+      "saveBodySize": 181111,
+      "saveMapMatches": true,
+      "saveId": 1,
+      "activeObjectives": 1,
+      "doneObjectives": 0
+    },
+    "naturalCheckpoint": {
+      "serverHealth": 100,
+      "serverPmType": 0,
+      "objectiveHash": -14408069,
+      "activeActors": 6,
+      "aliveActors": 6,
+      "actorFingerprint": -1893101316,
+      "scriptThreads": 474,
+      "levelTime": 2100,
+      "levelFrame": 42,
+      "missionFlags": 0,
+      "committedSave": true,
+      "saveWrittenToDevice": true,
+      "saveHealth": 100,
+      "saveBodySize": 181111,
+      "saveMapMatches": true,
+      "saveId": 1,
+      "activeObjectives": 1,
+      "doneObjectives": 0
+    },
+    "naturalCheckpointFlush": {
+      "filesPersisted": 1,
+      "bytesPersisted": 2885690,
+      "durationMs": 0.07999999998719431
+    }
+  },
+  "progression": {
+    "objectiveBefore": -14408069,
+    "objectiveAfter": -14408069,
+    "inputEvidence": {
+      "validationResult": "pass",
+      "inventoryProvisioning": null,
+      "movement": true,
+      "primaryFireCanonicalResponse": {
+        "weapon": 18,
+        "clipBefore": 30,
+        "clipAfter": 28,
+        "shotCountBefore": 0,
+        "shotCountAfter": 0
+      },
+      "mouseLook": true,
+      "pointerLock": true
+    },
+    "enemyDamageEventCount": 1
+  },
+  "saveAndDeath": {
+    "savedState": {
+      "serverHealth": 100,
+      "serverPmType": 0,
+      "objectiveHash": -14408069,
+      "activeActors": 5,
+      "aliveActors": 5,
+      "actorFingerprint": -698109908,
+      "scriptThreads": 453,
+      "levelTime": 11450,
+      "levelFrame": 229,
+      "missionFlags": 0,
+      "committedSave": true,
+      "saveWrittenToDevice": true,
+      "saveHealth": 100,
+      "saveBodySize": 236562,
+      "saveMapMatches": true,
+      "saveId": 0,
+      "activeObjectives": 1,
+      "doneObjectives": 0
+    },
+    "namedSaveFlush": {
+      "filesPersisted": 2,
+      "bytesPersisted": 5826831,
+      "durationMs": 9.319999999977881
+    },
+    "restartedState": {
+      "serverHealth": 100,
+      "serverPmType": 0,
+      "objectiveHash": -14408069,
+      "activeActors": 5,
+      "aliveActors": 5,
+      "actorFingerprint": 1333920880,
+      "scriptThreads": 442,
+      "levelTime": 11850,
+      "levelFrame": 237,
+      "missionFlags": 0,
+      "committedSave": true,
+      "saveWrittenToDevice": true,
+      "saveHealth": 100,
+      "saveBodySize": 236562,
+      "saveMapMatches": true,
+      "saveId": 0,
+      "activeObjectives": 1,
+      "doneObjectives": 0
+    },
+    "continuedInput": {
+      "validationResult": "pass",
+      "inventoryProvisioning": null,
+      "movement": true,
+      "primaryFireCanonicalResponse": {
+        "weapon": 18,
+        "clipBefore": 30,
+        "clipAfter": 29,
+        "shotCountBefore": 0,
+        "shotCountAfter": 0
+      },
+      "mouseLook": true,
+      "pointerLock": true
+    }
+  },
+  "shutdown": {
+    "flushDurationMs": 16.529999999969732,
+    "freshRuntimeState": {
+      "serverHealth": 100,
+      "serverPmType": 0,
+      "objectiveHash": -14408069,
+      "activeActors": 5,
+      "aliveActors": 5,
+      "actorFingerprint": -984296544,
+      "scriptThreads": 437,
+      "levelTime": 12650,
+      "levelFrame": 253,
+      "missionFlags": 0,
+      "committedSave": true,
+      "saveWrittenToDevice": false,
+      "saveHealth": 100,
+      "saveBodySize": 236562,
+      "saveMapMatches": true,
+      "saveId": 0,
+      "activeObjectives": 1,
+      "doneObjectives": 0
+    },
+    "freshRuntimeInput": {
+      "validationResult": "pass",
+      "inventoryProvisioning": null,
+      "movement": true,
+      "primaryFireCanonicalResponse": {
+        "weapon": 18,
+        "clipBefore": 30,
+        "clipAfter": 29,
+        "shotCountBefore": 0,
+        "shotCountAfter": 0
+      },
+      "mouseLook": true,
+      "pointerLock": true
+    }
+  }
+}

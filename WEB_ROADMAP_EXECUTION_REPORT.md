@@ -13,6 +13,7 @@ retail evidence remains valid only for its recorded commits and dates.
 | Retail root supplied to this process | **YES**; explicit local path omitted from evidence |
 | Correctness fixes | `e42b48f3` through `721a981b` |
 | Renderer optimization | `9e75a9dd` |
+| Mission validator / branch | `da1e592c` / `codex/web-mission-progression` |
 | Browser / host | Headed Chrome 151.0.7922.174 / Windows 11 Pro x64 / Ryzen 7 7800X3D / RTX 3070 Ti |
 
 Commits `91788492` and `aff008c3` add an explicitly requested,
@@ -60,6 +61,7 @@ validator after the change. The sanitized evidence is
 | Headed retail Airplane campaign validator | Pass, 1/1 |
 | Headed retail Hunted campaign validator | Pass, 1/1 |
 | Headed retail Bog A campaign validator | Pass, 1/1 |
+| Headed retail Airplane mission/save/restart validator | Pass, 1/1 in 1.6 minutes at clean `da1e592c` |
 | Production Release build and canonical prefix | Pass |
 | Routine browser smoke | 12/12 pass |
 | Non-overlapping browser remainder | 36 pass; 2 expected retail-only skips |
@@ -70,12 +72,21 @@ and 3,524,622 B total across 17 files, with 24 raw Wasm exports and 9 named
 application exports. The respective budgets remain 3,332,379 B, 357,646 B,
 and 3,701,082 B.
 
-The representative mission-flow proof remains incomplete. Canonical `kill`,
-`devsave`, `loadgame`, save-device code, browser profile storage, and shutdown
-flushing are linked, but existing validators prove configuration persistence,
-not objective/AI/death/game-save restoration. The smallest next step is one
-diagnostics-only canonical-state probe plus an opt-in headed retail mission
-case; it must not be replaced with synthetic gameplay state.
+The representative mission-flow proof now passes without synthetic gameplay
+state. At clean `da1e592c`, Airplane exposed 6 live canonical actors, 476
+script threads, and one active objective; actor state changed, primary fire
+produced an enemy-damage event, and the natural checkpoint committed. A named
+236,562-byte save survived canonical death/restart, browser shutdown, and a
+fresh-runtime `loadgame`; objective identity, player state, weapon state, live
+actors/scripts, movement, firing, and frame progression continued afterward.
+The sanitized record is
+[retail-mission-da1e592c.json](docs/evidence/retail-mission-da1e592c.json).
+
+The next campaign batch is prepared, not promoted: `scoutsniper` targets
+outdoor/long-range AI visibility, `village_assault` targets dense scripted
+AI/objective/trigger progression, and `ac130` targets an atypical vehicle,
+thermal, FX, and material path. All three remain `UNTESTED` until legal local
+runtime evidence exists.
 
 Final classification: `PERFORMANCE BOTTLENECK IDENTIFIED — NEXT FIX REQUIRED`
 

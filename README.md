@@ -14,6 +14,10 @@ Killhouse and Airplane are `PLAYABLE`; CargoShip, Blackout, Hunted, and Bog A
 are `FUNCTIONAL`; 16 discovered direct SP zones remain `UNTESTED`. This is
 still an incomplete port, not a generally compatible COD4 release.
 
+Clean Airplane evidence at `da1e592c` also proves one canonical mission loop:
+live AI/scripts/objective state, combat, natural and named saves, death/restart,
+browser shutdown, fresh-runtime load, restored state, and continued play.
+
 The opt-in diagnostics target builds the same runtime with browser-only test
 controls and telemetry. Production does not expose those controls.
 
@@ -117,9 +121,10 @@ validation, and remaining material families are outstanding.
 
 Encoded-source recovery is active. At the comparable Killhouse measurement it
 reduced aggregate CPU recovery storage by 64.27% and Wasm capacity by 45.28%,
-with longer but successful context re-decode. The next runtime milestone is
-bounded frame-stage profiling before one measured renderer optimisation, then
-one canonical mission checkpoint/death/restart/save-reload loop.
+with longer but successful context re-decode. Bounded six-map frame profiling,
+one measured shadow optimization, and one canonical Airplane mission
+checkpoint/death/restart/save-reload loop are complete; the next runtime work
+must follow the remaining measured renderer bottleneck.
 
 ## License
 

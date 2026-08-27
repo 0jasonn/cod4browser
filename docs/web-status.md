@@ -61,12 +61,14 @@ shadow reduction, measured backend costs are led by shadows/world geometry
 (7.14/7.11 ms six-map averages) and static models (6.48 ms); CargoShip's static
 models alone average 15.98 ms.
 
-The representative mission objective/AI/combat/death/save-reload gate remains
-unproven. Canonical `kill`, `devsave`, `loadgame`, save-device code, browser
-profile storage, and shutdown flushing are linked, but the repository has no
-automated mission-flow validator or diagnostics-only objective/death/save-state
-probe. Configuration checkpoint evidence must not be called gameplay save/load
-evidence.
+The representative mission objective/AI/combat/death/save-reload gate passes
+on Airplane at clean `da1e592c`. A diagnostics-only canonical-state probe and
+opt-in headed validator observed live actors/scripts, an active objective,
+combat damage, a natural checkpoint, a named game save, death/restart, browser
+shutdown, fresh-runtime load, restored state, and continued play. See
+[retail-mission-da1e592c.json](evidence/retail-mission-da1e592c.json).
+Configuration checkpoints on the other maps remain configuration evidence,
+not gameplay save/load evidence.
 
 ## Product boundaries and gaps
 
@@ -76,8 +78,8 @@ evidence.
   repository fixtures.
 - Native Bink, Miles, Steam, raw UDP, and native DLLs are not shipped;
   cinematics currently complete as explicit visible omissions.
-- Gamepad, full cinematics, advanced audio parity, 16 campaign zones, one proven
-  mission save/reload loop, and remaining renderer/material families remain.
+- Gamepad, full cinematics, advanced audio parity, 16 campaign zones, broader
+  mission coverage, and remaining renderer/material families remain.
 
 The approved production boundary is 3,173,694 B Wasm (3,332,379 B budget),
 340,615 B application JavaScript (357,646 B budget), and 3,524,840 B across 17
