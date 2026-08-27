@@ -830,6 +830,12 @@ async function gameplayState(page, field, weaponIndex = 0)
         { stateField: field, weapon: weaponIndex });
 }
 
+async function waitForRelativeMouseMode(page)
+{
+    await expect.poll(() => page.evaluate(() =>
+        globalThis.__KISAKCOD_WEB__.input.absoluteMouse)).toBe(false);
+}
+
 async function provisionGameplayInventory(page)
 {
     if (await gameplayState(page, 7) !== 0) return null;
@@ -891,6 +897,7 @@ async function exerciseTransitionInput(page)
         await page.keyboard.press("Escape");
         await expect.poll(async () => await gameplayState(page, 12) & 0x10)
             .toBe(0);
+        await waitForRelativeMouseMode(page);
     }
     await canvas.click({ position: { x: 8, y: 8 } });
     await expect.poll(() => page.evaluate(() => document.pointerLockElement?.id))
@@ -982,6 +989,7 @@ async function exerciseRetailInput(page)
         await page.keyboard.press("Escape");
         await expect.poll(async () => await gameplayState(page, 12) & 0x10)
             .toBe(0);
+        await waitForRelativeMouseMode(page);
     }
     await canvas.click({ position: { x: 8, y: 8 } });
     await expect.poll(() => page.evaluate(() => document.pointerLockElement?.id))
@@ -1146,6 +1154,7 @@ async function exerciseRetailInput(page)
     await page.keyboard.press("Escape");
     await expect.poll(async () => await gameplayState(page, 12) & 0x10)
         .toBe(0);
+    await waitForRelativeMouseMode(page);
     const inputs = await page.evaluate(() => structuredClone(
         globalThis.__retailValidationInput));
     for (const key of [0x77, 0x73, 0x61, 0x64, 0x20, 0x1B, 0xC8, 0xC9, 0xCD, 0xCE]) {
