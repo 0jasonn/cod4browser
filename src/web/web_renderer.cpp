@@ -18,6 +18,7 @@
 #include <emscripten.h>
 #if KISAK_WEB_DIAGNOSTICS
 #include <emscripten/heap.h>
+#include <malloc.h>
 #endif
 #include <emscripten/html5.h>
 #include <webgl/webgl1_ext.h>
@@ -1100,7 +1101,20 @@ EM_JS(void, DispatchRendererMemory, (
     double recoveryCopyBytes,
     double shaderProgramCacheEstimateBytes,
     double temporaryUploadBytes,
-    double recoveryBudgetBytes), {
+    double recoveryBudgetBytes,
+    bool wasmHeapStatsSampled,
+    double wasmProgramBreakOffsetBytes,
+    double wasmLinearMemoryCapacityBytes,
+    double wasmLinearMemoryMaximumBytes,
+    bool wasmAllocatorStatsSampled,
+    double wasmAllocatorInUseBytes,
+    double wasmAllocatorFreeBytes,
+    double wasmAllocatorFootprintBytes,
+    double wasmAllocatorTopFreeBytes,
+    double imageLoadDefCacheEntryCount,
+    double imageLoadDefCacheEncodedPayloadBytes,
+    double imageLoadDefCacheBudgetBytes,
+    double imageLoadDefCacheEvictionCount), {
         let webglRendererIdentity = null;
         try {
             const gl = (typeof GL !== "undefined" && GL.currentContext)
@@ -1141,6 +1155,25 @@ EM_JS(void, DispatchRendererMemory, (
                 shaderProgramCacheEstimateBytes,
                 temporaryUploadBytes,
                 recoveryBudgetBytes,
+                wasmProgramBreakOffsetBytes: wasmHeapStatsSampled
+                    ? wasmProgramBreakOffsetBytes : null,
+                wasmLinearMemoryCapacityBytes: wasmHeapStatsSampled
+                    ? wasmLinearMemoryCapacityBytes : null,
+                wasmLinearMemoryMaximumBytes: wasmHeapStatsSampled
+                    ? wasmLinearMemoryMaximumBytes : null,
+                wasmAllocatorStatsSampled: Boolean(wasmAllocatorStatsSampled),
+                wasmAllocatorInUseBytes: wasmAllocatorStatsSampled
+                    ? wasmAllocatorInUseBytes : null,
+                wasmAllocatorFreeBytes: wasmAllocatorStatsSampled
+                    ? wasmAllocatorFreeBytes : null,
+                wasmAllocatorFootprintBytes: wasmAllocatorStatsSampled
+                    ? wasmAllocatorFootprintBytes : null,
+                wasmAllocatorTopFreeBytes: wasmAllocatorStatsSampled
+                    ? wasmAllocatorTopFreeBytes : null,
+                imageLoadDefCacheEntryCount,
+                imageLoadDefCacheEncodedPayloadBytes,
+                imageLoadDefCacheBudgetBytes,
+                imageLoadDefCacheEvictionCount,
                 webglRendererIdentity
             }
         }));
@@ -1191,7 +1224,7 @@ std::size_t RetainedImageBytes(
     return bytes;
 }
 
-std::size_t EmitRendererMemory(const char *state)
+std::size_t EmitRendererMemory(const char *state, bool sampleAllocator = true)
 {
     const std::size_t geometryBytes =
         g_renderer.retainedVertices.size() * sizeof(WebRendererSurfaceVertex) +
@@ -1247,6 +1280,38 @@ std::size_t EmitRendererMemory(const char *state)
     }
     const std::size_t recoveryCopyBytes =
         decodedTextureSourceBytes + geometryBytes + shaderProgramCacheEstimateBytes;
+    const WebDbImageLoadDefStats imageLoadDefStats =
+        DB_WebGetImageLoadDefStats();
+    bool wasmHeapStatsSampled = false;
+    bool wasmAllocatorStatsSampled = false;
+    double wasmProgramBreakOffsetBytes = 0.0;
+    double wasmLinearMemoryCapacityBytes = 0.0;
+    double wasmLinearMemoryMaximumBytes = 0.0;
+    double wasmAllocatorInUseBytes = 0.0;
+    double wasmAllocatorFreeBytes = 0.0;
+    double wasmAllocatorFootprintBytes = 0.0;
+    double wasmAllocatorTopFreeBytes = 0.0;
+#if KISAK_WEB_DIAGNOSTICS
+    wasmHeapStatsSampled = true;
+    wasmProgramBreakOffsetBytes = static_cast<double>(
+        *emscripten_get_sbrk_ptr());
+    wasmLinearMemoryCapacityBytes = static_cast<double>(
+        emscripten_get_heap_size());
+    wasmLinearMemoryMaximumBytes = static_cast<double>(
+        emscripten_get_heap_max());
+    if (sampleAllocator)
+    {
+        const struct mallinfo allocator = mallinfo();
+        wasmAllocatorStatsSampled = true;
+        wasmAllocatorInUseBytes = static_cast<double>(allocator.uordblks);
+        wasmAllocatorFreeBytes = static_cast<double>(allocator.fordblks);
+        wasmAllocatorFootprintBytes =
+            wasmAllocatorInUseBytes + wasmAllocatorFreeBytes;
+        wasmAllocatorTopFreeBytes = static_cast<double>(allocator.keepcost);
+    }
+#else
+    (void)sampleAllocator;
+#endif
     DispatchRendererMemory(
         state,
         static_cast<double>(worldImageRecoveryBytes),
@@ -1260,7 +1325,20 @@ std::size_t EmitRendererMemory(const char *state)
         static_cast<double>(recoveryCopyBytes),
         static_cast<double>(shaderProgramCacheEstimateBytes),
         0.0,
-        static_cast<double>(WEB_RENDERER_MAX_WORLD_TEXTURE_BYTES));
+        static_cast<double>(WEB_RENDERER_MAX_WORLD_TEXTURE_BYTES),
+        wasmHeapStatsSampled,
+        wasmProgramBreakOffsetBytes,
+        wasmLinearMemoryCapacityBytes,
+        wasmLinearMemoryMaximumBytes,
+        wasmAllocatorStatsSampled,
+        wasmAllocatorInUseBytes,
+        wasmAllocatorFreeBytes,
+        wasmAllocatorFootprintBytes,
+        wasmAllocatorTopFreeBytes,
+        static_cast<double>(imageLoadDefStats.entryCount),
+        static_cast<double>(imageLoadDefStats.encodedPayloadBytes),
+        static_cast<double>(imageLoadDefStats.budgetBytes),
+        static_cast<double>(imageLoadDefStats.evictionCount));
     return recoveryCopyBytes;
 }
 
@@ -6284,7 +6362,7 @@ WebRendererSurfaceResult WebRenderer_SetUiScene(
     g_renderer.retainedUiIndices = std::move(indices);
     g_renderer.retainedUiBatches = std::move(batches);
     g_renderer.uiSceneActive = true;
-    EmitRendererMemory("ui-submitted");
+    EmitRendererMemory("ui-submitted", false);
     return WebRendererSurfaceResult::Success;
 }
 

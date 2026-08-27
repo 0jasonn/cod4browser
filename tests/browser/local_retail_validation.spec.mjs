@@ -275,12 +275,6 @@ async function sustainWorldFrames(page, mapName, durationMs = 60_000)
     };
 }
 
-async function heapBytes(page)
-{
-    return page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.call(
-        "_KisakWeb_TestHeapBytes"));
-}
-
 async function checkpoint(page)
 {
     return page.evaluate(async () => {
@@ -336,13 +330,12 @@ async function captureMapCursor(page)
     }));
 }
 
-async function mapEvidence(page, map, cursor, commandTimeMs, heapBeforeMapLoad,
-    heapAfterMapLoad, heapAfterWorldPublication, heapAtStabilityEnd, stability,
-    memorySnapshot, audioSnapshot, input, checkpointResult)
+async function mapEvidence(page, map, cursor, commandTimeMs, memoryLifecycle,
+    stability, audioSnapshot, input, checkpointResult)
 {
-    return page.evaluate(({ map, cursor, commandTimeMs, heapBeforeMapLoad,
-        heapAfterMapLoad, heapAfterWorldPublication, heapAtStabilityEnd,
-        stability, memorySnapshot, audioSnapshot, input, checkpointResult }) => {
+    return page.evaluate(({ map, cursor, commandTimeMs, memoryLifecycle,
+        stability, audioSnapshot, input, checkpointResult }) => {
+        const memorySnapshot = memoryLifecycle.steadyState;
         const frames = globalThis.__retailValidationFrames.slice(cursor.frames)
             .filter((entry) => entry.state === "drawn" &&
                 entry.geometrySubmitted === true &&
@@ -430,11 +423,20 @@ async function mapEvidence(page, map, cursor, commandTimeMs, heapBeforeMapLoad,
             framesRenderedDuringStabilityWindow: stabilityFrames.length,
             stability,
             wasmLinearMemoryCapacityBytes: {
-                beforeMapLoad: heapBeforeMapLoad,
-                afterCGameInit: heapAfterMapLoad,
-                afterWorldPublication: heapAfterWorldPublication,
-                atStabilityEnd: heapAtStabilityEnd,
+                beforeMapLoad:
+                    memoryLifecycle.beforeMapLoad.wasmLinearMemoryCapacityBytes,
+                afterDatabaseCompletion:
+                    memoryLifecycle.afterDatabaseCompletion
+                        .wasmLinearMemoryCapacityBytes,
+                afterCGameInit:
+                    memoryLifecycle.afterCGameInit.wasmLinearMemoryCapacityBytes,
+                afterWorldPublication:
+                    memoryLifecycle.afterFirstWorldFrame
+                        .wasmLinearMemoryCapacityBytes,
+                atStabilityEnd:
+                    memoryLifecycle.steadyState.wasmLinearMemoryCapacityBytes,
             },
+            memoryLifecycle,
             decodedTextureRecoveryBytes: memorySnapshot.decodedTextureSourceBytes,
             aggregateCpuRecoveryBytes: memorySnapshot.recoveryCopyBytes,
             estimatedGpuTextureBytes: memorySnapshot.gpuTextureEstimateBytes,
@@ -456,9 +458,8 @@ async function mapEvidence(page, map, cursor, commandTimeMs, heapBeforeMapLoad,
             input,
             checkpoint: checkpointResult,
         };
-    }, { map, cursor, commandTimeMs, heapBeforeMapLoad, heapAfterMapLoad,
-        heapAfterWorldPublication, heapAtStabilityEnd, stability,
-        memorySnapshot, audioSnapshot, input, checkpointResult });
+    }, { map, cursor, commandTimeMs, memoryLifecycle, stability,
+        audioSnapshot, input, checkpointResult });
 }
 
 function assertMemoryTelemetry(sample)
@@ -480,11 +481,30 @@ function assertMemoryTelemetry(sample)
     for (const bytes of imagePoolBytes) {
         expect(bytes).toBeLessThanOrEqual(sample.recoveryBudgetBytes);
     }
+    expect(sample.wasmProgramBreakOffsetBytes).toBeGreaterThan(0);
+    expect(sample.wasmProgramBreakOffsetBytes)
+        .toBeLessThanOrEqual(sample.wasmLinearMemoryCapacityBytes);
+    expect(sample.wasmLinearMemoryCapacityBytes)
+        .toBeLessThanOrEqual(sample.wasmLinearMemoryMaximumBytes);
+    if (sample.wasmAllocatorStatsSampled) {
+        expect(sample.wasmAllocatorInUseBytes + sample.wasmAllocatorFreeBytes)
+            .toBe(sample.wasmAllocatorFootprintBytes);
+        expect(sample.wasmAllocatorTopFreeBytes)
+            .toBeLessThanOrEqual(sample.wasmAllocatorFreeBytes);
+    } else {
+        expect(sample.state).toBe("ui-submitted");
+    }
+    expect(sample.imageLoadDefCacheEncodedPayloadBytes)
+        .toBeLessThanOrEqual(sample.imageLoadDefCacheBudgetBytes);
 }
 
 function assertMapEvidence(evidence, memorySnapshot)
 {
     assertMemoryTelemetry(memorySnapshot);
+    for (const sample of Object.values(evidence.memoryLifecycle)) {
+        assertMemoryTelemetry(sample);
+        expect(sample.wasmAllocatorStatsSampled).toBe(true);
+    }
     for (const [check, passed] of Object.entries(evidence.checks)) {
         if (check === "stability60s" && stabilityDurationMs < 60_000) {
             expect(passed).toBe(false);
@@ -623,9 +643,19 @@ async function rendererTransitionEvidence(page, lifecycleCursor, startedMs, ende
     expect(unloadEnd.supplementalTextureRecoveryBytes).toBe(0);
     expect(unloadEnd.decodedTextureSourceBytes).toBe(0);
     expect(unloadEnd.geometryBytes).toBe(0);
+    expect(unloadEnd.imageLoadDefCacheEntryCount)
+        .toBe(unloadBegin.imageLoadDefCacheEntryCount);
+    expect(unloadEnd.imageLoadDefCacheEncodedPayloadBytes)
+        .toBe(unloadBegin.imageLoadDefCacheEncodedPayloadBytes);
+    expect(unloadEnd.imageLoadDefCacheEvictionCount)
+        .toBe(unloadBegin.imageLoadDefCacheEvictionCount);
     expect(lifecycle[unloadEndIndex].oldMapBytesReleased)
         .toBe(unloadBegin.recoveryCopyBytes - unloadEnd.recoveryCopyBytes);
     const maximum = (key) => Math.max(...memory.map((entry) => entry[key]));
+    const sampledAllocator = memory.filter(
+        (entry) => entry.wasmAllocatorStatsSampled);
+    const maximumSampled = (key) => Math.max(...sampledAllocator.map(
+        (entry) => entry[key]));
     return {
         validationResult: "pass",
         durationToFirstWorldFrameMs: endedMs - startedMs,
@@ -646,6 +676,19 @@ async function rendererTransitionEvidence(page, lifecycleCursor, startedMs, ende
             geometryBytes: maximum("geometryBytes"),
             boundaryRetainedTemporaryUploadBytes: maximum("temporaryUploadBytes"),
             shaderProgramBytes: maximum("shaderProgramCacheEstimateBytes"),
+            wasmProgramBreakOffsetBytes: maximum("wasmProgramBreakOffsetBytes"),
+            wasmLinearMemoryCapacityBytes:
+                maximum("wasmLinearMemoryCapacityBytes"),
+            wasmAllocatorInUseBytes:
+                maximumSampled("wasmAllocatorInUseBytes"),
+            wasmAllocatorFootprintBytes:
+                maximumSampled("wasmAllocatorFootprintBytes"),
+            imageLoadDefCacheEntryCount:
+                maximum("imageLoadDefCacheEntryCount"),
+            imageLoadDefCacheEncodedPayloadBytes:
+                maximum("imageLoadDefCacheEncodedPayloadBytes"),
+            imageLoadDefCacheEvictionCount:
+                maximum("imageLoadDefCacheEvictionCount"),
         },
         lifecycleOrder: ["worldUnloadBegin", "worldUnloadEnd", "newWorldPublished"],
     };
@@ -658,6 +701,7 @@ async function recoverMapContext(page, mapName)
         contextLosses: globalThis.__KISAKCOD_WEB__.contextLosses,
         surfaceRecoveryCount:
             globalThis.__KISAKCOD_WEB__.rendererSurface.recoveryCount ?? 0,
+        memoryCursor: globalThis.__retailValidationMemory.length,
         frame: structuredClone(globalThis.__retailValidationFrames.findLast(
             (entry) => entry.worldName?.toLowerCase().includes(name))),
     }), mapName);
@@ -696,6 +740,18 @@ async function recoverMapContext(page, mapName)
         before.frame.viewSubmissionGeneration + 1);
     const completedMs = await page.evaluate(() => performance.now());
     const input = await exerciseRetailInput(page);
+    const contextMemory = await page.evaluate((cursor) => structuredClone(
+        globalThis.__retailValidationMemory.slice(cursor).filter((entry) =>
+            entry.state === "context-lost" || entry.state === "context-restored")),
+    before.memoryCursor);
+    const contextLostMemory = contextMemory.find(
+        (entry) => entry.state === "context-lost");
+    const contextRestoredMemory = contextMemory.find(
+        (entry) => entry.state === "context-restored");
+    expect(contextLostMemory).toBeTruthy();
+    expect(contextRestoredMemory).toBeTruthy();
+    assertMemoryTelemetry(contextLostMemory);
+    assertMemoryTelemetry(contextRestoredMemory);
     const after = await page.evaluate((name) => ({
         contextLosses: globalThis.__KISAKCOD_WEB__.contextLosses,
         surfaceRecoveryCount:
@@ -714,6 +770,16 @@ async function recoverMapContext(page, mapName)
         resourceGenerationAfter: after.frame.resourceGeneration,
         framesResumed: true,
         inputResumed: input,
+        memory: {
+            contextLost: contextLostMemory,
+            contextRestored: contextRestoredMemory,
+            allocatorInUseDeltaBytes:
+                contextRestoredMemory.wasmAllocatorInUseBytes -
+                    contextLostMemory.wasmAllocatorInUseBytes,
+            linearMemoryCapacityDeltaBytes:
+                contextRestoredMemory.wasmLinearMemoryCapacityBytes -
+                    contextLostMemory.wasmLinearMemoryCapacityBytes,
+        },
     };
 }
 
@@ -1104,9 +1170,10 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
     failureStage = "Killhouse database load";
     failureClass = "database";
     const killhouseCursor = await captureMapCursor(page);
-    const killhouseHeapBefore = await heapBytes(page);
+    const killhouseMemoryBefore = await rendererMemorySnapshot(page);
     const killhouseCommandMs = await submitCommand(page, "map killhouse");
     await waitForDatabaseCompletion(page, "killhouse", killhouseCursor.database);
+    const killhouseMemoryAfterDatabase = await rendererMemorySnapshot(page);
     failureStage = "Killhouse CGame initialization";
     failureClass = "cgame";
     await expect.poll(() => page.evaluate((start) =>
@@ -1114,13 +1181,19 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
             (event) => event.stage === "CG_Init complete"), killhouseCursor.lifecycle), {
         timeout: 300_000,
     }).toBe(true);
-    const killhouseHeapAfterLoad = await heapBytes(page);
+    const killhouseMemoryAfterCGame = await rendererMemorySnapshot(page);
     await waitForWorldFrames(page, "killhouse", 120);
-    const killhouseHeapAfterWorld = await heapBytes(page);
+    const killhouseMemoryAfterWorld = await rendererMemorySnapshot(page);
     const killhouseStability = await sustainWorldFrames(
         page, "killhouse", stabilityDurationMs);
-    const killhouseHeapAtStabilityEnd = await heapBytes(page);
     const killhouseMemory = await rendererMemorySnapshot(page);
+    const killhouseMemoryLifecycle = {
+        beforeMapLoad: killhouseMemoryBefore,
+        afterDatabaseCompletion: killhouseMemoryAfterDatabase,
+        afterCGameInit: killhouseMemoryAfterCGame,
+        afterFirstWorldFrame: killhouseMemoryAfterWorld,
+        steadyState: killhouseMemory,
+    };
     const killhouseAudio = await page.evaluate(() => structuredClone(
         globalThis.__retailAudioTelemetry.at(-1) ?? null));
 
@@ -1130,20 +1203,20 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
     failureClass = "lifecycle";
     const killhouseCheckpoint = await writeConfigAndCheckpoint(page);
     const killhouseEvidence = await mapEvidence(page, "killhouse", killhouseCursor,
-        killhouseCommandMs, killhouseHeapBefore, killhouseHeapAfterLoad,
-        killhouseHeapAfterWorld, killhouseHeapAtStabilityEnd, killhouseStability,
-        killhouseMemory, killhouseAudio, killhouseInput, killhouseCheckpoint);
+        killhouseCommandMs, killhouseMemoryLifecycle, killhouseStability,
+        killhouseAudio, killhouseInput, killhouseCheckpoint);
     assertMapEvidence(killhouseEvidence, killhouseMemory);
     failureStage = "Killhouse to CargoShip transition";
     failureClass = "lifecycle";
     const transitionStart = await page.evaluate(() =>
         globalThis.__retailRendererLifecycle.length);
     const cargoshipCursor = await captureMapCursor(page);
-    const cargoshipHeapBefore = await heapBytes(page);
+    const cargoshipMemoryBefore = await rendererMemorySnapshot(page);
     const cargoshipCommandMs = await submitCommand(page, "map cargoship");
     failureStage = "CargoShip database load";
     failureClass = "database";
     await waitForDatabaseCompletion(page, "cargoship", cargoshipCursor.database);
+    const cargoshipMemoryAfterDatabase = await rendererMemorySnapshot(page);
     failureStage = "CargoShip CGame initialization";
     failureClass = "cgame";
     await expect.poll(() => page.evaluate((start) =>
@@ -1151,16 +1224,22 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
             (event) => event.stage === "CG_Init complete"), cargoshipCursor.lifecycle), {
         timeout: 300_000,
     }).toBe(true);
-    const cargoshipHeapAfterLoad = await heapBytes(page);
+    const cargoshipMemoryAfterCGame = await rendererMemorySnapshot(page);
     await waitForWorldFrames(page, "cargoship", 120);
-    const cargoshipHeapAfterWorld = await heapBytes(page);
+    const cargoshipMemoryAfterWorld = await rendererMemorySnapshot(page);
     const cargoshipStability = await sustainWorldFrames(
         page, "cargoship", stabilityDurationMs);
     failureStage = "Killhouse to CargoShip critical input";
     failureClass = "cgame";
     const cargoshipTransitionInput = await exerciseTransitionInput(page);
-    const cargoshipHeapAtStabilityEnd = await heapBytes(page);
     const cargoshipMemory = await rendererMemorySnapshot(page);
+    const cargoshipMemoryLifecycle = {
+        beforeMapLoad: cargoshipMemoryBefore,
+        afterDatabaseCompletion: cargoshipMemoryAfterDatabase,
+        afterCGameInit: cargoshipMemoryAfterCGame,
+        afterFirstWorldFrame: cargoshipMemoryAfterWorld,
+        steadyState: cargoshipMemory,
+    };
     const cargoshipAudio = await page.evaluate(() => structuredClone(
         globalThis.__retailAudioTelemetry.at(-1) ?? null));
     expect(await page.evaluate(() => globalThis.__retailLogs
@@ -1193,9 +1272,8 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
     const cargoshipContextRecovery = await recoverMapContext(page, "cargoship");
 
     const cargoshipEvidence = await mapEvidence(page, "cargoship", cargoshipCursor,
-        cargoshipCommandMs, cargoshipHeapBefore, cargoshipHeapAfterLoad,
-        cargoshipHeapAfterWorld, cargoshipHeapAtStabilityEnd, cargoshipStability,
-        cargoshipMemory, cargoshipAudio, cargoshipInput, cargoshipCheckpoint);
+        cargoshipCommandMs, cargoshipMemoryLifecycle, cargoshipStability,
+        cargoshipAudio, cargoshipInput, cargoshipCheckpoint);
     assertMapEvidence(cargoshipEvidence, cargoshipMemory);
 
     const transitionMemory = await page.evaluate(({ startedMs, endedMs }) =>
@@ -1221,9 +1299,19 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
     expect(unloadEndMemory.dynamicModelImageRecoveryBytes).toBe(0);
     expect(unloadEndMemory.uiImageRecoveryBytes).toBe(0);
     expect(unloadEndMemory.geometryBytes).toBe(0);
+    expect(unloadEndMemory.imageLoadDefCacheEntryCount)
+        .toBe(unloadBeginMemory.imageLoadDefCacheEntryCount);
+    expect(unloadEndMemory.imageLoadDefCacheEncodedPayloadBytes)
+        .toBe(unloadBeginMemory.imageLoadDefCacheEncodedPayloadBytes);
+    expect(unloadEndMemory.imageLoadDefCacheEvictionCount)
+        .toBe(unloadBeginMemory.imageLoadDefCacheEvictionCount);
     expect(transition[unloadEndIndex].oldMapBytesReleased)
         .toBe(unloadBeginMemory.recoveryCopyBytes - unloadEndMemory.recoveryCopyBytes);
     const maximum = (key) => Math.max(...transitionMemory.map(
+        (entry) => entry[key]));
+    const sampledAllocator = transitionMemory.filter(
+        (entry) => entry.wasmAllocatorStatsSampled);
+    const maximumSampled = (key) => Math.max(...sampledAllocator.map(
         (entry) => entry[key]));
     const transitionEvidence = {
         validationResult: "pass",
@@ -1252,6 +1340,17 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
             geometryBytes: maximum("geometryBytes"),
             boundaryRetainedTemporaryUploadBytes: maximum("temporaryUploadBytes"),
             shaderProgramBytes: maximum("shaderProgramCacheEstimateBytes"),
+            wasmProgramBreakOffsetBytes: maximum("wasmProgramBreakOffsetBytes"),
+            wasmAllocatorInUseBytes:
+                maximumSampled("wasmAllocatorInUseBytes"),
+            wasmAllocatorFootprintBytes:
+                maximumSampled("wasmAllocatorFootprintBytes"),
+            imageLoadDefCacheEntryCount:
+                maximum("imageLoadDefCacheEntryCount"),
+            imageLoadDefCacheEncodedPayloadBytes:
+                maximum("imageLoadDefCacheEncodedPayloadBytes"),
+            imageLoadDefCacheEvictionCount:
+                maximum("imageLoadDefCacheEvictionCount"),
             imagePoolRecoveryBytes: {
                 world: maximum("worldImageRecoveryBytes"),
                 staticModels: maximum("staticModelImageRecoveryBytes"),
@@ -1261,6 +1360,8 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
             },
             wasmLinearMemoryCapacityBytes: Math.max(
                 cargoshipEvidence.wasmLinearMemoryCapacityBytes.beforeMapLoad,
+                cargoshipEvidence.wasmLinearMemoryCapacityBytes
+                    .afterDatabaseCompletion,
                 cargoshipEvidence.wasmLinearMemoryCapacityBytes.afterCGameInit,
                 cargoshipEvidence.wasmLinearMemoryCapacityBytes.afterWorldPublication),
         },
@@ -1275,21 +1376,22 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
     const cargoshipToBlackoutCursor = await page.evaluate(() =>
         globalThis.__retailRendererLifecycle.length);
     const blackoutCursor = await captureMapCursor(page);
-    const blackoutHeapBefore = await heapBytes(page);
+    const blackoutMemoryBefore = await rendererMemorySnapshot(page);
     const blackoutCommandMs = await submitCommand(page, "map blackout");
     failureStage = "Blackout database load";
     failureClass = "database";
     await waitForDatabaseCompletion(page, "blackout", blackoutCursor.database);
+    const blackoutMemoryAfterDatabase = await rendererMemorySnapshot(page);
     failureStage = "Blackout canonical lifecycle";
     failureClass = "cgame";
     await waitForLifecycleStages(
         page, blackoutCursor.lifecycle, canonicalMapLifecycleStages);
-    const blackoutHeapAfterLoad = await heapBytes(page);
+    const blackoutMemoryAfterCGame = await rendererMemorySnapshot(page);
     failureStage = "Blackout first world frame";
     failureClass = "renderer";
     const blackoutFrame = await firstWorldFrameEvidence(
         page, "blackout", blackoutCursor.frames);
-    const blackoutHeapAfterWorld = await heapBytes(page);
+    const blackoutMemoryAfterWorld = await rendererMemorySnapshot(page);
     const cargoshipToBlackout = await rendererTransitionEvidence(
         page, cargoshipToBlackoutCursor, blackoutCommandMs,
         blackoutFrame.observedMs);
@@ -1300,8 +1402,14 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
     failureStage = "CargoShip to Blackout critical input";
     failureClass = "cgame";
     const blackoutTransitionInput = await exerciseTransitionInput(page);
-    const blackoutHeapAtStabilityEnd = await heapBytes(page);
     const blackoutMemory = await rendererMemorySnapshot(page);
+    const blackoutMemoryLifecycle = {
+        beforeMapLoad: blackoutMemoryBefore,
+        afterDatabaseCompletion: blackoutMemoryAfterDatabase,
+        afterCGameInit: blackoutMemoryAfterCGame,
+        afterFirstWorldFrame: blackoutMemoryAfterWorld,
+        steadyState: blackoutMemory,
+    };
     const blackoutAudio = await page.evaluate(() => structuredClone(
         globalThis.__retailAudioTelemetry.at(-1) ?? null));
     failureStage = "Blackout gameplay validation";
@@ -1312,9 +1420,8 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
     const blackoutCheckpoint = await writeConfigAndCheckpoint(page);
     const blackoutEvidence = await mapEvidence(
         page, "blackout", blackoutCursor, blackoutCommandMs,
-        blackoutHeapBefore, blackoutHeapAfterLoad, blackoutHeapAfterWorld,
-        blackoutHeapAtStabilityEnd, blackoutStability, blackoutMemory,
-        blackoutAudio, blackoutInput, blackoutCheckpoint);
+        blackoutMemoryLifecycle, blackoutStability, blackoutAudio,
+        blackoutInput, blackoutCheckpoint);
     blackoutEvidence.canonicalLifecycle = await lifecycleEvidence(
         page, blackoutCursor.lifecycle);
     assertMapEvidence(blackoutEvidence, blackoutMemory);
@@ -1497,7 +1604,7 @@ if (phase3TargetMap) {
             const transitionInCursor = await page.evaluate(() =>
                 globalThis.__retailRendererLifecycle.length);
             const targetCursor = await captureMapCursor(page);
-            const targetHeapBefore = await heapBytes(page);
+            const targetMemoryBefore = await rendererMemorySnapshot(page);
             const targetCommandMs = await submitCommand(
                 page, `map ${phase3TargetMap}`);
 
@@ -1505,6 +1612,7 @@ if (phase3TargetMap) {
             failureClass = "database";
             await waitForDatabaseCompletion(
                 page, phase3TargetMap, targetCursor.database);
+            const targetMemoryAfterDatabase = await rendererMemorySnapshot(page);
             failureStage = `${phase3TargetMap} ClipMap/world initialization`;
             await waitForLifecycleStages(page, targetCursor.lifecycle, [
                 "CM_LoadMap complete",
@@ -1523,22 +1631,28 @@ if (phase3TargetMap) {
                 "CG_Init complete",
                 "CL_InitCGame complete",
             ]);
-            const targetHeapAfterLoad = await heapBytes(page);
+            const targetMemoryAfterCGame = await rendererMemorySnapshot(page);
             failureStage = `${phase3TargetMap} first world frame`;
             failureClass = "renderer";
             const targetFrame = await firstWorldFrameEvidence(
                 page, phase3TargetMap, targetCursor.frames);
-            const targetHeapAfterWorld = await heapBytes(page);
+            const targetMemoryAfterWorld = await rendererMemorySnapshot(page);
             const transitionIn = await rendererTransitionEvidence(
                 page, transitionInCursor, targetCommandMs, targetFrame.observedMs);
 
             failureStage = `${phase3TargetMap} 60-second stability`;
             const targetStability = await sustainWorldFrames(
                 page, phase3TargetMap, 60_000);
-            const targetHeapAtStabilityEnd = await heapBytes(page);
             failureStage = `${phase3TargetMap} renderer memory`;
             failureClass = "memory";
             const targetMemory = await rendererMemorySnapshot(page);
+            const targetMemoryLifecycle = {
+                beforeMapLoad: targetMemoryBefore,
+                afterDatabaseCompletion: targetMemoryAfterDatabase,
+                afterCGameInit: targetMemoryAfterCGame,
+                afterFirstWorldFrame: targetMemoryAfterWorld,
+                steadyState: targetMemory,
+            };
             failureStage = `${phase3TargetMap} gameplay input/audio`;
             failureClass = "unknown";
             const targetInput = await exerciseRetailInput(page);
@@ -1550,9 +1664,8 @@ if (phase3TargetMap) {
             const targetCheckpoint = await writeConfigAndCheckpoint(page);
             const targetEvidence = await mapEvidence(
                 page, phase3TargetMap, targetCursor, targetCommandMs,
-                targetHeapBefore, targetHeapAfterLoad, targetHeapAfterWorld,
-                targetHeapAtStabilityEnd, targetStability, targetMemory,
-                targetAudio, targetInput, targetCheckpoint);
+                targetMemoryLifecycle, targetStability, targetAudio,
+                targetInput, targetCheckpoint);
             targetEvidence.canonicalLifecycle = await lifecycleEvidence(
                 page, targetCursor.lifecycle);
             assertMapEvidence(targetEvidence, targetMemory);

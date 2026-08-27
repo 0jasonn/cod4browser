@@ -130,8 +130,12 @@ test("surface restoration failure remains terminal and non-resident", async ({ p
 test("world unload releases renderer recovery data without replacing the context", async ({ page }) => {
     await page.addInitScript(() => {
         globalThis.__rendererLifecycle = [];
+        globalThis.__rendererMemory = [];
         globalThis.addEventListener("kisakcod:renderer-lifecycle", (event) => {
             globalThis.__rendererLifecycle.push(structuredClone(event.detail));
+        });
+        globalThis.addEventListener("kisakcod:renderer-memory", (event) => {
+            globalThis.__rendererMemory.push(structuredClone(event.detail));
         });
     });
     await boot(page);
@@ -149,6 +153,24 @@ test("world unload releases renderer recovery data without replacing the context
     expect(lifecycle[1].contextGenerationBefore)
         .toBe(lifecycle[1].contextGenerationAfter);
     expect(lifecycle[1].recoveryBytes).toBeLessThan(lifecycle[0].recoveryBytes);
+    const memory = await page.evaluate(() => structuredClone(
+        globalThis.__rendererMemory.filter((event) =>
+            event.state === "world-unload-begin" || event.state === "world-unloaded")));
+    expect(memory).toHaveLength(2);
+    expect(memory[0].wasmAllocatorStatsSampled).toBe(true);
+    expect(memory[1].wasmAllocatorStatsSampled).toBe(true);
+    expect(memory[1].wasmLinearMemoryCapacityBytes)
+        .toBe(memory[0].wasmLinearMemoryCapacityBytes);
+    expect(memory[1].wasmAllocatorInUseBytes)
+        .toBeLessThanOrEqual(memory[0].wasmAllocatorInUseBytes);
+    for (const field of [
+        "imageLoadDefCacheEntryCount",
+        "imageLoadDefCacheEncodedPayloadBytes",
+        "imageLoadDefCacheBudgetBytes",
+        "imageLoadDefCacheEvictionCount",
+    ]) {
+        expect(memory[1][field]).toBe(memory[0][field]);
+    }
 });
 
 test("reports disjoint renderer recovery memory categories", async ({ page }) => {
@@ -183,6 +205,31 @@ test("reports disjoint renderer recovery memory categories", async ({ page }) =>
         .toBe(sample.recoveryCopyBytes);
     expect(sample.gpuTextureEstimateBytes)
         .toBeGreaterThanOrEqual(sample.decodedTextureSourceBytes);
+    const heapCapacity = await page.evaluate(() =>
+        globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestHeapBytes"));
+    expect(sample.wasmLinearMemoryCapacityBytes).toBe(heapCapacity);
+    expect(sample.wasmProgramBreakOffsetBytes).toBeGreaterThan(0);
+    expect(sample.wasmProgramBreakOffsetBytes)
+        .toBeLessThanOrEqual(sample.wasmLinearMemoryCapacityBytes);
+    expect(sample.wasmLinearMemoryCapacityBytes)
+        .toBeLessThanOrEqual(sample.wasmLinearMemoryMaximumBytes);
+    expect(sample.wasmAllocatorStatsSampled).toBe(true);
+    expect(sample.wasmAllocatorInUseBytes + sample.wasmAllocatorFreeBytes)
+        .toBe(sample.wasmAllocatorFootprintBytes);
+    expect(sample.wasmAllocatorTopFreeBytes)
+        .toBeLessThanOrEqual(sample.wasmAllocatorFreeBytes);
+    for (const field of [
+        "imageLoadDefCacheEntryCount",
+        "imageLoadDefCacheEncodedPayloadBytes",
+        "imageLoadDefCacheBudgetBytes",
+        "imageLoadDefCacheEvictionCount",
+    ]) {
+        expect(Number.isSafeInteger(sample[field])).toBe(true);
+        expect(sample[field]).toBeGreaterThanOrEqual(0);
+    }
+    expect(sample.imageLoadDefCacheBudgetBytes).toBeGreaterThan(0);
+    expect(sample.imageLoadDefCacheEncodedPayloadBytes)
+        .toBeLessThanOrEqual(sample.imageLoadDefCacheBudgetBytes);
 });
 
 test("keeps an initial WebGL pipeline failure terminal", async ({ page }) => {
