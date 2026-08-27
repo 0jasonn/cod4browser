@@ -5,53 +5,103 @@ Call of Duty 4 installation through the browser picker; it does not copy them
 into the repository or CI artifacts. Close other cod4browser tabs first so the
 test can acquire the exclusive writable-home lease.
 
-After the pinned toolchain, npm dependencies, and Chromium are installed, run:
+After installing the pinned toolchain, npm dependencies, and target browsers,
+run the permanent three-map baseline in headed branded Chrome and Edge:
 
 ```powershell
-.\tools\validate_web_retail.ps1 -RetailRoot 'D:\Games\Call of Duty 4'
+.\tools\validate_web_retail.ps1 `
+    -RetailRoot 'D:\Games\Call of Duty 4' `
+    -Browser chrome
+
+.\tools\validate_web_retail.ps1 `
+    -RetailRoot 'D:\Games\Call of Duty 4' `
+    -Browser msedge
 ```
 
+Chrome is the default. `chromium`, `chrome`, and `msedge` are accepted. The
+wrapper is headed unless `-Headless` is supplied; headless runs are functional
+evidence, not the primary performance benchmark. Leave the game window in the
+foreground during each timed window.
+
 The command builds the diagnostic artifact because forced WebGL context loss
-is deliberately unavailable to the production protocol. The test otherwise
-uses the normal importer and canonical runtime. It requires both
-`killhouse.ff` and `cargoship.ff` and checks:
+and canonical gameplay-state probes are deliberately unavailable to the
+production protocol. The test otherwise uses the normal importer and
+canonical runtime. It requires `killhouse.ff`, `cargoship.ff`, and
+`blackout.ff`, then runs:
+
+```text
+Killhouse -> CargoShip -> Blackout -> Killhouse
+```
+
+It verifies:
 
 - installation import, persistence, and canonical mount;
-- canonical `map killhouse` completion through `CG_Init`, a real world frame,
-  and a 60-second stability window;
-- visible W/A/S/D movement, jump, mouse look, primary-fire audio, secondary aim,
-  wheel pulses, Escape/menu, and pointer-lock recovery through the canonical
-  input queue;
-- checkpoint duration and persisted-byte evidence after `writeconfig`;
-- an in-process `killhouse` → `cargoship` transition with ordered unload begin,
-  unload end, and new-world publication events on one WebGL context;
-- the same CGame/frame/stability/input/audio/checkpoint checks on `cargoship`;
-- forced WebGL2 context loss, recovery, resumed CargoShip frames and input;
-- heap, renderer recovery/GPU/geometry/upload/program, frame-percentile, audio,
-  transition-peak, shutdown-flush, and reload evidence in one non-proprietary
-  `KISAK_RETAIL_RESULT` JSON record.
+- database completion, ClipMap/world, server, game, cgame, and actual world
+  frames on every map;
+- a foreground 60-second window after `page.bringToFront()`, sampled every
+  second for `document.visibilityState`, focus, and background transitions;
+- actual frame intervals, p50/p95/p99, FPS equivalents, game/wall advancement,
+  renderer identity, browser name/version, and performance-window validity;
+- W/A/S/D movement, jump, mouse look, canonical clip/shot response to MOUSE1,
+  canonical ADS/secondary response to MOUSE2, and canonical wheel selection or
+  `NOT_APPLICABLE_SINGLE_WEAPON`;
+- Escape/menu state, pointer-lock loss and reacquisition, full initial input,
+  and a reduced critical subset after each in-process transition;
+- decoded gameplay audio, config checkpoint duration/bytes, shutdown flush,
+  and config reload;
+- ordered unload begin/end and new-world publication on one WebGL context, with
+  old map-local recovery retired before replacement publication;
+- forced WebGL2 context loss/recovery on CargoShip, Blackout, and returned
+  Killhouse, followed by resumed frames and input; and
+- Wasm allocator/capacity snapshots before load, after database completion,
+  after cgame, after first frame, at steady state, unload/publication, and
+  context recovery, plus logical decoded texture size, actual encoded/source
+  recovery, GPU estimates, geometry, transient upload, programs, and audio.
 
-The command is intentionally skipped unless `KISAK_COD4_RETAIL_ROOT` is set.
-Record the exact commit, browser version, matrix result, and renderer-memory
-events before changing the recovery budget or compatibility matrix.
+The result is one non-proprietary schema-v2 `KISAK_RETAIL_RESULT` JSON record.
+If a timed window becomes hidden or unfocused, its performance fields are
+invalidated with `performanceWindowValid: false`; slow background timing must
+not be used to assign or remove `PLAYABLE` status.
 
-## Phase 3 campaign map
+The wrapper sets `KISAK_COD4_RETAIL_ROOT` itself. The Playwright case is
+skipped only when invoked directly without that environment variable. Record
+the exact commit, clean/dirty state, browser version, reference hardware,
+foreground validity, result, and renderer-memory events before changing the
+recovery budget or compatibility matrix.
 
-After the two-map matrix and memory review pass, validate the first additional
-campaign map with:
+## Additional campaign maps
+
+Validate one discovered single-player zone at a time after the baseline is
+green:
 
 ```powershell
 .\tools\validate_web_campaign_map.ps1 `
     -RetailRoot 'D:\Games\Call of Duty 4' `
-    -Map blackout
+    -Map airplane `
+    -Browser chrome
 ```
 
-The wrapper currently accepts only `blackout`. It starts with a fresh browser
-profile, reaches a CargoShip world frame, transitions into Blackout, verifies
-the exact canonical DB and runtime lifecycle, runs Blackout for at least 60
-seconds, exercises gameplay input/audio/config persistence, records memory,
-forces WebGL2 context recovery, and transitions out to Killhouse before clean
-shutdown and reload. It emits one non-proprietary
-`KISAK_RETAIL_PHASE3_RESULT` JSON record. This opt-in test is not registered
-without an explicit campaign-map request, so routine browser-suite skip counts
-and the authoritative Killhouse-to-CargoShip matrix remain unchanged.
+The wrapper accepts a lowercase zone name containing letters, numbers, or
+underscores, rejects `mp_*` and `*_mp`, and requires the selected fastfile in
+the supplied installation. It starts with a fresh browser profile, reaches a
+CargoShip world frame, transitions into the target, verifies its full
+canonical lifecycle, runs a foreground 60-second window, exercises canonical
+gameplay input/audio/config persistence, records memory, forces WebGL2 context
+recovery, and transitions to Killhouse before clean shutdown and reload.
+
+It emits one non-proprietary `KISAK_RETAIL_PHASE3_RESULT` JSON record. The
+opt-in campaign case is skipped without an explicit target, so routine browser
+suites and the permanent Killhouse -> CargoShip -> Blackout -> Killhouse
+baseline remain separate.
+
+Use these compatibility results:
+
+- `FUNCTIONAL` for a passing sustained runtime with core gameplay/input/audio;
+- `PLAYABLE` only when `FUNCTIONAL` and a valid foreground window meets the
+  current reference of average >=30 FPS, p95 <=50 ms, and game/wall ratio
+  >=0.90; and
+- `BLOCKED` only for a deterministic compatibility failure at an identified
+  canonical boundary.
+
+The threshold describes the recorded reference hardware/browser, not a
+universal user requirement. Discovery alone remains `UNTESTED`.

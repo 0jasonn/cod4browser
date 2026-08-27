@@ -41,6 +41,7 @@ oracle.
 | Seam | Why it differs |
 | --- | --- |
 | `database/db_file_platform.cpp` | Maps DB file operations to the Worker filesystem. |
+| `database/db_generated_image_platform.*` | Copies transient canonical image load definitions at the native texture-upload boundary into a bounded process-global source cache; canonical `GfxImage` identity remains authoritative. |
 | `qcommon/common_runtime_commands.cpp` | Keeps the post-mount common-command continuation canonical and separate from browser hosting. |
 | `web_client_server_lifecycle.cpp` | Continues synchronous-looking native startup after the main-thread host mounts user files. |
 | `web_canonical_gfxworld.cpp` | Observes final DB publication and submits the bounded compatibility surface; the full renderer frontend remains the long-term owner. |
@@ -56,7 +57,7 @@ platform makes that behavior impossible.
 | --- | --- |
 | Host/Worker split | DOM, picker and persistent-storage ownership stay on the main thread; Wasm and OffscreenCanvas run in a Worker. |
 | Storage | OPFS/IndexedDB-backed import, validation, atomic replacement and synchronous Worker reads. File System Access is optional. |
-| Rendering | WebGL2 context, buffers, textures, shaders, render targets, context recovery and presentation. GPU handles stay private to the backend. |
+| Rendering | WebGL2 context, buffers, textures, shaders, render targets, context recovery and presentation. GPU handles stay private to the backend. The shared 2D image pools retain the selected canonical encoded source and use the existing image decoder transiently for initial upload and context restoration; this is recovery data at the platform boundary, not a second asset model or parser. |
 | Input host | Pointer lock, keyboard/mouse normalization, focus release and cursor mode. |
 | Audio device | AudioContext policy, gesture resume, buffers/nodes and PCM scheduling. |
 | Main loop | Non-blocking Emscripten frame pump; no Asyncify or pthread requirement. |
@@ -90,58 +91,123 @@ proof jobs are retired. Canonical runtime tests replace their useful coverage.
   canonical scenes, without introducing browser asset types.
 - Add a legal browser cinematic path or a documented graceful omission.
 - Add gamepad input when it becomes a product requirement.
-- Carry the measured Phase 2 renderer-resource classifications forward and
-  gather comparable map evidence before changing recovery policy; profile
-  streaming and Worker scheduling before considering pthreads.
+- Continue measuring the encoded-source recovery policy on later campaign
+  batches. Consider source deduplication or reload from imported storage only
+  if current retained-source or recovery-latency evidence justifies another
+  strategy; profile streaming and Worker scheduling before considering
+  pthreads.
 - Design and document a gateway before compiling multiplayer transport code.
 - Retire the bounded `web_engine_world_surface` compatibility path once its
   remaining tests are covered by the canonical frontend.
 
 ## Current retail and memory evidence
 
-The strengthened Killhouse/CargoShip matrix passed on 2026-08-26 at clean
-source SHA `ac063bb20cbc4027497841322d87c2069d736939`. Both maps reached
-canonical DB publication, cgame initialization, real world frames, at least
-60 seconds of sustained rendering, input, audio, and configuration
-checkpoint/reload. The transition and forced WebGL context recovery also
-passed. Exact values are in
-[retail-phase1-ac063bb2.json](evidence/retail-phase1-ac063bb2.json).
+### Foreground baseline and campaign status
 
-The first Phase 3 campaign batch then validated Blackout as PLAYABLE on the
-same date at clean source SHA
-`6be926cb4e78693f9f6e638c348b0ee0f908b45f`. A browser-only 20,000
-static-model-instance ceiling initially rejected canonical spot-shadow
-instance 20,000 after DB/server/game/cgame startup. Commit `164fc1f2` restored
-native IW3's 65,536-instance bound at the portable renderer seam. CargoShip to
-Blackout to Killhouse transitions, a 60-second Blackout window, input, audio,
-configuration persistence, context recovery, and shutdown/reload then passed.
-Exact values are in
-[retail-phase3-6be926cb.json](evidence/retail-phase3-6be926cb.json).
+At clean source SHA `c66d41e1`, headed branded Chrome 151 and Edge 151 on the
+Windows 11 reference machine each passed the complete
+Killhouse -> CargoShip -> Blackout -> Killhouse matrix in 4.6 minutes. Every
+timed window was visible and focused, with zero background transitions. Both
+browsers passed canonical loading and publication, gameplay input and audio,
+ordered map retirement/publication, checkpoint persistence, forced WebGL
+context loss/restoration, and the return to Killhouse.
 
-The renderer telemetry categories are disjoint. Their current lifecycle
-classification is:
+Chrome measured Killhouse at 33.639893 average FPS-equivalent, 32.26 ms p95,
+and a 0.998402 game-time/wall-time ratio. Edge measured 34.116843 average
+FPS-equivalent, 31.955 ms p95, and a 0.998882 ratio. Against the initial
+reference threshold of 30 average FPS, 50 ms p95, and 0.90 ratio, Killhouse is
+PLAYABLE; CargoShip and Blackout remain FUNCTIONAL. The threshold describes
+this reference hardware, not a universal requirement.
 
-| Resource | Lifecycle/ownership |
+The next clean Chrome campaign batch at source SHA `247980a6` added three
+representative maps. Airplane is PLAYABLE at 59.946157 average FPS-equivalent,
+18.65 ms p95, and a 0.999992 ratio. Hunted is FUNCTIONAL at 19.079996 average,
+55.40 ms p95, and a 0.993989 ratio. Bog A is FUNCTIONAL at 21.210488 average,
+56.64 ms p95, and a 0.999457 ratio. Each passed canonical DB/world,
+server/game/cgame, a foreground 60-second window, full gameplay input and
+audio, checkpoint persistence, transition in and out, and context recovery.
+The structured record is
+[retail-campaign-247980a6.json](evidence/retail-campaign-247980a6.json).
+
+The current six-map status is therefore:
+
+| Result | Maps |
 | --- | --- |
-| Decoded world/static/dynamic/UI/supplemental textures | Regenerable, reloadable from user storage, map-local |
-| Retained geometry and portable draw commands | Regenerable, map-local |
-| GPU map textures and buffers | Regenerable, map-local |
-| Render targets and fixed pipeline programs | Regenerable, intentionally global |
-| Shader source/cache | Regenerable, intentionally global; 0 B measured in Phase 1 |
-| Temporary uploads | Regenerable, map-local; 0 B measured in Phase 1 |
-| Audio data | Regenerable, reloadable, predominantly map-local |
-| Wasm linear-memory capacity | Allocator capacity; outside retained renderer ownership |
+| PLAYABLE | Killhouse, Airplane |
+| FUNCTIONAL | CargoShip, Blackout, Hunted, Bog A |
+| RENDERS / LOADS / BLOCKED / REGRESSION | None in the validated six-map set |
 
-No irreplaceable retained resource was observed; cross-pool/content duplicates
-were not measured. Phase 2 keeps the existing previous-map recovery eviction:
-old aggregate CPU recovery fell from 1,521,922,580 B to zero before new-world
-publication, so no old/new overlap was observed. The 800 MiB limit remains a
-per retained-image-pool admission cap. Killhouse's static-model pool reached
-817,908,800 of 838,860,800 B (97.50%, 20,952,000 B headroom), so lowering it
-would be unsupported. Wasm capacity remaining at 2,013,724,672 B reflects
-monotonic allocator capacity, not an eviction failure. These measurements are
-a baseline; no unmeasured before/after (A/B) timing is claimed. Authored mip
-levels are included in dynamic/UI pool admission.
+### Encoded recovery sources
+
+Commit `c66d41e1` changed one recovery strategy. The world, static-model,
+dynamic-model, and UI 2D pools still decode each selected image once for
+validation, decoded-byte admission, and its initial WebGL upload, but they no
+longer retain that decoded RGBA allocation. They retain either the exact DB
+load-definition metadata and payload, the complete IWI member read through the
+canonical filesystem, or the tiny raw `$white` pixels. Context restoration
+decodes one image at a time through the existing Kisak image decoder and then
+releases that temporary decoded buffer.
+
+Sky/reflection cubes, lighting atlases, water, render targets, and other
+supplemental paths were not converted by this strategy. Telemetry consequently
+distinguishes:
+
+- `textureRecoverySourceBytes`: actual CPU texture sources retained for
+  recovery;
+- `decodedTextureSourceBytes`: logical decoded texture size used for admission
+  and GPU estimates, not retained RGBA bytes for the converted pools;
+- `recoveryCopyBytes`: actual texture recovery sources plus retained geometry
+  and shader/program recovery estimates; and
+- `temporaryUploadBytes`: the largest transient decoded upload observed.
+
+The unchanged 800 MiB limit remains a decoded-byte admission limit for each
+shared image pool, not an aggregate actual-recovery budget. It was neither
+raised nor arbitrarily lowered.
+
+The A-F classes are A (irreplaceable), B (cheaply regenerable), C
+(reloadable/redecodable from canonical imported source), D (duplicated by
+content), E (process-global), and F (map-local):
+
+| Resource | Classes | Lifecycle/ownership |
+| --- | --- | --- |
+| Retained LoadDef/IWI 2D recovery sources | B/C/F; LoadDef copies are also D while cached | Map-local renderer-backend recovery data derived from canonical DB or filesystem sources; discarded on map retirement. |
+| Transient decoded 2D pixels | B | Recreated one image at a time for upload or context recovery and then released; the measured peak was 16,777,216 B. |
+| Decoded supplemental texture recovery | B/C/F | Existing map-local cube, lighting, water, and related paths; not changed by `c66d41e1`. |
+| DB LoadDef source cache | C/D/E | Bounded process-global cache at the canonical generated-image upload seam. A renderer LoadDef recovery copy duplicates its selected cached payload so later cache replacement cannot invalidate live recovery. |
+| Retained geometry and portable draw commands | B/F | Regenerable map-local renderer data. |
+| GPU map textures and buffers | B/F | Regenerable backend resources; destroyed and recreated without becoming engine state. |
+| Render targets and fixed pipeline programs | B/E | Intentionally process-global backend resources. |
+| Audio data | B/C, predominantly F | Canonical audio feeding the browser device boundary. |
+| Wasm linear-memory capacity | Not a retained-resource class | Allocator capacity, reported separately from renderer ownership. |
+
+No class-A retained resource was observed. Content identity across distinct
+image assets has not been measured; class D above is limited to the traced
+LoadDef cache/recovery copy of the same payload.
+
+On the same headed-Chrome Killhouse comparison point, the instrumentation-only
+implementation and encoded-source implementation measured:
+
+| Metric | Decoded retention | Encoded sources | Reduction |
+| --- | ---: | ---: | ---: |
+| Aggregate renderer recovery | 1,417,257,708 B | 506,423,759 B | 64.27% |
+| Allocator bytes in use | 1,731,297,456 B | 820,736,432 B | 52.59% |
+| Wasm linear-memory capacity | 1,809,121,280 B | 989,921,280 B | 45.28% |
+| Program break | 1,808,785,408 B | 901,816,320 B | 50.14% |
+
+The clean Chrome Killhouse run at `c66d41e1` reached its first frame in
+5,688.82 ms and reported 1,426,285,608 B logical decoded textures,
+428,211,983 B actual retained texture sources, 397,212,519 B encoded image
+sources, 518,271,299 B aggregate renderer recovery, 1,447,282,760 B estimated
+GPU textures, 90,059,316 B geometry, and 989,921,280 B Wasm capacity. Edge
+reached the Killhouse first frame in 5,777 ms.
+
+Re-decoding trades some restoration latency for the memory reduction. Chrome
+restored CargoShip in 1,355.63 ms, Blackout in 1,834.105 ms, and returned
+Killhouse in 2,008.82 ms; Edge returned Killhouse in 1,907.715 ms. Every
+recovery resumed real world frames and gameplay input, so the strategy passed
+the clean Chrome and Edge acceptance matrices without asset corruption or a
+map-lifecycle regression. Continue recording this latency rather than treating
+the memory saving as free.
 
 ## Verification
 

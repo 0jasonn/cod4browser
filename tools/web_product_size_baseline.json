@@ -1,19 +1,24 @@
 {
-  "approvedCommit": "7a32cba07527d1179001fc088d72244eaab00411",
-  "reason": "Post-correctness baseline after filesystem ordering, ownership, capability, input, audio, and regression-coverage fixes.",
+  "approvedCommit": "658e778784da6a13dcfbde8189f5c98d48f17334",
+  "reason": "Foreground retail validation, encoded renderer recovery sources, and production diagnostic-payload cleanup.",
+  "toolchain": {
+    "emscripten": "6.0.6",
+    "cmake": "4.2.0-rc3",
+    "ninja": "1.13.2"
+  },
   "headroomPercent": 5,
   "artifacts": {
     "wasm": {
-      "baselineBytes": 3166496,
-      "budgetBytes": 3324821
+      "baselineBytes": 3173694,
+      "budgetBytes": 3332379
     },
     "javascript": {
-      "baselineBytes": 325143,
-      "budgetBytes": 341401
+      "baselineBytes": 340615,
+      "budgetBytes": 357646
     },
     "site": {
-      "baselineBytes": 3501767,
-      "budgetBytes": 3676856
+      "baselineBytes": 3524840,
+      "budgetBytes": 3701082
     }
   },
   "rawWasmExportCap": 24,
