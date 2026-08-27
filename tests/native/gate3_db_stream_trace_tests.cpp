@@ -2329,6 +2329,14 @@ const PhysicalMemory *PMem_GetState()
 
 int main()
 {
+    DB_WebClearImageLoadDefs();
+    const WebDbImageLoadDefStats emptyImageLoadDefStats =
+        DB_WebGetImageLoadDefStats();
+    assert(emptyImageLoadDefStats.entryCount == 0u);
+    assert(emptyImageLoadDefStats.encodedPayloadBytes == 0u);
+    assert(emptyImageLoadDefStats.budgetBytes == 256u * 1024u * 1024u);
+    assert(emptyImageLoadDefStats.evictionCount == 0u);
+
     DB_RegisterStringZoneOwnership(100u, 1u);
     DB_RegisterStringZoneOwnership(100u, 2u);
     DB_RegisterStringZoneOwnership(101u, 1u);
@@ -2815,6 +2823,21 @@ int main()
     assert(DB_WebGetImageLoadDef(publishedImage.image, publishedImageLoadDef));
     assert(publishedImageLoadDef.format == 21);
     assert(publishedImageLoadDef.byteLength == 4);
+    const WebDbImageLoadDefStats populatedImageLoadDefStats =
+        DB_WebGetImageLoadDefStats();
+    assert(populatedImageLoadDefStats.entryCount == 1u);
+    assert(populatedImageLoadDefStats.encodedPayloadBytes == 4u);
+    assert(populatedImageLoadDefStats.budgetBytes ==
+        emptyImageLoadDefStats.budgetBytes);
+    assert(populatedImageLoadDefStats.evictionCount == 0u);
+    DB_WebClearImageLoadDefs();
+    const WebDbImageLoadDefStats clearedImageLoadDefStats =
+        DB_WebGetImageLoadDefStats();
+    assert(clearedImageLoadDefStats.entryCount == 0u);
+    assert(clearedImageLoadDefStats.encodedPayloadBytes == 0u);
+    assert(clearedImageLoadDefStats.budgetBytes ==
+        emptyImageLoadDefStats.budgetBytes);
+    assert(clearedImageLoadDefStats.evictionCount == 0u);
     const water_t *publishedWater =
         publishedMaterial.material->textureTable[1].u.water;
     assert(publishedWater && publishedWater->M == 2 && publishedWater->N == 2);

@@ -21,7 +21,16 @@ struct WebDbImageLoadDef
     std::size_t byteLength;
 };
 
+struct WebDbImageLoadDefStats
+{
+    std::size_t entryCount;
+    std::size_t encodedPayloadBytes;
+    std::size_t budgetBytes;
+    std::uint64_t evictionCount;
+};
+
 // Returns the most recently loaded transient payload for the canonical image
 // name. The view remains valid until another image load or an explicit clear.
 bool DB_WebGetImageLoadDef(const GfxImage *image, WebDbImageLoadDef &loadDef);
+WebDbImageLoadDefStats DB_WebGetImageLoadDefStats();
 void DB_WebClearImageLoadDefs();

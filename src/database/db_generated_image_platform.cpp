@@ -33,6 +33,7 @@ std::unordered_map<std::string, RetainedImageLoadDef> g_imageLoadDefs;
 std::deque<RetainedImageKey> g_imageLoadOrder;
 std::size_t g_imageLoadDefBytes = 0u;
 std::uint64_t g_imageLoadGeneration = 0u;
+std::uint64_t g_imageLoadDefEvictionCount = 0u;
 
 void EvictImageLoadDefs()
 {
@@ -49,6 +50,7 @@ void EvictImageLoadDefs()
         }
         g_imageLoadDefBytes -= found->second.data.size();
         g_imageLoadDefs.erase(found);
+        ++g_imageLoadDefEvictionCount;
     }
 }
 } // namespace
@@ -105,6 +107,16 @@ bool DB_WebGetImageLoadDef(const GfxImage *image, WebDbImageLoadDef &loadDef)
     loadDef.data = retained.data.data();
     loadDef.byteLength = retained.data.size();
     return true;
+}
+
+WebDbImageLoadDefStats DB_WebGetImageLoadDefStats()
+{
+    return {
+        g_imageLoadDefs.size(),
+        g_imageLoadDefBytes,
+        WEB_DB_IMAGE_PAYLOAD_BUDGET,
+        g_imageLoadDefEvictionCount,
+    };
 }
 
 void DB_WebClearImageLoadDefs()
