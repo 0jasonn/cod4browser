@@ -594,6 +594,21 @@ uint32_t __cdecl XAnimGetInfoIndex_r(const XAnimTree_s* tree, uint32_t animIndex
     info = &g_xAnimInfo[infoIndex];
     if (!info->inuse)
         MyAssertHandler(".\\xanim\\xanim.cpp", 2436, 0, "%s", "info->inuse");
+    if (info->tree != tree)
+        MyAssertHandler(
+            ".\\xanim\\xanim.cpp",
+            2437,
+            0,
+            "XAnim lookup crossed tree ownership\n\tinfoIndex=%u animIndex=%u requestedAnimIndex=%u tree=%p ownerTree=%p root=%u parent=%u prev=%u next=%u",
+            infoIndex,
+            info->animIndex,
+            animIndex,
+            tree,
+            info->tree,
+            tree->children,
+            info->parent,
+            info->prev,
+            info->next);
     if (info->animIndex == animIndex)
         return infoIndex;
     prevAnimIndex = 0;
@@ -813,6 +828,21 @@ void __cdecl XAnimUpdateOldTime(
     info = &g_xAnimInfo[infoIndex];
     if (!info->inuse)
         MyAssertHandler(".\\xanim\\xanim.cpp", 1674, 0, "%s", "info->inuse");
+    if (info->tree != tree)
+        MyAssertHandler(
+            ".\\xanim\\xanim.cpp",
+            1675,
+            0,
+            "XAnim update crossed tree ownership\n\tinfoIndex=%u animIndex=%u entnum=%u tree=%p ownerTree=%p root=%u parent=%u prev=%u next=%u",
+            infoIndex,
+            info->animIndex,
+            obj->entnum,
+            tree,
+            info->tree,
+            tree->children,
+            info->parent,
+            info->prev,
+            info->next);
     state = &info->state;
     if (!std::isfinite(dtime)
         || !std::isfinite(state->weight)
@@ -3599,6 +3629,20 @@ int __cdecl XAnimSetGoalWeightNode(
     iassert(infoIndex && (infoIndex < 4096));
 
     info = &g_xAnimInfo[infoIndex];
+    if (info->tree != tree)
+        MyAssertHandler(
+            ".\\xanim\\xanim.cpp",
+            2380,
+            0,
+            "XAnim setter crossed tree ownership\n\tinfoIndex=%u animIndex=%u tree=%p ownerTree=%p root=%u parent=%u prev=%u next=%u",
+            infoIndex,
+            info->animIndex,
+            tree,
+            info->tree,
+            tree->children,
+            info->parent,
+            info->prev,
+            info->next);
     if (!std::isfinite(goalWeight) || !std::isfinite(goalTime) || !std::isfinite(rate))
         MyAssertHandler(
             ".\\xanim\\xanim.cpp",
