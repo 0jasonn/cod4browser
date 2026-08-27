@@ -1,0 +1,243 @@
+{
+  "schemaVersion": 2,
+  "source": {
+    "commitSha": "247980a68fae109bbf5df556bb38bf09a0a4afcd",
+    "dirty": false
+  },
+  "recordedAtUtc": "2026-08-27T11:52:45.552Z",
+  "environment": {
+    "browser": {
+      "name": "chrome",
+      "version": "151.0.7922.174",
+      "channel": "chrome",
+      "headless": false
+    },
+    "operatingSystem": {
+      "platform": "win32",
+      "release": "10.0.26200",
+      "version": "Windows 11 Pro",
+      "architecture": "x64"
+    },
+    "referenceHardware": {
+      "processor": "AMD Ryzen 7 7800X3D 8-Core Processor",
+      "logicalProcessorCount": 16,
+      "totalSystemMemoryBytes": 33944879104
+    },
+    "build": "Release diagnostics"
+  },
+  "playableThreshold": {
+    "averageFpsEquivalentMinimum": 30,
+    "p95FrameTimeMsMaximum": 50,
+    "gameTimeWallTimeRatioMinimum": 0.9,
+    "scope": "Initial reference for the recorded hardware/browser, not a universal requirement."
+  },
+  "selection": {
+    "airplane": "Compact indoor map with conventional combat and full input coverage.",
+    "hunted": "Outdoor visibility, foliage, world, and dynamic-model coverage.",
+    "bog_a": "Dense combat, FX, material, entity, and audio stress coverage."
+  },
+  "maps": {
+    "airplane": {
+      "validationResult": "pass",
+      "compatibilityResult": "PLAYABLE",
+      "checks": {
+        "assetDiscovered": true,
+        "databaseCompleted": true,
+        "clipWorld": true,
+        "server": true,
+        "game": true,
+        "cgame": true,
+        "worldFrameProduced": true,
+        "stability60s": true,
+        "input": true,
+        "audio": true,
+        "checkpoint": true,
+        "transitionIn": true,
+        "transitionOut": true,
+        "contextRecovery": true,
+        "noFatalError": true
+      },
+      "mapToFirstFrameMs": 7352.5,
+      "performance": {
+        "pageVisibilityState": "visible",
+        "pageFocused": true,
+        "backgroundTransitions": 0,
+        "performanceWindowValid": true,
+        "actualWorldFrames": 3597,
+        "averageFrameIntervalMs": 16.681636540598348,
+        "p50FrameTimeMs": 16.645000010728836,
+        "p95FrameTimeMs": 18.649999976158142,
+        "p99FrameTimeMs": 19.41499999165535,
+        "minimumFpsEquivalent": 18.097909683231162,
+        "averageFpsEquivalent": 59.94615681538709,
+        "gameTimeWallTimeRatio": 0.9999923344140419
+      },
+      "memory": {
+        "wasmLinearMemoryCapacityBytes": 866582528,
+        "decodedTextureRecoveryBytes": 317123896,
+        "textureRecoverySourceBytes": 111906903,
+        "encodedImageRecoveryBytes": 85266595,
+        "aggregateCpuRecoveryBytes": 122778819,
+        "estimatedGpuTextureBytes": 338121048,
+        "geometryBytes": 10871916,
+        "temporaryUploadBytes": 8388608,
+        "shaderProgramBytes": 0,
+        "audioDecodedBytes": 1192220
+      },
+      "input": {
+        "movement": true,
+        "mouseLook": true,
+        "primaryFireCanonicalClipBefore": 12,
+        "primaryFireCanonicalClipAfter": 11,
+        "secondaryAction": true,
+        "wheelCanonicalResponse": "pass",
+        "escapeMenu": true,
+        "pointerLockLoss": true,
+        "pointerLockReacquisition": true
+      },
+      "checkpoint": {
+        "filesPersisted": 7,
+        "bytesPersisted": 6830710,
+        "durationMs": 0.17500001192092896
+      },
+      "transitionInOldRecoveryReleasedBytes": 291816962,
+      "transitionOutOldRecoveryReleasedBytes": 123132915,
+      "contextRecoveryMs": 591.7750000059605
+    },
+    "hunted": {
+      "validationResult": "pass",
+      "compatibilityResult": "FUNCTIONAL",
+      "checks": {
+        "assetDiscovered": true,
+        "databaseCompleted": true,
+        "clipWorld": true,
+        "server": true,
+        "game": true,
+        "cgame": true,
+        "worldFrameProduced": true,
+        "stability60s": true,
+        "input": true,
+        "audio": true,
+        "checkpoint": true,
+        "transitionIn": true,
+        "transitionOut": true,
+        "contextRecovery": true,
+        "noFatalError": true
+      },
+      "mapToFirstFrameMs": 6660.219999998808,
+      "performance": {
+        "pageVisibilityState": "visible",
+        "pageFocused": true,
+        "backgroundTransitions": 0,
+        "performanceWindowValid": true,
+        "actualWorldFrames": 1145,
+        "averageFrameIntervalMs": 52.41091346154575,
+        "p50FrameTimeMs": 51.70500001311302,
+        "p95FrameTimeMs": 55.400000005960464,
+        "p99FrameTimeMs": 64.10999998450279,
+        "minimumFpsEquivalent": 3.354072682634338,
+        "averageFpsEquivalent": 19.07999563361373,
+        "gameTimeWallTimeRatio": 0.9939891606781668
+      },
+      "memory": {
+        "wasmLinearMemoryCapacityBytes": 968163328,
+        "decodedTextureRecoveryBytes": 1374970108,
+        "textureRecoverySourceBytes": 417538462,
+        "encodedImageRecoveryBytes": 378384102,
+        "aggregateCpuRecoveryBytes": 480307702,
+        "estimatedGpuTextureBytes": 1395967260,
+        "geometryBytes": 62769240,
+        "temporaryUploadBytes": 16777216,
+        "shaderProgramBytes": 0,
+        "audioDecodedBytes": 5938804
+      },
+      "input": {
+        "movement": true,
+        "mouseLook": true,
+        "primaryFireCanonicalClipBefore": 6,
+        "primaryFireCanonicalClipAfter": 5,
+        "secondaryAction": true,
+        "wheelCanonicalResponse": "NOT_APPLICABLE_SINGLE_WEAPON",
+        "escapeMenu": true,
+        "pointerLockLoss": true,
+        "pointerLockReacquisition": true
+      },
+      "checkpoint": {
+        "filesPersisted": 7,
+        "bytesPersisted": 7477176,
+        "durationMs": 231.4500000178814
+      },
+      "transitionInOldRecoveryReleasedBytes": 291850994,
+      "transitionOutOldRecoveryReleasedBytes": 481221190,
+      "contextRecoveryMs": 1984.0150000154972
+    },
+    "bog_a": {
+      "validationResult": "pass",
+      "compatibilityResult": "FUNCTIONAL",
+      "checks": {
+        "assetDiscovered": true,
+        "databaseCompleted": true,
+        "clipWorld": true,
+        "server": true,
+        "game": true,
+        "cgame": true,
+        "worldFrameProduced": true,
+        "stability60s": true,
+        "input": true,
+        "audio": true,
+        "checkpoint": true,
+        "transitionIn": true,
+        "transitionOut": true,
+        "contextRecovery": true,
+        "noFatalError": true
+      },
+      "mapToFirstFrameMs": 9821.955000013113,
+      "performance": {
+        "pageVisibilityState": "visible",
+        "pageFocused": true,
+        "backgroundTransitions": 0,
+        "performanceWindowValid": true,
+        "actualWorldFrames": 1271,
+        "averageFrameIntervalMs": 47.146488188993274,
+        "p50FrameTimeMs": 46.06999999284744,
+        "p95FrameTimeMs": 56.639999985694885,
+        "p99FrameTimeMs": 59.979999989271164,
+        "minimumFpsEquivalent": 8.857395925130255,
+        "averageFpsEquivalent": 21.21048753390413,
+        "gameTimeWallTimeRatio": 0.9994566793649379
+      },
+      "memory": {
+        "wasmLinearMemoryCapacityBytes": 961937408,
+        "decodedTextureRecoveryBytes": 1236476948,
+        "textureRecoverySourceBytes": 373824975,
+        "encodedImageRecoveryBytes": 341471995,
+        "aggregateCpuRecoveryBytes": 428120523,
+        "estimatedGpuTextureBytes": 1257474100,
+        "geometryBytes": 54295548,
+        "temporaryUploadBytes": 16777216,
+        "shaderProgramBytes": 0,
+        "audioDecodedBytes": 7385336
+      },
+      "input": {
+        "movement": true,
+        "mouseLook": true,
+        "primaryFireCanonicalClipBefore": 15,
+        "primaryFireCanonicalClipAfter": 14,
+        "secondaryAction": true,
+        "wheelCanonicalResponse": "pass",
+        "escapeMenu": true,
+        "pointerLockLoss": true,
+        "pointerLockReacquisition": true
+      },
+      "checkpoint": {
+        "filesPersisted": 7,
+        "bytesPersisted": 7626240,
+        "durationMs": 113.08499997854233
+      },
+      "transitionInOldRecoveryReleasedBytes": 292113626,
+      "transitionOutOldRecoveryReleasedBytes": 429267587,
+      "contextRecoveryMs": 1844.6349999904633,
+      "note": "One earlier clean run had a non-reproducible initial pointer-lock rejection after a trusted canvas click; this unchanged clean rerun passed the complete matrix."
+    }
+  }
+}
