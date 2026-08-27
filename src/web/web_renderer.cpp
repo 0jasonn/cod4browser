@@ -8292,12 +8292,12 @@ bool DrawShadowPartition(
             WorldImage(batch.baseImageIndex);
         const std::int32_t alphaTest = WorldAlphaTestMode(
             requireSunCaster ? batch.stateBits[0] : shadowStateBits0);
+        const bool samplesTexture = base != nullptr && alphaTest != 0;
         glUniform1f(g_renderer.shadowDepthTextureEnabledUniform,
-            base ? 1.0f : 0.0f);
+            samplesTexture ? 1.0f : 0.0f);
         glUniform1i(g_renderer.shadowDepthAlphaTestUniform, alphaTest);
-        BindWorldTexture(GL_TEXTURE0,
-            base ? base->texture : g_renderer.texture,
-            batch.samplerState);
+        if (samplesTexture)
+            BindWorldTexture(GL_TEXTURE0, base->texture, batch.samplerState);
         const std::uintptr_t indexOffset =
             static_cast<std::uintptr_t>(firstIndex) *
             sizeof(std::uint32_t);
@@ -8342,15 +8342,17 @@ bool DrawShadowPartition(
             const WebRendererRetainedWorldImage *base = RetainedImage(
                 g_renderer.retainedStaticModelImages,
                 batch.draw.baseImageIndex);
-            glUniform1f(g_renderer.shadowDepthTextureEnabledUniform,
-                base ? 1.0f : 0.0f);
-            glUniform1i(g_renderer.shadowDepthAlphaTestUniform,
-                WorldAlphaTestMode(requireSunCaster
+            const std::int32_t alphaTest = WorldAlphaTestMode(
+                requireSunCaster
                     ? batch.draw.stateBits[0]
-                    : batch.draw.shadowStateBits0));
-            BindWorldTexture(GL_TEXTURE0,
-                base ? base->texture : g_renderer.texture,
-                batch.draw.samplerState);
+                    : batch.draw.shadowStateBits0);
+            const bool samplesTexture = base != nullptr && alphaTest != 0;
+            glUniform1f(g_renderer.shadowDepthTextureEnabledUniform,
+                samplesTexture ? 1.0f : 0.0f);
+            glUniform1i(g_renderer.shadowDepthAlphaTestUniform, alphaTest);
+            if (samplesTexture)
+                BindWorldTexture(GL_TEXTURE0, base->texture,
+                    batch.draw.samplerState);
             if (batch.instanceCount == 0u) continue;
             const std::uintptr_t indexOffset =
                 static_cast<std::uintptr_t>(batch.draw.firstIndex) *
@@ -8432,13 +8434,15 @@ bool DrawShadowPartition(
             const WebRendererRetainedWorldImage *base = RetainedImage(
                 g_renderer.retainedDynamicModelImages,
                 batch.baseImageIndex);
+            const std::int32_t alphaTest = WorldAlphaTestMode(
+                batch.stateBits[0]);
+            const bool samplesTexture = base != nullptr && alphaTest != 0;
             glUniform1f(g_renderer.shadowDepthTextureEnabledUniform,
-                base ? 1.0f : 0.0f);
-            glUniform1i(g_renderer.shadowDepthAlphaTestUniform,
-                WorldAlphaTestMode(batch.stateBits[0]));
-            BindWorldTexture(GL_TEXTURE0,
-                base ? base->texture : g_renderer.texture,
-                batch.samplerState);
+                samplesTexture ? 1.0f : 0.0f);
+            glUniform1i(g_renderer.shadowDepthAlphaTestUniform, alphaTest);
+            if (samplesTexture)
+                BindWorldTexture(GL_TEXTURE0, base->texture,
+                    batch.samplerState);
             const std::uintptr_t indexOffset =
                 static_cast<std::uintptr_t>(batch.firstIndex) *
                 sizeof(std::uint32_t);
