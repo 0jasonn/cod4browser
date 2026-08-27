@@ -1822,8 +1822,8 @@ void __cdecl ActorCmd_GetMotionAngle(scr_entref_t entref)
     actor_s *v1; // r31
     double v2; // fp1
     double v3; // fp31
-    long double v4; // fp2
-    long double v5; // fp2
+    double v4; // fp2
+    double v5; // fp2
     double v6; // fp1
     double v7; // fp1
 
@@ -1845,9 +1845,9 @@ void __cdecl ActorCmd_GetMotionAngle(scr_entref_t entref)
     {
         v2 = vectoyaw(v1->Physics.vVelocity);
         v3 = (float)((float)((float)v2 - v1->ent->r.currentAngles[1]) * (float)0.0027777778);
-        *(double *)&v4 = (float)((float)((float)((float)v2 - v1->ent->r.currentAngles[1]) * (float)0.0027777778) + (float)0.5);
+        v4 = (float)((float)((float)((float)v2 - v1->ent->r.currentAngles[1]) * (float)0.0027777778) + (float)0.5);
         v5 = floor(v4);
-        v6 = (float)((float)((float)v3 - (float)*(double *)&v5) * (float)360.0);
+        v6 = (float)((float)((float)v3 - (float)v5) * (float)360.0);
     }
     Scr_AddFloat(v6);
 }
