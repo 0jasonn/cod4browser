@@ -352,7 +352,8 @@ async function mapEvidence(page, map, cursor, commandTimeMs, memoryLifecycle,
     stability, audioSnapshot, input, checkpointResult)
 {
     return page.evaluate(({ map, cursor, commandTimeMs, memoryLifecycle,
-        stability, audioSnapshot, input, checkpointResult }) => {
+        stability, audioSnapshot, input, checkpointResult,
+        frameProfileSampleLimit }) => {
         const memorySnapshot = memoryLifecycle.steadyState;
         const frames = globalThis.__retailValidationFrames.slice(cursor.frames)
             .filter((entry) => entry.state === "drawn" &&
@@ -569,7 +570,7 @@ async function mapEvidence(page, map, cursor, commandTimeMs, memoryLifecycle,
             checkpoint: checkpointResult,
         };
     }, { map, cursor, commandTimeMs, memoryLifecycle, stability,
-        audioSnapshot, input, checkpointResult });
+        audioSnapshot, input, checkpointResult, frameProfileSampleLimit });
 }
 
 function assertMemoryTelemetry(sample)
