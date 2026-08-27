@@ -89,11 +89,11 @@ void __cdecl Actor_UpdateLookAngles(actor_s *self)
 {
     ai_orient_t *p_ScriptOrient; // r30
     double v4; // fp31
-    long double v5; // fp2
+    double v5; // fp2
     double v6; // fp0
     double v7; // fp25
     double v8; // fp31
-    long double v9; // fp2
+    double v9; // fp2
     double v10; // fp0
 
     double a2;
@@ -103,8 +103,9 @@ void __cdecl Actor_UpdateLookAngles(actor_s *self)
         p_ScriptOrient = &self->CodeOrient;
     v4 = (float)((float)(p_ScriptOrient->fDesiredLookPitch - self->fLookPitch) * (float)0.0027777778);
     a2 = (float)((float)((float)(p_ScriptOrient->fDesiredLookPitch - self->fLookPitch) * (float)0.0027777778) + (float)0.5);
+    // Native MSVC treats long double as double; Wasm does not.
     v5 = floor(a2);
-    v6 = (float)((float)((float)v4 - (float)*(double *)&v5) * (float)360.0);
+    v6 = (float)((float)((float)v4 - (float)v5) * (float)360.0);
     if (v6 <= 40.0)
     {
         if (v6 < -40.0)
@@ -116,10 +117,10 @@ void __cdecl Actor_UpdateLookAngles(actor_s *self)
     }
     v7 = (float)(self->fLookPitch + (float)v6);
     v8 = (float)((float)(p_ScriptOrient->fDesiredLookYaw - self->fLookYaw) * (float)0.0027777778);
-    *(double *)&v5 = (float)((float)((float)(p_ScriptOrient->fDesiredLookYaw - self->fLookYaw) * (float)0.0027777778)
+    v5 = (float)((float)((float)(p_ScriptOrient->fDesiredLookYaw - self->fLookYaw) * (float)0.0027777778)
         + (float)0.5);
     v9 = floor(v5);
-    v10 = (float)((float)((float)v8 - (float)*(double *)&v9) * (float)360.0);
+    v10 = (float)((float)((float)v8 - (float)v9) * (float)360.0);
     if (v10 <= 40.0)
     {
         if (v10 < -40.0)
@@ -137,7 +138,7 @@ void __cdecl Actor_UpdateBodyAngle(actor_s *self)
     double fDesiredBodyYaw; // fp0
     gentity_s *ent; // r11
     double v5; // fp31
-    long double v6; // fp2
+    double v6; // fp2
     double v7; // fp31
     double v8; // fp13
     double v9; // fp0
@@ -153,7 +154,7 @@ void __cdecl Actor_UpdateBodyAngle(actor_s *self)
     v5 = (float)((float)((float)fDesiredBodyYaw - ent->r.currentAngles[1]) * (float)0.0027777778);
     a2 = (float)((float)((float)((float)fDesiredBodyYaw - ent->r.currentAngles[1]) * (float)0.0027777778) + (float)0.5);
     v6 = floor(a2);
-    v7 = (float)((float)((float)v5 - (float)*(double *)&v6) * (float)360.0);
+    v7 = (float)((float)((float)v5 - (float)v6) * (float)360.0);
     if (BG_ActorIsProne(&self->ProneInfo, level.time))
         v8 = 0.035999998;
     else
