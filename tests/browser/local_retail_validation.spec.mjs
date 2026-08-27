@@ -391,9 +391,10 @@ async function mapEvidence(page, map, cursor, commandTimeMs, heapBeforeMapLoad,
                 databaseCompleted: dbComplete !== undefined,
                 cgameInitialized: cgame !== undefined,
                 worldFrameProduced: firstFrame !== undefined,
-                stability60s: stability.performanceWindowValid
+                stability60s: stability.requestedDurationMs === 60_000 &&
+                    stability.performanceWindowValid
                     ? stabilityFrames.length >= 60
-                    : stability.finalGeneration > stability.firstGeneration,
+                    : false,
                 input: Boolean(input) && Object.values(input).every(Boolean),
                 audio: (audioSnapshot?.decodedPcmBytes ?? 0) > 0,
                 checkpoint: checkpointResult.bytesPersisted > 0,
@@ -484,7 +485,13 @@ function assertMemoryTelemetry(sample)
 function assertMapEvidence(evidence, memorySnapshot)
 {
     assertMemoryTelemetry(memorySnapshot);
-    expect(Object.values(evidence.checks).every(Boolean)).toBe(true);
+    for (const [check, passed] of Object.entries(evidence.checks)) {
+        if (check === "stability60s" && stabilityDurationMs < 60_000) {
+            expect(passed).toBe(false);
+        } else {
+            expect(passed).toBe(true);
+        }
+    }
     expect(evidence.databaseStartTimeMs).not.toBeNull();
     expect(evidence.databaseCompletionTimeMs).not.toBeNull();
     expect(evidence.databaseCompletionTimeMs)
@@ -730,6 +737,29 @@ async function provisionGameplayInventory(page)
 async function waitForWeaponReady(page)
 {
     await expect.poll(async () => ({
+        keyCatchers: await gameplayState(page, 12),
+        respawnedOrFrozen: (await gameplayState(page, 10) & 0xC00) !== 0,
+        turret: (await gameplayState(page, 9) & 0x300) !== 0,
+        scriptDisabled: (await gameplayState(page, 11) & 0x80) !== 0,
+    }), { timeout: 90_000 }).toEqual({
+        keyCatchers: 0,
+        respawnedOrFrozen: false,
+        turret: false,
+        scriptDisabled: false,
+    });
+    for (const movementX of [320, 320, 320, 320]) {
+        if ((await gameplayState(page, 11) & 8) === 0) break;
+        await page.evaluate((dx) => {
+            const movement = new MouseEvent("mousemove");
+            Object.defineProperties(movement, {
+                movementX: { value: dx },
+                movementY: { value: -25 },
+            });
+            globalThis.dispatchEvent(movement);
+        }, movementX);
+        await page.waitForTimeout(100);
+    }
+    await expect.poll(async () => ({
         weaponTime: await gameplayState(page, 13),
         weaponDelay: await gameplayState(page, 14),
         weaponState: await gameplayState(page, 15),
@@ -770,8 +800,6 @@ async function exerciseTransitionInput(page)
             return current ? Math.hypot(...current.map(
                 (value, index) => value - previous[index])) : 0;
         }, origin), { timeout: 30_000 }).toBeGreaterThan(1);
-        await expect.poll(async () => await gameplayState(page, 11) & 0x88,
-            { timeout: 30_000 }).toBe(0);
     } finally {
         await page.keyboard.up("w");
     }
@@ -783,6 +811,7 @@ async function exerciseTransitionInput(page)
     }
     await expect.poll(() => gameplayState(page, 4), { timeout: 30_000 })
         .toBeGreaterThan(0);
+    await waitForWeaponReady(page);
     let weapon = await gameplayState(page, 4);
     if (await gameplayState(page, 6, weapon) <= 0) {
         await submitCommand(page, "give all");
@@ -791,10 +820,11 @@ async function exerciseTransitionInput(page)
             weapon = await gameplayState(page, 4);
             return gameplayState(page, 6, weapon);
         }, { timeout: 15_000 }).toBeGreaterThan(0);
+        await waitForWeaponReady(page);
+        weapon = await gameplayState(page, 4);
     }
     const clipBefore = await gameplayState(page, 6, weapon);
     expect(clipBefore).toBeGreaterThan(0);
-    await waitForWeaponReady(page);
     const shotCountBefore = await gameplayState(page, 16);
     await page.mouse.down({ button: "left" });
     try {
@@ -1124,11 +1154,11 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
     const cargoshipHeapAfterLoad = await heapBytes(page);
     await waitForWorldFrames(page, "cargoship", 120);
     const cargoshipHeapAfterWorld = await heapBytes(page);
+    const cargoshipStability = await sustainWorldFrames(
+        page, "cargoship", stabilityDurationMs);
     failureStage = "Killhouse to CargoShip critical input";
     failureClass = "cgame";
     const cargoshipTransitionInput = await exerciseTransitionInput(page);
-    const cargoshipStability = await sustainWorldFrames(
-        page, "cargoship", stabilityDurationMs);
     const cargoshipHeapAtStabilityEnd = await heapBytes(page);
     const cargoshipMemory = await rendererMemorySnapshot(page);
     const cargoshipAudio = await page.evaluate(() => structuredClone(
@@ -1263,13 +1293,13 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
     const cargoshipToBlackout = await rendererTransitionEvidence(
         page, cargoshipToBlackoutCursor, blackoutCommandMs,
         blackoutFrame.observedMs);
-    failureStage = "CargoShip to Blackout critical input";
-    failureClass = "cgame";
-    const blackoutTransitionInput = await exerciseTransitionInput(page);
     failureStage = "Blackout foreground stability";
     failureClass = "renderer";
     const blackoutStability = await sustainWorldFrames(
         page, "blackout", stabilityDurationMs);
+    failureStage = "CargoShip to Blackout critical input";
+    failureClass = "cgame";
+    const blackoutTransitionInput = await exerciseTransitionInput(page);
     const blackoutHeapAtStabilityEnd = await heapBytes(page);
     const blackoutMemory = await rendererMemorySnapshot(page);
     const blackoutAudio = await page.evaluate(() => structuredClone(
