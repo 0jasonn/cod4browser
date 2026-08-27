@@ -1030,7 +1030,7 @@ bool __cdecl Actor_ShouldMoveAwayFromCloseEnt(actor_s *self)
 void __cdecl Actor_UpdateProneInformation(actor_s *self, int bDoProneCheck)
 {
     double v7; // fp31
-    long double v8; // fp2
+    double v8; // fp2
     double v9; // fp28
     double v10; // fp29
     double v11; // fp26
@@ -1058,17 +1058,18 @@ void __cdecl Actor_UpdateProneInformation(actor_s *self, int bDoProneCheck)
     else
         self->fProneLastDiff = 360.0;
     v7 = (float)((float)(self->ProneInfo.fWaistPitch - self->ProneInfo.fTorsoPitch) * (float)0.0027777778);
+    // Do not type-pun an 8-byte double through Wasm's 16-byte long double.
     v8 = floor((float)((float)((float)(self->ProneInfo.fWaistPitch - self->ProneInfo.fTorsoPitch)
         * (float)0.0027777778)
         + (float)0.5));
-    v9 = (float)((float)((float)v7 - (float)*(double *)&v8) * (float)360.0);
+    v9 = (float)((float)((float)v7 - (float)v8) * (float)360.0);
     if (self->fProneLastDiff != v9)
     {
         v10 = 0.0;
         v11 = 0.0;
         if (v9 >= 0.0)
         {
-            v11 = (float)(self->fInvProneAnimHighPitch * (float)((float)((float)v7 - (float)*(double *)&v8) * (float)360.0));
+            v11 = (float)(self->fInvProneAnimHighPitch * (float)((float)((float)v7 - (float)v8) * (float)360.0));
             if (v11 > 0.99f)
                 v11 = 0.99f;
             v12 = 1.0;
@@ -1076,7 +1077,7 @@ void __cdecl Actor_UpdateProneInformation(actor_s *self, int bDoProneCheck)
         }
         else
         {
-            v10 = (float)(self->fInvProneAnimLowPitch * (float)((float)((float)v7 - (float)*(double *)&v8) * (float)360.0));
+            v10 = (float)(self->fInvProneAnimLowPitch * (float)((float)((float)v7 - (float)v8) * (float)360.0));
             if (v10 > 0.99f)
                 v10 = 0.99f;
             v12 = 1.0;
