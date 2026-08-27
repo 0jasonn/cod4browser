@@ -11,6 +11,7 @@
 #include <ui/ui.h>
 #include <web/web_client_server_lifecycle.h>
 #include <web/web_filesystem.h>
+#include <web/web_frame_profile.h>
 #include <web/web_renderer.h>
 #include <web/web_system.h>
 
@@ -20,6 +21,174 @@
 
 #if KISAK_WEB_DIAGNOSTICS
 #include <emscripten/emscripten.h>
+#endif
+
+#if KISAK_WEB_DIAGNOSTICS
+namespace
+{
+WebFrameProfileSample g_frameProfileSample{};
+std::uint32_t g_frameProfileRemaining = 0u;
+bool g_frameProfilePumpActive = false;
+
+EM_JS(void, DispatchFrameProfile,
+    (std::uint32_t pumpTick, std::uint32_t contextGeneration,
+     std::uint32_t viewSubmissionGeneration, bool gameplayFrame,
+     bool rendererSubmitted, bool gpuTimingsAvailable, bool gpuQueryIssued,
+     bool gpuQueryDropped,
+     double filesystemMs, double commandMs, double serverMs,
+     double clientOnceMs, double commandBufferMs, double clientFrameMs,
+     double cgameFrameMs, double sceneBuildMs, double rendererFrontendMs,
+     double soundMs, double rendererBackendMs, double totalMs,
+     double rendererSetupMs, double lodMs, double sunShadowMs,
+     double spotShadowMs, double skyMs, double worldMs,
+     double staticModelsMs, double dynamicModelsMs, double fxModelsMs,
+     double particlesMs, double marksMs, double uiMs, double postProcessMs,
+     double worldSurfacesSubmitted, double worldSurfacesDrawn,
+     double staticModelInstancesRetained, double staticModelInstanceDraws,
+     double dynamicBatchesDrawn, double fxModelBatchesDrawn,
+     double particleBatchesDrawn, double markBatchesDrawn,
+     double worldDrawCalls, double staticModelDrawCalls,
+     double dynamicDrawCalls, double fxDrawCalls, double shadowDrawCalls,
+     double uiDrawCalls, double postProcessDrawCalls, double queryDrawCalls,
+     double resolveBlits, double submittedIndices, double submittedTriangles,
+     double textureBindCalls, double programSwitches,
+     double bufferUploadBytes, double textureUploadBytes,
+     double unmeasuredTextureUploads, double lodChanges,
+     double shadowCasterDraws), {
+        globalThis.dispatchEvent(new CustomEvent("kisakcod:frame-profile", {
+            detail: {
+                kind: "frame",
+                pumpTick: pumpTick >>> 0,
+                contextGeneration: contextGeneration >>> 0,
+                viewSubmissionGeneration: viewSubmissionGeneration >>> 0,
+                gameplayFrame: Boolean(gameplayFrame),
+                rendererSubmitted: Boolean(rendererSubmitted),
+                cpu: {
+                    filesystemMs, commandMs, serverMs, clientOnceMs,
+                    commandBufferMs, clientFrameMs, cgameFrameMs,
+                    sceneBuildMs, rendererFrontendMs, soundMs,
+                    rendererBackendMs, totalMs
+                },
+                renderer: {
+                    setupMs: rendererSetupMs, lodMs, sunShadowMs,
+                    spotShadowMs, skyMs, worldMs, staticModelsMs,
+                    dynamicModelsMs, fxModelsMs, particlesMs, marksMs,
+                    uiMs, postProcessMs
+                },
+                gpu: {
+                    timingsAvailable: Boolean(gpuTimingsAvailable),
+                    queryIssued: Boolean(gpuQueryIssued),
+                    queryDropped: Boolean(gpuQueryDropped)
+                },
+                counters: {
+                    worldSurfacesSubmitted, worldSurfacesDrawn,
+                    staticModelInstancesRetained, staticModelInstanceDraws,
+                    dynamicBatchesDrawn, fxModelBatchesDrawn,
+                    particleBatchesDrawn, markBatchesDrawn,
+                    worldDrawCalls, staticModelDrawCalls, dynamicDrawCalls,
+                    fxDrawCalls, shadowDrawCalls, uiDrawCalls,
+                    postProcessDrawCalls, queryDrawCalls, resolveBlits,
+                    submittedIndices, submittedTriangles, textureBindCalls,
+                    programSwitches, bufferUploadBytes, textureUploadBytes,
+                    unmeasuredTextureUploads, lodChanges, shadowCasterDraws
+                }
+            }
+        }));
+    });
+
+EM_JS(void, DispatchFrameProfileGpuResult,
+    (std::uint32_t pumpTick, std::uint32_t contextGeneration,
+     std::uint32_t viewSubmissionGeneration, double gpuMilliseconds,
+     std::uint32_t queryLagFrames, const char *status), {
+        globalThis.dispatchEvent(new CustomEvent("kisakcod:frame-profile", {
+            detail: {
+                kind: "gpu-result",
+                pumpTick: pumpTick >>> 0,
+                contextGeneration: contextGeneration >>> 0,
+                viewSubmissionGeneration: viewSubmissionGeneration >>> 0,
+                gpu: {
+                    status: UTF8ToString(status),
+                    backendDrawMs: gpuMilliseconds,
+                    queryLagFrames: queryLagFrames >>> 0
+                }
+            }
+        }));
+    });
+}
+
+bool WebFrameProfile_BeginPump(std::uint32_t pumpTick) noexcept
+{
+    g_frameProfilePumpActive = g_frameProfileRemaining != 0u;
+    if (!g_frameProfilePumpActive) return false;
+    g_frameProfileSample = {};
+    g_frameProfileSample.pumpTick = pumpTick;
+    return true;
+}
+
+WebFrameProfileSample *WebFrameProfile_Current() noexcept
+{
+    return g_frameProfilePumpActive ? &g_frameProfileSample : nullptr;
+}
+
+double WebFrameProfile_Now() noexcept { return emscripten_get_now(); }
+
+void WebFrameProfile_EndPump(bool gameplayFrame, bool rendererSubmitted)
+{
+    if (!g_frameProfilePumpActive) return;
+    g_frameProfilePumpActive = false;
+    g_frameProfileSample.gameplayFrame = gameplayFrame;
+    g_frameProfileSample.rendererSubmitted = rendererSubmitted;
+    const WebFrameProfileSample &s = g_frameProfileSample;
+    DispatchFrameProfile(
+        s.pumpTick, s.contextGeneration, s.viewSubmissionGeneration,
+        s.gameplayFrame, s.rendererSubmitted, s.gpuTimingsAvailable,
+        s.gpuQueryIssued, s.gpuQueryDropped,
+        s.filesystemMs, s.commandMs, s.serverMs, s.clientOnceMs,
+        s.commandBufferMs, s.clientFrameMs, s.cgameFrameMs, s.sceneBuildMs,
+        s.rendererFrontendMs, s.soundMs, s.rendererBackendMs, s.totalMs,
+        s.rendererSetupMs, s.lodMs, s.sunShadowMs, s.spotShadowMs, s.skyMs,
+        s.worldMs, s.staticModelsMs, s.dynamicModelsMs, s.fxModelsMs,
+        s.particlesMs, s.marksMs, s.uiMs, s.postProcessMs,
+        static_cast<double>(s.worldSurfacesSubmitted),
+        static_cast<double>(s.worldSurfacesDrawn),
+        static_cast<double>(s.staticModelInstancesRetained),
+        static_cast<double>(s.staticModelInstanceDraws),
+        static_cast<double>(s.dynamicBatchesDrawn),
+        static_cast<double>(s.fxModelBatchesDrawn),
+        static_cast<double>(s.particleBatchesDrawn),
+        static_cast<double>(s.markBatchesDrawn),
+        static_cast<double>(s.worldDrawCalls),
+        static_cast<double>(s.staticModelDrawCalls),
+        static_cast<double>(s.dynamicDrawCalls),
+        static_cast<double>(s.fxDrawCalls),
+        static_cast<double>(s.shadowDrawCalls),
+        static_cast<double>(s.uiDrawCalls),
+        static_cast<double>(s.postProcessDrawCalls),
+        static_cast<double>(s.queryDrawCalls),
+        static_cast<double>(s.resolveBlits),
+        static_cast<double>(s.submittedIndices),
+        static_cast<double>(s.submittedTriangles),
+        static_cast<double>(s.textureBindCalls),
+        static_cast<double>(s.programSwitches),
+        static_cast<double>(s.bufferUploadBytes),
+        static_cast<double>(s.textureUploadBytes),
+        static_cast<double>(s.unmeasuredTextureUploads),
+        static_cast<double>(s.lodChanges),
+        static_cast<double>(s.shadowCasterDraws));
+    --g_frameProfileRemaining;
+}
+
+void WebFrameProfile_PublishGpuResult(
+    std::uint32_t pumpTick,
+    std::uint32_t contextGeneration,
+    std::uint32_t viewSubmissionGeneration,
+    double gpuMilliseconds,
+    std::uint32_t queryLagFrames,
+    const char *status)
+{
+    DispatchFrameProfileGpuResult(pumpTick, contextGeneration,
+        viewSubmissionGeneration, gpuMilliseconds, queryLagFrames, status);
+}
 #endif
 
 namespace
@@ -134,8 +303,26 @@ bool RunCGameFrame(const WebFrameInfo &frame)
     // CG_DrawActiveFrame calls canonical CL_Input while SCR_UpdateScreen builds
     // this frame, producing the next command. Sending another command here
     // would duplicate the same serverTime and Pmove would correctly ignore it.
+    #if KISAK_WEB_DIAGNOSTICS
+    WebFrameProfileSample *const profile = WebFrameProfile_Current();
+    double profileStarted = profile ? WebFrameProfile_Now() : 0.0;
+    #endif
     frameMilliseconds = SV_Frame(frameMilliseconds);
+    #if KISAK_WEB_DIAGNOSTICS
+    if (profile)
+    {
+        profile->serverMs = WebFrameProfile_Now() - profileStarted;
+        profileStarted = WebFrameProfile_Now();
+    }
+    #endif
     CL_RunOncePerClientFrame(0, frameMilliseconds);
+    #if KISAK_WEB_DIAGNOSTICS
+    if (profile)
+    {
+        profile->clientOnceMs = WebFrameProfile_Now() - profileStarted;
+        profileStarted = WebFrameProfile_Now();
+    }
+    #endif
     if (!Cbuf_TryExecute(0, CL_ControllerIndexFromClientNum(0)) &&
         !g_reentrantCommandPumpReported)
     {
@@ -145,8 +332,29 @@ bool RunCGameFrame(const WebFrameInfo &frame)
             "[kisakcod-web] Deferred a re-entrant command-buffer pump to "
             "the next browser frame.\n");
     }
+    #if KISAK_WEB_DIAGNOSTICS
+    if (profile)
+    {
+        profile->commandBufferMs = WebFrameProfile_Now() - profileStarted;
+        profileStarted = WebFrameProfile_Now();
+    }
+    #endif
     CL_Frame(0, frameMilliseconds);
+    #if KISAK_WEB_DIAGNOSTICS
+    if (profile)
+    {
+        profile->clientFrameMs = WebFrameProfile_Now() - profileStarted;
+        profileStarted = WebFrameProfile_Now();
+    }
+    #endif
     SCR_UpdateScreen();
+    #if KISAK_WEB_DIAGNOSTICS
+    if (profile)
+    {
+        profile->cgameFrameMs = WebFrameProfile_Now() - profileStarted;
+        profileStarted = WebFrameProfile_Now();
+    }
+    #endif
     // Native SCR_UpdateFrame updates sound on non-cgame screens. The web
     // renderer reports every active SP frame as refreshed UI, so that native
     // branch is never reached while gameplay is running. Keep the canonical
@@ -158,6 +366,10 @@ bool RunCGameFrame(const WebFrameInfo &frame)
     if (clientUIActives[0].connectionState == CA_ACTIVE &&
         !UI_IsFullscreen() && !CL_SkipRendering())
         CL_UpdateSound();
+    #if KISAK_WEB_DIAGNOSTICS
+    if (profile)
+        profile->soundMs = WebFrameProfile_Now() - profileStarted;
+    #endif
     ++activeFrameCount;
     if (activeFrameCount == 1u || activeFrameCount == 120u)
     {
@@ -173,14 +385,47 @@ bool RunCGameFrame(const WebFrameInfo &frame)
 
 void RenderFrame(const WebFrameInfo &frame, void *)
 {
+    #if KISAK_WEB_DIAGNOSTICS
+    const bool profiling = WebFrameProfile_BeginPump(frame.pumpTick);
+    const double totalStarted = profiling ? WebFrameProfile_Now() : 0.0;
+    double stageStarted = totalStarted;
+    #endif
     WebFs_PumpCompletions();
+    #if KISAK_WEB_DIAGNOSTICS
+    if (profiling)
+    {
+        WebFrameProfile_Current()->filesystemMs =
+            WebFrameProfile_Now() - stageStarted;
+        stageStarted = WebFrameProfile_Now();
+    }
+    #endif
     RunCommands();
+    #if KISAK_WEB_DIAGNOSTICS
+    if (profiling)
+    {
+        WebFrameProfile_Current()->commandMs =
+            WebFrameProfile_Now() - stageStarted;
+    }
+    #endif
     const bool gameplayFrame = RunCGameFrame(frame);
     // Before a local game is active the renderer remains responsible for the
     // launcher/bootstrap surface. During gameplay, presentation follows the
     // same non-blocking com_maxfps admission decision as the engine frame.
-    if (!CL_IsLocalClientInGame(0) || gameplayFrame)
+    const bool rendererSubmitted = !CL_IsLocalClientInGame(0) || gameplayFrame;
+    #if KISAK_WEB_DIAGNOSTICS
+    stageStarted = profiling ? WebFrameProfile_Now() : 0.0;
+    #endif
+    if (rendererSubmitted)
         WebRenderer_DrawFrame(frame);
+    #if KISAK_WEB_DIAGNOSTICS
+    if (profiling)
+    {
+        WebFrameProfileSample *const profile = WebFrameProfile_Current();
+        profile->rendererBackendMs = WebFrameProfile_Now() - stageStarted;
+        profile->totalMs = WebFrameProfile_Now() - totalStarted;
+    }
+    WebFrameProfile_EndPump(gameplayFrame, rendererSubmitted);
+    #endif
 }
 } // namespace
 
@@ -191,6 +436,19 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestSlowNextCommand(int millisecond
         return 0;
     g_testSlowCommandMilliseconds = static_cast<std::uint32_t>(milliseconds);
     return 1;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestBeginFrameProfile(int samples)
+{
+    if (samples < 1 || samples > 600) return 0;
+    g_frameProfileRemaining = static_cast<std::uint32_t>(samples);
+    g_frameProfilePumpActive = false;
+    return 1;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestFrameProfileRemaining()
+{
+    return static_cast<int>(g_frameProfileRemaining);
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestUsingAds()

@@ -26,6 +26,7 @@ const stabilityDurationMs = allowDirty &&
     requestedExploratoryStabilityMs >= 1_000 &&
     requestedExploratoryStabilityMs <= 60_000
     ? requestedExploratoryStabilityMs : 60_000;
+const frameProfileSampleLimit = 300;
 const operatingSystem = {
     platform: platform(),
     release: release(),
@@ -77,7 +78,7 @@ test.afterEach(async ({}, testInfo) => {
     const prefix = phase3
         ? "KISAK_RETAIL_PHASE3_RESULT" : "KISAK_RETAIL_RESULT";
     console.log(`${prefix} ${JSON.stringify({
-        schemaVersion: 2,
+        schemaVersion: 3,
         source: { commitSha: sourceCommit, dirty: sourceDirty },
         recordedAtUtc: new Date().toISOString(),
         environment: {
@@ -107,6 +108,7 @@ async function installRetailObservers(page)
         globalThis.__retailValidationFrames = [];
         globalThis.__retailValidationViews = [];
         globalThis.__retailValidationMemory = [];
+        globalThis.__retailFrameProfiles = [];
         globalThis.__retailRendererLifecycle = [];
         globalThis.__retailValidationInput = [];
         globalThis.__retailLifecycle = [];
@@ -164,6 +166,13 @@ async function installRetailObservers(page)
             globalThis.__retailAudioTelemetry.push({
                 ...structuredClone(event.detail), observedMs: performance.now(),
             });
+        });
+        globalThis.addEventListener("kisakcod:frame-profile", (event) => {
+            globalThis.__retailFrameProfiles.push({
+                ...structuredClone(event.detail), observedMs: performance.now(),
+            });
+            if (globalThis.__retailFrameProfiles.length > 4_096)
+                globalThis.__retailFrameProfiles.shift();
         });
         globalThis.addEventListener("kisakcod:audio-playback", () => {
             ++globalThis.__retailAudioPlaybackCount;
@@ -240,6 +249,10 @@ async function waitForWorldFrames(page, mapName, minimumGeneration = 1)
 async function sustainWorldFrames(page, mapName, durationMs = 60_000)
 {
     await page.bringToFront();
+    expect(await page.evaluate((sampleLimit) =>
+        globalThis.__KISAKCOD_WEB__.module.call(
+            "_KisakWeb_TestBeginFrameProfile", sampleLimit),
+    frameProfileSampleLimit)).toBe(1);
     const sampleForeground = () => page.evaluate(() => ({
         observedMs: performance.now(),
         visibilityState: document.visibilityState,
@@ -331,6 +344,7 @@ async function captureMapCursor(page)
         database: globalThis.__retailDatabase.length,
         memory: globalThis.__retailValidationMemory.length,
         frames: globalThis.__retailValidationFrames.length,
+        profiles: globalThis.__retailFrameProfiles.length,
     }));
 }
 
@@ -370,6 +384,84 @@ async function mapEvidence(page, map, cursor, commandTimeMs, memoryLifecycle,
             entry.observedMs >= stability.startedMs &&
             entry.observedMs <= stability.endedMs &&
             entry.worldName?.toLowerCase().includes(map));
+        const rawProfiles = globalThis.__retailFrameProfiles.slice(cursor.profiles)
+            .filter((entry) => entry.observedMs >= stability.startedMs &&
+                entry.observedMs <= stability.endedMs);
+        const frameProfiles = stability.performanceWindowValid
+            ? rawProfiles.filter((entry) => entry.kind === "frame" &&
+                entry.gameplayFrame === true &&
+                entry.viewSubmissionGeneration >= stability.firstGeneration &&
+                entry.viewSubmissionGeneration <= stability.finalGeneration)
+            : [];
+        const framePumpTicks = new Set(frameProfiles.map(({ pumpTick }) => pumpTick));
+        const gpuProfiles = rawProfiles.filter((entry) =>
+            entry.kind === "gpu-result" && framePumpTicks.has(entry.pumpTick));
+        const summarize = (values) => {
+            const finite = values.filter(Number.isFinite)
+                .sort((left, right) => left - right);
+            if (!finite.length) return null;
+            const at = (fraction) => finite[Math.min(finite.length - 1,
+                Math.ceil(finite.length * fraction) - 1)];
+            return {
+                samples: finite.length,
+                average: finite.reduce((sum, value) => sum + value, 0) /
+                    finite.length,
+                p50: at(0.50),
+                p95: at(0.95),
+                p99: at(0.99),
+                maximum: finite.at(-1),
+            };
+        };
+        const summarizeFields = (container, fields) => Object.fromEntries(
+            fields.map((field) => [field,
+                summarize(frameProfiles.map((entry) => entry[container]?.[field]))]));
+        const gpuStatusCounts = Object.fromEntries(gpuProfiles.reduce((counts, entry) => {
+            const status = entry.gpu?.status ?? "unknown";
+            counts.set(status, (counts.get(status) ?? 0) + 1);
+            return counts;
+        }, new Map()));
+        const frameProfile = {
+            requestedSamples: frameProfileSampleLimit,
+            capturedSamples: frameProfiles.length,
+            cpu: summarizeFields("cpu", [
+                "filesystemMs", "commandMs", "serverMs", "clientOnceMs",
+                "commandBufferMs", "clientFrameMs", "cgameFrameMs",
+                "sceneBuildMs", "rendererFrontendMs", "soundMs",
+                "rendererBackendMs", "totalMs",
+            ]),
+            renderer: summarizeFields("renderer", [
+                "setupMs", "lodMs", "sunShadowMs", "spotShadowMs", "skyMs",
+                "worldMs", "staticModelsMs", "dynamicModelsMs", "fxModelsMs",
+                "particlesMs", "marksMs", "uiMs", "postProcessMs",
+            ]),
+            counters: summarizeFields("counters", [
+                "worldSurfacesSubmitted", "worldSurfacesDrawn",
+                "staticModelInstancesRetained", "staticModelInstanceDraws",
+                "dynamicBatchesDrawn", "fxModelBatchesDrawn",
+                "particleBatchesDrawn", "markBatchesDrawn", "worldDrawCalls",
+                "staticModelDrawCalls", "dynamicDrawCalls", "fxDrawCalls",
+                "shadowDrawCalls", "uiDrawCalls", "postProcessDrawCalls",
+                "queryDrawCalls", "resolveBlits", "submittedIndices",
+                "submittedTriangles", "textureBindCalls", "programSwitches",
+                "bufferUploadBytes", "textureUploadBytes",
+                "unmeasuredTextureUploads", "lodChanges", "shadowCasterDraws",
+            ]),
+            gpu: {
+                timingsAvailable: frameProfiles.some(
+                    (entry) => entry.gpu?.timingsAvailable === true),
+                queriesIssued: frameProfiles.filter(
+                    (entry) => entry.gpu?.queryIssued === true).length,
+                queriesDropped: frameProfiles.filter(
+                    (entry) => entry.gpu?.queryDropped === true).length,
+                results: gpuProfiles.length,
+                statusCounts: gpuStatusCounts,
+                backendDrawMs: summarize(gpuProfiles
+                    .filter((entry) => entry.gpu?.status === "valid")
+                    .map((entry) => entry.gpu.backendDrawMs)),
+                queryLagFrames: summarize(gpuProfiles
+                    .map((entry) => entry.gpu?.queryLagFrames)),
+            },
+        };
         const gameTimeAdvancementMs = stability.performanceWindowValid &&
             stabilityViews.length > 1
             ? stabilityViews.at(-1).time - stabilityViews[0].time : null;
@@ -426,6 +518,7 @@ async function mapEvidence(page, map, cursor, commandTimeMs, memoryLifecycle,
                 ? gameTimeAdvancementMs / wallTimeAdvancementMs : null,
             framesRenderedDuringStabilityWindow: stabilityFrames.length,
             stability,
+            frameProfile,
             wasmLinearMemoryCapacityBytes: {
                 beforeMapLoad:
                     memoryLifecycle.beforeMapLoad.wasmLinearMemoryCapacityBytes,
@@ -568,6 +661,14 @@ function assertMapEvidence(evidence, memorySnapshot)
         expect(evidence.p95FrameTimeMs).not.toBeNull();
         expect(evidence.p99FrameTimeMs).not.toBeNull();
         expect(evidence.gameTimeWallTimeRatio).not.toBeNull();
+        expect(evidence.frameProfile.capturedSamples).toBeGreaterThan(0);
+        expect(evidence.frameProfile.cpu.totalMs).not.toBeNull();
+        expect(evidence.frameProfile.renderer.worldMs).not.toBeNull();
+        expect(evidence.frameProfile.counters.worldDrawCalls).not.toBeNull();
+        expect(evidence.frameProfile.counters.worldDrawCalls.maximum)
+            .toBeGreaterThan(0);
+        expect(evidence.frameProfile.counters.worldSurfacesDrawn.maximum)
+            .toBeGreaterThan(0);
     } else {
         expect(evidence.performanceInvalidReason)
             .toBe("INVALID_BACKGROUND_THROTTLED");
@@ -1536,7 +1637,7 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
         .toBe("running");
     expect(pageErrors).toEqual([]);
     const validationRecord = {
-        schemaVersion: 2,
+        schemaVersion: 3,
         source: { commitSha: sourceCommit, dirty: sourceDirty },
         recordedAtUtc: new Date().toISOString(),
         environment: {
@@ -1777,7 +1878,7 @@ if (phase3TargetMap) {
             expect(pageErrors).toEqual([]);
 
             const validationRecord = {
-                schemaVersion: 2,
+                schemaVersion: 3,
                 source: { commitSha: sourceCommit, dirty: sourceDirty },
                 recordedAtUtc: new Date().toISOString(),
                 environment: {

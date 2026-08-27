@@ -1,4 +1,5 @@
 #include <web/web_renderer.h>
+#include <web/web_frame_profile.h>
 #include <web/web_renderer_surface_storage.h>
 #include <web/web_renderer_context.h>
 #include <web/web_renderer_lod.h>
@@ -507,6 +508,377 @@ void DeleteStaticModelObjects(
     GLuint instanceBuffer);
 void BindStaticModelInstanceRange(std::uint32_t instanceOffset);
 void AttachRetainedWorldReflectionTextures() noexcept;
+
+#if KISAK_WEB_DIAGNOSTICS
+enum class FrameProfileDrawBucket : std::uint8_t
+{
+    None,
+    World,
+    StaticModel,
+    DynamicModel,
+    FxModel,
+    Particle,
+    Mark,
+    Shadow,
+    Ui,
+    PostProcess,
+    Query,
+};
+
+struct FrameProfileGpuQuery
+{
+    GLuint query = 0u;
+    std::uint32_t pumpTick = 0u;
+    std::uint32_t contextGeneration = 0u;
+    std::uint32_t viewSubmissionGeneration = 0u;
+    std::uint32_t lagFrames = 0u;
+    bool pending = false;
+};
+
+constexpr std::size_t FRAME_PROFILE_GPU_QUERY_COUNT = 8u;
+std::array<FrameProfileGpuQuery, FRAME_PROFILE_GPU_QUERY_COUNT>
+    g_frameProfileGpuQueries{};
+bool g_frameProfileGpuSupported = false;
+FrameProfileGpuQuery *g_frameProfileActiveGpuQuery = nullptr;
+FrameProfileDrawBucket g_frameProfileDrawBucket = FrameProfileDrawBucket::None;
+GLuint g_frameProfileLastProgram = std::numeric_limits<GLuint>::max();
+
+void ResetFrameProfileGpuQueries(bool deleteObjects)
+{
+    if (deleteObjects)
+    {
+        for (FrameProfileGpuQuery &slot : g_frameProfileGpuQueries)
+        {
+            if (slot.query != 0u) glDeleteQueries(1, &slot.query);
+        }
+    }
+    g_frameProfileGpuQueries = {};
+    g_frameProfileGpuSupported = false;
+    g_frameProfileActiveGpuQuery = nullptr;
+    g_frameProfileLastProgram = std::numeric_limits<GLuint>::max();
+}
+
+void InitializeFrameProfileGpuQueries()
+{
+    ResetFrameProfileGpuQueries(false);
+    g_frameProfileGpuSupported = emscripten_webgl_enable_extension(
+        g_renderer.context, "EXT_disjoint_timer_query_webgl2");
+    if (!g_frameProfileGpuSupported) return;
+    for (FrameProfileGpuQuery &slot : g_frameProfileGpuQueries)
+        glGenQueries(1, &slot.query);
+    g_frameProfileGpuSupported = std::all_of(
+        g_frameProfileGpuQueries.begin(), g_frameProfileGpuQueries.end(),
+        [](const FrameProfileGpuQuery &slot) { return slot.query != 0u; });
+    if (!g_frameProfileGpuSupported) ResetFrameProfileGpuQueries(true);
+}
+
+void PollFrameProfileGpuQueries()
+{
+    if (!g_frameProfileGpuSupported) return;
+    GLboolean disjoint = GL_FALSE;
+    glGetBooleanv(GL_GPU_DISJOINT_EXT, &disjoint);
+    for (FrameProfileGpuQuery &slot : g_frameProfileGpuQueries)
+    {
+        if (!slot.pending) continue;
+        ++slot.lagFrames;
+        if (disjoint == GL_TRUE)
+        {
+            WebFrameProfile_PublishGpuResult(
+                slot.pumpTick,
+                slot.contextGeneration,
+                slot.viewSubmissionGeneration,
+                0.0,
+                slot.lagFrames,
+                "disjoint");
+            slot.pending = false;
+            continue;
+        }
+        GLuint available = GL_FALSE;
+        glGetQueryObjectuiv(slot.query, GL_QUERY_RESULT_AVAILABLE, &available);
+        if (available != GL_TRUE) continue;
+        GLuint64 nanoseconds = 0u;
+        glGetQueryObjectui64vEXT(slot.query, GL_QUERY_RESULT, &nanoseconds);
+        const bool stale = slot.contextGeneration !=
+            g_renderer.contextGeneration;
+        WebFrameProfile_PublishGpuResult(
+            slot.pumpTick,
+            slot.contextGeneration,
+            slot.viewSubmissionGeneration,
+            stale ? 0.0
+                : static_cast<double>(nanoseconds) / 1'000'000.0,
+            slot.lagFrames,
+            stale ? "stale-context" : "valid");
+        slot.pending = false;
+    }
+}
+
+void BeginFrameProfileGpuQuery(WebFrameProfileSample &profile)
+{
+    profile.gpuTimingsAvailable = g_frameProfileGpuSupported;
+    if (!g_frameProfileGpuSupported) return;
+    auto slot = std::find_if(g_frameProfileGpuQueries.begin(),
+        g_frameProfileGpuQueries.end(),
+        [](const FrameProfileGpuQuery &candidate) {
+            return !candidate.pending;
+        });
+    if (slot == g_frameProfileGpuQueries.end())
+    {
+        profile.gpuQueryDropped = true;
+        return;
+    }
+    slot->pumpTick = profile.pumpTick;
+    slot->contextGeneration = g_renderer.contextGeneration;
+    slot->viewSubmissionGeneration =
+        g_renderer.sceneViewSubmissionGeneration;
+    slot->lagFrames = 0u;
+    glBeginQuery(GL_TIME_ELAPSED_EXT, slot->query);
+    g_frameProfileActiveGpuQuery = &*slot;
+    profile.gpuQueryIssued = true;
+}
+
+void EndFrameProfileGpuQuery()
+{
+    if (!g_frameProfileActiveGpuQuery) return;
+    glEndQuery(GL_TIME_ELAPSED_EXT);
+    g_frameProfileActiveGpuQuery->pending = true;
+    g_frameProfileActiveGpuQuery = nullptr;
+}
+
+FrameProfileDrawBucket ProfileBucketForKind(
+    WebRendererSceneBatchKind kind) noexcept
+{
+    switch (kind)
+    {
+    case WebRendererSceneBatchKind::FxXModel:
+        return FrameProfileDrawBucket::FxModel;
+    case WebRendererSceneBatchKind::FxParticleCloud:
+        return FrameProfileDrawBucket::Particle;
+    case WebRendererSceneBatchKind::FxCodeMesh:
+    case WebRendererSceneBatchKind::FxMarkMesh:
+        return FrameProfileDrawBucket::Mark;
+    default:
+        return FrameProfileDrawBucket::DynamicModel;
+    }
+}
+
+void AddProfileDynamicTime(WebRendererSceneBatchKind kind, double milliseconds)
+{
+    WebFrameProfileSample *const profile = WebFrameProfile_Current();
+    if (!profile) return;
+    switch (kind)
+    {
+    case WebRendererSceneBatchKind::FxXModel:
+        profile->fxModelsMs += milliseconds;
+        break;
+    case WebRendererSceneBatchKind::FxParticleCloud:
+        profile->particlesMs += milliseconds;
+        break;
+    case WebRendererSceneBatchKind::FxCodeMesh:
+    case WebRendererSceneBatchKind::FxMarkMesh:
+        profile->marksMs += milliseconds;
+        break;
+    default:
+        profile->dynamicModelsMs += milliseconds;
+        break;
+    }
+}
+
+void AddProfileDraw(
+    std::uint64_t elementCount, std::uint64_t instanceCount, bool indexed)
+{
+    WebFrameProfileSample *const profile = WebFrameProfile_Current();
+    if (!profile) return;
+    const std::uint64_t multipliedElements = elementCount * instanceCount;
+    if (indexed) profile->submittedIndices += multipliedElements;
+    profile->submittedTriangles += multipliedElements / 3u;
+    switch (g_frameProfileDrawBucket)
+    {
+    case FrameProfileDrawBucket::World: ++profile->worldDrawCalls; break;
+    case FrameProfileDrawBucket::StaticModel:
+        ++profile->staticModelDrawCalls;
+        profile->staticModelInstanceDraws += instanceCount;
+        break;
+    case FrameProfileDrawBucket::DynamicModel:
+        ++profile->dynamicDrawCalls;
+        ++profile->dynamicBatchesDrawn;
+        break;
+    case FrameProfileDrawBucket::FxModel:
+        ++profile->fxDrawCalls;
+        ++profile->fxModelBatchesDrawn;
+        break;
+    case FrameProfileDrawBucket::Particle:
+        ++profile->fxDrawCalls;
+        ++profile->particleBatchesDrawn;
+        break;
+    case FrameProfileDrawBucket::Mark:
+        ++profile->fxDrawCalls;
+        ++profile->markBatchesDrawn;
+        break;
+    case FrameProfileDrawBucket::Shadow:
+        ++profile->shadowDrawCalls;
+        profile->shadowCasterDraws += instanceCount;
+        break;
+    case FrameProfileDrawBucket::Ui: ++profile->uiDrawCalls; break;
+    case FrameProfileDrawBucket::PostProcess:
+        ++profile->postProcessDrawCalls;
+        break;
+    case FrameProfileDrawBucket::Query: ++profile->queryDrawCalls; break;
+    default: break;
+    }
+}
+
+void ProfileBindTexture(GLenum target, GLuint texture)
+{
+    glBindTexture(target, texture);
+    if (WebFrameProfileSample *const profile = WebFrameProfile_Current())
+        ++profile->textureBindCalls;
+}
+
+void ProfileUseProgram(GLuint program)
+{
+    glUseProgram(program);
+    if (g_frameProfileLastProgram != program)
+    {
+        if (WebFrameProfileSample *const profile = WebFrameProfile_Current())
+            ++profile->programSwitches;
+        g_frameProfileLastProgram = program;
+    }
+}
+
+void ProfileBufferData(
+    GLenum target, GLsizeiptr size, const void *data, GLenum usage)
+{
+    glBufferData(target, size, data, usage);
+    if (data && size > 0)
+    {
+        if (WebFrameProfileSample *const profile = WebFrameProfile_Current())
+            profile->bufferUploadBytes += static_cast<std::uint64_t>(size);
+    }
+}
+
+void ProfileBufferSubData(
+    GLenum target, GLintptr offset, GLsizeiptr size, const void *data)
+{
+    glBufferSubData(target, offset, size, data);
+    if (data && size > 0)
+    {
+        if (WebFrameProfileSample *const profile = WebFrameProfile_Current())
+            profile->bufferUploadBytes += static_cast<std::uint64_t>(size);
+    }
+}
+
+std::uint64_t ProfilePixelBytes(
+    GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type)
+{
+    if (width <= 0 || height <= 0 || depth <= 0) return 0u;
+    std::uint64_t channels = 0u;
+    switch (format)
+    {
+    case GL_RED: channels = 1u; break;
+    case GL_RG: channels = 2u; break;
+    case GL_RGB: channels = 3u; break;
+    case GL_RGBA: channels = 4u; break;
+    default: return 0u;
+    }
+    std::uint64_t componentBytes = 0u;
+    switch (type)
+    {
+    case GL_UNSIGNED_BYTE: componentBytes = 1u; break;
+    case GL_UNSIGNED_SHORT: componentBytes = 2u; break;
+    case GL_FLOAT: componentBytes = 4u; break;
+    default: return 0u;
+    }
+    return static_cast<std::uint64_t>(width) *
+        static_cast<std::uint64_t>(height) *
+        static_cast<std::uint64_t>(depth) * channels * componentBytes;
+}
+
+void AddProfileTextureUpload(
+    GLsizei width, GLsizei height, GLsizei depth,
+    GLenum format, GLenum type, const void *pixels)
+{
+    if (!pixels) return;
+    WebFrameProfileSample *const profile = WebFrameProfile_Current();
+    if (!profile) return;
+    const std::uint64_t bytes =
+        ProfilePixelBytes(width, height, depth, format, type);
+    if (bytes != 0u) profile->textureUploadBytes += bytes;
+    else ++profile->unmeasuredTextureUploads;
+}
+
+void ProfileTexImage2D(GLenum target, GLint level, GLint internalFormat,
+    GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type,
+    const void *pixels)
+{
+    glTexImage2D(target, level, internalFormat, width, height, border,
+        format, type, pixels);
+    AddProfileTextureUpload(width, height, 1, format, type, pixels);
+}
+
+void ProfileTexImage3D(GLenum target, GLint level, GLint internalFormat,
+    GLsizei width, GLsizei height, GLsizei depth, GLint border,
+    GLenum format, GLenum type, const void *pixels)
+{
+    glTexImage3D(target, level, internalFormat, width, height, depth, border,
+        format, type, pixels);
+    AddProfileTextureUpload(width, height, depth, format, type, pixels);
+}
+
+void ProfileTexSubImage2D(GLenum target, GLint level, GLint xOffset,
+    GLint yOffset, GLsizei width, GLsizei height, GLenum format, GLenum type,
+    const void *pixels)
+{
+    glTexSubImage2D(target, level, xOffset, yOffset, width, height,
+        format, type, pixels);
+    AddProfileTextureUpload(width, height, 1, format, type, pixels);
+}
+
+void ProfileDrawElements(
+    GLenum mode, GLsizei count, GLenum type, const void *indices)
+{
+    glDrawElements(mode, count, type, indices);
+    if (count > 0)
+        AddProfileDraw(static_cast<std::uint64_t>(count), 1u, true);
+}
+
+void ProfileDrawElementsInstanced(GLenum mode, GLsizei count, GLenum type,
+    const void *indices, GLsizei instanceCount)
+{
+    glDrawElementsInstanced(mode, count, type, indices, instanceCount);
+    if (count > 0 && instanceCount > 0)
+        AddProfileDraw(static_cast<std::uint64_t>(count),
+            static_cast<std::uint64_t>(instanceCount), true);
+}
+
+void ProfileDrawArrays(GLenum mode, GLint first, GLsizei count)
+{
+    glDrawArrays(mode, first, count);
+    if (count > 0)
+        AddProfileDraw(static_cast<std::uint64_t>(count), 1u, false);
+}
+
+void ProfileBlitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1,
+    GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1,
+    GLbitfield mask, GLenum filter)
+{
+    glBlitFramebuffer(srcX0, srcY0, srcX1, srcY1,
+        dstX0, dstY0, dstX1, dstY1, mask, filter);
+    if (WebFrameProfileSample *const profile = WebFrameProfile_Current())
+        ++profile->resolveBlits;
+}
+
+#define glBindTexture ProfileBindTexture
+#define glUseProgram ProfileUseProgram
+#define glBufferData ProfileBufferData
+#define glBufferSubData ProfileBufferSubData
+#define glTexImage2D ProfileTexImage2D
+#define glTexImage3D ProfileTexImage3D
+#define glTexSubImage2D ProfileTexSubImage2D
+#define glDrawElements ProfileDrawElements
+#define glDrawElementsInstanced ProfileDrawElementsInstanced
+#define glDrawArrays ProfileDrawArrays
+#define glBlitFramebuffer ProfileBlitFramebuffer
+#endif
 
 #if KISAK_WEB_DIAGNOSTICS
 EM_JS(
@@ -2046,6 +2418,9 @@ void DestroyWebGLContext()
         {
             glDeleteQueries(2, g_renderer.sunVisibilityQueries);
         }
+#if KISAK_WEB_DIAGNOSTICS
+        ResetFrameProfileGpuQueries(true);
+#endif
         DeletePipelineObjects(
             g_renderer.program,
             g_renderer.skyProgram,
@@ -4515,6 +4890,9 @@ bool HandleWebGLContextLost(int, const void *, void *)
     }
 
     g_renderer.contextLost = true;
+#if KISAK_WEB_DIAGNOSTICS
+    ResetFrameProfileGpuQueries(false);
+#endif
     iassert(g_renderer.contextLost && g_renderer.context > 0);
     DispatchRendererAaLifecycle(
         "lost",
@@ -4616,6 +4994,9 @@ bool HandleWebGLContextRestored(int, const void *, void *)
     }
 
     ++g_renderer.contextGeneration;
+#if KISAK_WEB_DIAGNOSTICS
+    InitializeFrameProfileGpuQueries();
+#endif
     g_renderer.contextLost = false;
     iassert(g_renderer.initialized && !g_renderer.contextLost);
     if (g_renderer.surfaceActive)
@@ -4663,6 +5044,9 @@ bool CreateWebGLContext()
     }
     iassert(g_renderer.context > 0);
     InitializeTextureFilteringCapabilities();
+#if KISAK_WEB_DIAGNOSTICS
+    InitializeFrameProfileGpuQueries();
+#endif
     return true;
 }
 
@@ -8149,6 +8533,9 @@ bool UpdateStaticModelLods()
         return false;
 
     bool changed = false;
+#if KISAK_WEB_DIAGNOSTICS
+    std::uint64_t changedLodCount = 0u;
+#endif
     std::size_t firstBatch = 0u;
     while (firstBatch < g_renderer.retainedStaticModelBatches.size())
     {
@@ -8193,6 +8580,9 @@ bool UpdateStaticModelLods()
                 g_renderer.retainedStaticModelSelectedLods[sourceIndex] =
                     static_cast<std::int8_t>(selectedLod);
                 changed = true;
+#if KISAK_WEB_DIAGNOSTICS
+                ++changedLodCount;
+#endif
             }
             if (selectedLod >= 0)
                 ++lodCounts[static_cast<std::size_t>(selectedLod)];
@@ -8239,6 +8629,11 @@ bool UpdateStaticModelLods()
     }
     if (!changed)
         return true;
+
+#if KISAK_WEB_DIAGNOSTICS
+    if (WebFrameProfileSample *const profile = WebFrameProfile_Current())
+        profile->lodChanges += changedLodCount;
+#endif
 
     glBindBuffer(GL_ARRAY_BUFFER, g_renderer.staticModelInstanceBuffer);
     glBufferSubData(
@@ -8517,6 +8912,25 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         return;
     }
 
+#if KISAK_WEB_DIAGNOSTICS
+    PollFrameProfileGpuQueries();
+    WebFrameProfileSample *const frameProfile = WebFrameProfile_Current();
+    g_frameProfileDrawBucket = FrameProfileDrawBucket::None;
+    if (frameProfile)
+    {
+        frameProfile->contextGeneration = g_renderer.contextGeneration;
+        frameProfile->viewSubmissionGeneration =
+            g_renderer.sceneViewSubmissionGeneration;
+        frameProfile->worldSurfacesSubmitted =
+            g_renderer.sceneViewSurfaceCount;
+        frameProfile->staticModelInstancesRetained =
+            g_renderer.retainedStaticModelSourceInstances.size();
+        BeginFrameProfileGpuQuery(*frameProfile);
+    }
+    const double setupProfileStarted = frameProfile
+        ? WebFrameProfile_Now() : 0.0;
+#endif
+
     int width = 0;
     int height = 0;
     emscripten_get_canvas_element_size("#canvas", &width, &height);
@@ -8556,8 +8970,23 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         postProcessTargetsReady;
     const bool directAaResolveDraw = multisampleDraw &&
         !postProcessDraw && postProcessTargetsReady;
+#if KISAK_WEB_DIAGNOSTICS
+    double rendererStageStarted = frameProfile
+        ? WebFrameProfile_Now() : 0.0;
+    if (frameProfile)
+        frameProfile->rendererSetupMs =
+            rendererStageStarted - setupProfileStarted;
+#endif
     const bool staticModelLodsReady = !sceneGeometryDraw ||
         UpdateStaticModelLods();
+#if KISAK_WEB_DIAGNOSTICS
+    if (frameProfile)
+    {
+        frameProfile->lodMs = WebFrameProfile_Now() - rendererStageStarted;
+        rendererStageStarted = WebFrameProfile_Now();
+        g_frameProfileDrawBucket = FrameProfileDrawBucket::Shadow;
+    }
+#endif
     static bool staticModelLodFailureReported = false;
     if (!staticModelLodsReady && !staticModelLodFailureReported)
     {
@@ -8572,8 +9001,22 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
     }
     const bool shadowMapDrawn = sceneGeometryDraw && staticModelLodsReady &&
         DrawSunShadowMaps();
+#if KISAK_WEB_DIAGNOSTICS
+    if (frameProfile)
+    {
+        frameProfile->sunShadowMs =
+            WebFrameProfile_Now() - rendererStageStarted;
+        rendererStageStarted = WebFrameProfile_Now();
+    }
+#endif
     const bool spotShadowMapsDrawn = sceneGeometryDraw &&
         staticModelLodsReady && DrawSpotShadowMaps();
+#if KISAK_WEB_DIAGNOSTICS
+    if (frameProfile)
+        frameProfile->spotShadowMs =
+            WebFrameProfile_Now() - rendererStageStarted;
+    g_frameProfileDrawBucket = FrameProfileDrawBucket::None;
+#endif
     glBindFramebuffer(GL_FRAMEBUFFER,
         multisampleDraw
             ? g_renderer.multisampleFramebuffer
@@ -8604,6 +9047,11 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         g_renderer.retainedSky.texture != 0u &&
         g_renderer.skyProgram != 0u)
     {
+#if KISAK_WEB_DIAGNOSTICS
+        const double skyProfileStarted = frameProfile
+            ? WebFrameProfile_Now() : 0.0;
+        g_frameProfileDrawBucket = FrameProfileDrawBucket::None;
+#endif
         glUseProgram(g_renderer.skyProgram);
         glDisable(GL_DEPTH_TEST);
         glDepthMask(GL_FALSE);
@@ -8626,6 +9074,10 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glActiveTexture(GL_TEXTURE0);
         glEnable(GL_DEPTH_TEST);
         glDepthMask(GL_TRUE);
+#if KISAK_WEB_DIAGNOSTICS
+        if (frameProfile)
+            frameProfile->skyMs += WebFrameProfile_Now() - skyProfileStarted;
+#endif
     }
     // D3D9 and WebGL disagree on front-face conventions. The canonical
     // surface order is preserved, but culling stays disabled for this initial
@@ -8761,6 +9213,11 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
     std::uint32_t completedDraws = 0u;
     const bool worldBatchDraw = sceneGeometryDraw &&
         g_renderer.worldSurfaceActive && !compatibilityDraw;
+#if KISAK_WEB_DIAGNOSTICS
+    const double worldProfileStarted = frameProfile
+        ? WebFrameProfile_Now() : 0.0;
+    g_frameProfileDrawBucket = FrameProfileDrawBucket::World;
+#endif
     if (worldBatchDraw)
     {
         for (WebRendererRetainedWorldBatch &batch :
@@ -8917,6 +9374,10 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 static_cast<GLsizei>(batch.indexCount),
                 GL_UNSIGNED_INT,
                 reinterpret_cast<const void *>(indexOffset));
+#if KISAK_WEB_DIAGNOSTICS
+            if (frameProfile)
+                frameProfile->worldSurfacesDrawn += batch.surfaceCount;
+#endif
             ++completedDraws;
         }
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -8955,8 +9416,20 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             static_cast<GLsizei>(g_renderer.draw.indexCount),
             g_renderer.worldSurfaceActive ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT,
             reinterpret_cast<const void *>(indexOffset));
+#if KISAK_WEB_DIAGNOSTICS
+        if (frameProfile && sceneGeometryDraw && g_renderer.worldSurfaceActive)
+            frameProfile->worldSurfacesDrawn +=
+                g_renderer.sceneViewSurfaceCount;
+#endif
         completedDraws = 1u;
     }
+#if KISAK_WEB_DIAGNOSTICS
+    if (frameProfile)
+        frameProfile->worldMs = WebFrameProfile_Now() - worldProfileStarted;
+    const double staticProfileStarted = frameProfile
+        ? WebFrameProfile_Now() : 0.0;
+    g_frameProfileDrawBucket = FrameProfileDrawBucket::StaticModel;
+#endif
     if (sceneGeometryDraw && staticModelLodsReady && !compatibilityDraw &&
         g_renderer.staticModelSceneActive &&
         g_renderer.staticModelVertexArray != 0u &&
@@ -9077,6 +9550,12 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         glActiveTexture(GL_TEXTURE0);
     }
+#if KISAK_WEB_DIAGNOSTICS
+    if (frameProfile)
+        frameProfile->staticModelsMs =
+            WebFrameProfile_Now() - staticProfileStarted;
+    g_frameProfileDrawBucket = FrameProfileDrawBucket::DynamicModel;
+#endif
     if (sceneGeometryDraw && !compatibilityDraw &&
         g_renderer.dynamicModelSceneActive &&
         g_renderer.dynamicModelVertexArray != 0u)
@@ -9105,6 +9584,12 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 if (!WebRenderer_IsCameraVisibleXModelSurface(
                         batch.sourceKind, batch.cameraRegion))
                     continue;
+#if KISAK_WEB_DIAGNOSTICS
+                const double dynamicBatchProfileStarted = frameProfile
+                    ? WebFrameProfile_Now() : 0.0;
+                g_frameProfileDrawBucket = ProfileBucketForKind(
+                    batch.sourceKind);
+#endif
                 if (batch.sourceKind == WebRendererSceneBatchKind::SunFlare)
                 {
                     if (depthHackPass) continue;
@@ -9193,6 +9678,10 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                             std::min(16, width), std::min(16, height));
                         glBeginQuery(
                             GL_ANY_SAMPLES_PASSED_CONSERVATIVE, query);
+#if KISAK_WEB_DIAGNOSTICS
+                        g_frameProfileDrawBucket =
+                            FrameProfileDrawBucket::Query;
+#endif
                         const std::uintptr_t queryOffset =
                             static_cast<std::uintptr_t>(batch.firstIndex) *
                             sizeof(std::uint32_t);
@@ -9207,6 +9696,10 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                         glDepthMask(GL_TRUE);
                         ++completedDraws;
                     }
+#if KISAK_WEB_DIAGNOSTICS
+                    AddProfileDynamicTime(batch.sourceKind,
+                        WebFrameProfile_Now() - dynamicBatchProfileStarted);
+#endif
                     continue;
                 }
                 const bool sunSprite = batch.sourceKind ==
@@ -9383,6 +9876,10 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
                     static_cast<GLsizei>(batch.indexCount),
                     GL_UNSIGNED_INT,
                     reinterpret_cast<const void *>(indexOffset));
+#if KISAK_WEB_DIAGNOSTICS
+                AddProfileDynamicTime(batch.sourceKind,
+                    WebFrameProfile_Now() - dynamicBatchProfileStarted);
+#endif
                 if (sunSprite) glDepthMask(GL_TRUE);
                 ++completedDraws;
             }
@@ -9395,6 +9892,11 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
     }
     if (sceneGeometryDraw && !compatibilityDraw)
         UpdateSunPostEffectState();
+#if KISAK_WEB_DIAGNOSTICS
+    const double postProfileStarted = frameProfile
+        ? WebFrameProfile_Now() : 0.0;
+    g_frameProfileDrawBucket = FrameProfileDrawBucket::PostProcess;
+#endif
     if (multisampleDraw)
     {
         // Native COD4 resolves the multisampled 3D scene into a texture before
@@ -9520,6 +10022,14 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         }
         glActiveTexture(GL_TEXTURE0);
     }
+#if KISAK_WEB_DIAGNOSTICS
+    if (frameProfile)
+        frameProfile->postProcessMs +=
+            WebFrameProfile_Now() - postProfileStarted;
+    const double uiProfileStarted = frameProfile
+        ? WebFrameProfile_Now() : 0.0;
+    g_frameProfileDrawBucket = FrameProfileDrawBucket::Ui;
+#endif
     if (sceneGeometryDraw && !compatibilityDraw &&
         g_renderer.uiSceneActive && g_renderer.uiVertexArray != 0u)
     {
@@ -9562,6 +10072,12 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glDepthMask(GL_TRUE);
         glActiveTexture(GL_TEXTURE0);
     }
+#if KISAK_WEB_DIAGNOSTICS
+    if (frameProfile)
+        frameProfile->uiMs = WebFrameProfile_Now() - uiProfileStarted;
+    rendererStageStarted = frameProfile ? WebFrameProfile_Now() : 0.0;
+    g_frameProfileDrawBucket = FrameProfileDrawBucket::PostProcess;
+#endif
     if (postProcessDraw)
     {
         // Native R_CalcGammaRamp affects the finished frame, including 2D.
@@ -9581,6 +10097,13 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
             0.0f,
             0.0f);
     }
+#if KISAK_WEB_DIAGNOSTICS
+    if (frameProfile)
+        frameProfile->postProcessMs +=
+            WebFrameProfile_Now() - rendererStageStarted;
+    EndFrameProfileGpuQuery();
+    g_frameProfileDrawBucket = FrameProfileDrawBucket::None;
+#endif
     GLenum sceneDrawError = GL_NO_ERROR;
     if (firstSceneDrawPending)
     {

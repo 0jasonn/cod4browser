@@ -24,6 +24,7 @@ const forwardedEvents = [
     "kisakcod:cinematic",
     "kisakcod:renderer-memory",
     "kisakcod:renderer-lifecycle",
+    "kisakcod:frame-profile",
 ];
 
 if (typeof globalThis.CustomEvent !== "function") {

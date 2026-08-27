@@ -81,6 +81,7 @@ $forbiddenJavaScript = @(
     '_KisakWeb_StartRetail',
     'filesystem_bridge',
     'renderer-comparison',
+    'frame-profile',
     'retail-census',
     'gate2'
 )

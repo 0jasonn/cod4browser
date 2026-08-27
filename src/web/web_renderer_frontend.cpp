@@ -33,6 +33,7 @@
 #include <universal/com_memory.h>
 #include <universal/memfile.h>
 #include <web/web_renderer.h>
+#include <web/web_frame_profile.h>
 #include <limits>
 #include <web/web_renderer_image_reference.h>
 #include <web/web_renderer_code_mesh.h>
@@ -70,6 +71,9 @@ extern GfxWorld s_world;
 
 namespace
 {
+#if KISAK_WEB_DIAGNOSTICS
+double g_frontendProfileStarted = 0.0;
+#endif
 std::uint32_t WebRenderer_CalcReflectionProbeIndex(
     const GfxWorld &world, const float origin[3]) noexcept
 {
@@ -1321,6 +1325,10 @@ void R_ShutdownDirect3D() { WebRenderer_Shutdown(); }
 void __cdecl R_SyncRenderThread() {}
 void __cdecl R_BeginFrame()
 {
+#if KISAK_WEB_DIAGNOSTICS
+    g_frontendProfileStarted = WebFrameProfile_Current()
+        ? WebFrameProfile_Now() : 0.0;
+#endif
     g_warned.fill(false);
     g_processCodeMesh = false;
     g_codeMeshVertCount = 0;
@@ -1348,6 +1356,15 @@ void __cdecl R_EndFrame()
     // the real frame boundary so menus cannot capture input without becoming
     // visible, and so HUD commands belong to the frame that produced them.
     SubmitUiScene();
+#if KISAK_WEB_DIAGNOSTICS
+    if (WebFrameProfileSample *const profile = WebFrameProfile_Current();
+        profile && g_frontendProfileStarted != 0.0)
+    {
+        profile->rendererFrontendMs +=
+            WebFrameProfile_Now() - g_frontendProfileStarted;
+    }
+    g_frontendProfileStarted = 0.0;
+#endif
 }
 void __cdecl R_BeginClientCmdList2D() {}
 void __cdecl R_BeginSharedCmdList() {}
@@ -1957,6 +1974,10 @@ void __cdecl R_AddSpotLightToScene(const float *, const float *, float,
 void __cdecl R_SetLodOrigin(const refdef_s *) {}
 void __cdecl R_RenderScene(const refdef_s *refdef)
 {
+#if KISAK_WEB_DIAGNOSTICS
+    const double sceneProfileStarted = WebFrameProfile_Current()
+        ? WebFrameProfile_Now() : 0.0;
+#endif
     iassert(refdef->tanHalfFovX > 0.0f);
     iassert(refdef->tanHalfFovY > 0.0f);
     iassert(refdef->height > 0u);
@@ -3505,6 +3526,13 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         EmitEngineLifecycleTrace(
             EngineLifecycleStage::GameDrivenFrame, s_world.name);
     }
+#if KISAK_WEB_DIAGNOSTICS
+    if (WebFrameProfileSample *const profile = WebFrameProfile_Current();
+        profile && sceneProfileStarted != 0.0)
+    {
+        profile->sceneBuildMs += WebFrameProfile_Now() - sceneProfileStarted;
+    }
+#endif
 }
 
 GfxBrushModel *__cdecl R_GetBrushModel(std::uint32_t index)

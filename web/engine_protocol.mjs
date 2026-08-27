@@ -14,6 +14,7 @@ export const HOST_EVENTS = new Set([
     "kisakcod:cinematic",
     "kisakcod:renderer-memory",
     "kisakcod:renderer-lifecycle",
+    "kisakcod:frame-profile",
 ]);
 
 export function protocolError(code, operation, message, recoverable = false, details)

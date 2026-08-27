@@ -65,3 +65,57 @@ test("a slow canonical command yields telemetry and the frame pump recovers", as
     expect(new Set(evidence.ticks).size).toBe(evidence.ticks.length);
     expect(evidence.state).toBe("running");
 });
+
+test("diagnostic frame profiling is structured and bounded", async ({ page }) => {
+    await page.addInitScript(() => {
+        globalThis.__frameProfiles = [];
+        globalThis.addEventListener("kisakcod:frame-profile", (event) => {
+            globalThis.__frameProfiles.push(structuredClone(event.detail));
+        });
+    });
+    await page.goto("/");
+    await expect.poll(() => page.evaluate(
+        () => globalThis.__KISAKCOD_WEB__?.state)).toBe("running");
+
+    expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.call(
+        "_KisakWeb_TestBeginFrameProfile", 3))).toBe(1);
+    await expect.poll(() => page.evaluate(() =>
+        globalThis.__frameProfiles.filter(({ kind }) => kind === "frame").length,
+    )).toBe(3);
+    expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.call(
+        "_KisakWeb_TestFrameProfileRemaining"))).toBe(0);
+
+    await page.waitForTimeout(200);
+    const profiles = await page.evaluate(() => structuredClone(
+        globalThis.__frameProfiles.filter(({ kind }) => kind === "frame")));
+    expect(profiles).toHaveLength(3);
+    expect(profiles[0]).toMatchObject({
+        kind: "frame",
+        rendererSubmitted: true,
+        cpu: {
+            filesystemMs: expect.any(Number),
+            commandMs: expect.any(Number),
+            rendererBackendMs: expect.any(Number),
+            totalMs: expect.any(Number),
+        },
+        renderer: {
+            setupMs: expect.any(Number),
+            worldMs: expect.any(Number),
+            postProcessMs: expect.any(Number),
+        },
+        gpu: {
+            timingsAvailable: expect.any(Boolean),
+            queryIssued: expect.any(Boolean),
+            queryDropped: expect.any(Boolean),
+        },
+        counters: {
+            submittedIndices: expect.any(Number),
+            submittedTriangles: expect.any(Number),
+            textureBindCalls: expect.any(Number),
+            bufferUploadBytes: expect.any(Number),
+            textureUploadBytes: expect.any(Number),
+        },
+    });
+    expect(profiles.every(({ pumpTick }, index) =>
+        index === 0 || pumpTick > profiles[index - 1].pumpTick)).toBe(true);
+});
