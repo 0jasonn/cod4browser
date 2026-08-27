@@ -5,6 +5,7 @@ param(
     [string]$Map = 'blackout',
     [ValidateSet('chromium', 'chrome', 'msedge')]
     [string]$Browser = 'chrome',
+    [switch]$Mission,
     [switch]$Headless,
     [ValidateRange(1024, 65535)]
     [int]$Port = 8031
@@ -38,6 +39,7 @@ if ($LASTEXITCODE -ne 0) { throw 'The diagnostic web build failed.' }
 $environmentNames = @(
     'KISAK_COD4_RETAIL_ROOT',
     'KISAK_RETAIL_PHASE3_MAP',
+    'KISAK_RETAIL_MISSION_MAP',
     'KISAK_BROWSER_CHANNEL',
     'KISAK_WEB_SITE',
     'KISAK_WEB_TEST_PORT',
@@ -52,7 +54,13 @@ foreach ($name in $environmentNames) {
 $playwrightExitCode = 0
 try {
     $env:KISAK_COD4_RETAIL_ROOT = $resolvedRoot
-    $env:KISAK_RETAIL_PHASE3_MAP = $Map
+    if ($Mission) {
+        Remove-Item -LiteralPath 'Env:KISAK_RETAIL_PHASE3_MAP' -ErrorAction SilentlyContinue
+        $env:KISAK_RETAIL_MISSION_MAP = $Map
+    } else {
+        $env:KISAK_RETAIL_PHASE3_MAP = $Map
+        Remove-Item -LiteralPath 'Env:KISAK_RETAIL_MISSION_MAP' -ErrorAction SilentlyContinue
+    }
     if ($Browser -eq 'chromium') {
         Remove-Item -LiteralPath 'Env:KISAK_BROWSER_CHANNEL' -ErrorAction SilentlyContinue
     } else {
@@ -63,7 +71,8 @@ try {
     $env:KISAK_PLAYWRIGHT_WORKERS = '1'
     $playwrightArguments = @(
         'exec', '--', 'playwright', 'test',
-        'tests/browser/local_retail_validation.spec.mjs', '--grep', '@retail-phase3'
+        'tests/browser/local_retail_validation.spec.mjs', '--grep',
+        $(if ($Mission) { '@retail-mission' } else { '@retail-phase3' })
     )
     if (-not $Headless) { $playwrightArguments += '--headed' }
     & npm.cmd @playwrightArguments
@@ -78,5 +87,9 @@ try {
     }
 }
 if ($playwrightExitCode -ne 0) {
-    throw 'The local campaign-map validation failed.'
+    throw $(if ($Mission) {
+        'The local mission validation failed.'
+    } else {
+        'The local campaign-map validation failed.'
+    })
 }

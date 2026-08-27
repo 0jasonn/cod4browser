@@ -3,9 +3,13 @@
 #include <client/client.h>
 #include <cgame/cg_local.h>
 #include <cgame/cg_main.h>
+#include <game/actor.h>
+#include <game/g_main.h>
+#include <game/savememory.h>
 #include <qcommon/cmd.h>
 #include <qcommon/qcommon.h>
 #include <server/server.h>
+#include <script/scr_vm.h>
 #include <qcommon/system.h>
 #include <universal/dvar.h>
 #include <ui/ui.h>
@@ -16,6 +20,7 @@
 #include <web/web_system.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <csetjmp>
 
@@ -529,6 +534,111 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestGameplayState(
         return static_cast<int>(cgame->predictedPlayerState.weaponstate);
     case 16:
         return static_cast<int>(cgame->predictedPlayerState.weaponShotCount);
+    case 17:
+        return g_entities[0].health;
+    case 18:
+        return level.clients ? level.clients[0].ps.pm_type : -1;
+    case 19:
+    {
+        std::uint32_t hash = 2166136261u;
+        for (const objectiveInfo_t &objective : cgame->objectives)
+        {
+            hash ^= static_cast<std::uint32_t>(objective.state);
+            hash *= 16777619u;
+            for (std::size_t i = 0;
+                 i < sizeof(objective.string) && objective.string[i]; ++i)
+            {
+                hash ^= static_cast<unsigned char>(objective.string[i]);
+                hash *= 16777619u;
+            }
+        }
+        return static_cast<int>(hash);
+    }
+    case 20:
+    case 21:
+    case 22:
+    {
+        if (!level.actors)
+            return -1;
+        int active = 0;
+        int alive = 0;
+        std::uint32_t fingerprint = 2166136261u;
+        for (int i = 0; i < MAX_ACTORS; ++i)
+        {
+            const actor_s &actor = level.actors[i];
+            if (!actor.inuse || !actor.ent || !actor.ent->r.inuse)
+                continue;
+            const unsigned int stateLevel =
+                actor.stateLevel < 5 ? actor.stateLevel : 0;
+            ++active;
+            if (actor.ent->health > 0)
+                ++alive;
+            const std::uint32_t values[] = {
+                static_cast<std::uint32_t>(i),
+                static_cast<std::uint32_t>(actor.ent->health),
+                static_cast<std::uint32_t>(actor.eState[stateLevel]),
+                static_cast<std::uint32_t>(actor.eSubState[stateLevel]),
+                static_cast<std::uint32_t>(actor.lastShotTime),
+                static_cast<std::uint32_t>(static_cast<int>(
+                    actor.ent->r.currentOrigin[0] * 8.0f)),
+                static_cast<std::uint32_t>(static_cast<int>(
+                    actor.ent->r.currentOrigin[1] * 8.0f)),
+                static_cast<std::uint32_t>(static_cast<int>(
+                    actor.ent->r.currentOrigin[2] * 8.0f)),
+            };
+            for (const std::uint32_t value : values)
+            {
+                fingerprint ^= value;
+                fingerprint *= 16777619u;
+            }
+        }
+        if (field == 20) return active;
+        if (field == 21) return alive;
+        return static_cast<int>(fingerprint);
+    }
+    case 23:
+        return static_cast<int>(Scr_GetNumScriptThreads());
+    case 24:
+        return level.time;
+    case 25:
+        return level.framenum;
+    case 26:
+        return (level.bMissionSuccess ? 1 : 0) |
+            (level.bMissionFailed ? 2 : 0);
+    case 27:
+    case 28:
+    case 29:
+    case 30:
+    case 31:
+    case 32:
+    {
+        SaveGame *const save = SaveMemory_GetLastCommittedSave();
+        const bool committed = save && save->saveState == COMMITTED &&
+            *save->header.filename && save->header.bodySize > 0;
+        if (!committed)
+            return 0;
+        if (field == 27) return 1;
+        if (field == 28) return save->isWrittenToDevice ? 1 : 0;
+        if (field == 29) return save->header.health;
+        if (field == 30) return save->header.bodySize;
+        if (field == 31) return sv_mapname &&
+            I_stricmp(save->header.mapName, sv_mapname->current.string) == 0;
+        return save->header.saveId;
+    }
+    case 33:
+    case 34:
+    {
+        int count = 0;
+        for (const objectiveInfo_t &objective : cgame->objectives)
+        {
+            if (field == 33 && (objective.state == OBJST_ACTIVE ||
+                objective.state == OBJST_CURRENT))
+                ++count;
+            if (field == 34 && objective.state == OBJST_DONE)
+                ++count;
+        }
+        return count;
+    }
     default:
         return -1;
     }
