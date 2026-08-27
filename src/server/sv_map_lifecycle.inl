@@ -235,6 +235,7 @@ void __cdecl SV_SpawnServer(const char *mapname, int savegame)
     R_BeginRemoteScreenUpdate();
     R_EndRemoteScreenUpdate();
     CL_ShutdownAll(false);
+    SV_ShutdownGameProgs();
     SaveMemory_CleanupSaveMemory();
     SaveMemory_ShutdownSaveSystem();
     Com_Printf(15, "------ Server Initialization ------\n");
