@@ -1,0 +1,338 @@
+{
+  "schemaVersion": 2,
+  "source": {
+    "commitSha": "f52298064234092ebce455096c6fe28ea70490e5",
+    "dirty": false
+  },
+  "recordedAtUtc": {
+    "chrome": "2026-08-27T12:21:16.989Z",
+    "msedge": "2026-08-27T12:26:06.836Z"
+  },
+  "environment": {
+    "operatingSystem": {
+      "platform": "win32",
+      "release": "10.0.26200",
+      "version": "Windows 11 Pro",
+      "architecture": "x64"
+    },
+    "referenceHardware": {
+      "processor": "AMD Ryzen 7 7800X3D 8-Core Processor",
+      "logicalProcessorCount": 16,
+      "totalSystemMemoryBytes": 33944879104
+    },
+    "build": "Release diagnostics"
+  },
+  "playableThreshold": {
+    "averageFpsEquivalentMinimum": 30,
+    "p95FrameTimeMsMaximum": 50,
+    "gameTimeWallTimeRatioMinimum": 0.9,
+    "scope": "Initial reference for the recorded hardware and browsers, not a universal requirement."
+  },
+  "webglRendererIdentity": {
+    "vendor": "WebKit",
+    "renderer": "WebKit WebGL",
+    "unmaskedVendor": "Google Inc. (NVIDIA)",
+    "unmaskedRenderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3070 Ti (0x00002482) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+    "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+    "angleBackend": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3070 Ti (0x00002482) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+    "hardwareSoftwareIndication": "hardware-or-driver"
+  },
+  "browsers": {
+    "chrome": {
+      "environment": {
+        "name": "chrome",
+        "version": "151.0.7922.174",
+        "channel": "chrome",
+        "headless": false
+      },
+      "validationResult": "pass",
+      "maps": {
+        "killhouse": {
+          "compatibilityResult": "PLAYABLE",
+          "mapToFirstFrameMs": 5710.909999996424,
+          "performance": {
+            "pageVisibilityState": "visible",
+            "pageFocused": true,
+            "backgroundTransitions": 0,
+            "performanceWindowValid": true,
+            "actualWorldFrames": 2023,
+            "averageFpsEquivalent": 33.70767130419498,
+            "p50FrameTimeMs": 29.49500000476837,
+            "p95FrameTimeMs": 32.20999997854233,
+            "p99FrameTimeMs": 33.53999999165535,
+            "gameTimeWallTimeRatio": 0.9990750724267735
+          },
+          "memory": {
+            "wasmLinearMemoryCapacityBytes": 989921280,
+            "decodedTextureRecoveryBytes": 1419469864,
+            "textureRecoverySourceBytes": 427163511,
+            "encodedImageRecoveryBytes": 396164047,
+            "aggregateCpuRecoveryBytes": 518433483,
+            "estimatedGpuTextureBytes": 1440467016,
+            "geometryBytes": 91269972,
+            "temporaryUploadBytes": 16777216,
+            "audioDecodedBytes": 6072072
+          },
+          "canonicalInput": {
+            "eventCount": 23,
+            "primaryFireClipBefore": 30,
+            "primaryFireClipAfter": 28,
+            "wheelSelection": "pass",
+            "pointerLockReacquisition": true
+          }
+        },
+        "cargoship": {
+          "compatibilityResult": "FUNCTIONAL",
+          "mapToFirstFrameMs": 6834.409999996424,
+          "performance": {
+            "pageVisibilityState": "visible",
+            "pageFocused": true,
+            "backgroundTransitions": 0,
+            "performanceWindowValid": true,
+            "actualWorldFrames": 789,
+            "averageFpsEquivalent": 13.151231062867705,
+            "p50FrameTimeMs": 75.00499999523163,
+            "p95FrameTimeMs": 82.8449999988079,
+            "p99FrameTimeMs": 91.82499998807907,
+            "gameTimeWallTimeRatio": 0.9979536077786088
+          },
+          "memory": {
+            "wasmLinearMemoryCapacityBytes": 989921280,
+            "decodedTextureRecoveryBytes": 781927820,
+            "textureRecoverySourceBytes": 248280146,
+            "encodedImageRecoveryBytes": 217740550,
+            "aggregateCpuRecoveryBytes": 322859990,
+            "estimatedGpuTextureBytes": 802924972,
+            "geometryBytes": 74579844,
+            "temporaryUploadBytes": 16777216,
+            "audioDecodedBytes": 14537196
+          },
+          "canonicalInput": {
+            "eventCount": 23,
+            "primaryFireClipBefore": 12,
+            "primaryFireClipAfter": 11,
+            "wheelSelection": "pass",
+            "pointerLockReacquisition": true
+          }
+        },
+        "blackout": {
+          "compatibilityResult": "FUNCTIONAL",
+          "mapToFirstFrameMs": 6249.209999978542,
+          "performance": {
+            "pageVisibilityState": "visible",
+            "pageFocused": true,
+            "backgroundTransitions": 0,
+            "performanceWindowValid": true,
+            "actualWorldFrames": 1610,
+            "averageFpsEquivalent": 26.822690595927007,
+            "p50FrameTimeMs": 36.985000014305115,
+            "p95FrameTimeMs": 39.689999997615814,
+            "p99FrameTimeMs": 42.34499999880791,
+            "gameTimeWallTimeRatio": 0.9980075508773915
+          },
+          "memory": {
+            "wasmLinearMemoryCapacityBytes": 989921280,
+            "decodedTextureRecoveryBytes": 1238048844,
+            "textureRecoverySourceBytes": 384664311,
+            "encodedImageRecoveryBytes": 345912363,
+            "aggregateCpuRecoveryBytes": 450602931,
+            "estimatedGpuTextureBytes": 1259045996,
+            "geometryBytes": 65938620,
+            "temporaryUploadBytes": 16777216,
+            "audioDecodedBytes": 3058756
+          },
+          "canonicalInput": {
+            "eventCount": 23,
+            "primaryFireClipBefore": 10,
+            "primaryFireClipAfter": 9,
+            "wheelSelection": "pass",
+            "pointerLockReacquisition": true
+          }
+        }
+      },
+      "transitions": {
+        "killhouseToCargoship": "pass",
+        "cargoshipToBlackout": "pass",
+        "blackoutToKillhouse": "pass",
+        "oldMapRecoveryRetiredBeforeNewPublication": true
+      },
+      "contextRecovery": {
+        "cargoship": {
+          "validationResult": "pass",
+          "durationToFirstRecoveredWorldFrameMs": 1357.375,
+          "allocatorInUseDeltaBytes": 2272,
+          "linearMemoryCapacityDeltaBytes": 0,
+          "inputResumed": true
+        },
+        "blackout": {
+          "validationResult": "pass",
+          "durationToFirstRecoveredWorldFrameMs": 1790.2650000154972,
+          "allocatorInUseDeltaBytes": 104,
+          "linearMemoryCapacityDeltaBytes": 0,
+          "inputResumed": true
+        },
+        "returnedKillhouse": {
+          "validationResult": "pass",
+          "durationToFirstRecoveredWorldFrameMs": 1960.9449999928474,
+          "allocatorInUseDeltaBytes": -4216,
+          "linearMemoryCapacityDeltaBytes": 0,
+          "inputResumed": true
+        }
+      },
+      "shutdown": {
+        "flushDurationMs": 13.939999997615814,
+        "reloadResult": "pass",
+        "persistedProfileReady": true,
+        "persistedConfigLoaded": true
+      }
+    },
+    "msedge": {
+      "environment": {
+        "name": "msedge",
+        "version": "151.0.4129.107",
+        "channel": "msedge",
+        "headless": false
+      },
+      "validationResult": "pass",
+      "maps": {
+        "killhouse": {
+          "compatibilityResult": "PLAYABLE",
+          "mapToFirstFrameMs": 5693.484999984503,
+          "performance": {
+            "pageVisibilityState": "visible",
+            "pageFocused": true,
+            "backgroundTransitions": 0,
+            "performanceWindowValid": true,
+            "actualWorldFrames": 2102,
+            "averageFpsEquivalent": 35.026567509754294,
+            "p50FrameTimeMs": 28.294999986886978,
+            "p95FrameTimeMs": 31.179999977350235,
+            "p99FrameTimeMs": 32.5450000166893,
+            "gameTimeWallTimeRatio": 0.9987047932643616
+          },
+          "memory": {
+            "wasmLinearMemoryCapacityBytes": 989921280,
+            "decodedTextureRecoveryBytes": 1424712744,
+            "textureRecoverySourceBytes": 427687695,
+            "encodedImageRecoveryBytes": 396688231,
+            "aggregateCpuRecoveryBytes": 518844075,
+            "estimatedGpuTextureBytes": 1445709896,
+            "geometryBytes": 91156380,
+            "temporaryUploadBytes": 16777216,
+            "audioDecodedBytes": 6072072
+          },
+          "canonicalInput": {
+            "eventCount": 23,
+            "primaryFireClipBefore": 30,
+            "primaryFireClipAfter": 28,
+            "wheelSelection": "pass",
+            "pointerLockReacquisition": true
+          }
+        },
+        "cargoship": {
+          "compatibilityResult": "FUNCTIONAL",
+          "mapToFirstFrameMs": 7303.475000023842,
+          "performance": {
+            "pageVisibilityState": "visible",
+            "pageFocused": true,
+            "backgroundTransitions": 0,
+            "performanceWindowValid": true,
+            "actualWorldFrames": 832,
+            "averageFpsEquivalent": 13.872223301730475,
+            "p50FrameTimeMs": 70.81499999761581,
+            "p95FrameTimeMs": 79.77500000596046,
+            "p99FrameTimeMs": 86.96500000357628,
+            "gameTimeWallTimeRatio": 0.9977522869770502
+          },
+          "memory": {
+            "wasmLinearMemoryCapacityBytes": 989921280,
+            "decodedTextureRecoveryBytes": 778798476,
+            "textureRecoverySourceBytes": 247411698,
+            "encodedImageRecoveryBytes": 216872102,
+            "aggregateCpuRecoveryBytes": 321075594,
+            "estimatedGpuTextureBytes": 799795628,
+            "geometryBytes": 73663896,
+            "temporaryUploadBytes": 16777216,
+            "audioDecodedBytes": 12100260
+          },
+          "canonicalInput": {
+            "eventCount": 23,
+            "primaryFireClipBefore": 12,
+            "primaryFireClipAfter": 11,
+            "wheelSelection": "pass",
+            "pointerLockReacquisition": true
+          }
+        },
+        "blackout": {
+          "compatibilityResult": "FUNCTIONAL",
+          "mapToFirstFrameMs": 6502.419999986887,
+          "performance": {
+            "pageVisibilityState": "visible",
+            "pageFocused": true,
+            "backgroundTransitions": 0,
+            "performanceWindowValid": true,
+            "actualWorldFrames": 1619,
+            "averageFpsEquivalent": 26.975579847849435,
+            "p50FrameTimeMs": 36.78999999165535,
+            "p95FrameTimeMs": 39.46999999880791,
+            "p99FrameTimeMs": 41.525000005960464,
+            "gameTimeWallTimeRatio": 0.9974448244697333
+          },
+          "memory": {
+            "wasmLinearMemoryCapacityBytes": 989921280,
+            "decodedTextureRecoveryBytes": 1239097420,
+            "textureRecoverySourceBytes": 385013891,
+            "encodedImageRecoveryBytes": 346261943,
+            "aggregateCpuRecoveryBytes": 450954755,
+            "estimatedGpuTextureBytes": 1260094572,
+            "geometryBytes": 65940864,
+            "temporaryUploadBytes": 16777216,
+            "audioDecodedBytes": 2656468
+          },
+          "canonicalInput": {
+            "eventCount": 23,
+            "primaryFireClipBefore": 10,
+            "primaryFireClipAfter": 9,
+            "wheelSelection": "pass",
+            "pointerLockReacquisition": true
+          }
+        }
+      },
+      "transitions": {
+        "killhouseToCargoship": "pass",
+        "cargoshipToBlackout": "pass",
+        "blackoutToKillhouse": "pass",
+        "oldMapRecoveryRetiredBeforeNewPublication": true
+      },
+      "contextRecovery": {
+        "cargoship": {
+          "validationResult": "pass",
+          "durationToFirstRecoveredWorldFrameMs": 1349.0349999964237,
+          "allocatorInUseDeltaBytes": -2520,
+          "linearMemoryCapacityDeltaBytes": 0,
+          "inputResumed": true
+        },
+        "blackout": {
+          "validationResult": "pass",
+          "durationToFirstRecoveredWorldFrameMs": 1849.4300000071526,
+          "allocatorInUseDeltaBytes": 5000,
+          "linearMemoryCapacityDeltaBytes": 0,
+          "inputResumed": true
+        },
+        "returnedKillhouse": {
+          "validationResult": "pass",
+          "durationToFirstRecoveredWorldFrameMs": 1893.3050000071526,
+          "allocatorInUseDeltaBytes": -24,
+          "linearMemoryCapacityDeltaBytes": 0,
+          "inputResumed": true
+        }
+      },
+      "shutdown": {
+        "flushDurationMs": 17.555000007152557,
+        "reloadResult": "pass",
+        "persistedProfileReady": true,
+        "persistedConfigLoaded": true
+      }
+    }
+  }
+}
