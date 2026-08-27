@@ -3531,18 +3531,6 @@ int XAnimSetCompleteGoalWeightKnob(
 
     iassert(obj);
 
-    if (!std::isfinite(goalWeight) || !std::isfinite(goalTime) || !std::isfinite(rate))
-        MyAssertHandler(
-            ".\\xanim\\xanim.cpp",
-            2302,
-            0,
-            "XAnimSetCompleteGoalWeightKnob received nonfinite input\n\tentnum=%u animIndex=%u goalWeight=%g goalTime=%g rate=%g",
-            obj->entnum,
-            animIndex,
-            goalWeight,
-            goalTime,
-            rate);
-
     if (goalWeight < 0.001)
         goalWeight = 0.0;
 
@@ -3579,18 +3567,6 @@ int __cdecl XAnimSetGoalWeightKnob(
     PROF_SCOPED("XAnimSetGoalWeight");
 
     iassert(obj);
-
-    if (!std::isfinite(goalWeight) || !std::isfinite(goalTime) || !std::isfinite(rate))
-        MyAssertHandler(
-            ".\\xanim\\xanim.cpp",
-            2336,
-            0,
-            "XAnimSetGoalWeightKnob received nonfinite input\n\tentnum=%u animIndex=%u goalWeight=%g goalTime=%g rate=%g",
-            obj->entnum,
-            animIndex,
-            goalWeight,
-            goalTime,
-            rate);
 
     if (goalWeight < EQUAL_EPSILON)
         goalWeight = 0.0f;
@@ -4016,18 +3992,6 @@ int __cdecl XAnimSetGoalWeight(
     PROF_SCOPED("XAnimSetGoalWeight");
     iassert(obj);
 
-    if (!std::isfinite(goalWeight) || !std::isfinite(goalTime) || !std::isfinite(rate))
-        MyAssertHandler(
-            ".\\xanim\\xanim.cpp",
-            2620,
-            0,
-            "XAnimSetGoalWeight received nonfinite input\n\tentnum=%u animIndex=%u goalWeight=%g goalTime=%g rate=%g",
-            obj->entnum,
-            animIndex,
-            goalWeight,
-            goalTime,
-            rate);
-
     if (goalWeight < EQUAL_EPSILON)
         goalWeight = 0.0;
 
@@ -4142,18 +4106,6 @@ int __cdecl XAnimSetCompleteGoalWeight(
     PROF_SCOPED("XAnimSetGoalWeight");
 
     iassert(obj);
-
-    if (!std::isfinite(goalWeight) || !std::isfinite(goalTime) || !std::isfinite(rate))
-        MyAssertHandler(
-            ".\\xanim\\xanim.cpp",
-            2663,
-            0,
-            "XAnimSetCompleteGoalWeight received nonfinite input\n\tentnum=%u animIndex=%u goalWeight=%g goalTime=%g rate=%g",
-            obj->entnum,
-            animIndex,
-            goalWeight,
-            goalTime,
-            rate);
 
     if (goalWeight < EQUAL_EPSILON)
         goalWeight = 0.0;
