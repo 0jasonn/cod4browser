@@ -84,7 +84,7 @@ void __cdecl CG_mg42_DoControllers(const cpose_t *pose, const DObj_s *obj, int *
     double v9; // fp30
     double v11; // fp0
     double v12; // fp31
-    long double v13; // fp2
+    double v13; // fp2
     double roll; // fp0
     double v15; // fp13
     float aimAngles[3]; // [sp+50h] [-70h] BYREF
@@ -111,7 +111,8 @@ void __cdecl CG_mg42_DoControllers(const cpose_t *pose, const DObj_s *obj, int *
         v12 = (float)((float)(turretViewAngles[1] - (float)v11) * (float)0.0027777778);
         v13 = floor((((turretViewAngles[1] - (float)v11) * (float)0.0027777778) + (float)0.5));
         flashAngles[0] = 0.0;
-        aimAngles[1] = (float)((float)v12 - (float)*(double *)&v13) * (float)360.0;
+        // Native MSVC treats long double as double; Wasm does not.
+        aimAngles[1] = (float)((float)v12 - (float)v13) * (float)360.0;
     }
     else
     {
