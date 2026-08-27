@@ -28,7 +28,9 @@
 #include <web/web_system.h>
 #include <web/web_browser_bindings.h>
 #include <web/web_client_server_lifecycle.h>
+#include <xanim/dobj.h>
 #include <xanim/dobj_runtime_init.h>
+#include <xanim/xanim.h>
 #include <xanim/xanim_runtime_init.h>
 
 #include <emscripten.h>
@@ -179,10 +181,16 @@ void __cdecl Com_Restart()
     // web runtime.  Collision and common-world assets are retired by
     // DB_ReleaseXAssets, whose removal hooks require these canonical owners to
     // have been shut down first.
+    Com_ShutdownDObj();
+    DObjShutdown();
+    XAnimShutdown();
     Com_ShutdownWorld();
     CM_Shutdown();
-    DB_ReleaseXAssets();
     Hunk_Clear();
+    DB_ReleaseXAssets();
+    XAnimInit();
+    DObjInit();
+    Com_InitDObj();
 }
 
 void __cdecl R_BeginRemoteScreenUpdate()
