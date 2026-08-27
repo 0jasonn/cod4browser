@@ -1,6 +1,7 @@
 #include <client/cl_input.h>
 #include <client/cl_scrn.h>
 #include <client/client.h>
+#include <cgame/cg_local.h>
 #include <cgame/cg_main.h>
 #include <qcommon/cmd.h>
 #include <qcommon/qcommon.h>
@@ -247,6 +248,24 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestGameplayState(
     }
     case 7:
         return BG_PlayerWeaponCountPrimaryTypes(&cgame->predictedPlayerState);
+    case 8:
+        return WeaponCycleAllowed(cgame) ? 1 : 0;
+    case 9:
+        return cgame->predictedPlayerState.eFlags;
+    case 10:
+        return cgame->predictedPlayerState.pm_flags;
+    case 11:
+        return cgame->predictedPlayerState.weapFlags;
+    case 12:
+        return clientUIActives[0].keyCatchers;
+    case 13:
+        return cgame->predictedPlayerState.weaponTime;
+    case 14:
+        return cgame->predictedPlayerState.weaponDelay;
+    case 15:
+        return static_cast<int>(cgame->predictedPlayerState.weaponstate);
+    case 16:
+        return static_cast<int>(cgame->predictedPlayerState.weaponShotCount);
     default:
         return -1;
     }

@@ -120,14 +120,14 @@ async function installRetailObservers(page)
             globalThis.__retailValidationFrames.push({
                 ...structuredClone(event.detail), observedMs: performance.now(),
             });
-            if (globalThis.__retailValidationFrames.length > 20_000)
+            if (globalThis.__retailValidationFrames.length > 100_000)
                 globalThis.__retailValidationFrames.shift();
         });
         globalThis.addEventListener("kisakcod:renderer-scene-view", (event) => {
             globalThis.__retailValidationViews.push({
                 ...structuredClone(event.detail), observedMs: performance.now(),
             });
-            if (globalThis.__retailValidationViews.length > 20_000)
+            if (globalThis.__retailValidationViews.length > 100_000)
                 globalThis.__retailValidationViews.shift();
         });
         globalThis.addEventListener("kisakcod:renderer-memory", (event) => {
@@ -185,11 +185,12 @@ async function waitForAssets(page, state)
 async function submitCommand(page, command)
 {
     const input = page.locator("#engine-command-input");
-    await input.fill(command);
+    await expect(input).toBeEditable({ timeout: 30_000 });
+    await input.fill(command, { timeout: 30_000 });
     const commandTimeMs = await page.evaluate(() => performance.now());
-    await input.press("Enter");
+    await page.locator("#engine-command-form").evaluate((form) => form.requestSubmit());
     await expect(page.locator("#engine-command-status"))
-        .toHaveText(`Accepted: ${command}`, { timeout: 120_000 });
+        .toHaveText(`Accepted: ${command}`, { timeout: 30_000 });
     return commandTimeMs;
 }
 
@@ -557,7 +558,13 @@ async function lifecycleEvidence(page, lifecycleCursor)
 
 async function firstWorldFrameEvidence(page, mapName, frameCursor)
 {
-    await waitForWorldFrames(page, mapName);
+    await expect.poll(() => page.evaluate(({ cursor, name }) =>
+        globalThis.__retailValidationFrames.slice(cursor).some(
+            (entry) => entry.state === "drawn" && entry.geometrySubmitted === true &&
+                entry.worldName?.toLowerCase().includes(name)), {
+        cursor: frameCursor,
+        name: mapName,
+    }), { timeout: 300_000 }).toBe(true);
     const frame = await page.evaluate(({ cursor, name }) => structuredClone(
         globalThis.__retailValidationFrames.slice(cursor).find(
             (entry) => entry.state === "drawn" && entry.geometrySubmitted === true &&
@@ -703,28 +710,143 @@ async function recoverMapContext(page, mapName)
     };
 }
 
-async function exerciseRetailInput(page)
+async function gameplayState(page, field, weaponIndex = 0)
 {
-    const gameplayState = (field, weaponIndex = 0) => page.evaluate(
+    return page.evaluate(
         ({ stateField, weapon }) => globalThis.__KISAKCOD_WEB__.module.call(
             "_KisakWeb_TestGameplayState", stateField, weapon),
         { stateField: field, weapon: weaponIndex });
+}
+
+async function provisionGameplayInventory(page)
+{
+    if (await gameplayState(page, 7) !== 0) return null;
+    await submitCommand(page, "give all");
+    await expect.poll(() => gameplayState(page, 7), { timeout: 15_000 })
+        .toBeGreaterThan(0);
+    return "canonical give all";
+}
+
+async function waitForWeaponReady(page)
+{
+    await expect.poll(async () => ({
+        weaponTime: await gameplayState(page, 13),
+        weaponDelay: await gameplayState(page, 14),
+        weaponState: await gameplayState(page, 15),
+        weaponDisabled: (await gameplayState(page, 11) & 0x88) !== 0,
+    }), { timeout: 30_000 }).toEqual({
+        weaponTime: 0,
+        weaponDelay: 0,
+        weaponState: 0,
+        weaponDisabled: false,
+    });
+}
+
+async function exerciseTransitionInput(page)
+{
+    await page.bringToFront();
+    await expect.poll(() => page.evaluate(() => ({
+        visibility: document.visibilityState,
+        focused: document.hasFocus(),
+    }))).toEqual({ visibility: "visible", focused: true });
+    let inventoryProvisioning = await provisionGameplayInventory(page);
+    const canvas = page.locator("#game-canvas");
+    if ((await gameplayState(page, 12) & 0x10) !== 0) {
+        await canvas.focus();
+        await page.keyboard.press("Escape");
+        await expect.poll(async () => await gameplayState(page, 12) & 0x10)
+            .toBe(0);
+    }
+    await canvas.click({ position: { x: 8, y: 8 } });
+    await expect.poll(() => page.evaluate(() => document.pointerLockElement?.id))
+        .toBe("game-canvas");
+
+    const origin = await page.evaluate(() => structuredClone(
+        globalThis.__retailValidationViews.at(-1)?.viewOrigin));
+    await page.keyboard.down("w");
+    try {
+        await expect.poll(() => page.evaluate((previous) => {
+            const current = globalThis.__retailValidationViews.at(-1)?.viewOrigin;
+            return current ? Math.hypot(...current.map(
+                (value, index) => value - previous[index])) : 0;
+        }, origin), { timeout: 30_000 }).toBeGreaterThan(1);
+        await expect.poll(async () => await gameplayState(page, 11) & 0x88,
+            { timeout: 30_000 }).toBe(0);
+    } finally {
+        await page.keyboard.up("w");
+    }
+
+    if (await gameplayState(page, 4) <= 0) {
+        await expect.poll(() => gameplayState(page, 8), { timeout: 60_000 })
+            .toBe(1);
+        await page.mouse.wheel(0, -120);
+    }
+    await expect.poll(() => gameplayState(page, 4), { timeout: 30_000 })
+        .toBeGreaterThan(0);
+    let weapon = await gameplayState(page, 4);
+    if (await gameplayState(page, 6, weapon) <= 0) {
+        await submitCommand(page, "give all");
+        inventoryProvisioning = "canonical give all";
+        await expect.poll(async () => {
+            weapon = await gameplayState(page, 4);
+            return gameplayState(page, 6, weapon);
+        }, { timeout: 15_000 }).toBeGreaterThan(0);
+    }
+    const clipBefore = await gameplayState(page, 6, weapon);
+    expect(clipBefore).toBeGreaterThan(0);
+    await waitForWeaponReady(page);
+    const shotCountBefore = await gameplayState(page, 16);
+    await page.mouse.down({ button: "left" });
+    try {
+        await expect.poll(() => gameplayState(page, 6, weapon), { timeout: 15_000 })
+            .toBeLessThan(clipBefore);
+    } finally {
+        await page.mouse.up({ button: "left" });
+    }
+
+    const viewForward = await page.evaluate(() => structuredClone(
+        globalThis.__retailValidationViews.at(-1)?.viewForward));
+    await page.evaluate(() => {
+        const movement = new MouseEvent("mousemove");
+        Object.defineProperties(movement, {
+            movementX: { value: 7 },
+            movementY: { value: -3 },
+        });
+        globalThis.dispatchEvent(movement);
+    });
+    await expect.poll(() => page.evaluate((previous) => {
+        const current = globalThis.__retailValidationViews.at(-1)?.viewForward;
+        return current ? Math.hypot(...current.map(
+            (value, index) => value - previous[index])) : 0;
+    }, viewForward)).toBeGreaterThan(0.0001);
+    return {
+        validationResult: "pass",
+        inventoryProvisioning,
+        movement: true,
+        primaryFireCanonicalResponse: {
+            weapon,
+            clipBefore,
+            clipAfter: await gameplayState(page, 6, weapon),
+            shotCountBefore,
+            shotCountAfter: await gameplayState(page, 16),
+        },
+        mouseLook: true,
+        pointerLock: true,
+    };
+}
+
+async function exerciseRetailInput(page)
+{
     const canvas = page.locator("#game-canvas");
     const beforeMove = await page.evaluate(() => structuredClone(
         globalThis.__retailValidationViews.at(-1)?.viewOrigin));
     expect(beforeMove).toHaveLength(3);
-    let inventoryProvisioning = null;
-    if (await gameplayState(7) === 0) {
-        await submitCommand(page, "give all");
-        await expect.poll(() => gameplayState(7), { timeout: 15_000 })
-            .toBeGreaterThan(0);
-        inventoryProvisioning = "canonical give all";
-    }
-    if (await page.evaluate(() => globalThis.__KISAKCOD_WEB__.input.absoluteMouse ||
-        globalThis.__KISAKCOD_WEB__.input.cursorVisible)) {
+    const inventoryProvisioning = await provisionGameplayInventory(page);
+    if ((await gameplayState(page, 12) & 0x10) !== 0) {
+        await canvas.focus();
         await page.keyboard.press("Escape");
-        await expect.poll(() => page.evaluate(() =>
-            globalThis.__KISAKCOD_WEB__.input.absoluteMouse)).toBe(false);
+        await expect.poll(async () => await gameplayState(page, 12) & 0x10)
+            .toBe(0);
     }
     await canvas.click({ position: { x: 8, y: 8 } });
     await expect.poll(() => page.evaluate(() => document.pointerLockElement?.id))
@@ -765,11 +887,11 @@ async function exerciseRetailInput(page)
             (total, entry) => total + entry.count, 0));
     await expect.poll(() => page.evaluate(() => document.pointerLockElement?.id))
         .toBe("game-canvas");
-    const primaryWeaponCount = await gameplayState(7);
-    const selectedWeaponBefore = await gameplayState(2);
-    await page.mouse.wheel(0, -120);
+    const primaryWeaponCount = await gameplayState(page, 7);
+    const selectedWeaponBefore = await gameplayState(page, 2);
     let wheelCanonicalResponse;
     if (primaryWeaponCount <= 1) {
+        await page.mouse.wheel(0, -120);
         wheelCanonicalResponse = {
             validationResult: "NOT_APPLICABLE_SINGLE_WEAPON",
             primaryWeaponCount,
@@ -777,24 +899,31 @@ async function exerciseRetailInput(page)
             selectedWeaponAfter: selectedWeaponBefore,
         };
     } else {
-        await expect.poll(() => gameplayState(2), { timeout: 15_000 })
+        await expect.poll(() => gameplayState(page, 8), { timeout: 60_000 })
+            .toBe(1);
+        await page.mouse.wheel(0, -120);
+        await expect.poll(() => gameplayState(page, 2), { timeout: 15_000 })
             .not.toBe(selectedWeaponBefore);
-        const selectedWeaponAfter = await gameplayState(2);
+        const selectedWeaponAfter = await gameplayState(page, 2);
+        await expect.poll(() => gameplayState(page, 4), { timeout: 15_000 })
+            .toBe(selectedWeaponAfter);
         wheelCanonicalResponse = {
             validationResult: "pass",
             primaryWeaponCount,
+            selectionAllowed: true,
             selectedWeaponBefore,
             selectedWeaponAfter,
         };
     }
-    const snapshotWeaponBefore = await gameplayState(0);
-    const selectedWeaponBeforeFire = await gameplayState(2);
-    const predictedWeaponBefore = await gameplayState(4);
-    const viewmodelWeaponBefore = await gameplayState(5);
-    const fireWeapon = [selectedWeaponBeforeFire, predictedWeaponBefore,
-        viewmodelWeaponBefore].find((weapon) => weapon > 0) ?? 0;
-    const snapshotClipBefore = await gameplayState(1, fireWeapon);
-    const clipBefore = await gameplayState(6, fireWeapon);
+    const snapshotWeaponBefore = await gameplayState(page, 0);
+    const selectedWeaponBeforeFire = await gameplayState(page, 2);
+    const predictedWeaponBefore = await gameplayState(page, 4);
+    const viewmodelWeaponBefore = await gameplayState(page, 5);
+    const fireWeapon = [predictedWeaponBefore, viewmodelWeaponBefore,
+        snapshotWeaponBefore, selectedWeaponBeforeFire]
+        .find((weapon) => weapon > 0) ?? 0;
+    const snapshotClipBefore = await gameplayState(page, 1, fireWeapon);
+    const clipBefore = await gameplayState(page, 6, fireWeapon);
     console.log(`KISAK_RETAIL_GAMEPLAY_STATE ${JSON.stringify({
         snapshotWeaponBefore,
         selectedWeaponBeforeFire,
@@ -803,20 +932,24 @@ async function exerciseRetailInput(page)
         fireWeapon,
         snapshotClipBefore,
         predictedClipBefore: clipBefore,
-        snapshotPrimaryWeaponCount: await gameplayState(3),
+        snapshotPrimaryWeaponCount: await gameplayState(page, 3),
         predictedPrimaryWeaponCount: primaryWeaponCount,
     })}`);
     expect(fireWeapon).toBeGreaterThan(0);
     expect(clipBefore).toBeGreaterThan(0);
+    await waitForWeaponReady(page);
+    const shotCountBefore = await gameplayState(page, 16);
     await page.mouse.down({ button: "left" });
     try {
-        await expect.poll(() => gameplayState(6, fireWeapon), { timeout: 15_000 })
+        await expect.poll(() => gameplayState(page, 6, fireWeapon), {
+            timeout: 15_000,
+        })
             .toBeLessThan(clipBefore);
     } finally {
         await page.mouse.up({ button: "left" });
     }
-    const clipAfter = await gameplayState(6, fireWeapon);
-    const snapshotClipAfter = await gameplayState(1, fireWeapon);
+    const clipAfter = await gameplayState(page, 6, fireWeapon);
+    const snapshotClipAfter = await gameplayState(page, 1, fireWeapon);
     const primaryFireCanonicalResponse = {
         validationResult: "pass",
         inventoryProvisioning,
@@ -829,6 +962,8 @@ async function exerciseRetailInput(page)
         snapshotClipAfter,
         clipBefore,
         clipAfter,
+        shotCountBefore,
+        shotCountAfter: await gameplayState(page, 16),
     };
     const adsBefore = await page.evaluate(() =>
         globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestUsingAds"));
@@ -870,15 +1005,20 @@ async function exerciseRetailInput(page)
             (total, entry) => total + entry.count, 0)), { timeout: 30_000 })
         .toBeGreaterThan(audioBefore);
 
+    await expect.poll(async () => await gameplayState(page, 12) & 0x10)
+        .toBe(0x10);
+    const menuKeyCatchers = await gameplayState(page, 12);
+    await page.waitForTimeout(150);
+    await canvas.focus();
+    await page.keyboard.press("Escape");
+    await expect.poll(async () => await gameplayState(page, 12) & 0x10)
+        .toBe(0);
     const inputs = await page.evaluate(() => structuredClone(
         globalThis.__retailValidationInput));
     for (const key of [0x77, 0x73, 0x61, 0x64, 0x20, 0x1B, 0xC8, 0xC9, 0xCD, 0xCE]) {
         expect(inputs).toContainEqual({ type: "key", key, down: true });
         expect(inputs).toContainEqual({ type: "key", key, down: false });
     }
-    await page.keyboard.press("Escape");
-    await expect.poll(() => page.evaluate(() =>
-        globalThis.__KISAKCOD_WEB__.input.absoluteMouse)).toBe(false);
     await canvas.click({ position: { x: 8, y: 8 } });
     await expect.poll(() => page.evaluate(() => document.pointerLockElement?.id))
         .toBe("game-canvas");
@@ -890,14 +1030,18 @@ async function exerciseRetailInput(page)
         primaryFireAudioSecondaryEvidence: true,
         secondaryAction: true,
         wheelCanonicalResponse,
-        escapeMenu: true,
+        escapeMenu: {
+            validationResult: "pass",
+            openedKeyCatchers: menuKeyCatchers,
+            closedKeyCatchers: await gameplayState(page, 12),
+        },
         pointerLockLoss: true,
         pointerLockReacquisition: true,
     };
 }
 
 test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: page }) => {
-    test.setTimeout(900_000);
+    test.setTimeout(1_800_000);
     if (!allowDirty) expect(sourceDirty,
         "authoritative retail validation requires a clean source commit").toBe(false);
     const browser = page.context().browser();
@@ -980,6 +1124,9 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
     const cargoshipHeapAfterLoad = await heapBytes(page);
     await waitForWorldFrames(page, "cargoship", 120);
     const cargoshipHeapAfterWorld = await heapBytes(page);
+    failureStage = "Killhouse to CargoShip critical input";
+    failureClass = "cgame";
+    const cargoshipTransitionInput = await exerciseTransitionInput(page);
     const cargoshipStability = await sustainWorldFrames(
         page, "cargoship", stabilityDurationMs);
     const cargoshipHeapAtStabilityEnd = await heapBytes(page);
@@ -1013,46 +1160,7 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
 
     failureStage = "CargoShip WebGL context recovery";
     failureClass = "renderer";
-    const recoveryBefore = await page.evaluate(() => ({
-        startedMs: performance.now(),
-        contextLosses: globalThis.__KISAKCOD_WEB__.contextLosses,
-        surfaceRecoveryCount:
-            globalThis.__KISAKCOD_WEB__.rendererSurface.recoveryCount ?? 0,
-        frame: structuredClone(globalThis.__retailValidationFrames.findLast(
-            (entry) => entry.worldName?.toLowerCase().includes("cargoship"))),
-    }));
-    expect(await page.evaluate(() =>
-        globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestLoseWebGLContext")))
-        .toBeTruthy();
-    await expect.poll(() => page.evaluate(() => ({
-        runtime: globalThis.__KISAKCOD_WEB__.state,
-        surface: globalThis.__KISAKCOD_WEB__.rendererSurface.state,
-    }))).toEqual({ runtime: "renderer-lost", surface: "lost" });
-    expect(await page.evaluate(() =>
-        globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestRestoreWebGLContext")))
-        .toBeTruthy();
-    await expect.poll(() => page.evaluate((before) => ({
-        runtime: globalThis.__KISAKCOD_WEB__.state,
-        contextLossRecorded:
-            globalThis.__KISAKCOD_WEB__.contextLosses > before.contextLosses,
-        surface: globalThis.__KISAKCOD_WEB__.rendererSurface.state,
-        surfaceRecovered: globalThis.__KISAKCOD_WEB__.rendererSurface.recoveryCount >
-            before.surfaceRecoveryCount,
-        canonicalResourcesRebuilt:
-            (globalThis.__retailValidationFrames.findLast((entry) =>
-                entry.worldName?.toLowerCase().includes("cargoship"))
-                ?.resourceGeneration ?? 0) > (before.frame?.resourceGeneration ?? 0),
-    }), recoveryBefore), { timeout: 30_000 }).toEqual({
-        runtime: "running",
-        contextLossRecorded: true,
-        surface: "ready",
-        surfaceRecovered: true,
-        canonicalResourcesRebuilt: true,
-    });
-    await waitForWorldFrames(page, "cargoship",
-        recoveryBefore.frame.viewSubmissionGeneration + 1);
-    const recoveryCompletedMs = await page.evaluate(() => performance.now());
-    const recoveryInput = await exerciseRetailInput(page);
+    const cargoshipContextRecovery = await recoverMapContext(page, "cargoship");
 
     const cargoshipEvidence = await mapEvidence(page, "cargoship", cargoshipCursor,
         cargoshipCommandMs, cargoshipHeapBefore, cargoshipHeapAfterLoad,
@@ -1129,15 +1237,90 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
         lifecycleOrder: ["worldUnloadBegin", "worldUnloadEnd", "newWorldPublished"],
     };
 
-    const recoveryAfter = await page.evaluate(() => ({
-        contextLosses: globalThis.__KISAKCOD_WEB__.contextLosses,
-        surfaceRecoveryCount:
-            globalThis.__KISAKCOD_WEB__.rendererSurface.recoveryCount ?? 0,
-        frame: structuredClone(globalThis.__retailValidationFrames.findLast(
-            (entry) => entry.worldName?.toLowerCase().includes("cargoship"))),
-    }));
     expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.state))
         .toBe("running");
+
+    failureStage = "CargoShip to Blackout transition";
+    failureClass = "lifecycle";
+    const cargoshipToBlackoutCursor = await page.evaluate(() =>
+        globalThis.__retailRendererLifecycle.length);
+    const blackoutCursor = await captureMapCursor(page);
+    const blackoutHeapBefore = await heapBytes(page);
+    const blackoutCommandMs = await submitCommand(page, "map blackout");
+    failureStage = "Blackout database load";
+    failureClass = "database";
+    await waitForDatabaseCompletion(page, "blackout", blackoutCursor.database);
+    failureStage = "Blackout canonical lifecycle";
+    failureClass = "cgame";
+    await waitForLifecycleStages(
+        page, blackoutCursor.lifecycle, canonicalMapLifecycleStages);
+    const blackoutHeapAfterLoad = await heapBytes(page);
+    failureStage = "Blackout first world frame";
+    failureClass = "renderer";
+    const blackoutFrame = await firstWorldFrameEvidence(
+        page, "blackout", blackoutCursor.frames);
+    const blackoutHeapAfterWorld = await heapBytes(page);
+    const cargoshipToBlackout = await rendererTransitionEvidence(
+        page, cargoshipToBlackoutCursor, blackoutCommandMs,
+        blackoutFrame.observedMs);
+    failureStage = "CargoShip to Blackout critical input";
+    failureClass = "cgame";
+    const blackoutTransitionInput = await exerciseTransitionInput(page);
+    failureStage = "Blackout foreground stability";
+    failureClass = "renderer";
+    const blackoutStability = await sustainWorldFrames(
+        page, "blackout", stabilityDurationMs);
+    const blackoutHeapAtStabilityEnd = await heapBytes(page);
+    const blackoutMemory = await rendererMemorySnapshot(page);
+    const blackoutAudio = await page.evaluate(() => structuredClone(
+        globalThis.__retailAudioTelemetry.at(-1) ?? null));
+    failureStage = "Blackout gameplay validation";
+    failureClass = "cgame";
+    const blackoutInput = await exerciseRetailInput(page);
+    failureStage = "Blackout checkpoint";
+    failureClass = "lifecycle";
+    const blackoutCheckpoint = await writeConfigAndCheckpoint(page);
+    const blackoutEvidence = await mapEvidence(
+        page, "blackout", blackoutCursor, blackoutCommandMs,
+        blackoutHeapBefore, blackoutHeapAfterLoad, blackoutHeapAfterWorld,
+        blackoutHeapAtStabilityEnd, blackoutStability, blackoutMemory,
+        blackoutAudio, blackoutInput, blackoutCheckpoint);
+    blackoutEvidence.canonicalLifecycle = await lifecycleEvidence(
+        page, blackoutCursor.lifecycle);
+    assertMapEvidence(blackoutEvidence, blackoutMemory);
+    failureStage = "Blackout WebGL context recovery";
+    failureClass = "renderer";
+    const blackoutContextRecovery = await recoverMapContext(page, "blackout");
+
+    failureStage = "Blackout to Killhouse transition";
+    failureClass = "lifecycle";
+    const blackoutToKillhouseCursor = await page.evaluate(() =>
+        globalThis.__retailRendererLifecycle.length);
+    const returnedKillhouseCursor = await captureMapCursor(page);
+    const returnedKillhouseCommandMs = await submitCommand(page, "map killhouse");
+    failureStage = "Returned Killhouse database load";
+    failureClass = "database";
+    await waitForDatabaseCompletion(
+        page, "killhouse", returnedKillhouseCursor.database);
+    failureStage = "Returned Killhouse canonical lifecycle";
+    failureClass = "cgame";
+    await waitForLifecycleStages(
+        page, returnedKillhouseCursor.lifecycle, canonicalMapLifecycleStages);
+    failureStage = "Returned Killhouse first world frame";
+    failureClass = "renderer";
+    const returnedKillhouseFrame = await firstWorldFrameEvidence(
+        page, "killhouse", returnedKillhouseCursor.frames);
+    const blackoutToKillhouse = await rendererTransitionEvidence(
+        page, blackoutToKillhouseCursor, returnedKillhouseCommandMs,
+        returnedKillhouseFrame.observedMs);
+    failureStage = "Blackout to Killhouse critical input";
+    failureClass = "cgame";
+    const returnedKillhouseInput = await exerciseTransitionInput(page);
+    failureStage = "Returned Killhouse WebGL context recovery";
+    failureClass = "renderer";
+    const returnedKillhouseContextRecovery = await recoverMapContext(
+        page, "killhouse");
+
     expect(pageErrors).toEqual([]);
     failureStage = "shutdown flush";
     failureClass = "lifecycle";
@@ -1182,20 +1365,35 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
         browserVersion: retailBrowserMetadata.version,
         failureStage: null,
         failureClass: null,
-        maps: { killhouse: killhouseEvidence, cargoship: cargoshipEvidence },
-        transition: transitionEvidence,
+        maps: {
+            killhouse: killhouseEvidence,
+            cargoship: cargoshipEvidence,
+            blackout: blackoutEvidence,
+        },
+        transitions: {
+            killhouseToCargoship: {
+                from: "killhouse",
+                to: "cargoship",
+                ...transitionEvidence,
+                destinationCriticalInput: cargoshipTransitionInput,
+            },
+            cargoshipToBlackout: {
+                from: "cargoship",
+                to: "blackout",
+                ...cargoshipToBlackout,
+                destinationCriticalInput: blackoutTransitionInput,
+            },
+            blackoutToKillhouse: {
+                from: "blackout",
+                to: "killhouse",
+                ...blackoutToKillhouse,
+                destinationCriticalInput: returnedKillhouseInput,
+            },
+        },
         contextRecovery: {
-            validationResult: "pass",
-            durationToFirstRecoveredWorldFrameMs:
-                recoveryCompletedMs - recoveryBefore.startedMs,
-            contextLossesBefore: recoveryBefore.contextLosses,
-            contextLossesAfter: recoveryAfter.contextLosses,
-            surfaceRecoveryCountBefore: recoveryBefore.surfaceRecoveryCount,
-            surfaceRecoveryCountAfter: recoveryAfter.surfaceRecoveryCount,
-            resourceGenerationBefore: recoveryBefore.frame.resourceGeneration,
-            resourceGenerationAfter: recoveryAfter.frame.resourceGeneration,
-            framesResumed: true,
-            inputResumed: recoveryInput,
+            cargoship: cargoshipContextRecovery,
+            blackout: blackoutContextRecovery,
+            returnedKillhouse: returnedKillhouseContextRecovery,
         },
         shutdown: {
             flushDurationMs: shutdownFlushDurationMs,
