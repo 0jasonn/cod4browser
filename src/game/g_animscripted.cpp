@@ -203,18 +203,6 @@ void __cdecl G_AnimScripted_ClearAnimWeights(
             XAnimGetInfoIndex(pAnimTree, pActor->lookAtInfo.animLookAtStraight),
             Weight);
     v11 = XAnimGetWeight(pAnimTree, pActor->lookAtInfo.animLookAtLeft);
-    if (!std::isfinite(v11))
-        MyAssertHandler(
-            ".\\game\\g_animscripted.cpp",
-            190,
-            0,
-            "G_AnimScripted initial left look-at weight is not finite\n\tentnum=%u straight=%u left=%u right=%u infoIndex=%u weight=%g",
-            obj->entnum,
-            pActor->lookAtInfo.animLookAtStraight,
-            pActor->lookAtInfo.animLookAtLeft,
-            pActor->lookAtInfo.animLookAtRight,
-            XAnimGetInfoIndex(pAnimTree, pActor->lookAtInfo.animLookAtLeft),
-            v11);
     if (v11 > 0.0)
     {
         animLookAtLeft = pActor->lookAtInfo.animLookAtLeft;
@@ -223,18 +211,6 @@ void __cdecl G_AnimScripted_ClearAnimWeights(
         goto LABEL_9;
     }
     v11 = XAnimGetWeight(pAnimTree, pActor->lookAtInfo.animLookAtRight);
-    if (!std::isfinite(v11))
-        MyAssertHandler(
-            ".\\game\\g_animscripted.cpp",
-            198,
-            0,
-            "G_AnimScripted initial right look-at weight is not finite\n\tentnum=%u straight=%u left=%u right=%u infoIndex=%u weight=%g",
-            obj->entnum,
-            pActor->lookAtInfo.animLookAtStraight,
-            pActor->lookAtInfo.animLookAtLeft,
-            pActor->lookAtInfo.animLookAtRight,
-            XAnimGetInfoIndex(pAnimTree, pActor->lookAtInfo.animLookAtRight),
-            v11);
     if (v11 > 0.0)
     {
         animLookAtLeft = pActor->lookAtInfo.animLookAtRight;

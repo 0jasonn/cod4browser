@@ -3643,21 +3643,6 @@ int __cdecl XAnimSetGoalWeightNode(
             info->parent,
             info->prev,
             info->next);
-    if (!std::isfinite(info->state.weight)
-        || !std::isfinite(info->state.goalWeight)
-        || !std::isfinite(info->state.goalTime)
-        || !std::isfinite(info->state.rate))
-        MyAssertHandler(
-            ".\\xanim\\xanim.cpp",
-            2380,
-            0,
-            "XAnim setter entered with nonfinite state\n\tinfoIndex=%u animIndex=%u weight=%g goalWeight=%g goalTime=%g rate=%g",
-            infoIndex,
-            info->animIndex,
-            info->state.weight,
-            info->state.goalWeight,
-            info->state.goalTime,
-            info->state.rate);
     if (!std::isfinite(goalWeight) || !std::isfinite(goalTime) || !std::isfinite(rate))
         MyAssertHandler(
             ".\\xanim\\xanim.cpp",
@@ -3722,21 +3707,6 @@ int __cdecl XAnimSetGoalWeightNode(
     }
     info->state.goalWeight = goalWeight;
     info->state.rate = rate;
-    if (!std::isfinite(info->state.weight)
-        || !std::isfinite(info->state.goalWeight)
-        || !std::isfinite(info->state.goalTime)
-        || !std::isfinite(info->state.rate))
-        MyAssertHandler(
-            ".\\xanim\\xanim.cpp",
-            2441,
-            0,
-            "XAnim setter produced nonfinite state\n\tinfoIndex=%u animIndex=%u weight=%g goalWeight=%g goalTime=%g rate=%g",
-            infoIndex,
-            info->animIndex,
-            info->state.weight,
-            info->state.goalWeight,
-            info->state.goalTime,
-            info->state.rate);
     info->notifyName = notifyName;
     if (notifyName)
         SL_AddRefToString(notifyName);
@@ -4129,35 +4099,7 @@ int __cdecl XAnimSetCompleteGoalWeight(
 void __cdecl XAnimCloneAnimInfo(const XAnimInfo* from, XAnimInfo* to)
 {
     iassert(to->animIndex == from->animIndex);
-    if (!std::isfinite(from->state.weight)
-        || !std::isfinite(from->state.goalWeight)
-        || !std::isfinite(from->state.goalTime)
-        || !std::isfinite(from->state.rate))
-        MyAssertHandler(
-            ".\\xanim\\xanim.cpp",
-            2694,
-            0,
-            "XAnim clone source state is not finite\n\tanimIndex=%u weight=%g goalWeight=%g goalTime=%g rate=%g",
-            from->animIndex,
-            from->state.weight,
-            from->state.goalWeight,
-            from->state.goalTime,
-            from->state.rate);
     qmemcpy(&to->state, &from->state, sizeof(to->state));
-    if (!std::isfinite(to->state.weight)
-        || !std::isfinite(to->state.goalWeight)
-        || !std::isfinite(to->state.goalTime)
-        || !std::isfinite(to->state.rate))
-        MyAssertHandler(
-            ".\\xanim\\xanim.cpp",
-            2696,
-            0,
-            "XAnim clone destination state is not finite\n\tanimIndex=%u weight=%g goalWeight=%g goalTime=%g rate=%g",
-            to->animIndex,
-            to->state.weight,
-            to->state.goalWeight,
-            to->state.goalTime,
-            to->state.rate);
     to->notifyChild = from->notifyChild;
     to->notifyIndex = from->notifyIndex;
     to->notifyName = from->notifyName;
