@@ -23,6 +23,27 @@ browser test controls and telemetry through `KISAK_WEB_DIAGNOSTICS`; they no
 longer contain a second asset loader, world model, scheduler, or renderer
 oracle.
 
+## 2026-08-27 convergence update
+
+The current WebAssembly fixes preserve canonical Kisak ownership while
+removing ABI assumptions that only held when native `long double` was eight
+bytes. Actor motion/damage angle wrapping and script trigonometry now compute
+through ordinary `double` values without pointer-punning through Wasm's
+16-byte `long double`. Map reload also releases game-owned runtime state before
+database retirement and resets animation state at the canonical owner
+boundary. CargoShip -> Bog A -> Killhouse now passes without non-finite XAnim
+state; all temporary diagnostic assertions used to locate the fault were
+reverted.
+
+The single renderer change at `9e75a9dd` remains entirely backend-owned. Opaque
+shadow casters skip unused texture/sampler binds; alpha-tested casters keep the
+same canonical material sampling. The six-map headed Chrome rerun passed every
+functional and lifecycle gate and reduced average shadow CPU time 36.91% and
+texture binds 32.49%. Full measurements are in
+[retail-profile-9e75a9dd.json](evidence/retail-profile-9e75a9dd.json). This does
+not introduce an intermediate asset model or move shadow/material ownership
+out of Kisak's renderer frontend.
+
 ## Shared Kisak systems
 
 | System | Current ownership |

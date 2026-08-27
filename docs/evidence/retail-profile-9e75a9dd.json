@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUtc": "2026-08-27T16:46:49.773Z",
+  "source": {
+    "optimizationCommitSha": "9e75a9ddeb0c55ff473d90b32dd9c8dc49ca6c1d",
+    "dirty": false,
+    "preProfileCommits": [
+      "5d85003342baff238b0d58d4ef1c186d446cd873",
+      "1653cf56f5f337bc3cbf24e2de6f7de8c59b525e",
+      "4afc421c"
+    ]
+  },
+  "environment": {
+    "browser": "Chrome 151.0.7922.174",
+    "headless": false,
+    "operatingSystem": "Windows 11 Pro 10.0.26200 x64",
+    "processor": "AMD Ryzen 7 7800X3D",
+    "logicalProcessorCount": 16,
+    "totalSystemMemoryBytes": 33944879104,
+    "build": "Release diagnostics",
+    "foregroundWindowsValid": true
+  },
+  "change": {
+    "description": "Opaque sun and spot shadow casters skip unused texture and sampler binds.",
+    "scope": "WebGL2 renderer backend only",
+    "averageAcrossSixMaps": {
+      "shadowDrawCpuMsBefore": 11.325,
+      "shadowDrawCpuMsAfter": 7.144,
+      "shadowDrawCpuPercentChange": -36.91,
+      "textureBindCallsBefore": 51661,
+      "textureBindCallsAfter": 34874,
+      "textureBindCallsPercentChange": -32.49,
+      "rendererBackendCpuMsBefore": 25.863,
+      "rendererBackendCpuMsAfter": 24.166,
+      "rendererBackendCpuPercentChange": -6.56
+    }
+  },
+  "maps": {
+    "killhouse": {
+      "validationResult": "pass",
+      "capturedProfileSamples": 300,
+      "averageFrameTimeMs": 22.949,
+      "p95FrameTimeMs": 24.960,
+      "averageFpsEquivalent": 43.575,
+      "cpuTotalAverageMs": 22.891,
+      "rendererFrontendAverageMs": 8.639,
+      "rendererBackendAverageMs": 14.106,
+      "gpuBackendAverageMs": 15.606,
+      "shadowDrawAverageMs": 5.180,
+      "textureBindCallsAverage": 21429
+    },
+    "cargoship": {
+      "validationResult": "pass",
+      "capturedProfileSamples": 300,
+      "averageFrameTimeMs": 83.743,
+      "p95FrameTimeMs": 92.575,
+      "averageFpsEquivalent": 11.941,
+      "cpuTotalAverageMs": 82.714,
+      "rendererFrontendAverageMs": 34.880,
+      "rendererBackendAverageMs": 45.613,
+      "gpuBackendAverageMs": 43.338,
+      "shadowDrawAverageMs": 11.834,
+      "textureBindCallsAverage": 56264
+    },
+    "blackout": {
+      "validationResult": "pass",
+      "capturedProfileSamples": 300,
+      "averageFrameTimeMs": 41.650,
+      "p95FrameTimeMs": 45.775,
+      "averageFpsEquivalent": 24.009,
+      "cpuTotalAverageMs": 42.468,
+      "rendererFrontendAverageMs": 10.267,
+      "rendererBackendAverageMs": 31.897,
+      "gpuBackendAverageMs": 32.382,
+      "shadowDrawAverageMs": 10.361,
+      "textureBindCallsAverage": 42321
+    },
+    "airplane": {
+      "validationResult": "pass",
+      "capturedProfileSamples": 76,
+      "averageFrameTimeMs": 16.677,
+      "p95FrameTimeMs": 18.505,
+      "averageFpsEquivalent": 59.962,
+      "cpuTotalAverageMs": 10.119,
+      "rendererFrontendAverageMs": 7.727,
+      "rendererBackendAverageMs": 2.309,
+      "gpuBackendAverageMs": 3.535,
+      "shadowDrawAverageMs": 0.714,
+      "textureBindCallsAverage": 4247
+    },
+    "hunted": {
+      "validationResult": "pass",
+      "capturedProfileSamples": 300,
+      "averageFrameTimeMs": 46.235,
+      "p95FrameTimeMs": 49.105,
+      "averageFpsEquivalent": 21.629,
+      "cpuTotalAverageMs": 45.404,
+      "rendererFrontendAverageMs": 15.664,
+      "rendererBackendAverageMs": 29.462,
+      "gpuBackendAverageMs": 31.280,
+      "shadowDrawAverageMs": 8.417,
+      "textureBindCallsAverage": 50359
+    },
+    "bog_a": {
+      "validationResult": "pass",
+      "capturedProfileSamples": 300,
+      "averageFrameTimeMs": 48.009,
+      "p95FrameTimeMs": 61.505,
+      "averageFpsEquivalent": 20.830,
+      "cpuTotalAverageMs": 37.932,
+      "rendererFrontendAverageMs": 16.035,
+      "rendererBackendAverageMs": 21.608,
+      "gpuBackendAverageMs": 23.174,
+      "shadowDrawAverageMs": 6.360,
+      "textureBindCallsAverage": 34622
+    }
+  },
+  "validation": {
+    "baseline": "pass",
+    "airplane": "pass",
+    "hunted": "pass",
+    "bog_a": "pass",
+    "allMapsStableFor60Seconds": true,
+    "inputAudioCheckpoint": true,
+    "mapTransitions": true,
+    "contextRecovery": true,
+    "shutdownAndConfigReload": true,
+    "missionObjectiveDeathSaveReload": "not-run-no-automated-validator"
+  },
+  "classification": "PERFORMANCE BOTTLENECK IDENTIFIED — NEXT FIX REQUIRED"
+}

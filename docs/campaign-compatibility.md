@@ -18,6 +18,25 @@ universal hardware requirement. Performance is classified only from a headed
 window that remained visible and focused with zero background transitions.
 Background-invalid timing cannot establish or remove `PLAYABLE` status.
 
+The latest clean optimization rerun is `9e75a9dd`, in headed Chrome
+151.0.7922.174 on the same Windows 11/RTX 3070 Ti reference host. All six maps
+again passed canonical loading, 60-second foreground stability, gameplay,
+audio, configuration checkpoint, transitions, context recovery, and clean
+shutdown/reload. Current performance is summarized below; the machine-readable
+record is [retail-profile-9e75a9dd.json](evidence/retail-profile-9e75a9dd.json).
+
+| Map | Average FPS | p95 frame | Backend CPU average | Result |
+| --- | ---: | ---: | ---: | --- |
+| `killhouse` | 43.575 | 24.960 ms | 14.106 ms | **PLAYABLE** |
+| `cargoship` | 11.941 | 92.575 ms | 45.613 ms | **FUNCTIONAL** |
+| `blackout` | 24.009 | 45.775 ms | 31.897 ms | **FUNCTIONAL** |
+| `airplane` | 59.962 | 18.505 ms | 2.309 ms | **PLAYABLE** |
+| `hunted` | 21.629 | 49.105 ms | 29.462 ms | **FUNCTIONAL** |
+| `bog_a` | 20.830 | 61.505 ms | 21.608 ms | **FUNCTIONAL** |
+
+These results refresh performance and regression status; they do not promote
+configuration checkpoints to complete gameplay save/load evidence.
+
 The final clean baseline at `f5229806` ran
 `killhouse` -> `cargoship` -> `blackout` -> `killhouse` in headed branded
 Chrome and Edge. Every 60-second window was visible, focused, free of

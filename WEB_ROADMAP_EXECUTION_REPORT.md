@@ -9,8 +9,11 @@ retail evidence remains valid only for its recorded commits and dates.
 | --- | --- |
 | Starting SHA / branch | `d3f4c8d696e21939e7ef85cc19eb331ef104c30b` / `codex/web-frame-profile-mission` |
 | Profiler implementation | `91788492`, completed by `aff008c3` |
-| Retail root supplied to this process | **NO**; `KISAK_COD4_RETAIL_ROOT` is absent |
-| Current retail claim | None; no historical result is presented as a fresh run |
+| Integration branch | `web-port`; no additional branch remains |
+| Retail root supplied to this process | **YES**; explicit local path omitted from evidence |
+| Correctness fixes | `e42b48f3` through `721a981b` |
+| Renderer optimization | `9e75a9dd` |
+| Browser / host | Headed Chrome 151.0.7922.174 / Windows 11 Pro x64 / Ryzen 7 7800X3D / RTX 3070 Ti |
 
 Commits `91788492` and `aff008c3` add an explicitly requested,
 maximum-600-sample diagnostic capture. It reports engine CPU stages, renderer
@@ -22,36 +25,59 @@ generation, and view generation. GPU reads never synchronously wait. Disjoint
 or stale-context results are classified and excluded from valid timing
 summaries. The production boundary now rejects any `frame-profile` leak.
 
-The retail evidence schema advances to version 3 and summarizes average,
-p50, p95, p99, and maximum values only inside a valid foreground gameplay
-window. It also records GPU query availability, issued/dropped/result counts,
-status classes, and query lag. No proprietary data is emitted.
+The supplied retail root first exposed a deterministic CargoShip -> Bog A
+XAnim failure. The earliest incorrect boundary was a native ABI assumption:
+several canonical game/script functions type-punned an 8-byte `double` through
+`long double`, which is 16 bytes in Wasm. The final fixes preserve native
+float-rounding order while using direct `double` operations. Game-owned state
+is also released before map database retirement and animation state resets at
+reload. CargoShip -> Bog A -> Killhouse now passes; all temporary diagnostic
+commits were reverted.
+
+Pre-change profiles identified combined sun/spot shadow drawing as the largest
+backend stage. Commit `9e75a9dd` makes exactly one optimization: opaque shadow
+casters skip texture/sampler binds that only alpha-tested casters consume.
+Across six maps this reduced average shadow CPU time from 11.325 to 7.144 ms
+(-36.91%), texture binds from 51,661 to 34,874 (-32.49%), and backend CPU time
+from 25.863 to 24.166 ms (-6.56%). Every map passed its supported full retail
+validator after the change. The sanitized evidence is
+[retail-profile-9e75a9dd.json](docs/evidence/retail-profile-9e75a9dd.json).
+
+| Map | FPS | Frame avg / p95 | Frontend / backend CPU | Backend GPU | Result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Killhouse | 43.575 | 22.949 / 24.960 ms | 8.639 / 14.106 ms | 15.606 ms | PLAYABLE |
+| CargoShip | 11.941 | 83.743 / 92.575 ms | 34.880 / 45.613 ms | 43.338 ms | FUNCTIONAL |
+| Blackout | 24.009 | 41.650 / 45.775 ms | 10.267 / 31.897 ms | 32.382 ms | FUNCTIONAL |
+| Airplane | 59.962 | 16.677 / 18.505 ms | 7.727 / 2.309 ms | 3.535 ms | PLAYABLE |
+| Hunted | 21.629 | 46.235 / 49.105 ms | 15.664 / 29.462 ms | 31.280 ms | FUNCTIONAL |
+| Bog A | 20.830 | 48.009 / 61.505 ms | 16.035 / 21.608 ms | 23.174 ms | FUNCTIONAL |
 
 ### Current validation
 
 | Gate | Result |
 | --- | --- |
-| Static syntax, ESLint, strict/runtime `checkJs` | Pass |
-| Node protocol/lifecycle/filesystem | 76/76 pass |
-| Diagnostics Release build and canonical prefix | Pass |
-| Diagnostic smoke | 12/12 pass |
-| Serialized diagnostic remainder | 36 pass; exactly 2 expected `RETAIL_ROOT_MISSING` skips |
-| Focused bounded-profiler browser test | 2/2 pass after review fixes |
-| Production Playwright | 40/40 pass |
-| Production boundary | Pass; exact files/exports and unchanged bytes |
-| `git diff --check` | Pass |
+| Headed retail baseline: Killhouse -> CargoShip -> Blackout -> Killhouse | Pass, 1/1 in 4.8 minutes |
+| Headed retail Airplane campaign validator | Pass, 1/1 |
+| Headed retail Hunted campaign validator | Pass, 1/1 |
+| Headed retail Bog A campaign validator | Pass, 1/1 |
+| Production Release build and canonical prefix | Pass |
+| Routine browser smoke | 12/12 pass |
+| Non-overlapping browser remainder | 36 pass; 2 expected retail-only skips |
+| Production boundary | Pass; exact files/exports and all budgets |
 
-The production artifact remains 3,173,694 B Wasm, 340,615 B application
-JavaScript, and 3,524,840 B total across 17 files, with 24 raw Wasm exports
-and 9 named application exports. The respective budgets remain 3,332,379 B,
-357,646 B, and 3,701,082 B.
+The production artifact is 3,173,476 B Wasm, 340,615 B application JavaScript,
+and 3,524,622 B total across 17 files, with 24 raw Wasm exports and 9 named
+application exports. The respective budgets remain 3,332,379 B, 357,646 B,
+and 3,701,082 B.
 
-Six-map profiling, evidence-ranked optimisation, and the representative
-mission progression/save loop require the explicitly supplied retail root.
-No optimisation or production runtime behavior change was made without those
-profiles.
+The representative mission-flow proof remains incomplete. Canonical `kill`,
+`devsave`, `loadgame`, save-device code, browser profile storage, and shutdown
+flushing are linked, but existing validators prove configuration persistence,
+not objective/AI/death/game-save restoration. The smallest next step is one
+diagnostics-only canonical-state probe plus an opt-in headed retail mission
+case; it must not be replaced with synthetic gameplay state.
 
-Final classification: `RETAIL ROOT NOT AVAILABLE`
+Final classification: `PERFORMANCE BOTTLENECK IDENTIFIED — NEXT FIX REQUIRED`
 
 ## Current iteration — 2026-08-27 foreground, recovery memory, and campaign batch
 

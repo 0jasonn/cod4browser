@@ -44,18 +44,29 @@ remain retired.
 
 ## Current pass
 
-The current roadmap branch begins from `d3f4c8d6`. Commits `91788492` and
-`aff008c3` complete the non-retail instrumentation work: bounded
-diagnostics-only CPU/render-stage profiling, separate sun/spot shadow
-preparation and draw timings, upload duration/byte counters with unmeasured
-texture formats flagged, and optional asynchronous WebGL2 GPU timer queries. The
-retail validator now records structured percentile summaries for foreground
-gameplay windows. Production remains byte-for-byte at its approved baseline.
+An explicit legal retail root was supplied for the current headed Chrome pass.
+Commit `9e75a9dd` implements the one evidence-ranked renderer change: opaque
+sun/spot shadow casters no longer perform texture and sampler binds that the
+shadow fragment shader cannot consume. Across six valid foreground profiles,
+average shadow-draw CPU time fell 36.91%, texture binds fell 32.49%, and total
+backend CPU time fell 6.56%. All six maps passed their 60-second runtime,
+gameplay input, audio, configuration checkpoint, transition, context recovery,
+and shutdown/reload gates. The sanitized profile is
+[retail-profile-9e75a9dd.json](evidence/retail-profile-9e75a9dd.json).
 
-The current process has no `KISAK_COD4_RETAIL_ROOT`. Therefore the profiler is
-compiled and synthetically browser-tested, but no fresh six-map measurements
-are claimed, no renderer optimisation has been selected, and the canonical
-mission checkpoint/death/restart/save-reload gate has not been run.
+The change does not close the performance gap. CargoShip measured 11.94 FPS
+with an 83.74 ms average frame and 45.61 ms backend CPU time; Blackout, Hunted,
+and Bog A also remain below the reference `PLAYABLE` threshold. After the
+shadow reduction, measured backend costs are led by shadows/world geometry
+(7.14/7.11 ms six-map averages) and static models (6.48 ms); CargoShip's static
+models alone average 15.98 ms.
+
+The representative mission objective/AI/combat/death/save-reload gate remains
+unproven. Canonical `kill`, `devsave`, `loadgame`, save-device code, browser
+profile storage, and shutdown flushing are linked, but the repository has no
+automated mission-flow validator or diagnostics-only objective/death/save-state
+probe. Configuration checkpoint evidence must not be called gameplay save/load
+evidence.
 
 ## Product boundaries and gaps
 

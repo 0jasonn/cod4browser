@@ -36,23 +36,23 @@ records do. See the [execution report](../WEB_ROADMAP_EXECUTION_REPORT.md).
 
 ## Next, in order
 
-1. **Instrumentation completed at `91788492` and `aff008c3`:** bounded
-   diagnostics-only CPU frame-stage, renderer-stage, exact-work, separate
-   shadow preparation/draw, upload duration/bytes, and optional asynchronous
-   WebGL2 GPU timing evidence. Six-map evidence remains pending step 2.
-2. Profile Airplane, Killhouse, Blackout, Bog A, Hunted, and CargoShip in valid
-   foreground windows. Rank the measured stage deltas.
-3. Implement exactly one renderer optimisation selected by that evidence, then
-   rerun the six-map functional and performance matrix.
-4. Prove one representative canonical mission through AI/scripts/objectives,
+1. **Completed at `9e75a9dd`:** profile Airplane, Killhouse, Blackout, Bog A,
+   Hunted, and CargoShip in valid foreground windows; rank the measured stages;
+   implement exactly one evidence-selected renderer optimization; rerun all six
+   functional and performance matrices. Opaque shadow texture/sampler binds
+   were removed, reducing six-map average shadow CPU time by 36.91% and binds
+   by 32.49%, while every lifecycle gate remained green.
+2. Add the smallest diagnostics-only canonical state probe and one opt-in
+   headed retail mission validator, then prove one representative mission
+   through AI/scripts/objectives,
    combat, checkpoint, death/restart, browser shutdown, save reload, and
    continued progression.
-5. Measure encoded-image inspection/decode/upload/recovery work and improve it
+3. Continue renderer work only from the current measured bottleneck. World and
+   shadow drawing now average 7.11/7.14 ms across the six maps, static models
+   average 6.48 ms, and CargoShip remains the worst case. Do not combine this
+   next optimization with the mission validator.
+4. Measure encoded-image inspection/decode/upload/recovery work and improve it
    only if duplicate work is demonstrated without giving back the memory win.
-6. After those gates are stable, select the next two or three discovered SP
+5. After the mission and performance gates are stable, select the next two or
+   three discovered SP
    maps by coverage value. Discovery remains `UNTESTED`.
-
-The present process has no explicitly supplied `KISAK_COD4_RETAIL_ROOT`.
-Instrumentation and synthetic gates are complete, but steps 2–6 cannot produce
-fresh retail conclusions until that input is provided. No optimisation is to
-be selected speculatively.

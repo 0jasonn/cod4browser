@@ -1,5 +1,44 @@
 # Web retail roadmap progress
 
+## 2026-08-27 six-map profiling and one renderer optimization
+
+An explicit legally owned retail root was supplied. Work was integrated on
+`web-port` and pushed to `origin/web-port`; no extra roadmap branch remains.
+
+CargoShip -> Bog A initially failed in canonical XAnim because Wasm uses a
+16-byte `long double` where several native decompilation patterns assumed an
+8-byte value. Commits `e42b48f3` through `721a981b` restore canonical owner
+shutdown/reset and direct `double` math without changing game ownership. The
+final CargoShip -> Bog A -> Killhouse run passed 60-second stability, input,
+audio, checkpoint, context recovery, transition, and shutdown/reload. Temporary
+diagnostic commits were fully reverted.
+
+The clean pre-change profiles ranked combined shadow draws first at an 11.325
+ms six-map mean. Commit `9e75a9dd` is the sole renderer optimization: opaque
+shadow casters no longer bind unused textures or rewrite sampler state. The
+post-change six-map mean is 7.144 ms (-36.91%), texture binds are down 32.49%,
+and backend CPU is down 6.56%. All six maps passed current headed Chrome
+validators. Killhouse and Airplane meet the reference `PLAYABLE` threshold;
+CargoShip, Blackout, Hunted, and Bog A remain `FUNCTIONAL`. Evidence:
+[retail-profile-9e75a9dd.json](docs/evidence/retail-profile-9e75a9dd.json).
+
+| Gate | Current result |
+| --- | --- |
+| Retail root supplied | YES; path excluded from repository evidence |
+| Release diagnostics retail baseline | Pass: Killhouse/CargoShip/Blackout |
+| Release diagnostics campaign validators | Pass: Airplane/Hunted/Bog A |
+| Production Release build | Pass |
+| Browser smoke | 12/12 pass |
+| Browser remainder | 36 pass, 2 expected retail-only skips |
+| Production boundary | 3,173,476 B Wasm; 340,615 B JS; 3,524,622 B site; 17 files; 24 raw/9 named exports; pass |
+
+The representative objective/AI/combat/death/game-save reload gate is not yet
+automated and was not claimed. Existing campaign validators verify configuration
+checkpoints and shutdown/config reload only. The next truthful evidence step is
+a narrow diagnostics-only canonical-state probe and one opt-in headed mission
+validator, followed by the next measured renderer fix. Current classification:
+`PERFORMANCE BOTTLENECK IDENTIFIED — NEXT FIX REQUIRED`.
+
 ## Phase 0 baseline
 
 | Field | Value |
