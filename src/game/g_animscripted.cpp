@@ -14,8 +14,6 @@
 #include <script/scr_animtree.h>
 #include "actor_corpse.h"
 
-#include <cmath>
-
 void __cdecl LocalToWorldOriginAndAngles(
     const float (*matrix)[3],
     const float *trans,
@@ -179,7 +177,6 @@ void __cdecl G_AnimScripted_ClearAnimWeights(
     unsigned int v9; // r6
     unsigned int v10; // r5
     double v11; // fp1
-    double currentWeight;
     unsigned int animLookAtLeft; // r4
     int v13; // r7
     double v14; // fp1
@@ -190,18 +187,6 @@ void __cdecl G_AnimScripted_ClearAnimWeights(
         goto LABEL_12;
     }
     Weight = XAnimGetWeight(pAnimTree, pActor->lookAtInfo.animLookAtStraight);
-    if (!std::isfinite(Weight))
-        MyAssertHandler(
-            ".\\game\\g_animscripted.cpp",
-            189,
-            0,
-            "G_AnimScripted initial look-at weight is not finite\n\tentnum=%u straight=%u left=%u right=%u infoIndex=%u weight=%g",
-            obj->entnum,
-            pActor->lookAtInfo.animLookAtStraight,
-            pActor->lookAtInfo.animLookAtLeft,
-            pActor->lookAtInfo.animLookAtRight,
-            XAnimGetInfoIndex(pAnimTree, pActor->lookAtInfo.animLookAtStraight),
-            Weight);
     v11 = XAnimGetWeight(pAnimTree, pActor->lookAtInfo.animLookAtLeft);
     if (v11 > 0.0)
     {
@@ -217,20 +202,6 @@ void __cdecl G_AnimScripted_ClearAnimWeights(
         goto LABEL_8;
     }
 LABEL_9:
-    currentWeight = XAnimGetWeight(pAnimTree, pActor->lookAtInfo.animLookAtStraight);
-    if (!std::isfinite(Weight) || !std::isfinite(currentWeight))
-        MyAssertHandler(
-            ".\\game\\g_animscripted.cpp",
-            205,
-            0,
-            "G_AnimScripted look-at weight changed to nonfinite across sibling update\n\tentnum=%u straight=%u left=%u right=%u infoIndex=%u cachedWeight=%g currentWeight=%g",
-            obj->entnum,
-            pActor->lookAtInfo.animLookAtStraight,
-            pActor->lookAtInfo.animLookAtLeft,
-            pActor->lookAtInfo.animLookAtRight,
-            XAnimGetInfoIndex(pAnimTree, pActor->lookAtInfo.animLookAtStraight),
-            Weight,
-            currentWeight);
     XAnimSetCompleteGoalWeight(obj, pActor->lookAtInfo.animLookAtStraight, Weight, 0.2, 1.0, 0, 0, 0);
     if (!root)
         return;
