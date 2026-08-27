@@ -1103,6 +1103,7 @@ void EmitShaderLifecycle(const char *state, const char *message)
         g_renderer.compatibilityFirstDrawCompleted);
 }
 
+#if KISAK_WEB_DIAGNOSTICS
 EM_JS(void, DispatchRendererMemory, (
     const char *state,
     double worldImageRecoveryBytes,
@@ -1232,6 +1233,66 @@ EM_JS(void, DispatchRendererMemory, (
             }
         }));
     });
+#else
+EM_JS(void, DispatchRendererMemory, (
+    const char *state,
+    double worldImageRecoveryBytes,
+    double staticModelImageRecoveryBytes,
+    double dynamicModelImageRecoveryBytes,
+    double uiImageRecoveryBytes,
+    double supplementalTextureRecoveryBytes,
+    double decodedTextureSourceBytes,
+    double gpuTextureEstimateBytes,
+    double geometryBytes,
+    double recoveryCopyBytes,
+    double shaderProgramCacheEstimateBytes,
+    double temporaryUploadBytes,
+    double recoveryBudgetBytes), {
+        let webglRendererIdentity = null;
+        try {
+            const gl = (typeof GL !== "undefined" && GL.currentContext)
+                ? GL.currentContext.GLctx : Module.ctx;
+            if (gl) {
+                const extension = gl.getExtension("WEBGL_debug_renderer_info");
+                const unmaskedVendor = extension
+                    ? gl.getParameter(extension.UNMASKED_VENDOR_WEBGL) : null;
+                const unmaskedRenderer = extension
+                    ? gl.getParameter(extension.UNMASKED_RENDERER_WEBGL) : null;
+                const identity = `${unmaskedVendor ?? ""} ${unmaskedRenderer ?? ""}`;
+                webglRendererIdentity = {
+                    vendor: gl.getParameter(gl.VENDOR),
+                    renderer: gl.getParameter(gl.RENDERER),
+                    unmaskedVendor,
+                    unmaskedRenderer,
+                    version: gl.getParameter(gl.VERSION),
+                    angleBackend: /ANGLE/i.test(unmaskedRenderer ?? "")
+                        ? unmaskedRenderer : null,
+                    hardwareSoftwareIndication:
+                        /swiftshader|llvmpipe|software|basic render/i.test(identity)
+                            ? "software" : (unmaskedRenderer ? "hardware-or-driver" : "unknown"),
+                };
+            }
+        } catch (_) {}
+        globalThis.dispatchEvent(new CustomEvent("kisakcod:renderer-memory", {
+            detail: {
+                state: UTF8ToString(state),
+                worldImageRecoveryBytes,
+                staticModelImageRecoveryBytes,
+                dynamicModelImageRecoveryBytes,
+                uiImageRecoveryBytes,
+                supplementalTextureRecoveryBytes,
+                decodedTextureSourceBytes,
+                gpuTextureEstimateBytes,
+                geometryBytes,
+                recoveryCopyBytes,
+                shaderProgramCacheEstimateBytes,
+                temporaryUploadBytes,
+                recoveryBudgetBytes,
+                webglRendererIdentity
+            }
+        }));
+    });
+#endif
 
 #if KISAK_WEB_DIAGNOSTICS
 EM_JS(void, DispatchRendererLifecycle, (
@@ -1417,6 +1478,7 @@ std::size_t EmitRendererMemory(const char *state, bool sampleAllocator = true)
     }
     const std::size_t recoveryCopyBytes =
         textureRecoverySourceBytes + geometryBytes + shaderProgramCacheEstimateBytes;
+#if KISAK_WEB_DIAGNOSTICS
     const WebDbImageLoadDefStats imageLoadDefStats =
         DB_WebGetImageLoadDefStats();
     bool wasmHeapStatsSampled = false;
@@ -1428,7 +1490,6 @@ std::size_t EmitRendererMemory(const char *state, bool sampleAllocator = true)
     double wasmAllocatorFreeBytes = 0.0;
     double wasmAllocatorFootprintBytes = 0.0;
     double wasmAllocatorTopFreeBytes = 0.0;
-#if KISAK_WEB_DIAGNOSTICS
     wasmHeapStatsSampled = true;
     wasmProgramBreakOffsetBytes = static_cast<double>(
         *emscripten_get_sbrk_ptr());
@@ -1446,9 +1507,6 @@ std::size_t EmitRendererMemory(const char *state, bool sampleAllocator = true)
             wasmAllocatorInUseBytes + wasmAllocatorFreeBytes;
         wasmAllocatorTopFreeBytes = static_cast<double>(allocator.keepcost);
     }
-#else
-    (void)sampleAllocator;
-#endif
     DispatchRendererMemory(
         state,
         static_cast<double>(worldImages.recoveryBytes),
@@ -1491,6 +1549,23 @@ std::size_t EmitRendererMemory(const char *state, bool sampleAllocator = true)
         static_cast<double>(rawImageCount),
         static_cast<double>(rawRecoveryBytes),
         static_cast<double>(rawDecodedBytes));
+#else
+    (void)sampleAllocator;
+    DispatchRendererMemory(
+        state,
+        static_cast<double>(worldImages.recoveryBytes),
+        static_cast<double>(staticModelImages.recoveryBytes),
+        static_cast<double>(dynamicModelImages.recoveryBytes),
+        static_cast<double>(uiImages.recoveryBytes),
+        static_cast<double>(supplementalTextureRecoveryBytes),
+        static_cast<double>(decodedTextureSourceBytes),
+        static_cast<double>(decodedTextureSourceBytes + renderTargetEstimateBytes),
+        static_cast<double>(geometryBytes),
+        static_cast<double>(recoveryCopyBytes),
+        static_cast<double>(shaderProgramCacheEstimateBytes),
+        static_cast<double>(temporaryUploadBytes),
+        static_cast<double>(WEB_RENDERER_MAX_DECODED_TEXTURE_BYTES));
+#endif
     return recoveryCopyBytes;
 }
 
