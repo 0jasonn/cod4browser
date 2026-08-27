@@ -3570,6 +3570,17 @@ int __cdecl XAnimSetGoalWeightNode(
     iassert(infoIndex && (infoIndex < 4096));
 
     info = &g_xAnimInfo[infoIndex];
+    if (!std::isfinite(goalWeight) || !std::isfinite(goalTime) || !std::isfinite(rate))
+        MyAssertHandler(
+            ".\\xanim\\xanim.cpp",
+            2381,
+            0,
+            "XAnim goal state is not finite\n\tinfoIndex=%u animIndex=%u goalWeight=%g goalTime=%g rate=%g",
+            infoIndex,
+            info->animIndex,
+            goalWeight,
+            goalTime,
+            rate);
     XAnimClearServerNotify(info);
     iassert(info->inuse);
     animIndex = info->animIndex;

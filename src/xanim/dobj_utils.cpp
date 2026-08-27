@@ -8,6 +8,8 @@
 #include <script/scr_stringlist.h>
 #include <universal/profile.h>
 
+#include <cmath>
+
 DObjAnimMat *__cdecl DObjGetRotTransArray(const DObj_s *obj)
 {
     iassert(obj);
@@ -279,7 +281,20 @@ void __cdecl DObjSetLocalTagInternal(const DObj_s *obj, const float *trans, cons
     {
         rotTransa = &rotTrans[boneIndex];
         if (angles)
+        {
+            if (!std::isfinite(angles[0]) || !std::isfinite(angles[1]) || !std::isfinite(angles[2]))
+                MyAssertHandler(
+                    ".\\xanim\\dobj_utils.cpp",
+                    278,
+                    0,
+                    "DObj controller angles are not finite\n\tentnum=%u boneIndex=%d angles=(%g %g %g)",
+                    obj->entnum,
+                    boneIndex,
+                    angles[0],
+                    angles[1],
+                    angles[2]);
             DObjSetAngles(rotTransa, angles);
+        }
         else
             DObjClearAngles(rotTransa);
         DObjSetTrans(rotTransa, trans);
