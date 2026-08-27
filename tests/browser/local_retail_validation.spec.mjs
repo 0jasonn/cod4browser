@@ -438,6 +438,9 @@ async function mapEvidence(page, map, cursor, commandTimeMs, memoryLifecycle,
             },
             memoryLifecycle,
             decodedTextureRecoveryBytes: memorySnapshot.decodedTextureSourceBytes,
+            textureRecoverySourceBytes:
+                memorySnapshot.textureRecoverySourceBytes,
+            encodedImageRecoveryBytes: memorySnapshot.encodedImageRecoveryBytes,
             aggregateCpuRecoveryBytes: memorySnapshot.recoveryCopyBytes,
             estimatedGpuTextureBytes: memorySnapshot.gpuTextureEstimateBytes,
             geometryBytes: memorySnapshot.geometryBytes,
@@ -449,8 +452,16 @@ async function mapEvidence(page, map, cursor, commandTimeMs, memoryLifecycle,
                 staticModels: memorySnapshot.staticModelImageRecoveryBytes,
                 dynamicModels: memorySnapshot.dynamicModelImageRecoveryBytes,
                 ui: memorySnapshot.uiImageRecoveryBytes,
-                perPoolAdmissionLimit: memorySnapshot.recoveryBudgetBytes,
+                perPoolAdmissionLimit:
+                    memorySnapshot.decodedTextureAdmissionBudgetBytes,
             },
+            imagePoolDecodedBytes: {
+                world: memorySnapshot.worldImageDecodedBytes,
+                staticModels: memorySnapshot.staticModelImageDecodedBytes,
+                dynamicModels: memorySnapshot.dynamicModelImageDecodedBytes,
+                ui: memorySnapshot.uiImageDecodedBytes,
+            },
+            imageRecoverySources: memorySnapshot.imageRecoverySources,
             supplementalTextureRecoveryBytes:
                 memorySnapshot.supplementalTextureRecoveryBytes,
             audioDecodedBytes: audioSnapshot?.decodedPcmBytes ?? null,
@@ -472,14 +483,36 @@ function assertMemoryTelemetry(sample)
     ];
     expect(imagePoolBytes.reduce((sum, bytes) => sum + bytes, 0) +
         sample.supplementalTextureRecoveryBytes)
+        .toBe(sample.textureRecoverySourceBytes);
+    const imagePoolDecodedBytes = [
+        sample.worldImageDecodedBytes,
+        sample.staticModelImageDecodedBytes,
+        sample.dynamicModelImageDecodedBytes,
+        sample.uiImageDecodedBytes,
+    ];
+    expect(imagePoolDecodedBytes.reduce((sum, bytes) => sum + bytes, 0) +
+        sample.supplementalTextureRecoveryBytes)
         .toBe(sample.decodedTextureSourceBytes);
-    expect(sample.decodedTextureSourceBytes + sample.geometryBytes +
+    expect(sample.textureRecoverySourceBytes + sample.geometryBytes +
         sample.shaderProgramCacheEstimateBytes)
         .toBe(sample.recoveryCopyBytes);
+    const recoverySources = Object.values(sample.imageRecoverySources);
+    expect(recoverySources.reduce((sum, source) =>
+        sum + source.recoveryBytes, 0)).toBe(
+        imagePoolBytes.reduce((sum, bytes) => sum + bytes, 0));
+    expect(recoverySources.reduce((sum, source) =>
+        sum + source.decodedBytes, 0)).toBe(
+        imagePoolDecodedBytes.reduce((sum, bytes) => sum + bytes, 0));
+    expect(sample.imageRecoverySources.loadDef.recoveryBytes +
+        sample.imageRecoverySources.iwiMember.recoveryBytes)
+        .toBe(sample.encodedImageRecoveryBytes);
+    expect(sample.recoveryBudgetBytes)
+        .toBe(sample.decodedTextureAdmissionBudgetBytes);
     expect(sample.gpuTextureEstimateBytes)
         .toBeGreaterThanOrEqual(sample.decodedTextureSourceBytes);
-    for (const bytes of imagePoolBytes) {
-        expect(bytes).toBeLessThanOrEqual(sample.recoveryBudgetBytes);
+    for (const bytes of imagePoolDecodedBytes) {
+        expect(bytes).toBeLessThanOrEqual(
+            sample.decodedTextureAdmissionBudgetBytes);
     }
     expect(sample.wasmProgramBreakOffsetBytes).toBeGreaterThan(0);
     expect(sample.wasmProgramBreakOffsetBytes)
@@ -671,6 +704,8 @@ async function rendererTransitionEvidence(page, lifecycleCursor, startedMs, ende
             newWorld.recoveryCopyBytes,
         peakObserved: {
             decodedTextureRecoveryBytes: maximum("decodedTextureSourceBytes"),
+            textureRecoverySourceBytes: maximum("textureRecoverySourceBytes"),
+            encodedImageRecoveryBytes: maximum("encodedImageRecoveryBytes"),
             aggregateCpuRecoveryBytes: maximum("recoveryCopyBytes"),
             estimatedGpuTextureBytes: maximum("gpuTextureEstimateBytes"),
             geometryBytes: maximum("geometryBytes"),
@@ -1335,6 +1370,8 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
             newWorldMemory.recoveryCopyBytes,
         peakObserved: {
             decodedTextureRecoveryBytes: maximum("decodedTextureSourceBytes"),
+            textureRecoverySourceBytes: maximum("textureRecoverySourceBytes"),
+            encodedImageRecoveryBytes: maximum("encodedImageRecoveryBytes"),
             aggregateCpuRecoveryBytes: maximum("recoveryCopyBytes"),
             estimatedGpuTextureBytes: maximum("gpuTextureEstimateBytes"),
             geometryBytes: maximum("geometryBytes"),
@@ -1356,7 +1393,8 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
                 staticModels: maximum("staticModelImageRecoveryBytes"),
                 dynamicModels: maximum("dynamicModelImageRecoveryBytes"),
                 ui: maximum("uiImageRecoveryBytes"),
-                perPoolAdmissionLimit: unloadBeginMemory.recoveryBudgetBytes,
+                perPoolAdmissionLimit:
+                    unloadBeginMemory.decodedTextureAdmissionBudgetBytes,
             },
             wasmLinearMemoryCapacityBytes: Math.max(
                 cargoshipEvidence.wasmLinearMemoryCapacityBytes.beforeMapLoad,

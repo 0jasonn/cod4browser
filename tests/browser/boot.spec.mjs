@@ -199,10 +199,34 @@ test("reports disjoint renderer recovery memory categories", async ({ page }) =>
         sample.dynamicModelImageRecoveryBytes +
         sample.uiImageRecoveryBytes +
         sample.supplementalTextureRecoveryBytes)
+        .toBe(sample.textureRecoverySourceBytes);
+    expect(sample.worldImageDecodedBytes +
+        sample.staticModelImageDecodedBytes +
+        sample.dynamicModelImageDecodedBytes +
+        sample.uiImageDecodedBytes +
+        sample.supplementalTextureRecoveryBytes)
         .toBe(sample.decodedTextureSourceBytes);
-    expect(sample.decodedTextureSourceBytes + sample.geometryBytes +
+    expect(sample.textureRecoverySourceBytes + sample.geometryBytes +
         sample.shaderProgramCacheEstimateBytes)
         .toBe(sample.recoveryCopyBytes);
+    const recoverySources = Object.values(sample.imageRecoverySources);
+    expect(recoverySources.reduce((sum, source) =>
+        sum + source.recoveryBytes, 0)).toBe(
+        sample.worldImageRecoveryBytes +
+        sample.staticModelImageRecoveryBytes +
+        sample.dynamicModelImageRecoveryBytes +
+        sample.uiImageRecoveryBytes);
+    expect(recoverySources.reduce((sum, source) =>
+        sum + source.decodedBytes, 0)).toBe(
+        sample.worldImageDecodedBytes +
+        sample.staticModelImageDecodedBytes +
+        sample.dynamicModelImageDecodedBytes +
+        sample.uiImageDecodedBytes);
+    expect(sample.imageRecoverySources.loadDef.recoveryBytes +
+        sample.imageRecoverySources.iwiMember.recoveryBytes)
+        .toBe(sample.encodedImageRecoveryBytes);
+    expect(sample.recoveryBudgetBytes)
+        .toBe(sample.decodedTextureAdmissionBudgetBytes);
     expect(sample.gpuTextureEstimateBytes)
         .toBeGreaterThanOrEqual(sample.decodedTextureSourceBytes);
     const heapCapacity = await page.evaluate(() =>

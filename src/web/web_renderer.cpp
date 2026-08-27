@@ -45,11 +45,17 @@ constexpr GLsizei SUN_SHADOW_SIZE = 1024;
 constexpr GLsizei SPOT_SHADOW_SIZE = 512;
 // Retail Killhouse's full static XModel base/normal/specular material set
 // expands to roughly 766 MiB after canonical DXT textures cross the portable
-// RGBA8 boundary. Keep the max-graphics recovery copy bounded just above that
-// measured set so canonical base, normal, and specular coverage all survives
-// WebGL context recovery.
-constexpr std::size_t WEB_RENDERER_MAX_WORLD_TEXTURE_BYTES =
+// RGBA8 boundary. Keep decoded admission bounded just above that measured set
+// while the recovery copy retains the much smaller canonical encoded source.
+constexpr std::size_t WEB_RENDERER_MAX_DECODED_TEXTURE_BYTES =
     800u * 1024u * 1024u;
+
+enum class WebRendererImageRecoverySource : std::uint8_t
+{
+    DecodedRgba8,
+    LoadDef,
+    IwiMember,
+};
 
 struct WebRendererRetainedWorldImage
 {
@@ -57,10 +63,19 @@ struct WebRendererRetainedWorldImage
     std::string canonicalName;
     std::vector<std::uint8_t> pixels;
     std::vector<std::vector<std::uint8_t>> mipPixels;
+    std::vector<std::uint8_t> encodedSource;
+    std::int32_t sourceFormat = 0;
+    std::int16_t sourceDimensions[3]{};
+    std::size_t decodedByteLength = 0u;
+    std::size_t uploadByteLength = 0u;
     std::uint32_t width = 0u;
     std::uint32_t height = 0u;
     GLuint texture = 0u;
+    WebRendererImageRecoverySource recoverySource =
+        WebRendererImageRecoverySource::DecodedRgba8;
+    std::uint8_t sourceFlags = 0u;
     bool mipmapsAllowed = true;
+    bool authoredMipChain = false;
     bool supported = false;
 };
 
@@ -1095,13 +1110,19 @@ EM_JS(void, DispatchRendererMemory, (
     double dynamicModelImageRecoveryBytes,
     double uiImageRecoveryBytes,
     double supplementalTextureRecoveryBytes,
+    double worldImageDecodedBytes,
+    double staticModelImageDecodedBytes,
+    double dynamicModelImageDecodedBytes,
+    double uiImageDecodedBytes,
+    double textureRecoverySourceBytes,
+    double encodedImageRecoveryBytes,
     double decodedTextureSourceBytes,
     double gpuTextureEstimateBytes,
     double geometryBytes,
     double recoveryCopyBytes,
     double shaderProgramCacheEstimateBytes,
     double temporaryUploadBytes,
-    double recoveryBudgetBytes,
+    double decodedTextureAdmissionBudgetBytes,
     bool wasmHeapStatsSampled,
     double wasmProgramBreakOffsetBytes,
     double wasmLinearMemoryCapacityBytes,
@@ -1114,7 +1135,16 @@ EM_JS(void, DispatchRendererMemory, (
     double imageLoadDefCacheEntryCount,
     double imageLoadDefCacheEncodedPayloadBytes,
     double imageLoadDefCacheBudgetBytes,
-    double imageLoadDefCacheEvictionCount), {
+    double imageLoadDefCacheEvictionCount,
+    double loadDefImageCount,
+    double loadDefImageRecoveryBytes,
+    double loadDefImageDecodedBytes,
+    double iwiImageCount,
+    double iwiImageRecoveryBytes,
+    double iwiImageDecodedBytes,
+    double rawImageCount,
+    double rawImageRecoveryBytes,
+    double rawImageDecodedBytes), {
         let webglRendererIdentity = null;
         try {
             const gl = (typeof GL !== "undefined" && GL.currentContext)
@@ -1148,13 +1178,20 @@ EM_JS(void, DispatchRendererMemory, (
                 dynamicModelImageRecoveryBytes,
                 uiImageRecoveryBytes,
                 supplementalTextureRecoveryBytes,
+                worldImageDecodedBytes,
+                staticModelImageDecodedBytes,
+                dynamicModelImageDecodedBytes,
+                uiImageDecodedBytes,
+                textureRecoverySourceBytes,
+                encodedImageRecoveryBytes,
                 decodedTextureSourceBytes,
                 gpuTextureEstimateBytes,
                 geometryBytes,
                 recoveryCopyBytes,
                 shaderProgramCacheEstimateBytes,
                 temporaryUploadBytes,
-                recoveryBudgetBytes,
+                decodedTextureAdmissionBudgetBytes,
+                recoveryBudgetBytes: decodedTextureAdmissionBudgetBytes,
                 wasmProgramBreakOffsetBytes: wasmHeapStatsSampled
                     ? wasmProgramBreakOffsetBytes : null,
                 wasmLinearMemoryCapacityBytes: wasmHeapStatsSampled
@@ -1174,6 +1211,23 @@ EM_JS(void, DispatchRendererMemory, (
                 imageLoadDefCacheEncodedPayloadBytes,
                 imageLoadDefCacheBudgetBytes,
                 imageLoadDefCacheEvictionCount,
+                imageRecoverySources: {
+                    loadDef: {
+                        imageCount: loadDefImageCount,
+                        recoveryBytes: loadDefImageRecoveryBytes,
+                        decodedBytes: loadDefImageDecodedBytes,
+                    },
+                    iwiMember: {
+                        imageCount: iwiImageCount,
+                        recoveryBytes: iwiImageRecoveryBytes,
+                        decodedBytes: iwiImageDecodedBytes,
+                    },
+                    decodedRgba8: {
+                        imageCount: rawImageCount,
+                        recoveryBytes: rawImageRecoveryBytes,
+                        decodedBytes: rawImageDecodedBytes,
+                    },
+                },
                 webglRendererIdentity
             }
         }));
@@ -1212,16 +1266,58 @@ std::size_t RetainedCubeBytes(const kisak::iwi::Rgba8Cube &cube)
     return bytes;
 }
 
-std::size_t RetainedImageBytes(
+struct RetainedImageMemoryStats
+{
+    std::size_t recoveryBytes = 0u;
+    std::size_t decodedBytes = 0u;
+    std::size_t encodedBytes = 0u;
+    std::size_t temporaryUploadBytes = 0u;
+    std::size_t loadDefRecoveryBytes = 0u;
+    std::size_t loadDefDecodedBytes = 0u;
+    std::size_t iwiRecoveryBytes = 0u;
+    std::size_t iwiDecodedBytes = 0u;
+    std::size_t rawRecoveryBytes = 0u;
+    std::size_t rawDecodedBytes = 0u;
+    std::size_t loadDefCount = 0u;
+    std::size_t iwiCount = 0u;
+    std::size_t rawCount = 0u;
+};
+
+RetainedImageMemoryStats RetainedImageStats(
     const std::vector<WebRendererRetainedWorldImage> &images)
 {
-    std::size_t bytes = 0u;
+    RetainedImageMemoryStats stats;
     for (const WebRendererRetainedWorldImage &image : images)
     {
-        bytes += image.pixels.size();
-        for (const auto &mip : image.mipPixels) bytes += mip.size();
+        if (!image.supported) continue;
+        std::size_t rawBytes = image.pixels.size();
+        for (const auto &mip : image.mipPixels) rawBytes += mip.size();
+        stats.recoveryBytes += rawBytes + image.encodedSource.size();
+        stats.decodedBytes += image.decodedByteLength;
+        stats.encodedBytes += image.encodedSource.size();
+        if (!image.encodedSource.empty())
+            stats.temporaryUploadBytes = std::max(
+                stats.temporaryUploadBytes, image.uploadByteLength);
+        switch (image.recoverySource)
+        {
+        case WebRendererImageRecoverySource::LoadDef:
+            ++stats.loadDefCount;
+            stats.loadDefRecoveryBytes += image.encodedSource.size();
+            stats.loadDefDecodedBytes += image.decodedByteLength;
+            break;
+        case WebRendererImageRecoverySource::IwiMember:
+            ++stats.iwiCount;
+            stats.iwiRecoveryBytes += image.encodedSource.size();
+            stats.iwiDecodedBytes += image.decodedByteLength;
+            break;
+        case WebRendererImageRecoverySource::DecodedRgba8:
+            ++stats.rawCount;
+            stats.rawRecoveryBytes += rawBytes;
+            stats.rawDecodedBytes += image.decodedByteLength;
+            break;
+        }
     }
-    return bytes;
+    return stats;
 }
 
 std::size_t EmitRendererMemory(const char *state, bool sampleAllocator = true)
@@ -1238,14 +1334,14 @@ std::size_t EmitRendererMemory(const char *state, bool sampleAllocator = true)
         g_renderer.retainedDynamicModelIndices.size() * sizeof(std::uint32_t) +
         g_renderer.retainedUiVertices.size() * sizeof(WebRendererSurfaceVertex) +
         g_renderer.retainedUiIndices.size() * sizeof(std::uint32_t);
-    const std::size_t worldImageRecoveryBytes =
-        RetainedImageBytes(g_renderer.retainedWorldImages);
-    const std::size_t staticModelImageRecoveryBytes =
-        RetainedImageBytes(g_renderer.retainedStaticModelImages);
-    const std::size_t dynamicModelImageRecoveryBytes =
-        RetainedImageBytes(g_renderer.retainedDynamicModelImages);
-    const std::size_t uiImageRecoveryBytes =
-        RetainedImageBytes(g_renderer.retainedUiImages);
+    const RetainedImageMemoryStats worldImages =
+        RetainedImageStats(g_renderer.retainedWorldImages);
+    const RetainedImageMemoryStats staticModelImages =
+        RetainedImageStats(g_renderer.retainedStaticModelImages);
+    const RetainedImageMemoryStats dynamicModelImages =
+        RetainedImageStats(g_renderer.retainedDynamicModelImages);
+    const RetainedImageMemoryStats uiImages =
+        RetainedImageStats(g_renderer.retainedUiImages);
     std::size_t supplementalTextureRecoveryBytes =
         RetainedCubeBytes(g_renderer.retainedSky.cube) +
         g_renderer.retainedStaticModelLighting.pixels.size() +
@@ -1256,10 +1352,51 @@ std::size_t EmitRendererMemory(const char *state, bool sampleAllocator = true)
         supplementalTextureRecoveryBytes += batch.waterPixels.size();
         supplementalTextureRecoveryBytes += RetainedCubeBytes(batch.reflectionCube);
     }
+    const std::size_t imageRecoverySourceBytes =
+        worldImages.recoveryBytes + staticModelImages.recoveryBytes +
+        dynamicModelImages.recoveryBytes + uiImages.recoveryBytes;
+    const std::size_t textureRecoverySourceBytes =
+        imageRecoverySourceBytes + supplementalTextureRecoveryBytes;
     const std::size_t decodedTextureSourceBytes =
-        worldImageRecoveryBytes + staticModelImageRecoveryBytes +
-        dynamicModelImageRecoveryBytes + uiImageRecoveryBytes +
+        worldImages.decodedBytes + staticModelImages.decodedBytes +
+        dynamicModelImages.decodedBytes + uiImages.decodedBytes +
         supplementalTextureRecoveryBytes;
+    const std::size_t encodedImageRecoveryBytes =
+        worldImages.encodedBytes + staticModelImages.encodedBytes +
+        dynamicModelImages.encodedBytes + uiImages.encodedBytes;
+    const std::size_t temporaryUploadBytes = std::max({
+        worldImages.temporaryUploadBytes,
+        staticModelImages.temporaryUploadBytes,
+        dynamicModelImages.temporaryUploadBytes,
+        uiImages.temporaryUploadBytes,
+    });
+    const std::size_t loadDefImageCount = worldImages.loadDefCount +
+        staticModelImages.loadDefCount + dynamicModelImages.loadDefCount +
+        uiImages.loadDefCount;
+    const std::size_t loadDefRecoveryBytes = worldImages.loadDefRecoveryBytes +
+        staticModelImages.loadDefRecoveryBytes +
+        dynamicModelImages.loadDefRecoveryBytes + uiImages.loadDefRecoveryBytes;
+    const std::size_t loadDefDecodedBytes = worldImages.loadDefDecodedBytes +
+        staticModelImages.loadDefDecodedBytes +
+        dynamicModelImages.loadDefDecodedBytes + uiImages.loadDefDecodedBytes;
+    const std::size_t iwiImageCount = worldImages.iwiCount +
+        staticModelImages.iwiCount + dynamicModelImages.iwiCount +
+        uiImages.iwiCount;
+    const std::size_t iwiRecoveryBytes = worldImages.iwiRecoveryBytes +
+        staticModelImages.iwiRecoveryBytes + dynamicModelImages.iwiRecoveryBytes +
+        uiImages.iwiRecoveryBytes;
+    const std::size_t iwiDecodedBytes = worldImages.iwiDecodedBytes +
+        staticModelImages.iwiDecodedBytes + dynamicModelImages.iwiDecodedBytes +
+        uiImages.iwiDecodedBytes;
+    const std::size_t rawImageCount = worldImages.rawCount +
+        staticModelImages.rawCount + dynamicModelImages.rawCount +
+        uiImages.rawCount;
+    const std::size_t rawRecoveryBytes = worldImages.rawRecoveryBytes +
+        staticModelImages.rawRecoveryBytes + dynamicModelImages.rawRecoveryBytes +
+        uiImages.rawRecoveryBytes;
+    const std::size_t rawDecodedBytes = worldImages.rawDecodedBytes +
+        staticModelImages.rawDecodedBytes + dynamicModelImages.rawDecodedBytes +
+        uiImages.rawDecodedBytes;
     const std::size_t shaderProgramCacheEstimateBytes =
         g_renderer.compatibilityId.size() +
         g_renderer.compatibilityVertexSource.size() +
@@ -1279,7 +1416,7 @@ std::size_t EmitRendererMemory(const char *state, bool sampleAllocator = true)
             static_cast<std::size_t>(SPOT_SHADOW_SIZE) * SPOT_SHADOW_SIZE * 4u;
     }
     const std::size_t recoveryCopyBytes =
-        decodedTextureSourceBytes + geometryBytes + shaderProgramCacheEstimateBytes;
+        textureRecoverySourceBytes + geometryBytes + shaderProgramCacheEstimateBytes;
     const WebDbImageLoadDefStats imageLoadDefStats =
         DB_WebGetImageLoadDefStats();
     bool wasmHeapStatsSampled = false;
@@ -1314,18 +1451,24 @@ std::size_t EmitRendererMemory(const char *state, bool sampleAllocator = true)
 #endif
     DispatchRendererMemory(
         state,
-        static_cast<double>(worldImageRecoveryBytes),
-        static_cast<double>(staticModelImageRecoveryBytes),
-        static_cast<double>(dynamicModelImageRecoveryBytes),
-        static_cast<double>(uiImageRecoveryBytes),
+        static_cast<double>(worldImages.recoveryBytes),
+        static_cast<double>(staticModelImages.recoveryBytes),
+        static_cast<double>(dynamicModelImages.recoveryBytes),
+        static_cast<double>(uiImages.recoveryBytes),
         static_cast<double>(supplementalTextureRecoveryBytes),
+        static_cast<double>(worldImages.decodedBytes),
+        static_cast<double>(staticModelImages.decodedBytes),
+        static_cast<double>(dynamicModelImages.decodedBytes),
+        static_cast<double>(uiImages.decodedBytes),
+        static_cast<double>(textureRecoverySourceBytes),
+        static_cast<double>(encodedImageRecoveryBytes),
         static_cast<double>(decodedTextureSourceBytes),
         static_cast<double>(decodedTextureSourceBytes + renderTargetEstimateBytes),
         static_cast<double>(geometryBytes),
         static_cast<double>(recoveryCopyBytes),
         static_cast<double>(shaderProgramCacheEstimateBytes),
-        0.0,
-        static_cast<double>(WEB_RENDERER_MAX_WORLD_TEXTURE_BYTES),
+        static_cast<double>(temporaryUploadBytes),
+        static_cast<double>(WEB_RENDERER_MAX_DECODED_TEXTURE_BYTES),
         wasmHeapStatsSampled,
         wasmProgramBreakOffsetBytes,
         wasmLinearMemoryCapacityBytes,
@@ -1338,7 +1481,16 @@ std::size_t EmitRendererMemory(const char *state, bool sampleAllocator = true)
         static_cast<double>(imageLoadDefStats.entryCount),
         static_cast<double>(imageLoadDefStats.encodedPayloadBytes),
         static_cast<double>(imageLoadDefStats.budgetBytes),
-        static_cast<double>(imageLoadDefStats.evictionCount));
+        static_cast<double>(imageLoadDefStats.evictionCount),
+        static_cast<double>(loadDefImageCount),
+        static_cast<double>(loadDefRecoveryBytes),
+        static_cast<double>(loadDefDecodedBytes),
+        static_cast<double>(iwiImageCount),
+        static_cast<double>(iwiRecoveryBytes),
+        static_cast<double>(iwiDecodedBytes),
+        static_cast<double>(rawImageCount),
+        static_cast<double>(rawRecoveryBytes),
+        static_cast<double>(rawDecodedBytes));
     return recoveryCopyBytes;
 }
 
@@ -2342,19 +2494,56 @@ bool CreateWorldTextureObjects(
     {
         if (!image.supported) continue;
         if (image.texture != 0u) continue;
+        kisak::iwi::Rgba8Image decoded;
+        kisak::iwi::Error decodeError = kisak::iwi::Error::None;
+        if (image.recoverySource == WebRendererImageRecoverySource::LoadDef)
+        {
+            decodeError = kisak::iwi::DecodeLoadDefRgba8(
+                image.sourceFormat,
+                image.sourceFlags,
+                static_cast<std::uint16_t>(image.sourceDimensions[0]),
+                static_cast<std::uint16_t>(image.sourceDimensions[1]),
+                static_cast<std::uint16_t>(image.sourceDimensions[2]),
+                image.encodedSource,
+                decoded);
+        }
+        else if (image.recoverySource ==
+            WebRendererImageRecoverySource::IwiMember)
+        {
+            decodeError = kisak::iwi::DecodeRgba8(
+                image.encodedSource, decoded);
+        }
+        const bool encoded = image.recoverySource !=
+            WebRendererImageRecoverySource::DecodedRgba8;
+        if (encoded && (decodeError != kisak::iwi::Error::None ||
+                decoded.width != image.width || decoded.height != image.height))
+        {
+            Web_Log(WebLogLevel::Error,
+                "[kisakcod-web] Canonical recovery source '%s' could not "
+                "be decoded for WebGL upload: %s.\n",
+                image.canonicalName.c_str(),
+                kisak::iwi::ErrorString(decodeError));
+            DeleteWorldTextureObjects(images);
+            return false;
+        }
+        const std::vector<std::uint8_t> &pixels = encoded
+            ? decoded.pixels : image.pixels;
+        const std::vector<std::vector<std::uint8_t>> &mipPixels =
+            encoded && image.authoredMipChain
+            ? decoded.mipPixels : image.mipPixels;
         if (!CreateTextureObject(
-                image.pixels.data(), image.width, image.height, 2u,
+                pixels.data(), image.width, image.height, 2u,
                 image.texture))
         {
             DeleteWorldTextureObjects(images);
             return false;
         }
         glBindTexture(GL_TEXTURE_2D, image.texture);
-        if (image.mipPixels.empty() && image.mipmapsAllowed)
+        if (mipPixels.empty() && image.mipmapsAllowed)
         {
             glGenerateMipmap(GL_TEXTURE_2D);
         }
-        else if (image.mipPixels.empty())
+        else if (mipPixels.empty())
         {
             // Native Load_Texture creates a one-level D3D texture when the
             // canonical load definition carries IMG_FLAG_NOMIPMAPS. Do not
@@ -2364,7 +2553,7 @@ bool CreateWorldTextureObjects(
         }
         else
         {
-            for (std::size_t mip = 0u; mip < image.mipPixels.size(); ++mip)
+            for (std::size_t mip = 0u; mip < mipPixels.size(); ++mip)
             {
                 const std::uint32_t width = std::max<std::uint32_t>(
                     image.width >> (mip + 1u), 1u);
@@ -2372,7 +2561,7 @@ bool CreateWorldTextureObjects(
                     image.height >> (mip + 1u), 1u);
                 const std::size_t expectedBytes =
                     static_cast<std::size_t>(width) * height * 4u;
-                if (image.mipPixels[mip].size() != expectedBytes)
+                if (mipPixels[mip].size() != expectedBytes)
                 {
                     DeleteWorldTextureObjects(images);
                     return false;
@@ -2381,10 +2570,10 @@ bool CreateWorldTextureObjects(
                     static_cast<GLint>(mip + 1u), GL_RGBA8,
                     static_cast<GLsizei>(width),
                     static_cast<GLsizei>(height), 0, GL_RGBA,
-                    GL_UNSIGNED_BYTE, image.mipPixels[mip].data());
+                    GL_UNSIGNED_BYTE, mipPixels[mip].data());
             }
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL,
-                static_cast<GLint>(image.mipPixels.size()));
+                static_cast<GLint>(mipPixels.size()));
         }
         if (glGetError() != GL_NO_ERROR)
         {
@@ -4442,7 +4631,8 @@ WebRendererTextureResult ValidateTextureDesc(
 bool DecodeExternalCanonicalImage(
     const GfxImage *canonical,
     kisak::iwi::Rgba8Image &decoded,
-    kisak::iwi::Error &decodeError)
+    kisak::iwi::Error &decodeError,
+    std::vector<std::uint8_t> &encodedSource)
 {
     if (!canonical || canonical->mapType != MAPTYPE_2D ||
         !canonical->name || !canonical->name[0] ||
@@ -4466,6 +4656,8 @@ bool DecodeExternalCanonicalImage(
         decodeError = read == bytes.size()
             ? kisak::iwi::DecodeRgba8(bytes, decoded)
             : kisak::iwi::Error::InvalidFileSize;
+        if (decodeError == kisak::iwi::Error::None)
+            encodedSource = std::move(bytes);
     }
     else
     {
@@ -4544,6 +4736,9 @@ std::uint32_t RetainCanonicalWorldImage(
         (loadDef.flags & kisak::iwi::FLAG_NO_MIPMAPS) == 0u;
     kisak::iwi::Rgba8Image decoded;
     kisak::iwi::Error decodeError = kisak::iwi::Error::None;
+    WebRendererImageRecoverySource recoverySource =
+        WebRendererImageRecoverySource::DecodedRgba8;
+    std::vector<std::uint8_t> externalSource;
     bool attemptedDecode = false;
     if (retained.canonicalName == ",$white" ||
         retained.canonicalName == "$white")
@@ -4569,6 +4764,8 @@ std::uint32_t RetainCanonicalWorldImage(
                 loadDef.data,
                 loadDef.byteLength),
             decoded);
+        if (decodeError == kisak::iwi::Error::None)
+            recoverySource = WebRendererImageRecoverySource::LoadDef;
     }
     if ((!attemptedDecode || decodeError != kisak::iwi::Error::None) &&
         retained.canonicalName != ",$white" &&
@@ -4577,18 +4774,24 @@ std::uint32_t RetainCanonicalWorldImage(
         kisak::iwi::Rgba8Image externalDecoded;
         kisak::iwi::Error externalError = decodeError;
         if (DecodeExternalCanonicalImage(
-                canonical, externalDecoded, externalError))
+                canonical, externalDecoded, externalError, externalSource))
         {
             attemptedDecode = true;
             decodeError = externalError;
             if (decodeError == kisak::iwi::Error::None)
             {
                 decoded = std::move(externalDecoded);
+                recoverySource = WebRendererImageRecoverySource::IwiMember;
             }
         }
     }
 
     std::size_t decodedBytes = decoded.pixels.size();
+    std::size_t uploadBytes = decodedBytes;
+    for (const std::vector<std::uint8_t> &mip : decoded.mipPixels)
+    {
+        uploadBytes += mip.size();
+    }
     if (retainAuthoredMipChain)
     {
         for (const std::vector<std::uint8_t> &mip : decoded.mipPixels)
@@ -4604,18 +4807,38 @@ std::uint32_t RetainCanonicalWorldImage(
     }
     if (attemptedDecode && decodeError == kisak::iwi::Error::None &&
         decodedBytes <=
-            WEB_RENDERER_MAX_WORLD_TEXTURE_BYTES -
+            WEB_RENDERER_MAX_DECODED_TEXTURE_BYTES -
                 std::min(retainedPixelBytes,
-                    WEB_RENDERER_MAX_WORLD_TEXTURE_BYTES))
+                    WEB_RENDERER_MAX_DECODED_TEXTURE_BYTES))
     {
         retained.width = decoded.width;
         retained.height = decoded.height;
         if (retained.width <= 1u && retained.height <= 1u)
             retained.mipmapsAllowed = false;
         retainedPixelBytes += decodedBytes;
-        retained.pixels = std::move(decoded.pixels);
-        if (retainAuthoredMipChain)
-            retained.mipPixels = std::move(decoded.mipPixels);
+        retained.recoverySource = recoverySource;
+        retained.authoredMipChain = retainAuthoredMipChain;
+        retained.decodedByteLength = decodedBytes;
+        retained.uploadByteLength = uploadBytes;
+        if (recoverySource == WebRendererImageRecoverySource::LoadDef)
+        {
+            retained.sourceFlags = loadDef.flags;
+            std::copy_n(loadDef.dimensions, 3u, retained.sourceDimensions);
+            retained.sourceFormat = loadDef.format;
+            retained.encodedSource.assign(
+                loadDef.data, loadDef.data + loadDef.byteLength);
+        }
+        else if (recoverySource ==
+            WebRendererImageRecoverySource::IwiMember)
+        {
+            retained.encodedSource = std::move(externalSource);
+        }
+        else
+        {
+            retained.pixels = std::move(decoded.pixels);
+            if (retainAuthoredMipChain)
+                retained.mipPixels = std::move(decoded.mipPixels);
+        }
         retained.supported = true;
     }
     else if (attemptedDecode)
@@ -4783,7 +5006,7 @@ WebRendererSurfaceResult CopyWorldCommand(
     // Dynamic scenes reuse this vector across frames. Count authored mip
     // levels already in the pool as well as base pixels before admitting a
     // new image against the per-pool recovery allowance.
-    std::size_t retainedPixelBytes = RetainedImageBytes(images);
+    std::size_t retainedPixelBytes = RetainedImageStats(images).decodedBytes;
     try
     {
         vertices.assign(surface.vertices, surface.vertices + surface.vertexCount);
@@ -6292,7 +6515,7 @@ WebRendererSurfaceResult WebRenderer_SetUiScene(
     std::vector<std::uint32_t> indices;
     std::vector<WebRendererRetainedUiBatch> batches;
     std::size_t retainedPixelBytes =
-        RetainedImageBytes(g_renderer.retainedUiImages);
+        RetainedImageStats(g_renderer.retainedUiImages).decodedBytes;
     try
     {
         vertices.assign(scene.vertices, scene.vertices + scene.vertexCount);
