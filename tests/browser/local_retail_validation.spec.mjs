@@ -1,15 +1,18 @@
 import { execFileSync } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
-import { platform, release, tmpdir, version } from "node:os";
+import { cpus, platform, release, tmpdir, totalmem, version } from "node:os";
 import { join } from "node:path";
 
 import { chromium, expect, test as base } from "@playwright/test";
 
+import { summarizeForegroundSamples } from "./retail_foreground_window.mjs";
+
 const retailRoot = process.env.KISAK_COD4_RETAIL_ROOT;
 const browserChannel = process.env.KISAK_BROWSER_CHANNEL;
 const phase3TargetMap = process.env.KISAK_RETAIL_PHASE3_MAP?.trim().toLowerCase();
-if (phase3TargetMap && phase3TargetMap !== "blackout") {
-    throw new Error("KISAK_RETAIL_PHASE3_MAP currently supports only blackout");
+if (phase3TargetMap && (!/^[a-z0-9_]+$/.test(phase3TargetMap) ||
+    phase3TargetMap.startsWith("mp_") || phase3TargetMap.endsWith("_mp"))) {
+    throw new Error("KISAK_RETAIL_PHASE3_MAP must name one single-player zone");
 }
 const sourceCommit = execFileSync(
     "git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
@@ -35,6 +38,12 @@ let retailBrowserMetadata = {
     name: "chromium",
     version: null,
     channel: browserChannel ?? null,
+    headless: true,
+};
+const referenceHardware = {
+    processor: cpus()[0]?.model ?? "unknown",
+    logicalProcessorCount: cpus().length,
+    totalSystemMemoryBytes: totalmem(),
 };
 
 const test = base.extend({
@@ -68,14 +77,18 @@ test.afterEach(async ({}, testInfo) => {
     const prefix = phase3
         ? "KISAK_RETAIL_PHASE3_RESULT" : "KISAK_RETAIL_RESULT";
     console.log(`${prefix} ${JSON.stringify({
-        schemaVersion: 1,
+        schemaVersion: 2,
         source: { commitSha: sourceCommit, dirty: sourceDirty },
         recordedAtUtc: new Date().toISOString(),
         environment: {
             browser: retailBrowserMetadata,
             operatingSystem,
+            referenceHardware,
             build: "Release diagnostics",
         },
+        browserHeadless: retailBrowserMetadata.headless,
+        browserName: retailBrowserMetadata.name,
+        browserVersion: retailBrowserMetadata.version,
         validationResult: "fail",
         failureStage,
         failureClass,
@@ -171,9 +184,10 @@ async function waitForAssets(page, state)
 
 async function submitCommand(page, command)
 {
-    await page.locator("#engine-command-input").fill(command);
+    const input = page.locator("#engine-command-input");
+    await input.fill(command);
     const commandTimeMs = await page.evaluate(() => performance.now());
-    await page.locator("#engine-command-submit").click();
+    await input.press("Enter");
     await expect(page.locator("#engine-command-status"))
         .toHaveText(`Accepted: ${command}`, { timeout: 120_000 });
     return commandTimeMs;
@@ -220,13 +234,24 @@ async function waitForWorldFrames(page, mapName, minimumGeneration = 1)
 
 async function sustainWorldFrames(page, mapName, durationMs = 60_000)
 {
+    await page.bringToFront();
+    const sampleForeground = () => page.evaluate(() => ({
+        observedMs: performance.now(),
+        visibilityState: document.visibilityState,
+        pageFocused: document.hasFocus(),
+    }));
+    const foregroundSamples = [await sampleForeground()];
     const started = await page.evaluate((name) => ({
         observedMs: performance.now(),
         generation: globalThis.__retailValidationFrames.findLast((entry) =>
             entry.state === "drawn" && entry.geometrySubmitted === true &&
             entry.worldName?.toLowerCase().includes(name))?.viewSubmissionGeneration ?? 0,
     }), mapName);
-    await page.waitForTimeout(durationMs);
+    const deadline = Date.now() + durationMs;
+    while (Date.now() < deadline) {
+        await page.waitForTimeout(Math.min(1_000, deadline - Date.now()));
+        foregroundSamples.push(await sampleForeground());
+    }
     const ended = await page.evaluate((name) => ({
         observedMs: performance.now(),
         generation: globalThis.__retailValidationFrames.findLast((entry) =>
@@ -234,8 +259,10 @@ async function sustainWorldFrames(page, mapName, durationMs = 60_000)
             entry.worldName?.toLowerCase().includes(name))?.viewSubmissionGeneration ?? 0,
     }), mapName);
     expect(ended.observedMs - started.observedMs).toBeGreaterThanOrEqual(durationMs);
-    expect(ended.generation - started.generation)
-        .toBeGreaterThanOrEqual(Math.max(1, Math.floor(durationMs / 1000)));
+    const foreground = summarizeForegroundSamples(foregroundSamples);
+    expect(ended.generation - started.generation).toBeGreaterThanOrEqual(
+        foreground.performanceWindowValid
+            ? Math.max(1, Math.floor(durationMs / 1000)) : 1);
     return {
         requestedDurationMs: durationMs,
         observedDurationMs: ended.observedMs - started.observedMs,
@@ -243,6 +270,7 @@ async function sustainWorldFrames(page, mapName, durationMs = 60_000)
         endedMs: ended.observedMs,
         firstGeneration: started.generation,
         finalGeneration: ended.generation,
+        ...foreground,
     };
 }
 
@@ -321,9 +349,10 @@ async function mapEvidence(page, map, cursor, commandTimeMs, heapBeforeMapLoad,
         const stabilityFrames = frames.filter((entry) =>
             entry.observedMs >= stability.startedMs &&
             entry.observedMs <= stability.endedMs);
-        const intervals = stabilityFrames.slice(1).map((entry, index) =>
+        const measuredIntervals = stabilityFrames.slice(1).map((entry, index) =>
             entry.observedMs - stabilityFrames[index].observedMs)
             .filter((value) => value >= 0);
+        const intervals = stability.performanceWindowValid ? measuredIntervals : [];
         const sorted = [...intervals].sort((left, right) => left - right);
         const percentile = (fraction) => sorted.length
             ? sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * fraction) - 1)]
@@ -339,6 +368,18 @@ async function mapEvidence(page, map, cursor, commandTimeMs, heapBeforeMapLoad,
             (event) => event.stage === "XAssetList begin");
         const dbComplete = mapDatabase.findLast(
             (event) => event.stage === "XAssetList end" && !event.generatedLoadFailed);
+        const stabilityViews = globalThis.__retailValidationViews.filter((entry) =>
+            entry.observedMs >= stability.startedMs &&
+            entry.observedMs <= stability.endedMs &&
+            entry.worldName?.toLowerCase().includes(map));
+        const gameTimeAdvancementMs = stability.performanceWindowValid &&
+            stabilityViews.length > 1
+            ? stabilityViews.at(-1).time - stabilityViews[0].time : null;
+        const wallTimeAdvancementMs = stability.performanceWindowValid
+            ? stability.endedMs - stability.startedMs : null;
+        const averageFrameIntervalMs = intervals.length
+            ? intervals.reduce((sum, value) => sum + value, 0) / intervals.length
+            : null;
         return {
             map,
             validationResult: "pass",
@@ -349,7 +390,9 @@ async function mapEvidence(page, map, cursor, commandTimeMs, heapBeforeMapLoad,
                 databaseCompleted: dbComplete !== undefined,
                 cgameInitialized: cgame !== undefined,
                 worldFrameProduced: firstFrame !== undefined,
-                stability60s: stabilityFrames.length >= 60,
+                stability60s: stability.performanceWindowValid
+                    ? stabilityFrames.length >= 60
+                    : stability.finalGeneration > stability.firstGeneration,
                 input: Boolean(input) && Object.values(input).every(Boolean),
                 audio: (audioSnapshot?.decodedPcmBytes ?? 0) > 0,
                 checkpoint: checkpointResult.bytesPersisted > 0,
@@ -361,10 +404,27 @@ async function mapEvidence(page, map, cursor, commandTimeMs, heapBeforeMapLoad,
             cgameInitTimeMs: cgame?.observedMs ?? null,
             firstRealWorldFrameTimeMs: firstFrame?.observedMs ?? null,
             mapToFirstFrameMs: firstFrame ? firstFrame.observedMs - commandTimeMs : null,
-            averageFrameTimeMs: intervals.length
-                ? intervals.reduce((sum, value) => sum + value, 0) / intervals.length : null,
+            pageVisibilityState: stability.pageVisibilityState,
+            pageFocused: stability.pageFocused,
+            backgroundTransitions: stability.backgroundTransitions,
+            foregroundStateTransitions: stability.foregroundStateTransitions,
+            performanceWindowValid: stability.performanceWindowValid,
+            performanceInvalidReason: stability.performanceInvalidReason,
+            actualWorldFrames: stability.performanceWindowValid
+                ? stabilityFrames.length : null,
+            averageFrameIntervalMs,
+            averageFrameTimeMs: averageFrameIntervalMs,
+            p50FrameTimeMs: percentile(0.50),
             p95FrameTimeMs: percentile(0.95),
             p99FrameTimeMs: percentile(0.99),
+            minimumFpsEquivalent: sorted.length
+                ? 1_000 / sorted.at(-1) : null,
+            averageFpsEquivalent: averageFrameIntervalMs
+                ? 1_000 / averageFrameIntervalMs : null,
+            gameTimeAdvancementMs,
+            wallTimeAdvancementMs,
+            gameTimeWallTimeRatio: wallTimeAdvancementMs
+                ? gameTimeAdvancementMs / wallTimeAdvancementMs : null,
             framesRenderedDuringStabilityWindow: stabilityFrames.length,
             stability,
             wasmLinearMemoryCapacityBytes: {
@@ -379,6 +439,7 @@ async function mapEvidence(page, map, cursor, commandTimeMs, heapBeforeMapLoad,
             geometryBytes: memorySnapshot.geometryBytes,
             temporaryUploadBytes: memorySnapshot.temporaryUploadBytes,
             shaderProgramBytes: memorySnapshot.shaderProgramCacheEstimateBytes,
+            webglRendererIdentity: memorySnapshot.webglRendererIdentity,
             imagePoolRecoveryBytes: {
                 world: memorySnapshot.worldImageRecoveryBytes,
                 staticModels: memorySnapshot.staticModelImageRecoveryBytes,
@@ -429,10 +490,28 @@ function assertMapEvidence(evidence, memorySnapshot)
         .toBeGreaterThanOrEqual(evidence.databaseStartTimeMs);
     expect(evidence.cgameInitTimeMs).not.toBeNull();
     expect(evidence.firstRealWorldFrameTimeMs).not.toBeNull();
-    expect(evidence.framesRenderedDuringStabilityWindow).toBeGreaterThanOrEqual(60);
-    expect(evidence.averageFrameTimeMs).not.toBeNull();
-    expect(evidence.p95FrameTimeMs).not.toBeNull();
-    expect(evidence.p99FrameTimeMs).not.toBeNull();
+    expect(evidence.framesRenderedDuringStabilityWindow).toBeGreaterThanOrEqual(
+        evidence.performanceWindowValid ? 60 : 1);
+    expect(evidence.webglRendererIdentity).toEqual(expect.objectContaining({
+        vendor: expect.any(String),
+        renderer: expect.any(String),
+        version: expect.any(String),
+    }));
+    if (evidence.performanceWindowValid) {
+        expect(evidence.averageFrameTimeMs).not.toBeNull();
+        expect(evidence.p50FrameTimeMs).not.toBeNull();
+        expect(evidence.p95FrameTimeMs).not.toBeNull();
+        expect(evidence.p99FrameTimeMs).not.toBeNull();
+        expect(evidence.gameTimeWallTimeRatio).not.toBeNull();
+    } else {
+        expect(evidence.performanceInvalidReason)
+            .toBe("INVALID_BACKGROUND_THROTTLED");
+        expect(evidence.averageFrameTimeMs).toBeNull();
+        expect(evidence.p50FrameTimeMs).toBeNull();
+        expect(evidence.p95FrameTimeMs).toBeNull();
+        expect(evidence.p99FrameTimeMs).toBeNull();
+        expect(evidence.gameTimeWallTimeRatio).toBeNull();
+    }
     expect(evidence.audioDecodedBytes).toBeGreaterThan(0);
     expect(evidence.audioQueuedBuffers).toBeGreaterThanOrEqual(0);
     expect(evidence.checkpoint.filesPersisted).toBeGreaterThan(0);
@@ -626,10 +705,21 @@ async function recoverMapContext(page, mapName)
 
 async function exerciseRetailInput(page)
 {
+    const gameplayState = (field, weaponIndex = 0) => page.evaluate(
+        ({ stateField, weapon }) => globalThis.__KISAKCOD_WEB__.module.call(
+            "_KisakWeb_TestGameplayState", stateField, weapon),
+        { stateField: field, weapon: weaponIndex });
     const canvas = page.locator("#game-canvas");
     const beforeMove = await page.evaluate(() => structuredClone(
         globalThis.__retailValidationViews.at(-1)?.viewOrigin));
     expect(beforeMove).toHaveLength(3);
+    let inventoryProvisioning = null;
+    if (await gameplayState(7) === 0) {
+        await submitCommand(page, "give all");
+        await expect.poll(() => gameplayState(7), { timeout: 15_000 })
+            .toBeGreaterThan(0);
+        inventoryProvisioning = "canonical give all";
+    }
     if (await page.evaluate(() => globalThis.__KISAKCOD_WEB__.input.absoluteMouse ||
         globalThis.__KISAKCOD_WEB__.input.cursorVisible)) {
         await page.keyboard.press("Escape");
@@ -673,11 +763,73 @@ async function exerciseRetailInput(page)
     const audioBefore = await page.evaluate(() =>
         globalThis.__KISAKCOD_WEB__.audioPlayback.reduce(
             (total, entry) => total + entry.count, 0));
-    const box = await canvas.boundingBox();
-    expect(box).not.toBeNull();
-    await canvas.click({ position: { x: box.width / 2, y: box.height / 2 } });
     await expect.poll(() => page.evaluate(() => document.pointerLockElement?.id))
         .toBe("game-canvas");
+    const primaryWeaponCount = await gameplayState(7);
+    const selectedWeaponBefore = await gameplayState(2);
+    await page.mouse.wheel(0, -120);
+    let wheelCanonicalResponse;
+    if (primaryWeaponCount <= 1) {
+        wheelCanonicalResponse = {
+            validationResult: "NOT_APPLICABLE_SINGLE_WEAPON",
+            primaryWeaponCount,
+            selectedWeaponBefore,
+            selectedWeaponAfter: selectedWeaponBefore,
+        };
+    } else {
+        await expect.poll(() => gameplayState(2), { timeout: 15_000 })
+            .not.toBe(selectedWeaponBefore);
+        const selectedWeaponAfter = await gameplayState(2);
+        wheelCanonicalResponse = {
+            validationResult: "pass",
+            primaryWeaponCount,
+            selectedWeaponBefore,
+            selectedWeaponAfter,
+        };
+    }
+    const snapshotWeaponBefore = await gameplayState(0);
+    const selectedWeaponBeforeFire = await gameplayState(2);
+    const predictedWeaponBefore = await gameplayState(4);
+    const viewmodelWeaponBefore = await gameplayState(5);
+    const fireWeapon = [selectedWeaponBeforeFire, predictedWeaponBefore,
+        viewmodelWeaponBefore].find((weapon) => weapon > 0) ?? 0;
+    const snapshotClipBefore = await gameplayState(1, fireWeapon);
+    const clipBefore = await gameplayState(6, fireWeapon);
+    console.log(`KISAK_RETAIL_GAMEPLAY_STATE ${JSON.stringify({
+        snapshotWeaponBefore,
+        selectedWeaponBeforeFire,
+        predictedWeaponBefore,
+        viewmodelWeaponBefore,
+        fireWeapon,
+        snapshotClipBefore,
+        predictedClipBefore: clipBefore,
+        snapshotPrimaryWeaponCount: await gameplayState(3),
+        predictedPrimaryWeaponCount: primaryWeaponCount,
+    })}`);
+    expect(fireWeapon).toBeGreaterThan(0);
+    expect(clipBefore).toBeGreaterThan(0);
+    await page.mouse.down({ button: "left" });
+    try {
+        await expect.poll(() => gameplayState(6, fireWeapon), { timeout: 15_000 })
+            .toBeLessThan(clipBefore);
+    } finally {
+        await page.mouse.up({ button: "left" });
+    }
+    const clipAfter = await gameplayState(6, fireWeapon);
+    const snapshotClipAfter = await gameplayState(1, fireWeapon);
+    const primaryFireCanonicalResponse = {
+        validationResult: "pass",
+        inventoryProvisioning,
+        weapon: fireWeapon,
+        snapshotWeaponBefore,
+        selectedWeaponBefore: selectedWeaponBeforeFire,
+        predictedWeaponBefore,
+        viewmodelWeaponBefore,
+        snapshotClipBefore,
+        snapshotClipAfter,
+        clipBefore,
+        clipAfter,
+    };
     const adsBefore = await page.evaluate(() =>
         globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestUsingAds"));
     await page.mouse.down({ button: "right" });
@@ -688,7 +840,6 @@ async function exerciseRetailInput(page)
     } finally {
         await page.mouse.up({ button: "right" });
     }
-    await page.mouse.wheel(0, -120);
     await page.mouse.wheel(0, 120);
     const lookBefore = await page.evaluate(() => structuredClone(
         globalThis.__retailValidationViews.at(-1)?.viewForward));
@@ -728,8 +879,21 @@ async function exerciseRetailInput(page)
     await page.keyboard.press("Escape");
     await expect.poll(() => page.evaluate(() =>
         globalThis.__KISAKCOD_WEB__.input.absoluteMouse)).toBe(false);
-    return { eventCount: inputs.length, movement: true, mouseLook: true,
-        primaryFireAudio: true, secondaryAction: true };
+    await canvas.click({ position: { x: 8, y: 8 } });
+    await expect.poll(() => page.evaluate(() => document.pointerLockElement?.id))
+        .toBe("game-canvas");
+    return {
+        eventCount: inputs.length,
+        movement: true,
+        mouseLook: true,
+        primaryFireCanonicalResponse,
+        primaryFireAudioSecondaryEvidence: true,
+        secondaryAction: true,
+        wheelCanonicalResponse,
+        escapeMenu: true,
+        pointerLockLoss: true,
+        pointerLockReacquisition: true,
+    };
 }
 
 test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: page }) => {
@@ -738,9 +902,10 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
         "authoritative retail validation requires a clean source commit").toBe(false);
     const browser = page.context().browser();
     retailBrowserMetadata = {
-        name: browser?.browserType().name() ?? "unknown",
+        name: browserChannel ?? browser?.browserType().name() ?? "unknown",
         version: browser?.version() ?? "unknown",
         channel: browserChannel ?? null,
+        headless: Boolean(test.info().project.use.headless ?? true),
     };
     const pageErrors = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
@@ -1002,15 +1167,19 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
         .toBe("running");
     expect(pageErrors).toEqual([]);
     const validationRecord = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         source: { commitSha: sourceCommit, dirty: sourceDirty },
         recordedAtUtc: new Date().toISOString(),
         environment: {
             browser: retailBrowserMetadata,
             operatingSystem,
+            referenceHardware,
             build: "Release diagnostics",
         },
         validationResult: "pass",
+        browserHeadless: retailBrowserMetadata.headless,
+        browserName: retailBrowserMetadata.name,
+        browserVersion: retailBrowserMetadata.version,
         failureStage: null,
         failureClass: null,
         maps: { killhouse: killhouseEvidence, cargoship: cargoshipEvidence },
@@ -1049,9 +1218,10 @@ if (phase3TargetMap) {
                 .toBe(false);
             const browser = page.context().browser();
             retailBrowserMetadata = {
-                name: browser?.browserType().name() ?? "unknown",
+                name: browserChannel ?? browser?.browserType().name() ?? "unknown",
                 version: browser?.version() ?? "unknown",
                 channel: browserChannel ?? null,
+                headless: Boolean(test.info().project.use.headless ?? true),
             };
             const pageErrors = [];
             page.on("pageerror", (error) => pageErrors.push(error.message));
@@ -1072,6 +1242,10 @@ if (phase3TargetMap) {
             const chooser = await chooserPromise;
             await chooser.setFiles(retailRoot);
             await waitForAssets(page, "ready");
+            expect(await page.evaluate((mapName) =>
+                globalThis.__KISAKCOD_WEB__.assets.manifest.profile
+                    .availableSinglePlayerZones.includes(`zone/english/${mapName}.ff`),
+            phase3TargetMap)).toBe(true);
 
             failureStage = "CargoShip baseline database load";
             failureClass = "database";
@@ -1213,15 +1387,19 @@ if (phase3TargetMap) {
             expect(pageErrors).toEqual([]);
 
             const validationRecord = {
-                schemaVersion: 1,
+                schemaVersion: 2,
                 source: { commitSha: sourceCommit, dirty: sourceDirty },
                 recordedAtUtc: new Date().toISOString(),
                 environment: {
                     browser: retailBrowserMetadata,
                     operatingSystem,
+                    referenceHardware,
                     build: "Release diagnostics",
                 },
                 validationResult: "pass",
+                browserHeadless: retailBrowserMetadata.headless,
+                browserName: retailBrowserMetadata.name,
+                browserVersion: retailBrowserMetadata.version,
                 failureStage: null,
                 failureClass: null,
                 targetMap: phase3TargetMap,

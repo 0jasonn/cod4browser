@@ -1289,7 +1289,7 @@ void __cdecl Cmd_ExecuteSingleCommand(int32_t  localClientNum, int32_t  controll
             //}
             //else
             {
-#if defined(KISAK_GATE3_COM_INIT_PREFIX)
+#if defined(KISAK_GATE3_COM_INIT_PREFIX) && !defined(KISAK_RUNTIME_MAP_DB_BOUNDARY)
                 Dvar_Command();
 #else
                 if (!Dvar_Command() && (!com_sv_running || !com_sv_running->current.enabled || !SV_GameCommand()))

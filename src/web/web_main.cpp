@@ -1,6 +1,7 @@
 #include <client/cl_input.h>
 #include <client/cl_scrn.h>
 #include <client/client.h>
+#include <cgame/cg_main.h>
 #include <qcommon/cmd.h>
 #include <qcommon/qcommon.h>
 #include <server/server.h>
@@ -194,6 +195,61 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestSlowNextCommand(int millisecond
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestUsingAds()
 {
     return clients[0].usingAds ? 1 : 0;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestGameplayState(
+    int field, int weaponIndex)
+{
+    if (!CL_IsLocalClientInGame(0) || !CL_IsCgameInitialized(0))
+        return -1;
+
+    cg_s *const cgame = CG_GetLocalClientGlobals(0);
+    if (!cgame || !cgame->nextSnap)
+        return -1;
+
+    const playerState_s &snapshot = cgame->nextSnap->ps;
+    switch (field)
+    {
+    case 0:
+        return static_cast<int>(snapshot.weapon);
+    case 1:
+    {
+        if (weaponIndex < 0 ||
+            static_cast<std::uint32_t>(weaponIndex) >= BG_GetNumWeapons())
+            return -1;
+        const int clip = BG_ClipForWeapon(
+            static_cast<std::uint32_t>(weaponIndex));
+        const int clipCount = static_cast<int>(
+            sizeof(snapshot.ammoclip) / sizeof(snapshot.ammoclip[0]));
+        return clip >= 0 && clip < clipCount ? snapshot.ammoclip[clip] : -1;
+    }
+    case 2:
+        return static_cast<int>(cgame->weaponSelect);
+    case 3:
+        return BG_PlayerWeaponCountPrimaryTypes(&snapshot);
+    case 4:
+        return static_cast<int>(cgame->predictedPlayerState.weapon);
+    case 5:
+        return static_cast<int>(
+            BG_GetViewmodelWeaponIndex(&cgame->predictedPlayerState));
+    case 6:
+    {
+        if (weaponIndex < 0 ||
+            static_cast<std::uint32_t>(weaponIndex) >= BG_GetNumWeapons())
+            return -1;
+        const int clip = BG_ClipForWeapon(
+            static_cast<std::uint32_t>(weaponIndex));
+        const int clipCount = static_cast<int>(
+            sizeof(cgame->predictedPlayerState.ammoclip) /
+            sizeof(cgame->predictedPlayerState.ammoclip[0]));
+        return clip >= 0 && clip < clipCount
+            ? cgame->predictedPlayerState.ammoclip[clip] : -1;
+    }
+    case 7:
+        return BG_PlayerWeaponCountPrimaryTypes(&cgame->predictedPlayerState);
+    default:
+        return -1;
+    }
 }
 #endif
 

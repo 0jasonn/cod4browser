@@ -1101,6 +1101,31 @@ EM_JS(void, DispatchRendererMemory, (
     double shaderProgramCacheEstimateBytes,
     double temporaryUploadBytes,
     double recoveryBudgetBytes), {
+        let webglRendererIdentity = null;
+        try {
+            const gl = (typeof GL !== "undefined" && GL.currentContext)
+                ? GL.currentContext.GLctx : Module.ctx;
+            if (gl) {
+                const extension = gl.getExtension("WEBGL_debug_renderer_info");
+                const unmaskedVendor = extension
+                    ? gl.getParameter(extension.UNMASKED_VENDOR_WEBGL) : null;
+                const unmaskedRenderer = extension
+                    ? gl.getParameter(extension.UNMASKED_RENDERER_WEBGL) : null;
+                const identity = `${unmaskedVendor ?? ""} ${unmaskedRenderer ?? ""}`;
+                webglRendererIdentity = {
+                    vendor: gl.getParameter(gl.VENDOR),
+                    renderer: gl.getParameter(gl.RENDERER),
+                    unmaskedVendor,
+                    unmaskedRenderer,
+                    version: gl.getParameter(gl.VERSION),
+                    angleBackend: /ANGLE/i.test(unmaskedRenderer ?? "")
+                        ? unmaskedRenderer : null,
+                    hardwareSoftwareIndication:
+                        /swiftshader|llvmpipe|software|basic render/i.test(identity)
+                            ? "software" : (unmaskedRenderer ? "hardware-or-driver" : "unknown"),
+                };
+            }
+        } catch (_) {}
         globalThis.dispatchEvent(new CustomEvent("kisakcod:renderer-memory", {
             detail: {
                 state: UTF8ToString(state),
@@ -1115,7 +1140,8 @@ EM_JS(void, DispatchRendererMemory, (
                 recoveryCopyBytes,
                 shaderProgramCacheEstimateBytes,
                 temporaryUploadBytes,
-                recoveryBudgetBytes
+                recoveryBudgetBytes,
+                webglRendererIdentity
             }
         }));
     });
