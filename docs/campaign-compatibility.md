@@ -34,6 +34,9 @@ system memory. See the
 [sanitized machine-readable evidence](evidence/retail-campaign-247980a6.json).
 It contains no retail paths or proprietary content.
 
+Current totals are 6 validated maps: 2 `PLAYABLE`, 4 `FUNCTIONAL`, 16
+`UNTESTED`, and 0 `BLOCKED` or `REGRESSION`.
+
 | Map | Canonical runtime | First frame | Valid foreground performance | Canonical gameplay | Transition / context recovery | Recovery / Wasm capacity | Result | Evidence |
 | --- | --- | ---: | --- | --- | --- | --- | --- | --- |
 | `killhouse` | DB, ClipMap/world, server, game, cgame, and actual world frames pass | Chrome 5,710.910 ms; Edge 5,693.485 ms | Chrome: 33.708 FPS, 32.210 ms p95, 0.999075 ratio; Edge: 35.027 FPS, 31.180 ms p95, 0.998705 ratio | Full input, canonical fire clip 30 -> 28, ADS, weapon selection, audio, and checkpoint pass | Fresh load and return transition pass; old-map recovery retires; returned-map forced recovery passes in 1,960.945/1,893.305 ms | Chrome 518,433,483 B recovery / 989,921,280 B capacity; Edge 518,844,075 B / 989,921,280 B | **PLAYABLE** | Clean legally owned Chrome/Edge baseline at `f5229806`. |
@@ -42,12 +45,16 @@ It contains no retail paths or proprietary content.
 | `airplane` | All canonical runtime boundaries pass | 7,352.500 ms | 3,597 frames; 59.95 FPS; 18.65 ms p95; 0.99999 ratio | Fire clip 12 -> 11; ADS, wheel selection, movement, mouse, menu, pointer lock, audio, and checkpoint pass | CargoShip in / Killhouse out pass; 591.775 ms context recovery | 122,778,819 B aggregate CPU recovery / 866,582,528 B capacity | **PLAYABLE** | Clean `247980a6` record; compact indoor/conventional-combat coverage. |
 | `hunted` | All canonical runtime boundaries pass | 6,660.220 ms | 1,145 frames; 19.08 FPS; 55.40 ms p95; 0.993989 ratio | Fire clip 6 -> 5; ADS, movement, mouse, menu, pointer lock, audio, and checkpoint pass; wheel is `NOT_APPLICABLE_SINGLE_WEAPON` | CargoShip in / Killhouse out pass; 1,984.015 ms context recovery | 480,307,702 B aggregate CPU recovery / 968,163,328 B capacity | **FUNCTIONAL** | Clean `247980a6` record; outdoor visibility, foliage, world, and dynamic-model coverage; average and p95 miss the threshold. |
 | `bog_a` | All canonical runtime boundaries pass | 9,821.955 ms | 1,271 frames; 21.21 FPS; 56.64 ms p95; 0.999457 ratio | Fire clip 15 -> 14; ADS, wheel selection, movement, mouse, menu, pointer lock, audio, and checkpoint pass | CargoShip in / Killhouse out pass; 1,844.635 ms context recovery | 428,120,523 B aggregate CPU recovery / 961,937,408 B capacity | **FUNCTIONAL** | Clean `247980a6` rerun; dense combat, FX, material, entity, and audio coverage; average and p95 miss the threshold. |
-| Other directly selected non-`mp_*`/non-`*_mp` SP zones | Not run | Not run | Not measured | Not run | Not run | Not recorded | **UNTESTED** | Discovery or a header probe is not compatibility evidence. Add one row only after a legal local execution run. |
+| Other 16 directly selected non-`mp_*`/non-`*_mp` SP zones | Not run | Not run | Not measured | Not run | Not run | Not recorded | **UNTESTED** | Discovery or a header probe is not compatibility evidence. Add one row only after a legal local execution run. |
 
 `decodedTextureRecoveryBytes` is the logical decoded texture size. It is not
 the retained recovery allocation after `c66d41e1`: the renderer now retains
 encoded/canonical image sources where supported. `aggregateCpuRecoveryBytes`
 and `textureRecoverySourceBytes` describe actual retained recovery storage.
+At the same Killhouse point this reduced aggregate CPU recovery by 64.27% and
+Wasm capacity by 45.28%, in exchange for longer successful context re-decode
+(+57% to +94.75%, approximately +90% on returned Killhouse) and a 14.43%
+Killhouse first-frame increase. Exact comparisons are in the execution report.
 
 ## Result definitions
 

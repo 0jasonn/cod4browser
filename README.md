@@ -8,11 +8,11 @@ platform boundaries.
 
 The Release product runs in a dedicated Worker and follows the canonical Kisak
 path through `Com_Init`, database/XFile loading, ClipMap, server/game, local
-client/cgame, renderer-frontend commands, and actual WebGL2 world frames.
-Historical local retail evidence catalogued at commit `887f1c87` on 2026-08-25
-includes Killhouse input, HUD, effects, and Web Audio; it was not rerun during
-the 2026-08-26 cleanup because no retail root was supplied. This is still an
-incomplete port, not a generally compatible COD4 release.
+client/cgame, renderer-frontend commands, and actual WebGL2 world frames. Clean
+local retail evidence at `f5229806` and `247980a6` currently covers six maps:
+Killhouse and Airplane are `PLAYABLE`; CargoShip, Blackout, Hunted, and Bog A
+are `FUNCTIONAL`; 16 discovered direct SP zones remain `UNTESTED`. This is
+still an incomplete port, not a generally compatible COD4 release.
 
 The opt-in diagnostics target builds the same runtime with browser-only test
 controls and telemetry. Production does not expose those controls.
@@ -44,8 +44,12 @@ the engine, assets, game state, filesystem semantics, and renderer frontend.
 
 The authoritative component classification and current blockers are in
 [docs/web-port-convergence.md](docs/web-port-convergence.md). Concise build and
-validation instructions are in [docs/web-port.md](docs/web-port.md). Historical
-milestone narratives are retained under [docs/history](docs/history/README.md).
+validation instructions are in [docs/web-port.md](docs/web-port.md). See the
+[current status](docs/web-status.md), [ordered roadmap](docs/web-roadmap.md),
+[campaign matrix](docs/campaign-compatibility.md), and
+[execution report](WEB_ROADMAP_EXECUTION_REPORT.md) for claim scope and exact
+evidence. Historical milestone narratives are retained under
+[docs/history](docs/history/README.md).
 
 ## Build
 
@@ -79,8 +83,10 @@ Build the separate diagnostic site with `tools/build_web.ps1 -Diagnostics`.
 It is emitted under `build/web-diagnostics/site-diagnostics`.
 
 The opt-in [local retail validation](docs/local-retail-validation.md) exercises
-the Killhouse/CargoShip, persistence, input/audio, and context-loss matrix with
-legally owned files.
+the canonical Killhouse -> CargoShip -> Blackout -> Killhouse matrix; the
+campaign mode validates one explicitly selected SP zone at a time. Both use
+legally owned local files and cover persistence, input/audio, transitions, and
+context loss.
 
 Routine CI runs smoke and remainder once each against the exact diagnostic
 Release artifact. Parser/database semantics stay in the direct native and Wasm
@@ -108,6 +114,12 @@ state in JavaScript. Browser input and bounded Web Audio are demonstrated.
 Native Bink playback is intentionally omitted with a visible structured skip;
 gamepad support, full cinematics, advanced audio parity, broader campaign
 validation, and remaining material families are outstanding.
+
+Encoded-source recovery is active. At the comparable Killhouse measurement it
+reduced aggregate CPU recovery storage by 64.27% and Wasm capacity by 45.28%,
+with longer but successful context re-decode. The next runtime milestone is
+bounded frame-stage profiling before one measured renderer optimisation, then
+one canonical mission checkpoint/death/restart/save-reload loop.
 
 ## License
 

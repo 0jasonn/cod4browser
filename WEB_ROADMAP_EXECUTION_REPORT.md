@@ -10,6 +10,7 @@ installation without recording its path or any proprietary content.
 | --- | --- |
 | Starting SHA | `01e54eacc3d6961f572c44c08fcc9a59600f478f` |
 | Clean foreground runtime evidence SHA | `f52298064234092ebce455096c6fe28ea70490e5` |
+| Current roadmap branch / starting SHA | `codex/web-frame-profile-mission` / `d3f4c8d696e21939e7ef85cc19eb331ef104c30b` |
 | Foreground evidence artifact commit | `b59c32a009b4224e5ec06f0602549e1471d827d6` |
 | Policy/campaign evidence commit | `c1c17121ada5e66e09138eaeb9ff12afa40cf35f` |
 | Date | 2026-08-27 |
@@ -18,7 +19,8 @@ installation without recording its path or any proprietary content.
 | OS | Windows 11 Pro 10.0.26200 x64 |
 | Reference hardware | AMD Ryzen 7 7800X3D, 16 logical processors, 33,944,879,104 B system memory |
 | Build | Release diagnostics |
-| Retail root supplied | YES; local path deliberately omitted |
+| Retail root for recorded six-map evidence | YES; local path deliberately omitted |
+| Retail root in the current profiling process | NO; `KISAK_COD4_RETAIL_ROOT` absent, so no fresh retail rerun is claimed |
 
 The implementation chain for this iteration is:
 
@@ -176,7 +178,7 @@ then exposed an asynchronous Worker-to-DOM mouse-mode boundary; `f5229806`
 waits for relative mode before clicking. Neither change bypasses a map,
 weakens an assertion, or substitutes for canonical gameplay state.
 
-The complete non-overlapping current-head gate matrix passed:
+The complete non-overlapping validated-runtime-milestone gate matrix passed:
 
 | Gate | Result |
 | --- | --- |
@@ -220,8 +222,17 @@ The pinned baseline records Emscripten 6.0.6, CMake 4.2.0-rc3, and Ninja
 1.13.2. The file/export allowlists and diagnostic-source exclusions were not
 loosened.
 
+## Current recommendation
+
+Begin bounded frame-stage instrumentation, then obtain valid foreground
+profiles for all six known maps before selecting one renderer optimisation.
+After that change is stable, prove one real mission checkpoint/death/restart/
+shutdown/save-reload loop. Broader campaign expansion follows those gates.
+The current process cannot perform the retail portions because
+`KISAK_COD4_RETAIL_ROOT` is absent.
+
 All sections below are historical records of the 2026-08-26 milestone. Their
-old PLAYABLE labels and final recommendation do not override the current
+old PLAYABLE labels and recommendations do not override the current
 threshold-based classifications and gate results above.
 
 ## Phase 0 baseline (historical)
@@ -264,7 +275,7 @@ contains no retail paths or proprietary content.
 
 ### Killhouse
 
-| Evidence field | Current result |
+| Evidence field | Historical result |
 | --- | --- |
 | DB / CGame / world | Pass |
 | Clip / Server / Game | Canonical SP path reached; not separate booleans in the structured result |
@@ -284,7 +295,7 @@ contains no retail paths or proprietary content.
 
 ### CargoShip
 
-| Evidence field | Current result |
+| Evidence field | Historical result |
 | --- | --- |
 | DB / CGame / world | Pass |
 | Clip / Server / Game | Canonical SP path reached; not separate booleans in the structured result |
@@ -389,7 +400,7 @@ The non-proprietary machine-readable record is
 
 ### Blackout
 
-| Evidence field | Current result |
+| Evidence field | Historical result |
 | --- | --- |
 | DB / Clip / world | Pass |
 | Server / Game | Pass; `G_InitGame`, `G_LoadLevel`, `SV_InitGameVM`, and `SV_InitGameProgs` completed |
@@ -470,7 +481,7 @@ No artifact budget was changed.
 
 ## Campaign matrix (historical)
 
-Current promotions from this execution:
+Historical promotions from this execution were:
 
 | Result | Count |
 | --- | ---: |
@@ -481,9 +492,10 @@ Current promotions from this execution:
 | REGRESSION | 0 |
 | UNTESTED | 0 new rows |
 
-Killhouse and CargoShip remain PLAYABLE, and Blackout is promoted to PLAYABLE
-from current Phase 3 evidence. Other directly selected SP zones remain grouped
-as UNTESTED until each receives its own legal run.
+Killhouse and CargoShip were recorded as PLAYABLE, and Blackout was promoted to
+PLAYABLE by that Phase 3 evidence. The current foreground matrix above
+supersedes those performance classifications. Other directly selected SP zones
+remained grouped as UNTESTED until each received its own legal run.
 
 ## Remaining work (historical)
 
@@ -497,14 +509,3 @@ as UNTESTED until each receives its own legal run.
 | Phase 5 gamepad | Future product feature; eligible after the stable keyboard/mouse slice, but not yet implemented or retail-proven |
 | Phase 6 cinematics | Evidence-gated future work; retain the tested visible omission until campaign progression requires legal browser playback |
 | Phase 7 launcher/map UX | Future product feature now evidence-eligible after multiple playable maps; map selection and compatibility labels are not yet claimed complete |
-
-## Current recommendation
-
-`CURRENT ITERATION COMPLETE`
-
-The foreground, canonical-input, encoded-recovery, and first three-map
-campaign-batch evidence is sufficient to continue evidence-driven campaign
-expansion. The artifact rebaseline, full non-overlapping gate matrix, final
-clean branded Chrome/Edge baseline, and exact WebGL identity are complete and
-tracked. No current compatibility blocker remains in the validated six-map
-set.

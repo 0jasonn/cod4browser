@@ -15,39 +15,42 @@
 
 ## Completed roadmap evidence
 
-The 2026-08-26 execution preserved the non-retail Phase 0 baseline and
-completed the local Killhouse/CargoShip matrix at clean source SHA
-`ac063bb20cbc4027497841322d87c2069d736939`. Both maps are currently PLAYABLE
-under the matrix. Transition retirement, configuration checkpoint/reload,
-audio, input, memory telemetry, and forced context recovery passed. See the
-[progress report](../ROADMAP_PROGRESS_REPORT.md).
+The clean `f5229806` foreground baseline and `247980a6` campaign batch validate
+six maps. Killhouse and Airplane are `PLAYABLE`; CargoShip, Blackout, Hunted,
+and Bog A are `FUNCTIONAL`; 16 discovered direct SP zones remain `UNTESTED`.
+All six pass the canonical runtime, real gameplay input, audio, checkpoint,
+transition, context-recovery, and valid foreground stability boundaries.
 
-Phase 2 retained the existing previous-map recovery eviction and made no new
-optimization. It released 1,521,922,580 B of old-map aggregate CPU recovery to
-zero before new-world publication, with no old/new recovery overlap. Keep
-800 MiB as the per retained-image-pool admission cap: the Killhouse
-static-model pool used 817,908,800 of 838,860,800 B (97.50%). Wasm capacity is
-monotonic allocator capacity, not a retained-resource measurement. No
-unobserved before/after (A/B) timing was inferred.
+Encoded-source recovery retains canonical compressed sources and reuses the
+existing decoder. At the comparable Killhouse point it reduced aggregate CPU
+recovery by 64.27% and Wasm capacity by 45.28%. Context recovery remained
+successful but became +57% to +94.75% slower (approximately +90% on returned
+Killhouse), while Killhouse first frame increased 14.43% and CargoShip remained
+approximately flat. Previous-map resources still retire before the next world
+publishes, and the 800 MiB per-pool decoded admission limit is unchanged.
 
-The first Phase 3 campaign batch validated Blackout as PLAYABLE at clean source
-SHA `6be926cb4e78693f9f6e638c348b0ee0f908b45f`. Canonical database, ClipMap,
-world, server, game, client, and cgame initialization passed, followed by a
-60,022.685 ms gameplay window, input, audio, configuration persistence,
-CargoShip-to-Blackout-to-Killhouse retirement, and forced context recovery.
-The measured blocker was a browser-only 20,000 static-model-instance ceiling;
-`164fc1f2` restored native IW3's 65,536-instance cardinality with focused
-native/Wasm coverage. See the
-[Phase 3 evidence](evidence/retail-phase3-6be926cb.json).
+The historical browser-only 20,000 static-model-instance ceiling is fixed at
+the native IW3 65,536 cardinality. The old background-throttled performance
+figures do not establish current compatibility; only the clean foreground
+records do. See the [execution report](../WEB_ROADMAP_EXECUTION_REPORT.md).
 
 ## Next, in order
 
-1. Continue validating additional campaign zones individually and update the
-   compatibility matrix; discovery is not compatibility.
-2. Close remaining renderer/material and advanced audio parity gaps found by
-   those measured scenes.
-3. Add gamepad support behind the existing input boundary.
-4. Design a browser-compatible cinematic path only as a narrow, independently
-   tested subsystem.
-5. Consider multiplayer only with a documented WebSocket/WebTransport relay;
-   browsers cannot use COD4 UDP directly.
+1. Add bounded diagnostics-only CPU frame-stage, renderer-stage, exact-work,
+   upload, and optional asynchronous WebGL2 GPU timing evidence.
+2. Profile Airplane, Killhouse, Blackout, Bog A, Hunted, and CargoShip in valid
+   foreground windows. Rank the measured stage deltas.
+3. Implement exactly one renderer optimisation selected by that evidence, then
+   rerun the six-map functional and performance matrix.
+4. Prove one representative canonical mission through AI/scripts/objectives,
+   combat, checkpoint, death/restart, browser shutdown, save reload, and
+   continued progression.
+5. Measure encoded-image inspection/decode/upload/recovery work and improve it
+   only if duplicate work is demonstrated without giving back the memory win.
+6. After those gates are stable, select the next two or three discovered SP
+   maps by coverage value. Discovery remains `UNTESTED`.
+
+The present process has no explicitly supplied `KISAK_COD4_RETAIL_ROOT`.
+Instrumentation and synthetic gates may proceed, but steps 2–6 cannot produce
+fresh retail conclusions until that input is provided. No optimisation is to
+be selected speculatively.
