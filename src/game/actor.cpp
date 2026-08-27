@@ -601,8 +601,8 @@ void __cdecl Actor_Pain(
     int v18; // r8
     double v19; // fp1
     double v20; // fp31
-    long double v21; // fp2
-    long double v22; // fp2
+    double v21; // fp2
+    double v22; // fp2
     unsigned __int16 HitLocationString; // r3
     WeaponDef *WeaponDef; // r30
     sentient_s *sentient; // r4
@@ -646,9 +646,9 @@ void __cdecl Actor_Pain(
     actor->iDamageTaken = iDamage;
     v19 = vectoyaw(vDir);
     v20 = (float)((float)((float)v19 - self->r.currentAngles[1]) * (float)0.0027777778);
-    *(double *)&v21 = (float)((float)((float)((float)v19 - self->r.currentAngles[1]) * (float)0.0027777778) + (float)0.5);
+    v21 = (float)((float)((float)((float)v19 - self->r.currentAngles[1]) * (float)0.0027777778) + (float)0.5);
     v22 = floor(v21);
-    actor->iDamageYaw = (int)(float)((float)((float)v20 - (float)*(double *)&v22) * (float)360.0);
+    actor->iDamageYaw = (int)(float)((float)((float)v20 - (float)v22) * (float)360.0);
     actor->damageDir[0] = *vDir;
     actor->damageDir[1] = vDir[1];
     actor->damageDir[2] = vDir[2];
@@ -705,8 +705,8 @@ void __cdecl Actor_Die(
     int v17; // r8
     double v18; // fp1
     double v19; // fp31
-    long double v20; // fp2
-    long double v21; // fp2
+    double v20; // fp2
+    double v21; // fp2
     unsigned __int16 HitLocationString; // r3
     WeaponDef *WeaponDef; // r29
 
@@ -765,9 +765,9 @@ void __cdecl Actor_Die(
         actor->damageDir[2] = vDir[2];
         v18 = vectoyaw(vDir);
         v19 = (float)((float)((float)v18 - self->r.currentAngles[1]) * (float)0.0027777778);
-        *(double *)&v20 = (float)((float)((float)((float)v18 - self->r.currentAngles[1]) * (float)0.0027777778) + (float)0.5);
+        v20 = (float)((float)((float)((float)v18 - self->r.currentAngles[1]) * (float)0.0027777778) + (float)0.5);
         v21 = floor(v20);
-        actor->iDamageYaw = (int)(float)((float)((float)v19 - (float)*(double *)&v21) * (float)360.0);
+        actor->iDamageYaw = (int)(float)((float)((float)v19 - (float)v21) * (float)360.0);
         HitLocationString = G_GetHitLocationString(hitLoc);
         Scr_SetString(&actor->damageHitLoc, HitLocationString);
         if (pInflictor)
