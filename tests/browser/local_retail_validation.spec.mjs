@@ -430,9 +430,11 @@ async function mapEvidence(page, map, cursor, commandTimeMs, memoryLifecycle,
                 "rendererBackendMs", "totalMs",
             ]),
             renderer: summarizeFields("renderer", [
-                "setupMs", "lodMs", "sunShadowMs", "spotShadowMs", "skyMs",
-                "worldMs", "staticModelsMs", "dynamicModelsMs", "fxModelsMs",
+                "setupMs", "lodMs", "sunShadowPrepareMs", "sunShadowDrawMs",
+                "spotShadowPrepareMs", "spotShadowDrawMs", "skyMs", "worldMs",
+                "staticModelsMs", "dynamicModelsMs", "fxModelsMs",
                 "particlesMs", "marksMs", "uiMs", "postProcessMs",
+                "bufferUploadMs", "textureUploadMs",
             ]),
             counters: summarizeFields("counters", [
                 "worldSurfacesSubmitted", "worldSurfacesDrawn",

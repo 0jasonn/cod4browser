@@ -100,8 +100,14 @@ test("diagnostic frame profiling is structured and bounded", async ({ page }) =>
         },
         renderer: {
             setupMs: expect.any(Number),
+            sunShadowPrepareMs: expect.any(Number),
+            sunShadowDrawMs: expect.any(Number),
+            spotShadowPrepareMs: expect.any(Number),
+            spotShadowDrawMs: expect.any(Number),
             worldMs: expect.any(Number),
             postProcessMs: expect.any(Number),
+            bufferUploadMs: expect.any(Number),
+            textureUploadMs: expect.any(Number),
         },
         gpu: {
             timingsAvailable: expect.any(Boolean),

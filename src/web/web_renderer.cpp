@@ -748,10 +748,14 @@ void ProfileUseProgram(GLuint program)
 void ProfileBufferData(
     GLenum target, GLsizeiptr size, const void *data, GLenum usage)
 {
+    WebFrameProfileSample *const profile = WebFrameProfile_Current();
+    const double started = profile ? WebFrameProfile_Now() : 0.0;
     glBufferData(target, size, data, usage);
+    if (profile)
+        profile->bufferUploadMs += WebFrameProfile_Now() - started;
     if (data && size > 0)
     {
-        if (WebFrameProfileSample *const profile = WebFrameProfile_Current())
+        if (profile)
             profile->bufferUploadBytes += static_cast<std::uint64_t>(size);
     }
 }
@@ -759,10 +763,14 @@ void ProfileBufferData(
 void ProfileBufferSubData(
     GLenum target, GLintptr offset, GLsizeiptr size, const void *data)
 {
+    WebFrameProfileSample *const profile = WebFrameProfile_Current();
+    const double started = profile ? WebFrameProfile_Now() : 0.0;
     glBufferSubData(target, offset, size, data);
+    if (profile)
+        profile->bufferUploadMs += WebFrameProfile_Now() - started;
     if (data && size > 0)
     {
-        if (WebFrameProfileSample *const profile = WebFrameProfile_Current())
+        if (profile)
             profile->bufferUploadBytes += static_cast<std::uint64_t>(size);
     }
 }
@@ -810,8 +818,12 @@ void ProfileTexImage2D(GLenum target, GLint level, GLint internalFormat,
     GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type,
     const void *pixels)
 {
+    WebFrameProfileSample *const profile = WebFrameProfile_Current();
+    const double started = profile ? WebFrameProfile_Now() : 0.0;
     glTexImage2D(target, level, internalFormat, width, height, border,
         format, type, pixels);
+    if (profile)
+        profile->textureUploadMs += WebFrameProfile_Now() - started;
     AddProfileTextureUpload(width, height, 1, format, type, pixels);
 }
 
@@ -819,8 +831,12 @@ void ProfileTexImage3D(GLenum target, GLint level, GLint internalFormat,
     GLsizei width, GLsizei height, GLsizei depth, GLint border,
     GLenum format, GLenum type, const void *pixels)
 {
+    WebFrameProfileSample *const profile = WebFrameProfile_Current();
+    const double started = profile ? WebFrameProfile_Now() : 0.0;
     glTexImage3D(target, level, internalFormat, width, height, depth, border,
         format, type, pixels);
+    if (profile)
+        profile->textureUploadMs += WebFrameProfile_Now() - started;
     AddProfileTextureUpload(width, height, depth, format, type, pixels);
 }
 
@@ -828,8 +844,12 @@ void ProfileTexSubImage2D(GLenum target, GLint level, GLint xOffset,
     GLint yOffset, GLsizei width, GLsizei height, GLenum format, GLenum type,
     const void *pixels)
 {
+    WebFrameProfileSample *const profile = WebFrameProfile_Current();
+    const double started = profile ? WebFrameProfile_Now() : 0.0;
     glTexSubImage2D(target, level, xOffset, yOffset, width, height,
         format, type, pixels);
+    if (profile)
+        profile->textureUploadMs += WebFrameProfile_Now() - started;
     AddProfileTextureUpload(width, height, 1, format, type, pixels);
 }
 
@@ -7785,15 +7805,34 @@ bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
     g_renderer.sceneTanHalfFov = {view.tanHalfFovX, view.tanHalfFovY};
     std::copy(axis, axis + 9u, g_renderer.sceneViewAxis.begin());
     std::copy_n(view.viewOrigin, 3u, g_renderer.sceneViewOrigin.begin());
+#if KISAK_WEB_DIAGNOSTICS
+    WebFrameProfileSample *const frameProfile = WebFrameProfile_Current();
+    const double spotShadowPrepareStarted = frameProfile
+        ? WebFrameProfile_Now() : 0.0;
+#endif
     SelectSpotShadowLights();
+#if KISAK_WEB_DIAGNOSTICS
+    if (frameProfile)
+        frameProfile->spotShadowPrepareMs +=
+            WebFrameProfile_Now() - spotShadowPrepareStarted;
+#endif
     std::copy_n(view.fogColor, 4u, g_renderer.sceneFogColor.begin());
     g_renderer.sceneFogParams = {view.fogStart, view.fogDensity};
     g_renderer.sceneFogEnabled = view.fogEnabled;
+#if KISAK_WEB_DIAGNOSTICS
+    const double sunShadowPrepareStarted = frameProfile
+        ? WebFrameProfile_Now() : 0.0;
+#endif
     g_renderer.sceneSunShadowEnabled = view.sunShadowEnabled &&
         BuildSunShadowMatrix(
             view, 0.25f, g_renderer.sceneSunShadowMatrix) &&
         BuildSunShadowMatrix(
             view, 1.0f, g_renderer.sceneSunShadowFarMatrix);
+#if KISAK_WEB_DIAGNOSTICS
+    if (frameProfile)
+        frameProfile->sunShadowPrepareMs +=
+            WebFrameProfile_Now() - sunShadowPrepareStarted;
+#endif
     std::copy_n(view.sunDirection, 3u,
         g_renderer.sceneSunDirection.begin());
     std::copy_n(view.sunColor, 3u, g_renderer.sceneSunColor.begin());
@@ -9004,7 +9043,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
 #if KISAK_WEB_DIAGNOSTICS
     if (frameProfile)
     {
-        frameProfile->sunShadowMs =
+        frameProfile->sunShadowDrawMs =
             WebFrameProfile_Now() - rendererStageStarted;
         rendererStageStarted = WebFrameProfile_Now();
     }
@@ -9013,7 +9052,7 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         staticModelLodsReady && DrawSpotShadowMaps();
 #if KISAK_WEB_DIAGNOSTICS
     if (frameProfile)
-        frameProfile->spotShadowMs =
+        frameProfile->spotShadowDrawMs =
             WebFrameProfile_Now() - rendererStageStarted;
     g_frameProfileDrawBucket = FrameProfileDrawBucket::None;
 #endif

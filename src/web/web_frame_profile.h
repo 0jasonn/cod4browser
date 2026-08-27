@@ -29,8 +29,10 @@ struct WebFrameProfileSample
 
     double rendererSetupMs = 0.0;
     double lodMs = 0.0;
-    double sunShadowMs = 0.0;
-    double spotShadowMs = 0.0;
+    double sunShadowPrepareMs = 0.0;
+    double sunShadowDrawMs = 0.0;
+    double spotShadowPrepareMs = 0.0;
+    double spotShadowDrawMs = 0.0;
     double skyMs = 0.0;
     double worldMs = 0.0;
     double staticModelsMs = 0.0;
@@ -40,6 +42,8 @@ struct WebFrameProfileSample
     double marksMs = 0.0;
     double uiMs = 0.0;
     double postProcessMs = 0.0;
+    double bufferUploadMs = 0.0;
+    double textureUploadMs = 0.0;
 
     std::uint64_t worldSurfacesSubmitted = 0u;
     std::uint64_t worldSurfacesDrawn = 0u;
