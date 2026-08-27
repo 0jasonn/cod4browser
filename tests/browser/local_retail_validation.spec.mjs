@@ -1083,6 +1083,11 @@ async function exerciseTransitionInput(page)
 
 async function exerciseRetailInput(page)
 {
+    await page.bringToFront();
+    await expect.poll(() => page.evaluate(() => ({
+        visibility: document.visibilityState,
+        focused: document.hasFocus(),
+    }))).toEqual({ visibility: "visible", focused: true });
     const canvas = page.locator("#game-canvas");
     const beforeMove = await page.evaluate(() => structuredClone(
         globalThis.__retailValidationViews.at(-1)?.viewOrigin));
@@ -1093,8 +1098,8 @@ async function exerciseRetailInput(page)
         await page.keyboard.press("Escape");
         await expect.poll(async () => await gameplayState(page, 12) & 0x10)
             .toBe(0);
-        await waitForRelativeMouseMode(page);
     }
+    await waitForRelativeMouseMode(page);
     await canvas.click({ position: { x: 8, y: 8 } });
     await expect.poll(() => page.evaluate(() => document.pointerLockElement?.id))
         .toBe("game-canvas");
