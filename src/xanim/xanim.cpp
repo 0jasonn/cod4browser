@@ -11,8 +11,6 @@
 #include <script/scr_vm.h>
 #include <universal/com_files.h>
 
-#include <cmath>
-
 #ifdef KISAK_MP
 #include <cgame_mp/cg_local_mp.h>
 #elif KISAK_SP
@@ -1008,7 +1006,6 @@ void __cdecl XAnimUpdateTimeAndNotetrack(const DObj_s* obj, uint32_t infoIndex, 
     XAnimInfo* info; // [esp+10h] [ebp-8h]
     XAnimTree_s* tree; // [esp+14h] [ebp-4h]
     uint32_t infoIndexa; // [esp+24h] [ebp+Ch]
-    float frequency; // diagnostic input to synchronized time advancement
     float dtimea; // [esp+28h] [ebp+10h]
     float dtimeb; // [esp+28h] [ebp+10h]
 
@@ -1042,21 +1039,7 @@ void __cdecl XAnimUpdateTimeAndNotetrack(const DObj_s* obj, uint32_t infoIndex, 
     }
     if ((info->animParent.flags & 3) != 0)
     {
-        frequency = XAnimGetAverageRateFrequency(tree, infoIndex);
-        dtimea = frequency * info->state.rate * dtime;
-        if (!std::isfinite(dtimea))
-            MyAssertHandler(
-                ".\\xanim\\xanim.cpp",
-                1391,
-                0,
-                "XAnim sync delta is not finite\n\tentnum=%u infoIndex=%u animIndex=%u frequency=%g rate=%g dtime=%g oldTime=%g",
-                obj->entnum,
-                infoIndex,
-                info->animIndex,
-                frequency,
-                info->state.rate,
-                dtime,
-                info->state.oldTime);
+        dtimea = XAnimGetAverageRateFrequency(tree, infoIndex) * info->state.rate * dtime;
         if (dtimea == 0.0)
         {
         LABEL_18:
@@ -1212,15 +1195,6 @@ double __cdecl XAnimGetAverageRateFrequency(const XAnimTree_s *tree, uint32_t in
         parts = info->parts;
         if (!parts)
             MyAssertHandler(".\\xanim\\xanim.cpp", 864, 0, "%s", "parts");
-        if (!std::isfinite(parts->frequency))
-            MyAssertHandler(
-                ".\\xanim\\xanim.cpp",
-                865,
-                0,
-                "XAnimParts frequency is not finite\n\tinfoIndex=%u animIndex=%u frequency=%g",
-                infoIndex,
-                info->animIndex,
-                parts->frequency);
         return parts->frequency;
     }
     else
@@ -1239,16 +1213,6 @@ double __cdecl XAnimGetAverageRateFrequency(const XAnimTree_s *tree, uint32_t in
                     infoIndexa);
             infoa = &g_xAnimInfo[infoIndexa];
             weight = infoa->state.weight;
-            if (!std::isfinite(weight) || !std::isfinite(infoa->state.rate))
-                MyAssertHandler(
-                    ".\\xanim\\xanim.cpp",
-                    876,
-                    0,
-                    "XAnim blend state is not finite\n\tinfoIndex=%u animIndex=%u weight=%g rate=%g",
-                    infoIndexa,
-                    infoa->animIndex,
-                    weight,
-                    infoa->state.rate);
             if (weight < 0.0)
                 MyAssertHandler(".\\xanim\\xanim.cpp", 876, 0, "%s\n\t(weight) = %g", "(weight >= 0.0f)", weight);
             if (weight != 0.0)
