@@ -9,8 +9,9 @@ installation without recording its path or any proprietary content.
 | Field | Current evidence |
 | --- | --- |
 | Starting SHA | `01e54eacc3d6961f572c44c08fcc9a59600f478f` |
-| Clean runtime evidence SHA | `247980a68fae109bbf5df556bb38bf09a0a4afcd` |
-| Policy/evidence commit | `c1c17121ada5e66e09138eaeb9ff12afa40cf35f` |
+| Clean foreground runtime evidence SHA | `f52298064234092ebce455096c6fe28ea70490e5` |
+| Foreground evidence artifact commit | `b59c32a009b4224e5ec06f0602549e1471d827d6` |
+| Policy/campaign evidence commit | `c1c17121ada5e66e09138eaeb9ff12afa40cf35f` |
 | Date | 2026-08-27 |
 | Browsers | Headed branded Chrome 151 and Microsoft Edge 151 |
 | Campaign evidence browser | Chrome 151.0.7922.174, headed |
@@ -27,6 +28,9 @@ The implementation chain for this iteration is:
 | `c66d41e1` | Retained canonical encoded LoadDef/IWI recovery sources for shared 2D image pools and re-decoded them through the existing decoder for upload and context restoration. |
 | `247980a6` | Made the diagnostic validator count every existing `kisakcod:audio-playback` event instead of relying on a finite summarized playback view during audio-heavy scenes. |
 | `c1c17121` | Tracked the repository policy and the non-proprietary campaign evidence record. |
+| `658e7787` | Kept rich renderer-memory fields diagnostics-only and restored the compact production event. |
+| `f5229806` | Made the retail validator wait for the Worker-owned relative-mouse-mode publication before the trusted pointer-lock click. |
+| `b59c32a0` | Preserved the final clean Chrome/Edge foreground result and exact renderer identity without retail paths or assets. |
 
 No proprietary fastfile, decoded asset, retail path, or game installation data
 is present in the evidence artifact.
@@ -45,12 +49,12 @@ values retained from that foreground run are:
 
 | Map | Browser | Average FPS-equivalent | p95 frame time | Game/wall ratio | Current result |
 | --- | --- | ---: | ---: | ---: | --- |
-| Killhouse | Chrome 151 | 33.97 | 31.905 ms | 0.998708 | PLAYABLE |
-| CargoShip | Chrome 151 | 12.79 | 87.030 ms | 0.992821 | FUNCTIONAL |
-| Blackout | Chrome 151 | 26.77 | 39.925 ms | 0.999058 | FUNCTIONAL |
-| Killhouse | Edge 151 | 34.64 | 31.325 ms | 0.999062 | PLAYABLE |
-| CargoShip | Edge 151 | 13.71 | 80.035 ms | 0.998158 | FUNCTIONAL |
-| Blackout | Edge 151 | 26.90 | 39.640 ms | approximately 0.9990 | FUNCTIONAL |
+| Killhouse | Chrome 151.0.7922.174 | 33.708 | 32.210 ms | 0.999075 | PLAYABLE |
+| CargoShip | Chrome 151.0.7922.174 | 13.151 | 82.845 ms | 0.997954 | FUNCTIONAL |
+| Blackout | Chrome 151.0.7922.174 | 26.823 | 39.690 ms | 0.998008 | FUNCTIONAL |
+| Killhouse | Edge 151.0.4129.107 | 35.027 | 31.180 ms | 0.998705 | PLAYABLE |
+| CargoShip | Edge 151.0.4129.107 | 13.872 | 79.775 ms | 0.997752 | FUNCTIONAL |
+| Blackout | Edge 151.0.4129.107 | 26.976 | 39.470 ms | 0.997445 | FUNCTIONAL |
 
 The full canonical input matrix passed on each baseline map: W/S/A/D, jump,
 mouse look, MOUSE1 with canonical clip/ammo response, MOUSE2/ADS, wheel weapon
@@ -60,10 +64,11 @@ passed after every in-process transition. These results replace the historical
 background-throttled frame conclusions; the old approximately 1 FPS numbers
 remain invalid for performance interpretation.
 
-The exact WebGL/ANGLE identity and the complete p50/p99/minimum-FPS fields from
-the two-browser baseline were not preserved in a tracked evidence artifact and
-are therefore not reconstructed here. They remain required in the final
-evidence bundle.
+The tracked
+[foreground evidence](docs/evidence/retail-foreground-f5229806.json) preserves
+the complete p50/p95/p99 fields and exact WebGL identity. Both browsers used
+WebGL 2 through ANGLE's Direct3D 11 backend on an NVIDIA GeForce RTX 3070 Ti;
+the implementation reported `hardware-or-driver`, not a software renderer.
 
 ### Recovery-memory instrumentation and measured strategy
 
@@ -139,10 +144,12 @@ The input evidence is canonical rather than audio-inferred: Airplane changed
 clip 12 -> 11, Hunted 6 -> 5, and Bog A 15 -> 14. Wheel selection passed on
 Airplane and Bog A; Hunted correctly recorded
 `NOT_APPLICABLE_SINGLE_WEAPON`. Pointer-lock loss and reacquisition passed on
-all three. An earlier clean Bog A attempt had one non-reproducible initial
-pointer-lock rejection after a trusted canvas click; an unchanged clean rerun
-passed the entire matrix, so it is recorded as a harness observation rather
-than a deterministic map blocker.
+all three. The later final baseline reproduced the same intermittent boundary
+after context recovery: the canonical menu catcher had cleared, but the
+validator clicked before the Worker's relative-mouse-mode publication reached
+the DOM host. Commit `f5229806` waits for that existing platform signal before
+the trusted click; the unchanged pointer-lock assertion then passed the
+complete clean Chrome and Edge matrices.
 
 Current campaign classification is:
 
@@ -162,12 +169,12 @@ runtime, gameplay, transition, persistence, and recovery matrices.
 
 ### Current fixes, gates, and artifact status
 
-The only new campaign-test correction was `247980a6`. Dense Bog A audio exposed
-that the validator's finite summarized playback view was not a reliable event
-counter. The earliest incorrect boundary was diagnostic observation, not the
-canonical mixer or Web Audio device. The fix increments a test-owned counter
-for every existing playback event; the unchanged clean Bog A rerun then passed
-audio and the complete gameplay matrix without a map-specific bypass.
+Two validator corrections were required. Dense Bog A audio exposed that the
+finite summarized playback view was not a reliable event counter, so
+`247980a6` counts every existing playback event. Final context-recovery input
+then exposed an asynchronous Worker-to-DOM mouse-mode boundary; `f5229806`
+waits for relative mode before clicking. Neither change bypasses a map,
+weakens an assertion, or substitutes for canonical gameplay state.
 
 The complete non-overlapping current-head gate matrix passed:
 
@@ -493,11 +500,11 @@ as UNTESTED until each receives its own legal run.
 
 ## Current recommendation
 
-`CURRENT ITERATION IN PROGRESS`
+`CURRENT ITERATION COMPLETE`
 
 The foreground, canonical-input, encoded-recovery, and first three-map
 campaign-batch evidence is sufficient to continue evidence-driven campaign
-expansion. The artifact rebaseline and full current-head gate matrix are
-complete. A final clean Chrome/Edge evidence bundle and its exact WebGL
-identities remain pending; this report does not yet claim the current
-iteration complete.
+expansion. The artifact rebaseline, full non-overlapping gate matrix, final
+clean branded Chrome/Edge baseline, and exact WebGL identity are complete and
+tracked. No current compatibility blocker remains in the validated six-map
+set.

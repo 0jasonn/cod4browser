@@ -104,7 +104,7 @@ proof jobs are retired. Canonical runtime tests replace their useful coverage.
 
 ### Foreground baseline and campaign status
 
-At clean source SHA `c66d41e1`, headed branded Chrome 151 and Edge 151 on the
+At clean source SHA `f5229806`, headed branded Chrome 151 and Edge 151 on the
 Windows 11 reference machine each passed the complete
 Killhouse -> CargoShip -> Blackout -> Killhouse matrix in 4.6 minutes. Every
 timed window was visible and focused, with zero background transitions. Both
@@ -112,12 +112,14 @@ browsers passed canonical loading and publication, gameplay input and audio,
 ordered map retirement/publication, checkpoint persistence, forced WebGL
 context loss/restoration, and the return to Killhouse.
 
-Chrome measured Killhouse at 33.639893 average FPS-equivalent, 32.26 ms p95,
-and a 0.998402 game-time/wall-time ratio. Edge measured 34.116843 average
-FPS-equivalent, 31.955 ms p95, and a 0.998882 ratio. Against the initial
+Chrome measured Killhouse at 33.707671 average FPS-equivalent, 32.210 ms p95,
+and a 0.999075 game-time/wall-time ratio. Edge measured 35.026568 average
+FPS-equivalent, 31.180 ms p95, and a 0.998705 ratio. Against the initial
 reference threshold of 30 average FPS, 50 ms p95, and 0.90 ratio, Killhouse is
 PLAYABLE; CargoShip and Blackout remain FUNCTIONAL. The threshold describes
-this reference hardware, not a universal requirement.
+this reference hardware, not a universal requirement. The complete sanitized
+record, including exact renderer identity, is
+[retail-foreground-f5229806.json](evidence/retail-foreground-f5229806.json).
 
 The next clean Chrome campaign batch at source SHA `247980a6` added three
 representative maps. Airplane is PLAYABLE at 59.946157 average FPS-equivalent,
@@ -194,16 +196,18 @@ implementation and encoded-source implementation measured:
 | Wasm linear-memory capacity | 1,809,121,280 B | 989,921,280 B | 45.28% |
 | Program break | 1,808,785,408 B | 901,816,320 B | 50.14% |
 
-The clean Chrome Killhouse run at `c66d41e1` reached its first frame in
-5,688.82 ms and reported 1,426,285,608 B logical decoded textures,
-428,211,983 B actual retained texture sources, 397,212,519 B encoded image
-sources, 518,271,299 B aggregate renderer recovery, 1,447,282,760 B estimated
-GPU textures, 90,059,316 B geometry, and 989,921,280 B Wasm capacity. Edge
-reached the Killhouse first frame in 5,777 ms.
+The final clean Chrome Killhouse run at `f5229806` reached its first frame in
+5,710.910 ms and reported 1,419,469,864 B logical decoded textures,
+427,163,511 B actual retained texture sources, 396,164,047 B encoded image
+sources, 518,433,483 B aggregate renderer recovery, 1,440,467,016 B estimated
+GPU textures, 91,269,972 B geometry, and 989,921,280 B Wasm capacity. Edge
+reached the Killhouse first frame in 5,693.485 ms and reported 518,844,075 B
+aggregate recovery at the same 989,921,280 B capacity.
 
 Re-decoding trades some restoration latency for the memory reduction. Chrome
-restored CargoShip in 1,355.63 ms, Blackout in 1,834.105 ms, and returned
-Killhouse in 2,008.82 ms; Edge returned Killhouse in 1,907.715 ms. Every
+restored CargoShip in 1,357.375 ms, Blackout in 1,790.265 ms, and returned
+Killhouse in 1,960.945 ms. Edge measured 1,349.035 ms, 1,849.430 ms, and
+1,893.305 ms respectively. Every
 recovery resumed real world frames and gameplay input, so the strategy passed
 the clean Chrome and Edge acceptance matrices without asset corruption or a
 map-lifecycle regression. Continue recording this latency rather than treating

@@ -63,6 +63,12 @@ If a timed window becomes hidden or unfocused, its performance fields are
 invalidated with `performanceWindowValid: false`; slow background timing must
 not be used to assign or remove `PLAYABLE` status.
 
+The current clean headed Chrome/Edge example is preserved as
+[retail-foreground-f5229806.json](evidence/retail-foreground-f5229806.json).
+It contains selected performance, memory, input, recovery, shutdown, host, and
+renderer fields only; it omits the local installation path and proprietary
+content.
+
 The wrapper sets `KISAK_COD4_RETAIL_ROOT` itself. The Playwright case is
 skipped only when invoked directly without that environment variable. Record
 the exact commit, clean/dirty state, browser version, reference hardware,
