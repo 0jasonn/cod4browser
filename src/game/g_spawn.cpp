@@ -96,14 +96,16 @@ int __cdecl G_LevelSpawnString(const char *key, const char *defaultString, const
 int __cdecl G_SpawnFloat(const char *key, const char *defaultString, float *out)
 {
     int v4; // r30
-    long double v5; // fp2
+    double v5; // fp2
     int result; // r3
     const char *v7; // [sp+50h] [-20h] BYREF
 
     v4 = G_SpawnString(&level.spawnVar, key, defaultString, &v7);
     v5 = atof(v7);
     result = v4;
-    *out = *(double *)&v5;
+    // Wasm long double is 16 bytes, so the original 8-byte type-pun did not
+    // recover the parsed value. Preserve the native conversion directly.
+    *out = v5;
     return result;
 }
 
