@@ -311,3 +311,35 @@ systems.
 ## Final recommendation
 
 `READY FOR NEXT ROADMAP PHASE`
+
+## 2026-08-27 bounded frame-profiler pass
+
+This section supersedes the historical recommendation immediately above.
+
+| Field | Value |
+| --- | --- |
+| Starting SHA | `d3f4c8d696e21939e7ef85cc19eb331ef104c30b` |
+| Implementation SHA | `91788492` |
+| Branch | `codex/web-frame-profile-mission` |
+| Retail root supplied | NO; `KISAK_COD4_RETAIL_ROOT` absent |
+| Build | Release production and Release diagnostics |
+
+The diagnostics artifact now has bounded CPU/renderer stage profiling,
+draw/upload counters that flag unmeasured texture formats, and non-blocking
+asynchronous GPU timers. The retail
+validator records those values in schema version 3, but no retail result was
+generated in this process. Production remains at the exact approved artifact
+baseline and rejects profiler symbols/events.
+
+Validation passed: static checks, 76 Node tests, diagnostics build, 12 smoke
+tests, 36 serialized remainder tests with exactly two expected missing-retail
+skips, the focused 2-test profiler suite, 40 production browser tests, the
+production boundary, and `git diff --check`. The earlier same-pass native,
+direct-Wasm, and 256-run fuzz baselines also passed before diagnostics-only
+instrumentation was added.
+
+No renderer optimisation was selected and no mission checkpoint/death/restart
+or save-reload claim was made. Those steps remain evidence-gated on the
+explicit retail input.
+
+Classification: `RETAIL ROOT NOT AVAILABLE`

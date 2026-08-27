@@ -44,12 +44,17 @@ remain retired.
 
 ## Current pass
 
-The current roadmap branch begins from `d3f4c8d6`. Its first task is bounded,
-diagnostics-only CPU/render-stage profiling, followed by six-map foreground
-measurement, one evidence-driven renderer optimisation, and one real canonical
-mission checkpoint/death/restart/save-reload loop. The current process has no
-`KISAK_COD4_RETAIL_ROOT`, so it may add and synthetically validate measurement
-infrastructure but cannot claim a fresh retail rerun or choose an optimisation.
+The current roadmap branch begins from `d3f4c8d6`. Commit `91788492` completes
+the first task: bounded diagnostics-only CPU/render-stage profiling, draw and
+upload counters with unmeasured texture formats flagged, and optional
+asynchronous WebGL2 GPU timer queries. The
+retail validator now records structured percentile summaries for foreground
+gameplay windows. Production remains byte-for-byte at its approved baseline.
+
+The current process has no `KISAK_COD4_RETAIL_ROOT`. Therefore the profiler is
+compiled and synthetically browser-tested, but no fresh six-map measurements
+are claimed, no renderer optimisation has been selected, and the canonical
+mission checkpoint/death/restart/save-reload gate has not been run.
 
 ## Product boundaries and gaps
 

@@ -1,5 +1,57 @@
 # Web roadmap execution report
 
+## Current profiling pass — 2026-08-27
+
+This section supersedes the execution recommendation below; the historical
+retail evidence remains valid only for its recorded commits and dates.
+
+| Field | Current result |
+| --- | --- |
+| Starting SHA / branch | `d3f4c8d696e21939e7ef85cc19eb331ef104c30b` / `codex/web-frame-profile-mission` |
+| Profiler implementation | `91788492` |
+| Retail root supplied to this process | **NO**; `KISAK_COD4_RETAIL_ROOT` is absent |
+| Current retail claim | None; no historical result is presented as a fresh run |
+
+Commit `91788492` adds an explicitly requested, maximum-600-sample diagnostic
+capture. It reports engine CPU stages, renderer frontend/backend stages,
+renderer sub-stages, actual GL draw/upload work, retained and drawn geometry
+counts, LOD/shadow activity, and asynchronous
+`EXT_disjoint_timer_query_webgl2` results correlated by pump tick, context
+generation, and view generation. GPU reads never synchronously wait. Disjoint
+or stale-context results are classified and excluded from valid timing
+summaries. The production boundary now rejects any `frame-profile` leak.
+
+The retail evidence schema advances to version 3 and summarizes average,
+p50, p95, p99, and maximum values only inside a valid foreground gameplay
+window. It also records GPU query availability, issued/dropped/result counts,
+status classes, and query lag. No proprietary data is emitted.
+
+### Current validation
+
+| Gate | Result |
+| --- | --- |
+| Static syntax, ESLint, strict/runtime `checkJs` | Pass |
+| Node protocol/lifecycle/filesystem | 76/76 pass |
+| Diagnostics Release build and canonical prefix | Pass |
+| Diagnostic smoke | 12/12 pass |
+| Serialized diagnostic remainder | 36 pass; exactly 2 expected `RETAIL_ROOT_MISSING` skips |
+| Focused bounded-profiler browser test | 2/2 pass after review fixes |
+| Production Playwright | 40/40 pass |
+| Production boundary | Pass; exact files/exports and unchanged bytes |
+| `git diff --check` | Pass |
+
+The production artifact remains 3,173,694 B Wasm, 340,615 B application
+JavaScript, and 3,524,840 B total across 17 files, with 24 raw Wasm exports
+and 9 named application exports. The respective budgets remain 3,332,379 B,
+357,646 B, and 3,701,082 B.
+
+Six-map profiling, evidence-ranked optimisation, and the representative
+mission progression/save loop require the explicitly supplied retail root.
+No optimisation or production runtime behavior change was made without those
+profiles.
+
+Final classification: `RETAIL ROOT NOT AVAILABLE`
+
 ## Current iteration — 2026-08-27 foreground, recovery memory, and campaign batch
 
 This section supersedes the compatibility labels and recommendations in the

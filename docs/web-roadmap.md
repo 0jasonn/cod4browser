@@ -36,8 +36,9 @@ records do. See the [execution report](../WEB_ROADMAP_EXECUTION_REPORT.md).
 
 ## Next, in order
 
-1. Add bounded diagnostics-only CPU frame-stage, renderer-stage, exact-work,
-   upload, and optional asynchronous WebGL2 GPU timing evidence.
+1. **Completed at `91788492`:** bounded diagnostics-only CPU frame-stage,
+   renderer-stage, exact-work, upload, and optional asynchronous WebGL2 GPU
+   timing evidence.
 2. Profile Airplane, Killhouse, Blackout, Bog A, Hunted, and CargoShip in valid
    foreground windows. Rank the measured stage deltas.
 3. Implement exactly one renderer optimisation selected by that evidence, then
@@ -51,6 +52,6 @@ records do. See the [execution report](../WEB_ROADMAP_EXECUTION_REPORT.md).
    maps by coverage value. Discovery remains `UNTESTED`.
 
 The present process has no explicitly supplied `KISAK_COD4_RETAIL_ROOT`.
-Instrumentation and synthetic gates may proceed, but steps 2–6 cannot produce
+Instrumentation and synthetic gates are complete, but steps 2–6 cannot produce
 fresh retail conclusions until that input is provided. No optimisation is to
 be selected speculatively.
