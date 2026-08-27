@@ -36,9 +36,10 @@ records do. See the [execution report](../WEB_ROADMAP_EXECUTION_REPORT.md).
 
 ## Next, in order
 
-1. **Completed at `91788492`:** bounded diagnostics-only CPU frame-stage,
-   renderer-stage, exact-work, upload, and optional asynchronous WebGL2 GPU
-   timing evidence.
+1. **Instrumentation completed at `91788492` and `aff008c3`:** bounded
+   diagnostics-only CPU frame-stage, renderer-stage, exact-work, separate
+   shadow preparation/draw, upload duration/bytes, and optional asynchronous
+   WebGL2 GPU timing evidence. Six-map evidence remains pending step 2.
 2. Profile Airplane, Killhouse, Blackout, Bog A, Hunted, and CargoShip in valid
    foreground windows. Rank the measured stage deltas.
 3. Implement exactly one renderer optimisation selected by that evidence, then

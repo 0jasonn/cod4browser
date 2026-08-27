@@ -44,10 +44,11 @@ remain retired.
 
 ## Current pass
 
-The current roadmap branch begins from `d3f4c8d6`. Commit `91788492` completes
-the first task: bounded diagnostics-only CPU/render-stage profiling, draw and
-upload counters with unmeasured texture formats flagged, and optional
-asynchronous WebGL2 GPU timer queries. The
+The current roadmap branch begins from `d3f4c8d6`. Commits `91788492` and
+`aff008c3` complete the non-retail instrumentation work: bounded
+diagnostics-only CPU/render-stage profiling, separate sun/spot shadow
+preparation and draw timings, upload duration/byte counters with unmeasured
+texture formats flagged, and optional asynchronous WebGL2 GPU timer queries. The
 retail validator now records structured percentile summaries for foreground
 gameplay windows. Production remains byte-for-byte at its approved baseline.
 

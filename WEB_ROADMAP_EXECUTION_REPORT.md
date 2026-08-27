@@ -8,14 +8,15 @@ retail evidence remains valid only for its recorded commits and dates.
 | Field | Current result |
 | --- | --- |
 | Starting SHA / branch | `d3f4c8d696e21939e7ef85cc19eb331ef104c30b` / `codex/web-frame-profile-mission` |
-| Profiler implementation | `91788492` |
+| Profiler implementation | `91788492`, completed by `aff008c3` |
 | Retail root supplied to this process | **NO**; `KISAK_COD4_RETAIL_ROOT` is absent |
 | Current retail claim | None; no historical result is presented as a fresh run |
 
-Commit `91788492` adds an explicitly requested, maximum-600-sample diagnostic
-capture. It reports engine CPU stages, renderer frontend/backend stages,
-renderer sub-stages, actual GL draw/upload work, retained and drawn geometry
-counts, LOD/shadow activity, and asynchronous
+Commits `91788492` and `aff008c3` add an explicitly requested,
+maximum-600-sample diagnostic capture. It reports engine CPU stages, renderer
+frontend/backend stages, separate sun/spot shadow preparation and draw stages,
+CPU upload duration and byte counts, actual GL draw work, retained and drawn
+geometry counts, LOD/shadow activity, and asynchronous
 `EXT_disjoint_timer_query_webgl2` results correlated by pump tick, context
 generation, and view generation. GPU reads never synchronously wait. Disjoint
 or stale-context results are classified and excluded from valid timing

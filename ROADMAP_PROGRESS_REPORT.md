@@ -319,13 +319,14 @@ This section supersedes the historical recommendation immediately above.
 | Field | Value |
 | --- | --- |
 | Starting SHA | `d3f4c8d696e21939e7ef85cc19eb331ef104c30b` |
-| Implementation SHA | `91788492` |
+| Implementation SHAs | `91788492`, `aff008c3` |
 | Branch | `codex/web-frame-profile-mission` |
 | Retail root supplied | NO; `KISAK_COD4_RETAIL_ROOT` absent |
 | Build | Release production and Release diagnostics |
 
 The diagnostics artifact now has bounded CPU/renderer stage profiling,
-draw/upload counters that flag unmeasured texture formats, and non-blocking
+separate sun/spot shadow preparation and draw timings, draw/upload counters
+that flag unmeasured texture formats, upload CPU duration, and non-blocking
 asynchronous GPU timers. The retail
 validator records those values in schema version 3, but no retail result was
 generated in this process. Production remains at the exact approved artifact
