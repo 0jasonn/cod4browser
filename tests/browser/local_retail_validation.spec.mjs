@@ -112,6 +112,7 @@ async function installRetailObservers(page)
         globalThis.__retailLifecycle = [];
         globalThis.__retailDatabase = [];
         globalThis.__retailAudioTelemetry = [];
+        globalThis.__retailAudioPlaybackCount = 0;
         globalThis.__retailLogs = [];
         globalThis.addEventListener("kisakcod:log", (event) => {
             globalThis.__retailLogs.push(structuredClone(event.detail));
@@ -163,6 +164,9 @@ async function installRetailObservers(page)
             globalThis.__retailAudioTelemetry.push({
                 ...structuredClone(event.detail), observedMs: performance.now(),
             });
+        });
+        globalThis.addEventListener("kisakcod:audio-playback", () => {
+            ++globalThis.__retailAudioPlaybackCount;
         });
     });
 }
@@ -1014,8 +1018,7 @@ async function exerciseRetailInput(page)
     }
 
     const audioBefore = await page.evaluate(() =>
-        globalThis.__KISAKCOD_WEB__.audioPlayback.reduce(
-            (total, entry) => total + entry.count, 0));
+        globalThis.__retailAudioPlaybackCount);
     await expect.poll(() => page.evaluate(() => document.pointerLockElement?.id))
         .toBe("game-canvas");
     const primaryWeaponCount = await gameplayState(page, 7);
@@ -1132,8 +1135,7 @@ async function exerciseRetailInput(page)
         globalThis.__KISAKCOD_WEB__.input.absoluteMouse ||
         globalThis.__KISAKCOD_WEB__.input.cursorVisible)).toBe(true);
     await expect.poll(() => page.evaluate(() =>
-        globalThis.__KISAKCOD_WEB__.audioPlayback.reduce(
-            (total, entry) => total + entry.count, 0)), { timeout: 30_000 })
+        globalThis.__retailAudioPlaybackCount), { timeout: 30_000 })
         .toBeGreaterThan(audioBefore);
 
     await expect.poll(async () => await gameplayState(page, 12) & 0x10)
