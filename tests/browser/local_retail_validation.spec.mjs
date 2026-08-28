@@ -1390,13 +1390,36 @@ async function authorAssistedMissionRoute(page)
         prefixRoute = parseMissionRoute(JSON.parse(
             await readFile(missionRoutePath, "utf8")));
         expect(prefixRoute.map).toBe(missionTargetMap);
-        prefixReplay = await createMissionRouteController(baseAdapter, {
-            tickMs: 100,
-            mouseCountsPerDegree: 16,
-            maximumMouseDelta: 512,
-            obstacleRecoveryAttempts: 4,
-            obstacleRecoveryMs: 1_000,
-        }).run(prefixRoute);
+        const events = [];
+        for (const [segmentIndex, segment] of
+            prefixRoute.segments.entries()) {
+            const combat = segment.actions?.fire === true;
+            try {
+                const replay = await createMissionRouteController(baseAdapter, {
+                    tickMs: combat ? 100 : 200,
+                    ...(combat ? {
+                        mouseCountsPerDegree: 16,
+                        maximumMouseDelta: 512,
+                    } : {}),
+                    obstacleRecoveryAttempts: 4,
+                    obstacleRecoveryMs: 1_000,
+                }).run({
+                    schemaVersion: prefixRoute.schemaVersion,
+                    map: prefixRoute.map,
+                    segments: [segment],
+                });
+                events.push(...replay.events.map((event) => ({
+                    ...event, segmentIndex,
+                })));
+            } catch (error) {
+                console.log(`KISAK_ROUTE_ASSIST_PREFIX_FAILURE ${JSON.stringify({
+                    code: error?.code, segmentIndex,
+                    message: error?.message,
+                })}`);
+                throw error;
+            }
+        }
+        prefixReplay = { events };
         console.log(`KISAK_ROUTE_ASSIST_PREFIX ${JSON.stringify({
             segments: prefixRoute.segments.length,
             events: prefixReplay.events.length,
