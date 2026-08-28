@@ -1239,8 +1239,8 @@ async function replayMissionRoute(page, before)
     }
     const after = await canonicalMissionState(page);
     const changes = missionProgressDelta(before, after);
-    expect(changes,
-        "route replay must change a canonical objective/progression marker")
+    expect(missionObjectiveProgressDelta(before, after),
+        "route replay must change canonical objective or mission state")
         .not.toEqual([]);
     return { ...replay, changes, before, after };
 }
@@ -1390,7 +1390,6 @@ async function authorAssistedMissionRoute(page)
     };
     let lastObservationMs = 0;
     let initialProgression = null;
-    let initialCheckpoint = null;
     let progressed = false;
     let combatObserved = false;
     let routeController = null;
@@ -1398,15 +1397,14 @@ async function authorAssistedMissionRoute(page)
     let progressionWaypointDeferred = false;
     let lastRecordedWaypointOrigin = null;
     const meaningfulProgression = (observation) => initialProgression && (
-        (observation.progression.objectiveHash !==
-            initialProgression.objectiveHash &&
-            observation.progression.activeObjectives > 0) ||
+        observation.progression.objectiveHash !==
+            initialProgression.objectiveHash ||
+        observation.progression.activeObjectives !==
+            initialProgression.activeObjectives ||
         observation.progression.doneObjectives >
             initialProgression.doneObjectives ||
         observation.progression.missionFlags !==
-            initialProgression.missionFlags ||
-        observation.checkpoint.saveId !== initialCheckpoint.saveId ||
-        observation.checkpoint.checksum !== initialCheckpoint.checksum);
+            initialProgression.missionFlags);
     const adapter = Object.freeze({
         ...baseAdapter,
         async observe() {
@@ -1443,7 +1441,6 @@ async function authorAssistedMissionRoute(page)
     const combatLogStart = await page.evaluate(() =>
         globalThis.__retailLogs.length);
     initialProgression = { ...start.progression };
-    initialCheckpoint = { ...start.checkpoint };
     const attempted = new Set();
     const retryable = new Set([
         MISSION_ROUTE_FAILURE.DIVERGED,
@@ -1798,6 +1795,12 @@ function missionProgressDelta(before, after)
         after.saveChecksum !== before.saveChecksum)
         changes.push("checkpoint");
     return changes;
+}
+
+function missionObjectiveProgressDelta(before, after)
+{
+    return missionProgressDelta(before, after).filter(
+        (change) => change !== "checkpoint");
 }
 
 async function advanceMissionProgression(page, before, timeoutMs = 120_000)
