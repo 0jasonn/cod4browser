@@ -361,7 +361,6 @@ export function createMissionRouteController(adapter, options = {})
                             if (distance <= closest - minimumProgress) {
                                 closest = distance;
                                 lastProgress = state.timestampMs;
-                                recoveryCount = 0;
                             } else if (state.timestampMs - lastProgress >=
                                 segment.stuckTimeoutMs) {
                                 if (recoveryCount < obstacleRecoveryAttempts) {

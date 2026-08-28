@@ -137,15 +137,19 @@ test("mission route can recover from an obstacle through normal strafe input",
         const adapter = fakeAdapter([
             state(0, [0, 0, 0]), state(0, [0, 0, 0]),
             state(1_000, [0, 0, 0]), state(2_000, [20, 0, 0]),
-            state(2_100, [95, 0, 0]),
+            state(3_000, [20, 0, 0]), state(3_100, [95, 0, 0]),
         ]);
         const result = await createMissionRouteController(adapter, {
             obstacleRecoveryAttempts: 2,
-        }).run(route({ maxDurationMs: 3_000 }));
+        }).run(route({ maxDurationMs: 5_000 }));
         assert(result.events.some((event) =>
             event.type === "obstacle-recovery" && event.attempt === 1));
+        assert(result.events.some((event) =>
+            event.type === "obstacle-recovery" && event.attempt === 2));
         assert(adapter.inputs.some((input) =>
             input.type === "key" && input.key === "right" && input.down));
+        assert(adapter.inputs.some((input) =>
+            input.type === "key" && input.key === "left" && input.down));
     });
 
 test("mission route reports a segment timeout", async () => {
