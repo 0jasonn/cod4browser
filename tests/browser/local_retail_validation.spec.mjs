@@ -1140,7 +1140,7 @@ async function missionRouteObservation(page)
         gameplayState(page, missionStateField.activeObjectives),
         gameplayState(page, missionStateField.doneObjectives),
         gameplayState(page, missionStateField.saveChecksum),
-        ...[0, 1].flatMap((field) => [0, 1, 2].map(
+        ...[0, 1, 2].flatMap((field) => [0, 1, 2].map(
             (component) => gameplayFloat(page, field, component))),
     ]);
     if (!view?.viewOrigin) throw new Error("canonical renderer view is unavailable");
@@ -1149,6 +1149,7 @@ async function missionRouteObservation(page)
         origin: playerVector.slice(0, 3),
         aimOrigin: view.viewOrigin.slice(0, 3),
         viewAngles: playerVector.slice(3, 6),
+        aimAngles: playerVector.slice(6, 9),
         health: serverHealth,
         progression: {
             objectiveHash,

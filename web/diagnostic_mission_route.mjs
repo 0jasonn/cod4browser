@@ -211,6 +211,8 @@ function routeState(value, segmentIndex)
     if (!value || typeof value !== "object" ||
         !Number.isFinite(value.timestampMs) || !validVector(value.origin) ||
         value.origin.length < 3 || !validVector(value.viewAngles) ||
+        (value.aimAngles !== undefined &&
+            (!validVector(value.aimAngles) || value.aimAngles.length < 3)) ||
         (value.aimOrigin !== undefined &&
             (!validVector(value.aimOrigin) || value.aimOrigin.length < 3)) ||
         !Number.isFinite(value.health) || !value.progression ||
@@ -398,8 +400,11 @@ export function createMissionRouteController(adapter, options = {})
                             const desiredYaw = Math.atan2(deltaY, deltaX) * 180 / Math.PI;
                             const desiredPitch = -Math.atan2(
                                 deltaZ, Math.hypot(deltaX, deltaY)) * 180 / Math.PI;
-                            const yawError = angleDelta(desiredYaw, state.viewAngles[1]);
-                            const pitchError = angleDelta(desiredPitch, state.viewAngles[0]);
+                            const controlAngles = actions.fire === true
+                                ? state.aimAngles ?? state.viewAngles
+                                : state.viewAngles;
+                            const yawError = angleDelta(desiredYaw, controlAngles[1]);
+                            const pitchError = angleDelta(desiredPitch, controlAngles[0]);
                             await adapter.mouse(
                                 -clamp(Math.round(yawError * mouseCountsPerDegree),
                                     -maximumMouseDelta, maximumMouseDelta),

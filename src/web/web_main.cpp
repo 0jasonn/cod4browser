@@ -577,6 +577,14 @@ extern "C" EMSCRIPTEN_KEEPALIVE double KisakWeb_TestGameplayFloat(
         return cgame->predictedPlayerState.origin[component];
     if (field == 1)
         return cgame->predictedPlayerState.viewangles[component];
+    if (field == 2 && level.clients)
+    {
+        if (component == 0)
+            return level.clients[0].fGunPitch;
+        if (component == 1)
+            return level.clients[0].fGunYaw;
+        return 0.0;
+    }
     return std::numeric_limits<double>::quiet_NaN();
 }
 
