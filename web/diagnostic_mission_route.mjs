@@ -211,6 +211,8 @@ function routeState(value, segmentIndex)
     if (!value || typeof value !== "object" ||
         !Number.isFinite(value.timestampMs) || !validVector(value.origin) ||
         value.origin.length < 3 || !validVector(value.viewAngles) ||
+        (value.aimOrigin !== undefined &&
+            (!validVector(value.aimOrigin) || value.aimOrigin.length < 3)) ||
         !Number.isFinite(value.health) || !value.progression ||
         !["objectiveHash", "activeObjectives", "doneObjectives", "missionFlags"]
             .every((field) => Number.isInteger(value.progression[field]))) {
@@ -387,9 +389,10 @@ export function createMissionRouteController(adapter, options = {})
                         let facingTarget = false;
                         if (distance > segment.targetRegion.radius ||
                             actions.fire === true) {
-                            const deltaX = segment.targetRegion.x - state.origin[0];
-                            const deltaY = segment.targetRegion.y - state.origin[1];
-                            const deltaZ = segment.targetRegion.z - state.origin[2];
+                            const aimOrigin = state.aimOrigin ?? state.origin;
+                            const deltaX = segment.targetRegion.x - aimOrigin[0];
+                            const deltaY = segment.targetRegion.y - aimOrigin[1];
+                            const deltaZ = segment.targetRegion.z - aimOrigin[2];
                             const desiredYaw = Math.atan2(deltaY, deltaX) * 180 / Math.PI;
                             const desiredPitch = -Math.atan2(
                                 deltaZ, Math.hypot(deltaX, deltaY)) * 180 / Math.PI;

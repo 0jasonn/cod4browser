@@ -108,6 +108,21 @@ test("mission route can hold position and fire toward a target", async () => {
         input.type === "key" && input.key === "forward" && input.down), false);
 });
 
+test("mission route aims fire from the canonical view origin", async () => {
+    const adapter = fakeAdapter([
+        state(0, [0, 0, 0], { aimOrigin: [0, 0, 60] }),
+        state(1_000, [0, 0, 0], { aimOrigin: [0, 0, 60] }),
+        state(2_000, [0, 0, 0], { aimOrigin: [0, 0, 60] }),
+    ]);
+    await createMissionRouteController(adapter).run(route({
+        targetRegion: { x: 100, y: 0, z: 60, radius: 128 },
+        minimumDurationMs: 2_000,
+        actions: { fire: true },
+    }));
+    assert(adapter.inputs.some((input) =>
+        input.type === "mouse" && input.dy === 0));
+});
+
 test("mission route reports a stuck player", async () => {
     const adapter = fakeAdapter([
         state(0, [0, 0, 0]), state(0, [0, 0, 0]),

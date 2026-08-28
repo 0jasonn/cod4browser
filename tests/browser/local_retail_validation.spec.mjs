@@ -1141,6 +1141,7 @@ async function missionRouteObservation(page)
     return {
         timestampMs: view.observedMs,
         origin: playerVector.slice(0, 3),
+        aimOrigin: view.viewOrigin.slice(0, 3),
         viewAngles: playerVector.slice(3, 6),
         health: serverHealth,
         progression: {
