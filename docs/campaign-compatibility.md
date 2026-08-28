@@ -1,5 +1,43 @@
 # Campaign compatibility matrix
 
+## Current corrected evidence — 2026-08-28
+
+This section supersedes the performance and mission-progression interpretation
+below. The six-map classifications are unchanged: Killhouse and Airplane are
+`PLAYABLE`; CargoShip, Blackout, Hunted, and Bog A are `FUNCTIONAL`.
+
+| Map | Clean FPS | p95 / p99 | Game/wall | Compatibility | Mission-flow flag |
+| --- | ---: | ---: | ---: | --- | --- |
+| `airplane` | 59.51 | 19.12 / 20.99 ms | 0.999783 | **PLAYABLE** | not validated |
+| `killhouse` | 40.45 | 27.25 / 28.86 ms | 0.998363 | **PLAYABLE** | not validated |
+| `blackout` | 28.79 | 37.33 / 39.97 ms | 0.998603 | **FUNCTIONAL** | not validated |
+| `bog_a` | 23.42 | 48.46 / 51.52 ms | 0.999583 | **FUNCTIONAL** | not validated |
+| `hunted` | 20.93 | 50.79 / 56.21 ms | 0.994109 | **FUNCTIONAL** | not validated |
+| `cargoship` | 14.22 | 77.15 / 85.08 ms | 0.998161 | **FUNCTIONAL** | not validated |
+
+These are independent profiling-disabled 60-second foreground windows from
+the clean six-map rerun at `93451ec5` in headed Chrome 152.0.7977.64 on the
+Windows 11 / Ryzen 7 7800X3D / RTX 3070 Ti reference host. The paired
+diagnostic capture collected exactly 300 completed gameplay/render samples per
+map and is not used for the compatibility label. Full aggregates are in
+[retail-profile-93451ec5.json](evidence/retail-profile-93451ec5.json).
+
+Airplane proves substantial canonical save/reload continuity, but the record
+at `da1e592c` shows no objective hash, active/done objective count, or mission
+flag change. It therefore does not earn `MISSION_FLOW_VALIDATED`. A stricter
+Village Assault run at clean `e7be6898` reached live AI, scripts, an active
+objective, changing actor state, and canonical input, but no monitored
+progression marker changed in 120 seconds. The checkpoint/save/death/reload
+flow after progression was not reached. This is unproven trigger traversal,
+not a demonstrated canonical defect. See
+[the sanitized failed gate](evidence/retail-mission-village-assault-e7be6898.json).
+
+The supplied installation contains `scoutsniper`, `village_assault`, and
+`ac130`. Presence is discovery only: all three remain `UNTESTED`, and no new
+campaign row is promoted. The six validated maps remain permanent regression
+baselines. See the
+[sanitized preparation record](evidence/next-campaign-batch-bad1e7b9.json).
+
 This ledger records current execution evidence, not filenames. Asset discovery
 alone is `UNTESTED`; compatibility advances through canonical database, world,
 server, game, cgame, renderer, input, audio, persistence, transition, and

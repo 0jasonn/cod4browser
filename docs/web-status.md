@@ -1,5 +1,45 @@
 # Web product status
 
+## Current roadmap pass — 2026-08-28
+
+Corrected sampling, separate clean/profile windows, complete sanitized
+aggregates, and rotating non-nested GPU-stage queries are now in place. The
+current six-map evidence uses headed Chrome 152.0.7977.64 on Windows 11 with a
+Ryzen 7 7800X3D and RTX 3070 Ti. Killhouse and Airplane remain `PLAYABLE`;
+CargoShip, Blackout, Hunted, and Bog A remain `FUNCTIONAL`.
+
+Exactly one evidence-selected renderer optimization was made: DObj skinning
+scratch vectors retain numeric capacity across surfaces/frames. CargoShip's
+clean FPS improved 6.99% and p95 improved 6.03%, but the independent profiled
+scene-build stage did not improve. The change is retained because every
+six-map runtime/lifecycle gate passed, while the renderer bottleneck remains
+open. See [the six-map comparison](evidence/retail-profile-93451ec5.md).
+
+Airplane's earlier run proves checkpoint/save, death/restart, shutdown,
+fresh-runtime load, restored gameplay state, and continued play. It does not
+prove objective/trigger progression. The strict Village Assault validator
+required a canonical objective hash/count or mission-flag change; none changed
+during its bounded action window, so progressed save/reload stages were not
+run. The current result is no `MISSION_FLOW_VALIDATED` flag and no proven
+canonical defect. See
+[the strict mission result](evidence/retail-mission-village-assault-e7be6898.json).
+
+Encoded image publication no longer decodes the same retained source once for
+validation and immediately again for upload. The exact seven-stop chain cut
+initial decode calls and CPU approximately in half, eliminated 6,023 duplicate
+decodes, preserved context recovery, retired map-local sources, and stayed
+within the bounded global cache. See
+[the decode report](evidence/retail-decode-919f8c27.md).
+
+A focused Wasm audit also replaced four confirmed SP script `long double`
+representation puns with typed parse/floor/ceil operations and matching
+native/Wasm tests. Remaining candidates are explicitly triaged in
+[the numeric audit](evidence/wasm-numeric-portability-d252515d.md).
+
+`scoutsniper`, `village_assault`, and `ac130` are present but remain prepared
+and `UNTESTED`. Broad campaign expansion is still gated by meaningful
+objective progression through save/reload.
+
 ## Demonstrated
 
 The production Release artifact is a Worker-hosted offline single-player

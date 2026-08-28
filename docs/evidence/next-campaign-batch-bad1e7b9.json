@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "commitSha": "bad1e7b9e6322822a96ca38b202b105d776e1731",
+    "dirty": false
+  },
+  "recordedAtUtc": "2026-08-28T11:34:00.086Z",
+  "retailRootSupplied": true,
+  "assetsIncluded": false,
+  "candidates": [
+    {
+      "map": "scoutsniper",
+      "fastfilePresent": true,
+      "compatibility": "UNTESTED",
+      "coverageIntent": "outdoor, long-range AI, visibility"
+    },
+    {
+      "map": "village_assault",
+      "fastfilePresent": true,
+      "compatibility": "UNTESTED",
+      "coverageIntent": "scripts, objectives, triggers, dense combat"
+    },
+    {
+      "map": "ac130",
+      "fastfilePresent": true,
+      "compatibility": "UNTESTED",
+      "coverageIntent": "vehicle-style play, thermal rendering, FX, unusual materials"
+    }
+  ],
+  "executed": false,
+  "gate": "Broad campaign execution remains deferred until meaningful objective progression through save/reload is stable."
+}

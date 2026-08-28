@@ -1,5 +1,34 @@
 # Web port convergence inventory
 
+## 2026-08-28 corrected-roadmap update
+
+The current pass preserves every ownership boundary. Gameplay-profile
+sampling observes completed canonical gameplay/render frames; GPU timing and
+decode telemetry remain diagnostics-only. The one renderer change reuses only
+numeric DObj skinning scratch capacity and retains no canonical object pointer
+or duplicate scene state.
+
+Encoded-image publication now calls shared Kisak format/layout validation
+without allocating pixels, decodes once for initial WebGL upload, releases the
+temporary pixels, and re-decodes the retained canonical encoded source only
+after context loss. This removes duplicate work without adding an image parser
+or changing asset identity. The seven-stop retail chain proves map-owned source
+retirement, bounded process-global cache ownership, and recovery without Wasm
+capacity growth.
+
+The mission validator reads canonical game/script/objective/save state only.
+Its Village Assault action window did not change a monitored canonical
+progression marker, so the validator stopped before save/reload proof. No
+browser mission state or hard-coded map behavior was added, and the result is
+not classified as a canonical defect without a reproduced canonical boundary
+failure.
+
+The focused numeric correction also stays in canonical SP code: typed dvar
+parsing and script `floor`/`ceil` replace representation-dependent decompiler
+puns, with native and Wasm tests using the same production math seam. The
+remaining audit inventory is intentionally classified rather than bulk
+rewritten.
+
 This is the current ownership map for the browser port. Upstream KisakCOD
 types and behavior remain canonical; browser code exists only at platform
 boundaries. Historical milestone evidence belongs in `docs/history/` and Git,

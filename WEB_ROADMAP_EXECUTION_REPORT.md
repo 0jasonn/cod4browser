@@ -1,5 +1,96 @@
 # Web roadmap execution report
 
+## Corrected-profile roadmap pass — 2026-08-28
+
+This section supersedes the mission-progression, profiling, renderer, and
+decode recommendations in the older sections below. Historical measurements
+remain valid only at their recorded commits.
+
+| Field | Current result |
+| --- | --- |
+| Roadmap branch / base | `codex/corrected-profile-roadmap` / `aa407bb5` |
+| Corrected six-map evidence | `f0b3c5b4`, sanitized at `d05f788f` |
+| One renderer optimization | `93451ec5` |
+| Strict mission validator | `e7be6898` |
+| Decode investigation / optimization | `92a93e39` / `a83f8047` |
+| Wasm numeric fix / audit | `d252515d` / `bad1e7b9` |
+| Browser / host | Headed Chrome 152.0.7977.64 / Windows 11 Pro x64 / Ryzen 7 7800X3D / RTX 3070 Ti / 32 GiB |
+| Retail root | Explicit legal local root supplied; path and assets omitted from evidence |
+
+The diagnostic capture now counts only completed gameplay frames that submit
+renderer work. Non-gameplay pumps, context loss, render-less callbacks, and
+old-map transition frames do not consume the target. Captures terminate at an
+explicit timeout and report partial counts. Retail validation runs independent
+60-second profiling-disabled clean windows and exact 300-gameplay-frame
+diagnostic windows; only the clean window determines `PLAYABLE`. GPU stage
+timing rotates non-nested asynchronous WebGL2 elapsed queries across world,
+static models, sun shadows, spot shadows, dynamic/FX, and UI/post, rejecting
+disjoint or stale-generation results.
+
+The corrected six-map profile selected one renderer change: reuse numeric DObj
+skinning scratch capacity across surfaces and frames without retaining
+canonical pointers. The complete comparison is
+[retail-profile-93451ec5.md](docs/evidence/retail-profile-93451ec5.md). Every
+map, transition, context recovery, persistence, input, and audio gate passed.
+CargoShip's authoritative clean window improved 13.29 -> 14.22 FPS (+6.99%),
+with p95 82.10 -> 77.15 ms and p99 91.35 -> 85.08 ms. However, its separately
+profiled scene-build stage changed 28.61 -> 29.22 ms (+2.13%). The bounded
+allocation change is retained, but it did not prove removal of the dominant
+remaining CargoShip frontend cost. No second renderer optimization was
+stacked.
+
+| Map | Clean FPS after | p95 / p99 | Game/wall | Current result |
+| --- | ---: | ---: | ---: | --- |
+| Airplane | 59.51 | 19.12 / 20.99 ms | 0.999783 | PLAYABLE |
+| Killhouse | 40.45 | 27.25 / 28.86 ms | 0.998363 | PLAYABLE |
+| Blackout | 28.79 | 37.33 / 39.97 ms | 0.998603 | FUNCTIONAL |
+| Bog A | 23.42 | 48.46 / 51.52 ms | 0.999583 | FUNCTIONAL |
+| Hunted | 20.93 | 50.79 / 56.21 ms | 0.994109 | FUNCTIONAL |
+| CargoShip | 14.22 | 77.15 / 85.08 ms | 0.998161 | FUNCTIONAL |
+
+Airplane remains valid evidence for AI/scripts, combat, natural and named save
+creation, death/restart, browser shutdown, fresh-runtime `loadgame`, restored
+gameplay state, and continued play. It is **not** objective/trigger progression
+evidence: objective hash, active-objective count, completed-objective count,
+and mission flags remained unchanged in the recorded interval.
+
+The strict clean Village Assault run required one of those canonical markers
+to change before allowing checkpoint/death/reload validation. Active actors,
+alive actors, script threads, an active objective, actor-state change, and
+canonical input all passed, but no monitored progression marker changed during
+the bounded 120-second action window. The downstream progressed checkpoint,
+death/restart, shutdown, reload, and continued-progression stages therefore did
+not run. This does not prove a canonical defect; the automation did not prove
+that it traversed the required mission trigger. The sanitized record is
+[retail-mission-village-assault-e7be6898.json](docs/evidence/retail-mission-village-assault-e7be6898.json).
+No map currently carries `MISSION_FLOW_VALIDATED`.
+
+The encoded-source investigation proved an avoidable initial double decode.
+Shared decoder validation now inspects format/layout without allocating
+pixels, performs one decode for initial upload, discards temporary RGBA, and
+re-decodes the retained encoded source only for context recovery. Across
+`Killhouse -> CargoShip -> Blackout -> Hunted -> Bog A -> Airplane -> Killhouse`,
+initial decoder calls fell 12,046 -> 6,033, duplicate decodes 6,023 -> 0,
+initial decoded bytes by 49.63%, and initial decode CPU by 49.06%. Mean first
+world frame improved 4.53%; mean recovery remained within 1.70%. Map-owned
+sources retired at every unload, the global source cache stayed bounded, and
+recovery added no Wasm capacity. See
+[retail-decode-919f8c27.md](docs/evidence/retail-decode-919f8c27.md).
+
+The focused Wasm numeric audit corrected SP script dvar-float parsing and
+`floor`/`ceil`, whose decompiled 8-byte writes could not form a valid 16-byte
+Wasm `long double`. Native and direct-Wasm behavioral tests cover the exact
+typed production seam. The remaining matches are classified, not mechanically
+rewritten, in
+[wasm-numeric-portability-d252515d.md](docs/evidence/wasm-numeric-portability-d252515d.md).
+
+The named next-batch fastfiles `scoutsniper`, `village_assault`, and `ac130`
+are present in the supplied installation. They remain preparation-only and
+`UNTESTED`; the roadmap explicitly forbids broad execution until meaningful
+objective/save/reload progression is stable. The six existing maps remain the
+permanent regression baseline. The sanitized discovery-only record is
+[next-campaign-batch-bad1e7b9.json](docs/evidence/next-campaign-batch-bad1e7b9.json).
+
 ## Current profiling pass — 2026-08-27
 
 This section supersedes the execution recommendation below; the historical

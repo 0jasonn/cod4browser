@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "commitSha": "e7be689839e19b125df4c5433991c0ea5ccffdf0",
+    "dirty": false
+  },
+  "recordedAtUtc": "2026-08-28T10:45:07.898Z",
+  "environment": {
+    "browser": {
+      "name": "chrome",
+      "version": "152.0.7977.64",
+      "channel": "chrome",
+      "headless": false
+    },
+    "operatingSystem": {
+      "platform": "win32",
+      "release": "10.0.26200",
+      "version": "Windows 11 Pro",
+      "architecture": "x64"
+    },
+    "referenceHardware": {
+      "processor": "AMD Ryzen 7 7800X3D 8-Core Processor",
+      "logicalProcessorCount": 16,
+      "totalSystemMemoryBytes": 33944879104
+    },
+    "build": "Release diagnostics"
+  },
+  "validationResult": "fail",
+  "missionFlowValidated": false,
+  "targetMap": "village_assault",
+  "failureStage": "village_assault objective progression and combat",
+  "failureClass": "game",
+  "canonicalPreconditions": {
+    "activeActorsGreaterThanZero": true,
+    "aliveActorsGreaterThanZero": true,
+    "scriptThreadsGreaterThanZero": true,
+    "activeObjectivesGreaterThanZero": true,
+    "actorFingerprintChanged": true,
+    "canonicalInputPassed": true
+  },
+  "progression": {
+    "boundedActionWindowMs": 120000,
+    "markersObserved": [
+      "objectiveHash",
+      "activeObjectives",
+      "doneObjectives",
+      "missionFlags"
+    ],
+    "changedMarkers": [],
+    "assertion": "real mission actions must change a canonical objective/progression marker"
+  },
+  "notReached": [
+    "progressed natural checkpoint",
+    "named game save after progression",
+    "death and checkpoint restart after progression",
+    "fresh browser runtime save load",
+    "continued progression after restore"
+  ],
+  "conclusion": "The bounded automation did not reach a canonical progression marker. This run does not prove a canonical engine defect and does not earn MISSION_FLOW_VALIDATED."
+}

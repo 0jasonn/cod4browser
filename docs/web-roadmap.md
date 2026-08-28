@@ -1,5 +1,39 @@
 # Web product roadmap
 
+## Corrected-profile pass status — 2026-08-28
+
+1. **Complete:** profile requests count completed gameplay/render samples,
+   isolate pump diagnostics, time out explicitly, and reset/transition/context
+   state deterministically.
+2. **Complete:** each retail map uses an independent profiling-disabled
+   60-second clean window and an exact 300-gameplay-frame diagnostic window.
+3. **Complete:** sanitized CPU, renderer, GPU, counter, upload, memory, and
+   classification aggregates are committed for all six maps.
+4. **Complete:** diagnostics rotate non-nested asynchronous WebGL2 queries
+   across world, static-model, sun-shadow, spot-shadow, dynamic/FX, and UI/post
+   stages with disjoint/stale rejection.
+5. **Complete:** the corrected six-map baseline and one DObj scratch-capacity
+   optimization were validated. The target's clean performance improved, but
+   the separately profiled target stage did not; no second renderer change is
+   authorized in this pass.
+6. **Not complete:** Airplane proves save/reload continuity but not an
+   objective/trigger change. Strict Village Assault automation observed no
+   canonical progression marker within its bounded action window, so it did
+   not proceed to progressed checkpoint/death/shutdown/reload proof. This has
+   not established a canonical defect.
+7. **Complete:** encoded-image inspection/decode/recovery telemetry proved and
+   removed one avoidable initial re-decode. The exact seven-stop map chain,
+   context recovery, retirement, cache bound, and memory behavior pass.
+8. **Complete:** one focused SP Wasm numeric family has matching native/Wasm
+   tests and a committed triage of the suspicious remainder.
+9. **Prepared only:** `scoutsniper`, `village_assault`, and `ac130` exist in
+   the supplied legal installation but remain `UNTESTED`. Do not execute broad
+   expansion until the mission-progression gate is stable. The discovery-only
+   evidence is [recorded here](evidence/next-campaign-batch-bad1e7b9.json).
+
+Current decision: the measured renderer bottleneck remains open, and no map
+has `MISSION_FLOW_VALIDATED`. The six-map regression set stays permanent.
+
 ## Completed cleanup boundary
 
 - Separate production and diagnostic CMake targets/sites.
