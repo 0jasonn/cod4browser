@@ -53,12 +53,15 @@ function fakeAdapter(states, onWait = () => {})
 test("mission route parser accepts the versioned sanitized schema", () => {
     const parsed = parseMissionRoute(route({
         expectedProgression: { doneObjectivesDeltaAtLeast: 1 },
-        actions: { fire: true, use: true },
+        actions: { ads: true, fire: true, use: true },
+        minimumDurationMs: 500,
         restartPolicy: "resume",
     }));
     assert.equal(parsed.schemaVersion, 1);
     assert.equal(parsed.map, "village_assault");
     assert.equal(parsed.segments[0].actions.fire, true);
+    assert.equal(parsed.segments[0].actions.ads, true);
+    assert.equal(parsed.segments[0].minimumDurationMs, 500);
 });
 
 test("mission route completes a waypoint through normal input", async () => {
@@ -87,6 +90,24 @@ test("mission route uses COD yaw direction for a positive-y waypoint", async () 
         input.type === "mouse" && input.dx < 0));
 });
 
+test("mission route can hold position and fire toward a target", async () => {
+    const adapter = fakeAdapter([
+        state(0, [0, 0, 0]),
+        state(1_000, [0, 0, 0]),
+        state(2_000, [0, 0, 0]),
+    ]);
+    const result = await createMissionRouteController(adapter).run(route({
+        targetRegion: { x: 100, y: 0, z: 0, radius: 128 },
+        minimumDurationMs: 2_000,
+        actions: { fire: true },
+    }));
+    assert.equal(result.events.at(-1).timestampMs, 2_000);
+    assert(adapter.inputs.some((input) =>
+        input.type === "key" && input.key === "fire" && input.down));
+    assert.equal(adapter.inputs.some((input) =>
+        input.type === "key" && input.key === "forward" && input.down), false);
+});
+
 test("mission route reports a stuck player", async () => {
     const adapter = fakeAdapter([
         state(0, [0, 0, 0]), state(0, [0, 0, 0]),
@@ -95,6 +116,22 @@ test("mission route reports a stuck player", async () => {
     await assert.rejects(createMissionRouteController(adapter).run(route()),
         (error) => error.code === MISSION_ROUTE_FAILURE.STUCK);
 });
+
+test("mission route can recover from an obstacle through normal strafe input",
+    async () => {
+        const adapter = fakeAdapter([
+            state(0, [0, 0, 0]), state(0, [0, 0, 0]),
+            state(1_000, [0, 0, 0]), state(2_000, [20, 0, 0]),
+            state(2_100, [95, 0, 0]),
+        ]);
+        const result = await createMissionRouteController(adapter, {
+            obstacleRecoveryAttempts: 2,
+        }).run(route({ maxDurationMs: 3_000 }));
+        assert(result.events.some((event) =>
+            event.type === "obstacle-recovery" && event.attempt === 1));
+        assert(adapter.inputs.some((input) =>
+            input.type === "key" && input.key === "right" && input.down));
+    });
 
 test("mission route reports a segment timeout", async () => {
     const adapter = fakeAdapter([
@@ -126,6 +163,24 @@ test("mission route waits for its objective expectation", async () => {
     assert.equal(result.events.at(-1).timestampMs, 200);
 });
 
+test("mission route waits for a canonical checkpoint change", async () => {
+    const adapter = fakeAdapter([
+        state(0, [100, 0, 0], {
+            checkpoint: { committed: false, saveId: 0, checksum: 0 },
+        }),
+        state(100, [100, 0, 0], {
+            checkpoint: { committed: false, saveId: 0, checksum: 0 },
+        }),
+        state(200, [100, 0, 0], {
+            checkpoint: { committed: true, saveId: 1, checksum: 123 },
+        }),
+    ]);
+    const result = await createMissionRouteController(adapter).run(route({
+        expectedProgression: { checkpointChanged: true },
+    }));
+    assert.equal(result.events.at(-1).timestampMs, 200);
+});
+
 test("mission route resumes only after a canonical restart observation", async () => {
     const adapter = fakeAdapter([
         state(0, [0, 0, 0]),
@@ -143,6 +198,8 @@ test("mission route rejects invalid and mutation-shaped routes", () => {
     assert.throws(() => parseMissionRoute({ ...route(), schemaVersion: 2 }),
         (error) => error.code === MISSION_ROUTE_FAILURE.INVALID_ROUTE);
     assert.throws(() => parseMissionRoute(route({ teleport: [100, 0, 0] })),
+        (error) => error.code === MISSION_ROUTE_FAILURE.INVALID_ROUTE);
+    assert.throws(() => parseMissionRoute(route({ minimumDurationMs: 2_001 })),
         (error) => error.code === MISSION_ROUTE_FAILURE.INVALID_ROUTE);
 });
 
@@ -186,6 +243,8 @@ test("mission route authoring records sparse sanitized waypoints", () => {
     assert.equal(authored.route.segments.length, 1);
     assert.equal(authored.route.segments[0].actions.use, true);
     assert.equal(authored.route.segments[0].expectedProgression.objectiveHashChanged,
+        true);
+    assert.equal(authored.route.segments[0].expectedProgression.checkpointChanged,
         true);
     assert.equal(authored.evidence.observations[0].timestampMs, 0);
     assert.equal(JSON.stringify(authored).includes("setObjective"), false);

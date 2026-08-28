@@ -3,12 +3,14 @@
 #include <client/client.h>
 #include <cgame/cg_local.h>
 #include <cgame/cg_main.h>
+#include <cgame/cg_vehicle_hud.h>
 #include <game/actor.h>
 #include <game/g_main.h>
 #include <game/savememory.h>
 #include <qcommon/cmd.h>
 #include <qcommon/qcommon.h>
 #include <server/server.h>
+#include <server/sv_public.h>
 #include <script/scr_vm.h>
 #include <qcommon/system.h>
 #include <universal/dvar.h>
@@ -23,6 +25,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <csetjmp>
+#include <cstdio>
+#include <cstdlib>
 #include <limits>
 
 #if KISAK_WEB_DIAGNOSTICS
@@ -571,6 +575,133 @@ extern "C" EMSCRIPTEN_KEEPALIVE double KisakWeb_TestGameplayFloat(
         return cgame->predictedPlayerState.origin[component];
     if (field == 1)
         return cgame->predictedPlayerState.viewangles[component];
+    return std::numeric_limits<double>::quiet_NaN();
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestObjectiveState(int slot)
+{
+    if (!CL_IsLocalClientInGame(0) || !CL_IsCgameInitialized(0) ||
+        slot < 0 || slot >= 16)
+        return -1;
+    cg_s *const cgame = CG_GetLocalClientGlobals(0);
+    return cgame && cgame->nextSnap
+        ? static_cast<int>(cgame->objectives[slot].state) : -1;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE double KisakWeb_TestObjectiveOrigin(
+    int slot, int marker, int component)
+{
+    if (!CL_IsLocalClientInGame(0) || !CL_IsCgameInitialized(0) ||
+        slot < 0 || slot >= 16 || marker < 0 || marker >= 8 ||
+        component < 0 || component >= 3)
+        return std::numeric_limits<double>::quiet_NaN();
+    cg_s *const cgame = CG_GetLocalClientGlobals(0);
+    return cgame && cgame->nextSnap
+        ? cgame->objectives[slot].origin[marker][component]
+        : std::numeric_limits<double>::quiet_NaN();
+}
+
+namespace
+{
+bool ReadServerObjective(
+    int slot, int marker, int *state, float (&origin)[3])
+{
+    if (slot < 0 || slot >= 16 || marker < 0 || marker >= 8)
+        return false;
+    char configString[1024]{};
+    SV_GetConfigstring(slot + 11, configString, sizeof(configString));
+    const char *const stateValue = Info_ValueForKey(configString, "state");
+    *state = *stateValue ? std::atoi(stateValue) : 0;
+    char key[16]{};
+    std::snprintf(key, sizeof(key), "org%d", marker);
+    const char *const originValue = Info_ValueForKey(configString, key);
+    return *originValue && std::sscanf(originValue, "%f %f %f",
+        &origin[0], &origin[1], &origin[2]) == 3;
+}
+} // namespace
+
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestServerObjectiveState(int slot)
+{
+    int state = -1;
+    float origin[3]{};
+    return ReadServerObjective(slot, 0, &state, origin) ? state :
+        slot >= 0 && slot < 16 ? state : -1;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE double KisakWeb_TestServerObjectiveOrigin(
+    int slot, int marker, int component)
+{
+    if (component < 0 || component >= 3)
+        return std::numeric_limits<double>::quiet_NaN();
+    int state = 0;
+    float origin[3]{};
+    return ReadServerObjective(slot, marker, &state, origin)
+        ? origin[component] : std::numeric_limits<double>::quiet_NaN();
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestTargetEntity(int slot)
+{
+    if (!CL_IsLocalClientInGame(0) || !CL_IsCgameInitialized(0) ||
+        slot < 0 || slot >= 32)
+        return -1;
+    cg_s *const cgame = CG_GetLocalClientGlobals(0);
+    if (!cgame || !cgame->nextSnap ||
+        cgame->targets[slot].entNum == ENTITYNUM_NONE)
+        return -1;
+    return cgame->targets[slot].entNum;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE double KisakWeb_TestTargetOrigin(
+    int slot, int component)
+{
+    const int entity = KisakWeb_TestTargetEntity(slot);
+    if (entity < 0 || component < 0 || component >= 3)
+        return std::numeric_limits<double>::quiet_NaN();
+    cg_s *const cgame = CG_GetLocalClientGlobals(0);
+    const targetInfo_t &target = cgame->targets[slot];
+    const centity_s *const centity = CG_GetEntity(0, entity);
+    return centity->pose.origin[component] + target.offset[component];
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestPlayerTeam()
+{
+    return g_entities[0].sentient
+        ? static_cast<int>(g_entities[0].sentient->eTeam) : -1;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestActorState(
+    int slot, int field)
+{
+    if (!level.actors || slot < 0 || slot >= MAX_ACTORS)
+        return -1;
+    const actor_s &actor = level.actors[slot];
+    if (!actor.inuse || !actor.ent || !actor.ent->r.inuse || !actor.sentient)
+        return -1;
+    switch (field)
+    {
+    case 0: return static_cast<int>(actor.sentient->eTeam);
+    case 1: return actor.ent->health;
+    case 2: return actor.bDrawOnCompass ? 1 : 0;
+    case 3: return actor.Path.wPathLen > 0 ? 1 : 0;
+    case 4: return static_cast<int>(actor.eState[
+        actor.stateLevel < 5 ? actor.stateLevel : 0]);
+    case 5: return static_cast<int>(actor.moveMode);
+    case 6: return actor.lastShotTime;
+    default: return -1;
+    }
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE double KisakWeb_TestActorVector(
+    int slot, int vector, int component)
+{
+    if (KisakWeb_TestActorState(slot, 0) < 0 ||
+        component < 0 || component >= 3)
+        return std::numeric_limits<double>::quiet_NaN();
+    const actor_s &actor = level.actors[slot];
+    if (vector == 0)
+        return actor.ent->r.currentOrigin[component];
+    if (vector == 1 && actor.Path.wPathLen > 0)
+        return actor.Path.vFinalGoal[component];
     return std::numeric_limits<double>::quiet_NaN();
 }
 

@@ -10,6 +10,7 @@ param(
     [string]$RouteMode = 'none',
     [string]$RoutePath,
     [string]$RouteOutput,
+    [switch]$RouteAssist,
     [switch]$Headless,
     [ValidateRange(1024, 65535)]
     [int]$Port = 8031
@@ -23,8 +24,11 @@ if ($Map -notmatch '^[a-z0-9_]+$' -or
 if ($RouteMode -ne 'none' -and -not $Mission) {
     throw 'Route authoring and replay require -Mission.'
 }
-if ($RouteMode -eq 'author' -and $Headless) {
-    throw 'Route authoring requires a headed browser.'
+if ($RouteMode -eq 'author' -and $Headless -and -not $RouteAssist) {
+    throw 'Manual route authoring requires a headed browser.'
+}
+if ($RouteAssist -and $RouteMode -ne 'author') {
+    throw '-RouteAssist requires -RouteMode author.'
 }
 $resolvedRoutePath = $null
 if ($RouteMode -eq 'replay') {
@@ -66,6 +70,7 @@ $environmentNames = @(
     'KISAK_RETAIL_ROUTE_MODE',
     'KISAK_RETAIL_ROUTE_PATH',
     'KISAK_RETAIL_ROUTE_OUTPUT',
+    'KISAK_RETAIL_ROUTE_ASSIST',
     'KISAK_BROWSER_CHANNEL',
     'KISAK_WEB_SITE',
     'KISAK_WEB_TEST_PORT',
@@ -91,6 +96,7 @@ try {
         Remove-Item -LiteralPath 'Env:KISAK_RETAIL_ROUTE_MODE' -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath 'Env:KISAK_RETAIL_ROUTE_PATH' -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath 'Env:KISAK_RETAIL_ROUTE_OUTPUT' -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath 'Env:KISAK_RETAIL_ROUTE_ASSIST' -ErrorAction SilentlyContinue
     } else {
         $env:KISAK_RETAIL_ROUTE_MODE = $RouteMode
         if ($RouteMode -eq 'replay') {
@@ -98,6 +104,8 @@ try {
             Remove-Item -LiteralPath 'Env:KISAK_RETAIL_ROUTE_OUTPUT' -ErrorAction SilentlyContinue
         } else {
             $env:KISAK_RETAIL_ROUTE_OUTPUT = $resolvedRouteOutput
+            if ($RouteAssist) { $env:KISAK_RETAIL_ROUTE_ASSIST = '1' }
+            else { Remove-Item -LiteralPath 'Env:KISAK_RETAIL_ROUTE_ASSIST' -ErrorAction SilentlyContinue }
             Remove-Item -LiteralPath 'Env:KISAK_RETAIL_ROUTE_PATH' -ErrorAction SilentlyContinue
         }
     }

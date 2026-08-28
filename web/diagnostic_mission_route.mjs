@@ -13,13 +13,14 @@ export const MISSION_ROUTE_FAILURE = Object.freeze({
 const routeKeys = new Set(["schemaVersion", "map", "segments"]);
 const segmentKeys = new Set([
     "targetRegion", "expectedProgression", "maxDurationMs",
-    "stuckTimeoutMs", "divergenceRadius", "restartPolicy", "actions",
+    "minimumDurationMs", "stuckTimeoutMs", "divergenceRadius",
+    "restartPolicy", "actions",
 ]);
 const progressionKeys = new Set([
     "objectiveHashChanged", "activeObjectives", "doneObjectivesDeltaAtLeast",
-    "missionFlagsChanged",
+    "missionFlagsChanged", "checkpointChanged",
 ]);
-const actionKeys = new Set(["fire", "jump", "use"]);
+const actionKeys = new Set(["ads", "fire", "jump", "use"]);
 
 export class MissionRouteError extends Error
 {
@@ -71,7 +72,9 @@ function validateProgression(value, name)
     exactKeys(expectation, progressionKeys, name);
     if (Object.keys(expectation).length === 0)
         invalid(`${name} must contain an expectation`);
-    for (const field of ["objectiveHashChanged", "missionFlagsChanged"]) {
+    for (const field of [
+        "objectiveHashChanged", "missionFlagsChanged", "checkpointChanged",
+    ]) {
         if (expectation[field] !== undefined && expectation[field] !== true)
             invalid(`${name}.${field} must be true when present`);
     }
@@ -128,6 +131,9 @@ export function parseMissionRoute(value)
             invalid(`${name}.targetRegion.radius must be greater than 0 and at most 65536`);
         const maxDurationMs = integer(
             segment.maxDurationMs, 100, 600_000, `${name}.maxDurationMs`);
+        const minimumDurationMs = segment.minimumDurationMs === undefined ? 0 :
+            integer(segment.minimumDurationMs, 0, maxDurationMs,
+                `${name}.minimumDurationMs`);
         const stuckTimeoutMs = segment.stuckTimeoutMs === undefined
             ? Math.min(10_000, maxDurationMs)
             : integer(segment.stuckTimeoutMs, 100, maxDurationMs,
@@ -145,6 +151,7 @@ export function parseMissionRoute(value)
         return {
             targetRegion,
             maxDurationMs,
+            ...(minimumDurationMs === 0 ? {} : { minimumDurationMs }),
             stuckTimeoutMs,
             restartPolicy,
             ...(divergenceRadius === undefined ? {} : { divergenceRadius }),
@@ -172,6 +179,9 @@ function progressionChanged(expectation, before, after)
     if (expectation.doneObjectivesDeltaAtLeast !== undefined &&
         after.doneObjectives - before.doneObjectives <
             expectation.doneObjectivesDeltaAtLeast) return false;
+    if (expectation.checkpointChanged &&
+        after.checkpoint.saveId === before.checkpoint.saveId &&
+        after.checkpoint.checksum === before.checkpoint.checksum) return false;
     return true;
 }
 
@@ -244,6 +254,13 @@ export function createMissionRouteController(adapter, options = {})
         .every((value) => Number.isFinite(value) && value > 0)) {
         throw new RangeError("mission route controller options must be positive");
     }
+    const obstacleRecoveryAttempts = options.obstacleRecoveryAttempts ?? 0;
+    const obstacleRecoveryMs = options.obstacleRecoveryMs ?? 1_000;
+    if (!Number.isInteger(obstacleRecoveryAttempts) ||
+        obstacleRecoveryAttempts < 0 || obstacleRecoveryAttempts > 4 ||
+        !Number.isFinite(obstacleRecoveryMs) || obstacleRecoveryMs <= 0) {
+        throw new RangeError("mission route obstacle recovery options are invalid");
+    }
 
     let activeRun = null;
     const controller = {
@@ -262,11 +279,15 @@ export function createMissionRouteController(adapter, options = {})
                     segmentIndex < route.segments.length; ++segmentIndex) {
                     const segment = route.segments[segmentIndex];
                     const began = state.timestampMs;
-                    const progressionBefore = { ...state.progression };
+                    const progressionBefore = {
+                        ...state.progression,
+                        checkpoint: { ...state.checkpoint },
+                    };
                     let closest = distanceTo(segment.targetRegion, state.origin);
                     let lastProgress = began;
                     let lastPulse = Number.NEGATIVE_INFINITY;
                     let died = false;
+                    let recoveryCount = 0;
                     events.push({ type: "segment-start", segmentIndex,
                         timestampMs: began, distance: closest });
 
@@ -314,8 +335,12 @@ export function createMissionRouteController(adapter, options = {})
                         }
                         const progressionMet = progressionChanged(
                             segment.expectedProgression,
-                            progressionBefore, state.progression);
-                        if (distance <= segment.targetRegion.radius && progressionMet) {
+                            progressionBefore, {
+                                ...state.progression,
+                                checkpoint: state.checkpoint,
+                            });
+                        if (distance <= segment.targetRegion.radius && progressionMet &&
+                            elapsed >= (segment.minimumDurationMs ?? 0)) {
                             await releaseInput(adapter, held);
                             events.push({ type: "segment-complete", segmentIndex,
                                 timestampMs: state.timestampMs, distance });
@@ -329,17 +354,39 @@ export function createMissionRouteController(adapter, options = {})
                                     : "route segment timed out before expected progression",
                                 segmentIndex);
                         }
+                        const actions = segment.actions ?? {};
                         if (distance > segment.targetRegion.radius) {
                             if (distance <= closest - minimumProgress) {
                                 closest = distance;
                                 lastProgress = state.timestampMs;
+                                recoveryCount = 0;
                             } else if (state.timestampMs - lastProgress >=
                                 segment.stuckTimeoutMs) {
+                                if (recoveryCount < obstacleRecoveryAttempts) {
+                                    await setHeld(adapter, held, "forward", false);
+                                    const recoveryKey = recoveryCount % 2 === 0
+                                        ? "right" : "left";
+                                    await setHeld(adapter, held, recoveryKey, true);
+                                    await adapter.wait(obstacleRecoveryMs);
+                                    await setHeld(adapter, held, recoveryKey, false);
+                                    ++recoveryCount;
+                                    lastProgress = state.timestampMs;
+                                    closest = distance;
+                                    events.push({ type: "obstacle-recovery",
+                                        segmentIndex,
+                                        timestampMs: state.timestampMs,
+                                        attempt: recoveryCount });
+                                    continue;
+                                }
                                 throw new MissionRouteError(
                                     MISSION_ROUTE_FAILURE.STUCK,
                                     "player stopped making route progress",
                                     segmentIndex);
                             }
+                        }
+                        let facingTarget = false;
+                        if (distance > segment.targetRegion.radius ||
+                            actions.fire === true) {
                             const deltaX = segment.targetRegion.x - state.origin[0];
                             const deltaY = segment.targetRegion.y - state.origin[1];
                             const deltaZ = segment.targetRegion.z - state.origin[2];
@@ -353,12 +400,11 @@ export function createMissionRouteController(adapter, options = {})
                                     -maximumMouseDelta, maximumMouseDelta),
                                 clamp(Math.round(pitchError * mouseCountsPerDegree),
                                     -maximumMouseDelta, maximumMouseDelta));
-                            await setHeld(adapter, held, "forward", Math.abs(yawError) < 75);
-                        } else {
-                            await setHeld(adapter, held, "forward", false);
+                            facingTarget = Math.abs(yawError) < 75;
                         }
-
-                        const actions = segment.actions ?? {};
+                        await setHeld(adapter, held, "forward",
+                            distance > segment.targetRegion.radius && facingTarget);
+                        await setHeld(adapter, held, "ads", actions.ads === true);
                         await setHeld(adapter, held, "fire", actions.fire === true);
                         if (state.timestampMs - lastPulse >= 1_000) {
                             for (const [action, key] of [["use", "use"], ["jump", "jump"]]) {
@@ -449,7 +495,7 @@ export function createMissionRouteRecorder({ map, radius = 96 } = {})
                     dx: event.dx, dy: event.dy });
             return true;
         },
-        markWaypoint() {
+        markWaypoint(options = {}) {
             if (!latest) throw new Error("record an observation before marking a waypoint");
             const elapsed = latest.timestampMs - (previousMarker?.timestampMs ?? 0);
             const segmentInputs = inputTransitions.slice(inputStart);
@@ -457,31 +503,42 @@ export function createMissionRouteRecorder({ map, radius = 96 } = {})
             const progressionBaseline = previousMarker ?? initial;
             if (progressionBaseline) {
                 if (latest.progression.objectiveHash !==
-                    progressionBaseline.progression.objectiveHash)
+                    progressionBaseline.progression.objectiveHash) {
                     expectedProgression.objectiveHashChanged = true;
+                    expectedProgression.activeObjectives =
+                        latest.progression.activeObjectives;
+                }
                 const doneDelta = latest.progression.doneObjectives -
                     progressionBaseline.progression.doneObjectives;
                 if (doneDelta > 0) expectedProgression.doneObjectivesDeltaAtLeast = doneDelta;
                 if (latest.progression.missionFlags !==
                     progressionBaseline.progression.missionFlags)
                     expectedProgression.missionFlagsChanged = true;
+                if (latest.checkpoint.saveId !== progressionBaseline.checkpoint.saveId ||
+                    latest.checkpoint.checksum !== progressionBaseline.checkpoint.checksum)
+                    expectedProgression.checkpointChanged = true;
             }
             const pressed = new Set(segmentInputs
                 .filter((event) => event.type === "key" && event.down)
                 .map((event) => event.key));
             const actions = {
+                ...(pressed.has(0xC9) ? { ads: true } : {}),
                 ...(pressed.has(0xC8) ? { fire: true } : {}),
                 ...(pressed.has(0x20) ? { jump: true } : {}),
                 ...(pressed.has(0x66) ? { use: true } : {}),
             };
-            const maxDurationMs = Math.max(5_000,
-                Math.min(600_000, Math.ceil(elapsed * 1.5 / 1_000) * 1_000));
+            const maxDurationMs = Math.max(10_000,
+                Math.min(600_000, Math.ceil(elapsed * 3 / 1_000) * 1_000));
+            const targetRegion = options.targetRegion ?? {
+                x: latest.origin[0], y: latest.origin[1],
+                z: latest.origin[2], radius,
+            };
             segments.push({
-                targetRegion: {
-                    x: latest.origin[0], y: latest.origin[1],
-                    z: latest.origin[2], radius,
-                },
+                targetRegion: { ...targetRegion },
                 maxDurationMs,
+                ...(options.minimumDurationMs === undefined ? {} : {
+                    minimumDurationMs: options.minimumDurationMs,
+                }),
                 stuckTimeoutMs: Math.min(10_000, maxDurationMs),
                 restartPolicy: "resume",
                 ...(Object.keys(expectedProgression).length === 0
