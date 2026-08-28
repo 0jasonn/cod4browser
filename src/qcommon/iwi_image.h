@@ -92,6 +92,15 @@ struct Rgba8Image
     std::vector<std::vector<std::uint8_t>> mipPixels;
 };
 
+struct Rgba8Layout
+{
+    std::uint16_t width = 0;
+    std::uint16_t height = 0;
+    std::uint32_t mipCount = 0;
+    std::size_t baseDecodedByteLength = 0u;
+    std::size_t totalDecodedByteLength = 0u;
+};
+
 struct Rgba8Cube
 {
     std::uint16_t edgeLength = 0;
@@ -121,6 +130,11 @@ Error Parse(std::span<const std::uint8_t> bytes, Metadata &metadata) noexcept;
 Error DecodeRgba8(
     std::span<const std::uint8_t> bytes,
     Rgba8Image &image) noexcept;
+// Applies the same format, flag, size, and layout validation as DecodeRgba8
+// without allocating or converting pixel storage.
+Error InspectRgba8(
+    std::span<const std::uint8_t> bytes,
+    Rgba8Layout &layout) noexcept;
 
 // Decodes the complete authored mip chain of all six faces from a bounded
 // COD4 IWI cubemap.
@@ -146,6 +160,16 @@ Error DecodeLoadDefRgba8(
     std::uint16_t depth,
     std::span<const std::uint8_t> payload,
     Rgba8Image &image) noexcept;
+// Applies the same canonical load-definition validation as
+// DecodeLoadDefRgba8 without allocating or converting pixel storage.
+Error InspectLoadDefRgba8(
+    std::int32_t format,
+    std::uint8_t flags,
+    std::uint16_t width,
+    std::uint16_t height,
+    std::uint16_t depth,
+    std::span<const std::uint8_t> payload,
+    Rgba8Layout &layout) noexcept;
 
 // Decodes the complete authored chain from a canonical DB-owned cubemap load
 // definition. Native Load_Texture stores this payload face-major, with each

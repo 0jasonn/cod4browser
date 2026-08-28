@@ -471,9 +471,10 @@ Error Parse(std::span<const std::uint8_t> bytes, Metadata &metadata) noexcept
     return Error::None;
 }
 
-Error DecodeRgba8(
+static Error ProcessRgba8(
     std::span<const std::uint8_t> bytes,
-    Rgba8Image &image) noexcept
+    Rgba8Image *image,
+    Rgba8Layout *layout) noexcept
 {
     Metadata metadata{};
     const Error parseError = Parse(bytes, metadata);
@@ -602,6 +603,17 @@ Error DecodeRgba8(
     {
         return Error::DecodeInvalidLayout;
     }
+    if (layout)
+    {
+        *layout = {
+            metadata.width,
+            metadata.height,
+            1u,
+            pixelBytes,
+            pixelBytes,
+        };
+    }
+    if (!image) return Error::None;
 
     std::vector<std::uint8_t> rgba;
     try
@@ -691,10 +703,24 @@ Error DecodeRgba8(
         }
     }
 
-    image.width = metadata.width;
-    image.height = metadata.height;
-    image.pixels.swap(rgba);
+    image->width = metadata.width;
+    image->height = metadata.height;
+    image->pixels.swap(rgba);
     return Error::None;
+}
+
+Error DecodeRgba8(
+    std::span<const std::uint8_t> bytes,
+    Rgba8Image &image) noexcept
+{
+    return ProcessRgba8(bytes, &image, nullptr);
+}
+
+Error InspectRgba8(
+    std::span<const std::uint8_t> bytes,
+    Rgba8Layout &layout) noexcept
+{
+    return ProcessRgba8(bytes, nullptr, &layout);
 }
 
 Error DecodeCubeRgba8(
@@ -818,14 +844,15 @@ Error DecodeCubeRgba8(
     return Error::None;
 }
 
-Error DecodeLoadDefRgba8(
+static Error ProcessLoadDefRgba8(
     std::int32_t format,
     std::uint8_t flags,
     std::uint16_t width,
     std::uint16_t height,
     std::uint16_t depth,
     std::span<const std::uint8_t> payload,
-    Rgba8Image &image) noexcept
+    Rgba8Image *image,
+    Rgba8Layout *layout) noexcept
 {
     std::uint8_t iwiFormat = 0u;
     std::size_t bytesPerBlock = 0u;
@@ -919,6 +946,17 @@ Error DecodeLoadDefRgba8(
         return Error::DecodeInvalidLayout;
     if (totalRgbaBytes > MAX_LOADDEF_MIP_CHAIN_RGBA8_BYTES)
         return Error::DecodeOutputTooLarge;
+    if (layout)
+    {
+        *layout = {
+            width,
+            height,
+            mipCount,
+            pixelBytes,
+            totalRgbaBytes,
+        };
+    }
+    if (!image) return Error::None;
 
     std::vector<std::uint8_t> rgba;
     try
@@ -1017,12 +1055,12 @@ Error DecodeLoadDefRgba8(
                 format, mipWidth, mipHeight, levelBytes);
             if (sizeError != Error::None) return sizeError;
             Rgba8Image level{};
-            const Error levelError = DecodeLoadDefRgba8(
+            const Error levelError = ProcessLoadDefRgba8(
                 format,
                 static_cast<std::uint8_t>(flags | FLAG_NO_MIPMAPS),
                 static_cast<std::uint16_t>(mipWidth),
                 static_cast<std::uint16_t>(mipHeight), depth,
-                payload.subspan(sourceOffset, levelBytes), level);
+                payload.subspan(sourceOffset, levelBytes), &level, nullptr);
             if (levelError != Error::None) return levelError;
             decoded.mipPixels.push_back(std::move(level.pixels));
             sourceOffset += levelBytes;
@@ -1030,8 +1068,34 @@ Error DecodeLoadDefRgba8(
         if (sourceOffset != payload.size())
             return Error::DecodeInvalidLayout;
     }
-    image = std::move(decoded);
+    *image = std::move(decoded);
     return Error::None;
+}
+
+Error DecodeLoadDefRgba8(
+    std::int32_t format,
+    std::uint8_t flags,
+    std::uint16_t width,
+    std::uint16_t height,
+    std::uint16_t depth,
+    std::span<const std::uint8_t> payload,
+    Rgba8Image &image) noexcept
+{
+    return ProcessLoadDefRgba8(
+        format, flags, width, height, depth, payload, &image, nullptr);
+}
+
+Error InspectLoadDefRgba8(
+    std::int32_t format,
+    std::uint8_t flags,
+    std::uint16_t width,
+    std::uint16_t height,
+    std::uint16_t depth,
+    std::span<const std::uint8_t> payload,
+    Rgba8Layout &layout) noexcept
+{
+    return ProcessLoadDefRgba8(
+        format, flags, width, height, depth, payload, nullptr, &layout);
 }
 
 Error DecodeLoadDefCubeRgba8(

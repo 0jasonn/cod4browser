@@ -608,7 +608,6 @@ function assertMemoryTelemetry(sample)
     }
     expect(decode.initialUploadDecodeCount + decode.contextRecoveryDecodeCount)
         .toBe(decode.pixelDecodeCount);
-    expect(decode.metadataParseCount).toBeLessThanOrEqual(decode.pixelDecodeCount);
     expect(decode.duplicateDecodeCount)
         .toBeLessThanOrEqual(decode.initialUploadDecodeCount);
     expect(decode.cpuMilliseconds).toBeGreaterThanOrEqual(0);
@@ -2072,12 +2071,17 @@ if (runDecodeChain) {
             for (let index = 0; index < chain.length; ++index)
                 maps.push(await loadDecodeChainMap(page, chain[index], index));
             const decodeAfter = await rendererMemorySnapshot(page);
+            const totals = imageDecodeDelta(
+                decodeAfter.imageDecode, decodeBefore.imageDecode);
             expect(pageErrors).toEqual([]);
             expect(maps.slice(1).every((entry) =>
                 entry.worldUnload.rendererEncodedBytesAfterUnload === 0)).toBe(true);
             expect(maps.every((entry) =>
                 entry.sourceCache.encodedPayloadBytes <=
                     entry.sourceCache.budgetBytes)).toBe(true);
+            expect(maps.every((entry) =>
+                entry.initialUploadDecode.duplicateDecodeCount === 0)).toBe(true);
+            expect(totals.duplicateDecodeCount).toBe(0);
             for (let index = 1; index < maps.length; ++index) {
                 expect(maps[index].sourceCache.evictionCount)
                     .toBeGreaterThanOrEqual(maps[index - 1].sourceCache.evictionCount);
@@ -2100,8 +2104,7 @@ if (runDecodeChain) {
                 validationResult: "pass",
                 chain,
                 maps,
-                totals: imageDecodeDelta(
-                    decodeAfter.imageDecode, decodeBefore.imageDecode),
+                totals,
                 sourceCacheBounded: true,
                 mapOwnedRendererSourcesRetired: true,
                 contextRecoveryValidatedForEveryMap: true,

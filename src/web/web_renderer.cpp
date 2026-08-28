@@ -93,9 +93,9 @@ struct WebRendererRetainedWorldImage
     WebRendererImageRecoverySource recoverySource =
         WebRendererImageRecoverySource::DecodedRgba8;
     std::uint8_t sourceFlags = 0u;
+    std::uint8_t initialPixelDecodeCount = 0u;
     bool mipmapsAllowed = true;
     bool authoredMipChain = false;
-    bool decodedDuringRetention = false;
     bool supported = false;
 };
 
@@ -533,6 +533,13 @@ void RecordEncodedImageInspection() noexcept
 {
 #if KISAK_WEB_DIAGNOSTICS
     ++g_renderer.imageDecodeStats.encodedImageInspections;
+#endif
+}
+
+void RecordImageMetadataParse() noexcept
+{
+#if KISAK_WEB_DIAGNOSTICS
+    ++g_renderer.imageDecodeStats.metadataParses;
 #endif
 }
 
@@ -3085,11 +3092,15 @@ bool CreateWorldTextureObjects(
         if (image.texture != 0u) continue;
         kisak::iwi::Rgba8Image decoded;
         kisak::iwi::Error decodeError = kisak::iwi::Error::None;
+        const bool encoded = image.recoverySource !=
+            WebRendererImageRecoverySource::DecodedRgba8;
+        const bool initialDecode = encoded &&
+            reason == WebRendererImageDecodeReason::InitialUpload;
+        const bool duplicate = initialDecode &&
+            image.initialPixelDecodeCount != 0u;
         if (image.recoverySource == WebRendererImageRecoverySource::LoadDef)
         {
-            decodeError = DecodeRetainedImage(reason, false,
-                reason == WebRendererImageDecodeReason::InitialUpload &&
-                    image.decodedDuringRetention,
+            decodeError = DecodeRetainedImage(reason, false, duplicate,
                 decoded, [&] {
                     return kisak::iwi::DecodeLoadDefRgba8(
                         image.sourceFormat,
@@ -3104,16 +3115,13 @@ bool CreateWorldTextureObjects(
         else if (image.recoverySource ==
             WebRendererImageRecoverySource::IwiMember)
         {
-            decodeError = DecodeRetainedImage(reason, true,
-                reason == WebRendererImageDecodeReason::InitialUpload &&
-                    image.decodedDuringRetention,
+            decodeError = DecodeRetainedImage(reason, true, duplicate,
                 decoded, [&] {
                     return kisak::iwi::DecodeRgba8(
                         image.encodedSource, decoded);
                 });
         }
-        const bool encoded = image.recoverySource !=
-            WebRendererImageRecoverySource::DecodedRgba8;
+        if (initialDecode) ++image.initialPixelDecodeCount;
         if (encoded && (decodeError != kisak::iwi::Error::None ||
                 decoded.width != image.width || decoded.height != image.height))
         {
@@ -5243,10 +5251,10 @@ WebRendererTextureResult ValidateTextureDesc(
     return WebRendererTextureResult::Success;
 }
 
-bool DecodeExternalCanonicalImage(
+bool InspectExternalCanonicalImage(
     const GfxImage *canonical,
-    kisak::iwi::Rgba8Image &decoded,
-    kisak::iwi::Error &decodeError,
+    kisak::iwi::Rgba8Layout &layout,
+    kisak::iwi::Error &inspectError,
     std::vector<std::uint8_t> &encodedSource)
 {
     if (!canonical || canonical->mapType != MAPTYPE_2D ||
@@ -5269,18 +5277,16 @@ bool DecodeExternalCanonicalImage(
         std::vector<std::uint8_t> bytes(static_cast<std::size_t>(fileSize));
         const std::uint32_t read = FS_Read(bytes.data(),
             static_cast<std::uint32_t>(bytes.size()), file);
-        decodeError = read == bytes.size()
-            ? DecodeRetainedImage(
-                WebRendererImageDecodeReason::InitialUpload,
-                true, false, decoded,
-                [&] { return kisak::iwi::DecodeRgba8(bytes, decoded); })
+        if (read == bytes.size()) RecordImageMetadataParse();
+        inspectError = read == bytes.size()
+            ? kisak::iwi::InspectRgba8(bytes, layout)
             : kisak::iwi::Error::InvalidFileSize;
-        if (decodeError == kisak::iwi::Error::None)
+        if (inspectError == kisak::iwi::Error::None)
             encodedSource = std::move(bytes);
     }
     else
     {
-        decodeError = kisak::iwi::Error::InvalidFileSize;
+        inspectError = kisak::iwi::Error::InvalidFileSize;
     }
     FS_FCloseFile(file);
     return true;
@@ -5354,99 +5360,74 @@ std::uint32_t RetainCanonicalWorldImage(
     const bool hasLoadDef = DB_WebGetImageLoadDef(canonical, loadDef);
     retained.mipmapsAllowed = !hasLoadDef ||
         (loadDef.flags & kisak::iwi::FLAG_NO_MIPMAPS) == 0u;
-    kisak::iwi::Rgba8Image decoded;
-    kisak::iwi::Error decodeError = kisak::iwi::Error::None;
+    kisak::iwi::Rgba8Layout layout;
+    kisak::iwi::Error inspectError = kisak::iwi::Error::None;
     WebRendererImageRecoverySource recoverySource =
         WebRendererImageRecoverySource::DecodedRgba8;
     std::vector<std::uint8_t> externalSource;
-    bool attemptedDecode = false;
+    bool attemptedInspection = false;
     if (retained.canonicalName == ",$white" ||
         retained.canonicalName == "$white")
     {
-        decoded.width = 1u;
-        decoded.height = 1u;
-        decoded.pixels = {255u, 255u, 255u, 255u};
+        layout = {1u, 1u, 1u, 4u, 4u};
+        retained.pixels = {255u, 255u, 255u, 255u};
         retained.mipmapsAllowed = false;
-        attemptedDecode = true;
+        attemptedInspection = true;
     }
     else if (canonical->mapType == MAPTYPE_2D && hasLoadDef &&
         loadDef.byteLength > 0 && loadDef.dimensions[0] > 0 &&
         loadDef.dimensions[1] > 0 && loadDef.dimensions[2] == 1)
     {
-        attemptedDecode = true;
-        decodeError = DecodeRetainedImage(
-            WebRendererImageDecodeReason::InitialUpload,
-            false, false, decoded,
-            [&] {
-                return kisak::iwi::DecodeLoadDefRgba8(
-                    loadDef.format,
-                    loadDef.flags,
-                    static_cast<std::uint16_t>(loadDef.dimensions[0]),
-                    static_cast<std::uint16_t>(loadDef.dimensions[1]),
-                    static_cast<std::uint16_t>(loadDef.dimensions[2]),
-                    std::span<const std::uint8_t>(
-                        loadDef.data,
-                        loadDef.byteLength),
-                    decoded);
-            });
-        if (decodeError == kisak::iwi::Error::None)
+        attemptedInspection = true;
+        inspectError = kisak::iwi::InspectLoadDefRgba8(
+            loadDef.format,
+            loadDef.flags,
+            static_cast<std::uint16_t>(loadDef.dimensions[0]),
+            static_cast<std::uint16_t>(loadDef.dimensions[1]),
+            static_cast<std::uint16_t>(loadDef.dimensions[2]),
+            std::span<const std::uint8_t>(
+                loadDef.data,
+                loadDef.byteLength),
+            layout);
+        if (inspectError == kisak::iwi::Error::None)
             recoverySource = WebRendererImageRecoverySource::LoadDef;
     }
-    if ((!attemptedDecode || decodeError != kisak::iwi::Error::None) &&
+    if ((!attemptedInspection || inspectError != kisak::iwi::Error::None) &&
         retained.canonicalName != ",$white" &&
         retained.canonicalName != "$white")
     {
-        kisak::iwi::Rgba8Image externalDecoded;
-        kisak::iwi::Error externalError = decodeError;
-        if (DecodeExternalCanonicalImage(
-                canonical, externalDecoded, externalError, externalSource))
+        kisak::iwi::Rgba8Layout externalLayout;
+        kisak::iwi::Error externalError = inspectError;
+        if (InspectExternalCanonicalImage(
+                canonical, externalLayout, externalError, externalSource))
         {
-            attemptedDecode = true;
-            decodeError = externalError;
-            if (decodeError == kisak::iwi::Error::None)
+            attemptedInspection = true;
+            inspectError = externalError;
+            if (inspectError == kisak::iwi::Error::None)
             {
-                decoded = std::move(externalDecoded);
+                layout = externalLayout;
                 recoverySource = WebRendererImageRecoverySource::IwiMember;
             }
         }
     }
 
-    std::size_t decodedBytes = decoded.pixels.size();
-    std::size_t uploadBytes = decodedBytes;
-    for (const std::vector<std::uint8_t> &mip : decoded.mipPixels)
-    {
-        uploadBytes += mip.size();
-    }
-    if (retainAuthoredMipChain)
-    {
-        for (const std::vector<std::uint8_t> &mip : decoded.mipPixels)
-        {
-            if (mip.size() > std::numeric_limits<std::size_t>::max() -
-                    decodedBytes)
-            {
-                decodedBytes = std::numeric_limits<std::size_t>::max();
-                break;
-            }
-            decodedBytes += mip.size();
-        }
-    }
-    if (attemptedDecode && decodeError == kisak::iwi::Error::None &&
+    const std::size_t decodedBytes = retainAuthoredMipChain
+        ? layout.totalDecodedByteLength : layout.baseDecodedByteLength;
+    if (attemptedInspection && inspectError == kisak::iwi::Error::None &&
         decodedBytes <=
             WEB_RENDERER_MAX_DECODED_TEXTURE_BYTES -
                 std::min(retainedPixelBytes,
                     WEB_RENDERER_MAX_DECODED_TEXTURE_BYTES))
     {
-        retained.width = decoded.width;
-        retained.height = decoded.height;
+        retained.width = layout.width;
+        retained.height = layout.height;
         if (retained.width <= 1u && retained.height <= 1u)
             retained.mipmapsAllowed = false;
         retainedPixelBytes += decodedBytes;
         retained.recoverySource = recoverySource;
-        retained.decodedDuringRetention = recoverySource !=
-            WebRendererImageRecoverySource::DecodedRgba8;
         retained.authoredMipChain = retainAuthoredMipChain;
         retained.decodedByteLength = decodedBytes;
-        retained.uploadByteLength = uploadBytes;
+        retained.uploadByteLength = layout.totalDecodedByteLength;
         if (recoverySource == WebRendererImageRecoverySource::LoadDef)
         {
             retained.sourceFlags = loadDef.flags;
@@ -5460,23 +5441,17 @@ std::uint32_t RetainCanonicalWorldImage(
         {
             retained.encodedSource = std::move(externalSource);
         }
-        else
-        {
-            retained.pixels = std::move(decoded.pixels);
-            if (retainAuthoredMipChain)
-                retained.mipPixels = std::move(decoded.mipPixels);
-        }
         retained.supported = true;
     }
-    else if (attemptedDecode)
+    else if (attemptedInspection)
     {
         Web_Log(WebLogLevel::Info,
             "[kisakcod-web] Canonical image '%s' uses backend fallback: %s "
             "(format=0x%08x flags=0x%02x dimensions=%dx%dx%d bytes=%zu).\n",
             retained.canonicalName.c_str(),
-            decodeError == kisak::iwi::Error::None
+            inspectError == kisak::iwi::Error::None
                 ? "world texture recovery budget exceeded"
-                : kisak::iwi::ErrorString(decodeError),
+                : kisak::iwi::ErrorString(inspectError),
             static_cast<unsigned int>(loadDef.format),
             static_cast<unsigned int>(loadDef.flags),
             loadDef.dimensions[0], loadDef.dimensions[1],

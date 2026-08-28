@@ -20,6 +20,7 @@ using kisak::iwi::Error;
 using kisak::iwi::Metadata;
 using kisak::iwi::Rgba8Cube;
 using kisak::iwi::Rgba8Image;
+using kisak::iwi::Rgba8Layout;
 
 class TestFailure final : public std::runtime_error
 {
@@ -364,6 +365,14 @@ void TestRgba8DecodeAndSwizzle()
         0x55, 0xaa, 0xcc, 0x11,
     };
     std::copy(bgra.begin(), bgra.end(), fixture.begin() + kisak::iwi::HEADER_SIZE);
+
+    Rgba8Layout layout{};
+    RequireError(kisak::iwi::InspectRgba8(fixture, layout), Error::None,
+        "inspect tightly packed format-1 IWI without decoding pixels");
+    Require(layout.width == 2u && layout.height == 2u &&
+            layout.mipCount == 1u && layout.baseDecodedByteLength == 16u &&
+            layout.totalDecodedByteLength == 16u,
+        "IWI inspection reports the bounded decoded layout");
 
     Rgba8Image image = MakeSentinelImage();
     RequireError(kisak::iwi::DecodeRgba8(fixture, image), Error::None,
@@ -843,6 +852,15 @@ void TestCanonicalLoadDefDecode()
     Append(nativeMipOrder, blue); // 4x4 base level first.
     Append(nativeMipOrder, red);  // 2x2 mip.
     Append(nativeMipOrder, red);  // 1x1 mip.
+    Rgba8Layout layout{};
+    RequireError(kisak::iwi::InspectLoadDefRgba8(
+        kisak::iwi::LOADDEF_FORMAT_DXT1, 0u, 4u, 4u, 1u,
+        nativeMipOrder, layout), Error::None,
+        "inspect canonical DXT load definition without decoding pixels");
+    Require(layout.width == 4u && layout.height == 4u &&
+            layout.mipCount == 3u && layout.baseDecodedByteLength == 64u &&
+            layout.totalDecodedByteLength == 84u,
+        "load-definition inspection reports base and authored mip bytes");
     RequireError(kisak::iwi::DecodeLoadDefRgba8(
         kisak::iwi::LOADDEF_FORMAT_DXT1,
         0u,
@@ -867,6 +885,19 @@ void TestCanonicalLoadDefDecode()
     const Rgba8Image sentinel = MakeSentinelImage();
     image = sentinel;
     nativeMipOrder.pop_back();
+    const Rgba8Layout layoutBeforeFailure = layout;
+    RequireError(kisak::iwi::InspectLoadDefRgba8(
+        kisak::iwi::LOADDEF_FORMAT_DXT1, 0u, 4u, 4u, 1u,
+        nativeMipOrder, layout), Error::DecodeInvalidLayout,
+        "inspection rejects a truncated canonical mip chain");
+    Require(layout.width == layoutBeforeFailure.width &&
+            layout.height == layoutBeforeFailure.height &&
+            layout.mipCount == layoutBeforeFailure.mipCount &&
+            layout.baseDecodedByteLength ==
+                layoutBeforeFailure.baseDecodedByteLength &&
+            layout.totalDecodedByteLength ==
+                layoutBeforeFailure.totalDecodedByteLength,
+        "failed load-definition inspection leaves output unchanged");
     RequireError(kisak::iwi::DecodeLoadDefRgba8(
         kisak::iwi::LOADDEF_FORMAT_DXT1,
         0u,
