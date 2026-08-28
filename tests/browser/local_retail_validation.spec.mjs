@@ -1219,9 +1219,15 @@ async function prepareMissionRouteInput(page)
         .toBe("game-canvas");
 }
 
-async function runMissionRouteSegments(adapter, route)
+async function runMissionRouteSegments(adapter, route, { skipRetryable = false } = {})
 {
     const events = [];
+    const skippedSegmentIndices = [];
+    const retryable = new Set([
+        MISSION_ROUTE_FAILURE.DIVERGED,
+        MISSION_ROUTE_FAILURE.STUCK,
+        MISSION_ROUTE_FAILURE.TIMEOUT,
+    ]);
     for (const [segmentIndex, segment] of route.segments.entries()) {
         const combat = segment.actions?.fire === true;
         try {
@@ -1243,11 +1249,18 @@ async function runMissionRouteSegments(adapter, route)
             })));
         } catch (error) {
             error.segmentIndex = segmentIndex;
+            if (skipRetryable && retryable.has(error?.code)) {
+                skippedSegmentIndices.push(segmentIndex);
+                console.log(`KISAK_ROUTE_PREFIX_SKIP ${JSON.stringify({
+                    code: error.code, segmentIndex,
+                })}`);
+                continue;
+            }
             throw error;
         }
     }
     return { schemaVersion: route.schemaVersion, map: route.map,
-        validationResult: "pass", events };
+        validationResult: "pass", events, skippedSegmentIndices };
 }
 
 async function replayMissionRoute(page, before)
@@ -1425,13 +1438,14 @@ async function authorAssistedMissionRoute(page)
             return Object.keys(actions).length > 0
                 ? { ...withoutActions, actions } : withoutActions;
         });
-        prefixRoute = parseMissionRoute({
+        const replayRoute = parseMissionRoute({
             schemaVersion: legacyPrefix.schemaVersion,
             map: legacyPrefix.map,
             segments,
         });
         try {
-            prefixReplay = await runMissionRouteSegments(baseAdapter, prefixRoute);
+            prefixReplay = await runMissionRouteSegments(
+                baseAdapter, replayRoute, { skipRetryable: true });
         } catch (error) {
             console.log(`KISAK_ROUTE_ASSIST_PREFIX_FAILURE ${JSON.stringify({
                 code: error?.code, segmentIndex: error?.segmentIndex,
@@ -1439,9 +1453,17 @@ async function authorAssistedMissionRoute(page)
             })}`);
             throw error;
         }
+        const skipped = new Set(prefixReplay.skippedSegmentIndices);
+        prefixRoute = parseMissionRoute({
+            schemaVersion: replayRoute.schemaVersion,
+            map: replayRoute.map,
+            segments: replayRoute.segments.filter(
+                (_, segmentIndex) => !skipped.has(segmentIndex)),
+        });
         console.log(`KISAK_ROUTE_ASSIST_PREFIX ${JSON.stringify({
             segments: prefixRoute.segments.length,
             events: prefixReplay.events.length,
+            skippedSegments: prefixReplay.skippedSegmentIndices,
             legacyCombatSegmentsRemoved: legacyPrefix.segments.filter(
                 (segment) => segment.actions?.fire === true).length,
         })}`);
@@ -1720,6 +1742,7 @@ async function authorAssistedMissionRoute(page)
             prefix: {
                 segments: prefixRoute.segments.length,
                 replayEvents: prefixReplay.events.length,
+                skippedSegments: prefixReplay.skippedSegmentIndices,
             },
         },
     } : continuation;
