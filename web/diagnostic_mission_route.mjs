@@ -280,6 +280,7 @@ export function createMissionRouteController(adapter, options = {})
                 for (let segmentIndex = 0;
                     segmentIndex < route.segments.length; ++segmentIndex) {
                     const segment = route.segments[segmentIndex];
+                    const actions = segment.actions ?? {};
                     const began = state.timestampMs;
                     const progressionBefore = {
                         ...state.progression,
@@ -290,6 +291,7 @@ export function createMissionRouteController(adapter, options = {})
                     let lastPulse = Number.NEGATIVE_INFINITY;
                     let died = false;
                     let recoveryCount = 0;
+                    let alignedFireObserved = actions.fire !== true;
                     events.push({ type: "segment-start", segmentIndex,
                         timestampMs: began, distance: closest });
 
@@ -342,6 +344,7 @@ export function createMissionRouteController(adapter, options = {})
                                 checkpoint: state.checkpoint,
                             });
                         if (distance <= segment.targetRegion.radius && progressionMet &&
+                            alignedFireObserved &&
                             elapsed >= (segment.minimumDurationMs ?? 0)) {
                             await releaseInput(adapter, held);
                             events.push({ type: "segment-complete", segmentIndex,
@@ -356,7 +359,6 @@ export function createMissionRouteController(adapter, options = {})
                                     : "route segment timed out before expected progression",
                                 segmentIndex);
                         }
-                        const actions = segment.actions ?? {};
                         if (distance > segment.targetRegion.radius) {
                             if (distance <= closest - minimumProgress) {
                                 closest = distance;
@@ -386,6 +388,7 @@ export function createMissionRouteController(adapter, options = {})
                             }
                         }
                         let facingTarget = false;
+                        let aimingAtTarget = false;
                         if (distance > segment.targetRegion.radius ||
                             actions.fire === true) {
                             const aimOrigin = state.aimOrigin ?? state.origin;
@@ -403,11 +406,15 @@ export function createMissionRouteController(adapter, options = {})
                                 clamp(Math.round(pitchError * mouseCountsPerDegree),
                                     -maximumMouseDelta, maximumMouseDelta));
                             facingTarget = Math.abs(yawError) < 75;
+                            aimingAtTarget = Math.abs(yawError) < 3 &&
+                                Math.abs(pitchError) < 3;
                         }
                         await setHeld(adapter, held, "forward",
                             distance > segment.targetRegion.radius && facingTarget);
                         await setHeld(adapter, held, "ads", actions.ads === true);
-                        await setHeld(adapter, held, "fire", actions.fire === true);
+                        await setHeld(adapter, held, "fire",
+                            actions.fire === true && aimingAtTarget);
+                        alignedFireObserved ||= held.has("fire");
                         if (state.timestampMs - lastPulse >= 1_000) {
                             for (const [action, key] of [["use", "use"], ["jump", "jump"]]) {
                                 if (actions[action] === true) {

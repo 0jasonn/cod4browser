@@ -123,6 +123,26 @@ test("mission route aims fire from the canonical view origin", async () => {
         input.type === "mouse" && input.dy === 0));
 });
 
+test("mission route fires only after aligning with the target", async () => {
+    const adapter = fakeAdapter([
+        state(0, [0, 0, 0], { viewAngles: [0, 90, 0] }),
+        state(100, [0, 0, 0], { viewAngles: [0, 90, 0] }),
+        state(200, [0, 0, 0]),
+        state(300, [0, 0, 0]),
+    ]);
+    await createMissionRouteController(adapter).run(route({
+        targetRegion: { x: 100, y: 0, z: 0, radius: 128 },
+        minimumDurationMs: 100,
+        actions: { fire: true },
+    }));
+    const mouseIndex = adapter.inputs.findIndex((input) =>
+        input.type === "mouse");
+    const fireIndex = adapter.inputs.findIndex((input) =>
+        input.type === "key" && input.key === "fire" && input.down);
+    assert(mouseIndex >= 0);
+    assert(fireIndex > mouseIndex);
+});
+
 test("mission route reports a stuck player", async () => {
     const adapter = fakeAdapter([
         state(0, [0, 0, 0]), state(0, [0, 0, 0]),

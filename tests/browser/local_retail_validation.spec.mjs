@@ -1545,6 +1545,7 @@ async function authorAssistedMissionRoute(page)
             actorMarkers.length === 0 && canonicalMarkers.length > 0) {
             if (squadUpdateWaits < 60) {
                 ++squadUpdateWaits;
+                --attempt;
                 await adapter.wait(1_000);
                 continue;
             }
