@@ -56,6 +56,9 @@ CargoShip's renderer-frontend cost is the largest actionable fast/slow-map
 difference: it is 22.93 ms above Airplane, and its nested scene-build interval
 accounts for 28.61 ms of the 32.29 ms. The selected Phase 6 change is therefore
 one Case D correction: reuse capacity for the C++ renderer frontend's
-per-frame portable scene command storage to reduce temporary allocations and
-copying. Canonical scene generation, visibility, ownership, and WebGL command
-semantics remain unchanged. No second renderer optimization is included.
+DObj skinning scratch storage across surfaces and frames. CargoShip submits
+1,571 dynamic batches per profiled frame versus Airplane's 197, and the
+frontend previously created four temporary vectors for each model/surface
+conversion. Canonical scene generation, visibility, ownership, geometry, and
+WebGL command semantics remain unchanged. No second renderer optimization is
+included.

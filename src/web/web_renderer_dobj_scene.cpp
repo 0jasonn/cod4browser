@@ -408,6 +408,23 @@ bool SkinRigidSurface(
     return vertexIndex == surface.vertCount;
 }
 
+struct DObjSkinningScratch
+{
+    std::vector<DObjSkelMat> matrices;
+    std::vector<float> positions;
+    std::vector<float> normals;
+    std::vector<float> tangents;
+};
+
+DObjSkinningScratch &SkinningScratch() noexcept
+{
+    // R_RenderScene rebuilds dynamic DObj geometry synchronously. Retain only
+    // typeless numeric workspace so repeated surfaces and frames reuse their
+    // capacity without retaining canonical model, pose, or material pointers.
+    static thread_local DObjSkinningScratch scratch;
+    return scratch;
+}
+
 bool SurfaceHidden(
     const XSurface &surface, const std::uint32_t hideBits[4],
     std::uint32_t modelBoneOffset, std::uint32_t modelBoneCount) noexcept
@@ -537,6 +554,7 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
     if (!submissions) return WebRendererDObjSceneResult::InvalidSubmission;
 
     WebRendererDObjSceneCommand replacement;
+    DObjSkinningScratch &scratch = SkinningScratch();
     bool modelLightingComplete = lightGrid != nullptr &&
         WebRenderer_InitializeModelLightingAtlas(
             submissionCount, replacement.modelLightingAtlas);
@@ -621,7 +639,7 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                     return WebRendererDObjSceneResult::InvalidModel;
                 }
 
-                std::vector<DObjSkelMat> skinMatrices(model->numBones);
+                scratch.matrices.resize(model->numBones);
                 for (std::uint32_t bone = 0u; bone < model->numBones; ++bone)
                 {
                     DObjSkelMat inverseBase{};
@@ -630,7 +648,8 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                         &model->baseMat[bone], &inverseBase);
                     ConvertQuatToSkelMat(
                         &posedMats[globalBoneOffset + bone], &current);
-                    MultiplySkelMat(inverseBase, current, skinMatrices[bone]);
+                    MultiplySkelMat(
+                        inverseBase, current, scratch.matrices[bone]);
                 }
 
                 bool submittedModel = false;
@@ -659,16 +678,13 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                         return WebRendererDObjSceneResult::OutputTooLarge;
                     }
 
-                    std::vector<float> positions;
-                    std::vector<float> normals;
-                    std::vector<float> tangents;
                     const bool skinned = surface.deformed
                         ? SkinWeightedSurface(
-                            surface, skinMatrices, positions, normals,
-                            tangents)
+                            surface, scratch.matrices, scratch.positions,
+                            scratch.normals, scratch.tangents)
                         : SkinRigidSurface(
-                            surface, skinMatrices, positions, normals,
-                            tangents);
+                            surface, scratch.matrices, scratch.positions,
+                            scratch.normals, scratch.tangents);
                     if (!skinned)
                         return WebRendererDObjSceneResult::InvalidModel;
 
@@ -680,11 +696,11 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                         const GfxPackedVertex &source =
                             surface.verts0[vertexIndex];
                         WebRendererSurfaceVertex vertex{};
-                        std::copy_n(&positions[vertexIndex * 3u], 3u,
+                        std::copy_n(&scratch.positions[vertexIndex * 3u], 3u,
                             vertex.position);
-                        std::copy_n(&normals[vertexIndex * 3u], 3u,
+                        std::copy_n(&scratch.normals[vertexIndex * 3u], 3u,
                             vertex.normal);
-                        std::copy_n(&tangents[vertexIndex * 3u], 3u,
+                        std::copy_n(&scratch.tangents[vertexIndex * 3u], 3u,
                             vertex.tangent);
                         vertex.binormalSign = source.binormalSign;
                         if (!Finite3(vertex.position) || !Finite3(vertex.normal) ||
