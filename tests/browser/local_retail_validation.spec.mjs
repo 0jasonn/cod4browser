@@ -1579,7 +1579,8 @@ async function authorAssistedMissionRoute(page)
         try {
             routeController = createMissionRouteController(adapter, {
                 tickMs: 100,
-                mouseCountsPerDegree: 8,
+                mouseCountsPerDegree: 16,
+                maximumMouseDelta: 512,
                 minimumProgress: 4,
                 obstacleRecoveryAttempts: 2,
                 obstacleRecoveryMs: 1_000,
