@@ -21,6 +21,8 @@ const missionTargetMap = process.env.KISAK_RETAIL_MISSION_MAP?.trim().toLowerCas
 const missionRoutePath = process.env.KISAK_RETAIL_ROUTE_PATH?.trim();
 const missionRouteOutputPath = process.env.KISAK_RETAIL_ROUTE_OUTPUT?.trim();
 const missionRouteAssist = process.env.KISAK_RETAIL_ROUTE_ASSIST === "1";
+const missionValidationStage = process.env.KISAK_RETAIL_MISSION_STAGE?.trim()
+    .toLowerCase() ?? "full";
 const missionRouteMode = process.env.KISAK_RETAIL_ROUTE_MODE?.trim().toLowerCase() ??
     (missionRoutePath ? "replay" : null);
 const runDecodeChain = process.env.KISAK_RETAIL_DECODE_CHAIN === "1";
@@ -38,6 +40,8 @@ if (missionRouteMode === "author" && !missionRouteOutputPath)
     throw new Error("KISAK_RETAIL_ROUTE_OUTPUT is required in author mode");
 if (missionRouteMode === "replay" && !missionRoutePath)
     throw new Error("KISAK_RETAIL_ROUTE_PATH is required in replay mode");
+if (!['progression', 'full'].includes(missionValidationStage))
+    throw new Error("KISAK_RETAIL_MISSION_STAGE must be progression or full");
 const sourceCommit = execFileSync(
     "git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 const sourceDirty = execFileSync(
@@ -3106,6 +3110,30 @@ if (missionTargetMap && missionRouteMode !== "author") {
             expect(enemyDamageEvents.length,
                 "mission flow must include canonical enemy damage")
                 .toBeGreaterThan(0);
+            if (missionValidationStage === "progression") {
+                const progressedState = await canonicalMissionState(page);
+                console.log(`KISAK_RETAIL_MISSION_RESULT ${JSON.stringify({
+                    schemaVersion: 2,
+                    source: { commitSha: sourceCommit, dirty: sourceDirty },
+                    recordedAtUtc: new Date().toISOString(),
+                    environment: {
+                        browser: retailBrowserMetadata,
+                        operatingSystem,
+                        referenceHardware,
+                        build: "Release diagnostics",
+                    },
+                    validationResult: "pass",
+                    validationStage: "progression",
+                    targetMap: missionTargetMap,
+                    canonicalSystems: { initialState, progressedState },
+                    progression: {
+                        ...progression,
+                        inputEvidence,
+                        enemyDamageEventCount: enemyDamageEvents.length,
+                    },
+                })}`);
+                return;
+            }
 
             failureStage = `${missionTargetMap} progressed natural checkpoint`;
             failureClass = "savegame";

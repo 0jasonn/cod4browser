@@ -6,6 +6,8 @@ param(
     [ValidateSet('chromium', 'chrome', 'msedge')]
     [string]$Browser = 'chrome',
     [switch]$Mission,
+    [ValidateSet('progression', 'full')]
+    [string]$MissionStage = 'full',
     [ValidateSet('none', 'author', 'replay')]
     [string]$RouteMode = 'none',
     [string]$RoutePath,
@@ -67,6 +69,7 @@ $environmentNames = @(
     'KISAK_COD4_RETAIL_ROOT',
     'KISAK_RETAIL_PHASE3_MAP',
     'KISAK_RETAIL_MISSION_MAP',
+    'KISAK_RETAIL_MISSION_STAGE',
     'KISAK_RETAIL_ROUTE_MODE',
     'KISAK_RETAIL_ROUTE_PATH',
     'KISAK_RETAIL_ROUTE_OUTPUT',
@@ -88,9 +91,11 @@ try {
     if ($Mission) {
         Remove-Item -LiteralPath 'Env:KISAK_RETAIL_PHASE3_MAP' -ErrorAction SilentlyContinue
         $env:KISAK_RETAIL_MISSION_MAP = $Map
+        $env:KISAK_RETAIL_MISSION_STAGE = $MissionStage
     } else {
         $env:KISAK_RETAIL_PHASE3_MAP = $Map
         Remove-Item -LiteralPath 'Env:KISAK_RETAIL_MISSION_MAP' -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath 'Env:KISAK_RETAIL_MISSION_STAGE' -ErrorAction SilentlyContinue
     }
     if ($RouteMode -eq 'none') {
         Remove-Item -LiteralPath 'Env:KISAK_RETAIL_ROUTE_MODE' -ErrorAction SilentlyContinue
