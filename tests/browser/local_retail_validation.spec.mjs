@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { chromium, expect, test as base } from "@playwright/test";
 
 import { summarizeForegroundSamples } from "./retail_foreground_window.mjs";
+import { aggregateGameplayProfile } from "./retail_profile_aggregate.mjs";
 
 const retailRoot = process.env.KISAK_COD4_RETAIL_ROOT;
 const browserChannel = process.env.KISAK_BROWSER_CHANNEL;
@@ -32,6 +33,8 @@ const stabilityDurationMs = allowDirty &&
     requestedExploratoryStabilityMs <= 60_000
     ? requestedExploratoryStabilityMs : 60_000;
 const frameProfileSampleLimit = 300;
+const frameProfileTimeoutMs = 120_000;
+const retailEvidenceSchemaVersion = 4;
 const operatingSystem = {
     platform: platform(),
     release: release(),
@@ -84,7 +87,7 @@ test.afterEach(async ({}, testInfo) => {
     const prefix = mission ? "KISAK_RETAIL_MISSION_RESULT" : phase3
         ? "KISAK_RETAIL_PHASE3_RESULT" : "KISAK_RETAIL_RESULT";
     console.log(`${prefix} ${JSON.stringify({
-        schemaVersion: 3,
+        schemaVersion: retailEvidenceSchemaVersion,
         source: { commitSha: sourceCommit, dirty: sourceDirty },
         recordedAtUtc: new Date().toISOString(),
         environment: {
@@ -253,13 +256,9 @@ async function waitForWorldFrames(page, mapName, minimumGeneration = 1)
         .toBe("drawn");
 }
 
-async function sustainWorldFrames(page, mapName, durationMs = 60_000)
+async function measureCleanPerformanceWindow(page, mapName, durationMs = 60_000)
 {
     await page.bringToFront();
-    expect(await page.evaluate((sampleLimit) =>
-        globalThis.__KISAKCOD_WEB__.module.call(
-            "_KisakWeb_TestBeginFrameProfile", sampleLimit),
-    frameProfileSampleLimit)).toBe(1);
     const sampleForeground = () => page.evaluate(() => ({
         observedMs: performance.now(),
         visibilityState: document.visibilityState,
@@ -356,11 +355,11 @@ async function captureMapCursor(page)
 }
 
 async function mapEvidence(page, map, cursor, commandTimeMs, memoryLifecycle,
-    stability, audioSnapshot, input, checkpointResult)
+    stability, profileCapture, audioSnapshot, input, checkpointResult)
 {
-    return page.evaluate(({ map, cursor, commandTimeMs, memoryLifecycle,
-        stability, audioSnapshot, input, checkpointResult,
-        frameProfileSampleLimit }) => {
+    const rawEvidence = await page.evaluate(({ map, cursor, commandTimeMs,
+        memoryLifecycle, stability, profileCapture, audioSnapshot, input,
+        checkpointResult }) => {
         const memorySnapshot = memoryLifecycle.steadyState;
         const frames = globalThis.__retailValidationFrames.slice(cursor.frames)
             .filter((entry) => entry.state === "drawn" &&
@@ -392,86 +391,17 @@ async function mapEvidence(page, map, cursor, commandTimeMs, memoryLifecycle,
             entry.observedMs >= stability.startedMs &&
             entry.observedMs <= stability.endedMs &&
             entry.worldName?.toLowerCase().includes(map));
-        const rawProfiles = globalThis.__retailFrameProfiles.slice(cursor.profiles)
-            .filter((entry) => entry.observedMs >= stability.startedMs &&
-                entry.observedMs <= stability.endedMs);
-        const frameProfiles = stability.performanceWindowValid
-            ? rawProfiles.filter((entry) => entry.kind === "frame" &&
-                entry.gameplayFrame === true &&
-                entry.viewSubmissionGeneration >= stability.firstGeneration &&
-                entry.viewSubmissionGeneration <= stability.finalGeneration)
-            : [];
-        const framePumpTicks = new Set(frameProfiles.map(({ pumpTick }) => pumpTick));
+        const rawProfiles = globalThis.__retailFrameProfiles.slice(
+            profileCapture.profileCursor);
+        const frameProfiles = rawProfiles.filter((entry) =>
+            entry.kind === "frame" && entry.gameplayFrame === true &&
+            entry.rendererSubmitted === true &&
+            entry.observedMs >= profileCapture.startedMs &&
+            entry.observedMs <= profileCapture.endedMs &&
+            entry.viewSubmissionGeneration >= profileCapture.firstGeneration &&
+            entry.viewSubmissionGeneration <= profileCapture.finalGeneration);
         const gpuProfiles = rawProfiles.filter((entry) =>
-            entry.kind === "gpu-result" && framePumpTicks.has(entry.pumpTick));
-        const summarize = (values) => {
-            const finite = values.filter(Number.isFinite)
-                .sort((left, right) => left - right);
-            if (!finite.length) return null;
-            const at = (fraction) => finite[Math.min(finite.length - 1,
-                Math.ceil(finite.length * fraction) - 1)];
-            return {
-                samples: finite.length,
-                average: finite.reduce((sum, value) => sum + value, 0) /
-                    finite.length,
-                p50: at(0.50),
-                p95: at(0.95),
-                p99: at(0.99),
-                maximum: finite.at(-1),
-            };
-        };
-        const summarizeFields = (container, fields) => Object.fromEntries(
-            fields.map((field) => [field,
-                summarize(frameProfiles.map((entry) => entry[container]?.[field]))]));
-        const gpuStatusCounts = Object.fromEntries(gpuProfiles.reduce((counts, entry) => {
-            const status = entry.gpu?.status ?? "unknown";
-            counts.set(status, (counts.get(status) ?? 0) + 1);
-            return counts;
-        }, new Map()));
-        const frameProfile = {
-            requestedSamples: frameProfileSampleLimit,
-            capturedSamples: frameProfiles.length,
-            cpu: summarizeFields("cpu", [
-                "filesystemMs", "commandMs", "serverMs", "clientOnceMs",
-                "commandBufferMs", "clientFrameMs", "cgameFrameMs",
-                "sceneBuildMs", "rendererFrontendMs", "soundMs",
-                "rendererBackendMs", "totalMs",
-            ]),
-            renderer: summarizeFields("renderer", [
-                "setupMs", "lodMs", "sunShadowPrepareMs", "sunShadowDrawMs",
-                "spotShadowPrepareMs", "spotShadowDrawMs", "skyMs", "worldMs",
-                "staticModelsMs", "dynamicModelsMs", "fxModelsMs",
-                "particlesMs", "marksMs", "uiMs", "postProcessMs",
-                "bufferUploadMs", "textureUploadMs",
-            ]),
-            counters: summarizeFields("counters", [
-                "worldSurfacesSubmitted", "worldSurfacesDrawn",
-                "staticModelInstancesRetained", "staticModelInstanceDraws",
-                "dynamicBatchesDrawn", "fxModelBatchesDrawn",
-                "particleBatchesDrawn", "markBatchesDrawn", "worldDrawCalls",
-                "staticModelDrawCalls", "dynamicDrawCalls", "fxDrawCalls",
-                "shadowDrawCalls", "uiDrawCalls", "postProcessDrawCalls",
-                "queryDrawCalls", "resolveBlits", "submittedIndices",
-                "submittedTriangles", "textureBindCalls", "programSwitches",
-                "bufferUploadBytes", "textureUploadBytes",
-                "unmeasuredTextureUploads", "lodChanges", "shadowCasterDraws",
-            ]),
-            gpu: {
-                timingsAvailable: frameProfiles.some(
-                    (entry) => entry.gpu?.timingsAvailable === true),
-                queriesIssued: frameProfiles.filter(
-                    (entry) => entry.gpu?.queryIssued === true).length,
-                queriesDropped: frameProfiles.filter(
-                    (entry) => entry.gpu?.queryDropped === true).length,
-                results: gpuProfiles.length,
-                statusCounts: gpuStatusCounts,
-                backendDrawMs: summarize(gpuProfiles
-                    .filter((entry) => entry.gpu?.status === "valid")
-                    .map((entry) => entry.gpu.backendDrawMs)),
-                queryLagFrames: summarize(gpuProfiles
-                    .map((entry) => entry.gpu?.queryLagFrames)),
-            },
-        };
+            entry.kind === "gpu-result");
         const gameTimeAdvancementMs = stability.performanceWindowValid &&
             stabilityViews.length > 1
             ? stabilityViews.at(-1).time - stabilityViews[0].time : null;
@@ -479,6 +409,14 @@ async function mapEvidence(page, map, cursor, commandTimeMs, memoryLifecycle,
             ? stability.endedMs - stability.startedMs : null;
         const averageFrameIntervalMs = intervals.length
             ? intervals.reduce((sum, value) => sum + value, 0) / intervals.length
+            : null;
+        const averageFpsEquivalent = averageFrameIntervalMs
+            ? 1_000 / averageFrameIntervalMs : null;
+        const gameTimeWallTimeRatio = wallTimeAdvancementMs
+            ? gameTimeAdvancementMs / wallTimeAdvancementMs : null;
+        const classification = stability.performanceWindowValid
+            ? averageFpsEquivalent >= 30 && percentile(0.95) <= 50 &&
+                gameTimeWallTimeRatio >= 0.90 ? "PLAYABLE" : "FUNCTIONAL"
             : null;
         return {
             map,
@@ -520,15 +458,16 @@ async function mapEvidence(page, map, cursor, commandTimeMs, memoryLifecycle,
             p99FrameTimeMs: percentile(0.99),
             minimumFpsEquivalent: sorted.length
                 ? 1_000 / sorted.at(-1) : null,
-            averageFpsEquivalent: averageFrameIntervalMs
-                ? 1_000 / averageFrameIntervalMs : null,
+            averageFpsEquivalent,
             gameTimeAdvancementMs,
             wallTimeAdvancementMs,
-            gameTimeWallTimeRatio: wallTimeAdvancementMs
-                ? gameTimeAdvancementMs / wallTimeAdvancementMs : null,
+            gameTimeWallTimeRatio,
+            classification,
+            classificationSource: "clean-performance-window",
             framesRenderedDuringStabilityWindow: stabilityFrames.length,
-            stability,
-            frameProfile,
+            cleanPerformanceWindow: stability,
+            rawFrameProfiles: frameProfiles,
+            rawGpuProfiles: gpuProfiles,
             wasmLinearMemoryCapacityBytes: {
                 beforeMapLoad:
                     memoryLifecycle.beforeMapLoad.wasmLinearMemoryCapacityBytes,
@@ -576,8 +515,17 @@ async function mapEvidence(page, map, cursor, commandTimeMs, memoryLifecycle,
             input,
             checkpoint: checkpointResult,
         };
-    }, { map, cursor, commandTimeMs, memoryLifecycle, stability,
-        audioSnapshot, input, checkpointResult, frameProfileSampleLimit });
+    }, { map, cursor, commandTimeMs, memoryLifecycle, stability, profileCapture,
+        audioSnapshot, input, checkpointResult });
+    rawEvidence.frameProfile = aggregateGameplayProfile({
+        frames: rawEvidence.rawFrameProfiles,
+        gpuResults: rawEvidence.rawGpuProfiles,
+        capture: profileCapture,
+        cleanAverageFrameIntervalMs: rawEvidence.averageFrameIntervalMs,
+    });
+    delete rawEvidence.rawFrameProfiles;
+    delete rawEvidence.rawGpuProfiles;
+    return rawEvidence;
 }
 
 function assertMemoryTelemetry(sample)
@@ -665,20 +613,32 @@ function assertMapEvidence(evidence, memorySnapshot)
         renderer: expect.any(String),
         version: expect.any(String),
     }));
+    expect(evidence.frameProfile.profileComplete).toBe(true);
+    expect(evidence.frameProfile.profileSamplesRequested)
+        .toBe(frameProfileSampleLimit);
+    expect(evidence.frameProfile.profileSamplesCollected)
+        .toBe(frameProfileSampleLimit);
+    expect(evidence.frameProfile.sampleCount).toBe(frameProfileSampleLimit);
+    expect(evidence.frameProfile.profileIncompleteReason).toBeNull();
+    expect(evidence.frameProfile.cpu.totalMs).not.toBeNull();
+    expect(evidence.frameProfile.renderer.worldMs).not.toBeNull();
+    expect(evidence.frameProfile.counters.worldDrawCalls).not.toBeNull();
+    expect(evidence.frameProfile.counters.worldDrawCalls.maximum)
+        .toBeGreaterThan(0);
+    expect(evidence.frameProfile.counters.worldSurfacesDrawn.maximum)
+        .toBeGreaterThan(0);
     if (evidence.performanceWindowValid) {
         expect(evidence.averageFrameTimeMs).not.toBeNull();
         expect(evidence.p50FrameTimeMs).not.toBeNull();
         expect(evidence.p95FrameTimeMs).not.toBeNull();
         expect(evidence.p99FrameTimeMs).not.toBeNull();
         expect(evidence.gameTimeWallTimeRatio).not.toBeNull();
-        expect(evidence.frameProfile.capturedSamples).toBeGreaterThan(0);
-        expect(evidence.frameProfile.cpu.totalMs).not.toBeNull();
-        expect(evidence.frameProfile.renderer.worldMs).not.toBeNull();
-        expect(evidence.frameProfile.counters.worldDrawCalls).not.toBeNull();
-        expect(evidence.frameProfile.counters.worldDrawCalls.maximum)
-            .toBeGreaterThan(0);
-        expect(evidence.frameProfile.counters.worldSurfacesDrawn.maximum)
-            .toBeGreaterThan(0);
+        expect(evidence.frameProfile.overhead.cleanAverageFrameIntervalMs)
+            .toBe(evidence.averageFrameIntervalMs);
+        expect(evidence.frameProfile.overhead.profiledAverageFrameIntervalMs)
+            .not.toBeNull();
+        expect(evidence.frameProfile.overhead.profilerOverheadPercent)
+            .not.toBeNull();
     } else {
         expect(evidence.performanceInvalidReason)
             .toBe("INVALID_BACKGROUND_THROTTLED");
@@ -1009,6 +969,56 @@ async function canonicalMissionState(page)
         activeObjectives,
         doneObjectives,
     };
+}
+
+async function captureGameplayProfile(page, mapName)
+{
+    await page.bringToFront();
+    const started = await page.evaluate((name) => ({
+        observedMs: performance.now(),
+        profileCursor: globalThis.__retailFrameProfiles.length,
+        generation: globalThis.__retailValidationFrames.findLast((entry) =>
+            entry.state === "drawn" && entry.geometrySubmitted === true &&
+            entry.worldName?.toLowerCase().includes(name))
+            ?.viewSubmissionGeneration ?? 0,
+    }), mapName);
+    expect(await page.evaluate(({ sampleLimit, timeoutMs }) =>
+        globalThis.__KISAKCOD_WEB__.module.call(
+            "_KisakWeb_TestBeginFrameProfileWithTimeout", sampleLimit, timeoutMs), {
+        sampleLimit: frameProfileSampleLimit,
+        timeoutMs: frameProfileTimeoutMs,
+    })).toBe(1);
+    const terminalHandle = await page.waitForFunction((cursor) =>
+        globalThis.__retailFrameProfiles.slice(cursor).find(
+            (entry) => entry.kind === "capture") ?? null,
+    started.profileCursor, { timeout: frameProfileTimeoutMs + 30_000 });
+    const terminal = await terminalHandle.jsonValue();
+    await terminalHandle.dispose();
+    const ended = await page.evaluate((name) => ({
+        observedMs: performance.now(),
+        generation: globalThis.__retailValidationFrames.findLast((entry) =>
+            entry.state === "drawn" && entry.geometrySubmitted === true &&
+            entry.worldName?.toLowerCase().includes(name))
+            ?.viewSubmissionGeneration ?? 0,
+    }), mapName);
+    const capture = {
+        requestedSamples: frameProfileSampleLimit,
+        timeoutMs: frameProfileTimeoutMs,
+        profileCursor: started.profileCursor,
+        startedMs: started.observedMs,
+        endedMs: ended.observedMs,
+        observedDurationMs: ended.observedMs - started.observedMs,
+        firstGeneration: started.generation,
+        finalGeneration: ended.generation,
+        profileComplete: terminal.profileComplete,
+        profileSamplesRequested: terminal.profileSamplesRequested,
+        profileSamplesCollected: terminal.profileSamplesCollected,
+        profileIncompleteReason: terminal.profileIncompleteReason,
+    };
+    expect(capture.profileComplete, JSON.stringify(capture)).toBe(true);
+    expect(capture.profileSamplesRequested).toBe(frameProfileSampleLimit);
+    expect(capture.profileSamplesCollected).toBe(frameProfileSampleLimit);
+    return capture;
 }
 
 async function missionActionBurst(page, durationMs = 8_000)
@@ -1456,8 +1466,9 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
     const killhouseMemoryAfterCGame = await rendererMemorySnapshot(page);
     await waitForWorldFrames(page, "killhouse", 120);
     const killhouseMemoryAfterWorld = await rendererMemorySnapshot(page);
-    const killhouseStability = await sustainWorldFrames(
+    const killhouseStability = await measureCleanPerformanceWindow(
         page, "killhouse", stabilityDurationMs);
+    const killhouseProfile = await captureGameplayProfile(page, "killhouse");
     const killhouseMemory = await rendererMemorySnapshot(page);
     const killhouseMemoryLifecycle = {
         beforeMapLoad: killhouseMemoryBefore,
@@ -1476,7 +1487,7 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
     const killhouseCheckpoint = await writeConfigAndCheckpoint(page);
     const killhouseEvidence = await mapEvidence(page, "killhouse", killhouseCursor,
         killhouseCommandMs, killhouseMemoryLifecycle, killhouseStability,
-        killhouseAudio, killhouseInput, killhouseCheckpoint);
+        killhouseProfile, killhouseAudio, killhouseInput, killhouseCheckpoint);
     assertMapEvidence(killhouseEvidence, killhouseMemory);
     failureStage = "Killhouse to CargoShip transition";
     failureClass = "lifecycle";
@@ -1499,8 +1510,9 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
     const cargoshipMemoryAfterCGame = await rendererMemorySnapshot(page);
     await waitForWorldFrames(page, "cargoship", 120);
     const cargoshipMemoryAfterWorld = await rendererMemorySnapshot(page);
-    const cargoshipStability = await sustainWorldFrames(
+    const cargoshipStability = await measureCleanPerformanceWindow(
         page, "cargoship", stabilityDurationMs);
+    const cargoshipProfile = await captureGameplayProfile(page, "cargoship");
     failureStage = "Killhouse to CargoShip critical input";
     failureClass = "cgame";
     const cargoshipTransitionInput = await exerciseTransitionInput(page);
@@ -1545,7 +1557,7 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
 
     const cargoshipEvidence = await mapEvidence(page, "cargoship", cargoshipCursor,
         cargoshipCommandMs, cargoshipMemoryLifecycle, cargoshipStability,
-        cargoshipAudio, cargoshipInput, cargoshipCheckpoint);
+        cargoshipProfile, cargoshipAudio, cargoshipInput, cargoshipCheckpoint);
     assertMapEvidence(cargoshipEvidence, cargoshipMemory);
 
     const transitionMemory = await page.evaluate(({ startedMs, endedMs }) =>
@@ -1672,8 +1684,9 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
         blackoutFrame.observedMs);
     failureStage = "Blackout foreground stability";
     failureClass = "renderer";
-    const blackoutStability = await sustainWorldFrames(
+    const blackoutStability = await measureCleanPerformanceWindow(
         page, "blackout", stabilityDurationMs);
+    const blackoutProfile = await captureGameplayProfile(page, "blackout");
     failureStage = "CargoShip to Blackout critical input";
     failureClass = "cgame";
     const blackoutTransitionInput = await exerciseTransitionInput(page);
@@ -1695,7 +1708,7 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
     const blackoutCheckpoint = await writeConfigAndCheckpoint(page);
     const blackoutEvidence = await mapEvidence(
         page, "blackout", blackoutCursor, blackoutCommandMs,
-        blackoutMemoryLifecycle, blackoutStability, blackoutAudio,
+        blackoutMemoryLifecycle, blackoutStability, blackoutProfile, blackoutAudio,
         blackoutInput, blackoutCheckpoint);
     blackoutEvidence.canonicalLifecycle = await lifecycleEvidence(
         page, blackoutCursor.lifecycle);
@@ -1762,7 +1775,7 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
         .toBe("running");
     expect(pageErrors).toEqual([]);
     const validationRecord = {
-        schemaVersion: 3,
+        schemaVersion: retailEvidenceSchemaVersion,
         source: { commitSha: sourceCommit, dirty: sourceDirty },
         recordedAtUtc: new Date().toISOString(),
         environment: {
@@ -1916,8 +1929,10 @@ if (phase3TargetMap) {
                 page, transitionInCursor, targetCommandMs, targetFrame.observedMs);
 
             failureStage = `${phase3TargetMap} 60-second stability`;
-            const targetStability = await sustainWorldFrames(
+            const targetStability = await measureCleanPerformanceWindow(
                 page, phase3TargetMap, 60_000);
+            const targetProfile = await captureGameplayProfile(
+                page, phase3TargetMap);
             failureStage = `${phase3TargetMap} renderer memory`;
             failureClass = "memory";
             const targetMemory = await rendererMemorySnapshot(page);
@@ -1939,7 +1954,7 @@ if (phase3TargetMap) {
             const targetCheckpoint = await writeConfigAndCheckpoint(page);
             const targetEvidence = await mapEvidence(
                 page, phase3TargetMap, targetCursor, targetCommandMs,
-                targetMemoryLifecycle, targetStability, targetAudio,
+                targetMemoryLifecycle, targetStability, targetProfile, targetAudio,
                 targetInput, targetCheckpoint);
             targetEvidence.canonicalLifecycle = await lifecycleEvidence(
                 page, targetCursor.lifecycle);
@@ -2003,7 +2018,7 @@ if (phase3TargetMap) {
             expect(pageErrors).toEqual([]);
 
             const validationRecord = {
-                schemaVersion: 3,
+                schemaVersion: retailEvidenceSchemaVersion,
                 source: { commitSha: sourceCommit, dirty: sourceDirty },
                 recordedAtUtc: new Date().toISOString(),
                 environment: {
