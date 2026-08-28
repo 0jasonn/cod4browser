@@ -163,6 +163,26 @@ test("mission route aligns fire with canonical server gun angles", async () => {
     assert(fireIndex > aimIndex);
 });
 
+test("mission route settles ADS before firing", async () => {
+    const adapter = fakeAdapter([
+        state(0, [0, 0, 0]),
+        state(100, [0, 0, 0]),
+        state(400, [0, 0, 0]),
+        state(600, [0, 0, 0]),
+        state(1_000, [0, 0, 0]),
+    ]);
+    await createMissionRouteController(adapter).run(route({
+        targetRegion: { x: 100, y: 0, z: 0, radius: 128 },
+        minimumDurationMs: 1_000,
+        actions: { ads: true, fire: true },
+    }));
+    const fireIndex = adapter.inputs.findIndex((input) =>
+        input.type === "key" && input.key === "fire" && input.down);
+    assert(fireIndex >= 0);
+    assert(adapter.inputs.slice(0, fireIndex).filter((input) =>
+        input.type === "mouse").length >= 3);
+});
+
 test("mission route reports a stuck player", async () => {
     const adapter = fakeAdapter([
         state(0, [0, 0, 0]), state(0, [0, 0, 0]),

@@ -253,8 +253,10 @@ export function createMissionRouteController(adapter, options = {})
     const tickMs = options.tickMs ?? 100;
     const mouseCountsPerDegree = options.mouseCountsPerDegree ?? 1;
     const maximumMouseDelta = options.maximumMouseDelta ?? 64;
+    const aimToleranceDegrees = options.aimToleranceDegrees ?? 3;
     const minimumProgress = options.minimumProgress ?? 8;
-    if (![tickMs, mouseCountsPerDegree, maximumMouseDelta, minimumProgress]
+    if (![tickMs, mouseCountsPerDegree, maximumMouseDelta,
+        aimToleranceDegrees, minimumProgress]
         .every((value) => Number.isFinite(value) && value > 0)) {
         throw new RangeError("mission route controller options must be positive");
     }
@@ -411,14 +413,16 @@ export function createMissionRouteController(adapter, options = {})
                                 clamp(Math.round(pitchError * mouseCountsPerDegree),
                                     -maximumMouseDelta, maximumMouseDelta));
                             facingTarget = Math.abs(yawError) < 75;
-                            aimingAtTarget = Math.abs(yawError) < 3 &&
-                                Math.abs(pitchError) < 3;
+                            aimingAtTarget =
+                                Math.abs(yawError) < aimToleranceDegrees &&
+                                Math.abs(pitchError) < aimToleranceDegrees;
                         }
                         await setHeld(adapter, held, "forward",
                             distance > segment.targetRegion.radius && facingTarget);
                         await setHeld(adapter, held, "ads", actions.ads === true);
                         await setHeld(adapter, held, "fire",
-                            actions.fire === true && aimingAtTarget);
+                            actions.fire === true && aimingAtTarget &&
+                            (actions.ads !== true || elapsed >= 500));
                         alignedFireObserved ||= held.has("fire");
                         if (state.timestampMs - lastPulse >= 1_000) {
                             for (const [action, key] of [["use", "use"], ["jump", "jump"]]) {

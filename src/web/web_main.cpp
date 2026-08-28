@@ -585,6 +585,12 @@ extern "C" EMSCRIPTEN_KEEPALIVE double KisakWeb_TestGameplayFloat(
             return level.clients[0].fGunYaw;
         return 0.0;
     }
+    if (field == 3 && level.clients)
+    {
+        float viewOrigin[3]{};
+        G_GetPlayerViewOrigin(&level.clients[0].ps, viewOrigin);
+        return viewOrigin[component];
+    }
     return std::numeric_limits<double>::quiet_NaN();
 }
 

@@ -1140,14 +1140,14 @@ async function missionRouteObservation(page)
         gameplayState(page, missionStateField.activeObjectives),
         gameplayState(page, missionStateField.doneObjectives),
         gameplayState(page, missionStateField.saveChecksum),
-        ...[0, 1, 2].flatMap((field) => [0, 1, 2].map(
+        ...[0, 1, 2, 3].flatMap((field) => [0, 1, 2].map(
             (component) => gameplayFloat(page, field, component))),
     ]);
     if (!view?.viewOrigin) throw new Error("canonical renderer view is unavailable");
     return {
         timestampMs: view.observedMs,
         origin: playerVector.slice(0, 3),
-        aimOrigin: view.viewOrigin.slice(0, 3),
+        aimOrigin: playerVector.slice(9, 12),
         viewAngles: playerVector.slice(3, 6),
         aimAngles: playerVector.slice(6, 9),
         health: serverHealth,
@@ -1318,7 +1318,7 @@ async function ensureMissionEnemyDamage(page, logStart)
                 distance: Math.hypot(...actor.origin.map((value, index) =>
                     value - observation.origin[index])),
             }))
-            .filter(({ distance }) => distance >= 64 && distance <= 2_048)
+            .filter(({ distance }) => distance >= 64 && distance <= 1_200)
             .sort((left, right) =>
                 Number(right.lineOfSight > 0) -
                     Number(left.lineOfSight > 0) ||
@@ -1336,9 +1336,9 @@ async function ensureMissionEnemyDamage(page, logStart)
                     z: visibleTarget.aimOrigin[2],
                     radius: visibleTarget.distance + 32,
                 },
-                maxDurationMs: 10_000,
-                minimumDurationMs: 2_000,
-                stuckTimeoutMs: 10_000,
+                maxDurationMs: 3_000,
+                minimumDurationMs: 1_000,
+                stuckTimeoutMs: 3_000,
                 restartPolicy: "fail",
                 actions: { ads: true, fire: true },
             };
@@ -1380,6 +1380,8 @@ async function ensureMissionEnemyDamage(page, logStart)
             await createMissionRouteController(adapter, {
                 tickMs: 100,
                 mouseCountsPerDegree: 8,
+                maximumMouseDelta: 512,
+                aimToleranceDegrees: 0.5,
                 obstacleRecoveryAttempts: 4,
             }).run({ schemaVersion: 1, map: missionTargetMap,
                 segments: [segment] });
@@ -1635,7 +1637,7 @@ async function authorAssistedMissionRoute(page)
                     (value, index) => value - observation.origin[index])),
             }))
             .filter(({ source, slot, marker, distance }) =>
-                distance >= 64 && distance <= 1_800 &&
+                distance >= 64 && distance <= 1_200 &&
                 !attempted.has(`${source}:${slot}:${marker}`))
             .sort((left, right) =>
                 Number(right.lineOfSight > 0) -
@@ -1657,7 +1659,8 @@ async function authorAssistedMissionRoute(page)
             actorMarkers.length > 0 ? actorMarkers : canonicalMarkers;
         if (markers.length === 0) break;
         const target = markers[0];
-        attempted.add(`${target.source}:${target.slot}:${target.marker}`);
+        if (target.source !== "enemy")
+            attempted.add(`${target.source}:${target.slot}:${target.marker}`);
         const segment = {
             targetRegion: {
                 x: target.origin[0], y: target.origin[1], z: target.origin[2],
@@ -1665,11 +1668,11 @@ async function authorAssistedMissionRoute(page)
                     target.source === "enemy" ? target.distance + 32 : 128,
             },
             maxDurationMs: target.source.startsWith("actor") ? 45_000 :
-                target.source === "enemy" ? 20_000 : 90_000,
+                target.source === "enemy" ? 3_000 : 90_000,
             ...(target.source === "enemy"
-                ? { minimumDurationMs: 2_000 } : {}),
+                ? { minimumDurationMs: 1_000 } : {}),
             stuckTimeoutMs: target.source.startsWith("actor") ||
-                target.source === "enemy" ? 8_000 : 12_000,
+                target.source === "enemy" ? 3_000 : 12_000,
             restartPolicy: "resume",
             actions: target.source === "enemy"
                 ? { ads: true, fire: true } : {
@@ -1685,6 +1688,7 @@ async function authorAssistedMissionRoute(page)
                 ...(combat ? {
                     mouseCountsPerDegree: 8,
                     maximumMouseDelta: 512,
+                    aimToleranceDegrees: 0.5,
                 } : {}),
                 minimumProgress: 4,
                 obstacleRecoveryAttempts: 2,
@@ -1705,7 +1709,8 @@ async function authorAssistedMissionRoute(page)
         } finally {
             routeController = null;
         }
-        if (!progressed) await adapter.wait(1_000);
+        if (!progressed && target.source !== "enemy")
+            await adapter.wait(1_000);
         const after = await adapter.observe();
         progressed ||= meaningfulProgression(after);
         const newlyProgressed = !progressedBeforeSegment && progressed;
