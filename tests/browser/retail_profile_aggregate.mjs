@@ -23,6 +23,10 @@ export const COUNTER_PROFILE_FIELDS = [
     "unmeasuredTextureUploads", "lodChanges", "shadowCasterDraws",
 ];
 
+export const GPU_PROFILE_STAGES = [
+    "world", "staticModels", "sunShadows", "spotShadows", "dynamicFx", "uiPost",
+];
+
 export function summarizeProfileSamples(values)
 {
     const finite = values.filter(Number.isFinite)
@@ -63,6 +67,8 @@ export function aggregateGameplayProfile({
             counts.set(status, (counts.get(status) ?? 0) + 1);
             return counts;
         }, new Map()));
+    const validGpuResults = matchedGpuResults.filter(
+        (entry) => entry.gpu?.status === "valid");
     const frameIntervals = frames.slice(1).map((entry, index) =>
         entry.observedMs - frames[index].observedMs).filter((value) => value >= 0);
     const profiledAverageFrameIntervalMs = frameIntervals.length
@@ -85,6 +91,8 @@ export function aggregateGameplayProfile({
         renderer: summarizeFields(frames, "renderer", RENDERER_PROFILE_FIELDS),
         counters: summarizeFields(frames, "counters", COUNTER_PROFILE_FIELDS),
         gpu: {
+            gpuStageProfilingAvailable: frames.some(
+                (entry) => entry.gpu?.timingsAvailable === true),
             timingsAvailable: frames.some(
                 (entry) => entry.gpu?.timingsAvailable === true),
             queriesIssued: frames.filter(
@@ -93,9 +101,12 @@ export function aggregateGameplayProfile({
                 (entry) => entry.gpu?.queryDropped === true).length,
             results: matchedGpuResults.length,
             statusCounts: gpuStatusCounts,
-            backendDrawMs: summarizeProfileSamples(matchedGpuResults
-                .filter((entry) => entry.gpu?.status === "valid")
-                .map((entry) => entry.gpu.backendDrawMs)),
+            stages: Object.fromEntries(GPU_PROFILE_STAGES.map((stage) => [
+                stage,
+                summarizeProfileSamples(validGpuResults
+                    .filter((entry) => entry.gpu?.stage === stage)
+                    .map((entry) => entry.gpu.stageMs)),
+            ])),
             queryLagFrames: summarizeProfileSamples(matchedGpuResults
                 .map((entry) => entry.gpu?.queryLagFrames)),
         },

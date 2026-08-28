@@ -994,6 +994,16 @@ async function captureGameplayProfile(page, mapName)
     started.profileCursor, { timeout: frameProfileTimeoutMs + 30_000 });
     const terminal = await terminalHandle.jsonValue();
     await terminalHandle.dispose();
+    const gpuResultsExpected = await page.evaluate((cursor) =>
+        globalThis.__retailFrameProfiles.slice(cursor).filter((entry) =>
+            entry.kind === "frame" && entry.gpu?.queryIssued === true).length,
+    started.profileCursor);
+    if (gpuResultsExpected > 0) {
+        await expect.poll(() => page.evaluate((cursor) =>
+            globalThis.__retailFrameProfiles.slice(cursor).filter((entry) =>
+                entry.kind === "gpu-result").length,
+        started.profileCursor), { timeout: 30_000 }).toBe(gpuResultsExpected);
+    }
     const ended = await page.evaluate((name) => ({
         observedMs: performance.now(),
         generation: globalThis.__retailValidationFrames.findLast((entry) =>
@@ -1014,6 +1024,8 @@ async function captureGameplayProfile(page, mapName)
         profileSamplesRequested: terminal.profileSamplesRequested,
         profileSamplesCollected: terminal.profileSamplesCollected,
         profileIncompleteReason: terminal.profileIncompleteReason,
+        gpuResultsExpected,
+        gpuResultsCollected: gpuResultsExpected,
     };
     expect(capture.profileComplete, JSON.stringify(capture)).toBe(true);
     expect(capture.profileSamplesRequested).toBe(frameProfileSampleLimit);

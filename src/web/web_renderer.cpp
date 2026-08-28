@@ -530,7 +530,10 @@ struct FrameProfileGpuQuery
     GLuint query = 0u;
     std::uint32_t pumpTick = 0u;
     std::uint32_t contextGeneration = 0u;
+    std::uint32_t worldGeneration = 0u;
     std::uint32_t viewSubmissionGeneration = 0u;
+    WebFrameProfileGpuStage stage = WebFrameProfileGpuStage::None;
+    std::string mapName;
     std::uint32_t lagFrames = 0u;
     bool pending = false;
 };
@@ -540,6 +543,7 @@ std::array<FrameProfileGpuQuery, FRAME_PROFILE_GPU_QUERY_COUNT>
     g_frameProfileGpuQueries{};
 bool g_frameProfileGpuSupported = false;
 FrameProfileGpuQuery *g_frameProfileActiveGpuQuery = nullptr;
+std::uint32_t g_frameProfileGpuStageOrdinal = 0u;
 FrameProfileDrawBucket g_frameProfileDrawBucket = FrameProfileDrawBucket::None;
 GLuint g_frameProfileLastProgram = std::numeric_limits<GLuint>::max();
 
@@ -555,6 +559,7 @@ void ResetFrameProfileGpuQueries(bool deleteObjects)
     g_frameProfileGpuQueries = {};
     g_frameProfileGpuSupported = false;
     g_frameProfileActiveGpuQuery = nullptr;
+    g_frameProfileGpuStageOrdinal = 0u;
     g_frameProfileLastProgram = std::numeric_limits<GLuint>::max();
 }
 
@@ -586,7 +591,10 @@ void PollFrameProfileGpuQueries()
             WebFrameProfile_PublishGpuResult(
                 slot.pumpTick,
                 slot.contextGeneration,
+                slot.worldGeneration,
                 slot.viewSubmissionGeneration,
+                slot.stage,
+                slot.mapName.c_str(),
                 0.0,
                 slot.lagFrames,
                 "disjoint");
@@ -598,24 +606,39 @@ void PollFrameProfileGpuQueries()
         if (available != GL_TRUE) continue;
         GLuint64 nanoseconds = 0u;
         glGetQueryObjectui64vEXT(slot.query, GL_QUERY_RESULT, &nanoseconds);
-        const bool stale = slot.contextGeneration !=
+        const bool staleContext = slot.contextGeneration !=
             g_renderer.contextGeneration;
+        const bool staleWorld = slot.worldGeneration !=
+                g_renderer.sceneViewSurfaceSubmissionGeneration ||
+            slot.mapName != g_renderer.sceneViewWorldName;
         WebFrameProfile_PublishGpuResult(
             slot.pumpTick,
             slot.contextGeneration,
+            slot.worldGeneration,
             slot.viewSubmissionGeneration,
-            stale ? 0.0
+            slot.stage,
+            slot.mapName.c_str(),
+            staleContext || staleWorld ? 0.0
                 : static_cast<double>(nanoseconds) / 1'000'000.0,
             slot.lagFrames,
-            stale ? "stale-context" : "valid");
+            staleContext ? "stale-context" :
+                staleWorld ? "stale-world" : "valid");
         slot.pending = false;
     }
 }
 
-void BeginFrameProfileGpuQuery(WebFrameProfileSample &profile)
+void SelectFrameProfileGpuStage(WebFrameProfileSample &profile)
 {
     profile.gpuTimingsAvailable = g_frameProfileGpuSupported;
     if (!g_frameProfileGpuSupported) return;
+    profile.gpuStage = WebFrameProfile_GpuStageForOrdinal(
+        g_frameProfileGpuStageOrdinal++);
+}
+
+void BeginFrameProfileGpuQuery(
+    WebFrameProfileSample &profile, WebFrameProfileGpuStage stage)
+{
+    if (profile.gpuStage != stage) return;
     auto slot = std::find_if(g_frameProfileGpuQueries.begin(),
         g_frameProfileGpuQueries.end(),
         [](const FrameProfileGpuQuery &candidate) {
@@ -628,17 +651,23 @@ void BeginFrameProfileGpuQuery(WebFrameProfileSample &profile)
     }
     slot->pumpTick = profile.pumpTick;
     slot->contextGeneration = g_renderer.contextGeneration;
+    slot->worldGeneration =
+        g_renderer.sceneViewSurfaceSubmissionGeneration;
     slot->viewSubmissionGeneration =
         g_renderer.sceneViewSubmissionGeneration;
+    slot->stage = stage;
+    slot->mapName = g_renderer.sceneViewWorldName;
     slot->lagFrames = 0u;
     glBeginQuery(GL_TIME_ELAPSED_EXT, slot->query);
     g_frameProfileActiveGpuQuery = &*slot;
     profile.gpuQueryIssued = true;
 }
 
-void EndFrameProfileGpuQuery()
+void EndFrameProfileGpuQuery(WebFrameProfileGpuStage stage)
 {
-    if (!g_frameProfileActiveGpuQuery) return;
+    if (!g_frameProfileActiveGpuQuery ||
+        g_frameProfileActiveGpuQuery->stage != stage)
+        return;
     glEndQuery(GL_TIME_ELAPSED_EXT);
     g_frameProfileActiveGpuQuery->pending = true;
     g_frameProfileActiveGpuQuery = nullptr;
@@ -8991,7 +9020,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
             g_renderer.surfaceSubmissionGeneration;
 #if KISAK_WEB_DIAGNOSTICS
     if (frameProfile && frameProfile->gameplayFrame && sceneGeometryDraw)
-        BeginFrameProfileGpuQuery(*frameProfile);
+        SelectFrameProfileGpuStage(*frameProfile);
 #endif
     if (g_renderer.sceneViewActive && !sceneGeometryDraw &&
         !g_renderer.sceneViewFirstDrawCompleted &&
@@ -9047,22 +9076,36 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
     {
         staticModelLodFailureReported = false;
     }
+#if KISAK_WEB_DIAGNOSTICS
+    if (frameProfile)
+        BeginFrameProfileGpuQuery(
+            *frameProfile, WebFrameProfileGpuStage::SunShadows);
+#endif
     const bool shadowMapDrawn = sceneGeometryDraw && staticModelLodsReady &&
         DrawSunShadowMaps();
 #if KISAK_WEB_DIAGNOSTICS
     if (frameProfile)
     {
+        EndFrameProfileGpuQuery(WebFrameProfileGpuStage::SunShadows);
         frameProfile->sunShadowDrawMs =
             WebFrameProfile_Now() - rendererStageStarted;
         rendererStageStarted = WebFrameProfile_Now();
     }
 #endif
+#if KISAK_WEB_DIAGNOSTICS
+    if (frameProfile)
+        BeginFrameProfileGpuQuery(
+            *frameProfile, WebFrameProfileGpuStage::SpotShadows);
+#endif
     const bool spotShadowMapsDrawn = sceneGeometryDraw &&
         staticModelLodsReady && DrawSpotShadowMaps();
 #if KISAK_WEB_DIAGNOSTICS
     if (frameProfile)
+    {
+        EndFrameProfileGpuQuery(WebFrameProfileGpuStage::SpotShadows);
         frameProfile->spotShadowDrawMs =
             WebFrameProfile_Now() - rendererStageStarted;
+    }
     g_frameProfileDrawBucket = FrameProfileDrawBucket::None;
 #endif
     glBindFramebuffer(GL_FRAMEBUFFER,
@@ -9264,6 +9307,9 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
 #if KISAK_WEB_DIAGNOSTICS
     const double worldProfileStarted = frameProfile
         ? WebFrameProfile_Now() : 0.0;
+    if (frameProfile)
+        BeginFrameProfileGpuQuery(
+            *frameProfile, WebFrameProfileGpuStage::World);
     g_frameProfileDrawBucket = FrameProfileDrawBucket::World;
 #endif
     if (worldBatchDraw)
@@ -9473,9 +9519,15 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
     }
 #if KISAK_WEB_DIAGNOSTICS
     if (frameProfile)
+    {
+        EndFrameProfileGpuQuery(WebFrameProfileGpuStage::World);
         frameProfile->worldMs = WebFrameProfile_Now() - worldProfileStarted;
+    }
     const double staticProfileStarted = frameProfile
         ? WebFrameProfile_Now() : 0.0;
+    if (frameProfile)
+        BeginFrameProfileGpuQuery(
+            *frameProfile, WebFrameProfileGpuStage::StaticModels);
     g_frameProfileDrawBucket = FrameProfileDrawBucket::StaticModel;
 #endif
     if (sceneGeometryDraw && staticModelLodsReady && !compatibilityDraw &&
@@ -9600,8 +9652,11 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
     }
 #if KISAK_WEB_DIAGNOSTICS
     if (frameProfile)
+    {
+        EndFrameProfileGpuQuery(WebFrameProfileGpuStage::StaticModels);
         frameProfile->staticModelsMs =
             WebFrameProfile_Now() - staticProfileStarted;
+    }
     g_frameProfileDrawBucket = FrameProfileDrawBucket::DynamicModel;
 #endif
     if (sceneGeometryDraw && !compatibilityDraw &&
@@ -9615,6 +9670,21 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.specularMapEnabledUniform, 0.0f);
         BindModelLightingTexture(g_renderer.retainedDynamicModelLighting);
+#if KISAK_WEB_DIAGNOSTICS
+        const WebRendererRetainedWorldBatch *lastSunVisibilityBatch = nullptr;
+        for (const WebRendererRetainedWorldBatch &batch :
+             g_renderer.retainedDynamicModelBatches)
+        {
+            if (!batch.depthHack &&
+                batch.sourceKind == WebRendererSceneBatchKind::SunFlare &&
+                WebRenderer_IsCameraVisibleXModelSurface(
+                    batch.sourceKind, batch.cameraRegion))
+                lastSunVisibilityBatch = &batch;
+        }
+        if (frameProfile && !lastSunVisibilityBatch)
+            BeginFrameProfileGpuQuery(
+                *frameProfile, WebFrameProfileGpuStage::DynamicFx);
+#endif
         // The portable command combines ordinary DObjs, moving brush models,
         // DynEnts, and first-person DObjs in one buffer. Native draw-surf
         // generation keeps depth-hacked first-person surfaces in their camera
@@ -9653,6 +9723,11 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                         // backend cannot supply asynchronous query objects.
                         g_renderer.sunVisibility =
                             batch.falloffParms[3] > 0.5f ? 1.0f : 0.0f;
+#if KISAK_WEB_DIAGNOSTICS
+                        if (frameProfile && &batch == lastSunVisibilityBatch)
+                            BeginFrameProfileGpuQuery(*frameProfile,
+                                WebFrameProfileGpuStage::DynamicFx);
+#endif
                         continue;
                     }
                     const std::uint32_t queryIndex =
@@ -9747,6 +9822,9 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
 #if KISAK_WEB_DIAGNOSTICS
                     AddProfileDynamicTime(batch.sourceKind,
                         WebFrameProfile_Now() - dynamicBatchProfileStarted);
+                    if (frameProfile && &batch == lastSunVisibilityBatch)
+                        BeginFrameProfileGpuQuery(*frameProfile,
+                            WebFrameProfileGpuStage::DynamicFx);
 #endif
                     continue;
                 }
@@ -9938,11 +10016,18 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         glActiveTexture(GL_TEXTURE0);
     }
+#if KISAK_WEB_DIAGNOSTICS
+    if (frameProfile)
+        EndFrameProfileGpuQuery(WebFrameProfileGpuStage::DynamicFx);
+#endif
     if (sceneGeometryDraw && !compatibilityDraw)
         UpdateSunPostEffectState();
 #if KISAK_WEB_DIAGNOSTICS
     const double postProfileStarted = frameProfile
         ? WebFrameProfile_Now() : 0.0;
+    if (frameProfile)
+        BeginFrameProfileGpuQuery(
+            *frameProfile, WebFrameProfileGpuStage::UiPost);
     g_frameProfileDrawBucket = FrameProfileDrawBucket::PostProcess;
 #endif
     if (multisampleDraw)
@@ -10149,7 +10234,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
     if (frameProfile)
         frameProfile->postProcessMs +=
             WebFrameProfile_Now() - rendererStageStarted;
-    EndFrameProfileGpuQuery();
+    EndFrameProfileGpuQuery(WebFrameProfileGpuStage::UiPost);
     g_frameProfileDrawBucket = FrameProfileDrawBucket::None;
 #endif
     GLenum sceneDrawError = GL_NO_ERROR;

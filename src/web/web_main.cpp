@@ -41,7 +41,7 @@ EM_JS(void, DispatchFrameProfile,
      std::uint32_t worldGeneration,
      std::uint32_t viewSubmissionGeneration, bool gameplayFrame,
      bool rendererSubmitted, bool gpuTimingsAvailable, bool gpuQueryIssued,
-     bool gpuQueryDropped,
+     bool gpuQueryDropped, const char *gpuQueryStage,
      double filesystemMs, double commandMs, double serverMs,
      double clientOnceMs, double commandBufferMs, double clientFrameMs,
      double cgameFrameMs, double sceneBuildMs, double rendererFrontendMs,
@@ -89,7 +89,8 @@ EM_JS(void, DispatchFrameProfile,
                 gpu: {
                     timingsAvailable: Boolean(gpuTimingsAvailable),
                     queryIssued: Boolean(gpuQueryIssued),
-                    queryDropped: Boolean(gpuQueryDropped)
+                    queryDropped: Boolean(gpuQueryDropped),
+                    stage: UTF8ToString(gpuQueryStage)
                 },
                 counters: {
                     worldSurfacesSubmitted, worldSurfacesDrawn,
@@ -124,17 +125,22 @@ EM_JS(void, DispatchFrameProfileCapture,
 
 EM_JS(void, DispatchFrameProfileGpuResult,
     (std::uint32_t pumpTick, std::uint32_t contextGeneration,
-     std::uint32_t viewSubmissionGeneration, double gpuMilliseconds,
+     std::uint32_t worldGeneration,
+     std::uint32_t viewSubmissionGeneration, const char *stage,
+     const char *mapName, double gpuMilliseconds,
      std::uint32_t queryLagFrames, const char *status), {
         globalThis.dispatchEvent(new CustomEvent("kisakcod:frame-profile", {
             detail: {
                 kind: "gpu-result",
                 pumpTick: pumpTick >>> 0,
                 contextGeneration: contextGeneration >>> 0,
+                worldGeneration: worldGeneration >>> 0,
                 viewSubmissionGeneration: viewSubmissionGeneration >>> 0,
+                map: UTF8ToString(mapName),
                 gpu: {
                     status: UTF8ToString(status),
-                    backendDrawMs: gpuMilliseconds,
+                    stage: UTF8ToString(stage),
+                    stageMs: gpuMilliseconds,
                     queryLagFrames: queryLagFrames >>> 0
                 }
             }
@@ -223,6 +229,7 @@ void WebFrameProfile_EndPump(bool gameplayFrame, bool rendererSubmitted)
         s.viewSubmissionGeneration,
         s.gameplayFrame, s.rendererSubmitted, s.gpuTimingsAvailable,
         s.gpuQueryIssued, s.gpuQueryDropped,
+        WebFrameProfile_GpuStageName(s.gpuStage),
         s.filesystemMs, s.commandMs, s.serverMs, s.clientOnceMs,
         s.commandBufferMs, s.clientFrameMs, s.cgameFrameMs, s.sceneBuildMs,
         s.rendererFrontendMs, s.soundMs, s.rendererBackendMs, s.totalMs,
@@ -264,13 +271,17 @@ void WebFrameProfile_EndPump(bool gameplayFrame, bool rendererSubmitted)
 void WebFrameProfile_PublishGpuResult(
     std::uint32_t pumpTick,
     std::uint32_t contextGeneration,
+    std::uint32_t worldGeneration,
     std::uint32_t viewSubmissionGeneration,
+    WebFrameProfileGpuStage stage,
+    const char *mapName,
     double gpuMilliseconds,
     std::uint32_t queryLagFrames,
     const char *status)
 {
-    DispatchFrameProfileGpuResult(pumpTick, contextGeneration,
-        viewSubmissionGeneration, gpuMilliseconds, queryLagFrames, status);
+    DispatchFrameProfileGpuResult(pumpTick, contextGeneration, worldGeneration,
+        viewSubmissionGeneration, WebFrameProfile_GpuStageName(stage), mapName,
+        gpuMilliseconds, queryLagFrames, status);
 }
 #endif
 

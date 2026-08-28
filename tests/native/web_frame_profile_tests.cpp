@@ -18,6 +18,21 @@ void Finish(WebFrameProfileCapture &capture, double now,
 
 int main()
 {
+    constexpr WebFrameProfileGpuStage stages[] = {
+        WebFrameProfileGpuStage::World,
+        WebFrameProfileGpuStage::StaticModels,
+        WebFrameProfileGpuStage::SunShadows,
+        WebFrameProfileGpuStage::SpotShadows,
+        WebFrameProfileGpuStage::DynamicFx,
+        WebFrameProfileGpuStage::UiPost,
+    };
+    for (std::uint32_t ordinal = 0u; ordinal < 12u; ++ordinal)
+    {
+        assert(WebFrameProfile_GpuStageForOrdinal(ordinal) ==
+            stages[ordinal % 6u]);
+        assert(WebFrameProfile_GpuStageName(stages[ordinal % 6u])[0] != '\0');
+    }
+
     WebFrameProfileCapture capture;
 
     capture.Begin(5u, 0.0, 100.0);

@@ -42,11 +42,12 @@ test("gameplay profile aggregation keeps populations and overhead explicit", () 
     const profile = aggregateGameplayProfile({
         frames,
         gpuResults: [
-            { pumpTick: 10, gpu: { status: "valid", backendDrawMs: 5,
+            { pumpTick: 10, gpu: { status: "valid", stage: "world", stageMs: 5,
                 queryLagFrames: 2 } },
-            { pumpTick: 11, gpu: { status: "valid", backendDrawMs: 99,
+            { pumpTick: 11, gpu: { status: "valid", stage: "world", stageMs: 99,
                 queryLagFrames: 1 } },
-            { pumpTick: 12, gpu: { status: "disjoint", queryLagFrames: 3 } },
+            { pumpTick: 12, gpu: { status: "disjoint", stage: "staticModels",
+                queryLagFrames: 3 } },
         ],
         capture: {
             profileComplete: true,
@@ -72,7 +73,10 @@ test("gameplay profile aggregation keeps populations and overhead explicit", () 
     assert.equal(profile.counters.worldDrawCalls.maximum, 8);
     assert.equal(profile.gpu.results, 2);
     assert.deepEqual(profile.gpu.statusCounts, { valid: 1, disjoint: 1 });
-    assert.equal(profile.gpu.backendDrawMs.sampleCount, 1);
+    assert.equal(profile.gpu.gpuStageProfilingAvailable, true);
+    assert.equal(profile.gpu.stages.world.sampleCount, 1);
+    assert.equal(profile.gpu.stages.world.average, 5);
+    assert.equal(profile.gpu.stages.staticModels, null);
     assert.equal(profile.overhead.profiledAverageFrameIntervalMs, 20);
     assert.equal(profile.overhead.profilerOverheadPercent, 25);
 });

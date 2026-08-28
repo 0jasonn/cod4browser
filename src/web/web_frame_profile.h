@@ -26,6 +26,47 @@ enum class WebFrameProfilePumpResult : std::uint8_t
     CaptureIncomplete,
 };
 
+enum class WebFrameProfileGpuStage : std::uint8_t
+{
+    None,
+    World,
+    StaticModels,
+    SunShadows,
+    SpotShadows,
+    DynamicFx,
+    UiPost,
+};
+
+constexpr WebFrameProfileGpuStage WebFrameProfile_GpuStageForOrdinal(
+    std::uint32_t ordinal) noexcept
+{
+    switch (ordinal % 6u)
+    {
+    case 0u: return WebFrameProfileGpuStage::World;
+    case 1u: return WebFrameProfileGpuStage::StaticModels;
+    case 2u: return WebFrameProfileGpuStage::SunShadows;
+    case 3u: return WebFrameProfileGpuStage::SpotShadows;
+    case 4u: return WebFrameProfileGpuStage::DynamicFx;
+    default: return WebFrameProfileGpuStage::UiPost;
+    }
+}
+
+constexpr const char *WebFrameProfile_GpuStageName(
+    WebFrameProfileGpuStage stage) noexcept
+{
+    switch (stage)
+    {
+    case WebFrameProfileGpuStage::None: return "none";
+    case WebFrameProfileGpuStage::World: return "world";
+    case WebFrameProfileGpuStage::StaticModels: return "staticModels";
+    case WebFrameProfileGpuStage::SunShadows: return "sunShadows";
+    case WebFrameProfileGpuStage::SpotShadows: return "spotShadows";
+    case WebFrameProfileGpuStage::DynamicFx: return "dynamicFx";
+    case WebFrameProfileGpuStage::UiPost: return "uiPost";
+    }
+    return "unknown";
+}
+
 struct WebFrameProfileCapture
 {
     void Begin(std::uint32_t targetSamples, double nowMilliseconds,
@@ -118,6 +159,7 @@ struct WebFrameProfileSample
     bool gpuTimingsAvailable = false;
     bool gpuQueryIssued = false;
     bool gpuQueryDropped = false;
+    WebFrameProfileGpuStage gpuStage = WebFrameProfileGpuStage::None;
 
     double filesystemMs = 0.0;
     double commandMs = 0.0;
@@ -185,7 +227,10 @@ void WebFrameProfile_EndPump(bool gameplayFrame, bool rendererSubmitted);
 void WebFrameProfile_PublishGpuResult(
     std::uint32_t pumpTick,
     std::uint32_t contextGeneration,
+    std::uint32_t worldGeneration,
     std::uint32_t viewSubmissionGeneration,
+    WebFrameProfileGpuStage stage,
+    const char *mapName,
     double gpuMilliseconds,
     std::uint32_t queryLagFrames,
     const char *status);
