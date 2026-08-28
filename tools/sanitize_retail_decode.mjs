@@ -43,7 +43,8 @@ const output = {
         contextRecoveryPerMap: true,
         encodedImageInspectionCount:
             "new retained 2D image source lookup attempts",
-        metadataParseCount: "IWI header parses performed by pixel decode",
+        metadataParseCount:
+            "IWI header parses performed during layout inspection or pixel decode",
         pixelDecodeCount: "2D encoded-source decoder invocations",
         initialUploadDecodeCount:
             "decoder invocations before or during initial WebGL upload",
