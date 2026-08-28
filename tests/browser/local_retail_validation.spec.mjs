@@ -1548,7 +1548,6 @@ async function authorAssistedMissionRoute(page)
                 await adapter.wait(1_000);
                 continue;
             }
-            break;
         }
         if (actorMarkers.length > 0) squadUpdateWaits = 0;
         const markers = enemyMarkers.length > 0 ? enemyMarkers :
