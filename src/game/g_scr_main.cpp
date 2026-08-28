@@ -6,6 +6,7 @@
 #include <script/scr_animtree.h>
 
 #include "g_scr_main.h"
+#include "g_scr_main_math.h"
 #include "g_public.h"
 #include <script/scr_stringlist.h>
 #include <qcommon/mem_track.h>
@@ -1488,12 +1489,10 @@ void GScr_GetDvarFloat()
 {
     const char *String; // r3
     const char *VariantString; // r3
-    long double v2; // fp2
 
     String = Scr_GetString(0);
     VariantString = SV_Archived_Dvar_GetVariantString(String);
-    v2 = atof(VariantString);
-    Scr_AddFloat((float)*(double *)&v2);
+    Scr_AddFloat(GScr_ParseFloatValue(VariantString));
 }
 
 void GScr_GetDebugDvar()
@@ -1531,12 +1530,10 @@ void GScr_GetDebugDvarFloat()
 {
     const char *String; // r3
     const char *VariantString; // r3
-    long double v2; // fp2
 
     String = Scr_GetString(0);
     VariantString = Dvar_GetVariantString(String);
-    v2 = atof(VariantString);
-    Scr_AddFloat((float)*(double *)&v2);
+    Scr_AddFloat(GScr_ParseFloatValue(VariantString));
 }
 
 void GScr_SetDvar()
@@ -5710,22 +5707,12 @@ void GScr_max()
 
 void GScr_floor()
 {
-    long double v0; // fp2
-    long double v1; // fp2
-
-    *(double *)&v0 = Scr_GetFloat(0);
-    v1 = floor(v0);
-    Scr_AddFloat((float)*(double *)&v1);
+    Scr_AddFloat(GScr_FloorValue(Scr_GetFloat(0)));
 }
 
 void GScr_ceil()
 {
-    long double v0; // fp2
-    long double v1; // fp2
-
-    *(double *)&v0 = Scr_GetFloat(0);
-    v1 = ceil(v0);
-    Scr_AddFloat((float)*(double *)&v1);
+    Scr_AddFloat(GScr_CeilValue(Scr_GetFloat(0)));
 }
 
 void GScr_sqrt()

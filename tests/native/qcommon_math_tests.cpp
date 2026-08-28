@@ -1,5 +1,6 @@
 #include <qcommon/qcommon_math.h>
 #include <game/g_active_math.h>
+#include <game/g_scr_main_math.h>
 #include <universal/com_random.h>
 
 #include <array>
@@ -8,6 +9,16 @@
 
 int main()
 {
+#if defined(__EMSCRIPTEN__)
+    static_assert(sizeof(long double) == 16);
+#elif defined(_WIN32)
+    static_assert(sizeof(long double) == 8);
+#endif
+
+    assert(GScr_ParseFloatValue("12.5") == 12.5f);
+    assert(GScr_ParseFloatValue("-0.125") == -0.125f);
+    assert(GScr_ParseFloatValue("17.25 trailing") == 17.25f);
+
     static_assert(Q_RandomToUnitFloat(0u, 32767u) == 0.0f);
     static_assert(Q_RandomToUnitFloat(16384u, 32767u) == 0.5f);
     static_assert(Q_RandomToUnitFloat(32767u, 32767u) ==
@@ -40,6 +51,34 @@ int main()
     {
         assert(SnapFloatToInt(input) == expected);
         assert(SnapFloat(input) == static_cast<float>(expected));
+    }
+
+    constexpr std::array<std::pair<float, float>, 7> floorCases{{
+        {-2.75f, -3.0f},
+        {-1.0f, -1.0f},
+        {-0.25f, -1.0f},
+        {0.0f, 0.0f},
+        {0.25f, 0.0f},
+        {1.0f, 1.0f},
+        {2.75f, 2.0f},
+    }};
+    for (const auto &[input, expected] : floorCases)
+    {
+        assert(GScr_FloorValue(input) == expected);
+    }
+
+    constexpr std::array<std::pair<float, float>, 7> ceilCases{{
+        {-2.75f, -2.0f},
+        {-1.0f, -1.0f},
+        {-0.25f, 0.0f},
+        {0.0f, 0.0f},
+        {0.25f, 1.0f},
+        {1.0f, 1.0f},
+        {2.75f, 3.0f},
+    }};
+    for (const auto &[input, expected] : ceilCases)
+    {
+        assert(GScr_CeilValue(input) == expected);
     }
 
     return 0;
