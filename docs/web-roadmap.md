@@ -1,5 +1,27 @@
 # Web product roadmap
 
+## Mission-route pass status — 2026-08-28
+
+1. **Complete:** diagnostics-only versioned route parsing, waypoint steering,
+   ordinary canonical input replay, clear timeout/stuck/death/divergence/
+   cancellation failures, and canonical checkpoint-restart observation.
+2. **Complete:** opt-in headed authoring records sparse sanitized numeric
+   observations and input transitions; F8 marks a target and F9 writes the
+   route plus evidence sidecar.
+3. **Complete:** 12 synthetic tests cover the requested route contract and
+   prove that no direct gameplay-state mutation API exists.
+4. **Blocked by inputs, not classified as an engine defect:** no explicit
+   `KISAK_COD4_RETAIL_ROOT` was supplied, so Village Assault objective/trigger
+   progression cannot be proved in this pass.
+5. **Not started by design:** CargoShip substage profiling, canonical DPVS
+   census, six-map reprofiling, one renderer optimization, Village Assault
+   save/reload completion, Scout Sniper, AC-130, and further Wasm fixes all
+   remain behind the progression gate.
+
+Current decision: run headed Village Assault route authoring/replay next with
+an explicitly supplied legal retail root. Do not start renderer or campaign
+expansion work first.
+
 ## Corrected-profile pass status — 2026-08-28
 
 1. **Complete:** profile requests count completed gameplay/render samples,

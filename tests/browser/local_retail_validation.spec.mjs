@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { cpus, platform, release, tmpdir, totalmem, version } from "node:os";
 import { join } from "node:path";
 
@@ -7,11 +7,20 @@ import { chromium, expect, test as base } from "@playwright/test";
 
 import { summarizeForegroundSamples } from "./retail_foreground_window.mjs";
 import { aggregateGameplayProfile } from "./retail_profile_aggregate.mjs";
+import {
+    createMissionRouteController,
+    createMissionRouteRecorder,
+    parseMissionRoute,
+} from "../../web/diagnostic_mission_route.mjs";
 
 const retailRoot = process.env.KISAK_COD4_RETAIL_ROOT;
 const browserChannel = process.env.KISAK_BROWSER_CHANNEL;
 const phase3TargetMap = process.env.KISAK_RETAIL_PHASE3_MAP?.trim().toLowerCase();
 const missionTargetMap = process.env.KISAK_RETAIL_MISSION_MAP?.trim().toLowerCase();
+const missionRoutePath = process.env.KISAK_RETAIL_ROUTE_PATH?.trim();
+const missionRouteOutputPath = process.env.KISAK_RETAIL_ROUTE_OUTPUT?.trim();
+const missionRouteMode = process.env.KISAK_RETAIL_ROUTE_MODE?.trim().toLowerCase() ??
+    (missionRoutePath ? "replay" : null);
 const runDecodeChain = process.env.KISAK_RETAIL_DECODE_CHAIN === "1";
 if (phase3TargetMap && (!/^[a-z0-9_]+$/.test(phase3TargetMap) ||
     phase3TargetMap.startsWith("mp_") || phase3TargetMap.endsWith("_mp"))) {
@@ -21,6 +30,12 @@ if (missionTargetMap && (!/^[a-z0-9_]+$/.test(missionTargetMap) ||
     missionTargetMap.startsWith("mp_") || missionTargetMap.endsWith("_mp"))) {
     throw new Error("KISAK_RETAIL_MISSION_MAP must name one single-player zone");
 }
+if (missionRouteMode && !["author", "replay"].includes(missionRouteMode))
+    throw new Error("KISAK_RETAIL_ROUTE_MODE must be author or replay");
+if (missionRouteMode === "author" && !missionRouteOutputPath)
+    throw new Error("KISAK_RETAIL_ROUTE_OUTPUT is required in author mode");
+if (missionRouteMode === "replay" && !missionRoutePath)
+    throw new Error("KISAK_RETAIL_ROUTE_PATH is required in replay mode");
 const sourceCommit = execFileSync(
     "git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 const sourceDirty = execFileSync(
@@ -85,8 +100,10 @@ test.afterEach(async ({}, testInfo) => {
     if (testInfo.status === testInfo.expectedStatus) return;
     const phase3 = testInfo.tags.includes("@retail-phase3");
     const mission = testInfo.tags.includes("@retail-mission");
+    const routeAuthor = testInfo.tags.includes("@retail-route-author");
     const decode = testInfo.tags.includes("@retail-decode");
-    const prefix = mission ? "KISAK_RETAIL_MISSION_RESULT" : phase3
+    const prefix = routeAuthor ? "KISAK_RETAIL_ROUTE_RESULT" : mission
+        ? "KISAK_RETAIL_MISSION_RESULT" : phase3
         ? "KISAK_RETAIL_PHASE3_RESULT" : decode
             ? "KISAK_RETAIL_DECODE_RESULT" : "KISAK_RETAIL_RESULT";
     console.log(`${prefix} ${JSON.stringify({
@@ -106,7 +123,7 @@ test.afterEach(async ({}, testInfo) => {
         failureStage,
         failureClass,
         ...(phase3 ? { targetMap: phase3TargetMap } : {}),
-        ...(mission ? { targetMap: missionTargetMap } : {}),
+        ...(mission || routeAuthor ? { targetMap: missionTargetMap } : {}),
     })}`);
 });
 
@@ -130,6 +147,14 @@ async function installRetailObservers(page)
         globalThis.__retailAudioPlaybackCount = 0;
         globalThis.__retailCinematics = [];
         globalThis.__retailLogs = [];
+        globalThis.__retailRouteAuthor = { markers: 0, finish: false };
+        globalThis.addEventListener("keydown", (event) => {
+            if (event.code !== "F8" && event.code !== "F9") return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            if (event.code === "F8") ++globalThis.__retailRouteAuthor.markers;
+            else globalThis.__retailRouteAuthor.finish = true;
+        }, true);
         globalThis.addEventListener("kisakcod:log", (event) => {
             globalThis.__retailLogs.push(structuredClone(event.detail));
         });
@@ -158,7 +183,9 @@ async function installRetailObservers(page)
             });
         });
         globalThis.addEventListener("kisakcod:input", (event) => {
-            globalThis.__retailValidationInput.push(structuredClone(event.detail));
+            globalThis.__retailValidationInput.push({
+                ...structuredClone(event.detail), observedMs: performance.now(),
+            });
         });
         globalThis.addEventListener("kisakcod:engine-lifecycle", (event) => {
             globalThis.__retailLifecycle.push({
@@ -928,6 +955,14 @@ async function gameplayState(page, field, weaponIndex = 0)
         { stateField: field, weapon: weaponIndex });
 }
 
+async function gameplayFloat(page, field, component)
+{
+    return page.evaluate(
+        ({ stateField, vectorComponent }) => globalThis.__KISAKCOD_WEB__.module.call(
+            "_KisakWeb_TestGameplayFloat", stateField, vectorComponent),
+        { stateField: field, vectorComponent: component });
+}
+
 const missionStateField = Object.freeze({
     serverHealth: 17,
     serverPmType: 18,
@@ -1000,6 +1035,186 @@ async function canonicalMissionState(page)
         doneObjectives,
         saveChecksum,
     };
+}
+
+async function missionRouteObservation(page)
+{
+    const [view, serverHealth, objectiveHash, activeActors, aliveActors,
+        scriptThreads, missionFlags, committedSave, saveId, activeObjectives,
+        doneObjectives, saveChecksum, ...playerVector] = await Promise.all([
+        page.evaluate(() => structuredClone(
+            globalThis.__retailValidationViews.at(-1))),
+        gameplayState(page, missionStateField.serverHealth),
+        gameplayState(page, missionStateField.objectiveHash),
+        gameplayState(page, missionStateField.activeActors),
+        gameplayState(page, missionStateField.aliveActors),
+        gameplayState(page, missionStateField.scriptThreads),
+        gameplayState(page, missionStateField.missionFlags),
+        gameplayState(page, missionStateField.committedSave),
+        gameplayState(page, missionStateField.saveId),
+        gameplayState(page, missionStateField.activeObjectives),
+        gameplayState(page, missionStateField.doneObjectives),
+        gameplayState(page, missionStateField.saveChecksum),
+        ...[0, 1].flatMap((field) => [0, 1, 2].map(
+            (component) => gameplayFloat(page, field, component))),
+    ]);
+    if (!view?.viewOrigin) throw new Error("canonical renderer view is unavailable");
+    return {
+        timestampMs: view.observedMs,
+        origin: playerVector.slice(0, 3),
+        viewAngles: playerVector.slice(3, 6),
+        health: serverHealth,
+        progression: {
+            objectiveHash,
+            activeObjectives,
+            doneObjectives,
+            missionFlags,
+        },
+        mission: {
+            activeActors,
+            aliveActors,
+            scriptThreads,
+        },
+        checkpoint: {
+            committed: Boolean(committedSave),
+            saveId,
+            checksum: saveChecksum,
+        },
+    };
+}
+
+function missionRouteAdapter(page)
+{
+    const keys = { forward: "w", jump: "Space", use: "f" };
+    return Object.freeze({
+        observe: () => missionRouteObservation(page),
+        async key(key, down) {
+            if (key === "fire") {
+                if (down) await page.mouse.down({ button: "left" });
+                else await page.mouse.up({ button: "left" });
+                return;
+            }
+            if (!keys[key]) throw new Error(`unsupported route key ${key}`);
+            if (down) await page.keyboard.down(keys[key]);
+            else await page.keyboard.up(keys[key]);
+        },
+        mouse(dx, dy) {
+            return page.evaluate(({ x, y }) => {
+                const movement = new MouseEvent("mousemove");
+                Object.defineProperties(movement, {
+                    movementX: { value: x },
+                    movementY: { value: y },
+                });
+                globalThis.dispatchEvent(movement);
+            }, { x: dx, y: dy });
+        },
+        wait: (milliseconds) => page.waitForTimeout(milliseconds),
+    });
+}
+
+async function prepareMissionRouteInput(page)
+{
+    await page.bringToFront();
+    const canvas = page.locator("#game-canvas");
+    if ((await gameplayState(page, 12) & 0x10) !== 0) {
+        await canvas.focus();
+        await page.keyboard.press("Escape");
+    }
+    await waitForRelativeMouseMode(page);
+    await canvas.click({ position: { x: 8, y: 8 } });
+    await expect.poll(() => page.evaluate(() => document.pointerLockElement?.id))
+        .toBe("game-canvas");
+}
+
+async function replayMissionRoute(page, before)
+{
+    const route = parseMissionRoute(JSON.parse(
+        await readFile(missionRoutePath, "utf8")));
+    expect(route.map).toBe(missionTargetMap);
+    await prepareMissionRouteInput(page);
+    const replay = await createMissionRouteController(
+        missionRouteAdapter(page), { tickMs: 200 }).run(route);
+    const after = await canonicalMissionState(page);
+    const changes = missionProgressDelta(before, after);
+    expect(changes,
+        "route replay must change a canonical objective/progression marker")
+        .not.toEqual([]);
+    return { ...replay, changes, before, after };
+}
+
+async function authorMissionRoute(page)
+{
+    const recorder = createMissionRouteRecorder({ map: missionTargetMap });
+    let inputCursor = 0;
+    console.log("KISAK_ROUTE_AUTHOR_READY F8=mark waypoint F9=finish");
+    for (;;) {
+        recorder.recordObservation(await missionRouteObservation(page));
+        const captured = await page.evaluate((cursor) => {
+            const inputs = structuredClone(
+                globalThis.__retailValidationInput.slice(cursor));
+            const control = { ...globalThis.__retailRouteAuthor };
+            globalThis.__retailRouteAuthor.markers = 0;
+            return {
+                inputs,
+                inputCursor: globalThis.__retailValidationInput.length,
+                control,
+            };
+        }, inputCursor);
+        inputCursor = captured.inputCursor;
+        for (const input of captured.inputs)
+            recorder.recordInput(input, input.observedMs);
+        for (let marker = 0; marker < captured.control.markers; ++marker)
+            recorder.markWaypoint();
+        if (captured.control.finish) break;
+        await page.waitForTimeout(250);
+    }
+    const authored = recorder.finish();
+    await writeFile(missionRouteOutputPath,
+        `${JSON.stringify(authored.route, null, 2)}\n`, "utf8");
+    await writeFile(`${missionRouteOutputPath}.evidence.json`,
+        `${JSON.stringify(authored.evidence, null, 2)}\n`, "utf8");
+    return authored;
+}
+
+async function loadMissionStart(page)
+{
+    await installRetailObservers(page);
+    failureStage = "mission runtime bootstrap";
+    failureClass = "lifecycle";
+    await page.goto("/");
+    await expect.poll(() => page.evaluate(
+        () => globalThis.__KISAKCOD_WEB__?.state)).toBe("running");
+    await waitForAssets(page, "empty");
+    const chooserPromise = page.waitForEvent("filechooser");
+    await page.locator("#portable-install-button").click();
+    const chooser = await chooserPromise;
+    await chooser.setFiles(retailRoot);
+    await waitForAssets(page, "ready");
+
+    failureStage = `${missionTargetMap} mission load`;
+    failureClass = "database";
+    const mapCursor = await captureMapCursor(page);
+    await submitCommand(page, `devmap ${missionTargetMap}`);
+    await waitForDatabaseCompletion(page, missionTargetMap, mapCursor.database);
+    failureClass = "cgame";
+    await waitForLifecycleStages(
+        page, mapCursor.lifecycle, canonicalMapLifecycleStages);
+    failureClass = "renderer";
+    await firstWorldFrameEvidence(page, missionTargetMap, mapCursor.frames);
+
+    failureStage = `${missionTargetMap} canonical mission systems`;
+    failureClass = "game";
+    for (const field of [missionStateField.activeActors,
+        missionStateField.aliveActors, missionStateField.scriptThreads,
+        missionStateField.activeObjectives]) {
+        await expect.poll(() => gameplayState(page, field),
+            { timeout: 120_000 }).toBeGreaterThan(0);
+    }
+    const initialState = await canonicalMissionState(page);
+    await expect.poll(() => gameplayState(
+        page, missionStateField.actorFingerprint), { timeout: 30_000 })
+        .not.toBe(initialState.actorFingerprint);
+    return initialState;
 }
 
 function imageDecodeDelta(after, before)
@@ -2348,7 +2563,35 @@ if (phase3TargetMap) {
         });
 }
 
-if (missionTargetMap) {
+if (missionTargetMap && missionRouteMode === "author") {
+    test("headed local retail mission route authoring",
+        { tag: "@retail-route-author" }, async ({ retailPage: page }) => {
+            test.setTimeout(7_200_000);
+            expect(test.info().project.use.headless,
+                "route authoring requires a headed browser").toBe(false);
+            const pageErrors = [];
+            page.on("pageerror", (error) => pageErrors.push(error.message));
+            await loadMissionStart(page);
+            failureStage = `${missionTargetMap} route authoring`;
+            failureClass = "input";
+            await prepareMissionRouteInput(page);
+            const authored = await authorMissionRoute(page);
+            expect(authored.route.segments.length).toBeGreaterThan(0);
+            expect(pageErrors).toEqual([]);
+            console.log(`KISAK_RETAIL_ROUTE_RESULT ${JSON.stringify({
+                schemaVersion: authored.route.schemaVersion,
+                source: { commitSha: sourceCommit, dirty: sourceDirty },
+                recordedAtUtc: new Date().toISOString(),
+                validationResult: "authored",
+                targetMap: missionTargetMap,
+                routeSegments: authored.route.segments.length,
+                observationCount: authored.evidence.observations.length,
+                inputTransitionCount: authored.evidence.inputTransitions.length,
+            })}`);
+        });
+}
+
+if (missionTargetMap && missionRouteMode !== "author") {
     test("local retail mission progression", { tag: "@retail-mission" },
         async ({ retailPage: initialPage }) => {
             test.setTimeout(1_200_000);
@@ -2366,55 +2609,19 @@ if (missionTargetMap) {
             };
             const pageErrors = [];
             page.on("pageerror", (error) => pageErrors.push(error.message));
-            await installRetailObservers(page);
-
-            failureStage = "mission runtime bootstrap";
-            failureClass = "lifecycle";
-            await page.goto("/");
-            await expect.poll(() => page.evaluate(
-                () => globalThis.__KISAKCOD_WEB__?.state)).toBe("running");
-            await waitForAssets(page, "empty");
-            const chooserPromise = page.waitForEvent("filechooser");
-            await page.locator("#portable-install-button").click();
-            const chooser = await chooserPromise;
-            await chooser.setFiles(retailRoot);
-            await waitForAssets(page, "ready");
-
-            failureStage = `${missionTargetMap} mission load`;
-            failureClass = "database";
-            const mapCursor = await captureMapCursor(page);
-            await submitCommand(page, `devmap ${missionTargetMap}`);
-            await waitForDatabaseCompletion(
-                page, missionTargetMap, mapCursor.database);
-            failureClass = "cgame";
-            await waitForLifecycleStages(
-                page, mapCursor.lifecycle, canonicalMapLifecycleStages);
-            failureClass = "renderer";
-            await firstWorldFrameEvidence(
-                page, missionTargetMap, mapCursor.frames);
-
-            failureStage = `${missionTargetMap} canonical mission systems`;
-            failureClass = "game";
-            for (const field of [missionStateField.activeActors,
-                missionStateField.aliveActors, missionStateField.scriptThreads,
-                missionStateField.activeObjectives]) {
-                await expect.poll(() => gameplayState(page, field),
-                    { timeout: 120_000 }).toBeGreaterThan(0);
-            }
-            const initialState = await canonicalMissionState(page);
-            await expect.poll(() => gameplayState(
-                page, missionStateField.actorFingerprint), { timeout: 30_000 })
-                .not.toBe(initialState.actorFingerprint);
+            const initialState = await loadMissionStart(page);
 
             failureStage = `${missionTargetMap} objective progression and combat`;
             failureClass = "game";
-            await submitCommand(page, "god");
             const combatLogStart = await page.evaluate(() =>
                 globalThis.__retailLogs.length);
             const progressionStart = initialState;
-            const inputEvidence = await exerciseTransitionInput(page);
-            const progression = await advanceMissionProgression(
-                page, progressionStart);
+            const inputEvidence = missionRoutePath
+                ? { validationResult: "canonical-input-route" }
+                : await exerciseTransitionInput(page);
+            const progression = missionRoutePath
+                ? await replayMissionRoute(page, progressionStart)
+                : await advanceMissionProgression(page, progressionStart);
             const enemyDamageEvents = await page.evaluate((start) =>
                 globalThis.__retailLogs.slice(start).filter(({ text }) =>
                     text.includes("canonical damage target=") &&
@@ -2567,7 +2774,6 @@ if (missionTargetMap) {
             expect(Math.hypot(...freshViewOrigin.map((value, index) =>
                 value - savedViewOrigin[index]))).toBeLessThan(8);
             const freshInput = await exerciseTransitionInput(page);
-            await submitCommand(page, "god");
             const continuedProgression = await advanceMissionProgression(
                 page, freshState);
             expect(pageErrors).toEqual([]);

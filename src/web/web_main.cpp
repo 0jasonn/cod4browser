@@ -23,6 +23,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <csetjmp>
+#include <limits>
 
 #if KISAK_WEB_DIAGNOSTICS
 #include <emscripten/emscripten.h>
@@ -554,6 +555,23 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestFrameProfileRemaining()
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestUsingAds()
 {
     return clients[0].usingAds ? 1 : 0;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE double KisakWeb_TestGameplayFloat(
+    int field, int component)
+{
+    if (!CL_IsLocalClientInGame(0) || !CL_IsCgameInitialized(0) ||
+        component < 0 || component >= 3)
+        return std::numeric_limits<double>::quiet_NaN();
+
+    cg_s *const cgame = CG_GetLocalClientGlobals(0);
+    if (!cgame || !cgame->nextSnap)
+        return std::numeric_limits<double>::quiet_NaN();
+    if (field == 0)
+        return cgame->predictedPlayerState.origin[component];
+    if (field == 1)
+        return cgame->predictedPlayerState.viewangles[component];
+    return std::numeric_limits<double>::quiet_NaN();
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestGameplayState(

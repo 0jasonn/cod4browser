@@ -1,5 +1,15 @@
 # Web port convergence inventory
 
+## 2026-08-28 mission-route update
+
+Mission routing remains diagnostics-only platform validation. The controller
+reads canonical predicted player origin/view angles and bounded canonical
+mission summaries, then emits normal DOM keyboard/mouse input through the
+existing Worker queue. It cannot submit console commands, teleport, or write
+player, objective, script, checkpoint, or save state. Sparse authoring evidence
+contains only numeric coordinates/angles, input transitions, counts, hashes,
+and timestamps. Production files and protocol operations are unchanged.
+
 ## 2026-08-28 corrected-roadmap update
 
 The current pass preserves every ownership boundary. Gameplay-profile

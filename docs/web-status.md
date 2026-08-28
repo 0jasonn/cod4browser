@@ -1,5 +1,19 @@
 # Web product status
 
+## Mission-route infrastructure — 2026-08-28
+
+The diagnostic validator now supports headed waypoint authoring and
+goal-directed replay for scripted missions. Observation is read-only and
+canonical; replay crosses the same DOM/Worker key and mouse queue as a player.
+The route boundary has no teleport, command, or gameplay-state setter. Its 12
+focused synthetic tests and diagnostics Release build pass.
+
+`KISAK_COD4_RETAIL_ROOT` was absent during this pass. Consequently Village
+Assault objective progression, progressed checkpoint/save/reload, CargoShip
+profile splitting, DPVS census, renderer optimization, Scout Sniper, and
+AC-130 were not executed. Existing six-map classifications and evidence remain
+unchanged.
+
 ## Current roadmap pass — 2026-08-28
 
 Corrected sampling, separate clean/profile windows, complete sanitized

@@ -1,5 +1,45 @@
 # Web roadmap execution report
 
+## Mission-route roadmap pass — 2026-08-28
+
+This pass started at `d8a3fea3` on `codex/corrected-profile-roadmap` after
+fetching `origin`; `origin/web-port` at `aa407bb5` is an ancestor of the
+roadmap branch. The worktree was clean. `KISAK_COD4_RETAIL_ROOT` was not set,
+and the machine was not searched for retail assets.
+
+The required first milestone now has a diagnostics-only, schema-versioned
+mission-route controller and headed authoring workflow. F8 records a waypoint
+and F9 finishes authoring. The saved route contains numeric target regions,
+bounded timings, input-action classes, and hashed/count progression
+expectations; a sidecar contains sparse numeric observations and input
+transitions. Replay reads canonical predicted player origin/view angles and
+existing canonical objective, actor, script, checkpoint, and save summaries.
+It emits only ordinary browser keyboard/mouse events into the existing
+canonical input queue. The controller exposes no command, teleport, objective
+setter, script setter, or other gameplay-state mutation operation.
+
+Twelve focused synthetic tests pass: schema parsing, waypoint completion,
+COD yaw orientation,
+stuck detection, timeout, unexpected death, objective expectation, canonical
+restart observation, invalid/mutation-shaped routes, cancellation, absence of
+a mutation API, and sparse sanitized authoring. The full Node total is now
+90/90. The fresh diagnostics Release build and canonical runtime-prefix check
+pass. Author and replay test discovery each produce exactly one expected
+`RETAIL_ROOT_MISSING` skip without a supplied root.
+
+The pre-change Phase 0 matrix passed: 78 Node tests, 22 native Clang tests, 30
+Win32 MSVC tests, 30 direct-Wasm tests, 256 sanitizer fuzz runs, 40 production
+browser tests, 12 diagnostic smoke tests, and 36 diagnostic remainder tests
+with exactly two retail-root skips. The production boundary was 3,173,293 B
+Wasm, 340,615 B application JavaScript, 3,524,439 B total site, 17 files, 24
+raw exports, and 9 named application exports.
+
+No Village Assault progression claim is made. The strict execution order
+requires real objective/trigger evidence before CargoShip profile splitting,
+DPVS census, a new renderer optimization, or new-map validation. Those stages
+were therefore not started in this pass. Current handoff state:
+`RETAIL ROOT UNAVAILABLE`.
+
 ## Corrected-profile roadmap pass — 2026-08-28
 
 This section supersedes the mission-progression, profiling, renderer, and

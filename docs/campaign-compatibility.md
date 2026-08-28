@@ -1,5 +1,16 @@
 # Campaign compatibility matrix
 
+## Mission-route infrastructure update — 2026-08-28
+
+A diagnostics-only version-1 route author/replay system is now available for
+Village Assault. It records only numeric coordinates/angles, input
+transitions, counts, hashes, timestamps, and checkpoint summaries, and replay
+drives the normal canonical browser input queue. Twelve synthetic route tests
+pass. No retail root was supplied to this pass, so no route was authored or
+replayed against retail content and no compatibility or mission-flow row
+changes. `village_assault` remains `UNTESTED` with no
+`MISSION_FLOW_VALIDATED` flag.
+
 ## Current corrected evidence — 2026-08-28
 
 This section supersedes the performance and mission-progression interpretation

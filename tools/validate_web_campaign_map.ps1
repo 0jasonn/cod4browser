@@ -6,6 +6,10 @@ param(
     [ValidateSet('chromium', 'chrome', 'msedge')]
     [string]$Browser = 'chrome',
     [switch]$Mission,
+    [ValidateSet('none', 'author', 'replay')]
+    [string]$RouteMode = 'none',
+    [string]$RoutePath,
+    [string]$RouteOutput,
     [switch]$Headless,
     [ValidateRange(1024, 65535)]
     [int]$Port = 8031
@@ -15,6 +19,25 @@ $ErrorActionPreference = 'Stop'
 if ($Map -notmatch '^[a-z0-9_]+$' -or
     $Map.StartsWith('mp_') -or $Map.EndsWith('_mp')) {
     throw 'Map must name one single-player zone using lowercase letters, numbers, or underscores.'
+}
+if ($RouteMode -ne 'none' -and -not $Mission) {
+    throw 'Route authoring and replay require -Mission.'
+}
+if ($RouteMode -eq 'author' -and $Headless) {
+    throw 'Route authoring requires a headed browser.'
+}
+$resolvedRoutePath = $null
+if ($RouteMode -eq 'replay') {
+    if (-not $RoutePath) { throw '-RoutePath is required for route replay.' }
+    $resolvedRoutePath = (Resolve-Path -LiteralPath $RoutePath).Path
+}
+$resolvedRouteOutput = $null
+if ($RouteMode -eq 'author') {
+    if (-not $RouteOutput) { throw '-RouteOutput is required for route authoring.' }
+    $routeOutputParent = Split-Path -Parent $RouteOutput
+    if (-not $routeOutputParent) { $routeOutputParent = '.' }
+    $resolvedRouteOutput = Join-Path (Resolve-Path -LiteralPath $routeOutputParent).Path `
+        (Split-Path -Leaf $RouteOutput)
 }
 $resolvedRoot = (Resolve-Path -LiteralPath $RetailRoot).Path
 $required = @(
@@ -40,6 +63,9 @@ $environmentNames = @(
     'KISAK_COD4_RETAIL_ROOT',
     'KISAK_RETAIL_PHASE3_MAP',
     'KISAK_RETAIL_MISSION_MAP',
+    'KISAK_RETAIL_ROUTE_MODE',
+    'KISAK_RETAIL_ROUTE_PATH',
+    'KISAK_RETAIL_ROUTE_OUTPUT',
     'KISAK_BROWSER_CHANNEL',
     'KISAK_WEB_SITE',
     'KISAK_WEB_TEST_PORT',
@@ -61,6 +87,20 @@ try {
         $env:KISAK_RETAIL_PHASE3_MAP = $Map
         Remove-Item -LiteralPath 'Env:KISAK_RETAIL_MISSION_MAP' -ErrorAction SilentlyContinue
     }
+    if ($RouteMode -eq 'none') {
+        Remove-Item -LiteralPath 'Env:KISAK_RETAIL_ROUTE_MODE' -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath 'Env:KISAK_RETAIL_ROUTE_PATH' -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath 'Env:KISAK_RETAIL_ROUTE_OUTPUT' -ErrorAction SilentlyContinue
+    } else {
+        $env:KISAK_RETAIL_ROUTE_MODE = $RouteMode
+        if ($RouteMode -eq 'replay') {
+            $env:KISAK_RETAIL_ROUTE_PATH = $resolvedRoutePath
+            Remove-Item -LiteralPath 'Env:KISAK_RETAIL_ROUTE_OUTPUT' -ErrorAction SilentlyContinue
+        } else {
+            $env:KISAK_RETAIL_ROUTE_OUTPUT = $resolvedRouteOutput
+            Remove-Item -LiteralPath 'Env:KISAK_RETAIL_ROUTE_PATH' -ErrorAction SilentlyContinue
+        }
+    }
     if ($Browser -eq 'chromium') {
         Remove-Item -LiteralPath 'Env:KISAK_BROWSER_CHANNEL' -ErrorAction SilentlyContinue
     } else {
@@ -72,7 +112,8 @@ try {
     $playwrightArguments = @(
         'exec', '--', 'playwright', 'test',
         'tests/browser/local_retail_validation.spec.mjs', '--grep',
-        $(if ($Mission) { '@retail-mission' } else { '@retail-phase3' })
+        $(if ($RouteMode -eq 'author') { '@retail-route-author' }
+            elseif ($Mission) { '@retail-mission' } else { '@retail-phase3' })
     )
     if (-not $Headless) { $playwrightArguments += '--headed' }
     & npm.cmd @playwrightArguments
