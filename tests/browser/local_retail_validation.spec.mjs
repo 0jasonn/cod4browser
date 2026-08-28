@@ -1237,7 +1237,7 @@ async function runMissionRouteSegments(adapter, route, {
             const result = await createMissionRouteController(adapter, {
                 tickMs: combat ? 100 : 200,
                 ...(combat ? {
-                    mouseCountsPerDegree: 4,
+                    mouseCountsPerDegree: 8,
                     maximumMouseDelta: 512,
                 } : {}),
                 obstacleRecoveryAttempts: 4,
@@ -1666,7 +1666,7 @@ async function authorAssistedMissionRoute(page)
             maxDurationMs: target.source.startsWith("actor") ? 45_000 :
                 target.source === "enemy" ? 20_000 : 90_000,
             ...(target.source === "enemy"
-                ? { minimumDurationMs: 500 } : {}),
+                ? { minimumDurationMs: 2_000 } : {}),
             stuckTimeoutMs: target.source.startsWith("actor") ||
                 target.source === "enemy" ? 8_000 : 12_000,
             restartPolicy: "resume",
@@ -1682,7 +1682,7 @@ async function authorAssistedMissionRoute(page)
             routeController = createMissionRouteController(adapter, {
                 tickMs: combat ? 100 : 200,
                 ...(combat ? {
-                    mouseCountsPerDegree: 4,
+                    mouseCountsPerDegree: 8,
                     maximumMouseDelta: 512,
                 } : {}),
                 minimumProgress: 4,
