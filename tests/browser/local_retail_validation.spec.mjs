@@ -1219,6 +1219,37 @@ async function prepareMissionRouteInput(page)
         .toBe("game-canvas");
 }
 
+async function runMissionRouteSegments(adapter, route)
+{
+    const events = [];
+    for (const [segmentIndex, segment] of route.segments.entries()) {
+        const combat = segment.actions?.fire === true;
+        try {
+            const result = await createMissionRouteController(adapter, {
+                tickMs: combat ? 100 : 200,
+                ...(combat ? {
+                    mouseCountsPerDegree: 4,
+                    maximumMouseDelta: 512,
+                } : {}),
+                obstacleRecoveryAttempts: 4,
+                obstacleRecoveryMs: 1_000,
+            }).run({
+                schemaVersion: route.schemaVersion,
+                map: route.map,
+                segments: [segment],
+            });
+            events.push(...result.events.map((event) => ({
+                ...event, segmentIndex,
+            })));
+        } catch (error) {
+            error.segmentIndex = segmentIndex;
+            throw error;
+        }
+    }
+    return { schemaVersion: route.schemaVersion, map: route.map,
+        validationResult: "pass", events };
+}
+
 async function replayMissionRoute(page, before)
 {
     const route = parseMissionRoute(JSON.parse(
@@ -1227,11 +1258,7 @@ async function replayMissionRoute(page, before)
     await prepareMissionRouteInput(page);
     let replay;
     try {
-        replay = await createMissionRouteController(missionRouteAdapter(page), {
-            tickMs: 200,
-            obstacleRecoveryAttempts: 4,
-            obstacleRecoveryMs: 1_000,
-        }).run(route);
+        replay = await runMissionRouteSegments(missionRouteAdapter(page), route);
     } catch (error) {
         console.log(`KISAK_ROUTE_REPLAY_FAILURE ${JSON.stringify({
             code: error?.code, segmentIndex: error?.segmentIndex,
@@ -1387,42 +1414,36 @@ async function authorAssistedMissionRoute(page)
     let prefixRoute = null;
     let prefixReplay = null;
     if (missionRoutePath) {
-        prefixRoute = parseMissionRoute(JSON.parse(
+        const legacyPrefix = parseMissionRoute(JSON.parse(
             await readFile(missionRoutePath, "utf8")));
-        expect(prefixRoute.map).toBe(missionTargetMap);
-        const events = [];
-        for (const [segmentIndex, segment] of
-            prefixRoute.segments.entries()) {
-            const combat = segment.actions?.fire === true;
-            try {
-                const replay = await createMissionRouteController(baseAdapter, {
-                    tickMs: combat ? 100 : 200,
-                    ...(combat ? {
-                        mouseCountsPerDegree: 16,
-                        maximumMouseDelta: 512,
-                    } : {}),
-                    obstacleRecoveryAttempts: 4,
-                    obstacleRecoveryMs: 1_000,
-                }).run({
-                    schemaVersion: prefixRoute.schemaVersion,
-                    map: prefixRoute.map,
-                    segments: [segment],
-                });
-                events.push(...replay.events.map((event) => ({
-                    ...event, segmentIndex,
-                })));
-            } catch (error) {
-                console.log(`KISAK_ROUTE_ASSIST_PREFIX_FAILURE ${JSON.stringify({
-                    code: error?.code, segmentIndex,
-                    message: error?.message,
-                })}`);
-                throw error;
-            }
+        expect(legacyPrefix.map).toBe(missionTargetMap);
+        const segments = legacyPrefix.segments.map((segment) => {
+            if (segment.actions?.fire !== true) return segment;
+            const { actions: legacyActions, ...withoutActions } = segment;
+            const actions = Object.fromEntries(Object.entries(legacyActions)
+                .filter(([action]) => action !== "ads" && action !== "fire"));
+            return Object.keys(actions).length > 0
+                ? { ...withoutActions, actions } : withoutActions;
+        });
+        prefixRoute = parseMissionRoute({
+            schemaVersion: legacyPrefix.schemaVersion,
+            map: legacyPrefix.map,
+            segments,
+        });
+        try {
+            prefixReplay = await runMissionRouteSegments(baseAdapter, prefixRoute);
+        } catch (error) {
+            console.log(`KISAK_ROUTE_ASSIST_PREFIX_FAILURE ${JSON.stringify({
+                code: error?.code, segmentIndex: error?.segmentIndex,
+                message: error?.message,
+            })}`);
+            throw error;
         }
-        prefixReplay = { events };
         console.log(`KISAK_ROUTE_ASSIST_PREFIX ${JSON.stringify({
             segments: prefixRoute.segments.length,
             events: prefixReplay.events.length,
+            legacyCombatSegmentsRemoved: legacyPrefix.segments.filter(
+                (segment) => segment.actions?.fire === true).length,
         })}`);
     }
     const recorder = createMissionRouteRecorder({
@@ -1627,7 +1648,7 @@ async function authorAssistedMissionRoute(page)
             routeController = createMissionRouteController(adapter, {
                 tickMs: combat ? 100 : 200,
                 ...(combat ? {
-                    mouseCountsPerDegree: 16,
+                    mouseCountsPerDegree: 4,
                     maximumMouseDelta: 512,
                 } : {}),
                 minimumProgress: 4,
