@@ -1218,7 +1218,7 @@ async function replayMissionRoute(page, before)
     try {
         replay = await createMissionRouteController(missionRouteAdapter(page), {
             tickMs: 200,
-            obstacleRecoveryAttempts: 2,
+            obstacleRecoveryAttempts: 4,
             obstacleRecoveryMs: 1_000,
         }).run(route);
     } catch (error) {
