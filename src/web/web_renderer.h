@@ -603,4 +603,4 @@ WebRendererSurfaceResult WebRenderer_SetUiScene(
     const WebRendererUiSceneDesc &scene);
 
 // Draws one non-blocking browser frame. Engine work remains outside this seam.
-void WebRenderer_DrawFrame(const WebFrameInfo &frame);
+bool WebRenderer_DrawFrame(const WebFrameInfo &frame);

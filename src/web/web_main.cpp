@@ -32,11 +32,13 @@
 namespace
 {
 WebFrameProfileSample g_frameProfileSample{};
-std::uint32_t g_frameProfileRemaining = 0u;
+WebFrameProfileCapture g_frameProfileCapture{};
 bool g_frameProfilePumpActive = false;
+constexpr double DEFAULT_FRAME_PROFILE_TIMEOUT_MS = 120'000.0;
 
 EM_JS(void, DispatchFrameProfile,
     (std::uint32_t pumpTick, std::uint32_t contextGeneration,
+     std::uint32_t worldGeneration,
      std::uint32_t viewSubmissionGeneration, bool gameplayFrame,
      bool rendererSubmitted, bool gpuTimingsAvailable, bool gpuQueryIssued,
      bool gpuQueryDropped,
@@ -67,6 +69,7 @@ EM_JS(void, DispatchFrameProfile,
                 kind: "frame",
                 pumpTick: pumpTick >>> 0,
                 contextGeneration: contextGeneration >>> 0,
+                worldGeneration: worldGeneration >>> 0,
                 viewSubmissionGeneration: viewSubmissionGeneration >>> 0,
                 gameplayFrame: Boolean(gameplayFrame),
                 rendererSubmitted: Boolean(rendererSubmitted),
@@ -104,6 +107,21 @@ EM_JS(void, DispatchFrameProfile,
         }));
     });
 
+EM_JS(void, DispatchFrameProfileCapture,
+    (bool profileComplete, std::uint32_t requestedSamples,
+     std::uint32_t collectedSamples, const char *incompleteReason), {
+        const reason = UTF8ToString(incompleteReason);
+        globalThis.dispatchEvent(new CustomEvent("kisakcod:frame-profile", {
+            detail: {
+                kind: "capture",
+                profileComplete: Boolean(profileComplete),
+                profileSamplesRequested: requestedSamples >>> 0,
+                profileSamplesCollected: collectedSamples >>> 0,
+                profileIncompleteReason: reason || null
+            }
+        }));
+    });
+
 EM_JS(void, DispatchFrameProfileGpuResult,
     (std::uint32_t pumpTick, std::uint32_t contextGeneration,
      std::uint32_t viewSubmissionGeneration, double gpuMilliseconds,
@@ -122,11 +140,53 @@ EM_JS(void, DispatchFrameProfileGpuResult,
             }
         }));
     });
+
+const char *FrameProfileIncompleteReasonString(
+    WebFrameProfileIncompleteReason reason) noexcept
+{
+    switch (reason)
+    {
+    case WebFrameProfileIncompleteReason::None: return "";
+    case WebFrameProfileIncompleteReason::Timeout: return "TIMEOUT";
+    case WebFrameProfileIncompleteReason::ContextChanged:
+        return "CONTEXT_CHANGED";
+    case WebFrameProfileIncompleteReason::WorldChanged:
+        return "MAP_CHANGED";
+    }
+    return "UNKNOWN";
+}
+
+void DispatchFrameProfileCaptureState()
+{
+    DispatchFrameProfileCapture(
+        g_frameProfileCapture.state == WebFrameProfileCaptureState::Complete,
+        g_frameProfileCapture.requestedSamples,
+        g_frameProfileCapture.collectedSamples,
+        FrameProfileIncompleteReasonString(
+            g_frameProfileCapture.incompleteReason));
+}
+
+int BeginFrameProfileCapture(int samples, int timeoutMilliseconds)
+{
+    if (samples < 1 || samples > 600 || timeoutMilliseconds < 1 ||
+        timeoutMilliseconds > 300'000)
+        return 0;
+    g_frameProfileCapture.Begin(
+        static_cast<std::uint32_t>(samples), WebFrameProfile_Now(),
+        static_cast<double>(timeoutMilliseconds));
+    g_frameProfileSample = {};
+    g_frameProfilePumpActive = false;
+    return 1;
+}
 }
 
 bool WebFrameProfile_BeginPump(std::uint32_t pumpTick) noexcept
 {
-    g_frameProfilePumpActive = g_frameProfileRemaining != 0u;
+    g_frameProfilePumpActive = false;
+    if (g_frameProfileCapture.Poll(WebFrameProfile_Now()))
+        DispatchFrameProfileCaptureState();
+    g_frameProfilePumpActive =
+        g_frameProfileCapture.state == WebFrameProfileCaptureState::Active;
     if (!g_frameProfilePumpActive) return false;
     g_frameProfileSample = {};
     g_frameProfileSample.pumpTick = pumpTick;
@@ -146,9 +206,21 @@ void WebFrameProfile_EndPump(bool gameplayFrame, bool rendererSubmitted)
     g_frameProfilePumpActive = false;
     g_frameProfileSample.gameplayFrame = gameplayFrame;
     g_frameProfileSample.rendererSubmitted = rendererSubmitted;
+    const WebFrameProfilePumpResult result =
+        g_frameProfileCapture.FinishPump(
+            WebFrameProfile_Now(), gameplayFrame, rendererSubmitted,
+            g_frameProfileSample.contextGeneration,
+            g_frameProfileSample.worldGeneration);
+    if (result == WebFrameProfilePumpResult::Ignored) return;
+    if (result == WebFrameProfilePumpResult::CaptureIncomplete)
+    {
+        DispatchFrameProfileCaptureState();
+        return;
+    }
     const WebFrameProfileSample &s = g_frameProfileSample;
     DispatchFrameProfile(
-        s.pumpTick, s.contextGeneration, s.viewSubmissionGeneration,
+        s.pumpTick, s.contextGeneration, s.worldGeneration,
+        s.viewSubmissionGeneration,
         s.gameplayFrame, s.rendererSubmitted, s.gpuTimingsAvailable,
         s.gpuQueryIssued, s.gpuQueryDropped,
         s.filesystemMs, s.commandMs, s.serverMs, s.clientOnceMs,
@@ -185,7 +257,8 @@ void WebFrameProfile_EndPump(bool gameplayFrame, bool rendererSubmitted)
         static_cast<double>(s.unmeasuredTextureUploads),
         static_cast<double>(s.lodChanges),
         static_cast<double>(s.shadowCasterDraws));
-    --g_frameProfileRemaining;
+    if (result == WebFrameProfilePumpResult::CaptureComplete)
+        DispatchFrameProfileCaptureState();
 }
 
 void WebFrameProfile_PublishGpuResult(
@@ -421,11 +494,13 @@ void RenderFrame(const WebFrameInfo &frame, void *)
     // Before a local game is active the renderer remains responsible for the
     // launcher/bootstrap surface. During gameplay, presentation follows the
     // same non-blocking com_maxfps admission decision as the engine frame.
-    const bool rendererSubmitted = !CL_IsLocalClientInGame(0) || gameplayFrame;
+    const bool rendererScheduled = !CL_IsLocalClientInGame(0) || gameplayFrame;
     #if KISAK_WEB_DIAGNOSTICS
+    if (profiling)
+        WebFrameProfile_Current()->gameplayFrame = gameplayFrame;
     stageStarted = profiling ? WebFrameProfile_Now() : 0.0;
     #endif
-    if (rendererSubmitted)
+    const bool rendererSubmitted = rendererScheduled &&
         WebRenderer_DrawFrame(frame);
     #if KISAK_WEB_DIAGNOSTICS
     if (profiling)
@@ -450,15 +525,19 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestSlowNextCommand(int millisecond
 
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestBeginFrameProfile(int samples)
 {
-    if (samples < 1 || samples > 600) return 0;
-    g_frameProfileRemaining = static_cast<std::uint32_t>(samples);
-    g_frameProfilePumpActive = false;
-    return 1;
+    return BeginFrameProfileCapture(
+        samples, static_cast<int>(DEFAULT_FRAME_PROFILE_TIMEOUT_MS));
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestBeginFrameProfileWithTimeout(
+    int samples, int timeoutMilliseconds)
+{
+    return BeginFrameProfileCapture(samples, timeoutMilliseconds);
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestFrameProfileRemaining()
 {
-    return static_cast<int>(g_frameProfileRemaining);
+    return static_cast<int>(g_frameProfileCapture.Remaining());
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestUsingAds()

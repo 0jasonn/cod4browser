@@ -2,11 +2,116 @@
 
 #include <cstdint>
 
+enum class WebFrameProfileCaptureState : std::uint8_t
+{
+    Idle,
+    Active,
+    Complete,
+    Incomplete,
+};
+
+enum class WebFrameProfileIncompleteReason : std::uint8_t
+{
+    None,
+    Timeout,
+    ContextChanged,
+    WorldChanged,
+};
+
+enum class WebFrameProfilePumpResult : std::uint8_t
+{
+    Ignored,
+    SampleCollected,
+    CaptureComplete,
+    CaptureIncomplete,
+};
+
+struct WebFrameProfileCapture
+{
+    void Begin(std::uint32_t targetSamples, double nowMilliseconds,
+        double timeoutMilliseconds) noexcept
+    {
+        state = WebFrameProfileCaptureState::Active;
+        incompleteReason = WebFrameProfileIncompleteReason::None;
+        requestedSamples = targetSamples;
+        collectedSamples = 0u;
+        deadlineMilliseconds = nowMilliseconds + timeoutMilliseconds;
+        contextGeneration = 0u;
+        worldGeneration = 0u;
+        identityBound = false;
+    }
+
+    bool Poll(double nowMilliseconds) noexcept
+    {
+        if (state != WebFrameProfileCaptureState::Active ||
+            nowMilliseconds < deadlineMilliseconds)
+            return false;
+        state = WebFrameProfileCaptureState::Incomplete;
+        incompleteReason = WebFrameProfileIncompleteReason::Timeout;
+        return true;
+    }
+
+    WebFrameProfilePumpResult FinishPump(double nowMilliseconds,
+        bool gameplayFrame, bool rendererSubmitted,
+        std::uint32_t sampleContextGeneration,
+        std::uint32_t sampleWorldGeneration) noexcept
+    {
+        if (state != WebFrameProfileCaptureState::Active)
+            return WebFrameProfilePumpResult::Ignored;
+        if (Poll(nowMilliseconds))
+            return WebFrameProfilePumpResult::CaptureIncomplete;
+        if (!gameplayFrame || !rendererSubmitted)
+            return WebFrameProfilePumpResult::Ignored;
+        if (!identityBound)
+        {
+            contextGeneration = sampleContextGeneration;
+            worldGeneration = sampleWorldGeneration;
+            identityBound = true;
+        }
+        else if (contextGeneration != sampleContextGeneration)
+        {
+            state = WebFrameProfileCaptureState::Incomplete;
+            incompleteReason = WebFrameProfileIncompleteReason::ContextChanged;
+            return WebFrameProfilePumpResult::CaptureIncomplete;
+        }
+        else if (worldGeneration != sampleWorldGeneration)
+        {
+            state = WebFrameProfileCaptureState::Incomplete;
+            incompleteReason = WebFrameProfileIncompleteReason::WorldChanged;
+            return WebFrameProfilePumpResult::CaptureIncomplete;
+        }
+
+        ++collectedSamples;
+        if (collectedSamples == requestedSamples)
+        {
+            state = WebFrameProfileCaptureState::Complete;
+            return WebFrameProfilePumpResult::CaptureComplete;
+        }
+        return WebFrameProfilePumpResult::SampleCollected;
+    }
+
+    std::uint32_t Remaining() const noexcept
+    {
+        return requestedSamples - collectedSamples;
+    }
+
+    WebFrameProfileCaptureState state = WebFrameProfileCaptureState::Idle;
+    WebFrameProfileIncompleteReason incompleteReason =
+        WebFrameProfileIncompleteReason::None;
+    std::uint32_t requestedSamples = 0u;
+    std::uint32_t collectedSamples = 0u;
+    double deadlineMilliseconds = 0.0;
+    std::uint32_t contextGeneration = 0u;
+    std::uint32_t worldGeneration = 0u;
+    bool identityBound = false;
+};
+
 #if KISAK_WEB_DIAGNOSTICS
 struct WebFrameProfileSample
 {
     std::uint32_t pumpTick = 0u;
     std::uint32_t contextGeneration = 0u;
+    std::uint32_t worldGeneration = 0u;
     std::uint32_t viewSubmissionGeneration = 0u;
     bool gameplayFrame = false;
     bool rendererSubmitted = false;

@@ -8946,13 +8946,13 @@ void DrawPostProcessPass(
 }
 } // namespace
 
-void WebRenderer_DrawFrame(const WebFrameInfo &frame)
+bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
 {
     if (!g_renderer.initialized || g_renderer.contextLost ||
         !g_renderer.surfaceActive || g_renderer.vertexArray == 0 ||
         g_renderer.vertexBuffer == 0 || g_renderer.indexBuffer == 0)
     {
-        return;
+        return false;
     }
 
 #if KISAK_WEB_DIAGNOSTICS
@@ -8962,13 +8962,14 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
     if (frameProfile)
     {
         frameProfile->contextGeneration = g_renderer.contextGeneration;
+        frameProfile->worldGeneration =
+            g_renderer.sceneViewSurfaceSubmissionGeneration;
         frameProfile->viewSubmissionGeneration =
             g_renderer.sceneViewSubmissionGeneration;
         frameProfile->worldSurfacesSubmitted =
             g_renderer.sceneViewSurfaceCount;
         frameProfile->staticModelInstancesRetained =
             g_renderer.retainedStaticModelSourceInstances.size();
-        BeginFrameProfileGpuQuery(*frameProfile);
     }
     const double setupProfileStarted = frameProfile
         ? WebFrameProfile_Now() : 0.0;
@@ -8988,6 +8989,10 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
         g_renderer.sceneViewGeometrySubmitted &&
         g_renderer.sceneViewSurfaceSubmissionGeneration ==
             g_renderer.surfaceSubmissionGeneration;
+#if KISAK_WEB_DIAGNOSTICS
+    if (frameProfile && frameProfile->gameplayFrame && sceneGeometryDraw)
+        BeginFrameProfileGpuQuery(*frameProfile);
+#endif
     if (g_renderer.sceneViewActive && !sceneGeometryDraw &&
         !g_renderer.sceneViewFirstDrawCompleted &&
         !g_renderer.sceneViewWaitReported &&
@@ -10261,4 +10266,5 @@ void WebRenderer_DrawFrame(const WebFrameInfo &frame)
     {
         Web_EmitFrameStats(g_renderer.frameNumber, width, height, elapsed);
     }
+    return sceneGeometryDraw;
 }

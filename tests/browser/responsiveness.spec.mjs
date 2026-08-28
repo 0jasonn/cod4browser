@@ -66,7 +66,7 @@ test("a slow canonical command yields telemetry and the frame pump recovers", as
     expect(evidence.state).toBe("running");
 });
 
-test("diagnostic frame profiling is structured and bounded", async ({ page }) => {
+test("diagnostic gameplay profiling ignores non-gameplay pumps and times out explicitly", async ({ page }) => {
     await page.addInitScript(() => {
         globalThis.__frameProfiles = [];
         globalThis.addEventListener("kisakcod:frame-profile", (event) => {
@@ -78,50 +78,21 @@ test("diagnostic frame profiling is structured and bounded", async ({ page }) =>
         () => globalThis.__KISAKCOD_WEB__?.state)).toBe("running");
 
     expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.call(
-        "_KisakWeb_TestBeginFrameProfile", 3))).toBe(1);
+        "_KisakWeb_TestBeginFrameProfileWithTimeout", 3, 100))).toBe(1);
     await expect.poll(() => page.evaluate(() =>
-        globalThis.__frameProfiles.filter(({ kind }) => kind === "frame").length,
-    )).toBe(3);
+        globalThis.__frameProfiles.some(({ kind }) => kind === "capture"),
+    )).toBe(true);
     expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.call(
-        "_KisakWeb_TestFrameProfileRemaining"))).toBe(0);
+        "_KisakWeb_TestFrameProfileRemaining"))).toBe(3);
 
-    await page.waitForTimeout(200);
     const profiles = await page.evaluate(() => structuredClone(
-        globalThis.__frameProfiles.filter(({ kind }) => kind === "frame")));
-    expect(profiles).toHaveLength(3);
-    expect(profiles[0]).toMatchObject({
-        kind: "frame",
-        rendererSubmitted: true,
-        cpu: {
-            filesystemMs: expect.any(Number),
-            commandMs: expect.any(Number),
-            rendererBackendMs: expect.any(Number),
-            totalMs: expect.any(Number),
-        },
-        renderer: {
-            setupMs: expect.any(Number),
-            sunShadowPrepareMs: expect.any(Number),
-            sunShadowDrawMs: expect.any(Number),
-            spotShadowPrepareMs: expect.any(Number),
-            spotShadowDrawMs: expect.any(Number),
-            worldMs: expect.any(Number),
-            postProcessMs: expect.any(Number),
-            bufferUploadMs: expect.any(Number),
-            textureUploadMs: expect.any(Number),
-        },
-        gpu: {
-            timingsAvailable: expect.any(Boolean),
-            queryIssued: expect.any(Boolean),
-            queryDropped: expect.any(Boolean),
-        },
-        counters: {
-            submittedIndices: expect.any(Number),
-            submittedTriangles: expect.any(Number),
-            textureBindCalls: expect.any(Number),
-            bufferUploadBytes: expect.any(Number),
-            textureUploadBytes: expect.any(Number),
-        },
-    });
-    expect(profiles.every(({ pumpTick }, index) =>
-        index === 0 || pumpTick > profiles[index - 1].pumpTick)).toBe(true);
+        globalThis.__frameProfiles));
+    expect(profiles.filter(({ kind }) => kind === "frame")).toEqual([]);
+    expect(profiles.filter(({ kind }) => kind === "capture")).toEqual([{
+        kind: "capture",
+        profileComplete: false,
+        profileSamplesRequested: 3,
+        profileSamplesCollected: 0,
+        profileIncompleteReason: "TIMEOUT",
+    }]);
 });

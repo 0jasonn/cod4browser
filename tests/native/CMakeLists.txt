@@ -81,6 +81,10 @@ add_executable(web_thread_context_tests
     "${KISAK_REPOSITORY_ROOT}/src/web/web_thread_context.cpp"
 )
 
+add_executable(web_frame_profile_tests
+    "${CMAKE_CURRENT_LIST_DIR}/web_frame_profile_tests.cpp"
+)
+
 if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     add_executable(gate3_db_pool_tests
         "${CMAKE_CURRENT_LIST_DIR}/gate3_db_pool_tests.cpp"
@@ -409,6 +413,13 @@ endif()
 target_compile_features(web_thread_context_tests PRIVATE cxx_std_20)
 target_include_directories(web_thread_context_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
 target_compile_definitions(web_thread_context_tests PRIVATE KISAK_SP=1)
+target_compile_features(web_frame_profile_tests PRIVATE cxx_std_20)
+target_include_directories(web_frame_profile_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
+if (MSVC)
+    target_compile_options(web_frame_profile_tests PRIVATE /UNDEBUG)
+else()
+    target_compile_options(web_frame_profile_tests PRIVATE -UNDEBUG)
+endif()
 target_compile_features(web_renderer_surface_tests PRIVATE cxx_std_20)
 target_include_directories(web_renderer_surface_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
 target_compile_features(web_renderer_world_scene_tests PRIVATE cxx_std_20)
@@ -634,6 +645,7 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     set_target_properties(sound_curve_validation_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(canonical_startup_zone_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_thread_context_tests PROPERTIES SUFFIX ".cjs")
+    set_target_properties(web_frame_profile_tests PROPERTIES SUFFIX ".cjs")
     if (TARGET canonical_runtime_prefix_tests)
         set_target_properties(canonical_runtime_prefix_tests PROPERTIES SUFFIX ".cjs")
     endif()
@@ -680,6 +692,8 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:canonical_startup_zone_tests>")
     add_test(NAME web_thread_context_tests
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_thread_context_tests>")
+    add_test(NAME web_frame_profile_tests
+        COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_frame_profile_tests>")
     if (TARGET canonical_runtime_prefix_tests)
         add_test(NAME canonical_runtime_prefix_tests
             COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:canonical_runtime_prefix_tests>")
@@ -773,6 +787,7 @@ else()
     add_test(NAME sound_curve_validation_tests COMMAND sound_curve_validation_tests)
     add_test(NAME canonical_startup_zone_tests COMMAND canonical_startup_zone_tests)
     add_test(NAME web_thread_context_tests COMMAND web_thread_context_tests)
+    add_test(NAME web_frame_profile_tests COMMAND web_frame_profile_tests)
     if (TARGET canonical_runtime_prefix_tests)
         add_test(NAME canonical_runtime_prefix_tests COMMAND canonical_runtime_prefix_tests)
     endif()
