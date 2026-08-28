@@ -5,7 +5,6 @@
 #include <cgame/cg_main.h>
 #include <cgame/cg_vehicle_hud.h>
 #include <game/actor.h>
-#include <game/actor_senses.h>
 #include <game/g_local.h>
 #include <game/g_main.h>
 #include <game/savememory.h>
@@ -692,11 +691,11 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestActorState(
     case 7:
     {
         float playerView[3]{};
-        float actorEye[3]{};
+        float actorAim[3]{};
         G_GetPlayerViewOrigin(&level.clients[0].ps, playerView);
-        Actor_GetEyePosition(&actor, actorEye);
+        G_EntityCentroid(actor.ent, actorAim);
         return G_LocationalTracePassed(
-            playerView, actorEye, 0, actor.ent->s.number,
+            playerView, actorAim, 0, actor.ent->s.number,
             0x2806831, nullptr) ? 1 : 0;
     }
     default: return -1;
@@ -716,9 +715,9 @@ extern "C" EMSCRIPTEN_KEEPALIVE double KisakWeb_TestActorVector(
         return actor.Path.vFinalGoal[component];
     if (vector == 2)
     {
-        float actorEye[3]{};
-        Actor_GetEyePosition(&actor, actorEye);
-        return actorEye[component];
+        float actorAim[3]{};
+        G_EntityCentroid(actor.ent, actorAim);
+        return actorAim[component];
     }
     return std::numeric_limits<double>::quiet_NaN();
 }

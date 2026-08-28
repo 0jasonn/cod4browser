@@ -1518,9 +1518,10 @@ async function authorAssistedMissionRoute(page)
                 Number(right.hasPath) - Number(left.hasPath) ||
                 Number(right.moveMode > 0) - Number(left.moveMode > 0) ||
                 left.distance - right.distance);
-        const enemyMarkers = actorState.actors
-            .filter(({ team, health, aimOrigin }) =>
+        const enemyMarkers = combatObserved ? [] : actorState.actors
+            .filter(({ team, health, aimOrigin, lineOfSight }) =>
                 team !== actorState.playerTeam && health > 0 &&
+                lineOfSight > 0 &&
                 aimOrigin.every(Number.isFinite))
             .map((actor) => ({
                 ...actor,
@@ -1564,7 +1565,7 @@ async function authorAssistedMissionRoute(page)
             maxDurationMs: target.source.startsWith("actor") ? 45_000 :
                 target.source === "enemy" ? 20_000 : 90_000,
             ...(target.source === "enemy"
-                ? { minimumDurationMs: 2_000 } : {}),
+                ? { minimumDurationMs: 500 } : {}),
             stuckTimeoutMs: target.source.startsWith("actor") ||
                 target.source === "enemy" ? 8_000 : 12_000,
             restartPolicy: "resume",
