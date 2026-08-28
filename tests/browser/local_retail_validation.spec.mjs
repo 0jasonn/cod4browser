@@ -1021,8 +1021,8 @@ async function missionActors(page)
         for (let slot = 0; slot < 32; ++slot) {
             const team = await module.call("_KisakWeb_TestActorState", slot, 0);
             if (team < 0) continue;
-            const [health, compass, hasPath, state, moveMode, lastShotTime] =
-                await Promise.all([1, 2, 3, 4, 5, 6].map(
+            const [health, compass, hasPath, state, moveMode, lastShotTime,
+                lineOfSight] = await Promise.all([1, 2, 3, 4, 5, 6, 7].map(
                     (field) => module.call(
                         "_KisakWeb_TestActorState", slot, field)));
             const origin = await Promise.all([0, 1, 2].map(
@@ -1031,8 +1031,12 @@ async function missionActors(page)
             const pathGoal = hasPath ? await Promise.all([0, 1, 2].map(
                 (component) => module.call(
                     "_KisakWeb_TestActorVector", slot, 1, component))) : null;
+            const aimOrigin = await Promise.all([0, 1, 2].map(
+                (component) => module.call(
+                    "_KisakWeb_TestActorVector", slot, 2, component)));
             actors.push({ slot, team, health, compass, hasPath, state,
-                moveMode, lastShotTime, origin, pathGoal });
+                moveMode, lastShotTime, lineOfSight, origin, pathGoal,
+                aimOrigin });
         }
         return { playerTeam, actors };
     });
@@ -1251,9 +1255,10 @@ async function ensureMissionEnemyDamage(page, logStart)
             adapter.observe(), missionActors(page),
         ]);
         const targets = actorState.actors
-            .filter(({ team, health, origin }) =>
+            .filter(({ team, health, origin, aimOrigin }) =>
                 team !== actorState.playerTeam && health > 0 &&
-                origin.every(Number.isFinite))
+                origin.every(Number.isFinite) &&
+                aimOrigin.every(Number.isFinite))
             .map((actor) => ({
                 ...actor,
                 distance: Math.hypot(...actor.origin.map((value, index) =>
@@ -1261,29 +1266,73 @@ async function ensureMissionEnemyDamage(page, logStart)
             }))
             .filter(({ distance }) => distance >= 64 && distance <= 2_048)
             .sort((left, right) =>
+                Number(right.lineOfSight > 0) -
+                    Number(left.lineOfSight > 0) ||
                 Number(right.lastShotTime > 0) -
                     Number(left.lastShotTime > 0) ||
                 left.distance - right.distance);
-        if (targets.length === 0) break;
-        const target = targets[0];
-        await createMissionRouteController(adapter, {
-            tickMs: 100,
-            mouseCountsPerDegree: 8,
-        }).run({
-            schemaVersion: 1,
-            map: missionTargetMap,
-            segments: [{
+        const visibleTarget = targets.find(({ lineOfSight }) =>
+            lineOfSight > 0);
+        let segment;
+        if (visibleTarget) {
+            segment = {
                 targetRegion: {
-                    x: target.origin[0], y: target.origin[1],
-                    z: target.origin[2], radius: target.distance + 32,
+                    x: visibleTarget.aimOrigin[0],
+                    y: visibleTarget.aimOrigin[1],
+                    z: visibleTarget.aimOrigin[2],
+                    radius: visibleTarget.distance + 32,
                 },
                 maxDurationMs: 10_000,
                 minimumDurationMs: 2_000,
                 stuckTimeoutMs: 10_000,
                 restartPolicy: "fail",
                 actions: { ads: true, fire: true },
-            }],
-        });
+            };
+        } else {
+            const allies = actorState.actors
+                .filter(({ team, health, origin }) =>
+                    team === actorState.playerTeam && health > 0 &&
+                    origin.every(Number.isFinite))
+                .map((actor) => ({
+                    ...actor,
+                    routeOrigin: actor.hasPath &&
+                        actor.pathGoal?.every(Number.isFinite)
+                        ? actor.pathGoal : actor.origin,
+                }))
+                .map((actor) => ({
+                    ...actor,
+                    distance: Math.hypot(...actor.routeOrigin.map(
+                        (value, index) => value - observation.origin[index])),
+                }))
+                .filter(({ distance }) =>
+                    distance >= 192 && distance <= 4_096)
+                .sort((left, right) =>
+                    Number(right.hasPath) - Number(left.hasPath) ||
+                    left.distance - right.distance);
+            if (allies.length === 0) break;
+            const ally = allies[0];
+            segment = {
+                targetRegion: {
+                    x: ally.routeOrigin[0], y: ally.routeOrigin[1],
+                    z: ally.routeOrigin[2], radius: 192,
+                },
+                maxDurationMs: 45_000,
+                stuckTimeoutMs: 10_000,
+                restartPolicy: "fail",
+                actions: { jump: true, use: true },
+            };
+        }
+        try {
+            await createMissionRouteController(adapter, {
+                tickMs: 100,
+                mouseCountsPerDegree: 8,
+                obstacleRecoveryAttempts: 4,
+            }).run({ schemaVersion: 1, map: missionTargetMap,
+                segments: [segment] });
+        } catch (error) {
+            if (![MISSION_ROUTE_FAILURE.STUCK, MISSION_ROUTE_FAILURE.TIMEOUT]
+                .includes(error?.code)) throw error;
+        }
         events = await damageEvents();
     }
     return events;
@@ -1468,21 +1517,24 @@ async function authorAssistedMissionRoute(page)
                 Number(right.moveMode > 0) - Number(left.moveMode > 0) ||
                 left.distance - right.distance);
         const enemyMarkers = actorState.actors
-            .filter(({ team, health, origin }) =>
+            .filter(({ team, health, aimOrigin }) =>
                 team !== actorState.playerTeam && health > 0 &&
-                origin.every(Number.isFinite))
+                aimOrigin.every(Number.isFinite))
             .map((actor) => ({
                 ...actor,
                 source: "enemy",
-                marker: actor.origin.map(
+                origin: actor.aimOrigin,
+                marker: actor.aimOrigin.map(
                     (value) => Math.round(value / 96)).join(":"),
-                distance: Math.hypot(...actor.origin.map(
+                distance: Math.hypot(...actor.aimOrigin.map(
                     (value, index) => value - observation.origin[index])),
             }))
             .filter(({ source, slot, marker, distance }) =>
                 distance >= 64 && distance <= 1_800 &&
                 !attempted.has(`${source}:${slot}:${marker}`))
             .sort((left, right) =>
+                Number(right.lineOfSight > 0) -
+                    Number(left.lineOfSight > 0) ||
                 Number(right.lastShotTime > 0) -
                     Number(left.lastShotTime > 0) ||
                 left.distance - right.distance);

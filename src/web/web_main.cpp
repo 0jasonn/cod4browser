@@ -5,6 +5,8 @@
 #include <cgame/cg_main.h>
 #include <cgame/cg_vehicle_hud.h>
 #include <game/actor.h>
+#include <game/actor_senses.h>
+#include <game/g_local.h>
 #include <game/g_main.h>
 #include <game/savememory.h>
 #include <qcommon/cmd.h>
@@ -674,7 +676,7 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestActorState(
 {
     if (!level.actors || slot < 0 || slot >= MAX_ACTORS)
         return -1;
-    const actor_s &actor = level.actors[slot];
+    actor_s &actor = level.actors[slot];
     if (!actor.inuse || !actor.ent || !actor.ent->r.inuse || !actor.sentient)
         return -1;
     switch (field)
@@ -687,6 +689,16 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestActorState(
         actor.stateLevel < 5 ? actor.stateLevel : 0]);
     case 5: return static_cast<int>(actor.moveMode);
     case 6: return actor.lastShotTime;
+    case 7:
+    {
+        float playerView[3]{};
+        float actorEye[3]{};
+        G_GetPlayerViewOrigin(&level.clients[0].ps, playerView);
+        Actor_GetEyePosition(&actor, actorEye);
+        return G_LocationalTracePassed(
+            playerView, actorEye, 0, actor.ent->s.number,
+            0x2806831, nullptr) ? 1 : 0;
+    }
     default: return -1;
     }
 }
@@ -697,11 +709,17 @@ extern "C" EMSCRIPTEN_KEEPALIVE double KisakWeb_TestActorVector(
     if (KisakWeb_TestActorState(slot, 0) < 0 ||
         component < 0 || component >= 3)
         return std::numeric_limits<double>::quiet_NaN();
-    const actor_s &actor = level.actors[slot];
+    actor_s &actor = level.actors[slot];
     if (vector == 0)
         return actor.ent->r.currentOrigin[component];
     if (vector == 1 && actor.Path.wPathLen > 0)
         return actor.Path.vFinalGoal[component];
+    if (vector == 2)
+    {
+        float actorEye[3]{};
+        Actor_GetEyePosition(&actor, actorEye);
+        return actorEye[component];
+    }
     return std::numeric_limits<double>::quiet_NaN();
 }
 
