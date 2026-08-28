@@ -1219,10 +1219,13 @@ async function prepareMissionRouteInput(page)
         .toBe("game-canvas");
 }
 
-async function runMissionRouteSegments(adapter, route, { skipRetryable = false } = {})
+async function runMissionRouteSegments(adapter, route, {
+    maximumConsecutiveSkips = 0,
+} = {})
 {
     const events = [];
     const skippedSegmentIndices = [];
+    let consecutiveSkips = 0;
     const retryable = new Set([
         MISSION_ROUTE_FAILURE.DIVERGED,
         MISSION_ROUTE_FAILURE.STUCK,
@@ -1247,10 +1250,13 @@ async function runMissionRouteSegments(adapter, route, { skipRetryable = false }
             events.push(...result.events.map((event) => ({
                 ...event, segmentIndex,
             })));
+            consecutiveSkips = 0;
         } catch (error) {
             error.segmentIndex = segmentIndex;
-            if (skipRetryable && retryable.has(error?.code)) {
+            if (consecutiveSkips < maximumConsecutiveSkips &&
+                retryable.has(error?.code)) {
                 skippedSegmentIndices.push(segmentIndex);
+                ++consecutiveSkips;
                 console.log(`KISAK_ROUTE_PREFIX_SKIP ${JSON.stringify({
                     code: error.code, segmentIndex,
                 })}`);
@@ -1431,8 +1437,12 @@ async function authorAssistedMissionRoute(page)
             await readFile(missionRoutePath, "utf8")));
         expect(legacyPrefix.map).toBe(missionTargetMap);
         const segments = legacyPrefix.segments.map((segment) => {
-            if (segment.actions?.fire !== true) return segment;
-            const { actions: legacyActions, ...withoutActions } = segment;
+            const widened = segment.targetRegion.radius < 384 ? {
+                ...segment,
+                targetRegion: { ...segment.targetRegion, radius: 384 },
+            } : segment;
+            if (widened.actions?.fire !== true) return widened;
+            const { actions: legacyActions, ...withoutActions } = widened;
             const actions = Object.fromEntries(Object.entries(legacyActions)
                 .filter(([action]) => action !== "ads" && action !== "fire"));
             return Object.keys(actions).length > 0
@@ -1445,7 +1455,7 @@ async function authorAssistedMissionRoute(page)
         });
         try {
             prefixReplay = await runMissionRouteSegments(
-                baseAdapter, replayRoute, { skipRetryable: true });
+                baseAdapter, replayRoute, { maximumConsecutiveSkips: 1 });
         } catch (error) {
             console.log(`KISAK_ROUTE_ASSIST_PREFIX_FAILURE ${JSON.stringify({
                 code: error?.code, segmentIndex: error?.segmentIndex,
@@ -1464,6 +1474,8 @@ async function authorAssistedMissionRoute(page)
             segments: prefixRoute.segments.length,
             events: prefixReplay.events.length,
             skippedSegments: prefixReplay.skippedSegmentIndices,
+            widenedMovementSegments: legacyPrefix.segments.filter(
+                (segment) => segment.targetRegion.radius < 384).length,
             legacyCombatSegmentsRemoved: legacyPrefix.segments.filter(
                 (segment) => segment.actions?.fire === true).length,
         })}`);
