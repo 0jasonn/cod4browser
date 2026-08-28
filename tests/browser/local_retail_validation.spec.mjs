@@ -1623,10 +1623,13 @@ async function authorAssistedMissionRoute(page)
         };
         console.log(`KISAK_ROUTE_ASSIST_TARGET ${JSON.stringify(target)}`);
         try {
+            const combat = target.source === "enemy";
             routeController = createMissionRouteController(adapter, {
-                tickMs: 100,
-                mouseCountsPerDegree: 16,
-                maximumMouseDelta: 512,
+                tickMs: combat ? 100 : 200,
+                ...(combat ? {
+                    mouseCountsPerDegree: 16,
+                    maximumMouseDelta: 512,
+                } : {}),
                 minimumProgress: 4,
                 obstacleRecoveryAttempts: 2,
                 obstacleRecoveryMs: 1_000,
