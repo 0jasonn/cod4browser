@@ -701,6 +701,7 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestGameplayState(
     case 30:
     case 31:
     case 32:
+    case 35:
     {
         SaveGame *const save = SaveMemory_GetLastCommittedSave();
         const bool committed = save && save->saveState == COMMITTED &&
@@ -713,7 +714,8 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestGameplayState(
         if (field == 30) return save->header.bodySize;
         if (field == 31) return sv_mapname &&
             I_stricmp(save->header.mapName, sv_mapname->current.string) == 0;
-        return save->header.saveId;
+        if (field == 32) return save->header.saveId;
+        return save->header.saveCheckSum;
     }
     case 33:
     case 34:

@@ -125,6 +125,7 @@ async function installRetailObservers(page)
         globalThis.__retailDatabase = [];
         globalThis.__retailAudioTelemetry = [];
         globalThis.__retailAudioPlaybackCount = 0;
+        globalThis.__retailCinematics = [];
         globalThis.__retailLogs = [];
         globalThis.addEventListener("kisakcod:log", (event) => {
             globalThis.__retailLogs.push(structuredClone(event.detail));
@@ -158,6 +159,11 @@ async function installRetailObservers(page)
         });
         globalThis.addEventListener("kisakcod:engine-lifecycle", (event) => {
             globalThis.__retailLifecycle.push({
+                ...structuredClone(event.detail), observedMs: performance.now(),
+            });
+        });
+        globalThis.addEventListener("kisakcod:cinematic", (event) => {
+            globalThis.__retailCinematics.push({
                 ...structuredClone(event.detail), observedMs: performance.now(),
             });
         });
@@ -920,6 +926,7 @@ const missionStateField = Object.freeze({
     saveId: 32,
     activeObjectives: 33,
     doneObjectives: 34,
+    saveChecksum: 35,
 });
 
 async function canonicalMissionState(page)
@@ -944,11 +951,13 @@ async function canonicalMissionState(page)
         read(missionStateField.saveId),
         read(missionStateField.activeObjectives),
         read(missionStateField.doneObjectives),
+        read(missionStateField.saveChecksum),
     ]);
     const [serverHealth, serverPmType, objectiveHash, activeActors, aliveActors,
         actorFingerprint, scriptThreads, levelTime, levelFrame, missionFlags,
         committedSave, saveWrittenToDevice, saveHealth, saveBodySize,
-        saveMapMatches, saveId, activeObjectives, doneObjectives] = values;
+        saveMapMatches, saveId, activeObjectives, doneObjectives,
+        saveChecksum] = values;
     return {
         serverHealth,
         serverPmType,
@@ -968,6 +977,55 @@ async function canonicalMissionState(page)
         saveId,
         activeObjectives,
         doneObjectives,
+        saveChecksum,
+    };
+}
+
+function missionProgressDelta(before, after)
+{
+    const changes = [];
+    if (after.objectiveHash !== before.objectiveHash)
+        changes.push("objectiveHash");
+    if (after.activeObjectives !== before.activeObjectives)
+        changes.push("activeObjectives");
+    if (after.doneObjectives > before.doneObjectives)
+        changes.push("doneObjectives");
+    if (after.missionFlags !== before.missionFlags)
+        changes.push("missionFlags");
+    return changes;
+}
+
+async function advanceMissionProgression(page, before, timeoutMs = 120_000)
+{
+    const started = Date.now();
+    let after = before;
+    let actionBursts = 0;
+    while (Date.now() - started < timeoutMs) {
+        await missionActionBurst(page);
+        ++actionBursts;
+        after = await canonicalMissionState(page);
+        const changes = missionProgressDelta(before, after);
+        if (changes.length > 0) {
+            return {
+                validationResult: "pass",
+                changes,
+                actionBursts,
+                observedDurationMs: Date.now() - started,
+                before,
+                after,
+            };
+        }
+    }
+    expect(missionProgressDelta(before, after),
+        "real mission actions must change a canonical objective/progression marker")
+        .not.toEqual([]);
+    return {
+        validationResult: "pass",
+        changes: missionProgressDelta(before, after),
+        actionBursts,
+        observedDurationMs: Date.now() - started,
+        before,
+        after,
     };
 }
 
@@ -2136,40 +2194,45 @@ if (missionTargetMap) {
                 page, missionStateField.actorFingerprint), { timeout: 30_000 })
                 .not.toBe(initialState.actorFingerprint);
 
-            failureStage = `${missionTargetMap} natural checkpoint`;
-            failureClass = "savegame";
-            await expect.poll(() => gameplayState(
-                page, missionStateField.committedSave), { timeout: 120_000 })
-                .toBe(1);
-            await expect.poll(() => gameplayState(
-                page, missionStateField.saveId), { timeout: 120_000 })
+            failureStage = `${missionTargetMap} objective progression and combat`;
+            failureClass = "game";
+            await submitCommand(page, "god");
+            const combatLogStart = await page.evaluate(() =>
+                globalThis.__retailLogs.length);
+            const progressionStart = initialState;
+            const inputEvidence = await exerciseTransitionInput(page);
+            const progression = await advanceMissionProgression(
+                page, progressionStart);
+            const enemyDamageEvents = await page.evaluate((start) =>
+                globalThis.__retailLogs.slice(start).filter(({ text }) =>
+                    text.includes("canonical damage target=") &&
+                    text.includes("class=actor_enemy")).map(({ text }) => text),
+            combatLogStart);
+            expect(enemyDamageEvents.length,
+                "mission flow must include canonical enemy damage")
                 .toBeGreaterThan(0);
+
+            failureStage = `${missionTargetMap} progressed natural checkpoint`;
+            failureClass = "savegame";
+            await expect.poll(async () => {
+                const state = await canonicalMissionState(page);
+                return state.committedSave && state.saveId > 0 &&
+                    (!progressionStart.committedSave ||
+                        state.saveChecksum !== progressionStart.saveChecksum);
+            }, { timeout: 120_000 }).toBe(true);
             const naturalCheckpoint = await canonicalMissionState(page);
+            expect(missionProgressDelta(initialState, naturalCheckpoint))
+                .not.toEqual([]);
             await submitCommand(page, "savegame_lastcommit");
             await expect.poll(() => gameplayState(
                 page, missionStateField.saveWrittenToDevice),
             { timeout: 60_000 }).toBe(1);
             const naturalCheckpointFlush = await checkpoint(page);
             expect(naturalCheckpointFlush.bytesPersisted).toBeGreaterThan(0);
-
-            failureStage = `${missionTargetMap} movement and combat`;
-            failureClass = "game";
-            await submitCommand(page, "god");
-            const combatLogStart = await page.evaluate(() =>
-                globalThis.__retailLogs.length);
-            const inputEvidence = await exerciseTransitionInput(page);
-            const objectiveBefore = await gameplayState(
-                page, missionStateField.objectiveHash);
-            await missionActionBurst(page);
-            const enemyDamageEvents = await page.evaluate((start) =>
-                globalThis.__retailLogs.slice(start).filter(({ text }) =>
-                    text.includes("canonical damage target=") &&
-                    text.includes("class=actor_enemy")).map(({ text }) => text),
-            combatLogStart);
-            const objectiveAfter = await gameplayState(
-                page, missionStateField.objectiveHash);
-            expect(await gameplayState(
-                page, missionStateField.activeObjectives)).toBeGreaterThan(0);
+            const cinematicEvidence = await page.evaluate(() => structuredClone(
+                globalThis.__retailCinematics));
+            expect(cinematicEvidence.every(({ state }) => state === "skipped"))
+                .toBe(true);
 
             failureStage = `${missionTargetMap} named game save`;
             failureClass = "savegame";
@@ -2191,8 +2254,8 @@ if (missionTargetMap) {
             const savedState = await canonicalMissionState(page);
             expect(savedState.saveBodySize).toBeGreaterThan(0);
             expect(savedState.saveMapMatches).toBe(true);
-            const savedWeapon = await gameplayState(page, 4);
-            const savedClip = await gameplayState(page, 6, savedWeapon);
+            const savedWeapon = await gameplayState(page, 0);
+            const savedClip = await gameplayState(page, 1, savedWeapon);
             const savedViewOrigin = await page.evaluate(() => structuredClone(
                 globalThis.__retailValidationViews.at(-1)?.viewOrigin));
             const namedSaveFlush = await checkpoint(page);
@@ -2221,11 +2284,20 @@ if (missionTargetMap) {
                 .toBeGreaterThan(0);
             await waitForWorldFrames(
                 page, missionTargetMap, generationBeforeDeath + 1);
+            await expect.poll(() => gameplayState(
+                page, missionStateField.objectiveHash), { timeout: 30_000 })
+                .toBe(savedState.objectiveHash);
+            await expect.poll(() => gameplayState(
+                page, missionStateField.activeObjectives), { timeout: 30_000 })
+                .toBe(savedState.activeObjectives);
+            await expect.poll(() => gameplayState(
+                page, missionStateField.doneObjectives), { timeout: 30_000 })
+                .toBe(savedState.doneObjectives);
             const restartedState = await canonicalMissionState(page);
-            expect(restartedState.objectiveHash).toBe(savedState.objectiveHash);
             expect(restartedState.serverHealth).toBe(savedState.saveHealth);
-            expect(await gameplayState(page, 4)).toBe(savedWeapon);
-            expect(await gameplayState(page, 6, savedWeapon)).toBe(savedClip);
+            await expect.poll(() => gameplayState(page, 0)).toBe(savedWeapon);
+            await expect.poll(() => gameplayState(page, 1, savedWeapon))
+                .toBe(savedClip);
             const continuedInput = await exerciseTransitionInput(page);
             await expect.poll(() => gameplayState(
                 page, missionStateField.levelFrame), { timeout: 30_000 })
@@ -2262,25 +2334,34 @@ if (missionTargetMap) {
                 globalThis.__retailLogs.slice(start).some(({ text }) =>
                     text.includes("=== G_LoadGame ===")),
             freshLoadLogStart), { timeout: 120_000 }).toBe(true);
+            await expect.poll(() => gameplayState(
+                page, missionStateField.objectiveHash), { timeout: 30_000 })
+                .toBe(savedState.objectiveHash);
+            await expect.poll(() => gameplayState(
+                page, missionStateField.activeObjectives), { timeout: 30_000 })
+                .toBe(savedState.activeObjectives);
+            await expect.poll(() => gameplayState(
+                page, missionStateField.doneObjectives), { timeout: 30_000 })
+                .toBe(savedState.doneObjectives);
             const freshState = await canonicalMissionState(page);
-            expect(freshState.objectiveHash).toBe(savedState.objectiveHash);
             expect(freshState.serverHealth).toBe(savedState.saveHealth);
             expect(freshState.scriptThreads).toBeGreaterThan(0);
             expect(freshState.activeActors).toBeGreaterThan(0);
-            expect(await gameplayState(page, 4)).toBe(savedWeapon);
-            expect(await gameplayState(page, 6, savedWeapon)).toBe(savedClip);
+            await expect.poll(() => gameplayState(page, 0)).toBe(savedWeapon);
+            await expect.poll(() => gameplayState(page, 1, savedWeapon))
+                .toBe(savedClip);
             const freshViewOrigin = await page.evaluate(() => structuredClone(
                 globalThis.__retailValidationViews.at(-1)?.viewOrigin));
             expect(Math.hypot(...freshViewOrigin.map((value, index) =>
                 value - savedViewOrigin[index]))).toBeLessThan(8);
             const freshInput = await exerciseTransitionInput(page);
-            await expect.poll(() => gameplayState(
-                page, missionStateField.levelFrame), { timeout: 30_000 })
-                .toBeGreaterThan(freshState.levelFrame);
+            await submitCommand(page, "god");
+            const continuedProgression = await advanceMissionProgression(
+                page, freshState);
             expect(pageErrors).toEqual([]);
 
             console.log(`KISAK_RETAIL_MISSION_RESULT ${JSON.stringify({
-                schemaVersion: 1,
+                schemaVersion: 2,
                 source: { commitSha: sourceCommit, dirty: sourceDirty },
                 recordedAtUtc: new Date().toISOString(),
                 environment: {
@@ -2295,10 +2376,10 @@ if (missionTargetMap) {
                     initialState,
                     naturalCheckpoint,
                     naturalCheckpointFlush,
+                    cinematicEvidence,
                 },
                 progression: {
-                    objectiveBefore,
-                    objectiveAfter,
+                    ...progression,
                     inputEvidence,
                     enemyDamageEventCount: enemyDamageEvents.length,
                 },
@@ -2312,6 +2393,7 @@ if (missionTargetMap) {
                     flushDurationMs: shutdownFlushDurationMs,
                     freshRuntimeState: freshState,
                     freshRuntimeInput: freshInput,
+                    continuedProgression,
                 },
             })}`);
         });
