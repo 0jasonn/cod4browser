@@ -38,6 +38,8 @@ if (missionRouteMode && !["author", "replay"].includes(missionRouteMode))
     throw new Error("KISAK_RETAIL_ROUTE_MODE must be author or replay");
 if (missionRouteMode === "author" && !missionRouteOutputPath)
     throw new Error("KISAK_RETAIL_ROUTE_OUTPUT is required in author mode");
+if (missionRouteMode === "author" && missionRoutePath && !missionRouteAssist)
+    throw new Error("an authoring route prefix requires assisted author mode");
 if (missionRouteMode === "replay" && !missionRoutePath)
     throw new Error("KISAK_RETAIL_ROUTE_PATH is required in replay mode");
 if (!['progression', 'full'].includes(missionValidationStage))
@@ -1379,11 +1381,31 @@ async function authorMissionRoute(page)
 
 async function authorAssistedMissionRoute(page)
 {
+    const baseAdapter = missionRouteAdapter(page);
+    const combatLogStart = await page.evaluate(() =>
+        globalThis.__retailLogs.length);
+    let prefixRoute = null;
+    let prefixReplay = null;
+    if (missionRoutePath) {
+        prefixRoute = parseMissionRoute(JSON.parse(
+            await readFile(missionRoutePath, "utf8")));
+        expect(prefixRoute.map).toBe(missionTargetMap);
+        prefixReplay = await createMissionRouteController(baseAdapter, {
+            tickMs: 100,
+            mouseCountsPerDegree: 16,
+            maximumMouseDelta: 512,
+            obstacleRecoveryAttempts: 4,
+            obstacleRecoveryMs: 1_000,
+        }).run(prefixRoute);
+        console.log(`KISAK_ROUTE_ASSIST_PREFIX ${JSON.stringify({
+            segments: prefixRoute.segments.length,
+            events: prefixReplay.events.length,
+        })}`);
+    }
     const recorder = createMissionRouteRecorder({
         map: missionTargetMap,
         radius: 160,
     });
-    const baseAdapter = missionRouteAdapter(page);
     const routeKey = {
         ads: 0xC9, fire: 0xC8, forward: 0x77, left: 0x61, right: 0x64,
         jump: 0x20, use: 0x66,
@@ -1391,7 +1413,10 @@ async function authorAssistedMissionRoute(page)
     let lastObservationMs = 0;
     let initialProgression = null;
     let progressed = false;
-    let combatObserved = false;
+    let combatObserved = await page.evaluate((startIndex) =>
+        globalThis.__retailLogs.slice(startIndex).some(({ text }) =>
+            text.includes("canonical damage target=") &&
+            text.includes("class=actor_enemy")), combatLogStart);
     let routeController = null;
     let routeHeading = null;
     let progressionWaypointDeferred = false;
@@ -1438,8 +1463,6 @@ async function authorAssistedMissionRoute(page)
     });
     const start = await adapter.observe();
     lastRecordedWaypointOrigin = [...start.origin];
-    const combatLogStart = await page.evaluate(() =>
-        globalThis.__retailLogs.length);
     initialProgression = { ...start.progression };
     const attempted = new Set();
     const retryable = new Set([
@@ -1635,7 +1658,24 @@ async function authorAssistedMissionRoute(page)
     }
     if (progressionWaypointDeferred)
         recorder.markWaypoint();
-    const authored = recorder.finish();
+    const continuation = recorder.finish();
+    const authored = prefixRoute ? {
+        route: parseMissionRoute({
+            schemaVersion: prefixRoute.schemaVersion,
+            map: prefixRoute.map,
+            segments: [
+                ...prefixRoute.segments,
+                ...continuation.route.segments,
+            ],
+        }),
+        evidence: {
+            ...continuation.evidence,
+            prefix: {
+                segments: prefixRoute.segments.length,
+                replayEvents: prefixReplay.events.length,
+            },
+        },
+    } : continuation;
     await writeFile(missionRouteOutputPath,
         `${JSON.stringify(authored.route, null, 2)}\n`, "utf8");
     await writeFile(`${missionRouteOutputPath}.evidence.json`,

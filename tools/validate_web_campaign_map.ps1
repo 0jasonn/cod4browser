@@ -33,9 +33,10 @@ if ($RouteAssist -and $RouteMode -ne 'author') {
     throw '-RouteAssist requires -RouteMode author.'
 }
 $resolvedRoutePath = $null
-if ($RouteMode -eq 'replay') {
-    if (-not $RoutePath) { throw '-RoutePath is required for route replay.' }
+if ($RoutePath) {
     $resolvedRoutePath = (Resolve-Path -LiteralPath $RoutePath).Path
+} elseif ($RouteMode -eq 'replay') {
+    throw '-RoutePath is required for route replay.'
 }
 $resolvedRouteOutput = $null
 if ($RouteMode -eq 'author') {
@@ -111,7 +112,11 @@ try {
             $env:KISAK_RETAIL_ROUTE_OUTPUT = $resolvedRouteOutput
             if ($RouteAssist) { $env:KISAK_RETAIL_ROUTE_ASSIST = '1' }
             else { Remove-Item -LiteralPath 'Env:KISAK_RETAIL_ROUTE_ASSIST' -ErrorAction SilentlyContinue }
-            Remove-Item -LiteralPath 'Env:KISAK_RETAIL_ROUTE_PATH' -ErrorAction SilentlyContinue
+            if ($resolvedRoutePath) {
+                $env:KISAK_RETAIL_ROUTE_PATH = $resolvedRoutePath
+            } else {
+                Remove-Item -LiteralPath 'Env:KISAK_RETAIL_ROUTE_PATH' -ErrorAction SilentlyContinue
+            }
         }
     }
     if ($Browser -eq 'chromium') {
