@@ -254,6 +254,24 @@ test("reports disjoint renderer recovery memory categories", async ({ page }) =>
     expect(sample.imageLoadDefCacheBudgetBytes).toBeGreaterThan(0);
     expect(sample.imageLoadDefCacheEncodedPayloadBytes)
         .toBeLessThanOrEqual(sample.imageLoadDefCacheBudgetBytes);
+    const decode = sample.imageDecode;
+    for (const field of [
+        "encodedImageInspectionCount",
+        "metadataParseCount",
+        "pixelDecodeCount",
+        "initialUploadDecodeCount",
+        "contextRecoveryDecodeCount",
+        "decodedBytes",
+        "duplicateDecodeCount",
+    ]) {
+        expect(Number.isSafeInteger(decode[field])).toBe(true);
+        expect(decode[field]).toBeGreaterThanOrEqual(0);
+    }
+    expect(decode.initialUploadDecodeCount + decode.contextRecoveryDecodeCount)
+        .toBe(decode.pixelDecodeCount);
+    expect(decode.duplicateDecodeCount)
+        .toBeLessThanOrEqual(decode.initialUploadDecodeCount);
+    expect(decode.cpuMilliseconds).toBeGreaterThanOrEqual(0);
 });
 
 test("keeps an initial WebGL pipeline failure terminal", async ({ page }) => {

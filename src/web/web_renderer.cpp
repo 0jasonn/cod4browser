@@ -58,6 +58,24 @@ enum class WebRendererImageRecoverySource : std::uint8_t
     IwiMember,
 };
 
+enum class WebRendererImageDecodeReason : std::uint8_t
+{
+    InitialUpload,
+    ContextRecovery,
+};
+
+struct WebRendererImageDecodeStats
+{
+    std::uint64_t encodedImageInspections = 0u;
+    std::uint64_t metadataParses = 0u;
+    std::uint64_t pixelDecodes = 0u;
+    std::uint64_t initialUploadDecodes = 0u;
+    std::uint64_t contextRecoveryDecodes = 0u;
+    std::uint64_t bytesDecoded = 0u;
+    std::uint64_t duplicateDecodes = 0u;
+    double cpuMilliseconds = 0.0;
+};
+
 struct WebRendererRetainedWorldImage
 {
     const GfxImage *canonicalIdentity = nullptr;
@@ -77,6 +95,7 @@ struct WebRendererRetainedWorldImage
     std::uint8_t sourceFlags = 0u;
     bool mipmapsAllowed = true;
     bool authoredMipChain = false;
+    bool decodedDuringRetention = false;
     bool supported = false;
 };
 
@@ -429,6 +448,7 @@ struct WebRendererState
     std::uint32_t uploadGeneration = 0;
     std::uint32_t rebuildGeneration = 0;
     std::uint32_t recoveryCount = 0;
+    WebRendererImageDecodeStats imageDecodeStats;
     bool sourceTextureActive = false;
     std::string compatibilityId;
     std::string compatibilityVertexSource;
@@ -508,6 +528,48 @@ void DeleteStaticModelObjects(
     GLuint instanceBuffer);
 void BindStaticModelInstanceRange(std::uint32_t instanceOffset);
 void AttachRetainedWorldReflectionTextures() noexcept;
+
+void RecordEncodedImageInspection() noexcept
+{
+#if KISAK_WEB_DIAGNOSTICS
+    ++g_renderer.imageDecodeStats.encodedImageInspections;
+#endif
+}
+
+std::size_t DecodedImageBytes(const kisak::iwi::Rgba8Image &image) noexcept
+{
+    std::size_t bytes = image.pixels.size();
+    for (const auto &mip : image.mipPixels) bytes += mip.size();
+    return bytes;
+}
+
+template <typename Decode>
+kisak::iwi::Error DecodeRetainedImage(
+    WebRendererImageDecodeReason reason,
+    bool parsesMetadata,
+    bool duplicate,
+    kisak::iwi::Rgba8Image &image,
+    Decode &&decode)
+{
+#if KISAK_WEB_DIAGNOSTICS
+    const double started = emscripten_get_now();
+    WebRendererImageDecodeStats &stats = g_renderer.imageDecodeStats;
+    ++stats.pixelDecodes;
+    if (parsesMetadata) ++stats.metadataParses;
+    if (reason == WebRendererImageDecodeReason::ContextRecovery)
+        ++stats.contextRecoveryDecodes;
+    else
+        ++stats.initialUploadDecodes;
+    if (duplicate) ++stats.duplicateDecodes;
+#endif
+    const kisak::iwi::Error error = std::forward<Decode>(decode)();
+#if KISAK_WEB_DIAGNOSTICS
+    stats.cpuMilliseconds += emscripten_get_now() - started;
+    if (error == kisak::iwi::Error::None)
+        stats.bytesDecoded += DecodedImageBytes(image);
+#endif
+    return error;
+}
 
 #if KISAK_WEB_DIAGNOSTICS
 enum class FrameProfileDrawBucket : std::uint8_t
@@ -1566,7 +1628,15 @@ EM_JS(void, DispatchRendererMemory, (
     double iwiImageDecodedBytes,
     double rawImageCount,
     double rawImageRecoveryBytes,
-    double rawImageDecodedBytes), {
+    double rawImageDecodedBytes,
+    double encodedImageInspectionCount,
+    double imageMetadataParseCount,
+    double pixelDecodeCount,
+    double initialUploadDecodeCount,
+    double contextRecoveryDecodeCount,
+    double decodedImageBytes,
+    double duplicateDecodeCount,
+    double imageDecodeCpuMilliseconds), {
         let webglRendererIdentity = null;
         try {
             const gl = (typeof GL !== "undefined" && GL.currentContext)
@@ -1649,6 +1719,16 @@ EM_JS(void, DispatchRendererMemory, (
                         recoveryBytes: rawImageRecoveryBytes,
                         decodedBytes: rawImageDecodedBytes,
                     },
+                },
+                imageDecode: {
+                    encodedImageInspectionCount,
+                    metadataParseCount: imageMetadataParseCount,
+                    pixelDecodeCount,
+                    initialUploadDecodeCount,
+                    contextRecoveryDecodeCount,
+                    decodedBytes: decodedImageBytes,
+                    duplicateDecodeCount,
+                    cpuMilliseconds: imageDecodeCpuMilliseconds,
                 },
                 webglRendererIdentity
             }
@@ -1969,7 +2049,15 @@ std::size_t EmitRendererMemory(const char *state, bool sampleAllocator = true)
         static_cast<double>(iwiDecodedBytes),
         static_cast<double>(rawImageCount),
         static_cast<double>(rawRecoveryBytes),
-        static_cast<double>(rawDecodedBytes));
+        static_cast<double>(rawDecodedBytes),
+        static_cast<double>(g_renderer.imageDecodeStats.encodedImageInspections),
+        static_cast<double>(g_renderer.imageDecodeStats.metadataParses),
+        static_cast<double>(g_renderer.imageDecodeStats.pixelDecodes),
+        static_cast<double>(g_renderer.imageDecodeStats.initialUploadDecodes),
+        static_cast<double>(g_renderer.imageDecodeStats.contextRecoveryDecodes),
+        static_cast<double>(g_renderer.imageDecodeStats.bytesDecoded),
+        static_cast<double>(g_renderer.imageDecodeStats.duplicateDecodes),
+        g_renderer.imageDecodeStats.cpuMilliseconds);
 #else
     (void)sampleAllocator;
     DispatchRendererMemory(
@@ -2987,7 +3075,9 @@ bool CreateWaterTextureObjects(
 }
 
 bool CreateWorldTextureObjects(
-    std::vector<WebRendererRetainedWorldImage> &images)
+    std::vector<WebRendererRetainedWorldImage> &images,
+    WebRendererImageDecodeReason reason =
+        WebRendererImageDecodeReason::InitialUpload)
 {
     for (WebRendererRetainedWorldImage &image : images)
     {
@@ -2997,20 +3087,30 @@ bool CreateWorldTextureObjects(
         kisak::iwi::Error decodeError = kisak::iwi::Error::None;
         if (image.recoverySource == WebRendererImageRecoverySource::LoadDef)
         {
-            decodeError = kisak::iwi::DecodeLoadDefRgba8(
-                image.sourceFormat,
-                image.sourceFlags,
-                static_cast<std::uint16_t>(image.sourceDimensions[0]),
-                static_cast<std::uint16_t>(image.sourceDimensions[1]),
-                static_cast<std::uint16_t>(image.sourceDimensions[2]),
-                image.encodedSource,
-                decoded);
+            decodeError = DecodeRetainedImage(reason, false,
+                reason == WebRendererImageDecodeReason::InitialUpload &&
+                    image.decodedDuringRetention,
+                decoded, [&] {
+                    return kisak::iwi::DecodeLoadDefRgba8(
+                        image.sourceFormat,
+                        image.sourceFlags,
+                        static_cast<std::uint16_t>(image.sourceDimensions[0]),
+                        static_cast<std::uint16_t>(image.sourceDimensions[1]),
+                        static_cast<std::uint16_t>(image.sourceDimensions[2]),
+                        image.encodedSource,
+                        decoded);
+                });
         }
         else if (image.recoverySource ==
             WebRendererImageRecoverySource::IwiMember)
         {
-            decodeError = kisak::iwi::DecodeRgba8(
-                image.encodedSource, decoded);
+            decodeError = DecodeRetainedImage(reason, true,
+                reason == WebRendererImageDecodeReason::InitialUpload &&
+                    image.decodedDuringRetention,
+                decoded, [&] {
+                    return kisak::iwi::DecodeRgba8(
+                        image.encodedSource, decoded);
+                });
         }
         const bool encoded = image.recoverySource !=
             WebRendererImageRecoverySource::DecodedRgba8;
@@ -3464,8 +3564,11 @@ bool CreateShadowTarget(
     return true;
 }
 
-bool CreateRendererResources()
+bool CreateRendererResources(bool contextRecovery = false)
 {
+    const WebRendererImageDecodeReason imageDecodeReason = contextRecovery
+        ? WebRendererImageDecodeReason::ContextRecovery
+        : WebRendererImageDecodeReason::InitialUpload;
     constexpr const char *vertexSource = R"glsl(#version 300 es
         precision highp float;
         precision highp int;
@@ -4585,7 +4688,8 @@ bool CreateRendererResources()
         texturePixels, textureWidth, textureHeight, textureSamplerState, texture);
     const bool worldTexturesReady = textureReady &&
         (!g_renderer.worldSurfaceActive ||
-         CreateWorldTextureObjects(g_renderer.retainedWorldImages));
+         CreateWorldTextureObjects(
+             g_renderer.retainedWorldImages, imageDecodeReason));
     const bool waterTexturesReady = worldTexturesReady &&
         (!g_renderer.worldSurfaceActive ||
          CreateWaterTextureObjects(g_renderer.retainedWorldBatches));
@@ -4608,7 +4712,8 @@ bool CreateRendererResources()
             staticModelInstanceBuffer);
     const bool staticModelTexturesReady = staticModelObjectsReady &&
         (!g_renderer.staticModelSceneActive ||
-         CreateWorldTextureObjects(g_renderer.retainedStaticModelImages));
+         CreateWorldTextureObjects(
+             g_renderer.retainedStaticModelImages, imageDecodeReason));
     const bool staticModelLightingReady = staticModelTexturesReady &&
         (!g_renderer.staticModelSceneActive ||
          CreateModelLightingTexture(
@@ -4625,7 +4730,8 @@ bool CreateRendererResources()
             dynamicModelIndexBuffer);
     const bool dynamicModelTexturesReady = dynamicModelObjectsReady &&
         (!g_renderer.dynamicModelSceneActive ||
-         CreateWorldTextureObjects(g_renderer.retainedDynamicModelImages));
+         CreateWorldTextureObjects(
+             g_renderer.retainedDynamicModelImages, imageDecodeReason));
     const bool dynamicModelLightingReady = dynamicModelTexturesReady &&
         (!g_renderer.dynamicModelSceneActive ||
          CreateModelLightingTexture(
@@ -4639,7 +4745,8 @@ bool CreateRendererResources()
             uiIndexBuffer);
     const bool uiTexturesReady = uiObjectsReady &&
         (!g_renderer.uiSceneActive ||
-         CreateWorldTextureObjects(g_renderer.retainedUiImages));
+         CreateWorldTextureObjects(
+             g_renderer.retainedUiImages, imageDecodeReason));
     GLuint shadowFramebuffer = 0u;
     GLuint shadowDepthTexture = 0u;
     GLuint shadowFarFramebuffer = 0u;
@@ -5024,7 +5131,7 @@ bool HandleWebGLContextRestored(int, const void *, void *)
     // Every WebGL object became invalid at context loss. Rebuild the pipeline,
     // indexed surface, and texture from renderer-owned, bounded descriptions.
     ResetGpuHandles();
-    if (!CreateRendererResources())
+    if (!CreateRendererResources(true))
     {
         EmitSurfaceLifecycle(
             "failed",
@@ -5149,6 +5256,7 @@ bool DecodeExternalCanonicalImage(
         return false;
     }
 
+    RecordEncodedImageInspection();
     const std::string path =
         std::string("images/") + canonical->name + ".iwi";
     int file = 0;
@@ -5162,7 +5270,10 @@ bool DecodeExternalCanonicalImage(
         const std::uint32_t read = FS_Read(bytes.data(),
             static_cast<std::uint32_t>(bytes.size()), file);
         decodeError = read == bytes.size()
-            ? kisak::iwi::DecodeRgba8(bytes, decoded)
+            ? DecodeRetainedImage(
+                WebRendererImageDecodeReason::InitialUpload,
+                true, false, decoded,
+                [&] { return kisak::iwi::DecodeRgba8(bytes, decoded); })
             : kisak::iwi::Error::InvalidFileSize;
         if (decodeError == kisak::iwi::Error::None)
             encodedSource = std::move(bytes);
@@ -5239,6 +5350,7 @@ std::uint32_t RetainCanonicalWorldImage(
     retained.canonicalIdentity = canonical;
     retained.canonicalName = canonical->name ? canonical->name : "<unnamed-image>";
     WebDbImageLoadDef loadDef{};
+    RecordEncodedImageInspection();
     const bool hasLoadDef = DB_WebGetImageLoadDef(canonical, loadDef);
     retained.mipmapsAllowed = !hasLoadDef ||
         (loadDef.flags & kisak::iwi::FLAG_NO_MIPMAPS) == 0u;
@@ -5262,16 +5374,21 @@ std::uint32_t RetainCanonicalWorldImage(
         loadDef.dimensions[1] > 0 && loadDef.dimensions[2] == 1)
     {
         attemptedDecode = true;
-        decodeError = kisak::iwi::DecodeLoadDefRgba8(
-            loadDef.format,
-            loadDef.flags,
-            static_cast<std::uint16_t>(loadDef.dimensions[0]),
-            static_cast<std::uint16_t>(loadDef.dimensions[1]),
-            static_cast<std::uint16_t>(loadDef.dimensions[2]),
-            std::span<const std::uint8_t>(
-                loadDef.data,
-                loadDef.byteLength),
-            decoded);
+        decodeError = DecodeRetainedImage(
+            WebRendererImageDecodeReason::InitialUpload,
+            false, false, decoded,
+            [&] {
+                return kisak::iwi::DecodeLoadDefRgba8(
+                    loadDef.format,
+                    loadDef.flags,
+                    static_cast<std::uint16_t>(loadDef.dimensions[0]),
+                    static_cast<std::uint16_t>(loadDef.dimensions[1]),
+                    static_cast<std::uint16_t>(loadDef.dimensions[2]),
+                    std::span<const std::uint8_t>(
+                        loadDef.data,
+                        loadDef.byteLength),
+                    decoded);
+            });
         if (decodeError == kisak::iwi::Error::None)
             recoverySource = WebRendererImageRecoverySource::LoadDef;
     }
@@ -5325,6 +5442,8 @@ std::uint32_t RetainCanonicalWorldImage(
             retained.mipmapsAllowed = false;
         retainedPixelBytes += decodedBytes;
         retained.recoverySource = recoverySource;
+        retained.decodedDuringRetention = recoverySource !=
+            WebRendererImageRecoverySource::DecodedRgba8;
         retained.authoredMipChain = retainAuthoredMipChain;
         retained.decodedByteLength = decodedBytes;
         retained.uploadByteLength = uploadBytes;

@@ -12,6 +12,7 @@ const retailRoot = process.env.KISAK_COD4_RETAIL_ROOT;
 const browserChannel = process.env.KISAK_BROWSER_CHANNEL;
 const phase3TargetMap = process.env.KISAK_RETAIL_PHASE3_MAP?.trim().toLowerCase();
 const missionTargetMap = process.env.KISAK_RETAIL_MISSION_MAP?.trim().toLowerCase();
+const runDecodeChain = process.env.KISAK_RETAIL_DECODE_CHAIN === "1";
 if (phase3TargetMap && (!/^[a-z0-9_]+$/.test(phase3TargetMap) ||
     phase3TargetMap.startsWith("mp_") || phase3TargetMap.endsWith("_mp"))) {
     throw new Error("KISAK_RETAIL_PHASE3_MAP must name one single-player zone");
@@ -84,8 +85,10 @@ test.afterEach(async ({}, testInfo) => {
     if (testInfo.status === testInfo.expectedStatus) return;
     const phase3 = testInfo.tags.includes("@retail-phase3");
     const mission = testInfo.tags.includes("@retail-mission");
+    const decode = testInfo.tags.includes("@retail-decode");
     const prefix = mission ? "KISAK_RETAIL_MISSION_RESULT" : phase3
-        ? "KISAK_RETAIL_PHASE3_RESULT" : "KISAK_RETAIL_RESULT";
+        ? "KISAK_RETAIL_PHASE3_RESULT" : decode
+            ? "KISAK_RETAIL_DECODE_RESULT" : "KISAK_RETAIL_RESULT";
     console.log(`${prefix} ${JSON.stringify({
         schemaVersion: retailEvidenceSchemaVersion,
         source: { commitSha: sourceCommit, dirty: sourceDirty },
@@ -590,6 +593,25 @@ function assertMemoryTelemetry(sample)
     }
     expect(sample.imageLoadDefCacheEncodedPayloadBytes)
         .toBeLessThanOrEqual(sample.imageLoadDefCacheBudgetBytes);
+    const decode = sample.imageDecode;
+    for (const field of [
+        "encodedImageInspectionCount",
+        "metadataParseCount",
+        "pixelDecodeCount",
+        "initialUploadDecodeCount",
+        "contextRecoveryDecodeCount",
+        "decodedBytes",
+        "duplicateDecodeCount",
+    ]) {
+        expect(Number.isSafeInteger(decode[field])).toBe(true);
+        expect(decode[field]).toBeGreaterThanOrEqual(0);
+    }
+    expect(decode.initialUploadDecodeCount + decode.contextRecoveryDecodeCount)
+        .toBe(decode.pixelDecodeCount);
+    expect(decode.metadataParseCount).toBeLessThanOrEqual(decode.pixelDecodeCount);
+    expect(decode.duplicateDecodeCount)
+        .toBeLessThanOrEqual(decode.initialUploadDecodeCount);
+    expect(decode.cpuMilliseconds).toBeGreaterThanOrEqual(0);
 }
 
 function assertMapEvidence(evidence, memorySnapshot)
@@ -810,7 +832,7 @@ async function rendererTransitionEvidence(page, lifecycleCursor, startedMs, ende
     };
 }
 
-async function recoverMapContext(page, mapName)
+async function recoverMapContext(page, mapName, validateInput = true)
 {
     const before = await page.evaluate((name) => ({
         startedMs: performance.now(),
@@ -855,7 +877,7 @@ async function recoverMapContext(page, mapName)
     await waitForWorldFrames(page, mapName,
         before.frame.viewSubmissionGeneration + 1);
     const completedMs = await page.evaluate(() => performance.now());
-    const input = await exerciseRetailInput(page);
+    const input = validateInput ? await exerciseRetailInput(page) : null;
     const contextMemory = await page.evaluate((cursor) => structuredClone(
         globalThis.__retailValidationMemory.slice(cursor).filter((entry) =>
             entry.state === "context-lost" || entry.state === "context-restored")),
@@ -978,6 +1000,104 @@ async function canonicalMissionState(page)
         activeObjectives,
         doneObjectives,
         saveChecksum,
+    };
+}
+
+function imageDecodeDelta(after, before)
+{
+    return Object.fromEntries(Object.keys(after).map((field) =>
+        [field, after[field] - before[field]]));
+}
+
+async function loadDecodeChainMap(page, map, index)
+{
+    failureStage = `${map} decode-chain load`;
+    failureClass = "database";
+    const before = await rendererMemorySnapshot(page);
+    const cursors = await page.evaluate(() => ({
+        memory: globalThis.__retailValidationMemory.length,
+    }));
+    const mapCursor = await captureMapCursor(page);
+    const commandMs = await submitCommand(page, `map ${map}`);
+    await waitForDatabaseCompletion(page, map, mapCursor.database);
+    failureStage = `${map} decode-chain canonical lifecycle`;
+    failureClass = "cgame";
+    await waitForLifecycleStages(
+        page, mapCursor.lifecycle, canonicalMapLifecycleStages);
+    failureStage = `${map} decode-chain first world frame`;
+    failureClass = "renderer";
+    const firstFrame = await firstWorldFrameEvidence(page, map, mapCursor.frames);
+    await waitForWorldFrames(page, map, firstFrame.viewSubmissionGeneration + 30);
+    const afterInitialUpload = await rendererMemorySnapshot(page);
+    assertMemoryTelemetry(afterInitialUpload);
+    expect(afterInitialUpload.encodedImageRecoveryBytes).toBeGreaterThan(0);
+    expect(afterInitialUpload.imageLoadDefCacheEncodedPayloadBytes)
+        .toBeLessThanOrEqual(afterInitialUpload.imageLoadDefCacheBudgetBytes);
+
+    const transitionMemory = await page.evaluate((cursor) => structuredClone(
+        globalThis.__retailValidationMemory.slice(cursor.memory)), cursors);
+    const unloadBegin = transitionMemory.find(
+        (entry) => entry.state === "world-unload-begin");
+    const unloadEnd = transitionMemory.find(
+        (entry) => entry.state === "world-unloaded");
+    if (index > 0) {
+        expect(unloadBegin).toBeTruthy();
+        expect(unloadEnd).toBeTruthy();
+        expect(unloadEnd.encodedImageRecoveryBytes).toBe(0);
+        expect(unloadEnd.worldImageRecoveryBytes).toBe(0);
+        expect(unloadEnd.staticModelImageRecoveryBytes).toBe(0);
+        expect(unloadEnd.dynamicModelImageRecoveryBytes).toBe(0);
+        expect(unloadEnd.uiImageRecoveryBytes).toBe(0);
+        expect(unloadEnd.imageLoadDefCacheEntryCount)
+            .toBe(unloadBegin.imageLoadDefCacheEntryCount);
+        expect(unloadEnd.imageLoadDefCacheEncodedPayloadBytes)
+            .toBe(unloadBegin.imageLoadDefCacheEncodedPayloadBytes);
+    }
+
+    failureStage = `${map} decode-chain context recovery`;
+    const recovery = await recoverMapContext(page, map, false);
+    const recovered = recovery.memory.contextRestored;
+    const recoveryDecode = imageDecodeDelta(
+        recovered.imageDecode, recovery.memory.contextLost.imageDecode);
+    expect(recoveryDecode.contextRecoveryDecodeCount).toBeGreaterThan(0);
+    expect(recoveryDecode.duplicateDecodeCount).toBe(0);
+    return {
+        map,
+        firstWorldFrameLatencyMs: firstFrame.observedMs - commandMs,
+        initialUploadDecode: imageDecodeDelta(
+            afterInitialUpload.imageDecode, before.imageDecode),
+        recovery: {
+            durationToFirstRecoveredWorldFrameMs:
+                recovery.durationToFirstRecoveredWorldFrameMs,
+            decode: recoveryDecode,
+            wasmAllocatorInUseDeltaBytes:
+                recovery.memory.allocatorInUseDeltaBytes,
+            wasmLinearMemoryCapacityDeltaBytes:
+                recovery.memory.linearMemoryCapacityDeltaBytes,
+        },
+        rendererRecovery: {
+            encodedImageRecoveryBytes:
+                afterInitialUpload.encodedImageRecoveryBytes,
+            decodedTextureSourceBytes:
+                afterInitialUpload.decodedTextureSourceBytes,
+            recoveryCopyBytes: afterInitialUpload.recoveryCopyBytes,
+        },
+        sourceCache: {
+            entryCount: afterInitialUpload.imageLoadDefCacheEntryCount,
+            encodedPayloadBytes:
+                afterInitialUpload.imageLoadDefCacheEncodedPayloadBytes,
+            budgetBytes: afterInitialUpload.imageLoadDefCacheBudgetBytes,
+            evictionCount: afterInitialUpload.imageLoadDefCacheEvictionCount,
+        },
+        worldUnload: index === 0 ? null : {
+            rendererEncodedBytesAfterUnload:
+                unloadEnd.encodedImageRecoveryBytes,
+            cacheEntryCountBefore: unloadBegin.imageLoadDefCacheEntryCount,
+            cacheEntryCountAfter: unloadEnd.imageLoadDefCacheEntryCount,
+            cacheBytesBefore:
+                unloadBegin.imageLoadDefCacheEncodedPayloadBytes,
+            cacheBytesAfter: unloadEnd.imageLoadDefCacheEncodedPayloadBytes,
+        },
     };
 }
 
@@ -1899,6 +2019,95 @@ test("local retail validation matrix", { tag: "@retail" }, async ({ retailPage: 
     };
     console.log(`KISAK_RETAIL_RESULT ${JSON.stringify(validationRecord)}`);
 });
+
+if (runDecodeChain) {
+    test("local retail encoded-source decode chain", { tag: "@retail-decode" },
+        async ({ retailPage: page }) => {
+            test.setTimeout(1_800_000);
+            if (!allowDirty) expect(sourceDirty,
+                "authoritative decode validation requires a clean source commit")
+                .toBe(false);
+            const browser = page.context().browser();
+            retailBrowserMetadata = {
+                name: browserChannel ?? browser?.browserType().name() ?? "unknown",
+                version: browser?.version() ?? "unknown",
+                channel: browserChannel ?? null,
+                headless: Boolean(test.info().project.use.headless ?? true),
+            };
+            const pageErrors = [];
+            page.on("pageerror", (error) => pageErrors.push(error.message));
+            await installRetailObservers(page);
+
+            failureStage = "decode-chain runtime bootstrap";
+            failureClass = "lifecycle";
+            await page.goto("/");
+            await expect.poll(() => page.evaluate(
+                () => globalThis.__KISAKCOD_WEB__?.state)).toBe("running");
+            await waitForAssets(page, "empty");
+
+            failureStage = "decode-chain installation/profile validation";
+            failureClass = "filesystem";
+            const chooserPromise = page.waitForEvent("filechooser");
+            await page.locator("#portable-install-button").click();
+            const chooser = await chooserPromise;
+            await chooser.setFiles(retailRoot);
+            await waitForAssets(page, "ready");
+            const chain = [
+                "killhouse",
+                "cargoship",
+                "blackout",
+                "hunted",
+                "bog_a",
+                "airplane",
+                "killhouse",
+            ];
+            const available = await page.evaluate(() =>
+                globalThis.__KISAKCOD_WEB__.assets.manifest.profile
+                    .availableSinglePlayerZones.map((path) => path.toLowerCase()));
+            for (const map of new Set(chain))
+                expect(available).toContain(`zone/english/${map}.ff`);
+
+            const decodeBefore = await rendererMemorySnapshot(page);
+            const maps = [];
+            for (let index = 0; index < chain.length; ++index)
+                maps.push(await loadDecodeChainMap(page, chain[index], index));
+            const decodeAfter = await rendererMemorySnapshot(page);
+            expect(pageErrors).toEqual([]);
+            expect(maps.slice(1).every((entry) =>
+                entry.worldUnload.rendererEncodedBytesAfterUnload === 0)).toBe(true);
+            expect(maps.every((entry) =>
+                entry.sourceCache.encodedPayloadBytes <=
+                    entry.sourceCache.budgetBytes)).toBe(true);
+            for (let index = 1; index < maps.length; ++index) {
+                expect(maps[index].sourceCache.evictionCount)
+                    .toBeGreaterThanOrEqual(maps[index - 1].sourceCache.evictionCount);
+            }
+
+            failureStage = "decode-chain shutdown";
+            failureClass = "lifecycle";
+            await page.evaluate(() =>
+                globalThis.__KISAKCOD_WEB__.module.dispose());
+            console.log(`KISAK_RETAIL_DECODE_RESULT ${JSON.stringify({
+                schemaVersion: 1,
+                source: { commitSha: sourceCommit, dirty: sourceDirty },
+                recordedAtUtc: new Date().toISOString(),
+                environment: {
+                    browser: retailBrowserMetadata,
+                    operatingSystem,
+                    referenceHardware,
+                    build: "Release diagnostics",
+                },
+                validationResult: "pass",
+                chain,
+                maps,
+                totals: imageDecodeDelta(
+                    decodeAfter.imageDecode, decodeBefore.imageDecode),
+                sourceCacheBounded: true,
+                mapOwnedRendererSourcesRetired: true,
+                contextRecoveryValidatedForEveryMap: true,
+            })}`);
+        });
+}
 
 if (phase3TargetMap) {
     test("local retail Phase 3 campaign map", { tag: "@retail-phase3" },
