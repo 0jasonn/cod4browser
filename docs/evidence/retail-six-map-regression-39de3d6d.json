@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "commitSha": "39de3d6df16a00a9f8d42f59e68d8f016933ec31",
+    "dirty": false
+  },
+  "recordedAtUtc": "2026-08-28T11:47:02.255Z",
+  "environment": {
+    "browser": {
+      "name": "chromium",
+      "version": "149.0.7827.55",
+      "headless": true
+    },
+    "operatingSystem": "Windows 11 Pro x64",
+    "processor": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "logicalProcessorCount": 16,
+    "totalSystemMemoryBytes": 33944879104,
+    "build": "Release diagnostics"
+  },
+  "validationResult": "pass",
+  "chain": [
+    "killhouse",
+    "cargoship",
+    "blackout",
+    "hunted",
+    "bog_a",
+    "airplane",
+    "killhouse"
+  ],
+  "maps": [
+    {
+      "map": "killhouse",
+      "firstWorldFrameLatencyMs": 5074.675000000745,
+      "contextRecoveryLatencyMs": 2512.519999999553,
+      "sourceCacheEncodedPayloadBytes": 23987140
+    },
+    {
+      "map": "cargoship",
+      "firstWorldFrameLatencyMs": 8463.929999999702,
+      "contextRecoveryLatencyMs": 1953.495000001043,
+      "sourceCacheEncodedPayloadBytes": 22676308
+    },
+    {
+      "map": "blackout",
+      "firstWorldFrameLatencyMs": 8279.5,
+      "contextRecoveryLatencyMs": 2588.089999999851,
+      "sourceCacheEncodedPayloadBytes": 24380140
+    },
+    {
+      "map": "hunted",
+      "firstWorldFrameLatencyMs": 6956.504999998957,
+      "contextRecoveryLatencyMs": 2500.579999998212,
+      "sourceCacheEncodedPayloadBytes": 24773332
+    },
+    {
+      "map": "bog_a",
+      "firstWorldFrameLatencyMs": 10494.72000000067,
+      "contextRecoveryLatencyMs": 2248.0149999987334,
+      "sourceCacheEncodedPayloadBytes": 24773332
+    },
+    {
+      "map": "airplane",
+      "firstWorldFrameLatencyMs": 10236.214999999851,
+      "contextRecoveryLatencyMs": 915.859999999404,
+      "sourceCacheEncodedPayloadBytes": 18481876
+    },
+    {
+      "map": "killhouse",
+      "firstWorldFrameLatencyMs": 5339.5099999997765,
+      "contextRecoveryLatencyMs": 2513.144999999553,
+      "sourceCacheEncodedPayloadBytes": 27919060
+    }
+  ],
+  "decodeTotals": {
+    "encodedImageInspectionCount": 12212,
+    "metadataParseCount": 18248,
+    "pixelDecodeCount": 12241,
+    "initialUploadDecodeCount": 6121,
+    "contextRecoveryDecodeCount": 6120,
+    "decodedBytes": 14247396232,
+    "duplicateDecodeCount": 0,
+    "cpuMilliseconds": 9973.41499988921
+  },
+  "assertions": {
+    "canonicalLifecycleAndThirtyWorldFramesAtEveryStop": true,
+    "sourceCacheBounded": true,
+    "sourceCacheBudgetBytes": 268435456,
+    "sourceCachePeakEncodedPayloadBytes": 27919060,
+    "mapOwnedRendererSourcesRetired": true,
+    "contextRecoveryValidatedForEveryMap": true,
+    "duplicateDecodeCount": 0,
+    "wasmLinearMemoryCapacityGrowthDuringRecoveryBytes": 0
+  }
+}

@@ -40,6 +40,14 @@ native/Wasm tests. Remaining candidates are explicitly triaged in
 and `UNTESTED`. Broad campaign expansion is still gated by meaningful
 objective progression through save/reload.
 
+The final clean-source regression at `39de3d6d` reran `Killhouse -> CargoShip
+-> Blackout -> Hunted -> Bog A -> Airplane -> Killhouse`. All seven loads
+reached canonical lifecycle plus 30 world frames and recovered from forced
+WebGL context loss. Duplicate decoding remained zero, map-owned sources
+retired on unload, and encoded source-cache use peaked at 27,919,060 B of the
+268,435,456 B budget. See the sanitized
+[final six-map regression](evidence/retail-six-map-regression-39de3d6d.json).
+
 ## Demonstrated
 
 The production Release artifact is a Worker-hosted offline single-player

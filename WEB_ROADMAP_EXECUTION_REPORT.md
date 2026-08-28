@@ -14,6 +14,7 @@ remain valid only at their recorded commits.
 | Strict mission validator | `e7be6898` |
 | Decode investigation / optimization | `92a93e39` / `a83f8047` |
 | Wasm numeric fix / audit | `d252515d` / `bad1e7b9` |
+| Final verification source / retail regression | `39de3d6d` / seven-stop six-map chain passed |
 | Browser / host | Headed Chrome 152.0.7977.64 / Windows 11 Pro x64 / Ryzen 7 7800X3D / RTX 3070 Ti / 32 GiB |
 | Retail root | Explicit legal local root supplied; path and assets omitted from evidence |
 
@@ -90,6 +91,41 @@ are present in the supplied installation. They remain preparation-only and
 objective/save/reload progression is stable. The six existing maps remain the
 permanent regression baseline. The sanitized discovery-only record is
 [next-campaign-batch-bad1e7b9.json](docs/evidence/next-campaign-batch-bad1e7b9.json).
+
+### Final verification matrix
+
+The runtime verification below ran from clean source commit `39de3d6d`. The
+subsequent changes only add this sanitized evidence and report. Retail opt-in
+was disabled for the routine remainder suite, preserving its two explicit
+`RETAIL_ROOT_MISSING` skips; the six-map command supplied the legal root
+explicitly.
+
+| Gate | Result |
+| --- | --- |
+| Dependency install | Pass; 74 packages installed, 75 audited, 0 vulnerabilities |
+| Node protocol/lifecycle/filesystem | 78 passed |
+| `node --check` | Pass |
+| ESLint | Pass |
+| Strict `checkJs` | Pass |
+| Runtime/gradual `checkJs` | Pass |
+| Native Clang portable | 22 passed |
+| Native MSVC portable | 30 passed |
+| Direct Wasm portable | 30 passed |
+| Sanitizer/libFuzzer smoke | 256 runs passed |
+| Production Release build / canonical-prefix check | Pass |
+| Production boundary | Pass; 3,173,293 B Wasm, 340,615 B application JavaScript, 3,524,439 B site, 17 files, 24 raw exports, 9 application exports |
+| Production Playwright | 40 passed |
+| Diagnostics Release build / canonical-prefix check | Pass |
+| Diagnostic smoke | 12 passed |
+| Diagnostic remainder | 36 passed; 2 expected `RETAIL_ROOT_MISSING` skips |
+| Current six-map retail regression | 1 passed in 3.3 minutes; seven loads, canonical lifecycle plus 30 world frames at every stop, seven context recoveries, zero duplicate decodes, bounded source cache, map-owned source retirement |
+| `git diff --check` | Pass before report-only evidence update; repeated after the update |
+
+The final chain was `Killhouse -> CargoShip -> Blackout -> Hunted -> Bog A ->
+Airplane -> Killhouse`. Peak encoded source-cache use was 27,919,060 B of the
+268,435,456 B budget and no context recovery grew Wasm linear-memory capacity.
+The sanitized record is
+[retail-six-map-regression-39de3d6d.json](docs/evidence/retail-six-map-regression-39de3d6d.json).
 
 ## Current profiling pass — 2026-08-27
 
