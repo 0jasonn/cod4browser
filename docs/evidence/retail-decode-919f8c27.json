@@ -1,0 +1,398 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUtc": "2026-08-28T11:21:05.993Z",
+  "source": {
+    "commitSha": "919f8c271a813fc823ff5d5015b8ac507cfb6f5c",
+    "dirty": false,
+    "inputKind": "sanitized aggregate retail decode validator output"
+  },
+  "environment": {
+    "browser": {
+      "name": "chrome",
+      "version": "152.0.7977.64",
+      "channel": "chrome",
+      "headless": false
+    },
+    "operatingSystem": {
+      "platform": "win32",
+      "release": "10.0.26200",
+      "version": "Windows 11 Pro",
+      "architecture": "x64"
+    },
+    "referenceHardware": {
+      "processor": "AMD Ryzen 7 7800X3D 8-Core Processor           ",
+      "logicalProcessorCount": 16,
+      "totalSystemMemoryBytes": 33944879104
+    },
+    "build": "Release diagnostics"
+  },
+  "methodology": {
+    "chain": [
+      "killhouse",
+      "cargoship",
+      "blackout",
+      "hunted",
+      "bog_a",
+      "airplane",
+      "killhouse"
+    ],
+    "settleFramesAfterFirstWorldFrame": 30,
+    "contextRecoveryPerMap": true,
+    "encodedImageInspectionCount": "new retained 2D image source lookup attempts",
+    "metadataParseCount": "IWI header parses performed during layout inspection or pixel decode",
+    "pixelDecodeCount": "2D encoded-source decoder invocations",
+    "initialUploadDecodeCount": "decoder invocations before or during initial WebGL upload",
+    "contextRecoveryDecodeCount": "decoder invocations while rebuilding a restored WebGL context",
+    "duplicateDecodeCount": "initial upload decodes repeated after a successful retention decode"
+  },
+  "maps": [
+    {
+      "map": "killhouse",
+      "firstWorldFrameLatencyMs": 4848.344999999739,
+      "initialUploadDecode": {
+        "encodedImageInspectionCount": 1959,
+        "metadataParseCount": 1950,
+        "pixelDecodeCount": 983,
+        "initialUploadDecodeCount": 983,
+        "contextRecoveryDecodeCount": 0,
+        "decodedBytes": 1268584576,
+        "duplicateDecodeCount": 0,
+        "cpuMilliseconds": 882.1799999922514
+      },
+      "recovery": {
+        "durationToFirstRecoveredWorldFrameMs": 1752.640000000596,
+        "decode": {
+          "encodedImageInspectionCount": 0,
+          "metadataParseCount": 977,
+          "pixelDecodeCount": 985,
+          "initialUploadDecodeCount": 0,
+          "contextRecoveryDecodeCount": 985,
+          "decodedBytes": 1270681728,
+          "duplicateDecodeCount": 0,
+          "cpuMilliseconds": 883.2650000108406
+        },
+        "wasmAllocatorInUseDeltaBytes": 80,
+        "wasmLinearMemoryCapacityDeltaBytes": 0
+      },
+      "rendererRecovery": {
+        "encodedImageRecoveryBytes": 364029475,
+        "decodedTextureSourceBytes": 1299551268,
+        "recoveryCopyBytes": 482559483
+      },
+      "sourceCache": {
+        "entryCount": 1402,
+        "encodedPayloadBytes": 23987140,
+        "budgetBytes": 268435456,
+        "evictionCount": 0
+      },
+      "worldUnload": null
+    },
+    {
+      "map": "cargoship",
+      "firstWorldFrameLatencyMs": 7093.495000000112,
+      "initialUploadDecode": {
+        "encodedImageInspectionCount": 1355,
+        "metadataParseCount": 1348,
+        "pixelDecodeCount": 680,
+        "initialUploadDecodeCount": 680,
+        "contextRecoveryDecodeCount": 0,
+        "decodedBytes": 641391808,
+        "duplicateDecodeCount": 0,
+        "cpuMilliseconds": 444.87000000383705
+      },
+      "recovery": {
+        "durationToFirstRecoveredWorldFrameMs": 1275.1849999995902,
+        "decode": {
+          "encodedImageInspectionCount": 0,
+          "metadataParseCount": 672,
+          "pixelDecodeCount": 678,
+          "initialUploadDecodeCount": 0,
+          "contextRecoveryDecodeCount": 678,
+          "decodedBytes": 640867520,
+          "duplicateDecodeCount": 0,
+          "cpuMilliseconds": 434.9349999986589
+        },
+        "wasmAllocatorInUseDeltaBytes": 8080,
+        "wasmLinearMemoryCapacityDeltaBytes": 0
+      },
+      "rendererRecovery": {
+        "encodedImageRecoveryBytes": 187211798,
+        "decodedTextureSourceBytes": 671276044,
+        "recoveryCopyBytes": 292043590
+      },
+      "sourceCache": {
+        "entryCount": 1791,
+        "encodedPayloadBytes": 22676308,
+        "budgetBytes": 268435456,
+        "evictionCount": 0
+      },
+      "worldUnload": {
+        "rendererEncodedBytesAfterUnload": 0,
+        "cacheEntryCountBefore": 1402,
+        "cacheEntryCountAfter": 1402,
+        "cacheBytesBefore": 23987140,
+        "cacheBytesAfter": 23987140
+      }
+    },
+    {
+      "map": "blackout",
+      "firstWorldFrameLatencyMs": 7233.125,
+      "initialUploadDecode": {
+        "encodedImageInspectionCount": 2054,
+        "metadataParseCount": 2050,
+        "pixelDecodeCount": 1029,
+        "initialUploadDecodeCount": 1029,
+        "contextRecoveryDecodeCount": 0,
+        "decodedBytes": 1144167424,
+        "duplicateDecodeCount": 0,
+        "cpuMilliseconds": 808.8500000089407
+      },
+      "recovery": {
+        "durationToFirstRecoveredWorldFrameMs": 1852.9199999999255,
+        "decode": {
+          "encodedImageInspectionCount": 0,
+          "metadataParseCount": 1036,
+          "pixelDecodeCount": 1040,
+          "initialUploadDecodeCount": 0,
+          "contextRecoveryDecodeCount": 1040,
+          "decodedBytes": 1194798080,
+          "duplicateDecodeCount": 0,
+          "cpuMilliseconds": 831.460000003688
+        },
+        "wasmAllocatorInUseDeltaBytes": 6824,
+        "wasmLinearMemoryCapacityDeltaBytes": 0
+      },
+      "rendererRecovery": {
+        "encodedImageRecoveryBytes": 330513635,
+        "decodedTextureSourceBytes": 1182919368,
+        "recoveryCopyBytes": 435687607
+      },
+      "sourceCache": {
+        "entryCount": 2415,
+        "encodedPayloadBytes": 24380140,
+        "budgetBytes": 268435456,
+        "evictionCount": 0
+      },
+      "worldUnload": {
+        "rendererEncodedBytesAfterUnload": 0,
+        "cacheEntryCountBefore": 1791,
+        "cacheEntryCountAfter": 1791,
+        "cacheBytesBefore": 22676308,
+        "cacheBytesAfter": 22676308
+      }
+    },
+    {
+      "map": "hunted",
+      "firstWorldFrameLatencyMs": 6296.094999999739,
+      "initialUploadDecode": {
+        "encodedImageInspectionCount": 1974,
+        "metadataParseCount": 1968,
+        "pixelDecodeCount": 988,
+        "initialUploadDecodeCount": 988,
+        "contextRecoveryDecodeCount": 0,
+        "decodedBytes": 1189215296,
+        "duplicateDecodeCount": 0,
+        "cpuMilliseconds": 850.5349999899045
+      },
+      "recovery": {
+        "durationToFirstRecoveredWorldFrameMs": 1844.3150000004098,
+        "decode": {
+          "encodedImageInspectionCount": 0,
+          "metadataParseCount": 984,
+          "pixelDecodeCount": 988,
+          "initialUploadDecodeCount": 0,
+          "contextRecoveryDecodeCount": 988,
+          "decodedBytes": 1189215296,
+          "duplicateDecodeCount": 0,
+          "cpuMilliseconds": 832.1750000100583
+        },
+        "wasmAllocatorInUseDeltaBytes": -88,
+        "wasmLinearMemoryCapacityDeltaBytes": 0
+      },
+      "rendererRecovery": {
+        "encodedImageRecoveryBytes": 338464710,
+        "decodedTextureSourceBytes": 1228369656,
+        "recoveryCopyBytes": 440220262
+      },
+      "sourceCache": {
+        "entryCount": 2698,
+        "encodedPayloadBytes": 24773332,
+        "budgetBytes": 268435456,
+        "evictionCount": 0
+      },
+      "worldUnload": {
+        "rendererEncodedBytesAfterUnload": 0,
+        "cacheEntryCountBefore": 2415,
+        "cacheEntryCountAfter": 2415,
+        "cacheBytesBefore": 24380140,
+        "cacheBytesAfter": 24380140
+      }
+    },
+    {
+      "map": "bog_a",
+      "firstWorldFrameLatencyMs": 9857.495000000112,
+      "initialUploadDecode": {
+        "encodedImageInspectionCount": 2112,
+        "metadataParseCount": 2108,
+        "pixelDecodeCount": 1058,
+        "initialUploadDecodeCount": 1058,
+        "contextRecoveryDecodeCount": 0,
+        "decodedBytes": 1175283776,
+        "duplicateDecodeCount": 0,
+        "cpuMilliseconds": 836.6950000198558
+      },
+      "recovery": {
+        "durationToFirstRecoveredWorldFrameMs": 1941.7900000000373,
+        "decode": {
+          "encodedImageInspectionCount": 0,
+          "metadataParseCount": 1054,
+          "pixelDecodeCount": 1058,
+          "initialUploadDecodeCount": 0,
+          "contextRecoveryDecodeCount": 1058,
+          "decodedBytes": 1175283776,
+          "duplicateDecodeCount": 0,
+          "cpuMilliseconds": 817.4849999928847
+        },
+        "wasmAllocatorInUseDeltaBytes": -576,
+        "wasmLinearMemoryCapacityDeltaBytes": 0
+      },
+      "rendererRecovery": {
+        "encodedImageRecoveryBytes": 334422071,
+        "decodedTextureSourceBytes": 1207636752,
+        "recoveryCopyBytes": 424719291
+      },
+      "sourceCache": {
+        "entryCount": 3124,
+        "encodedPayloadBytes": 24773332,
+        "budgetBytes": 268435456,
+        "evictionCount": 0
+      },
+      "worldUnload": {
+        "rendererEncodedBytesAfterUnload": 0,
+        "cacheEntryCountBefore": 2698,
+        "cacheEntryCountAfter": 2698,
+        "cacheBytesBefore": 24773332,
+        "cacheBytesAfter": 24773332
+      }
+    },
+    {
+      "map": "airplane",
+      "firstWorldFrameLatencyMs": 7390.9199999999255,
+      "initialUploadDecode": {
+        "encodedImageInspectionCount": 617,
+        "metadataParseCount": 612,
+        "pixelDecodeCount": 310,
+        "initialUploadDecodeCount": 310,
+        "contextRecoveryDecodeCount": 0,
+        "decodedBytes": 284847492,
+        "duplicateDecodeCount": 0,
+        "cpuMilliseconds": 199.9699999941513
+      },
+      "recovery": {
+        "durationToFirstRecoveredWorldFrameMs": 453.8649999992922,
+        "decode": {
+          "encodedImageInspectionCount": 0,
+          "metadataParseCount": 306,
+          "pixelDecodeCount": 310,
+          "initialUploadDecodeCount": 0,
+          "contextRecoveryDecodeCount": 310,
+          "decodedBytes": 284847492,
+          "duplicateDecodeCount": 0,
+          "cpuMilliseconds": 195.86000000219792
+        },
+        "wasmAllocatorInUseDeltaBytes": 8,
+        "wasmLinearMemoryCapacityDeltaBytes": 0
+      },
+      "rendererRecovery": {
+        "encodedImageRecoveryBytes": 83681787,
+        "decodedTextureSourceBytes": 311487800,
+        "recoveryCopyBytes": 121640699
+      },
+      "sourceCache": {
+        "entryCount": 3252,
+        "encodedPayloadBytes": 18481876,
+        "budgetBytes": 268435456,
+        "evictionCount": 0
+      },
+      "worldUnload": {
+        "rendererEncodedBytesAfterUnload": 0,
+        "cacheEntryCountBefore": 3124,
+        "cacheEntryCountAfter": 3124,
+        "cacheBytesBefore": 24773332,
+        "cacheBytesAfter": 24773332
+      }
+    },
+    {
+      "map": "killhouse",
+      "firstWorldFrameLatencyMs": 4961.304999999702,
+      "initialUploadDecode": {
+        "encodedImageInspectionCount": 1963,
+        "metadataParseCount": 1954,
+        "pixelDecodeCount": 985,
+        "initialUploadDecodeCount": 985,
+        "contextRecoveryDecodeCount": 0,
+        "decodedBytes": 1248661632,
+        "duplicateDecodeCount": 0,
+        "cpuMilliseconds": 883.3650000095367
+      },
+      "recovery": {
+        "durationToFirstRecoveredWorldFrameMs": 1770.015000000596,
+        "decode": {
+          "encodedImageInspectionCount": 12,
+          "metadataParseCount": 991,
+          "pixelDecodeCount": 993,
+          "initialUploadDecodeCount": 0,
+          "contextRecoveryDecodeCount": 993,
+          "decodedBytes": 1250693248,
+          "duplicateDecodeCount": 0,
+          "cpuMilliseconds": 884.5349999889731
+        },
+        "wasmAllocatorInUseDeltaBytes": 545928,
+        "wasmLinearMemoryCapacityDeltaBytes": 0
+      },
+      "rendererRecovery": {
+        "encodedImageRecoveryBytes": 358524515,
+        "decodedTextureSourceBytes": 1279628324,
+        "recoveryCopyBytes": 477677347
+      },
+      "sourceCache": {
+        "entryCount": 3252,
+        "encodedPayloadBytes": 27919060,
+        "budgetBytes": 268435456,
+        "evictionCount": 0
+      },
+      "worldUnload": {
+        "rendererEncodedBytesAfterUnload": 0,
+        "cacheEntryCountBefore": 3252,
+        "cacheEntryCountAfter": 3252,
+        "cacheBytesBefore": 18481876,
+        "cacheBytesAfter": 18481876
+      }
+    }
+  ],
+  "totals": {
+    "encodedImageInspectionCount": 12114,
+    "metadataParseCount": 18078,
+    "pixelDecodeCount": 12119,
+    "initialUploadDecodeCount": 6067,
+    "contextRecoveryDecodeCount": 6052,
+    "decodedBytes": 14053209992,
+    "duplicateDecodeCount": 0,
+    "cpuMilliseconds": 9854.615000024438
+  },
+  "summary": {
+    "averageFirstWorldFrameLatencyMs": 6811.5399999999045,
+    "averageRecoveryLatencyMs": 1555.8185714286353,
+    "initialUploadDecodedBytes": 6952152004,
+    "initialUploadDecodeCpuMilliseconds": 4906.465000018477,
+    "initialUploadDecodeCount": 6033,
+    "immediateDuplicateDecodeCount": 0,
+    "recoveryDecodedBytes": 7006387140,
+    "recoveryDecodeCpuMilliseconds": 4879.715000007302,
+    "maximumSourceCacheBytes": 27919060,
+    "sourceCacheBudgetBytes": 268435456,
+    "sourceCacheEvictionCount": 0,
+    "mapOwnedRendererSourcesRetired": true,
+    "contextRecoveryValidatedForEveryMap": true
+  }
+}
