@@ -281,6 +281,10 @@ Dynamic opaque sun ranges now use the same range-joining implementation as world
 shadows, with placement/buffer identity preserved. See
 [renderer resource ownership](renderer-retained-resources.md#dobj-conversion-and-dynamic-sun-ranges).
 This is a renderer-boundary improvement, not expanded gameplay compatibility.
+The [delivered evidence](evidence/dobj-conversion-30e34cff.md) records focused
+checks, exact logical-work qualification, recovery and one final Release,
+separating diagnostic DObj-stage reductions from the observed 7.54% production
+pair-mean reduction and its control drift.
 
 - Broaden campaign coverage and close renderer/material gaps from measured
   canonical scenes, without introducing browser asset types.

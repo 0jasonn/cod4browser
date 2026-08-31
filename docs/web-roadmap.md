@@ -61,10 +61,18 @@ Manual gameplay assessment can guide renderer work without a progression gate.
    cap lifted; default-cap means are 21.469 -> 16.843 ms. Upload bytes fall 29.67%.
    These are local paused-renderer results. Canonical checkpoint timing replaces
    callback telemetry that suppresses most fast frames; product defaults remain.
-9. Next: reduce DObj skinning and vertex-assembly work under the same seeded
-   qualification. Keep canonical animation, pose and lighting ownership; do not
-   introduce pause-specific caches. Measure the remaining stages before changing
-   skinning ownership or GPU-buffer policy.
+9. The [DObj conversion milestone](evidence/dobj-conversion-30e34cff.md) fuses final
+   vertex construction with skinning, reuses numeric geometry capacity, exposes
+   canonical math/packing helpers to selective LTO, and merges dynamic opaque
+   sun ranges. The final diagnostic comparison observes 41.1% lower DObj build
+   and 59.1% lower combined skinning/geometry time. Production A/B/B/A means are
+   15.461 -> 14.296 ms (7.54% lower), with control drift documented. Another
+   1,374 shadow submissions are avoided with identical logical geometry,
+   culling and independent shadows. Focused checks, recovery and Release pass.
+10. Next: profile remaining sun-shadow static-caster submission versus GPU depth
+    work, then optimize the measured cost using canonical bounds. Preserve
+    off-camera casters; never substitute camera visibility for shadow visibility.
+    Keep canonical pose/lighting ownership and avoid pause-specific caches.
 
 The earlier renderer milestone used one focused native fixture, rerun after shadow
 integration; three diagnostic builds and five 120-frame profiles; four

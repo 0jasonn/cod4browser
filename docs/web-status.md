@@ -4,7 +4,29 @@ Updated 2026-08-31. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
-## Major retained-renderer milestone delivered
+## DObj conversion and dynamic shadow milestone delivered
+
+Runtime `30e34cff` fuses skinning with final vertex construction, recycles numeric
+geometry capacity, enables selective LTO of existing Kisak helpers, and extends
+opaque sun-range merging to dynamic geometry. The final diagnostic comparison
+observes **41.1% lower DObj build time** and **59.1% lower combined skinning/geometry
+time**, with current canonical poses and lighting still evaluated each frame.
+
+Fresh production A/B/B/A means are **15.461 -> 14.296 ms (7.54% lower)** with only
+the benchmark cap lifted. Both candidates beat both controls, but control drift
+limits precision. These are paused CargoShip results, not gameplay FPS. Diagnostic
+inactive windows also drift and do not independently establish a frame-time gain.
+
+Another 1,374 sun draw calls are avoided per frame. All 120 samples preserve
+logical caster totals, indices, uploads and world/static camera work. Independent
+shadows, static culling, atomic failures and recovery remain intact. One focused
+native target and one final production Release passed; no broad suites, mission
+checks or captures were required. See [evidence and limits](evidence/dobj-conversion-30e34cff.md).
+
+Next: profile remaining sun-shadow static-caster submission versus GPU depth
+work, then optimize the measured cost while preserving off-camera casters.
+
+## Prior retained-renderer milestone
 
 Runtime `49af3948` retains canonical brush geometry, joins adjacent opaque
 sun-shadow ranges, and removes repeated texture state/binding calls. Fresh
@@ -23,7 +45,7 @@ passed. Production timing now uses existing canonical view checkpoints because
 routine callback telemetry omits most sub-16 ms callbacks. Eight final production
 windows pass the workload guards. See [the evidence](evidence/retained-renderer-49af3948.md)
 and [resource ownership](renderer-retained-resources.md).
-Next: reduce DObj skinning/vertex-assembly cost while preserving canonical poses.
+The DObj follow-up is delivered above.
 
 ## Prior seeded brush shader-hash optimization
 

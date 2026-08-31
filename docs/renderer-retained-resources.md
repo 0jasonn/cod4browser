@@ -84,6 +84,12 @@ with the same setting. This is measurement of a paused renderer, not gameplay.
 
 ## DObj conversion and dynamic sun ranges
 
+Delivered in `30e34cff`: the final diagnostic comparison observes 41.1% lower
+DObj build time and 59.1% lower combined skinning/geometry time. Fresh production
+A/B/B/A pair means are 15.461 -> 14.296 ms (7.54% lower), with 1,374 additional
+sun draw submissions avoided. Control drift and other limits are recorded in
+[the DObj evidence](evidence/dobj-conversion-30e34cff.md).
+
 DObj skinning now writes position, normal, tangent and decoded attributes directly
 into the final vertex span. Indices are constructed as one span per surface.
 The three intermediate float arrays and separate vertex-copy pass are removed.
@@ -94,6 +100,8 @@ allocations and growth copies; it does not retain canonical asset pointers,
 poses, lighting, visibility, materials or completed draw commands. All of those
 inputs are consumed anew each frame. Backend context recovery still uses its
 own published CPU geometry, never this empty frontend workspace.
+Existing backend memory counters do not include this frontend capacity; no
+total-memory saving is claimed.
 
 Selective Emscripten LTO covers the DObj builder, lighting adapter and existing
 Kisak `com_pack.cpp`/`com_math.cpp` helpers. This exposes helper bodies to the
