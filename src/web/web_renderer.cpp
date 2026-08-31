@@ -5590,6 +5590,10 @@ WebRendererSurfaceResult CopyWorldCommand(
         surface.primaryLightCount != 0u
         ? surface.primaryLightCount
         : inheritedPrimaryLightCount;
+#if KISAK_WEB_DIAGNOSTICS
+    WebFrameProfileSample *const commandProfile = WebFrameProfile_Current();
+    const double checkStarted = commandProfile ? WebFrameProfile_Now() : 0.0;
+#endif
     for (std::uint32_t vertexIndex = 0u;
          vertexIndex < surface.vertexCount; ++vertexIndex)
     {
@@ -5619,6 +5623,11 @@ WebRendererSurfaceResult CopyWorldCommand(
         if (surface.indices[index] >= surface.vertexCount)
             return WebRendererSurfaceResult::IndexOutOfRange;
 
+#if KISAK_WEB_DIAGNOSTICS
+    const double geometryCopyStarted = commandProfile ? WebFrameProfile_Now() : 0.0;
+    if (commandProfile)
+        commandProfile->commandGeometryCheckMs += geometryCopyStarted - checkStarted;
+#endif
     // Dynamic scenes reuse this vector across frames. Count authored mip
     // levels already in the pool as well as base pixels before admitting a
     // new image against the per-pool recovery allowance.
@@ -5627,6 +5636,11 @@ WebRendererSurfaceResult CopyWorldCommand(
     {
         vertices.assign(surface.vertices, surface.vertices + surface.vertexCount);
         indices.assign(surface.indices, surface.indices + surface.indexCount);
+#if KISAK_WEB_DIAGNOSTICS
+        const double batchCopyStarted = commandProfile ? WebFrameProfile_Now() : 0.0;
+        if (commandProfile)
+            commandProfile->commandGeometryCopyMs += batchCopyStarted - geometryCopyStarted;
+#endif
         batches.reserve(surface.batchCount);
         images.reserve(surface.batchCount * 3u);
         primaryLights.reserve(surface.primaryLightCount);
@@ -6022,6 +6036,10 @@ WebRendererSurfaceResult CopyWorldCommand(
                 expectedFirstIndex, surface.indexCount);
             return WebRendererSurfaceResult::InvalidDescriptor;
         }
+#if KISAK_WEB_DIAGNOSTICS
+        if (commandProfile)
+            commandProfile->commandBatchCopyMs += WebFrameProfile_Now() - batchCopyStarted;
+#endif
     }
     catch (const std::bad_alloc &)
     {

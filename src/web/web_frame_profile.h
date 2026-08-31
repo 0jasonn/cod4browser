@@ -189,6 +189,10 @@ struct WebFrameProfileSample
     double dynamicGeometryUploadMs = 0.0;
     double dynamicTextureUploadMs = 0.0;
     double dynamicPublishMs = 0.0;
+    // CopyWorldCommand substages (world publication or dynamic submission).
+    double commandGeometryCheckMs = 0.0;
+    double commandGeometryCopyMs = 0.0;
+    double commandBatchCopyMs = 0.0;
     // DObj build is nested in sceneBuildMs. The four substages are disjoint;
     // validation, LOD/hide tests and other overhead remain in the build total.
     double dobjBuildMs = 0.0;

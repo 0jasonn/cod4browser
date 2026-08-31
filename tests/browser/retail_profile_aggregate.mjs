@@ -5,6 +5,7 @@ export const CPU_PROFILE_FIELDS = [
     "sceneDynamicSubmitMs", "sceneCameraVisibilityMs", "sceneViewSubmitMs",
     "sceneEffectsPrepareMs", "sceneModelBuildMs", "sceneCommandAppendMs", "sceneCloudAppendMs",
     "dynamicCopyMs", "dynamicGeometryUploadMs", "dynamicTextureUploadMs", "dynamicPublishMs",
+    "commandGeometryCheckMs", "commandGeometryCopyMs", "commandBatchCopyMs",
     "dobjBuildMs", "dobjPoseMs", "dobjLightingMs", "dobjSkinningMs", "dobjGeometryMs",
     "rendererFrontendMs", "soundMs", "rendererBackendMs", "totalMs",
 ];
