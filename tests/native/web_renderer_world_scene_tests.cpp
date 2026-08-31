@@ -1,12 +1,14 @@
 #include <gfx_d3d/gfx_world_types.h>
 #include <web/web_renderer_world_scene.h>
 #include <web/web_renderer_image_reference.h>
+#include <web/web_renderer_material_lookup.h>
 
 #include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 
 namespace
 {
@@ -786,6 +788,59 @@ void TestMalformedLocalIndexIsRejectedAtomically()
     assert(command.surfaceCount == 99u);
 }
 
+void TestNonFiniteWorldVertexIsRejectedAtomically()
+{
+    Fixture fixture;
+    GfxWorldVertex &vertex = fixture.vertices[0];
+    for (float *component : {&vertex.xyz[0], &vertex.texCoord[0],
+            &vertex.texCoord[1], &vertex.lmapCoord[0], &vertex.lmapCoord[1],
+            &vertex.binormalSign})
+    {
+        const float saved = *component;
+        for (float invalid : {std::numeric_limits<float>::quiet_NaN(),
+                std::numeric_limits<float>::infinity(),
+                -std::numeric_limits<float>::infinity()})
+        {
+            *component = invalid;
+            WebRendererWorldSceneCommand command;
+            command.surfaceCount = 99u;
+            assert(WebRenderer_BuildWorldSceneCommand(
+                fixture.world, MakeView(), command) ==
+                WebRendererWorldSceneResult::InvalidSurfaceBounds);
+            assert(command.surfaceCount == 99u);
+            assert(command.vertices.empty() && command.indices.empty());
+        }
+        *component = saved;
+    }
+}
+
+void TestSharedMaterialLookupPreservesPrecedenceAndDefaults()
+{
+    GfxImage semanticImage{}, namedImage{};
+    MaterialTextureDef textures[2]{};
+    textures[0].semantic = 2u;
+    textures[0].samplerState = 3u;
+    textures[0].u.image = &semanticImage;
+    textures[1].nameHash = 0xa0ab1041u;
+    textures[1].samplerState = 7u;
+    textures[1].u.image = &namedImage;
+    Material material{};
+    material.textureCount = 2u;
+    material.textureTable = textures;
+    std::uint8_t sampler = 11u;
+    assert(WebRenderer_FindBaseImage(&material, sampler) == &namedImage);
+    assert(sampler == 7u);
+    textures[1].u.image = nullptr;
+    assert(WebRenderer_FindBaseImage(&material, sampler) == &semanticImage);
+    assert(sampler == 3u);
+    assert(WebRenderer_FindBaseImage(nullptr, sampler) == nullptr);
+    assert(WebRenderer_FindDetailImage(&material, sampler) == nullptr);
+    assert(sampler == 3u);
+    float constant[4]{1.0f, 2.0f, 3.0f, 4.0f};
+    assert(!WebRenderer_CopyMaterialConstant(&material, 123u, constant));
+    assert(constant[0] == 1.0f && constant[3] == 4.0f);
+}
+
 void TestSkyPassIsNotFoldedIntoOpaqueWorldBatch()
 {
     Fixture fixture;
@@ -1090,6 +1145,8 @@ int main()
     TestSunShadowTechniqueAndCanonicalCasterBitsSplitBatches();
     TestShaderModel3SpecularPassCarriesCanonicalInputs();
     TestMalformedLocalIndexIsRejectedAtomically();
+    TestNonFiniteWorldVertexIsRejectedAtomically();
+    TestSharedMaterialLookupPreservesPrecedenceAndDefaults();
     TestSkyPassIsNotFoldedIntoOpaqueWorldBatch();
     TestSpecialSurfaceInventoryUsesCanonicalMaterialData();
     TestCanonicalWaterPassCarriesSimulationAndReflectionInputs();

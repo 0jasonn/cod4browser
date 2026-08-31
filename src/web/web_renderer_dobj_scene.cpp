@@ -1,4 +1,5 @@
 #include <web/web_renderer_dobj_scene.h>
+#include <web/web_renderer_material_lookup.h>
 
 #include <cgame/cg_pose.h>
 #include <gfx_d3d/gfx_world_types.h>
@@ -31,103 +32,12 @@ constexpr std::uint32_t TECHNIQUE_UNLIT_INDEX = 4u;
 constexpr std::uint32_t TECHNIQUE_EMISSIVE_INDEX = 5u;
 constexpr std::uint32_t TECHNIQUE_LIT_INDEX = 7u;
 constexpr std::uint32_t ENV_MAP_PARMS_HASH = 0x3d9994dcu;
-constexpr std::uint32_t COLOR_MAP_HASH = 0xa0ab1041u;
-constexpr std::uint32_t DETAIL_MAP_HASH = 0xeb529b4du;
 constexpr std::uint32_t DETAIL_SCALE_HASH = 0x08d36a09u;
 
 bool Finite3(const float value[3]) noexcept
 {
     return std::isfinite(value[0]) && std::isfinite(value[1]) &&
         std::isfinite(value[2]);
-}
-
-const GfxImage *FindBaseImage(
-    const Material *material, std::uint8_t &sampler) noexcept
-{
-    if (!material || !material->textureTable) return nullptr;
-    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
-    {
-        const MaterialTextureDef &texture = material->textureTable[index];
-        if (texture.nameHash == COLOR_MAP_HASH && texture.u.image)
-        {
-            sampler = texture.samplerState;
-            return texture.u.image;
-        }
-    }
-    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
-    {
-        const MaterialTextureDef &texture = material->textureTable[index];
-        if (texture.semantic == 2u && texture.u.image)
-        {
-            sampler = texture.samplerState;
-            return texture.u.image;
-        }
-    }
-    return nullptr;
-}
-
-const GfxImage *FindDetailImage(
-    const Material *material, std::uint8_t &sampler) noexcept
-{
-    if (!material || !material->textureTable) return nullptr;
-    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
-    {
-        const MaterialTextureDef &texture = material->textureTable[index];
-        if (texture.nameHash == DETAIL_MAP_HASH && texture.u.image)
-        {
-            sampler = texture.samplerState;
-            return texture.u.image;
-        }
-    }
-    return nullptr;
-}
-
-const GfxImage *FindNormalImage(
-    const Material *material, std::uint8_t &sampler) noexcept
-{
-    if (!material || !material->textureTable) return nullptr;
-    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
-    {
-        const MaterialTextureDef &texture = material->textureTable[index];
-        if (texture.semantic == 5u && texture.u.image)
-        {
-            sampler = texture.samplerState;
-            return texture.u.image;
-        }
-    }
-    return nullptr;
-}
-
-const GfxImage *FindSpecularImage(
-    const Material *material, std::uint8_t &sampler) noexcept
-{
-    if (!material || !material->textureTable) return nullptr;
-    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
-    {
-        const MaterialTextureDef &texture = material->textureTable[index];
-        if (texture.semantic == 8u && texture.u.image)
-        {
-            sampler = texture.samplerState;
-            return texture.u.image;
-        }
-    }
-    return nullptr;
-}
-
-bool CopyMaterialConstant(const Material *material, std::uint32_t nameHash,
-    float output[4]) noexcept
-{
-    if (!material || !material->constantTable) return false;
-    for (std::uint32_t index = 0u; index < material->constantCount; ++index)
-    {
-        const MaterialConstantDef &constant = material->constantTable[index];
-        if (constant.nameHash == nameHash)
-        {
-            std::copy_n(constant.literal, 4u, output);
-            return true;
-        }
-    }
-    return false;
 }
 
 std::uint32_t HashPixelShaderProgram(
@@ -489,9 +399,9 @@ WebRendererWorldBatchDesc MakeDraw(
     // specialized static-model shortcut and must not reject these draws.
     draw.castsSunShadow = castsSunShadow && shadowSet &&
         shadowSet->techniques[TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX];
-    draw.baseImage = FindBaseImage(material, draw.samplerState);
-    draw.normalImage = FindNormalImage(material, draw.normalSamplerState);
-    draw.specularImage = FindSpecularImage(
+    draw.baseImage = WebRenderer_FindBaseImage(material, draw.samplerState);
+    draw.normalImage = WebRenderer_FindNormalImage(material, draw.normalSamplerState);
+    draw.specularImage = WebRenderer_FindSpecularImage(
         material, draw.specularSamplerState);
     draw.reflectionProbeIndex = reflectionProbeIndex;
     draw.reflectionProbeImage = reflectionProbeImage;
@@ -504,9 +414,9 @@ WebRendererWorldBatchDesc MakeDraw(
         std::strncmp(draw.pixelShaderName, "lp_amb_", 7u) == 0;
     if (draw.pixelShaderName &&
         std::strstr(draw.pixelShaderName, "d0") != nullptr &&
-        CopyMaterialConstant(material, DETAIL_SCALE_HASH, draw.detailScale))
+        WebRenderer_CopyMaterialConstant(material, DETAIL_SCALE_HASH, draw.detailScale))
     {
-        draw.detailImage = FindDetailImage(
+        draw.detailImage = WebRenderer_FindDetailImage(
             material, draw.detailSamplerState);
     }
     const bool normalMapped = draw.pixelShaderName &&
@@ -517,7 +427,7 @@ WebRendererWorldBatchDesc MakeDraw(
         std::strncmp(draw.pixelShaderName, "lp_", 3u) == 0 &&
         std::strstr(draw.pixelShaderName, "s0_sm3.hlsl") != nullptr &&
         draw.specularImage && draw.reflectionProbeImage &&
-        CopyMaterialConstant(material, ENV_MAP_PARMS_HASH, draw.envMapParms);
+        WebRenderer_CopyMaterialConstant(material, ENV_MAP_PARMS_HASH, draw.envMapParms);
     draw.technique = !draw.baseImage
         ? WebRendererWorldTechnique::BackendFallback
         : WebRenderer_IsReflexSightTechnique(draw.techniqueName)

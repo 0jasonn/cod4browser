@@ -9639,6 +9639,9 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
         for (const WebRendererRetainedStaticModelBatch &batch :
              g_renderer.retainedStaticModelBatches)
         {
+            // LOD selection can leave an authored batch empty. Reject it
+            // before material/texture setup; shadow submission is unchanged.
+            if (batch.instanceCount == 0u) continue;
             // R_AddXModelSurfacesCamera reserves camera region 3 for geometry
             // that participates in shadow passes only (tree shadow facades
             // are the common retail example).
@@ -9727,7 +9730,6 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 GL_TEXTURE5,
                 specular ? specular->texture : g_renderer.texture,
                 batch.draw.specularSamplerState);
-            if (batch.instanceCount == 0u) continue;
             BindStaticModelInstanceRange(batch.instanceOffset);
             const std::uintptr_t indexOffset =
                 static_cast<std::uintptr_t>(batch.draw.firstIndex) *

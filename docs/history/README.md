@@ -16,3 +16,9 @@ only at the recorded checkpoint.
 Use [`../web-port-convergence.md`](../web-port-convergence.md) for current
 architecture. The other files in this directory are retained only as historical
 checkpoint inventories.
+
+The status, roadmap, and convergence records through 2026-08-28 are archived as
+`web-status-through-2026-08-28.md`, `web-roadmap-through-2026-08-28.md`,
+`web-convergence-through-2026-08-28.md`, and
+`engineering-roadmap-through-2026-08-25.md`. Their former gates and blockers are
+superseded by the active status and roadmap, including all mission prerequisites.

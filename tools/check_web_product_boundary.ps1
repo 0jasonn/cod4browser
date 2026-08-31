@@ -55,7 +55,8 @@ $allowedFiles = @(
     'product_protocol.mjs',
     'styles.css',
     'web_audio_driver.mjs',
-    'worker_sync_filesystem.mjs'
+    'worker_sync_filesystem.mjs',
+    'worker_transport.mjs'
 )
 
 foreach ($name in $allowedFiles) {

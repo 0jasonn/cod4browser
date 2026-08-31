@@ -9,14 +9,16 @@ platform boundaries.
 The Release product runs in a dedicated Worker and follows the canonical Kisak
 path through `Com_Init`, database/XFile loading, ClipMap, server/game, local
 client/cgame, renderer-frontend commands, and actual WebGL2 world frames. Clean
-local retail evidence at `f5229806` and `247980a6` currently covers six maps:
+historical local retail evidence at `f5229806` and `247980a6` covers six maps:
 Killhouse and Airplane are `PLAYABLE`; CargoShip, Blackout, Hunted, and Bog A
 are `FUNCTIONAL`; 16 discovered direct SP zones remain `UNTESTED`. This is
 still an incomplete port, not a generally compatible COD4 release.
 
-Clean Airplane evidence at `da1e592c` also proves one canonical mission loop:
+Historical Airplane evidence at `da1e592c` records save/reload continuity:
 live AI/scripts/objective state, combat, natural and named saves, death/restart,
-browser shutdown, fresh-runtime load, restored state, and continued play.
+browser shutdown, fresh-runtime load, restored state, and continued play. This
+does not establish objective/trigger progression. Mission-flow validation is
+not a prerequisite for renderer improvements or cleanup.
 
 The opt-in diagnostics target builds the same runtime with browser-only test
 controls and telemetry. Production does not expose those controls.

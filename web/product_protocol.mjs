@@ -1,5 +1,10 @@
-export const ENGINE_PROTOCOL_VERSION = 1;
-export const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
+import { ENGINE_PROTOCOL_VERSION } from "./worker_transport.mjs";
+export {
+    DEFAULT_REQUEST_TIMEOUT_MS,
+    ENGINE_PROTOCOL_VERSION,
+    EngineWorkerError,
+    protocolError,
+} from "./worker_transport.mjs";
 export const MAX_REQUEST_TIMEOUT_MS = 120_000;
 
 /**
@@ -45,18 +50,6 @@ export const PRODUCT_HOST_EVENTS = new Set([
     "kisakcod:renderer-scene-view",
     "kisakcod:renderer-scene-frame",
 ]);
-
-/**
- * @param {string} code
- * @param {string} operation
- * @param {string} message
- * @param {boolean} [recoverable]
- * @param {unknown} [details]
- */
-export function protocolError(code, operation, message, recoverable = false, details)
-{
-    return { code, operation, message, recoverable, ...(details === undefined ? {} : { details }) };
-}
 
 /** @param {string} operation @param {string} message @returns {never} */
 function invalid(operation, message)
@@ -152,18 +145,4 @@ function validateInput(operation, input)
         values.every((value) => typeof value === "number" &&
             Number.isInteger(value) && Math.abs(value) <= 1_000_000);
     if (!validKey && !validMouse) invalid(operation, "The input event is invalid.");
-}
-
-export class EngineWorkerError extends Error
-{
-    /** @param {any} error */
-    constructor(error)
-    {
-        super(error?.message ?? "The engine Worker request failed.");
-        this.name = "EngineWorkerError";
-        this.code = error?.code ?? "WORKER_ERROR";
-        this.operation = error?.operation ?? "unknown";
-        this.recoverable = error?.recoverable === true;
-        if (error?.details !== undefined) this.details = error.details;
-    }
 }

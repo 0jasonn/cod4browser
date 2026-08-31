@@ -335,7 +335,7 @@ test("canonical Gate 3 traverses the locally owned retail startup prerequisite c
     });
     expect(checkpoint.generatedFailure).toBeUndefined();
     expect(checkpoint.canonicalWorld).toMatchObject({
-        state: "submitted",
+        state: "published",
         sourceRepresentation: "real-kisak-db-gfxworld",
         databaseOwned: true,
         browserWorldRepresentation: false,

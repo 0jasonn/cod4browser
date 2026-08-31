@@ -1,4 +1,10 @@
-# Web roadmap execution report
+# Web roadmap execution report — historical evidence
+
+This report records earlier passes through 2026-08-28. Its gates, recommendations,
+and uses of "current" are historical, not instructions for new work. See
+[the active roadmap](docs/web-roadmap.md), [current status](docs/web-status.md),
+and [the 2026-08-31 cleanup record](docs/evidence/cleanup-renderer-2026-08-31.md).
+Mission progression is not a prerequisite for renderer work or cleanup.
 
 ## Mission-route roadmap pass — 2026-08-28
 
@@ -167,7 +173,7 @@ Airplane -> Killhouse`. Peak encoded source-cache use was 27,919,060 B of the
 The sanitized record is
 [retail-six-map-regression-39de3d6d.json](docs/evidence/retail-six-map-regression-39de3d6d.json).
 
-## Current profiling pass — 2026-08-27
+## Historical profiling pass — 2026-08-27
 
 This section supersedes the execution recommendation below; the historical
 retail evidence remains valid only for its recorded commits and dates.
@@ -220,7 +226,7 @@ validator after the change. The sanitized evidence is
 | Hunted | 21.629 | 46.235 / 49.105 ms | 15.664 / 29.462 ms | 31.280 ms | FUNCTIONAL |
 | Bog A | 20.830 | 48.009 / 61.505 ms | 16.035 / 21.608 ms | 23.174 ms | FUNCTIONAL |
 
-### Current validation
+### Historical validation
 
 | Gate | Result |
 | --- | --- |
@@ -257,7 +263,7 @@ runtime evidence exists.
 
 Final classification: `PERFORMANCE BOTTLENECK IDENTIFIED — NEXT FIX REQUIRED`
 
-## Current iteration — 2026-08-27 foreground, recovery memory, and campaign batch
+## Historical iteration — 2026-08-27 foreground, recovery memory, and campaign batch
 
 This section supersedes the compatibility labels and recommendations in the
 historical sections below. It records local execution against a legally owned
@@ -426,7 +432,7 @@ The FUNCTIONAL labels for CargoShip and Blackout are threshold
 reclassifications, not runtime regressions: both still pass their canonical
 runtime, gameplay, transition, persistence, and recovery matrices.
 
-### Current fixes, gates, and artifact status
+### Historical fixes, gates, and artifact status
 
 Two validator corrections were required. Dense Bog A audio exposed that the
 finite summarized playback view was not a reliable event counter, so
@@ -479,7 +485,7 @@ The pinned baseline records Emscripten 6.0.6, CMake 4.2.0-rc3, and Ninja
 1.13.2. The file/export allowlists and diagnostic-source exclusions were not
 loosened.
 
-## Current recommendation
+## Historical recommendation
 
 Begin bounded frame-stage instrumentation, then obtain valid foreground
 profiles for all six known maps before selecting one renderer optimisation.

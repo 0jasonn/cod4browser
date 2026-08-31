@@ -10,7 +10,6 @@ import { aggregateGameplayProfile } from "./retail_profile_aggregate.mjs";
 import {
     createMissionRouteController,
     createMissionRouteRecorder,
-    MISSION_ROUTE_FAILURE,
     parseMissionRoute,
 } from "../../web/diagnostic_mission_route.mjs";
 
@@ -20,7 +19,6 @@ const phase3TargetMap = process.env.KISAK_RETAIL_PHASE3_MAP?.trim().toLowerCase(
 const missionTargetMap = process.env.KISAK_RETAIL_MISSION_MAP?.trim().toLowerCase();
 const missionRoutePath = process.env.KISAK_RETAIL_ROUTE_PATH?.trim();
 const missionRouteOutputPath = process.env.KISAK_RETAIL_ROUTE_OUTPUT?.trim();
-const missionRouteAssist = process.env.KISAK_RETAIL_ROUTE_ASSIST === "1";
 const missionValidationStage = process.env.KISAK_RETAIL_MISSION_STAGE?.trim()
     .toLowerCase() ?? "full";
 const missionRouteMode = process.env.KISAK_RETAIL_ROUTE_MODE?.trim().toLowerCase() ??
@@ -38,8 +36,8 @@ if (missionRouteMode && !["author", "replay"].includes(missionRouteMode))
     throw new Error("KISAK_RETAIL_ROUTE_MODE must be author or replay");
 if (missionRouteMode === "author" && !missionRouteOutputPath)
     throw new Error("KISAK_RETAIL_ROUTE_OUTPUT is required in author mode");
-if (missionRouteMode === "author" && missionRoutePath && !missionRouteAssist)
-    throw new Error("an authoring route prefix requires assisted author mode");
+if (missionRouteMode === "author" && missionRoutePath)
+    throw new Error("KISAK_RETAIL_ROUTE_PATH is only used in replay mode");
 if (missionRouteMode === "replay" && !missionRoutePath)
     throw new Error("KISAK_RETAIL_ROUTE_PATH is required in replay mode");
 if (!['progression', 'full'].includes(missionValidationStage))
@@ -971,83 +969,6 @@ async function gameplayFloat(page, field, component)
         { stateField: field, vectorComponent: component });
 }
 
-async function missionObjectiveMarkers(page)
-{
-    return page.evaluate(async () => {
-        const module = globalThis.__KISAKCOD_WEB__.module;
-        const markers = [];
-        for (let slot = 0; slot < 16; ++slot) {
-            const state = await module.call("_KisakWeb_TestObjectiveState", slot);
-            for (let marker = 0; marker < 8; ++marker) {
-                const origin = await Promise.all([0, 1, 2].map(
-                    (component) => module.call(
-                        "_KisakWeb_TestObjectiveOrigin", slot, marker,
-                        component)));
-                if (origin.every(Number.isFinite) &&
-                    origin.some((value) => Math.abs(value) > 0.001)) {
-                    markers.push({ source: "cgame", slot, marker, state, origin });
-                }
-            }
-            const serverState = await module.call(
-                "_KisakWeb_TestServerObjectiveState", slot);
-            for (let marker = 0; marker < 8; ++marker) {
-                const serverOrigin = await Promise.all([0, 1, 2].map(
-                    (component) => module.call(
-                        "_KisakWeb_TestServerObjectiveOrigin", slot, marker,
-                        component)));
-                if (serverOrigin.every(Number.isFinite) &&
-                    serverOrigin.some((value) => Math.abs(value) > 0.001)) {
-                    markers.push({ source: "server", slot, marker,
-                        state: serverState, origin: serverOrigin });
-                }
-            }
-        }
-        for (let slot = 0; slot < 32; ++slot) {
-            const entity = await module.call(
-                "_KisakWeb_TestTargetEntity", slot);
-            if (entity < 0) continue;
-            const origin = await Promise.all([0, 1, 2].map(
-                (component) => module.call(
-                    "_KisakWeb_TestTargetOrigin", slot, component)));
-            if (origin.every(Number.isFinite)) {
-                markers.push({ source: "target", slot, marker: entity,
-                    state: 4, origin });
-            }
-        }
-        return markers;
-    });
-}
-
-async function missionActors(page)
-{
-    return page.evaluate(async () => {
-        const module = globalThis.__KISAKCOD_WEB__.module;
-        const playerTeam = await module.call("_KisakWeb_TestPlayerTeam");
-        const actors = [];
-        for (let slot = 0; slot < 32; ++slot) {
-            const team = await module.call("_KisakWeb_TestActorState", slot, 0);
-            if (team < 0) continue;
-            const [health, compass, hasPath, state, moveMode, lastShotTime,
-                lineOfSight] = await Promise.all([1, 2, 3, 4, 5, 6, 7].map(
-                    (field) => module.call(
-                        "_KisakWeb_TestActorState", slot, field)));
-            const origin = await Promise.all([0, 1, 2].map(
-                (component) => module.call(
-                    "_KisakWeb_TestActorVector", slot, 0, component)));
-            const pathGoal = hasPath ? await Promise.all([0, 1, 2].map(
-                (component) => module.call(
-                    "_KisakWeb_TestActorVector", slot, 1, component))) : null;
-            const aimOrigin = await Promise.all([0, 1, 2].map(
-                (component) => module.call(
-                    "_KisakWeb_TestActorVector", slot, 2, component)));
-            actors.push({ slot, team, health, compass, hasPath, state,
-                moveMode, lastShotTime, lineOfSight, origin, pathGoal,
-                aimOrigin });
-        }
-        return { playerTeam, actors };
-    });
-}
-
 const missionStateField = Object.freeze({
     serverHealth: 17,
     serverPmType: 18,
@@ -1220,18 +1141,9 @@ async function prepareMissionRouteInput(page)
         .toBe("game-canvas");
 }
 
-async function runMissionRouteSegments(adapter, route, {
-    maximumConsecutiveSkips = 0,
-} = {})
+async function runMissionRouteSegments(adapter, route)
 {
     const events = [];
-    const skippedSegmentIndices = [];
-    let consecutiveSkips = 0;
-    const retryable = new Set([
-        MISSION_ROUTE_FAILURE.DIVERGED,
-        MISSION_ROUTE_FAILURE.STUCK,
-        MISSION_ROUTE_FAILURE.TIMEOUT,
-    ]);
     for (const [segmentIndex, segment] of route.segments.entries()) {
         const combat = segment.actions?.fire === true;
         try {
@@ -1251,23 +1163,13 @@ async function runMissionRouteSegments(adapter, route, {
             events.push(...result.events.map((event) => ({
                 ...event, segmentIndex,
             })));
-            consecutiveSkips = 0;
         } catch (error) {
             error.segmentIndex = segmentIndex;
-            if (consecutiveSkips < maximumConsecutiveSkips &&
-                retryable.has(error?.code)) {
-                skippedSegmentIndices.push(segmentIndex);
-                ++consecutiveSkips;
-                console.log(`KISAK_ROUTE_PREFIX_SKIP ${JSON.stringify({
-                    code: error.code, segmentIndex,
-                })}`);
-                continue;
-            }
             throw error;
         }
     }
     return { schemaVersion: route.schemaVersion, map: route.map,
-        validationResult: "pass", events, skippedSegmentIndices };
+        validationResult: "pass", events };
 }
 
 async function replayMissionRoute(page, before)
@@ -1292,106 +1194,6 @@ async function replayMissionRoute(page, before)
         "route replay must change canonical objective or mission state")
         .not.toEqual([]);
     return { ...replay, changes, before, after };
-}
-
-async function ensureMissionEnemyDamage(page, logStart)
-{
-    const damageEvents = () => page.evaluate((startIndex) =>
-        globalThis.__retailLogs.slice(startIndex).filter(({ text }) =>
-            text.includes("canonical damage target=") &&
-            text.includes("class=actor_enemy")).map(({ text }) => text),
-    logStart);
-    let events = await damageEvents();
-    if (events.length > 0) return events;
-    const adapter = missionRouteAdapter(page);
-    for (let attempt = 0; attempt < 24 && events.length === 0; ++attempt) {
-        const [observation, actorState] = await Promise.all([
-            adapter.observe(), missionActors(page),
-        ]);
-        const targets = actorState.actors
-            .filter(({ team, health, origin, aimOrigin }) =>
-                team !== actorState.playerTeam && health > 0 &&
-                origin.every(Number.isFinite) &&
-                aimOrigin.every(Number.isFinite))
-            .map((actor) => ({
-                ...actor,
-                distance: Math.hypot(...actor.origin.map((value, index) =>
-                    value - observation.origin[index])),
-            }))
-            .filter(({ distance }) => distance >= 64 && distance <= 1_200)
-            .sort((left, right) =>
-                Number(right.lineOfSight > 0) -
-                    Number(left.lineOfSight > 0) ||
-                Number(right.lastShotTime > 0) -
-                    Number(left.lastShotTime > 0) ||
-                left.distance - right.distance);
-        const visibleTarget = targets.find(({ lineOfSight }) =>
-            lineOfSight > 0);
-        let segment;
-        if (visibleTarget) {
-            segment = {
-                targetRegion: {
-                    x: visibleTarget.aimOrigin[0],
-                    y: visibleTarget.aimOrigin[1],
-                    z: visibleTarget.aimOrigin[2],
-                    radius: visibleTarget.distance + 32,
-                },
-                maxDurationMs: 3_000,
-                minimumDurationMs: 1_000,
-                stuckTimeoutMs: 3_000,
-                restartPolicy: "fail",
-                actions: { ads: true, fire: true },
-            };
-        } else {
-            const allies = actorState.actors
-                .filter(({ team, health, origin }) =>
-                    team === actorState.playerTeam && health > 0 &&
-                    origin.every(Number.isFinite))
-                .map((actor) => ({
-                    ...actor,
-                    routeOrigin: actor.hasPath &&
-                        actor.pathGoal?.every(Number.isFinite)
-                        ? actor.pathGoal : actor.origin,
-                }))
-                .map((actor) => ({
-                    ...actor,
-                    distance: Math.hypot(...actor.routeOrigin.map(
-                        (value, index) => value - observation.origin[index])),
-                }))
-                .filter(({ distance }) =>
-                    distance >= 192 && distance <= 4_096)
-                .sort((left, right) =>
-                    Number(right.hasPath) - Number(left.hasPath) ||
-                    left.distance - right.distance);
-            if (allies.length === 0) break;
-            const ally = allies[0];
-            segment = {
-                targetRegion: {
-                    x: ally.routeOrigin[0], y: ally.routeOrigin[1],
-                    z: ally.routeOrigin[2], radius: 192,
-                },
-                maxDurationMs: 45_000,
-                stuckTimeoutMs: 10_000,
-                restartPolicy: "fail",
-                actions: { jump: true, use: true },
-            };
-        }
-        try {
-            await createMissionRouteController(adapter, {
-                tickMs: 100,
-                mouseCountsPerDegree: 8,
-                maximumMouseDelta: 512,
-                aimToleranceDegrees: 0.5,
-                obstacleRecoveryAttempts: 4,
-            }).run({ schemaVersion: 1, map: missionTargetMap,
-                segments: [segment] });
-        } catch (error) {
-            if (![MISSION_ROUTE_FAILURE.STUCK, MISSION_ROUTE_FAILURE.TIMEOUT]
-                .includes(error?.code)) throw error;
-        }
-        events = await damageEvents();
-    }
-    return events;
 }
 
 async function authorMissionRoute(page)
@@ -1421,349 +1223,6 @@ async function authorMissionRoute(page)
         await page.waitForTimeout(250);
     }
     const authored = recorder.finish();
-    await writeFile(missionRouteOutputPath,
-        `${JSON.stringify(authored.route, null, 2)}\n`, "utf8");
-    await writeFile(`${missionRouteOutputPath}.evidence.json`,
-        `${JSON.stringify(authored.evidence, null, 2)}\n`, "utf8");
-    return authored;
-}
-
-async function authorAssistedMissionRoute(page)
-{
-    const baseAdapter = missionRouteAdapter(page);
-    const combatLogStart = await page.evaluate(() =>
-        globalThis.__retailLogs.length);
-    let prefixRoute = null;
-    let prefixReplay = null;
-    if (missionRoutePath) {
-        const legacyPrefix = parseMissionRoute(JSON.parse(
-            await readFile(missionRoutePath, "utf8")));
-        expect(legacyPrefix.map).toBe(missionTargetMap);
-        const segments = legacyPrefix.segments.map((segment) => {
-            const widened = segment.targetRegion.radius < 384 ? {
-                ...segment,
-                targetRegion: { ...segment.targetRegion, radius: 384 },
-            } : segment;
-            if (widened.actions?.fire !== true) return widened;
-            const { actions: legacyActions, ...withoutActions } = widened;
-            const actions = Object.fromEntries(Object.entries(legacyActions)
-                .filter(([action]) => action !== "ads" && action !== "fire"));
-            return Object.keys(actions).length > 0
-                ? { ...withoutActions, actions } : withoutActions;
-        });
-        const replayRoute = parseMissionRoute({
-            schemaVersion: legacyPrefix.schemaVersion,
-            map: legacyPrefix.map,
-            segments,
-        });
-        try {
-            prefixReplay = await runMissionRouteSegments(
-                baseAdapter, replayRoute, { maximumConsecutiveSkips: 1 });
-        } catch (error) {
-            console.log(`KISAK_ROUTE_ASSIST_PREFIX_FAILURE ${JSON.stringify({
-                code: error?.code, segmentIndex: error?.segmentIndex,
-                message: error?.message,
-            })}`);
-            throw error;
-        }
-        const skipped = new Set(prefixReplay.skippedSegmentIndices);
-        prefixRoute = parseMissionRoute({
-            schemaVersion: replayRoute.schemaVersion,
-            map: replayRoute.map,
-            segments: replayRoute.segments.filter(
-                (_, segmentIndex) => !skipped.has(segmentIndex)),
-        });
-        console.log(`KISAK_ROUTE_ASSIST_PREFIX ${JSON.stringify({
-            segments: prefixRoute.segments.length,
-            events: prefixReplay.events.length,
-            skippedSegments: prefixReplay.skippedSegmentIndices,
-            widenedMovementSegments: legacyPrefix.segments.filter(
-                (segment) => segment.targetRegion.radius < 384).length,
-            legacyCombatSegmentsRemoved: legacyPrefix.segments.filter(
-                (segment) => segment.actions?.fire === true).length,
-        })}`);
-    }
-    const recorder = createMissionRouteRecorder({
-        map: missionTargetMap,
-        radius: 160,
-    });
-    const routeKey = {
-        ads: 0xC9, fire: 0xC8, forward: 0x77, left: 0x61, right: 0x64,
-        jump: 0x20, use: 0x66,
-    };
-    let lastObservationMs = 0;
-    let initialProgression = null;
-    let progressed = false;
-    let combatObserved = await page.evaluate((startIndex) =>
-        globalThis.__retailLogs.slice(startIndex).some(({ text }) =>
-            text.includes("canonical damage target=") &&
-            text.includes("class=actor_enemy")), combatLogStart);
-    let routeController = null;
-    let routeHeading = null;
-    let progressionWaypointDeferred = false;
-    let lastRecordedWaypointOrigin = null;
-    const meaningfulProgression = (observation) => initialProgression && (
-        observation.progression.objectiveHash !==
-            initialProgression.objectiveHash ||
-        observation.progression.activeObjectives !==
-            initialProgression.activeObjectives ||
-        observation.progression.doneObjectives >
-            initialProgression.doneObjectives ||
-        observation.progression.missionFlags !==
-            initialProgression.missionFlags);
-    const adapter = Object.freeze({
-        ...baseAdapter,
-        async observe() {
-            const observation = await baseAdapter.observe();
-            lastObservationMs = observation.timestampMs;
-            recorder.recordObservation(observation);
-            const newlyObservedProgression = !progressed &&
-                meaningfulProgression(observation);
-            if (newlyObservedProgression) {
-                progressed = true;
-                routeController?.cancel();
-            }
-            if (!newlyObservedProgression && lastRecordedWaypointOrigin &&
-                Math.hypot(...observation.origin.map((value, index) =>
-                    value - lastRecordedWaypointOrigin[index])) >= 512) {
-                recorder.markWaypoint();
-                lastRecordedWaypointOrigin = [...observation.origin];
-            }
-            return observation;
-        },
-        async key(key, down) {
-            await baseAdapter.key(key, down);
-            recorder.recordInput(
-                { type: "key", key: routeKey[key], down }, lastObservationMs);
-        },
-        async mouse(dx, dy) {
-            await baseAdapter.mouse(dx, dy);
-            recorder.recordInput(
-                { type: "mouse-move", dx, dy }, lastObservationMs);
-        },
-    });
-    const start = await adapter.observe();
-    lastRecordedWaypointOrigin = [...start.origin];
-    initialProgression = { ...start.progression };
-    const attempted = new Set();
-    const retryable = new Set([
-        MISSION_ROUTE_FAILURE.DIVERGED,
-        MISSION_ROUTE_FAILURE.STUCK,
-        MISSION_ROUTE_FAILURE.TIMEOUT,
-    ]);
-    let squadUpdateWaits = 0;
-    for (let attempt = 0; attempt < 96 &&
-        (!progressed || !combatObserved); ++attempt) {
-        const progressedBeforeSegment = progressed;
-        const observation = await adapter.observe();
-        const [objectiveMarkers, actorState] = await Promise.all([
-            missionObjectiveMarkers(page), missionActors(page),
-        ]);
-        if (attempt === 0) {
-            console.log(`KISAK_ROUTE_OBJECTIVE_MARKERS ${JSON.stringify(
-                objectiveMarkers)}`);
-            console.log(`KISAK_ROUTE_ACTORS ${JSON.stringify(actorState)}`);
-        }
-        const canonicalOrigins = new Set();
-        const canonicalMarkers = objectiveMarkers.filter(
-            ({ source, slot, marker, state, origin }) => {
-                const originKey = origin.map(Math.round).join(":");
-                if (canonicalOrigins.has(originKey)) return false;
-                canonicalOrigins.add(originKey);
-                return (state === 1 || state === 4) &&
-                    !attempted.has(`${source}:${slot}:${marker}`);
-            })
-            .sort((left, right) =>
-                Math.hypot(...left.origin.map((value, index) =>
-                    value - observation.origin[index])) -
-                Math.hypot(...right.origin.map((value, index) =>
-                    value - observation.origin[index])));
-        const actorPositions = actorState.actors
-            .filter(({ team, health, origin }) =>
-                team === actorState.playerTeam && health > 0 &&
-                origin.every(Number.isFinite))
-            .map((actor) => ({
-                ...actor,
-                source: "actor",
-                marker: actor.origin.map(
-                    (value) => Math.round(value / 96)).join(":"),
-                distance: Math.hypot(...actor.origin.map(
-                    (value, index) => value - observation.origin[index])),
-            }))
-            .filter(({ source, slot, marker, distance, origin }) =>
-                distance >= 192 && distance <= 4_096 &&
-                (!routeHeading || origin.reduce((sum, value, index) =>
-                    sum + (value - observation.origin[index]) *
-                        routeHeading[index], 0) >= 0) &&
-                !attempted.has(`${source}:${slot}:${marker}`));
-        const actorPathGoals = actorState.actors
-            .filter(({ team, health, hasPath, pathGoal }) =>
-                team === actorState.playerTeam && health > 0 && hasPath &&
-                pathGoal?.every(Number.isFinite))
-            .map((actor) => ({
-                ...actor,
-                source: "actor-path",
-                origin: actor.pathGoal,
-                marker: actor.pathGoal.map(
-                    (value) => Math.round(value / 96)).join(":"),
-                distance: Math.hypot(...actor.pathGoal.map(
-                    (value, index) => value - observation.origin[index])),
-            }))
-            .filter(({ source, slot, marker, distance, origin }) =>
-                distance >= 192 && distance <= 8_192 &&
-                (!routeHeading || origin.reduce((sum, value, index) =>
-                    sum + (value - observation.origin[index]) *
-                        routeHeading[index], 0) >= 0) &&
-                !attempted.has(`${source}:${slot}:${marker}`));
-        const actorMarkers = [...actorPositions, ...actorPathGoals]
-            .sort((left, right) =>
-                Number(right.source === "actor") -
-                    Number(left.source === "actor") ||
-                Number(right.hasPath) - Number(left.hasPath) ||
-                Number(right.moveMode > 0) - Number(left.moveMode > 0) ||
-                left.distance - right.distance);
-        const enemyMarkers = combatObserved ? [] : actorState.actors
-            .filter(({ team, health, aimOrigin, lineOfSight }) =>
-                team !== actorState.playerTeam && health > 0 &&
-                lineOfSight > 0 &&
-                aimOrigin.every(Number.isFinite))
-            .map((actor) => ({
-                ...actor,
-                source: "enemy",
-                origin: actor.aimOrigin,
-                marker: actor.aimOrigin.map(
-                    (value) => Math.round(value / 96)).join(":"),
-                distance: Math.hypot(...actor.aimOrigin.map(
-                    (value, index) => value - observation.origin[index])),
-            }))
-            .filter(({ source, slot, marker, distance }) =>
-                distance >= 64 && distance <= 1_200 &&
-                !attempted.has(`${source}:${slot}:${marker}`))
-            .sort((left, right) =>
-                Number(right.lineOfSight > 0) -
-                    Number(left.lineOfSight > 0) ||
-                Number(right.lastShotTime > 0) -
-                    Number(left.lastShotTime > 0) ||
-                left.distance - right.distance);
-        if (routeHeading && enemyMarkers.length === 0 &&
-            actorMarkers.length === 0 && canonicalMarkers.length > 0) {
-            if (squadUpdateWaits < 60) {
-                ++squadUpdateWaits;
-                --attempt;
-                await adapter.wait(1_000);
-                continue;
-            }
-        }
-        if (actorMarkers.length > 0) squadUpdateWaits = 0;
-        const markers = enemyMarkers.length > 0 ? enemyMarkers :
-            actorMarkers.length > 0 ? actorMarkers : canonicalMarkers;
-        if (markers.length === 0) break;
-        const target = markers[0];
-        if (target.source !== "enemy")
-            attempted.add(`${target.source}:${target.slot}:${target.marker}`);
-        const segment = {
-            targetRegion: {
-                x: target.origin[0], y: target.origin[1], z: target.origin[2],
-                radius: target.source.startsWith("actor") ? 192 :
-                    target.source === "enemy" ? target.distance + 32 : 128,
-            },
-            maxDurationMs: target.source.startsWith("actor") ? 45_000 :
-                target.source === "enemy" ? 3_000 : 90_000,
-            ...(target.source === "enemy"
-                ? { minimumDurationMs: 1_000 } : {}),
-            stuckTimeoutMs: target.source.startsWith("actor") ||
-                target.source === "enemy" ? 3_000 : 12_000,
-            restartPolicy: "resume",
-            actions: target.source === "enemy"
-                ? { ads: true, fire: true } : {
-                ...(target.source.startsWith("actor") ? {} : { fire: true }),
-                jump: true, use: true,
-            },
-        };
-        console.log(`KISAK_ROUTE_ASSIST_TARGET ${JSON.stringify(target)}`);
-        try {
-            const combat = target.source === "enemy";
-            routeController = createMissionRouteController(adapter, {
-                tickMs: combat ? 100 : 200,
-                ...(combat ? {
-                    mouseCountsPerDegree: 8,
-                    maximumMouseDelta: 512,
-                    aimToleranceDegrees: 0.5,
-                } : {}),
-                minimumProgress: 4,
-                obstacleRecoveryAttempts: 2,
-                obstacleRecoveryMs: 1_000,
-            });
-            await routeController.run({ schemaVersion: 1, map: missionTargetMap,
-                segments: [segment] });
-        } catch (error) {
-            if (progressed && error?.code === MISSION_ROUTE_FAILURE.CANCELED) {
-                console.log("KISAK_ROUTE_ASSIST_PROGRESSION_CANCELED_SEGMENT");
-            } else if (!retryable.has(error?.code)) {
-                throw error;
-            } else {
-                console.log(`KISAK_ROUTE_ASSIST_RETRY ${JSON.stringify({
-                    code: error.code, slot: target.slot, marker: target.marker,
-                })}`);
-            }
-        } finally {
-            routeController = null;
-        }
-        if (!progressed && target.source !== "enemy")
-            await adapter.wait(1_000);
-        const after = await adapter.observe();
-        progressed ||= meaningfulProgression(after);
-        const newlyProgressed = !progressedBeforeSegment && progressed;
-        combatObserved ||= await page.evaluate((startIndex) =>
-            globalThis.__retailLogs.slice(startIndex).some(({ text }) =>
-                text.includes("canonical damage target=") &&
-                text.includes("class=actor_enemy")), combatLogStart);
-        const movement = after.origin.map((value, index) =>
-            value - observation.origin[index]);
-        const movementLength = Math.hypot(...movement);
-        if (movementLength >= 32) {
-            routeHeading = movement.map((value) => value / movementLength);
-        }
-        if (newlyProgressed && !combatObserved) {
-            progressionWaypointDeferred = true;
-        } else if (target.source === "enemy") {
-            recorder.markWaypoint({
-                targetRegion: segment.targetRegion,
-                minimumDurationMs: segment.minimumDurationMs,
-            });
-            lastRecordedWaypointOrigin = [...after.origin];
-        } else if (progressed || movementLength >= 32) {
-            recorder.markWaypoint();
-            lastRecordedWaypointOrigin = [...after.origin];
-            progressionWaypointDeferred = false;
-        }
-    }
-    if (!progressed || !combatObserved) {
-        throw new Error(
-            `assisted route authoring exhausted canonical markers without ${
-                !progressed ? "progression" : "enemy damage"}`);
-    }
-    if (progressionWaypointDeferred)
-        recorder.markWaypoint();
-    const continuation = recorder.finish();
-    const authored = prefixRoute ? {
-        route: parseMissionRoute({
-            schemaVersion: prefixRoute.schemaVersion,
-            map: prefixRoute.map,
-            segments: [
-                ...prefixRoute.segments,
-                ...continuation.route.segments,
-            ],
-        }),
-        evidence: {
-            ...continuation.evidence,
-            prefix: {
-                segments: prefixRoute.segments.length,
-                replayEvents: prefixReplay.events.length,
-                skippedSegments: prefixReplay.skippedSegmentIndices,
-            },
-        },
-    } : continuation;
     await writeFile(missionRouteOutputPath,
         `${JSON.stringify(authored.route, null, 2)}\n`, "utf8");
     await writeFile(`${missionRouteOutputPath}.evidence.json`,
@@ -3171,20 +2630,16 @@ if (missionTargetMap && missionRouteMode === "author") {
     test("local retail mission route authoring",
         { tag: "@retail-route-author" }, async ({ retailPage: page }) => {
             test.setTimeout(7_200_000);
-            if (!missionRouteAssist) {
-                expect(test.info().project.use.headless,
-                    "manual route authoring requires a headed browser")
-                    .toBe(false);
-            }
+            expect(test.info().project.use.headless,
+                "manual route authoring requires a headed browser")
+                .toBe(false);
             const pageErrors = [];
             page.on("pageerror", (error) => pageErrors.push(error.message));
             await loadMissionStart(page);
             failureStage = `${missionTargetMap} route authoring`;
             failureClass = "input";
             await prepareMissionRouteInput(page);
-            const authored = missionRouteAssist
-                ? await authorAssistedMissionRoute(page)
-                : await authorMissionRoute(page);
+            const authored = await authorMissionRoute(page);
             expect(authored.route.segments.length).toBeGreaterThan(0);
             expect(pageErrors).toEqual([]);
             console.log(`KISAK_RETAIL_ROUTE_RESULT ${JSON.stringify({
@@ -3231,15 +2686,11 @@ if (missionTargetMap && missionRouteMode !== "author") {
             const progression = missionRoutePath
                 ? await replayMissionRoute(page, progressionStart)
                 : await advanceMissionProgression(page, progressionStart);
-            let enemyDamageEvents = await page.evaluate((start) =>
+            const enemyDamageEvents = await page.evaluate((start) =>
                 globalThis.__retailLogs.slice(start).filter(({ text }) =>
                     text.includes("canonical damage target=") &&
                     text.includes("class=actor_enemy")).map(({ text }) => text),
             combatLogStart);
-            if (missionRoutePath && enemyDamageEvents.length === 0) {
-                enemyDamageEvents = await ensureMissionEnemyDamage(
-                    page, combatLogStart);
-            }
             expect(enemyDamageEvents.length,
                 "mission flow must include canonical enemy damage")
                 .toBeGreaterThan(0);

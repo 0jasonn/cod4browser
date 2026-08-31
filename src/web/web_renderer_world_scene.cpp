@@ -1,4 +1,5 @@
 #include <web/web_renderer_world_scene.h>
+#include <web/web_renderer_material_lookup.h>
 #include <gfx_d3d/gfx_world_types.h>
 
 #include <algorithm>
@@ -23,8 +24,6 @@ constexpr std::uint32_t TECHNIQUE_LIT_SUN_SHADOW_INDEX = 9u;
 constexpr std::uint32_t TECHNIQUE_LIT_SPOT_INDEX = 10u;
 constexpr std::uint32_t TECHNIQUE_LIT_OMNI_INDEX = 12u;
 constexpr std::uint32_t TECHNIQUE_NONE_INDEX = 36u;
-constexpr std::uint32_t COLOR_MAP_HASH = 0xa0ab1041u;
-constexpr std::uint32_t DETAIL_MAP_HASH = 0xeb529b4du;
 constexpr std::uint32_t DETAIL_SCALE_HASH = 0x08d36a09u;
 
 void UnpackUnitVec(PackedUnitVec packed, float output[3]) noexcept
@@ -153,24 +152,6 @@ const water_t *FindWater(
     return nullptr;
 }
 
-bool CopyMaterialConstant(
-    const Material *material,
-    std::uint32_t nameHash,
-    float output[4]) noexcept
-{
-    if (!material || !material->constantTable) return false;
-    for (std::uint32_t index = 0u; index < material->constantCount; ++index)
-    {
-        const MaterialConstantDef &constant = material->constantTable[index];
-        if (constant.nameHash == nameHash)
-        {
-            std::copy_n(constant.literal, 4u, output);
-            return true;
-        }
-    }
-    return false;
-}
-
 bool SurfaceRangeIsValid(const GfxWorld &world, const GfxSurface &surface) noexcept
 {
     if (surface.tris.firstVertex < 0 || surface.tris.baseIndex < 0 ||
@@ -188,78 +169,6 @@ bool SurfaceRangeIsValid(const GfxWorld &world, const GfxSurface &surface) noexc
         surface.tris.vertexCount <= world.vertexCount - firstVertex &&
         firstIndex <= static_cast<std::uint32_t>(world.indexCount) &&
         indexCount <= static_cast<std::uint32_t>(world.indexCount) - firstIndex;
-}
-
-const GfxImage *FindBaseImage(const Material *material, std::uint8_t &sampler) noexcept
-{
-    if (!material || !material->textureTable) return nullptr;
-    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
-    {
-        const MaterialTextureDef &texture = material->textureTable[index];
-        if (texture.nameHash == COLOR_MAP_HASH && texture.u.image)
-        {
-            sampler = texture.samplerState;
-            return texture.u.image;
-        }
-    }
-    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
-    {
-        const MaterialTextureDef &texture = material->textureTable[index];
-        if (texture.semantic == 2u && texture.u.image)
-        {
-            sampler = texture.samplerState;
-            return texture.u.image;
-        }
-    }
-    return nullptr;
-}
-
-const GfxImage *FindDetailImage(
-    const Material *material, std::uint8_t &sampler) noexcept
-{
-    if (!material || !material->textureTable) return nullptr;
-    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
-    {
-        const MaterialTextureDef &texture = material->textureTable[index];
-        if (texture.nameHash == DETAIL_MAP_HASH && texture.u.image)
-        {
-            sampler = texture.samplerState;
-            return texture.u.image;
-        }
-    }
-    return nullptr;
-}
-
-const GfxImage *FindNormalImage(
-    const Material *material, std::uint8_t &sampler) noexcept
-{
-    if (!material || !material->textureTable) return nullptr;
-    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
-    {
-        const MaterialTextureDef &texture = material->textureTable[index];
-        if (texture.semantic == 5u && texture.u.image)
-        {
-            sampler = texture.samplerState;
-            return texture.u.image;
-        }
-    }
-    return nullptr;
-}
-
-const GfxImage *FindSpecularImage(
-    const Material *material, std::uint8_t &sampler) noexcept
-{
-    if (!material || !material->textureTable) return nullptr;
-    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
-    {
-        const MaterialTextureDef &texture = material->textureTable[index];
-        if (texture.semantic == 8u && texture.u.image)
-        {
-            sampler = texture.samplerState;
-            return texture.u.image;
-        }
-    }
-    return nullptr;
 }
 
 std::uint32_t HashPixelShaderProgram(
@@ -503,10 +412,10 @@ WebRendererWorldBatchDesc MakeBatch(
     batch.lastInstanceIndex = UINT32_MAX;
     batch.sourceKind = WebRendererSceneBatchKind::WorldSurface;
     batch.samplerState = 0u;
-    batch.baseImage = FindBaseImage(surface.material, batch.samplerState);
-    batch.normalImage = FindNormalImage(
+    batch.baseImage = WebRenderer_FindBaseImage(surface.material, batch.samplerState);
+    batch.normalImage = WebRenderer_FindNormalImage(
         surface.material, batch.normalSamplerState);
-    batch.specularImage = FindSpecularImage(
+    batch.specularImage = WebRenderer_FindSpecularImage(
         surface.material, batch.specularSamplerState);
     batch.water = FindWater(surface.material, batch.waterSamplerState);
     if (surface.reflectionProbeIndex < world.reflectionProbeCount &&
@@ -533,10 +442,10 @@ WebRendererWorldBatchDesc MakeBatch(
     batch.pixelShaderProgramHash = technique.pixelShaderProgramHash;
     if (batch.pixelShaderName &&
         std::strstr(batch.pixelShaderName, "d0") != nullptr &&
-        CopyMaterialConstant(surface.material, DETAIL_SCALE_HASH,
+        WebRenderer_CopyMaterialConstant(surface.material, DETAIL_SCALE_HASH,
             batch.detailScale))
     {
-        batch.detailImage = FindDetailImage(
+        batch.detailImage = WebRenderer_FindDetailImage(
             surface.material, batch.detailSamplerState);
     }
     batch.stateBits[0] = technique.stateBits[0];
@@ -566,21 +475,21 @@ WebRendererWorldBatchDesc MakeBatch(
     const bool canonicalSm3Specular = UsesSm3EnvironmentSpecular(
             technique, batch.specularImage) &&
         batch.reflectionProbeImage &&
-        CopyMaterialConstant(surface.material, ENV_MAP_PARMS_HASH,
+        WebRenderer_CopyMaterialConstant(surface.material, ENV_MAP_PARMS_HASH,
             batch.envMapParms);
     const bool canonicalWater = ShaderNameIs(technique, "water_l_sun.hlsl") &&
         batch.water && batch.reflectionProbeImage &&
-        CopyMaterialConstant(surface.material, ENV_MAP_PARMS_HASH,
+        WebRenderer_CopyMaterialConstant(surface.material, ENV_MAP_PARMS_HASH,
             batch.envMapParms) &&
-        CopyMaterialConstant(surface.material, WATER_COLOR_HASH,
+        WebRenderer_CopyMaterialConstant(surface.material, WATER_COLOR_HASH,
             batch.waterColor);
     const bool canonicalDistanceFalloff = VertexShaderNameIs(
             technique, "vertcol_simple_fog_df.hlsl") &&
-        CopyMaterialConstant(surface.material, FALLOFF_PARMS_HASH,
+        WebRenderer_CopyMaterialConstant(surface.material, FALLOFF_PARMS_HASH,
             batch.falloffParms) &&
-        CopyMaterialConstant(surface.material, FALLOFF_BEGIN_COLOR_HASH,
+        WebRenderer_CopyMaterialConstant(surface.material, FALLOFF_BEGIN_COLOR_HASH,
             batch.falloffBeginColor) &&
-        CopyMaterialConstant(surface.material, FALLOFF_END_COLOR_HASH,
+        WebRenderer_CopyMaterialConstant(surface.material, FALLOFF_END_COLOR_HASH,
             batch.falloffEndColor);
     if (canonicalWater)
         batch.technique = WebRendererWorldTechnique::WaterLitSun;
@@ -795,7 +704,9 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
                     world.vd.vertices[vertexIndex];
                 if (!Finite3(source.xyz) ||
                     !std::isfinite(source.texCoord[0]) ||
-                    !std::isfinite(source.texCoord[1]))
+                    !std::isfinite(source.texCoord[1]) ||
+                    !std::isfinite(source.lmapCoord[0]) ||
+                    !std::isfinite(source.lmapCoord[1]))
                 {
                     return WebRendererWorldSceneResult::InvalidSurfaceBounds;
                 }

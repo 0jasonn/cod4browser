@@ -1,3 +1,8 @@
+import {
+    createRequestIdAllocator,
+    rejectWorkerRequests,
+    settleWorkerReply,
+} from "./worker_transport.mjs";
 import { WebAudioDriver } from "./web_audio_driver.mjs";
 import {
     DEFAULT_REQUEST_TIMEOUT_MS,
@@ -58,7 +63,7 @@ export function createEngineWorkerHost(canvas, {
     audioDriver.attachGestureResume(canvas);
 
     const pending = new Map();
-    let nextRequestId = 1;
+    const allocateRequestId = createRequestIdAllocator(pending);
     let releaseFilesystemLease = null;
     let filesystemLeaseCompletion = null;
     let releaseHomeWriterLease = null;
@@ -117,29 +122,6 @@ export function createEngineWorkerHost(canvas, {
         clearTimeout(request.absoluteTimeout);
     }
 
-    function rejectPending(error)
-    {
-        const failure = error instanceof EngineWorkerError
-            ? error
-            : new EngineWorkerError(error);
-        for (const request of pending.values()) {
-            clearRequestTimers(request);
-            request.signal?.removeEventListener("abort", request.abort);
-            request.reject(failure);
-        }
-        pending.clear();
-    }
-
-    function allocateRequestId()
-    {
-        for (let attempts = 0; attempts <= 0xffff_ffff; ++attempts) {
-            const id = nextRequestId;
-            nextRequestId = nextRequestId === 0xffff_ffff ? 1 : nextRequestId + 1;
-            if (!pending.has(id)) return id;
-        }
-        throw new EngineWorkerError(protocolError(
-            "REQUEST_ID_EXHAUSTED", "request", "No Worker request IDs are available."));
-    }
 
     /**
      * @param {string} type
@@ -233,21 +215,14 @@ export function createEngineWorkerHost(canvas, {
                 "PROTOCOL_VERSION", "message",
                 "The engine Worker returned an incompatible protocol version.");
             rejectReady(new EngineWorkerError(error));
-            rejectPending(error);
+            rejectWorkerRequests(pending, error);
             return;
         }
         switch (message?.type) {
         case "ready": resolveReady(message); break;
-        case "reply": {
-            const request = pending.get(message.id);
-            if (!request || request.generation !== workerGeneration) break;
-            pending.delete(message.id);
-            clearRequestTimers(request);
-            request.signal?.removeEventListener("abort", request.abort);
-            if (message.error) request.reject(new EngineWorkerError(message.error));
-            else request.resolve(message.result);
+        case "reply":
+            settleWorkerReply(pending, message, workerGeneration);
             break;
-        }
         case "filesystem-progress": {
             const request = pending.get(message.id);
             if (!request || request.generation !== workerGeneration ||
@@ -270,7 +245,7 @@ export function createEngineWorkerHost(canvas, {
             break;
         case "event":
             if (!PRODUCT_HOST_EVENTS.has(message.name)) {
-                rejectPending(protocolError(
+                rejectWorkerRequests(pending, protocolError(
                     "EVENT_NOT_ALLOWED", "event", `Worker event is not allowed: ${message.name}.`));
                 break;
             }
@@ -293,7 +268,7 @@ export function createEngineWorkerHost(canvas, {
         case "startup-error": {
             const error = new EngineWorkerError(message.error);
             rejectReady(error);
-            rejectPending(error);
+            rejectWorkerRequests(pending, error);
             break;
         }
         default: break;
@@ -303,13 +278,13 @@ export function createEngineWorkerHost(canvas, {
         const error = protocolError(
             "WORKER_ERROR", "worker", event.error?.message ?? event.message ?? "Worker failed.");
         rejectReady(new EngineWorkerError(error));
-        rejectPending(error);
+        rejectWorkerRequests(pending, error);
         void recoverWorkerOwnership("worker-error", new EngineWorkerError(error));
     };
     const handleMessageError = () => {
         const error = protocolError(
             "MESSAGE_ERROR", "message", "The engine Worker sent an unreadable message.");
-        rejectPending(error);
+        rejectWorkerRequests(pending, error);
         void recoverWorkerOwnership("message-error", new EngineWorkerError(error));
     };
     worker.addEventListener("message", handleMessage);
@@ -411,7 +386,7 @@ export function createEngineWorkerHost(canvas, {
             setFilesystemState(FILESYSTEM_STATES.TERMINATING);
             workerUnavailable = true;
             ++workerGeneration;
-            rejectPending(protocolError(
+            rejectWorkerRequests(pending, protocolError(
                 "WORKER_TERMINATED", operation,
                 "The engine Worker was terminated to end uncertain filesystem ownership."));
             emitFilesystemLifecycle("workerTerminationStarted");
@@ -597,7 +572,7 @@ export function createEngineWorkerHost(canvas, {
                     worker.removeEventListener("error", handleError);
                     worker.removeEventListener("messageerror", handleMessageError);
                     audioDriver.dispose();
-                    rejectPending(protocolError(
+                    rejectWorkerRequests(pending, protocolError(
                         "WORKER_TERMINATED", "shutdown", "The engine Worker was terminated."));
                     if (!workerUnavailable) {
                         workerUnavailable = true;

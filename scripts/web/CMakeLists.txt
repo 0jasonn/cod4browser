@@ -165,7 +165,6 @@ set(KISAK_WEB_CANONICAL_ADAPTER_SOURCES
     "${SRC_DIR}/web/web_client_server_lifecycle.cpp"
     "${SRC_DIR}/web/web_canonical_gfxworld.cpp"
     "${SRC_DIR}/web/web_engine_filesystem.cpp"
-    "${SRC_DIR}/web/web_engine_world_surface.cpp"
     "${SRC_DIR}/web/web_renderer_frontend.cpp"
     "${SRC_DIR}/web/web_system_files.cpp"
 )
@@ -434,12 +433,15 @@ configure_file("${KISAK_WEB_SOURCE_DIR}/product_engine_worker_host.mjs"
 configure_file("${KISAK_WEB_SOURCE_DIR}/product_protocol.mjs"
     "${KISAK_WEB_SITE_DIR}/product_protocol.mjs" COPYONLY)
 
+configure_file("${KISAK_WEB_SOURCE_DIR}/worker_transport.mjs"
+    "${KISAK_WEB_SITE_DIR}/worker_transport.mjs" COPYONLY)
+
 if (KISAK_WEB_DIAGNOSTICS)
     set(KISAK_WEB_DIAGNOSTIC_SITE_DIR "${CMAKE_BINARY_DIR}/site-diagnostics")
     file(MAKE_DIRECTORY "${KISAK_WEB_DIAGNOSTIC_SITE_DIR}")
     foreach(WEB_FILE index.html launcher.mjs asset_profile.mjs asset_store.mjs input_controller_core.mjs
             engine_worker.mjs engine_worker_host.mjs engine_protocol.mjs
-            web_audio_driver.mjs worker_sync_filesystem.mjs styles.css)
+            web_audio_driver.mjs worker_sync_filesystem.mjs worker_transport.mjs styles.css)
         configure_file(
             "${KISAK_WEB_SOURCE_DIR}/${WEB_FILE}"
             "${KISAK_WEB_DIAGNOSTIC_SITE_DIR}/${WEB_FILE}"

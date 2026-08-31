@@ -1,6 +1,10 @@
 # Campaign compatibility matrix
 
-## Mission-route infrastructure update — 2026-08-28
+This matrix preserves historical automated retail evidence; it was not rerun
+on 2026-08-31. [Current status](web-status.md) distinguishes this task's checks.
+No mission-flow result is a prerequisite for renderer or cleanup work.
+
+## Historical mission-route infrastructure update — 2026-08-28
 
 A diagnostics-only version-1 route author/replay system is now available for
 Village Assault. It records only numeric coordinates/angles, input
@@ -11,7 +15,7 @@ replayed against retail content and no compatibility or mission-flow row
 changes. `village_assault` remains `UNTESTED` with no
 `MISSION_FLOW_VALIDATED` flag.
 
-## Current corrected evidence — 2026-08-28
+## Historical corrected evidence — 2026-08-28
 
 This section supersedes the performance and mission-progression interpretation
 below. The six-map classifications are unchanged: Killhouse and Airplane are

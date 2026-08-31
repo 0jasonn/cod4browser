@@ -334,11 +334,6 @@ add_executable(web_browser_bindings_tests
     "${KISAK_REPOSITORY_ROOT}/src/web/web_browser_bindings.cpp"
 )
 
-add_executable(web_engine_world_surface_tests
-    "${CMAKE_CURRENT_LIST_DIR}/web_engine_world_surface_tests.cpp"
-    "${KISAK_REPOSITORY_ROOT}/src/web/web_engine_world_surface.cpp"
-)
-
 add_executable(web_asset_probe_tests
     "${CMAKE_CURRENT_LIST_DIR}/web_asset_probe_tests.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/web/web_asset_probe.cpp"
@@ -491,8 +486,6 @@ target_compile_features(web_openal_proxy_tests PRIVATE cxx_std_20)
 target_include_directories(web_openal_proxy_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
 target_compile_features(web_browser_bindings_tests PRIVATE cxx_std_20)
 target_include_directories(web_browser_bindings_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
-target_compile_features(web_engine_world_surface_tests PRIVATE cxx_std_20)
-target_include_directories(web_engine_world_surface_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
 target_compile_features(web_asset_probe_tests PRIVATE cxx_std_20)
 target_include_directories(web_asset_probe_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
 
@@ -626,11 +619,6 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "-sEXIT_RUNTIME=1"
         "-sNO_DISABLE_EXCEPTION_CATCHING"
     )
-    target_link_options(web_engine_world_surface_tests PRIVATE
-        "-sENVIRONMENT=node"
-        "-sEXIT_RUNTIME=1"
-        "-sNO_DISABLE_EXCEPTION_CATCHING"
-    )
     target_link_options(web_asset_probe_tests PRIVATE
         "-sENVIRONMENT=node"
         "-sEXIT_RUNTIME=1"
@@ -671,7 +659,6 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     set_target_properties(web_renderer_dobj_submission_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_openal_proxy_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_browser_bindings_tests PROPERTIES SUFFIX ".cjs")
-    set_target_properties(web_engine_world_surface_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(web_asset_probe_tests PROPERTIES SUFFIX ".cjs")
     find_program(KISAK_NODE_EXECUTABLE NAMES node node.exe REQUIRED)
     add_test(NAME iwd_archive_tests
@@ -744,8 +731,6 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_openal_proxy_tests>")
     add_test(NAME web_browser_bindings_tests
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_browser_bindings_tests>")
-    add_test(NAME web_engine_world_surface_tests
-        COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_engine_world_surface_tests>")
     add_test(NAME web_asset_probe_tests
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_asset_probe_tests>")
 else()
@@ -822,7 +807,6 @@ else()
     endif()
     add_test(NAME web_openal_proxy_tests COMMAND web_openal_proxy_tests)
     add_test(NAME web_browser_bindings_tests COMMAND web_browser_bindings_tests)
-    add_test(NAME web_engine_world_surface_tests COMMAND web_engine_world_surface_tests)
     add_test(NAME web_asset_probe_tests COMMAND web_asset_probe_tests)
 endif()
 
