@@ -184,6 +184,11 @@ struct WebFrameProfileSample
     double sceneModelBuildMs = 0.0;
     double sceneCommandAppendMs = 0.0;
     double sceneCloudAppendMs = 0.0;
+    // Disjoint parts of sceneDynamicSubmitMs; upload timers also overlap them.
+    double dynamicCopyMs = 0.0;
+    double dynamicGeometryUploadMs = 0.0;
+    double dynamicTextureUploadMs = 0.0;
+    double dynamicPublishMs = 0.0;
     // DObj build is nested in sceneBuildMs. The four substages are disjoint;
     // validation, LOD/hide tests and other overhead remain in the build total.
     double dobjBuildMs = 0.0;

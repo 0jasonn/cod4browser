@@ -7014,6 +7014,10 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
         return WebRendererSurfaceResult::InvalidDescriptor;
     }
 
+#if KISAK_WEB_DIAGNOSTICS
+    WebFrameProfileSample *const dynamicProfile = WebFrameProfile_Current();
+    const double copyStarted = dynamicProfile ? WebFrameProfile_Now() : 0.0;
+#endif
     std::vector<WebRendererSurfaceVertex> retainedVertices;
     std::vector<std::uint32_t> retainedIndices;
     std::vector<WebRendererRetainedWorldBatch> retainedBatches;
@@ -7042,6 +7046,11 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
     if (dynamicNeedsLighting && retainedLighting.pixels.empty())
         return WebRendererSurfaceResult::InvalidDescriptor;
 
+#if KISAK_WEB_DIAGNOSTICS
+    const double geometryStarted = dynamicProfile ? WebFrameProfile_Now() : 0.0;
+    if (dynamicProfile)
+        dynamicProfile->dynamicCopyMs += geometryStarted - copyStarted;
+#endif
     GLuint vertexArray = 0u;
     GLuint vertexBuffer = 0u;
     GLuint indexBuffer = 0u;
@@ -7052,6 +7061,11 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
     {
         return WebRendererSurfaceResult::BackendFailure;
     }
+#if KISAK_WEB_DIAGNOSTICS
+    const double texturesStarted = dynamicProfile ? WebFrameProfile_Now() : 0.0;
+    if (dynamicProfile)
+        dynamicProfile->dynamicGeometryUploadMs += texturesStarted - geometryStarted;
+#endif
     if (hasContext && !CreateWorldTextureObjects(
         g_renderer.retainedDynamicModelImages))
     {
@@ -7063,6 +7077,11 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
         DeleteSurfaceObjects(vertexArray, vertexBuffer, indexBuffer);
         return WebRendererSurfaceResult::BackendFailure;
     }
+#if KISAK_WEB_DIAGNOSTICS
+    const double publishStarted = dynamicProfile ? WebFrameProfile_Now() : 0.0;
+    if (dynamicProfile)
+        dynamicProfile->dynamicTextureUploadMs += publishStarted - texturesStarted;
+#endif
     if (hasContext)
     {
         DeleteSurfaceObjects(
@@ -7123,6 +7142,8 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
     }
 #if KISAK_WEB_DIAGNOSTICS
     ReportRetainedDynamicFx();
+    if (dynamicProfile)
+        dynamicProfile->dynamicPublishMs += WebFrameProfile_Now() - publishStarted;
 #endif
     return WebRendererSurfaceResult::Success;
 }
