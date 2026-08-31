@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { join } from 'node:path';
 import { cpus, totalmem } from 'node:os';
 import { chromium } from '@playwright/test';
 import { aggregateGameplayProfile, summarizeProfileSamples } from '../tests/browser/retail_profile_aggregate.mjs';
@@ -17,7 +18,9 @@ const source = {
     commitSha: execFileSync('git', ['rev-parse', sourceRevision], { encoding: 'utf8' }).trim(),
     dirty: execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim().length > 0,
 };
-const wasmPath = production ? 'build/web/site/kisakcod.wasm' : 'build/web-diagnostics/site-diagnostics/kisakcod.wasm';
+// Match the directory being served, including retained before/after artifacts.
+const wasmPath = production ? join(process.argv[5] ?? 'build/web/site', 'kisakcod.wasm')
+    : 'build/web-diagnostics/site-diagnostics/kisakcod.wasm';
 const artifactSha256 = createHash('sha256').update(await readFile(wasmPath)).digest('hex');
 assert(process.env.KISAK_COD4_RETAIL_ROOT);
 // Playwright owns this new temporary persistent profile and its cleanup.

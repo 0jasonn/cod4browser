@@ -1127,7 +1127,7 @@ void TestMalformedDynamicBrushRangeIsRejectedAtomically()
     assert(command.surfaceCount == 99u);
 }
 
-void TestBrushReuseMatchesUncachedWorldSelectionAndRejectsAtomically()
+void TestBrushMatchesWorldSelectionAndRejectsAtomically()
 {
     // Repository-authored synthetic data, under the repository license.
     // The uncached world path supplies the technique/hash and vertex oracle.
@@ -1273,6 +1273,6 @@ int main()
     TestSpotShadowCommandPreservesAuthoredCasterMembership();
     TestDynamicBrushModelUsesCanonicalSurfaceRangeAndPlacement();
     TestMalformedDynamicBrushRangeIsRejectedAtomically();
-    TestBrushReuseMatchesUncachedWorldSelectionAndRejectsAtomically();
+    TestBrushMatchesWorldSelectionAndRejectsAtomically();
     return 0;
 }
