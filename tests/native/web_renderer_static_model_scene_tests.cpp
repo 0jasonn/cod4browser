@@ -1,8 +1,17 @@
+#if KISAK_TEST_DPVS_CORE
+#include <universal/q_shared.h>
+#include <universal/com_math.h>
+#include <universal/com_memory.h>
+#include <qcommon/qcommon.h>
+#include <gfx_d3d/r_dpvs_core.h>
+#include <gfx_d3d/r_dvars.h>
+#endif
 #include <gfx_d3d/gfx_world_types.h>
 #include <web/web_renderer_static_model_scene.h>
 #include <xanim/xmodel_types.h>
 #include <xanim/xsurface_types.h>
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cmath>
@@ -22,6 +31,55 @@ void __cdecl Vec3UnpackUnitVec(PackedUnitVec, float *out)
     out[1] = 0.0f;
     out[2] = 1.0f;
 }
+
+
+#if KISAK_TEST_DPVS_CORE
+// Host services only; visibility, portal geometry and packing execute production code.
+void MyAssertHandler(const char *file, int line, int, const char *format, ...)
+{
+    std::fprintf(stderr, "%s:%d: ", file, line);
+    va_list args; va_start(args, format); std::vfprintf(stderr, format, args); va_end(args);
+    std::abort();
+}
+void Com_Error(errorParm_t, const char *format, ...)
+{
+    va_list args; va_start(args, format); std::vfprintf(stderr, format, args); va_end(args);
+    std::abort();
+}
+bool Sys_IsMainThread() { return true; }
+void track_static_alloc_internal(void *, int, const char *, int) {}
+char *va(const char *format, ...)
+{
+    static char buffers[8][4096];
+    static unsigned index = 0;
+    char *out = buffers[index++ % 8];
+    va_list args; va_start(args, format); std::vsnprintf(out, 4096, format, args); va_end(args);
+    return out;
+}
+namespace {
+std::array<std::uint8_t, 0x20000> portalScratch{};
+bool portalScratchInUse = false;
+dvar_t disabled{}, bevels{}, minClipArea{}, minRecurse{};
+}
+LargeLocal::LargeLocal(int bytes) : startPos(0), size(bytes)
+{
+    assert(!portalScratchInUse && bytes <= portalScratch.size());
+    portalScratchInUse = true;
+}
+LargeLocal::~LargeLocal() { portalScratchInUse = false; }
+std::uint8_t *LargeLocal::GetBuf() { return portalScratch.data(); }
+const dvar_t *r_skipPvs = &disabled;
+const dvar_t *r_singleCell = &disabled;
+const dvar_t *r_portalWalkLimit = &disabled;
+const dvar_t *r_portalBevelsOnly = &disabled;
+const dvar_t *r_showPortals = &disabled;
+const dvar_t *r_showAabbTrees = &disabled;
+const dvar_t *r_drawDecals = &disabled;
+const dvar_t *r_portalBevels = &bevels;
+const dvar_t *r_portalMinClipArea = &minClipArea;
+const dvar_t *r_portalMinRecurseDepth = &minRecurse;
+
+#endif
 
 namespace
 {
@@ -244,6 +302,132 @@ void TestCanonicalInstanceIndicesSurviveRegroupingAndLods()
     assert(command.instances[1].canonicalInstanceIndex == 2u);
     assert(command.instances[2].canonicalInstanceIndex == 1u);
 }
+
+
+#if KISAK_TEST_DPVS_CORE
+void TestCanonicalCameraVisibilityAndIndependentPacking()
+{
+    Fixture fixture;
+    fixture.world.dpvs.smodelCount = 3;
+    fixture.instances[0].primaryLightIndex = 1;
+    fixture.instances[1].primaryLightIndex = 2;
+    fixture.instances[2].primaryLightIndex = 1;
+    std::array<XSurface, 2> surfaces{fixture.surface, fixture.surface};
+    Material *materials[2]{&fixture.material, &fixture.material};
+    fixture.model.numsurfs = 2;
+    fixture.model.numLods = 2;
+    fixture.model.surfs = surfaces.data();
+    fixture.model.materialHandles = materials;
+    fixture.model.lodInfo[1].surfIndex = 1;
+    fixture.model.lodInfo[1].numsurfs = 1;
+    WebRendererStaticModelSceneCommand command;
+    assert(WebRenderer_BuildStaticModelSceneCommand(fixture.world, command) ==
+        WebRendererStaticModelSceneResult::Success);
+    assert(command.instances[1].canonicalInstanceIndex == 2);
+    assert(command.instances[2].canonicalInstanceIndex == 1);
+
+    std::array<GfxCell, 2> cells{};
+    std::array<GfxAabbTree, 2> trees{};
+    std::uint16_t cellNode[2]{1, 0}; // canonical BSP leaf: camera cell 0
+    std::uint16_t cell0Models[2]{0, 2}, cell1Models[1]{1};
+    std::uint8_t cameraMask[3]{0x55, 0x55, 0x55}; // loaded bytes aren't completion
+    std::uint8_t shadowMask[3]{7, 8, 9}, surfaceMask[1]{11};
+    fixture.world.cells = cells.data();
+    fixture.world.dpvsPlanes.cellCount = 2;
+    fixture.world.dpvsPlanes.nodes = cellNode;
+    fixture.world.dpvs.smodelVisData[0] = cameraMask;
+    fixture.world.dpvs.smodelVisData[1] = shadowMask;
+    fixture.world.dpvs.surfaceVisData[0] = surfaceMask;
+    for (int cell = 0; cell < 2; ++cell)
+    {
+        cells[cell].aabbTree = &trees[cell];
+        cells[cell].aabbTreeCount = 1;
+        for (int axis = 0; axis < 3; ++axis)
+        {
+            trees[cell].mins[axis] = -100;
+            trees[cell].maxs[axis] = 100;
+        }
+    }
+    trees[0].smodelIndexes = cell0Models;
+    trees[0].smodelIndexCount = 2;
+    trees[1].smodelIndexes = cell1Models;
+    trees[1].smodelIndexCount = 1;
+    const float positions[3][3]{{10, 0, 0}, {30, 0, 0}, {10, 40, 0}};
+    for (int model = 0; model < 3; ++model)
+        for (int axis = 0; axis < 3; ++axis)
+        {
+            fixture.lightingInstances[model].mins[axis] = positions[model][axis] - 1;
+            fixture.lightingInstances[model].maxs[axis] = positions[model][axis] + 1;
+        }
+    // The second cell is reachable only through this canonical queued portal.
+    GfxPortal portal{};
+    float winding[4][3]{{20,-5,-5},{20,-5,5},{20,5,5},{20,5,-5}};
+    portal.plane.coeffs[0] = 1;
+    portal.plane.coeffs[3] = -20;
+    portal.hullAxis[0][1] = 1;
+    portal.hullAxis[1][2] = 1;
+    portal.vertices = winding;
+    portal.vertexCount = 4;
+    portal.cell = &cells[1];
+    cells[0].portals = &portal;
+    cells[0].portalCount = 1;
+    bevels.current.value = 0.7f;
+    minClipArea.current.value = 0.02f;
+    minRecurse.current.integer = 2;
+    DpvsGlobals dpvs{};
+    GfxViewParms view{};
+    auto setView = [&](bool backwards) {
+        std::memset(view.axis, 0, sizeof(view.axis));
+        view.axis[0][0] = backwards ? -1.0f : 1.0f;
+        view.axis[1][1] = backwards ? -1.0f : 1.0f;
+        view.axis[2][2] = 1.0f;
+        view.origin[3] = 1;
+        MatrixForViewer(view.viewMatrix.m, view.origin, view.axis);
+        InfinitePerspectiveMatrix(view.projectionMatrix.m, 1, 1, 1);
+        MatrixMultiply44(view.viewMatrix.m, view.projectionMatrix.m, view.viewProjectionMatrix.m);
+        MatrixInverse44(view.viewProjectionMatrix.m, view.inverseViewProjectionMatrix.m);
+    };
+    setView(false);
+    assert(R_ComputeStaticCameraVisibility(fixture.world, dpvs, view, 0, 0));
+    assert(cameraMask[0] == 1 && cameraMask[1] == 1 && cameraMask[2] == 0);
+    assert((dpvs.cellVisibleBits[0] & 3u) == 3u);
+    assert(!portal.writable.isQueued && !portal.writable.isAncestor && !portal.writable.hullPoints);
+
+    const auto shadowSource = command.instances;
+    std::array<WebRendererStaticModelInstanceDesc, 6> packed{};
+    std::copy(shadowSource.begin(), shadowSource.end(), packed.begin());
+    const std::int8_t selectedLods[3]{0, 1, 1}; // never changed during visibility changes
+    std::array<std::uint32_t, 4> offsets{}, counts{};
+    auto pack = [&](bool computed) {
+        assert(WebRenderer_PackStaticModelCameraInstances(command.instances.data(), 3,
+            selectedLods, cameraMask, 3, computed, packed.data() + 3, offsets, counts));
+        assert(std::memcmp(packed.data(), shadowSource.data(),
+            shadowSource.size() * sizeof(shadowSource[0])) == 0);
+    };
+    pack(true);
+    assert(counts[0] == 1 && counts[1] == 1);
+    assert(packed[3].canonicalInstanceIndex == 0 && packed[4].canonicalInstanceIndex == 1);
+    setView(true);
+    assert(R_ComputeStaticCameraVisibility(fixture.world, dpvs, view, 0, 0));
+    assert(cameraMask[0] == 0 && cameraMask[1] == 0 && cameraMask[2] == 0);
+    pack(true);
+    assert(counts[0] == 0 && counts[1] == 0); // completed empty stays empty
+    pack(false);
+    assert(counts[0] == 1 && counts[1] == 2); // only unavailable is conservative
+    setView(false);
+    assert(R_ComputeStaticCameraVisibility(fixture.world, dpvs, view, 0, 15));
+    assert(cameraMask[0] == 1 && cameraMask[1] == 0); // canonical far/cull plane
+    pack(true);
+    assert(counts[0] == 1 && counts[1] == 0);
+    assert(shadowMask[0] == 7 && shadowMask[1] == 8 && shadowMask[2] == 9);
+    assert(surfaceMask[0] == 11); // world-surface filtering deferred
+    fixture.world.cells = nullptr;
+    assert(!R_ComputeStaticCameraVisibility(fixture.world, dpvs, view, 0, 0));
+    assert(!WebRenderer_PackStaticModelCameraInstances(command.instances.data(), 3,
+        selectedLods, cameraMask, 2, true, packed.data() + 3, offsets, counts));
+}
+
+#endif
 
 void TestAmbientProbeShaderIdentitySurvivesPortableBoundary()
 {
@@ -519,6 +703,9 @@ void TestMalformedIndexAndPlacementFailAtomically()
 
 int main()
 {
+#if KISAK_TEST_DPVS_CORE
+    TestCanonicalCameraVisibilityAndIndependentPacking();
+#endif
     TestCanonicalInstancesShareOneMaterialSurfaceBatch();
     TestEveryAuthoredLodIsRetainedForRuntimeSelection();
     TestCanonicalPrimaryLightSplitsStaticInstanceGroups();

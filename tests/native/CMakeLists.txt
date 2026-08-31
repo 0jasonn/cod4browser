@@ -440,6 +440,29 @@ else()
     target_compile_options(web_renderer_lighting_tests PRIVATE -UNDEBUG)
 endif()
 target_compile_features(web_renderer_static_model_scene_tests PRIVATE cxx_std_20)
+# The canonical runtime headers require IW3's 32-bit ABI. Keep the existing
+# portable scene tests available on 64-bit hosts without weakening ABI assertions.
+if (CMAKE_SIZEOF_VOID_P EQUAL 4)
+    target_sources(web_renderer_static_model_scene_tests PRIVATE
+        "${KISAK_REPOSITORY_ROOT}/src/gfx_d3d/r_dpvs_core.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/universal/com_math.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/universal/com_math_anglevectors.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/universal/com_convexhull.cpp"
+    )
+    target_include_directories(web_renderer_static_model_scene_tests PRIVATE
+        "${KISAK_REPOSITORY_ROOT}/deps")
+    target_compile_definitions(web_renderer_static_model_scene_tests PRIVATE
+        KISAK_TEST_DPVS_CORE=1 KISAK_SP=1 KISAK_GATE3_COM_INIT_PREFIX=1 dNODEBUG=1)
+    if (MSVC)
+        target_compile_options(web_renderer_static_model_scene_tests PRIVATE /Gy /Gw /Zc:inline /UNDEBUG)
+        target_link_options(web_renderer_static_model_scene_tests PRIVATE /OPT:REF /OPT:ICF)
+    else()
+        target_compile_options(web_renderer_static_model_scene_tests PRIVATE
+            -ffunction-sections -fdata-sections -UNDEBUG)
+        target_link_options(web_renderer_static_model_scene_tests PRIVATE -Wl,--gc-sections)
+    endif()
+endif()
+
 target_include_directories(web_renderer_static_model_scene_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
 target_compile_features(web_renderer_fx_model_scene_tests PRIVATE cxx_std_20)
 target_include_directories(web_renderer_fx_model_scene_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")

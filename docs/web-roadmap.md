@@ -5,14 +5,11 @@ mission-progression gates are superseded. Mission playing, progression
 validation, route generation, and campaign expansion are outside this task.
 Manual gameplay assessment can guide renderer work without a progression gate.
 
-1. Static-model LOD evaluation now skips repacking unchanged groups; both
-   camera and shadow passes reject empty batches before material setup. Camera
-   draw ranges are separate, but native DPVS production remains blocked on
-   native view/reset ownership and the coupled worker dispatch. Finish that
-   native dependency seam before consuming `smodelVisData`; do not treat loaded
-   bytes as a current camera result. The
-   [renderer record](evidence/renderer-efficiency-2026-08-31.md) names the exact
-   blockers and completed prerequisite. World-surface filtering stays deferred.
+1. Canonical static-camera DPVS now computes and filters camera instances,
+   preserving shadow data and canonical identity across light groups/LODs.
+   The [visibility record](evidence/static-camera-visibility-2026-08-31.md)
+   separates synthetic execution from browser/retail verification. World-surface
+   filtering requires a separate batch-boundary change and stays deferred.
 2. Preserve canonical asset/game/renderer ownership, imported-asset validation,
    and durable filesystem shutdown. Small shared material lookups and Worker
    transport bookkeeping must not absorb technique selection or host-specific
@@ -22,11 +19,10 @@ Manual gameplay assessment can guide renderer work without a progression gate.
    No fresh capture or speedup is claimed. Keep any future measurement short
    and question-specific; mission automation remains outside this work.
 
-This renderer task allows at most one focused test command and one incremental
-production Release build per step; diagnostics are built only for changed
-diagnostic code. No routine full tiers, mission checks, or lifecycle matrices
-apply. The renderer record separates checks actually run from the historical
-cleanup and CargoShip evidence.
+This continuation uses one focused existing test invocation and one final
+incremental production Release build. Diagnostic interfaces are unchanged;
+no diagnostic build, broad tiers, retail capture or mission/lifecycle checks.
+Escape, renderer polish and further DObj optimization remain outside scope.
 
 Historical plans and completed milestones remain in
 [the earlier roadmap](history/web-roadmap-through-2026-08-28.md) and

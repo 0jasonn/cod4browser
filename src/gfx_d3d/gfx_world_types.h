@@ -1,4 +1,5 @@
 #pragma once
+#include "gfx_dpvs_types.h"
 
 #include <gfx_d3d/gfx_draw_surf_types.h>
 #include <gfx_d3d/gfx_color_types.h>
@@ -191,12 +192,7 @@ struct GfxPortalWritable
     GfxPortal *queuedParent;
 };
 
-struct DpvsPlane
-{
-    float coeffs[4];
-    std::uint8_t side[3];
-    std::uint8_t pad;
-};
+
 
 struct GfxCell;
 

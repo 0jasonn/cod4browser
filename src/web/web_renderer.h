@@ -61,6 +61,12 @@ struct WebRendererPrimaryLightDesc;
 
 struct WebRendererSceneViewDesc
 {
+    // Completed canonical camera slot 0 for this exact view. An empty mask is
+    // valid; unavailable computation uses conservative camera submission.
+    const std::uint8_t *staticModelVisibility = nullptr;
+    std::uint32_t staticModelVisibilityCount = 0u;
+    bool staticModelVisibilityComputed = false;
+
     std::uint32_t x;
     std::uint32_t y;
     std::uint32_t width;

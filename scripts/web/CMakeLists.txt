@@ -182,6 +182,8 @@ set(KISAK_WEB_PLATFORM_SOURCES
 )
 
 set(KISAK_WEB_RENDERER_SOURCES
+    "${SRC_DIR}/gfx_d3d/r_dpvs_core.cpp"
+    "${SRC_DIR}/universal/com_convexhull.cpp"
     "${SRC_DIR}/web/web_renderer.cpp"
     "${SRC_DIR}/web/web_renderer_context.cpp"
     "${SRC_DIR}/web/web_renderer_code_mesh.cpp"

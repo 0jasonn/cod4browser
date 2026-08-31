@@ -78,15 +78,22 @@ check lives in `WebRenderer_BuildWorldSceneCommand`; canonical vertex layout
 assertions remain in `gfx_world_types.h`. Proof-only projection/mirror assertions
 have no consumer. Surface APIs used by UI, overlays, and actual rendering remain.
 
-Static-model LODs are still evaluated each frame; unchanged groups retain
-packed instances/ranges, while initial population and culling transitions
-repack. Empty batches skip camera and shadow material setup. Camera draw
-ranges are now explicit and separate from shadow ranges, but use the same
-conservative LOD-packed buffer until canonical DPVS setup/traversal is admitted.
-No camera visibility array is consumed yet. The
-[renderer record](evidence/renderer-efficiency-2026-08-31.md) documents the
-native global/view/reset and dispatch blockers. Original canonical instance
-indices survive grouping and LODs; no JavaScript visibility state was added.
+Canonical camera visibility now runs through `gfx_d3d/r_dpvs_core.*`: extracted
+native view setup/reset, portal clipping/queueing and static AABB traversal use
+`GfxWorld`, `GfxViewParms` and `DpvsGlobals`. Native adapters retain worker jobs
+and debug drawing; the engine Worker dispatches static cells synchronously.
+There are no fake renderer globals or browser culling algorithms.
+
+Every submitted view recomputes camera slot 0. Completion is explicit, including
+all-zero results; loaded bytes and prior world/view results are never accepted
+as completion. The backend snapshots the mask and repacks camera groups when
+visibility or LOD changes, using `canonicalInstanceIndex` across light groups.
+Shadow LOD ranges remain intact in the first half of the existing instance
+buffer; camera ranges occupy the second half. This adds one instance-capacity
+region in CPU/GPU storage plus a byte mask, without another GPU buffer. World
+surface batches remain unfiltered. See [the visibility record](evidence/static-camera-visibility-2026-08-31.md)
+for bounded synthetic execution and production compile evidence, not retail
+visual or performance claims.
 
 Diagnostics add five DObj CPU measurements (total build and four disjoint
 substages) to the existing frame profiler. Production compiles them out. Pose,
@@ -208,8 +215,9 @@ the memory saving as free.
 
 ## Verification scope
 
-The 2026-08-31 renderer continuation uses the per-step bounded checks recorded
-in [the renderer evidence](evidence/renderer-efficiency-2026-08-31.md). The
+The 2026-08-31 static-camera continuation uses the bounded checks recorded
+in [the visibility evidence](evidence/static-camera-visibility-2026-08-31.md).
+The [renderer handoff](evidence/renderer-efficiency-2026-08-31.md) is prior evidence. The
 [cleanup record](evidence/cleanup-renderer-2026-08-31.md) is earlier evidence.
 No routine full tier or mission-flow gate applies to this work. Native/Wasm parser tests remain
 authoritative for cases that do not require a browser boundary; retail checks

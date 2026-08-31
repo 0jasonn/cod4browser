@@ -1,4 +1,5 @@
 #pragma once
+#include "gfx_dpvs_types.h"
 
 #if defined(KISAK_WEB)
 struct IDirect3DIndexBuffer9;
@@ -55,23 +56,9 @@ struct GfxMeshData // sizeof=0x20
 };
 
 
-struct GfxMatrix // sizeof=0x40
-{                                       // ...
-    float m[4][4];                      // ...
-};
 
-struct GfxViewParms // sizeof=0x140
-{                                       // ...
-    GfxMatrix viewMatrix;
-    GfxMatrix projectionMatrix;         // ...
-    GfxMatrix viewProjectionMatrix;     // ...
-    GfxMatrix inverseViewProjectionMatrix; // ...
-    float origin[4];                    // ...
-    float axis[3][3];                   // ...
-    float depthHackNearClip;
-    float zNear;
-    int pad;
-};
+
+
 
 struct GfxIndexBufferState // sizeof=0x10
 {                                       // ...
@@ -340,12 +327,7 @@ struct GfxPortalWritable // sizeof=0xC
     GfxPortal* queuedParent;
 };
 
-struct DpvsPlane // sizeof=0x14
-{                                       // ...
-    float coeffs[4];                    // ...
-    uint8_t side[3];            // ...
-    uint8_t pad;
-};
+
 
 struct GfxCell;
 

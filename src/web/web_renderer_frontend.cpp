@@ -16,6 +16,7 @@
 #include <gfx_d3d/r_dynentity_api.h>
 #include <gfx_d3d/r_drawsurf.h>
 #include <gfx_d3d/r_dvars.h>
+#include <gfx_d3d/r_dpvs_core.h>
 #include <gfx_d3d/r_effects_api.h>
 #include <gfx_d3d/r_font.h>
 #include <gfx_d3d/r_runtime_api.h>
@@ -465,6 +466,7 @@ namespace
 std::array<WebRendererFog, 5> g_fogs{};
 std::uint32_t g_fogIndex = 0;
 float g_cullDistance = 0.0f;
+DpvsGlobals g_cameraDpvs{};
 float g_sunLightOverride[3]{};
 float g_sunDirectionOverride[3]{};
 float g_sunDirectionTarget[3]{};
@@ -3525,6 +3527,26 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     view.worldVertexCount = g_worldSceneVertexCount;
     view.worldIndexCount = g_worldSceneIndexCount;
     view.geometrySubmitted = g_worldSceneSubmitted;
+    // Recompute synchronously on the engine Worker for every submitted view.
+    // Never cache completion across world/camera changes or infer it from bytes.
+    GfxViewParms cameraParms{};
+    std::memcpy(cameraParms.viewMatrix.m, viewMatrix, sizeof(viewMatrix));
+    std::memcpy(cameraParms.projectionMatrix.m, projectionMatrix, sizeof(projectionMatrix));
+    std::memcpy(cameraParms.viewProjectionMatrix.m, d3dViewProjectionMatrix,
+        sizeof(d3dViewProjectionMatrix));
+    MatrixInverse44(cameraParms.viewProjectionMatrix.m,
+        cameraParms.inverseViewProjectionMatrix.m);
+    std::copy_n(view.viewOrigin, 3u, cameraParms.origin);
+    cameraParms.origin[3] = 1.0f;
+    std::memcpy(cameraParms.axis, view.viewAxis, sizeof(cameraParms.axis));
+    view.staticModelVisibilityComputed = R_ComputeStaticCameraVisibility(
+        s_world, g_cameraDpvs, cameraParms, view.localClientNum,
+        static_cast<float>(R_GetFarPlaneDist()));
+    view.staticModelVisibility = s_world.dpvs.smodelVisData[0];
+    view.staticModelVisibilityCount = s_world.dpvs.smodelCount;
+    if (!view.staticModelVisibilityComputed && s_world.dpvs.smodelCount)
+        Com_Error(ERR_DROP, "R_RenderScene: canonical static camera DPVS unavailable");
+
     if (!WebRenderer_SubmitSceneView(view))
         Com_Error(ERR_DROP, "R_RenderScene: invalid cgame view command");
 
@@ -3642,7 +3664,11 @@ void R_DObjReplaceMaterial(
     }
 }
 
-double __cdecl R_GetFarPlaneDist() { return g_cullDistance; }
+double __cdecl R_GetFarPlaneDist()
+{
+    return r_zfar && r_zfar->current.value != 0.0f
+        ? r_zfar->current.value : g_cullDistance;
+}
 void R_SetCullDist(float distance) { g_cullDistance = distance; }
 
 void R_SetSunLightOverride(float *color)

@@ -216,6 +216,7 @@ set(GFX_D3D
     "${SRC_DIR}/gfx_d3d/r_dobj_skin.cpp"
     "${SRC_DIR}/gfx_d3d/r_dobj_skin.h"
     "${SRC_DIR}/gfx_d3d/r_dpvs.cpp"
+    "${SRC_DIR}/gfx_d3d/r_dpvs_core.cpp"
     "${SRC_DIR}/gfx_d3d/r_dpvs.h"
     "${SRC_DIR}/gfx_d3d/r_dpvs_dynmodel.cpp"
     "${SRC_DIR}/gfx_d3d/r_dpvs_entity.cpp"

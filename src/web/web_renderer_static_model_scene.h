@@ -3,6 +3,7 @@
 #include <web/web_renderer.h>
 #include <web/web_renderer_lighting.h>
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -44,3 +45,13 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
 
 const char *WebRenderer_StaticModelSceneResultString(
     WebRendererStaticModelSceneResult result) noexcept;
+
+// Backend packing only: canonical indices address DPVS, never group offsets.
+// Destination is separate from the LOD-packed shadow range and has sourceCount capacity.
+bool WebRenderer_PackStaticModelCameraInstances(
+    const WebRendererStaticModelInstanceDesc *source, std::uint32_t sourceCount,
+    const std::int8_t *selectedLods, const std::uint8_t *visibility,
+    std::uint32_t visibilityCount, bool visibilityComputed,
+    WebRendererStaticModelInstanceDesc *destination,
+    std::array<std::uint32_t, 4> &lodOffsets,
+    std::array<std::uint32_t, 4> &lodCounts) noexcept;

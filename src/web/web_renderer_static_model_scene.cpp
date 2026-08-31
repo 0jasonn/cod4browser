@@ -580,3 +580,35 @@ const char *WebRenderer_StaticModelSceneResultString(
     }
     return "unknown static XModel scene error";
 }
+
+bool WebRenderer_PackStaticModelCameraInstances(
+    const WebRendererStaticModelInstanceDesc *source, std::uint32_t sourceCount,
+    const std::int8_t *selectedLods, const std::uint8_t *visibility,
+    std::uint32_t visibilityCount, bool visibilityComputed,
+    WebRendererStaticModelInstanceDesc *destination,
+    std::array<std::uint32_t, 4> &lodOffsets,
+    std::array<std::uint32_t, 4> &lodCounts) noexcept
+{
+    if (sourceCount && (!source || !selectedLods || !destination)) return false;
+    if (visibilityComputed && visibilityCount && !visibility) return false;
+    for (std::uint32_t index = 0; index < sourceCount; ++index)
+    {
+        if (selectedLods[index] < -1 || selectedLods[index] >= 4 ||
+            (visibilityComputed && source[index].canonicalInstanceIndex >= visibilityCount))
+            return false;
+    }
+    lodCounts.fill(0u);
+    std::uint32_t writeOffset = 0u;
+    for (std::size_t lod = 0; lod < lodOffsets.size(); ++lod)
+    {
+        lodOffsets[lod] = writeOffset;
+        for (std::uint32_t index = 0; index < sourceCount; ++index)
+        {
+            if (selectedLods[index] != static_cast<std::int8_t>(lod)) continue;
+            if (visibilityComputed && !visibility[source[index].canonicalInstanceIndex]) continue;
+            destination[writeOffset++] = source[index];
+            ++lodCounts[lod];
+        }
+    }
+    return true;
+}

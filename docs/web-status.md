@@ -4,7 +4,22 @@ Updated 2026-08-31. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
-## Renderer continuation from `bf5ec1e2`
+## Canonical static-camera visibility
+
+Canonical DPVS setup/reset, portal traversal and static-cell AABB work now run
+synchronously from `R_RenderScene` on the engine Worker. Camera packing consumes
+completed slot-0 visibility by canonical instance index, including valid empty
+results, independently of shadow instances and LOD-change detection. No producer
+dependency blocker remains; world-surface filtering is still deferred.
+
+Production Release compiled. One Win32 Debug fixture executed the producer and
+camera packing with portal, empty-mask, identity and shadow-separation checks.
+Browser execution and retail visuals were not observed in this task; gameplay
+assessment remains with the user. No performance improvement is measured.
+See [the visibility evidence](evidence/static-camera-visibility-2026-08-31.md)
+for exact checks, build setup corrections and skipped work.
+
+## Prior renderer handoff (`a44119df`, from `bf5ec1e2`)
 
 Unchanged static-model LOD groups now avoid repacking and batch-range updates;
 empty shadow batches skip setup. Camera draw ranges are separate, but canonical

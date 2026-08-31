@@ -1,3 +1,4 @@
+#include <web/web_renderer_static_model_scene.h>
 #include <web/web_renderer.h>
 #include <web/web_frame_profile.h>
 #include <web/web_renderer_surface_storage.h>
@@ -212,9 +213,8 @@ struct WebRendererRetainedStaticModelBatch
     std::uint32_t sourceInstanceCount = 0u;
     std::uint32_t instanceOffset = 0u;
     std::uint32_t instanceCount = 0u;
-    // Camera ranges are owned separately from shadow-caster ranges. Until
-    // canonical DPVS view setup/traversal is integrated they share the same
-    // conservative LOD packing; uninitialized smodelVisData is never consumed.
+    // Camera data occupies the second half of the instance buffer. Shadow
+    // ranges retain every LOD-selected caster, independent of camera DPVS.
     std::uint32_t cameraInstanceOffset = 0u;
     std::uint32_t cameraInstanceCount = 0u;
     std::uint8_t lodIndex = 0u;
@@ -409,6 +409,9 @@ struct WebRendererState
         retainedStaticModelSourceInstances;
     std::vector<WebRendererStaticModelInstanceDesc> retainedStaticModelInstances;
     std::vector<std::int8_t> retainedStaticModelSelectedLods;
+    std::vector<std::uint8_t> staticModelVisibility;
+    bool staticModelVisibilityComputed = false;
+    bool staticModelVisibilityChanged = true;
     std::vector<WebRendererRetainedStaticModelBatch> retainedStaticModelBatches;
     std::vector<WebRendererRetainedWorldImage> retainedStaticModelImages;
     WebRendererRetainedModelLightingAtlas retainedStaticModelLighting;
@@ -2148,6 +2151,9 @@ void ResetGpuHandles()
     g_renderer.staticModelVertexBuffer = 0u;
     g_renderer.staticModelIndexBuffer = 0u;
     g_renderer.staticModelInstanceBuffer = 0u;
+    decltype(g_renderer.staticModelVisibility){}.swap(g_renderer.staticModelVisibility);
+    g_renderer.staticModelVisibilityComputed = false;
+    g_renderer.staticModelVisibilityChanged = true;
     g_renderer.dynamicModelVertexArray = 0u;
     g_renderer.dynamicModelVertexBuffer = 0u;
     g_renderer.dynamicModelIndexBuffer = 0u;
@@ -6640,6 +6646,9 @@ void WebRenderer_UnloadWorldResources()
     g_renderer.staticModelVertexBuffer = 0u;
     g_renderer.staticModelIndexBuffer = 0u;
     g_renderer.staticModelInstanceBuffer = 0u;
+    decltype(g_renderer.staticModelVisibility){}.swap(g_renderer.staticModelVisibility);
+    g_renderer.staticModelVisibilityComputed = false;
+    g_renderer.staticModelVisibilityChanged = true;
     g_renderer.dynamicModelVertexArray = 0u;
     g_renderer.dynamicModelVertexBuffer = 0u;
     g_renderer.dynamicModelIndexBuffer = 0u;
@@ -6808,6 +6817,8 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
     {
         sourceInstances = retainedInstances;
         selectedLods.assign(retainedInstances.size(), -2);
+        // First half remains shadow packing. Camera packing has independent capacity.
+        retainedInstances.resize(2u * sourceInstances.size());
     }
     catch (const std::bad_alloc &)
     {
@@ -6875,6 +6886,9 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
         std::move(sourceInstances);
     g_renderer.retainedStaticModelInstances = std::move(retainedInstances);
     g_renderer.retainedStaticModelSelectedLods = std::move(selectedLods);
+    g_renderer.staticModelVisibility.clear();
+    g_renderer.staticModelVisibilityComputed = false;
+    g_renderer.staticModelVisibilityChanged = true;
     g_renderer.retainedStaticModelBatches = std::move(retainedBatches);
     g_renderer.retainedStaticModelImages = std::move(retainedImages);
     g_renderer.retainedStaticModelLighting = std::move(retainedLighting);
@@ -7915,6 +7929,28 @@ bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
         std::copy_n(source.origin, 3u, destination.origin);
     }
 
+    if (view.staticModelVisibilityComputed && view.staticModelVisibilityCount &&
+        !view.staticModelVisibility) return false;
+    const std::size_t visibilityCount = view.staticModelVisibilityComputed
+        ? view.staticModelVisibilityCount : 0u;
+    const bool visibilityChanged =
+        g_renderer.staticModelVisibilityComputed != view.staticModelVisibilityComputed ||
+        g_renderer.staticModelVisibility.size() != visibilityCount ||
+        (visibilityCount && !std::equal(g_renderer.staticModelVisibility.begin(),
+            g_renderer.staticModelVisibility.end(), view.staticModelVisibility));
+    if (visibilityChanged)
+    {
+        try
+        {
+            g_renderer.staticModelVisibility.resize(visibilityCount);
+            if (visibilityCount)
+                std::copy_n(view.staticModelVisibility, visibilityCount,
+                    g_renderer.staticModelVisibility.begin());
+        }
+        catch (const std::bad_alloc &) { return false; }
+        g_renderer.staticModelVisibilityComputed = view.staticModelVisibilityComputed;
+        g_renderer.staticModelVisibilityChanged = true;
+    }
     const bool worldChanged = g_renderer.sceneViewWorldName != view.worldName;
     ++g_renderer.sceneViewSubmissionGeneration;
     g_renderer.sceneViewActive = true;
@@ -8689,7 +8725,7 @@ bool UpdateStaticModelLods()
         return true;
 
     if (g_renderer.retainedStaticModelInstances.size() !=
-            g_renderer.retainedStaticModelSourceInstances.size() ||
+            2u * g_renderer.retainedStaticModelSourceInstances.size() ||
         g_renderer.retainedStaticModelSelectedLods.size() !=
             g_renderer.retainedStaticModelSourceInstances.size())
         return false;
@@ -8705,7 +8741,7 @@ bool UpdateStaticModelLods()
             parms))
         return false;
 
-    bool changed = false;
+    bool changed = g_renderer.staticModelVisibilityChanged;
 #if KISAK_WEB_DIAGNOSTICS
     std::uint64_t changedLodCount = 0u;
 #endif
@@ -8765,50 +8801,70 @@ bool UpdateStaticModelLods()
 
         // The -2 initial selections force first population. Keep evaluating
         // every LOD (including -1 culling), but retain unchanged group ranges.
-        if (!groupChanged)
+        if (!groupChanged && !g_renderer.staticModelVisibilityChanged)
         {
             firstBatch = endBatch;
             continue;
         }
 
-        std::array<std::uint32_t, MAX_LODS> lodOffsets{};
-        std::uint32_t writeOffset = sourceOffset;
-        for (std::size_t lod = 0u; lod < MAX_LODS; ++lod)
+        if (groupChanged)
         {
-            lodOffsets[lod] = writeOffset;
+            std::array<std::uint32_t, MAX_LODS> lodOffsets{};
+            std::uint32_t writeOffset = sourceOffset;
+            for (std::size_t lod = 0u; lod < MAX_LODS; ++lod)
+            {
+                lodOffsets[lod] = writeOffset;
+                for (std::uint32_t index = 0u; index < sourceCount; ++index)
+                {
+                    const std::size_t sourceIndex = sourceOffset + index;
+                    if (g_renderer.retainedStaticModelSelectedLods[sourceIndex] ==
+                            static_cast<std::int8_t>(lod))
+                    {
+                        g_renderer.retainedStaticModelInstances[writeOffset++] =
+                            g_renderer.retainedStaticModelSourceInstances[
+                                sourceIndex];
+                    }
+                }
+            }
             for (std::uint32_t index = 0u; index < sourceCount; ++index)
             {
                 const std::size_t sourceIndex = sourceOffset + index;
-                if (g_renderer.retainedStaticModelSelectedLods[sourceIndex] ==
-                        static_cast<std::int8_t>(lod))
+                if (g_renderer.retainedStaticModelSelectedLods[sourceIndex] < 0)
                 {
                     g_renderer.retainedStaticModelInstances[writeOffset++] =
-                        g_renderer.retainedStaticModelSourceInstances[
-                            sourceIndex];
+                        g_renderer.retainedStaticModelSourceInstances[sourceIndex];
                 }
             }
-        }
-        for (std::uint32_t index = 0u; index < sourceCount; ++index)
-        {
-            const std::size_t sourceIndex = sourceOffset + index;
-            if (g_renderer.retainedStaticModelSelectedLods[sourceIndex] < 0)
+            if (writeOffset != sourceOffset + sourceCount)
+                return false;
+
+            for (std::size_t batchIndex = firstBatch;
+                 batchIndex < endBatch; ++batchIndex)
             {
-                g_renderer.retainedStaticModelInstances[writeOffset++] =
-                    g_renderer.retainedStaticModelSourceInstances[sourceIndex];
+                WebRendererRetainedStaticModelBatch &batch =
+                    g_renderer.retainedStaticModelBatches[batchIndex];
+                batch.instanceOffset = lodOffsets[batch.lodIndex];
+                batch.instanceCount = lodCounts[batch.lodIndex];
             }
         }
-        if (writeOffset != sourceOffset + sourceCount)
-            return false;
 
-        for (std::size_t batchIndex = firstBatch;
-             batchIndex < endBatch; ++batchIndex)
+        std::array<std::uint32_t, MAX_LODS> cameraOffsets{}, cameraCounts{};
+        const std::uint32_t cameraBase = static_cast<std::uint32_t>(
+            g_renderer.retainedStaticModelSourceInstances.size()) + sourceOffset;
+        if (!WebRenderer_PackStaticModelCameraInstances(
+                g_renderer.retainedStaticModelSourceInstances.data() + sourceOffset,
+                sourceCount, g_renderer.retainedStaticModelSelectedLods.data() + sourceOffset,
+                g_renderer.staticModelVisibility.data(),
+                static_cast<std::uint32_t>(g_renderer.staticModelVisibility.size()),
+                g_renderer.staticModelVisibilityComputed,
+                g_renderer.retainedStaticModelInstances.data() + cameraBase,
+                cameraOffsets, cameraCounts))
+            return false;
+        for (std::size_t batchIndex = firstBatch; batchIndex < endBatch; ++batchIndex)
         {
-            WebRendererRetainedStaticModelBatch &batch =
-                g_renderer.retainedStaticModelBatches[batchIndex];
-            batch.instanceOffset = lodOffsets[batch.lodIndex];
-            batch.instanceCount = lodCounts[batch.lodIndex];
-            batch.cameraInstanceOffset = lodOffsets[batch.lodIndex];
-            batch.cameraInstanceCount = lodCounts[batch.lodIndex];
+            auto &batch = g_renderer.retainedStaticModelBatches[batchIndex];
+            batch.cameraInstanceOffset = cameraBase + cameraOffsets[batch.lodIndex];
+            batch.cameraInstanceCount = cameraCounts[batch.lodIndex];
         }
         firstBatch = endBatch;
     }
@@ -8829,7 +8885,9 @@ bool UpdateStaticModelLods()
             sizeof(WebRendererStaticModelInstanceDesc)),
         g_renderer.retainedStaticModelInstances.data());
     glBindBuffer(GL_ARRAY_BUFFER, 0u);
-    return glGetError() == GL_NO_ERROR;
+    if (glGetError() != GL_NO_ERROR) return false;
+    g_renderer.staticModelVisibilityChanged = false;
+    return true;
 }
 
 float UpdateSunEffectOverTime(float current, float goal,
