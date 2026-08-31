@@ -134,9 +134,19 @@ view submission. They extend existing telemetry only; canonical ownership and
 the frontend/backend seam are unchanged. Upload timing nests within submission,
 and all timers compile out of production. The
 [focused scene profile](evidence/scene-stages-2ce03241.md) places 13.801 ms in
-assembly and 4.638 ms in dynamic submission; assembly's individual operations
-still need attribution before another optimization. No cache or runtime model
-was added.
+assembly and 4.638 ms in dynamic submission, prompting the finer attribution
+below. No cache or runtime model was added.
+
+Assembly diagnostics now distinguish physics/mark preparation, brush/model
+work and command appends, with a nested particle-cloud append interval. The
+[cloud-append comparison](evidence/cloud-append-ae37e80c.md) identified repeated
+exact vector reservations as the dominant assembly cost. Removing those three
+reservations lets standard vectors grow normally while preserving validation,
+atomic logical rollback, draw order and canonical ownership. This remains a
+platform-owned command-storage detail; no shared engine behavior or persistent
+cache was added. Observed cloud append fell from 9.676 to 0.865 ms. Spare vector
+capacity and the higher observed dynamic-submission cost need consideration in
+the next optimization; no general FPS or memory reduction is claimed.
 
 ## Temporary compatibility seams
 

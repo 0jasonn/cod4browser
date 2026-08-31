@@ -1,0 +1,625 @@
+{
+  "schemaVersion": 1,
+  "profiles": {
+    "before": {
+      "recordedAtUtc": "2026-08-31T16:35:29.433Z",
+      "source": {
+        "commitSha": "f7d437b82bb4e29bfff93c734f5e62448ef4ffdc",
+        "dirty": false
+      },
+      "environment": {
+        "browser": "Chrome",
+        "version": "152.0.7977.64",
+        "headless": true,
+        "processor": "AMD Ryzen 7 7800X3D 8-Core Processor           ",
+        "totalSystemMemoryBytes": 33944879104,
+        "viewport": {
+          "width": 1440,
+          "height": 1000
+        },
+        "build": "Release diagnostics"
+      },
+      "methodology": {
+        "map": "cargoship",
+        "warmupWorldFrames": 30,
+        "completedGameplayFrames": 120,
+        "input": "No gameplay input; authored scene continues running",
+        "cleanBenchmark": false,
+        "compatibilityValidation": false,
+        "foreground": {
+          "pageVisibilityState": "visible",
+          "pageFocused": true,
+          "finalPageVisibilityState": "visible",
+          "finalPageFocused": true,
+          "backgroundTransitions": 0,
+          "foregroundStateTransitions": [],
+          "performanceWindowValid": true,
+          "performanceInvalidReason": null
+        }
+      },
+      "profile": {
+        "sampleCount": 120,
+        "profileComplete": true,
+        "captureDurationMs": 7223.319999992847,
+        "cpu": {
+          "sceneBuildMs": {
+            "sampleCount": 120,
+            "average": 32.37004166543484,
+            "p50": 32.12000000476837,
+            "p95": 35.99000000953674,
+            "p99": 41,
+            "maximum": 41.99500000476837
+          },
+          "sceneSetupMs": {
+            "sampleCount": 120,
+            "average": 0.006500000258286794,
+            "p50": 0.004999995231628418,
+            "p95": 0.010000050067901611,
+            "p99": 0.01500004529953003,
+            "maximum": 0.01500004529953003
+          },
+          "sceneAssemblyMs": {
+            "sampleCount": 120,
+            "average": 14.96395833492279,
+            "p50": 14.959999978542328,
+            "p95": 16.4200000166893,
+            "p99": 17.569999992847443,
+            "maximum": 18.524999976158142
+          },
+          "sceneEffectsPrepareMs": {
+            "sampleCount": 120,
+            "average": 0.20387500176827114,
+            "p50": 0.1899999976158142,
+            "p95": 0.27500003576278687,
+            "p99": 0.2849999666213989,
+            "maximum": 0.29500001668930054
+          },
+          "sceneModelBuildMs": {
+            "sampleCount": 120,
+            "average": 3.8090833321213724,
+            "p50": 3.7300000190734863,
+            "p95": 4.299999952316284,
+            "p99": 4.824999988079071,
+            "maximum": 5.179999947547913
+          },
+          "sceneCommandAppendMs": {
+            "sampleCount": 120,
+            "average": 10.951000001033147,
+            "p50": 11.020000040531158,
+            "p95": 12.009999990463257,
+            "p99": 12.514999985694885,
+            "maximum": 13.40499997138977
+          },
+          "sceneCloudAppendMs": {
+            "sampleCount": 120,
+            "average": 9.67608333081007,
+            "p50": 9.74999988079071,
+            "p95": 10.565000236034393,
+            "p99": 11.130000054836273,
+            "maximum": 11.194999933242798
+          },
+          "sceneImageResolveMs": {
+            "sampleCount": 120,
+            "average": 0.029124999543031056,
+            "p50": 0.029999971389770508,
+            "p95": 0.0350000262260437,
+            "p99": 0.04500001668930054,
+            "maximum": 0.04500001668930054
+          },
+          "sceneDynamicSubmitMs": {
+            "sampleCount": 120,
+            "average": 5.562083331743876,
+            "p50": 5.480000019073486,
+            "p95": 6.939999997615814,
+            "p99": 11.314999997615814,
+            "maximum": 11.444999992847443
+          },
+          "sceneCameraVisibilityMs": {
+            "sampleCount": 120,
+            "average": 0.16295833339293797,
+            "p50": 0.15500003099441528,
+            "p95": 0.20499998331069946,
+            "p99": 0.7099999785423279,
+            "maximum": 1.0400000214576721
+          },
+          "sceneViewSubmitMs": {
+            "sampleCount": 120,
+            "average": 0.07208333363135656,
+            "p50": 0.06999999284744263,
+            "p95": 0.09499996900558472,
+            "p99": 0.10999995470046997,
+            "maximum": 0.16499996185302734
+          },
+          "dobjBuildMs": {
+            "sampleCount": 120,
+            "average": 11.572833332419396,
+            "p50": 11.439999997615814,
+            "p95": 12.985000014305115,
+            "p99": 15.380000054836273,
+            "maximum": 15.694999992847443
+          },
+          "dobjPoseMs": {
+            "sampleCount": 120,
+            "average": 0.30924999018510185,
+            "p50": 0.3049999475479126,
+            "p95": 0.38000011444091797,
+            "p99": 0.44000011682510376,
+            "maximum": 0.4999999403953552
+          },
+          "dobjLightingMs": {
+            "sampleCount": 120,
+            "average": 1.3570833295583724,
+            "p50": 1.3350000977516174,
+            "p95": 1.6199997067451477,
+            "p99": 1.78000009059906,
+            "maximum": 1.8900002837181091
+          },
+          "dobjSkinningMs": {
+            "sampleCount": 120,
+            "average": 2.8495416526993114,
+            "p50": 2.7800002694129944,
+            "p95": 3.169999420642853,
+            "p99": 3.9749998450279236,
+            "maximum": 4.029999494552612
+          },
+          "dobjGeometryMs": {
+            "sampleCount": 120,
+            "average": 6.518000010152658,
+            "p50": 6.4450002908706665,
+            "p95": 7.370000064373016,
+            "p99": 8.66500049829483,
+            "maximum": 8.705000102519989
+          },
+          "rendererBackendMs": {
+            "sampleCount": 120,
+            "average": 21.120791664222875,
+            "p50": 21.055000007152557,
+            "p95": 23.764999985694885,
+            "p99": 24.459999978542328,
+            "maximum": 24.719999969005585
+          },
+          "totalMs": {
+            "sampleCount": 120,
+            "average": 58.08279166668653,
+            "p50": 58.205000042915344,
+            "p95": 63.19999998807907,
+            "p99": 69.8299999833107,
+            "maximum": 70.16000002622604
+          }
+        },
+        "sceneUnassignedMs": {
+          "sampleCount": 120,
+          "average": 0.0004999995231628418,
+          "p50": 0,
+          "p95": 0.004999995231628418,
+          "p99": 0.004999995231628418,
+          "maximum": 0.004999995231628418
+        },
+        "counters": {
+          "worldSurfacesSubmitted": {
+            "sampleCount": 120,
+            "average": 13125,
+            "p50": 13125,
+            "p95": 13125,
+            "p99": 13125,
+            "maximum": 13125
+          },
+          "worldSurfacesDrawn": {
+            "sampleCount": 120,
+            "average": 4909.308333333333,
+            "p50": 5453,
+            "p95": 5496,
+            "p99": 5496,
+            "maximum": 5496
+          },
+          "staticModelInstancesRetained": {
+            "sampleCount": 120,
+            "average": 5956,
+            "p50": 5956,
+            "p95": 5956,
+            "p99": 5956,
+            "maximum": 5956
+          },
+          "staticModelInstanceDraws": {
+            "sampleCount": 120,
+            "average": 1662.7833333333333,
+            "p50": 1857,
+            "p95": 1873,
+            "p99": 1873,
+            "maximum": 1873
+          },
+          "dynamicBatchesDrawn": {
+            "sampleCount": 120,
+            "average": 1390.3666666666666,
+            "p50": 1392,
+            "p95": 1394,
+            "p99": 1394,
+            "maximum": 1394
+          },
+          "fxModelBatchesDrawn": {
+            "sampleCount": 120,
+            "average": 0,
+            "p50": 0,
+            "p95": 0,
+            "p99": 0,
+            "maximum": 0
+          },
+          "particleBatchesDrawn": {
+            "sampleCount": 120,
+            "average": 22.616666666666667,
+            "p50": 23,
+            "p95": 23,
+            "p99": 23,
+            "maximum": 23
+          },
+          "markBatchesDrawn": {
+            "sampleCount": 120,
+            "average": 5.625,
+            "p50": 5,
+            "p95": 8,
+            "p99": 8,
+            "maximum": 9
+          },
+          "shadowDrawCalls": {
+            "sampleCount": 120,
+            "average": 9519.866666666667,
+            "p50": 9515,
+            "p95": 9544,
+            "p99": 9544,
+            "maximum": 9544
+          },
+          "submittedIndices": {
+            "sampleCount": 120,
+            "average": 5431767.05,
+            "p50": 5501382,
+            "p95": 5515410,
+            "p99": 5515584,
+            "maximum": 5515590
+          },
+          "bufferUploadBytes": {
+            "sampleCount": 120,
+            "average": 17967081.2,
+            "p50": 18413712,
+            "p95": 18462312,
+            "p99": 18470256,
+            "maximum": 18471816
+          }
+        },
+        "bufferUploadMs": {
+          "sampleCount": 120,
+          "average": 1.3752916658918062,
+          "p50": 1.3949999809265137,
+          "p95": 1.5200000405311584,
+          "p99": 2.449999988079071,
+          "maximum": 2.550000011920929
+        },
+        "textureUploadMs": {
+          "sampleCount": 120,
+          "average": 0.015708335240681968,
+          "p50": 0.010000050067901611,
+          "p95": 0.02499997615814209,
+          "p99": 0.09499996900558472,
+          "maximum": 0.1549999713897705
+        }
+      },
+      "validation": {
+        "completeSamples": 120,
+        "sceneIntervalsNonnegative": true,
+        "assemblyPartitionMatches": true,
+        "cloudIntervalWithinParent": true,
+        "intervalToleranceMs": 0.001,
+        "pageErrorCount": 0
+      }
+    },
+    "after": {
+      "recordedAtUtc": "2026-08-31T16:38:22.256Z",
+      "source": {
+        "commitSha": "ae37e80c2eefe2269eb390597d3047113f568667",
+        "dirty": false
+      },
+      "environment": {
+        "browser": "Chrome",
+        "version": "152.0.7977.64",
+        "headless": true,
+        "processor": "AMD Ryzen 7 7800X3D 8-Core Processor           ",
+        "totalSystemMemoryBytes": 33944879104,
+        "viewport": {
+          "width": 1440,
+          "height": 1000
+        },
+        "build": "Release diagnostics"
+      },
+      "methodology": {
+        "map": "cargoship",
+        "warmupWorldFrames": 30,
+        "completedGameplayFrames": 120,
+        "input": "No gameplay input; authored scene continues running",
+        "cleanBenchmark": false,
+        "compatibilityValidation": false,
+        "foreground": {
+          "pageVisibilityState": "visible",
+          "pageFocused": true,
+          "finalPageVisibilityState": "visible",
+          "finalPageFocused": true,
+          "backgroundTransitions": 0,
+          "foregroundStateTransitions": [],
+          "performanceWindowValid": true,
+          "performanceInvalidReason": null
+        }
+      },
+      "profile": {
+        "sampleCount": 120,
+        "profileComplete": true,
+        "captureDurationMs": 5661.655000030994,
+        "cpu": {
+          "sceneBuildMs": {
+            "sampleCount": 120,
+            "average": 26.266749997933704,
+            "p50": 22.76500004529953,
+            "p95": 33.43000000715256,
+            "p99": 35.0799999833107,
+            "maximum": 35.825000047683716
+          },
+          "sceneSetupMs": {
+            "sampleCount": 120,
+            "average": 0.005375002821286519,
+            "p50": 0.004999995231628418,
+            "p95": 0.009999990463256836,
+            "p99": 0.010000050067901611,
+            "maximum": 0.010000050067901611
+          },
+          "sceneAssemblyMs": {
+            "sampleCount": 120,
+            "average": 5.863583333790302,
+            "p50": 5.814999997615814,
+            "p95": 6.39000004529953,
+            "p99": 6.800000011920929,
+            "maximum": 7.120000004768372
+          },
+          "sceneEffectsPrepareMs": {
+            "sampleCount": 120,
+            "average": 0.20512500355641047,
+            "p50": 0.2149999737739563,
+            "p95": 0.24500000476837158,
+            "p99": 0.26999998092651367,
+            "maximum": 0.2900000214576721
+          },
+          "sceneModelBuildMs": {
+            "sampleCount": 120,
+            "average": 3.5796666671832402,
+            "p50": 3.550000011920929,
+            "p95": 3.8350000381469727,
+            "p99": 4.074999988079071,
+            "maximum": 4.14000004529953
+          },
+          "sceneCommandAppendMs": {
+            "sampleCount": 120,
+            "average": 2.0787916630506516,
+            "p50": 2.0300000309944153,
+            "p95": 2.5799999833106995,
+            "p99": 2.7299999594688416,
+            "maximum": 2.9300000071525574
+          },
+          "sceneCloudAppendMs": {
+            "sampleCount": 120,
+            "average": 0.8645416274666786,
+            "p50": 0.8599995374679565,
+            "p95": 0.9449996948242188,
+            "p99": 0.9999998807907104,
+            "maximum": 1.055000126361847
+          },
+          "sceneImageResolveMs": {
+            "sampleCount": 120,
+            "average": 0.01712500552336375,
+            "p50": 0.01500004529953003,
+            "p95": 0.025000035762786865,
+            "p99": 0.025000035762786865,
+            "maximum": 0.029999971389770508
+          },
+          "sceneDynamicSubmitMs": {
+            "sampleCount": 120,
+            "average": 8.722583331167698,
+            "p50": 4.754999995231628,
+            "p95": 15.110000014305115,
+            "p99": 16.814999997615814,
+            "maximum": 18.19000005722046
+          },
+          "sceneCameraVisibilityMs": {
+            "sampleCount": 120,
+            "average": 0.13891666382551193,
+            "p50": 0.13999998569488525,
+            "p95": 0.17500001192092896,
+            "p99": 0.6150000095367432,
+            "maximum": 0.8149999976158142
+          },
+          "sceneViewSubmitMs": {
+            "sampleCount": 120,
+            "average": 0.060458330810070036,
+            "p50": 0.06000000238418579,
+            "p95": 0.07499998807907104,
+            "p99": 0.08499997854232788,
+            "maximum": 0.08500003814697266
+          },
+          "dobjBuildMs": {
+            "sampleCount": 120,
+            "average": 11.45812499622504,
+            "p50": 11.519999980926514,
+            "p95": 12.275000035762787,
+            "p99": 12.979999959468842,
+            "maximum": 14.909999966621399
+          },
+          "dobjPoseMs": {
+            "sampleCount": 120,
+            "average": 0.2732916593551636,
+            "p50": 0.26500022411346436,
+            "p95": 0.339999794960022,
+            "p99": 0.3550001382827759,
+            "maximum": 0.3550001382827759
+          },
+          "dobjLightingMs": {
+            "sampleCount": 120,
+            "average": 1.2141666745146116,
+            "p50": 1.1950002908706665,
+            "p95": 1.3849998712539673,
+            "p99": 1.4599995613098145,
+            "maximum": 1.460000455379486
+          },
+          "dobjSkinningMs": {
+            "sampleCount": 120,
+            "average": 2.6277083655198417,
+            "p50": 2.610000252723694,
+            "p95": 2.814999997615814,
+            "p99": 3.069999575614929,
+            "maximum": 3.690000057220459
+          },
+          "dobjGeometryMs": {
+            "sampleCount": 120,
+            "average": 6.8536249727010725,
+            "p50": 6.920000076293945,
+            "p95": 7.649999499320984,
+            "p99": 8.085000336170197,
+            "maximum": 8.895000100135803
+          },
+          "rendererBackendMs": {
+            "sampleCount": 120,
+            "average": 15.733291666209698,
+            "p50": 16.100000023841858,
+            "p95": 17.365000009536743,
+            "p99": 18.319999992847443,
+            "maximum": 21.80000001192093
+          },
+          "totalMs": {
+            "sampleCount": 120,
+            "average": 45.446124999721846,
+            "p50": 43.4899999499321,
+            "p95": 52.94499999284744,
+            "p99": 57.330000042915344,
+            "maximum": 57.625
+          }
+        },
+        "sceneUnassignedMs": {
+          "sampleCount": 120,
+          "average": 0.0005833337704340617,
+          "p50": 0,
+          "p95": 0.004999995231628418,
+          "p99": 0.005000054836273193,
+          "maximum": 0.009999990463256836
+        },
+        "counters": {
+          "worldSurfacesSubmitted": {
+            "sampleCount": 120,
+            "average": 13125,
+            "p50": 13125,
+            "p95": 13125,
+            "p99": 13125,
+            "maximum": 13125
+          },
+          "worldSurfacesDrawn": {
+            "sampleCount": 120,
+            "average": 4733.125,
+            "p50": 5472,
+            "p95": 5496,
+            "p99": 5497,
+            "maximum": 5497
+          },
+          "staticModelInstancesRetained": {
+            "sampleCount": 120,
+            "average": 5956,
+            "p50": 5956,
+            "p95": 5956,
+            "p99": 5956,
+            "maximum": 5956
+          },
+          "staticModelInstanceDraws": {
+            "sampleCount": 120,
+            "average": 1616.1,
+            "p50": 1870,
+            "p95": 1873,
+            "p99": 1873,
+            "maximum": 1873
+          },
+          "dynamicBatchesDrawn": {
+            "sampleCount": 120,
+            "average": 1390.2333333333333,
+            "p50": 1392,
+            "p95": 1392,
+            "p99": 1392,
+            "maximum": 1392
+          },
+          "fxModelBatchesDrawn": {
+            "sampleCount": 120,
+            "average": 0,
+            "p50": 0,
+            "p95": 0,
+            "p99": 0,
+            "maximum": 0
+          },
+          "particleBatchesDrawn": {
+            "sampleCount": 120,
+            "average": 23.258333333333333,
+            "p50": 23,
+            "p95": 24,
+            "p99": 24,
+            "maximum": 24
+          },
+          "markBatchesDrawn": {
+            "sampleCount": 120,
+            "average": 5.266666666666667,
+            "p50": 5,
+            "p95": 8,
+            "p99": 9,
+            "maximum": 9
+          },
+          "shadowDrawCalls": {
+            "sampleCount": 120,
+            "average": 9515,
+            "p50": 9515,
+            "p95": 9515,
+            "p99": 9515,
+            "maximum": 9515
+          },
+          "submittedIndices": {
+            "sampleCount": 120,
+            "average": 5409142.95,
+            "p50": 5509731,
+            "p95": 5516346,
+            "p99": 5516637,
+            "maximum": 5516673
+          },
+          "bufferUploadBytes": {
+            "sampleCount": 120,
+            "average": 18016024,
+            "p50": 17834016,
+            "p95": 18708528,
+            "p99": 18710712,
+            "maximum": 18711960
+          }
+        },
+        "bufferUploadMs": {
+          "sampleCount": 120,
+          "average": 1.4710000018278757,
+          "p50": 1.3300000429153442,
+          "p95": 2.6200000047683716,
+          "p99": 2.849999964237213,
+          "maximum": 2.939999997615814
+        },
+        "textureUploadMs": {
+          "sampleCount": 120,
+          "average": 0.014208334684371948,
+          "p50": 0.009999990463256836,
+          "p95": 0.020000040531158447,
+          "p99": 0.08000004291534424,
+          "maximum": 0.2049999237060547
+        }
+      },
+      "validation": {
+        "completeSamples": 120,
+        "sceneIntervalsNonnegative": true,
+        "assemblyPartitionMatches": true,
+        "cloudIntervalWithinParent": true,
+        "intervalToleranceMs": 0.001,
+        "pageErrorCount": 0
+      }
+    }
+  }
+}

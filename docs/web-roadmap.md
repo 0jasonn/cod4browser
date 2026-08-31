@@ -15,17 +15,17 @@ Manual gameplay assessment can guide renderer work without a progression gate.
    and durable filesystem shutdown. Small shared material lookups and Worker
    transport bookkeeping must not absorb technique selection or host-specific
    filesystem recovery policy.
-3. The [DObj hash deletion](evidence/dobj-hash-d8661476.md) reduced observed
-   geometry-build mean time from 7.192 to 6.347 ms in matching short headless
-   profiles. The subsequent [scene profile](evidence/scene-stages-2ce03241.md)
-   places 73.94% of non-DObj scene time in command assembly (13.801 ms), followed
-   by dynamic submission (4.638 ms). Recommended next task: separate assembly's
-   physics/mark work, brush/model construction and appends, then optimize the
-   dominant operation. Preserve canonical culling/shadows; no pose or geometry
-   cache is justified.
+3. The [cloud-append optimization](evidence/cloud-append-ae37e80c.md) removes
+   repeated exact vector reservations, with observed cloud-append mean time
+   falling from 9.676 to 0.865 ms and assembly from 14.964 to 5.864 ms.
+   Recommended next task: investigate dynamic submission's increase from
+   5.562 to 8.723 ms, separating command validation/copy/allocation from GPU
+   resource creation/upload and checking the spare-capacity memory tradeoff.
+   Preserve canonical culling/shadows; no pose or geometry cache is justified.
 
-The latest measurement used one focused test file, one diagnostic build, one
-120-frame profile and one final production Release build, with no retries.
+The latest optimization used one focused native fixture, two diagnostic builds
+with matched 120-frame profiles and one final production Release build, with no
+retries.
 No broad tiers, mission/lifecycle checks, screenshots or compatibility promotion
 were required. Escape and renderer polish remain outside scope.
 

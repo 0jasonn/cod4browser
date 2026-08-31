@@ -4,14 +4,29 @@ Updated 2026-08-31. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
-## Scene-construction measurement
+## Particle-cloud append optimization
+
+`ae37e80c` removes three exact per-cloud vector reservations after a focused
+profile identified repeated appends as 64.66% of assembly time. Matched short
+CargoShip profiles observed cloud append at 9.676 -> 0.865 ms and total assembly
+at 14.964 -> 5.864 ms. Bounds checks, rollback, canonical behavior, camera
+culling and independent shadows are preserved. The focused native fixture,
+both diagnostic builds/profiles and final production Release passed.
+
+Dynamic submission increased from 5.562 to 8.723 ms and is the next investigation;
+standard vector growth can also retain spare capacity within a command.
+See [the comparison](evidence/cloud-append-ae37e80c.md) for the tradeoff,
+allocation-failure checks and measurement limits. No general FPS or visual
+improvement is claimed.
+
+## Prior scene-construction measurement
 
 `2ce03241` adds six diagnostic scene intervals without changing rendering.
 A 120-frame headless CargoShip profile measured command assembly at 13.801 ms
 (73.94% of scene time outside DObj building), dynamic submission at 4.638 ms,
 camera visibility at 0.141 ms and dynamic image resolution at 0.019 ms.
-The next task is to isolate assembly's physics/mark, brush/model and append
-costs before selecting an optimization. One focused test file, one diagnostic
+This prompted isolation of assembly's physics/mark, brush/model and append
+costs. One focused test file, one diagnostic
 build/profile and one final production Release build passed without retries.
 See [the scene profile](evidence/scene-stages-2ce03241.md) for boundaries and
 limitations. This is diagnostic CPU evidence, with no FPS or visual promotion.
