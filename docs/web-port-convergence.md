@@ -90,10 +90,33 @@ as completion. The backend snapshots the mask and repacks camera groups when
 visibility or LOD changes, using `canonicalInstanceIndex` across light groups.
 Shadow LOD ranges remain intact in the first half of the existing instance
 buffer; camera ranges occupy the second half. This adds one instance-capacity
-region in CPU/GPU storage plus a byte mask, without another GPU buffer. World
-surface batches remain unfiltered. See [the visibility record](evidence/static-camera-visibility-2026-08-31.md)
+region in CPU/GPU storage plus a byte mask, without another GPU buffer. See
+[the static-model visibility record](evidence/static-camera-visibility-2026-08-31.md)
 for bounded synthetic execution and production compile evidence, not retail
 visual or performance claims.
+
+World camera visibility now extends that same canonical call through AABB
+surface tests and cell cull groups, including native decal selection. It resets
+the complete DB-allocated `staticSurfaceCount` camera mask, and checks sorted
+surface ranges/indices and cull-group references before use. Shadow view bytes
+and authored caster membership are untouched.
+
+World draw commands retain each emitted canonical surface ID and its original
+index-buffer span inside a merged material batch. The backend validates and
+retains those spans, then builds contiguous visible camera runs on every view
+submission. Empty completed masks produce no world camera draws; unavailable
+or incorrectly sized results fail submission. Sun batches and authored spot
+caster ranges keep the original index buffer, independent of camera visibility.
+Static-model packing and LOD policy are unchanged.
+
+This is permanent draw-command boundary metadata, not another world model.
+It costs 16 bytes per emitted surface plus up to 16 bytes per surface of retained
+camera-run capacity, with an O(emitted surfaces) scan per submitted view. No
+extra geometry buffer, index upload, mask cache or JS visibility state is added.
+World replacement clears runs; unload releases both vectors; context restoration
+reuses retained geometry/spans. Retire the spans only if canonical frontend draw
+commands directly provide the backend ranges. See
+[world visibility evidence](evidence/world-camera-visibility-2026-08-31.md).
 
 Diagnostics add five DObj CPU measurements (total build and four disjoint
 substages) to the existing frame profiler. Production compiles them out. Pose,

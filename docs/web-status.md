@@ -4,7 +4,24 @@ Updated 2026-08-31. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
-## Canonical static-camera visibility
+## Canonical world-camera visibility
+
+The shared DPVS call now computes world surfaces as well as static models,
+including native AABB, portal, cull-group and decal policy. Per-surface index
+spans survive merged material batches, and the WebGL camera pass draws only
+contiguous visible runs. Sun batches and authored spotlight caster ranges stay
+independent; existing static-model culling/LOD packing is preserved.
+
+Production Release and the focused Win32 Debug fixture each passed once, with
+no retries. The fixture exercises the real producer,
+world command construction and camera-run selection alongside existing static
+packing checks, including empty views, portal/far-plane rejection, sky gaps,
+batch boundaries, decals and unchanged shadow geometry. See
+[the world visibility evidence](evidence/world-camera-visibility-2026-08-31.md)
+for the final Release result and validation limits. No browser boot, retail
+visual, gameplay or performance promotion is claimed.
+
+## Prior canonical static-camera visibility (`317fc12f`)
 
 Canonical DPVS setup/reset, portal traversal and static-cell AABB work now run
 synchronously from `R_RenderScene` on the engine Worker. Camera packing consumes
