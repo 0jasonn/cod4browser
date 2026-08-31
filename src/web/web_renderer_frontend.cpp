@@ -1977,7 +1977,8 @@ void __cdecl R_SetLodOrigin(const refdef_s *) {}
 void __cdecl R_RenderScene(const refdef_s *refdef)
 {
 #if KISAK_WEB_DIAGNOSTICS
-    const double sceneProfileStarted = WebFrameProfile_Current()
+    WebFrameProfileSample *const sceneProfile = WebFrameProfile_Current();
+    const double sceneProfileStarted = sceneProfile
         ? WebFrameProfile_Now() : 0.0;
 #endif
     iassert(refdef->tanHalfFovX > 0.0f);
@@ -2839,8 +2840,9 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
 
     WebRendererDObjSceneCommand dynamicCommand;
 #if KISAK_WEB_DIAGNOSTICS
-    WebFrameProfileSample *const dobjProfile = WebFrameProfile_Current();
-    const double dobjBuildStarted = dobjProfile ? WebFrameProfile_Now() : 0.0;
+    const double dobjBuildStarted = sceneProfile ? WebFrameProfile_Now() : 0.0;
+    if (sceneProfile)
+        sceneProfile->sceneSetupMs += dobjBuildStarted - sceneProfileStarted;
 #endif
     const WebRendererDObjSceneResult dynamicBuild =
         WebRenderer_BuildDObjSceneCommand(
@@ -2848,8 +2850,9 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             dynamicCommand, &lodParms, &s_world.lightGrid,
             &MODEL_LIGHTING_CALLBACKS, ResolveRendererMaterial);
 #if KISAK_WEB_DIAGNOSTICS
-    if (dobjProfile)
-        dobjProfile->dobjBuildMs += WebFrameProfile_Now() - dobjBuildStarted;
+    const double assemblyStarted = sceneProfile ? WebFrameProfile_Now() : 0.0;
+    if (sceneProfile)
+        sceneProfile->dobjBuildMs += assemblyStarted - dobjBuildStarted;
 #endif
     if (dynamicBuild == WebRendererDObjSceneResult::NoDObj)
     {
@@ -3422,6 +3425,12 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     const bool hasSunSprite = AppendSunSprite(dynamicCommand, view);
     const bool hasSunFlare = AppendSunFlare(dynamicCommand, view);
 
+#if KISAK_WEB_DIAGNOSTICS
+    const double imageResolveStarted = sceneProfile ? WebFrameProfile_Now() : 0.0;
+    double dynamicSubmitStarted = imageResolveStarted;
+    if (sceneProfile)
+        sceneProfile->sceneAssemblyMs += imageResolveStarted - assemblyStarted;
+#endif
     if (dynamicBuild == WebRendererDObjSceneResult::Success ||
         hasBrushModels ||
         hasDynamicEntityModels ||
@@ -3430,6 +3439,14 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     {
         for (WebRendererWorldBatchDesc &batch : dynamicCommand.batches)
             ResolveRendererBatchImages(batch);
+#if KISAK_WEB_DIAGNOSTICS
+        if (sceneProfile)
+        {
+            dynamicSubmitStarted = WebFrameProfile_Now();
+            sceneProfile->sceneImageResolveMs +=
+                dynamicSubmitStarted - imageResolveStarted;
+        }
+#endif
         const WebRendererModelLightingAtlasDesc lightingAtlas{
             dynamicCommand.modelLightingAtlas.pixels.data(),
             dynamicCommand.modelLightingAtlas.width,
@@ -3461,6 +3478,11 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     {
         WebRenderer_SetDynamicModelScene({});
     }
+#if KISAK_WEB_DIAGNOSTICS
+    if (sceneProfile)
+        sceneProfile->sceneDynamicSubmitMs +=
+            WebFrameProfile_Now() - dynamicSubmitStarted;
+#endif
 
     if (dynamicBuild == WebRendererDObjSceneResult::Success)
     {
@@ -3526,6 +3548,9 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                 ? "<none>"
                 : dynamicEntityModelCommand.batches[0].modelName);
     }
+#if KISAK_WEB_DIAGNOSTICS
+    const double visibilityStarted = sceneProfile ? WebFrameProfile_Now() : 0.0;
+#endif
     view.worldSurfaceCount = g_worldSceneSurfaceCount;
     view.worldVertexCount = g_worldSceneVertexCount;
     view.worldIndexCount = g_worldSceneIndexCount;
@@ -3554,8 +3579,17 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         (s_world.dpvs.smodelCount || s_world.dpvs.staticSurfaceCount))
         Com_Error(ERR_DROP, "R_RenderScene: canonical static camera DPVS unavailable");
 
+#if KISAK_WEB_DIAGNOSTICS
+    const double viewSubmitStarted = sceneProfile ? WebFrameProfile_Now() : 0.0;
+    if (sceneProfile)
+        sceneProfile->sceneCameraVisibilityMs += viewSubmitStarted - visibilityStarted;
+#endif
     if (!WebRenderer_SubmitSceneView(view))
         Com_Error(ERR_DROP, "R_RenderScene: invalid cgame view command");
+#if KISAK_WEB_DIAGNOSTICS
+    if (sceneProfile)
+        sceneProfile->sceneViewSubmitMs += WebFrameProfile_Now() - viewSubmitStarted;
+#endif
 
     if (!g_gameDrivenFrameReported)
     {
@@ -3564,10 +3598,9 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             EngineLifecycleStage::GameDrivenFrame, s_world.name);
     }
 #if KISAK_WEB_DIAGNOSTICS
-    if (WebFrameProfileSample *const profile = WebFrameProfile_Current();
-        profile && sceneProfileStarted != 0.0)
+    if (sceneProfile)
     {
-        profile->sceneBuildMs += WebFrameProfile_Now() - sceneProfileStarted;
+        sceneProfile->sceneBuildMs += WebFrameProfile_Now() - sceneProfileStarted;
     }
 #endif
 }

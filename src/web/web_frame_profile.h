@@ -169,6 +169,15 @@ struct WebFrameProfileSample
     double clientFrameMs = 0.0;
     double cgameFrameMs = 0.0;
     double sceneBuildMs = 0.0;
+    // Disjoint intervals within sceneBuildMs, alongside dobjBuildMs.
+    // Dynamic submission includes backend validation/copy and uploads;
+    // renderer upload timers overlap it and must not be added to this total.
+    double sceneSetupMs = 0.0;
+    double sceneAssemblyMs = 0.0;
+    double sceneImageResolveMs = 0.0;
+    double sceneDynamicSubmitMs = 0.0;
+    double sceneCameraVisibilityMs = 0.0;
+    double sceneViewSubmitMs = 0.0;
     // DObj build is nested in sceneBuildMs. The four substages are disjoint;
     // validation, LOD/hide tests and other overhead remain in the build total.
     double dobjBuildMs = 0.0;

@@ -70,7 +70,13 @@ test("gameplay profile aggregation keeps populations and overhead explicit", () 
         maximum: 12,
     });
     assert.equal(profile.renderer.worldMs.average, 4);
-    // Historical samples do not invent zero-valued DObj measurements.
+    // Historical samples do not invent zero-valued scene/DObj measurements.
+    assert.equal(profile.cpu.sceneSetupMs, null);
+    assert.equal(profile.cpu.sceneAssemblyMs, null);
+    assert.equal(profile.cpu.sceneImageResolveMs, null);
+    assert.equal(profile.cpu.sceneDynamicSubmitMs, null);
+    assert.equal(profile.cpu.sceneCameraVisibilityMs, null);
+    assert.equal(profile.cpu.sceneViewSubmitMs, null);
     assert.equal(profile.cpu.dobjBuildMs, null);
     assert.equal(profile.counters.worldDrawCalls.maximum, 8);
     assert.equal(profile.gpu.results, 2);
@@ -83,8 +89,11 @@ test("gameplay profile aggregation keeps populations and overhead explicit", () 
     assert.equal(profile.overhead.profilerOverheadPercent, 25);
 });
 
-test("DObj build and disjoint substages survive profile aggregation", () => {
-    const fields = ["dobjBuildMs", "dobjPoseMs", "dobjLightingMs",
+test("scene and DObj intervals survive profile aggregation", () => {
+    const fields = ["sceneBuildMs", "sceneSetupMs", "sceneAssemblyMs",
+        "sceneImageResolveMs", "sceneDynamicSubmitMs",
+        "sceneCameraVisibilityMs", "sceneViewSubmitMs",
+        "dobjBuildMs", "dobjPoseMs", "dobjLightingMs",
         "dobjSkinningMs", "dobjGeometryMs"];
     const profile = aggregateGameplayProfile({
         frames: [1, 2].map((scale) => ({
