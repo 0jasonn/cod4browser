@@ -56,33 +56,51 @@ try {
         for (const name of ['visibilitychange', 'focus', 'blur']) addEventListener(name, sampleFocus);
     });
     await page.goto('http://127.0.0.1:8051/');
-    await page.waitForFunction(() => __KISAKCOD_WEB__?.state === 'running', null, { timeout: 60000 });
+    await page.waitForFunction(production => production
+        ? document.documentElement.dataset.runtimeState === 'running'
+        : globalThis.__KISAKCOD_WEB__?.state === 'running', production, { timeout: 60000 });
+    const engineWorker = page.workers().find(worker => worker.url().includes('engine_worker.mjs'));
+    assert(engineWorker, 'engine Worker exists');
     console.log('BOOTED');
     stage = 'import';
     const pendingChooser = page.waitForEvent('filechooser');
     await page.locator('#portable-install-button').click();
     const chooser = await pendingChooser;
     await chooser.setFiles(process.env.KISAK_COD4_RETAIL_ROOT);
-    await page.waitForFunction(() => __KISAKCOD_WEB__?.assets?.state === 'failed' ||
-        (__KISAKCOD_WEB__?.assets?.state === 'ready' &&
-        __KISAKCOD_WEB__?.module?.filesystemState === 'mounted'), null, { timeout: 300000 });
-    assert.equal(await page.evaluate(() => __KISAKCOD_WEB__.assets.state), 'ready');
+    await page.waitForFunction(production => {
+        if (!production) return __KISAKCOD_WEB__?.assets?.state === 'failed' ||
+            (__KISAKCOD_WEB__?.assets?.state === 'ready' &&
+            __KISAKCOD_WEB__?.module?.filesystemState === 'mounted');
+        const state = document.querySelector('.asset-control')?.dataset.assetState;
+        return state === 'failed' || (state === 'ready' &&
+            document.querySelector('#boot-log')?.textContent.includes('Local installation mounted; canonical runtime started.'));
+    }, production, { timeout: 300000 });
+    assert.equal(await page.evaluate(production => production
+        ? document.querySelector('.asset-control').dataset.assetState : __KISAKCOD_WEB__.assets.state, production), 'ready');
+    if (production) await engineWorker.evaluate(() => {
+        globalThis.__warmWorldFrames = 0;
+        let worldReady = false;
+        addEventListener('kisakcod:renderer-scene-frame', event => {
+            if (event.detail.worldName?.toLowerCase().includes('cargoship')) worldReady = true;
+        });
+        addEventListener('kisakcod:system', () => { if (worldReady) ++__warmWorldFrames; });
+    });
     console.log('IMPORTED_AND_MOUNTED');
     stage = 'CargoShip load';
     await page.locator('#engine-command-input').fill('map cargoship');
     await page.locator('#engine-command-form').evaluate(form => form.requestSubmit());
-    await page.waitForFunction(production => {
-        const frames = __dobj.frames.filter(frame => frame.state === 'drawn' && frame.geometrySubmitted &&
-            frame.worldName?.toLowerCase().includes('cargoship'));
-        return production ? frames.length > 0 && __dobj.system.filter(event =>
-            event.observedMs >= frames[0].observedMs && event.state === 'running').length >= 30
-            : frames.length >= 30;
-    }, production, { timeout: 300000 });
+    if (production) {
+        const warmupDeadline = Date.now() + 300000;
+        while (await engineWorker.evaluate(() => __warmWorldFrames) < 30) {
+            assert(Date.now() < warmupDeadline, 'production world warmup completed');
+            await page.waitForTimeout(1000);
+        }
+    } else await page.waitForFunction(() => __dobj.frames.filter(frame => frame.state === 'drawn' &&
+        frame.geometrySubmitted && frame.worldName?.toLowerCase().includes('cargoship')).length >= 30,
+        null, { timeout: 300000 });
     console.log('CARGOSHIP_WARM_30_FRAMES');
     stage = 'profiling disabled';
     await page.bringToFront();
-    const engineWorker = page.workers().find(worker => worker.url().includes('engine_worker.mjs'));
-    assert(engineWorker, 'engine Worker exists');
     await page.evaluate(() => {
         __dobj.profiles = [];
         __dobj.foreground = [{ observedMs: performance.now(), visibilityState: document.visibilityState,
