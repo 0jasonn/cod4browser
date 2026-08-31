@@ -69,7 +69,29 @@ export function validateProfileWindow(frames, views, workload) {
     });
 }
 
+export function compareProfileWorkloads(runs) {
+    assert(runs.length >= 2, 'supply at least two diagnostic runs');
+    for (const run of runs) {
+        assert.equal(run.workload?.mode, 'paused-renderer');
+        assert.equal(run.cleanTiming.diagnosticBuild, true);
+        assert.equal(run.cleanTiming.profilerActive, false);
+        assert.equal(run.cleanTiming.foreground.performanceWindowValid, true);
+        assert.equal(run.methodology.foreground.performanceWindowValid, true);
+        assert.equal(run.pageErrors.length, 0);
+        assert.deepEqual(run.environment, runs[0].environment, 'diagnostic environments differ');
+        assert.deepEqual(run.workload, runs[0].workload, 'diagnostic camera/time checkpoints differ');
+        assert.equal(run.workCounts.length, 120);
+        for (let index = 0; index < 120; ++index) {
+            for (const [key, value] of Object.entries(runs[0].workCounts[index])) {
+                assert.equal(run.workCounts[index][key], value, `diagnostic view ${601 + index}: ${key} differs`);
+            }
+        }
+    }
+    return runs.map(run => ({ artifactSha256: run.artifactSha256, matchingWorkCountSamples: 120 }));
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-    const runs = await Promise.all(process.argv.slice(2).map(async path => JSON.parse(await readFile(path, 'utf8'))));
-    console.log(JSON.stringify(compareWorkloads(runs), null, 2));
+    const profiles = process.argv[2] === '--profiles';
+    const runs = await Promise.all(process.argv.slice(profiles ? 3 : 2).map(async path => JSON.parse(await readFile(path, 'utf8'))));
+    console.log(JSON.stringify((profiles ? compareProfileWorkloads : compareWorkloads)(runs), null, 2));
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { validateWorkload, compareWorkloads, validateProfileWindow } from '../../tools/renderer_workload.mjs';
+import { validateWorkload, compareWorkloads, validateProfileWindow, compareProfileWorkloads } from '../../tools/renderer_workload.mjs';
 
 test('controlled comparison rejects clock, camera, geometry and sampling mismatches', () => {
     const warmup = [{ submissionGeneration: 30, time: 1480 }, { submissionGeneration: 60, time: 1960 }];
@@ -40,4 +40,13 @@ test('controlled comparison rejects clock, camera, geometry and sampling mismatc
     assert.throws(() => validateProfileWindow(frames, profileViews.map(view => ({ ...view, time: view.time + 1 })), run.workload));
     assert.throws(() => validateProfileWindow(frames.map(frame => ({ ...frame, viewSubmissionGeneration: 600 })), profileViews, run.workload));
     assert.throws(() => validateProfileWindow(frames.map(frame => ({ ...frame, counters: { ...counters, shadowCasterDraws: NaN } })), profileViews, run.workload));
+    const diagnostic = { ...run, cleanTiming: { ...run.cleanTiming, diagnosticBuild: true },
+        workCounts: frames.map(frame => frame.counters), methodology: { foreground: { performanceWindowValid: true } }, pageErrors: [] };
+    assert.equal(compareProfileWorkloads([diagnostic, structuredClone(diagnostic)]).length, 2);
+    for (const key of ['bufferUploadBytes', 'submittedIndices', 'shadowCasterDraws']) {
+        const changed = structuredClone(diagnostic);
+        // Preserve every camera checkpoint and all other draw counts.
+        changed.workCounts[10][key]++;
+        assert.throws(() => compareProfileWorkloads([diagnostic, changed]));
+    }
 });
