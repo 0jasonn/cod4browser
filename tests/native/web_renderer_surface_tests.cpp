@@ -1,4 +1,5 @@
 #include <web/web_renderer_surface_storage.h>
+#include <web/web_renderer_dynamic_textures.h>
 
 #include <array>
 #include <cmath>
@@ -330,6 +331,70 @@ void TestReusableStagedGeometry()
     Require(staging.empty() && stagingIndices.empty(), "empty input clears logical storage");
 }
 
+void TestDynamicTextureBindings()
+{
+    // Model texture-object sampler state separately from unit bindings, as GL
+    // does. Compare each draw against unconditional ordered binding, including
+    // aliases with conflicting samplers and every single-field transition.
+    struct State
+    {
+        std::array<std::uint32_t, 10> units{};
+        std::array<std::uint8_t, 8> textureSamplers{};
+        unsigned calls = 0;
+        void Bind(std::uint32_t unit, std::uint32_t texture, std::uint8_t sampler)
+        {
+            units.at(unit) = texture;
+            textureSamplers.at(texture) = sampler;
+            ++calls;
+        }
+    } actual, reference;
+    WebRendererDynamicTextures bindings;
+    const auto apply = [&](const WebRendererDynamicTextureSet &set) {
+        reference.Bind(0, set.textures[0], set.samplers[0]);
+        reference.Bind(1, set.textures[1], set.samplers[1]);
+        reference.Bind(4, set.textures[2], set.samplers[2]);
+        reference.Bind(5, set.textures[3], set.samplers[3]);
+        reference.Bind(2, set.textures[4], 0x62);
+        reference.Bind(9, set.textures[5], 0x62);
+        bindings.Apply(set, [&](auto unit, auto texture, auto sampler) {
+            actual.Bind(unit, texture, sampler);
+        });
+        Require(actual.units == reference.units &&
+            actual.textureSamplers == reference.textureSamplers,
+            "draw sees unchanged texture bindings and object sampler state");
+    };
+    const WebRendererDynamicTextureSet base{{1, 2, 3, 4, 5, 6}, {1, 2, 3, 4}};
+    apply(base);
+    Require(actual.calls == 6, "first set binds every unit");
+    apply(base);
+    Require(actual.calls == 6, "identical set needs no GL calls");
+    for (std::size_t i = 0; i < base.textures.size(); ++i)
+    {
+        auto changed = base;
+        changed.textures[i] = 7;
+        apply(changed);
+        apply(base);
+    }
+    for (std::size_t i = 0; i < base.samplers.size(); ++i)
+    {
+        auto changed = base;
+        changed.samplers[i] = 0x62;
+        apply(changed);
+        apply(base);
+    }
+    const WebRendererDynamicTextureSet aliases{{1, 1, 1, 1, 1, 1}, {1, 2, 3, 4}};
+    apply(aliases);
+    apply(aliases);
+    apply(base);
+    bindings = {}; // Another pass/frame/context must bind afresh.
+    const unsigned before = actual.calls;
+    apply(base);
+    Require(actual.calls == before + 6, "new pass cannot reuse old GL state");
+    bindings = {};
+    apply({});
+    Require(actual.calls == before + 12, "zero-valued first set still binds");
+}
+
 void TestErrorStrings()
 {
     for (const WebRendererSurfaceResult result : {
@@ -389,6 +454,7 @@ int main()
     runner.Run("vertex and index validation", TestVertexAndIndexValidation);
     runner.Run("owned copy and atomic failure", TestOwnedCopyAndAtomicFailure);
     runner.Run("reusable staged geometry", TestReusableStagedGeometry);
+    runner.Run("dynamic texture binding equivalence", TestDynamicTextureBindings);
     runner.Run("surface result strings", TestErrorStrings);
     return runner.Result();
 }

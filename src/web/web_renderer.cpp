@@ -3,6 +3,7 @@
 #include <web/web_frame_profile.h>
 #include <web/web_renderer_surface_storage.h>
 #include <web/web_renderer_context.h>
+#include <web/web_renderer_dynamic_textures.h>
 #include <web/web_renderer_lod.h>
 #include <web/web_renderer_world_scene.h>
 #include <web/web_system.h>
@@ -9939,6 +9940,9 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.specularMapEnabledUniform, 0.0f);
         BindModelLightingTexture(g_renderer.retainedDynamicModelLighting);
+        // Sun queries do not bind textures; reflection/spot-shadow setup uses
+        // units 8/14. These six bindings remain owned by this local pass.
+        WebRendererDynamicTextures dynamicTextures;
 #if KISAK_WEB_DIAGNOSTICS
         const WebRendererRetainedWorldBatch *lastSunVisibilityBatch = nullptr;
         for (const WebRendererRetainedWorldBatch &batch :
@@ -10259,26 +10263,19 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 const double texturesStarted = profileDynamicModel
                     ? WebFrameProfile_Now() : 0.0;
 #endif
-                BindWorldTexture(GL_TEXTURE0,
+                dynamicTextures.Apply({{
                     base ? base->texture : g_renderer.texture,
-                    batch.samplerState);
-                BindWorldTexture(GL_TEXTURE1,
                     normal ? normal->texture : g_renderer.texture,
-                    batch.normalSamplerState);
-                BindWorldTexture(GL_TEXTURE4,
                     detail ? detail->texture : g_renderer.texture,
-                    batch.detailSamplerState);
-                BindWorldTexture(GL_TEXTURE5,
                     specular ? specular->texture : g_renderer.texture,
-                    batch.specularSamplerState);
-                BindWorldTexture(GL_TEXTURE2,
-                    secondaryLightmap
-                        ? secondaryLightmap->texture : g_renderer.texture,
-                    0x62u);
-                BindWorldTexture(GL_TEXTURE9,
-                    primaryLightmap
-                        ? primaryLightmap->texture : g_renderer.texture,
-                    0x62u);
+                    secondaryLightmap ? secondaryLightmap->texture : g_renderer.texture,
+                    primaryLightmap ? primaryLightmap->texture : g_renderer.texture,
+                }, {
+                    batch.samplerState, batch.normalSamplerState,
+                    batch.detailSamplerState, batch.specularSamplerState,
+                }}, [](std::uint32_t unit, std::uint32_t texture, std::uint8_t sampler) {
+                    BindWorldTexture(GL_TEXTURE0 + unit, texture, sampler);
+                });
 #if KISAK_WEB_DIAGNOSTICS
                 const double drawStarted = profileDynamicModel
                     ? WebFrameProfile_Now() : 0.0;
