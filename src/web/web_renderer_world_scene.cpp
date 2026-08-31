@@ -228,6 +228,17 @@ struct TechniqueSelection
     std::uint32_t stateBits[2]{};
 };
 
+// Shader programs are immutable during one synchronous brush build. Reuse
+// only the preceding hashes, including across materials that share shaders.
+// Never retain canonical pointers or derived values across builds.
+struct LastBrushShaders
+{
+    const MaterialVertexShader *vertex = nullptr;
+    const MaterialPixelShader *pixel = nullptr;
+    std::uint32_t vertexHash = 0u;
+    std::uint32_t pixelHash = 0u;
+};
+
 bool IsCanonicalWorldColorLitAlias(const MaterialTechniqueSet *techniqueSet)
     noexcept
 {
@@ -315,7 +326,8 @@ std::uint32_t SelectLitTechniqueType(
 }
 
 TechniqueSelection SelectTechnique(
-    const Material *material, std::uint32_t litTechniqueType) noexcept
+    const Material *material, std::uint32_t litTechniqueType,
+    LastBrushShaders *lastShaders) noexcept
 {
     TechniqueSelection selection;
     if (!material || !material->techniqueSet || !material->stateBitsTable)
@@ -357,10 +369,14 @@ TechniqueSelection SelectTechnique(
             technique->passArray[0u].vertexShader;
         selection.vertexShaderName =
             vertexShader ? vertexShader->name : nullptr;
-        selection.vertexShaderProgramHash =
-            HashVertexShaderProgram(vertexShader);
+        selection.vertexShaderProgramHash = lastShaders && lastShaders->vertex == vertexShader
+            ? lastShaders->vertexHash : HashVertexShaderProgram(vertexShader);
         selection.pixelShaderName = pixelShader ? pixelShader->name : nullptr;
-        selection.pixelShaderProgramHash = HashPixelShaderProgram(pixelShader);
+        selection.pixelShaderProgramHash = lastShaders && lastShaders->pixel == pixelShader
+            ? lastShaders->pixelHash : HashPixelShaderProgram(pixelShader);
+        if (lastShaders)
+            *lastShaders = {vertexShader, pixelShader,
+                selection.vertexShaderProgramHash, selection.pixelShaderProgramHash};
         selection.stateBits[0] = material->stateBitsTable[entry].loadBits[0];
         selection.stateBits[1] = material->stateBitsTable[entry].loadBits[1];
         return selection;
@@ -395,7 +411,8 @@ WebRendererWorldBatchDesc MakeBatch(
     std::uint32_t surfaceIndex,
     std::uint32_t firstIndex,
     bool sunShadowEnabled,
-    const WebRendererWorldLightTechniqueContext *lightContext) noexcept
+    const WebRendererWorldLightTechniqueContext *lightContext,
+    LastBrushShaders *lastShaders = nullptr) noexcept
 {
     WebRendererWorldBatchDesc batch{};
     batch.firstIndex = firstIndex;
@@ -429,7 +446,7 @@ WebRendererWorldBatchDesc MakeBatch(
     const std::uint32_t requestedTechniqueType = SelectLitTechniqueType(
         surface.primaryLightIndex, lightContext, sunShadowEnabled);
     const TechniqueSelection technique = SelectTechnique(
-        surface.material, requestedTechniqueType);
+        surface.material, requestedTechniqueType, lastShaders);
     batch.techniqueName = technique.identityName
         ? technique.identityName : "<unsupported-technique>";
     batch.techniqueType = static_cast<std::uint8_t>(technique.type);
@@ -960,6 +977,7 @@ WebRendererWorldSceneResult WebRenderer_BuildBrushModelSceneCommand(
     }
 
     WebRendererBrushModelSceneCommand replacement;
+    LastBrushShaders lastShaders;
 #if KISAK_WEB_DIAGNOSTICS
     WebFrameProfileSample *const profile = WebFrameProfile_Current();
     double stageStarted = profile ? WebFrameProfile_Now() : 0.0;
@@ -1121,7 +1139,7 @@ WebRendererWorldSceneResult WebRenderer_BuildBrushModelSceneCommand(
 #endif
                 WebRendererWorldBatchDesc candidate = MakeBatch(
                     world, surface, surfaceIndex, firstDestinationIndex,
-                    false, lightContext);
+                    false, lightContext, &lastShaders);
                 candidate.indexCount = indexCount;
                 candidate.sourceKind =
                     WebRendererSceneBatchKind::DynamicBModel;
