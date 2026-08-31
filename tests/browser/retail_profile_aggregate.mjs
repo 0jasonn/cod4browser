@@ -13,7 +13,8 @@ export const CPU_PROFILE_FIELDS = [
 export const RENDERER_PROFILE_FIELDS = [
     "setupMs", "lodMs", "sunShadowPrepareMs", "sunShadowDrawMs",
     "spotShadowPrepareMs", "spotShadowDrawMs", "skyMs", "worldMs",
-    "staticModelsMs", "dynamicModelsMs", "dynamicModelMaterialMs",
+    "staticModelsMs", "dynamicModelsMs", "dynamicModelProjectionMs",
+    "dynamicModelMaterialMs", "dynamicModelParametersMs",
     "dynamicModelTexturesMs", "dynamicModelDrawMs", "fxModelsMs", "particlesMs",
     "marksMs", "uiMs", "postProcessMs", "bufferUploadMs", "textureUploadMs",
 ];
@@ -22,6 +23,7 @@ export const COUNTER_PROFILE_FIELDS = [
     "worldSurfacesSubmitted", "worldSurfacesDrawn",
     "staticModelInstancesRetained", "staticModelInstanceDraws",
     "dynamicBatchesDrawn", "fxModelBatchesDrawn", "particleBatchesDrawn",
+    "dynamicProjectionUpdates", "dynamicMaterialUpdates", "dynamicFeatureUpdates",
     "markBatchesDrawn", "worldDrawCalls", "staticModelDrawCalls",
     "dynamicDrawCalls", "fxDrawCalls", "shadowDrawCalls", "uiDrawCalls",
     "postProcessDrawCalls", "queryDrawCalls", "resolveBlits",

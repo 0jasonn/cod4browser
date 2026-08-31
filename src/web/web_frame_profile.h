@@ -216,7 +216,9 @@ struct WebFrameProfileSample
     double staticModelsMs = 0.0;
     double dynamicModelsMs = 0.0;
     // Nested dynamic-model draw costs; excludes FX buckets and sun queries.
+    double dynamicModelProjectionMs = 0.0;
     double dynamicModelMaterialMs = 0.0;
+    double dynamicModelParametersMs = 0.0;
     double dynamicModelTexturesMs = 0.0;
     double dynamicModelDrawMs = 0.0;
     double fxModelsMs = 0.0;
@@ -232,6 +234,9 @@ struct WebFrameProfileSample
     std::uint64_t staticModelInstancesRetained = 0u;
     std::uint64_t staticModelInstanceDraws = 0u;
     std::uint64_t dynamicBatchesDrawn = 0u;
+    std::uint64_t dynamicProjectionUpdates = 0u;
+    std::uint64_t dynamicMaterialUpdates = 0u;
+    std::uint64_t dynamicFeatureUpdates = 0u;
     std::uint64_t fxModelBatchesDrawn = 0u;
     std::uint64_t particleBatchesDrawn = 0u;
     std::uint64_t markBatchesDrawn = 0u;

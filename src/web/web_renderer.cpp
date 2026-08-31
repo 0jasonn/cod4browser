@@ -10108,6 +10108,13 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 }
                 const bool sunSprite = batch.sourceKind ==
                     WebRendererSceneBatchKind::SunSprite;
+#if KISAK_WEB_DIAGNOSTICS
+                const bool profileDynamicModel = frameProfile &&
+                    g_frameProfileDrawBucket == FrameProfileDrawBucket::DynamicModel;
+                const double projectionStarted = profileDynamicModel
+                    ? WebFrameProfile_Now() : 0.0;
+                if (profileDynamicModel) ++frameProfile->dynamicProjectionUpdates;
+#endif
                 glUniformMatrix4fv(g_renderer.viewProjectionUniform, 1,
                     GL_FALSE,
                     sunSprite
@@ -10117,16 +10124,21 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                         : g_renderer.sceneViewProjection.data());
                 glDepthRangef(0.0f, batch.depthHack ? 0.015625f : 1.0f);
 #if KISAK_WEB_DIAGNOSTICS
-                const bool profileDynamicModel = frameProfile &&
-                    g_frameProfileDrawBucket == FrameProfileDrawBucket::DynamicModel;
                 const double materialStarted = profileDynamicModel
                     ? WebFrameProfile_Now() : 0.0;
+                if (profileDynamicModel)
+                {
+                    frameProfile->dynamicModelProjectionMs += materialStarted - projectionStarted;
+                    ++frameProfile->dynamicMaterialUpdates;
+                }
 #endif
                 ApplyWorldMaterialState(batch);
 #if KISAK_WEB_DIAGNOSTICS
+                const double parametersStarted = profileDynamicModel
+                    ? WebFrameProfile_Now() : 0.0;
                 if (profileDynamicModel)
                     frameProfile->dynamicModelMaterialMs +=
-                        WebFrameProfile_Now() - materialStarted;
+                        parametersStarted - materialStarted;
 #endif
                 const WebRendererRetainedWorldImage *base = RetainedImage(
                     g_renderer.retainedDynamicModelImages,
@@ -10189,6 +10201,9 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                     batch.pixelShaderName.rfind("lm_spot_", 0u) == 0u;
                 const bool directionalPrimaryLit = modelLit && primaryLight &&
                     primaryLight->type == 1u;
+#if KISAK_WEB_DIAGNOSTICS
+                if (profileDynamicModel) ++frameProfile->dynamicFeatureUpdates;
+#endif
                 glUniform1f(g_renderer.fogEnabledUniform,
                     g_renderer.sceneFogEnabled && !fxSceneGeometry &&
                         !sunSprite
@@ -10267,6 +10282,8 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
 #if KISAK_WEB_DIAGNOSTICS
                 const double texturesStarted = profileDynamicModel
                     ? WebFrameProfile_Now() : 0.0;
+                if (profileDynamicModel)
+                    frameProfile->dynamicModelParametersMs += texturesStarted - parametersStarted;
 #endif
                 dynamicTextures.Apply({{
                     base ? base->texture : g_renderer.texture,
