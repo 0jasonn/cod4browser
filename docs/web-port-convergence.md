@@ -38,6 +38,19 @@ oracle.
 | Audio | Canonical mixer and OpenAL-facing state feed a browser Web Audio device boundary. |
 | Save/persistence | Canonical game save serialization and load own gameplay state; the browser host only persists and flushes the engine filesystem at the platform boundary. |
 
+The [retained-renderer milestone](evidence/retained-renderer-49af3948.md) moves
+brush submission closer to native separation of immutable `GfxBrushModel`
+geometry and current placement. Only GPU-ready mesh/material resources and their
+recovery copies live in the backend; canonical entities, poses, visibility and
+light animation remain in Kisak. World retirement frees these resources, and
+context restoration recreates GPU objects. Optional effects still account for
+brush geometry in the original logical budget.
+
+Sun-depth range joining preserves original triangle order and membership without
+using camera culling. Texture reuse is bounded and resets each frame/pass; it
+preserves texture aliases and adds no persistent GL cache. Resource/remap lifetime
+and the verified limitations are recorded in [the boundary notes](renderer-retained-resources.md).
+
 ## Modified Kisak seams
 
 | Seam | Why it differs |
@@ -121,7 +134,7 @@ commands directly provide the backend ranges. See
 
 Diagnostics add five DObj CPU measurements (total build and four disjoint
 substages) to the existing frame profiler. Production compiles them out. Pose,
-lighting, and skinning ownership is unchanged; no pose or geometry cache was added.
+lighting, and skinning ownership is unchanged; no DObj pose or geometry cache was added.
 The [first focused stage profile](evidence/dobj-stages-946dc918.md), from a
 120-frame headless CargoShip window, places geometry construction at 59.02% of
 DObj build time. The subsequent [DObj-only hash deletion](evidence/dobj-hash-d8661476.md)

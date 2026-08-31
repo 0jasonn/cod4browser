@@ -53,11 +53,18 @@ Manual gameplay assessment can guide renderer work without a progression gate.
    are now reused locally within a build: material setup fell about 28%, and
    production A/B/B/A pair means were 26.917 -> 26.027 ms. Host drift and paused
    execution limit that 3.30% observation; no general gameplay FPS claim follows.
-8. Next: inspect DObj lighting setup under the same seeded workload, preserving
-   canonical lighting and pose ownership. Avoid pause-specific result caches.
-   Do not infer whole-frame gains from local timers or
-   add global GL caches, new batching representations or GPU-buffer policies
-   from an aggregate renderer total alone.
+8. The [major retained-renderer milestone](evidence/retained-renderer-49af3948.md)
+   removes repeated brush expansion/upload, joins adjacent opaque sun ranges,
+   and reuses frame-local texture parameters/pass-local bindings. Canonical
+   geometry, static camera culling and independent shadow membership are preserved.
+   Fresh production means are 21.175 -> 14.731 ms (30.43% lower) with the benchmark
+   cap lifted; default-cap means are 21.469 -> 16.843 ms. Upload bytes fall 29.67%.
+   These are local paused-renderer results. Canonical checkpoint timing replaces
+   callback telemetry that suppresses most fast frames; product defaults remain.
+9. Next: reduce DObj skinning and vertex-assembly work under the same seeded
+   qualification. Keep canonical animation, pose and lighting ownership; do not
+   introduce pause-specific caches. Measure the remaining stages before changing
+   skinning ownership or GPU-buffer policy.
 
 The earlier renderer milestone used one focused native fixture, rerun after shadow
 integration; three diagnostic builds and five 120-frame profiles; four

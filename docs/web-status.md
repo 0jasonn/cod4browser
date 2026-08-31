@@ -4,7 +4,28 @@ Updated 2026-08-31. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
-## Seeded brush shader-hash optimization delivered
+## Major retained-renderer milestone delivered
+
+Runtime `49af3948` retains canonical brush geometry, joins adjacent opaque
+sun-shadow ranges, and removes repeated texture state/binding calls. Fresh
+production A/B/B/A means are **21.175 -> 14.731 ms (30.43% lower)** with the cap
+lifted only in temporary benchmark sessions. With the product default cap,
+means are **21.469 -> 16.843 ms**, near its 60 FPS setting. These are paused
+CargoShip renderer measurements, not active-gameplay FPS.
+
+Each sampled frame uploads 29.67% fewer buffer bytes and avoids 4,114 sun-shadow
+draw calls. All 120 diagnostic samples preserve logical geometry; static-model
+culling and independent sun/spot membership remain intact. Retained brushes still
+consume the original logical geometry budget before optional effects.
+
+The focused native fixture, explicit resource-recovery check and final Release
+passed. Production timing now uses existing canonical view checkpoints because
+routine callback telemetry omits most sub-16 ms callbacks. Eight final production
+windows pass the workload guards. See [the evidence](evidence/retained-renderer-49af3948.md)
+and [resource ownership](renderer-retained-resources.md).
+Next: reduce DObj skinning/vertex-assembly cost while preserving canonical poses.
+
+## Prior seeded brush shader-hash optimization
 
 Fresh-map randomness caused the changing dynamic geometry; UI counts matched.
 The shared server now offers optional `sv_mapSeed` control, defaulting to the
@@ -19,7 +40,7 @@ independent shadows, validation and atomic publication remain unchanged.
 
 Focused checks and the final Release passed; the production candidate was
 browser-run twice. See [the evidence](evidence/seeded-brush-hashes-06ad8004.md).
-Next: inspect DObj lighting setup using the same controlled workload.
+This provided the controlled baseline for the retained-renderer milestone above.
 
 ## Prior paused profiling exposes geometry variation
 

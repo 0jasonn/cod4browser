@@ -1,10 +1,12 @@
 # Retained renderer resources
 
-The major renderer milestone targets a repeatable reduction of at least 25%
-from the seeded `06ad8004` production baseline (26.027 ms pair mean), together
-with substantially less geometry rebuilt/uploaded each frame. This is a local
-paused-renderer target, not a promise of gameplay FPS on other machines. A
-single improved substage or a diagnostic-only change does not complete it.
+The major milestone is delivered in runtime `49af3948`: fresh production
+A/B/B/A controls show 21.175 -> 14.731 ms with only the benchmark cap lifted,
+a 30.43% reduction, alongside 29.67% fewer buffer-upload bytes. The default-cap
+comparison is 21.469 -> 16.843 ms. The initial 25% throughput target is met
+against current controls; the historical 26.027 ms mean is not used to claim
+a gain across changing host conditions. This remains a local paused-renderer
+result, not gameplay FPS. See [the evidence](evidence/retained-renderer-49af3948.md).
 
 The previous brush path expanded `GfxBrushModel` vertices through every placement,
 rebuilt material batches, appended them to the DObj/FX command, then copied and
@@ -19,7 +21,7 @@ The implementation moves that separation through the existing draw-command bound
 - Lazily validate/retain a brush mesh at first use, keyed by its canonical model
   within the current world. Reuse the existing brush builder at identity
   placement; retain only backend geometry and material resources, as for world
-  and static-model geometry. Audit material-remap invalidation before adoption.
+  and static-model geometry. Material-remap lifetime is documented below.
 - Submit current rigid placements every frame and preserve the existing
   DObj/brush/FX draw order. Reuse the existing instance shader inputs; avoid
   changing static-model packing or canonical camera DPVS.
@@ -29,16 +31,16 @@ The implementation moves that separation through the existing draw-command bound
   GPU objects from retained CPU data. Failed submissions must not publish
   partially updated draw lists.
 
-Verification needs an independent comparison against the existing transformed
+Verification uses an independent comparison against the existing transformed
 brush output, changing placements and shader inputs, invalid-input atomicity,
 logical draw/index/shadow equality, reduced upload work, targeted renderer
 recovery, and interleaved production timing. Keep the strict existing workload
 comparator: any intended physical-upload change needs explicitly justified
 logical-work comparison, not silently relaxed assertions.
 
-Continue through other measured renderer costs if brush retention alone does
-not reach the major target. No mission checks, broad suites or mandatory
-captures are required.
+Brush retention alone was followed by shadow-range and texture-state work to
+reach the major target. No mission checks, broad suites or mandatory captures
+were required.
 
 The sun-depth backend joins only contiguous opaque world-index ranges. Cutouts,
 non-casters and non-contiguous ranges break a run. It does not consult camera
@@ -64,7 +66,7 @@ opaque-shadow triangle order/cutouts, texture aliases, collisions and reset.
 The controlled browser workload caught and fixed logical geometry admission:
 retained brushes still occupy the original scene budget before optional FX and
 clouds. A diagnostic context-loss/restoration run then matched twelve resumed
-work samples. Production timing qualification is the remaining delivery gate.
+work samples. Production timing qualification passed both interleaved sequences.
 
 Production timing uses six existing canonical view checkpoints (240, 300, 360,
 420, 480, 540): five contiguous 60-frame spans cover 300 frames. The old
