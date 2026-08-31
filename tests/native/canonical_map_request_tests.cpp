@@ -70,6 +70,8 @@ void CaptureLifecycle(
 
 std::uint32_t com_errorPrintsCount = 0;
 int com_inServerFrame = 0;
+float com_timescaleValue = 1.0f;
+float com_codeTimeScale = 1.0f;
 const dvar_t *sv_cheats = nullptr;
 const dvar_t *sv_loadMyChanges = nullptr;
 const dvar_t *cg_drawCrosshair = nullptr;
