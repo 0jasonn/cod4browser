@@ -295,6 +295,41 @@ void TestOwnedCopyAndAtomicFailure()
         "failed replacement preserves owned draw");
 }
 
+void TestReusableStagedGeometry()
+{
+    std::vector<WebRendererSurfaceVertex> source(12u);
+    std::vector<std::uint32_t> sourceIndices = {0u, 4u, 11u};
+    source[0].position[2] = 7.0f;
+    source[11].binormalSign = -1.0f;
+    std::vector<WebRendererSurfaceVertex> staging;
+    std::vector<std::uint32_t> stagingIndices;
+    RequireResult(WebRenderer_CopyStagedGeometry(source, sourceIndices,
+        staging, stagingIndices), WebRendererSurfaceResult::Success, "stage geometry");
+    auto *const vertexStorage = staging.data();
+    auto *const indexStorage = stagingIndices.data();
+    source[0].position[2] = 9.0f;
+    Require(staging[0].position[2] == 7.0f, "staging owns copied geometry");
+    source.resize(6u);
+    sourceIndices = {5u, 1u, 0u};
+    RequireResult(WebRenderer_CopyStagedGeometry(source, sourceIndices,
+        staging, stagingIndices), WebRendererSurfaceResult::Success, "replace smaller geometry");
+    Require(staging.data() == vertexStorage && stagingIndices.data() == indexStorage,
+        "a fitting replacement reuses both allocations");
+    Require(staging.size() == source.size() && stagingIndices == sourceIndices,
+        "replacement updates counts and indices without stale tails");
+    Require(std::memcmp(staging.data(), source.data(),
+        source.size() * sizeof(WebRendererSurfaceVertex)) == 0, "all vertex fields copied");
+    source.resize(24u);
+    sourceIndices = {0u, 23u, 2u, 2u, 23u, 1u};
+    RequireResult(WebRenderer_CopyStagedGeometry(source, sourceIndices,
+        staging, stagingIndices), WebRendererSurfaceResult::Success, "grow geometry");
+    Require(staging.size() == source.size() && stagingIndices == sourceIndices,
+        "growth preserves the complete new command");
+    RequireResult(WebRenderer_CopyStagedGeometry({}, {}, staging, stagingIndices),
+        WebRendererSurfaceResult::Success, "clear staged geometry");
+    Require(staging.empty() && stagingIndices.empty(), "empty input clears logical storage");
+}
+
 void TestErrorStrings()
 {
     for (const WebRendererSurfaceResult result : {
@@ -353,6 +388,7 @@ int main()
     runner.Run("draw validation", TestDrawValidation);
     runner.Run("vertex and index validation", TestVertexAndIndexValidation);
     runner.Run("owned copy and atomic failure", TestOwnedCopyAndAtomicFailure);
+    runner.Run("reusable staged geometry", TestReusableStagedGeometry);
     runner.Run("surface result strings", TestErrorStrings);
     return runner.Result();
 }

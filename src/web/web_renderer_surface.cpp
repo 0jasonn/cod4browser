@@ -113,6 +113,24 @@ WebRendererSurfaceResult WebRenderer_CopySurface(
     return WebRendererSurfaceResult::Success;
 }
 
+WebRendererSurfaceResult WebRenderer_CopyStagedGeometry(
+    std::span<const WebRendererSurfaceVertex> sourceVertices,
+    std::span<const std::uint32_t> sourceIndices,
+    std::vector<WebRendererSurfaceVertex> &vertices,
+    std::vector<std::uint32_t> &indices)
+{
+    try
+    {
+        vertices.assign(sourceVertices.begin(), sourceVertices.end());
+        indices.assign(sourceIndices.begin(), sourceIndices.end());
+    }
+    catch (const std::bad_alloc &)
+    {
+        return WebRendererSurfaceResult::AllocationFailed;
+    }
+    return WebRendererSurfaceResult::Success;
+}
+
 const char *WebRenderer_SurfaceResultString(WebRendererSurfaceResult result) noexcept
 {
     switch (result)

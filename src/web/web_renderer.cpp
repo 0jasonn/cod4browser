@@ -426,6 +426,9 @@ struct WebRendererState
     GLuint dynamicModelIndexBuffer = 0u;
     std::vector<WebRendererSurfaceVertex> retainedDynamicModelVertices;
     std::vector<std::uint32_t> retainedDynamicModelIndices;
+    // Reuse the previous frame's storage while the current command stays live.
+    std::vector<WebRendererSurfaceVertex> dynamicModelVertexStaging;
+    std::vector<std::uint32_t> dynamicModelIndexStaging;
     std::vector<WebRendererRetainedWorldBatch> retainedDynamicModelBatches;
     std::vector<WebRendererRetainedWorldImage> retainedDynamicModelImages;
     WebRendererRetainedModelLightingAtlas retainedDynamicModelLighting;
@@ -1654,7 +1657,9 @@ EM_JS(void, DispatchRendererMemory, (
     double contextRecoveryDecodeCount,
     double decodedImageBytes,
     double duplicateDecodeCount,
-    double imageDecodeCpuMilliseconds), {
+    double imageDecodeCpuMilliseconds,
+    double dynamicGeometryCapacityBytes,
+    double dynamicGeometryStagingCapacityBytes), {
         let webglRendererIdentity = null;
         try {
             const gl = (typeof GL !== "undefined" && GL.currentContext)
@@ -1702,6 +1707,8 @@ EM_JS(void, DispatchRendererMemory, (
                 temporaryUploadBytes,
                 decodedTextureAdmissionBudgetBytes,
                 recoveryBudgetBytes: decodedTextureAdmissionBudgetBytes,
+                dynamicGeometryCapacityBytes,
+                dynamicGeometryStagingCapacityBytes,
                 wasmProgramBreakOffsetBytes: wasmHeapStatsSampled
                     ? wasmProgramBreakOffsetBytes : null,
                 wasmLinearMemoryCapacityBytes: wasmHeapStatsSampled
@@ -2075,7 +2082,15 @@ std::size_t EmitRendererMemory(const char *state, bool sampleAllocator = true)
         static_cast<double>(g_renderer.imageDecodeStats.contextRecoveryDecodes),
         static_cast<double>(g_renderer.imageDecodeStats.bytesDecoded),
         static_cast<double>(g_renderer.imageDecodeStats.duplicateDecodes),
-        g_renderer.imageDecodeStats.cpuMilliseconds);
+        g_renderer.imageDecodeStats.cpuMilliseconds,
+        static_cast<double>(
+            (g_renderer.retainedDynamicModelVertices.capacity() +
+                g_renderer.dynamicModelVertexStaging.capacity()) * sizeof(WebRendererSurfaceVertex) +
+            (g_renderer.retainedDynamicModelIndices.capacity() +
+                g_renderer.dynamicModelIndexStaging.capacity()) * sizeof(std::uint32_t)),
+        static_cast<double>(
+            g_renderer.dynamicModelVertexStaging.capacity() * sizeof(WebRendererSurfaceVertex) +
+            g_renderer.dynamicModelIndexStaging.capacity() * sizeof(std::uint32_t)));
 #else
     (void)sampleAllocator;
     DispatchRendererMemory(
@@ -5634,8 +5649,10 @@ WebRendererSurfaceResult CopyWorldCommand(
     std::size_t retainedPixelBytes = RetainedImageStats(images).decodedBytes;
     try
     {
-        vertices.assign(surface.vertices, surface.vertices + surface.vertexCount);
-        indices.assign(surface.indices, surface.indices + surface.indexCount);
+        const WebRendererSurfaceResult geometryCopy = WebRenderer_CopyStagedGeometry(
+            {surface.vertices, surface.vertexCount},
+            {surface.indices, surface.indexCount}, vertices, indices);
+        if (geometryCopy != WebRendererSurfaceResult::Success) return geometryCopy;
 #if KISAK_WEB_DIAGNOSTICS
         const double batchCopyStarted = commandProfile ? WebFrameProfile_Now() : 0.0;
         if (commandProfile)
@@ -6739,6 +6756,10 @@ void WebRenderer_UnloadWorldResources()
         g_renderer.retainedDynamicModelVertices);
     decltype(g_renderer.retainedDynamicModelIndices){}.swap(
         g_renderer.retainedDynamicModelIndices);
+    decltype(g_renderer.dynamicModelVertexStaging){}.swap(
+        g_renderer.dynamicModelVertexStaging);
+    decltype(g_renderer.dynamicModelIndexStaging){}.swap(
+        g_renderer.dynamicModelIndexStaging);
     decltype(g_renderer.retainedDynamicModelBatches){}.swap(
         g_renderer.retainedDynamicModelBatches);
     decltype(g_renderer.retainedDynamicModelImages){}.swap(
@@ -7036,8 +7057,8 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
     WebFrameProfileSample *const dynamicProfile = WebFrameProfile_Current();
     const double copyStarted = dynamicProfile ? WebFrameProfile_Now() : 0.0;
 #endif
-    std::vector<WebRendererSurfaceVertex> retainedVertices;
-    std::vector<std::uint32_t> retainedIndices;
+    auto &retainedVertices = g_renderer.dynamicModelVertexStaging;
+    auto &retainedIndices = g_renderer.dynamicModelIndexStaging;
     std::vector<WebRendererRetainedWorldBatch> retainedBatches;
     std::vector<WebRendererRetainedPrimaryLight> ignoredPrimaryLights;
     std::uint32_t ignoredSunPrimaryLightIndex = 0u;
@@ -7112,8 +7133,10 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
         g_renderer.dynamicModelVertexBuffer = vertexBuffer;
         g_renderer.dynamicModelIndexBuffer = indexBuffer;
     }
-    g_renderer.retainedDynamicModelVertices = std::move(retainedVertices);
-    g_renderer.retainedDynamicModelIndices = std::move(retainedIndices);
+    g_renderer.retainedDynamicModelVertices.swap(retainedVertices);
+    g_renderer.retainedDynamicModelIndices.swap(retainedIndices);
+    retainedVertices.clear();
+    retainedIndices.clear();
     g_renderer.retainedDynamicModelBatches = std::move(retainedBatches);
     g_renderer.retainedDynamicModelLighting = std::move(retainedLighting);
     g_renderer.dynamicModelSceneActive = true;

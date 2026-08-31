@@ -3,6 +3,7 @@
 #include <web/web_renderer_surface.h>
 
 #include <cstdint>
+#include <span>
 #include <vector>
 
 // Renderer-internal, backend-neutral recovery value. Building a replacement
@@ -25,3 +26,11 @@ WebRendererSurfaceResult WebRenderer_CopySurface(
     const WebRendererSurfaceDesc &surface,
     const WebRendererDrawDesc &draw,
     WebRendererOwnedSurface &destination);
+
+// Copy already-validated, non-aliasing geometry into reusable staging buffers.
+// Staging may change on allocation failure; publish only after backend success.
+WebRendererSurfaceResult WebRenderer_CopyStagedGeometry(
+    std::span<const WebRendererSurfaceVertex> sourceVertices,
+    std::span<const std::uint32_t> sourceIndices,
+    std::vector<WebRendererSurfaceVertex> &vertices,
+    std::vector<std::uint32_t> &indices);
