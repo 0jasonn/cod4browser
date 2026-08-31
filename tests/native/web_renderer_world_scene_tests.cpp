@@ -1126,6 +1126,115 @@ void TestMalformedDynamicBrushRangeIsRejectedAtomically()
         WebRendererWorldSceneResult::InvalidSurfaceRange);
     assert(command.surfaceCount == 99u);
 }
+
+void TestBrushReuseMatchesUncachedWorldSelectionAndRejectsAtomically()
+{
+    // Repository-authored synthetic data, under the repository license.
+    // The uncached world path supplies the technique/hash and vertex oracle.
+    Fixture fixture;
+    std::uint32_t vertexProgram[]{0x12345678u, 0x90abcdefu};
+    std::uint32_t pixelProgram[]{0x76543210u, 0xfedcba98u};
+    MaterialVertexShader vertexShader{};
+    vertexShader.name = "synthetic_vertex";
+    vertexShader.prog.loadDef.program = vertexProgram;
+    vertexShader.prog.loadDef.programSize = 2;
+    MaterialPixelShader pixelShader{};
+    pixelShader.name = "synthetic_pixel";
+    pixelShader.prog.loadDef.program = pixelProgram;
+    pixelShader.prog.loadDef.programSize = 2;
+    MaterialTechnique lit{};
+    lit.name = "synthetic_lit";
+    lit.passCount = 1;
+    lit.flags = 17;
+    lit.passArray[0].vertexShader = &vertexShader;
+    lit.passArray[0].pixelShader = &pixelShader;
+    lit.passArray[0].customSamplerFlags = 6;
+    MaterialTechnique spot = lit;
+    spot.name = "synthetic_spot";
+    spot.flags = 23;
+    MaterialTechniqueSet techniqueSet{};
+    techniqueSet.techniques[TECHNIQUE_LIT_INDEX] = &lit;
+    techniqueSet.techniques[TECHNIQUE_LIT_SPOT_INDEX] = &spot;
+    techniqueSet.techniques[TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX] = &lit;
+    GfxStateBits states[2]{};
+    states[0].loadBits[0] = 0x1234;
+    states[1].loadBits[1] = 0x5678;
+    Material material{};
+    material.techniqueSet = &techniqueSet;
+    material.stateBitsTable = states;
+    material.stateBitsCount = 2;
+    std::fill_n(material.stateBitsEntry, 34, std::uint8_t{0xff});
+    material.stateBitsEntry[TECHNIQUE_LIT_INDEX] = 0;
+    material.stateBitsEntry[TECHNIQUE_LIT_SPOT_INDEX] = 1;
+    Material otherMaterial = material;
+    GfxStateBits otherStates[2]{};
+    otherStates[0].loadBits[0] = 0xabcd;
+    otherMaterial.stateBitsTable = otherStates;
+    for (std::size_t i = 0; i < fixture.surfaces.size(); ++i)
+    {
+        fixture.surfaces[i].material = &material;
+        // Split batches without changing their requested technique.
+        fixture.surfaces[i].lightmapIndex = static_cast<std::uint8_t>(i);
+    }
+    std::array<WebRendererPrimaryLightDesc, 3> lights{};
+    lights[2].type = 2;
+    const WebRendererWorldLightTechniqueContext context{lights.data(), 3, 1, false};
+    WebRendererBrushModelSubmission submission{};
+    submission.model = &fixture.model;
+    for (std::size_t i = 0; i < 3; ++i) submission.axis[i][i] = 1.0f;
+    WebRendererBrushModelSceneCommand actual;
+    const auto check = [&]() {
+        WebRendererWorldSceneCommand expected;
+        assert(WebRenderer_BuildWorldSceneCommand(fixture.world, MakeView(), expected, &context) ==
+            WebRendererWorldSceneResult::Success);
+        assert(WebRenderer_BuildBrushModelSceneCommand(fixture.world, &submission, 1, actual, &context) ==
+            WebRendererWorldSceneResult::Success);
+        assert(actual.indices == expected.indices && actual.vertices.size() == expected.vertices.size());
+        assert(std::memcmp(actual.vertices.data(), expected.vertices.data(),
+            actual.vertices.size() * sizeof(WebRendererSurfaceVertex)) == 0);
+        assert(actual.batches.size() == 3 && expected.batches.size() == 3);
+        for (std::size_t i = 0; i < actual.batches.size(); ++i)
+        {
+            const auto &a = actual.batches[i];
+            const auto &e = expected.batches[i];
+            assert(a.materialIdentity == e.materialIdentity && a.techniqueType == e.techniqueType);
+            assert(std::strcmp(a.techniqueName, e.techniqueName) == 0 && a.technique == e.technique);
+            assert(a.techniqueFlags == e.techniqueFlags && a.customSamplerFlags == e.customSamplerFlags);
+            assert(std::strcmp(a.vertexShaderName, e.vertexShaderName) == 0);
+            assert(std::strcmp(a.pixelShaderName, e.pixelShaderName) == 0);
+            assert(a.vertexShaderProgramHash == e.vertexShaderProgramHash);
+            assert(a.pixelShaderProgramHash == e.pixelShaderProgramHash);
+            assert(a.stateBits[0] == e.stateBits[0] && a.stateBits[1] == e.stateBits[1]);
+            assert(a.firstIndex == e.firstIndex && a.indexCount == e.indexCount);
+            assert(a.primaryLightIndex == e.primaryLightIndex && a.lightmapIndex == e.lightmapIndex);
+            assert(a.sourceKind == WebRendererSceneBatchKind::DynamicBModel);
+            assert(a.castsSunShadow == (a.materialIdentity != nullptr));
+        }
+    };
+    check(); // Consecutive identical keys still emit distinct lightmap batches.
+    fixture.surfaces[1].material = &otherMaterial;
+    check(); // A -> B -> A must not reuse a different material's state.
+    fixture.surfaces[1].material = &material;
+    fixture.surfaces[1].primaryLightIndex = 2;
+    check(); // Same material, lit -> spot -> lit.
+    vertexProgram[0] ^= 0xffu;
+    pixelProgram[1] ^= 0xffu;
+    states[0].loadBits[0] ^= 0xffu;
+    check(); // New builds must observe changed shader bytes and state.
+    techniqueSet.techniques[TECHNIQUE_LIT_SPOT_INDEX] = nullptr;
+    check(); // Missing requested technique must not reuse the lit result.
+    for (auto &surface : fixture.surfaces) surface.material = nullptr;
+    check();
+    const auto savedVertices = actual.vertices;
+    const auto savedIndices = actual.indices;
+    fixture.vertices[8].binormalSign = std::numeric_limits<float>::quiet_NaN();
+    assert(WebRenderer_BuildBrushModelSceneCommand(fixture.world, &submission, 1, actual, &context) ==
+        WebRendererWorldSceneResult::InvalidSurfaceBounds);
+    assert(actual.vertices.size() == savedVertices.size());
+    assert(std::memcmp(actual.vertices.data(), savedVertices.data(),
+        savedVertices.size() * sizeof(WebRendererSurfaceVertex)) == 0);
+    assert(actual.indices == savedIndices && actual.batches.size() == 3 && actual.surfaceCount == 3);
+}
 } // namespace
 
 int main()
@@ -1155,5 +1264,6 @@ int main()
     TestSpotShadowCommandPreservesAuthoredCasterMembership();
     TestDynamicBrushModelUsesCanonicalSurfaceRangeAndPlacement();
     TestMalformedDynamicBrushRangeIsRejectedAtomically();
+    TestBrushReuseMatchesUncachedWorldSelectionAndRejectsAtomically();
     return 0;
 }

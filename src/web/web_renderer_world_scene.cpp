@@ -228,6 +228,15 @@ struct TechniqueSelection
     std::uint32_t stateBits[2]{};
 };
 
+// Canonical material/technique contents are immutable during one synchronous
+// brush build. Keep only the preceding result; never retain it across builds.
+struct LastBrushTechnique
+{
+    const Material *material = nullptr;
+    std::uint32_t requestedType = UINT32_MAX;
+    TechniqueSelection selection;
+};
+
 bool IsCanonicalWorldColorLitAlias(const MaterialTechniqueSet *techniqueSet)
     noexcept
 {
@@ -395,7 +404,8 @@ WebRendererWorldBatchDesc MakeBatch(
     std::uint32_t surfaceIndex,
     std::uint32_t firstIndex,
     bool sunShadowEnabled,
-    const WebRendererWorldLightTechniqueContext *lightContext) noexcept
+    const WebRendererWorldLightTechniqueContext *lightContext,
+    LastBrushTechnique *lastTechnique = nullptr) noexcept
 {
     WebRendererWorldBatchDesc batch{};
     batch.firstIndex = firstIndex;
@@ -428,8 +438,13 @@ WebRendererWorldBatchDesc MakeBatch(
     }
     const std::uint32_t requestedTechniqueType = SelectLitTechniqueType(
         surface.primaryLightIndex, lightContext, sunShadowEnabled);
-    const TechniqueSelection technique = SelectTechnique(
-        surface.material, requestedTechniqueType);
+    const TechniqueSelection technique = lastTechnique &&
+            lastTechnique->material == surface.material &&
+            lastTechnique->requestedType == requestedTechniqueType
+        ? lastTechnique->selection
+        : SelectTechnique(surface.material, requestedTechniqueType);
+    if (lastTechnique)
+        *lastTechnique = {surface.material, requestedTechniqueType, technique};
     batch.techniqueName = technique.identityName
         ? technique.identityName : "<unsupported-technique>";
     batch.techniqueType = static_cast<std::uint8_t>(technique.type);
@@ -960,6 +975,7 @@ WebRendererWorldSceneResult WebRenderer_BuildBrushModelSceneCommand(
     }
 
     WebRendererBrushModelSceneCommand replacement;
+    LastBrushTechnique lastTechnique;
 #if KISAK_WEB_DIAGNOSTICS
     WebFrameProfileSample *const profile = WebFrameProfile_Current();
     double stageStarted = profile ? WebFrameProfile_Now() : 0.0;
@@ -1058,7 +1074,10 @@ WebRendererWorldSceneResult WebRenderer_BuildBrushModelSceneCommand(
                         {
                             return WebRendererWorldSceneResult::InvalidSurfaceBounds;
                         }
-                        WebRendererSurfaceVertex vertex{};
+                        // Only the complete replacement is published on success.
+                        destinationIndex = static_cast<std::uint32_t>(
+                            replacement.vertices.size());
+                        WebRendererSurfaceVertex &vertex = replacement.vertices.emplace_back();
                         for (std::size_t component = 0u;
                              component < 3u; ++component)
                         {
@@ -1103,9 +1122,6 @@ WebRendererWorldSceneResult WebRenderer_BuildBrushModelSceneCommand(
                         {
                             return WebRendererWorldSceneResult::InvalidSurfaceBounds;
                         }
-                        destinationIndex = static_cast<std::uint32_t>(
-                            replacement.vertices.size());
-                        replacement.vertices.push_back(vertex);
                         touchedVertices.push_back(sourceVertexIndex);
                     }
                     replacement.indices.push_back(destinationIndex);
@@ -1121,7 +1137,7 @@ WebRendererWorldSceneResult WebRenderer_BuildBrushModelSceneCommand(
 #endif
                 WebRendererWorldBatchDesc candidate = MakeBatch(
                     world, surface, surfaceIndex, firstDestinationIndex,
-                    false, lightContext);
+                    false, lightContext, &lastTechnique);
                 candidate.indexCount = indexCount;
                 candidate.sourceKind =
                     WebRendererSceneBatchKind::DynamicBModel;
