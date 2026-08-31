@@ -321,6 +321,8 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR
     add_executable(web_renderer_dobj_submission_tests
         "${CMAKE_CURRENT_LIST_DIR}/web_renderer_dobj_submission_tests.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/web/web_renderer_dobj_lod.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/web/web_renderer_dobj_scene.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/web/web_renderer_lighting.cpp"
     )
 endif()
 
@@ -490,7 +492,8 @@ else()
 endif()
 if (TARGET web_renderer_dobj_submission_tests)
     target_compile_features(web_renderer_dobj_submission_tests PRIVATE cxx_std_20)
-    target_include_directories(web_renderer_dobj_submission_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
+    target_include_directories(web_renderer_dobj_submission_tests PRIVATE
+        "${KISAK_REPOSITORY_ROOT}/src" "${KISAK_REPOSITORY_ROOT}/deps")
     target_compile_definitions(web_renderer_dobj_submission_tests PRIVATE
         KISAK_SP=1 dNODEBUG=1)
     if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")

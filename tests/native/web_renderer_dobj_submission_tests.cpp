@@ -2,16 +2,145 @@
 #include <gfx_d3d/material_types.h>
 #include <universal/q_shared.h>
 #include <xanim/xmodel.h>
+#include <cgame/cg_pose.h>
+#include <xanim/xsurface_types.h>
 
+#include <algorithm>
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
+#include <limits>
 
 namespace
 {
 float g_lodDistance = -1.0f;
 int g_canonicalLod = 2;
 Material *g_resolvedMaterial = nullptr;
+
+// Synthetic, repository-authored geometry. Runtime pose and packing are
+// stubbed below; the actual builder, validation and publication run here.
+void TestDObjEmissionAndAtomicFailure()
+{
+    std::array<GfxPackedVertex, 3> vertices{};
+    for (std::size_t i = 0; i < vertices.size(); ++i)
+    {
+        vertices[i].xyz[0] = static_cast<float>(i);
+        vertices[i].color.packed = 0x80402010u;
+        vertices[i].texCoord.packed = 0x0201u;
+        vertices[i].binormalSign = -1.0f;
+    }
+    std::uint16_t indices[]{0, 2, 1};
+    XRigidVertList rigid{};
+    rigid.vertCount = 3;
+    std::array<XSurface, 2> surfaces{};
+    for (XSurface &surface : surfaces)
+    {
+        surface.vertCount = 3;
+        surface.triCount = 1;
+        surface.verts0 = vertices.data();
+        surface.triIndices = indices;
+        surface.vertList = &rigid;
+        surface.vertListCount = 1;
+        surface.partBits[0] = static_cast<int>(0x80000000u);
+    }
+    Material *materials[]{nullptr, nullptr};
+    DObjAnimMat base{};
+    XModel model{};
+    model.numBones = 1;
+    model.numLods = 1;
+    model.numsurfs = 2;
+    model.lodInfo[0].numsurfs = 2;
+    model.surfs = surfaces.data();
+    model.materialHandles = materials;
+    model.baseMat = &base;
+    XModel *models[]{&model};
+    DObj_s obj{};
+    obj.numModels = 1;
+    obj.numBones = 1;
+    obj.models = models;
+    obj.skel.mat = &base;
+    cpose_t pose{};
+    WebRendererDObjSubmission submission{&obj, &pose, 17u, 2u};
+    WebRendererDObjSceneCommand command;
+    WebRendererLodParms lodParms;
+    assert(WebRenderer_BuildLodParms(pose.origin, 1.0f, 1.0f, 0.0f,
+        1.0f, 0.0f, lodParms));
+    g_canonicalLod = 0;
+    assert(WebRenderer_BuildDObjSceneCommand(&submission, 1, command, &lodParms) ==
+        WebRendererDObjSceneResult::Success);
+    assert(command.vertices.size() == 6 && command.indices.size() == 6);
+    assert(command.batches.size() == 2 && command.surfaceCount == 2);
+    assert(command.dobjCount == 1 && command.modelCount == 1);
+    for (std::size_t i = 0; i < command.vertices.size(); ++i)
+    {
+        const auto &v = command.vertices[i];
+        assert(v.position[0] == static_cast<float>(i % 3));
+        assert(v.position[1] == 0.0f && v.position[2] == 0.0f);
+        assert(v.normal[2] == 1.0f && v.tangent[2] == 1.0f);
+        assert(v.normal[0] == 0.0f && v.normal[1] == 0.0f);
+        assert(v.tangent[0] == 0.0f && v.tangent[1] == 0.0f);
+        assert(v.binormalSign == -1.0f);
+        assert(v.lightmapCoordinate[0] == 0.0f && v.lightmapCoordinate[1] == 0.0f);
+        assert(v.textureCoordinate[0] == 1.0f && v.textureCoordinate[1] == 2.0f);
+        assert(std::fabs(v.color[0] - 64.0f / 255.0f) < 0.000001f);
+        assert(std::fabs(v.color[1] - 32.0f / 255.0f) < 0.000001f);
+        assert(std::fabs(v.color[2] - 16.0f / 255.0f) < 0.000001f);
+        assert(std::fabs(v.color[3] - 128.0f / 255.0f) < 0.000001f);
+        assert(command.indices[i] == indices[i % 3] + (i / 3) * 3);
+    }
+    assert(command.batches[0].firstIndex == 0 && command.batches[1].firstIndex == 3);
+    assert(command.batches[0].depthHack && command.batches[1].depthHack);
+    assert(command.batches[0].modelIdentity == &model);
+    const auto savedVertices = command.vertices;
+    const auto savedIndices = command.indices;
+    const auto unchanged = [&]() {
+        assert(command.vertices.size() == savedVertices.size());
+        assert(std::memcmp(command.vertices.data(), savedVertices.data(),
+            savedVertices.size() * sizeof(WebRendererSurfaceVertex)) == 0);
+        assert(command.indices == savedIndices && command.batches.size() == 2);
+        assert(command.surfaceCount == 2 && command.dobjCount == 1 && command.modelCount == 1);
+    };
+    auto badVertices = vertices;
+    surfaces[1].verts0 = badVertices.data();
+    for (float *value : {&badVertices[2].xyz[0], &badVertices[2].binormalSign})
+    {
+        const float saved = *value;
+        *value = std::numeric_limits<float>::quiet_NaN();
+        assert(WebRenderer_BuildDObjSceneCommand(&submission, 1, command, &lodParms) ==
+            WebRendererDObjSceneResult::InvalidModel);
+        unchanged();
+        *value = saved;
+    }
+    badVertices[2].texCoord.packed = UINT32_MAX;
+    assert(WebRenderer_BuildDObjSceneCommand(&submission, 1, command, &lodParms) ==
+        WebRendererDObjSceneResult::InvalidModel);
+    unchanged();
+    surfaces[1].verts0 = vertices.data();
+    std::uint16_t badIndices[]{0, 2, 3};
+    surfaces[1].triIndices = badIndices;
+    assert(WebRenderer_BuildDObjSceneCommand(&submission, 1, command, &lodParms) ==
+        WebRendererDObjSceneResult::IndexOutOfRange);
+    unchanged();
+    surfaces[1].triIndices = indices;
+    obj.hidePartBits[0] = 0x80000000u;
+    assert(WebRenderer_BuildDObjSceneCommand(&submission, 1, command, &lodParms) ==
+        WebRendererDObjSceneResult::NoDObj);
+    unchanged();
+    obj.hidePartBits[0] = 0;
+    // The same emission loop also receives weighted vertices.
+    std::uint16_t blend[]{0, 0, 0};
+    for (XSurface &surface : surfaces)
+    {
+        surface.deformed = true;
+        surface.vertInfo.vertCount[0] = 3;
+        surface.vertInfo.vertsBlend = blend;
+    }
+    assert(WebRenderer_BuildDObjSceneCommand(&submission, 1, command, &lodParms) ==
+        WebRendererDObjSceneResult::Success);
+    unchanged();
+}
 
 Material *ResolveMaterial(Material *) noexcept
 {
@@ -156,6 +285,7 @@ int main()
     TestInvalidAndCapacityAdmissionIsDeterministic();
     TestDObjMaterialResolutionPreservesCanonicalFallback();
     TestReflexSightTechniqueSelectsIntensityOpacitySubset();
+    TestDObjEmissionAndAtomicFailure();
     return 0;
 }
 
@@ -163,4 +293,35 @@ int __cdecl XModelGetLodForDist(const XModel *, float distance)
 {
     g_lodDistance = distance;
     return g_canonicalLod;
+}
+
+DObjAnimMat *__cdecl CG_DObjCalcPose(const cpose_t *, const DObj_s *obj, int *)
+{
+    return obj->skel.mat;
+}
+XModel *__cdecl DObjGetModel(const DObj_s *obj, int index) { return obj->models[index]; }
+void __cdecl DObjGetHidePartBits(const DObj_s *obj, std::uint32_t *bits)
+{
+    std::copy_n(obj->hidePartBits, 4, bits);
+}
+void __cdecl ConvertQuatToSkelMat(const DObjAnimMat *, DObjSkelMat *matrix)
+{
+    *matrix = {};
+    for (int i = 0; i < 3; ++i) matrix->axis[i][i] = 1.0f;
+    matrix->origin[3] = 1.0f;
+}
+void __cdecl ConvertQuatToInverseSkelMat(const DObjAnimMat *mat, DObjSkelMat *matrix)
+{
+    ConvertQuatToSkelMat(mat, matrix);
+}
+void __cdecl Vec2UnpackTexCoords(PackedTexCoords in, float *out)
+{
+    out[0] = in.packed == UINT32_MAX ? std::numeric_limits<float>::quiet_NaN()
+        : static_cast<float>(in.packed & 0xffu);
+    out[1] = static_cast<float>((in.packed >> 8) & 0xffu);
+}
+void __cdecl Vec3UnpackUnitVec(PackedUnitVec, float *out)
+{
+    out[0] = out[1] = 0.0f;
+    out[2] = 1.0f;
 }

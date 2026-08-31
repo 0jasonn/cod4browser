@@ -629,7 +629,9 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                     {
                         const GfxPackedVertex &source =
                             surface.verts0[vertexIndex];
-                        WebRendererSurfaceVertex vertex{};
+                        // The replacement is private until the entire command succeeds.
+                        // Fill its value-initialized vertex directly, avoiding a copy.
+                        WebRendererSurfaceVertex &vertex = replacement.vertices.emplace_back();
                         std::copy_n(&scratch.positions[vertexIndex * 3u], 3u,
                             vertex.position);
                         std::copy_n(&scratch.normals[vertexIndex * 3u], 3u,
@@ -656,7 +658,6 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                         {
                             return WebRendererDObjSceneResult::InvalidModel;
                         }
-                        replacement.vertices.push_back(vertex);
                     }
 #if KISAK_WEB_DIAGNOSTICS
                     double emitStarted = profile ? WebFrameProfile_Now() : 0.0;
