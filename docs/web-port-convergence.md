@@ -206,6 +206,17 @@ shader hashing, technique selection and batch merge policy remain; no new cache,
 allocation policy or engine representation was added. Retained artifacts now
 support interleaved comparisons before further optimization.
 
+The [controlled timing follow-up](evidence/controlled-renderer-552a468d.md)
+moves `Com_ModifyMsec` outside the temporary common.cpp compile gate and calls
+it in the browser pump at the native pre-server boundary. Its single native
+body owns fixedtime, time scaling and clamping for both paths; the browser
+still owns only nonblocking callback admission. No prefix function was copied.
+Canonical pause/free-move commands and existing refdef events now qualify a
+paused renderer benchmark. The Node runner owns only test orchestration and
+comparison; it does not own game state or a replay format. Exact sampled camera,
+time and world-count matching is demonstrated, not complete dynamic state or
+active-gameplay determinism. Culling and independent shadow paths are unchanged.
+
 ## Temporary compatibility seams
 
 | Seam | Retirement condition |

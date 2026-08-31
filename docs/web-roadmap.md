@@ -36,9 +36,14 @@ Manual gameplay assessment can guide renderer work without a progression gate.
    Both optimization candidates were reverted after production comparisons
    remained slower; the verified baseline runtime is restored. Profiling and
    focused regression coverage remain.
-5. Next: make the timing workload repeatable, using retained artifacts,
-   controlled scene position/time and repeated interleaved windows before
-   further CPU changes. Do not infer whole-frame gains from local timers or
+5. The [controlled timing work](evidence/controlled-renderer-552a468d.md) now
+   qualifies a paused renderer window: two fresh loads matched all six camera,
+   time and world-geometry checkpoints. A retained legacy candidate was rejected
+   for ignoring fixedtime. Native time adjustment is shared with the web pump.
+   Active-gameplay replay and dynamic entity/caster equality remain unproven.
+6. Next: align diagnostic profiling and dynamic work counts with that paused
+   window, then evaluate one command-copy optimization using qualified A/B/B/A
+   production windows. Do not infer whole-frame gains from local timers or
    add global GL caches, new batching representations or GPU-buffer policies
    from an aggregate renderer total alone.
 
@@ -57,6 +62,11 @@ The production before/after means were effectively unchanged (39.547 ->
 The brush follow-up used the focused world/brush fixture, a targeted
 implementation revision, three diagnostic builds/profiles, a candidate Release
 and a targeted baseline-control Release, which became the final delivered build.
+
+The controlled-window follow-up used one focused Node fixture, setup trials and
+an A / rejected legacy B / A qualification. The Release initially failed at the
+common compile boundary; the targeted retry passed after sharing the native
+time-adjustment body. No renderer expansion or broad suite was added.
 
 Historical plans and completed milestones remain in
 [the earlier roadmap](history/web-roadmap-through-2026-08-28.md) and

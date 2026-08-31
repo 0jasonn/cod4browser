@@ -4,7 +4,22 @@ Updated 2026-08-31. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
-## Brush cost investigation complete
+## Paused renderer benchmark qualified
+
+The browser pump now shares native `Com_ModifyMsec`, restoring canonical
+fixedtime/time-scale handling. The existing profiling runner can select an
+exact paused scene time and fixed free-camera view, then reject mismatched
+camera/time/geometry traces before timing comparison.
+
+Two corrected-build runs matched all six checkpoints: mean callback intervals
+were 26.655 and 26.134 ms. An interleaved legacy candidate was correctly rejected
+for ignoring fixedtime. These are **paused renderer measurements**, not active
+gameplay or FPS gains; entity/particle/caster equality is not yet established.
+The focused fixture and Release retry passed. See [the evidence](evidence/controlled-renderer-552a468d.md).
+Next: align diagnostic profiling and dynamic work counts with this window before
+testing another command-copy optimization.
+
+## Prior brush cost investigation
 
 Brush costs are now separated: material/batch setup measured 2.029 ms,
 geometry 1.496 ms, remapping 0.095 ms and append 0.144 ms in the baseline.
@@ -14,8 +29,8 @@ an interleaved control. The verified baseline runtime/build is restored.
 
 Profiling, focused regression coverage and retained-artifact comparison support
 remain. Tests and Release/control builds passed. See [the evidence](evidence/brush-costs-f15c3dc9.md)
-for all runs and uncertainty. Next: make the timing workload repeatable before
-further CPU changes. No rendering or playability improvement is claimed.
+for all runs and uncertainty. This prompted the controlled timing work above.
+No rendering or playability improvement is claimed.
 
 ## Prior direct DObj vertex emission
 
