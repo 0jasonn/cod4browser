@@ -88,8 +88,11 @@ try {
         addEventListener('kisakcod:renderer-scene-frame', sample);
     });
     // Poll only completion, not individual frame timestamps across the Worker bridge.
-    while (await engineWorker.evaluate(() => __cleanFrames.length) < 301)
+    const cleanDeadline = Date.now() + 60000;
+    while (await engineWorker.evaluate(() => __cleanFrames.length) < 301) {
+        assert(Date.now() < cleanDeadline, 'profiling-disabled window completed within 60 seconds');
         await page.waitForTimeout(1000);
+    }
     const cleanFrames = await engineWorker.evaluate(() => __cleanFrames);
     const cleanForeground = summarizeForegroundSamples(await page.evaluate(() => {
         __dobj.collecting = false;

@@ -1,5 +1,7 @@
 #include <web/web_renderer_surface_storage.h>
 #include <web/web_renderer_dynamic_textures.h>
+#include <web/web_renderer_dynamic_state.h>
+#include <web/web_renderer.h>
 
 #include <array>
 #include <cmath>
@@ -395,6 +397,79 @@ void TestDynamicTextureBindings()
     Require(actual.calls == before + 12, "zero-valued first set still binds");
 }
 
+void TestDynamicDrawState()
+{
+    WebRendererDynamicDrawState<WebRendererWorldBatchDesc> state;
+    const std::array<float, 16> scene{1.0f}, depthHack{2.0f}, sun{3.0f};
+    std::array<float, 16> uploaded{};
+    unsigned projectionUpdates = 0;
+    for (const auto *matrix : {&scene, &scene, &sun, &scene, &depthHack, &depthHack})
+    {
+        if (state.NeedsProjection(matrix->data()))
+        {
+            uploaded = *matrix;
+            ++projectionUpdates;
+        }
+        Require(uploaded == *matrix, "each draw keeps its projection despite skipped uploads");
+    }
+    Require(projectionUpdates == 4, "only repeated projections are omitted");
+    uploaded = sun; // Direct GL override, as in the sun-query path.
+    state.Reset();
+    Require(state.NeedsProjection(depthHack.data()), "sun override requires projection restoration");
+
+    const WebRendererWorldBatchDesc base{};
+    Require(state.NeedsMaterial(base), "first material is always applied");
+    Require(!state.NeedsMaterial(base), "repeated material needs no state calls");
+    const auto requireMaterialChange = [&](auto modify) {
+        auto changed = base;
+        modify(changed);
+        state.Reset();
+        Require(state.NeedsMaterial(base), "new pass applies baseline state");
+        Require(state.NeedsMaterial(changed), "changed material input cannot be omitted");
+        Require(!state.NeedsMaterial(changed), "unchanged material can be omitted");
+        Require(state.NeedsMaterial(base), "return to earlier material restores its state");
+        state.Reset(); // Do not retain the local changed batch beyond its lifetime.
+    };
+    // Identities are opaque and never dereferenced by the backend state helper.
+    requireMaterialChange([](auto &b) { b.materialIdentity = reinterpret_cast<const Material *>(1); });
+    for (unsigned word = 0; word < 2; ++word)
+        for (unsigned bit = 0; bit < 32; ++bit)
+            requireMaterialChange([&](auto &b) { b.stateBits[word] = 1u << bit; });
+    requireMaterialChange([](auto &b) { b.technique = WebRendererWorldTechnique::VertexColorDistanceFalloff; });
+    requireMaterialChange([](auto &b) { b.sourceKind = WebRendererSceneBatchKind::SunSprite; });
+    requireMaterialChange([](auto &b) { b.ambientProbeLighting = true; });
+    for (unsigned component = 0; component < 4; ++component)
+    {
+        requireMaterialChange([&](auto &b) { b.falloffParms[component] = 0.5f; });
+        requireMaterialChange([&](auto &b) { b.falloffBeginColor[component] = 0.5f; });
+        requireMaterialChange([&](auto &b) { b.falloffEndColor[component] = 0.5f; });
+    }
+    requireMaterialChange([](auto &b) { b.falloffParms[0] = -0.0f; });
+    auto differentDraw = base;
+    differentDraw.firstIndex = 3;
+    differentDraw.modelLightingCoordinates[0] = 0.25f;
+    state.NeedsMaterial(base);
+    Require(!state.NeedsMaterial(differentDraw),
+        "geometry and per-model lighting remain per-draw, not material state");
+
+    const std::array<bool, 9> disabled{};
+    Require(state.NeedsFeatures(disabled), "all-disabled features are still uploaded first");
+    Require(!state.NeedsFeatures(disabled), "unchanged feature flags need no uploads");
+    for (unsigned bit = 0; bit < disabled.size(); ++bit)
+    {
+        auto enabled = disabled;
+        enabled[bit] = true;
+        Require(state.NeedsFeatures(enabled), "each feature transition must upload");
+        Require(!state.NeedsFeatures(enabled), "repeated feature group can be omitted");
+        Require(state.NeedsFeatures(disabled), "disabling a feature must upload");
+    }
+    // Sun sprite depth overrides and a new camera pass/frame/context invalidate
+    // all three groups even when the requested values are identical.
+    state.Reset();
+    Require(state.NeedsProjection(depthHack.data()) && state.NeedsMaterial(differentDraw) &&
+        state.NeedsFeatures(disabled), "reset cannot retain any stale GL state");
+}
+
 void TestErrorStrings()
 {
     for (const WebRendererSurfaceResult result : {
@@ -455,6 +530,7 @@ int main()
     runner.Run("owned copy and atomic failure", TestOwnedCopyAndAtomicFailure);
     runner.Run("reusable staged geometry", TestReusableStagedGeometry);
     runner.Run("dynamic texture binding equivalence", TestDynamicTextureBindings);
+    runner.Run("dynamic draw state transitions", TestDynamicDrawState);
     runner.Run("surface result strings", TestErrorStrings);
     return runner.Result();
 }

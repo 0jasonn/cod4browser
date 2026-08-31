@@ -4,6 +4,7 @@
 #include <web/web_renderer_surface_storage.h>
 #include <web/web_renderer_context.h>
 #include <web/web_renderer_dynamic_textures.h>
+#include <web/web_renderer_dynamic_state.h>
 #include <web/web_renderer_lod.h>
 #include <web/web_renderer_world_scene.h>
 #include <web/web_system.h>
@@ -9973,6 +9974,8 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
         for (std::uint32_t cameraPass = 0u; cameraPass < 2u; ++cameraPass)
         {
             const bool depthHackPass = cameraPass != 0u;
+            WebRendererDynamicDrawState<WebRendererRetainedWorldBatch> drawState;
+            glDepthRangef(0.0f, depthHackPass ? 0.015625f : 1.0f);
             for (const WebRendererRetainedWorldBatch &batch :
                  g_renderer.retainedDynamicModelBatches)
             {
@@ -9988,6 +9991,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
 #endif
                 if (batch.sourceKind == WebRendererSceneBatchKind::SunFlare)
                 {
+                    drawState.Reset();
                     if (depthHackPass) continue;
                     if (g_renderer.sunVisibilityQueries[0] == 0u &&
                         g_renderer.sunVisibilityQueries[1] == 0u)
@@ -10113,26 +10117,33 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                     g_frameProfileDrawBucket == FrameProfileDrawBucket::DynamicModel;
                 const double projectionStarted = profileDynamicModel
                     ? WebFrameProfile_Now() : 0.0;
-                if (profileDynamicModel) ++frameProfile->dynamicProjectionUpdates;
 #endif
-                glUniformMatrix4fv(g_renderer.viewProjectionUniform, 1,
-                    GL_FALSE,
-                    sunSprite
-                        ? IDENTITY_MATRIX
-                        : batch.depthHack
-                        ? g_renderer.sceneDepthHackViewProjection.data()
-                        : g_renderer.sceneViewProjection.data());
-                glDepthRangef(0.0f, batch.depthHack ? 0.015625f : 1.0f);
+                const float *projection = sunSprite ? IDENTITY_MATRIX
+                    : depthHackPass ? g_renderer.sceneDepthHackViewProjection.data()
+                    : g_renderer.sceneViewProjection.data();
+                if (drawState.NeedsProjection(projection))
+                {
+                    glUniformMatrix4fv(g_renderer.viewProjectionUniform, 1,
+                        GL_FALSE, projection);
+#if KISAK_WEB_DIAGNOSTICS
+                    if (profileDynamicModel) ++frameProfile->dynamicProjectionUpdates;
+#endif
+                }
 #if KISAK_WEB_DIAGNOSTICS
                 const double materialStarted = profileDynamicModel
                     ? WebFrameProfile_Now() : 0.0;
                 if (profileDynamicModel)
                 {
                     frameProfile->dynamicModelProjectionMs += materialStarted - projectionStarted;
-                    ++frameProfile->dynamicMaterialUpdates;
                 }
 #endif
-                ApplyWorldMaterialState(batch);
+                if (drawState.NeedsMaterial(batch))
+                {
+                    ApplyWorldMaterialState(batch);
+#if KISAK_WEB_DIAGNOSTICS
+                    if (profileDynamicModel) ++frameProfile->dynamicMaterialUpdates;
+#endif
+                }
 #if KISAK_WEB_DIAGNOSTICS
                 const double parametersStarted = profileDynamicModel
                     ? WebFrameProfile_Now() : 0.0;
@@ -10201,31 +10212,40 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                     batch.pixelShaderName.rfind("lm_spot_", 0u) == 0u;
                 const bool directionalPrimaryLit = modelLit && primaryLight &&
                     primaryLight->type == 1u;
+                if (drawState.NeedsFeatures({
+                    g_renderer.sceneFogEnabled && !fxSceneGeometry && !sunSprite,
+                    fallback && !fxSceneGeometry, !fallback, dynamicLightmapped,
+                    modelLit, detailMapped, normalMapped, specularMapped,
+                    primaryLit || directionalPrimaryLit }))
+                {
 #if KISAK_WEB_DIAGNOSTICS
-                if (profileDynamicModel) ++frameProfile->dynamicFeatureUpdates;
+                    if (profileDynamicModel) ++frameProfile->dynamicFeatureUpdates;
 #endif
-                glUniform1f(g_renderer.fogEnabledUniform,
-                    g_renderer.sceneFogEnabled && !fxSceneGeometry &&
-                        !sunSprite
-                        ? 1.0f : 0.0f);
-                glUniform1f(g_renderer.sceneFallbackUniform,
-                    fallback && !fxSceneGeometry ? 1.0f : 0.0f);
-                glUniform1f(g_renderer.textureEnabledUniform,
-                    fallback ? 0.0f : 1.0f);
-                glUniform1f(g_renderer.lightmapEnabledUniform,
-                    dynamicLightmapped ? 1.0f : 0.0f);
-                glUniform1f(g_renderer.secondaryLightmapEnabledUniform,
-                    dynamicLightmapped ? 1.0f : 0.0f);
-                glUniform1f(g_renderer.modelLightingEnabledUniform,
-                    modelLit ? 1.0f : 0.0f);
-                glUniform1f(g_renderer.detailMapEnabledUniform,
-                    detailMapped ? 1.0f : 0.0f);
-                glUniform4fv(g_renderer.detailScaleUniform, 1,
-                    batch.detailScale);
-                glUniform1f(g_renderer.normalMapEnabledUniform,
-                    normalMapped ? 1.0f : 0.0f);
-                glUniform1f(g_renderer.specularMapEnabledUniform,
-                    specularMapped ? 1.0f : 0.0f);
+                    glUniform1f(g_renderer.fogEnabledUniform,
+                        g_renderer.sceneFogEnabled && !fxSceneGeometry &&
+                            !sunSprite
+                            ? 1.0f : 0.0f);
+                    glUniform1f(g_renderer.sceneFallbackUniform,
+                        fallback && !fxSceneGeometry ? 1.0f : 0.0f);
+                    glUniform1f(g_renderer.textureEnabledUniform,
+                        fallback ? 0.0f : 1.0f);
+                    glUniform1f(g_renderer.lightmapEnabledUniform,
+                        dynamicLightmapped ? 1.0f : 0.0f);
+                    glUniform1f(g_renderer.secondaryLightmapEnabledUniform,
+                        dynamicLightmapped ? 1.0f : 0.0f);
+                    glUniform1f(g_renderer.modelLightingEnabledUniform,
+                        modelLit ? 1.0f : 0.0f);
+                    glUniform1f(g_renderer.detailMapEnabledUniform,
+                        detailMapped ? 1.0f : 0.0f);
+                    glUniform1f(g_renderer.normalMapEnabledUniform,
+                        normalMapped ? 1.0f : 0.0f);
+                    glUniform1f(g_renderer.specularMapEnabledUniform,
+                        specularMapped ? 1.0f : 0.0f);
+                    glUniform1f(g_renderer.primaryLightEnabledUniform,
+                        primaryLit || directionalPrimaryLit ? 1.0f : 0.0f);
+                }
+                if (detailMapped)
+                    glUniform4fv(g_renderer.detailScaleUniform, 1, batch.detailScale);
                 if (specularMapped)
                 {
                     glUniform4fv(g_renderer.envMapParmsUniform, 1,
@@ -10238,8 +10258,6 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 else
                     glUniform4f(g_renderer.envMapParmsUniform,
                         0.0f, 0.0f, 0.0f, 0.0f);
-                glUniform1f(g_renderer.primaryLightEnabledUniform,
-                    primaryLit || directionalPrimaryLit ? 1.0f : 0.0f);
                 if (primaryLit)
                 {
                     glUniform4f(
@@ -10266,8 +10284,9 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 }
                 BindSpotShadowForPrimaryLight(batch.primaryLightIndex,
                     primaryLit, spotShadowMapsDrawn);
-                glUniform3fv(g_renderer.modelLightingBaseCoordinatesUniform,
-                    1, batch.modelLightingCoordinates);
+                if (modelLit)
+                    glUniform3fv(g_renderer.modelLightingBaseCoordinatesUniform,
+                        1, batch.modelLightingCoordinates);
                 if (sunSprite)
                 {
                     // Native visibility is derived from an occlusion query.
@@ -10319,7 +10338,11 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 AddProfileDynamicTime(batch.sourceKind,
                     WebFrameProfile_Now() - dynamicBatchProfileStarted);
 #endif
-                if (sunSprite) glDepthMask(GL_TRUE);
+                if (sunSprite)
+                {
+                    glDepthMask(GL_TRUE);
+                    drawState.Reset();
+                }
                 ++completedDraws;
             }
         }
