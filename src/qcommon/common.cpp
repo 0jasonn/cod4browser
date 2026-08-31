@@ -2399,7 +2399,7 @@ int __cdecl Com_ModifyMsec(int msec)
     }
     else
     {
-        msec = SnapFloatToInt(dev_timescale->current.value * (com_codeTimeScale * (com_timescale->current.value * (double)msec)));        
+        msec = SnapFloatToInt(dev_timescale->current.value * (com_codeTimeScale * (com_timescale->current.value * (double)msec)));
         useTimescale = 1;
     }
 
@@ -2434,4 +2434,3 @@ int __cdecl Com_ModifyMsec(int msec)
 
     return msec;
 }
-

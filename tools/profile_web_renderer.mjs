@@ -102,20 +102,38 @@ try {
     if (controlled) {
         await page.bringToFront();
         await page.evaluate(() => { __dobj.profiles = []; __dobj.collecting = true; });
-        await engineWorker.evaluate(() => {
+        await engineWorker.evaluate(async () => {
+            const { ENGINE_PROTOCOL_VERSION } = await import('./product_protocol.mjs');
             globalThis.__cleanFrames = [];
             globalThis.__workloadViews = [];
+            globalThis.__workloadWarmup = [];
             let generation = 0;
+            const commands = new Map([
+                [30, 'cg_ufo'], [60, 'cl_paused_simple 1; pause'],
+                [120, 'cg_setviewpos -9732 -9384 2041 73 16'],
+                [180, 'cg_setviewpos -9732 -9384 2041 73 16'],
+            ]);
             const view = event => {
                 const detail = event.detail;
                 if (!detail.worldName?.toLowerCase().includes('cargoship')) return;
                 generation = detail.submissionGeneration;
-                if (generation >= 60 && generation <= 360) __workloadViews.push(structuredClone(detail));
+                if (generation === 30 || generation === 60) __workloadWarmup.push(structuredClone(detail));
+                if (commands.has(generation)) {
+                    // Use the validated production command request, synchronously
+                    // queued for the next pump. DOM/Worker transit must not select
+                    // which simulation frame is paused. No diagnostic exports.
+                    dispatchEvent(new MessageEvent('message', { data: {
+                        protocolVersion: ENGINE_PROTOCOL_VERSION, type: 'submitCanonicalCommand',
+                        id: 1000000 + generation, command: commands.get(generation),
+                    } }));
+                    commands.delete(generation);
+                }
+                if (generation >= 240 && generation <= 540) __workloadViews.push(structuredClone(detail));
             };
             const sample = event => {
-                if (generation < 60) return;
+                if (generation < 240) return;
                 __cleanFrames.push({ at: performance.now(), generation: event.detail.framePumpTicks });
-                if (generation >= 360) {
+                if (generation >= 540) {
                     removeEventListener('kisakcod:system', sample);
                     removeEventListener('kisakcod:renderer-scene-view', view);
                 }
@@ -164,7 +182,8 @@ try {
     }
     const cleanFrames = await engineWorker.evaluate(() => __cleanFrames);
     assert.equal(cleanFrames.length, 301, 'exactly 300 consecutive completed callback intervals');
-    const workload = controlled ? validateWorkload(await engineWorker.evaluate(() => __workloadViews)) : undefined;
+    const workload = controlled ? validateWorkload(...await engineWorker.evaluate(() =>
+        [__workloadViews, __workloadWarmup])) : undefined;
     const cleanForeground = summarizeForegroundSamples(await page.evaluate(() => {
         __dobj.collecting = false;
         __dobj.foreground.push({ observedMs: performance.now(), visibilityState: document.visibilityState,
@@ -188,9 +207,12 @@ try {
             recordedAtUtc: new Date().toISOString(),
             environment: { browser: 'Chrome', version: browser.version(), headless: true,
                 processor: cpus()[0].model, viewport: { width: 1440, height: 1000 }, build: 'Release production' },
-            methodology: { map: 'cargoship', warmupWorldFrames: controlled ? 60 : 30, profilingDisabledIntervals: 300,
+            methodology: { map: 'cargoship', warmupWorldFrames: controlled ? 240 : 30, profilingDisabledIntervals: 300,
                 command: controlled ? 'devmap cargoship; fixedtime 16' : 'map cargoship',
-                input: 'No gameplay input; authored scene continues running', displayedFps: false } };
+                cameraSetup: controlled ? { mode: 'cg_ufo after view 30', pauseAfterView: 60, afterViews: [120, 180],
+                    command: 'cg_setviewpos -9732 -9384 2041 73 16' } : undefined,
+                input: controlled ? 'Paused renderer-only workload; no gameplay input'
+                    : 'No gameplay input; authored scene continues running', displayedFps: false } };
         await writeFile(`build/renderer-efficiency-${source.commitSha.slice(0, 8)}-${runLabel}.json`,
             `${JSON.stringify(result, null, 2)}\n`);
     } else {
