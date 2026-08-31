@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { cpus, totalmem } from 'node:os';
 import { chromium } from '@playwright/test';
 import { aggregateGameplayProfile, summarizeProfileSamples } from '../tests/browser/retail_profile_aggregate.mjs';
@@ -9,10 +10,15 @@ import { summarizeForegroundSamples } from '../tests/browser/retail_foreground_w
 // Local, owned installation only. No asset contents or logs are written to evidence.
 const runLabel = process.argv[2] ?? 'sample';
 assert(/^[a-z0-9-]+$/.test(runLabel));
+const production = process.argv[3] === 'production';
+const sourceRevision = production ? process.argv[4] : 'HEAD';
+assert(sourceRevision, 'production measurement requires the built source revision');
 const source = {
-    commitSha: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+    commitSha: execFileSync('git', ['rev-parse', sourceRevision], { encoding: 'utf8' }).trim(),
     dirty: execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim().length > 0,
 };
+const wasmPath = production ? 'build/web/site/kisakcod.wasm' : 'build/web-diagnostics/site-diagnostics/kisakcod.wasm';
+const artifactSha256 = createHash('sha256').update(await readFile(wasmPath)).digest('hex');
 assert(process.env.KISAK_COD4_RETAIL_ROOT);
 // Playwright owns this new temporary persistent profile and its cleanup.
 const context = await chromium.launchPersistentContext('', {
@@ -34,8 +40,8 @@ const progressTimer = setInterval(async () => {
 try {
     await page.addInitScript(() => {
         Object.defineProperty(globalThis, 'showDirectoryPicker', { configurable: true, value: undefined });
-        globalThis.__dobj = { frames: [], profiles: [], logs: [], memory: [], foreground: [], collecting: false };
-        for (const [name, key] of [['renderer-scene-frame', 'frames'], ['frame-profile', 'profiles'], ['log', 'logs'], ['renderer-memory', 'memory']]) {
+        globalThis.__dobj = { frames: [], profiles: [], logs: [], memory: [], system: [], foreground: [], collecting: false };
+        for (const [name, key] of [['renderer-scene-frame', 'frames'], ['frame-profile', 'profiles'], ['log', 'logs'], ['renderer-memory', 'memory'], ['system', 'system']]) {
             addEventListener(`kisakcod:${name}`, event => {
                 const list = __dobj[key];
                 list.push({ ...structuredClone(event.detail), observedMs: performance.now() });
@@ -65,9 +71,13 @@ try {
     stage = 'CargoShip load';
     await page.locator('#engine-command-input').fill('map cargoship');
     await page.locator('#engine-command-form').evaluate(form => form.requestSubmit());
-    await page.waitForFunction(() => __dobj.frames.filter(frame => frame.state === 'drawn' &&
-        frame.geometrySubmitted && frame.worldName?.toLowerCase().includes('cargoship')).length >= 30,
-        null, { timeout: 300000 });
+    await page.waitForFunction(production => {
+        const frames = __dobj.frames.filter(frame => frame.state === 'drawn' && frame.geometrySubmitted &&
+            frame.worldName?.toLowerCase().includes('cargoship'));
+        return production ? frames.length > 0 && __dobj.system.filter(event =>
+            event.observedMs >= frames[0].observedMs && event.state === 'running').length >= 30
+            : frames.length >= 30;
+    }, production, { timeout: 300000 });
     console.log('CARGOSHIP_WARM_30_FRAMES');
     stage = 'profiling disabled';
     await page.bringToFront();
@@ -79,14 +89,16 @@ try {
             pageFocused: document.hasFocus() }];
         __dobj.collecting = true;
     });
-    await engineWorker.evaluate(() => {
+    await engineWorker.evaluate(production => {
+        const eventName = production ? 'kisakcod:system' : 'kisakcod:renderer-scene-frame';
         globalThis.__cleanFrames = [];
         const sample = event => {
-            __cleanFrames.push({ at: performance.now(), generation: event.detail.viewSubmissionGeneration });
-            if (__cleanFrames.length === 301) removeEventListener('kisakcod:renderer-scene-frame', sample);
+            __cleanFrames.push({ at: performance.now(), generation: production
+                ? event.detail.framePumpTicks : event.detail.viewSubmissionGeneration });
+            if (__cleanFrames.length === 301) removeEventListener(eventName, sample);
         };
-        addEventListener('kisakcod:renderer-scene-frame', sample);
-    });
+        addEventListener(eventName, sample);
+    }, production);
     // Poll only completion, not individual frame timestamps across the Worker bridge.
     const cleanDeadline = Date.now() + 60000;
     while (await engineWorker.evaluate(() => __cleanFrames.length) < 301) {
@@ -107,9 +119,20 @@ try {
         return frame.at - cleanFrames[index].at;
     });
     const cleanTiming = { intervals: summarizeProfileSamples(cleanIntervals), foreground: cleanForeground,
-        clock: 'Worker performance.now at completed canonical render events',
-        profilerActive: false, diagnosticBuild: true, displayedFps: false };
+        clock: production ? 'Worker performance.now at completed main-loop callbacks'
+            : 'Worker performance.now at completed canonical render events',
+        profilerActive: false, diagnosticBuild: !production, displayedFps: false };
     console.log('CLEAN_TIMING', JSON.stringify(cleanTiming));
+    if (production) {
+        assert.equal(pageErrors.length, 0);
+        const result = { source, artifactSha256, cleanTiming, pageErrorCount: 0,
+            environment: { browser: 'Chrome', version: browser.version(), headless: true,
+                processor: cpus()[0].model, viewport: { width: 1440, height: 1000 }, build: 'Release production' },
+            methodology: { map: 'cargoship', warmupWorldFrames: 30, profilingDisabledIntervals: 300,
+                input: 'No gameplay input; authored scene continues running', displayedFps: false } };
+        await writeFile(`build/renderer-efficiency-${source.commitSha.slice(0, 8)}-${runLabel}.json`,
+            `${JSON.stringify(result, null, 2)}\n`);
+    } else {
     stage = 'profile';
     await page.bringToFront();
     const started = await page.evaluate(async () => {
@@ -181,7 +204,7 @@ try {
     });
     assert(geometryMemory.stagingCapacityBytes > 0);
     assert(geometryMemory.capacityBytes > geometryMemory.stagingCapacityBytes);
-    const result = { schemaVersion: 1, cleanTiming, recordedAtUtc: new Date().toISOString(), source,
+    const result = { schemaVersion: 1, cleanTiming, artifactSha256, recordedAtUtc: new Date().toISOString(), source,
         environment: { browser: 'Chrome', version: browser.version(), headless: true,
             processor: cpus()[0].model, totalSystemMemoryBytes: totalmem(), viewport: { width: 1440, height: 1000 },
             build: 'Release diagnostics' },
@@ -195,6 +218,7 @@ try {
     console.log(JSON.stringify({ stage: 'complete', renderer: profile.renderer, cpu: profile.cpu,
         dobjUnassignedMs: result.dobjUnassignedMs, sceneUnassignedMs: result.sceneUnassignedMs,
         foreground, pageErrors }));
+    }
 } catch (error) {
     console.error('PROFILE_FAILED', stage, error.message);
     console.error(JSON.stringify(await page.evaluate(() => ({ state: globalThis.__KISAKCOD_WEB__?.state,
