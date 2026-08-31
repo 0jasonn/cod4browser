@@ -41,21 +41,6 @@ bool Finite3(const float value[3]) noexcept
         std::isfinite(value[2]);
 }
 
-std::uint32_t HashPixelShaderProgram(
-    const MaterialPixelShader *shader) noexcept
-{
-    if (!shader || !shader->prog.loadDef.program ||
-        shader->prog.loadDef.programSize == 0u) return 0u;
-    std::uint32_t hash = 2166136261u;
-    const auto *bytes = reinterpret_cast<const std::uint8_t *>(
-        shader->prog.loadDef.program);
-    const std::size_t byteCount =
-        static_cast<std::size_t>(shader->prog.loadDef.programSize) * 4u;
-    for (std::size_t index = 0u; index < byteCount; ++index)
-        hash = (hash ^ bytes[index]) * 16777619u;
-    return hash;
-}
-
 bool SelectTechnique(
     const Material *material, WebRendererWorldBatchDesc &draw) noexcept
 {
@@ -88,7 +73,6 @@ bool SelectTechnique(
         const MaterialPixelShader *pixelShader =
             technique->passArray[0u].pixelShader;
         draw.pixelShaderName = pixelShader ? pixelShader->name : nullptr;
-        draw.pixelShaderProgramHash = HashPixelShaderProgram(pixelShader);
         return true;
     }
     if (material->techniqueSet->name &&
