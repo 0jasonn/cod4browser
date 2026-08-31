@@ -4,7 +4,19 @@ Updated 2026-08-31. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
-## DObj hashing optimization
+## Scene-construction measurement
+
+`2ce03241` adds six diagnostic scene intervals without changing rendering.
+A 120-frame headless CargoShip profile measured command assembly at 13.801 ms
+(73.94% of scene time outside DObj building), dynamic submission at 4.638 ms,
+camera visibility at 0.141 ms and dynamic image resolution at 0.019 ms.
+The next task is to isolate assembly's physics/mark, brush/model and append
+costs before selecting an optimization. One focused test file, one diagnostic
+build/profile and one final production Release build passed without retries.
+See [the scene profile](evidence/scene-stages-2ce03241.md) for boundaries and
+limitations. This is diagnostic CPU evidence, with no FPS or visual promotion.
+
+## Prior DObj hashing optimization
 
 `d8661476` removes unused per-surface DObj shader hashing while preserving
 world/static-model hashing, canonical culling and shadow behavior. A matching

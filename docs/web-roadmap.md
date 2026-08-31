@@ -17,11 +17,14 @@ Manual gameplay assessment can guide renderer work without a progression gate.
    filesystem recovery policy.
 3. The [DObj hash deletion](evidence/dobj-hash-d8661476.md) reduced observed
    geometry-build mean time from 7.192 to 6.347 ms in matching short headless
-   profiles. Recommended next task: measure the roughly 20.451 ms of remaining
-   scene construction outside DObj building before choosing another change.
-   Preserve canonical culling/shadows; no pose or geometry cache is justified.
+   profiles. The subsequent [scene profile](evidence/scene-stages-2ce03241.md)
+   places 73.94% of non-DObj scene time in command assembly (13.801 ms), followed
+   by dynamic submission (4.638 ms). Recommended next task: separate assembly's
+   physics/mark work, brush/model construction and appends, then optimize the
+   dominant operation. Preserve canonical culling/shadows; no pose or geometry
+   cache is justified.
 
-The latest optimization used one focused test, one diagnostic build, one
+The latest measurement used one focused test file, one diagnostic build, one
 120-frame profile and one final production Release build, with no retries.
 No broad tiers, mission/lifecycle checks, screenshots or compatibility promotion
 were required. Escape and renderer polish remain outside scope.

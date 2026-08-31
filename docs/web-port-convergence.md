@@ -128,6 +128,16 @@ removes unused bytecode scans without changing canonical material identity or
 world/static-model hashing. Matching short profiles observed 7.192 -> 6.347 ms
 in geometry construction; no comparable foreground FPS result is claimed.
 
+Six additional diagnostic intervals partition non-DObj scene work into setup,
+command assembly, dynamic image resolution, dynamic submission, camera DPVS and
+view submission. They extend existing telemetry only; canonical ownership and
+the frontend/backend seam are unchanged. Upload timing nests within submission,
+and all timers compile out of production. The
+[focused scene profile](evidence/scene-stages-2ce03241.md) places 13.801 ms in
+assembly and 4.638 ms in dynamic submission; assembly's individual operations
+still need attribution before another optimization. No cache or runtime model
+was added.
+
 ## Temporary compatibility seams
 
 | Seam | Retirement condition |
