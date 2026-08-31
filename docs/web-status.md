@@ -4,7 +4,21 @@ Updated 2026-08-31. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
-## Dynamic geometry staging
+## Dynamic draw texture setup
+
+`74fe11aa` skips repeated complete texture binding sets within each dynamic
+draw block, preserving sampler alias order. Short matching CargoShip profiles
+observed texture setup at 2.041 -> 1.538 ms and dynamic-model drawing at
+5.299 -> 4.710 ms. Total CPU did not improve; this is a local reduction only.
+Draw order, canonical culling and independent shadow passes remain unchanged.
+
+One focused native fixture, two diagnostic builds/profiles and the final
+production Release passed without retries. See
+[the texture-state evidence](evidence/dynamic-textures-74fe11aa.md) for scope
+and limitations. Next: inspect remaining per-batch material/uniform setup;
+material state still averages 1.133 ms.
+
+## Prior dynamic geometry staging
 
 `9403a899` reuses vertex/index staging while keeping the published command
 intact until upload succeeds. Matched short CargoShip profiles observed geometry
@@ -15,8 +29,8 @@ Validation, culling and shadow behavior remain unchanged; unload releases stagin
 
 The focused native test, three diagnostic builds/profiles and final production
 Release passed. See [the staging evidence](evidence/dynamic-staging-9403a899.md)
-for limitations and the memory tradeoff. Next: inspect redundant material/state
-work in the dynamic-model draw pass (6.116 ms measured CPU time).
+for limitations and the memory tradeoff. This prompted the dynamic draw work
+above (6.116 ms measured CPU time in that earlier window).
 
 ## Prior particle-cloud append optimization
 

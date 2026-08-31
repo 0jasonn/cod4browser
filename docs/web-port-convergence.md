@@ -160,6 +160,17 @@ Keep it while the measured copy-tail reduction justifies the approximately
 be transferred directly without weakening publication or recovery semantics.
 No whole-frame speedup or peak-memory reduction was measured.
 
+The [dynamic texture continuation](evidence/dynamic-textures-74fe11aa.md) avoids
+reapplying an identical six-texture/four-sampler set within the dynamic draw
+block. It preserves the order of all six calls whenever any field changes,
+because GL sampler parameters belong to texture objects and units can alias.
+This is permanent backend-owned state handling, with a stack-local value reset
+each frame and no canonical state, new resource or persistent cache. The helper
+requires exclusive ownership of those bindings/parameters during the block;
+reset it if a future path changes them. World/static culling and independent
+shadow passes are unchanged. Diagnostic material/texture/draw intervals measured
+a local texture-setup reduction, without a whole-frame CPU improvement.
+
 ## Temporary compatibility seams
 
 | Seam | Retirement condition |

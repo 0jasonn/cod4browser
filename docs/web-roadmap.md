@@ -18,13 +18,16 @@ Manual gameplay assessment can guide renderer work without a progression gate.
 3. After cloud-append optimization, [dynamic staging](evidence/dynamic-staging-9403a899.md)
    reduced observed geometry-copy p95 from 3.480 to 0.955 ms at the cost of
    16.962 MiB of retained staging capacity. Whole-frame CPU was unchanged.
-   Recommended next task: inspect redundant material/state work in the
-   dynamic-model draw pass (6.116 ms measured CPU), preserving draw order,
-   canonical culling and independent shadows. No pose/geometry cache or further
-   staging storage is justified by the current evidence.
+   The subsequent [dynamic texture change](evidence/dynamic-textures-74fe11aa.md)
+   skips consecutive identical binding sets, preserving texture aliases and
+   reducing observed texture setup from 2.041 to 1.538 ms. Total CPU did not
+   improve. Recommended next task: inspect remaining per-batch material/uniform
+   setup (material state averages 1.133 ms), preserving draw order, canonical
+   culling and independent shadows. Measure reuse before adding a tracker;
+   no global GL cache, pose cache or additional staging is justified here.
 
-The latest optimization used one focused native fixture, three diagnostic builds
-and 120-frame profiles (attribution, narrower baseline, implementation), and one
+The latest optimization used one focused native fixture, two diagnostic builds
+and 120-frame profiles (baseline and implementation), and one
 final production Release build, with no retries.
 No broad tiers, mission/lifecycle checks, screenshots or compatibility promotion
 were required. Escape and renderer polish remain outside scope.
