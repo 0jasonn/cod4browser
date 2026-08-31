@@ -21,10 +21,13 @@ Manual gameplay assessment can guide renderer work without a progression gate.
    The subsequent [dynamic texture change](evidence/dynamic-textures-74fe11aa.md)
    skips consecutive identical binding sets, preserving texture aliases and
    reducing observed texture setup from 2.041 to 1.538 ms. Total CPU did not
-   improve. Recommended next task: inspect remaining per-batch material/uniform
-   setup (material state averages 1.133 ms), preserving draw order, canonical
-   culling and independent shadows. Measure reuse before adding a tracker;
-   no global GL cache, pose cache or additional staging is justified here.
+   improve. The [falloff-uniform guard](evidence/falloff-uniforms-12ac17e5.md)
+   then removed three unused uploads from other material techniques, with
+   observed dynamic material setup at 1.747 -> 1.248 ms in a fresh comparison.
+   Recommended next task: measure repeated view/projection setup within the
+   dynamic camera passes before moving uploads out of individual draws.
+   Preserve sun-query/sprite overrides, depth-hack order, canonical culling
+   and independent shadows. No global GL cache or extra staging is justified.
 
 The latest optimization used one focused native fixture, two diagnostic builds
 and 120-frame profiles (baseline and implementation), and one

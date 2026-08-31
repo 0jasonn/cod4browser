@@ -171,6 +171,14 @@ reset it if a future path changes them. World/static culling and independent
 shadow passes are unchanged. Diagnostic material/texture/draw intervals measured
 a local texture-setup reduction, without a whole-frame CPU improvement.
 
+The [falloff-uniform guard](evidence/falloff-uniforms-12ac17e5.md) keeps all three
+falloff uploads on distance-falloff draws and omits them for other techniques,
+whose shaders do not read those values. The shared backend material helper
+owns this permanent uniform policy; canonical constants, validation and shader
+arithmetic stay unchanged. No tracker or intermediate representation is added.
+Observed dynamic material CPU cost fell in a focused comparison, with no
+general FPS or visual-compatibility claim.
+
 ## Temporary compatibility seams
 
 | Seam | Retirement condition |

@@ -4,7 +4,21 @@ Updated 2026-08-31. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
-## Dynamic draw texture setup
+## Conditional falloff uniforms
+
+`12ac17e5` uploads distance-falloff constants only for their technique, removing
+three unused uniform uploads from other material setups. No tracker, shader
+arithmetic, culling or shadow-policy change was added. Matching short CargoShip
+profiles observed dynamic material setup at 1.747 -> 1.248 ms and dynamic-model
+drawing at 6.993 -> 6.417 ms; the total CPU reduction is not solely attributable
+to this change.
+
+The focused existing native fixture, two diagnostic builds/profiles and final
+production Release passed. See [the evidence](evidence/falloff-uniforms-12ac17e5.md)
+for the source-verified shader contract and execution limits. Next: measure
+repeated view/projection setup within the dynamic camera passes.
+
+## Prior dynamic draw texture setup
 
 `74fe11aa` skips repeated complete texture binding sets within each dynamic
 draw block, preserving sampler alias order. Short matching CargoShip profiles
@@ -15,8 +29,8 @@ Draw order, canonical culling and independent shadow passes remain unchanged.
 One focused native fixture, two diagnostic builds/profiles and the final
 production Release passed without retries. See
 [the texture-state evidence](evidence/dynamic-textures-74fe11aa.md) for scope
-and limitations. Next: inspect remaining per-batch material/uniform setup;
-material state still averages 1.133 ms.
+and limitations. This prompted the material/uniform inspection above; material
+state averaged 1.133 ms in that earlier window.
 
 ## Prior dynamic geometry staging
 
