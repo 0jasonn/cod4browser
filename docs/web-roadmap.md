@@ -24,14 +24,20 @@ Manual gameplay assessment can guide renderer work without a progression gate.
    improve. The [falloff-uniform guard](evidence/falloff-uniforms-12ac17e5.md)
    then removed three unused uploads from other material techniques, with
    observed dynamic material setup at 1.747 -> 1.248 ms in a fresh comparison.
-   Recommended next task: measure repeated view/projection setup within the
-   dynamic camera passes before moving uploads out of individual draws.
-   Preserve sun-query/sprite overrides, depth-hack order, canonical culling
-   and independent shadows. No global GL cache or extra staging is justified.
+   The [completed CPU-efficiency milestone](evidence/renderer-cpu-milestone-e4db91df.md)
+   covers projection/material/feature reuse, world/static material state and
+   shadow alpha/cull reuse. Production mean frame intervals were 43.175 ->
+   40.895 ms across two runs per version; variation limits the claim.
+4. Next: profile canonical DObj geometry emission (7.157 ms measured CPU) and
+   scene assembly (6.626 ms). Preserve canonical animation, collision, script
+   and asset ownership. The renderer-state milestone is closed; do not add
+   global GL caches, new batching representations or GPU-buffer policies from
+   the remaining aggregate renderer total alone.
 
-The latest optimization used one focused native fixture, two diagnostic builds
-and 120-frame profiles (baseline and implementation), and one
-final production Release build, with no retries.
+The completed milestone used one focused native fixture, rerun after shadow
+integration; three diagnostic builds and five 120-frame profiles; four
+successful production timing windows; and one final production Release build.
+A production benchmark setup mismatch was corrected with a targeted retry.
 No broad tiers, mission/lifecycle checks, screenshots or compatibility promotion
 were required. Escape and renderer polish remain outside scope.
 

@@ -179,6 +179,18 @@ arithmetic stay unchanged. No tracker or intermediate representation is added.
 Observed dynamic material CPU cost fell in a focused comparison, with no
 general FPS or visual-compatibility claim.
 
+The [completed renderer CPU milestone](evidence/renderer-cpu-milestone-e4db91df.md)
+adds pass-local backend state reuse for projections, material inputs and dynamic
+feature flags, plus shadow-partition alpha/cull state. It also omits unused
+detail and model-lighting uniform uploads. These are permanent GL-boundary
+details: canonical commands, identities, validation, culling and independent
+caster ranges remain unchanged. No GPU resources, persistent cache or engine
+representation is added. Immutable batch/matrix contents and explicit reset
+after direct overrides are required; new material inputs must extend the key.
+Production frame timing observed a modest gain with overlapping run ranges.
+The local renderer milestone is closed; canonical scene construction is the
+next measured CPU priority.
+
 ## Temporary compatibility seams
 
 | Seam | Retirement condition |

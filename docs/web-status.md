@@ -4,7 +4,25 @@ Updated 2026-08-31. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
-## Conditional falloff uniforms
+## Renderer CPU-efficiency milestone complete
+
+`e4db91df` finishes local projection/material/feature-state reuse and extends
+material reuse to world/static draws plus alpha/cull reuse to independent shadow
+partitions. Draw order, canonical culling, caster membership and per-draw values
+are preserved; state is local to each pass and resets after direct overrides.
+
+Two production runs per version measured mean frame intervals of
+**43.175 -> 40.895 ms (5.28% lower)** with the profiler compiled out. Run ranges
+overlap, so this is a modest observed gain, not a fixed FPS or playability claim.
+The focused fixture, diagnostic comparisons and final production Release passed.
+See [the completed milestone](evidence/renderer-cpu-milestone-e4db91df.md) for
+all windows, the targeted benchmark correction and verification limits.
+
+Projection, material, uniform and draw-submission opportunities are now either
+implemented or explicitly ruled out there. Next: canonical DObj geometry
+emission and scene assembly, which dominate remaining CPU work.
+
+## Prior conditional falloff uniforms
 
 `12ac17e5` uploads distance-falloff constants only for their technique, removing
 three unused uniform uploads from other material setups. No tracker, shader
@@ -15,8 +33,8 @@ to this change.
 
 The focused existing native fixture, two diagnostic builds/profiles and final
 production Release passed. See [the evidence](evidence/falloff-uniforms-12ac17e5.md)
-for the source-verified shader contract and execution limits. Next: measure
-repeated view/projection setup within the dynamic camera passes.
+for the source-verified shader contract and execution limits. This prompted the
+completed view/projection and state work above.
 
 ## Prior dynamic draw texture setup
 
