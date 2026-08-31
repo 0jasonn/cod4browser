@@ -2,10 +2,13 @@
 #include <web/web_renderer_world_scene.h>
 #include <web/web_renderer_image_reference.h>
 #include <web/web_renderer_material_lookup.h>
+#include <web/web_renderer_draw_state.h>
+#include <web/web_renderer_dynamic_textures.h>
 
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -1108,6 +1111,159 @@ void TestDynamicBrushModelUsesCanonicalSurfaceRangeAndPlacement()
         WebRendererWorldTechnique::NativeTechniqueUnavailable);
 }
 
+void TestTextureParameterMemoPreservesAliasedObjectState()
+{
+    struct Bind { std::uint32_t texture; std::uint8_t sampler; bool mipmaps; };
+    const std::array<Bind, 9> bindings{{
+        {1, 0x62, true}, {2, 0x62, true}, {1, 0x62, true},
+        {1, 0x23, true}, {1, 0x23, false}, {257, 0x62, true},
+        {1, 0x23, false}, {2, 0x62, true}, {1, 0x62, true}}};
+    WebRendererTextureParameters memo;
+    std::array<std::pair<std::uint8_t, bool>, 258> original{}, cached{};
+    std::uint32_t writes = 0;
+    for (const auto &bind : bindings)
+    {
+        original[bind.texture] = {bind.sampler, bind.mipmaps};
+        if (memo.NeedsUpdate(bind.texture, bind.sampler, bind.mipmaps))
+        {
+            cached[bind.texture] = {bind.sampler, bind.mipmaps};
+            ++writes;
+        }
+        // Every draw sees the same last-write state, including a texture
+        // shared by units with different samplers and a table collision.
+        assert(original == cached);
+    }
+    assert(writes == 7u);
+    memo.Reset();
+    assert(memo.NeedsUpdate(1, 0x62, true)); // name reused after upload/recovery
+
+    WebRendererDynamicTextures dynamic;
+    std::array<std::uint32_t, 10> expectedUnits{}, actualUnits{};
+    const std::array<WebRendererDynamicTextureSet, 4> sets{{
+        {{1, 2, 3, 4, 5, 6}, {1, 2, 3, 4}},
+        {{1, 2, 3, 4, 5, 7}, {1, 2, 3, 4}},
+        {{1, 1, 1, 1, 1, 1}, {1, 2, 3, 4}},
+        {{1, 2, 3, 4, 5, 6}, {1, 2, 3, 4}}}};
+    for (const auto &set : sets)
+    {
+        constexpr std::array<unsigned, 6> units{0, 1, 4, 5, 2, 9};
+        for (unsigned i = 0; i < units.size(); ++i)
+        {
+            expectedUnits[units[i]] = set.textures[i];
+            original[set.textures[i]] = {i < 4 ? set.samplers[i] : 0x62, true};
+        }
+        dynamic.Apply(set, [&](auto unit, auto texture, auto sampler, bool unchanged) {
+            if (unchanged) assert(actualUnits[unit] == texture);
+            else actualUnits[unit] = texture;
+            if (memo.NeedsUpdate(texture, sampler, true))
+                cached[texture] = {sampler, true};
+        });
+        assert(expectedUnits == actualUnits && original == cached);
+    }
+}
+
+void TestSunShadowRangesPreserveTriangleOrderAndCutouts()
+{
+    // Each triple names one triangle. The ordinary per-batch loop is the
+    // independent coverage oracle, including off-camera/non-caster gaps.
+    std::array<WebRendererWorldBatchDesc, 8> batches{};
+    for (std::uint32_t index = 0u; index < batches.size(); ++index)
+    {
+        batches[index].firstIndex = index * 3u;
+        batches[index].indexCount = 3u;
+        batches[index].castsSunShadow = true;
+    }
+    batches[2].castsSunShadow = false;
+    batches[4].stateBits[0] = 0x1000u; // cutout stays a separate draw
+    batches[7].firstIndex = 30u; // non-contiguous geometry cannot be bridged
+    std::vector<std::uint32_t> expected, actual;
+    for (const auto &batch : batches)
+        if (batch.castsSunShadow)
+            for (std::uint32_t index = 0u; index < batch.indexCount; ++index)
+                expected.push_back(batch.firstIndex + index);
+    std::vector<std::array<std::uint32_t, 3>> draws;
+    const auto merged = WebRenderer_ForEachSunShadowRange(batches,
+        [](const auto &batch) { return batch.stateBits[0] == 0u; },
+        [&](const auto &batch, std::uint32_t first, std::uint32_t count) {
+            draws.push_back({first, count, batch.stateBits[0]});
+            for (std::uint32_t index = 0u; index < count; ++index)
+                actual.push_back(first + index);
+        });
+    assert(actual == expected);
+    assert(merged == 2u);
+    const std::vector<std::array<std::uint32_t, 3>> expectedDraws{
+        {0u, 6u, 0u}, {9u, 3u, 0u}, {12u, 3u, 0x1000u},
+        {15u, 6u, 0u}, {30u, 3u, 0u}};
+    assert(draws == expectedDraws);
+    for (auto &batch : batches) batch.castsSunShadow = false;
+    assert(WebRenderer_ForEachSunShadowRange(batches,
+        [](const auto &) { return true; },
+        [](const auto &, auto, auto) { assert(false); }) == 0u);
+}
+
+void TestRetainedBrushPlacementMatchesExpandedGeometry()
+{
+    Fixture fixture;
+    WebRendererBrushModelSubmission submission{};
+    submission.model = &fixture.model;
+    for (std::size_t axis = 0u; axis < 3u; ++axis) submission.axis[axis][axis] = 1.0f;
+    WebRendererBrushModelSceneCommand retained;
+    assert(WebRenderer_BuildBrushModelSceneCommand(fixture.world, &submission, 1u, retained) ==
+        WebRendererWorldSceneResult::Success);
+    float maximumCoordinate = 0.0f;
+    for (const auto &vertex : retained.vertices)
+        for (std::size_t component = 0u; component < 3u; ++component)
+            maximumCoordinate = std::max({maximumCoordinate, std::fabs(vertex.position[component]),
+                std::fabs(vertex.normal[component]), std::fabs(vertex.tangent[component])});
+
+    WebRendererBrushModelInstanceDesc instance{};
+    instance.axis[0][1] = 1.0f;
+    instance.axis[1][0] = -1.0f;
+    instance.axis[2][2] = 1.0f;
+    instance.origin[0] = 100.0f;
+    instance.origin[1] = 200.0f;
+    instance.origin[2] = 300.0f;
+    for (const float offset : {100.0f, -27.0f})
+    {
+        instance.origin[0] = offset;
+        assert(WebRenderer_BrushPlacementIsFinite(instance, retained.vertices, maximumCoordinate));
+        std::memcpy(submission.axis, instance.axis, sizeof(instance.axis));
+        std::memcpy(submission.origin, instance.origin, sizeof(instance.origin));
+        WebRendererBrushModelSceneCommand expanded;
+        assert(WebRenderer_BuildBrushModelSceneCommand(fixture.world, &submission, 1u, expanded) ==
+            WebRendererWorldSceneResult::Success);
+        assert(expanded.indices == retained.indices && expanded.batches.size() == retained.batches.size());
+        for (std::size_t index = 0u; index < retained.vertices.size(); ++index)
+        {
+            const auto &source = retained.vertices[index];
+            const auto &expected = expanded.vertices[index];
+            // Explicit quarter-turn placement, independent of the builder's matrix loop.
+            assert(expected.position[0] == offset - source.position[1]);
+            assert(expected.position[1] == 200.0f + source.position[0]);
+            assert(expected.position[2] == 300.0f + source.position[2]);
+            assert(expected.normal[0] == -source.normal[1] && expected.normal[1] == source.normal[0]);
+            assert(expected.tangent[0] == -source.tangent[1] && expected.tangent[1] == source.tangent[0]);
+        }
+    }
+    instance.origin[0] = std::numeric_limits<float>::quiet_NaN();
+    assert(!WebRenderer_BrushPlacementIsFinite(instance, retained.vertices, maximumCoordinate));
+    instance.origin[0] = 0.0f;
+    instance.axis[0][0] = std::numeric_limits<float>::max();
+    assert(!WebRenderer_BrushPlacementIsFinite(instance, retained.vertices, maximumCoordinate));
+    instance.axis[0][0] = std::numeric_limits<float>::infinity();
+    assert(!WebRenderer_BrushPlacementIsFinite(instance, retained.vertices, maximumCoordinate));
+
+    // The shader adds origin first; cancellation in the old CPU expansion
+    // must not conceal overflow in that ordering at the GPU boundary.
+    std::vector<WebRendererSurfaceVertex> large(1);
+    large[0].position[0] = std::numeric_limits<float>::max();
+    large[0].position[1] = -std::numeric_limits<float>::max();
+    instance = {};
+    instance.axis[0][0] = instance.axis[1][0] = 1.0f;
+    instance.origin[0] = std::numeric_limits<float>::max();
+    assert(!WebRenderer_BrushPlacementIsFinite(instance, large, std::numeric_limits<float>::max()));
+}
+
 void TestMalformedDynamicBrushRangeIsRejectedAtomically()
 {
     Fixture fixture;
@@ -1272,6 +1428,9 @@ int main()
     TestCanonicalDpvsRangesOverrideNonContiguousModelCount();
     TestSpotShadowCommandPreservesAuthoredCasterMembership();
     TestDynamicBrushModelUsesCanonicalSurfaceRangeAndPlacement();
+    TestRetainedBrushPlacementMatchesExpandedGeometry();
+    TestSunShadowRangesPreserveTriangleOrderAndCutouts();
+    TestTextureParameterMemoPreservesAliasedObjectState();
     TestMalformedDynamicBrushRangeIsRejectedAtomically();
     TestBrushMatchesWorldSelectionAndRejectsAtomically();
     return 0;

@@ -14,6 +14,8 @@ const runLabel = process.argv[2] ?? 'sample';
 assert(/^[a-z0-9-]+$/.test(runLabel));
 const production = process.argv[3] === 'production';
 const controlled = process.argv[6] === 'fixedtime';
+const checkRecovery = process.argv[7] === 'recovery';
+assert(!process.argv[7] || (checkRecovery && !production && controlled));
 const mapCommand = controlled ? 'set sv_mapSeed 1; devmap cargoship; fixedtime 16' : 'map cargoship';
 assert(!process.argv[6] || controlled, 'optional workload must be fixedtime');
 const sourceRevision = process.argv[4] ?? (production ? undefined : 'HEAD');
@@ -313,7 +315,51 @@ try {
     });
     assert(geometryMemory.stagingCapacityBytes > 0);
     assert(geometryMemory.capacityBytes > geometryMemory.stagingCapacityBytes);
-    const result = { schemaVersion: 1, cleanTiming, artifactSha256, recordedAtUtc: new Date().toISOString(), source,
+    let recovery;
+    if (checkRecovery) {
+        // Separate from both timing windows: rebuild GPU resources, then check
+        // actual resumed draw work against the completed pre-loss profile.
+        stage = 'context recovery';
+        const before = await page.evaluate(() => ({
+            frame: __dobj.frames.at(-1), losses: __KISAKCOD_WEB__.contextLosses ?? 0,
+            recoveries: __KISAKCOD_WEB__.rendererSurface.recoveryCount ?? 0,
+        }));
+        assert(await page.evaluate(() => __KISAKCOD_WEB__.module.call('_KisakWeb_TestLoseWebGLContext')));
+        await page.waitForFunction(() => __KISAKCOD_WEB__.rendererSurface.state === 'lost');
+        assert(await page.evaluate(() => __KISAKCOD_WEB__.module.call('_KisakWeb_TestRestoreWebGLContext')));
+        await page.waitForFunction(before =>
+            __dobj.frames.at(-1)?.resourceGeneration > before.frame.resourceGeneration &&
+            __dobj.frames.at(-1)?.viewSubmissionGeneration > before.frame.viewSubmissionGeneration + 10,
+            before, { timeout: 30000 });
+        const restored = await page.evaluate(() => ({
+            runtime: __KISAKCOD_WEB__.state, surface: __KISAKCOD_WEB__.rendererSurface.state,
+            losses: __KISAKCOD_WEB__.contextLosses, recoveries: __KISAKCOD_WEB__.rendererSurface.recoveryCount,
+        }));
+        assert.equal(restored.runtime, 'running');
+        assert.equal(restored.surface, 'ready');
+        assert(restored.losses > before.losses, JSON.stringify({ before, restored }));
+        assert(restored.recoveries > before.recoveries, JSON.stringify({ before, restored }));
+        await page.evaluate(async () => {
+            __dobj.profiles = [];
+            await __KISAKCOD_WEB__.module.call('_KisakWeb_TestBeginFrameProfileWithTimeout', 12, 30000);
+        });
+        await page.waitForFunction(() => __dobj.profiles.some(entry => entry.kind === 'capture'), null, { timeout: 30000 });
+        const resumed = await page.evaluate(() => ({
+            frames: __dobj.profiles.filter(entry => entry.kind === 'frame'),
+            capture: __dobj.profiles.find(entry => entry.kind === 'capture'),
+            generation: __dobj.frames.at(-1).resourceGeneration,
+        }));
+        assert(resumed.capture.profileComplete);
+        assert.equal(resumed.frames.length, 12);
+        for (const frame of resumed.frames)
+            for (const [key, value] of Object.entries(workCounts[0]))
+                assert.equal(frame.counters[key], value, `recovered ${key} differs`);
+        recovery = { passed: true, matchingWorkSamples: 12,
+            resourceGenerationBefore: before.frame.resourceGeneration,
+            resourceGenerationAfter: resumed.generation };
+        assert.equal(pageErrors.length, 0);
+    }
+    const result = { schemaVersion: 1, recovery, cleanTiming, artifactSha256, recordedAtUtc: new Date().toISOString(), source,
         workload, workCounts, workCountSha256: workCounts
             ? createHash('sha256').update(JSON.stringify(workCounts)).digest('hex') : undefined,
         environment: { browser: 'Chrome', version: browser.version(), headless: true,
@@ -333,9 +379,15 @@ try {
     }
 } catch (error) {
     console.error('PROFILE_FAILED', stage, error.message);
-    console.error(JSON.stringify(await page.evaluate(() => ({ state: globalThis.__KISAKCOD_WEB__?.state,
+    console.error('ENGINE_ERRORS', await page.evaluate(() => globalThis.__dobj?.logs
+        .filter(log => /error|failed|invalid|assert/i.test(log.text ?? log.message ?? ''))
+        .slice(-8)).catch(() => null));
+    console.error(JSON.stringify(await page.evaluate(pageErrors => ({ state: globalThis.__KISAKCOD_WEB__?.state,
         assets: globalThis.__KISAKCOD_WEB__?.assets?.state,
-        worldFrames: globalThis.__dobj?.frames.length })).catch(() => null)));
+        worldFrames: globalThis.__dobj?.frames.length,
+        lastScene: globalThis.__dobj?.frames.at(-1),
+        lastSystem: globalThis.__dobj?.system.at(-1),
+        pageErrors }), pageErrors).catch(() => null)));
     process.exitCode = 1;
 } finally {
     clearInterval(progressTimer);

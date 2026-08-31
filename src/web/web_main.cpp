@@ -86,7 +86,7 @@ EM_JS(void, DispatchFrameProfile,
      double textureBindCalls, double programSwitches,
      double bufferUploadBytes, double textureUploadBytes,
      double unmeasuredTextureUploads, double lodChanges,
-     double shadowCasterDraws, double dynamicCommandVertices,
+     double shadowCasterDraws, double sunShadowMergedRanges, double dynamicCommandVertices,
      double dynamicCommandIndices, double uiCommandVertices, double uiCommandIndices), {
         globalThis.dispatchEvent(new CustomEvent("kisakcod:frame-profile", {
             detail: {
@@ -141,7 +141,7 @@ EM_JS(void, DispatchFrameProfile,
                     postProcessDrawCalls, queryDrawCalls, resolveBlits,
                     submittedIndices, submittedTriangles, textureBindCalls,
                     programSwitches, bufferUploadBytes, textureUploadBytes,
-                    unmeasuredTextureUploads, lodChanges, shadowCasterDraws,
+                    unmeasuredTextureUploads, lodChanges, shadowCasterDraws, sunShadowMergedRanges,
                     dynamicCommandVertices, dynamicCommandIndices, uiCommandVertices, uiCommandIndices
                 }
             }
@@ -320,6 +320,7 @@ void WebFrameProfile_EndPump(bool gameplayFrame, bool rendererSubmitted)
         static_cast<double>(s.unmeasuredTextureUploads),
         static_cast<double>(s.lodChanges),
         static_cast<double>(s.shadowCasterDraws),
+        static_cast<double>(s.sunShadowMergedRanges),
         static_cast<double>(s.dynamicCommandVertices),
         static_cast<double>(s.dynamicCommandIndices),
         static_cast<double>(s.uiCommandVertices),

@@ -31,7 +31,7 @@ export const COUNTER_PROFILE_FIELDS = [
     "postProcessDrawCalls", "queryDrawCalls", "resolveBlits",
     "submittedIndices", "submittedTriangles", "textureBindCalls",
     "programSwitches", "bufferUploadBytes", "textureUploadBytes",
-    "unmeasuredTextureUploads", "lodChanges", "shadowCasterDraws",
+    "unmeasuredTextureUploads", "lodChanges", "shadowCasterDraws", "sunShadowMergedRanges",
     "dynamicCommandVertices", "dynamicCommandIndices", "uiCommandVertices", "uiCommandIndices",
 ];
 

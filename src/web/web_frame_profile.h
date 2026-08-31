@@ -268,6 +268,7 @@ struct WebFrameProfileSample
     std::uint64_t unmeasuredTextureUploads = 0u;
     std::uint64_t lodChanges = 0u;
     std::uint64_t shadowCasterDraws = 0u;
+    std::uint64_t sunShadowMergedRanges = 0u;
     std::uint64_t dynamicCommandVertices = 0u;
     std::uint64_t dynamicCommandIndices = 0u;
     std::uint64_t uiCommandVertices = 0u;

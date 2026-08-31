@@ -61,7 +61,7 @@ export function validateProfileWindow(frames, views, workload) {
         const counts = {};
         for (const key of ['worldSurfacesSubmitted', 'worldSurfacesDrawn', 'staticModelInstancesRetained',
             'staticModelInstanceDraws', 'dynamicBatchesDrawn', 'fxModelBatchesDrawn', 'particleBatchesDrawn',
-            'markBatchesDrawn', 'shadowCasterDraws', 'submittedIndices', 'bufferUploadBytes',
+            'markBatchesDrawn', 'shadowCasterDraws', 'sunShadowMergedRanges', 'submittedIndices', 'bufferUploadBytes',
             'dynamicCommandVertices', 'dynamicCommandIndices', 'uiCommandVertices', 'uiCommandIndices']) {
             assert(Number.isSafeInteger(frame.counters[key]) && frame.counters[key] >= 0, key);
             counts[key] = frame.counters[key];
@@ -91,8 +91,44 @@ export function compareProfileWorkloads(runs) {
     return runs.map(run => ({ artifactSha256: run.artifactSha256, matchingWorkCountSamples: 120 }));
 }
 
+// Explicit qualification for retained brushes and opaque sun-range merging.
+// The original comparator remains strict for optimizations with unchanged work.
+export function compareRetainedRendererWorkloads(runs) {
+    assert(runs.length >= 2);
+    const baseline = runs[0];
+    const normalized = [baseline];
+    const changes = [];
+    for (const run of runs.slice(1)) {
+        assert.equal(run.workCounts.length, 120);
+        const deltas = run.workCounts.map((counts, index) => {
+            const original = baseline.workCounts[index];
+            const vertices = original.dynamicCommandVertices - counts.dynamicCommandVertices;
+            const indices = original.dynamicCommandIndices - counts.dynamicCommandIndices;
+            const bytes = original.bufferUploadBytes - counts.bufferUploadBytes;
+            assert(vertices > 0 && indices > 0);
+            assert.equal(bytes, vertices * 72 + indices * 4, 'upload reduction must equal retained brush geometry');
+            assert(Number.isSafeInteger(counts.sunShadowMergedRanges) && counts.sunShadowMergedRanges > 0);
+            assert.equal(counts.shadowCasterDraws + counts.sunShadowMergedRanges,
+                original.shadowCasterDraws, 'logical caster ranges changed');
+            return { vertices, indices, bytes, mergedSunRanges: counts.sunShadowMergedRanges };
+        });
+        for (const delta of deltas) assert.deepEqual(delta, deltas[0], 'optimization work changed within paused window');
+        normalized.push({ ...run, workCounts: run.workCounts.map((counts, index) => ({
+            ...counts,
+            dynamicCommandVertices: counts.dynamicCommandVertices + deltas[index].vertices,
+            dynamicCommandIndices: counts.dynamicCommandIndices + deltas[index].indices,
+            bufferUploadBytes: counts.bufferUploadBytes + deltas[index].bytes,
+            shadowCasterDraws: counts.shadowCasterDraws + counts.sunShadowMergedRanges,
+        })) });
+        changes.push({ artifactSha256: run.artifactSha256, matchingLogicalWorkSamples: 120, ...deltas[0] });
+    }
+    compareProfileWorkloads(normalized); // all other counts and workload metadata must match exactly
+    return changes;
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
     const profiles = process.argv[2] === '--profiles';
-    const runs = await Promise.all(process.argv.slice(profiles ? 3 : 2).map(async path => JSON.parse(await readFile(path, 'utf8'))));
-    console.log(JSON.stringify((profiles ? compareProfileWorkloads : compareWorkloads)(runs), null, 2));
+    const retained = process.argv[2] === '--retained';
+    const runs = await Promise.all(process.argv.slice(profiles || retained ? 3 : 2).map(async path => JSON.parse(await readFile(path, 'utf8'))));
+    console.log(JSON.stringify((retained ? compareRetainedRendererWorkloads : profiles ? compareProfileWorkloads : compareWorkloads)(runs), null, 2));
 }

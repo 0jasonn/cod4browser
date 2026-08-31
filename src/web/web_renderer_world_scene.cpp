@@ -1200,6 +1200,50 @@ WebRendererWorldSceneResult WebRenderer_BuildBrushModelSceneCommand(
     return WebRendererWorldSceneResult::Success;
 }
 
+bool WebRenderer_BrushPlacementIsFinite(
+    const WebRendererBrushModelInstanceDesc &instance,
+    const std::vector<WebRendererSurfaceVertex> &vertices,
+    float maximumCoordinate) noexcept
+{
+    if (!Finite3(instance.origin)) return false;
+    for (const auto &axis : instance.axis)
+        if (!Finite3(axis)) return false;
+    bool checkVertices = false;
+    for (std::size_t component = 0u; component < 3u; ++component)
+    {
+        const double bound = std::fabs(static_cast<double>(instance.origin[component])) +
+            static_cast<double>(maximumCoordinate) *
+                (std::fabs(static_cast<double>(instance.axis[0][component])) +
+                 std::fabs(static_cast<double>(instance.axis[1][component])) +
+                 std::fabs(static_cast<double>(instance.axis[2][component])));
+        checkVertices |= bound > static_cast<double>(std::numeric_limits<float>::max()) * 0.5;
+    }
+    if (!checkVertices) return true;
+    for (const auto &vertex : vertices)
+    {
+        for (std::size_t component = 0u; component < 3u; ++component)
+        {
+            const float position = vertex.position[0] * instance.axis[0][component] +
+                vertex.position[1] * instance.axis[1][component] +
+                vertex.position[2] * instance.axis[2][component] + instance.origin[component];
+            const float shaderPosition = instance.origin[component] +
+                vertex.position[0] * instance.axis[0][component] +
+                vertex.position[1] * instance.axis[1][component] +
+                vertex.position[2] * instance.axis[2][component];
+            const float normal = vertex.normal[0] * instance.axis[0][component] +
+                vertex.normal[1] * instance.axis[1][component] +
+                vertex.normal[2] * instance.axis[2][component];
+            const float tangent = vertex.tangent[0] * instance.axis[0][component] +
+                vertex.tangent[1] * instance.axis[1][component] +
+                vertex.tangent[2] * instance.axis[2][component];
+            if (!std::isfinite(position) || !std::isfinite(shaderPosition) ||
+                !std::isfinite(normal) || !std::isfinite(tangent))
+                return false;
+        }
+    }
+    return true;
+}
+
 const char *WebRenderer_WorldSceneResultString(
     WebRendererWorldSceneResult result) noexcept
 {

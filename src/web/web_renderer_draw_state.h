@@ -4,6 +4,40 @@
 #include <cstdint>
 #include <cstring>
 
+// Sun depth uses one projection, no culling, and no material inputs for opaque
+// world triangles. Join only adjacent opaque index ranges; never bridge an
+// omitted caster or an alpha-tested range. Camera visibility is irrelevant here.
+template<typename Batches, typename IsOpaque, typename Draw>
+std::uint32_t WebRenderer_ForEachSunShadowRange(
+    const Batches &batches, IsOpaque isOpaque, Draw draw)
+{
+    const typename Batches::value_type *pending = nullptr;
+    std::uint32_t count = 0u;
+    std::uint32_t merged = 0u;
+    for (const auto &batch : batches)
+    {
+        if (!batch.castsSunShadow || batch.indexCount == 0u)
+        {
+            if (pending) draw(*pending, pending->firstIndex, count);
+            pending = nullptr;
+            continue;
+        }
+        if (pending && isOpaque(*pending) && isOpaque(batch) &&
+            std::uint64_t(pending->firstIndex) + count == batch.firstIndex &&
+            batch.indexCount <= UINT32_MAX - count)
+        {
+            count += batch.indexCount;
+            ++merged;
+            continue;
+        }
+        if (pending) draw(*pending, pending->firstIndex, count);
+        pending = &batch;
+        count = batch.indexCount;
+    }
+    if (pending) draw(*pending, pending->firstIndex, count);
+    return merged;
+}
+
 // Local to one draw pass and one shader program. Batch values and
 // matrix contents must remain immutable for that pass. Reset after any direct
 // GL override (sun query/sprite), and never retain this across frames/contexts.

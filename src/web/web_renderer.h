@@ -353,6 +353,15 @@ enum class WebRendererSceneBatchKind : std::uint8_t
     SunFlare,
 };
 
+// Backend-owned brush mesh handle plus the current canonical rigid placement.
+// Handles are valid only until world retirement; no game/entity state is retained.
+struct WebRendererBrushModelInstanceDesc
+{
+    std::uint32_t geometryIndex;
+    float axis[3][3];
+    float origin[3];
+};
+
 constexpr bool WebRenderer_IsCameraVisibleXModelSurface(
     WebRendererSceneBatchKind kind, std::uint8_t cameraRegion) noexcept
 {
@@ -617,9 +626,18 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
 
 // Replaces the current per-frame DObj surface command. Geometry has already
 // been posed/skinned by the canonical frontend; canonical model/material/image
-// identities remain attached to each batch.
+// identities remain attached to each batch. Retained brush placements are
+// inserted before brushInsertBatch without occupying the streamed vertex buffer.
 WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
-    const WebRendererWorldSurfaceDesc &scene);
+    const WebRendererWorldSurfaceDesc &scene,
+    const WebRendererBrushModelInstanceDesc *brushInstances = nullptr,
+    std::uint32_t brushInstanceCount = 0u,
+    std::uint32_t brushInsertBatch = 0u);
+
+// Validated, immutable geometry/material resources owned until world retirement.
+// Current transforms, visibility, and animated primary-light values are not cached.
+WebRendererSurfaceResult WebRenderer_RetainBrushModelGeometry(
+    const WebRendererWorldSurfaceDesc &geometry, std::uint32_t &geometryIndex);
 
 // Replaces the current frame's canonical 2D material/text command stream.
 WebRendererSurfaceResult WebRenderer_SetUiScene(

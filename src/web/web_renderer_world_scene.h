@@ -120,3 +120,11 @@ WebRendererWorldSceneResult WebRenderer_BuildBrushModelSceneCommand(
 
 const char *WebRenderer_WorldSceneResultString(
     WebRendererWorldSceneResult result) noexcept;
+
+// maximumCoordinate bounds position, normal and tangent magnitudes of validated
+// retained vertices. Ordinary placements need no per-vertex revalidation; near
+// float overflow, check the actual transformed values before GPU submission.
+bool WebRenderer_BrushPlacementIsFinite(
+    const WebRendererBrushModelInstanceDesc &instance,
+    const std::vector<WebRendererSurfaceVertex> &vertices,
+    float maximumCoordinate) noexcept;

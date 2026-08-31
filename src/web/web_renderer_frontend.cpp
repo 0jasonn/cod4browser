@@ -488,6 +488,15 @@ std::uint32_t g_dobjSubmissionCount = 0u;
 std::array<WebRendererBrushModelSubmission,
     WEB_RENDERER_MAX_DYNAMIC_BMODEL_SUBMISSIONS> g_brushModelSubmissions{};
 std::uint32_t g_brushModelSubmissionCount = 0u;
+struct BrushGeometryReference
+{
+    std::uint32_t handle = UINT32_MAX;
+    std::uint32_t surfaces = 0u;
+    std::uint32_t batches = 0u;
+    std::uint32_t vertices = 0u;
+    std::uint32_t indices = 0u;
+};
+std::vector<BrushGeometryReference> g_brushGeometryByModel;
 std::array<WebRendererFxModelSubmission,
     WEB_RENDERER_MAX_FX_MODEL_SUBMISSIONS> g_fxModelSubmissions{};
 std::uint32_t g_fxModelSubmissionCount = 0u;
@@ -706,7 +715,8 @@ void ConfigureMarkBatch(WebRendererWorldBatchDesc &batch,
 }
 
 bool AppendSunSprite(WebRendererDObjSceneCommand &command,
-    const WebRendererSceneViewDesc &view) noexcept
+    const WebRendererSceneViewDesc &view,
+    std::uint32_t brushVertices, std::uint32_t brushIndices) noexcept
 {
     static bool reported = false;
     if (!s_world.sun.hasValidData || !s_world.sun.spriteMaterial ||
@@ -750,9 +760,9 @@ bool AppendSunSprite(WebRendererDObjSceneCommand &command,
     };
     try
     {
-        if (command.vertices.size() + 4u >
+        if (command.vertices.size() + brushVertices + 4u >
                 WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES ||
-            command.indices.size() + 6u >
+            command.indices.size() + brushIndices + 6u >
                 WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES)
             return false;
         const std::uint32_t vertexBase = static_cast<std::uint32_t>(
@@ -866,7 +876,8 @@ bool AppendSunSprite(WebRendererDObjSceneCommand &command,
 }
 
 bool AppendSunFlare(WebRendererDObjSceneCommand &command,
-    const WebRendererSceneViewDesc &view) noexcept
+    const WebRendererSceneViewDesc &view,
+    std::uint32_t brushVertices, std::uint32_t brushIndices) noexcept
 {
     if (!s_world.sun.hasValidData || !s_world.sun.flareMaterial ||
         s_world.sun.flareMaxAlpha <= 0.0f)
@@ -918,9 +929,9 @@ bool AppendSunFlare(WebRendererDObjSceneCommand &command,
 
     try
     {
-        if (command.vertices.size() + 4u >
+        if (command.vertices.size() + brushVertices + 4u >
                 WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES ||
-            command.indices.size() + 6u >
+            command.indices.size() + brushIndices + 6u >
                 WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES)
             return false;
         const std::uint32_t vertexBase = static_cast<std::uint32_t>(
@@ -1322,7 +1333,11 @@ void __cdecl R_Shutdown(int destroyWindow)
     if (destroyWindow) WebRenderer_Shutdown();
 }
 
-void __cdecl R_UnloadWorld() { WebRenderer_UnloadWorldResources(); }
+void __cdecl R_UnloadWorld()
+{
+    WebRenderer_UnloadWorldResources();
+    decltype(g_brushGeometryByModel){}.swap(g_brushGeometryByModel);
+}
 void R_ShutdownDirect3D() { WebRenderer_Shutdown(); }
 void __cdecl R_SyncRenderThread() {}
 void __cdecl R_BeginFrame()
@@ -1405,6 +1420,7 @@ void __cdecl R_LoadWorld(char *name, int *checksum, int)
     g_sceneBlurReported = false;
     g_worldSceneSubmitted = false;
     g_staticModelSceneSubmitted = false;
+    g_brushGeometryByModel.clear();
     g_dynamicModelSceneReported = false;
     g_dynamicBrushSceneReported = false;
     g_dynamicEntityModelSceneReported = false;
@@ -3022,63 +3038,112 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         sunPrimaryLightIndex,
         false,
     };
-    WebRendererBrushModelSceneCommand brushCommand;
-    const WebRendererWorldSceneResult brushBuild =
-        WebRenderer_BuildBrushModelSceneCommand(
-            s_world, activeBrushModels.data(),
-            static_cast<std::uint32_t>(activeBrushModels.size()),
-            brushCommand, &brushLightContext);
-    const bool hasBrushModels =
-        brushBuild == WebRendererWorldSceneResult::Success;
-    if (brushBuild != WebRendererWorldSceneResult::Success &&
-        brushBuild != WebRendererWorldSceneResult::NoVisibleSurface)
+    const std::uint32_t brushInsertBatch = static_cast<std::uint32_t>(dynamicCommand.batches.size());
+    std::vector<WebRendererBrushModelInstanceDesc> brushInstances;
+    std::uint32_t brushSurfaceCount = 0u;
+    std::uint32_t brushBatchCount = 0u;
+    std::uint32_t brushVertexCount = 0u;
+    std::uint32_t brushIndexCount = 0u;
+    try
     {
-        Com_Error(ERR_DROP, "R_RenderScene dynamic brush model: %s",
-            WebRenderer_WorldSceneResultString(brushBuild));
-        return;
-    }
-    if (hasBrushModels)
-    {
-#if KISAK_WEB_DIAGNOSTICS
-        const double appendStarted = sceneProfile ? WebFrameProfile_Now() : 0.0;
-#endif
-        try
+        if (g_brushGeometryByModel.size() != s_world.modelCount)
+            g_brushGeometryByModel.assign(s_world.modelCount, {});
+        brushInstances.reserve(activeBrushModels.size());
+        for (const auto &submission : activeBrushModels)
         {
-            const std::uint32_t vertexBase = static_cast<std::uint32_t>(
-                dynamicCommand.vertices.size());
-            const std::uint32_t indexBase = static_cast<std::uint32_t>(
-                dynamicCommand.indices.size());
-            if (vertexBase > WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES -
-                    brushCommand.vertices.size() ||
-                indexBase > WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES -
-                    brushCommand.indices.size())
+            bool finitePlacement = std::all_of(std::begin(submission.origin), std::end(submission.origin),
+                [](float value) { return std::isfinite(value); });
+            for (const auto &axis : submission.axis)
+                finitePlacement = finitePlacement && std::all_of(std::begin(axis), std::end(axis),
+                    [](float value) { return std::isfinite(value); });
+            if (!finitePlacement)
             {
-                Com_Error(ERR_DROP,
-                    "R_RenderScene canonical brush models exceed dynamic limits");
+                Com_Error(ERR_DROP, "R_RenderScene brush placement contains non-finite values");
                 return;
             }
-            dynamicCommand.vertices.insert(dynamicCommand.vertices.end(),
-                brushCommand.vertices.begin(), brushCommand.vertices.end());
-            for (const std::uint32_t index : brushCommand.indices)
-                dynamicCommand.indices.push_back(vertexBase + index);
-            for (WebRendererWorldBatchDesc batch : brushCommand.batches)
+            const auto address = reinterpret_cast<std::uintptr_t>(submission.model);
+            const auto base = reinterpret_cast<std::uintptr_t>(s_world.models);
+            if (!submission.model || !s_world.models || address < base ||
+                (address - base) % sizeof(GfxBrushModel) != 0u ||
+                (address - base) / sizeof(GfxBrushModel) >= s_world.modelCount)
             {
-                batch.firstIndex += indexBase;
-                dynamicCommand.batches.push_back(batch);
+                Com_Error(ERR_DROP, "R_RenderScene brush model is outside the canonical world");
+                return;
             }
-            dynamicCommand.surfaceCount += brushCommand.surfaceCount;
+            auto &resource = g_brushGeometryByModel[(address - base) / sizeof(GfxBrushModel)];
+            if (resource.handle == UINT32_MAX)
+            {
+                // Native brush geometry is immutable between world publications.
+                // Technique remaps run in R_LoadWorld, which clears this table;
+                // primary-light types are stable (enforced by SetSceneView).
+                // Retain it at identity placement; current entity transforms stay
+                // in the per-frame command and never become cached engine state.
+                WebRendererBrushModelSubmission identity{};
+                identity.model = submission.model;
+                for (std::size_t axis = 0u; axis < 3u; ++axis) identity.axis[axis][axis] = 1.0f;
+                WebRendererBrushModelSceneCommand geometry;
+                const auto build = WebRenderer_BuildBrushModelSceneCommand(
+                    s_world, &identity, 1u, geometry, &brushLightContext);
+                if (build == WebRendererWorldSceneResult::NoVisibleSurface)
+                {
+                    resource.handle = UINT32_MAX - 1u;
+                    continue;
+                }
+                if (build != WebRendererWorldSceneResult::Success)
+                {
+                    Com_Error(ERR_DROP, "R_RenderScene brush geometry: %s",
+                        WebRenderer_WorldSceneResultString(build));
+                    return;
+                }
+                for (auto &batch : geometry.batches) ResolveRendererBatchImages(batch);
+                const WebRendererWorldSurfaceDesc descriptor{
+                    geometry.vertices.data(), static_cast<std::uint32_t>(geometry.vertices.size()),
+                    geometry.indices.data(), static_cast<std::uint32_t>(geometry.indices.size()),
+                    geometry.batches.data(), static_cast<std::uint32_t>(geometry.batches.size()),
+                };
+                const auto retain = WebRenderer_RetainBrushModelGeometry(descriptor, resource.handle);
+                if (retain != WebRendererSurfaceResult::Success)
+                {
+                    Com_Error(ERR_DROP, "R_RenderScene retain brush geometry: %s",
+                        WebRenderer_SurfaceResultString(retain));
+                    return;
+                }
+                resource.surfaces = geometry.surfaceCount;
+                resource.batches = static_cast<std::uint32_t>(geometry.batches.size());
+                resource.vertices = descriptor.vertexCount;
+                resource.indices = descriptor.indexCount;
+            }
+            if (resource.handle == UINT32_MAX - 1u) continue;
+            // Retention removes physical copies, not logical scene occupancy.
+            // Later optional effects must see the same remaining budget.
+            if (WebRenderer_ValidateFxModelAppendCounts(
+                    resource.vertices, resource.indices, resource.batches, resource.surfaces,
+                    dynamicCommand.vertices.size() + brushVertexCount,
+                    dynamicCommand.indices.size() + brushIndexCount,
+                    dynamicCommand.batches.size() + brushBatchCount,
+                    dynamicCommand.surfaceCount + brushSurfaceCount) !=
+                WebRendererFxModelAppendResult::Success)
+            {
+                Com_Error(ERR_DROP, "R_RenderScene brush geometry exceeds dynamic limits");
+                return;
+            }
+            WebRendererBrushModelInstanceDesc instance{};
+            instance.geometryIndex = resource.handle;
+            std::memcpy(instance.axis, submission.axis, sizeof(instance.axis));
+            std::memcpy(instance.origin, submission.origin, sizeof(instance.origin));
+            brushInstances.push_back(instance);
+            brushSurfaceCount += resource.surfaces;
+            brushBatchCount += resource.batches;
+            brushVertexCount += resource.vertices;
+            brushIndexCount += resource.indices;
         }
-        catch (const std::bad_alloc &)
-        {
-            Com_Error(ERR_DROP,
-                "R_RenderScene canonical brush model allocation failed");
-            return;
-        }
-#if KISAK_WEB_DIAGNOSTICS
-        if (sceneProfile)
-            sceneProfile->sceneBrushAppendMs += WebFrameProfile_Now() - appendStarted;
-#endif
     }
+    catch (const std::bad_alloc &)
+    {
+        Com_Error(ERR_DROP, "R_RenderScene canonical brush placement allocation failed");
+        return;
+    }
+    const bool hasBrushModels = !brushInstances.empty();
 
 #if KISAK_WEB_DIAGNOSTICS
     if (sceneProfile)
@@ -3227,13 +3292,21 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     }
     if (hasDynamicEntityModels)
     {
+        const auto admission = WebRenderer_ValidateFxModelAppendCounts(
+            dynamicEntityModelCommand.vertices.size(), dynamicEntityModelCommand.indices.size(),
+            dynamicEntityModelCommand.batches.size(), dynamicEntityModelCommand.surfaceCount,
+            dynamicCommand.vertices.size() + brushVertexCount,
+            dynamicCommand.indices.size() + brushIndexCount,
+            dynamicCommand.batches.size() + brushBatchCount,
+            dynamicCommand.surfaceCount + brushSurfaceCount);
         const WebRendererFxModelAppendResult append =
-            WebRenderer_AppendFxModelSceneCommand(
+            admission == WebRendererFxModelAppendResult::Success
+            ? WebRenderer_AppendFxModelSceneCommand(
                 dynamicEntityModelCommand,
                 dynamicCommand.vertices,
                 dynamicCommand.indices,
                 dynamicCommand.batches,
-                dynamicCommand.surfaceCount);
+                dynamicCommand.surfaceCount) : admission;
         if (append != WebRendererFxModelAppendResult::Success)
         {
             Com_Error(ERR_DROP,
@@ -3297,10 +3370,10 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     {
         const WebRendererFxModelAppendResult admission =
             WebRenderer_ValidateFxModelAdmissionCounts(
-                dynamicCommand.vertices.size(),
-                dynamicCommand.indices.size(),
-                dynamicCommand.batches.size(),
-                dynamicCommand.surfaceCount,
+                dynamicCommand.vertices.size() + brushVertexCount,
+                dynamicCommand.indices.size() + brushIndexCount,
+                dynamicCommand.batches.size() + brushBatchCount,
+                dynamicCommand.surfaceCount + brushSurfaceCount,
                 fxModelCommand.vertices.size(),
                 fxModelCommand.indices.size(),
                 fxModelCommand.batches.size(),
@@ -3337,9 +3410,9 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                 dynamicCommand.vertices.size());
             const std::uint32_t indexBase = static_cast<std::uint32_t>(
                 dynamicCommand.indices.size());
-            if (vertexBase > WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES -
+            if (vertexBase + brushVertexCount > WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES -
                     g_markMeshRenderVertices.size() ||
-                indexBase > WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES -
+                indexBase + brushIndexCount > WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES -
                     g_markMeshRenderIndices.size())
             {
                 Com_Error(ERR_DROP,
@@ -3374,9 +3447,9 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                 dynamicCommand.vertices.size());
             const std::uint32_t indexBase = static_cast<std::uint32_t>(
                 dynamicCommand.indices.size());
-            if (vertexBase > WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES -
+            if (vertexBase + brushVertexCount > WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES -
                     g_codeMeshRenderVertices.size() ||
-                indexBase > WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES -
+                indexBase + brushIndexCount > WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES -
                     g_codeMeshRenderIndices.size())
             {
                 Com_Error(ERR_DROP,
@@ -3431,13 +3504,19 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
 #if KISAK_WEB_DIAGNOSTICS
         const double cloudAppendStarted = sceneProfile ? WebFrameProfile_Now() : 0.0;
 #endif
+        const auto admission = WebRenderer_ValidateParticleCloudAppendCounts(
+            dynamicCommand.vertices.size() + brushVertexCount,
+            dynamicCommand.indices.size() + brushIndexCount,
+            dynamicCommand.batches.size() + brushBatchCount,
+            dynamicCommand.surfaceCount + brushSurfaceCount);
         const WebRendererParticleCloudAppendResult append =
-            WebRenderer_AppendParticleCloudCommand(
+            admission == WebRendererParticleCloudAppendResult::Success
+            ? WebRenderer_AppendParticleCloudCommand(
                 cloudCommand,
                 dynamicCommand.vertices,
                 dynamicCommand.indices,
                 dynamicCommand.batches,
-                dynamicCommand.surfaceCount);
+                dynamicCommand.surfaceCount) : admission;
 #if KISAK_WEB_DIAGNOSTICS
         if (sceneProfile)
             sceneProfile->sceneCloudAppendMs += WebFrameProfile_Now() - cloudAppendStarted;
@@ -3450,8 +3529,8 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     if (droppedParticleClouds != 0u)
         R_WarnOncePerFrame(R_WARN_MAX_CLOUDS);
 
-    const bool hasSunSprite = AppendSunSprite(dynamicCommand, view);
-    const bool hasSunFlare = AppendSunFlare(dynamicCommand, view);
+    const bool hasSunSprite = AppendSunSprite(dynamicCommand, view, brushVertexCount, brushIndexCount);
+    const bool hasSunFlare = AppendSunFlare(dynamicCommand, view, brushVertexCount, brushIndexCount);
 
 #if KISAK_WEB_DIAGNOSTICS
     const double imageResolveStarted = sceneProfile ? WebFrameProfile_Now() : 0.0;
@@ -3497,11 +3576,13 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                 ? nullptr : &lightingAtlas,
         };
         const WebRendererSurfaceResult submission =
-            WebRenderer_SetDynamicModelScene(scene);
+            WebRenderer_SetDynamicModelScene(scene, brushInstances.data(),
+                static_cast<std::uint32_t>(brushInstances.size()), brushInsertBatch);
         if (submission != WebRendererSurfaceResult::Success)
         {
-            Com_Error(ERR_DROP, "R_RenderScene dynamic/canonical FX command %s",
-                WebRenderer_SurfaceResultString(submission));
+            Com_Error(ERR_DROP, "R_RenderScene dynamic/canonical FX command %s (vertices=%u indices=%u batches=%u brushes=%zu insert=%u)",
+                WebRenderer_SurfaceResultString(submission), scene.vertexCount,
+                scene.indexCount, scene.batchCount, brushInstances.size(), brushInsertBatch);
             return;
         }
     }
@@ -3562,8 +3643,8 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         Web_Log(WebLogLevel::Info,
             "[kisakcod-web] Canonical dynamic brush scene: %u models, "
             "%u surfaces, %zu batches.\n",
-            brushCommand.modelCount, brushCommand.surfaceCount,
-            brushCommand.batches.size());
+            static_cast<std::uint32_t>(brushInstances.size()), brushSurfaceCount,
+            static_cast<std::size_t>(brushBatchCount));
     }
     if (hasDynamicEntityModels && !g_dynamicEntityModelSceneReported)
     {

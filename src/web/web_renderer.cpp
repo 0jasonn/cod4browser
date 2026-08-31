@@ -235,11 +235,29 @@ struct WebRendererRetainedUiBatch
     float color[4]{1.0f, 1.0f, 1.0f, 1.0f};
 };
 
+struct WebRendererRetainedBrushGeometry
+{
+    float maximumCoordinate = 0.0f;
+    GLuint vertexArray = 0u;
+    GLuint vertexBuffer = 0u;
+    GLuint indexBuffer = 0u;
+    std::vector<WebRendererSurfaceVertex> vertices;
+    std::vector<std::uint32_t> indices;
+    std::vector<WebRendererRetainedWorldBatch> batches;
+};
+
+struct WebRendererDynamicDraw
+{
+    std::uint32_t batchIndex;
+    std::uint32_t brushInstanceIndex = UINT32_MAX;
+};
+
 struct WebRendererState
 {
     EMSCRIPTEN_WEBGL_CONTEXT_HANDLE context = 0;
     float maxTextureAnisotropy = 1.0f;
     bool textureAnisotropySupported = false;
+    WebRendererTextureParameters textureParameters;
     GLuint program = 0;
     GLuint skyProgram = 0;
     GLuint postProcessProgram = 0;
@@ -432,6 +450,9 @@ struct WebRendererState
     std::vector<WebRendererSurfaceVertex> dynamicModelVertexStaging;
     std::vector<std::uint32_t> dynamicModelIndexStaging;
     std::vector<WebRendererRetainedWorldBatch> retainedDynamicModelBatches;
+    std::vector<WebRendererRetainedBrushGeometry> retainedBrushGeometry;
+    std::vector<WebRendererBrushModelInstanceDesc> retainedBrushInstances;
+    std::vector<WebRendererDynamicDraw> dynamicDraws;
     std::vector<WebRendererRetainedWorldImage> retainedDynamicModelImages;
     WebRendererRetainedModelLightingAtlas retainedDynamicModelLighting;
     bool dynamicModelSceneActive = false;
@@ -543,6 +564,9 @@ void DeleteStaticModelObjects(
     GLuint vertexArray, GLuint vertexBuffer, GLuint indexBuffer,
     GLuint instanceBuffer);
 void BindStaticModelInstanceRange(std::uint32_t instanceOffset);
+void DeleteBrushModelObjects();
+bool CreateBrushModelObjects();
+const WebRendererRetainedWorldBatch &DynamicDrawBatch(const WebRendererDynamicDraw &draw);
 void AttachRetainedWorldReflectionTextures() noexcept;
 
 void RecordEncodedImageInspection() noexcept
@@ -1911,7 +1935,7 @@ RetainedImageMemoryStats RetainedImageStats(
 
 std::size_t EmitRendererMemory(const char *state, bool sampleAllocator = true)
 {
-    const std::size_t geometryBytes =
+    std::size_t geometryBytes =
         g_renderer.retainedVertices.size() * sizeof(WebRendererSurfaceVertex) +
         g_renderer.retainedIndices.size() * sizeof(std::uint16_t) +
         g_renderer.retainedWorldIndices.size() * sizeof(std::uint32_t) +
@@ -1923,6 +1947,12 @@ std::size_t EmitRendererMemory(const char *state, bool sampleAllocator = true)
         g_renderer.retainedDynamicModelIndices.size() * sizeof(std::uint32_t) +
         g_renderer.retainedUiVertices.size() * sizeof(WebRendererSurfaceVertex) +
         g_renderer.retainedUiIndices.size() * sizeof(std::uint32_t);
+    for (const auto &geometry : g_renderer.retainedBrushGeometry)
+        geometryBytes += geometry.vertices.size() * sizeof(WebRendererSurfaceVertex) +
+            geometry.indices.size() * sizeof(std::uint32_t);
+    geometryBytes += g_renderer.retainedBrushInstances.size() *
+        sizeof(WebRendererBrushModelInstanceDesc) +
+        g_renderer.dynamicDraws.size() * sizeof(WebRendererDynamicDraw);
     const RetainedImageMemoryStats worldImages =
         RetainedImageStats(g_renderer.retainedWorldImages);
     const RetainedImageMemoryStats staticModelImages =
@@ -2177,6 +2207,8 @@ void ResetGpuHandles()
     g_renderer.dynamicModelVertexArray = 0u;
     g_renderer.dynamicModelVertexBuffer = 0u;
     g_renderer.dynamicModelIndexBuffer = 0u;
+    for (auto &geometry : g_renderer.retainedBrushGeometry)
+        geometry.vertexArray = geometry.vertexBuffer = geometry.indexBuffer = 0u;
     g_renderer.uiVertexArray = 0u;
     g_renderer.uiVertexBuffer = 0u;
     g_renderer.uiIndexBuffer = 0u;
@@ -2305,6 +2337,8 @@ void ResetGpuHandles()
     for (WebRendererRetainedWorldBatch &batch :
          g_renderer.retainedDynamicModelBatches)
         batch.reflectionTexture = 0u;
+    for (auto &geometry : g_renderer.retainedBrushGeometry)
+        for (auto &batch : geometry.batches) batch.reflectionTexture = 0u;
     g_renderer.retainedSky.texture = 0u;
     g_renderer.retainedStaticModelLighting.texture = 0u;
     g_renderer.retainedDynamicModelLighting.texture = 0u;
@@ -2541,6 +2575,7 @@ void DestroyWebGLContext()
 
     if (WebRendererContext_MakeCurrent(g_renderer.context))
     {
+        DeleteBrushModelObjects();
         DeleteWorldTextureObjects(g_renderer.retainedWorldImages);
         DeleteWaterTextureObjects(g_renderer.retainedWorldBatches);
         DeleteWorldTextureObjects(g_renderer.retainedStaticModelImages);
@@ -2774,6 +2809,30 @@ bool CreateSurfaceObjects(
     vertexArrayOut = vertexArray;
     vertexBufferOut = vertexBuffer;
     indexBufferOut = indexBuffer;
+    return true;
+}
+
+void DeleteBrushModelObjects()
+{
+    for (auto &geometry : g_renderer.retainedBrushGeometry)
+    {
+        DeleteSurfaceObjects(geometry.vertexArray, geometry.vertexBuffer,
+            geometry.indexBuffer);
+        geometry.vertexArray = geometry.vertexBuffer = geometry.indexBuffer = 0u;
+    }
+}
+
+bool CreateBrushModelObjects()
+{
+    for (auto &geometry : g_renderer.retainedBrushGeometry)
+    {
+        if (!CreateSurfaceObjects(geometry.vertices, geometry.indices,
+                geometry.vertexArray, geometry.vertexBuffer, geometry.indexBuffer))
+        {
+            DeleteBrushModelObjects();
+            return false;
+        }
+    }
     return true;
 }
 
@@ -4761,7 +4820,7 @@ bool CreateRendererResources(bool contextRecovery = false)
     GLuint dynamicModelVertexBuffer = 0u;
     GLuint dynamicModelIndexBuffer = 0u;
     const bool dynamicModelObjectsReady =
-        !g_renderer.dynamicModelSceneActive || CreateSurfaceObjects(
+        g_renderer.retainedDynamicModelVertices.empty() || CreateSurfaceObjects(
             g_renderer.retainedDynamicModelVertices,
             g_renderer.retainedDynamicModelIndices,
             dynamicModelVertexArray,
@@ -4775,6 +4834,7 @@ bool CreateRendererResources(bool contextRecovery = false)
         (!g_renderer.dynamicModelSceneActive ||
          CreateModelLightingTexture(
             g_renderer.retainedDynamicModelLighting));
+    const bool brushObjectsReady = dynamicModelLightingReady && CreateBrushModelObjects();
     GLuint uiVertexArray = 0u;
     GLuint uiVertexBuffer = 0u;
     GLuint uiIndexBuffer = 0u;
@@ -4883,12 +4943,13 @@ bool CreateRendererResources(bool contextRecovery = false)
         !staticModelObjectsReady || !staticModelTexturesReady ||
         !staticModelLightingReady ||
         !dynamicModelObjectsReady || !dynamicModelTexturesReady ||
-        !dynamicModelLightingReady ||
+        !dynamicModelLightingReady || !brushObjectsReady ||
         !uiObjectsReady || !uiTexturesReady ||
         !shadowTargetReady || !shadowFarTargetReady ||
         !spotShadowTargetsReady ||
         !compatibilityReady)
     {
+        DeleteBrushModelObjects();
         Web_Log(
             WebLogLevel::Error,
             "[kisakcod-web] WebGL2 resource creation failed (0x%x).\n",
@@ -5524,6 +5585,10 @@ GLuint FindRetainedWorldReflectionTexture(
 
 void AttachRetainedWorldReflectionTextures() noexcept
 {
+    for (auto &geometry : g_renderer.retainedBrushGeometry)
+        for (auto &batch : geometry.batches)
+            if (WebRenderer_UsesModelEnvironmentSpecular(batch.technique))
+                batch.reflectionTexture = FindRetainedWorldReflectionTexture(batch.reflectionProbeIndex);
     for (WebRendererRetainedStaticModelBatch &batch :
          g_renderer.retainedStaticModelBatches)
     {
@@ -6666,6 +6731,7 @@ void WebRenderer_UnloadWorldResources()
         static_cast<double>(recoveryBytesBefore));
     if (g_renderer.initialized && !g_renderer.contextLost)
     {
+        DeleteBrushModelObjects();
         DeleteWorldTextureObjects(g_renderer.retainedWorldImages);
         DeleteWaterTextureObjects(g_renderer.retainedWorldBatches);
         DeleteWorldTextureObjects(g_renderer.retainedStaticModelImages);
@@ -6764,6 +6830,9 @@ void WebRenderer_UnloadWorldResources()
         g_renderer.dynamicModelIndexStaging);
     decltype(g_renderer.retainedDynamicModelBatches){}.swap(
         g_renderer.retainedDynamicModelBatches);
+    decltype(g_renderer.retainedBrushGeometry){}.swap(g_renderer.retainedBrushGeometry);
+    decltype(g_renderer.retainedBrushInstances){}.swap(g_renderer.retainedBrushInstances);
+    decltype(g_renderer.dynamicDraws){}.swap(g_renderer.dynamicDraws);
     decltype(g_renderer.retainedDynamicModelImages){}.swap(
         g_renderer.retainedDynamicModelImages);
     decltype(g_renderer.retainedUiVertices){}.swap(
@@ -7033,22 +7102,71 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
     return WebRendererSurfaceResult::Success;
 }
 
-WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
-    const WebRendererWorldSurfaceDesc &scene)
+WebRendererSurfaceResult WebRenderer_RetainBrushModelGeometry(
+    const WebRendererWorldSurfaceDesc &geometry, std::uint32_t &geometryIndex)
 {
-    if (scene.vertexCount == 0u && scene.indexCount == 0u &&
-        scene.batchCount == 0u)
+    if (!geometry.batches || !geometry.vertexCount || !geometry.indexCount ||
+        !geometry.batchCount || geometry.batchCount > geometry.indexCount / 3u ||
+        geometry.modelLightingAtlas || geometry.primaryLightCount ||
+        geometry.vertexCount > WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES ||
+        geometry.indexCount > WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES ||
+        g_renderer.retainedBrushGeometry.size() >= UINT32_MAX)
+        return WebRendererSurfaceResult::InvalidDescriptor;
+    for (std::uint32_t index = 0u; index < geometry.batchCount; ++index)
     {
-        if (scene.vertices || scene.indices || scene.batches ||
-            scene.modelLightingAtlas)
+        if (geometry.batches[index].sourceKind != WebRendererSceneBatchKind::DynamicBModel ||
+            geometry.batches[index].depthHack || geometry.batches[index].lightingMode ==
+                WebRendererWorldLightingMode::ModelLightGrid)
             return WebRendererSurfaceResult::InvalidDescriptor;
-        if (g_renderer.initialized && !g_renderer.contextLost)
-            DeleteModelLightingTexture(
-                g_renderer.retainedDynamicModelLighting);
-        g_renderer.retainedDynamicModelLighting = {};
-        g_renderer.dynamicModelSceneActive = false;
-        return WebRendererSurfaceResult::Success;
     }
+    WebRendererRetainedBrushGeometry retained;
+    std::vector<WebRendererRetainedPrimaryLight> ignoredLights;
+    std::uint32_t ignoredSun = 0u;
+    const auto copy = CopyWorldCommand(geometry, retained.vertices, retained.indices,
+        retained.batches, g_renderer.retainedDynamicModelImages, ignoredLights,
+        ignoredSun, static_cast<std::uint32_t>(g_renderer.retainedPrimaryLights.size()),
+        nullptr, nullptr);
+    if (copy != WebRendererSurfaceResult::Success) return copy;
+    for (const auto &vertex : retained.vertices)
+        for (std::size_t component = 0u; component < 3u; ++component)
+            retained.maximumCoordinate = std::max({retained.maximumCoordinate,
+                std::fabs(vertex.position[component]), std::fabs(vertex.normal[component]),
+                std::fabs(vertex.tangent[component])});
+    if (g_renderer.initialized && !g_renderer.contextLost)
+    {
+        if (!CreateSurfaceObjects(retained.vertices, retained.indices, retained.vertexArray,
+                retained.vertexBuffer, retained.indexBuffer))
+            return WebRendererSurfaceResult::BackendFailure;
+        if (!CreateWorldTextureObjects(g_renderer.retainedDynamicModelImages))
+        {
+            DeleteSurfaceObjects(retained.vertexArray, retained.vertexBuffer, retained.indexBuffer);
+            return WebRendererSurfaceResult::BackendFailure;
+        }
+    }
+    try
+    {
+        g_renderer.retainedBrushGeometry.push_back(std::move(retained));
+    }
+    catch (const std::bad_alloc &)
+    {
+        DeleteSurfaceObjects(retained.vertexArray, retained.vertexBuffer, retained.indexBuffer);
+        return WebRendererSurfaceResult::AllocationFailed;
+    }
+    geometryIndex = static_cast<std::uint32_t>(g_renderer.retainedBrushGeometry.size() - 1u);
+    return WebRendererSurfaceResult::Success;
+}
+
+WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
+    const WebRendererWorldSurfaceDesc &scene,
+    const WebRendererBrushModelInstanceDesc *brushInstances,
+    std::uint32_t brushInstanceCount, std::uint32_t brushInsertBatch)
+{
+    const bool empty = scene.vertexCount == 0u && scene.indexCount == 0u && scene.batchCount == 0u;
+    if ((empty && (scene.vertices || scene.indices || scene.batches || scene.modelLightingAtlas)) ||
+        (brushInstanceCount != 0u && !brushInstances) ||
+        brushInstanceCount > WEB_RENDERER_MAX_DYNAMIC_BMODEL_SUBMISSIONS ||
+        brushInsertBatch > scene.batchCount)
+        return WebRendererSurfaceResult::InvalidDescriptor;
     if (scene.vertexCount > WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES ||
         scene.indexCount > WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES)
     {
@@ -7061,14 +7179,18 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
 #endif
     auto &retainedVertices = g_renderer.dynamicModelVertexStaging;
     auto &retainedIndices = g_renderer.dynamicModelIndexStaging;
+    retainedVertices.clear();
+    retainedIndices.clear();
     std::vector<WebRendererRetainedWorldBatch> retainedBatches;
+    std::vector<WebRendererBrushModelInstanceDesc> retainedBrushInstances;
+    std::vector<WebRendererDynamicDraw> dynamicDraws;
     std::vector<WebRendererRetainedPrimaryLight> ignoredPrimaryLights;
     std::uint32_t ignoredSunPrimaryLightIndex = 0u;
     WebRendererRetainedModelLightingAtlas retainedLighting;
     // Dynamic image ownership is persistent across frames. CopyWorldCommand
     // finds canonical identities already present here, so an animated weapon
     // uploads geometry each frame without re-reading or re-decoding its IWI.
-    const WebRendererSurfaceResult copy = CopyWorldCommand(
+    const WebRendererSurfaceResult copy = empty ? WebRendererSurfaceResult::Success : CopyWorldCommand(
         scene, retainedVertices, retainedIndices, retainedBatches,
         g_renderer.retainedDynamicModelImages, ignoredPrimaryLights,
         ignoredSunPrimaryLightIndex,
@@ -7087,6 +7209,41 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
     if (dynamicNeedsLighting && retainedLighting.pixels.empty())
         return WebRendererSurfaceResult::InvalidDescriptor;
 
+    try
+    {
+        std::uint64_t logicalVertices = scene.vertexCount;
+        std::uint64_t logicalIndices = scene.indexCount;
+        for (std::uint32_t index = 0u; index < brushInsertBatch; ++index)
+            dynamicDraws.push_back({index});
+        for (std::uint32_t index = 0u; index < brushInstanceCount; ++index)
+        {
+            const auto &instance = brushInstances[index];
+            if (instance.geometryIndex >= g_renderer.retainedBrushGeometry.size())
+                return WebRendererSurfaceResult::InvalidDescriptor;
+            const auto &geometry = g_renderer.retainedBrushGeometry[instance.geometryIndex];
+            if (!WebRenderer_BrushPlacementIsFinite(instance, geometry.vertices, geometry.maximumCoordinate))
+                return WebRendererSurfaceResult::NonFiniteVertex;
+            logicalVertices += geometry.vertices.size();
+            logicalIndices += geometry.indices.size();
+            if (logicalVertices > WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES ||
+                logicalIndices > WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES)
+            {
+                Web_Log(WebLogLevel::Error, "[kisakcod-web] Brush logical geometry exceeds limits: %llu vertices, %llu indices.\n",
+                    static_cast<unsigned long long>(logicalVertices), static_cast<unsigned long long>(logicalIndices));
+                return WebRendererSurfaceResult::InvalidDescriptor;
+            }
+            retainedBrushInstances.push_back(instance);
+            for (std::uint32_t batch = 0u; batch < geometry.batches.size(); ++batch)
+                dynamicDraws.push_back({batch, index});
+        }
+        for (std::uint32_t index = brushInsertBatch; index < scene.batchCount; ++index)
+            dynamicDraws.push_back({index});
+    }
+    catch (const std::bad_alloc &)
+    {
+        return WebRendererSurfaceResult::AllocationFailed;
+    }
+
 #if KISAK_WEB_DIAGNOSTICS
     const double geometryStarted = dynamicProfile ? WebFrameProfile_Now() : 0.0;
     if (dynamicProfile)
@@ -7096,7 +7253,7 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
     GLuint vertexBuffer = 0u;
     GLuint indexBuffer = 0u;
     const bool hasContext = g_renderer.initialized && !g_renderer.contextLost;
-    if (hasContext && !CreateSurfaceObjects(
+    if (hasContext && !empty && !CreateSurfaceObjects(
         retainedVertices, retainedIndices,
         vertexArray, vertexBuffer, indexBuffer))
     {
@@ -7140,10 +7297,12 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
     retainedVertices.clear();
     retainedIndices.clear();
     g_renderer.retainedDynamicModelBatches = std::move(retainedBatches);
+    g_renderer.retainedBrushInstances = std::move(retainedBrushInstances);
+    g_renderer.dynamicDraws = std::move(dynamicDraws);
     g_renderer.retainedDynamicModelLighting = std::move(retainedLighting);
-    g_renderer.dynamicModelSceneActive = true;
+    g_renderer.dynamicModelSceneActive = !g_renderer.dynamicDraws.empty();
 
-    if (!g_renderer.dynamicModelFirstSubmissionReported)
+    if (!empty && !g_renderer.dynamicModelFirstSubmissionReported)
     {
         g_renderer.dynamicModelFirstSubmissionReported = true;
         const std::size_t supportedImages =
@@ -7822,10 +7981,12 @@ void SelectSpotShadowLights() noexcept
          g_renderer.retainedWorldBatches)
         if (batch.primaryLightIndex < used.size())
             used[batch.primaryLightIndex] = true;
-    for (const WebRendererRetainedWorldBatch &batch :
-         g_renderer.retainedDynamicModelBatches)
+    for (const auto &draw : g_renderer.dynamicDraws)
+    {
+        const auto &batch = DynamicDrawBatch(draw);
         if (batch.primaryLightIndex < used.size())
             used[batch.primaryLightIndex] = true;
+    }
 
     std::vector<Candidate> candidates;
     candidates.reserve(g_renderer.retainedPrimaryLights.size());
@@ -8415,10 +8576,15 @@ void BindWorldTexture(
     GLenum unit,
     GLuint texture,
     std::uint8_t samplerState,
-    bool mipmapsAvailable = true)
+    bool mipmapsAvailable = true,
+    bool bindingUnchanged = false)
 {
+    const bool updateParameters =
+        g_renderer.textureParameters.NeedsUpdate(texture, samplerState, mipmapsAvailable);
+    if (bindingUnchanged && !updateParameters) return;
     glActiveTexture(unit);
-    glBindTexture(GL_TEXTURE_2D, texture);
+    if (!bindingUnchanged) glBindTexture(GL_TEXTURE_2D, texture);
+    if (!updateParameters) return;
     const std::uint8_t filter = samplerState & 7u;
     const bool linear = filter == 2u || filter == 3u || filter == 4u;
     const std::uint8_t mipMode = mipmapsAvailable
@@ -8504,6 +8670,36 @@ const WebRendererRetainedWorldImage *WorldImage(
     std::uint32_t index) noexcept
 {
     return RetainedImage(g_renderer.retainedWorldImages, index);
+}
+
+const WebRendererRetainedWorldBatch &DynamicDrawBatch(const WebRendererDynamicDraw &draw)
+{
+    if (draw.brushInstanceIndex == UINT32_MAX)
+        return g_renderer.retainedDynamicModelBatches[draw.batchIndex];
+    const auto &instance = g_renderer.retainedBrushInstances[draw.brushInstanceIndex];
+    return g_renderer.retainedBrushGeometry[instance.geometryIndex].batches[draw.batchIndex];
+}
+
+void BindDynamicDrawGeometry(const WebRendererDynamicDraw &draw,
+    GLint instanceEnabledUniform, std::uint32_t &previousInstance)
+{
+    if (previousInstance == draw.brushInstanceIndex) return;
+    previousInstance = draw.brushInstanceIndex;
+    if (draw.brushInstanceIndex == UINT32_MAX)
+    {
+        glBindVertexArray(g_renderer.dynamicModelVertexArray);
+        glUniform1f(instanceEnabledUniform, 0.0f);
+        return;
+    }
+    const auto &instance = g_renderer.retainedBrushInstances[draw.brushInstanceIndex];
+    glBindVertexArray(g_renderer.retainedBrushGeometry[instance.geometryIndex].vertexArray);
+    // These arrays are disabled on brush VAOs. Constant attributes reuse the
+    // existing rigid-placement shader path without another per-frame buffer.
+    for (GLuint axis = 0u; axis < 3u; ++axis)
+        glVertexAttrib3fv(4u + axis, instance.axis[axis]);
+    glVertexAttrib3fv(7u, instance.origin);
+    glVertexAttrib3f(9u, 0.0f, 0.0f, 0.0f);
+    glUniform1f(instanceEnabledUniform, 1.0f);
 }
 
 bool DrawShadowPartition(
@@ -8593,13 +8789,17 @@ bool DrawShadowPartition(
     };
     if (requireSunCaster)
     {
-        for (const WebRendererRetainedWorldBatch &batch :
-             g_renderer.retainedWorldBatches)
-        {
-            if (!batch.castsSunShadow) continue;
-            drawWorldRange(batch, batch.firstIndex, batch.indexCount,
-                batch.stateBits[0]);
-        }
+        const auto merged = WebRenderer_ForEachSunShadowRange(
+            g_renderer.retainedWorldBatches,
+            [](const auto &batch) { return WorldAlphaTestMode(batch.stateBits[0]) == 0; },
+            [&drawWorldRange](const auto &batch, std::uint32_t first, std::uint32_t count) {
+                drawWorldRange(batch, first, count, batch.stateBits[0]);
+            });
+#if KISAK_WEB_DIAGNOSTICS
+        if (auto *profile = WebFrameProfile_Current()) profile->sunShadowMergedRanges += merged;
+#else
+        (void)merged;
+#endif
     }
     else
     {
@@ -8701,18 +8901,18 @@ bool DrawShadowPartition(
             }
         }
     }
-    if (requireSunCaster && g_renderer.dynamicModelSceneActive &&
-        g_renderer.dynamicModelVertexArray != 0u)
+    if (requireSunCaster && g_renderer.dynamicModelSceneActive)
     {
-        glBindVertexArray(g_renderer.dynamicModelVertexArray);
-        glUniform1f(g_renderer.shadowDepthInstanceEnabledUniform, 0.0f);
-        for (const WebRendererRetainedWorldBatch &batch :
-             g_renderer.retainedDynamicModelBatches)
+        std::uint32_t previousInstance = UINT32_MAX - 1u;
+        for (const auto &draw : g_renderer.dynamicDraws)
         {
+            const auto &batch = DynamicDrawBatch(draw);
             if ((requireSunCaster && !batch.castsSunShadow) ||
                 batch.depthHack ||
                 WebRenderer_IsFxVertexColorBatch(batch.sourceKind))
                 continue;
+            BindDynamicDrawGeometry(draw, g_renderer.shadowDepthInstanceEnabledUniform,
+                previousInstance);
             if (!requireSunCaster)
                 applySpotShadowCull(batch.stateBits[0]);
             const WebRendererRetainedWorldImage *base = RetainedImage(
@@ -9264,6 +9464,7 @@ void DrawPostProcessPass(
 
 bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
 {
+    g_renderer.textureParameters.Reset();
     if (!g_renderer.initialized || g_renderer.contextLost ||
         !g_renderer.surfaceActive || g_renderer.vertexArray == 0 ||
         g_renderer.vertexBuffer == 0 || g_renderer.indexBuffer == 0)
@@ -9953,8 +10154,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
     g_frameProfileDrawBucket = FrameProfileDrawBucket::DynamicModel;
 #endif
     if (sceneGeometryDraw && !compatibilityDraw &&
-        g_renderer.dynamicModelSceneActive &&
-        g_renderer.dynamicModelVertexArray != 0u)
+        g_renderer.dynamicModelSceneActive)
     {
         glBindVertexArray(g_renderer.dynamicModelVertexArray);
         glUniform1f(g_renderer.sunShadowEnabledUniform, 0.0f);
@@ -9981,8 +10181,8 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
             BeginFrameProfileGpuQuery(
                 *frameProfile, WebFrameProfileGpuStage::DynamicFx);
 #endif
-        // The portable command combines ordinary DObjs, moving brush models,
-        // DynEnts, and first-person DObjs in one buffer. Native draw-surf
+        // The ordered draw list combines ordinary DObjs, retained moving brushes,
+        // DynEnts, and first-person DObjs. Native draw-surf
         // generation keeps depth-hacked first-person surfaces in their camera
         // pass; drawing the append order directly lets a later moving brush
         // overwrite transparent viewmodel surfaces such as the G36C reflex
@@ -9992,14 +10192,17 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
         {
             const bool depthHackPass = cameraPass != 0u;
             WebRendererDrawState<WebRendererRetainedWorldBatch> drawState;
+            std::uint32_t previousInstance = UINT32_MAX - 1u;
             glDepthRangef(0.0f, depthHackPass ? 0.015625f : 1.0f);
-            for (const WebRendererRetainedWorldBatch &batch :
-                 g_renderer.retainedDynamicModelBatches)
+            for (const auto &draw : g_renderer.dynamicDraws)
             {
+                const auto &batch = DynamicDrawBatch(draw);
                 if (batch.depthHack != depthHackPass) continue;
                 if (!WebRenderer_IsCameraVisibleXModelSurface(
                         batch.sourceKind, batch.cameraRegion))
                     continue;
+                BindDynamicDrawGeometry(draw, g_renderer.instanceEnabledUniform,
+                    previousInstance);
 #if KISAK_WEB_DIAGNOSTICS
                 const double dynamicBatchProfileStarted = frameProfile
                     ? WebFrameProfile_Now() : 0.0;
@@ -10331,8 +10534,9 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 }, {
                     batch.samplerState, batch.normalSamplerState,
                     batch.detailSamplerState, batch.specularSamplerState,
-                }}, [](std::uint32_t unit, std::uint32_t texture, std::uint8_t sampler) {
-                    BindWorldTexture(GL_TEXTURE0 + unit, texture, sampler);
+                }}, [](std::uint32_t unit, std::uint32_t texture, std::uint8_t sampler,
+                       bool bindingUnchanged) {
+                    BindWorldTexture(GL_TEXTURE0 + unit, texture, sampler, true, bindingUnchanged);
                 });
 #if KISAK_WEB_DIAGNOSTICS
                 const double drawStarted = profileDynamicModel

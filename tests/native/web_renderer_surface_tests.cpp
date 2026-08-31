@@ -358,7 +358,7 @@ void TestDynamicTextureBindings()
         reference.Bind(5, set.textures[3], set.samplers[3]);
         reference.Bind(2, set.textures[4], 0x62);
         reference.Bind(9, set.textures[5], 0x62);
-        bindings.Apply(set, [&](auto unit, auto texture, auto sampler) {
+        bindings.Apply(set, [&](auto unit, auto texture, auto sampler, bool) {
             actual.Bind(unit, texture, sampler);
         });
         Require(actual.units == reference.units &&
