@@ -15,7 +15,8 @@ assert(/^[a-z0-9-]+$/.test(runLabel));
 const production = process.argv[3] === 'production';
 const controlled = process.argv[6] === 'fixedtime';
 const checkRecovery = process.argv[7] === 'recovery';
-assert(!process.argv[7] || (checkRecovery && !production && controlled));
+const uncapped = process.argv[7] === 'uncapped';
+assert(!process.argv[7] || (checkRecovery && !production && controlled) || (uncapped && production && controlled));
 const mapCommand = controlled ? 'set sv_mapSeed 1; devmap cargoship; fixedtime 16' : 'map cargoship';
 assert(!process.argv[6] || controlled, 'optional workload must be fixedtime');
 const sourceRevision = process.argv[4] ?? (production ? undefined : 'HEAD');
@@ -104,7 +105,7 @@ try {
     if (controlled) {
         await page.bringToFront();
         await page.evaluate(() => { __dobj.profiles = []; __dobj.collecting = true; });
-        await engineWorker.evaluate(async production => {
+        await engineWorker.evaluate(async ({ production, uncapped }) => {
             const { ENGINE_PROTOCOL_VERSION } = await import(production ? './product_protocol.mjs' : './engine_protocol.mjs');
             globalThis.__cleanFrames = [];
             globalThis.__workloadViews = [];
@@ -114,7 +115,7 @@ try {
             const commands = new Map([
                 [30, 'cg_ufo'], [60, 'cl_paused_simple 1; pause'],
                 [120, 'cg_setviewpos -9732 -9384 2041 73 16'],
-                [180, 'cg_setviewpos -9732 -9384 2041 73 16'],
+                [180, `cg_setviewpos -9732 -9384 2041 73 16${uncapped ? '; com_maxfps 0' : ''}`],
             ]);
             const view = event => {
                 const detail = event.detail;
@@ -160,7 +161,7 @@ try {
             };
             addEventListener('kisakcod:renderer-scene-view', view);
             if (!production) addEventListener('kisakcod:renderer-scene-frame', sample);
-        }, production);
+        }, { production, uncapped });
     }
     // fixedtime is a canonical cheat dvar; devmap enables it through the normal
     // engine command path. No diagnostic exports or memory writes are used.
@@ -206,6 +207,7 @@ try {
     assert.equal(cleanFrames.length, timestampCount, 'timing window must cover exactly 300 frames');
     const workload = controlled ? validateWorkload(...await engineWorker.evaluate(() =>
         [__workloadViews, __workloadWarmup])) : undefined;
+    if (uncapped) workload.requestedMaxFpsAfterView180 = 0;
     const cleanForeground = summarizeForegroundSamples(await page.evaluate(() => {
         __dobj.collecting = false;
         __dobj.foreground.push({ observedMs: performance.now(), visibilityState: document.visibilityState,

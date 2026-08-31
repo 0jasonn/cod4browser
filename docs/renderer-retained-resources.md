@@ -73,3 +73,9 @@ suppresses most fast callback telemetry. Baseline and candidate must both use
 the checkpoint method. Report the total elapsed time divided by 300; percentiles
 of the five span means are not per-frame latency percentiles. No production
 profiler or high-frequency telemetry was added.
+
+The optional `uncapped` production benchmark argument queues `com_maxfps 0`
+through the canonical console after view 180, once the paused scene is selected.
+It leaves the product's default 60 FPS setting unchanged and retains the web
+125 Hz safety ceiling. Record this override in the workload; compare only runs
+with the same setting. This is measurement of a paused renderer, not gameplay.
