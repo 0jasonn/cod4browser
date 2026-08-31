@@ -1,0 +1,243 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUtc": "2026-08-31T16:19:46.349Z",
+  "source": {
+    "commitSha": "d8661476e5d32e9920eb6ee8aa09dcab00f84be0",
+    "dirty": false
+  },
+  "baselineSource": {
+    "commitSha": "946dc91815b7158cd8c9ab67218217cef9b8ddf1",
+    "dirty": false
+  },
+  "baselineCpuEvidence": "dobj-stages-946dc918.json",
+  "environment": {
+    "browser": "Chrome",
+    "version": "152.0.7977.64",
+    "headless": true,
+    "processor": "AMD Ryzen 7 7800X3D 8-Core Processor           ",
+    "totalSystemMemoryBytes": 33944879104,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "build": "Release diagnostics"
+  },
+  "methodology": {
+    "map": "cargoship",
+    "warmupWorldFrames": 30,
+    "completedGameplayFrames": 120,
+    "input": "No gameplay input; authored scene continues running",
+    "cleanBenchmark": false,
+    "compatibilityValidation": false,
+    "foreground": {
+      "pageVisibilityState": "visible",
+      "pageFocused": true,
+      "finalPageVisibilityState": "visible",
+      "finalPageFocused": true,
+      "backgroundTransitions": 0,
+      "foregroundStateTransitions": [],
+      "performanceWindowValid": true,
+      "performanceInvalidReason": null
+    }
+  },
+  "profile": {
+    "sampleCount": 120,
+    "profileComplete": true,
+    "captureDurationMs": 7092.2699999809265,
+    "cpu": {
+      "sceneBuildMs": {
+        "sampleCount": 120,
+        "average": 31.770208334426083,
+        "p50": 31.37000000476837,
+        "p95": 35.25,
+        "p99": 41.24000000953674,
+        "maximum": 45.844999969005585
+      },
+      "dobjBuildMs": {
+        "sampleCount": 120,
+        "average": 11.319583335022132,
+        "p50": 11.134999990463257,
+        "p95": 12.97000002861023,
+        "p99": 15.1700000166893,
+        "maximum": 15.290000021457672
+      },
+      "dobjPoseMs": {
+        "sampleCount": 120,
+        "average": 0.2969583426912626,
+        "p50": 0.28999996185302734,
+        "p95": 0.3700002431869507,
+        "p99": 0.4300001859664917,
+        "maximum": 0.4499998092651367
+      },
+      "dobjLightingMs": {
+        "sampleCount": 120,
+        "average": 1.338041623433431,
+        "p50": 1.3199999928474426,
+        "p95": 1.5949997901916504,
+        "p99": 1.7500000596046448,
+        "maximum": 1.7549996376037598
+      },
+      "dobjSkinningMs": {
+        "sampleCount": 120,
+        "average": 2.803083365162214,
+        "p50": 2.750000238418579,
+        "p95": 3.2200003266334534,
+        "p99": 3.9299999475479126,
+        "maximum": 3.9350003004074097
+      },
+      "dobjGeometryMs": {
+        "sampleCount": 120,
+        "average": 6.346958324313164,
+        "p50": 6.3349997997283936,
+        "p95": 7.244999647140503,
+        "p99": 8.624999761581421,
+        "maximum": 8.62999951839447
+      },
+      "totalMs": {
+        "sampleCount": 120,
+        "average": 56.861874998609224,
+        "p50": 56.780000030994415,
+        "p95": 61.40499997138977,
+        "p99": 70.07499998807907,
+        "maximum": 74.2600000500679
+      }
+    },
+    "unassignedDObjMs": {
+      "sampleCount": 120,
+      "average": 0.5345416794220607,
+      "p50": 0.5299997329711914,
+      "p95": 0.6650000214576721,
+      "p99": 0.7400001287460327,
+      "maximum": 0.7499997615814209
+    }
+  },
+  "counterComparison": {
+    "worldSurfacesSubmitted": {
+      "before": {
+        "sampleCount": 120,
+        "average": 13125,
+        "p50": 13125,
+        "p95": 13125,
+        "p99": 13125,
+        "maximum": 13125
+      },
+      "after": {
+        "sampleCount": 120,
+        "average": 13125,
+        "p50": 13125,
+        "p95": 13125,
+        "p99": 13125,
+        "maximum": 13125
+      }
+    },
+    "worldSurfacesDrawn": {
+      "before": {
+        "sampleCount": 120,
+        "average": 4906.25,
+        "p50": 5464,
+        "p95": 5496,
+        "p99": 5496,
+        "maximum": 5496
+      },
+      "after": {
+        "sampleCount": 120,
+        "average": 4853.133333333333,
+        "p50": 5470,
+        "p95": 5496,
+        "p99": 5497,
+        "maximum": 5497
+      }
+    },
+    "staticModelInstanceDraws": {
+      "before": {
+        "sampleCount": 120,
+        "average": 1662.9416666666666,
+        "p50": 1867,
+        "p95": 1873,
+        "p99": 1873,
+        "maximum": 1873
+      },
+      "after": {
+        "sampleCount": 120,
+        "average": 1646.7083333333333,
+        "p50": 1869,
+        "p95": 1873,
+        "p99": 1873,
+        "maximum": 1873
+      }
+    },
+    "dynamicBatchesDrawn": {
+      "before": {
+        "sampleCount": 120,
+        "average": 1390.2333333333333,
+        "p50": 1390,
+        "p95": 1394,
+        "p99": 1394,
+        "maximum": 1394
+      },
+      "after": {
+        "sampleCount": 120,
+        "average": 1390.6583333333333,
+        "p50": 1392,
+        "p95": 1394,
+        "p99": 1394,
+        "maximum": 1394
+      }
+    },
+    "submittedIndices": {
+      "before": {
+        "sampleCount": 120,
+        "average": 5428689.325,
+        "p50": 5491125,
+        "p95": 5515494,
+        "p99": 5515602,
+        "maximum": 5515614
+      },
+      "after": {
+        "sampleCount": 120,
+        "average": 5428595.425,
+        "p50": 5514480,
+        "p95": 5517945,
+        "p99": 5518053,
+        "maximum": 5518065
+      }
+    },
+    "bufferUploadBytes": {
+      "before": {
+        "sampleCount": 120,
+        "average": 17911168.6,
+        "p50": 18132360,
+        "p95": 18459432,
+        "p99": 18465504,
+        "maximum": 18468000
+      },
+      "after": {
+        "sampleCount": 120,
+        "average": 18090670.6,
+        "p50": 18433176,
+        "p95": 18470688,
+        "p99": 18476616,
+        "maximum": 18476616
+      }
+    },
+    "shadowDrawCalls": {
+      "before": {
+        "sampleCount": 120,
+        "average": 9519.275,
+        "p50": 9515,
+        "p95": 9538,
+        "p99": 9544,
+        "maximum": 9544
+      },
+      "after": {
+        "sampleCount": 120,
+        "average": 9518.7,
+        "p50": 9515,
+        "p95": 9533,
+        "p99": 9544,
+        "maximum": 9544
+      }
+    }
+  },
+  "pageErrors": []
+}

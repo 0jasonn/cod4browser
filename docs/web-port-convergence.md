@@ -123,8 +123,10 @@ substages) to the existing frame profiler. Production compiles them out. Pose,
 lighting, and skinning ownership is unchanged; no pose or geometry cache was added.
 The [first focused stage profile](evidence/dobj-stages-946dc918.md), from a
 120-frame headless CargoShip window, places geometry construction at 59.02% of
-DObj build time. It recommends a small unused-hash deletion before caches;
-no optimization or comparable foreground performance result is claimed.
+DObj build time. The subsequent [DObj-only hash deletion](evidence/dobj-hash-d8661476.md)
+removes unused bytecode scans without changing canonical material identity or
+world/static-model hashing. Matching short profiles observed 7.192 -> 6.347 ms
+in geometry construction; no comparable foreground FPS result is claimed.
 
 ## Temporary compatibility seams
 

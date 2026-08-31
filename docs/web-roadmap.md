@@ -15,18 +15,16 @@ Manual gameplay assessment can guide renderer work without a progression gate.
    and durable filesystem shutdown. Small shared material lookups and Worker
    transport bookkeeping must not absorb technique selection or host-specific
    filesystem recovery policy.
-3. The [focused DObj profile](evidence/dobj-stages-946dc918.md) identifies
-   geometry construction as 59.02% of DObj build in a short headless CargoShip
-   window. Recommended next task: remove unused per-surface pixel-shader
-   hashing from the DObj path, preserve world/static-model behavior, then run
-   one focused semantic check and repeat the same short profile. The hash's
-   individual cost is not yet measured; do not promise a speedup or add caches.
+3. The [DObj hash deletion](evidence/dobj-hash-d8661476.md) reduced observed
+   geometry-build mean time from 7.192 to 6.347 ms in matching short headless
+   profiles. Recommended next task: measure the roughly 20.451 ms of remaining
+   scene construction outside DObj building before choosing another change.
+   Preserve canonical culling/shadows; no pose or geometry cache is justified.
 
-The world-camera milestone used one focused test and one final production
-Release build. The subsequent measurement used one diagnostic build and one
-successful 120-frame profile after browser setup corrections. No broad tiers,
-mission/lifecycle checks, screenshots or compatibility promotion were required.
-Escape and renderer polish remain outside scope.
+The latest optimization used one focused test, one diagnostic build, one
+120-frame profile and one final production Release build, with no retries.
+No broad tiers, mission/lifecycle checks, screenshots or compatibility promotion
+were required. Escape and renderer polish remain outside scope.
 
 Historical plans and completed milestones remain in
 [the earlier roadmap](history/web-roadmap-through-2026-08-28.md) and

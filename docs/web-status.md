@@ -4,7 +4,17 @@ Updated 2026-08-31. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
-## Focused DObj measurement
+## DObj hashing optimization
+
+`d8661476` removes unused per-surface DObj shader hashing while preserving
+world/static-model hashing, canonical culling and shadow behavior. A matching
+120-frame headless CargoShip profile observed geometry at 6.347 ms versus
+7.192 ms (-11.75%), and DObj build at 11.320 ms versus 12.186 ms (-7.11%).
+This short comparison supports the deletion, not a general FPS or visual claim.
+One focused Debug test, one diagnostic build and one final production Release
+build passed with no retries. See [the comparison](evidence/dobj-hash-d8661476.md).
+
+## Prior focused DObj measurement (`946dc918`)
 
 A 120-frame headless Chrome CargoShip profile at `946dc918` measured geometry
 construction at 7.192 ms (59.02% of DObj build), skinning at 2.810 ms, lighting
