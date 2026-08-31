@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUtc": "2026-08-31T16:08:54.657Z",
+  "source": {
+    "commitSha": "946dc91815b7158cd8c9ab67218217cef9b8ddf1",
+    "dirty": false
+  },
+  "environment": {
+    "browser": "Chrome",
+    "version": "152.0.7977.64",
+    "headless": true,
+    "processor": "AMD Ryzen 7 7800X3D 8-Core Processor           ",
+    "totalSystemMemoryBytes": 33944879104,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "build": "Release diagnostics"
+  },
+  "methodology": {
+    "map": "cargoship",
+    "warmupWorldFrames": 30,
+    "completedGameplayFrames": 120,
+    "input": "No gameplay input; authored scene continues running",
+    "cleanBenchmark": false,
+    "compatibilityValidation": false,
+    "foreground": {
+      "pageVisibilityState": "visible",
+      "pageFocused": true,
+      "finalPageVisibilityState": "visible",
+      "finalPageFocused": true,
+      "backgroundTransitions": 0,
+      "foregroundStateTransitions": [],
+      "performanceWindowValid": true,
+      "performanceInvalidReason": null
+    }
+  },
+  "profile": {
+    "sampleCount": 120,
+    "profileComplete": true,
+    "captureDurationMs": 7112.449999988079,
+    "cpu": {
+      "sceneBuildMs": {
+        "sampleCount": 120,
+        "average": 32.28841666529576,
+        "p50": 32.2849999666214,
+        "p95": 35.905000030994415,
+        "p99": 40.77000004053116,
+        "maximum": 51.139999985694885
+      },
+      "dobjBuildMs": {
+        "sampleCount": 120,
+        "average": 12.186291664838791,
+        "p50": 11.964999973773956,
+        "p95": 14.005000054836273,
+        "p99": 16.855000019073486,
+        "maximum": 17.19999998807907
+      },
+      "dobjPoseMs": {
+        "sampleCount": 120,
+        "average": 0.2996666724483172,
+        "p50": 0.2999998927116394,
+        "p95": 0.3600001335144043,
+        "p99": 0.3900001645088196,
+        "maximum": 0.5100000500679016
+      },
+      "dobjLightingMs": {
+        "sampleCount": 120,
+        "average": 1.341208309928576,
+        "p50": 1.3100000023841858,
+        "p95": 1.5799999833106995,
+        "p99": 1.760000228881836,
+        "maximum": 1.9399995803833008
+      },
+      "dobjSkinningMs": {
+        "sampleCount": 120,
+        "average": 2.8104583407441774,
+        "p50": 2.7349997758865356,
+        "p95": 3.2699997425079346,
+        "p99": 4.0000001192092896,
+        "maximum": 4.039999961853027
+      },
+      "dobjGeometryMs": {
+        "sampleCount": 120,
+        "average": 7.192291670044264,
+        "p50": 7.100000441074371,
+        "p95": 8.014999449253082,
+        "p99": 9.490000069141388,
+        "maximum": 10.19499921798706
+      },
+      "totalMs": {
+        "sampleCount": 120,
+        "average": 57.305624998609225,
+        "p50": 57.24000000953674,
+        "p95": 62.76500004529953,
+        "p99": 65.95500004291534,
+        "maximum": 79.76499998569489
+      }
+    },
+    "unassignedDObjMs": {
+      "sampleCount": 120,
+      "average": 0.5426666716734568,
+      "p50": 0.525000274181366,
+      "p95": 0.7299997806549072,
+      "p99": 0.8550004363059998,
+      "maximum": 0.8750003576278687
+    }
+  },
+  "pageErrors": []
+}

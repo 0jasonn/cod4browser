@@ -4,6 +4,16 @@ Updated 2026-08-31. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
+## Focused DObj measurement
+
+A 120-frame headless Chrome CargoShip profile at `946dc918` measured geometry
+construction at 7.192 ms (59.02% of DObj build), skinning at 2.810 ms, lighting
+at 1.341 ms and pose at 0.300 ms. DObj build averaged 12.186 ms within 32.288 ms
+of scene construction. No optimization or pose/geometry cache was added.
+See [the stage profile](evidence/dobj-stages-946dc918.md) for setup corrections,
+methodology, limitations and the recommended small DObj hash deletion.
+This is diagnostic CPU evidence, not a clean FPS or retail-visual assessment.
+
 ## Canonical world-camera visibility
 
 The shared DPVS call now computes world surfaces as well as static models,

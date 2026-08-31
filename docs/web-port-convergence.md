@@ -121,6 +121,10 @@ commands directly provide the backend ranges. See
 Diagnostics add five DObj CPU measurements (total build and four disjoint
 substages) to the existing frame profiler. Production compiles them out. Pose,
 lighting, and skinning ownership is unchanged; no pose or geometry cache was added.
+The [first focused stage profile](evidence/dobj-stages-946dc918.md), from a
+120-frame headless CargoShip window, places geometry construction at 59.02% of
+DObj build time. It recommends a small unused-hash deletion before caches;
+no optimization or comparable foreground performance result is claimed.
 
 ## Temporary compatibility seams
 

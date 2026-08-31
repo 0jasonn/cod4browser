@@ -15,15 +15,18 @@ Manual gameplay assessment can guide renderer work without a progression gate.
    and durable filesystem shutdown. Small shared material lookups and Worker
    transport bookkeeping must not absorb technique selection or host-specific
    filesystem recovery policy.
-3. Recommended next task: use the five diagnostic DObj build/substage timings
-   to distinguish pose, lighting, skinning and geometry before considering caches.
-   No fresh capture or speedup is claimed. Keep any future measurement short
-   and question-specific; mission automation remains outside this work.
+3. The [focused DObj profile](evidence/dobj-stages-946dc918.md) identifies
+   geometry construction as 59.02% of DObj build in a short headless CargoShip
+   window. Recommended next task: remove unused per-surface pixel-shader
+   hashing from the DObj path, preserve world/static-model behavior, then run
+   one focused semantic check and repeat the same short profile. The hash's
+   individual cost is not yet measured; do not promise a speedup or add caches.
 
-This milestone uses one focused existing test invocation and one final
-incremental production Release build. Diagnostic interfaces are unchanged;
-no diagnostic build, broad tiers, retail capture or mission/lifecycle checks.
-Escape, renderer polish and further DObj optimization remain outside scope.
+The world-camera milestone used one focused test and one final production
+Release build. The subsequent measurement used one diagnostic build and one
+successful 120-frame profile after browser setup corrections. No broad tiers,
+mission/lifecycle checks, screenshots or compatibility promotion were required.
+Escape and renderer polish remain outside scope.
 
 Historical plans and completed milestones remain in
 [the earlier roadmap](history/web-roadmap-through-2026-08-28.md) and
