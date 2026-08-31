@@ -33,7 +33,8 @@ test('controlled comparison rejects clock, camera, geometry and sampling mismatc
     const profileViews = Array.from({ length: 120 }, (_, index) => ({ ...views[0], submissionGeneration: 601 + index }));
     const counters = Object.fromEntries(['worldSurfacesSubmitted', 'worldSurfacesDrawn', 'staticModelInstancesRetained',
         'staticModelInstanceDraws', 'dynamicBatchesDrawn', 'fxModelBatchesDrawn', 'particleBatchesDrawn',
-        'markBatchesDrawn', 'shadowCasterDraws', 'submittedIndices', 'bufferUploadBytes'].map(key => [key, 3]));
+        'markBatchesDrawn', 'shadowCasterDraws', 'submittedIndices', 'bufferUploadBytes',
+        'dynamicCommandVertices', 'dynamicCommandIndices', 'uiCommandVertices', 'uiCommandIndices'].map(key => [key, 3]));
     const frames = profileViews.map(view => ({ viewSubmissionGeneration: view.submissionGeneration, counters }));
     assert.deepEqual(validateProfileWindow(frames, profileViews, run.workload), frames.map(frame => frame.counters));
     assert.throws(() => validateProfileWindow(frames.slice(1), profileViews, run.workload));
@@ -43,7 +44,8 @@ test('controlled comparison rejects clock, camera, geometry and sampling mismatc
     const diagnostic = { ...run, cleanTiming: { ...run.cleanTiming, diagnosticBuild: true },
         workCounts: frames.map(frame => frame.counters), methodology: { foreground: { performanceWindowValid: true } }, pageErrors: [] };
     assert.equal(compareProfileWorkloads([diagnostic, structuredClone(diagnostic)]).length, 2);
-    for (const key of ['bufferUploadBytes', 'submittedIndices', 'shadowCasterDraws']) {
+    for (const key of ['bufferUploadBytes', 'submittedIndices', 'shadowCasterDraws',
+        'dynamicCommandVertices', 'dynamicCommandIndices', 'uiCommandVertices', 'uiCommandIndices']) {
         const changed = structuredClone(diagnostic);
         // Preserve every camera checkpoint and all other draw counts.
         changed.workCounts[10][key]++;

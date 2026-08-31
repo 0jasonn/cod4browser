@@ -7186,7 +7186,11 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
 #if KISAK_WEB_DIAGNOSTICS
     ReportRetainedDynamicFx();
     if (dynamicProfile)
+    {
         dynamicProfile->dynamicPublishMs += WebFrameProfile_Now() - publishStarted;
+        dynamicProfile->dynamicCommandVertices += scene.vertexCount;
+        dynamicProfile->dynamicCommandIndices += scene.indexCount;
+    }
 #endif
     return WebRendererSurfaceResult::Success;
 }
@@ -7297,6 +7301,13 @@ WebRendererSurfaceResult WebRenderer_SetUiScene(
     g_renderer.retainedUiIndices = std::move(indices);
     g_renderer.retainedUiBatches = std::move(batches);
     g_renderer.uiSceneActive = true;
+#if KISAK_WEB_DIAGNOSTICS
+    if (WebFrameProfileSample *const profile = WebFrameProfile_Current())
+    {
+        profile->uiCommandVertices += scene.vertexCount;
+        profile->uiCommandIndices += scene.indexCount;
+    }
+#endif
     EmitRendererMemory("ui-submitted", false);
     return WebRendererSurfaceResult::Success;
 }

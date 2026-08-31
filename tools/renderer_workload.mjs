@@ -61,7 +61,8 @@ export function validateProfileWindow(frames, views, workload) {
         const counts = {};
         for (const key of ['worldSurfacesSubmitted', 'worldSurfacesDrawn', 'staticModelInstancesRetained',
             'staticModelInstanceDraws', 'dynamicBatchesDrawn', 'fxModelBatchesDrawn', 'particleBatchesDrawn',
-            'markBatchesDrawn', 'shadowCasterDraws', 'submittedIndices', 'bufferUploadBytes']) {
+            'markBatchesDrawn', 'shadowCasterDraws', 'submittedIndices', 'bufferUploadBytes',
+            'dynamicCommandVertices', 'dynamicCommandIndices', 'uiCommandVertices', 'uiCommandIndices']) {
             assert(Number.isSafeInteger(frame.counters[key]) && frame.counters[key] >= 0, key);
             counts[key] = frame.counters[key];
         }

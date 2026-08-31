@@ -32,6 +32,7 @@ export const COUNTER_PROFILE_FIELDS = [
     "submittedIndices", "submittedTriangles", "textureBindCalls",
     "programSwitches", "bufferUploadBytes", "textureUploadBytes",
     "unmeasuredTextureUploads", "lodChanges", "shadowCasterDraws",
+    "dynamicCommandVertices", "dynamicCommandIndices", "uiCommandVertices", "uiCommandIndices",
 ];
 
 export const GPU_PROFILE_STAGES = [

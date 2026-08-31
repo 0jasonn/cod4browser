@@ -86,7 +86,8 @@ EM_JS(void, DispatchFrameProfile,
      double textureBindCalls, double programSwitches,
      double bufferUploadBytes, double textureUploadBytes,
      double unmeasuredTextureUploads, double lodChanges,
-     double shadowCasterDraws), {
+     double shadowCasterDraws, double dynamicCommandVertices,
+     double dynamicCommandIndices, double uiCommandVertices, double uiCommandIndices), {
         globalThis.dispatchEvent(new CustomEvent("kisakcod:frame-profile", {
             detail: {
                 kind: "frame",
@@ -140,7 +141,8 @@ EM_JS(void, DispatchFrameProfile,
                     postProcessDrawCalls, queryDrawCalls, resolveBlits,
                     submittedIndices, submittedTriangles, textureBindCalls,
                     programSwitches, bufferUploadBytes, textureUploadBytes,
-                    unmeasuredTextureUploads, lodChanges, shadowCasterDraws
+                    unmeasuredTextureUploads, lodChanges, shadowCasterDraws,
+                    dynamicCommandVertices, dynamicCommandIndices, uiCommandVertices, uiCommandIndices
                 }
             }
         }));
@@ -317,7 +319,11 @@ void WebFrameProfile_EndPump(bool gameplayFrame, bool rendererSubmitted)
         static_cast<double>(s.textureUploadBytes),
         static_cast<double>(s.unmeasuredTextureUploads),
         static_cast<double>(s.lodChanges),
-        static_cast<double>(s.shadowCasterDraws));
+        static_cast<double>(s.shadowCasterDraws),
+        static_cast<double>(s.dynamicCommandVertices),
+        static_cast<double>(s.dynamicCommandIndices),
+        static_cast<double>(s.uiCommandVertices),
+        static_cast<double>(s.uiCommandIndices));
     if (result == WebFrameProfilePumpResult::CaptureComplete)
         DispatchFrameProfileCaptureState();
 }
