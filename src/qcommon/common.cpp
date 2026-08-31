@@ -2003,60 +2003,6 @@ void __cdecl Com_WriteConfiguration(int localClientNum)
     }
 }
 
-int __cdecl Com_ModifyMsec(int msec)
-{
-    int clampTime; // [esp+18h] [ebp-Ch]
-    int originalMsec; // [esp+1Ch] [ebp-8h]
-    bool useTimescale; // [esp+23h] [ebp-1h]
-
-    originalMsec = msec;
-    if (com_fixedtime->current.integer)
-    {
-        msec = com_fixedtime->current.integer;
-        useTimescale = 1;
-    }
-    else if (com_timescale->current.value == 1.0 && com_codeTimeScale == 1.0 && dev_timescale->current.value == 1.0)
-    {
-        useTimescale = 0;
-    }
-    else
-    {
-        msec = SnapFloatToInt(dev_timescale->current.value * (com_codeTimeScale * (com_timescale->current.value * (double)msec)));        
-        useTimescale = 1;
-    }
-
-    if (msec < 1)
-        msec = 1;
-
-#ifdef KISAK_MP
-    if (com_dedicated->current.integer)
-    {
-        if (msec > 500 && msec < 500000)
-            Com_PrintWarning(16, "Hitch warning: %i msec frame time\n", msec);
-        clampTime = 5000;
-    }
-    else if (com_sv_running->current.enabled)
-#elif KISAK_SP
-    if (com_sv_running->current.enabled)
-#endif
-    {
-        clampTime = com_maxFrameTime->current.integer;
-    }
-    else
-    {
-        clampTime = 5000;
-    }
-
-    if (msec > clampTime)
-        msec = clampTime;
-    if (useTimescale && originalMsec)
-        com_timescaleValue = (float)msec / (float)originalMsec;
-    else
-        com_timescaleValue = 1.0f;
-
-    return msec;
-}
-
 void Com_Statmon()
 {
     int timePrevFrame; // [esp+0h] [ebp-4h]
@@ -2431,3 +2377,61 @@ void Com_SetTimeScale(float timescale)
 #endif // KISAK_SP
 
 #endif // KISAK_GATE3_COM_INIT_PREFIX
+
+// Shared by the native loop and the temporary browser Com_Init prefix.
+extern float com_codeTimeScale;
+
+int __cdecl Com_ModifyMsec(int msec)
+{
+    int clampTime; // [esp+18h] [ebp-Ch]
+    int originalMsec; // [esp+1Ch] [ebp-8h]
+    bool useTimescale; // [esp+23h] [ebp-1h]
+
+    originalMsec = msec;
+    if (com_fixedtime->current.integer)
+    {
+        msec = com_fixedtime->current.integer;
+        useTimescale = 1;
+    }
+    else if (com_timescale->current.value == 1.0 && com_codeTimeScale == 1.0 && dev_timescale->current.value == 1.0)
+    {
+        useTimescale = 0;
+    }
+    else
+    {
+        msec = SnapFloatToInt(dev_timescale->current.value * (com_codeTimeScale * (com_timescale->current.value * (double)msec)));        
+        useTimescale = 1;
+    }
+
+    if (msec < 1)
+        msec = 1;
+
+#ifdef KISAK_MP
+    if (com_dedicated->current.integer)
+    {
+        if (msec > 500 && msec < 500000)
+            Com_PrintWarning(16, "Hitch warning: %i msec frame time\n", msec);
+        clampTime = 5000;
+    }
+    else if (com_sv_running->current.enabled)
+#elif KISAK_SP
+    if (com_sv_running->current.enabled)
+#endif
+    {
+        clampTime = com_maxFrameTime->current.integer;
+    }
+    else
+    {
+        clampTime = 5000;
+    }
+
+    if (msec > clampTime)
+        msec = clampTime;
+    if (useTimescale && originalMsec)
+        com_timescaleValue = (float)msec / (float)originalMsec;
+    else
+        com_timescaleValue = 1.0f;
+
+    return msec;
+}
+
