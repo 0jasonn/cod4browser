@@ -153,6 +153,7 @@ struct WebRendererRetainedWorldBatch
     bool ambientProbeLighting = false;
     bool castsSunShadow = false;
     std::uint32_t shadowStateBits0 = 0u;
+    std::string vertexShaderName;
     std::uint32_t vertexShaderProgramHash = 0u;
     std::string pixelShaderName;
     std::uint32_t pixelShaderProgramHash = 0u;
@@ -5771,6 +5772,8 @@ WebRendererSurfaceResult CopyWorldCommand(
             batch.sourceKind = source.sourceKind;
             batch.technique = source.technique;
             batch.lightingMode = source.lightingMode;
+            batch.techniqueName = source.techniqueName
+                ? source.techniqueName : "<unsupported-technique>";
             batch.techniqueType = source.techniqueType;
             batch.customSamplerFlags = source.customSamplerFlags;
             batch.techniqueFlags = source.techniqueFlags;
@@ -5779,6 +5782,8 @@ WebRendererSurfaceResult CopyWorldCommand(
             batch.ambientProbeLighting = source.ambientProbeLighting;
             batch.castsSunShadow = source.castsSunShadow;
             batch.shadowStateBits0 = source.shadowStateBits0;
+            batch.vertexShaderName = source.vertexShaderName
+                ? source.vertexShaderName : "<unavailable-vertex-shader>";
             batch.vertexShaderProgramHash = source.vertexShaderProgramHash;
             batch.pixelShaderName = source.pixelShaderName
                 ? source.pixelShaderName : "<unavailable-pixel-shader>";
@@ -6190,6 +6195,8 @@ WebRendererSurfaceResult CopyStaticModelCommand(
             batch.draw.ambientProbeLighting = draw.ambientProbeLighting;
             batch.draw.castsSunShadow = draw.castsSunShadow;
             batch.draw.shadowStateBits0 = draw.shadowStateBits0;
+            batch.draw.vertexShaderName = draw.vertexShaderName
+                ? draw.vertexShaderName : "<unavailable-vertex-shader>";
             batch.draw.vertexShaderProgramHash =
                 draw.vertexShaderProgramHash;
             batch.draw.pixelShaderName = draw.pixelShaderName
