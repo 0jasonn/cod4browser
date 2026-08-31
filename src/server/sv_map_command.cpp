@@ -8,16 +8,28 @@
 #include <qcommon/cmd.h>
 #include <qcommon/engine_lifecycle_trace.h>
 #include <qcommon/qcommon.h>
+#include <qcommon/system.h>
 #include <universal/com_files.h>
 #include <universal/dvar.h>
 #include <universal/q_shared.h>
 
 #include <cstring>
+#include <climits>
 
 extern const dvar_t *sv_cheats;
 
 void __cdecl CL_ShutdownDemo();
 void __cdecl SV_SpawnServer(const char *mapname, int savegame);
+
+unsigned int SV_GetMapRandomSeed()
+{
+    // Shared developer control for repeatable fresh-map profiling. Save/demo
+    // restoration still replaces this seed through the canonical game path.
+    const dvar_t *const seed = Dvar_RegisterInt("sv_mapSeed", -1, -1, INT_MAX,
+        DVAR_CHEAT, "Fresh-map random seed; -1 uses the system clock");
+    return seed->current.integer < 0 ? Sys_MillisecondsRaw()
+        : static_cast<unsigned int>(seed->current.integer);
+}
 
 void SV_Map_f()
 {

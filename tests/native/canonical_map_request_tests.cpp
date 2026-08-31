@@ -288,6 +288,15 @@ int main()
     sv_loadMyChanges = Dvar_RegisterBool("sv_loadMyChanges", false, 0, "test");
     SV_RegisterMapCommands();
 
+    assert(SV_GetMapRandomSeed() == 7u); // Default retains the clock seed.
+    assert(Dvar_FindVar("sv_mapSeed")->flags & DVAR_CHEAT);
+    Cbuf_ExecuteBuffer(0, 0, "set sv_mapSeed 1");
+    assert(SV_GetMapRandomSeed() == 1u);
+    Cbuf_ExecuteBuffer(0, 0, "set sv_mapSeed 0");
+    assert(SV_GetMapRandomSeed() == 0u);
+    Cbuf_ExecuteBuffer(0, 0, "set sv_mapSeed -1");
+    assert(SV_GetMapRandomSeed() == 7u);
+
     Cbuf_ExecuteBuffer(0, 0, "map KiLlHoUsE");
 
     constexpr std::array<EngineLifecycleStage, 10> expectedLifecycle{{

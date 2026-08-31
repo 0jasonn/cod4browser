@@ -29,7 +29,7 @@ export function validateWorkload(views, warmup) {
         return { submissionGeneration, time, viewOrigin, viewForward, viewport,
             tanHalfFovX, tanHalfFovY, zNear, worldSurfaceCount, worldVertexCount, worldIndexCount };
     });
-    return { mode: 'paused-renderer', fixedtime: 16, pauseAfterView: 60, firstView: 240, lastView: 540, trace };
+    return { mode: 'paused-renderer', requestedMapSeed: 1, fixedtime: 16, pauseAfterView: 60, firstView: 240, lastView: 540, trace };
 }
 
 export function compareWorkloads(runs) {

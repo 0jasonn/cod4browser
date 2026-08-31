@@ -156,7 +156,7 @@ try {
     }
     // fixedtime is a canonical cheat dvar; devmap enables it through the normal
     // engine command path. No diagnostic exports or memory writes are used.
-    await page.locator('#engine-command-input').fill(controlled ? 'devmap cargoship; fixedtime 16' : 'map cargoship');
+    await page.locator('#engine-command-input').fill(controlled ? 'set sv_mapSeed 1; devmap cargoship; fixedtime 16' : 'map cargoship');
     await page.locator('#engine-command-form').evaluate(form => form.requestSubmit());
     if (production) {
         const warmupDeadline = Date.now() + 300000;

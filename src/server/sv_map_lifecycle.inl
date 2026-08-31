@@ -241,7 +241,7 @@ void __cdecl SV_SpawnServer(const char *mapname, int savegame)
     Com_Printf(15, "------ Server Initialization ------\n");
     Com_Printf(15, "Server: %s\n", mapname);
     SV_ClearServer();
-    const std::uint32_t seed = Sys_MillisecondsRaw();
+    const std::uint32_t seed = SV_GetMapRandomSeed();
     Com_Restart();
     if (!com_sv_running->current.enabled)
         SV_Startup();

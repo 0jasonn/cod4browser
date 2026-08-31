@@ -522,7 +522,7 @@ void __cdecl SV_SpawnServer(const char *mapname, int savegame)
         }
         // MP END
 
-        seed = Sys_MillisecondsRaw();
+        seed = SV_GetMapRandomSeed();
 
         //if (!*((_BYTE *)com_dedicated + 12))
         if (true)
