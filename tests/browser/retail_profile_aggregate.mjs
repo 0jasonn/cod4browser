@@ -7,6 +7,7 @@ export const CPU_PROFILE_FIELDS = [
     "dynamicCopyMs", "dynamicGeometryUploadMs", "dynamicTextureUploadMs", "dynamicPublishMs",
     "commandGeometryCheckMs", "commandGeometryCopyMs", "commandBatchCopyMs",
     "dobjBuildMs", "dobjPoseMs", "dobjLightingMs", "dobjSkinningMs", "dobjGeometryMs",
+    "dobjVertexEmitMs", "dobjIndexEmitMs", "sceneBrushBuildMs",
     "rendererFrontendMs", "soundMs", "rendererBackendMs", "totalMs",
 ];
 

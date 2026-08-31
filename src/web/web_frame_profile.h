@@ -182,6 +182,8 @@ struct WebFrameProfileSample
     // append; cloud construction and other appends remain in its parent.
     double sceneEffectsPrepareMs = 0.0;
     double sceneModelBuildMs = 0.0;
+    // Nested in sceneModelBuildMs; other model families remain in the parent.
+    double sceneBrushBuildMs = 0.0;
     double sceneCommandAppendMs = 0.0;
     double sceneCloudAppendMs = 0.0;
     // Disjoint parts of sceneDynamicSubmitMs; upload timers also overlap them.
@@ -200,6 +202,9 @@ struct WebFrameProfileSample
     double dobjLightingMs = 0.0;
     double dobjSkinningMs = 0.0;
     double dobjGeometryMs = 0.0;
+    // Nested, disjoint geometry intervals; material/batch setup is the residual.
+    double dobjVertexEmitMs = 0.0;
+    double dobjIndexEmitMs = 0.0;
     double rendererFrontendMs = 0.0;
     double soundMs = 0.0;
     double rendererBackendMs = 0.0;

@@ -658,6 +658,11 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                         }
                         replacement.vertices.push_back(vertex);
                     }
+#if KISAK_WEB_DIAGNOSTICS
+                    double emitStarted = profile ? WebFrameProfile_Now() : 0.0;
+                    if (profile)
+                        profile->dobjVertexEmitMs += emitStarted - substageStarted;
+#endif
                     const std::uint32_t firstIndex = static_cast<std::uint32_t>(
                         replacement.indices.size());
                     for (std::uint32_t index = 0u; index < indexCount; ++index)
@@ -668,6 +673,10 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                             return WebRendererDObjSceneResult::IndexOutOfRange;
                         replacement.indices.push_back(vertexBase + localIndex);
                     }
+#if KISAK_WEB_DIAGNOSTICS
+                    if (profile)
+                        profile->dobjIndexEmitMs += WebFrameProfile_Now() - emitStarted;
+#endif
                     replacement.batches.push_back(MakeDraw(
                         *model, model->materialHandles[modelSurfaceIndex],
                         modelSurfaceIndex, firstIndex, indexCount,

@@ -3073,6 +3073,10 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         }
     }
 
+#if KISAK_WEB_DIAGNOSTICS
+    if (sceneProfile)
+        sceneProfile->sceneBrushBuildMs += WebFrameProfile_Now() - modelBuildStarted;
+#endif
     std::vector<WebRendererFxModelSubmission> dynamicEntityModels;
     std::vector<std::uint16_t> dynamicEntityModelIds;
     try

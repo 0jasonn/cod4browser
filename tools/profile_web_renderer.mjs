@@ -193,7 +193,8 @@ try {
     const dynamicFields = ['dynamicCopyMs', 'dynamicGeometryUploadMs', 'dynamicTextureUploadMs', 'dynamicPublishMs'];
     const commandFields = ['commandGeometryCheckMs', 'commandGeometryCopyMs', 'commandBatchCopyMs'];
     for (const field of [...sceneFields, ...assemblyFields, ...dynamicFields, ...commandFields, 'sceneCloudAppendMs',
-        'dobjPoseMs', 'dobjLightingMs', 'dobjSkinningMs', 'dobjGeometryMs'])
+        'dobjPoseMs', 'dobjLightingMs', 'dobjSkinningMs', 'dobjGeometryMs',
+        'dobjVertexEmitMs', 'dobjIndexEmitMs', 'sceneBrushBuildMs'])
         assert.equal(profile.cpu[field]?.sampleCount, 120, field);
     const sceneResiduals = frames.map(({ cpu }) => {
         for (const field of sceneFields) assert(cpu[field] >= 0, field);
@@ -202,6 +203,12 @@ try {
         return residual;
     });
     for (const { cpu } of frames) {
+        for (const field of ['dobjVertexEmitMs', 'dobjIndexEmitMs', 'sceneBrushBuildMs'])
+            assert(cpu[field] >= 0, field);
+        assert(cpu.dobjVertexEmitMs + cpu.dobjIndexEmitMs <= cpu.dobjGeometryMs + 0.001,
+            'DObj emission intervals exceed geometry parent');
+        assert(cpu.sceneBrushBuildMs <= cpu.sceneModelBuildMs + 0.001,
+            'Brush build interval exceeds model parent');
         for (const field of [...assemblyFields, 'sceneCloudAppendMs']) assert(cpu[field] >= 0, field);
         const assemblySum = assemblyFields.reduce((sum, field) => sum + cpu[field], 0);
         assert(Math.abs(cpu.sceneAssemblyMs - assemblySum) <= 0.001, 'Assembly partition mismatch');
