@@ -215,6 +215,10 @@ struct WebFrameProfileSample
     double worldMs = 0.0;
     double staticModelsMs = 0.0;
     double dynamicModelsMs = 0.0;
+    // Nested dynamic-model draw costs; excludes FX buckets and sun queries.
+    double dynamicModelMaterialMs = 0.0;
+    double dynamicModelTexturesMs = 0.0;
+    double dynamicModelDrawMs = 0.0;
     double fxModelsMs = 0.0;
     double particlesMs = 0.0;
     double marksMs = 0.0;

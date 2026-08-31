@@ -10107,7 +10107,18 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                         ? g_renderer.sceneDepthHackViewProjection.data()
                         : g_renderer.sceneViewProjection.data());
                 glDepthRangef(0.0f, batch.depthHack ? 0.015625f : 1.0f);
+#if KISAK_WEB_DIAGNOSTICS
+                const bool profileDynamicModel = frameProfile &&
+                    g_frameProfileDrawBucket == FrameProfileDrawBucket::DynamicModel;
+                const double materialStarted = profileDynamicModel
+                    ? WebFrameProfile_Now() : 0.0;
+#endif
                 ApplyWorldMaterialState(batch);
+#if KISAK_WEB_DIAGNOSTICS
+                if (profileDynamicModel)
+                    frameProfile->dynamicModelMaterialMs +=
+                        WebFrameProfile_Now() - materialStarted;
+#endif
                 const WebRendererRetainedWorldImage *base = RetainedImage(
                     g_renderer.retainedDynamicModelImages,
                     batch.baseImageIndex);
@@ -10244,6 +10255,10 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                     glDepthFunc(GL_LEQUAL);
                     glDepthMask(GL_FALSE);
                 }
+#if KISAK_WEB_DIAGNOSTICS
+                const double texturesStarted = profileDynamicModel
+                    ? WebFrameProfile_Now() : 0.0;
+#endif
                 BindWorldTexture(GL_TEXTURE0,
                     base ? base->texture : g_renderer.texture,
                     batch.samplerState);
@@ -10264,6 +10279,13 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                     primaryLightmap
                         ? primaryLightmap->texture : g_renderer.texture,
                     0x62u);
+#if KISAK_WEB_DIAGNOSTICS
+                const double drawStarted = profileDynamicModel
+                    ? WebFrameProfile_Now() : 0.0;
+                if (profileDynamicModel)
+                    frameProfile->dynamicModelTexturesMs +=
+                        drawStarted - texturesStarted;
+#endif
                 const std::uintptr_t indexOffset =
                     static_cast<std::uintptr_t>(batch.firstIndex) *
                     sizeof(std::uint32_t);
@@ -10272,6 +10294,9 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                     GL_UNSIGNED_INT,
                     reinterpret_cast<const void *>(indexOffset));
 #if KISAK_WEB_DIAGNOSTICS
+                if (profileDynamicModel)
+                    frameProfile->dynamicModelDrawMs +=
+                        WebFrameProfile_Now() - drawStarted;
                 AddProfileDynamicTime(batch.sourceKind,
                     WebFrameProfile_Now() - dynamicBatchProfileStarted);
 #endif
