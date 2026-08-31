@@ -3,6 +3,7 @@ export const CPU_PROFILE_FIELDS = [
     "commandBufferMs", "clientFrameMs", "cgameFrameMs", "sceneBuildMs",
     "sceneSetupMs", "sceneAssemblyMs", "sceneImageResolveMs",
     "sceneDynamicSubmitMs", "sceneCameraVisibilityMs", "sceneViewSubmitMs",
+    "sceneEffectsPrepareMs", "sceneModelBuildMs", "sceneCommandAppendMs", "sceneCloudAppendMs",
     "dobjBuildMs", "dobjPoseMs", "dobjLightingMs", "dobjSkinningMs", "dobjGeometryMs",
     "rendererFrontendMs", "soundMs", "rendererBackendMs", "totalMs",
 ];

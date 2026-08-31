@@ -77,6 +77,10 @@ test("gameplay profile aggregation keeps populations and overhead explicit", () 
     assert.equal(profile.cpu.sceneDynamicSubmitMs, null);
     assert.equal(profile.cpu.sceneCameraVisibilityMs, null);
     assert.equal(profile.cpu.sceneViewSubmitMs, null);
+    assert.equal(profile.cpu.sceneEffectsPrepareMs, null);
+    assert.equal(profile.cpu.sceneModelBuildMs, null);
+    assert.equal(profile.cpu.sceneCommandAppendMs, null);
+    assert.equal(profile.cpu.sceneCloudAppendMs, null);
     assert.equal(profile.cpu.dobjBuildMs, null);
     assert.equal(profile.counters.worldDrawCalls.maximum, 8);
     assert.equal(profile.gpu.results, 2);
@@ -93,6 +97,8 @@ test("scene and DObj intervals survive profile aggregation", () => {
     const fields = ["sceneBuildMs", "sceneSetupMs", "sceneAssemblyMs",
         "sceneImageResolveMs", "sceneDynamicSubmitMs",
         "sceneCameraVisibilityMs", "sceneViewSubmitMs",
+        "sceneEffectsPrepareMs", "sceneModelBuildMs",
+        "sceneCommandAppendMs", "sceneCloudAppendMs",
         "dobjBuildMs", "dobjPoseMs", "dobjLightingMs",
         "dobjSkinningMs", "dobjGeometryMs"];
     const profile = aggregateGameplayProfile({

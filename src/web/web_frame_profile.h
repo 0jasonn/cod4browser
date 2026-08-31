@@ -178,6 +178,12 @@ struct WebFrameProfileSample
     double sceneDynamicSubmitMs = 0.0;
     double sceneCameraVisibilityMs = 0.0;
     double sceneViewSubmitMs = 0.0;
+    // Three disjoint parts of sceneAssemblyMs. Cloud append nests in command
+    // append; cloud construction and other appends remain in its parent.
+    double sceneEffectsPrepareMs = 0.0;
+    double sceneModelBuildMs = 0.0;
+    double sceneCommandAppendMs = 0.0;
+    double sceneCloudAppendMs = 0.0;
     // DObj build is nested in sceneBuildMs. The four substages are disjoint;
     // validation, LOD/hide tests and other overhead remain in the build total.
     double dobjBuildMs = 0.0;

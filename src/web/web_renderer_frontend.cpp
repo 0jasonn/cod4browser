@@ -3011,6 +3011,11 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         FX_EndGeneratingMarkVertsForEntModels(refdef->localClientNum);
     }
 
+#if KISAK_WEB_DIAGNOSTICS
+    const double modelBuildStarted = sceneProfile ? WebFrameProfile_Now() : 0.0;
+    if (sceneProfile)
+        sceneProfile->sceneEffectsPrepareMs += modelBuildStarted - assemblyStarted;
+#endif
     const WebRendererWorldLightTechniqueContext brushLightContext{
         framePrimaryLights.data(),
         static_cast<std::uint32_t>(framePrimaryLights.size()),
@@ -3265,6 +3270,11 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         fxModelBuild = WebRendererFxModelSceneResult::NoFxModel;
     }
 
+#if KISAK_WEB_DIAGNOSTICS
+    const double commandAppendStarted = sceneProfile ? WebFrameProfile_Now() : 0.0;
+    if (sceneProfile)
+        sceneProfile->sceneModelBuildMs += commandAppendStarted - modelBuildStarted;
+#endif
     // EffectsCore remains the sole producer of FX geometry. Append its
     // already-converted canonical mark/code-mesh spans to the existing
     // dynamic command so the backend retains one ordered, copied submission.
@@ -3407,6 +3417,9 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             if (droppedParticleClouds != UINT32_MAX) ++droppedParticleClouds;
             continue;
         }
+#if KISAK_WEB_DIAGNOSTICS
+        const double cloudAppendStarted = sceneProfile ? WebFrameProfile_Now() : 0.0;
+#endif
         const WebRendererParticleCloudAppendResult append =
             WebRenderer_AppendParticleCloudCommand(
                 cloudCommand,
@@ -3414,6 +3427,10 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                 dynamicCommand.indices,
                 dynamicCommand.batches,
                 dynamicCommand.surfaceCount);
+#if KISAK_WEB_DIAGNOSTICS
+        if (sceneProfile)
+            sceneProfile->sceneCloudAppendMs += WebFrameProfile_Now() - cloudAppendStarted;
+#endif
         if (append == WebRendererParticleCloudAppendResult::Success)
             hasParticleCloud = true;
         else if (droppedParticleClouds != UINT32_MAX)
@@ -3429,7 +3446,10 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     const double imageResolveStarted = sceneProfile ? WebFrameProfile_Now() : 0.0;
     double dynamicSubmitStarted = imageResolveStarted;
     if (sceneProfile)
+    {
+        sceneProfile->sceneCommandAppendMs += imageResolveStarted - commandAppendStarted;
         sceneProfile->sceneAssemblyMs += imageResolveStarted - assemblyStarted;
+    }
 #endif
     if (dynamicBuild == WebRendererDObjSceneResult::Success ||
         hasBrushModels ||
