@@ -49,6 +49,26 @@ export function compareWorkloads(runs) {
         averageMs: run.cleanTiming.intervals.average, p95Ms: run.cleanTiming.intervals.p95 }));
 }
 
+export function validateProfileWindow(frames, views, workload) {
+    assert.equal(frames.length, 120);
+    assert.equal(views.length, 120);
+    return frames.map((frame, index) => {
+        assert.equal(frame.viewSubmissionGeneration, 601 + index, 'profile missed its canonical view window');
+        assert.equal(views[index].submissionGeneration, 601 + index);
+        for (const [key, value] of Object.entries(workload.trace[0])) {
+            if (key !== 'submissionGeneration') assert.deepEqual(views[index][key], value, `profile ${key} differs from clean window`);
+        }
+        const counts = {};
+        for (const key of ['worldSurfacesSubmitted', 'worldSurfacesDrawn', 'staticModelInstancesRetained',
+            'staticModelInstanceDraws', 'dynamicBatchesDrawn', 'fxModelBatchesDrawn', 'particleBatchesDrawn',
+            'markBatchesDrawn', 'shadowCasterDraws', 'submittedIndices', 'bufferUploadBytes']) {
+            assert(Number.isSafeInteger(frame.counters[key]) && frame.counters[key] >= 0, key);
+            counts[key] = frame.counters[key];
+        }
+        return counts;
+    });
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
     const runs = await Promise.all(process.argv.slice(2).map(async path => JSON.parse(await readFile(path, 'utf8'))));
     console.log(JSON.stringify(compareWorkloads(runs), null, 2));

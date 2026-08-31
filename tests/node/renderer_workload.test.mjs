@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { validateWorkload, compareWorkloads } from '../../tools/renderer_workload.mjs';
+import { validateWorkload, compareWorkloads, validateProfileWindow } from '../../tools/renderer_workload.mjs';
 
 test('controlled comparison rejects clock, camera, geometry and sampling mismatches', () => {
     const warmup = [{ submissionGeneration: 30, time: 1480 }, { submissionGeneration: 60, time: 1960 }];
@@ -30,4 +30,14 @@ test('controlled comparison rejects clock, camera, geometry and sampling mismatc
         mutate(changed);
         assert.throws(() => compareWorkloads([run, changed]));
     }
+    const profileViews = Array.from({ length: 120 }, (_, index) => ({ ...views[0], submissionGeneration: 601 + index }));
+    const counters = Object.fromEntries(['worldSurfacesSubmitted', 'worldSurfacesDrawn', 'staticModelInstancesRetained',
+        'staticModelInstanceDraws', 'dynamicBatchesDrawn', 'fxModelBatchesDrawn', 'particleBatchesDrawn',
+        'markBatchesDrawn', 'shadowCasterDraws', 'submittedIndices', 'bufferUploadBytes'].map(key => [key, 3]));
+    const frames = profileViews.map(view => ({ viewSubmissionGeneration: view.submissionGeneration, counters }));
+    assert.deepEqual(validateProfileWindow(frames, profileViews, run.workload), frames.map(frame => frame.counters));
+    assert.throws(() => validateProfileWindow(frames.slice(1), profileViews, run.workload));
+    assert.throws(() => validateProfileWindow(frames, profileViews.map(view => ({ ...view, time: view.time + 1 })), run.workload));
+    assert.throws(() => validateProfileWindow(frames.map(frame => ({ ...frame, viewSubmissionGeneration: 600 })), profileViews, run.workload));
+    assert.throws(() => validateProfileWindow(frames.map(frame => ({ ...frame, counters: { ...counters, shadowCasterDraws: NaN } })), profileViews, run.workload));
 });

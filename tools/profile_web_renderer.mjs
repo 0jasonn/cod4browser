@@ -7,7 +7,7 @@ import { cpus, totalmem } from 'node:os';
 import { chromium } from '@playwright/test';
 import { aggregateGameplayProfile, summarizeProfileSamples } from '../tests/browser/retail_profile_aggregate.mjs';
 import { summarizeForegroundSamples } from '../tests/browser/retail_foreground_window.mjs';
-import { validateWorkload } from './renderer_workload.mjs';
+import { validateWorkload, validateProfileWindow } from './renderer_workload.mjs';
 
 // Local, owned installation only. No asset contents or logs are written to evidence.
 const runLabel = process.argv[2] ?? 'sample';
@@ -15,16 +15,15 @@ assert(/^[a-z0-9-]+$/.test(runLabel));
 const production = process.argv[3] === 'production';
 const controlled = process.argv[6] === 'fixedtime';
 assert(!process.argv[6] || controlled, 'optional workload must be fixedtime');
-assert(!controlled || production, 'controlled windows currently require production');
-const sourceRevision = production ? process.argv[4] : 'HEAD';
+const sourceRevision = process.argv[4] ?? (production ? undefined : 'HEAD');
 assert(sourceRevision, 'production measurement requires the built source revision');
 const source = {
     commitSha: execFileSync('git', ['rev-parse', sourceRevision], { encoding: 'utf8' }).trim(),
     dirty: execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim().length > 0,
 };
 // Match the directory being served, including retained before/after artifacts.
-const wasmPath = production ? join(process.argv[5] ?? 'build/web/site', 'kisakcod.wasm')
-    : 'build/web-diagnostics/site-diagnostics/kisakcod.wasm';
+const wasmPath = join(process.argv[5] ?? (production ? 'build/web/site'
+    : 'build/web-diagnostics/site-diagnostics'), 'kisakcod.wasm');
 const artifactSha256 = createHash('sha256').update(await readFile(wasmPath)).digest('hex');
 assert(process.env.KISAK_COD4_RETAIL_ROOT);
 // Playwright owns this new temporary persistent profile and its cleanup.
@@ -102,11 +101,12 @@ try {
     if (controlled) {
         await page.bringToFront();
         await page.evaluate(() => { __dobj.profiles = []; __dobj.collecting = true; });
-        await engineWorker.evaluate(async () => {
-            const { ENGINE_PROTOCOL_VERSION } = await import('./product_protocol.mjs');
+        await engineWorker.evaluate(async production => {
+            const { ENGINE_PROTOCOL_VERSION } = await import(production ? './product_protocol.mjs' : './engine_protocol.mjs');
             globalThis.__cleanFrames = [];
             globalThis.__workloadViews = [];
             globalThis.__workloadWarmup = [];
+            globalThis.__profileViews = [];
             let generation = 0;
             const commands = new Map([
                 [30, 'cg_ufo'], [60, 'cl_paused_simple 1; pause'],
@@ -122,25 +122,37 @@ try {
                     // Use the validated production command request, synchronously
                     // queued for the next pump. DOM/Worker transit must not select
                     // which simulation frame is paused. No diagnostic exports.
+                    const command = commands.get(generation);
                     dispatchEvent(new MessageEvent('message', { data: {
-                        protocolVersion: ENGINE_PROTOCOL_VERSION, type: 'submitCanonicalCommand',
-                        id: 1000000 + generation, command: commands.get(generation),
+                        protocolVersion: ENGINE_PROTOCOL_VERSION, id: 1000000 + generation,
+                        ...(production ? { type: 'submitCanonicalCommand', command }
+                            : { type: 'probe', functionName: '_KisakWeb_SubmitCanonicalCommand',
+                                buffers: [new TextEncoder().encode(`${command}\0`).buffer],
+                                argumentLayout: [{ kind: 'pointer', index: 0 }] }),
                     } }));
                     commands.delete(generation);
                 }
-                if (generation >= 240 && generation <= 540) __workloadViews.push(structuredClone(detail));
+                if (generation >= 240 && generation <= 540 && generation % 60 === 0)
+                    __workloadViews.push(structuredClone(detail));
+                if (!production && generation === 600) dispatchEvent(new MessageEvent('message', { data: {
+                    protocolVersion: ENGINE_PROTOCOL_VERSION, type: 'call', id: 1000600,
+                    functionName: '_KisakWeb_TestBeginFrameProfileWithTimeout', arguments: [120, 30000],
+                } }));
+                if (!production && generation > 600 && generation <= 720) __profileViews.push(structuredClone(detail));
+                if (!production && generation === 720) removeEventListener('kisakcod:renderer-scene-view', view);
             };
             const sample = event => {
                 if (generation < 240) return;
-                __cleanFrames.push({ at: performance.now(), generation: event.detail.framePumpTicks });
+                __cleanFrames.push({ at: performance.now(), generation: production
+                    ? event.detail.framePumpTicks : event.detail.viewSubmissionGeneration });
                 if (generation >= 540) {
-                    removeEventListener('kisakcod:system', sample);
-                    removeEventListener('kisakcod:renderer-scene-view', view);
+                    removeEventListener(production ? 'kisakcod:system' : 'kisakcod:renderer-scene-frame', sample);
+                    if (production) removeEventListener('kisakcod:renderer-scene-view', view);
                 }
             };
             addEventListener('kisakcod:renderer-scene-view', view);
-            addEventListener('kisakcod:system', sample);
-        });
+            addEventListener(production ? 'kisakcod:system' : 'kisakcod:renderer-scene-frame', sample);
+        }, production);
     }
     // fixedtime is a canonical cheat dvar; devmap enables it through the normal
     // engine command path. No diagnostic exports or memory writes are used.
@@ -218,16 +230,16 @@ try {
     } else {
     stage = 'profile';
     await page.bringToFront();
-    const started = await page.evaluate(async () => {
-        __dobj.profiles = [];
+    const started = await page.evaluate(async controlled => {
+        if (!controlled) __dobj.profiles = [];
         __dobj.foreground = [{ observedMs: performance.now(), visibilityState: document.visibilityState,
             pageFocused: document.hasFocus() }];
         __dobj.collecting = true;
         const startedMs = performance.now();
-        const accepted = await __KISAKCOD_WEB__.module.call('_KisakWeb_TestBeginFrameProfileWithTimeout', 120, 30000);
+        const accepted = controlled ? null : await __KISAKCOD_WEB__.module.call('_KisakWeb_TestBeginFrameProfileWithTimeout', 120, 30000);
         return { startedMs, accepted };
-    });
-    assert.equal(started.accepted, 1);
+    }, controlled);
+    if (!controlled) assert.equal(started.accepted, 1);
     await page.waitForFunction(() => __dobj.profiles.some(entry => entry.kind === 'capture'), null, { timeout: 45000 });
     const captured = await page.evaluate(() => {
         __dobj.foreground.push({ observedMs: performance.now(), visibilityState: document.visibilityState,
@@ -240,6 +252,8 @@ try {
     assert.equal(terminal.profileSamplesCollected, 120);
     const frames = captured.entries.filter(entry => entry.kind === 'frame');
     assert.equal(frames.length, 120);
+    const workCounts = controlled ? validateProfileWindow(frames,
+        await engineWorker.evaluate(() => __profileViews), workload) : undefined;
     const foreground = summarizeForegroundSamples(captured.foreground);
     assert(foreground.performanceWindowValid, JSON.stringify(foreground));
     const profile = aggregateGameplayProfile({ frames,
@@ -299,11 +313,14 @@ try {
     assert(geometryMemory.stagingCapacityBytes > 0);
     assert(geometryMemory.capacityBytes > geometryMemory.stagingCapacityBytes);
     const result = { schemaVersion: 1, cleanTiming, artifactSha256, recordedAtUtc: new Date().toISOString(), source,
+        workload, workCounts, workCountSha256: workCounts
+            ? createHash('sha256').update(JSON.stringify(workCounts)).digest('hex') : undefined,
         environment: { browser: 'Chrome', version: browser.version(), headless: true,
             processor: cpus()[0].model, totalSystemMemoryBytes: totalmem(), viewport: { width: 1440, height: 1000 },
             build: 'Release diagnostics' },
-        methodology: { map: 'cargoship', warmupWorldFrames: 30, completedGameplayFrames: 120, profilingDisabledIntervals: 300,
-            input: 'No gameplay input; authored scene continues running', cleanBenchmark: true,
+        methodology: { map: 'cargoship', warmupWorldFrames: controlled ? 240 : 30, completedGameplayFrames: 120, profilingDisabledIntervals: 300,
+            profileViews: controlled ? [601, 720] : undefined,
+            input: controlled ? 'Paused renderer-only workload; no gameplay input' : 'No gameplay input; authored scene continues running', cleanBenchmark: true,
             compatibilityValidation: false, foreground }, profile,
         dobjUnassignedMs: summarizeProfileSamples(frames.map(({ cpu }) => cpu.dobjBuildMs -
             cpu.dobjPoseMs - cpu.dobjLightingMs - cpu.dobjSkinningMs - cpu.dobjGeometryMs)),
