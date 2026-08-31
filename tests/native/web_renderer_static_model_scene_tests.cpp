@@ -8,6 +8,7 @@
 #endif
 #include <gfx_d3d/gfx_world_types.h>
 #include <web/web_renderer_static_model_scene.h>
+#include <web/web_renderer_world_scene.h>
 #include <xanim/xmodel_types.h>
 #include <xanim/xsurface_types.h>
 
@@ -59,7 +60,7 @@ char *va(const char *format, ...)
 namespace {
 std::array<std::uint8_t, 0x20000> portalScratch{};
 bool portalScratchInUse = false;
-dvar_t disabled{}, bevels{}, minClipArea{}, minRecurse{};
+dvar_t disabled{}, bevels{}, minClipArea{}, minRecurse{}, decals{};
 }
 LargeLocal::LargeLocal(int bytes) : startPos(0), size(bytes)
 {
@@ -74,7 +75,7 @@ const dvar_t *r_portalWalkLimit = &disabled;
 const dvar_t *r_portalBevelsOnly = &disabled;
 const dvar_t *r_showPortals = &disabled;
 const dvar_t *r_showAabbTrees = &disabled;
-const dvar_t *r_drawDecals = &disabled;
+const dvar_t *r_drawDecals = &decals;
 const dvar_t *r_portalBevels = &bevels;
 const dvar_t *r_portalMinClipArea = &minClipArea;
 const dvar_t *r_portalMinRecurseDepth = &minRecurse;
@@ -420,7 +421,153 @@ void TestCanonicalCameraVisibilityAndIndependentPacking()
     pack(true);
     assert(counts[0] == 1 && counts[1] == 0);
     assert(shadowMask[0] == 7 && shadowMask[1] == 8 && shadowMask[2] == 9);
-    assert(surfaceMask[0] == 11); // world-surface filtering deferred
+    assert(surfaceMask[0] == 11); // static-model-only callers leave world bytes alone
+
+    // Original synthetic geometry (repository GPL-3.0); no retail data. Exercise
+    // the same canonical producer and production batch/range helpers together.
+    std::array<GfxSurface, 5> worldSurfaces{};
+    std::array<GfxWorldVertex, 15> worldVertices{};
+    std::array<std::uint16_t, 15> worldIndices{};
+    Material sky{};
+    sky.info.gameFlags = 8u;
+    const float worldPositions[5][3]{{10,0,0},{10,40,0},{10,0,0},{30,0,0},{12,0,0}};
+    for (unsigned i = 0; i < worldSurfaces.size(); ++i)
+    {
+        auto &surface = worldSurfaces[i];
+        surface.material = i == 2 ? &sky : &fixture.material;
+        surface.primaryLightIndex = i == 4 ? 1u : 0u;
+        surface.tris.firstVertex = i * 3;
+        surface.tris.baseIndex = i * 3;
+        surface.tris.vertexCount = 3;
+        surface.tris.triCount = 1;
+        for (unsigned axis = 0; axis < 3; ++axis)
+        {
+            surface.bounds[0][axis] = worldPositions[i][axis] - 1;
+            surface.bounds[1][axis] = worldPositions[i][axis] + 1;
+            for (unsigned vertex = 0; vertex < 3; ++vertex)
+                worldVertices[i * 3 + vertex].xyz[axis] = worldPositions[i][axis];
+        }
+        for (unsigned vertex = 0; vertex < 3; ++vertex)
+            worldIndices[i * 3 + vertex] = vertex;
+    }
+    GfxBrushModel worldModel{};
+    worldModel.surfaceCount = 5;
+    auto &world = fixture.world;
+    world.models = &worldModel;
+    world.modelCount = 1;
+    world.surfaceCount = world.dpvs.staticSurfaceCount = 5;
+    world.dpvs.staticSurfaceCountNoDecal = 5;
+    world.dpvs.surfaces = worldSurfaces.data();
+    world.vd.vertices = worldVertices.data();
+    world.vertexCount = 15;
+    world.indices = worldIndices.data();
+    world.indexCount = 15;
+    std::uint8_t worldMask[5]{55,55,55,55,55}, worldShadowMask[5]{7,8,9,10,11};
+    world.dpvs.surfaceVisData[0] = worldMask;
+    world.dpvs.surfaceVisData[1] = worldShadowMask;
+    std::uint16_t sortedSurfaces[10]{1,0,3,4,2, 0,3,4,2,1};
+    world.dpvs.sortedSurfIndex = sortedSurfaces;
+    trees[0].startSurfIndex = 0;
+    trees[0].surfaceCount = 2;
+    trees[1].startSurfIndex = 2;
+    trees[1].surfaceCount = 1;
+    trees[0].startSurfIndexNoDecal = 5;
+    trees[0].surfaceCountNoDecal = 1;
+    trees[1].startSurfIndexNoDecal = 6;
+    trees[1].surfaceCountNoDecal = 1;
+    GfxCullGroup group{};
+    std::copy_n(worldSurfaces[4].bounds[0], 3, group.mins);
+    std::copy_n(worldSurfaces[4].bounds[1], 3, group.maxs);
+    group.startSurfIndex = 3;
+    group.surfaceCount = 1;
+    world.cullGroupCount = 1;
+    world.dpvs.cullGroups = &group;
+    int cellGroup = 0;
+    cells[0].cullGroups = &cellGroup;
+    cells[0].cullGroupCount = 1;
+    std::uint32_t sunCasters = 0x1fu;
+    world.dpvs.surfaceCastsSunShadow = &sunCasters;
+    std::uint16_t spotSurfaces[2]{1,3}; // includes the camera-invisible surface
+    GfxShadowGeometry shadowGeometry{};
+    shadowGeometry.surfaceCount = 2;
+    shadowGeometry.sortedSurfIndex = spotSurfaces;
+    world.shadowGeom = &shadowGeometry;
+    world.primaryLightCount = 1;
+    fixture.material.stateBitsEntry[2] = 0;
+    WebRendererSceneViewDesc sceneView{};
+    sceneView.width = sceneView.height = 100;
+    sceneView.tanHalfFovX = sceneView.tanHalfFovY = sceneView.zNear = 1;
+    sceneView.viewAxis[0][0] = sceneView.viewAxis[1][1] = sceneView.viewAxis[2][2] = 1;
+    WebRendererWorldSceneCommand worldCommand;
+    assert(WebRenderer_BuildWorldSceneCommand(world, sceneView, worldCommand) ==
+        WebRendererWorldSceneResult::Success);
+    assert(worldCommand.batches.size() == 2 && worldCommand.surfaceRanges.size() == 4);
+    assert(worldCommand.surfaceRanges[2].canonicalSurfaceIndex == 3); // sky gap
+    assert(worldCommand.batches[0].indexCount == 9 && worldCommand.batches[0].castsSunShadow);
+    assert(worldCommand.spotShadowCasters.size() == 2);
+    assert(worldCommand.spotShadowCasters[0].firstIndex == 3);
+    const auto shadowIndices = worldCommand.indices;
+    const auto shadowBatches = worldCommand.batches;
+    const auto spotCasters = worldCommand.spotShadowCasters;
+    WebRendererWorldSurfaceDesc descriptor{};
+    descriptor.indexCount = 12;
+    descriptor.batches = worldCommand.batches.data();
+    descriptor.batchCount = 2;
+    descriptor.surfaceRanges = worldCommand.surfaceRanges.data();
+    descriptor.surfaceRangeCount = 4;
+    descriptor.canonicalSurfaceCount = 5;
+    assert(WebRenderer_ValidateWorldSurfaceRanges(descriptor));
+    std::vector<WebRendererWorldCameraRange> cameraRanges;
+    auto computeWorld = [&](float farPlane = 0.0f) {
+        assert(R_ComputeStaticCameraVisibility(world, dpvs, view, 0, farPlane, true));
+        assert(WebRenderer_BuildWorldCameraRanges(worldCommand.surfaceRanges,
+            worldMask, 5, true, cameraRanges));
+        pack(true); // static-model LOD/canonical-ID assertions still apply
+        assert(worldCommand.indices == shadowIndices);
+        assert(std::memcmp(shadowBatches.data(), worldCommand.batches.data(),
+            shadowBatches.size() * sizeof(shadowBatches[0])) == 0);
+        assert(std::memcmp(spotCasters.data(), worldCommand.spotShadowCasters.data(),
+            spotCasters.size() * sizeof(spotCasters[0])) == 0);
+        assert(worldShadowMask[0] == 7 && worldShadowMask[4] == 11);
+        assert(shadowMask[0] == 7 && shadowMask[2] == 9);
+    };
+    decals.current.enabled = true;
+    computeWorld();
+    assert(worldMask[0] == 1 && worldMask[1] == 0 && worldMask[3] == 1 && worldMask[4] == 1);
+    assert(cameraRanges.size() == 3);
+    assert(cameraRanges[0].firstIndex == 0 && cameraRanges[0].indexCount == 3);
+    assert(cameraRanges[1].firstIndex == 6 && cameraRanges[1].batchIndex == 0);
+    assert(cameraRanges[2].firstIndex == 9 && cameraRanges[2].batchIndex == 1);
+    assert(counts[0] == 1 && counts[1] == 1);
+    setView(true);
+    computeWorld();
+    assert(cameraRanges.empty() && counts[0] == 0 && counts[1] == 0);
+    setView(false);
+    computeWorld(15);
+    assert(worldMask[3] == 0 && cameraRanges.size() == 2 && counts[1] == 0);
+    // Unchanged LODs, changed camera visibility; retain original batch order
+    // and coalesce only contiguous visible spans, including a skipped sky ID.
+    worldSurfaces[1].bounds[0][1] = -1;
+    worldSurfaces[1].bounds[1][1] = 1;
+    computeWorld();
+    assert(cameraRanges.size() == 2 && cameraRanges[0].indexCount == 9);
+    assert(cameraRanges[0].surfaceCount == 3 && cameraRanges[1].surfaceCount == 1);
+    decals.current.enabled = false;
+    computeWorld();
+    assert(worldMask[1] == 0 && cameraRanges.size() == 3);
+    assert(!WebRenderer_BuildWorldCameraRanges(worldCommand.surfaceRanges,
+        worldMask, 5, false, cameraRanges) && cameraRanges.empty());
+    assert(!WebRenderer_BuildWorldCameraRanges(worldCommand.surfaceRanges,
+        worldMask, 4, true, cameraRanges) && cameraRanges.empty());
+    assert(!WebRenderer_BuildWorldCameraRanges(worldCommand.surfaceRanges,
+        nullptr, 5, true, cameraRanges) && cameraRanges.empty());
+    ++worldCommand.surfaceRanges[1].firstIndex;
+    assert(!WebRenderer_ValidateWorldSurfaceRanges(descriptor));
+    --worldCommand.surfaceRanges[1].firstIndex;
+    worldCommand.surfaceRanges[1].canonicalSurfaceIndex = 5;
+    assert(!WebRenderer_ValidateWorldSurfaceRanges(descriptor));
+    world.dpvs.surfaceVisData[0] = nullptr;
+    assert(!R_ComputeStaticCameraVisibility(world, dpvs, view, 0, 0, true));
     fixture.world.cells = nullptr;
     assert(!R_ComputeStaticCameraVisibility(fixture.world, dpvs, view, 0, 0));
     assert(!WebRenderer_PackStaticModelCameraInstances(command.instances.data(), 3,

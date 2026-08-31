@@ -445,6 +445,7 @@ target_compile_features(web_renderer_static_model_scene_tests PRIVATE cxx_std_20
 if (CMAKE_SIZEOF_VOID_P EQUAL 4)
     target_sources(web_renderer_static_model_scene_tests PRIVATE
         "${KISAK_REPOSITORY_ROOT}/src/gfx_d3d/r_dpvs_core.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/web/web_renderer_world_scene.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/universal/com_math.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/universal/com_math_anglevectors.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/universal/com_convexhull.cpp"

@@ -391,6 +391,9 @@ struct WebRendererState
     std::vector<std::uint16_t> retainedIndices;
     std::vector<std::uint32_t> retainedWorldIndices;
     std::vector<WebRendererRetainedWorldBatch> retainedWorldBatches;
+    std::vector<WebRendererWorldSurfaceRange> retainedWorldSurfaceRanges;
+    std::vector<WebRendererWorldCameraRange> worldCameraRanges;
+    std::uint32_t worldCanonicalSurfaceCount = 0u;
     std::vector<WebRendererRetainedSpotShadowCaster>
         retainedWorldSpotShadowCasters;
     std::vector<WebRendererRetainedSpotShadowStaticModel>
@@ -6390,6 +6393,9 @@ WebRendererSurfaceResult WebRenderer_SetSurface(
     g_renderer.retainedIndices = std::move(retainedSurface.indices);
     g_renderer.retainedWorldIndices.clear();
     g_renderer.retainedWorldBatches.clear();
+    g_renderer.retainedWorldSurfaceRanges.clear();
+    g_renderer.worldCameraRanges.clear();
+    g_renderer.worldCanonicalSurfaceCount = 0u;
     g_renderer.retainedWorldSpotShadowCasters.clear();
     g_renderer.retainedWorldSpotShadowStaticModels.clear();
     g_renderer.retainedWorldImages.clear();
@@ -6420,6 +6426,18 @@ WebRendererSurfaceResult WebRenderer_SetSurface(
 WebRendererSurfaceResult WebRenderer_SetWorldSurface(
     const WebRendererWorldSurfaceDesc &surface)
 {
+    if (!WebRenderer_ValidateWorldSurfaceRanges(surface))
+        return WebRendererSurfaceResult::InvalidDescriptor;
+    std::vector<WebRendererWorldSurfaceRange> retainedSurfaceRanges;
+    try
+    {
+        retainedSurfaceRanges.assign(surface.surfaceRanges,
+            surface.surfaceRanges + surface.surfaceRangeCount);
+    }
+    catch (const std::bad_alloc &)
+    {
+        return WebRendererSurfaceResult::AllocationFailed;
+    }
     std::vector<WebRendererSurfaceVertex> retainedVertices;
     std::vector<std::uint32_t> retainedIndices;
     std::vector<WebRendererRetainedWorldBatch> retainedBatches;
@@ -6476,6 +6494,9 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
     g_renderer.retainedVertices = std::move(retainedVertices);
     g_renderer.retainedWorldIndices = std::move(retainedIndices);
     g_renderer.retainedWorldBatches = std::move(retainedBatches);
+    g_renderer.retainedWorldSurfaceRanges = std::move(retainedSurfaceRanges);
+    g_renderer.worldCameraRanges.clear();
+    g_renderer.worldCanonicalSurfaceCount = surface.canonicalSurfaceCount;
     g_renderer.retainedWorldSpotShadowCasters =
         std::move(retainedSpotShadowCasters);
     g_renderer.retainedWorldSpotShadowStaticModels =
@@ -6670,6 +6691,10 @@ void WebRenderer_UnloadWorldResources()
         g_renderer.retainedWorldIndices);
     decltype(g_renderer.retainedWorldBatches){}.swap(
         g_renderer.retainedWorldBatches);
+    decltype(g_renderer.retainedWorldSurfaceRanges){}.swap(
+        g_renderer.retainedWorldSurfaceRanges);
+    decltype(g_renderer.worldCameraRanges){}.swap(g_renderer.worldCameraRanges);
+    g_renderer.worldCanonicalSurfaceCount = 0u;
     decltype(g_renderer.retainedWorldSpotShadowCasters){}.swap(
         g_renderer.retainedWorldSpotShadowCasters);
     decltype(g_renderer.retainedWorldSpotShadowStaticModels){}.swap(
@@ -7807,6 +7832,8 @@ void SelectSpotShadowLights() noexcept
 
 bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
 {
+    // No previous view may supply world camera runs after a failed submission.
+    g_renderer.worldCameraRanges.clear();
     if (!view.worldName || !*view.worldName || view.width == 0u ||
         view.height == 0u || view.tanHalfFovX <= 0.0f ||
         view.tanHalfFovY <= 0.0f || view.localClientNum != 0)
@@ -7951,6 +7978,12 @@ bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
         g_renderer.staticModelVisibilityComputed = view.staticModelVisibilityComputed;
         g_renderer.staticModelVisibilityChanged = true;
     }
+    if (view.geometrySubmitted && g_renderer.worldSurfaceActive &&
+        (view.worldSurfaceVisibilityCount != g_renderer.worldCanonicalSurfaceCount ||
+         !WebRenderer_BuildWorldCameraRanges(g_renderer.retainedWorldSurfaceRanges,
+            view.worldSurfaceVisibility, view.worldSurfaceVisibilityCount,
+            view.worldSurfaceVisibilityComputed, g_renderer.worldCameraRanges)))
+        return false;
     const bool worldChanged = g_renderer.sceneViewWorldName != view.worldName;
     ++g_renderer.sceneViewSubmissionGeneration;
     g_renderer.sceneViewActive = true;
@@ -9485,9 +9518,10 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
 #endif
     if (worldBatchDraw)
     {
-        for (WebRendererRetainedWorldBatch &batch :
-             g_renderer.retainedWorldBatches)
+        for (const WebRendererWorldCameraRange &range : g_renderer.worldCameraRanges)
         {
+            WebRendererRetainedWorldBatch &batch =
+                g_renderer.retainedWorldBatches[range.batchIndex];
             if (WebRenderer_SkipsNativeDraw(batch.technique))
                 continue;
             ApplyWorldMaterialState(batch);
@@ -9632,16 +9666,16 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                     ? primaryLightmap->texture : g_renderer.texture,
                 0x62u);
             const std::uintptr_t indexOffset =
-                static_cast<std::uintptr_t>(batch.firstIndex) *
+                static_cast<std::uintptr_t>(range.firstIndex) *
                 sizeof(std::uint32_t);
             glDrawElements(
                 GL_TRIANGLES,
-                static_cast<GLsizei>(batch.indexCount),
+                static_cast<GLsizei>(range.indexCount),
                 GL_UNSIGNED_INT,
                 reinterpret_cast<const void *>(indexOffset));
 #if KISAK_WEB_DIAGNOSTICS
             if (frameProfile)
-                frameProfile->worldSurfacesDrawn += batch.surfaceCount;
+                frameProfile->worldSurfacesDrawn += range.surfaceCount;
 #endif
             ++completedDraws;
         }

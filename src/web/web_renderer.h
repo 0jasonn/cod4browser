@@ -66,6 +66,10 @@ struct WebRendererSceneViewDesc
     const std::uint8_t *staticModelVisibility = nullptr;
     std::uint32_t staticModelVisibilityCount = 0u;
     bool staticModelVisibilityComputed = false;
+    // World geometry requires a completed result; unavailable is rejected.
+    const std::uint8_t *worldSurfaceVisibility = nullptr;
+    std::uint32_t worldSurfaceVisibilityCount = 0u;
+    bool worldSurfaceVisibilityComputed = false;
 
     std::uint32_t x;
     std::uint32_t y;
@@ -210,6 +214,16 @@ struct WebRendererSpotShadowStaticModelDesc
     std::uint32_t canonicalInstanceIndex;
 };
 
+// Immutable index-buffer spans preserve canonical surface identity after batching.
+// Camera runs reference these spans; shadow passes retain the original batches.
+struct WebRendererWorldSurfaceRange
+{
+    std::uint32_t canonicalSurfaceIndex;
+    std::uint32_t batchIndex;
+    std::uint32_t firstIndex;
+    std::uint32_t indexCount;
+};
+
 struct WebRendererWorldSurfaceDesc
 {
     const WebRendererSurfaceVertex *vertices;
@@ -227,6 +241,9 @@ struct WebRendererWorldSurfaceDesc
     const WebRendererSpotShadowStaticModelDesc *spotShadowStaticModels =
         nullptr;
     std::uint32_t spotShadowStaticModelCount = 0u;
+    const WebRendererWorldSurfaceRange *surfaceRanges = nullptr;
+    std::uint32_t surfaceRangeCount = 0u;
+    std::uint32_t canonicalSurfaceCount = 0u;
 };
 
 enum class WebRendererWorldTechnique : std::uint8_t

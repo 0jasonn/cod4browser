@@ -13,6 +13,7 @@ struct WebRendererWorldSceneCommand
     std::vector<WebRendererSurfaceVertex> vertices;
     std::vector<std::uint32_t> indices;
     std::vector<WebRendererWorldBatchDesc> batches;
+    std::vector<WebRendererWorldSurfaceRange> surfaceRanges;
     std::vector<WebRendererPrimaryLightDesc> primaryLights;
     std::vector<WebRendererSpotShadowCasterDesc> spotShadowCasters;
     std::vector<WebRendererSpotShadowStaticModelDesc> spotShadowStaticModels;
@@ -76,19 +77,36 @@ bool WebRenderer_ValidatePrimaryLightFrame(
 // Builds material/lightmap-aware portable world batches from the canonical
 // renderer-owned GfxWorld. Surface order follows Kisak's canonical lit, decal,
 // and emissive camera ranges; fixtures without initialized DPVS ranges fall
-// back to the world-model range. Contiguous batches preserve that order while
-// exposing Material identity,
-// first-pass state bits, base GfxImage identity, and lightmap GfxImage identity.
-// Conservative visibility is deliberately disabled for this initial WebGL2
-// backend: the static command remains valid as the canonical cgame camera
-// moves, while homogeneous clipping stays in WebGL. The command contains
-// world-space vertices; projection remains the canonical frontend matrix
+// back to the world-model range. Contiguous batches preserve that order,
+// Material identity, first-pass state bits and base/lightmap GfxImage identity.
+// Geometry remains resident as the camera moves. Per-surface index spans allow
+// completed canonical DPVS to select camera runs without filtering shadows.
+// The command contains world-space vertices; projection remains the frontend matrix
 // carried by WebRendererSceneViewDesc.
 WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
     const GfxWorld &world,
     const WebRendererSceneViewDesc &view,
     WebRendererWorldSceneCommand &destination,
     const WebRendererWorldLightTechniqueContext *lightContext = nullptr);
+
+struct WebRendererWorldCameraRange
+{
+    std::uint32_t batchIndex;
+    std::uint32_t firstIndex;
+    std::uint32_t indexCount;
+    std::uint32_t surfaceCount;
+};
+
+bool WebRenderer_ValidateWorldSurfaceRanges(
+    const WebRendererWorldSurfaceDesc &surface) noexcept;
+
+// Consumes validated spans in command order; merges only adjacent visible spans
+// within the same batch. Failure clears the camera result, never shadow storage.
+bool WebRenderer_BuildWorldCameraRanges(
+    const std::vector<WebRendererWorldSurfaceRange> &surfaces,
+    const std::uint8_t *visibility, std::uint32_t visibilityCount,
+    bool visibilityComputed,
+    std::vector<WebRendererWorldCameraRange> &destination);
 
 // Expands canonical scene-brush submissions from their GfxBrushModel surface
 // ranges. Native retains the placement separately; the portable boundary

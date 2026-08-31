@@ -1301,6 +1301,19 @@ void __cdecl R_SetDpvsPlaneSides(DpvsPlane *plane)
     plane->side[2] = (plane->coeffs[2] <= 0.0f) ? 8 : 20;
 }
 
+static uint16_t *R_CheckedSortedSurfaceRange(GfxWorld &world, unsigned start, unsigned count)
+{
+    const uint64_t sortedCount = static_cast<uint64_t>(world.dpvs.staticSurfaceCount) +
+        world.dpvs.staticSurfaceCountNoDecal;
+    if (!world.dpvs.sortedSurfIndex || start > sortedCount || count > sortedCount - start)
+        Com_Error(ERR_DROP, "DPVS sorted surface range out of bounds");
+    uint16_t *indices = world.dpvs.sortedSurfIndex + start;
+    for (unsigned i = 0; i < count; ++i)
+        if (indices[i] >= world.dpvs.staticSurfaceCount || indices[i] >= world.surfaceCount)
+            Com_Error(ERR_DROP, "DPVS world surface index out of bounds");
+    return indices;
+}
+
 void __cdecl DpvsContext::R_AddAabbTreeSurfacesInFrustum_r(const GfxAabbTree *tree, const DpvsClipPlaneSet *clipSet)
 {
     int v2; // [esp+10h] [ebp-D0h]
@@ -1417,7 +1430,7 @@ void __cdecl DpvsContext::R_AddAabbTreeSurfacesInFrustum_r(const GfxAabbTree *tr
                 }
                 if (surfaceCountNoDecal)
                 {
-                    v13 = &world->dpvs.sortedSurfIndex[startSurfIndexNoDecal];
+                    v13 = R_CheckedSortedSurfaceRange(*world, startSurfIndexNoDecal, surfaceCountNoDecal);
                     for (k = 0; k < surfaceCountNoDecal; ++k)
                     {
                         v2 = v13[k];
@@ -1486,7 +1499,7 @@ void __cdecl DpvsContext::R_AddAabbTreeSurfacesInFrustum_r(const GfxAabbTree *tr
             }
             if (surfaceCount)
             {
-                v20 = &world->dpvs.sortedSurfIndex[startSurfIndex];
+                v20 = R_CheckedSortedSurfaceRange(*world, startSurfIndex, surfaceCount);
                 for (surfNodeIndex = 0; surfNodeIndex < surfaceCount; ++surfNodeIndex)
                 {
                     g_surfaceVisData[v20[surfNodeIndex]] = 1;
@@ -1529,6 +1542,8 @@ void __cdecl DpvsContext::R_AddCullGroupSurfacesInFrustum(int cullGroupIndex, co
     GfxCullGroup *group; // [esp+1Ch] [ebp-8h]
     int count; // [esp+20h] [ebp-4h]
 
+    if (cullGroupIndex < 0 || cullGroupIndex >= world->cullGroupCount || !world->dpvs.cullGroups)
+        Com_Error(ERR_DROP, "DPVS cull group index out of bounds");
     group = &world->dpvs.cullGroups[cullGroupIndex];
     for (i = 0; i < planeCount; ++i)
     {
@@ -1550,7 +1565,9 @@ LABEL_7:
             debugBox( group->mins, group->maxs, colorLtYellow);
         if (group->surfaceCount)
         {
-            indices = &world->dpvs.sortedSurfIndex[group->startSurfIndex];
+            if (group->surfaceCount < 0 || group->startSurfIndex < 0)
+                Com_Error(ERR_DROP, "DPVS cull group surface range out of bounds");
+            indices = R_CheckedSortedSurfaceRange(*world, group->startSurfIndex, group->surfaceCount);
             for (count = 0; count < group->surfaceCount; ++count)
             {
                 //*(_BYTE *)(*(_DWORD *)(*((_DWORD *)NtCurrentTeb()->ThreadLocalStoragePointer + _tls_index) + 28) + indices[count]) = 1;
@@ -1567,6 +1584,8 @@ void __cdecl DpvsContext::R_AddCellCullGroupsInFrustum(DpvsStaticCellCmd *dpvsCe
     int count; // [esp+Ch] [ebp-4h]
 
     cell = dpvsCell->cell;
+    if (cell->cullGroupCount < 0 || (cell->cullGroupCount && !cell->cullGroups))
+        Com_Error(ERR_DROP, "DPVS cell cull group list unavailable");
     count = cell->cullGroupCount;
     cullGroup = cell->cullGroups;
     while (count)
@@ -1586,6 +1605,8 @@ void DpvsContext::DispatchCell(const GfxCell *cell, const DpvsPlane *planes,
     {
         DpvsStaticCellCmd command{planes, cell, planeCount, frustumPlaneCount, 0};
         R_AddCellStaticSurfacesInFrustum(&command);
+        if (drawWorld)
+            R_AddCellCullGroupsInFrustum(&command);
     }
 }
 
@@ -1598,12 +1619,18 @@ void R_ClearStaticDpvsView(GfxWorld &world, unsigned viewIndex, bool clearSurfac
 }
 
 bool R_ComputeStaticCameraVisibility(GfxWorld &world, DpvsGlobals &dpvs,
-    const GfxViewParms &viewParms, unsigned localClientNum, float farPlaneDist)
+    const GfxViewParms &viewParms, unsigned localClientNum, float farPlaneDist,
+    bool includeWorldSurfaces)
 {
     if (localClientNum >= 4 || world.dpvsPlanes.cellCount <= 0 ||
         world.dpvsPlanes.cellCount > 1024 || !world.cells ||
         !world.dpvsPlanes.nodes ||
         (world.dpvs.smodelCount && (!world.dpvs.smodelInsts || !world.dpvs.smodelVisData[0])))
+        return false;
+    if (includeWorldSurfaces &&
+        (world.surfaceCount < 0 || world.dpvs.staticSurfaceCount > static_cast<unsigned>(world.surfaceCount) ||
+         (world.dpvs.staticSurfaceCount &&
+          (!world.dpvs.surfaceVisData[0] || !world.dpvs.surfaces || !world.dpvs.sortedSurfIndex))))
         return false;
     for (int cellIndex = 0; cellIndex < world.dpvsPlanes.cellCount; ++cellIndex)
     {
@@ -1622,8 +1649,12 @@ bool R_ComputeStaticCameraVisibility(GfxWorld &world, DpvsGlobals &dpvs,
         }
     }
     R_ClearStaticDpvsView(world, 0, false);
+    if (includeWorldSurfaces && world.dpvs.staticSurfaceCount)
+        memset(world.dpvs.surfaceVisData[0], 0, world.dpvs.staticSurfaceCount);
     DpvsContext context{&world, dpvs, localClientNum, farPlaneDist};
     context.g_smodelVisData = world.dpvs.smodelVisData[0];
+    context.drawWorld = includeWorldSurfaces;
+    context.g_surfaceVisData = world.dpvs.surfaceVisData[0];
     context.R_SetupWorldSurfacesDpvs(&viewParms);
     const int cameraCell = R_CellForPoint(&world, viewParms.origin);
     if (cameraCell >= world.dpvsPlanes.cellCount) return false;

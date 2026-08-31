@@ -125,6 +125,8 @@ void __cdecl R_SetDpvsPlaneSides(DpvsPlane *plane);
 
 // Synchronous static-camera producer. False means unavailable, not an empty mask.
 // Resets and writes camera slot 0 only; other views/caster data remain untouched.
+// includeWorldSurfaces adds canonical AABB surfaces and cell cull groups.
 bool R_ComputeStaticCameraVisibility(GfxWorld &world, DpvsGlobals &dpvs,
-    const GfxViewParms &viewParms, unsigned localClientNum, float farPlaneDist);
+    const GfxViewParms &viewParms, unsigned localClientNum, float farPlaneDist,
+    bool includeWorldSurfaces = false);
 void R_ClearStaticDpvsView(GfxWorld &world, unsigned viewIndex, bool clearSurfaces);

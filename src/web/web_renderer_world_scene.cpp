@@ -779,6 +779,9 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
                 candidate.indexCount,
                 static_cast<std::uint32_t>(replacement.batches.size() - 1u),
             };
+            replacement.surfaceRanges.push_back({surfaceIndex,
+                static_cast<std::uint32_t>(replacement.batches.size() - 1u),
+                candidate.firstIndex, candidate.indexCount});
             if (replacement.surfaceCount == 0u)
                 replacement.firstSurfaceIndex = surfaceIndex;
             replacement.lastSurfaceIndex = surfaceIndex;
@@ -862,6 +865,76 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
         return WebRendererWorldSceneResult::NoVisibleSurface;
     destination = std::move(replacement);
     return WebRendererWorldSceneResult::Success;
+}
+
+bool WebRenderer_ValidateWorldSurfaceRanges(
+    const WebRendererWorldSurfaceDesc &surface) noexcept
+{
+    if (!surface.surfaceRanges || !surface.batches ||
+        !surface.surfaceRangeCount || !surface.canonicalSurfaceCount ||
+        surface.surfaceRangeCount > surface.canonicalSurfaceCount)
+        return false;
+    std::uint32_t nextIndex = 0u, nextSurface = 0u, batchIndex = 0u;
+    for (std::uint32_t i = 0u; i < surface.surfaceRangeCount; ++i)
+    {
+        const auto &range = surface.surfaceRanges[i];
+        if (range.canonicalSurfaceIndex < nextSurface ||
+            range.canonicalSurfaceIndex >= surface.canonicalSurfaceCount ||
+            range.batchIndex != batchIndex || batchIndex >= surface.batchCount ||
+            range.firstIndex != nextIndex || !range.indexCount ||
+            range.indexCount % 3u || nextIndex > surface.indexCount ||
+            range.indexCount > surface.indexCount - nextIndex)
+            return false;
+        const auto &batch = surface.batches[batchIndex];
+        if (range.firstIndex < batch.firstIndex ||
+            range.firstIndex - batch.firstIndex > batch.indexCount ||
+            range.indexCount > batch.indexCount - (range.firstIndex - batch.firstIndex))
+            return false;
+        nextIndex += range.indexCount;
+        nextSurface = range.canonicalSurfaceIndex + 1u;
+        if (nextIndex - batch.firstIndex == batch.indexCount) ++batchIndex;
+    }
+    return nextIndex == surface.indexCount && batchIndex == surface.batchCount;
+}
+
+bool WebRenderer_BuildWorldCameraRanges(
+    const std::vector<WebRendererWorldSurfaceRange> &surfaces,
+    const std::uint8_t *visibility, std::uint32_t visibilityCount,
+    bool visibilityComputed,
+    std::vector<WebRendererWorldCameraRange> &destination)
+{
+    destination.clear();
+    if (!visibilityComputed || (visibilityCount && !visibility)) return false;
+    try
+    {
+        // Keep capacity across views; no geometry copy or GPU upload is needed.
+        destination.reserve(surfaces.size());
+        for (const auto &surface : surfaces)
+        {
+            if (surface.canonicalSurfaceIndex >= visibilityCount)
+            {
+                destination.clear();
+                return false;
+            }
+            if (visibility[surface.canonicalSurfaceIndex] != 1u) continue;
+            if (!destination.empty() &&
+                destination.back().batchIndex == surface.batchIndex &&
+                destination.back().firstIndex + destination.back().indexCount == surface.firstIndex)
+            {
+                destination.back().indexCount += surface.indexCount;
+                ++destination.back().surfaceCount;
+            }
+            else
+                destination.push_back({surface.batchIndex, surface.firstIndex,
+                    surface.indexCount, 1u});
+        }
+    }
+    catch (const std::bad_alloc &)
+    {
+        destination.clear();
+        return false;
+    }
+    return true;
 }
 
 WebRendererWorldSceneResult WebRenderer_BuildBrushModelSceneCommand(

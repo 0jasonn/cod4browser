@@ -2554,6 +2554,9 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                     ? nullptr : command.spotShadowStaticModels.data(),
                 static_cast<std::uint32_t>(
                     command.spotShadowStaticModels.size()),
+                command.surfaceRanges.data(),
+                static_cast<std::uint32_t>(command.surfaceRanges.size()),
+                s_world.dpvs.staticSurfaceCount,
             };
             const WebRendererSurfaceResult submission =
                 WebRenderer_SetWorldSurface(surface);
@@ -3541,10 +3544,14 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     std::memcpy(cameraParms.axis, view.viewAxis, sizeof(cameraParms.axis));
     view.staticModelVisibilityComputed = R_ComputeStaticCameraVisibility(
         s_world, g_cameraDpvs, cameraParms, view.localClientNum,
-        static_cast<float>(R_GetFarPlaneDist()));
+        static_cast<float>(R_GetFarPlaneDist()), true);
     view.staticModelVisibility = s_world.dpvs.smodelVisData[0];
     view.staticModelVisibilityCount = s_world.dpvs.smodelCount;
-    if (!view.staticModelVisibilityComputed && s_world.dpvs.smodelCount)
+    view.worldSurfaceVisibilityComputed = view.staticModelVisibilityComputed;
+    view.worldSurfaceVisibility = s_world.dpvs.surfaceVisData[0];
+    view.worldSurfaceVisibilityCount = s_world.dpvs.staticSurfaceCount;
+    if (!view.staticModelVisibilityComputed &&
+        (s_world.dpvs.smodelCount || s_world.dpvs.staticSurfaceCount))
         Com_Error(ERR_DROP, "R_RenderScene: canonical static camera DPVS unavailable");
 
     if (!WebRenderer_SubmitSceneView(view))
