@@ -8290,11 +8290,16 @@ void ApplyWorldMaterialState(const WebRendererRetainedWorldBatch &batch)
         shaderPremultipliesAlpha ? 1.0f : 0.0f);
     glUniform1f(g_renderer.colorIntensityAlphaUniform,
         WebRenderer_UsesColorIntensityOpacity(batch.technique) ? 1.0f : 0.0f);
-    glUniform4fv(g_renderer.falloffParmsUniform, 1, batch.falloffParms);
-    glUniform4fv(g_renderer.falloffBeginColorUniform, 1,
-        batch.falloffBeginColor);
-    glUniform4fv(g_renderer.falloffEndColorUniform, 1,
-        batch.falloffEndColor);
+    // Only vertex material mode 4 reads these constants. Upload on every
+    // distance-falloff draw so technique transitions cannot reuse stale data.
+    if (batch.technique == WebRendererWorldTechnique::VertexColorDistanceFalloff)
+    {
+        glUniform4fv(g_renderer.falloffParmsUniform, 1, batch.falloffParms);
+        glUniform4fv(g_renderer.falloffBeginColorUniform, 1,
+            batch.falloffBeginColor);
+        glUniform4fv(g_renderer.falloffEndColorUniform, 1,
+            batch.falloffEndColor);
+    }
     glUniform1i(g_renderer.materialModeUniform,
         batch.sourceKind == WebRendererSceneBatchKind::SunFlare
             ? 5
