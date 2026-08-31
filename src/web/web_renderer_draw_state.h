@@ -1,15 +1,16 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <cstring>
 
-// Local to one dynamic camera pass and one shader program. Batch values and
+// Local to one draw pass and one shader program. Batch values and
 // matrix contents must remain immutable for that pass. Reset after any direct
 // GL override (sun query/sprite), and never retain this across frames/contexts.
 // The batch template uses the same fields in retained and portable commands;
 // it avoids copying canonical identities or owning another material model.
 template<typename Batch>
-class WebRendererDynamicDrawState
+class WebRendererDrawState
 {
 public:
     void Reset() noexcept { *this = {}; }
@@ -54,4 +55,34 @@ private:
     const Batch *material_ = nullptr;
     std::array<bool, 9> features_{};
     bool featuresKnown_ = false;
+};
+
+// One shadow partition. Texture binding, instance ranges and caster membership
+// remain per-draw; this only avoids repeating the same two uniforms/cull mode.
+class WebRendererShadowState
+{
+public:
+    bool NeedsAlpha(int alphaTest, bool samplesTexture) noexcept
+    {
+        if (alphaKnown_ && alphaTest_ == alphaTest && samplesTexture_ == samplesTexture)
+            return false;
+        alphaKnown_ = true;
+        alphaTest_ = alphaTest;
+        samplesTexture_ = samplesTexture;
+        return true;
+    }
+
+    bool NeedsCull(std::uint32_t stateBits0) noexcept
+    {
+        const std::uint32_t cull = stateBits0 & 0xc000u;
+        if (cull_ == cull) return false;
+        cull_ = cull;
+        return true;
+    }
+
+private:
+    int alphaTest_ = 0;
+    bool samplesTexture_ = false;
+    bool alphaKnown_ = false;
+    std::uint32_t cull_ = UINT32_MAX;
 };

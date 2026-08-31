@@ -1,6 +1,6 @@
 #include <web/web_renderer_surface_storage.h>
 #include <web/web_renderer_dynamic_textures.h>
-#include <web/web_renderer_dynamic_state.h>
+#include <web/web_renderer_draw_state.h>
 #include <web/web_renderer.h>
 
 #include <array>
@@ -399,7 +399,7 @@ void TestDynamicTextureBindings()
 
 void TestDynamicDrawState()
 {
-    WebRendererDynamicDrawState<WebRendererWorldBatchDesc> state;
+    WebRendererDrawState<WebRendererWorldBatchDesc> state;
     const std::array<float, 16> scene{1.0f}, depthHack{2.0f}, sun{3.0f};
     std::array<float, 16> uploaded{};
     unsigned projectionUpdates = 0;
@@ -470,6 +470,27 @@ void TestDynamicDrawState()
         state.NeedsFeatures(disabled), "reset cannot retain any stale GL state");
 }
 
+void TestShadowState()
+{
+    WebRendererShadowState state;
+    for (int alpha = 0; alpha < 4; ++alpha)
+    {
+        Require(state.NeedsAlpha(alpha, false), "new shadow alpha mode must upload");
+        Require(!state.NeedsAlpha(alpha, false), "repeated shadow alpha can be omitted");
+        Require(state.NeedsAlpha(alpha, true), "texture availability must upload");
+        Require(!state.NeedsAlpha(alpha, true), "unchanged sampling can be omitted");
+        Require(state.NeedsAlpha(alpha, false), "missing texture must disable sampling");
+    }
+    for (std::uint32_t cull : {0u, 0x8000u, 0xc000u, 0x4000u, 0u})
+    {
+        Require(state.NeedsCull(cull), "cull-mode transition must be applied");
+        Require(!state.NeedsCull(cull | 0x18000000u), "unrelated write bits do not alter cull mode");
+    }
+    state = {}; // Every sun near/far and spot partition starts unknown.
+    Require(state.NeedsAlpha(0, false) && state.NeedsCull(0),
+        "new shadow partition must restore alpha and culling even for zero state");
+}
+
 void TestErrorStrings()
 {
     for (const WebRendererSurfaceResult result : {
@@ -531,6 +552,7 @@ int main()
     runner.Run("reusable staged geometry", TestReusableStagedGeometry);
     runner.Run("dynamic texture binding equivalence", TestDynamicTextureBindings);
     runner.Run("dynamic draw state transitions", TestDynamicDrawState);
+    runner.Run("shadow state transitions", TestShadowState);
     runner.Run("surface result strings", TestErrorStrings);
     return runner.Result();
 }

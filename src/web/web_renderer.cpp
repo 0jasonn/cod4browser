@@ -4,7 +4,7 @@
 #include <web/web_renderer_surface_storage.h>
 #include <web/web_renderer_context.h>
 #include <web/web_renderer_dynamic_textures.h>
-#include <web/web_renderer_dynamic_state.h>
+#include <web/web_renderer_draw_state.h>
 #include <web/web_renderer_lod.h>
 #include <web/web_renderer_world_scene.h>
 #include <web/web_system.h>
@@ -8525,8 +8525,17 @@ bool DrawShadowPartition(
     glClearDepthf(1.0f);
     glClear(GL_DEPTH_BUFFER_BIT);
     glBindVertexArray(g_renderer.vertexArray);
-    const auto applySpotShadowCull = [](std::uint32_t stateBits0)
+    WebRendererShadowState shadowState;
+    const auto applyShadowAlpha = [&shadowState](int alphaTest, bool samplesTexture)
     {
+        if (!shadowState.NeedsAlpha(alphaTest, samplesTexture)) return;
+        glUniform1f(g_renderer.shadowDepthTextureEnabledUniform,
+            samplesTexture ? 1.0f : 0.0f);
+        glUniform1i(g_renderer.shadowDepthAlphaTestUniform, alphaTest);
+    };
+    const auto applySpotShadowCull = [&shadowState](std::uint32_t stateBits0)
+    {
+        if (!shadowState.NeedsCull(stateBits0)) return;
         switch (stateBits0 & 0xc000u)
         {
         case 0x8000u:
@@ -8545,7 +8554,7 @@ bool DrawShadowPartition(
         }
     };
     const auto drawWorldRange =
-        [requireSunCaster, &applySpotShadowCull](
+        [requireSunCaster, &applySpotShadowCull, &applyShadowAlpha](
         const WebRendererRetainedWorldBatch &batch,
         std::uint32_t firstIndex,
         std::uint32_t indexCount,
@@ -8561,9 +8570,7 @@ bool DrawShadowPartition(
         const std::int32_t alphaTest = WorldAlphaTestMode(
             requireSunCaster ? batch.stateBits[0] : shadowStateBits0);
         const bool samplesTexture = base != nullptr && alphaTest != 0;
-        glUniform1f(g_renderer.shadowDepthTextureEnabledUniform,
-            samplesTexture ? 1.0f : 0.0f);
-        glUniform1i(g_renderer.shadowDepthAlphaTestUniform, alphaTest);
+        applyShadowAlpha(alphaTest, samplesTexture);
         if (samplesTexture)
             BindWorldTexture(GL_TEXTURE0, base->texture, batch.samplerState);
         const std::uintptr_t indexOffset =
@@ -8616,9 +8623,7 @@ bool DrawShadowPartition(
                     ? batch.draw.stateBits[0]
                     : batch.draw.shadowStateBits0);
             const bool samplesTexture = base != nullptr && alphaTest != 0;
-            glUniform1f(g_renderer.shadowDepthTextureEnabledUniform,
-                samplesTexture ? 1.0f : 0.0f);
-            glUniform1i(g_renderer.shadowDepthAlphaTestUniform, alphaTest);
+            applyShadowAlpha(alphaTest, samplesTexture);
             if (samplesTexture)
                 BindWorldTexture(GL_TEXTURE0, base->texture,
                     batch.draw.samplerState);
@@ -8705,9 +8710,7 @@ bool DrawShadowPartition(
             const std::int32_t alphaTest = WorldAlphaTestMode(
                 batch.stateBits[0]);
             const bool samplesTexture = base != nullptr && alphaTest != 0;
-            glUniform1f(g_renderer.shadowDepthTextureEnabledUniform,
-                samplesTexture ? 1.0f : 0.0f);
-            glUniform1i(g_renderer.shadowDepthAlphaTestUniform, alphaTest);
+            applyShadowAlpha(alphaTest, samplesTexture);
             if (samplesTexture)
                 BindWorldTexture(GL_TEXTURE0, base->texture,
                     batch.samplerState);
@@ -9587,13 +9590,14 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
 #endif
     if (worldBatchDraw)
     {
+        WebRendererDrawState<WebRendererRetainedWorldBatch> worldDrawState;
         for (const WebRendererWorldCameraRange &range : g_renderer.worldCameraRanges)
         {
             WebRendererRetainedWorldBatch &batch =
                 g_renderer.retainedWorldBatches[range.batchIndex];
             if (WebRenderer_SkipsNativeDraw(batch.technique))
                 continue;
-            ApplyWorldMaterialState(batch);
+            if (worldDrawState.NeedsMaterial(batch)) ApplyWorldMaterialState(batch);
             const WebRendererRetainedWorldImage *base =
                 WorldImage(batch.baseImageIndex);
             const WebRendererRetainedWorldImage *detail =
@@ -9651,6 +9655,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
             else if (water)
             {
                 glUniform1i(g_renderer.materialModeUniform, 0);
+                worldDrawState.Reset();
             }
             else if (specularMapped)
             {
@@ -9673,8 +9678,8 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
             glUniform1f(g_renderer.modelLightingEnabledUniform, 0.0f);
             glUniform1f(g_renderer.detailMapEnabledUniform,
                 detailMapped ? 1.0f : 0.0f);
-            glUniform4fv(g_renderer.detailScaleUniform, 1,
-                batch.detailScale);
+            if (detailMapped)
+                glUniform4fv(g_renderer.detailScaleUniform, 1, batch.detailScale);
             glUniform1f(g_renderer.normalMapEnabledUniform,
                 normalMapped ? 1.0f : 0.0f);
             glUniform1f(g_renderer.specularMapEnabledUniform,
@@ -9816,6 +9821,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.specularMapEnabledUniform, 0.0f);
         BindModelLightingTexture(g_renderer.retainedStaticModelLighting);
+        WebRendererDrawState<WebRendererRetainedWorldBatch> staticDrawState;
         for (const WebRendererRetainedStaticModelBatch &batch :
              g_renderer.retainedStaticModelBatches)
         {
@@ -9828,7 +9834,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
             if (!WebRenderer_IsCameraVisibleXModelSurface(
                     batch.draw.sourceKind, batch.draw.cameraRegion))
                 continue;
-            ApplyWorldMaterialState(batch.draw);
+            if (staticDrawState.NeedsMaterial(batch.draw)) ApplyWorldMaterialState(batch.draw);
             const WebRendererRetainedWorldImage *base = RetainedImage(
                 g_renderer.retainedStaticModelImages,
                 batch.draw.baseImageIndex);
@@ -9873,8 +9879,8 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 modelLit ? 1.0f : 0.0f);
             glUniform1f(g_renderer.detailMapEnabledUniform,
                 detailMapped ? 1.0f : 0.0f);
-            glUniform4fv(g_renderer.detailScaleUniform, 1,
-                batch.draw.detailScale);
+            if (detailMapped)
+                glUniform4fv(g_renderer.detailScaleUniform, 1, batch.draw.detailScale);
             glUniform1f(g_renderer.normalMapEnabledUniform,
                 normalMapped ? 1.0f : 0.0f);
             glUniform1f(g_renderer.specularMapEnabledUniform,
@@ -9974,7 +9980,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
         for (std::uint32_t cameraPass = 0u; cameraPass < 2u; ++cameraPass)
         {
             const bool depthHackPass = cameraPass != 0u;
-            WebRendererDynamicDrawState<WebRendererRetainedWorldBatch> drawState;
+            WebRendererDrawState<WebRendererRetainedWorldBatch> drawState;
             glDepthRangef(0.0f, depthHackPass ? 0.015625f : 1.0f);
             for (const WebRendererRetainedWorldBatch &batch :
                  g_renderer.retainedDynamicModelBatches)
