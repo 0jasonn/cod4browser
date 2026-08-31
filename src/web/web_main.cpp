@@ -455,6 +455,9 @@ bool RunCGameFrame(const WebFrameInfo &frame)
     WebFrameProfileSample *const profile = WebFrameProfile_Current();
     double profileStarted = profile ? WebFrameProfile_Now() : 0.0;
     #endif
+    // Match Com_Frame: fixedtime and script/developer timescales are applied
+    // after wall-clock frame admission and before the authoritative server.
+    frameMilliseconds = Com_ModifyMsec(frameMilliseconds);
     frameMilliseconds = SV_Frame(frameMilliseconds);
     #if KISAK_WEB_DIAGNOSTICS
     if (profile)

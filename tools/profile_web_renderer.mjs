@@ -7,11 +7,15 @@ import { cpus, totalmem } from 'node:os';
 import { chromium } from '@playwright/test';
 import { aggregateGameplayProfile, summarizeProfileSamples } from '../tests/browser/retail_profile_aggregate.mjs';
 import { summarizeForegroundSamples } from '../tests/browser/retail_foreground_window.mjs';
+import { validateWorkload } from './renderer_workload.mjs';
 
 // Local, owned installation only. No asset contents or logs are written to evidence.
 const runLabel = process.argv[2] ?? 'sample';
 assert(/^[a-z0-9-]+$/.test(runLabel));
 const production = process.argv[3] === 'production';
+const controlled = process.argv[6] === 'fixedtime';
+assert(!process.argv[6] || controlled, 'optional workload must be fixedtime');
+assert(!controlled || production, 'controlled windows currently require production');
 const sourceRevision = production ? process.argv[4] : 'HEAD';
 assert(sourceRevision, 'production measurement requires the built source revision');
 const source = {
@@ -59,6 +63,11 @@ try {
         for (const name of ['visibilitychange', 'focus', 'blur']) addEventListener(name, sampleFocus);
     });
     await page.goto('http://127.0.0.1:8051/');
+    const servedWasm = await page.request.get('http://127.0.0.1:8051/kisakcod.wasm');
+    assert(servedWasm.ok());
+    assert.equal(createHash('sha256').update(await servedWasm.body()).digest('hex'), artifactSha256,
+        'served Wasm does not match the selected retained artifact');
+    await servedWasm.dispose();
     await page.waitForFunction(production => production
         ? document.documentElement.dataset.runtimeState === 'running'
         : globalThis.__KISAKCOD_WEB__?.state === 'running', production, { timeout: 60000 });
@@ -90,7 +99,34 @@ try {
     });
     console.log('IMPORTED_AND_MOUNTED');
     stage = 'CargoShip load';
-    await page.locator('#engine-command-input').fill('map cargoship');
+    if (controlled) {
+        await page.bringToFront();
+        await page.evaluate(() => { __dobj.profiles = []; __dobj.collecting = true; });
+        await engineWorker.evaluate(() => {
+            globalThis.__cleanFrames = [];
+            globalThis.__workloadViews = [];
+            let generation = 0;
+            const view = event => {
+                const detail = event.detail;
+                if (!detail.worldName?.toLowerCase().includes('cargoship')) return;
+                generation = detail.submissionGeneration;
+                if (generation >= 60 && generation <= 360) __workloadViews.push(structuredClone(detail));
+            };
+            const sample = event => {
+                if (generation < 60) return;
+                __cleanFrames.push({ at: performance.now(), generation: event.detail.framePumpTicks });
+                if (generation >= 360) {
+                    removeEventListener('kisakcod:system', sample);
+                    removeEventListener('kisakcod:renderer-scene-view', view);
+                }
+            };
+            addEventListener('kisakcod:renderer-scene-view', view);
+            addEventListener('kisakcod:system', sample);
+        });
+    }
+    // fixedtime is a canonical cheat dvar; devmap enables it through the normal
+    // engine command path. No diagnostic exports or memory writes are used.
+    await page.locator('#engine-command-input').fill(controlled ? 'devmap cargoship; fixedtime 16' : 'map cargoship');
     await page.locator('#engine-command-form').evaluate(form => form.requestSubmit());
     if (production) {
         const warmupDeadline = Date.now() + 300000;
@@ -104,13 +140,13 @@ try {
     console.log('CARGOSHIP_WARM_30_FRAMES');
     stage = 'profiling disabled';
     await page.bringToFront();
-    await page.evaluate(() => {
+    if (!controlled) await page.evaluate(() => {
         __dobj.profiles = [];
         __dobj.foreground = [{ observedMs: performance.now(), visibilityState: document.visibilityState,
             pageFocused: document.hasFocus() }];
         __dobj.collecting = true;
     });
-    await engineWorker.evaluate(production => {
+    if (!controlled) await engineWorker.evaluate(production => {
         const eventName = production ? 'kisakcod:system' : 'kisakcod:renderer-scene-frame';
         globalThis.__cleanFrames = [];
         const sample = event => {
@@ -127,6 +163,8 @@ try {
         await page.waitForTimeout(1000);
     }
     const cleanFrames = await engineWorker.evaluate(() => __cleanFrames);
+    assert.equal(cleanFrames.length, 301, 'exactly 300 consecutive completed callback intervals');
+    const workload = controlled ? validateWorkload(await engineWorker.evaluate(() => __workloadViews)) : undefined;
     const cleanForeground = summarizeForegroundSamples(await page.evaluate(() => {
         __dobj.collecting = false;
         __dobj.foreground.push({ observedMs: performance.now(), visibilityState: document.visibilityState,
@@ -146,10 +184,12 @@ try {
     console.log('CLEAN_TIMING', JSON.stringify(cleanTiming));
     if (production) {
         assert.equal(pageErrors.length, 0);
-        const result = { source, artifactSha256, cleanTiming, pageErrorCount: 0,
+        const result = { source, artifactSha256, cleanTiming, workload, pageErrorCount: 0,
+            recordedAtUtc: new Date().toISOString(),
             environment: { browser: 'Chrome', version: browser.version(), headless: true,
                 processor: cpus()[0].model, viewport: { width: 1440, height: 1000 }, build: 'Release production' },
-            methodology: { map: 'cargoship', warmupWorldFrames: 30, profilingDisabledIntervals: 300,
+            methodology: { map: 'cargoship', warmupWorldFrames: controlled ? 60 : 30, profilingDisabledIntervals: 300,
+                command: controlled ? 'devmap cargoship; fixedtime 16' : 'map cargoship',
                 input: 'No gameplay input; authored scene continues running', displayedFps: false } };
         await writeFile(`build/renderer-efficiency-${source.commitSha.slice(0, 8)}-${runLabel}.json`,
             `${JSON.stringify(result, null, 2)}\n`);
