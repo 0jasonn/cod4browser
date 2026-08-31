@@ -5,6 +5,11 @@ Recorded 2026-08-31. Runtime `552a468d`; runner `578e2194`. This qualifies a
 The [numeric record](controlled-renderer-552a468d.json) includes all setup
 trials, rejected windows, artifact hashes and the two qualified runs.
 
+Follow-up: [diagnostic geometry checks](paused-copy-qualification-cd85e18e.md)
+found different index/upload workloads across fresh loads of the same Wasm.
+The camera/time qualification here remains a prerequisite only; it does not
+qualify dynamic-copy performance comparisons on its own.
+
 ## Result and boundary
 
 Two fresh CargoShip loads produced exactly matching six-checkpoint camera,

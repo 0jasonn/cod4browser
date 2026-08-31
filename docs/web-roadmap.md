@@ -41,9 +41,14 @@ Manual gameplay assessment can guide renderer work without a progression gate.
    time and world-geometry checkpoints. A retained legacy candidate was rejected
    for ignoring fixedtime. Native time adjustment is shared with the web pump.
    Active-gameplay replay and dynamic entity/caster equality remain unproven.
-6. Next: align diagnostic profiling and dynamic work counts with that paused
-   window, then evaluate one command-copy optimization using qualified A/B/B/A
-   production windows. Do not infer whole-frame gains from local timers or
+6. [Aligned diagnostic profiling](evidence/paused-copy-qualification-cd85e18e.md)
+   now checks all 120 sampled views and geometry work. Fresh loads of the same
+   Wasm produced different uploaded-byte and submitted-index totals despite
+   matching camera and draw counts. The unused-name candidate was reverted;
+   production A/B/B/A was not justified by those mismatched workloads.
+7. Next: trace differing canonical model/LOD submissions and establish a
+   repeatable canonical seed/save/replay state before further copy tuning.
+   Do not infer whole-frame gains from local timers or
    add global GL caches, new batching representations or GPU-buffer policies
    from an aggregate renderer total alone.
 

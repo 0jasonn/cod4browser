@@ -217,6 +217,14 @@ comparison; it does not own game state or a replay format. Exact sampled camera,
 time and world-count matching is demonstrated, not complete dynamic state or
 active-gameplay determinism. Culling and independent shadow paths are unchanged.
 
+The [paused-copy follow-up](evidence/paused-copy-qualification-cd85e18e.md)
+aligns diagnostic profiling with that scene and records actual geometry work.
+It reproduced different index/upload totals across fresh loads of the same
+Wasm, despite matching camera and draw counts. The name-copy experiment was
+reverted; this milestone adds test orchestration and qualification only, with
+no net engine/renderer changes. Resolving the remaining variation belongs in
+canonical model/LOD and seed/save/replay behavior, not a browser game-state copy.
+
 ## Temporary compatibility seams
 
 | Seam | Retirement condition |

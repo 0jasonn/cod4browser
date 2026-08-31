@@ -4,7 +4,20 @@ Updated 2026-08-31. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
-## Paused renderer benchmark qualified
+## Paused profiling exposes geometry variation
+
+Diagnostic profiling now samples exact views 601–720 of the paused scene and
+checks every view plus actual geometry work. Three runs matched camera/time and
+draw counts but differed in submitted indices and uploaded bytes, including two
+runs of the same Wasm. The seven-line unused-name optimization was reverted;
+no production performance gain is claimed.
+
+The comparison guard, focused fixture and final restored Release passed. See
+[the evidence](evidence/paused-copy-qualification-cd85e18e.md). Next: trace the
+differing canonical model/LOD submissions and establish repeatable canonical
+seed/save/replay state before further copy tuning.
+
+## Prior camera/time qualification
 
 The browser pump now shares native `Com_ModifyMsec`, restoring canonical
 fixedtime/time-scale handling. The existing profiling runner can select an
@@ -16,8 +29,8 @@ were 26.655 and 26.134 ms. An interleaved legacy candidate was correctly rejecte
 for ignoring fixedtime. These are **paused renderer measurements**, not active
 gameplay or FPS gains; entity/particle/caster equality is not yet established.
 The focused fixture and Release retry passed. See [the evidence](evidence/controlled-renderer-552a468d.md).
-Next: align diagnostic profiling and dynamic work counts with this window before
-testing another command-copy optimization.
+This prompted the diagnostic geometry checks above; the earlier camera/time
+qualification alone is insufficient for dynamic-copy comparisons.
 
 ## Prior brush cost investigation
 
