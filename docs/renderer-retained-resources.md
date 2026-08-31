@@ -81,3 +81,37 @@ through the canonical console after view 180, once the paused scene is selected.
 It leaves the product's default 60 FPS setting unchanged and retains the web
 125 Hz safety ceiling. Record this override in the workload; compare only runs
 with the same setting. This is measurement of a paused renderer, not gameplay.
+
+## DObj conversion and dynamic sun ranges
+
+DObj skinning now writes position, normal, tangent and decoded attributes directly
+into the final vertex span. Indices are constructed as one span per surface.
+The three intermediate float arrays and separate vertex-copy pass are removed.
+After synchronous backend submission, the frontend recycles only numeric vertex
+and index capacity; the builder also returns failed, unpublished geometry to that
+workspace. World unload releases it. This trades retained CPU capacity for fewer
+allocations and growth copies; it does not retain canonical asset pointers,
+poses, lighting, visibility, materials or completed draw commands. All of those
+inputs are consumed anew each frame. Backend context recovery still uses its
+own published CPU geometry, never this empty frontend workspace.
+
+Selective Emscripten LTO covers the DObj builder, lighting adapter and existing
+Kisak `com_pack.cpp`/`com_math.cpp` helpers. This exposes helper bodies to the
+optimizer instead of copying their implementations into the web renderer.
+Exception catching, allocation-failure handling and finite-input checks remain
+enabled. Native target behavior and browser capability requirements are unchanged.
+The diagnostic skinning interval now includes final vertex construction and
+attributes; the old separate vertex-emission interval is zero. Compare the sum
+of skinning and geometry, or total DObj build, across this boundary.
+
+The existing sun-range helper also accepts dynamic draw references. Adjacent
+opaque ranges merge only within the same brush instance or shared skinned buffer.
+Non-casters, depth-hack/FX exclusions, cutouts, gaps and instance changes break
+the run. Camera visibility never enters the decision. Static-model culling,
+static shadow instance selection and authored spot membership are unchanged.
+`sunShadowMergedRanges` includes these additional avoided submissions.
+
+Use `renderer_workload.mjs --shadow-ranges` for this physical-draw change. It
+requires exact logical caster totals and exact equality of all other work,
+including uploaded bytes and submitted indices, across all 120 samples. The
+ordinary `--profiles` comparator remains strict.

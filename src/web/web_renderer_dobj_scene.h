@@ -83,6 +83,11 @@ struct WebRendererDObjSceneCommand
     std::uint32_t surfaceCount = 0u;
 };
 
+// After synchronous backend submission, recycle only numeric geometry storage.
+// No pose, material, visibility or other canonical asset state is retained.
+void WebRenderer_RecycleDObjSceneGeometry(WebRendererDObjSceneCommand &command) noexcept;
+void WebRenderer_ReleaseDObjSceneScratch() noexcept;
+
 enum class WebRendererDObjSceneResult : std::uint8_t
 {
     Success = 0,

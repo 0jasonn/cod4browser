@@ -4,38 +4,59 @@
 #include <cstdint>
 #include <cstring>
 
-// Sun depth uses one projection, no culling, and no material inputs for opaque
-// world triangles. Join only adjacent opaque index ranges; never bridge an
-// omitted caster or an alpha-tested range. Camera visibility is irrelevant here.
-template<typename Batches, typename IsOpaque, typename Draw>
-std::uint32_t WebRenderer_ForEachSunShadowRange(
-    const Batches &batches, IsOpaque isOpaque, Draw draw)
+// Join adjacent index ranges only when the caller proves identical shadow
+// inputs. Skipped casters always break a run. This never uses camera visibility.
+template<typename Entries, typename BatchFor, typename IsCaster,
+    typename CanMerge, typename Draw>
+std::uint32_t WebRenderer_ForEachShadowRange(
+    const Entries &entries, BatchFor batchFor, IsCaster isCaster,
+    CanMerge canMerge, Draw draw)
 {
-    const typename Batches::value_type *pending = nullptr;
+    const typename Entries::value_type *pending = nullptr;
     std::uint32_t count = 0u;
     std::uint32_t merged = 0u;
-    for (const auto &batch : batches)
+    const auto flush = [&]() {
+        if (pending) draw(*pending, batchFor(*pending),
+            batchFor(*pending).firstIndex, count);
+    };
+    for (const auto &entry : entries)
     {
-        if (!batch.castsSunShadow || batch.indexCount == 0u)
+        const auto &batch = batchFor(entry);
+        if (!isCaster(batch) || batch.indexCount == 0u)
         {
-            if (pending) draw(*pending, pending->firstIndex, count);
+            flush();
             pending = nullptr;
             continue;
         }
-        if (pending && isOpaque(*pending) && isOpaque(batch) &&
-            std::uint64_t(pending->firstIndex) + count == batch.firstIndex &&
+        if (pending && canMerge(*pending, entry) &&
+            std::uint64_t(batchFor(*pending).firstIndex) + count == batch.firstIndex &&
             batch.indexCount <= UINT32_MAX - count)
         {
             count += batch.indexCount;
             ++merged;
             continue;
         }
-        if (pending) draw(*pending, pending->firstIndex, count);
-        pending = &batch;
+        flush();
+        pending = &entry;
         count = batch.indexCount;
     }
-    if (pending) draw(*pending, pending->firstIndex, count);
+    flush();
     return merged;
+}
+
+// Sun depth uses one projection, no culling, and no material inputs for opaque
+// world triangles. Alpha-tested ranges keep their own material inputs.
+template<typename Batches, typename IsOpaque, typename Draw>
+std::uint32_t WebRenderer_ForEachSunShadowRange(
+    const Batches &batches, IsOpaque isOpaque, Draw draw)
+{
+    return WebRenderer_ForEachShadowRange(batches,
+        [](const auto &batch) -> const auto & { return batch; },
+        [](const auto &batch) { return batch.castsSunShadow; },
+        [&isOpaque](const auto &a, const auto &b) { return isOpaque(a) && isOpaque(b); },
+        [&draw](const auto &, const auto &batch, std::uint32_t first, std::uint32_t count) {
+            draw(batch, first, count);
+        });
 }
 
 // Local to one draw pass and one shader program. Batch values and

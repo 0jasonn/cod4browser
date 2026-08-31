@@ -1335,6 +1335,7 @@ void __cdecl R_Shutdown(int destroyWindow)
 
 void __cdecl R_UnloadWorld()
 {
+    WebRenderer_ReleaseDObjSceneScratch();
     WebRenderer_UnloadWorldResources();
     decltype(g_brushGeometryByModel){}.swap(g_brushGeometryByModel);
 }
@@ -3660,6 +3661,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                 ? "<none>"
                 : dynamicEntityModelCommand.batches[0].modelName);
     }
+    WebRenderer_RecycleDObjSceneGeometry(dynamicCommand);
 #if KISAK_WEB_DIAGNOSTICS
     const double visibilityStarted = sceneProfile ? WebFrameProfile_Now() : 0.0;
 #endif

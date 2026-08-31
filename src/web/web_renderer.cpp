@@ -8904,34 +8904,45 @@ bool DrawShadowPartition(
     if (requireSunCaster && g_renderer.dynamicModelSceneActive)
     {
         std::uint32_t previousInstance = UINT32_MAX - 1u;
-        for (const auto &draw : g_renderer.dynamicDraws)
-        {
-            const auto &batch = DynamicDrawBatch(draw);
-            if ((requireSunCaster && !batch.castsSunShadow) ||
-                batch.depthHack ||
-                WebRenderer_IsFxVertexColorBatch(batch.sourceKind))
-                continue;
-            BindDynamicDrawGeometry(draw, g_renderer.shadowDepthInstanceEnabledUniform,
-                previousInstance);
-            if (!requireSunCaster)
-                applySpotShadowCull(batch.stateBits[0]);
-            const WebRendererRetainedWorldImage *base = RetainedImage(
-                g_renderer.retainedDynamicModelImages,
-                batch.baseImageIndex);
-            const std::int32_t alphaTest = WorldAlphaTestMode(
-                batch.stateBits[0]);
-            const bool samplesTexture = base != nullptr && alphaTest != 0;
-            applyShadowAlpha(alphaTest, samplesTexture);
-            if (samplesTexture)
-                BindWorldTexture(GL_TEXTURE0, base->texture,
-                    batch.samplerState);
-            const std::uintptr_t indexOffset =
-                static_cast<std::uintptr_t>(batch.firstIndex) *
-                sizeof(std::uint32_t);
-            glDrawElements(GL_TRIANGLES,
-                static_cast<GLsizei>(batch.indexCount), GL_UNSIGNED_INT,
-                reinterpret_cast<const void *>(indexOffset));
-        }
+        const auto merged = WebRenderer_ForEachShadowRange(
+            g_renderer.dynamicDraws, DynamicDrawBatch,
+            [](const auto &batch) {
+                return batch.castsSunShadow && !batch.depthHack &&
+                    !WebRenderer_IsFxVertexColorBatch(batch.sourceKind);
+            },
+            [](const auto &a, const auto &b) {
+                // One instance means the same VAO, index buffer and placement.
+                // UINT32_MAX denotes the shared, already-skinned DObj/FX buffer.
+                return a.brushInstanceIndex == b.brushInstanceIndex &&
+                    WorldAlphaTestMode(DynamicDrawBatch(a).stateBits[0]) == 0 &&
+                    WorldAlphaTestMode(DynamicDrawBatch(b).stateBits[0]) == 0;
+            },
+            [&](const auto &draw, const auto &batch, std::uint32_t first,
+                std::uint32_t count) {
+                BindDynamicDrawGeometry(draw, g_renderer.shadowDepthInstanceEnabledUniform,
+                    previousInstance);
+                const WebRendererRetainedWorldImage *base = RetainedImage(
+                    g_renderer.retainedDynamicModelImages,
+                    batch.baseImageIndex);
+                const std::int32_t alphaTest = WorldAlphaTestMode(
+                    batch.stateBits[0]);
+                const bool samplesTexture = base != nullptr && alphaTest != 0;
+                applyShadowAlpha(alphaTest, samplesTexture);
+                if (samplesTexture)
+                    BindWorldTexture(GL_TEXTURE0, base->texture,
+                        batch.samplerState);
+                const std::uintptr_t indexOffset =
+                    static_cast<std::uintptr_t>(first) *
+                    sizeof(std::uint32_t);
+                glDrawElements(GL_TRIANGLES,
+                    static_cast<GLsizei>(count), GL_UNSIGNED_INT,
+                    reinterpret_cast<const void *>(indexOffset));
+            });
+#if KISAK_WEB_DIAGNOSTICS
+        if (auto *profile = WebFrameProfile_Current()) profile->sunShadowMergedRanges += merged;
+#else
+        (void)merged;
+#endif
     }
     glUniform1f(g_renderer.shadowDepthInstanceEnabledUniform, 0.0f);
     glDisable(GL_POLYGON_OFFSET_FILL);

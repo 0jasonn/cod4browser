@@ -141,9 +141,28 @@ export function compareRetainedRendererWorkloads(runs) {
     return changes;
 }
 
+// Only physical sun submissions may change; vertices, indices, uploads,
+// camera selection and the sum of submitted/merged caster ranges stay exact.
+export function compareShadowRangeWorkloads(runs) {
+    const normalized = runs.map(run => ({ ...run, workCounts: run.workCounts.map(counts => {
+        assert(Number.isSafeInteger(counts.sunShadowMergedRanges) && counts.sunShadowMergedRanges >= 0);
+        assert.equal(counts.sunShadowMergedRanges, run.workCounts[0].sunShadowMergedRanges,
+            'merged range count changed within paused window');
+        assert.equal(counts.shadowCasterDraws, run.workCounts[0].shadowCasterDraws,
+            'submitted caster count changed within paused window');
+        return { ...counts, shadowCasterDraws: counts.shadowCasterDraws + counts.sunShadowMergedRanges,
+            sunShadowMergedRanges: 0 };
+    }) }));
+    compareProfileWorkloads(normalized);
+    return runs.map(run => ({ artifactSha256: run.artifactSha256, matchingLogicalWorkSamples: 120,
+        shadowCasterDraws: run.workCounts[0].shadowCasterDraws,
+        sunShadowMergedRanges: run.workCounts[0].sunShadowMergedRanges }));
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
     const profiles = process.argv[2] === '--profiles';
     const retained = process.argv[2] === '--retained';
-    const runs = await Promise.all(process.argv.slice(profiles || retained ? 3 : 2).map(async path => JSON.parse(await readFile(path, 'utf8'))));
-    console.log(JSON.stringify((retained ? compareRetainedRendererWorkloads : profiles ? compareProfileWorkloads : compareWorkloads)(runs), null, 2));
+    const shadows = process.argv[2] === '--shadow-ranges';
+    const runs = await Promise.all(process.argv.slice(profiles || retained || shadows ? 3 : 2).map(async path => JSON.parse(await readFile(path, 'utf8'))));
+    console.log(JSON.stringify((shadows ? compareShadowRangeWorkloads : retained ? compareRetainedRendererWorkloads : profiles ? compareProfileWorkloads : compareWorkloads)(runs), null, 2));
 }

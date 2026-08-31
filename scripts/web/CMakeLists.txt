@@ -286,6 +286,16 @@ set_source_files_properties(
     "${SRC_DIR}/server/sv_game.cpp"
     PROPERTIES COMPILE_OPTIONS "-flto")
 
+# Keep the hot DObj conversion loop and its canonical numeric helpers visible
+# to the linker. Separate Wasm objects otherwise hide their non-throwing bodies,
+# preventing inlining and retaining emulated-exception call boundaries per vertex.
+set_source_files_properties(
+    "${SRC_DIR}/web/web_renderer_dobj_scene.cpp"
+    "${SRC_DIR}/web/web_renderer_lighting.cpp"
+    "${SRC_DIR}/qcommon/com_pack.cpp"
+    "${SRC_DIR}/universal/com_math.cpp"
+    PROPERTIES COMPILE_OPTIONS "-flto")
+
 target_include_directories(KisakCOD-web PRIVATE
     "${SRC_DIR}"
     "${DEPS_DIR}"

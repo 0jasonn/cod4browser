@@ -272,6 +272,16 @@ proof jobs are retired. Canonical runtime tests replace their useful coverage.
 
 ## Remaining work
 
+The DObj conversion milestone keeps canonical pose generation, LOD/hide masks,
+material resolution and lighting inputs unchanged. Final vertices are assembled
+in one skinning pass, and only empty numeric geometry capacity survives frontend
+submission. Selective web LTO exposes the shared Kisak packing and quaternion
+helpers to that loop; no browser copies of their implementations were added.
+Dynamic opaque sun ranges now use the same range-joining implementation as world
+shadows, with placement/buffer identity preserved. See
+[renderer resource ownership](renderer-retained-resources.md#dobj-conversion-and-dynamic-sun-ranges).
+This is a renderer-boundary improvement, not expanded gameplay compatibility.
+
 - Broaden campaign coverage and close renderer/material gaps from measured
   canonical scenes, without introducing browser asset types.
 - Add a legal browser cinematic path or a documented graceful omission.
