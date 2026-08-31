@@ -14,6 +14,7 @@ const runLabel = process.argv[2] ?? 'sample';
 assert(/^[a-z0-9-]+$/.test(runLabel));
 const production = process.argv[3] === 'production';
 const controlled = process.argv[6] === 'fixedtime';
+const mapCommand = controlled ? 'set sv_mapSeed 1; devmap cargoship; fixedtime 16' : 'map cargoship';
 assert(!process.argv[6] || controlled, 'optional workload must be fixedtime');
 const sourceRevision = process.argv[4] ?? (production ? undefined : 'HEAD');
 assert(sourceRevision, 'production measurement requires the built source revision');
@@ -156,7 +157,7 @@ try {
     }
     // fixedtime is a canonical cheat dvar; devmap enables it through the normal
     // engine command path. No diagnostic exports or memory writes are used.
-    await page.locator('#engine-command-input').fill(controlled ? 'set sv_mapSeed 1; devmap cargoship; fixedtime 16' : 'map cargoship');
+    await page.locator('#engine-command-input').fill(mapCommand);
     await page.locator('#engine-command-form').evaluate(form => form.requestSubmit());
     if (production) {
         const warmupDeadline = Date.now() + 300000;
@@ -220,7 +221,7 @@ try {
             environment: { browser: 'Chrome', version: browser.version(), headless: true,
                 processor: cpus()[0].model, viewport: { width: 1440, height: 1000 }, build: 'Release production' },
             methodology: { map: 'cargoship', warmupWorldFrames: controlled ? 240 : 30, profilingDisabledIntervals: 300,
-                command: controlled ? 'devmap cargoship; fixedtime 16' : 'map cargoship',
+                command: mapCommand,
                 cameraSetup: controlled ? { mode: 'cg_ufo after view 30', pauseAfterView: 60, afterViews: [120, 180],
                     command: 'cg_setviewpos -9732 -9384 2041 73 16' } : undefined,
                 input: controlled ? 'Paused renderer-only workload; no gameplay input'

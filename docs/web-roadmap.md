@@ -46,8 +46,15 @@ Manual gameplay assessment can guide renderer work without a progression gate.
    Wasm produced different uploaded-byte and submitted-index totals despite
    matching camera and draw counts. The unused-name candidate was reverted;
    production A/B/B/A was not justified by those mismatched workloads.
-7. Next: trace differing canonical model/LOD submissions and establish a
-   repeatable canonical seed/save/replay state before further copy tuning.
+7. [Seeded brush optimization](evidence/seeded-brush-hashes-06ad8004.md) locates
+   the variation in dynamic commands and adds shared optional `sv_mapSeed`
+   control. Seed 1 matches all 120 measured workload samples across two fresh
+   baseline loads and the hash-reuse candidate. Consecutive brush shader hashes
+   are now reused locally within a build: material setup fell about 28%, and
+   production A/B/B/A pair means were 26.917 -> 26.027 ms. Host drift and paused
+   execution limit that 3.30% observation; no general gameplay FPS claim follows.
+8. Next: inspect DObj lighting setup under the same seeded workload, preserving
+   canonical lighting and pose ownership. Avoid pause-specific result caches.
    Do not infer whole-frame gains from local timers or
    add global GL caches, new batching representations or GPU-buffer policies
    from an aggregate renderer total alone.

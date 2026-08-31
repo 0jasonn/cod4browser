@@ -4,7 +4,24 @@ Updated 2026-08-31. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
-## Paused profiling exposes geometry variation
+## Seeded brush shader-hash optimization delivered
+
+Fresh-map randomness caused the changing dynamic geometry; UI counts matched.
+The shared server now offers optional `sv_mapSeed` control, defaulting to the
+original clock seed. With seed 1, two baseline loads and the candidate matched
+all 120 diagnostic camera/time and measured geometry/shadow-work samples.
+
+The brush builder now reuses consecutive shader hashes within each synchronous
+build. Material setup fell about 28%; production A/B/B/A pair means were
+26.917 -> 26.027 ms (3.30% lower). Host drift and the paused workload limit this
+observation; no general gameplay FPS gain is claimed. Static-model culling,
+independent shadows, validation and atomic publication remain unchanged.
+
+Focused checks and the final Release passed; the production candidate was
+browser-run twice. See [the evidence](evidence/seeded-brush-hashes-06ad8004.md).
+Next: inspect DObj lighting setup using the same controlled workload.
+
+## Prior paused profiling exposes geometry variation
 
 Diagnostic profiling now samples exact views 601–720 of the paused scene and
 checks every view plus actual geometry work. Three runs matched camera/time and
@@ -13,9 +30,8 @@ runs of the same Wasm. The seven-line unused-name optimization was reverted;
 no production performance gain is claimed.
 
 The comparison guard, focused fixture and final restored Release passed. See
-[the evidence](evidence/paused-copy-qualification-cd85e18e.md). Next: trace the
-differing canonical model/LOD submissions and establish repeatable canonical
-seed/save/replay state before further copy tuning.
+[the evidence](evidence/paused-copy-qualification-cd85e18e.md). This prompted
+the dynamic/UI partition and shared seed control above.
 
 ## Prior camera/time qualification
 

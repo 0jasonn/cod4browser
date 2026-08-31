@@ -95,3 +95,7 @@ future production optimization comparison.
 Next: trace the differing canonical model/LOD submissions and establish a
 repeatable canonical seed/save/replay state. Avoid additional copy optimizations
 or browser-owned game-state substitutes until index and upload workloads match.
+
+Follow-up: [seeded brush comparison](seeded-brush-hashes-06ad8004.md) locates
+variation in dynamic geometry, adds shared optional map-seed control, and
+matches all 120 measured workload samples before retaining brush hash reuse.

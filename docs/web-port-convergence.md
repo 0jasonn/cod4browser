@@ -32,6 +32,7 @@ oracle.
 | Database | Canonical XFile stream, allocation blocks, generated loaders, pointer aliases, registry pools, dependency ordering and final publication own runtime assets, including native-compatible leading-comma asset-stub resolution. |
 | World/runtime | Canonical `GfxWorld`, collision, server/game, client/cgame, script VM, XAnim/DObj, effects, ragdoll, physics and sound code are in the browser link closure. |
 | Frame order | The browser supplies elapsed time; canonical `SV_Frame`, client frame work and `SCR_UpdateScreen` advance gameplay. |
+| Fresh-map randomness | Shared `SV_GetMapRandomSeed` serves native and browser spawn paths; optional cheat dvar `sv_mapSeed` defaults to the original clock seed. Game RNG and save/demo restoration remain canonical. |
 | Renderer frontend | Kisak world, model, effect and UI state is translated only at the portable draw-command boundary. Native IW3's bounded 65,536 static-model cardinality is preserved across that seam. |
 | Input | Browser events enter canonical key/mouse queues, bindings, usercmd creation and movement/weapon code. |
 | Audio | Canonical mixer and OpenAL-facing state feed a browser Web Audio device boundary. |
@@ -201,9 +202,9 @@ This prompted the brush construction/append measurement below.
 
 The [brush cost investigation](evidence/brush-costs-f15c3dc9.md) retained diagnostic
 attribution and a world/brush output oracle. Both proposed runtime changes were
-reverted after production timing failed to support them. The original geometry,
-shader hashing, technique selection and batch merge policy remain; no new cache,
-allocation policy or engine representation was added. Retained artifacts now
+reverted after production timing failed to support them. At that milestone,
+geometry, hashing, technique selection and batch merge policy were unchanged;
+no new cache, allocation policy or engine representation was added. Retained artifacts now
 support interleaved comparisons before further optimization.
 
 The [controlled timing follow-up](evidence/controlled-renderer-552a468d.md)
@@ -224,6 +225,16 @@ Wasm, despite matching camera and draw counts. The name-copy experiment was
 reverted; this milestone adds test orchestration and qualification only, with
 no net engine/renderer changes. Resolving the remaining variation belongs in
 canonical model/LOD and seed/save/replay behavior, not a browser game-state copy.
+
+The [seeded brush follow-up](evidence/seeded-brush-hashes-06ad8004.md) partitions
+accepted dynamic/UI geometry using four diagnostic-only counters. Variation was
+in dynamic commands; the shared optional map seed produced matching measured
+workloads across fresh loads. The runner owns only orchestration and metadata.
+It does not author model, pose, random-generator or replay state in JavaScript.
+The brush draw-command builder now reuses only the preceding shader hashes in
+a stack record scoped to one synchronous build. This adds no persistent pointer,
+heap allocation or global cache. Technique/material selection, output geometry,
+atomic publication, canonical culling and independent shadows are unchanged.
 
 ## Temporary compatibility seams
 

@@ -6,6 +6,10 @@ baseline: `f15c3dc9`. Evaluated candidates: `006bc35a` and `2b86c7c7`.
 the baseline control; the measured local saving did not justify shipping the
 slower candidate frame timings.
 
+Later follow-up: [seeded brush comparison](seeded-brush-hashes-06ad8004.md)
+re-evaluates and retains hash-only reuse with matching measured workloads.
+The results below describe the earlier uncontrolled investigation.
+
 ## Delivered work
 
 Four fields in the existing diagnostic profiler separate brush remapping,
