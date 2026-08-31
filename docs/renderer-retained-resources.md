@@ -65,3 +65,11 @@ The controlled browser workload caught and fixed logical geometry admission:
 retained brushes still occupy the original scene budget before optional FX and
 clouds. A diagnostic context-loss/restoration run then matched twelve resumed
 work samples. Production timing qualification is the remaining delivery gate.
+
+Production timing uses six existing canonical view checkpoints (240, 300, 360,
+420, 480, 540): five contiguous 60-frame spans cover 300 frames. The old
+callback-event method is unsuitable below 16 ms because `FramePumpTrampoline`
+suppresses most fast callback telemetry. Baseline and candidate must both use
+the checkpoint method. Report the total elapsed time divided by 300; percentiles
+of the five span means are not per-frame latency percentiles. No production
+profiler or high-frequency telemetry was added.

@@ -135,8 +135,13 @@ try {
                     } }));
                     commands.delete(generation);
                 }
-                if (generation >= 240 && generation <= 540 && generation % 60 === 0)
+                if (generation >= 240 && generation <= 540 && generation % 60 === 0) {
                     __workloadViews.push(structuredClone(detail));
+                    // Production system telemetry omits most callbacks below
+                    // 16 ms. Existing canonical view checkpoints remain exact
+                    // at every 60 views, with no added runtime instrumentation.
+                    if (production) __cleanFrames.push({ at: performance.now(), generation });
+                }
                 if (!production && generation === 600) dispatchEvent(new MessageEvent('message', { data: {
                     protocolVersion: ENGINE_PROTOCOL_VERSION, type: 'call', id: 1000600,
                     functionName: '_KisakWeb_TestBeginFrameProfileWithTimeout', arguments: [120, 30000],
@@ -154,7 +159,7 @@ try {
                 }
             };
             addEventListener('kisakcod:renderer-scene-view', view);
-            addEventListener(production ? 'kisakcod:system' : 'kisakcod:renderer-scene-frame', sample);
+            if (!production) addEventListener('kisakcod:renderer-scene-frame', sample);
         }, production);
     }
     // fixedtime is a canonical cheat dvar; devmap enables it through the normal
@@ -191,12 +196,14 @@ try {
     }, production);
     // Poll only completion, not individual frame timestamps across the Worker bridge.
     const cleanDeadline = Date.now() + 60000;
-    while (await engineWorker.evaluate(() => __cleanFrames.length) < 301) {
+    const checkpointTiming = production && controlled;
+    const timestampCount = checkpointTiming ? 6 : 301;
+    while (await engineWorker.evaluate(() => __cleanFrames.length) < timestampCount) {
         assert(Date.now() < cleanDeadline, 'profiling-disabled window completed within 60 seconds');
         await page.waitForTimeout(1000);
     }
     const cleanFrames = await engineWorker.evaluate(() => __cleanFrames);
-    assert.equal(cleanFrames.length, 301, 'exactly 300 consecutive completed callback intervals');
+    assert.equal(cleanFrames.length, timestampCount, 'timing window must cover exactly 300 frames');
     const workload = controlled ? validateWorkload(...await engineWorker.evaluate(() =>
         [__workloadViews, __workloadWarmup])) : undefined;
     const cleanForeground = summarizeForegroundSamples(await page.evaluate(() => {
@@ -208,11 +215,15 @@ try {
     assert(cleanForeground.performanceWindowValid);
     assert.equal(await page.evaluate(() => __dobj.profiles.length), 0, 'profiler stayed inactive');
     const cleanIntervals = cleanFrames.slice(1).map((frame, index) => {
-        assert.equal(frame.generation, cleanFrames[index].generation + 1, 'no skipped canonical views');
-        return frame.at - cleanFrames[index].at;
+        const span = checkpointTiming ? 60 : 1;
+        assert.equal(frame.generation, cleanFrames[index].generation + span, 'no skipped timing checkpoints');
+        return (frame.at - cleanFrames[index].at) / span;
     });
     const cleanTiming = { intervals: summarizeProfileSamples(cleanIntervals), foreground: cleanForeground,
-        clock: production ? 'Worker performance.now at completed main-loop callbacks'
+        checkpointSpanFrames: checkpointTiming ? 60 : undefined,
+        frameIntervalsCovered: 300, checkpointTimes: checkpointTiming ? cleanFrames : undefined,
+        clock: checkpointTiming ? 'Worker performance.now at canonical view checkpoints; samples are 60-frame span means'
+            : production ? 'Worker performance.now at completed main-loop callbacks'
             : 'Worker performance.now at completed canonical render events',
         profilerActive: false, diagnosticBuild: !production, displayedFps: false };
     console.log('CLEAN_TIMING', JSON.stringify(cleanTiming));
@@ -379,6 +390,12 @@ try {
     }
 } catch (error) {
     console.error('PROFILE_FAILED', stage, error.message);
+    const failedWorker = page.workers().find(worker => worker.url().includes('engine_worker.mjs'));
+    console.error('WORKLOAD_PROGRESS', await failedWorker?.evaluate(() => ({
+        cleanCount: globalThis.__cleanFrames?.length,
+        cleanFirst: globalThis.__cleanFrames?.[0], cleanLast: globalThis.__cleanFrames?.at(-1),
+        views: globalThis.__workloadViews, warmup: globalThis.__workloadWarmup,
+    })).catch(() => null));
     console.error('ENGINE_ERRORS', await page.evaluate(() => globalThis.__dobj?.logs
         .filter(log => /error|failed|invalid|assert/i.test(log.text ?? log.message ?? ''))
         .slice(-8)).catch(() => null));

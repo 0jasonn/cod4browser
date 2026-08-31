@@ -38,7 +38,20 @@ export function compareWorkloads(runs) {
         assert(run.workload, 'legacy/uncontrolled runs are not comparable');
         assert.equal(run.workload.mode, 'paused-renderer');
         assert.equal(run.pageErrorCount, 0);
-        assert.equal(run.cleanTiming.intervals.sampleCount, 300);
+        assert.equal(run.cleanTiming.clock, runs[0].cleanTiming.clock, 'timing methods differ');
+        if (run.cleanTiming.checkpointSpanFrames === 60) {
+            assert.equal(run.cleanTiming.intervals.sampleCount, 5);
+            assert.equal(run.cleanTiming.frameIntervalsCovered, 300);
+            const checkpoints = run.cleanTiming.checkpointTimes;
+            assert.equal(checkpoints.length, 6);
+            for (let index = 0; index < checkpoints.length; ++index) {
+                assert.equal(checkpoints[index].generation, 240 + index * 60);
+                assert(Number.isFinite(checkpoints[index].at));
+                if (index) assert(checkpoints[index].at > checkpoints[index - 1].at);
+            }
+            assert(Math.abs(run.cleanTiming.intervals.average -
+                (checkpoints[5].at - checkpoints[0].at) / 300) < 1e-9);
+        } else assert.equal(run.cleanTiming.intervals.sampleCount, 300);
         assert.equal(run.cleanTiming.profilerActive, false);
         assert.equal(run.cleanTiming.diagnosticBuild, false);
         assert.equal(run.cleanTiming.foreground.performanceWindowValid, true);
@@ -46,7 +59,9 @@ export function compareWorkloads(runs) {
         assert.deepEqual(run.workload, runs[0].workload, 'camera/time/geometry checkpoints differ');
     }
     return runs.map(run => ({ artifactSha256: run.artifactSha256,
-        averageMs: run.cleanTiming.intervals.average, p95Ms: run.cleanTiming.intervals.p95 }));
+        averageMs: run.cleanTiming.intervals.average,
+        p95Ms: run.cleanTiming.checkpointSpanFrames ? undefined : run.cleanTiming.intervals.p95,
+        spanMeanP95Ms: run.cleanTiming.checkpointSpanFrames ? run.cleanTiming.intervals.p95 : undefined }));
 }
 
 export function validateProfileWindow(frames, views, workload) {
