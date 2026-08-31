@@ -8,6 +8,7 @@ export const CPU_PROFILE_FIELDS = [
     "commandGeometryCheckMs", "commandGeometryCopyMs", "commandBatchCopyMs",
     "dobjBuildMs", "dobjPoseMs", "dobjLightingMs", "dobjSkinningMs", "dobjGeometryMs",
     "dobjVertexEmitMs", "dobjIndexEmitMs", "sceneBrushBuildMs",
+    "sceneBrushRemapMs", "sceneBrushGeometryMs", "sceneBrushMaterialMs", "sceneBrushAppendMs",
     "rendererFrontendMs", "soundMs", "rendererBackendMs", "totalMs",
 ];
 

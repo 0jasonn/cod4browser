@@ -1,5 +1,6 @@
 #include <web/web_renderer_world_scene.h>
 #include <web/web_renderer_material_lookup.h>
+#include <web/web_frame_profile.h>
 #include <gfx_d3d/gfx_world_types.h>
 
 #include <algorithm>
@@ -959,12 +960,20 @@ WebRendererWorldSceneResult WebRenderer_BuildBrushModelSceneCommand(
     }
 
     WebRendererBrushModelSceneCommand replacement;
+#if KISAK_WEB_DIAGNOSTICS
+    WebFrameProfileSample *const profile = WebFrameProfile_Current();
+    double stageStarted = profile ? WebFrameProfile_Now() : 0.0;
+#endif
     try
     {
         constexpr std::uint32_t UNMAPPED =
             std::numeric_limits<std::uint32_t>::max();
         std::vector<std::uint32_t> vertexRemap(world.vertexCount, UNMAPPED);
         std::vector<std::uint32_t> touchedVertices;
+#if KISAK_WEB_DIAGNOSTICS
+        if (profile)
+            profile->sceneBrushRemapMs += WebFrameProfile_Now() - stageStarted;
+#endif
         for (std::uint32_t submissionIndex = 0u;
              submissionIndex < submissionCount; ++submissionIndex)
         {
@@ -1019,6 +1028,9 @@ WebRendererWorldSceneResult WebRenderer_BuildBrushModelSceneCommand(
                 }
                 const std::uint32_t firstDestinationIndex =
                     static_cast<std::uint32_t>(replacement.indices.size());
+#if KISAK_WEB_DIAGNOSTICS
+                if (profile) stageStarted = WebFrameProfile_Now();
+#endif
                 for (std::uint32_t index = 0u; index < indexCount; ++index)
                 {
                     const std::uint32_t localIndex =
@@ -1099,6 +1111,14 @@ WebRendererWorldSceneResult WebRenderer_BuildBrushModelSceneCommand(
                     replacement.indices.push_back(destinationIndex);
                 }
 
+#if KISAK_WEB_DIAGNOSTICS
+                if (profile)
+                {
+                    const double now = WebFrameProfile_Now();
+                    profile->sceneBrushGeometryMs += now - stageStarted;
+                    stageStarted = now;
+                }
+#endif
                 WebRendererWorldBatchDesc candidate = MakeBatch(
                     world, surface, surfaceIndex, firstDestinationIndex,
                     false, lightContext);
@@ -1134,10 +1154,21 @@ WebRendererWorldSceneResult WebRenderer_BuildBrushModelSceneCommand(
                 }
                 ++replacement.surfaceCount;
                 ++emittedSurfaces;
+#if KISAK_WEB_DIAGNOSTICS
+                if (profile)
+                    profile->sceneBrushMaterialMs += WebFrameProfile_Now() - stageStarted;
+#endif
             }
+#if KISAK_WEB_DIAGNOSTICS
+            if (profile) stageStarted = WebFrameProfile_Now();
+#endif
             for (const std::uint32_t sourceVertexIndex : touchedVertices)
                 vertexRemap[sourceVertexIndex] = UNMAPPED;
             touchedVertices.clear();
+#if KISAK_WEB_DIAGNOSTICS
+            if (profile)
+                profile->sceneBrushRemapMs += WebFrameProfile_Now() - stageStarted;
+#endif
             if (emittedSurfaces != 0u) ++replacement.modelCount;
         }
     }

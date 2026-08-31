@@ -184,6 +184,11 @@ struct WebFrameProfileSample
     double sceneModelBuildMs = 0.0;
     // Nested in sceneModelBuildMs; other model families remain in the parent.
     double sceneBrushBuildMs = 0.0;
+    // Nested brush costs; validation and command publication remain in parent.
+    double sceneBrushRemapMs = 0.0;
+    double sceneBrushGeometryMs = 0.0;
+    double sceneBrushMaterialMs = 0.0;
+    double sceneBrushAppendMs = 0.0;
     double sceneCommandAppendMs = 0.0;
     double sceneCloudAppendMs = 0.0;
     // Disjoint parts of sceneDynamicSubmitMs; upload timers also overlap them.

@@ -3039,6 +3039,9 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     }
     if (hasBrushModels)
     {
+#if KISAK_WEB_DIAGNOSTICS
+        const double appendStarted = sceneProfile ? WebFrameProfile_Now() : 0.0;
+#endif
         try
         {
             const std::uint32_t vertexBase = static_cast<std::uint32_t>(
@@ -3071,6 +3074,10 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                 "R_RenderScene canonical brush model allocation failed");
             return;
         }
+#if KISAK_WEB_DIAGNOSTICS
+        if (sceneProfile)
+            sceneProfile->sceneBrushAppendMs += WebFrameProfile_Now() - appendStarted;
+#endif
     }
 
 #if KISAK_WEB_DIAGNOSTICS
