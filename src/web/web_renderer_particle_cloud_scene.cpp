@@ -490,9 +490,9 @@ WebRendererParticleCloudAppendResult WebRenderer_AppendParticleCloudCommand(
     const std::uint32_t originalSurfaces = surfaceCount;
     try
     {
-        vertices.reserve(originalVertices + source.vertices.size());
-        indices.reserve(originalIndices + source.indices.size());
-        batches.reserve(originalBatches + 1u);
+        // Let vector insertion grow capacity geometrically. Exact reserves
+        // for every cloud repeatedly copy all previously assembled geometry.
+        // The rollback below still preserves the command on allocation failure.
         const std::uint32_t vertexBase =
             static_cast<std::uint32_t>(originalVertices);
         const std::uint32_t indexBase =
