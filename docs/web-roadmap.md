@@ -31,11 +31,16 @@ Manual gameplay assessment can guide renderer work without a progression gate.
 4. [Direct DObj emission](evidence/dobj-emission-fb596702.md) removes the temporary
    vertex copy: observed vertex emission fell 5.884 -> 3.351 ms and DObj geometry
    6.989 -> 4.630 ms. Canonical animation, collision, scripts and asset ownership
-   remain unchanged. Next: split brush construction/append (3.436 ms, 81% of
-   model assembly) into geometry, material and copy costs before optimizing it.
-   The renderer-state milestone is closed; do not add
-   global GL caches, new batching representations or GPU-buffer policies from
-   the remaining aggregate renderer total alone.
+   remain unchanged. The [brush investigation](evidence/brush-costs-f15c3dc9.md)
+   isolated material setup (2.029 ms) and geometry (1.496 ms) as the main costs.
+   Both optimization candidates were reverted after production comparisons
+   remained slower; the verified baseline runtime is restored. Profiling and
+   focused regression coverage remain.
+5. Next: make the timing workload repeatable, using retained artifacts,
+   controlled scene position/time and repeated interleaved windows before
+   further CPU changes. Do not infer whole-frame gains from local timers or
+   add global GL caches, new batching representations or GPU-buffer policies
+   from an aggregate renderer total alone.
 
 The earlier renderer milestone used one focused native fixture, rerun after shadow
 integration; three diagnostic builds and five 120-frame profiles; four
@@ -48,6 +53,10 @@ The DObj follow-up used one extended native fixture (with a targeted test-setup
 correction), two diagnostic comparisons and one final production Release.
 The production before/after means were effectively unchanged (39.547 ->
 39.317 ms), with worse p95 afterward; no overall FPS improvement is claimed.
+
+The brush follow-up used the focused world/brush fixture, a targeted
+implementation revision, three diagnostic builds/profiles, a candidate Release
+and a targeted baseline-control Release, which became the final delivered build.
 
 Historical plans and completed milestones remain in
 [the earlier roadmap](history/web-roadmap-through-2026-08-28.md) and

@@ -4,7 +4,20 @@ Updated 2026-08-31. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
-## Direct DObj vertex emission
+## Brush cost investigation complete
+
+Brush costs are now separated: material/batch setup measured 2.029 ms,
+geometry 1.496 ms, remapping 0.095 ms and append 0.144 ms in the baseline.
+Two optimization candidates were evaluated and **both reverted**. Hash reuse
+reduced the material timer, but production windows remained slower, including
+an interleaved control. The verified baseline runtime/build is restored.
+
+Profiling, focused regression coverage and retained-artifact comparison support
+remain. Tests and Release/control builds passed. See [the evidence](evidence/brush-costs-f15c3dc9.md)
+for all runs and uncertainty. Next: make the timing workload repeatable before
+further CPU changes. No rendering or playability improvement is claimed.
+
+## Prior direct DObj vertex emission
 
 `fb596702` fills vertices directly in the private replacement command. A focused
 CargoShip comparison measured vertex emission at **5.884 -> 3.351 ms** and DObj
@@ -15,8 +28,7 @@ comparison does not establish an overall FPS improvement.
 
 The extended DObj fixture and final production Release passed, with one test
 setup correction and targeted rerun. See [the evidence](evidence/dobj-emission-fb596702.md)
-for timing populations and limits. Next: isolate brush construction/append,
-now measured at 3.436 ms, before choosing another change.
+for timing populations and limits. This prompted the brush work above.
 
 ## Prior renderer CPU-efficiency milestone
 

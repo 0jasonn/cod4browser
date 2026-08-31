@@ -197,7 +197,14 @@ This remains a permanent platform draw-command detail, with no new retained
 state or intermediate object model. Canonical pose, skinning, LOD and hide policy
 remain shared inputs; validation and whole-command publication are preserved.
 Focused execution covers emitted values and rejection without publication.
-The measured next target is brush construction/append, not another GL-state cache.
+This prompted the brush construction/append measurement below.
+
+The [brush cost investigation](evidence/brush-costs-f15c3dc9.md) retained diagnostic
+attribution and a world/brush output oracle. Both proposed runtime changes were
+reverted after production timing failed to support them. The original geometry,
+shader hashing, technique selection and batch merge policy remain; no new cache,
+allocation policy or engine representation was added. Retained artifacts now
+support interleaved comparisons before further optimization.
 
 ## Temporary compatibility seams
 
