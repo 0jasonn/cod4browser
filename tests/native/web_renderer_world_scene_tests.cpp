@@ -1152,6 +1152,12 @@ void TestBrushReuseMatchesUncachedWorldSelectionAndRejectsAtomically()
     MaterialTechnique spot = lit;
     spot.name = "synthetic_spot";
     spot.flags = 23;
+    std::uint32_t spotProgram[]{0x11223344u};
+    MaterialPixelShader spotShader = pixelShader;
+    spotShader.name = "synthetic_spot_pixel";
+    spotShader.prog.loadDef.program = spotProgram;
+    spotShader.prog.loadDef.programSize = 1;
+    spot.passArray[0].pixelShader = &spotShader;
     MaterialTechniqueSet techniqueSet{};
     techniqueSet.techniques[TECHNIQUE_LIT_INDEX] = &lit;
     techniqueSet.techniques[TECHNIQUE_LIT_SPOT_INDEX] = &spot;
@@ -1217,6 +1223,9 @@ void TestBrushReuseMatchesUncachedWorldSelectionAndRejectsAtomically()
     fixture.surfaces[1].material = &material;
     fixture.surfaces[1].primaryLightIndex = 2;
     check(); // Same material, lit -> spot -> lit.
+    lit.passArray[0].vertexShader = nullptr;
+    check(); // Null -> vertex shader -> null, independently of pixel changes.
+    lit.passArray[0].vertexShader = &vertexShader;
     vertexProgram[0] ^= 0xffu;
     pixelProgram[1] ^= 0xffu;
     states[0].loadBits[0] ^= 0xffu;
