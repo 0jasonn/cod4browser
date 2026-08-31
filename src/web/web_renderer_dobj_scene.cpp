@@ -1,4 +1,5 @@
 #include <web/web_renderer_dobj_scene.h>
+#include <web/web_frame_profile.h>
 #include <web/web_renderer_material_lookup.h>
 
 #include <cgame/cg_pose.h>
@@ -465,9 +466,17 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
 
     WebRendererDObjSceneCommand replacement;
     DObjSkinningScratch &scratch = SkinningScratch();
+#if KISAK_WEB_DIAGNOSTICS
+    WebFrameProfileSample *const profile = WebFrameProfile_Current();
+    double substageStarted = profile ? WebFrameProfile_Now() : 0.0;
+#endif
     bool modelLightingComplete = lightGrid != nullptr &&
         WebRenderer_InitializeModelLightingAtlas(
             submissionCount, replacement.modelLightingAtlas);
+#if KISAK_WEB_DIAGNOSTICS
+    if (profile)
+        profile->dobjLightingMs += WebFrameProfile_Now() - substageStarted;
+#endif
     try
     {
         for (std::uint32_t submissionIndex = 0u;
@@ -482,6 +491,9 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                 return WebRendererDObjSceneResult::InvalidSubmission;
             }
 
+#if KISAK_WEB_DIAGNOSTICS
+            if (profile) substageStarted = WebFrameProfile_Now();
+#endif
             float modelLightingCoordinates[3]{};
             std::uint8_t modelPrimaryLightIndex = 0u;
             bool submissionLightingReady = modelLightingComplete;
@@ -509,10 +521,21 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
             }
             modelLightingComplete =
                 modelLightingComplete && submissionLightingReady;
+#if KISAK_WEB_DIAGNOSTICS
+            if (profile)
+            {
+                profile->dobjLightingMs += WebFrameProfile_Now() - substageStarted;
+                substageStarted = WebFrameProfile_Now();
+            }
+#endif
 
             int posePartBits[4] = {-1, -1, -1, -1};
             DObjAnimMat *posedMats =
                 CG_DObjCalcPose(submission.pose, obj, posePartBits);
+#if KISAK_WEB_DIAGNOSTICS
+            if (profile)
+                profile->dobjPoseMs += WebFrameProfile_Now() - substageStarted;
+#endif
             if (!posedMats) return WebRendererDObjSceneResult::InvalidSubmission;
             std::uint32_t hideBits[4]{};
             DObjGetHidePartBits(obj, hideBits);
@@ -549,6 +572,9 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                     return WebRendererDObjSceneResult::InvalidModel;
                 }
 
+#if KISAK_WEB_DIAGNOSTICS
+                if (profile) substageStarted = WebFrameProfile_Now();
+#endif
                 scratch.matrices.resize(model->numBones);
                 for (std::uint32_t bone = 0u; bone < model->numBones; ++bone)
                 {
@@ -562,6 +588,10 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                         inverseBase, current, scratch.matrices[bone]);
                 }
 
+#if KISAK_WEB_DIAGNOSTICS
+                if (profile)
+                    profile->dobjSkinningMs += WebFrameProfile_Now() - substageStarted;
+#endif
                 bool submittedModel = false;
                 for (std::uint32_t localSurface = 0u;
                      localSurface < lod.numsurfs; ++localSurface)
@@ -588,6 +618,9 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                         return WebRendererDObjSceneResult::OutputTooLarge;
                     }
 
+#if KISAK_WEB_DIAGNOSTICS
+                    if (profile) substageStarted = WebFrameProfile_Now();
+#endif
                     const bool skinned = surface.deformed
                         ? SkinWeightedSurface(
                             surface, scratch.matrices, scratch.positions,
@@ -595,6 +628,13 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                         : SkinRigidSurface(
                             surface, scratch.matrices, scratch.positions,
                             scratch.normals, scratch.tangents);
+#if KISAK_WEB_DIAGNOSTICS
+                    if (profile)
+                    {
+                        profile->dobjSkinningMs += WebFrameProfile_Now() - substageStarted;
+                        substageStarted = WebFrameProfile_Now();
+                    }
+#endif
                     if (!skinned)
                         return WebRendererDObjSceneResult::InvalidModel;
 
@@ -657,6 +697,10 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                         submission.reflectionProbeIndex,
                         submission.reflectionProbeImage,
                         materialResolver));
+#if KISAK_WEB_DIAGNOSTICS
+                    if (profile)
+                        profile->dobjGeometryMs += WebFrameProfile_Now() - substageStarted;
+#endif
                     ++replacement.surfaceCount;
                     submittedModel = true;
                     submittedDObj = true;

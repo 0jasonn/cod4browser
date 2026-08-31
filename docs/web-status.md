@@ -4,7 +4,21 @@ Updated 2026-08-31. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
-## This cleanup
+## Renderer continuation from `bf5ec1e2`
+
+Unchanged static-model LOD groups now avoid repacking and batch-range updates;
+empty shadow batches skip setup. Camera draw ranges are separate, but canonical
+DPVS camera filtering is **not integrated**: its native view/reset/global and
+worker dependencies require a further seam. Camera and shadow draws still use
+the conservative LOD-packed data. Five diagnostic DObj timings distinguish
+total build, pose, lighting, skinning, and geometry costs without adding caches.
+
+See [the renderer record](evidence/renderer-efficiency-2026-08-31.md) for exact
+checks and remaining blockers. No new retail capture, visual assessment, FPS
+measurement, or compatibility promotion was performed. The earlier cleanup
+results below remain historical relative to this continuation.
+
+## Cleanup baseline at `bf5ec1e2`
 
 The DB publication hook now reports publication only. Canonical
 `R_RenderScene` owns world drawing; the obsolete single-surface proof and its

@@ -70,6 +70,8 @@ test("gameplay profile aggregation keeps populations and overhead explicit", () 
         maximum: 12,
     });
     assert.equal(profile.renderer.worldMs.average, 4);
+    // Historical samples do not invent zero-valued DObj measurements.
+    assert.equal(profile.cpu.dobjBuildMs, null);
     assert.equal(profile.counters.worldDrawCalls.maximum, 8);
     assert.equal(profile.gpu.results, 2);
     assert.deepEqual(profile.gpu.statusCounts, { valid: 1, disjoint: 1 });
@@ -79,4 +81,28 @@ test("gameplay profile aggregation keeps populations and overhead explicit", () 
     assert.equal(profile.gpu.stages.staticModels, null);
     assert.equal(profile.overhead.profiledAverageFrameIntervalMs, 20);
     assert.equal(profile.overhead.profilerOverheadPercent, 25);
+});
+
+test("DObj build and disjoint substages survive profile aggregation", () => {
+    const fields = ["dobjBuildMs", "dobjPoseMs", "dobjLightingMs",
+        "dobjSkinningMs", "dobjGeometryMs"];
+    const profile = aggregateGameplayProfile({
+        frames: [1, 2].map((scale) => ({
+            pumpTick: scale, observedMs: scale * 10,
+            cpu: Object.fromEntries(fields.map((field, index) =>
+                [field, scale * (index === 0 ? 20 : index)])),
+        })),
+        gpuResults: [],
+        capture: {
+            profileComplete: true, profileSamplesRequested: 2,
+            profileSamplesCollected: 2, profileIncompleteReason: null,
+            observedDurationMs: 20,
+        },
+    });
+    for (const [index, field] of fields.entries()) {
+        const value = index === 0 ? 20 : index;
+        assert.equal(profile.cpu[field].sampleCount, 2);
+        assert.equal(profile.cpu[field].average, value * 1.5);
+        assert.equal(profile.cpu[field].p95, value * 2);
+    }
 });

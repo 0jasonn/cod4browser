@@ -169,6 +169,13 @@ struct WebFrameProfileSample
     double clientFrameMs = 0.0;
     double cgameFrameMs = 0.0;
     double sceneBuildMs = 0.0;
+    // DObj build is nested in sceneBuildMs. The four substages are disjoint;
+    // validation, LOD/hide tests and other overhead remain in the build total.
+    double dobjBuildMs = 0.0;
+    double dobjPoseMs = 0.0;
+    double dobjLightingMs = 0.0;
+    double dobjSkinningMs = 0.0;
+    double dobjGeometryMs = 0.0;
     double rendererFrontendMs = 0.0;
     double soundMs = 0.0;
     double rendererBackendMs = 0.0;

@@ -212,6 +212,11 @@ struct WebRendererRetainedStaticModelBatch
     std::uint32_t sourceInstanceCount = 0u;
     std::uint32_t instanceOffset = 0u;
     std::uint32_t instanceCount = 0u;
+    // Camera ranges are owned separately from shadow-caster ranges. Until
+    // canonical DPVS view setup/traversal is integrated they share the same
+    // conservative LOD packing; uninitialized smodelVisData is never consumed.
+    std::uint32_t cameraInstanceOffset = 0u;
+    std::uint32_t cameraInstanceCount = 0u;
     std::uint8_t lodIndex = 0u;
 };
 
@@ -6109,6 +6114,8 @@ WebRendererSurfaceResult CopyStaticModelCommand(
             batch.sourceInstanceCount = source.instanceCount;
             batch.instanceOffset = source.instanceOffset;
             batch.instanceCount = source.instanceCount;
+            batch.cameraInstanceOffset = source.instanceOffset;
+            batch.cameraInstanceCount = source.instanceCount;
             batch.lodIndex = source.lodIndex;
             batch.draw.firstIndex = draw.firstIndex;
             batch.draw.indexCount = draw.indexCount;
@@ -8459,6 +8466,7 @@ bool DrawShadowPartition(
         for (const WebRendererRetainedStaticModelBatch &batch :
              g_renderer.retainedStaticModelBatches)
         {
+            if (batch.instanceCount == 0u) continue;
             if (requireSunCaster && !batch.draw.castsSunShadow) continue;
             if (!requireSunCaster)
                 applySpotShadowCull(batch.draw.shadowStateBits0);
@@ -8476,7 +8484,6 @@ bool DrawShadowPartition(
             if (samplesTexture)
                 BindWorldTexture(GL_TEXTURE0, base->texture,
                     batch.draw.samplerState);
-            if (batch.instanceCount == 0u) continue;
             const std::uintptr_t indexOffset =
                 static_cast<std::uintptr_t>(batch.draw.firstIndex) *
                 sizeof(std::uint32_t);
@@ -8729,6 +8736,7 @@ bool UpdateStaticModelLods()
             ++endBatch;
         }
 
+        bool groupChanged = false;
         std::array<std::uint32_t, MAX_LODS> lodCounts{};
         for (std::uint32_t index = 0u; index < sourceCount; ++index)
         {
@@ -8746,12 +8754,21 @@ bool UpdateStaticModelLods()
                 g_renderer.retainedStaticModelSelectedLods[sourceIndex] =
                     static_cast<std::int8_t>(selectedLod);
                 changed = true;
+                groupChanged = true;
 #if KISAK_WEB_DIAGNOSTICS
                 ++changedLodCount;
 #endif
             }
             if (selectedLod >= 0)
                 ++lodCounts[static_cast<std::size_t>(selectedLod)];
+        }
+
+        // The -2 initial selections force first population. Keep evaluating
+        // every LOD (including -1 culling), but retain unchanged group ranges.
+        if (!groupChanged)
+        {
+            firstBatch = endBatch;
+            continue;
         }
 
         std::array<std::uint32_t, MAX_LODS> lodOffsets{};
@@ -8790,6 +8807,8 @@ bool UpdateStaticModelLods()
                 g_renderer.retainedStaticModelBatches[batchIndex];
             batch.instanceOffset = lodOffsets[batch.lodIndex];
             batch.instanceCount = lodCounts[batch.lodIndex];
+            batch.cameraInstanceOffset = lodOffsets[batch.lodIndex];
+            batch.cameraInstanceCount = lodCounts[batch.lodIndex];
         }
         firstBatch = endBatch;
     }
@@ -9641,7 +9660,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
         {
             // LOD selection can leave an authored batch empty. Reject it
             // before material/texture setup; shadow submission is unchanged.
-            if (batch.instanceCount == 0u) continue;
+            if (batch.cameraInstanceCount == 0u) continue;
             // R_AddXModelSurfacesCamera reserves camera region 3 for geometry
             // that participates in shadow passes only (tree shadow facades
             // are the common retail example).
@@ -9730,7 +9749,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 GL_TEXTURE5,
                 specular ? specular->texture : g_renderer.texture,
                 batch.draw.specularSamplerState);
-            BindStaticModelInstanceRange(batch.instanceOffset);
+            BindStaticModelInstanceRange(batch.cameraInstanceOffset);
             const std::uintptr_t indexOffset =
                 static_cast<std::uintptr_t>(batch.draw.firstIndex) *
                 sizeof(std::uint32_t);
@@ -9739,7 +9758,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 static_cast<GLsizei>(batch.draw.indexCount),
                 GL_UNSIGNED_INT,
                 reinterpret_cast<const void *>(indexOffset),
-                static_cast<GLsizei>(batch.instanceCount));
+                static_cast<GLsizei>(batch.cameraInstanceCount));
             ++completedDraws;
         }
         glUniform1f(g_renderer.instanceEnabledUniform, 0.0f);

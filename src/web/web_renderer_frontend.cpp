@@ -2833,11 +2833,19 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     }
 
     WebRendererDObjSceneCommand dynamicCommand;
+#if KISAK_WEB_DIAGNOSTICS
+    WebFrameProfileSample *const dobjProfile = WebFrameProfile_Current();
+    const double dobjBuildStarted = dobjProfile ? WebFrameProfile_Now() : 0.0;
+#endif
     const WebRendererDObjSceneResult dynamicBuild =
         WebRenderer_BuildDObjSceneCommand(
             g_dobjSubmissions.data(), g_dobjSubmissionCount,
             dynamicCommand, &lodParms, &s_world.lightGrid,
             &MODEL_LIGHTING_CALLBACKS, ResolveRendererMaterial);
+#if KISAK_WEB_DIAGNOSTICS
+    if (dobjProfile)
+        dobjProfile->dobjBuildMs += WebFrameProfile_Now() - dobjBuildStarted;
+#endif
     if (dynamicBuild == WebRendererDObjSceneResult::NoDObj)
     {
         // Keep the command empty for now; canonical code meshes below may

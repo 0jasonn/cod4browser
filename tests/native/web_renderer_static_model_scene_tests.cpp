@@ -204,6 +204,47 @@ void TestCanonicalPrimaryLightSplitsStaticInstanceGroups()
     assert(command.batches[1].draw.primaryLightIndex == 2u);
 }
 
+void TestCanonicalInstanceIndicesSurviveRegroupingAndLods()
+{
+    Fixture fixture;
+    fixture.world.dpvs.smodelCount = 3u;
+    fixture.instances[0].primaryLightIndex = 1u;
+    fixture.instances[1].primaryLightIndex = 2u;
+    fixture.instances[2].primaryLightIndex = 1u;
+    std::array<XSurface, 2> surfaces{fixture.surface, fixture.surface};
+    Material *materials[2]{&fixture.material, &fixture.material};
+    fixture.model.numsurfs = 2u;
+    fixture.model.numLods = 2;
+    fixture.model.surfs = surfaces.data();
+    fixture.model.materialHandles = materials;
+    fixture.model.lodInfo[1].surfIndex = 1u;
+    fixture.model.lodInfo[1].numsurfs = 1u;
+
+    WebRendererStaticModelSceneCommand command;
+    assert(WebRenderer_BuildStaticModelSceneCommand(fixture.world, command) ==
+        WebRendererStaticModelSceneResult::Success);
+    assert(command.canonicalInstanceCount == 3u);
+    assert(command.instances.size() == 3u);
+    assert(command.batches.size() == 4u);
+    for (const auto &batch : command.batches)
+    {
+        assert(batch.lodIndex < 2u);
+        for (std::uint32_t i = 0u; i < batch.instanceCount; ++i)
+        {
+            const auto &instance = command.instances[batch.instanceOffset + i];
+            const std::uint32_t canonical = instance.canonicalInstanceIndex;
+            assert(canonical < fixture.world.dpvs.smodelCount);
+            assert(fixture.instances[canonical].primaryLightIndex ==
+                batch.draw.primaryLightIndex);
+            assert(instance.origin[0] == fixture.instances[canonical].placement.origin[0]);
+        }
+    }
+    // The noncontiguous light-1 group must still address DPVS slots 0 and 2.
+    assert(command.instances[0].canonicalInstanceIndex == 0u);
+    assert(command.instances[1].canonicalInstanceIndex == 2u);
+    assert(command.instances[2].canonicalInstanceIndex == 1u);
+}
+
 void TestAmbientProbeShaderIdentitySurvivesPortableBoundary()
 {
     Fixture fixture;
@@ -481,6 +522,7 @@ int main()
     TestCanonicalInstancesShareOneMaterialSurfaceBatch();
     TestEveryAuthoredLodIsRetainedForRuntimeSelection();
     TestCanonicalPrimaryLightSplitsStaticInstanceGroups();
+    TestCanonicalInstanceIndicesSurviveRegroupingAndLods();
     TestAmbientProbeShaderIdentitySurvivesPortableBoundary();
     TestCanonicalStaticModelInstancedTechniqueSelection();
     TestNamedDetailMapAndScaleSurvivePortableBoundary();

@@ -78,10 +78,19 @@ check lives in `WebRenderer_BuildWorldSceneCommand`; canonical vertex layout
 assertions remain in `gfx_world_types.h`. Proof-only projection/mirror assertions
 have no consumer. Surface APIs used by UI, overlays, and actual rendering remain.
 
-Camera static-model batches with no selected LOD instances now skip material
-setup. Canonical DPVS filtering remains unintegrated; the
-[next seam](evidence/cleanup-renderer-2026-08-31.md) preserves separate camera
-and shadow visibility instead of duplicating visibility state in JavaScript.
+Static-model LODs are still evaluated each frame; unchanged groups retain
+packed instances/ranges, while initial population and culling transitions
+repack. Empty batches skip camera and shadow material setup. Camera draw
+ranges are now explicit and separate from shadow ranges, but use the same
+conservative LOD-packed buffer until canonical DPVS setup/traversal is admitted.
+No camera visibility array is consumed yet. The
+[renderer record](evidence/renderer-efficiency-2026-08-31.md) documents the
+native global/view/reset and dispatch blockers. Original canonical instance
+indices survive grouping and LODs; no JavaScript visibility state was added.
+
+Diagnostics add five DObj CPU measurements (total build and four disjoint
+substages) to the existing frame profiler. Production compiles them out. Pose,
+lighting, and skinning ownership is unchanged; no pose or geometry cache was added.
 
 ## Temporary compatibility seams
 
@@ -199,8 +208,9 @@ the memory saving as free.
 
 ## Verification scope
 
-The 2026-08-31 cleanup uses the task-specific bounded checks recorded in
-[the cleanup evidence](evidence/cleanup-renderer-2026-08-31.md). No routine full
-tier or mission-flow gate applies to that work. Native/Wasm parser tests remain
+The 2026-08-31 renderer continuation uses the per-step bounded checks recorded
+in [the renderer evidence](evidence/renderer-efficiency-2026-08-31.md). The
+[cleanup record](evidence/cleanup-renderer-2026-08-31.md) is earlier evidence.
+No routine full tier or mission-flow gate applies to this work. Native/Wasm parser tests remain
 authoritative for cases that do not require a browser boundary; retail checks
 require legally owned local files and are never routine CI fixtures.
