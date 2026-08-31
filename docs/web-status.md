@@ -4,7 +4,21 @@ Updated 2026-08-31. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
-## Particle-cloud append optimization
+## Dynamic geometry staging
+
+`9403a899` reuses vertex/index staging while keeping the published command
+intact until upload succeeds. Matched short CargoShip profiles observed geometry
+copy at 1.621 -> 0.815 ms (p95 3.480 -> 0.955 ms) and dynamic submission at
+6.442 -> 5.668 ms. Median copy time rose; total CPU time stayed essentially
+unchanged. Staging retained 16.962 MiB in the final diagnostic snapshot.
+Validation, culling and shadow behavior remain unchanged; unload releases staging.
+
+The focused native test, three diagnostic builds/profiles and final production
+Release passed. See [the staging evidence](evidence/dynamic-staging-9403a899.md)
+for limitations and the memory tradeoff. Next: inspect redundant material/state
+work in the dynamic-model draw pass (6.116 ms measured CPU time).
+
+## Prior particle-cloud append optimization
 
 `ae37e80c` removes three exact per-cloud vector reservations after a focused
 profile identified repeated appends as 64.66% of assembly time. Matched short
@@ -13,7 +27,7 @@ at 14.964 -> 5.864 ms. Bounds checks, rollback, canonical behavior, camera
 culling and independent shadows are preserved. The focused native fixture,
 both diagnostic builds/profiles and final production Release passed.
 
-Dynamic submission increased from 5.562 to 8.723 ms and is the next investigation;
+Dynamic submission increased from 5.562 to 8.723 ms in that comparison;
 standard vector growth can also retain spare capacity within a command.
 See [the comparison](evidence/cloud-append-ae37e80c.md) for the tradeoff,
 allocation-failure checks and measurement limits. No general FPS or visual

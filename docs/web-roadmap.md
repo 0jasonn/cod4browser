@@ -15,17 +15,17 @@ Manual gameplay assessment can guide renderer work without a progression gate.
    and durable filesystem shutdown. Small shared material lookups and Worker
    transport bookkeeping must not absorb technique selection or host-specific
    filesystem recovery policy.
-3. The [cloud-append optimization](evidence/cloud-append-ae37e80c.md) removes
-   repeated exact vector reservations, with observed cloud-append mean time
-   falling from 9.676 to 0.865 ms and assembly from 14.964 to 5.864 ms.
-   Recommended next task: investigate dynamic submission's increase from
-   5.562 to 8.723 ms, separating command validation/copy/allocation from GPU
-   resource creation/upload and checking the spare-capacity memory tradeoff.
-   Preserve canonical culling/shadows; no pose or geometry cache is justified.
+3. After cloud-append optimization, [dynamic staging](evidence/dynamic-staging-9403a899.md)
+   reduced observed geometry-copy p95 from 3.480 to 0.955 ms at the cost of
+   16.962 MiB of retained staging capacity. Whole-frame CPU was unchanged.
+   Recommended next task: inspect redundant material/state work in the
+   dynamic-model draw pass (6.116 ms measured CPU), preserving draw order,
+   canonical culling and independent shadows. No pose/geometry cache or further
+   staging storage is justified by the current evidence.
 
-The latest optimization used one focused native fixture, two diagnostic builds
-with matched 120-frame profiles and one final production Release build, with no
-retries.
+The latest optimization used one focused native fixture, three diagnostic builds
+and 120-frame profiles (attribution, narrower baseline, implementation), and one
+final production Release build, with no retries.
 No broad tiers, mission/lifecycle checks, screenshots or compatibility promotion
 were required. Escape and renderer polish remain outside scope.
 

@@ -148,6 +148,18 @@ cache was added. Observed cloud append fell from 9.676 to 0.865 ms. Spare vector
 capacity and the higher observed dynamic-submission cost need consideration in
 the next optimization; no general FPS or memory reduction is claimed.
 
+The [dynamic-staging continuation](evidence/dynamic-staging-9403a899.md) separates
+CPU command copy, GPU resource setup and publication. Two backend-owned staging
+vectors reuse prior dynamic geometry allocations, while published data remains
+intact until upload succeeds. The portable staging-copy helper consumes already
+validated spans; validation and canonical state ownership are unchanged. Unload
+releases staging, and context recovery still consumes only published geometry.
+This is platform-owned command storage, not a pose or geometry-result cache.
+Keep it while the measured copy-tail reduction justifies the approximately
+17 MiB staging capacity; retire it if frontend/backend geometry ownership can
+be transferred directly without weakening publication or recovery semantics.
+No whole-frame speedup or peak-memory reduction was measured.
+
 ## Temporary compatibility seams
 
 | Seam | Retirement condition |
