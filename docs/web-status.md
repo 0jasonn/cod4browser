@@ -4,7 +4,21 @@ Updated 2026-08-31. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
-## Renderer CPU-efficiency milestone complete
+## Direct DObj vertex emission
+
+`fb596702` fills vertices directly in the private replacement command. A focused
+CargoShip comparison measured vertex emission at **5.884 -> 3.351 ms** and DObj
+geometry at **6.989 -> 4.630 ms**. All validation and atomic publication remain;
+canonical pose/LOD, culling, draw order and independent shadows are unchanged.
+Production intervals were 39.547 -> 39.317 ms with worse p95; this short
+comparison does not establish an overall FPS improvement.
+
+The extended DObj fixture and final production Release passed, with one test
+setup correction and targeted rerun. See [the evidence](evidence/dobj-emission-fb596702.md)
+for timing populations and limits. Next: isolate brush construction/append,
+now measured at 3.436 ms, before choosing another change.
+
+## Prior renderer CPU-efficiency milestone
 
 `e4db91df` finishes local projection/material/feature-state reuse and extends
 material reuse to world/static draws plus alpha/cull reuse to independent shadow
@@ -19,8 +33,8 @@ See [the completed milestone](evidence/renderer-cpu-milestone-e4db91df.md) for
 all windows, the targeted benchmark correction and verification limits.
 
 Projection, material, uniform and draw-submission opportunities are now either
-implemented or explicitly ruled out there. Next: canonical DObj geometry
-emission and scene assembly, which dominate remaining CPU work.
+implemented or explicitly ruled out there. This prompted the DObj geometry
+emission and scene assembly work above.
 
 ## Prior conditional falloff uniforms
 

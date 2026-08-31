@@ -28,18 +28,26 @@ Manual gameplay assessment can guide renderer work without a progression gate.
    covers projection/material/feature reuse, world/static material state and
    shadow alpha/cull reuse. Production mean frame intervals were 43.175 ->
    40.895 ms across two runs per version; variation limits the claim.
-4. Next: profile canonical DObj geometry emission (7.157 ms measured CPU) and
-   scene assembly (6.626 ms). Preserve canonical animation, collision, script
-   and asset ownership. The renderer-state milestone is closed; do not add
+4. [Direct DObj emission](evidence/dobj-emission-fb596702.md) removes the temporary
+   vertex copy: observed vertex emission fell 5.884 -> 3.351 ms and DObj geometry
+   6.989 -> 4.630 ms. Canonical animation, collision, scripts and asset ownership
+   remain unchanged. Next: split brush construction/append (3.436 ms, 81% of
+   model assembly) into geometry, material and copy costs before optimizing it.
+   The renderer-state milestone is closed; do not add
    global GL caches, new batching representations or GPU-buffer policies from
    the remaining aggregate renderer total alone.
 
-The completed milestone used one focused native fixture, rerun after shadow
+The earlier renderer milestone used one focused native fixture, rerun after shadow
 integration; three diagnostic builds and five 120-frame profiles; four
 successful production timing windows; and one final production Release build.
 A production benchmark setup mismatch was corrected with a targeted retry.
 No broad tiers, mission/lifecycle checks, screenshots or compatibility promotion
 were required. Escape and renderer polish remain outside scope.
+
+The DObj follow-up used one extended native fixture (with a targeted test-setup
+correction), two diagnostic comparisons and one final production Release.
+The production before/after means were effectively unchanged (39.547 ->
+39.317 ms), with worse p95 afterward; no overall FPS improvement is claimed.
 
 Historical plans and completed milestones remain in
 [the earlier roadmap](history/web-roadmap-through-2026-08-28.md) and

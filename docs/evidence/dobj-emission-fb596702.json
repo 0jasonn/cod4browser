@@ -1,0 +1,542 @@
+{
+  "schemaVersion": 1,
+  "milestone": "Direct DObj vertex emission",
+  "recordedDate": "2026-08-31",
+  "runtimeCommit": "fb59670287b81ed10614873a1f56f88b5762c96b",
+  "methodology": {
+    "map": "cargoship",
+    "warmupWorldFrames": 30,
+    "productionWarmup": "First world draw followed by 30 main-loop callbacks",
+    "profilingDisabledIntervals": 300,
+    "diagnosticProfileFrames": 120,
+    "input": "No gameplay input; authored scene continues running",
+    "displayedFps": false,
+    "noSkippedCallbacks": true,
+    "noConcurrentBuildsOrBenchmarks": true,
+    "limitation": "One run per version per build variant; moving scene and uncontrolled host load. No reliable overall FPS improvement established."
+  },
+  "runs": [
+    {
+      "source": {
+        "commitSha": "0ac738e56a62e0d670ac100531c1c067cdbcc1be",
+        "dirty": false
+      },
+      "artifactSha256": "b4bf13eeece4d9e438a9ad84db7736845fca1b6564896ce78125059792147261",
+      "environment": {
+        "browser": "Chrome",
+        "version": "152.0.7977.64",
+        "headless": true,
+        "processor": "AMD Ryzen 7 7800X3D 8-Core Processor           ",
+        "totalSystemMemoryBytes": 33944879104,
+        "viewport": {
+          "width": 1440,
+          "height": 1000
+        },
+        "build": "Release diagnostics"
+      },
+      "cleanTiming": {
+        "intervals": {
+          "sampleCount": 300,
+          "average": 40.54071666677793,
+          "p50": 40.160000026226044,
+          "p95": 45.98499995470047,
+          "p99": 51.44999998807907,
+          "maximum": 59.939999997615814
+        },
+        "foreground": {
+          "pageVisibilityState": "visible",
+          "pageFocused": true,
+          "finalPageVisibilityState": "visible",
+          "finalPageFocused": true,
+          "backgroundTransitions": 0,
+          "foregroundStateTransitions": [],
+          "performanceWindowValid": true,
+          "performanceInvalidReason": null
+        },
+        "clock": "Worker performance.now at completed canonical render events",
+        "profilerActive": false,
+        "diagnosticBuild": true,
+        "displayedFps": false
+      },
+      "label": "0ac738e5-emission-before",
+      "pageErrorCount": 0,
+      "profiledCpuMs": {
+        "dobjBuildMs": {
+          "sampleCount": 120,
+          "average": 11.882916670044263,
+          "p50": 11.819999992847443,
+          "p95": 12.76500004529953,
+          "p99": 13.504999995231628,
+          "maximum": 13.615000009536743
+        },
+        "dobjPoseMs": {
+          "sampleCount": 120,
+          "average": 0.2962083429098129,
+          "p50": 0.29500001668930054,
+          "p95": 0.3550000786781311,
+          "p99": 0.3850001096725464,
+          "maximum": 0.3900001049041748
+        },
+        "dobjLightingMs": {
+          "sampleCount": 120,
+          "average": 1.3092083588242531,
+          "p50": 1.2950000166893005,
+          "p95": 1.4800001978874207,
+          "p99": 1.7749992609024048,
+          "maximum": 1.7950002551078796
+        },
+        "dobjSkinningMs": {
+          "sampleCount": 120,
+          "average": 2.7704999829332033,
+          "p50": 2.765000343322754,
+          "p95": 2.9600000381469727,
+          "p99": 3.0500006675720215,
+          "maximum": 3.0800002813339233
+        },
+        "dobjGeometryMs": {
+          "sampleCount": 120,
+          "average": 6.989499990642071,
+          "p50": 7.0049996972084045,
+          "p95": 7.574999630451202,
+          "p99": 7.924999475479126,
+          "maximum": 8.000000417232513
+        },
+        "dobjVertexEmitMs": {
+          "sampleCount": 120,
+          "average": 5.884124984343846,
+          "p50": 5.914999902248383,
+          "p95": 6.479999899864197,
+          "p99": 6.63500052690506,
+          "maximum": 6.764999806880951
+        },
+        "dobjIndexEmitMs": {
+          "sampleCount": 120,
+          "average": 0.8163333435853323,
+          "p50": 0.8100001215934753,
+          "p95": 0.8999999165534973,
+          "p99": 0.9250002503395081,
+          "maximum": 0.9599999189376831
+        },
+        "sceneBuildMs": {
+          "sampleCount": 120,
+          "average": 24.381666668256123,
+          "p50": 24.089999973773956,
+          "p95": 26.564999997615814,
+          "p99": 27.894999980926514,
+          "maximum": 35.39500004053116
+        },
+        "sceneAssemblyMs": {
+          "sampleCount": 120,
+          "average": 6.561541667083899,
+          "p50": 6.509999990463257,
+          "p95": 7.305000007152557,
+          "p99": 8.285000026226044,
+          "maximum": 8.475000023841858
+        },
+        "sceneBrushBuildMs": {
+          "sampleCount": 120,
+          "average": 3.4797083338101706,
+          "p50": 3.4699999690055847,
+          "p95": 3.5950000286102295,
+          "p99": 4.365000009536743,
+          "maximum": 4.425000011920929
+        },
+        "sceneModelBuildMs": {
+          "sampleCount": 120,
+          "average": 4.22225000311931,
+          "p50": 4.10999995470047,
+          "p95": 4.839999973773956,
+          "p99": 5.189999997615814,
+          "maximum": 5.589999973773956
+        },
+        "sceneCommandAppendMs": {
+          "sampleCount": 120,
+          "average": 2.144416665037473,
+          "p50": 2.149999976158142,
+          "p95": 2.400000035762787,
+          "p99": 2.625,
+          "maximum": 2.939999997615814
+        },
+        "sceneDynamicSubmitMs": {
+          "sampleCount": 120,
+          "average": 5.768208332856497,
+          "p50": 5.634999990463257,
+          "p95": 7.360000014305115,
+          "p99": 9.284999966621399,
+          "maximum": 17.25499999523163
+        },
+        "rendererBackendMs": {
+          "sampleCount": 120,
+          "average": 15.302208330730597,
+          "p50": 14.810000002384186,
+          "p95": 18.304999947547913,
+          "p99": 18.589999973773956,
+          "maximum": 19.30000001192093
+        },
+        "totalMs": {
+          "sampleCount": 120,
+          "average": 43.30300000061592,
+          "p50": 43.43000000715256,
+          "p95": 47.264999985694885,
+          "p99": 49.935000002384186,
+          "maximum": 54.455000042915344
+        }
+      },
+      "profiledCounters": {
+        "worldSurfacesSubmitted": {
+          "sampleCount": 120,
+          "average": 13125,
+          "p50": 13125,
+          "p95": 13125,
+          "p99": 13125,
+          "maximum": 13125
+        },
+        "worldSurfacesDrawn": {
+          "sampleCount": 120,
+          "average": 2261.991666666667,
+          "p50": 2687,
+          "p95": 3280,
+          "p99": 3321,
+          "maximum": 3345
+        },
+        "staticModelInstanceDraws": {
+          "sampleCount": 120,
+          "average": 734.8416666666667,
+          "p50": 866,
+          "p95": 1060,
+          "p99": 1075,
+          "maximum": 1075
+        },
+        "dynamicBatchesDrawn": {
+          "sampleCount": 120,
+          "average": 1468.65,
+          "p50": 1447,
+          "p95": 1566,
+          "p99": 1576,
+          "maximum": 1576
+        },
+        "shadowDrawCalls": {
+          "sampleCount": 120,
+          "average": 9860.958333333334,
+          "p50": 9787,
+          "p95": 10136,
+          "p99": 10150,
+          "maximum": 10152
+        },
+        "submittedIndices": {
+          "sampleCount": 120,
+          "average": 5570689.425,
+          "p50": 5659656,
+          "p95": 5777076,
+          "p99": 5784243,
+          "maximum": 5786913
+        }
+      }
+    },
+    {
+      "source": {
+        "commitSha": "fb59670287b81ed10614873a1f56f88b5762c96b",
+        "dirty": false
+      },
+      "artifactSha256": "f5a85d0ef5b6d9d9c046e9af898efb27bf234d294d83cfc4d9df988f58030742",
+      "environment": {
+        "browser": "Chrome",
+        "version": "152.0.7977.64",
+        "headless": true,
+        "processor": "AMD Ryzen 7 7800X3D 8-Core Processor           ",
+        "totalSystemMemoryBytes": 33944879104,
+        "viewport": {
+          "width": 1440,
+          "height": 1000
+        },
+        "build": "Release diagnostics"
+      },
+      "cleanTiming": {
+        "intervals": {
+          "sampleCount": 300,
+          "average": 39.05328333338102,
+          "p50": 39.30000001192093,
+          "p95": 43.65499997138977,
+          "p99": 47.839999973773956,
+          "maximum": 49.64999997615814
+        },
+        "foreground": {
+          "pageVisibilityState": "visible",
+          "pageFocused": true,
+          "finalPageVisibilityState": "visible",
+          "finalPageFocused": true,
+          "backgroundTransitions": 0,
+          "foregroundStateTransitions": [],
+          "performanceWindowValid": true,
+          "performanceInvalidReason": null
+        },
+        "clock": "Worker performance.now at completed canonical render events",
+        "profilerActive": false,
+        "diagnosticBuild": true,
+        "displayedFps": false
+      },
+      "label": "fb596702-emission-after",
+      "pageErrorCount": 0,
+      "profiledCpuMs": {
+        "dobjBuildMs": {
+          "sampleCount": 120,
+          "average": 9.59133333414793,
+          "p50": 9.439999997615814,
+          "p95": 10.865000009536743,
+          "p99": 11.745000004768372,
+          "maximum": 12.1700000166893
+        },
+        "dobjPoseMs": {
+          "sampleCount": 120,
+          "average": 0.29512500812609993,
+          "p50": 0.28999996185302734,
+          "p95": 0.3600001335144043,
+          "p99": 0.3900004029273987,
+          "maximum": 0.40499991178512573
+        },
+        "dobjLightingMs": {
+          "sampleCount": 120,
+          "average": 1.3259583294391633,
+          "p50": 1.314999759197235,
+          "p95": 1.525000274181366,
+          "p99": 1.76500004529953,
+          "maximum": 1.7700000405311584
+        },
+        "dobjSkinningMs": {
+          "sampleCount": 120,
+          "average": 2.8126666943232217,
+          "p50": 2.7849996089935303,
+          "p95": 3.085000455379486,
+          "p99": 3.4200000166893005,
+          "maximum": 3.5
+        },
+        "dobjGeometryMs": {
+          "sampleCount": 120,
+          "average": 4.63045834004879,
+          "p50": 4.5799999833106995,
+          "p95": 5.149999439716339,
+          "p99": 5.730000436306,
+          "maximum": 5.809999465942383
+        },
+        "dobjVertexEmitMs": {
+          "sampleCount": 120,
+          "average": 3.3507500305771827,
+          "p50": 3.3150002360343933,
+          "p95": 3.7699999809265137,
+          "p99": 4.025000751018524,
+          "maximum": 4.224999785423279
+        },
+        "dobjIndexEmitMs": {
+          "sampleCount": 120,
+          "average": 0.9803750013311704,
+          "p50": 0.9999998211860657,
+          "p95": 1.159999966621399,
+          "p99": 1.2749996781349182,
+          "maximum": 1.2949998378753662
+        },
+        "sceneBuildMs": {
+          "sampleCount": 120,
+          "average": 22.04529166718324,
+          "p50": 21.744999945163727,
+          "p95": 24.40499997138977,
+          "p99": 26.430000007152557,
+          "maximum": 31.564999997615814
+        },
+        "sceneAssemblyMs": {
+          "sampleCount": 120,
+          "average": 6.486166665951411,
+          "p50": 6.415000021457672,
+          "p95": 7.525000035762787,
+          "p99": 7.784999966621399,
+          "maximum": 9.439999997615814
+        },
+        "sceneBrushBuildMs": {
+          "sampleCount": 120,
+          "average": 3.4362500031789143,
+          "p50": 3.3700000047683716,
+          "p95": 3.850000023841858,
+          "p99": 4.094999969005585,
+          "maximum": 4.160000026226044
+        },
+        "sceneModelBuildMs": {
+          "sampleCount": 120,
+          "average": 4.220875003437201,
+          "p50": 4.194999992847443,
+          "p95": 4.944999992847443,
+          "p99": 5.254999995231628,
+          "maximum": 6.039999961853027
+        },
+        "sceneCommandAppendMs": {
+          "sampleCount": 120,
+          "average": 2.072166665395101,
+          "p50": 2.0550000071525574,
+          "p95": 2.3949999809265137,
+          "p99": 2.810000002384186,
+          "maximum": 3.185000002384186
+        },
+        "sceneDynamicSubmitMs": {
+          "sampleCount": 120,
+          "average": 5.784333332876364,
+          "p50": 5.665000021457672,
+          "p95": 7.480000019073486,
+          "p99": 10.069999992847443,
+          "maximum": 15.745000004768372
+        },
+        "rendererBackendMs": {
+          "sampleCount": 120,
+          "average": 15.588291666408379,
+          "p50": 15.560000002384186,
+          "p95": 18.290000021457672,
+          "p99": 18.67500001192093,
+          "maximum": 19.080000042915344
+        },
+        "totalMs": {
+          "sampleCount": 120,
+          "average": 41.26583333164454,
+          "p50": 41.2600000500679,
+          "p95": 46.54000002145767,
+          "p99": 48.5450000166893,
+          "maximum": 51.82499998807907
+        }
+      },
+      "profiledCounters": {
+        "worldSurfacesSubmitted": {
+          "sampleCount": 120,
+          "average": 13125,
+          "p50": 13125,
+          "p95": 13125,
+          "p99": 13125,
+          "maximum": 13125
+        },
+        "worldSurfacesDrawn": {
+          "sampleCount": 120,
+          "average": 2417.5666666666666,
+          "p50": 2787,
+          "p95": 3346,
+          "p99": 3403,
+          "maximum": 3403
+        },
+        "staticModelInstanceDraws": {
+          "sampleCount": 120,
+          "average": 782.5666666666667,
+          "p50": 889,
+          "p95": 1073,
+          "p99": 1095,
+          "maximum": 1098
+        },
+        "dynamicBatchesDrawn": {
+          "sampleCount": 120,
+          "average": 1473.625,
+          "p50": 1450,
+          "p95": 1567,
+          "p99": 1576,
+          "maximum": 1576
+        },
+        "shadowDrawCalls": {
+          "sampleCount": 120,
+          "average": 9876.6,
+          "p50": 9799,
+          "p95": 10144,
+          "p99": 10154,
+          "maximum": 10155
+        },
+        "submittedIndices": {
+          "sampleCount": 120,
+          "average": 5602539.5,
+          "p50": 5674683,
+          "p95": 5771631,
+          "p99": 5773554,
+          "maximum": 5778774
+        }
+      }
+    },
+    {
+      "source": {
+        "commitSha": "e4db91dfd988f7ad4f91e5d0f9e0eeb984145dcc",
+        "dirty": false
+      },
+      "artifactSha256": "94b47785e183a5f3b4b70de31fc3435d82dc0a66c5d43a48a7f4c2055f4d21e1",
+      "environment": {
+        "browser": "Chrome",
+        "version": "152.0.7977.64",
+        "headless": true,
+        "processor": "AMD Ryzen 7 7800X3D 8-Core Processor           ",
+        "viewport": {
+          "width": 1440,
+          "height": 1000
+        },
+        "build": "Release production"
+      },
+      "cleanTiming": {
+        "intervals": {
+          "sampleCount": 300,
+          "average": 39.5469333332777,
+          "p50": 39.69499999284744,
+          "p95": 43.8649999499321,
+          "p99": 48.22500002384186,
+          "maximum": 49.689999997615814
+        },
+        "foreground": {
+          "pageVisibilityState": "visible",
+          "pageFocused": true,
+          "finalPageVisibilityState": "visible",
+          "finalPageFocused": true,
+          "backgroundTransitions": 0,
+          "foregroundStateTransitions": [],
+          "performanceWindowValid": true,
+          "performanceInvalidReason": null
+        },
+        "clock": "Worker performance.now at completed main-loop callbacks",
+        "profilerActive": false,
+        "diagnosticBuild": false,
+        "displayedFps": false
+      },
+      "label": "e4db91df-emission-prod-before",
+      "pageErrorCount": 0
+    },
+    {
+      "source": {
+        "commitSha": "fb59670287b81ed10614873a1f56f88b5762c96b",
+        "dirty": false
+      },
+      "artifactSha256": "46bb427a6b84a24da42b8b6323963604714c2960cb5d9951bab5d8a70d2396f3",
+      "environment": {
+        "browser": "Chrome",
+        "version": "152.0.7977.64",
+        "headless": true,
+        "processor": "AMD Ryzen 7 7800X3D 8-Core Processor           ",
+        "viewport": {
+          "width": 1440,
+          "height": 1000
+        },
+        "build": "Release production"
+      },
+      "cleanTiming": {
+        "intervals": {
+          "sampleCount": 300,
+          "average": 39.317266666491825,
+          "p50": 38.44999998807907,
+          "p95": 46.594999969005585,
+          "p99": 50.89000004529953,
+          "maximum": 136.4200000166893
+        },
+        "foreground": {
+          "pageVisibilityState": "visible",
+          "pageFocused": true,
+          "finalPageVisibilityState": "visible",
+          "finalPageFocused": true,
+          "backgroundTransitions": 0,
+          "foregroundStateTransitions": [],
+          "performanceWindowValid": true,
+          "performanceInvalidReason": null
+        },
+        "clock": "Worker performance.now at completed main-loop callbacks",
+        "profilerActive": false,
+        "diagnosticBuild": false,
+        "displayedFps": false
+      },
+      "label": "fb596702-emission-prod-after",
+      "pageErrorCount": 0
+    }
+  ]
+}

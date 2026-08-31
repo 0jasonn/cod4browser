@@ -191,6 +191,14 @@ Production frame timing observed a modest gain with overlapping run ranges.
 The local renderer milestone is closed; canonical scene construction is the
 next measured CPU priority.
 
+The [direct DObj emission change](evidence/dobj-emission-fb596702.md) now constructs
+vertices in the private replacement vector, removing a temporary vertex copy.
+This remains a permanent platform draw-command detail, with no new retained
+state or intermediate object model. Canonical pose, skinning, LOD and hide policy
+remain shared inputs; validation and whole-command publication are preserved.
+Focused execution covers emitted values and rejection without publication.
+The measured next target is brush construction/append, not another GL-state cache.
+
 ## Temporary compatibility seams
 
 | Seam | Retirement condition |
