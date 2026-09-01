@@ -6,12 +6,12 @@ exists across six maps, and dynamic DObj convergence is complete through
 `838e047c`. Route generation, waypoint replay, and simulated mission progression
 are retired and out of scope.
 
-The immediate task is the smallest stationary `ac130` campaign probe, reusing
-the observe-only validator proven by `scoutsniper`. It should exercise canonical
-loading through a bounded stationary frame/profile window and inspect thermal
-rendering and unusual-material telemetry without gameplay input. Fix only the
-earliest deterministic canonical/platform boundary if that run exposes one.
-Do not optimize speculatively or promote beyond the evidence observed.
+The immediate task is canonical SP UI and persistence convergence. The main,
+Options, Profiles, Load Game, pause, and resume lifecycle is complete with
+[focused retail evidence](evidence/canonical-menu-lifecycle-2026-09-01.md).
+Next: objective notification through the canonical configstring/cgame/menu
+path, followed by dvar/config persistence, profile isolation, and save/load UI.
+The stationary `ac130` probe remains deferred.
 
 1. Canonical camera DPVS now filters both static-model instances and world
    surfaces. World camera runs preserve merged-batch order and canonical IDs;

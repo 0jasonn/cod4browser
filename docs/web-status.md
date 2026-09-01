@@ -6,6 +6,14 @@ Updated 2026-09-01. This is the single current status page; the
 
 ## Current campaign boundary
 
+Canonical SP menu startup now runs before a map is active. A legal-retail
+Release-diagnostics run loaded 69 shipped menus, opened `main`, Options,
+Profiles, and Load Game through Kisak's command/UI owners, then loaded
+Killhouse and verified the shipped pause and in-game menus. Escape paused and
+resumed through the existing key queue. The reached Wasm defect was an invalid
+SP `int()`-to-`void()` command callback cast; SP now matches MP's typed
+`openmenu` callback. See [the focused evidence](evidence/canonical-menu-lifecycle-2026-09-01.md).
+
 The playable offline slice already exists across six legally validated maps.
 Those runs demonstrate canonical movement, aiming, firing, weapons, audio,
 transitions, and Airplane save/load continuity. Building another player
@@ -22,9 +30,9 @@ headed/manual visual inspection occurred, so this is not a `FUNCTIONAL`,
 `PLAYABLE`, or visual-correctness claim. See
 [the stationary evidence](evidence/scoutsniper-stationary-838e047c.md).
 
-No measured defect or bottleneck appeared. The next concrete compatibility
-boundary is an equally stationary `ac130` probe, especially its thermal and
-unusual-material paths.
+The active convergence task is now objective notification, dvar/config,
+profiles, and save/load menu persistence. The stationary `ac130` probe is
+deferred behind that user-facing UI/persistence work.
 
 ## Prior dynamic geometry handoff
 

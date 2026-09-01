@@ -34,7 +34,7 @@ function(kisak_configure_web_target TARGET_NAME)
         "_main,_malloc,_free,_KisakWeb_ProbeLocalization,_KisakWeb_ProbeIwd,_KisakWeb_ProbeFastfileHeader,_KisakWeb_CompleteFsStat,_KisakWeb_CompleteFsRead,_KisakWeb_MountCanonicalRuntime,_KisakWeb_SubmitCanonicalCommand,_KisakWeb_QueueKeyEvent,_KisakWeb_QueueMouseMove")
     if (ARGV1 STREQUAL "DIAGNOSTICS")
         set(KISAK_WEB_EXPORTED_FUNCTIONS
-            "${KISAK_WEB_EXPORTED_FUNCTIONS},_KisakWeb_CanonicalFsFileSize,_KisakWeb_CanonicalFsListCount,_KisakWeb_CanonicalFsReadHash,_KisakWeb_CanonicalFsWriteRename,_KisakWeb_DiagnosticCinematicOmission,_KisakWeb_TestAudioProxyPcm,_KisakWeb_TestLoseWebGLContext,_KisakWeb_TestRestoreWebGLContext,_KisakWeb_TestSetAaSamples,_KisakWeb_TestSubmitSurface,_KisakWeb_TestSlowNextCommand")
+            "${KISAK_WEB_EXPORTED_FUNCTIONS},_KisakWeb_CanonicalFsFileSize,_KisakWeb_CanonicalFsListCount,_KisakWeb_CanonicalFsReadHash,_KisakWeb_CanonicalFsWriteRename,_KisakWeb_DiagnosticCinematicOmission,_KisakWeb_TestAudioProxyPcm,_KisakWeb_TestLoseWebGLContext,_KisakWeb_TestRestoreWebGLContext,_KisakWeb_TestSetAaSamples,_KisakWeb_TestSubmitSurface,_KisakWeb_TestSlowNextCommand,_KisakWeb_TestUiState,_KisakWeb_TestMenuState,_KisakWeb_TestResumeGame")
     endif()
 
     target_link_options(${TARGET_NAME} PRIVATE

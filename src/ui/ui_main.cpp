@@ -1162,12 +1162,12 @@ void __cdecl UI_Pause(int localClientNum, int b)
     }
 }
 
-int UI_OpenMenu_f()
+void UI_OpenMenu_f()
 {
     char v1[72]; // [sp+50h] [-50h] BYREF
 
     Cmd_ArgsBuffer(1, v1, 64);
-    return Menus_OpenByName(&uiInfo.uiDC, v1);
+    Menus_OpenByName(&uiInfo.uiDC, v1);
 }
 
 void UI_CloseMenu_f()
@@ -1271,7 +1271,7 @@ void __cdecl UI_Init()
 
     UI_RegisterDvars();
     uiInfo.allowScriptMenuResponse = 1;
-    Cmd_AddCommandInternal("openmenu", (void(__cdecl *)())UI_OpenMenu_f, &UI_OpenMenu_f_VAR);
+    Cmd_AddCommandInternal("openmenu", UI_OpenMenu_f, &UI_OpenMenu_f_VAR);
     Cmd_AddCommandInternal("closemenu", UI_CloseMenu_f, &UI_CloseMenu_f_VAR);
 
     String_Init();

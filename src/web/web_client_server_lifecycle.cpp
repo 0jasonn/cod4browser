@@ -25,6 +25,7 @@
 #include <universal/com_files.h>
 #include <universal/com_memory.h>
 #include <universal/physicalmemory.h>
+#include <ui/ui.h>
 #include <web/web_system.h>
 #include <web/web_browser_bindings.h>
 #include <web/web_client_server_lifecycle.h>
@@ -374,6 +375,61 @@ extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_MountCanonicalRuntime()
 }
 
 #if KISAK_WEB_DIAGNOSTICS
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestUiState(int field)
+{
+    switch (field)
+    {
+    case 0: return cls.uiStarted;
+    case 1: return Menu_Count(&uiInfo.uiDC);
+    case 2: return uiInfo.uiDC.openMenuCount;
+    case 3: return clientUIActives[0].keyCatchers;
+    case 4: return UI_GetActiveMenu(0);
+    case 5: return cl_paused ? cl_paused->current.integer : -1;
+    case 6: return uiInfo.playerProfileCount;
+    case 7: return uiInfo.savegameCount;
+    default: return -1;
+    }
+}
+
+namespace
+{
+std::uint32_t HashDiagnosticName(const char *text)
+{
+    std::uint32_t hash = 2166136261u;
+    while (*text)
+    {
+        char character = *text++;
+        if (character >= 'A' && character <= 'Z')
+            character += 'a' - 'A';
+        hash ^= static_cast<std::uint8_t>(character);
+        hash *= 16777619u;
+    }
+    return hash;
+}
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestMenuState(
+    std::uint32_t nameHash)
+{
+    for (int index = 0; index < uiInfo.uiDC.menuCount; ++index)
+    {
+        menuDef_t *const menu = uiInfo.uiDC.Menus[index];
+        if (!menu || !menu->window.name ||
+            HashDiagnosticName(menu->window.name) != nameHash)
+            continue;
+        int state = 1;
+        if (Menus_MenuIsInStack(&uiInfo.uiDC, menu)) state |= 2;
+        if (Menu_IsVisible(&uiInfo.uiDC, menu)) state |= 4;
+        return state;
+    }
+    return 0;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_TestResumeGame()
+{
+    UI_SetActiveMenu(0, UIMENU_NONE);
+}
+
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_CanonicalFsFileSize(
     const char *logicalPath)
 {

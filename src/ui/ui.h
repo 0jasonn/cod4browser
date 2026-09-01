@@ -127,7 +127,7 @@ bool __cdecl UI_AutoContinue();
 int __cdecl UI_FeederItemEnabled(int localClientNum, double feederID, int index);
 Material *__cdecl UI_FeederItemImage(double feederID, int index);
 const char *__cdecl UI_GetSavegameInfo();
-int UI_OpenMenu_f();
+void UI_OpenMenu_f();
 void UI_CloseMenu_f();
 void __cdecl UI_OpenMenu(int localClientNum, const char *menuName);
 void __cdecl UI_CloseMenu(int localClientNum, const char *menuName);

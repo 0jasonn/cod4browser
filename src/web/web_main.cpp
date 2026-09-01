@@ -420,11 +420,11 @@ void RunCommands()
 bool RunCGameFrame(const WebFrameInfo &frame)
 {
     static std::uint32_t activeFrameCount = 0u;
-    // CA_ACTIVE is enough to enter the native SP frame order. Do not wait for
-    // CL_IsCgameInitialized here: that flag is set by CL_FirstSnapshot, and the
-    // first snapshot itself is produced only after SV_Frame runs. Gating on
-    // both states deadlocks the authoritative server at the load-screen view.
-    if (!CL_IsLocalClientInGame(0))
+    // Native Com_Frame keeps pumping the client and screen while disconnected;
+    // that is where CL_Frame opens the canonical main menu.  The browser must
+    // wait only for CL_Init, not for CA_ACTIVE, or no pregame UI command list
+    // can ever be built.
+    if (!clientUIActives[0].isRunning)
     {
         g_lastCGameFrameMilliseconds = 0u;
         g_cgameFrameAccumulatorMilliseconds = 0u;
