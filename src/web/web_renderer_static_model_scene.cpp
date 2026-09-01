@@ -617,6 +617,43 @@ const char *WebRenderer_StaticModelSceneResultString(
     return "unknown static XModel scene error";
 }
 
+bool WebRenderer_StaticModelIntersectsShadowPartition(
+    const WebRendererStaticModelInstanceDesc &instance,
+    const std::array<float, 16> &shadowMatrix) noexcept
+{
+    float center[3];
+    float extent[3];
+    for (std::size_t component = 0u; component < 3u; ++component)
+    {
+        center[component] =
+            (instance.shadowMins[component] +
+                instance.shadowMaxs[component]) * 0.5f;
+        extent[component] =
+            (instance.shadowMaxs[component] -
+                instance.shadowMins[component]) * 0.5f;
+    }
+    float clipCenter[4];
+    float clipExtent[3];
+    for (std::size_t row = 0u; row < 4u; ++row)
+    {
+        clipCenter[row] = shadowMatrix[row] * center[0] +
+            shadowMatrix[4u + row] * center[1] +
+            shadowMatrix[8u + row] * center[2] +
+            shadowMatrix[12u + row];
+        if (row < 3u)
+            clipExtent[row] = std::fabs(shadowMatrix[row]) * extent[0] +
+                std::fabs(shadowMatrix[4u + row]) * extent[1] +
+                std::fabs(shadowMatrix[8u + row]) * extent[2];
+    }
+    const float w = clipCenter[3];
+    return clipCenter[0] + clipExtent[0] >= -w &&
+        clipCenter[0] - clipExtent[0] <= w &&
+        clipCenter[1] + clipExtent[1] >= -w &&
+        clipCenter[1] - clipExtent[1] <= w &&
+        clipCenter[2] + clipExtent[2] >= -w &&
+        clipCenter[2] - clipExtent[2] <= w;
+}
+
 bool WebRenderer_PackStaticModelCameraInstances(
     const WebRendererStaticModelInstanceDesc *source, std::uint32_t sourceCount,
     const std::int8_t *selectedLods, const std::uint8_t *visibility,

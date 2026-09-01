@@ -46,6 +46,12 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
 const char *WebRenderer_StaticModelSceneResultString(
     WebRendererStaticModelSceneResult result) noexcept;
 
+// Sun-shadow partition visibility uses authored world bounds and the light
+// matrix only. Camera DPVS visibility is intentionally absent from this seam.
+bool WebRenderer_StaticModelIntersectsShadowPartition(
+    const WebRendererStaticModelInstanceDesc &instance,
+    const std::array<float, 16> &shadowMatrix) noexcept;
+
 // Backend packing only: canonical indices address DPVS, never group offsets.
 // Destination is separate from the LOD-packed shadow range and has sourceCount capacity.
 bool WebRenderer_PackStaticModelCameraInstances(

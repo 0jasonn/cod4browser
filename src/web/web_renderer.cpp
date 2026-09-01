@@ -362,7 +362,6 @@ struct WebRendererState
     GLint shadowDepthTextureEnabledUniform = -1;
     GLint shadowDepthAlphaTestUniform = -1;
     GLint shadowDepthInstanceEnabledUniform = -1;
-    GLint shadowDepthBoundsEnabledUniform = -1;
     GLint skyTextureUniform = -1;
     GLint skyTanHalfFovUniform = -1;
     GLint skyForwardUniform = -1;
@@ -433,6 +432,7 @@ struct WebRendererState
         retainedStaticModelSourceInstances;
     std::vector<WebRendererStaticModelInstanceDesc> retainedStaticModelInstances;
     std::vector<std::int8_t> retainedStaticModelSelectedLods;
+    std::vector<std::uint8_t> staticModelShadowVisibility;
     std::vector<std::uint8_t> staticModelVisibility;
     bool staticModelVisibilityComputed = false;
     bool staticModelVisibilityChanged = true;
@@ -2272,7 +2272,6 @@ void ResetGpuHandles()
     g_renderer.shadowDepthTextureEnabledUniform = -1;
     g_renderer.shadowDepthAlphaTestUniform = -1;
     g_renderer.shadowDepthInstanceEnabledUniform = -1;
-    g_renderer.shadowDepthBoundsEnabledUniform = -1;
     g_renderer.skyTextureUniform = -1;
     g_renderer.skyTanHalfFovUniform = -1;
     g_renderer.skyForwardUniform = -1;
@@ -2902,20 +2901,6 @@ bool CreateStaticModelObjects(
             WebRendererStaticModelInstanceDesc,
             modelLightingCoordinates)));
     glVertexAttribDivisor(9u, 1u);
-    for (GLuint location = 10u; location <= 11u; ++location)
-    {
-        glEnableVertexAttribArray(location);
-        glVertexAttribPointer(
-            location,
-            3,
-            GL_FLOAT,
-            GL_FALSE,
-            sizeof(WebRendererStaticModelInstanceDesc),
-            reinterpret_cast<const void *>(location == 10u
-                ? offsetof(WebRendererStaticModelInstanceDesc, shadowMins)
-                : offsetof(WebRendererStaticModelInstanceDesc, shadowMaxs)));
-        glVertexAttribDivisor(location, 1u);
-    }
     const GLenum error = glGetError();
     if (instanceBuffer == 0u || error != GL_NO_ERROR)
     {
@@ -4314,11 +4299,8 @@ bool CreateRendererResources(bool contextRecovery = false)
         layout(location = 5) in vec3 a_instance_axis1;
         layout(location = 6) in vec3 a_instance_axis2;
         layout(location = 7) in vec3 a_instance_origin;
-        layout(location = 10) in vec3 a_instance_shadow_mins;
-        layout(location = 11) in vec3 a_instance_shadow_maxs;
         uniform mat4 u_shadow_depth_matrix;
         uniform float u_shadow_depth_instance_enabled;
-        uniform float u_shadow_depth_bounds_enabled;
         out vec2 v_shadow_texcoord;
         void main()
         {
@@ -4330,29 +4312,7 @@ bool CreateRendererResources(bool contextRecovery = false)
                     a_position.y * a_instance_axis1 +
                     a_position.z * a_instance_axis2;
             }
-            vec4 clip_position =
-                u_shadow_depth_matrix * vec4(position, 1.0);
-            if (u_shadow_depth_bounds_enabled > 0.5)
-            {
-                vec3 center =
-                    (a_instance_shadow_mins + a_instance_shadow_maxs) * 0.5;
-                vec3 extent =
-                    (a_instance_shadow_maxs - a_instance_shadow_mins) * 0.5;
-                vec4 clip_center =
-                    u_shadow_depth_matrix * vec4(center, 1.0);
-                vec3 clip_extent =
-                    abs(u_shadow_depth_matrix[0].xyz) * extent.x +
-                    abs(u_shadow_depth_matrix[1].xyz) * extent.y +
-                    abs(u_shadow_depth_matrix[2].xyz) * extent.z;
-                if (clip_center.x + clip_extent.x < -clip_center.w ||
-                    clip_center.x - clip_extent.x > clip_center.w ||
-                    clip_center.y + clip_extent.y < -clip_center.w ||
-                    clip_center.y - clip_extent.y > clip_center.w ||
-                    clip_center.z + clip_extent.z < -clip_center.w ||
-                    clip_center.z - clip_extent.z > clip_center.w)
-                    clip_position = vec4(2.0, 2.0, 2.0, 1.0);
-            }
-            gl_Position = clip_position;
+            gl_Position = u_shadow_depth_matrix * vec4(position, 1.0);
             v_shadow_texcoord = a_texcoord;
         }
     )glsl";
@@ -4737,9 +4697,6 @@ bool CreateRendererResources(bool contextRecovery = false)
     const GLint shadowDepthInstanceEnabledUniform =
         glGetUniformLocation(
             shadowProgram, "u_shadow_depth_instance_enabled");
-    const GLint shadowDepthBoundsEnabledUniform =
-        glGetUniformLocation(
-            shadowProgram, "u_shadow_depth_bounds_enabled");
     const GLint skyTextureUniform =
         glGetUniformLocation(skyProgram, "u_sky");
     const GLint skyTanHalfFovUniform =
@@ -4958,7 +4915,6 @@ bool CreateRendererResources(bool contextRecovery = false)
         shadowDepthTextureEnabledUniform < 0 ||
         shadowDepthAlphaTestUniform < 0 ||
         shadowDepthInstanceEnabledUniform < 0 ||
-        shadowDepthBoundsEnabledUniform < 0 ||
         skyTextureUniform < 0 || skyTanHalfFovUniform < 0 ||
         skyForwardUniform < 0 || skyRightUniform < 0 ||
         skyUpUniform < 0 || postProcessTextureUniform < 0 ||
@@ -5130,8 +5086,6 @@ bool CreateRendererResources(bool contextRecovery = false)
     g_renderer.shadowDepthAlphaTestUniform = shadowDepthAlphaTestUniform;
     g_renderer.shadowDepthInstanceEnabledUniform =
         shadowDepthInstanceEnabledUniform;
-    g_renderer.shadowDepthBoundsEnabledUniform =
-        shadowDepthBoundsEnabledUniform;
     g_renderer.skyTextureUniform = skyTextureUniform;
     g_renderer.skyTanHalfFovUniform = skyTanHalfFovUniform;
     g_renderer.skyForwardUniform = skyForwardUniform;
@@ -6872,6 +6826,8 @@ void WebRenderer_UnloadWorldResources()
         g_renderer.retainedStaticModelInstances);
     decltype(g_renderer.retainedStaticModelSelectedLods){}.swap(
         g_renderer.retainedStaticModelSelectedLods);
+    decltype(g_renderer.staticModelShadowVisibility){}.swap(
+        g_renderer.staticModelShadowVisibility);
     decltype(g_renderer.retainedStaticModelBatches){}.swap(
         g_renderer.retainedStaticModelBatches);
     decltype(g_renderer.retainedStaticModelImages){}.swap(
@@ -7004,10 +6960,12 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
     if (copy != WebRendererSurfaceResult::Success) return copy;
     std::vector<WebRendererStaticModelInstanceDesc> sourceInstances;
     std::vector<std::int8_t> selectedLods;
+    std::vector<std::uint8_t> shadowVisibility;
     try
     {
         sourceInstances = retainedInstances;
         selectedLods.assign(retainedInstances.size(), -2);
+        shadowVisibility.resize(retainedInstances.size());
         // First half remains shadow packing. Camera packing has independent capacity.
         retainedInstances.resize(2u * sourceInstances.size());
     }
@@ -7077,6 +7035,7 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
         std::move(sourceInstances);
     g_renderer.retainedStaticModelInstances = std::move(retainedInstances);
     g_renderer.retainedStaticModelSelectedLods = std::move(selectedLods);
+    g_renderer.staticModelShadowVisibility = std::move(shadowVisibility);
     g_renderer.staticModelVisibility.clear();
     g_renderer.staticModelVisibilityComputed = false;
     g_renderer.staticModelVisibilityChanged = true;
@@ -8777,7 +8736,6 @@ bool DrawShadowPartition(
         matrix.data());
     glUniform1i(g_renderer.shadowDepthTextureUniform, 0);
     glUniform1f(g_renderer.shadowDepthInstanceEnabledUniform, 0.0f);
-    glUniform1f(g_renderer.shadowDepthBoundsEnabledUniform, 0.0f);
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
     glDepthMask(GL_TRUE);
@@ -8890,8 +8848,21 @@ bool DrawShadowPartition(
     {
         glBindVertexArray(g_renderer.staticModelVertexArray);
         glUniform1f(g_renderer.shadowDepthInstanceEnabledUniform, 1.0f);
-        glUniform1f(g_renderer.shadowDepthBoundsEnabledUniform,
-            requireSunCaster ? 1.0f : 0.0f);
+        if (requireSunCaster)
+        {
+            const std::size_t shadowInstanceCount =
+                g_renderer.retainedStaticModelSourceInstances.size();
+            if (g_renderer.staticModelShadowVisibility.size() !=
+                    shadowInstanceCount ||
+                g_renderer.retainedStaticModelInstances.size() <
+                    shadowInstanceCount)
+                return false;
+            for (std::size_t index = 0u; index < shadowInstanceCount; ++index)
+                g_renderer.staticModelShadowVisibility[index] =
+                    WebRenderer_StaticModelIntersectsShadowPartition(
+                        g_renderer.retainedStaticModelInstances[index], matrix)
+                    ? 1u : 0u;
+        }
         for (const WebRendererRetainedStaticModelBatch &batch :
              g_renderer.retainedStaticModelBatches)
         {
@@ -8916,12 +8887,28 @@ bool DrawShadowPartition(
                 sizeof(std::uint32_t);
             if (requireSunCaster)
             {
-                BindStaticModelInstanceRange(batch.instanceOffset);
-                glDrawElementsInstanced(GL_TRIANGLES,
-                    static_cast<GLsizei>(batch.draw.indexCount),
-                    GL_UNSIGNED_INT,
-                    reinterpret_cast<const void *>(indexOffset),
-                    static_cast<GLsizei>(batch.instanceCount));
+                const std::uint32_t instanceEnd =
+                    batch.instanceOffset + batch.instanceCount;
+                std::uint32_t instanceIndex = batch.instanceOffset;
+                while (instanceIndex < instanceEnd)
+                {
+                    while (instanceIndex < instanceEnd &&
+                        g_renderer.staticModelShadowVisibility[
+                            instanceIndex] == 0u)
+                        ++instanceIndex;
+                    const std::uint32_t runBegin = instanceIndex;
+                    while (instanceIndex < instanceEnd &&
+                        g_renderer.staticModelShadowVisibility[
+                            instanceIndex] != 0u)
+                        ++instanceIndex;
+                    if (instanceIndex == runBegin) continue;
+                    BindStaticModelInstanceRange(runBegin);
+                    glDrawElementsInstanced(GL_TRIANGLES,
+                        static_cast<GLsizei>(batch.draw.indexCount),
+                        GL_UNSIGNED_INT,
+                        reinterpret_cast<const void *>(indexOffset),
+                        static_cast<GLsizei>(instanceIndex - runBegin));
+                }
                 continue;
             }
 
@@ -8985,7 +8972,6 @@ bool DrawShadowPartition(
 #endif
     if (requireSunCaster && g_renderer.dynamicModelSceneActive)
     {
-        glUniform1f(g_renderer.shadowDepthBoundsEnabledUniform, 0.0f);
         std::uint32_t previousInstance = UINT32_MAX - 1u;
         const auto merged = WebRenderer_ForEachShadowRange(
             g_renderer.dynamicDraws, DynamicDrawBatch,
@@ -9033,7 +9019,6 @@ bool DrawShadowPartition(
             WebFrameProfile_Now() - sunShadowFamilyStarted;
 #endif
     glUniform1f(g_renderer.shadowDepthInstanceEnabledUniform, 0.0f);
-    glUniform1f(g_renderer.shadowDepthBoundsEnabledUniform, 0.0f);
     glDisable(GL_POLYGON_OFFSET_FILL);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glActiveTexture(GL_TEXTURE0);
@@ -9131,22 +9116,6 @@ void BindStaticModelInstanceRange(std::uint32_t instanceOffset)
         reinterpret_cast<const void *>(base + offsetof(
             WebRendererStaticModelInstanceDesc,
             modelLightingCoordinates)));
-    glVertexAttribPointer(
-        10u,
-        3,
-        GL_FLOAT,
-        GL_FALSE,
-        sizeof(WebRendererStaticModelInstanceDesc),
-        reinterpret_cast<const void *>(base + offsetof(
-            WebRendererStaticModelInstanceDesc, shadowMins)));
-    glVertexAttribPointer(
-        11u,
-        3,
-        GL_FLOAT,
-        GL_FALSE,
-        sizeof(WebRendererStaticModelInstanceDesc),
-        reinterpret_cast<const void *>(base + offsetof(
-            WebRendererStaticModelInstanceDesc, shadowMaxs)));
 }
 
 bool UpdateStaticModelLods()

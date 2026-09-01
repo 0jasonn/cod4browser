@@ -225,6 +225,30 @@ void TestCanonicalInstancesShareOneMaterialSurfaceBatch()
     assert(command.vertices[0].normal[2] == 1.0f);
 }
 
+void TestSunShadowPartitionUsesCanonicalBounds()
+{
+    WebRendererStaticModelInstanceDesc instance{};
+    instance.shadowMins[0] = -0.25f;
+    instance.shadowMins[1] = -0.25f;
+    instance.shadowMins[2] = -0.25f;
+    instance.shadowMaxs[0] = 0.25f;
+    instance.shadowMaxs[1] = 0.25f;
+    instance.shadowMaxs[2] = 0.25f;
+    const std::array<float, 16> identity{
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f,
+    };
+    assert(WebRenderer_StaticModelIntersectsShadowPartition(instance, identity));
+    instance.shadowMins[0] = 1.25f;
+    instance.shadowMaxs[0] = 1.75f;
+    assert(!WebRenderer_StaticModelIntersectsShadowPartition(instance, identity));
+    instance.shadowMins[0] = 1.0f;
+    instance.shadowMaxs[0] = 1.5f;
+    assert(WebRenderer_StaticModelIntersectsShadowPartition(instance, identity));
+}
+
 void TestEveryAuthoredLodIsRetainedForRuntimeSelection()
 {
     Fixture fixture;
@@ -864,6 +888,7 @@ int main()
     TestCanonicalCameraVisibilityAndIndependentPacking();
 #endif
     TestCanonicalInstancesShareOneMaterialSurfaceBatch();
+    TestSunShadowPartitionUsesCanonicalBounds();
     TestEveryAuthoredLodIsRetainedForRuntimeSelection();
     TestCanonicalPrimaryLightSplitsStaticInstanceGroups();
     TestCanonicalInstanceIndicesSurviveRegroupingAndLods();
