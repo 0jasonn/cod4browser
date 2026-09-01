@@ -6,43 +6,14 @@ and uses of "current" are historical, not instructions for new work. See
 and [the 2026-08-31 cleanup record](docs/evidence/cleanup-renderer-2026-08-31.md).
 Mission progression is not a prerequisite for renderer work or cleanup.
 
-## Mission-route roadmap pass — 2026-08-28
+## Retired mission-route pass — 2026-08-28
 
-This pass started at `d8a3fea3` on `codex/corrected-profile-roadmap` after
-fetching `origin`; `origin/web-port` at `aa407bb5` is an ancestor of the
-roadmap branch. The worktree was clean. `KISAK_COD4_RETAIL_ROOT` was not set,
-and the machine was not searched for retail assets.
+This historical pass once added a diagnostics-only mission-route author/replay
+workflow. The workflow, browser branches, wrapper controls, and dedicated
+synthetic tests were deleted on 2026-09-01. Route generation and simulated
+mission progression are no longer part of the product or validation plan.
 
-The required first milestone now has a diagnostics-only, schema-versioned
-mission-route controller and headed authoring workflow. F8 records a waypoint
-and F9 finishes authoring. The saved route contains numeric target regions,
-bounded timings, input-action classes, and hashed/count progression
-expectations; a sidecar contains sparse numeric observations and input
-transitions. Replay reads canonical predicted player origin/view angles and
-existing canonical objective, actor, script, checkpoint, and save summaries.
-It emits only ordinary browser keyboard/mouse events into the existing
-canonical input queue. The controller exposes no command, teleport, objective
-setter, script setter, or other gameplay-state mutation operation.
-
-Twelve focused synthetic tests pass: schema parsing, waypoint completion,
-COD yaw orientation,
-stuck detection, timeout, unexpected death, objective expectation, canonical
-restart observation, invalid/mutation-shaped routes, cancellation, absence of
-a mutation API, and sparse sanitized authoring. The full Node total is now
-90/90. The fresh diagnostics Release build and canonical runtime-prefix check
-pass. Author and replay test discovery each produce exactly one expected
-`RETAIL_ROOT_MISSING` skip without a supplied root.
-
-The pre-change Phase 0 matrix passed: 78 Node tests, 22 native Clang tests, 30
-Win32 MSVC tests, 30 direct-Wasm tests, 256 sanitizer fuzz runs, 40 production
-browser tests, 12 diagnostic smoke tests, and 36 diagnostic remainder tests
-with exactly two retail-root skips. The production boundary was 3,173,293 B
-Wasm, 340,615 B application JavaScript, 3,524,439 B total site, 17 files, 24
-raw exports, and 9 named application exports.
-
-No Village Assault progression claim is made. The strict execution order
-requires real objective/trigger evidence before CargoShip profile splitting,
-DPVS census, a new renderer optimization, or new-map validation. Those stages
+No Village Assault progression claim was demonstrated. The stages that followed
 were therefore not started in this pass. Current handoff state:
 `RETAIL ROOT UNAVAILABLE`.
 
@@ -131,12 +102,9 @@ typed production seam. The remaining matches are classified, not mechanically
 rewritten, in
 [wasm-numeric-portability-d252515d.md](docs/evidence/wasm-numeric-portability-d252515d.md).
 
-The named next-batch fastfiles `scoutsniper`, `village_assault`, and `ac130`
-are present in the supplied installation. They remain preparation-only and
-`UNTESTED`; the roadmap explicitly forbids broad execution until meaningful
-objective/save/reload progression is stable. The six existing maps remain the
-permanent regression baseline. The sanitized discovery-only record is
-[next-campaign-batch-bad1e7b9.json](docs/evidence/next-campaign-batch-bad1e7b9.json).
+The named next-batch fastfiles were present in the supplied installation. This
+was discovery-only at the time; current evidence now records `scoutsniper` as
+`RENDERS`, while `village_assault` and `ac130` remain `UNTESTED`.
 
 ### Final verification matrix
 
@@ -255,11 +223,9 @@ actors/scripts, movement, firing, and frame progression continued afterward.
 The sanitized record is
 [retail-mission-da1e592c.json](docs/evidence/retail-mission-da1e592c.json).
 
-The next campaign batch is prepared, not promoted: `scoutsniper` targets
-outdoor/long-range AI visibility, `village_assault` targets dense scripted
-AI/objective/trigger progression, and `ac130` targets an atypical vehicle,
-thermal, FX, and material path. All three remain `UNTESTED` until legal local
-runtime evidence exists.
+This historical next-batch statement is superseded: `scoutsniper` now has
+stationary `RENDERS` evidence, `village_assault` progression automation is
+retired, and `ac130` is the next stationary thermal/material probe.
 
 Final classification: `PERFORMANCE BOTTLENECK IDENTIFIED — NEXT FIX REQUIRED`
 

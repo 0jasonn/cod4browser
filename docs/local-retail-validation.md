@@ -112,41 +112,26 @@ Use these compatibility results:
 The threshold describes the recorded reference hardware/browser, not a
 universal user requirement. Discovery alone remains `UNTESTED`.
 
-## Mission route authoring and replay
-
-Route files are local sanitized validator artifacts; they contain no retail
-asset bytes or proprietary strings. Author a Village Assault route in a
-headed browser:
+For an observation-only stationary probe, add `-ObserveOnly`:
 
 ```powershell
 .\tools\validate_web_campaign_map.ps1 `
     -RetailRoot 'D:\Games\Call of Duty 4' `
-    -Map village_assault `
+    -Map scoutsniper `
     -Browser chrome `
-    -Mission `
-    -RouteMode author `
-    -RouteOutput '.\build\village-assault.route.json'
+    -ObserveOnly `
+    -Headless
 ```
 
-Navigate with normal game controls. Press F8 at each useful waypoint and F9
-to finish. The command writes the route and a neighboring
-`.evidence.json` sidecar with sparse numeric observations and input
-transitions. It does not record asset contents.
+This uses the same canonical database/lifecycle, memory, renderer, and profile
+collectors, but exits after the bounded stationary window. It injects no
+keyboard, mouse, firing, waypoint, coordinate, objective, or synthetic gameplay
+state and skips config persistence, forced context loss, and transition-out.
+Headless evidence can establish `RENDERS` and stationary stability only; visual
+correctness requires separate headed/manual inspection.
 
-Replay the route through the normal canonical input queue:
-
-```powershell
-.\tools\validate_web_campaign_map.ps1 `
-    -RetailRoot 'D:\Games\Call of Duty 4' `
-    -Map village_assault `
-    -Browser chrome `
-    -Mission `
-    -RouteMode replay `
-    -RoutePath '.\build\village-assault.route.json'
-```
-
-Replay fails explicitly on invalid schema, timeout, stuck/diverged movement,
-unexpected death, unmet objective expectation, invalid state, or
-cancellation. A segment may resume only after diagnostics observe the normal
-canonical checkpoint restart; the validator never teleports or writes
-gameplay state.
+The former mission-route author/replay workflow is retired. Do not replace it
+with another controller, waypoint format, replay abstraction, or player-state
+simulator. Ordinary mission/save validation remains available through
+`-Mission`; it continues to use short canonical input actions rather than route
+files.

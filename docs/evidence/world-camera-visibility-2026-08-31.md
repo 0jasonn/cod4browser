@@ -78,7 +78,7 @@ Skipped: browser/native/Wasm/fuzz suites, diagnostic build, retail captures,
 mission/campaign checks, replay and save/death/restart checks. No dependencies,
 asset formats, transport, threading or engine substitutes were added.
 
-Recommended next task: use the existing DObj stage timings for a short,
+Historical next-task note (now completed): use the existing DObj stage timings for a short,
 question-specific profile to identify whether pose, lighting, skinning or
 geometry construction dominates before choosing an optimization. This is a
 separate task, not a gate on this delivery.

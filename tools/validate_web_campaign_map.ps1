@@ -8,10 +8,7 @@ param(
     [switch]$Mission,
     [ValidateSet('progression', 'full')]
     [string]$MissionStage = 'full',
-    [ValidateSet('none', 'author', 'replay')]
-    [string]$RouteMode = 'none',
-    [string]$RoutePath,
-    [string]$RouteOutput,
+    [switch]$ObserveOnly,
     [switch]$Headless,
     [ValidateRange(1024, 65535)]
     [int]$Port = 8031
@@ -22,28 +19,8 @@ if ($Map -notmatch '^[a-z0-9_]+$' -or
     $Map.StartsWith('mp_') -or $Map.EndsWith('_mp')) {
     throw 'Map must name one single-player zone using lowercase letters, numbers, or underscores.'
 }
-if ($RouteMode -ne 'none' -and -not $Mission) {
-    throw 'Route authoring and replay require -Mission.'
-}
-if ($RouteMode -eq 'author' -and $Headless) {
-    throw 'Manual route authoring requires a headed browser.'
-}
-if ($RoutePath -and $RouteMode -ne 'replay') {
-    throw '-RoutePath is only used with -RouteMode replay.'
-}
-$resolvedRoutePath = $null
-if ($RoutePath) {
-    $resolvedRoutePath = (Resolve-Path -LiteralPath $RoutePath).Path
-} elseif ($RouteMode -eq 'replay') {
-    throw '-RoutePath is required for route replay.'
-}
-$resolvedRouteOutput = $null
-if ($RouteMode -eq 'author') {
-    if (-not $RouteOutput) { throw '-RouteOutput is required for route authoring.' }
-    $routeOutputParent = Split-Path -Parent $RouteOutput
-    if (-not $routeOutputParent) { $routeOutputParent = '.' }
-    $resolvedRouteOutput = Join-Path (Resolve-Path -LiteralPath $routeOutputParent).Path `
-        (Split-Path -Leaf $RouteOutput)
+if ($ObserveOnly -and $Mission) {
+    throw '-ObserveOnly is a stationary campaign-map probe and cannot be combined with -Mission.'
 }
 $resolvedRoot = (Resolve-Path -LiteralPath $RetailRoot).Path
 $required = @(
@@ -70,9 +47,7 @@ $environmentNames = @(
     'KISAK_RETAIL_PHASE3_MAP',
     'KISAK_RETAIL_MISSION_MAP',
     'KISAK_RETAIL_MISSION_STAGE',
-    'KISAK_RETAIL_ROUTE_MODE',
-    'KISAK_RETAIL_ROUTE_PATH',
-    'KISAK_RETAIL_ROUTE_OUTPUT',
+    'KISAK_RETAIL_OBSERVE_ONLY',
     'KISAK_BROWSER_CHANNEL',
     'KISAK_WEB_SITE',
     'KISAK_WEB_TEST_PORT',
@@ -96,19 +71,10 @@ try {
         Remove-Item -LiteralPath 'Env:KISAK_RETAIL_MISSION_MAP' -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath 'Env:KISAK_RETAIL_MISSION_STAGE' -ErrorAction SilentlyContinue
     }
-    if ($RouteMode -eq 'none') {
-        Remove-Item -LiteralPath 'Env:KISAK_RETAIL_ROUTE_MODE' -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath 'Env:KISAK_RETAIL_ROUTE_PATH' -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath 'Env:KISAK_RETAIL_ROUTE_OUTPUT' -ErrorAction SilentlyContinue
+    if ($ObserveOnly) {
+        $env:KISAK_RETAIL_OBSERVE_ONLY = '1'
     } else {
-        $env:KISAK_RETAIL_ROUTE_MODE = $RouteMode
-        if ($RouteMode -eq 'replay') {
-            $env:KISAK_RETAIL_ROUTE_PATH = $resolvedRoutePath
-            Remove-Item -LiteralPath 'Env:KISAK_RETAIL_ROUTE_OUTPUT' -ErrorAction SilentlyContinue
-        } else {
-            $env:KISAK_RETAIL_ROUTE_OUTPUT = $resolvedRouteOutput
-            Remove-Item -LiteralPath 'Env:KISAK_RETAIL_ROUTE_PATH' -ErrorAction SilentlyContinue
-        }
+        Remove-Item -LiteralPath 'Env:KISAK_RETAIL_OBSERVE_ONLY' -ErrorAction SilentlyContinue
     }
     if ($Browser -eq 'chromium') {
         Remove-Item -LiteralPath 'Env:KISAK_BROWSER_CHANNEL' -ErrorAction SilentlyContinue
@@ -121,8 +87,7 @@ try {
     $playwrightArguments = @(
         'exec', '--', 'playwright', 'test',
         'tests/browser/local_retail_validation.spec.mjs', '--grep',
-        $(if ($RouteMode -eq 'author') { '@retail-route-author' }
-            elseif ($Mission) { '@retail-mission' } else { '@retail-phase3' })
+        $(if ($Mission) { '@retail-mission' } else { '@retail-phase3' })
     )
     if (-not $Headless) { $playwrightArguments += '--headed' }
     & npm.cmd @playwrightArguments

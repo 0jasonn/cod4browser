@@ -4,7 +4,29 @@ Updated 2026-09-01. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
-## Dynamic geometry handoff completed
+## Current campaign boundary
+
+The playable offline slice already exists across six legally validated maps.
+Those runs demonstrate canonical movement, aiming, firing, weapons, audio,
+transitions, and Airplane save/load continuity. Building another player
+controller or simulated movement path is out of scope. The obsolete mission
+route author/replay system and its waypoint/progression simulation have been
+deleted; `village_assault` progression automation remains retired.
+
+The dynamic DObj convergence path is complete through `838e047c`. A headless
+Release-diagnostics observe-only run based on that commit now establishes
+`scoutsniper` as **RENDERS**: all canonical lifecycle stages completed, the
+first real world frame arrived, and 3,601 stationary frames ran over 60.013
+seconds with no page, WebGL, or lifecycle error. No input was injected and no
+headed/manual visual inspection occurred, so this is not a `FUNCTIONAL`,
+`PLAYABLE`, or visual-correctness claim. See
+[the stationary evidence](evidence/scoutsniper-stationary-838e047c.md).
+
+No measured defect or bottleneck appeared. The next concrete compatibility
+boundary is an equally stationary `ac130` probe, especially its thermal and
+unusual-material paths.
+
+## Prior dynamic geometry handoff
 
 Runtime `af601efe` transfers final per-frame dynamic vertex/index vectors into
 backend staging instead of copying them. Descriptor, finite/index, batch,
@@ -18,11 +40,10 @@ submission **1.7592 -> 1.6389 ms**. Whole-frame timings are flat, so no gameplay
 FPS gain is claimed. A double-buffered WebGL upload follow-up produced no upload
 gain and was reverted.
 
-Authored active-scene runs exposed DObj construction as the next large frontend
+Authored active-scene runs once exposed DObj construction as a large frontend
 component, but unchanged control loads did not reproduce their camera/effect
-work. The strict comparison rejected those runs. Platform geometry-handoff work
-is now closed; the next measured category is shared DObj pose, lighting and
-skinning. See [evidence and limits](evidence/dynamic-geometry-ownership-af601efe.md).
+work. Later milestones closed the DObj path through `838e047c`. See
+[the historical evidence and limits](evidence/dynamic-geometry-ownership-af601efe.md).
 
 ## Renderer optimization audit completed
 
@@ -421,10 +442,10 @@ private mirror types/tests are retired. The live world command retains bounds,
 range, index, and atomic-publication checks and now also checks finite lightmap
 coordinates before publication. Live surface APIs remain.
 
-Assisted mission authoring, autonomous combat fallback, helper-only diagnostic
-exports, and unused assist/prefix-skip options are removed. Manual F8/F9
-recording and explicit replay remain diagnostic tools. Neither mission
-progression nor save/death/restart validation is a prerequisite for future work.
+Assisted mission authoring, route author/replay, autonomous combat fallback,
+helper-only diagnostic exports, and unused assist/prefix-skip options are
+removed. No replacement controller, waypoint format, replay abstraction, or
+player-state simulator is planned.
 
 World, static-model, and DObj paths share only identical material table lookups.
 Worker hosts share request IDs, error envelopes, rejection cleanup, and reply
@@ -457,7 +478,8 @@ These are earlier execution results, not checks of this working tree:
   historical observations impose no development gate.
 
 The [campaign matrix](campaign-compatibility.md) retains the exact historical
-classifications; other discovered direct SP zones remain `UNTESTED`.
+classifications and the new stationary `scoutsniper` `RENDERS` result; other
+discovered direct SP zones remain `UNTESTED`.
 [Earlier status narratives](history/web-status-through-2026-08-28.md) preserve
 measurements and their original context. No fresh visual claim is made here.
 

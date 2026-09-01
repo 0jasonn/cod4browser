@@ -1,19 +1,22 @@
 # Campaign compatibility matrix
 
-This matrix preserves historical automated retail evidence; it was not rerun
-on 2026-08-31. [Current status](web-status.md) distinguishes this task's checks.
-No mission-flow result is a prerequisite for renderer or cleanup work.
+This matrix preserves historical automated retail evidence and the 2026-09-01
+stationary `scoutsniper` probe. [Current status](web-status.md) distinguishes
+the scope of each task. No mission-flow result is a prerequisite for renderer
+or cleanup work.
 
-## Historical mission-route infrastructure update — 2026-08-28
+## Stationary campaign update — 2026-09-01
 
-A diagnostics-only version-1 route author/replay system is now available for
-Village Assault. It records only numeric coordinates/angles, input
-transitions, counts, hashes, timestamps, and checkpoint summaries, and replay
-drives the normal canonical browser input queue. Twelve synthetic route tests
-pass. No retail root was supplied to this pass, so no route was authored or
-replayed against retail content and no compatibility or mission-flow row
-changes. `village_assault` remains `UNTESTED` with no
-`MISSION_FLOW_VALIDATED` flag.
+The obsolete mission-route author/replay system and its synthetic progression
+tests are deleted. Route generation and simulated mission progression are
+retired, and `village_assault` automation remains out of scope.
+
+A legally owned, headless Release-diagnostics run based on `838e047c` completed
+canonical DB, ClipMap/world, server/game, client/cgame, first-world-frame, and a
+60.013-second stationary window for `scoutsniper`. It injected no gameplay
+input and performed no visual inspection, so the map advances only to
+`RENDERS`. See
+[the stationary evidence](evidence/scoutsniper-stationary-838e047c.md).
 
 ## Historical corrected evidence — 2026-08-28
 
@@ -47,11 +50,9 @@ flow after progression was not reached. This is unproven trigger traversal,
 not a demonstrated canonical defect. See
 [the sanitized failed gate](evidence/retail-mission-village-assault-e7be6898.json).
 
-The supplied installation contains `scoutsniper`, `village_assault`, and
-`ac130`. Presence is discovery only: all three remain `UNTESTED`, and no new
-campaign row is promoted. The six validated maps remain permanent regression
-baselines. See the
-[sanitized preparation record](evidence/next-campaign-batch-bad1e7b9.json).
+The supplied installation contains `village_assault` and `ac130`, but presence
+alone remains discovery. Both remain `UNTESTED`; `ac130` is the next stationary
+probe. The six gameplay-validated maps remain permanent regression baselines.
 
 This ledger records current execution evidence, not filenames. Asset discovery
 alone is `UNTESTED`; compatibility advances through canonical database, world,
@@ -110,8 +111,8 @@ system memory. See the
 [sanitized machine-readable evidence](evidence/retail-campaign-247980a6.json).
 It contains no retail paths or proprietary content.
 
-Current totals are 6 validated maps: 2 `PLAYABLE`, 4 `FUNCTIONAL`, 16
-`UNTESTED`, and 0 `BLOCKED` or `REGRESSION`.
+Current totals are 7 runtime-probed maps: 2 `PLAYABLE`, 4 `FUNCTIONAL`, 1
+`RENDERS`, 15 `UNTESTED`, and 0 `BLOCKED` or `REGRESSION`.
 
 | Map | Canonical runtime | First frame | Valid foreground performance | Canonical gameplay | Transition / context recovery | Recovery / Wasm capacity | Result | Evidence |
 | --- | --- | ---: | --- | --- | --- | --- | --- | --- |
@@ -121,7 +122,8 @@ Current totals are 6 validated maps: 2 `PLAYABLE`, 4 `FUNCTIONAL`, 16
 | `airplane` | All canonical runtime boundaries pass | 7,352.500 ms | 3,597 frames; 59.95 FPS; 18.65 ms p95; 0.99999 ratio | Fire clip 12 -> 11; ADS, wheel selection, movement, mouse, menu, pointer lock, audio, and checkpoint pass | CargoShip in / Killhouse out pass; 591.775 ms context recovery | 122,778,819 B aggregate CPU recovery / 866,582,528 B capacity | **PLAYABLE** | Clean `247980a6` record; compact indoor/conventional-combat coverage. |
 | `hunted` | All canonical runtime boundaries pass | 6,660.220 ms | 1,145 frames; 19.08 FPS; 55.40 ms p95; 0.993989 ratio | Fire clip 6 -> 5; ADS, movement, mouse, menu, pointer lock, audio, and checkpoint pass; wheel is `NOT_APPLICABLE_SINGLE_WEAPON` | CargoShip in / Killhouse out pass; 1,984.015 ms context recovery | 480,307,702 B aggregate CPU recovery / 968,163,328 B capacity | **FUNCTIONAL** | Clean `247980a6` record; outdoor visibility, foliage, world, and dynamic-model coverage; average and p95 miss the threshold. |
 | `bog_a` | All canonical runtime boundaries pass | 9,821.955 ms | 1,271 frames; 21.21 FPS; 56.64 ms p95; 0.999457 ratio | Fire clip 15 -> 14; ADS, wheel selection, movement, mouse, menu, pointer lock, audio, and checkpoint pass | CargoShip in / Killhouse out pass; 1,844.635 ms context recovery | 428,120,523 B aggregate CPU recovery / 961,937,408 B capacity | **FUNCTIONAL** | Clean `247980a6` rerun; dense combat, FX, material, entity, and audio coverage; average and p95 miss the threshold. |
-| Other 16 directly selected non-`mp_*`/non-`*_mp` SP zones | Not run | Not run | Not measured | Not run | Not run | Not recorded | **UNTESTED** | Discovery or a header probe is not compatibility evidence. Add one row only after a legal local execution run. |
+| `scoutsniper` | DB, ClipMap/world, server, game, cgame, and actual world frames pass | 9,547.870 ms | Headless stationary window: 3,601 frames / 60,012.685 ms; no visual claim | Not exercised; no input injected | CargoShip transition-in passed; context recovery and transition-out not exercised | 414,917,420 B aggregate CPU recovery / 955,514,880 B capacity | **RENDERS** | Dirty observe-only run based on `838e047c`; no page, GL, or lifecycle errors. |
+| Other 15 directly selected non-`mp_*`/non-`*_mp` SP zones | Not run | Not run | Not measured | Not run | Not run | Not recorded | **UNTESTED** | Discovery or a header probe is not compatibility evidence. Add one row only after a legal local execution run. |
 
 `decodedTextureRecoveryBytes` is the logical decoded texture size. It is not
 the retained recovery allocation after `c66d41e1`: the renderer now retains

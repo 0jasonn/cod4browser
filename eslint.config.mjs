@@ -3,7 +3,6 @@ export default [{
         "web/product_*.mjs",
         "web/asset_profile.mjs",
         "web/asset_store.mjs",
-        "web/diagnostic_mission_route.mjs",
         "web/input_controller_core.mjs",
         "web/web_audio_driver.mjs",
         "web/worker_sync_filesystem.mjs",

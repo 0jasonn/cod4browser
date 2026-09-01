@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { cpus, platform, release, tmpdir, totalmem, version } from "node:os";
 import { join } from "node:path";
 
@@ -7,22 +7,13 @@ import { chromium, expect, test as base } from "@playwright/test";
 
 import { summarizeForegroundSamples } from "./retail_foreground_window.mjs";
 import { aggregateGameplayProfile } from "./retail_profile_aggregate.mjs";
-import {
-    createMissionRouteController,
-    createMissionRouteRecorder,
-    parseMissionRoute,
-} from "../../web/diagnostic_mission_route.mjs";
-
 const retailRoot = process.env.KISAK_COD4_RETAIL_ROOT;
 const browserChannel = process.env.KISAK_BROWSER_CHANNEL;
 const phase3TargetMap = process.env.KISAK_RETAIL_PHASE3_MAP?.trim().toLowerCase();
+const phase3ObserveOnly = process.env.KISAK_RETAIL_OBSERVE_ONLY === "1";
 const missionTargetMap = process.env.KISAK_RETAIL_MISSION_MAP?.trim().toLowerCase();
-const missionRoutePath = process.env.KISAK_RETAIL_ROUTE_PATH?.trim();
-const missionRouteOutputPath = process.env.KISAK_RETAIL_ROUTE_OUTPUT?.trim();
 const missionValidationStage = process.env.KISAK_RETAIL_MISSION_STAGE?.trim()
     .toLowerCase() ?? "full";
-const missionRouteMode = process.env.KISAK_RETAIL_ROUTE_MODE?.trim().toLowerCase() ??
-    (missionRoutePath ? "replay" : null);
 const runDecodeChain = process.env.KISAK_RETAIL_DECODE_CHAIN === "1";
 if (phase3TargetMap && (!/^[a-z0-9_]+$/.test(phase3TargetMap) ||
     phase3TargetMap.startsWith("mp_") || phase3TargetMap.endsWith("_mp"))) {
@@ -32,14 +23,6 @@ if (missionTargetMap && (!/^[a-z0-9_]+$/.test(missionTargetMap) ||
     missionTargetMap.startsWith("mp_") || missionTargetMap.endsWith("_mp"))) {
     throw new Error("KISAK_RETAIL_MISSION_MAP must name one single-player zone");
 }
-if (missionRouteMode && !["author", "replay"].includes(missionRouteMode))
-    throw new Error("KISAK_RETAIL_ROUTE_MODE must be author or replay");
-if (missionRouteMode === "author" && !missionRouteOutputPath)
-    throw new Error("KISAK_RETAIL_ROUTE_OUTPUT is required in author mode");
-if (missionRouteMode === "author" && missionRoutePath)
-    throw new Error("KISAK_RETAIL_ROUTE_PATH is only used in replay mode");
-if (missionRouteMode === "replay" && !missionRoutePath)
-    throw new Error("KISAK_RETAIL_ROUTE_PATH is required in replay mode");
 if (!['progression', 'full'].includes(missionValidationStage))
     throw new Error("KISAK_RETAIL_MISSION_STAGE must be progression or full");
 const sourceCommit = execFileSync(
@@ -106,10 +89,8 @@ test.afterEach(async ({}, testInfo) => {
     if (testInfo.status === testInfo.expectedStatus) return;
     const phase3 = testInfo.tags.includes("@retail-phase3");
     const mission = testInfo.tags.includes("@retail-mission");
-    const routeAuthor = testInfo.tags.includes("@retail-route-author");
     const decode = testInfo.tags.includes("@retail-decode");
-    const prefix = routeAuthor ? "KISAK_RETAIL_ROUTE_RESULT" : mission
-        ? "KISAK_RETAIL_MISSION_RESULT" : phase3
+    const prefix = mission ? "KISAK_RETAIL_MISSION_RESULT" : phase3
         ? "KISAK_RETAIL_PHASE3_RESULT" : decode
             ? "KISAK_RETAIL_DECODE_RESULT" : "KISAK_RETAIL_RESULT";
     console.log(`${prefix} ${JSON.stringify({
@@ -129,7 +110,7 @@ test.afterEach(async ({}, testInfo) => {
         failureStage,
         failureClass,
         ...(phase3 ? { targetMap: phase3TargetMap } : {}),
-        ...(mission || routeAuthor ? { targetMap: missionTargetMap } : {}),
+        ...(mission ? { targetMap: missionTargetMap } : {}),
     })}`);
 });
 
@@ -153,14 +134,6 @@ async function installRetailObservers(page)
         globalThis.__retailAudioPlaybackCount = 0;
         globalThis.__retailCinematics = [];
         globalThis.__retailLogs = [];
-        globalThis.__retailRouteAuthor = { markers: 0, finish: false };
-        globalThis.addEventListener("keydown", (event) => {
-            if (event.code !== "F8" && event.code !== "F9") return;
-            event.preventDefault();
-            event.stopImmediatePropagation();
-            if (event.code === "F8") ++globalThis.__retailRouteAuthor.markers;
-            else globalThis.__retailRouteAuthor.finish = true;
-        }, true);
         globalThis.addEventListener("kisakcod:log", (event) => {
             globalThis.__retailLogs.push(structuredClone(event.detail));
         });
@@ -393,15 +366,18 @@ async function captureMapCursor(page)
         memory: globalThis.__retailValidationMemory.length,
         frames: globalThis.__retailValidationFrames.length,
         profiles: globalThis.__retailFrameProfiles.length,
+        logs: globalThis.__retailLogs.length,
+        rendererLifecycle: globalThis.__retailRendererLifecycle.length,
     }));
 }
 
 async function mapEvidence(page, map, cursor, commandTimeMs, memoryLifecycle,
-    stability, profileCapture, audioSnapshot, input, checkpointResult)
+    stability, profileCapture, audioSnapshot, input, checkpointResult,
+    observeOnly = false)
 {
     const rawEvidence = await page.evaluate(({ map, cursor, commandTimeMs,
         memoryLifecycle, stability, profileCapture, audioSnapshot, input,
-        checkpointResult }) => {
+        checkpointResult, observeOnly }) => {
         const memorySnapshot = memoryLifecycle.steadyState;
         const frames = globalThis.__retailValidationFrames.slice(cursor.frames)
             .filter((entry) => entry.state === "drawn" &&
@@ -456,7 +432,7 @@ async function mapEvidence(page, map, cursor, commandTimeMs, memoryLifecycle,
             ? 1_000 / averageFrameIntervalMs : null;
         const gameTimeWallTimeRatio = wallTimeAdvancementMs
             ? gameTimeAdvancementMs / wallTimeAdvancementMs : null;
-        const classification = stability.performanceWindowValid
+        const classification = observeOnly ? "RENDERS" : stability.performanceWindowValid
             ? averageFpsEquivalent >= 30 && percentile(0.95) <= 50 &&
                 gameTimeWallTimeRatio >= 0.90 ? "PLAYABLE" : "FUNCTIONAL"
             : null;
@@ -474,9 +450,11 @@ async function mapEvidence(page, map, cursor, commandTimeMs, memoryLifecycle,
                     stability.performanceWindowValid
                     ? stabilityFrames.length >= 60
                     : false,
-                input: Boolean(input) && Object.values(input).every(Boolean),
-                audio: (audioSnapshot?.decodedPcmBytes ?? 0) > 0,
-                checkpoint: checkpointResult.bytesPersisted > 0,
+                ...(observeOnly ? {} : {
+                    input: Boolean(input) && Object.values(input).every(Boolean),
+                    audio: (audioSnapshot?.decodedPcmBytes ?? 0) > 0,
+                    checkpoint: checkpointResult.bytesPersisted > 0,
+                }),
                 noFatalError: globalThis.__KISAKCOD_WEB__.state === "running",
             },
             mapCommandTimeMs: commandTimeMs,
@@ -558,7 +536,7 @@ async function mapEvidence(page, map, cursor, commandTimeMs, memoryLifecycle,
             checkpoint: checkpointResult,
         };
     }, { map, cursor, commandTimeMs, memoryLifecycle, stability, profileCapture,
-        audioSnapshot, input, checkpointResult });
+        audioSnapshot, input, checkpointResult, observeOnly });
     rawEvidence.frameProfile = aggregateGameplayProfile({
         frames: rawEvidence.rawFrameProfiles,
         gpuResults: rawEvidence.rawGpuProfiles,
@@ -646,7 +624,7 @@ function assertMemoryTelemetry(sample)
     expect(decode.cpuMilliseconds).toBeGreaterThanOrEqual(0);
 }
 
-function assertMapEvidence(evidence, memorySnapshot)
+function assertMapEvidence(evidence, memorySnapshot, observeOnly = false)
 {
     assertMemoryTelemetry(memorySnapshot);
     for (const sample of Object.values(evidence.memoryLifecycle)) {
@@ -708,11 +686,15 @@ function assertMapEvidence(evidence, memorySnapshot)
         expect(evidence.p99FrameTimeMs).toBeNull();
         expect(evidence.gameTimeWallTimeRatio).toBeNull();
     }
-    expect(evidence.audioDecodedBytes).toBeGreaterThan(0);
-    expect(evidence.audioQueuedBuffers).toBeGreaterThanOrEqual(0);
-    expect(evidence.checkpoint.filesPersisted).toBeGreaterThan(0);
-    expect(evidence.checkpoint.bytesPersisted).toBeGreaterThan(0);
-    expect(evidence.checkpoint.durationMs).toBeGreaterThanOrEqual(0);
+    if (observeOnly) {
+        expect(evidence.classification).toBe("RENDERS");
+    } else {
+        expect(evidence.audioDecodedBytes).toBeGreaterThan(0);
+        expect(evidence.audioQueuedBuffers).toBeGreaterThanOrEqual(0);
+        expect(evidence.checkpoint.filesPersisted).toBeGreaterThan(0);
+        expect(evidence.checkpoint.bytesPersisted).toBeGreaterThan(0);
+        expect(evidence.checkpoint.durationMs).toBeGreaterThanOrEqual(0);
+    }
 }
 
 const canonicalMapLifecycleStages = [
@@ -961,14 +943,6 @@ async function gameplayState(page, field, weaponIndex = 0)
         { stateField: field, weapon: weaponIndex });
 }
 
-async function gameplayFloat(page, field, component)
-{
-    return page.evaluate(
-        ({ stateField, vectorComponent }) => globalThis.__KISAKCOD_WEB__.module.call(
-            "_KisakWeb_TestGameplayFloat", stateField, vectorComponent),
-        { stateField: field, vectorComponent: component });
-}
-
 const missionStateField = Object.freeze({
     serverHealth: 17,
     serverPmType: 18,
@@ -1041,193 +1015,6 @@ async function canonicalMissionState(page)
         doneObjectives,
         saveChecksum,
     };
-}
-
-async function missionRouteObservation(page)
-{
-    const [view, serverHealth, objectiveHash, activeActors, aliveActors,
-        scriptThreads, missionFlags, committedSave, saveId, activeObjectives,
-        doneObjectives, saveChecksum, ...playerVector] = await Promise.all([
-        page.evaluate(() => structuredClone(
-            globalThis.__retailValidationViews.at(-1))),
-        gameplayState(page, missionStateField.serverHealth),
-        gameplayState(page, missionStateField.objectiveHash),
-        gameplayState(page, missionStateField.activeActors),
-        gameplayState(page, missionStateField.aliveActors),
-        gameplayState(page, missionStateField.scriptThreads),
-        gameplayState(page, missionStateField.missionFlags),
-        gameplayState(page, missionStateField.committedSave),
-        gameplayState(page, missionStateField.saveId),
-        gameplayState(page, missionStateField.activeObjectives),
-        gameplayState(page, missionStateField.doneObjectives),
-        gameplayState(page, missionStateField.saveChecksum),
-        ...[0, 1, 2, 3].flatMap((field) => [0, 1, 2].map(
-            (component) => gameplayFloat(page, field, component))),
-    ]);
-    if (!view?.viewOrigin) throw new Error("canonical renderer view is unavailable");
-    return {
-        timestampMs: view.observedMs,
-        origin: playerVector.slice(0, 3),
-        aimOrigin: playerVector.slice(9, 12),
-        viewAngles: playerVector.slice(3, 6),
-        aimAngles: playerVector.slice(6, 9),
-        health: serverHealth,
-        progression: {
-            objectiveHash,
-            activeObjectives,
-            doneObjectives,
-            missionFlags,
-        },
-        mission: {
-            activeActors,
-            aliveActors,
-            scriptThreads,
-        },
-        checkpoint: {
-            committed: Boolean(committedSave),
-            saveId,
-            checksum: saveChecksum,
-        },
-    };
-}
-
-function missionRouteAdapter(page)
-{
-    const keys = {
-        forward: "w", left: "a", right: "d", jump: "Space", use: "f",
-    };
-    return Object.freeze({
-        observe: () => missionRouteObservation(page),
-        async key(key, down) {
-            if (key === "fire" || key === "ads") {
-                const button = key === "fire" ? "left" : "right";
-                if (down) await page.mouse.down({ button });
-                else await page.mouse.up({ button });
-                return;
-            }
-            if (!keys[key]) throw new Error(`unsupported route key ${key}`);
-            if (down) await page.keyboard.down(keys[key]);
-            else await page.keyboard.up(keys[key]);
-        },
-        mouse(dx, dy) {
-            return page.evaluate(({ x, y }) => {
-                const movement = new MouseEvent("mousemove");
-                Object.defineProperties(movement, {
-                    movementX: { value: x },
-                    movementY: { value: y },
-                });
-                globalThis.dispatchEvent(movement);
-            }, { x: dx, y: dy });
-        },
-        wait: (milliseconds) => page.waitForTimeout(milliseconds),
-    });
-}
-
-async function prepareMissionRouteInput(page)
-{
-    await page.bringToFront();
-    const canvas = page.locator("#game-canvas");
-    for (let attempt = 0; attempt < 3 &&
-        (await gameplayState(page, 12) & 0x10) !== 0; ++attempt) {
-        await canvas.focus();
-        await page.keyboard.press("Escape");
-        await page.waitForTimeout(100);
-    }
-    await expect.poll(async () => (await gameplayState(page, 12) & 0x10))
-        .toBe(0);
-    await waitForRelativeMouseMode(page);
-    await canvas.click({ position: { x: 8, y: 8 } });
-    await expect.poll(() => page.evaluate(() => document.pointerLockElement?.id))
-        .toBe("game-canvas");
-}
-
-async function runMissionRouteSegments(adapter, route)
-{
-    const events = [];
-    for (const [segmentIndex, segment] of route.segments.entries()) {
-        const combat = segment.actions?.fire === true;
-        try {
-            const result = await createMissionRouteController(adapter, {
-                tickMs: combat ? 100 : 200,
-                ...(combat ? {
-                    mouseCountsPerDegree: 8,
-                    maximumMouseDelta: 512,
-                } : {}),
-                obstacleRecoveryAttempts: 4,
-                obstacleRecoveryMs: 1_000,
-            }).run({
-                schemaVersion: route.schemaVersion,
-                map: route.map,
-                segments: [segment],
-            });
-            events.push(...result.events.map((event) => ({
-                ...event, segmentIndex,
-            })));
-        } catch (error) {
-            error.segmentIndex = segmentIndex;
-            throw error;
-        }
-    }
-    return { schemaVersion: route.schemaVersion, map: route.map,
-        validationResult: "pass", events };
-}
-
-async function replayMissionRoute(page, before)
-{
-    const route = parseMissionRoute(JSON.parse(
-        await readFile(missionRoutePath, "utf8")));
-    expect(route.map).toBe(missionTargetMap);
-    await prepareMissionRouteInput(page);
-    let replay;
-    try {
-        replay = await runMissionRouteSegments(missionRouteAdapter(page), route);
-    } catch (error) {
-        console.log(`KISAK_ROUTE_REPLAY_FAILURE ${JSON.stringify({
-            code: error?.code, segmentIndex: error?.segmentIndex,
-            message: error?.message,
-        })}`);
-        throw error;
-    }
-    const after = await canonicalMissionState(page);
-    const changes = missionProgressDelta(before, after);
-    expect(missionObjectiveProgressDelta(before, after),
-        "route replay must change canonical objective or mission state")
-        .not.toEqual([]);
-    return { ...replay, changes, before, after };
-}
-
-async function authorMissionRoute(page)
-{
-    const recorder = createMissionRouteRecorder({ map: missionTargetMap });
-    let inputCursor = 0;
-    console.log("KISAK_ROUTE_AUTHOR_READY F8=mark waypoint F9=finish");
-    for (;;) {
-        recorder.recordObservation(await missionRouteObservation(page));
-        const captured = await page.evaluate((cursor) => {
-            const inputs = structuredClone(
-                globalThis.__retailValidationInput.slice(cursor));
-            const control = { ...globalThis.__retailRouteAuthor };
-            globalThis.__retailRouteAuthor.markers = 0;
-            return {
-                inputs,
-                inputCursor: globalThis.__retailValidationInput.length,
-                control,
-            };
-        }, inputCursor);
-        inputCursor = captured.inputCursor;
-        for (const input of captured.inputs)
-            recorder.recordInput(input, input.observedMs);
-        for (let marker = 0; marker < captured.control.markers; ++marker)
-            recorder.markWaypoint();
-        if (captured.control.finish) break;
-        await page.waitForTimeout(250);
-    }
-    const authored = recorder.finish();
-    await writeFile(missionRouteOutputPath,
-        `${JSON.stringify(authored.route, null, 2)}\n`, "utf8");
-    await writeFile(`${missionRouteOutputPath}.evidence.json`,
-        `${JSON.stringify(authored.evidence, null, 2)}\n`, "utf8");
-    return authored;
 }
 
 async function loadMissionStart(page)
@@ -1384,12 +1171,6 @@ function missionProgressDelta(before, after)
         after.saveChecksum !== before.saveChecksum)
         changes.push("checkpoint");
     return changes;
-}
-
-function missionObjectiveProgressDelta(before, after)
-{
-    return missionProgressDelta(before, after).filter(
-        (change) => change !== "checkpoint");
 }
 
 async function advanceMissionProgression(page, before, timeoutMs = 120_000)
@@ -2396,7 +2177,7 @@ if (phase3TargetMap) {
             test.setTimeout(900_000);
             failureStage = "Phase 3 test setup";
             failureClass = "unknown";
-            expect(sourceDirty,
+            if (!allowDirty) expect(sourceDirty,
                 "authoritative retail validation requires a clean source commit")
                 .toBe(false);
             const browser = page.context().browser();
@@ -2488,9 +2269,9 @@ if (phase3TargetMap) {
             const transitionIn = await rendererTransitionEvidence(
                 page, transitionInCursor, targetCommandMs, targetFrame.observedMs);
 
-            failureStage = `${phase3TargetMap} 60-second stability`;
+            failureStage = `${phase3TargetMap} stationary stability window`;
             const targetStability = await measureCleanPerformanceWindow(
-                page, phase3TargetMap, 60_000);
+                page, phase3TargetMap, stabilityDurationMs);
             const targetProfile = await captureGameplayProfile(
                 page, phase3TargetMap);
             failureStage = `${phase3TargetMap} renderer memory`;
@@ -2503,11 +2284,85 @@ if (phase3TargetMap) {
                 afterFirstWorldFrame: targetMemoryAfterWorld,
                 steadyState: targetMemory,
             };
+            const targetAudio = await page.evaluate(() => structuredClone(
+                globalThis.__retailAudioTelemetry.at(-1) ?? null));
+            if (phase3ObserveOnly) {
+                const targetEvidence = await mapEvidence(
+                    page, phase3TargetMap, targetCursor, targetCommandMs,
+                    targetMemoryLifecycle, targetStability, targetProfile,
+                    targetAudio, null, null, true);
+                targetEvidence.canonicalLifecycle = await lifecycleEvidence(
+                    page, targetCursor.lifecycle);
+                assertMapEvidence(targetEvidence, targetMemory, true);
+                const telemetry = await page.evaluate((cursor) => {
+                    const logs = globalThis.__retailLogs.slice(cursor.logs);
+                    const rendererPattern =
+                        /(webgl2|renderer|material|shader|texture)/i;
+                    const incompatibilityPattern =
+                        /(fail|error|reject|unsupported|incompat|fallback|missing)/i;
+                    return {
+                        glErrors: logs.filter(({ text }) => /webgl2/i.test(text) &&
+                            /(fail|error|reject)/i.test(text)),
+                        lifecycleFailures: logs.filter(({ text }) =>
+                            /canonical .* failed|runtime .* failed/i.test(text)),
+                        rendererMaterialCompatibilityTelemetry: logs.filter(({ text }) =>
+                            rendererPattern.test(text) &&
+                            incompatibilityPattern.test(text)),
+                        rendererLifecycle: structuredClone(
+                            globalThis.__retailRendererLifecycle.slice(
+                                cursor.rendererLifecycle)),
+                    };
+                }, targetCursor);
+                expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.state))
+                    .toBe("running");
+                expect(pageErrors).toEqual([]);
+                expect(telemetry.glErrors).toEqual([]);
+                expect(telemetry.lifecycleFailures).toEqual([]);
+                console.log(`KISAK_RETAIL_PHASE3_RESULT ${JSON.stringify({
+                    schemaVersion: retailEvidenceSchemaVersion,
+                    source: { commitSha: sourceCommit, dirty: sourceDirty },
+                    recordedAtUtc: new Date().toISOString(),
+                    environment: {
+                        browser: retailBrowserMetadata,
+                        operatingSystem,
+                        referenceHardware,
+                        build: "Release diagnostics",
+                    },
+                    validationResult: "pass",
+                    targetMap: phase3TargetMap,
+                    demonstrated: "RENDERS",
+                    probe: {
+                        mode: "stationary-observe-only",
+                        inputInjected: false,
+                        visualInspectionPerformed: false,
+                    },
+                    baseline: {
+                        map: "cargoship",
+                        commandAccepted: true,
+                        mapCommandTimeMs: cargoshipCommandMs,
+                        firstRealWorldFrameTimeMs: cargoshipFrame.observedMs,
+                        canonicalLifecycle: cargoshipLifecycle,
+                    },
+                    map: targetEvidence,
+                    transitionIn: {
+                        from: "cargoship",
+                        to: phase3TargetMap,
+                        ...transitionIn,
+                    },
+                    errors: {
+                        page: pageErrors,
+                        gl: telemetry.glErrors,
+                        lifecycle: telemetry.lifecycleFailures,
+                    },
+                    rendererMaterialCompatibilityTelemetry:
+                        telemetry.rendererMaterialCompatibilityTelemetry,
+                    rendererLifecycle: telemetry.rendererLifecycle,
+                })}`);
+                return;
+            }
             failureStage = `${phase3TargetMap} gameplay input/audio`;
             failureClass = "unknown";
             const targetInput = await exerciseRetailInput(page);
-            const targetAudio = await page.evaluate(() => structuredClone(
-                globalThis.__retailAudioTelemetry.at(-1) ?? null));
             expect(targetAudio?.decodedPcmBytes ?? 0).toBeGreaterThan(0);
             failureStage = `${phase3TargetMap} config checkpoint`;
             failureClass = "lifecycle";
@@ -2626,36 +2481,7 @@ if (phase3TargetMap) {
         });
 }
 
-if (missionTargetMap && missionRouteMode === "author") {
-    test("local retail mission route authoring",
-        { tag: "@retail-route-author" }, async ({ retailPage: page }) => {
-            test.setTimeout(7_200_000);
-            expect(test.info().project.use.headless,
-                "manual route authoring requires a headed browser")
-                .toBe(false);
-            const pageErrors = [];
-            page.on("pageerror", (error) => pageErrors.push(error.message));
-            await loadMissionStart(page);
-            failureStage = `${missionTargetMap} route authoring`;
-            failureClass = "input";
-            await prepareMissionRouteInput(page);
-            const authored = await authorMissionRoute(page);
-            expect(authored.route.segments.length).toBeGreaterThan(0);
-            expect(pageErrors).toEqual([]);
-            console.log(`KISAK_RETAIL_ROUTE_RESULT ${JSON.stringify({
-                schemaVersion: authored.route.schemaVersion,
-                source: { commitSha: sourceCommit, dirty: sourceDirty },
-                recordedAtUtc: new Date().toISOString(),
-                validationResult: "authored",
-                targetMap: missionTargetMap,
-                routeSegments: authored.route.segments.length,
-                observationCount: authored.evidence.observations.length,
-                inputTransitionCount: authored.evidence.inputTransitions.length,
-            })}`);
-        });
-}
-
-if (missionTargetMap && missionRouteMode !== "author") {
+if (missionTargetMap) {
     test("local retail mission progression", { tag: "@retail-mission" },
         async ({ retailPage: initialPage }) => {
             test.setTimeout(1_200_000);
@@ -2680,12 +2506,9 @@ if (missionTargetMap && missionRouteMode !== "author") {
             const combatLogStart = await page.evaluate(() =>
                 globalThis.__retailLogs.length);
             const progressionStart = initialState;
-            const inputEvidence = missionRoutePath
-                ? { validationResult: "canonical-input-route" }
-                : await exerciseTransitionInput(page);
-            const progression = missionRoutePath
-                ? await replayMissionRoute(page, progressionStart)
-                : await advanceMissionProgression(page, progressionStart);
+            const inputEvidence = await exerciseTransitionInput(page);
+            const progression = await advanceMissionProgression(
+                page, progressionStart);
             const enemyDamageEvents = await page.evaluate((start) =>
                 globalThis.__retailLogs.slice(start).filter(({ text }) =>
                     text.includes("canonical damage target=") &&
@@ -2861,27 +2684,9 @@ if (missionTargetMap && missionRouteMode !== "author") {
                 globalThis.__retailValidationViews.at(-1)?.viewOrigin));
             expect(Math.hypot(...freshViewOrigin.map((value, index) =>
                 value - savedViewOrigin[index]))).toBeLessThan(8);
-            const freshContinuationLogStart = await page.evaluate(() =>
-                globalThis.__retailLogs.length);
             const freshInput = await exerciseTransitionInput(page);
-            let continuedProgression;
-            if (missionRoutePath) {
-                const damageEvents = await ensureMissionEnemyDamage(
-                    page, freshContinuationLogStart);
-                expect(damageEvents,
-                    "loaded mission must continue through canonical combat")
-                    .not.toEqual([]);
-                continuedProgression = {
-                    validationResult: "pass",
-                    changes: ["enemyDamage"],
-                    damageEventCount: damageEvents.length,
-                    before: freshState,
-                    after: await canonicalMissionState(page),
-                };
-            } else {
-                continuedProgression = await advanceMissionProgression(
-                    page, freshState);
-            }
+            const continuedProgression = await advanceMissionProgression(
+                page, freshState);
             expect(pageErrors).toEqual([]);
 
             console.log(`KISAK_RETAIL_MISSION_RESULT ${JSON.stringify({

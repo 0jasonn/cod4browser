@@ -380,8 +380,15 @@ current renderer-frontend optimization path; further renderer changes should
 respond to evidence from broader canonical gameplay rather than extend the
 bootstrap as a standalone viewer.
 
-- Broaden campaign coverage and close renderer/material gaps from measured
-  canonical scenes, without introducing browser asset types.
+The playable offline slice is already demonstrated across six campaign maps.
+The mission-route author/replay and simulated-progression layer is retired with
+no replacement. The first observe-only expansion run establishes `scoutsniper`
+as `RENDERS` after canonical lifecycle completion and a 60-second stationary
+window; it makes no visual, functional, or playable claim. See
+[the stationary evidence](evidence/scoutsniper-stationary-838e047c.md).
+
+- Probe `ac130` stationary next and close only measured thermal/material gaps,
+  without introducing browser asset types or simulated gameplay.
 - Add a legal browser cinematic path or a documented graceful omission.
 - Add gamepad input when it becomes a product requirement.
 - Continue measuring the encoded-source recovery policy on later campaign

@@ -1,5 +1,15 @@
 # Web retail roadmap progress
 
+## 2026-09-01 current continuation
+
+The playable offline slice is already demonstrated across six maps. The
+mission-route author/replay simulator is retired without replacement, and DObj
+renderer convergence is complete through `838e047c`. A headless observe-only
+Release-diagnostics run now classifies `scoutsniper` as `RENDERS` after full
+canonical lifecycle execution and 60.013 seconds of stationary frames. No
+input or visual inspection was performed. `ac130` is the next stationary probe;
+`village_assault` route/progression automation remains retired.
+
 ## 2026-08-27 six-map profiling, one renderer optimization, and mission proof
 
 An explicit legally owned retail root was supplied. The six-map and renderer
@@ -41,9 +51,8 @@ event, a natural checkpoint, a 236,562-byte named game save, canonical death
 and restart, full browser shutdown, fresh-runtime `loadgame`, restored mission
 state, and continued movement/fire. Evidence:
 [retail-mission-da1e592c.json](docs/evidence/retail-mission-da1e592c.json).
-The next measured renderer change remains separate. The prepared next campaign
-batch is `scoutsniper`, `village_assault`, and `ac130`; all remain `UNTESTED`.
-Current classification: `PERFORMANCE BOTTLENECK IDENTIFIED — NEXT FIX REQUIRED`.
+That historical next-batch statement is superseded by the current continuation
+above. No measured bottleneck or compatibility fix is currently required.
 
 ## Phase 0 baseline
 

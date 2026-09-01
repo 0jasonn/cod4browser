@@ -1,9 +1,17 @@
 # Web product roadmap
 
 Updated 2026-09-01. This is the single active roadmap; earlier orders and
-mission-progression gates are superseded. Mission playing, progression
-validation, route generation, and campaign expansion are outside this task.
-Manual gameplay assessment can guide renderer work without a progression gate.
+mission-progression gates are superseded. A playable offline slice already
+exists across six maps, and dynamic DObj convergence is complete through
+`838e047c`. Route generation, waypoint replay, and simulated mission progression
+are retired and out of scope.
+
+The immediate task is the smallest stationary `ac130` campaign probe, reusing
+the observe-only validator proven by `scoutsniper`. It should exercise canonical
+loading through a bounded stationary frame/profile window and inspect thermal
+rendering and unusual-material telemetry without gameplay input. Fix only the
+earliest deterministic canonical/platform boundary if that run exposes one.
+Do not optimize speculatively or promote beyond the evidence observed.
 
 1. Canonical camera DPVS now filters both static-model instances and world
    surfaces. World camera runs preserve merged-batch order and canonical IDs;
@@ -108,17 +116,17 @@ Manual gameplay assessment can guide renderer work without a progression gate.
     light-region rejection, and selected-light masks before spot-matrix culling.
     All 120 work-count samples remain exact and the final Release passes.
 18. The [Kisak optimization audit](kisak-renderer-optimization-audit.md) is
-    complete with no applicable Open or Partial rows. The next renderer task is
-    an active-gameplay profile that selects a measured bottleneck.
+    complete with no applicable Open or Partial rows. Further renderer work is
+    gated on a measured compatibility defect or bottleneck.
 19. The [dynamic geometry ownership milestone](evidence/dynamic-geometry-ownership-af601efe.md)
     follows that profile direction without accepting non-reproducible authored
     gameplay as an A/B benchmark. Final dynamic vertex/index storage now crosses
     the backend boundary by ownership transfer; all 120 seeded paused work samples
     match while command geometry copy falls 99.6%. A measured WebGL double-buffer
     candidate did not reduce upload time and was reverted. This closes platform
-    geometry-handoff optimization. The next category is canonical DObj pose,
-    lighting and skinning, beginning with a focused native/wasm trace rather than
-    a browser-owned pose cache.
+    geometry-handoff optimization; later canonical DObj pose, lighting,
+    weighted/rigid skinning, and decoded-attribute work is complete through
+    `838e047c`.
 
 The static-instance follow-up used the focused native fixture, isolated control
 and candidate diagnostic builds, three final moving-camera profiles, and one
