@@ -340,6 +340,31 @@ void TestDynamicShadowRangesPreserveGeometryAndPlacement()
     assert(actual == expected);
 }
 
+void TestStableDrawOrderPreservesUnsafeAnchors()
+{
+    struct Batch { std::uint32_t key; bool reorderable; };
+    struct Draw { std::uint32_t batchIndex; };
+    const std::vector<Batch> batches{
+        {30u, true}, {10u, true}, {10u, true},
+        {0u, false},
+        {40u, true}, {20u, true},
+        {1u, false},
+        {5u, true},
+    };
+    const std::vector<Draw> draws{
+        {0u}, {1u}, {2u}, {3u}, {4u}, {5u}, {6u}, {7u},
+    };
+    std::vector<std::uint32_t> order;
+    WebRenderer_BuildStableDrawOrder(draws,
+        [&](const Draw &draw) -> const Batch & {
+            return batches[draw.batchIndex];
+        },
+        [](const Batch &batch) { return batch.reorderable; },
+        [](const Batch &batch) { return batch.key; }, order);
+    assert((order == std::vector<std::uint32_t>{
+        1u, 2u, 0u, 3u, 5u, 4u, 6u, 7u}));
+}
+
 void TestLodDelegatesToCanonicalXModelPolicy()
 {
     XModel model{};
@@ -481,6 +506,7 @@ int main()
     TestDObjEmissionAndAtomicFailure();
     TestFusedSkinningUsesCurrentPoseAndRecyclesOnlyGeometry();
     TestDynamicShadowRangesPreserveGeometryAndPlacement();
+    TestStableDrawOrderPreservesUnsafeAnchors();
     return 0;
 }
 

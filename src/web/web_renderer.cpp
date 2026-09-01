@@ -153,6 +153,9 @@ struct WebRendererRetainedWorldBatch
     bool ambientProbeLighting = false;
     bool castsSunShadow = false;
     std::uint32_t shadowStateBits0 = 0u;
+    // Canonical material draw-surface key with current light/probe/depth-hack
+    // inputs and no object ID. Camera ordering owns only this numeric copy.
+    std::uint64_t drawSortKey = 0u;
     std::string vertexShaderName;
     std::uint32_t vertexShaderProgramHash = 0u;
     std::string pixelShaderName;
@@ -461,6 +464,7 @@ struct WebRendererState
     std::vector<WebRendererRetainedBrushGeometry> retainedBrushGeometry;
     std::vector<WebRendererBrushModelInstanceDesc> retainedBrushInstances;
     std::vector<WebRendererDynamicDraw> dynamicDraws;
+    std::vector<std::uint32_t> dynamicCameraDrawOrder;
     std::vector<WebRendererRetainedWorldImage> retainedDynamicModelImages;
     WebRendererRetainedModelLightingAtlas retainedDynamicModelLighting;
     bool dynamicModelSceneActive = false;
@@ -1960,7 +1964,8 @@ std::size_t EmitRendererMemory(const char *state, bool sampleAllocator = true)
             geometry.indices.size() * sizeof(std::uint32_t);
     geometryBytes += g_renderer.retainedBrushInstances.size() *
         sizeof(WebRendererBrushModelInstanceDesc) +
-        g_renderer.dynamicDraws.size() * sizeof(WebRendererDynamicDraw);
+        g_renderer.dynamicDraws.size() * sizeof(WebRendererDynamicDraw) +
+        g_renderer.dynamicCameraDrawOrder.size() * sizeof(std::uint32_t);
     const RetainedImageMemoryStats worldImages =
         RetainedImageStats(g_renderer.retainedWorldImages);
     const RetainedImageMemoryStats staticModelImages =
@@ -5855,6 +5860,19 @@ WebRendererSurfaceResult CopyWorldCommand(
             batch.ambientProbeLighting = source.ambientProbeLighting;
             batch.castsSunShadow = source.castsSunShadow;
             batch.shadowStateBits0 = source.shadowStateBits0;
+            if (source.materialIdentity)
+            {
+                GfxDrawSurf drawSort =
+                    source.materialIdentity->info.drawSurf;
+                drawSort.fields.objectId = 0u;
+                drawSort.fields.reflectionProbeIndex =
+                    source.reflectionProbeIndex;
+                drawSort.fields.primaryLightIndex =
+                    source.primaryLightIndex;
+                if (source.depthHack)
+                    --drawSort.fields.primarySortKey;
+                batch.drawSortKey = drawSort.packed;
+            }
             batch.vertexShaderName = source.vertexShaderName
                 ? source.vertexShaderName : "<unavailable-vertex-shader>";
             batch.vertexShaderProgramHash = source.vertexShaderProgramHash;
@@ -6865,6 +6883,8 @@ void WebRenderer_UnloadWorldResources()
     decltype(g_renderer.retainedBrushGeometry){}.swap(g_renderer.retainedBrushGeometry);
     decltype(g_renderer.retainedBrushInstances){}.swap(g_renderer.retainedBrushInstances);
     decltype(g_renderer.dynamicDraws){}.swap(g_renderer.dynamicDraws);
+    decltype(g_renderer.dynamicCameraDrawOrder){}.swap(
+        g_renderer.dynamicCameraDrawOrder);
     decltype(g_renderer.retainedDynamicModelImages){}.swap(
         g_renderer.retainedDynamicModelImages);
     decltype(g_renderer.retainedUiVertices){}.swap(
@@ -7295,6 +7315,7 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
     std::vector<WebRendererRetainedWorldBatch> retainedBatches;
     std::vector<WebRendererBrushModelInstanceDesc> retainedBrushInstances;
     std::vector<WebRendererDynamicDraw> dynamicDraws;
+    std::vector<std::uint32_t> dynamicCameraDrawOrder;
     std::vector<WebRendererRetainedPrimaryLight> ignoredPrimaryLights;
     std::uint32_t ignoredSunPrimaryLightIndex = 0u;
     WebRendererRetainedModelLightingAtlas retainedLighting;
@@ -7364,6 +7385,39 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
         for (std::uint32_t index = brushInsertBatch; index < scene.batchCount; ++index)
             if (!appendIndexedDraw(index))
                 return WebRendererSurfaceResult::InvalidDescriptor;
+        const auto batchFor = [&](const WebRendererDynamicDraw &draw)
+            -> const WebRendererRetainedWorldBatch & {
+            if (draw.brushInstanceIndex == UINT32_MAX)
+                return retainedBatches[draw.batchIndex];
+            const auto &instance =
+                retainedBrushInstances[draw.brushInstanceIndex];
+            return g_renderer.retainedBrushGeometry[
+                instance.geometryIndex].batches[draw.batchIndex];
+        };
+        // Native sorts entity draw surfaces by the canonical material key.
+        // Keep unsafe draws as append-order anchors and sort only opaque,
+        // color/depth-writing model and brush runs between them.
+        WebRenderer_BuildStableDrawOrder(dynamicDraws, batchFor,
+            [](const WebRendererRetainedWorldBatch &batch) {
+                if (batch.sourceKind !=
+                        WebRendererSceneBatchKind::DynamicDObj &&
+                    batch.sourceKind !=
+                        WebRendererSceneBatchKind::DynamicXModel &&
+                    batch.sourceKind !=
+                        WebRendererSceneBatchKind::DynamicBModel)
+                    return false;
+                if ((batch.stateBits[0] & 0x700u) != 0u)
+                    return false;
+                if (!batch.materialIdentity) return true;
+                const std::uint32_t depthState = batch.stateBits[1];
+                const std::uint32_t depthFunc = depthState & 0xcu;
+                return (batch.stateBits[0] & 0x08000000u) != 0u &&
+                    (depthState & 3u) == 1u &&
+                    (depthFunc == 4u || depthFunc == 12u);
+            },
+            [](const WebRendererRetainedWorldBatch &batch) {
+                return batch.drawSortKey;
+            }, dynamicCameraDrawOrder);
     }
     catch (const std::bad_alloc &)
     {
@@ -7425,6 +7479,8 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
     g_renderer.retainedDynamicModelBatches = std::move(retainedBatches);
     g_renderer.retainedBrushInstances = std::move(retainedBrushInstances);
     g_renderer.dynamicDraws = std::move(dynamicDraws);
+    g_renderer.dynamicCameraDrawOrder =
+        std::move(dynamicCameraDrawOrder);
     g_renderer.retainedDynamicModelLighting = std::move(retainedLighting);
     g_renderer.dynamicModelSceneActive = !g_renderer.dynamicDraws.empty();
 
@@ -10378,21 +10434,21 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
             BeginFrameProfileGpuQuery(
                 *frameProfile, WebFrameProfileGpuStage::DynamicFx);
 #endif
-        // The ordered draw list combines ordinary DObjs, retained moving brushes,
-        // DynEnts, and first-person DObjs. Native draw-surf
-        // generation keeps depth-hacked first-person surfaces in their camera
-        // pass; drawing the append order directly lets a later moving brush
-        // overwrite transparent viewmodel surfaces such as the G36C reflex
-        // dot (which intentionally does not write depth). Draw ordinary scene
-        // geometry first, then the reserved-depth first-person pass.
+        // The camera order combines ordinary DObjs, retained moving brushes,
+        // DynEnts, and first-person DObjs. Safe opaque runs follow canonical
+        // material keys; transparent/FX/state-sensitive anchors retain append
+        // order. Depth-hacked first-person surfaces remain in their reserved
+        // camera pass so ordinary geometry cannot overwrite the viewmodel.
         for (std::uint32_t cameraPass = 0u; cameraPass < 2u; ++cameraPass)
         {
             const bool depthHackPass = cameraPass != 0u;
             WebRendererDrawState<WebRendererRetainedWorldBatch> drawState;
             std::uint32_t previousInstance = UINT32_MAX - 1u;
             glDepthRangef(0.0f, depthHackPass ? 0.015625f : 1.0f);
-            for (const auto &draw : g_renderer.dynamicDraws)
+            for (const std::uint32_t drawIndex :
+                 g_renderer.dynamicCameraDrawOrder)
             {
+                const auto &draw = g_renderer.dynamicDraws[drawIndex];
                 const auto &batch = DynamicDrawBatch(draw);
                 if (batch.depthHack != depthHackPass) continue;
                 if (!WebRenderer_IsCameraVisibleXModelSurface(

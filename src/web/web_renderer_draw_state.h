@@ -1,8 +1,42 @@
 #pragma once
 
 #include <array>
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <numeric>
+#include <vector>
+
+// Preserve every non-reorderable entry as an anchor. Stable-sort only the
+// contiguous runs that the caller has proved order-independent.
+template<typename Entries, typename BatchFor, typename CanReorder,
+    typename SortKey>
+void WebRenderer_BuildStableDrawOrder(
+    const Entries &entries, BatchFor batchFor, CanReorder canReorder,
+    SortKey sortKey, std::vector<std::uint32_t> &order)
+{
+    order.resize(entries.size());
+    std::iota(order.begin(), order.end(), 0u);
+    std::size_t runBegin = 0u;
+    while (runBegin < order.size())
+    {
+        if (!canReorder(batchFor(entries[order[runBegin]])))
+        {
+            ++runBegin;
+            continue;
+        }
+        std::size_t runEnd = runBegin + 1u;
+        while (runEnd < order.size() &&
+            canReorder(batchFor(entries[order[runEnd]])))
+            ++runEnd;
+        std::stable_sort(order.begin() + runBegin, order.begin() + runEnd,
+            [&](std::uint32_t left, std::uint32_t right) {
+                return sortKey(batchFor(entries[left])) <
+                    sortKey(batchFor(entries[right]));
+            });
+        runBegin = runEnd;
+    }
+}
 
 // Join adjacent index ranges only when the caller proves identical shadow
 // inputs. Skipped casters always break a run. This never uses camera visibility.
