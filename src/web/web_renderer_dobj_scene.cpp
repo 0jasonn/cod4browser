@@ -258,12 +258,76 @@ bool SkinWeightedSurface(
     return vertexIndex == surface.vertCount;
 }
 
+struct RigidDecodedSurface
+{
+    const GfxPackedVertex *source = nullptr;
+    std::vector<WebRendererSurfaceVertex> vertices;
+};
+
+bool DecodeRigidVertexStatic(
+    const GfxPackedVertex &source,
+    WebRendererSurfaceVertex &vertex) noexcept
+{
+    std::copy_n(source.xyz, 3u, vertex.position);
+    Vec3UnpackUnitVec(source.normal, vertex.normal);
+    Vec3UnpackUnitVec(source.tangent, vertex.tangent);
+    if (!Finite3(vertex.position) || !Finite3(vertex.normal) ||
+        !Finite3(vertex.tangent) || !std::isfinite(source.binormalSign))
+    {
+        return false;
+    }
+    vertex.binormalSign = source.binormalSign;
+    vertex.color[0] = static_cast<float>(
+        (source.color.packed >> 16u) & 0xffu) * BYTE_TO_UNIT;
+    vertex.color[1] = static_cast<float>(
+        (source.color.packed >> 8u) & 0xffu) * BYTE_TO_UNIT;
+    vertex.color[2] = static_cast<float>(
+        source.color.packed & 0xffu) * BYTE_TO_UNIT;
+    vertex.color[3] = static_cast<float>(
+        (source.color.packed >> 24u) & 0xffu) * BYTE_TO_UNIT;
+    Vec2UnpackTexCoords(source.texCoord, vertex.textureCoordinate);
+    return std::isfinite(vertex.textureCoordinate[0]) &&
+        std::isfinite(vertex.textureCoordinate[1]);
+}
+
+const WebRendererSurfaceVertex *ResolveRigidDecodedVertices(
+    const XSurface &surface,
+    std::vector<RigidDecodedSurface> &cache,
+    std::uint32_t &cachedVertexCount)
+{
+    const auto found = std::find_if(cache.begin(), cache.end(),
+        [&surface](const RigidDecodedSurface &entry) {
+            return entry.source == surface.verts0 &&
+                entry.vertices.size() == surface.vertCount;
+        });
+    if (found != cache.end()) return found->vertices.data();
+    if (surface.vertCount > WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES -
+            cachedVertexCount)
+    {
+        return nullptr;
+    }
+    RigidDecodedSurface decoded;
+    decoded.source = surface.verts0;
+    decoded.vertices.resize(surface.vertCount);
+    for (std::uint32_t index = 0u; index < surface.vertCount; ++index)
+        if (!DecodeRigidVertexStatic(
+                surface.verts0[index], decoded.vertices[index]))
+            return nullptr;
+    cache.push_back(std::move(decoded));
+    cachedVertexCount += surface.vertCount;
+    return cache.back().vertices.data();
+}
+
 bool SkinRigidSurface(
     const XSurface &surface,
     const std::vector<DObjSkelMat> &matrices,
+    std::vector<RigidDecodedSurface> &cache,
+    std::uint32_t &cachedVertexCount,
     WebRendererSurfaceVertex *vertices)
 {
     if (!surface.vertList || surface.vertListCount == 0u) return false;
+    const WebRendererSurfaceVertex *decoded = ResolveRigidDecodedVertices(
+        surface, cache, cachedVertexCount);
     std::uint32_t vertexIndex = 0u;
     for (std::uint32_t listIndex = 0u;
          listIndex < surface.vertListCount; ++listIndex)
@@ -276,16 +340,21 @@ bool SkinRigidSurface(
         for (std::uint32_t local = 0u; local < list.vertCount;
              ++local, ++vertexIndex)
         {
-            const GfxPackedVertex &source = surface.verts0[vertexIndex];
+            WebRendererSurfaceVertex uncached;
+            const WebRendererSurfaceVertex *source = decoded
+                ? &decoded[vertexIndex] : &uncached;
+            if (!decoded && !DecodeRigidVertexStatic(
+                    surface.verts0[vertexIndex], uncached))
+                return false;
             WebRendererSurfaceVertex &output = vertices[vertexIndex];
-            TransformPosition(source.xyz, *matrix, output.position);
-            float unpackedNormal[3]{};
-            Vec3UnpackUnitVec(source.normal, unpackedNormal);
-            TransformDirection(unpackedNormal, *matrix, output.normal);
-            float unpackedTangent[3]{};
-            Vec3UnpackUnitVec(source.tangent, unpackedTangent);
-            TransformDirection(unpackedTangent, *matrix, output.tangent);
-            if (!FinishVertex(source, output)) return false;
+            output = *source;
+            TransformPosition(source->position, *matrix, output.position);
+            TransformDirection(source->normal, *matrix, output.normal);
+            TransformDirection(source->tangent, *matrix, output.tangent);
+            if (!Finite3(output.position) ||
+                !NormalizeDirection(output.normal) ||
+                !NormalizeDirection(output.tangent))
+                return false;
         }
     }
     return vertexIndex == surface.vertCount;
@@ -302,6 +371,8 @@ struct DObjSkinningScratch
     };
 
     std::vector<DObjSkelMat> matrices;
+    std::vector<RigidDecodedSurface> rigidDecodedSurfaces;
+    std::uint32_t rigidDecodedVertexCount = 0u;
     std::vector<WebRendererSurfaceVertex> vertices;
     std::vector<std::uint32_t> indices;
     std::vector<ModelLightingCacheEntry> modelLighting;
@@ -309,9 +380,10 @@ struct DObjSkinningScratch
 
 DObjSkinningScratch &SkinningScratch() noexcept
 {
-    // R_RenderScene rebuilds dynamic DObj geometry synchronously. Retain only
-    // numeric workspace and canonical lighting-handle payloads so repeated
-    // frames reuse capacity without retaining model, pose, or material pointers.
+    // R_RenderScene rebuilds dynamic DObj geometry synchronously. Retain
+    // bounded decoded immutable vertex records, numeric workspace, and
+    // lighting-handle payloads; model, pose, and material pointers remain
+    // callback-scoped. R_UnloadWorld releases the source-vertex identities.
     static thread_local DObjSkinningScratch scratch;
     return scratch;
 }
@@ -668,7 +740,12 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
 
 #if KISAK_WEB_DIAGNOSTICS
                 if (profile)
-                    profile->dobjSkinningMs += WebFrameProfile_Now() - substageStarted;
+                {
+                    const double elapsed =
+                        WebFrameProfile_Now() - substageStarted;
+                    profile->dobjSkinningMs += elapsed;
+                    profile->dobjMatrixMs += elapsed;
+                }
 #endif
                 bool submittedModel = false;
                 for (std::uint32_t localSurface = 0u;
@@ -708,13 +785,21 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                         replacement.vertices.data() + vertexBase;
                     const bool skinned = surface.deformed
                         ? SkinWeightedSurface(surface, scratch.matrices, vertices)
-                        : SkinRigidSurface(surface, scratch.matrices, vertices);
+                        : SkinRigidSurface(surface, scratch.matrices,
+                            scratch.rigidDecodedSurfaces,
+                            scratch.rigidDecodedVertexCount, vertices);
 #if KISAK_WEB_DIAGNOSTICS
                     if (profile)
                     {
                         // Includes vertex construction/attributes now that emission
                         // is fused with skinning. There is no separate vertex pass.
-                        profile->dobjSkinningMs += WebFrameProfile_Now() - substageStarted;
+                        const double elapsed =
+                            WebFrameProfile_Now() - substageStarted;
+                        profile->dobjSkinningMs += elapsed;
+                        if (surface.deformed)
+                            profile->dobjWeightedSkinningMs += elapsed;
+                        else
+                            profile->dobjRigidSkinningMs += elapsed;
                         substageStarted = WebFrameProfile_Now();
                     }
 #endif

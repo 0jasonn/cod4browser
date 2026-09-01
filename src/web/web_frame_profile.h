@@ -205,8 +205,12 @@ struct WebFrameProfileSample
     double dobjBuildMs = 0.0;
     double dobjPoseMs = 0.0;
     double dobjLightingMs = 0.0;
-    // Includes final vertex construction/attributes after fused DObj emission.
+    // Includes matrix setup and final vertex construction/attributes.
     double dobjSkinningMs = 0.0;
+    // Nested, disjoint parts of dobjSkinningMs.
+    double dobjMatrixMs = 0.0;
+    double dobjWeightedSkinningMs = 0.0;
+    double dobjRigidSkinningMs = 0.0;
     double dobjGeometryMs = 0.0;
     // Nested, disjoint geometry intervals; material/batch setup is the residual.
     double dobjVertexEmitMs = 0.0; // zero when emission is fused with skinning

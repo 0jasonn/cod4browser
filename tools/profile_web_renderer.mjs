@@ -316,9 +316,16 @@ try {
     const dynamicFields = ['dynamicCopyMs', 'dynamicGeometryUploadMs', 'dynamicTextureUploadMs', 'dynamicPublishMs'];
     const commandFields = ['commandGeometryCheckMs', 'commandGeometryCopyMs', 'commandBatchCopyMs'];
     for (const field of [...sceneFields, ...assemblyFields, ...brushFields, ...dynamicFields, ...commandFields, 'sceneCloudAppendMs',
-        'dobjPoseMs', 'dobjLightingMs', 'dobjSkinningMs', 'dobjGeometryMs',
+        'dobjPoseMs', 'dobjLightingMs', 'dobjSkinningMs',
+        'dobjMatrixMs', 'dobjWeightedSkinningMs', 'dobjRigidSkinningMs', 'dobjGeometryMs',
         'dobjVertexEmitMs', 'dobjIndexEmitMs', 'sceneBrushBuildMs'])
         assert.equal(profile.cpu[field]?.sampleCount, 120, field);
+    for (const { cpu } of frames) {
+        const splitSkinning = cpu.dobjMatrixMs + cpu.dobjWeightedSkinningMs +
+            cpu.dobjRigidSkinningMs;
+        assert(splitSkinning <= cpu.dobjSkinningMs + 0.001,
+            `DObj skinning intervals overlap: ${splitSkinning - cpu.dobjSkinningMs}`);
+    }
     const sceneResiduals = frames.map(({ cpu }) => {
         for (const field of sceneFields) assert(cpu[field] >= 0, field);
         const residual = cpu.sceneBuildMs - sceneFields.reduce((sum, field) => sum + cpu[field], 0);
