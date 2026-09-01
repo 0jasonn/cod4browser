@@ -293,18 +293,87 @@ bool SkinRigidSurface(
 
 struct DObjSkinningScratch
 {
+    struct ModelLightingCacheEntry
+    {
+        float origin[3]{};
+        std::uint32_t nonSunPrimaryLightIndex = 0u;
+        WebRendererModelLightingSample sample{};
+        bool valid = false;
+    };
+
     std::vector<DObjSkelMat> matrices;
     std::vector<WebRendererSurfaceVertex> vertices;
     std::vector<std::uint32_t> indices;
+    std::vector<ModelLightingCacheEntry> modelLighting;
 };
 
 DObjSkinningScratch &SkinningScratch() noexcept
 {
     // R_RenderScene rebuilds dynamic DObj geometry synchronously. Retain only
-    // numeric workspace so repeated surfaces and frames reuse their
-    // capacity without retaining canonical model, pose, or material pointers.
+    // numeric workspace and canonical lighting-handle payloads so repeated
+    // frames reuse capacity without retaining model, pose, or material pointers.
     static thread_local DObjSkinningScratch scratch;
     return scratch;
+}
+
+bool ResolveModelLighting(
+    DObjSkinningScratch &scratch,
+    const WebRendererDObjSubmission &submission,
+    const GfxLightGrid &lightGrid,
+    std::uint32_t nonSunPrimaryLightIndex,
+    const WebRendererModelLightingCallbacks *callbacks,
+    WebRendererModelLightingSample &sample)
+{
+    DObjSkinningScratch::ModelLightingCacheEntry *entry = nullptr;
+    std::uint16_t *const handle = submission.cachedLightingHandle;
+    if (handle && *handle != 0u && *handle <= scratch.modelLighting.size())
+    {
+        entry = &scratch.modelLighting[*handle - 1u];
+        if (entry->valid &&
+            entry->nonSunPrimaryLightIndex == nonSunPrimaryLightIndex &&
+            entry->origin[0] == submission.lightingOrigin[0] &&
+            entry->origin[1] == submission.lightingOrigin[1] &&
+            entry->origin[2] == submission.lightingOrigin[2])
+        {
+            sample = entry->sample;
+            return true;
+        }
+    }
+
+    WebRendererModelLightingSample replacement{};
+    if (!WebRenderer_EvaluateModelLighting(
+            lightGrid, submission.lightingOrigin,
+            nonSunPrimaryLightIndex, callbacks, replacement))
+    {
+        return false;
+    }
+
+    if (handle)
+    {
+        if (!entry)
+        {
+            if (scratch.modelLighting.size() < UINT16_MAX)
+            {
+                scratch.modelLighting.emplace_back();
+                *handle = static_cast<std::uint16_t>(
+                    scratch.modelLighting.size());
+                entry = &scratch.modelLighting.back();
+            }
+            else
+            {
+                *handle = 0u;
+            }
+        }
+        if (entry)
+        {
+            std::copy_n(submission.lightingOrigin, 3u, entry->origin);
+            entry->nonSunPrimaryLightIndex = nonSunPrimaryLightIndex;
+            entry->sample = replacement;
+            entry->valid = true;
+        }
+    }
+    sample = replacement;
+    return true;
 }
 
 bool SurfaceHidden(
@@ -511,11 +580,9 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
             if (submissionLightingReady)
             {
                 WebRendererModelLightingSample lightingSample{};
-                submissionLightingReady = WebRenderer_EvaluateModelLighting(
-                    *lightGrid,
-                    submission.lightingOrigin,
-                    lightGrid->sunPrimaryLightIndex,
-                    lightingCallbacks,
+                submissionLightingReady = ResolveModelLighting(
+                    scratch, submission, *lightGrid,
+                    lightGrid->sunPrimaryLightIndex, lightingCallbacks,
                     lightingSample) &&
                     WebRenderer_SetModelLightingAtlasEntry(
                         replacement.modelLightingAtlas,

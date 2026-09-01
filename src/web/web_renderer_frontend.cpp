@@ -3029,12 +3029,17 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             {
                 continue;
             }
-            // EffectsCore retains this handle only in the generated draw
-            // context.  The portable backend does not consume native model-
-            // lighting handles yet, but zero is reserved by the canonical
-            // mark path, so preserve a stable per-submission nonzero identity.
-            const std::uint16_t lightingHandle = static_cast<std::uint16_t>(
-                std::min<std::uint32_t>(index + 1u, UINT16_MAX));
+            // The DObj build has assigned the canonical pose-owned lighting
+            // handle by this point. Keep the historical nonzero fallback when
+            // lighting was unavailable.
+            const std::uint16_t fallbackLightingHandle =
+                static_cast<std::uint16_t>(
+                    std::min<std::uint32_t>(index + 1u, UINT16_MAX));
+            const std::uint16_t lightingHandle =
+                submission.cachedLightingHandle &&
+                    *submission.cachedLightingHandle != 0u
+                ? *submission.cachedLightingHandle
+                : fallbackLightingHandle;
             FX_GenerateMarkVertsForEntDObj(
                 refdef->localClientNum,
                 static_cast<int>(submission.entityNumber),
@@ -3820,6 +3825,10 @@ void __cdecl R_AddDObjToScene(const DObj_s *obj, const cpose_t *pose,
     submission.pose = pose;
     submission.entityNumber = entityNumber;
     submission.renderFlags = renderFlags;
+    // Native R_AddDObjToScene also treats the first cpose_t field as the
+    // mutable cached model-lighting handle despite receiving a const pose.
+    submission.cachedLightingHandle = pose
+        ? &const_cast<cpose_t *>(pose)->lightingHandle : nullptr;
     const float *sourceLightingOrigin = lightingOrigin
         ? lightingOrigin : (pose ? pose->origin : vec3_origin);
     std::copy_n(sourceLightingOrigin, 3u, submission.lightingOrigin);

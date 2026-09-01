@@ -1,5 +1,6 @@
 #include <web/web_renderer_dobj_scene.h>
 #include <web/web_renderer_draw_state.h>
+#include <gfx_d3d/gfx_world_types.h>
 #include <gfx_d3d/material_types.h>
 #include <universal/q_shared.h>
 #include <xanim/xmodel.h>
@@ -11,6 +12,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 
@@ -19,6 +21,64 @@ namespace
 float g_lodDistance = -1.0f;
 int g_canonicalLod = 2;
 Material *g_resolvedMaterial = nullptr;
+
+struct ModelLightingGridFixture
+{
+    std::uint16_t rowDataStart[2]{0u, 4u};
+    std::uint8_t rawRows[32]{};
+    GfxLightGridEntry entries[8]{};
+    GfxLightGridColors colors[8]{};
+    GfxLightGrid grid{};
+
+    ModelLightingGridFixture()
+    {
+        struct Row
+        {
+            std::uint16_t colStart;
+            std::uint16_t colCount;
+            std::uint16_t zStart;
+            std::uint16_t zCount;
+            std::uint32_t firstEntry;
+        };
+        for (std::uint32_t rowIndex = 0u; rowIndex < 2u; ++rowIndex)
+        {
+            const Row row{4096u, 2u, 2048u, 2u, rowIndex * 4u};
+            std::memcpy(rawRows + rowIndex * 16u, &row, sizeof(row));
+            rawRows[rowIndex * 16u + 12u] = 2u;
+            rawRows[rowIndex * 16u + 13u] = 2u;
+        }
+        for (std::uint32_t index = 0u; index < 8u; ++index)
+        {
+            entries[index].colorsIndex = static_cast<std::uint16_t>(index);
+            entries[index].primaryLightIndex = 1u;
+            for (auto &rgb : colors[index].rgb)
+                std::fill_n(rgb, 3u, 32u);
+        }
+        grid.sunPrimaryLightIndex = 1u;
+        grid.mins[0] = 4096u;
+        grid.mins[1] = 4096u;
+        grid.mins[2] = 2048u;
+        grid.maxs[0] = 4097u;
+        grid.maxs[1] = 4097u;
+        grid.maxs[2] = 2049u;
+        grid.rowAxis = 0u;
+        grid.colAxis = 1u;
+        grid.rowDataStart = rowDataStart;
+        grid.rawRowDataSize = sizeof(rawRows);
+        grid.rawRowData = rawRows;
+        grid.entryCount = 8u;
+        grid.entries = entries;
+        grid.colorCount = 8u;
+        grid.colors = colors;
+    }
+
+    void SetColor(std::uint8_t value) noexcept
+    {
+        for (auto &color : colors)
+            for (auto &rgb : color.rgb)
+                std::fill_n(rgb, 3u, value);
+    }
+};
 
 // Synthetic, repository-authored geometry. Runtime pose and packing are
 // stubbed below; the actual builder, validation and publication run here.
@@ -146,6 +206,80 @@ void TestDObjEmissionAndAtomicFailure()
 Material *ResolveMaterial(Material *) noexcept
 {
     return g_resolvedMaterial;
+}
+
+void TestCanonicalPoseLightingHandleReusesExactOrigin()
+{
+    std::array<GfxPackedVertex, 3> vertices{};
+    for (auto &vertex : vertices)
+    {
+        vertex.normal.packed = 1u;
+        vertex.tangent.packed = 2u;
+        vertex.binormalSign = 1.0f;
+    }
+    std::uint16_t indices[]{0u, 1u, 2u};
+    XRigidVertList rigid{};
+    rigid.vertCount = 3u;
+    XSurface surface{};
+    surface.vertCount = 3u;
+    surface.triCount = 1u;
+    surface.verts0 = vertices.data();
+    surface.triIndices = indices;
+    surface.vertList = &rigid;
+    surface.vertListCount = 1u;
+    Material *materials[]{nullptr};
+    DObjAnimMat base{};
+    XModel model{};
+    model.numBones = 1u;
+    model.numLods = 1;
+    model.numsurfs = 1u;
+    model.lodInfo[0].numsurfs = 1u;
+    model.surfs = &surface;
+    model.materialHandles = materials;
+    model.baseMat = &base;
+    XModel *models[]{&model};
+    DObj_s obj{};
+    obj.numModels = 1u;
+    obj.numBones = 1u;
+    obj.models = models;
+    obj.skel.mat = &base;
+    cpose_t pose{};
+    WebRendererDObjSubmission submission{&obj, &pose, 7u, 0u};
+    submission.cachedLightingHandle = &pose.lightingHandle;
+    std::fill_n(submission.lightingOrigin, 3u, 16.0f);
+    submission.lightingOrigin[2] = 32.0f;
+    ModelLightingGridFixture fixture;
+    WebRendererDObjSceneCommand command;
+    WebRendererLodParms lodParms;
+    assert(WebRenderer_BuildLodParms(pose.origin, 1.0f, 1.0f, 0.0f,
+        1.0f, 0.0f, lodParms));
+    const auto build = [&]() {
+        const WebRendererDObjSceneResult result =
+            WebRenderer_BuildDObjSceneCommand(
+                &submission, 1u, command, &lodParms, &fixture.grid);
+        if (result != WebRendererDObjSceneResult::Success)
+            std::fprintf(stderr, "lighting cache build failed: %s\n",
+                WebRenderer_DObjSceneResultString(result));
+        return result;
+    };
+    WebRenderer_ReleaseDObjSceneScratch();
+    assert(build() == WebRendererDObjSceneResult::Success);
+    assert(pose.lightingHandle == 1u);
+    assert(command.modelLightingAtlas.pixels[0] == 32u);
+
+    fixture.SetColor(96u);
+    assert(build() == WebRendererDObjSceneResult::Success);
+    assert(command.modelLightingAtlas.pixels[0] == 32u);
+
+    submission.lightingOrigin[0] += 1.0f;
+    assert(build() == WebRendererDObjSceneResult::Success);
+    assert(command.modelLightingAtlas.pixels[0] == 96u);
+
+    fixture.SetColor(128u);
+    WebRenderer_ReleaseDObjSceneScratch();
+    assert(build() == WebRendererDObjSceneResult::Success);
+    assert(command.modelLightingAtlas.pixels[0] == 128u);
+    WebRenderer_ReleaseDObjSceneScratch();
 }
 
 void TestFusedSkinningUsesCurrentPoseAndRecyclesOnlyGeometry()
@@ -505,6 +639,7 @@ int main()
     TestDObjMaterialResolutionPreservesCanonicalFallback();
     TestReflexSightTechniqueSelectsIntensityOpacitySubset();
     TestDObjEmissionAndAtomicFailure();
+    TestCanonicalPoseLightingHandleReusesExactOrigin();
     TestFusedSkinningUsesCurrentPoseAndRecyclesOnlyGeometry();
     TestDynamicShadowRangesPreserveGeometryAndPlacement();
     TestStableDrawOrderPreservesUnsafeAnchors();

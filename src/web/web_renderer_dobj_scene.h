@@ -35,6 +35,7 @@ struct WebRendererDObjSubmission
     const cpose_t *pose;
     std::uint32_t entityNumber;
     std::uint32_t renderFlags;
+    std::uint16_t *cachedLightingHandle = nullptr;
     float lightingOrigin[3];
     std::uint8_t reflectionProbeIndex = 0u;
     const GfxImage *reflectionProbeImage = nullptr;
