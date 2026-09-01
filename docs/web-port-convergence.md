@@ -176,6 +176,16 @@ order. Changed origins recompute, and the handle now also reaches canonical
 mark generation. Exact-work diagnostics observed 87.3% lower DObj lighting
 time without changing static culling or independent shadow selection.
 
+The [dynamic DObj convergence milestone](evidence/dobj-rigid-decode-3e65c7d0.md)
+measures matrix, weighted and rigid skinning separately, then removes repeated
+packed-attribute decoding from the dominant rigid path. The bounded cache owns
+only immutable decoded vertex values and source identity until world unload;
+current canonical bone matrices still produce every final vertex. Exact-work
+diagnostics observed 22.3% lower rigid skinning, 8.4% lower DObj build and 6.6%
+lower renderer-frontend time. A GPU rigid-placement candidate was rejected
+because it changed shadow partition work and raised total time. Static-model
+camera culling and independent sun/spot shadow selection remain intact.
+
 Dynamic camera submission now mirrors Kisak's material draw-surface ordering
 inside proven-safe opaque runs. Blended, depth-equal/disabled, no-color, FX,
 sun, and other state-sensitive batches remain append-order anchors, and shadow
@@ -362,12 +372,13 @@ checks, exact logical-work qualification, recovery and one final Release,
 separating diagnostic DObj-stage reductions from the observed 7.54% production
 pair-mean reduction and its control drift.
 
-Weighted DObj basis handling and pose-owned model-lighting reuse now match
-canonical Kisak. Exact paused measurements observed 10.8% lower DObj skinning
-and 87.3% lower DObj lighting time. The next renderer step should first split
-remaining skinning cost into matrix setup, weighted surfaces and rigid surfaces,
-then adapt only the dominant native path; do not assume rigid placement wins
-without that measurement.
+Dynamic DObj pose, weighted basis, lighting reuse, rigid transformation,
+culling and shadow submission now converge on canonical Kisak behavior. The
+final measured rigid path retains immutable packed-attribute decoding while
+preserving the existing draw command and exact shadow work. This closes the
+current renderer-frontend optimization path; further renderer changes should
+respond to evidence from broader canonical gameplay rather than extend the
+bootstrap as a standalone viewer.
 
 - Broaden campaign coverage and close renderer/material gaps from measured
   canonical scenes, without introducing browser asset types.

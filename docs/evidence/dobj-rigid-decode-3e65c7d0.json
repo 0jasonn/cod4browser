@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUtc": "2026-09-01T15:00:15Z",
+  "scope": "Seeded paused CargoShip dynamic DObj renderer qualification on one host",
+  "runtimeCommit": "3e65c7d0",
+  "environment": {
+    "browser": "Chrome",
+    "version": "152.0.7977.65",
+    "processor": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "viewport": { "width": 1440, "height": 1000 }
+  },
+  "artifacts": {
+    "controlDiagnosticsSha256": "f070eb4764244d01074001845daaee531715175c76a31d49bdd1f11f4feef0b9",
+    "candidateDiagnosticsSha256": "6770eefb4dd0ab6589ffca0906033b2bf7e39617ff24046f8b86941075de7d12",
+    "finalProductionSha256": "fd604a8e07dcf3129dcad7635e3da2bbdeacfcbd40c888189f68e5d3bf8d5a86"
+  },
+  "qualifiedPausedDiagnostic": {
+    "matchingWorkCountSamples": 120,
+    "workCountSha256": "fed8ea624d731601e62fc6639021ecec6eb3dd28ed9944461cf4704dcba9917c",
+    "control": {
+      "dobjBuildMs": 2.4566249971588454,
+      "dobjSkinningMs": 1.2314166749517124,
+      "dobjMatrixMs": 0.10004166215658188,
+      "dobjWeightedSkinningMs": 0.4219999959071477,
+      "dobjRigidSkinningMs": 0.7093750168879827,
+      "sceneBuildMs": 4.901958332955838,
+      "rendererFrontendMs": 5.6589166636268295,
+      "rendererBackendMs": 6.302416665355365,
+      "totalMs": 11.969874995450178,
+      "cleanFrameIntervalMs": 16.667883333365122
+    },
+    "candidate": {
+      "dobjBuildMs": 2.250999999543031,
+      "dobjSkinningMs": 1.0227083166440327,
+      "dobjMatrixMs": 0.09745832631985346,
+      "dobjWeightedSkinningMs": 0.3737916777531306,
+      "dobjRigidSkinningMs": 0.5514583125710487,
+      "sceneBuildMs": 4.5658749982714655,
+      "rendererFrontendMs": 5.2855416665474575,
+      "rendererBackendMs": 6.533916665116946,
+      "totalMs": 11.829666664203009,
+      "cleanFrameIntervalMs": 16.679833333293598
+    }
+  },
+  "validation": {
+    "focusedNativeTest": "web_renderer_dobj_submission_tests: passed",
+    "focusedComparator": "renderer_workload.mjs --profiles: 120/120 exact samples passed",
+    "diagnosticRelease": "passed",
+    "finalProductionRelease": "passed in 19.622 seconds",
+    "runtimePrefixCheck": "passed"
+  },
+  "rawRecordSha256": {
+    "control": "a3347a5445804fd5834776ff1860131736e21b0260b21add464435063575a9f6",
+    "candidate": "0d293d9dda1f9ec1ce66586df51a932c5f7ccce3a36273699a55d7a9da2d0d3f"
+  }
+}
