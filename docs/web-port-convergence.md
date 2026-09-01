@@ -27,7 +27,7 @@ oracle.
 
 | System | Current ownership |
 | --- | --- |
-| Common startup | Canonical `Dvar_Init` and the strict `Com_Init` prefix run in native order; the host mounts browser storage at the filesystem boundary, then the continuation restores canonical common-command registration before script/server/client startup. |
+| Common startup | Canonical `Dvar_Init` and the strict `Com_Init` prefix run in native order; the host mounts browser storage at the filesystem boundary, then the continuation restores canonical common-command and version-dvar registration before script/server/client startup. |
 | Dvars/config | Canonical dvar types, domains, reset/current/latched values, flags, command handlers, key bindings, `Com_WriteConfigToFile`, and profile-relative `config.cfg` own settings. The Worker continuation restores `CL_InitKeyCommands` before filesystem/profile config execution; the browser frame pump only calls the shared `Com_WriteConfiguration` owner. |
 | Profiles | Canonical `Com_*PlayerProfile` and `UI_*PlayerProfile` functions own profile identity, active-marker parsing, list/feeder selection, config replay, and deletion. Browser diagnostics only select fixed synthetic entries through those owners. |
 | Filesystem | Canonical search paths, IWD/minizip behavior, config/profile calls and synchronous engine-facing operations use Worker file primitives. Recursive profile deletion maps to one durable Worker/OPFS tree-removal primitive. |
@@ -40,7 +40,7 @@ oracle.
 | Renderer frontend | Kisak world, model, effect and UI state is translated only at the portable draw-command boundary. Native IW3's bounded 65,536 static-model cardinality is preserved across that seam. |
 | Input | Browser events enter canonical key/mouse queues, bindings, usercmd creation and movement/weapon code. |
 | Audio | Canonical mixer and OpenAL-facing state feed a browser Web Audio device boundary. |
-| Save/persistence | Canonical game save serialization and load own gameplay state; the browser host only persists and flushes the engine filesystem at the platform boundary. |
+| Save/persistence | Canonical game serialization, `UI_LoadSavegames`, feeders, menu scripts, Continue, and deletion own saves and gameplay state. Profile-relative engine paths isolate saves; the browser host only persists and flushes files at the platform boundary. The unavailable loose screenshot retains the shipped unknown-save fallback. |
 
 The [retained-renderer milestone](evidence/retained-renderer-49af3948.md) moves
 brush submission closer to native separation of immutable `GfxBrushModel`
@@ -62,7 +62,7 @@ and the verified limitations are recorded in [the boundary notes](renderer-retai
 | `database/db_file_platform.cpp` | Maps DB file operations to the Worker filesystem. |
 | `database/db_generated_image_platform.*` | Copies transient canonical image load definitions at the native texture-upload boundary into a bounded process-global source cache; canonical `GfxImage` identity remains authoritative. |
 | `qcommon/common_runtime_commands.cpp` | Keeps the post-mount common-command continuation canonical and separate from browser hosting. |
-| `web_client_server_lifecycle.cpp` | Continues synchronous-looking native startup after the main-thread host mounts user files. |
+| `web_client_server_lifecycle.cpp` | Continues synchronous-looking native startup after the main-thread host mounts user files, including canonical version dvars and diagnostic-only calls through real profile/save UI owners. |
 | `web_main.cpp` | Admits disconnected-but-running client frames so canonical pre-map UI and config work run in native order; the browser still owns only the non-blocking pump. |
 | `web_canonical_gfxworld.cpp` | Observes final DB publication only; canonical `R_RenderScene` owns world rendering. The obsolete proof submission is removed. |
 | `web_renderer_frontend.cpp` | Converts canonical renderer state into backend-neutral commands. |
@@ -81,6 +81,7 @@ platform makes that behavior impossible.
 | Input host | Pointer lock, keyboard/mouse normalization, focus release and cursor mode. |
 | Audio device | AudioContext policy, gesture resume, buffers/nodes and PCM scheduling. |
 | Main loop | Non-blocking Emscripten frame pump; no Asyncify or pthread requirement. |
+| Wasm stack | The web linker reserves 1 MiB, matching native Windows scale for canonical nested map/save loading rather than rewriting shared call chains. |
 | Cinematics | Native Bink is omitted safely until a browser-owned replacement is chosen. |
 
 ## Control classification

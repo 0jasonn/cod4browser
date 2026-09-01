@@ -661,12 +661,12 @@ void CG_DrawVersion()
     h = (float)UI_TextHeight(font, 0.25);
     y = -h - cg_drawVersionY->current.value + 1.0f;
     x = -w - cg_drawVersionX->current.value + 1.0f;
-    UI_DrawText(&scrPlaceFullUnsafe, (char *)version->current.integer, 0x7FFFFFFF, font, x, y, 3, 3, 0.25f, shadowColor, 0);
+    UI_DrawText(&scrPlaceFullUnsafe, version->current.string, 0x7FFFFFFF, font, x, y, 3, 3, 0.25f, shadowColor, 0);
     v1 = -h - cg_drawVersionY->current.value;
     v0 = -w - cg_drawVersionX->current.value;
     UI_DrawText(
         &scrPlaceFullUnsafe,
-        (char *)version->current.integer,
+        version->current.string,
         0x7FFFFFFF,
         font,
         v0,

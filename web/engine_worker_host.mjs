@@ -211,6 +211,8 @@ export function createEngineWorkerHost(canvas, {
     const handleError = (event) => {
         const error = protocolError(
             "WORKER_ERROR", "worker", event.error?.message ?? event.message ?? "Worker failed.");
+        onLog?.(`[kisakcod-web] Engine Worker failed: ` +
+            (event.error?.stack ?? error.message), "error");
         rejectReady(new EngineWorkerError(error));
         rejectWorkerRequests(pending, error);
         void recoverWorkerOwnership("worker-error", new EngineWorkerError(error));

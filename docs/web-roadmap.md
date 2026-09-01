@@ -17,8 +17,11 @@ restart persistence are complete with
 Canonical profile create/list/select, config isolation, restart restoration,
 and non-active deletion are complete with
 [focused evidence](evidence/canonical-profile-lifecycle-2026-09-01.md).
-Next: canonical save/load list, continuity, deletion, and profile isolation.
-The stationary `ac130` probe remains deferred.
+Canonical save/load listing, menu-script loading, Continue after restart,
+gameplay/objective continuity, exact deletion, and profile isolation are also
+complete with [focused evidence](evidence/canonical-save-load-2026-09-01.md).
+This closes the requested UI/persistence convergence sequence. The stationary
+`ac130` probe may resume as a separate follow-up.
 
 1. Canonical camera DPVS now filters both static-model instances and world
    surfaces. World camera runs preserve merged-batch order and canonical IDs;

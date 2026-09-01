@@ -52,7 +52,7 @@ async function call(page, name, ...arguments_)
 
 test("canonical retail main menu starts without a map", { tag: "@retail-ui" },
     async ({ retailPage: page }) => {
-        test.setTimeout(300_000);
+        test.setTimeout(600_000);
         await page.addInitScript(() => {
             globalThis.__uiLogs = [];
             globalThis.__uiLifecycle = [];
@@ -243,4 +243,137 @@ test("canonical retail main menu starts without a map", { tag: "@retail-ui" },
         expect((await call(page, "_KisakWeb_TestProfileState", 0)) & 7)
             .toBe(5);
         expect(await call(page, "_KisakWeb_TestProfileState", 6)).toBe(2);
+
+        const gameplayState = (field, argument = 0) =>
+            call(page, "_KisakWeb_TestGameplayState", field, argument);
+        const gameplayFloat = (field, component) =>
+            call(page, "_KisakWeb_TestGameplayFloat", field, component);
+        const saveSnapshot = async () => {
+            const weapon = await gameplayState(36);
+            return {
+                health: await gameplayState(17),
+                weapon,
+                ammo: await gameplayState(37, weapon),
+                objectiveHash: await gameplayState(19),
+                activeObjectives: await gameplayState(33),
+                doneObjectives: await gameplayState(34),
+                origin: await Promise.all([0, 1, 2].map((component) =>
+                    gameplayFloat(0, component))),
+            };
+        };
+        const expectRestoredSnapshot = async (saved) => {
+            await expect.poll(() => gameplayState(17), { timeout: 120_000 })
+                .toBe(saved.health);
+            await expect.poll(() => gameplayState(36)).toBe(saved.weapon);
+            await expect.poll(() => gameplayState(37, saved.weapon))
+                .toBe(saved.ammo);
+            await expect.poll(() => gameplayState(19))
+                .toBe(saved.objectiveHash);
+            expect(await gameplayState(33)).toBe(saved.activeObjectives);
+            expect(await gameplayState(34)).toBe(saved.doneObjectives);
+            const restoredOrigin = await Promise.all([0, 1, 2].map(
+                (component) => gameplayFloat(0, component)));
+            expect(Math.hypot(...restoredOrigin.map((value, index) =>
+                value - saved.origin[index]))).toBeLessThan(8);
+        };
+
+        let saveLifecycleCursor = await page.evaluate(() =>
+            globalThis.__uiLifecycle.length);
+        await submitCommand("devmap airplane");
+        await expect.poll(() => page.evaluate((cursor) =>
+            globalThis.__uiLifecycle.slice(cursor).some(
+                ({ stage }) => stage === "CG_Init complete"),
+        saveLifecycleCursor), { timeout: 300_000 }).toBe(true);
+        await expect.poll(() => gameplayState(17), { timeout: 120_000 })
+            .toBeGreaterThan(0);
+        await submitCommand("give all");
+        await expect.poll(() => gameplayState(7), { timeout: 30_000 })
+            .toBeGreaterThan(0);
+        await expect.poll(() => gameplayState(36), { timeout: 30_000 })
+            .toBeGreaterThan(0);
+        const saveLogCursor = await page.evaluate(() =>
+            globalThis.__uiLogs.length);
+        await submitCommand("devsave kisak_web_ui_test");
+        await expect.poll(() => page.evaluate((cursor) =>
+            globalThis.__uiLogs.slice(cursor).some(({ text }) =>
+                text.includes("G_WriteGame 'kisak_web_ui_test'")),
+        saveLogCursor), { timeout: 60_000 }).toBe(true);
+        await expect.poll(() => gameplayState(32), { timeout: 60_000 })
+            .toBe(0);
+        await expect.poll(() => gameplayState(28), { timeout: 60_000 })
+            .toBe(1);
+        await expect.poll(() => call(page, "_KisakWeb_TestSaveState", 6))
+            .toBeGreaterThan(0);
+        const saved = await saveSnapshot();
+        expect(saved.weapon).toBeGreaterThan(0);
+        expect(saved.ammo).toBeGreaterThanOrEqual(0);
+
+        expect(await call(page, "_KisakWeb_TestSaveState", 0))
+            .toBeGreaterThanOrEqual(1);
+        expect(await call(page, "_KisakWeb_TestSaveState", 1))
+            .toBeGreaterThan(0);
+        expect(await call(page, "_KisakWeb_TestSaveState", 2)).toBe(1);
+        expect(await call(page, "_KisakWeb_TestSaveState", 7)).toBe(1);
+        expect(await call(page, "_KisakWeb_TestSaveState", 8)).toBe(1);
+        await page.evaluate(() =>
+            globalThis.__KISAKCOD_WEB__.module.checkpoint());
+
+        await page.reload();
+        await expect.poll(() => page.evaluate(() =>
+            globalThis.__KISAKCOD_WEB__?.module?.filesystemState), {
+            timeout: 300_000,
+        }).toBe("mounted");
+        expect(await call(page, "_KisakWeb_TestProfileState", 6)).toBe(2);
+        expect(await call(page, "_KisakWeb_TestSaveState", 0))
+            .toBeGreaterThanOrEqual(1);
+        expect(await call(page, "_KisakWeb_TestSaveState", 8)).toBe(1);
+        expect(await call(page, "_KisakWeb_TestProfileState", 1)).toBe(1);
+        expect(await call(page, "_KisakWeb_TestProfileState", 3)).toBe(1);
+        expect(await call(page, "_KisakWeb_TestSaveState", 0)).toBe(0);
+        expect(await call(page, "_KisakWeb_TestSaveState", 5)).toBe(1);
+        expect(await call(page, "_KisakWeb_TestProfileState", 10)).toBe(1);
+        expect(await call(page, "_KisakWeb_TestProfileState", 6)).toBe(3);
+        expect(await call(page, "_KisakWeb_TestSaveState", 1)).toBe(0);
+        expect(await call(page, "_KisakWeb_TestSaveState", 6)).toBe(0);
+        expect(await call(page, "_KisakWeb_TestProfileState", 4)).toBe(1);
+        expect(await call(page, "_KisakWeb_TestSaveState", 1))
+            .toBeGreaterThan(0);
+        expect(await call(page, "_KisakWeb_TestSaveState", 6))
+            .toBeGreaterThan(0);
+        await submitCommand("openmenu save_load_menu");
+        await expect.poll(() => call(page, "_KisakWeb_TestMenuState",
+            nameHash("save_load_menu"))).toBe(7);
+        saveLifecycleCursor = await page.evaluate(() =>
+            globalThis.__uiLifecycle.length);
+        expect(await call(page, "_KisakWeb_TestSaveState", 3)).toBe(1);
+        await expect.poll(() => page.evaluate((cursor) =>
+            globalThis.__uiLifecycle.slice(cursor).some(
+                ({ stage }) => stage === "CG_Init complete"),
+        saveLifecycleCursor), { timeout: 300_000 }).toBe(true);
+        await expectRestoredSnapshot(saved);
+        await page.evaluate(() =>
+            globalThis.__KISAKCOD_WEB__.module.checkpoint());
+
+        await page.reload();
+        await expect.poll(() => page.evaluate(() =>
+            globalThis.__KISAKCOD_WEB__?.module?.filesystemState), {
+            timeout: 300_000,
+        }).toBe("mounted");
+        expect(await call(page, "_KisakWeb_TestProfileState", 6)).toBe(2);
+        expect(await call(page, "_KisakWeb_TestSaveState", 1))
+            .toBeGreaterThan(0);
+        expect(await call(page, "_KisakWeb_TestSaveState", 8)).toBe(1);
+        saveLifecycleCursor = await page.evaluate(() =>
+            globalThis.__uiLifecycle.length);
+        await submitCommand("loadgame_continue");
+        await expect.poll(() => page.evaluate((cursor) =>
+            globalThis.__uiLifecycle.slice(cursor).some(
+                ({ stage }) => stage === "CG_Init complete"),
+        saveLifecycleCursor), { timeout: 300_000 }).toBe(true);
+        await expectRestoredSnapshot(saved);
+
+        expect(await call(page, "_KisakWeb_TestSaveState", 4)).toBe(1);
+        expect(await call(page, "_KisakWeb_TestSaveState", 1)).toBe(0);
+        expect(await call(page, "_KisakWeb_TestSaveState", 6)).toBe(0);
+        expect(await call(page, "_KisakWeb_TestProfileState", 5)).toBe(1);
     });

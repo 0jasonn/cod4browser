@@ -37,6 +37,16 @@ configuration remain native engine state. The reached Wasm dvar-domain callback
 ABI mismatch was corrected at its shared typed call site. See
 [the profile evidence](evidence/canonical-profile-lifecycle-2026-09-01.md).
 
+Canonical save/load menu persistence is now complete. A legal-retail run made
+an Airplane `devsave`, discovered and selected it through the shipped feeder,
+loaded it through the real menu script, and reopened it after a full page and
+Worker restart through Continue. Health, weapon, ammo, objective state, and
+position matched; other profiles saw an empty list; exact canonical deletion
+removed only the test-owned save. The browser screenshot path uses the shipped
+fallback. Reached fixes restored the canonical version dvars and a 1 MiB web
+platform stack for native-scale load depth. See
+[the save/load evidence](evidence/canonical-save-load-2026-09-01.md).
+
 The playable offline slice already exists across six legally validated maps.
 Those runs demonstrate canonical movement, aiming, firing, weapons, audio,
 transitions, and Airplane save/load continuity. Building another player
@@ -53,9 +63,9 @@ headed/manual visual inspection occurred, so this is not a `FUNCTIONAL`,
 `PLAYABLE`, or visual-correctness claim. See
 [the stationary evidence](evidence/scoutsniper-stationary-838e047c.md).
 
-The active convergence task is now save/load menu persistence and profile
-isolation for saves. The stationary `ac130` probe is deferred behind that
-user-facing persistence work.
+The requested canonical SP UI and persistence convergence task is complete.
+The stationary `ac130` observation can resume as a separate renderer/campaign
+task; it was not mixed into this persistence milestone.
 
 ## Prior dynamic geometry handoff
 

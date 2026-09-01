@@ -843,6 +843,18 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestGameplayState(
         }
         return count;
     }
+    case 36:
+        for (std::uint32_t weapon = 1; weapon < BG_GetNumWeapons(); ++weapon)
+            if (BG_PlayerHasWeapon(&snapshot, static_cast<int>(weapon)))
+                return static_cast<int>(weapon);
+        return 0;
+    case 37:
+        if (weaponIndex <= 0 ||
+            static_cast<std::uint32_t>(weaponIndex) >= BG_GetNumWeapons() ||
+            !BG_PlayerHasWeapon(&snapshot, weaponIndex))
+            return -1;
+        return BG_WeaponAmmo(
+            &snapshot, static_cast<std::uint32_t>(weaponIndex));
     default:
         return -1;
     }

@@ -39,6 +39,7 @@
 #include <xanim/dobj_runtime_init.h>
 #include <xanim/xanim.h>
 #include <xanim/xanim_runtime_init.h>
+#include <buildnumber.h>
 
 #include <emscripten.h>
 
@@ -298,6 +299,14 @@ extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_MountCanonicalRuntime()
     Hunk_InitDebugMemory();
     ProfLoad_Init();
     Com_RegisterRuntimeCommands();
+    const char *const buildVersion = va(
+        "%s %s build %s %s", "CoD4", "1.0", getBuildNumber(), CPUSTRING);
+    version = Dvar_RegisterString(
+        "version", "", DVAR_ROM, "Game version");
+    Dvar_SetString(version, buildVersion);
+    shortversion = Dvar_RegisterString(
+        "shortversion", "1.0", DVAR_ROM | DVAR_SERVERINFO,
+        "Short game version");
     Scr_InitVariables();
     Scr_Init();
     Scr_Settings(
@@ -630,6 +639,72 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestProfileState(int operation)
         return value;
     }
     if (operation == 9) return Dvar_GetInt("kisak_profile_value");
+    if (operation == 10) return selectProfile("browser");
+    return -1;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestSaveState(int operation)
+{
+    constexpr const char *SAVE_NAME = "kisak_web_ui_test";
+    const auto saveIndex = [=]() {
+        UI_LoadSavegames(0);
+        return UI_SavegameIndexFromFilename(SAVE_NAME);
+    };
+    const auto selectSave = [=]() {
+        const int index = saveIndex();
+        if (index < 0) return false;
+        UI_FeederSelection(0, 16.0f, index);
+        return !I_stricmp(ui_savegame->current.string, SAVE_NAME);
+    };
+
+    if (operation == 0)
+    {
+        UI_LoadSavegames(0);
+        return uiInfo.savegameCount;
+    }
+    if (operation == 1) return saveIndex() + 1;
+    if (operation == 2) return selectSave();
+    if (operation == 3)
+    {
+        if (!selectSave()) return 0;
+        // Menu script argument streams retain their trailing separator. The
+        // shared String_Parse owner treats a fully exhausted stream as absent.
+        const char *args = "Loadgame ;";
+        UI_RunMenuScript(0, &args, "Loadgame");
+        return 1;
+    }
+    if (operation == 4)
+    {
+        if (!selectSave()) return 0;
+        UI_DelSavegame();
+        return saveIndex() < 0;
+    }
+    if (operation == 5)
+    {
+        UI_LoadSavegames(0);
+        return uiInfo.savegameCount == 0 && !uiInfo.savegameName[0] &&
+            !ui_savegame->current.string[0];
+    }
+    if (operation == 6)
+    {
+        char path[64];
+        Com_BuildPlayerProfilePath(
+            path, sizeof(path), "save/%s.svg", SAVE_NAME);
+        int file = 0;
+        const int size = static_cast<int>(FS_FOpenFileRead(path, &file));
+        if (file) FS_FCloseFile(file);
+        return file ? size : 0;
+    }
+    if (operation == 7)
+    {
+        const int index = saveIndex();
+        if (index < 0) return 0;
+        const int slot = uiInfo.savegameStatus.displaySavegames[index];
+        return slot >= 0 && slot < uiInfo.savegameCount &&
+            uiInfo.savegameList[slot].imageName == nullptr;
+    }
+    if (operation == 8)
+        return std::strstr(Dvar_GetString("sv_lastSaveGame"), SAVE_NAME) != nullptr;
     return -1;
 }
 

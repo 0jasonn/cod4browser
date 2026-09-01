@@ -34,7 +34,7 @@ function(kisak_configure_web_target TARGET_NAME)
         "_main,_malloc,_free,_KisakWeb_ProbeLocalization,_KisakWeb_ProbeIwd,_KisakWeb_ProbeFastfileHeader,_KisakWeb_CompleteFsStat,_KisakWeb_CompleteFsRead,_KisakWeb_MountCanonicalRuntime,_KisakWeb_SubmitCanonicalCommand,_KisakWeb_QueueKeyEvent,_KisakWeb_QueueMouseMove")
     if (ARGV1 STREQUAL "DIAGNOSTICS")
         set(KISAK_WEB_EXPORTED_FUNCTIONS
-            "${KISAK_WEB_EXPORTED_FUNCTIONS},_KisakWeb_CanonicalFsFileSize,_KisakWeb_CanonicalFsListCount,_KisakWeb_CanonicalFsReadHash,_KisakWeb_CanonicalFsWriteRename,_KisakWeb_DiagnosticCinematicOmission,_KisakWeb_TestAudioProxyPcm,_KisakWeb_TestLoseWebGLContext,_KisakWeb_TestRestoreWebGLContext,_KisakWeb_TestSetAaSamples,_KisakWeb_TestSubmitSurface,_KisakWeb_TestSlowNextCommand,_KisakWeb_TestUiState,_KisakWeb_TestMenuState,_KisakWeb_TestResumeGame,_KisakWeb_TestObjectiveNotification,_KisakWeb_TestUiTextSeen,_KisakWeb_TestConfigState,_KisakWeb_TestProfileState")
+            "${KISAK_WEB_EXPORTED_FUNCTIONS},_KisakWeb_CanonicalFsFileSize,_KisakWeb_CanonicalFsListCount,_KisakWeb_CanonicalFsReadHash,_KisakWeb_CanonicalFsWriteRename,_KisakWeb_DiagnosticCinematicOmission,_KisakWeb_TestAudioProxyPcm,_KisakWeb_TestLoseWebGLContext,_KisakWeb_TestRestoreWebGLContext,_KisakWeb_TestSetAaSamples,_KisakWeb_TestSubmitSurface,_KisakWeb_TestSlowNextCommand,_KisakWeb_TestUiState,_KisakWeb_TestMenuState,_KisakWeb_TestResumeGame,_KisakWeb_TestObjectiveNotification,_KisakWeb_TestUiTextSeen,_KisakWeb_TestConfigState,_KisakWeb_TestProfileState,_KisakWeb_TestSaveState")
     endif()
 
     target_link_options(${TARGET_NAME} PRIVATE
@@ -47,6 +47,10 @@ function(kisak_configure_web_target TARGET_NAME)
         "-sMIN_WEBGL_VERSION=2"
         "-sMAX_WEBGL_VERSION=2"
         "-sALLOW_MEMORY_GROWTH=1"
+        # Canonical map/save load nests substantially deeper than Emscripten's
+        # 64 KiB default. Match the native Windows stack scale at the platform
+        # boundary instead of rewriting shared engine call chains.
+        "-sSTACK_SIZE=1048576"
         "-sEXIT_RUNTIME=0"
         "-sERROR_ON_UNDEFINED_SYMBOLS=1"
         "-sEXPORTED_FUNCTIONS=${KISAK_WEB_EXPORTED_FUNCTIONS}"

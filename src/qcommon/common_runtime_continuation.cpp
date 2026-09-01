@@ -28,6 +28,7 @@ float com_timescaleValue = 1.0f;
 int com_frameTime;
 const dvar_t *com_recommendedSet;
 const dvar_t *version;
+const dvar_t *shortversion;
 float com_codeTimeScale = 1.0f;
 int com_safemode;
 

@@ -8,6 +8,15 @@ import {
     protocolError,
 } from "./engine_protocol.mjs";
 
+globalThis.addEventListener("error", (event) => {
+    const detail = event.error?.stack ?? event.message ?? "Unknown Worker failure";
+    globalThis.postMessage({
+        type: "log",
+        level: "error",
+        message: `[kisakcod-web] Uncaught engine Worker error: ${detail}`,
+    });
+});
+
 const forwardedEvents = [
     "kisakcod:renderer-shader", "kisakcod:renderer-texture",
     "kisakcod:renderer-aa", "kisakcod:test-webgl-aa",
