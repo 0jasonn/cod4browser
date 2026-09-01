@@ -67,3 +67,46 @@ a proprietary screenshot.
 This completes the requested canonical SP UI and persistence convergence
 milestones. No proprietary assets, local installation paths, screenshots, or
 generated build products are recorded in the repository.
+
+## Final verification ledger
+
+The final handoff used the diagnostics site only for browser boundary tests and
+then rebuilt the production Release site from source:
+
+```text
+tools/build_web.ps1 -Configuration Release
+PASS — 292 objects linked; 14-stage runtime prefix stopped at
+       DB_LoadXAssets/engine-filesystem-mount
+
+npm.cmd run test:browser:product
+PASS — 40 tests
+
+npm.cmd run test:browser
+PASS — 12 tests (isolated diagnostics server)
+
+npm.cmd run test:browser:remainder
+PASS — 36 tests, 3 opt-in retail tests skipped
+```
+
+The smoke runtime-prefix assertion now records all 16 commands deliberately
+linked by the production diagnostics target. The direct strict Wasm prefix
+continues to assert its smaller six-command closure. The Gate 3 retail census
+was also aligned to the current exact canonical trace: 9,635 publications,
+including 9,634 named publications and one empty-name rawfile publication.
+This removes two obsolete duplicate empty image expectations without relaxing
+the census.
+
+Two unrelated repository-wide checks remain red and were not hidden:
+
+- `npm.cmd run check:web:static` passes syntax and lint, then strict types finds
+  seven existing implicit-`any` errors in `web/worker_transport.mjs`.
+- `npm.cmd run test:protocol` passes 80 of 81 tests; the existing renderer
+  workload comparison still fails its `sunShadowMergedRanges` assertion in
+  `tools/renderer_workload.mjs`.
+
+An opt-in Gate 3 retail rerun passed the corrected complete startup census and
+then timed out in its older downstream requirement for a drawn Killhouse scene
+frame. That renderer proof is separate from this UI/persistence milestone. The
+focused canonical Airplane save/load test passed end to end. No headed retail
+screenshot was retained; this evidence intentionally records semantic traces
+only.

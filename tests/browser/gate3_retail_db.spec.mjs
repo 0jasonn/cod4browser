@@ -120,7 +120,7 @@ test("canonical Gate 3 traverses the locally owned retail startup prerequisite c
         assetType: 31,
         assetName: "common",
         publicationEnd: true,
-        freeEntryCountAfter: 23115,
+        freeEntryCountAfter: 23152,
         generatedLoadFailed: false,
         xassetListEnd: true,
         streamOffsets: [0, 0, 0, 0, 28021740, 0, 0, 438944, 76704],
@@ -145,7 +145,7 @@ test("canonical Gate 3 traverses the locally owned retail startup prerequisite c
             streamOffsets: [0, 0, 0, 0, 28021740, 0, 0, 438944, 76704],
         },
     ]);
-    expect(result.publications).toHaveLength(9637);
+    expect(result.publications).toHaveLength(9635);
     expect(publicationsByType).toEqual({
         1: 8,
         2: 1017,
@@ -154,7 +154,7 @@ test("canonical Gate 3 traverses the locally owned retail startup prerequisite c
         5: 192,
         6: 321,
         7: 1734,
-        8: 9,
+        8: 7,
         9: 772,
         17: 2,
         19: 9,
@@ -178,39 +178,27 @@ test("canonical Gate 3 traverses the locally owned retail startup prerequisite c
     expect(localizePublications.at(-1)).toMatchObject({
         assetIndex: 3990,
         assetName: "STARTS_DRIVE",
-        assetEntryIndex: 5848,
+        assetEntryIndex: 5836,
         assetPoolIndex: 4378,
-        freeEntryCountBefore: 26920,
-        freeEntryCountAfter: 26919,
+        freeEntryCountBefore: 26932,
+        freeEntryCountAfter: 26931,
     });
     expect(result.publications.at(-1)).toMatchObject({
         assetIndex: 6501,
         assetType: 31,
         assetName: "common",
-        assetEntryIndex: 9652,
+        assetEntryIndex: 9615,
         assetPoolIndex: 440,
-        freeEntryCountBefore: 23116,
-        freeEntryCountAfter: 23115,
+        freeEntryCountBefore: 23153,
+        freeEntryCountAfter: 23152,
     });
     const emptyNames = result.publications.filter(
         (entry) => entry.assetName.length === 0);
     expect(emptyNames).toEqual([
         expect.objectContaining({
-            assetIndex: 1202,
-            assetType: 8,
-            assetEntryIndex: 1219,
-            assetPoolIndex: 1,
-        }),
-        expect.objectContaining({
             assetIndex: 4661,
             assetType: 26,
-            assetEntryIndex: 6859,
-            assetPoolIndex: 1,
-        }),
-        expect.objectContaining({
-            assetIndex: 4778,
-            assetType: 8,
-            assetEntryIndex: 1219,
+            assetEntryIndex: 6851,
             assetPoolIndex: 1,
         }),
     ]);
