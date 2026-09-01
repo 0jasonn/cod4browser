@@ -41,6 +41,7 @@ void WebWorkerFS_Close(WebWorkerFile file);
 
 bool WebWorkerFS_Mkdir(const char *logicalPath);
 bool WebWorkerFS_Remove(const char *logicalPath);
+bool WebWorkerFS_RemoveTree(const char *logicalPath);
 bool WebWorkerFS_Rename(const char *from, const char *to);
 
 bool WebWorkerFS_Stat(const char *logicalPath, WebWorkerFileStat &stat);

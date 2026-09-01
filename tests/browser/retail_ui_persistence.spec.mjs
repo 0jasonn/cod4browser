@@ -203,4 +203,44 @@ test("canonical retail main menu starts without a map", { tag: "@retail-ui" },
         await expect.poll(() => call(page, "_KisakWeb_TestConfigState", 0))
             .toBe(37);
         expect(await call(page, "_KisakWeb_TestConfigState", 2)).toBe(1);
+
+        await submitCommand("openmenu player_profile");
+        await expect.poll(() => call(page, "_KisakWeb_TestMenuState",
+            nameHash("player_profile"))).toBe(7);
+        await submitCommand("closemenu profile_create_popmenu");
+        expect(await call(page, "_KisakWeb_TestProfileState", 1)).toBe(1);
+        expect(await call(page, "_KisakWeb_TestProfileState", 2)).toBe(1);
+        expect((await call(page, "_KisakWeb_TestProfileState", 0)) & 7)
+            .toBe(7);
+
+        expect(await call(page, "_KisakWeb_TestProfileState", 3)).toBe(1);
+        await submitCommand("seta kisak_profile_value 101");
+        await expect.poll(() => call(page, "_KisakWeb_TestProfileState", 7))
+            .toBe(101);
+        expect(await call(page, "_KisakWeb_TestProfileState", 4)).toBe(1);
+        await submitCommand("seta kisak_profile_value 202");
+        await expect.poll(() => call(page, "_KisakWeb_TestProfileState", 7))
+            .toBe(202);
+        expect(await call(page, "_KisakWeb_TestProfileState", 3)).toBe(1);
+        expect(await call(page, "_KisakWeb_TestProfileState", 9)).toBe(101);
+        expect(await call(page, "_KisakWeb_TestProfileState", 4)).toBe(1);
+        expect(await call(page, "_KisakWeb_TestProfileState", 9)).toBe(202);
+        expect(await call(page, "_KisakWeb_TestProfileState", 8)).toBe(2);
+        await page.evaluate(() =>
+            globalThis.__KISAKCOD_WEB__.module.checkpoint());
+
+        await page.reload();
+        await expect.poll(() => page.evaluate(() =>
+            globalThis.__KISAKCOD_WEB__?.module?.filesystemState), {
+            timeout: 300_000,
+        }).toBe("mounted");
+        const restartedProfiles = await call(
+            page, "_KisakWeb_TestProfileState", 0);
+        expect(restartedProfiles & 7).toBe(7);
+        expect(await call(page, "_KisakWeb_TestProfileState", 6)).toBe(2);
+        expect(await call(page, "_KisakWeb_TestProfileState", 9)).toBe(202);
+        expect(await call(page, "_KisakWeb_TestProfileState", 5)).toBe(1);
+        expect((await call(page, "_KisakWeb_TestProfileState", 0)) & 7)
+            .toBe(5);
+        expect(await call(page, "_KisakWeb_TestProfileState", 6)).toBe(2);
     });

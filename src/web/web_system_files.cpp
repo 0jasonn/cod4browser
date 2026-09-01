@@ -102,8 +102,7 @@ void __cdecl Sys_Mkdir(const char *path)
 
 BOOL __cdecl Sys_RemoveDirTree(const char *path)
 {
-    (void)path;
-    return 0;
+    return path && *path && WebWorkerFS_RemoveTree(path);
 }
 
 int __cdecl Sys_CountFileList(char **list)

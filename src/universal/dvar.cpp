@@ -1384,13 +1384,7 @@ void __cdecl Dvar_SetVariant(dvar_s *dvar, DvarValue value, DvarSetSource source
         }
         return;
     }
-    if (dvar->domainFunc
-        && !((uint8_t(__cdecl *)(dvar_s *, int, uint32_t, uint32_t, uint32_t))dvar->domainFunc)(
-            dvar,
-            value.integer,
-            LODWORD(value.vector[1]),
-            LODWORD(value.vector[2]),
-            LODWORD(value.vector[3])))
+    if (dvar->domainFunc && !dvar->domainFunc(dvar, value))
     {
         v8 = dvar->name;
         v6 = Dvar_ValueToString(dvar, value);

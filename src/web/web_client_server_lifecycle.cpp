@@ -355,6 +355,10 @@ extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_MountCanonicalRuntime()
     char profileConfig[64];
     Com_BuildPlayerProfilePath(profileConfig, sizeof(profileConfig), "config.cfg");
     Com_ExecStartupConfigs(0, profileConfig);
+    com_recommendedSet = Dvar_RegisterBool(
+        "com_recommendedSet", false, DVAR_ARCHIVE,
+        "Use recommended settings");
+    Com_CheckSetRecommended(0);
     // A fresh browser profile has no native config.cfg. Seed only absent core
     // controls in the canonical binding table; imported or future persisted
     // bindings always win, and movement remains owned by CL_Input/usercmd.
@@ -540,6 +544,92 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestConfigState(int field)
     if (field == 4)
         return (Cmd_FindCommand("bind") ? 1 : 0) |
             (Key_StringToKeynum("F9") << 8);
+    return -1;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestProfileState(int operation)
+{
+    constexpr const char *PROFILE_A = "kisak_web_test_a";
+    constexpr const char *PROFILE_B = "kisak_web_test_b";
+    Dvar_RegisterInt("kisak_profile_value", 0, 0, 1000, DVAR_ARCHIVE,
+        "Diagnostic profile-isolation value");
+    const auto activeProfile = [=]() {
+        if (!I_stricmp(com_playerProfile->current.string, PROFILE_A)) return 1;
+        if (!I_stricmp(com_playerProfile->current.string, PROFILE_B)) return 2;
+        if (!I_stricmp(com_playerProfile->current.string, "browser")) return 3;
+        return 0;
+    };
+    const auto selectProfile = [=](const char *name) {
+        UI_AddPlayerProfiles();
+        const int index = UI_GetPlayerProfileListIndexFromName(name);
+        if (index < 0) return false;
+        UI_FeederSelection(0, 24.0f, index);
+        UI_LoadPlayerProfile(0);
+        return !I_stricmp(com_playerProfile->current.string, name);
+    };
+
+    if (operation == 0)
+    {
+        UI_AddPlayerProfiles();
+        int state = activeProfile() << 8;
+        if (UI_GetPlayerProfileListIndexFromName("browser") >= 0) state |= 1;
+        if (UI_GetPlayerProfileListIndexFromName(PROFILE_A) >= 0) state |= 2;
+        if (UI_GetPlayerProfileListIndexFromName(PROFILE_B) >= 0) state |= 4;
+        return state;
+    }
+    if (operation == 1 || operation == 2)
+    {
+        const char *name = operation == 1 ? PROFILE_A : PROFILE_B;
+        UI_AddPlayerProfiles();
+        if (UI_GetPlayerProfileListIndexFromName(name) < 0)
+        {
+            Dvar_SetString(
+                const_cast<dvar_s *>(ui_playerProfileNameNew), name);
+            UI_CreatePlayerProfile();
+        }
+        return Com_IsValidPlayerProfileDir(name);
+    }
+    if (operation == 3) return selectProfile(PROFILE_A);
+    if (operation == 4) return selectProfile(PROFILE_B);
+    if (operation == 5)
+    {
+        if (!I_stricmp(com_playerProfile->current.string, PROFILE_A)) return -2;
+        UI_AddPlayerProfiles();
+        const int index = UI_GetPlayerProfileListIndexFromName(PROFILE_A);
+        if (index < 0) return 1;
+        UI_FeederSelection(0, 24.0f, index);
+        UI_DeletePlayerProfile();
+        return !Com_IsValidPlayerProfileDir(PROFILE_A);
+    }
+    if (operation == 6) return activeProfile();
+    if (operation == 7)
+    {
+        char path[64];
+        Com_BuildPlayerProfilePath(path, sizeof(path), "config.cfg");
+        char *contents = nullptr;
+        if (FS_ReadFile(path, reinterpret_cast<void **>(&contents)) < 0)
+            return 0;
+        int value = 0;
+        if (std::strstr(contents, "kisak_profile_value"))
+        {
+            if (std::strstr(contents, "\"101\"")) value = 101;
+            if (std::strstr(contents, "\"202\"")) value = 202;
+        }
+        FS_FreeFile(contents);
+        return value;
+    }
+    if (operation == 8)
+    {
+        char *contents = nullptr;
+        if (FS_ReadFile("profiles/active.txt",
+                reinterpret_cast<void **>(&contents)) < 0)
+            return 0;
+        const int value = !I_stricmp(contents, PROFILE_A) ? 1
+            : !I_stricmp(contents, PROFILE_B) ? 2 : 0;
+        FS_FreeFile(contents);
+        return value;
+    }
+    if (operation == 9) return Dvar_GetInt("kisak_profile_value");
     return -1;
 }
 

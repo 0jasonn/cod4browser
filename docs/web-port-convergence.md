@@ -29,7 +29,8 @@ oracle.
 | --- | --- |
 | Common startup | Canonical `Dvar_Init` and the strict `Com_Init` prefix run in native order; the host mounts browser storage at the filesystem boundary, then the continuation restores canonical common-command registration before script/server/client startup. |
 | Dvars/config | Canonical dvar types, domains, reset/current/latched values, flags, command handlers, key bindings, `Com_WriteConfigToFile`, and profile-relative `config.cfg` own settings. The Worker continuation restores `CL_InitKeyCommands` before filesystem/profile config execution; the browser frame pump only calls the shared `Com_WriteConfiguration` owner. |
-| Filesystem | Canonical search paths, IWD/minizip behavior, config/profile calls and synchronous engine-facing operations use Worker file primitives. |
+| Profiles | Canonical `Com_*PlayerProfile` and `UI_*PlayerProfile` functions own profile identity, active-marker parsing, list/feeder selection, config replay, and deletion. Browser diagnostics only select fixed synthetic entries through those owners. |
+| Filesystem | Canonical search paths, IWD/minizip behavior, config/profile calls and synchronous engine-facing operations use Worker file primitives. Recursive profile deletion maps to one durable Worker/OPFS tree-removal primitive. |
 | Database | Canonical XFile stream, allocation blocks, generated loaders, pointer aliases, registry pools, dependency ordering and final publication own runtime assets, including native-compatible leading-comma asset-stub resolution. |
 | World/runtime | Canonical `GfxWorld`, collision, server/game, client/cgame, script VM, XAnim/DObj, effects, ragdoll, physics and sound code are in the browser link closure. |
 | Frame order | The browser supplies elapsed time; canonical `SV_Frame`, client frame work and `SCR_UpdateScreen` advance gameplay. |
@@ -65,7 +66,7 @@ and the verified limitations are recorded in [the boundary notes](renderer-retai
 | `web_main.cpp` | Admits disconnected-but-running client frames so canonical pre-map UI and config work run in native order; the browser still owns only the non-blocking pump. |
 | `web_canonical_gfxworld.cpp` | Observes final DB publication only; canonical `R_RenderScene` owns world rendering. The obsolete proof submission is removed. |
 | `web_renderer_frontend.cpp` | Converts canonical renderer state into backend-neutral commands. |
-| `web_system*.cpp` | Supplies browser timing, frame pump, files, events and thread-context behavior. |
+| `web_system*.cpp` | Supplies browser timing, frame pump, files (including recursive directory deletion), events and thread-context behavior. |
 
 Changes in these seams should preserve native behavior unless the browser
 platform makes that behavior impossible.

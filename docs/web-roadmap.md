@@ -14,7 +14,10 @@ now complete with [focused evidence](evidence/canonical-objective-notification-2
 Canonical dvar/config registration, command execution, frame-owned writing, and
 restart persistence are complete with
 [focused evidence](evidence/canonical-dvar-config-2026-09-01.md).
-Next: profile isolation and save/load UI.
+Canonical profile create/list/select, config isolation, restart restoration,
+and non-active deletion are complete with
+[focused evidence](evidence/canonical-profile-lifecycle-2026-09-01.md).
+Next: canonical save/load list, continuity, deletion, and profile isolation.
 The stationary `ac130` probe remains deferred.
 
 1. Canonical camera DPVS now filters both static-model instances and world

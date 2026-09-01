@@ -29,6 +29,14 @@ all seven dvar value families, representative ROM/cheat/archive/latch flags,
 across a page and Worker restart. See
 [the config evidence](evidence/canonical-dvar-config-2026-09-01.md).
 
+Canonical player profiles now create, enumerate, select, isolate archived
+configuration, survive a page/Worker restart, and delete through the shipped
+UI and shared Kisak profile owner. The only new storage operation is recursive
+directory removal at the Worker filesystem boundary; profile identity and
+configuration remain native engine state. The reached Wasm dvar-domain callback
+ABI mismatch was corrected at its shared typed call site. See
+[the profile evidence](evidence/canonical-profile-lifecycle-2026-09-01.md).
+
 The playable offline slice already exists across six legally validated maps.
 Those runs demonstrate canonical movement, aiming, firing, weapons, audio,
 transitions, and Airplane save/load continuity. Building another player
@@ -45,9 +53,9 @@ headed/manual visual inspection occurred, so this is not a `FUNCTIONAL`,
 `PLAYABLE`, or visual-correctness claim. See
 [the stationary evidence](evidence/scoutsniper-stationary-838e047c.md).
 
-The active convergence task is now profile isolation and save/load menu
-persistence. The stationary `ac130` probe is deferred behind that user-facing
-UI/persistence work.
+The active convergence task is now save/load menu persistence and profile
+isolation for saves. The stationary `ac130` probe is deferred behind that
+user-facing persistence work.
 
 ## Prior dynamic geometry handoff
 

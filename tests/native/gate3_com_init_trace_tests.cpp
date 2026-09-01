@@ -24,7 +24,16 @@ bool g_mainThreadInitialized = false;
 int g_probeCount = 0;
 int g_databaseThreadInitCount = 0;
 bool g_nestedTryExecuteDeferred = false;
+int g_domainCallCount = 0;
+int g_domainValue = 0;
 std::array<std::array<char, 32>, 2> g_probeArguments{};
+
+bool __cdecl ValidateDomainValue(dvar_s *, DvarValue value)
+{
+    ++g_domainCallCount;
+    g_domainValue = value.integer;
+    return value.integer >= 0;
+}
 
 void __cdecl ProbeCommand()
 {
@@ -182,6 +191,14 @@ int main()
     assert((archive->flags & DVAR_ARCHIVE) != 0);
     const dvar_t *smp = Dvar_FindVar("sys_smp_allowed");
     assert(smp && !smp->current.enabled && (smp->flags & DVAR_INIT));
+
+    dvar_s *domainDvar = const_cast<dvar_s *>(Dvar_RegisterInt(
+        "gate3_domain", 1, 0, 10, 0, "domain callback ABI probe"));
+    Dvar_SetDomainFunc(domainDvar, ValidateDomainValue);
+    Dvar_SetInt(domainDvar, 7);
+    assert(g_domainCallCount == 2);
+    assert(g_domainValue == 7);
+    assert(domainDvar->current.integer == 7);
 
     // Exercise the real command implementation's registration order, exact
     // lookup, case-insensitive execution, token/argument access, buffered wait

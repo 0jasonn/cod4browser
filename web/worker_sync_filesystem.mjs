@@ -538,6 +538,47 @@ export function createWorkerSyncFilesystem(faults = null)
         return true;
     }
 
+    function removeHomeTree(path)
+    {
+        if (!acceptingWrites) return false;
+        const logicalPath = normalizeDirectoryPath(path);
+        if (!logicalPath || !homeDirectories.has(logicalPath)) return false;
+        const prefix = `${logicalPath}/`;
+        const treeFiles = [...homeFiles.entries()].filter(([name]) =>
+            name.startsWith(prefix));
+        if ([...descriptors.values()].some(({ file }) =>
+            file.logicalPath.startsWith(prefix))) return false;
+
+        for (const [name, file] of treeFiles) {
+            homeFiles.delete(name);
+            homeBytes -= file.size;
+            const segments = name.split("/");
+            const entryName = segments.pop();
+            homeDirectoryEntries.get(segments.join("/"))?.delete(entryName);
+        }
+        const treeDirectories = [...homeDirectories].filter((name) =>
+            name === logicalPath || name.startsWith(prefix))
+            .sort((left, right) => right.length - left.length);
+        for (const name of treeDirectories) {
+            homeDirectories.delete(name);
+            homeDirectoryEntries.delete(name);
+        }
+        const segments = logicalPath.split("/");
+        const name = segments.pop();
+        homeDirectoryEntries.get(segments.join("/"))?.delete(name);
+        void schedulePersistence(async () => {
+            if (!homeDirectory) return;
+            try {
+                const directory = await childDirectory(homeDirectory, segments);
+                await directory.removeEntry(name, { recursive: true });
+            } catch (error) {
+                if (error?.name !== "NotFoundError") throw error;
+            }
+        }, { phase: "removing", files: treeFiles.length, bytes: 0 });
+        faults?.onDirty?.();
+        return true;
+    }
+
     function renameHomePath(from, to)
     {
         if (!acceptingWrites) return false;
@@ -802,6 +843,7 @@ export function createWorkerSyncFilesystem(faults = null)
                 return true;
             },
             remove(path) { return removeHomePath(path); },
+            removeTree(path) { return removeHomeTree(path); },
             rename(from, to) { return renameHomePath(from, to); },
         });
     }

@@ -219,6 +219,22 @@ test("browser home preserves write, remove, recreate ordering across remount", a
     await expectRestartedFile(root, harness, "test/a.cfg", "new");
 });
 
+test("browser home removes a profile tree durably", async () => {
+    const root = await createRoot();
+    const harness = await mount(root);
+    assert.equal(harness.io.mkdir("players/profiles/test"), true);
+    assert.equal(harness.io.mkdir("players/profiles/test/save"), true);
+    writeText(harness, "players/profiles/test/config.cfg", "setting");
+    writeText(harness, "players/profiles/test/save/save.svg", "state");
+    await harness.filesystem.checkpoint();
+
+    assert.equal(harness.io.removeTree("players/profiles/test"), true);
+    assert.equal(harness.io.stat("players/profiles/test"), null);
+    await harness.filesystem.checkpoint();
+    const remounted = await restart(root, harness);
+    assert.equal(remounted.io.stat("players/profiles/test"), null);
+});
+
 test("rename over an existing destination is durable after remount", async () => {
     const root = await createRoot();
     const harness = await mount(root);

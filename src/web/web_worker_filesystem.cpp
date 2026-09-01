@@ -62,6 +62,12 @@ EM_JS(int, WebWorkerFS_RemoveJs, (const char *path), {
         fs.remove(UTF8ToString(path)) ? 1 : 0;
 });
 
+EM_JS(int, WebWorkerFS_RemoveTreeJs, (const char *path), {
+    const fs = globalThis.__KISAKCOD_SYNC_FS__;
+    return fs && typeof fs.removeTree === "function" &&
+        fs.removeTree(UTF8ToString(path)) ? 1 : 0;
+});
+
 EM_JS(int, WebWorkerFS_RenameJs, (const char *from, const char *to), {
     const fs = globalThis.__KISAKCOD_SYNC_FS__;
     return fs && typeof fs.rename === "function" &&
@@ -163,6 +169,11 @@ bool WebWorkerFS_Mkdir(const char *logicalPath)
 bool WebWorkerFS_Remove(const char *logicalPath)
 {
     return logicalPath && WebWorkerFS_RemoveJs(logicalPath) != 0;
+}
+
+bool WebWorkerFS_RemoveTree(const char *logicalPath)
+{
+    return logicalPath && WebWorkerFS_RemoveTreeJs(logicalPath) != 0;
 }
 
 bool WebWorkerFS_Rename(const char *from, const char *to)
