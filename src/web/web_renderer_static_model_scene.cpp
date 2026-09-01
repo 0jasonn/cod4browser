@@ -154,6 +154,8 @@ bool SelectTechnique(
 
 WebRendererStaticModelInstanceDesc MakeInstance(
     const GfxPackedPlacement &placement,
+    const XModel &model,
+    const GfxStaticModelInst *canonicalBounds,
     float cullDistance,
     std::uint32_t canonicalIndex,
     const float modelLightingCoordinates[3]) noexcept
@@ -168,6 +170,37 @@ WebRendererStaticModelInstanceDesc MakeInstance(
     if (modelLightingCoordinates)
         std::copy_n(modelLightingCoordinates, 3u,
             instance.modelLightingCoordinates);
+    if (canonicalBounds)
+    {
+        std::copy_n(canonicalBounds->mins, 3u, instance.shadowMins);
+        std::copy_n(canonicalBounds->maxs, 3u, instance.shadowMaxs);
+    }
+    else
+    {
+        float localCenter[3];
+        float localExtent[3];
+        for (std::size_t component = 0u; component < 3u; ++component)
+        {
+            localCenter[component] =
+                (model.mins[component] + model.maxs[component]) * 0.5f;
+            localExtent[component] =
+                (model.maxs[component] - model.mins[component]) * 0.5f;
+        }
+        for (std::size_t component = 0u; component < 3u; ++component)
+        {
+            float center = placement.origin[component];
+            float extent = 0.0f;
+            for (std::size_t axis = 0u; axis < 3u; ++axis)
+            {
+                const float scaledAxis =
+                    placement.axis[axis][component] * placement.scale;
+                center += localCenter[axis] * scaledAxis;
+                extent += std::fabs(scaledAxis) * localExtent[axis];
+            }
+            instance.shadowMins[component] = center - extent;
+            instance.shadowMaxs[component] = center + extent;
+        }
+    }
     instance.modelScale = placement.scale;
     instance.modelCullDistance = cullDistance;
     instance.canonicalInstanceIndex = canonicalIndex;
@@ -389,6 +422,9 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
                 modelLightingComplete = modelLightingComplete && lightingReady;
                 replacement.instances.push_back(MakeInstance(
                     world.dpvs.smodelDrawInsts[canonicalIndex].placement,
+                    model,
+                    world.dpvs.smodelInsts
+                        ? &world.dpvs.smodelInsts[canonicalIndex] : nullptr,
                     world.dpvs.smodelDrawInsts[canonicalIndex].cullDist,
                     canonicalIndex,
                     lightingCoordinates));

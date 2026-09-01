@@ -485,6 +485,10 @@ struct WebRendererStaticModelInstanceDesc
     float axis[3][3];
     float origin[3];
     float modelLightingCoordinates[3];
+    // Canonical bounds drive sun-partition rejection in light space and stay
+    // independent of camera visibility.
+    float shadowMins[3];
+    float shadowMaxs[3];
     float modelScale;
     float modelCullDistance;
     std::uint32_t canonicalInstanceIndex;

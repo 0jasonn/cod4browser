@@ -162,6 +162,14 @@ struct Fixture
                 instances[instance].placement.axis[axis][axis] = 1.0f;
             lightingInstances[instance].groundLighting.packed =
                 0xff204080u;
+            lightingInstances[instance].mins[0] =
+                static_cast<float>(instance) * 10.0f - 1.0f;
+            lightingInstances[instance].mins[1] = -2.0f;
+            lightingInstances[instance].mins[2] = -3.0f;
+            lightingInstances[instance].maxs[0] =
+                static_cast<float>(instance) * 10.0f + 1.0f;
+            lightingInstances[instance].maxs[1] = 2.0f;
+            lightingInstances[instance].maxs[2] = 3.0f;
         }
         world.dpvs.smodelCount = 2u;
         world.dpvs.smodelDrawInsts = instances.data();
@@ -204,6 +212,8 @@ void TestCanonicalInstancesShareOneMaterialSurfaceBatch()
     assert(command.instances[1].modelScale == 2.0f);
     assert(command.instances[1].modelCullDistance == 1000.0f);
     assert(command.instances[1].canonicalInstanceIndex == 1u);
+    assert(command.instances[1].shadowMins[0] == 9.0f);
+    assert(command.instances[1].shadowMaxs[0] == 11.0f);
     assert(command.modelLightingAtlas.entryCount == 2u);
     assert(command.instances[0].modelLightingCoordinates[0] !=
         command.instances[1].modelLightingCoordinates[0]);
