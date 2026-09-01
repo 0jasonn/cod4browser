@@ -1,10 +1,32 @@
 # Web product status
 
-Updated 2026-08-31. This is the single current status page; the
+Updated 2026-09-01. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
-## DObj conversion and dynamic shadow milestone delivered
+## Static sun-shadow partition milestone delivered
+
+Runtime `cc4af645` carries canonical static-model AABBs through the portable
+boundary, tests them against each sun cascade, and submits only contiguous
+visible instance runs. This matches native's separate shadow visibility shape:
+camera DPVS does not select casters, near/far membership remains independent,
+and authored spot membership is unchanged.
+
+Diagnostic sun-shadow CPU fell **3.524 -> 1.234 ms (65.0%)** and static-shadow
+submission **0.707 -> 0.137 ms (80.6%)**. The controlled workload avoids 9,706
+static caster-instance submissions and 1,897,368 indices per frame while all
+120 samples preserve camera/static retention, dynamic/UI commands, uploads,
+merged ranges, camera, time, and world geometry.
+
+Fresh production A/B/B/A pair means are **14.947 -> 12.732 ms (14.82% lower)**.
+The focused static-model target, recovery check, explicit work comparator, and
+one final Release passed. This is paused CargoShip throughput, not gameplay FPS
+or pixel equivalence. See [evidence and limits](evidence/static-sun-partitions-cc4af645.md).
+
+Next: move CPU-only shadow bounds out of the GPU instance payload and measure
+moving-camera static-buffer updates without changing the delivered culling seam.
+
+## Prior DObj conversion and dynamic shadow milestone
 
 Runtime `30e34cff` fuses skinning with final vertex construction, recycles numeric
 geometry capacity, enables selective LTO of existing Kisak helpers, and extends
@@ -23,8 +45,7 @@ shadows, static culling, atomic failures and recovery remain intact. One focused
 native target and one final production Release passed; no broad suites, mission
 checks or captures were required. See [evidence and limits](evidence/dobj-conversion-30e34cff.md).
 
-Next: profile remaining sun-shadow static-caster submission versus GPU depth
-work, then optimize the measured cost while preserving off-camera casters.
+That milestone's static-caster follow-up is delivered in the current section above.
 
 ## Prior retained-renderer milestone
 

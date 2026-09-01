@@ -159,10 +159,50 @@ export function compareShadowRangeWorkloads(runs) {
         sunShadowMergedRanges: run.workCounts[0].sunShadowMergedRanges }));
 }
 
+// Static sun casters may reduce both submitted instances and their index work.
+// Camera/static retention, dynamic commands, uploads and merged ranges stay exact.
+export function compareStaticShadowPartitionWorkloads(runs) {
+    assert(runs.length >= 2);
+    const baseline = runs[0];
+    const normalized = [baseline];
+    const changes = [];
+    for (const run of runs.slice(1)) {
+        assert.equal(run.workCounts.length, 120);
+        const deltas = run.workCounts.map((counts, index) => {
+            const original = baseline.workCounts[index];
+            const casterDraws = original.shadowCasterDraws - counts.shadowCasterDraws;
+            const submittedIndices = original.submittedIndices - counts.submittedIndices;
+            assert(casterDraws > 0, 'static partition culling must reduce caster instances');
+            assert(submittedIndices > 0, 'static partition culling must reduce submitted indices');
+            return { casterDraws, submittedIndices };
+        });
+        for (const delta of deltas)
+            assert.deepEqual(delta, deltas[0],
+                'static shadow work changed within paused window');
+        normalized.push({ ...run, workCounts: run.workCounts.map((counts, index) => ({
+            ...counts,
+            shadowCasterDraws: counts.shadowCasterDraws + deltas[index].casterDraws,
+            submittedIndices: counts.submittedIndices + deltas[index].submittedIndices,
+        })) });
+        changes.push({ artifactSha256: run.artifactSha256,
+            matchingLogicalWorkSamples: 120, ...deltas[0] });
+    }
+    compareProfileWorkloads(normalized);
+    return changes;
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
     const profiles = process.argv[2] === '--profiles';
     const retained = process.argv[2] === '--retained';
     const shadows = process.argv[2] === '--shadow-ranges';
-    const runs = await Promise.all(process.argv.slice(profiles || retained || shadows ? 3 : 2).map(async path => JSON.parse(await readFile(path, 'utf8'))));
-    console.log(JSON.stringify((shadows ? compareShadowRangeWorkloads : retained ? compareRetainedRendererWorkloads : profiles ? compareProfileWorkloads : compareWorkloads)(runs), null, 2));
+    const staticShadowPartitions =
+        process.argv[2] === '--static-shadow-partitions';
+    const qualified = profiles || retained || shadows || staticShadowPartitions;
+    const runs = await Promise.all(process.argv.slice(qualified ? 3 : 2)
+        .map(async path => JSON.parse(await readFile(path, 'utf8'))));
+    console.log(JSON.stringify((staticShadowPartitions
+        ? compareStaticShadowPartitionWorkloads
+        : shadows ? compareShadowRangeWorkloads
+        : retained ? compareRetainedRendererWorkloads
+        : profiles ? compareProfileWorkloads : compareWorkloads)(runs), null, 2));
 }

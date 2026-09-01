@@ -1,6 +1,6 @@
 # Web product roadmap
 
-Updated 2026-08-31. This is the single active roadmap; earlier orders and
+Updated 2026-09-01. This is the single active roadmap; earlier orders and
 mission-progression gates are superseded. Mission playing, progression
 validation, route generation, and campaign expansion are outside this task.
 Manual gameplay assessment can guide renderer work without a progression gate.
@@ -69,10 +69,16 @@ Manual gameplay assessment can guide renderer work without a progression gate.
    15.461 -> 14.296 ms (7.54% lower), with control drift documented. Another
    1,374 shadow submissions are avoided with identical logical geometry,
    culling and independent shadows. Focused checks, recovery and Release pass.
-10. Next: profile remaining sun-shadow static-caster submission versus GPU depth
-    work, then optimize the measured cost using canonical bounds. Preserve
-    off-camera casters; never substitute camera visibility for shadow visibility.
-    Keep canonical pose/lighting ownership and avoid pause-specific caches.
+10. The [static sun-shadow partition milestone](evidence/static-sun-partitions-cc4af645.md)
+    carries canonical static AABBs into each light-space cascade and submits only
+    contiguous visible runs. Sun-shadow CPU falls 3.524 -> 1.234 ms, 9,706 caster
+    instances are avoided, and production A/B/B/A pair means fall 14.947 ->
+    12.732 ms (14.82%). Camera DPVS, independent near/far membership, authored
+    spot membership, uploads, and dynamic/UI work remain intact.
+11. Next: separate CPU-only shadow bounds from the GPU instance payload and
+    measure moving-camera static-buffer updates. Preserve the delivered
+    light-space visibility seam and do not add a second geometry buffer or
+    camera-derived caster selection.
 
 The earlier renderer milestone used one focused native fixture, rerun after shadow
 integration; three diagnostic builds and five 120-frame profiles; four

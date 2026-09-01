@@ -1,6 +1,6 @@
 # Web port convergence inventory
 
-Updated 2026-08-31. This page owns system classification; see
+Updated 2026-09-01. This page owns system classification; see
 [current status](web-status.md) and [the active roadmap](web-roadmap.md) for
 evidence and priorities. Earlier chronology is retained in
 [the historical inventory](history/web-convergence-through-2026-08-28.md).
@@ -108,6 +108,16 @@ region in CPU/GPU storage plus a byte mask, without another GPU buffer. See
 [the static-model visibility record](evidence/static-camera-visibility-2026-08-31.md)
 for bounded synthetic execution and production compile evidence, not retail
 visual or performance claims.
+
+Static sun shadows now apply a separate light-space visibility mask over that
+first-half LOD packing. Canonical `GfxStaticModelInst` AABBs cross the portable
+boundary; each near/far matrix overwrites one backend byte per retained instance,
+then only contiguous visible runs are submitted. Camera visibility is never
+consulted, off-camera casters remain eligible, and spot shadows retain authored
+canonical membership. This is the native-shaped partition seam, not a browser
+engine model or pause cache. The bounds currently also occupy 24 bytes in each
+GPU instance record; separating that CPU metadata is the next measured cleanup.
+See [the milestone evidence](evidence/static-sun-partitions-cc4af645.md).
 
 World camera visibility now extends that same canonical call through AABB
 surface tests and cell cull groups, including native decal selection. It resets

@@ -123,3 +123,30 @@ Use `renderer_workload.mjs --shadow-ranges` for this physical-draw change. It
 requires exact logical caster totals and exact equality of all other work,
 including uploaded bytes and submitted indices, across all 120 samples. The
 ordinary `--profiles` comparator remains strict.
+
+## Static sun-shadow partitions
+
+Delivered in `cc4af645`: the backend now mirrors native's distinct sun-shadow
+visibility step for static XModels. The portable instance record carries the
+canonical `GfxStaticModelInst` AABB. Once LOD packing is current, each near/far
+pass computes a light-matrix visibility byte for every retained shadow instance
+and submits contiguous visible runs from the existing instance buffer.
+
+This mask belongs to the WebGL draw boundary. It stores no pose, asset, gameplay,
+or camera state; it is overwritten independently for each partition. Camera DPVS
+packing remains in the buffer's second half and never enters caster selection.
+Authored spot-shadow membership keeps its existing canonical-index lookup.
+Unload releases the mask, and context recovery reuses canonical retained bounds.
+
+The explicit `--static-shadow-partitions` comparator normalizes only the intended
+caster-instance and submitted-index reductions before requiring every other work
+field and workload checkpoint to match. The final diagnostic candidate removes
+9,706 caster instances and 1,897,368 indices per frame; sun CPU falls 65.0%.
+Production A/B/B/A pair means fall 14.947 -> 12.732 ms (14.82%). See
+[the full evidence](evidence/static-sun-partitions-cc4af645.md).
+
+The bounds currently add 24 bytes to each static instance record, including the
+GPU instance buffer even though the draw shader does not consume them. This is
+acceptable for the delivered boundary but leaves moving-camera buffer-update
+cost unmeasured. The next change should split CPU-only bounds from the GPU payload
+without adding another geometry buffer or weakening atomic scene publication.
