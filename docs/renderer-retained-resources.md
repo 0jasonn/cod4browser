@@ -97,6 +97,16 @@ See [the ownership evidence](evidence/dynamic-geometry-ownership-af601efe.md).
 This marks the end of platform geometry-handoff optimization; the next measured
 work belongs to canonical DObj pose, lighting and skinning.
 
+## Canonical weighted DObj basis
+
+Runtime `82b4de10` brings the platform weighted skinner back to Kisak's native
+behavior: it blends position across all influences and transforms normal and
+tangent with the primary bone only. Removing the web-only secondary basis
+blends reduced the exact-work DObj skinning interval by an observed 10.8%.
+All existing normalization, validation, pose, LOD, material, culling and shadow
+decisions remain in place. See
+[the focused evidence](evidence/dobj-primary-basis-82b4de10.md).
+
 ## DObj conversion and dynamic sun ranges
 
 Delivered in `30e34cff`: the final diagnostic comparison observes 41.1% lower

@@ -161,6 +161,13 @@ are unchanged. A measured inactive-buffer WebGL candidate was reverted after it
 failed to reduce upload cost. Further work now begins at shared DObj
 pose/lighting/skinning behavior rather than expanding platform GPU ownership.
 
+The [canonical weighted-basis milestone](evidence/dobj-primary-basis-82b4de10.md)
+makes the portable DObj skinner follow Kisak's native scalar and SSE rule:
+positions blend across influences, while normals and tangents use the primary
+bone. This deletes a browser-only behavioral divergence and its secondary basis
+matrix work. Pose generation, packed decoding, finite checks, LOD/hide policy,
+static-model camera culling and independent shadow selection are unchanged.
+
 Dynamic camera submission now mirrors Kisak's material draw-surface ordering
 inside proven-safe opaque runs. Blended, depth-equal/disabled, no-color, FX,
 sun, and other state-sensitive batches remain append-order anchors, and shadow
@@ -346,6 +353,12 @@ The [delivered evidence](evidence/dobj-conversion-30e34cff.md) records focused
 checks, exact logical-work qualification, recovery and one final Release,
 separating diagnostic DObj-stage reductions from the observed 7.54% production
 pair-mean reduction and its control drift.
+
+Weighted DObj basis handling now matches canonical Kisak. The exact paused
+workload observed 10.8% lower DObj skinning time without new ownership or
+platform state. The remaining measured DObj cost is led by per-object model
+lighting, which should be traced against canonical light-grid reuse before any
+cache is introduced.
 
 - Broaden campaign coverage and close renderer/material gaps from measured
   canonical scenes, without introducing browser asset types.
