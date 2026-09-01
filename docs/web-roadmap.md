@@ -85,9 +85,14 @@ Manual gameplay assessment can guide renderer work without a progression gate.
     membership searches with one packed mask per authored light. Static spot CPU
     falls 45.5%; production A/B/B/A pair means fall 12.627 -> 12.090 ms (4.25%)
     with all diagnostic logical-work samples exact.
-13. The [Kisak optimization audit](kisak-renderer-optimization-audit.md) now owns
-    completion of the broad renderer goal. Next: consume native BSP
-    `surfaceVisData[partition + 1]` for independent sun cascades. Dynamic sun/spot
+13. The [BSP sun-partition milestone](evidence/bsp-sun-partitions-a23850aa.md)
+    carries canonical surface AABBs with retained spans and selects each cascade
+    independently. Per frame, 578 physical shadow draws and 1,694,994 submitted
+    indices are avoided; attributed sun drawing falls 8.27%. Production A/B/B/A
+    pair means fall 15.189 -> 14.942 ms (1.63%) with documented run drift.
+14. The [Kisak optimization audit](kisak-renderer-optimization-audit.md) owns
+    completion of the broad renderer goal. Next: carry canonical dynamic
+    scene-entity visibility into independent sun partitions. Dynamic spot
     visibility and the measured disposition of safe opaque sorting follow.
 
 The static-instance follow-up used the focused native fixture, isolated control
@@ -99,6 +104,10 @@ The static spot-shadow follow-up used the same focused native target, one focuse
 Node target, attributed control/candidate diagnostics, four production windows,
 and one final Release. One targeted profile retry corrected an aggregate-field
 allowlist; renderer assertions were not weakened.
+
+The BSP sun follow-up used one focused native target, exact 120-sample targeted
+comparison, four production windows, and one final Release. No broad tier,
+mission check, capture, or unrelated compatibility promotion ran.
 
 The earlier renderer milestone used one focused native fixture, rerun after shadow
 integration; three diagnostic builds and five 120-frame profiles; four

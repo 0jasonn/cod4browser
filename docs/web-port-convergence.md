@@ -131,9 +131,13 @@ partition bytes, canonical asset identity, and GPU resource ownership remain
 separate.
 
 The [Kisak renderer optimization audit](kisak-renderer-optimization-audit.md)
-tracks applicable native techniques to closure. Native BSP and dynamic
-sun-partition visibility and dynamic spot visibility remain open; they must use
-canonical producer data rather than backend-derived camera membership.
+tracks applicable native techniques to closure. The
+[BSP sun milestone](evidence/bsp-sun-partitions-a23850aa.md) carries canonical
+`GfxSurface` AABBs with retained spans and builds each cascade's light-space
+selection independently. Camera DPVS is absent, range holes and alpha-tested
+boundaries remain explicit, and adjacent opaque spans can still merge. Dynamic
+sun-partition and dynamic spot visibility remain open; they must use canonical
+scene-entity producer data rather than backend-derived camera membership.
 
 World camera visibility now extends that same canonical call through AABB
 surface tests and cell cull groups, including native decal selection. It resets
@@ -150,12 +154,13 @@ caster ranges keep the original index buffer, independent of camera visibility.
 Static-model packing and LOD policy are unchanged.
 
 This is permanent draw-command boundary metadata, not another world model.
-It costs 16 bytes per emitted surface plus up to 16 bytes per surface of retained
-camera-run capacity, with an O(emitted surfaces) scan per submitted view. No
-extra geometry buffer, index upload, mask cache or JS visibility state is added.
-World replacement clears runs; unload releases both vectors; context restoration
-reuses retained geometry/spans. Retire the spans only if canonical frontend draw
-commands directly provide the backend ranges. See
+It costs 40 bytes per emitted surface, plus up to 16 bytes per surface for
+camera-run capacity and one reused 16-byte-per-range sun scratch vector. Camera
+submission scans emitted surfaces once; sun drawing scans them once per
+cascade. No extra geometry buffer, index upload, mask cache or JS visibility
+state is added. World replacement clears runs; unload releases all vectors;
+context restoration reuses retained geometry/spans. Retire the spans only if
+canonical frontend draw commands directly provide the backend ranges. See
 [world visibility evidence](evidence/world-camera-visibility-2026-08-31.md).
 
 Diagnostics add five DObj CPU measurements (total build and four disjoint

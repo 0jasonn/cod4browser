@@ -25,7 +25,7 @@ Status meanings:
 | Dynamic vertex/index buffer pools (`r_buffers.cpp`) | Capacity-backed WebGL buffers and retained numeric staging avoid per-batch allocation and upload combined dynamic geometry once per submission. | **Equivalent** |
 | DObj pose, lighting, skinning, and skinned-cache reuse (`r_dobj_skin.cpp`, `r_model_skin*.cpp`, `rb_tess.cpp`) | Canonical pose/lighting execute each frame; direct final-vertex emission and retained numeric capacity remove intermediate conversion without a browser pose cache. Cross-pass reuse is present for the shared skinned dynamic buffer. | **Equivalent** |
 | Render/sampler/stream state suppression (`r_setstate_d3d.*`, `r_draw_bsp.cpp`) | Pass-local material, projection, feature, texture, shadow-alpha, shadow-cull, program, and geometry binding state suppress redundant GL calls with explicit reset boundaries. | **Equivalent** |
-| BSP sun-cascade visibility (`r_add_bsp.cpp::R_AddAllBspDrawSurfacesRangeSunShadow`) | Web world sun drawing still submits every retained sun-casting range to both cascades; it does not consume `surfaceVisData[partition + 1]`. | **Open** |
+| BSP sun-cascade visibility (`r_add_bsp.cpp::R_AddAllBspDrawSurfacesRangeSunShadow`) | `a23850aa` carries canonical `GfxSurface` AABBs with retained spans and builds independent light-space near/far ranges before submission. Camera DPVS is absent; holes and alpha boundaries remain explicit. | **Equivalent** |
 | Static-model sun-cascade visibility (`r_add_staticmodel.cpp::R_AddAllStaticModelSurfacesRangeSunShadow`) | Canonical static AABBs produce independent near/far masks and contiguous instanced runs. | **Equivalent** |
 | Dynamic scene-entity sun-cascade visibility (`r_dpvs.cpp::R_AddAllSceneEntSurfacesRangeSunShadow`) | Web dynamic sun drawing filters authored caster/material flags but currently submits eligible dynamic ranges to both cascades without native per-partition scene visibility. | **Open** |
 | Authored BSP/static spot membership (`r_add_bsp.cpp`, `r_add_staticmodel.cpp`, `GfxWorld::shadowGeom`) | Authored world ranges are retained; `26b3dc98` builds one packed static mask per selected light and reuses instanced runs. | **Equivalent** |
@@ -41,15 +41,13 @@ Status meanings:
 The broad optimization goal remains active while any applicable row is **Open**
 or **Partial**. Completion requires:
 
-1. BSP sun partitions consume canonical partition visibility before submission.
-2. Dynamic sun and spot casters consume canonical per-view/per-light visibility,
+1. Dynamic sun and spot casters consume canonical per-view/per-light visibility,
    without deriving caster membership from camera DPVS.
-3. The remaining dynamic draw-sort row is either implemented for a proven-safe
+2. The remaining dynamic draw-sort row is either implemented for a proven-safe
    opaque subset or closed with measurements showing no material benefit.
-4. Each closure has focused semantic coverage, matched logical-work evidence,
+3. Each closure has focused semantic coverage, matched logical-work evidence,
    a production Release, current convergence documentation, and a pushed commit.
 
-The next implementation target is BSP sun-cascade visibility because it is a
-direct, high-volume native omission with existing canonical surface identities
-and partition matrices. Dynamic shadow visibility follows after its frontend
-producer boundary is identified.
+The next implementation target is dynamic sun-cascade visibility. Its canonical
+scene/DynEnt producer boundary must be identified before changing submission;
+camera visibility cannot stand in for either light-space partition.

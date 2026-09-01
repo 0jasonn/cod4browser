@@ -4,7 +4,26 @@ Updated 2026-09-01. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
-## Static spot-shadow membership milestone delivered
+## BSP sun-cascade visibility milestone delivered
+
+Runtime `a23850aa` carries canonical `GfxSurface` bounds with retained world
+spans and selects near/far sun casters independently in light space. Camera DPVS
+is absent from shadow selection; range holes, alpha boundaries, static masks,
+authored spot membership, and dynamic commands are preserved.
+
+Across all 120 diagnostic samples, physical shadow draws fall **1,302 -> 724**,
+merged ranges **5,488 -> 1,374**, and submitted indices **2,918,796 ->
+1,223,802** while every other recorded work count remains exact. Sun-shadow
+draw time falls **1.208 -> 1.108 ms (8.27%)**. Production A/B/B/A pair means are
+**15.189 -> 14.942 ms (1.63% lower)** with material run drift, so that timing is
+a local observation. The focused test and one final Release passed. See
+[evidence and limits](evidence/bsp-sun-partitions-a23850aa.md).
+
+The [Kisak optimization audit](kisak-renderer-optimization-audit.md) remains
+active. Dynamic sun-partition visibility and dynamic spot visibility are open;
+dynamic opaque sorting remains partial. Next is dynamic sun visibility.
+
+## Prior static spot-shadow membership milestone
 
 Runtime `26b3dc98` converts authored `GfxWorld::shadowGeom` static membership
 into one packed mask per selected spot light. Model surface batches reuse that
@@ -16,11 +35,6 @@ spot drawing **1.484 -> 1.074 ms (27.7%)**, with all 120 logical-work samples
 matching. Production A/B/B/A pair means are **12.627 -> 12.090 ms (4.25%
 lower)**. The focused native and Node checks and one final Release passed. See
 [evidence and limits](evidence/static-spot-membership-26b3dc98.md).
-
-The [Kisak optimization audit](kisak-renderer-optimization-audit.md) now defines
-the remaining broad goal. BSP and dynamic sun-partition visibility and dynamic
-spot visibility are open; dynamic opaque sorting remains partial. Next is BSP
-sun-cascade visibility.
 
 ## Prior static-instance upload milestone
 
