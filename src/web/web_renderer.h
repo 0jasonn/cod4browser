@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 struct WebFrameInfo;
 struct GfxImage;
@@ -664,6 +665,16 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
 // inserted before brushInsertBatch without occupying the streamed vertex buffer.
 WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
     const WebRendererWorldSurfaceDesc &scene,
+    const WebRendererBrushModelInstanceDesc *brushInstances = nullptr,
+    std::uint32_t brushInstanceCount = 0u,
+    std::uint32_t brushInsertBatch = 0u);
+
+// Transfers final per-frame vertex/index storage into the backend after the
+// same descriptor validation. On failure, both source vectors are restored.
+WebRendererSurfaceResult WebRenderer_SetDynamicModelSceneOwned(
+    const WebRendererWorldSurfaceDesc &scene,
+    std::vector<WebRendererSurfaceVertex> &vertices,
+    std::vector<std::uint32_t> &indices,
     const WebRendererBrushModelInstanceDesc *brushInstances = nullptr,
     std::uint32_t brushInstanceCount = 0u,
     std::uint32_t brushInsertBatch = 0u);

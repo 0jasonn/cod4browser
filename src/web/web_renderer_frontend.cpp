@@ -3625,9 +3625,22 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             dynamicCommand.modelLightingAtlas.pixels.empty()
                 ? nullptr : &lightingAtlas,
         };
+        // Keep the first command intact for the one-time diagnostic below.
+        // Later frames transfer final geometry storage to the backend and
+        // receive its reusable staging capacity in return.
+        const bool retainFirstDiagnosticGeometry =
+            dynamicBuild == WebRendererDObjSceneResult::Success &&
+            !g_dynamicModelSceneReported;
         const WebRendererSurfaceResult submission =
-            WebRenderer_SetDynamicModelScene(scene, brushInstances.data(),
-                static_cast<std::uint32_t>(brushInstances.size()), brushInsertBatch);
+            retainFirstDiagnosticGeometry
+            ? WebRenderer_SetDynamicModelScene(scene, brushInstances.data(),
+                static_cast<std::uint32_t>(brushInstances.size()),
+                brushInsertBatch)
+            : WebRenderer_SetDynamicModelSceneOwned(scene,
+                dynamicCommand.vertices, dynamicCommand.indices,
+                brushInstances.data(),
+                static_cast<std::uint32_t>(brushInstances.size()),
+                brushInsertBatch);
         if (submission != WebRendererSurfaceResult::Success)
         {
             Com_Error(ERR_DROP, "R_RenderScene dynamic/canonical FX command %s (vertices=%u indices=%u batches=%u brushes=%zu insert=%u)",

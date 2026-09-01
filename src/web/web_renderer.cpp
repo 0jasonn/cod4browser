@@ -5635,7 +5635,8 @@ WebRendererSurfaceResult CopyWorldCommand(
     std::uint32_t inheritedPrimaryLightCount,
     std::vector<WebRendererRetainedSpotShadowCaster> *spotShadowCasters,
     std::vector<WebRendererRetainedSpotShadowStaticModel> *
-        spotShadowStaticModels)
+        spotShadowStaticModels,
+    bool geometryAlreadyStaged = false)
 {
     if (!surface.vertices || !surface.indices || !surface.batches ||
         surface.vertexCount == 0u || surface.indexCount == 0u ||
@@ -5736,10 +5737,23 @@ WebRendererSurfaceResult CopyWorldCommand(
     std::size_t retainedPixelBytes = RetainedImageStats(images).decodedBytes;
     try
     {
-        const WebRendererSurfaceResult geometryCopy = WebRenderer_CopyStagedGeometry(
-            {surface.vertices, surface.vertexCount},
-            {surface.indices, surface.indexCount}, vertices, indices);
-        if (geometryCopy != WebRendererSurfaceResult::Success) return geometryCopy;
+        if (geometryAlreadyStaged)
+        {
+            if (vertices.size() != surface.vertexCount ||
+                indices.size() != surface.indexCount ||
+                vertices.data() != surface.vertices ||
+                indices.data() != surface.indices)
+                return WebRendererSurfaceResult::InvalidDescriptor;
+        }
+        else
+        {
+            const WebRendererSurfaceResult geometryCopy =
+                WebRenderer_CopyStagedGeometry(
+                    {surface.vertices, surface.vertexCount},
+                    {surface.indices, surface.indexCount}, vertices, indices);
+            if (geometryCopy != WebRendererSurfaceResult::Success)
+                return geometryCopy;
+        }
 #if KISAK_WEB_DIAGNOSTICS
         const double batchCopyStarted = commandProfile ? WebFrameProfile_Now() : 0.0;
         if (commandProfile)
@@ -7296,10 +7310,12 @@ bool TransformShadowBounds(
     return true;
 }
 
-WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
+WebRendererSurfaceResult SetDynamicModelScene(
     const WebRendererWorldSurfaceDesc &scene,
     const WebRendererBrushModelInstanceDesc *brushInstances,
-    std::uint32_t brushInstanceCount, std::uint32_t brushInsertBatch)
+    std::uint32_t brushInstanceCount, std::uint32_t brushInsertBatch,
+    std::vector<WebRendererSurfaceVertex> *ownedVertices,
+    std::vector<std::uint32_t> *ownedIndices)
 {
     const bool empty = scene.vertexCount == 0u && scene.indexCount == 0u && scene.batchCount == 0u;
     if ((empty && (scene.vertices || scene.indices || scene.batches || scene.modelLightingAtlas)) ||
@@ -7321,6 +7337,34 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
     auto &retainedIndices = g_renderer.dynamicModelIndexStaging;
     retainedVertices.clear();
     retainedIndices.clear();
+    const bool adoptsGeometry = ownedVertices && ownedIndices;
+    if ((ownedVertices == nullptr) != (ownedIndices == nullptr) ||
+        (adoptsGeometry &&
+            (ownedVertices->data() != scene.vertices ||
+             ownedVertices->size() != scene.vertexCount ||
+             ownedIndices->data() != scene.indices ||
+             ownedIndices->size() != scene.indexCount)))
+        return WebRendererSurfaceResult::InvalidDescriptor;
+    if (adoptsGeometry)
+    {
+        retainedVertices.swap(*ownedVertices);
+        retainedIndices.swap(*ownedIndices);
+    }
+    struct GeometryRestore
+    {
+        std::vector<WebRendererSurfaceVertex> *sourceVertices;
+        std::vector<std::uint32_t> *sourceIndices;
+        std::vector<WebRendererSurfaceVertex> &stagedVertices;
+        std::vector<std::uint32_t> &stagedIndices;
+        bool active;
+        ~GeometryRestore()
+        {
+            if (!active) return;
+            stagedVertices.swap(*sourceVertices);
+            stagedIndices.swap(*sourceIndices);
+        }
+    } restore{ownedVertices, ownedIndices, retainedVertices,
+        retainedIndices, adoptsGeometry};
     std::vector<WebRendererRetainedWorldBatch> retainedBatches;
     std::vector<WebRendererBrushModelInstanceDesc> retainedBrushInstances;
     std::vector<WebRendererDynamicDraw> dynamicDraws;
@@ -7336,7 +7380,8 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
         g_renderer.retainedDynamicModelImages, ignoredPrimaryLights,
         ignoredSunPrimaryLightIndex,
         static_cast<std::uint32_t>(
-            g_renderer.retainedPrimaryLights.size()), nullptr, nullptr);
+            g_renderer.retainedPrimaryLights.size()), nullptr, nullptr,
+        adoptsGeometry);
     if (copy != WebRendererSurfaceResult::Success) return copy;
     if (!CopyModelLightingAtlas(
             scene.modelLightingAtlas, retainedLighting))
@@ -7501,6 +7546,7 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
         std::move(dynamicCameraDrawOrder);
     g_renderer.retainedDynamicModelLighting = std::move(retainedLighting);
     g_renderer.dynamicModelSceneActive = !g_renderer.dynamicDraws.empty();
+    restore.active = false;
 
     if (!empty && !g_renderer.dynamicModelFirstSubmissionReported)
     {
@@ -7552,6 +7598,26 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
     }
 #endif
     return WebRendererSurfaceResult::Success;
+}
+
+WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
+    const WebRendererWorldSurfaceDesc &scene,
+    const WebRendererBrushModelInstanceDesc *brushInstances,
+    std::uint32_t brushInstanceCount, std::uint32_t brushInsertBatch)
+{
+    return SetDynamicModelScene(scene, brushInstances, brushInstanceCount,
+        brushInsertBatch, nullptr, nullptr);
+}
+
+WebRendererSurfaceResult WebRenderer_SetDynamicModelSceneOwned(
+    const WebRendererWorldSurfaceDesc &scene,
+    std::vector<WebRendererSurfaceVertex> &vertices,
+    std::vector<std::uint32_t> &indices,
+    const WebRendererBrushModelInstanceDesc *brushInstances,
+    std::uint32_t brushInstanceCount, std::uint32_t brushInsertBatch)
+{
+    return SetDynamicModelScene(scene, brushInstances, brushInstanceCount,
+        brushInsertBatch, &vertices, &indices);
 }
 
 WebRendererSurfaceResult WebRenderer_SetUiScene(
