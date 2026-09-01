@@ -29,22 +29,20 @@ Status meanings:
 | Static-model sun-cascade visibility (`r_add_staticmodel.cpp::R_AddAllStaticModelSurfacesRangeSunShadow`) | Canonical static AABBs produce independent near/far masks and contiguous instanced runs. | **Equivalent** |
 | Dynamic scene-entity sun-cascade visibility (`r_dpvs.cpp::R_AddAllSceneEntSurfacesRangeSunShadow`) | `6ece6ee9` retains world-space bounds for DObj, XModel, DynEnt model, moving-brush, and DynEnt-brush draws and tests them independently against both sun matrices. | **Equivalent** |
 | Authored BSP/static spot membership (`r_add_bsp.cpp`, `r_add_staticmodel.cpp`, `GfxWorld::shadowGeom`) | Authored world ranges are retained; `26b3dc98` builds one packed static mask per selected light and reuses instanced runs. | **Equivalent** |
-| Dynamic scene-entity spot visibility (`r_dpvs.cpp::R_AddAllSceneEntSurfacesSpotShadow`) | `9a253c6a` submits build-shadowmap-qualified DObj, DynEnt model, moving-brush, and DynEnt-brush draws after an independent AABB test against each selected spot matrix. Canonical primary-light entity/DynEnt linkage and light-region membership remain stubbed. | **Partial** |
+| Dynamic scene-entity spot visibility (`r_dpvs.cpp::R_AddAllSceneEntSurfacesSpotShadow`) | `9a253c6a` submits build-shadowmap-qualified dynamic families independently per spot matrix. `4ed38a84` restores the canonical entity/DynEnt bit stride, sphere/box/cone tests, authored light-region hull rejection, and selected-light masks before the matrix test. | **Equivalent** |
 | Shadow draw sorting and opaque range coalescing (`R_SortDrawSurfs`, grouped static lists) | Adjacent opaque world/dynamic sun ranges merge; static sun/spot instances form contiguous runs. Alpha-tested boundaries and authored order remain explicit. | **Equivalent** |
 | Asynchronous sun-flare occlusion (`rb_sky.cpp`) | Double-buffered `GL_ANY_SAMPLES_PASSED_CONSERVATIVE` queries use availability polling and collision fallback. | **Equivalent** |
 | Backend resource retention and device recovery | World/static/brush geometry, textures, image sources, and command metadata have explicit unload and WebGL context-recovery ownership. | **Equivalent** |
 | Native renderer SMP/backend worker overlap | Kisak Wasm currently owns a single engine Worker and no pthread deployment decision exists. | **Not applicable** until profiling justifies pthreads and cross-origin isolation. |
 | D3D9-specific declaration, lock flag, and COM state caches | WebGL VAOs, buffer capacity, binding state, and context restoration own these API boundaries. | **Not applicable** literally; covered by platform equivalents above. |
 
-## Completion requirements
+## Completion record
 
-The broad optimization goal remains active while any applicable row is **Open**
-or **Partial**. Completion requires:
+The broad optimization goal is complete: no applicable row remains **Open** or
+**Partial**. The final closure provides:
 
-1. Dynamic spot casters consume canonical primary-light entity/DynEnt linkage;
-   matrix culling is already independent of camera and sun visibility.
-2. Each closure has focused semantic coverage, matched logical-work evidence,
-   a production Release, current convergence documentation, and a pushed commit.
-
-The last implementation target is canonical primary-light linkage so authored
-light-region membership narrows the already independent spot-matrix test.
+1. Dynamic spot casters consume canonical primary-light entity/DynEnt linkage
+   and authored light regions before independent spot-matrix culling.
+2. Focused semantic coverage, 120 matched logical-work samples, a final
+   production Release, and current convergence evidence at
+   [runtime `4ed38a84`](evidence/dynamic-primary-light-linkage-4ed38a84.md).

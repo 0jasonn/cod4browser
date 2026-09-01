@@ -4,7 +4,22 @@ Updated 2026-09-01. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
-## Dynamic opaque draw-order milestone delivered
+## Renderer optimization audit completed
+
+Runtime `4ed38a84` restores canonical primary-light linkage for DObj,
+moving-brush, DynEnt model, and DynEnt-brush spot casters. The canonical
+visibility bit arrays and authored light-region hulls now filter each selected
+spot light before the existing independent matrix test. Camera DPVS, both sun
+cascades, static membership, and dynamic draw ordering remain separate.
+
+The focused primary-light test passed, all 120 diagnostic work-count samples
+match, and the one final production Release passed. This CargoShip view retained
+the same 340 shadow draws and 1,023,750 submitted indices, so the result closes
+semantic convergence without a new performance claim. The optimization audit
+now has no applicable Open or Partial rows. See
+[evidence and limits](evidence/dynamic-primary-light-linkage-4ed38a84.md).
+
+## Prior dynamic opaque draw-order milestone
 
 Runtime `c8c4f335` applies Kisak's canonical material key only within contiguous
 dynamic model/brush runs proven opaque and depth-writing. Every blended, FX,
@@ -14,8 +29,7 @@ anchor; depth-hack and shadow passes stay independent.
 All 120 work-count samples match. Across 1,323 draws, material updates fall
 556→418 and feature updates 567→348; dynamic camera CPU falls 3.820→3.641 ms
 while command copy/order rises 0.949→0.988 ms. Noisy production pair means are
-14.613→14.116 ms (3.41% lower). The optimization audit now has one applicable
-Partial row: canonical primary-light linkage for dynamic spot membership. See
+14.613→14.116 ms (3.41% lower). See
 [evidence and limits](evidence/dynamic-opaque-sort-c8c4f335.md).
 
 ## Prior dynamic spot-shadow caster milestone
@@ -27,8 +41,8 @@ boundary. Camera and sun visibility remain independent.
 
 All 120 unchanged-work samples match. The missing rendering adds 10 physical
 caster draws and 65,760 indices per frame; dynamic spot attribution is 0.0915
-ms. The final production Release passed. Canonical primary-light linkage is
-still a partial convergence gap, and dynamic opaque sorting remains partial.
+ms. The final production Release passed. At that milestone, primary-light
+linkage and dynamic opaque ordering remained the two convergence gaps.
 See [evidence and limits](evidence/dynamic-spot-shadows-9a253c6a.md).
 
 ## Prior dynamic sun-cascade visibility milestone
@@ -46,8 +60,7 @@ merged dynamic ranges **1,374 -> 0**, and submitted indices **1,223,802 ->
 means are **14.868 -> 14.421 ms (3.01% lower)** with substantial run drift. See
 [evidence and limits](evidence/dynamic-sun-partitions-6ece6ee9.md).
 
-The [Kisak optimization audit](kisak-renderer-optimization-audit.md) remains
-active.
+The [Kisak optimization audit](kisak-renderer-optimization-audit.md) is closed.
 
 ## Prior BSP sun-cascade visibility milestone
 

@@ -145,9 +145,11 @@ bounds scan per dynamic submission. See
 Dynamic spot draws now use the same retained bounds independently against each
 selected perspective light matrix. DObj, DynEnt XModel, moving-brush, and
 DynEnt-brush materials require the remap-aware build-shadowmap technique and
-carry its cull/alpha state; camera and sun bytes remain absent. Canonical
-primary-light entity/DynEnt linkage and light-region membership remain a named
-gap. See [the dynamic spot evidence](evidence/dynamic-spot-shadows-9a253c6a.md).
+carry its cull/alpha state; camera and sun bytes remain absent. The
+[primary-light closure](evidence/dynamic-primary-light-linkage-4ed38a84.md)
+restores canonical entity/DynEnt visibility bits and authored light-region
+hulls, then builds a selected-light mask before the existing matrix test.
+Missing canonical arrays fall back conservatively to matrix-only selection.
 
 Dynamic camera submission now mirrors Kisak's material draw-surface ordering
 inside proven-safe opaque runs. Blended, depth-equal/disabled, no-color, FX,
