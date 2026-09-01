@@ -221,8 +221,6 @@ bool SkinWeightedSurface(
             TransformDirection(unpackedNormal, *primary, transformedNormal);
             TransformDirection(unpackedTangent, *primary, transformedTangent);
             float weightedSecondary[3]{};
-            float weightedSecondaryNormal[3]{};
-            float weightedSecondaryTangent[3]{};
             float explicitWeight = 0.0f;
             for (std::uint32_t influence = 0u;
                  influence < influenceCount; ++influence)
@@ -233,21 +231,11 @@ bool SkinWeightedSurface(
                 const float weight = static_cast<float>(
                     blend[2u + influence * 2u]) * SHORT_WEIGHT_TO_UNIT;
                 float secondaryPosition[3]{};
-                float secondaryNormal[3]{};
-                float secondaryTangent[3]{};
                 TransformPosition(vertex.xyz, *secondary, secondaryPosition);
-                TransformDirection(
-                    unpackedNormal, *secondary, secondaryNormal);
-                TransformDirection(
-                    unpackedTangent, *secondary, secondaryTangent);
                 for (std::size_t axis = 0u; axis < 3u; ++axis)
                 {
                     weightedSecondary[axis] +=
                         weight * secondaryPosition[axis];
-                    weightedSecondaryNormal[axis] +=
-                        weight * secondaryNormal[axis];
-                    weightedSecondaryTangent[axis] +=
-                        weight * secondaryTangent[axis];
                 }
                 explicitWeight += weight;
             }
@@ -258,12 +246,10 @@ bool SkinWeightedSurface(
                 output.position[axis] =
                     primaryWeight * transformed[axis] +
                     weightedSecondary[axis];
-                output.normal[axis] =
-                    primaryWeight * transformedNormal[axis] +
-                    weightedSecondaryNormal[axis];
-                output.tangent[axis] =
-                    primaryWeight * transformedTangent[axis] +
-                    weightedSecondaryTangent[axis];
+                // Canonical Kisak skinning blends positions but transforms the
+                // vertex basis with the primary bone only.
+                output.normal[axis] = transformedNormal[axis];
+                output.tangent[axis] = transformedTangent[axis];
             }
             if (!FinishVertex(vertex, output)) return false;
             blend += 1u + influenceCount * 2u;

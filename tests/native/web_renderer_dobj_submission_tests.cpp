@@ -239,23 +239,24 @@ void TestFusedSkinningUsesCurrentPoseAndRecyclesOnlyGeometry()
             else if (vertex == 2) { weights[0] = weights[1] = 0.25f; weights[2] = 0.5f; }
             else std::fill_n(weights, 4, 0.25f);
             // Independent planar rotation oracle, including inverse bind translation.
-            float x = 0, y = 0, nx = 0, ny = 0;
+            float x = 0, y = 0;
             for (int bone = 0; bone < 4; ++bone)
             {
                 const float c = std::cos(angles[bone]), s = std::sin(angles[bone]);
                 x += weights[bone] * ((2.0f - bone) * c - 3.0f * s + posed[bone].trans[0]);
                 y += weights[bone] * ((2.0f - bone) * s + 3.0f * c + posed[bone].trans[1]);
-                nx += weights[bone] * c;
-                ny += weights[bone] * s;
             }
-            const float length = std::sqrt(nx * nx + ny * ny);
+            // Kisak's weighted skinners blend position across all influences,
+            // then transform normal and tangent with the primary bone only.
+            const float basisAngle = surface.deformed ? angles[0] : angles[vertex];
+            const float nx = std::cos(basisAngle), ny = std::sin(basisAngle);
             const auto &v = command.vertices[vertex];
             assert(std::fabs(v.position[0] - x) < 0.00001f);
             assert(std::fabs(v.position[1] - y) < 0.00001f && v.position[2] == 5.0f);
-            assert(std::fabs(v.normal[0] - nx / length) < 0.00001f);
-            assert(std::fabs(v.normal[1] - ny / length) < 0.00001f && v.normal[2] == 0);
-            assert(std::fabs(v.tangent[0] + ny / length) < 0.00001f);
-            assert(std::fabs(v.tangent[1] - nx / length) < 0.00001f && v.tangent[2] == 0);
+            assert(std::fabs(v.normal[0] - nx) < 0.00001f);
+            assert(std::fabs(v.normal[1] - ny) < 0.00001f && v.normal[2] == 0);
+            assert(std::fabs(v.tangent[0] + ny) < 0.00001f);
+            assert(std::fabs(v.tangent[1] - nx) < 0.00001f && v.tangent[2] == 0);
             assert(v.binormalSign == -1 && v.textureCoordinate[0] == 1 && v.textureCoordinate[1] == 2);
             assert(v.lightmapCoordinate[0] == 0 && v.lightmapCoordinate[1] == 0);
         }
