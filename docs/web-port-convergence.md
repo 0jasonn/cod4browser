@@ -28,6 +28,7 @@ oracle.
 | System | Current ownership |
 | --- | --- |
 | Common startup | Canonical `Dvar_Init` and the strict `Com_Init` prefix run in native order; the host mounts browser storage at the filesystem boundary, then the continuation restores canonical common-command registration before script/server/client startup. |
+| Dvars/config | Canonical dvar types, domains, reset/current/latched values, flags, command handlers, key bindings, `Com_WriteConfigToFile`, and profile-relative `config.cfg` own settings. The Worker continuation restores `CL_InitKeyCommands` before filesystem/profile config execution; the browser frame pump only calls the shared `Com_WriteConfiguration` owner. |
 | Filesystem | Canonical search paths, IWD/minizip behavior, config/profile calls and synchronous engine-facing operations use Worker file primitives. |
 | Database | Canonical XFile stream, allocation blocks, generated loaders, pointer aliases, registry pools, dependency ordering and final publication own runtime assets, including native-compatible leading-comma asset-stub resolution. |
 | World/runtime | Canonical `GfxWorld`, collision, server/game, client/cgame, script VM, XAnim/DObj, effects, ragdoll, physics and sound code are in the browser link closure. |
@@ -80,6 +81,16 @@ platform makes that behavior impossible.
 | Audio device | AudioContext policy, gesture resume, buffers/nodes and PCM scheduling. |
 | Main loop | Non-blocking Emscripten frame pump; no Asyncify or pthread requirement. |
 | Cinematics | Native Bink is omitted safely until a browser-owned replacement is chosen. |
+
+## Control classification
+
+| Control family | Classification |
+| --- | --- |
+| Reached SP main/options/profile/load/pause controls | Shared canonical dvars and commands. The focused menu trace rejects missing references. |
+| `ui_sp_unlock` | Deliberate stock-retail dangling menu reference. Native COD4 1.7 emits the same `openmenuondvar` warning; no guessed browser dvar is registered. |
+| D3D9/Win32 renderer controls | Native-only where they configure APIs absent from WebGL2; browser renderer capability controls remain platform-owned and are not aliases pretending to be native dvars. |
+| Miles, Bink, and Steam controls | Native-only/omitted with their unavailable binary integrations. Web Audio and the explicit cinematic omission boundary report browser behavior. |
+| Multiplayer and dedicated-server controls | Not compiled into the initial offline SP target. They return only with the documented browser transport/server milestone, not as inert SP dvars. |
 
 ## Shared renderer and transport helpers
 

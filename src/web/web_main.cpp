@@ -464,6 +464,7 @@ bool RunCGameFrame(const WebFrameInfo &frame)
     {
         g_lastCGameFrameMilliseconds = frame.monotonicMilliseconds;
     }
+    Com_WriteConfiguration(0);
     // Native Com_Frame refreshes this clock before the server/client frame.
     // CL_CreateNewCommands derives frame_msec from it; leaving it unchanged
     // makes the canonical mouse path discard motion as a zero-duration sample.

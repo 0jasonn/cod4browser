@@ -11,7 +11,10 @@ Options, Profiles, Load Game, pause, and resume lifecycle is complete with
 [focused retail evidence](evidence/canonical-menu-lifecycle-2026-09-01.md).
 Objective notification through the canonical configstring/cgame/menu path is
 now complete with [focused evidence](evidence/canonical-objective-notification-2026-09-01.md).
-Next: dvar/config persistence, profile isolation, and save/load UI.
+Canonical dvar/config registration, command execution, frame-owned writing, and
+restart persistence are complete with
+[focused evidence](evidence/canonical-dvar-config-2026-09-01.md).
+Next: profile isolation and save/load UI.
 The stationary `ac130` probe remains deferred.
 
 1. Canonical camera DPVS now filters both static-model instances and world

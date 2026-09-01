@@ -4,6 +4,7 @@
 
 #include <qcommon/qcommon.h>
 #include <qcommon/cmd.h>
+#include <qcommon/com_playerprofile.h>
 #include <qcommon/system.h>
 #include <qcommon/sys_event_types.h>
 #include <client/client.h>
@@ -22,6 +23,7 @@ int com_fixedConsolePosition;
 int com_consoleLogOpenFailed;
 int com_missingAssetOpenFailed;
 int com_lastFrameTime[4];
+int com_fullyInitialized;
 float com_timescaleValue = 1.0f;
 int com_frameTime;
 const dvar_t *com_recommendedSet;
@@ -70,6 +72,18 @@ void __cdecl Com_ExecStartupConfigs(int localClientNum, const char *configFile)
     if (Com_SafeMode())
         Cbuf_AddText(localClientNum, "exec safemode.cfg\n");
     Cbuf_Execute(localClientNum, controllerIndex);
+}
+
+void __cdecl Com_WriteConfiguration(int localClientNum)
+{
+    char configFile[68];
+    if (!com_fullyInitialized || (dvar_modifiedFlags & DVAR_ARCHIVE) == 0)
+        return;
+    dvar_modifiedFlags &= ~DVAR_ARCHIVE;
+    if (!Com_HasPlayerProfile())
+        return;
+    Com_BuildPlayerProfilePath(configFile, 64, "config.cfg");
+    Com_WriteConfigToFile(localClientNum, configFile);
 }
 
 double __cdecl Com_GetTimescaleForSnd()

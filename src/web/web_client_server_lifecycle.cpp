@@ -31,6 +31,7 @@
 #include <universal/com_memory.h>
 #include <universal/physicalmemory.h>
 #include <ui/ui.h>
+#include <ui/keycodes.h>
 #include <web/web_system.h>
 #include <web/web_browser_bindings.h>
 #include <web/web_client_server_lifecycle.h>
@@ -248,6 +249,9 @@ extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_MountCanonicalRuntime()
         return;
 
     SetEngineLifecycleTraceObserver(PublishLifecycle);
+    // Continue the native Com_Init order at the filesystem boundary. Key
+    // commands must exist before profile config execution can replay binds.
+    CL_InitKeyCommands();
     Web_Log(WebLogLevel::Info,
         "[kisakcod-web] FS_InitFilesystem begin.\n");
     FS_InitFilesystem();
@@ -285,8 +289,8 @@ extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_MountCanonicalRuntime()
     Com_InitPlayerProfiles(0);
     if (!Com_HasPlayerProfile())
     {
-        char browserProfile[] = "browser";
-        Com_SetPlayerProfile(0, browserProfile);
+        if (!Com_EnsureInitialPlayerProfile(0, "browser"))
+            Com_Error(ERR_FATAL, "Could not create the initial browser profile");
     }
     Web_Log(WebLogLevel::Info,
         "[kisakcod-web] Canonical runtime: initializing Hunk and shared runtime owners.\n");
@@ -348,7 +352,9 @@ extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_MountCanonicalRuntime()
     // default.cfg` cannot yet resolve the RawFile. Repeat that same canonical
     // config owner now that code_post_gfx/ui/common are published. This seeds
     // any retail defaults available from the asset database.
-    Com_ExecStartupConfigs(0, nullptr);
+    char profileConfig[64];
+    Com_BuildPlayerProfilePath(profileConfig, sizeof(profileConfig), "config.cfg");
+    Com_ExecStartupConfigs(0, profileConfig);
     // A fresh browser profile has no native config.cfg. Seed only absent core
     // controls in the canonical binding table; imported or future persisted
     // bindings always win, and movement remains owned by CL_Input/usercmd.
@@ -373,6 +379,7 @@ extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_MountCanonicalRuntime()
     R_BeginRemoteScreenUpdate();
     CL_StartHunkUsers();
     R_EndRemoteScreenUpdate();
+    com_fullyInitialized = 1;
     g_clientLifecycleReady = true;
     Web_Log(
         WebLogLevel::Info,
@@ -479,6 +486,61 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestObjectiveNotification(
 extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_TestResumeGame()
 {
     UI_SetActiveMenu(0, UIMENU_NONE);
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestConfigState(int field)
+{
+    if (field == 0)
+        return Dvar_GetInt("kisak_ui_archive");
+    if (field == 1)
+    {
+        char path[64];
+        Com_BuildPlayerProfilePath(path, sizeof(path), "config.cfg");
+        void *contents = nullptr;
+        const int size = FS_ReadFile(path, &contents);
+        if (contents) FS_FreeFile(static_cast<char *>(contents));
+        return size;
+    }
+    if (field == 2)
+    {
+        const char *binding = Key_GetBinding(0, K_F9);
+        return binding && !I_stricmp(binding, "+scores");
+    }
+    if (field == 3)
+    {
+        static const char *enumValues[] = {"first", "second", nullptr};
+        const dvar_s *values[] = {
+            Dvar_RegisterBool("kisak_test_bool", false, DVAR_ROM, "test"),
+            Dvar_RegisterInt("kisak_test_int", 2, 0, 4,
+                DVAR_CHEAT, "test"),
+            Dvar_RegisterFloat("kisak_test_float", 0.5f, 0.0f, 1.0f,
+                DVAR_ARCHIVE, "test"),
+            Dvar_RegisterString("kisak_test_string", "value",
+                DVAR_LATCH, "test"),
+            Dvar_RegisterEnum("kisak_test_enum", enumValues, 1, 0, "test"),
+            Dvar_RegisterVec3("kisak_test_vector", 1.0f, 2.0f, 3.0f,
+                -4.0f, 4.0f, 0, "test"),
+            Dvar_RegisterColor("kisak_test_color", 0.1f, 0.2f, 0.3f,
+                0.4f, 0, "test"),
+        };
+        const std::uint8_t types[] = {DVAR_TYPE_BOOL, DVAR_TYPE_INT,
+            DVAR_TYPE_FLOAT, DVAR_TYPE_STRING, DVAR_TYPE_ENUM,
+            DVAR_TYPE_FLOAT_3, DVAR_TYPE_COLOR};
+        int mask = 0;
+        for (std::size_t index = 0; index < std::size(values); ++index)
+            if (values[index] && values[index]->type == types[index])
+                mask |= 1 << index;
+        if ((values[0]->flags & DVAR_ROM) &&
+            (values[1]->flags & DVAR_CHEAT) &&
+            (values[2]->flags & DVAR_ARCHIVE) &&
+            (values[3]->flags & DVAR_LATCH))
+            mask |= 1 << 7;
+        return mask;
+    }
+    if (field == 4)
+        return (Cmd_FindCommand("bind") ? 1 : 0) |
+            (Key_StringToKeynum("F9") << 8);
+    return -1;
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_CanonicalFsFileSize(

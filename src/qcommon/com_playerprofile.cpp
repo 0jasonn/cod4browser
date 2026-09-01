@@ -584,6 +584,28 @@ bool __cdecl Sys_ShouldUpdateForInfoChange()
 #endif
 }
 
+char __cdecl Com_EnsureInitialPlayerProfile(
+    int localClientNum, const char *profileName)
+{
+    iassert(profileName);
+    iassert(profileName[0]);
+    if (Com_HasPlayerProfile())
+        return 1;
+    if (!Com_IsValidPlayerProfileDir(profileName) &&
+        !Com_NewPlayerProfile(profileName))
+        return 0;
+
+    char cachedName[68];
+    I_strncpyz(cachedName, profileName, 64);
+    if (!FS_WriteFileToDir(
+            "profiles/active.txt", "players", cachedName,
+            static_cast<std::uint32_t>(strlen(cachedName))))
+        return 0;
+
+    Com_SetPlayerProfile(localClientNum, cachedName);
+    return 1;
+}
+
 bool __cdecl Sys_ShouldUpdateForConfigChange()
 {
 #if defined(KISAK_WEB)

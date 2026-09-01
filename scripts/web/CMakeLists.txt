@@ -75,6 +75,7 @@ kisak_configure_web_compile_target(kisak_web_runtime_prefix)
 target_compile_definitions(kisak_web_runtime_prefix PRIVATE
     KISAK_GATE3_COM_INIT_PREFIX=1
     KISAK_CANONICAL_MAP_COMMANDS=1
+    KISAK_WEB_FULL_RUNTIME_COMMANDS=1
     KISAK_RUNTIME_MAP_DB_BOUNDARY=1)
 
 # Keep the strict prefix oracle genuinely narrow. Production compiles the same

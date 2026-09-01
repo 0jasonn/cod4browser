@@ -522,7 +522,7 @@ cmd_function_s Dvar_SetU_f_VAR;
 
 void __cdecl Dvar_AddCommands()
 {
-#ifdef KISAK_GATE3_COM_INIT_PREFIX
+#if defined(KISAK_GATE3_COM_INIT_PREFIX) && !defined(KISAK_WEB_FULL_RUNTIME_COMMANDS)
     // The compile/runtime checkpoint needs only the two canonical startup
     // variable commands. The remaining canonical registrations stay owned by
     // this translation unit and return when cmd.cpp/filesystem closure does.
@@ -673,7 +673,7 @@ void __cdecl Dvar_RegisterFloat_f()
     }
 }
 
-#ifndef KISAK_GATE3_COM_INIT_PREFIX
+#if !defined(KISAK_GATE3_COM_INIT_PREFIX) || defined(KISAK_WEB_FULL_RUNTIME_COMMANDS)
 void __cdecl Dvar_SetFromLocalizedStr_f()
 {
     const char *v0; // eax

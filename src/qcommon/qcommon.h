@@ -117,6 +117,7 @@ extern int com_frameNumber;
 extern int com_consoleLogOpenFailed;
 extern int com_missingAssetOpenFailed;
 extern int com_frameTime;
+extern int com_fullyInitialized;
 
 #ifdef KISAK_MP
 extern const dvar_t *com_dedicated;

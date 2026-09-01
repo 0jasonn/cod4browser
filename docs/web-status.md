@@ -20,6 +20,15 @@ proved current/completed parsing, localized objective text reaching the
 renderer command boundary, and the existing timed fade/hide behavior. See
 [the objective evidence](evidence/canonical-objective-notification-2026-09-01.md).
 
+Canonical dvar/config persistence now also runs in native order. The mounted
+runtime restores the full shared dvar and key-command tables, executes the
+active profile's `config.cfg` after retail RawFiles are available, and calls
+`Com_WriteConfiguration` from the frame loop. A fresh legal-retail run proved
+all seven dvar value families, representative ROM/cheat/archive/latch flags,
+`seta`/`toggle`/`reset`/`bind`, config creation, and archive/binding survival
+across a page and Worker restart. See
+[the config evidence](evidence/canonical-dvar-config-2026-09-01.md).
+
 The playable offline slice already exists across six legally validated maps.
 Those runs demonstrate canonical movement, aiming, firing, weapons, audio,
 transitions, and Airplane save/load continuity. Building another player
@@ -36,9 +45,9 @@ headed/manual visual inspection occurred, so this is not a `FUNCTIONAL`,
 `PLAYABLE`, or visual-correctness claim. See
 [the stationary evidence](evidence/scoutsniper-stationary-838e047c.md).
 
-The active convergence task is now objective notification, dvar/config,
-profiles, and save/load menu persistence. The stationary `ac130` probe is
-deferred behind that user-facing UI/persistence work.
+The active convergence task is now profile isolation and save/load menu
+persistence. The stationary `ac130` probe is deferred behind that user-facing
+UI/persistence work.
 
 ## Prior dynamic geometry handoff
 

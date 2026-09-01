@@ -98,6 +98,8 @@ test("canonical retail main menu starts without a map", { tag: "@retail-ui" },
             await expect(page.locator("#engine-command-status"))
                 .toHaveText(`Accepted: ${command}`);
         };
+        const menuLogCursor = await page.evaluate(() =>
+            globalThis.__uiLogs.length);
         for (const menuName of [
             "main_options", "player_profile", "save_load_menu",
         ]) {
@@ -117,6 +119,29 @@ test("canonical retail main menu starts without a map", { tag: "@retail-ui" },
                 await submitCommand("closemenu profile_create_popmenu");
             }
         }
+        const missingMenuDvars = await page.evaluate((cursor) =>
+            globalThis.__uiLogs.slice(cursor).filter(({ text }) =>
+                text.includes("doesn't exist") ||
+                text.includes("cannot find dvar")), menuLogCursor);
+        expect(missingMenuDvars.every(({ text }) =>
+            text.includes("cannot find dvar ui_sp_unlock"))).toBe(true);
+        expect(await call(page, "_KisakWeb_TestConfigState", 3)).toBe(0xFF);
+        await submitCommand("seta kisak_ui_archive 37");
+        await expect.poll(() => call(page, "_KisakWeb_TestConfigState", 0))
+            .toBe(37);
+        await submitCommand("toggle kisak_ui_archive 37 41");
+        await expect.poll(() => call(page, "_KisakWeb_TestConfigState", 0))
+            .toBe(41);
+        await submitCommand("reset kisak_ui_archive");
+        await expect.poll(() => call(page, "_KisakWeb_TestConfigState", 0))
+            .toBe(37);
+        expect(await call(page, "_KisakWeb_TestConfigState", 4))
+            .toBe((0xAF << 8) | 1);
+        await submitCommand("bind F9 +scores");
+        await expect.poll(() => call(page, "_KisakWeb_TestConfigState", 2))
+            .toBe(1);
+        await expect.poll(() => call(page, "_KisakWeb_TestConfigState", 1))
+            .toBeGreaterThan(0);
         const lifecycleCursor = await page.evaluate(() =>
             globalThis.__uiLifecycle.length);
         await submitCommand("map killhouse");
@@ -167,4 +192,15 @@ test("canonical retail main menu starts without a map", { tag: "@retail-ui" },
         await expect.poll(() => call(page, "_KisakWeb_TestUiState", 5))
             .toBe(0);
         expect((await call(page, "_KisakWeb_TestUiState", 3)) & 16).toBe(0);
+
+        await page.reload();
+        await expect.poll(() => page.evaluate(() =>
+            globalThis.__KISAKCOD_WEB__?.state)).toBe("running");
+        await expect.poll(() => page.evaluate(() =>
+            globalThis.__KISAKCOD_WEB__?.module?.filesystemState), {
+            timeout: 300_000,
+        }).toBe("mounted");
+        await expect.poll(() => call(page, "_KisakWeb_TestConfigState", 0))
+            .toBe(37);
+        expect(await call(page, "_KisakWeb_TestConfigState", 2)).toBe(1);
     });
