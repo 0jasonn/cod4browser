@@ -385,6 +385,17 @@ WebRendererWorldBatchDesc MakeDraw(
     // specialized static-model shortcut and must not reject these draws.
     draw.castsSunShadow = castsSunShadow && shadowSet &&
         shadowSet->techniques[TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX];
+    if (draw.castsSunShadow && material && material->stateBitsTable)
+    {
+        const std::uint8_t shadowStateEntry = material->stateBitsEntry[
+            TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX];
+        if (shadowStateEntry != 0xffu &&
+            shadowStateEntry < material->stateBitsCount)
+        {
+            draw.shadowStateBits0 =
+                material->stateBitsTable[shadowStateEntry].loadBits[0];
+        }
+    }
     draw.baseImage = WebRenderer_FindBaseImage(material, draw.samplerState);
     draw.normalImage = WebRenderer_FindNormalImage(material, draw.normalSamplerState);
     draw.specularImage = WebRenderer_FindSpecularImage(

@@ -19,6 +19,7 @@ int __cdecl XModelGetLodForDist(const XModel *model, float dist);
 namespace
 {
 constexpr float BYTE_TO_UNIT = 1.0f / 255.0f;
+constexpr std::uint32_t TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX = 2u;
 constexpr std::uint32_t TECHNIQUE_UNLIT_INDEX = 4u;
 constexpr std::uint32_t TECHNIQUE_EMISSIVE_INDEX = 5u;
 constexpr std::uint32_t TECHNIQUE_LIT_INDEX = 7u;
@@ -182,9 +183,26 @@ WebRendererWorldBatchDesc MakeDraw(
     draw.lastInstanceIndex = UINT32_MAX;
     draw.lightmapIndex = 31u;
     draw.sourceKind = submission.sourceKind;
+    const MaterialTechniqueSet *shadowSet =
+        material ? material->techniqueSet : nullptr;
+    if (shadowSet && shadowSet->remappedTechniqueSet)
+        shadowSet = shadowSet->remappedTechniqueSet;
+    const bool hasShadowTechnique = shadowSet &&
+        shadowSet->techniques[TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX];
     draw.castsSunShadow =
         submission.sourceKind == WebRendererSceneBatchKind::DynamicXModel &&
-        material && (material->info.gameFlags & 0x40u) != 0u;
+        hasShadowTechnique;
+    if (hasShadowTechnique && material && material->stateBitsTable)
+    {
+        const std::uint8_t shadowStateEntry = material->stateBitsEntry[
+            TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX];
+        if (shadowStateEntry != 0xffu &&
+            shadowStateEntry < material->stateBitsCount)
+        {
+            draw.shadowStateBits0 =
+                material->stateBitsTable[shadowStateEntry].loadBits[0];
+        }
+    }
     draw.baseImage = FindBaseImage(material, draw.samplerState);
     draw.normalImage = FindNormalImage(material, draw.normalSamplerState);
     const bool hasTechnique = SelectTechnique(material, draw.stateBits,

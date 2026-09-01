@@ -1163,6 +1163,20 @@ WebRendererWorldSceneResult WebRenderer_BuildBrushModelSceneCommand(
                 candidate.castsSunShadow = shadowSet &&
                     shadowSet->techniques[
                         TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX];
+                if (candidate.castsSunShadow && surface.material &&
+                    surface.material->stateBitsTable)
+                {
+                    const std::uint8_t shadowStateEntry =
+                        surface.material->stateBitsEntry[
+                            TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX];
+                    if (shadowStateEntry != 0xffu &&
+                        shadowStateEntry < surface.material->stateBitsCount)
+                    {
+                        candidate.shadowStateBits0 =
+                            surface.material->stateBitsTable[
+                                shadowStateEntry].loadBits[0];
+                    }
+                }
                 if (replacement.batches.size() > firstSubmissionBatch &&
                     BatchMatches(replacement.batches.back(), candidate) &&
                     replacement.batches.back().firstIndex +

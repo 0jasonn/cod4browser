@@ -9048,7 +9048,7 @@ bool DrawShadowPartition(
         shadowFamilyStarted = now;
     }
 #endif
-    if (requireSunCaster && g_renderer.dynamicModelSceneActive)
+    if (g_renderer.dynamicModelSceneActive)
     {
         std::uint32_t previousInstance = UINT32_MAX - 1u;
         const auto merged = WebRenderer_ForEachShadowRange(
@@ -9059,12 +9059,19 @@ bool DrawShadowPartition(
                     WebRenderer_ShadowBoundsIntersectPartition(
                         draw.shadowBounds, matrix);
             },
-            [](const auto &a, const auto &b) {
+            [requireSunCaster](const auto &a, const auto &b) {
                 // One instance means the same VAO, index buffer and placement.
                 // UINT32_MAX denotes the shared, already-skinned DObj/FX buffer.
                 return a.brushInstanceIndex == b.brushInstanceIndex &&
-                    WorldAlphaTestMode(DynamicDrawBatch(a).stateBits[0]) == 0 &&
-                    WorldAlphaTestMode(DynamicDrawBatch(b).stateBits[0]) == 0;
+                    WorldAlphaTestMode(requireSunCaster
+                        ? DynamicDrawBatch(a).stateBits[0]
+                        : DynamicDrawBatch(a).shadowStateBits0) == 0 &&
+                    WorldAlphaTestMode(requireSunCaster
+                        ? DynamicDrawBatch(b).stateBits[0]
+                        : DynamicDrawBatch(b).shadowStateBits0) == 0 &&
+                    (requireSunCaster ||
+                        (DynamicDrawBatch(a).shadowStateBits0 & 0xc000u) ==
+                        (DynamicDrawBatch(b).shadowStateBits0 & 0xc000u));
             },
             [&](const auto &draw, const auto &batch, std::uint32_t first,
                 std::uint32_t count) {
@@ -9073,8 +9080,12 @@ bool DrawShadowPartition(
                 const WebRendererRetainedWorldImage *base = RetainedImage(
                     g_renderer.retainedDynamicModelImages,
                     batch.baseImageIndex);
+                if (!requireSunCaster)
+                    applySpotShadowCull(batch.shadowStateBits0);
                 const std::int32_t alphaTest = WorldAlphaTestMode(
-                    batch.stateBits[0]);
+                    requireSunCaster
+                        ? batch.stateBits[0]
+                        : batch.shadowStateBits0);
                 const bool samplesTexture = base != nullptr && alphaTest != 0;
                 applyShadowAlpha(alphaTest, samplesTexture);
                 if (samplesTexture)
@@ -9088,7 +9099,9 @@ bool DrawShadowPartition(
                     reinterpret_cast<const void *>(indexOffset));
             });
 #if KISAK_WEB_DIAGNOSTICS
-        if (auto *profile = WebFrameProfile_Current()) profile->sunShadowMergedRanges += merged;
+        if (requireSunCaster)
+            if (auto *profile = WebFrameProfile_Current())
+                profile->sunShadowMergedRanges += merged;
 #else
         (void)merged;
 #endif

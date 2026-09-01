@@ -40,6 +40,7 @@ int __cdecl XModelGetLodForDist(const XModel *model, float distance)
 
 namespace
 {
+constexpr std::uint32_t TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX = 2u;
 constexpr std::uint32_t TECHNIQUE_LIT_INDEX = 7u;
 Material *g_resolvedMaterial = nullptr;
 
@@ -56,8 +57,9 @@ struct Fixture
     GfxImage image{};
     MaterialTextureDef texture{};
     MaterialTechnique technique{};
+    MaterialTechnique shadowTechnique{};
     MaterialTechniqueSet techniqueSet{};
-    GfxStateBits stateBits[1]{};
+    GfxStateBits stateBits[2]{};
     Material material{};
     Material *materials[2]{&material, &material};
     XModel model{};
@@ -87,12 +89,13 @@ struct Fixture
         techniqueSet.techniques[TECHNIQUE_LIT_INDEX] = &technique;
         stateBits[0].loadBits[0] = 0x18008800u;
         stateBits[0].loadBits[1] = 0x0000000du;
+        stateBits[1].loadBits[0] = 0x0000c800u;
         material.info.name = "fx/model-material";
         material.textureCount = 1u;
         material.textureTable = &texture;
         material.techniqueSet = &techniqueSet;
         material.stateBitsEntry[TECHNIQUE_LIT_INDEX] = 0u;
-        material.stateBitsCount = 1u;
+        material.stateBitsCount = 2u;
         material.stateBitsTable = stateBits;
 
         model.name = "fx/model";
@@ -158,7 +161,19 @@ void TestIdentityAndCanonicalSurfaceData()
         WebRendererFxModelSceneResult::Success);
     assert(command.batches[0].sourceKind ==
         WebRendererSceneBatchKind::DynamicXModel);
+    assert(!command.batches[0].castsSunShadow);
+    fixture.material.info.gameFlags = 0u;
+    fixture.shadowTechnique.passCount = 1u;
+    fixture.techniqueSet.techniques[
+        TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX] = &fixture.shadowTechnique;
+    fixture.material.stateBitsEntry[
+        TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX] = 1u;
+    command = {};
+    assert(WebRenderer_BuildFxModelSceneCommand(
+        &dynamicSubmission, 1u, command) ==
+        WebRendererFxModelSceneResult::Success);
     assert(command.batches[0].castsSunShadow);
+    assert(command.batches[0].shadowStateBits0 == 0x0000c800u);
     assert(command.batches[0].lightingMode ==
         WebRendererWorldLightingMode::ModelLightGrid);
     assert(command.batches[0].modelLightingCoordinates[0] == 0.25f);
