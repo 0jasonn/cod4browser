@@ -8825,9 +8825,8 @@ bool DrawShadowPartition(
             reinterpret_cast<const void *>(indexOffset));
     };
 #if KISAK_WEB_DIAGNOSTICS
-    WebFrameProfileSample *const sunShadowProfile = requireSunCaster
-        ? WebFrameProfile_Current() : nullptr;
-    double sunShadowFamilyStarted = sunShadowProfile
+    WebFrameProfileSample *const shadowProfile = WebFrameProfile_Current();
+    double shadowFamilyStarted = shadowProfile
         ? WebFrameProfile_Now() : 0.0;
 #endif
     if (requireSunCaster)
@@ -8857,11 +8856,13 @@ bool DrawShadowPartition(
         }
     }
 #if KISAK_WEB_DIAGNOSTICS
-    if (sunShadowProfile)
+    if (shadowProfile)
     {
         const double now = WebFrameProfile_Now();
-        sunShadowProfile->sunShadowWorldMs += now - sunShadowFamilyStarted;
-        sunShadowFamilyStarted = now;
+        (requireSunCaster
+            ? shadowProfile->sunShadowWorldMs
+            : shadowProfile->spotShadowWorldMs) += now - shadowFamilyStarted;
+        shadowFamilyStarted = now;
     }
 #endif
     if (g_renderer.staticModelSceneActive &&
@@ -8885,6 +8886,20 @@ bool DrawShadowPartition(
                         g_renderer.retainedStaticModelShadowBounds[index], matrix)
                     ? 1u : 0u;
         }
+        else if (!WebRenderer_BuildStaticModelSpotShadowVisibility(
+            g_renderer.retainedStaticModelInstances.data(),
+            static_cast<std::uint32_t>(
+                g_renderer.retainedStaticModelSourceInstances.size()),
+            g_renderer.retainedWorldSpotShadowStaticModels.data(),
+            static_cast<std::uint32_t>(
+                g_renderer.retainedWorldSpotShadowStaticModels.size()),
+            spotPrimaryLightIndex,
+            g_renderer.staticModelShadowVisibility.data(),
+            static_cast<std::uint32_t>(
+                g_renderer.staticModelShadowVisibility.size())))
+        {
+            return false;
+        }
         for (const WebRendererRetainedStaticModelBatch &batch :
              g_renderer.retainedStaticModelBatches)
         {
@@ -8907,72 +8922,18 @@ bool DrawShadowPartition(
             const std::uintptr_t indexOffset =
                 static_cast<std::uintptr_t>(batch.draw.firstIndex) *
                 sizeof(std::uint32_t);
-            if (requireSunCaster)
-            {
-                const std::uint32_t instanceEnd =
-                    batch.instanceOffset + batch.instanceCount;
-                std::uint32_t instanceIndex = batch.instanceOffset;
-                while (instanceIndex < instanceEnd)
-                {
-                    while (instanceIndex < instanceEnd &&
-                        g_renderer.staticModelShadowVisibility[
-                            instanceIndex] == 0u)
-                        ++instanceIndex;
-                    const std::uint32_t runBegin = instanceIndex;
-                    while (instanceIndex < instanceEnd &&
-                        g_renderer.staticModelShadowVisibility[
-                            instanceIndex] != 0u)
-                        ++instanceIndex;
-                    if (instanceIndex == runBegin) continue;
-                    BindStaticModelInstanceRange(runBegin);
-                    glDrawElementsInstanced(GL_TRIANGLES,
-                        static_cast<GLsizei>(batch.draw.indexCount),
-                        GL_UNSIGNED_INT,
-                        reinterpret_cast<const void *>(indexOffset),
-                        static_cast<GLsizei>(instanceIndex - runBegin));
-                }
-                continue;
-            }
-
-            const auto castsForSpot = [spotPrimaryLightIndex](
-                std::uint32_t canonicalInstanceIndex)
-            {
-                const WebRendererRetainedSpotShadowStaticModel target{
-                    spotPrimaryLightIndex,
-                    canonicalInstanceIndex,
-                };
-                return std::binary_search(
-                    g_renderer.retainedWorldSpotShadowStaticModels.begin(),
-                    g_renderer.retainedWorldSpotShadowStaticModels.end(),
-                    target,
-                    [](const WebRendererRetainedSpotShadowStaticModel &left,
-                       const WebRendererRetainedSpotShadowStaticModel &right)
-                    {
-                        if (left.primaryLightIndex != right.primaryLightIndex)
-                            return left.primaryLightIndex <
-                                right.primaryLightIndex;
-                        return left.canonicalInstanceIndex <
-                            right.canonicalInstanceIndex;
-                    });
-            };
             const std::uint32_t instanceEnd =
                 batch.instanceOffset + batch.instanceCount;
             std::uint32_t instanceIndex = batch.instanceOffset;
             while (instanceIndex < instanceEnd)
             {
                 while (instanceIndex < instanceEnd &&
-                    !castsForSpot(g_renderer.retainedStaticModelInstances[
-                        instanceIndex].canonicalInstanceIndex))
-                {
+                    g_renderer.staticModelShadowVisibility[instanceIndex] == 0u)
                     ++instanceIndex;
-                }
                 const std::uint32_t runBegin = instanceIndex;
                 while (instanceIndex < instanceEnd &&
-                    castsForSpot(g_renderer.retainedStaticModelInstances[
-                        instanceIndex].canonicalInstanceIndex))
-                {
+                    g_renderer.staticModelShadowVisibility[instanceIndex] != 0u)
                     ++instanceIndex;
-                }
                 if (instanceIndex == runBegin) continue;
                 BindStaticModelInstanceRange(runBegin);
                 glDrawElementsInstanced(GL_TRIANGLES,
@@ -8984,12 +8945,14 @@ bool DrawShadowPartition(
         }
     }
 #if KISAK_WEB_DIAGNOSTICS
-    if (sunShadowProfile)
+    if (shadowProfile)
     {
         const double now = WebFrameProfile_Now();
-        sunShadowProfile->sunShadowStaticModelsMs +=
-            now - sunShadowFamilyStarted;
-        sunShadowFamilyStarted = now;
+        (requireSunCaster
+            ? shadowProfile->sunShadowStaticModelsMs
+            : shadowProfile->spotShadowStaticModelsMs) +=
+            now - shadowFamilyStarted;
+        shadowFamilyStarted = now;
     }
 #endif
     if (requireSunCaster && g_renderer.dynamicModelSceneActive)
@@ -9036,9 +8999,11 @@ bool DrawShadowPartition(
 #endif
     }
 #if KISAK_WEB_DIAGNOSTICS
-    if (sunShadowProfile)
-        sunShadowProfile->sunShadowDynamicModelsMs +=
-            WebFrameProfile_Now() - sunShadowFamilyStarted;
+    if (shadowProfile)
+        (requireSunCaster
+            ? shadowProfile->sunShadowDynamicModelsMs
+            : shadowProfile->spotShadowDynamicModelsMs) +=
+            WebFrameProfile_Now() - shadowFamilyStarted;
 #endif
     glUniform1f(g_renderer.shadowDepthInstanceEnabledUniform, 0.0f);
     glDisable(GL_POLYGON_OFFSET_FILL);

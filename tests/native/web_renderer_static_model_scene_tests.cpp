@@ -249,6 +249,31 @@ void TestSunShadowPartitionUsesCanonicalBounds()
     assert(WebRenderer_StaticModelIntersectsShadowPartition(bounds, identity));
 }
 
+void TestSpotShadowVisibilityUsesAuthoredCanonicalMembership()
+{
+    WebRendererStaticModelInstanceDesc instances[4]{};
+    instances[0].canonicalInstanceIndex = 8u;
+    instances[1].canonicalInstanceIndex = 2u;
+    instances[2].canonicalInstanceIndex = 5u;
+    instances[3].canonicalInstanceIndex = 1u;
+    const WebRendererSpotShadowStaticModelDesc memberships[]{
+        {3u, 1u}, {3u, 5u}, {4u, 2u}, {4u, 8u},
+    };
+    std::uint8_t visibility[4]{};
+    assert(WebRenderer_BuildStaticModelSpotShadowVisibility(
+        instances, 4u, memberships, 4u, 3u, visibility, 4u));
+    assert(visibility[0] == 0u);
+    assert(visibility[1] == 0u);
+    assert(visibility[2] == 1u);
+    assert(visibility[3] == 1u);
+    assert(WebRenderer_BuildStaticModelSpotShadowVisibility(
+        instances, 4u, memberships, 4u, 9u, visibility, 4u));
+    assert(std::all_of(std::begin(visibility), std::end(visibility),
+        [](std::uint8_t visible) { return visible == 0u; }));
+    assert(!WebRenderer_BuildStaticModelSpotShadowVisibility(
+        instances, 4u, memberships, 4u, 3u, visibility, 3u));
+}
+
 void TestEveryAuthoredLodIsRetainedForRuntimeSelection()
 {
     Fixture fixture;
@@ -889,6 +914,7 @@ int main()
 #endif
     TestCanonicalInstancesShareOneMaterialSurfaceBatch();
     TestSunShadowPartitionUsesCanonicalBounds();
+    TestSpotShadowVisibilityUsesAuthoredCanonicalMembership();
     TestEveryAuthoredLodIsRetainedForRuntimeSelection();
     TestCanonicalPrimaryLightSplitsStaticInstanceGroups();
     TestCanonicalInstanceIndicesSurviveRegroupingAndLods();

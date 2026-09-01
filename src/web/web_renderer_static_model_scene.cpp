@@ -667,6 +667,48 @@ bool WebRenderer_StaticModelIntersectsShadowPartition(
         clipCenter[2] - clipExtent[2] <= w;
 }
 
+bool WebRenderer_BuildStaticModelSpotShadowVisibility(
+    const WebRendererStaticModelInstanceDesc *instances,
+    std::uint32_t instanceCount,
+    const WebRendererSpotShadowStaticModelDesc *memberships,
+    std::uint32_t membershipCount,
+    std::uint32_t primaryLightIndex,
+    std::uint8_t *visibility,
+    std::uint32_t visibilityCount) noexcept
+{
+    if (!instances || !visibility || visibilityCount != instanceCount ||
+        (membershipCount != 0u && !memberships))
+        return false;
+    if (membershipCount == 0u)
+    {
+        std::fill_n(visibility, instanceCount, 0u);
+        return true;
+    }
+    const auto less = [](const WebRendererSpotShadowStaticModelDesc &left,
+                         const WebRendererSpotShadowStaticModelDesc &right)
+    {
+        if (left.primaryLightIndex != right.primaryLightIndex)
+            return left.primaryLightIndex < right.primaryLightIndex;
+        return left.canonicalInstanceIndex < right.canonicalInstanceIndex;
+    };
+    const WebRendererSpotShadowStaticModelDesc firstTarget{
+        primaryLightIndex, 0u};
+    const WebRendererSpotShadowStaticModelDesc lastTarget{
+        primaryLightIndex, UINT32_MAX};
+    const auto begin = std::lower_bound(
+        memberships, memberships + membershipCount, firstTarget, less);
+    const auto end = std::upper_bound(
+        begin, memberships + membershipCount, lastTarget, less);
+    for (std::uint32_t index = 0u; index < instanceCount; ++index)
+    {
+        const WebRendererSpotShadowStaticModelDesc target{
+            primaryLightIndex, instances[index].canonicalInstanceIndex};
+        visibility[index] = std::binary_search(begin, end, target, less)
+            ? 1u : 0u;
+    }
+    return true;
+}
+
 bool WebRenderer_PackStaticModelCameraInstances(
     const WebRendererStaticModelInstanceDesc *source, std::uint32_t sourceCount,
     const std::int8_t *selectedLods, const std::uint8_t *visibility,

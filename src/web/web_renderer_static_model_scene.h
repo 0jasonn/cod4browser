@@ -53,6 +53,17 @@ bool WebRenderer_StaticModelIntersectsShadowPartition(
     const WebRendererStaticModelShadowBounds &bounds,
     const std::array<float, 16> &shadowMatrix) noexcept;
 
+// Repack authored spot membership once per selected light. Batches then scan
+// this packed mask without repeating canonical-index searches per surface.
+bool WebRenderer_BuildStaticModelSpotShadowVisibility(
+    const WebRendererStaticModelInstanceDesc *instances,
+    std::uint32_t instanceCount,
+    const WebRendererSpotShadowStaticModelDesc *memberships,
+    std::uint32_t membershipCount,
+    std::uint32_t primaryLightIndex,
+    std::uint8_t *visibility,
+    std::uint32_t visibilityCount) noexcept;
+
 // Backend packing only: canonical indices address DPVS, never group offsets.
 // Destination is separate from the LOD-packed shadow range and has sourceCount capacity.
 bool WebRenderer_PackStaticModelCameraInstances(

@@ -227,6 +227,10 @@ struct WebFrameProfileSample
     double sunShadowDynamicModelsMs = 0.0;
     double spotShadowPrepareMs = 0.0;
     double spotShadowDrawMs = 0.0;
+    // Disjoint CPU submission intervals within all selected spot-shadow maps.
+    double spotShadowWorldMs = 0.0;
+    double spotShadowStaticModelsMs = 0.0;
+    double spotShadowDynamicModelsMs = 0.0;
     double skyMs = 0.0;
     double worldMs = 0.0;
     double staticModelsMs = 0.0;

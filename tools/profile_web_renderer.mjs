@@ -300,6 +300,15 @@ try {
         assert(sunShadowFields.reduce((sum, field) => sum + renderer[field], 0) <=
             renderer.sunShadowDrawMs + 0.001, 'Sun-shadow intervals exceed parent');
     }
+    const spotShadowFields = ['spotShadowWorldMs', 'spotShadowStaticModelsMs',
+        'spotShadowDynamicModelsMs'];
+    for (const field of spotShadowFields)
+        assert.equal(profile.renderer[field]?.sampleCount, 120, field);
+    for (const { renderer } of frames) {
+        for (const field of spotShadowFields) assert(renderer[field] >= 0, field);
+        assert(spotShadowFields.reduce((sum, field) => sum + renderer[field], 0) <=
+            renderer.spotShadowDrawMs + 0.001, 'Spot-shadow intervals exceed parent');
+    }
     const sceneFields = ['sceneSetupMs', 'dobjBuildMs', 'sceneAssemblyMs',
         'sceneImageResolveMs', 'sceneDynamicSubmitMs', 'sceneCameraVisibilityMs', 'sceneViewSubmitMs'];
     const assemblyFields = ['sceneEffectsPrepareMs', 'sceneModelBuildMs', 'sceneCommandAppendMs'];
