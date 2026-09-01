@@ -27,7 +27,7 @@ Status meanings:
 | Render/sampler/stream state suppression (`r_setstate_d3d.*`, `r_draw_bsp.cpp`) | Pass-local material, projection, feature, texture, shadow-alpha, shadow-cull, program, and geometry binding state suppress redundant GL calls with explicit reset boundaries. | **Equivalent** |
 | BSP sun-cascade visibility (`r_add_bsp.cpp::R_AddAllBspDrawSurfacesRangeSunShadow`) | `a23850aa` carries canonical `GfxSurface` AABBs with retained spans and builds independent light-space near/far ranges before submission. Camera DPVS is absent; holes and alpha boundaries remain explicit. | **Equivalent** |
 | Static-model sun-cascade visibility (`r_add_staticmodel.cpp::R_AddAllStaticModelSurfacesRangeSunShadow`) | Canonical static AABBs produce independent near/far masks and contiguous instanced runs. | **Equivalent** |
-| Dynamic scene-entity sun-cascade visibility (`r_dpvs.cpp::R_AddAllSceneEntSurfacesRangeSunShadow`) | Web dynamic sun drawing filters authored caster/material flags but currently submits eligible dynamic ranges to both cascades without native per-partition scene visibility. | **Open** |
+| Dynamic scene-entity sun-cascade visibility (`r_dpvs.cpp::R_AddAllSceneEntSurfacesRangeSunShadow`) | `6ece6ee9` retains world-space bounds for DObj, XModel, DynEnt model, moving-brush, and DynEnt-brush draws and tests them independently against both sun matrices. | **Equivalent** |
 | Authored BSP/static spot membership (`r_add_bsp.cpp`, `r_add_staticmodel.cpp`, `GfxWorld::shadowGeom`) | Authored world ranges are retained; `26b3dc98` builds one packed static mask per selected light and reuses instanced runs. | **Equivalent** |
 | Dynamic scene-entity spot visibility (`r_dpvs.cpp::R_AddAllSceneEntSurfacesSpotShadow`) | The current spot path has no dynamic submission and no `sceneDObjVisData`/`sceneModelVisData` per-light equivalent. | **Open** |
 | Shadow draw sorting and opaque range coalescing (`R_SortDrawSurfs`, grouped static lists) | Adjacent opaque world/dynamic sun ranges merge; static sun/spot instances form contiguous runs. Alpha-tested boundaries and authored order remain explicit. | **Equivalent** |
@@ -41,13 +41,13 @@ Status meanings:
 The broad optimization goal remains active while any applicable row is **Open**
 or **Partial**. Completion requires:
 
-1. Dynamic sun and spot casters consume canonical per-view/per-light visibility,
-   without deriving caster membership from camera DPVS.
+1. Dynamic spot casters consume canonical per-light visibility without deriving
+   caster membership from camera or sun visibility.
 2. The remaining dynamic draw-sort row is either implemented for a proven-safe
    opaque subset or closed with measurements showing no material benefit.
 3. Each closure has focused semantic coverage, matched logical-work evidence,
    a production Release, current convergence documentation, and a pushed commit.
 
-The next implementation target is dynamic sun-cascade visibility. Its canonical
-scene/DynEnt producer boundary must be identified before changing submission;
-camera visibility cannot stand in for either light-space partition.
+The next implementation target is dynamic spot visibility and submission. The
+retained dynamic bounds can supply the light-space test, but each selected spot
+light must remain independent and material shadow eligibility must be preserved.

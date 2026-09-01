@@ -4,7 +4,26 @@ Updated 2026-09-01. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
-## BSP sun-cascade visibility milestone delivered
+## Dynamic sun-cascade visibility milestone delivered
+
+Runtime `6ece6ee9` retains one world-space AABB per flattened DObj, XModel,
+DynEnt, and moving-brush draw, then tests it independently against both sun
+cascades. Camera visibility, material eligibility, placement identity, and
+alpha boundaries remain independent.
+
+Across all 120 diagnostic samples, physical shadow draws fall **724 -> 330**,
+merged dynamic ranges **1,374 -> 0**, and submitted indices **1,223,802 ->
+957,990**, with every other recorded work count exact. Dynamic sun CPU falls
+**0.148 -> 0.041 ms (71.9%)** and total sun drawing **1.181 -> 0.535 ms
+(54.7%)**. Bounds construction adds 0.328 ms to dynamic copy. Production pair
+means are **14.868 -> 14.421 ms (3.01% lower)** with substantial run drift. See
+[evidence and limits](evidence/dynamic-sun-partitions-6ece6ee9.md).
+
+The [Kisak optimization audit](kisak-renderer-optimization-audit.md) remains
+active. Dynamic spot visibility is open and dynamic opaque sorting remains
+partial. Next is dynamic spot submission.
+
+## Prior BSP sun-cascade visibility milestone
 
 Runtime `a23850aa` carries canonical `GfxSurface` bounds with retained world
 spans and selects near/far sun casters independently in light space. Camera DPVS
@@ -18,10 +37,6 @@ draw time falls **1.208 -> 1.108 ms (8.27%)**. Production A/B/B/A pair means are
 **15.189 -> 14.942 ms (1.63% lower)** with material run drift, so that timing is
 a local observation. The focused test and one final Release passed. See
 [evidence and limits](evidence/bsp-sun-partitions-a23850aa.md).
-
-The [Kisak optimization audit](kisak-renderer-optimization-audit.md) remains
-active. Dynamic sun-partition visibility and dynamic spot visibility are open;
-dynamic opaque sorting remains partial. Next is dynamic sun visibility.
 
 ## Prior static spot-shadow membership milestone
 

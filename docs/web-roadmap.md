@@ -90,10 +90,14 @@ Manual gameplay assessment can guide renderer work without a progression gate.
     independently. Per frame, 578 physical shadow draws and 1,694,994 submitted
     indices are avoided; attributed sun drawing falls 8.27%. Production A/B/B/A
     pair means fall 15.189 -> 14.942 ms (1.63%) with documented run drift.
-14. The [Kisak optimization audit](kisak-renderer-optimization-audit.md) owns
-    completion of the broad renderer goal. Next: carry canonical dynamic
-    scene-entity visibility into independent sun partitions. Dynamic spot
-    visibility and the measured disposition of safe opaque sorting follow.
+14. The [dynamic sun-partition milestone](evidence/dynamic-sun-partitions-6ece6ee9.md)
+    retains world-space bounds per flattened dynamic draw and independently
+    selects both cascades. Dynamic sun CPU falls 71.9%; 394 physical shadow
+    draws and 265,812 indices are avoided. Bounds construction costs 0.328 ms;
+    noisy production pair means fall 14.868 -> 14.421 ms (3.01%).
+15. The [Kisak optimization audit](kisak-renderer-optimization-audit.md) owns
+    completion of the broad renderer goal. Next: add per-light dynamic spot
+    visibility, then measure the remaining safe opaque-sorting opportunity.
 
 The static-instance follow-up used the focused native fixture, isolated control
 and candidate diagnostic builds, three final moving-camera profiles, and one
@@ -108,6 +112,10 @@ allowlist; renderer assertions were not weakened.
 The BSP sun follow-up used one focused native target, exact 120-sample targeted
 comparison, four production windows, and one final Release. No broad tier,
 mission check, capture, or unrelated compatibility promotion ran.
+
+The dynamic sun follow-up used one focused native target, exact 120-sample
+targeted comparison, four production windows, and one final Release. It records
+the bounds-construction cost and timing drift rather than hiding either.
 
 The earlier renderer milestone used one focused native fixture, rerun after shadow
 integration; three diagnostic builds and five 120-frame profiles; four

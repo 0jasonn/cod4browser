@@ -135,9 +135,14 @@ tracks applicable native techniques to closure. The
 [BSP sun milestone](evidence/bsp-sun-partitions-a23850aa.md) carries canonical
 `GfxSurface` AABBs with retained spans and builds each cascade's light-space
 selection independently. Camera DPVS is absent, range holes and alpha-tested
-boundaries remain explicit, and adjacent opaque spans can still merge. Dynamic
-sun-partition and dynamic spot visibility remain open; they must use canonical
-scene-entity producer data rather than backend-derived camera membership.
+boundaries remain explicit, and adjacent opaque spans can still merge.
+Dynamic sun draws now retain one world-space AABB after DObj/DynEnt assembly or
+brush placement and test it against each sun matrix independently. This
+platform-equivalent seam covers the five native dynamic families without
+retaining entity state; it costs 24 bytes per flattened draw and one indexed
+bounds scan per dynamic submission. See
+[the dynamic sun evidence](evidence/dynamic-sun-partitions-6ece6ee9.md).
+Dynamic spot visibility remains open and cannot use camera or sun membership.
 
 World camera visibility now extends that same canonical call through AABB
 surface tests and cell cull groups, including native decal selection. It resets
