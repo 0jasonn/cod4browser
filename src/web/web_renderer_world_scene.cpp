@@ -797,9 +797,14 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
                 candidate.indexCount,
                 static_cast<std::uint32_t>(replacement.batches.size() - 1u),
             };
-            replacement.surfaceRanges.push_back({surfaceIndex,
+            WebRendererWorldSurfaceRange range{surfaceIndex,
                 static_cast<std::uint32_t>(replacement.batches.size() - 1u),
-                candidate.firstIndex, candidate.indexCount});
+                candidate.firstIndex, candidate.indexCount};
+            std::copy(std::begin(surface.bounds[0]),
+                std::end(surface.bounds[0]), std::begin(range.mins));
+            std::copy(std::begin(surface.bounds[1]),
+                std::end(surface.bounds[1]), std::begin(range.maxs));
+            replacement.surfaceRanges.push_back(range);
             if (replacement.surfaceCount == 0u)
                 replacement.firstSurfaceIndex = surfaceIndex;
             replacement.lastSurfaceIndex = surfaceIndex;
@@ -901,7 +906,11 @@ bool WebRenderer_ValidateWorldSurfaceRanges(
             range.batchIndex != batchIndex || batchIndex >= surface.batchCount ||
             range.firstIndex != nextIndex || !range.indexCount ||
             range.indexCount % 3u || nextIndex > surface.indexCount ||
-            range.indexCount > surface.indexCount - nextIndex)
+            range.indexCount > surface.indexCount - nextIndex ||
+            !Finite3(range.mins) || !Finite3(range.maxs) ||
+            range.mins[0] > range.maxs[0] ||
+            range.mins[1] > range.maxs[1] ||
+            range.mins[2] > range.maxs[2])
             return false;
         const auto &batch = surface.batches[batchIndex];
         if (range.firstIndex < batch.firstIndex ||
@@ -1240,6 +1249,76 @@ bool WebRenderer_BrushPlacementIsFinite(
                 !std::isfinite(normal) || !std::isfinite(tangent))
                 return false;
         }
+    }
+    return true;
+}
+
+bool WebRenderer_BuildWorldShadowRanges(
+    const std::vector<WebRendererWorldSurfaceRange> &surfaces,
+    const std::array<float, 16> &shadowMatrix,
+    std::vector<WebRendererWorldShadowRange> &destination)
+{
+    destination.clear();
+    for (const float value : shadowMatrix)
+        if (!std::isfinite(value)) return false;
+    try
+    {
+        destination.reserve(surfaces.size());
+        for (const auto &surface : surfaces)
+        {
+            float center[3], extent[3];
+            for (std::size_t component = 0u; component < 3u; ++component)
+            {
+                if (!std::isfinite(surface.mins[component]) ||
+                    !std::isfinite(surface.maxs[component]) ||
+                    surface.mins[component] > surface.maxs[component])
+                {
+                    destination.clear();
+                    return false;
+                }
+                center[component] =
+                    (surface.mins[component] + surface.maxs[component]) * 0.5f;
+                extent[component] =
+                    (surface.maxs[component] - surface.mins[component]) * 0.5f;
+            }
+            float clipCenter[4], clipExtent[3];
+            for (std::size_t row = 0u; row < 4u; ++row)
+            {
+                clipCenter[row] = shadowMatrix[row] * center[0] +
+                    shadowMatrix[4u + row] * center[1] +
+                    shadowMatrix[8u + row] * center[2] +
+                    shadowMatrix[12u + row];
+                if (row < 3u)
+                    clipExtent[row] = std::fabs(shadowMatrix[row]) * extent[0] +
+                        std::fabs(shadowMatrix[4u + row]) * extent[1] +
+                        std::fabs(shadowMatrix[8u + row]) * extent[2];
+            }
+            const float w = clipCenter[3];
+            const bool visible =
+                clipCenter[0] + clipExtent[0] >= -w &&
+                clipCenter[0] - clipExtent[0] <= w &&
+                clipCenter[1] + clipExtent[1] >= -w &&
+                clipCenter[1] - clipExtent[1] <= w &&
+                clipCenter[2] + clipExtent[2] >= -w &&
+                clipCenter[2] - clipExtent[2] <= w;
+            if (!visible) continue;
+            if (!destination.empty() &&
+                destination.back().batchIndex == surface.batchIndex &&
+                destination.back().firstIndex + destination.back().indexCount ==
+                    surface.firstIndex)
+            {
+                destination.back().indexCount += surface.indexCount;
+                ++destination.back().surfaceCount;
+            }
+            else
+                destination.push_back({surface.batchIndex, surface.firstIndex,
+                    surface.indexCount, 1u});
+        }
+    }
+    catch (const std::bad_alloc &)
+    {
+        destination.clear();
+        return false;
     }
     return true;
 }

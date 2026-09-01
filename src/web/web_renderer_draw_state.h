@@ -59,6 +59,45 @@ std::uint32_t WebRenderer_ForEachSunShadowRange(
         });
 }
 
+// Visible surface spans may cover only part of a retained batch. Preserve
+// those holes while retaining the opaque cross-batch merge used by sun depth.
+template<typename Ranges, typename Batches, typename IsOpaque, typename Draw>
+std::uint32_t WebRenderer_ForEachWorldSunShadowRange(
+    const Ranges &ranges, const Batches &batches, IsOpaque isOpaque, Draw draw)
+{
+    const typename Ranges::value_type *pending = nullptr;
+    std::uint32_t count = 0u;
+    std::uint32_t merged = 0u;
+    const auto flush = [&]() {
+        if (pending)
+            draw(batches[pending->batchIndex], pending->firstIndex, count);
+    };
+    for (const auto &range : ranges)
+    {
+        const auto &batch = batches[range.batchIndex];
+        if (!batch.castsSunShadow || range.indexCount == 0u)
+        {
+            flush();
+            pending = nullptr;
+            continue;
+        }
+        if (pending && isOpaque(batches[pending->batchIndex]) &&
+            isOpaque(batch) &&
+            std::uint64_t(pending->firstIndex) + count == range.firstIndex &&
+            range.indexCount <= UINT32_MAX - count)
+        {
+            count += range.indexCount;
+            ++merged;
+            continue;
+        }
+        flush();
+        pending = &range;
+        count = range.indexCount;
+    }
+    flush();
+    return merged;
+}
+
 // Local to one draw pass and one shader program. Batch values and
 // matrix contents must remain immutable for that pass. Reset after any direct
 // GL override (sun query/sprite), and never retain this across frames/contexts.

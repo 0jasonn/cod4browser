@@ -413,6 +413,7 @@ struct WebRendererState
     std::vector<WebRendererRetainedWorldBatch> retainedWorldBatches;
     std::vector<WebRendererWorldSurfaceRange> retainedWorldSurfaceRanges;
     std::vector<WebRendererWorldCameraRange> worldCameraRanges;
+    std::vector<WebRendererWorldShadowRange> worldShadowRanges;
     std::uint32_t worldCanonicalSurfaceCount = 0u;
     std::vector<WebRendererRetainedSpotShadowCaster>
         retainedWorldSpotShadowCasters;
@@ -6517,6 +6518,7 @@ WebRendererSurfaceResult WebRenderer_SetSurface(
     g_renderer.retainedWorldBatches.clear();
     g_renderer.retainedWorldSurfaceRanges.clear();
     g_renderer.worldCameraRanges.clear();
+    g_renderer.worldShadowRanges.clear();
     g_renderer.worldCanonicalSurfaceCount = 0u;
     g_renderer.retainedWorldSpotShadowCasters.clear();
     g_renderer.retainedWorldSpotShadowStaticModels.clear();
@@ -6618,6 +6620,7 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
     g_renderer.retainedWorldBatches = std::move(retainedBatches);
     g_renderer.retainedWorldSurfaceRanges = std::move(retainedSurfaceRanges);
     g_renderer.worldCameraRanges.clear();
+    g_renderer.worldShadowRanges.clear();
     g_renderer.worldCanonicalSurfaceCount = surface.canonicalSurfaceCount;
     g_renderer.retainedWorldSpotShadowCasters =
         std::move(retainedSpotShadowCasters);
@@ -6817,6 +6820,7 @@ void WebRenderer_UnloadWorldResources()
     decltype(g_renderer.retainedWorldSurfaceRanges){}.swap(
         g_renderer.retainedWorldSurfaceRanges);
     decltype(g_renderer.worldCameraRanges){}.swap(g_renderer.worldCameraRanges);
+    decltype(g_renderer.worldShadowRanges){}.swap(g_renderer.worldShadowRanges);
     g_renderer.worldCanonicalSurfaceCount = 0u;
     decltype(g_renderer.retainedWorldSpotShadowCasters){}.swap(
         g_renderer.retainedWorldSpotShadowCasters);
@@ -8831,8 +8835,12 @@ bool DrawShadowPartition(
 #endif
     if (requireSunCaster)
     {
-        const auto merged = WebRenderer_ForEachSunShadowRange(
-            g_renderer.retainedWorldBatches,
+        if (!WebRenderer_BuildWorldShadowRanges(
+                g_renderer.retainedWorldSurfaceRanges, matrix,
+                g_renderer.worldShadowRanges))
+            return false;
+        const auto merged = WebRenderer_ForEachWorldSunShadowRange(
+            g_renderer.worldShadowRanges, g_renderer.retainedWorldBatches,
             [](const auto &batch) { return WorldAlphaTestMode(batch.stateBits[0]) == 0; },
             [&drawWorldRange](const auto &batch, std::uint32_t first, std::uint32_t count) {
                 drawWorldRange(batch, first, count, batch.stateBits[0]);

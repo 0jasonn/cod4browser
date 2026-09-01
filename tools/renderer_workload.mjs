@@ -191,16 +191,57 @@ export function compareStaticShadowPartitionWorkloads(runs) {
     return changes;
 }
 
+// BSP sun partition culling may reduce world shadow draws, opaque merges and
+// their submitted indices. Every camera, model, command and upload count must
+// remain exact, and the reduction must be stable throughout the paused view.
+export function compareWorldShadowPartitionWorkloads(runs) {
+    assert(runs.length >= 2);
+    const baseline = runs[0];
+    const normalized = [baseline];
+    const changes = [];
+    for (const run of runs.slice(1)) {
+        assert.equal(run.workCounts.length, 120);
+        const deltas = run.workCounts.map((counts, index) => {
+            const original = baseline.workCounts[index];
+            const casterDraws = original.shadowCasterDraws - counts.shadowCasterDraws;
+            const mergedRanges = original.sunShadowMergedRanges - counts.sunShadowMergedRanges;
+            const submittedIndices = original.submittedIndices - counts.submittedIndices;
+            assert(casterDraws > 0, 'world partition culling must reduce shadow draws');
+            assert(mergedRanges > 0, 'world partition culling must reduce merged surface ranges');
+            assert(submittedIndices > 0, 'world partition culling must reduce submitted indices');
+            return { casterDraws, mergedRanges, submittedIndices };
+        });
+        for (const delta of deltas)
+            assert.deepEqual(delta, deltas[0],
+                'world shadow work changed within paused window');
+        normalized.push({ ...run, workCounts: run.workCounts.map((counts, index) => ({
+            ...counts,
+            shadowCasterDraws: counts.shadowCasterDraws + deltas[index].casterDraws,
+            sunShadowMergedRanges: counts.sunShadowMergedRanges + deltas[index].mergedRanges,
+            submittedIndices: counts.submittedIndices + deltas[index].submittedIndices,
+        })) });
+        changes.push({ artifactSha256: run.artifactSha256,
+            matchingLogicalWorkSamples: 120, ...deltas[0] });
+    }
+    compareProfileWorkloads(normalized);
+    return changes;
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
     const profiles = process.argv[2] === '--profiles';
     const retained = process.argv[2] === '--retained';
     const shadows = process.argv[2] === '--shadow-ranges';
     const staticShadowPartitions =
         process.argv[2] === '--static-shadow-partitions';
-    const qualified = profiles || retained || shadows || staticShadowPartitions;
+    const worldShadowPartitions =
+        process.argv[2] === '--world-shadow-partitions';
+    const qualified = profiles || retained || shadows || staticShadowPartitions ||
+        worldShadowPartitions;
     const runs = await Promise.all(process.argv.slice(qualified ? 3 : 2)
         .map(async path => JSON.parse(await readFile(path, 'utf8'))));
-    console.log(JSON.stringify((staticShadowPartitions
+    console.log(JSON.stringify((worldShadowPartitions
+        ? compareWorldShadowPartitionWorkloads
+        : staticShadowPartitions
         ? compareStaticShadowPartitionWorkloads
         : shadows ? compareShadowRangeWorkloads
         : retained ? compareRetainedRendererWorkloads

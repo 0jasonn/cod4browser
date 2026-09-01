@@ -97,6 +97,8 @@ struct WebRendererWorldCameraRange
     std::uint32_t surfaceCount;
 };
 
+using WebRendererWorldShadowRange = WebRendererWorldCameraRange;
+
 bool WebRenderer_ValidateWorldSurfaceRanges(
     const WebRendererWorldSurfaceDesc &surface) noexcept;
 
@@ -107,6 +109,14 @@ bool WebRenderer_BuildWorldCameraRanges(
     const std::uint8_t *visibility, std::uint32_t visibilityCount,
     bool visibilityComputed,
     std::vector<WebRendererWorldCameraRange> &destination);
+
+// Builds one sun-cascade selection from canonical surface bounds. Camera DPVS
+// visibility is deliberately absent; near and far partitions call this
+// independently with their own light-space matrices.
+bool WebRenderer_BuildWorldShadowRanges(
+    const std::vector<WebRendererWorldSurfaceRange> &surfaces,
+    const std::array<float, 16> &shadowMatrix,
+    std::vector<WebRendererWorldShadowRange> &destination);
 
 // Expands canonical scene-brush submissions from their GfxBrushModel surface
 // ranges. Native retains the placement separately; the portable boundary

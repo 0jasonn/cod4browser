@@ -1201,6 +1201,65 @@ void TestSunShadowRangesPreserveTriangleOrderAndCutouts()
         [](const auto &, auto, auto) { assert(false); }) == 0u);
 }
 
+void TestWorldSunShadowRangesCullPartitionsIndependently()
+{
+    const auto makeRange = [](std::uint32_t surface, std::uint32_t batch,
+                               std::uint32_t first, float minimumX,
+                               float maximumX) {
+        WebRendererWorldSurfaceRange range{surface, batch, first, 3u};
+        range.mins[0] = minimumX;
+        range.mins[1] = range.mins[2] = -0.25f;
+        range.maxs[0] = maximumX;
+        range.maxs[1] = range.maxs[2] = 0.25f;
+        return range;
+    };
+    const std::vector<WebRendererWorldSurfaceRange> surfaces{
+        makeRange(0u, 0u, 0u, -0.5f, 0.5f),
+        makeRange(1u, 0u, 3u, 2.0f, 2.5f),
+        makeRange(2u, 0u, 6u, 0.5f, 1.0f),
+        makeRange(3u, 1u, 9u, -0.5f, 0.5f),
+    };
+    const std::array<float, 16> nearMatrix{
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f,
+    };
+    auto farMatrix = nearMatrix;
+    farMatrix[0] = 0.25f;
+
+    std::vector<WebRendererWorldShadowRange> nearRanges, farRanges;
+    assert(WebRenderer_BuildWorldShadowRanges(
+        surfaces, nearMatrix, nearRanges));
+    assert(WebRenderer_BuildWorldShadowRanges(
+        surfaces, farMatrix, farRanges));
+    assert(nearRanges.size() == 3u);
+    assert(nearRanges[0].firstIndex == 0u && nearRanges[0].indexCount == 3u);
+    assert(nearRanges[1].firstIndex == 6u && nearRanges[1].indexCount == 3u);
+    assert(nearRanges[2].firstIndex == 9u && nearRanges[2].indexCount == 3u);
+    assert(farRanges.size() == 2u);
+    assert(farRanges[0].firstIndex == 0u && farRanges[0].indexCount == 9u);
+    assert(farRanges[0].surfaceCount == 3u);
+    assert(farRanges[1].firstIndex == 9u && farRanges[1].indexCount == 3u);
+
+    std::array<WebRendererWorldBatchDesc, 2> batches{};
+    for (auto &batch : batches) batch.castsSunShadow = true;
+    std::vector<std::array<std::uint32_t, 2>> draws;
+    assert(WebRenderer_ForEachWorldSunShadowRange(nearRanges, batches,
+        [](const auto &) { return true; },
+        [&](const auto &, std::uint32_t first, std::uint32_t count) {
+            draws.push_back({first, count});
+        }) == 1u);
+    assert((draws == std::vector<std::array<std::uint32_t, 2>>{
+        {0u, 3u}, {6u, 6u}}));
+
+    auto malformed = surfaces;
+    malformed[1].mins[0] = std::numeric_limits<float>::quiet_NaN();
+    assert(!WebRenderer_BuildWorldShadowRanges(
+        malformed, nearMatrix, nearRanges));
+    assert(nearRanges.empty());
+}
+
 void TestRetainedBrushPlacementMatchesExpandedGeometry()
 {
     Fixture fixture;
@@ -1430,6 +1489,7 @@ int main()
     TestDynamicBrushModelUsesCanonicalSurfaceRangeAndPlacement();
     TestRetainedBrushPlacementMatchesExpandedGeometry();
     TestSunShadowRangesPreserveTriangleOrderAndCutouts();
+    TestWorldSunShadowRangesCullPartitionsIndependently();
     TestTextureParameterMemoPreservesAliasedObjectState();
     TestMalformedDynamicBrushRangeIsRejectedAtomically();
     TestBrushMatchesWorldSelectionAndRejectsAtomically();

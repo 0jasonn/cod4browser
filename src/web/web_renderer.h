@@ -222,6 +222,8 @@ struct WebRendererWorldSurfaceRange
     std::uint32_t batchIndex;
     std::uint32_t firstIndex;
     std::uint32_t indexCount;
+    float mins[3];
+    float maxs[3];
 };
 
 struct WebRendererWorldSurfaceDesc
