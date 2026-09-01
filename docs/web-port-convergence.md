@@ -123,6 +123,18 @@ camera-packed half. Canonical `GfxStaticModelInst`, DPVS, and authored light
 membership remain authoritative. See
 [the partition evidence](evidence/static-sun-partitions-cc4af645.md).
 
+Authored static spot membership now follows the same packed-mask shape. The
+[spot milestone](evidence/static-spot-membership-26b3dc98.md) translates the
+selected light's sorted `GfxShadowGeometry::smodelIndex` records once, then all
+model surface batches scan the resulting LOD-packed bytes. Camera DPVS, sun
+partition bytes, canonical asset identity, and GPU resource ownership remain
+separate.
+
+The [Kisak renderer optimization audit](kisak-renderer-optimization-audit.md)
+tracks applicable native techniques to closure. Native BSP and dynamic
+sun-partition visibility and dynamic spot visibility remain open; they must use
+canonical producer data rather than backend-derived camera membership.
+
 World camera visibility now extends that same canonical call through AABB
 surface tests and cell cull groups, including native decal selection. It resets
 the complete DB-allocated `staticSurfaceCount` camera mask, and checks sorted

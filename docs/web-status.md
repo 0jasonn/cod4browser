@@ -4,7 +4,25 @@ Updated 2026-09-01. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
-## Static-instance upload milestone delivered
+## Static spot-shadow membership milestone delivered
+
+Runtime `26b3dc98` converts authored `GfxWorld::shadowGeom` static membership
+into one packed mask per selected spot light. Model surface batches reuse that
+mask instead of repeating canonical-index searches. Camera DPVS remains absent
+from caster selection, and the existing CPU shadow mask is reused.
+
+Diagnostic static spot-shadow CPU falls **0.982 -> 0.535 ms (45.5%)** and total
+spot drawing **1.484 -> 1.074 ms (27.7%)**, with all 120 logical-work samples
+matching. Production A/B/B/A pair means are **12.627 -> 12.090 ms (4.25%
+lower)**. The focused native and Node checks and one final Release passed. See
+[evidence and limits](evidence/static-spot-membership-26b3dc98.md).
+
+The [Kisak optimization audit](kisak-renderer-optimization-audit.md) now defines
+the remaining broad goal. BSP and dynamic sun-partition visibility and dynamic
+spot visibility are open; dynamic opaque sorting remains partial. Next is BSP
+sun-cascade visibility.
+
+## Prior static-instance upload milestone
 
 Runtime `ac8b00ca` moves 24-byte canonical shadow bounds out of the instanced GPU
 record and uploads only the camera-packed half when DPVS visibility changes
@@ -19,7 +37,7 @@ production Release passed. This is deterministic transfer evidence; noisy
 single-run timing does not establish a CPU or FPS improvement. See
 [evidence and limits](evidence/static-instance-uploads-ac8b00ca.md).
 
-Next: attribute spot-shadow cost by caster family before changing that path.
+Its spot-shadow follow-up is delivered in the current section above.
 
 ## Prior static sun-shadow partition milestone
 

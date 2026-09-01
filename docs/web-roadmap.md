@@ -80,14 +80,25 @@ Manual gameplay assessment can guide renderer work without a progression gate.
     uploads only the camera half for visibility-only changes. A moving-camera
     transition falls from 1,143,552 to 428,832 bytes (62.5%) while light-space
     sun selection, authored spot membership, and camera DPVS remain independent.
-12. Next: attribute spot-shadow draw cost to world, static and dynamic caster
-    families under the same controlled workload. Change only a measured dominant
-    path and preserve canonical light membership and recovery ownership.
+12. The [static spot-shadow milestone](evidence/static-spot-membership-26b3dc98.md)
+    attributes the pass by caster family and replaces repeated per-surface static
+    membership searches with one packed mask per authored light. Static spot CPU
+    falls 45.5%; production A/B/B/A pair means fall 12.627 -> 12.090 ms (4.25%)
+    with all diagnostic logical-work samples exact.
+13. The [Kisak optimization audit](kisak-renderer-optimization-audit.md) now owns
+    completion of the broad renderer goal. Next: consume native BSP
+    `surfaceVisData[partition + 1]` for independent sun cascades. Dynamic sun/spot
+    visibility and the measured disposition of safe opaque sorting follow.
 
 The static-instance follow-up used the focused native fixture, isolated control
 and candidate diagnostic builds, three final moving-camera profiles, and one
 production Release. It claims exact transfer bytes, not timing or gameplay FPS.
 No broad suite, mission check, context-loss run, or capture was required.
+
+The static spot-shadow follow-up used the same focused native target, one focused
+Node target, attributed control/candidate diagnostics, four production windows,
+and one final Release. One targeted profile retry corrected an aggregate-field
+allowlist; renderer assertions were not weakened.
 
 The earlier renderer milestone used one focused native fixture, rerun after shadow
 integration; three diagnostic builds and five 120-frame profiles; four
