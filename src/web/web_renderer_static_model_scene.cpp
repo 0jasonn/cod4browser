@@ -636,6 +636,13 @@ bool WebRenderer_StaticModelIntersectsShadowPartition(
     const WebRendererStaticModelShadowBounds &bounds,
     const std::array<float, 16> &shadowMatrix) noexcept
 {
+    return WebRenderer_ShadowBoundsIntersectPartition(bounds, shadowMatrix);
+}
+
+bool WebRenderer_ShadowBoundsIntersectPartition(
+    const WebRendererStaticModelShadowBounds &bounds,
+    const std::array<float, 16> &shadowMatrix) noexcept
+{
     float center[3];
     float extent[3];
     for (std::size_t component = 0u; component < 3u; ++component)

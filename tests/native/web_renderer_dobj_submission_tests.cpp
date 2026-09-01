@@ -283,7 +283,11 @@ void TestFusedSkinningUsesCurrentPoseAndRecyclesOnlyGeometry()
 void TestDynamicShadowRangesPreserveGeometryAndPlacement()
 {
     struct Batch { std::uint32_t firstIndex, indexCount; bool castsSunShadow, opaque; };
-    struct Draw { std::uint32_t batchIndex, instance; };
+    struct Draw
+    {
+        std::uint32_t batchIndex, instance;
+        bool partitionVisible = true;
+    };
     const std::vector<Batch> batches{
         {0, 3, true, true}, {3, 3, true, true}, {6, 3, true, false},
         {9, 3, true, true}, {12, 3, false, true}, {15, 3, true, true},
@@ -293,7 +297,7 @@ void TestDynamicShadowRangesPreserveGeometryAndPlacement()
     };
     const std::vector<Draw> draws{
         {0, UINT32_MAX}, {1, UINT32_MAX}, {2, UINT32_MAX},
-        {3, UINT32_MAX}, {4, UINT32_MAX}, {5, 0}, {6, 1}, {7, 1},
+        {3, UINT32_MAX}, {4, UINT32_MAX}, {5, 0}, {6, 1, false}, {7, 1},
         {8, 1}, {9, 1}, {10, 1}, {11, 1}, {12, 1},
     };
     // Compare every index, placement and cutout identity with the original
@@ -308,18 +312,21 @@ void TestDynamicShadowRangesPreserveGeometryAndPlacement()
     for (const auto &draw : draws)
     {
         const auto &batch = batches[draw.batchIndex];
-        if (batch.castsSunShadow) append(expected, draw, batch, batch.firstIndex, batch.indexCount);
+        if (draw.partitionVisible && batch.castsSunShadow)
+            append(expected, draw, batch, batch.firstIndex, batch.indexCount);
     }
     const auto merged = WebRenderer_ForEachShadowRange(draws,
         [&](const Draw &draw) -> const Batch & { return batches[draw.batchIndex]; },
-        [](const Batch &batch) { return batch.castsSunShadow; },
+        [](const Draw &draw, const Batch &batch) {
+            return draw.partitionVisible && batch.castsSunShadow;
+        },
         [&](const Draw &a, const Draw &b) {
             return a.instance == b.instance && batches[a.batchIndex].opaque && batches[b.batchIndex].opaque;
         },
         [&](const Draw &draw, const Batch &batch, std::uint32_t first, std::uint32_t count) {
             append(actual, draw, batch, first, count);
         });
-    assert(merged == 2 && actual == expected);
+    assert(merged == 1 && actual == expected);
     // Exercise the existing world adapter as well as the dynamic reference path.
     actual.clear();
     expected.clear();

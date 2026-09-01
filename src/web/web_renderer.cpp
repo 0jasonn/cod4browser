@@ -238,6 +238,7 @@ struct WebRendererRetainedUiBatch
 struct WebRendererRetainedBrushGeometry
 {
     float maximumCoordinate = 0.0f;
+    WebRendererStaticModelShadowBounds shadowBounds{};
     GLuint vertexArray = 0u;
     GLuint vertexBuffer = 0u;
     GLuint indexBuffer = 0u;
@@ -250,6 +251,7 @@ struct WebRendererDynamicDraw
 {
     std::uint32_t batchIndex;
     std::uint32_t brushInstanceIndex = UINT32_MAX;
+    WebRendererStaticModelShadowBounds shadowBounds{};
 };
 
 struct WebRendererState
@@ -7168,11 +7170,20 @@ WebRendererSurfaceResult WebRenderer_RetainBrushModelGeometry(
         ignoredSun, static_cast<std::uint32_t>(g_renderer.retainedPrimaryLights.size()),
         nullptr, nullptr);
     if (copy != WebRendererSurfaceResult::Success) return copy;
+    const float maximumFloat = std::numeric_limits<float>::max();
+    std::fill_n(retained.shadowBounds.mins, 3u, maximumFloat);
+    std::fill_n(retained.shadowBounds.maxs, 3u, -maximumFloat);
     for (const auto &vertex : retained.vertices)
         for (std::size_t component = 0u; component < 3u; ++component)
+        {
             retained.maximumCoordinate = std::max({retained.maximumCoordinate,
                 std::fabs(vertex.position[component]), std::fabs(vertex.normal[component]),
                 std::fabs(vertex.tangent[component])});
+            retained.shadowBounds.mins[component] = std::min(
+                retained.shadowBounds.mins[component], vertex.position[component]);
+            retained.shadowBounds.maxs[component] = std::max(
+                retained.shadowBounds.maxs[component], vertex.position[component]);
+        }
     if (g_renderer.initialized && !g_renderer.contextLost)
     {
         if (!CreateSurfaceObjects(retained.vertices, retained.indices, retained.vertexArray,
@@ -7195,6 +7206,65 @@ WebRendererSurfaceResult WebRenderer_RetainBrushModelGeometry(
     }
     geometryIndex = static_cast<std::uint32_t>(g_renderer.retainedBrushGeometry.size() - 1u);
     return WebRendererSurfaceResult::Success;
+}
+
+bool BuildIndexedShadowBounds(
+    const std::vector<WebRendererSurfaceVertex> &vertices,
+    const std::vector<std::uint32_t> &indices,
+    const WebRendererRetainedWorldBatch &batch,
+    WebRendererStaticModelShadowBounds &bounds) noexcept
+{
+    if (batch.firstIndex >= indices.size() || !batch.indexCount ||
+        batch.indexCount > indices.size() - batch.firstIndex)
+        return false;
+    const float maximumFloat = std::numeric_limits<float>::max();
+    std::fill_n(bounds.mins, 3u, maximumFloat);
+    std::fill_n(bounds.maxs, 3u, -maximumFloat);
+    for (std::uint32_t offset = 0u; offset < batch.indexCount; ++offset)
+    {
+        const std::uint32_t vertexIndex = indices[batch.firstIndex + offset];
+        if (vertexIndex >= vertices.size()) return false;
+        for (std::size_t component = 0u; component < 3u; ++component)
+        {
+            const float value = vertices[vertexIndex].position[component];
+            if (!std::isfinite(value)) return false;
+            bounds.mins[component] = std::min(bounds.mins[component], value);
+            bounds.maxs[component] = std::max(bounds.maxs[component], value);
+        }
+    }
+    return true;
+}
+
+bool TransformShadowBounds(
+    const WebRendererStaticModelShadowBounds &local,
+    const WebRendererBrushModelInstanceDesc &instance,
+    WebRendererStaticModelShadowBounds &world) noexcept
+{
+    float center[3], extent[3];
+    for (std::size_t component = 0u; component < 3u; ++component)
+    {
+        center[component] =
+            (local.mins[component] + local.maxs[component]) * 0.5f;
+        extent[component] =
+            (local.maxs[component] - local.mins[component]) * 0.5f;
+    }
+    for (std::size_t component = 0u; component < 3u; ++component)
+    {
+        const float transformedCenter = instance.origin[component] +
+            center[0] * instance.axis[0][component] +
+            center[1] * instance.axis[1][component] +
+            center[2] * instance.axis[2][component];
+        const float transformedExtent =
+            std::fabs(instance.axis[0][component]) * extent[0] +
+            std::fabs(instance.axis[1][component]) * extent[1] +
+            std::fabs(instance.axis[2][component]) * extent[2];
+        world.mins[component] = transformedCenter - transformedExtent;
+        world.maxs[component] = transformedCenter + transformedExtent;
+        if (!std::isfinite(world.mins[component]) ||
+            !std::isfinite(world.maxs[component]))
+            return false;
+    }
+    return true;
 }
 
 WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
@@ -7254,8 +7324,18 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
     {
         std::uint64_t logicalVertices = scene.vertexCount;
         std::uint64_t logicalIndices = scene.indexCount;
+        const auto appendIndexedDraw = [&](std::uint32_t batchIndex) {
+            WebRendererDynamicDraw draw{batchIndex};
+            if (batchIndex >= retainedBatches.size() ||
+                !BuildIndexedShadowBounds(retainedVertices, retainedIndices,
+                    retainedBatches[batchIndex], draw.shadowBounds))
+                return false;
+            dynamicDraws.push_back(draw);
+            return true;
+        };
         for (std::uint32_t index = 0u; index < brushInsertBatch; ++index)
-            dynamicDraws.push_back({index});
+            if (!appendIndexedDraw(index))
+                return WebRendererSurfaceResult::InvalidDescriptor;
         for (std::uint32_t index = 0u; index < brushInstanceCount; ++index)
         {
             const auto &instance = brushInstances[index];
@@ -7274,11 +7354,16 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
                 return WebRendererSurfaceResult::InvalidDescriptor;
             }
             retainedBrushInstances.push_back(instance);
+            WebRendererStaticModelShadowBounds shadowBounds{};
+            if (!TransformShadowBounds(
+                    geometry.shadowBounds, instance, shadowBounds))
+                return WebRendererSurfaceResult::NonFiniteVertex;
             for (std::uint32_t batch = 0u; batch < geometry.batches.size(); ++batch)
-                dynamicDraws.push_back({batch, index});
+                dynamicDraws.push_back({batch, index, shadowBounds});
         }
         for (std::uint32_t index = brushInsertBatch; index < scene.batchCount; ++index)
-            dynamicDraws.push_back({index});
+            if (!appendIndexedDraw(index))
+                return WebRendererSurfaceResult::InvalidDescriptor;
     }
     catch (const std::bad_alloc &)
     {
@@ -8968,9 +9053,11 @@ bool DrawShadowPartition(
         std::uint32_t previousInstance = UINT32_MAX - 1u;
         const auto merged = WebRenderer_ForEachShadowRange(
             g_renderer.dynamicDraws, DynamicDrawBatch,
-            [](const auto &batch) {
+            [&matrix](const auto &draw, const auto &batch) {
                 return batch.castsSunShadow && !batch.depthHack &&
-                    !WebRenderer_IsFxVertexColorBatch(batch.sourceKind);
+                    !WebRenderer_IsFxVertexColorBatch(batch.sourceKind) &&
+                    WebRenderer_ShadowBoundsIntersectPartition(
+                        draw.shadowBounds, matrix);
             },
             [](const auto &a, const auto &b) {
                 // One instance means the same VAO, index buffer and placement.

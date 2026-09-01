@@ -22,7 +22,7 @@ std::uint32_t WebRenderer_ForEachShadowRange(
     for (const auto &entry : entries)
     {
         const auto &batch = batchFor(entry);
-        if (!isCaster(batch) || batch.indexCount == 0u)
+        if (!isCaster(entry, batch) || batch.indexCount == 0u)
         {
             flush();
             pending = nullptr;
@@ -52,7 +52,7 @@ std::uint32_t WebRenderer_ForEachSunShadowRange(
 {
     return WebRenderer_ForEachShadowRange(batches,
         [](const auto &batch) -> const auto & { return batch; },
-        [](const auto &batch) { return batch.castsSunShadow; },
+        [](const auto &, const auto &batch) { return batch.castsSunShadow; },
         [&isOpaque](const auto &a, const auto &b) { return isOpaque(a) && isOpaque(b); },
         [&draw](const auto &, const auto &batch, std::uint32_t first, std::uint32_t count) {
             draw(batch, first, count);

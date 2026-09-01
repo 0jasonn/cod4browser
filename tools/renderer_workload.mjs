@@ -191,10 +191,10 @@ export function compareStaticShadowPartitionWorkloads(runs) {
     return changes;
 }
 
-// BSP sun partition culling may reduce world shadow draws, opaque merges and
-// their submitted indices. Every camera, model, command and upload count must
-// remain exact, and the reduction must be stable throughout the paused view.
-export function compareWorldShadowPartitionWorkloads(runs) {
+// Light-space partition culling may reduce shadow draws, opaque merges and
+// submitted indices. Every camera, model, command and upload count must remain
+// exact, and the reduction must be stable throughout the paused view.
+function compareReducedShadowPartitionWorkloads(runs, family) {
     assert(runs.length >= 2);
     const baseline = runs[0];
     const normalized = [baseline];
@@ -206,14 +206,14 @@ export function compareWorldShadowPartitionWorkloads(runs) {
             const casterDraws = original.shadowCasterDraws - counts.shadowCasterDraws;
             const mergedRanges = original.sunShadowMergedRanges - counts.sunShadowMergedRanges;
             const submittedIndices = original.submittedIndices - counts.submittedIndices;
-            assert(casterDraws > 0, 'world partition culling must reduce shadow draws');
-            assert(mergedRanges > 0, 'world partition culling must reduce merged surface ranges');
-            assert(submittedIndices > 0, 'world partition culling must reduce submitted indices');
+            assert(casterDraws > 0, `${family} culling must reduce shadow draws`);
+            assert(mergedRanges > 0, `${family} culling must reduce merged ranges`);
+            assert(submittedIndices > 0, `${family} culling must reduce submitted indices`);
             return { casterDraws, mergedRanges, submittedIndices };
         });
         for (const delta of deltas)
             assert.deepEqual(delta, deltas[0],
-                'world shadow work changed within paused window');
+                `${family} work changed within paused window`);
         normalized.push({ ...run, workCounts: run.workCounts.map((counts, index) => ({
             ...counts,
             shadowCasterDraws: counts.shadowCasterDraws + deltas[index].casterDraws,
@@ -227,6 +227,14 @@ export function compareWorldShadowPartitionWorkloads(runs) {
     return changes;
 }
 
+export function compareWorldShadowPartitionWorkloads(runs) {
+    return compareReducedShadowPartitionWorkloads(runs, 'world shadow partition');
+}
+
+export function compareDynamicShadowPartitionWorkloads(runs) {
+    return compareReducedShadowPartitionWorkloads(runs, 'dynamic shadow partition');
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
     const profiles = process.argv[2] === '--profiles';
     const retained = process.argv[2] === '--retained';
@@ -235,11 +243,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         process.argv[2] === '--static-shadow-partitions';
     const worldShadowPartitions =
         process.argv[2] === '--world-shadow-partitions';
+    const dynamicShadowPartitions =
+        process.argv[2] === '--dynamic-shadow-partitions';
     const qualified = profiles || retained || shadows || staticShadowPartitions ||
-        worldShadowPartitions;
+        worldShadowPartitions || dynamicShadowPartitions;
     const runs = await Promise.all(process.argv.slice(qualified ? 3 : 2)
         .map(async path => JSON.parse(await readFile(path, 'utf8'))));
-    console.log(JSON.stringify((worldShadowPartitions
+    console.log(JSON.stringify((dynamicShadowPartitions
+        ? compareDynamicShadowPartitionWorkloads
+        : worldShadowPartitions
         ? compareWorldShadowPartitionWorkloads
         : staticShadowPartitions
         ? compareStaticShadowPartitionWorkloads

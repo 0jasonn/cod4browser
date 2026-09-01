@@ -53,6 +53,12 @@ bool WebRenderer_StaticModelIntersectsShadowPartition(
     const WebRendererStaticModelShadowBounds &bounds,
     const std::array<float, 16> &shadowMatrix) noexcept;
 
+// Shared light-space AABB test for retained dynamic draws. The static wrapper
+// above remains the named frontend seam used by existing static-model code.
+bool WebRenderer_ShadowBoundsIntersectPartition(
+    const WebRendererStaticModelShadowBounds &bounds,
+    const std::array<float, 16> &shadowMatrix) noexcept;
+
 // Repack authored spot membership once per selected light. Batches then scan
 // this packed mask without repeating canonical-index searches per surface.
 bool WebRenderer_BuildStaticModelSpotShadowVisibility(
