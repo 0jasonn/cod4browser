@@ -4,7 +4,20 @@ Updated 2026-09-01. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
-## Dynamic sun-cascade visibility milestone delivered
+## Dynamic spot-shadow caster milestone delivered
+
+Runtime `9a253c6a` restores dynamic DObj, DynEnt XModel, moving-brush, and
+DynEnt-brush casters for every selected spot map. Each light applies its own
+matrix AABB test, and build-shadowmap cull/alpha state now crosses the material
+boundary. Camera and sun visibility remain independent.
+
+All 120 unchanged-work samples match. The missing rendering adds 10 physical
+caster draws and 65,760 indices per frame; dynamic spot attribution is 0.0915
+ms. The final production Release passed. Canonical primary-light linkage is
+still a partial convergence gap, and dynamic opaque sorting remains partial.
+See [evidence and limits](evidence/dynamic-spot-shadows-9a253c6a.md).
+
+## Prior dynamic sun-cascade visibility milestone
 
 Runtime `6ece6ee9` retains one world-space AABB per flattened DObj, XModel,
 DynEnt, and moving-brush draw, then tests it independently against both sun
@@ -20,8 +33,7 @@ means are **14.868 -> 14.421 ms (3.01% lower)** with substantial run drift. See
 [evidence and limits](evidence/dynamic-sun-partitions-6ece6ee9.md).
 
 The [Kisak optimization audit](kisak-renderer-optimization-audit.md) remains
-active. Dynamic spot visibility is open and dynamic opaque sorting remains
-partial. Next is dynamic spot submission.
+active.
 
 ## Prior BSP sun-cascade visibility milestone
 

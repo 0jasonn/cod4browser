@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUtc": "2026-09-01T12:30:01.951Z",
+  "scope": "Seeded paused CargoShip renderer on one host; dynamic spot correctness/work evidence, not active-gameplay FPS or pixel equivalence",
+  "runtimeCommit": "9a253c6ae67e8df10c53254e83d0d998cc1c0614",
+  "environment": {
+    "browser": "Chrome",
+    "version": "152.0.7977.65",
+    "processor": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "viewport": { "width": 1440, "height": 1000 }
+  },
+  "artifacts": {
+    "controlDiagnosticsSha256": "21edca25af14c982400e257b79ddde2392de724333da021560099df6d3c81e40",
+    "finalDiagnosticsSha256": "ded793d8676f8432b6c41409ea34caffaaed46196b87d8999e9a90c5841404bd",
+    "finalProductionSha256": "aaf87575e213521a7736877df0563fcd1556262a5f590698aa356f7e553f49c0"
+  },
+  "diagnostic": {
+    "control": {
+      "shadowCasterDraws": 330,
+      "submittedIndices": 957990,
+      "sunShadowMergedRanges": 0,
+      "spotShadowDrawMs": 1.0732083350419999,
+      "spotShadowDynamicModelsMs": 0.0007500002781550089
+    },
+    "candidate": {
+      "shadowCasterDraws": 340,
+      "submittedIndices": 1023750,
+      "sunShadowMergedRanges": 0,
+      "spotShadowDrawMs": 1.1859166666865348,
+      "spotShadowDynamicModelsMs": 0.0914583330353101,
+      "matchingUnchangedWorkSamples": 120
+    }
+  },
+  "validation": {
+    "focusedNative": "web_renderer_fx_model_scene_tests: 1/1 passed",
+    "diagnosticComparator": "120/120 unchanged-work samples passed; +10 caster draws and +65760 indices per frame",
+    "finalProductionRelease": "passed",
+    "runtimePrefixCheck": "passed"
+  },
+  "rawRecordSha256": {
+    "diagnosticControl": "abc92c34f6ca2d546adfff6e8f818d80d6a491f94b2ac51cce78d45e1bd16481",
+    "diagnosticCandidate": "c821edf037675e03a0318e8ae9ed4ea69e406210c110fdf8bbddeebf229d02b5"
+  }
+}

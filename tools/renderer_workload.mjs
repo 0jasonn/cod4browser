@@ -235,6 +235,46 @@ export function compareDynamicShadowPartitionWorkloads(runs) {
     return compareReducedShadowPartitionWorkloads(runs, 'dynamic shadow partition');
 }
 
+// Dynamic spot integration adds only light-space-qualified caster submissions.
+// Camera work, retained geometry, uploads and the independent sun path remain
+// byte-for-byte/count-for-count stable throughout the paused view.
+export function compareDynamicSpotShadowWorkloads(runs) {
+    assert(runs.length >= 2);
+    const baseline = runs[0];
+    const normalized = [baseline];
+    const changes = [];
+    for (const run of runs.slice(1)) {
+        assert.equal(run.workCounts.length, 120);
+        const deltas = run.workCounts.map((counts, index) => {
+            const original = baseline.workCounts[index];
+            const casterDraws = counts.shadowCasterDraws -
+                original.shadowCasterDraws;
+            const submittedIndices = counts.submittedIndices -
+                original.submittedIndices;
+            assert(casterDraws > 0,
+                'dynamic spot submission must add caster draws');
+            assert(submittedIndices > 0,
+                'dynamic spot submission must add caster indices');
+            return { casterDraws, submittedIndices };
+        });
+        for (const delta of deltas)
+            assert.deepEqual(delta, deltas[0],
+                'dynamic spot work changed within paused window');
+        normalized.push({ ...run, workCounts: run.workCounts.map(
+            (counts, index) => ({
+                ...counts,
+                shadowCasterDraws:
+                    counts.shadowCasterDraws - deltas[index].casterDraws,
+                submittedIndices:
+                    counts.submittedIndices - deltas[index].submittedIndices,
+            })) });
+        changes.push({ artifactSha256: run.artifactSha256,
+            matchingUnchangedWorkSamples: 120, ...deltas[0] });
+    }
+    compareProfileWorkloads(normalized);
+    return changes;
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
     const profiles = process.argv[2] === '--profiles';
     const retained = process.argv[2] === '--retained';
@@ -245,11 +285,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         process.argv[2] === '--world-shadow-partitions';
     const dynamicShadowPartitions =
         process.argv[2] === '--dynamic-shadow-partitions';
+    const dynamicSpotShadows =
+        process.argv[2] === '--dynamic-spot-shadows';
     const qualified = profiles || retained || shadows || staticShadowPartitions ||
-        worldShadowPartitions || dynamicShadowPartitions;
+        worldShadowPartitions || dynamicShadowPartitions || dynamicSpotShadows;
     const runs = await Promise.all(process.argv.slice(qualified ? 3 : 2)
         .map(async path => JSON.parse(await readFile(path, 'utf8'))));
-    console.log(JSON.stringify((dynamicShadowPartitions
+    console.log(JSON.stringify((dynamicSpotShadows
+        ? compareDynamicSpotShadowWorkloads
+        : dynamicShadowPartitions
         ? compareDynamicShadowPartitionWorkloads
         : worldShadowPartitions
         ? compareWorldShadowPartitionWorkloads

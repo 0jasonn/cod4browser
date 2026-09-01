@@ -142,7 +142,12 @@ platform-equivalent seam covers the five native dynamic families without
 retaining entity state; it costs 24 bytes per flattened draw and one indexed
 bounds scan per dynamic submission. See
 [the dynamic sun evidence](evidence/dynamic-sun-partitions-6ece6ee9.md).
-Dynamic spot visibility remains open and cannot use camera or sun membership.
+Dynamic spot draws now use the same retained bounds independently against each
+selected perspective light matrix. DObj, DynEnt XModel, moving-brush, and
+DynEnt-brush materials require the remap-aware build-shadowmap technique and
+carry its cull/alpha state; camera and sun bytes remain absent. Canonical
+primary-light entity/DynEnt linkage and light-region membership remain a named
+gap. See [the dynamic spot evidence](evidence/dynamic-spot-shadows-9a253c6a.md).
 
 World camera visibility now extends that same canonical call through AABB
 surface tests and cell cull groups, including native decal selection. It resets
