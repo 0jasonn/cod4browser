@@ -145,8 +145,10 @@ field and workload checkpoint to match. The final diagnostic candidate removes
 Production A/B/B/A pair means fall 14.947 -> 12.732 ms (14.82%). See
 [the full evidence](evidence/static-sun-partitions-cc4af645.md).
 
-The bounds currently add 24 bytes to each static instance record, including the
-GPU instance buffer even though the draw shader does not consume them. This is
-acceptable for the delivered boundary but leaves moving-camera buffer-update
-cost unmeasured. The next change should split CPU-only bounds from the GPU payload
-without adding another geometry buffer or weakening atomic scene publication.
+The [static-instance upload follow-up](evidence/static-instance-uploads-ac8b00ca.md)
+keeps those 24-byte bounds in aligned CPU source and shadow-packed vectors. The
+GPU instance record is again 72 bytes, and a visibility-only change uploads only
+the camera half. LOD changes still upload both halves because both packings move.
+No geometry buffer, camera-derived caster selection, or non-atomic publication
+was added. Eleven controlled camera transitions save 7,861,920 transfer bytes;
+no timing or gameplay-FPS improvement is inferred.

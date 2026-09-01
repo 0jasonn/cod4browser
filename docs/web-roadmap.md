@@ -75,10 +75,19 @@ Manual gameplay assessment can guide renderer work without a progression gate.
     instances are avoided, and production A/B/B/A pair means fall 14.947 ->
     12.732 ms (14.82%). Camera DPVS, independent near/far membership, authored
     spot membership, uploads, and dynamic/UI work remain intact.
-11. Next: separate CPU-only shadow bounds from the GPU instance payload and
-    measure moving-camera static-buffer updates. Preserve the delivered
-    light-space visibility seam and do not add a second geometry buffer or
-    camera-derived caster selection.
+11. The [static-instance upload milestone](evidence/static-instance-uploads-ac8b00ca.md)
+    separates CPU-only shadow bounds from the 72-byte GPU instance record and
+    uploads only the camera half for visibility-only changes. A moving-camera
+    transition falls from 1,143,552 to 428,832 bytes (62.5%) while light-space
+    sun selection, authored spot membership, and camera DPVS remain independent.
+12. Next: attribute spot-shadow draw cost to world, static and dynamic caster
+    families under the same controlled workload. Change only a measured dominant
+    path and preserve canonical light membership and recovery ownership.
+
+The static-instance follow-up used the focused native fixture, isolated control
+and candidate diagnostic builds, three final moving-camera profiles, and one
+production Release. It claims exact transfer bytes, not timing or gameplay FPS.
+No broad suite, mission check, context-loss run, or capture was required.
 
 The earlier renderer milestone used one focused native fixture, rerun after shadow
 integration; three diagnostic builds and five 120-frame profiles; four

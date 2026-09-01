@@ -115,9 +115,13 @@ boundary; each near/far matrix overwrites one backend byte per retained instance
 then only contiguous visible runs are submitted. Camera visibility is never
 consulted, off-camera casters remain eligible, and spot shadows retain authored
 canonical membership. This is the native-shaped partition seam, not a browser
-engine model or pause cache. The bounds currently also occupy 24 bytes in each
-GPU instance record; separating that CPU metadata is the next measured cleanup.
-See [the milestone evidence](evidence/static-sun-partitions-cc4af645.md).
+engine model or pause cache. The
+[upload follow-up](evidence/static-instance-uploads-ac8b00ca.md) retains the
+24-byte AABBs only in CPU source/shadow-packing vectors. The 72-byte GPU record
+contains shader and LOD/cull data, and visibility-only updates transfer only its
+camera-packed half. Canonical `GfxStaticModelInst`, DPVS, and authored light
+membership remain authoritative. See
+[the partition evidence](evidence/static-sun-partitions-cc4af645.md).
 
 World camera visibility now extends that same canonical call through AABB
 surface tests and cell cull groups, including native decal selection. It resets

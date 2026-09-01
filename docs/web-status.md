@@ -4,7 +4,24 @@ Updated 2026-09-01. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
-## Static sun-shadow partition milestone delivered
+## Static-instance upload milestone delivered
+
+Runtime `ac8b00ca` moves 24-byte canonical shadow bounds out of the instanced GPU
+record and uploads only the camera-packed half when DPVS visibility changes
+without a LOD repack. The shader record returns to 72 bytes; CPU bounds remain
+aligned with shadow LOD packing and preserve independent near/far and authored
+spot membership.
+
+In an exact 120-view moving-camera diagnostic, each visibility transition falls
+from **1,143,552 to 428,832 bytes (62.5% lower)** for 5,956 source instances.
+Eleven transitions save 7,861,920 bytes. One focused test and the single final
+production Release passed. This is deterministic transfer evidence; noisy
+single-run timing does not establish a CPU or FPS improvement. See
+[evidence and limits](evidence/static-instance-uploads-ac8b00ca.md).
+
+Next: attribute spot-shadow cost by caster family before changing that path.
+
+## Prior static sun-shadow partition milestone
 
 Runtime `cc4af645` carries canonical static-model AABBs through the portable
 boundary, tests them against each sun cascade, and submits only contiguous
@@ -23,8 +40,7 @@ The focused static-model target, recovery check, explicit work comparator, and
 one final Release passed. This is paused CargoShip throughput, not gameplay FPS
 or pixel equivalence. See [evidence and limits](evidence/static-sun-partitions-cc4af645.md).
 
-Next: move CPU-only shadow bounds out of the GPU instance payload and measure
-moving-camera static-buffer updates without changing the delivered culling seam.
+Its instance-upload follow-up is delivered in the current section above.
 
 ## Prior DObj conversion and dynamic shadow milestone
 
