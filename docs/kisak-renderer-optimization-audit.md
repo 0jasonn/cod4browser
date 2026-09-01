@@ -21,7 +21,7 @@ Status meanings:
 | Cell/portal/frustum DPVS for world and static models (`r_dpvs_core.cpp`, `r_dpvs_static.cpp`) | Canonical DPVS runs from `web_renderer_frontend.cpp`; world spans and static canonical indices are consumed by `web_renderer.cpp`. | **Shared** |
 | Camera LOD selection and static distance culling (`r_add_staticmodel.cpp`) | `WebRenderer_SelectStaticModelLod` and grouped first/second-half packing retain native LOD/cull inputs. | **Equivalent** |
 | Static-model surface cache and grouped draws (`r_staticmodelcache.cpp`, `r_draw_staticmodel.cpp`) | Shared model geometry is retained once and drawn through instanced model/LOD/material batches. | **Equivalent** |
-| Sorted draw surfaces and compatible material grouping (`r_drawsurf.cpp`) | World/static commands group compatible opaque geometry. Dynamic commands retain canonical append/depth-hack order; safe opaque reordering has not been audited exhaustively. | **Partial** |
+| Sorted draw surfaces and compatible material grouping (`r_drawsurf.cpp`) | World/static commands group compatible geometry. `c8c4f335` stable-sorts only contiguous ordinary dynamic model/brush runs proven opaque and depth-writing by the canonical material key; all unsafe anchors and separate depth-hack passes retain order. | **Equivalent** |
 | Dynamic vertex/index buffer pools (`r_buffers.cpp`) | Capacity-backed WebGL buffers and retained numeric staging avoid per-batch allocation and upload combined dynamic geometry once per submission. | **Equivalent** |
 | DObj pose, lighting, skinning, and skinned-cache reuse (`r_dobj_skin.cpp`, `r_model_skin*.cpp`, `rb_tess.cpp`) | Canonical pose/lighting execute each frame; direct final-vertex emission and retained numeric capacity remove intermediate conversion without a browser pose cache. Cross-pass reuse is present for the shared skinned dynamic buffer. | **Equivalent** |
 | Render/sampler/stream state suppression (`r_setstate_d3d.*`, `r_draw_bsp.cpp`) | Pass-local material, projection, feature, texture, shadow-alpha, shadow-cull, program, and geometry binding state suppress redundant GL calls with explicit reset boundaries. | **Equivalent** |
@@ -43,11 +43,8 @@ or **Partial**. Completion requires:
 
 1. Dynamic spot casters consume canonical primary-light entity/DynEnt linkage;
    matrix culling is already independent of camera and sun visibility.
-2. The remaining dynamic draw-sort row is either implemented for a proven-safe
-   opaque subset or closed with measurements showing no material benefit.
-3. Each closure has focused semantic coverage, matched logical-work evidence,
+2. Each closure has focused semantic coverage, matched logical-work evidence,
    a production Release, current convergence documentation, and a pushed commit.
 
-The next implementation target is the dynamic opaque-sort audit, followed by
-restoring canonical primary-light linkage so authored light-region membership
-narrows the already independent spot-matrix test.
+The last implementation target is canonical primary-light linkage so authored
+light-region membership narrows the already independent spot-matrix test.

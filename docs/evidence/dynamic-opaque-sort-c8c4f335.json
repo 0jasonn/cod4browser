@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUtc": "2026-09-01T12:40:08.236Z",
+  "scope": "Seeded paused CargoShip renderer on one host; no active-gameplay FPS or pixel-equivalence claim",
+  "runtimeCommit": "c8c4f335d363bbce242ac3bd46e9ca166e9959e8",
+  "environment": {
+    "browser": "Chrome",
+    "version": "152.0.7977.65",
+    "processor": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "viewport": { "width": 1440, "height": 1000 }
+  },
+  "artifacts": {
+    "controlProductionSha256": "aaf87575e213521a7736877df0563fcd1556262a5f590698aa356f7e553f49c0",
+    "finalProductionSha256": "0c438933362da1b96e4775ea38af78fffd6677d6e5a9c09a4e93f983506cc7a5",
+    "controlDiagnosticsSha256": "ded793d8676f8432b6c41409ea34caffaaed46196b87d8999e9a90c5841404bd",
+    "finalDiagnosticsSha256": "3a1c214e11f7ded2d9ef83fb53f51204584dc73d1b91a730b4897a5945391c4d"
+  },
+  "diagnostic": {
+    "control": {
+      "dynamicDrawCalls": 1323,
+      "dynamicMaterialUpdates": 556,
+      "dynamicFeatureUpdates": 567,
+      "dynamicModelMaterialMs": 0.6495416611433029,
+      "dynamicModelTexturesMs": 1.0156666681170463,
+      "dynamicModelsMs": 3.8197916775941847,
+      "dynamicCopyMs": 0.9492916683355967
+    },
+    "candidate": {
+      "dynamicDrawCalls": 1323,
+      "dynamicMaterialUpdates": 418,
+      "dynamicFeatureUpdates": 348,
+      "dynamicModelMaterialMs": 0.6213333055377006,
+      "dynamicModelTexturesMs": 0.8775000110268593,
+      "dynamicModelsMs": 3.6408333137631415,
+      "dynamicCopyMs": 0.9876666689912478,
+      "matchingWorkCountSamples": 120
+    }
+  },
+  "production": {
+    "executionOrder": [
+      { "label": "A1 control", "averageMs": 14.150033333301545 },
+      { "label": "B1 candidate", "averageMs": 14.75956666668256 },
+      { "label": "B2 candidate", "averageMs": 13.471783333222072 },
+      { "label": "A2 control", "averageMs": 15.076566666762034 }
+    ],
+    "controlPairMeanMs": 14.613300000031789,
+    "candidatePairMeanMs": 14.115674999952315,
+    "reductionPercent": 3.405288333767123,
+    "controlDriftMs": 0.9265333334604886,
+    "candidateDriftMs": 1.287783333460487
+  },
+  "validation": {
+    "focusedNative": "web_renderer_dobj_submission_tests: 1/1 passed",
+    "diagnosticComparator": "120/120 exact work-count samples passed",
+    "productionComparator": "four matched workload windows passed",
+    "finalProductionRelease": "passed",
+    "runtimePrefixCheck": "passed"
+  },
+  "rawRecordSha256": {
+    "diagnosticControl": "c821edf037675e03a0318e8ae9ed4ea69e406210c110fdf8bbddeebf229d02b5",
+    "diagnosticCandidate": "4e79eaf4b89ae7189828c0abcea002c60dc261806df88bdb5265e5e6e3badd98",
+    "productionA1": "da9b0251f3f87f62d8fefef235b35c0aa9bcae61fccfe3b2722027b4f0aac519",
+    "productionB1": "3ace7807a1ea4b5bf8c98401955587b584735a3dd521b6699630991919051de1",
+    "productionB2": "0e2577825064599e40c377969a3a578ad19c10eb60e63b10a37d2a588a1f475c",
+    "productionA2": "13ca8b6cccf2cf9f24bff4b5fd8c66751ad4c12151cd95535f1a2b67a66b086e"
+  }
+}

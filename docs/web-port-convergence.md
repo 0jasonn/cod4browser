@@ -149,6 +149,14 @@ carry its cull/alpha state; camera and sun bytes remain absent. Canonical
 primary-light entity/DynEnt linkage and light-region membership remain a named
 gap. See [the dynamic spot evidence](evidence/dynamic-spot-shadows-9a253c6a.md).
 
+Dynamic camera submission now mirrors Kisak's material draw-surface ordering
+inside proven-safe opaque runs. Blended, depth-equal/disabled, no-color, FX,
+sun, and other state-sensitive batches remain append-order anchors, and shadow
+draw order is untouched. The platform retains one numeric key per batch and
+one 32-bit camera-order index per dynamic draw; no engine identity or geometry
+copy is added. See
+[the dynamic order evidence](evidence/dynamic-opaque-sort-c8c4f335.md).
+
 World camera visibility now extends that same canonical call through AABB
 surface tests and cell cull groups, including native decal selection. It resets
 the complete DB-allocated `staticSurfaceCount` camera mask, and checks sorted

@@ -99,9 +99,13 @@ Manual gameplay assessment can guide renderer work without a progression gate.
     submits build-shadowmap-qualified dynamic families independently per spot
     matrix. The focused comparator proves that only 10 caster draws and 65,760
     indices are added; primary-light linkage remains a named gap.
-16. The [Kisak optimization audit](kisak-renderer-optimization-audit.md) owns
-    completion of the broad renderer goal. Next: measure the remaining safe
-    opaque-sorting opportunity, then restore canonical primary-light linkage.
+16. The [dynamic opaque-order milestone](evidence/dynamic-opaque-sort-c8c4f335.md)
+    sorts only safe model/brush runs by Kisak's material key. Material updates
+    fall 24.8%, feature updates 38.6%, and all 120 work-count samples remain
+    exact; production pair means fall 3.41% with documented drift.
+17. The [Kisak optimization audit](kisak-renderer-optimization-audit.md) owns
+    completion of the broad renderer goal. Canonical primary-light linkage for
+    dynamic spot membership is the last applicable Partial row.
 
 The static-instance follow-up used the focused native fixture, isolated control
 and candidate diagnostic builds, three final moving-camera profiles, and one
@@ -124,6 +128,10 @@ the bounds-construction cost and timing drift rather than hiding either.
 The dynamic spot follow-up used one focused native target, an exact 120-sample
 unchanged-work comparison, and one final production Release. It restores missing
 caster work and makes no broad performance claim.
+
+The dynamic opaque-order follow-up used one focused native target, exact
+120-sample work comparison, four production windows, and one final Release. It
+keeps unsafe anchors fixed and reports timing drift.
 
 The earlier renderer milestone used one focused native fixture, rerun after shadow
 integration; three diagnostic builds and five 120-frame profiles; four
