@@ -168,6 +168,14 @@ bone. This deletes a browser-only behavioral divergence and its secondary basis
 matrix work. Pose generation, packed decoding, finite checks, LOD/hide policy,
 static-model camera culling and independent shadow selection are unchanged.
 
+The [DObj lighting-handle milestone](evidence/dobj-lighting-cache-a16fb9f2.md)
+uses canonical `cpose_t::lightingHandle` identity to reuse exact-origin
+light-grid results. The platform retains only numeric sample payloads and
+clears them on world unload; the per-frame atlas still follows submitted DObj
+order. Changed origins recompute, and the handle now also reaches canonical
+mark generation. Exact-work diagnostics observed 87.3% lower DObj lighting
+time without changing static culling or independent shadow selection.
+
 Dynamic camera submission now mirrors Kisak's material draw-surface ordering
 inside proven-safe opaque runs. Blended, depth-equal/disabled, no-color, FX,
 sun, and other state-sensitive batches remain append-order anchors, and shadow
@@ -354,11 +362,12 @@ checks, exact logical-work qualification, recovery and one final Release,
 separating diagnostic DObj-stage reductions from the observed 7.54% production
 pair-mean reduction and its control drift.
 
-Weighted DObj basis handling now matches canonical Kisak. The exact paused
-workload observed 10.8% lower DObj skinning time without new ownership or
-platform state. The remaining measured DObj cost is led by per-object model
-lighting, which should be traced against canonical light-grid reuse before any
-cache is introduced.
+Weighted DObj basis handling and pose-owned model-lighting reuse now match
+canonical Kisak. Exact paused measurements observed 10.8% lower DObj skinning
+and 87.3% lower DObj lighting time. The next renderer step should first split
+remaining skinning cost into matrix setup, weighted surfaces and rigid surfaces,
+then adapt only the dominant native path; do not assume rigid placement wins
+without that measurement.
 
 - Broaden campaign coverage and close renderer/material gaps from measured
   canonical scenes, without introducing browser asset types.

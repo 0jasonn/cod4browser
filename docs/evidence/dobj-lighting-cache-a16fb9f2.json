@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUtc": "2026-09-01T14:20:20Z",
+  "scope": "Seeded paused CargoShip qualification on one host",
+  "runtimeCommit": "a16fb9f2981bf364516ccb814b6f4b59ba5f5336",
+  "environment": {
+    "browser": "Chrome",
+    "version": "152.0.7977.65",
+    "processor": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "viewport": { "width": 1440, "height": 1000 }
+  },
+  "artifacts": {
+    "controlDiagnosticsSha256": "696b24191a5e35153fa09f503cdae4bc627025e0299d39620c6ff228ad02f3a9",
+    "candidateDiagnosticsSha256": "f7a22a9bf52fe7d5b6dc107526489eb27acca84c0441a5dc8b83c24013aaa42d",
+    "finalProductionSha256": "36b16d58fc8aaf9ea697e291d50ca0938189f2b021a0410693f1ab0d2a3c152e"
+  },
+  "qualifiedPausedDiagnostic": {
+    "matchingWorkCountSamples": 120,
+    "workCountSha256": "fed8ea624d731601e62fc6639021ecec6eb3dd28ed9944461cf4704dcba9917c",
+    "control": {
+      "dobjLightingMs": 1.2057916487256686,
+      "dobjBuildMs": 3.576374998688698,
+      "sceneBuildMs": 5.935083332657814,
+      "rendererFrontendMs": 6.659499999384085,
+      "totalMs": 12.979208332300185,
+      "cleanFrameIntervalMs": 16.506083333293596
+    },
+    "candidate": {
+      "dobjLightingMs": 0.15258332987626394,
+      "dobjBuildMs": 2.505166673163573,
+      "sceneBuildMs": 4.88474999666214,
+      "rendererFrontendMs": 5.665333331624667,
+      "totalMs": 12.28358333458503,
+      "cleanFrameIntervalMs": 16.641966666579247
+    }
+  },
+  "validation": {
+    "focusedNativeTest": "web_renderer_dobj_submission_tests: 1/1 passed in 0.03 seconds",
+    "focusedComparator": "renderer_workload.mjs --profiles: 120/120 exact samples passed",
+    "diagnosticRelease": "passed",
+    "finalProductionRelease": "passed in 13.803 seconds",
+    "runtimePrefixCheck": "passed"
+  },
+  "rawRecordSha256": {
+    "control": "b6cf3983f0bd97c244d76cec76eb95c751442706a992141c2def8f7a755e46f4",
+    "candidate": "443ed9caaf19512ad9dd1c7bbf956b0da8154a13c8a1a22ed29f60a022636898"
+  }
+}

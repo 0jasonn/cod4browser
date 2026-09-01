@@ -107,6 +107,16 @@ All existing normalization, validation, pose, LOD, material, culling and shadow
 decisions remain in place. See
 [the focused evidence](evidence/dobj-primary-basis-82b4de10.md).
 
+## Canonical DObj lighting handles
+
+Runtime `a16fb9f2` restores native-shaped model-lighting reuse through
+`cpose_t::lightingHandle`. Exact origin and primary-light matches reuse a
+numeric light-grid sample; movement recomputes it, and world unload clears the
+cache. No canonical pointers are retained, and the current per-frame atlas
+ordering and upload remain unchanged. Exact-work diagnostics observed 87.3%
+lower DObj lighting time and 30.0% lower total DObj build time. See
+[the lighting-handle evidence](evidence/dobj-lighting-cache-a16fb9f2.md).
+
 ## DObj conversion and dynamic sun ranges
 
 Delivered in `30e34cff`: the final diagnostic comparison observes 41.1% lower
