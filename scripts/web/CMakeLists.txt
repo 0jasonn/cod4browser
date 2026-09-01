@@ -140,6 +140,7 @@ set(KISAK_WEB_CANONICAL_RUNTIME_SOURCES
     "${SRC_DIR}/qcommon/iwd_archive.cpp"
     "${SRC_DIR}/EffectsCore/fx_fastfile_registration.cpp"
     "${SRC_DIR}/qcommon/iwi_image.cpp"
+    "${SRC_DIR}/gfx_d3d/r_image_wavelet.cpp"
     "${SRC_DIR}/qcommon/engine_lifecycle_trace.cpp"
     "${SRC_DIR}/qcommon/graph.cpp"
     "${SRC_DIR}/qcommon/common_runtime_state.cpp"
@@ -312,6 +313,7 @@ target_compile_definitions(KisakCOD-web PRIVATE
     KISAK_GATE3_COM_INIT_PREFIX=1
     KISAK_CANONICAL_MAP_COMMANDS=1
     KISAK_DB_REGISTRY_LIFECYCLE_SLICE=1
+    KISAK_PORTABLE_IWI_WAVELET=1
     KISAK_OPENAL=1
     KISAK_WEB_DIAGNOSTICS=0
 )
@@ -360,6 +362,7 @@ if (KISAK_WEB_DIAGNOSTICS)
         KISAK_GATE3_COM_INIT_PREFIX=1
         KISAK_CANONICAL_MAP_COMMANDS=1
         KISAK_DB_REGISTRY_LIFECYCLE_SLICE=1
+        KISAK_PORTABLE_IWI_WAVELET=1
         KISAK_OPENAL=1
         KISAK_WEB_DIAGNOSTICS=1)
     kisak_assert_unique_target_sources(KisakCOD-web-diagnostics)

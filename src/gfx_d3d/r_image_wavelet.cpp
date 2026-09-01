@@ -1,8 +1,40 @@
+#if defined(KISAK_PORTABLE_IWI_WAVELET)
+#include <qcommon/iwi_image.h>
+
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <span>
+#include <vector>
+
+#if !defined(__cdecl)
+#define __cdecl
+#endif
+#define iassert(condition) ((void)0)
+
+struct WaveletDecode
+{
+    std::uint16_t value = 0u;
+    std::uint16_t bit = 0u;
+    const std::uint8_t *data = nullptr;
+    int width = 0;
+    int height = 0;
+    int channels = 0;
+    int bpp = 0;
+    int mipLevel = 0;
+    bool dataInitialized = false;
+    const std::uint8_t *dataEnd = nullptr;
+    std::uint8_t paddingBytes = 0u;
+    bool failed = false;
+};
+#else
 #include <universal/q_shared.h>
 #include "r_image.h"
 #include <qcommon/mem_track.h>
 #include <universal/assertive.h>
 #include <universal/com_memory.h>
+#endif
 
 struct WaveletHuffmanDecode // sizeof=0x4
 {                                       // ...
@@ -14360,6 +14392,7 @@ const uint16_t waveletEncodeAlpha[511] =
   0u
 }; // idb
 
+#if !defined(KISAK_PORTABLE_IWI_WAVELET)
 void __cdecl TRACK_r_image_wavelet()
 {
 	track_static_alloc_internal((void *)waveletDecodeBlue, 0x4000, "waveletDecodeBlue", 18);
@@ -14440,7 +14473,19 @@ void __cdecl Image_LoadWavelet(GfxImage *image, const GfxImageFileHeader *fileHe
         Image_FreeTempMemory(pixels[--faceIndex], totalSize);
     while (faceIndex);
 }
+#endif
 
+void __cdecl Wavelet_ConsumeBits(uint16_t bitCount, WaveletDecode *decode);
+int __cdecl Wavelet_DecodeValue(
+    const WaveletHuffmanDecode *decodeTable,
+    uint16_t bitCount,
+    int bias,
+    WaveletDecode *decode);
+void __cdecl Wavelet_AddDeltaToMipmap(
+    uint8_t *inout,
+    int size,
+    WaveletDecode *decode,
+    const int *dstChanOffset);
 
 void __cdecl Wavelet_DecompressLevel(uint8_t *src, uint8_t *dst, WaveletDecode *decode)
 {
@@ -14491,7 +14536,17 @@ void __cdecl Wavelet_DecompressLevel(uint8_t *src, uint8_t *dst, WaveletDecode *
     {
         if (!decode->dataInitialized)
         {
+#if defined(KISAK_PORTABLE_IWI_WAVELET)
+            if (decode->dataEnd - decode->data < 2)
+            {
+                decode->failed = true;
+                return;
+            }
+            decode->value = static_cast<std::uint16_t>(decode->data[0]) |
+                (static_cast<std::uint16_t>(decode->data[1]) << 8u);
+#else
             decode->value = *(WORD*)decode->data;
+#endif
             decode->bit = 0;
             decode->data += 2;
             decode->dataInitialized = 1;
@@ -14591,7 +14646,16 @@ void __cdecl Wavelet_DecompressLevel(uint8_t *src, uint8_t *dst, WaveletDecode *
         do
         {
             for (chanIndex = 0; chanIndex < decode->channels; ++chanIndex)
+            {
+#if defined(KISAK_PORTABLE_IWI_WAVELET)
+                if (decode->data >= decode->dataEnd)
+                {
+                    decode->failed = true;
+                    return;
+                }
+#endif
                 dst[dstChanOffset[chanIndex]] = *decode->data++;
+            }
             if (decode->bpp != decode->channels)
                 dst[dstChanOffset[3]] = -1;
             dst += dstBpp;
@@ -14605,12 +14669,45 @@ void __cdecl Wavelet_ConsumeBits(uint16_t bitCount, WaveletDecode *decode)
     iassert( bitCount > 0 && bitCount <= 16 );
     iassert( decode->bit < 8 );
     decode->value >>= bitCount;
+#if defined(KISAK_PORTABLE_IWI_WAVELET)
+    std::uint32_t next = 0u;
+    for (std::size_t index = 0u; index < 4u; ++index)
+    {
+        if (decode->data + index >= decode->dataEnd) break;
+        next |= static_cast<std::uint32_t>(decode->data[index]) <<
+            (index * 8u);
+    }
+    decode->value |= (next >> decode->bit) << (16 - bitCount);
+#else
     decode->value |= ((*((uint8_t *)decode->data + 3) << 24)
         | (*((uint8_t *)decode->data + 2) << 16)
         | (uint32_t)*(uint16_t *)decode->data) >> decode->bit << (16 - bitCount);
+#endif
     decode->bit += bitCount;
+#if defined(KISAK_PORTABLE_IWI_WAVELET)
+    const std::size_t advance = decode->bit >> 3u;
+    const std::size_t remaining = static_cast<std::size_t>(
+        decode->dataEnd - decode->data);
+    if (advance > remaining)
+    {
+        decode->paddingBytes = static_cast<std::uint8_t>(
+            decode->paddingBytes + advance - remaining);
+        decode->data = decode->dataEnd;
+    }
+    else
+    {
+        decode->data += advance;
+    }
+#else
     decode->data += (int)decode->bit >> 3;
+#endif
     decode->bit &= 7u;
+#if defined(KISAK_PORTABLE_IWI_WAVELET)
+    // Native Image_AllocTempMemory rounds the compressed member up to a
+    // four-byte boundary. Preserve that bit-reservoir behavior with bounded,
+    // deterministic zero padding instead of reading beyond the member.
+    if (decode->paddingBytes > 3u) decode->failed = true;
+#endif
 }
 
 
@@ -14663,3 +14760,136 @@ void __cdecl Wavelet_AddDeltaToMipmap(
         --size;
     } while (size);
 }
+
+#if defined(KISAK_PORTABLE_IWI_WAVELET)
+namespace kisak::iwi
+{
+Error DecodeWaveletPayloadRgba8(
+    std::uint8_t format,
+    std::uint16_t width,
+    std::uint16_t height,
+    std::span<const std::uint8_t> payload,
+    std::vector<std::uint8_t> &rgba) noexcept
+{
+    int channels = 0;
+    int bytesPerPixel = 0;
+    switch (format)
+    {
+    case FORMAT_WAVELET_ARGB:
+        channels = 4;
+        bytesPerPixel = 4;
+        break;
+    case FORMAT_WAVELET_RGB8:
+        channels = 3;
+        bytesPerPixel = 4;
+        break;
+    case FORMAT_WAVELET_A8L8:
+        channels = 2;
+        bytesPerPixel = 2;
+        break;
+    case FORMAT_WAVELET_L8:
+    case FORMAT_WAVELET_A8:
+        channels = 1;
+        bytesPerPixel = 1;
+        break;
+    default:
+        return Error::DecodeUnsupportedFormat;
+    }
+
+    std::size_t pixelCount = 0u;
+    std::size_t decodedBytes = 0u;
+    if (width == 0u || height == 0u ||
+        static_cast<std::size_t>(width) >
+            std::numeric_limits<std::size_t>::max() / height)
+        return Error::DecodeUnsupportedDimensions;
+    pixelCount = static_cast<std::size_t>(width) * height;
+    if (pixelCount > MAX_DECODED_RGBA8_BYTES / 4u ||
+        pixelCount > std::numeric_limits<std::size_t>::max() /
+            static_cast<std::size_t>(bytesPerPixel))
+        return Error::DecodeOutputTooLarge;
+    decodedBytes = pixelCount * static_cast<std::size_t>(bytesPerPixel);
+
+    std::vector<std::uint8_t> decoded;
+    std::vector<std::uint8_t> converted;
+    try
+    {
+        decoded.resize(decodedBytes);
+        converted.resize(pixelCount * 4u);
+    }
+    catch (...)
+    {
+        return Error::DecodeAllocationFailed;
+    }
+
+    WaveletDecode decode{};
+    decode.width = width;
+    decode.height = height;
+    decode.channels = channels;
+    decode.bpp = bytesPerPixel;
+    decode.data = payload.data();
+    decode.dataEnd = payload.data() + payload.size();
+    decode.mipLevel = 0;
+    for (std::uint32_t resolution = 1u;
+         resolution < width || resolution < height;
+         resolution *= 2u)
+    {
+        ++decode.mipLevel;
+    }
+
+    std::uint8_t *previous = nullptr;
+    while (decode.mipLevel >= 0)
+    {
+        const std::size_t mipWidth = std::max<std::size_t>(
+            static_cast<std::size_t>(width) >> decode.mipLevel, 1u);
+        const std::size_t mipHeight = std::max<std::size_t>(
+            static_cast<std::size_t>(height) >> decode.mipLevel, 1u);
+        const std::size_t levelBytes =
+            mipWidth * mipHeight * static_cast<std::size_t>(bytesPerPixel);
+        std::uint8_t *current = decoded.data() + decoded.size() - levelBytes;
+        Wavelet_DecompressLevel(previous, current, &decode);
+        if (decode.failed) return Error::DecodeInvalidLayout;
+        previous = current;
+        --decode.mipLevel;
+    }
+
+    for (std::size_t pixel = 0u; pixel < pixelCount; ++pixel)
+    {
+        const std::size_t source = pixel *
+            static_cast<std::size_t>(bytesPerPixel);
+        const std::size_t target = pixel * 4u;
+        if (format == FORMAT_WAVELET_ARGB ||
+            format == FORMAT_WAVELET_RGB8)
+        {
+            converted[target] = decoded[source + 2u];
+            converted[target + 1u] = decoded[source + 1u];
+            converted[target + 2u] = decoded[source];
+            converted[target + 3u] = format == FORMAT_WAVELET_ARGB
+                ? decoded[source + 3u] : 255u;
+        }
+        else if (format == FORMAT_WAVELET_A8L8)
+        {
+            converted[target] = decoded[source];
+            converted[target + 1u] = decoded[source];
+            converted[target + 2u] = decoded[source];
+            converted[target + 3u] = decoded[source + 1u];
+        }
+        else if (format == FORMAT_WAVELET_L8)
+        {
+            converted[target] = decoded[source];
+            converted[target + 1u] = decoded[source];
+            converted[target + 2u] = decoded[source];
+            converted[target + 3u] = 255u;
+        }
+        else
+        {
+            converted[target] = 0u;
+            converted[target + 1u] = 0u;
+            converted[target + 2u] = 0u;
+            converted[target + 3u] = decoded[source];
+        }
+    }
+    rgba.swap(converted);
+    return Error::None;
+}
+} // namespace kisak::iwi
+#endif

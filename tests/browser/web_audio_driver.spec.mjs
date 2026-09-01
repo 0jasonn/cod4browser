@@ -1,5 +1,41 @@
 import { expect, test } from "@playwright/test";
 
+test("Web Audio starts muted until the canvas gesture resumes it", async ({ page }) => {
+    await page.goto("/");
+    const states = await page.evaluate(async () => {
+        const { WebAudioDriver } = await import("/web_audio_driver.mjs");
+        const context = {
+            state: "running",
+            suspend() { this.state = "suspended"; return Promise.resolve(); },
+            resume() { this.state = "running"; return Promise.resolve(); },
+            destination: {},
+            createGain() {
+                return { gain: { value: -1 }, connect() {} };
+            },
+        };
+        const driver = new WebAudioDriver({ contextFactory: () => context });
+        driver.ensureContext();
+        const beforeGesture = context.state;
+        driver.createSource(1);
+        const source = driver.sources.get(1);
+        driver.createOutputGraph(source, context);
+        const gainBeforeGesture = source.gainNode.gain.value;
+        await driver.resumeFromGesture();
+        return {
+            beforeGesture,
+            gainBeforeGesture,
+            afterGesture: context.state,
+            gainAfterGesture: source.gainNode.gain.value,
+        };
+    });
+    expect(states).toEqual({
+        beforeGesture: "suspended",
+        gainBeforeGesture: 0,
+        afterGesture: "running",
+        gainAfterGesture: 1,
+    });
+});
+
 test("Web Audio proxy accepts bounded PCM and ignores stale source generations", async ({ page }) => {
     await page.goto("/");
     const result = await page.evaluate(async () => {

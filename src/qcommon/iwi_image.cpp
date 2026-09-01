@@ -7,6 +7,13 @@
 
 namespace kisak::iwi
 {
+Error DecodeWaveletPayloadRgba8(
+    std::uint8_t format,
+    std::uint16_t width,
+    std::uint16_t height,
+    std::span<const std::uint8_t> payload,
+    std::vector<std::uint8_t> &rgba) noexcept;
+
 namespace
 {
 constexpr std::uint8_t TAG[] = {'I', 'W', 'i'};
@@ -486,10 +493,12 @@ static Error ProcessRgba8(
     const bool rgb8 = metadata.format == FORMAT_RGB8;
     const bool a8l8 = metadata.format == FORMAT_A8L8;
     const bool l8 = metadata.format == FORMAT_L8;
+    const bool wavelet = metadata.format >= FORMAT_WAVELET_ARGB &&
+        metadata.format <= FORMAT_WAVELET_A8;
     const bool compressed = metadata.format == FORMAT_DXT1 ||
         metadata.format == FORMAT_DXT3 || metadata.format == FORMAT_DXT5;
     if (metadata.format != FORMAT_ARGB && !rgb8 && !a8l8 && !l8 &&
-        !compressed)
+        !wavelet && !compressed)
     {
         return Error::DecodeUnsupportedFormat;
     }
@@ -501,7 +510,7 @@ static Error ProcessRgba8(
             ((metadata.flags & FLAG_NO_MIPMAPS) == 0u ||
              (metadata.flags & static_cast<std::uint8_t>(
                  ~(FLAG_NO_MIPMAPS | policyFlags))) != 0u)) ||
-        ((rgb8 || a8l8 || l8) &&
+        ((rgb8 || a8l8 || l8 || wavelet) &&
             (metadata.flags & static_cast<std::uint8_t>(
                 ~(FLAG_NO_PICMIP | FLAG_NO_MIPMAPS | policyFlags))) != 0u) ||
         (compressed && (metadata.flags & static_cast<std::uint8_t>(
@@ -530,7 +539,12 @@ static Error ProcessRgba8(
         return Error::DecodeOutputTooLarge;
     }
     std::size_t baseLevelOffset = HEADER_SIZE;
-    if (!compressed && !rgb8 && !a8l8 && !l8)
+    if (wavelet)
+    {
+        if (bytes.size() <= HEADER_SIZE)
+            return Error::DecodeInvalidLayout;
+    }
+    else if (!compressed && !rgb8 && !a8l8 && !l8)
     {
         if (!CheckedAdd(HEADER_SIZE, pixelBytes, expectedMemberBytes) ||
             bytes.size() != expectedMemberBytes)
@@ -616,6 +630,17 @@ static Error ProcessRgba8(
     if (!image) return Error::None;
 
     std::vector<std::uint8_t> rgba;
+    if (wavelet)
+    {
+        const Error waveletError = DecodeWaveletPayloadRgba8(
+            metadata.format, metadata.width, metadata.height,
+            bytes.subspan(HEADER_SIZE), rgba);
+        if (waveletError != Error::None) return waveletError;
+        image->width = metadata.width;
+        image->height = metadata.height;
+        image->pixels.swap(rgba);
+        return Error::None;
+    }
     try
     {
         rgba.resize(pixelBytes);

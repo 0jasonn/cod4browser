@@ -90,6 +90,11 @@ test("canonical retail main menu starts without a map", { tag: "@retail-ui" },
         await expect.poll(() => page.evaluate(() =>
             globalThis.__uiLogs.some(({ text }) =>
                 text.includes("first canonical 2D scene")))).toBe(true);
+        await expect.poll(() => call(page, "_KisakWeb_TestUiDrawCount"))
+            .toBeGreaterThan(0);
+        await page.waitForTimeout(1_000);
+        expect(await call(page, "_KisakWeb_TestUiDrawCount"))
+            .toBeGreaterThan(0);
 
         const submitCommand = async (command) => {
             await page.locator("#engine-command-input").fill(command);

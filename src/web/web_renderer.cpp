@@ -567,6 +567,9 @@ struct WebRendererState
     bool sceneSunShadowEnabled = false;
     bool sceneViewFirstDrawCompleted = false;
     bool sceneViewWaitReported = false;
+#if KISAK_WEB_DIAGNOSTICS
+    std::uint32_t lastUiDrawCount = 0u;
+#endif
 };
 
 WebRendererState g_renderer;
@@ -2167,6 +2170,11 @@ std::size_t EmitRendererMemory(const char *state, bool sampleAllocator = true)
 extern "C" EMSCRIPTEN_KEEPALIVE double KisakWeb_TestEmitRendererMemory()
 {
     return static_cast<double>(EmitRendererMemory("diagnostic-snapshot"));
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestUiDrawCount()
+{
+    return static_cast<int>(g_renderer.lastUiDrawCount);
 }
 #endif
 
@@ -9828,10 +9836,18 @@ void DrawPostProcessPass(
 
 bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
 {
+#if KISAK_WEB_DIAGNOSTICS
+    g_renderer.lastUiDrawCount = 0u;
+#endif
     g_renderer.textureParameters.Reset();
+    const bool primarySurfaceReady = g_renderer.surfaceActive &&
+        g_renderer.vertexArray != 0u && g_renderer.vertexBuffer != 0u &&
+        g_renderer.indexBuffer != 0u;
+    const bool uiSurfaceReady = g_renderer.uiSceneActive &&
+        g_renderer.uiVertexArray != 0u && g_renderer.uiVertexBuffer != 0u &&
+        g_renderer.uiIndexBuffer != 0u;
     if (!g_renderer.initialized || g_renderer.contextLost ||
-        !g_renderer.surfaceActive || g_renderer.vertexArray == 0 ||
-        g_renderer.vertexBuffer == 0 || g_renderer.indexBuffer == 0)
+        (!primarySurfaceReady && !uiSurfaceReady))
     {
         return false;
     }
@@ -9890,7 +9906,8 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
             g_renderer.surfaceActive ? 1u : 0u);
         g_renderer.sceneViewWaitReported = true;
     }
-    const bool multisampleDraw = CreateMultisampleTarget(width, height);
+    const bool multisampleDraw = primarySurfaceReady &&
+        CreateMultisampleTarget(width, height);
     const bool postProcessTargetsReady =
         g_renderer.postProcessProgram != 0u &&
         (sceneGeometryDraw || multisampleDraw) &&
@@ -10030,7 +10047,8 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
     // canonical world batch that deliberately carries no texture binding must
     // stay on the vertex-color pipeline; sampling the backend's 1x1 recovery
     // fallback would turn valid geometry into a uniform white frame.
-    const bool compatibilityDraw = g_renderer.compatibilityActive &&
+    const bool compatibilityDraw = primarySurfaceReady &&
+        g_renderer.compatibilityActive &&
         g_renderer.compatibilityProgram != 0 &&
         g_renderer.draw.textureBinding == WebRendererTextureBinding::EngineImage;
     constexpr GLfloat IDENTITY_MATRIX[16] = {
@@ -10332,7 +10350,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         glActiveTexture(GL_TEXTURE0);
     }
-    else
+    else if (primarySurfaceReady)
     {
         glActiveTexture(GL_TEXTURE0);
         if (!compatibilityDraw)
@@ -11084,8 +11102,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
         ? WebFrameProfile_Now() : 0.0;
     g_frameProfileDrawBucket = FrameProfileDrawBucket::Ui;
 #endif
-    if (sceneGeometryDraw && !compatibilityDraw &&
-        g_renderer.uiSceneActive && g_renderer.uiVertexArray != 0u)
+    if (g_renderer.uiSceneActive && g_renderer.uiVertexArray != 0u)
     {
         glUseProgram(g_renderer.program);
         glUniformMatrix4fv(g_renderer.viewProjectionUniform, 1, GL_FALSE,
@@ -11121,6 +11138,9 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 static_cast<GLsizei>(batch.indexCount), GL_UNSIGNED_INT,
                 reinterpret_cast<const void *>(indexOffset));
             ++completedDraws;
+#if KISAK_WEB_DIAGNOSTICS
+            ++g_renderer.lastUiDrawCount;
+#endif
         }
         glUniform4f(g_renderer.uiColorUniform, 1.0f, 1.0f, 1.0f, 1.0f);
         glDepthMask(GL_TRUE);

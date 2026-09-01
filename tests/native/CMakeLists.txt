@@ -34,6 +34,7 @@ endif()
 add_executable(iwi_image_tests
     "${CMAKE_CURRENT_LIST_DIR}/iwi_image_tests.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/qcommon/iwi_image.cpp"
+    "${KISAK_REPOSITORY_ROOT}/src/gfx_d3d/r_image_wavelet.cpp"
 )
 
 add_executable(canonical_asset_abi_tests
@@ -363,6 +364,7 @@ target_include_directories(iwd_archive_tests PRIVATE
     "${KISAK_REPOSITORY_ROOT}/deps")
 target_compile_features(iwi_image_tests PRIVATE cxx_std_20)
 target_include_directories(iwi_image_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
+target_compile_definitions(iwi_image_tests PRIVATE KISAK_PORTABLE_IWI_WAVELET=1)
 target_compile_features(canonical_asset_abi_tests PRIVATE cxx_std_20)
 target_include_directories(canonical_asset_abi_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
 target_compile_features(qcommon_math_tests PRIVATE cxx_std_20)
@@ -865,9 +867,12 @@ if (KISAK_BUILD_FUZZERS)
         "${CMAKE_CURRENT_LIST_DIR}/../fuzz/asset_parsers_fuzz.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/qcommon/iwd_archive.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/qcommon/iwi_image.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/gfx_d3d/r_image_wavelet.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/web/web_shader_compatibility.cpp"
     )
     target_compile_features(asset_parsers_fuzz PRIVATE cxx_std_20)
+    target_compile_definitions(asset_parsers_fuzz PRIVATE
+        KISAK_PORTABLE_IWI_WAVELET=1)
     target_include_directories(asset_parsers_fuzz PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
     target_compile_options(asset_parsers_fuzz PRIVATE
         -fsanitize=fuzzer,address,undefined

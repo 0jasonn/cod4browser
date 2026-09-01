@@ -15,6 +15,11 @@ constexpr std::uint8_t FORMAT_ARGB = 1u;
 constexpr std::uint8_t FORMAT_RGB8 = 2u;
 constexpr std::uint8_t FORMAT_A8L8 = 3u;
 constexpr std::uint8_t FORMAT_L8 = 4u;
+constexpr std::uint8_t FORMAT_WAVELET_ARGB = 6u;
+constexpr std::uint8_t FORMAT_WAVELET_RGB8 = 7u;
+constexpr std::uint8_t FORMAT_WAVELET_A8L8 = 8u;
+constexpr std::uint8_t FORMAT_WAVELET_L8 = 9u;
+constexpr std::uint8_t FORMAT_WAVELET_A8 = 10u;
 constexpr std::uint8_t FORMAT_DXT1 = 11u;
 constexpr std::uint8_t FORMAT_DXT3 = 12u;
 constexpr std::uint8_t FORMAT_DXT5 = 13u;
@@ -120,7 +125,7 @@ Error Parse(std::span<const std::uint8_t> bytes, Metadata &metadata) noexcept;
 
 // Decodes one bounded two-dimensional IWI v6 image into RGBA8. Format 1 (named
 // ARGB by the engine, serialized as BGRA) retains its original strict one-mip
-// boundary. Format 2 (opaque BGR8), format 3 (A8L8), DXT1, DXT3, and DXT5
+// boundary. Bitmap formats 2-4, wavelet formats 6-10, DXT1, DXT3, and DXT5
 // accept an exact 2D mip chain in COD4's smallest-to-largest file order and
 // decode only the largest level. The streaming and U/V clamp policy bits do
 // not alter that layout and are accepted. Cubemaps, volumes, unknown flags,

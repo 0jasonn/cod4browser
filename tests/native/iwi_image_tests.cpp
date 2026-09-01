@@ -394,6 +394,49 @@ void TestRgba8DecodeAndSwizzle()
         "aliased decode commits only after conversion is complete");
 }
 
+void TestWaveletArgbDecodeAndBounds()
+{
+    Bytes fixture = MakeIwi(
+        kisak::iwi::FORMAT_WAVELET_ARGB,
+        kisak::iwi::FLAG_NO_MIPMAPS,
+        1u,
+        1u,
+        1u,
+        4u);
+    fixture[kisak::iwi::HEADER_SIZE] = 0x30u;
+    fixture[kisak::iwi::HEADER_SIZE + 1u] = 0x20u;
+    fixture[kisak::iwi::HEADER_SIZE + 2u] = 0x10u;
+    fixture[kisak::iwi::HEADER_SIZE + 3u] = 0x40u;
+
+    Rgba8Layout layout{};
+    RequireError(kisak::iwi::InspectRgba8(fixture, layout), Error::None,
+        "inspect canonical wavelet ARGB IWI");
+    Require(layout.width == 1u && layout.height == 1u &&
+            layout.baseDecodedByteLength == 4u,
+        "wavelet inspection reports RGBA8 output dimensions");
+
+    Rgba8Image image = MakeSentinelImage();
+    RequireError(kisak::iwi::DecodeRgba8(fixture, image), Error::None,
+        "decode canonical wavelet ARGB IWI");
+    Require(image.width == 1u && image.height == 1u &&
+            image.pixels == Bytes({0x10u, 0x20u, 0x30u, 0x40u}),
+        "wavelet ARGB bytes are converted from BGRA to RGBA8");
+
+    Bytes truncated = fixture;
+    truncated.pop_back();
+    PatchU32(truncated, 12u, static_cast<std::uint32_t>(truncated.size()));
+    for (std::size_t index = 1u; index < 4u; ++index)
+        PatchU32(truncated, 12u + index * 4u,
+            static_cast<std::uint32_t>(truncated.size()));
+    const Rgba8Image expected = image;
+    RequireError(kisak::iwi::DecodeRgba8(truncated, image),
+        Error::DecodeInvalidLayout,
+        "reject truncated wavelet payload without reading beyond it");
+    Require(image.width == expected.width && image.height == expected.height &&
+            image.pixels == expected.pixels,
+        "truncated wavelet failure leaves the destination unchanged");
+}
+
 void TestRgb8DecodeAndMipOrder()
 {
     Bytes payload(3u + 12u + 48u, 0u);
@@ -1180,6 +1223,7 @@ int main()
     runner.Run("header validation", TestHeaderValidation);
     runner.Run("file-size validation", TestFileSizeValidation);
     runner.Run("RGBA8 decode and swizzle", TestRgba8DecodeAndSwizzle);
+    runner.Run("wavelet ARGB decode and bounds", TestWaveletArgbDecodeAndBounds);
     runner.Run("RGB8 decode and mip order", TestRgb8DecodeAndMipOrder);
     runner.Run("A8L8 decode and mip order", TestA8L8DecodeAndMipOrder);
     runner.Run("L8 decode and mip order", TestL8DecodeAndMipOrder);

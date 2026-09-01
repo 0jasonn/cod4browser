@@ -19,6 +19,7 @@ export class WebAudioDriver {
      *   onDiagnostic?: (message: string) => void,
      *   onPlaybackStarted?: (detail: object) => void,
      *   onTelemetry?: (detail: object) => void,
+     *   startMuted?: boolean,
      *   decodedPcmBudgetBytes?: number,
      *   maxQueuedBuffersPerSource?: number}} [options]
      */
@@ -27,6 +28,7 @@ export class WebAudioDriver {
         onDiagnostic,
         onPlaybackStarted,
         onTelemetry,
+        startMuted = true,
         decodedPcmBudgetBytes = MAX_DECODED_PCM_BYTES,
         maxQueuedBuffersPerSource = MAX_QUEUED_BUFFERS_PER_SOURCE,
     } = {}) {
@@ -45,6 +47,7 @@ export class WebAudioDriver {
         this.bufferMetadata = new Map();
         this.decodedPcmBytes = 0;
         this.telemetry = { underruns: 0, overruns: 0, evictions: 0 };
+        this.audioUnlocked = !startMuted;
         this.gestureTarget = null;
         this.gestureHandler = null;
     }
@@ -79,6 +82,8 @@ export class WebAudioDriver {
         }
         if (!this.context) {
             this.diagnostic("Web Audio unavailable; loaded sounds will be muted.");
+        } else if (!this.audioUnlocked && this.context.state === "running") {
+            void this.context.suspend?.();
         }
         return this.context;
     }
@@ -94,12 +99,21 @@ export class WebAudioDriver {
     }
 
     async resumeFromGesture() {
+        this.audioUnlocked = true;
         const context = this.ensureContext();
         if (!context?.resume) return false;
+        for (const source of this.sources.values()) this.applyProperties(source);
         try {
             await context.resume();
-            return context.state === undefined || context.state === "running";
+            const resumed = context.state === undefined || context.state === "running";
+            if (!resumed) {
+                this.audioUnlocked = false;
+                for (const source of this.sources.values()) this.applyProperties(source);
+            }
+            return resumed;
         } catch (error) {
+            this.audioUnlocked = false;
+            for (const source of this.sources.values()) this.applyProperties(source);
             this.diagnostic(`Web Audio resume failed: ${error?.message ?? error}`);
             return false;
         }
@@ -285,7 +299,8 @@ export class WebAudioDriver {
     }
 
     applyProperties(source) {
-        if (source.gainNode) source.gainNode.gain.value = source.gain;
+        if (source.gainNode)
+            source.gainNode.gain.value = this.audioUnlocked ? source.gain : 0;
         if (source.node) source.node.playbackRate.value = source.pitch;
         for (const node of source.streamNodes)
             node.playbackRate.value = source.pitch;
@@ -301,7 +316,8 @@ export class WebAudioDriver {
     createOutputGraph(source, context) {
         const gainNode = context.createGain?.();
         const panner = source.spatialized ? context.createPanner?.() : null;
-        if (gainNode) gainNode.gain.value = source.gain;
+        if (gainNode)
+            gainNode.gain.value = this.audioUnlocked ? source.gain : 0;
         if (panner) {
             panner.panningModel = "equalpower";
             panner.distanceModel = "inverse";
