@@ -9169,6 +9169,7 @@ bool UpdateStaticModelLods()
         return false;
 
     bool changed = g_renderer.staticModelVisibilityChanged;
+    bool shadowPackingChanged = false;
 #if KISAK_WEB_DIAGNOSTICS
     std::uint64_t changedLodCount = 0u;
 #endif
@@ -9236,6 +9237,7 @@ bool UpdateStaticModelLods()
 
         if (groupChanged)
         {
+            shadowPackingChanged = true;
             std::array<std::uint32_t, MAX_LODS> lodOffsets{};
             std::uint32_t writeOffset = sourceOffset;
             for (std::size_t lod = 0u; lod < MAX_LODS; ++lod)
@@ -9312,13 +9314,16 @@ bool UpdateStaticModelLods()
 #endif
 
     glBindBuffer(GL_ARRAY_BUFFER, g_renderer.staticModelInstanceBuffer);
+    const std::size_t uploadOffset = shadowPackingChanged
+        ? 0u : g_renderer.retainedStaticModelSourceInstances.size();
     glBufferSubData(
         GL_ARRAY_BUFFER,
-        0,
+        static_cast<GLintptr>(
+            uploadOffset * sizeof(WebRendererStaticModelInstanceDesc)),
         static_cast<GLsizeiptr>(
-            g_renderer.retainedStaticModelInstances.size() *
+            (g_renderer.retainedStaticModelInstances.size() - uploadOffset) *
             sizeof(WebRendererStaticModelInstanceDesc)),
-        g_renderer.retainedStaticModelInstances.data());
+        g_renderer.retainedStaticModelInstances.data() + uploadOffset);
     glBindBuffer(GL_ARRAY_BUFFER, 0u);
     if (glGetError() != GL_NO_ERROR) return false;
     g_renderer.staticModelVisibilityChanged = false;
