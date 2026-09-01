@@ -8787,6 +8787,12 @@ bool DrawShadowPartition(
             static_cast<GLsizei>(indexCount), GL_UNSIGNED_INT,
             reinterpret_cast<const void *>(indexOffset));
     };
+#if KISAK_WEB_DIAGNOSTICS
+    WebFrameProfileSample *const sunShadowProfile = requireSunCaster
+        ? WebFrameProfile_Current() : nullptr;
+    double sunShadowFamilyStarted = sunShadowProfile
+        ? WebFrameProfile_Now() : 0.0;
+#endif
     if (requireSunCaster)
     {
         const auto merged = WebRenderer_ForEachSunShadowRange(
@@ -8813,6 +8819,14 @@ bool DrawShadowPartition(
                 caster.stateBits0);
         }
     }
+#if KISAK_WEB_DIAGNOSTICS
+    if (sunShadowProfile)
+    {
+        const double now = WebFrameProfile_Now();
+        sunShadowProfile->sunShadowWorldMs += now - sunShadowFamilyStarted;
+        sunShadowFamilyStarted = now;
+    }
+#endif
     if (g_renderer.staticModelSceneActive &&
         g_renderer.staticModelVertexArray != 0u &&
         g_renderer.staticModelInstanceBuffer != 0u)
@@ -8901,6 +8915,15 @@ bool DrawShadowPartition(
             }
         }
     }
+#if KISAK_WEB_DIAGNOSTICS
+    if (sunShadowProfile)
+    {
+        const double now = WebFrameProfile_Now();
+        sunShadowProfile->sunShadowStaticModelsMs +=
+            now - sunShadowFamilyStarted;
+        sunShadowFamilyStarted = now;
+    }
+#endif
     if (requireSunCaster && g_renderer.dynamicModelSceneActive)
     {
         std::uint32_t previousInstance = UINT32_MAX - 1u;
@@ -8944,6 +8967,11 @@ bool DrawShadowPartition(
         (void)merged;
 #endif
     }
+#if KISAK_WEB_DIAGNOSTICS
+    if (sunShadowProfile)
+        sunShadowProfile->sunShadowDynamicModelsMs +=
+            WebFrameProfile_Now() - sunShadowFamilyStarted;
+#endif
     glUniform1f(g_renderer.shadowDepthInstanceEnabledUniform, 0.0f);
     glDisable(GL_POLYGON_OFFSET_FILL);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);

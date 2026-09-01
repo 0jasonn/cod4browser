@@ -220,6 +220,11 @@ struct WebFrameProfileSample
     double lodMs = 0.0;
     double sunShadowPrepareMs = 0.0;
     double sunShadowDrawMs = 0.0;
+    // Disjoint CPU submission intervals within both sun-shadow partitions.
+    // Framebuffer setup, clears and final state restoration remain residual.
+    double sunShadowWorldMs = 0.0;
+    double sunShadowStaticModelsMs = 0.0;
+    double sunShadowDynamicModelsMs = 0.0;
     double spotShadowPrepareMs = 0.0;
     double spotShadowDrawMs = 0.0;
     double skyMs = 0.0;

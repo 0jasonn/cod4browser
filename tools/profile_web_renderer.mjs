@@ -282,6 +282,15 @@ try {
         for (const field of drawFields) assert(renderer[field] >= 0, field);
         assert(drawFields.reduce((sum, field) => sum + renderer[field], 0) <= renderer.dynamicModelsMs + 0.001, 'Draw intervals exceed parent');
     }
+    const sunShadowFields = ['sunShadowWorldMs', 'sunShadowStaticModelsMs',
+        'sunShadowDynamicModelsMs'];
+    for (const field of sunShadowFields)
+        assert.equal(profile.renderer[field]?.sampleCount, 120, field);
+    for (const { renderer } of frames) {
+        for (const field of sunShadowFields) assert(renderer[field] >= 0, field);
+        assert(sunShadowFields.reduce((sum, field) => sum + renderer[field], 0) <=
+            renderer.sunShadowDrawMs + 0.001, 'Sun-shadow intervals exceed parent');
+    }
     const sceneFields = ['sceneSetupMs', 'dobjBuildMs', 'sceneAssemblyMs',
         'sceneImageResolveMs', 'sceneDynamicSubmitMs', 'sceneCameraVisibilityMs', 'sceneViewSubmitMs'];
     const assemblyFields = ['sceneEffectsPrepareMs', 'sceneModelBuildMs', 'sceneCommandAppendMs'];

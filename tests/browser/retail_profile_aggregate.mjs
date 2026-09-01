@@ -14,6 +14,7 @@ export const CPU_PROFILE_FIELDS = [
 
 export const RENDERER_PROFILE_FIELDS = [
     "setupMs", "lodMs", "sunShadowPrepareMs", "sunShadowDrawMs",
+    "sunShadowWorldMs", "sunShadowStaticModelsMs", "sunShadowDynamicModelsMs",
     "spotShadowPrepareMs", "spotShadowDrawMs", "skyMs", "worldMs",
     "staticModelsMs", "dynamicModelsMs", "dynamicModelProjectionMs",
     "dynamicModelMaterialMs", "dynamicModelParametersMs",
