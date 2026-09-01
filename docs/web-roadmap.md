@@ -110,6 +110,15 @@ Manual gameplay assessment can guide renderer work without a progression gate.
 18. The [Kisak optimization audit](kisak-renderer-optimization-audit.md) is
     complete with no applicable Open or Partial rows. The next renderer task is
     an active-gameplay profile that selects a measured bottleneck.
+19. The [dynamic geometry ownership milestone](evidence/dynamic-geometry-ownership-af601efe.md)
+    follows that profile direction without accepting non-reproducible authored
+    gameplay as an A/B benchmark. Final dynamic vertex/index storage now crosses
+    the backend boundary by ownership transfer; all 120 seeded paused work samples
+    match while command geometry copy falls 99.6%. A measured WebGL double-buffer
+    candidate did not reduce upload time and was reverted. This closes platform
+    geometry-handoff optimization. The next category is canonical DObj pose,
+    lighting and skinning, beginning with a focused native/wasm trace rather than
+    a browser-owned pose cache.
 
 The static-instance follow-up used the focused native fixture, isolated control
 and candidate diagnostic builds, three final moving-camera profiles, and one

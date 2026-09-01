@@ -151,6 +151,16 @@ restores canonical entity/DynEnt visibility bits and authored light-region
 hulls, then builds a selected-light mask before the existing matrix test.
 Missing canonical arrays fall back conservatively to matrix-only selection.
 
+The [dynamic geometry ownership milestone](evidence/dynamic-geometry-ownership-af601efe.md)
+removes the remaining full CPU copy at the frontend/backend boundary. The
+frontend transfers only final numeric vertex/index vector storage; the backend
+retains its existing validation, GPU upload, recovery data and atomic command
+publication. Failure returns ownership to the caller. World and static-model
+commands, camera DPVS, primary-light linkage, and independent shadow selections
+are unchanged. A measured inactive-buffer WebGL candidate was reverted after it
+failed to reduce upload cost. Further work now begins at shared DObj
+pose/lighting/skinning behavior rather than expanding platform GPU ownership.
+
 Dynamic camera submission now mirrors Kisak's material draw-surface ordering
 inside proven-safe opaque runs. Blended, depth-equal/disabled, no-color, FX,
 sun, and other state-sensitive batches remain append-order anchors, and shadow

@@ -4,6 +4,26 @@ Updated 2026-09-01. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
+## Dynamic geometry handoff completed
+
+Runtime `af601efe` transfers final per-frame dynamic vertex/index vectors into
+backend staging instead of copying them. Descriptor, finite/index, batch,
+lighting, upload and atomic-publication checks remain in place, and failure
+restores frontend ownership. World/static geometry, canonical culling, draw
+order, and independent sun/spot shadows are unchanged.
+
+The seeded paused comparison matches all 120 work samples. Command geometry copy
+falls **0.1217 -> 0.0005 ms**, dynamic copy **1.0026 -> 0.8916 ms**, and dynamic
+submission **1.7592 -> 1.6389 ms**. Whole-frame timings are flat, so no gameplay
+FPS gain is claimed. A double-buffered WebGL upload follow-up produced no upload
+gain and was reverted.
+
+Authored active-scene runs exposed DObj construction as the next large frontend
+component, but unchanged control loads did not reproduce their camera/effect
+work. The strict comparison rejected those runs. Platform geometry-handoff work
+is now closed; the next measured category is shared DObj pose, lighting and
+skinning. See [evidence and limits](evidence/dynamic-geometry-ownership-af601efe.md).
+
 ## Renderer optimization audit completed
 
 Runtime `4ed38a84` restores canonical primary-light linkage for DObj,

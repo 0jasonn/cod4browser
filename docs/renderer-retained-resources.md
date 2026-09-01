@@ -82,6 +82,21 @@ It leaves the product's default 60 FPS setting unchanged and retains the web
 125 Hz safety ceiling. Record this override in the workload; compare only runs
 with the same setting. This is measurement of a paused renderer, not gameplay.
 
+## Dynamic geometry ownership
+
+Runtime `af601efe` transfers the completed per-frame dynamic vertex and index
+vectors into backend staging. It does not change retained brush geometry or add
+another persistent engine representation. The backend validates the same
+descriptor and command metadata, uploads the same bytes, and publishes the new
+draw command only after all work succeeds. Failure restores the caller's vector
+ownership. The first scene retains its existing one-time geometry diagnostic.
+
+The exact paused workload removes the attributed command geometry copy, while a
+follow-up inactive GPU-buffer set failed to reduce upload time and was reverted.
+See [the ownership evidence](evidence/dynamic-geometry-ownership-af601efe.md).
+This marks the end of platform geometry-handoff optimization; the next measured
+work belongs to canonical DObj pose, lighting and skinning.
+
 ## DObj conversion and dynamic sun ranges
 
 Delivered in `30e34cff`: the final diagnostic comparison observes 41.1% lower
