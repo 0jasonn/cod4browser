@@ -135,6 +135,11 @@ bool Web_TakePendingCanonicalCommand(char *command, std::size_t capacity)
     return true;
 }
 
+std::uint32_t Web_RendererEntityCount() noexcept
+{
+    return g_rendererConfigured ? g_rendererConfiguration.entCount : 0u;
+}
+
 bool __cdecl DB_ModFileExists()
 {
     return false;

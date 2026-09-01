@@ -19,6 +19,7 @@
 #include <gfx_d3d/r_dpvs_core.h>
 #include <gfx_d3d/r_effects_api.h>
 #include <gfx_d3d/r_font.h>
+#include <gfx_d3d/r_primarylights_core.h>
 #include <gfx_d3d/r_runtime_api.h>
 #include <gfx_d3d/r_scene_api.h>
 #include <gfx_d3d/r_statistics.h>
@@ -45,6 +46,7 @@
 #include <web/web_renderer_particle_cloud_scene.h>
 #include <web/web_renderer_static_model_scene.h>
 #include <web/web_renderer_world_scene.h>
+#include <web/web_client_server_lifecycle.h>
 #include <web/web_system.h>
 #include <xanim/dobj.h>
 #include <xanim/dobj_utils.h>
@@ -75,6 +77,42 @@ namespace
 #if KISAK_WEB_DIAGNOSTICS
 double g_frontendProfileStarted = 0.0;
 #endif
+bool DynamicShadowVisibleToPrimaryLight(
+    WebRendererShadowEntityKind kind, std::uint32_t entityId,
+    std::uint32_t localClientNum,
+    std::uint32_t primaryLightIndex) noexcept
+{
+    using namespace kisak::primary_lights;
+    switch (kind)
+    {
+    case WebRendererShadowEntityKind::SceneEntity:
+    {
+        if (!EntityVisibilityAvailable(s_world, primaryLightIndex))
+            return true;
+        return IsEntityVisible(s_world, Web_RendererEntityCount(),
+            localClientNum, entityId, primaryLightIndex);
+    }
+    case WebRendererShadowEntityKind::DynEntModel:
+    case WebRendererShadowEntityKind::DynEntBrush:
+    {
+        const std::uint32_t drawType =
+            kind == WebRendererShadowEntityKind::DynEntModel
+            ? DYNENT_DRAW_MODEL : DYNENT_DRAW_BRUSH;
+        if (!DynEntVisibilityAvailable(
+                s_world, drawType, primaryLightIndex))
+            return true;
+        const auto collType = kind ==
+                WebRendererShadowEntityKind::DynEntModel
+            ? DYNENT_COLL_CLIENT_MODEL : DYNENT_COLL_CLIENT_BRUSH;
+        return IsDynEntVisible(s_world,
+            DynEnt_GetEntityCount(collType), entityId, drawType,
+            primaryLightIndex);
+    }
+    default:
+        return true;
+    }
+}
+
 std::uint32_t WebRenderer_CalcReflectionProbeIndex(
     const GfxWorld &world, const float origin[3]) noexcept
 {
@@ -2274,6 +2312,8 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     view.primaryLights = framePrimaryLights.data();
     view.primaryLightCount = static_cast<std::uint32_t>(
         framePrimaryLights.size());
+    view.dynamicShadowVisibility =
+        DynamicShadowVisibleToPrimaryLight;
     view.sunShadowEnabled = sm_enable && sm_enable->current.enabled &&
         sunPrimaryLightIndex < framePrimaryLights.size() &&
         framePrimaryLights[sunPrimaryLightIndex].type == 1u;
@@ -2958,6 +2998,8 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             WebRendererBrushModelSubmission submission{};
             submission.model = &s_world.models[definition->brushModel];
             submission.entityNumber = static_cast<std::uint16_t>(dynEntId);
+            submission.shadowEntityKind =
+                WebRendererShadowEntityKind::DynEntBrush;
             std::copy_n(pose->pose.origin, 3u, submission.origin);
             UnitQuatToAxis(pose->pose.quat, submission.axis);
             activeBrushModels.push_back(submission);
@@ -3134,6 +3176,8 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             instance.geometryIndex = resource.handle;
             std::memcpy(instance.axis, submission.axis, sizeof(instance.axis));
             std::memcpy(instance.origin, submission.origin, sizeof(instance.origin));
+            instance.shadowEntityKind = submission.shadowEntityKind;
+            instance.shadowEntityId = submission.entityNumber;
             brushInstances.push_back(instance);
             brushSurfaceCount += resource.surfaces;
             brushBatchCount += resource.batches;
@@ -3180,6 +3224,9 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             submission.placement.scale = 1.0f;
             submission.sourceKind =
                 WebRendererSceneBatchKind::DynamicXModel;
+            submission.shadowEntityKind =
+                WebRendererShadowEntityKind::DynEntModel;
+            submission.shadowEntityId = dynEntId;
             const int lod = WebRenderer_SelectFxModelLod(
                 submission.model, submission.placement, &lodParms);
             if (lod < 0) continue;
@@ -3790,12 +3837,45 @@ void __cdecl R_AddDObjToScene(const DObj_s *obj, const cpose_t *pose,
     }
     g_dobjSubmissions[g_dobjSubmissionCount++] = submission;
 }
-void __cdecl R_LinkDObjEntity(std::uint32_t, std::uint32_t, float *, float) {}
-void __cdecl R_LinkBModelEntity(std::uint32_t, std::uint32_t,
-    GfxBrushModel *) {}
-void __cdecl R_UnlinkEntity(std::uint32_t, std::uint32_t) {}
-void __cdecl R_UnlinkDynEnt(std::uint32_t, DynEntityDrawType) {}
-void __cdecl R_LinkDynEnt(std::uint32_t, DynEntityDrawType, float *, float *) {}
+void __cdecl R_LinkDObjEntity(std::uint32_t localClientNum,
+    std::uint32_t entityNumber, float *origin, float radius)
+{
+    kisak::primary_lights::LinkSphereEntity(s_world, comWorld,
+        Web_RendererEntityCount(), localClientNum, entityNumber,
+        origin, radius);
+}
+void __cdecl R_LinkBModelEntity(std::uint32_t localClientNum,
+    std::uint32_t entityNumber, GfxBrushModel *model)
+{
+    if (model)
+        kisak::primary_lights::LinkBoxEntity(s_world, comWorld,
+            Web_RendererEntityCount(), localClientNum, entityNumber,
+            model->writable.mins, model->writable.maxs);
+}
+void __cdecl R_UnlinkEntity(std::uint32_t localClientNum,
+    std::uint32_t entityNumber)
+{
+    kisak::primary_lights::UnlinkEntity(s_world,
+        Web_RendererEntityCount(), localClientNum, entityNumber);
+}
+void __cdecl R_UnlinkDynEnt(std::uint32_t dynEntId,
+    DynEntityDrawType drawType)
+{
+    const auto collType = drawType == DYNENT_DRAW_MODEL
+        ? DYNENT_COLL_CLIENT_MODEL : DYNENT_COLL_CLIENT_BRUSH;
+    kisak::primary_lights::UnlinkDynEnt(s_world,
+        DynEnt_GetEntityCount(collType), dynEntId,
+        static_cast<std::uint32_t>(drawType));
+}
+void __cdecl R_LinkDynEnt(std::uint32_t dynEntId,
+    DynEntityDrawType drawType, float *mins, float *maxs)
+{
+    const auto collType = drawType == DYNENT_DRAW_MODEL
+        ? DYNENT_COLL_CLIENT_MODEL : DYNENT_COLL_CLIENT_BRUSH;
+    kisak::primary_lights::LinkDynEnt(s_world, comWorld,
+        DynEnt_GetEntityCount(collType), dynEntId,
+        static_cast<std::uint32_t>(drawType), mins, maxs);
+}
 
 void R_DObjReplaceMaterial(
     DObj_s *obj, int lod, int surfaceIndex, Material *material)

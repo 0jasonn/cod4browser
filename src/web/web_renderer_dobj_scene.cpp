@@ -352,6 +352,7 @@ WebRendererWorldBatchDesc MakeDraw(
     std::uint32_t indexCount,
     const float modelLightingCoordinates[3],
     bool modelLightingEnabled, bool depthHack, bool castsSunShadow,
+    std::uint32_t entityNumber,
     std::uint8_t primaryLightIndex,
     std::uint8_t reflectionProbeIndex,
     const GfxImage *reflectionProbeImage,
@@ -374,6 +375,8 @@ WebRendererWorldBatchDesc MakeDraw(
     draw.lightmapIndex = 31u;
     draw.primaryLightIndex = primaryLightIndex;
     draw.sourceKind = WebRendererSceneBatchKind::DynamicDObj;
+    draw.shadowEntityKind = WebRendererShadowEntityKind::SceneEntity;
+    draw.shadowEntityId = entityNumber;
     draw.cameraRegion = material ? material->cameraRegion : 0u;
     draw.depthHack = depthHack;
     const MaterialTechniqueSet *shadowSet =
@@ -692,6 +695,7 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                             submission.renderFlags),
                         WebRenderer_DObjIsSunShadowCandidate(
                             submission.renderFlags),
+                        submission.entityNumber,
                         modelPrimaryLightIndex,
                         submission.reflectionProbeIndex,
                         submission.reflectionProbeImage,

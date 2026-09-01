@@ -290,6 +290,7 @@ set(GFX_D3D
     "${SRC_DIR}/gfx_d3d/r_pretess.h"
     "${SRC_DIR}/gfx_d3d/r_primarylights.cpp"
     "${SRC_DIR}/gfx_d3d/r_primarylights.h"
+    "${SRC_DIR}/gfx_d3d/r_primarylights_core.h"
     "${SRC_DIR}/gfx_d3d/r_reflection_probe.cpp"
     "${SRC_DIR}/gfx_d3d/r_reflection_probe.h"
     "${SRC_DIR}/gfx_d3d/r_reflection_probe_load_obj.cpp"

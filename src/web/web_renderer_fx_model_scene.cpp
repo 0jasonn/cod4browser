@@ -183,6 +183,8 @@ WebRendererWorldBatchDesc MakeDraw(
     draw.lastInstanceIndex = UINT32_MAX;
     draw.lightmapIndex = 31u;
     draw.sourceKind = submission.sourceKind;
+    draw.shadowEntityKind = submission.shadowEntityKind;
+    draw.shadowEntityId = submission.shadowEntityId;
     const MaterialTechniqueSet *shadowSet =
         material ? material->techniqueSet : nullptr;
     if (shadowSet && shadowSet->remappedTechniqueSet)

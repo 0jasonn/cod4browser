@@ -59,6 +59,19 @@ struct WebRendererShaderState
 
 struct WebRendererPrimaryLightDesc;
 
+enum class WebRendererShadowEntityKind : std::uint8_t
+{
+    None = 0u,
+    SceneEntity,
+    DynEntModel,
+    DynEntBrush,
+};
+
+using WebRendererDynamicShadowVisibility = bool (*)(
+    WebRendererShadowEntityKind kind, std::uint32_t entityId,
+    std::uint32_t localClientNum,
+    std::uint32_t primaryLightIndex) noexcept;
+
 struct WebRendererSceneViewDesc
 {
     // Completed canonical camera slot 0 for this exact view. An empty mask is
@@ -138,6 +151,7 @@ struct WebRendererSceneViewDesc
     // frame payload keeps its light constants synchronized with cgame.
     const WebRendererPrimaryLightDesc *primaryLights = nullptr;
     std::uint32_t primaryLightCount = 0u;
+    WebRendererDynamicShadowVisibility dynamicShadowVisibility = nullptr;
 };
 
 // Static opaque-world command at the renderer backend boundary. Canonical BSP
@@ -362,6 +376,9 @@ struct WebRendererBrushModelInstanceDesc
     std::uint32_t geometryIndex;
     float axis[3][3];
     float origin[3];
+    WebRendererShadowEntityKind shadowEntityKind =
+        WebRendererShadowEntityKind::None;
+    std::uint32_t shadowEntityId = UINT32_MAX;
 };
 
 constexpr bool WebRenderer_IsCameraVisibleXModelSurface(
@@ -441,6 +458,9 @@ struct WebRendererWorldBatchDesc
     // values select the matching spot/omni light retained with the world.
     std::uint8_t primaryLightIndex;
     WebRendererSceneBatchKind sourceKind;
+    WebRendererShadowEntityKind shadowEntityKind =
+        WebRendererShadowEntityKind::None;
+    std::uint32_t shadowEntityId = UINT32_MAX;
     WebRendererWorldTechnique technique;
     WebRendererWorldLightingMode lightingMode;
     // Canonical frontend technique identity. The backend copies the name and

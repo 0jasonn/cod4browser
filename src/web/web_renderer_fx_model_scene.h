@@ -27,6 +27,9 @@ struct WebRendererFxModelSubmission
     // reuse the same rigid XSurface expansion without being classified as FX.
     WebRendererSceneBatchKind sourceKind =
         WebRendererSceneBatchKind::FxXModel;
+    WebRendererShadowEntityKind shadowEntityKind =
+        WebRendererShadowEntityKind::None;
+    std::uint32_t shadowEntityId = UINT32_MAX;
     bool modelLightingEnabled = false;
     float modelLightingCoordinates[3]{};
 };

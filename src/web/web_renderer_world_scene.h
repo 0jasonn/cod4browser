@@ -35,6 +35,8 @@ struct WebRendererBrushModelSubmission
     float origin[3]{};
     float axis[3][3]{};
     std::uint16_t entityNumber = 0u;
+    WebRendererShadowEntityKind shadowEntityKind =
+        WebRendererShadowEntityKind::SceneEntity;
 };
 
 struct WebRendererBrushModelSceneCommand

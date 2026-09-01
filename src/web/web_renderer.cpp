@@ -140,6 +140,9 @@ struct WebRendererRetainedWorldBatch
     std::uint8_t primaryLightIndex = 0u;
     WebRendererSceneBatchKind sourceKind =
         WebRendererSceneBatchKind::WorldSurface;
+    WebRendererShadowEntityKind shadowEntityKind =
+        WebRendererShadowEntityKind::None;
+    std::uint32_t shadowEntityId = UINT32_MAX;
     WebRendererWorldTechnique technique =
         WebRendererWorldTechnique::BackendFallback;
     WebRendererWorldLightingMode lightingMode =
@@ -255,6 +258,10 @@ struct WebRendererDynamicDraw
     std::uint32_t batchIndex;
     std::uint32_t brushInstanceIndex = UINT32_MAX;
     WebRendererStaticModelShadowBounds shadowBounds{};
+    WebRendererShadowEntityKind shadowEntityKind =
+        WebRendererShadowEntityKind::None;
+    std::uint32_t shadowEntityId = UINT32_MAX;
+    std::uint8_t spotShadowVisibilityMask = 0xffu;
 };
 
 struct WebRendererState
@@ -5848,6 +5855,8 @@ WebRendererSurfaceResult CopyWorldCommand(
             batch.lightmapIndex = source.lightmapIndex;
             batch.primaryLightIndex = source.primaryLightIndex;
             batch.sourceKind = source.sourceKind;
+            batch.shadowEntityKind = source.shadowEntityKind;
+            batch.shadowEntityId = source.shadowEntityId;
             batch.technique = source.technique;
             batch.lightingMode = source.lightingMode;
             batch.techniqueName = source.techniqueName
@@ -7351,6 +7360,10 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
                 !BuildIndexedShadowBounds(retainedVertices, retainedIndices,
                     retainedBatches[batchIndex], draw.shadowBounds))
                 return false;
+            draw.shadowEntityKind =
+                retainedBatches[batchIndex].shadowEntityKind;
+            draw.shadowEntityId =
+                retainedBatches[batchIndex].shadowEntityId;
             dynamicDraws.push_back(draw);
             return true;
         };
@@ -7380,7 +7393,12 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelScene(
                     geometry.shadowBounds, instance, shadowBounds))
                 return WebRendererSurfaceResult::NonFiniteVertex;
             for (std::uint32_t batch = 0u; batch < geometry.batches.size(); ++batch)
-                dynamicDraws.push_back({batch, index, shadowBounds});
+            {
+                WebRendererDynamicDraw draw{batch, index, shadowBounds};
+                draw.shadowEntityKind = instance.shadowEntityKind;
+                draw.shadowEntityId = instance.shadowEntityId;
+                dynamicDraws.push_back(draw);
+            }
         }
         for (std::uint32_t index = brushInsertBatch; index < scene.batchCount; ++index)
             if (!appendIndexedDraw(index))
@@ -8155,7 +8173,9 @@ bool BuildSpotShadowMatrix(
         [](float value) { return std::isfinite(value); });
 }
 
-void SelectSpotShadowLights() noexcept
+void SelectSpotShadowLights(
+    WebRendererDynamicShadowVisibility dynamicShadowVisibility,
+    std::uint32_t localClientNum) noexcept
 {
     struct Candidate { std::uint32_t lightIndex; float score; };
     std::array<bool, WEB_RENDERER_MAX_PRIMARY_LIGHTS> used{};
@@ -8226,6 +8246,23 @@ void SelectSpotShadowLights() noexcept
             continue;
         g_renderer.sceneSpotShadowLightIndices[slot] = candidate.lightIndex;
         ++g_renderer.sceneSpotShadowCount;
+    }
+    for (WebRendererDynamicDraw &draw : g_renderer.dynamicDraws)
+    {
+        if (!dynamicShadowVisibility ||
+            draw.shadowEntityKind == WebRendererShadowEntityKind::None)
+        {
+            draw.spotShadowVisibilityMask = 0xffu;
+            continue;
+        }
+        draw.spotShadowVisibilityMask = 0u;
+        for (std::uint32_t slot = 0u;
+             slot < g_renderer.sceneSpotShadowCount; ++slot)
+            if (dynamicShadowVisibility(draw.shadowEntityKind,
+                    draw.shadowEntityId, localClientNum,
+                    g_renderer.sceneSpotShadowLightIndices[slot]))
+                draw.spotShadowVisibilityMask |=
+                    static_cast<std::uint8_t>(1u << slot);
     }
     static std::uint32_t reportedCount = UINT32_MAX;
     if (reportedCount != g_renderer.sceneSpotShadowCount)
@@ -8427,7 +8464,8 @@ bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
     const double spotShadowPrepareStarted = frameProfile
         ? WebFrameProfile_Now() : 0.0;
 #endif
-    SelectSpotShadowLights();
+    SelectSpotShadowLights(view.dynamicShadowVisibility,
+        static_cast<std::uint32_t>(view.localClientNum));
 #if KISAK_WEB_DIAGNOSTICS
     if (frameProfile)
         frameProfile->spotShadowPrepareMs +=
@@ -8889,7 +8927,8 @@ bool DrawShadowPartition(
     const std::array<float, 16> &matrix,
     GLsizei shadowSize,
     bool requireSunCaster,
-    std::uint32_t spotPrimaryLightIndex = UINT32_MAX)
+    std::uint32_t spotPrimaryLightIndex = UINT32_MAX,
+    std::uint32_t spotShadowSlot = UINT32_MAX)
 {
     if (g_renderer.shadowProgram == 0u ||
         framebuffer == 0u ||
@@ -9109,9 +9148,14 @@ bool DrawShadowPartition(
         std::uint32_t previousInstance = UINT32_MAX - 1u;
         const auto merged = WebRenderer_ForEachShadowRange(
             g_renderer.dynamicDraws, DynamicDrawBatch,
-            [&matrix](const auto &draw, const auto &batch) {
+            [&matrix, requireSunCaster, spotShadowSlot](
+                const auto &draw, const auto &batch) {
                 return batch.castsSunShadow && !batch.depthHack &&
                     !WebRenderer_IsFxVertexColorBatch(batch.sourceKind) &&
+                    (requireSunCaster ||
+                        (spotShadowSlot < MAX_SPOT_SHADOWS &&
+                         (draw.spotShadowVisibilityMask &
+                            (1u << spotShadowSlot)) != 0u)) &&
                     WebRenderer_ShadowBoundsIntersectPartition(
                         draw.shadowBounds, matrix);
             },
@@ -9200,7 +9244,8 @@ bool DrawSpotShadowMaps()
             !DrawShadowPartition(g_renderer.spotShadowFramebuffers[slot],
                 g_renderer.sceneSpotShadowMatrices[slot],
                 SPOT_SHADOW_SIZE, false,
-                g_renderer.sceneSpotShadowLightIndices[slot]))
+                g_renderer.sceneSpotShadowLightIndices[slot],
+                static_cast<std::uint32_t>(slot)))
             return false;
     }
     return true;
