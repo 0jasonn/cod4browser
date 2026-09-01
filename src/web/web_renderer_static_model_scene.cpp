@@ -154,8 +154,6 @@ bool SelectTechnique(
 
 WebRendererStaticModelInstanceDesc MakeInstance(
     const GfxPackedPlacement &placement,
-    const XModel &model,
-    const GfxStaticModelInst *canonicalBounds,
     float cullDistance,
     std::uint32_t canonicalIndex,
     const float modelLightingCoordinates[3]) noexcept
@@ -170,10 +168,22 @@ WebRendererStaticModelInstanceDesc MakeInstance(
     if (modelLightingCoordinates)
         std::copy_n(modelLightingCoordinates, 3u,
             instance.modelLightingCoordinates);
+    instance.modelScale = placement.scale;
+    instance.modelCullDistance = cullDistance;
+    instance.canonicalInstanceIndex = canonicalIndex;
+    return instance;
+}
+
+WebRendererStaticModelShadowBounds MakeShadowBounds(
+    const GfxPackedPlacement &placement,
+    const XModel &model,
+    const GfxStaticModelInst *canonicalBounds) noexcept
+{
+    WebRendererStaticModelShadowBounds bounds{};
     if (canonicalBounds)
     {
-        std::copy_n(canonicalBounds->mins, 3u, instance.shadowMins);
-        std::copy_n(canonicalBounds->maxs, 3u, instance.shadowMaxs);
+        std::copy_n(canonicalBounds->mins, 3u, bounds.mins);
+        std::copy_n(canonicalBounds->maxs, 3u, bounds.maxs);
     }
     else
     {
@@ -197,14 +207,11 @@ WebRendererStaticModelInstanceDesc MakeInstance(
                 center += localCenter[axis] * scaledAxis;
                 extent += std::fabs(scaledAxis) * localExtent[axis];
             }
-            instance.shadowMins[component] = center - extent;
-            instance.shadowMaxs[component] = center + extent;
+            bounds.mins[component] = center - extent;
+            bounds.maxs[component] = center + extent;
         }
     }
-    instance.modelScale = placement.scale;
-    instance.modelCullDistance = cullDistance;
-    instance.canonicalInstanceIndex = canonicalIndex;
-    return instance;
+    return bounds;
 }
 
 WebRendererWorldBatchDesc MakeDraw(
@@ -353,6 +360,8 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
         for (const ModelGroup &group : groups)
             submittedInstanceCount += static_cast<std::uint32_t>(
                 group.instanceIndices.size());
+        replacement.instances.reserve(submittedInstanceCount);
+        replacement.shadowBounds.reserve(submittedInstanceCount);
         modelLightingComplete = replacement.modelLightingSourceAvailable &&
             WebRenderer_InitializeModelLightingAtlas(
                 submittedInstanceCount, replacement.modelLightingAtlas);
@@ -420,14 +429,18 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
                 if (!lightingReady)
                     ++replacement.modelLightingFailureCount;
                 modelLightingComplete = modelLightingComplete && lightingReady;
+                const GfxPackedPlacement &placement =
+                    world.dpvs.smodelDrawInsts[canonicalIndex].placement;
                 replacement.instances.push_back(MakeInstance(
-                    world.dpvs.smodelDrawInsts[canonicalIndex].placement,
-                    model,
-                    world.dpvs.smodelInsts
-                        ? &world.dpvs.smodelInsts[canonicalIndex] : nullptr,
+                    placement,
                     world.dpvs.smodelDrawInsts[canonicalIndex].cullDist,
                     canonicalIndex,
                     lightingCoordinates));
+                replacement.shadowBounds.push_back(MakeShadowBounds(
+                    placement,
+                    model,
+                    world.dpvs.smodelInsts
+                        ? &world.dpvs.smodelInsts[canonicalIndex] : nullptr));
             }
 
             bool modelSubmitted = false;
@@ -574,6 +587,8 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
 
     if (replacement.batches.empty())
         return WebRendererStaticModelSceneResult::NoStaticModels;
+    if (replacement.shadowBounds.size() != replacement.instances.size())
+        return WebRendererStaticModelSceneResult::InvalidWorld;
     if (modelLightingComplete &&
         replacement.modelLightingAtlas.entryCount ==
             replacement.instances.size())
@@ -618,7 +633,7 @@ const char *WebRenderer_StaticModelSceneResultString(
 }
 
 bool WebRenderer_StaticModelIntersectsShadowPartition(
-    const WebRendererStaticModelInstanceDesc &instance,
+    const WebRendererStaticModelShadowBounds &bounds,
     const std::array<float, 16> &shadowMatrix) noexcept
 {
     float center[3];
@@ -626,11 +641,9 @@ bool WebRenderer_StaticModelIntersectsShadowPartition(
     for (std::size_t component = 0u; component < 3u; ++component)
     {
         center[component] =
-            (instance.shadowMins[component] +
-                instance.shadowMaxs[component]) * 0.5f;
+            (bounds.mins[component] + bounds.maxs[component]) * 0.5f;
         extent[component] =
-            (instance.shadowMaxs[component] -
-                instance.shadowMins[component]) * 0.5f;
+            (bounds.maxs[component] - bounds.mins[component]) * 0.5f;
     }
     float clipCenter[4];
     float clipExtent[3];

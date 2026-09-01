@@ -16,6 +16,7 @@ struct WebRendererStaticModelSceneCommand
     std::vector<WebRendererSurfaceVertex> vertices;
     std::vector<std::uint32_t> indices;
     std::vector<WebRendererStaticModelInstanceDesc> instances;
+    std::vector<WebRendererStaticModelShadowBounds> shadowBounds;
     std::vector<WebRendererStaticModelBatchDesc> batches;
     WebRendererModelLightingAtlas modelLightingAtlas;
     std::uint32_t modelCount = 0u;
@@ -49,7 +50,7 @@ const char *WebRenderer_StaticModelSceneResultString(
 // Sun-shadow partition visibility uses authored world bounds and the light
 // matrix only. Camera DPVS visibility is intentionally absent from this seam.
 bool WebRenderer_StaticModelIntersectsShadowPartition(
-    const WebRendererStaticModelInstanceDesc &instance,
+    const WebRendererStaticModelShadowBounds &bounds,
     const std::array<float, 16> &shadowMatrix) noexcept;
 
 // Backend packing only: canonical indices address DPVS, never group offsets.

@@ -431,6 +431,10 @@ struct WebRendererState
     std::vector<WebRendererStaticModelInstanceDesc>
         retainedStaticModelSourceInstances;
     std::vector<WebRendererStaticModelInstanceDesc> retainedStaticModelInstances;
+    std::vector<WebRendererStaticModelShadowBounds>
+        retainedStaticModelSourceShadowBounds;
+    std::vector<WebRendererStaticModelShadowBounds>
+        retainedStaticModelShadowBounds;
     std::vector<std::int8_t> retainedStaticModelSelectedLods;
     std::vector<std::uint8_t> staticModelShadowVisibility;
     std::vector<std::uint8_t> staticModelVisibility;
@@ -6138,12 +6142,15 @@ WebRendererSurfaceResult CopyStaticModelCommand(
     std::vector<WebRendererSurfaceVertex> &vertices,
     std::vector<std::uint32_t> &indices,
     std::vector<WebRendererStaticModelInstanceDesc> &instances,
+    std::vector<WebRendererStaticModelShadowBounds> &shadowBounds,
     std::vector<WebRendererRetainedStaticModelBatch> &batches,
     std::vector<WebRendererRetainedWorldImage> &images)
 {
     if (!scene.vertices || !scene.indices || !scene.instances ||
+        !scene.shadowBounds ||
         !scene.batches || scene.vertexCount == 0u || scene.indexCount == 0u ||
         scene.instanceCount == 0u || scene.batchCount == 0u ||
+        scene.shadowBoundsCount != scene.instanceCount ||
         scene.modelCount == 0u || scene.surfaceCount == 0u ||
         scene.vertexCount > WEB_RENDERER_MAX_STATIC_MODEL_VERTICES ||
         scene.indexCount > WEB_RENDERER_MAX_STATIC_MODEL_INDICES ||
@@ -6180,11 +6187,12 @@ WebRendererSurfaceResult CopyStaticModelCommand(
                 return WebRendererSurfaceResult::NonFiniteVertex;
         for (std::size_t component = 0u; component < 3u; ++component)
         {
-            if (!std::isfinite(instance.shadowMins[component]) ||
-                !std::isfinite(instance.shadowMaxs[component]))
+            const WebRendererStaticModelShadowBounds &bounds =
+                scene.shadowBounds[instanceIndex];
+            if (!std::isfinite(bounds.mins[component]) ||
+                !std::isfinite(bounds.maxs[component]))
                 return WebRendererSurfaceResult::NonFiniteVertex;
-            if (instance.shadowMins[component] >
-                instance.shadowMaxs[component])
+            if (bounds.mins[component] > bounds.maxs[component])
                 return WebRendererSurfaceResult::InvalidDescriptor;
         }
         if (!std::isfinite(instance.modelScale) || instance.modelScale <= 0.0f ||
@@ -6199,6 +6207,8 @@ WebRendererSurfaceResult CopyStaticModelCommand(
         indices.assign(scene.indices, scene.indices + scene.indexCount);
         instances.assign(
             scene.instances, scene.instances + scene.instanceCount);
+        shadowBounds.assign(
+            scene.shadowBounds, scene.shadowBounds + scene.shadowBoundsCount);
         batches.reserve(scene.batchCount);
         images.reserve(scene.batchCount);
         for (std::uint32_t index = 0u; index < scene.batchCount; ++index)
@@ -6824,6 +6834,10 @@ void WebRenderer_UnloadWorldResources()
         g_renderer.retainedStaticModelSourceInstances);
     decltype(g_renderer.retainedStaticModelInstances){}.swap(
         g_renderer.retainedStaticModelInstances);
+    decltype(g_renderer.retainedStaticModelSourceShadowBounds){}.swap(
+        g_renderer.retainedStaticModelSourceShadowBounds);
+    decltype(g_renderer.retainedStaticModelShadowBounds){}.swap(
+        g_renderer.retainedStaticModelShadowBounds);
     decltype(g_renderer.retainedStaticModelSelectedLods){}.swap(
         g_renderer.retainedStaticModelSelectedLods);
     decltype(g_renderer.staticModelShadowVisibility){}.swap(
@@ -6947,6 +6961,7 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
     std::vector<WebRendererSurfaceVertex> retainedVertices;
     std::vector<std::uint32_t> retainedIndices;
     std::vector<WebRendererStaticModelInstanceDesc> retainedInstances;
+    std::vector<WebRendererStaticModelShadowBounds> retainedShadowBounds;
     std::vector<WebRendererRetainedStaticModelBatch> retainedBatches;
     std::vector<WebRendererRetainedWorldImage> retainedImages;
     WebRendererRetainedModelLightingAtlas retainedLighting;
@@ -6955,15 +6970,18 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
         retainedVertices,
         retainedIndices,
         retainedInstances,
+        retainedShadowBounds,
         retainedBatches,
         retainedImages);
     if (copy != WebRendererSurfaceResult::Success) return copy;
     std::vector<WebRendererStaticModelInstanceDesc> sourceInstances;
+    std::vector<WebRendererStaticModelShadowBounds> sourceShadowBounds;
     std::vector<std::int8_t> selectedLods;
     std::vector<std::uint8_t> shadowVisibility;
     try
     {
         sourceInstances = retainedInstances;
+        sourceShadowBounds = retainedShadowBounds;
         selectedLods.assign(retainedInstances.size(), -2);
         shadowVisibility.resize(retainedInstances.size());
         // First half remains shadow packing. Camera packing has independent capacity.
@@ -7034,6 +7052,10 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
     g_renderer.retainedStaticModelSourceInstances =
         std::move(sourceInstances);
     g_renderer.retainedStaticModelInstances = std::move(retainedInstances);
+    g_renderer.retainedStaticModelSourceShadowBounds =
+        std::move(sourceShadowBounds);
+    g_renderer.retainedStaticModelShadowBounds =
+        std::move(retainedShadowBounds);
     g_renderer.retainedStaticModelSelectedLods = std::move(selectedLods);
     g_renderer.staticModelShadowVisibility = std::move(shadowVisibility);
     g_renderer.staticModelVisibility.clear();
@@ -8854,13 +8876,13 @@ bool DrawShadowPartition(
                 g_renderer.retainedStaticModelSourceInstances.size();
             if (g_renderer.staticModelShadowVisibility.size() !=
                     shadowInstanceCount ||
-                g_renderer.retainedStaticModelInstances.size() <
+                g_renderer.retainedStaticModelShadowBounds.size() <
                     shadowInstanceCount)
                 return false;
             for (std::size_t index = 0u; index < shadowInstanceCount; ++index)
                 g_renderer.staticModelShadowVisibility[index] =
                     WebRenderer_StaticModelIntersectsShadowPartition(
-                        g_renderer.retainedStaticModelInstances[index], matrix)
+                        g_renderer.retainedStaticModelShadowBounds[index], matrix)
                     ? 1u : 0u;
         }
         for (const WebRendererRetainedStaticModelBatch &batch :
@@ -9127,6 +9149,10 @@ bool UpdateStaticModelLods()
 
     if (g_renderer.retainedStaticModelInstances.size() !=
             2u * g_renderer.retainedStaticModelSourceInstances.size() ||
+        g_renderer.retainedStaticModelSourceShadowBounds.size() !=
+            g_renderer.retainedStaticModelSourceInstances.size() ||
+        g_renderer.retainedStaticModelShadowBounds.size() !=
+            g_renderer.retainedStaticModelSourceInstances.size() ||
         g_renderer.retainedStaticModelSelectedLods.size() !=
             g_renderer.retainedStaticModelSourceInstances.size())
         return false;
@@ -9221,9 +9247,13 @@ bool UpdateStaticModelLods()
                     if (g_renderer.retainedStaticModelSelectedLods[sourceIndex] ==
                             static_cast<std::int8_t>(lod))
                     {
-                        g_renderer.retainedStaticModelInstances[writeOffset++] =
+                        g_renderer.retainedStaticModelInstances[writeOffset] =
                             g_renderer.retainedStaticModelSourceInstances[
                                 sourceIndex];
+                        g_renderer.retainedStaticModelShadowBounds[writeOffset] =
+                            g_renderer.retainedStaticModelSourceShadowBounds[
+                                sourceIndex];
+                        ++writeOffset;
                     }
                 }
             }
@@ -9232,8 +9262,12 @@ bool UpdateStaticModelLods()
                 const std::size_t sourceIndex = sourceOffset + index;
                 if (g_renderer.retainedStaticModelSelectedLods[sourceIndex] < 0)
                 {
-                    g_renderer.retainedStaticModelInstances[writeOffset++] =
+                    g_renderer.retainedStaticModelInstances[writeOffset] =
                         g_renderer.retainedStaticModelSourceInstances[sourceIndex];
+                    g_renderer.retainedStaticModelShadowBounds[writeOffset] =
+                        g_renderer.retainedStaticModelSourceShadowBounds[
+                            sourceIndex];
+                    ++writeOffset;
                 }
             }
             if (writeOffset != sourceOffset + sourceCount)

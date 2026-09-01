@@ -16,7 +16,9 @@ const production = process.argv[3] === 'production';
 const controlled = process.argv[6] === 'fixedtime';
 const checkRecovery = process.argv[7] === 'recovery';
 const uncapped = process.argv[7] === 'uncapped';
-assert(!process.argv[7] || (checkRecovery && !production && controlled) || (uncapped && production && controlled));
+const movingCamera = process.argv[7] === 'moving-camera';
+assert(!process.argv[7] || (checkRecovery && !production && controlled) ||
+    (uncapped && production && controlled) || (movingCamera && !production && controlled));
 const mapCommand = controlled ? 'set sv_mapSeed 1; devmap cargoship; fixedtime 16' : 'map cargoship';
 assert(!process.argv[6] || controlled, 'optional workload must be fixedtime');
 const sourceRevision = process.argv[4] ?? (production ? undefined : 'HEAD');
@@ -105,7 +107,7 @@ try {
     if (controlled) {
         await page.bringToFront();
         await page.evaluate(() => { __dobj.profiles = []; __dobj.collecting = true; });
-        await engineWorker.evaluate(async ({ production, uncapped }) => {
+        await engineWorker.evaluate(async ({ production, uncapped, movingCamera }) => {
             const { ENGINE_PROTOCOL_VERSION } = await import(production ? './product_protocol.mjs' : './engine_protocol.mjs');
             globalThis.__cleanFrames = [];
             globalThis.__workloadViews = [];
@@ -117,6 +119,13 @@ try {
                 [120, 'cg_setviewpos -9732 -9384 2041 73 16'],
                 [180, `cg_setviewpos -9732 -9384 2041 73 16${uncapped ? '; com_maxfps 0' : ''}`],
             ]);
+            if (movingCamera) {
+                for (let generation = 610; generation <= 710; generation += 10) {
+                    const yaw = generation % 20 === 10 ? 253 : 73;
+                    commands.set(generation,
+                        `cg_setviewpos -9732 -9384 2041 ${yaw} 16`);
+                }
+            }
             const view = event => {
                 const detail = event.detail;
                 if (!detail.worldName?.toLowerCase().includes('cargoship')) return;
@@ -161,7 +170,7 @@ try {
             };
             addEventListener('kisakcod:renderer-scene-view', view);
             if (!production) addEventListener('kisakcod:renderer-scene-frame', sample);
-        }, { production, uncapped });
+        }, { production, uncapped, movingCamera });
     }
     // fixedtime is a canonical cheat dvar; devmap enables it through the normal
     // engine command path. No diagnostic exports or memory writes are used.
@@ -268,7 +277,7 @@ try {
     assert.equal(terminal.profileSamplesCollected, 120);
     const frames = captured.entries.filter(entry => entry.kind === 'frame');
     assert.equal(frames.length, 120);
-    const workCounts = controlled ? validateProfileWindow(frames,
+    const workCounts = controlled && !movingCamera ? validateProfileWindow(frames,
         await engineWorker.evaluate(() => __profileViews), workload) : undefined;
     const foreground = summarizeForegroundSamples(captured.foreground);
     assert(foreground.performanceWindowValid, JSON.stringify(foreground));
@@ -384,12 +393,15 @@ try {
     const result = { schemaVersion: 1, recovery, cleanTiming, artifactSha256, recordedAtUtc: new Date().toISOString(), source,
         workload, workCounts, workCountSha256: workCounts
             ? createHash('sha256').update(JSON.stringify(workCounts)).digest('hex') : undefined,
+        bufferUploadBytesSamples: movingCamera
+            ? frames.map(({ counters }) => counters.bufferUploadBytes) : undefined,
         environment: { browser: 'Chrome', version: browser.version(), headless: true,
             processor: cpus()[0].model, totalSystemMemoryBytes: totalmem(), viewport: { width: 1440, height: 1000 },
             build: 'Release diagnostics' },
         methodology: { map: 'cargoship', warmupWorldFrames: controlled ? 240 : 30, completedGameplayFrames: 120, profilingDisabledIntervals: 300,
             profileViews: controlled ? [601, 720] : undefined,
-            input: controlled ? 'Paused renderer-only workload; no gameplay input' : 'No gameplay input; authored scene continues running', cleanBenchmark: true,
+            input: movingCamera ? 'Paused renderer-only workload; canonical camera yaw alternates every 10 views'
+                : controlled ? 'Paused renderer-only workload; no gameplay input' : 'No gameplay input; authored scene continues running', cleanBenchmark: true,
             compatibilityValidation: false, foreground }, profile,
         dobjUnassignedMs: summarizeProfileSamples(frames.map(({ cpu }) => cpu.dobjBuildMs -
             cpu.dobjPoseMs - cpu.dobjLightingMs - cpu.dobjSkinningMs - cpu.dobjGeometryMs)),

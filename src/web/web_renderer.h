@@ -485,14 +485,20 @@ struct WebRendererStaticModelInstanceDesc
     float axis[3][3];
     float origin[3];
     float modelLightingCoordinates[3];
-    // Canonical bounds drive sun-partition rejection in light space and stay
-    // independent of camera visibility.
-    float shadowMins[3];
-    float shadowMaxs[3];
     float modelScale;
     float modelCullDistance;
     std::uint32_t canonicalInstanceIndex;
 };
+static_assert(sizeof(WebRendererStaticModelInstanceDesc) == 72u);
+
+// CPU-only canonical bounds for light-space partition selection. They stay
+// outside the instanced GPU payload and camera DPVS packing.
+struct WebRendererStaticModelShadowBounds
+{
+    float mins[3];
+    float maxs[3];
+};
+static_assert(sizeof(WebRendererStaticModelShadowBounds) == 24u);
 
 struct WebRendererStaticModelBatchDesc
 {
@@ -510,6 +516,8 @@ struct WebRendererStaticModelSceneDesc
     std::uint32_t indexCount;
     const WebRendererStaticModelInstanceDesc *instances;
     std::uint32_t instanceCount;
+    const WebRendererStaticModelShadowBounds *shadowBounds;
+    std::uint32_t shadowBoundsCount;
     const WebRendererStaticModelBatchDesc *batches;
     std::uint32_t batchCount;
     std::uint32_t modelCount;

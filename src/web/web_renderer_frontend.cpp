@@ -2823,6 +2823,8 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                 static_cast<std::uint32_t>(command.indices.size()),
                 command.instances.data(),
                 static_cast<std::uint32_t>(command.instances.size()),
+                command.shadowBounds.data(),
+                static_cast<std::uint32_t>(command.shadowBounds.size()),
                 command.batches.data(),
                 static_cast<std::uint32_t>(command.batches.size()),
                 command.modelCount,

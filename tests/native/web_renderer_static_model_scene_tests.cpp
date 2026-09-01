@@ -212,8 +212,8 @@ void TestCanonicalInstancesShareOneMaterialSurfaceBatch()
     assert(command.instances[1].modelScale == 2.0f);
     assert(command.instances[1].modelCullDistance == 1000.0f);
     assert(command.instances[1].canonicalInstanceIndex == 1u);
-    assert(command.instances[1].shadowMins[0] == 9.0f);
-    assert(command.instances[1].shadowMaxs[0] == 11.0f);
+    assert(command.shadowBounds[1].mins[0] == 9.0f);
+    assert(command.shadowBounds[1].maxs[0] == 11.0f);
     assert(command.modelLightingAtlas.entryCount == 2u);
     assert(command.instances[0].modelLightingCoordinates[0] !=
         command.instances[1].modelLightingCoordinates[0]);
@@ -227,26 +227,26 @@ void TestCanonicalInstancesShareOneMaterialSurfaceBatch()
 
 void TestSunShadowPartitionUsesCanonicalBounds()
 {
-    WebRendererStaticModelInstanceDesc instance{};
-    instance.shadowMins[0] = -0.25f;
-    instance.shadowMins[1] = -0.25f;
-    instance.shadowMins[2] = -0.25f;
-    instance.shadowMaxs[0] = 0.25f;
-    instance.shadowMaxs[1] = 0.25f;
-    instance.shadowMaxs[2] = 0.25f;
+    WebRendererStaticModelShadowBounds bounds{};
+    bounds.mins[0] = -0.25f;
+    bounds.mins[1] = -0.25f;
+    bounds.mins[2] = -0.25f;
+    bounds.maxs[0] = 0.25f;
+    bounds.maxs[1] = 0.25f;
+    bounds.maxs[2] = 0.25f;
     const std::array<float, 16> identity{
         1.0f, 0.0f, 0.0f, 0.0f,
         0.0f, 1.0f, 0.0f, 0.0f,
         0.0f, 0.0f, 1.0f, 0.0f,
         0.0f, 0.0f, 0.0f, 1.0f,
     };
-    assert(WebRenderer_StaticModelIntersectsShadowPartition(instance, identity));
-    instance.shadowMins[0] = 1.25f;
-    instance.shadowMaxs[0] = 1.75f;
-    assert(!WebRenderer_StaticModelIntersectsShadowPartition(instance, identity));
-    instance.shadowMins[0] = 1.0f;
-    instance.shadowMaxs[0] = 1.5f;
-    assert(WebRenderer_StaticModelIntersectsShadowPartition(instance, identity));
+    assert(WebRenderer_StaticModelIntersectsShadowPartition(bounds, identity));
+    bounds.mins[0] = 1.25f;
+    bounds.maxs[0] = 1.75f;
+    assert(!WebRenderer_StaticModelIntersectsShadowPartition(bounds, identity));
+    bounds.mins[0] = 1.0f;
+    bounds.maxs[0] = 1.5f;
+    assert(WebRenderer_StaticModelIntersectsShadowPartition(bounds, identity));
 }
 
 void TestEveryAuthoredLodIsRetainedForRuntimeSelection()
