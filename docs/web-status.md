@@ -14,6 +14,12 @@ resumed through the existing key queue. The reached Wasm defect was an invalid
 SP `int()`-to-`void()` command callback cast; SP now matches MP's typed
 `openmenu` callback. See [the focused evidence](evidence/canonical-menu-lifecycle-2026-09-01.md).
 
+The top-left objective notification is also canonical end to end. The normal
+server spawn loads `ui/ingame.txt`; a synthetic diagnostic configstring then
+proved current/completed parsing, localized objective text reaching the
+renderer command boundary, and the existing timed fade/hide behavior. See
+[the objective evidence](evidence/canonical-objective-notification-2026-09-01.md).
+
 The playable offline slice already exists across six legally validated maps.
 Those runs demonstrate canonical movement, aiming, firing, weapons, audio,
 transitions, and Airplane save/load continuity. Building another player

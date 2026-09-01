@@ -76,6 +76,22 @@ namespace
 {
 #if KISAK_WEB_DIAGNOSTICS
 double g_frontendProfileStarted = 0.0;
+std::array<std::uint32_t, 256> g_testUiTextHashes{};
+std::size_t g_testUiTextHashCursor = 0;
+
+std::uint32_t HashDiagnosticText(const char *text)
+{
+    std::uint32_t hash = 2166136261u;
+    while (*text)
+    {
+        char character = *text++;
+        if (character >= 'A' && character <= 'Z')
+            character += 'a' - 'A';
+        hash ^= static_cast<std::uint8_t>(character);
+        hash *= 16777619u;
+    }
+    return hash;
+}
 #endif
 bool DynamicShadowVisibleToPrimaryLight(
     WebRendererShadowEntityKind kind, std::uint32_t entityId,
@@ -1245,6 +1261,10 @@ void AppendUiText(const char *text, int maxChars, Font_s *font,
     const float *color)
 {
     if (!text || !font || !font->glyphs || !font->material) return;
+#if KISAK_WEB_DIAGNOSTICS
+    g_testUiTextHashes[g_testUiTextHashCursor++ % g_testUiTextHashes.size()] =
+        HashDiagnosticText(text);
+#endif
     if (maxChars <= 0) maxChars = 0x7fffffff;
     const float startX = x;
     int count = 0;
@@ -1279,6 +1299,15 @@ void AppendUiText(const char *text, int maxChars, Font_s *font,
         ++count;
     }
 }
+
+#if KISAK_WEB_DIAGNOSTICS
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestUiTextSeen(
+    std::uint32_t textHash)
+{
+    return std::find(g_testUiTextHashes.begin(), g_testUiTextHashes.end(),
+        textHash) != g_testUiTextHashes.end();
+}
+#endif
 
 void SubmitUiScene()
 {

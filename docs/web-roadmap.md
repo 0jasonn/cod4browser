@@ -9,8 +9,9 @@ are retired and out of scope.
 The immediate task is canonical SP UI and persistence convergence. The main,
 Options, Profiles, Load Game, pause, and resume lifecycle is complete with
 [focused retail evidence](evidence/canonical-menu-lifecycle-2026-09-01.md).
-Next: objective notification through the canonical configstring/cgame/menu
-path, followed by dvar/config persistence, profile isolation, and save/load UI.
+Objective notification through the canonical configstring/cgame/menu path is
+now complete with [focused evidence](evidence/canonical-objective-notification-2026-09-01.md).
+Next: dvar/config persistence, profile isolation, and save/load UI.
 The stationary `ac130` probe remains deferred.
 
 1. Canonical camera DPVS now filters both static-model instances and world

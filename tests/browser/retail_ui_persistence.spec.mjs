@@ -135,6 +135,18 @@ test("canonical retail main menu starts without a map", { tag: "@retail-ui" },
             expect(await call(page, "_KisakWeb_TestMenuState",
                 nameHash(menuName))).toBeGreaterThan(0);
         }
+        expect(await call(page, "_KisakWeb_TestObjectiveNotification", 4))
+            .toBe(1);
+        await expect.poll(() => call(page, "_KisakWeb_TestUiState", 8))
+            .toBe(4);
+        await expect.poll(() => call(page, "_KisakWeb_TestUiTextSeen",
+            nameHash("Kisak web objective test"))).toBe(1);
+        expect(await call(page, "_KisakWeb_TestObjectiveNotification", 6))
+            .toBe(1);
+        expect(await call(page, "_KisakWeb_TestObjectiveNotification", 3))
+            .toBe(1);
+        await expect.poll(() => call(page, "_KisakWeb_TestUiState", 8))
+            .toBe(3);
         const canvas = page.locator("#game-canvas");
         await canvas.click();
         await expect.poll(() => page.evaluate(() =>

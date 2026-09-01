@@ -33,6 +33,7 @@ oracle.
 | World/runtime | Canonical `GfxWorld`, collision, server/game, client/cgame, script VM, XAnim/DObj, effects, ragdoll, physics and sound code are in the browser link closure. |
 | Frame order | The browser supplies elapsed time; canonical `SV_Frame`, client frame work and `SCR_UpdateScreen` advance gameplay. |
 | SP UI | Canonical `CL_StartHunkUsers`, `CL_InitUI`, `UI_Init`, shipped MenuLists, `UI_SetActiveMenu`, `UI_Refresh`, and renderer 2D commands own main/options/profile/load/pause menus. Disconnected browser frames continue through `CL_Frame` and `SCR_UpdateScreen`; no DOM menu state exists. |
+| Objectives | Native server configstrings, `CG_ParseObjectiveChange`, `objectiveInfo_t`, `objectiveinfo`, canonical localization, timed menu visibility, and renderer text/quads own objective notifications. Diagnostics only observe hashed emitted text and inject a freely usable string through the canonical parser. |
 | Fresh-map randomness | Shared `SV_GetMapRandomSeed` serves native and browser spawn paths; optional cheat dvar `sv_mapSeed` defaults to the original clock seed. Game RNG and save/demo restoration remain canonical. |
 | Renderer frontend | Kisak world, model, effect and UI state is translated only at the portable draw-command boundary. Native IW3's bounded 65,536 static-model cardinality is preserved across that seam. |
 | Input | Browser events enter canonical key/mouse queues, bindings, usercmd creation and movement/weapon code. |

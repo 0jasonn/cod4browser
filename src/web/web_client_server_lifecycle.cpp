@@ -4,6 +4,10 @@
 
 #include <client/cl_fastfile_config.h>
 #include <client/client.h>
+#include <cgame/cg_main.h>
+#include <cgame/cg_draw.h>
+#include <cgame/cg_scoreboard.h>
+#include <cgame/cg_servercmds.h>
 #include <database/database.h>
 #include <database/db_registry_publication.h>
 #include <database/db_initialization.h>
@@ -19,6 +23,7 @@
 #include <server/sv_public.h>
 #include <sound/snd_public.h>
 #include <script/scr_variable.h>
+#include <script/scr_stringlist.h>
 #include <script/scr_vm_runtime.h>
 #include <stringed/stringed_hooks.h>
 #include <universal/dvar.h>
@@ -387,6 +392,9 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestUiState(int field)
     case 5: return cl_paused ? cl_paused->current.integer : -1;
     case 6: return uiInfo.playerProfileCount;
     case 7: return uiInfo.savegameCount;
+    case 8: return cgArray[0].objectives[15].state;
+    case 9: return cgDC.menuCount;
+    case 10: return CG_FadeObjectives(&cgArray[0]) > 0.0f;
     default: return -1;
     }
 }
@@ -422,7 +430,50 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestMenuState(
         if (Menu_IsVisible(&uiInfo.uiDC, menu)) state |= 4;
         return state;
     }
+    for (int index = 0; index < cgDC.menuCount; ++index)
+    {
+        menuDef_t *const menu = cgDC.Menus[index];
+        if (!menu || !menu->window.name ||
+            HashDiagnosticName(menu->window.name) != nameHash)
+            continue;
+        int state = 1;
+        if (Menus_MenuIsInStack(&cgDC, menu)) state |= 2;
+        if (Menu_IsVisible(&cgDC, menu)) state |= 4;
+        return state;
+    }
     return 0;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestObjectiveNotification(
+    int state)
+{
+    if (!CL_IsCgameInitialized(0))
+        return 0;
+    if (state == 6)
+    {
+        const int oldTime = cgArray[0].time;
+        cgArray[0].time = cgArray[0].scoreFadeTime + 601;
+        CG_CheckHudObjectiveDisplay(0);
+        const int faded = CG_FadeObjectives(&cgArray[0]) == 0.0f;
+        cgArray[0].time = oldTime;
+        return faded;
+    }
+    if (state < 0 || state > 5)
+        return 0;
+    char configString[128];
+    Com_sprintf(configString, sizeof(configString),
+        "\\state\\%d\\str\\Kisak web objective test", state);
+    SV_SetConfigstring(26, configString);
+    std::uint16_t &clientConfigString = clients[0].configstrings[26];
+    if (clientConfigString)
+        SL_RemoveRefToString(clientConfigString);
+    clientConfigString = static_cast<std::uint16_t>(
+        SL_GetString_(configString, 0, MT_TYPE_CONFIG_STRING));
+    CG_ParseObjectiveChange(0, 26);
+    cgArray[0].showScores = 0;
+    cgArray[0].scoreFadeTime = 0;
+    CG_MenuShowNotify(0, 5);
+    return 1;
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_TestResumeGame()
