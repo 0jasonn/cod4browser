@@ -198,6 +198,33 @@ test("canonical retail main menu starts without a map", { tag: "@retail-ui" },
             .toBe(0);
         expect((await call(page, "_KisakWeb_TestUiState", 3)) & 16).toBe(0);
 
+        await test.step("slow browser frames retain real-time gameplay", async () => {
+            await expect.poll(() => call(page, "_KisakWeb_TestGameplayState", 24, 0))
+                .toBeGreaterThan(0);
+            const timing = await page.evaluate(async () => {
+                const module = globalThis.__KISAKCOD_WEB__.module;
+                const gameBefore = await module.call("_KisakWeb_TestGameplayState", 24, 0);
+                const wallBefore = performance.now();
+                // Artificial Worker stalls, not input or a changed game timescale.
+                // This reproduces the former 100 ms/frame cap at low frame rates.
+                for (let frame = 0; frame < 12; ++frame) {
+                    if (await module.call("_KisakWeb_TestSlowNextCommand", 250) !== 1)
+                        throw new Error("Could not schedule timing probe");
+                    const command = new TextEncoder().encode("echo frame-timing-probe\0");
+                    if (await module.callProbe("_KisakWeb_SubmitCanonicalCommand",
+                        [command], [{ kind: "pointer", index: 0 }]) !== 1)
+                        throw new Error("Could not submit timing probe");
+                    await new Promise((resolve) => setTimeout(resolve, 300));
+                }
+                const gameAfter = await module.call("_KisakWeb_TestGameplayState", 24, 0);
+                return { gameMs: gameAfter - gameBefore, wallMs: performance.now() - wallBefore };
+            });
+            console.log("real-time frame probe", timing);
+            expect(timing.wallMs).toBeGreaterThan(3_000);
+            expect(timing.gameMs / timing.wallMs).toBeGreaterThan(0.85);
+            expect(timing.gameMs / timing.wallMs).toBeLessThan(1.15);
+        });
+
         await page.reload();
         await expect.poll(() => page.evaluate(() =>
             globalThis.__KISAKCOD_WEB__?.state)).toBe("running");

@@ -1,10 +1,15 @@
 # Web product roadmap
 
-Updated 2026-09-01. This is the single active roadmap; earlier orders and
+Updated 2026-09-02. This is the single active roadmap; earlier orders and
 mission-progression gates are superseded. A playable offline slice already
 exists across six maps, and dynamic DObj convergence is complete through
 `838e047c`. Route generation, waypoint replay, and simulated mission progression
 are retired and out of scope.
+
+Normal-speed gameplay now preserves numeric script timescales and elapsed
+browser frame time, with a five-second long-suspension ceiling. The old
+100 ms frame cap is no longer a low-FPS slowdown policy; profiling remains
+explicitly opt-in. See [the timing evidence](evidence/browser-frame-time-2026-09-02.md).
 
 The immediate task is canonical SP UI and persistence convergence. The main,
 Options, Profiles, Load Game, pause, and resume lifecycle is complete with

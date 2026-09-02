@@ -377,6 +377,12 @@ extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_MountCanonicalRuntime()
     // auto-continue path after the retail defaults have been applied.
     Dvar_SetBoolByName("ui_autoContinue", true);
 
+    // Keep browser gameplay on wall time through slow frames. The native
+    // 100 ms limit otherwise intentionally dilates time below 10 FPS, even
+    // after the browser pump admits the full elapsed time. Retain its maximum
+    // long-stall limit; fixedtime and scripted timescales remain canonical.
+    Dvar_SetInt(com_maxFrameTime, 5000);
+
     // Complete the canonical renderer/sound transition only after the browser
     // DB queue has published the renderer prerequisites. In particular,
     // SND_InitEntChannels now resolves soundaliases/channels.def from the

@@ -1,8 +1,18 @@
 # Web product status
 
-Updated 2026-09-01. This is the single current status page; the
+Updated 2026-09-02. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
+
+## Real-time gameplay
+
+Unintended slow motion had two causes: a `long double`/`double` alias in the
+canonical slow-command parser corrupted normal speed in Wasm, and the browser
+plus native frame-time caps discarded elapsed time beyond 100 ms. The shared
+parser now converts numerically; the browser selects the native five-second
+long-stall ceiling. Deliberate script slow motion and opt-in profiling
+`fixedtime` remain supported. See [the parser proof](evidence/canonical-timescale-2026-09-02.md)
+and [the browser timing evidence](evidence/browser-frame-time-2026-09-02.md).
 
 ## Current campaign boundary
 

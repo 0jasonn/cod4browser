@@ -1,6 +1,6 @@
 # Web port convergence inventory
 
-Updated 2026-09-01. This page owns system classification; see
+Updated 2026-09-02. This page owns system classification; see
 [current status](web-status.md) and [the active roadmap](web-roadmap.md) for
 evidence and priorities. Earlier chronology is retained in
 [the historical inventory](history/web-convergence-through-2026-08-28.md).
@@ -33,7 +33,7 @@ oracle.
 | Filesystem | Canonical search paths, IWD/minizip behavior, config/profile calls and synchronous engine-facing operations use Worker file primitives. Recursive profile deletion maps to one durable Worker/OPFS tree-removal primitive. |
 | Database | Canonical XFile stream, allocation blocks, generated loaders, pointer aliases, registry pools, dependency ordering and final publication own runtime assets, including native-compatible leading-comma asset-stub resolution. |
 | World/runtime | Canonical `GfxWorld`, collision, server/game, client/cgame, script VM, XAnim/DObj, effects, ragdoll, physics and sound code are in the browser link closure. |
-| Frame order | The browser supplies elapsed time; canonical `SV_Frame`, client frame work and `SCR_UpdateScreen` advance gameplay. |
+| Frame order | The browser supplies elapsed time; canonical `Com_ModifyMsec`, `SV_Frame`, client frame work and `SCR_UpdateScreen` advance gameplay. Browser startup selects `com_maxFrameTime=5000`, and the platform pump uses the same long-stall ceiling instead of losing time on every frame longer than 100 ms. Script/developer timescales and opt-in `fixedtime` remain canonical. |
 | SP UI | Canonical `CL_StartHunkUsers`, `CL_InitUI`, `UI_Init`, shipped MenuLists, `UI_SetActiveMenu`, `UI_Refresh`, and renderer 2D commands own main/options/profile/load/pause menus. Disconnected browser frames continue through `CL_Frame` and `SCR_UpdateScreen`; UI-only backend frames are valid before any `GfxWorld` exists, so startup presents the shipped main menu rather than a DOM substitute. |
 | Objectives | Native server configstrings, `CG_ParseObjectiveChange`, `objectiveInfo_t`, `objectiveinfo`, canonical localization, timed menu visibility, and renderer text/quads own objective notifications. Diagnostics only observe hashed emitted text and inject a freely usable string through the canonical parser. |
 | Fresh-map randomness | Shared `SV_GetMapRandomSeed` serves native and browser spawn paths; optional cheat dvar `sv_mapSeed` defaults to the original clock seed. Game RNG and save/demo restoration remain canonical. |
@@ -62,6 +62,7 @@ and the verified limitations are recorded in [the boundary notes](renderer-retai
 | `database/db_file_platform.cpp` | Maps DB file operations to the Worker filesystem. |
 | `database/db_generated_image_platform.*` | Copies transient canonical image load definitions at the native texture-upload boundary into a bounded process-global source cache; canonical `GfxImage` identity remains authoritative. |
 | `qcommon/common_runtime_commands.cpp` | Keeps the post-mount common-command continuation canonical and separate from browser hosting. |
+| `cgame/cg_servercmds.cpp` | The shared slow-command parser converts decimal scales numerically instead of aliasing `long double` storage as `double`; this preserves normal-speed and scripted scale values in Wasm. |
 | `web_client_server_lifecycle.cpp` | Continues synchronous-looking native startup after the main-thread host mounts user files, including canonical version dvars and diagnostic-only calls through real profile/save UI owners. |
 | `web_main.cpp` | Admits disconnected-but-running client frames so canonical pre-map UI and config work run in native order; the browser still owns only the non-blocking pump. |
 | `web_canonical_gfxworld.cpp` | Observes final DB publication only; canonical `R_RenderScene` owns world rendering. The obsolete proof submission is removed. |

@@ -446,7 +446,10 @@ bool RunCGameFrame(const WebFrameInfo &frame)
         // components indefinitely. Accumulate real time without blocking the
         // browser and honor the canonical com_maxfps dvar. An uncapped value
         // retains the web safety ceiling of 125 Hz.
-        g_cgameFrameAccumulatorMilliseconds += std::min(elapsed, 100u);
+        // Only bound long suspension gaps here. The former 100 ms cap lost
+        // real time on every slow frame, producing continuous slow motion.
+        // Com_ModifyMsec still owns the canonical dvar/script time adjustment.
+        g_cgameFrameAccumulatorMilliseconds += std::min(elapsed, 5000u);
         const int configuredMaxFps = com_maxfps
             ? com_maxfps->current.integer : 0;
         const std::uint32_t minimumFrameMilliseconds = configuredMaxFps > 0
@@ -457,7 +460,7 @@ bool RunCGameFrame(const WebFrameInfo &frame)
             return false;
 
         frameMilliseconds = static_cast<int>(
-            std::min(g_cgameFrameAccumulatorMilliseconds, 100u));
+            std::min(g_cgameFrameAccumulatorMilliseconds, 5000u));
         g_cgameFrameAccumulatorMilliseconds = 0u;
     }
     else
