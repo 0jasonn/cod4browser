@@ -31,6 +31,21 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
         KISAK_TEST_CANONICAL_MINIZIP=1)
 endif()
 
+if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    add_executable(cgame_timescale_tests
+        "${CMAKE_CURRENT_LIST_DIR}/cgame_timescale_tests.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/cgame/cg_servercmds.cpp")
+    target_compile_features(cgame_timescale_tests PRIVATE cxx_std_20)
+    target_include_directories(cgame_timescale_tests PRIVATE
+        "${KISAK_REPOSITORY_ROOT}/src" "${KISAK_REPOSITORY_ROOT}/deps")
+    target_compile_definitions(cgame_timescale_tests PRIVATE
+        KISAK_SP=1 KISAK_WEB=1 KISAK_OPENAL=1
+        KISAK_DB_REGISTRY_LIFECYCLE_SLICE=1 dNODEBUG=1)
+    target_compile_options(cgame_timescale_tests PRIVATE
+        -ffunction-sections -fdata-sections -UNDEBUG -fdeclspec)
+    target_link_options(cgame_timescale_tests PRIVATE -Wl,--gc-sections)
+endif()
+
 add_executable(iwi_image_tests
     "${CMAKE_CURRENT_LIST_DIR}/iwi_image_tests.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/qcommon/iwi_image.cpp"
@@ -669,6 +684,7 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     set_target_properties(iwi_image_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(canonical_asset_abi_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(qcommon_math_tests PROPERTIES SUFFIX ".cjs")
+    set_target_properties(cgame_timescale_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(fx_emission_math_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(fx_archive_callback_tests PROPERTIES SUFFIX ".cjs")
     set_target_properties(sound_curve_validation_tests PROPERTIES SUFFIX ".cjs")
@@ -722,6 +738,8 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_thread_context_tests>")
     add_test(NAME web_frame_profile_tests
         COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:web_frame_profile_tests>")
+    add_test(NAME cgame_timescale_tests
+        COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:cgame_timescale_tests>")
     if (TARGET canonical_runtime_prefix_tests)
         add_test(NAME canonical_runtime_prefix_tests
             COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:canonical_runtime_prefix_tests>")

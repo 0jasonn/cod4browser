@@ -917,29 +917,12 @@ void __cdecl CG_BlurServerCommand(int localClientNum)
 
 void __cdecl CG_SlowServerCommand(int localClientNum)
 {
-    int nesting; // r7
-    const char *v3; // r3
-    int v4; // r3
-    int v5; // r7
-    int v6; // r27
-    const char *v7; // r3
-    long double v8; // fp2
-    int v9; // r7
-    double v10; // fp31
-    const char *v11; // r3
-    long double v12; // fp2
-
-    v3 = Cmd_Argv(1);
-    v4 = atol(v3);
-    v5 = cmd_args.nesting;
-    v6 = v4;
-    v7 = Cmd_Argv(2);
-    v8 = atof(v7);
-    v9 = cmd_args.nesting;
-    v10 = (float)*(double *)&v8;
-    v11 = Cmd_Argv(3);
-    v12 = atof(v11);
-    CG_AlterTimescale(localClientNum, v6, v10, (float)*(double *)&v12);
+    const int duration = atol(Cmd_Argv(1));
+    // Convert numerically: long double and double need not share a layout.
+    // Reinterpreting the former as the latter turns even "1" into zero in Wasm.
+    const float startScale = static_cast<float>(atof(Cmd_Argv(2)));
+    const float endScale = static_cast<float>(atof(Cmd_Argv(3)));
+    CG_AlterTimescale(localClientNum, duration, startScale, endScale);
 }
 
 void __cdecl CG_SetClientDvarFromServer(const char *dvarname, const char *value)
