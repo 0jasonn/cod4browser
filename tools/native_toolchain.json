@@ -1,0 +1,9 @@
+{
+  "generator": "Visual Studio 18 2026",
+  "platform": "Win32",
+  "msvcTools": "14.51.36231",
+  "windowsSdk": "10.0.28000.0",
+  "d3dxPackage": "Microsoft.DXSDK.D3DX",
+  "d3dxVersion": "9.29.952.8",
+  "d3dxSha256": "ead0906ae8a26c18a7525da7490127a2110f7c58f18293738283e30e97c6ea4b"
+}

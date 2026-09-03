@@ -1,6 +1,7 @@
 #include <web/web_renderer_lighting.h>
 
 #include <gfx_d3d/gfx_world_types.h>
+#include <gfx_d3d/r_dynamiclights_core.h>
 
 #include <array>
 #include <cassert>
@@ -334,6 +335,111 @@ void TestNativeLightGridRleAndFixedPointBlend()
     }
 }
 
+void TestNativeAverageLightingSelectionAndQuantization()
+{
+    GridFixture fixture;
+    const float center[3]{16.0f, 16.0f, 32.0f};
+    const float sun[3]{0.5f, 1.0f, 2.0f};
+    std::array<std::uint8_t, 4> color{};
+    assert(WebRenderer_EvaluateAverageLighting(fixture.grid, center, sun, nullptr, color.data()));
+    // Native RB: palette mean 112, plus sun * (255 * .5), truncated/clamped.
+    assert((color == std::array<std::uint8_t, 4>{175, 239, 255, 255}));
+    // Half the corners carry no primary light. Ambient remains blended, but
+    // native primary weight is now 128/255 rather than model-query alpha 255.
+    for (unsigned i = 4; i < 8; ++i) fixture.entries[i].primaryLightIndex = 0;
+    assert(WebRenderer_EvaluateAverageLighting(fixture.grid, center, sun, nullptr, color.data()));
+    assert((color == std::array<std::uint8_t, 4>{144, 176, 240, 255}));
+    // Non-sun primary corners are excluded, including their palette values.
+    for (unsigned i = 4; i < 8; ++i) fixture.entries[i].primaryLightIndex = 2;
+    assert(WebRenderer_EvaluateAverageLighting(fixture.grid, center, sun, nullptr, color.data()));
+    assert((color == std::array<std::uint8_t, 4>{111, 175, 255, 255}));
+    for (auto &entry : fixture.entries) entry.primaryLightIndex = 2;
+    assert(WebRenderer_EvaluateAverageLighting(fixture.grid, center, sun, nullptr, color.data()));
+    assert((color == std::array<std::uint8_t, 4>{32, 64, 128, 255}));
+    const auto previous = color;
+    const float invalid[3]{std::numeric_limits<float>::quiet_NaN(), 0, 0};
+    assert(!WebRenderer_EvaluateAverageLighting(fixture.grid, invalid, sun, nullptr, color.data()));
+    assert(color == previous);
+    for (auto &entry : fixture.entries) entry.primaryLightIndex = 1;
+    fixture.entries[0].colorsIndex = 8;
+    assert(!WebRenderer_EvaluateAverageLighting(fixture.grid, center, sun, nullptr, color.data()));
+    assert(color == previous);
+}
+
+void TestCanonicalEmptyLightGrid()
+{
+    // Synthetic R_InitEmptyLightGrid representation; no retail data.
+    std::uint16_t missingRow = 0xffffu;
+    GfxLightGridColors colors[2]{};
+    std::memset(&colors[0], 37, sizeof(colors[0]));
+    std::memset(&colors[1], 81, sizeof(colors[1]));
+    GfxLightGrid grid{};
+    grid.colAxis = 1u;
+    grid.sunPrimaryLightIndex = 1u;
+    grid.rowDataStart = &missingRow;
+    grid.colors = colors;
+    grid.colorCount = 1u;
+    const float position[3]{100.0f, 200.0f, 300.0f};
+    WebRendererModelLightingSample sample{};
+    assert(WebRenderer_EvaluateModelLighting(grid, position, 0u, nullptr, sample));
+    assert(sample.extrapolated && sample.primaryLightWeight == 255u);
+    // R_ExtrapolateLightingAtPoint: absent default entry 1 selects the last
+    // palette and returns no primary light; an existing entry selects sun.
+    assert(sample.primaryLightIndex == 0u);
+    assert(std::memcmp(sample.colors.rgb, colors[0].rgb, sizeof(colors[0].rgb)) == 0);
+    grid.colorCount = 2u;
+    assert(WebRenderer_EvaluateModelLighting(grid, position, 0u, nullptr, sample));
+    assert(sample.extrapolated && sample.primaryLightIndex == 1u);
+    assert(std::memcmp(sample.colors.rgb, colors[1].rgb, sizeof(colors[1].rgb)) == 0);
+
+    const float sun[3]{0.5f, 1.0f, 2.0f};
+    std::array<std::uint8_t, 4> average{};
+    assert(WebRenderer_EvaluateAverageLighting(grid, position, sun, nullptr, average.data()));
+    assert((average == std::array<std::uint8_t, 4>{32, 64, 128, 255}));
+    missingRow = 0u; // Missing storage for a purported nonempty row is invalid.
+    assert(!WebRenderer_EvaluateModelLighting(grid, position, 0u, nullptr, sample));
+    missingRow = 0xffffu;
+    grid.colorCount = 0u;
+    assert(!WebRenderer_EvaluateModelLighting(grid, position, 0u, nullptr, sample));
+    assert(!WebRenderer_EvaluateAverageLighting(grid, position, sun, nullptr, average.data()));
+}
+
+void TestSharedTransientLights()
+{
+    using namespace kisak::dynamic_lights;
+    GfxLightDef definition{};
+    const float origin[3]{3, 4, 5}, direction[3]{1, 0, 0}, color[3]{0.25f, 0.5f, 1};
+    GfxLight omni, spot;
+    SetOmni(omni, &definition, origin, 100, color);
+    assert(omni.type == 3 && omni.def == &definition && omni.radius == 100);
+    assert(omni.origin[0] == 3 && omni.origin[1] == 4 && omni.origin[2] == 5);
+    assert(omni.color[0] == 0.25f && omni.color[2] == 1);
+    assert(!omni.canUseShadowMap && omni.spotShadowIndex == UINT32_MAX);
+    const float offset = SetSpot(spot, &definition, origin, direction, 400,
+        color, 36, 196, 0.7f, 14, true);
+    assert(std::fabs(offset - 90) < 0.0001f && std::fabs(spot.radius - 490) < 0.0001f);
+    assert(std::fabs(spot.origin[0] + 87) < 0.0001f && spot.dir[0] == -1);
+    assert(spot.type == 2 && spot.color[0] == 3.5f && spot.color[2] == 14);
+    assert(spot.exponent == 1 && spot.canUseShadowMap && spot.spotShadowIndex == UINT32_MAX);
+    assert(Near(spot.cosHalfFovOuter, std::cos(std::atan(0.4f))));
+    assert(Near(spot.cosHalfFovInner, std::cos(std::atan(0.4f) * 0.7f)));
+    std::array<GfxLight, 6> lights{};
+    std::array<const GfxLight *, 6> selected{};
+    const float view[3]{};
+    for (unsigned i = 0; i < lights.size(); ++i)
+    {
+        const float position[3]{static_cast<float>(i + 1), 0, 0};
+        SetOmni(lights[i], &definition, position, 1, color);
+        selected[i] = &lights[i];
+    }
+    lights[5].type = 2; // Spot priority outranks a nearer omni, exactly as native.
+    MostImportant(selected.data(), 6, 4, view);
+    for (const auto *expected : {&lights[0], &lights[1], &lights[2], &lights[5]})
+        assert(std::find(selected.begin(), selected.begin() + 4, expected) != selected.begin() + 4);
+    MostImportant(selected.data(), 4, 1, view);
+    assert(selected[0] == &lights[5]);
+}
+
 void TestNativeModelLightingAtlasLayoutAndCoordinates()
 {
     WebRendererModelLightingAtlas atlas;
@@ -432,6 +538,9 @@ int main()
     TestNativeDxt5NormalDecode();
     TestFractionalShadowComparisonReconstruction();
     TestNativeLightGridRleAndFixedPointBlend();
+    TestNativeAverageLightingSelectionAndQuantization();
+    TestCanonicalEmptyLightGrid();
+    TestSharedTransientLights();
     TestNativeModelLightingAtlasLayoutAndCoordinates();
     TestNativeModelLightingShaderComposition();
     TestNativeAmbientProbeLightingComposition();

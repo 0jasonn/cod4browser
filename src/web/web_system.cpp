@@ -3,6 +3,7 @@
 #include <client/cl_input.h>
 #include <client/client.h>
 #include <qcommon/common_api.h>
+#include <qcommon/qcommon.h>
 #include <universal/q_shared.h>
 #include <universal/com_math.h>
 #include <qcommon/system_info.h>
@@ -26,6 +27,7 @@ constexpr std::size_t LOG_BUFFER_SIZE = 4096;
 double g_timeBase = 0.0;
 bool g_timeBaseInitialized = false;
 bool g_framePumpStarted = false;
+bool g_quitRequested = false;
 uint32_t g_framePumpTicks = 0;
 WebFrameCallback g_frameCallback = nullptr;
 void *g_frameUserData = nullptr;
@@ -162,6 +164,16 @@ void FramePumpTrampoline(void *)
     const WebFrameInfo frame{g_framePumpTicks, Sys_Milliseconds()};
     const uint32_t callbackStart = Sys_Milliseconds();
     g_frameCallback(frame, g_frameUserData);
+    if (g_quitRequested)
+    {
+        // Unwind the canonical command/UI stack before ending the platform
+        // pump. The host flushes all writable handles before freeing the
+        // Worker and its engine heap; a failed flush must remain retryable.
+        emscripten_cancel_main_loop();
+        Com_WriteConfiguration(0);
+        Web_EmitRuntimeState("quitting", "Saving before returning to the launcher");
+        return;
+    }
     const uint32_t callbackMilliseconds = Sys_Milliseconds() - callbackStart;
     if (frame.pumpTick <= 2 || frame.pumpTick % 30 == 0 ||
         callbackMilliseconds >= 16u)
@@ -550,6 +562,11 @@ bool Web_StartFramePump(WebFrameCallback callback, void *userData)
     DispatchSystemStatus("ready", Sys_Milliseconds(), 0, 0);
     emscripten_set_main_loop_arg(FramePumpTrampoline, nullptr, 0, EM_FALSE);
     return true;
+}
+
+void Web_RequestQuit()
+{
+    g_quitRequested = true;
 }
 
 void Web_EmitRuntimeState(const char *state, const char *message)

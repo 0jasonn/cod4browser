@@ -2917,7 +2917,7 @@ int __cdecl FS_WriteFileToDir(const char *filename, const char *path, char *buff
         }
         else
         {
-            FS_Delete(filename);
+            FS_DeleteInDir(const_cast<char *>(filename), const_cast<char *>(path));
             return 0;
         }
     }

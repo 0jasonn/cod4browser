@@ -36,11 +36,20 @@ static_assert(sizeof(LightGridRow) == 12u);
 
 bool ValidGrid(const GfxLightGrid &grid) noexcept
 {
-    return grid.rowAxis < 2u && grid.colAxis < 2u &&
-        grid.rowAxis != grid.colAxis && grid.rowDataStart &&
-        grid.rawRowData && grid.entries && grid.colors &&
+    if (grid.rowAxis >= 2u || grid.colAxis >= 2u ||
+        grid.rowAxis == grid.colAxis || !grid.rowDataStart ||
+        !grid.colors || grid.colorCount == 0u)
+        return false;
+    // R_InitEmptyLightGrid publishes a missing row with no RLE or entries.
+    // Lookup then uses the canonical default palette, including in AC130.
+    if (grid.rawRowDataSize == 0u && grid.entryCount == 0u)
+        return grid.rowAxis == 0u && grid.colAxis == 1u &&
+            grid.mins[0] == 0u && grid.mins[1] == 0u && grid.mins[2] == 0u &&
+            grid.maxs[0] == 0u && grid.maxs[1] == 0u && grid.maxs[2] == 0u &&
+            grid.rowDataStart[0] == 0xffffu;
+    return grid.rawRowData && grid.entries &&
         grid.rawRowDataSize >= sizeof(LightGridRow) &&
-        grid.entryCount != 0u && grid.colorCount != 0u;
+        grid.entryCount != 0u;
 }
 
 bool UpdateFrameFogInternal(
@@ -750,7 +759,8 @@ bool WebRenderer_EvaluateModelLighting(
         std::memcpy(replacement.colors.rgb, lightGrid.colors[index].rgb,
             sizeof(replacement.colors.rgb));
         replacement.primaryLightIndex = static_cast<std::uint8_t>(
-            lightGrid.sunPrimaryLightIndex & 0xffu);
+            defaultGridEntry < lightGrid.colorCount
+                ? lightGrid.sunPrimaryLightIndex & 0xffu : 0u);
         replacement.primaryLightWeight = 255u;
     }
     else
@@ -769,6 +779,70 @@ bool WebRenderer_EvaluateModelLighting(
             std::clamp(visible * 255.0f + 0.5f, 0.0f, 255.0f));
     }
     sample = replacement;
+    return true;
+}
+
+bool WebRenderer_EvaluateAverageLighting(
+    const GfxLightGrid &lightGrid, const float samplePosition[3],
+    const float sunColor[3], const WebRendererModelLightingCallbacks *callbacks,
+    std::uint8_t outColor[4]) noexcept
+{
+    if (!samplePosition || !sunColor || !outColor || !ValidGrid(lightGrid))
+        return false;
+    for (int channel = 0; channel < 3; ++channel)
+        if (!std::isfinite(samplePosition[channel]) ||
+            !std::isfinite(sunColor[channel])) return false;
+
+    float cornerWeights[8]{};
+    const GfxLightGridEntry *cornerEntries[8]{};
+    std::uint32_t defaultGridEntry = 1u, gridPosition[3]{};
+    const auto primaryLightIndex = Lookup(lightGrid, samplePosition, callbacks,
+        cornerWeights, cornerEntries, defaultGridEntry, gridPosition);
+    std::uint8_t average[4]{0u, 0u, 0u, 128u};
+    // Native average lighting deliberately differs from model lighting: only
+    // sun-selected samples blend palettes; other primary selections use 128
+    // sun alpha and black ambient. Do not substitute the model query here.
+    if (primaryLightIndex == 1u)
+    {
+        std::uint16_t indices[8]{};
+        float weights[8]{};
+        std::uint32_t count = 0u;
+        float totalWeight = 0.0f, primaryWeight = 0.0f;
+        for (std::uint32_t corner = 0u; corner < 8u; ++corner)
+        {
+            const auto *entry = cornerEntries[corner];
+            if (!entry) continue;
+            if (entry->colorsIndex >= lightGrid.colorCount) return false;
+            if (entry->primaryLightIndex && entry->primaryLightIndex != 255u)
+            {
+                if (entry->primaryLightIndex != primaryLightIndex) continue;
+                primaryWeight += cornerWeights[corner];
+            }
+            totalWeight += cornerWeights[corner];
+            std::uint32_t index = 0u;
+            while (index < count && indices[index] != entry->colorsIndex) ++index;
+            if (index == count) indices[count++] = entry->colorsIndex;
+            weights[index] += cornerWeights[corner];
+        }
+        average[3] = 255u;
+        if (count && totalWeight > 0.0f)
+        {
+            WebRendererLightGridColors blended{};
+            BlendColors(lightGrid, indices, weights, count, totalWeight, blended);
+            for (int channel = 0; channel < 3; ++channel)
+            {
+                unsigned sum = 0u;
+                for (const auto &rgb : blended.rgb) sum += rgb[channel];
+                average[channel] = static_cast<std::uint8_t>(sum / 56u);
+            }
+            primaryWeight *= 1.0f / totalWeight;
+            average[3] = static_cast<std::uint8_t>(static_cast<double>(primaryWeight) * 255.0 + 0.5);
+        }
+    }
+    for (int channel = 0; channel < 3; ++channel)
+        outColor[channel] = static_cast<std::uint8_t>(std::clamp(
+            sunColor[channel] * (average[3] * 0.5f) + average[channel], 0.0f, 255.0f));
+    outColor[3] = 255u;
     return true;
 }
 

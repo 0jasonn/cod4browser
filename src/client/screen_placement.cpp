@@ -10,6 +10,16 @@ ScreenPlacement scrPlaceFull;
 float cg_hudSplitscreenScale;
 ScreenPlacement scrPlaceFullUnsafe;
 
+void CL_UpdateScreenPlacement()
+{
+    ScrPlace_SetupUnsafeViewport(&scrPlaceFullUnsafe, 0, 0, cls.vidConfig.displayWidth, cls.vidConfig.displayHeight);
+    ScrPlace_SetupViewport(&scrPlaceFull, 0, 0, cls.vidConfig.displayWidth, cls.vidConfig.displayHeight);
+    ScrPlace_SetupViewport(scrPlaceView, 0, 0, cls.vidConfig.displayWidth, cls.vidConfig.displayHeight);
+    // A browser window can be narrower than the native 640-pixel minimum.
+    g_console_field_width = cls.vidConfig.displayWidth > 40 ? cls.vidConfig.displayWidth - 40 : 1;
+    g_consoleField.widthInPixels = g_console_field_width;
+}
+
 #ifdef KISAK_XBOX
 const dvar_t *safeArea_horizontal;
 const dvar_t *safeArea_vertical;

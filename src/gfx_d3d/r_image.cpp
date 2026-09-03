@@ -290,7 +290,7 @@ void __cdecl Load_Texture(GfxTexture *remoteLoadDef, GfxImage *image)
     image->texture.basemap = 0;
     if (r_loadForRenderer->current.enabled)
     {
-        imageFormat = loadDef->format;
+        imageFormat = static_cast<_D3DFORMAT>(loadDef->format);
         if (loadDef->resourceSize)
         {
             image->delayLoadPixels = 0;
@@ -370,7 +370,7 @@ void __cdecl Load_Texture(GfxTexture *remoteLoadDef, GfxImage *image)
         {
             if (image->cardMemory.platform[0] != Image_GetCardMemoryAmount(
                 loadDef->flags,
-                loadDef->format,
+                static_cast<_D3DFORMAT>(loadDef->format),
                 loadDef->dimensions[0],
                 loadDef->dimensions[1],
                 loadDef->dimensions[2]))

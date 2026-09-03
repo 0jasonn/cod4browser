@@ -121,6 +121,7 @@ async function mount(root, faults = null)
         filesystem,
         io: globalThis.__KISAKCOD_SYNC_FS__,
         heap: module.HEAPU8,
+        module,
     };
 }
 
@@ -217,6 +218,26 @@ test("browser home preserves write, remove, recreate ordering across remount", a
     const summary = await harness.filesystem.checkpoint();
     assert.deepEqual(summary, { filesPersisted: 1, bytesPersisted: 3 });
     await expectRestartedFile(root, harness, "test/a.cfg", "new");
+});
+
+test("checkpoint and shutdown include pending image codec writes before closing the filesystem", async () => {
+    for (const shutdown of [false, true]) {
+        const root = await createRoot();
+        const writer = await mount(root);
+        const encoded = deferred();
+        const image = encoded.promise.then(() => writeText(writer, "thumbnail.jpg", "encoded-image"));
+        writer.module.webImageTasks = new Set([image]);
+        let complete = false;
+        const flushing = (shutdown ? writer.filesystem.flushAndUnmount() : writer.filesystem.checkpoint())
+            .then(() => { complete = true; });
+        for (let turn = 0; turn < 10; ++turn) await Promise.resolve();
+        assert.equal(complete, false);
+        assert.equal(writer.module.webImageClosing === true, shutdown);
+        encoded.resolve();
+        await flushing;
+        const verifier = await mount(root);
+        assert.equal(readText(verifier, "thumbnail.jpg"), "encoded-image");
+    }
 });
 
 test("browser home removes a profile tree durably", async () => {

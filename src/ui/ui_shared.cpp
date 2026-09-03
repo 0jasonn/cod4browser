@@ -5290,6 +5290,14 @@ void __cdecl Item_Text_Paint(UiContext *dc, itemDef_s *item)
 		return;
 #endif
 	}
+    else if ((item->itemFlags & 1) != 0)
+    {
+#ifdef KISAK_SP
+        textPtr = (char *)UI_GetSavegameInfo();
+#else
+        return;
+#endif
+    }
     else if (item->text)
     {
         textPtr = (char *)item->text;
@@ -5374,7 +5382,7 @@ void __cdecl Item_SetTextExtents(int localClientNum, itemDef_s *item, const char
     isOwnerDraw = item->type == 8;
     v4 = item->type != 8 && item->dvar;
     isDvarField = v4;
-    v3 = xAlignMode && (isOwnerDraw || isDvarField);
+    v3 = xAlignMode && (isOwnerDraw || isDvarField || (item->itemFlags & 1));
     if (v3 || Item_GetTextRect(localClientNum, item)->w == 0.0)
     {
         font = UI_GetFontHandle(&scrPlaceView[localClientNum], item->fontEnum, item->textscale);

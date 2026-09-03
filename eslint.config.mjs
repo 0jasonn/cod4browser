@@ -5,6 +5,7 @@ export default [{
         "web/asset_store.mjs",
         "web/input_controller_core.mjs",
         "web/web_audio_driver.mjs",
+        "web/web_reverb_worklet.mjs",
         "web/worker_sync_filesystem.mjs",
         "tests/node/*.mjs",
     ],

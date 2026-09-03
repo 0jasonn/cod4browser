@@ -91,10 +91,7 @@ struct GfxWindowParms // sizeof=0x28
     int aaSamples;                      // ...
 };
 
-struct GfxGammaRamp // sizeof=0x200
-{                                       // ...
-    uint16_t entries[256];      // ...
-};
+#include "r_gamma.h"
 
 #include "r_statistics.h"
 
@@ -356,8 +353,6 @@ void __cdecl  R_FatalInitError(const char *msg);
 void __cdecl  R_FatalLockError(HRESULT hr);
 const char *__cdecl R_ErrorDescription(HRESULT hr);
 void __cdecl R_SetColorMappings();
-void __cdecl R_CalcGammaRamp(GfxGammaRamp *gammaRamp);
-void __cdecl R_GammaCorrect(uint8_t *buffer, int bufSize);
 void __cdecl SetGfxConfig(const GfxConfiguration *config);
 void __cdecl R_InitThreads();
 void __cdecl R_ShutdownStreams();

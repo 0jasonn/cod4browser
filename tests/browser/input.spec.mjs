@@ -41,10 +41,16 @@ test("Escape leaves pointer lock and reaches the engine as one key press", async
     await page.goto("/");
     await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state))
         .toBe("running");
+    await page.bringToFront();
+    await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
     const canvas = page.locator("#game-canvas");
     await canvas.click({ position: { x: 12, y: 12 } });
     await expect.poll(() => page.evaluate(() => document.pointerLockElement?.id))
         .toBe("game-canvas");
+    // The DOM property can change before the queued pointerlockchange event.
+    // Wait for the real input owner to observe acquisition before releasing it.
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.input.pointerLocked))
+        .toBe(true);
     await page.evaluate(() => {
         globalThis.__browserInputEvents = [];
         globalThis.addEventListener("kisakcod:input", (event) => {

@@ -8,10 +8,13 @@
 #include <qcommon/md4.h>
 #include <qcommon/com_bsp.h>
 #include "win_net_debug.h"
+#include <Windows.h>
+#include <mmsystem.h>
 
 #ifdef KISAK_MP
 #include <client_mp/client_mp.h>
 #elif KISAK_SP
+#include <client/client.h>
 #endif
 
 const dvar_t *debugStats;
@@ -670,7 +673,11 @@ void __cdecl LiveStorage_SetStat(int __formal, int index, uint32_t value)
     {
         if (value >= 0x100)
         {
+#ifdef KISAK_SP
+            CL_DumpReliableCommands(clientConnections);
+#else
             CL_DumpReliableCommands(0);
+#endif
             Com_Error(
                 ERR_SERVERDISCONNECT,
                 "Trying to set index %i (which is a byte value) to invalid value %i",

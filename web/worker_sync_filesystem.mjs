@@ -353,6 +353,7 @@ export function createWorkerSyncFilesystem(faults = null)
 
         closeMountedFilesystem();
         acceptingWrites = true;
+        if (module) module.webImageClosing = false;
         const totalBytes = manifest.files.reduce((sum, entry) =>
             sum + (Number.isSafeInteger(entry?.size) && entry.size >= 0 ? entry.size : 0), 0);
         report?.({
@@ -640,6 +641,7 @@ export function createWorkerSyncFilesystem(faults = null)
 
     async function checkpoint(report = null)
     {
+        await Promise.all(module?.webImageTasks ?? []);
         report?.({ phase: "snapshotting", filesProcessed: 0, bytesProcessed: 0 });
         scheduleDirtyOpenFiles();
         await drainPersistenceWithProgress(report);
@@ -655,8 +657,10 @@ export function createWorkerSyncFilesystem(faults = null)
     function flushAndUnmount(report = null)
     {
         if (flushPromise) return flushPromise;
-        acceptingWrites = false;
+        if (module) module.webImageClosing = true;
         const operation = (async () => {
+            await Promise.all(module?.webImageTasks ?? []);
+            acceptingWrites = false;
             report?.({ phase: "snapshotting", filesProcessed: 0, bytesProcessed: 0 });
             scheduleDirtyOpenFiles();
             await drainPersistenceWithProgress(report);

@@ -1,0 +1,586 @@
+{
+  "capturedUtc": "2026-09-02T15:36:34.8624189Z",
+  "source": "Locally owned Steam installation, read-only inventory",
+  "steamAppId": 7940,
+  "steamBuildId": "2737681",
+  "repositoryBase": "a2d54b7d",
+  "scope": "Executable, localization, main IWD/video files, English non-multiplayer fastfiles. Hashes only; no proprietary contents.",
+  "difficulty": "Unverified: not present in active config; must be recorded during original-game New Game",
+  "settingsEvidence": "Active original-game config only; visible outcomes have not been inspected",
+  "settings": {
+    "m_filter": "0",
+    "m_forward": "0.25",
+    "m_pitch": "0.022",
+    "m_side": "0.25",
+    "m_yaw": "0.022",
+    "r_aaAlpha": "dither (fast)",
+    "r_aaSamples": "4",
+    "r_altModelLightingUpdate": "1",
+    "r_aspectRatio": "auto",
+    "r_autopriority": "0",
+    "r_customMode": "",
+    "r_debugLineWidth": "1",
+    "r_depthPrepass": "0",
+    "r_displayRefresh": "60 Hz",
+    "r_distortion": "1",
+    "r_dlightLimit": "4",
+    "r_dof_enable": "0",
+    "r_drawDecals": "1",
+    "r_drawSun": "1",
+    "r_drawWater": "1",
+    "r_fastSkin": "0",
+    "r_fullscreen": "1",
+    "r_gamma": "1.00265",
+    "r_glow_allowed": "1",
+    "r_ignorehwgamma": "0",
+    "r_inGameVideo": "1",
+    "r_lodBiasRigid": "-1000",
+    "r_lodBiasSkinned": "-1000",
+    "r_lodScaleRigid": "1",
+    "r_lodScaleSkinned": "1",
+    "r_mode": "1920x1080",
+    "r_monitor": "0",
+    "r_multiGpu": "0",
+    "r_picmip": "0",
+    "r_picmip_bump": "0",
+    "r_picmip_manual": "1",
+    "r_picmip_spec": "0",
+    "r_picmip_water": "0",
+    "r_polygonOffsetBias": "-1",
+    "r_polygonOffsetScale": "-1",
+    "r_portalBevels": "0.7",
+    "r_preloadShaders": "0",
+    "r_rendererPreference": "Default",
+    "r_specular": "1",
+    "r_texFilterAnisoMax": "4",
+    "r_texFilterAnisoMin": "16",
+    "r_texFilterMipMode": "Force Trilinear",
+    "r_vsync": "0",
+    "r_zFeather": "1",
+    "sensitivity": "2.07407",
+    "snd_cinematicVolumeScale": "0.85",
+    "snd_enableEq": "1",
+    "snd_errorOnMissing": "0",
+    "snd_khz": "44",
+    "snd_levelFadeTime": "250",
+    "snd_outputConfiguration": "Windows default",
+    "snd_slaveFadeTime": "500",
+    "snd_touchStreamFilesOnLoad": "0",
+    "snd_volume": "0.042328"
+  },
+  "hardware": {
+    "cpu": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "gpu": "NVIDIA GeForce RTX 3070 Ti",
+    "gpuDriver": "32.0.16.1088",
+    "ramBytes": 33944879104,
+    "os": "Microsoft Windows 11 Pro",
+    "osVersion": "10.0.26200"
+  },
+  "files": [
+    {
+      "path": "iw3sp.exe",
+      "bytes": 3035136,
+      "sha256": "7aec4e2e3fa9ed188809d09fc08149c9024f6208e2f296149ffd0fc90757a2ed"
+    },
+    {
+      "path": "localization.txt",
+      "bytes": 2482,
+      "sha256": "a16bb05dafc15ca5e8fc6b82dc5f8ff20332d9f4f123b769a2547428b14b33a0"
+    },
+    {
+      "path": "main/iw_00.iwd",
+      "bytes": 167780172,
+      "sha256": "95d8497f5c7ab62c8e715810c58675e3b4af51ef4c499882e720430ae07dd8f4"
+    },
+    {
+      "path": "main/iw_01.iwd",
+      "bytes": 167885112,
+      "sha256": "984c0573dfeb5a5531b0e75d4305379f2bacd3ab68690ccf904f72a26ff8b369"
+    },
+    {
+      "path": "main/iw_02.iwd",
+      "bytes": 166957774,
+      "sha256": "f3e347403a31ffeaa87caedd019955f87924c2a3b7b94999f2d5f41452acc698"
+    },
+    {
+      "path": "main/iw_03.iwd",
+      "bytes": 166904484,
+      "sha256": "eab1c2165731a06fec80c1875a8c0879f1712e3154f434e0c600de50edf5c26e"
+    },
+    {
+      "path": "main/iw_04.iwd",
+      "bytes": 167682009,
+      "sha256": "85114736cde49486c3f9be62eb8bc0764ea966f9f2a16f2686f7b4e850bb6177"
+    },
+    {
+      "path": "main/iw_05.iwd",
+      "bytes": 167489996,
+      "sha256": "b15db07a430b90c6fe60306bbd70b62eb8ca00abd63fda81c71b3b7be1d1aecb"
+    },
+    {
+      "path": "main/iw_06.iwd",
+      "bytes": 167754503,
+      "sha256": "074ae94032b228ddcd43df4bfb33f98516f12faaa678502d36ea4f83614ac32e"
+    },
+    {
+      "path": "main/iw_07.iwd",
+      "bytes": 162987361,
+      "sha256": "76cba12ffb861291619c0d4381813cee330ad04d76569549dc0695fb99d860b7"
+    },
+    {
+      "path": "main/iw_08.iwd",
+      "bytes": 167544651,
+      "sha256": "1588068e0545680205a398223d3d80abaabd1b76c690aa61267b233ba4de821b"
+    },
+    {
+      "path": "main/iw_09.iwd",
+      "bytes": 167076481,
+      "sha256": "b600a86ca1cd2b8070852d4178609243b21c15b5cf370f4c0f96050999e97d42"
+    },
+    {
+      "path": "main/iw_10.iwd",
+      "bytes": 165389824,
+      "sha256": "3dd3529f65d20b28f827f555f5e74d48bbf5abccd1ebf51b309b9c6fc3a7458c"
+    },
+    {
+      "path": "main/iw_11.iwd",
+      "bytes": 151420446,
+      "sha256": "cc1d4781f8f99a0de91322b9b5f7864042b42d22f76fa90f16dd4e80cc9774d2"
+    },
+    {
+      "path": "main/iw_12.iwd",
+      "bytes": 5559373,
+      "sha256": "a63bcfc3f4248acc63220743bced2dd2fb9384c782521b75a4dbe21f0ee2d4b5"
+    },
+    {
+      "path": "main/iw_13.iwd",
+      "bytes": 28644036,
+      "sha256": "42a4de64e9b2504d2e7af9ced686a396bdb9c2eec7213031f836f3dc529a1166"
+    },
+    {
+      "path": "main/localized_english_iw00.iwd",
+      "bytes": 168239387,
+      "sha256": "728258788df24158e12e45fd5d02336eefc5806ff61fdfa44b6f84b1e9b78f77"
+    },
+    {
+      "path": "main/localized_english_iw01.iwd",
+      "bytes": 168314744,
+      "sha256": "c06d13a18388a38c79eebacfa350aed28f440f66b21199a98575b3861e808b4c"
+    },
+    {
+      "path": "main/localized_english_iw02.iwd",
+      "bytes": 168417931,
+      "sha256": "70daa54f60730daf311a64fe6714de8a79069fd993862943ae89e888a7afcc40"
+    },
+    {
+      "path": "main/localized_english_iw03.iwd",
+      "bytes": 168443199,
+      "sha256": "0b97e15dc8ff944abdb9e31922755f909b49b261890cf683b9c424a3a659ebee"
+    },
+    {
+      "path": "main/localized_english_iw04.iwd",
+      "bytes": 168056737,
+      "sha256": "811ab1c6303b573ee3afb18a0187f80e66ade2d357141a502cc625da085d8151"
+    },
+    {
+      "path": "main/localized_english_iw05.iwd",
+      "bytes": 167906464,
+      "sha256": "d05d662f0d2d4b1e6ac8b7f822367ec0a01ead9d748d3b5ed819d45b909f37d6"
+    },
+    {
+      "path": "main/localized_english_iw06.iwd",
+      "bytes": 773661,
+      "sha256": "df764ade4b0e8a34fea5ee5f0ac750f25239130290dd456f446d83977f994efe"
+    },
+    {
+      "path": "main/video/ac130_fade.bik",
+      "bytes": 5001740,
+      "sha256": "78282c38e33e06ccfd1b1021f8aed63cb4d6046ba6133ba8a5377faf219a2e32"
+    },
+    {
+      "path": "main/video/ac130_load.bik",
+      "bytes": 27475828,
+      "sha256": "cdccbf3c477cd113bbe8e373970a9913986cafec40f04fba97d8de0ca24d2623"
+    },
+    {
+      "path": "main/video/Aftermath_fade.bik",
+      "bytes": 2646312,
+      "sha256": "27f175c0f15249ed16863cdca486d881f42cb0d6bfbea5829dbb8fc3caea0463"
+    },
+    {
+      "path": "main/video/Aftermath_load.bik",
+      "bytes": 56436240,
+      "sha256": "a11a0752df2d6cd75f41a18e9bb49f39e0c7bb2e72d99fde64a3ca6e3d84329f"
+    },
+    {
+      "path": "main/video/airlift_fade.bik",
+      "bytes": 2869156,
+      "sha256": "3166c296cc31992a8fe1b14ee5284487cf75354da8133b42f39bbcd7dbf7b8c0"
+    },
+    {
+      "path": "main/video/Airlift_load.bik",
+      "bytes": 43969700,
+      "sha256": "4598e2c095e7aeba1a81b9683dc588af0732fb76f7a40d7238f6da31080f0ffa"
+    },
+    {
+      "path": "main/video/airplane_load.bik",
+      "bytes": 16570804,
+      "sha256": "f7ed05ac206e632ca3ef864f2cadc45bffe3d5c8c86cceb9b74149aa46bb306b"
+    },
+    {
+      "path": "main/video/ambush_fade.bik",
+      "bytes": 1612240,
+      "sha256": "47dc9da5626473ad175a7c0a3c4db2e9fadaece7e6533cefe1831aa0eb19454b"
+    },
+    {
+      "path": "main/video/Ambush_load.bik",
+      "bytes": 55007864,
+      "sha256": "1b9193af9c1c27faf57e789e702373e12214770d40b06b2c533d14da5843811f"
+    },
+    {
+      "path": "main/video/armada_fade.bik",
+      "bytes": 1476712,
+      "sha256": "287e3d4c456e3d6c5a77cf4d390c92eb2fe351eecc6aa546fc1fdaa85dd3e072"
+    },
+    {
+      "path": "main/video/Armada_load.bik",
+      "bytes": 42724476,
+      "sha256": "f860b5cceb757573f1b273771e0357b0f677e7d4504d0b78aa496f386ce897aa"
+    },
+    {
+      "path": "main/video/asad_speech_180.bik",
+      "bytes": 6104104,
+      "sha256": "8143eaaef5e04365af8a6ac455ff760c3c675833174fd91580cb265dfa712b38"
+    },
+    {
+      "path": "main/video/attract.bik",
+      "bytes": 155322180,
+      "sha256": "32bec3c31c879dc65130ab10086dd440ef6284a68722a6c7667f289d5cb3532b"
+    },
+    {
+      "path": "main/video/atvi.bik",
+      "bytes": 11292236,
+      "sha256": "1a2832a87bf16f4d4e625b8764593f51485d3c21c90c1559885685e077ee12fd"
+    },
+    {
+      "path": "main/video/black.bik",
+      "bytes": 13072,
+      "sha256": "dea4aa34d6930d34448a292a7a80279932e0e10a7e3840a8cff62322ad3083e7"
+    },
+    {
+      "path": "main/video/blackout_fade.bik",
+      "bytes": 1866580,
+      "sha256": "8d1ee2e83dcd006f54e716efec8e327f33bbbb8a1e595f95395c0512260a585c"
+    },
+    {
+      "path": "main/video/Blackout_load.bik",
+      "bytes": 47148740,
+      "sha256": "a8cc48c2ded73254c2c02e6395da0e3ba4cfb4e93ec9dda9f8e61834b6d33bcc"
+    },
+    {
+      "path": "main/video/bog_a_fade.bik",
+      "bytes": 1532188,
+      "sha256": "13f3153d6d8fa75a71398ff8b64d8e4d08a5b59d7da47745cc3ee68c1966909e"
+    },
+    {
+      "path": "main/video/bog_a_load.bik",
+      "bytes": 45976436,
+      "sha256": "502b5791ae2e6b2a93670f6d6c89264a867c1389c6b00e75a27af1b6713f56fb"
+    },
+    {
+      "path": "main/video/bog_b_fade.bik",
+      "bytes": 3505364,
+      "sha256": "9fa107c8d7006dcb9b3ce33454cdb17f53a795b3c796be3ce14b87c2eeee047d"
+    },
+    {
+      "path": "main/video/bog_b_load.bik",
+      "bytes": 57911212,
+      "sha256": "d3ea59b8a139976fe0727acf4c9b08ac5fce4cc46eac1f0dd989595e23edbca4"
+    },
+    {
+      "path": "main/video/cargoship_fade.bik",
+      "bytes": 643216,
+      "sha256": "3d68fa64d1f8a0365805814a97aa4231f1accc3132b5fb556c0661edeb6eb84b"
+    },
+    {
+      "path": "main/video/cargoship_load.bik",
+      "bytes": 36508116,
+      "sha256": "f2804f76e2b20a893c70bd78459a4b2420721d9a8a306c3c7233c0d9312796b3"
+    },
+    {
+      "path": "main/video/cod_intro.bik",
+      "bytes": 128677128,
+      "sha256": "f3b1a5b7fbf4430173041a800ca9cdc37e2e00e0ea8f7f8ad908cf385fea1e1a"
+    },
+    {
+      "path": "main/video/coup_fade.bik",
+      "bytes": 2010904,
+      "sha256": "fa400809d3888cf9d180e6e94452e97cc293e9a646d4465325bbc8053eea58bb"
+    },
+    {
+      "path": "main/video/coup_load.bik",
+      "bytes": 50462932,
+      "sha256": "c3304cb3c2e5fd3b0468a22444349b03e7f2bb27113dfc7df10b9da48f57fc4d"
+    },
+    {
+      "path": "main/video/credits_load.bik",
+      "bytes": 592,
+      "sha256": "e6a8b0c29cd2327bbd1e30a59ea31ce310b7eae44a3d5712d533156fb894a431"
+    },
+    {
+      "path": "main/video/default.bik",
+      "bytes": 738168,
+      "sha256": "f3f1f00e1f04cf7da997d656e4ebd454de0cbb05e944e1e7b68af33a64d5f26a"
+    },
+    {
+      "path": "main/video/dog_vs_player_load.bik",
+      "bytes": 3362652,
+      "sha256": "6dce14efc68ac024ea38ecfc0ac6e7f8ea1a640ebba7e2a73d14374bbedbe370"
+    },
+    {
+      "path": "main/video/hunted_fade.bik",
+      "bytes": 1357548,
+      "sha256": "336d607d07b5d215f8297ffe4db844c32ae1b68e360450a46d7032d6cea899be"
+    },
+    {
+      "path": "main/video/hunted_load.bik",
+      "bytes": 27678512,
+      "sha256": "decc313b9ebb9cf170049ac2c447fdcb40300d7b2f738bac9cb627c768b163ac"
+    },
+    {
+      "path": "main/video/icbm_fade.bik",
+      "bytes": 2923116,
+      "sha256": "d7e7d3a154d0e462fa8a9194feb545ad77292e00e136ad6292125fcf45b25ecb"
+    },
+    {
+      "path": "main/video/icbm_load.bik",
+      "bytes": 57606400,
+      "sha256": "135a6be6dd56599d561f3b02fb17735731a384214053046c32cd67fc684b4ead"
+    },
+    {
+      "path": "main/video/IW_logo.bik",
+      "bytes": 10243556,
+      "sha256": "3af3739d0eeef73bab1310e1211a72b7c69bef288d5d6aad78f10a88fd8eddf8"
+    },
+    {
+      "path": "main/video/jeepride_fade.bik",
+      "bytes": 3286724,
+      "sha256": "a70fc414a3830e68365975483a9befe22db0868c1431bd1c7d3b85871cc6fdf9"
+    },
+    {
+      "path": "main/video/jeepride_load.bik",
+      "bytes": 40104192,
+      "sha256": "63a9922c7207fc6329aadad6a4531e54ec3114dfa3726cb91dd73202f075e5b6"
+    },
+    {
+      "path": "main/video/killhouse_fade.bik",
+      "bytes": 2255644,
+      "sha256": "f931bbb8bf171bbf85a7ad7a918c718ad12b54b0c6895260192b7a1e2f90822b"
+    },
+    {
+      "path": "main/video/killhouse_load.bik",
+      "bytes": 38162616,
+      "sha256": "4aaae58d499450c61c3ec2b001da0eb14b67c7c7ae7b4aadd2443202f9593547"
+    },
+    {
+      "path": "main/video/Killhouse_monitor1.bik",
+      "bytes": 3517276,
+      "sha256": "c75db399074429719cda5bfdf1979e16bf492637a6b8a911cc869e93e539bfb8"
+    },
+    {
+      "path": "main/video/launchfacility_a_fade.bik",
+      "bytes": 2776248,
+      "sha256": "742bf346b5875aeb797edce67b07919b64ad2bdc003933554ebd6d1afb595a2b"
+    },
+    {
+      "path": "main/video/launchfacility_a_load.bik",
+      "bytes": 42176616,
+      "sha256": "34288b82f3c53d4df232112e43c2b9e2a6ae83b5add6815b9147f584fcfb5ad5"
+    },
+    {
+      "path": "main/video/launchfacility_b_fade.bik",
+      "bytes": 1788004,
+      "sha256": "ea07d764ec9c3055aa732908c04de099162c3834c141bb85a2e0dfcec5b3881c"
+    },
+    {
+      "path": "main/video/launchfacility_b_load.bik",
+      "bytes": 51697572,
+      "sha256": "bc2464022aa808a518259e310da82c457d2bfce5d258a2957ce1450eaaa0ebbf"
+    },
+    {
+      "path": "main/video/legal.bik",
+      "bytes": 4241772,
+      "sha256": "58ab95072686d083f8b5d6ccde6eb1c54ffedbaf4f5e16a66a4631b55f98963e"
+    },
+    {
+      "path": "main/video/scoutsniper_fade.bik",
+      "bytes": 4662048,
+      "sha256": "9e029aa5e14ee700fa68ca131ff924025421705e1a043092015dc05da6eccc83"
+    },
+    {
+      "path": "main/video/scoutsniper_load.bik",
+      "bytes": 54830176,
+      "sha256": "e138cbdec7cd907d6f82b9b1cc5df8c331775d652e2188b51e573481e23a86fb"
+    },
+    {
+      "path": "main/video/simplecredits_load.bik",
+      "bytes": 592,
+      "sha256": "e6a8b0c29cd2327bbd1e30a59ea31ce310b7eae44a3d5712d533156fb894a431"
+    },
+    {
+      "path": "main/video/sniperescape_load.bik",
+      "bytes": 30514056,
+      "sha256": "15426ac821c124cc894e907d19fff076afd47abc7a2e0925899156938af0384c"
+    },
+    {
+      "path": "main/video/village_assault_fade.bik",
+      "bytes": 1934608,
+      "sha256": "06ccd1d1a05d028decfdb977e8f6c4c82a32c840d207730cc9d58c2c5f8ca0a3"
+    },
+    {
+      "path": "main/video/village_assault_load.bik",
+      "bytes": 42507480,
+      "sha256": "2b0964d6383bce39cc3ae151861fdbd1fd657798656e0c8e04670124dce386a0"
+    },
+    {
+      "path": "main/video/village_defend_fade.bik",
+      "bytes": 1468184,
+      "sha256": "f08bda6a3fba03b0be348ba04e5043ac0b4e603be18f4101402fe450e60b62d3"
+    },
+    {
+      "path": "main/video/village_defend_load.bik",
+      "bytes": 40812360,
+      "sha256": "45ff37eb4b07a83d5fadf5eb6a8d1c9d80db225f28f20dcc8a062b909959fd6a"
+    },
+    {
+      "path": "main/video/zakhaev_escape.bik",
+      "bytes": 46785176,
+      "sha256": "73f3dba648ac2bbc3212b5a9aa877e4e9aadebaf64f80b0d319b54bc16b49c0b"
+    },
+    {
+      "path": "zone/english/ac130.ff",
+      "bytes": 47672613,
+      "sha256": "ab5d2d3c3a95a69a483b70861f0c3f21b82c4fcb7c9d7627d8dac5b95935c057"
+    },
+    {
+      "path": "zone/english/aftermath.ff",
+      "bytes": 46429546,
+      "sha256": "83963958d79bca044d15abaa9ab864093d431f939c8618f872358672d30eea11"
+    },
+    {
+      "path": "zone/english/airlift.ff",
+      "bytes": 81437227,
+      "sha256": "51af6a9b352adce0b95c6f7ed94c52567dfd103bb3ab0b1470765bd5cf90ef6a"
+    },
+    {
+      "path": "zone/english/airplane.ff",
+      "bytes": 46494472,
+      "sha256": "3e919c9bea058a08166254a1161ffc1e9deeb3a0badab669c7ef7b366fcf3278"
+    },
+    {
+      "path": "zone/english/ambush.ff",
+      "bytes": 71915913,
+      "sha256": "8c397d6a6c6ebf03d5566ae0b355ba2ca1f88206ddf96c20f5856f81a275d22b"
+    },
+    {
+      "path": "zone/english/armada.ff",
+      "bytes": 88433088,
+      "sha256": "59c7e4a9f3c9b325428bdc2fdc6a43694295d066b3b10cb27ff50cb00b397c76"
+    },
+    {
+      "path": "zone/english/blackout.ff",
+      "bytes": 76424169,
+      "sha256": "c206bec88b58a94f7012bece864ce592fa263637fb7d272897fe778e63926f85"
+    },
+    {
+      "path": "zone/english/bog_a.ff",
+      "bytes": 75753998,
+      "sha256": "2db3a3977e3e6494f38552cce174aebb073e1cfc6ca5c3250cdcd7dcfa3380b8"
+    },
+    {
+      "path": "zone/english/bog_b.ff",
+      "bytes": 74396626,
+      "sha256": "93fba78e363e0e6c88f5fb755423fc29a2f2fbc88313366be3189d9baa16cc8c"
+    },
+    {
+      "path": "zone/english/cargoship.ff",
+      "bytes": 83449668,
+      "sha256": "7203f000e0b17347145de37bcac12b2cba7228465ddd8825cc512db12bf8135f"
+    },
+    {
+      "path": "zone/english/code_post_gfx.ff",
+      "bytes": 872586,
+      "sha256": "81725a3492080f836a800b59e3378ed63e445ff62bb922e67f40f012216f70cd"
+    },
+    {
+      "path": "zone/english/common.ff",
+      "bytes": 75656851,
+      "sha256": "dd269840ad20f4c67cd96d1f42b0e5571bc61645c91b1866b65bd08036a6b306"
+    },
+    {
+      "path": "zone/english/coup.ff",
+      "bytes": 82680606,
+      "sha256": "53b54ddb6af4713017fefac4d991ab6de5bd583c79f682c7e9814972eb9c0228"
+    },
+    {
+      "path": "zone/english/hunted.ff",
+      "bytes": 78387035,
+      "sha256": "6b54c1434f4b63122fb8bc5c237bdf3ff52dc252bceea957e607a7b961e21fac"
+    },
+    {
+      "path": "zone/english/icbm.ff",
+      "bytes": 79781091,
+      "sha256": "df9e09c707535857e897465dab611906e6929f9b03d514cc98fb1755c6d5763d"
+    },
+    {
+      "path": "zone/english/jeepride.ff",
+      "bytes": 96396693,
+      "sha256": "f42869a6a347002becf1c533dea34eaec0256bb9b9261667bce255e14e9e19a5"
+    },
+    {
+      "path": "zone/english/killhouse.ff",
+      "bytes": 70391800,
+      "sha256": "391e29651af7e796c0227db9a10a095500106fe6c4e59ce75ea8f892609b4a3c"
+    },
+    {
+      "path": "zone/english/launchfacility_a.ff",
+      "bytes": 73729161,
+      "sha256": "ec24b63ded6dc9a5d30c6e8f065529c0c6a13626f63a832fbedb4febb3b0bb4c"
+    },
+    {
+      "path": "zone/english/launchfacility_b.ff",
+      "bytes": 68514743,
+      "sha256": "338329a20d94540c9ef3c2d5c1ca5b3bc4447c7fe96a80fab819bc4688490b13"
+    },
+    {
+      "path": "zone/english/scoutsniper.ff",
+      "bytes": 86264016,
+      "sha256": "7f2fd6d7e1f5b11e34c0cd8f08fb09bc71d5ec6ce4d8da0b53cf22e37f926d4c"
+    },
+    {
+      "path": "zone/english/simplecredits.ff",
+      "bytes": 26205785,
+      "sha256": "c9e3f36dd5a29e9ff599949e8ba1aa52b8b368888976005ab4056e81a13031c9"
+    },
+    {
+      "path": "zone/english/sniperescape.ff",
+      "bytes": 79619695,
+      "sha256": "c3c184d083c81810b1badb37e7997019f7a36729f03f264a00d4d83b941adcb8"
+    },
+    {
+      "path": "zone/english/ui.ff",
+      "bytes": 53174,
+      "sha256": "f961af1e57edf733a513a946648f3a9ad14e991950392bff6f08823020dc54e4"
+    },
+    {
+      "path": "zone/english/village_assault.ff",
+      "bytes": 78462516,
+      "sha256": "720614793da488e89e208b2d15535f612139195456a465b0137f84b3d70fd6c5"
+    },
+    {
+      "path": "zone/english/village_defend.ff",
+      "bytes": 79700971,
+      "sha256": "da1e9a36895d3160c5dfa9ff3ac13fd322253ef5d200d83caf39ddc823f290e4"
+    }
+  ]
+}

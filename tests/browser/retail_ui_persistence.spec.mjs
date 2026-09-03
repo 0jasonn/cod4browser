@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -21,12 +21,328 @@ const test = base.extend({
             await use(page);
         } finally {
             try {
-                await context.close();
+                if (testInfo.status !== testInfo.expectedStatus && !page.isClosed()) {
+                    const reverb = await page.evaluate(() => {
+                        const driver = globalThis.__observedReverbDriver;
+                        return driver ? { telemetry: driver.publishTelemetry(),
+                            contextState: driver.context?.state,
+                            diagnostics: globalThis.__reverbDiagnostics,
+                            messages: globalThis.__reverbMessages,
+                            sources: [...driver.sources.values()].map((source) => ({
+                                alias: source.aliasName, wet: source.wet, gain: source.gain,
+                                state: source.state })) } : null;
+                    });
+                    if (reverb) await writeFile(testInfo.outputPath("reverb-failure.json"),
+                        JSON.stringify(reverb, null, 2));
+                }
             } finally {
-                await rm(profile, { recursive: true, force: true, maxRetries: 5 });
+                try {
+                    await context.close();
+                } finally {
+                    await rm(profile, { recursive: true, force: true, maxRetries: 5 });
+                }
             }
         }
     },
+});
+
+test("production canonical reverb controls affect playing Killhouse audio", {
+    tag: ["@retail-reverb", "@product"],
+}, async ({ retailPage: page }, testInfo) => {
+    test.skip(process.env.KISAK_WEB_PRODUCT_TEST !== "1", "Runs against the production site.");
+    test.setTimeout(480_000);
+    const failures = [];
+    page.on("pageerror", (error) => failures.push(String(error)));
+    await page.addInitScript(() => {
+        globalThis.__reverbScene = null;
+        globalThis.addEventListener("kisakcod:renderer-scene-frame", ({ detail }) => {
+            globalThis.__reverbScene = detail;
+        });
+    });
+    await page.goto("/");
+    await expect(page.locator("html")).toHaveAttribute("data-runtime-state", "running");
+    await page.evaluate(async () => {
+        const { WebAudioDriver } = await import("/web_audio_driver.mjs");
+        const original = WebAudioDriver.prototype.handleCommand;
+        globalThis.__reverbMessages = [];
+        globalThis.__reverbDiagnostics = [];
+        const diagnostic = WebAudioDriver.prototype.diagnostic;
+        WebAudioDriver.prototype.diagnostic = function (message) {
+            globalThis.__reverbDiagnostics.push(String(message));
+            return diagnostic.call(this, message);
+        };
+        WebAudioDriver.prototype.handleCommand = function (command) {
+            const result = original.call(this, command);
+            globalThis.__observedReverbDriver = this;
+            if (command.op === "room-type" || command.wet > 0) {
+                const messages = globalThis.__reverbMessages;
+                messages.push({ op: command.op, room: command.id, wet: command.wet,
+                    alias: command.aliasName, at: performance.now() });
+                if (messages.length > 2000) messages.shift();
+            }
+            return result;
+        };
+    });
+    const chooser = page.waitForEvent("filechooser");
+    await page.locator("#portable-install-button").click();
+    await (await chooser).setFiles(retailRoot);
+    await expect(page.locator(".asset-control")).toHaveAttribute("data-asset-state", "ready", { timeout: 300_000 });
+    await expect(page.locator("#boot-log")).toContainText("canonical runtime started", { timeout: 300_000 });
+    const command = async (text) => {
+        await page.locator("#engine-command-input").fill(text);
+        await page.locator("#engine-command-submit").click();
+        await expect(page.locator("#engine-command-status")).toHaveText(`Accepted: ${text}`);
+    };
+    await command("map killhouse");
+    await expect.poll(() => page.evaluate(() => globalThis.__reverbScene?.worldName),
+        { timeout: 300_000 }).toContain("killhouse");
+    await page.locator("#game-canvas").click({ position: { x: 5, y: 5 } });
+    await expect.poll(() => page.evaluate(() => {
+        const driver = globalThis.__observedReverbDriver;
+        return driver.roomType === 17 && [...driver.sources.values()].some((source) =>
+            source.state === "playing" && Math.abs(source.wet - 0.3) < 1e-6);
+    })).toBe(true);
+    const baseline = await page.evaluate(() => {
+        const driver = globalThis.__observedReverbDriver;
+        return { room: driver.roomType, sources: [...driver.sources.values()]
+            .filter((source) => source.state === "playing")
+            .map((source) => ({ alias: source.aliasName, wet: source.wet })) };
+    });
+    // Exercise the existing sound console API, without replacing any alias,
+    // PCM, mission script, player action, or objective. This is a device
+    // qualification, not evidence of an authored campaign reverb transition.
+    // The cgame clears the shellshock priority every frame when no shock is
+    // active (EndShellShockSound). Use the level console API, then restore
+    // the observed Killhouse exterior preset after the device check.
+    await command("snd_setEnvironmentEffects level cave 1 0.75 1000");
+    await expect.poll(() => page.evaluate(() => {
+        const driver = globalThis.__observedReverbDriver;
+        return { room: driver.roomType, ready: driver.reverbNode !== null };
+    })).toEqual({ room: 8, ready: true });
+    await expect.poll(() => page.evaluate(() => [...globalThis.__observedReverbDriver.sources.values()]
+        .some((source) => source.state === "playing" && source.wet >= 0.74 && source.gain > 0)),
+    { timeout: 20_000 }).toBe(true);
+    await page.evaluate(() => {
+        const driver = globalThis.__observedReverbDriver;
+        const analyser = driver.context.createAnalyser();
+        analyser.fftSize = 2048;
+        driver.reverbNode.connect(analyser);
+        globalThis.__wetAnalyser = analyser;
+    });
+    await expect.poll(() => page.evaluate(() => {
+        const samples = new Float32Array(2048);
+        globalThis.__wetAnalyser.getFloatTimeDomainData(samples);
+        return samples.reduce((sum, value) => sum + value * value, 0);
+    }), { timeout: 20_000 }).toBeGreaterThan(1e-12);
+    const evidence = await page.evaluate(() => {
+        const driver = globalThis.__observedReverbDriver;
+        const samples = new Float32Array(2048);
+        globalThis.__wetAnalyser.getFloatTimeDomainData(samples);
+        return { telemetry: driver.publishTelemetry(), contextState: driver.context.state,
+            wetEnergy: samples.reduce((sum, value) => sum + value * value, 0),
+            messages: globalThis.__reverbMessages,
+            sources: [...driver.sources.values()].filter((source) => source.state === "playing")
+                .map((source) => ({ alias: source.aliasName, wet: source.wet, gain: source.gain })) };
+    });
+    expect(evidence.contextState).toBe("running");
+    expect(evidence.messages.some(({ wet }) => wet > 0.300001 && wet < 0.74)).toBe(true);
+    await command("snd_setEnvironmentEffects level mountains 1 0.3 500");
+    await expect.poll(() => page.evaluate(() => {
+        const driver = globalThis.__observedReverbDriver;
+        return driver.roomType === 17 && [...driver.sources.values()].some((source) =>
+            source.state === "playing" && Math.abs(source.wet - 0.3) < 1e-6);
+    })).toBe(true);
+    expect(await page.evaluate(() => globalThis.__reverbDiagnostics)).toEqual([]);
+    expect(failures).toEqual([]);
+    expect(await page.evaluate(() => "__KISAKCOD_WEB__" in globalThis)).toBe(false);
+    await writeFile(testInfo.outputPath("reverb-evidence.json"), JSON.stringify({ baseline, ...evidence }, null, 2));
+    await testInfo.attach("reverb-evidence", { contentType: "application/json",
+        body: Buffer.from(JSON.stringify({ baseline, ...evidence })) });
+});
+
+test("production shipped brightness slider changes menu and world pixels", {
+    tag: ["@retail-gamma", "@product"],
+}, async ({ retailPage: page }, testInfo) => {
+    test.skip(process.env.KISAK_WEB_PRODUCT_TEST !== "1", "Runs against the production site.");
+    test.setTimeout(480_000);
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(String(error)));
+    await page.addInitScript(() => {
+        globalThis.__gammaScene = null;
+        addEventListener("kisakcod:renderer-scene-frame", ({ detail }) => {
+            globalThis.__gammaScene = detail;
+        });
+    });
+    await page.goto("/");
+    await expect(page.locator("html")).toHaveAttribute("data-runtime-state", "running");
+    const chooser = page.waitForEvent("filechooser");
+    await page.locator("#portable-install-button").click();
+    await (await chooser).setFiles(retailRoot);
+    await expect(page.locator(".asset-control")).toHaveAttribute("data-asset-state", "ready", { timeout: 300_000 });
+    await expect(page.locator("#boot-log")).toContainText("canonical runtime started", { timeout: 300_000 });
+    const command = async (text) => {
+        await page.locator("#engine-command-input").fill(text);
+        await page.locator("#engine-command-submit").click();
+        await expect(page.locator("#engine-command-status")).toHaveText(`Accepted: ${text}`);
+    };
+    const meanPixel = () => page.evaluate(() => {
+        const sample = new OffscreenCanvas(32, 18);
+        const context = sample.getContext("2d");
+        context.drawImage(document.querySelector("#game-canvas"), 0, 0, 32, 18);
+        const pixels = context.getImageData(0, 0, 32, 18).data;
+        let total = 0;
+        for (let i = 0; i < pixels.length; i += 4) total += pixels[i] + pixels[i + 1] + pixels[i + 2];
+        return total / (32 * 18 * 3);
+    });
+    await command("openmenu main_options");
+    const canvas = page.locator("#game-canvas");
+    // Canonical centered 640x480 menu positions work at either display aspect.
+    const clickMenu = async (x, y) => {
+        const bounds = await canvas.boundingBox();
+        await canvas.click({ position: {
+            x: (bounds.width - bounds.height * 4 / 3) / 2 + x * bounds.height / 480,
+            y: y * bounds.height / 480,
+        } });
+    };
+    await clickMenu(190, 45); // Graphics
+    await clickMenu(454, 130); // Brightness slider, near minimum
+    await command("r_gamma");
+    await expect(page.locator("#boot-log")).toContainText('"r_gamma" is: "0.5');
+    const lowMenu = await meanPixel();
+    expect(lowMenu).toBeGreaterThan(0);
+    await canvas.screenshot({ path: testInfo.outputPath("brightness-low.png") });
+    await clickMenu(534, 130); // Same canonical slider, near maximum
+    await command("r_gamma");
+    await expect(page.locator("#boot-log")).toContainText('"r_gamma" is: "2.9');
+    await expect.poll(meanPixel).toBeGreaterThan(lowMenu + 20);
+    const highMenu = await meanPixel();
+    await canvas.screenshot({ path: testInfo.outputPath("brightness-high.png") });
+
+    // Loaded-world display qualification only; no mission progress is inferred.
+    await command("map killhouse");
+    await expect.poll(() => page.evaluate(() => globalThis.__gammaScene?.worldName),
+        { timeout: 300_000 }).toContain("killhouse");
+    await expect.poll(meanPixel).toBeGreaterThan(30);
+    const highWorld = await meanPixel();
+    await command("r_gamma 0.5");
+    await expect.poll(meanPixel).toBeLessThan(highWorld - 20);
+    const lowWorld = await meanPixel();
+    await command("r_gamma 0.8");
+    expect(errors).toEqual([]);
+    expect(await page.evaluate(() => "__KISAKCOD_WEB__" in globalThis)).toBe(false);
+    await writeFile(testInfo.outputPath("gamma-evidence.json"), JSON.stringify({
+        browser: page.context().browser()?.version(), lowMenu, highMenu, lowWorld, highWorld, errors,
+    }, null, 2));
+});
+
+test("production shipped display Apply and in-game restart preserve the loaded mission", {
+    tag: ["@retail-display", "@product"],
+}, async ({ retailPage: page }, testInfo) => {
+    test.skip(process.env.KISAK_WEB_PRODUCT_TEST !== "1", "Runs against the production site.");
+    test.setTimeout(480_000);
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(String(error)));
+    await page.addInitScript(() => {
+        globalThis.__displayScene = null;
+        globalThis.__displayView = null;
+        globalThis.__displayLogs = [];
+        const NativeWorker = globalThis.Worker;
+        globalThis.Worker = class extends NativeWorker {
+            constructor(...args) {
+                super(...args);
+                this.addEventListener("message", ({ data }) => {
+                    if (data.type === "log") globalThis.__displayLogs.push(String(data.message));
+                });
+            }
+        };
+        addEventListener("kisakcod:renderer-scene-frame", ({ detail }) => {
+            globalThis.__displayScene = detail;
+        });
+        addEventListener("kisakcod:renderer-scene-view", ({ detail }) => {
+            globalThis.__displayView = detail;
+        });
+    });
+    await page.goto("/");
+    const canvas = page.locator("#game-canvas");
+    const size = () => canvas.evaluate((element) => [element.width, element.height]);
+    const command = async (text) => {
+        await page.locator("#engine-command-input").fill(text);
+        await page.locator("#engine-command-submit").click();
+        await expect(page.locator("#engine-command-status")).toHaveText(`Accepted: ${text}`);
+    };
+    const clickMenu = async (x, y) => {
+        const bounds = await canvas.boundingBox();
+        await canvas.click({ position: {
+            x: (bounds.width - bounds.height * 4 / 3) / 2 + x * bounds.height / 480,
+            y: y * bounds.height / 480,
+        } });
+    };
+    try {
+        const chooser = page.waitForEvent("filechooser");
+        await page.locator("#portable-install-button").click();
+        await (await chooser).setFiles(retailRoot);
+        await expect(page.locator(".asset-control")).toHaveAttribute("data-asset-state", "ready", { timeout: 300_000 });
+        await expect(page.locator("#boot-log")).toContainText("canonical runtime started", { timeout: 300_000 });
+        await command("r_mode Automatic; vid_restart");
+        await expect.poll(() => canvas.evaluate((element) => element.width)).toBeGreaterThan(640);
+        await command("openmenu main_options");
+        await clickMenu(190, 45); // Graphics, in canonical centered 640x480 coordinates.
+        await clickMenu(480, 42); // Video Mode: Automatic -> 640x480.
+        await clickMenu(535, 464); // Apply.
+        await clickMenu(360, 260); // Native Apply Settings confirmation: Yes.
+        await expect.poll(size).toEqual([640, 480]);
+        await canvas.screenshot({ path: testInfo.outputPath("display-applied.png") });
+        const bounds = await canvas.boundingBox();
+        expect(bounds.width / bounds.height).toBeCloseTo(4 / 3, 2);
+        await command("quit");
+        await expect(page.locator("html")).toHaveAttribute("data-runtime-state", "stopped");
+        await page.getByRole("button", { name: "Start game", exact: true }).click();
+        await expect(page.locator("#boot-log")).toContainText("canonical runtime started");
+        await expect.poll(size).toEqual([640, 480]);
+        await command("r_mode Automatic; vid_restart");
+        await command("map killhouse");
+        await expect.poll(() => page.evaluate(() => globalThis.__displayScene?.worldName),
+            { timeout: 300_000 }).toContain("killhouse");
+        await page.setViewportSize({ width: 1100, height: 850 });
+        await expect.poll(() => page.evaluate(() => {
+            const canvas = document.querySelector("#game-canvas");
+            const bounds = canvas.getBoundingClientRect();
+            const viewport = globalThis.__displayView?.viewport;
+            return canvas.width === Math.round(bounds.width * devicePixelRatio) &&
+                canvas.height === Math.round(bounds.height * devicePixelRatio) &&
+                viewport?.width === canvas.width && viewport?.height === canvas.height;
+        })).toBe(true);
+        // Let the authored opening camera/fall settle before comparing the
+        // restored view. No player, script, objective or save state is injected.
+        await expect.poll(() => page.evaluate(() => globalThis.__displayView?.time),
+            { timeout: 30_000 }).toBeGreaterThanOrEqual(6000);
+        const before = await page.evaluate(() => globalThis.__displayView);
+        await page.evaluate(() => { globalThis.__displayView = null; globalThis.__displayScene = null; });
+        await command("r_mode 1280x720; vid_restart");
+        // Keep the actual Worker logs: native reload can roll the launcher's
+        // bounded 160-line display past this message before the next poll.
+        await expect.poll(() => page.evaluate(() => globalThis.__displayLogs.join("\n")),
+            { timeout: 60_000 }).toContain("Game saved for vid_restart");
+        await expect.poll(size, { timeout: 60_000 }).toEqual([1280, 720]);
+        await expect.poll(() => page.evaluate(() => globalThis.__displayView?.viewport),
+            { timeout: 300_000 }).toEqual({ x: 0, y: 0, width: 1280, height: 720 });
+        await expect.poll(() => page.evaluate(() => globalThis.__displayScene?.worldName)).toContain("killhouse");
+        await expect(page.locator("html")).toHaveAttribute("data-runtime-state", "running");
+        await canvas.screenshot({ path: testInfo.outputPath("display-mission-restored.png") });
+        const after = await page.evaluate(() => globalThis.__displayView);
+        expect(after.time).toBeGreaterThanOrEqual(before.time);
+        for (let axis = 0; axis < 3; ++axis)
+            expect(Math.abs(after.viewOrigin[axis] - before.viewOrigin[axis])).toBeLessThan(5);
+        expect(errors).toEqual([]);
+        expect(await page.evaluate(() => "__KISAKCOD_WEB__" in globalThis)).toBe(false);
+        await writeFile(testInfo.outputPath("display-evidence.json"), JSON.stringify({
+            browser: page.context().browser()?.version(), before,
+            after, errors,
+        }, null, 2));
+    } finally {
+        await writeFile(testInfo.outputPath("display-engine.log"),
+            await page.evaluate(() => globalThis.__displayLogs.join("\n")));
+    }
 });
 
 test.skip(!retailRoot,
@@ -51,7 +367,7 @@ async function call(page, name, ...arguments_)
 }
 
 test("canonical retail main menu starts without a map", { tag: "@retail-ui" },
-    async ({ retailPage: page }) => {
+    async ({ retailPage: page }, testInfo) => {
         test.setTimeout(600_000);
         await page.addInitScript(() => {
             globalThis.__uiLogs = [];
@@ -95,6 +411,9 @@ test("canonical retail main menu starts without a map", { tag: "@retail-ui" },
         await page.waitForTimeout(1_000);
         expect(await call(page, "_KisakWeb_TestUiDrawCount"))
             .toBeGreaterThan(0);
+        await page.locator("#game-canvas").screenshot({
+            path: testInfo.outputPath("main-menu.png"),
+        });
 
         const submitCommand = async (command) => {
             await page.locator("#engine-command-input").fill(command);
@@ -178,6 +497,10 @@ test("canonical retail main menu starts without a map", { tag: "@retail-ui" },
         await expect.poll(() => call(page, "_KisakWeb_TestUiState", 8))
             .toBe(3);
         const canvas = page.locator("#game-canvas");
+        // A persistent Chrome tab can retain emulated DOM focus after the
+        // directory picker while its browser widget is inactive. Pointer lock
+        // requires the real tab to be active, as it is during a player's click.
+        await page.bringToFront();
         await canvas.click();
         await expect.poll(() => page.evaluate(() =>
             document.pointerLockElement?.id)).toBe("game-canvas");
@@ -223,6 +546,48 @@ test("canonical retail main menu starts without a map", { tag: "@retail-ui" },
             expect(timing.wallMs).toBeGreaterThan(3_000);
             expect(timing.gameMs / timing.wallMs).toBeGreaterThan(0.85);
             expect(timing.gameMs / timing.wallMs).toBeLessThan(1.15);
+        });
+
+        await test.step("canonical EQ controls reach playing owned sounds and bypass", async () => {
+            const logCursor = await page.evaluate(() => globalThis.__uiLogs.length);
+            await submitCommand("snd_setEq");
+            await expect.poll(() => page.evaluate((cursor) =>
+                globalThis.__uiLogs.slice(cursor).some(({ text }) =>
+                    text.includes("Current EQ Settings")), logCursor)).toBe(true);
+            const channels = await page.evaluate((cursor) =>
+                globalThis.__uiLogs.slice(cursor).flatMap(({ text }) =>
+                    [...text.matchAll(/^\+ ([a-zA-Z0-9_]+)\s*$/gm)].map((match) => match[1])), logCursor);
+            expect(channels.length).toBeGreaterThan(0);
+            await submitCommand("snd_enableEq 1");
+            for (const channel of channels)
+                await submitCommand(`snd_setEq ${channel} 1 2 bell -6 1000 0.75`);
+            await expect.poll(() => page.evaluate(() => {
+                const driver = globalThis.__KISAKCOD_WEB__.module.audioDriver;
+                return [...driver.sources.values()].some((source) =>
+                    source.state === "playing" && source.eqBands[25] === 1 &&
+                    source.eqBands[27] === -6 && source.eqNodes.length > 0);
+            }), { timeout: 30_000 }).toBe(true);
+            const filtered = await page.evaluate(() => {
+                const driver = globalThis.__KISAKCOD_WEB__.module.audioDriver;
+                const source = [...driver.sources.values()].find((value) =>
+                    value.state === "playing" && value.eqNodes.length && value.eqBands[27] === -6);
+                const magnitude = new Float32Array(1), phase = new Float32Array(1);
+                source.eqNodes.at(-1).getFrequencyResponse(new Float32Array([1000]), magnitude, phase);
+                return { alias: source.aliasName, contextState: driver.context.state,
+                    magnitude: magnitude[0], filters: source.eqNodes.length };
+            });
+            console.log("owned EQ device probe", filtered);
+            expect(filtered.alias.length).toBeGreaterThan(0);
+            expect(filtered.contextState).toBe("running");
+            expect(filtered.magnitude).toBeCloseTo(10 ** (-6 / 20), 5);
+            await submitCommand("snd_enableEq 0");
+            await expect.poll(() => page.evaluate(() =>
+                [...globalThis.__KISAKCOD_WEB__.module.audioDriver.sources.values()]
+                    .every((source) => source.eqNodes.length === 0))).toBe(true);
+            const errors = await page.evaluate((cursor) =>
+                globalThis.__uiLogs.slice(cursor).filter(({ text }) =>
+                    text.includes("Rejected Web Audio EQ")), logCursor);
+            expect(errors).toEqual([]);
         });
 
         await page.reload();
@@ -318,6 +683,19 @@ test("canonical retail main menu starts without a map", { tag: "@retail-ui" },
         saveLifecycleCursor), { timeout: 300_000 }).toBe(true);
         await expect.poll(() => gameplayState(17), { timeout: 120_000 })
             .toBeGreaterThan(0);
+        // The native start-level save is committed before the first draw.
+        // Its deferred capture must eventually publish without a devsave.
+        await expect.poll(() => call(page, "_KisakWeb_TestSaveState", 14),
+            { timeout: 30_000 }).toBeGreaterThan(1000);
+        await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.checkpoint());
+        const startImage = await page.evaluate(async () => {
+            let directory = await navigator.storage.getDirectory();
+            for (const name of ["kisakcod-web", "home", "players", "profiles", "kisak_web_test_b", "save"])
+                directory = await directory.getDirectoryHandle(name);
+            const file = await (await directory.getFileHandle("airplane.jpg")).getFile();
+            return Array.from(new Uint8Array(await file.arrayBuffer()));
+        });
+        await writeFile(testInfo.outputPath("start-level-thumbnail.jpg"), Buffer.from(startImage));
         await submitCommand("give all");
         await expect.poll(() => gameplayState(7), { timeout: 30_000 })
             .toBeGreaterThan(0);
@@ -347,6 +725,9 @@ test("canonical retail main menu starts without a map", { tag: "@retail-ui" },
         expect(await call(page, "_KisakWeb_TestSaveState", 2)).toBe(1);
         expect(await call(page, "_KisakWeb_TestSaveState", 7)).toBe(1);
         expect(await call(page, "_KisakWeb_TestSaveState", 8)).toBe(1);
+        expect(await call(page, "_KisakWeb_TestSaveState", 9)).toBe(15);
+        expect(await call(page, "_KisakWeb_TestSaveState", 10)).toBeGreaterThan(1000);
+        await expect.poll(() => call(page, "_KisakWeb_TestSaveState", 11)).toBe(1);
         await page.evaluate(() =>
             globalThis.__KISAKCOD_WEB__.module.checkpoint());
 
@@ -359,6 +740,9 @@ test("canonical retail main menu starts without a map", { tag: "@retail-ui" },
         expect(await call(page, "_KisakWeb_TestSaveState", 0))
             .toBeGreaterThanOrEqual(1);
         expect(await call(page, "_KisakWeb_TestSaveState", 8)).toBe(1);
+        expect(await call(page, "_KisakWeb_TestSaveState", 9)).toBe(15);
+        expect(await call(page, "_KisakWeb_TestSaveState", 10)).toBeGreaterThan(1000);
+        await expect.poll(() => call(page, "_KisakWeb_TestSaveState", 11)).toBe(1);
         expect(await call(page, "_KisakWeb_TestProfileState", 1)).toBe(1);
         expect(await call(page, "_KisakWeb_TestProfileState", 3)).toBe(1);
         expect(await call(page, "_KisakWeb_TestSaveState", 0)).toBe(0);
@@ -372,9 +756,16 @@ test("canonical retail main menu starts without a map", { tag: "@retail-ui" },
             .toBeGreaterThan(0);
         expect(await call(page, "_KisakWeb_TestSaveState", 6))
             .toBeGreaterThan(0);
+        await submitCommand("closemenu player_profile");
         await submitCommand("openmenu save_load_menu");
         await expect.poll(() => call(page, "_KisakWeb_TestMenuState",
             nameHash("save_load_menu"))).toBe(7);
+        expect(await call(page, "_KisakWeb_TestSaveState", 2)).toBe(1);
+        await expect.poll(() => call(page, "_KisakWeb_TestSaveState", 12)).toBe(1);
+        expect(await call(page, "_KisakWeb_TestSaveState", 13)).toBe(3);
+        await page.locator("#game-canvas").screenshot({
+            path: testInfo.outputPath("save-thumbnail-menu.png"),
+        });
         saveLifecycleCursor = await page.evaluate(() =>
             globalThis.__uiLifecycle.length);
         expect(await call(page, "_KisakWeb_TestSaveState", 3)).toBe(1);
@@ -404,8 +795,143 @@ test("canonical retail main menu starts without a map", { tag: "@retail-ui" },
         saveLifecycleCursor), { timeout: 300_000 }).toBe(true);
         await expectRestoredSnapshot(saved);
 
+        // Use the shipped Save and Quit menus. Their successful-save callback
+        // reaches ERR_DISCONNECT, which must unwind the live browser frame,
+        // retire the world, and reload UI without terminating the Worker.
+        await canvas.focus();
+        await page.keyboard.press("Escape");
+        await expect.poll(() => call(page, "_KisakWeb_TestMenuState",
+            nameHash("pausedmenu"))).toBe(7);
+        for (let index = 0; index < 4; ++index)
+            await page.keyboard.press("ArrowDown");
+        await page.keyboard.press("Enter");
+        await expect.poll(() => call(page, "_KisakWeb_TestMenuState",
+            nameHash("savegame_warning"))).toBe(7);
+        await page.keyboard.press("ArrowDown");
+        await page.keyboard.press("Enter");
+        await expect.poll(() => call(page, "_KisakWeb_TestMenuState",
+            nameHash("main")), { timeout: 60_000 }).toBe(7);
+        expect(await call(page, "_KisakWeb_TestUiState", 5)).toBe(0);
+        await expect(page.locator("#boot-log")).toContainText("Disconnecting: EXE_DISCONNECTED");
+        await canvas.screenshot({ path: testInfo.outputPath("save-quit-main-menu.png") });
+        saveLifecycleCursor = await page.evaluate(() => globalThis.__uiLifecycle.length);
+        await submitCommand("loadgame_continue");
+        await expect.poll(() => page.evaluate((cursor) =>
+            globalThis.__uiLifecycle.slice(cursor).some(
+                ({ stage }) => stage === "CG_Init complete"),
+        saveLifecycleCursor), { timeout: 300_000 }).toBe(true);
+        await expectRestoredSnapshot(saved);
+
         expect(await call(page, "_KisakWeb_TestSaveState", 4)).toBe(1);
         expect(await call(page, "_KisakWeb_TestSaveState", 1)).toBe(0);
         expect(await call(page, "_KisakWeb_TestSaveState", 6)).toBe(0);
         expect(await call(page, "_KisakWeb_TestProfileState", 5)).toBe(1);
+        await submitCommand("quit");
+        await expect(page.locator("html")).toHaveAttribute("data-runtime-state", "stopped");
+        await expect(page.locator("#quit-dialog")).toContainText("Game closed");
+        await page.getByRole("button", { name: "Start game", exact: true }).click();
+        await expect.poll(() => page.evaluate(() =>
+            globalThis.__KISAKCOD_WEB__?.module?.filesystemState), {
+            timeout: 300_000,
+        }).toBe("mounted");
+        await expect.poll(() => call(page, "_KisakWeb_TestMenuState",
+            nameHash("main"))).toBe(7);
     });
+
+test("owned retail saved-screen materials blend from the scene composite", async ({ retailPage: page }) => {
+    test.setTimeout(600_000);
+    await page.goto("/");
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state)).toBe("running");
+    const chooser = page.waitForEvent("filechooser");
+    await page.locator("#portable-install-button").click();
+    await (await chooser).setFiles(retailRoot);
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.assets.state),
+        { timeout: 240_000 }).toBe("ready");
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.filesystemState),
+        { timeout: 240_000 }).toBe("mounted");
+    await page.evaluate(() => globalThis.__KISAKCOD_WEB__.submitCanonicalCommand("map killhouse"));
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.rendererSceneFrame?.worldName),
+        { timeout: 60_000 }).toContain("killhouse");
+    // Endpoint colors are invariant under final display gamma. The first
+    // command captures before the blue overlay; the second uses the loaded
+    // retail material/state and samples the retained scene-composite pixels.
+    expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.call(
+        "_KisakWeb_TestSavedScreen", 0, 1000, 200, 0, 1, 0))).toBe(0xff0000);
+    expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.call(
+        "_KisakWeb_TestSavedScreen", 1, 1010, 200, 0, 1, 0))).toBe(0x0000ff);
+    await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.dispose());
+});
+
+test("owned retail transient lights reach native material passes and obey scene limits", async ({ retailPage: page }, testInfo) => {
+    test.setTimeout(600_000);
+    await page.goto("/");
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state)).toBe("running");
+    const chooser = page.waitForEvent("filechooser");
+    await page.locator("#portable-install-button").click();
+    await (await chooser).setFiles(retailRoot);
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.assets.state),
+        { timeout: 240_000 }).toBe("ready");
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.filesystemState),
+        { timeout: 240_000 }).toBe("mounted");
+    const command = text => page.evaluate(text =>
+        globalThis.__KISAKCOD_WEB__.submitCanonicalCommand(text), text);
+    await command("map killhouse");
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.rendererSceneFrame?.worldName),
+        { timeout: 60_000 }).toContain("killhouse");
+    // Let the authored initial fade finish, then use canonical pause to hold
+    // the pose/fog constant for private visual comparisons.
+    await page.waitForTimeout(6_000);
+    await command("set cl_paused_simple 1");
+    await command("pause");
+    await expect.poll(() => call(page, "_KisakWeb_TestUiState", 5)).toBe(1);
+    const capture = async name => {
+        const png = await page.locator("#game-canvas").screenshot({ path: testInfo.outputPath(`lights-${name}.png`) });
+        return page.evaluate(async encoded => {
+            const bitmap = await createImageBitmap(new Blob([Uint8Array.from(atob(encoded), c => c.charCodeAt(0))], { type: "image/png" }));
+            const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+            const context = canvas.getContext("2d");
+            context.drawImage(bitmap, 0, 0);
+            const { data } = context.getImageData(0, 0, bitmap.width, bitmap.height);
+            const means = [0, 0, 0];
+            for (let i = 0; i < data.length; i += 4)
+                for (let channel = 0; channel < 3; ++channel) means[channel] += data[i + channel];
+            bitmap.close();
+            return means.map(value => value / (data.length / 4));
+        }, png.toString("base64"));
+    };
+    const baseline = await capture("baseline");
+    const state = () => call(page, "_KisakWeb_TestTransientLightDraws");
+    // Synthetic renderer input through the same R_Add* calls used by canonical
+    // FX. This validates rendering, not authored FX timing or mission progress.
+    for (const [mode, type, count, name] of [[1, 3, 1, "omni"], [2, 2, 1, "spot"], [3, 3, 4, "limit"]]) {
+        await call(page, "_KisakWeb_TestTransientLights", mode);
+        await expect.poll(async () => (await state()) >>> 16).toBe((type << 8) | count);
+        await expect.poll(async () => (await state()) & 65535).toBeGreaterThan(0);
+        if (mode === 3) expect(await call(page, "_KisakWeb_TestTransientLights", -1)).toBe(32);
+        const lit = await capture(name);
+        expect(lit[0] - baseline[0], `${name} must visibly illuminate the owned scene`).toBeGreaterThan(1);
+        if (mode === 2) {
+            expect(await call(page, "_KisakWeb_TestLoseWebGLContext")).toBe(1);
+            await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state)).toBe("renderer-lost");
+            expect(await call(page, "_KisakWeb_TestRestoreWebGLContext")).toBe(1);
+            await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state), { timeout: 60_000 }).toBe("running");
+            const recovered = await capture("recovered");
+            expect(recovered[0] - baseline[0]).toBeGreaterThan(1);
+        }
+    }
+    await command("set r_dlightLimit 0");
+    await expect.poll(state).toBe(0);
+    await command("set r_dlightLimit 4");
+    await expect.poll(async () => ((await state()) >>> 16) & 255).toBe(4);
+    await call(page, "_KisakWeb_TestTransientLights", 0);
+    await expect.poll(state).toBe(0);
+    const cleared = await capture("cleared");
+    for (let channel = 0; channel < 3; ++channel)
+        expect(Math.abs(cleared[channel] - baseline[channel])).toBeLessThan(0.1);
+    // Exercise the retained native attenuation image, not just synthetic white.
+    const attenuationPixel = await call(page, "_KisakWeb_TestDynamicLightPixel", 7, 255, 1, 0);
+    expect(attenuationPixel >>> 24).toBe(0);
+    expect(attenuationPixel & 255).toBeGreaterThan(0);
+    await testInfo.attach("renderer-log", { body: await page.locator("#boot-log").innerText(), contentType: "text/plain" });
+    await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.dispose());
+});

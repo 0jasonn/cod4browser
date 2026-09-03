@@ -193,6 +193,13 @@ bool WebRenderer_EvaluateModelLighting(
     const WebRendererModelLightingCallbacks *callbacks,
     WebRendererModelLightingSample &sample) noexcept;
 
+// R_GetAverageLightingAtPoint, using the same bounded grid lookup and fixed-
+// point palette blend as model lighting. FX consumes this native byte color.
+bool WebRenderer_EvaluateAverageLighting(
+    const GfxLightGrid &lightGrid, const float samplePosition[3],
+    const float sunColor[3], const WebRendererModelLightingCallbacks *callbacks,
+    std::uint8_t outColor[4]) noexcept;
+
 // CPU-owned representation of native modelLightGlob.image. Each entry owns a
 // 4x4x4 RGBA8 block; WebGL uploads the bytes as a 3D texture without changing
 // the native sample layout or color space.

@@ -106,6 +106,14 @@ double WebOpenAL_RebaseStarted(double nowSeconds, float offsetSeconds, float pit
 // commands. This never participates in OpenAL state or playback selection.
 void WebOpenAL_SetSourceAlias(ALuint source, const char *aliasName);
 
+// Device-only snapshot in native stage/band order: enabled, type, gain (dB),
+// frequency (Hz), Q. Canonical SndEqParams and entchannel ownership stay in SND.
+void WebOpenAL_SetSourceEq(ALuint source, const float (&bands)[6][5]);
+
+// Narrow device operations; canonical room/alias/wet-fade state stays in SND.
+void WebOpenAL_SetRoomType(int room);
+void WebOpenAL_SetReverbSend(ALuint source, float wet);
+
 ALenum alGetError();
 void alDistanceModel(ALenum);
 void alListener3f(ALenum, ALfloat, ALfloat, ALfloat);

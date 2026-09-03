@@ -11,6 +11,9 @@
 #include "r_dvars.h"
 #include "r_image.h"
 #include "r_shadowcookie.h"
+#include "r_savegame_image_win32.h"
+#include "r_registration_api.h"
+#include <vector>
 
 #include <algorithm>
 #include <universal/com_files.h>
@@ -1030,10 +1033,58 @@ void __cdecl R_Cmd_ReloadMaterialTextures()
     }
 }
 
+namespace
+{
+Material rawMaterial{};
+MaterialTextureDef rawTexture{};
+char rawImageName[64]{};
+}
+
+void Material_InvalidateRawImage()
+{
+    rawImageName[0] = 0;
+    if (rgp.rawImage && rgp.rawImage->texture.basemap)
+    {
+        R_SyncRenderThread();
+        RB_UnbindAllImages();
+        Image_Release(rgp.rawImage);
+    }
+}
+
 Material *Material_RegisterRawImage(const char *name, int imageTrack)
 {
-    iassert(name);
-    iassert(rgp.defaultMaterial);
-
-    return rgp.defaultMaterial;
+    if (!name || !*name || strlen(name) >= sizeof(rawImageName) ||
+        !rgp.rawImage || !dx.device || dx.deviceLost) return nullptr;
+    if (I_stricmp(rawImageName, name))
+    {
+        Material_InvalidateRawImage();
+        int file = 0;
+        const unsigned size = FS_FOpenFileRead(name, &file);
+        if (!file) return nullptr;
+        std::vector<uint8_t> jpeg(size <= SAVEGAME_JPEG_MAX_BYTES ? size : 0);
+        const unsigned read = jpeg.empty() ? 0 : FS_Read(jpeg.data(), size, file);
+        FS_FCloseFile(file);
+        if (read != size) return nullptr;
+        R_SyncRenderThread();
+        auto *texture = R_DecodeSaveGameTexture(dx.device, jpeg);
+        if (!texture) return nullptr;
+        GfxImage *image = rgp.rawImage;
+        image->texture.map = texture;
+        image->mapType = MAPTYPE_2D;
+        image->width = image->height = SAVEGAME_IMAGE_SIZE;
+        image->depth = 1;
+        image->noPicmip = true;
+        Image_TrackTexture(image, IMG_FLAG_NOPICMIP | IMG_FLAG_NOMIPMAPS,
+            D3DFMT_A8R8G8B8, image->width, image->height, 1);
+        I_strncpyz(rawImageName, name, sizeof(rawImageName));
+    }
+    Material *base = Material_RegisterHandle("white", imageTrack);
+    if (!base || !base->textureCount) return nullptr;
+    rawMaterial = *base;
+    rawMaterial.info.name = rawImageName;
+    rawMaterial.textureCount = 1;
+    rawTexture = base->textureTable[0];
+    rawTexture.u.image = rgp.rawImage;
+    rawMaterial.textureTable = &rawTexture;
+    return &rawMaterial;
 }

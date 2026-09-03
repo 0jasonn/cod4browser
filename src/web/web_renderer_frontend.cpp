@@ -17,8 +17,12 @@
 #include <gfx_d3d/r_drawsurf.h>
 #include <gfx_d3d/r_dvars.h>
 #include <gfx_d3d/r_dpvs_core.h>
+#include <gfx_d3d/r_dynamiclights_core.h>
 #include <gfx_d3d/r_effects_api.h>
 #include <gfx_d3d/r_font.h>
+#include <gfx_d3d/r_gamma.h>
+#include <gfx_d3d/r_text.h>
+#include <gfx_d3d/r_rendercmds.h>
 #include <gfx_d3d/r_primarylights_core.h>
 #include <gfx_d3d/r_runtime_api.h>
 #include <gfx_d3d/r_scene_api.h>
@@ -34,7 +38,9 @@
 #include <universal/com_math.h>
 #include <universal/com_memory.h>
 #include <universal/memfile.h>
+#include <ui/ui.h>
 #include <web/web_renderer.h>
+#include <web/web_display.h>
 #include <web/web_frame_profile.h>
 #include <limits>
 #include <web/web_renderer_image_reference.h>
@@ -602,31 +608,23 @@ std::vector<std::uint8_t> g_staticMarkVisibility;
 std::vector<WebRendererSurfaceVertex> g_uiVertices;
 std::vector<std::uint32_t> g_uiIndices;
 std::vector<WebRendererUiBatchDesc> g_uiBatches;
+int g_uiSceneTime = 0;
+std::array<GfxLight, 32> g_addedLights{};
+std::uint32_t g_addedLightCount = 0;
+#if KISAK_WEB_DIAGNOSTICS
+int g_testTransientLightMode = 0;
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestTransientLights(int mode)
+{
+    if (mode >= 0 && mode <= 3) g_testTransientLightMode = mode;
+    return static_cast<int>(g_addedLightCount);
+}
+#endif
 
 EM_JS(void, Web_GetCanvasSize, (std::uint32_t *width, std::uint32_t *height), {
     const canvas = Module.canvas;
     HEAPU32[width >> 2] = canvas ? (canvas.width >>> 0) : 1280;
     HEAPU32[height >> 2] = canvas ? (canvas.height >>> 0) : 720;
 });
-
-const Glyph *GetGlyph(Font_s *font, std::uint32_t letter)
-{
-    if (letter >= 0x20 && letter <= 0x7f)
-        return &font->glyphs[letter - 0x20];
-    int bottom = 96;
-    int top = font->glyphCount - 1;
-    while (bottom <= top)
-    {
-        const int middle = (bottom + top) / 2;
-        if (font->glyphs[middle].letter == letter)
-            return &font->glyphs[middle];
-        if (font->glyphs[middle].letter < letter)
-            bottom = middle + 1;
-        else
-            top = middle - 1;
-    }
-    return &font->glyphs[14];
-}
 
 const GfxImage *FindUiImage(Material *material, std::uint8_t &sampler)
 {
@@ -1256,48 +1254,50 @@ void AppendUiRotatedRect(float x, float y, float w, float h,
     AppendUiQuad(points, s0, t0, s1, t1, color, material);
 }
 
-void AppendUiText(const char *text, int maxChars, Font_s *font,
+GfxCmdDrawText2D MakeTextCommand(int maxChars, Font_s *font,
     float x, float y, float xScale, float yScale, float rotation,
-    const float *color)
+    const float *color, int style)
 {
-    if (!text || !font || !font->glyphs || !font->material) return;
+    GfxCmdDrawText2D cmd{};
+    cmd.x = x;
+    cmd.y = y;
+    cmd.font = font;
+    cmd.xScale = xScale;
+    cmd.yScale = yScale;
+    cmd.rotation = rotation;
+    cmd.maxChars = maxChars > 0 ? maxChars : INT_MAX;
+    cmd.renderFlags = R_TextStyleFlags(style);
+    if (color) Byte4PackVertexColor(color, cmd.color.array);
+    else cmd.color.packed = UINT32_MAX;
+    return cmd;
+}
+
+void AppendUiText(const char *text, const GfxCmdDrawText2D &cmd)
+{
+    if (!text || !cmd.font || !cmd.font->glyphs || !cmd.font->material) return;
 #if KISAK_WEB_DIAGNOSTICS
     g_testUiTextHashes[g_testUiTextHashCursor++ % g_testUiTextHashes.size()] =
         HashDiagnosticText(text);
 #endif
-    if (maxChars <= 0) maxChars = 0x7fffffff;
-    const float startX = x;
-    int count = 0;
-    while (*text && count < maxChars)
-    {
-        const std::uint32_t letter = SEH_ReadCharFromString(&text, 0);
-        if (letter == '\n')
-        {
-            x = startX;
-            y += static_cast<float>(font->pixelHeight) * yScale;
-            continue;
-        }
-        if (letter == '\r')
-        {
-            x = startX;
-            continue;
-        }
-        if (letter == '^' && *text >= '0' && *text <= '9')
-        {
-            ++text;
-            continue;
-        }
-        const Glyph *glyph = GetGlyph(font, letter);
-        AppendUiRotatedRect(
-            x + static_cast<float>(glyph->x0) * xScale,
-            y + static_cast<float>(glyph->y0) * yScale,
-            static_cast<float>(glyph->pixelWidth) * xScale,
-            static_cast<float>(glyph->pixelHeight) * yScale,
-            rotation, glyph->s0, glyph->t0, glyph->s1, glyph->t1,
-            color, font->material);
-        x += static_cast<float>(glyph->dx) * xScale;
-        ++count;
-    }
+    const float radians = cmd.rotation * 0.017453292519943295f;
+    DrawText2D(text, cmd.x, cmd.y, cmd.font, cmd.xScale, cmd.yScale,
+        std::sin(radians), std::cos(radians), cmd.color, cmd.maxChars,
+        static_cast<short>(cmd.renderFlags), cmd.cursorPos, cmd.cursorLetter,
+        cmd.padding, cmd.glowForceColor, cmd.fxBirthTime, cmd.fxLetterTime,
+        cmd.fxDecayStartTime, cmd.fxDecayDuration, cmd.fxMaterial, cmd.fxMaterialGlow);
+}
+
+void AppendConsoleText(char *pool, int poolSize, int first, int count,
+    const GfxCmdDrawText2D &parameters)
+{
+    // The canonical console is a byte ring. Bound both copy spans before
+    // using its shared copy routine (including embedded HUD-icon payloads).
+    if (!pool || poolSize <= 0 || first < 0 || first >= poolSize ||
+        count <= 0 || count > poolSize) return;
+    std::vector<unsigned char> storage(sizeof(GfxCmdDrawText2D) + count);
+    auto *cmd = new (storage.data()) GfxCmdDrawText2D(parameters);
+    CopyPoolTextToCmd(pool, poolSize, first, count, cmd);
+    AppendUiText(cmd->text, *cmd);
 }
 
 #if KISAK_WEB_DIAGNOSTICS
@@ -1370,26 +1370,14 @@ void __cdecl R_BeginRegistration(vidConfig_t *configuration)
 {
     iassert(configuration);
     R_RegisterDvars();
+    if (!WebRenderer_Initialize())
+        Com_Error(ERR_FATAL, "Could not initialize the browser renderer");
     // WebGL2 exceeds IW3's shader-model-3 feature floor. Select the same
     // canonical best path as a max-graphics D3D9 client before zone assets
     // are loaded, so shader programs and technique sets remain coherent.
     Dvar_SetInt(r_rendererInUse, 1);
     std::memset(configuration, 0, sizeof(*configuration));
-    Web_GetCanvasSize(&configuration->displayWidth,
-        &configuration->displayHeight);
-    configuration->sceneWidth = configuration->displayWidth;
-    configuration->sceneHeight = configuration->displayHeight;
-    configuration->displayFrequency = 60.0f;
-    configuration->isWideScreen =
-        configuration->displayWidth * 3 >= configuration->displayHeight * 4;
-    configuration->isHiDef = configuration->displayWidth >= 1280;
-    configuration->isFullscreen = 0;
-    configuration->aspectRatioWindow = configuration->displayHeight
-        ? static_cast<float>(configuration->displayWidth) /
-            static_cast<float>(configuration->displayHeight)
-        : 1.0f;
-    configuration->aspectRatioScenePixel = 1.0f;
-    configuration->aspectRatioDisplayPixel = 1.0f;
+    WebDisplay_Configure(configuration);
     configuration->maxTextureSize = WEB_RENDERER_MAX_RGBA8_DIMENSION;
     configuration->maxTextureMaps = 16;
     configuration->deviceSupportsGamma = false;
@@ -1402,6 +1390,8 @@ void __cdecl R_Shutdown(int destroyWindow)
 
 void __cdecl R_UnloadWorld()
 {
+    UI_InvalidateSaveGameShot();
+    g_addedLightCount = 0;
     WebRenderer_ReleaseDObjSceneScratch();
     WebRenderer_UnloadWorldResources();
     decltype(g_brushGeometryByModel){}.swap(g_brushGeometryByModel);
@@ -1441,6 +1431,11 @@ void __cdecl R_EndFrame()
     // the real frame boundary so menus cannot capture input without becoming
     // visible, and so HUD commands belong to the frame that produced them.
     SubmitUiScene();
+    const float gamma = r_gamma &&
+        (!r_ignoreHwGamma || !r_ignoreHwGamma->current.enabled)
+        ? r_gamma->current.value : 1.0f;
+    if (!WebRenderer_SetDisplayGamma(gamma))
+        Com_Error(ERR_DROP, "R_EndFrame: invalid display gamma");
 #if KISAK_WEB_DIAGNOSTICS
     if (WebFrameProfileSample *const profile = WebFrameProfile_Current();
         profile && g_frontendProfileStarted != 0.0)
@@ -1508,12 +1503,6 @@ Font_s *__cdecl R_RegisterFont(const char *name, int)
     return DB_FindXAssetHeader(ASSET_TYPE_FONT, name).font;
 }
 
-const Glyph *__cdecl R_GetCharacterGlyph(Font_s *font, std::uint32_t letter)
-{
-    iassert(font && font->glyphs);
-    return GetGlyph(font, letter);
-}
-
 int __cdecl R_TextWidth(const char *text, int maxChars, Font_s *font)
 {
     iassert(text && font);
@@ -1530,7 +1519,7 @@ int __cdecl R_TextWidth(const char *text, int maxChars, Font_s *font)
             ++text;
         else
         {
-            lineWidth += GetGlyph(font, letter)->dx;
+            lineWidth += R_GetCharacterGlyph(font, letter)->dx;
             maxWidth = std::max(maxWidth, lineWidth);
             ++count;
         }
@@ -1570,7 +1559,7 @@ const char *__cdecl R_TextLineWrapPosition(
             ++parse;
         else
         {
-            if (font) pixelsUsed += GetGlyph(font, letter)->dx;
+            if (font) pixelsUsed += R_GetCharacterGlyph(font, letter)->dx;
             if (preLetter != text && letter < 0x100 && std::isspace(letter))
                 wrap = preLetter;
         }
@@ -1599,7 +1588,7 @@ int __cdecl R_ConsoleTextWidth(
             textPool[position] >= '0' && textPool[position] <= '9')
             position = mask & (position + 1);
         else
-            width += GetGlyph(font, letter)->dx;
+            width += R_GetCharacterGlyph(font, letter)->dx;
     }
     return width;
 }
@@ -1654,59 +1643,264 @@ void __cdecl R_AddCmdDrawQuadPic(const float (*verts)[2], const float *color,
 }
 void __cdecl R_AddCmdDrawText(const char *text, int maxChars, Font_s *font,
     float x, float y, float xScale, float yScale, float rotation,
-    const float *color, int)
+    const float *color, int style)
 {
-    AppendUiText(text, maxChars, font, x, y, xScale, yScale, rotation, color);
+    AppendUiText(text, MakeTextCommand(maxChars, font, x, y, xScale, yScale,
+        rotation, color, style));
 }
 void __cdecl R_AddCmdDrawTextSubtitle(const char *text, int maxChars,
     Font_s *font, float x, float y, float xScale, float yScale,
-    float rotation, const float *color, int, const float *, bool)
+    float rotation, const float *color, int style, const float *glow, bool cinematic)
 {
-    AppendUiText(text, maxChars, font, x, y, xScale, yScale, rotation, color);
+    auto cmd = MakeTextCommand(maxChars, font, x, y, xScale, yScale, rotation, color, style);
+    cmd.renderFlags |= 0x100 | (cinematic ? 0x200 : 0);
+    SetDrawText2DGlowParms(&cmd, color, glow);
+    AppendUiText(text, cmd);
 }
 void __cdecl R_AddCmdDrawTextWithCursor(const char *text, int maxChars,
     Font_s *font, float x, float y, float xScale, float yScale,
-    float rotation, const float *color, int, int cursorPos, char cursor)
+    float rotation, const float *color, int style, int cursorPos, char cursor)
 {
-    AppendUiText(text, maxChars, font, x, y, xScale, yScale, rotation, color);
-    if (cursorPos >= 0 && text)
-    {
-        const int prefixCount = std::min<int>(cursorPos,
-            static_cast<int>(std::strlen(text)));
-        const float cursorX = x + static_cast<float>(
-            R_TextWidth(text, prefixCount, font)) * xScale;
-        const char cursorText[2] = {cursor, '\0'};
-        AppendUiText(cursorText, 1, font, cursorX, y, xScale, yScale,
-            rotation, color);
+    auto cmd = MakeTextCommand(maxChars, font, x, y, xScale, yScale, rotation, color, style);
+    if (cursorPos >= 0) {
+        cmd.renderFlags |= 2;
+        cmd.cursorPos = cursorPos;
+        cmd.cursorLetter = cursor;
     }
+    AppendUiText(text, cmd);
 }
 void __cdecl R_AddCmdDrawTextWithEffects(const char *text, int maxChars,
     Font_s *font, float x, float y, float xScale, float yScale,
-    float rotation, const float *color, int, const float *, Material *,
-    Material *, int, int, int, int)
+    float rotation, const float *color, int style, const float *glow, Material *fx,
+    Material *fxGlow, int birth, int letterTime, int decayStart, int decayDuration)
 {
-    AppendUiText(text, maxChars, font, x, y, xScale, yScale, rotation, color);
+    auto cmd = MakeTextCommand(maxChars, font, x, y, xScale, yScale, rotation, color, style);
+    SetDrawText2DGlowParms(&cmd, color, glow);
+    SetDrawText2DPulseFXParms(&cmd, fx, fxGlow, birth, letterTime, decayStart, decayDuration);
+    AppendUiText(text, cmd);
 }
-void __cdecl R_AddCmdDrawConsoleText(char *, int, int, int, Font_s *, float,
-    float, float, float, const float *, int) {}
-void __cdecl R_AddCmdDrawConsoleTextSubtitle(char *, int, int, int, Font_s *,
-    float, float, float, float, const float *, int, const float *) {}
-void __cdecl R_AddCmdDrawConsoleTextPulseFX(char *, int, int, int, Font_s *,
-    float, float, float, float, const float *, int, const float *, int, int,
-    int, int, Material *, Material *) {}
+void __cdecl R_AddCmdDrawConsoleText(char *pool, int poolSize, int first, int count,
+    Font_s *font, float x, float y, float xScale, float yScale, const float *color, int style)
+{
+    AppendConsoleText(pool, poolSize, first, count,
+        MakeTextCommand(INT_MAX, font, x, y, xScale, yScale, 0, color, style));
+}
+void __cdecl R_AddCmdDrawConsoleTextSubtitle(char *pool, int poolSize, int first, int count,
+    Font_s *font, float x, float y, float xScale, float yScale, const float *color,
+    int style, const float *glow)
+{
+    auto cmd = MakeTextCommand(INT_MAX, font, x, y, xScale, yScale, 0, color, style);
+    cmd.renderFlags |= 0x100;
+    SetDrawText2DGlowParms(&cmd, color, glow);
+    AppendConsoleText(pool, poolSize, first, count, cmd);
+}
+void __cdecl R_AddCmdDrawConsoleTextPulseFX(char *pool, int poolSize, int first, int count,
+    Font_s *font, float x, float y, float xScale, float yScale, const float *color,
+    int style, const float *glow, int birth, int letterTime, int decayStart, int decayDuration,
+    Material *fx, Material *fxGlow)
+{
+    auto cmd = MakeTextCommand(INT_MAX, font, x, y, xScale, yScale, 0, color, style);
+    SetDrawText2DGlowParms(&cmd, color, glow);
+    SetDrawText2DPulseFXParms(&cmd, fx, fxGlow, birth, letterTime, decayStart, decayDuration);
+    AppendConsoleText(pool, poolSize, first, count, cmd);
+}
 void __cdecl R_AddCmdDrawProfile() {}
 void __cdecl R_AddCmdClearScreen(int, const float *, float, std::uint8_t) {}
-void __cdecl R_AddCmdSaveScreen(std::uint32_t) {}
-void __cdecl R_AddCmdSaveScreenSection(float, float, float, float,
-    std::uint32_t) {}
-void __cdecl R_AddCmdBlendSavedScreenShockBlurred(int, float, float, float,
-    float, std::uint32_t) {}
-void __cdecl R_AddCmdBlendSavedScreenShockFlashed(float, float, float, float,
-    float, float) {}
+void __cdecl R_AddCmdSaveScreenSection(float x, float y, float width, float height,
+    std::uint32_t screenTimerId)
+{
+    iassert(screenTimerId < 4u);
+    WebRendererUiBatchDesc batch{};
+    batch.firstIndex = static_cast<std::uint32_t>(g_uiIndices.size());
+    batch.materialName = "<save-screen>";
+    batch.savedScreen = {WebRendererUiCommand::SaveScreen, screenTimerId,
+        g_uiSceneTime, 0, {x, y, width, height}};
+    g_uiBatches.push_back(batch);
+}
+void __cdecl R_AddCmdSaveScreen(std::uint32_t screenTimerId)
+{
+    R_AddCmdSaveScreenSection(0.0f, 0.0f, 1.0f, 1.0f, screenTimerId);
+}
+
+static void AppendShellShock(WebRendererUiCommand command, int fadeMsec,
+    float x, float y, float width, float height, std::uint32_t timerId,
+    const float color[4])
+{
+    const char *name = command == WebRendererUiCommand::ShellShockBlurred
+        ? "shellshock" : "shellshock_flashed";
+    Material *material = g_rendererWorldReady
+        ? DB_FindXAssetHeader(ASSET_TYPE_MATERIAL, name).material : nullptr;
+    const auto previousCount = g_uiBatches.size();
+    // Native RB_BlendSavedScreen* draws at (0,0), sampling the normalized view
+    // region. Framebuffer textures have the opposite vertical origin to IW3.
+    AppendUiRect(0.0f, 0.0f, cls.vidConfig.displayWidth * width,
+        cls.vidConfig.displayHeight * height, x, 1.0f - y,
+        x + width, 1.0f - y - height, color, material);
+    if (g_uiBatches.size() == previousCount) return;
+    auto &batch = g_uiBatches.back();
+    batch.savedScreen = {command, timerId, g_uiSceneTime, fadeMsec};
+}
+
+void __cdecl R_AddCmdBlendSavedScreenShockBlurred(int fadeMsec, float x,
+    float y, float width, float height, std::uint32_t screenTimerId)
+{
+    iassert(screenTimerId < 4u);
+    if (fadeMsec <= 0) return;
+    const float color[4]{1.0f, 1.0f, 1.0f, 1.0f};
+    AppendShellShock(WebRendererUiCommand::ShellShockBlurred, fadeMsec,
+        x, y, width, height, screenTimerId, color);
+}
+void __cdecl R_AddCmdBlendSavedScreenShockFlashed(float whiteout, float screengrab,
+    float x, float y, float width, float height)
+{
+    const auto quantize = [](float value) {
+        return static_cast<std::uint8_t>(SnapFloatToInt(
+            std::clamp(value, 0.0f, 1.0f) * 255.0f)) / 255.0f;
+    };
+    const float white = quantize(whiteout);
+    const float color[4]{white, white, white, quantize(screengrab)};
+    AppendShellShock(WebRendererUiCommand::ShellShockFlashed, 0,
+        x, y, width, height, 0u, color);
+}
+
+#if KISAK_WEB_DIAGNOSTICS
+extern "C" EMSCRIPTEN_KEEPALIVE double KisakWeb_TestDisplayGamma(
+    int level, float gamma, int bypass)
+{
+    if (level < 0 || level > 255 || !std::isfinite(gamma) || gamma < 0.5f || gamma > 3.0f)
+        return -1;
+    if (!r_gamma) R_RegisterDvars();
+    const float previousGamma = r_gamma->current.value;
+    const bool previousBypass = r_ignoreHwGamma->current.enabled;
+    Dvar_SetFloat(r_gamma, gamma);
+    Dvar_SetBool(r_ignoreHwGamma, bypass != 0);
+    GfxGammaRamp ramp{};
+    R_CalcGammaRamp(&ramp);
+    const int expected = bypass ? level : 255 * ramp.entries[level] / 65535;
+    Web_GetCanvasSize(&cls.vidConfig.displayWidth, &cls.vidConfig.displayHeight);
+    const float color[4]{level / 255.0f, level / 255.0f, level / 255.0f, 1};
+    R_BeginFrame();
+    R_AddCmdDrawStretchPic(0, 0, cls.vidConfig.displayWidth, cls.vidConfig.displayHeight,
+        0, 0, 1, 1, color, nullptr);
+    R_EndFrame();
+    const auto pixel = WebRenderer_TestDrawPixel(16, 16);
+    WebRenderer_SetUiScene({});
+    Dvar_SetFloat(r_gamma, previousGamma);
+    Dvar_SetBool(r_ignoreHwGamma, previousBypass);
+    return static_cast<double>(expected) * 4294967296.0 + pixel;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE double KisakWeb_TestTextDraw(
+    int scenario, int time, int field, int index)
+{
+    static std::array<Glyph, 96> glyphs{};
+    static Material base{}, glow{}, fx{};
+    static MaterialTechniqueSet technique{};
+    base.info.name = "synthetic-font";
+    glow.info.name = "synthetic-font-glow";
+    fx.info.name = "synthetic-text-fx";
+    fx.techniqueSet = &technique;
+    for (std::size_t i = 0; i < glyphs.size(); ++i) {
+        glyphs[i].letter = static_cast<std::uint16_t>(i + 32);
+        glyphs[i].y0 = -10;
+        glyphs[i].dx = 8;
+        glyphs[i].pixelWidth = 6;
+        glyphs[i].pixelHeight = 10;
+        glyphs[i].s1 = glyphs[i].t1 = 1;
+    }
+    glyphs['o' - 32].dx = 12;
+    Font_s font{"synthetic", 12, 96, &base, &glow, glyphs.data()};
+    const float white[4]{1, 1, 1, 1}, redGlow[4]{1, 0, 0, 1};
+    Web_GetCanvasSize(&cls.vidConfig.displayWidth, &cls.vidConfig.displayHeight);
+    R_BeginFrame();
+    g_uiSceneTime = time;
+    if (field == 100) {
+        const float black[4]{0, 0, 0, 1};
+        R_AddCmdDrawStretchPic(0, 0, cls.vidConfig.displayWidth, cls.vidConfig.displayHeight,
+            0, 0, 1, 1, black, nullptr);
+    }
+    char pool[8]{'A', 'B', 'C', 'x', 'x', 'x', '^', '2'};
+    if (scenario == 4)
+        R_AddCmdDrawTextSubtitle("^1A^2B^7C", 99, &font, 20, 30, 1, 1, 0, white, 0, redGlow, false);
+    else if (scenario == 5)
+        R_AddCmdDrawTextWithEffects("ABCD", 99, &font, 20, 30, 1, 1, 0, white, 0,
+            nullptr, &fx, &fx, 100, 100, 1000, 1000);
+    else if (scenario == 6)
+        R_AddCmdDrawConsoleText(pool, 8, 6, 5, &font, 20, 30, 1, 1, white, 0);
+    else if (scenario == 7)
+        R_AddCmdDrawConsoleTextSubtitle(pool, 8, 6, 5, &font, 20, 30, 1, 1, white, 0, redGlow);
+    else if (scenario == 8)
+        R_AddCmdDrawConsoleTextPulseFX(pool, 8, 6, 5, &font, 20, 30, 1, 1, white, 0,
+            nullptr, 100, 100, 1000, 1000, &fx, &fx);
+    else
+        R_AddCmdDrawText("AB", 99, &font, 20, 30, 1, 1, scenario == 9 ? 90 : 0,
+            white, scenario == 1 ? 3 : scenario == 2 ? 6 : scenario == 3 ? 128 : 0);
+    double result = -1;
+    if (field == 0) result = g_uiBatches.size();
+    else if (index >= 0 && static_cast<std::size_t>(index) < g_uiBatches.size()) {
+        const auto &batch = g_uiBatches[index];
+        const auto &vertex = g_uiVertices[index * 4];
+        if (field == 1) result = (vertex.position[0] + 1) * cls.vidConfig.displayWidth / 2;
+        if (field == 2) result = (1 - vertex.position[1]) * cls.vidConfig.displayHeight / 2;
+        if (field >= 3 && field <= 6) result = std::round(batch.color[field - 3] * 255);
+    }
+    R_EndFrame();
+    if (field == 100)
+        result = WebRenderer_TestDrawPixel(21, cls.vidConfig.displayHeight - 22);
+    WebRenderer_SetUiScene({});
+    return result;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestSavedScreen(
+    int action, int time, int fadeMsec, float whiteout, float screengrab, int bottom)
+{
+    Web_GetCanvasSize(&cls.vidConfig.displayWidth, &cls.vidConfig.displayHeight);
+    const float width = cls.vidConfig.displayWidth;
+    const float height = cls.vidConfig.displayHeight;
+    const float red[4]{1, 0, 0, 1}, green[4]{0, 1, 0, 1};
+    const float blue[4]{0, 0, 1, 1}, black[4]{0, 0, 0, 1};
+    const float yellow[4]{1, 1, 0, 1};
+    R_BeginFrame();
+    g_uiSceneTime = time;
+    if (action == 0)
+    {
+        R_AddCmdDrawStretchPic(0, 0, width, height / 2, 0, 0, 1, 1, red, nullptr);
+        R_AddCmdDrawStretchPic(0, height / 2, width, height / 2, 0, 0, 1, 1, green, nullptr);
+        R_AddCmdSaveScreen(0u);
+        R_AddCmdDrawStretchPic(0, 0, width, height, 0, 0, 1, 1, blue, nullptr);
+    }
+    else if (action == 3)
+    {
+        R_AddCmdDrawStretchPic(0, 0, width, height, 0, 0, 1, 1, yellow, nullptr);
+        R_AddCmdSaveScreenSection(0, 0, 1, 0.5f, 1u);
+        R_AddCmdDrawStretchPic(0, 0, width, height, 0, 0, 1, 1, blue, nullptr);
+    }
+    else if (action == 4)
+        R_AddCmdSaveScreen(0u); // No geometry: capture is itself an ordered command.
+    else
+    {
+        R_AddCmdDrawStretchPic(0, 0, width, height, 0, 0, 1, 1,
+            action == 1 ? black : blue, nullptr);
+        if (action == 1 || action == 6)
+            R_AddCmdBlendSavedScreenShockFlashed(whiteout, screengrab, 0, 0, 1, 1);
+        else
+        {
+            R_AddCmdBlendSavedScreenShockBlurred(fadeMsec, 0, 0, 1, 1, 0u);
+            if (action == 5) R_AddCmdSaveScreen(0u);
+        }
+    }
+    R_EndFrame();
+    const auto pixel = WebRenderer_TestDrawPixel(static_cast<int>(width / 4),
+        static_cast<int>(height * (bottom ? 0.25f : 0.75f)));
+    WebRenderer_SetUiScene({});
+    return pixel;
+}
+#endif
 
 std::uint32_t __cdecl R_GetLocalClientNum() { return 0; }
 void __cdecl R_ClearScene(std::uint32_t)
 {
+    g_addedLightCount = 0;
     g_dobjSubmissionCount = 0u;
     g_brushModelSubmissionCount = 0u;
     WebRenderer_ClearFxModelSubmissions(&g_fxModelSubmissionCount);
@@ -2054,12 +2248,53 @@ void __cdecl R_FilterXModelIntoScene(
     }
 }
 
-void __cdecl R_AddOmniLightToScene(const float *, float, float, float, float) {}
-void __cdecl R_AddSpotLightToScene(const float *, const float *, float,
-    float, float, float) {}
+static GfxLight *AllocateSceneLight(const float *origin, float radius,
+    const float color[3])
+{
+    if (!g_rendererWorldReady || !origin || !std::isfinite(radius) || radius <= 0) return nullptr;
+    for (int i = 0; i < 3; ++i)
+        if (!std::isfinite(origin[i]) || !std::isfinite(color[i])) return nullptr;
+    if (g_addedLightCount == g_addedLights.size())
+    {
+        R_WarnOncePerFrame(R_WARN_MAX_DLIGHTS);
+        return nullptr;
+    }
+    return &g_addedLights[g_addedLightCount++];
+}
+
+void __cdecl R_AddOmniLightToScene(const float *origin, float radius, float r, float g, float b)
+{
+    const float color[3]{r, g, b};
+    if (auto *light = AllocateSceneLight(origin, radius, color))
+        kisak::dynamic_lights::SetOmni(*light,
+            DB_FindXAssetHeader(ASSET_TYPE_LIGHT_DEF, "light_dynamic").lightDef,
+            origin, radius, color);
+}
+
+void __cdecl R_AddSpotLightToScene(const float *origin, const float *direction,
+    float radius, float r, float g, float b)
+{
+    if (!direction || !std::isfinite(direction[0]) ||
+        !std::isfinite(direction[1]) || !std::isfinite(direction[2])) return;
+    const float color[3]{r, g, b};
+    auto *light = AllocateSceneLight(origin, radius, color);
+    if (!light) return;
+    const float start = r_spotLightStartRadius->current.value;
+    if (start >= r_spotLightEndRadius->current.value)
+        Dvar_SetFloat(r_spotLightEndRadius, start + 0.1f);
+    if (r_spotLightEndRadius->current.value >= start + radius)
+        Dvar_SetFloat(r_spotLightEndRadius, start + radius - 0.1f);
+    kisak::dynamic_lights::SetSpot(*light,
+        DB_FindXAssetHeader(ASSET_TYPE_LIGHT_DEF, "light_dynamic").lightDef,
+        origin, direction, radius, color, start, r_spotLightEndRadius->current.value,
+        r_spotLightFovInnerFraction->current.value, r_spotLightBrightness->current.value,
+        r_spotLightShadows->current.enabled);
+    iassert(light->cosHalfFovInner > light->cosHalfFovOuter);
+}
 void __cdecl R_SetLodOrigin(const refdef_s *) {}
 void __cdecl R_RenderScene(const refdef_s *refdef)
 {
+    g_uiSceneTime = refdef->time;
 #if KISAK_WEB_DIAGNOSTICS
     WebFrameProfileSample *const sceneProfile = WebFrameProfile_Current();
     const double sceneProfileStarted = sceneProfile
@@ -2259,16 +2494,6 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             "radius=%.6f before 2D composition.\n",
             refdef->blurRadius);
     }
-    const float displayGamma = r_gamma ? r_gamma->current.value : 0.8f;
-    // R_SetColorMappings is gated by vidConfig.deviceSupportsGamma. The
-    // browser registration deliberately reports false because a composited
-    // WebGL canvas cannot install the D3D9 display LUT. Preserve r_gamma for
-    // diagnostics/screenshots, but do not darken the scene in a shader when
-    // the canonical device capability says the hardware ramp is unavailable.
-    view.displayGammaExponent = cls.vidConfig.deviceSupportsGamma &&
-            (!r_ignoreHwGamma || !r_ignoreHwGamma->current.enabled)
-        ? 1.0f / std::max(displayGamma, 0.001f)
-        : 1.0f;
     if (!g_visionLightingReported)
     {
         g_visionLightingReported = true;
@@ -3789,6 +4014,52 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         (s_world.dpvs.smodelCount || s_world.dpvs.staticSurfaceCount))
         Com_Error(ERR_DROP, "R_RenderScene: canonical static camera DPVS unavailable");
 
+    std::array<const GfxLight *, 32> visibleLights{};
+#if KISAK_WEB_DIAGNOSTICS
+    if (g_testTransientLightMode)
+    {
+        g_addedLightCount = 0;
+        float origin[3];
+        Vec3Mad(view.viewOrigin, 64.0f, view.viewAxis[0], origin);
+        if (g_testTransientLightMode == 2)
+            R_AddSpotLightToScene(view.viewOrigin, view.viewAxis[0], 512, 0.2f, 0.1f, 0.05f);
+        else
+            for (int i = 0; i < (g_testTransientLightMode == 3 ? 33 : 1); ++i)
+                R_AddOmniLightToScene(origin, 256, 0.8f, 0.2f, 0.05f);
+    }
+#endif
+    const auto &camera = g_cameraDpvs.views[view.localClientNum][0];
+    int visibleCount = 0;
+    const int lightLimit = r_fullbright->current.enabled ? 0 : r_dlightLimit->current.integer;
+    if (lightLimit > 0)
+    {
+        for (std::uint32_t index = 0; index < g_addedLightCount; ++index)
+        {
+            const auto &light = g_addedLights[index];
+            bool culled = false;
+            for (int plane = 0; plane < camera.frustumPlaneCount; ++plane)
+            {
+                const float *coeffs = camera.frustumPlanes[plane].coeffs;
+                if (Vec3Dot(light.origin, coeffs) + coeffs[3] < -light.radius)
+                {
+                    culled = true;
+                    break;
+                }
+            }
+            if (!culled) visibleLights[visibleCount++] = &light;
+        }
+        if (visibleCount > lightLimit)
+        {
+            kisak::dynamic_lights::MostImportant(visibleLights.data(), visibleCount,
+                lightLimit, view.viewOrigin);
+            visibleCount = lightLimit;
+        }
+    }
+    view.dynamicLights = visibleLights.data();
+    view.dynamicLightCount = visibleCount;
+    if (visibleCount && visibleLights[0]->def)
+        view.dynamicLightAttenuation = ResolveRendererImage(visibleLights[0]->def->attenuation.image);
+
 #if KISAK_WEB_DIAGNOSTICS
     const double viewSubmitStarted = sceneProfile ? WebFrameProfile_Now() : 0.0;
     if (sceneProfile)
@@ -4030,8 +4301,12 @@ void __cdecl R_ArchiveFogState(MemoryFile *memory)
     MemFile_ArchiveData(memory, sizeof(g_fogIndex), &g_fogIndex);
 }
 
-void __cdecl R_GetAverageLightingAtPoint(const float *, std::uint8_t *color)
+void __cdecl R_GetAverageLightingAtPoint(const float *position, std::uint8_t *color)
 {
+    if (g_rendererWorldReady && s_world.sunLight &&
+        WebRenderer_EvaluateAverageLighting(s_world.lightGrid, position,
+            s_world.sunLight->color, &MODEL_LIGHTING_CALLBACKS, color)) return;
+    // Preserve the startup fallback only when a usable world sample is absent.
     color[0] = color[1] = color[2] = color[3] = 255;
 }
 
@@ -4105,11 +4380,6 @@ int __cdecl R_PickMaterial(int, const float *, const float *, char *, char *,
 
 void __cdecl Material_DirtyTechniqueSetOverrides() {}
 
-Material *Material_RegisterRawImage(const char *, int)
-{
-    return DB_FindXAssetHeader(ASSET_TYPE_MATERIAL, "$default").material;
-}
-
 Material *__cdecl Material_Duplicate(Material *source, char *name)
 {
     iassert(source && name);
@@ -4120,4 +4390,44 @@ Material *__cdecl Material_Duplicate(Material *source, char *name)
     // browser frontend admits its canonical alias hash, retaining the source
     // handle preserves rendering without publishing browser-owned DB state.
     return source;
+}
+
+int R_TextSceneTime() { return g_uiSceneTime; }
+int R_TextCursorTime() { return CL_ScaledMilliseconds(); }
+
+const Material *__cdecl Material_FromHandle(Material *handle)
+{
+    iassert(handle && handle->info.name && handle->info.name[0]);
+    return handle;
+}
+bool __cdecl IsValidMaterialHandle(Material *const handle)
+{
+    iassert((reinterpret_cast<std::uintptr_t>(handle) & 3u) == 0u);
+    return handle && handle->info.name && handle->info.name[0];
+}
+bool __cdecl Material_HasAnyFogableTechnique(const Material *material)
+{
+    if (!material || !material->techniqueSet) return false;
+    const auto *tech = material->techniqueSet->remappedTechniqueSet;
+    if (!tech) tech = material->techniqueSet;
+    return tech->techniques[TECHNIQUE_LIT_BEGIN] || tech->techniques[TECHNIQUE_EMISSIVE];
+}
+void __cdecl RB_LookupColor(std::uint8_t c, GfxColor *color)
+{
+    const std::uint32_t index = ColorIndex(c);
+    // SP never calls the MP R_UpdateTeamColors owner; native rg starts zeroed.
+    *color = index < 8u ? color_table[index] : GfxColor(c == '8' || c == '9' ? 0 : -1);
+}
+void __cdecl R_TextDrawQuad(const Material *material, float x, float y, float w,
+    float h, float s0, float t0, float s1, float t1, float sinAngle, float cosAngle,
+    std::uint32_t packed)
+{
+    const float dx = w * cosAngle, dy = w * sinAngle;
+    const float hx = -h * sinAngle, hy = h * cosAngle;
+    const float verts[4][2]{{x, y}, {x + dx, y + dy},
+        {x + dx + hx, y + dy + hy}, {x + hx, y + hy}};
+    const GfxColor nativeColor(packed);
+    const float color[4]{nativeColor.array[2] / 255.0f, nativeColor.array[1] / 255.0f,
+        nativeColor.array[0] / 255.0f, nativeColor.array[3] / 255.0f};
+    AppendUiQuad(verts, s0, t0, s1, t1, color, const_cast<Material *>(material));
 }

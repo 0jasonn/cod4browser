@@ -116,7 +116,17 @@ Kisak behavior or explain why a platform-owned implementation is permanent.
 - Prefer source-built, browser-compatible dependencies with licenses suitable for GPL-3.0 distribution. Record replacements for every removed native library.
 - Serve browser builds over HTTP for testing; do not rely on `file://` behavior.
 - Bootstrap the local pinned toolchain with `tools/bootstrap_web_toolchain.ps1`.
+- Build the native SP reference with `tools/build_native_sp.ps1`; its pinned
+  MSVC/SDK configuration uses existing OpenAL and disables runtime DLL copying.
+  See `docs/evidence/native-reference-2026-09-02.md` for owned-data launch paths
+  and the distinction between native startup and gameplay/reference evidence.
 - Build the production Release target with `tools/build_web.ps1 -Configuration Release`.
+- This command also builds the SHA-256-pinned FFmpeg Bink decoder from public
+  source using Git for Windows Bash. Codec sources and products stay under
+  ignored `.tools/` and `build/ffmpeg-bink/`; see `docs/cinematic-codec.md`.
+- It also builds the commit-pinned OpenAL Soft reverb DSP through
+  `tools/build_reverb.ps1`. Its AudioWorklet module and public-source license
+  ship in the generated site; see `docs/browser-reverb.md`.
 - Serve only the generated site with `python tools/serve_web.py --directory build/web/site`.
 - Run the non-overlapping routine tiers with `npm.cmd run test:browser` and
   `npm.cmd run test:browser:remainder` after `npm.cmd ci` and browser

@@ -1,6 +1,7 @@
 import { createBrowserAssetStore, selectInstallEntries } from "./asset_store.mjs";
 import { createEngineWorkerHost } from "./engine_worker_host.mjs";
 import { createInputControllerCore } from "./input_controller_core.mjs";
+import { createBrowserQuit } from "./browser_quit.mjs";
 
 const canvas = document.querySelector("#game-canvas");
 const runtimeLabel = document.querySelector("#runtime-label");
@@ -68,6 +69,14 @@ const runtime = {
 };
 globalThis.__KISAKCOD_WEB__ = runtime;
 
+globalThis.addEventListener("kisakcod:display", (event) => {
+    const { detail } = /** @type {CustomEvent} */ (event);
+    const wrapper = /** @type {HTMLElement} */ (document.querySelector(".canvas-wrap"));
+    if (Number.isInteger(detail.width) && Number.isInteger(detail.height) && detail.width > 0 && detail.height > 0)
+        wrapper.style.aspectRatio = detail.fixed
+            ? `${detail.width} / ${detail.height}` : "";
+});
+
 async function submitCanonicalCommand(command) {
     const text = String(command).trim();
     if (!text || new TextEncoder().encode(text).byteLength > 1023) {
@@ -91,6 +100,8 @@ async function submitCanonicalCommand(command) {
 runtime.submitCanonicalCommand = submitCanonicalCommand;
 
 let assetStore = null;
+let inputController = null;
+let quitController = null;
 let filesystemBridge = null;
 let mountedImportId = null;
 let mountingImportId = null;
@@ -401,7 +412,7 @@ function resizeCanvas() {
 
 function installBrowserInput()
 {
-    createInputControllerCore({
+    inputController = createInputControllerCore({
         canvas,
         sendInput(event) {
             const result = runtime.module?.input?.(event);
@@ -417,6 +428,7 @@ function installBrowserInput()
 }
 
 globalThis.addEventListener("kisakcod:state", (event) => {
+    if (event.detail.state === "quitting") void quitController?.request();
     if (event.detail.state === "renderer-lost") {
         runtime.contextLosses += 1;
         rendererStatus.textContent = "WebGL2 context lost";
@@ -537,7 +549,7 @@ async function chooseInstallation({ portable = false } = {})
     });
     const persistenceRequest = assetStore.requestPersistence();
     try {
-        const entries = await selectInstallEntries(installFolderInput, { portable });
+        const entries = await selectInstallEntries(installFolderInput, { portable, module: runtime.module });
         await persistenceRequest;
         if (!entries) {
             publishAssetState(previousState);
@@ -588,6 +600,27 @@ try {
         },
     });
     await runtime.module.ready;
+    quitController = createBrowserQuit({
+        engine: {
+            // The diagnostic unmount intentionally force-terminates on error.
+            // Checkpoint first so persistence failures retain the stopped
+            // runtime for retry. With no more frames, unmount has no new writes.
+            async flushAndUnmount() {
+                await runtime.module.checkpoint();
+                return runtime.module.flushAndUnmount();
+            },
+            get filesystemState() { return runtime.module.filesystemState; },
+        },
+        dialog: document.querySelector("#quit-dialog"),
+        onStop() {
+            inputController?.dispose();
+            engineCommandInput.disabled = engineCommandSubmit.disabled = true;
+        },
+        async dispose() {
+            await assetStore?.dispose();
+            await runtime.module.dispose();
+        },
+    });
     installBrowserInput();
     engineCommandInput.disabled = false;
     engineCommandSubmit.disabled = false;

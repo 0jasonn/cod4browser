@@ -1,3 +1,4 @@
+#include <atomic>
 #include <universal/q_shared.h>
 #include "xanim.h"
 #include "xanim_calc.h"
@@ -1098,7 +1099,7 @@ void __cdecl XAnimFreeInfo(XAnimTree_s* tree, uint32_t infoIndex)
     const char* animToModel; // [esp+8h] [ebp-Ch]
     uint32_t prev; // [esp+Ch] [ebp-8h]
 
-    InterlockedIncrement(&tree->modifyRefCount);
+    std::atomic_ref<volatile int32_t>(tree->modifyRefCount).fetch_add(1);
 
     iassert(!tree->calcRefCount);
     iassert(tree);
@@ -1159,7 +1160,7 @@ void __cdecl XAnimFreeInfo(XAnimTree_s* tree, uint32_t infoIndex)
 #endif
 
     iassert(!tree->calcRefCount);
-    InterlockedDecrement(&tree->modifyRefCount);
+    std::atomic_ref<volatile int32_t>(tree->modifyRefCount).fetch_sub(1);
 }
 
 void __cdecl XAnimClearServerNotify(XAnimInfo* info)

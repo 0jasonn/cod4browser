@@ -42,6 +42,7 @@ $allowedFiles = @(
     'asset_profile.mjs',
     'asset_store.mjs',
     'browser_capabilities.mjs',
+    'browser_quit.mjs',
     'capability_probe_worker.mjs',
     'engine_worker.mjs',
     'index.html',
@@ -49,12 +50,15 @@ $allowedFiles = @(
     'kisakcod.mjs',
     'kisakcod.wasm',
     'launcher.mjs',
+    'licenses.txt',
     'product_checkpoint_controller.mjs',
     'product_engine_worker_host.mjs',
     'product_mount_controller.mjs',
     'product_protocol.mjs',
+    'reverb_dsp.mjs',
     'styles.css',
     'web_audio_driver.mjs',
+    'web_reverb_worklet.mjs',
     'worker_sync_filesystem.mjs',
     'worker_transport.mjs'
 )

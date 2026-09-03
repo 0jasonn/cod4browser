@@ -591,6 +591,7 @@ void __cdecl ScrPlace_CalcSafeAreaOffsets(
     float *realViewableMax,
     float *virtualViewableMin,
     float *virtualViewableMax);
+void CL_UpdateScreenPlacement();
 void __cdecl ScrPlace_SetupViewport(
     ScreenPlacement *scrPlace,
     int32_t viewportX,

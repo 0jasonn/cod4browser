@@ -29,6 +29,18 @@ export class EngineWorkerError extends Error
     }
 }
 
+/**
+ * @typedef {object} PendingRequest
+ * @property {number} generation
+ * @property {(value: any) => void} resolve
+ * @property {(error: Error) => void} reject
+ * @property {ReturnType<typeof setTimeout> | null} timeout
+ * @property {ReturnType<typeof setTimeout> | null} [absoluteTimeout]
+ * @property {AbortSignal} [signal]
+ * @property {() => void} abort
+ */
+
+/** @param {Map<number, PendingRequest>} pending */
 export function createRequestIdAllocator(pending)
 {
     let nextRequestId = 1;
@@ -43,13 +55,18 @@ export function createRequestIdAllocator(pending)
     };
 }
 
+/** @param {PendingRequest} request */
 function releaseRequest(request)
 {
-    clearTimeout(request.timeout);
-    clearTimeout(request.absoluteTimeout);
+    clearTimeout(request.timeout ?? undefined);
+    clearTimeout(request.absoluteTimeout ?? undefined);
     request.signal?.removeEventListener("abort", request.abort);
 }
 
+/**
+ * @param {Map<number, PendingRequest>} pending
+ * @param {unknown} error
+ */
 export function rejectWorkerRequests(pending, error)
 {
     const failure = error instanceof EngineWorkerError ? error : new EngineWorkerError(error);
@@ -60,6 +77,11 @@ export function rejectWorkerRequests(pending, error)
     pending.clear();
 }
 
+/**
+ * @param {Map<number, PendingRequest>} pending
+ * @param {{id: number, error?: unknown, result?: unknown}} message
+ * @param {number} generation
+ */
 export function settleWorkerReply(pending, message, generation)
 {
     const request = pending.get(message.id);

@@ -6,11 +6,9 @@
 // Canonical KisakCOD/IW3 database-facing image records.  The browser database
 // loader leaves GfxTexture null: decoded IWI bytes and GPU resources belong to
 // the renderer/backend, not to zone publication.
-#if defined(D3D_SDK_VERSION)
-using GfxImageFormat = _D3DFORMAT;
-#else
+// Serialized D3DFORMAT value; the native GPU boundary performs the enum cast.
+// Its C++ type must not depend on whether d3d9.h was included first.
 using GfxImageFormat = std::int32_t;
-#endif
 
 struct IDirect3DBaseTexture9;
 struct IDirect3DTexture9;

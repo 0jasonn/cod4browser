@@ -847,15 +847,11 @@ void __cdecl CL_InitRenderer()
     iassert(!cls.rendererStarted);
     cls.rendererStarted = 1;
     R_BeginRegistration(&cls.vidConfig);
-    ScrPlace_SetupUnsafeViewport(&scrPlaceFullUnsafe, 0, 0, cls.vidConfig.displayWidth, cls.vidConfig.displayHeight);
-    ScrPlace_SetupViewport(&scrPlaceFull, 0, 0, cls.vidConfig.displayWidth, cls.vidConfig.displayHeight);
-    ScrPlace_SetupViewport(scrPlaceView, 0, 0, cls.vidConfig.displayWidth, cls.vidConfig.displayHeight);
+    CL_UpdateScreenPlacement();
     cls.whiteMaterial = Material_RegisterHandle("white", 3);
     cls.consoleMaterial = Material_RegisterHandle("console", 3);
     cls.consoleFont = R_RegisterFont("fonts/consoleFont", 3);
-    g_console_field_width = cls.vidConfig.displayWidth - 40;
     g_consoleField.charHeight = g_console_char_height;
-    g_consoleField.widthInPixels = cls.vidConfig.displayWidth - 40;
     g_consoleField.fixedSize = 1;
     StatMon_Reset();
     Con_InitClientAssets();
@@ -1606,7 +1602,9 @@ void __cdecl CL_Vid_Restart_f()
             FS_Restart(0, 0);
         SEH_UpdateLanguageInfo();
         Dvar_SetInt(cl_paused, 0);
-        Com_InitXAssets();
+        // The database executor belongs to the process, not the renderer.
+        // Com_Init already created it; shutdown/restart only retires assets.
+        // Spawning it here violates Sys_CreateThread's single-owner invariant.
         CL_InitRef();
         CL_InitRenderer();
         CL_StartHunkUsers();

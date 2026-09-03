@@ -2272,6 +2272,9 @@ if (phase3TargetMap) {
             failureStage = `${phase3TargetMap} stationary stability window`;
             const targetStability = await measureCleanPerformanceWindow(
                 page, phase3TargetMap, stabilityDurationMs);
+            await page.locator("#game-canvas").screenshot({
+                path: test.info().outputPath(`${phase3TargetMap}-stationary.png`),
+            });
             const targetProfile = await captureGameplayProfile(
                 page, phase3TargetMap);
             failureStage = `${phase3TargetMap} renderer memory`;

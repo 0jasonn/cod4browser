@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <limits>
 
 int main()
 {
@@ -11,6 +12,43 @@ int main()
     ALuint source = 0;
     alGenSources(1, &source);
     assert(source == 1);
+
+    WebOpenAL_SetRoomType(25);
+    WebOpenAL_SetReverbSend(source, 0.5f);
+    assert(alGetError() == AL_NONE);
+    WebOpenAL_SetRoomType(-1);
+    assert(alGetError() != AL_NONE);
+    WebOpenAL_SetRoomType(26);
+    assert(alGetError() != AL_NONE);
+    WebOpenAL_SetReverbSend(999, 0.5f);
+    assert(alGetError() != AL_NONE);
+    WebOpenAL_SetReverbSend(source, std::numeric_limits<float>::quiet_NaN());
+    assert(alGetError() != AL_NONE);
+    WebOpenAL_SetReverbSend(source, -0.1f);
+    assert(alGetError() != AL_NONE);
+    WebOpenAL_SetReverbSend(source, 1.1f);
+    assert(alGetError() != AL_NONE);
+    WebOpenAL_SetReverbSend(source, 0);
+    assert(alGetError() == AL_NONE);
+
+    float bands[6][5] = {};
+    bands[5][0] = 1; bands[5][1] = 4;
+    bands[5][2] = -6; bands[5][3] = 1000; bands[5][4] = 0.75f;
+    WebOpenAL_SetSourceEq(source, bands);
+    assert(alGetError() == AL_NONE);
+    bands[5][4] = 0;
+    WebOpenAL_SetSourceEq(source, bands);
+    assert(alGetError() != AL_NONE);
+    bands[5][4] = std::numeric_limits<float>::infinity();
+    WebOpenAL_SetSourceEq(source, bands);
+    assert(alGetError() != AL_NONE);
+    bands[5][4] = 1;
+    bands[5][1] = 1.5f;
+    WebOpenAL_SetSourceEq(source, bands);
+    assert(alGetError() != AL_NONE);
+    bands[5][0] = 0;
+    WebOpenAL_SetSourceEq(source, bands);
+    assert(alGetError() == AL_NONE);
 
     ALuint buffer = 0;
     alGenBuffers(1, &buffer);
@@ -28,6 +66,23 @@ int main()
     ALfloat gain = 0.0f;
     alGetSourcef(source, AL_GAIN, &gain);
     assert(gain == 0.25f);
+
+    // Additional allocations must preserve live game sources. The final slot
+    // belongs to the movie device, outside the 53 canonical SND channels.
+    ALuint remainingSources[53]{};
+    alGenSources(53, remainingSources);
+    assert(alGetError() == AL_NONE);
+    assert(remainingSources[0] == 2 && remainingSources[52] == 54);
+    alGetSourcef(source, AL_GAIN, &gain);
+    assert(gain == 0.25f);
+    ALuint exhausted = 0;
+    alGenSources(1, &exhausted);
+    assert(alGetError() != AL_NONE && exhausted == 0);
+    alDeleteSources(53, remainingSources);
+    ALuint reused = 0;
+    alGenSources(1, &reused);
+    assert(reused == 2);
+    alDeleteSources(1, &reused);
 
     // Invalid IDs fail closed and do not poison a valid later query.
     alSourcePlay(999);

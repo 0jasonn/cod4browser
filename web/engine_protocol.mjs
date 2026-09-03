@@ -6,6 +6,7 @@ export {
 } from "./worker_transport.mjs";
 
 export const HOST_EVENTS = new Set([
+    "kisakcod:display",
     "kisakcod:renderer-shader", "kisakcod:renderer-texture",
     "kisakcod:renderer-aa",
     "kisakcod:test-webgl-aa", "kisakcod:renderer-surface",

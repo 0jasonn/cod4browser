@@ -249,6 +249,9 @@ export function createEngineWorkerHost(canvas, {
                     "EVENT_NOT_ALLOWED", "event", `Worker event is not allowed: ${message.name}.`));
                 break;
             }
+            if (message.name === "kisakcod:state" && message.detail?.state === "quitting") {
+                audioDriver.dispose();
+            }
             globalThis.dispatchEvent(new CustomEvent(message.name, { detail: message.detail }));
             break;
         case "audio-command": audioDriver.handleCommand(message); break;

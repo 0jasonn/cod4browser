@@ -18,7 +18,7 @@
 #include <dr_libs/dr_wav.h>
 #include <dr_libs/dr_mp3.h>
 #if !defined(KISAK_WEB)
-#include <AL/efx-presets.h>
+#include "snd_reverb_presets.h"
 #endif
 #include <fstream>
 
@@ -872,41 +872,7 @@ int __cdecl SND_StartAliasStreamOnChannel(SndStartAliasInfo *startAliasInfo, int
     return playbackId;
 }
 
-// snd_roomStrings[27] (snd.cpp) is the exact same 26-name, same-order I3DL2/EAX preset list
-// as these - verified name-for-name, not assumed - so this is a mechanical 1:1 copy, not a
-// design decision. SND_RoomtypeFromString (snd.cpp) maps a string to an index into this
-// same list, so the two arrays must stay in lockstep.
 #if !defined(KISAK_WEB)
-static const EFXEAXREVERBPROPERTIES AL_RoomPresets[26] =
-{
-    EFX_REVERB_PRESET_GENERIC,
-    EFX_REVERB_PRESET_PADDEDCELL,
-    EFX_REVERB_PRESET_ROOM,
-    EFX_REVERB_PRESET_BATHROOM,
-    EFX_REVERB_PRESET_LIVINGROOM,
-    EFX_REVERB_PRESET_STONEROOM,
-    EFX_REVERB_PRESET_AUDITORIUM,
-    EFX_REVERB_PRESET_CONCERTHALL,
-    EFX_REVERB_PRESET_CAVE,
-    EFX_REVERB_PRESET_ARENA,
-    EFX_REVERB_PRESET_HANGAR,
-    EFX_REVERB_PRESET_CARPETEDHALLWAY,
-    EFX_REVERB_PRESET_HALLWAY,
-    EFX_REVERB_PRESET_STONECORRIDOR,
-    EFX_REVERB_PRESET_ALLEY,
-    EFX_REVERB_PRESET_FOREST,
-    EFX_REVERB_PRESET_CITY,
-    EFX_REVERB_PRESET_MOUNTAINS,
-    EFX_REVERB_PRESET_QUARRY,
-    EFX_REVERB_PRESET_PLAIN,
-    EFX_REVERB_PRESET_PARKINGLOT,
-    EFX_REVERB_PRESET_SEWERPIPE,
-    EFX_REVERB_PRESET_UNDERWATER,
-    EFX_REVERB_PRESET_DRUGGED,
-    EFX_REVERB_PRESET_DIZZY,
-    EFX_REVERB_PRESET_PSYCHOTIC,
-};
-
 static void AL_ApplyReverbPreset(ALuint effect, const EFXEAXREVERBPROPERTIES &props)
 {
     alEffectf(effect, AL_EAXREVERB_DENSITY, props.flDensity);
@@ -944,8 +910,7 @@ static void AL_ApplyReverbPreset(ALuint effect, const EFXEAXREVERBPROPERTIES &pr
 void SND_ApplyReverbSend(int index, const snd_alias_t *alias)
 {
 #if defined(KISAK_WEB)
-    (void)index;
-    (void)alias;
+    WebOpenAL_SetReverbSend(alGlob.source[index], MSS_GetWetLevel(alias));
 #else
     float wet = MSS_GetWetLevel(alias);
     alFilterf(alGlob.sendFilter[index], AL_LOWPASS_GAIN, wet);
@@ -957,7 +922,8 @@ void SND_ApplyReverbSend(int index, const snd_alias_t *alias)
 void __cdecl SND_SetRoomtype(int roomtype)
 {
 #if defined(KISAK_WEB)
-    (void)roomtype;
+    iassert(roomtype >= 0 && roomtype < 26);
+    WebOpenAL_SetRoomType(roomtype);
 #else
     iassert(roomtype >= 0 && roomtype < ARRAY_COUNT(AL_RoomPresets));
     AL_ApplyReverbPreset(alGlob.reverbEffect, AL_RoomPresets[roomtype]);
@@ -967,7 +933,7 @@ void __cdecl SND_SetRoomtype(int roomtype)
 
 void __cdecl SND_UpdateEqs()
 {
-    // Mirrors the Miles loop, but MSS_ApplyEqFilter (snd_al.cpp) is a deliberate no-op
+    // Preserve native entchannel ownership; the web device sends only changes.
     for (int channelIndex = 0; channelIndex < 53; ++channelIndex)
     {
         MSS_ApplyEqFilter(alGlob.source[channelIndex], g_snd.chaninfo[channelIndex].entchannel);

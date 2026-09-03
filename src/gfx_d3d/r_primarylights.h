@@ -1,4 +1,5 @@
 #pragma once
+#include "gfx_world_types.h"
 #include "r_rendercmds.h"
 
 enum GfxLightType : __int32
@@ -34,32 +35,6 @@ struct GfxShadowedLightHistory // sizeof=0x48
     GfxShadowedLightEntry entries[4];
     uint32_t entryCount;
     uint32_t lastUpdateTime;
-};
-
-struct GfxShadowGeometry // sizeof=0xC
-{
-    uint16_t surfaceCount;
-    uint16_t smodelCount;
-    uint16_t *sortedSurfIndex;
-    uint16_t *smodelIndex;
-};
-struct GfxLightRegionAxis // sizeof=0x14
-{
-    float dir[3];
-    float midPoint;
-    float halfSize;
-};
-struct GfxLightRegionHull // sizeof=0x50
-{
-    float kdopMidPoint[9];
-    float kdopHalfSize[9];
-    uint32_t axisCount;
-    GfxLightRegionAxis *axis;
-};
-struct GfxLightRegion // sizeof=0x8
-{
-    uint32_t hullCount;
-    GfxLightRegionHull *hulls;
 };
 
 void __cdecl R_ClearShadowedPrimaryLightHistory(int localClientNum);

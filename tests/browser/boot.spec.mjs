@@ -81,6 +81,15 @@ test("recovers the retained surface after WebGL2 context loss", { tag: "@smoke" 
     expect(after.resident).toBe(true);
 });
 
+test("reports a latched canonical frame error as terminal", async ({ page }) => {
+    await boot(page);
+    await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.call(
+        "_KisakWeb_TestDeferredFrameError"));
+    await expect.poll(() => page.evaluate(
+        () => globalThis.__KISAKCOD_WEB__?.state)).toBe("failed");
+    await expect(page.locator("#boot-log")).toContainText("Diagnostic deferred frame error");
+});
+
 test("surface restoration failure remains terminal and non-resident", async ({ page }) => {
     await page.addInitScript(() => {
         globalThis.__rendererStates = [];

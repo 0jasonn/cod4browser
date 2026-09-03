@@ -1,6 +1,8 @@
 #include <database/db_file_platform.h>
 
 #if defined(KISAK_WEB) || defined(KISAK_DB_SYNC_FILE_TEST)
+#include <universal/q_shared.h>
+#include <stringed/stringed_hooks.h>
 #include <web/web_worker_filesystem.h>
 
 #include <cstdio>
@@ -9,7 +11,8 @@ void DB_PlatformBuildZonePath(
     const char *zoneName, std::uint32_t size, char *filename)
 {
     if (!filename || !size) return;
-    std::snprintf(filename, size, "zone/english/%s.ff", zoneName ? zoneName : "");
+    std::snprintf(filename, size, "zone/%s/%s.ff",
+        SEH_GetLanguageName(SEH_GetCurrentLanguage()), zoneName ? zoneName : "");
     filename[size - 1] = '\0';
 }
 

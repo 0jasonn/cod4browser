@@ -4,6 +4,7 @@ import { createEngineWorkerHost } from "./product_engine_worker_host.mjs";
 import { createVisibilityCheckpoint } from "./product_checkpoint_controller.mjs";
 import { createInputControllerCore } from "./input_controller_core.mjs";
 import { createLatestMountController } from "./product_mount_controller.mjs";
+import { createBrowserQuit } from "./browser_quit.mjs";
 
 /** @template {Element} T @param {string} selector @returns {T} */
 function requiredElement(selector)
@@ -47,6 +48,7 @@ let inputController = null;
 let checkpointController = null;
 let resizeObserver = null;
 let disposePromise = null;
+let quitController = null;
 let assetState = { state: "checking", message: "Waiting for the engine" };
 const logs = [];
 
@@ -157,7 +159,7 @@ async function chooseInstallation(portable = false)
     });
     const persistence = assetStore.requestPersistence();
     try {
-        const entries = await selectInstallEntries(installFolderInput, { portable });
+        const entries = await selectInstallEntries(installFolderInput, { portable, module: engine });
         await persistence;
         if (!entries) {
             renderAssetState({ ...previous, ...assetStore.storageStatus });
@@ -192,9 +194,18 @@ function resizeCanvas()
         appendLog(`[kisakcod-web] Resize: ${error.message}`, "error"));
 }
 
+globalThis.addEventListener("kisakcod:display", (event) => {
+    const { detail } = /** @type {CustomEvent} */ (event);
+    const wrapper = /** @type {HTMLElement} */ (document.querySelector(".canvas-wrap"));
+    if (Number.isInteger(detail.width) && Number.isInteger(detail.height) && detail.width > 0 && detail.height > 0)
+        wrapper.style.aspectRatio = detail.fixed
+            ? `${detail.width} / ${detail.height}` : "";
+});
+
 const handleRuntimeState = (event) => {
     document.documentElement.dataset.runtimeState = event.detail.state;
     if (event.detail.message) appendLog(`[kisakcod-web] ${event.detail.message}`);
+    if (event.detail.state === "quitting") void quitController?.request();
 };
 const handleFrame = (event) => {
     frameCounter.textContent = `Frame ${event.detail.frame.toLocaleString()}`;
@@ -210,9 +221,12 @@ const handleDatabase = (event) => {
     }
 };
 const handleCinematic = (event) => {
-    cinematicStatus.hidden = false;
-    cinematicStatus.textContent = event.detail.message;
-    appendLog(`[kisakcod-web] Cinematic '${event.detail.name}' skipped: ${event.detail.reason}.`);
+    const { state, name, reason } = event.detail;
+    cinematicStatus.hidden = state !== "skipped" && state !== "failed";
+    cinematicStatus.textContent = state === "skipped"
+        ? "Movie missing from browser storage. Select your installation again to import movies."
+        : state === "failed" ? `Movie playback failed: ${reason}` : "";
+    appendLog(`[kisakcod-web] Cinematic '${name}' ${state}${reason ? `: ${reason}` : ""}.`);
 };
 
 const capabilityReport = await detectBrowserCapabilities();
@@ -325,6 +339,18 @@ try {
         onFilesystemDirty() { checkpointController?.markDirty(); },
     });
     await engine.ready;
+    quitController = createBrowserQuit({
+        engine,
+        dialog: requiredElement("#quit-dialog"),
+        onStop() {
+            inputController?.dispose();
+            checkpointController?.dispose();
+            resizeObserver?.disconnect();
+            mountController?.invalidate();
+            commandInput.disabled = commandSubmit.disabled = true;
+        },
+        dispose: disposeApp,
+    });
     mountController = createLatestMountController({
         mount: (manifest) => engine.mountAssets(manifest),
         unmount: () => engine.flushAndUnmount(),

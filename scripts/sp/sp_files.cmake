@@ -212,6 +212,7 @@ set(SERVER
     "${SRC_DIR}/server/sv_client.cpp"
     "${SRC_DIR}/server/sv_demo.cpp"
     "${SRC_DIR}/server/sv_init.cpp"
+    "${SRC_DIR}/server/sv_shutdown.cpp"
     "${SRC_DIR}/server/sv_map_assets.cpp"
     "${SRC_DIR}/server/sv_map_assets.h"
     "${SRC_DIR}/server/sv_map_command.cpp"
@@ -227,6 +228,7 @@ set(UI
     ${UI}
     "${SRC_DIR}/ui/mission.cpp"
     "${SRC_DIR}/ui/ui_main.cpp"
+    "${SRC_DIR}/ui/ui_savegames.cpp"
 )
 
 set(XANIM

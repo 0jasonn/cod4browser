@@ -1,6 +1,129 @@
 import { expect, test } from "@playwright/test";
+import { createInstallDirectory } from "./install_fixture.mjs";
+import { createSyntheticIwd } from "./synthetic_iwd.mjs";
 
 test.skip(process.env.KISAK_WEB_PRODUCT_TEST !== "1", "Runs only against the production site.");
+
+test("canonical Quit stops the French production runtime and can start again @product", async ({ page }, testInfo) => {
+    const directory = await createInstallDirectory(testInfo, "quit-install", { language: "french" });
+    await page.goto("/");
+    await expect(page.locator("html")).toHaveAttribute("data-runtime-state", "running");
+    const chooser = page.waitForEvent("filechooser");
+    await page.locator("#portable-install-button").click();
+    await (await chooser).setFiles(directory);
+    await expect(page.locator("#boot-log")).toContainText("canonical runtime started");
+    await page.locator("#engine-command-input").fill("path");
+    await page.locator("#engine-command-submit").click();
+    await expect(page.locator("#boot-log")).toContainText("Current language: french");
+    await page.locator("#engine-command-input").fill("snd_volume 0.37; quit");
+    await page.locator("#engine-command-submit").click();
+    await expect(page.locator("html")).toHaveAttribute("data-runtime-state", "stopped");
+    await expect(page.locator("#quit-dialog")).toBeVisible();
+    const frame = await page.locator("#frame-counter").textContent();
+    await page.waitForTimeout(150);
+    await expect(page.locator("#frame-counter")).toHaveText(frame);
+    const savedConfigs = await page.evaluate(async () => {
+        const root = await navigator.storage.getDirectory();
+        const app = await root.getDirectoryHandle("kisakcod-web");
+        const home = await app.getDirectoryHandle("home");
+        const configs = [];
+        async function visit(directory) {
+            for await (const [name, handle] of directory.entries()) {
+                if (handle.kind === "directory") await visit(handle);
+                else if (name === "config.cfg") configs.push(await (await handle.getFile()).text());
+            }
+        }
+        await visit(home);
+        return configs;
+    });
+    expect(savedConfigs).toEqual(expect.arrayContaining([
+        expect.stringContaining('seta snd_volume "0.37"'),
+    ]));
+    expect(await page.evaluate(async () => (await navigator.locks.query()).held
+        .some(({ name }) => name.includes("engine-filesystem") || name.includes("home-writer"))))
+        .toBe(false);
+    await page.getByRole("button", { name: "Start game", exact: true }).click();
+    await expect(page.locator("html")).toHaveAttribute("data-runtime-state", "running");
+    await expect(page.locator("#boot-log")).toContainText("canonical runtime started");
+});
+
+test("display resolution applies through native restart and survives durable restart @product", async ({ page }, testInfo) => {
+    const directory = await createInstallDirectory(testInfo, "display-install");
+    await page.goto("/");
+    const chooser = page.waitForEvent("filechooser");
+    await page.locator("#portable-install-button").click();
+    await (await chooser).setFiles(directory);
+    await expect(page.locator("#boot-log")).toContainText("canonical runtime started");
+    const command = async (text) => {
+        await page.locator("#engine-command-input").fill(text);
+        await page.locator("#engine-command-submit").click();
+        await expect(page.locator("#engine-command-status")).toHaveText(`Accepted: ${text}`);
+    };
+    const canvas = page.locator("#game-canvas");
+    const size = () => canvas.evaluate((element) => [element.width, element.height]);
+    await command("r_mode 640x480; vid_restart");
+    await expect.poll(size).toEqual([640, 480]);
+    const bounds = await canvas.boundingBox();
+    expect(bounds.width / bounds.height).toBeCloseTo(4 / 3, 2);
+    await page.setViewportSize({ width: 1000, height: 800 });
+    await expect.poll(size).toEqual([640, 480]);
+    await command("r_mode Automatic; vid_restart");
+    await expect.poll(() => canvas.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return Math.abs(element.width - Math.round(rect.width)) +
+            Math.abs(element.height - Math.round(rect.height));
+    })).toBe(0);
+    await command("r_displayRefresh");
+    await expect(page.locator("#boot-log")).toContainText('"r_displayRefresh" is: "Browser controlled');
+    await command("r_mode 1280x720; vid_restart");
+    await expect.poll(size).toEqual([1280, 720]);
+    await expect(page.locator("html")).toHaveAttribute("data-runtime-state", "running");
+    await command("quit");
+    await expect(page.locator("html")).toHaveAttribute("data-runtime-state", "stopped");
+    await page.getByRole("button", { name: "Start game", exact: true }).click();
+    await expect(page.locator("#boot-log")).toContainText("canonical runtime started");
+    await expect.poll(size).toEqual([1280, 720]);
+});
+
+test("Quit retains the runtime when saving fails and retries before disposal @product", async ({ page }) => {
+    await page.goto("/");
+    await page.evaluate(async () => {
+        const { createBrowserQuit } = await import("/browser_quit.mjs");
+        globalThis.quitCalls = [];
+        let fail = true;
+        const controller = createBrowserQuit({
+            engine: { async flushAndUnmount() {
+                globalThis.quitCalls.push("flush");
+                if (fail) { fail = false; throw new Error("storage full"); }
+            } },
+            onStop: () => globalThis.quitCalls.push("stop"),
+            dispose: async () => { globalThis.quitCalls.push("dispose"); },
+            dialog: document.querySelector("#quit-dialog"),
+        });
+        await controller.request();
+    });
+    await expect(page.locator("#quit-dialog")).toContainText("storage full");
+    expect(await page.evaluate(() => globalThis.quitCalls)).toEqual(["stop", "flush"]);
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#quit-dialog")).toBeVisible();
+    await page.getByRole("button", { name: "Retry save and quit" }).click();
+    await expect(page.locator("#quit-dialog")).toContainText("Game closed");
+    expect(await page.evaluate(() => globalThis.quitCalls))
+        .toEqual(["stop", "flush", "flush", "dispose"]);
+});
+
+test("production mount reports canonical filesystem errors @product", async ({ page }, testInfo) => {
+    const directory = await createInstallDirectory(testInfo, "missing-filesystem-check", {
+        overrides: new Map([["main/iw_13.iwd", createSyntheticIwd()]]),
+    });
+    await page.goto("/");
+    await expect(page.locator("html")).toHaveAttribute("data-runtime-state", "running");
+    const chooserPromise = page.waitForEvent("filechooser");
+    await page.locator("#portable-install-button").click();
+    await (await chooserPromise).setFiles(directory);
+    await expect(page.locator("#asset-message")).toContainText("fileSysCheck.cfg");
+    await expect(page.locator("#asset-message")).not.toContainText("[object Object]");
+});
 
 test("production artifact boots without diagnostic browser APIs @product", async ({ page }) => {
     const pageErrors = [];
@@ -35,6 +158,7 @@ test("production JavaScript exposes only named product operations @product", asy
     const files = [
         "asset_store.mjs",
         "browser_capabilities.mjs",
+        "browser_quit.mjs",
         "capability_probe_worker.mjs",
         "product_protocol.mjs",
         "engine_worker.mjs",

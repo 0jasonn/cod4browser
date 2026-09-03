@@ -259,8 +259,7 @@ globalThis.addEventListener("message", (event) => {
                     });
                 }
                 if (module?.canvas) {
-                    module.canvas.width = message.width;
-                    module.canvas.height = message.height;
+                    module.browserCanvasSize = [message.width, message.height];
                 }
                 reply(message.id, message.type, true);
                 break;

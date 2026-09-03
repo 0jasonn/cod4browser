@@ -1,3 +1,4 @@
+#include "r_dynamiclights_core.h"
 #include <universal/q_shared.h>
 #include "r_scene.h"
 #include <qcommon/mem_track.h>
@@ -272,18 +273,8 @@ void __cdecl R_AddOmniLightToScene(const float *org, float radius, float r, floa
             if (scene.addedLightCount < 32)
             {
                 dst = &scene.addedLight[scene.addedLightCount++];
-                memset(&dst->type, 0, sizeof(GfxLight));
-                dst->def = rgp.dlightDef;
-                dst->type = 3;
-                dst->origin[0] = *org;
-                dst->origin[1] = org[1];
-                dst->origin[2] = org[2];
-                dst->radius = radius;
-                dst->color[0] = r;
-                dst->color[1] = g;
-                dst->color[2] = b;
-                dst->canUseShadowMap = 0;
-                dst->spotShadowIndex = -1;
+                const float color[3]{r, g, b};
+                kisak::dynamic_lights::SetOmni(*dst, rgp.dlightDef, org, radius, color);
             }
             else
             {
@@ -295,15 +286,7 @@ void __cdecl R_AddOmniLightToScene(const float *org, float radius, float r, floa
 
 void __cdecl R_AddSpotLightToScene(const float *org, const float *dir, float radius, float r, float g, float b)
 {
-    float v6; // [esp+Ch] [ebp-38h]
-    float v7; // [esp+10h] [ebp-34h]
-    float v8; // [esp+14h] [ebp-30h]
-    float spotLightFovOuter; // [esp+18h] [ebp-2Ch]
-    float v10; // [esp+1Ch] [ebp-28h]
-    float value; // [esp+20h] [ebp-24h]
-    float v12; // [esp+30h] [ebp-14h]
-    float spotLightFovInner; // [esp+38h] [ebp-Ch]
-    float spotLightOffset; // [esp+3Ch] [ebp-8h]
+    float value, v10;
     GfxLight *dst; // [esp+40h] [ebp-4h]
 
     if (rg.registered && rgp.world)
@@ -324,34 +307,17 @@ void __cdecl R_AddSpotLightToScene(const float *org, const float *dir, float rad
                     Dvar_SetFloat((dvar_s *)r_spotLightEndRadius, v10);
                 }
                 dst = &scene.addedLight[scene.addedLightCount++];
-                v12 = (r_spotLightEndRadius->current.value - r_spotLightStartRadius->current.value) / radius;
-                spotLightFovOuter = atan(v12);
-                spotLightFovInner = spotLightFovOuter * r_spotLightFovInnerFraction->current.value;
-                iassert( spotLightFovOuter > 0.0f );
-                v8 = tan(spotLightFovOuter);
-                spotLightOffset = r_spotLightStartRadius->current.value / v8;
-                memset(&dst->type, 0, sizeof(GfxLight));
-                dst->def = rgp.dlightDef;
-                dst->type = 2;
-                dst->origin[0] = *org;
-                dst->origin[1] = org[1];
-                dst->origin[2] = org[2];
-                Vec3Scale(dir, -1.0, dst->dir);
-                Vec3Mad(dst->origin, spotLightOffset, dst->dir, dst->origin);
-                dst->radius = radius + spotLightOffset;
-                dst->color[0] = r;
-                dst->color[1] = g;
-                dst->color[2] = b;
-                Vec3Scale(dst->color, r_spotLightBrightness->current.value, dst->color);
-                scene.dynamicSpotLightNearPlaneOffset = spotLightOffset;
-                dst->exponent = 1;
-                iassert( spotLightFovOuter > spotLightFovInner );
-                v7 = cos(spotLightFovInner);
-                dst->cosHalfFovInner = v7;
-                v6 = cos(spotLightFovOuter);
-                dst->cosHalfFovOuter = v6;
-                dst->canUseShadowMap = r_spotLightShadows->current.color[0];
-                dst->spotShadowIndex = -1;
+                const float color[3]{r, g, b};
+                const float outer = std::atan((r_spotLightEndRadius->current.value -
+                    r_spotLightStartRadius->current.value) / radius);
+                iassert(outer > 0.0f);
+                iassert(outer > outer * r_spotLightFovInnerFraction->current.value);
+                scene.dynamicSpotLightNearPlaneOffset = kisak::dynamic_lights::SetSpot(
+                    *dst, rgp.dlightDef, org, dir, radius, color,
+                    r_spotLightStartRadius->current.value, r_spotLightEndRadius->current.value,
+                    r_spotLightFovInnerFraction->current.value, r_spotLightBrightness->current.value,
+                    r_spotLightShadows->current.enabled);
+                iassert(dst->cosHalfFovInner > dst->cosHalfFovOuter);
             }
             else
             {

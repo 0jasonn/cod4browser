@@ -1,5 +1,6 @@
 #include <universal/q_shared.h>
 #include "r_light.h"
+#include "r_dynamiclights_core.h"
 #include <qcommon/qcommon.h>
 #include <universal/com_files.h>
 #include <universal/com_memory.h>
@@ -153,90 +154,16 @@ int __cdecl R_GetPointLightPartitions(const GfxLight **visibleLights)
 
 void __cdecl R_MostImportantLights(const GfxLight **lights, int lightCount, int keepCount)
 {
-    int top; // [esp+54h] [ebp-10h]
-    int bot; // [esp+58h] [ebp-Ch]
-    const GfxLight *pivot; // [esp+5Ch] [ebp-8h]
-    const GfxLight *swapCache; // [esp+60h] [ebp-4h]
-    const GfxLight *swapCachea; // [esp+60h] [ebp-4h]
-
-    iassert( lightCount > keepCount );
-    iassert( keepCount >= 1 );
-    while (1)
-    {
-        bot = 0;
-        top = lightCount;
-        pivot = *lights;
-        while (1)
-        {
-            iassert( top >= bot );
-            do
-                ++bot;
-            while (bot < top && R_LightImportanceGreaterEqual(lights[bot], pivot));
-            if (bot > top)
-                break;
-            do
-                --top;
-            while (top >= bot && R_LightImportanceGreaterEqual(pivot, lights[top]));
-            if (bot > top)
-                break;
-            swapCache = lights[bot];
-            lights[bot] = lights[top];
-            lights[top] = swapCache;
-        }
-        iassert( bot == top + 1 );
-        if (bot == lightCount)
-        {
-            swapCachea = *lights;
-            *lights = lights[top];
-            lights[top] = swapCachea;
-            --bot;
-        }
-        if (bot == keepCount)
-            break;
-        iassert( lightCount > bot );
-        if (bot >= keepCount)
-        {
-            lightCount = bot;
-        }
-        else
-        {
-            lights += bot;
-            lightCount -= bot;
-            keepCount -= bot;
-        }
-    }
+    iassert(lightCount > keepCount);
+    iassert(keepCount >= 1);
+    kisak::dynamic_lights::MostImportant(lights, lightCount, keepCount, rg.viewOrg);
 }
 
 bool __cdecl R_LightImportanceGreaterEqual(const GfxLight *light0, const GfxLight *light1)
 {
-    float v[3]; // [esp+4h] [ebp-28h] BYREF
-    float diff[3]; // [esp+10h] [ebp-1Ch] BYREF
-    float radiusSq[2]; // [esp+1Ch] [ebp-10h]
-    float distSq[2]; // [esp+24h] [ebp-8h]
-
-    if (light0->type != 3 && light0->type != 2)
-        MyAssertHandler(
-            ".\\r_light.cpp",
-            132,
-            1,
-            "%s",
-            "light0->type == GFX_LIGHT_TYPE_OMNI || light0->type == GFX_LIGHT_TYPE_SPOT");
-    if (light1->type != 3 && light1->type != 2)
-        MyAssertHandler(
-            ".\\r_light.cpp",
-            133,
-            1,
-            "%s",
-            "light1->type == GFX_LIGHT_TYPE_OMNI || light1->type == GFX_LIGHT_TYPE_SPOT");
-    if (light0->type != light1->type)
-        return light0->type == 2;
-    radiusSq[0] = light0->radius * light0->radius;
-    radiusSq[1] = light1->radius * light1->radius;
-    Vec3Sub(rg.viewOrg, light0->origin, diff);
-    distSq[0] = Vec3LengthSq(diff);
-    Vec3Sub(rg.viewOrg, light1->origin, v);
-    distSq[1] = Vec3LengthSq(v);
-    return radiusSq[1] * distSq[0] <= radiusSq[0] * distSq[1];
+    iassert(light0->type == 2 || light0->type == 3);
+    iassert(light1->type == 2 || light1->type == 3);
+    return kisak::dynamic_lights::ImportanceGreaterEqual(light0, light1, rg.viewOrg);
 }
 
 void __cdecl R_GetBspLightSurfs(const GfxLight **visibleLights, int visibleCount)

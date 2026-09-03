@@ -5,6 +5,20 @@ import { WebAudioDriver } from "../../web/web_audio_driver.mjs";
 
 const command = (op, values = {}) => ({ version: 1, op, ...values });
 
+test("signed PCM conversion preserves opposite samples and OpenAL full scale", () => {
+    const output = new Float32Array(5);
+    const driver = new WebAudioDriver({ contextFactory: () => ({
+        createBuffer: () => ({ getChannelData: () => output }),
+    }) });
+    const samples = new Int16Array([-32768, -16384, 0, 16384, 32767]);
+    assert.equal(driver.handleCommand(command("buffer-upload", {
+        bufferId: 1, bytes: samples.byteLength, rate: 44100,
+        format: 0x1101, pcm: samples.buffer,
+    })), true);
+    assert.deepEqual([...output], [-1, -0.5, 0, 0.5, 32767 / 32768]);
+    driver.dispose();
+});
+
 test("stream unqueue validates the complete prefix before mutation", () => {
     const diagnostics = [];
     const driver = new WebAudioDriver({

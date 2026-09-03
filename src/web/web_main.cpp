@@ -9,6 +9,7 @@
 #include <game/g_local.h>
 #include <game/g_main.h>
 #include <game/savememory.h>
+#include <gfx_d3d/r_debugger_api.h>
 #include <qcommon/cmd.h>
 #include <qcommon/qcommon.h>
 #include <server/server.h>
@@ -16,11 +17,13 @@
 #include <script/scr_vm.h>
 #include <qcommon/system.h>
 #include <universal/dvar.h>
+#include <universal/com_memory.h>
 #include <ui/ui.h>
 #include <web/web_client_server_lifecycle.h>
 #include <web/web_filesystem.h>
 #include <web/web_frame_profile.h>
 #include <web/web_renderer.h>
+#include <web/web_display.h>
 #include <web/web_system.h>
 
 #include <algorithm>
@@ -30,6 +33,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+
+extern errorParm_t errorcode;
+extern char com_errorMessage[4096];
+void WebCinematic_Update();
 
 #if KISAK_WEB_DIAGNOSTICS
 #include <emscripten/emscripten.h>
@@ -561,8 +568,30 @@ bool RunCGameFrame(const WebFrameInfo &frame)
     return true;
 }
 
-void RenderFrame(const WebFrameInfo &frame, void *)
+void RecoverFrameDisconnect()
 {
+    if (errorcode != ERR_DISCONNECT)
+        Sys_Error("%s", com_errorMessage);
+    LargeLocalReset();
+    R_PopRemoteScreenUpdate();
+    Cmd_ComErrorCleanup();
+    Dvar_SetInt(cl_paused, 0);
+    Com_Printf(16, "Disconnecting: %s\n", com_errorMessage);
+    Com_ShutdownInternal(com_errorMessage);
+    com_errorEntered = 0;
+    // Native Com_Frame restarts renderer-backed UI after error cleanup.
+    CL_InitRenderer();
+    Com_AssetLoadUI();
+    UI_SetActiveMenu(0, static_cast<uiMenuCommand_t>(UI_GetMenuScreen()));
+    g_lastCGameFrameMilliseconds = 0u;
+    g_cgameFrameAccumulatorMilliseconds = 0u;
+}
+
+// Keep the setjmp wrapper small: Emscripten otherwise emits jump handling for
+// every call in the frame body. The extra call occurs only once per frame.
+[[gnu::noinline]] void RenderFrameInternal(const WebFrameInfo &frame)
+{
+    WebDisplay_Update();
     #if KISAK_WEB_DIAGNOSTICS
     const bool profiling = WebFrameProfile_BeginPump(frame.pumpTick);
     const double totalStarted = profiling ? WebFrameProfile_Now() : 0.0;
@@ -585,6 +614,7 @@ void RenderFrame(const WebFrameInfo &frame, void *)
             WebFrameProfile_Now() - stageStarted;
     }
     #endif
+    WebCinematic_Update();
     const bool gameplayFrame = RunCGameFrame(frame);
     // Before a local game is active the renderer remains responsible for the
     // launcher/bootstrap surface. During gameplay, presentation follows the
@@ -597,6 +627,7 @@ void RenderFrame(const WebFrameInfo &frame, void *)
     #endif
     const bool rendererSubmitted = rendererScheduled &&
         WebRenderer_DrawFrame(frame);
+    if (rendererSubmitted) WebSaveImage_CapturePending();
     #if KISAK_WEB_DIAGNOSTICS
     if (profiling)
     {
@@ -607,9 +638,27 @@ void RenderFrame(const WebFrameInfo &frame, void *)
     WebFrameProfile_EndPump(gameplayFrame, rendererSubmitted);
     #endif
 }
+
+void RenderFrame(const WebFrameInfo &frame, void *)
+{
+    // Initialization and asset mounting have returned before this callback.
+    if (!setjmp(*static_cast<jmp_buf *>(Sys_GetValue(2))))
+        RenderFrameInternal(frame);
+    // Com_Frame checks the latched canonical error after the frame body too.
+    // A returning subsystem must not leave the browser pumping a failed game.
+    if (com_errorEntered)
+        RecoverFrameDisconnect();
+}
 } // namespace
 
 #if KISAK_WEB_DIAGNOSTICS
+extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_TestDeferredFrameError()
+{
+    std::strcpy(com_errorMessage, "Diagnostic deferred frame error");
+    errorcode = ERR_DROP;
+    com_errorEntered = 1;
+}
+
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestSlowNextCommand(int milliseconds)
 {
     if (milliseconds < 1 || milliseconds > 250)

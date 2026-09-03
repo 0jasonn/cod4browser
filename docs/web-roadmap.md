@@ -1,201 +1,104 @@
 # Web product roadmap
 
-Updated 2026-09-02. This is the single active roadmap; earlier orders and
-mission-progression gates are superseded. A playable offline slice already
-exists across six maps, and dynamic DObj convergence is complete through
-`838e047c`. Route generation, waypoint replay, and simulated mission progression
-are retired and out of scope.
+Updated 2026-09-03. Target: full offline single-player fidelity with the
+original Steam COD4 (2007). Multiplayer remains out of scope. Canonical Kisak
+owns gameplay and assets; the dedicated Worker, synchronous filesystem adapter
+and WebGL2 backend remain the platform architecture.
 
-Normal-speed gameplay now preserves numeric script timescales and elapsed
-browser frame time, with a five-second long-suspension ceiling. The old
-100 ms frame cap is no longer a low-FPS slowdown policy; profiling remains
-explicitly opt-in. See [the timing evidence](evidence/browser-frame-time-2026-09-02.md).
+Completed optimization chronology is in
+[history](history/web-roadmap-through-2026-09-02.md). Paused benchmarks do not
+qualify active-campaign performance. See [current status](web-status.md) and
+[the campaign evidence ledger](campaign-compatibility.md).
 
-The immediate task is canonical SP UI and persistence convergence. The main,
-Options, Profiles, Load Game, pause, and resume lifecycle is complete with
-[focused retail evidence](evidence/canonical-menu-lifecycle-2026-09-01.md).
-Objective notification through the canonical configstring/cgame/menu path is
-now complete with [focused evidence](evidence/canonical-objective-notification-2026-09-01.md).
-Canonical dvar/config registration, command execution, frame-owned writing, and
-restart persistence are complete with
-[focused evidence](evidence/canonical-dvar-config-2026-09-01.md).
-Canonical profile create/list/select, config isolation, restart restoration,
-and non-active deletion are complete with
-[focused evidence](evidence/canonical-profile-lifecycle-2026-09-01.md).
-Canonical save/load listing, menu-script loading, Continue after restart,
-gameplay/objective continuity, exact deletion, and profile isolation are also
-complete with [focused evidence](evidence/canonical-save-load-2026-09-01.md).
-This closes the requested UI/persistence convergence sequence. The stationary
-`ac130` probe may resume as a separate follow-up.
+## Current executable milestones
 
-1. Canonical camera DPVS now filters both static-model instances and world
-   surfaces. World camera runs preserve merged-batch order and canonical IDs;
-   sun/spot shadows retain independent ranges. The
-   [world visibility record](evidence/world-camera-visibility-2026-08-31.md)
-   separates synthetic execution and production compilation from browser/retail
-   verification. No new visual or performance result is claimed.
-2. Preserve canonical asset/game/renderer ownership, imported-asset validation,
-   and durable filesystem shutdown. Small shared material lookups and Worker
-   transport bookkeeping must not absorb technique selection or host-specific
-   filesystem recovery policy.
-3. After cloud-append optimization, [dynamic staging](evidence/dynamic-staging-9403a899.md)
-   reduced observed geometry-copy p95 from 3.480 to 0.955 ms at the cost of
-   16.962 MiB of retained staging capacity. Whole-frame CPU was unchanged.
-   The subsequent [dynamic texture change](evidence/dynamic-textures-74fe11aa.md)
-   skips consecutive identical binding sets, preserving texture aliases and
-   reducing observed texture setup from 2.041 to 1.538 ms. Total CPU did not
-   improve. The [falloff-uniform guard](evidence/falloff-uniforms-12ac17e5.md)
-   then removed three unused uploads from other material techniques, with
-   observed dynamic material setup at 1.747 -> 1.248 ms in a fresh comparison.
-   The [completed CPU-efficiency milestone](evidence/renderer-cpu-milestone-e4db91df.md)
-   covers projection/material/feature reuse, world/static material state and
-   shadow alpha/cull reuse. Production mean frame intervals were 43.175 ->
-   40.895 ms across two runs per version; variation limits the claim.
-4. [Direct DObj emission](evidence/dobj-emission-fb596702.md) removes the temporary
-   vertex copy: observed vertex emission fell 5.884 -> 3.351 ms and DObj geometry
-   6.989 -> 4.630 ms. Canonical animation, collision, scripts and asset ownership
-   remain unchanged. The [brush investigation](evidence/brush-costs-f15c3dc9.md)
-   isolated material setup (2.029 ms) and geometry (1.496 ms) as the main costs.
-   Both optimization candidates were reverted after production comparisons
-   remained slower; the verified baseline runtime is restored. Profiling and
-   focused regression coverage remain.
-5. The [controlled timing work](evidence/controlled-renderer-552a468d.md) now
-   qualifies a paused renderer window: two fresh loads matched all six camera,
-   time and world-geometry checkpoints. A retained legacy candidate was rejected
-   for ignoring fixedtime. Native time adjustment is shared with the web pump.
-   Active-gameplay replay and dynamic entity/caster equality remain unproven.
-6. [Aligned diagnostic profiling](evidence/paused-copy-qualification-cd85e18e.md)
-   now checks all 120 sampled views and geometry work. Fresh loads of the same
-   Wasm produced different uploaded-byte and submitted-index totals despite
-   matching camera and draw counts. The unused-name candidate was reverted;
-   production A/B/B/A was not justified by those mismatched workloads.
-7. [Seeded brush optimization](evidence/seeded-brush-hashes-06ad8004.md) locates
-   the variation in dynamic commands and adds shared optional `sv_mapSeed`
-   control. Seed 1 matches all 120 measured workload samples across two fresh
-   baseline loads and the hash-reuse candidate. Consecutive brush shader hashes
-   are now reused locally within a build: material setup fell about 28%, and
-   production A/B/B/A pair means were 26.917 -> 26.027 ms. Host drift and paused
-   execution limit that 3.30% observation; no general gameplay FPS claim follows.
-8. The [major retained-renderer milestone](evidence/retained-renderer-49af3948.md)
-   removes repeated brush expansion/upload, joins adjacent opaque sun ranges,
-   and reuses frame-local texture parameters/pass-local bindings. Canonical
-   geometry, static camera culling and independent shadow membership are preserved.
-   Fresh production means are 21.175 -> 14.731 ms (30.43% lower) with the benchmark
-   cap lifted; default-cap means are 21.469 -> 16.843 ms. Upload bytes fall 29.67%.
-   These are local paused-renderer results. Canonical checkpoint timing replaces
-   callback telemetry that suppresses most fast frames; product defaults remain.
-9. The [DObj conversion milestone](evidence/dobj-conversion-30e34cff.md) fuses final
-   vertex construction with skinning, reuses numeric geometry capacity, exposes
-   canonical math/packing helpers to selective LTO, and merges dynamic opaque
-   sun ranges. The final diagnostic comparison observes 41.1% lower DObj build
-   and 59.1% lower combined skinning/geometry time. Production A/B/B/A means are
-   15.461 -> 14.296 ms (7.54% lower), with control drift documented. Another
-   1,374 shadow submissions are avoided with identical logical geometry,
-   culling and independent shadows. Focused checks, recovery and Release pass.
-10. The [static sun-shadow partition milestone](evidence/static-sun-partitions-cc4af645.md)
-    carries canonical static AABBs into each light-space cascade and submits only
-    contiguous visible runs. Sun-shadow CPU falls 3.524 -> 1.234 ms, 9,706 caster
-    instances are avoided, and production A/B/B/A pair means fall 14.947 ->
-    12.732 ms (14.82%). Camera DPVS, independent near/far membership, authored
-    spot membership, uploads, and dynamic/UI work remain intact.
-11. The [static-instance upload milestone](evidence/static-instance-uploads-ac8b00ca.md)
-    separates CPU-only shadow bounds from the 72-byte GPU instance record and
-    uploads only the camera half for visibility-only changes. A moving-camera
-    transition falls from 1,143,552 to 428,832 bytes (62.5%) while light-space
-    sun selection, authored spot membership, and camera DPVS remain independent.
-12. The [static spot-shadow milestone](evidence/static-spot-membership-26b3dc98.md)
-    attributes the pass by caster family and replaces repeated per-surface static
-    membership searches with one packed mask per authored light. Static spot CPU
-    falls 45.5%; production A/B/B/A pair means fall 12.627 -> 12.090 ms (4.25%)
-    with all diagnostic logical-work samples exact.
-13. The [BSP sun-partition milestone](evidence/bsp-sun-partitions-a23850aa.md)
-    carries canonical surface AABBs with retained spans and selects each cascade
-    independently. Per frame, 578 physical shadow draws and 1,694,994 submitted
-    indices are avoided; attributed sun drawing falls 8.27%. Production A/B/B/A
-    pair means fall 15.189 -> 14.942 ms (1.63%) with documented run drift.
-14. The [dynamic sun-partition milestone](evidence/dynamic-sun-partitions-6ece6ee9.md)
-    retains world-space bounds per flattened dynamic draw and independently
-    selects both cascades. Dynamic sun CPU falls 71.9%; 394 physical shadow
-    draws and 265,812 indices are avoided. Bounds construction costs 0.328 ms;
-    noisy production pair means fall 14.868 -> 14.421 ms (3.01%).
-15. The [dynamic spot-shadow milestone](evidence/dynamic-spot-shadows-9a253c6a.md)
-    submits build-shadowmap-qualified dynamic families independently per spot
-    matrix. The focused comparator proves that only 10 caster draws and 65,760
-    indices are added.
-16. The [dynamic opaque-order milestone](evidence/dynamic-opaque-sort-c8c4f335.md)
-    sorts only safe model/brush runs by Kisak's material key. Material updates
-    fall 24.8%, feature updates 38.6%, and all 120 work-count samples remain
-    exact; production pair means fall 3.41% with documented drift.
-17. The [dynamic primary-light milestone](evidence/dynamic-primary-light-linkage-4ed38a84.md)
-    restores the canonical entity/DynEnt bit stride, link/unlink math, authored
-    light-region rejection, and selected-light masks before spot-matrix culling.
-    All 120 work-count samples remain exact and the final Release passes.
-18. The [Kisak optimization audit](kisak-renderer-optimization-audit.md) is
-    complete with no applicable Open or Partial rows. Further renderer work is
-    gated on a measured compatibility defect or bottleneck.
-19. The [dynamic geometry ownership milestone](evidence/dynamic-geometry-ownership-af601efe.md)
-    follows that profile direction without accepting non-reproducible authored
-    gameplay as an A/B benchmark. Final dynamic vertex/index storage now crosses
-    the backend boundary by ownership transfer; all 120 seeded paused work samples
-    match while command geometry copy falls 99.6%. A measured WebGL double-buffer
-    candidate did not reduce upload time and was reverted. This closes platform
-    geometry-handoff optimization; later canonical DObj pose, lighting,
-    weighted/rigid skinning, and decoded-attribute work is complete through
-    `838e047c`.
+1. **A complete first campaign chapter.** Use shipped New Game through
+   Killhouse, CargoShip and the authored following transition. Record natural
+   objectives, scripted sequences, checkpoints, death/restart, a fresh-browser
+   Continue and mission completion. Use ordinary gameplay; no routes,
+   waypoints, replay/progression substitutes or injected objective success.
+   Rifle/timed-shooting/sidearm training, checkpoints 1–3 and fresh-browser
+   Resume now pass; Save and Quit also returns safely to the main menu
+   ([evidence](evidence/campaign-training-disconnect-2026-09-02.md)). The reached
+   Captain Price/ladder platform is the extent of that gameplay evidence;
+   course completion and the remaining chapter flow still require ordinary
+   gameplay verification. Automated route or progression substitutes remain
+   out of scope.
+2. **Three-way reference.** Compare original Steam -> native Kisak -> browser
+   Kisak. The [owned installation inventory](evidence/steam-reference-2026-09-02.json)
+   pins hashes and configured settings. Native SP now builds and enters menu
+   code ([evidence](evidence/native-reference-2026-09-02.md)). Finish its visual
+   qualification and record
+   difficulty/settings in all three runtimes before attributing differences.
 
-The static-instance follow-up used the focused native fixture, isolated control
-and candidate diagnostic builds, three final moving-camera profiles, and one
-production Release. It claims exact transfer bytes, not timing or gameplay FPS.
-No broad suite, mission check, context-loss run, or capture was required.
+Supporting repairs must address an observed engine/platform defect or a named
+fidelity gap. Synthetic regression cases qualify those boundaries; campaign
+acceptance requires the original mission scripts to drive the real game.
+Completed verification and renderer repairs are recorded in the status and
+convergence pages rather than counted as remaining product milestones here.
 
-The static spot-shadow follow-up used the same focused native target, one focused
-Node target, attributed control/candidate diagnostics, four production windows,
-and one final Release. One targeted profile retry corrected an aggregate-field
-allowlist; renderer assertions were not weakened.
+## Remaining player-visible gaps and acceptance
 
-The BSP sun follow-up used one focused native target, exact 120-sample targeted
-comparison, four production windows, and one final Release. No broad tier,
-mission check, capture, or unrelated compatibility promotion ran.
+- **Rendering:** validate encountered material passes, transparency, lighting
+  and special vision against the original. AC130 now renders and has inspected
+  captures ([evidence](evidence/ac130-rendering-2026-09-03.md)); compare its
+  thermal and cloud passes against matching Steam/native scenes. Keep all state in
+  canonical assets and FX, and translate only at the renderer boundary.
+  Compare saved-screen/text presentation and point lighting with Steam; finish
+  transient spot shadows and native receiver/scissor selection.
+- **Cinematics:** the [source-built codec](cinematic-codec.md) now implements
+  playback behind `R_Cinematic_*` using imported movies. Chrome playback,
+  audio start, skip, pause/resume and natural completion pass
+  ([evidence](evidence/cinematics-2026-09-02.md)). Compare synchronization,
+  color, in-world materials and authored transitions against Steam. The decoder
+  exceeds the previous production size baseline; that gate remains unchanged.
+- **Audio:** both canonical EQ stages now reach the browser device
+  ([evidence](evidence/browser-eq-2026-09-02.md)). Qualify authored/default EQ
+  activation and filter-update transients against Steam. Room reverb/wet sends
+  now use the [native DSP component](browser-reverb.md) in an AudioWorklet;
+  native/Wasm impulses and browser routing checks pass. Qualify authored
+  room changes and callback cost. Compare dialogue, music, positional audio and authored
+  effects during gameplay, pause and cinematics.
+- **Menus/platform:** prove each shipped setting changes its visible or
+  functional output. Quit now reaches durable shutdown and restart. Save metadata,
+  list bounds, screenshot capture, durable JPEG completion and raw-image upload
+  now work for an owned Airplane save ([evidence](evidence/save-thumbnails-2026-09-02.md)).
+  Start-level capture now waits for a matching frame, and native raw-image
+  loading passes a device test ([evidence](evidence/save-startup-native-2026-09-02.md)).
+  Compare authored checkpoint/menu presentation with Steam and the native game.
+  Localized profile/DB paths now pass French/German synthetic import and reload;
+  qualify owned localized inventories, glyphs and dialogue
+  ([evidence](evidence/localized-imports-2026-09-02.md)). Gamma now reaches the
+  final pass and the shipped slider visibly changes menus/worlds
+  ([evidence](evidence/display-gamma-2026-09-03.md)); compare display response
+  with Steam. Resolution Apply, persistence and native in-game save/restart/load
+  now pass; monitor refresh remains browser-controlled
+  ([evidence](evidence/display-options-2026-09-03.md)). Qualify remaining shipped
+  graphics controls and native/Steam display behavior.
+- **Campaign breadth:** after the first completed chapter, qualify the remaining
+  missions, special mechanics and difficulty-dependent behavior. Preserve the
+  existing evidence levels: compile, boot, render, functional, playable,
+  mission-complete and retail fidelity are separate claims.
+- **Durability/performance:** measure current foreground production gameplay,
+  combat, movies, repeated transitions and long sessions on named hardware.
+  Record frame distributions/stalls, responsiveness, game/wall time, Wasm/GPU/
+  renderer/audio memory and scheduling, context recovery and fresh-browser
+  save/profile restoration. Optimize measured bottlenecks.
+- **Imported data:** extend bounded synthetic fuzz inputs into canonical XFile
+  block allocation, aliases, dependency order and atomic publication. Do not
+  build a replacement loader.
+- **Browser qualification:** Chrome/Edge evidence does not qualify Firefox or
+  Safari. Test those separately. Gamepad requirements must follow the product
+  and original-game reference; keyboard/mouse fidelity remains required.
 
-The dynamic sun follow-up used one focused native target, exact 120-sample
-targeted comparison, four production windows, and one final Release. It records
-the bounds-construction cost and timing drift rather than hiding either.
+## Working gates
 
-The dynamic spot follow-up used one focused native target, an exact 120-sample
-unchanged-work comparison, and one final production Release. It restores missing
-caster work and makes no broad performance claim.
+Build with the pinned toolchain. Run focused checks during each change, then
+the routine smoke and non-overlapping remainder before handoff; run production
+checks for changed product boundaries. Run owned retail validation separately.
+Exhaustive duplicate suites are useful only for a concrete remaining risk.
 
-The dynamic opaque-order follow-up used one focused native target, exact
-120-sample work comparison, four production windows, and one final Release. It
-keeps unsafe anchors fixed and reports timing drift.
-
-The dynamic primary-light follow-up used one focused native target, an exact
-120-sample diagnostic comparison, and one final production Release. It makes a
-semantic convergence claim and no new performance claim.
-
-The earlier renderer milestone used one focused native fixture, rerun after shadow
-integration; three diagnostic builds and five 120-frame profiles; four
-successful production timing windows; and one final production Release build.
-A production benchmark setup mismatch was corrected with a targeted retry.
-No broad tiers, mission/lifecycle checks, screenshots or compatibility promotion
-were required. Escape and renderer polish remain outside scope.
-
-The DObj follow-up used one extended native fixture (with a targeted test-setup
-correction), two diagnostic comparisons and one final production Release.
-The production before/after means were effectively unchanged (39.547 ->
-39.317 ms), with worse p95 afterward; no overall FPS improvement is claimed.
-
-The brush follow-up used the focused world/brush fixture, a targeted
-implementation revision, three diagnostic builds/profiles, a candidate Release
-and a targeted baseline-control Release, which became the final delivered build.
-
-The controlled-window follow-up used one focused Node fixture, setup trials and
-an A / rejected legacy B / A qualification. The Release initially failed at the
-common compile boundary; the targeted retry passed after sharing the native
-time-adjustment body. No renderer expansion or broad suite was added.
-
-Historical plans and completed milestones remain in
-[the earlier roadmap](history/web-roadmap-through-2026-08-28.md) and
-[execution report](../WEB_ROADMAP_EXECUTION_REPORT.md). Use
-[current status](web-status.md) for evidence scope; file discovery never
-promotes compatibility.
+Every milestone must update the convergence inventory and evidence ledger.
+Missing human gameplay or original/native reference evidence must be recorded
+as unverified, with the exact next observation required. No campaign promotion
+follows from a short window, unchanged draw counts or synthetic notifications.

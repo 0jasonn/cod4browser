@@ -13,6 +13,8 @@
 #include <database/db_initialization.h>
 #include <gfx_d3d/r_asset_load.h>
 #include <gfx_d3d/r_configuration.h>
+#include <gfx_d3d/r_savegame_image.h>
+#include <gfx_d3d/r_material.h>
 #include <qcommon/cmd.h>
 #include <qcommon/com_world_runtime.h>
 #include <qcommon/engine_lifecycle_trace.h>
@@ -44,6 +46,7 @@
 #include <emscripten.h>
 
 #include <array>
+#include <csetjmp>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -185,7 +188,7 @@ void __cdecl Com_Shutdown(const char *)
 
 void __cdecl Com_Quit_f()
 {
-    Com_Shutdown("EXE_SERVERQUIT");
+    Web_RequestQuit();
 }
 
 void __cdecl Com_Restart()
@@ -244,7 +247,7 @@ void __cdecl CM_LoadMapData_LoadObj(const char *)
         "Loose BSP collision loading is unavailable in the browser fastfile runtime");
 }
 
-extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_MountCanonicalRuntime()
+static void MountCanonicalRuntime()
 {
     if (g_clientLifecycleReady)
         return;
@@ -403,6 +406,24 @@ extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_MountCanonicalRuntime()
     Web_Log(
         WebLogLevel::Info,
         "[kisakcod-web] Canonical renderer prerequisite-zone request completed.\n");
+}
+
+EM_JS(void, ThrowCanonicalMountError, (const char *message), {
+    throw new Error(UTF8ToString(message));
+});
+
+extern "C" EMSCRIPTEN_KEEPALIVE void KisakWeb_MountCanonicalRuntime()
+{
+    // Com_Init's setjmp frame has returned before the asynchronous import.
+    // Keep a live canonical error boundary for this continuation so Com_Error
+    // reaches the Worker as its actual message, not Emscripten's longjmp object.
+    extern char com_errorMessage[4096];
+    if (setjmp(*static_cast<jmp_buf *>(Sys_GetValue(2))))
+    {
+        ThrowCanonicalMountError(com_errorMessage);
+        return;
+    }
+    MountCanonicalRuntime();
 }
 
 #if KISAK_WEB_DIAGNOSTICS
@@ -651,6 +672,7 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestProfileState(int operation)
 
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestSaveState(int operation)
 {
+    if (operation == 12) return uiInfo.sshotImage && uiInfo.sshotImageName[0];
     constexpr const char *SAVE_NAME = "kisak_web_ui_test";
     const auto saveIndex = [=]() {
         UI_LoadSavegames(0);
@@ -670,6 +692,15 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestSaveState(int operation)
     }
     if (operation == 1) return saveIndex() + 1;
     if (operation == 2) return selectSave();
+    if (operation == 13)
+    {
+        const int index = UI_SavegameIndexFromFilename(SAVE_NAME);
+        if (index < 0) return 0;
+        const SavegameInfo &save = uiInfo.savegameList[uiInfo.savegameStatus.displaySavegames[index]];
+        Material *handle = nullptr;
+        return (!I_stricmp(UI_FeederItemText(0, nullptr, 16, index, 1, &handle), save.date) ? 1 : 0) |
+            (!I_stricmp(UI_GetSavegameInfo(), save.savegameInfoText) ? 2 : 0);
+    }
     if (operation == 3)
     {
         if (!selectSave()) return 0;
@@ -707,10 +738,33 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestSaveState(int operation)
         if (index < 0) return 0;
         const int slot = uiInfo.savegameStatus.displaySavegames[index];
         return slot >= 0 && slot < uiInfo.savegameCount &&
-            uiInfo.savegameList[slot].imageName == nullptr;
+            uiInfo.savegameList[slot].imageName != nullptr;
     }
     if (operation == 8)
         return std::strstr(Dvar_GetString("sv_lastSaveGame"), SAVE_NAME) != nullptr;
+    if (operation == 9)
+    {
+        const int index = saveIndex();
+        if (index < 0) return 0;
+        const SavegameInfo &save = uiInfo.savegameList[uiInfo.savegameStatus.displaySavegames[index]];
+        return (save.mapName && std::strstr(save.mapName, "airplane") ? 1 : 0) |
+            (save.date && save.date[0] ? 2 : 0) |
+            (save.time && save.time[0] ? 4 : 0) |
+            (save.tm.tm_year >= 126 && save.savegameName && save.savegameName[0] ? 8 : 0);
+    }
+    if (operation == 10 || operation == 11 || operation == 14)
+    {
+        char path[64];
+        Com_BuildPlayerProfilePath(path, sizeof(path), "save/%s.jpg", operation == 14 ? "airplane" : SAVE_NAME);
+        if (operation == 11) return Material_RegisterRawImage(path, 3) != nullptr;
+        int file = 0;
+        const unsigned size = FS_FOpenFileRead(path, &file);
+        if (!file) return 0;
+        std::vector<uint8_t> jpeg(size <= SAVEGAME_JPEG_MAX_BYTES ? size : 0);
+        const unsigned read = jpeg.empty() ? 0 : FS_Read(jpeg.data(), size, file);
+        FS_FCloseFile(file);
+        return read == size && R_IsSaveGameJpeg(jpeg) ? size : -1;
+    }
     return -1;
 }
 

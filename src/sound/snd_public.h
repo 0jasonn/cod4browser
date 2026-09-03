@@ -20,7 +20,11 @@ typedef char CHAR;
 typedef short SHORT;
 typedef int BOOL;
 #ifndef KISAK_LONG_DEFINED
+#ifdef _WIN32
+typedef long LONG;
+#else
 typedef std::int32_t LONG;
+#endif
 #define KISAK_LONG_DEFINED 1
 #endif
 typedef CHAR *LPSTR, *PSTR;

@@ -141,9 +141,6 @@ int logfile;
 int com_numConsoleLines;
 char *com_consoleLines[32];
 
-#define WEAPMEMSOURCE_NONE 0
-int weaponInfoSource;
-
 errorParm_t errorcode;
 int lastErrorTime;
 int errorCount;
@@ -460,23 +457,6 @@ void Com_OpenLogFile()
     }
 }
 
-void Com_DPrintf(int channel, const char* fmt, ...)
-{
-    char string[4100]; // [esp+4h] [ebp-1008h] BYREF
-    va_list va; // [esp+101Ch] [ebp+10h] BYREF
-
-    va_start(va, fmt);
-    if (com_developer)
-    {
-        if (com_developer->current.integer)
-        {
-            _vsnprintf(string, 0x1000u, fmt, va);
-            string[4095] = 0;
-            Com_Printf(channel, "%s", string);
-        }
-    }
-}
-
 void Com_PrintError(int channel, const char *fmt, ...)
 {
 #if defined(KISAK_PURE)
@@ -573,22 +553,6 @@ void __cdecl CL_ShutdownDemo()
         }
     }
 #endif
-}
-
-void __cdecl Com_ShutdownInternal(const char* finalmsg)
-{
-    int localClientNum; // [esp+0h] [ebp-4h]
-
-    for (localClientNum = 0; localClientNum < 1; ++localClientNum)
-        CL_Disconnect(localClientNum);
-//    KISAK_NULLSUB();
-    CL_ShutdownAll(false);
-    CL_ShutdownDemo();
-#ifdef KISAK_MP
-    FakeLag_Shutdown();
-#endif
-    SV_Shutdown(finalmsg);
-    Com_Restart();
 }
 
 void __cdecl Com_SetLocalizedErrorMessage(char* localizedErrorMessage, const char* titleToken)
@@ -2046,41 +2010,6 @@ int Com_UpdateMenu()
     return result;
 }
 
-void __cdecl Com_AssetLoadUI()
-{
-    XZoneInfo zoneInfo; // [esp+0h] [ebp-10h] BYREF
-
-    if (IsFastFileLoad())
-    {
-#ifdef KISAK_MP
-        zoneInfo.name = "ui_mp";
-#elif KISAK_SP
-        zoneInfo.name = "ui";
-#endif
-        zoneInfo.allocFlags = 8;
-        zoneInfo.freeFlags = 104;
-        DB_LoadXAssets(&zoneInfo, 1u, 0);
-    }
-#ifdef KISAK_MP
-    UI_SetMap((char*)"", (char*)"");
-#elif KISAK_SP
-    UI_SetMap((char *)"");
-#endif
-    R_BeginRemoteScreenUpdate();
-    CL_StartHunkUsers();
-    R_EndRemoteScreenUpdate();
-}
-
-void __cdecl Com_CheckSyncFrame()
-{
-    iassert( Sys_IsMainThread() );
-#ifdef KISAK_SP
-    SV_WaitSaveGame();
-#endif
-    Scr_UpdateRemoteDebugger();
-    DB_Update();
-}
-
 void __cdecl Com_Frame()
 {
 #ifdef TRACY_ENABLE
@@ -2209,35 +2138,6 @@ void __cdecl Com_Restart()
     Com_InitDObj();
 }
 
-void __cdecl Com_SetWeaponInfoMemory(int source)
-{
-    if (source != 1 && source != 2)
-        MyAssertHandler(
-            ".\\qcommon\\common.cpp",
-            4551,
-            0,
-            "%s",
-            "(source == WEAPMEMSOURCE_SERVER) || (source == WEAPMEMSOURCE_CLIENT)");
-    iassert( weaponInfoSource == WEAPMEMSOURCE_NONE );
-    weaponInfoSource = source;
-}
-
-void __cdecl Com_FreeWeaponInfoMemory(int source)
-{
-    if (source != 1 && source != 2)
-        MyAssertHandler(
-            ".\\qcommon\\common.cpp",
-            4560,
-            0,
-            "%s",
-            "(source == WEAPMEMSOURCE_SERVER) || (source == WEAPMEMSOURCE_CLIENT)");
-    if (source == weaponInfoSource)
-    {
-        weaponInfoSource = 0;
-        BG_ShutdownWeaponDefFiles();
-    }
-}
-
 int __cdecl Com_AddToString(const char* add, char* msg, int len, int maxlen, int mayAddQuotes)
 {
     int addQuotes; // [esp+0h] [ebp-8h]
@@ -2346,26 +2246,6 @@ void Com_ResetFrametime()
     com_lastFrameTime[0] = Sys_Milliseconds();
     com_lastFrameTime[1] = com_lastFrameTime[0];
     com_lastFrameTime[2] = com_lastFrameTime[0];
-}
-
-void Com_XAnimFreeSmallTree(XAnimTree_s *animtree)
-{
-    XAnimFreeTree(animtree, (void(*)(void*,int))MT_Free);
-}
-
-static void *MT_AllocAnimTree(int size)
-{
-    return MT_Alloc(size, MT_TYPE_SMALL_ANIM_TREE);
-}
-
-XAnimTree_s *Com_XAnimCreateSmallTree(XAnim_s *anims)
-{
-    return XAnimCreateTree(anims, MT_AllocAnimTree);
-}
-
-bool Com_IsRunningMenuLevel()
-{
-    return com_sv_running->current.enabled && I_strnicmp(sv_mapname->current.string, "menu_", 5) == 0;
 }
 
 void Com_SetTimeScale(float timescale)

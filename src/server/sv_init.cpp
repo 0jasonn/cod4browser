@@ -273,38 +273,6 @@ void __cdecl SV_Init()
         "Slow down server frame time to allow good client frame rate with server bound.");
 }
 
-void __cdecl SV_Shutdown(const char *finalmsg)
-{
-    serverStatic_t *v1; // r11
-    int v2; // ctr
-
-    if (com_sv_running && com_sv_running->current.enabled)
-    {
-        //LSP_LogStringEvenIfControllerIsInactive("server shutdown");
-        //LSP_ForceSendPacket();
-        Com_Printf(15, "----- Server Shutdown -----\n");
-        SV_RemoveOperatorCommands();
-#if !defined(KISAK_RUNTIME_MAP_DB_BOUNDARY)
-        SV_ShutdownGameProgs();
-        SaveMemory_CleanupSaveMemory();
-        SaveMemory_ShutdownSaveSystem();
-#endif
-        SV_ClearServer();
-        v1 = &svs;
-        v2 = 10;
-        do
-        {
-            v1->initialized = 0;
-            v1 = (serverStatic_t *)((char *)v1 + 4);
-            --v2;
-        } while (v2);
-        Dvar_SetBool(com_sv_running, 0);
-        Dvar_SetFloat(com_timescale, 1.0);
-        Com_Printf(15, "---------------------------\n");
-        CL_Disconnect(0);
-    }
-}
-
 void __cdecl SV_SetConfigstring(unsigned int index, const char *val)
 {
     unsigned int v4; // r31

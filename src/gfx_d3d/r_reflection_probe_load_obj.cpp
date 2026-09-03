@@ -2,6 +2,7 @@
 #include "r_reflection_probe.h"
 #include "r_bsp.h"
 #include <qcommon/com_bsp.h>
+#include <universal/com_memory.h>
 
 void R_CreateDefaultProbes()
 {

@@ -1,9 +1,96 @@
 # Campaign compatibility matrix
 
-This matrix preserves historical automated retail evidence and the 2026-09-01
-stationary `scoutsniper` probe. [Current status](web-status.md) distinguishes
+This matrix preserves historical automated retail evidence and the stationary
+`scoutsniper` and `ac130` probes. [Current status](web-status.md) distinguishes
 the scope of each task. No mission-flow result is a prerequisite for renderer
 or cleanup work.
+
+## Retail fidelity acceptance — 2026-09-02
+
+The [2026-09-03 AC130 check](evidence/ac130-rendering-2026-09-03.md) establishes
+**RENDERS** through canonical lifecycle completion and 60 seconds of stationary
+world frames after CargoShip. Production rendering and separate screenshot
+inspection also pass. Gunship interaction, authored mission completion and
+Steam/native thermal fidelity remain unverified.
+
+The [display-options check](evidence/display-options-2026-09-03.md) verifies
+shipped Apply, durable resolution and native save/restart/load of Killhouse
+with the same observed view origin. This platform check does not advance any
+mission-completion classification.
+
+The [2026-09-03 gamma check](evidence/display-gamma-2026-09-03.md) verifies
+the shipped Brightness slider and loaded Killhouse display response. It adds
+presentation evidence and does not change campaign classifications.
+
+The [localized import change](evidence/localized-imports-2026-09-02.md) adds
+French/German synthetic path and persistence coverage. Retail campaign evidence
+below remains English-only; localized mission behavior is unverified.
+
+The [cinematic implementation](evidence/cinematics-2026-09-02.md) decodes and
+plays the owned Killhouse intro through the existing Kisak cinematic API.
+Its standalone command-based playback check does not advance any mission
+classification or establish the authored Killhouse → CargoShip transition.
+
+The [Steam inventory](evidence/steam-reference-2026-09-02.json) records local
+build 2737681, 101 executable/data hashes, configured graphics/audio/input
+settings, and reference hardware. These are inventory/configuration facts;
+difficulty and visible outcomes still require an original-game observation.
+The native SP reference now builds and enters main-menu code with owned data
+(see [native evidence](evidence/native-reference-2026-09-02.md)). Native visual
+and gameplay comparison remains unverified. The browser retail rerun passes
+Killhouse pointer lock/pause/resume, profile persistence and Airplane save/load
+and Continue after page reload. The test required real tab activation before
+requesting pointer lock. Its injected objective and save probes do not establish
+authored mission completion or Continue in a new browser process, and do not
+promote any campaign classification.
+The subsequent [Quit check](evidence/browser-quit-2026-09-02.md) also returns from
+the active Airplane runtime to the launcher and starts a fresh Worker/main menu.
+The [shared text renderer](evidence/text-presentation-2026-09-02.md) also passes
+that menu/input/profile/save/Continue sequence; it adds presentation evidence,
+not authored campaign-completion evidence.
+The [EQ device check](evidence/browser-eq-2026-09-02.md) applies injected
+canonical settings to a playing owned Killhouse sound and verifies bypass.
+It establishes device routing/filter response, not authored audio fidelity or
+additional campaign progress.
+The [save presentation prerequisite fixes](evidence/save-presentation-2026-09-02.md)
+restore bounded header metadata and typed thumbnail selection in shared UI.
+The owned Airplane run verifies that map/date/time metadata survives reload
+alongside the existing save/Continue/Quit checks. These checks do not qualify
+screenshot capture or change campaign classifications. The subsequent
+[thumbnail implementation](evidence/save-thumbnails-2026-09-02.md) captures the
+owned Airplane scene, persists its JPEG through reload and displays it in the
+shipped save menu. Its injected save and visual check add presentation evidence;
+authored checkpoint timing and original-game comparison remain unverified.
+The [start-level capture follow-up](evidence/save-startup-native-2026-09-02.md)
+also requires the automatic Airplane start-level save to produce its JPEG
+before a diagnostic save is issued. This covers the initial capture boundary;
+it does not qualify later authored checkpoints or mission completion.
+
+Subsequent [ordinary New Game gameplay](evidence/campaign-training-disconnect-2026-09-02.md)
+completed Killhouse rifle, timed-shooting and sidearm/melee training and authored
+checkpoints 1–3. A fresh Chrome process resumed checkpoint 3 with those objectives
+complete. The reached Save and Quit disconnect crash is fixed; two production
+Save and Quit cycles returned to the canonical menu and Resume Game restored
+the checkpoint between them. The next objective is to locate Captain Price.
+This adds early authored progress and fresh-browser Continue evidence, without
+promoting Killhouse to mission-complete or qualifying death/restart.
+
+The remaining campaign acceptance is shipped New Game through Killhouse, CargoShip
+and the authored following mission transition. Require natural objectives,
+scripted sequences, checkpoints, death/restart, fresh-browser Continue and
+mission completion, matched against original Steam and native Kisak where
+available. Ordinary gameplay is required; synthetic objectives and route/replay
+substitutes cannot satisfy this gate. No classification below changes from
+verification repairs or shader-boundary tests.
+
+The [saved-screen check](evidence/saved-screen-2026-09-02.md) loaded Killhouse
+and exercised its retail material against synthetic framebuffer colors. It
+adds renderer-boundary evidence only; no campaign classification changes.
+
+The [transient-light check](evidence/transient-lights-2026-09-02.md) uses
+canonical pause and synthetic `R_Add*LightToScene` inputs in owned Killhouse.
+It verifies visible world/model illumination, clearing and context recovery.
+It does not validate authored FX timing, active gameplay or mission flow.
 
 ## Stationary campaign update — 2026-09-01
 
@@ -50,9 +137,9 @@ flow after progression was not reached. This is unproven trigger traversal,
 not a demonstrated canonical defect. See
 [the sanitized failed gate](evidence/retail-mission-village-assault-e7be6898.json).
 
-The supplied installation contains `village_assault` and `ac130`, but presence
-alone remains discovery. Both remain `UNTESTED`; `ac130` is the next stationary
-probe. The six gameplay-validated maps remain permanent regression baselines.
+`village_assault` remains `UNTESTED`; file presence does not establish
+compatibility. AC130 now has the separate `RENDERS` evidence above. The six
+gameplay-validated maps remain permanent regression baselines.
 
 This ledger records current execution evidence, not filenames. Asset discovery
 alone is `UNTESTED`; compatibility advances through canonical database, world,

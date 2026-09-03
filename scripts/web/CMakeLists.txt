@@ -90,6 +90,7 @@ target_compile_definitions(kisak_web_runtime_prefix_check PRIVATE
     KISAK_GATE3_COM_INIT_PREFIX=1)
 
 set(KISAK_WEB_CANONICAL_RUNTIME_SOURCES
+    "${SRC_DIR}/qcommon/common_shutdown.cpp"
     "${SRC_DIR}/client/cl_fastfile_config.cpp"
     "${SRC_DIR}/client/cl_controller.cpp"
     "${SRC_DIR}/client/cl_cin.cpp"
@@ -149,6 +150,12 @@ set(KISAK_WEB_CANONICAL_RUNTIME_SOURCES
     "${SRC_DIR}/qcommon/cm_load.cpp"
     "${SRC_DIR}/qcommon/cm_memory.cpp"
     "${SRC_DIR}/qcommon/com_world_runtime.cpp"
+    "${SRC_DIR}/gfx_d3d/r_text.cpp"
+    "${SRC_DIR}/gfx_d3d/r_image_resample.cpp"
+    "${SRC_DIR}/gfx_d3d/r_gamma.cpp"
+    "${SRC_DIR}/web/web_savegame_image.cpp"
+    "${SRC_DIR}/web/web_display.cpp"
+    "${SRC_DIR}/gfx_d3d/r_text_cmds.cpp"
     "${SRC_DIR}/gfx_d3d/r_asset_load.cpp"
     "${SRC_DIR}/gfx_d3d/r_water.cpp"
     "${SRC_DIR}/universal/fft.cpp"
@@ -175,6 +182,7 @@ set(KISAK_WEB_PLATFORM_SOURCES
     "${SRC_DIR}/web/web_browser_bindings.cpp"
     "${SRC_DIR}/web/web_assertive.cpp"
     "${SRC_DIR}/web/web_cinematic.cpp"
+    "${SRC_DIR}/web/web_cinematic_decoder.cpp"
     "${SRC_DIR}/web/web_asset_probe.cpp"
     "${SRC_DIR}/web/web_filesystem.cpp"
     "${SRC_DIR}/web/web_shader_compatibility.cpp"
@@ -308,6 +316,26 @@ set_target_properties(KisakCOD-web PROPERTIES
 )
 
 kisak_configure_web_target(KisakCOD-web)
+set(KISAK_WEB_CINEMATIC_ROOT "${CMAKE_SOURCE_DIR}/build/ffmpeg-bink")
+function(kisak_link_cinematic TARGET_NAME)
+    target_include_directories(${TARGET_NAME} PRIVATE "${KISAK_WEB_CINEMATIC_ROOT}/install/include")
+    target_link_libraries(${TARGET_NAME} PRIVATE
+        "${KISAK_WEB_CINEMATIC_ROOT}/libavformat/libavformat.a"
+        "${KISAK_WEB_CINEMATIC_ROOT}/libavcodec/libavcodec.a"
+        "${KISAK_WEB_CINEMATIC_ROOT}/libavutil/libavutil.a")
+endfunction()
+kisak_link_cinematic(KisakCOD-web)
+add_executable(KisakCOD-web-cinematic-check EXCLUDE_FROM_ALL
+    "${CMAKE_SOURCE_DIR}/tests/native/web_cinematic_decoder_tests.cpp"
+    "${SRC_DIR}/web/web_cinematic_decoder.cpp")
+target_compile_features(KisakCOD-web-cinematic-check PRIVATE cxx_std_20)
+target_compile_options(KisakCOD-web-cinematic-check PRIVATE -Oz -flto -UNDEBUG)
+target_include_directories(KisakCOD-web-cinematic-check PRIVATE "${SRC_DIR}")
+target_link_options(KisakCOD-web-cinematic-check PRIVATE
+    -Oz -flto "-sENVIRONMENT=node" "-sNODERAWFS=1" "-sALLOW_MEMORY_GROWTH=1")
+set_target_properties(KisakCOD-web-cinematic-check PROPERTIES SUFFIX ".cjs"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/cinematic-check")
+kisak_link_cinematic(KisakCOD-web-cinematic-check)
 target_link_options(KisakCOD-web PRIVATE "-flto" "-Wl,--error-limit=0")
 target_compile_definitions(KisakCOD-web PRIVATE
     KISAK_GATE3_COM_INIT_PREFIX=1
@@ -354,6 +382,7 @@ if (KISAK_WEB_DIAGNOSTICS)
     set_target_properties(KisakCOD-web-diagnostics PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/site-diagnostics")
     kisak_configure_web_target(KisakCOD-web-diagnostics DIAGNOSTICS)
+    kisak_link_cinematic(KisakCOD-web-diagnostics)
     target_link_options(KisakCOD-web-diagnostics PRIVATE
         "-flto"
         "-Wl,--error-limit=0"
@@ -419,6 +448,13 @@ add_custom_command(TARGET KisakCOD-web POST_BUILD
 # protocol. Diagnostic launcher code and browser test controls are copied to a
 # separate site when explicitly requested.
 file(MAKE_DIRECTORY "${KISAK_WEB_SITE_DIR}")
+file(READ "${CMAKE_SOURCE_DIR}/LICENSE" KISAK_GPL_TEXT)
+file(READ "${CMAKE_SOURCE_DIR}/.tools/ffmpeg-8.0.3/COPYING.LGPLv2.1" KISAK_FFMPEG_LICENSE)
+file(READ "${CMAKE_SOURCE_DIR}/build/reverb-wasm/reverb-license.txt" KISAK_OPENAL_LICENSE)
+file(WRITE "${KISAK_WEB_SITE_DIR}/licenses.txt"
+    "KisakCOD: GPL-3.0. FFmpeg 8.0.3: LGPL-2.1-or-later, copyright the FFmpeg contributors. OpenAL Soft 1.25.2: LGPL-2.0-or-later, copyright the OpenAL Soft contributors.\nCorresponding sources and build instructions: docs/cinematic-codec.md and docs/browser-reverb.md in this distribution's source.\n\n${KISAK_GPL_TEXT}\n\nFFmpeg license:\n${KISAK_FFMPEG_LICENSE}\n\nOpenAL Soft license:\n${KISAK_OPENAL_LICENSE}")
+configure_file("${CMAKE_SOURCE_DIR}/build/reverb-wasm/reverb_dsp.mjs"
+    "${KISAK_WEB_SITE_DIR}/reverb_dsp.mjs" COPYONLY)
 file(REMOVE
     "${KISAK_WEB_SITE_DIR}/engine_worker_host.mjs"
     "${KISAK_WEB_SITE_DIR}/engine_protocol.mjs"
@@ -426,8 +462,8 @@ file(REMOVE
     "${KISAK_WEB_SITE_DIR}/kisakcod-next.mjs"
     "${KISAK_WEB_SITE_DIR}/kisakcod-next.wasm")
 foreach(WEB_FILE asset_profile.mjs asset_store.mjs browser_capabilities.mjs
-        capability_probe_worker.mjs input_controller_core.mjs web_audio_driver.mjs
-        worker_sync_filesystem.mjs styles.css)
+        capability_probe_worker.mjs input_controller_core.mjs web_audio_driver.mjs web_reverb_worklet.mjs
+        worker_sync_filesystem.mjs browser_quit.mjs styles.css)
     configure_file(
         "${KISAK_WEB_SOURCE_DIR}/${WEB_FILE}"
         "${KISAK_WEB_SITE_DIR}/${WEB_FILE}"
@@ -455,9 +491,11 @@ configure_file("${KISAK_WEB_SOURCE_DIR}/worker_transport.mjs"
 if (KISAK_WEB_DIAGNOSTICS)
     set(KISAK_WEB_DIAGNOSTIC_SITE_DIR "${CMAKE_BINARY_DIR}/site-diagnostics")
     file(MAKE_DIRECTORY "${KISAK_WEB_DIAGNOSTIC_SITE_DIR}")
+    configure_file("${CMAKE_SOURCE_DIR}/build/reverb-wasm/reverb_dsp.mjs"
+        "${KISAK_WEB_DIAGNOSTIC_SITE_DIR}/reverb_dsp.mjs" COPYONLY)
     foreach(WEB_FILE index.html launcher.mjs asset_profile.mjs asset_store.mjs input_controller_core.mjs
             engine_worker.mjs engine_worker_host.mjs engine_protocol.mjs
-            web_audio_driver.mjs worker_sync_filesystem.mjs worker_transport.mjs styles.css)
+            web_audio_driver.mjs web_reverb_worklet.mjs worker_sync_filesystem.mjs worker_transport.mjs browser_quit.mjs styles.css)
         configure_file(
             "${KISAK_WEB_SOURCE_DIR}/${WEB_FILE}"
             "${KISAK_WEB_DIAGNOSTIC_SITE_DIR}/${WEB_FILE}"

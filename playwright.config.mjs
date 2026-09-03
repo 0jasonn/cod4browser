@@ -7,6 +7,9 @@ const baseURL = `http://127.0.0.1:${serverPort}`;
 
 export default defineConfig({
     testDir: "./tests/browser",
+    // Playwright clears this directory at startup; isolated servers must not
+    // delete another invocation's fixtures or traces.
+    outputDir: `test-results/${serverPort}`,
     fullyParallel: false,
     forbidOnly: Boolean(process.env.CI),
     retries: process.env.CI ? 2 : 0,
@@ -24,7 +27,8 @@ export default defineConfig({
     webServer: {
         command: `python tools/serve_web.py --directory ${siteDirectory} --port ${serverPort}`,
         url: baseURL,
-        reuseExistingServer: !process.env.CI,
+        // A server on this port may serve a different (production/diagnostic) artifact.
+        reuseExistingServer: false,
         timeout: 15_000,
     },
     projects: [

@@ -7,6 +7,7 @@
 #include <qcommon/qcommon.h>
 #include <universal/com_files.h>
 #include <client/client.h>      // SaveHeader
+#include <gfx_d3d/r_savegame_image.h>
 #include "../server/server.h"
 #include <script/scr_readwrite.h>   // Scr_SaveSourceImmediate
 #ifndef KISAK_XBOX
@@ -274,6 +275,7 @@ int __cdecl WriteSaveToDevice(unsigned char *data, struct SaveHeader const *save
 	FS_Rename((char*)"save/temp.svg", fs_gamedir,
 		(char*)saveHeader->filename, (char*)"players");
 	g_saveDevice_lastSaveSucceeded = true;
+	if (!saveHeader->internalSave) R_SaveGameThumbnail(*saveHeader);
 #endif
 	return 0;
 }

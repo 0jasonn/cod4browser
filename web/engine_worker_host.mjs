@@ -15,6 +15,7 @@ import {
 const EXPORTED_COMMANDS = [
     "_KisakWeb_SubmitCanonicalCommand",
     "_KisakWeb_DiagnosticCinematicOmission",
+    "_KisakWeb_TestCinematicState",
     "_KisakWeb_TestAudioProxyPcm",
     "_KisakWeb_TestSlowNextCommand",
     "_KisakWeb_TestLoseWebGLContext", "_KisakWeb_TestRestoreWebGLContext",
@@ -178,6 +179,9 @@ export function createEngineWorkerHost(canvas, {
                 rejectWorkerRequests(pending, protocolError(
                     "EVENT_NOT_ALLOWED", "event", `Worker event is not allowed: ${message.name}.`));
                 break;
+            }
+            if (message.name === "kisakcod:state" && message.detail?.state === "quitting") {
+                audioDriver.dispose();
             }
             globalThis.dispatchEvent(new CustomEvent(message.name, { detail: message.detail }));
             break;

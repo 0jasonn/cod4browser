@@ -1,8 +1,9 @@
 import {
     isAdditionalSinglePlayerFastfile,
+    isCinematicPath,
     isSupportedImportedPath,
-    M12_INSTALL_PROFILE,
-    MAP_ZONE,
+    getInstallProfile,
+    getRequiredAssets,
     REQUIRED_ASSETS,
 } from "./asset_profile.mjs";
 
@@ -91,18 +92,18 @@ function requireFileLike(file, path)
     return file;
 }
 
-function retainSupportedEntries(entries)
+function retainSupportedEntries(entries, language)
 {
     const supported = new Map();
     for (const [path, file] of entries) {
-        if (isSupportedImportedPath(path)) {
+        if (isSupportedImportedPath(path, language)) {
             supported.set(path, file);
         }
     }
     return supported;
 }
 
-export function entriesFromFileList(fileList)
+export async function entriesFromFileList(fileList, module)
 {
     const files = Array.from(fileList ?? []);
     if (files.length === 0) {
@@ -150,8 +151,11 @@ export function entriesFromFileList(fileList)
         }
     }
 
-    const canonical = new Map(selectedByPath);
-    for (const requirement of REQUIRED_ASSETS) {
+    if (!selectedByPath.has("localization.txt"))
+        throw importError("MISSING_MANIFEST",
+            "Select the Call of Duty 4 installation folder containing localization.txt.");
+    const language = await probeLocalization(module, selectedByPath.get("localization.txt"));
+    for (const requirement of getRequiredAssets(language)) {
         const file = selectedByPath.get(requirement.path);
         if (!file) {
             const message = requirement.path === "localization.txt"
@@ -159,9 +163,9 @@ export function entriesFromFileList(fileList)
                 : `The selected installation is missing ${requirement.path}.`;
             throw importError("MISSING_MANIFEST", message);
         }
-        canonical.set(requirement.path, requireFileLike(file, requirement.path));
+        requireFileLike(file, requirement.path);
     }
-    return retainSupportedEntries(canonical);
+    return retainSupportedEntries(selectedByPath, language);
 }
 
 async function getRequiredHandle(directory, kind, name, displayPath = name)
@@ -204,7 +208,7 @@ async function getRequiredFileFromDirectory(directory, relativePath, directoryCa
     );
 }
 
-export async function entriesFromDirectoryHandle(directory)
+export async function entriesFromDirectoryHandle(directory, module)
 {
     if (!directory || typeof directory.getFileHandle !== "function" ||
         typeof directory.getDirectoryHandle !== "function") {
@@ -212,7 +216,13 @@ export async function entriesFromDirectoryHandle(directory)
     }
     const entries = new Map();
     const directoryCache = new Map();
-    for (const requirement of REQUIRED_ASSETS) {
+    const localizationHandle = await getRequiredFileFromDirectory(directory, "localization.txt");
+    if (localizationHandle?.kind !== "file" || typeof localizationHandle.getFile !== "function")
+        throw importError("INVALID_FILE", "localization.txt is not a readable browser file handle.");
+    entries.set("localization.txt", requireFileLike(await localizationHandle.getFile(), "localization.txt"));
+    const language = await probeLocalization(module, entries.get("localization.txt"));
+    for (const requirement of getRequiredAssets(language)) {
+        if (requirement.path === "localization.txt") continue;
         const handle = await getRequiredFileFromDirectory(
             directory,
             requirement.path,
@@ -230,11 +240,11 @@ export async function entriesFromDirectoryHandle(directory)
         );
     }
 
-    const languageDirectory = directoryCache.get(`zone/${M12_INSTALL_PROFILE.language}`);
+    const languageDirectory = directoryCache.get(`zone/${language}`);
     if (!languageDirectory || typeof languageDirectory.entries !== "function") {
         throw importError(
             "INVALID_PICKER",
-            `The selected installation does not expose zone/${M12_INSTALL_PROFILE.language} files.`,
+            `The selected installation does not expose zone/${language} files.`,
         );
     }
     for await (const [name, handle] of languageDirectory.entries()) {
@@ -243,10 +253,10 @@ export async function entriesFromDirectoryHandle(directory)
             continue;
         }
         const relativePath = normalizeSelectionPath(
-            `zone/${M12_INSTALL_PROFILE.language}/${name}`,
+            `zone/${language}/${name}`,
         ).toLocaleLowerCase("en-US");
         if (entries.has(relativePath) ||
-            !isAdditionalSinglePlayerFastfile(relativePath)) {
+            !isAdditionalSinglePlayerFastfile(relativePath, language)) {
             continue;
         }
         if (!handle || handle.kind !== "file" || typeof handle.getFile !== "function") {
@@ -266,11 +276,28 @@ export async function entriesFromDirectoryHandle(directory)
             throw importError("TOO_MANY_FILES", "The selected installation contains too many files.");
         }
     }
-    validateSelectedEntries(entries);
+    // Movies are optional for existing installations, but a new selection
+    // admits the owned originals through the same durable file boundary.
+    let videoDirectory;
+    try { videoDirectory = await directoryCache.get("main").getDirectoryHandle("video"); }
+    catch (error) { if (error?.name !== "NotFoundError") throw error; }
+    if (videoDirectory) {
+        for await (const [name, handle] of videoDirectory.entries()) {
+            const path = normalizeSelectionPath(`main/video/${name}`).toLocaleLowerCase("en-US");
+            if (!isCinematicPath(path)) continue;
+            if (entries.has(path)) throw importError("DUPLICATE_PATH", `Conflicting movie path: ${path}.`);
+            if (handle?.kind !== "file" || typeof handle.getFile !== "function")
+                throw importError("INVALID_FILE", `${path} is not a readable movie file.`);
+            entries.set(path, requireFileLike(await handle.getFile(), path));
+            if (entries.size > MAX_IMPORTED_FILES)
+                throw importError("TOO_MANY_FILES", "The selected installation contains too many files.");
+        }
+    }
+    validateSelectedEntries(entries, language);
     return entries;
 }
 
-function selectFromInput(input)
+function selectFromInput(input, module)
 {
     if (!(input instanceof HTMLInputElement) || input.type !== "file") {
         throw importError("INVALID_PICKER", "The portable folder picker is unavailable.");
@@ -283,7 +310,7 @@ function selectFromInput(input)
         };
         const handleChange = () => finish(() => {
             try {
-                resolve(entriesFromFileList(input.files));
+                resolve(entriesFromFileList(input.files, module));
             } catch (error) {
                 reject(error);
             } finally {
@@ -297,10 +324,10 @@ function selectFromInput(input)
     });
 }
 
-export async function selectInstallEntries(fallbackInput, { portable = false } = {})
+export async function selectInstallEntries(fallbackInput, { portable = false, module = null } = {})
 {
     if (portable) {
-        return selectFromInput(fallbackInput);
+        return selectFromInput(fallbackInput, module);
     }
     if (typeof globalThis.showDirectoryPicker === "function") {
         try {
@@ -308,7 +335,7 @@ export async function selectInstallEntries(fallbackInput, { portable = false } =
                 id: "kisakcod-install",
                 mode: "read",
             });
-            return await entriesFromDirectoryHandle(directory);
+            return await entriesFromDirectoryHandle(directory, module);
         } catch (error) {
             if (error?.name === "AbortError") {
                 return null;
@@ -316,7 +343,7 @@ export async function selectInstallEntries(fallbackInput, { portable = false } =
             throw error;
         }
     }
-    return selectFromInput(fallbackInput);
+    return selectFromInput(fallbackInput, module);
 }
 
 function requestResult(request)
@@ -390,12 +417,16 @@ function validateImportId(importId)
 function validateStoredManifest(manifest)
 {
     if (!manifest || typeof manifest !== "object" || Array.isArray(manifest) ||
-        manifest.schema !== MANIFEST_SCHEMA || !Array.isArray(manifest.files) ||
+        manifest.schema !== MANIFEST_SCHEMA || typeof manifest.language !== "string" ||
+        !Array.isArray(manifest.files) ||
         manifest.files.length < REQUIRED_ASSETS.length ||
         manifest.files.length > MAX_IMPORTED_FILES) {
         throw importError("INVALID_METADATA", "Stored asset metadata has an invalid shape.");
     }
     const importId = validateImportId(manifest.importId);
+    let requirements;
+    try { requirements = getRequiredAssets(manifest.language); }
+    catch { throw importError("INVALID_METADATA", "Stored installation language is invalid."); }
     const sizes = new Map();
     for (const entry of manifest.files) {
         if (!entry || typeof entry !== "object" || Array.isArray(entry) ||
@@ -405,20 +436,20 @@ function validateStoredManifest(manifest)
         const normalizedPath = normalizeSelectionPath(entry.path).toLocaleLowerCase("en-US");
         if (normalizedPath !== entry.path ||
             new TextEncoder().encode(normalizedPath).byteLength > MAX_IMPORTED_PATH_BYTES ||
-            !isSupportedImportedPath(normalizedPath) ||
+            !isSupportedImportedPath(normalizedPath, manifest.language) ||
             sizes.has(entry.path) || entry.size < 0 ||
             entry.size > MAX_IMPORTED_FILE_SIZE) {
             throw importError("INVALID_METADATA", "Stored asset file metadata is inconsistent.");
         }
         sizes.set(entry.path, entry.size);
     }
-    if (REQUIRED_ASSETS.some(({ path }) => !sizes.has(path))) {
+    if (requirements.some(({ path }) => !sizes.has(path))) {
         throw importError("INVALID_METADATA", "Stored asset metadata is incomplete.");
     }
     return { importId, sizes };
 }
 
-function validateSelectedEntries(entries)
+function validateSelectedEntries(entries, language)
 {
     if (!(entries instanceof Map)) {
         throw importError("INVALID_SELECTION", "The asset selection is not a canonical file map.");
@@ -432,19 +463,23 @@ function validateSelectedEntries(entries)
             new TextEncoder().encode(path).byteLength > MAX_IMPORTED_PATH_BYTES) {
             throw importError("UNSAFE_PATH", `The selected path is unsafe: ${path}.`);
         }
-        if (!isSupportedImportedPath(path)) {
+        if (!isSupportedImportedPath(path, language)) {
             throw importError("UNSUPPORTED_FILE", `The selected file is outside the supported asset set: ${path}.`);
         }
         const file = requireFileLike(selectedFile, path);
         if (file.size > MAX_IMPORTED_FILE_SIZE) {
             throw importError("INVALID_SIZE", `${path} is too large for the browser filesystem boundary.`);
         }
+        if (isCinematicPath(path) && (file.size < 48 || file.size > 512 * 1024 * 1024))
+            throw importError("INVALID_SIZE", `${path} is outside the movie size limit.`);
         totalSize += file.size;
         if (!Number.isSafeInteger(totalSize)) {
             throw importError("INVALID_SIZE", "The selected installation is too large.");
         }
     }
-    for (const requirement of REQUIRED_ASSETS) {
+    for (const requirement of getRequiredAssets(language)) {
+        if (!entries.has(requirement.path))
+            throw importError("MISSING_MANIFEST", `The selected installation is missing ${requirement.path}.`);
         const file = requireFileLike(entries.get(requirement.path), requirement.path);
         if (file.size < requirement.minimumSize || file.size > requirement.maximumSize) {
             throw importError(
@@ -504,6 +539,9 @@ function assertProbeSucceeded(result)
 
 async function probeLocalization(module, file)
 {
+    requireFileLike(file, "localization.txt");
+    if (file.size < 1 || file.size > 4095)
+        throw importError("PROBE_10", PROBE_ERRORS.get(10));
     const bytes = await readWindow(file, 0, file.size);
     const result = await runAssetProbe(
         module, "localization", [bytes], { fileSize: file.size });
@@ -547,22 +585,39 @@ async function probeFastfile(module, file)
     return { version: 5, compression: "zlib" };
 }
 
-async function probeInstallEntries(module, entries)
+async function probeCinematic(file, path)
 {
+    const header = await readWindow(file, 0, 44);
+    const view = new DataView(header.buffer, header.byteOffset, header.byteLength);
+    const integer = (offset) => view.getUint32(offset, true);
+    // Admission bounds only; FFmpeg remains the container/codec implementation.
+    if (header.length !== 44 || integer(0) !== 0x694b4942 ||
+        integer(4) + 8 !== file.size || integer(8) < 1 || integer(8) > 108000 ||
+        integer(12) > 16 * 1024 * 1024 || integer(12) > file.size ||
+        integer(20) < 1 || integer(20) > 1920 || integer(24) < 1 || integer(24) > 1080 ||
+        integer(28) < 1 || integer(32) < 1 || integer(28) / integer(32) > 120 ||
+        integer(28) / integer(32) < 1 || integer(40) > 1 ||
+        integer(8) * integer(32) / integer(28) > 3600 ||
+        44 + integer(40) * 12 + integer(8) * 4 > file.size)
+        throw importError("INVALID_CINEMATIC", `${path} has an invalid or unsupported Bink 1 header.`);
+}
+
+async function probeInstallEntries(module, entries, expectedLanguage = null)
+{
+    if (!(entries instanceof Map))
+        throw importError("INVALID_SELECTION", "The asset selection is not a canonical file map.");
     const language = await probeLocalization(module, entries.get("localization.txt"));
-    if (language !== M12_INSTALL_PROFILE.language) {
-        throw importError(
-            "PROFILE_LANGUAGE",
-            `The ${M12_INSTALL_PROFILE.id} profile requires English game data.`,
-        );
-    }
+    if (expectedLanguage !== null && language !== expectedLanguage)
+        throw importError("INVALID_METADATA", "Stored language does not match localization.txt.");
+    const profile = getInstallProfile(language);
+    const totalSize = validateSelectedEntries(entries, language);
 
     let entriesDeclared = 0;
     let archiveCount = 0;
     let zoneCount = 0;
     const availableSinglePlayerZones = [];
     const requiredFastfiles = new Set();
-    for (const requirement of REQUIRED_ASSETS) {
+    for (const requirement of getRequiredAssets(language)) {
         try {
             if (requirement.kind === "iwd") {
                 const result = await probeIwd(module, entries.get(requirement.path));
@@ -572,7 +627,7 @@ async function probeInstallEntries(module, entries)
                 await probeFastfile(module, entries.get(requirement.path));
                 zoneCount += 1;
                 requiredFastfiles.add(requirement.path);
-                if (requirement.path === MAP_ZONE) {
+                if (requirement.path === profile.mapZone) {
                     availableSinglePlayerZones.push(requirement.path);
                 }
             }
@@ -584,7 +639,11 @@ async function probeInstallEntries(module, entries)
         }
     }
     for (const [path, file] of entries) {
-        if (!isAdditionalSinglePlayerFastfile(path)) {
+        if (isCinematicPath(path)) {
+            await probeCinematic(file, path);
+            continue;
+        }
+        if (!isAdditionalSinglePlayerFastfile(path, language)) {
             continue;
         }
         try {
@@ -602,11 +661,12 @@ async function probeInstallEntries(module, entries)
     }
     return {
         language,
+        totalSize,
         profile: {
-            version: M12_INSTALL_PROFILE.version,
-            id: M12_INSTALL_PROFILE.id,
-            product: M12_INSTALL_PROFILE.product,
-            map: M12_INSTALL_PROFILE.map,
+            version: profile.version,
+            id: profile.id,
+            product: profile.product,
+            map: profile.map,
             archiveCount,
             zoneCount,
             availableSinglePlayerZones: availableSinglePlayerZones.sort(),
@@ -819,33 +879,26 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
             ));
     }
 
-    async function probeStoredImport(importId, recordedManifest = null)
+    async function probeStoredImport(importId, recordedManifest)
     {
+        const { importId: recordedId, sizes: recordedSizes } = validateStoredManifest(recordedManifest);
+        if (recordedId !== importId)
+            throw importError("INVALID_METADATA", "Stored asset metadata names the wrong import.");
         const entries = new Map();
-        const recordedFiles = recordedManifest?.files ?? REQUIRED_ASSETS;
-        for (const entry of recordedFiles) {
+        for (const entry of recordedManifest.files) {
             const handle = await fileHandleFor(importId, entry.path);
             entries.set(entry.path, await handle.getFile());
         }
-        validateSelectedEntries(entries);
-
-        if (recordedManifest) {
-            const { importId: recordedId, sizes: recordedSizes } =
-                validateStoredManifest(recordedManifest);
-            if (recordedId !== importId) {
-                throw importError("INVALID_METADATA", "Stored asset metadata names the wrong import.");
-            }
-            for (const [path, file] of entries) {
-                if (recordedSizes.get(path) !== file.size) {
-                    throw importError(
-                        "PERSISTED_SIZE",
-                        "Persisted asset sizes no longer match the manifest.",
-                    );
-                }
+        for (const [path, file] of entries) {
+            if (recordedSizes.get(path) !== file.size) {
+                throw importError(
+                    "PERSISTED_SIZE",
+                    "Persisted asset sizes no longer match the manifest.",
+                );
             }
         }
 
-        const probe = await probeInstallEntries(module, entries);
+        const probe = await probeInstallEntries(module, entries, recordedManifest.language);
         return {
             ...probe,
             files: [...entries].map(([path, file]) => ({ path, size: file.size })),
@@ -1024,16 +1077,16 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
         let stagedImportId = null;
         try {
             await ensureBackend();
-            const totalSize = validateSelectedEntries(entries);
             emit({
                 state: "validating",
                 message: "Checking selected file structure before copying",
                 copiedBytes: 0,
-                totalBytes: totalSize,
+                totalBytes: 0,
                 progress: 0,
                 manifest: previousManifest,
             });
-            await probeSelectedEntries(entries);
+            const selectedProbe = await probeSelectedEntries(entries);
+            const totalSize = selectedProbe.totalSize;
             await releaseEngineFilesForMutation();
 
             return await withStorageLock(async () => {
@@ -1100,6 +1153,7 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
                     schema: MANIFEST_SCHEMA,
                     importId: stagedImportId,
                     importedAt: new Date().toISOString(),
+                    language: selectedProbe.language,
                     files: [...entries].map(([path, file]) => ({ path, size: file.size })),
                 };
                 const probe = await probeStoredImport(stagedImportId, candidateManifest);

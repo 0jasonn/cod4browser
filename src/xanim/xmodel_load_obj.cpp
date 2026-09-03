@@ -7,6 +7,8 @@
 #include <qcommon/com_pack.h>
 #include <universal/aabbtree.h>
 #include <gfx_d3d/r_dvars.h>
+#include <gfx_d3d/r_registration_api.h>
+#include <gfx_d3d/r_bsp.h>
 #include "xanim.h"
 #include <physics/phys_local.h>
 

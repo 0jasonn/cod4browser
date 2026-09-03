@@ -1,3 +1,8 @@
+option(KISAK_COPY_RUNTIME_DLLS "Copy native runtime DLLs beside build outputs" ON)
+if (NOT KISAK_COPY_RUNTIME_DLLS)
+    return()
+endif()
+
 # [POST_BUILD] Copy over MILES dependency.
 # copy_directory_if_different, NOT copy_directory: every target (mp/sp/dedi) runs this
 # into the same bin/<config> dir, so unconditional copies race each other during parallel

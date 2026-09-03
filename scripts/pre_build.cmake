@@ -30,8 +30,8 @@ if (WIN32)
   set(CMAKE_GENERATOR_PLATFORM "WIN32")
 
   # Check to see if we are running a github action
-  if (DEFINED CICD)
-    message("===== BUILDING FOR GITHUB ACTIONS =====")
+  if (DEFINED CICD OR EXISTS "${DXSDK_DIR}/release/lib/x86/d3dx9.lib")
+    message("===== BUILDING WITH NUGET D3DX SDK =====")
 
     # Check if this variable has been set
     if (NOT DEFINED DXSDK_DIR)

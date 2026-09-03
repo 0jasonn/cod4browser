@@ -1,0 +1,11 @@
+{
+  "ffmpeg": {
+    "version": "8.0.3",
+    "url": "https://ffmpeg.org/releases/ffmpeg-8.0.3.tar.xz",
+    "sha256": "6136812ea6d4e68bdba27e33c2a94382711cdf4f8602ffef056ff792bd6f9818"
+  },
+  "make": {
+    "url": "https://repo.msys2.org/msys/x86_64/make-4.4.1-2-x86_64.pkg.tar.zst",
+    "sha256": "2408af61717dae87b00c855b132769a125c708907fc94a46bb16dae076113e5c"
+  }
+}

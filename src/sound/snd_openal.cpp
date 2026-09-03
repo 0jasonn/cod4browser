@@ -10,6 +10,9 @@
 #include <qcommon/qcommon.h>
 #include <universal/com_memory.h>
 #include <math.h>
+#if defined(KISAK_WEB) && KISAK_WEB_DIAGNOSTICS
+#include <emscripten/emscripten.h>
+#endif
 
 // alGlob is declared extern in snd_local.h; its one definition lives in snd_driver.cpp
 // (KISAK_SOUND branch), matching where milesGlob's Miles-side definition already lives.
@@ -134,9 +137,8 @@ void MSS_InitChannels()
     g_snd.ambient_track = 1;
 }
 
-// Mirrors MSS_InitEq. Only the shared EQ *data* (alGlob.eq[][]) gets initialized here -
-// see MSS_ApplyEqFilter below for why alGlob.eqFilter is deliberately left at 0/unallocated
-// rather than an EFX filter object (Phase 7: no working EQ application on this side).
+// Shared EQ parameters stay in alGlob.eq. Web Audio owns its device filters;
+// native OpenAL still leaves the incompatible single EFX filter unallocated.
 void MSS_InitEq()
 {
     alGlob.eqFilter = 0;
@@ -220,62 +222,66 @@ float MSS_GetWetLevel(const snd_alias_t *pAlias)
         return g_snd.effect->wetlevel;
 }
 
-// Mirrors MSS_ApplyEqFilter. Left as a genuine no-op: Miles does true 3-band parametric EQ
-// per entchannel (up to 2 EQ slots x 3 bands each, arbitrary type/freq/gain/Q per band -
-// see the Miles branch in snd_mss.cpp), and there's no 1:1 equivalent in OpenAL-Soft's EFX,
-// which only exposes single-band lowpass/highpass/bandpass filters. Real parity would need
-// custom biquad DSP via the AL_SOFT_callback_buffer extension (alBufferCallbackSOFT) -
-// genuine DSP work, budgeted separately if ever needed (see WORK.md Phase 7). Not a
-// regression from what players get today either way: snd_enableEq already defaults off in
-// the existing Miles code due to a documented crash bug (snd.cpp, SND_Init).
-//
-// Sketch of a crude single-band approximation, if this is ever revisited - uses only band 0
-// of EQ slot 0 (ignoring slot 1 entirely, which only matters for the Xbox-only crossfade
-// path anyway, and bands 1/2), and only handles the two band types EFX has a filter for.
-// LOWSHELF/HIGHSHELF/BELL have no EFX equivalent at all. This is illustrative only - not
-// wired up, not tested, and alGlob.eqFilter is deliberately left unallocated (0) above in
-// MSS_InitEq since nothing here uses it while this stays commented out.
-/*
+// The browser device can apply all six parametric bands. Native OpenAL EFX
+// still has no equivalent to Miles' two arbitrary three-band sample filters.
 void __cdecl MSS_ApplyEqFilter(ALuint source, int entchannel)
 {
-    if (!snd_enableEq->current.enabled)
+#if defined(KISAK_WEB)
+    if (!source) return;
+    iassert(entchannel >= 0 && entchannel < 64);
+    float bands[6][5] = {};
+    if (snd_enableEq->current.enabled)
     {
-        alSourcei(source, AL_DIRECT_FILTER, AL_FILTER_NULL);
-        return;
+        for (int stage = 0; stage < 2; ++stage)
+            for (int band = 0; band < 3; ++band)
+            {
+                const auto &params = alGlob.eq[stage].params[band][entchannel];
+                if (!params.enabled) continue;
+                auto &out = bands[stage * 3 + band];
+                out[0] = 1.0f;
+                out[1] = static_cast<float>(params.type);
+                out[2] = params.gain;
+                out[3] = params.freq;
+                out[4] = params.q;
+            }
     }
-
-    SndEqParams *params = &alGlob.eq[0].params[0][entchannel];
-    if (!params->enabled)
-    {
-        alSourcei(source, AL_DIRECT_FILTER, AL_FILTER_NULL);
-        return;
-    }
-
-    switch (params->type)
-    {
-    case SND_EQTYPE_LOWPASS:
-        alFilteri(alGlob.eqFilter, AL_FILTER_TYPE, AL_FILTER_LOWPASS);
-        alFilterf(alGlob.eqFilter, AL_LOWPASS_GAIN, params->gain);
-        alFilterf(alGlob.eqFilter, AL_LOWPASS_GAINHF, 1.0f - (params->freq / 20000.0f));
-        alSourcei(source, AL_DIRECT_FILTER, alGlob.eqFilter);
-        break;
-    case SND_EQTYPE_HIGHPASS:
-        alFilteri(alGlob.eqFilter, AL_FILTER_TYPE, AL_FILTER_HIGHPASS);
-        alFilterf(alGlob.eqFilter, AL_HIGHPASS_GAIN, params->gain);
-        alFilterf(alGlob.eqFilter, AL_HIGHPASS_GAINLF, params->freq / 20000.0f);
-        alSourcei(source, AL_DIRECT_FILTER, alGlob.eqFilter);
-        break;
-    default:
-        // SND_EQTYPE_LOWSHELF/HIGHSHELF/BELL: no EFX filter type covers these.
-        alSourcei(source, AL_DIRECT_FILTER, AL_FILTER_NULL);
-        break;
-    }
+    WebOpenAL_SetSourceEq(source, bands);
+#endif
 }
-*/
-void __cdecl MSS_ApplyEqFilter(ALuint source, int entchannel)
+
+#if defined(KISAK_WEB) && KISAK_WEB_DIAGNOSTICS
+// Synthetic device probe: never touches an initialized retail sound runtime.
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestAudioEq()
 {
+    if (g_snd.Initialized2d || g_snd.Initialized3d) return 0;
+    ALuint source = 0;
+    alGenSources(1, &source);
+    SndEqParams saved[2][3];
+    const auto *savedEnable = snd_enableEq;
+    dvar_t enabled{};
+    enabled.current.enabled = true;
+    snd_enableEq = &enabled;
+    for (int stage = 0; stage < 2; ++stage)
+        for (int band = 0; band < 3; ++band)
+        {
+            auto &params = alGlob.eq[stage].params[band][63];
+            saved[stage][band] = params;
+            params = {static_cast<SND_EQTYPE>((stage * 3 + band) % 5),
+                static_cast<float>(-6 + stage * 3 + band),
+                static_cast<float>(500 + 100 * (stage * 3 + band)), 0.75f, true};
+        }
+    MSS_ApplyEqFilter(source, 63);
+    MSS_ApplyEqFilter(source, 63); // Unchanged updates must not resend the chain.
+    enabled.current.enabled = false;
+    MSS_ApplyEqFilter(source, 63);
+    snd_enableEq = savedEnable;
+    for (int stage = 0; stage < 2; ++stage)
+        for (int band = 0; band < 3; ++band)
+            alGlob.eq[stage].params[band][63] = saved[stage][band];
+    alDeleteSources(1, &source);
+    return alGetError() == AL_NONE;
 }
-
+#endif
 // Mirrors MSS_ResumeSample.
 void __cdecl MSS_ResumeSample(int i, int frametime)
 {

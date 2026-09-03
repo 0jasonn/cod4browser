@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { deflateSync } from "node:zlib";
-import { REQUIRED_ASSETS } from "../../web/asset_store.mjs";
+import { getRequiredAssets } from "../../web/asset_profile.mjs";
 import { createSyntheticIwd } from "./synthetic_iwd.mjs";
 
 export const SYNTHETIC_LOCALIZATION = [
@@ -19,6 +19,17 @@ export function createSyntheticFastfileHeader()
         0x05, 0x00, 0x00, 0x00,
         0x78, 0xda,
     ]);
+}
+
+// Freely generated admission fixture only; zero payload is not a decodable movie.
+export function createSyntheticCinematicHeader()
+{
+    const bytes = Buffer.alloc(64);
+    bytes.write("BIKi");
+    for (const [offset, value] of [[4, 56], [8, 1], [12, 16], [16, 1],
+        [20, 16], [24, 16], [28, 30], [32, 1], [44, 49]])
+        bytes.writeUInt32LE(value, offset);
+    return bytes;
 }
 
 // Freely generated fixture for the canonical runtime-prefix XFile envelope. It keeps
@@ -124,34 +135,14 @@ export function createSyntheticCanonicalRefillXFile()
     ]);
 }
 
-// Freely generated minimal prerequisite zone. It exercises the real
-// code_post_gfx -> common -> world orchestration without inventing retail
-// assets or requiring sound records in unrelated browser-platform tests.
+// Freely generated minimal prerequisite zone. The empty channel file allows
+// canonical sound initialization without sound assets in platform tests.
 export function createSyntheticEmptyPrerequisiteFastfile()
 {
-    const inflated = [];
-    appendU32(inflated, 4096);
-    appendU32(inflated, 0);
-    for (const size of [1024, 0, 0, 0, 1024, 0, 0, 0, 0]) {
-        appendU32(inflated, size);
-    }
-    appendU32(inflated, 0); // script-string count
-    appendU32(inflated, 0); // script-string table
-    appendU32(inflated, 1); // asset count
-    appendU32(inflated, 0xffff_ffff); // asset table
-    appendU32(inflated, 31); // RawFile
-    appendU32(inflated, 0xffff_ffff);
-    appendU32(inflated, 0xffff_ffff); // RawFile name
-    appendU32(inflated, 4);
-    appendU32(inflated, 1); // RawFile payload presence
-    inflated.push(...Buffer.from("tests/empty_common.txt", "ascii"), 0);
-    inflated.push(...Buffer.from("test", "ascii"), 0);
-    const compressed = deflateSync(Uint8Array.from(inflated), { level: 9 });
-    return Uint8Array.from([
-        0x49, 0x57, 0x66, 0x66, 0x75, 0x31, 0x30, 0x30,
-        0x05, 0x00, 0x00, 0x00,
-        ...compressed,
-    ]);
+    return createSyntheticGeneratedPrefixFastfile({ rawFiles: [
+        { name: "tests/empty_common.txt", contents: "test" },
+        { name: "soundaliases/channels.def", contents: "# No sounds in this fixture.\n" },
+    ] });
 }
 
 function appendU32(bytes, value)
@@ -1004,7 +995,8 @@ export async function createInstallDirectory(
     testInfo,
     name,
     {
-        localization = SYNTHETIC_LOCALIZATION,
+        language = "english",
+        localization = SYNTHETIC_LOCALIZATION.replace(/^english/, language),
         primaryIwd = createSyntheticIwd(),
         overrides = new Map(),
         omit = [],
@@ -1014,7 +1006,7 @@ export async function createInstallDirectory(
 {
     const directory = testInfo.outputPath(name);
     const omitted = new Set(omit);
-    for (const requirement of REQUIRED_ASSETS) {
+    for (const requirement of getRequiredAssets(language)) {
         if (omitted.has(requirement.path)) {
             continue;
         }
@@ -1034,14 +1026,20 @@ export async function createInstallDirectory(
                     path: "fileSysCheck.cfg",
                     contents: "synthetic filesystem validation\n",
                     method: "deflate",
+                }, {
+                    path: "configure_mp.csv",
+                    contents: "cpu ghz,sys mb,r_fullscreen\n0,128,0\ngpu,r_fullscreen\n*,0\n",
+                    method: "deflate",
                 }]);
             } else if (requirement.kind === "iwd") {
                 contents = createSyntheticIwd();
-            } else if (requirement.path === "zone/english/code_post_gfx.ff") {
+            } else if (requirement.path === `zone/${language}/code_post_gfx.ff`) {
                 contents = createSyntheticRetailCensusFastfile();
-            } else if (requirement.path === "zone/english/common.ff") {
+            } else if (requirement.path === `zone/${language}/common.ff`) {
                 contents = createSyntheticEmptyPrerequisiteFastfile();
-            } else if (requirement.path === "zone/english/killhouse.ff") {
+            } else if (requirement.path === `zone/${language}/ui.ff`) {
+                contents = createSyntheticGeneratedPrefixFastfile();
+            } else if (requirement.path === `zone/${language}/killhouse.ff`) {
                 contents = createSyntheticWorldInventoryFastfile();
             } else {
                 contents = createSyntheticFastfileHeader();

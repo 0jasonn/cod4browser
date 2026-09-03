@@ -1,4 +1,5 @@
 #pragma once
+#include "gfx_world_types.h"
 
 #if defined(KISAK_WEB)
 struct IDirect3DVertexDeclaration9;
@@ -305,12 +306,6 @@ struct GfxAssembledShaderText // sizeof=0x8418
     GfxAssembledShaderTextFile files[128];
 };
 
-struct MaterialMemory // sizeof=0x8
-{                                       // ...
-    Material* material;
-    int memory;
-};
-
 struct stream_source_info_t // sizeof=0x3
 {                                       // ...
     uint8_t Stream;
@@ -419,7 +414,6 @@ struct $8E67C8D28114E56A26FBAF05ACADB66A // sizeof=0x11028
     const MaterialRaw *sortMtlRaw;      // ...
 };
 
-
 const char* __cdecl Material_GetName(Material* handle);
 const Material* __cdecl Material_FromHandle(Material* handle);
 char __cdecl Material_GetConstantValue(Material* material, const char* name, float* outValue);
@@ -472,6 +466,7 @@ void __cdecl Material_PreventOverrideTechniqueGeneration();
 void __cdecl Material_UpdatePicmipAll();
 void __cdecl R_Cmd_ReloadMaterialTextures();
 Material *Material_RegisterRawImage(const char *name, int imageTrack);
+void Material_InvalidateRawImage();
 
 struct GfxMtlFeatureMap // sizeof=0x10
 {                                       // ...
@@ -551,7 +546,6 @@ void __cdecl Material_OriginalRemapTechniqueSet(MaterialTechniqueSet *techSet);
 void __cdecl Material_DirtyTechniqueSetOverrides();
 void __cdecl Material_ClearShaderUploadList();
 bool __cdecl Material_WouldTechniqueSetBeOverridden(const MaterialTechniqueSet *techSet);
-
 
 inline bool Material_UsesDepthBuffer(Material *mat)
 {

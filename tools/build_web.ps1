@@ -46,6 +46,9 @@ foreach ($requiredPath in @(
 $env:EM_CONFIG = $emscriptenConfig
 $env:EMSDK = $emsdkRoot
 
+& (Join-Path $PSScriptRoot 'bootstrap_cinematic_codec.ps1')
+& (Join-Path $PSScriptRoot 'build_reverb.ps1') -Jobs $buildJobs
+
 $totalTimer = [Diagnostics.Stopwatch]::StartNew()
 $stepTimer = [Diagnostics.Stopwatch]::StartNew()
 & $cmakeExecutable `

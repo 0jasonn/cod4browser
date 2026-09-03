@@ -1,5 +1,6 @@
 #include <universal/q_shared.h>
 #include <database/database.h>
+#include <database/db_file_platform.h>
 #include <database/db_generated_loaders.h>
 #include <database/db_generated_image_platform.h>
 #include <game/g_bsp.h>
@@ -52,6 +53,7 @@ namespace
 {
 std::vector<std::uint8_t> g_file;
 std::size_t g_filePosition = 0;
+int g_language = 0;
 DBRuntimeTraceSnapshot g_trace{};
 alignas(4096) std::array<std::uint8_t, 4 * 1024 * 1024> g_arena{};
 std::uint32_t g_lowPosition = 0;
@@ -2101,6 +2103,13 @@ void Run(const std::vector<std::uint8_t> &file, XZoneMemory &zone)
 } // namespace
 
 WebWorkerFile WebWorkerFS_Open(const char *) { return 0; }
+int __cdecl SEH_GetCurrentLanguage() { return g_language; }
+const char *__cdecl SEH_GetLanguageName(std::uint32_t language)
+{
+    static const char *names[] = { "english", "french", "german" };
+    assert(language < 3);
+    return names[language];
+}
 void __cdecl PMem_Free(const char *, std::uint32_t) {}
 void __cdecl CM_Unload() {}
 void __cdecl Com_UnloadWorld() {}
@@ -2329,6 +2338,15 @@ const PhysicalMemory *PMem_GetState()
 
 int main()
 {
+    char localizedPath[256];
+    for (int language = 0; language < 3; ++language)
+    {
+        g_language = language;
+        DB_PlatformBuildZonePath("code_post_gfx", sizeof(localizedPath), localizedPath);
+        assert(std::string(localizedPath) == std::string("zone/") +
+            SEH_GetLanguageName(language) + "/code_post_gfx.ff");
+    }
+    g_language = 0;
     DB_WebClearImageLoadDefs();
     const WebDbImageLoadDefStats emptyImageLoadDefStats =
         DB_WebGetImageLoadDefStats();
@@ -4175,6 +4193,21 @@ int main()
     assert(g_trace.generatedLoadFailed && !g_trace.publicationBegin);
     assert(std::strcmp(g_trace.stopStage, "stream/truncated string") == 0 ||
         std::strcmp(g_trace.stopStage, "inflate/premature EOF") == 0);
+
+    // A terminating NUL must also fit in the virtual block. PMem reserves 15
+    // alignment bytes beyond it; malformed strings must not write there.
+    for (std::size_t nameLength : {4083u, 4084u, 4085u, 4112u})
+    {
+        Run(MakePhysPresetXFile(UINT32_MAX - 1u, UINT32_MAX, 0,
+            false, true, true, nameLength), zone);
+        assert(g_trace.generatedLoadFailed == (nameLength >= 4084u));
+        assert(g_trace.publicationEnd == (nameLength < 4084u));
+        assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_PHYSPRESET) ==
+            (nameLength < 4084u ? 63u : 64u));
+        const XBlock &block = zone.blocks[4];
+        assert(std::all_of(block.data + block.size, block.data + block.size + 15u,
+            [](std::uint8_t byte) { return byte == 0u; }));
+    }
 
     Reset(physInsertAlias);
     *static_cast<void **>(DB_XAssetPool[ASSET_TYPE_PHYSPRESET]) = nullptr;

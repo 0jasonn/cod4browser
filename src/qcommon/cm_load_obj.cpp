@@ -7,6 +7,7 @@
 #include <DynEntity/DynEntity_client.h>
 #include <game/game_public.h>
 #include <universal/profile.h>
+#include <gfx_d3d/r_bsp.h>
 
 struct DiskCollBorder // sizeof=0x1C
 {

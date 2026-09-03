@@ -33,7 +33,7 @@ test('controlled comparison rejects clock, camera, geometry and sampling mismatc
     const profileViews = Array.from({ length: 120 }, (_, index) => ({ ...views[0], submissionGeneration: 601 + index }));
     const counters = Object.fromEntries(['worldSurfacesSubmitted', 'worldSurfacesDrawn', 'staticModelInstancesRetained',
         'staticModelInstanceDraws', 'dynamicBatchesDrawn', 'fxModelBatchesDrawn', 'particleBatchesDrawn',
-        'markBatchesDrawn', 'shadowCasterDraws', 'submittedIndices', 'bufferUploadBytes',
+        'markBatchesDrawn', 'shadowCasterDraws', 'sunShadowMergedRanges', 'submittedIndices', 'bufferUploadBytes',
         'dynamicCommandVertices', 'dynamicCommandIndices', 'uiCommandVertices', 'uiCommandIndices'].map(key => [key, 3]));
     const frames = profileViews.map(view => ({ viewSubmissionGeneration: view.submissionGeneration, counters }));
     assert.deepEqual(validateProfileWindow(frames, profileViews, run.workload), frames.map(frame => frame.counters));
@@ -41,6 +41,9 @@ test('controlled comparison rejects clock, camera, geometry and sampling mismatc
     assert.throws(() => validateProfileWindow(frames, profileViews.map(view => ({ ...view, time: view.time + 1 })), run.workload));
     assert.throws(() => validateProfileWindow(frames.map(frame => ({ ...frame, viewSubmissionGeneration: 600 })), profileViews, run.workload));
     assert.throws(() => validateProfileWindow(frames.map(frame => ({ ...frame, counters: { ...counters, shadowCasterDraws: NaN } })), profileViews, run.workload));
+    const missingCounter = { ...counters };
+    delete missingCounter.sunShadowMergedRanges;
+    assert.throws(() => validateProfileWindow(frames.map(frame => ({ ...frame, counters: missingCounter })), profileViews, run.workload));
     const diagnostic = { ...run, cleanTiming: { ...run.cleanTiming, diagnosticBuild: true },
         workCounts: frames.map(frame => frame.counters), methodology: { foreground: { performanceWindowValid: true } }, pageErrors: [] };
     assert.equal(compareProfileWorkloads([diagnostic, structuredClone(diagnostic)]).length, 2);

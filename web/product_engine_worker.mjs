@@ -258,8 +258,7 @@ globalThis.addEventListener("message", (event) => {
                 break;
             }
             case "resize":
-                module.canvas.width = message.width;
-                module.canvas.height = message.height;
+                module.browserCanvasSize = [message.width, message.height];
                 reply(message.id, message.type, true);
                 break;
             case "runtimeStatus":

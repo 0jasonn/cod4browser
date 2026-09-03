@@ -2,7 +2,9 @@
 #include <database/database.h>
 #include <bgame/bg_weapons.h>
 #include <script/scr_debugger.h>
+#ifdef KISAK_SP
 #include <server/server.h>
+#endif
 #include <universal/com_memory.h>
 #include <universal/dvar.h>
 #include <xanim/xanim.h>
@@ -29,7 +31,9 @@ void Com_DPrintf(int channel, const char *fmt, ...)
 void __cdecl Com_CheckSyncFrame()
 {
     iassert(Sys_IsMainThread());
+#ifdef KISAK_SP
     SV_WaitSaveGame();
+#endif
     Scr_UpdateRemoteDebugger();
     DB_Update();
 }
@@ -51,6 +55,7 @@ void __cdecl Com_FreeWeaponInfoMemory(int source)
     }
 }
 
+#ifdef KISAK_SP
 void Com_XAnimFreeSmallTree(XAnimTree_s *animtree)
 {
     XAnimFreeTree(animtree, reinterpret_cast<void (*)(void *, int)>(MT_Free));
@@ -74,3 +79,4 @@ bool Com_IsRunningMenuLevel()
     return com_sv_running->current.enabled &&
         I_strnicmp(sv_mapname->current.string, "menu_", 5) == 0;
 }
+#endif

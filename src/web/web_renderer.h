@@ -59,6 +59,7 @@ struct WebRendererShaderState
 };
 
 struct WebRendererPrimaryLightDesc;
+struct GfxLight;
 
 enum class WebRendererShadowEntityKind : std::uint8_t
 {
@@ -123,7 +124,6 @@ struct WebRendererSceneViewDesc
     float colorBias[4];
     float colorTintBase[4];
     float colorTintDelta[4];
-    float displayGammaExponent;
     bool filmEnabled;
     // Canonical GfxGlow after R_SetGlowInfo's tweak and renderer-dvar gates.
     // The backend owns the quarter-resolution filter targets; these values
@@ -152,6 +152,9 @@ struct WebRendererSceneViewDesc
     // frame payload keeps its light constants synchronized with cgame.
     const WebRendererPrimaryLightDesc *primaryLights = nullptr;
     std::uint32_t primaryLightCount = 0u;
+    const GfxLight *const *dynamicLights = nullptr;
+    std::uint32_t dynamicLightCount = 0u;
+    const GfxImage *dynamicLightAttenuation = nullptr;
     WebRendererDynamicShadowVisibility dynamicShadowVisibility = nullptr;
 };
 
@@ -168,8 +171,11 @@ constexpr std::uint32_t WEB_RENDERER_MAX_WORLD_INDICES = 3'000'000u;
 constexpr std::uint32_t WEB_RENDERER_MAX_STATIC_MODEL_VERTICES = 1'000'000u;
 constexpr std::uint32_t WEB_RENDERER_MAX_STATIC_MODEL_INDICES = 3'000'000u;
 constexpr std::uint32_t WEB_RENDERER_MAX_STATIC_MODEL_INSTANCES = 65'536u;
-constexpr std::uint32_t WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES = 250'000u;
-constexpr std::uint32_t WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES = 500'000u;
+// AC130's authored DObjs plus retained brushes exceed the former 250k/500k
+// scene cap before FX. Keep logical brush occupancy and bound the complete
+// dynamic command at 40 MB (72-byte vertices plus 32-bit indices).
+constexpr std::uint32_t WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES = 500'000u;
+constexpr std::uint32_t WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES = 1'000'000u;
 // Native GfxScene::sceneDObj is a fixed 512-entry array. Keep the same bound
 // at the browser frontend seam so ordinary entity DObjs are not silently
 // limited to a smaller browser-only subset.
@@ -548,8 +554,28 @@ struct WebRendererStaticModelSceneDesc
     const WebRendererModelLightingAtlasDesc *modelLightingAtlas;
 };
 
+enum class WebRendererUiCommand : std::uint8_t
+{
+    Draw,
+    SaveScreen,
+    ShellShockBlurred,
+    ShellShockFlashed,
+};
+
+// Ordered framebuffer operations at the 2D renderer boundary. Effect lifetime
+// and intensities remain in canonical cg_shellshock; no gameplay state lives here.
+struct WebRendererSavedScreenCommand
+{
+    WebRendererUiCommand command = WebRendererUiCommand::Draw;
+    std::uint32_t timerId = 0u;
+    int sceneTime = 0;
+    int fadeMsec = 0;
+    float region[4]{0.0f, 0.0f, 1.0f, 1.0f};
+};
+
 struct WebRendererUiBatchDesc
 {
+    WebRendererSavedScreenCommand savedScreen;
     std::uint32_t firstIndex;
     std::uint32_t indexCount;
     const Material *materialIdentity;
@@ -688,5 +714,21 @@ WebRendererSurfaceResult WebRenderer_RetainBrushModelGeometry(
 WebRendererSurfaceResult WebRenderer_SetUiScene(
     const WebRendererUiSceneDesc &scene);
 
+#if KISAK_WEB_DIAGNOSTICS
+std::uint32_t WebRenderer_TestDrawPixel(int x, int y);
+#endif
+
 // Draws one non-blocking browser frame. Engine work remains outside this seam.
+// Display gamma applies after world effects and 2D, including menu-only frames.
+bool WebRenderer_SetDisplayGamma(float gamma);
 bool WebRenderer_DrawFrame(const WebFrameInfo &frame);
+
+// Platform screenshot/image boundary; ownership and names remain in Kisak.
+bool WebRenderer_ReadSaveGameShot(std::vector<std::uint8_t> &rgba, const char *mapName);
+void WebSaveImage_CapturePending();
+void WebSaveImage_CancelPending();
+bool WebRenderer_SetRawUiImage(const GfxImage *image, const std::uint8_t *rgba,
+    std::size_t byteLength);
+bool WebRenderer_UpdateUiImage(const GfxImage *image, const std::uint8_t *rgba,
+    std::size_t byteLength);
+void WebRenderer_ReleaseUiImage(const GfxImage *image);

@@ -14,7 +14,7 @@
 
 namespace
 {
-constexpr std::size_t MAX_SOURCES = 53;
+constexpr std::size_t MAX_SOURCES = 54; // 53 canonical SND channels plus one cinematic track.
 constexpr std::size_t MAX_BUFFERS = 512;
 constexpr std::size_t MAX_PCM_BYTES = 16u * 1024u * 1024u;
 
@@ -32,6 +32,7 @@ struct SourceState
     ALuint buffer = 0;
     ALenum state = AL_STOPPED;
     ALfloat gain = 1.0f;
+    float wet = 0.0f;
     ALfloat pitch = 1.0f;
     ALfloat offset = 0.0f;
     ALfloat position[3] = {};
@@ -44,6 +45,7 @@ struct SourceState
     std::size_t processed = 0;
     double queueOffset = 0.0;
     std::string diagnosticAlias;
+    float eqBands[6][5] = {};
 };
 
 std::array<BufferState, MAX_BUFFERS + 1> g_buffers;
@@ -51,6 +53,7 @@ std::array<SourceState, MAX_SOURCES + 1> g_sources;
 ALuint g_next_buffer = 1;
 ALenum g_error = AL_NONE;
 bool g_context_current = false;
+int g_room_type = -1;
 
 double now_seconds()
 {
@@ -85,13 +88,13 @@ void emit_source(ALuint id, const char *op)
                 sourceId: $0, generation: $2, bufferId: $3, gain: $4, pitch: $5,
                 looping: !!$6, offset: $7, x: $8, y: $9, z: $10,
                 aliasName: UTF8ToString($11), spatialized: !!$12,
-                queueProcessed: $13});
+                queueProcessed: $13, wet: $14});
         }
     }, id, op, source.generation, source.buffer, source.gain, source.pitch,
        source.looping ? 1 : 0, source.offset, source.position[0], source.position[1],
        source.position[2], source.diagnosticAlias.c_str(),
        source.spatialized ? 1 : 0,
-       static_cast<ALint>(source.processed));
+       static_cast<ALint>(source.processed), source.wet);
 }
 
 void emit_simple(const char *op, ALuint id)
@@ -210,11 +213,54 @@ void WebOpenAL_SetSourceAlias(ALuint source, const char *aliasName)
         value, std::min(std::strlen(value), std::size_t(128u)));
 }
 
+void WebOpenAL_SetSourceEq(ALuint source, const float (&bands)[6][5])
+{
+    if (!source_valid(source)) { fail(); return; }
+    for (const auto &band : bands)
+    {
+        if ((band[0] != 0.0f && band[0] != 1.0f) ||
+            (band[0] && (!std::isfinite(band[1]) || band[1] < 0 || band[1] > 4 ||
+                std::floor(band[1]) != band[1] || !std::isfinite(band[2]) ||
+                !std::isfinite(band[3]) || band[3] < 0 || band[3] > 20000 ||
+                !std::isfinite(band[4]) || band[4] <= 0)))
+        { fail(); return; }
+    }
+    auto &state = g_sources[source];
+    if (std::memcmp(state.eqBands, bands, sizeof(bands)) == 0) return;
+    std::memcpy(state.eqBands, bands, sizeof(bands));
+#if defined(__EMSCRIPTEN__)
+    EM_ASM({
+        if (typeof self !== "undefined" && typeof self.postMessage === "function") {
+            const begin = $2 >>> 2;
+            self.postMessage({type: "audio-command", version: 1, op: "source-eq",
+                sourceId: $0, generation: $1,
+                bands: Array.from(HEAPF32.subarray(begin, begin + 30))});
+        }
+    }, source, state.generation, state.eqBands);
+#endif
+}
+
 ALenum alGetError()
 {
     const ALenum result = g_error;
     g_error = AL_NONE;
     return result;
+}
+
+void WebOpenAL_SetRoomType(int room)
+{
+    if (room < 0 || room >= 26) { fail(); return; }
+    if (g_room_type == room) return;
+    g_room_type = room;
+    emit_simple("room-type", static_cast<ALuint>(room));
+}
+
+void WebOpenAL_SetReverbSend(ALuint id, float wet)
+{
+    if (!source_valid(id) || !std::isfinite(wet) || wet < 0 || wet > 1) { fail(); return; }
+    if (g_sources[id].wet == wet) return;
+    g_sources[id].wet = wet;
+    source_property(id);
 }
 
 void alDistanceModel(ALenum) {}
@@ -228,9 +274,13 @@ void alGenSources(ALsizei count, ALuint *ids)
         fail();
         return;
     }
+    const auto available = std::count_if(g_sources.begin() + 1, g_sources.end(),
+        [](const SourceState &source) { return !source.live; });
+    if (available < count) { fail(); return; }
+    ALuint id = 1;
     for (ALsizei i = 0; i < count; ++i)
     {
-        const ALuint id = static_cast<ALuint>(i + 1);
+        while (g_sources[id].live) ++id;
         g_sources[id] = SourceState{};
         g_sources[id].live = true;
         ids[i] = id;
@@ -550,6 +600,7 @@ void reset_proxy_state()
     g_next_buffer = 1;
     g_error = AL_NONE;
     g_context_current = false;
+    g_room_type = -1;
     emit_reset();
 }
 

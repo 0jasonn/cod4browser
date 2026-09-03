@@ -1,9 +1,50 @@
 # Web port convergence inventory
 
-Updated 2026-09-02. This page owns system classification; see
+Updated 2026-09-03. This page owns system classification; see
 [current status](web-status.md) and [the active roadmap](web-roadmap.md) for
 evidence and priorities. Earlier chronology is retained in
 [the historical inventory](history/web-convergence-through-2026-08-28.md).
+
+## Current verification boundary
+
+The platform frame wrapper now checks the canonical latched error after its
+body, matching `Com_Frame` and preventing a reached renderer failure from
+leaving the host marked running. The portable light-grid helper accepts native
+`R_InitEmptyLightGrid` and preserves its default-palette/primary-light result.
+AC130 supplies current execution evidence for both reached boundaries; its
+game, camera, mission and FX state remain canonical. See
+[AC130 evidence](evidence/ac130-rendering-2026-09-03.md).
+
+The asynchronous mount continuation now has a live canonical `setjmp` error
+boundary after `Com_Init` has returned. `Com_Error` retains its native text
+through the Worker cleanup/ownership protocol. The shared synthetic import
+fixtures include real startup prerequisites, and the picker test waits for
+completed mounting and restoration. See [verification evidence](evidence/verification-repair-2026-09-02.md).
+
+The three-way reference remains incomplete: Steam hashes/settings are pinned,
+and native SP now builds and enters main-menu code using the owned startup
+fastfiles. Native headers share the canonical world and critical-section types;
+common runtime definitions have a single owner, and XAnim counters use C++20
+atomics. Native OpenAL avoids the owned Miles DLL's incompatible exports.
+See [build, boot and remaining test failures](evidence/native-reference-2026-09-02.md).
+No browser/runtime comparison can stand in for original Steam mission-completion
+evidence.
+
+Canonical `Com_Quit_f` now requests platform shutdown at the end of the Worker
+frame. Canonical config serialization stays in C++; the browser flushes existing
+writable handles, stops audio/input, releases leases and terminates the Worker
+only after confirmed persistence. Worker destruction owns the final engine heap
+release instead of native process teardown. The launcher retains a retry path
+for save errors. This is a permanent platform adaptation, not another game
+lifecycle model. See [Quit evidence](evidence/browser-quit-2026-09-02.md).
+
+The frame callback now also owns a live canonical `setjmp` target. Shipped
+Save and Quit raises `ERR_DISCONNECT` after saving; recovery uses the extracted
+native `Com_ShutdownInternal`, SP `SV_Shutdown` and `Com_AssetLoadUI` owners to
+retire the game and reload the main menu in the same Worker. Natural Killhouse
+training/checkpoints and fresh-browser Resume Game exposed and verify this seam.
+General error-class recovery remains incomplete. See
+[disconnect evidence](evidence/campaign-training-disconnect-2026-09-02.md).
 
 ## Runtime flow
 
@@ -31,16 +72,23 @@ oracle.
 | Dvars/config | Canonical dvar types, domains, reset/current/latched values, flags, command handlers, key bindings, `Com_WriteConfigToFile`, and profile-relative `config.cfg` own settings. The Worker continuation restores `CL_InitKeyCommands` before filesystem/profile config execution; the browser frame pump only calls the shared `Com_WriteConfiguration` owner. |
 | Profiles | Canonical `Com_*PlayerProfile` and `UI_*PlayerProfile` functions own profile identity, active-marker parsing, list/feeder selection, config replay, and deletion. Browser diagnostics only select fixed synthetic entries through those owners. |
 | Filesystem | Canonical search paths, IWD/minizip behavior, config/profile calls and synchronous engine-facing operations use Worker file primitives. Recursive profile deletion maps to one durable Worker/OPFS tree-removal primitive. |
+| Installation language | The platform import profile derives paths from the validated localization marker; canonical FS/SEH selects localized IWDs and the DB file adapter now uses that selection instead of hardcoded English. French/German synthetic import, DB open and reload pass. Localized retail text/audio remain unqualified. See [evidence](evidence/localized-imports-2026-09-02.md). |
 | Database | Canonical XFile stream, allocation blocks, generated loaders, pointer aliases, registry pools, dependency ordering and final publication own runtime assets, including native-compatible leading-comma asset-stub resolution. |
 | World/runtime | Canonical `GfxWorld`, collision, server/game, client/cgame, script VM, XAnim/DObj, effects, ragdoll, physics and sound code are in the browser link closure. |
 | Frame order | The browser supplies elapsed time; canonical `Com_ModifyMsec`, `SV_Frame`, client frame work and `SCR_UpdateScreen` advance gameplay. Browser startup selects `com_maxFrameTime=5000`, and the platform pump uses the same long-stall ceiling instead of losing time on every frame longer than 100 ms. Script/developer timescales and opt-in `fixedtime` remain canonical. |
 | SP UI | Canonical `CL_StartHunkUsers`, `CL_InitUI`, `UI_Init`, shipped MenuLists, `UI_SetActiveMenu`, `UI_Refresh`, and renderer 2D commands own main/options/profile/load/pause menus. Disconnected browser frames continue through `CL_Frame` and `SCR_UpdateScreen`; UI-only backend frames are valid before any `GfxWorld` exists, so startup presents the shipped main menu rather than a DOM substitute. |
+| Text presentation | `r_text.cpp` and `r_text_cmds.cpp` move native glyph lookup, layout, color codes, shadows, subtitle glow, cursor blinking and reveal/decay logic into sources compiled by native and web targets. Canonical fonts/materials remain authoritative. The browser only provides scene/cursor clocks, SP color lookup and quad submission; console bytes pass through the native ring-copy routine. See [text evidence](evidence/text-presentation-2026-09-02.md). |
 | Objectives | Native server configstrings, `CG_ParseObjectiveChange`, `objectiveInfo_t`, `objectiveinfo`, canonical localization, timed menu visibility, and renderer text/quads own objective notifications. Diagnostics only observe hashed emitted text and inject a freely usable string through the canonical parser. |
 | Fresh-map randomness | Shared `SV_GetMapRandomSeed` serves native and browser spawn paths; optional cheat dvar `sv_mapSeed` defaults to the original clock seed. Game RNG and save/demo restoration remain canonical. |
 | Renderer frontend | Kisak world, model, effect and UI state is translated only at the portable draw-command boundary. Native IW3's bounded 65,536 static-model cardinality is preserved across that seam. |
+| Display gamma | Canonical `r_gamma` owns the setting; unchanged native ramp/correction functions are shared in `r_gamma.cpp`. The WebGL2 final pass implements the display-device boundary after world effects and all 2D, including menu-only frames. Save/feedback captures remain pre-display. Native/Wasm ramps and shipped slider/world pixels pass; Steam monitor-response parity is unverified. See [evidence](evidence/display-gamma-2026-09-03.md). |
+| Display modes/restart | Platform `web_display.cpp` registers canonical resolution/refresh enums and owns canvas/device sizing. Shared client/UI viewport helpers and `CG_InitViewDimensions` consume native `vidConfig_t`. Shared `CL_Vid_Restart_f` keeps the existing process-owned DB executor; browser registration recreates WebGL resources. Shipped Apply, persistence and native in-game save/restart/load pass in Chrome; mission state stays in Kisak. See [evidence](evidence/display-options-2026-09-03.md). |
+| Saved-screen effects | Canonical cgame owns flashbang/shellshock lifetime and intensities. Ordered renderer commands carry capture, native timer slots and packed colors into the WebGL2 UI pass; a GPU-only feedback texture is platform-owned and invalidated on resize/context loss. Synthetic pixels and a loaded retail material/composite pass are verified; authored effect fidelity remains unverified. See [evidence](evidence/saved-screen-2026-09-02.md). |
+| FX lighting queries | Canonical `FX_CalculatePackedLighting` now receives world light-grid/sun samples through the existing renderer lighting helper, following native average-query selection and quantization. Host-native/Wasm checks pass; original-game visual comparison is pending. This adapted query retires with the portable grid helper when native backend compilation replaces it. See [evidence](evidence/average-lighting-2026-09-02.md). |
+| Transient FX lights | `r_dynamiclights_core.h` shares canonical `GfxLight` construction and native importance partitioning between native and web callers. FX owns emission/lifetime; the frontend clears per-scene submissions, applies camera visibility and `r_dlightLimit`, then passes selected `GfxLight` records to WebGL2. The backend uses existing retained images, canonical material technique/state tables and destination-alpha coverage. Synthetic pixels and owned Killhouse visual/clear/context recovery checks pass. Native receiver/scissor selection, transient spot shadows and authored-effect fidelity remain open. See [evidence](evidence/transient-lights-2026-09-02.md). |
 | Input | Browser events enter canonical key/mouse queues, bindings, usercmd creation and movement/weapon code. |
-| Audio | Canonical mixer and OpenAL-facing state feed a browser Web Audio device boundary. |
-| Save/persistence | Canonical game serialization, `UI_LoadSavegames`, feeders, menu scripts, Continue, and deletion own saves and gameplay state. Profile-relative engine paths isolate saves; the browser host only persists and flushes files at the platform boundary. The unavailable loose screenshot retains the shipped unknown-save fallback. |
+| Audio | Canonical mixer and OpenAL-facing state feed a browser Web Audio device boundary. Both three-band EQ stages cross that boundary; SND retains parameter/entchannel ownership, while the device computes IIR coefficients and owns filter nodes. Canonical room/wet changes now reach the existing OpenAL reverb DSP in an AudioWorklet with shared native presets. Native/Wasm differential and browser PCM routing tests pass; authored campaign transitions, callback cost and Steam comparison remain open. See [EQ evidence](evidence/browser-eq-2026-09-02.md) and [reverb scope/evidence](browser-reverb.md). |
+| Save/persistence | Canonical game serialization, shared `ui_savegames.cpp`, feeders, menu scripts, Continue, and deletion own saves and gameplay state. Bounded header metadata supplies the Date column and dynamic description. Save commits request 512x512 JPEGs through native shared resampling; the Worker codec owns only temporary pixels/bytes. C++ checks save identity before persistence and publishes one canonical raw `Material`/`GfxImage`, using existing backend UI texture retention/recovery. Captures wait for a frame of the matching map and cancel on unload; shutdown drains admitted codec jobs before closing files. Native decoding uses reserved `rgp.rawImage`, canonical texture accounting and the existing D3DX dependency. Owned Airplane start-level/save capture, reload and menu display plus native decoder/device checks are verified; complete native menu and Steam comparison remain open. See [latest evidence](evidence/save-startup-native-2026-09-02.md). |
 
 The [retained-renderer milestone](evidence/retained-renderer-49af3948.md) moves
 brush submission closer to native separation of immutable `GfxBrushModel`
@@ -48,7 +96,10 @@ geometry and current placement. Only GPU-ready mesh/material resources and their
 recovery copies live in the backend; canonical entities, poses, visibility and
 light animation remain in Kisak. World retirement frees these resources, and
 context restoration recreates GPU objects. Optional effects still account for
-brush geometry in the original logical budget.
+brush geometry in the logical budget. AC130 exceeded the old 250k/500k
+vertex/index capacity; the bounded 500k/1m capacity retains that accounting
+and admits the authored scene. One logical command is bounded at 40 MB,
+excluding other renderer resources and staging/recovery copies.
 
 Sun-depth range joining preserves original triangle order and membership without
 using camera culling. Texture reuse is bounded and resets each frame/pass; it
@@ -64,7 +115,7 @@ and the verified limitations are recorded in [the boundary notes](renderer-retai
 | `qcommon/common_runtime_commands.cpp` | Keeps the post-mount common-command continuation canonical and separate from browser hosting. |
 | `cgame/cg_servercmds.cpp` | The shared slow-command parser converts decimal scales numerically instead of aliasing `long double` storage as `double`; this preserves normal-speed and scripted scale values in Wasm. |
 | `web_client_server_lifecycle.cpp` | Continues synchronous-looking native startup after the main-thread host mounts user files, including canonical version dvars and diagnostic-only calls through real profile/save UI owners. |
-| `web_main.cpp` | Admits disconnected-but-running client frames so canonical pre-map UI and config work run in native order; the browser still owns only the non-blocking pump. |
+| `web_main.cpp` | Admits disconnected-but-running client frames so canonical pre-map UI and config work run in native order. Its live frame jump target recovers canonical disconnects through shared native shutdown/UI owners; the browser owns the non-blocking pump. |
 | `web_canonical_gfxworld.cpp` | Observes final DB publication only; canonical `R_RenderScene` owns world rendering. The obsolete proof submission is removed. |
 | `web_renderer_frontend.cpp` | Converts canonical renderer state into backend-neutral commands. |
 | `web_system*.cpp` | Supplies browser timing, frame pump, files (including recursive directory deletion), events and thread-context behavior. |
@@ -83,7 +134,7 @@ platform makes that behavior impossible.
 | Audio device | AudioContext policy, buffers/nodes and PCM scheduling. Startup remains suspended and muted until an intentional canvas gesture resumes it; installation-picker interaction does not unlock sound. |
 | Main loop | Non-blocking Emscripten frame pump; no Asyncify or pthread requirement. |
 | Wasm stack | The web linker reserves 1 MiB, matching native Windows scale for canonical nested map/save loading rather than rewriting shared call chains. |
-| Cinematics | Native Bink is omitted safely until a browser-owned replacement is chosen. |
+| Cinematics | Existing `R_Cinematic_*` callers drive the platform FFmpeg Bink decoder, retained UI texture, and OpenAL PCM queue. Movie identity and subsequent game actions stay in Kisak. See [codec scope and remaining qualification](cinematic-codec.md). |
 
 ## Control classification
 
@@ -92,7 +143,7 @@ platform makes that behavior impossible.
 | Reached SP main/options/profile/load/pause controls | Shared canonical dvars and commands. The focused menu trace rejects missing references. |
 | `ui_sp_unlock` | Deliberate stock-retail dangling menu reference. Native COD4 1.7 emits the same `openmenuondvar` warning; no guessed browser dvar is registered. |
 | D3D9/Win32 renderer controls | Native-only where they configure APIs absent from WebGL2; browser renderer capability controls remain platform-owned and are not aliases pretending to be native dvars. |
-| Miles, Bink, and Steam controls | Native-only/omitted with their unavailable binary integrations. Web Audio and the explicit cinematic omission boundary report browser behavior. |
+| Miles, Bink, and Steam controls | Native DLL integrations remain unavailable. Web Audio and the source-built FFmpeg codec provide device behavior behind existing sound/cinematic APIs; Steam integration remains omitted. |
 | Multiplayer and dedicated-server controls | Not compiled into the initial offline SP target. They return only with the documented browser transport/server milestone, not as inert SP dvars. |
 
 ## Shared renderer and transport helpers
@@ -406,7 +457,9 @@ window; it makes no visual, functional, or playable claim. See
 
 - Probe `ac130` stationary next and close only measured thermal/material gaps,
   without introducing browser asset types or simulated gameplay.
-- Add a legal browser cinematic path or a documented graceful omission.
+- Qualify the source-built cinematic path against Steam: playback timing,
+  synchronization, recovery, and in-world materials. Missing movies still
+  report an explicit omission.
 - Add gamepad input when it becomes a product requirement.
 - Continue measuring the encoded-source recovery policy on later campaign
   batches. Consider source deduplication or reload from imported storage only

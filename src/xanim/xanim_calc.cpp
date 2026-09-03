@@ -1,3 +1,4 @@
+#include <atomic>
 #include <universal/q_shared.h>
 #include "xanim_calc.h"
 #include <qcommon/qcommon.h>
@@ -1713,13 +1714,13 @@ LABEL_20:
     tree = obj->tree;
     if (tree && tree->children)
     {
-        InterlockedIncrement(&tree->calcRefCount);
+        std::atomic_ref<volatile int32_t>(tree->calcRefCount).fetch_add(1);
         iassert(!tree->modifyRefCount);
         info.ignorePartBits.setBit(127);
         AnimInfo = GetAnimInfo(tree->children);
         XAnimCalc(obj, AnimInfo, 1.0f, 1, 0, &info, 0, p_skel->mat);
         iassert(!tree->modifyRefCount);
-        InterlockedDecrement(&tree->calcRefCount);
+        std::atomic_ref<volatile int32_t>(tree->calcRefCount).fetch_sub(1);
     }
     boneIndex = 0;
     models = obj->models;

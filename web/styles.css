@@ -28,6 +28,19 @@ body {
     background: #0d0f0c;
 }
 
+#quit-dialog {
+    width: min(520px, calc(100% - 32px));
+    padding: 28px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    color: var(--ink);
+    background: var(--surface);
+}
+
+#quit-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.85);
+}
+
 .app-shell {
     display: grid;
     gap: 20px;

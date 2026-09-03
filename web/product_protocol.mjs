@@ -30,6 +30,7 @@ export const PRODUCT_OPERATIONS = new Set([
 export const PRODUCT_ONE_WAY_OPERATIONS = new Set(["input-event"]);
 
 export const PRODUCT_HOST_EVENTS = new Set([
+    "kisakcod:display",
     "kisakcod:state",
     "kisakcod:frame",
     "kisakcod:system",

@@ -2,6 +2,8 @@
 #include "r_gfx.h"
 #include "rb_backend.h"
 
+struct r_double_index_t;
+
 struct GfxMeshGlobals // sizeof=0x180
 {                                       // ...
     GfxQuadMeshData fullSceneViewMesh[4]; // ...

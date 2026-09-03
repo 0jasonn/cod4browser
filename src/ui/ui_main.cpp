@@ -677,41 +677,6 @@ int __cdecl UI_SavegameIndexFromFilename2(const char *filename)
         return uiInfo.savegameStatus.displaySavegames[v1];
 }
 
-void __cdecl UI_DrawSaveGameShot(rectDef_s *rect, double scale, float *color)
-{
-    int v4; // r3
-    int v5; // r30
-    Material *sshotImage; // r3
-    int v11; // r30
-
-    v4 = UI_SavegameIndexFromFilename(uiInfo.savegameName);
-    if (v4 >= 0 && (v5 = uiInfo.savegameStatus.displaySavegames[v4], v5 >= 0))
-    {
-        sshotImage = uiInfo.sshotImage;
-        if (uiInfo.sshotImage && uiInfo.savegameList[v5].imageName)
-        {
-            if (!I_strnicmp(uiInfo.savegameList[v5].imageName, uiInfo.sshotImageName, 64))
-                goto LABEL_14;
-            sshotImage = uiInfo.sshotImage;
-        }
-        v11 = v5 << 6;
-        if (*(const char **)((char *)&uiInfo.savegameList[0].imageName + v11))
-        {
-            sshotImage = Material_RegisterRawImage(*(const char **)((char *)&uiInfo.savegameList[0].imageName + v11), 3);
-            uiInfo.sshotImage = sshotImage;
-        }
-        if (!*(const char **)((char *)&uiInfo.savegameList[0].imageName + v11) || !sshotImage)
-            uiInfo.sshotImage = Material_RegisterHandle("unknownsave", 3);
-        I_strncpyz(uiInfo.sshotImageName, *(const char **)((char *)&uiInfo.savegameList[0].imageName + v11), 64);
-    }
-    else
-    {
-        uiInfo.sshotImage = Material_RegisterHandle("unknownsave", 3);
-    }
-LABEL_14:
-    UI_DrawHandlePic(&scrPlaceFull, rect->x, rect->y, rect->w, rect->h, rect->horzAlign, rect->vertAlign, color, uiInfo.sshotImage);
-}
-
 void __cdecl UI_DrawSaveGameName(int localClientNum, rectDef_s *rect, Font_s *font, float scale, float *color, int textStyle)
 {
 	int idx = UI_SavegameIndexFromFilename(uiInfo.savegameName);
@@ -1046,47 +1011,6 @@ int __cdecl UI_FeederCount(int localClientNum, float feederID)
     return 0;
 }
 
-const char *__cdecl UI_FeederItemText(
-    int localClientNum,
-    itemDef_s *item,
-    const float feederID,
-    int index,
-    unsigned int column,
-    Material **handle)
-{
-    *handle = 0;
-
-    if (feederID == 16.0f)
-    {
-        if (index < 0 || index >= uiInfo.savegameCount)
-            return "";
-        int slotIdx = uiInfo.savegameStatus.displaySavegames[index];
-        if (slotIdx < 0 || slotIdx >= uiInfo.savegameCount)
-            return "";
-        const SavegameInfo &slot = uiInfo.savegameList[slotIdx];
-        switch (column)
-        {
-        case 0: return slot.savegameName ? slot.savegameName : "";
-        case 1: return slot.mapName      ? slot.mapName      : "";
-        case 2: return slot.date         ? slot.date         : "";
-        case 3: return slot.time         ? slot.time         : "";
-        default: return slot.savegameName ? slot.savegameName : "";
-        }
-    }
-
-    if (feederID == 24.0f)
-    {
-        if (index < 0 || index >= uiInfo.playerProfileCount)
-            return "";
-        int nameIdx = uiInfo.playerProfileStatus.displayProfile[index];
-        if (nameIdx < 0 || nameIdx >= uiInfo.playerProfileCount)
-            return "";
-        return uiInfo.playerProfileName[nameIdx] ? uiInfo.playerProfileName[nameIdx] : "";
-    }
-
-    return "";
-}
-
 int __cdecl UI_FeederItemEnabled(int localClientNum, double feederID, int index)
 {
     return 1;
@@ -1140,11 +1064,6 @@ void __cdecl UI_FeederSelection(int localClientNum, float feederID, int index)
             Dvar_SetString((dvar_s *)ui_playerProfileSelected, (char *)name);
         return;
     }
-}
-
-const char *__cdecl UI_GetSavegameInfo()
-{
-    return SEH_LocalizeTextMessage(uiInfo.savegameInfo, "Savegame Description Text", LOCMSG_SAFE);
 }
 
 void __cdecl UI_Pause(int localClientNum, int b)
@@ -1250,6 +1169,17 @@ void __cdecl UI_MapLoadInfo(const char *filename)
 cmd_function_s UI_OpenMenu_f_VAR;
 cmd_function_s UI_CloseMenu_f_VAR;
 
+void UI_UpdateScreenDimensions()
+{
+    CL_GetScreenDimensions(&uiInfo.uiDC.screenWidth, &uiInfo.uiDC.screenHeight, &uiInfo.uiDC.screenAspect);
+    if (480 * uiInfo.uiDC.screenWidth <= 640 * uiInfo.uiDC.screenHeight)
+        uiInfo.uiDC.bias = 0.0;
+    else
+        uiInfo.uiDC.bias = ((double)uiInfo.uiDC.screenWidth
+            - (double)uiInfo.uiDC.screenHeight * 1.333333373069763)
+        * 0.5;
+}
+
 void __cdecl UI_Init()
 {
     __int64 v0; // r10 OVERLAPPED
@@ -1278,13 +1208,7 @@ void __cdecl UI_Init()
     Menu_Setup(&uiInfo.uiDC);
 
 
-    CL_GetScreenDimensions(&uiInfo.uiDC.screenWidth, &uiInfo.uiDC.screenHeight, &uiInfo.uiDC.screenAspect);
-    if (480 * uiInfo.uiDC.screenWidth <= 640 * uiInfo.uiDC.screenHeight)
-        uiInfo.uiDC.bias = 0.0;
-    else
-        uiInfo.uiDC.bias = ((double)uiInfo.uiDC.screenWidth
-            - (double)uiInfo.uiDC.screenHeight * 1.333333373069763)
-        * 0.5;
+    UI_UpdateScreenDimensions();
 
     Sys_Milliseconds();
 
@@ -1921,59 +1845,6 @@ void __cdecl UI_SavegameSort(int column, int force)
             uiInfo.savegameName[0] = 0;
             strcpy(uiInfo.savegameInfo, "EXE_NOSAVEGAMES");
         }
-    }
-}
-
-void __cdecl UI_LoadSavegames(int /*unused*/)
-{
-    int saveCount = 0;
-#ifdef KISAK_XBOX
-    const char **saveFiles = FS_ListFiles("save", "svg", FS_LIST_ALL, &saveCount);
-#else
-    char saveDir[64];
-    Com_BuildPlayerProfilePath(saveDir, 64, "save");
-    const char **saveFiles = FS_ListFiles(saveDir, "svg", FS_LIST_ALL, &saveCount);
-#endif
-
-    uiInfo.savegameCount = 0;
-    if (saveFiles)
-    {
-        for (int i = 0; i < saveCount && uiInfo.savegameCount < 512; ++i)
-        {
-            const char *fileName = saveFiles[i];
-            if (!fileName || !*fileName)
-                continue;
-
-            char nameBuf[64];
-            I_strncpyz(nameBuf, fileName, sizeof(nameBuf));
-            size_t len = strlen(nameBuf);
-            if (len >= 4 && !I_stricmp(nameBuf + len - 4, ".svg"))
-                nameBuf[len - 4] = 0;
-
-            int idx = uiInfo.savegameCount++;
-            uiInfo.savegameList[idx].savegameFile = String_Alloc(nameBuf);
-            uiInfo.savegameList[idx].savegameName = String_Alloc(nameBuf);
-            uiInfo.savegameList[idx].imageName = 0;
-            uiInfo.savegameList[idx].mapName = 0;
-            uiInfo.savegameList[idx].savegameInfoText = 0;
-            uiInfo.savegameList[idx].time = 0;
-            uiInfo.savegameList[idx].date = 0;
-            memset(&uiInfo.savegameList[idx].tm, 0, sizeof(uiInfo.savegameList[idx].tm));
-            uiInfo.savegameStatus.displaySavegames[idx] = idx;
-        }
-        FS_FreeFileList(saveFiles);
-    }
-
-    if (uiInfo.savegameCount)
-    {
-        uiInfo.savegameStatus.sortDir = 1;
-        UI_SavegameSort(uiInfo.savegameStatus.sortKey, 1);
-    }
-    else
-    {
-        Dvar_SetString(ui_savegame, "");
-        uiInfo.savegameName[0] = 0;
-        strcpy(uiInfo.savegameInfo, "EXE_NOSAVEGAMES");
     }
 }
 

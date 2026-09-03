@@ -19,6 +19,7 @@ using WebFrameCallback = void (*)(const WebFrameInfo &frame, void *userData);
 // Browser-owned system services.  The frame pump invokes one callback per
 // requestAnimationFrame and never blocks or spins to enforce a native FPS cap.
 bool Web_StartFramePump(WebFrameCallback callback, void *userData);
+void Web_RequestQuit();
 void Web_Log(WebLogLevel level, const char *format, ...);
 
 void Web_EmitRuntimeState(const char *state, const char *message);

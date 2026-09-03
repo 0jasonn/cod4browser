@@ -98,7 +98,10 @@ void __cdecl Load_XStringCustom(char **str)
     for (pos = (uint8_t *)*str; ; ++pos)
     {
 #if defined(KISAK_WEB)
-        if (!DB_RuntimeStreamCanRead(1u))
+        // The canonical stream cursor advances only after the complete string.
+        // Include bytes already written when checking each next output byte.
+        if (!DB_RuntimeStreamCanRead(static_cast<std::size_t>(pos -
+            reinterpret_cast<std::uint8_t *>(s)) + 1u))
         {
             DB_RuntimeGeneratedFailure("stream/truncated string");
             return;

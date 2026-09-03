@@ -431,7 +431,7 @@ test("Worker audio proxy crosses one platform PCM command without gameplay state
     expect(result).toEqual({ accepted: 1, crossed: true });
 });
 
-test("Unavailable native cinematics complete and publish an explicit omission", async ({ page }) => {
+test("Missing imported cinematics complete and publish an explicit omission", async ({ page }) => {
     await page.goto("/");
     await page.waitForFunction(() => globalThis.__KISAKCOD_WEB__?.module?.ready);
     const result = await page.evaluate(async () => {
@@ -446,8 +446,7 @@ test("Unavailable native cinematics complete and publish an explicit omission", 
         detail: {
             state: "skipped",
             name: "diagnostic_intro",
-            reason: "native-bink-unavailable",
-            message: "Cinematic playback is unavailable in the browser build; continuing gameplay",
+            reason: "movie-not-imported",
         },
     });
 });

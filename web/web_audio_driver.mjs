@@ -3,7 +3,7 @@
 // and playback timing remain in the Kisak Worker.
 
 export const WEB_AUDIO_PROTOCOL_VERSION = 1;
-const MAX_SOURCES = 53;
+const MAX_SOURCES = 54; // 53 canonical SND channels plus one cinematic track.
 const MAX_BUFFERS = 512;
 const MAX_PCM_BYTES = 16 * 1024 * 1024;
 const MAX_DECODED_PCM_BYTES = 64 * 1024 * 1024;
@@ -11,6 +11,56 @@ const MAX_QUEUED_BUFFERS_PER_SOURCE = 128;
 
 function clamp(value, low, high) {
     return Math.min(high, Math.max(low, Number.isFinite(value) ? value : low));
+}
+
+// Device coefficients from the RBJ/W3C Audio EQ Cookbook (Q form):
+// https://www.w3.org/TR/audio-eq-cookbook/
+// IIRFilterNode preserves Q for shelves too; BiquadFilterNode ignores it there.
+function eqCoefficients(type, gain, frequency, q, sampleRate) {
+    const a = 10 ** (gain / 40);
+    if (!Number.isFinite(a) || a <= 0) throw new Error("Unrepresentable EQ gain");
+    if (frequency === 0 || frequency >= sampleRate / 2) {
+        const atZero = frequency === 0;
+        const level = type === 0 ? (atZero ? 0 : 1)
+            : type === 1 ? (atZero ? 1 : 0)
+            : type === 2 ? (atZero ? 1 : a * a)
+            : type === 3 ? (atZero ? a * a : 1) : 1;
+        if (!Number.isFinite(level)) throw new Error("Unrepresentable EQ gain");
+        return { level };
+    }
+    const w = 2 * Math.PI * frequency / sampleRate;
+    const c = Math.cos(w);
+    const alpha = Math.sin(w) / (2 * q);
+    const root = 2 * Math.sqrt(a) * alpha;
+    let b, d;
+    switch (type) {
+    case 0:
+        b = [(1 - c) / 2, 1 - c, (1 - c) / 2];
+        d = [1 + alpha, -2 * c, 1 - alpha]; break;
+    case 1:
+        b = [(1 + c) / 2, -(1 + c), (1 + c) / 2];
+        d = [1 + alpha, -2 * c, 1 - alpha]; break;
+    case 2:
+        b = [a * (a + 1 - (a - 1) * c + root),
+            2 * a * (a - 1 - (a + 1) * c), a * (a + 1 - (a - 1) * c - root)];
+        d = [a + 1 + (a - 1) * c + root,
+            -2 * (a - 1 + (a + 1) * c), a + 1 + (a - 1) * c - root]; break;
+    case 3:
+        b = [a * (a + 1 + (a - 1) * c + root),
+            -2 * a * (a - 1 + (a + 1) * c), a * (a + 1 + (a - 1) * c - root)];
+        d = [a + 1 - (a - 1) * c + root,
+            2 * (a - 1 - (a + 1) * c), a + 1 - (a - 1) * c - root]; break;
+    default:
+        b = [1 + alpha * a, -2 * c, 1 - alpha * a];
+        d = [1 + alpha / a, -2 * c, 1 - alpha / a]; break;
+    }
+    b = b.map((value) => value / d[0]);
+    d = d.map((value) => value / d[0]);
+    // Reject degenerate coefficients before publishing any part of a chain.
+    if (![...b, ...d].every(Number.isFinite) || Math.abs(d[2]) >= 1 ||
+        1 + d[1] + d[2] <= 0 || 1 - d[1] + d[2] <= 0)
+        throw new Error("Unstable EQ coefficients");
+    return { b, d };
 }
 
 export class WebAudioDriver {
@@ -50,6 +100,12 @@ export class WebAudioDriver {
         this.audioUnlocked = !startMuted;
         this.gestureTarget = null;
         this.gestureHandler = null;
+        this.roomType = 0;
+        this.reverbNode = null;
+        this.reverbReady = null;
+        this.reverbModule = null;
+        this.reverbEpoch = 0;
+        this.reverbMemoryBytes = 0;
     }
 
     diagnostic(message) {
@@ -65,6 +121,9 @@ export class WebAudioDriver {
             bufferCount: this.buffers.size,
             sourceCount: this.sources.size,
             queuedBufferCount,
+            reverbReady: Boolean(this.reverbNode),
+            reverbRoomType: this.roomType,
+            reverbMemoryBytes: this.reverbMemoryBytes,
             ...this.telemetry,
         });
         this.onTelemetry?.(detail);
@@ -119,6 +178,111 @@ export class WebAudioDriver {
         }
     }
 
+    closeReverbNode(node) {
+        if (!node) return;
+        node.port.postMessage({ type: "shutdown" });
+        node.disconnect();
+        node.port.close();
+    }
+
+    ensureReverb() {
+        if (this.reverbReady) return this.reverbReady;
+        const epoch = this.reverbEpoch, context = this.ensureContext();
+        this.reverbReady = (async () => {
+            let node;
+            try {
+                if (!context?.audioWorklet || !globalThis.AudioWorkletNode)
+                    throw new Error("AudioWorklet is unavailable");
+                this.reverbModule ??= context.audioWorklet.addModule(
+                    new URL("./web_reverb_worklet.mjs", import.meta.url));
+                await this.reverbModule;
+                if (epoch !== this.reverbEpoch || context !== this.context) return null;
+                node = new AudioWorkletNode(context, "kisak-reverb", {
+                    numberOfInputs: MAX_SOURCES, numberOfOutputs: 1,
+                    outputChannelCount: [2], channelCountMode: "max",
+                    channelInterpretation: "discrete",
+                    processorOptions: { roomType: this.roomType },
+                    parameterData: { room: this.roomType },
+                });
+                const memoryBytes = await new Promise((resolve, reject) => {
+                    const timer = setTimeout(() => reject(new Error("DSP startup timed out")), 5000);
+                    node.port.onmessage = ({ data }) => {
+                        if (data.type === "ready") { clearTimeout(timer); resolve(data.memoryBytes); }
+                        else if (data.type === "error") { clearTimeout(timer); reject(new Error(data.message)); }
+                    };
+                    node.onprocessorerror = () => {
+                        clearTimeout(timer);
+                        const error = new Error("Reverb processor failed");
+                        if (this.reverbNode === node) {
+                            this.reverbNode = null;
+                            this.reverbMemoryBytes = 0;
+                            this.closeReverbNode(node);
+                            this.diagnostic(error.message);
+                            this.publishTelemetry();
+                        }
+                        reject(error);
+                    };
+                });
+                if (epoch !== this.reverbEpoch || context !== this.context) {
+                    this.closeReverbNode(node);
+                    return null;
+                }
+                this.reverbNode = node;
+                this.reverbMemoryBytes = Number(memoryBytes);
+                node.parameters.get("room").value = this.roomType;
+                node.connect(context.destination);
+                for (const source of this.sources.values()) {
+                    source.reverbProperties = null;
+                    this.applyReverbProperties(source);
+                    for (const pcm of [source.node, ...source.streamNodes])
+                        if (pcm) this.connectReverb(source, pcm);
+                }
+                this.publishTelemetry();
+                return node;
+            } catch (error) {
+                this.closeReverbNode(node);
+                if (epoch === this.reverbEpoch)
+                    this.diagnostic(`Room reverb unavailable: ${error?.message ?? error}`);
+                return null;
+            }
+        })();
+        return this.reverbReady;
+    }
+
+    applyReverbProperties(source) {
+        if (!this.reverbNode) {
+            if (source.wet > 0) void this.ensureReverb();
+            return;
+        }
+        const gain = this.audioUnlocked ? source.gain * source.wet : 0;
+        let { x, y, z } = source;
+        // OpenAL Pairwise stereo's front azimuth expands by 3/2. SND supplies
+        // listener-space coordinates and distance attenuation; this is only
+        // the device's ACN/N3D encoding for the native reverb input.
+        const distance = source.spatialized ? Math.hypot(x, y, z) : 0;
+        if (distance > 1.1920929e-7) {
+            x /= distance; y /= distance; z /= distance;
+            if (z < 0) {
+                const horizontal = Math.hypot(x, z);
+                const angle = Math.max(-Math.PI / 2, Math.min(Math.PI / 2,
+                    1.5 * Math.atan2(x, -z)));
+                x = Math.sin(angle) * horizontal;
+                z = -Math.cos(angle) * horizontal;
+            }
+        } else { x = 0; y = 0; z = -1; }
+        const values = [gain, -Math.sqrt(3) * x * gain,
+            Math.sqrt(3) * y * gain, -Math.sqrt(3) * z * gain];
+        if (source.reverbProperties?.every((value, i) => value === values[i])) return;
+        source.reverbProperties = values;
+        for (let c = 0; c < 4; ++c)
+            this.reverbNode.parameters.get(`s${source.sourceId - 1}_${c}`).value = values[c];
+    }
+
+    connectReverb(source, pcm) {
+        if (this.reverbNode)
+            (source.eqNodes.at(-1) ?? pcm).connect(this.reverbNode, 0, source.sourceId - 1);
+    }
+
     validId(value, maximum) {
         return Number.isInteger(value) && value > 0 && value <= maximum;
     }
@@ -145,11 +309,19 @@ export class WebAudioDriver {
         case "device-reset":
             this.resetResources();
             return true;
+        case "room-type":
+            if (!Number.isInteger(command.id) || command.id < 0 || command.id >= 26) return false;
+            this.roomType = command.id;
+            if (this.reverbNode) this.reverbNode.parameters.get("room").value = command.id;
+            else void this.ensureReverb();
+            return true;
         case "source-property":
         case "source-play":
         case "source-pause":
         case "source-stop":
             return this.sourceCommand(command);
+        case "source-eq":
+            return this.setSourceEq(command);
         case "source-queue":
         case "source-unqueue":
             return this.queueCommand(command);
@@ -168,6 +340,8 @@ export class WebAudioDriver {
                 gainNode: null, panner: null, startedAt: 0, activeBufferId: 0,
                 aliasName: "", sourceId: id, spatialized: false,
                 queue: [], queueProcessed: 0, streamNodes: [], queueEndTime: 0,
+                eqBands: new Array(30).fill(0), eqNodes: [],
+                wet: 0, reverbProperties: null,
             });
         }
         return true;
@@ -188,7 +362,61 @@ export class WebAudioDriver {
         node?.disconnect?.();
         gainNode?.disconnect?.();
         panner?.disconnect?.();
+        for (const filter of source.eqNodes) filter.disconnect();
+        source.eqNodes = [];
         source.queueEndTime = 0;
+    }
+
+    setSourceEq(command) {
+        const source = this.sources.get(command.sourceId);
+        const bands = command.bands;
+        if (!this.validSource(command) || !source ||
+            !Number.isInteger(command.generation) || command.generation < 0 ||
+            !Array.isArray(bands) || bands.length !== 30) return false;
+        if (command.generation < source.generation) return true;
+        for (let i = 0; i < 30; i += 5) {
+            if ((bands[i] !== 0 && bands[i] !== 1) || (bands[i] && (
+                !Number.isInteger(bands[i + 1]) || bands[i + 1] < 0 || bands[i + 1] > 4 ||
+                !Number.isFinite(bands[i + 2]) || !Number.isFinite(bands[i + 3]) ||
+                bands[i + 3] < 0 || bands[i + 3] > 20000 ||
+                !Number.isFinite(bands[i + 4]) || bands[i + 4] <= 0))) return false;
+        }
+        if (bands.every((value, index) => value === source.eqBands[index])) return true;
+        if (!this.replaceEqGraph(source, bands)) return false;
+        source.eqBands = bands.slice();
+        source.generation = command.generation;
+        return true;
+    }
+
+    replaceEqGraph(source, bands = source.eqBands) {
+        // ponytail: changed IIR coefficients reset history; retain DSP history
+        // if authored sweeps reveal audible update transients.
+        const context = this.context;
+        const filters = [];
+        try {
+            for (let i = 0; context && i < 30; i += 5) {
+                if (!bands[i]) continue;
+                const coefficients = eqCoefficients(...bands.slice(i + 1, i + 5), context.sampleRate);
+                const filter = coefficients.level === undefined
+                    ? context.createIIRFilter(coefficients.b, coefficients.d) : context.createGain();
+                if (coefficients.level !== undefined) filter.gain.value = coefficients.level;
+                filters.push(filter);
+            }
+        } catch (error) {
+            for (const filter of filters) filter.disconnect();
+            this.diagnostic(`Rejected Web Audio EQ: ${error?.message ?? error}`);
+            return false;
+        }
+        const output = source.panner ?? source.gainNode ?? context?.destination;
+        for (let i = 0; i < filters.length; ++i) filters[i].connect(filters[i + 1] ?? output);
+        for (const filter of source.eqNodes) filter.disconnect();
+        source.eqNodes = filters;
+        for (const node of [source.node, ...source.streamNodes]) {
+            if (!node) continue;
+            node.disconnect();
+            this.connectToOutput(source, node, context);
+        }
+        return true;
     }
 
     deleteSource(id) {
@@ -275,7 +503,7 @@ export class WebAudioDriver {
                 const output = buffer.getChannelData(channel);
                 for (let frame = 0; frame < frames; ++frame) {
                     const sample = samples[frame * channels + channel];
-                    output[frame] = sample < 0 ? sample / 32768 : sample / 32767;
+                    output[frame] = sample / 32768;
                 }
             }
             const decodedBytes = frames * channels * Float32Array.BYTES_PER_ELEMENT;
@@ -299,6 +527,7 @@ export class WebAudioDriver {
     }
 
     applyProperties(source) {
+        this.applyReverbProperties(source);
         if (source.gainNode)
             source.gainNode.gain.value = this.audioUnlocked ? source.gain : 0;
         if (source.node) source.node.playbackRate.value = source.pitch;
@@ -329,13 +558,16 @@ export class WebAudioDriver {
         if (gainNode) gainNode.connect(context.destination);
         source.gainNode = gainNode;
         source.panner = panner;
+        this.replaceEqGraph(source);
         this.applyProperties(source);
     }
 
     connectToOutput(source, node, context) {
-        if (source.panner) node.connect(source.panner);
+        if (source.eqNodes.length) node.connect(source.eqNodes[0]);
+        else if (source.panner) node.connect(source.panner);
         else if (source.gainNode) node.connect(source.gainNode);
         else node.connect?.(context.destination);
+        this.connectReverb(source, node);
     }
 
     startSource(source, generation) {
@@ -370,6 +602,8 @@ export class WebAudioDriver {
             node.disconnect?.();
             gainNode?.disconnect?.();
             panner?.disconnect?.();
+            for (const filter of source.eqNodes) filter.disconnect();
+            source.eqNodes = [];
             source.state = source.looping ? "playing" : "stopped";
             source.activeBufferId = 0;
             source.node = source.gainNode = source.panner = null;
@@ -550,6 +784,9 @@ export class WebAudioDriver {
             this.diagnostic("Rejected Web Audio source command with an invalid position.");
             return false;
         }
+        if (command.wet !== undefined && (!Number.isFinite(command.wet) ||
+            command.wet < 0 || command.wet > 1)) return false;
+        if (command.wet !== undefined) source.wet = command.wet;
         if (Number.isFinite(command.gain)) source.gain = clamp(command.gain, 0, 16);
         if (Number.isFinite(command.pitch)) source.pitch = clamp(command.pitch, 0.001, 16);
         if (Number.isFinite(command.offset)) source.offset = Math.max(0, command.offset);
@@ -582,6 +819,11 @@ export class WebAudioDriver {
     }
 
     resetResources() {
+        ++this.reverbEpoch;
+        this.closeReverbNode(this.reverbNode);
+        this.reverbNode = this.reverbReady = null;
+        this.reverbMemoryBytes = 0;
+        this.roomType = 0;
         for (const source of this.sources.values()) {
             source.generation++;
             this.cleanup(source);
@@ -602,6 +844,7 @@ export class WebAudioDriver {
         this.gestureTarget = this.gestureHandler = null;
         const context = this.context;
         this.context = null;
+        this.reverbModule = null;
         void context?.close?.();
     }
 }

@@ -1,21 +1,24 @@
 import { expect, test } from "@playwright/test";
-import { mkdir, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
     createInstallDirectory as createM12InstallDirectory,
     createSyntheticFastfileHeader,
+    createSyntheticCinematicHeader,
     createSyntheticWorldInventoryFastfile,
     SYNTHETIC_LOCALIZATION,
 } from "./install_fixture.mjs";
 import { REQUIRED_ASSETS } from "../../web/asset_store.mjs";
+import { getRequiredAssets } from "../../web/asset_profile.mjs";
 import { createSyntheticIwd } from "./synthetic_iwd.mjs";
 
 const SYNTHETIC_MAP_FASTFILE_SIZE = createSyntheticWorldInventoryFastfile().length;
 
-async function createInstallDirectory(testInfo, name, { localization, iwd } = {})
+async function createInstallDirectory(testInfo, name, { localization, iwd, language = "english" } = {})
 {
     return createM12InstallDirectory(testInfo, name, {
-        localization: localization ?? SYNTHETIC_LOCALIZATION,
+        language,
+        localization: localization ?? SYNTHETIC_LOCALIZATION.replace(/^english/, language),
         primaryIwd: iwd ?? createSyntheticIwd(),
     });
 }
@@ -104,7 +107,7 @@ test("imports synthetic files through the portable picker and restores them afte
                 archiveCount: 21,
                 zoneCount: 4,
             },
-            archiveProbe: { entriesDeclared: 21, archivesProbed: 21 },
+            archiveProbe: { entriesDeclared: 22, archivesProbed: 21 },
             zoneProbe: { filesProbed: 4, version: 5, compression: "zlib" },
         },
     });
@@ -170,22 +173,20 @@ test("imports synthetic files through the portable picker and restores them afte
     expect(assetNetworkRequests).toEqual([]);
 });
 
-test("uses the native directory picker boundary and admits only SP zone fastfiles", async ({ page }) => {
-    const iwdBytes = Array.from(createSyntheticIwd());
+test("uses the native directory picker boundary and admits German SP fastfiles and movies", async ({ page }, testInfo) => {
+    const directory = await createInstallDirectory(testInfo, "native-picker-install", { language: "german" });
     const fastfileBytes = Array.from(createSyntheticFastfileHeader());
-    const descriptors = REQUIRED_ASSETS.map((requirement) => ({
+    const descriptors = await Promise.all(getRequiredAssets("german").map(async (requirement) => ({
         path: requirement.path,
         kind: requirement.kind,
-        bytes: requirement.kind === "iwd"
-            ? iwdBytes
-            : requirement.kind === "fastfile"
-                ? fastfileBytes
-            : null,
-    }));
+        bytes: Array.from(await readFile(path.join(directory, requirement.path))),
+    })));
     const additionalDescriptors = [
-        { path: "zone/english/cargoship.ff", kind: "fastfile", bytes: fastfileBytes },
-        { path: "zone/english/mp_test.ff", kind: "fastfile", bytes: fastfileBytes },
-        { path: "zone/english/readme.bin", kind: "other", bytes: [1, 2, 3] },
+        { path: "main/video/intro.bik", kind: "cinematic", bytes: Array.from(createSyntheticCinematicHeader()) },
+        { path: "main/video/binkw32.dll", kind: "other", bytes: [1, 2, 3] },
+        { path: "zone/german/cargoship.ff", kind: "fastfile", bytes: fastfileBytes },
+        { path: "zone/german/mp_test.ff", kind: "fastfile", bytes: fastfileBytes },
+        { path: "zone/german/readme.bin", kind: "other", bytes: [1, 2, 3] },
     ];
     const allDescriptors = [...descriptors, ...additionalDescriptors];
     const expectedAccesses = [];
@@ -202,8 +203,14 @@ test("uses the native directory picker boundary and admits only SP zone fastfile
         }
         expectedAccesses.push(`file:${descriptor.path}`);
     }
-    expectedAccesses.push("entries:zone/english", "file:zone/english/cargoship.ff");
+    expectedAccesses.push("entries:zone/german", "file:zone/german/cargoship.ff");
+    expectedAccesses.push("directory:main/video", "entries:main/video", "file:main/video/intro.bik");
     await page.addInitScript(({ assets, localization }) => {
+        globalThis.__localizedOpenedPaths = [];
+        globalThis.addEventListener("kisakcod:database", ({ detail }) => {
+            if (detail.stage === "FS/platform open success")
+                globalThis.__localizedOpenedPaths.push(detail.logicalPath);
+        });
         const files = new Map(assets.map((asset) => [asset.path, new File(
             [asset.kind === "localization"
                 ? localization
@@ -274,12 +281,15 @@ test("uses the native directory picker boundary and admits only SP zone fastfile
             globalThis.__pickerOptions = options;
             return rootHandle;
         };
-    }, { assets: allDescriptors, localization: SYNTHETIC_LOCALIZATION });
+    }, { assets: allDescriptors, localization: SYNTHETIC_LOCALIZATION.replace(/^english/, "german") });
 
     await page.goto("/");
     await waitForEngine(page);
     await waitForAssets(page, "empty");
     await page.locator("#select-install-button").click();
+    await expect.poll(() => page.evaluate(
+        () => globalThis.__KISAKCOD_WEB__.module.filesystemState,
+    )).toBe("mounted");
     await waitForAssets(page, "ready");
     expect(await page.evaluate(() => ({
         invocations: globalThis.__pickerInvocations,
@@ -293,23 +303,111 @@ test("uses the native directory picker boundary and admits only SP zone fastfile
     expect(await page.evaluate(
         () => globalThis.__KISAKCOD_WEB__.assets.manifest.files
             .map(({ path: assetPath }) => assetPath),
-    )).toContain("zone/english/cargoship.ff");
+    )).toContain("zone/german/cargoship.ff");
+    await expect.poll(() => page.evaluate(() => globalThis.__localizedOpenedPaths))
+        .toContain("zone/german/code_post_gfx.ff");
+    const moviePaths = await page.evaluate(() => globalThis.__KISAKCOD_WEB__.assets.manifest.files
+        .map(({ path }) => path).filter((path) => path.startsWith("main/video/")));
+    expect(moviePaths).toEqual(["main/video/intro.bik"]);
     expect(await page.evaluate(
         () => globalThis.__KISAKCOD_WEB__.assets.manifest.profile.zoneCount,
     )).toBe(5);
     await page.reload();
     await waitForEngine(page);
+    await expect.poll(() => page.evaluate(
+        () => globalThis.__KISAKCOD_WEB__.module.filesystemState,
+    )).toBe("mounted");
     await waitForAssets(page, "ready");
     expect(await page.evaluate(async () => {
         const store = globalThis.__KISAKCOD_WEB__.assetStore;
         return {
             state: globalThis.__KISAKCOD_WEB__.assets.state,
-            cargo: await store.stat("zone/english/cargoship.ff"),
+            cargo: await store.stat("zone/german/cargoship.ff"),
         };
     })).toMatchObject({
         state: "ready",
-        cargo: { path: "zone/english/cargoship.ff" },
+        cargo: { path: "zone/german/cargoship.ff" },
     });
+    await expect.poll(() => page.evaluate(() => globalThis.__localizedOpenedPaths))
+        .toContain("zone/german/code_post_gfx.ff");
+});
+
+test("portable French import reaches canonical DB paths, restores, and rejects a changed language marker", async ({ page }, testInfo) => {
+    await usePortableFolderPicker(page);
+    const directory = await createM12InstallDirectory(testInfo, "french-install", {
+        language: "french",
+        extraFiles: new Map([["zone/english/foreign.ff", createSyntheticFastfileHeader()]]),
+    });
+    await page.addInitScript(() => {
+        globalThis.__localizedOpenedPaths = [];
+        globalThis.addEventListener("kisakcod:database", ({ detail }) => {
+            if (detail.stage === "FS/platform open success")
+                globalThis.__localizedOpenedPaths.push(detail.logicalPath);
+        });
+    });
+    await page.goto("/");
+    await waitForEngine(page);
+    const chooser = page.waitForEvent("filechooser");
+    await page.locator("#select-install-button").click();
+    await (await chooser).setFiles(directory);
+    for (let pass = 0; pass < 2; ++pass) {
+        await waitForAssets(page, "ready");
+        await expect.poll(() => page.evaluate(() => globalThis.__localizedOpenedPaths))
+            .toContain("zone/french/code_post_gfx.ff");
+        const manifest = await page.evaluate(() => globalThis.__KISAKCOD_WEB__.assets.manifest);
+        expect(manifest).toMatchObject({ language: "french", profile: { id: "sp-killhouse-french-v1" } });
+        expect(manifest.files.map(({ path }) => path)).toEqual(
+            expect.arrayContaining(getRequiredAssets("french").map(({ path }) => path)));
+        expect(manifest.files.some(({ path }) => path.includes("english"))).toBe(false);
+        if (pass === 0) await page.reload();
+    }
+    await page.evaluate(async () => {
+        const runtime = globalThis.__KISAKCOD_WEB__;
+        const importId = runtime.assetStore.manifest.importId;
+        await runtime.module.flushAndUnmount();
+        const root = await navigator.storage.getDirectory();
+        const app = await root.getDirectoryHandle("kisakcod-web");
+        const imports = await app.getDirectoryHandle("imports");
+        const directory = await imports.getDirectoryHandle(importId);
+        const handle = await directory.getFileHandle("localization.txt");
+        const text = await (await handle.getFile()).text();
+        const writable = await handle.createWritable();
+        await writable.write(text.replace(/^french/, "german")); // Same byte count.
+        await writable.close();
+    });
+    await page.reload();
+    await waitForAssets(page, "invalid");
+    await expect(page.locator("#asset-message")).toContainText("Stored language does not match localization.txt");
+});
+
+test("rejects an invalid movie header before mounting the installation", async ({ page }, testInfo) => {
+    await usePortableFolderPicker(page);
+    const directory = await createInstallDirectory(testInfo, "bad-movie-install");
+    await mkdir(path.join(directory, "main/video"), { recursive: true });
+    const movie = createSyntheticCinematicHeader();
+    movie.writeUInt32LE(20000, 20);
+    await writeFile(path.join(directory, "main/video/intro.bik"), movie);
+    await page.goto("/");
+    await waitForEngine(page);
+    await chooseDirectory(page, directory);
+    await waitForAssets(page, "failed");
+    await expect(page.locator("#asset-message")).toContainText("main/video/intro.bik");
+    await expect(page.locator("#asset-message")).toContainText("invalid or unsupported Bink 1 header");
+    expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.filesystemState))
+        .not.toBe("mounted");
+});
+
+test("reports the canonical filesystem error when an imported archive lacks the base-path check", async ({ page }, testInfo) => {
+    await usePortableFolderPicker(page);
+    const directory = await createM12InstallDirectory(testInfo, "missing-filesystem-check", {
+        overrides: new Map([["main/iw_13.iwd", createSyntheticIwd()]]),
+    });
+    await page.goto("/");
+    await waitForEngine(page);
+    await chooseDirectory(page, directory);
+    await waitForAssets(page, "failed");
+    await expect(page.locator("#asset-message")).toContainText("fileSysCheck.cfg");
+    await expect(page.locator("#asset-message")).not.toContainText("[object Object]");
 });
 
 test("offers the explicit portable picker while retaining native picker priority", async ({ page }, testInfo) => {

@@ -38,7 +38,6 @@ WebRendererSceneViewDesc MakeView()
     view.viewAxis[1][1] = 1.0f;
     view.viewAxis[2][2] = 1.0f;
     view.zNear = 1.0f;
-    view.displayGammaExponent = 1.0f;
     view.localClientNum = 0;
     view.worldName = "maps/test.d3dbsp";
     return view;
