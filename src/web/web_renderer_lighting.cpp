@@ -3,6 +3,7 @@
 #include <gfx_d3d/gfx_world_types.h>
 
 #include <algorithm>
+#include <bit>
 #include <array>
 #include <cmath>
 #include <cstring>
@@ -434,12 +435,6 @@ constexpr std::array<std::uint8_t, 64> MODEL_LIGHTING_SAMPLE_MAP{{
     48, 49, 50, 51, 52, 53, 54, 55,
 }};
 
-std::uint32_t NextPowerOfTwo(std::uint32_t value) noexcept
-{
-    std::uint32_t result = 1u;
-    while (result < value && result <= (1u << 30u)) result <<= 1u;
-    return result;
-}
 } // namespace
 
 bool WebRenderer_UpdateFrameFog(
@@ -853,7 +848,7 @@ bool WebRenderer_InitializeModelLightingAtlas(
     if (entryCount == 0u || entryCount > 65536u) return false;
     const std::uint32_t usedRows =
         (entryCount + ENTRIES_PER_ROW - 1u) / ENTRIES_PER_ROW;
-    const std::uint32_t height = NextPowerOfTwo(usedRows * 4u);
+    const std::uint32_t height = std::bit_ceil(usedRows * 4u);
     if (height < 4u || height > 4096u) return false;
     const std::uint64_t byteCount =
         static_cast<std::uint64_t>(MODEL_LIGHTING_WIDTH) * height *

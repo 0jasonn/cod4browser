@@ -2,8 +2,8 @@
 
 Updated 2026-09-03. This page owns system classification; see
 [current status](web-status.md) and [the active roadmap](web-roadmap.md) for
-evidence and priorities. Earlier chronology is retained in
-[the historical inventory](history/web-convergence-through-2026-08-28.md).
+evidence and priorities. Earlier chronology is available in
+[Git history](history/README.md).
 
 ## Current verification boundary
 
@@ -150,10 +150,22 @@ platform makes that behavior impossible.
 
 `web_renderer_material_lookup.h` shares identical image/constant table searches
 across world, static-model, and DObj rendering. Technique selection and water
-handling remain local. `worker_transport.mjs` shares only request bookkeeping;
-production and diagnostic protocols, timeout/recovery policy, and filesystem
-ownership remain separate. These are platform boundary utilities, not new
-material or engine object models.
+handling remain local. `worker_transport.mjs` shares request bookkeeping and
+filesystem lease acquisition/release. Production and diagnostic protocols,
+timeouts and recovery policy remain host-owned. Both hosts enforce the same
+shared import lease and exclusive writable-profile lease.
+
+The native `UnitQuatToAxis` wrapper, FX models and particle clouds now use the
+same arithmetic in `qcommon_math.h`; each caller retains its existing input
+validation. Lighting-atlas sizing uses bounded C++20 `std::bit_ceil`.
+
+The unused asynchronous filesystem adapters and completion exports are retired;
+canonical filesystem calls use `web_worker_filesystem` and synchronous Worker
+primitives. The unused bootstrap texture/substitution APIs and shader decoder
+are also retired. Canonical material rendering, fallback resources and context
+recovery remain platform-owned. The uncompiled `dvar_core.cpp` copy is removed;
+`dvar.cpp` remains the dvar implementation. These removals add no replacement
+engine model. See [test inventory](web-test-inventory.md) for retained coverage.
 
 The single-surface proof is retired. Its relevant finite lightmap-coordinate
 check lives in `WebRenderer_BuildWorldSceneCommand`; canonical vertex layout

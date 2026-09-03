@@ -3,8 +3,8 @@
 This is the concise operational guide for the current `web-port` branch. The
 authoritative architecture and debt classification is
 [`web-port-convergence.md`](web-port-convergence.md). The former chronological
-milestone log is preserved in
-[`history/web-port-milestones.md`](history/web-port-milestones.md).
+milestone log is available through
+[Git history](history/README.md).
 
 ## Current runtime modes
 

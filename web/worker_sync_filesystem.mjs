@@ -1,24 +1,9 @@
 const APP_DIRECTORY = "kisakcod-web";
 const IMPORTS_DIRECTORY = "imports";
 const HOME_DIRECTORY = "home";
-const BRIDGE_GLOBAL = "__KISAKCOD_WEB_FS_BRIDGE__";
 const SYNC_GLOBAL = "__KISAKCOD_SYNC_FS__";
 const MAX_HOME_FILE_BYTES = 64 * 1024 * 1024;
 const MAX_HOME_TOTAL_BYTES = 128 * 1024 * 1024;
-
-const STATUS = Object.freeze({
-    SUCCESS: 0,
-    PENDING: 1,
-    NOT_READY: 2,
-    INVALID_ARGUMENT: 3,
-    NO_REQUEST_SLOTS: 4,
-    INVALID_RANGE: 5,
-    NOT_FOUND: 6,
-    STALE_SOURCE: 7,
-    IO_ERROR: 8,
-    PROTOCOL_ERROR: 9,
-    CANCELLED: 10,
-});
 
 function normalizeLogicalPath(path)
 {
@@ -92,7 +77,6 @@ export function createWorkerSyncFilesystem(faults = null)
     const homeDirectoryEntries = new Map([["", new Map()]]);
     const descriptors = new Map();
     let nextDescriptor = 1;
-    let mountedImport = null;
     let homeDirectory = null;
     let homeLoaded = false;
     let persistChain = Promise.resolve();
@@ -119,7 +103,6 @@ export function createWorkerSyncFilesystem(faults = null)
         directories.add("");
         directoryEntries.clear();
         directoryEntries.set("", new Map());
-        mountedImport = null;
     }
 
     function resetHomeCache()
@@ -418,7 +401,6 @@ export function createWorkerSyncFilesystem(faults = null)
                     totalBytes,
                 });
             }
-            mountedImport = manifest.importId;
             report?.({
                 phase: "complete",
                 filesProcessed,
@@ -694,51 +676,6 @@ export function createWorkerSyncFilesystem(faults = null)
     function installForModule(wasmModule)
     {
         module = wasmModule;
-        globalThis[BRIDGE_GLOBAL] = Object.freeze({
-            stat(requestId, path) {
-                const file = lookup(path);
-                module._KisakWeb_CompleteFsStat(
-                    requestId >>> 0,
-                    file ? STATUS.SUCCESS : mountedImport ? STATUS.NOT_FOUND : STATUS.NOT_READY,
-                    file?.size ?? 0,
-                );
-                return true;
-            },
-            read(requestId, path, offset, length, destination, capacity) {
-                const file = lookup(path);
-                if (!file) {
-                    module._KisakWeb_CompleteFsRead(
-                        requestId >>> 0,
-                        mountedImport ? STATUS.NOT_FOUND : STATUS.NOT_READY,
-                        0,
-                    );
-                    return true;
-                }
-                if (faults?.reject?.("read", normalizeLogicalPath(path))) {
-                    module._KisakWeb_CompleteFsRead(requestId >>> 0, STATUS.IO_ERROR, 0);
-                    return true;
-                }
-                if (!Number.isInteger(length) || length <= 0 || length > capacity ||
-                    destination <= 0 || destination > module.HEAPU8.byteLength ||
-                    length > module.HEAPU8.byteLength - destination) {
-                    module._KisakWeb_CompleteFsRead(requestId >>> 0, STATUS.INVALID_ARGUMENT, 0);
-                    return true;
-                }
-                const view = module.HEAPU8.subarray(destination, destination + length);
-                const bytesRead = readMounted(file, offset >>> 0, view);
-                module._KisakWeb_CompleteFsRead(
-                    requestId >>> 0,
-                    bytesRead === length ? STATUS.SUCCESS :
-                        bytesRead < 0 ? STATUS.INVALID_RANGE : STATUS.IO_ERROR,
-                    Math.max(0, bytesRead),
-                );
-                return true;
-            },
-            cancel() { return true; },
-            invalidate: closeMountedFilesystem,
-            dispose: closeMountedFilesystem,
-        });
-
         globalThis[SYNC_GLOBAL] = Object.freeze({
             stat(path) {
                 const logicalPath = normalizeDirectoryPath(path);

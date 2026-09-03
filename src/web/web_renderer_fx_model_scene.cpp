@@ -4,6 +4,8 @@
 #include <xanim/xmodel_types.h>
 #include <xanim/xsurface_types.h>
 
+#include <qcommon/qcommon_math.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -45,35 +47,6 @@ bool PlacementIsValid(const GfxScaledPlacement &placement) noexcept
     }
     return std::isfinite(lengthSquared) &&
         std::fabs(lengthSquared - 1.0f) <= 0.002f;
-}
-
-void UnitQuatToAxisExact(const float quat[4], float axis[3][3]) noexcept
-{
-    // This is the same row-major formula as Kisak's UnitQuatToAxis. The
-    // validity check above makes the canonical unit-quaternion precondition
-    // explicit without invoking the assert-heavy common helper in tests.
-    const float scaledX = quat[0] + quat[0];
-    const float xx = scaledX * quat[0];
-    const float xy = scaledX * quat[1];
-    const float xz = scaledX * quat[2];
-    const float xw = scaledX * quat[3];
-    const float scaledY = quat[1] + quat[1];
-    const float yy = scaledY * quat[1];
-    const float yz = scaledY * quat[2];
-    const float yw = scaledY * quat[3];
-    const float scaledZ = quat[2] + quat[2];
-    const float zz = scaledZ * quat[2];
-    const float zw = scaledZ * quat[3];
-
-    axis[0][0] = 1.0f - (yy + zz);
-    axis[0][1] = xy + zw;
-    axis[0][2] = xz - yw;
-    axis[1][0] = xy - zw;
-    axis[1][1] = 1.0f - (xx + zz);
-    axis[1][2] = yz + xw;
-    axis[2][0] = xz + yw;
-    axis[2][1] = yz - xw;
-    axis[2][2] = 1.0f - (xx + yy);
 }
 
 const GfxImage *FindBaseImage(
@@ -331,7 +304,7 @@ WebRendererFxModelSceneResult WebRenderer_BuildFxModelSceneCommand(
                 dropSubmission();
             };
             float axis[3][3]{};
-            UnitQuatToAxisExact(submission.placement.base.quat, axis);
+            Q_UnitQuatToAxis(submission.placement.base.quat, axis);
             bool modelSubmitted = false;
             for (std::uint32_t localSurface = 0u;
                  localSurface < lod.numsurfs; ++localSurface)

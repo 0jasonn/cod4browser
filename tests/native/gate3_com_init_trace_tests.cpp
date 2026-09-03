@@ -56,6 +56,8 @@ void __cdecl TryExecuteCommand()
 
 void DB_InitThread() { ++g_databaseThreadInitCount; }
 int com_inServerFrame = 0;
+float com_timescaleValue = 1.0f;
+float com_codeTimeScale = 1.0f;
 void __cdecl SV_WaitServer() { assert(!com_inServerFrame); }
 void __cdecl G_AddCommandNotify(volatile std::uint16_t) {}
 void Scr_Error(const char *) { std::abort(); }

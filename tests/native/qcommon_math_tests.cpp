@@ -5,10 +5,19 @@
 
 #include <array>
 #include <cassert>
+#include <cmath>
 #include <utility>
 
 int main()
 {
+    const float quarterTurn[4]{0.0f, 0.0f, std::sqrt(0.5f), std::sqrt(0.5f)};
+    float axis[3][3]{};
+    Q_UnitQuatToAxis(quarterTurn, axis);
+    const float expected[3][3]{{0.0f, 1.0f, 0.0f}, {-1.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f}};
+    for (int row = 0; row < 3; ++row)
+        for (int column = 0; column < 3; ++column)
+            assert(std::fabs(axis[row][column] - expected[row][column]) < 0.000001f);
+
 #if defined(__EMSCRIPTEN__)
     static_assert(sizeof(long double) == 16);
 #elif defined(_WIN32)

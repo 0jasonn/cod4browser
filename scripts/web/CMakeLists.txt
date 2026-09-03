@@ -173,7 +173,6 @@ set(KISAK_WEB_CANONICAL_RUNTIME_SOURCES
 set(KISAK_WEB_CANONICAL_ADAPTER_SOURCES
     "${SRC_DIR}/web/web_client_server_lifecycle.cpp"
     "${SRC_DIR}/web/web_canonical_gfxworld.cpp"
-    "${SRC_DIR}/web/web_engine_filesystem.cpp"
     "${SRC_DIR}/web/web_renderer_frontend.cpp"
     "${SRC_DIR}/web/web_system_files.cpp"
 )
@@ -184,8 +183,6 @@ set(KISAK_WEB_PLATFORM_SOURCES
     "${SRC_DIR}/web/web_cinematic.cpp"
     "${SRC_DIR}/web/web_cinematic_decoder.cpp"
     "${SRC_DIR}/web/web_asset_probe.cpp"
-    "${SRC_DIR}/web/web_filesystem.cpp"
-    "${SRC_DIR}/web/web_shader_compatibility.cpp"
     "${SRC_DIR}/web/web_system.cpp"
     "${SRC_DIR}/web/web_thread_context.cpp"
     "${SRC_DIR}/web/web_worker_filesystem.cpp"
@@ -501,8 +498,5 @@ if (KISAK_WEB_DIAGNOSTICS)
             "${KISAK_WEB_DIAGNOSTIC_SITE_DIR}/${WEB_FILE}"
             COPYONLY)
     endforeach()
-    configure_file(
-        "${CMAKE_SOURCE_DIR}/tests/browser/support/filesystem_bridge.mjs"
-        "${KISAK_WEB_DIAGNOSTIC_SITE_DIR}/filesystem_bridge.mjs"
-        COPYONLY)
+    file(REMOVE "${KISAK_WEB_DIAGNOSTIC_SITE_DIR}/filesystem_bridge.mjs")
 endif()

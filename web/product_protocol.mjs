@@ -43,8 +43,6 @@ export const PRODUCT_HOST_EVENTS = new Set([
     "kisakcod:canonical-filesystem",
     "kisakcod:cinematic",
     "kisakcod:renderer-memory",
-    "kisakcod:renderer-shader",
-    "kisakcod:renderer-texture",
     "kisakcod:renderer-aa",
     "kisakcod:renderer-surface",
     "kisakcod:renderer-surface-draw",

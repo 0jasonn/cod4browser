@@ -7,7 +7,6 @@ export {
 
 export const HOST_EVENTS = new Set([
     "kisakcod:display",
-    "kisakcod:renderer-shader", "kisakcod:renderer-texture",
     "kisakcod:renderer-aa",
     "kisakcod:test-webgl-aa", "kisakcod:renderer-surface",
     "kisakcod:renderer-surface-draw", "kisakcod:renderer-scene-view",

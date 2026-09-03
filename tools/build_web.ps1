@@ -93,9 +93,6 @@ $requiredOutputs = @(
     'kisakcod.mjs',
     'kisakcod.wasm'
 )
-if ($Diagnostics) {
-    $requiredOutputs += 'filesystem_bridge.mjs'
-}
 foreach ($requiredOutput in $requiredOutputs) {
     $outputPath = Join-Path $siteDirectory $requiredOutput
     if (-not (Test-Path -LiteralPath $outputPath -PathType Leaf)) {

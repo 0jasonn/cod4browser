@@ -23,8 +23,6 @@
   },
   "rawWasmExportCap": 24,
   "applicationExportAllowlist": [
-    "_KisakWeb_CompleteFsRead",
-    "_KisakWeb_CompleteFsStat",
     "_KisakWeb_MountCanonicalRuntime",
     "_KisakWeb_ProbeFastfileHeader",
     "_KisakWeb_ProbeIwd",

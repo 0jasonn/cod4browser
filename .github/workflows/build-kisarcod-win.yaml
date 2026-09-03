@@ -15,43 +15,23 @@ jobs:
       matrix:
         config: [Debug, Release]
 
-    env:
-      NUGET_PACKAGES: ${{ github.workspace }}\.nuget\packages
-      DXSDK_PKG: Microsoft.DXSDK.D3DX
-      DXSDK_VER: 9.29.952.8
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install .NET SDK (for nuget usage)
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.x'
-
-      - name: Restore DXSDK NuGet package
-        run: |
-          dotnet new classlib -o dxsdk-temp
-          cd dxsdk-temp
-          dotnet add package $env:DXSDK_PKG --version $env:DXSDK_VER
-          cd ..
-      
-      - name: Extract DXSDK paths from NuGet
-        id: dxsdk
+      - name: Download pinned DirectX SDK package
         shell: powershell
         run: |
-          $pkgPath = Join-Path "${env:NUGET_PACKAGES}" "$env:DXSDK_PKG\$env:DXSDK_VER"
-          $libDir = Join-Path $pkgPath "build\native\release\lib\x86"
-          $incDir = Join-Path $pkgPath "build\native\include"
-          $sdkDir = Join-Path $pkgPath "build\native"
-          echo "libDir=$libDir" >> $env:GITHUB_ENV
-          echo "incDir=$incDir" >> $env:GITHUB_ENV
-          echo "DXSDK_DIR_NUGET=$pkgPath" >> $env:GITHUB_ENV
-          echo "DXSDK_DIR=$sdkDir" >> $env:GITHUB_ENV
-          Write-Host $pkgPath
-          Write-Host $libDir
-          Write-Host $incDir
-          Write-Host $sdkDir
+          $pin = Get-Content -Raw tools/native_toolchain.json | ConvertFrom-Json
+          $archive = Join-Path $env:RUNNER_TEMP 'dxsdk.nupkg'
+          $sdk = Join-Path $env:RUNNER_TEMP 'dxsdk'
+          Invoke-WebRequest -UseBasicParsing -Uri "https://www.nuget.org/api/v2/package/$($pin.d3dxPackage)/$($pin.d3dxVersion)" -OutFile $archive
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $pin.d3dxSha256) {
+              throw 'D3DX package hash mismatch.'
+          }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [System.IO.Compression.ZipFile]::ExtractToDirectory($archive, $sdk)
+          "DXSDK_DIR=$sdk/build/native" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Install latest CMake
         uses: lukka/get-cmake@latest

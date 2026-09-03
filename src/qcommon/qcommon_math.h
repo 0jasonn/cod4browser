@@ -40,3 +40,30 @@ inline float SnapFloat(float value)
 {
     return static_cast<float>(SnapFloatToInt(value));
 }
+
+// Canonical row-major quaternion expansion. Callers validate unit length.
+inline void Q_UnitQuatToAxis(const float *quat, float axis[3][3]) noexcept
+{
+    const float scaledX = *quat + *quat;
+    const float xx = scaledX * *quat;
+    const float xy = scaledX * quat[1];
+    const float xz = scaledX * quat[2];
+    const float xw = scaledX * quat[3];
+    const float scaledY = quat[1] + quat[1];
+    const float yy = scaledY * quat[1];
+    const float yz = scaledY * quat[2];
+    const float yw = scaledY * quat[3];
+    const float scaledZ = quat[2] + quat[2];
+    const float zw = scaledZ * quat[3];
+    const float zz = scaledZ * quat[2];
+
+    (axis)[0][0] = 1.0 - (yy + zz);
+    (axis)[0][1] = xy + zw;
+    (axis)[0][2] = xz - yw;
+    (axis)[1][0] = xy - zw;
+    (axis)[1][1] = 1.0 - (xx + zz);
+    (axis)[1][2] = yz + xw;
+    (axis)[2][0] = xz + yw;
+    (axis)[2][1] = yz - xw;
+    (axis)[2][2] = 1.0 - (xx + yy);
+}

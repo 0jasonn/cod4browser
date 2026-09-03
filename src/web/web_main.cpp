@@ -20,7 +20,6 @@
 #include <universal/com_memory.h>
 #include <ui/ui.h>
 #include <web/web_client_server_lifecycle.h>
-#include <web/web_filesystem.h>
 #include <web/web_frame_profile.h>
 #include <web/web_renderer.h>
 #include <web/web_display.h>
@@ -597,7 +596,6 @@ void RecoverFrameDisconnect()
     const double totalStarted = profiling ? WebFrameProfile_Now() : 0.0;
     double stageStarted = totalStarted;
     #endif
-    WebFs_PumpCompletions();
     #if KISAK_WEB_DIAGNOSTICS
     if (profiling)
     {
@@ -944,7 +942,6 @@ int main()
         "Canonical runtime and browser platform boundaries are initialized");
     if (!Web_StartFramePump(RenderFrame, nullptr))
     {
-        WebFs_CancelAll();
         Web_EmitRuntimeState("failed", "The browser frame pump could not start");
         return 1;
     }

@@ -1,24 +1,18 @@
-# Historical web-port notes
+# Historical web-port records
 
-These documents preserve chronological milestone rationale. They are not the
-current source of truth and may contain names or boundaries that were accurate
-only at the recorded checkpoint.
+Superseded milestone snapshots and root completion reports live in Git.
+The last revision containing the complete set is
+`49d6168cab15181f03744cf07f10b288b673bc0c`.
 
-- [`web-port-milestones.md`](web-port-milestones.md) — original long-form
-  milestone and validation log.
-- [`gate-3-com-init-inventory.md`](gate-3-com-init-inventory.md) — historical
-  first/second Gate 3 integration inventory.
-- [`gate-3-worker-database-inventory.md`](gate-3-worker-database-inventory.md),
-  [`gate-3-xfile-streaming-inventory.md`](gate-3-xfile-streaming-inventory.md),
-  and [`gate-3-generated-loader-inventory.md`](gate-3-generated-loader-inventory.md)
-  — later Worker, XFile, and generated-loader checkpoint inventories.
+List or read an archived document without changing the working tree:
 
-Use [`../web-port-convergence.md`](../web-port-convergence.md) for current
-architecture. The other files in this directory are retained only as historical
-checkpoint inventories.
+```powershell
+git ls-tree -r --name-only 49d6168c docs/history
+git show 49d6168c:docs/history/web-port-milestones.md
+git show 49d6168c:WEB_ROADMAP_EXECUTION_REPORT.md
+git log --all -- docs/history
+```
 
-The status, roadmap, and convergence records through 2026-08-28 are archived as
-`web-status-through-2026-08-28.md`, `web-roadmap-through-2026-08-28.md`,
-`web-convergence-through-2026-08-28.md`, and
-`engineering-roadmap-through-2026-08-25.md`. Their former gates and blockers are
-superseded by the active status and roadmap, including all mission prerequisites.
+Use [current status](../web-status.md), [the roadmap](../web-roadmap.md),
+[system ownership](../web-port-convergence.md), and the retained
+[evidence records](../evidence/) for ongoing work.

@@ -287,7 +287,6 @@ struct WebRendererState
     GLuint postProcessProgram = 0;
     GLuint glowProgram = 0;
     GLuint shadowProgram = 0;
-    GLuint compatibilityProgram = 0;
     GLuint sceneFramebuffer = 0;
     GLuint sceneColorTexture = 0;
     GLuint sceneDepthTexture = 0;
@@ -419,9 +418,6 @@ struct WebRendererState
     GLint glowTexelDeltaUniform = -1;
     GLint glowWeightsUniform = -1;
     GLint glowSetupUniform = -1;
-    GLint compatibilityViewProjectionUniform = -1;
-    GLint compatibilityWorldUniform = -1;
-    GLint compatibilityTextureUniform = -1;
     int frameNumber = 0;
     int canvasWidth = 0;
     int canvasHeight = 0;
@@ -515,26 +511,7 @@ struct WebRendererState
     std::uint32_t surfaceRecoveryCount = 0;
     bool surfaceActive = false;
     bool worldSurfaceActive = false;
-    std::vector<std::uint8_t> retainedPixels;
-    std::uint32_t textureWidth = 0;
-    std::uint32_t textureHeight = 0;
-    std::uint8_t textureSamplerState = 0u;
-    std::uint32_t uploadGeneration = 0;
-    std::uint32_t rebuildGeneration = 0;
-    std::uint32_t recoveryCount = 0;
     WebRendererImageDecodeStats imageDecodeStats;
-    bool sourceTextureActive = false;
-    std::string compatibilityId;
-    std::string compatibilityVertexSource;
-    std::string compatibilityFragmentSource;
-    std::uint32_t compatibilityVertexSourceHash = 0u;
-    std::uint32_t compatibilityFragmentSourceHash = 0u;
-    std::uint32_t compatibilitySubmissionGeneration = 0u;
-    std::uint32_t compatibilityResourceGeneration = 0u;
-    std::uint32_t compatibilityRecoveryCount = 0u;
-    std::uint32_t compatibilityDrawCount = 0u;
-    bool compatibilityActive = false;
-    bool compatibilityFirstDrawCompleted = false;
     std::uint32_t sceneViewSubmissionGeneration = 0u;
     std::uint32_t sceneViewSurfaceSubmissionGeneration = 0u;
     std::uint32_t sceneViewDrawnSubmissionGeneration = 0u;
@@ -1289,36 +1266,6 @@ void ReportRetainedDynamicFx()
 
 EM_JS(
     void,
-    DispatchRendererTextureLifecycle,
-    (const char *state,
-     const char *message,
-     std::uint32_t width,
-     std::uint32_t height,
-     std::uint32_t recoveryBytes,
-     std::uint32_t uploadGeneration,
-     std::uint32_t resourceGeneration,
-     std::uint32_t recoveryCount,
-     bool resident),
-    {
-        globalThis.dispatchEvent(new CustomEvent("kisakcod:renderer-texture", {
-            detail: {
-                state: UTF8ToString(state),
-                message: UTF8ToString(message),
-                width,
-                height,
-                payloadBytes: recoveryBytes >>> 0,
-                gpuFormat: "rgba8",
-                recoveryBytes: recoveryBytes >>> 0,
-                uploadGeneration: uploadGeneration >>> 0,
-                resourceGeneration: resourceGeneration >>> 0,
-                recoveryCount: recoveryCount >>> 0,
-                resident: Boolean(resident)
-            }
-        }));
-    });
-
-EM_JS(
-    void,
     DispatchRendererAaLifecycle,
     (const char *state,
      const char *message,
@@ -1345,47 +1292,6 @@ EM_JS(
                 resident: Boolean(resident),
                 backend: "webgl2-multisample-renderbuffer",
                 resolveBoundary: "scene-before-postfx-and-ui"
-            }
-        }));
-    });
-
-EM_JS(
-    void,
-    DispatchRendererShaderLifecycle,
-    (const char *state,
-     const char *message,
-     const char *substitutionId,
-     std::uint32_t vertexSourceHash,
-     std::uint32_t fragmentSourceHash,
-     std::uint32_t submissionGeneration,
-     std::uint32_t resourceGeneration,
-     std::uint32_t recoveryCount,
-     std::uint32_t drawCount,
-     bool retained,
-     bool resident,
-     bool firstDrawCompleted),
-    {
-        globalThis.dispatchEvent(new CustomEvent("kisakcod:renderer-shader", {
-            detail: {
-                state: UTF8ToString(state),
-                message: UTF8ToString(message),
-                substitutionId: UTF8ToString(substitutionId),
-                vertexSourceHash: vertexSourceHash >>> 0,
-                fragmentSourceHash: fragmentSourceHash >>> 0,
-                submissionGeneration: submissionGeneration >>> 0,
-                resourceGeneration: resourceGeneration >>> 0,
-                recoveryCount: recoveryCount >>> 0,
-                drawCount: drawCount >>> 0,
-                retained: Boolean(retained),
-                resident: Boolean(resident),
-                firstDrawCompleted: Boolean(firstDrawCompleted),
-                vertexAttributes: ["a_position", "a_color", "a_texcoord0"],
-                uniforms: [
-                    "u_viewProjectionMatrix",
-                    "u_worldMatrix",
-                    "u_colorMapSampler"
-                ],
-                textureUnit: 0
             }
         }));
     });
@@ -1657,43 +1563,6 @@ void EmitSurfaceDraw()
         g_renderer.initialized && !g_renderer.contextLost &&
             g_renderer.vertexArray != 0 && g_renderer.vertexBuffer != 0 &&
             g_renderer.indexBuffer != 0);
-}
-
-void EmitTextureLifecycle(const char *state, const char *message)
-{
-    if (!g_renderer.sourceTextureActive ||
-        g_renderer.retainedPixels.size() > UINT32_MAX)
-    {
-        return;
-    }
-    DispatchRendererTextureLifecycle(
-        state,
-        message,
-        g_renderer.textureWidth,
-        g_renderer.textureHeight,
-        static_cast<std::uint32_t>(g_renderer.retainedPixels.size()),
-        g_renderer.uploadGeneration,
-        g_renderer.rebuildGeneration,
-        g_renderer.recoveryCount,
-        g_renderer.initialized && !g_renderer.contextLost && g_renderer.texture != 0);
-}
-
-void EmitShaderLifecycle(const char *state, const char *message)
-{
-    DispatchRendererShaderLifecycle(
-        state,
-        message,
-        g_renderer.compatibilityId.c_str(),
-        g_renderer.compatibilityVertexSourceHash,
-        g_renderer.compatibilityFragmentSourceHash,
-        g_renderer.compatibilitySubmissionGeneration,
-        g_renderer.compatibilityResourceGeneration,
-        g_renderer.compatibilityRecoveryCount,
-        g_renderer.compatibilityDrawCount,
-        g_renderer.compatibilityActive,
-        g_renderer.initialized && !g_renderer.contextLost &&
-            g_renderer.compatibilityProgram != 0,
-        g_renderer.compatibilityFirstDrawCompleted);
 }
 
 #if KISAK_WEB_DIAGNOSTICS
@@ -2028,8 +1897,7 @@ std::size_t EmitRendererMemory(const char *state, bool sampleAllocator = true)
     std::size_t supplementalTextureRecoveryBytes =
         RetainedCubeBytes(g_renderer.retainedSky.cube) +
         g_renderer.retainedStaticModelLighting.pixels.size() +
-        g_renderer.retainedDynamicModelLighting.pixels.size() +
-        g_renderer.retainedPixels.size();
+        g_renderer.retainedDynamicModelLighting.pixels.size();
     for (const WebRendererRetainedWorldBatch &batch : g_renderer.retainedWorldBatches)
     {
         supplementalTextureRecoveryBytes += batch.waterPixels.size();
@@ -2080,10 +1948,8 @@ std::size_t EmitRendererMemory(const char *state, bool sampleAllocator = true)
     const std::size_t rawDecodedBytes = worldImages.rawDecodedBytes +
         staticModelImages.rawDecodedBytes + dynamicModelImages.rawDecodedBytes +
         uiImages.rawDecodedBytes;
-    const std::size_t shaderProgramCacheEstimateBytes =
-        g_renderer.compatibilityId.size() +
-        g_renderer.compatibilityVertexSource.size() +
-        g_renderer.compatibilityFragmentSource.size();
+    // Preserve the memory telemetry schema; the retired substitution cache is empty.
+    constexpr std::size_t shaderProgramCacheEstimateBytes = 0u;
     std::size_t renderTargetEstimateBytes = 0u;
     if (g_renderer.initialized && !g_renderer.contextLost)
     {
@@ -2231,7 +2097,6 @@ void ResetGpuHandles()
     g_renderer.postProcessProgram = 0;
     g_renderer.glowProgram = 0;
     g_renderer.shadowProgram = 0;
-    g_renderer.compatibilityProgram = 0;
     g_renderer.sceneFramebuffer = 0;
     g_renderer.sceneColorTexture = 0;
     g_renderer.sceneDepthTexture = 0;
@@ -2373,9 +2238,6 @@ void ResetGpuHandles()
     g_renderer.glowTexelDeltaUniform = -1;
     g_renderer.glowWeightsUniform = -1;
     g_renderer.glowSetupUniform = -1;
-    g_renderer.compatibilityViewProjectionUniform = -1;
-    g_renderer.compatibilityWorldUniform = -1;
-    g_renderer.compatibilityTextureUniform = -1;
     g_renderer.canvasWidth = 0;
     g_renderer.canvasHeight = 0;
     g_renderer.postProcessWidth = 0;
@@ -2479,53 +2341,6 @@ bool LinkProgram(
     return true;
 }
 
-bool CreateCompatibilityProgram(
-    const char *vertexSource,
-    const char *fragmentSource,
-    GLuint &programOut,
-    GLint &viewProjectionOut,
-    GLint &worldOut,
-    GLint &textureOut)
-{
-    GLuint program = 0;
-    if (!LinkProgram("WebGL2 compatibility", vertexSource, fragmentSource, program))
-        return false;
-
-    while (glGetError() != GL_NO_ERROR)
-    {
-    }
-    const GLint position = glGetAttribLocation(program, "a_position");
-    const GLint color = glGetAttribLocation(program, "a_color");
-    const GLint texcoord = glGetAttribLocation(program, "a_texcoord0");
-    const GLint viewProjection =
-        glGetUniformLocation(program, "u_viewProjectionMatrix");
-    const GLint world = glGetUniformLocation(program, "u_worldMatrix");
-    const GLint texture = glGetUniformLocation(program, "u_colorMapSampler");
-    const GLenum error = glGetError();
-    if (position != 0 || color != 1 || texcoord != 2 ||
-        viewProjection < 0 || world < 0 || texture < 0 || error != GL_NO_ERROR)
-    {
-        Web_Log(
-            WebLogLevel::Error,
-            "[kisakcod-web] WebGL2 compatibility binding validation failed "
-            "(attributes %d/%d/%d, uniforms %d/%d/%d, error 0x%x).\n",
-            position,
-            color,
-            texcoord,
-            viewProjection,
-            world,
-            texture,
-            static_cast<unsigned int>(error));
-        glDeleteProgram(program);
-        return false;
-    }
-    programOut = program;
-    viewProjectionOut = viewProjection;
-    worldOut = world;
-    textureOut = texture;
-    return true;
-}
-
 void DeleteModelLightingTexture(
     WebRendererRetainedModelLightingAtlas &atlas);
 
@@ -2534,7 +2349,6 @@ void DeletePipelineObjects(
     GLuint skyProgram,
     GLuint postProcessProgram,
     GLuint glowProgram,
-    GLuint compatibilityProgram,
     GLuint vertexArray,
     GLuint vertexBuffer,
     GLuint indexBuffer,
@@ -2571,10 +2385,6 @@ void DeletePipelineObjects(
     if (glowProgram != 0)
     {
         glDeleteProgram(glowProgram);
-    }
-    if (compatibilityProgram != 0)
-    {
-        glDeleteProgram(compatibilityProgram);
     }
 }
 
@@ -2712,7 +2522,6 @@ void DestroyWebGLContext()
             g_renderer.skyProgram,
             g_renderer.postProcessProgram,
             g_renderer.glowProgram,
-            g_renderer.compatibilityProgram,
             g_renderer.vertexArray,
             g_renderer.vertexBuffer,
             g_renderer.indexBuffer,
@@ -4889,18 +4698,6 @@ bool CreateRendererResources(bool contextRecovery = false)
         glGetUniformLocation(glowProgram, "u_setup");
     const GLenum pipelineError = glGetError();
 
-    const std::uint8_t *texturePixels = FALLBACK_TEXTURE_RGBA;
-    std::uint32_t textureWidth = 1u;
-    std::uint32_t textureHeight = 1u;
-    std::uint8_t textureSamplerState = 0u;
-    if (g_renderer.sourceTextureActive)
-    {
-        texturePixels = g_renderer.retainedPixels.data();
-        textureWidth = g_renderer.textureWidth;
-        textureHeight = g_renderer.textureHeight;
-        textureSamplerState = g_renderer.textureSamplerState;
-    }
-
     GLuint vertexArray = 0;
     GLuint vertexBuffer = 0;
     GLuint indexBuffer = 0;
@@ -4921,7 +4718,7 @@ bool CreateRendererResources(bool contextRecovery = false)
 
     GLuint texture = 0;
     const bool textureReady = CreateTextureObject(
-        texturePixels, textureWidth, textureHeight, textureSamplerState, texture);
+        FALLBACK_TEXTURE_RGBA, 1u, 1u, 0u, texture);
     const bool worldTexturesReady = textureReady &&
         (!g_renderer.worldSurfaceActive ||
          CreateWorldTextureObjects(
@@ -5004,18 +4801,6 @@ bool CreateRendererResources(bool contextRecovery = false)
             SPOT_SHADOW_SIZE, "spot",
             spotShadowFramebuffers[index], spotShadowDepthTextures[index]);
     }
-    GLuint compatibilityProgram = 0;
-    GLint compatibilityViewProjection = -1;
-    GLint compatibilityWorld = -1;
-    GLint compatibilityTexture = -1;
-    const bool compatibilityReady = !g_renderer.compatibilityActive ||
-        CreateCompatibilityProgram(
-            g_renderer.compatibilityVertexSource.c_str(),
-            g_renderer.compatibilityFragmentSource.c_str(),
-            compatibilityProgram,
-            compatibilityViewProjection,
-            compatibilityWorld,
-            compatibilityTexture);
     if (aspectUniform < 0 || textureUniform < 0 || textureEnabledUniform < 0 ||
         detailMapUniform < 0 || detailMapEnabledUniform < 0 ||
         detailScaleUniform < 0 ||
@@ -5085,8 +4870,7 @@ bool CreateRendererResources(bool contextRecovery = false)
         !dynamicModelLightingReady || !brushObjectsReady ||
         !uiObjectsReady || !uiTexturesReady ||
         !shadowTargetReady || !shadowFarTargetReady ||
-        !spotShadowTargetsReady ||
-        !compatibilityReady)
+        !spotShadowTargetsReady)
     {
         DeleteBrushModelObjects();
         Web_Log(
@@ -5098,7 +4882,6 @@ bool CreateRendererResources(bool contextRecovery = false)
             skyProgram,
             postProcessProgram,
             glowProgram,
-            compatibilityProgram,
             vertexArray,
             vertexBuffer,
             indexBuffer,
@@ -5136,7 +4919,6 @@ bool CreateRendererResources(bool contextRecovery = false)
     g_renderer.postProcessProgram = postProcessProgram;
     g_renderer.glowProgram = glowProgram;
     g_renderer.shadowProgram = shadowProgram;
-    g_renderer.compatibilityProgram = compatibilityProgram;
     g_renderer.vertexArray = vertexArray;
     g_renderer.vertexBuffer = vertexBuffer;
     g_renderer.indexBuffer = indexBuffer;
@@ -5262,17 +5044,9 @@ bool CreateRendererResources(bool contextRecovery = false)
     g_renderer.glowTexelDeltaUniform = glowTexelDeltaUniform;
     g_renderer.glowWeightsUniform = glowWeightsUniform;
     g_renderer.glowSetupUniform = glowSetupUniform;
-    g_renderer.compatibilityViewProjectionUniform = compatibilityViewProjection;
-    g_renderer.compatibilityWorldUniform = compatibilityWorld;
-    g_renderer.compatibilityTextureUniform = compatibilityTexture;
-    ++g_renderer.rebuildGeneration;
     if (g_renderer.surfaceActive)
     {
         ++g_renderer.surfaceResourceGeneration;
-    }
-    if (g_renderer.compatibilityActive)
-    {
-        ++g_renderer.compatibilityResourceGeneration;
     }
     return true;
 }
@@ -5304,15 +5078,6 @@ bool HandleWebGLContextLost(int, const void *, void *)
     EmitSurfaceLifecycle(
         "lost",
         "The renderer retained the indexed surface description while WebGL2 was lost");
-    EmitTextureLifecycle(
-        "lost",
-        "The renderer retained bounded pixels while the WebGL2 context was lost");
-    if (g_renderer.compatibilityActive)
-    {
-        EmitShaderLifecycle(
-            "lost",
-            "The renderer retained the selected WebGL2 shader contract while the context was lost");
-    }
     Web_Log(WebLogLevel::Info, "[kisakcod-web] WebGL2 context lost; rendering paused.\n");
     Web_EmitRuntimeState(
         "renderer-lost",
@@ -5353,15 +5118,6 @@ bool HandleWebGLContextRestored(int, const void *, void *)
         EmitSurfaceLifecycle(
             "failed",
             "The restored WebGL2 context could not be made current for surface recovery");
-        EmitTextureLifecycle(
-            "failed",
-            "The restored WebGL2 context could not be made current for texture recovery");
-        if (g_renderer.compatibilityActive)
-        {
-            EmitShaderLifecycle(
-                "failed",
-                "The restored WebGL2 context could not be made current for shader recovery");
-        }
         Web_EmitRuntimeState("failed", "The restored WebGL2 context could not be made current");
         return true;
     }
@@ -5375,15 +5131,6 @@ bool HandleWebGLContextRestored(int, const void *, void *)
         EmitSurfaceLifecycle(
             "failed",
             "The renderer could not recreate the retained indexed surface after context loss");
-        EmitTextureLifecycle(
-            "failed",
-            "The renderer could not recreate the retained texture after context loss");
-        if (g_renderer.compatibilityActive)
-        {
-            EmitShaderLifecycle(
-                "failed",
-                "The renderer could not recreate the selected WebGL2 shader program after context loss");
-        }
         Web_EmitRuntimeState("failed", "The WebGL2 renderer could not recover from context loss");
         return true;
     }
@@ -5398,26 +5145,9 @@ bool HandleWebGLContextRestored(int, const void *, void *)
     {
         ++g_renderer.surfaceRecoveryCount;
     }
-    if (g_renderer.sourceTextureActive)
-    {
-        ++g_renderer.recoveryCount;
-    }
-    if (g_renderer.compatibilityActive)
-    {
-        ++g_renderer.compatibilityRecoveryCount;
-    }
     EmitSurfaceLifecycle(
         "ready",
         "The renderer recreated the indexed surface from its retained description");
-    EmitTextureLifecycle(
-        "ready",
-        "The renderer recreated the texture from bounded recovery pixels");
-    if (g_renderer.compatibilityActive)
-    {
-        EmitShaderLifecycle(
-            "ready",
-            "The renderer recreated the selected WebGL2 shader program after context loss");
-    }
     Web_Log(WebLogLevel::Info, "[kisakcod-web] WebGL2 context restored; renderer rebuilt.\n");
     Web_EmitRuntimeState("running", "WebGL2 context restored and rendering resumed");
     EmitRendererMemory("context-restored");
@@ -5443,43 +5173,6 @@ bool CreateWebGLContext()
     InitializeFrameProfileGpuQueries();
 #endif
     return true;
-}
-
-WebRendererTextureResult ValidateTextureDesc(
-    const WebRendererRgba8TextureDesc &texture,
-    std::size_t &expectedByteLength)
-{
-    if (texture.pixels == nullptr || texture.width == 0u || texture.height == 0u)
-    {
-        Web_Log(WebLogLevel::Error, "[kisakcod-web] Invalid empty RGBA8 texture.\n");
-        return WebRendererTextureResult::InvalidDescriptor;
-    }
-    if (texture.width > WEB_RENDERER_MAX_RGBA8_DIMENSION ||
-        texture.height > WEB_RENDERER_MAX_RGBA8_DIMENSION)
-    {
-        Web_Log(
-            WebLogLevel::Error,
-            "[kisakcod-web] RGBA8 texture dimensions exceed the renderer limit (%ux%u).\n",
-            WEB_RENDERER_MAX_RGBA8_DIMENSION,
-            WEB_RENDERER_MAX_RGBA8_DIMENSION);
-        return WebRendererTextureResult::UnsupportedDimensions;
-    }
-
-    expectedByteLength = static_cast<std::size_t>(texture.width) *
-        static_cast<std::size_t>(texture.height) * 4u;
-    if (expectedByteLength > WEB_RENDERER_MAX_RETAINED_TEXTURE_BYTES)
-    {
-        Web_Log(
-            WebLogLevel::Error,
-            "[kisakcod-web] RGBA8 texture exceeds the recovery limit.\n");
-        return WebRendererTextureResult::OutputTooLarge;
-    }
-    if (texture.byteLength != expectedByteLength)
-    {
-        Web_Log(WebLogLevel::Error, "[kisakcod-web] RGBA8 texture byte length is invalid.\n");
-        return WebRendererTextureResult::InvalidDescriptor;
-    }
-    return WebRendererTextureResult::Success;
 }
 
 bool InspectExternalCanonicalImage(
@@ -6536,23 +6229,6 @@ const char *WebRenderer_TextureResultString(WebRendererTextureResult result) noe
         return "WebGL2 texture upload failed";
     }
     return "unknown renderer texture error";
-}
-
-const char *WebRenderer_ShaderResultString(WebRendererShaderResult result) noexcept
-{
-    switch (result)
-    {
-    case WebRendererShaderResult::Success: return "success";
-    case WebRendererShaderResult::InvalidDescriptor:
-        return "invalid WebGL2 shader compatibility descriptor";
-    case WebRendererShaderResult::UnsupportedSubstitution:
-        return "WebGL2 shader substitution is not registry-owned";
-    case WebRendererShaderResult::AllocationFailed:
-        return "renderer shader recovery allocation failed";
-    case WebRendererShaderResult::BackendFailure:
-        return "WebGL2 shader compilation, link, or binding validation failed";
-    }
-    return "unknown renderer shader error";
 }
 
 WebRendererTextureResult WebRenderer_SetSkyImage(
@@ -7925,15 +7601,6 @@ bool WebRenderer_Initialize()
             "ready",
             "The engine-owned indexed surface is resident in the graphics backend");
     }
-    EmitTextureLifecycle(
-        "ready",
-        "The renderer uploaded its retained texture during initialization");
-    if (g_renderer.compatibilityActive)
-    {
-        EmitShaderLifecycle(
-            "ready",
-            "The renderer compiled the retained WebGL2 shader contract during initialization");
-    }
     EmitRendererMemory("initialized");
     return true;
 }
@@ -7944,278 +7611,6 @@ void WebRenderer_Shutdown()
     DestroyWebGLContext();
     iassert(g_renderer.context == 0 && !g_renderer.initialized);
     EmitRendererMemory("shutdown");
-}
-
-WebRendererTextureResult WebRenderer_SetBootstrapTexture(
-    const WebRendererRgba8TextureDesc &texture)
-{
-    std::size_t expectedByteLength = 0;
-    const WebRendererTextureResult validation =
-        ValidateTextureDesc(texture, expectedByteLength);
-    if (validation != WebRendererTextureResult::Success)
-    {
-        return validation;
-    }
-
-    std::vector<std::uint8_t> retainedCopy;
-    try
-    {
-        retainedCopy.assign(texture.pixels, texture.pixels + expectedByteLength);
-    }
-    catch (const std::bad_alloc &)
-    {
-        Web_Log(
-            WebLogLevel::Error,
-            "[kisakcod-web] Renderer could not retain the bounded RGBA8 texture.\n");
-        return WebRendererTextureResult::AllocationFailed;
-    }
-
-    GLuint replacementTexture = 0;
-    if (g_renderer.initialized && !g_renderer.contextLost)
-    {
-        if (!CreateTextureObject(
-                retainedCopy.data(), texture.width, texture.height,
-                texture.samplerState, replacementTexture))
-        {
-            return WebRendererTextureResult::BackendFailure;
-        }
-    }
-
-    if (replacementTexture != 0)
-    {
-        glDeleteTextures(1, &g_renderer.texture);
-        g_renderer.texture = replacementTexture;
-        ++g_renderer.rebuildGeneration;
-    }
-    g_renderer.retainedPixels = std::move(retainedCopy);
-    g_renderer.textureWidth = texture.width;
-    g_renderer.textureHeight = texture.height;
-    g_renderer.textureSamplerState = texture.samplerState;
-    g_renderer.sourceTextureActive = true;
-    ++g_renderer.uploadGeneration;
-
-    Web_Log(
-        WebLogLevel::Info,
-        "[kisakcod-web] Renderer retained RGBA8 texture %ux%u (%zu bytes).\n",
-        texture.width,
-        texture.height,
-        expectedByteLength);
-    return WebRendererTextureResult::Success;
-}
-
-bool WebRenderer_ClearBootstrapTexture()
-{
-    if (!g_renderer.sourceTextureActive)
-    {
-        if (!g_renderer.initialized || g_renderer.contextLost || g_renderer.texture != 0)
-        {
-            return true;
-        }
-        GLuint fallbackTexture = 0;
-        if (!CreateTextureObject(
-                FALLBACK_TEXTURE_RGBA, 1u, 1u, 0u, fallbackTexture))
-        {
-            return false;
-        }
-        g_renderer.texture = fallbackTexture;
-        ++g_renderer.rebuildGeneration;
-        return true;
-    }
-
-    GLuint replacementTexture = 0;
-    bool backendReady = true;
-    if (g_renderer.initialized && !g_renderer.contextLost)
-    {
-        backendReady = CreateTextureObject(
-            FALLBACK_TEXTURE_RGBA, 1u, 1u, 0u, replacementTexture);
-    }
-
-    if (replacementTexture != 0)
-    {
-        glDeleteTextures(1, &g_renderer.texture);
-        g_renderer.texture = replacementTexture;
-        ++g_renderer.rebuildGeneration;
-    }
-    else if (g_renderer.initialized && !g_renderer.contextLost)
-    {
-        // Even if the fallback upload failed, never leave an old imported GPU
-        // object addressable after its source generation has been retired.
-        glDeleteTextures(1, &g_renderer.texture);
-        g_renderer.texture = 0;
-    }
-    std::vector<std::uint8_t>().swap(g_renderer.retainedPixels);
-    g_renderer.textureWidth = 0u;
-    g_renderer.textureHeight = 0u;
-    g_renderer.textureSamplerState = 0u;
-    g_renderer.sourceTextureActive = false;
-    ++g_renderer.uploadGeneration;
-    Web_Log(WebLogLevel::Info, "[kisakcod-web] Renderer released the imported texture.\n");
-    return backendReady;
-}
-
-WebRendererTextureState WebRenderer_GetBootstrapTextureState()
-{
-    if (!g_renderer.sourceTextureActive)
-    {
-        return {
-            0u,
-            0u,
-            0u,
-            g_renderer.uploadGeneration,
-            g_renderer.rebuildGeneration,
-            g_renderer.recoveryCount,
-            false,
-            false,
-        };
-    }
-    return {
-        g_renderer.textureWidth,
-        g_renderer.textureHeight,
-        g_renderer.retainedPixels.size(),
-        g_renderer.uploadGeneration,
-        g_renderer.rebuildGeneration,
-        g_renderer.recoveryCount,
-        true,
-        g_renderer.initialized && !g_renderer.contextLost && g_renderer.texture != 0,
-    };
-}
-
-WebRendererShaderResult WebRenderer_SetShaderCompatibility(
-    const kisak::web::WebGL2ShaderSubstitution &substitution)
-{
-    if (!substitution.id || !substitution.vertexSource ||
-        !substitution.fragmentSource || substitution.vertexSourceHash == 0u ||
-        substitution.fragmentSourceHash == 0u)
-        return WebRendererShaderResult::InvalidDescriptor;
-
-    kisak::web::WebGL2ShaderSubstitution registered;
-    if (!kisak::web::LookupWebGL2ShaderSubstitution(substitution.id, registered) ||
-        registered.vertexSourceHash != substitution.vertexSourceHash ||
-        registered.fragmentSourceHash != substitution.fragmentSourceHash ||
-        std::strcmp(registered.vertexSource, substitution.vertexSource) != 0 ||
-        std::strcmp(registered.fragmentSource, substitution.fragmentSource) != 0)
-        return WebRendererShaderResult::UnsupportedSubstitution;
-
-    constexpr std::size_t MAX_SOURCE_BYTES = 16u * 1024u;
-    const std::size_t vertexLength = std::strlen(substitution.vertexSource);
-    const std::size_t fragmentLength = std::strlen(substitution.fragmentSource);
-    if (vertexLength == 0u || fragmentLength == 0u ||
-        vertexLength >= MAX_SOURCE_BYTES || fragmentLength >= MAX_SOURCE_BYTES)
-        return WebRendererShaderResult::InvalidDescriptor;
-
-    std::string retainedId;
-    std::string retainedVertex;
-    std::string retainedFragment;
-    try
-    {
-        retainedId = substitution.id;
-        retainedVertex = substitution.vertexSource;
-        retainedFragment = substitution.fragmentSource;
-    }
-    catch (const std::bad_alloc &)
-    {
-        return WebRendererShaderResult::AllocationFailed;
-    }
-
-    GLuint replacementProgram = 0;
-    GLint replacementViewProjection = -1;
-    GLint replacementWorld = -1;
-    GLint replacementTexture = -1;
-    if (g_renderer.initialized && !g_renderer.contextLost &&
-        !CreateCompatibilityProgram(
-            retainedVertex.c_str(),
-            retainedFragment.c_str(),
-            replacementProgram,
-            replacementViewProjection,
-            replacementWorld,
-            replacementTexture))
-    {
-        DispatchRendererShaderLifecycle(
-            "failed",
-            "The selected compatibility source did not compile, link, and bind atomically",
-            substitution.id,
-            substitution.vertexSourceHash,
-            substitution.fragmentSourceHash,
-            g_renderer.compatibilitySubmissionGeneration + 1u,
-            g_renderer.compatibilityResourceGeneration,
-            g_renderer.compatibilityRecoveryCount,
-            0u,
-            false,
-            false,
-            false);
-        return WebRendererShaderResult::BackendFailure;
-    }
-
-    if (replacementProgram != 0)
-    {
-        glDeleteProgram(g_renderer.compatibilityProgram);
-        g_renderer.compatibilityProgram = replacementProgram;
-        g_renderer.compatibilityViewProjectionUniform = replacementViewProjection;
-        g_renderer.compatibilityWorldUniform = replacementWorld;
-        g_renderer.compatibilityTextureUniform = replacementTexture;
-        ++g_renderer.compatibilityResourceGeneration;
-    }
-    g_renderer.compatibilityId = std::move(retainedId);
-    g_renderer.compatibilityVertexSource = std::move(retainedVertex);
-    g_renderer.compatibilityFragmentSource = std::move(retainedFragment);
-    g_renderer.compatibilityVertexSourceHash = substitution.vertexSourceHash;
-    g_renderer.compatibilityFragmentSourceHash = substitution.fragmentSourceHash;
-    g_renderer.compatibilityActive = true;
-    g_renderer.compatibilityDrawCount = 0u;
-    g_renderer.compatibilityFirstDrawCompleted = false;
-    ++g_renderer.compatibilitySubmissionGeneration;
-    Web_Log(
-        WebLogLevel::Info,
-        "[kisakcod-web] Renderer selected WebGL2 shader compatibility program %s.\n",
-        g_renderer.compatibilityId.c_str());
-    EmitShaderLifecycle(
-        replacementProgram != 0 ? "ready" : "retained",
-        replacementProgram != 0
-            ? "The selected WebGL2 shader program is resident with validated bindings"
-            : "The selected WebGL2 shader contract is retained for context recovery");
-    return WebRendererShaderResult::Success;
-}
-
-bool WebRenderer_ClearShaderCompatibility()
-{
-    if (!g_renderer.compatibilityActive) return true;
-    if (g_renderer.initialized && !g_renderer.contextLost &&
-        g_renderer.compatibilityProgram != 0)
-        glDeleteProgram(g_renderer.compatibilityProgram);
-    g_renderer.compatibilityProgram = 0;
-    g_renderer.compatibilityViewProjectionUniform = -1;
-    g_renderer.compatibilityWorldUniform = -1;
-    g_renderer.compatibilityTextureUniform = -1;
-    g_renderer.compatibilityActive = false;
-    g_renderer.compatibilityDrawCount = 0u;
-    g_renderer.compatibilityFirstDrawCompleted = false;
-    ++g_renderer.compatibilitySubmissionGeneration;
-    EmitShaderLifecycle(
-        "cleared",
-        "The imported shader generation was retired; drawing returned to the bootstrap pipeline");
-    g_renderer.compatibilityId.clear();
-    g_renderer.compatibilityVertexSource.clear();
-    g_renderer.compatibilityFragmentSource.clear();
-    g_renderer.compatibilityVertexSourceHash = 0u;
-    g_renderer.compatibilityFragmentSourceHash = 0u;
-    return true;
-}
-
-WebRendererShaderState WebRenderer_GetShaderCompatibilityState()
-{
-    return {
-        g_renderer.compatibilityId.c_str(),
-        g_renderer.compatibilityVertexSourceHash,
-        g_renderer.compatibilityFragmentSourceHash,
-        g_renderer.compatibilitySubmissionGeneration,
-        g_renderer.compatibilityResourceGeneration,
-        g_renderer.compatibilityRecoveryCount,
-        g_renderer.compatibilityDrawCount,
-        g_renderer.compatibilityActive,
-        g_renderer.initialized && !g_renderer.contextLost &&
-            g_renderer.compatibilityProgram != 0,
-        g_renderer.compatibilityFirstDrawCompleted,
-    };
 }
 
 namespace
@@ -10587,14 +9982,6 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
     // surface order is preserved, but culling stays disabled for this initial
     // untextured backend until material state owns the intended cull mode.
     glDisable(GL_CULL_FACE);
-    // The retained retail substitution expects an engine image sampler. A
-    // canonical world batch that deliberately carries no texture binding must
-    // stay on the vertex-color pipeline; sampling the backend's 1x1 recovery
-    // fallback would turn valid geometry into a uniform white frame.
-    const bool compatibilityDraw = primarySurfaceReady &&
-        g_renderer.compatibilityActive &&
-        g_renderer.compatibilityProgram != 0 &&
-        g_renderer.draw.textureBinding == WebRendererTextureBinding::EngineImage;
     constexpr GLfloat IDENTITY_MATRIX[16] = {
         1.0f, 0.0f, 0.0f, 0.0f,
         0.0f, 1.0f, 0.0f, 0.0f,
@@ -10615,90 +10002,69 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
     std::uint32_t completedDraws = 0u;
     // Native draws lit/decal receivers, point-light passes, then emissive.
     // Keep the existing single traversal when no transient light is visible.
-    const bool splitLighting = sceneGeometryDraw && !compatibilityDraw && g_renderer.dynamicLightCount;
+    const bool splitLighting = sceneGeometryDraw && g_renderer.dynamicLightCount;
     for (unsigned cameraStage = 0; cameraStage < (splitLighting ? 2u : 1u); ++cameraStage)
     {
     const bool emissiveCameraPass = cameraStage != 0;
-    if (compatibilityDraw)
-    {
-        while (glGetError() != GL_NO_ERROR)
-        {
-        }
-        glUseProgram(g_renderer.compatibilityProgram);
-        glUniformMatrix4fv(
-            g_renderer.compatibilityViewProjectionUniform,
-            1,
-            GL_FALSE,
-            viewProjection);
-        glUniformMatrix4fv(
-            g_renderer.compatibilityWorldUniform,
-            1,
-            GL_FALSE,
-            IDENTITY_MATRIX);
-        glUniform1i(g_renderer.compatibilityTextureUniform, 0);
-    }
-    else
-    {
-        glUseProgram(g_renderer.program);
-        glUniform1f(
-            g_renderer.aspectUniform,
-            sceneGeometryDraw
-                ? 1.0f
-                : (height > 0
-                    ? static_cast<float>(width) / static_cast<float>(height)
-                    : 1.0f));
-        glUniformMatrix4fv(
-            g_renderer.viewProjectionUniform,
-            1,
-            GL_FALSE,
-            viewProjection);
-        glUniform1f(
-            g_renderer.sceneFallbackUniform,
-            sceneGeometryDraw ? 1.0f : 0.0f);
-        BindSceneSamplers();
-        glUniformMatrix4fv(g_renderer.shadowMatrixUniform, 1, GL_FALSE,
-            g_renderer.sceneSunShadowMatrix.data());
-        glUniformMatrix4fv(g_renderer.shadowFarMatrixUniform, 1, GL_FALSE,
-            g_renderer.sceneSunShadowFarMatrix.data());
-        glUniform3fv(g_renderer.sunDirectionUniform, 1,
-            g_renderer.sceneSunDirection.data());
-        glUniform3fv(g_renderer.sunColorUniform, 1,
-            g_renderer.sceneSunColor.data());
-        glUniform1f(g_renderer.sunShadowEnabledUniform, 0.0f);
-        glUniform1f(g_renderer.primaryLightEnabledUniform, 0.0f);
-        glUniform1f(g_renderer.spotShadowEnabledUniform, 0.0f);
-        glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
-        glUniform1f(g_renderer.detailMapEnabledUniform, 0.0f);
-        glUniform4f(g_renderer.detailScaleUniform,
-            0.0f, 0.0f, 0.0f, 0.0f);
-        glUniform1f(g_renderer.modelLightingEnabledUniform, 0.0f);
-        glUniform1f(g_renderer.normalMapEnabledUniform, 0.0f);
-        glUniform1f(g_renderer.specularMapEnabledUniform, 0.0f);
-        glUniform3f(g_renderer.modelLightingBaseCoordinatesUniform,
-            0.0f, 0.0f, 0.0f);
-        glUniform3f(g_renderer.modelLightingLookupScaleUniform,
-            0.0f, 0.0f, 0.0f);
-        glUniform1f(g_renderer.premultiplyAlphaUniform, 0.0f);
-        glUniform1f(g_renderer.colorIntensityAlphaUniform, 0.0f);
-        glUniform1i(g_renderer.materialModeUniform, 0);
-        glUniform4f(g_renderer.envMapParmsUniform,
-            0.0f, 0.0f, 0.0f, 0.0f);
-        glUniform4f(g_renderer.waterColorUniform,
-            0.0f, 0.0f, 0.0f, 1.0f);
-        glUniform1f(g_renderer.instanceEnabledUniform, 0.0f);
-        glUniform4f(g_renderer.uiColorUniform, 1.0f, 1.0f, 1.0f, 1.0f);
-        glUniform1f(g_renderer.fogEnabledUniform,
-            sceneGeometryDraw && g_renderer.sceneFogEnabled ? 1.0f : 0.0f);
-        glUniform3fv(g_renderer.viewOriginUniform, 1,
-            g_renderer.sceneViewOrigin.data());
-        glUniform3fv(g_renderer.fogColorUniform, 1,
-            g_renderer.sceneFogColor.data());
-        glUniform2fv(g_renderer.fogParamsUniform, 1,
-            g_renderer.sceneFogParams.data());
-    }
+    glUseProgram(g_renderer.program);
+    glUniform1f(
+        g_renderer.aspectUniform,
+        sceneGeometryDraw
+            ? 1.0f
+            : (height > 0
+                ? static_cast<float>(width) / static_cast<float>(height)
+                : 1.0f));
+    glUniformMatrix4fv(
+        g_renderer.viewProjectionUniform,
+        1,
+        GL_FALSE,
+        viewProjection);
+    glUniform1f(
+        g_renderer.sceneFallbackUniform,
+        sceneGeometryDraw ? 1.0f : 0.0f);
+    BindSceneSamplers();
+    glUniformMatrix4fv(g_renderer.shadowMatrixUniform, 1, GL_FALSE,
+        g_renderer.sceneSunShadowMatrix.data());
+    glUniformMatrix4fv(g_renderer.shadowFarMatrixUniform, 1, GL_FALSE,
+        g_renderer.sceneSunShadowFarMatrix.data());
+    glUniform3fv(g_renderer.sunDirectionUniform, 1,
+        g_renderer.sceneSunDirection.data());
+    glUniform3fv(g_renderer.sunColorUniform, 1,
+        g_renderer.sceneSunColor.data());
+    glUniform1f(g_renderer.sunShadowEnabledUniform, 0.0f);
+    glUniform1f(g_renderer.primaryLightEnabledUniform, 0.0f);
+    glUniform1f(g_renderer.spotShadowEnabledUniform, 0.0f);
+    glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
+    glUniform1f(g_renderer.detailMapEnabledUniform, 0.0f);
+    glUniform4f(g_renderer.detailScaleUniform,
+        0.0f, 0.0f, 0.0f, 0.0f);
+    glUniform1f(g_renderer.modelLightingEnabledUniform, 0.0f);
+    glUniform1f(g_renderer.normalMapEnabledUniform, 0.0f);
+    glUniform1f(g_renderer.specularMapEnabledUniform, 0.0f);
+    glUniform3f(g_renderer.modelLightingBaseCoordinatesUniform,
+        0.0f, 0.0f, 0.0f);
+    glUniform3f(g_renderer.modelLightingLookupScaleUniform,
+        0.0f, 0.0f, 0.0f);
+    glUniform1f(g_renderer.premultiplyAlphaUniform, 0.0f);
+    glUniform1f(g_renderer.colorIntensityAlphaUniform, 0.0f);
+    glUniform1i(g_renderer.materialModeUniform, 0);
+    glUniform4f(g_renderer.envMapParmsUniform,
+        0.0f, 0.0f, 0.0f, 0.0f);
+    glUniform4f(g_renderer.waterColorUniform,
+        0.0f, 0.0f, 0.0f, 1.0f);
+    glUniform1f(g_renderer.instanceEnabledUniform, 0.0f);
+    glUniform4f(g_renderer.uiColorUniform, 1.0f, 1.0f, 1.0f, 1.0f);
+    glUniform1f(g_renderer.fogEnabledUniform,
+        sceneGeometryDraw && g_renderer.sceneFogEnabled ? 1.0f : 0.0f);
+    glUniform3fv(g_renderer.viewOriginUniform, 1,
+        g_renderer.sceneViewOrigin.data());
+    glUniform3fv(g_renderer.fogColorUniform, 1,
+        g_renderer.sceneFogColor.data());
+    glUniform2fv(g_renderer.fogParamsUniform, 1,
+        g_renderer.sceneFogParams.data());
     glBindVertexArray(g_renderer.vertexArray);
     const bool worldBatchDraw = sceneGeometryDraw &&
-        g_renderer.worldSurfaceActive && !compatibilityDraw;
+        g_renderer.worldSurfaceActive;
 #if KISAK_WEB_DIAGNOSTICS
     const double worldProfileStarted = frameProfile
         ? WebFrameProfile_Now() : 0.0;
@@ -10879,25 +10245,19 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
     else if (primarySurfaceReady && !emissiveCameraPass)
     {
         glActiveTexture(GL_TEXTURE0);
-        if (!compatibilityDraw)
-        {
-            glUniform1f(
-                g_renderer.textureEnabledUniform,
-                g_renderer.sourceTextureActive &&
-                        g_renderer.draw.textureBinding ==
-                            WebRendererTextureBinding::EngineImage
-                    ? 1.0f : 0.0f);
-            glUniform1f(g_renderer.lightmapEnabledUniform, 0.0f);
-            glUniform1f(
-                g_renderer.secondaryLightmapEnabledUniform, 0.0f);
-            glUniform1f(g_renderer.modelLightingEnabledUniform, 0.0f);
-            glUniform1f(g_renderer.detailMapEnabledUniform, 0.0f);
-            glUniform1f(g_renderer.normalMapEnabledUniform, 0.0f);
-            glUniform1f(g_renderer.specularMapEnabledUniform, 0.0f);
-            glUniform1i(g_renderer.alphaTestUniform, 0);
-            glUniform1f(g_renderer.premultiplyAlphaUniform, 0.0f);
-            glUniform1i(g_renderer.materialModeUniform, 0);
-        }
+        glUniform1f(
+            g_renderer.textureEnabledUniform,
+            0.0f);
+        glUniform1f(g_renderer.lightmapEnabledUniform, 0.0f);
+        glUniform1f(
+            g_renderer.secondaryLightmapEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.modelLightingEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.detailMapEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.normalMapEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.specularMapEnabledUniform, 0.0f);
+        glUniform1i(g_renderer.alphaTestUniform, 0);
+        glUniform1f(g_renderer.premultiplyAlphaUniform, 0.0f);
+        glUniform1i(g_renderer.materialModeUniform, 0);
         glBindTexture(GL_TEXTURE_2D, g_renderer.texture);
         const std::uintptr_t indexOffset =
             static_cast<std::uintptr_t>(g_renderer.draw.firstIndex) *
@@ -10929,7 +10289,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
             *frameProfile, WebFrameProfileGpuStage::StaticModels);
     g_frameProfileDrawBucket = FrameProfileDrawBucket::StaticModel;
 #endif
-    if (sceneGeometryDraw && staticModelLodsReady && !compatibilityDraw &&
+    if (sceneGeometryDraw && staticModelLodsReady &&
         g_renderer.staticModelSceneActive &&
         g_renderer.staticModelVertexArray != 0u &&
         g_renderer.staticModelInstanceBuffer != 0u)
@@ -11062,7 +10422,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
     }
     g_frameProfileDrawBucket = FrameProfileDrawBucket::DynamicModel;
 #endif
-    if (sceneGeometryDraw && !compatibilityDraw &&
+    if (sceneGeometryDraw &&
         g_renderer.dynamicModelSceneActive)
     {
         glBindVertexArray(g_renderer.dynamicModelVertexArray);
@@ -11499,7 +10859,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
 #endif
     }
     }
-    if (sceneGeometryDraw && !compatibilityDraw)
+    if (sceneGeometryDraw)
         UpdateSunPostEffectState();
 #if KISAK_WEB_DIAGNOSTICS
     const double postProfileStarted = frameProfile
@@ -11561,7 +10921,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
             glowImage != 0u
                 ? g_renderer.sceneGlowBloomIntensity : 0.0f);
     }
-    if (postProcessDraw && sceneGeometryDraw && !compatibilityDraw &&
+    if (postProcessDraw && sceneGeometryDraw &&
         g_renderer.dynamicModelSceneActive &&
         g_renderer.dynamicModelVertexArray != 0u)
     {
@@ -11817,46 +11177,6 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
         g_renderer.surfaceDrawnSubmissionGeneration =
             g_renderer.surfaceSubmissionGeneration;
         EmitSurfaceDraw();
-    }
-
-    if (compatibilityDraw)
-    {
-        if (UINT32_MAX - g_renderer.compatibilityDrawCount < completedDraws)
-            g_renderer.compatibilityDrawCount = UINT32_MAX;
-        else
-            g_renderer.compatibilityDrawCount += completedDraws;
-        if (!g_renderer.compatibilityFirstDrawCompleted && completedDraws != 0u)
-        {
-            const GLenum drawError = firstSceneDrawPending
-                ? sceneDrawError
-                : glGetError();
-            if (drawError == GL_NO_ERROR)
-            {
-                g_renderer.compatibilityFirstDrawCompleted = true;
-                Web_Log(
-                    WebLogLevel::Info,
-                    "[kisakcod-web] First draw completed through %s.\n",
-                    g_renderer.compatibilityId.c_str());
-                EmitShaderLifecycle(
-                    "ready",
-                    "The deterministic indexed draw completed through the selected COD4 shader contract");
-            }
-            else
-            {
-                Web_Log(
-                    WebLogLevel::Error,
-                    "[kisakcod-web] WebGL2 compatibility draw failed (0x%x).\n",
-                    static_cast<unsigned int>(drawError));
-                glDeleteProgram(g_renderer.compatibilityProgram);
-                g_renderer.compatibilityProgram = 0;
-                g_renderer.compatibilityViewProjectionUniform = -1;
-                g_renderer.compatibilityWorldUniform = -1;
-                g_renderer.compatibilityTextureUniform = -1;
-                EmitShaderLifecycle(
-                    "failed",
-                    "The selected shader program was resident but its first indexed draw failed");
-            }
-        }
     }
 
     ++g_renderer.frameNumber;

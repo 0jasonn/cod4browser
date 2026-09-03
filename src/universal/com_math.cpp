@@ -1,4 +1,5 @@
 #include <universal/q_shared.h>
+#include <qcommon/qcommon_math.h>
 #include "com_math.h"
 
 #include <universal/assertive.h>
@@ -1601,47 +1602,13 @@ void __cdecl QuatToAxis(const float *quat, mat3x3 &axis)
 
 void __cdecl UnitQuatToAxis(const float *quat, mat3x3 &axis)
 {
-    const char *v2; // eax
-    float yy; // [esp+24h] [ebp-30h]
-    float xy; // [esp+28h] [ebp-2Ch]
-    float scaledZ; // [esp+2Ch] [ebp-28h]
-    float zz; // [esp+30h] [ebp-24h]
-    float zw; // [esp+34h] [ebp-20h]
-    float scaledX; // [esp+38h] [ebp-1Ch]
-    float scaledY; // [esp+3Ch] [ebp-18h]
-    float yw; // [esp+40h] [ebp-14h]
-    float xz; // [esp+44h] [ebp-10h]
-    float yz; // [esp+48h] [ebp-Ch]
-    float xx; // [esp+4Ch] [ebp-8h]
-    float xw; // [esp+50h] [ebp-4h]
-
+    const char *v2;
     if (!Vec4IsNormalized(quat))
     {
         v2 = va("%g %g %g %g", *quat, quat[1], quat[2], quat[3]);
         MyAssertHandler(".\\universal\\com_math.cpp", 1948, 0, "%s\n\t%s", "Vec4IsNormalized( quat )", v2);
     }
-    scaledX = *quat + *quat;
-    xx = scaledX * *quat;
-    xy = scaledX * quat[1];
-    xz = scaledX * quat[2];
-    xw = scaledX * quat[3];
-    scaledY = quat[1] + quat[1];
-    yy = scaledY * quat[1];
-    yz = scaledY * quat[2];
-    yw = scaledY * quat[3];
-    scaledZ = quat[2] + quat[2];
-    zw = scaledZ * quat[3];
-    zz = scaledZ * quat[2];
-
-    (axis)[0][0] = 1.0 - (yy + zz);
-    (axis)[0][1] = xy + zw;
-    (axis)[0][2] = xz - yw;
-    (axis)[1][0] = xy - zw;
-    (axis)[1][1] = 1.0 - (xx + zz);
-    (axis)[1][2] = yz + xw;
-    (axis)[2][0] = xz + yw;
-    (axis)[2][1] = yz - xw;
-    (axis)[2][2] = 1.0 - (xx + yy);
+    Q_UnitQuatToAxis(quat, axis);
 }
 
 void __cdecl UnitQuatToForward(const float *quat, float *forward)

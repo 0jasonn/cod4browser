@@ -18,7 +18,6 @@ globalThis.addEventListener("error", (event) => {
 });
 
 const forwardedEvents = [
-    "kisakcod:renderer-shader", "kisakcod:renderer-texture",
     "kisakcod:renderer-aa", "kisakcod:test-webgl-aa",
     "kisakcod:renderer-surface", "kisakcod:renderer-surface-draw",
     "kisakcod:renderer-scene-view", "kisakcod:renderer-scene-frame",

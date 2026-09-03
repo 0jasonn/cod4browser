@@ -3,6 +3,8 @@
 #include <gfx_d3d/material_types.h>
 #include <web/web_renderer_code_mesh.h>
 
+#include <qcommon/qcommon_math.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -56,31 +58,6 @@ bool PlacementIsValid(const GfxScaledPlacement &placement) noexcept
     }
     return std::isfinite(lengthSquared) &&
         std::fabs(lengthSquared - 1.0f) <= 0.002f;
-}
-
-void UnitQuatToAxisExact(const float quat[4], float axis[3][3]) noexcept
-{
-    const float scaledX = quat[0] + quat[0];
-    const float xx = scaledX * quat[0];
-    const float xy = scaledX * quat[1];
-    const float xz = scaledX * quat[2];
-    const float xw = scaledX * quat[3];
-    const float scaledY = quat[1] + quat[1];
-    const float yy = scaledY * quat[1];
-    const float yz = scaledY * quat[2];
-    const float yw = scaledY * quat[3];
-    const float scaledZ = quat[2] + quat[2];
-    const float zz = scaledZ * quat[2];
-    const float zw = scaledZ * quat[3];
-    axis[0][0] = 1.0f - (yy + zz);
-    axis[0][1] = xy + zw;
-    axis[0][2] = xz - yw;
-    axis[1][0] = xy - zw;
-    axis[1][1] = 1.0f - (xx + zz);
-    axis[1][2] = yz + xw;
-    axis[2][0] = xz + yw;
-    axis[2][1] = yz - xw;
-    axis[2][2] = 1.0f - (xx + yy);
 }
 
 float Dot3(const float left[3], const float right[3]) noexcept
@@ -259,7 +236,7 @@ WebRendererParticleCloudSceneResult BuildOne(
         return WebRendererParticleCloudSceneResult::InvalidSubmission;
 
     float placementAxis[3][3]{};
-    UnitQuatToAxisExact(cloud.placement.base.quat, placementAxis);
+    Q_UnitQuatToAxis(cloud.placement.base.quat, placementAxis);
     float cloudAxis0[3]{};
     float cloudAxis1[3]{};
     if (!BuildCloudAxes(cloud, view, cloudAxis0, cloudAxis1))

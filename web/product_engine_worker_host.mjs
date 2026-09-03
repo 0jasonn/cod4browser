@@ -1,4 +1,5 @@
 import {
+    createFilesystemLeases,
     createRequestIdAllocator,
     rejectWorkerRequests,
     settleWorkerReply,
@@ -13,8 +14,6 @@ import {
     protocolError,
 } from "./product_protocol.mjs";
 
-const ENGINE_FILESYSTEM_LOCK = "kisakcod-web-engine-filesystem-v1";
-const HOME_WRITER_LOCK = "kisakcod-web-home-writer-v1";
 const FILESYSTEM_STALL_TIMEOUT_MS = 30_000;
 const FILESYSTEM_ABSOLUTE_TIMEOUT_MS = 5 * 60_000;
 const MAX_FILESYSTEM_TIMEOUT_MS = 10 * 60_000;
@@ -64,10 +63,7 @@ export function createEngineWorkerHost(canvas, {
 
     const pending = new Map();
     const allocateRequestId = createRequestIdAllocator(pending);
-    let releaseFilesystemLease = null;
-    let filesystemLeaseCompletion = null;
-    let releaseHomeWriterLease = null;
-    let homeWriterLeaseCompletion = null;
+    const leases = createFilesystemLeases(lockManager, emitFilesystemLifecycle);
     let filesystemMutation = Promise.resolve();
     let checkpointPromise = null;
     let checkpointQueued = false;
@@ -301,76 +297,6 @@ export function createEngineWorkerHost(canvas, {
         canvas: offscreen,
     }, [offscreen]);
 
-    async function acquireLeases()
-    {
-        if (releaseFilesystemLease || !lockManager?.request) return;
-
-        let markHomeAcquired;
-        let releaseHome;
-        const homeAcquired = new Promise((resolve) => { markHomeAcquired = resolve; });
-        const homeHeld = new Promise((resolve) => { releaseHome = resolve; });
-        homeWriterLeaseCompletion = lockManager.request(
-            HOME_WRITER_LOCK,
-            { mode: "exclusive", ifAvailable: true },
-            async (lock) => {
-                if (!lock) {
-                    markHomeAcquired(false);
-                    return;
-                }
-                releaseHomeWriterLease = releaseHome;
-                markHomeAcquired(true);
-                emitFilesystemLifecycle("writerLeaseAcquired");
-                await homeHeld;
-            },
-        );
-        if (!await homeAcquired) {
-            await homeWriterLeaseCompletion;
-            homeWriterLeaseCompletion = null;
-            throw Object.assign(new Error("Another tab owns the writable browser profile."), {
-                code: "HOME_WRITER_CONFLICT",
-            });
-        }
-
-        let markFilesystemAcquired;
-        let releaseFilesystem;
-        const filesystemAcquired = new Promise((resolve) => { markFilesystemAcquired = resolve; });
-        const filesystemHeld = new Promise((resolve) => { releaseFilesystem = resolve; });
-        try {
-            filesystemLeaseCompletion = lockManager.request(
-                ENGINE_FILESYSTEM_LOCK,
-                { mode: "shared" },
-                async () => {
-                    releaseFilesystemLease = releaseFilesystem;
-                    markFilesystemAcquired();
-                    await filesystemHeld;
-                },
-            );
-            await filesystemAcquired;
-        } catch (error) {
-            releaseHomeWriterLease?.();
-            await homeWriterLeaseCompletion;
-            releaseHomeWriterLease = null;
-            homeWriterLeaseCompletion = null;
-            throw error;
-        }
-    }
-
-    async function releaseLeases()
-    {
-        const releasedWriter = Boolean(releaseHomeWriterLease);
-        const completions = [filesystemLeaseCompletion, homeWriterLeaseCompletion]
-            .filter(Boolean);
-        const releases = [releaseFilesystemLease, releaseHomeWriterLease]
-            .filter(Boolean);
-        filesystemLeaseCompletion = null;
-        homeWriterLeaseCompletion = null;
-        releaseFilesystemLease = null;
-        releaseHomeWriterLease = null;
-        for (const release of releases) release();
-        await Promise.all(completions);
-        if (releasedWriter) emitFilesystemLifecycle("writerLeaseReleased");
-    }
-
     function workerOwnershipUnknown(error)
     {
         return [
@@ -395,7 +321,7 @@ export function createEngineWorkerHost(canvas, {
             emitFilesystemLifecycle("workerTerminationStarted");
             worker.terminate();
             emitFilesystemLifecycle("workerTerminated");
-            await releaseLeases();
+            await leases.release();
             setFilesystemState(FILESYSTEM_STATES.TERMINATED);
         })();
         return recoveryPromise;
@@ -411,7 +337,7 @@ export function createEngineWorkerHost(canvas, {
     async function flushMountedFilesystem()
     {
         if (filesystemState === FILESYSTEM_STATES.UNMOUNTED) {
-            await releaseLeases();
+            await leases.release();
             return { mounted: false };
         }
         if (filesystemState !== FILESYSTEM_STATES.MOUNTED &&
@@ -428,7 +354,7 @@ export function createEngineWorkerHost(canvas, {
                 absoluteTimeoutMs: filesystemAbsoluteTimeoutMs,
             });
             setFilesystemState(FILESYSTEM_STATES.UNMOUNTED);
-            await releaseLeases();
+            await leases.release();
             return result;
         } catch (error) {
             if (workerOwnershipUnknown(error)) {
@@ -450,7 +376,7 @@ export function createEngineWorkerHost(canvas, {
                 setFilesystemState(FILESYSTEM_STATES.ACQUIRING);
                 let mountRequestStarted = false;
                 try {
-                    await acquireLeases();
+                    await leases.acquire();
                     setFilesystemState(FILESYSTEM_STATES.MOUNTING);
                     mountRequestStarted = true;
                     const result = await rpc("mountAssets", { manifest }, [], {
@@ -466,7 +392,7 @@ export function createEngineWorkerHost(canvas, {
                         await recoverWorkerOwnership("mountAssets", error);
                     } else {
                         setFilesystemState(FILESYSTEM_STATES.UNMOUNTED);
-                        await releaseLeases();
+                        await leases.release();
                     }
                     throw error;
                 }
@@ -567,7 +493,7 @@ export function createEngineWorkerHost(canvas, {
                     await recoverWorkerOwnership("shutdown", error);
                 } finally {
                     disposed = true;
-                    if (!workerUnavailable) await releaseLeases();
+                    if (!workerUnavailable) await leases.release();
                     if (managePageLifecycle) {
                         globalThis.removeEventListener("pagehide", handlePageHide);
                     }

@@ -6,7 +6,7 @@ owns gameplay and assets; the dedicated Worker, synchronous filesystem adapter
 and WebGL2 backend remain the platform architecture.
 
 Completed optimization chronology is in
-[history](history/web-roadmap-through-2026-09-02.md). Paused benchmarks do not
+[Git history](history/README.md). Paused benchmarks do not
 qualify active-campaign performance. See [current status](web-status.md) and
 [the campaign evidence ledger](campaign-compatibility.md).
 

@@ -717,7 +717,6 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
     let disposed = false;
     let disposePromise = null;
     const pendingOperations = new Set();
-    const readSources = new WeakSet();
     const storageChannel = typeof BroadcastChannel === "function"
         ? new BroadcastChannel(STORAGE_CHANNEL_NAME)
         : null;
@@ -1279,97 +1278,6 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
         return handle.getFile();
     }
 
-    async function openSource(path)
-    {
-        await ensureBackend();
-        return withStorageLock(async () => {
-            if (!activeManifest) {
-                throw importError("NOT_READY", "No validated installation is active.");
-            }
-
-            const active = validateStoredManifest(activeManifest);
-            const storedManifest = await databaseGet(database, ACTIVE_IMPORT_KEY);
-            if (!storedManifest) {
-                throw importError("NOT_READY", "No validated installation is active.");
-            }
-            const stored = validateStoredManifest(storedManifest);
-            if (stored.importId !== active.importId) {
-                throw importError(
-                    "STALE_SOURCE",
-                    "The active browser asset import changed while the file was being opened.",
-                );
-            }
-
-            const recordedSize = stored.sizes.get(path);
-            if (recordedSize === undefined) {
-                throw importError("UNSAFE_PATH", `The asset adapter does not allow ${path}.`);
-            }
-            const handle = await fileHandleFor(stored.importId, path);
-            const file = await handle.getFile();
-            if (file.size !== recordedSize) {
-                throw importError(
-                    "PERSISTED_SIZE",
-                    "Persisted asset sizes no longer match the manifest.",
-                );
-            }
-
-            const source = Object.freeze({
-                importId: stored.importId,
-                path,
-                size: file.size,
-                lastModified: file.lastModified,
-            });
-            readSources.add(source);
-            return source;
-        }, "shared");
-    }
-
-    async function readSource(source, { offset = 0, length = undefined } = {})
-    {
-        if (!source || typeof source !== "object" || !readSources.has(source)) {
-            throw importError("INVALID_SOURCE", "The asset read source is invalid or foreign.");
-        }
-
-        const requestedLength = length ?? source.size - offset;
-        if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(requestedLength) ||
-            offset < 0 || requestedLength < 0 || requestedLength > MAX_ADAPTER_READ ||
-            offset > source.size || requestedLength > source.size - offset) {
-            throw importError(
-                "INVALID_RANGE",
-                `Asset reads must stay in range and at or below ${MAX_ADAPTER_READ} bytes.`,
-            );
-        }
-
-        await ensureBackend();
-        return withStorageLock(async () => {
-            const storedManifest = await databaseGet(database, ACTIVE_IMPORT_KEY);
-            if (!storedManifest) {
-                throw importError(
-                    "STALE_SOURCE",
-                    "The browser asset import was removed before the read completed.",
-                );
-            }
-            const stored = validateStoredManifest(storedManifest);
-            if (stored.importId !== source.importId ||
-                stored.sizes.get(source.path) !== source.size) {
-                throw importError(
-                    "STALE_SOURCE",
-                    "The browser asset import changed before the read completed.",
-                );
-            }
-
-            const handle = await fileHandleFor(source.importId, source.path);
-            const file = await handle.getFile();
-            if (file.size !== source.size) {
-                throw importError(
-                    "PERSISTED_SIZE",
-                    "Persisted asset sizes no longer match the active read source.",
-                );
-            }
-            return readWindow(file, offset, requestedLength);
-        }, "shared");
-    }
-
     async function stat(path)
     {
         const file = await openFile(path);
@@ -1432,8 +1340,6 @@ export function createBrowserAssetStore(module, { onState = () => {} } = {})
         clear: () => track(clear),
         stat: (path) => track(() => stat(path)),
         read: (path, options) => track(() => read(path, options)),
-        openSource: (path) => track(() => openSource(path)),
-        readSource: (source, options) => track(() => readSource(source, options)),
         dispose,
         get manifest() { return activeManifest; },
         get storageStatus() { return { persistenceGranted, storageEstimate }; },

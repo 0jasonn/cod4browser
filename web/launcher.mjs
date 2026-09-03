@@ -51,8 +51,6 @@ const runtime = {
         message: "Waiting for the WebAssembly asset probe",
     },
     rendererSurface: { state: "idle", message: "Waiting for an engine surface" },
-    rendererTexture: { state: "idle", message: "Waiting for a supported engine image" },
-    rendererShader: { state: "idle", message: "Waiting for a retail shader contract" },
     rendererAa: { state: "idle", message: "Waiting for the scene sample target" },
     rendererSceneView: null,
     rendererSceneFrame: null,
@@ -163,26 +161,6 @@ function publishAssetState(detail) {
     }));
 }
 
-globalThis.addEventListener("kisakcod:renderer-shader", (event) => {
-    const previousFirstDraw = runtime.rendererShader?.firstDrawCompleted === true;
-    runtime.rendererShader = structuredClone(event.detail);
-    if (event.detail.state === "ready" && event.detail.firstDrawCompleted) {
-        rendererStatus.textContent = "WebGL2 + COD4 shader contract ready";
-        if (!previousFirstDraw) {
-            appendLog(
-                `[kisakcod-web] Drew the indexed surface through ` +
-                `${event.detail.substitutionId}.`,
-            );
-        }
-    } else if (event.detail.state === "failed") {
-        rendererStatus.textContent = "WebGL2 shader substitution failed";
-        appendLog(`[kisakcod-web] Renderer shader: ${event.detail.message}`, "error");
-    } else if (event.detail.state === "lost") {
-        rendererStatus.textContent = "WebGL2 shader context lost";
-    } else if (event.detail.state === "cleared") {
-        rendererStatus.textContent = "WebGL2 + world surface ready";
-    }
-});
 
 globalThis.addEventListener("kisakcod:renderer-aa", (event) => {
     const previousGeneration = runtime.rendererAa?.resourceGeneration ?? 0;
@@ -198,63 +176,6 @@ globalThis.addEventListener("kisakcod:renderer-aa", (event) => {
     }
 });
 
-globalThis.addEventListener("kisakcod:renderer-texture", (event) => {
-    const previousState = runtime.rendererTexture.state;
-    const previousRecoveryCount = runtime.rendererTexture.recoveryCount ?? 0;
-    runtime.rendererTexture = {
-        ...runtime.rendererTexture,
-        ...event.detail,
-    };
-    switch (event.detail.state) {
-    case "ready":
-        if (event.detail.resident === false) {
-            engineAssetStatus.textContent = "IWI texture retained; awaiting WebGL2";
-            break;
-        }
-        engineAssetStatus.textContent =
-            `${runtime.rendererTexture.width}\u00d7${runtime.rendererTexture.height} IWI texture active`;
-        if (previousState === "lost" || previousState === "retained" ||
-            runtime.rendererTexture.recoveryCount > previousRecoveryCount) {
-            appendLog(
-                `[kisakcod-web] Recreated the renderer texture from ` +
-                `${formatBytes(runtime.rendererTexture.recoveryBytes)} of bounded recovery pixels.`,
-            );
-        } else {
-            appendLog(
-                `[kisakcod-web] Uploaded ${runtime.rendererTexture.path || "engine IWI"} ` +
-                `as RGBA8; renderer owns ${formatBytes(runtime.rendererTexture.recoveryBytes)}.`,
-            );
-        }
-        break;
-    case "retained":
-        engineAssetStatus.textContent = "IWI texture retained; awaiting WebGL2";
-        appendLog(
-            `[kisakcod-web] Retained ${formatBytes(runtime.rendererTexture.recoveryBytes)} ` +
-            `of bounded texture pixels for context recovery.`,
-        );
-        break;
-    case "unsupported":
-        engineAssetStatus.textContent = "IWI parsed; texture format deferred";
-        appendLog(`[kisakcod-web] Renderer texture: ${event.detail.message}`);
-        break;
-    case "failed":
-        engineAssetStatus.textContent = "IWI texture rejected";
-        appendLog(`[kisakcod-web] Renderer texture: ${event.detail.message}`, "error");
-        break;
-    case "loading":
-        engineAssetStatus.textContent = "Reading one IWI texture asynchronously";
-        break;
-    case "lost":
-        engineAssetStatus.textContent = "IWI texture retained for context recovery";
-        break;
-    case "unavailable":
-        engineAssetStatus.textContent = "No bounded IWI texture found";
-        break;
-    default:
-        engineAssetStatus.textContent = "Waiting for mounted archive";
-        break;
-    }
-});
 
 globalThis.addEventListener("kisakcod:renderer-surface", (event) => {
     const previousState = runtime.rendererSurface.state;

@@ -1378,7 +1378,7 @@ void __cdecl R_BeginRegistration(vidConfig_t *configuration)
     Dvar_SetInt(r_rendererInUse, 1);
     std::memset(configuration, 0, sizeof(*configuration));
     WebDisplay_Configure(configuration);
-    configuration->maxTextureSize = WEB_RENDERER_MAX_RGBA8_DIMENSION;
+    configuration->maxTextureSize = 2048;
     configuration->maxTextureMaps = 16;
     configuration->deviceSupportsGamma = false;
 }

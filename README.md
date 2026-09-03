@@ -52,10 +52,8 @@ The authoritative component classification and current blockers are in
 [docs/web-port-convergence.md](docs/web-port-convergence.md). Concise build and
 validation instructions are in [docs/web-port.md](docs/web-port.md). See the
 [current status](docs/web-status.md), [ordered roadmap](docs/web-roadmap.md),
-[campaign matrix](docs/campaign-compatibility.md), and
-[execution report](WEB_ROADMAP_EXECUTION_REPORT.md) for claim scope and exact
-evidence. Historical milestone narratives are retained under
-[docs/history](docs/history/README.md).
+[campaign matrix](docs/campaign-compatibility.md) for claim scope and exact
+evidence. [Historical records](docs/history/README.md) are available in Git.
 
 ## Build
 

@@ -1,5 +1,5 @@
-// Transport bookkeeping only. Each host owns its operation/event allowlists,
-// timeout policy, recovery, and filesystem leases.
+// Shared Worker transport and filesystem leases. Each host owns its
+// operation/event allowlists, timeout policy, and recovery.
 export const ENGINE_PROTOCOL_VERSION = 1;
 export const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 
@@ -90,4 +90,94 @@ export function settleWorkerReply(pending, message, generation)
     releaseRequest(request);
     if (message.error) request.reject(new EngineWorkerError(message.error));
     else request.resolve(message.result);
+}
+
+const ENGINE_FILESYSTEM_LOCK = "kisakcod-web-engine-filesystem-v1";
+const HOME_WRITER_LOCK = "kisakcod-web-home-writer-v1";
+
+/**
+ * Imported files are shared; writable home data has one owner across tabs.
+ * @param {Pick<LockManager, "request"> | null | undefined} lockManager
+ * @param {(state: string) => void} emitFilesystemLifecycle
+ */
+export function createFilesystemLeases(lockManager, emitFilesystemLifecycle)
+{
+    /** @type {(() => void) | null} */
+    let releaseFilesystemLease = null;
+    /** @type {Promise<void> | null} */
+    let filesystemLeaseCompletion = null;
+    /** @type {(() => void) | null} */
+    let releaseHomeWriterLease = null;
+    /** @type {Promise<void> | null} */
+    let homeWriterLeaseCompletion = null;
+    async function acquire()
+    {
+        if (releaseFilesystemLease || !lockManager?.request) return;
+
+        const homeAcquired = Promise.withResolvers();
+        /** @type {PromiseWithResolvers<void>} */
+        const homeHeld = Promise.withResolvers();
+        homeWriterLeaseCompletion = lockManager.request(
+            HOME_WRITER_LOCK,
+            { mode: "exclusive", ifAvailable: true },
+            async (lock) => {
+                if (!lock) {
+                    homeAcquired.resolve(false);
+                    return;
+                }
+                releaseHomeWriterLease = homeHeld.resolve;
+                homeAcquired.resolve(true);
+                emitFilesystemLifecycle("writerLeaseAcquired");
+                await homeHeld.promise;
+            },
+        );
+        if (!await homeAcquired.promise) {
+            await homeWriterLeaseCompletion;
+            homeWriterLeaseCompletion = null;
+            throw Object.assign(new Error("Another tab owns the writable browser profile."), {
+                code: "HOME_WRITER_CONFLICT",
+            });
+        }
+
+        /** @type {PromiseWithResolvers<void>} */
+        const filesystemAcquired = Promise.withResolvers();
+        /** @type {PromiseWithResolvers<void>} */
+        const filesystemHeld = Promise.withResolvers();
+        try {
+            filesystemLeaseCompletion = lockManager.request(
+                ENGINE_FILESYSTEM_LOCK,
+                { mode: "shared" },
+                async () => {
+                    releaseFilesystemLease = filesystemHeld.resolve;
+                    filesystemAcquired.resolve();
+                    await filesystemHeld.promise;
+                },
+            );
+            await filesystemAcquired.promise;
+        } catch (error) {
+            releaseHomeWriterLease?.();
+            await homeWriterLeaseCompletion;
+            releaseHomeWriterLease = null;
+            homeWriterLeaseCompletion = null;
+            throw error;
+        }
+    }
+
+    async function release()
+    {
+        const releasedWriter = Boolean(releaseHomeWriterLease);
+        const completions = [filesystemLeaseCompletion, homeWriterLeaseCompletion]
+            .filter(Boolean);
+        const releases = [releaseFilesystemLease, releaseHomeWriterLease]
+            .filter(Boolean);
+        filesystemLeaseCompletion = null;
+        homeWriterLeaseCompletion = null;
+        releaseFilesystemLease = null;
+        releaseHomeWriterLease = null;
+        for (const release of releases) release?.();
+        await Promise.all(completions);
+        if (releasedWriter) emitFilesystemLifecycle("writerLeaseReleased");
+    }
+
+    return { acquire, release };
 }

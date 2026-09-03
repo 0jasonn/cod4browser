@@ -165,6 +165,10 @@ Kisak behavior or explain why a platform-owned implementation is permanent.
 - Treat compile, boot, render, functional, and playable as distinct evidence levels. Promote retail compatibility only from current execution evidence; file discovery is not compatibility.
 - Never weaken native or browser assertions to make a test pass. Reproduce the earliest incorrect canonical or platform boundary and fix that boundary.
 - Keep generated files out of hand-written patches. Do not edit vendored or imported retail data.
+- Update existing documentation instead of adding agent completion reports or
+  milestone snapshots. Put disposable run reports under ignored `build/`; keep
+  durable architectural decisions and compatibility evidence in the existing
+  guides and `docs/evidence/`. Use Git for superseded documentation.
 - Preserve unrelated user changes and avoid destructive Git operations.
 - Document architectural choices and browser limitations in the repository when they become real, especially renderer selection, asset storage, transport, memory sizing, and cross-origin isolation.
 - Update this file when verified setup or test commands replace the bootstrap assumptions above.
