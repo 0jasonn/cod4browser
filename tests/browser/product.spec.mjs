@@ -4,6 +4,15 @@ import { createSyntheticIwd } from "./synthetic_iwd.mjs";
 
 test.skip(process.env.KISAK_WEB_PRODUCT_TEST !== "1", "Runs only against the production site.");
 
+async function submitCommand(page, text)
+{
+    await page.locator("#engine-command-input").evaluate((input, command) => {
+        input.value = command;
+        input.form.requestSubmit();
+    }, text);
+    await expect(page.locator("#engine-command-status")).toHaveText(`Accepted: ${text}`);
+}
+
 test("canonical Quit stops the French production runtime and can start again @product", async ({ page }, testInfo) => {
     const directory = await createInstallDirectory(testInfo, "quit-install", { language: "french" });
     await page.goto("/");
@@ -12,11 +21,9 @@ test("canonical Quit stops the French production runtime and can start again @pr
     await page.locator("#portable-install-button").click();
     await (await chooser).setFiles(directory);
     await expect(page.locator("#boot-log")).toContainText("canonical runtime started");
-    await page.locator("#engine-command-input").fill("path");
-    await page.locator("#engine-command-submit").click();
+    await submitCommand(page, "path");
     await expect(page.locator("#boot-log")).toContainText("Current language: french");
-    await page.locator("#engine-command-input").fill("snd_volume 0.37; quit");
-    await page.locator("#engine-command-submit").click();
+    await submitCommand(page, "snd_volume 0.37; quit");
     await expect(page.locator("html")).toHaveAttribute("data-runtime-state", "stopped");
     await expect(page.locator("#quit-dialog")).toBeVisible();
     const frame = await page.locator("#frame-counter").textContent();
@@ -54,31 +61,26 @@ test("display resolution applies through native restart and survives durable res
     await page.locator("#portable-install-button").click();
     await (await chooser).setFiles(directory);
     await expect(page.locator("#boot-log")).toContainText("canonical runtime started");
-    const command = async (text) => {
-        await page.locator("#engine-command-input").fill(text);
-        await page.locator("#engine-command-submit").click();
-        await expect(page.locator("#engine-command-status")).toHaveText(`Accepted: ${text}`);
-    };
     const canvas = page.locator("#game-canvas");
     const size = () => canvas.evaluate((element) => [element.width, element.height]);
-    await command("r_mode 640x480; vid_restart");
+    await submitCommand(page, "r_mode 640x480; vid_restart");
     await expect.poll(size).toEqual([640, 480]);
     const bounds = await canvas.boundingBox();
     expect(bounds.width / bounds.height).toBeCloseTo(4 / 3, 2);
     await page.setViewportSize({ width: 1000, height: 800 });
     await expect.poll(size).toEqual([640, 480]);
-    await command("r_mode Automatic; vid_restart");
+    await submitCommand(page, "r_mode Automatic; vid_restart");
     await expect.poll(() => canvas.evaluate((element) => {
         const rect = element.getBoundingClientRect();
         return Math.abs(element.width - Math.round(rect.width)) +
             Math.abs(element.height - Math.round(rect.height));
     })).toBe(0);
-    await command("r_displayRefresh");
+    await submitCommand(page, "r_displayRefresh");
     await expect(page.locator("#boot-log")).toContainText('"r_displayRefresh" is: "Browser controlled');
-    await command("r_mode 1280x720; vid_restart");
+    await submitCommand(page, "r_mode 1280x720; vid_restart");
     await expect.poll(size).toEqual([1280, 720]);
     await expect(page.locator("html")).toHaveAttribute("data-runtime-state", "running");
-    await command("quit");
+    await submitCommand(page, "quit");
     await expect(page.locator("html")).toHaveAttribute("data-runtime-state", "stopped");
     await page.getByRole("button", { name: "Start game", exact: true }).click();
     await expect(page.locator("#boot-log")).toContainText("canonical runtime started");
@@ -152,6 +154,18 @@ test("production artifact boots without diagnostic browser APIs @product", async
     expect(await page.evaluate(() => "__KISAKCOD_WEB__" in globalThis)).toBe(false);
     expect(pageErrors).toEqual([]);
     expect(consoleErrors).toEqual([]);
+});
+
+test("production renderer fills the browser viewport @product", async ({ page }) => {
+    await page.setViewportSize({ width: 1234, height: 777 });
+    await page.goto("/");
+    await expect(page.locator("html")).toHaveAttribute("data-runtime-state", "running");
+    await expect(page.locator(".viewport-panel > .panel-heading")).toBeHidden();
+    await expect(page.locator(".console-panel")).toBeHidden();
+    await expect.poll(() => page.locator("#game-canvas").evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        return [bounds.x, bounds.y, bounds.width, bounds.height];
+    })).toEqual([0, 0, 1234, 777]);
 });
 
 test("production JavaScript exposes only named product operations @product", async ({ request }) => {

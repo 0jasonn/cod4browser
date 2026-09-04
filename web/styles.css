@@ -345,3 +345,55 @@ body {
     }
 
 }
+
+/* The production page is the game surface; launcher controls remain available
+   to the runtime without competing with the renderer for screen space. */
+.renderer-only {
+    overflow: hidden;
+    background: #000;
+}
+
+.renderer-only .app-shell {
+    position: fixed;
+    inset: 0;
+    display: block;
+    width: auto;
+    margin: 0;
+    padding: 0;
+}
+
+.renderer-only .viewport-panel {
+    display: grid;
+    place-items: center;
+    width: 100%;
+    height: 100%;
+    border: 0;
+}
+
+.renderer-only .canvas-wrap {
+    width: 100%;
+    height: 100%;
+    background: #000;
+}
+
+.renderer-only .panel-heading,
+.renderer-only .console-panel,
+.renderer-only > p {
+    display: none;
+}
+
+.renderer-only .asset-panel {
+    position: fixed;
+    z-index: 1;
+    top: 50%;
+    left: 50%;
+    width: min(480px, calc(100% - 32px));
+    border-color: var(--line);
+    transform: translate(-50%, -50%);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.72);
+}
+
+html[data-asset-state="checking"] .renderer-only .asset-panel,
+html[data-asset-state="ready"] .renderer-only .asset-panel {
+    display: none;
+}

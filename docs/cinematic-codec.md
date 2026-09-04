@@ -42,11 +42,24 @@ Display/subtitle time advances when that frame is presented, and completion
 waits for both the video duration and queued audio duration. Movies without
 audio, or with a failed audio device, retain the wall-time fallback.
 
+Native runs the loading movie on its cinematic thread while the main thread
+loads the map. The single-threaded browser Worker cannot present successive
+OffscreenCanvas frames inside that synchronous command. The web map boundary
+therefore starts the canonically selected loading movie before `SV_SpawnServer`
+and uses COD4's existing `nextmap` handoff to issue the same requested map
+command when playback ends. That replay suppresses the duplicate loading-movie
+start. The native pregame hold remains enabled, so gameplay, mission sound and
+the HUD cannot begin behind a full-screen loading movie. Map work is serialized
+after the movie on this single-threaded build.
+
 Owned Killhouse movie playback now waits through held audio delivery and actual
 AudioContext suspension, resumes, and survives WebGL context loss/restoration
 in Chromium 149. A 900-ms blocked page thread followed by 150 ms of recovery
 advances video by 433 ms in the planar-material run, consuming queued PCM
-before waiting for more delivery.
+before waiting for more delivery. The rebuilt production `map killhouse` path starts `killhouse_load` in 299 ms,
+presents changing movie-only frames for 37,624 ms, then loads the map and starts
+`killhouse_fade` 2,722 ms after the movie ends. The diagnostic path starts in
+375 ms and records no server spawn or game-driven frame during the movie.
 This is platform synchronization/recovery evidence; human
 listening, hardware output latency, arbitrary audio-tail layouts and matched
 native/Steam audiovisual comparison remain unqualified.

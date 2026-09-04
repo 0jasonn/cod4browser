@@ -162,8 +162,17 @@ through the queued audio in that run (433 ms with the subsequent planar
 renderer). Hardware output latency, arbitrary audio tails and
 native/Steam audiovisual comparison
 remain open; no-audio/device-failure playback retains a wall-time fallback.
-Owned Killhouse movie pause/resume/completion/skip and production playback pass
-in Chromium 149; production completion takes 37,518 ms. An initial diagnostic
+The single-threaded Worker now starts a canonically selected loading movie
+before `SV_SpawnServer`, then uses the existing `nextmap` handoff to run the
+same requested map after the movie ends. This replaces the former post-load
+playback, which exposed active gameplay, mission audio and HUD underneath the
+movie. The forced `ui_autoContinue` override from the pre-cinematic bootstrap
+has also been removed, restoring the native pregame hold. Owned production
+`map killhouse` starts `killhouse_load` in 299 ms, presents changing movie-only
+frames for 37,624 ms, then loads the map and starts the authored fade 2,722 ms
+after the movie ends. The diagnostic run starts in 375 ms and records no
+`SV_SpawnServer` or game-driven frame before movie completion. Standalone
+production completion remains 37,518 ms. An initial diagnostic
 attempt let the canvas unlock click reach canonical input after the movie
 command, stopping the skippable movie. The fixture now waits for that input
 receipt before starting playback; all timing and skip assertions remain intact.

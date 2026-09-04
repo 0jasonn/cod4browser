@@ -18,6 +18,10 @@
 
 extern const dvar_t *sv_cheats;
 
+#if defined(KISAK_WEB)
+bool WebCinematic_DeferMapLoad(const char *command, const char *mapname);
+#endif
+
 void __cdecl CL_ShutdownDemo();
 void __cdecl SV_SpawnServer(const char *mapname, int savegame);
 
@@ -68,6 +72,10 @@ void SV_Map_f()
     FS_ConvertPath(mapname);
     EmitEngineLifecycleTrace(
         EngineLifecycleStage::MapNameSelected, mapname);
+#if defined(KISAK_WEB)
+    if (!savegame && WebCinematic_DeferMapLoad(Cmd_Argv(0), mapname))
+        return;
+#endif
     EmitEngineLifecycleTrace(
         EngineLifecycleStage::MapSpawnBegin, mapname);
     EmitEngineLifecycleTrace(

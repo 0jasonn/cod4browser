@@ -382,10 +382,10 @@ static void MountCanonicalRuntime()
     // controls in the canonical binding table; imported or future persisted
     // bindings always win, and movement remains owned by CL_Input/usercmd.
     InstallBrowserProfileDefaultBindings();
-    // Native SP can hold the pregame menu for Bink playback. The browser
-    // backend deliberately omits Bink, so select the canonical UI
-    // auto-continue path after the retail defaults have been applied.
-    Dvar_SetBoolByName("ui_autoContinue", true);
+    // Retain native pregame ownership while the loading movie is active. It
+    // keeps the server paused and the HUD hidden until UI_PlayerStart releases
+    // the movie and starts the authored in-game fade.
+    Dvar_SetBoolByName("ui_autoContinue", false);
 
     // Keep browser gameplay on wall time through slow frames. The native
     // 100 ms limit otherwise intentionally dilates time below 10 FPS, even

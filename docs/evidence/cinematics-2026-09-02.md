@@ -153,6 +153,35 @@ comparison. Retail media and logs stay under ignored `build/parity-audit/`;
 no shader bytecode or movie content is added to fixtures. Current byte budgets
 and artifact identity are in [architecture](../web-architecture.md#build-products).
 
+## Map-loading sequencing update, 2026-09-04
+
+The first map-path observation reproduced two separate problems. The loading
+movie began inside the synchronous Worker map command, where the browser could
+not present it, and an authored `killhouse_fade` queued during initialization
+replaced it after 3,348.705 ms. Delaying the movie clock until the command
+returned preserved all frames, but by then forced `ui_autoContinue` had released
+the pregame hold. Gameplay, Gaz dialogue and the HUD could therefore run behind
+the full-screen movie.
+
+A direct keep-alive experiment confirmed that successive OffscreenCanvas frames
+remain frozen until the synchronous Worker command returns. The final browser
+boundary starts the movie selected by `cin_levels.txt` before `SV_SpawnServer`
+and stores the same requested map command in COD4's existing `nextmap` path. At
+natural completion or skip, that command runs once and suppresses its duplicate
+loading-movie start. The obsolete forced `ui_autoContinue` setting is removed,
+restoring the native pregame hold for any remaining active cinematic. No route,
+objective or mission state is injected.
+
+The rebuilt production `map killhouse` path starts `killhouse_load` 299.050 ms
+after submission and presents changing, movie-only frames for 37,624.075 ms.
+It then performs the synchronous map load and starts `killhouse_fade` 2,722.270
+ms after the loading movie ends. The diagnostic run starts in 375.050 ms, plays
+for 37,564.770 ms, records no `SV_SpawnServer` or game-driven frame during the
+movie, and produces its first game-driven frame 6,313.015 ms after completion.
+Production and diagnostic captures were inspected and contain the cinematic
+without the gameplay HUD. Retail media and detailed run artifacts remain under
+ignored `build/parity-audit/`.
+
 ## Limits
 
 This is movie playback, not authored campaign completion or Steam parity.

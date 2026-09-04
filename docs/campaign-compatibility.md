@@ -27,9 +27,12 @@ French/German synthetic path and persistence coverage. Retail campaign evidence
 below remains English-only; localized mission behavior is unverified.
 
 The [cinematic implementation](evidence/cinematics-2026-09-02.md) decodes and
-plays the owned Killhouse intro through the existing Kisak cinematic API.
-Its standalone command-based playback check does not advance any mission
-classification or establish the authored Killhouse → CargoShip transition.
+plays the owned Killhouse intro through the existing Kisak cinematic API. The
+production `map killhouse` path starts the movie before map initialization,
+keeps gameplay and HUD state out of the movie, then loads Killhouse and starts
+the authored fade. Standalone pause, suspension, recovery, completion and skip
+checks also pass. This playback evidence does not advance any mission
+classification or establish the authored Killhouse-to-CargoShip transition.
 
 The [Steam inventory](evidence/steam-reference-2026-09-02.json) records local
 build 2737681, 101 executable/data hashes, configured graphics/audio/input

@@ -126,6 +126,7 @@ function renderStorageStatus(detail)
 function renderAssetState(detail)
 {
     assetState = { ...detail };
+    document.documentElement.dataset.assetState = detail.state;
     assetControl.dataset.assetState = detail.state;
     assetStateLabel.textContent = labelForAssetState(detail.state);
     assetMessage.textContent = detail.message;
@@ -199,9 +200,13 @@ function resizeCanvas()
 globalThis.addEventListener("kisakcod:display", (event) => {
     const { detail } = /** @type {CustomEvent} */ (event);
     const wrapper = /** @type {HTMLElement} */ (document.querySelector(".canvas-wrap"));
-    if (Number.isInteger(detail.width) && Number.isInteger(detail.height) && detail.width > 0 && detail.height > 0)
-        wrapper.style.aspectRatio = detail.fixed
-            ? `${detail.width} / ${detail.height}` : "";
+    if (Number.isInteger(detail.width) && Number.isInteger(detail.height) &&
+        detail.width > 0 && detail.height > 0) {
+        const aspect = detail.width / detail.height;
+        wrapper.style.aspectRatio = detail.fixed ? String(aspect) : "";
+        wrapper.style.width = detail.fixed ? `min(100vw, ${aspect * 100}vh)` : "";
+        wrapper.style.height = detail.fixed ? `min(100vh, ${100 / aspect}vw)` : "";
+    }
 });
 
 const handleRuntimeState = (event) => {

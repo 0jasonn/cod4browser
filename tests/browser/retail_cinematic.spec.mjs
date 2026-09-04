@@ -148,18 +148,30 @@ test("owned Killhouse movie renders, pauses, completes and accepts native skip",
         expect(await call(page, 3)).toBe(1);
         await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.audioDriver.context.resume());
         await expect.poll(() => call(page, 0)).toBeGreaterThan(devicePausedAt + 500);
-        const beforeStall = await call(page, 0);
+        const beforeStall = await page.evaluate(async () => ({
+            movie: await globalThis.__KISAKCOD_WEB__.module.call(
+                "_KisakWeb_TestCinematicState", 0),
+            device: globalThis.__KISAKCOD_WEB__.module.audioDriver.context.currentTime,
+        }));
         await page.evaluate(() => {
             const until = performance.now() + 900;
             while (performance.now() < until) { /* simulate a blocked DOM host */ }
         });
-        // Give queued device feedback time to arrive and several video pumps
-        // to catch up. A wall-time movie jumps about 1050 ms here; a PCM-led
-        // movie consumes its short queued lead, then the resumed 150 ms.
+        // Give device feedback time to arrive and video several pumps to catch
+        // up. Web Audio continues on its rendering thread while the page is
+        // blocked, so compare the movie with actual device progress instead of
+        // assuming a particular decoded Bink audio-packet duration.
         await page.waitForTimeout(150);
-        const afterStall = await call(page, 0);
-        expect(afterStall - beforeStall).toBeLessThan(500);
-        await expect.poll(() => call(page, 0)).toBeGreaterThan(afterStall + 500);
+        const afterStall = await page.evaluate(async () => ({
+            movie: await globalThis.__KISAKCOD_WEB__.module.call(
+                "_KisakWeb_TestCinematicState", 0),
+            device: globalThis.__KISAKCOD_WEB__.module.audioDriver.context.currentTime,
+        }));
+        const stallVideoAdvance = afterStall.movie - beforeStall.movie;
+        const stallDeviceAdvance = (afterStall.device - beforeStall.device) * 1000;
+        expect(stallVideoAdvance).toBeGreaterThanOrEqual(0);
+        expect(stallVideoAdvance).toBeLessThanOrEqual(stallDeviceAdvance + 100);
+        await expect.poll(() => call(page, 0)).toBeGreaterThan(afterStall.movie + 500);
         expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.call(
             "_KisakWeb_TestLoseWebGLContext"))).toBe(1);
         await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state)).toBe("renderer-lost");
@@ -175,12 +187,97 @@ test("owned Killhouse movie renders, pauses, completes and accepts native skip",
         await expect.poll(() => call(page, 3)).toBe(2);
         expect(failures).toEqual([]);
         const evidence = { events, elapsed, audio, devicePausedAt,
-            stallVideoAdvance: afterStall - beforeStall, browser: testInfo.project.name };
+            stallVideoAdvance, stallDeviceAdvance, browser: testInfo.project.name };
         await writeFile(testInfo.outputPath("cinematic-evidence.json"),
             JSON.stringify(evidence, null, 2));
         await testInfo.attach("cinematic-evidence", { contentType: "application/json",
             body: Buffer.from(JSON.stringify(evidence)) });
     });
+
+test("map request plays the complete owned cinematic before game initialization and fade", {
+    tag: "@retail-cinematic",
+}, async ({ retailPage: page }, testInfo) => {
+    test.skip(process.env.KISAK_WEB_PRODUCT_TEST === "1",
+        "Diagnostic playback position is excluded from production.");
+    test.setTimeout(480_000);
+    const failures = [];
+    page.on("pageerror", (error) => failures.push(String(error)));
+    await page.addInitScript(() => {
+        globalThis.__mapMovieEvents = [];
+        globalThis.__mapSceneFrames = [];
+        globalThis.__mapLifecycleEvents = [];
+        globalThis.addEventListener("kisakcod:cinematic", ({ detail }) =>
+            globalThis.__mapMovieEvents.push({ ...detail, wallTime: performance.now() }));
+        globalThis.addEventListener("kisakcod:engine-lifecycle", ({ detail }) =>
+            globalThis.__mapLifecycleEvents.push({ ...structuredClone(detail), wallTime: performance.now() }));
+        globalThis.addEventListener("kisakcod:renderer-scene-frame", ({ detail }) => {
+            if (detail?.state === "drawn" && detail.geometrySubmitted)
+                globalThis.__mapSceneFrames.push({ ...structuredClone(detail), wallTime: performance.now() });
+        });
+    });
+    await page.goto("/");
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state)).toBe("running");
+    const chooser = page.waitForEvent("filechooser");
+    await page.locator("#portable-install-button").click();
+    await (await chooser).setFiles(retailRoot);
+    await expect.poll(() => page.evaluate(() => {
+        const assets = globalThis.__KISAKCOD_WEB__?.assets;
+        if (assets?.state === "failed") throw new Error(assets.message);
+        return assets?.state;
+    }), { timeout: 300_000 }).toBe("ready");
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.filesystemState),
+        { timeout: 300_000 }).toBe("mounted");
+    await page.locator("#game-canvas").click({ position: { x: 5, y: 5 } });
+    await expect(page.locator("#boot-log")).toContainText("Browser mouse button reached canonical input");
+
+    // The command uses the canonical map/loading path. It does not advance a
+    // route or inject mission state.
+    await page.locator("#engine-command-input").fill("map killhouse");
+    const commandAt = await page.evaluate(() => performance.now());
+    await page.locator("#engine-command-form").evaluate((form) => form.requestSubmit());
+    await expect.poll(() => page.evaluate(() => globalThis.__mapMovieEvents
+        .some((event) => event.state === "started" && event.name === "killhouse_load")),
+    { timeout: 10_000 }).toBe(true);
+    expect(await call(page, 0)).toBeLessThan(10_000);
+    await page.waitForTimeout(1_000);
+    const early = await page.locator("#game-canvas").screenshot({
+        path: testInfo.outputPath("map-movie-early.png"),
+    });
+    await page.waitForTimeout(4_000);
+    const middle = await page.locator("#game-canvas").screenshot({
+        path: testInfo.outputPath("map-movie-middle.png"),
+    });
+    expect(middle.equals(early)).toBe(false);
+    expect(await page.evaluate(() => globalThis.__mapLifecycleEvents
+        .some((event) => event.stage === "SV_SpawnServer"))).toBe(false);
+    expect(await page.evaluate(() => globalThis.__mapSceneFrames.length)).toBe(0);
+    expect(await page.evaluate(() => globalThis.__mapMovieEvents
+        .some((event) => event.state === "started" && event.name === "killhouse_fade"))).toBe(false);
+
+    await expect.poll(() => page.evaluate(() => globalThis.__mapMovieEvents
+        .some((event) => event.state === "ended" && event.name === "killhouse_load")),
+    { timeout: 60_000 }).toBe(true);
+    await expect.poll(() => page.evaluate(() => globalThis.__mapMovieEvents
+        .some((event) => event.state === "started" && event.name === "killhouse_fade")),
+    { timeout: 30_000 }).toBe(true);
+    await expect.poll(() => page.evaluate(() => globalThis.__mapSceneFrames.length),
+        { timeout: 30_000 }).toBeGreaterThan(0);
+    const events = await page.evaluate(() => structuredClone(globalThis.__mapMovieEvents));
+    const loadingStart = events.find((event) =>
+        event.state === "started" && event.name === "killhouse_load");
+    const loadingEnd = events.find((event) =>
+        event.state === "ended" && event.name === "killhouse_load");
+    const elapsed = loadingEnd.wallTime - loadingStart.wallTime;
+    const firstSceneAt = await page.evaluate(() => globalThis.__mapSceneFrames[0].wallTime);
+    expect(loadingStart.wallTime - commandAt).toBeLessThan(3_000);
+    expect(elapsed).toBeGreaterThan(37_000);
+    expect(elapsed).toBeLessThan(42_000);
+    expect(firstSceneAt).toBeGreaterThanOrEqual(loadingEnd.wallTime);
+    expect(failures).toEqual([]);
+    await writeFile(testInfo.outputPath("map-cinematic-evidence.json"),
+        JSON.stringify({ events, elapsed, startDelay: loadingStart.wallTime - commandAt,
+            sceneAfterMovie: firstSceneAt - loadingEnd.wallTime }, null, 2));
+});
 
 test("production movie plays owned frames and completes through the shipped command", {
     tag: ["@retail-cinematic", "@product"],

@@ -35,6 +35,7 @@ char currentName[256]{};
 char nextName[256]{};
 unsigned nextFlags = 0, playbackFlags = 0;
 bool started = false, finished = true, paused = false, inputEnded = false;
+bool clockStarted = false, finishBeforeNext = false;
 double startedAt = 0, pausedAt = 0, decodedTime = -1;
 WebCinematicVideo pendingVideo;
 bool hasPendingVideo = false;
@@ -61,6 +62,7 @@ std::int64_t SeekMovie(void *, std::int64_t offset, int whence)
 }
 double Position()
 {
+    if (!clockStarted) return 0;
     double seconds = 0;
     if (audioSources[0] && WebOpenAL_SourcePlaybackSeconds(audioSources[0], seconds))
         return seconds;
@@ -194,6 +196,15 @@ void WebCinematic_Update()
 {
     if (!gfxCmdBufInput.codeImages[TEXTURE_SRC_CODE_CINEMATIC_Y] && !UploadVideo(nullptr)) return;
     if (!started || finished || paused) return;
+    if (!clockStarted)
+    {
+        // Map loading is synchronous in the engine Worker. Start presentation
+        // only after that command returns to the browser frame pump, otherwise
+        // an unpresentable loading interval consumes the movie clock.
+        clockStarted = true;
+        startedAt = emscripten_get_now();
+        PublishMovie("started", currentName, "");
+    }
     // Keep one decoded frame pending: its audio must be queued before display
     // time. The decoder owns its planes until the next ReadFrame, so this adds
     // no copied frame queue. Bound catch-up work after a Worker stall.
@@ -252,6 +263,7 @@ void R_Cinematic_StopPlayback()
     hasPendingVideo = false;
     pendingVideo = {};
     audioDuration = 0;
+    clockStarted = finishBeforeNext = false;
     started = false;
     finished = true;
     currentName[0] = 0;
@@ -287,12 +299,14 @@ void __cdecl R_Cinematic_StartPlayback(char *name, unsigned int flags, float vol
     playbackFlags = flags;
     playbackVolume = std::isfinite(volume) ? std::clamp(volume, 0.0f, 1.0f) : 0;
     paused = inputEnded = false;
+    clockStarted = false;
+    // Native can present the loading movie while its other threads build the
+    // map. The single-threaded Worker cannot. Keep that authored loading movie
+    // until completion before accepting the in-game fade queued during load.
+    finishBeforeNext = clientUIActives[0].connectionState == CA_LOADING;
     started = true;
     finished = false;
     decodedTime = -1;
-    startedAt = emscripten_get_now();
-    WebCinematic_Update();
-    if (!finished) PublishMovie("started", currentName, "");
 }
 void R_Cinematic_SetNextPlayback(const char *name, unsigned int flags)
 {
@@ -301,6 +315,7 @@ void R_Cinematic_SetNextPlayback(const char *name, unsigned int flags)
 }
 void __cdecl R_Cinematic_StartNextPlayback()
 {
+    if (finishBeforeNext && started && !finished) return;
     const float scale = snd_cinematicVolumeScale ? snd_cinematicVolumeScale->current.value : 1;
     R_Cinematic_StartPlayback(nextName, nextFlags, static_cast<float>(SND_GetVolumeNormalized()) * scale);
     nextName[0] = 0;
@@ -311,8 +326,11 @@ void __cdecl R_Cinematic_SetPaused(CinematicEnum value)
     const bool requested = static_cast<int>(value) != 0;
     if (!started || finished || paused == requested) return;
     const double now = emscripten_get_now();
-    if (requested) pausedAt = now;
-    else startedAt += now - pausedAt;
+    if (clockStarted)
+    {
+        if (requested) pausedAt = now;
+        else startedAt += now - pausedAt;
+    }
     paused = requested;
     for (const auto source : audioSources)
         if (source) { if (paused) alSourcePause(source); else alSourcePlay(source); }
