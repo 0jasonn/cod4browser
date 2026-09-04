@@ -3,7 +3,11 @@
 #include <web/web_renderer_material_lookup.h>
 
 #include <cgame/cg_pose.h>
+#include <cgame/cg_local.h>
 #include <gfx_d3d/gfx_world_types.h>
+#include <gfx_d3d/r_dpvs_core.h>
+#include <gfx_d3d/r_light.h>
+#include <gfx_d3d/r_model_pose_bounds.h>
 #include <gfx_d3d/material_types.h>
 #include <universal/com_math.h>
 #include <xanim/dobj.h>
@@ -479,6 +483,7 @@ WebRendererWorldBatchDesc MakeDraw(
     std::uint32_t indexCount,
     const float modelLightingCoordinates[3],
     bool modelLightingEnabled, bool depthHack, bool castsSunShadow,
+    bool excludeTransientSpotLight,
     std::uint32_t entityNumber,
     std::uint8_t primaryLightIndex,
     std::uint8_t reflectionProbeIndex,
@@ -506,6 +511,7 @@ WebRendererWorldBatchDesc MakeDraw(
     draw.shadowEntityId = entityNumber;
     draw.cameraRegion = material ? material->cameraRegion : 0u;
     draw.depthHack = depthHack;
+    draw.excludeTransientSpotLight = excludeTransientSpotLight;
     const MaterialTechniqueSet *shadowSet =
         material ? material->techniqueSet : nullptr;
     if (shadowSet && shadowSet->remappedTechniqueSet)
@@ -515,6 +521,7 @@ WebRendererWorldBatchDesc MakeDraw(
     // specialized static-model shortcut and must not reject these draws.
     draw.castsSunShadow = castsSunShadow && shadowSet &&
         shadowSet->techniques[TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX];
+    draw.castsSpotShadow = draw.castsSunShadow;
     if (draw.castsSunShadow && material && material->stateBitsTable)
     {
         const std::uint8_t shadowStateEntry = material->stateBitsEntry[
@@ -555,7 +562,9 @@ WebRendererWorldBatchDesc MakeDraw(
         std::strstr(draw.pixelShaderName, "s0_sm3.hlsl") != nullptr &&
         draw.specularImage && draw.reflectionProbeImage &&
         WebRenderer_CopyMaterialConstant(material, ENV_MAP_PARMS_HASH, draw.envMapParms);
-    draw.technique = !draw.baseImage
+    draw.technique = WebRenderer_IsCinematicMaterial(material, draw.techniqueType)
+        ? WebRendererWorldTechnique::Cinematic
+        : !draw.baseImage
         ? WebRendererWorldTechnique::BackendFallback
         : WebRenderer_IsReflexSightTechnique(draw.techniqueName)
             ? WebRendererWorldTechnique::ReflexSight
@@ -565,6 +574,8 @@ WebRendererWorldBatchDesc MakeDraw(
                     : WebRendererWorldTechnique::BaseTextureSpecular)
                 : WebRendererWorldTechnique::BaseTexture;
     // Only the canonical lit pass consumes the model-light-grid constants.
+    if (draw.technique == WebRendererWorldTechnique::Cinematic)
+        draw.samplerState = draw.normalSamplerState = draw.detailSamplerState = draw.specularSamplerState = 0x62;
     // Unlit reflex sights must preserve their emissive color and derived
     // opacity instead of being darkened by the viewmodel's lighting sample.
     if (modelLightingEnabled &&
@@ -597,6 +608,129 @@ void WebRenderer_ReleaseDObjSceneScratch() noexcept
     SkinningScratch() = {};
 }
 
+bool WebRenderer_ComputeDObjReceiverBounds(const DObj_s &obj,
+    const DObjAnimMat *posedMats, const int partBits[4],
+    const float viewOffset[3], float mins[3], float maxs[3]) noexcept
+{
+    if (!posedMats || !partBits || !viewOffset || !mins || !maxs ||
+        !obj.models || obj.numBones == 0u || obj.numBones > DOBJ_MAX_PARTS ||
+        !Finite3(viewOffset)) return false;
+    float localMins[3]{131072.0f, 131072.0f, 131072.0f};
+    float localMaxs[3]{-131072.0f, -131072.0f, -131072.0f};
+    unsigned globalBone = 0u;
+    bool accumulated = false;
+    for (unsigned modelIndex = 0u; modelIndex < obj.numModels; ++modelIndex)
+    {
+        const XModel *model = obj.models[modelIndex];
+        if (!model || !model->boneInfo || globalBone + model->numBones > obj.numBones)
+            return false;
+        for (unsigned localBone = 0u; localBone < model->numBones;
+             ++localBone, ++globalBone)
+        {
+            if ((static_cast<unsigned>(partBits[globalBone >> 5u]) &
+                    (0x80000000u >> (globalBone & 31u))) == 0u) continue;
+            const DObjAnimMat &pose = posedMats[globalBone];
+            const XBoneInfo &bone = model->boneInfo[localBone];
+            for (float value : pose.quat) if (!std::isfinite(value)) return false;
+            for (float value : pose.trans) if (!std::isfinite(value)) return false;
+            if (!std::isfinite(pose.transWeight)) return false;
+            for (unsigned axis = 0u; axis < 3u; ++axis)
+                if (!std::isfinite(bone.bounds[0][axis]) ||
+                    !std::isfinite(bone.bounds[1][axis]) ||
+                    bone.bounds[0][axis] > bone.bounds[1][axis]) return false;
+            kisak::model_pose::AccumulateBoneBounds(
+                pose, bone, viewOffset, localMins, localMaxs);
+            accumulated = true;
+        }
+    }
+    if (!accumulated || globalBone != obj.numBones ||
+        !Finite3(localMins) || !Finite3(localMaxs)) return false;
+    std::copy_n(localMins, 3, mins);
+    std::copy_n(localMaxs, 3, maxs);
+    return true;
+}
+
+namespace
+{
+struct PreparedDObjPose
+{
+    std::array<int, DOBJ_MAX_SUBMODELS> selectedLods{};
+    int partBits[4]{};
+    DObjAnimMat *matrices = nullptr;
+};
+
+WebRendererDObjSceneResult PrepareDObjPose(
+    const WebRendererDObjSubmission &submission, const WebRendererLodParms *lodParms,
+    bool sceneEntity, PreparedDObjPose &prepared)
+{
+    const DObj_s *obj = submission.obj;
+    if (!obj || !submission.pose || obj->numModels == 0u ||
+        obj->numModels > DOBJ_MAX_SUBMODELS || !obj->models)
+        return WebRendererDObjSceneResult::InvalidSubmission;
+    auto &selectedLods = prepared.selectedLods;
+    auto &posePartBits = prepared.partBits;
+    selectedLods.fill(-1);
+    std::uint32_t selectedBoneOffset = 0u;
+    bool hasSelectedSurface = false;
+    for (std::uint32_t modelIndex = 0u; modelIndex < obj->numModels; ++modelIndex)
+    {
+        const XModel *model = DObjGetModel(obj, modelIndex);
+        if (!model || !model->surfs || !model->materialHandles ||
+            !model->baseMat || (sceneEntity && !model->boneInfo) || model->numLods <= 0 ||
+            model->numBones == 0u ||
+            selectedBoneOffset + model->numBones > obj->numBones)
+            return WebRendererDObjSceneResult::InvalidModel;
+        const int selected = WebRenderer_SelectDObjLod(
+            model, submission.pose->origin, lodParms);
+        if (!sceneEntity && (!std::isfinite(model->radius) || model->radius < 0.0f))
+            return WebRendererDObjSceneResult::InvalidModel;
+        if (selected >= model->numLods || selected >= MAX_LODS)
+            return WebRendererDObjSceneResult::InvalidModel;
+        selectedLods[modelIndex] = selected;
+        if (selected >= 0)
+        {
+            const XModelLodInfo &lod = model->lodInfo[selected];
+            if (lod.surfIndex > model->numsurfs ||
+                lod.numsurfs > model->numsurfs - lod.surfIndex)
+                return WebRendererDObjSceneResult::InvalidModel;
+            hasSelectedSurface |= lod.numsurfs != 0u;
+            for (std::uint32_t localBone = 0u; localBone < model->numBones; ++localBone)
+            {
+                const std::uint32_t localMask = 0x80000000u >> (localBone & 31u);
+                if ((static_cast<std::uint32_t>(lod.partBits[localBone >> 5u]) & localMask) == 0u)
+                    continue;
+                const std::uint32_t globalBone = selectedBoneOffset + localBone;
+                posePartBits[globalBone >> 5u] |= static_cast<int>(
+                    0x80000000u >> (globalBone & 31u));
+            }
+        }
+        selectedBoneOffset += model->numBones;
+    }
+    if (selectedBoneOffset != obj->numBones)
+        return WebRendererDObjSceneResult::InvalidModel;
+    if (!hasSelectedSurface) return WebRendererDObjSceneResult::NoDObj;
+    prepared.matrices =
+        CG_DObjCalcPose(submission.pose, obj, posePartBits);
+    return prepared.matrices ? WebRendererDObjSceneResult::Success
+        : WebRendererDObjSceneResult::InvalidSubmission;
+}
+} // namespace
+
+WebRendererDObjSceneResult WebRenderer_ComputeDObjVisibilityBounds(
+    const WebRendererDObjSubmission &submission, const WebRendererLodParms *lodParms,
+    const float viewOffset[3], float mins[3], float maxs[3])
+{
+    PreparedDObjPose prepared;
+    const auto result = PrepareDObjPose(submission, lodParms, true, prepared);
+    if (result != WebRendererDObjSceneResult::Success) return result;
+    // Native CG_DObjCalcPose reuses the skeleton for the current frame. Mark
+    // pose use even if the subsequent cell test rejects every draw.
+    CG_UsedDObjCalcPose(const_cast<cpose_t *>(submission.pose));
+    return WebRenderer_ComputeDObjReceiverBounds(*submission.obj,
+        prepared.matrices, prepared.partBits, viewOffset, mins, maxs)
+        ? WebRendererDObjSceneResult::Success : WebRendererDObjSceneResult::InvalidModel;
+}
+
 WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
     const WebRendererDObjSubmission *submissions,
     std::uint32_t submissionCount,
@@ -604,10 +738,15 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
     const WebRendererLodParms *lodParms,
     const GfxLightGrid *lightGrid,
     const WebRendererModelLightingCallbacks *lightingCallbacks,
-    WebRendererMaterialResolver materialResolver)
+    WebRendererMaterialResolver materialResolver,
+    const float viewOffset[3],
+    const DpvsPlane *cameraPlanes,
+    int cameraPlaneCount)
 {
     if (submissionCount == 0u) return WebRendererDObjSceneResult::NoDObj;
-    if (!submissions) return WebRendererDObjSceneResult::InvalidSubmission;
+    if (!submissions || cameraPlaneCount < 0 ||
+        (cameraPlaneCount > 0 && !cameraPlanes))
+        return WebRendererDObjSceneResult::InvalidSubmission;
 
     WebRendererDObjSceneCommand replacement;
     DObjSkinningScratch &scratch = SkinningScratch();
@@ -638,11 +777,50 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                 submissions[submissionIndex];
             const DObj_s *obj = submission.obj;
             if (!obj || !submission.pose || obj->numModels == 0u ||
-                !obj->models)
+                obj->numModels > DOBJ_MAX_SUBMODELS || !obj->models)
             {
                 return WebRendererDObjSceneResult::InvalidSubmission;
             }
 
+#if KISAK_WEB_DIAGNOSTICS
+            if (profile) substageStarted = WebFrameProfile_Now();
+#endif
+            // Match R_AddDObjToScene's scene-entity/model split before applying
+            // R_GetSceneEntLightSurfs' DObj-only spot receiver exclusions.
+            const bool sceneEntity =
+                (submission.renderFlags & 4u) != 0 || obj->tree || obj->numModels != 1;
+            const bool excludeTransientSpotLight = sceneEntity &&
+                ((submission.renderFlags & 8u) != 0 || R_SpotLightIsAttachedToDobj(obj));
+            PreparedDObjPose prepared;
+            const auto poseResult = PrepareDObjPose(submission, lodParms, sceneEntity, prepared);
+            if (poseResult == WebRendererDObjSceneResult::NoDObj) continue;
+            if (poseResult != WebRendererDObjSceneResult::Success) return poseResult;
+            const auto &selectedLods = prepared.selectedLods;
+            const auto &posePartBits = prepared.partBits;
+            DObjAnimMat *posedMats = prepared.matrices;
+            if (sceneEntity) CG_UsedDObjCalcPose(const_cast<cpose_t *>(submission.pose));
+#if KISAK_WEB_DIAGNOSTICS
+            if (profile)
+                profile->dobjPoseMs += WebFrameProfile_Now() - substageStarted;
+#endif
+            if (!posedMats) return WebRendererDObjSceneResult::InvalidSubmission;
+            float receiverMins[3]{}, receiverMaxs[3]{};
+            const float zeroOffset[3]{};
+            if (sceneEntity && !WebRenderer_ComputeDObjReceiverBounds(*obj,
+                    posedMats, posePartBits, viewOffset ? viewOffset : zeroOffset,
+                    receiverMins, receiverMaxs))
+                return WebRendererDObjSceneResult::InvalidModel;
+            // Native R_AddEntitySurfacesInFrustumCmd retests the updated pose
+            // bounds before skinning. This catches animation that moved every
+            // selected bone outside the camera after the linked sphere passed.
+            if (sceneEntity && cameraPlaneCount > 0 &&
+                kisak::dpvs::CullBox(receiverMins, receiverMaxs,
+                    cameraPlanes, cameraPlaneCount))
+                continue;
+            if (sceneEntity) CG_CullIn(const_cast<cpose_t *>(submission.pose));
+            // Native rejects the updated pose before skinning and lighting.
+            // Culled submissions must not mutate lighting handles or disable
+            // the atlas for other DObjs that actually reach the draw list.
 #if KISAK_WEB_DIAGNOSTICS
             if (profile) substageStarted = WebFrameProfile_Now();
 #endif
@@ -679,14 +857,6 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
             }
 #endif
 
-            int posePartBits[4] = {-1, -1, -1, -1};
-            DObjAnimMat *posedMats =
-                CG_DObjCalcPose(submission.pose, obj, posePartBits);
-#if KISAK_WEB_DIAGNOSTICS
-            if (profile)
-                profile->dobjPoseMs += WebFrameProfile_Now() - substageStarted;
-#endif
-            if (!posedMats) return WebRendererDObjSceneResult::InvalidSubmission;
             std::uint32_t hideBits[4]{};
             DObjGetHidePartBits(obj, hideBits);
             std::uint32_t globalBoneOffset = 0u;
@@ -703,8 +873,7 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                 {
                     return WebRendererDObjSceneResult::InvalidModel;
                 }
-                const int selectedLod = WebRenderer_SelectDObjLod(
-                    model, submission.pose->origin, lodParms);
+                const int selectedLod = selectedLods[modelIndex];
                 if (selectedLod < 0)
                 {
                     globalBoneOffset += model->numBones;
@@ -833,11 +1002,27 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                             submission.renderFlags),
                         WebRenderer_DObjIsSunShadowCandidate(
                             submission.renderFlags),
+                        excludeTransientSpotLight,
                         submission.entityNumber,
                         modelPrimaryLightIndex,
                         submission.reflectionProbeIndex,
                         submission.reflectionProbeImage,
                         materialResolver));
+                    replacement.batches.back().dynamicLightSurfType =
+                        surface.deformed ? 9u : 7u;
+                    if (!sceneEntity)
+                    {
+                        auto &draw = replacement.batches.back();
+                        std::copy_n(submission.pose->origin, 3, draw.transientLightSphere);
+                        draw.transientLightSphere[3] = model->radius;
+                    }
+                    else
+                    {
+                        auto &draw = replacement.batches.back();
+                        std::copy_n(receiverMins, 3, draw.transientLightMins);
+                        std::copy_n(receiverMaxs, 3, draw.transientLightMaxs);
+                        draw.transientLightBoundsEnabled = true;
+                    }
 #if KISAK_WEB_DIAGNOSTICS
                     if (profile)
                         profile->dobjGeometryMs += WebFrameProfile_Now() - substageStarted;

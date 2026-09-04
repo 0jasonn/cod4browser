@@ -7,6 +7,12 @@
 
 struct GfxWorld;
 struct GfxBrushModel;
+struct GfxLight;
+
+bool WebRenderer_CopyBrushReceiverBounds(const GfxBrushModel &model,
+    WebRendererBrushModelInstanceDesc &instance) noexcept;
+bool WebRenderer_BrushReceivesLight(const WebRendererBrushModelInstanceDesc &instance,
+    const GfxLight &light, const float spotPlanes[6][4]) noexcept;
 
 struct WebRendererWorldSceneCommand
 {
@@ -27,6 +33,8 @@ struct WebRendererWorldSceneCommand
     std::uint32_t resolvedPostSunSurfaceCount = 0u;
     std::uint32_t firstSurfaceIndex = UINT32_MAX;
     std::uint32_t lastSurfaceIndex = UINT32_MAX;
+    const GfxImage *outdoorImage = nullptr;
+    float outdoorLookupMatrix[4][4]{};
 };
 
 struct WebRendererBrushModelSubmission
@@ -106,11 +114,20 @@ bool WebRenderer_ValidateWorldSurfaceRanges(
 
 // Consumes validated spans in command order; merges only adjacent visible spans
 // within the same batch. Failure clears the camera result, never shadow storage.
+// A transient receiver light additionally applies native BSP volume selection.
 bool WebRenderer_BuildWorldCameraRanges(
     const std::vector<WebRendererWorldSurfaceRange> &surfaces,
     const std::uint8_t *visibility, std::uint32_t visibilityCount,
     bool visibilityComputed,
-    std::vector<WebRendererWorldCameraRange> &destination);
+    std::vector<WebRendererWorldCameraRange> &destination,
+    const GfxLight *receiverLight = nullptr, float spotNearPlaneOffset = 0.0f);
+
+// Native transient spot shadows use the light-plane surface set without the
+// camera visibility filter used by the corresponding receiver list.
+bool WebRenderer_BuildWorldTransientSpotShadowRanges(
+    const std::vector<WebRendererWorldSurfaceRange> &surfaces,
+    const GfxLight &light, float spotNearPlaneOffset,
+    std::vector<WebRendererWorldShadowRange> &destination);
 
 // Builds one sun-cascade selection from canonical surface bounds. Camera DPVS
 // visibility is deliberately absent; near and far partitions call this

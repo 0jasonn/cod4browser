@@ -15,6 +15,8 @@ function requiredElement(selector)
 }
 
 const canvas = /** @type {HTMLCanvasElement} */ (requiredElement("#game-canvas"));
+const gameTextInput = /** @type {HTMLTextAreaElement} */ (
+    requiredElement("#game-text-input"));
 const frameCounter = /** @type {HTMLElement} */ (requiredElement("#frame-counter"));
 const cinematicStatus = /** @type {HTMLElement} */ (requiredElement("#cinematic-status"));
 const saveStatus = /** @type {HTMLElement} */ (requiredElement("#save-status"));
@@ -379,6 +381,7 @@ try {
     });
     inputController = createInputControllerCore({
         canvas,
+        textInput: gameTextInput,
         commandInput,
         sendInput: (event) => engine.input(event),
         onFailure(error) {

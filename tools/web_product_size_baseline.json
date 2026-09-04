@@ -28,7 +28,9 @@
     "_KisakWeb_ProbeIwd",
     "_KisakWeb_ProbeLocalization",
     "_KisakWeb_QueueKeyEvent",
+    "_KisakWeb_QueueCharEvent",
     "_KisakWeb_QueueMouseMove",
+    "_KisakWeb_SetClipboardText",
     "_KisakWeb_SubmitCanonicalCommand"
   ]
 }

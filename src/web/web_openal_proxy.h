@@ -100,11 +100,18 @@ constexpr ALenum AL_EAXREVERB_DECAY_HFLIMIT = 0x0017;
 constexpr ALCenum ALC_FREQUENCY = 0x1007;
 
 // Pure timing helper shared by the proxy and deterministic native tests.
-double WebOpenAL_RebaseStarted(double nowSeconds, float offsetSeconds, float pitch);
+// Device-only playback observations; canonical SND remains the channel owner.
+std::uint32_t WebOpenAL_SourceGeneration(ALuint source);
+bool WebOpenAL_ApplyPlayback(ALuint source, std::uint32_t generation,
+    std::uint32_t processed, double offset, ALenum state);
 
 // Retains only a bounded diagnostic identity for the next canonical source
 // commands. This never participates in OpenAL state or playback selection.
 void WebOpenAL_SetSourceAlias(ALuint source, const char *aliasName);
+
+// Cumulative device playback for a stream, including buffers already unqueued.
+// False reports a failed device; no wall-time estimate is substituted here.
+bool WebOpenAL_SourcePlaybackSeconds(ALuint source, double &seconds);
 
 // Device-only snapshot in native stage/band order: enabled, type, gain (dB),
 // frequency (Hz), Q. Canonical SndEqParams and entchannel ownership stay in SND.

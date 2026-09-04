@@ -18,6 +18,9 @@
 #include <physics/phys_preset.h>
 #include <physics/phys_geom_types.h>
 #include <qcommon/qcommon.h>
+#include <qcommon/cmd.h>
+#include <qcommon/engine_lifecycle_trace.h>
+#include <qcommon/threads.h>
 #include <qcommon/cm_types.h>
 #include <qcommon/com_world_types.h>
 #include <qcommon/system.h>
@@ -41,6 +44,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <deque>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -52,15 +56,20 @@ const dvar_t *useFastFile = &g_testUseFastFile;
 namespace
 {
 std::vector<std::uint8_t> g_file;
+std::vector<std::pair<std::string, std::vector<std::uint8_t>>> g_namedFiles;
+const std::vector<std::uint8_t> *g_activeFile = &g_file;
 std::size_t g_filePosition = 0;
 int g_language = 0;
 DBRuntimeTraceSnapshot g_trace{};
+std::vector<std::pair<XAssetType, std::string>> g_publications;
 alignas(4096) std::array<std::uint8_t, 4 * 1024 * 1024> g_arena{};
 std::uint32_t g_lowPosition = 0;
 std::uint32_t g_highPosition = static_cast<std::uint32_t>(g_arena.size());
 std::string g_scriptString;
 std::uint32_t g_databaseStringShutdownCount = 0;
 std::uint32_t g_databaseStringRemoveUserCount = 0;
+std::uint32_t g_rendererWorldUnloadCount = 0;
+std::uint32_t g_commonWorldUnloadCount = 0;
 
 void AppendU32(std::vector<std::uint8_t> &bytes, std::uint32_t value)
 {
@@ -351,13 +360,15 @@ struct MaterialFixtureOptions
     std::int32_t waterM = 2;
     std::int32_t waterN = 2;
     std::int32_t imageResourceSize = 4;
+    std::uint32_t imagePayload = 0x494D4733u;
+    const char *imageName = "images/gate3";
 };
 
 std::vector<std::uint8_t> MakeMaterialXFile(
     const MaterialFixtureOptions &options = {})
 {
     constexpr const char *materialName = "materials/gate3";
-    constexpr const char *imageName = "images/gate3";
+    const char *imageName = options.imageName;
     const bool inlineAsset = options.assetPointer == UINT32_MAX ||
         options.assetPointer == UINT32_MAX - 1u;
     const std::uint32_t assetCount = options.includeAliasAsset ? 2u : 1u;
@@ -495,7 +506,7 @@ std::vector<std::uint8_t> MakeMaterialXFile(
             AppendU32(inflated,
                 static_cast<std::uint32_t>(options.imageResourceSize));
             if (options.imageResourceSize == 4)
-                AppendU32(inflated, 0x494D4733u);
+                AppendU32(inflated, options.imagePayload);
             block0Offset += 16u + (options.imageResourceSize == 4 ? 4u : 0u);
         }
     }
@@ -1437,8 +1448,10 @@ std::vector<std::uint8_t> MakeFxImpactXFile(
 
 struct ComWorldFixtureOptions
 {
+    const char *name = "maps/gate3.d3dbsp";
     std::uint32_t assetPointer = UINT32_MAX - 1u;
     bool includeAliasAsset = true;
+    bool corruptTrailingRawFile = false;
     bool includeBody = true;
     bool terminateName = true;
     std::uint32_t primaryLightCount = 2;
@@ -1451,13 +1464,14 @@ struct ComWorldFixtureOptions
 std::vector<std::uint8_t> MakeComWorldXFile(
     const ComWorldFixtureOptions &options = {})
 {
-    constexpr const char *name = "maps/gate3.d3dbsp";
     constexpr const char *lightNames[] = {
         "light/gate3_0", "light/gate3_1",
     };
     const bool inlineAsset = options.assetPointer == UINT32_MAX ||
         options.assetPointer == UINT32_MAX - 1u;
-    const std::uint32_t assetCount = options.includeAliasAsset ? 2u : 1u;
+    const std::uint32_t assetCount = 1u +
+        static_cast<std::uint32_t>(options.includeAliasAsset) +
+        static_cast<std::uint32_t>(options.corruptTrailingRawFile);
     std::vector<std::uint8_t> inflated;
     AppendU32(inflated, 8192);
     AppendU32(inflated, 0);
@@ -1474,6 +1488,11 @@ std::vector<std::uint8_t> MakeComWorldXFile(
         AppendU32(inflated, ASSET_TYPE_COMWORLD);
         AppendU32(inflated, 0x40000011u);
     }
+    if (options.corruptTrailingRawFile)
+    {
+        AppendU32(inflated, ASSET_TYPE_RAWFILE);
+        AppendU32(inflated, UINT32_MAX - 1u);
+    }
     if (!inlineAsset || !options.includeBody) return CompressXFile(inflated);
 
     ComWorld world{};
@@ -1483,7 +1502,8 @@ std::vector<std::uint8_t> MakeComWorldXFile(
     world.primaryLights = PointerToken<ComPrimaryLight>(
         options.primaryLightsPointer);
     AppendObject(inflated, world);
-    inflated.insert(inflated.end(), name, name + std::strlen(name));
+    inflated.insert(inflated.end(), options.name,
+        options.name + std::strlen(options.name));
     if (options.terminateName) inflated.push_back(0);
     if (!options.terminateName || !options.primaryLightsPointer ||
         !options.includeLights) return CompressXFile(inflated);
@@ -1501,13 +1521,23 @@ std::vector<std::uint8_t> MakeComWorldXFile(
     }
     for (std::uint32_t index = 0; index < options.inlineDefNameCount; ++index)
         AppendCString(inflated, lightNames[index % std::size(lightNames)]);
+    if (options.corruptTrailingRawFile)
+    {
+        AppendU32(inflated, UINT32_MAX);
+        AppendU32(inflated, INT32_MAX);
+        AppendU32(inflated, 1);
+        AppendCString(inflated, "tests/comworld-invalid");
+    }
     return CompressXFile(inflated);
 }
 
 struct GfxWorldFixtureOptions
 {
+    const char *name = "maps/gfxworld_gate3.d3dbsp";
+    const char *baseName = "gfxworld_gate3";
     std::uint32_t assetPointer = UINT32_MAX - 1u;
     bool includeAliasAsset = true;
+    bool corruptTrailingRawFile = false;
     bool includeBody = true;
     bool terminateName = true;
     bool terminateBaseName = true;
@@ -1522,16 +1552,17 @@ struct GfxWorldFixtureOptions
     std::uint32_t includedSurfaceCount = 1;
     std::uint32_t primaryLightCount = 1;
     std::uint32_t sunPrimaryLightIndex = 0;
+    std::uint32_t checksum = 0x47584657u;
 };
 
 std::vector<std::uint8_t> MakeGfxWorldXFile(
     const GfxWorldFixtureOptions &options = {})
 {
-    constexpr const char *name = "maps/gfxworld_gate3.d3dbsp";
-    constexpr const char *baseName = "gfxworld_gate3";
     const bool inlineAsset = options.assetPointer == UINT32_MAX ||
         options.assetPointer == UINT32_MAX - 1u;
-    const std::uint32_t assetCount = options.includeAliasAsset ? 2u : 1u;
+    const std::uint32_t assetCount = 1u +
+        static_cast<std::uint32_t>(options.includeAliasAsset) +
+        static_cast<std::uint32_t>(options.corruptTrailingRawFile);
     std::vector<std::uint8_t> inflated;
     AppendU32(inflated, 12288);
     AppendU32(inflated, 0);
@@ -1548,6 +1579,11 @@ std::vector<std::uint8_t> MakeGfxWorldXFile(
         AppendU32(inflated, ASSET_TYPE_GFXWORLD);
         AppendU32(inflated, 0x40000011u);
     }
+    if (options.corruptTrailingRawFile)
+    {
+        AppendU32(inflated, ASSET_TYPE_RAWFILE);
+        AppendU32(inflated, UINT32_MAX - 1u);
+    }
     if (!inlineAsset || !options.includeBody) return CompressXFile(inflated);
 
     GfxWorld world{};
@@ -1560,17 +1596,19 @@ std::vector<std::uint8_t> MakeGfxWorldXFile(
     world.vd.vertices = PointerToken<GfxWorldVertex>(options.vertexPointer);
     world.primaryLightCount = options.primaryLightCount;
     world.sunPrimaryLightIndex = options.sunPrimaryLightIndex;
+    world.checksum = options.checksum;
     world.lightGrid.rowAxis = 0;
     world.dpvs.staticSurfaceCount = options.surfaceCount > 0
         ? static_cast<std::uint32_t>(options.surfaceCount) : 0u;
     world.dpvs.staticSurfaceCountNoDecal = world.dpvs.staticSurfaceCount;
     world.dpvs.surfaces = PointerToken<GfxSurface>(options.surfacePointer);
     AppendObject(inflated, world);
-    inflated.insert(inflated.end(), name, name + std::strlen(name));
+    inflated.insert(inflated.end(), options.name,
+        options.name + std::strlen(options.name));
     if (options.terminateName) inflated.push_back(0);
     if (!options.terminateName) return CompressXFile(inflated);
-    inflated.insert(inflated.end(), baseName,
-        baseName + std::strlen(baseName));
+    inflated.insert(inflated.end(), options.baseName,
+        options.baseName + std::strlen(options.baseName));
     if (options.terminateBaseName) inflated.push_back(0);
     if (!options.terminateBaseName) return CompressXFile(inflated);
 
@@ -1613,6 +1651,13 @@ std::vector<std::uint8_t> MakeGfxWorldXFile(
             surface.bounds[1][1] = 1.0f;
             AppendObject(inflated, surface);
         }
+    }
+    if (options.corruptTrailingRawFile)
+    {
+        AppendU32(inflated, UINT32_MAX);
+        AppendU32(inflated, INT32_MAX);
+        AppendU32(inflated, 1);
+        AppendCString(inflated, "tests/gfxworld-invalid");
     }
     return CompressXFile(inflated);
 }
@@ -1863,7 +1908,10 @@ std::vector<std::uint8_t> MakeScriptListXFile()
     return CompressXFile(inflated);
 }
 
-std::vector<std::uint8_t> MakeGameWorldSpXFile(bool invalidNodeCount = false)
+std::vector<std::uint8_t> MakeGameWorldSpXFile(
+    bool invalidNodeCount = false,
+    const char *name = "maps/killhouse.d3dbsp",
+    bool corruptTrailingRawFile = false)
 {
     std::vector<std::uint8_t> inflated;
     AppendU32(inflated, 16384);
@@ -1875,11 +1923,16 @@ std::vector<std::uint8_t> MakeGameWorldSpXFile(bool invalidNodeCount = false)
     // table present so native and Wasm execute the same indexed lookup.
     AppendU32(inflated, 1);
     AppendU32(inflated, UINT32_MAX);
-    AppendU32(inflated, 1);
+    AppendU32(inflated, corruptTrailingRawFile ? 2u : 1u);
     AppendU32(inflated, UINT32_MAX);
     AppendU32(inflated, 0);
     AppendU32(inflated, ASSET_TYPE_GAMEWORLD_SP);
     AppendU32(inflated, UINT32_MAX - 1u);
+    if (corruptTrailingRawFile)
+    {
+        AppendU32(inflated, ASSET_TYPE_RAWFILE);
+        AppendU32(inflated, UINT32_MAX - 1u);
+    }
 
     GameWorldSp world{};
     world.name = PointerToken<const char>(UINT32_MAX);
@@ -1894,7 +1947,7 @@ std::vector<std::uint8_t> MakeGameWorldSpXFile(bool invalidNodeCount = false)
     world.path.nodeTreeCount = 1;
     world.path.nodeTree = PointerToken<pathnode_tree_t>(1u);
     AppendObject(inflated, world);
-    AppendCString(inflated, "maps/killhouse.d3dbsp");
+    AppendCString(inflated, name);
     if (invalidNodeCount) return CompressXFile(inflated);
 
     pathnode_t node{};
@@ -1919,12 +1972,22 @@ std::vector<std::uint8_t> MakeGameWorldSpXFile(bool invalidNodeCount = false)
     tree.u.s.nodes = PointerToken<std::uint16_t>(1u);
     AppendObject(inflated, tree);
     AppendU16(inflated, 0);
+    if (corruptTrailingRawFile)
+    {
+        AppendU32(inflated, UINT32_MAX);
+        AppendU32(inflated, INT32_MAX);
+        AppendU32(inflated, 1);
+        AppendCString(inflated, "tests/gameworld-invalid");
+    }
     return CompressXFile(inflated);
 }
 
-std::vector<std::uint8_t> MakeClipMapXFile(bool invalidPlaneCount = false)
+std::vector<std::uint8_t> MakeClipMapXFile(
+    bool invalidPlaneCount = false,
+    const char *mapName = "maps/killhouse.d3dbsp",
+    bool corruptTrailingRawFile = false,
+    std::uint32_t checksum = 0x4b484f55u)
 {
-    constexpr const char *mapName = "maps/killhouse.d3dbsp";
     constexpr const char *entities =
         "{\n\"classname\" \"worldspawn\"\n}\n";
     std::vector<std::uint8_t> inflated;
@@ -1935,10 +1998,15 @@ std::vector<std::uint8_t> MakeClipMapXFile(bool invalidPlaneCount = false)
 
     AppendU32(inflated, 0);
     AppendU32(inflated, 0);
-    AppendU32(inflated, 1);
+    AppendU32(inflated, corruptTrailingRawFile ? 2u : 1u);
     AppendU32(inflated, UINT32_MAX);
     AppendU32(inflated, ASSET_TYPE_CLIPMAP);
     AppendU32(inflated, UINT32_MAX - 1u);
+    if (corruptTrailingRawFile)
+    {
+        AppendU32(inflated, ASSET_TYPE_RAWFILE);
+        AppendU32(inflated, UINT32_MAX - 1u);
+    }
 
     clipMap_t clip{};
     clip.name = PointerToken<const char>(UINT32_MAX);
@@ -1984,7 +2052,7 @@ std::vector<std::uint8_t> MakeClipMapXFile(bool invalidPlaneCount = false)
     clip.dynEntPoseList[0] = PointerToken<DynEntityPose>(1u);
     clip.dynEntClientList[0] = PointerToken<DynEntityClient>(1u);
     clip.dynEntCollList[0] = PointerToken<DynEntityColl>(1u);
-    clip.checksum = 0x4b484f55u;
+    clip.checksum = checksum;
     AppendObject(inflated, clip);
     AppendCString(inflated, mapName);
     if (invalidPlaneCount) return CompressXFile(inflated);
@@ -2068,6 +2136,13 @@ std::vector<std::uint8_t> MakeClipMapXFile(bool invalidPlaneCount = false)
     AppendZeros(inflated, 32);
     AppendZeros(inflated, 12);
     AppendZeros(inflated, 20);
+    if (corruptTrailingRawFile)
+    {
+        AppendU32(inflated, UINT32_MAX);
+        AppendU32(inflated, INT32_MAX);
+        AppendU32(inflated, 1);
+        AppendCString(inflated, "tests/clipmap-invalid");
+    }
     return CompressXFile(inflated);
 }
 
@@ -2076,22 +2151,29 @@ void Reset(const std::vector<std::uint8_t> &file)
     g_file = file;
     g_filePosition = 0;
     g_trace = {};
+    g_publications.clear();
     g_lowPosition = 0;
     g_highPosition = static_cast<std::uint32_t>(g_arena.size());
     std::fill(g_arena.begin(), g_arena.end(), 0);
     g_scriptString.clear();
     std::memset(g_zones, 0, sizeof(g_zones));
     g_zones[1].flags = 1;
+    DB_ResetStringOwnership();
     DB_InitAssetPools();
     DB_SetLoadingZoneIndex(1);
 }
 
-void RunPrepared(XZoneMemory &zone)
+void BeginPrepared(XZoneMemory &zone, int allocType = 0)
 {
     zone = {};
     alignas(16) static std::array<std::uint8_t, 0x80000> inputBuffer{};
     DB_LoadXFile("zone/english/synthetic.ff", reinterpret_cast<void *>(1),
-        "synthetic", &zone, nullptr, inputBuffer.data(), 0);
+        "synthetic", &zone, nullptr, inputBuffer.data(), allocType);
+}
+
+void RunPrepared(XZoneMemory &zone)
+{
+    BeginPrepared(zone);
     DB_LoadXFileInternal();
 }
 
@@ -2100,9 +2182,173 @@ void Run(const std::vector<std::uint8_t> &file, XZoneMemory &zone)
     Reset(file);
     RunPrepared(zone);
 }
+
+void RunMutationCampaign()
+{
+    // Repository-authored synthetic seeds, GPL-3.0 like this test. Mutate the
+    // inflated stream and recompress it so fuzzing reaches the active loaders.
+    std::array<std::vector<std::uint8_t>, 3> seeds{
+        MakeGeneratedPrefixXFile(), MakePhysPresetXFile(), MakeMaterialXFile()};
+    for (auto &seed : seeds)
+    {
+        std::vector<std::uint8_t> inflated(65536);
+        uLongf size = static_cast<uLongf>(inflated.size());
+        assert(uncompress(inflated.data(), &size, seed.data() + 12,
+            static_cast<uLong>(seed.size() - 12)) == Z_OK);
+        inflated.resize(size);
+        seed = std::move(inflated);
+    }
+    std::uint32_t random = 0x5846494cu, hash = 2166136261u;
+    const auto next = [&]() {
+        random ^= random << 13; random ^= random >> 17; random ^= random << 5;
+        return random;
+    };
+    const auto record = [&](std::uint32_t value) {
+        for (unsigned byte = 0; byte < 4; ++byte)
+            hash = (hash ^ ((value >> (8 * byte)) & 255u)) * 16777619u;
+    };
+    unsigned accepted = 0, rejected = 0, partialRejected = 0;
+    for (unsigned iteration = 0; iteration < 328; ++iteration)
+    {
+        const unsigned seedIndex = iteration < 256 ? iteration % seeds.size() : 1;
+        auto input = seeds[seedIndex];
+        const unsigned operation = iteration < 256 ? iteration % 8 : 8;
+        const int allocType = iteration < 256 ? (iteration / 8) % 2 :
+            ((iteration - 256) % 8) / 4;
+        std::size_t offset = 0;
+        std::uint32_t value = next();
+        switch (operation)
+        {
+        case 0: break; // Valid controls repeatedly interleave rejection/reload.
+        case 1: input.resize(value % input.size()); break;
+        case 2:
+        {
+            constexpr std::uint32_t sizes[]{0, 1, 3, 15, 16, 31, 4095, 4096,
+                0x100000, 0x7fffffff, 0xffffffff};
+            offset = 8 + (value % 9) * 4;
+            value = sizes[next() % std::size(sizes)];
+            WriteU32(input, offset, value);
+            break;
+        }
+        case 3: offset = 44; WriteU32(input, offset, value); break;
+        case 4: offset = 52; WriteU32(input, offset, value); break;
+        case 5:
+            offset = 60 + value % (input.size() - 60);
+            input[offset] ^= static_cast<std::uint8_t>(1u << (next() % 8));
+            break;
+        case 6:
+            offset = 60 + (value % ((input.size() - 60) / 4)) * 4;
+            WriteU32(input, offset, value);
+            break;
+        case 7:
+            offset = 48;
+            WriteU32(input, offset, 0); // Missing script-string array.
+            break;
+        case 8:
+        {
+            constexpr std::uint32_t sizes[]{0, 3, 4096, UINT32_MAX};
+            offset = 8 + ((iteration - 256) / 8) * 4;
+            value = sizes[(iteration - 256) % 4];
+            WriteU32(input, offset, value);
+            break;
+        }
+        }
+        std::fprintf(stderr, "xfile-mutation case=%u seed=%u alloc=%d op=%u offset=%zu value=%08x\n",
+            iteration, seedIndex, allocType, operation, offset, value);
+        Reset(CompressXFile(input));
+        DB_WebClearImageLoadDefs();
+        XZoneMemory zone{};
+        BeginPrepared(zone, allocType);
+        static RawFile sentinel{"tests/mutation-sentinel", 4, "keep"};
+        std::strcpy(g_zones[1].name, "mutation");
+        std::strcpy(g_zones[2].name, "sentinel");
+        g_zones[2].flags = 2;
+        DB_SetLoadingZoneIndex(2);
+        const RawFile *identity = DB_AddXAsset(ASSET_TYPE_RAWFILE, {&sentinel}).rawfile;
+        const auto freeBefore = DB_GetFreeAssetEntryCount();
+        std::array<std::uint32_t, ASSET_TYPE_COUNT> freePools{};
+        for (unsigned type = 0; type < freePools.size(); ++type)
+            freePools[type] = DB_GetAssetPoolFreeCount(static_cast<XAssetType>(type));
+        DB_SetLoadingZoneIndex(1);
+        g_trace = {};
+        g_publications.clear();
+        DB_LoadXFileInternal();
+        const bool failed = DB_RuntimeGeneratedLoadFailed();
+        assert(g_trace.cleanupComplete);
+        assert(!g_trace.streamInitialized || g_streamPosStackIndex == 0);
+        if (operation == 0) assert(!failed && g_trace.xassetListEnd);
+        if (operation == 0 && seedIndex == 1)
+        {
+            assert(varXAssetList->assets[0].header.physPreset ==
+                varXAssetList->assets[1].header.physPreset);
+            assert(g_publications.size() == 1 &&
+                g_publications[0].first == ASSET_TYPE_PHYSPRESET);
+        }
+        if (operation == 0 && seedIndex == 2)
+        {
+            assert(g_publications.size() == 2);
+            assert(g_publications[0].first == ASSET_TYPE_IMAGE &&
+                g_publications[1].first == ASSET_TYPE_MATERIAL);
+            const Material *material = varXAssetList->assets[0].header.material;
+            assert(material == varXAssetList->assets[1].header.material);
+            assert(material->textureTable[0].u.image ==
+                material->textureTable[1].u.water->image);
+        }
+        if (operation == 8 && value == UINT32_MAX)
+            assert(failed && g_lowPosition == 0 && g_highPosition == g_arena.size());
+        if (operation == 8 && value == 0 && offset == 8)
+            assert(failed && std::strcmp(g_trace.stopStage,
+                "stream/allocation from absent canonical block") == 0);
+        if (failed && operation == 1 && seedIndex == 2)
+            assert(!DB_FindXAssetEntryCanonical(ASSET_TYPE_MATERIAL, "materials/gate3"));
+        if (failed && !g_publications.empty()) ++partialRejected;
+        failed ? ++rejected : ++accepted;
+        record(failed);
+        record(g_trace.decompressedBytesProduced);
+        record(g_trace.blockAllocationBytes);
+        record(DB_GetFreeAssetEntryCount());
+        for (auto streamOffset : g_trace.streamOffsets) record(streamOffset);
+        for (const char *stage = g_trace.stopStage; stage && *stage; ++stage)
+            record(static_cast<unsigned char>(*stage));
+        record(0);
+        for (const auto &[type, name] : g_publications)
+        {
+            record(type);
+            for (unsigned char character : name) record(character);
+            record(0);
+        }
+        DB_UnloadXZonesForFreeFlags(1);
+        assert(DB_GetFreeAssetEntryCount() == freeBefore);
+        for (unsigned type = 0; type < freePools.size(); ++type)
+            assert(DB_GetAssetPoolFreeCount(static_cast<XAssetType>(type)) == freePools[type]);
+        assert(DB_FindXAssetHeader(ASSET_TYPE_RAWFILE, sentinel.name).rawfile == identity);
+        assert(identity->len == 4 && std::strcmp(identity->buffer, "keep") == 0);
+    }
+    assert(accepted >= 32 && rejected > 0 && partialRejected > 0);
+    // Normalized Win32/Wasm trace: no addresses or compressed zlib bytes.
+    // Keep both builds pinned to the same outcomes and publication order.
+    assert(accepted == 173 && rejected == 155 && partialRejected == 9 &&
+        hash == 0x99b9d10cu);
+    std::printf("xfile-mutations seed=5846494c cases=328 accepted=%u rejected=%u partial-rejected=%u trace=%08x\n",
+        accepted, rejected, partialRejected, hash);
+}
 } // namespace
 
-WebWorkerFile WebWorkerFS_Open(const char *) { return 0; }
+WebWorkerFile WebWorkerFS_Open(const char *path)
+{
+    g_activeFile = &g_file;
+    for (const auto &[name, file] : g_namedFiles)
+    {
+        const std::string filename = name + ".ff";
+        if (path && std::strstr(path, filename.c_str()))
+        {
+            g_activeFile = &file;
+            break;
+        }
+    }
+    g_filePosition = 0;
+    return 0;
+}
 int __cdecl SEH_GetCurrentLanguage() { return g_language; }
 const char *__cdecl SEH_GetLanguageName(std::uint32_t language)
 {
@@ -2110,34 +2356,69 @@ const char *__cdecl SEH_GetLanguageName(std::uint32_t language)
     assert(language < 3);
     return names[language];
 }
+#if !defined(KISAK_DB_ZONE_RECOVERY_TEST)
 void __cdecl PMem_Free(const char *, std::uint32_t) {}
+#endif
 void __cdecl CM_Unload() {}
-void __cdecl Com_UnloadWorld() {}
-void __cdecl R_UnloadWorld() {}
-std::int64_t WebWorkerFS_Size(WebWorkerFile) { return static_cast<std::int64_t>(g_file.size()); }
+void __cdecl Com_UnloadWorld() { ++g_commonWorldUnloadCount; }
+void __cdecl R_UnloadWorld() { ++g_rendererWorldUnloadCount; }
+std::int64_t WebWorkerFS_Size(WebWorkerFile)
+{
+    return static_cast<std::int64_t>(g_activeFile->size());
+}
 bool WebWorkerFS_Seek(WebWorkerFile, std::uint32_t offset)
 {
-    if (offset > g_file.size()) return false;
+    if (offset > g_activeFile->size()) return false;
     g_filePosition = offset;
     return true;
 }
 std::int32_t WebWorkerFS_Read(WebWorkerFile, void *destination, std::uint32_t length)
 {
-    const std::size_t count = std::min<std::size_t>(length, g_file.size() - g_filePosition);
-    if (count) std::memcpy(destination, g_file.data() + g_filePosition, count);
+    const std::size_t count = std::min<std::size_t>(
+        length, g_activeFile->size() - g_filePosition);
+    if (count) std::memcpy(destination,
+        g_activeFile->data() + g_filePosition, count);
     g_filePosition += count;
     return static_cast<std::int32_t>(count);
 }
 void WebWorkerFS_Close(WebWorkerFile) {}
 
-void DB_RuntimeTraceStage(const char *) {}
+void DB_RuntimeTraceStage(const char *)
+{
+    g_trace.generatedLoadFailed = DB_HasXFileLoadFailure();
+}
+#if defined(KISAK_DB_ZONE_RECOVERY_TEST)
+bool g_initializing = false;
+void DB_RuntimeSetLogicalPath(const char *) {}
+void DB_RuntimeSetFileSize(std::uint32_t) {}
+void DB_RuntimeTraceOpenSucceeded() {}
+void DB_RuntimeTraceThreadInitialized() {}
+void DB_RuntimeTracePoolsInitialized(std::uint32_t, std::uint32_t) {}
+void Com_InitThreadData(int) {}
+void Cmd_AddCommandInternal(const char *, void(__cdecl *)(), cmd_function_s *) {}
+int Cmd_Argc() { return 0; }
+const char *Cmd_Argv(int) { return ""; }
+void Material_DirtyTechniqueSetOverrides() {}
+void BG_FillInAllWeaponItems() {}
+void EmitEngineLifecycleTrace(EngineLifecycleStage, const char *, std::uint32_t,
+    std::int32_t, std::int32_t, std::int32_t) noexcept {}
+void Sys_Error(const char *, ...) { throw std::runtime_error("zone recovery system error"); }
+void Sys_OutOfMemErrorInternal(const char *, int) { throw std::runtime_error("zone recovery out of memory"); }
+void *Sys_AllocatePhysicalMemory(std::size_t, std::size_t) { return nullptr; }
+void I_strncpyz(char *dest, const char *source, int size)
+{
+    assert(size > 0);
+    std::snprintf(dest, static_cast<std::size_t>(size), "%s", source);
+}
+char *va(const char *, ...) { return const_cast<char *>("unexpected PMem hole"); }
+double ConvertToMB(int bytes) { return bytes / 1048576.0; }
+#endif
 void DB_RuntimeTraceStop(const char *stage)
 {
     g_trace.stopStage = stage;
     // The differential fixture normalizes transport/inflate and generated
     // loader failures into one platform-independent failure bit.
-    g_trace.generatedLoadFailed =
-        g_trace.generatedLoadFailed || DB_HasXFileLoadFailure();
+    g_trace.generatedLoadFailed = DB_HasXFileLoadFailure();
 }
 void DB_RuntimeTraceHeaderRead(std::uint32_t, std::uint32_t) { g_trace.headerValid = true; }
 void DB_RuntimeTraceInputRefill(std::uint32_t bytesRead)
@@ -2219,6 +2500,7 @@ void DB_RuntimeTracePublicationEnd(XAssetType type, const char *name,
     std::uint32_t entryIndex, std::uint32_t poolIndex, std::size_t freeBefore,
     std::size_t freeAfter, std::uint32_t hash, std::uint32_t zoneIndex)
 {
+    g_publications.emplace_back(type, name ? name : "");
     g_trace.publicationEnd = true;
     g_trace.assetType = type;
     g_trace.assetEntryIndex = entryIndex;
@@ -2229,29 +2511,9 @@ void DB_RuntimeTracePublicationEnd(XAssetType type, const char *name,
     g_trace.assetZoneIndex = zoneIndex;
     std::snprintf(g_trace.assetName, sizeof(g_trace.assetName), "%s", name ? name : "");
 }
-void DB_RuntimeGeneratedFailure(const char *stage)
+void MyAssertHandler(const char *file, int line, int, const char *, ...)
 {
-    if (!g_trace.generatedLoadFailed)
-    {
-        g_trace.generatedLoadFailed = true;
-        DB_FailXFileLoad(stage);
-    }
-}
-bool DB_RuntimeGeneratedLoadFailed()
-{
-    return g_trace.generatedLoadFailed || DB_HasXFileLoadFailure();
-}
-bool DB_RuntimeStreamCanRead(std::size_t size)
-{
-    if (g_streamPosIndex >= 9 || !g_streamZoneMem || !g_streamPos) return false;
-    const XBlock &block = g_streamZoneMem->blocks[g_streamPosIndex];
-    if (!block.data || g_streamPos < block.data) return size == 0;
-    const std::size_t offset = static_cast<std::size_t>(g_streamPos - block.data);
-    return offset <= block.size && size <= block.size - offset;
-}
-
-void MyAssertHandler(const char *, int, int, const char *, ...)
-{
+    std::fprintf(stderr, "canonical DB assertion: %s:%d\n", file, line);
     throw std::runtime_error("canonical DB assertion");
 }
 void Com_Error(errorParm_t, const char *, ...) { throw std::runtime_error("canonical DB error"); }
@@ -2269,6 +2531,7 @@ int I_stricmp(const char *left, const char *right)
         std::tolower(static_cast<unsigned char>(*right));
 }
 void track_static_alloc_internal(void *, int, const char *, int) {}
+#if !defined(KISAK_DB_ZONE_RECOVERY_TEST)
 void Sys_LockWrite(FastCriticalSection *section)
 {
     section->writeCount = section->writeCount + 1;
@@ -2277,6 +2540,31 @@ void Sys_UnlockWrite(FastCriticalSection *section)
 {
     section->writeCount = section->writeCount - 1;
 }
+#endif
+#if defined(KISAK_DB_ZONE_RECOVERY_TEST)
+// Stable interned identities for multi-asset rollback/default checks. Reference
+// counting remains a fixture stand-in; this does not qualify the string runtime.
+std::deque<std::string> g_zoneTestStrings;
+std::uint32_t SL_GetString(const char *value, std::uint32_t)
+{
+    if (!value || !*value) return 0;
+    const auto found = std::find(g_zoneTestStrings.begin(), g_zoneTestStrings.end(), value);
+    if (found != g_zoneTestStrings.end())
+        return static_cast<std::uint32_t>(found - g_zoneTestStrings.begin()) + 1;
+    g_zoneTestStrings.emplace_back(value);
+    return static_cast<std::uint32_t>(g_zoneTestStrings.size());
+}
+const char *SL_ConvertToString(std::uint32_t value)
+{
+    return value && value <= g_zoneTestStrings.size() ? g_zoneTestStrings[value - 1].c_str() : "";
+}
+std::uint32_t SL_ConvertFromString(const char *value)
+{
+    for (std::uint32_t index = 0; index < g_zoneTestStrings.size(); ++index)
+        if (value == g_zoneTestStrings[index].c_str()) return index + 1;
+    return 0;
+}
+#else
 std::uint32_t SL_GetString(const char *value, std::uint32_t)
 {
     g_scriptString = value ? value : "";
@@ -2290,6 +2578,7 @@ std::uint32_t SL_ConvertFromString(const char *value)
 {
     return value && value == g_scriptString.c_str() ? 1u : 0u;
 }
+#endif
 void SL_AddUser(std::uint32_t, std::uint32_t) {}
 void SL_RemoveUser(std::uint32_t stringValue, std::uint32_t user)
 {
@@ -2302,6 +2591,7 @@ void SL_ShutdownSystem(std::uint32_t user)
     assert(user == 4u);
     ++g_databaseStringShutdownCount;
 }
+#if !defined(KISAK_DB_ZONE_RECOVERY_TEST)
 void Load_GetCurrentZoneHandle(std::uint8_t *handle)
 {
     assert(handle);
@@ -2335,9 +2625,438 @@ const PhysicalMemory *PMem_GetState()
     memory.prim[1].pos = g_highPosition;
     return &memory;
 }
+#endif
 
-int main()
+#if defined(KISAK_DB_ZONE_RECOVERY_TEST)
+int TestZoneRecovery()
 {
+    extern PhysicalMemory g_mem;
+    PMem_InitPhysicalMemory(&g_mem, g_arena.data(), static_cast<std::uint32_t>(g_arena.size()));
+    Sys_InitMainThread();
+    DB_InitThread();
+    const auto load = [](const char *zoneName, int flags, const char *payload, bool corrupt) {
+        std::vector<std::uint8_t> bytes;
+        AppendU32(bytes, 8192);
+        AppendU32(bytes, 0);
+        for (auto size : std::array<std::uint32_t, 9>{4096, 0, 0, 0, 4096, 0, 0, 0, 0})
+            AppendU32(bytes, size);
+        AppendU32(bytes, 0); AppendU32(bytes, 0);
+        const unsigned count = corrupt ? 3 : 1;
+        AppendU32(bytes, count); AppendU32(bytes, UINT32_MAX);
+        for (unsigned i = 0; i < count; ++i)
+        {
+            AppendU32(bytes, ASSET_TYPE_RAWFILE);
+            AppendU32(bytes, UINT32_MAX - 1u);
+        }
+        for (unsigned i = 0; i < count; ++i)
+        {
+            AppendU32(bytes, UINT32_MAX);
+            AppendU32(bytes, i == 2 ? INT32_MAX : static_cast<std::uint32_t>(std::strlen(payload)));
+            AppendU32(bytes, 1);
+            AppendCString(bytes, i == 0 ? "tests/zone-shared" : i == 1 ? "tests/zone-new" : "tests/zone-invalid");
+            if (i != 2) AppendCString(bytes, payload);
+        }
+        g_file = CompressXFile(bytes);
+        XZoneInfo request{zoneName, flags, 0};
+        DB_LoadXAssets(&request, 1, 1);
+        assert(Sys_IsDatabaseReady());
+    };
+    for (int flags : {8, 16})
+    {
+        const unsigned allocType = flags == 16 ? 1 : 0;
+        load("base", flags, "original", false);
+        assert(!DB_RuntimeGeneratedLoadFailed());
+        const RawFile *identity = DB_FindXAssetHeader(ASSET_TYPE_RAWFILE, "tests/zone-shared").rawfile;
+        assert(identity && std::strcmp(identity->buffer, "original") == 0);
+        const auto memoryBefore = PMem_GetFreeAmount();
+        const auto entriesBefore = DB_GetFreeAssetEntryCount();
+        const auto poolBefore = DB_GetAssetPoolFreeCount(ASSET_TYPE_RAWFILE);
+        for (unsigned attempt = 0; attempt < 40; ++attempt)
+        {
+            load("broken", flags, "replacement", true);
+            assert(DB_RuntimeGeneratedLoadFailed());
+            assert(DB_FindXAssetHeader(ASSET_TYPE_RAWFILE, "tests/zone-shared").rawfile == identity);
+            assert(std::strcmp(identity->buffer, "original") == 0);
+            assert(!DB_FindXAssetEntryCanonical(ASSET_TYPE_RAWFILE, "tests/zone-new"));
+            assert(!DB_FindXAssetEntryCanonical(ASSET_TYPE_RAWFILE, "tests/zone-invalid"));
+            assert(DB_GetFreeAssetEntryCount() == entriesBefore);
+            assert(DB_GetAssetPoolFreeCount(ASSET_TYPE_RAWFILE) == poolBefore);
+            assert(PMem_GetFreeAmount() == memoryBefore);
+            assert(g_mem.prim[allocType].allocListCount == 1 && !g_mem.prim[allocType].allocName);
+            assert(g_zones[1].name[0] && !g_zones[2].name[0]);
+        }
+        load("retry", flags, "recovered", false);
+        assert(!DB_RuntimeGeneratedLoadFailed());
+        assert(DB_FindXAssetHeader(ASSET_TYPE_RAWFILE, "tests/zone-shared").rawfile == identity);
+        assert(std::strcmp(identity->buffer, "recovered") == 0);
+        DB_UnloadXZonesForFreeFlags(flags);
+        assert(PMem_GetFreeAmount() == g_arena.size());
+        assert(g_mem.prim[allocType].allocListCount == 0);
+    }
+
+    const auto loadClipMap = [](const char *zoneName, int flags,
+                                const char *mapName, bool corrupt,
+                                std::uint32_t checksum) {
+        g_file = MakeClipMapXFile(false, mapName, corrupt, checksum);
+        XZoneInfo request{zoneName, flags, 0};
+        DB_LoadXAssets(&request, 1, 1);
+        assert(Sys_IsDatabaseReady());
+    };
+    loadClipMap("clip-base", 8, "maps/killhouse.d3dbsp", false,
+        0x11112222u);
+    assert(!DB_RuntimeGeneratedLoadFailed());
+    clipMap_t *clipIdentity = DB_FindXAssetHeader(ASSET_TYPE_CLIPMAP,
+        "maps/killhouse.d3dbsp").clipMap;
+    assert(clipIdentity == DB_XAssetPool[ASSET_TYPE_CLIPMAP] &&
+        clipIdentity->checksum == 0x11112222u);
+    XAssetEntryPoolEntry *clipEntry = DB_FindXAssetEntryCanonical(
+        ASSET_TYPE_CLIPMAP, "maps/killhouse.d3dbsp");
+    assert(clipEntry);
+    clipEntry->entry.inuse = true;
+    const auto clipMemoryBefore = PMem_GetFreeAmount();
+    const auto clipEntriesBefore = DB_GetFreeAssetEntryCount();
+    for (unsigned attempt = 0; attempt < 40; ++attempt)
+    {
+        const auto publicationsBefore = g_publications.size();
+        loadClipMap("clip-broken", 16, "maps/cargoship.d3dbsp", true,
+            0x33334444u);
+        assert(DB_RuntimeGeneratedLoadFailed());
+        assert(std::find(g_publications.begin() + publicationsBefore,
+            g_publications.end(), std::pair<XAssetType, std::string>{
+                ASSET_TYPE_CLIPMAP, "maps/cargoship.d3dbsp"}) !=
+            g_publications.end());
+        assert(DB_FindXAssetHeader(ASSET_TYPE_CLIPMAP,
+            "maps/killhouse.d3dbsp").clipMap == clipIdentity);
+        assert(std::strcmp(clipIdentity->name,
+            "maps/killhouse.d3dbsp") == 0);
+        assert(clipIdentity->checksum == 0x11112222u);
+        assert(clipEntry->entry.inuse);
+        assert(!DB_FindXAssetEntryCanonical(ASSET_TYPE_CLIPMAP,
+            "maps/cargoship.d3dbsp"));
+        assert(!DB_FindXAssetEntryCanonical(ASSET_TYPE_MAP_ENTS,
+            "maps/cargoship.d3dbsp"));
+        assert(!DB_FindXAssetEntryCanonical(ASSET_TYPE_RAWFILE,
+            "tests/clipmap-invalid"));
+        assert(DB_GetFreeAssetEntryCount() == clipEntriesBefore);
+        assert(PMem_GetFreeAmount() == clipMemoryBefore);
+        assert(g_mem.prim[0].allocListCount == 1 &&
+            g_mem.prim[1].allocListCount == 0);
+        assert(g_zones[1].name[0] && !g_zones[2].name[0]);
+    }
+
+    g_namedFiles = {
+        {"clip-request-a", MakeClipMapXFile(false,
+            "maps/cargoship.d3dbsp", false, 0x77778888u)},
+        {"clip-request-b", MakeClipMapXFile(false,
+            "maps/bog_a.d3dbsp", true, 0x9999aaaau)},
+    };
+    const auto multiPublicationsBefore = g_publications.size();
+    XZoneInfo clipRequest[] = {
+        {"clip-request-a", 16, 0},
+        {"clip-request-b", 16, 0},
+    };
+    DB_LoadXAssets(clipRequest, std::size(clipRequest), 1);
+    g_namedFiles.clear();
+    g_activeFile = &g_file;
+    assert(Sys_IsDatabaseReady() && DB_RuntimeGeneratedLoadFailed());
+    assert(std::find(g_publications.begin() + multiPublicationsBefore,
+        g_publications.end(), std::pair<XAssetType, std::string>{
+            ASSET_TYPE_CLIPMAP, "maps/cargoship.d3dbsp"}) !=
+        g_publications.end());
+    for (const char *candidate : {
+             "maps/cargoship.d3dbsp", "maps/bog_a.d3dbsp"})
+    {
+        assert(!DB_FindXAssetEntryCanonical(ASSET_TYPE_CLIPMAP, candidate));
+        assert(!DB_FindXAssetEntryCanonical(ASSET_TYPE_MAP_ENTS, candidate));
+    }
+    assert(DB_FindXAssetHeader(ASSET_TYPE_CLIPMAP,
+        "maps/killhouse.d3dbsp").clipMap == clipIdentity);
+    assert(clipIdentity->checksum == 0x11112222u && clipEntry->entry.inuse);
+    assert(DB_GetFreeAssetEntryCount() == clipEntriesBefore);
+    assert(PMem_GetFreeAmount() == clipMemoryBefore);
+    assert(g_mem.prim[0].allocListCount == 1 &&
+        g_mem.prim[1].allocListCount == 0);
+    assert(g_zones[1].name[0] && !g_zones[2].name[0] &&
+        !g_zones[3].name[0]);
+
+    loadClipMap("clip-retry", 16, "maps/cargoship.d3dbsp", false,
+        0x55556666u);
+    assert(!DB_RuntimeGeneratedLoadFailed());
+    assert(!DB_FindXAssetEntryCanonical(ASSET_TYPE_CLIPMAP,
+        "maps/killhouse.d3dbsp"));
+    assert(DB_FindXAssetHeader(ASSET_TYPE_CLIPMAP,
+        "maps/cargoship.d3dbsp").clipMap == clipIdentity);
+    assert(clipIdentity->checksum == 0x55556666u);
+    DB_UnloadXZonesForFreeFlags(16);
+    DB_UnloadXZonesForFreeFlags(8);
+    assert(PMem_GetFreeAmount() == g_arena.size());
+
+    const auto loadGfxWorld = [](const char *zoneName, int flags,
+                                 const char *mapName, const char *baseName,
+                                 std::uint32_t checksum, bool corrupt) {
+        GfxWorldFixtureOptions options;
+        options.name = mapName;
+        options.baseName = baseName;
+        options.checksum = checksum;
+        options.assetPointer = UINT32_MAX;
+        options.includeAliasAsset = false;
+        options.corruptTrailingRawFile = corrupt;
+        g_file = MakeGfxWorldXFile(options);
+        XZoneInfo request{zoneName, flags, 0};
+        DB_LoadXAssets(&request, 1, 1);
+        assert(Sys_IsDatabaseReady());
+    };
+    loadGfxWorld("gfx-base", 8, "maps/gfx_base.d3dbsp", "gfx_base",
+        0x11113333u, false);
+    assert(!DB_RuntimeGeneratedLoadFailed());
+    GfxWorld *gfxIdentity = DB_FindXAssetHeader(ASSET_TYPE_GFXWORLD,
+        "maps/gfx_base.d3dbsp").gfxWorld;
+    assert(gfxIdentity == DB_XAssetPool[ASSET_TYPE_GFXWORLD] &&
+        gfxIdentity->checksum == 0x11113333u);
+    XAssetEntryPoolEntry *gfxEntry = DB_FindXAssetEntryCanonical(
+        ASSET_TYPE_GFXWORLD, "maps/gfx_base.d3dbsp");
+    assert(gfxEntry);
+    gfxEntry->entry.inuse = true;
+    const auto gfxMemoryBefore = PMem_GetFreeAmount();
+    const auto gfxEntriesBefore = DB_GetFreeAssetEntryCount();
+    const auto worldUnloadsBefore = g_rendererWorldUnloadCount;
+    loadGfxWorld("gfx-broken", 16, "maps/gfx_broken.d3dbsp",
+        "gfx_broken", 0x55557777u, true);
+    assert(DB_RuntimeGeneratedLoadFailed());
+    assert(g_rendererWorldUnloadCount == worldUnloadsBefore);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_GFXWORLD,
+        "maps/gfx_base.d3dbsp").gfxWorld == gfxIdentity);
+    assert(std::strcmp(gfxIdentity->name, "maps/gfx_base.d3dbsp") == 0 &&
+        std::strcmp(gfxIdentity->baseName, "gfx_base") == 0 &&
+        gfxIdentity->checksum == 0x11113333u && gfxEntry->entry.inuse);
+    assert(!DB_FindXAssetEntryCanonical(ASSET_TYPE_GFXWORLD,
+        "maps/gfx_broken.d3dbsp"));
+    assert(!DB_FindXAssetEntryCanonical(ASSET_TYPE_RAWFILE,
+        "tests/gfxworld-invalid"));
+    assert(DB_GetFreeAssetEntryCount() == gfxEntriesBefore);
+    assert(PMem_GetFreeAmount() == gfxMemoryBefore);
+    loadGfxWorld("gfx-retry", 16, "maps/gfx_retry.d3dbsp", "gfx_retry",
+        0x9999bbbbu, false);
+    assert(!DB_RuntimeGeneratedLoadFailed());
+    assert(g_rendererWorldUnloadCount == worldUnloadsBefore + 1u);
+    assert(!DB_FindXAssetEntryCanonical(ASSET_TYPE_GFXWORLD,
+        "maps/gfx_base.d3dbsp"));
+    assert(DB_FindXAssetHeader(ASSET_TYPE_GFXWORLD,
+        "maps/gfx_retry.d3dbsp").gfxWorld == gfxIdentity);
+    assert(gfxIdentity->checksum == 0x9999bbbbu);
+    DB_UnloadXZonesForFreeFlags(16);
+    DB_UnloadXZonesForFreeFlags(8);
+    assert(g_rendererWorldUnloadCount == worldUnloadsBefore + 2u);
+    assert(PMem_GetFreeAmount() == g_arena.size());
+
+    const auto loadComWorld = [](const char *zoneName, int flags,
+                                 const char *mapName, bool corrupt) {
+        ComWorldFixtureOptions options;
+        options.name = mapName;
+        options.assetPointer = UINT32_MAX;
+        options.includeAliasAsset = false;
+        options.corruptTrailingRawFile = corrupt;
+        g_file = MakeComWorldXFile(options);
+        XZoneInfo request{zoneName, flags, 0};
+        DB_LoadXAssets(&request, 1, 1);
+        assert(Sys_IsDatabaseReady());
+    };
+    loadComWorld("com-base", 8, "maps/com_base.d3dbsp", false);
+    assert(!DB_RuntimeGeneratedLoadFailed());
+    ComWorld *comIdentity = DB_FindXAssetHeader(ASSET_TYPE_COMWORLD,
+        "maps/com_base.d3dbsp").comWorld;
+    assert(comIdentity == DB_XAssetPool[ASSET_TYPE_COMWORLD] &&
+        comIdentity->primaryLightCount == 2u);
+    XAssetEntryPoolEntry *comEntry = DB_FindXAssetEntryCanonical(
+        ASSET_TYPE_COMWORLD, "maps/com_base.d3dbsp");
+    assert(comEntry);
+    comEntry->entry.inuse = true;
+    const auto commonUnloadsBefore = g_commonWorldUnloadCount;
+    loadComWorld("com-broken", 16, "maps/com_broken.d3dbsp", true);
+    assert(DB_RuntimeGeneratedLoadFailed());
+    assert(g_commonWorldUnloadCount == commonUnloadsBefore);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_COMWORLD,
+        "maps/com_base.d3dbsp").comWorld == comIdentity);
+    assert(std::strcmp(comIdentity->name, "maps/com_base.d3dbsp") == 0 &&
+        comIdentity->primaryLightCount == 2u && comEntry->entry.inuse);
+    assert(!DB_FindXAssetEntryCanonical(ASSET_TYPE_COMWORLD,
+        "maps/com_broken.d3dbsp"));
+    assert(!DB_FindXAssetEntryCanonical(ASSET_TYPE_RAWFILE,
+        "tests/comworld-invalid"));
+    loadComWorld("com-retry", 16, "maps/com_retry.d3dbsp", false);
+    assert(!DB_RuntimeGeneratedLoadFailed());
+    assert(g_commonWorldUnloadCount == commonUnloadsBefore + 1u);
+    assert(!DB_FindXAssetEntryCanonical(ASSET_TYPE_COMWORLD,
+        "maps/com_base.d3dbsp"));
+    assert(DB_FindXAssetHeader(ASSET_TYPE_COMWORLD,
+        "maps/com_retry.d3dbsp").comWorld == comIdentity);
+    DB_UnloadXZonesForFreeFlags(16);
+    DB_UnloadXZonesForFreeFlags(8);
+    assert(g_commonWorldUnloadCount == commonUnloadsBefore + 2u);
+    assert(PMem_GetFreeAmount() == g_arena.size());
+
+    const auto loadGameWorld = [](const char *zoneName, int flags,
+                                  const char *mapName, bool corrupt) {
+        g_file = MakeGameWorldSpXFile(false, mapName, corrupt);
+        XZoneInfo request{zoneName, flags, 0};
+        DB_LoadXAssets(&request, 1, 1);
+        assert(Sys_IsDatabaseReady());
+    };
+    loadGameWorld("game-base", 8, "maps/game_base.d3dbsp", false);
+    assert(!DB_RuntimeGeneratedLoadFailed());
+    GameWorldSp *gameIdentity = DB_FindXAssetHeader(
+        ASSET_TYPE_GAMEWORLD_SP, "maps/game_base.d3dbsp").gameWorldSp;
+    assert(gameIdentity == DB_XAssetPool[ASSET_TYPE_GAMEWORLD_SP] &&
+        gameIdentity->path.nodeCount == 1u);
+    XAssetEntryPoolEntry *gameEntry = DB_FindXAssetEntryCanonical(
+        ASSET_TYPE_GAMEWORLD_SP, "maps/game_base.d3dbsp");
+    assert(gameEntry);
+    gameEntry->entry.inuse = true;
+    loadGameWorld("game-broken", 16, "maps/game_broken.d3dbsp", true);
+    assert(DB_RuntimeGeneratedLoadFailed());
+    assert(DB_FindXAssetHeader(ASSET_TYPE_GAMEWORLD_SP,
+        "maps/game_base.d3dbsp").gameWorldSp == gameIdentity);
+    assert(std::strcmp(gameIdentity->name, "maps/game_base.d3dbsp") == 0 &&
+        gameIdentity->path.nodeCount == 1u && gameEntry->entry.inuse);
+    assert(!DB_FindXAssetEntryCanonical(ASSET_TYPE_GAMEWORLD_SP,
+        "maps/game_broken.d3dbsp"));
+    assert(!DB_FindXAssetEntryCanonical(ASSET_TYPE_RAWFILE,
+        "tests/gameworld-invalid"));
+    loadGameWorld("game-retry", 16, "maps/game_retry.d3dbsp", false);
+    assert(!DB_RuntimeGeneratedLoadFailed());
+    assert(!DB_FindXAssetEntryCanonical(ASSET_TYPE_GAMEWORLD_SP,
+        "maps/game_base.d3dbsp"));
+    assert(DB_FindXAssetHeader(ASSET_TYPE_GAMEWORLD_SP,
+        "maps/game_retry.d3dbsp").gameWorldSp == gameIdentity);
+    DB_UnloadXZonesForFreeFlags(16);
+    DB_UnloadXZonesForFreeFlags(8);
+    assert(PMem_GetFreeAmount() == g_arena.size());
+
+    // Reuse a lower-numbered zone after an older allocation at the other end.
+    // Reverse zone-index order would free the older high allocation first.
+    load("low-first", 8, "low", false);
+    load("high-old", 16, "high-old", false);
+    DB_UnloadXZonesForFreeFlags(8);
+    load("high-new", 16, "high-new", false);
+    assert(std::strcmp(g_zones[1].name, "high-new") == 0);
+    assert(std::strcmp(g_zones[2].name, "high-old") == 0);
+    DB_UnloadXZonesForFreeFlags(16);
+    assert(PMem_GetFreeAmount() == g_arena.size());
+    assert(g_mem.prim[0].allocListCount == 0 && g_mem.prim[1].allocListCount == 0);
+    const auto loadImage = [](const char *zoneName, std::uint32_t payload, bool corrupt,
+                             const char *name = "images/gate3", int flags = 8) {
+        MaterialFixtureOptions options;
+        options.imagePayload = payload;
+        options.imageName = name;
+        if (corrupt) options.waterPointer = 0x90000001u;
+        g_file = MakeMaterialXFile(options);
+        XZoneInfo request{zoneName, flags, 0};
+        DB_LoadXAssets(&request, 1, 1);
+        assert(Sys_IsDatabaseReady());
+    };
+    const auto imagePayload = [](const GfxImage *image) {
+        WebDbImageLoadDef source{};
+        assert(DB_WebGetImageLoadDef(image, source) && source.byteLength == 4);
+        std::uint32_t payload;
+        std::memcpy(&payload, source.data, sizeof(payload));
+        return payload;
+    };
+    loadImage("image-base", 0x11223344u, false);
+    assert(!DB_RuntimeGeneratedLoadFailed());
+    const GfxImage *image = DB_FindXAssetHeader(ASSET_TYPE_IMAGE, "images/gate3").image;
+    assert(image && imagePayload(image) == 0x11223344u);
+    Material *aliasSource = DB_FindXAssetHeader(
+        ASSET_TYPE_MATERIAL, "materials/gate3").material;
+    assert(aliasSource && aliasSource->stateBitsCount &&
+        aliasSource->textureCount && aliasSource->constantCount);
+    Material *alias = DB_DuplicateMaterialAsset(aliasSource, "$map_preview");
+    assert(alias && alias != aliasSource &&
+        std::strcmp(alias->info.name, "$map_preview") == 0);
+    assert(alias->stateBitsTable != aliasSource->stateBitsTable &&
+        alias->textureTable != aliasSource->textureTable &&
+        alias->constantTable != aliasSource->constantTable);
+    const GfxStateBits aliasState = alias->stateBitsTable[0];
+    const MaterialTextureDef aliasTexture = alias->textureTable[0];
+    const MaterialConstantDef aliasConstant = alias->constantTable[0];
+    aliasSource->stateBitsTable[0].loadBits[0] ^= 0xFFFFFFFFu;
+    aliasSource->textureTable[0].samplerState ^= 0xFFu;
+    aliasSource->constantTable[0].literal[0] += 1.0f;
+    assert(std::memcmp(&alias->stateBitsTable[0], &aliasState,
+        sizeof(aliasState)) == 0);
+    assert(std::memcmp(&alias->textureTable[0], &aliasTexture,
+        sizeof(aliasTexture)) == 0);
+    assert(std::memcmp(&alias->constantTable[0], &aliasConstant,
+        sizeof(aliasConstant)) == 0);
+    const auto imageMemory = PMem_GetFreeAmount();
+    GfxImageLoadDef oversized{};
+    oversized.resourceSize = static_cast<int>(DB_WebGetImageLoadDefStats().budgetBytes);
+    GfxImage rejected{};
+    rejected.name = "images/budget-rejected";
+    rejected.texture.loadDef = &oversized;
+    // Only the header is backed: budget rejection must precede reading payload.
+    Load_Texture(&rejected.texture, &rejected);
+    assert(DB_RuntimeGeneratedLoadFailed() && !rejected.texture.webResource);
+    assert(imagePayload(image) == 0x11223344u);
+    assert(DB_WebGetImageLoadDefStats().encodedPayloadBytes == 4);
+    for (unsigned attempt = 0; attempt < 40; ++attempt)
+    {
+        loadImage("image-broken", 0x55667788u, true);
+        assert(DB_RuntimeGeneratedLoadFailed());
+        assert(DB_FindXAssetHeader(ASSET_TYPE_IMAGE, "images/gate3").image == image);
+        assert(imagePayload(image) == 0x11223344u);
+        assert(PMem_GetFreeAmount() == imageMemory);
+        assert(DB_WebGetImageLoadDefStats().encodedPayloadBytes == 4);
+    }
+    loadImage("image-retry", 0xAABBCCDDu, false, "images/gate3", 16);
+    assert(!DB_RuntimeGeneratedLoadFailed());
+    assert(DB_FindXAssetHeader(ASSET_TYPE_IMAGE, "images/gate3").image == image);
+    assert(imagePayload(image) == 0xAABBCCDDu);
+    assert(DB_WebGetImageLoadDefStats().encodedPayloadBytes == 8);
+    DB_UnloadXZonesForFreeFlags(16);
+    assert(imagePayload(image) == 0x11223344u);
+    assert(DB_WebGetImageLoadDefStats().encodedPayloadBytes == 4);
+    assert(PMem_GetFreeAmount() == imageMemory);
+    DB_UnloadXZonesForFreeFlags(8);
+    assert(DB_WebGetImageLoadDefStats().entryCount == 0);
+    assert(DB_WebGetImageLoadDefStats().encodedPayloadBytes == 0);
+    assert(PMem_GetFreeAmount() == g_arena.size());
+    assert(!DB_FindXAssetEntryCanonical(
+        ASSET_TYPE_MATERIAL, "$map_preview"));
+
+    loadImage("image-default", 0x10203040u, false, "$white");
+    assert(!DB_RuntimeGeneratedLoadFailed());
+    const GfxImage *white = DB_FindXAssetHeader(ASSET_TYPE_IMAGE, "$white").image;
+    const GfxImage *copy = DB_FindXAssetHeader(ASSET_TYPE_IMAGE, "images/default-copy").image;
+    assert(copy && white && copy != white);
+    assert(copy->texture.webResource == white->texture.webResource);
+    const auto stringShutdownsBeforeDefaultUnload =
+        g_databaseStringShutdownCount;
+    DB_UnloadXZonesForFreeFlags(8);
+    assert(PMem_GetFreeAmount() == g_arena.size());
+    assert(imagePayload(copy) == 0x10203040u);
+    assert(DB_WebGetImageLoadDefStats().encodedPayloadBytes == 4);
+    assert(g_databaseStringShutdownCount ==
+        stringShutdownsBeforeDefaultUnload);
+    DB_ReleaseXAssets();
+    DB_UnloadXZonesForFreeFlags(8);
+    assert(DB_WebGetImageLoadDefStats().entryCount == 0);
+    assert(DB_WebGetImageLoadDefStats().encodedPayloadBytes == 0);
+    std::puts("canonical-image-recovery failures=40 override-bytes=restored water=marked default-copy=preserved budget=reject-before-copy resources=retired");
+    std::puts("canonical-zone-recovery failures=83 singleton-rollbacks=43 multi-file-rollback=atomic same-flag-zone=preserved overrides=restored clipmap=restored gfxworld=restored comworld=restored gameworld=restored device-side-effects=deferred pmem=both-ends-reclaimed reused-indices=ordered retry=published material-alias=deep-zone-owned");
+    return 0;
+}
+#endif
+
+int main(int argc, char **argv)
+{
+#if defined(KISAK_DB_ZONE_RECOVERY_TEST)
+    return TestZoneRecovery();
+#endif
+    if (argc == 2 && std::strcmp(argv[1], "--mutate") == 0)
+    {
+        RunMutationCampaign();
+        return 0;
+    }
     char localizedPath[256];
     for (int language = 0; language < 3; ++language)
     {
@@ -2364,6 +3083,16 @@ int main()
     assert(g_databaseStringRemoveUserCount == 2u);
 
     XZoneMemory zone{};
+    // A new real load must recover without resetting diagnostic observations.
+    // Previously their sticky failure bit kept every subsequent load failed.
+    Run(MakePhysPresetXFile(UINT32_MAX - 1u, 0x90000001u), zone);
+    assert(DB_RuntimeGeneratedLoadFailed() && g_trace.cleanupComplete);
+    g_file = MakePhysPresetXFile();
+    g_filePosition = 0;
+    RunPrepared(zone);
+    assert(!DB_RuntimeGeneratedLoadFailed() && g_trace.xassetListEnd);
+    assert(DB_FindXAssetHeader(ASSET_TYPE_PHYSPRESET, "physics/gate3").physPreset);
+
     const std::array<std::uint32_t, 9> prefixBlocks{
         4096, 0, 0, 0, 4096, 0, 0, 0, 0};
     Run(MakeEmptyXFile(prefixBlocks), zone);
@@ -2836,7 +3565,7 @@ int main()
         publishedImage.image);
     assert(publishedImage.image->mapType == MAPTYPE_2D);
     assert(publishedImage.image->width == 4 && publishedImage.image->height == 4);
-    assert(publishedImage.image->texture.basemap == nullptr);
+    assert(publishedImage.image->texture.webResource != 0);
     WebDbImageLoadDef publishedImageLoadDef{};
     assert(DB_WebGetImageLoadDef(publishedImage.image, publishedImageLoadDef));
     assert(publishedImageLoadDef.format == 21);

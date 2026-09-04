@@ -24,6 +24,13 @@
 
 fileData_s *com_fileDataHashTable[1024]{};
 
+void __cdecl DB_Cleanup()
+{
+    // Same native synchronization boundary. This synchronous XFile path has
+    // no native g_archiveBuf renderer-thread upload transaction to unwind.
+    Sys_SyncDatabase();
+}
+
 const char *g_assetNames[ASSET_TYPE_COUNT] =
 {
     "xmodelpieces", "physpreset", "xanim", "xmodel", "material",
@@ -50,6 +57,8 @@ volatile bool g_loadingZone = false;
 volatile std::uint32_t g_zoneInfoCount = 0;
 std::uint32_t g_pendingZoneInfoCount = 0;
 std::uint32_t g_pendingZoneInfoIndex = 0;
+std::array<std::uint8_t, 8> g_pendingLoadedZoneIndices{};
+std::uint32_t g_pendingLoadedZoneCount = 0;
 std::uint32_t g_zoneAllocType = 0;
 volatile std::uint32_t g_loadingAssets = 0;
 std::array<XZoneInfoInternal, 8> g_zoneInfo{};
@@ -220,9 +229,11 @@ void DB_TryLoadXFile()
     {
         g_pendingZoneInfoCount = g_zoneInfoCount;
         g_pendingZoneInfoIndex = 0;
+        g_pendingLoadedZoneCount = 0;
         g_zoneInfoCount = 0;
     }
     iassert(!g_loadingZone);
+    bool requestFailed = false;
     while (g_pendingZoneInfoIndex < g_pendingZoneInfoCount)
     {
         const std::uint32_t index = g_pendingZoneInfoIndex;
@@ -232,18 +243,40 @@ void DB_TryLoadXFile()
         // releases that scope.
         if (DB_GetZoneAllocType(g_zoneInfo[index].flags) == 1 && g_initializing)
             return;
+        if (!g_pendingZoneInfoIndex && !g_pendingLoadedZoneCount)
+            DB_BeginXZonePublication();
         const bool loaded = DB_TryLoadXFileInternal(
             g_zoneInfo[index].name, g_zoneInfo[index].flags) != 0;
+        if (g_zoneIndex > 0 && g_zoneIndex < ASSET_TYPE_COUNT &&
+            g_zones[g_zoneIndex].name[0] &&
+            !I_stricmp(g_zones[g_zoneIndex].name, g_zoneInfo[index].name))
+        {
+            iassert(g_pendingLoadedZoneCount <
+                g_pendingLoadedZoneIndices.size());
+            g_pendingLoadedZoneIndices[g_pendingLoadedZoneCount++] =
+                static_cast<std::uint8_t>(g_zoneIndex);
+        }
         ++g_pendingZoneInfoIndex;
         g_loadingAssets = g_loadingAssets - 1u;
         if (!loaded)
         {
+            // A DB_LoadXAssets request is one publication transaction. Retire
+            // the failed file and every earlier file from this request with a
+            // single reverse-allocation-order PMem release, preserving zones
+            // that existed before the request.
+            DB_RollbackXZonePublication(g_pendingLoadedZoneIndices.data(),
+                g_pendingLoadedZoneCount);
+            CompactReleasedZoneHandles();
+            requestFailed = true;
             g_loadingAssets -= g_pendingZoneInfoCount - g_pendingZoneInfoIndex;
             break;
         }
     }
+    if (!requestFailed)
+        DB_CommitXZonePublication();
     g_pendingZoneInfoCount = 0;
     g_pendingZoneInfoIndex = 0;
+    g_pendingLoadedZoneCount = 0;
     iassert(!g_loadingZone);
     iassert(!g_loadingAssets);
     Sys_DatabaseCompleted();
@@ -338,6 +371,7 @@ void __cdecl DB_LoadXAssets(
     {
         g_zoneInited = true;
         DB_RuntimeTraceStage("DB_Init");
+        DB_ResetStringOwnership();
         DB_InitAssetPools();
         DB_RuntimeTracePoolsInitialized(
             static_cast<std::uint32_t>(DB_GetInitializedAssetPoolCount()),

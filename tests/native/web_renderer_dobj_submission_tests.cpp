@@ -1,11 +1,15 @@
 #include <web/web_renderer_dobj_scene.h>
 #include <web/web_renderer_draw_state.h>
+#include <gfx_d3d/gfx_dpvs_types.h>
 #include <gfx_d3d/gfx_world_types.h>
+#include <gfx_d3d/r_model_pose_bounds.h>
 #include <gfx_d3d/material_types.h>
 #include <universal/q_shared.h>
 #include <xanim/xmodel.h>
 #include <cgame/cg_pose.h>
 #include <xanim/xsurface_types.h>
+#include <xanim/xanim.h>
+#include <EffectsCore/fx_system.h>
 
 #include <algorithm>
 #include <array>
@@ -21,6 +25,9 @@ namespace
 float g_lodDistance = -1.0f;
 int g_canonicalLod = 2;
 Material *g_resolvedMaterial = nullptr;
+FxSystem g_fxSystem{};
+DObj_s *g_attachedDobj = nullptr;
+int g_lastPosePartBits[4]{};
 
 struct ModelLightingGridFixture
 {
@@ -108,14 +115,20 @@ void TestDObjEmissionAndAtomicFailure()
     }
     Material *materials[]{nullptr, nullptr};
     DObjAnimMat base{};
+    XBoneInfo boneInfo{};
+    boneInfo.bounds[0][0] = boneInfo.bounds[0][1] = boneInfo.bounds[0][2] = -1.0f;
+    boneInfo.bounds[1][0] = boneInfo.bounds[1][1] = boneInfo.bounds[1][2] = 1.0f;
     XModel model{};
     model.numBones = 1;
     model.numLods = 1;
     model.numsurfs = 2;
     model.lodInfo[0].numsurfs = 2;
+    model.lodInfo[0].partBits[0] = static_cast<int>(0x80000000u);
     model.surfs = surfaces.data();
     model.materialHandles = materials;
     model.baseMat = &base;
+    model.boneInfo = &boneInfo;
+    model.radius = 7.0f;
     XModel *models[]{&model};
     DObj_s obj{};
     obj.numModels = 1;
@@ -123,6 +136,7 @@ void TestDObjEmissionAndAtomicFailure()
     obj.models = models;
     obj.skel.mat = &base;
     cpose_t pose{};
+    pose.origin[0] = 12.0f;
     WebRendererDObjSubmission submission{&obj, &pose, 17u, 2u};
     WebRendererDObjSceneCommand command;
     WebRendererLodParms lodParms;
@@ -154,7 +168,89 @@ void TestDObjEmissionAndAtomicFailure()
     assert(command.batches[0].firstIndex == 0 && command.batches[1].firstIndex == 3);
     assert(command.batches[0].depthHack && command.batches[1].depthHack);
     assert(command.batches[0].modelIdentity == &model);
+    assert(command.batches[0].dynamicLightSurfType == 7u);
+    assert(command.batches[1].dynamicLightSurfType == 7u);
+    for (const auto &batch : command.batches)
+    {
+        assert(batch.transientLightSphere[0] == 12.0f);
+        assert(batch.transientLightSphere[3] == 7.0f);
+    }
+    // Real native attachment lookup feeds the portable receiver flag each frame.
+    DObj_s otherObj{};
+    for (unsigned scenario = 0; scenario < 6; ++scenario)
+    {
+        g_fxSystem.activeSpotLightEffectCount = scenario != 0;
+        g_fxSystem.activeSpotLightBoltDobj = scenario == 1 ? -1 : 17;
+        g_attachedDobj = scenario == 2 ? nullptr : scenario == 3 ? &otherObj : &obj;
+        submission.renderFlags = scenario == 5 ? 12u : 6u;
+        if (scenario == 5) g_fxSystem.activeSpotLightEffectCount = 0;
+        assert(WebRenderer_BuildDObjSceneCommand(&submission, 1, command, &lodParms) ==
+            WebRendererDObjSceneResult::Success);
+        for (const auto &batch : command.batches)
+            assert(batch.excludeTransientSpotLight == (scenario >= 4));
+    }
+    g_fxSystem = {};
+    g_attachedDobj = nullptr;
+    // Native's rigid single-model path remains eligible even with flag 8.
+    submission.renderFlags = 8u;
+    assert(WebRenderer_BuildDObjSceneCommand(&submission, 1, command, &lodParms) ==
+        WebRendererDObjSceneResult::Success);
+    assert(!command.batches[0].excludeTransientSpotLight);
+    XAnimTree_s tree{};
+    obj.tree = &tree;
+    assert(WebRenderer_BuildDObjSceneCommand(&submission, 1, command, &lodParms) ==
+        WebRendererDObjSceneResult::Success);
+    assert(command.batches[0].excludeTransientSpotLight);
+    assert(static_cast<std::uint32_t>(g_lastPosePartBits[0]) == 0x80000000u);
+    assert(command.batches[0].transientLightSphere[3] == -1.0f);
+    assert(command.batches[0].transientLightBoundsEnabled);
+    assert(command.batches[0].transientLightMins[0] == -1.0f);
+    assert(command.batches[0].transientLightMaxs[0] == 1.0f);
+    float visibilityMins[3]{}, visibilityMaxs[3]{};
+    const float visibilityOffset[3]{5.0f, 7.0f, 9.0f};
+    pose.cullIn = 0;
+    const auto lightingHandleBeforeVisibility = pose.lightingHandle;
+    assert(WebRenderer_ComputeDObjVisibilityBounds(submission, &lodParms,
+        visibilityOffset, visibilityMins, visibilityMaxs) == WebRendererDObjSceneResult::Success);
+    for (unsigned axis = 0; axis < 3u; ++axis)
+    {
+        assert(visibilityMins[axis] == visibilityOffset[axis] - 1.0f);
+        assert(visibilityMaxs[axis] == visibilityOffset[axis] + 1.0f);
+    }
+    assert(pose.cullIn == 1);
+    assert(pose.lightingHandle == lightingHandleBeforeVisibility);
+    DpvsPlane cameraPlane{};
+    cameraPlane.coeffs[0] = 1.0f;
+    cameraPlane.coeffs[3] = -2.0f;
+    const auto savedAnimatedVertices = command.vertices;
+    assert(WebRenderer_BuildDObjSceneCommand(&submission, 1, command,
+        &lodParms, nullptr, nullptr, nullptr, nullptr,
+        &cameraPlane, 1) == WebRendererDObjSceneResult::NoDObj);
+    assert(pose.cullIn == 1); // Evaluated, but rejected before skinning.
+    assert(command.vertices.size() == savedAnimatedVertices.size());
+    assert(std::memcmp(command.vertices.data(), savedAnimatedVertices.data(),
+        savedAnimatedVertices.size() * sizeof(WebRendererSurfaceVertex)) == 0);
+    cameraPlane.coeffs[3] = 0.0f;
+    assert(WebRenderer_BuildDObjSceneCommand(&submission, 1, command,
+        &lodParms, nullptr, nullptr, nullptr, nullptr,
+        &cameraPlane, 1) == WebRendererDObjSceneResult::Success);
+    assert(pose.cullIn == 2);
+    // A rejected second portal path cannot undo prior admission this frame.
+    cameraPlane.coeffs[3] = -1.0f;
+    assert(WebRenderer_BuildDObjSceneCommand(&submission, 1, command,
+        &lodParms, nullptr, nullptr, nullptr, nullptr,
+        &cameraPlane, 1) == WebRendererDObjSceneResult::NoDObj);
+    assert(pose.cullIn == 2);
+    assert(WebRenderer_BuildDObjSceneCommand(&submission, 1, command,
+        &lodParms, nullptr, nullptr, nullptr, nullptr,
+        nullptr, 1) == WebRendererDObjSceneResult::InvalidSubmission);
+    obj.tree = nullptr;
+    submission.renderFlags = 2u;
+    assert(WebRenderer_BuildDObjSceneCommand(&submission, 1, command, &lodParms) ==
+        WebRendererDObjSceneResult::Success);
+    assert(!command.batches[0].excludeTransientSpotLight);
     const auto savedVertices = command.vertices;
+    assert(command.batches[0].transientLightSphere[3] == 7.0f);
     const auto savedIndices = command.indices;
     const auto unchanged = [&]() {
         assert(command.vertices.size() == savedVertices.size());
@@ -200,6 +296,8 @@ void TestDObjEmissionAndAtomicFailure()
     }
     assert(WebRenderer_BuildDObjSceneCommand(&submission, 1, command, &lodParms) ==
         WebRendererDObjSceneResult::Success);
+    assert(command.batches[0].dynamicLightSurfType == 9u);
+    assert(command.batches[1].dynamicLightSurfType == 9u);
     unchanged();
 }
 
@@ -280,6 +378,53 @@ void TestCanonicalPoseLightingHandleReusesExactOrigin()
     assert(build() == WebRendererDObjSceneResult::Success);
     assert(command.modelLightingAtlas.pixels[0] == 128u);
     WebRenderer_ReleaseDObjSceneScratch();
+
+    // A post-pose rejection must not evaluate lighting or poison the atlas
+    // used by another, visible DObj in the same command.
+    MaterialTechnique lit{};
+    lit.passCount = 1u;
+    MaterialTechniqueSet techniqueSet{};
+    techniqueSet.techniques[7] = &lit;
+    GfxStateBits stateBits{};
+    Material material{};
+    material.techniqueSet = &techniqueSet;
+    material.stateBitsCount = 1u;
+    material.stateBitsTable = &stateBits;
+    materials[0] = &material;
+    XBoneInfo boneInfo{};
+    std::fill_n(boneInfo.bounds[0], 3u, -1.0f);
+    std::fill_n(boneInfo.bounds[1], 3u, 1.0f);
+    model.boneInfo = &boneInfo;
+    model.lodInfo[0].partBits[0] = static_cast<int>(0x80000000u);
+    DObjAnimMat outside = base;
+    outside.trans[0] = -10.0f;
+    DObj_s culledObj = obj;
+    culledObj.skel.mat = &outside;
+    cpose_t culledPose{};
+    WebRendererDObjSubmission submissions[]{submission, submission};
+    submissions[0].obj = &culledObj;
+    submissions[0].pose = &culledPose;
+    submissions[0].renderFlags = 4u;
+    submissions[0].cachedLightingHandle = &culledPose.lightingHandle;
+    DpvsPlane cameraPlane{};
+    cameraPlane.coeffs[0] = 1.0f;
+    for (bool invalidLighting : {false, true})
+    {
+        WebRenderer_ReleaseDObjSceneScratch();
+        pose.lightingHandle = culledPose.lightingHandle = 0u;
+        submissions[0].lightingOrigin[0] = invalidLighting
+            ? std::numeric_limits<float>::quiet_NaN() : 16.0f;
+        assert(WebRenderer_BuildDObjSceneCommand(submissions, 2u, command,
+            &lodParms, &fixture.grid, nullptr, nullptr, nullptr,
+            &cameraPlane, 1) == WebRendererDObjSceneResult::Success);
+        assert(command.dobjCount == 1u);
+        assert(culledPose.lightingHandle == 0u);
+        assert(pose.lightingHandle == 1u);
+        assert(!command.modelLightingAtlas.pixels.empty());
+        assert(command.batches[0].lightingMode ==
+            WebRendererWorldLightingMode::ModelLightGrid);
+    }
+    WebRenderer_ReleaseDObjSceneScratch();
 }
 
 void TestFusedSkinningUsesCurrentPoseAndRecyclesOnlyGeometry()
@@ -296,6 +441,7 @@ void TestFusedSkinningUsesCurrentPoseAndRecyclesOnlyGeometry()
     for (int i = 0; i < 4; ++i)
     {
         base[i].quat[3] = 1.0f;
+        base[i].transWeight = posed[i].transWeight = 2.0f;
         base[i].trans[0] = static_cast<float>(i);
         vertices[i].xyz[0] = 2.0f;
         vertices[i].xyz[1] = 3.0f;
@@ -363,6 +509,7 @@ void TestFusedSkinningUsesCurrentPoseAndRecyclesOnlyGeometry()
         if (recycledVertices) assert(command.vertices.data() == recycledVertices);
         if (recycledIndices) assert(command.indices.data() == recycledIndices);
         assert(command.batches.size() == 1 && command.batches[0].castsSunShadow);
+        assert(command.batches[0].castsSpotShadow);
         assert(command.batches[0].depthHack && command.batches[0].modelIdentity == &model);
         for (int vertex = 0; vertex < 4; ++vertex)
         {
@@ -627,6 +774,106 @@ void TestReflexSightTechniqueSelectsIntensityOpacitySubset()
     assert(!WebRenderer_UsesSecondaryDirectionalLightmap(
         WebRendererWorldTechnique::BaseTextureNormalSpecular));
 }
+
+void TestAnimatedReceiverBoundsUseSelectedBonesAndViewOffset()
+{
+    XBoneInfo bones[2]{};
+    for (unsigned axis = 0; axis < 3; ++axis)
+    {
+        bones[0].bounds[0][axis] = -1.0f;
+        bones[0].bounds[1][axis] = 1.0f;
+    }
+    bones[1].bounds[0][0] = -2.0f; bones[1].bounds[1][0] = 4.0f;
+    bones[1].bounds[0][1] = -1.0f; bones[1].bounds[1][1] = 3.0f;
+    bones[1].bounds[0][2] = 5.0f; bones[1].bounds[1][2] = 6.0f;
+    XModel model{};
+    model.numBones = 2;
+    model.boneInfo = bones;
+    XModel *models[]{&model};
+    DObj_s obj{};
+    obj.numModels = 1;
+    obj.numBones = 2;
+    obj.models = models;
+    DObjAnimMat poses[2]{};
+    poses[0].quat[3] = poses[1].quat[3] = 1.0f;
+    constexpr float halfSqrt2 = 0.7071067811865475f;
+    poses[1].quat[2] = poses[1].quat[3] = halfSqrt2;
+    poses[1].trans[0] = 10.0f;
+    poses[1].trans[1] = 20.0f;
+    poses[1].trans[2] = 30.0f;
+    poses[1].transWeight = 2.0f;
+    const float viewOffset[3]{100.0f, 200.0f, 300.0f};
+    int partBits[4]{static_cast<int>(0x40000000u), 0, 0, 0};
+    float mins[3]{9.0f, 8.0f, 7.0f}, maxs[3]{6.0f, 5.0f, 4.0f};
+    assert(WebRenderer_ComputeDObjReceiverBounds(
+        obj, poses, partBits, viewOffset, mins, maxs));
+    assert(std::fabs(mins[0] - 107.0f) < 0.00001f);
+    assert(std::fabs(maxs[0] - 111.0f) < 0.00001f);
+    assert(std::fabs(mins[1] - 218.0f) < 0.00001f);
+    assert(std::fabs(maxs[1] - 224.0f) < 0.00001f);
+    assert(mins[2] == 335.0f && maxs[2] == 336.0f);
+    const float savedMins[3]{mins[0], mins[1], mins[2]};
+    bones[1].bounds[1][0] = std::numeric_limits<float>::quiet_NaN();
+    assert(!WebRenderer_ComputeDObjReceiverBounds(
+        obj, poses, partBits, viewOffset, mins, maxs));
+    assert(std::equal(std::begin(mins), std::end(mins), savedMins));
+}
+
+void TestSharedPoseBoundsMatchNativeScalarOrder()
+{
+    std::uint32_t state = 0x91e10da5u;
+    const auto next = [&]() {
+        state = state * 1664525u + 1013904223u;
+        return static_cast<float>(static_cast<int>(state >> 20u) - 2048) / 256.0f;
+    };
+    for (unsigned iteration = 0; iteration < 4096; ++iteration)
+    {
+        DObjAnimMat pose{};
+        for (float &value : pose.quat) value = next();
+        for (float &value : pose.trans) value = next();
+        pose.transWeight = next();
+        XBoneInfo bone{};
+        for (unsigned axis = 0; axis < 3; ++axis)
+        {
+            const float a = next(), b = next();
+            bone.bounds[0][axis] = a < b ? a : b;
+            bone.bounds[1][axis] = a < b ? b : a;
+        }
+        float offset[3]{next(), next(), next()};
+        float expectedMins[3]{131072.0f, 131072.0f, 131072.0f};
+        float expectedMaxs[3]{-131072.0f, -131072.0f, -131072.0f};
+        float scaled[3]{pose.quat[0] * pose.transWeight,
+            pose.quat[1] * pose.transWeight, pose.quat[2] * pose.transWeight};
+        const float xx = scaled[0] * pose.quat[0], xy = scaled[0] * pose.quat[1];
+        const float xz = scaled[0] * pose.quat[2], xw = scaled[0] * pose.quat[3];
+        const float yy = scaled[1] * pose.quat[1], yz = scaled[1] * pose.quat[2];
+        const float yw = scaled[1] * pose.quat[3], zz = scaled[2] * pose.quat[2];
+        const float zw = scaled[2] * pose.quat[3];
+        const float matrix[3][3]{{1.0f - (yy + zz), xy + zw, xz - yw},
+            {xy - zw, 1.0f - (xx + zz), yz + xw},
+            {xz + yw, yz - xw, 1.0f - (xx + yy)}};
+        for (unsigned output = 0; output < 3; ++output)
+        {
+            float lower = pose.trans[output] + offset[output], upper = lower;
+            for (unsigned input = 0; input < 3; ++input)
+            {
+                const float coefficient = matrix[input][output];
+                lower = (coefficient >= 0.0f ? bone.bounds[0][input] : bone.bounds[1][input]) *
+                    coefficient + lower;
+                upper = (coefficient >= 0.0f ? bone.bounds[1][input] : bone.bounds[0][input]) *
+                    coefficient + upper;
+            }
+            expectedMins[output] = lower;
+            expectedMaxs[output] = upper;
+        }
+        float actualMins[3]{131072.0f, 131072.0f, 131072.0f};
+        float actualMaxs[3]{-131072.0f, -131072.0f, -131072.0f};
+        kisak::model_pose::AccumulateBoneBounds(
+            pose, bone, offset, actualMins, actualMaxs);
+        assert(std::memcmp(actualMins, expectedMins, sizeof(actualMins)) == 0);
+        assert(std::memcmp(actualMaxs, expectedMaxs, sizeof(actualMaxs)) == 0);
+    }
+}
 } // namespace
 
 int main()
@@ -638,6 +885,8 @@ int main()
     TestInvalidAndCapacityAdmissionIsDeterministic();
     TestDObjMaterialResolutionPreservesCanonicalFallback();
     TestReflexSightTechniqueSelectsIntensityOpacitySubset();
+    TestAnimatedReceiverBoundsUseSelectedBonesAndViewOffset();
+    TestSharedPoseBoundsMatchNativeScalarOrder();
     TestDObjEmissionAndAtomicFailure();
     TestCanonicalPoseLightingHandleReusesExactOrigin();
     TestFusedSkinningUsesCurrentPoseAndRecyclesOnlyGeometry();
@@ -652,8 +901,20 @@ int __cdecl XModelGetLodForDist(const XModel *, float distance)
     return g_canonicalLod;
 }
 
-DObjAnimMat *__cdecl CG_DObjCalcPose(const cpose_t *, const DObj_s *obj, int *)
+FxSystem *__cdecl FX_GetSystem(int32_t clientIndex)
 {
+    assert(clientIndex == 0);
+    return &g_fxSystem;
+}
+DObj_s *__cdecl Com_GetClientDObj(std::uint32_t handle, int localClientNum)
+{
+    assert(handle == 17 && localClientNum == 0);
+    return g_attachedDobj;
+}
+
+DObjAnimMat *__cdecl CG_DObjCalcPose(const cpose_t *, const DObj_s *obj, int *partBits)
+{
+    std::copy_n(partBits, 4, g_lastPosePartBits);
     return obj->skel.mat;
 }
 XModel *__cdecl DObjGetModel(const DObj_s *obj, int index) { return obj->models[index]; }
@@ -664,11 +925,21 @@ void __cdecl DObjGetHidePartBits(const DObj_s *obj, std::uint32_t *bits)
 void __cdecl ConvertQuatToSkelMat(const DObjAnimMat *mat, DObjSkelMat *matrix)
 {
     *matrix = {};
-    for (int i = 0; i < 3; ++i) matrix->axis[i][i] = 1.0f;
-    const float z = mat->quat[2], w = mat->quat[3];
-    matrix->axis[0][0] = matrix->axis[1][1] = 1.0f - 2.0f * z * z;
-    matrix->axis[0][1] = 2.0f * z * w;
-    matrix->axis[1][0] = -2.0f * z * w;
+    const float x = mat->quat[0], y = mat->quat[1], z = mat->quat[2], w = mat->quat[3];
+    const float weight = mat->transWeight;
+    const float xx = x * weight * x, xy = x * weight * y;
+    const float xz = x * weight * z, xw = x * weight * w;
+    const float yy = y * weight * y, yz = y * weight * z;
+    const float yw = y * weight * w, zz = z * weight * z, zw = z * weight * w;
+    matrix->axis[0][0] = 1.0f - (yy + zz);
+    matrix->axis[0][1] = xy + zw;
+    matrix->axis[0][2] = xz - yw;
+    matrix->axis[1][0] = xy - zw;
+    matrix->axis[1][1] = 1.0f - (xx + zz);
+    matrix->axis[1][2] = yz + xw;
+    matrix->axis[2][0] = xz + yw;
+    matrix->axis[2][1] = yz - xw;
+    matrix->axis[2][2] = 1.0f - (xx + yy);
     std::copy_n(mat->trans, 3, matrix->origin);
     matrix->origin[3] = 1.0f;
 }

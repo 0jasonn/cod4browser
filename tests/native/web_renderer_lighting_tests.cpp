@@ -438,6 +438,109 @@ void TestSharedTransientLights()
         assert(std::find(selected.begin(), selected.begin() + 4, expected) != selected.begin() + 4);
     MostImportant(selected.data(), 4, 1, view);
     assert(selected[0] == &lights[5]);
+
+    const float viewAxis[3][3]{
+        {1, 0, 0}, {0, -1, 0}, {0, 0, 1}};
+    float viewProjection[4][4]{};
+    viewProjection[1][0] = -1.0f;
+    viewProjection[2][1] = -1.0f;
+    viewProjection[0][3] = 1.0f;
+    GfxLight scissorLight{};
+    scissorLight.origin[0] = 100.0f;
+    scissorLight.radius = 10.0f;
+    ScissorRect rect;
+    assert(ComputeScissorRect(scissorLight, view, viewAxis,
+        viewProjection, 10, 20, 200, 100, rect));
+    assert(rect.x > 90 && rect.x < 110);
+    assert(rect.y > 60 && rect.y < 80);
+    assert(rect.width > 0 && rect.width < 30);
+    assert(rect.height > 0 && rect.height < 20);
+    scissorLight.origin[0] = 0.0f;
+    assert(ComputeScissorRect(scissorLight, view, viewAxis,
+        viewProjection, 10, 20, 200, 100, rect));
+    assert(rect.x == 10 && rect.y == 20 &&
+        rect.width == 200 && rect.height == 100);
+    scissorLight.radius = 0.0f;
+    assert(!ComputeScissorRect(scissorLight, view, viewAxis,
+        viewProjection, 10, 20, 200, 100, rect));
+}
+
+void TestNativeReceiverDrawSortKey()
+{
+    using kisak::dynamic_lights::ReceiverDrawSortKey;
+    std::uint64_t state = 0x9e3779b97f4a7c15ull;
+    for (unsigned sample = 0u; sample < 4096u; ++sample)
+    {
+        state ^= state << 13u;
+        state ^= state >> 7u;
+        state ^= state << 17u;
+        const std::uint32_t low = static_cast<std::uint32_t>(state);
+        std::uint32_t high = static_cast<std::uint32_t>(state >> 32u);
+        high = (high & 0xf03fffffu) |
+            ((~static_cast<std::uint32_t>((state >> 54u) & 0x3fu) & 0x3fu) << 22u);
+        const std::uint64_t nativeKey = low |
+            (static_cast<std::uint64_t>(high) << 32u);
+        assert(ReceiverDrawSortKey(state) == nativeKey);
+    }
+
+    GfxDrawSurf lowerBand{}, higherBand{}, world{}, brush{}, model{};
+    lowerBand.fields.primarySortKey = 12u;
+    higherBand.fields.primarySortKey = 13u;
+    assert(ReceiverDrawSortKey(higherBand.packed) <
+        ReceiverDrawSortKey(lowerBand.packed));
+    world.fields.primarySortKey = brush.fields.primarySortKey =
+        model.fields.primarySortKey = 20u;
+    world.fields.surfType = 0u;
+    brush.fields.surfType = 6u;
+    model.fields.surfType = 7u;
+    assert(ReceiverDrawSortKey(world.packed) <
+        ReceiverDrawSortKey(brush.packed));
+    assert(ReceiverDrawSortKey(brush.packed) <
+        ReceiverDrawSortKey(model.packed));
+    model.fields.materialSortedIndex = 2u;
+    GfxDrawSurf laterMaterial = model;
+    laterMaterial.fields.materialSortedIndex = 3u;
+    assert(ReceiverDrawSortKey(model.packed) <
+        ReceiverDrawSortKey(laterMaterial.packed));
+
+    // Native non-camera builders copy the material, then change only these
+    // fields. Exercise every receiver family and packed-field preservation.
+    for (unsigned sample = 0u; sample < 1024u; ++sample)
+    {
+        state ^= state << 13u;
+        state ^= state >> 7u;
+        state ^= state << 17u;
+        for (unsigned type : {2u, 5u, 6u, 7u, 8u, 9u})
+        {
+            GfxDrawSurf material{}, expected{};
+            material.packed = expected.packed = state;
+            const unsigned id = sample * 61u;
+            const bool depthHack = type >= 7u && (sample & 1u);
+            expected.fields.objectId = id;
+            expected.fields.surfType = type;
+            expected.fields.primarySortKey =
+                (material.fields.primarySortKey - depthHack) & 0x3fu;
+            assert(kisak::dynamic_lights::ReceiverDrawSurf(
+                material, type, id, depthHack).packed == expected.packed);
+        }
+    }
+
+    // Camera primary-light state must not reverse the material order in a
+    // transient-light pass (whose destination alpha makes order observable).
+    GfxDrawSurf firstMaterial{}, secondMaterial{};
+    firstMaterial.fields.materialSortedIndex = 2u;
+    secondMaterial.fields.materialSortedIndex = 3u;
+    auto firstCamera = firstMaterial;
+    auto secondCamera = secondMaterial;
+    firstCamera.fields.primaryLightIndex = 9u;
+    secondCamera.fields.primaryLightIndex = 1u;
+    firstCamera.fields.reflectionProbeIndex = 7u;
+    assert(ReceiverDrawSortKey(firstCamera.packed) >
+        ReceiverDrawSortKey(secondCamera.packed));
+    assert(ReceiverDrawSortKey(kisak::dynamic_lights::ReceiverDrawSurf(
+        firstMaterial, 7u, 0u).packed) <
+        ReceiverDrawSortKey(kisak::dynamic_lights::ReceiverDrawSurf(
+        secondMaterial, 7u, 0u).packed));
 }
 
 void TestNativeModelLightingAtlasLayoutAndCoordinates()
@@ -523,8 +626,39 @@ void TestModelLightingAtlasEntryCopyAcrossHeights()
 }
 } // namespace
 
+void TestNativeSphereReceiverContact()
+{
+    using namespace kisak::dynamic_lights;
+    GfxLight light{};
+    light.type = 2;
+    light.dir[0] = -1.0f;
+    light.radius = 10.0f;
+    light.cosHalfFovOuter = 0.8f;
+    float planes[6][4];
+    assert(ReceiverPlanes(light, 3.0f, planes));
+    float center[3]{2.0f, 0.0f, 0.0f};
+    assert(SphereInPlanes(planes, center, 1.0f)); // near-plane tangent included
+    center[0] = 1.99f;
+    assert(!SphereInPlanes(planes, center, 1.0f));
+    center[0] = 11.0f;
+    assert(SphereInPlanes(planes, center, 1.0f)); // far-plane tangent included
+    center[0] = 11.01f;
+    assert(!SphereInPlanes(planes, center, 1.0f));
+    center[0] = 5.0f; center[1] = 4.0f;
+    assert(SphereInPlanes(planes, center, 1.0f));
+    center[1] = 6.0f;
+    assert(!SphereInPlanes(planes, center, 1.0f));
+    center[0] = 12.0f; center[1] = 0.0f;
+    assert(SpheresIntersect(center, 2.0f, light.origin, light.radius));
+    assert(!SpheresIntersect(center, 1.99f, light.origin, light.radius));
+    center[0] = 0.0f;
+    assert(SpheresIntersect(center, 0.0f, light.origin, 0.0f));
+}
+
 int main()
 {
+    TestNativeSphereReceiverContact();
+    TestNativeReceiverDrawSortKey();
     TestNativeSecondaryDirectionalDecode();
     TestZeroDirectionalLobeLeavesLowFrequencyLobe();
     TestNativeSecondaryDirectionalNormalDecode();

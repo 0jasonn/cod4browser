@@ -22,8 +22,10 @@ struct WebRendererSurfaceVertex
     float textureCoordinate[2];
     float lightmapCoordinate[2];
     // Canonical GfxPackedVertex/GfxWorldVertex unit normal. Model commands
-    // consume it for native light-grid lookup; non-model producers leave it
-    // zero and never enable the model-lighting shader branch.
+    // consume it for native light-grid lookup. FxParticleCloud vertices use
+    // this otherwise-unused three-float slot for the unexpanded particle
+    // center required by particle_cloud_outdoor.hlsl; that shader family does
+    // not consume a surface normal.
     float normal[3];
     // Native XSurface/GfxWorld tangent basis. The sign reconstructs
     // binormal = cross(normal, tangent) * binormalSign for n0 techniques.

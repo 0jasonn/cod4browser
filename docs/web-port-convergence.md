@@ -1,11 +1,198 @@
 # Web port convergence inventory
 
-Updated 2026-09-03. This page owns system classification; see
+Updated 2026-09-04. This page owns system classification; see
 [current status](web-status.md) and [the active roadmap](web-roadmap.md) for
 evidence and priorities. Earlier chronology is available in
 [Git history](history/README.md).
 
 ## Current verification boundary
+
+The owned-data Gate 3 acceptance now follows the complete canonical
+lit/decal/emissive DPVS ranges introduced by `498289c7`. Its exact Killhouse
+geometry is 8,475 surfaces, 445,369 vertices and 823,464 indices: 411 surfaces,
+13,622 vertices and 30,276 indices beyond the retired contiguous-prefix
+expectation, with the same one sky surface skipped. The test passes startup and
+map publication, the first WebGL2 frame, keyboard and pointer-lock input, and
+the CM/Com/game/server/client/cgame lifecycle. Its four fastfiles are owned data
+while its IWDs are synthetic, so the asserted 796-batch, 8/339-image fallback is
+kept separate from full-archive material-fidelity evidence.
+
+DObj transient spot receiver exclusions now use shared native
+`gfx_d3d/r_light_attachment.cpp`. The frontend preserves the native scene
+entity/model distinction and render flag 8 policy; the WebGL boundary retains
+only a receiver draw flag. Native/Wasm identity and next-frame reset checks,
+and Chromium spot-versus-omni pixels pass. The backend now globally orders all
+eligible receiver families by native's reverse material/surface key. Exact
+equal-key object-ID ties and authored-effect comparison remain open; see the existing
+[transient-light evidence](evidence/transient-lights-2026-09-02.md).
+
+Transient spot-shadow casters now reuse native admission rather than a shared
+projection-box approximation. BSP ranges use exact shifted light planes without
+camera visibility; static models reuse the camera/light receiver mask; dynamic
+models and brushes reuse their exact receiver predicates and DObj exclusions.
+The static/entity child dvars gate their own families. Sun matrix partitions
+and authored primary-spot membership remain independent.
+
+BSP transient receivers now combine canonical camera visibility and each
+surface's original bounds before coalescing draw ranges. Native and web share
+spot-plane construction, strict box/plane contact and inclusive omni-sphere
+intersection in `r_dynamiclights_core.h`. The backend retains only index runs,
+clears them on failed views/replacement and releases their capacity on unload.
+The shared routines match the pre-change native implementation exactly for
+4,096 spotlights and 98,304 bounds cases. Permanent native/Wasm tests cover
+visibility, near/far contact, near-plane/radius changes, batch gaps and
+empty/invalid results. Their ranges participate in the global receiver sort.
+
+Chrome 152.0.7977.77's ANGLE/D3D11 backend exposed a GLSL sampler-overload
+collision missed by the bundled Chromium gates: translated 3D, cube and
+shadow parameters all became `uint`, producing identical HLSL signatures.
+Distinct helper names preserve the same sampling expressions and restore
+dynamic pixel-executable compilation. The existing transient-light pixel test
+fails before the fix and passes afterward on D3D11. Three additional Chrome
+graphics cases still fail unchanged exact-byte assertions with 127 versus 128;
+native rounding/fidelity is not inferred from those observations.
+The owned Killhouse light/shadow/clear/context-recovery check passes on that
+D3D11 backend after correcting its comparison across two different paused
+poses. Authored light appearance and campaign acceptance remain unverified.
+
+Static-model transient receivers now combine the original canonical bounds
+with camera DPVS addressed by each packed instance's canonical ID. The native
+omni callback and browser mask share the sphere/box predicate; spotlights use
+the already-shared plane/box predicate. Existing LOD-packed instances supply
+contiguous eligible draw runs. The existing visibility scratch is rebuilt for
+each light/shadow pass, so no extra geometry copy, instance buffer or retained
+mask cache is added. Native/Wasm tests cover reordered IDs, camera exclusion,
+near-plane contact, moving lights and failed-mask clearing. Static draws
+participate in the same globally sorted receiver list as world and dynamic geometry.
+
+Rigid DObj, FX-model and DynEntity-model transient receivers now carry the
+native scene-model sphere through the draw boundary. Rigid DObjs use XModel
+radius at the pose origin; FX uses radius times placement scale; DynEntity
+uses its current pose radius. Native/browser spot receiver tests share
+`SphereInPlanes`, including tangent contact. Omni selection follows native's
+squared distance versus radius-sum test. Invalid sphere data is rejected
+before retention. Authored comparison remains open.
+
+Scene and DynEntity brushes now carry `GfxBrushModel::writable` world bounds
+in each frame's instance command. Those bounds remain owned and updated by
+canonical cgame/DynEntity code; the backend does not transform them again or
+derive them from retained mesh vertices. Shared spot box/plane and omni
+box/sphere predicates filter the existing material pass. Geometry-derived
+sun-shadow caster bounds remain separate, transient spot casters reuse these
+receiver bounds, and no receiver cache is added.
+
+Animated DObjs now compute the selected LOD bone mask before canonical pose
+evaluation. Native `R_UpdateSceneEntBounds` and the browser share the same
+per-bone `XBoneInfo` AABB transform in `r_model_pose_bounds.h`; both restore
+the renderer view offset and union only selected bones. The resulting one-box
+scene-entity receiver is copied to every emitted DObj surface. The backend
+applies the shared box/spot-plane or box/omni-sphere predicate. Invalid pose or
+bone bounds reject the command atomically. A 4,096-case native/Wasm scalar-order
+comparison covers the extracted transform. Camera DPVS now runs before dynamic
+assembly: DObj/DynEntity spheres and scene/DynEntity brush boxes must overlap
+the portal-visible cell mask and pass the shared native plane predicates, while
+FX models use native's direct sphere/frustum rule. After pose evaluation,
+animated DObjs also retest their selected-bone AABB against the camera planes
+before skinning, matching native's second-stage rejection. Linked DObjs and
+scene brushes now also consume each cell's exact portal-plane dispatch before
+expansion. Cgame link/unlink and snapshot initialization maintain the native
+world-owned `sceneEntCellBits` banks through bounded helpers in `r_dpvs_core`.
+The helpers call native `BoxOnPlaneSide`, preserve one-word BSP leaves, client
+offsets and relinking between banks, and commit a new link only after the walk
+validates. The renderer retains link validity and the cgame-supplied DObj radius
+(native `scene.dpvs.entInfo` metadata), not replacement entity or pose state.
+Portal admission is local to the current synchronous view and combines repeated
+paths. Unavailable scene links retain the conservative overlap fallback.
+DynEntity link/unlink and world initialization now maintain the original
+`dpvsDyn.dynEntCellBits` model/brush banks. Native and web callers share bounded
+link and cell-cull helpers: MSB-first entity IDs, independent bank strides,
+full cell planes, zero-plane admission and OR across repeated portal paths.
+The browser clears and consumes canonical `dynEntVisData[kind][0]` each view,
+checks collision/world entity counts, and rejects malformed links or storage
+before a command can render. DynEntity submissions use this mask directly;
+they no longer repeat the approximate BSP-overlap test. Linked animated DObjs
+now evaluate the selected canonical LOD bones during that cell dispatch, test
+the updated box against all cell planes, and query exact BSP cell membership.
+Native `R_BoundsInCell` and the browser share the bounded `BoxOnPlaneSide` walk;
+malformed walks are distinct from a valid miss. Pose selection is shared with
+the command builder, and `CG_DObjCalcPose` retains its native per-frame skeleton
+reuse. No extra portal-plane storage, skinned-vertex bounds substitute or
+persistent pose cache is introduced. `CG_UsedDObjCalcPose` and `CG_CullIn` now
+preserve native pose-use/visibility flags, including repeated rejected paths
+that must not undo prior admission.
+DObj lighting evaluation now follows post-pose visibility rejection, so a
+culled submission cannot mutate its pose-owned lighting handle or disable the
+atlas for visible submissions. DynEntity model and brush draws copy canonical
+placements and receiver bounds before `FX_RunPhysics` and
+`DynEntCl_ProcessEntities`, matching native `R_RenderScene`; static and dynamic
+mark generation remains after physics. Effects timing is excluded from the
+model-build timer. No additional pose state is retained.
+
+Transient receiver submission now mirrors `R_EmitPointLightPartitionSurfs` at
+the renderer boundary. Each light builds one list from BSP ranges, static-model
+instance runs and native receiver scene kinds, then sorts the complete list by
+the canonical packed `GfxDrawSurf` key with only `primarySortKey` complemented.
+World, brush, static rigid/skinned and XModel rigid/rigid-skinned/skinned
+families carry native surf types 0, 6, 2/5 and 7/8/9. Code meshes, marks,
+particle clouds and sun billboards do not enter the list. A 4,096-key
+high/low-word oracle and native/Wasm producer tests pass. Equal packed keys use
+stable frontend order because the browser boundary does not retain native's
+low object ID; matched Steam/native/browser appearance remains unverified.
+
+Texture sampler decoding now shares `gfx_d3d/r_sampler.h` with native
+`R_SetTexFilter`: authored filter bits, player anisotropy limits, mip-mode
+overrides and filtering disable produce the same packed native policy.
+WebGL translates only that result into device parameters, clamped to the
+extension's actual anisotropy limit. The same adapter now updates cubemaps,
+model-lighting volumes and animated water at draw time; those targets previously
+kept their initial filtering. Native and Wasm match the 19,200-case trace
+from unmodified `R_SetTexFilter` at `8be61213`. Normal/specular/detail dvars now
+gate existing world/static/dynamic shader flags; transient light passes obey
+normal/detail controls. The web frontend also runs the native technique-set
+feature-name policy after atomic zone publication and on relevant dvar changes,
+using canonical DB lookup for available targets and resolving leading-comma
+aliases after target selection. A bounded native/Wasm graph proves target,
+alias and missing-variant behavior. An owned Killhouse load selects 201 feature
+variants among 165 shader-model-3 sets; disabling normal maps updates 221 sets
+on the next frame and restoring the dvar triggers a second update. No gameplay
+input or campaign progression was used.
+Native image-quality and semantic/no-picmip policy now share
+`gfx_d3d/r_image_quality.cpp`; D3D supplies measured memory and WebGL supplies
+explicit planning inputs. Existing bounded IWI/load-definition and canonical
+wavelet decoding select authored mip levels before allocation/upload. The
+retained source recipe owns only the backend's selected mip, not another image
+identity. The browser frontend registers the shipped menu's canonical
+`r_applyPicmip` command and maps it to the existing renderer restart because
+the backend rebuilds bounded retained sources rather than mutating D3D images
+in place. Synthetic pixels/residency/recreation and owned Killhouse production
+menu/restart/persistence pass. Native mip bias now reaches implicit material/sky/
+shadow sampling and explicit reflection LOD. Synthetic mip-colour, fractional
+filtering and recovery pixels pass; the native cheat/non-archived semantics
+remain. Unknown shader families, arbitrary multipass semantics, broader
+material qualification and original/native
+comparison remain open. No alternate material or image
+model was added.
+
+Owned paused Killhouse specular/normal toggles change rendered pixels, return
+to the original baseline, and survive actual context recovery with identical
+captures. This qualifies control causality in that narrow paused view; authored
+material fidelity remains open.
+
+Browser text now reaches shared `CL_CharEvent`, `Field_CharEvent` and shipped
+UI edit fields alongside physical `CL_KeyEvent`. Only layout/byte translation
+and event transport are platform-owned; editing, native shortcuts and repeat
+policy remain shared. The current adapter supports Windows-1252 text and
+committed composition events. A trusted canvas press now focuses an editable,
+out-of-tab-order text sink while preserving canvas pointer lock, allowing the
+browser to activate dead-key/IME composition without replacing physical game
+keys. A trusted paste event installs one bounded line
+in a platform cache before character 22 invokes canonical `Field_Paste`; the
+owned shipped console path passes. Served Chromium verifies sink focus and
+one-time composed Windows-1252 delivery; actual Windows IME candidate UI,
+other code pages, arbitrary programmatic clipboard reads and localized retail
+glyph qualification remain open. See
+[input architecture](web-architecture.md#input-coordinates-and-lifecycle) and
+[current checks](web-status.md).
 
 The platform frame wrapper now checks the canonical latched error after its
 body, matching `Com_Frame` and preventing a reached renderer failure from
@@ -43,8 +230,86 @@ Save and Quit raises `ERR_DISCONNECT` after saving; recovery uses the extracted
 native `Com_ShutdownInternal`, SP `SV_Shutdown` and `Com_AssetLoadUI` owners to
 retire the game and reload the main menu in the same Worker. Natural Killhouse
 training/checkpoints and fresh-browser Resume Game exposed and verify this seam.
-General error-class recovery remains incomplete. See
-[disconnect evidence](evidence/campaign-training-disconnect-2026-09-02.md).
+`common_error.cpp` now shares native `Com_ErrorCleanup`, error localization,
+temporary-memory reset and quit/escalation policy with the web frame pump.
+After owned startup completes, `ERR_DROP`, `ERR_DISCONNECT` and
+`ERR_SERVERDISCONNECT` use that cleanup; pre-initialization/fatal errors stay
+terminal. Browser cleanup supplies synchronous DB completion, fastfile-only
+BSP ownership and renderer-list retirement instead of native worker/D3D/debug
+socket teardown. The owned error-dialog -> Killhouse -> error-dialog ->
+Killhouse reload regression passes. It exposed a shared `Dvar_InfoString`
+one-byte/four-byte callback-mask mismatch: stale stack bits overflowed server
+info and omitted `mapname`. The flags word is now correctly sized, with
+native/Wasm selection checks. The runtime-prefix test keeps assertions enabled
+in Release. Malformed-load rollback and error re-entry still need broader
+qualification; this is not campaign acceptance. Earlier Save and Quit evidence
+remains in the [disconnect record](evidence/campaign-training-disconnect-2026-09-02.md).
+
+The existing canonical DB fixture now also owns a 328-case bounded mutation
+run (`canonical_xfile_mutation_tests`, or the stream-test executable with
+`--mutate`). It loads recompressed synthetic streams through `DB_LoadXFile`,
+the generated loaders and real registry pools. Both PMem directions, all nine
+block sizes, malformed counts/truncation, pointer fields, alias identities,
+ordered child/parent publication and explicit failed-zone pool retirement
+are exercised while an unrelated zone survives. The Win32/Wasm normalized
+trace is pinned to `99b9d10c`; engine release assertions remain enabled.
+An absent canonical allocation block now takes the web input-failure path
+before the native cursor assertion. This shares the existing loader and
+stream state rather than introducing a second parser. A 32-bit MSVC oracle now
+compiles the actual `db_load.cpp` RawFile routine behind a test-only source
+slice. The native routine and adapted generated loader consume the same direct
+serialized fixture and match on read order/consumption, inline `-1`,
+insert-pointer `-2`, block-4 alias resolution, final-pointer replacement at
+publication, asset name/index/type and logical stream coordinates; the adapted
+oracle also passes as Wasm. The fixture supplies byte reads and a publication
+callback; it does not qualify the native inflate layer or full registry.
+The test slices are disabled in production builds. The rebuilt production Wasm
+is byte-identical to the pre-oracle artifact (`a9546c0b7fb190ef193fe9c54d69830dbe8d695d5c3788e59c5cbd3b90868912`).
+Independent comparison of more asset families and arbitrary alias graphs
+remains open.
+
+`canonical_db_zone_recovery_tests` reuses those fixtures with real
+`db_registry.cpp` browser orchestration, `physicalmemory.cpp` and
+`web_thread_context.cpp`. Its 80 repeated partial RawFile failures prove
+automatic override/pool rollback, preservation of same-flag zones, PMem
+reclamation at both ends and successful retries. A further 43 failures publish
+replacements for the compiled world singleton pools (`clipMap_t`, `ComWorld`,
+`GameWorldSp` and `GfxWorld`) before a malformed trailing RawFile is rejected.
+The publication transaction restores the prior singleton body, name, hash
+ownership, zone identity and in-use state while its nested arrays remain owned
+by the surviving PMem scope; candidate registry entries and allocations are
+retired, and valid retries commit. `R_UnloadWorld` and `Com_UnloadWorld` counters
+prove that rejected replacements do not tear down the surviving renderer/world
+owner and that a committed replacement retires the prior owner exactly once. Release
+follows PMem's allocation order, including reused zone indices, as native
+Kisak's reverse load-order policy requires. XFile failure and stream bounds now
+live in their canonical source owners; `db_runtime_prefix.cpp` only observes
+them, so stale diagnostic failure cannot block a new load. DB-owned strings
+now use the real `scr_stringlist` user with explicit zone/default ownership:
+native/Wasm checks prove shared strings survive a partial zone release,
+last-owner retirement removes them, and a live zone-0 default prevents the
+coarse whole-user shutdown. Broader asset graphs and non-world device side
+effects still need qualification. A bounded
+two-fastfile request now also rolls back atomically when file one has published
+a replacement ClipMap and file two exhausts the `MapEnts` pool: both new zones
+are retired together in reverse PMem allocation order and the pre-request
+singleton returns. Broader request graphs still need coverage; native-game
+loader comparison currently covers only the focused RawFile contract.
+
+Image retention now follows the canonical `GfxTexture` resource boundary:
+opaque handles preserve distinct same-name payloads through native image
+copies, overrides, default substitution and aliases. Completion/unload collects
+resources absent from canonical primary and override entries. Forty rejected
+image overrides restore the original bytes without accumulating resources;
+valid retries and default copies surviving zone release pass in native/Wasm.
+The 256 MiB source cap now rejects admission before copying rather than evicting
+live bytes during speculative loads. The native material mark policy also
+corrects semantic-11 water dependencies to follow `water_t::image`.
+Dynamic menu material aliases now publish through the same registry under the
+active zone. Their material record and state, texture and constant tables are
+independent copies, while referenced canonical assets retain their existing
+identities. Zone retirement removes the alias and frees its auxiliary tables;
+native/Wasm recovery checks cover source mutation and unload.
 
 ## Runtime flow
 
@@ -73,7 +338,7 @@ oracle.
 | Profiles | Canonical `Com_*PlayerProfile` and `UI_*PlayerProfile` functions own profile identity, active-marker parsing, list/feeder selection, config replay, and deletion. Browser diagnostics only select fixed synthetic entries through those owners. |
 | Filesystem | Canonical search paths, IWD/minizip behavior, config/profile calls and synchronous engine-facing operations use Worker file primitives. Recursive profile deletion maps to one durable Worker/OPFS tree-removal primitive. |
 | Installation language | The platform import profile derives paths from the validated localization marker; canonical FS/SEH selects localized IWDs and the DB file adapter now uses that selection instead of hardcoded English. French/German synthetic import, DB open and reload pass. Localized retail text/audio remain unqualified. See [evidence](evidence/localized-imports-2026-09-02.md). |
-| Database | Canonical XFile stream, allocation blocks, generated loaders, pointer aliases, registry pools, dependency ordering and final publication own runtime assets, including native-compatible leading-comma asset-stub resolution. |
+| Database | Canonical XFile stream, allocation blocks, generated loaders, pointer aliases, registry pools, dependency ordering and final publication own runtime assets, including native-compatible leading-comma asset-stub resolution and zone-owned dynamic menu material aliases. |
 | World/runtime | Canonical `GfxWorld`, collision, server/game, client/cgame, script VM, XAnim/DObj, effects, ragdoll, physics and sound code are in the browser link closure. |
 | Frame order | The browser supplies elapsed time; canonical `Com_ModifyMsec`, `SV_Frame`, client frame work and `SCR_UpdateScreen` advance gameplay. Browser startup selects `com_maxFrameTime=5000`, and the platform pump uses the same long-stall ceiling instead of losing time on every frame longer than 100 ms. Script/developer timescales and opt-in `fixedtime` remain canonical. |
 | SP UI | Canonical `CL_StartHunkUsers`, `CL_InitUI`, `UI_Init`, shipped MenuLists, `UI_SetActiveMenu`, `UI_Refresh`, and renderer 2D commands own main/options/profile/load/pause menus. Disconnected browser frames continue through `CL_Frame` and `SCR_UpdateScreen`; UI-only backend frames are valid before any `GfxWorld` exists, so startup presents the shipped main menu rather than a DOM substitute. |
@@ -85,8 +350,8 @@ oracle.
 | Display modes/restart | Platform `web_display.cpp` registers canonical resolution/refresh enums and owns canvas/device sizing. Shared client/UI viewport helpers and `CG_InitViewDimensions` consume native `vidConfig_t`. Shared `CL_Vid_Restart_f` keeps the existing process-owned DB executor; browser registration recreates WebGL resources. Shipped Apply, persistence and native in-game save/restart/load pass in Chrome; mission state stays in Kisak. See [evidence](evidence/display-options-2026-09-03.md). |
 | Saved-screen effects | Canonical cgame owns flashbang/shellshock lifetime and intensities. Ordered renderer commands carry capture, native timer slots and packed colors into the WebGL2 UI pass; a GPU-only feedback texture is platform-owned and invalidated on resize/context loss. Synthetic pixels and a loaded retail material/composite pass are verified; authored effect fidelity remains unverified. See [evidence](evidence/saved-screen-2026-09-02.md). |
 | FX lighting queries | Canonical `FX_CalculatePackedLighting` now receives world light-grid/sun samples through the existing renderer lighting helper, following native average-query selection and quantization. Host-native/Wasm checks pass; original-game visual comparison is pending. This adapted query retires with the portable grid helper when native backend compilation replaces it. See [evidence](evidence/average-lighting-2026-09-02.md). |
-| Transient FX lights | `r_dynamiclights_core.h` shares canonical `GfxLight` construction and native importance partitioning between native and web callers. FX owns emission/lifetime; the frontend clears per-scene submissions, applies camera visibility and `r_dlightLimit`, then passes selected `GfxLight` records to WebGL2. The backend uses existing retained images, canonical material technique/state tables and destination-alpha coverage. Synthetic pixels and owned Killhouse visual/clear/context recovery checks pass. Native receiver/scissor selection, transient spot shadows and authored-effect fidelity remain open. See [evidence](evidence/transient-lights-2026-09-02.md). |
-| Input | Browser events enter canonical key/mouse queues, bindings, usercmd creation and movement/weapon code. |
+| Transient FX lights | `r_dynamiclights_core.h` shares canonical `GfxLight` construction, importance partitioning and projected tangent-sphere scissor calculation between native and web callers. FX owns emission/lifetime; the frontend clears per-scene submissions, applies camera visibility and `r_dlightLimit`, preserves added-light-zero spot identity and near-plane bias, then passes selected `GfxLight` records to WebGL2. The backend uses retained images, canonical material technique/state tables and destination-alpha coverage. A shadow-capable first spot competes with primary lights for the four existing shadow maps and its dynamic pass samples that map. BSP caster ranges use exact shifted light planes without camera visibility; static casters reuse the canonical camera/light receiver mask; dynamic model and brush casters reuse their exact receiver predicate and DObj exclusions. Static/entity child dvars independently gate those families; sun matrices and authored primary-spot lists remain separate. Dynamic DObj/DynEntity spheres and brush boxes require a portal-visible cell and native camera-plane acceptance before assembly, animated DObjs retest their post-pose box before skinning, and FX models use native direct frustum culling. One per-light receiver list globally follows native reverse material/surface-key order and excludes nonreceiver scene kinds. Synthetic pixels and owned Killhouse shadow-toggle/clear/context-recovery checks pass. Equal-key object-ID order and authored-effect fidelity remain open. See [evidence](evidence/transient-lights-2026-09-02.md). |
+| Input | Browser events enter canonical key/character/mouse queues, bindings, native paste/edit fields, usercmd creation and movement/weapon code. |
 | Audio | Canonical mixer and OpenAL-facing state feed a browser Web Audio device boundary. Both three-band EQ stages cross that boundary; SND retains parameter/entchannel ownership, while the device computes IIR coefficients and owns filter nodes. Canonical room/wet changes now reach the existing OpenAL reverb DSP in an AudioWorklet with shared native presets. Native/Wasm differential and browser PCM routing tests pass; authored campaign transitions, callback cost and Steam comparison remain open. See [EQ evidence](evidence/browser-eq-2026-09-02.md) and [reverb scope/evidence](browser-reverb.md). |
 | Save/persistence | Canonical game serialization, shared `ui_savegames.cpp`, feeders, menu scripts, Continue, and deletion own saves and gameplay state. Bounded header metadata supplies the Date column and dynamic description. Save commits request 512x512 JPEGs through native shared resampling; the Worker codec owns only temporary pixels/bytes. C++ checks save identity before persistence and publishes one canonical raw `Material`/`GfxImage`, using existing backend UI texture retention/recovery. Captures wait for a frame of the matching map and cancel on unload; shutdown drains admitted codec jobs before closing files. Native decoding uses reserved `rgp.rawImage`, canonical texture accounting and the existing D3DX dependency. Owned Airplane start-level/save capture, reload and menu display plus native decoder/device checks are verified; complete native menu and Steam comparison remain open. See [latest evidence](evidence/save-startup-native-2026-09-02.md). |
 
@@ -108,14 +373,24 @@ and the verified limitations are recorded in [the boundary notes](renderer-retai
 
 ## Modified Kisak seams
 
+Placement-only FX/DynEntity XModels now retain deformed surfaces. Native
+`R_SkinXModel` classifies these as `SF_XMODEL_RIGID_SKINNED`, and
+`R_TessXModelRigidSkinnedDrawSurfList` uploads authored `verts0` with the object
+placement; it does not apply DObj bone weights. The browser's existing vertex
+expansion already implements that transform, so the erroneous deformed-surface
+drop is removed. Native/Wasm tests compare mixed rigid/deformed surfaces under
+rotation, scale and translation, preserve material/model identity, and still
+reject malformed later surfaces atomically. This is a source-backed boundary
+repair, not an owned-effect visual match. Animated DObj skinning is unchanged.
+
 | Seam | Why it differs |
 | --- | --- |
 | `database/db_file_platform.cpp` | Maps DB file operations to the Worker filesystem. |
-| `database/db_generated_image_platform.*` | Copies transient canonical image load definitions at the native texture-upload boundary into a bounded process-global source cache; canonical `GfxImage` identity remains authoritative. |
+| `database/db_generated_image_platform.*` | Retains transient LoadDefs behind opaque `GfxTexture` resource handles at the native upload boundary. Canonical image copies/overrides/defaults own lifetime; completion/unload collects unreferenced handles. The 256 MiB cap rejects admission before copying; live sources are not evicted. |
 | `qcommon/common_runtime_commands.cpp` | Keeps the post-mount common-command continuation canonical and separate from browser hosting. |
 | `cgame/cg_servercmds.cpp` | The shared slow-command parser converts decimal scales numerically instead of aliasing `long double` storage as `double`; this preserves normal-speed and scripted scale values in Wasm. |
 | `web_client_server_lifecycle.cpp` | Continues synchronous-looking native startup after the main-thread host mounts user files, including canonical version dvars and diagnostic-only calls through real profile/save UI owners. |
-| `web_main.cpp` | Admits disconnected-but-running client frames so canonical pre-map UI and config work run in native order. Its live frame jump target recovers canonical disconnects through shared native shutdown/UI owners; the browser owns the non-blocking pump. |
+| `web_main.cpp` | Admits disconnected-but-running client frames so canonical pre-map UI and config work run in native order. Its live frame jump target uses shared native error cleanup, shutdown and UI owners; the browser owns the non-blocking pump and terminal Worker teardown. |
 | `web_canonical_gfxworld.cpp` | Observes final DB publication only; canonical `R_RenderScene` owns world rendering. The obsolete proof submission is removed. |
 | `web_renderer_frontend.cpp` | Converts canonical renderer state into backend-neutral commands. |
 | `web_system*.cpp` | Supplies browser timing, frame pump, files (including recursive directory deletion), events and thread-context behavior. |
@@ -130,11 +405,11 @@ platform makes that behavior impossible.
 | Host/Worker split | DOM, picker and persistent-storage ownership stay on the main thread; Wasm and OffscreenCanvas run in a Worker. |
 | Storage | OPFS/IndexedDB-backed import, validation, atomic replacement and synchronous Worker reads. File System Access is optional. |
 | Rendering | WebGL2 context, buffers, textures, shaders, render targets, context recovery and presentation. GPU handles stay private to the backend. The shared 2D image pools retain the selected canonical encoded source and use the existing image decoder, including canonical IWI wavelet formats, transiently for initial upload and context restoration; this is recovery data at the platform boundary, not a second asset model or parser. |
-| Input host | Pointer lock, keyboard/mouse normalization, focus release and cursor mode. |
-| Audio device | AudioContext policy, buffers/nodes and PCM scheduling. Startup remains suspended and muted until an intentional canvas gesture resumes it; installation-picker interaction does not unlock sound. |
+| Input host | Pointer lock, keyboard/mouse normalization, trusted paste snapshot/cache transport, focus release and cursor mode. |
+| Audio device | AudioContext policy, buffers/nodes and PCM scheduling. Source offset/completion use `AudioContext.currentTime`; validated generation-tagged feedback replaces the proxy wall clock. Absolute queue ordinals survive unqueue/feedback crossing in flight. One snapshot can be in flight, sampled at 25 ms while the host is available; synchronous Worker work cannot accumulate feedback messages. Startup remains suspended and muted until an intentional canvas gesture resumes it; installation-picker interaction does not unlock sound. |
 | Main loop | Non-blocking Emscripten frame pump; no Asyncify or pthread requirement. |
 | Wasm stack | The web linker reserves 1 MiB, matching native Windows scale for canonical nested map/save loading rather than rewriting shared call chains. |
-| Cinematics | Existing `R_Cinematic_*` callers drive the platform FFmpeg Bink decoder, retained UI texture, and OpenAL PCM queue. Movie identity and subsequent game actions stay in Kisak. See [codec scope and remaining qualification](cinematic-codec.md). |
+| Cinematics | Existing `R_Cinematic_*` callers drive the platform FFmpeg Bink decoder, canonical Y/Cr/Cb/A code images, and OpenAL PCM queue. The canonical single-pass `cinematic.hlsl` material uses retained R8 planes with native colour coefficients and filtered chroma; world/brush, static-model, DObj and UI draws bind current planes at draw time. Recovery also works without 2D submission; authored in-world scene fidelity remains unverified. Video follows cumulative device-played PCM, including unqueued buffers; one decoder-owned pending frame feeds audio before presentation. Owned delay/suspension and WebGL recovery pass. Movie identity and subsequent game actions stay in Kisak. See [codec scope and remaining qualification](cinematic-codec.md). |
 
 ## Control classification
 
@@ -148,16 +423,85 @@ platform makes that behavior impossible.
 
 ## Shared renderer and transport helpers
 
+`r_dynamiclights_core.h` now constructs non-BSP receiver keys for both native
+scene/static-model light builders and the browser backend. These keys inherit
+the canonical material fields and set only surface type, object ID and depth
+hack; camera instance light/probe state no longer changes transient receiver
+order. Native object IDs remain native draw-buffer coordinates. The browser
+still uses stable frontend order for unresolved equal-key object-ID ties.
+Dynamic model, DObj and brush IDs are offsets into native's transient
+`frontEndDataOut` surface storage, which the browser does not duplicate.
+Synthetic IDs would not establish exact cross-family order; retain them only
+through a future shared native surface packer or a smaller demonstrated seam.
+
 `web_renderer_material_lookup.h` shares identical image/constant table searches
 across world, static-model, and DObj rendering. Technique selection and water
 handling remain local. `worker_transport.mjs` shares request bookkeeping and
-filesystem lease acquisition/release. Production and diagnostic protocols,
-timeouts and recovery policy remain host-owned. Both hosts enforce the same
-shared import lease and exclusive writable-profile lease.
+filesystem lease acquisition/release, progress validation and bounded request
+watchdogs. Production and diagnostic protocols, timeout defaults and recovery
+policy remain host-owned. Both hosts enforce the same shared import lease and
+exclusive writable-profile lease. Native runtime mount reports actual reads
+through a scoped synchronous filesystem observer, preserving canonical loader
+ownership while distinguishing active loading from a stalled Worker.
 
 The native `UnitQuatToAxis` wrapper, FX models and particle clouds now use the
 same arithmetic in `qcommon_math.h`; each caller retains its existing input
 validation. Lighting-atlas sizing uses bounded C++20 `std::bit_ceil`.
+
+Particle-cloud axis policy now lives in shared `gfx_d3d/r_particle_cloud.h`,
+called by native `RB_CreateParticleCloud2dAxis` and the browser draw adapter.
+The adapter follows native view-X sign, unnormalized endpoint epsilon,
+radius-scaled projection and the authored shader's `UV - 0.5` corner offsets.
+The native signed threshold and projected-length minimum are preserved,
+including its negative-quadrant fallback. An unmodified `8be61213` native
+oracle matches 4,096 shared-axis inputs exactly and verifies 12 matrix cases;
+native/Wasm tests check 147,456 corners across three camera orientations.
+Placement rotation/scale affect centers, not billboard dimensions. Canonical
+FX still owns each `GfxParticleCloud`; no new asset representation was added.
+Native and web use the same cell-position helper for the 8x8x16 lattice. Web
+registration consumes the native three samples per cell in x/y/z order, maps
+its wider CRT output into the original 32,768 inclusive buckets, and retains
+the 1,024 centers until renderer re-registration. Native keeps its own CRT and
+original formula, so this restores lifecycle, sample count, range and cell
+arithmetic without claiming identical sequences for the same seed across CRTs.
+Broader cloud/thermal material semantics remain compatibility work.
+
+Canonical `GfxWorld::outdoorImage` and `outdoorLookupMatrix` now cross the
+immutable world-scene command and are retained atomically with the world. The
+generated `$outdoor` image uses the existing canonical image-resource path;
+context recovery reconstructs it from the same retained load definition. Cloud
+quad expansion stores each original particle center in the vertex normal slot,
+which native particle-cloud geometry otherwise leaves unused, so this adds no
+vertex bytes or browser-owned engine representation. An exact authored
+`particle_cloud_outdoor.hlsl` binding match selects the WebGL pass, which samples
+the lookup image with native sampler state `0x62` and keeps the inclusive native
+height comparison. A missing lookup skips the recognized outdoor-only cloud
+instead of displaying it everywhere. Native/Wasm command and binding checks plus
+synthetic GPU pixels cover lookup coordinates, both height outcomes, equality,
+colour/alpha behavior and real context restoration. The prior stationary owned
+AC130 run submitted no particle cloud, so authored appearance and recovery in an
+encountered cloud scene remain unverified.
+
+Soft-particle decoding reads retained canonical Material passes, shader arguments
+and slot-1 FloatZ state. Recognized z-feather variants consume a platform-owned
+signed-depth prepass with native lit/decal ownership, alpha rejection, near fade,
+fog, additive colour, angle falloff and eye offset. No material or FX identity
+is duplicated. Native `Vec3UnpackUnitVec` and the code-mesh adapter now share
+the exact packed-normal arithmetic in `qcommon_math.h`; code meshes preserve
+the normal for authored angle falloff and the tangent for distortion. Native trails leave the unused binormal
+sign unwritten, so this adapter does not read it. RGBA8 float-bit
+storage, target lifetime and WebGL event registration remain platform work.
+The actual loss extension exposed and verifies a repaired OffscreenCanvas event
+mapping; prior directly invoked handlers proved reconstruction only.
+
+The recognized distortion pass reads canonical scale, sampler bindings and
+technique flags, projects the tangent/normal basis and rejects offsets crossing
+foreground depth. A renderer-owned post-lighting colour snapshot supplies native
+`RESOLVED_POST_SUN`; it is resolved before emissive draws and recovered/resized
+with the other GL targets. Native material-group disabling follows `r_distortion`.
+Snapshot submission needs `glFlush` for the observed Chromium MSAA reuse case;
+there is no production readback or new engine asset. Unknown distortion variants
+and arbitrary material passes remain unimplemented.
 
 The unused asynchronous filesystem adapters and completion exports are retired;
 canonical filesystem calls use `web_worker_filesystem` and synchronous Worker
@@ -467,7 +811,7 @@ as `RENDERS` after canonical lifecycle completion and a 60-second stationary
 window; it makes no visual, functional, or playable claim. See
 [the stationary evidence](evidence/scoutsniper-stationary-838e047c.md).
 
-- Probe `ac130` stationary next and close only measured thermal/material gaps,
+- Compare the rendered `ac130` scene and close only measured thermal/material gaps,
   without introducing browser asset types or simulated gameplay.
 - Qualify the source-built cinematic path against Steam: playback timing,
   synchronization, recovery, and in-world materials. Missing movies still
@@ -522,7 +866,7 @@ content), E (process-global), and F (map-local):
 | Retained LoadDef/IWI 2D recovery sources | B/C/F; LoadDef copies are also D while cached | Map-local renderer-backend recovery data derived from canonical DB or filesystem sources; discarded on map retirement. |
 | Transient decoded 2D pixels | B | Recreated one image at a time for upload or context recovery and then released; the measured peak was 16,777,216 B. |
 | Decoded supplemental texture recovery | B/C/F | Existing map-local cube, lighting, water, and related paths; not changed by `c66d41e1`. |
-| DB LoadDef source cache | C/D/E | Bounded process-global cache at the canonical generated-image upload seam. A renderer LoadDef recovery copy duplicates its selected cached payload so later cache replacement cannot invalidate live recovery. |
+| DB LoadDef source resources | C/D/E | Process-global table bounded to 256 MiB at the canonical image upload seam, with lifetime owned by canonical primary/override image references. Renderer recovery copies duplicate selected payloads. Unreferenced resources are collected at DB completion/unload; admission cannot evict a live source. |
 | Retained geometry and portable draw commands | B/F | Regenerable map-local renderer data. |
 | GPU map textures and buffers | B/F | Regenerable backend resources; destroyed and recreated without becoming engine state. |
 | Render targets and fixed pipeline programs | B/E | Intentionally process-global backend resources. |

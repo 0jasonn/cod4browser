@@ -1,14 +1,18 @@
 #include <web/web_renderer_particle_cloud_scene.h>
 
 #include <gfx_d3d/material_types.h>
+#include <gfx_d3d/r_particle_cloud.h>
 #include <web/web_renderer_code_mesh.h>
 
 #include <qcommon/qcommon_math.h>
+#include <universal/com_random.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <new>
 #include <utility>
@@ -18,6 +22,37 @@ namespace
 constexpr float BYTE_TO_UNIT = 1.0f / 255.0f;
 constexpr float EPSILON = 0.001f;
 constexpr std::uint32_t TECHNIQUE_EMISSIVE_INDEX = 5u;
+std::array<std::array<float, 3u>, WEB_RENDERER_PARTICLE_CLOUD_PARTICLES>
+    g_particleCloudLayout{};
+bool g_particleCloudLayoutReady = false;
+
+void GenerateParticleCloudLayout() noexcept
+{
+    for (std::uint32_t x = 0u; x < 8u; ++x)
+    {
+        for (std::uint32_t y = 0u; y < 8u; ++y)
+        {
+            for (std::uint32_t z = 0u; z < 16u; ++z)
+            {
+                const std::uint32_t particleId = z + (x << 7u) + 16u * y;
+                std::array<float, 3u> &position =
+                    g_particleCloudLayout[particleId];
+                const double random[3] = {
+                    Q_RandomToInclusiveUnitDouble(
+                        static_cast<std::uint32_t>(std::rand()), RAND_MAX),
+                    Q_RandomToInclusiveUnitDouble(
+                        static_cast<std::uint32_t>(std::rand()), RAND_MAX),
+                    Q_RandomToInclusiveUnitDouble(
+                        static_cast<std::uint32_t>(std::rand()), RAND_MAX),
+                };
+                R_CreateParticleCloudCellPosition(
+                    static_cast<int>(x), static_cast<int>(y),
+                    static_cast<int>(z), random, position.data());
+            }
+        }
+    }
+    g_particleCloudLayoutReady = true;
+}
 
 bool Finite3(const float value[3]) noexcept
 {
@@ -142,21 +177,6 @@ WebRendererWorldBatchDesc MakeDraw(Material *material) noexcept
     return draw;
 }
 
-std::uint32_t DeterministicJitter(std::uint32_t particleId,
-    std::uint32_t salt) noexcept
-{
-    std::uint32_t value = particleId * 1664525u + 1013904223u + salt;
-    value ^= value >> 16u;
-    value *= 2246822519u;
-    return (value >> 8u) & 0xffffu;
-}
-
-float Jitter(std::uint32_t particleId, std::uint32_t salt) noexcept
-{
-    return static_cast<float>(DeterministicJitter(particleId, salt)) /
-        65535.0f;
-}
-
 bool BuildCloudAxes(
     const GfxParticleCloud &cloud,
     const WebRendererParticleCloudView &view,
@@ -167,7 +187,8 @@ bool BuildCloudAxes(
         cloud.radius[0] < 0.0f || cloud.radius[1] < 0.0f)
         return false;
 
-    float cameraRight[3] = {view.axis[1][0], view.axis[1][1], view.axis[1][2]};
+    // MatrixForViewer uses -refdef.axis[1] for view X and axis[2] for view Y.
+    float cameraRight[3] = {-view.axis[1][0], -view.axis[1][1], -view.axis[1][2]};
     float cameraUp[3] = {view.axis[2][0], view.axis[2][1], view.axis[2][2]};
     if (!Normalize3(cameraRight) || !Normalize3(cameraUp)) return false;
 
@@ -176,47 +197,29 @@ bool BuildCloudAxes(
         cloud.endpos[1] - cloud.placement.base.origin[1],
         cloud.endpos[2] - cloud.placement.base.origin[2],
     };
-    // Native RB_CreateParticleCloud2dAxis receives this direction in view
-    // space, writes rows {(-viewUp.y, -viewUp.x), (viewUp.x, viewUp.y)}, and
-    // the particle-cloud shader applies that 2x2 constant to each quad's
-    // corner offset. Bake the same sign convention into world-space axes
-    // using the refdef right/up rows. The native decompile has a radius
-    // conditional whose exact shader interaction is unavailable here; this
-    // compatibility subset preserves both explicit cloud radii while keeping
-    // the native directed-axis orientation and finite behavior.
-    const bool directed = Normalize3(direction) &&
-        (std::fabs(direction[0]) > EPSILON ||
-         std::fabs(direction[1]) > EPSILON ||
-         std::fabs(direction[2]) > EPSILON) &&
-        (cloud.radius[0] != cloud.radius[1]);
-    if (!directed)
+    // R_SetParticleCloudConstants compares unnormalized components, then
+    // projects the radius-scaled direction. The minimum length and signed
+    // quadrant fallback belong to the shared native calculation.
+    float viewUp[3]{};
+    if (cloud.radius[0] != cloud.radius[1] &&
+        (direction[0] * direction[0] > EPSILON * EPSILON ||
+         direction[1] * direction[1] > EPSILON * EPSILON ||
+         direction[2] * direction[2] > EPSILON * EPSILON))
     {
-        Scale3(cameraRight, cloud.radius[0], axis0);
-        Scale3(cameraUp, cloud.radius[1], axis1);
-        return true;
+        if (!Normalize3(direction)) return false;
+        Scale3(direction, cloud.radius[1], direction);
+        viewUp[0] = Dot3(direction, cameraRight);
+        viewUp[1] = Dot3(direction, cameraUp);
+        if (!Finite3(viewUp)) return false;
     }
-
-    const float directionRight = Dot3(direction, cameraRight);
-    const float directionUp = Dot3(direction, cameraUp);
-    const float projectedLength = std::sqrt(
-        directionRight * directionRight + directionUp * directionUp);
-    if (!std::isfinite(projectedLength) || projectedLength <= EPSILON)
-    {
-        Scale3(cameraRight, cloud.radius[0], axis0);
-        Scale3(cameraUp, cloud.radius[1], axis1);
-        return true;
-    }
-    const float invLength = 1.0f / projectedLength;
+    float viewAxis[2][2]{};
+    R_CreateParticleCloud2dAxis(cloud.radius, viewUp, viewAxis);
     for (std::size_t component = 0u; component < 3u; ++component)
     {
-        axis0[component] =
-            (-directionUp * cameraRight[component] -
-             directionRight * cameraUp[component]) * invLength *
-            cloud.radius[0];
-        axis1[component] =
-            (directionRight * cameraRight[component] +
-             directionUp * cameraUp[component]) * invLength *
-            cloud.radius[1];
+        axis0[component] = viewAxis[0][0] * cameraRight[component] +
+            viewAxis[0][1] * cameraUp[component];
+        axis1[component] = viewAxis[1][0] * cameraRight[component] +
+            viewAxis[1][1] * cameraUp[component];
     }
     return Finite3(axis0) && Finite3(axis1);
 }
@@ -264,6 +267,7 @@ WebRendererParticleCloudSceneResult BuildOne(
     };
     try
     {
+        if (!g_particleCloudLayoutReady) GenerateParticleCloudLayout();
         destination.vertices.reserve(vertexStart +
             WEB_RENDERER_PARTICLE_CLOUD_VERTICES);
         destination.indices.reserve(indexStart +
@@ -292,14 +296,8 @@ WebRendererParticleCloudSceneResult BuildOne(
                 {
                     const std::uint32_t particleId = z + (x << 7u) +
                         16u * y;
-                    const float local[3] = {
-                        (Jitter(particleId, 0x13579bdfu) +
-                            static_cast<float>(x)) * 0.25f - 1.0f,
-                        (Jitter(particleId, 0x2468ace0u) +
-                            static_cast<float>(y)) * 0.25f - 1.0f,
-                        (Jitter(particleId, 0xdeadbeefu) +
-                            static_cast<float>(z)) * 0.125f - 1.0f,
-                    };
+                    const std::array<float, 3u> &local =
+                        g_particleCloudLayout[particleId];
                     float center[3] = {
                         cloud.placement.base.origin[0],
                         cloud.placement.base.origin[1],
@@ -319,12 +317,17 @@ WebRendererParticleCloudSceneResult BuildOne(
                         vertex.position[1] = center[1];
                         vertex.position[2] = center[2];
                         AddScaled3(vertex.position, cloudAxis0,
-                            texcoords[corner][0] * 2.0f - 1.0f);
+                            texcoords[corner][0] - 0.5f);
                         AddScaled3(vertex.position, cloudAxis1,
-                            texcoords[corner][1] * 2.0f - 1.0f);
+                            texcoords[corner][1] - 0.5f);
                         std::copy_n(color, 4u, vertex.color);
                         vertex.textureCoordinate[0] = texcoords[corner][0];
                         vertex.textureCoordinate[1] = texcoords[corner][1];
+                        // The native outdoor vertex shader samples its lookup
+                        // at the particle center, before billboard expansion.
+                        // Particle clouds do not use surface normals, so keep
+                        // that center in the existing portable normal slot.
+                        std::copy_n(center, 3u, vertex.normal);
                         if (!Finite3(vertex.position))
                         {
                             rollback();
@@ -354,6 +357,11 @@ WebRendererParticleCloudSceneResult BuildOne(
     }
 }
 } // namespace
+
+void WebRenderer_InitializeParticleCloudLayout() noexcept
+{
+    GenerateParticleCloudLayout();
+}
 
 WebRendererParticleCloudRetainResult
 WebRenderer_RetainParticleCloudSubmission(

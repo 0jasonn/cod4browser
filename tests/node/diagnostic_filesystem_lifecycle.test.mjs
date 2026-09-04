@@ -34,6 +34,14 @@ class WorkerDouble extends EventTarget
         } })), delay);
     }
 
+    progress(request, progress, delay = 0)
+    {
+        setTimeout(() => this.dispatchEvent(new MessageEvent("message", { data: {
+            protocolVersion: ENGINE_PROTOCOL_VERSION, type: "filesystem-progress",
+            id: request.id, operation: request.type, progress,
+        } })), delay);
+    }
+
     postMessage(message)
     {
         this.log.push(`worker:post:${message.type}`);
@@ -66,7 +74,8 @@ const failure = (operation, code = "OPERATION_FAILED") => ({
     code, operation, message: `${operation} failed`, recoverable: true,
 });
 
-function createHarness({ behavior, locks = new LockManager(), timeout = 20 } = {})
+function createHarness({ behavior, locks = new LockManager(), timeout = 20,
+    absoluteTimeout = Math.max(100, timeout), onProgress } = {})
 {
     const defaultBehavior = (message, worker) => worker.reply(
         message, message.type === "mount" ? { fileCount: 0 } : { mounted: false });
@@ -78,6 +87,8 @@ function createHarness({ behavior, locks = new LockManager(), timeout = 20 } = {
         transferControlToOffscreen() { return {}; },
     }, {
         requestTimeoutMs: timeout,
+        filesystemAbsoluteTimeoutMs: absoluteTimeout,
+        onFilesystemProgress: onProgress,
         managePageLifecycle: false,
         workerFactory: () => worker,
         audioDriverFactory: () => ({ attachGestureResume() {}, dispose() {} }),
@@ -198,4 +209,70 @@ test("diagnostic writer lease hands off after forced termination", async () => {
     await second.host.mount(manifest);
     assert.equal(second.host.filesystemState, DIAGNOSTIC_FILESYSTEM_STATES.MOUNTED);
     await Promise.all([first.host.dispose(), second.host.dispose()]);
+});
+
+
+test("diagnostic native mount progress survives the ordinary reply deadline", async () => {
+    const progress = [];
+    const { host, worker } = createHarness({
+        timeout: 35, absoluteTimeout: 180, onProgress: item => progress.push(item),
+        behavior(message, target) {
+            if (message.type !== "mount") return target.reply(message);
+            for (let i = 1; i <= 4; ++i) target.progress(message, {
+                phase: "runtime-loading", filesProcessed: 0, bytesProcessed: i * 262144,
+            }, i * 20);
+            target.reply(message, { fileCount: 1 }, null, 100);
+        },
+    });
+    await host.ready;
+    await host.mount(manifest);
+    assert.equal(host.filesystemState, DIAGNOSTIC_FILESYSTEM_STATES.MOUNTED);
+    assert.equal(worker.terminated, false);
+    assert.equal(progress.length, 4);
+    await host.dispose();
+});
+
+test("diagnostic mount rejects duplicate, malformed, and unrelated progress", async () => {
+    const progress = [];
+    const { host, worker, log } = createHarness({
+        timeout: 35, onProgress: item => progress.push(item),
+        behavior(message, target) {
+            const valid = { phase: "runtime-loading", filesProcessed: 0, bytesProcessed: 1 };
+            target.progress(message, valid, 5);
+            target.progress(message, valid, 15); // No advancement.
+            target.progress(message, { ...valid, bytesProcessed: NaN }, 20);
+            target.progress({ ...message, type: "checkpoint" }, { ...valid, bytesProcessed: 2 }, 25);
+            target.progress({ ...message, id: message.id + 1 }, { ...valid, bytesProcessed: 3 }, 30);
+            target.progress(message, { ...valid, bytesProcessed: 4 }, 70); // Retired request.
+        },
+    });
+    await host.ready;
+    await assert.rejects(host.mount(manifest), error => error.code === "REQUEST_TIMEOUT");
+    await new Promise(resolve => setTimeout(resolve, 45));
+    assert.equal(progress.length, 1);
+    assert.equal(worker.terminated, true);
+    assert.ok(log.indexOf("worker:terminate") < log.indexOf(`lock:${HOME_LOCK}:release`));
+    await host.dispose();
+});
+
+test("diagnostic mount retains its absolute deadline despite progress", async () => {
+    let timer;
+    const { host, worker } = createHarness({
+        timeout: 35, absoluteTimeout: 100,
+        behavior(message, target) {
+            let bytesProcessed = 0;
+            timer = setInterval(() => target.progress(message, {
+                phase: "runtime-loading", filesProcessed: 0, bytesProcessed: ++bytesProcessed,
+            }), 15);
+        },
+    });
+    await host.ready;
+    try {
+        await assert.rejects(host.mount(manifest), error =>
+            error.code === "REQUEST_TIMEOUT" && /absolute limit/u.test(error.message));
+    } finally {
+        clearInterval(timer);
+    }
+    assert.equal(worker.terminated, true);
+    await host.dispose();
 });

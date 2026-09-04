@@ -24,6 +24,10 @@ void TestConversionRetainsPackedColorAndOrdering()
     // Canonical Vec2PackTexCoords(1.0, 0.5), retained as an explicit FX
     // packed-UV regression rather than relying only on the zero coordinate.
     source[0].texCoord.packed = 0x3c003800u;
+    source[0].normal.packed = 0x3ffe7f7fu;
+    source[0].tangent.packed = 0x3f7f7ffeu;
+    // Native FX_GenTrail_VertsForSegment does not supply this unused attribute.
+    source[0].binormalSign = std::nanf("");
     std::array<std::uint32_t, 3> packed{
         0x00010000u, 0x00020001u, 0x00000002u};
     std::vector<WebRendererSurfaceVertex> vertices;
@@ -34,6 +38,10 @@ void TestConversionRetainsPackedColorAndOrdering()
     assert(vertices.size() == 3u && indices.size() == 6u);
     assert(vertices[0].color[0] == 0x40 / 255.0f);
     assert(vertices[0].color[3] == 0x80 / 255.0f);
+    assert(vertices[0].normal[0] == 0 && vertices[0].normal[1] == 0);
+    assert(std::fabs(vertices[0].normal[2] - 1) < 0.00001f);
+    assert(std::fabs(vertices[0].tangent[0] - 1) < 0.00001f);
+    assert(vertices[0].tangent[1] == 0 && vertices[0].tangent[2] == 0);
     assert(std::fabs(vertices[0].textureCoordinate[0] - 1.0f) < 0.0001f);
     assert(std::fabs(vertices[0].textureCoordinate[1] - 0.5f) < 0.0001f);
     assert(indices[0] == 0u && indices[1] == 1u && indices[2] == 1u &&

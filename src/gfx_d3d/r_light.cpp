@@ -268,9 +268,9 @@ void __cdecl R_GetBspOmniLightSurfs(const GfxLight *light, int lightIndex, GfxBs
 
 int __cdecl R_AllowBspOmniLight(int surfIndex, void *bspLightCallbackAsVoid)
 {
-    return *(_BYTE *)(*(uint32_t *)bspLightCallbackAsVoid + surfIndex)
-        && *((float *)bspLightCallbackAsVoid + 4) >= PointToBoxDistSq(
-            (const float *)bspLightCallbackAsVoid + 1,
+    const auto *callback = static_cast<const BspOmniLightCallback *>(bspLightCallbackAsVoid);
+    return callback->surfaceVisData[surfIndex] &&
+        kisak::dynamic_lights::BoxInSphere(callback->position, callback->radiusSq,
             rgp.world->dpvs.surfaces[surfIndex].bounds[0],
             rgp.world->dpvs.surfaces[surfIndex].bounds[1]);
 }
@@ -390,88 +390,7 @@ int __cdecl R_AllowBspSpotLightShadows(int surfIndex, void *bspLightCallbackAsVo
 
 int __cdecl R_BoxInPlanes(const float (*planes)[4], const float *mins, const float *maxs)
 {
-    float v4; // [esp+0h] [ebp-4Ch]
-    float v5; // [esp+4h] [ebp-48h]
-    float v6; // [esp+8h] [ebp-44h]
-    float v7; // [esp+Ch] [ebp-40h]
-    float v8; // [esp+10h] [ebp-3Ch]
-    float v9; // [esp+14h] [ebp-38h]
-    float v10; // [esp+18h] [ebp-34h]
-    float v11; // [esp+1Ch] [ebp-30h]
-    float v12; // [esp+20h] [ebp-2Ch]
-    float v13; // [esp+24h] [ebp-28h]
-    float v14; // [esp+28h] [ebp-24h]
-    float v15; // [esp+2Ch] [ebp-20h]
-    float v16; // [esp+30h] [ebp-1Ch]
-    float v17; // [esp+34h] [ebp-18h]
-    float v18; // [esp+38h] [ebp-14h]
-    float v19; // [esp+3Ch] [ebp-10h]
-    const float *plane; // [esp+40h] [ebp-Ch]
-    float insidef; // [esp+44h] [ebp-8h]
-    float inside; // [esp+44h] [ebp-8h]
-    float insidea; // [esp+44h] [ebp-8h]
-    float insideb; // [esp+44h] [ebp-8h]
-    float insidec; // [esp+44h] [ebp-8h]
-    float insided; // [esp+44h] [ebp-8h]
-    float insidee; // [esp+44h] [ebp-8h]
-    float insideg; // [esp+44h] [ebp-8h]
-    uint32_t planeIndex; // [esp+48h] [ebp-4h]
-
-    for (planeIndex = 0; planeIndex < 6; ++planeIndex)
-    {
-        plane = &(*planes)[4 * planeIndex];
-        v19 = plane[3] + mins[2] * plane[2] + mins[1] * plane[1] + *mins * *plane;
-        if (v19 < 0.0)
-            v18 = 1.0;
-        else
-            v18 = 0.0;
-        v17 = plane[3] + maxs[2] * plane[2] + mins[1] * plane[1] + *mins * *plane;
-        if (v17 < 0.0)
-            v16 = 1.0;
-        else
-            v16 = 0.0;
-        insidef = (float)0.0 + v18;
-        inside = insidef + v16;
-        v15 = plane[3] + mins[2] * plane[2] + maxs[1] * plane[1] + *mins * *plane;
-        if (v15 < 0.0)
-            v14 = 1.0;
-        else
-            v14 = 0.0;
-        insidea = inside + v14;
-        v13 = plane[3] + maxs[2] * plane[2] + maxs[1] * plane[1] + *mins * *plane;
-        if (v13 < 0.0)
-            v12 = 1.0;
-        else
-            v12 = 0.0;
-        insideb = insidea + v12;
-        v11 = plane[3] + mins[2] * plane[2] + mins[1] * plane[1] + *maxs * *plane;
-        if (v11 < 0.0)
-            v10 = 1.0;
-        else
-            v10 = 0.0;
-        insidec = insideb + v10;
-        v9 = plane[3] + maxs[2] * plane[2] + mins[1] * plane[1] + *maxs * *plane;
-        if (v9 < 0.0)
-            v8 = 1.0;
-        else
-            v8 = 0.0;
-        insided = insidec + v8;
-        v7 = plane[3] + mins[2] * plane[2] + maxs[1] * plane[1] + *maxs * *plane;
-        if (v7 < 0.0)
-            v6 = 1.0;
-        else
-            v6 = 0.0;
-        insidee = insided + v6;
-        v5 = plane[3] + maxs[2] * plane[2] + maxs[1] * plane[1] + *maxs * *plane;
-        if (v5 < 0.0)
-            v4 = 1.0;
-        else
-            v4 = 0.0;
-        insideg = insidee + v4;
-        if (insideg == 0.0)
-            return 0;
-    }
-    return 1;
+    return kisak::dynamic_lights::BoxInPlanes(planes, mins, maxs);
 }
 
 int __cdecl R_AllowBspSpotLight(int surfIndex, void *bspLightCallbackAsVoid)
@@ -487,39 +406,7 @@ int __cdecl R_AllowBspSpotLight(int surfIndex, void *bspLightCallbackAsVoid)
 
 void __cdecl R_CalcSpotLightPlanes(const GfxLight *light, float (*planes)[4])
 {
-    float fCos; // [esp+0h] [ebp-50h]
-    float fCosa; // [esp+0h] [ebp-50h]
-    float v4; // [esp+4h] [ebp-4Ch]
-    float v5; // [esp+4h] [ebp-4Ch]
-    float v6; // [esp+4h] [ebp-4Ch]
-    float v7; // [esp+4h] [ebp-4Ch]
-    float v8; // [esp+14h] [ebp-3Ch]
-    float v9; // [esp+18h] [ebp-38h]
-    float origin[3]; // [esp+1Ch] [ebp-34h] BYREF
-    float crossDirs[2][3]; // [esp+28h] [ebp-28h] BYREF
-    float lightDirection[3]; // [esp+40h] [ebp-10h] BYREF
-    float fSin; // [esp+4Ch] [ebp-4h]
-
-    Vec3Scale(light->dir, -1.0, lightDirection);
-    Vec3Scale(lightDirection, -1.0, (float *)planes);
-    Vec3Mad(light->origin, scene.dynamicSpotLightNearPlaneOffset, lightDirection, origin);
-    (*planes)[3] = -Vec3Dot((const float *)planes, origin);
-    R_ComputeSpotLightCrossDirs(light, crossDirs);
-    v9 = 1.0 - light->cosHalfFovOuter * light->cosHalfFovOuter;
-    v8 = sqrt(v9);
-    fSin = v8;
-    v4 = -v8;
-    R_CalcPlaneFromCosSinPointDirs(&(*planes)[4], light->cosHalfFovOuter, v4, light->origin, lightDirection, crossDirs[0]);
-    v5 = -fSin;
-    R_CalcPlaneFromCosSinPointDirs(&(*planes)[8], light->cosHalfFovOuter, v5, light->origin, lightDirection, crossDirs[1]);
-    v6 = -fSin;
-    fCos = -light->cosHalfFovOuter;
-    R_CalcPlaneFromCosSinPointDirs(&(*planes)[12], fCos, v6, light->origin, lightDirection, crossDirs[0]);
-    v7 = -fSin;
-    fCosa = -light->cosHalfFovOuter;
-    R_CalcPlaneFromCosSinPointDirs(&(*planes)[16], fCosa, v7, light->origin, lightDirection, crossDirs[1]);
-    Vec3Mad(light->origin, light->radius, lightDirection, origin);
-    R_CalcPlaneFromPointDir(&(*planes)[20], origin, lightDirection);
+    kisak::dynamic_lights::SpotPlanes(*light, scene.dynamicSpotLightNearPlaneOffset, planes);
 }
 
 void __cdecl R_CalcPlaneFromPointDir(float *plane, const float *origin, const float *dir)
@@ -532,27 +419,7 @@ void __cdecl R_CalcPlaneFromPointDir(float *plane, const float *origin, const fl
 
 void __cdecl R_ComputeSpotLightCrossDirs(const GfxLight *light, float (*crossDirs)[3])
 {
-    float v2; // [esp+0h] [ebp-34h]
-    float v3; // [esp+4h] [ebp-30h]
-    int axisIndex; // [esp+2Ch] [ebp-8h]
-    int bestCrossAxis; // [esp+30h] [ebp-4h]
-
-    bestCrossAxis = 0;
-    for (axisIndex = 1; axisIndex < 3; ++axisIndex)
-    {
-        v3 = I_fabs(light->dir[axisIndex]);
-        v2 = I_fabs(light->dir[bestCrossAxis]);
-        if (v2 > (double)v3)
-            bestCrossAxis = axisIndex;
-    }
-    (*crossDirs)[0] = 0.0;
-    (*crossDirs)[1] = 0.0;
-    (*crossDirs)[2] = 0.0;
-    (*crossDirs)[bestCrossAxis] = 1.0;
-    Vec3Cross(light->dir, (const float *)crossDirs, &(*crossDirs)[3]);
-    Vec3Normalize(&(*crossDirs)[3]);
-    Vec3Cross(&(*crossDirs)[3], light->dir, (float *)crossDirs);
-    Vec3Normalize((float *)crossDirs);
+    kisak::dynamic_lights::SpotCrossDirs(*light, crossDirs);
 }
 
 void __cdecl R_CalcPlaneFromCosSinPointDirs(
@@ -650,9 +517,9 @@ void __cdecl R_GetStaticModelLightSurfs(const GfxLight **visibleLights, int visi
 
                 if (Material_GetTechnique(material, TECHNIQUE_LIGHT_OMNI))
                 {
-                    drawSurf = material->info.drawSurf;
-                    //HIDWORD(drawSurf.packed) = ((staticModelId.surfType & 0xF) << 18) | HIDWORD(drawSurf.packed) & 0xFFC3FFFF;
-                    drawSurf.fields.surfType = staticModelId.surfType;
+                    drawSurf = kisak::dynamic_lights::ReceiverDrawSurf(
+                        material->info.drawSurf, staticModelId.surfType,
+                        material->info.drawSurf.fields.objectId);
                     if (!R_AllocDrawSurf(&surfData.delayedCmdBuf, drawSurf, &surfData.drawSurfList, 3u))
                         break;
                     R_AddDelayedStaticModelDrawSurf(&surfData.delayedCmdBuf, &surfaces[surfaceIndex], (uint8_t*)list, 1u);
@@ -683,8 +550,9 @@ void __cdecl R_GetStaticModelLightSurfs(const GfxLight **visibleLights, int visi
 int __cdecl R_AllowStaticModelOmniLight(int smodelIndex)
 {
     return g_staticModelLightCallback.smodelVisData[smodelIndex]
-        && g_staticModelLightCallback.radiusSq >= PointToBoxDistSq(
+        && kisak::dynamic_lights::BoxInSphere(
             g_staticModelLightCallback.position,
+            g_staticModelLightCallback.radiusSq,
             rgp.world->dpvs.smodelInsts[smodelIndex].mins,
             rgp.world->dpvs.smodelInsts[smodelIndex].maxs);
 }
@@ -1108,30 +976,7 @@ void __cdecl R_GetSceneEntLightSurfs(const GfxLight **visibleLights, int visible
 
 int __cdecl R_SphereInPlanes(const float (*planes)[4], const float *center, float radius)
 {
-    uint32_t planeIndex; // [esp+4h] [ebp-4h]
-
-    for (planeIndex = 0; planeIndex < 6; ++planeIndex)
-    {
-        if (Vec3Dot(&(*planes)[4 * planeIndex], center) + (float)(*planes)[4 * planeIndex + 3] - radius > 0.0)
-            return 0;
-    }
-    return 1;
-}
-
-bool __cdecl R_SpotLightIsAttachedToDobj(const DObj_s *obj)
-{
-    FxSystem *system; // [esp+0h] [ebp-8h]
-    DObj_s *attachedDobj; // [esp+4h] [ebp-4h]
-
-    iassert( obj );
-    system = FX_GetSystem(0);
-    iassert( system );
-    if (!system->activeSpotLightEffectCount)
-        return 0;
-    if (system->activeSpotLightBoltDobj == -1)
-        return 0;
-    attachedDobj = Com_GetClientDObj(system->activeSpotLightBoltDobj, 0);
-    return attachedDobj && attachedDobj == obj;
+    return kisak::dynamic_lights::SphereInPlanes(planes, center, radius);
 }
 
 // KISAKTODO: unfk

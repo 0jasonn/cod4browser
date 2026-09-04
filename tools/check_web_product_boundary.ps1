@@ -70,8 +70,8 @@ foreach ($name in $allowedFiles) {
     }
 }
 
-$unexpected = Get-ChildItem -LiteralPath $siteDirectory -File |
-    Where-Object { $_.Name -notin $allowedFiles }
+$unexpected = Get-ChildItem -LiteralPath $siteDirectory -Force |
+    Where-Object { $_.PSIsContainer -or $_.Name -notin $allowedFiles }
 if ($unexpected) {
     throw "Production artifact contains unexpected files: $($unexpected.Name -join ', ')"
 }

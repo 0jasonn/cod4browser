@@ -76,3 +76,29 @@ test("the production protocol rejects malformed and diagnostic requests", () => 
         assert.throws(() => validateProductRequest(message), (error) => error.code === code);
     }
 });
+
+test("character transport is bounded to native nonzero bytes", () => {
+    const input = (character) => ({ protocolVersion: ENGINE_PROTOCOL_VERSION,
+        type: "input-event", event: { type: "char", character } });
+    for (const character of [1, 8, 32, 65, 233, 255]) {
+        assert.equal(validateProductRequest(input(character)).event.character, character);
+    }
+    for (const character of [0, -1, 256, 0x400, NaN, 1.5, "65", undefined]) {
+        assert.throws(() => validateProductRequest(input(character)),
+            (error) => error.code === "INVALID_PAYLOAD");
+    }
+});
+
+test("clipboard transport accepts one bounded native byte line", () => {
+    const input = (characters) => ({ protocolVersion: ENGINE_PROTOCOL_VERSION,
+        type: "input-event", event: { type: "clipboard", characters } });
+    assert.deepEqual(validateProductRequest(input([32, 65, 128, 255])).event.characters,
+        [32, 65, 128, 255]);
+    assert.equal(validateProductRequest(input(Array(4095).fill(65))).event.characters.length,
+        4095);
+    for (const characters of [[], [31], [127], [256], [65.5], ["65"],
+        Array(4096).fill(65), "text", undefined]) {
+        assert.throws(() => validateProductRequest(input(characters)),
+            (error) => error.code === "INVALID_PAYLOAD");
+    }
+});

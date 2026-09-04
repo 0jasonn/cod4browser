@@ -14769,7 +14769,8 @@ Error DecodeWaveletPayloadRgba8(
     std::uint16_t width,
     std::uint16_t height,
     std::span<const std::uint8_t> payload,
-    std::vector<std::uint8_t> &rgba) noexcept
+    std::vector<std::uint8_t> &rgba,
+    std::uint32_t firstMip) noexcept
 {
     int channels = 0;
     int bytesPerPixel = 0;
@@ -14802,7 +14803,9 @@ Error DecodeWaveletPayloadRgba8(
         static_cast<std::size_t>(width) >
             std::numeric_limits<std::size_t>::max() / height)
         return Error::DecodeUnsupportedDimensions;
-    pixelCount = static_cast<std::size_t>(width) * height;
+    if (firstMip > 15u) return Error::DecodeInvalidLayout;
+    pixelCount = static_cast<std::size_t>(std::max<unsigned>(width >> firstMip, 1u)) *
+        std::max<unsigned>(height >> firstMip, 1u);
     if (pixelCount > MAX_DECODED_RGBA8_BYTES / 4u ||
         pixelCount > std::numeric_limits<std::size_t>::max() /
             static_cast<std::size_t>(bytesPerPixel))
@@ -14837,7 +14840,7 @@ Error DecodeWaveletPayloadRgba8(
     }
 
     std::uint8_t *previous = nullptr;
-    while (decode.mipLevel >= 0)
+    while (decode.mipLevel >= static_cast<int>(firstMip))
     {
         const std::size_t mipWidth = std::max<std::size_t>(
             static_cast<std::size_t>(width) >> decode.mipLevel, 1u);

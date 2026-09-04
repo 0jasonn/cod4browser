@@ -18,6 +18,7 @@
 #include "r_draw_staticmodel.h"
 #include "r_draw_xmodel.h"
 #include "r_pretess.h"
+#include "r_particle_cloud.h"
 #include <EffectsCore/fx_marks.h>
 
 GfxScaledPlacement s_manualObjectPlacement;
@@ -586,38 +587,15 @@ void __cdecl RB_Vec3DirWorldToView(const GfxCmdBufSourceState *source, const flo
 
 void __cdecl RB_CreateParticleCloud2dAxis(const GfxParticleCloud *cloud, const float *viewUp, float (*viewAxis)[2][2])
 {
-    float viewAxisLength; // [esp+40h] [ebp-18h]
-
     iassert(cloud);
-
-    if (viewUp[0] >= 0.001f || viewUp[1] >= 0.001f )
+    if (viewUp[0] >= 0.001f || viewUp[1] >= 0.001f)
     {
-        (*viewAxis)[0][0] = -1.0f * viewUp[1]; // double check this! it was -(float)-1.0 before lol
-        (*viewAxis)[0][1] = -1.0f * *viewUp;
-        (*viewAxis)[1][0] = viewUp[0];
-        (*viewAxis)[1][1] = viewUp[1];
-
-        viewAxisLength = Vec2Length((const float *)viewAxis);
-
+        const float perpendicular[2] = {-viewUp[1], -viewUp[0]};
+        const float viewAxisLength = Vec2Length(perpendicular);
         iassert(viewAxisLength > 0);
-        iassert(I_fabs(viewAxisLength - Vec2Length(&(*viewAxis)[1][0])) < EQUAL_EPSILON);
-
-        (*viewAxis)[0][0] *= (cloud->radius[0] / viewAxisLength);
-        (*viewAxis)[0][1] *= (cloud->radius[0] / viewAxisLength);
-
-        if (cloud->radius[0] > (double)viewAxisLength)
-        {
-            (*viewAxis)[1][0] *= (cloud->radius[0] / viewAxisLength);
-            (*viewAxis)[1][1] *= (cloud->radius[0] / viewAxisLength);
-        }
+        iassert(I_fabs(viewAxisLength - Vec2Length(viewUp)) < EQUAL_EPSILON);
     }
-    else
-    {
-        (*viewAxis)[0][0] = cloud->radius[0];
-        (*viewAxis)[0][1] = 0.0f;
-        (*viewAxis)[1][0] = 0.0f;
-        (*viewAxis)[1][1] = cloud->radius[1];
-    }
+    R_CreateParticleCloud2dAxis(cloud->radius, viewUp, *viewAxis);
 }
 
 uint32_t __cdecl R_TessXModelSkinnedDrawSurfList(

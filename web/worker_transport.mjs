@@ -3,6 +3,92 @@
 export const ENGINE_PROTOCOL_VERSION = 1;
 export const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 
+export const FILESYSTEM_ABSOLUTE_TIMEOUT_MS = 5 * 60_000;
+
+/** @param {number} timeoutMs @param {string} name */
+export function validateFilesystemTimeout(timeoutMs, name)
+{
+    const maximum = 10 * 60_000;
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > maximum) {
+        throw new RangeError(`${name} timeout must be 1..${maximum} ms.`);
+    }
+}
+
+/** @param {any} request */
+export function clearRequestTimers(request)
+{
+    clearTimeout(request.timeout);
+    clearTimeout(request.absoluteTimeout);
+}
+
+/**
+ * @param {any} request
+ * @param {{timeoutMs: number, stallTimeoutMs?: number, absoluteTimeoutMs?: number}} options
+ * @param {(message: string) => void} expire
+ */
+export function armWorkerRequestTimeout(request, options, expire)
+{
+    const { timeoutMs, stallTimeoutMs, absoluteTimeoutMs } = options;
+    request.stallTimeoutMs = stallTimeoutMs;
+    request.refreshStall = () => {
+        clearTimeout(request.timeout);
+        request.timeout = setTimeout(() => expire(stallTimeoutMs !== undefined
+            ? `The engine Worker made no filesystem progress for ${stallTimeoutMs} ms.`
+            : `The engine Worker did not answer within ${timeoutMs} ms.`),
+        stallTimeoutMs ?? timeoutMs);
+    };
+    request.refreshStall();
+    if (stallTimeoutMs !== undefined) {
+        request.absoluteTimeout = setTimeout(() => expire(
+            `The filesystem operation exceeded its ${absoluteTimeoutMs} ms absolute limit.`),
+        absoluteTimeoutMs);
+    }
+}
+
+/** @param {any} request @param {any} message @param {number} generation */
+export function acceptFilesystemProgress(request, message, generation)
+{
+    const progress = message.progress;
+    if (!request || request.generation !== generation ||
+        request.operation !== message.operation || request.stallTimeoutMs === undefined ||
+        !progress || typeof progress.phase !== "string" || !progress.phase.length ||
+        progress.phase.length > 64 ||
+        !Number.isSafeInteger(progress.filesProcessed) || progress.filesProcessed < 0 ||
+        !Number.isSafeInteger(progress.bytesProcessed) || progress.bytesProcessed < 0) return false;
+    const previous = request.lastProgress;
+    if (previous?.phase === progress.phase &&
+        progress.filesProcessed <= previous.filesProcessed &&
+        progress.bytesProcessed <= previous.bytesProcessed) return false;
+    request.lastProgress = { ...progress };
+    request.refreshStall();
+    return true;
+}
+
+/** @param {{id: number, type: string}} message */
+export function createFilesystemProgressReporter(message)
+{
+    let lastSent = 0;
+    let lastPhase = "";
+    let lastFiles = 0;
+    let lastBytes = 0;
+    return (/** @type {{phase: string, filesProcessed: number, bytesProcessed: number}} */ progress) => {
+        const now = Date.now();
+        const phaseChanged = progress.phase !== lastPhase;
+        const files = progress.filesProcessed - lastFiles;
+        const bytes = progress.bytesProcessed - lastBytes;
+        if (!phaseChanged && (files <= 0 && bytes <= 0 ||
+            files < 64 && bytes < 16 * 1024 * 1024 && now - lastSent < 250)) return;
+        lastSent = now;
+        lastPhase = progress.phase;
+        lastFiles = progress.filesProcessed;
+        lastBytes = progress.bytesProcessed;
+        globalThis.postMessage({
+            protocolVersion: ENGINE_PROTOCOL_VERSION,
+            type: "filesystem-progress", id: message.id, operation: message.type, progress,
+        });
+    };
+}
+
 /**
  * @param {string} code
  * @param {string} operation
@@ -58,8 +144,7 @@ export function createRequestIdAllocator(pending)
 /** @param {PendingRequest} request */
 function releaseRequest(request)
 {
-    clearTimeout(request.timeout ?? undefined);
-    clearTimeout(request.absoluteTimeout ?? undefined);
+    clearRequestTimers(request);
     request.signal?.removeEventListener("abort", request.abort);
 }
 
@@ -180,4 +265,21 @@ export function createFilesystemLeases(lockManager, emitFilesystemLifecycle)
     }
 
     return { acquire, release };
+}
+
+/** Accept only complete, bounded Web Audio device snapshots. @param {any} message */
+export function acceptAudioPlayback(message) {
+    if (message?.type !== "audio-playback" || message.version !== 1 ||
+        !Array.isArray(message.sources) || message.sources.length > 54) return false;
+    const states = Object.create(null);
+    const uint = (/** @type {any} */ value) => Number.isInteger(value) && value >= 0 && value <= 0xffff_ffff;
+    for (const source of message.sources) {
+        if (!source || !uint(source.sourceId) || source.sourceId < 1 || source.sourceId > 54 ||
+            states[source.sourceId] || !uint(source.generation) || !uint(source.processed) ||
+            !Number.isFinite(source.offset) || source.offset < 0 ||
+            ![0, 0x1012, 0x1013, 0x1014].includes(source.state)) return false;
+        states[source.sourceId] = source;
+    }
+    /** @type {any} */ (globalThis).__KISAKCOD_AUDIO_PLAYBACK__ = states;
+    return true;
 }

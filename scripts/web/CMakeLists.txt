@@ -57,6 +57,7 @@ set(KISAK_WEB_SOURCE_DIR "${CMAKE_SOURCE_DIR}/web")
 # boundary while the strict Node check must stop before that boundary.
 set(KISAK_WEB_RUNTIME_PREFIX_SOURCES
     "${SRC_DIR}/database/db_initialization.cpp"
+    "${SRC_DIR}/database/db_string_ownership.cpp"
     "${SRC_DIR}/qcommon/com_init_trace.cpp"
     "${SRC_DIR}/qcommon/common.cpp"
     "${SRC_DIR}/qcommon/cmd.cpp"
@@ -91,6 +92,7 @@ target_compile_definitions(kisak_web_runtime_prefix_check PRIVATE
 
 set(KISAK_WEB_CANONICAL_RUNTIME_SOURCES
     "${SRC_DIR}/qcommon/common_shutdown.cpp"
+    "${SRC_DIR}/qcommon/common_error.cpp"
     "${SRC_DIR}/client/cl_fastfile_config.cpp"
     "${SRC_DIR}/client/cl_controller.cpp"
     "${SRC_DIR}/client/cl_cin.cpp"
@@ -141,6 +143,7 @@ set(KISAK_WEB_CANONICAL_RUNTIME_SOURCES
     "${SRC_DIR}/qcommon/iwd_archive.cpp"
     "${SRC_DIR}/EffectsCore/fx_fastfile_registration.cpp"
     "${SRC_DIR}/qcommon/iwi_image.cpp"
+    "${SRC_DIR}/gfx_d3d/r_image_quality.cpp"
     "${SRC_DIR}/gfx_d3d/r_image_wavelet.cpp"
     "${SRC_DIR}/qcommon/engine_lifecycle_trace.cpp"
     "${SRC_DIR}/qcommon/graph.cpp"
@@ -151,6 +154,7 @@ set(KISAK_WEB_CANONICAL_RUNTIME_SOURCES
     "${SRC_DIR}/qcommon/cm_memory.cpp"
     "${SRC_DIR}/qcommon/com_world_runtime.cpp"
     "${SRC_DIR}/gfx_d3d/r_text.cpp"
+    "${SRC_DIR}/gfx_d3d/r_light_attachment.cpp"
     "${SRC_DIR}/gfx_d3d/r_image_resample.cpp"
     "${SRC_DIR}/gfx_d3d/r_gamma.cpp"
     "${SRC_DIR}/web/web_savegame_image.cpp"

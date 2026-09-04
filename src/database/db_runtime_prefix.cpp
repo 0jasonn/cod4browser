@@ -1,8 +1,8 @@
 // TEMPORARY CANONICAL-RUNTIME INTEGRATION PREFIX -- SHRINK-ONLY CONTRACT.
 //
 // Canonical db_registry.cpp now owns the DB lifecycle. This file contains only
-// temporary deterministic trace/failure scaffolding and the exported browser
-// start hook. It remains shrink-only.
+// temporary deterministic trace observations. XFile failure and stream bounds
+// belong to db_file_load.cpp and db_stream.cpp. This file remains shrink-only.
 
 #include <database/db_runtime_prefix.h>
 
@@ -115,6 +115,8 @@ void CaptureStreamState()
 
 void Trace(const char *stage)
 {
+    g_trace.generatedLoadFailed = DB_HasXFileLoadFailure();
+    if (g_trace.generatedLoadFailed) CaptureStreamState();
     if (g_trace.stageCount < std::size(g_trace.stages))
         g_trace.stages[g_trace.stageCount++] = stage;
     EmitDatabaseTrace(stage, g_trace.logicalPath, g_trace.bytesRead,
@@ -141,6 +143,7 @@ void Trace(const char *stage)
 
 void Stop(const char *stage)
 {
+    g_trace.generatedLoadFailed = DB_HasXFileLoadFailure();
     g_trace.stopStage = stage;
     EmitDatabaseTrace("DB stop", g_trace.logicalPath, g_trace.bytesRead,
         g_trace.fileSize, g_trace.readOffset, g_trace.requestedBytes,
@@ -338,31 +341,6 @@ void DB_RuntimeTracePublicationEnd(
     g_trace.assetHash = hash;
     g_trace.assetZoneIndex = zoneIndex;
     Trace("publication end");
-}
-
-void DB_RuntimeGeneratedFailure(const char *stage)
-{
-    if (!g_trace.generatedLoadFailed)
-    {
-        g_trace.generatedLoadFailed = true;
-        CaptureStreamState();
-        DB_FailXFileLoad(stage);
-        Trace(stage);
-    }
-}
-
-bool DB_RuntimeGeneratedLoadFailed()
-{
-    return g_trace.generatedLoadFailed || DB_HasXFileLoadFailure();
-}
-
-bool DB_RuntimeStreamCanRead(std::size_t size)
-{
-    if (g_streamPosIndex >= 9 || !g_streamZoneMem || !g_streamPos) return false;
-    const XBlock &block = g_streamZoneMem->blocks[g_streamPosIndex];
-    if (!block.data || g_streamPos < block.data) return size == 0;
-    const std::size_t offset = static_cast<std::size_t>(g_streamPos - block.data);
-    return offset <= block.size && size <= block.size - offset;
 }
 
 const DBRuntimeTraceSnapshot &DB_GetRuntimeTrace()

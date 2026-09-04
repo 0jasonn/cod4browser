@@ -191,6 +191,13 @@ void __cdecl Com_Quit_f()
     Web_RequestQuit();
 }
 
+void __cdecl Com_CleanupBsp()
+{
+    // Loose BSP loading is excluded above. Fastfile ClipMap/ComWorld owners
+    // are retired by canonical Com_ShutdownInternal -> Com_Restart below.
+    iassert(IsFastFileLoad());
+}
+
 void __cdecl Com_Restart()
 {
     // Match the native restart boundary for the owners that are active in the

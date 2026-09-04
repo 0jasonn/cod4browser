@@ -567,17 +567,14 @@ bool RunCGameFrame(const WebFrameInfo &frame)
     return true;
 }
 
-void RecoverFrameDisconnect()
+void RecoverFrameError()
 {
-    if (errorcode != ERR_DISCONNECT)
+    // Before the owned startup assets are mounted there is no canonical UI or
+    // client state to recover. Once initialized, native common owns error
+    // classification, cleanup, localization and repeated-error escalation.
+    if (!com_fullyInitialized)
         Sys_Error("%s", com_errorMessage);
-    LargeLocalReset();
-    R_PopRemoteScreenUpdate();
-    Cmd_ComErrorCleanup();
-    Dvar_SetInt(cl_paused, 0);
-    Com_Printf(16, "Disconnecting: %s\n", com_errorMessage);
-    Com_ShutdownInternal(com_errorMessage);
-    com_errorEntered = 0;
+    Com_ErrorCleanup();
     // Native Com_Frame restarts renderer-backed UI after error cleanup.
     CL_InitRenderer();
     Com_AssetLoadUI();
@@ -645,7 +642,7 @@ void RenderFrame(const WebFrameInfo &frame, void *)
     // Com_Frame checks the latched canonical error after the frame body too.
     // A returning subsystem must not leave the browser pumping a failed game.
     if (com_errorEntered)
-        RecoverFrameDisconnect();
+        RecoverFrameError();
 }
 } // namespace
 

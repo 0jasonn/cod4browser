@@ -225,6 +225,7 @@ set(RADIANT_GFX_D3D
     "${SRC_DIR}/gfx_d3d/r_image_load_db.h"
     "${SRC_DIR}/gfx_d3d/r_image_load_obj.cpp"
     "${SRC_DIR}/gfx_d3d/r_image_utils.cpp"
+    "${SRC_DIR}/gfx_d3d/r_image_quality.cpp"
     "${SRC_DIR}/gfx_d3d/r_image_wavelet.cpp"
     "${SRC_DIR}/gfx_d3d/r_init.cpp"
     "${SRC_DIR}/gfx_d3d/r_init.h"

@@ -109,6 +109,7 @@ body {
 }
 
 .canvas-wrap {
+    position: relative;
     aspect-ratio: 16 / 9;
     overflow: hidden;
     background: #080a08;
@@ -123,6 +124,17 @@ body {
 
 #game-canvas:focus-visible {
     box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.game-text-input {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    border: 0;
+    opacity: 0.01;
+    resize: none;
 }
 
 .asset-control {

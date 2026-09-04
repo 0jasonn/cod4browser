@@ -6,6 +6,7 @@
 #include <database/db_semantic_trace.h>
 #if defined(KISAK_WEB)
 #include <database/db_generated_loaders.h>
+#include <database/db_generated_image_platform.h>
 #include <database/db_file_platform.h>
 #endif
 
@@ -100,6 +101,18 @@ void DB_FailXFileLoad(const char *stage)
 
 bool DB_HasXFileLoadFailure()
 {
+    return g_load.failed;
+}
+
+void DB_RuntimeGeneratedFailure(const char *stage)
+{
+    DB_WebFail(stage);
+}
+
+bool DB_RuntimeGeneratedLoadFailed()
+{
+    // Generated loaders and their publications share the current XFile state.
+    // Diagnostic observations must never keep a subsequent load failed.
     return g_load.failed;
 }
 #endif
@@ -538,6 +551,7 @@ void __cdecl DB_LoadXFileInternal()
     }
     if (!DB_RuntimeGeneratedLoadFailed()) DB_RuntimeTraceXAssetListEnd();
     DB_CancelLoadXFile();
+    DB_WebReleaseUnusedImageLoadDefs();
     DB_RuntimeTraceStop(DB_RuntimeGeneratedLoadFailed()
         ? g_load.failureStage
         : "Load_XAssetHeader/next-family-closure");
@@ -658,7 +672,6 @@ void __cdecl DB_LoadXFile(
 {
 #if defined(KISAK_WEB)
     (void)path;
-    DB_RuntimeTraceStage("DB_LoadXFile");
 #endif
     if (((uintptr_t)buf & 3) != 0)
         MyAssertHandler(".\\database\\db_file_load.cpp", 749, 0, "%s", "!(reinterpret_cast< psize_int >( buf ) & 3)");
@@ -678,5 +691,8 @@ void __cdecl DB_LoadXFile(
     g_load.compressBufferEnd = buf + 0x80000;
     g_load.stream.next_in = buf;
     g_load.stream.avail_in = 0;
+#if defined(KISAK_WEB)
+    DB_RuntimeTraceStage("DB_LoadXFile");
+#endif
 }
 

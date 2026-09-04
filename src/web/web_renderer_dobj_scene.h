@@ -11,6 +11,8 @@
 struct DObj_s;
 struct cpose_t;
 struct XModel;
+struct DObjAnimMat;
+struct DpvsPlane;
 
 using WebRendererMaterialResolver = Material *(*)(Material *) noexcept;
 
@@ -113,7 +115,20 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
     const WebRendererLodParms *lodParms = nullptr,
     const GfxLightGrid *lightGrid = nullptr,
     const WebRendererModelLightingCallbacks *lightingCallbacks = nullptr,
-    WebRendererMaterialResolver materialResolver = nullptr);
+    WebRendererMaterialResolver materialResolver = nullptr,
+    const float viewOffset[3] = nullptr,
+    const DpvsPlane *cameraPlanes = nullptr,
+    int cameraPlaneCount = 0);
+
+// Evaluate current canonical LOD bones without skinning or lighting. The
+// caller owns synchronous cell admission; no prepared pose is retained here.
+WebRendererDObjSceneResult WebRenderer_ComputeDObjVisibilityBounds(
+    const WebRendererDObjSubmission &submission, const WebRendererLodParms *lodParms,
+    const float viewOffset[3], float mins[3], float maxs[3]);
+
+bool WebRenderer_ComputeDObjReceiverBounds(const DObj_s &obj,
+    const DObjAnimMat *posedMats, const int partBits[4],
+    const float viewOffset[3], float mins[3], float maxs[3]) noexcept;
 
 const char *WebRenderer_DObjSceneResultString(
     WebRendererDObjSceneResult result) noexcept;

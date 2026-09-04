@@ -138,6 +138,11 @@ void Sys_DatabaseCompleted2() { g_databaseCompleted2 = true; }
 bool Sys_IsDatabaseReady() { return g_databaseCompleted; }
 bool Sys_IsDatabaseReady2() { return g_databaseCompleted2; }
 void Sys_SyncDatabase() { if (!g_databaseCompleted) std::abort(); }
+
+void NET_RestartDebug()
+{
+    // The single Worker has no native network debugger socket/thread.
+}
 void Sys_NotifyDatabase()
 {
     if (!g_databaseFunction) std::abort();

@@ -72,86 +72,9 @@ void __cdecl R_AddEntitySurfacesInFrustumCmd(uint16_t *data)
 
 bool __cdecl R_BoundsInCell(mnode_t *node, int findCellIndex, const float *mins, const float *maxs)
 {
-    return R_BoundsInCell_r(node, findCellIndex, mins, maxs);
+    bool inside = false;
+    if (node != reinterpret_cast<mnode_t *>(rgp.world->dpvsPlanes.nodes) ||
+        !R_QueryBoundsInCell(*rgp.world, findCellIndex, mins, maxs, inside))
+        Com_Error(ERR_DROP, "R_BoundsInCell: invalid canonical BSP or bounds");
+    return inside;
 }
-
-bool __cdecl R_BoundsInCell_r(mnode_t *node, int findCellIndex, const float *mins, const float *maxs)
-{
-    float localmaxs[3]; // [esp+0h] [ebp-58h]
-    float dist; // [esp+Ch] [ebp-4Ch]
-    float localmins[3]; // [esp+10h] [ebp-48h] BYREF
-    uint32_t type; // [esp+1Ch] [ebp-3Ch]
-    int side; // [esp+20h] [ebp-38h]
-    cplane_s *plane; // [esp+24h] [ebp-34h]
-    int cellIndex; // [esp+28h] [ebp-30h]
-    mnode_t *leftNode; // [esp+30h] [ebp-28h]
-    float mins2[3]; // [esp+34h] [ebp-24h] BYREF
-    int cellCount; // [esp+40h] [ebp-18h]
-    float maxs2[3]; // [esp+44h] [ebp-14h] BYREF
-    mnode_t *rightNode; // [esp+50h] [ebp-8h]
-    int planeIndex; // [esp+54h] [ebp-4h]
-
-    cellCount = rgp.world->dpvsPlanes.cellCount + 1;
-    mins2[0] = *mins;
-    mins2[1] = mins[1];
-    mins2[2] = mins[2];
-    maxs2[0] = *maxs;
-    maxs2[1] = maxs[1];
-    maxs2[2] = maxs[2];
-    while (1)
-    {
-        cellIndex = node->cellIndex;
-        planeIndex = cellIndex - cellCount;
-        if (cellIndex - cellCount < 0)
-            break;
-        plane = &rgp.world->dpvsPlanes.planes[planeIndex];
-        side = BoxOnPlaneSide(mins2, maxs2, plane);
-        if (side == 3)
-        {
-            type = plane->type;
-            rightNode = (mnode_t *)((char *)node + 2 * node->rightChildOffset);
-            if (type >= 3)
-            {
-                leftNode = node + 1;
-                if (R_BoundsInCell_r(node + 1, findCellIndex, mins2, maxs2))
-                    return 1;
-            }
-            else
-            {
-                dist = plane->dist;
-                localmins[0] = mins2[0];
-                localmins[1] = mins2[1];
-                localmins[2] = mins2[2];
-                localmins[type] = dist;
-                localmaxs[0] = maxs2[0];
-                localmaxs[1] = maxs2[1];
-                localmaxs[2] = maxs2[2];
-                localmaxs[type] = dist;
-                if (BoxOnPlaneSide(localmins, maxs2, plane) != 1)
-                    MyAssertHandler(
-                        ".\\r_dpvs_entity.cpp",
-                        128,
-                        0,
-                        "%s",
-                        "BoxOnPlaneSide( localmins, maxs2, plane ) == BOXSIDE_FRONT");
-                if (maxs2[type] > (double)dist)
-                {
-                    leftNode = node + 1;
-                    if (R_BoundsInCell_r(node + 1, findCellIndex, localmins, maxs2))
-                        return 1;
-                }
-                maxs2[0] = localmaxs[0];
-                maxs2[1] = localmaxs[1];
-                maxs2[2] = localmaxs[2];
-            }
-            node = rightNode;
-        }
-        else
-        {
-            iassert( (side == BOXSIDE_FRONT) || (side == BOXSIDE_BACK) );
-            node = (mnode_t *)((char *)node + ((side - 1) * (node->rightChildOffset - 2)) * 2 + 4);
-        }
-    }
-    return cellIndex && cellIndex - 1 == findCellIndex;
-}
-

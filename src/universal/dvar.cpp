@@ -185,7 +185,10 @@ char *__cdecl Dvar_InfoString(int localClientNum, char bit)
     const char *UsernameForLocalClient; // eax
 
     info1[0] = 0;
-    Dvar_ForEach((void(__cdecl *)(const dvar_s *, void *))Dvar_InfoStringSingle, &bit);
+    // The callback reads a full flags word. Passing &bit reads beyond this
+    // one-byte argument and can admit unrelated dvars from stale stack bytes.
+    uint32_t flags = static_cast<unsigned char>(bit);
+    Dvar_ForEach((void(__cdecl *)(const dvar_s *, void *))Dvar_InfoStringSingle, &flags);
 #ifdef KISAK_MP
     if ((bit & 2) != 0)
     {

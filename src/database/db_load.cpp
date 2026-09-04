@@ -806,6 +806,7 @@ IDirect3DVertexBuffer9 **varGfxVertexBuffer;
 uint8_t *varXZoneHandle;
 MaterialVertexShaderProgram *varMaterialVertexShaderProgram;
 
+#if !defined(KISAK_NATIVE_DB_LOAD_RAWFILE_ORACLE)
 void __cdecl Load_byte(bool atStreamStart)
 {
     Load_Stream(atStreamStart, varbyte, 1);
@@ -941,10 +942,16 @@ void __cdecl Load_ScriptStringArray(bool atStreamStart, int32_t count)
         ++var;
     }
 }
+#endif
 
 uint8_t *__cdecl AllocLoad_raw_byte()
 {
     return DB_AllocStreamPos(0);
+}
+
+XAsset *__cdecl AllocLoad_FxElemVisStateSample()
+{
+    return (XAsset *)DB_AllocStreamPos(3);
 }
 
 void __cdecl Load_ConstCharArray(bool atStreamStart, int32_t count)
@@ -952,6 +959,7 @@ void __cdecl Load_ConstCharArray(bool atStreamStart, int32_t count)
     Load_Stream(atStreamStart, (uint8_t *)varConstChar, count);
 }
 
+#if !defined(KISAK_NATIVE_DB_LOAD_RAWFILE_ORACLE)
 void __cdecl Load_TempString(bool atStreamStart)
 {
     Load_Stream(atStreamStart, (uint8_t *)varTempString, 4);
@@ -984,6 +992,7 @@ void __cdecl Load_TempStringArray(bool atStreamStart, int32_t count)
         ++var;
     }
 }
+#endif
 
 void __cdecl Load_XString(bool atStreamStart)
 {
@@ -1003,6 +1012,7 @@ void __cdecl Load_XString(bool atStreamStart)
     }
 }
 
+#if !defined(KISAK_NATIVE_DB_LOAD_RAWFILE_ORACLE)
 void __cdecl Load_XStringArray(bool atStreamStart, int32_t count)
 {
     const char **var; // [esp+0h] [ebp-8h]
@@ -3009,11 +3019,6 @@ void __cdecl Load_cbrushside_t(bool atStreamStart)
             DB_ConvertOffsetToPointer((uint32_t*)(uint32_t*)varcbrushside_t);
         }
     }
-}
-
-XAsset *__cdecl AllocLoad_FxElemVisStateSample()
-{
-    return (XAsset *)DB_AllocStreamPos(3);
 }
 
 void __cdecl Load_cbrushside_tArray(bool atStreamStart, int32_t count)
@@ -6037,6 +6042,7 @@ void __cdecl Mark_WeaponDefPtr()
         Mark_WeaponDef();
     }
 }
+#endif
 
 void __cdecl Load_RawFile(bool atStreamStart)
 {
@@ -6130,6 +6136,21 @@ void __cdecl Load_RawFilePtr(bool atStreamStart)
     DB_PopStreamPos();
 }
 
+#if defined(KISAK_NATIVE_DB_LOAD_RAWFILE_ORACLE)
+RawFile *__cdecl DB_LoadNativeRawFileOracle(std::uint32_t assetIndex)
+{
+    DB_PushStreamPos(4u);
+    varRawFilePtr = reinterpret_cast<RawFile **>(DB_GetStreamPos());
+    kisak::database::ResetNativeSemanticTraceContext();
+    kisak::database::EnterNativeSemanticTraceAsset(
+        assetIndex, ASSET_TYPE_RAWFILE);
+    Load_RawFilePtr(true);
+    kisak::database::LeaveNativeSemanticTraceAsset();
+    RawFile *result = *varRawFilePtr;
+    DB_PopStreamPos();
+    return result;
+}
+#else
 void __cdecl Mark_RawFilePtr()
 {
     if (*varRawFilePtr)
@@ -7461,6 +7482,7 @@ void __cdecl DB_LoadDObjs()
             DObjUnarchive(obj);
     }
 }
+#endif
 
 
 

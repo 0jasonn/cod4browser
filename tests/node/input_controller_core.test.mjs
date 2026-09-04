@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createInputControllerCore } from "../../web/input_controller_core.mjs";
+import { browserTextToEngineCharacters, createInputControllerCore } from "../../web/input_controller_core.mjs";
 
 class EventHub
 {
@@ -23,10 +23,12 @@ class EventHub
     {
         const event = {
             target: this,
-            preventDefault() {},
+            defaultPrevented: false,
+            preventDefault() { this.defaultPrevented = true; },
             ...values,
         };
         for (const listener of this.listeners.get(type) ?? []) listener(event);
+        return event;
     }
 }
 
@@ -35,11 +37,14 @@ function createHarness({ pointerLocked = true, sendInput } = {})
     const windowEvents = new EventHub();
     const documentEvents = new EventHub();
     const canvas = new EventHub();
+    const textInput = new EventHub();
     canvas.width = 100;
     canvas.height = 50;
     canvas.bounds = { left: 10, top: 20, width: 200, height: 100 };
     canvas.getBoundingClientRect = () => canvas.bounds;
     canvas.focus = () => { documentEvents.activeElement = canvas; };
+    textInput.value = "";
+    textInput.focus = () => { documentEvents.activeElement = textInput; };
     canvas.requestPointerLock = () => Promise.resolve();
     documentEvents.pointerLockElement = pointerLocked ? canvas : null;
     documentEvents.activeElement = canvas;
@@ -78,6 +83,7 @@ function createHarness({ pointerLocked = true, sendInput } = {})
     globalThis.removeEventListener = windowEvents.removeEventListener.bind(windowEvents);
     const controller = createInputControllerCore({
         canvas,
+        textInput,
         sendInput: sendInput ?? ((event) => { inputs.push(event); }),
         onFailure: (error) => failures.push(error),
         requestFrame,
@@ -90,6 +96,7 @@ function createHarness({ pointerLocked = true, sendInput } = {})
         document: documentEvents,
         failures,
         inputs,
+        textInput,
         window: windowEvents,
         cancelledFrames,
         runFrames,
@@ -115,6 +122,131 @@ function holdInputAndQueueMotion(harness)
         movementY: -4,
     });
 }
+
+test("text retains keyboard layout, shift and native repeat independently of physical keys", () => {
+    const harness = createHarness();
+    try {
+        harness.window.fire("keydown", { code: "KeyQ", key: "A", shiftKey: true });
+        harness.window.fire("keydown", { code: "KeyQ", key: "A", shiftKey: true, repeat: true });
+        harness.window.fire("keyup", { code: "KeyQ" });
+        harness.window.fire("keydown", { code: "Backspace", key: "Backspace" });
+        harness.window.fire("keydown", { code: "Backspace", key: "Backspace", repeat: true });
+        harness.window.fire("keyup", { code: "Backspace" });
+        assert.deepEqual(harness.inputs, [
+            { type: "key", key: 113, down: true }, { type: "char", character: 65 },
+            { type: "key", key: 113, down: true }, { type: "char", character: 65 },
+            { type: "key", key: 113, down: false },
+            { type: "key", key: 127, down: true }, { type: "char", character: 8 },
+            { type: "key", key: 127, down: true }, { type: "char", character: 8 },
+            { type: "key", key: 127, down: false },
+        ]);
+    } finally {
+        harness.restore();
+    }
+});
+
+test("composition commits native bytes once, with no intermediate commands or Unicode truncation", () => {
+    const harness = createHarness();
+    try {
+        harness.window.fire("keydown", { code: "Quote", key: "Dead" });
+        harness.window.fire("keydown", { code: "KeyE", key: "e", isComposing: true });
+        harness.window.fire("compositionend", {
+            target: harness.textInput, data: "e\u0301\u20ac\u{1f600}",
+        });
+        assert.deepEqual(harness.inputs, [
+            { type: "char", character: 233 }, { type: "char", character: 128 },
+        ]);
+        assert.deepEqual(browserTextToEngineCharacters("Äß\u0000\n"), [196, 223]);
+        harness.document.activeElement = null;
+        harness.document.pointerLockElement = null;
+        harness.window.fire("compositionend", {
+            target: harness.textInput, data: "ignored",
+        });
+        assert.equal(harness.inputs.length, 2);
+    } finally {
+        harness.restore();
+    }
+});
+
+test("a trusted canvas press activates the editable IME sink without consuming physical input", () => {
+    const harness = createHarness({ pointerLocked: false });
+    try {
+        harness.canvas.fire("mousedown", { button: 0 });
+        assert.equal(harness.document.activeElement, harness.textInput);
+        harness.window.fire("keydown", {
+            target: harness.textInput, code: "KeyW", key: "Process", isComposing: true,
+        });
+        harness.textInput.value = "pending";
+        harness.window.fire("compositionend", {
+            target: harness.textInput, data: "e\u0301\u20ac\u{1f600}",
+        });
+        harness.textInput.fire("input");
+        assert.equal(harness.textInput.value, "");
+        assert.deepEqual(harness.inputs, [
+            { type: "key", key: 0xC8, down: true },
+            { type: "char", character: 233 },
+            { type: "char", character: 128 },
+        ]);
+    } finally {
+        harness.restore();
+    }
+});
+
+test("native control shortcuts do not insert letters, while AltGraph permits layout text", () => {
+    const harness = createHarness();
+    try {
+        harness.window.fire("keydown", { code: "KeyC", key: "c", ctrlKey: true });
+        harness.window.fire("keyup", { code: "KeyC" });
+        harness.window.fire("keydown", { code: "KeyQ", key: "@", ctrlKey: true,
+            altKey: true, getModifierState: (name) => name === "AltGraph" });
+        harness.window.fire("keyup", { code: "KeyQ" });
+        harness.window.fire("keydown", { code: "KeyV", key: "v", metaKey: true });
+        assert.deepEqual(harness.inputs.filter((event) => event.type === "char"), [
+            { type: "char", character: 3 }, { type: "char", character: 64 },
+        ]);
+    } finally {
+        harness.restore();
+    }
+});
+
+test("trusted paste snapshots one native line before invoking canonical Field_Paste", () => {
+    const harness = createHarness();
+    try {
+        const keyDown = harness.window.fire("keydown", {
+            code: "KeyV", key: "v", ctrlKey: true,
+        });
+        const paste = harness.window.fire("paste", {
+            clipboardData: {
+                getData: (type) => type === "text/plain" ? "Äß\nignored" : "",
+            },
+        });
+        harness.window.fire("keyup", { code: "KeyV" });
+        assert.equal(keyDown.defaultPrevented, false);
+        assert.equal(paste.defaultPrevented, true);
+        assert.deepEqual(harness.inputs, [
+            { type: "key", key: 0x76, down: true },
+            { type: "clipboard", characters: [196, 223] },
+            { type: "char", character: 22 },
+            { type: "key", key: 0x76, down: false },
+        ]);
+
+        harness.inputs.length = 0;
+        const insertDown = harness.window.fire("keydown", {
+            code: "Insert", key: "Insert", shiftKey: true,
+        });
+        harness.window.fire("paste", {
+            clipboardData: { getData: () => "Again" },
+        });
+        harness.window.fire("keyup", { code: "Insert", key: "Insert", shiftKey: true });
+        assert.equal(insertDown.defaultPrevented, false);
+        assert.deepEqual(harness.inputs, [
+            { type: "clipboard", characters: [65, 103, 97, 105, 110] },
+            { type: "char", character: 22 },
+        ]);
+    } finally {
+        harness.restore();
+    }
+});
 
 function assertReleasedWithoutMotion(harness)
 {

@@ -110,6 +110,11 @@ struct WebRendererSceneViewDesc
     const GfxLight *const *dynamicLights = nullptr;
     std::uint32_t dynamicLightCount = 0u;
     const GfxImage *dynamicLightAttenuation = nullptr;
+    // Native gives only added light zero an emissive spot shadow. Preserve its
+    // identity after camera culling and importance selection; UINT32_MAX means
+    // the canonical first light is absent from this view.
+    std::uint32_t dynamicSpotLightIndex = UINT32_MAX;
+    float dynamicSpotLightNearPlaneOffset = 0.0f;
     WebRendererDynamicShadowVisibility dynamicShadowVisibility = nullptr;
 };
 
@@ -222,6 +227,11 @@ struct WebRendererWorldSurfaceDesc
     const WebRendererWorldSurfaceRange *surfaceRanges = nullptr;
     std::uint32_t surfaceRangeCount = 0u;
     std::uint32_t canonicalSurfaceCount = 0u;
+    // Immutable code-image inputs owned by the canonical GfxWorld. Dynamic
+    // particle clouds reference these after the world geometry command has
+    // been retained; browser-generated pixels remain behind GfxImage.
+    const GfxImage *outdoorImage = nullptr;
+    float outdoorLookupMatrix[4][4]{};
 };
 
 enum class WebRendererWorldTechnique : std::uint8_t
@@ -256,6 +266,7 @@ enum class WebRendererWorldTechnique : std::uint8_t
     // primary-light-selected technique is absent. Retain that negative
     // selection explicitly so the backend does not invent fallback geometry.
     NativeTechniqueUnavailable,
+    Cinematic,
 };
 
 constexpr bool WebRenderer_SkipsNativeDraw(
@@ -338,6 +349,10 @@ struct WebRendererBrushModelInstanceDesc
     std::uint32_t geometryIndex;
     float axis[3][3];
     float origin[3];
+    // Current canonical GfxBrushModel::writable world bounds, independent of
+    // the retained mesh and its transformed shadow-caster bounds.
+    float receiverMins[3]{};
+    float receiverMaxs[3]{};
     WebRendererShadowEntityKind shadowEntityKind =
         WebRendererShadowEntityKind::None;
     std::uint32_t shadowEntityId = UINT32_MAX;
@@ -361,6 +376,15 @@ constexpr bool WebRenderer_IsFxVertexColorBatch(
         kind == WebRendererSceneBatchKind::FxMarkMesh ||
         kind == WebRendererSceneBatchKind::SunSprite ||
         kind == WebRendererSceneBatchKind::SunFlare;
+}
+
+constexpr bool WebRenderer_IsTransientLightReceiver(
+    WebRendererSceneBatchKind kind) noexcept
+{
+    return kind == WebRendererSceneBatchKind::DynamicDObj ||
+        kind == WebRendererSceneBatchKind::DynamicXModel ||
+        kind == WebRendererSceneBatchKind::DynamicBModel ||
+        kind == WebRendererSceneBatchKind::FxXModel;
 }
 
 constexpr bool WebRenderer_IsSunBillboardBatch(
@@ -437,12 +461,26 @@ struct WebRendererWorldBatchDesc
     // visible camera pass.
     std::uint8_t cameraRegion;
     bool depthHack;
+    // Native receiver-list surf type (SF_*). The backend combines this with
+    // the canonical material key before R_ReverseSortDrawSurfs-equivalent
+    // ordering; it never identifies or owns geometry.
+    std::uint8_t dynamicLightSurfType;
+    bool excludeTransientSpotLight;
+    // Native sceneModel / DynEntity receiver sphere, copied at submission.
+    // Radius -1 leaves other scene kinds on their existing receiver path.
+    float transientLightSphere[4] = {0.0f, 0.0f, 0.0f, -1.0f};
+    float transientLightMins[3]{};
+    float transientLightMaxs[3]{};
+    bool transientLightBoundsEnabled = false;
     // Native lp_amb_* adds model-lighting alpha times sun diffuse without
     // the normal-dependent term used by the other lp_* families.
     bool ambientProbeLighting;
     // Canonical GfxWorldDpvsStatic::surfaceCastsSunShadow membership. This is
     // frontend visibility intent, not a backend material heuristic.
     bool castsSunShadow;
+    // Build-shadowmap technique/state availability. Dynamic spot BSP caster
+    // membership is light-volume based and does not use the sun bitset.
+    bool castsSpotShadow;
     // State from TECHNIQUE_BUILD_SHADOWMAP_DEPTH, kept separate from the
     // visible receiver technique selected for the camera pass.
     std::uint32_t shadowStateBits0;
@@ -634,6 +672,7 @@ WebRendererSurfaceResult WebRenderer_SetUiScene(
 
 #if KISAK_WEB_DIAGNOSTICS
 std::uint32_t WebRenderer_TestDrawPixel(int x, int y);
+std::uint32_t WebRenderer_TestCinematicPixel(bool ui, int field);
 #endif
 
 // Draws one non-blocking browser frame. Engine work remains outside this seam.
@@ -648,5 +687,5 @@ void WebSaveImage_CancelPending();
 bool WebRenderer_SetRawUiImage(const GfxImage *image, const std::uint8_t *rgba,
     std::size_t byteLength);
 bool WebRenderer_UpdateUiImage(const GfxImage *image, const std::uint8_t *rgba,
-    std::size_t byteLength);
+    std::size_t byteLength, unsigned components = 4);
 void WebRenderer_ReleaseUiImage(const GfxImage *image);

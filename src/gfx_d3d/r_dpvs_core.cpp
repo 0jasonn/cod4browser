@@ -11,6 +11,11 @@
 #include <universal/com_memory.h>
 #include <universal/profile.h>
 
+#include <DynEntity/DynEntity_client.h>
+
+#include <array>
+#include <bit>
+
 const float standardFrustumSidePlanes[4][4] =
 {
   { -1.0, 0.0, 0.0, 1.0 },
@@ -1608,6 +1613,487 @@ void DpvsContext::DispatchCell(const GfxCell *cell, const DpvsPlane *planes,
         if (drawWorld)
             R_AddCellCullGroupsInFrustum(&command);
     }
+    if (observeCell)
+        observeCell(observeCellUser, cell, planes, planeCount,
+            frustumPlaneCount);
+}
+
+namespace
+{
+struct DpvsBspNode
+{
+    std::uint16_t cellIndex;
+    std::uint16_t rightChildOffset;
+};
+static_assert(sizeof(DpvsBspNode) == 4u);
+
+constexpr std::uint32_t DPVS_SCENE_ENTITY_WORDS_PER_CELL = 128u;
+constexpr std::uint32_t DPVS_SCENE_ENTITY_BANK_COUNT = 2u;
+constexpr std::uint32_t DPVS_MAX_SCENE_ENTITY_COUNT = 4096u;
+
+bool SceneEntityCellLayoutAvailable(const GfxWorld &world,
+    unsigned localClientNum, std::uint32_t entityCount) noexcept
+{
+    if (!world.dpvsPlanes.sceneEntCellBits ||
+        world.dpvsPlanes.cellCount <= 0 ||
+        world.dpvsPlanes.cellCount > 1024 || entityCount == 0u ||
+        entityCount > DPVS_MAX_SCENE_ENTITY_COUNT ||
+        (entityCount & 31u) != 0u || localClientNum >= 4u)
+        return false;
+    const std::uint32_t wordCount = entityCount >> 5u;
+    const std::uint32_t clientOffset = wordCount * localClientNum;
+    return clientOffset + wordCount <=
+        DPVS_SCENE_ENTITY_WORDS_PER_CELL;
+}
+
+bool SceneEntityBoundsValid(const float mins[3],
+    const float maxs[3]) noexcept
+{
+    if (!mins || !maxs) return false;
+    for (int axis = 0; axis < 3; ++axis)
+        if (!std::isfinite(mins[axis]) || !std::isfinite(maxs[axis]) ||
+            mins[axis] > maxs[axis])
+            return false;
+    return true;
+}
+
+bool DpvsNodeAvailable(const GfxWorld &world,
+    const DpvsBspNode *node, std::size_t bytes) noexcept
+{
+    if (!node || !world.dpvsPlanes.nodes || world.nodeCount <= 0)
+        return false;
+    const std::uintptr_t begin = reinterpret_cast<std::uintptr_t>(
+        world.dpvsPlanes.nodes);
+    const std::uintptr_t end = begin +
+        static_cast<std::uintptr_t>(world.nodeCount) * sizeof(std::uint16_t);
+    const std::uintptr_t address = reinterpret_cast<std::uintptr_t>(node);
+    return end >= begin && bytes <= end - begin &&
+        address >= begin && address <= end - bytes &&
+        ((address - begin) & 1u) == 0u;
+}
+
+bool CollectSceneEntityCells_r(const GfxWorld &world,
+    const DpvsBspNode *node, const float mins[3], const float maxs[3],
+    std::array<std::uint32_t, 32> &cellBits,
+    std::uint32_t &remainingNodes, std::uint32_t depth) noexcept
+{
+    if (!remainingNodes-- || depth > 64u ||
+        !DpvsNodeAvailable(world, node, sizeof(std::uint16_t)))
+        return false;
+    const std::uint32_t cellLimit =
+        static_cast<std::uint32_t>(world.dpvsPlanes.cellCount) + 1u;
+    const std::uint32_t nodeIndex = node->cellIndex;
+    if (nodeIndex < cellLimit)
+    {
+        if (nodeIndex != 0u)
+        {
+            const std::uint32_t cellIndex = nodeIndex - 1u;
+            if (cellIndex >=
+                static_cast<std::uint32_t>(world.dpvsPlanes.cellCount))
+                return false;
+            cellBits[cellIndex >> 5u] |= 1u << (cellIndex & 31u);
+        }
+        return true;
+    }
+
+    const std::uint32_t planeIndex = nodeIndex - cellLimit;
+    if (!DpvsNodeAvailable(world, node, sizeof(DpvsBspNode)) ||
+        !world.dpvsPlanes.planes || world.planeCount <= 0 ||
+        planeIndex >= static_cast<std::uint32_t>(world.planeCount) ||
+        node->rightChildOffset < 2u)
+        return false;
+    const cplane_s &plane = world.dpvsPlanes.planes[planeIndex];
+    for (int axis = 0; axis < 3; ++axis)
+        if (!std::isfinite(plane.normal[axis])) return false;
+    if (!std::isfinite(plane.dist) || plane.signbits >= 8u) return false;
+    // Use native's signbit-specific scalar order, including its tangent rule.
+    const int side = BoxOnPlaneSide(mins, maxs, &plane);
+    const DpvsBspNode *const front = node + 1;
+    const DpvsBspNode *const back = reinterpret_cast<const DpvsBspNode *>(
+        reinterpret_cast<const std::uint8_t *>(node) +
+        2u * node->rightChildOffset);
+    if (side == BOXSIDE_FRONT)
+        return CollectSceneEntityCells_r(world, front, mins, maxs,
+            cellBits, remainingNodes, depth + 1u);
+    if (side == BOXSIDE_BACK)
+        return CollectSceneEntityCells_r(world, back, mins, maxs,
+            cellBits, remainingNodes, depth + 1u);
+    if (side == 0)
+        return CollectSceneEntityCells_r(world, front, mins, maxs,
+            cellBits, remainingNodes, depth + 1u);
+    if (side != 3) return false;
+
+    if (plane.type < 3u)
+    {
+        float frontMins[3]{mins[0], mins[1], mins[2]};
+        float backMaxs[3]{maxs[0], maxs[1], maxs[2]};
+        frontMins[plane.type] = plane.dist;
+        backMaxs[plane.type] = plane.dist;
+        if (maxs[plane.type] > plane.dist &&
+            !CollectSceneEntityCells_r(world, front, frontMins, maxs,
+                cellBits, remainingNodes, depth + 1u))
+            return false;
+        return CollectSceneEntityCells_r(world, back, mins, backMaxs,
+            cellBits, remainingNodes, depth + 1u);
+    }
+    return CollectSceneEntityCells_r(world, front, mins, maxs,
+               cellBits, remainingNodes, depth + 1u) &&
+        CollectSceneEntityCells_r(world, back, mins, maxs,
+            cellBits, remainingNodes, depth + 1u);
+}
+
+std::uint32_t SceneEntityWordOffset(const GfxWorld &world,
+    unsigned localClientNum, std::uint32_t entityCount,
+    std::uint32_t entityNumber, std::uint32_t cellIndex,
+    DpvsSceneEntityKind kind) noexcept
+{
+    const std::uint32_t wordCount = entityCount >> 5u;
+    const std::uint32_t bank = kind == DpvsSceneEntityKind::Brush
+        ? static_cast<std::uint32_t>(world.dpvsPlanes.cellCount) : 0u;
+    return DPVS_SCENE_ENTITY_WORDS_PER_CELL * (bank + cellIndex) +
+        wordCount * localClientNum + (entityNumber >> 5u);
+}
+
+bool BoundsTouchVisibleCell_r(const GfxWorld &world,
+    const DpvsBspNode *node, const std::uint32_t *visibleCellBits,
+    const float mins[3], const float maxs[3],
+    std::uint32_t &remainingNodes) noexcept
+{
+    if (!remainingNodes--) return true;
+    const std::uint32_t cellLimit =
+        static_cast<std::uint32_t>(world.dpvsPlanes.cellCount) + 1u;
+    const std::uint32_t nodeIndex = node->cellIndex;
+    if (nodeIndex < cellLimit)
+    {
+        if (nodeIndex == 0u) return false;
+        const std::uint32_t cellIndex = nodeIndex - 1u;
+        return cellIndex <
+                static_cast<std::uint32_t>(world.dpvsPlanes.cellCount) &&
+            (visibleCellBits[cellIndex >> 5u] &
+                (1u << (cellIndex & 31u))) != 0u;
+    }
+
+    const std::uint32_t planeIndex = nodeIndex - cellLimit;
+    if (planeIndex >= static_cast<std::uint32_t>(world.planeCount) ||
+        node->rightChildOffset < 2u)
+        return true;
+    const cplane_s &plane = world.dpvsPlanes.planes[planeIndex];
+    float furthest = 0.0f;
+    float nearest = 0.0f;
+    for (int axis = 0; axis < 3; ++axis)
+    {
+        if (plane.normal[axis] >= 0.0f)
+        {
+            furthest += plane.normal[axis] * maxs[axis];
+            nearest += plane.normal[axis] * mins[axis];
+        }
+        else
+        {
+            furthest += plane.normal[axis] * mins[axis];
+            nearest += plane.normal[axis] * maxs[axis];
+        }
+    }
+    const int side = (furthest > plane.dist ? BOXSIDE_FRONT : 0) |
+        (nearest < plane.dist ? BOXSIDE_BACK : 0);
+    const DpvsBspNode *const front = node + 1;
+    const DpvsBspNode *const back = reinterpret_cast<const DpvsBspNode *>(
+        reinterpret_cast<const std::uint8_t *>(node) +
+        2u * node->rightChildOffset);
+    if (side == BOXSIDE_FRONT)
+        return BoundsTouchVisibleCell_r(world, front, visibleCellBits,
+            mins, maxs, remainingNodes);
+    if (side == BOXSIDE_BACK)
+        return BoundsTouchVisibleCell_r(world, back, visibleCellBits,
+            mins, maxs, remainingNodes);
+    if (side != 3) return true;
+
+    if (plane.type < 3u)
+    {
+        float frontMins[3]{mins[0], mins[1], mins[2]};
+        float backMaxs[3]{maxs[0], maxs[1], maxs[2]};
+        frontMins[plane.type] = plane.dist;
+        backMaxs[plane.type] = plane.dist;
+        if (maxs[plane.type] > plane.dist &&
+            BoundsTouchVisibleCell_r(world, front, visibleCellBits,
+                frontMins, maxs, remainingNodes))
+            return true;
+        return BoundsTouchVisibleCell_r(world, back, visibleCellBits,
+            mins, backMaxs, remainingNodes);
+    }
+    if (BoundsTouchVisibleCell_r(world, front, visibleCellBits,
+            mins, maxs, remainingNodes))
+        return true;
+    return BoundsTouchVisibleCell_r(world, back, visibleCellBits,
+        mins, maxs, remainingNodes);
+}
+} // namespace
+
+bool R_QueryBoundsInCell(const GfxWorld &world, unsigned cellIndex,
+    const float mins[3], const float maxs[3], bool &inside) noexcept
+{
+    if (world.dpvsPlanes.cellCount <= 0 || world.dpvsPlanes.cellCount > 1024 ||
+        cellIndex >= static_cast<unsigned>(world.dpvsPlanes.cellCount) ||
+        !SceneEntityBoundsValid(mins, maxs)) return false;
+    std::array<std::uint32_t, 32> cells{};
+    std::uint32_t remainingNodes = 65536u;
+    if (!CollectSceneEntityCells_r(world,
+            reinterpret_cast<const DpvsBspNode *>(world.dpvsPlanes.nodes),
+            mins, maxs, cells, remainingNodes, 0u)) return false;
+    inside = (cells[cellIndex >> 5u] & (1u << (cellIndex & 31u))) != 0u;
+    return true;
+}
+
+bool R_DynEntityCellLayoutAvailable(const GfxWorld &world, unsigned kind) noexcept
+{
+    if (kind >= 2u || world.dpvsPlanes.cellCount <= 0 ||
+        world.dpvsPlanes.cellCount > 1024)
+        return false;
+    const unsigned count = world.dpvsDyn.dynEntClientCount[kind];
+    const unsigned words = world.dpvsDyn.dynEntClientWordCount[kind];
+    return count <= UINT16_MAX && words <= 2048u &&
+        words >= (count + 31u) / 32u &&
+        (words == 0u || world.dpvsDyn.dynEntCellBits[kind]);
+}
+
+bool R_ClearDynEntityCellLinks(GfxWorld &world, unsigned kind) noexcept
+{
+    if (!R_DynEntityCellLayoutAvailable(world, kind)) return false;
+    const unsigned words = world.dpvsDyn.dynEntClientWordCount[kind];
+    if (words != 0u)
+        std::memset(world.dpvsDyn.dynEntCellBits[kind], 0,
+            sizeof(std::uint32_t) * words * world.dpvsPlanes.cellCount);
+    return true;
+}
+
+bool R_UnlinkDynEntityFromCells(GfxWorld &world, unsigned kind,
+    unsigned entityIndex) noexcept
+{
+    if (!R_DynEntityCellLayoutAvailable(world, kind) ||
+        entityIndex >= world.dpvsDyn.dynEntClientCount[kind])
+        return false;
+    const unsigned words = world.dpvsDyn.dynEntClientWordCount[kind];
+    const std::uint32_t bit = 0x80000000u >> (entityIndex & 31u);
+    for (int cell = 0; cell < world.dpvsPlanes.cellCount; ++cell)
+        world.dpvsDyn.dynEntCellBits[kind][words * cell + (entityIndex >> 5u)] &= ~bit;
+    return true;
+}
+
+bool R_LinkDynEntityBoundsToCells(GfxWorld &world, unsigned kind,
+    unsigned entityIndex, const float mins[3], const float maxs[3]) noexcept
+{
+    if (!R_DynEntityCellLayoutAvailable(world, kind) ||
+        entityIndex >= world.dpvsDyn.dynEntClientCount[kind] ||
+        !SceneEntityBoundsValid(mins, maxs))
+        return false;
+    std::array<std::uint32_t, 32> cells{};
+    std::uint32_t remainingNodes = 65536u;
+    if (!CollectSceneEntityCells_r(world,
+            reinterpret_cast<const DpvsBspNode *>(world.dpvsPlanes.nodes),
+            mins, maxs, cells, remainingNodes, 0u))
+        return false;
+    // Validate the entire walk before replacing a canonical link.
+    R_UnlinkDynEntityFromCells(world, kind, entityIndex);
+    const unsigned words = world.dpvsDyn.dynEntClientWordCount[kind];
+    const std::uint32_t bit = 0x80000000u >> (entityIndex & 31u);
+    for (unsigned cell = 0; cell < static_cast<unsigned>(world.dpvsPlanes.cellCount); ++cell)
+        if (cells[cell >> 5u] & (1u << (cell & 31u)))
+            world.dpvsDyn.dynEntCellBits[kind][words * cell + (entityIndex >> 5u)] |= bit;
+    return true;
+}
+
+bool R_CullDynEntityCell(const GfxWorld &world, unsigned kind, unsigned cellIndex,
+    const DynEntityPose *poses, const DynEntityDef *definitions,
+    const DpvsPlane *planes, int planeCount, unsigned char *visibility) noexcept
+{
+    if (!R_DynEntityCellLayoutAvailable(world, kind) ||
+        cellIndex >= static_cast<unsigned>(world.dpvsPlanes.cellCount) ||
+        planeCount < 0 || planeCount > DPVS_PORTAL_MAX_PLANES ||
+        (planeCount != 0 && !planes))
+        return false;
+    const unsigned count = world.dpvsDyn.dynEntClientCount[kind];
+    if (count == 0u) return true;
+    if (!visibility || (kind == 0u ? !poses : !definitions)) return false;
+    for (int p = 0; p < planeCount; ++p)
+        for (float coefficient : planes[p].coeffs)
+            if (!std::isfinite(coefficient)) return false;
+    const unsigned words = world.dpvsDyn.dynEntClientWordCount[kind];
+    const std::uint32_t *cellBits = world.dpvsDyn.dynEntCellBits[kind] + words * cellIndex;
+    for (unsigned word = 0; word < words; ++word)
+    {
+        std::uint32_t bits = cellBits[word];
+        while (bits)
+        {
+            const unsigned bitIndex = std::countl_zero(bits);
+            bits &= ~(0x80000000u >> bitIndex);
+            const unsigned id = 32u * word + bitIndex;
+            if (id >= count) return false;
+            if (visibility[id]) continue;
+            bool culled;
+            if (kind == 0u)
+            {
+                const DynEntityPose &pose = poses[id];
+                if (!std::isfinite(pose.radius) || pose.radius < 0.0f)
+                    return false;
+                for (float coordinate : pose.pose.origin)
+                    if (!std::isfinite(coordinate)) return false;
+                culled = planeCount != 0 && kisak::dpvs::CullSphere(
+                    pose.pose.origin, pose.radius, planes, planeCount);
+            }
+            else
+            {
+                const unsigned modelIndex = definitions[id].brushModel;
+                if (definitions[id].xModel || !modelIndex ||
+                    !world.models || modelIndex >= world.modelCount)
+                    return false;
+                const GfxBrushModel &model = world.models[modelIndex];
+                if (!SceneEntityBoundsValid(model.writable.mins, model.writable.maxs))
+                    return false;
+                culled = planeCount != 0 && kisak::dpvs::CullBox(
+                    model.writable.mins, model.writable.maxs, planes, planeCount);
+            }
+            if (!culled) visibility[id] = 1u;
+        }
+    }
+    return true;
+}
+
+bool R_ClearSceneEntityCellLinks(GfxWorld &world,
+    unsigned localClientNum, std::uint32_t entityCount) noexcept
+{
+    if (!SceneEntityCellLayoutAvailable(
+            world, localClientNum, entityCount))
+        return false;
+    const std::uint32_t wordCount = entityCount >> 5u;
+    const std::uint32_t clientOffset = wordCount * localClientNum;
+    const std::uint32_t bankCellCount =
+        DPVS_SCENE_ENTITY_BANK_COUNT *
+        static_cast<std::uint32_t>(world.dpvsPlanes.cellCount);
+    for (std::uint32_t bankCell = 0u;
+         bankCell < bankCellCount; ++bankCell)
+    {
+        std::memset(world.dpvsPlanes.sceneEntCellBits +
+                DPVS_SCENE_ENTITY_WORDS_PER_CELL * bankCell + clientOffset,
+            0, wordCount * sizeof(std::uint32_t));
+    }
+    return true;
+}
+
+bool R_UnlinkSceneEntityFromCells(GfxWorld &world,
+    unsigned localClientNum, std::uint32_t entityCount,
+    std::uint32_t entityNumber) noexcept
+{
+    if (!SceneEntityCellLayoutAvailable(
+            world, localClientNum, entityCount) ||
+        entityNumber >= entityCount)
+        return false;
+    const std::uint32_t bit =
+        0x80000000u >> (entityNumber & 31u);
+    const std::uint32_t bankCellCount =
+        DPVS_SCENE_ENTITY_BANK_COUNT *
+        static_cast<std::uint32_t>(world.dpvsPlanes.cellCount);
+    std::uint32_t offset = (entityCount >> 5u) * localClientNum +
+        (entityNumber >> 5u);
+    for (std::uint32_t bankCell = 0u;
+         bankCell < bankCellCount; ++bankCell)
+    {
+        world.dpvsPlanes.sceneEntCellBits[offset] &= ~bit;
+        offset += DPVS_SCENE_ENTITY_WORDS_PER_CELL;
+    }
+    return true;
+}
+
+DpvsSceneEntityCellLink R_LinkSceneEntityBoundsToCells(GfxWorld &world,
+    unsigned localClientNum, std::uint32_t entityCount,
+    std::uint32_t entityNumber, DpvsSceneEntityKind kind,
+    const float mins[3], const float maxs[3]) noexcept
+{
+    if (!SceneEntityCellLayoutAvailable(
+            world, localClientNum, entityCount) ||
+        entityNumber >= entityCount || !SceneEntityBoundsValid(mins, maxs) ||
+        (kind != DpvsSceneEntityKind::DObj &&
+         kind != DpvsSceneEntityKind::Brush))
+        return DpvsSceneEntityCellLink::Unavailable;
+    std::array<std::uint32_t, 32> cellBits{};
+    std::uint32_t remainingNodes = 65536u;
+    if (!CollectSceneEntityCells_r(world,
+            reinterpret_cast<const DpvsBspNode *>(world.dpvsPlanes.nodes),
+            mins, maxs, cellBits, remainingNodes, 0u))
+        return DpvsSceneEntityCellLink::Unavailable;
+    if (!R_UnlinkSceneEntityFromCells(
+            world, localClientNum, entityCount, entityNumber))
+        return DpvsSceneEntityCellLink::Unavailable;
+    const std::uint32_t bit =
+        0x80000000u >> (entityNumber & 31u);
+    bool linked = false;
+    for (std::uint32_t cellIndex = 0u;
+         cellIndex < static_cast<std::uint32_t>(world.dpvsPlanes.cellCount);
+         ++cellIndex)
+    {
+        if ((cellBits[cellIndex >> 5u] &
+                (1u << (cellIndex & 31u))) == 0u)
+            continue;
+        const std::uint32_t offset = SceneEntityWordOffset(world,
+            localClientNum, entityCount, entityNumber, cellIndex, kind);
+        world.dpvsPlanes.sceneEntCellBits[offset] |= bit;
+        linked = true;
+    }
+    return linked ? DpvsSceneEntityCellLink::Linked
+                  : DpvsSceneEntityCellLink::Unlinked;
+}
+
+DpvsSceneEntityCellLink R_QuerySceneEntityCellLink(const GfxWorld &world,
+    unsigned localClientNum, std::uint32_t entityCount,
+    std::uint32_t entityNumber, std::uint32_t cellIndex,
+    DpvsSceneEntityKind kind) noexcept
+{
+    if (!SceneEntityCellLayoutAvailable(
+            world, localClientNum, entityCount) ||
+        entityNumber >= entityCount ||
+        cellIndex >= static_cast<std::uint32_t>(world.dpvsPlanes.cellCount) ||
+        (kind != DpvsSceneEntityKind::DObj &&
+         kind != DpvsSceneEntityKind::Brush))
+        return DpvsSceneEntityCellLink::Unavailable;
+    const std::uint32_t offset = SceneEntityWordOffset(world,
+        localClientNum, entityCount, entityNumber, cellIndex, kind);
+    const std::uint32_t bit =
+        0x80000000u >> (entityNumber & 31u);
+    return (world.dpvsPlanes.sceneEntCellBits[offset] & bit) != 0u
+        ? DpvsSceneEntityCellLink::Linked
+        : DpvsSceneEntityCellLink::Unlinked;
+}
+
+bool R_BoundsTouchVisibleCell(const GfxWorld &world,
+    const std::uint32_t *visibleCellBits,
+    const float mins[3], const float maxs[3]) noexcept
+{
+    if (!visibleCellBits || !mins || !maxs ||
+        world.dpvsPlanes.cellCount <= 0 ||
+        world.dpvsPlanes.cellCount > 1024 ||
+        !world.dpvsPlanes.nodes || !world.dpvsPlanes.planes)
+        return true;
+    for (int axis = 0; axis < 3; ++axis)
+        if (!std::isfinite(mins[axis]) || !std::isfinite(maxs[axis]) ||
+            mins[axis] > maxs[axis])
+            return true;
+    std::uint32_t remainingNodes = 65536u;
+    return BoundsTouchVisibleCell_r(world,
+        reinterpret_cast<const DpvsBspNode *>(world.dpvsPlanes.nodes),
+        visibleCellBits, mins, maxs, remainingNodes);
+}
+
+bool R_SphereTouchesVisibleCell(const GfxWorld &world,
+    const std::uint32_t *visibleCellBits,
+    const float origin[3], float radius) noexcept
+{
+    if (!origin || !std::isfinite(radius) || radius < 0.0f) return true;
+    float mins[3], maxs[3];
+    for (int axis = 0; axis < 3; ++axis)
+    {
+        mins[axis] = origin[axis] - radius;
+        maxs[axis] = origin[axis] + radius;
+    }
+    return R_BoundsTouchVisibleCell(
+        world, visibleCellBits, mins, maxs);
 }
 
 void R_ClearStaticDpvsView(GfxWorld &world, unsigned viewIndex, bool clearSurfaces)
@@ -1620,7 +2106,8 @@ void R_ClearStaticDpvsView(GfxWorld &world, unsigned viewIndex, bool clearSurfac
 
 bool R_ComputeStaticCameraVisibility(GfxWorld &world, DpvsGlobals &dpvs,
     const GfxViewParms &viewParms, unsigned localClientNum, float farPlaneDist,
-    bool includeWorldSurfaces)
+    bool includeWorldSurfaces, DpvsCellObserver observeCell,
+    void *observeCellUser)
 {
     if (localClientNum >= 4 || world.dpvsPlanes.cellCount <= 0 ||
         world.dpvsPlanes.cellCount > 1024 || !world.cells ||
@@ -1652,6 +2139,8 @@ bool R_ComputeStaticCameraVisibility(GfxWorld &world, DpvsGlobals &dpvs,
     if (includeWorldSurfaces && world.dpvs.staticSurfaceCount)
         memset(world.dpvs.surfaceVisData[0], 0, world.dpvs.staticSurfaceCount);
     DpvsContext context{&world, dpvs, localClientNum, farPlaneDist};
+    context.observeCell = observeCell;
+    context.observeCellUser = observeCellUser;
     context.g_smodelVisData = world.dpvs.smodelVisData[0];
     context.drawWorld = includeWorldSurfaces;
     context.g_surfaceVisData = world.dpvs.surfaceVisData[0];

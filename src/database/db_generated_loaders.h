@@ -108,3 +108,6 @@ void __cdecl Load_GfxLightDefPtr(bool atStreamStart);
 void __cdecl Load_MenuListPtr(bool atStreamStart);
 void __cdecl Load_menuDef_ptr(bool atStreamStart);
 void DB_SetGeneratedAssetIndex(std::uint32_t index);
+#if defined(KISAK_GENERATED_DB_LOAD_RAWFILE_ORACLE)
+RawFile *DB_LoadGeneratedRawFileOracle(std::uint32_t assetIndex);
+#endif

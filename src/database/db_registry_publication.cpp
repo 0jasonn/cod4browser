@@ -3,6 +3,7 @@
 #include <database/db_registry_pools.h>
 #include <database/db_registry_publication.h>
 #include <database/db_generated_gfxworld_platform.h>
+#include <database/db_generated_image_platform.h>
 #include <database/db_runtime_prefix.h>
 #include <database/db_generated_material_platform.h>
 #include <bgame/weapon_types.h>
@@ -35,6 +36,7 @@
 #include <cstddef>
 #include <cstring>
 #include <array>
+#include <new>
 
 void __cdecl CM_Unload();
 void __cdecl Com_UnloadWorld();
@@ -55,6 +57,25 @@ constexpr const char *g_defaultAssetName[ASSET_TYPE_COUNT] = {
 };
 
 std::int32_t g_defaultAssetCount = 0;
+std::array<void *, 2048> g_dynamicMaterialStorage{};
+
+struct SingletonPublicationBackup
+{
+    bool active = false;
+    XAssetType type = ASSET_TYPE_CLIPMAP;
+    std::uint32_t entryIndex = 0;
+    std::uint8_t previousZoneIndex = 0;
+    bool previousInUse = false;
+    std::size_t bodySize = 0;
+    alignas(4) std::array<std::byte, sizeof(GfxWorld)> body{};
+};
+
+// The world pools are engine-owned singletons, so they cannot retain ordinary
+// override entries during a zone load. Keep shallow owner records until the
+// synchronous DB_LoadXAssets transaction commits; referenced arrays remain in
+// the prior zone's PMem scope and are valid to restore on failure.
+bool g_publicationTransactionActive = false;
+std::array<SingletonPublicationBackup, 5> g_singletonPublicationBackups{};
 }
 
 namespace
@@ -336,8 +357,14 @@ void MarkDependencies(XAssetType type, XAssetHeader header)
         MarkHeader(ASSET_TYPE_TECHNIQUE_SET, {header.material->techniqueSet});
         if (header.material->textureTable)
             for (int i = 0; i < header.material->textureCount; ++i)
+            {
+                const MaterialTextureDef &texture = header.material->textureTable[i];
+                // Native Mark_MaterialTextureDefInfo follows water_t::image.
                 MarkHeader(ASSET_TYPE_IMAGE,
-                    {header.material->textureTable[i].u.image});
+                    {texture.semantic == 11u
+                        ? (texture.u.water ? texture.u.water->image : nullptr)
+                        : texture.u.image});
+            }
         break;
     case ASSET_TYPE_SOUND:
         if (header.sound->head)
@@ -429,6 +456,17 @@ void RemoveAsset(XAssetType type, XAssetHeader header)
     // its native Z_Free handler is intentionally a no-op here.
     switch (type)
     {
+    case ASSET_TYPE_MATERIAL:
+    {
+        const std::uint32_t index = DB_GetAssetPoolIndex(type, header);
+        if (index < g_dynamicMaterialStorage.size() &&
+            g_dynamicMaterialStorage[index])
+        {
+            ::operator delete(g_dynamicMaterialStorage[index]);
+            g_dynamicMaterialStorage[index] = nullptr;
+        }
+        break;
+    }
     case ASSET_TYPE_CLIPMAP:
     case ASSET_TYPE_CLIPMAP_PVS: CM_Unload(); break;
     case ASSET_TYPE_COMWORLD: Com_UnloadWorld(); break;
@@ -575,14 +613,29 @@ void RemoveOverrideChain(std::uint16_t overrideIndex,
     }
 }
 
-bool IsClipMapSingleton(XAssetType type)
+bool IsTransactionalSingleton(XAssetType type)
 {
-    return type == ASSET_TYPE_CLIPMAP || type == ASSET_TYPE_CLIPMAP_PVS;
+    return type == ASSET_TYPE_CLIPMAP || type == ASSET_TYPE_CLIPMAP_PVS ||
+        type == ASSET_TYPE_COMWORLD || type == ASSET_TYPE_GAMEWORLD_SP ||
+        type == ASSET_TYPE_GFXWORLD;
+}
+
+SingletonPublicationBackup *SingletonBackupForType(XAssetType type)
+{
+    switch (type)
+    {
+    case ASSET_TYPE_CLIPMAP: return &g_singletonPublicationBackups[0];
+    case ASSET_TYPE_CLIPMAP_PVS: return &g_singletonPublicationBackups[1];
+    case ASSET_TYPE_COMWORLD: return &g_singletonPublicationBackups[2];
+    case ASSET_TYPE_GAMEWORLD_SP: return &g_singletonPublicationBackups[3];
+    case ASSET_TYPE_GFXWORLD: return &g_singletonPublicationBackups[4];
+    default: return nullptr;
+    }
 }
 
 XAssetEntryPoolEntry *FindAnySingletonEntry(XAssetType type)
 {
-    if (!IsClipMapSingleton(type)) return nullptr;
+    if (!IsTransactionalSingleton(type)) return nullptr;
     for (std::uint32_t hash = 0; hash < 0x8000u; ++hash)
         for (std::uint32_t index = db_hashTable[hash]; index;
              index = g_assetEntryPool[index].entry.nextHash)
@@ -615,16 +668,34 @@ void UnlinkAssetEntryFromHash(XAssetEntryPoolEntry *target)
     }
 }
 
-XAssetEntryPoolEntry *ReplaceClipMapSingleton(
+XAssetEntryPoolEntry *ReplaceSingleton(
     XAssetEntryPoolEntry *existing, const XAsset &asset,
-    std::uint32_t hash)
+    std::uint32_t hash, std::uint32_t ownerZoneIndex)
 {
     if (!existing) return nullptr;
 
-    // CLIPMAP and CLIPMAP_PVS are represented by the one engine-owned cm
-    // object. Never retain an override chain whose entries all alias that
-    // object: publishing another map would overwrite every entry's name and
-    // leave the hash table pointing at stale ownership.
+    SingletonPublicationBackup *backup = SingletonBackupForType(asset.type);
+    const bool deferRemoval = backup && g_publicationTransactionActive;
+    if (backup && g_publicationTransactionActive && !backup->active)
+    {
+        const std::size_t bodySize = AssetSize(asset.type);
+        iassert(bodySize && bodySize <= backup->body.size());
+        backup->active = true;
+        backup->type = asset.type;
+        backup->entryIndex = static_cast<std::uint32_t>(
+            existing - g_assetEntryPool);
+        backup->previousZoneIndex = existing->entry.zoneIndex;
+        backup->previousInUse = existing->entry.inuse;
+        backup->bodySize = bodySize;
+        std::memcpy(backup->body.data(), existing->entry.asset.header.data,
+            bodySize);
+    }
+
+    // Engine singleton pools retain one canonical object identity. Never keep
+    // another hash or override entry whose body aliases that same object.
+    // Defer the old singleton's global removal hook until transaction commit:
+    // a later malformed asset must be able to restore both the body and the
+    // active renderer/collision/world side effects without rebuilding them.
     UnlinkAssetEntryFromHash(existing);
     std::uint16_t overrideIndex = existing->entry.nextOverride;
     existing->entry.nextOverride = 0;
@@ -635,9 +706,10 @@ XAssetEntryPoolEntry *ReplaceClipMapSingleton(
         ReturnAssetEntry(overrideIndex);
         overrideIndex = nextOverride;
     }
-    RemoveAsset(existing->entry.asset.type, existing->entry.asset.header);
+    if (!deferRemoval)
+        RemoveAsset(existing->entry.asset.type, existing->entry.asset.header);
     CloneAsset(asset, existing->entry.asset);
-    existing->entry.zoneIndex = static_cast<std::uint8_t>(g_zoneIndex);
+    existing->entry.zoneIndex = static_cast<std::uint8_t>(ownerZoneIndex);
     existing->entry.inuse = false;
     existing->entry.nextHash = db_hashTable[hash];
     db_hashTable[hash] = static_cast<std::uint16_t>(
@@ -646,7 +718,8 @@ XAssetEntryPoolEntry *ReplaceClipMapSingleton(
 }
 
 XAssetEntryPoolEntry *DB_LinkXAssetEntry(
-    XAssetEntryPoolEntry *newEntry, std::int32_t allowOverride)
+    XAssetEntryPoolEntry *newEntry, std::int32_t allowOverride,
+    std::uint32_t ownerZoneIndex)
 {
     iassert(newEntry && !allowOverride);
     const XAsset &asset = newEntry->entry.asset;
@@ -660,22 +733,22 @@ XAssetEntryPoolEntry *DB_LinkXAssetEntry(
     if (isStubAsset)
         return existing ? existing : CreateDefaultEntry(asset.type, name);
     if (!existing) existing = FindAnySingletonEntry(asset.type);
-    if (IsClipMapSingleton(asset.type) && existing)
+    if (IsTransactionalSingleton(asset.type) && existing)
     {
-        if (existing->entry.zoneIndex == g_zoneIndex)
+        if (existing->entry.zoneIndex == ownerZoneIndex)
         {
             DB_RuntimeGeneratedFailure("publication/duplicate ClipMap zone");
             return nullptr;
         }
-        return ReplaceClipMapSingleton(existing, asset, hash);
+        return ReplaceSingleton(existing, asset, hash, ownerZoneIndex);
     }
-    if (existing && existing->entry.zoneIndex == g_zoneIndex)
+    if (existing && existing->entry.zoneIndex == ownerZoneIndex)
     {
         DB_RuntimeGeneratedFailure("publication/duplicate asset in one zone");
         return nullptr;
     }
     XAssetEntryPoolEntry *entry = AllocAssetEntry(asset.type,
-        static_cast<std::uint8_t>(g_zoneIndex));
+        static_cast<std::uint8_t>(ownerZoneIndex));
     if (!entry)
     {
         DB_RuntimeGeneratedFailure(g_freeAssetEntryHead
@@ -785,14 +858,8 @@ void __cdecl Mark_FxEffectDefAsset(FxEffectDef *fx)
 
 #undef WEB_MARK_ASSET
 
-void DB_UnloadXZonesForFreeFlags(int freeFlags)
+static void DB_UnloadXZones(const std::array<bool, ASSET_TYPE_COUNT> &releaseZone)
 {
-    if (!freeFlags) return;
-    std::array<bool, ASSET_TYPE_COUNT> releaseZone{};
-    for (std::uint32_t zoneIndex = 1; zoneIndex < ASSET_TYPE_COUNT;
-         ++zoneIndex)
-        releaseZone[zoneIndex] = g_zones[zoneIndex].name[0] != '\0' &&
-            (g_zones[zoneIndex].flags & freeFlags) != 0;
     const bool releasesEveryLoadedZone =
         ReleasesEveryLoadedZone(releaseZone);
 
@@ -918,6 +985,7 @@ void DB_UnloadXZonesForFreeFlags(int freeFlags)
     Sys_UnlockWrite(&db_hashCritSect);
 
     std::uint64_t releaseZoneMask = 0u;
+    DB_WebReleaseUnusedImageLoadDefs();
     for (std::uint32_t zoneIndex = 1; zoneIndex < releaseZone.size();
          ++zoneIndex)
     {
@@ -933,22 +1001,112 @@ void DB_UnloadXZonesForFreeFlags(int freeFlags)
     // common-zone owners without a second XAsset traversal. If no zone
     // survives, finish with the canonical whole-user shutdown as a safety net
     // for any legacy user-4 string that predates ownership registration.
-    if (releasesEveryLoadedZone)
+    if (releasesEveryLoadedZone && !DB_HasRegisteredStringOwnership())
         SL_ShutdownSystem(4u);
 
-    for (std::uint32_t zoneIndex = 1; zoneIndex < ASSET_TYPE_COUNT;
-         ++zoneIndex)
+    // Native DB_UnloadXAssetsMemoryForZone walks load order backwards. Zone
+    // indices can be reused, so use PMem's canonical allocation order rather
+    // than numeric zone order, independently for its two allocation ends.
+    const PhysicalMemory *memory = PMem_GetState();
+    for (std::uint32_t allocType = 0; allocType < 2; ++allocType)
+        for (int allocation = static_cast<int>(memory->prim[allocType].allocListCount) - 1;
+             allocation >= 0; --allocation)
+        {
+            const char *name = memory->prim[allocType].allocList[allocation].name;
+            if (!name) continue;
+            for (std::uint32_t zoneIndex = 1; zoneIndex < ASSET_TYPE_COUNT; ++zoneIndex)
+                if (releaseZone[zoneIndex] && name == g_zones[zoneIndex].name)
+                {
+                    PMem_Free(name, allocType);
+                    break;
+                }
+        }
+    for (std::uint32_t zoneIndex = 1; zoneIndex < ASSET_TYPE_COUNT; ++zoneIndex)
+        if (releaseZone[zoneIndex]) g_zones[zoneIndex] = XZone{};
+}
+
+void DB_UnloadXZonesForFreeFlags(int freeFlags)
+{
+    if (!freeFlags) return;
+    std::array<bool, ASSET_TYPE_COUNT> releaseZone{};
+    for (std::uint32_t zoneIndex = 1; zoneIndex < ASSET_TYPE_COUNT; ++zoneIndex)
+        releaseZone[zoneIndex] = g_zones[zoneIndex].name[0] != '\0' &&
+            (g_zones[zoneIndex].flags & freeFlags) != 0;
+    DB_UnloadXZones(releaseZone);
+}
+
+void DB_BeginXZonePublication()
+{
+    iassert(!g_publicationTransactionActive);
+    for (const SingletonPublicationBackup &backup :
+         g_singletonPublicationBackups)
+        iassert(!backup.active);
+    g_publicationTransactionActive = true;
+}
+
+void DB_CommitXZonePublication()
+{
+    iassert(g_publicationTransactionActive);
+    for (SingletonPublicationBackup &backup :
+         g_singletonPublicationBackups)
     {
-        if (!releaseZone[zoneIndex]) continue;
-        // Web DB_LoadXAssets is synchronous: all published headers and the
-        // renderer/audio removal hooks have been replaced before this point,
-        // and no worker retains a pointer into the zone block. This is the
-        // platform equivalent of native archive/free-unused/unarchive.
-        if (g_zones[zoneIndex].name[0])
-            PMem_Free(g_zones[zoneIndex].name,
-                static_cast<std::uint32_t>(g_zones[zoneIndex].allocType));
-        g_zones[zoneIndex] = XZone{};
+        if (!backup.active) continue;
+        iassert(backup.entryIndex > 0 && backup.entryIndex < 0x8000u);
+        XAssetEntryPoolEntry *entry = &g_assetEntryPool[backup.entryIndex];
+        iassert(entry->entry.asset.type == backup.type);
+        std::array<std::byte, sizeof(GfxWorld)> replacement{};
+        std::memcpy(replacement.data(), entry->entry.asset.header.data,
+            backup.bodySize);
+        std::memcpy(entry->entry.asset.header.data, backup.body.data(),
+            backup.bodySize);
+        RemoveAsset(entry->entry.asset.type, entry->entry.asset.header);
+        std::memcpy(entry->entry.asset.header.data, replacement.data(),
+            backup.bodySize);
     }
+    g_singletonPublicationBackups = {};
+    g_publicationTransactionActive = false;
+}
+
+void DB_RollbackXZonePublication(
+    const std::uint8_t *zoneIndices, std::size_t zoneCount)
+{
+    iassert(zoneIndices || !zoneCount);
+    Sys_LockWrite(&db_hashCritSect);
+    for (SingletonPublicationBackup &backup :
+         g_singletonPublicationBackups)
+    {
+        if (!backup.active) continue;
+        iassert(backup.entryIndex > 0 && backup.entryIndex < 0x8000u);
+        XAssetEntryPoolEntry *entry = &g_assetEntryPool[backup.entryIndex];
+        iassert(entry->entry.asset.type == backup.type);
+        UnlinkAssetEntryFromHash(entry);
+        std::memcpy(entry->entry.asset.header.data, backup.body.data(),
+            backup.bodySize);
+        entry->entry.zoneIndex = backup.previousZoneIndex;
+        entry->entry.inuse = backup.previousInUse;
+        entry->entry.nextOverride = 0;
+        const std::uint32_t hash = DB_HashForNameCanonical(
+            AssetName(entry->entry.asset), backup.type);
+        entry->entry.nextHash = db_hashTable[hash];
+        db_hashTable[hash] = static_cast<std::uint16_t>(backup.entryIndex);
+    }
+    Sys_UnlockWrite(&db_hashCritSect);
+    g_singletonPublicationBackups = {};
+    g_publicationTransactionActive = false;
+    std::array<bool, ASSET_TYPE_COUNT> releaseZone{};
+    for (std::size_t index = 0; index < zoneCount; ++index)
+    {
+        iassert(zoneIndices[index] > 0 && zoneIndices[index] < ASSET_TYPE_COUNT);
+        releaseZone[zoneIndices[index]] = true;
+    }
+    DB_UnloadXZones(releaseZone);
+}
+
+void DB_UnloadFailedXZone(std::uint32_t zoneIndex)
+{
+    iassert(zoneIndex > 0 && zoneIndex < ASSET_TYPE_COUNT);
+    const std::uint8_t failedZone = static_cast<std::uint8_t>(zoneIndex);
+    DB_RollbackXZonePublication(&failedZone, 1);
 }
 
 std::uint32_t DB_HashForNameCanonical(const char *name, XAssetType type)
@@ -994,7 +1152,8 @@ XAssetEntryPoolEntry *DB_FindXAssetEntryCanonical(XAssetType type, const char *n
     return nullptr;
 }
 
-XAssetHeader DB_AddXAsset(XAssetType type, XAssetHeader header)
+XAssetHeader AddXAssetForZone(
+    XAssetType type, XAssetHeader header, std::uint32_t ownerZoneIndex)
 {
     XAssetHeader result{};
     XAsset asset{type, header};
@@ -1005,7 +1164,8 @@ XAssetHeader DB_AddXAsset(XAssetType type, XAssetHeader header)
     XAssetEntryPoolEntry newEntry{};
     newEntry.entry.asset = asset;
     Sys_LockWrite(&db_hashCritSect);
-    XAssetEntryPoolEntry *entry = DB_LinkXAssetEntry(&newEntry, 0);
+    XAssetEntryPoolEntry *entry = DB_LinkXAssetEntry(
+        &newEntry, 0, ownerZoneIndex);
     Sys_UnlockWrite(&db_hashCritSect);
     if (!entry || DB_RuntimeGeneratedLoadFailed()) return result;
     result = entry->entry.asset.header;
@@ -1015,6 +1175,78 @@ XAssetHeader DB_AddXAsset(XAssetType type, XAssetHeader header)
         freeBefore, DB_GetFreeAssetEntryCount(),
         DB_HashForNameCanonical(name, type), entry->entry.zoneIndex);
     return result;
+}
+
+XAssetHeader DB_AddXAsset(XAssetType type, XAssetHeader header)
+{
+    return AddXAssetForZone(type, header, g_zoneIndex);
+}
+
+Material *DB_DuplicateMaterialAsset(Material *source, const char *name)
+{
+    if (!source || !name || !name[0]) return nullptr;
+    if (XAssetEntryPoolEntry *existing = DB_FindXAssetEntryCanonical(
+        ASSET_TYPE_MATERIAL, name))
+    {
+        existing->entry.inuse = true;
+        return existing->entry.asset.header.material;
+    }
+
+    const std::size_t stateBytes = source->stateBitsTable
+        ? sizeof(GfxStateBits) * source->stateBitsCount : 0u;
+    const std::size_t textureBytes = source->textureTable
+        ? sizeof(MaterialTextureDef) * source->textureCount : 0u;
+    const std::size_t constantBytes = source->constantTable
+        ? sizeof(MaterialConstantDef) * source->constantCount : 0u;
+    const std::size_t storageBytes = stateBytes + textureBytes + constantBytes;
+    std::byte *storage = storageBytes
+        ? static_cast<std::byte *>(::operator new(storageBytes, std::nothrow))
+        : nullptr;
+    if (storageBytes && !storage) return nullptr;
+
+    Material duplicate = *source;
+    duplicate.info.name = name;
+    std::byte *cursor = storage;
+    if (stateBytes)
+    {
+        duplicate.stateBitsTable = reinterpret_cast<GfxStateBits *>(cursor);
+        std::memcpy(cursor, source->stateBitsTable, stateBytes);
+        cursor += stateBytes;
+    }
+    if (textureBytes)
+    {
+        duplicate.textureTable = reinterpret_cast<MaterialTextureDef *>(cursor);
+        std::memcpy(cursor, source->textureTable, textureBytes);
+        cursor += textureBytes;
+    }
+    if (constantBytes)
+    {
+        duplicate.constantTable =
+            reinterpret_cast<MaterialConstantDef *>(cursor);
+        std::memcpy(cursor, source->constantTable, constantBytes);
+    }
+
+    Material *published = DB_AddXAsset(
+        ASSET_TYPE_MATERIAL, {&duplicate}).material;
+    if (!published)
+    {
+        ::operator delete(storage);
+        return nullptr;
+    }
+    const std::uint32_t nameValue = SL_GetString(name, 4u);
+    iassert(nameValue);
+    DB_RegisterStringZoneOwnership(nameValue, g_zoneIndex);
+    published->info.name = SL_ConvertToString(nameValue);
+    XAssetEntryPoolEntry *entry = DB_FindXAssetEntryCanonical(
+        ASSET_TYPE_MATERIAL, name);
+    iassert(entry && entry->entry.asset.header.material == published);
+    entry->entry.inuse = true;
+    const std::uint32_t poolIndex = DB_GetAssetPoolIndex(
+        ASSET_TYPE_MATERIAL, {published});
+    iassert(poolIndex < g_dynamicMaterialStorage.size() &&
+        !g_dynamicMaterialStorage[poolIndex]);
+    g_dynamicMaterialStorage[poolIndex] = storage;
+    return published;
 }
 
 int32_t __cdecl DB_GetAllXAssetOfType_FastFile(

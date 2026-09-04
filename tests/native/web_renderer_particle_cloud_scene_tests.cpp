@@ -1,10 +1,12 @@
 #include <web/web_renderer_particle_cloud_scene.h>
+#include <web/web_renderer_material_lookup.h>
 #include <gfx_d3d/gfx_image_types.h>
 #include <gfx_d3d/material_types.h>
 
 #include <array>
 #include <cassert>
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -164,6 +166,19 @@ void TestDeterministicLayoutAndMaterialData()
     for (const WebRendererSurfaceVertex &vertex : first.vertices)
         for (const float component : vertex.position)
             assert(std::isfinite(component));
+    for (std::size_t particle = 0u; particle < first.vertices.size();
+         particle += 4u)
+    {
+        float center[3]{};
+        for (unsigned component = 0u; component < 3u; ++component)
+            center[component] =
+                (first.vertices[particle].position[component] +
+                    first.vertices[particle + 3u].position[component]) * 0.5f;
+        for (unsigned corner = 0u; corner < 4u; ++corner)
+            for (unsigned component = 0u; component < 3u; ++component)
+                assert(std::fabs(first.vertices[particle + corner]
+                    .normal[component] - center[component]) < 0.00001f);
+    }
     assert(first.vertices.size() == second.vertices.size());
     assert(std::memcmp(first.vertices.data(), second.vertices.data(),
         first.vertices.size() * sizeof(WebRendererSurfaceVertex)) == 0);
@@ -181,6 +196,122 @@ void TestDeterministicLayoutAndMaterialData()
         &fixture.technique;
 }
 
+void TestNativeRandomizedCenterLayout()
+{
+    Fixture fixture;
+    fixture.submission.cloud.radius[0] = 0.0f;
+    fixture.submission.cloud.radius[1] = 0.0f;
+    std::srand(1u);
+    for (unsigned sample = 0u;
+         sample < WEB_RENDERER_PARTICLE_CLOUD_PARTICLES * 3u; ++sample)
+        (void)std::rand();
+    const int expectedNextSample = std::rand();
+    std::srand(1u);
+    WebRenderer_InitializeParticleCloudLayout();
+    assert(std::rand() == expectedNextSample);
+    WebRendererParticleCloudSceneCommand first;
+    assert(WebRenderer_BuildParticleCloudCommand(fixture.submission,
+        IdentityView(), first) == WebRendererParticleCloudSceneResult::Success);
+
+    for (std::uint32_t particleId = 0u;
+         particleId < WEB_RENDERER_PARTICLE_CLOUD_PARTICLES; ++particleId)
+    {
+        const std::uint32_t x = particleId >> 7u;
+        const std::uint32_t y = (particleId >> 4u) & 7u;
+        const std::uint32_t z = particleId & 15u;
+        const WebRendererSurfaceVertex &vertex = first.vertices[particleId * 4u];
+        const float minimum[3] = {
+            static_cast<float>(x) * 0.25f - 1.0f,
+            static_cast<float>(y) * 0.25f - 1.0f,
+            static_cast<float>(z) * 0.125f - 1.0f,
+        };
+        const float extent[3] = {0.25f, 0.25f, 0.125f};
+        for (unsigned component = 0u; component < 3u; ++component)
+        {
+            assert(vertex.normal[component] >= minimum[component]);
+            assert(vertex.normal[component] <=
+                minimum[component] + extent[component]);
+        }
+    }
+
+    std::srand(1u);
+    WebRenderer_InitializeParticleCloudLayout();
+    WebRendererParticleCloudSceneCommand repeated;
+    assert(WebRenderer_BuildParticleCloudCommand(fixture.submission,
+        IdentityView(), repeated) ==
+        WebRendererParticleCloudSceneResult::Success);
+    assert(std::memcmp(first.vertices.data(), repeated.vertices.data(),
+        first.vertices.size() * sizeof(WebRendererSurfaceVertex)) == 0);
+
+    WebRenderer_InitializeParticleCloudLayout();
+    WebRendererParticleCloudSceneCommand restarted;
+    assert(WebRenderer_BuildParticleCloudCommand(fixture.submission,
+        IdentityView(), restarted) ==
+        WebRendererParticleCloudSceneResult::Success);
+    assert(std::memcmp(first.vertices.data(), restarted.vertices.data(),
+        first.vertices.size() * sizeof(WebRendererSurfaceVertex)) != 0);
+}
+
+void TestAuthoredOutdoorCloudBindings()
+{
+    Material material{};
+    MaterialTechniqueSet direct{};
+    MaterialTechniqueSet remapped{};
+    MaterialTechnique technique{};
+    MaterialVertexShader vertexShader{};
+    MaterialPixelShader pixelShader{};
+    MaterialShaderArgument arguments[7]{};
+    vertexShader.name = "particle_cloud_outdoor.hlsl";
+    pixelShader.name = "particle_cloud_outdoor.hlsl";
+    technique.passCount = 1u;
+    technique.passArray[0].vertexShader = &vertexShader;
+    technique.passArray[0].pixelShader = &pixelShader;
+    technique.passArray[0].args = arguments;
+    technique.passArray[0].stableArgCount = 7u;
+    remapped.techniques[TECHNIQUE_EMISSIVE_INDEX] = &technique;
+    direct.remappedTechniqueSet = &remapped;
+    material.techniqueSet = &direct;
+
+    arguments[0].type = 2u;
+    arguments[0].dest = 0u;
+    arguments[0].u.nameHash = 0xa0ab1041u;
+    arguments[1].type = 4u;
+    arguments[1].dest = 4u;
+    arguments[1].u.codeSampler = static_cast<MaterialTextureSource>(17u);
+    constexpr unsigned destinations[4] = {4u, 8u, 16u, 24u};
+    constexpr unsigned indices[4] = {72u, 68u, 53u, 88u};
+    for (unsigned index = 0u; index < 4u; ++index)
+    {
+        arguments[index + 2u].type = 3u;
+        arguments[index + 2u].dest = destinations[index];
+        arguments[index + 2u].u.codeConst.index = indices[index];
+    }
+    arguments[6].type = 5u;
+    arguments[6].dest = 3u;
+    arguments[6].u.codeConst.index = 17u;
+
+    assert(WebRenderer_IsOutdoorParticleCloud(
+        &material, TECHNIQUE_EMISSIVE_INDEX));
+    for (unsigned index = 0u; index < 7u; ++index)
+    {
+        const unsigned destination = arguments[index].dest;
+        arguments[index].dest = 31u;
+        assert(!WebRenderer_IsOutdoorParticleCloud(
+            &material, TECHNIQUE_EMISSIVE_INDEX));
+        arguments[index].dest = destination;
+    }
+    technique.passCount = 2u;
+    assert(!WebRenderer_IsOutdoorParticleCloud(
+        &material, TECHNIQUE_EMISSIVE_INDEX));
+    technique.passCount = 1u;
+    pixelShader.name = "particle_cloud.hlsl";
+    assert(!WebRenderer_IsOutdoorParticleCloud(
+        &material, TECHNIQUE_EMISSIVE_INDEX));
+    assert(!WebRenderer_IsOutdoorParticleCloud(nullptr,
+        TECHNIQUE_EMISSIVE_INDEX));
+    assert(!WebRenderer_IsOutdoorParticleCloud(&material, 34u));
+}
+
 void TestDirectedAxisAndMultiCloudOrdering()
 {
     Fixture firstFixture;
@@ -188,7 +319,7 @@ void TestDirectedAxisAndMultiCloudOrdering()
     firstFixture.submission.cloud.radius[0] = 1.0f;
     firstFixture.submission.cloud.radius[1] = 4.0f;
     firstFixture.submission.cloud.endpos[0] = 0.0f;
-    firstFixture.submission.cloud.endpos[1] = 1.0f;
+    firstFixture.submission.cloud.endpos[1] = -1.0f;
     firstFixture.submission.cloud.radius[1] = 1.0f;
     WebRendererParticleCloudSceneCommand equalRadius;
     assert(WebRenderer_BuildParticleCloudCommand(firstFixture.submission,
@@ -219,8 +350,8 @@ void TestDirectedAxisAndMultiCloudOrdering()
     const auto ReconstructAxis = [](const WebRendererSurfaceVertex &first,
         const WebRendererSurfaceVertex &second, float out[3]) {
         for (std::size_t component = 0u; component < 3u; ++component)
-            out[component] = (second.position[component] -
-                first.position[component]) * 0.5f;
+            out[component] = second.position[component] -
+                first.position[component];
     };
     float directedAxis0[3]{};
     float directedAxis1[3]{};
@@ -230,7 +361,7 @@ void TestDirectedAxisAndMultiCloudOrdering()
     assert(std::fabs(directedAxis0[1]) < 0.00001f);
     assert(std::fabs(directedAxis0[2] + 1.0f) < 0.00001f);
     assert(std::fabs(directedAxis1[0]) < 0.00001f);
-    assert(std::fabs(directedAxis1[1] - 4.0f) < 0.00001f);
+    assert(std::fabs(directedAxis1[1] + 4.0f) < 0.00001f);
     assert(std::fabs(directedAxis1[2]) < 0.00001f);
 
     float equalAxis0[3]{};
@@ -240,12 +371,91 @@ void TestDirectedAxisAndMultiCloudOrdering()
     ReconstructAxis(equalRadius.vertices[0], equalRadius.vertices[1],
         equalAxis1);
     assert(std::fabs(equalAxis0[0]) < 0.00001f);
-    assert(std::fabs(equalAxis0[1] - 1.0f) < 0.00001f);
+    assert(std::fabs(equalAxis0[1] + 1.0f) < 0.00001f);
     assert(std::fabs(equalAxis0[2]) < 0.00001f);
     assert(std::fabs(equalAxis1[0]) < 0.00001f);
     assert(std::fabs(equalAxis1[1]) < 0.00001f);
     assert(std::fabs(equalAxis1[2] - 1.0f) < 0.00001f);
 
+}
+
+struct CloudAxisCase
+{
+    float radius[2];
+    float end[3];
+    float matrix[2][2];
+};
+
+// Expected constants verified against unmodified R_SetParticleCloudConstants
+// and RB_CreateParticleCloud2dAxis at 8be61213. The shipped cloud vertex
+// shader applies this matrix to (UV - 0.5), after the placement transform.
+constexpr CloudAxisCase cloudAxisCases[] = {
+    {{1, 1}, {0, -1, 0}, {{1, 0}, {0, 1}}},
+    {{2, 3}, {0, 0, 0}, {{2, 0}, {0, 3}}},
+    {{1, 4}, {0, -1, 0}, {{0, -1}, {4, 0}}},
+    {{1, 4}, {0, 1, 0}, {{1, 0}, {0, 4}}},
+    {{1, 4}, {0, 0, 1}, {{-1, 0}, {0, 4}}},
+    {{1, 4}, {0, 1, -1}, {{1, 0}, {0, 4}}},
+    {{1, 5}, {3, -4, 0}, {{0, -1}, {4, 0}}},
+    {{6, 5}, {3, -4, 0}, {{0, -6}, {6, 0}}},
+    {{1, 4}, {1, -0.0001f, 0}, {{1, 0}, {0, 4}}},
+    {{1, 4}, {0.001f, 0.001f, 0.001f}, {{1, 0}, {0, 4}}},
+    {{1, 5}, {0, 3, 4}, {{-0.8f, 0.6f}, {-3, 4}}},
+    {{1, 0}, {0, -1, 0}, {{1, 0}, {0, 0}}},
+};
+
+void TestNativeCloudAxisCases()
+{
+    std::uint32_t cornerChecks = 0u;
+    for (const auto &item : cloudAxisCases)
+    {
+        // Orthonormal native refdefs: identity, yawed, and pitched.
+        const float views[3][3][3] = {
+            {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
+            {{0, 1, 0}, {-1, 0, 0}, {0, 0, 1}},
+            {{0, 0, 1}, {0, 1, 0}, {-1, 0, 0}},
+        };
+        for (const auto &axes : views)
+        {
+            Fixture fixture;
+            auto &cloud = fixture.submission.cloud;
+            std::memcpy(cloud.radius, item.radius, sizeof(item.radius));
+            for (unsigned component = 0; component < 3; ++component)
+                for (unsigned row = 0; row < 3; ++row)
+                    cloud.endpos[component] += item.end[row] * axes[row][component];
+            // Billboard offsets are view-space lengths, independent of the
+            // cloud placement's rotation and scale (which affect centers).
+            cloud.placement.base.quat[2] = std::sqrt(0.5f);
+            cloud.placement.base.quat[3] = std::sqrt(0.5f);
+            cloud.placement.scale = 7.0f;
+            WebRendererParticleCloudView view{};
+            std::memcpy(view.axis, axes, sizeof(axes));
+            WebRendererParticleCloudSceneCommand command;
+            assert(WebRenderer_BuildParticleCloudCommand(fixture.submission,
+                view, command) == WebRendererParticleCloudSceneResult::Success);
+            for (std::size_t particle = 0; particle < command.vertices.size(); particle += 4u)
+            {
+                float center[3]{};
+                for (unsigned component = 0; component < 3; ++component)
+                    center[component] = (command.vertices[particle].position[component] +
+                        command.vertices[particle + 3].position[component]) * 0.5f;
+                for (unsigned corner = 0; corner < 4; ++corner)
+                {
+                    const auto &vertex = command.vertices[particle + corner];
+                    const float u = vertex.textureCoordinate[0] - 0.5f;
+                    const float v = vertex.textureCoordinate[1] - 0.5f;
+                    const float x = u * item.matrix[0][0] + v * item.matrix[1][0];
+                    const float y = u * item.matrix[0][1] + v * item.matrix[1][1];
+                    for (unsigned component = 0; component < 3; ++component)
+                        assert(std::fabs(vertex.position[component] - center[component] -
+                            (-axes[1][component] * x + axes[2][component] * y)) < 0.00001f);
+                    ++cornerChecks;
+                }
+            }
+        }
+    }
+    std::printf("native-cloud-axis cases=36 corners=%u signed-threshold=preserved placement=independent\n",
+        cornerChecks);
 }
 
 void TestFailureAtomicAppendAndCapacity()
@@ -338,6 +548,7 @@ void TestRepeatedAppendAndAllocationRollback()
         assert(batches[cloud + 1u].sourceKind == WebRendererSceneBatchKind::FxParticleCloud);
         assert(batches[cloud + 1u].baseImage == source.batches[0].baseImage);
         assert(batches[cloud + 1u].castsSunShadow == source.batches[0].castsSunShadow);
+        assert(batches[cloud + 1u].castsSpotShadow == source.batches[0].castsSpotShadow);
     }
 
     // Fail each successive allocation until an append succeeds, covering
@@ -373,9 +584,12 @@ void TestRepeatedAppendAndAllocationRollback()
 
 int main()
 {
+    TestAuthoredOutdoorCloudBindings();
     TestRetentionCopySlotsAndClear();
     TestDeterministicLayoutAndMaterialData();
+    TestNativeRandomizedCenterLayout();
     TestDirectedAxisAndMultiCloudOrdering();
+    TestNativeCloudAxisCases();
     TestFailureAtomicAppendAndCapacity();
     TestRepeatedAppendAndAllocationRollback();
     return 0;

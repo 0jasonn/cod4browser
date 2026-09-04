@@ -435,6 +435,36 @@ void TestWaveletArgbDecodeAndBounds()
     Require(image.width == expected.width && image.height == expected.height &&
             image.pixels == expected.pixels,
         "truncated wavelet failure leaves the destination unchanged");
+
+    // Native alpha/luminance Huffman symbol 1 encodes a zero coefficient.
+    // A constant pyramid needs no parent delta and no even/odd parity bit.
+    Bytes pyramid{100};
+    unsigned bit = 8;
+    const auto putBit = [&](unsigned value) {
+        if (bit / 8 == pyramid.size()) pyramid.push_back(0);
+        pyramid[bit / 8] |= value << (bit % 8);
+        ++bit;
+    };
+    for (unsigned edge : {2u, 4u, 8u, 16u, 32u}) {
+        putBit(0);
+        for (unsigned pixel = 0; pixel < edge * edge / 4; ++pixel) {
+            putBit(0);
+            putBit(1); putBit(1); putBit(1);
+        }
+    }
+    pyramid.resize(pyramid.size() + 2); // Native 16-bit Huffman lookahead.
+    Bytes large = MakeIwi(kisak::iwi::FORMAT_WAVELET_L8, 0, 32, 32, 1, pyramid.size());
+    std::copy(pyramid.begin(), pyramid.end(), large.begin() + kisak::iwi::HEADER_SIZE);
+    for (unsigned mip = 0; mip < 4; ++mip) {
+        RequireError(kisak::iwi::DecodeRgba8(large, image, mip), Error::None,
+            "wavelet authored mip selection");
+        Require(image.width == (32u >> mip) && image.height == (32u >> mip),
+            "wavelet selected dimensions");
+        for (unsigned pixel = 0; pixel < image.pixels.size(); pixel += 4)
+            Require(image.pixels[pixel] == 100 && image.pixels[pixel + 1] == 100 &&
+                image.pixels[pixel + 2] == 100 && image.pixels[pixel + 3] == 255,
+                "wavelet selected constant pyramid");
+    }
 }
 
 void TestRgb8DecodeAndMipOrder()
@@ -1180,6 +1210,52 @@ void TestErrorStrings()
     }
 }
 
+void TestPicmipSelection()
+{
+    const Bytes red = MakeDxtColorBlock(0xf800u, 0x07e0u, 0u);
+    const Bytes blue = MakeDxtColorBlock(0x001fu, 0x07e0u, 0u);
+    std::array<Bytes, 6> levels;
+    for (unsigned mip = 0; mip < levels.size(); ++mip) {
+        const unsigned size = std::max(32u >> mip, 1u);
+        const unsigned blocks = ((size + 3) / 4) * ((size + 3) / 4);
+        for (unsigned block = 0; block < blocks; ++block)
+            Append(levels[mip], mip == 1 ? red : blue);
+    }
+    Bytes iwiPayload, loadDef;
+    for (const auto &level : levels) Append(loadDef, level);
+    for (auto it = levels.rbegin(); it != levels.rend(); ++it) Append(iwiPayload, *it);
+    const Bytes iwi = MakeDxtIwi(kisak::iwi::FORMAT_DXT1, 32, 32, iwiPayload, 0);
+    Rgba8Image image;
+    Rgba8Layout layout;
+    RequireError(kisak::iwi::DecodeRgba8(iwi, image, 1), Error::None, "selected IWI mip");
+    Require(image.width == 16 && image.height == 16 && image.pixels[0] == 255 &&
+        image.pixels[2] == 0, "IWI picmip selects authored red, not resampled blue");
+    RequireError(kisak::iwi::InspectRgba8(iwi, layout, 1), Error::None, "selected IWI layout");
+    Require(layout.width == 16 && layout.baseDecodedByteLength == 1024,
+        "IWI admission accounts for selected mip");
+    RequireError(kisak::iwi::DecodeLoadDefRgba8(kisak::iwi::LOADDEF_FORMAT_DXT1,
+        0, 32, 32, 1, loadDef, image, 1), Error::None, "selected native loaddef mip");
+    Require(image.width == 16 && image.mipPixels.size() == 4 && image.pixels[0] == 255,
+        "native loaddef retains selected authored chain");
+    RequireError(kisak::iwi::InspectLoadDefRgba8(kisak::iwi::LOADDEF_FORMAT_DXT1,
+        0, 32, 32, 1, loadDef, layout, 1), Error::None, "selected loaddef layout");
+    Require(layout.mipCount == 5 && layout.totalDecodedByteLength == 1364,
+        "loaddef admission accounts for selected chain");
+    RequireError(kisak::iwi::DecodeLoadDefRgba8(kisak::iwi::LOADDEF_FORMAT_DXT1,
+        kisak::iwi::FLAG_NO_PICMIP, 32, 32, 1, loadDef, image, 3), Error::None, "no picmip");
+    Require(image.width == 32 && image.pixels[2] == 255, "native no-picmip flag wins");
+    const auto preserved = image.pixels;
+    loadDef.pop_back();
+    RequireError(kisak::iwi::DecodeLoadDefRgba8(kisak::iwi::LOADDEF_FORMAT_DXT1,
+        0, 32, 32, 1, loadDef, image, 1), Error::DecodeInvalidLayout, "truncated full chain");
+    Require(image.pixels == preserved, "failed selection cannot publish partial pixels");
+    Bytes odd(44, 255);
+    RequireError(kisak::iwi::DecodeLoadDefRgba8(kisak::iwi::LOADDEF_FORMAT_A8R8G8B8,
+        0, 3, 3, 1, odd, image, 1), Error::None, "non-power-of-two native chain");
+    Require(image.width == 1 && image.mipPixels.size() == 1,
+        "selected non-power-of-two chain keeps native repeated terminal level");
+}
+
 class Runner
 {
 public:
@@ -1219,6 +1295,7 @@ int main()
 {
     Runner runner;
     runner.Run("valid header and formats", TestHappyPathAndSupportedFormats);
+    runner.Run("native picmip selection and atomic rejection", TestPicmipSelection);
     runner.Run("truncation and atomic failure", TestTruncationAndAtomicFailure);
     runner.Run("header validation", TestHeaderValidation);
     runner.Run("file-size validation", TestFileSizeValidation);

@@ -23,6 +23,7 @@
 namespace
 {
 constexpr std::size_t LOG_BUFFER_SIZE = 4096;
+constexpr std::size_t CLIPBOARD_CAPACITY = 4096;
 
 double g_timeBase = 0.0;
 bool g_timeBaseInitialized = false;
@@ -35,6 +36,7 @@ void *g_frameUserData = nullptr;
 enum class WebInputEventType : std::uint8_t
 {
     Key,
+    Character,
     MouseMove,
 };
 
@@ -59,6 +61,8 @@ bool g_mouseReceiptReported = false;
 bool g_mouseButtonReceiptReported = false;
 bool g_mouseModePublished = false;
 bool g_absoluteMouseMode = false;
+std::array<char, CLIPBOARD_CAPACITY> g_clipboardText{};
+std::size_t g_clipboardLength = 0u;
 
 bool QueueInputEvent(const WebInputEvent &event)
 {
@@ -307,9 +311,12 @@ void Sys_VirtualRelease(void *memory)
 
 char *Sys_GetClipboardData()
 {
-    // Clipboard reads require an asynchronous browser permission boundary.
-    // The synchronous engine API therefore reports no clipboard contents.
-    return nullptr;
+    if (g_clipboardLength == 0u)
+        return nullptr;
+    auto *copy = static_cast<char *>(Z_Malloc(
+        static_cast<int>(g_clipboardLength + 1u), "Sys_GetClipboardData", 10));
+    std::memcpy(copy, g_clipboardText.data(), g_clipboardLength + 1u);
+    return copy;
 }
 
 EM_JS(int, Web_SetClipboardData, (const char *text), {
@@ -323,6 +330,23 @@ EM_JS(int, Web_SetClipboardData, (const char *text), {
 int __cdecl Sys_SetClipboardData(const char *text)
 {
     return text ? Web_SetClipboardData(text) : 0;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_SetClipboardText(
+    const unsigned char *text, int length)
+{
+    if (!text || length <= 0 ||
+        static_cast<std::size_t>(length) >= CLIPBOARD_CAPACITY)
+        return 0;
+    for (int index = 0; index < length; ++index)
+    {
+        if (text[index] < 32u || text[index] == 127u)
+            return 0;
+    }
+    std::memcpy(g_clipboardText.data(), text, static_cast<std::size_t>(length));
+    g_clipboardText[static_cast<std::size_t>(length)] = '\0';
+    g_clipboardLength = static_cast<std::size_t>(length);
+    return 1;
 }
 
 void IN_Frame()
@@ -361,6 +385,10 @@ void IN_Frame()
             }
             CL_KeyEvent(0, event.value, event.value2, event.time);
         }
+        else if (event.type == WebInputEventType::Character)
+        {
+            CL_CharEvent(0, event.value);
+        }
         else
         {
             if (!g_mouseReceiptReported)
@@ -391,6 +419,13 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_QueueKeyEvent(int key, int down)
         0,
         Sys_Milliseconds(),
     }) ? 1 : 0;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_QueueCharEvent(int character)
+{
+    if (character <= 0 || character > 255)
+        return 0;
+    return QueueInputEvent({ WebInputEventType::Character, character }) ? 1 : 0;
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_QueueMouseMove(

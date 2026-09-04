@@ -5,6 +5,7 @@
 #include <qcommon/qcommon.h>
 #include <gfx_d3d/r_dpvs_core.h>
 #include <gfx_d3d/r_dvars.h>
+#include <DynEntity/DynEntity_client.h>
 #endif
 #include <gfx_d3d/gfx_world_types.h>
 #include <web/web_renderer_static_model_scene.h>
@@ -36,6 +37,7 @@ void __cdecl Vec3UnpackUnitVec(PackedUnitVec, float *out)
 
 #if KISAK_TEST_DPVS_CORE
 // Host services only; visibility, portal geometry and packing execute production code.
+clipMap_t cm{}; // Unused debug-collision owner in native BoxOnPlaneSide's TU.
 void MyAssertHandler(const char *file, int line, int, const char *format, ...)
 {
     std::fprintf(stderr, "%s:%d: ", file, line);
@@ -84,6 +86,89 @@ const dvar_t *r_portalMinRecurseDepth = &minRecurse;
 
 namespace
 {
+#if KISAK_TEST_DPVS_CORE
+struct ObservedDpvsCell
+{
+    std::uint32_t cellIndex = UINT32_MAX;
+    std::uint8_t planeCount = 0u;
+    std::uint8_t frustumPlaneCount = 0u;
+    std::array<DpvsPlane, DPVS_PORTAL_MAX_PLANES> planes{};
+};
+
+struct DpvsObserverCapture
+{
+    const GfxCell *cells = nullptr;
+    std::array<ObservedDpvsCell, 8> records{};
+    std::uint32_t count = 0u;
+    bool overflowed = false;
+};
+
+void CaptureDpvsCell(void *user, const GfxCell *cell,
+    const DpvsPlane *planes, unsigned char planeCount,
+    unsigned char frustumPlaneCount)
+{
+    auto &capture = *static_cast<DpvsObserverCapture *>(user);
+    if (!capture.cells || !cell || planeCount > DPVS_PORTAL_MAX_PLANES ||
+        (planeCount && !planes) || capture.count >= capture.records.size())
+    {
+        capture.overflowed = true;
+        return;
+    }
+    ObservedDpvsCell &record = capture.records[capture.count++];
+    record.cellIndex = static_cast<std::uint32_t>(cell - capture.cells);
+    record.planeCount = planeCount;
+    record.frustumPlaneCount = frustumPlaneCount;
+    std::copy_n(planes, planeCount, record.planes.begin());
+}
+#endif
+
+void TestTransientLightMaskUsesPackedBoundsAndCanonicalCameraIds()
+{
+    std::array<WebRendererStaticModelInstanceDesc, 4> instances{};
+    const unsigned ids[]{4, 0, 3, 1};
+    for (unsigned i = 0; i < 4; ++i) instances[i].canonicalInstanceIndex = ids[i];
+    const std::array<WebRendererStaticModelShadowBounds, 4> bounds{{
+        {{-1,-1,2},{1,1,3}}, {{99,-1,2},{101,1,3}},
+        {{-1,-1,6},{1,1,7}}, {{-1,-1,4},{1,1,5}}}};
+    std::array<std::uint8_t, 5> camera{1,1,0,0,1};
+    std::array<std::uint8_t, 4> mask{};
+    GfxLight light{};
+    light.type = 3;
+    light.radius = 10;
+    const auto build = [&](float nearOffset = 0.0f) {
+        return WebRenderer_BuildStaticModelLightVisibility(
+            instances, bounds, camera, true, light, nearOffset, mask);
+    };
+    assert(build() && (mask == std::array<std::uint8_t,4>{1,0,0,1}));
+    light.type = 2;
+    light.dir[2] = -1;
+    light.cosHalfFovOuter = std::sqrt(0.5f);
+    assert(build(3) && (mask == std::array<std::uint8_t,4>{0,0,0,1}));
+    // A light-space box alone admits both a camera-hidden model and one
+    // rejected by the native shifted near plane. Transient spot casters must
+    // use this receiver mask; sun cascades retain their independent selection.
+    const std::array<float, 16> broadPartition{
+        0.1f,0,0,0, 0,0.1f,0,0, 0,0,0.1f,0, 0,0,0,1};
+    assert(WebRenderer_StaticModelIntersectsShadowPartition(bounds[0], broadPartition));
+    assert(WebRenderer_StaticModelIntersectsShadowPartition(bounds[2], broadPartition));
+    assert(mask[0] == 0u && mask[2] == 0u && mask[3] == 1u);
+    light.origin[0] = 100;
+    assert(build() && (mask == std::array<std::uint8_t,4>{0,1,0,0}));
+    light.origin[0] = 0;
+    camera[3] = 1;
+    assert(build() && (mask == std::array<std::uint8_t,4>{1,0,1,1}));
+    // Failed rebuilds cannot leave the previous light's eligible slots behind.
+    instances[1].canonicalInstanceIndex = 99;
+    assert(!build() && (mask == std::array<std::uint8_t,4>{}));
+    instances[1].canonicalInstanceIndex = 0;
+    light.cosHalfFovOuter = std::numeric_limits<float>::quiet_NaN();
+    assert(!build() && (mask == std::array<std::uint8_t,4>{}));
+    light.cosHalfFovOuter = std::sqrt(0.5f);
+    assert(!WebRenderer_BuildStaticModelLightVisibility(
+        instances, std::span(bounds).first(3), camera, true, light, 0, mask));
+}
+
+constexpr std::uint32_t TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX = 2u;
 constexpr std::uint32_t TECHNIQUE_LIT_INDEX = 7u;
 constexpr std::uint32_t TECHNIQUE_LIT_INSTANCED_INDEX = 14u;
 constexpr std::uint32_t TECHNIQUE_LIT_INSTANCED_SUN_INDEX = 15u;
@@ -140,6 +225,7 @@ struct Fixture
         material.textureTable = &texture;
         material.techniqueSet = &techniqueSet;
         material.stateBitsEntry[TECHNIQUE_LIT_INDEX] = 0u;
+        material.stateBitsEntry[TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX] = 0u;
         material.stateBitsCount = 1u;
         material.stateBitsTable = stateBits;
 
@@ -195,6 +281,7 @@ void TestCanonicalInstancesShareOneMaterialSurfaceBatch()
     assert(batch.instanceOffset == 0u && batch.instanceCount == 2u);
     assert(batch.lodIndex == 0u);
     assert(batch.draw.sourceKind == WebRendererSceneBatchKind::StaticXModel);
+    assert(batch.draw.dynamicLightSurfType == 2u);
     assert(batch.draw.materialIdentity == &fixture.material);
     assert(batch.draw.modelIdentity == &fixture.model);
     assert(std::strcmp(batch.draw.materialName, "model/material") == 0);
@@ -203,6 +290,7 @@ void TestCanonicalInstancesShareOneMaterialSurfaceBatch()
     assert(batch.draw.samplerState == 0x42u);
     assert(batch.draw.technique == WebRendererWorldTechnique::BaseTexture);
     assert(batch.draw.castsSunShadow);
+    assert(batch.draw.castsSpotShadow);
     assert(batch.draw.lightingMode ==
         WebRendererWorldLightingMode::ModelLightGrid);
     assert(batch.draw.firstInstanceIndex == 0u);
@@ -223,6 +311,14 @@ void TestCanonicalInstancesShareOneMaterialSurfaceBatch()
     assert(std::fabs(command.vertices[0].textureCoordinate[0] -
         64.0f / 255.0f) < 0.0001f);
     assert(command.vertices[0].normal[2] == 1.0f);
+
+    fixture.material.info.gameFlags = 0u;
+    WebRendererStaticModelSceneCommand spotOnlyCommand;
+    assert(WebRenderer_BuildStaticModelSceneCommand(
+        fixture.world, spotOnlyCommand) ==
+        WebRendererStaticModelSceneResult::Success);
+    assert(!spotOnlyCommand.batches[0].draw.castsSunShadow);
+    assert(spotOnlyCommand.batches[0].draw.castsSpotShadow);
 }
 
 void TestSunShadowPartitionUsesCanonicalBounds()
@@ -247,6 +343,23 @@ void TestSunShadowPartitionUsesCanonicalBounds()
     bounds.mins[0] = 1.0f;
     bounds.maxs[0] = 1.5f;
     assert(WebRenderer_StaticModelIntersectsShadowPartition(bounds, identity));
+}
+
+void TestDeformedSiblingSelectsNativeSkinnedReceiverType()
+{
+    Fixture fixture;
+    std::array<XSurface, 2> surfaces{fixture.surface, fixture.surface};
+    surfaces[1].deformed = true;
+    Material *materials[2]{&fixture.material, &fixture.material};
+    fixture.model.numsurfs = 2u;
+    fixture.model.surfs = surfaces.data();
+    fixture.model.materialHandles = materials;
+    fixture.model.lodInfo[0].numsurfs = 2u;
+    WebRendererStaticModelSceneCommand command;
+    assert(WebRenderer_BuildStaticModelSceneCommand(fixture.world, command) ==
+        WebRendererStaticModelSceneResult::Success);
+    assert(command.batches.size() == 1u);
+    assert(command.batches[0].draw.dynamicLightSurfType == 5u);
 }
 
 void TestSpotShadowVisibilityUsesAuthoredCanonicalMembership()
@@ -389,12 +502,15 @@ void TestCanonicalCameraVisibilityAndIndependentPacking()
     std::array<GfxCell, 2> cells{};
     std::array<GfxAabbTree, 2> trees{};
     std::uint16_t cellNode[2]{1, 0}; // canonical BSP leaf: camera cell 0
+    cplane_s unusedPlane{};
     std::uint16_t cell0Models[2]{0, 2}, cell1Models[1]{1};
     std::uint8_t cameraMask[3]{0x55, 0x55, 0x55}; // loaded bytes aren't completion
     std::uint8_t shadowMask[3]{7, 8, 9}, surfaceMask[1]{11};
     fixture.world.cells = cells.data();
     fixture.world.dpvsPlanes.cellCount = 2;
     fixture.world.dpvsPlanes.nodes = cellNode;
+    fixture.world.dpvsPlanes.planes = &unusedPlane;
+    fixture.world.planeCount = 1;
     fixture.world.dpvs.smodelVisData[0] = cameraMask;
     fixture.world.dpvs.smodelVisData[1] = shadowMask;
     fixture.world.dpvs.surfaceVisData[0] = surfaceMask;
@@ -448,10 +564,311 @@ void TestCanonicalCameraVisibilityAndIndependentPacking()
         MatrixInverse44(view.viewProjectionMatrix.m, view.inverseViewProjectionMatrix.m);
     };
     setView(false);
-    assert(R_ComputeStaticCameraVisibility(fixture.world, dpvs, view, 0, 0));
+    DpvsObserverCapture capture{};
+    capture.cells = cells.data();
+    assert(R_ComputeStaticCameraVisibility(fixture.world, dpvs, view, 0, 0,
+        false, CaptureDpvsCell, &capture));
     assert(cameraMask[0] == 1 && cameraMask[1] == 1 && cameraMask[2] == 0);
     assert((dpvs.cellVisibleBits[0] & 3u) == 3u);
     assert(!portal.writable.isQueued && !portal.writable.isAncestor && !portal.writable.hullPoints);
+    assert(!capture.overflowed && capture.count >= 2u);
+    const auto observedCell = [&](std::uint32_t cellIndex)
+        -> const ObservedDpvsCell * {
+        for (std::uint32_t index = 0u; index < capture.count; ++index)
+            if (capture.records[index].cellIndex == cellIndex)
+                return &capture.records[index];
+        return nullptr;
+    };
+    const ObservedDpvsCell *const cameraCell = observedCell(0u);
+    const ObservedDpvsCell *const portalCell = observedCell(1u);
+    assert(cameraCell && portalCell);
+    assert(cameraCell->planeCount == cameraCell->frustumPlaneCount);
+    // R_VisitPortals supplies a fresh clipped set with a zero camera prefix.
+    assert(portalCell->frustumPlaneCount == 0u);
+    assert(portalCell->planeCount > portalCell->frustumPlaneCount);
+    const float throughPortal[3]{30, 0, 0};
+    const float besidePortal[3]{30, 20, 0};
+    assert(!kisak::dpvs::CullSphere(throughPortal, 1,
+        portalCell->planes.data(), portalCell->planeCount));
+    assert(!kisak::dpvs::CullSphere(besidePortal, 1,
+        cameraCell->planes.data(), cameraCell->planeCount));
+    assert(kisak::dpvs::CullSphere(besidePortal, 1,
+        portalCell->planes.data(), portalCell->planeCount));
+    const float cellBoundsMins[3]{9.0f, -1.0f, -1.0f};
+    const float cellBoundsMaxs[3]{11.0f, 1.0f, 1.0f};
+    assert(R_BoundsTouchVisibleCell(fixture.world, dpvs.cellVisibleBits,
+        cellBoundsMins, cellBoundsMaxs));
+    dpvs.cellVisibleBits[0] = 2u;
+    assert(!R_BoundsTouchVisibleCell(fixture.world, dpvs.cellVisibleBits,
+        cellBoundsMins, cellBoundsMaxs));
+    dpvs.cellVisibleBits[0] = 3u;
+    // Native R_SortNodes_r packs internal nodes into two words, leaves into one.
+    std::array<std::uint16_t, 4> splitNodes{3u, 3u, 1u, 2u};
+    cplane_s splitPlane{};
+    splitPlane.normal[0] = 1.0f;
+    splitPlane.type = 0u;
+    splitPlane.dist = 0.0f;
+    GfxWorld splitWorld = fixture.world;
+    splitWorld.dpvsPlanes.nodes = reinterpret_cast<std::uint16_t *>(
+        splitNodes.data());
+    splitWorld.nodeCount = 4;
+    splitWorld.dpvsPlanes.planes = &splitPlane;
+    splitWorld.planeCount = 1;
+    const std::uint32_t frontCellOnly[1]{1u};
+    const float frontMins[3]{1.0f, -1.0f, -1.0f};
+    const float frontMaxs[3]{2.0f, 1.0f, 1.0f};
+    const float backMins[3]{-2.0f, -1.0f, -1.0f};
+    const float backMaxs[3]{-1.0f, 1.0f, 1.0f};
+    const float splitMins[3]{-1.0f, -1.0f, -1.0f};
+    const float splitMaxs[3]{1.0f, 1.0f, 1.0f};
+    assert(R_BoundsTouchVisibleCell(splitWorld, frontCellOnly,
+        frontMins, frontMaxs));
+    assert(!R_BoundsTouchVisibleCell(splitWorld, frontCellOnly,
+        backMins, backMaxs));
+    assert(R_BoundsTouchVisibleCell(splitWorld, frontCellOnly,
+        splitMins, splitMaxs));
+
+    // Post-pose native R_BoundsInCell must reject a box that moved out of
+    // the linked cell even when it remains inside the camera/portal planes.
+    bool inside = false;
+    assert(R_QueryBoundsInCell(splitWorld, 0u, frontMins, frontMaxs, inside) && inside);
+    assert(R_QueryBoundsInCell(splitWorld, 1u, frontMins, frontMaxs, inside) && !inside);
+    assert(R_QueryBoundsInCell(splitWorld, 0u, backMins, backMaxs, inside) && !inside);
+    assert(R_QueryBoundsInCell(splitWorld, 1u, backMins, backMaxs, inside) && inside);
+    for (unsigned cell = 0; cell < 2u; ++cell)
+        assert(R_QueryBoundsInCell(splitWorld, cell, splitMins, splitMaxs, inside) && inside);
+    // Invalid traversals leave the result untouched, not an ordinary miss.
+    splitNodes[1] = 1000u;
+    assert(!R_QueryBoundsInCell(splitWorld, 1u, backMins, backMaxs, inside));
+    assert(inside);
+    splitNodes[1] = 3u;
+    assert(!R_QueryBoundsInCell(splitWorld, 2u, frontMins, frontMaxs, inside));
+    assert(inside);
+
+    // The browser link helpers preserve native sceneEntCellBits ownership:
+    // DObjs occupy the first cell bank, brushes the second, and relinking one
+    // entity clears its old kind/cells only after a valid BSP walk completes.
+    std::array<std::uint32_t, 2u * 2u * 128u> sceneEntCellBits{};
+    splitWorld.dpvsPlanes.sceneEntCellBits = sceneEntCellBits.data();
+    constexpr std::uint32_t entityCount = 64u;
+    constexpr std::uint32_t entityNumber = 5u;
+    assert(R_ClearSceneEntityCellLinks(splitWorld, 0u, entityCount));
+    assert(R_LinkSceneEntityBoundsToCells(splitWorld, 0u, entityCount,
+        entityNumber, DpvsSceneEntityKind::DObj, frontMins, frontMaxs) ==
+        DpvsSceneEntityCellLink::Linked);
+    assert(R_QuerySceneEntityCellLink(splitWorld, 0u, entityCount,
+        entityNumber, 0u, DpvsSceneEntityKind::DObj) ==
+        DpvsSceneEntityCellLink::Linked);
+    assert(R_QuerySceneEntityCellLink(splitWorld, 0u, entityCount,
+        entityNumber, 1u, DpvsSceneEntityKind::DObj) ==
+        DpvsSceneEntityCellLink::Unlinked);
+    assert(R_LinkSceneEntityBoundsToCells(splitWorld, 0u, entityCount,
+        entityNumber, DpvsSceneEntityKind::DObj, splitMins, splitMaxs) ==
+        DpvsSceneEntityCellLink::Linked);
+    assert(R_QuerySceneEntityCellLink(splitWorld, 0u, entityCount,
+        entityNumber, 0u, DpvsSceneEntityKind::DObj) ==
+        DpvsSceneEntityCellLink::Linked);
+    assert(R_QuerySceneEntityCellLink(splitWorld, 0u, entityCount,
+        entityNumber, 1u, DpvsSceneEntityKind::DObj) ==
+        DpvsSceneEntityCellLink::Linked);
+    assert(R_LinkSceneEntityBoundsToCells(splitWorld, 0u, entityCount,
+        entityNumber, DpvsSceneEntityKind::Brush, frontMins, frontMaxs) ==
+        DpvsSceneEntityCellLink::Linked);
+    assert(R_QuerySceneEntityCellLink(splitWorld, 0u, entityCount,
+        entityNumber, 0u, DpvsSceneEntityKind::DObj) ==
+        DpvsSceneEntityCellLink::Unlinked);
+    assert(R_QuerySceneEntityCellLink(splitWorld, 0u, entityCount,
+        entityNumber, 0u, DpvsSceneEntityKind::Brush) ==
+        DpvsSceneEntityCellLink::Linked);
+    const auto linkedSnapshot = sceneEntCellBits;
+    splitWorld.nodeCount = 1;
+    assert(R_LinkSceneEntityBoundsToCells(splitWorld, 0u, entityCount,
+        entityNumber, DpvsSceneEntityKind::DObj, backMins, backMaxs) ==
+        DpvsSceneEntityCellLink::Unavailable);
+    assert(sceneEntCellBits == linkedSnapshot);
+    splitWorld.nodeCount = 4;
+    assert(R_UnlinkSceneEntityFromCells(splitWorld, 0u, entityCount,
+        entityNumber));
+    assert(R_QuerySceneEntityCellLink(splitWorld, 0u, entityCount,
+        entityNumber, 0u, DpvsSceneEntityKind::Brush) ==
+        DpvsSceneEntityCellLink::Unlinked);
+    assert(R_QuerySceneEntityCellLink(splitWorld, 0u, entityCount,
+        entityCount, 0u, DpvsSceneEntityKind::DObj) ==
+        DpvsSceneEntityCellLink::Unavailable);
+    // Client offsets share each 128-word cell row without clearing siblings.
+    assert(R_LinkSceneEntityBoundsToCells(splitWorld, 1u, entityCount,
+        63u, DpvsSceneEntityKind::DObj, backMins, backMaxs) ==
+        DpvsSceneEntityCellLink::Linked);
+    assert(sceneEntCellBits[128u + 2u + 1u] == 1u);
+    assert(R_ClearSceneEntityCellLinks(splitWorld, 0u, entityCount));
+    assert(sceneEntCellBits[128u + 2u + 1u] == 1u);
+    assert(R_ClearSceneEntityCellLinks(splitWorld, 1u, entityCount));
+    assert(sceneEntCellBits[128u + 2u + 1u] == 0u);
+    const std::uint16_t solidLeaf = 0u;
+    splitWorld.dpvsPlanes.nodes = const_cast<std::uint16_t *>(&solidLeaf);
+    splitWorld.nodeCount = 1;
+    assert(R_LinkSceneEntityBoundsToCells(splitWorld, 0u, entityCount,
+        entityNumber, DpvsSceneEntityKind::DObj, frontMins, frontMaxs) ==
+        DpvsSceneEntityCellLink::Unlinked);
+    splitWorld.dpvsPlanes.nodes = splitNodes.data();
+    splitWorld.nodeCount = 4;
+    // Native DynEntity banks have separate word strides and MSB-first IDs.
+    // Exercise IDs across a word boundary and exact queued-portal planes.
+    std::array<std::uint32_t, 4> dynModelBits{}, dynBrushBits{};
+    std::array<std::uint8_t, 64> dynModelVisible{}, dynBrushVisible{};
+    std::array<DynEntityPose, 33> dynPoses{};
+    std::array<DynEntityDef, 33> dynDefinitions{};
+    std::array<GfxBrushModel, 3> dynBrushModels{};
+    splitWorld.models = dynBrushModels.data();
+    splitWorld.modelCount = dynBrushModels.size();
+    splitWorld.dpvsDyn.dynEntCellBits[0] = dynModelBits.data();
+    splitWorld.dpvsDyn.dynEntCellBits[1] = dynBrushBits.data();
+    for (unsigned kind = 0; kind < 2u; ++kind)
+    {
+        splitWorld.dpvsDyn.dynEntClientCount[kind] = 33u;
+        splitWorld.dpvsDyn.dynEntClientWordCount[kind] = 2u;
+        assert(R_ClearDynEntityCellLinks(splitWorld, kind));
+        assert(R_LinkDynEntityBoundsToCells(splitWorld, kind, 0u, frontMins, frontMaxs));
+        assert(R_LinkDynEntityBoundsToCells(splitWorld, kind, 32u, frontMins, frontMaxs));
+    }
+    assert(dynModelBits[0] == 0x80000000u && dynModelBits[1] == 0x80000000u);
+    assert(dynModelBits[2] == 0u && dynModelBits[3] == 0u);
+    assert(R_LinkDynEntityBoundsToCells(splitWorld, 0u, 32u, backMins, backMaxs));
+    assert(dynModelBits[1] == 0u && dynModelBits[3] == 0x80000000u);
+    assert(R_LinkDynEntityBoundsToCells(splitWorld, 0u, 32u, splitMins, splitMaxs));
+    assert(dynModelBits[1] == 0x80000000u && dynModelBits[3] == 0x80000000u);
+    const auto savedDynBits = dynModelBits;
+    splitNodes[1] = 1000u;
+    assert(!R_LinkDynEntityBoundsToCells(splitWorld, 0u, 32u, backMins, backMaxs));
+    assert(dynModelBits == savedDynBits);
+    splitNodes[1] = 3u;
+    assert(R_UnlinkDynEntityFromCells(splitWorld, 0u, 32u));
+    assert(dynModelBits[1] == 0u && dynModelBits[3] == 0u);
+    assert(dynBrushBits[1] == 0x80000000u);
+    assert(R_LinkDynEntityBoundsToCells(splitWorld, 0u, 32u, frontMins, frontMaxs));
+    for (unsigned id : {0u, 32u})
+    {
+        const float *origin = id == 0u ? besidePortal : throughPortal;
+        std::copy_n(origin, 3u, dynPoses[id].pose.origin);
+        dynPoses[id].radius = 1.0f;
+        dynDefinitions[id].brushModel = id == 0u ? 1u : 2u;
+        auto &brush = dynBrushModels[dynDefinitions[id].brushModel];
+        for (unsigned axis = 0; axis < 3u; ++axis)
+        {
+            brush.writable.mins[axis] = origin[axis] - 1.0f;
+            brush.writable.maxs[axis] = origin[axis] + 1.0f;
+        }
+    }
+    const auto cull = [&](unsigned kind, unsigned cell, const DpvsPlane *planes, int count) {
+        return R_CullDynEntityCell(splitWorld, kind, cell, dynPoses.data(),
+            dynDefinitions.data(), planes, count,
+            kind == 0u ? dynModelVisible.data() : dynBrushVisible.data());
+    };
+    for (unsigned kind = 0; kind < 2u; ++kind)
+    {
+        auto &visible = kind == 0u ? dynModelVisible : dynBrushVisible;
+        assert(cull(kind, 1u, nullptr, 0));
+        assert(visible[0] == 0u && visible[32] == 0u); // Wrong cell.
+        assert(cull(kind, 0u, portalCell->planes.data(), portalCell->planeCount));
+        assert(visible[0] == 0u && visible[32] == 1u);
+        assert(cull(kind, 0u, nullptr, 0)); // A second, open portal path.
+        assert(visible[0] == 1u && visible[32] == 1u);
+        assert(cull(kind, 0u, portalCell->planes.data(), portalCell->planeCount));
+        assert(visible[0] == 1u); // Rejection cannot undo another path's admission.
+        visible.fill(0u);
+        DpvsPlane outside{{1.0f, 0.0f, 0.0f, -31.0f}, {}};
+        assert(cull(kind, 0u, &outside, 1));
+        assert(visible[0] == 0u && visible[32] == 0u); // Full camera prefix; tangent.
+        assert(!cull(kind, 0u, nullptr, 1));
+    }
+    // Padding bits are not entity IDs and cannot index the canonical arrays.
+    dynModelBits[1] |= 1u;
+    assert(!cull(0u, 0u, nullptr, 0));
+    dynModelBits[1] &= ~1u;
+    dynBrushVisible.fill(0u);
+    dynDefinitions[0].brushModel = 3u;
+    assert(!cull(1u, 0u, nullptr, 0));
+    dynDefinitions[0].brushModel = 1u;
+    splitWorld.dpvsDyn.dynEntClientWordCount[0] = 1u;
+    assert(!R_DynEntityCellLayoutAvailable(splitWorld, 0u));
+    splitWorld.dpvsDyn.dynEntClientWordCount[0] = 2u;
+    assert(R_ClearDynEntityCellLinks(splitWorld, 0u));
+    assert(std::all_of(dynModelBits.begin(), dynModelBits.end(), [](auto word) { return word == 0u; }));
+    assert(dynBrushBits[0] == 0x80000000u);
+
+    // Different bank strides and an independent scalar oracle for the
+    // original native sphere/box loops, including their arithmetic order.
+    splitWorld.dpvsDyn.dynEntClientCount[0] = 1u;
+    splitWorld.dpvsDyn.dynEntClientCount[1] = 1u;
+    splitWorld.dpvsDyn.dynEntClientWordCount[1] = 1u;
+    dynBrushBits.fill(0x12345678u);
+    assert(R_ClearDynEntityCellLinks(splitWorld, 1u));
+    assert(dynBrushBits[0] == 0u && dynBrushBits[1] == 0u);
+    assert(dynBrushBits[2] == 0x12345678u); // Only this bank's two cells.
+    assert(R_LinkDynEntityBoundsToCells(splitWorld, 0u, 0u, frontMins, frontMaxs));
+    assert(R_LinkDynEntityBoundsToCells(splitWorld, 1u, 0u, frontMins, frontMaxs));
+    std::uint32_t randomState = 0x39177u;
+    const auto randomFloat = [&]() {
+        randomState = randomState * 1664525u + 1013904223u;
+        return (static_cast<int>(randomState >> 16u) - 32768) / 1024.0f;
+    };
+    for (unsigned sample = 0; sample < 1024u; ++sample)
+    {
+        std::array<DpvsPlane, 3> planes{};
+        for (auto &plane : planes)
+            for (float &coefficient : plane.coeffs) coefficient = randomFloat();
+        for (unsigned axis = 0; axis < 3u; ++axis)
+        {
+            const float origin = randomFloat();
+            dynPoses[0].pose.origin[axis] = origin;
+            dynBrushModels[1].writable.mins[axis] = origin - 2.0f;
+            dynBrushModels[1].writable.maxs[axis] = origin + 2.0f;
+        }
+        for (unsigned kind = 0; kind < 2u; ++kind)
+        {
+            auto &visible = kind == 0u ? dynModelVisible : dynBrushVisible;
+            visible.fill(0u);
+            bool expected = true;
+            for (const auto &plane : planes)
+            {
+                const float *origin = dynPoses[0].pose.origin;
+                float distance = (plane.coeffs[0] * origin[0] +
+                    plane.coeffs[1] * origin[1]) + plane.coeffs[2] * origin[2];
+                distance = (distance + plane.coeffs[3]) + dynPoses[0].radius;
+                if (kind == 1u)
+                {
+                    const auto &bounds = dynBrushModels[1].writable;
+                    const auto extreme = [&](unsigned axis) {
+                        return plane.coeffs[axis] >= 0.0f ? bounds.maxs[axis] : bounds.mins[axis];
+                    };
+                    distance = ((extreme(0) * plane.coeffs[0] + plane.coeffs[3]) +
+                        extreme(1) * plane.coeffs[1]) + extreme(2) * plane.coeffs[2];
+                }
+                if (distance <= 0.0f) expected = false;
+            }
+            assert(cull(kind, 0u, planes.data(), planes.size()));
+            assert((visible[0] != 0u) == expected);
+        }
+    }
+
+    const DpvsPlane cameraPlane{{1.0f, 0.0f, 0.0f, -5.0f}, {}};
+    const float visibleSphere[3]{10.0f, 0.0f, 0.0f};
+    const float culledSphere[3]{3.0f, 0.0f, 0.0f};
+    const float tangentSphere[3]{4.0f, 0.0f, 0.0f};
+    assert(!kisak::dpvs::CullSphere(
+        visibleSphere, 1.0f, &cameraPlane, 1));
+    assert(kisak::dpvs::CullSphere(
+        culledSphere, 1.0f, &cameraPlane, 1));
+    assert(kisak::dpvs::CullSphere(
+        tangentSphere, 1.0f, &cameraPlane, 1));
+    const float visibleBoxMins[3]{6.0f, -1.0f, -1.0f};
+    const float visibleBoxMaxs[3]{8.0f, 1.0f, 1.0f};
+    const float culledBoxMins[3]{2.0f, -1.0f, -1.0f};
+    const float culledBoxMaxs[3]{5.0f, 1.0f, 1.0f};
+    assert(!kisak::dpvs::CullBox(
+        visibleBoxMins, visibleBoxMaxs, &cameraPlane, 1));
+    assert(kisak::dpvs::CullBox(
+        culledBoxMins, culledBoxMaxs, &cameraPlane, 1));
 
     const auto shadowSource = command.instances;
     std::array<WebRendererStaticModelInstanceDesc, 6> packed{};
@@ -909,10 +1326,12 @@ void TestMalformedIndexAndPlacementFailAtomically()
 
 int main()
 {
+    TestTransientLightMaskUsesPackedBoundsAndCanonicalCameraIds();
 #if KISAK_TEST_DPVS_CORE
     TestCanonicalCameraVisibilityAndIndependentPacking();
 #endif
     TestCanonicalInstancesShareOneMaterialSurfaceBatch();
+    TestDeformedSiblingSelectsNativeSkinnedReceiverType();
     TestSunShadowPartitionUsesCanonicalBounds();
     TestSpotShadowVisibilityUsesAuthoredCanonicalMembership();
     TestEveryAuthoredLodIsRetainedForRuntimeSelection();

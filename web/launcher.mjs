@@ -4,6 +4,7 @@ import { createInputControllerCore } from "./input_controller_core.mjs";
 import { createBrowserQuit } from "./browser_quit.mjs";
 
 const canvas = document.querySelector("#game-canvas");
+const gameTextInput = document.querySelector("#game-text-input");
 const runtimeLabel = document.querySelector("#runtime-label");
 const runtimeMessage = document.querySelector("#runtime-message");
 const bootLog = document.querySelector("#boot-log");
@@ -335,6 +336,7 @@ function installBrowserInput()
 {
     inputController = createInputControllerCore({
         canvas,
+        textInput: gameTextInput,
         sendInput(event) {
             const result = runtime.module?.input?.(event);
             if (event.type === "key") runtime.input.keyEvents += 1;

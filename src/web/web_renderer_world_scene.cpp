@@ -2,6 +2,7 @@
 #include <web/web_renderer_material_lookup.h>
 #include <web/web_frame_profile.h>
 #include <gfx_d3d/gfx_world_types.h>
+#include <gfx_d3d/r_dynamiclights_core.h>
 
 #include <algorithm>
 #include <array>
@@ -468,6 +469,17 @@ WebRendererWorldBatchDesc MakeBatch(
     }
     batch.stateBits[0] = technique.stateBits[0];
     batch.stateBits[1] = technique.stateBits[1];
+    if (surface.material && surface.material->stateBitsTable)
+    {
+        const std::uint8_t entry = surface.material->stateBitsEntry[
+            TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX];
+        if (entry != 0xffu && entry < surface.material->stateBitsCount)
+        {
+            batch.castsSpotShadow = true;
+            batch.shadowStateBits0 =
+                surface.material->stateBitsTable[entry].loadBits[0];
+        }
+    }
     const bool hasCanonicalLightmap = technique.identityName &&
         technique.type >= TECHNIQUE_LIT_INDEX &&
         technique.type <= 13u &&
@@ -509,7 +521,9 @@ WebRendererWorldBatchDesc MakeBatch(
             batch.falloffBeginColor) &&
         WebRenderer_CopyMaterialConstant(surface.material, FALLOFF_END_COLOR_HASH,
             batch.falloffEndColor);
-    if (canonicalWater)
+    if (WebRenderer_IsCinematicMaterial(surface.material, technique.type))
+        batch.technique = WebRendererWorldTechnique::Cinematic;
+    else if (canonicalWater)
         batch.technique = WebRendererWorldTechnique::WaterLitSun;
     else if (!technique.identityName &&
         (requestedTechniqueType == TECHNIQUE_LIT_SPOT_INDEX ||
@@ -545,7 +559,10 @@ WebRendererWorldBatchDesc MakeBatch(
         batch.technique = WebRendererWorldTechnique::BaseTexture;
     batch.castsSunShadow = world.dpvs.surfaceCastsSunShadow &&
         (world.dpvs.surfaceCastsSunShadow[surfaceIndex >> 5u] &
-            (1u << (surfaceIndex & 31u))) != 0u;
+            (1u << (surfaceIndex & 31u))) != 0u &&
+        batch.castsSpotShadow;
+    if (batch.technique == WebRendererWorldTechnique::Cinematic)
+        batch.samplerState = batch.normalSamplerState = batch.detailSamplerState = batch.specularSamplerState = 0x62;
     return batch;
 }
 
@@ -589,7 +606,8 @@ bool BatchMatches(
             sizeof(batch.falloffBeginColor)) == 0 &&
         std::memcmp(batch.falloffEndColor, candidate.falloffEndColor,
             sizeof(batch.falloffEndColor)) == 0 &&
-        batch.castsSunShadow == candidate.castsSunShadow;
+        batch.castsSunShadow == candidate.castsSunShadow &&
+        batch.castsSpotShadow == candidate.castsSpotShadow;
 }
 
 } // namespace
@@ -664,6 +682,17 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
     }
 
     WebRendererWorldSceneCommand replacement;
+    if (world.outdoorImage)
+    {
+        for (const auto &row : world.outdoorLookupMatrix)
+            for (const float component : row)
+                if (!std::isfinite(component))
+                    return WebRendererWorldSceneResult::InvalidWorld;
+        replacement.outdoorImage = world.outdoorImage;
+        std::memcpy(replacement.outdoorLookupMatrix,
+            world.outdoorLookupMatrix,
+            sizeof(replacement.outdoorLookupMatrix));
+    }
     try
     {
         struct EmittedSurfaceRange
@@ -924,26 +953,33 @@ bool WebRenderer_ValidateWorldSurfaceRanges(
     return nextIndex == surface.indexCount && batchIndex == surface.batchCount;
 }
 
-bool WebRenderer_BuildWorldCameraRanges(
+static bool BuildWorldLightRanges(
     const std::vector<WebRendererWorldSurfaceRange> &surfaces,
     const std::uint8_t *visibility, std::uint32_t visibilityCount,
-    bool visibilityComputed,
-    std::vector<WebRendererWorldCameraRange> &destination)
+    std::vector<WebRendererWorldCameraRange> &destination,
+    const GfxLight *receiverLight, float spotNearPlaneOffset)
 {
     destination.clear();
-    if (!visibilityComputed || (visibilityCount && !visibility)) return false;
+    float planes[6][4]{};
+    if (receiverLight && !kisak::dynamic_lights::ReceiverPlanes(
+            *receiverLight, spotNearPlaneOffset, planes)) return false;
     try
     {
         // Keep capacity across views; no geometry copy or GPU upload is needed.
         destination.reserve(surfaces.size());
         for (const auto &surface : surfaces)
         {
-            if (surface.canonicalSurfaceIndex >= visibilityCount)
+            if (visibility && surface.canonicalSurfaceIndex >= visibilityCount)
             {
                 destination.clear();
                 return false;
             }
-            if (visibility[surface.canonicalSurfaceIndex] != 1u) continue;
+            if (visibility && visibility[surface.canonicalSurfaceIndex] != 1u) continue;
+            if (receiverLight && !(receiverLight->type == 2
+                ? kisak::dynamic_lights::BoxInPlanes(planes, surface.mins, surface.maxs)
+                : kisak::dynamic_lights::BoxInSphere(receiverLight->origin,
+                    receiverLight->radius * receiverLight->radius, surface.mins, surface.maxs)))
+                continue;
             if (!destination.empty() &&
                 destination.back().batchIndex == surface.batchIndex &&
                 destination.back().firstIndex + destination.back().indexCount == surface.firstIndex)
@@ -1152,6 +1188,7 @@ WebRendererWorldSceneResult WebRenderer_BuildBrushModelSceneCommand(
                 candidate.indexCount = indexCount;
                 candidate.sourceKind =
                     WebRendererSceneBatchKind::DynamicBModel;
+                candidate.dynamicLightSurfType = 6u;
                 candidate.modelName = "<brush-model>";
                 // Native R_AddBModelSurfaces admits a moving brush to the
                 // sun pass by its build-shadowmap technique. The world-only
@@ -1163,6 +1200,7 @@ WebRendererWorldSceneResult WebRenderer_BuildBrushModelSceneCommand(
                 candidate.castsSunShadow = shadowSet &&
                     shadowSet->techniques[
                         TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX];
+                candidate.castsSpotShadow = candidate.castsSunShadow;
                 if (candidate.castsSunShadow && surface.material &&
                     surface.material->stateBitsTable)
                 {
@@ -1223,12 +1261,59 @@ WebRendererWorldSceneResult WebRenderer_BuildBrushModelSceneCommand(
     return WebRendererWorldSceneResult::Success;
 }
 
+bool WebRenderer_CopyBrushReceiverBounds(const GfxBrushModel &model,
+    WebRendererBrushModelInstanceDesc &instance) noexcept
+{
+    for (unsigned axis = 0; axis < 3; ++axis)
+        if (!std::isfinite(model.writable.mins[axis]) || !std::isfinite(model.writable.maxs[axis]) ||
+            model.writable.mins[axis] > model.writable.maxs[axis]) return false;
+    std::copy_n(model.writable.mins, 3, instance.receiverMins);
+    std::copy_n(model.writable.maxs, 3, instance.receiverMaxs);
+    return true;
+}
+
+bool WebRenderer_BuildWorldCameraRanges(
+    const std::vector<WebRendererWorldSurfaceRange> &surfaces,
+    const std::uint8_t *visibility, std::uint32_t visibilityCount,
+    bool visibilityComputed,
+    std::vector<WebRendererWorldCameraRange> &destination,
+    const GfxLight *receiverLight, float spotNearPlaneOffset)
+{
+    destination.clear();
+    if (!visibilityComputed || (!surfaces.empty() && !visibility)) return false;
+    return BuildWorldLightRanges(surfaces, visibility, visibilityCount,
+        destination, receiverLight, spotNearPlaneOffset);
+}
+
+bool WebRenderer_BuildWorldTransientSpotShadowRanges(
+    const std::vector<WebRendererWorldSurfaceRange> &surfaces,
+    const GfxLight &light, float spotNearPlaneOffset,
+    std::vector<WebRendererWorldShadowRange> &destination)
+{
+    destination.clear();
+    if (light.type != 2u) return false;
+    return BuildWorldLightRanges(surfaces, nullptr, 0u, destination,
+        &light, spotNearPlaneOffset);
+}
+
+bool WebRenderer_BrushReceivesLight(const WebRendererBrushModelInstanceDesc &instance,
+    const GfxLight &light, const float spotPlanes[6][4]) noexcept
+{
+    return light.type == 2
+        ? kisak::dynamic_lights::BoxInPlanes(spotPlanes, instance.receiverMins, instance.receiverMaxs)
+        : kisak::dynamic_lights::BoxInSphere(light.origin, light.radius * light.radius,
+            instance.receiverMins, instance.receiverMaxs);
+}
+
 bool WebRenderer_BrushPlacementIsFinite(
     const WebRendererBrushModelInstanceDesc &instance,
     const std::vector<WebRendererSurfaceVertex> &vertices,
     float maximumCoordinate) noexcept
 {
     if (!Finite3(instance.origin)) return false;
+    if (!Finite3(instance.receiverMins) || !Finite3(instance.receiverMaxs)) return false;
+    for (unsigned axis = 0; axis < 3; ++axis)
+        if (instance.receiverMins[axis] > instance.receiverMaxs[axis]) return false;
     for (const auto &axis : instance.axis)
         if (!Finite3(axis)) return false;
     bool checkVertices = false;

@@ -84,13 +84,83 @@ closed boundaries. The site adds only `licenses.txt` to its closed file list.
 This feature therefore has working playback evidence but does not pass the
 current release-size gate.
 
+## Device-clock update, 2026-09-03
+
+The device-clock update replaces proxy wall-time completion with
+validated Web Audio feedback. Native/Wasm tests, 93 Node tests, ten browser
+smoke cases, 53 synthetic remainder cases (eight retail skips), and 44 product
+cases pass on the current working tree. Served Chromium 149.0.7827.55 verifies
+static and three-buffer PCM under delayed delivery and actual AudioContext
+suspension. Source generations and absolute queue ordinals protect reuse and
+unqueuing; at most one feedback snapshot is in flight.
+
+Movie video now follows cumulative played PCM across unqueue operations. The
+decoder retains one pending video frame so its preceding audio can be scheduled
+before presentation. Completion waits for the video and audio durations; silent
+movies and failed audio devices retain a wall-time fallback.
+
+The owned diagnostic Killhouse movie passes pause/resume, completion and native
+skip, held audio delivery, actual AudioContext suspension/resume and WebGL
+context loss/restoration. Blocking the page thread for 900 ms, then allowing
+150 ms of recovery, advances presented video by 367 ms instead of jumping over
+unplayed audio. The final diagnostic movie completes in 38,436.205 ms including
+its native pause; production completes in 37,517.610 ms. The recovered SAS
+frame was inspected. An earlier diagnostic run stopped immediately
+after the unlock click reached native input behind the movie command. Both
+fixtures now wait for that input receipt before starting a skippable movie;
+timing and playback assertions are unchanged. Current private logs and the
+production frame/evidence are under `build/parity-audit/audio-clock-*` and
+`build/parity-audit/movie-clock-*`.
+Current artifact identity and the unchanged failing byte budgets are recorded
+in [architecture](../web-architecture.md#build-products).
+
+## Planar material update, 2026-09-03
+
+The canonical startup material inventory exposes `cinematic` with single-pass
+techniques 0, 4, 24 and 25, shader `cinematic.hlsl`, and pixel samplers 4–7
+bound to native code images 22–25. The backend now translates that observed
+family, preserving the canonical material and state. It binds Y/Cr/Cb/A at
+draw time for world/brush, static-model, DObj and UI batches. The fullscreen
+caller uses the canonical `cinematic` material; its former private RGBA
+material and CPU nearest-chroma expansion are removed.
+
+Each plane is a retained R8 image. Synthetic served Chromium pixels verify
+limited/full-range conversion, vertex tint, explicit/default alpha, odd-sized
+planes with padded strides, linear chroma interpolation, frame replacement,
+malformed stride/dimension rejection before publication, and inactive defaults.
+A test first reproduced missing textures after recovery without a 2D scene;
+texture restoration now runs independently of UI geometry. The same test
+uploads a new frame while lost and verifies its restored pixels. Repeated idle
+stop calls preserve the same texture object instead of reallocating four black
+textures every game frame. Native/Wasm tests verify canonical world selection,
+remapped technique sets, material/state identity, absent texture tables, and
+rejection of missing/incorrect sampler bindings or unsupported shader/pass
+families.
+
+The owned diagnostic movie again passes completion/pause/resume, delayed audio,
+actual audio suspension, the blocked page thread, context restoration and native
+skip. It completes in 38,519.620 ms including the 700-ms pause; video advances
+433 ms across the 900-ms page stall plus 150-ms recovery window. The final
+production movie completes in 37,584.395 ms. Recovered and production SAS
+frames were visually inspected. Release production/diagnostic builds and
+runtime-prefix checks, 36 native, 37 Wasm, 93 Node, static, ten smoke,
+54 remainder (eight retail skips), and 44 product cases pass. One concurrent
+build attempt collided in the shared FFmpeg header-install directory; building
+the variants sequentially passed without changing the build scripts or guards.
+The material inventory
+and synthetic world-state/backend checks are not an authored in-world TV scene
+comparison. Retail media and logs stay under ignored `build/parity-audit/`;
+no shader bytecode or movie content is added to fixtures. Current byte budgets
+and artifact identity are in [architecture](../web-architecture.md#build-products).
+
 ## Limits
 
 This is movie playback, not authored campaign completion or Steam parity.
 The first campaign chapter remains unverified end to end. No mission ledger
 entry is promoted. Human listening and three-way audiovisual comparison have
-not been performed. Synchronization during stalls/suspension, audio-context
-recovery, context loss during movies, loop qualification, in-world cinematic
-materials, and authored mission transitions remain open. The first adapter
+not been performed. Long/background stalls, device replacement, audio-tail
+layouts, loop qualification, authored in-world cinematic surfaces, and mission
+transitions remain open. The first adapter
 supports the owned PC installation's zero/one-track movies; surround-track
-mixing is rejected. Nearest chroma sampling can differ from native filtering.
+mixing is rejected. Planar filtering is implemented; native/Steam colour-edge
+comparison remains unverified.

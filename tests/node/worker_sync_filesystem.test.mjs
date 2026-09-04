@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 
-import { createWorkerSyncFilesystem } from "../../web/worker_sync_filesystem.mjs";
+import { createWorkerSyncFilesystem, mountWorkerFilesystem } from "../../web/worker_sync_filesystem.mjs";
 
 const IMPORT_ID = "filesystem-ordering-tests";
 const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
@@ -616,4 +616,33 @@ test("reload rebuilds byte and directory accounting from durable state", async (
     const verifier = await mount(root);
     assert.equal(readText(verifier, "profiles/config.cfg"), "ok");
     assert.equal(readText(verifier, "saves/slot.dat"), "four");
+});
+
+
+test("native mount reports successful synchronous reads and releases its observer", async () => {
+    for (const failRuntime of [false, true]) {
+        const root = await createRoot();
+        await writeDurableText(root, "startup.cfg", "abcdef");
+        const harness = await mount(root);
+        const progress = [];
+        const operation = mountWorkerFilesystem(harness.filesystem,
+            { importId: IMPORT_ID, files: [] }, () => {
+                const descriptor = harness.io.open("startup.cfg");
+                assert.equal(harness.io.read(descriptor, 512, 2), 2);
+                assert.equal(harness.io.read(descriptor, 512, 8), 4);
+                assert.equal(harness.io.read(descriptor, 512, 8), 0); // EOF is not progress.
+                assert.equal(harness.io.read(-1, 512, 8), -1);
+                harness.io.close(descriptor);
+                if (failRuntime) throw new Error("native bootstrap failed");
+            }, item => progress.push(item));
+        if (failRuntime) await assert.rejects(operation, error => error.code === "FILESYSTEM_OWNERSHIP_UNKNOWN");
+        else await operation;
+        assert.deepEqual(progress.filter(item => item.phase === "runtime-loading").map(item => item.bytesProcessed),
+            [0, 2, 6]);
+        const completedCount = progress.length;
+        if (failRuntime) await remount(root, harness);
+        assert.equal(readText(harness, "startup.cfg"), "abcdef");
+        assert.equal(progress.length, completedCount);
+        await harness.filesystem.flushAndUnmount();
+    }
 });

@@ -24,14 +24,47 @@ test("browser reload, melee, and wheel input pulses cross the host boundary", as
     await expect.poll(() => page.evaluate(() => globalThis.__browserInputEvents))
         .toEqual([
         { type: "key", key: 0x72, down: true },
+        { type: "char", character: 0x72 },
         { type: "key", key: 0x72, down: false },
         { type: "key", key: 0x76, down: true },
+        { type: "char", character: 0x76 },
         { type: "key", key: 0x76, down: false },
         { type: "key", key: 0xCE, down: true },
         { type: "key", key: 0xCE, down: false },
         { type: "key", key: 0xCD, down: true },
         { type: "key", key: 0xCD, down: false },
         ]);
+});
+
+test("the game canvas activates an editable IME sink while preserving pointer lock", async ({ page }) => {
+    await page.addInitScript(() => {
+        globalThis.__KISAKCOD_WORKER_TEST_CONFIG__ = { observeInput: true };
+    });
+    await page.goto("/");
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state))
+        .toBe("running");
+    await page.evaluate(() => {
+        globalThis.__browserInputEvents = [];
+        globalThis.addEventListener("kisakcod:input", (event) => {
+            globalThis.__browserInputEvents.push(event.detail);
+        });
+    });
+    await page.locator("#game-canvas").click({ position: { x: 12, y: 12 } });
+    await expect.poll(() => page.evaluate(() => ({
+        active: document.activeElement?.id,
+        locked: document.pointerLockElement?.id,
+    }))).toEqual({ active: "game-text-input", locked: "game-canvas" });
+
+    await page.evaluate(() => document.querySelector("#game-text-input").dispatchEvent(
+        new CompositionEvent("compositionend", {
+            data: "e\u0301\u20ac\u{1f600}", bubbles: true,
+        })));
+    await expect.poll(() => page.evaluate(() => globalThis.__browserInputEvents
+        .filter((event) => event.type === "char"))).toEqual([
+        { type: "char", character: 233 },
+        { type: "char", character: 128 },
+    ]);
+    expect(await page.locator("#game-text-input").inputValue()).toBe("");
 });
 
 test("Escape leaves pointer lock and reaches the engine as one key press", async ({ page }) => {

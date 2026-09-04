@@ -10,59 +10,6 @@ uint32_t __cdecl Image_CubemapFace(uint32_t faceIndex)
     return faceIndex;
 }
 
-void __cdecl Image_GetPicmip(const GfxImage *image, Picmip *picmip)
-{
-    iassert(image);
-    iassert(picmip);
-
-    if (image->noPicmip)
-        *picmip = NULL;
-    else
-        Image_PicmipForSemantic(image->semantic, picmip);
-}
-
-void __cdecl Image_PicmipForSemantic(uint8_t semantic, Picmip *picmip)
-{
-    int picmipUsed; // [esp+4h] [ebp-4h]
-
-    switch (semantic)
-    {
-    case 0u:
-    case 1u:
-        goto $LN7_78;
-    case 2u:
-    case 0xBu:
-        picmipUsed = imageGlobals.picmip;
-        goto LABEL_8;
-    case 5u:
-        picmipUsed = imageGlobals.picmipBump;
-        goto LABEL_8;
-    case 8u:
-        picmipUsed = imageGlobals.picmipSpec;
-    LABEL_8:
-        picmip->platform[1] = 2;
-        if (picmipUsed >= 0)
-        {
-            if (picmipUsed > 3)
-                picmipUsed = 3;
-        }
-        else
-        {
-            picmipUsed = 0;
-        }
-        picmip->platform[0] = picmipUsed;
-        break;
-    default:
-        if (!alwaysfails)
-        {
-            MyAssertHandler(".\\r_image.cpp", 644, 1, va("unhandled case: %d", semantic));
-        }
-    $LN7_78:
-        *picmip = 0;
-        break;
-    }
-}
-
 int __cdecl Image_SourceBytesPerSlice_PC(_D3DFORMAT format, int width, int height)
 {
     switch (format)

@@ -11,7 +11,8 @@ path through `Com_Init`, database/XFile loading, ClipMap, server/game, local
 client/cgame, renderer-frontend commands, and actual WebGL2 world frames. Clean
 historical local retail evidence at `f5229806` and `247980a6` covers six maps:
 Killhouse and Airplane are `PLAYABLE`; CargoShip, Blackout, Hunted, and Bog A
-are `FUNCTIONAL`; 16 discovered direct SP zones remain `UNTESTED`. This is
+are `FUNCTIONAL`. Scoutsniper and AC130 have separate `RENDERS` evidence;
+14 discovered direct SP zones remain `UNTESTED`. This is
 still an incomplete port, not a generally compatible COD4 release.
 
 Historical Airplane evidence at `da1e592c` records save/reload continuity:
@@ -29,7 +30,22 @@ No proprietary COD4 data, Steam components, CD keys, Bink/Miles binaries, or
 retail-derived test fixtures belong in this repository or its artifacts.
 Users select files from a legally owned installation; the launcher validates
 an allowlisted single-player profile and stores it privately in browser
-storage. Automated tests use generated synthetic data only.
+storage. Committed fixtures are synthetic; optional local checks use owned files.
+
+Inherited Git history and local checkouts still contain legacy native SDKs.
+Browser source releases must use `git archive` from the same committed revision
+as the binary, with the versioned `.gitattributes` exclusions, and pass
+`python tools/check_source_archive.py <archive.zip>`. For example:
+
+```powershell
+git archive --format=zip --output=build/kisakcod-web-source.zip HEAD
+python tools/check_source_archive.py build/kisakcod-web-source.zip
+```
+
+The archive excludes Bink/Miles/Steam SDK directories and native binaries;
+local native reference dependencies are retained in the checkout. A raw clone
+or an archive of an older revision is not a sanitized browser source release.
+The generated flat browser site has its own exact file/export and size gate.
 
 ## Architecture
 

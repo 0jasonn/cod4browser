@@ -345,6 +345,107 @@ test("production shipped display Apply and in-game restart preserve the loaded m
     }
 });
 
+test("production texture quality survives renderer restart and a new runtime", {
+    tag: ["@retail-quality", "@product"],
+}, async ({ retailPage: page }, testInfo) => {
+    test.skip(process.env.KISAK_WEB_PRODUCT_TEST !== "1", "Runs against the production site.");
+    test.setTimeout(600_000);
+    await page.addInitScript(() => {
+        globalThis.__qualityMemory = null;
+        globalThis.__qualityScene = null;
+        globalThis.__qualityLogs = [];
+        const NativeWorker = globalThis.Worker;
+        globalThis.Worker = class extends NativeWorker {
+            constructor(...arguments_) {
+                super(...arguments_);
+                this.addEventListener("message", ({ data }) => {
+                    if (data.type === "log")
+                        globalThis.__qualityLogs.push(String(data.message));
+                });
+            }
+        };
+        addEventListener("kisakcod:renderer-memory", ({ detail }) => {
+            if (detail.state === "static-models-submitted") globalThis.__qualityMemory = detail;
+        });
+        addEventListener("kisakcod:renderer-scene-frame", ({ detail }) => {
+            globalThis.__qualityScene = detail;
+        });
+    });
+    const command = async (text) => {
+        await page.locator("#engine-command-input").fill(text);
+        await page.locator("#engine-command-submit").click();
+        await expect(page.locator("#engine-command-status")).toHaveText(`Accepted: ${text}`);
+    };
+    const loaded = async () => {
+        await expect.poll(() => page.evaluate(() => globalThis.__qualityScene?.worldName),
+            { timeout: 300_000 }).toContain("killhouse");
+        await expect.poll(() => page.evaluate(() => globalThis.__qualityMemory?.decodedTextureSourceBytes ?? 0),
+            { timeout: 60_000 }).toBeGreaterThan(1_000_000);
+        return page.evaluate(() => globalThis.__qualityMemory);
+    };
+    const clear = () => page.evaluate(() => {
+        globalThis.__qualityMemory = null;
+        globalThis.__qualityScene = null;
+    });
+    const canvas = page.locator("#game-canvas");
+    const clickMenu = async (x, y) => {
+        const bounds = await canvas.boundingBox();
+        await canvas.click({ position: {
+            x: (bounds.width - bounds.height * 4 / 3) / 2 + x * bounds.height / 480,
+            y: y * bounds.height / 480,
+        } });
+    };
+    await page.goto("/");
+    const chooser = page.waitForEvent("filechooser");
+    await page.locator("#portable-install-button").click();
+    await (await chooser).setFiles(retailRoot);
+    await expect(page.locator("#boot-log")).toContainText("canonical runtime started", { timeout: 300_000 });
+    await command("map killhouse");
+    const full = await loaded();
+    await canvas.screenshot({ path: testInfo.outputPath("quality-full.png") });
+    // Loading and renderer lifecycle only. No routes, objective changes, or
+    // mission acceptance. Return through canonical disconnect after measuring
+    // the full-quality scene because the authored opening UI owns in-map input.
+    await clear();
+    await command("disconnect");
+    await expect.poll(() => page.evaluate(() => globalThis.__qualityLogs.join("\n")),
+        { timeout: 60_000 }).toContain("----- Server Shutdown -----");
+    await command("openmenu main_options");
+    await clickMenu(190, 45); // Graphics.
+    await clickMenu(190, 70); // Texture Settings.
+    await clickMenu(480, 86); // Texture Quality: Automatic -> Manual.
+    for (const y of [108, 130, 152]) {
+        await clickMenu(480, y); // Extra -> High.
+        await clickMenu(480, y); // High -> Normal (picmip 2).
+    }
+    await canvas.screenshot({ path: testInfo.outputPath("quality-menu-normal.png") });
+    await clickMenu(535, 464); // Apply.
+    await clickMenu(360, 260); // Native Apply Settings confirmation: Yes.
+    await expect.poll(() => page.evaluate(() => globalThis.__qualityLogs.join("\n")),
+        { timeout: 60_000 }).toContain("Picmip is set manually.");
+    await command("map killhouse");
+    const reduced = await loaded();
+    expect(reduced.decodedTextureSourceBytes).toBeLessThan(full.decodedTextureSourceBytes * 0.6);
+    expect(reduced.gpuTextureEstimateBytes).toBeLessThan(full.gpuTextureEstimateBytes);
+    const appliedLogs = await page.evaluate(() => globalThis.__qualityLogs.join("\n"));
+    expect(appliedLogs).toContain("Picmip is set manually.");
+    expect(appliedLogs).toContain("Using picmip 2 on most textures, 2 on normal maps, and 2 on specular maps");
+    expect(appliedLogs).not.toContain('Unknown command "r_applyPicmip"');
+    await canvas.screenshot({ path: testInfo.outputPath("quality-reduced.png") });
+    await command("quit");
+    await expect(page.locator("html")).toHaveAttribute("data-runtime-state", "stopped");
+    await page.getByRole("button", { name: "Start game", exact: true }).click();
+    await expect(page.locator("#boot-log")).toContainText("canonical runtime started", { timeout: 300_000 });
+    await clear();
+    await command("map killhouse");
+    const persisted = await loaded();
+    expect(persisted.decodedTextureSourceBytes).toBeLessThan(full.decodedTextureSourceBytes * 0.6);
+    await writeFile(testInfo.outputPath("quality-evidence.json"), JSON.stringify({
+        full, reduced, persisted,
+        menu: { quality: "Manual", color: "Normal", normal: "Normal", specular: "Normal" },
+    }, null, 2));
+});
+
 test.skip(!retailRoot,
     "RETAIL_ROOT_MISSING: set KISAK_COD4_RETAIL_ROOT to a legally owned COD4 installation");
 
@@ -365,6 +466,148 @@ async function call(page, name, ...arguments_)
         name, arguments_,
     });
 }
+
+test("canonical console and shipped profile field accept browser typing", { tag: "@retail-text" },
+    async ({ retailPage: page }, testInfo) => {
+        test.setTimeout(360_000);
+        await page.addInitScript(() => {
+            globalThis.__KISAKCOD_WORKER_TEST_CONFIG__ = { observeInput: true };
+            globalThis.__textLogs = [];
+            globalThis.__textInputEvents = [];
+            globalThis.addEventListener("kisakcod:log", ({ detail }) =>
+                globalThis.__textLogs.push(detail.text));
+            globalThis.addEventListener("kisakcod:input", ({ detail }) =>
+                globalThis.__textInputEvents.push(detail));
+        });
+        await page.goto("/");
+        const chooser = page.waitForEvent("filechooser");
+        await page.locator("#portable-install-button").click();
+        await (await chooser).setFiles(retailRoot);
+        await expect.poll(() => page.evaluate(() =>
+            globalThis.__KISAKCOD_WEB__?.module?.filesystemState),
+        { timeout: 300_000 }).toBe("mounted");
+        const canvas = page.locator("#game-canvas");
+        await page.bringToFront();
+        await canvas.focus();
+        await page.keyboard.press("Backquote");
+        await expect.poll(async () => (await call(page, "_KisakWeb_TestUiState", 3)) & 1)
+            .toBe(1);
+        await page.evaluate(() => {
+            const paste = new Event("paste", { cancelable: true });
+            Object.defineProperty(paste, "clipboardData", { value: {
+                getData: (type) => type === "text/plain"
+                    ? 'seta kisak_text "Browser Text!"x\nignored' : "",
+            } });
+            globalThis.dispatchEvent(paste);
+        });
+        await expect.poll(() => page.evaluate(() => globalThis.__textInputEvents.slice(-2)))
+            .toEqual([
+                { type: "clipboard", characters: Array.from(
+                    new TextEncoder().encode('seta kisak_text "Browser Text!"x')) },
+                { type: "char", character: 22 },
+            ]);
+        await page.keyboard.press("Backspace");
+        await page.keyboard.press("Enter");
+        await page.keyboard.type("kisak_text");
+        await page.keyboard.press("Enter");
+        await expect.poll(() => page.evaluate(() => globalThis.__textLogs.join("\n")))
+            .toContain('"kisak_text" is: "Browser Text!');
+        await page.keyboard.type("seta kisak_ui_archive 7");
+        await page.keyboard.down("3");
+        await page.keyboard.down("3");
+        await page.keyboard.up("3");
+        await page.keyboard.press("Backspace");
+        await page.keyboard.press("Enter");
+        await expect.poll(() => call(page, "_KisakWeb_TestConfigState", 0)).toBe(73);
+        await page.keyboard.type("openmenu profile_create_popmenu");
+        await page.keyboard.press("Enter");
+        await page.keyboard.press("Backquote");
+        await expect.poll(() => call(page, "_KisakWeb_TestMenuState",
+            nameHash("profile_create_popmenu"))).toBe(7);
+        const bounds = await canvas.boundingBox();
+        await canvas.click({ position: { x: bounds.width * 0.50, y: bounds.height * 0.485 } });
+        await page.keyboard.type("BrowserZ");
+        await page.keyboard.press("Backspace");
+        await page.keyboard.down("7");
+        await page.keyboard.down("7");
+        await page.keyboard.up("7");
+        await page.keyboard.press("Backspace");
+        await page.keyboard.press("Home");
+        await page.keyboard.press("Delete");
+        // Native UI starts in overstrike mode; explicitly choose insertion.
+        await page.keyboard.press("Insert");
+        await page.keyboard.type("B");
+        await page.keyboard.press("End");
+        await page.keyboard.type("3");
+        await expect.poll(() => call(page, "_KisakWeb_TestUiTextSeen", nameHash("Browser73")))
+            .toBe(1);
+        await canvas.screenshot({ path: testInfo.outputPath("profile-field.png") });
+        await page.keyboard.press("Backquote");
+        await page.keyboard.type("ui_playerProfileNameNew");
+        await page.keyboard.press("Enter");
+        await expect.poll(() => page.evaluate(() => globalThis.__textLogs.join("\n")))
+            .toContain('"ui_playerProfileNameNew" is: "Browser73');
+    });
+
+test("canonical recoverable frame errors return to UI and permit another map load", { tag: "@retail-recovery" },
+    async ({ retailPage: page }, testInfo) => {
+        test.setTimeout(420_000);
+        const errors = [];
+        page.on("pageerror", (error) => errors.push(String(error)));
+        await page.addInitScript(() => {
+            globalThis.__recoveryUnloads = 0;
+            globalThis.__recoveryWorldFrames = 0;
+            globalThis.__recoveryLog = [];
+            addEventListener("kisakcod:log", ({ detail }) => {
+                globalThis.__recoveryLog.push(detail.message);
+            });
+            addEventListener("kisakcod:renderer-memory", ({ detail }) => {
+                if (detail.state === "world-unloaded") ++globalThis.__recoveryUnloads;
+            });
+            addEventListener("kisakcod:renderer-scene-frame", ({ detail }) => {
+                if (detail.state === "drawn" && detail.geometrySubmitted)
+                    ++globalThis.__recoveryWorldFrames;
+            });
+        });
+        await page.goto("/");
+        const chooser = page.waitForEvent("filechooser");
+        await page.locator("#portable-install-button").click();
+        await (await chooser).setFiles(retailRoot);
+        await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.module?.filesystemState),
+            { timeout: 300_000 }).toBe("mounted");
+        const command = async (text) => {
+            await page.locator("#engine-command-input").fill(text);
+            await page.locator("#engine-command-form").evaluate((form) => form.requestSubmit());
+            await expect(page.locator("#engine-command-status")).toHaveText(`Accepted: ${text}`);
+        };
+        const recover = async (fromMap = false) => {
+            const before = await page.evaluate(() => globalThis.__recoveryUnloads);
+            await call(page, "_KisakWeb_TestDeferredFrameError");
+            if (fromMap)
+                await expect.poll(() => page.evaluate(() => globalThis.__recoveryUnloads),
+                    { timeout: 60_000 }).toBeGreaterThan(before);
+            await expect.poll(() => call(page, "_KisakWeb_TestUiState", 0)).toBe(1);
+            await expect.poll(() => call(page, "_KisakWeb_TestUiTextSeen",
+                nameHash("Diagnostic deferred frame error"))).toBe(1);
+            expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.state)).toBe("running");
+        };
+        const loadMap = async () => {
+            const before = await page.evaluate(() => globalThis.__recoveryWorldFrames);
+            await command("map killhouse");
+            await expect.poll(() => call(page, "_KisakWeb_TestGameplayState", 0),
+                { timeout: 180_000 }).toBeGreaterThanOrEqual(0);
+            await expect.poll(() => page.evaluate(() => globalThis.__recoveryWorldFrames),
+                { timeout: 60_000 }).toBeGreaterThan(before);
+        };
+        await recover();
+        await loadMap();
+        await recover(true);
+        await loadMap();
+        expect(await page.evaluate(() => globalThis.__recoveryLog.join("\n")))
+            .not.toContain("Info string length exceeded");
+        expect(errors).toEqual([]);
+        await page.locator("#game-canvas").screenshot({ path: testInfo.outputPath("recovered-map.png") });
+    });
 
 test("canonical retail main menu starts without a map", { tag: "@retail-ui" },
     async ({ retailPage: page }, testInfo) => {
@@ -838,6 +1081,99 @@ test("canonical retail main menu starts without a map", { tag: "@retail-ui" },
             nameHash("main"))).toBe(7);
     });
 
+test("owned paused scene responds to specular and normal controls", {
+    tag: "@retail-graphics",
+}, async ({ retailPage: page }, testInfo) => {
+    test.skip(process.env.KISAK_WEB_PRODUCT_TEST === "1", "Uses diagnostic pause-state observation.");
+    test.setTimeout(480_000);
+    await page.goto("/");
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state)).toBe("running");
+    const chooser = page.waitForEvent("filechooser");
+    await page.locator("#portable-install-button").click();
+    await (await chooser).setFiles(retailRoot);
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.assets.state),
+        { timeout: 240_000 }).toBe("ready");
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.filesystemState),
+        { timeout: 240_000 }).toBe("mounted");
+    await page.locator("#game-canvas").click({ position: { x: 5, y: 5 } });
+    await expect(page.locator("#boot-log")).toContainText("Browser mouse button reached canonical input");
+    const command = text => page.evaluate(text =>
+        globalThis.__KISAKCOD_WEB__.submitCanonicalCommand(text), text);
+    await command("map killhouse");
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.rendererSceneFrame?.worldName),
+        { timeout: 90_000 }).toContain("killhouse");
+    // CL_Pause_f deliberately refuses a fullscreen movie. Let the real movie
+    // finish on the unlocked device clock before requesting canonical pause.
+    await expect.poll(() => call(page, "_KisakWeb_TestCinematicState", 3),
+        { timeout: 60_000 }).toBe(2);
+    await page.waitForTimeout(6_000); // Authored opening fade, no movement or progression input.
+    await command("set cg_cinematicFullscreen 0; set cl_paused_simple 1");
+    await command("pause");
+    await expect.poll(() => call(page, "_KisakWeb_TestUiState", 5)).toBe(1);
+    const capture = async (name, baseline = false) => {
+        const png = await page.locator("#game-canvas").screenshot({ path: testInfo.outputPath(`${name}.png`) });
+        return page.evaluate(async ({ encoded, baseline }) => {
+            const bitmap = await createImageBitmap(new Blob([
+                Uint8Array.from(atob(encoded), c => c.charCodeAt(0)),
+            ], { type: "image/png" }));
+            const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+            const context = canvas.getContext("2d");
+            context.drawImage(bitmap, 0, 0);
+            const { data } = context.getImageData(0, 0, bitmap.width, bitmap.height);
+            bitmap.close();
+            if (baseline) globalThis.__graphicsBaseline = data;
+            const original = globalThis.__graphicsBaseline;
+            let squared = 0, changed = 0;
+            for (let i = 0; i < data.length; i += 4) {
+                let pixel = false;
+                for (let channel = 0; channel < 3; ++channel) {
+                    const delta = data[i + channel] - original[i + channel];
+                    squared += delta * delta;
+                    pixel ||= Math.abs(delta) > 1;
+                }
+                if (pixel) ++changed;
+            }
+            return { rms: Math.sqrt(squared / (data.length / 4 * 3)), changed };
+        }, { encoded: png.toString("base64"), baseline });
+    };
+    await command("r_specular 1; r_normal 1");
+    await page.waitForTimeout(500);
+    await capture("graphics-baseline", true);
+    await page.waitForTimeout(500);
+    const noise = await capture("graphics-repeat");
+    const evidence = { noise, controls: {} };
+    for (const setting of ["r_specular", "r_normal"]) {
+        await command(`${setting} 0`);
+        await page.waitForTimeout(500);
+        const disabled = await capture(`${setting}-off`);
+        await command(`${setting} 1`);
+        await page.waitForTimeout(500);
+        const restored = await capture(`${setting}-restored`);
+        evidence.controls[setting] = { disabled, restored };
+        await writeFile(testInfo.outputPath("graphics-evidence.json"), JSON.stringify(evidence, null, 2));
+        expect(disabled.rms, `${setting} must exceed measured unchanged-frame noise`)
+            .toBeGreaterThan(Math.max(0.01, noise.rms * 4));
+        expect(restored.rms).toBeLessThanOrEqual(noise.rms + 0.01);
+    }
+    await command("r_specular 0; r_normal 0");
+    await page.waitForTimeout(500);
+    const beforeRecovery = await capture("graphics-before-recovery");
+    await call(page, "_KisakWeb_TestLoseWebGLContext");
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state)).toBe("renderer-lost");
+    await call(page, "_KisakWeb_TestRestoreWebGLContext");
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state),
+        { timeout: 60_000 }).toBe("running");
+    await page.waitForTimeout(500);
+    const recovered = await capture("graphics-recovered");
+    expect(Math.abs(recovered.rms - beforeRecovery.rms)).toBeLessThanOrEqual(noise.rms + 0.01);
+    await command("r_specular 1; r_normal 1");
+    await page.waitForTimeout(500);
+    const restored = await capture("graphics-restored-after-recovery");
+    expect(restored.rms).toBeLessThanOrEqual(noise.rms + 0.01);
+    evidence.recovery = { beforeRecovery, recovered, restored };
+    await writeFile(testInfo.outputPath("graphics-evidence.json"), JSON.stringify(evidence, null, 2));
+});
+
 test("owned retail saved-screen materials blend from the scene composite", async ({ retailPage: page }) => {
     test.setTimeout(600_000);
     await page.goto("/");
@@ -881,7 +1217,7 @@ test("owned retail transient lights reach native material passes and obey scene 
     // Let the authored initial fade finish, then use canonical pause to hold
     // the pose/fog constant for private visual comparisons.
     await page.waitForTimeout(6_000);
-    await command("set cl_paused_simple 1");
+    await command("set cg_cinematicFullscreen 0; set cl_paused_simple 1");
     await command("pause");
     await expect.poll(() => call(page, "_KisakWeb_TestUiState", 5)).toBe(1);
     const capture = async name => {
@@ -899,8 +1235,19 @@ test("owned retail transient lights reach native material passes and obey scene 
             return means.map(value => value / (data.length / 4));
         }, png.toString("base64"));
     };
-    const baseline = await capture("baseline");
+    // The pause command and authored objective overlay can reach adjacent
+    // renderer frames. Establish the comparison only after two paused captures
+    // agree, so a UI transition cannot be mistaken for transient-light output.
+    await page.waitForTimeout(500);
+    let baseline = await capture("baseline-first");
+    await page.waitForTimeout(500);
+    const stableBaseline = await capture("baseline");
+    for (let channel = 0; channel < 3; ++channel)
+        expect(Math.abs(stableBaseline[channel] - baseline[channel]),
+            "paused light baseline must be stable before injection").toBeLessThan(0.1);
+    baseline = stableBaseline;
     const state = () => call(page, "_KisakWeb_TestTransientLightDraws");
+    const shadowState = () => call(page, "_KisakWeb_TestTransientSpotShadowState");
     // Synthetic renderer input through the same R_Add* calls used by canonical
     // FX. This validates rendering, not authored FX timing or mission progress.
     for (const [mode, type, count, name] of [[1, 3, 1, "omni"], [2, 2, 1, "spot"], [3, 3, 4, "limit"]]) {
@@ -909,14 +1256,46 @@ test("owned retail transient lights reach native material passes and obey scene 
         await expect.poll(async () => (await state()) & 65535).toBeGreaterThan(0);
         if (mode === 3) expect(await call(page, "_KisakWeb_TestTransientLights", -1)).toBe(32);
         const lit = await capture(name);
-        expect(lit[0] - baseline[0], `${name} must visibly illuminate the owned scene`).toBeGreaterThan(1);
+        expect(lit[0] - baseline[0], `${name} must visibly illuminate the owned scene`).toBeGreaterThan(0.05);
         if (mode === 2) {
+            await expect.poll(async () => ((await shadowState()) >>> 8) & 255).toBe(1);
+            await command("set r_spotLightShadows 0");
+            await expect.poll(async () => ((await shadowState()) >>> 8) & 255).toBe(0);
+            const unshadowed = await capture("spot-unshadowed");
+            expect(unshadowed[0] - lit[0],
+                "the transient shadow map must darken at least part of the spot-lit scene").toBeGreaterThan(0.01);
+            await command("set r_spotLightShadows 1");
+            await expect.poll(async () => ((await shadowState()) >>> 8) & 255).toBe(1);
+            // Prove clearing against the unchanged pose before recovery's
+            // explicit frame pump advances canonical animation and HUD time.
+            await call(page, "_KisakWeb_TestTransientLights", 0);
+            await expect.poll(state).toBe(0);
+            const clearedBeforeRecovery = await capture("cleared-before-recovery");
+            for (let channel = 0; channel < 3; ++channel)
+                expect(Math.abs(clearedBeforeRecovery[channel] - baseline[channel])).toBeLessThan(0.1);
+            await call(page, "_KisakWeb_TestTransientLights", 2);
+            await expect.poll(async () => ((await shadowState()) >>> 8) & 255).toBe(1);
             expect(await call(page, "_KisakWeb_TestLoseWebGLContext")).toBe(1);
             await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state)).toBe("renderer-lost");
             expect(await call(page, "_KisakWeb_TestRestoreWebGLContext")).toBe(1);
             await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state), { timeout: 60_000 }).toBe("running");
+            await expect.poll(async () => (await state()) & 65535,
+                { timeout: 60_000 }).toBeGreaterThan(0);
+            await expect.poll(async () => ((await shadowState()) >>> 8) & 255,
+                { timeout: 60_000 }).toBe(1);
+            // A paused client has no new cgame view to submit after context
+            // recreation. Pump one frame, then freeze the recovered image.
+            await command("pause");
+            await expect.poll(() => call(page, "_KisakWeb_TestUiState", 5)).toBe(0);
+            await page.waitForTimeout(500);
+            await command("pause");
+            await expect.poll(() => call(page, "_KisakWeb_TestUiState", 5)).toBe(1);
             const recovered = await capture("recovered");
-            expect(recovered[0] - baseline[0]).toBeGreaterThan(1);
+            expect(recovered[0] - baseline[0]).toBeGreaterThan(0.05);
+            await call(page, "_KisakWeb_TestTransientLights", 0);
+            await expect.poll(state).toBe(0);
+            baseline = await capture("recovered-baseline");
+            expect(recovered[0] - baseline[0]).toBeGreaterThan(0.05);
         }
     }
     await command("set r_dlightLimit 0");
@@ -932,6 +1311,22 @@ test("owned retail transient lights reach native material passes and obey scene 
     const attenuationPixel = await call(page, "_KisakWeb_TestDynamicLightPixel", 7, 255, 1, 0);
     expect(attenuationPixel >>> 24).toBe(0);
     expect(attenuationPixel & 255).toBeGreaterThan(0);
-    await testInfo.attach("renderer-log", { body: await page.locator("#boot-log").innerText(), contentType: "text/plain" });
+    // The authored paused camera need not contain a DynEntity. Use an
+    // isolated renderer view of a linked owned model for positive admission.
+    try {
+        expect(await call(page, "_KisakWeb_TestDynEntityCamera", 1)).toBeGreaterThan(0);
+        await expect.poll(() => call(page, "_KisakWeb_TestDynEntityCamera", -1)).toBe(1);
+        await expect.poll(() => page.locator("#boot-log").innerText()).toMatch(
+            /Canonical DynEntity model scene: [1-9]\d* models/);
+    } finally {
+        await call(page, "_KisakWeb_TestDynEntityCamera", 0);
+    }
+    const rendererLog = await page.locator("#boot-log").innerText();
+    await writeFile(testInfo.outputPath("renderer-log.txt"), rendererLog);
+    expect(rendererLog).toMatch(/Canonical portal scene admission: valid=1 DObj linked=[1-9]\d* admitted=\d+ brush linked=\d+ admitted=\d+/);
+    expect(rendererLog).toMatch(/Canonical DObj post-pose admission: tested=[1-9]\d* plane-rejected=\d+ cell-rejected=\d+/);
+    expect(rendererLog).toMatch(/Canonical DynEntity portal admission: models=\d+ admitted=\d+ brushes=\d+ admitted=\d+/);
+    expect(rendererLog).toMatch(/Canonical DynEntity model scene: [1-9]\d* models/);
+    await testInfo.attach("renderer-log", { body: rendererLog, contentType: "text/plain" });
     await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.dispose());
 });

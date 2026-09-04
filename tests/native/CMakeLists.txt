@@ -34,10 +34,17 @@ endif()
 
 add_executable(r_image_resample_tests r_image_resample_tests.cpp ../../src/gfx_d3d/r_image_resample.cpp)
 add_executable(r_gamma_tests r_gamma_tests.cpp ../../src/gfx_d3d/r_gamma.cpp)
+add_executable(r_sampler_tests r_sampler_tests.cpp)
+set(_image_quality_tests)
+if (CMAKE_SIZEOF_VOID_P EQUAL 4)
+    add_executable(r_image_quality_tests r_image_quality_tests.cpp ../../src/gfx_d3d/r_image_quality.cpp)
+    target_compile_definitions(r_image_quality_tests PRIVATE KISAK_WEB=1 dNODEBUG=1 NOMINMAX)
+    set(_image_quality_tests r_image_quality_tests)
+endif()
 target_compile_definitions(r_gamma_tests PRIVATE KISAK_WEB=1 dNODEBUG=1 NOMINMAX)
 add_executable(ui_savegames_tests ui_savegames_tests.cpp ../../src/ui/ui_savegames.cpp)
 target_compile_definitions(ui_savegames_tests PRIVATE KISAK_SP=1 KISAK_WEB=1 dNODEBUG=1 NOMINMAX)
-foreach(target r_image_resample_tests r_gamma_tests ui_savegames_tests)
+foreach(target r_image_resample_tests r_gamma_tests r_sampler_tests ${_image_quality_tests} ui_savegames_tests)
     target_compile_features(${target} PRIVATE cxx_std_20)
     target_include_directories(${target} PRIVATE ../../src ../../deps)
     target_compile_definitions(${target} PRIVATE RELEASE_ASSERTS=1)
@@ -189,6 +196,7 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
         "${CMAKE_CURRENT_LIST_DIR}/gate3_com_init_trace_tests.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/qcommon/com_init_trace.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_initialization.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_string_ownership.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/qcommon/common.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/qcommon/common_runtime_commands.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/qcommon/cmd.cpp"
@@ -203,16 +211,18 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
         "${KISAK_REPOSITORY_ROOT}/src/universal/physicalmemory.cpp"
     )
     target_compile_features(canonical_runtime_prefix_tests PRIVATE cxx_std_20)
-    target_include_directories(canonical_runtime_prefix_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
+    target_include_directories(canonical_runtime_prefix_tests PRIVATE
+        "${KISAK_REPOSITORY_ROOT}/src")
     target_compile_definitions(canonical_runtime_prefix_tests PRIVATE
         KISAK_SP=1 KISAK_GATE3_COM_INIT_PREFIX=1
         KISAK_RUNTIME_COMMANDS_TEST=1 dNODEBUG=1)
     if (MSVC)
         target_compile_definitions(canonical_runtime_prefix_tests PRIVATE WIN32=1)
-        target_compile_options(canonical_runtime_prefix_tests PRIVATE /Gy /Gw /Zc:inline)
+        target_compile_options(canonical_runtime_prefix_tests PRIVATE /Gy /Gw /Zc:inline /UNDEBUG)
         target_link_options(canonical_runtime_prefix_tests PRIVATE /OPT:REF /OPT:ICF)
     else()
         target_compile_definitions(canonical_runtime_prefix_tests PRIVATE KISAK_WEB=1)
+        target_compile_options(canonical_runtime_prefix_tests PRIVATE -UNDEBUG)
     endif()
 
     add_executable(canonical_map_request_tests
@@ -324,6 +334,7 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
         "${KISAK_REPOSITORY_ROOT}/src/universal/com_sndalias_curve.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_stream.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_stream_load.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_string_ownership.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/database/db_stringtable_load.cpp"
     )
     target_compile_features(gate3_db_stream_trace_tests PRIVATE cxx_std_20)
@@ -331,13 +342,66 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME S
         "${KISAK_REPOSITORY_ROOT}/src" "${KISAK_REPOSITORY_ROOT}/deps")
     target_compile_definitions(gate3_db_stream_trace_tests PRIVATE
         KISAK_SP=1 KISAK_DB_SYNC_FILE_TEST=1 KISAK_DB_POOL_STANDALONE=1
-        KISAK_SOUND_CURVE_PUBLICATION_TEST=1 dNODEBUG=1)
+        KISAK_SOUND_CURVE_PUBLICATION_TEST=1 RELEASE_ASSERTS=1 dNODEBUG=1)
     if (MSVC)
         target_compile_definitions(gate3_db_stream_trace_tests PRIVATE WIN32=1)
         target_compile_options(gate3_db_stream_trace_tests PRIVATE /UNDEBUG)
     else()
         target_compile_definitions(gate3_db_stream_trace_tests PRIVATE KISAK_WEB=1)
         target_compile_options(gate3_db_stream_trace_tests PRIVATE -UNDEBUG -fdeclspec)
+    endif()
+endif()
+
+if (WIN32 AND MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 4)
+    # Compile the real generated native RawFile routine behind a test-only
+    # slice so the browser loader has an independent upstream oracle.
+    add_executable(native_db_load_rawfile_oracle_tests
+        "${CMAKE_CURRENT_LIST_DIR}/db_load_rawfile_oracle_tests.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_load.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_stream.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_stream_load.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_semantic_trace.cpp"
+    )
+    target_compile_features(native_db_load_rawfile_oracle_tests PRIVATE cxx_std_20)
+    target_include_directories(native_db_load_rawfile_oracle_tests PRIVATE
+        "${KISAK_REPOSITORY_ROOT}/src" "${KISAK_REPOSITORY_ROOT}/deps")
+    target_compile_definitions(native_db_load_rawfile_oracle_tests PRIVATE
+        KISAK_SP=1 WIN32=1 KISAK_NATIVE_DB_LOAD_RAWFILE_ORACLE=1
+        RELEASE_ASSERTS=1 dNODEBUG=1)
+    target_compile_options(native_db_load_rawfile_oracle_tests PRIVATE
+        /Gy /Gw /Zc:inline /UNDEBUG)
+    target_link_options(native_db_load_rawfile_oracle_tests PRIVATE /OPT:REF /OPT:ICF)
+    add_test(NAME native_db_load_rawfile_oracle_tests
+        COMMAND native_db_load_rawfile_oracle_tests)
+endif()
+
+if ((WIN32 AND MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR
+    CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    add_executable(generated_db_load_rawfile_oracle_tests
+        "${CMAKE_CURRENT_LIST_DIR}/db_load_rawfile_oracle_tests.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_generated_loaders.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_stream.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_stream_load.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_semantic_trace.cpp"
+    )
+    target_compile_features(generated_db_load_rawfile_oracle_tests PRIVATE cxx_std_20)
+    target_include_directories(generated_db_load_rawfile_oracle_tests PRIVATE
+        "${KISAK_REPOSITORY_ROOT}/src" "${KISAK_REPOSITORY_ROOT}/deps")
+    target_compile_definitions(generated_db_load_rawfile_oracle_tests PRIVATE
+        KISAK_SP=1 KISAK_DB_SYNC_FILE_TEST=1
+        KISAK_GENERATED_DB_LOAD_RAWFILE_ORACLE=1 RELEASE_ASSERTS=1 dNODEBUG=1)
+    if (MSVC)
+        target_compile_definitions(generated_db_load_rawfile_oracle_tests PRIVATE WIN32=1)
+        target_compile_options(generated_db_load_rawfile_oracle_tests PRIVATE
+            /Gy /Gw /Zc:inline /UNDEBUG)
+        target_link_options(generated_db_load_rawfile_oracle_tests PRIVATE /OPT:REF /OPT:ICF)
+    else()
+        target_compile_definitions(generated_db_load_rawfile_oracle_tests PRIVATE KISAK_WEB=1)
+        target_compile_options(generated_db_load_rawfile_oracle_tests PRIVATE -UNDEBUG -fdeclspec)
+        target_link_options(generated_db_load_rawfile_oracle_tests PRIVATE
+            "-sENVIRONMENT=node" "-sEXIT_RUNTIME=1")
+        set_target_properties(generated_db_load_rawfile_oracle_tests
+            PROPERTIES SUFFIX ".cjs")
     endif()
 endif()
 
@@ -411,6 +475,8 @@ if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR
     # assertions require the 32-bit IW3 ABI used by Win32 and Wasm32.
     add_executable(web_renderer_dobj_submission_tests
         "${CMAKE_CURRENT_LIST_DIR}/web_renderer_dobj_submission_tests.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/cgame/cg_pose_utils.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/gfx_d3d/r_light_attachment.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/web/web_renderer_dobj_lod.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/web/web_renderer_dobj_scene.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/web/web_renderer_lighting.cpp"
@@ -539,6 +605,7 @@ target_compile_features(web_renderer_static_model_scene_tests PRIVATE cxx_std_20
 if (CMAKE_SIZEOF_VOID_P EQUAL 4)
     target_sources(web_renderer_static_model_scene_tests PRIVATE
         "${KISAK_REPOSITORY_ROOT}/src/gfx_d3d/r_dpvs_core.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/qcommon/cm_showcollision.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/web/web_renderer_world_scene.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/universal/com_math.cpp"
         "${KISAK_REPOSITORY_ROOT}/src/universal/com_math_anglevectors.cpp"
@@ -794,6 +861,7 @@ foreach(target
     canonical_cm_load_tests
     gate3_db_pool_tests
     gate3_db_stream_trace_tests
+    generated_db_load_rawfile_oracle_tests
     web_renderer_surface_tests
     web_renderer_world_scene_tests
     r_water_simulation_tests
@@ -819,6 +887,46 @@ foreach(target
         endif()
     endif()
 endforeach()
+
+if (TARGET gate3_db_stream_trace_tests)
+    if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+        add_test(NAME canonical_xfile_mutation_tests
+            COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:gate3_db_stream_trace_tests>" --mutate)
+    else()
+        add_test(NAME canonical_xfile_mutation_tests
+            COMMAND gate3_db_stream_trace_tests --mutate)
+    endif()
+    set_tests_properties(canonical_xfile_mutation_tests PROPERTIES TIMEOUT 60)
+
+    # Reuse the same generated-loader fixtures with the real zone coordinator,
+    # PMem allocator and single-Worker database scheduler instead of stand-ins.
+    get_target_property(db_test_sources gate3_db_stream_trace_tests SOURCES)
+    add_executable(canonical_db_zone_recovery_tests ${db_test_sources}
+        "${KISAK_REPOSITORY_ROOT}/src/database/db_registry.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/universal/physicalmemory.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/web/web_thread_context.cpp")
+    foreach(property INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS LINK_OPTIONS LINK_LIBRARIES SUFFIX)
+        get_target_property(db_test_property gate3_db_stream_trace_tests ${property})
+        if (NOT db_test_property STREQUAL "db_test_property-NOTFOUND")
+            set_property(TARGET canonical_db_zone_recovery_tests PROPERTY ${property} "${db_test_property}")
+        endif()
+    endforeach()
+    target_compile_definitions(canonical_db_zone_recovery_tests PRIVATE
+        KISAK_DB_ZONE_RECOVERY_TEST=1 KISAK_DB_REGISTRY_LIFECYCLE_SLICE=1
+        KISAK_GATE3_COM_INIT_PREFIX=1 KISAK_WEB=1)
+    target_compile_features(canonical_db_zone_recovery_tests PRIVATE cxx_std_20)
+    if (MSVC)
+        target_compile_options(canonical_db_zone_recovery_tests PRIVATE /Gy /Gw)
+        target_link_options(canonical_db_zone_recovery_tests PRIVATE /OPT:REF)
+    endif()
+    if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+        add_test(NAME canonical_db_zone_recovery_tests
+            COMMAND "${KISAK_NODE_EXECUTABLE}" "$<TARGET_FILE:canonical_db_zone_recovery_tests>")
+    else()
+        add_test(NAME canonical_db_zone_recovery_tests COMMAND canonical_db_zone_recovery_tests)
+    endif()
+    set_tests_properties(canonical_db_zone_recovery_tests PROPERTIES TIMEOUT 60)
+endif()
 
 if (KISAK_BUILD_FUZZERS)
     if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")

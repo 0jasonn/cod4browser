@@ -95,9 +95,11 @@ std::uint32_t WebRenderer_ForEachSunShadowRange(
 
 // Visible surface spans may cover only part of a retained batch. Preserve
 // those holes while retaining the opaque cross-batch merge used by sun depth.
-template<typename Ranges, typename Batches, typename IsOpaque, typename Draw>
+template<typename Ranges, typename Batches, typename IsCaster,
+    typename IsOpaque, typename Draw>
 std::uint32_t WebRenderer_ForEachWorldSunShadowRange(
-    const Ranges &ranges, const Batches &batches, IsOpaque isOpaque, Draw draw)
+    const Ranges &ranges, const Batches &batches, IsCaster isCaster,
+    IsOpaque isOpaque, Draw draw)
 {
     const typename Ranges::value_type *pending = nullptr;
     std::uint32_t count = 0u;
@@ -109,7 +111,7 @@ std::uint32_t WebRenderer_ForEachWorldSunShadowRange(
     for (const auto &range : ranges)
     {
         const auto &batch = batches[range.batchIndex];
-        if (!batch.castsSunShadow || range.indexCount == 0u)
+        if (!isCaster(batch) || range.indexCount == 0u)
         {
             flush();
             pending = nullptr;

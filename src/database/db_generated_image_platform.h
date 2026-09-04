@@ -8,7 +8,8 @@
 // Renderer post-load boundary used by the canonical generated image loader.
 // Native builds provide the D3D implementation. The web implementation copies
 // the transient DB load definition at this boundary, where native IW3 uploads
-// it to D3D, and leaves the canonical GPU handle null.
+// it to D3D. The opaque GfxTexture resource handle follows canonical image
+// copies, overrides and aliases; it is not a WebGL object or an asset identity.
 void __cdecl Load_Texture(GfxTexture *remoteLoadDef, GfxImage *image);
 
 struct WebDbImageLoadDef
@@ -29,8 +30,9 @@ struct WebDbImageLoadDefStats
     std::uint64_t evictionCount;
 };
 
-// Returns the most recently loaded transient payload for the canonical image
-// name. The view remains valid until another image load or an explicit clear.
+// Returns this image's retained resource, including restored overrides and
+// default copies. The view lasts until a load, resource collection or clear.
 bool DB_WebGetImageLoadDef(const GfxImage *image, WebDbImageLoadDef &loadDef);
 WebDbImageLoadDefStats DB_WebGetImageLoadDefStats();
 void DB_WebClearImageLoadDefs();
+void DB_WebReleaseUnusedImageLoadDefs();

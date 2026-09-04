@@ -1,3 +1,4 @@
+import { acceptAudioPlayback, createFilesystemProgressReporter } from "./worker_transport.mjs";
 import {
     createWorkerSyncFilesystem,
     mountWorkerFilesystem,
@@ -203,6 +204,12 @@ async function probe(functionName, buffers, argumentLayout)
 
 globalThis.addEventListener("message", (event) => {
     const message = event.data;
+    if (message?.type === "audio-playback") {
+        acceptAudioPlayback(message);
+        // At most one snapshot waits behind synchronous engine work.
+        globalThis.postMessage({ type: "audio-playback-ack", version: 1 });
+        return;
+    }
     if (!message || typeof message !== "object") return;
     void (async () => {
         try {
@@ -223,13 +230,17 @@ globalThis.addEventListener("message", (event) => {
                     filesystem,
                     message.manifest,
                     () => module._KisakWeb_MountCanonicalRuntime(),
+                    createFilesystemProgressReporter(message),
                 );
                 reply(message.id, message.type, mounted);
                 break;
             }
-            case "unmount": reply(message.id, message.type, await filesystem.flushAndUnmount()); break;
-            case "checkpoint": reply(message.id, message.type, await filesystem.checkpoint()); break;
-            case "shutdown": reply(message.id, message.type, await filesystem.flushAndUnmount()); break;
+            case "unmount": reply(message.id, message.type, await filesystem.flushAndUnmount(
+                createFilesystemProgressReporter(message))); break;
+            case "checkpoint": reply(message.id, message.type, await filesystem.checkpoint(
+                createFilesystemProgressReporter(message))); break;
+            case "shutdown": reply(message.id, message.type, await filesystem.flushAndUnmount(
+                createFilesystemProgressReporter(message))); break;
             case "probe": {
                 const result = await probe(
                     message.functionName, message.buffers, message.argumentLayout);
@@ -271,6 +282,24 @@ globalThis.addEventListener("message", (event) => {
                 }
                 if (input.type === "key") {
                     module._KisakWeb_QueueKeyEvent?.(input.key, input.down ? 1 : 0);
+                } else if (input.type === "char") {
+                    module._KisakWeb_QueueCharEvent?.(input.character);
+                } else if (input.type === "clipboard") {
+                    const pointer = module._malloc(input.characters.length);
+                    if (!pointer) throw Object.assign(
+                        new Error("Wasm clipboard allocation failed."),
+                        { code: "WASM_MEMORY" });
+                    try {
+                        module.HEAPU8.set(input.characters, pointer);
+                        if (!module._KisakWeb_SetClipboardText(
+                            pointer, input.characters.length)) {
+                            throw Object.assign(
+                                new Error("Engine rejected clipboard text."),
+                                { code: "INVALID_PAYLOAD" });
+                        }
+                    } finally {
+                        module._free(pointer);
+                    }
                 } else if (input.type === "mouse-move") {
                     module._KisakWeb_QueueMouseMove?.(
                         input.x, input.y, input.dx, input.dy);

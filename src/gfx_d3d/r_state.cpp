@@ -1,5 +1,6 @@
 #include <universal/q_shared.h>
 #include "r_state.h"
+#include "r_sampler.h"
 #include "rb_logfile.h"
 #include "r_dvars.h"
 #include "rb_stats.h"
@@ -16,14 +17,6 @@
 //struct GfxScaledPlacement s_manualObjectPlacement 85b5dd18     gfx_d3d : r_state.obj
 
 uint32_t s_decodeSamplerFilterState[24];
-
-const _D3DTEXTUREFILTERTYPE s_mipFilterTable[4][3] =
-{
-  { D3DTEXF_NONE, D3DTEXF_POINT, D3DTEXF_LINEAR },
-  { D3DTEXF_NONE, D3DTEXF_LINEAR, D3DTEXF_LINEAR },
-  { D3DTEXF_NONE, D3DTEXF_POINT, D3DTEXF_POINT },
-  { D3DTEXF_NONE, D3DTEXF_NONE, D3DTEXF_NONE }
-}; // idb
 
 const uint32_t s_cullTable_30[4] = { 0u, 1u, 3u, 2u }; // idb
 const uint32_t s_blendTable_30[11] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
@@ -108,140 +101,14 @@ void __cdecl R_ChangeStreamSource(
 
 void __cdecl R_SetTexFilter()
 {
-    int v0; // [esp+0h] [ebp-60h]
-    int v1; // [esp+4h] [ebp-5Ch]
-    int v2; // [esp+8h] [ebp-58h]
-    int v3; // [esp+Ch] [ebp-54h]
-    int v4; // [esp+10h] [ebp-50h]
-    int v5; // [esp+14h] [ebp-4Ch]
-    int v6; // [esp+1Ch] [ebp-44h]
-    int integer; // [esp+24h] [ebp-3Ch]
-    uint32_t entryIndex; // [esp+30h] [ebp-30h]
-    int maxAniso; // [esp+34h] [ebp-2Ch]
-    uint32_t mipFilterMode; // [esp+38h] [ebp-28h]
-    int linearMippedAnisotropy; // [esp+3Ch] [ebp-24h]
-    int linearNonMippedFilter; // [esp+40h] [ebp-20h]
-    int linearMippedFilter; // [esp+44h] [ebp-1Ch]
-    int texFilter; // [esp+48h] [ebp-18h]
-    int anisotropicFilter; // [esp+50h] [ebp-10h]
-    int anisotropyFor4x; // [esp+54h] [ebp-Ch]
-    _D3DTEXTUREFILTERTYPE decoded; // [esp+58h] [ebp-8h]
-    uint32_t decodeda; // [esp+58h] [ebp-8h]
-    int anisotropyFor2x; // [esp+5Ch] [ebp-4h]
-
-    maxAniso = r_texFilterAnisoMax->current.integer;
-    if (maxAniso > gfxMetrics.maxAnisotropy)
-        maxAniso = gfxMetrics.maxAnisotropy;
-    if (maxAniso > 1)
-    {
-        anisotropicFilter = (gfxMetrics.hasAnisotropicMinFilter ? 768 : 512)
-            | (gfxMetrics.hasAnisotropicMagFilter ? 12288 : 0x2000);
-    }
-    else
-    {
-        maxAniso = 1;
-        anisotropicFilter = 8704;
-    }
-    if (maxAniso >= r_texFilterAnisoMin->current.integer)
-        integer = r_texFilterAnisoMin->current.integer;
-    else
-        integer = maxAniso;
-    if (integer <= 1)
-        v6 = 1;
-    else
-        v6 = integer;
-    //iassert( max( minAniso, min( maxAniso, 1 ) ) == minAniso );
-    linearMippedAnisotropy = integer;
-    if (integer == 1)
-    {
-        linearMippedFilter = 8704;
-    }
-    else
-    {
-        iassert( linearMippedAnisotropy > 1 );
-        linearMippedFilter = anisotropicFilter;
-    }
-    if (maxAniso >= 2)
-        v5 = 2;
-    else
-        v5 = maxAniso;
-    if (integer <= v5)
-    {
-        if (maxAniso >= 2)
-            v3 = 2;
-        else
-            v3 = maxAniso;
-        v4 = v3;
-    }
-    else
-    {
-        v4 = integer;
-    }
-    anisotropyFor2x = v4;
-    if (maxAniso >= 4)
-        v2 = 4;
-    else
-        v2 = maxAniso;
-    if (integer <= v2)
-    {
-        if (maxAniso >= 4)
-            v0 = 4;
-        else
-            v0 = maxAniso;
-        v1 = v0;
-    }
-    else
-    {
-        v1 = integer;
-    }
-    anisotropyFor4x = v1;
-    if (r_texFilterDisable->current.enabled)
-    {
-        linearMippedAnisotropy = 1;
-        anisotropyFor2x = 1;
-        anisotropyFor4x = 1;
-        anisotropicFilter = 4352;
-        linearMippedFilter = 4352;
-        linearNonMippedFilter = 4352;
-        mipFilterMode = 3;
-    }
-    else
-    {
-        linearNonMippedFilter = 8704;
-        mipFilterMode = r_texFilterMipMode->current.unsignedInt;
-        if (mipFilterMode >= 4)
-            MyAssertHandler(
-                ".\\r_state.cpp",
-                169,
-                0,
-                "mipFilterMode doesn't index R_MIP_FILTER_COUNT\n\t%i not in [0, %i)",
-                mipFilterMode,
-                4);
-    }
-    for (entryIndex = 0; entryIndex < 0x18; ++entryIndex)
-    {
-        texFilter = entryIndex & 7;
-        decoded = (_D3DTEXTUREFILTERTYPE)(s_mipFilterTable[mipFilterMode][(int)(entryIndex & 0x18) >> 3] << 16);
-        switch (texFilter)
-        {
-        case 2:
-            if (decoded)
-                decodeda = decoded | linearMippedAnisotropy | linearMippedFilter;
-            else
-                decodeda = linearNonMippedFilter | 1;
-            break;
-        case 3:
-            decodeda = decoded | anisotropyFor2x | anisotropicFilter;
-            break;
-        case 4:
-            decodeda = decoded | anisotropyFor4x | anisotropicFilter;
-            break;
-        default:
-            decodeda = decoded | 0x1101;
-            break;
-        }
-        s_decodeSamplerFilterState[entryIndex] = decodeda;
-    }
+    iassert(r_texFilterMipMode->current.unsignedInt < 4);
+    for (unsigned entry = 0; entry < 24; ++entry)
+        s_decodeSamplerFilterState[entry] = R_DecodeSamplerFilter(
+            static_cast<std::uint8_t>(entry), r_texFilterMipMode->current.integer,
+            r_texFilterAnisoMin->current.integer,
+            (std::min)(r_texFilterAnisoMax->current.integer, gfxMetrics.maxAnisotropy),
+            r_texFilterDisable->current.enabled,
+            gfxMetrics.hasAnisotropicMinFilter, gfxMetrics.hasAnisotropicMagFilter);
     dx.mipBias = r_texFilterMipBias->current.unsignedInt;
 }
 

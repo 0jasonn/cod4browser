@@ -13,6 +13,7 @@ function filesystem({ mountError = null, checkpointError = null, cleanupError = 
             if (mountError) throw mountError;
             return { fileCount: 1 };
         },
+        observeReadProgress() { return () => {}; },
         async checkpoint() {
             calls.push("checkpoint");
             if (checkpointError) throw checkpointError;

@@ -20,6 +20,17 @@ uint8_t *g_streamPos;
 StreamPosInfo g_streamPosStack[64];
 uint32_t g_streamPosStackIndex;
 
+#if defined(KISAK_WEB)
+bool DB_RuntimeStreamCanRead(std::size_t size)
+{
+    if (g_streamPosIndex >= 9 || !g_streamZoneMem || !g_streamPos) return false;
+    const XBlock &block = g_streamZoneMem->blocks[g_streamPosIndex];
+    if (!block.data || g_streamPos < block.data) return size == 0;
+    const std::size_t offset = static_cast<std::size_t>(g_streamPos - block.data);
+    return offset <= block.size && size <= block.size - offset;
+}
+#endif
+
 // --- file-local forward declarations (moved out of database.h) ---
 static void __cdecl DB_SetStreamIndex(uint32_t index);
 
@@ -95,6 +106,15 @@ uint8_t *__cdecl DB_GetStreamPos()
 
 uint8_t *__cdecl DB_AllocStreamPos(int32_t alignment)
 {
+#if defined(KISAK_WEB)
+    // A malformed XFile can omit a block that a generated loader needs.
+    // Report the input error before the native non-null cursor invariant.
+    if (!g_streamPos)
+    {
+        DB_RuntimeGeneratedFailure("stream/allocation from absent canonical block");
+        return nullptr;
+    }
+#endif
     iassert(g_streamPos);
     const std::uintptr_t address = reinterpret_cast<std::uintptr_t>(g_streamPos);
     const std::uintptr_t mask = static_cast<std::uintptr_t>(alignment);

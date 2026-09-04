@@ -1,3 +1,4 @@
+import { acceptAudioPlayback, createFilesystemProgressReporter } from "./worker_transport.mjs";
 import {
     createWorkerSyncFilesystem,
     mountWorkerFilesystem,
@@ -52,32 +53,6 @@ function notifyFilesystemDirty()
     } else if (dirtyNoticeTimer === null) {
         dirtyNoticeTimer = setTimeout(postFilesystemDirty, Math.max(0, remaining));
     }
-}
-
-function createProgressReporter(message)
-{
-    let lastSent = 0;
-    let lastPhase = "";
-    let lastFiles = 0;
-    let lastBytes = 0;
-    return (progress) => {
-        const now = Date.now();
-        const phaseChanged = progress.phase !== lastPhase;
-        const meaningfulDelta = progress.filesProcessed - lastFiles >= 64 ||
-            progress.bytesProcessed - lastBytes >= 16 * 1024 * 1024;
-        if (!phaseChanged && !meaningfulDelta && now - lastSent < 250) return;
-        lastSent = now;
-        lastPhase = progress.phase;
-        lastFiles = progress.filesProcessed;
-        lastBytes = progress.bytesProcessed;
-        globalThis.postMessage({
-            protocolVersion: ENGINE_PROTOCOL_VERSION,
-            type: "filesystem-progress",
-            id: message.id,
-            operation: message.type,
-            progress,
-        });
-    };
 }
 
 const filesystem = createWorkerSyncFilesystem({ onDirty: notifyFilesystemDirty });
@@ -192,6 +167,23 @@ function queueInput(input)
 {
     if (input.type === "key") {
         module._KisakWeb_QueueKeyEvent(input.key, input.down ? 1 : 0);
+    } else if (input.type === "char") {
+        module._KisakWeb_QueueCharEvent(input.character);
+    } else if (input.type === "clipboard") {
+        const pointer = module._malloc(input.characters.length);
+        if (!pointer) throw Object.assign(new Error("Wasm clipboard allocation failed."), {
+            code: "WASM_MEMORY",
+        });
+        try {
+            module.HEAPU8.set(input.characters, pointer);
+            if (!module._KisakWeb_SetClipboardText(pointer, input.characters.length)) {
+                throw Object.assign(new Error("Engine rejected clipboard text."), {
+                    code: "INVALID_PAYLOAD",
+                });
+            }
+        } finally {
+            module._free(pointer);
+        }
     } else {
         module._KisakWeb_QueueMouseMove(input.x, input.y, input.dx, input.dy);
     }
@@ -199,6 +191,12 @@ function queueInput(input)
 
 globalThis.addEventListener("message", (event) => {
     const message = event.data;
+    if (message?.type === "audio-playback") {
+        acceptAudioPlayback(message);
+        // At most one snapshot waits behind synchronous engine work.
+        globalThis.postMessage({ type: "audio-playback-ack", version: 1 });
+        return;
+    }
     void (async () => {
         try {
             validateProductRequest(message);
@@ -218,7 +216,7 @@ globalThis.addEventListener("message", (event) => {
 
             switch (message.type) {
             case "mountAssets": {
-                const report = createProgressReporter(message);
+                const report = createFilesystemProgressReporter(message);
                 try {
                     const mounted = await mountWorkerFilesystem(
                         filesystem,
@@ -236,14 +234,14 @@ globalThis.addEventListener("message", (event) => {
             }
             case "flushAndUnmount": {
                 const result = await filesystem.flushAndUnmount(
-                    createProgressReporter(message));
+                    createFilesystemProgressReporter(message));
                 reply(message.id, message.type, result);
                 state = "ready";
                 break;
             }
             case "checkpoint":
                 reply(message.id, message.type, await filesystem.checkpoint(
-                    createProgressReporter(message)));
+                    createFilesystemProgressReporter(message)));
                 break;
             case "probeAsset": {
                 const result = await probeAsset(message.kind, message.buffers, message.metadata);
@@ -267,7 +265,7 @@ globalThis.addEventListener("message", (event) => {
             case "shutdown":
                 state = "stopping";
                 reply(message.id, message.type, await filesystem.flushAndUnmount(
-                    createProgressReporter(message)));
+                    createFilesystemProgressReporter(message)));
                 state = "stopped";
                 break;
             default:

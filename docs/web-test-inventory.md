@@ -1,6 +1,6 @@
 # Web test inventory after the Ponytail cleanup
 
-Updated 2026-09-03. The Win32 MSVC portable configuration contains 34 tests;
+Updated 2026-09-04. The Win32 MSVC portable configuration contains 34 tests;
 the direct-Wasm configuration contains 35, including its platform-specific
 cgame timescale check. This cleanup preserves every portable test registration.
 Shared CMake loops replace repeated Node flags, output suffixes and registration.
@@ -17,7 +17,7 @@ specification for the canonical runtime.
 | --- | --- | --- |
 | `filesystem.spec.mjs` (three cases) | Unused asynchronous stat/read bridge and immutable read-source tokens | `canonical_filesystem.spec.mjs`, Worker durability tests, Node filesystem lifecycle tests and product lease tests exercise the active synchronous Worker filesystem and import ownership. |
 | Shader branch of `asset_parsers_fuzz` | Unused bootstrap shader substitution parser | No replacement by design. The harness retains active IWD/IWI parser coverage; browser boot and context-recovery tests exercise the actual renderer. |
-| `archive.spec`, `web_fastfile_source_stream_tests`, `web_fastfile_zone_stream_tests`, `web_fastfile_zone_registry_tests`, `retail_fastfile_dispatcher_fuzz` | Parallel retail archive/source/zone parser and dispatcher | Canonical IWD and filesystem behavior: `iwd_archive_tests`, `web_asset_probe_tests`, `gate3_db_stream_trace_tests`, and `canonical_filesystem.spec`. A state-owning canonical XFile fuzz harness remains a post-merge task; the deleted dispatcher is not restored. |
+| `archive.spec`, `web_fastfile_source_stream_tests`, `web_fastfile_zone_stream_tests`, `web_fastfile_zone_registry_tests`, `retail_fastfile_dispatcher_fuzz` | Parallel retail archive/source/zone parser and dispatcher | Canonical IWD and filesystem behavior: `iwd_archive_tests`, `web_asset_probe_tests`, `gate3_db_stream_trace_tests`, `canonical_xfile_mutation_tests`, and `canonical_filesystem.spec`. The focused RawFile semantic contract also runs through the real native `db_load.cpp` routine and the adapted Win32/Wasm routine; broader native-oracle asset coverage remains open. The deleted dispatcher is not restored. |
 | `engine_asset.spec`, `web_fastfile_world_surface_tests` | Extracted browser asset records and synthetic world proof | `canonical_asset_abi_tests`, `gate3_db_pool_tests`, `gate3_db_stream_trace_tests`, renderer frontend tests, `gate3_db_worker.spec`, and the opt-in retail canonical DB suite. |
 | `gate2_oracle.mjs`, `retail_census.spec`, `web_retail_fastfile_census_tests` | Gate 2 census/oracle | No direct replacement by design. Canonical DB stream/publication tests own correctness; production boundary checks ensure Gate 2 stays absent. |
 | `qcommon.spec`, `web_qcommon_preinit_tests` | Browser-only qcommon shell and staged startup controls | `canonical_runtime_prefix_tests` on native/Wasm plus `canonical_runtime_prefix.spec` through the Worker runtime. |
@@ -31,6 +31,18 @@ and the non-overlapping diagnostic remainder on direct `codex/**` pushes and
 pull requests.
 
 ## Current cleanup verification
+
+Renderer sampler changes also need the installed Chrome/D3D11 path on Windows:
+set `KISAK_BROWSER_CHANNEL=chrome`, select an isolated diagnostic port, and run
+`npx.cmd playwright test tests/browser/dynamic_lights.spec.mjs`. The first
+pixel draw forces ANGLE's dynamic backend compilation, which WebGL link and
+validation do not prove. This caught colliding HLSL sampler-helper signatures
+that the bundled Chromium path accepted. Distinct GLSL helper names fix the
+failure without changing sampling. The broader Chrome graphics suite currently
+has three unchanged exact-pixel assertion failures (127 versus 128 in soft
+alpha and light/mip green output); its other five cases, including transient
+lighting, pass. These are observed one-byte differences, not established
+native-versus-browser fidelity. The default Chromium routine tiers pass.
 
 Verified on 2026-09-03 with MSVC 19.51, Emscripten 6.0.6, Node 24.18.0
 and Chromium 149.0.7827.55:
@@ -60,14 +72,19 @@ completed with 52 passed and four failed:
 
 - The local validation matrix rejected the uncommitted cleanup at its
   clean-source guard.
-- Gate 3 loaded/rendered the owned map but timed out on the exact camera/geometry
-  predicate at `gate3_retail_db.spec.mjs:249`.
+- Gate 3 historically loaded/rendered the owned map but timed out on its exact
+  camera/geometry predicate. The 2026-09-04 follow-up traced the difference to
+  commit `498289c7`, where canonical lit/decal/emissive DPVS ranges replaced the
+  legacy contiguous prefix. Its independently derived 8,475-surface / 445,369-
+  vertex / 823,464-index expectation and later input/lifecycle assertions now
+  pass. The fixture's synthetic-IWD fallback inventory remains explicit.
 - The cinematic case observed a terminated Worker instead of completed mounting
   at `retail_cinematic.spec.mjs:55`.
 - Transient omni lighting increased the captured mean by 0.231, below the
   required value of 1 at `retail_ui_persistence.spec.mjs:912`.
 
-The isolated synthetic remainder above cleared the retail variable. The retail
-assertions were not changed, and these results do not establish retail parity
-or whether those failures predate the cleanup. Logs and failure traces remain
-under ignored `build/cleanup-remainder.log` and `test-results/8173/`.
+The isolated synthetic remainder above cleared the retail variable. This list
+records that historical cleanup run; the Gate 3 item is resolved as described
+above, while the other observations are not promoted into current parity
+claims. Logs and failure traces remain under ignored
+`build/cleanup-remainder.log` and `test-results/8173/`.

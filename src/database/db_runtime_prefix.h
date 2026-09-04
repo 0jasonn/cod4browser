@@ -96,6 +96,8 @@ void DB_RuntimeTracePublicationEnd(
     XAssetType type, const char *name, std::uint32_t entryIndex,
     std::uint32_t poolIndex, std::size_t freeBefore, std::size_t freeAfter,
     std::uint32_t hash, std::uint32_t zoneIndex);
+// Canonical validation lives in db_file_load.cpp/db_stream.cpp. The trace
+// snapshot observes these owners and cannot control load success or retry.
 void DB_RuntimeGeneratedFailure(const char *stage);
 bool DB_RuntimeGeneratedLoadFailed();
 bool DB_RuntimeStreamCanRead(std::size_t size);

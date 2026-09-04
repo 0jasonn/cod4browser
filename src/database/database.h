@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <cstddef>
+#include <database/db_string_ownership.h>
 
 #include <zlib/zlib.h>
 
@@ -178,6 +179,9 @@ void __stdcall DB_FileReadCompletion(
     _OVERLAPPED *lpOverlapped);
 #endif
 void __cdecl DB_LoadXFileInternal();
+#if defined(KISAK_NATIVE_DB_LOAD_RAWFILE_ORACLE)
+RawFile *__cdecl DB_LoadNativeRawFileOracle(std::uint32_t assetIndex);
+#endif
 void __cdecl DB_ResetZoneSize(int32_t trackLoadProgress);
 void __cdecl DB_LoadXFile(
     const char *path,
@@ -223,11 +227,6 @@ void __cdecl Load_TempStringCustom(char **str);
 // db_stringtable_load
 void __cdecl Load_ScriptStringCustom(uint16_t *var);
 void __cdecl Mark_ScriptStringCustom(uint16_t *var);
-void DB_RegisterStringZoneOwnership(uint32_t stringValue, uint32_t zoneIndex);
-void DB_UnregisterDefaultStringOwnership(uint32_t stringValue);
-void DB_ReleaseStringZoneOwnership(uint64_t releaseZoneMask);
-
-
 // db_load
 void __cdecl Load_ScriptStringList(bool atStreamStart);
 XAsset *__cdecl AllocLoad_FxElemVisStateSample();

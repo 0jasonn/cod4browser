@@ -450,3 +450,49 @@ test("Missing imported cinematics complete and publish an explicit omission", as
         },
     });
 });
+
+
+test("Worker playback waits for Web Audio delivery and its suspended device clock", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForFunction(() => globalThis.__KISAKCOD_WEB__?.module?.ready);
+    await page.locator("#game-canvas").click();
+    const call = (operation) => page.evaluate((op) =>
+        globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestAudioProxyPcm", op), operation);
+    await page.evaluate(async () => {
+        const driver = globalThis.__KISAKCOD_WEB__.module.audioDriver;
+        await driver.resumeFromGesture();
+        globalThis.__deliverAudio = driver.handleCommand.bind(driver);
+        driver.handleCommand = (command) => {
+            if (command.op === "source-play") { globalThis.__heldAudio = command; return true; }
+            return globalThis.__deliverAudio(command);
+        };
+    });
+    for (const operation of [10, 20]) {
+        expect(await call(operation)).toBe(1);
+        // Longer than the complete fixture, before the device receives play.
+        await page.waitForTimeout(850);
+        expect(await call(1)).toBe(0x1012);
+        expect(await call(2)).toBe(0);
+        expect(await call(7)).toBe(0);
+        await page.evaluate(() => globalThis.__deliverAudio(globalThis.__heldAudio));
+        await expect.poll(() => call(2)).toBeGreaterThan(0);
+        await page.evaluate(async () => {
+            const driver = globalThis.__KISAKCOD_WEB__.module.audioDriver;
+            await driver.context.suspend();
+            driver.publishPlayback(true);
+            // Match the proxy's ALfloat conversion and float milliseconds exactly.
+            globalThis.__frozenOffset = Math.trunc(Math.fround(Math.fround(driver.playbackState(
+                driver.sources.get(globalThis.__heldAudio.sourceId)).offset) * 1000));
+        });
+        const frozen = await page.evaluate(() => globalThis.__frozenOffset);
+        await expect.poll(() => call(2)).toBe(frozen);
+        await page.waitForTimeout(850);
+        expect(await call(1)).toBe(0x1012);
+        expect(await call(2)).toBe(frozen);
+        expect(await call(7)).toBe(0);
+        await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.audioDriver.context.resume());
+        await expect.poll(() => call(1)).toBe(0x1014);
+        expect(await call(7)).toBe(operation === 20 ? 3 : 0);
+        expect(await call(5)).toBe(1);
+    }
+});

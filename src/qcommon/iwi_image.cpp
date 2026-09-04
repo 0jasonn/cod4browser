@@ -12,7 +12,8 @@ Error DecodeWaveletPayloadRgba8(
     std::uint16_t width,
     std::uint16_t height,
     std::span<const std::uint8_t> payload,
-    std::vector<std::uint8_t> &rgba) noexcept;
+    std::vector<std::uint8_t> &rgba,
+    std::uint32_t firstMip) noexcept;
 
 namespace
 {
@@ -481,7 +482,8 @@ Error Parse(std::span<const std::uint8_t> bytes, Metadata &metadata) noexcept
 static Error ProcessRgba8(
     std::span<const std::uint8_t> bytes,
     Rgba8Image *image,
-    Rgba8Layout *layout) noexcept
+    Rgba8Layout *layout,
+    std::uint32_t firstMip) noexcept
 {
     Metadata metadata{};
     const Error parseError = Parse(bytes, metadata);
@@ -489,6 +491,13 @@ static Error ProcessRgba8(
     {
         return parseError;
     }
+
+    // Image_LoadFromFile also exempts small images from quality reduction.
+    firstMip = (metadata.flags & (FLAG_NO_PICMIP | FLAG_NO_MIPMAPS)) ||
+        metadata.width < 32u || metadata.height < 32u ? 0u :
+        std::min(firstMip, Count2dStoredMipmaps(metadata.flags, metadata.width, metadata.height) - 1u);
+    const auto originalWidth = metadata.width;
+    const auto originalHeight = metadata.height;
 
     const bool rgb8 = metadata.format == FORMAT_RGB8;
     const bool a8l8 = metadata.format == FORMAT_A8L8;
@@ -574,14 +583,16 @@ static Error ProcessRgba8(
             {
                 return Error::DecodeOutputTooLarge;
             }
-            if (level == 0u) baseLevelBytes = levelBytes;
+            if (level == firstMip) {
+                baseLevelBytes = levelBytes;
+                baseLevelOffset = HEADER_SIZE + payloadBytes - levelBytes;
+            }
         }
         if (!CheckedAdd(HEADER_SIZE, payloadBytes, expectedMemberBytes) ||
             bytes.size() != expectedMemberBytes || baseLevelBytes > payloadBytes)
         {
             return Error::DecodeInvalidLayout;
         }
-        baseLevelOffset = HEADER_SIZE + payloadBytes - baseLevelBytes;
     }
     else
     {
@@ -603,20 +614,26 @@ static Error ProcessRgba8(
             {
                 return Error::DecodeOutputTooLarge;
             }
-            if (level == 0u) baseLevelBytes = levelBytes;
+            if (level == firstMip) {
+                baseLevelBytes = levelBytes;
+                baseLevelOffset = HEADER_SIZE + payloadBytes - levelBytes;
+            }
         }
         if (!CheckedAdd(HEADER_SIZE, payloadBytes, expectedMemberBytes) ||
             bytes.size() != expectedMemberBytes || baseLevelBytes > payloadBytes)
         {
             return Error::DecodeInvalidLayout;
         }
-        baseLevelOffset = HEADER_SIZE + payloadBytes - baseLevelBytes;
     }
 
     if (baseLevelOffset > bytes.size())
     {
         return Error::DecodeInvalidLayout;
     }
+    metadata.width = std::max<std::uint16_t>(originalWidth >> firstMip, 1u);
+    metadata.height = std::max<std::uint16_t>(originalHeight >> firstMip, 1u);
+    pixelCount = static_cast<std::size_t>(metadata.width) * metadata.height;
+    pixelBytes = pixelCount * RGBA_BYTES_PER_PIXEL;
     if (layout)
     {
         *layout = {
@@ -633,8 +650,8 @@ static Error ProcessRgba8(
     if (wavelet)
     {
         const Error waveletError = DecodeWaveletPayloadRgba8(
-            metadata.format, metadata.width, metadata.height,
-            bytes.subspan(HEADER_SIZE), rgba);
+            metadata.format, originalWidth, originalHeight,
+            bytes.subspan(HEADER_SIZE), rgba, firstMip);
         if (waveletError != Error::None) return waveletError;
         image->width = metadata.width;
         image->height = metadata.height;
@@ -736,16 +753,18 @@ static Error ProcessRgba8(
 
 Error DecodeRgba8(
     std::span<const std::uint8_t> bytes,
-    Rgba8Image &image) noexcept
+    Rgba8Image &image,
+    std::uint32_t firstMip) noexcept
 {
-    return ProcessRgba8(bytes, &image, nullptr);
+    return ProcessRgba8(bytes, &image, nullptr, firstMip);
 }
 
 Error InspectRgba8(
     std::span<const std::uint8_t> bytes,
-    Rgba8Layout &layout) noexcept
+    Rgba8Layout &layout,
+    std::uint32_t firstMip) noexcept
 {
-    return ProcessRgba8(bytes, nullptr, &layout);
+    return ProcessRgba8(bytes, nullptr, &layout, firstMip);
 }
 
 Error DecodeCubeRgba8(
@@ -877,7 +896,8 @@ static Error ProcessLoadDefRgba8(
     std::uint16_t depth,
     std::span<const std::uint8_t> payload,
     Rgba8Image *image,
-    Rgba8Layout *layout) noexcept
+    Rgba8Layout *layout,
+    std::uint32_t firstMip = 0u) noexcept
 {
     std::uint8_t iwiFormat = 0u;
     std::size_t bytesPerBlock = 0u;
@@ -930,7 +950,9 @@ static Error ProcessLoadDefRgba8(
         return Error::DecodeOutputTooLarge;
     }
 
-    const std::uint32_t mipCount = CountMipmaps(flags, width, height, depth);
+    std::uint32_t mipCount = CountMipmaps(flags, width, height, depth);
+    firstMip = (flags & FLAG_NO_PICMIP) ? 0u : std::min(firstMip, mipCount - 1u);
+    std::size_t skippedBytes = 0u, skippedRgbaBytes = 0u;
     std::size_t expectedBytes = 0u;
     std::size_t baseLevelBytes = 0u;
     std::size_t totalRgbaBytes = 0u;
@@ -966,11 +988,26 @@ static Error ProcessLoadDefRgba8(
             !CheckedAdd(totalRgbaBytes, levelRgbaBytes, totalRgbaBytes) ||
             !CheckedAdd(expectedBytes, levelBytes, expectedBytes))
             return Error::DecodeOutputTooLarge;
+        if (mip < firstMip) {
+            skippedBytes = expectedBytes;
+            skippedRgbaBytes = totalRgbaBytes;
+        }
     }
     if (payload.size() != expectedBytes || baseLevelBytes > payload.size())
         return Error::DecodeInvalidLayout;
     if (totalRgbaBytes > MAX_LOADDEF_MIP_CHAIN_RGBA8_BYTES)
         return Error::DecodeOutputTooLarge;
+    if (firstMip) {
+        payload = payload.subspan(skippedBytes);
+        width = std::max<std::uint16_t>(width >> firstMip, 1u);
+        height = std::max<std::uint16_t>(height >> firstMip, 1u);
+        mipCount -= firstMip;
+        pixelCount = static_cast<std::size_t>(width) * height;
+        pixelBytes = pixelCount * RGBA_BYTES_PER_PIXEL;
+        totalRgbaBytes -= skippedRgbaBytes;
+        const Error sizeError = LoadDefLevelBytes(format, width, height, baseLevelBytes);
+        if (sizeError != Error::None) return sizeError;
+    }
     if (layout)
     {
         *layout = {
@@ -1104,10 +1141,11 @@ Error DecodeLoadDefRgba8(
     std::uint16_t height,
     std::uint16_t depth,
     std::span<const std::uint8_t> payload,
-    Rgba8Image &image) noexcept
+    Rgba8Image &image,
+    std::uint32_t firstMip) noexcept
 {
     return ProcessLoadDefRgba8(
-        format, flags, width, height, depth, payload, &image, nullptr);
+        format, flags, width, height, depth, payload, &image, nullptr, firstMip);
 }
 
 Error InspectLoadDefRgba8(
@@ -1117,10 +1155,11 @@ Error InspectLoadDefRgba8(
     std::uint16_t height,
     std::uint16_t depth,
     std::span<const std::uint8_t> payload,
-    Rgba8Layout &layout) noexcept
+    Rgba8Layout &layout,
+    std::uint32_t firstMip) noexcept
 {
     return ProcessLoadDefRgba8(
-        format, flags, width, height, depth, payload, nullptr, &layout);
+        format, flags, width, height, depth, payload, nullptr, &layout, firstMip);
 }
 
 Error DecodeLoadDefCubeRgba8(

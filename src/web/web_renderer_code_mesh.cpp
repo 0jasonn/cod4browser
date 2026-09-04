@@ -1,6 +1,7 @@
 #include <web/web_renderer_code_mesh.h>
 
 #include <gfx_d3d/material_types.h>
+#include <qcommon/qcommon_math.h>
 
 #include <algorithm>
 #include <cmath>
@@ -43,6 +44,10 @@ void ConvertVertex(
         static_cast<std::uint16_t>(source.texCoord.packed & 0xffffu));
     destination.lightmapCoordinate[0] = 0.0f;
     destination.lightmapCoordinate[1] = 0.0f;
+    // FOA uses the normal; distortion also projects the authored tangent.
+    // Native trails leave the unused binormal sign unwritten: do not read it.
+    Q_UnpackUnitVec(source.normal.array, destination.normal);
+    Q_UnpackUnitVec(source.tangent.array, destination.tangent);
 }
 
 bool IsFiniteVertex(const WebRendererSurfaceVertex &vertex) noexcept

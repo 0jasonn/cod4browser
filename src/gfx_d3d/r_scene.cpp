@@ -458,9 +458,8 @@ GfxDrawSurf *__cdecl R_AddBModelSurfaces(
         {
             bcassert(surfId, (1 << MTL_SORT_OBJECT_ID_BITS));
 
-			drawSurf->packed = material->info.drawSurf.packed;
-			drawSurf->fields.objectId = surfId;
-			drawSurf->fields.surfType = SF_BMODEL;
+            *drawSurf = kisak::dynamic_lights::ReceiverDrawSurf(
+                material->info.drawSurf, SF_BMODEL, surfId);
 			++drawSurf;
         }
         ++modelSurf;
@@ -686,16 +685,8 @@ GfxDrawSurf *__cdecl R_AddXModelSurfaces(
 
                 bcassert(surfId, (1 << MTL_SORT_OBJECT_ID_BITS));
 
-                drawSurf->packed = (*material)->info.drawSurf.packed; // copy all to start with
-
-                drawSurf->fields.surfType = surfType;
-                drawSurf->fields.objectId = surfId;
-                //HIDWORD(newDrawSurf) = ((surfType & 0xF) << 18)  // surfType
-                //    | HIDWORD((*material)->info.drawSurf.packed) & 0xFFC3FFFF; // rest of bits in HIDWORD
-                //LODWORD(newDrawSurf) = (uint16_t)surfId  // objectID
-                //    | *(uint32_t *)&(*material)->info.drawSurf.fields & 0xFFFF0000; // rest of bits in LODWORD
-
-                //drawSurf->packed = newDrawSurf;
+                *drawSurf = kisak::dynamic_lights::ReceiverDrawSurf(
+                    (*material)->info.drawSurf, surfType, surfId);
 
                 ++drawSurf;
                 surfId += 14;
@@ -885,7 +876,6 @@ GfxDrawSurf *__cdecl R_AddDObjSurfaces(
     XModel *model; // [esp+1Ch] [ebp-44h]
     uint32_t subMatIndex; // [esp+20h] [ebp-40h]
     uint32_t surfSize; // [esp+24h] [ebp-3Ch]
-    GfxDrawSurf newDrawSurf; // [esp+28h] [ebp-38h]
     int lod; // [esp+38h] [ebp-28h]
     uint32_t depthHack; // [esp+3Ch] [ebp-24h]
     char *modelSurf; // [esp+40h] [ebp-20h]
@@ -952,21 +942,8 @@ GfxDrawSurf *__cdecl R_AddDObjSurfaces(
                 surfId = surfId / 4;
                 iassert(surfId < (1 << MTL_SORT_OBJECT_ID_BITS));
 
-                newDrawSurf = (*material)->info.drawSurf;
-
-                drawSurf->packed = newDrawSurf.packed; // LWSS: see explanation below, it basically copies the whole thing and sets a few custom fields.
-
-                drawSurf->fields.objectId = (unsigned short)surfId;
-                //*(uint32_t *)&drawSurf->fields = (uint16_t)surfIda  // set lower 16 (objectId)
-                //    | *(uint32_t *)&newDrawSurf.fields & 0xFFFF0000; // Copy the higher 2 bytes (bits 16-32)
-                
-                drawSurf->fields.surfType = surfType;
-                drawSurf->fields.primarySortKey = (newDrawSurf.fields.primarySortKey - depthHack);
-
-                // HIDWORD(drawSurf->packed) = // Adds << 32 to all below
-                //     ((surfType & 0xF) << 18) // surfType
-                //     | (((((newDrawSurf.packed >> 54) & 0x3F) - depthHack) & 0x3F) << 22) // newDrawSurf.primarySortKey - depthhack
-                //     | HIDWORD(newDrawSurf.packed) & 0xF003FFFF; // Copy everything higher than 32 except for 10bits (Surftype and primarySortKey, we did those already)
+                *drawSurf = kisak::dynamic_lights::ReceiverDrawSurf(
+                    (*material)->info.drawSurf, surfType, surfId, depthHack != 0u);
 
                 ++drawSurf;
             }

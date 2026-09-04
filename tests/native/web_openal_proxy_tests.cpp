@@ -6,9 +6,6 @@
 
 int main()
 {
-    assert(WebOpenAL_RebaseStarted(10.0, 2.0f, 2.0f) == 9.0);
-    assert(WebOpenAL_RebaseStarted(10.0, 3.0f, 1.5f) == 8.0);
-
     ALuint source = 0;
     alGenSources(1, &source);
     assert(source == 1);
@@ -136,5 +133,79 @@ int main()
     assert(reusedBuffer == 1);
     alDeleteBuffers(1, &reusedBuffer);
     alcCloseDevice(device);
+    // The proxy must wait for the device rather than infer completion from
+    // Worker elapsed time. Feedback is generation- and queue-prefix-safe.
+    ALuint clockSource = 0, clockBuffers[3]{};
+    alGenSources(1, &clockSource);
+    alGenBuffers(3, clockBuffers);
+    const std::int16_t clockPcm[8]{};
+    for (ALuint id : clockBuffers)
+        alBufferData(id, AL_FORMAT_MONO16, clockPcm, sizeof(clockPcm), 8);
+    alSourcei(clockSource, AL_BUFFER, clockBuffers[0]);
+    alSourcePlay(clockSource);
+    auto generation = WebOpenAL_SourceGeneration(clockSource);
+    ALfloat offset = -1;
+    alGetSourcef(clockSource, AL_SEC_OFFSET, &offset);
+    assert(offset == 0);
+    assert(WebOpenAL_ApplyPlayback(clockSource, generation, 0, 0.75, AL_PLAYING));
+    alSourcef(clockSource, AL_PITCH, 2);
+    alGetSourcef(clockSource, AL_SEC_OFFSET, &offset);
+    assert(offset == 0.75f);
+    alSourcePause(clockSource);
+    assert(!WebOpenAL_ApplyPlayback(clockSource, generation, 0, 1, AL_STOPPED));
+    generation = WebOpenAL_SourceGeneration(clockSource);
+    assert(WebOpenAL_ApplyPlayback(clockSource, generation, 0, 0.8, AL_PAUSED));
+    alGetSourcef(clockSource, AL_SEC_OFFSET, &offset);
+    assert(offset == 0.8f);
+    alSourcePlay(clockSource);
+    assert(!WebOpenAL_ApplyPlayback(clockSource, generation, 0, 1, AL_STOPPED));
+    generation = WebOpenAL_SourceGeneration(clockSource);
+    assert(!WebOpenAL_ApplyPlayback(clockSource, generation, 0,
+        std::numeric_limits<double>::quiet_NaN(), AL_PLAYING));
+    assert(WebOpenAL_ApplyPlayback(clockSource, generation, 0, 1, AL_STOPPED));
+    alGetSourcei(clockSource, AL_SOURCE_STATE, &state);
+    assert(state == AL_STOPPED);
+
+    alSourcei(clockSource, AL_BUFFER, 0);
+    alSourceQueueBuffers(clockSource, 2, clockBuffers);
+    alSourcePlay(clockSource);
+    generation = WebOpenAL_SourceGeneration(clockSource);
+    assert(WebOpenAL_ApplyPlayback(clockSource, generation, 1, 0.25, AL_PLAYING));
+    double movieSeconds = -1;
+    assert(WebOpenAL_SourcePlaybackSeconds(clockSource, movieSeconds));
+    assert(movieSeconds == 1.25);
+    ALuint retired = 0;
+    alSourceUnqueueBuffers(clockSource, 1, &retired);
+    assert(retired == clockBuffers[0]);
+    assert(WebOpenAL_SourcePlaybackSeconds(clockSource, movieSeconds));
+    assert(movieSeconds == 1.25);
+    assert(!WebOpenAL_ApplyPlayback(clockSource, generation, 0, 0, AL_PLAYING));
+    assert(WebOpenAL_ApplyPlayback(clockSource, generation, 1, 0.5, AL_PLAYING));
+    assert(WebOpenAL_SourcePlaybackSeconds(clockSource, movieSeconds));
+    assert(movieSeconds == 1.5);
+    alGetSourcei(clockSource, AL_BUFFERS_PROCESSED, &processed);
+    assert(processed == 0);
+    alSourceQueueBuffers(clockSource, 1, &clockBuffers[2]);
+    // The device exhausted its older tail while the new queue command was in flight.
+    assert(WebOpenAL_ApplyPlayback(clockSource, generation, 2, 0, AL_STOPPED));
+    alGetSourcei(clockSource, AL_SOURCE_STATE, &state);
+    assert(state == AL_PLAYING);
+    assert(WebOpenAL_ApplyPlayback(clockSource, generation, 3, 0, AL_STOPPED));
+    assert(WebOpenAL_SourcePlaybackSeconds(clockSource, movieSeconds));
+    assert(movieSeconds == 3);
+    alGetSourcei(clockSource, AL_BUFFERS_PROCESSED, &processed);
+    assert(processed == 2);
+    alDeleteSources(1, &clockSource);
+    alGenSources(1, &clockSource);
+    alSourcei(clockSource, AL_BUFFER, clockBuffers[0]);
+    alSourcePlay(clockSource);
+    assert(!WebOpenAL_ApplyPlayback(clockSource, generation, 0, 1, AL_STOPPED));
+    generation = WebOpenAL_SourceGeneration(clockSource);
+    assert(WebOpenAL_ApplyPlayback(clockSource, generation, 0, 0, AL_NONE));
+    alGetSourcei(clockSource, AL_SOURCE_STATE, &state);
+    assert(state == AL_STOPPED); // explicit device failure retires a muted channel
+    assert(!WebOpenAL_SourcePlaybackSeconds(clockSource, movieSeconds));
+    alDeleteSources(1, &clockSource);
+    alDeleteBuffers(3, clockBuffers);
     return 0;
 }

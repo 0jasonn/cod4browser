@@ -198,8 +198,12 @@ system memory. See the
 [sanitized machine-readable evidence](evidence/retail-campaign-247980a6.json).
 It contains no retail paths or proprietary content.
 
-Current totals are 7 runtime-probed maps: 2 `PLAYABLE`, 4 `FUNCTIONAL`, 1
-`RENDERS`, 15 `UNTESTED`, and 0 `BLOCKED` or `REGRESSION`.
+Current totals are 8 runtime-probed maps: 2 `PLAYABLE`, 4 `FUNCTIONAL`, 2
+`RENDERS`, 14 `UNTESTED`, and 0 `BLOCKED` or `REGRESSION`. These retain the
+historical evidence levels below, not current-build performance claims.
+Authored mission completion is unverified for every row. The user owns further
+manual gameplay, death/restart/Continue and original/native fidelity acceptance;
+implementation work is independent of that acceptance.
 
 | Map | Canonical runtime | First frame | Valid foreground performance | Canonical gameplay | Transition / context recovery | Recovery / Wasm capacity | Result | Evidence |
 | --- | --- | ---: | --- | --- | --- | --- | --- | --- |
@@ -210,7 +214,21 @@ Current totals are 7 runtime-probed maps: 2 `PLAYABLE`, 4 `FUNCTIONAL`, 1
 | `hunted` | All canonical runtime boundaries pass | 6,660.220 ms | 1,145 frames; 19.08 FPS; 55.40 ms p95; 0.993989 ratio | Fire clip 6 -> 5; ADS, movement, mouse, menu, pointer lock, audio, and checkpoint pass; wheel is `NOT_APPLICABLE_SINGLE_WEAPON` | CargoShip in / Killhouse out pass; 1,984.015 ms context recovery | 480,307,702 B aggregate CPU recovery / 968,163,328 B capacity | **FUNCTIONAL** | Clean `247980a6` record; outdoor visibility, foliage, world, and dynamic-model coverage; average and p95 miss the threshold. |
 | `bog_a` | All canonical runtime boundaries pass | 9,821.955 ms | 1,271 frames; 21.21 FPS; 56.64 ms p95; 0.999457 ratio | Fire clip 15 -> 14; ADS, wheel selection, movement, mouse, menu, pointer lock, audio, and checkpoint pass | CargoShip in / Killhouse out pass; 1,844.635 ms context recovery | 428,120,523 B aggregate CPU recovery / 961,937,408 B capacity | **FUNCTIONAL** | Clean `247980a6` rerun; dense combat, FX, material, entity, and audio coverage; average and p95 miss the threshold. |
 | `scoutsniper` | DB, ClipMap/world, server, game, cgame, and actual world frames pass | 9,547.870 ms | Headless stationary window: 3,601 frames / 60,012.685 ms; no visual claim | Not exercised; no input injected | CargoShip transition-in passed; context recovery and transition-out not exercised | 414,917,420 B aggregate CPU recovery / 955,514,880 B capacity | **RENDERS** | Dirty observe-only run based on `838e047c`; no page, GL, or lifecycle errors. |
-| Other 15 directly selected non-`mp_*`/non-`*_mp` SP zones | Not run | Not run | Not measured | Not run | Not run | Not recorded | **UNTESTED** | Discovery or a header probe is not compatibility evidence. Add one row only after a legal local execution run. |
+| `ac130` | Canonical DB/world, server/game and client/cgame pass | 6.046 seconds after command | Headless stationary only; active performance unverified | Not exercised | CargoShip transition-in; recovery/out not exercised | 930,676,736 B Wasm capacity | **RENDERS** | [Chrome 152 diagnostics and production; source/artifact identity](evidence/ac130-rendering-2026-09-03.md). |
+| `aftermath` | Not run | Not run | Not measured | Not run | Not run | Not recorded | **UNTESTED** | Owned-file discovery only; no runtime or completion claim. |
+| `airlift` | Not run | Not run | Not measured | Not run | Not run | Not recorded | **UNTESTED** | Owned-file discovery only; no runtime or completion claim. |
+| `ambush` | Not run | Not run | Not measured | Not run | Not run | Not recorded | **UNTESTED** | Owned-file discovery only; no runtime or completion claim. |
+| `armada` | Not run | Not run | Not measured | Not run | Not run | Not recorded | **UNTESTED** | Owned-file discovery only; no runtime or completion claim. |
+| `bog_b` | Not run | Not run | Not measured | Not run | Not run | Not recorded | **UNTESTED** | Owned-file discovery only; no runtime or completion claim. |
+| `coup` | Not run | Not run | Not measured | Not run | Not run | Not recorded | **UNTESTED** | Owned-file discovery only; no runtime or completion claim. |
+| `icbm` | Not run | Not run | Not measured | Not run | Not run | Not recorded | **UNTESTED** | Owned-file discovery only; no runtime or completion claim. |
+| `jeepride` | Not run | Not run | Not measured | Not run | Not run | Not recorded | **UNTESTED** | Owned-file discovery only; no runtime or completion claim. |
+| `launchfacility_a` | Not run | Not run | Not measured | Not run | Not run | Not recorded | **UNTESTED** | Owned-file discovery only; no runtime or completion claim. |
+| `launchfacility_b` | Not run | Not run | Not measured | Not run | Not run | Not recorded | **UNTESTED** | Owned-file discovery only; no runtime or completion claim. |
+| `simplecredits` | Not run | Not run | Not measured | Not run | Not run | Not recorded | **UNTESTED** | Owned-file discovery only; no runtime or completion claim. |
+| `sniperescape` | Not run | Not run | Not measured | Not run | Not run | Not recorded | **UNTESTED** | Owned-file discovery only; no runtime or completion claim. |
+| `village_assault` | Not run | Not run | Not measured | Not run | Not run | Not recorded | **UNTESTED** | Owned-file discovery only; no runtime or completion claim. |
+| `village_defend` | Not run | Not run | Not measured | Not run | Not run | Not recorded | **UNTESTED** | Owned-file discovery only; no runtime or completion claim. |
 
 `decodedTextureRecoveryBytes` is the logical decoded texture size. It is not
 the retained recovery allocation after `c66d41e1`: the renderer now retains

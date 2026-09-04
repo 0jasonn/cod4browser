@@ -18,6 +18,9 @@ bool WebRendererContext_Create(
         const canvas = globalThis.__KISAKCOD_OFFSCREEN_CANVAS__;
         if (canvas && typeof GL === "object" && GL.offscreenCanvases) {
             GL.offscreenCanvases.canvas = canvas;
+            // Emscripten's context creation resolves offscreenCanvases, but
+            // its context-event registration uses the separate event table.
+            specialHTMLTargets["#canvas"] = canvas;
         }
     });
 
@@ -67,4 +70,5 @@ void WebRendererContext_Destroy(EMSCRIPTEN_WEBGL_CONTEXT_HANDLE &context)
     if (context > 0)
         (void)emscripten_webgl_destroy_context(context);
     context = 0;
+    EM_ASM({ delete specialHTMLTargets["#canvas"]; });
 }

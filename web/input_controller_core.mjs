@@ -32,10 +32,24 @@ export function browserKeyToEngineKey(event)
 /** @param {number} button */
 const mouseButtonKey = (button) => [0xC8, 0xCA, 0xC9, 0xCB, 0xCC][button] ?? 0;
 
+// Kisak's native ANSI fields store bytes, not UTF-8. Match the Western
+// installation code page; never truncate an unsupported Unicode character.
+const westernCharacters = new TextDecoder("windows-1252")
+    .decode(Uint8Array.from({ length: 256 }, (_, index) => index));
+/** @param {string} text */
+export function browserTextToEngineCharacters(text)
+{
+    return Array.from(text.normalize("NFC"), (character) =>
+        westernCharacters.indexOf(character)).filter((byte) => byte >= 32 && byte !== 127);
+}
+
 /**
  * @typedef {{type: "key", key: number, down: boolean} |
+ *   {type: "char", character: number} |
+ *   {type: "clipboard", characters: number[]} |
  *   {type: "mouse-move", x: number, y: number, dx: number, dy: number}} EngineInput
  * @param {{canvas: HTMLCanvasElement, commandInput?: HTMLElement | null,
+ *   textInput?: HTMLTextAreaElement | null,
  *   sendInput: (event: EngineInput) => unknown,
  *   onState?: (state: Record<string, boolean>) => void,
  *   onFailure?: (error: unknown) => void,
@@ -45,6 +59,7 @@ const mouseButtonKey = (button) => [0xC8, 0xCA, 0xC9, 0xCB, 0xCC][button] ?? 0;
 export function createInputControllerCore({
     canvas,
     commandInput = null,
+    textInput = null,
     sendInput,
     onState = () => {},
     onFailure = () => {},
@@ -96,7 +111,8 @@ export function createInputControllerCore({
         if (key) send({ type: "key", key, down });
     };
     const inputActive = () => document.pointerLockElement === canvas ||
-        document.activeElement === canvas;
+        document.activeElement === canvas ||
+        (textInput !== null && document.activeElement === textInput);
     const releaseHeldInput = () => {
         for (const key of heldKeys) sendKey(key, false);
         for (const key of heldMouseButtons) sendKey(key, false);
@@ -124,16 +140,63 @@ export function createInputControllerCore({
     /** @param {KeyboardEvent} event */
     const handleKeyDown = (event) => {
         if (event.target === commandInput || !inputActive()) return;
+        // Let the browser finish dead-key/IME composition before committing
+        // text. Intermediate composition keys are not game commands.
+        if (event.isComposing || event.key === "Dead" || event.key === "Process") return;
         const key = browserKeyToEngineKey(event);
-        if (!key) return;
-        event.preventDefault();
+        const altGraph = event.getModifierState?.("AltGraph") === true;
+        const shiftPasteShortcut = event.shiftKey &&
+            (key === 0xA1 || key === 0xC0);
+        const pasteShortcut = shiftPasteShortcut || event.key?.toLowerCase() === "v" &&
+            (event.metaKey || (event.ctrlKey && !altGraph));
+        let character = 0;
+        if (!event.metaKey && (!event.altKey || altGraph)) {
+            if (event.key === "Backspace") character = 8;
+            else if (event.ctrlKey && !altGraph) {
+                // Native field shortcuts: start, clear, end. Clipboard access
+                // remains a separate browser permission/gesture boundary.
+                character = ({ a: 1, c: 3, e: 5 })[event.key?.toLowerCase()] ?? 0;
+            } else if (event.key && Array.from(event.key).length === 1) {
+                character = browserTextToEngineCharacters(event.key)[0] ?? 0;
+            }
+        }
+        if (!key && !character) return;
+        // The trusted paste event owns synchronous clipboard access. Let the
+        // browser dispatch it, then route its bytes through Field_Paste.
+        // Shift+Insert would invoke Field_Paste from CL_KeyEvent too early, so
+        // defer that shortcut entirely to the following paste event.
+        if (shiftPasteShortcut) return;
+        if (!pasteShortcut) event.preventDefault();
         if (key === 0x1B &&
             performance.now() - lastSyntheticEscape < escapeDeduplicationMilliseconds) return;
-        if (heldKeys.has(key)) return;
-        heldKeys.add(key);
+        if (key) heldKeys.add(key);
         if (key === 0x1B) lastForwardedEscape = performance.now();
+        // CL_KeyEvent owns repeat suppression for gameplay and repeat admission
+        // for console/menu navigation. Char events repeat independently.
         sendKey(key, true);
+        if (character) send({ type: "char", character });
     };
+    /** @param {ClipboardEvent} event */
+    const handlePaste = (event) => {
+        if (event.target === commandInput || !inputActive()) return;
+        const text = event.clipboardData?.getData("text/plain");
+        if (typeof text !== "string") return;
+        const firstLine = text.split(/[\n\r\b]/, 1)[0];
+        const characters = browserTextToEngineCharacters(firstLine).slice(0, 4095);
+        if (!characters.length) return;
+        event.preventDefault();
+        send({ type: "clipboard", characters });
+        send({ type: "char", character: 22 });
+    };
+    /** @param {CompositionEvent} event */
+    const handleCompositionEnd = (event) => {
+        if (!textInput || event.target !== textInput || !inputActive()) return;
+        for (const character of browserTextToEngineCharacters(event.data)) {
+            send({ type: "char", character });
+        }
+        if (textInput) textInput.value = "";
+    };
+    const clearTextInput = () => { if (textInput) textInput.value = ""; };
     /** @param {KeyboardEvent} event */
     const handleKeyUp = (event) => {
         const key = browserKeyToEngineKey(event);
@@ -146,7 +209,8 @@ export function createInputControllerCore({
     };
     /** @param {MouseEvent} event */
     const handleMouseDown = (event) => {
-        canvas.focus();
+        if (textInput) textInput.focus({ preventScroll: true });
+        else canvas.focus();
         event.preventDefault();
         if (document.pointerLockElement === canvas) pointerWasLocked = true;
         const key = mouseButtonKey(event.button);
@@ -258,6 +322,8 @@ export function createInputControllerCore({
 
     globalThis.addEventListener("keydown", handleKeyDown);
     globalThis.addEventListener("keyup", handleKeyUp);
+    globalThis.addEventListener("compositionend", handleCompositionEnd);
+    globalThis.addEventListener("paste", handlePaste);
     globalThis.addEventListener("mouseup", handleMouseUp);
     globalThis.addEventListener("mousemove", handleMouseMove);
     globalThis.addEventListener("blur", handleBlur);
@@ -269,6 +335,7 @@ export function createInputControllerCore({
     canvas.addEventListener("wheel", handleWheel, { passive: false });
     canvas.addEventListener("auxclick", preventDefault);
     canvas.addEventListener("contextmenu", preventDefault);
+    textInput?.addEventListener("input", clearTextInput);
 
     return Object.freeze({
         dispose() {
@@ -279,6 +346,8 @@ export function createInputControllerCore({
             disposed = true;
             globalThis.removeEventListener("keydown", handleKeyDown);
             globalThis.removeEventListener("keyup", handleKeyUp);
+            globalThis.removeEventListener("compositionend", handleCompositionEnd);
+            globalThis.removeEventListener("paste", handlePaste);
             globalThis.removeEventListener("mouseup", handleMouseUp);
             globalThis.removeEventListener("mousemove", handleMouseMove);
             globalThis.removeEventListener("blur", handleBlur);
@@ -290,6 +359,7 @@ export function createInputControllerCore({
             canvas.removeEventListener("wheel", handleWheel);
             canvas.removeEventListener("auxclick", preventDefault);
             canvas.removeEventListener("contextmenu", preventDefault);
+            textInput?.removeEventListener("input", clearTextInput);
         },
     });
 }

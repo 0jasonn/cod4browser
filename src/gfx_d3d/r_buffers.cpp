@@ -4,6 +4,7 @@
 #include "r_init.h"
 #include <universal/com_memory.h>
 #include "r_dvars.h"
+#include "r_particle_cloud.h"
 #include "rb_logfile.h"
 #include "r_utils.h"
 #include <universal/profile.h>
@@ -278,9 +279,13 @@ void __cdecl R_CreateParticleCloudBuffer()
             for (zIter = 0; zIter != 16; ++zIter)
             {
                 particleId = zIter + (xIter << 7) + 16 * yIter;
-                pos[0] = ((double)rand() / 32767.0 + (double)xIter) * 0.25 + -1.0;
-                pos[1] = ((double)rand() / 32767.0 + (double)yIter) * 0.25 + -1.0;
-                pos[2] = ((double)rand() / 32767.0 + (double)zIter) * 0.125 + -1.0;
+                const double random[3] = {
+                    (double)rand() / 32767.0,
+                    (double)rand() / 32767.0,
+                    (double)rand() / 32767.0,
+                };
+                R_CreateParticleCloudCellPosition(
+                    xIter, yIter, zIter, random, pos);
                 for (cornerIter = 0; cornerIter != 4; ++cornerIter)
                 {
                     particleVertsIter->xyz[0] = pos[0];

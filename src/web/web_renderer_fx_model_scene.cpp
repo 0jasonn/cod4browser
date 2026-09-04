@@ -158,6 +158,9 @@ WebRendererWorldBatchDesc MakeDraw(
     draw.sourceKind = submission.sourceKind;
     draw.shadowEntityKind = submission.shadowEntityKind;
     draw.shadowEntityId = submission.shadowEntityId;
+    std::copy_n(submission.placement.base.origin, 3, draw.transientLightSphere);
+    draw.transientLightSphere[3] = submission.sourceKind == WebRendererSceneBatchKind::DynamicXModel
+        ? submission.dynamicEntityRadius : model.radius * submission.placement.scale;
     const MaterialTechniqueSet *shadowSet =
         material ? material->techniqueSet : nullptr;
     if (shadowSet && shadowSet->remappedTechniqueSet)
@@ -167,6 +170,7 @@ WebRendererWorldBatchDesc MakeDraw(
     draw.castsSunShadow =
         submission.sourceKind == WebRendererSceneBatchKind::DynamicXModel &&
         hasShadowTechnique;
+    draw.castsSpotShadow = draw.castsSunShadow;
     if (hasShadowTechnique && material && material->stateBitsTable)
     {
         const std::uint8_t shadowStateEntry = material->stateBitsEntry[
@@ -282,6 +286,14 @@ WebRendererFxModelSceneResult WebRenderer_BuildFxModelSceneCommand(
                 continue;
             }
 
+            const float receiverRadius = submission.sourceKind == WebRendererSceneBatchKind::DynamicXModel
+                ? submission.dynamicEntityRadius : model->radius * submission.placement.scale;
+            if (!std::isfinite(receiverRadius) || receiverRadius < 0.0f)
+            {
+                dropSubmission();
+                continue;
+            }
+
             const XModelLodInfo &lod = model->lodInfo[submission.lod];
             if (lod.surfIndex > model->numsurfs ||
                 lod.numsurfs > model->numsurfs - lod.surfIndex)
@@ -311,12 +323,10 @@ WebRendererFxModelSceneResult WebRenderer_BuildFxModelSceneCommand(
             {
                 const std::uint32_t surfaceIndex = lod.surfIndex + localSurface;
                 const XSurface &surface = model->surfs[surfaceIndex];
-                if (surface.deformed)
-                {
-                    dropAndRollback();
-                    modelSubmitted = false;
-                    break;
-                }
+                // Native R_SkinXModel selects SF_XMODEL_RIGID_SKINNED for a
+                // deformed placement-only model. R_TessXModelRigidSkinnedDrawSurfList
+                // still uploads verts0 with object placement, without bone weights.
+                // Animated DObj submissions have their separate skinning owner.
                 if (surface.vertCount == 0u || surface.triCount == 0u)
                     continue;
                 if (!surface.verts0 || !surface.triIndices)
@@ -450,6 +460,8 @@ WebRendererFxModelSceneResult WebRenderer_BuildFxModelSceneCommand(
                 replacement.batches.push_back(MakeDraw(
                     *model, model->materialHandles[surfaceIndex], surfaceIndex,
                     firstIndex, indexCount, submission, materialResolver));
+                replacement.batches.back().dynamicLightSurfType =
+                    surface.deformed ? 8u : 7u;
                 ++replacement.surfaceCount;
                 modelSubmitted = true;
             }
@@ -604,8 +616,6 @@ const char *WebRenderer_FxModelSceneResultString(
         return "invalid FX model placement";
     case WebRendererFxModelSceneResult::InvalidModel:
         return "invalid FX model or LOD surface data";
-    case WebRendererFxModelSceneResult::UnsupportedSurface:
-        return "deformed FX model surfaces are unsupported";
     case WebRendererFxModelSceneResult::IndexOutOfRange:
         return "FX model index is outside its vertex range";
     case WebRendererFxModelSceneResult::OutputTooLarge:

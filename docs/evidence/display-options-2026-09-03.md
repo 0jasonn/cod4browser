@@ -48,6 +48,15 @@ Diagnostic Wasm SHA-256:
   now-applied 4:3 startup mode. Menu mean RGB changes 6.624 → 105.321; loaded
   world means are 85.072 at low gamma and 234.057 at high gamma. Existing
   dvar/pixel assertions are unchanged; input positions use canonical menu units.
+- The production texture-quality regression now uses the shipped Graphics →
+  Texture Settings menu rather than setting picmip dvars through the launcher.
+  It measures full-quality Killhouse, returns through canonical disconnect,
+  selects Manual plus Normal color/normal/specular resolution, and clicks Apply
+  → Yes. The native menu command performs a renderer restart and reports picmip
+  2 for all three semantic classes. Decoded texture bytes fall from
+  1,153,857,573 to 168,912,933 and the GPU estimate falls from 1,174,304,805 to
+  189,360,165. Quit/Start game and a new Killhouse load retain the exact reduced
+  values. The focused owned production case passes in 50.9 seconds.
 
 The first saved-screen remainder run sampled immediately after a queued resize.
 It now waits for the actual 800×600 canvas before checking the unchanged black

@@ -109,6 +109,7 @@ function createHarness({
     };
     const worker = new WorkerDouble(behavior ?? defaultBehavior, log);
     const audio = { attachGestureResume() {}, dispose() {} };
+    let audioOptions;
     const canvas = {
         style: {},
         transferControlToOffscreen() { return {}; },
@@ -116,7 +117,7 @@ function createHarness({
     const states = [];
     const host = createEngineWorkerHost(canvas, {
         workerFactory: () => worker,
-        audioDriverFactory: () => audio,
+        audioDriverFactory: (options) => { audioOptions = options; return audio; },
         lockManager: locks,
         mountTimeoutMs: timeout,
         flushTimeoutMs: timeout,
@@ -131,7 +132,7 @@ function createHarness({
             onState?.(state, { host, worker, locks, log, states });
         },
     });
-    return { host, worker, locks, log, states };
+    return { host, worker, locks, log, states, audioOptions };
 }
 
 const manifest = { importId: "test", files: [] };
@@ -523,4 +524,20 @@ test("filesystem lifecycle: Worker crash while flushing terminates before releas
     assert.equal(host.filesystemState, FILESYSTEM_STATES.TERMINATED);
     assert.ok(log.indexOf("worker:terminate") < log.indexOf(`lock:${HOME_LOCK}:release`));
     await host.dispose();
+});
+
+
+test("audio feedback keeps one snapshot in flight and stops after Worker retirement", async () => {
+    const { host, worker, log, audioOptions } = createHarness();
+    await host.ready;
+    const snapshot = { type: "audio-playback", version: 1, sources: [] };
+    for (let i = 0; i < 100; ++i) audioOptions.onPlaybackState(snapshot);
+    const count = () => log.filter((line) => line === "worker:post:audio-playback").length;
+    assert.equal(count(), 1);
+    worker.emit("message", { data: { type: "audio-playback-ack", version: 1 } });
+    audioOptions.onPlaybackState(snapshot);
+    assert.equal(count(), 2);
+    await host.dispose();
+    audioOptions.onPlaybackState(snapshot);
+    assert.equal(count(), 2);
 });

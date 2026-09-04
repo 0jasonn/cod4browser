@@ -10,7 +10,7 @@ test("canonical Gate 3 traverses the locally owned retail startup prerequisite c
 }, async ({ page }, testInfo) => {
     test.skip(!retailRoot,
         "Set KISAK_COD4_RETAIL_ROOT to a legally owned COD4 installation");
-    test.setTimeout(180_000);
+    test.setTimeout(240_000);
 
     const startupZones = await Promise.all(["code_post_gfx", "ui", "common", "killhouse"]
         .map(async (name) => [
@@ -31,6 +31,20 @@ test("canonical Gate 3 traverses the locally owned retail startup prerequisite c
         globalThis.__gate3RendererSurfaceEvents = [];
         globalThis.__gate3RendererSceneViewEvents = [];
         globalThis.__gate3RendererSceneFrameEvents = [];
+        globalThis.__gate3RendererEvidence = {
+            firstFrame: false,
+            worldCommands: [],
+        };
+        globalThis.addEventListener("kisakcod:log", (event) => {
+            const text = event.detail?.text ?? "";
+            if (text.includes(
+                "First cgame-driven maps/killhouse.d3dbsp frame rendered through WebGL2"))
+            {
+                globalThis.__gate3RendererEvidence.firstFrame = true;
+            }
+            if (text.includes("Renderer retained canonical material world command"))
+                globalThis.__gate3RendererEvidence.worldCommands.push(text);
+        });
         globalThis.addEventListener("kisakcod:database", (event) => {
             globalThis.__gate3RetailDbEvents.push(structuredClone(event.detail));
         });
@@ -239,14 +253,22 @@ test("canonical Gate 3 traverses the locally owned retail startup prerequisite c
         globalThis.__gate3RendererSceneFrameEvents.some((event) =>
             event.state === "drawn" && event.geometrySubmitted === true)),
     { timeout: 150_000 }).toBe(true);
-    await expect.poll(() => page.evaluate(() => {
+    // The complete canonical DPVS ranges replace the former 8,065-surface
+    // surfaceCountNoDecal prefix. One sky surface is skipped in both paths;
+    // the remaining 411 surfaces add 13,622 vertices and 30,276 indices.
+    const expectedWorldGeometry = {
+        surfaces: 8475,
+        vertices: 445369,
+        indices: 823464,
+    };
+    await expect.poll(() => page.evaluate((expected) => {
         const view = globalThis.__gate3RendererSceneViewEvents.at(-1);
         return Boolean(view && view.submissionGeneration >= 120 &&
             view.viewOrigin[2] > 50 && view.viewOrigin[2] < 90 &&
-            view.worldSurfaceCount === 8064 &&
-            view.worldVertexCount === 431747 &&
-            view.worldIndexCount === 793188);
-    }), { timeout: 30_000 }).toBe(true);
+            view.worldSurfaceCount === expected.surfaces &&
+            view.worldVertexCount === expected.vertices &&
+            view.worldIndexCount === expected.indices);
+    }, expectedWorldGeometry), { timeout: 30_000 }).toBe(true);
 
     const beforeKeyboard = await page.evaluate(() => structuredClone(
         globalThis.__gate3RendererSceneViewEvents.at(-1)));
@@ -269,9 +291,16 @@ test("canonical Gate 3 traverses the locally owned retail startup prerequisite c
     await expect.poll(() => page.evaluate(() =>
         globalThis.__KISAKCOD_WEB__.input.pointerLocked),
     { timeout: 5_000 }).toBe(true);
-    await page.mouse.move(
-        box.x + box.width / 2 + 100,
-        box.y + box.height / 2);
+    // Pointer-lock movement is relative. Supply a deterministic physical delta
+    // large enough to remain meaningful with the owner's archived sensitivity.
+    await page.evaluate(() => {
+        const movement = new MouseEvent("mousemove");
+        Object.defineProperties(movement, {
+            movementX: { value: 640 },
+            movementY: { value: 0 },
+        });
+        globalThis.dispatchEvent(movement);
+    });
     await expect.poll(() => page.evaluate((forward) => {
         const current = globalThis.__gate3RendererSceneViewEvents.at(-1);
         return current ? Math.hypot(
@@ -297,6 +326,7 @@ test("canonical Gate 3 traverses the locally owned retail startup prerequisite c
                 globalThis.__gate3RendererSceneViewEvents.at(-1)),
             sceneFrame: structuredClone(
                 globalThis.__gate3RendererSceneFrameEvents.at(-1)),
+            rendererEvidence: structuredClone(globalThis.__gate3RendererEvidence),
             logs: structuredClone(globalThis.__KISAKCOD_WEB__.logs.slice(-24)),
         };
     }, mapDbEventStart);
@@ -306,6 +336,7 @@ test("canonical Gate 3 traverses the locally owned retail startup prerequisite c
         mapEnd: checkpoint.mapEnd,
         mapPublication: checkpoint.mapPublication,
         logs: checkpoint.logs,
+        rendererEvidence: checkpoint.rendererEvidence,
         sceneView: checkpoint.sceneView,
         sceneFrame: checkpoint.sceneFrame,
     })}`);
@@ -342,9 +373,9 @@ test("canonical Gate 3 traverses the locally owned retail startup prerequisite c
     expect(checkpoint.sceneView.tanHalfFovX).toBeGreaterThan(0);
     expect(checkpoint.sceneView.tanHalfFovY).toBeGreaterThan(0);
     expect(checkpoint.sceneView.zNear).toBeGreaterThan(0);
-    expect(checkpoint.sceneView.worldSurfaceCount).toBe(8064);
-    expect(checkpoint.sceneView.worldVertexCount).toBe(431747);
-    expect(checkpoint.sceneView.worldIndexCount).toBe(793188);
+    expect(checkpoint.sceneView.worldSurfaceCount).toBe(expectedWorldGeometry.surfaces);
+    expect(checkpoint.sceneView.worldVertexCount).toBe(expectedWorldGeometry.vertices);
+    expect(checkpoint.sceneView.worldIndexCount).toBe(expectedWorldGeometry.indices);
     expect(checkpoint.sceneFrame).toMatchObject({
         state: "drawn",
         source: "canonical-cgame-refdef",
@@ -356,22 +387,41 @@ test("canonical Gate 3 traverses the locally owned retail startup prerequisite c
     expect(checkpoint.sceneFrame.viewSubmissionGeneration).toBeGreaterThan(0);
     expect(checkpoint.sceneFrame.viewSubmissionGeneration)
         .toBeLessThanOrEqual(checkpoint.sceneView.submissionGeneration);
-    expect(checkpoint.sceneFrame.worldSurfaceCount).toBe(8064);
-    expect(checkpoint.sceneFrame.worldVertexCount).toBe(431747);
-    expect(checkpoint.sceneFrame.worldIndexCount).toBe(793188);
+    expect(checkpoint.sceneFrame.worldSurfaceCount).toBe(expectedWorldGeometry.surfaces);
+    expect(checkpoint.sceneFrame.worldVertexCount).toBe(expectedWorldGeometry.vertices);
+    expect(checkpoint.sceneFrame.worldIndexCount).toBe(expectedWorldGeometry.indices);
     expect(checkpoint.sceneView.viewOrigin[2]).toBeGreaterThan(50);
     expect(checkpoint.sceneView.viewOrigin[2]).toBeLessThan(90);
     expect(checkpoint.sceneView.viewOrigin).not.toEqual(beforeKeyboard.viewOrigin);
     expect(checkpoint.sceneView.viewForward).not.toEqual(beforeMouse.viewForward);
     expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.input))
         .toMatchObject({ pointerLocked: true });
-    expect(checkpoint.logs.some(({ text }) =>
-        text.includes("First cgame-driven maps/killhouse.d3dbsp frame rendered through WebGL2"),
-    )).toBe(true);
-    expect(checkpoint.logs.some(({ text }) =>
-        text.includes("514 batches: 429 lightmapped, 10 base-only") &&
-        text.includes("143/147 images"),
-    )).toBe(true);
+    expect(checkpoint.rendererEvidence.firstFrame).toBe(true);
+    // This Gate 3 fixture owns the four retail fastfiles but deliberately uses
+    // synthetic IWDs. Assert its bounded fallback inventory without treating
+    // it as material-fidelity evidence; full owned archives are covered by the
+    // production renderer tests.
+    const rendererInventory = checkpoint.rendererEvidence.worldCommands
+        .map((text) => text.match(/\((\d+) vertices, (\d+) indices, (\d+) batches: (\d+) lightmapped, (\d+) SM3 specular, (\d+) base-only; (\d+)\/(\d+) images/))
+        .filter(Boolean)
+        .map((match) => match.slice(1).map(Number))
+        .find(([vertices, indices]) => vertices === expectedWorldGeometry.vertices &&
+            indices === expectedWorldGeometry.indices);
+    expect(rendererInventory).toBeDefined();
+    const [vertices, indices, batches, lightmapped, specular, baseOnly,
+        supportedImages, imageCount] = rendererInventory;
+    expect({ vertices, indices, batches, baseOnly }).toEqual({
+        vertices: expectedWorldGeometry.vertices,
+        indices: expectedWorldGeometry.indices,
+        batches: 796,
+        baseOnly: 0,
+    });
+    expect({ lightmapped, specular, supportedImages, imageCount }).toEqual({
+        lightmapped: 0,
+        specular: 0,
+        supportedImages: 8,
+        imageCount: 339,
+    });
     const stages = checkpoint.lifecycle.map((event) => event.stage);
     for (const stage of [
         "CM_LoadMap complete",

@@ -4,8 +4,8 @@
 #include <cstdint>
 
 // Canonical KisakCOD/IW3 database-facing image records.  The browser database
-// loader leaves GfxTexture null: decoded IWI bytes and GPU resources belong to
-// the renderer/backend, not to zone publication.
+// loader replaces transient GfxTexture load definitions at the renderer
+// boundary. Native uses a D3D object; web uses an opaque retained-source handle.
 // Serialized D3DFORMAT value; the native GPU boundary performs the enum cast.
 // Its C++ type must not depend on whether d3d9.h was included first.
 using GfxImageFormat = std::int32_t;
@@ -57,6 +57,7 @@ union GfxTexture
     IDirect3DVolumeTexture9 *volmap;
     IDirect3DCubeTexture9 *cubemap;
     GfxImageLoadDef *loadDef;
+    std::uintptr_t webResource;
 };
 
 struct GfxImage

@@ -8,8 +8,8 @@ export {
 export const MAX_REQUEST_TIMEOUT_MS = 120_000;
 
 /**
- * @typedef {{type?: string, key?: number, down?: boolean,
- *   x?: number, y?: number, dx?: number, dy?: number}} ProductInput
+ * @typedef {{type?: string, key?: number, down?: boolean, character?: number,
+ *   characters?: number[], x?: number, y?: number, dx?: number, dy?: number}} ProductInput
  * @typedef {{protocolVersion?: number, type?: string, id?: number, canvas?: unknown,
  *   manifest?: object, kind?: string, buffers?: ArrayBuffer[], metadata?: object,
  *   command?: string, width?: number, height?: number, event?: ProductInput}} ProductRequest
@@ -138,10 +138,20 @@ function validateInput(operation, input)
 {
     const validKey = input?.type === "key" && typeof input.key === "number" &&
         Number.isInteger(input.key) &&
-        input.key >= 0 && input.key <= 0xffff && typeof input.down === "boolean";
+        input.key > 0 && input.key < 0xDF && typeof input.down === "boolean";
+    const validChar = input?.type === "char" && typeof input.character === "number" &&
+        Number.isInteger(input.character) &&
+        input.character > 0 && input.character <= 255;
+    const validClipboard = input?.type === "clipboard" &&
+        Array.isArray(input.characters) && input.characters.length > 0 &&
+        input.characters.length <= 4095 && input.characters.every((character) =>
+            Number.isInteger(character) && character >= 32 &&
+            character <= 255 && character !== 127);
     const values = [input?.x, input?.y, input?.dx, input?.dy];
     const validMouse = input?.type === "mouse-move" &&
         values.every((value) => typeof value === "number" &&
             Number.isInteger(value) && Math.abs(value) <= 1_000_000);
-    if (!validKey && !validMouse) invalid(operation, "The input event is invalid.");
+    if (!validKey && !validChar && !validClipboard && !validMouse) {
+        invalid(operation, "The input event is invalid.");
+    }
 }

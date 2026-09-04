@@ -379,10 +379,13 @@ test("production input covers canonical keyboard, mouse, focus, and pointer-lock
     await expect.poll(() => page.evaluate(() => globalThis.__productInputMessages))
         .toEqual([
             { type: "key", key: 0x77, down: true },
+            { type: "char", character: 0x77 },
             { type: "key", key: 0x77, down: false },
             { type: "key", key: 0x20, down: true },
+            { type: "char", character: 0x20 },
             { type: "key", key: 0x20, down: false },
             { type: "key", key: 0x3B, down: true },
+            { type: "char", character: 0x3B },
             { type: "key", key: 0x3B, down: false },
             { type: "key", key: 0xB2, down: true },
             { type: "key", key: 0xB2, down: false },
@@ -390,6 +393,56 @@ test("production input covers canonical keyboard, mouse, focus, and pointer-lock
             { type: "key", key: 0xBA, down: false },
             { type: "key", key: 0x1B, down: true },
             { type: "key", key: 0x1B, down: false },
+        ]);
+
+    const pasteDispatch = await page.evaluate(() => {
+        globalThis.__productInputMessages = [];
+        const keyDown = new KeyboardEvent("keydown", {
+            code: "KeyV", key: "v", ctrlKey: true, cancelable: true,
+        });
+        const keyDefaultAllowed = globalThis.dispatchEvent(keyDown);
+        const paste = new Event("paste", { cancelable: true });
+        Object.defineProperty(paste, "clipboardData", { value: {
+            getData: (type) => type === "text/plain" ? "Äß\nignored" : "",
+        } });
+        const pasteDefaultPrevented = !globalThis.dispatchEvent(paste);
+        globalThis.dispatchEvent(new KeyboardEvent("keyup", {
+            code: "KeyV", key: "v", ctrlKey: true, cancelable: true,
+        }));
+        return { keyDefaultAllowed, pasteDefaultPrevented };
+    });
+    expect(pasteDispatch).toEqual({
+        keyDefaultAllowed: true,
+        pasteDefaultPrevented: true,
+    });
+    await expect.poll(() => page.evaluate(() => globalThis.__productInputMessages))
+        .toEqual([
+            { type: "key", key: 0x76, down: true },
+            { type: "clipboard", characters: [196, 223] },
+            { type: "char", character: 22 },
+            { type: "key", key: 0x76, down: false },
+        ]);
+
+    const shiftInsertAllowed = await page.evaluate(() => {
+        globalThis.__productInputMessages = [];
+        const allowed = globalThis.dispatchEvent(new KeyboardEvent("keydown", {
+            code: "Insert", key: "Insert", shiftKey: true, cancelable: true,
+        }));
+        const paste = new Event("paste", { cancelable: true });
+        Object.defineProperty(paste, "clipboardData", { value: {
+            getData: () => "Again",
+        } });
+        globalThis.dispatchEvent(paste);
+        globalThis.dispatchEvent(new KeyboardEvent("keyup", {
+            code: "Insert", key: "Insert", shiftKey: true, cancelable: true,
+        }));
+        return allowed;
+    });
+    expect(shiftInsertAllowed).toBe(true);
+    await expect.poll(() => page.evaluate(() => globalThis.__productInputMessages))
+        .toEqual([
+            { type: "clipboard", characters: [65, 103, 97, 105, 110] },
+            { type: "char", character: 22 },
         ]);
 
     await page.evaluate(() => {

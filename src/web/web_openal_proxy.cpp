@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <deque>
@@ -17,6 +16,7 @@ namespace
 constexpr std::size_t MAX_SOURCES = 54; // 53 canonical SND channels plus one cinematic track.
 constexpr std::size_t MAX_BUFFERS = 512;
 constexpr std::size_t MAX_PCM_BYTES = 16u * 1024u * 1024u;
+constexpr std::size_t MAX_QUEUED_BUFFERS = 128;
 
 struct BufferState
 {
@@ -38,12 +38,12 @@ struct SourceState
     ALfloat position[3] = {};
     bool spatialized = false;
     bool looping = false;
-    double started = 0.0;
-    double lastRefresh = 0.0;
     std::uint32_t generation = 0;
     std::deque<ALuint> queue;
     std::size_t processed = 0;
-    double queueOffset = 0.0;
+    std::uint32_t queueBase = 0;
+    double retiredSeconds = 0;
+    bool deviceFailed = false;
     std::string diagnosticAlias;
     float eqBands[6][5] = {};
 };
@@ -55,12 +55,9 @@ ALenum g_error = AL_NONE;
 bool g_context_current = false;
 int g_room_type = -1;
 
-double now_seconds()
-{
-    using clock = std::chrono::steady_clock;
-    static const auto epoch = clock::now();
-    return std::chrono::duration<double>(clock::now() - epoch).count();
-}
+// Monotonic across source/context reuse so delayed device feedback cannot
+// complete a newly allocated sound with the same OpenAL source ID.
+std::uint32_t g_playbackGeneration = 0;
 
 bool source_valid(ALuint id)
 {
@@ -143,53 +140,32 @@ double buffer_duration(ALuint id)
     return buffer.rate > 0 ? frames / buffer.rate : 0.0;
 }
 
-void refresh_state_at(SourceState &source, double current)
-{
-    if (source.state != AL_PLAYING)
-        return;
-    if (!source.queue.empty())
-    {
-        const double elapsed = std::max(0.0, current - source.lastRefresh) *
-            std::max(0.001f, source.pitch);
-        source.lastRefresh = current;
-        source.queueOffset += elapsed;
-        while (source.processed < source.queue.size())
-        {
-            const double duration = buffer_duration(
-                source.queue[source.processed]);
-            if (duration > 0.0 && source.queueOffset < duration)
-                break;
-            source.queueOffset = duration > 0.0
-                ? std::max(0.0, source.queueOffset - duration) : 0.0;
-            ++source.processed;
-        }
-        source.offset = static_cast<ALfloat>(source.queueOffset);
-        if (source.processed >= source.queue.size())
-        {
-            source.offset = 0.0f;
-            source.queueOffset = 0.0;
-            source.state = AL_STOPPED;
-        }
-        return;
-    }
-    if (source.looping || !buffer_valid(source.buffer))
-        return;
-    const BufferState &buffer = g_buffers[source.buffer];
-    const int channels = buffer.format == AL_FORMAT_STEREO16 ? 2 : 1;
-    const double frames = channels > 0 ? (buffer.bytes / (2.0 * channels)) : 0.0;
-    const double duration = buffer.rate > 0 ? frames / buffer.rate : 0.0;
-    const double elapsed = (current - source.started) * std::max(0.001f, source.pitch);
-    source.offset = static_cast<ALfloat>(std::max(0.0, elapsed));
-    if (duration > 0.0 && elapsed >= duration)
-    {
-        source.offset = static_cast<ALfloat>(duration);
-        source.state = AL_STOPPED;
-    }
-}
+#if defined(__EMSCRIPTEN__)
+EM_JS(bool, read_device_playback, (ALuint id, std::uint32_t generation, double *out), {
+    const state = globalThis.__KISAKCOD_AUDIO_PLAYBACK__?.[id];
+    if (!state || state.generation !== generation) return false;
+    const index = out >>> 3;
+    HEAPF64[index] = state.processed;
+    HEAPF64[index + 1] = state.offset;
+    HEAPF64[index + 2] = state.state;
+    return true;
+});
+#endif
 
 void refresh_state(SourceState &source)
 {
-    refresh_state_at(source, now_seconds());
+#if defined(__EMSCRIPTEN__)
+    const ALuint id = static_cast<ALuint>(&source - g_sources.data());
+    double playback[3]{};
+    if (read_device_playback(id, source.generation, playback))
+        WebOpenAL_ApplyPlayback(id, source.generation,
+            static_cast<std::uint32_t>(playback[0]), playback[1],
+            static_cast<ALenum>(playback[2]));
+#else
+    (void)source;
+#endif
+    // Await the device, including before its first acknowledgement. Advancing
+    // a Worker wall clock can free queued PCM before the main thread plays it.
 }
 
 void source_property(ALuint id)
@@ -198,10 +174,53 @@ void source_property(ALuint id)
 }
 }
 
-double WebOpenAL_RebaseStarted(double nowSeconds, float offsetSeconds, float pitch)
+std::uint32_t WebOpenAL_SourceGeneration(ALuint id)
 {
-    return nowSeconds - static_cast<double>(offsetSeconds) /
-        std::max(0.001f, pitch);
+    return source_valid(id) ? g_sources[id].generation : 0;
+}
+
+bool WebOpenAL_ApplyPlayback(ALuint id, std::uint32_t generation,
+    std::uint32_t processed, double offset, ALenum state)
+{
+    if (!source_valid(id) || !std::isfinite(offset) || offset < 0.0 ||
+        (state != AL_NONE && state != AL_PLAYING && state != AL_PAUSED && state != AL_STOPPED))
+        return false;
+    auto &source = g_sources[id];
+    if (generation != source.generation || source.state == AL_STOPPED)
+        return false;
+    if (state == AL_NONE) // Explicit device failure, not elapsed playback.
+    {
+        source.deviceFailed = true;
+        source.processed = source.queue.size();
+        source.offset = 0.0f;
+        source.state = AL_STOPPED;
+        return true;
+    }
+    if (processed < source.queueBase ||
+        processed - source.queueBase > source.queue.size()) return false;
+    const std::size_t completed = processed - source.queueBase;
+    // Unqueue commands and feedback cross in flight. Absolute queue ordinals
+    // preserve progress without applying a count to the wrong buffer prefix.
+    if (completed < source.processed) return false;
+    source.processed = completed;
+    const ALuint buffer = source.queue.empty() ? source.buffer
+        : completed < source.queue.size() ? source.queue[completed] : 0;
+    source.offset = static_cast<ALfloat>(std::min(offset, buffer_duration(buffer)));
+    if (state == AL_STOPPED && (source.queue.empty() || completed == source.queue.size()))
+        source.state = AL_STOPPED;
+    return true;
+}
+
+bool WebOpenAL_SourcePlaybackSeconds(ALuint id, double &seconds)
+{
+    if (!source_valid(id)) return false;
+    auto &source = g_sources[id];
+    refresh_state(source);
+    if (source.deviceFailed) return false;
+    seconds = source.retiredSeconds + source.offset;
+    for (std::size_t i = 0; i < source.processed; ++i)
+        seconds += buffer_duration(source.queue[i]);
+    return true;
 }
 
 void WebOpenAL_SetSourceAlias(ALuint source, const char *aliasName)
@@ -283,6 +302,7 @@ void alGenSources(ALsizei count, ALuint *ids)
         while (g_sources[id].live) ++id;
         g_sources[id] = SourceState{};
         g_sources[id].live = true;
+        g_sources[id].generation = ++g_playbackGeneration;
         ids[i] = id;
         emit_simple("source-create", id);
     }
@@ -302,7 +322,7 @@ void alDeleteSources(ALsizei count, const ALuint *ids)
             fail();
             continue;
         }
-        ++g_sources[ids[i]].generation;
+        g_sources[ids[i]].generation = ++g_playbackGeneration;
         emit_source(ids[i], "source-delete");
         g_sources[ids[i]] = SourceState{};
     }
@@ -411,25 +431,24 @@ void alSourcef(ALuint id, ALenum parameter, ALfloat value)
         return;
     }
     auto &source = g_sources[id];
-    const double mutationTime = now_seconds();
-    refresh_state_at(source, mutationTime);
+    refresh_state(source);
     switch (parameter)
     {
     case AL_GAIN: source.gain = std::max(0.0f, value); break;
     case AL_PITCH:
         source.pitch = std::max(0.001f, value);
-        if (source.state == AL_PLAYING && source.queue.empty())
-            source.started = WebOpenAL_RebaseStarted(mutationTime, source.offset, source.pitch);
         break;
     case AL_SEC_OFFSET:
         source.offset = std::max(0.0f, value);
-        source.queueOffset = source.offset;
-        if (source.state == AL_PLAYING && source.queue.empty())
-            source.started = WebOpenAL_RebaseStarted(mutationTime, source.offset, source.pitch);
         break;
     default: fail(); return;
     }
-    source_property(id);
+    if (parameter == AL_SEC_OFFSET)
+    {
+        source.generation = ++g_playbackGeneration;
+        emit_source(id, "source-seek");
+    }
+    else source_property(id);
 }
 
 void alSourcei(ALuint id, ALenum parameter, ALint value)
@@ -440,26 +459,26 @@ void alSourcei(ALuint id, ALenum parameter, ALint value)
         return;
     }
     auto &source = g_sources[id];
-    const double mutationTime = now_seconds();
-    refresh_state_at(source, mutationTime);
+    refresh_state(source);
     switch (parameter)
     {
     case AL_BUFFER:
         if (value && !buffer_valid(static_cast<ALuint>(value))) { fail(); return; }
         source.buffer = static_cast<ALuint>(value);
         source.offset = 0.0f;
-        source.queueOffset = 0.0;
         break;
     case AL_LOOPING: source.looping = value != AL_FALSE; break;
     case AL_SEC_OFFSET:
         source.offset = std::max(0, value);
-        source.queueOffset = source.offset;
-        if (source.state == AL_PLAYING && source.queue.empty())
-            source.started = WebOpenAL_RebaseStarted(mutationTime, source.offset, source.pitch);
         break;
     default: fail(); return;
     }
-    source_property(id);
+    if (parameter == AL_SEC_OFFSET)
+    {
+        source.generation = ++g_playbackGeneration;
+        emit_source(id, "source-seek");
+    }
+    else source_property(id);
 }
 
 void alGetSourcef(ALuint id, ALenum parameter, ALfloat *value)
@@ -518,12 +537,11 @@ void alSourcePlay(ALuint id)
 {
     if (!source_valid(id)) { fail(); return; }
     auto &source = g_sources[id];
+    const bool resume = source.state == AL_PAUSED;
+    source.deviceFailed = false;
     source.state = AL_PLAYING;
-    const double current = now_seconds();
-    source.started = current - source.offset / std::max(0.001f, source.pitch);
-    source.lastRefresh = current;
-    ++source.generation;
-    emit_source(id, "source-play");
+    source.generation = ++g_playbackGeneration;
+    emit_source(id, resume ? "source-resume" : "source-play");
 }
 
 void alSourcePause(ALuint id)
@@ -532,6 +550,7 @@ void alSourcePause(ALuint id)
     auto &source = g_sources[id];
     refresh_state(source);
     source.state = AL_PAUSED;
+    source.generation = ++g_playbackGeneration;
     emit_source(id, "source-pause");
 }
 
@@ -541,10 +560,9 @@ void alSourceStop(ALuint id)
     auto &source = g_sources[id];
     source.state = AL_STOPPED;
     source.offset = 0.0f;
-    source.queueOffset = 0.0;
     if (!source.queue.empty())
         source.processed = source.queue.size();
-    ++source.generation;
+    source.generation = ++g_playbackGeneration;
     emit_source(id, "source-stop");
 }
 
@@ -554,6 +572,8 @@ void alSourceQueueBuffers(ALuint id, ALsizei count, const ALuint *buffers)
     for (ALsizei i = 0; i < count; ++i)
         if (!buffer_valid(buffers[i])) { fail(); return; }
     auto &source = g_sources[id];
+    if (static_cast<std::size_t>(count) > MAX_QUEUED_BUFFERS - source.queue.size())
+    { fail(); return; }
     for (ALsizei i = 0; i < count; ++i)
         source.queue.push_back(buffers[i]);
     emit_buffer_list(id, "source-queue", buffers, count);
@@ -569,9 +589,11 @@ void alSourceUnqueueBuffers(ALuint id, ALsizei count, ALuint *buffers)
     for (ALsizei i = 0; i < removed; ++i)
     {
         buffers[i] = source.queue.front();
+        source.retiredSeconds += buffer_duration(buffers[i]);
         source.queue.pop_front();
     }
     source.processed -= removed;
+    source.queueBase += removed;
     emit_buffer_list(id, "source-unqueue", buffers, removed);
 }
 
@@ -629,8 +651,46 @@ ALCboolean alcMakeContextCurrent(ALCcontext *context)
 // Platform-only probe used by the served Worker smoke. It exercises the same
 // proxy upload path as LoadedSound without creating an alias, channel, or
 // gameplay event.
-extern "C" int KisakWeb_TestAudioProxyPcm()
+extern "C" int KisakWeb_TestAudioProxyPcm(int operation)
 {
+#if KISAK_WEB_DIAGNOSTICS
+    static ALuint clockSource = 0, clockBuffers[3]{};
+    if (operation == 10 || operation == 20)
+    {
+        if (clockSource) return 0;
+        alGenSources(1, &clockSource);
+        alGenBuffers(3, clockBuffers);
+        const ALshort silence[2000]{}; // synthetic quarter-second device buffers
+        for (ALuint id : clockBuffers)
+            alBufferData(id, AL_FORMAT_MONO16, silence, sizeof(silence), 8000);
+        if (operation == 20) alSourceQueueBuffers(clockSource, 3, clockBuffers);
+        else alSourcei(clockSource, AL_BUFFER, clockBuffers[0]);
+        alSourcePlay(clockSource);
+        return alGetError() == AL_NONE;
+    }
+    if (operation && clockSource)
+    {
+        ALint value = 0;
+        ALfloat offset = 0;
+        switch (operation)
+        {
+        case 1: alGetSourcei(clockSource, AL_SOURCE_STATE, &value); return value;
+        case 2: alGetSourcef(clockSource, AL_SEC_OFFSET, &offset); return int(offset * 1000);
+        case 3: alSourcePause(clockSource); return 1;
+        case 4: alSourcePlay(clockSource); return 1;
+        case 7: alGetSourcei(clockSource, AL_BUFFERS_PROCESSED, &value); return value;
+        case 5:
+            alSourceStop(clockSource);
+            alDeleteSources(1, &clockSource);
+            alDeleteBuffers(3, clockBuffers);
+            clockSource = 0;
+            return 1;
+        default: return 0;
+        }
+    }
+#else
+    (void)operation;
+#endif
     ALuint buffer = 0;
     const ALshort pcm[2] = { 0, 8192 };
     alGenBuffers(1, &buffer);

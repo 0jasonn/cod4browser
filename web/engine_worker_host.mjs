@@ -1,4 +1,9 @@
 import {
+    acceptFilesystemProgress,
+    armWorkerRequestTimeout,
+    clearRequestTimers,
+    FILESYSTEM_ABSOLUTE_TIMEOUT_MS,
+    validateFilesystemTimeout,
     createFilesystemLeases,
     createRequestIdAllocator,
     rejectWorkerRequests,
@@ -41,6 +46,9 @@ export function createEngineWorkerHost(canvas, {
     onAbort,
     onAudioDiagnostic,
     requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+    filesystemStallTimeoutMs = requestTimeoutMs,
+    filesystemAbsoluteTimeoutMs = FILESYSTEM_ABSOLUTE_TIMEOUT_MS,
+    onFilesystemProgress,
     managePageLifecycle = true,
     onFilesystemState,
     onFilesystemLifecycleEvent,
@@ -57,7 +65,14 @@ export function createEngineWorkerHost(canvas, {
         type: "module",
         name: "kisakcod-engine",
     });
+    let audioFeedbackPending = false;
     const audioDriver = audioDriverFactory({
+        onPlaybackState: (message) => {
+            if (!workerUnavailable && !audioFeedbackPending) {
+                audioFeedbackPending = true;
+                worker.postMessage(message);
+            }
+        },
         onDiagnostic: (message) => {
             onAudioDiagnostic?.(message);
             onLog?.(`[kisakcod-web] ${message}`, "warn");
@@ -106,40 +121,66 @@ export function createEngineWorkerHost(canvas, {
     }
 
 
-    function rpc(type, payload = {}, transfer = [], { signal, timeoutMs = requestTimeoutMs } = {})
+    validateFilesystemTimeout(filesystemStallTimeoutMs, "Filesystem stall");
+    validateFilesystemTimeout(filesystemAbsoluteTimeoutMs, "Filesystem absolute");
+    if (filesystemAbsoluteTimeoutMs < filesystemStallTimeoutMs) {
+        throw new RangeError("Filesystem absolute timeout must be at least the stall timeout.");
+    }
+
+    function rpc(type, payload = {}, transfer = [], {
+        timeoutMs = requestTimeoutMs,
+        signal,
+        stallTimeoutMs,
+        absoluteTimeoutMs,
+    } = {})
     {
         if ((shuttingDown && type !== "shutdown") || disposed || workerUnavailable) {
             return Promise.reject(new EngineWorkerError(protocolError(
                 "WORKER_SHUTTING_DOWN", type, "The engine Worker is shutting down.")));
         }
-        if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 120_000) {
-            return Promise.reject(new RangeError("Worker request timeout must be 1..120000 ms."));
+        const usesProgressWatchdog = stallTimeoutMs !== undefined;
+        if (!usesProgressWatchdog && (!Number.isFinite(timeoutMs) || timeoutMs <= 0 ||
+            timeoutMs > 120_000)) {
+            return Promise.reject(new RangeError(
+                `Worker request timeout must be 1..${120_000} ms.`));
+        }
+        if (usesProgressWatchdog) {
+            try {
+                validateFilesystemTimeout(stallTimeoutMs, "Filesystem stall");
+                validateFilesystemTimeout(absoluteTimeoutMs, "Filesystem absolute");
+            } catch (error) {
+                return Promise.reject(error);
+            }
+            if (absoluteTimeoutMs < stallTimeoutMs) {
+                return Promise.reject(new RangeError(
+                    "Filesystem absolute timeout must be at least the stall timeout."));
+            }
         }
         if (signal?.aborted) {
             return Promise.reject(new DOMException("The Worker request was aborted.", "AbortError"));
         }
         const id = allocateRequestId();
         const promise = new Promise((resolve, reject) => {
-            const abort = () => {
-                const request = pending.get(id);
-                if (!request) return;
-                pending.delete(id);
-                clearTimeout(request.timeout);
-                reject(new DOMException("The Worker request was aborted.", "AbortError"));
-            };
-            const timeout = setTimeout(() => {
-                const request = pending.get(id);
-                if (!request) return;
-                pending.delete(id);
+            const expire = (message) => {
+                if (!pending.delete(id)) return;
+                clearRequestTimers(request);
                 signal?.removeEventListener("abort", abort);
                 reject(new EngineWorkerError(protocolError(
-                    "REQUEST_TIMEOUT", type,
-                    `The engine Worker did not answer within ${timeoutMs} ms.`, true)));
-            }, timeoutMs);
-            pending.set(id, {
-                resolve, reject, timeout, signal, abort, operation: type,
-                generation: workerGeneration,
-            });
+                    "REQUEST_TIMEOUT", type, message, true)));
+            };
+            const abort = () => {
+                if (!pending.delete(id)) return;
+                clearRequestTimers(request);
+                reject(new DOMException("The Worker request was aborted.", "AbortError"));
+            };
+            const request = {
+                resolve, reject, timeout: null, signal, abort,
+                absoluteTimeout: null,
+                stallTimeoutMs,
+                generation: workerGeneration, operation: type,
+            };
+            armWorkerRequestTimeout(request, { timeoutMs, stallTimeoutMs, absoluteTimeoutMs }, expire);
+            pending.set(id, request);
             signal?.addEventListener("abort", abort, { once: true });
         });
         try {
@@ -147,8 +188,8 @@ export function createEngineWorkerHost(canvas, {
         } catch (error) {
             const request = pending.get(id);
             pending.delete(id);
-            clearTimeout(request?.timeout);
-            signal?.removeEventListener("abort", request?.abort);
+            if (request) clearRequestTimers(request);
+            request?.signal?.removeEventListener("abort", request.abort);
             request?.reject(error);
         }
         return promise;
@@ -156,7 +197,7 @@ export function createEngineWorkerHost(canvas, {
 
     const handleMessage = (event) => {
         const message = event.data;
-        if (["ready", "reply", "event", "startup-error"].includes(message?.type) &&
+        if (["ready", "reply", "event", "startup-error", "filesystem-progress"].includes(message?.type) &&
             message.protocolVersion !== ENGINE_PROTOCOL_VERSION) {
             const error = protocolError(
                 "PROTOCOL_VERSION", "message",
@@ -170,6 +211,13 @@ export function createEngineWorkerHost(canvas, {
         case "reply":
             settleWorkerReply(pending, message, workerGeneration);
             break;
+        case "filesystem-progress": {
+            const request = pending.get(message.id);
+            if (acceptFilesystemProgress(request, message, workerGeneration)) {
+                onFilesystemProgress?.(message.progress);
+            }
+            break;
+        }
         case "event":
             if (!HOST_EVENTS.has(message.name)) {
                 rejectWorkerRequests(pending, protocolError(
@@ -180,6 +228,9 @@ export function createEngineWorkerHost(canvas, {
                 audioDriver.dispose();
             }
             globalThis.dispatchEvent(new CustomEvent(message.name, { detail: message.detail }));
+            break;
+        case "audio-playback-ack":
+            if (message.version === 1) audioFeedbackPending = false;
             break;
         case "audio-command":
             audioDriver.handleCommand(message);
@@ -279,7 +330,10 @@ export function createEngineWorkerHost(canvas, {
         unmounting = (async () => {
             setFilesystemState(DIAGNOSTIC_FILESYSTEM_STATES.FLUSHING);
             try {
-                const result = await rpc("unmount");
+                const result = await rpc("unmount", {}, [], {
+                    stallTimeoutMs: filesystemStallTimeoutMs,
+                    absoluteTimeoutMs: filesystemAbsoluteTimeoutMs,
+                });
                 setFilesystemState(DIAGNOSTIC_FILESYSTEM_STATES.UNMOUNTED);
                 await leases.release();
                 return result;
@@ -315,7 +369,10 @@ export function createEngineWorkerHost(canvas, {
                     await leases.acquire();
                     setFilesystemState(DIAGNOSTIC_FILESYSTEM_STATES.MOUNTING);
                     mountRequestStarted = true;
-                    const result = await rpc("mount", { manifest });
+                    const result = await rpc("mount", { manifest }, [], {
+                        stallTimeoutMs: filesystemStallTimeoutMs,
+                        absoluteTimeoutMs: filesystemAbsoluteTimeoutMs,
+                    });
                     setFilesystemState(DIAGNOSTIC_FILESYSTEM_STATES.MOUNTED);
                     return result;
                 } catch (error) {
@@ -406,7 +463,10 @@ export function createEngineWorkerHost(canvas, {
         checkpoint() {
             return serializeFilesystemMutation(async () => {
                 try {
-                    return await rpc("checkpoint");
+                    return await rpc("checkpoint", {}, [], {
+                        stallTimeoutMs: filesystemStallTimeoutMs,
+                        absoluteTimeoutMs: filesystemAbsoluteTimeoutMs,
+                    });
                 } catch (error) {
                     if (workerOwnershipUnknown(error)) {
                         await recoverWorkerOwnership("checkpoint", error);
@@ -423,7 +483,10 @@ export function createEngineWorkerHost(canvas, {
                 try {
                     await filesystemMutation.catch(() => {});
                     if (!workerUnavailable) {
-                        await rpc("shutdown");
+                        await rpc("shutdown", {}, [], {
+                            stallTimeoutMs: filesystemStallTimeoutMs,
+                            absoluteTimeoutMs: filesystemAbsoluteTimeoutMs,
+                        });
                         setFilesystemState(DIAGNOSTIC_FILESYSTEM_STATES.UNMOUNTED);
                     }
                 } catch (error) {

@@ -1,6 +1,7 @@
 #include <universal/q_shared.h>
 #include "com_pack.h"
 #include <qcommon/qcommon.h>
+#include <qcommon/qcommon_math.h>
 
 // KISAKTODO: Move more stuff into here. The Bgra/4byte stuff probably belongs in here.
 
@@ -111,13 +112,7 @@ void __cdecl Byte4CopyBgraToVertexColor(const uint8_t *rgbaFrom, uint8_t *native
 
 void __cdecl Vec3UnpackUnitVec(PackedUnitVec in, float *out)
 {
-    float decodeScale; // [esp+10h] [ebp-4h]
-
-    decodeScale = (in.array[3] - -192.0f) / 32385.0f;
-
-    out[0] = (in.array[0] - 127.0f) * decodeScale;
-    out[1] = (in.array[1] - 127.0f) * decodeScale;
-    out[2] = (in.array[2] - 127.0f) * decodeScale;
+    Q_UnpackUnitVec(in.array, out);
 }
 
 void __cdecl Vec2UnpackTexCoords(PackedTexCoords in, float *out)

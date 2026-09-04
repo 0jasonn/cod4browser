@@ -1,4 +1,5 @@
 #include <web/web_renderer_static_model_scene.h>
+#include <gfx_d3d/r_dynamiclights_core.h>
 #include <web/web_renderer_material_lookup.h>
 
 #include <gfx_d3d/gfx_world_types.h>
@@ -253,6 +254,7 @@ WebRendererWorldBatchDesc MakeDraw(
         if (shadowStateEntry != 0xffu &&
             shadowStateEntry < material->stateBitsCount)
         {
+            draw.castsSpotShadow = true;
             draw.shadowStateBits0 =
                 material->stateBitsTable[shadowStateEntry].loadBits[0];
         }
@@ -289,13 +291,17 @@ WebRendererWorldBatchDesc MakeDraw(
         std::strstr(draw.pixelShaderName, "s0_sm3.hlsl") != nullptr &&
         draw.specularImage && draw.reflectionProbeImage &&
         WebRenderer_CopyMaterialConstant(material, ENV_MAP_PARMS_HASH, draw.envMapParms);
-    draw.technique = !hasTechnique || !draw.baseImage
+    draw.technique = WebRenderer_IsCinematicMaterial(material, draw.techniqueType)
+        ? WebRendererWorldTechnique::Cinematic
+        : !hasTechnique || !draw.baseImage
         ? WebRendererWorldTechnique::BackendFallback
         : environmentSpecular
             ? (normalMapped
                 ? WebRendererWorldTechnique::BaseTextureNormalSpecular
                 : WebRendererWorldTechnique::BaseTextureSpecular)
             : WebRendererWorldTechnique::BaseTexture;
+    if (draw.technique == WebRendererWorldTechnique::Cinematic)
+        draw.samplerState = draw.normalSamplerState = draw.detailSamplerState = draw.specularSamplerState = 0x62;
     return draw;
 }
 } // namespace
@@ -452,6 +458,11 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
                 {
                     return WebRendererStaticModelSceneResult::InvalidModel;
                 }
+                bool lodHasDeformedSurface = false;
+                for (std::uint32_t localSurface = 0u;
+                     localSurface < lodInfo.numsurfs; ++localSurface)
+                    lodHasDeformedSurface |=
+                        model.surfs[lodInfo.surfIndex + localSurface].deformed;
                 for (std::uint32_t localSurface = 0u;
                      localSurface < lodInfo.numsurfs; ++localSurface)
                 {
@@ -563,6 +574,10 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
                         group.instanceIndices.back(),
                         group.reflectionProbeIndex,
                         group.primaryLightIndex);
+                    // WebGL has no native static-model cache. Match
+                    // R_GetStaticModelId's non-cache rigid/skinned branch.
+                    batch.draw.dynamicLightSurfType =
+                        lodHasDeformedSurface ? 5u : 2u;
                     batch.instanceOffset = instanceOffset;
                     batch.instanceCount = static_cast<std::uint32_t>(
                         group.instanceIndices.size());
@@ -712,6 +727,31 @@ bool WebRenderer_BuildStaticModelSpotShadowVisibility(
             primaryLightIndex, instances[index].canonicalInstanceIndex};
         visibility[index] = std::binary_search(begin, end, target, less)
             ? 1u : 0u;
+    }
+    return true;
+}
+
+bool WebRenderer_BuildStaticModelLightVisibility(
+    std::span<const WebRendererStaticModelInstanceDesc> instances,
+    std::span<const WebRendererStaticModelShadowBounds> bounds,
+    std::span<const std::uint8_t> cameraVisibility, bool cameraVisibilityComputed,
+    const GfxLight &light, float spotNearPlaneOffset,
+    std::span<std::uint8_t> destination) noexcept
+{
+    std::fill(destination.begin(), destination.end(), 0u);
+    if (instances.size() != bounds.size() || instances.size() != destination.size()) return false;
+    float planes[6][4]{};
+    if (!kisak::dynamic_lights::ReceiverPlanes(light, spotNearPlaneOffset, planes)) return false;
+    for (const auto &instance : instances)
+        if (cameraVisibilityComputed && instance.canonicalInstanceIndex >= cameraVisibility.size())
+            return false;
+    for (std::size_t index = 0; index < instances.size(); ++index)
+    {
+        if (cameraVisibilityComputed && !cameraVisibility[instances[index].canonicalInstanceIndex]) continue;
+        destination[index] = light.type == 2
+            ? kisak::dynamic_lights::BoxInPlanes(planes, bounds[index].mins, bounds[index].maxs)
+            : kisak::dynamic_lights::BoxInSphere(light.origin, light.radius * light.radius,
+                bounds[index].mins, bounds[index].maxs);
     }
     return true;
 }

@@ -58,6 +58,11 @@ enum class WebRendererParticleCloudAppendResult : std::uint8_t
     AllocationFailed,
 };
 
+// Native R_CreateParticleCloudBuffer builds one randomized 8x8x16 lattice for
+// the renderer lifetime. Call this after CL_Init seeds the CRT stream and on a
+// renderer restart; command construction reuses the retained centers.
+void WebRenderer_InitializeParticleCloudLayout() noexcept;
+
 WebRendererParticleCloudRetainResult WebRenderer_RetainParticleCloudSubmission(
     WebRendererParticleCloudSubmission *storage,
     std::uint32_t *count,

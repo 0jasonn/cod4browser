@@ -1,5 +1,6 @@
 #include <universal/q_shared.h>
 #include "r_dpvs.h"
+#include "r_dpvs_core.h"
 #include <qcommon/mem_track.h>
 #include "r_model_lighting.h"
 #include "r_dvars.h"
@@ -1029,22 +1030,9 @@ void __cdecl R_UnfilterEntFromCells(uint32_t localClientNum, uint32_t entnum)
 
 void __cdecl R_UnfilterDynEntFromCells(uint32_t dynEntId, DynEntityDrawType drawType)
 {
-    uint32_t cellIndex; // [esp+0h] [ebp-18h]
-    uint32_t cellCount; // [esp+8h] [ebp-10h]
-    uint32_t dynEntClientWordCount; // [esp+Ch] [ebp-Ch]
-    uint32_t *dynEntCellBits; // [esp+10h] [ebp-8h]
-    uint32_t wordIndex; // [esp+14h] [ebp-4h]
-
-    iassert( Sys_IsMainThread() );
-    dynEntCellBits = rgp.world->dpvsDyn.dynEntCellBits[drawType];
-    dynEntClientWordCount = rgp.world->dpvsDyn.dynEntClientWordCount[drawType];
-    cellCount = rgp.world->dpvsPlanes.cellCount;
-    wordIndex = dynEntId >> 5;
-    for (cellIndex = 0; cellIndex < cellCount; ++cellIndex)
-    {
-        dynEntCellBits[wordIndex] &= ~(0x80000000 >> (dynEntId & 0x1F));
-        wordIndex += dynEntClientWordCount;
-    }
+    iassert(Sys_IsMainThread());
+    if (!R_UnlinkDynEntityFromCells(*rgp.world, drawType, dynEntId))
+        Com_Error(ERR_DROP, "R_UnfilterDynEntFromCells: invalid canonical cell storage");
 }
 
 void __cdecl R_FilterXModelIntoScene(
@@ -1319,97 +1307,9 @@ void __cdecl R_FilterBModelIntoCells(uint32_t localClientNum, uint32_t entnum, G
 
 void __cdecl R_FilterDynEntIntoCells(uint32_t dynEntId, DynEntityDrawType drawType, float *mins, float *maxs)
 {
-    R_UnfilterDynEntFromCells(dynEntId, drawType);
-    R_FilterDynEntIntoCells_r((mnode_t *)rgp.world->dpvsPlanes.nodes, dynEntId, drawType, mins, maxs);
-}
-
-void __cdecl R_FilterDynEntIntoCells_r(
-    mnode_t *node,
-    uint32_t dynEntIndex,
-    DynEntityDrawType drawType,
-    const float *mins,
-    const float *maxs)
-{
-    float localmaxs[3]; // [esp+0h] [ebp-50h]
-    float dist; // [esp+Ch] [ebp-44h]
-    float localmins[3]; // [esp+10h] [ebp-40h] BYREF
-    uint32_t type; // [esp+1Ch] [ebp-34h]
-    int side; // [esp+20h] [ebp-30h]
-    cplane_s *plane; // [esp+24h] [ebp-2Ch]
-    int cellIndex; // [esp+28h] [ebp-28h]
-    float mins2[3]; // [esp+2Ch] [ebp-24h] BYREF
-    int cellCount; // [esp+38h] [ebp-18h]
-    float maxs2[3]; // [esp+3Ch] [ebp-14h] BYREF
-    mnode_t *rightNode; // [esp+48h] [ebp-8h]
-    int planeIndex; // [esp+4Ch] [ebp-4h]
-
-    cellCount = rgp.world->dpvsPlanes.cellCount + 1;
-
-    mins2[0] = mins[0];
-    mins2[1] = mins[1];
-    mins2[2] = mins[2];
-
-    maxs2[0] = maxs[0];
-    maxs2[1] = maxs[1];
-    maxs2[2] = maxs[2];
-
-    while (1)
-    {
-        cellIndex = node->cellIndex;
-        planeIndex = cellIndex - cellCount;
-        if (cellIndex - cellCount < 0)
-            break;
-        plane = &rgp.world->dpvsPlanes.planes[planeIndex];
-        side = BoxOnPlaneSide(mins2, maxs2, plane);
-        if (side == 3)
-        {
-            type = plane->type;
-            rightNode = (mnode_t *)((char *)node + 2 * node->rightChildOffset);
-            if (type >= 3)
-            {
-                R_FilterDynEntIntoCells_r(node + 1, dynEntIndex, drawType, mins2, maxs2);
-            }
-            else
-            {
-                dist = plane->dist;
-
-                localmins[0] = mins2[0];
-                localmins[1] = mins2[1];
-                localmins[2] = mins2[2];
-                localmins[type] = dist;
-
-                localmaxs[0] = maxs2[0];
-                localmaxs[1] = maxs2[1];
-                localmaxs[2] = maxs2[2];
-                localmaxs[type] = dist;
-
-                iassert(BoxOnPlaneSide(localmins, maxs2, plane) == BOXSIDE_FRONT);
-
-                if (maxs2[type] > (double)dist)
-                    R_FilterDynEntIntoCells_r(node + 1, dynEntIndex, drawType, localmins, maxs2);
-                maxs2[0] = localmaxs[0];
-                maxs2[1] = localmaxs[1];
-                maxs2[2] = localmaxs[2];
-            }
-            node = rightNode;
-        }
-        else
-        {
-            iassert( (side == BOXSIDE_FRONT) || (side == BOXSIDE_BACK) );
-            node = (mnode_t *)((char *)node + ((side - 1) * (node->rightChildOffset - 2)) * 2 + 4);
-        }
-    }
-    if (cellIndex)
-        R_AddDynEntToCell(cellIndex - 1, dynEntIndex, drawType);
-}
-
-void __cdecl R_AddDynEntToCell(uint32_t cellIndex, uint32_t dynEntIndex, DynEntityDrawType drawType)
-{
-    uint32_t wordIndex; // [esp+Ch] [ebp-4h]
-
-    iassert( Sys_IsMainThread() );
-    wordIndex = rgp.world->dpvsDyn.dynEntClientWordCount[drawType] * cellIndex + (dynEntIndex >> 5);
-    rgp.world->dpvsDyn.dynEntCellBits[drawType][wordIndex] |= 0x80000000 >> (dynEntIndex & 0x1F);
+    iassert(Sys_IsMainThread());
+    if (!R_LinkDynEntityBoundsToCells(*rgp.world, drawType, dynEntId, mins, maxs))
+        Com_Error(ERR_DROP, "R_FilterDynEntIntoCells: invalid canonical bounds or cell storage");
 }
 
 void __cdecl R_FilterEntitiesIntoCells(int cameraCellIndex)
@@ -1579,73 +1479,12 @@ void __cdecl R_AddCellDynBrushSurfacesInFrustumCmd(const DpvsDynamicCellCmd *dat
 
 void __cdecl R_CullDynBrushInCell(uint32_t cellIndex, const DpvsPlane *planes, int planeCount)
 {
-    unsigned long v4; // eax
-    int v5; // [esp+4h] [ebp-34h]
-    const DpvsPlane *v6; // [esp+8h] [ebp-30h]
-    int v7; // [esp+Ch] [ebp-2Ch]
-    uint32_t dynEntIndex; // [esp+14h] [ebp-24h]
-    const DynEntityDef *dynEntDef; // [esp+18h] [ebp-20h]
-    uint32_t bits; // [esp+1Ch] [ebp-1Ch]
-    uint32_t dynEntClientWordCount; // [esp+20h] [ebp-18h]
-    uint32_t indexLow; // [esp+24h] [ebp-14h]
-    uint8_t *dynEntVisData; // [esp+28h] [ebp-10h]
-    uint32_t *dynEntCellBits; // [esp+2Ch] [ebp-Ch]
-    uint32_t wordIndex; // [esp+30h] [ebp-8h]
-    const GfxBrushModel *bmodel; // [esp+34h] [ebp-4h]
-
-    if (cellIndex >= rgp.world->dpvsPlanes.cellCount)
-        MyAssertHandler(
-            ".\\r_dpvs.cpp",
-            1289,
-            0,
-            "cellIndex doesn't index rgp.world->dpvsPlanes.cellCount\n\t%i not in [0, %i)",
-            cellIndex,
-            rgp.world->dpvsPlanes.cellCount);
-    dynEntVisData = g_dynEntVisData[1];
-    dynEntClientWordCount = rgp.world->dpvsDyn.dynEntClientWordCount[1];
-    dynEntCellBits = &rgp.world->dpvsDyn.dynEntCellBits[1][dynEntClientWordCount * cellIndex];
-    for (wordIndex = 0; wordIndex < dynEntClientWordCount; ++wordIndex)
-    {
-        bits = dynEntCellBits[wordIndex];
-        while (1)
-        {
-            if (!_BitScanReverse(&v4, bits))
-                v4 = 0x3F;
-            indexLow = v4 ^ 0x1F;
-            if ((v4 ^ 0x1Fu) >= 0x20)
-                break;
-            dynEntIndex = indexLow + 32 * wordIndex;
-            uint32_t bit = (0x80000000 >> indexLow);
-            iassert( bits & bit );
-            bits &= ~bit;
-            if (!dynEntVisData[dynEntIndex])
-            {
-                dynEntDef = DynEnt_GetEntityDef(dynEntIndex, DYNENT_DRAW_BRUSH);
-                iassert( !dynEntDef->xModel );
-                iassert( dynEntDef->brushModel );
-                bmodel = R_GetBrushModel(dynEntDef->brushModel);
-                v7 = 0;
-                v6 = planes;
-                while (v7 < planeCount)
-                {
-                    if (*(float *)((char *)bmodel->writable.mins + v6->side[0]) * v6->coeffs[0]
-                        + v6->coeffs[3]
-                        + *(float *)((char *)bmodel->writable.mins + v6->side[1]) * v6->coeffs[1]
-                        + *(float *)((char *)bmodel->writable.mins + v6->side[2]) * v6->coeffs[2] <= 0.0)
-                    {
-                        v5 = 1;
-                        goto LABEL_22;
-                    }
-                    ++v7;
-                    ++v6;
-                }
-                v5 = 0;
-            LABEL_22:
-                if (!v5)
-                    dynEntVisData[dynEntIndex] = 1;
-            }
-        }
-    }
+    const unsigned count = DynEnt_GetEntityCount(DYNENT_COLL_CLIENT_BRUSH);
+    if (count != rgp.world->dpvsDyn.dynEntClientCount[1] ||
+        !R_CullDynEntityCell(*rgp.world, 1u, cellIndex, nullptr,
+            count ? DynEnt_GetEntityDef(0u, DYNENT_DRAW_BRUSH) : nullptr,
+            planes, planeCount, g_dynEntVisData[1]))
+        Com_Error(ERR_DROP, "R_CullDynBrushInCell: invalid canonical cell data");
 }
 
 void __cdecl R_GenerateShadowMapCasterCells()
@@ -2130,10 +1969,8 @@ void __cdecl DynEntCl_InitFilter()
     scene.sceneDynModelCount = 0;
     scene.sceneDynBrushCount = 0;
     for (drawType = 0; drawType < 2; ++drawType)
-        Com_Memset(
-            rgp.world->dpvsDyn.dynEntCellBits[drawType],
-            0,
-            4 * rgp.world->dpvsPlanes.cellCount * rgp.world->dpvsDyn.dynEntClientWordCount[drawType]);
+        if (!R_ClearDynEntityCellLinks(*rgp.world, drawType))
+            Com_Error(ERR_DROP, "DynEntCl_InitFilter: invalid canonical cell storage");
 }
 
 void __cdecl R_InitSceneBuffers()

@@ -1,6 +1,6 @@
 // Main-thread Web Audio owner for the Worker-side OpenAL compatibility proxy.
 // This class owns only Web Audio resources. Canonical SND channel/alias state
-// and playback timing remain in the Kisak Worker.
+// remain in the Kisak Worker; device position comes from AudioContext time.
 
 export const WEB_AUDIO_PROTOCOL_VERSION = 1;
 const MAX_SOURCES = 54; // 53 canonical SND channels plus one cinematic track.
@@ -68,6 +68,7 @@ export class WebAudioDriver {
      * @param {{contextFactory?: () => AudioContext | null,
      *   onDiagnostic?: (message: string) => void,
      *   onPlaybackStarted?: (detail: object) => void,
+     *   onPlaybackState?: (detail: object) => void,
      *   onTelemetry?: (detail: object) => void,
      *   startMuted?: boolean,
      *   decodedPcmBudgetBytes?: number,
@@ -77,6 +78,7 @@ export class WebAudioDriver {
         contextFactory,
         onDiagnostic,
         onPlaybackStarted,
+        onPlaybackState,
         onTelemetry,
         startMuted = true,
         decodedPcmBudgetBytes = MAX_DECODED_PCM_BYTES,
@@ -88,6 +90,10 @@ export class WebAudioDriver {
         });
         this.onDiagnostic = onDiagnostic;
         this.onPlaybackStarted = onPlaybackStarted;
+        this.onPlaybackState = onPlaybackState;
+        this.lastPlaybackReport = -Infinity;
+        this.playbackTimer = onPlaybackState
+            ? setInterval(() => this.publishPlayback(), 25) : null;
         this.onTelemetry = onTelemetry;
         this.decodedPcmBudgetBytes = decodedPcmBudgetBytes;
         this.maxQueuedBuffersPerSource = maxQueuedBuffersPerSource;
@@ -144,6 +150,7 @@ export class WebAudioDriver {
         } else if (!this.audioUnlocked && this.context.state === "running") {
             void this.context.suspend?.();
         }
+        this.context?.addEventListener?.("statechange", () => this.publishPlayback(true));
         return this.context;
     }
 
@@ -291,7 +298,54 @@ export class WebAudioDriver {
         return this.validId(command.sourceId, MAX_SOURCES);
     }
 
+    // Positions are sampled from the device clock, which freezes while the
+    // context is suspended. Worker delivery time is never added to playback.
+    playbackState(source) {
+        const now = this.context?.currentTime ?? source.startedAt;
+        let offset = source.offset;
+        let processed = source.queueProcessed;
+        let state = source.state;
+        if (state === "playing") {
+            if (source.queue.length) {
+                while (processed < source.queue.length) {
+                    const entry = source.queue[processed];
+                    if (!entry.completed && !(entry.node && now >= entry.endTime)) break;
+                    ++processed;
+                }
+                const entry = source.queue[processed];
+                offset = entry?.node
+                    ? entry.offset + Math.max(0, now - entry.startTime) * source.pitch : 0;
+                if (!entry) state = "stopped";
+                source.queueProcessed = processed;
+            } else {
+                const duration = this.buffers.get(source.bufferId)?.duration ?? 0;
+                offset += Math.max(0, now - source.startedAt) * source.pitch;
+                if (source.looping && duration > 0) offset %= duration;
+                else if (offset >= duration) { offset = duration; state = "stopped"; }
+            }
+        }
+        return { sourceId: source.sourceId, generation: source.generation,
+            processed: source.queueBase + processed, offset,
+            state: source.failed ? 0 : state === "playing" ? 0x1012 : state === "paused" ? 0x1013 : 0x1014 };
+    }
+
+    publishPlayback(force = false) {
+        if (!this.onPlaybackState) return;
+        const now = performance.now();
+        if (!force && now - this.lastPlaybackReport < 25) return;
+        this.lastPlaybackReport = now;
+        this.onPlaybackState({ type: "audio-playback", version: WEB_AUDIO_PROTOCOL_VERSION,
+            sources: [...this.sources.values()].map((source) => this.playbackState(source)) });
+    }
+
     handleCommand(command) {
+        const result = this.dispatchCommand(command);
+        this.publishPlayback(["source-play", "source-resume", "source-pause",
+            "source-stop", "source-seek", "device-reset"].includes(command?.op));
+        return result;
+    }
+
+    dispatchCommand(command) {
         if (!command || command.version !== WEB_AUDIO_PROTOCOL_VERSION ||
             typeof command.op !== "string") {
             this.diagnostic("Ignored malformed Web Audio command.");
@@ -317,6 +371,8 @@ export class WebAudioDriver {
             return true;
         case "source-property":
         case "source-play":
+        case "source-resume":
+        case "source-seek":
         case "source-pause":
         case "source-stop":
             return this.sourceCommand(command);
@@ -339,7 +395,7 @@ export class WebAudioDriver {
                 offset: 0, x: 0, y: 0, z: 0, state: "stopped", node: null,
                 gainNode: null, panner: null, startedAt: 0, activeBufferId: 0,
                 aliasName: "", sourceId: id, spatialized: false,
-                queue: [], queueProcessed: 0, streamNodes: [], queueEndTime: 0,
+                queue: [], queueProcessed: 0, queueBase: 0, streamNodes: [], queueEndTime: 0,
                 eqBands: new Array(30).fill(0), eqNodes: [],
                 wet: 0, reverbProperties: null,
             });
@@ -571,6 +627,7 @@ export class WebAudioDriver {
     }
 
     startSource(source, generation) {
+        source.failed = false;
         const context = this.ensureContext();
         const buffer = this.buffers.get(source.bufferId);
         if (!context || !buffer || !context.createBufferSource) {
@@ -579,6 +636,7 @@ export class WebAudioDriver {
             this.cleanup(source);
             source.activeBufferId = 0;
             source.state = "stopped";
+            source.failed = true;
             return false;
         }
         const metadata = this.bufferMetadata.get(source.bufferId);
@@ -605,6 +663,7 @@ export class WebAudioDriver {
             for (const filter of source.eqNodes) filter.disconnect();
             source.eqNodes = [];
             source.state = source.looping ? "playing" : "stopped";
+            source.offset = buffer.duration;
             source.activeBufferId = 0;
             source.node = source.gainNode = source.panner = null;
         };
@@ -617,7 +676,7 @@ export class WebAudioDriver {
         try { node.start(0, clamp(source.offset, 0, buffer.duration)); }
         catch (error) {
             this.cleanup(source); source.activeBufferId = 0;
-            source.state = "stopped"; this.diagnostic(error); return false;
+            source.state = "stopped"; source.failed = true; this.diagnostic(error); return false;
         }
         try {
             this.onPlaybackStarted?.({
@@ -661,6 +720,7 @@ export class WebAudioDriver {
             const duration = Math.max(0,
                 (buffer.duration - offset) / Math.max(0.001, source.pitch));
             entry.node = node;
+            entry.offset = offset;
             entry.startTime = when;
             entry.endTime = when + duration;
             source.streamNodes.push(node);
@@ -689,8 +749,9 @@ export class WebAudioDriver {
     }
 
     startQueuedSource(source, generation) {
+        source.failed = false;
         const context = this.ensureContext();
-        if (!context || source.queueProcessed >= source.queue.length) return false;
+        if (!context || source.queueProcessed >= source.queue.length) { source.failed = true; return false; }
         this.cleanup(source);
         this.createOutputGraph(source, context);
         source.state = "playing";
@@ -699,6 +760,7 @@ export class WebAudioDriver {
         if (!this.scheduleQueuedBuffers(source, generation, true)) {
             this.cleanup(source);
             source.state = "stopped";
+            source.failed = true;
             return false;
         }
         source.activeBufferId = source.queue[source.queueProcessed]?.bufferId ?? 0;
@@ -737,12 +799,21 @@ export class WebAudioDriver {
                 this.diagnostic("Rejected Web Audio stream queue: source queue limit exceeded.");
                 return false;
             }
-            if (command.bufferIds.some((id) => !this.buffers.has(id))) return false;
             source.generation = command.generation;
             for (const bufferId of command.bufferIds)
                 source.queue.push({ bufferId, node: null, completed: false });
-            if (source.state === "playing")
-                return this.scheduleQueuedBuffers(source, source.generation);
+            // Preserve the accepted queue ledger even when PCM admission failed.
+            // The Worker retires it after device failure and must still unqueue
+            // the same prefix before reusing this source.
+            if (command.bufferIds.some((id) => !this.buffers.has(id))) {
+                source.failed = true;
+                return false;
+            }
+            if (source.state === "playing") {
+                const scheduled = this.scheduleQueuedBuffers(source, source.generation);
+                if (!scheduled) source.failed = true;
+                return scheduled;
+            }
             return true;
         }
         if (command.bufferIds.length > source.queue.length ||
@@ -762,6 +833,7 @@ export class WebAudioDriver {
                 if (at >= 0) source.streamNodes.splice(at, 1);
             }
         }
+        source.queueBase += command.bufferIds.length;
         source.queueProcessed = Math.max(0,
             source.queueProcessed - command.bufferIds.length);
         source.activeBufferId = source.queue[source.queueProcessed]?.bufferId ?? 0;
@@ -786,34 +858,42 @@ export class WebAudioDriver {
         }
         if (command.wet !== undefined && (!Number.isFinite(command.wet) ||
             command.wet < 0 || command.wet > 1)) return false;
+        const wasPlaying = source.state === "playing";
+        const previousPitch = source.pitch;
+        const playback = this.playbackState(source);
+        source.offset = playback.offset;
+        source.startedAt = this.context?.currentTime ?? source.startedAt;
         if (command.wet !== undefined) source.wet = command.wet;
         if (Number.isFinite(command.gain)) source.gain = clamp(command.gain, 0, 16);
         if (Number.isFinite(command.pitch)) source.pitch = clamp(command.pitch, 0.001, 16);
-        if (Number.isFinite(command.offset)) source.offset = Math.max(0, command.offset);
+        if (["source-play", "source-seek"].includes(command.op) && Number.isFinite(command.offset))
+            source.offset = Math.max(0, command.offset);
         if (hasPosition) [source.x, source.y, source.z] = [command.x, command.y, command.z];
         if (typeof command.looping === "boolean") source.looping = command.looping;
         if (typeof command.spatialized === "boolean")
             source.spatialized = command.spatialized;
-        if (Number.isInteger(command.queueProcessed))
+        if (command.op === "source-play" && Number.isInteger(command.queueProcessed))
             source.queueProcessed = clamp(command.queueProcessed, 0, source.queue.length);
         if (Number.isInteger(command.bufferId)) source.bufferId = command.bufferId;
         if (typeof command.aliasName === "string")
             source.aliasName = command.aliasName.slice(0, 128);
         if (Number.isInteger(command.generation)) source.generation = command.generation;
-        if (command.op === "source-property") { this.applyProperties(source); return true; }
-        if (command.op === "source-play") {
+        if (command.op === "source-property") {
+            if (wasPlaying && source.queue.length && previousPitch !== source.pitch)
+                return this.startQueuedSource(source, source.generation);
+            this.applyProperties(source); return true;
+        }
+        if (command.op === "source-play" || command.op === "source-resume" ||
+            (command.op === "source-seek" && wasPlaying)) {
             if (source.queue.length > source.queueProcessed)
                 return this.startQueuedSource(source, source.generation);
             return this.startSource(source, source.generation);
         }
         if (command.op === "source-pause") {
-            if (source.state === "playing" && source.node && source.queue.length === 0) {
-                const current = this.context?.currentTime ?? source.startedAt;
-                source.offset += Math.max(0, current - source.startedAt) * source.pitch;
-            }
             this.cleanup(source); source.activeBufferId = 0;
             source.state = "paused"; return true;
         }
+        if (command.op === "source-seek") return true;
         this.cleanup(source); source.offset = 0; source.activeBufferId = 0;
         source.state = "stopped"; return true;
     }
@@ -836,6 +916,8 @@ export class WebAudioDriver {
     }
 
     dispose() {
+        clearInterval(this.playbackTimer);
+        this.onPlaybackState = undefined;
         this.resetResources();
         if (this.gestureTarget && this.gestureHandler) {
             for (const type of ["pointerdown", "keydown", "touchstart"])

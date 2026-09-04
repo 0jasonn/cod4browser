@@ -117,6 +117,8 @@ void __cdecl Load_XStringCustom(char **str)
     DB_IncStreamPos(pos - (uint8_t *)s + 1);
 }
 
+#if !defined(KISAK_NATIVE_DB_LOAD_RAWFILE_ORACLE) && \
+    !defined(KISAK_GENERATED_DB_LOAD_RAWFILE_ORACLE)
 void __cdecl Load_TempStringCustom(char **str)
 {
     const char * string; // [esp+0h] [ebp-4h]
@@ -132,4 +134,5 @@ void __cdecl Load_TempStringCustom(char **str)
         string= 0;
     *str = (char *)string;
 }
+#endif
 

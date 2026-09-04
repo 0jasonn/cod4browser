@@ -2,6 +2,8 @@
 #include <qcommon/cmd.h>
 #include <qcommon/qcommon.h>
 #include <qcommon/system.h>
+#include <database/db_string_ownership.h>
+#include <script/scr_stringlist.h>
 #include <universal/dvar.h>
 #include <universal/physicalmemory.h>
 #include <universal/q_shared.h>
@@ -194,6 +196,35 @@ int main()
     const dvar_t *smp = Dvar_FindVar("sys_smp_allowed");
     assert(smp && !smp->current.enabled && (smp->flags & DVAR_INIT));
 
+    const std::uint32_t sharedString = SL_GetString("gate3-zone-shared", 4u);
+    DB_RegisterStringZoneOwnership(sharedString, 1u);
+    assert(SL_GetString("gate3-zone-shared", 4u) == sharedString);
+    DB_RegisterStringZoneOwnership(sharedString, 2u);
+    assert(DB_HasRegisteredStringOwnership() &&
+        (SL_GetUser(sharedString) & 4u));
+    DB_ReleaseStringZoneOwnership(std::uint64_t{1} << 1u);
+    assert(SL_FindString("gate3-zone-shared") == sharedString &&
+        (SL_GetUser(sharedString) & 4u));
+    DB_ReleaseStringZoneOwnership(std::uint64_t{1} << 2u);
+    assert(!SL_FindString("gate3-zone-shared") &&
+        !DB_HasRegisteredStringOwnership());
+
+    const std::uint32_t defaultString = SL_GetString("gate3-default", 4u);
+    DB_RegisterStringZoneOwnership(defaultString, 0u);
+    DB_RegisterStringZoneOwnership(defaultString, 0u);
+    const std::uint32_t temporaryZoneString = SL_GetString("gate3-zone", 4u);
+    DB_RegisterStringZoneOwnership(temporaryZoneString, 1u);
+    DB_ReleaseStringZoneOwnership(std::uint64_t{1} << 1u);
+    assert(!SL_FindString("gate3-zone") &&
+        SL_FindString("gate3-default") == defaultString &&
+        DB_HasRegisteredStringOwnership());
+    DB_UnregisterDefaultStringOwnership(defaultString);
+    assert(SL_FindString("gate3-default") == defaultString);
+    DB_UnregisterDefaultStringOwnership(defaultString);
+    assert(!SL_FindString("gate3-default") &&
+        !DB_HasRegisteredStringOwnership());
+    std::puts("canonical-db-string-ownership shared-zones=retained default-refs=retained final-owner=retired");
+
     dvar_s *domainDvar = const_cast<dvar_s *>(Dvar_RegisterInt(
         "gate3_domain", 1, 0, 10, 0, "domain callback ABI probe"));
     Dvar_SetDomainFunc(domainDvar, ValidateDomainValue);
@@ -201,6 +232,18 @@ int main()
     assert(g_domainCallCount == 2);
     assert(g_domainValue == 7);
     assert(domainDvar->current.integer == 7);
+
+    Dvar_RegisterString("gate3_serverinfo", "server", DVAR_SERVERINFO, "info mask probe");
+    Dvar_RegisterString("gate3_systeminfo", "system", DVAR_SYSTEMINFO, "info mask probe");
+    Dvar_RegisterString("gate3_cheatinfo", "cheat", DVAR_CHEAT, "info mask probe");
+    for (char mask : {char(DVAR_SERVERINFO), char(DVAR_SYSTEMINFO), char(0)})
+    {
+        const char *info = Dvar_InfoString(0, mask);
+        assert((std::strstr(info, "gate3_serverinfo") != nullptr) == (mask == DVAR_SERVERINFO));
+        assert((std::strstr(info, "gate3_systeminfo") != nullptr) == (mask == DVAR_SYSTEMINFO));
+        assert(std::strstr(info, "gate3_archive") == nullptr);
+        assert(std::strstr(info, "gate3_cheatinfo") == nullptr);
+    }
 
     // Exercise the real command implementation's registration order, exact
     // lookup, case-insensitive execution, token/argument access, buffered wait

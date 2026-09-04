@@ -4,7 +4,10 @@
 // world conversion/submission path.
 
 #include <client/client.h>
+#include <cgame/cg_local.h>
 #include <database/database.h>
+#include <database/db_registry_pools.h>
+#include <database/db_registry_publication.h>
 #include <DynEntity/DynEntity_client.h>
 #include <EffectsCore/fx_system.h>
 #include <gfx_d3d/fxprimitives.h>
@@ -21,6 +24,8 @@
 #include <gfx_d3d/r_effects_api.h>
 #include <gfx_d3d/r_font.h>
 #include <gfx_d3d/r_gamma.h>
+#include <gfx_d3d/r_image_quality.h>
+#include <gfx_d3d/r_material_override_core.h>
 #include <gfx_d3d/r_text.h>
 #include <gfx_d3d/r_rendercmds.h>
 #include <gfx_d3d/r_primarylights_core.h>
@@ -80,6 +85,19 @@ extern GfxWorld s_world;
 
 namespace
 {
+cmd_function_s g_applyPicmipCommand{};
+bool g_applyPicmipCommandRegistered = false;
+
+void ApplyPicmipForBrowser()
+{
+    // Native refreshes every registered material image in place. The browser
+    // backend retains bounded decoded recovery sources instead, so reuse the
+    // established renderer restart path to rebuild them at the newly selected
+    // authored mip levels. SP vid_restart preserves the running game through
+    // its canonical temporary-save path.
+    Cbuf_AddText(0, "vid_restart\n");
+}
+
 #if KISAK_WEB_DIAGNOSTICS
 double g_frontendProfileStarted = 0.0;
 std::array<std::uint32_t, 256> g_testUiTextHashes{};
@@ -473,37 +491,73 @@ void __cdecl CollectTechniqueSet(XAssetHeader header, void *context)
         header.techniqueSet);
 }
 
-std::uint32_t ResolveTechniqueSetRemaps()
+struct MaterialFeature
 {
+    const char *name;
+    std::uint32_t mask;
+    std::uint32_t value;
+};
+
+constexpr std::array<MaterialFeature, 20> MATERIAL_FEATURES{{
+    {"s0", 4u, 0u}, {"s1", 4u, 0u}, {"s2", 4u, 0u},
+    {"s3", 4u, 0u}, {"s4", 4u, 0u}, {"d0", 8u, 0u},
+    {"d1", 8u, 0u}, {"d2", 8u, 0u}, {"d3", 8u, 0u},
+    {"d4", 8u, 0u}, {"n0", 16u, 0u}, {"n1", 16u, 0u},
+    {"n2", 16u, 0u}, {"n3", 16u, 0u}, {"n4", 16u, 0u},
+    {"zfeather", 1u, 0u}, {"outdoor", 2u, 0u},
+    {"sm", 384u, 128u}, {"hsm", 384u, 256u}, {"twk", 32u, 0u},
+}};
+
+bool g_techniqueSetRemapsDirty = true;
+std::uint32_t g_techniqueSetRemapMask = UINT32_MAX;
+std::uint32_t g_techniqueSetRemapValue = UINT32_MAX;
+
+struct TechniqueSetRemapStats
+{
+    std::uint32_t shaderModel3 = 0u;
+    std::uint32_t references = 0u;
+    std::uint32_t featureRemaps = 0u;
+    bool changed = false;
+};
+
+TechniqueSetRemapStats ResolveTechniqueSetRemaps(bool force = false)
+{
+    TechniqueSetRemapStats stats{};
+    if (!DB_AreAssetPoolsInitialized()) return stats;
+    std::uint32_t remapMask = 0x180u;
+    constexpr std::uint32_t remapValue = 0x100u;
+    if (r_detail && !r_detail->current.enabled) remapMask |= 8u;
+    if (r_specular && !r_specular->current.enabled) remapMask |= 4u;
+    if (r_normal && !r_normal->current.enabled) remapMask |= 16u;
+    if (r_zFeather && !r_zFeather->current.enabled) remapMask |= 1u;
+    if (r_outdoor && !r_outdoor->current.enabled) remapMask |= 2u;
+    if (r_envMapOverride && r_envMapOverride->current.enabled) remapMask |= 32u;
+    if (!force && !g_techniqueSetRemapsDirty &&
+        remapMask == g_techniqueSetRemapMask &&
+        remapValue == g_techniqueSetRemapValue)
+        return stats;
+
     std::vector<MaterialTechniqueSet *> techniqueSets;
     DB_EnumXAssets(ASSET_TYPE_TECHNIQUE_SET,
-        CollectTechniqueSet, &techniqueSets, true);
+        CollectTechniqueSet, &techniqueSets, false);
 
-    std::uint32_t shaderModel3Count = 0u;
-    std::uint32_t referenceCount = 0u;
-    for (MaterialTechniqueSet *source : techniqueSets)
-    {
-        if (!source) continue;
-        if (source->name && source->name[0] == ',' && source->name[1] != '\0')
-        {
-            MaterialTechniqueSet *canonical = DB_FindXAssetHeader(
-                ASSET_TYPE_TECHNIQUE_SET, source->name + 1).techniqueSet;
-            if (canonical && canonical->name &&
-                I_stricmp(canonical->name, source->name + 1) == 0)
-            {
-                source->remappedTechniqueSet = canonical;
-                ++referenceCount;
-                continue;
-            }
-        }
-        source->remappedTechniqueSet = source;
-        if (source->name && std::strncmp(source->name, "sm2/", 4u) != 0)
-            ++shaderModel3Count;
-    }
-    Web_Log(WebLogLevel::Info,
-        "[kisakcod-web] Resolved %u canonical leading-comma TechniqueSet "
-        "references at the renderer-evaluation seam.\n", referenceCount);
-    return shaderModel3Count;
+    const MaterialTechniqueSetRemapStats resolved =
+        Material_ResolveTechniqueSetRemapsCore(
+            techniqueSets.data(), techniqueSets.size(), remapMask, remapValue,
+            MATERIAL_FEATURES.data(), MATERIAL_FEATURES.size(),
+            [](const char *name) {
+                XAssetEntryPoolEntry *entry = DB_FindXAssetEntryCanonical(
+                    ASSET_TYPE_TECHNIQUE_SET, name);
+                return entry ? entry->entry.asset.header.techniqueSet : nullptr;
+            });
+    stats.shaderModel3 = resolved.shaderModel3;
+    stats.references = resolved.references;
+    stats.featureRemaps = resolved.featureRemaps;
+    g_techniqueSetRemapMask = remapMask;
+    g_techniqueSetRemapValue = remapValue;
+    g_techniqueSetRemapsDirty = false;
+    stats.changed = true;
+    return stats;
 }
 }
 
@@ -548,6 +602,179 @@ std::uint32_t g_dobjSubmissionCount = 0u;
 std::array<WebRendererBrushModelSubmission,
     WEB_RENDERER_MAX_DYNAMIC_BMODEL_SUBMISSIONS> g_brushModelSubmissions{};
 std::uint32_t g_brushModelSubmissionCount = 0u;
+std::array<std::uint8_t, MAX_GENTITIES> g_dobjCellLinkValid{};
+std::array<std::uint8_t, MAX_GENTITIES> g_brushCellLinkValid{};
+// Renderer link metadata corresponding to native scene.dpvs.entInfo.radius.
+// Cgame owns the supplied radius (including its movement tolerance); the
+// per-frame pose radius must not replace it for inner portal-plane tests.
+std::array<float, MAX_GENTITIES> g_dobjCellLinkRadius{};
+
+struct PortalSceneAdmissionState
+{
+    GfxWorld *world = nullptr;
+    std::uint32_t entityCount = 0u;
+    std::uint32_t localClientNum = 0u;
+    const WebRendererLodParms *lodParms = nullptr;
+    const float *viewOffset = nullptr;
+#if KISAK_WEB_DIAGNOSTICS
+    unsigned posedTests = 0u, posedPlaneRejects = 0u, posedCellRejects = 0u;
+#endif
+    std::array<std::uint8_t,
+        WEB_RENDERER_MAX_DYNAMIC_DOBJ_SUBMISSIONS> dobjVisible{};
+    std::array<std::uint8_t,
+        WEB_RENDERER_MAX_DYNAMIC_BMODEL_SUBMISSIONS> brushVisible{};
+    bool valid = true;
+};
+
+void ObservePortalSceneCell(void *user, const GfxCell *cell,
+    const DpvsPlane *planes, unsigned char planeCount,
+    unsigned char frustumPlaneCount)
+{
+    auto *state = static_cast<PortalSceneAdmissionState *>(user);
+    if (!state || !state->valid || !state->world || !cell ||
+        frustumPlaneCount > planeCount ||
+        planeCount > DPVS_PORTAL_MAX_PLANES ||
+        (planeCount != 0u && !planes))
+    {
+        if (state) state->valid = false;
+        return;
+    }
+    const std::uintptr_t begin = reinterpret_cast<std::uintptr_t>(
+        state->world->cells);
+    const std::uintptr_t target = reinterpret_cast<std::uintptr_t>(cell);
+    if (!begin || target < begin ||
+        (target - begin) % sizeof(GfxCell) != 0u)
+    {
+        state->valid = false;
+        return;
+    }
+    const std::uint32_t cellIndex = static_cast<std::uint32_t>(
+        (target - begin) / sizeof(GfxCell));
+    if (cellIndex >= static_cast<std::uint32_t>(
+            state->world->dpvsPlanes.cellCount))
+    {
+        state->valid = false;
+        return;
+    }
+    // DynEntities use every cell plane, including the camera prefix. Native
+    // scene DObjs/brushes below have already consumed that prefix separately.
+    if (!r_drawDynEnts || r_drawDynEnts->current.enabled)
+        for (unsigned kind = 0; kind < 2u; ++kind)
+        {
+            const auto drawType = static_cast<DynEntityDrawType>(kind);
+            const unsigned count = state->world->dpvsDyn.dynEntClientCount[kind];
+            if (!R_CullDynEntityCell(*state->world, kind, cellIndex,
+                    kind == 0u ? DynEnt_GetClientModelPoseList() : nullptr,
+                    kind == 1u && count ? DynEnt_GetEntityDef(0u, drawType) : nullptr,
+                    planes, planeCount, state->world->dpvsDyn.dynEntVisData[kind][0]))
+                Com_Error(ERR_DROP, "R_RenderScene: invalid DynEntity portal cell data");
+        }
+    const DpvsPlane *const innerPlanes =
+        planes ? planes + frustumPlaneCount : nullptr;
+    const int innerPlaneCount = planeCount - frustumPlaneCount;
+
+    for (std::uint32_t index = 0u;
+         index < g_dobjSubmissionCount; ++index)
+    {
+        const WebRendererDObjSubmission &submission =
+            g_dobjSubmissions[index];
+        if (state->dobjVisible[index]) continue;
+        if (submission.entityNumber >= g_dobjCellLinkValid.size() ||
+            !g_dobjCellLinkValid[submission.entityNumber])
+            continue;
+        const DpvsSceneEntityCellLink link =
+            R_QuerySceneEntityCellLink(*state->world,
+                state->localClientNum, state->entityCount,
+                submission.entityNumber, cellIndex,
+                DpvsSceneEntityKind::DObj);
+        if (link == DpvsSceneEntityCellLink::Unavailable)
+        {
+            state->valid = false;
+            return;
+        }
+        if (link != DpvsSceneEntityCellLink::Linked)
+            continue;
+        const float radius =
+            g_dobjCellLinkRadius[submission.entityNumber];
+        if (!submission.obj || !submission.pose || !std::isfinite(radius) || radius < 0.0f)
+        {
+            state->dobjVisible[index] = 1u; // Preserve the builder's validation path.
+            continue;
+        }
+        if (innerPlaneCount != 0 && kisak::dpvs::CullSphere(
+                submission.pose->origin, radius, innerPlanes, innerPlaneCount))
+            continue;
+        const bool sceneEntity = (submission.renderFlags & 4u) != 0u ||
+            submission.obj->tree || submission.obj->numModels != 1u;
+        if (sceneEntity)
+        {
+            const DpvsView &camera = g_cameraDpvs.views[state->localClientNum][0];
+            const float cameraRadius = static_cast<float>(DObjGetRadius(submission.obj));
+            if (std::isfinite(cameraRadius) && cameraRadius >= 0.0f &&
+                kisak::dpvs::CullSphere(submission.pose->origin, cameraRadius,
+                    camera.frustumPlanes, camera.frustumPlaneCount))
+                continue;
+            float mins[3]{}, maxs[3]{};
+            const auto result = WebRenderer_ComputeDObjVisibilityBounds(
+                submission, state->lodParms, state->viewOffset, mins, maxs);
+            if (result == WebRendererDObjSceneResult::NoDObj) continue;
+            if (result != WebRendererDObjSceneResult::Success)
+                Com_Error(ERR_DROP, "R_RenderScene: invalid canonical DObj cell bounds");
+#if KISAK_WEB_DIAGNOSTICS
+            ++state->posedTests;
+#endif
+            // Native's post-pose worker consumes the full planes, then verifies
+            // the updated box still occupies this precise BSP cell. Repeated
+            // paths retry rejected poses through CG_DObjCalcPose's own skeleton.
+            if (planeCount != 0 && kisak::dpvs::CullBox(mins, maxs, planes, planeCount))
+            {
+#if KISAK_WEB_DIAGNOSTICS
+                ++state->posedPlaneRejects;
+#endif
+                continue;
+            }
+            bool inside = false;
+            if (!R_QueryBoundsInCell(*state->world, cellIndex, mins, maxs, inside))
+                Com_Error(ERR_DROP, "R_RenderScene: invalid canonical DObj BSP cell query");
+            if (!inside)
+            {
+#if KISAK_WEB_DIAGNOSTICS
+                ++state->posedCellRejects;
+#endif
+                continue;
+            }
+            CG_CullIn(const_cast<cpose_t *>(submission.pose));
+        }
+        state->dobjVisible[index] = 1u;
+    }
+
+    for (std::uint32_t index = 0u;
+         index < g_brushModelSubmissionCount; ++index)
+    {
+        const WebRendererBrushModelSubmission &submission =
+            g_brushModelSubmissions[index];
+        if (submission.entityNumber >= g_brushCellLinkValid.size() ||
+            !g_brushCellLinkValid[submission.entityNumber])
+            continue;
+        const DpvsSceneEntityCellLink link =
+            R_QuerySceneEntityCellLink(*state->world,
+                state->localClientNum, state->entityCount,
+                submission.entityNumber, cellIndex,
+                DpvsSceneEntityKind::Brush);
+        if (link == DpvsSceneEntityCellLink::Unavailable)
+        {
+            state->valid = false;
+            return;
+        }
+        if (link != DpvsSceneEntityCellLink::Linked)
+            continue;
+        if (!submission.model || innerPlaneCount == 0 ||
+            !kisak::dpvs::CullBox(submission.model->writable.mins,
+                submission.model->writable.maxs,
+                innerPlanes, innerPlaneCount))
+            state->brushVisible[index] = 1u;
+    }
+}
 struct BrushGeometryReference
 {
     std::uint32_t handle = UINT32_MAX;
@@ -604,15 +831,46 @@ std::uint32_t g_pendingMarkDrawBegin = 0u;
 std::vector<WebRendererSurfaceVertex> g_markMeshRenderVertices;
 std::vector<std::uint32_t> g_markMeshRenderIndices;
 std::vector<WebRendererWorldBatchDesc> g_markMeshRenderBatches;
-std::vector<std::uint8_t> g_staticMarkVisibility;
 std::vector<WebRendererSurfaceVertex> g_uiVertices;
 std::vector<std::uint32_t> g_uiIndices;
 std::vector<WebRendererUiBatchDesc> g_uiBatches;
 int g_uiSceneTime = 0;
 std::array<GfxLight, 32> g_addedLights{};
 std::uint32_t g_addedLightCount = 0;
+float g_dynamicSpotLightNearPlaneOffset = 0.0f;
 #if KISAK_WEB_DIAGNOSTICS
 int g_testTransientLightMode = 0;
+int g_testDynEntityCamera = -1;
+bool g_testDynEntityCameraRendered = false;
+// A render-only fixture: select an existing linked model, without changing
+// the player, canonical poses, scripts, or the authored camera owner.
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestDynEntityCamera(int enabled)
+{
+    if (enabled < 0) return g_testDynEntityCameraRendered ? 1 : 0;
+    g_testDynEntityCameraRendered = false;
+    g_testDynEntityCamera = -1;
+    if (!enabled || !g_rendererWorldReady ||
+        !R_DynEntityCellLayoutAvailable(s_world, 0u)) return 0;
+    const unsigned count = DynEnt_GetEntityCount(DYNENT_COLL_CLIENT_MODEL);
+    if (count != s_world.dpvsDyn.dynEntClientCount[0]) return 0;
+    for (unsigned id = 0; id < count; ++id)
+    {
+        const auto *client = DynEnt_GetClientEntity(id, DYNENT_DRAW_MODEL);
+        const auto *pose = DynEnt_GetClientPose(id, DYNENT_DRAW_MODEL);
+        if (!(client->flags & DYNENT_CL_VISIBLE) ||
+            !std::isfinite(pose->radius) || pose->radius < 8.0f) continue;
+        for (int cell = 0; cell < s_world.dpvsPlanes.cellCount; ++cell)
+            if (s_world.dpvsDyn.dynEntCellBits[0][
+                    cell * s_world.dpvsDyn.dynEntClientWordCount[0] + (id >> 5u)] &
+                (0x80000000u >> (id & 31u)))
+            {
+                g_testDynEntityCamera = static_cast<int>(id);
+                return static_cast<int>(id + 1u);
+            }
+    }
+    return 0;
+}
+
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestTransientLights(int mode)
 {
     if (mode >= 0 && mode <= 3) g_testTransientLightMode = mode;
@@ -1370,12 +1628,24 @@ void __cdecl R_BeginRegistration(vidConfig_t *configuration)
 {
     iassert(configuration);
     R_RegisterDvars();
+
     if (!WebRenderer_Initialize())
         Com_Error(ERR_FATAL, "Could not initialize the browser renderer");
+    // CL_Init has seeded the process random stream by this registration point.
+    // Match native R_CreateParticleCloudBuffer's one lattice per renderer
+    // creation rather than deriving a new center in each scene command.
+    WebRenderer_InitializeParticleCloudLayout();
     // WebGL2 exceeds IW3's shader-model-3 feature floor. Select the same
     // canonical best path as a max-graphics D3D9 client before zone assets
     // are loaded, so shader programs and technique sets remain coherent.
     Dvar_SetInt(r_rendererInUse, 1);
+    // WebGL exposes no VRAM capacity. Auto quality uses the existing 800 MiB
+    // decoded-image admission ceiling and a 1 GiB platform planning budget,
+    // not a claim about the user's hardware. Manual policy is native.
+    R_SetPicmipForMemory(800, 1024);
+    Cmd_AddCommandInternal("r_applyPicmip", ApplyPicmipForBrowser,
+        &g_applyPicmipCommand);
+    g_applyPicmipCommandRegistered = true;
     std::memset(configuration, 0, sizeof(*configuration));
     WebDisplay_Configure(configuration);
     configuration->maxTextureSize = 2048;
@@ -1385,6 +1655,11 @@ void __cdecl R_BeginRegistration(vidConfig_t *configuration)
 
 void __cdecl R_Shutdown(int destroyWindow)
 {
+    if (g_applyPicmipCommandRegistered)
+    {
+        Cmd_RemoveCommand("r_applyPicmip");
+        g_applyPicmipCommandRegistered = false;
+    }
     if (destroyWindow) WebRenderer_Shutdown();
 }
 
@@ -1392,6 +1667,7 @@ void __cdecl R_UnloadWorld()
 {
     UI_InvalidateSaveGameShot();
     g_addedLightCount = 0;
+    g_dynamicSpotLightNearPlaneOffset = 0.0f;
     WebRenderer_ReleaseDObjSceneScratch();
     WebRenderer_UnloadWorldResources();
     decltype(g_brushGeometryByModel){}.swap(g_brushGeometryByModel);
@@ -1400,6 +1676,12 @@ void R_ShutdownDirect3D() { WebRenderer_Shutdown(); }
 void __cdecl R_SyncRenderThread() {}
 void __cdecl R_BeginFrame()
 {
+    const TechniqueSetRemapStats remaps = ResolveTechniqueSetRemaps();
+    if (remaps.changed)
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Remapped %u TechniqueSets for renderer feature "
+            "changes (%u canonical references).\n",
+            remaps.featureRemaps, remaps.references);
 #if KISAK_WEB_DIAGNOSTICS
     g_frontendProfileStarted = WebFrameProfile_Current()
         ? WebFrameProfile_Now() : 0.0;
@@ -1471,13 +1753,22 @@ void __cdecl R_LoadWorld(char *name, int *checksum, int)
         Com_Error(ERR_DROP,
             "R_LoadWorld: canonical GfxWorld '%s' has invalid world "
             "draw-surface runtime storage", name);
-    const std::uint32_t shaderModel3TechniqueSets =
-        ResolveTechniqueSetRemaps();
+    const TechniqueSetRemapStats remaps = ResolveTechniqueSetRemaps(true);
     Web_Log(WebLogLevel::Info,
         "[kisakcod-web] Selected %u canonical shader-model-3 technique sets "
-        "for the WebGL2 renderer after zone publication.\n",
-        shaderModel3TechniqueSets);
+        "for the WebGL2 renderer after zone publication; %u feature remaps "
+        "and %u leading-comma references resolved.\n",
+        remaps.shaderModel3, remaps.featureRemaps, remaps.references);
+    for (unsigned kind = 0; kind < 2u; ++kind)
+        if (!R_ClearDynEntityCellLinks(s_world, kind))
+            Com_Error(ERR_DROP, "R_LoadWorld: invalid DynEntity cell storage");
+#if KISAK_WEB_DIAGNOSTICS
+    g_testDynEntityCamera = -1;
+#endif
     g_rendererWorldReady = true;
+    g_dobjCellLinkValid.fill(0u);
+    g_brushCellLinkValid.fill(0u);
+    g_dobjCellLinkRadius.fill(0.0f);
     g_gameDrivenFrameReported = false;
     g_visionLightingReported = false;
     g_sceneBlurReported = false;
@@ -1901,17 +2192,33 @@ std::uint32_t __cdecl R_GetLocalClientNum() { return 0; }
 void __cdecl R_ClearScene(std::uint32_t)
 {
     g_addedLightCount = 0;
+    g_dynamicSpotLightNearPlaneOffset = 0.0f;
     g_dobjSubmissionCount = 0u;
     g_brushModelSubmissionCount = 0u;
     WebRenderer_ClearFxModelSubmissions(&g_fxModelSubmissionCount);
     WebRenderer_ClearParticleCloudSubmissions(&g_particleCloudSubmissionCount);
 }
 
+void R_ComErrorCleanup()
+{
+    iassert(Sys_IsMainThread());
+    // Discard the interrupted frontend lists. WebGL submission is synchronous
+    // in this Worker; there is no D3D BeginScene or queued render thread.
+    R_BeginFrame();
+    R_ClearScene(0);
+}
+
 void __cdecl R_InitSceneData(int localClientNum)
 {
     iassert(localClientNum == 0 && g_rendererWorldReady);
-    // Native DPVS scene buffers are renderer-backend storage. The WebGL2
-    // backend owns visibility submission and does not expose D3D scene bits.
+    // Native clears both per-cell scene-entity banks for this client before
+    // cgame relinks the current snapshot. Keep those canonical world-owned
+    // bits even though the WebGL2 frontend does not allocate GfxScene buffers.
+    R_ClearSceneEntityCellLinks(s_world,
+        static_cast<unsigned>(localClientNum), Web_RendererEntityCount());
+    g_dobjCellLinkValid.fill(0u);
+    g_brushCellLinkValid.fill(0u);
+    g_dobjCellLinkRadius.fill(0.0f);
 }
 
 void __cdecl R_InitPrimaryLights(GfxLight *primaryLights)
@@ -2284,16 +2591,32 @@ void __cdecl R_AddSpotLightToScene(const float *origin, const float *direction,
         Dvar_SetFloat(r_spotLightEndRadius, start + 0.1f);
     if (r_spotLightEndRadius->current.value >= start + radius)
         Dvar_SetFloat(r_spotLightEndRadius, start + radius - 0.1f);
-    kisak::dynamic_lights::SetSpot(*light,
+    const float nearPlaneOffset = kisak::dynamic_lights::SetSpot(*light,
         DB_FindXAssetHeader(ASSET_TYPE_LIGHT_DEF, "light_dynamic").lightDef,
         origin, direction, radius, color, start, r_spotLightEndRadius->current.value,
         r_spotLightFovInnerFraction->current.value, r_spotLightBrightness->current.value,
         r_spotLightShadows->current.enabled);
+    if (light == g_addedLights.data())
+        g_dynamicSpotLightNearPlaneOffset = nearPlaneOffset;
     iassert(light->cosHalfFovInner > light->cosHalfFovOuter);
 }
 void __cdecl R_SetLodOrigin(const refdef_s *) {}
 void __cdecl R_RenderScene(const refdef_s *refdef)
 {
+#if KISAK_WEB_DIAGNOSTICS
+    refdef_s testView;
+    if (g_testDynEntityCamera >= 0 && g_testDynEntityCamera <
+        DynEnt_GetEntityCount(DYNENT_COLL_CLIENT_MODEL))
+    {
+        testView = *refdef;
+        const auto *pose = DynEnt_GetClientPose(g_testDynEntityCamera, DYNENT_DRAW_MODEL);
+        std::copy_n(pose->pose.origin, 3u, testView.vieworg);
+        AxisClear(testView.viewaxis);
+        // Stay inside the linked bounds and face the selected model's centre.
+        testView.vieworg[0] -= std::min(16.0f, pose->radius * 0.25f);
+        refdef = &testView;
+    }
+#endif
     g_uiSceneTime = refdef->time;
 #if KISAK_WEB_DIAGNOSTICS
     WebFrameProfileSample *const sceneProfile = WebFrameProfile_Current();
@@ -2617,6 +2940,107 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         webglDepthHackViewProjectionMatrix,
         sizeof(view.depthHackViewProjectionMatrix));
 
+#if KISAK_WEB_DIAGNOSTICS
+    const double cameraVisibilityStarted =
+        sceneProfile ? WebFrameProfile_Now() : 0.0;
+#endif
+    // Native establishes the camera DPVS before filtering any dynamic scene
+    // family. Do the same here so canonical sphere/box tests can reject work
+    // before pose skinning, material expansion and GPU upload.
+    GfxViewParms cameraParms{};
+    std::memcpy(cameraParms.viewMatrix.m, viewMatrix, sizeof(viewMatrix));
+    std::memcpy(cameraParms.projectionMatrix.m, projectionMatrix,
+        sizeof(projectionMatrix));
+    std::memcpy(cameraParms.viewProjectionMatrix.m,
+        d3dViewProjectionMatrix, sizeof(d3dViewProjectionMatrix));
+    MatrixInverse44(cameraParms.viewProjectionMatrix.m,
+        cameraParms.inverseViewProjectionMatrix.m);
+    std::copy_n(view.viewOrigin, 3u, cameraParms.origin);
+    cameraParms.origin[3] = 1.0f;
+    std::memcpy(cameraParms.axis, view.viewAxis, sizeof(cameraParms.axis));
+    for (unsigned kind = 0; kind < 2u; ++kind)
+    {
+        const unsigned count = DynEnt_GetEntityCount(static_cast<DynEntityCollType>(kind));
+        const unsigned words = s_world.dpvsDyn.dynEntClientWordCount[kind];
+        auto *visibility = s_world.dpvsDyn.dynEntVisData[kind][0];
+        if (!R_DynEntityCellLayoutAvailable(s_world, kind) ||
+            count != s_world.dpvsDyn.dynEntClientCount[kind] ||
+            (words != 0u && !visibility))
+            Com_Error(ERR_DROP, "R_RenderScene: invalid DynEntity camera storage");
+        if (words != 0u) std::memset(visibility, 0, 32u * words);
+    }
+    PortalSceneAdmissionState portalAdmission{};
+    portalAdmission.world = &s_world;
+    portalAdmission.entityCount = Web_RendererEntityCount();
+    portalAdmission.localClientNum = view.localClientNum;
+    portalAdmission.lodParms = &lodParms;
+    portalAdmission.viewOffset = refdef->viewOffset;
+    view.staticModelVisibilityComputed = R_ComputeStaticCameraVisibility(
+        s_world, g_cameraDpvs, cameraParms, view.localClientNum,
+        static_cast<float>(R_GetFarPlaneDist()), true,
+        ObservePortalSceneCell, &portalAdmission);
+    view.staticModelVisibility = s_world.dpvs.smodelVisData[0];
+    view.staticModelVisibilityCount = s_world.dpvs.smodelCount;
+    view.worldSurfaceVisibilityComputed =
+        view.staticModelVisibilityComputed;
+    view.worldSurfaceVisibility = s_world.dpvs.surfaceVisData[0];
+    view.worldSurfaceVisibilityCount = s_world.dpvs.staticSurfaceCount;
+    if (!view.staticModelVisibilityComputed &&
+        (s_world.dpvs.smodelCount || s_world.dpvs.staticSurfaceCount))
+    {
+        Com_Error(ERR_DROP,
+            "R_RenderScene: canonical static camera DPVS unavailable");
+        return;
+    }
+    if ((!view.staticModelVisibilityComputed || !portalAdmission.valid) &&
+        (s_world.dpvsDyn.dynEntClientCount[0] || s_world.dpvsDyn.dynEntClientCount[1]))
+        Com_Error(ERR_DROP, "R_RenderScene: DynEntity portal walk unavailable");
+    const DpvsView &camera =
+        g_cameraDpvs.views[view.localClientNum][0];
+#if KISAK_WEB_DIAGNOSTICS
+    if (!g_gameDrivenFrameReported)
+    {
+        std::uint32_t linkedDObjs = 0u, admittedDObjs = 0u;
+        std::uint32_t linkedBrushes = 0u, admittedBrushes = 0u;
+        for (std::uint32_t i = 0; i < g_dobjSubmissionCount; ++i)
+        {
+            const auto entity = g_dobjSubmissions[i].entityNumber;
+            linkedDObjs += entity < g_dobjCellLinkValid.size() &&
+                g_dobjCellLinkValid[entity];
+            admittedDObjs += portalAdmission.dobjVisible[i] != 0u;
+        }
+        for (std::uint32_t i = 0; i < g_brushModelSubmissionCount; ++i)
+        {
+            const auto entity = g_brushModelSubmissions[i].entityNumber;
+            linkedBrushes += entity < g_brushCellLinkValid.size() &&
+                g_brushCellLinkValid[entity];
+            admittedBrushes += portalAdmission.brushVisible[i] != 0u;
+        }
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Canonical portal scene admission: valid=%u "
+            "DObj linked=%u admitted=%u brush linked=%u admitted=%u.\n",
+            portalAdmission.valid ? 1u : 0u, linkedDObjs, admittedDObjs,
+            linkedBrushes, admittedBrushes);
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Canonical DObj post-pose admission: tested=%u "
+            "plane-rejected=%u cell-rejected=%u.\n",
+            portalAdmission.posedTests, portalAdmission.posedPlaneRejects,
+            portalAdmission.posedCellRejects);
+        unsigned admittedDynEntities[2]{};
+        for (unsigned kind = 0; kind < 2u; ++kind)
+            for (unsigned id = 0; id < s_world.dpvsDyn.dynEntClientCount[kind]; ++id)
+                admittedDynEntities[kind] += s_world.dpvsDyn.dynEntVisData[kind][0][id] != 0u;
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Canonical DynEntity portal admission: models=%u admitted=%u "
+            "brushes=%u admitted=%u.\n",
+            s_world.dpvsDyn.dynEntClientCount[0], admittedDynEntities[0],
+            s_world.dpvsDyn.dynEntClientCount[1], admittedDynEntities[1]);
+    }
+    if (sceneProfile)
+        sceneProfile->sceneCameraVisibilityMs +=
+            WebFrameProfile_Now() - cameraVisibilityStarted;
+#endif
+
     if (!g_gameDrivenFrameReported)
     {
         Web_Log(WebLogLevel::Info,
@@ -2847,7 +3271,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                 command.sunPrimaryLightIndex, spotLightCount,
                 omniLightCount, resolvedAttenuationCount,
                 assignedLocalLightCount, assignedLocalSurfaceCount);
-            const WebRendererWorldSurfaceDesc surface{
+            WebRendererWorldSurfaceDesc surface{
                 command.vertices.data(),
                 static_cast<std::uint32_t>(command.vertices.size()),
                 command.indices.data(),
@@ -2869,7 +3293,11 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                 command.surfaceRanges.data(),
                 static_cast<std::uint32_t>(command.surfaceRanges.size()),
                 s_world.dpvs.staticSurfaceCount,
+                command.outdoorImage,
             };
+            std::memcpy(surface.outdoorLookupMatrix,
+                command.outdoorLookupMatrix,
+                sizeof(surface.outdoorLookupMatrix));
             const WebRendererSurfaceResult submission =
                 WebRenderer_SetWorldSurface(surface);
             if (submission != WebRendererSurfaceResult::Success)
@@ -3151,6 +3579,76 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         }
     }
 
+    // Native scene-entity DPVS rejects the linked sphere against the camera
+    // planes before updating bounds and skinning. Preserve malformed records
+    // for the existing validation path, but compact ordinary culled records
+    // out of the per-frame command.
+    std::uint32_t visibleDObjCount = 0u;
+    for (std::uint32_t index = 0u; index < g_dobjSubmissionCount; ++index)
+    {
+        const WebRendererDObjSubmission &submission =
+            g_dobjSubmissions[index];
+        bool culled = false;
+        if (submission.obj && submission.pose)
+        {
+            const float radius = static_cast<float>(
+                DObjGetRadius(submission.obj));
+            if (std::isfinite(radius) && radius >= 0.0f)
+            {
+                culled = kisak::dpvs::CullSphere(
+                    submission.pose->origin, radius,
+                    camera.frustumPlanes, camera.frustumPlaneCount);
+                const bool linkedPortalResult =
+                    view.staticModelVisibilityComputed &&
+                    portalAdmission.valid &&
+                    submission.entityNumber < g_dobjCellLinkValid.size() &&
+                    g_dobjCellLinkValid[submission.entityNumber];
+                culled = culled || (linkedPortalResult
+                    ? portalAdmission.dobjVisible[index] == 0u
+                    : !R_SphereTouchesVisibleCell(
+                        s_world, g_cameraDpvs.cellVisibleBits,
+                        submission.pose->origin, radius));
+            }
+        }
+        if (!culled)
+            g_dobjSubmissions[visibleDObjCount++] = submission;
+    }
+    g_dobjSubmissionCount = visibleDObjCount;
+
+    // Native scene brushes use the second sceneEntCellBits bank and the same
+    // portal-path inner planes. Compact only records whose canonical link was
+    // rebuilt successfully; malformed or unlinked records retain the existing
+    // conservative BSP-overlap fallback.
+    std::uint32_t visibleBrushCount = 0u;
+    for (std::uint32_t index = 0u;
+         index < g_brushModelSubmissionCount; ++index)
+    {
+        const WebRendererBrushModelSubmission &submission =
+            g_brushModelSubmissions[index];
+        bool culled = false;
+        if (submission.model)
+        {
+            culled = kisak::dpvs::CullBox(
+                submission.model->writable.mins,
+                submission.model->writable.maxs,
+                camera.frustumPlanes, camera.frustumPlaneCount);
+            const bool linkedPortalResult =
+                view.staticModelVisibilityComputed &&
+                portalAdmission.valid &&
+                submission.entityNumber < g_brushCellLinkValid.size() &&
+                g_brushCellLinkValid[submission.entityNumber];
+            culled = culled || (linkedPortalResult
+                ? portalAdmission.brushVisible[index] == 0u
+                : !R_BoundsTouchVisibleCell(
+                    s_world, g_cameraDpvs.cellVisibleBits,
+                    submission.model->writable.mins,
+                    submission.model->writable.maxs));
+        }
+        if (!culled)
+            g_brushModelSubmissions[visibleBrushCount++] = submission;
+    }
+    g_brushModelSubmissionCount = visibleBrushCount;
+
     WebRendererDObjSceneCommand dynamicCommand;
 #if KISAK_WEB_DIAGNOSTICS
     const double dobjBuildStarted = sceneProfile ? WebFrameProfile_Now() : 0.0;
@@ -3161,7 +3659,9 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         WebRenderer_BuildDObjSceneCommand(
             g_dobjSubmissions.data(), g_dobjSubmissionCount,
             dynamicCommand, &lodParms, &s_world.lightGrid,
-            &MODEL_LIGHTING_CALLBACKS, ResolveRendererMaterial);
+            &MODEL_LIGHTING_CALLBACKS, ResolveRendererMaterial,
+            refdef->viewOffset, camera.frustumPlanes,
+            camera.frustumPlaneCount);
 #if KISAK_WEB_DIAGNOSTICS
     const double assemblyStarted = sceneProfile ? WebFrameProfile_Now() : 0.0;
     if (sceneProfile)
@@ -3192,37 +3692,6 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         }
     }
 
-    // Native R_RenderScene advances the EffectsCore and DynEntity physics
-    // worlds before it consumes their current poses for scene submission.
-    // Keep that runtime ownership and ordering at the browser frontend seam.
-    FX_RunPhysics(refdef->localClientNum);
-    DynEntCl_ProcessEntities(refdef->localClientNum);
-
-    // Native camera-scene ordering waits for world-mark generation, advances
-    // physics, then expands persistent marks for visible static and dynamic
-    // receivers before the decal draw list is consumed.  The browser already
-    // receives world marks from R_UpdateRemainingEffects; complete the other
-    // canonical receiver families here.  Static geometry is conservatively
-    // all-visible at this boundary, matching the current no-DPVS portable
-    // world/static commands while homogeneous clipping remains in WebGL.
-    if (fx_marks && fx_marks->current.enabled && fx_marks_smodels &&
-        fx_marks_smodels->current.enabled && s_world.dpvs.smodelCount != 0u)
-    {
-        try
-        {
-            g_staticMarkVisibility.assign(
-                s_world.dpvs.smodelCount, std::uint8_t{1u});
-            FX_GenerateMarkVertsForStaticModels(
-                refdef->localClientNum,
-                static_cast<int>(s_world.dpvs.smodelCount),
-                g_staticMarkVisibility.data());
-        }
-        catch (const std::bad_alloc &)
-        {
-            R_WarnOncePerFrame(R_WARN_GFX_MARK_MESH_LIMIT);
-        }
-    }
-
     std::vector<WebRendererBrushModelSubmission> activeBrushModels;
     try
     {
@@ -3235,6 +3704,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         for (std::uint32_t dynEntId = 0u;
              dynEntId < dynamicBrushCount; ++dynEntId)
         {
+            if (!s_world.dpvsDyn.dynEntVisData[1][0][dynEntId]) continue;
             const DynEntityClient *client = DynEnt_GetClientEntity(
                 static_cast<std::uint16_t>(dynEntId), DYNENT_DRAW_BRUSH);
             const DynEntityDef *definition = DynEnt_GetEntityDef(
@@ -3264,71 +3734,6 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         Com_Error(ERR_DROP,
             "R_RenderScene canonical brush collection allocation failed");
         return;
-    }
-
-    if (fx_marks && fx_marks->current.enabled && fx_marks_ents &&
-        fx_marks_ents->current.enabled)
-    {
-        std::uint32_t markIndexCount = 0u;
-        FX_BeginGeneratingMarkVertsForEntModels(
-            refdef->localClientNum, &markIndexCount);
-        for (std::uint32_t index = 0u;
-             index < g_dobjSubmissionCount; ++index)
-        {
-            const WebRendererDObjSubmission &submission =
-                g_dobjSubmissions[index];
-            if (!submission.obj || !submission.pose ||
-                submission.entityNumber >= MAX_GENTITIES ||
-                WebRenderer_DObjUsesDepthHack(submission.renderFlags))
-            {
-                continue;
-            }
-            // The DObj build has assigned the canonical pose-owned lighting
-            // handle by this point. Keep the historical nonzero fallback when
-            // lighting was unavailable.
-            const std::uint16_t fallbackLightingHandle =
-                static_cast<std::uint16_t>(
-                    std::min<std::uint32_t>(index + 1u, UINT16_MAX));
-            const std::uint16_t lightingHandle =
-                submission.cachedLightingHandle &&
-                    *submission.cachedLightingHandle != 0u
-                ? *submission.cachedLightingHandle
-                : fallbackLightingHandle;
-            FX_GenerateMarkVertsForEntDObj(
-                refdef->localClientNum,
-                static_cast<int>(submission.entityNumber),
-                &markIndexCount,
-                lightingHandle,
-                submission.reflectionProbeIndex,
-                submission.obj,
-                submission.pose);
-        }
-        for (std::uint32_t index = 0u;
-             index < g_brushModelSubmissionCount; ++index)
-        {
-            const WebRendererBrushModelSubmission &submission =
-                g_brushModelSubmissions[index];
-            if (!submission.model ||
-                submission.entityNumber >= MAX_GENTITIES)
-            {
-                continue;
-            }
-            GfxPlacement placement{};
-            AxisToQuat(submission.axis, placement.quat);
-            std::copy_n(submission.origin, 3u, placement.origin);
-            const std::uint8_t reflectionProbeIndex =
-                static_cast<std::uint8_t>(std::min<std::uint32_t>(
-                    WebRenderer_CalcReflectionProbeIndex(
-                        s_world, submission.origin),
-                    UINT8_MAX));
-            FX_GenerateMarkVertsForEntBrush(
-                refdef->localClientNum,
-                static_cast<int>(submission.entityNumber),
-                &markIndexCount,
-                reflectionProbeIndex,
-                &placement);
-        }
-        FX_EndGeneratingMarkVertsForEntModels(refdef->localClientNum);
     }
 
 #if KISAK_WEB_DIAGNOSTICS
@@ -3437,6 +3842,19 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             std::memcpy(instance.origin, submission.origin, sizeof(instance.origin));
             instance.shadowEntityKind = submission.shadowEntityKind;
             instance.shadowEntityId = submission.entityNumber;
+            if (!WebRenderer_CopyBrushReceiverBounds(*submission.model, instance))
+            {
+                Com_Error(ERR_DROP, "R_RenderScene brush receiver bounds are invalid");
+                return;
+            }
+            if (submission.shadowEntityKind != WebRendererShadowEntityKind::DynEntBrush &&
+                (kisak::dpvs::CullBox(
+                    instance.receiverMins, instance.receiverMaxs,
+                    camera.frustumPlanes, camera.frustumPlaneCount) ||
+                !R_BoundsTouchVisibleCell(s_world,
+                    g_cameraDpvs.cellVisibleBits,
+                    instance.receiverMins, instance.receiverMaxs)))
+                continue;
             brushInstances.push_back(instance);
             brushSurfaceCount += resource.surfaces;
             brushBatchCount += resource.batches;
@@ -3466,6 +3884,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         for (std::uint32_t dynEntId = 0u;
              dynEntId < dynamicModelCount; ++dynEntId)
         {
+            if (!s_world.dpvsDyn.dynEntVisData[0][0][dynEntId]) continue;
             const DynEntityClient *client = DynEnt_GetClientEntity(
                 static_cast<std::uint16_t>(dynEntId), DYNENT_DRAW_MODEL);
             const DynEntityDef *definition = DynEnt_GetEntityDef(
@@ -3486,6 +3905,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             submission.shadowEntityKind =
                 WebRendererShadowEntityKind::DynEntModel;
             submission.shadowEntityId = dynEntId;
+            submission.dynamicEntityRadius = pose->radius;
             const int lod = WebRenderer_SelectFxModelLod(
                 submission.model, submission.placement, &lodParms);
             if (lod < 0) continue;
@@ -3622,7 +4042,120 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                 "R_RenderScene DynEntity model append failed");
             return;
         }
+#if KISAK_WEB_DIAGNOSTICS
+        if (g_testDynEntityCamera >= 0)
+            g_testDynEntityCameraRendered = std::any_of(
+                dynamicEntityModelCommand.batches.begin(), dynamicEntityModelCommand.batches.end(),
+                [](const auto &batch) {
+                    return batch.shadowEntityId == static_cast<unsigned>(g_testDynEntityCamera);
+                });
+#endif
     }
+
+#if KISAK_WEB_DIAGNOSTICS
+    const double effectsStarted = sceneProfile ? WebFrameProfile_Now() : 0.0;
+#endif
+    // Native R_RenderScene builds DynEntity draws from the same poses used
+    // for camera visibility, then advances physics before generating marks.
+    // All draw placements and receiver bounds above are already copied.
+    FX_RunPhysics(refdef->localClientNum);
+    DynEntCl_ProcessEntities(refdef->localClientNum);
+
+    // Native camera-scene ordering advances physics, waits for world marks,
+    // then expands persistent marks for visible static and dynamic
+    // receivers before the decal draw list is consumed. The browser already
+    // receives world marks from R_UpdateRemainingEffects; complete the other
+    // canonical receiver families here using the camera mask produced above.
+    if (fx_marks && fx_marks->current.enabled && fx_marks_smodels &&
+        fx_marks_smodels->current.enabled && s_world.dpvs.smodelCount != 0u)
+    {
+        FX_GenerateMarkVertsForStaticModels(
+            refdef->localClientNum,
+            static_cast<int>(s_world.dpvs.smodelCount),
+            s_world.dpvs.smodelVisData[0]);
+    }
+
+    if (fx_marks && fx_marks->current.enabled && fx_marks_ents &&
+        fx_marks_ents->current.enabled)
+    {
+        std::uint32_t markIndexCount = 0u;
+        FX_BeginGeneratingMarkVertsForEntModels(
+            refdef->localClientNum, &markIndexCount);
+        for (std::uint32_t index = 0u;
+             index < g_dobjSubmissionCount; ++index)
+        {
+            const WebRendererDObjSubmission &submission =
+                g_dobjSubmissions[index];
+            if (!submission.obj || !submission.pose ||
+                submission.entityNumber >= MAX_GENTITIES ||
+                WebRenderer_DObjUsesDepthHack(submission.renderFlags))
+            {
+                continue;
+            }
+            // The DObj build has assigned the canonical pose-owned lighting
+            // handle by this point. Keep the historical nonzero fallback when
+            // lighting was unavailable.
+            const std::uint16_t fallbackLightingHandle =
+                static_cast<std::uint16_t>(
+                    std::min<std::uint32_t>(index + 1u, UINT16_MAX));
+            const std::uint16_t lightingHandle =
+                submission.cachedLightingHandle &&
+                    *submission.cachedLightingHandle != 0u
+                ? *submission.cachedLightingHandle
+                : fallbackLightingHandle;
+            FX_GenerateMarkVertsForEntDObj(
+                refdef->localClientNum,
+                static_cast<int>(submission.entityNumber),
+                &markIndexCount,
+                lightingHandle,
+                submission.reflectionProbeIndex,
+                submission.obj,
+                submission.pose);
+        }
+        for (std::uint32_t index = 0u;
+             index < g_brushModelSubmissionCount; ++index)
+        {
+            const WebRendererBrushModelSubmission &submission =
+                g_brushModelSubmissions[index];
+            if (!submission.model ||
+                submission.entityNumber >= MAX_GENTITIES)
+            {
+                continue;
+            }
+            if (kisak::dpvs::CullBox(
+                    submission.model->writable.mins,
+                    submission.model->writable.maxs,
+                    camera.frustumPlanes, camera.frustumPlaneCount) ||
+                !R_BoundsTouchVisibleCell(s_world,
+                    g_cameraDpvs.cellVisibleBits,
+                    submission.model->writable.mins,
+                    submission.model->writable.maxs))
+            {
+                continue;
+            }
+            GfxPlacement placement{};
+            AxisToQuat(submission.axis, placement.quat);
+            std::copy_n(submission.origin, 3u, placement.origin);
+            const std::uint8_t reflectionProbeIndex =
+                static_cast<std::uint8_t>(std::min<std::uint32_t>(
+                    WebRenderer_CalcReflectionProbeIndex(
+                        s_world, submission.origin),
+                    UINT8_MAX));
+            FX_GenerateMarkVertsForEntBrush(
+                refdef->localClientNum,
+                static_cast<int>(submission.entityNumber),
+                &markIndexCount,
+                reflectionProbeIndex,
+                &placement);
+        }
+        FX_EndGeneratingMarkVertsForEntModels(refdef->localClientNum);
+    }
+
+#if KISAK_WEB_DIAGNOSTICS
+    const double effectsElapsed = sceneProfile
+        ? WebFrameProfile_Now() - effectsStarted : 0.0;
+    if (sceneProfile) sceneProfile->sceneEffectsPrepareMs += effectsElapsed;
+#endif
 
     // Use the same scene-wide FOV-adjusted rigid/skinned LOD parameters as
     // DObjs, DynEntities, and static models.
@@ -3630,6 +4163,19 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     for (std::uint32_t index = 0u; index < g_fxModelSubmissionCount; ++index)
     {
         WebRendererFxModelSubmission submission = g_fxModelSubmissions[index];
+        if (submission.model &&
+            WebRenderer_FxModelPlacementIsValid(submission.placement))
+        {
+            const float radius = submission.model->radius *
+                submission.placement.scale;
+            if (std::isfinite(radius) && radius >= 0.0f &&
+                kisak::dpvs::CullSphere(
+                    submission.placement.base.origin, radius,
+                    camera.frustumPlanes, camera.frustumPlaneCount))
+            {
+                continue;
+            }
+        }
         const int lod = WebRenderer_SelectFxModelLod(
             submission.model, submission.placement, &lodParms);
         if (lod < 0)
@@ -3666,7 +4212,8 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
 #if KISAK_WEB_DIAGNOSTICS
     const double commandAppendStarted = sceneProfile ? WebFrameProfile_Now() : 0.0;
     if (sceneProfile)
-        sceneProfile->sceneModelBuildMs += commandAppendStarted - modelBuildStarted;
+        sceneProfile->sceneModelBuildMs +=
+            commandAppendStarted - modelBuildStarted - effectsElapsed;
 #endif
     // EffectsCore remains the sole producer of FX geometry. Append its
     // already-converted canonical mark/code-mesh spans to the existing
@@ -3983,42 +4530,16 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                 : dynamicEntityModelCommand.batches[0].modelName);
     }
     WebRenderer_RecycleDObjSceneGeometry(dynamicCommand);
-#if KISAK_WEB_DIAGNOSTICS
-    const double visibilityStarted = sceneProfile ? WebFrameProfile_Now() : 0.0;
-#endif
     view.worldSurfaceCount = g_worldSceneSurfaceCount;
     view.worldVertexCount = g_worldSceneVertexCount;
     view.worldIndexCount = g_worldSceneIndexCount;
     view.geometrySubmitted = g_worldSceneSubmitted;
-    // Recompute synchronously on the engine Worker for every submitted view.
-    // Never cache completion across world/camera changes or infer it from bytes.
-    GfxViewParms cameraParms{};
-    std::memcpy(cameraParms.viewMatrix.m, viewMatrix, sizeof(viewMatrix));
-    std::memcpy(cameraParms.projectionMatrix.m, projectionMatrix, sizeof(projectionMatrix));
-    std::memcpy(cameraParms.viewProjectionMatrix.m, d3dViewProjectionMatrix,
-        sizeof(d3dViewProjectionMatrix));
-    MatrixInverse44(cameraParms.viewProjectionMatrix.m,
-        cameraParms.inverseViewProjectionMatrix.m);
-    std::copy_n(view.viewOrigin, 3u, cameraParms.origin);
-    cameraParms.origin[3] = 1.0f;
-    std::memcpy(cameraParms.axis, view.viewAxis, sizeof(cameraParms.axis));
-    view.staticModelVisibilityComputed = R_ComputeStaticCameraVisibility(
-        s_world, g_cameraDpvs, cameraParms, view.localClientNum,
-        static_cast<float>(R_GetFarPlaneDist()), true);
-    view.staticModelVisibility = s_world.dpvs.smodelVisData[0];
-    view.staticModelVisibilityCount = s_world.dpvs.smodelCount;
-    view.worldSurfaceVisibilityComputed = view.staticModelVisibilityComputed;
-    view.worldSurfaceVisibility = s_world.dpvs.surfaceVisData[0];
-    view.worldSurfaceVisibilityCount = s_world.dpvs.staticSurfaceCount;
-    if (!view.staticModelVisibilityComputed &&
-        (s_world.dpvs.smodelCount || s_world.dpvs.staticSurfaceCount))
-        Com_Error(ERR_DROP, "R_RenderScene: canonical static camera DPVS unavailable");
-
     std::array<const GfxLight *, 32> visibleLights{};
 #if KISAK_WEB_DIAGNOSTICS
     if (g_testTransientLightMode)
     {
         g_addedLightCount = 0;
+        g_dynamicSpotLightNearPlaneOffset = 0.0f;
         float origin[3];
         Vec3Mad(view.viewOrigin, 64.0f, view.viewAxis[0], origin);
         if (g_testTransientLightMode == 2)
@@ -4028,7 +4549,6 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                 R_AddOmniLightToScene(origin, 256, 0.8f, 0.2f, 0.05f);
     }
 #endif
-    const auto &camera = g_cameraDpvs.views[view.localClientNum][0];
     int visibleCount = 0;
     const int lightLimit = r_fullbright->current.enabled ? 0 : r_dlightLimit->current.integer;
     if (lightLimit > 0)
@@ -4057,13 +4577,25 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     }
     view.dynamicLights = visibleLights.data();
     view.dynamicLightCount = visibleCount;
+    view.dynamicSpotLightIndex = UINT32_MAX;
+    if (g_addedLightCount && g_addedLights[0].type == 2u &&
+        g_addedLights[0].canUseShadowMap)
+    {
+        for (int index = 0; index < visibleCount; ++index)
+            if (visibleLights[index] == &g_addedLights[0])
+            {
+                view.dynamicSpotLightIndex =
+                    static_cast<std::uint32_t>(index);
+                break;
+            }
+    }
+    view.dynamicSpotLightNearPlaneOffset =
+        g_dynamicSpotLightNearPlaneOffset;
     if (visibleCount && visibleLights[0]->def)
         view.dynamicLightAttenuation = ResolveRendererImage(visibleLights[0]->def->attenuation.image);
 
 #if KISAK_WEB_DIAGNOSTICS
     const double viewSubmitStarted = sceneProfile ? WebFrameProfile_Now() : 0.0;
-    if (sceneProfile)
-        sceneProfile->sceneCameraVisibilityMs += viewSubmitStarted - visibilityStarted;
 #endif
     if (!WebRenderer_SubmitSceneView(view))
         Com_Error(ERR_DROP, "R_RenderScene: invalid cgame view command");
@@ -4162,6 +4694,28 @@ void __cdecl R_AddDObjToScene(const DObj_s *obj, const cpose_t *pose,
 void __cdecl R_LinkDObjEntity(std::uint32_t localClientNum,
     std::uint32_t entityNumber, float *origin, float radius)
 {
+    if (entityNumber < g_dobjCellLinkValid.size())
+    {
+        g_dobjCellLinkValid[entityNumber] = 0u;
+        g_brushCellLinkValid[entityNumber] = 0u;
+        if (origin && std::isfinite(radius) && radius >= 0.0f)
+        {
+            const float mins[3]{
+                origin[0] - radius, origin[1] - radius,
+                origin[2] - radius};
+            const float maxs[3]{
+                origin[0] + radius, origin[1] + radius,
+                origin[2] + radius};
+            if (R_LinkSceneEntityBoundsToCells(s_world, localClientNum,
+                    Web_RendererEntityCount(), entityNumber,
+                    DpvsSceneEntityKind::DObj, mins, maxs) ==
+                DpvsSceneEntityCellLink::Linked)
+            {
+                g_dobjCellLinkValid[entityNumber] = 1u;
+                g_dobjCellLinkRadius[entityNumber] = radius;
+            }
+        }
+    }
     kisak::primary_lights::LinkSphereEntity(s_world, comWorld,
         Web_RendererEntityCount(), localClientNum, entityNumber,
         origin, radius);
@@ -4170,19 +4724,42 @@ void __cdecl R_LinkBModelEntity(std::uint32_t localClientNum,
     std::uint32_t entityNumber, GfxBrushModel *model)
 {
     if (model)
+    {
+        if (entityNumber < g_brushCellLinkValid.size())
+        {
+            g_dobjCellLinkValid[entityNumber] = 0u;
+            g_brushCellLinkValid[entityNumber] =
+                R_LinkSceneEntityBoundsToCells(s_world, localClientNum,
+                    Web_RendererEntityCount(), entityNumber,
+                    DpvsSceneEntityKind::Brush,
+                    model->writable.mins, model->writable.maxs) ==
+                    DpvsSceneEntityCellLink::Linked
+                ? 1u : 0u;
+        }
         kisak::primary_lights::LinkBoxEntity(s_world, comWorld,
             Web_RendererEntityCount(), localClientNum, entityNumber,
             model->writable.mins, model->writable.maxs);
+    }
 }
 void __cdecl R_UnlinkEntity(std::uint32_t localClientNum,
     std::uint32_t entityNumber)
 {
+    R_UnlinkSceneEntityFromCells(s_world, localClientNum,
+        Web_RendererEntityCount(), entityNumber);
+    if (entityNumber < g_dobjCellLinkValid.size())
+    {
+        g_dobjCellLinkValid[entityNumber] = 0u;
+        g_brushCellLinkValid[entityNumber] = 0u;
+        g_dobjCellLinkRadius[entityNumber] = 0.0f;
+    }
     kisak::primary_lights::UnlinkEntity(s_world,
         Web_RendererEntityCount(), localClientNum, entityNumber);
 }
 void __cdecl R_UnlinkDynEnt(std::uint32_t dynEntId,
     DynEntityDrawType drawType)
 {
+    if (!R_UnlinkDynEntityFromCells(s_world, drawType, dynEntId))
+        Com_Error(ERR_DROP, "R_UnlinkDynEnt: invalid canonical DynEntity cell data");
     const auto collType = drawType == DYNENT_DRAW_MODEL
         ? DYNENT_COLL_CLIENT_MODEL : DYNENT_COLL_CLIENT_BRUSH;
     kisak::primary_lights::UnlinkDynEnt(s_world,
@@ -4192,6 +4769,8 @@ void __cdecl R_UnlinkDynEnt(std::uint32_t dynEntId,
 void __cdecl R_LinkDynEnt(std::uint32_t dynEntId,
     DynEntityDrawType drawType, float *mins, float *maxs)
 {
+    if (!R_LinkDynEntityBoundsToCells(s_world, drawType, dynEntId, mins, maxs))
+        Com_Error(ERR_DROP, "R_LinkDynEnt: invalid canonical DynEntity cell data");
     const auto collType = drawType == DYNENT_DRAW_MODEL
         ? DYNENT_COLL_CLIENT_MODEL : DYNENT_COLL_CLIENT_BRUSH;
     kisak::primary_lights::LinkDynEnt(s_world, comWorld,
@@ -4378,17 +4957,16 @@ void __cdecl R_CalcCubeMapViewValues(refdef_s *, CubemapShot, int) {}
 int __cdecl R_PickMaterial(int, const float *, const float *, char *, char *,
     char *, std::uint32_t) { return 0; }
 
-void __cdecl Material_DirtyTechniqueSetOverrides() {}
+void __cdecl Material_DirtyTechniqueSetOverrides()
+{
+    g_techniqueSetRemapsDirty = true;
+}
 
 Material *__cdecl Material_Duplicate(Material *source, char *name)
 {
     iassert(source && name);
-    if (Material *existing =
-        DB_FindXAssetHeader(ASSET_TYPE_MATERIAL, name).material)
-        return existing;
-    // Dynamic UI aliases are renderer-owned in native Kisak. Until the
-    // browser frontend admits its canonical alias hash, retaining the source
-    // handle preserves rendering without publishing browser-owned DB state.
+    if (Material *duplicate = DB_DuplicateMaterialAsset(source, name))
+        return duplicate;
     return source;
 }
 

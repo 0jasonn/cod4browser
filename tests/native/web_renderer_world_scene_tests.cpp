@@ -1,4 +1,6 @@
 #include <gfx_d3d/gfx_world_types.h>
+#include <gfx_d3d/r_material_override_core.h>
+#include <gfx_d3d/r_dynamiclights_core.h>
 #include <web/web_renderer_world_scene.h>
 #include <web/web_renderer_image_reference.h>
 #include <web/web_renderer_material_lookup.h>
@@ -15,6 +17,119 @@
 
 namespace
 {
+void TestWorldLightReceiversPreserveNativeBoundsAndCameraSelection()
+{
+    // Synthetic bounds deliberately split one material batch at the light edge.
+    std::vector<WebRendererWorldSurfaceRange> surfaces{
+        {0, 0, 0, 3, {-0.25f,-0.25f,2}, {0.25f,0.25f,3}},
+        {1, 0, 3, 3, {20,20,2}, {21,21,3}},
+        {2, 0, 6, 3, {-0.25f,-0.25f,4}, {0.25f,0.25f,5}},
+        {3, 0, 9, 3, {-0.25f,-0.25f,5}, {0.25f,0.25f,6}},
+        {4, 1, 12, 3, {-0.25f,-0.25f,7}, {0.25f,0.25f,8}}};
+    std::uint8_t visibility[]{1,1,1,0,1};
+    GfxLight light{};
+    light.type = 3;
+    light.radius = 10;
+    std::vector<WebRendererWorldCameraRange> ranges;
+    const auto build = [&](float nearOffset = 0.0f) {
+        return WebRenderer_BuildWorldCameraRanges(surfaces, visibility, 5, true,
+            ranges, &light, nearOffset);
+    };
+    assert(build() && ranges.size() == 3);
+    assert(ranges[0].firstIndex == 0 && ranges[0].indexCount == 3);
+    assert(ranges[1].firstIndex == 6 && ranges[1].indexCount == 3);
+    assert(ranges[2].firstIndex == 12 && ranges[2].batchIndex == 1);
+    visibility[3] = 1;
+    assert(build() && ranges[1].indexCount == 6 && ranges[1].surfaceCount == 2);
+    light.type = 2;
+    light.dir[2] = -1;
+    light.cosHalfFovOuter = std::sqrt(0.5f);
+    assert(build(3) && ranges.size() == 2 && ranges[0].firstIndex == 6);
+    visibility[3] = 0;
+    assert(build(3) && ranges.size() == 2 && ranges[0].indexCount == 3);
+    std::vector<WebRendererWorldShadowRange> shadowRanges;
+    assert(WebRenderer_BuildWorldTransientSpotShadowRanges(
+        surfaces, light, 3, shadowRanges));
+    assert(shadowRanges.size() == 2 && shadowRanges[0].firstIndex == 6 &&
+        shadowRanges[0].indexCount == 6 &&
+        shadowRanges[0].surfaceCount == 2);
+    // Native caster selection ignores camera DPVS but still uses the shifted
+    // light planes, unlike a conservative shadow-projection box.
+    assert(shadowRanges[1].firstIndex == 12);
+    light.type = 3;
+    assert(!WebRenderer_BuildWorldTransientSpotShadowRanges(
+        surfaces, light, 3, shadowRanges) && shadowRanges.empty());
+    light.type = 2;
+    light.radius = std::numeric_limits<float>::quiet_NaN();
+    assert(!WebRenderer_BuildWorldTransientSpotShadowRanges(
+        surfaces, light, 3, shadowRanges) && shadowRanges.empty());
+    light.radius = 10;
+    visibility[3] = 1;
+    // Strict near/far plane contact and an omni's inclusive tangency differ.
+    surfaces[0].mins[2] = surfaces[0].maxs[2] = 10;
+    assert(build() && ranges[0].firstIndex == 6);
+    light.type = 3;
+    assert(build() && ranges[0].firstIndex == 0);
+    light.radius = 1;
+    assert(build() && ranges.empty());
+    light.radius = std::numeric_limits<float>::quiet_NaN();
+    assert(!build() && ranges.empty());
+}
+
+struct MaterialFeature
+{
+    const char *name;
+    std::uint32_t mask;
+    std::uint32_t value;
+};
+
+void TestTechniqueSetFeatureNameRemap()
+{
+    constexpr MaterialFeature features[]{
+        {"s0", 4u, 0u}, {"d0", 8u, 0u}, {"n0", 16u, 0u},
+        {"zfeather", 1u, 0u}, {"outdoor", 2u, 0u},
+        {"sm", 384u, 128u}, {"hsm", 384u, 256u},
+        {"twk", 32u, 0u},
+    };
+    char remapped[64]{};
+    assert(Material_RemapTechniqueSetNameCore(
+        "wc_l_sm_r0c0n0d0s0", remapped, sizeof(remapped),
+        0x19cu, 0x100u, features, std::size(features), false));
+    assert(std::strcmp(remapped, "wc_l_hsm_r0c0") == 0);
+    assert(Material_RemapTechniqueSetNameCore(
+        "particle_cloud_outdoor_zfeather", remapped, sizeof(remapped),
+        3u, 0u, features, std::size(features), false));
+    assert(std::strcmp(remapped, "particle_cloud") == 0);
+    assert(Material_RemapTechniqueSetNameCore(
+        "sm2/wc_l_hsm_twk", remapped, sizeof(remapped),
+        0x1a0u, 0x80u, features, std::size(features), true));
+    assert(std::strcmp(remapped, "sm2/wc_l_sm") == 0);
+    char tooSmall[8]{};
+    assert(!Material_RemapTechniqueSetNameCore(
+        "particle_cloud", tooSmall, sizeof(tooSmall),
+        0u, 0u, features, std::size(features), false));
+
+    MaterialTechniqueSet source{}, target{}, reference{}, missing{};
+    source.name = "wc_l_sm_r0c0n0d0s0";
+    target.name = "wc_l_hsm_r0c0";
+    reference.name = ",wc_l_sm_r0c0n0d0s0";
+    missing.name = "wc_l_sm_d0";
+    MaterialTechniqueSet *sets[]{&source, &target, &reference, &missing};
+    const auto stats = Material_ResolveTechniqueSetRemapsCore(
+        sets, std::size(sets), 0x19cu, 0x100u,
+        features, std::size(features), [&](const char *name) {
+            for (MaterialTechniqueSet *set : sets)
+                if (std::strcmp(set->name, name) == 0) return set;
+            return static_cast<MaterialTechniqueSet *>(nullptr);
+        });
+    assert(source.remappedTechniqueSet == &target);
+    assert(target.remappedTechniqueSet == &target);
+    assert(reference.remappedTechniqueSet == &target);
+    assert(missing.remappedTechniqueSet == &missing);
+    assert(stats.shaderModel3 == 3u && stats.featureRemaps == 1u &&
+        stats.references == 1u);
+}
+
 GfxImage g_resolvedImage{};
 
 const GfxImage *LookupResolvedImage(const char *name) noexcept
@@ -456,6 +571,66 @@ void TestRemappedTechniqueSetDrivesPortableSelection()
     assert(command.batches[0].lightmapImage == nullptr);
 }
 
+void TestCinematicCodeImagesSelectCanonicalMaterialWithoutTextureTable()
+{
+    Fixture fixture;
+    MaterialShaderArgument args[4]{};
+    for (unsigned i = 0; i < 4; ++i)
+    {
+        args[i].type = 4;
+        args[i].dest = 4 + i;
+        args[i].u.codeSampler = static_cast<MaterialTextureSource>(22 + i);
+    }
+    MaterialPixelShader shader{};
+    shader.name = "cinematic.hlsl";
+    MaterialTechnique technique{};
+    technique.name = "cinematic";
+    technique.passCount = 1;
+    technique.passArray[0].pixelShader = &shader;
+    technique.passArray[0].args = args;
+    technique.passArray[0].stableArgCount = 4;
+    MaterialTechniqueSet direct{}, remapped{};
+    direct.remappedTechniqueSet = &remapped;
+    remapped.techniques[4] = &technique;
+    GfxStateBits state{{0x18008800u, 2u}};
+    Material material{};
+    material.info.name = "synthetic/cinematic";
+    material.techniqueSet = &direct;
+    material.stateBitsTable = &state;
+    material.stateBitsCount = 1;
+    std::fill_n(material.stateBitsEntry, 34, 255);
+    material.stateBitsEntry[4] = 0;
+    for (auto &surface : fixture.surfaces) surface.material = &material;
+    WebRendererWorldSceneCommand command;
+    assert(WebRenderer_BuildWorldSceneCommand(fixture.world, MakeView(), command) ==
+        WebRendererWorldSceneResult::Success);
+    assert(command.batches.size() == 1);
+    const auto &batch = command.batches[0];
+    assert(batch.technique == WebRendererWorldTechnique::Cinematic);
+    assert(batch.materialIdentity == &material && batch.techniqueType == 4);
+    assert(batch.baseImage == nullptr && batch.lightmapImage == nullptr);
+    assert(batch.stateBits[0] == state.loadBits[0] && batch.stateBits[1] == state.loadBits[1]);
+    assert(batch.samplerState == 0x62 && batch.normalSamplerState == 0x62 &&
+        batch.detailSamplerState == 0x62 && batch.specularSamplerState == 0x62);
+    assert(WebRenderer_IsCinematicMaterial(&material, 4));
+    assert(!WebRenderer_IsCinematicMaterial(&material, 7));
+    assert(!WebRenderer_IsCinematicMaterial(&material, 34));
+    args[3].u.codeSampler = static_cast<MaterialTextureSource>(24); // A duplicate cannot stand in for alpha.
+    assert(!WebRenderer_IsCinematicMaterial(&material, 4));
+    assert(WebRenderer_BuildWorldSceneCommand(fixture.world, MakeView(), command) ==
+        WebRendererWorldSceneResult::Success);
+    assert(command.batches[0].technique == WebRendererWorldTechnique::BackendFallback);
+    args[3].u.codeSampler = static_cast<MaterialTextureSource>(25);
+    args[3].dest = 4;
+    assert(!WebRenderer_IsCinematicMaterial(&material, 4));
+    args[3].dest = 7;
+    shader.name = "unknown.hlsl";
+    assert(!WebRenderer_IsCinematicMaterial(&material, 4));
+    shader.name = "cinematic.hlsl";
+    technique.passCount = 2;
+    assert(!WebRenderer_IsCinematicMaterial(&material, 4));
+}
+
 void TestCanonicalWorldColorAliasUsesLitStateAndLightmaps()
 {
     Fixture fixture;
@@ -651,6 +826,8 @@ void TestSunShadowTechniqueAndCanonicalCasterBitsSplitBatches()
     MaterialTechniqueSet techniqueSet{};
     techniqueSet.techniques[TECHNIQUE_LIT_SUN_SHADOW_INDEX] =
         &shadowTechnique;
+    techniqueSet.techniques[TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX] =
+        &shadowTechnique;
     GfxStateBits stateBits[1]{{{0x18008812u, 0x0000000du}}};
     GfxImage baseImage{};
     GfxImage normalImage{};
@@ -669,6 +846,7 @@ void TestSunShadowTechniqueAndCanonicalCasterBitsSplitBatches()
     std::fill(std::begin(material.stateBitsEntry),
         std::end(material.stateBitsEntry), 0xffu);
     material.stateBitsEntry[TECHNIQUE_LIT_SUN_SHADOW_INDEX] = 0u;
+    material.stateBitsEntry[TECHNIQUE_BUILD_SHADOWMAP_DEPTH_INDEX] = 0u;
     material.stateBitsCount = 1u;
     material.stateBitsTable = stateBits;
     GfxLightmapArray lightmap{&primaryLightmap, &secondaryLightmap};
@@ -694,6 +872,7 @@ void TestSunShadowTechniqueAndCanonicalCasterBitsSplitBatches()
     assert(command.batches[2].castsSunShadow);
     for (const WebRendererWorldBatchDesc &batch : command.batches)
     {
+        assert(batch.castsSpotShadow);
         assert(batch.techniqueType == TECHNIQUE_LIT_SUN_SHADOW_INDEX);
         assert(batch.technique ==
             WebRendererWorldTechnique::BaseTextureLightmapNormal);
@@ -1092,6 +1271,7 @@ void TestDynamicBrushModelUsesCanonicalSurfaceRangeAndPlacement()
     assert(command.batches.size() == 1u);
     assert(command.batches[0].sourceKind ==
         WebRendererSceneBatchKind::DynamicBModel);
+    assert(command.batches[0].dynamicLightSurfType == 6u);
     assert(command.batches[0].firstSurfaceIndex == 2u);
     assert(command.batches[0].lastSurfaceIndex == 2u);
     assert(command.batches[0].castsSunShadow);
@@ -1245,6 +1425,7 @@ void TestWorldSunShadowRangesCullPartitionsIndependently()
     for (auto &batch : batches) batch.castsSunShadow = true;
     std::vector<std::array<std::uint32_t, 2>> draws;
     assert(WebRenderer_ForEachWorldSunShadowRange(nearRanges, batches,
+        [](const auto &batch) { return batch.castsSunShadow; },
         [](const auto &) { return true; },
         [&](const auto &, std::uint32_t first, std::uint32_t count) {
             draws.push_back({first, count});
@@ -1257,6 +1438,51 @@ void TestWorldSunShadowRangesCullPartitionsIndependently()
     assert(!WebRenderer_BuildWorldShadowRanges(
         malformed, nearMatrix, nearRanges));
     assert(nearRanges.empty());
+}
+
+void TestBrushReceiverUsesCanonicalWritableBounds()
+{
+    GfxBrushModel model{};
+    model.writable.mins[0] = 10.0f;
+    model.writable.maxs[0] = 11.0f;
+    WebRendererBrushModelInstanceDesc instance{};
+    // Writable bounds are already world-space. Do not transform them again.
+    instance.origin[0] = 100.0f;
+    instance.axis[0][1] = 1.0f;
+    instance.axis[1][0] = -1.0f;
+    instance.axis[2][2] = 1.0f;
+    assert(WebRenderer_CopyBrushReceiverBounds(model, instance));
+    assert(instance.receiverMins[0] == 10.0f && instance.receiverMaxs[0] == 11.0f);
+    GfxLight light{};
+    light.type = 3;
+    light.radius = 10.0f;
+    float planes[6][4];
+    assert(kisak::dynamic_lights::ReceiverPlanes(light, 0.0f, planes));
+    assert(WebRenderer_BrushReceivesLight(instance, light, planes));
+    model.writable.mins[0] = 10.01f;
+    assert(WebRenderer_CopyBrushReceiverBounds(model, instance));
+    assert(!WebRenderer_BrushReceivesLight(instance, light, planes));
+    light.type = 2;
+    light.dir[0] = -1.0f;
+    light.cosHalfFovOuter = 0.9f;
+    assert(kisak::dynamic_lights::ReceiverPlanes(light, 3.0f, planes));
+    model.writable.mins[0] = 1.0f;
+    model.writable.maxs[0] = 3.0f;
+    assert(WebRenderer_CopyBrushReceiverBounds(model, instance));
+    assert(!WebRenderer_BrushReceivesLight(instance, light, planes));
+    model.writable.maxs[0] = 3.01f;
+    assert(WebRenderer_CopyBrushReceiverBounds(model, instance));
+    assert(WebRenderer_BrushReceivesLight(instance, light, planes));
+    for (const float invalid : {0.0f, std::numeric_limits<float>::quiet_NaN(),
+            std::numeric_limits<float>::infinity()})
+    {
+        model.writable.maxs[0] = invalid;
+        assert(!WebRenderer_CopyBrushReceiverBounds(model, instance));
+        assert(instance.receiverMaxs[0] == 3.01f); // failed copy is atomic
+        auto invalidInstance = instance;
+        invalidInstance.receiverMaxs[0] = invalid;
+        assert(!WebRenderer_BrushPlacementIsFinite(invalidInstance, {}, 0.0f));
+    }
 }
 
 void TestRetainedBrushPlacementMatchesExpandedGeometry()
@@ -1460,10 +1686,153 @@ void TestBrushMatchesWorldSelectionAndRejectsAtomically()
 }
 } // namespace
 
+void TestAuthoredSoftParticleBindings()
+{
+    Material material{}; MaterialTechniqueSet set{}, remapped{}; MaterialTechnique tech{};
+    MaterialVertexShader vs{}; MaterialPixelShader ps{}; MaterialShaderArgument args[9]{};
+    float feather[4]{0.05f,20,0,0}, falloff[4]{0,0,2,-1}, begin[4]{1,0,0,1}, end[4]{0,1,0,1};
+    float eye[4]{2,0,0,0}, fog[4]{0.1f,0.2f,0.3f,1};
+    const auto literal=[&](unsigned i,unsigned type,unsigned dest,const float *value) {
+        args[i].type=type; args[i].dest=dest; args[i].u.literalConst=value;
+    };
+    literal(0,1,12,feather); literal(1,7,5,feather);
+    args[2].type=4; args[2].dest=4; args[2].u.codeSampler=static_cast<MaterialTextureSource>(18);
+    args[3].type=2; args[3].dest=0; args[3].u.nameHash=0xa0ab1041u;
+    literal(4,1,13,falloff); literal(5,1,14,begin); literal(6,1,15,end);
+    literal(7,1,16,eye); literal(8,7,0,fog);
+    tech.passCount=1; tech.passArray[0].vertexShader=&vs; tech.passArray[0].pixelShader=&ps;
+    tech.passArray[0].args=args; tech.passArray[0].stableArgCount=9;
+    material.techniqueSet=&set; set.remappedTechniqueSet=&remapped; remapped.techniques[5]=&tech;
+    WebRendererSoftParticle soft{};
+    vs.name="zfeather_foa_nf_eo_dtex.hlsl"; ps.name="zfeather_add_nf.hlsl";
+    assert(WebRenderer_GetSoftParticle(&material,5,soft));
+    assert(soft.flags==14 && soft.feather[0]==0.05f && soft.feather[1]==0.05f && soft.eyeOffset==2);
+    assert(soft.falloff[2]==2 && soft.falloff[3]==-1 && soft.beginColor[0]==1 && soft.endColor[1]==1);
+    vs.name="zfeather_foa_dtex.hlsl"; ps.name="zfeather.hlsl";
+    assert(WebRenderer_GetSoftParticle(&material,5,soft));
+    assert(soft.flags==5 && !soft.sceneFog && soft.fogColor[1]==0.2f);
+    args[8].type=5; args[8].u.codeConst.index=42;
+    assert(WebRenderer_GetSoftParticle(&material,5,soft) && soft.sceneFog);
+    args[2].u.codeSampler=static_cast<MaterialTextureSource>(10);
+    assert(!WebRenderer_GetSoftParticle(&material,5,soft));
+    args[2].u.codeSampler=static_cast<MaterialTextureSource>(18);
+    feather[0]=std::numeric_limits<float>::quiet_NaN();
+    assert(!WebRenderer_GetSoftParticle(&material,5,soft));
+    feather[0]=0.05f; args[4].dest=99;
+    assert(!WebRenderer_GetSoftParticle(&material,5,soft));
+    args[4].dest=13; ps.name="distortion_zfeather.hlsl";
+    assert(!WebRenderer_GetSoftParticle(&material,5,soft));
+    ps.name="zfeather.hlsl"; vs.name="unknown_zfeather.hlsl";
+    assert(!WebRenderer_GetSoftParticle(&material,5,soft));
+    vs.name="zfeather_dtex.hlsl"; tech.passCount=2;
+    assert(!WebRenderer_GetSoftParticle(&material,5,soft));
+    tech.passCount=1;
+    assert(!WebRenderer_GetSoftParticle(nullptr,5,soft));
+    assert(!WebRenderer_GetSoftParticle(&material,34,soft));
+
+    GfxStateBits state{{0x18000800u,0xdu}}; material.stateBitsTable=&state; material.stateBitsCount=1;
+    material.stateBitsEntry[1]=0; remapped.techniques[1]=&tech;
+    vs.name="floatz_build_atest_dtex.hlsl"; ps.name="floatz_build_atest.hlsl";
+    args[0].type=3; args[0].dest=20; args[0].u.codeConst.index=54;
+    std::uint32_t actual[2]{}; bool alpha=false;
+    assert(WebRenderer_GetFloatZ(&material,actual,alpha) && alpha);
+    assert(actual[0]==state.loadBits[0] && actual[1]==state.loadBits[1]);
+    vs.name=ps.name="floatz_build.hlsl";
+    assert(WebRenderer_GetFloatZ(&material,actual,alpha) && !alpha);
+    args[0].u.codeConst.index=53;
+    assert(!WebRenderer_GetFloatZ(&material,actual,alpha));
+    args[0].u.codeConst.index=54; material.stateBitsEntry[1]=255;
+    assert(!WebRenderer_GetFloatZ(&material,actual,alpha));
+}
+
+void TestCanonicalOutdoorLookupIsCarriedAtomically()
+{
+    Fixture fixture;
+    GfxImage outdoor{};
+    outdoor.name = "$outdoor";
+    fixture.world.outdoorImage = &outdoor;
+    for (unsigned component = 0u; component < 4u; ++component)
+        fixture.world.outdoorLookupMatrix[component][component] = 1.0f;
+    fixture.world.outdoorLookupMatrix[0][0] = 0.25f;
+    fixture.world.outdoorLookupMatrix[3][0] = 0.5f;
+    fixture.world.outdoorLookupMatrix[3][2] = -0.125f;
+
+    WebRendererWorldSceneCommand command;
+    assert(WebRenderer_BuildWorldSceneCommand(
+        fixture.world, MakeView(), command) ==
+        WebRendererWorldSceneResult::Success);
+    assert(command.outdoorImage == &outdoor);
+    assert(std::memcmp(command.outdoorLookupMatrix,
+        fixture.world.outdoorLookupMatrix,
+        sizeof(command.outdoorLookupMatrix)) == 0);
+
+    fixture.world.outdoorLookupMatrix[1][2] =
+        std::numeric_limits<float>::quiet_NaN();
+    const auto before = command.outdoorImage;
+    const float beforeScale = command.outdoorLookupMatrix[0][0];
+    assert(WebRenderer_BuildWorldSceneCommand(
+        fixture.world, MakeView(), command) ==
+        WebRendererWorldSceneResult::InvalidWorld);
+    assert(command.outdoorImage == before);
+    assert(command.outdoorLookupMatrix[0][0] == beforeScale);
+}
+
+void TestAuthoredDistortionBindings()
+{
+    Material material{}; MaterialTechniqueSet set{}, remapped{};
+    MaterialTechnique technique{}; MaterialVertexShader vs{}; MaterialPixelShader ps{};
+    MaterialShaderArgument args[7]{}; float scale[4]{10, 20, 0, 0}, out[4]{};
+    material.techniqueSet = &set; set.remappedTechniqueSet = &remapped;
+    remapped.techniques[5] = &technique; technique.passCount = 1; technique.flags = 33;
+    vs.name = "distortion_scale_zfeather_dtex.hlsl"; ps.name = "distortion_zfeather.hlsl";
+    auto &pass = technique.passArray[0]; pass.vertexShader = &vs; pass.pixelShader = &ps;
+    pass.args = args; pass.stableArgCount = 7;
+    args[0].type = 2; args[0].dest = 4; args[0].u.nameHash = 0xa0ab1041;
+    args[1].type = 4; args[1].dest = 0; args[1].u.codeSampler = static_cast<MaterialTextureSource>(10);
+    args[2].type = 4; args[2].dest = 5; args[2].u.codeSampler = static_cast<MaterialTextureSource>(18);
+    args[3].type = 3; args[3].dest = 0; args[3].u.codeConst.index = 80;
+    args[4].type = 3; args[4].dest = 17; args[4].u.codeConst.index = 51;
+    args[5].type = 3; args[5].dest = 18; args[5].u.codeConst.index = 52;
+    args[6].type = 1; args[6].dest = 12; args[6].u.literalConst = scale;
+    assert(WebRenderer_GetDistortion(&material, 5, out) && out[0] == 10 && out[1] == 20);
+    MaterialConstantDef constant{};
+    constant.nameHash = 0xf37b6913u; std::copy_n(scale, 4, constant.literal);
+    material.constantTable = &constant; material.constantCount = 1;
+    args[6].type = 0; args[6].u.nameHash = constant.nameHash;
+    assert(WebRenderer_GetDistortion(&material, 5, out) && out[0] == 10 && out[1] == 20);
+    args[6].type = 1; args[6].u.literalConst = scale;
+    assert(WebRenderer_SkipsDistortion(&material, 5, false));
+    assert(!WebRenderer_SkipsDistortion(&material, 5, true));
+    for (unsigned i = 0; i < 6; ++i)
+    {
+        const auto dest = args[i].dest; args[i].dest = 31;
+        assert(!WebRenderer_GetDistortion(&material, 5, out)); args[i].dest = dest;
+    }
+    scale[1] = std::nanf("");
+    assert(!WebRenderer_GetDistortion(&material, 5, out) && out[1] == 20);
+    scale[1] = -20; // Authored negative scaling is meaningful.
+    assert(WebRenderer_GetDistortion(&material, 5, out) && out[1] == -20);
+    technique.flags = 32;
+    assert(!WebRenderer_GetDistortion(&material, 5, out));
+    assert(!WebRenderer_SkipsDistortion(&material, 5, false));
+    technique.flags = 33; technique.passCount = 2;
+    assert(!WebRenderer_GetDistortion(&material, 5, out));
+    technique.passCount = 1; ps.name = "unknown.hlsl";
+    assert(!WebRenderer_GetDistortion(&material, 5, out));
+    assert(WebRenderer_SkipsDistortion(&material, 5, false));
+    assert(!WebRenderer_GetDistortion(nullptr, 5, out));
+    assert(!WebRenderer_GetDistortion(&material, 34, out));
+}
+
 int main()
 {
+    TestWorldLightReceiversPreserveNativeBoundsAndCameraSelection();
+    TestTechniqueSetFeatureNameRemap();
+    TestAuthoredDistortionBindings();
+    TestAuthoredSoftParticleBindings();
     TestCommaPrefixedImageReferenceResolvesAtRendererBoundary();
     TestCanonicalOpaqueSurfacesAreBatchedInWorldOrder();
+    TestCanonicalOutdoorLookupIsCarriedAtomically();
     TestPrimaryLightIdentitySplitsNativeLitBatches();
     TestSpotPrimaryLightSelectsNativeMaterialTechnique();
     TestPrimaryLightFrameAcceptsScriptedLightState();
@@ -1471,6 +1840,7 @@ int main()
     TestCanonicalMaterialAndLightmapIdentitySplitBatches();
     TestCanonicalLmTechniqueNameDoesNotInventLightmapSamplers();
     TestRemappedTechniqueSetDrivesPortableSelection();
+    TestCinematicCodeImagesSelectCanonicalMaterialWithoutTextureTable();
     TestCanonicalWorldColorAliasUsesLitStateAndLightmaps();
     TestNativePixelShaderFamiliesSelectPortableMaterialTechniques();
     TestDistanceFalloffVertexShaderCarriesCanonicalMaterialConstants();
@@ -1487,6 +1857,7 @@ int main()
     TestSpotShadowCommandPreservesAuthoredCasterMembership();
     TestDynamicBrushModelUsesCanonicalSurfaceRangeAndPlacement();
     TestRetainedBrushPlacementMatchesExpandedGeometry();
+    TestBrushReceiverUsesCanonicalWritableBounds();
     TestSunShadowRangesPreserveTriangleOrderAndCutouts();
     TestWorldSunShadowRangesCullPartitionsIndependently();
     TestTextureParameterMemoPreservesAliasedObjectState();

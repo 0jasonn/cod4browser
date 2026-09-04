@@ -2,6 +2,9 @@
 #include <database/database.h>
 #include <database/db_generated_loaders.h>
 #include <database/db_runtime_prefix.h>
+#if defined(KISAK_GENERATED_DB_LOAD_RAWFILE_ORACLE)
+#include <database/db_semantic_trace.h>
+#endif
 
 #include <script/scr_stringlist.h>
 
@@ -24,6 +27,7 @@ static std::uint32_t g_generatedAssetIndex = 0;
 
 namespace
 {
+#if !defined(KISAK_GENERATED_DB_LOAD_RAWFILE_ORACLE)
 bool CheckedCount(std::int32_t count, std::size_t stride,
     const char *failureStage, std::size_t &bytes)
 {
@@ -49,6 +53,7 @@ const char *PointerClassification(std::uintptr_t value)
     if (value == static_cast<std::uintptr_t>(UINT32_MAX - 1u)) return "inline-insert/-2";
     return "prior-offset/alias";
 }
+#endif
 
 std::uint8_t *AllocLoad_raw_byte()
 {
@@ -66,6 +71,7 @@ void Load_ConstCharArray(bool atStreamStart, std::int32_t count)
         const_cast<char *>(varConstChar)), count);
 }
 
+#if !defined(KISAK_GENERATED_DB_LOAD_RAWFILE_ORACLE)
 void Load_TempString(bool atStreamStart, std::uint32_t index)
 {
     Load_Stream(atStreamStart, reinterpret_cast<std::uint8_t *>(varTempString), 4);
@@ -103,6 +109,7 @@ void Load_TempStringArray(bool atStreamStart, std::int32_t count)
         if (DB_RuntimeGeneratedLoadFailed()) return;
     }
 }
+#endif
 
 void Load_XStringInternal(bool atStreamStart)
 {
@@ -121,6 +128,7 @@ void Load_XStringInternal(bool atStreamStart)
     }
 }
 
+#if !defined(KISAK_GENERATED_DB_LOAD_RAWFILE_ORACLE)
 void Load_PhysPreset(bool atStreamStart)
 {
     Load_Stream(atStreamStart, reinterpret_cast<std::uint8_t *>(varPhysPreset),
@@ -172,6 +180,7 @@ void Load_PhysPresetPtr(bool atStreamStart)
     }
     DB_PopStreamPos();
 }
+#endif
 
 void Load_RawFile(bool atStreamStart)
 {
@@ -200,6 +209,17 @@ void Load_RawFile(bool atStreamStart)
 
 void Load_RawFilePtr(bool atStreamStart)
 {
+#if defined(KISAK_GENERATED_DB_LOAD_RAWFILE_ORACLE)
+    const std::uint32_t referenceBlock = 4u;
+    std::uint32_t referenceOffset = 0u;
+    if (kisak::database::HasSemanticTraceObserver() &&
+        g_streamZoneMem && g_streamZoneMem->blocks[referenceBlock].data)
+    {
+        referenceOffset = static_cast<std::uint32_t>(
+            reinterpret_cast<std::uint8_t *>(varRawFilePtr) -
+            g_streamZoneMem->blocks[referenceBlock].data);
+    }
+#endif
     Load_Stream(atStreamStart, reinterpret_cast<std::uint8_t *>(varRawFilePtr), 4);
     if (DB_RuntimeGeneratedLoadFailed()) return;
     DB_PushStreamPos(0);
@@ -210,6 +230,15 @@ void Load_RawFilePtr(bool atStreamStart)
         {
             *varRawFilePtr = reinterpret_cast<RawFile *>(AllocLoad_FxElemVisStateSample());
             varRawFile = *varRawFilePtr;
+#if defined(KISAK_GENERATED_DB_LOAD_RAWFILE_ORACLE)
+            const std::uint32_t rawFileOffset = static_cast<std::uint32_t>(
+                reinterpret_cast<std::uint8_t *>(varRawFile) -
+                g_streamZoneMem->blocks[0].data);
+            kisak::database::EmitNativeSemanticTrace(
+                kisak::database::SemanticTraceEventKind::AssetBegin,
+                0u, 0u, 0u, rawFileOffset,
+                referenceBlock, referenceOffset);
+#endif
             const void **inserted = value == UINT32_MAX - 1u
                 ? DB_InsertPointer() : nullptr;
             Load_RawFile(true);
@@ -218,6 +247,15 @@ void Load_RawFilePtr(bool atStreamStart)
             if (!DB_RuntimeGeneratedLoadFailed())
             {
                 DB_RuntimeTraceAssetLoaded((*varRawFilePtr)->name);
+#if defined(KISAK_GENERATED_DB_LOAD_RAWFILE_ORACLE)
+                kisak::database::EmitNativeSemanticTrace(
+                    kisak::database::SemanticTraceEventKind::AssetPublish,
+                    0u, 0u, 0u, rawFileOffset,
+                    referenceBlock, referenceOffset,
+                    *varRawFilePtr && (*varRawFilePtr)->name
+                        ? (*varRawFilePtr)->name
+                        : "");
+#endif
                 if (inserted) *inserted = *varRawFilePtr;
             }
         }
@@ -230,6 +268,21 @@ void Load_RawFilePtr(bool atStreamStart)
 }
 } // namespace
 
+#if defined(KISAK_GENERATED_DB_LOAD_RAWFILE_ORACLE)
+RawFile *DB_LoadGeneratedRawFileOracle(std::uint32_t assetIndex)
+{
+    DB_PushStreamPos(4u);
+    varRawFilePtr = reinterpret_cast<RawFile **>(DB_GetStreamPos());
+    kisak::database::ResetNativeSemanticTraceContext();
+    kisak::database::EnterNativeSemanticTraceAsset(
+        assetIndex, ASSET_TYPE_RAWFILE);
+    Load_RawFilePtr(true);
+    kisak::database::LeaveNativeSemanticTraceAsset();
+    RawFile *result = *varRawFilePtr;
+    DB_PopStreamPos();
+    return result;
+}
+#else
 void __cdecl Load_XString(bool atStreamStart)
 {
     Load_XStringInternal(atStreamStart);
@@ -286,11 +339,14 @@ void __cdecl Load_MaterialHandleArrayGenerated(bool atStreamStart,
     }
 }
 
+#endif
+
 XAsset *__cdecl AllocLoad_FxElemVisStateSample()
 {
     return reinterpret_cast<XAsset *>(DB_AllocStreamPos(3));
 }
 
+#if !defined(KISAK_GENERATED_DB_LOAD_RAWFILE_ORACLE)
 void DB_SetGeneratedAssetIndex(std::uint32_t index)
 {
     g_generatedAssetIndex = index;
@@ -451,3 +507,4 @@ void __cdecl Load_XAsset(bool atStreamStart)
     varXAssetHeader = &varXAsset->header;
     Load_XAssetHeader(false);
 }
+#endif

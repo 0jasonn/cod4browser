@@ -1,0 +1,16 @@
+# Legacy native SDKs remain in upstream history/local checkouts, but must not
+# enter browser source releases. Native reference builds use local dependencies.
+/deps/binklib export-ignore
+/deps/msslib export-ignore
+/deps/steamsdk export-ignore
+*.dll export-ignore
+*.lib export-ignore
+*.exp export-ignore
+*.exe export-ignore
+*.flt export-ignore
+*.asi export-ignore
+*.so export-ignore
+*.dylib export-ignore
+*.iwd export-ignore
+*.ff export-ignore
+*.bik export-ignore

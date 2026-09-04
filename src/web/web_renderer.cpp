@@ -8,16 +8,20 @@
 #include <web/web_renderer_lod.h>
 #include <web/web_renderer_world_scene.h>
 #include <web/web_renderer_material_lookup.h>
+#include <web/web_cinematic.h>
 #include <web/web_system.h>
 
 #include <qcommon/qcommon.h>
 #include <qcommon/com_bsp.h>
 #include <gfx_d3d/gfx_image_types.h>
 #include <gfx_d3d/gfx_light_types.h>
+#include <gfx_d3d/r_dynamiclights_core.h>
 #include <gfx_d3d/material_types.h>
 #include <gfx_d3d/r_image_resample.h>
+#include <gfx_d3d/r_image_quality.h>
 #include <gfx_d3d/r_savegame_image.h>
 #include <gfx_d3d/r_dvars.h>
+#include <gfx_d3d/r_sampler.h>
 #include <universal/q_shared.h>
 #include <universal/com_math.h>
 #include <gfx_d3d/r_water.h>
@@ -63,7 +67,7 @@ constexpr std::size_t WEB_RENDERER_MAX_DECODED_TEXTURE_BYTES =
 
 enum class WebRendererImageRecoverySource : std::uint8_t
 {
-    DecodedRgba8,
+    DecodedPixels,
     LoadDef,
     IwiMember,
 };
@@ -91,6 +95,7 @@ struct WebRendererRetainedWorldImage
     const GfxImage *canonicalIdentity = nullptr;
     std::string canonicalName;
     std::vector<std::uint8_t> pixels;
+    unsigned components = 4;
     std::vector<std::vector<std::uint8_t>> mipPixels;
     std::vector<std::uint8_t> encodedSource;
     std::int32_t sourceFormat = 0;
@@ -101,9 +106,10 @@ struct WebRendererRetainedWorldImage
     std::uint32_t height = 0u;
     GLuint texture = 0u;
     WebRendererImageRecoverySource recoverySource =
-        WebRendererImageRecoverySource::DecodedRgba8;
+        WebRendererImageRecoverySource::DecodedPixels;
     std::uint8_t sourceFlags = 0u;
     std::uint8_t initialPixelDecodeCount = 0u;
+    std::uint8_t picmip = 0u;
     bool mipmapsAllowed = true;
     bool authoredMipChain = false;
     bool supported = false;
@@ -160,8 +166,15 @@ struct WebRendererRetainedWorldBatch
     std::uint16_t techniqueFlags = 0u;
     std::uint8_t cameraRegion = 0u;
     bool depthHack = false;
+    std::uint8_t dynamicLightSurfType = 0u;
+    bool excludeTransientSpotLight = false;
+    float transientLightSphere[4] = {0.0f, 0.0f, 0.0f, -1.0f};
+    float transientLightMins[3]{};
+    float transientLightMaxs[3]{};
+    bool transientLightBoundsEnabled = false;
     bool ambientProbeLighting = false;
     bool castsSunShadow = false;
+    bool castsSpotShadow = false;
     std::uint32_t shadowStateBits0 = 0u;
     // Canonical material draw-surface key with current light/probe/depth-hack
     // inputs and no object ID. Camera ordering owns only this numeric copy.
@@ -272,10 +285,29 @@ struct WebRendererDynamicDraw
     std::uint8_t spotShadowVisibilityMask = 0xffu;
 };
 
+enum class WebRendererDynamicLightDrawKind : std::uint8_t
+{
+    World,
+    StaticModel,
+    Dynamic,
+};
+
+struct WebRendererDynamicLightDrawCommand
+{
+    WebRendererDynamicLightDrawKind kind;
+    std::uint32_t sourceIndex;
+    std::uint32_t first;
+    std::uint32_t count;
+    std::uint64_t sortKey;
+};
+
 struct WebRendererState
 {
     std::array<GfxLight, 4> dynamicLights{};
+    std::array<std::vector<WebRendererWorldCameraRange>, 4> worldDynamicLightRanges;
     std::uint32_t dynamicLightCount = 0;
+    std::uint32_t dynamicSpotLightIndex = UINT32_MAX;
+    float dynamicSpotLightNearPlaneOffset = 0.0f;
     const GfxImage *dynamicLightAttenuationIdentity = nullptr;
     std::uint32_t dynamicLightAttenuationIndex = INVALID_WORLD_IMAGE;
     EMSCRIPTEN_WEBGL_CONTEXT_HANDLE context = 0;
@@ -290,6 +322,15 @@ struct WebRendererState
     GLuint sceneFramebuffer = 0;
     GLuint sceneColorTexture = 0;
     GLuint sceneDepthTexture = 0;
+    GLuint floatZFramebuffer = 0;
+    GLuint floatZTexture = 0;
+    GLuint floatZDepthBuffer = 0;
+    int floatZWidth = 0, floatZHeight = 0;
+    bool floatZPass = false;
+    bool softParticleDepthReady = false;
+    GLuint postSunFramebuffer = 0, postSunTexture = 0;
+    int postSunWidth = 0, postSunHeight = 0;
+    bool postSunReady = false;
     GLuint multisampleFramebuffer = 0;
     GLuint multisampleColorRenderbuffer = 0;
     GLuint multisampleDepthRenderbuffer = 0;
@@ -355,6 +396,12 @@ struct WebRendererState
     GLint premultiplyAlphaUniform = -1;
     GLint colorIntensityAlphaUniform = -1;
     GLint materialModeUniform = -1;
+    GLint softFlagsUniform = -1, softFeatherUniform = -1;
+    GLint softEyeUniform = -1, softScreenUniform = -1, softFogUniform = -1;
+    GLint floatZUniform = -1, depthSignUniform = -1;
+    GLint distortionScaleUniform = -1, postSunUniform = -1;
+    GLint outdoorLookupMatrixUniform = -1, outdoorUniform = -1;
+    GLint mipBiasUniform = -1;
     GLint falloffParmsUniform = -1;
     GLint falloffBeginColorUniform = -1;
     GLint falloffEndColorUniform = -1;
@@ -388,10 +435,12 @@ struct WebRendererState
     GLint waterColorUniform = -1;
     GLint shadowDepthMatrixUniform = -1;
     GLint shadowDepthTextureUniform = -1;
+    GLint shadowMipBiasUniform = -1;
     GLint shadowDepthTextureEnabledUniform = -1;
     GLint shadowDepthAlphaTestUniform = -1;
     GLint shadowDepthInstanceEnabledUniform = -1;
     GLint skyTextureUniform = -1;
+    GLint skyMipBiasUniform = -1;
     GLint skyTanHalfFovUniform = -1;
     GLint skyForwardUniform = -1;
     GLint skyRightUniform = -1;
@@ -446,6 +495,8 @@ struct WebRendererState
     std::vector<WebRendererRetainedSpotShadowStaticModel>
         retainedWorldSpotShadowStaticModels;
     std::vector<WebRendererRetainedWorldImage> retainedWorldImages;
+    std::uint32_t retainedOutdoorImageIndex = INVALID_WORLD_IMAGE;
+    std::array<float, 16> retainedOutdoorLookupMatrix{};
     std::vector<WebRendererRetainedPrimaryLight> retainedPrimaryLights;
     std::uint32_t retainedSunPrimaryLightIndex = 0u;
     WebRendererRetainedSkyImage retainedSky;
@@ -463,7 +514,8 @@ struct WebRendererState
     std::vector<WebRendererStaticModelShadowBounds>
         retainedStaticModelShadowBounds;
     std::vector<std::int8_t> retainedStaticModelSelectedLods;
-    std::vector<std::uint8_t> staticModelShadowVisibility;
+    // Recomputed for each shadow or transient-light pass over LOD-packed slots.
+    std::vector<std::uint8_t> staticModelPassVisibility;
     std::vector<std::uint8_t> staticModelVisibility;
     bool staticModelVisibilityComputed = false;
     bool staticModelVisibilityChanged = true;
@@ -486,6 +538,7 @@ struct WebRendererState
     std::vector<WebRendererBrushModelInstanceDesc> retainedBrushInstances;
     std::vector<WebRendererDynamicDraw> dynamicDraws;
     std::vector<std::uint32_t> dynamicCameraDrawOrder;
+    std::vector<WebRendererDynamicLightDrawCommand> dynamicLightDrawCommands;
     std::vector<WebRendererRetainedWorldImage> retainedDynamicModelImages;
     WebRendererRetainedModelLightingAtlas retainedDynamicModelLighting;
     bool dynamicModelSceneActive = false;
@@ -535,6 +588,7 @@ struct WebRendererState
     std::array<std::array<float, 16>, MAX_SPOT_SHADOWS>
         sceneSpotShadowMatrices{};
     std::array<std::uint32_t, MAX_SPOT_SHADOWS> sceneSpotShadowLightIndices{};
+    std::array<bool, MAX_SPOT_SHADOWS> sceneSpotShadowDynamic{};
     std::uint32_t sceneSpotShadowCount = 0u;
     std::array<float, 4> sceneColorBias{};
     std::array<float, 4> sceneColorTintBase{};
@@ -1446,12 +1500,25 @@ const char *SurfaceTopologyString(WebRendererPrimitiveTopology topology) noexcep
 #if KISAK_WEB_DIAGNOSTICS
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestLoseWebGLContext()
 {
-    return HandleWebGLContextLost(0, nullptr, nullptr) ? 1 : 0;
+    return EM_ASM_INT({
+        const context = GL.currentContext;
+        const extension = context && context.GLctx.getExtension("WEBGL_lose_context");
+        if (!extension) return 0;
+        context.kisakTestContextLoss = extension;
+        extension.loseContext();
+        return 1;
+    });
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestRestoreWebGLContext()
 {
-    return HandleWebGLContextRestored(0, nullptr, nullptr) ? 1 : 0;
+    return EM_ASM_INT({
+        const context = GL.currentContext;
+        const extension = context && context.kisakTestContextLoss;
+        if (!extension) return 0;
+        extension.restoreContext();
+        return 1;
+    });
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestSetAaSamples(int samples)
@@ -1855,7 +1922,7 @@ RetainedImageMemoryStats RetainedImageStats(
             stats.iwiRecoveryBytes += image.encodedSource.size();
             stats.iwiDecodedBytes += image.decodedByteLength;
             break;
-        case WebRendererImageRecoverySource::DecodedRgba8:
+        case WebRendererImageRecoverySource::DecodedPixels:
             ++stats.rawCount;
             stats.rawRecoveryBytes += rawBytes;
             stats.rawDecodedBytes += image.decodedByteLength;
@@ -1959,6 +2026,10 @@ std::size_t EmitRendererMemory(const char *state, bool sampleAllocator = true)
             std::max(g_renderer.postProcessHeight, 0));
         // Scene RGBA8 + depth, composite RGBA8, and two quarter-size glow targets.
         renderTargetEstimateBytes = width * height * 10u;
+        renderTargetEstimateBytes += static_cast<std::size_t>(g_renderer.floatZWidth) *
+            g_renderer.floatZHeight * 8u; // Packed float RGBA8 + depth24 (padded).
+        renderTargetEstimateBytes += static_cast<std::size_t>(g_renderer.postSunWidth) *
+            g_renderer.postSunHeight * 4u;
         renderTargetEstimateBytes += static_cast<std::size_t>(g_renderer.savedScreenWidth) *
             g_renderer.savedScreenHeight * 4u;
         renderTargetEstimateBytes +=
@@ -2100,6 +2171,12 @@ void ResetGpuHandles()
     g_renderer.sceneFramebuffer = 0;
     g_renderer.sceneColorTexture = 0;
     g_renderer.sceneDepthTexture = 0;
+    g_renderer.floatZFramebuffer = g_renderer.floatZTexture = g_renderer.floatZDepthBuffer = 0;
+    g_renderer.floatZWidth = g_renderer.floatZHeight = 0;
+    g_renderer.floatZPass = g_renderer.softParticleDepthReady = false;
+    g_renderer.postSunFramebuffer = g_renderer.postSunTexture = 0;
+    g_renderer.postSunWidth = g_renderer.postSunHeight = 0;
+    g_renderer.postSunReady = false;
     g_renderer.multisampleFramebuffer = 0;
     g_renderer.multisampleColorRenderbuffer = 0;
     g_renderer.multisampleDepthRenderbuffer = 0;
@@ -2175,6 +2252,9 @@ void ResetGpuHandles()
     g_renderer.premultiplyAlphaUniform = -1;
     g_renderer.colorIntensityAlphaUniform = -1;
     g_renderer.materialModeUniform = -1;
+    g_renderer.outdoorLookupMatrixUniform = -1;
+    g_renderer.outdoorUniform = -1;
+    g_renderer.mipBiasUniform = -1;
     g_renderer.falloffParmsUniform = -1;
     g_renderer.falloffBeginColorUniform = -1;
     g_renderer.falloffEndColorUniform = -1;
@@ -2208,10 +2288,12 @@ void ResetGpuHandles()
     g_renderer.waterColorUniform = -1;
     g_renderer.shadowDepthMatrixUniform = -1;
     g_renderer.shadowDepthTextureUniform = -1;
+    g_renderer.shadowMipBiasUniform = -1;
     g_renderer.shadowDepthTextureEnabledUniform = -1;
     g_renderer.shadowDepthAlphaTestUniform = -1;
     g_renderer.shadowDepthInstanceEnabledUniform = -1;
     g_renderer.skyTextureUniform = -1;
+    g_renderer.skyMipBiasUniform = -1;
     g_renderer.skyTanHalfFovUniform = -1;
     g_renderer.skyForwardUniform = -1;
     g_renderer.skyRightUniform = -1;
@@ -2250,6 +2332,7 @@ void ResetGpuHandles()
     g_renderer.aaMaxSamples = 1;
     g_renderer.sceneSpotShadowCount = 0u;
     g_renderer.sceneSpotShadowLightIndices.fill(0u);
+    g_renderer.sceneSpotShadowDynamic.fill(false);
     for (WebRendererRetainedWorldImage &image : g_renderer.retainedWorldImages)
         image.texture = 0u;
     for (WebRendererRetainedWorldImage &image :
@@ -2429,6 +2512,25 @@ void DeleteMultisampleTargetObjects(
         glDeleteRenderbuffers(1, &depthRenderbuffer);
 }
 
+void DeleteFloatZTarget()
+{
+    if (g_renderer.floatZFramebuffer) glDeleteFramebuffers(1, &g_renderer.floatZFramebuffer);
+    if (g_renderer.floatZTexture) glDeleteTextures(1, &g_renderer.floatZTexture);
+    if (g_renderer.floatZDepthBuffer) glDeleteRenderbuffers(1, &g_renderer.floatZDepthBuffer);
+    g_renderer.floatZFramebuffer = g_renderer.floatZTexture = g_renderer.floatZDepthBuffer = 0;
+    g_renderer.floatZWidth = g_renderer.floatZHeight = 0;
+    g_renderer.softParticleDepthReady = false;
+}
+
+void DeletePostSunTarget()
+{
+    glDeleteFramebuffers(1, &g_renderer.postSunFramebuffer);
+    glDeleteTextures(1, &g_renderer.postSunTexture);
+    g_renderer.postSunFramebuffer = g_renderer.postSunTexture = 0;
+    g_renderer.postSunWidth = g_renderer.postSunHeight = 0;
+    g_renderer.postSunReady = false;
+}
+
 void DeleteShadowObjects(
     GLuint shadowFramebuffer,
     GLuint shadowDepthTexture,
@@ -2496,6 +2598,8 @@ void DestroyWebGLContext()
             g_renderer.multisampleDepthRenderbuffer);
         DeleteGlowTargetObjects(
             g_renderer.glowFramebuffers, g_renderer.glowColorTextures);
+        DeleteFloatZTarget();
+        DeletePostSunTarget();
         DeleteShadowObjects(
             g_renderer.shadowFramebuffer,
             g_renderer.shadowDepthTexture,
@@ -2808,7 +2912,7 @@ bool CreateTextureObject(
     std::uint32_t width,
     std::uint32_t height,
     std::uint8_t samplerState,
-    GLuint &textureOut)
+    GLuint &textureOut, unsigned components = 4)
 {
     while (glGetError() != GL_NO_ERROR)
     {
@@ -2850,17 +2954,18 @@ bool CreateTextureObject(
         samplerState == 0u || (samplerState & 0x40u) != 0u
             ? GL_CLAMP_TO_EDGE
             : GL_REPEAT);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, components == 1 ? 1 : 4);
     glTexImage2D(
         GL_TEXTURE_2D,
         0,
-        GL_RGBA8,
+        components == 1 ? GL_R8 : GL_RGBA8,
         static_cast<GLsizei>(width),
         static_cast<GLsizei>(height),
         0,
-        GL_RGBA,
+        components == 1 ? GL_RED : GL_RGBA,
         GL_UNSIGNED_BYTE,
         pixels);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
 
     const GLenum error = glGetError();
     if (error != GL_NO_ERROR)
@@ -3068,7 +3173,7 @@ bool CreateWorldTextureObjects(
         kisak::iwi::Rgba8Image decoded;
         kisak::iwi::Error decodeError = kisak::iwi::Error::None;
         const bool encoded = image.recoverySource !=
-            WebRendererImageRecoverySource::DecodedRgba8;
+            WebRendererImageRecoverySource::DecodedPixels;
         const bool initialDecode = encoded &&
             reason == WebRendererImageDecodeReason::InitialUpload;
         const bool duplicate = initialDecode &&
@@ -3084,7 +3189,7 @@ bool CreateWorldTextureObjects(
                         static_cast<std::uint16_t>(image.sourceDimensions[1]),
                         static_cast<std::uint16_t>(image.sourceDimensions[2]),
                         image.encodedSource,
-                        decoded);
+                        decoded, image.picmip);
                 });
         }
         else if (image.recoverySource ==
@@ -3093,7 +3198,7 @@ bool CreateWorldTextureObjects(
             decodeError = DecodeRetainedImage(reason, true, duplicate,
                 decoded, [&] {
                     return kisak::iwi::DecodeRgba8(
-                        image.encodedSource, decoded);
+                        image.encodedSource, decoded, image.picmip);
                 });
         }
         if (initialDecode) ++image.initialPixelDecodeCount;
@@ -3115,7 +3220,7 @@ bool CreateWorldTextureObjects(
             ? decoded.mipPixels : image.mipPixels;
         if (!CreateTextureObject(
                 pixels.data(), image.width, image.height, 2u,
-                image.texture))
+                image.texture, image.components))
         {
             DeleteWorldTextureObjects(images);
             return false;
@@ -3358,6 +3463,101 @@ bool ResolveMultisampleTarget(
     return false;
 }
 
+// Native FloatZ is a separate, non-MSAA prepass. Store its IEEE float bits
+// losslessly in RGBA8 so WebGL2 does not require EXT_color_buffer_float.
+bool CreateFloatZTarget(int width, int height)
+{
+    if (g_renderer.floatZFramebuffer && g_renderer.floatZWidth == width &&
+        g_renderer.floatZHeight == height) return true;
+    DeleteFloatZTarget();
+    if (width <= 0 || height <= 0) return false;
+    glGenTextures(1, &g_renderer.floatZTexture);
+    glActiveTexture(GL_TEXTURE6);
+    glBindTexture(GL_TEXTURE_2D, g_renderer.floatZTexture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glGenRenderbuffers(1, &g_renderer.floatZDepthBuffer);
+    glBindRenderbuffer(GL_RENDERBUFFER, g_renderer.floatZDepthBuffer);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, width, height);
+    glGenFramebuffers(1, &g_renderer.floatZFramebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, g_renderer.floatZFramebuffer);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+        g_renderer.floatZTexture, 0);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER,
+        g_renderer.floatZDepthBuffer);
+    const bool complete = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    const GLenum error = glGetError();
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindRenderbuffer(GL_RENDERBUFFER, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE0);
+    if (!complete || error != GL_NO_ERROR)
+    {
+        DeleteFloatZTarget();
+        Web_Log(WebLogLevel::Error, "[kisakcod-web] FloatZ target creation failed (0x%x).\n", error);
+        return false;
+    }
+    g_renderer.floatZWidth = width; g_renderer.floatZHeight = height;
+    return true;
+}
+
+bool CreatePostSunTarget(int width, int height)
+{
+    if (g_renderer.postSunFramebuffer && g_renderer.postSunWidth == width &&
+        g_renderer.postSunHeight == height) return true;
+    DeletePostSunTarget();
+    if (width <= 0 || height <= 0) return false;
+    glGenTextures(1, &g_renderer.postSunTexture);
+    glActiveTexture(GL_TEXTURE10);
+    glBindTexture(GL_TEXTURE_2D, g_renderer.postSunTexture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glGenFramebuffers(1, &g_renderer.postSunFramebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, g_renderer.postSunFramebuffer);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+        g_renderer.postSunTexture, 0);
+    const bool complete = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    const GLenum error = glGetError();
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glActiveTexture(GL_TEXTURE0);
+    if (!complete || error != GL_NO_ERROR)
+    {
+        DeletePostSunTarget();
+        Web_Log(WebLogLevel::Error, "[kisakcod-web] Post-sun target creation failed (0x%x).\n", error);
+        return false;
+    }
+    g_renderer.postSunWidth = width; g_renderer.postSunHeight = height;
+    return true;
+}
+
+bool ResolvePostSunTarget(GLuint sourceFramebuffer, int width, int height)
+{
+    // Native resolves after lit/decal/sun/point-light draws, before emissive.
+    // Blit also resolves MSAA; the snapshot never receives subsequent draws.
+    const bool scissor = glIsEnabled(GL_SCISSOR_TEST) != GL_FALSE;
+    glDisable(GL_SCISSOR_TEST);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, sourceFramebuffer);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_renderer.postSunFramebuffer);
+    glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    // Chromium's MSAA resolve can remain deferred across a source clear.
+    // Submit before source reuse; this does not wait for GPU completion.
+    glFlush();
+    glBindFramebuffer(GL_FRAMEBUFFER, sourceFramebuffer);
+    if (scissor) glEnable(GL_SCISSOR_TEST);
+    const GLenum error = glGetError();
+    g_renderer.postSunReady = error == GL_NO_ERROR;
+    if (error != GL_NO_ERROR)
+        Web_Log(WebLogLevel::Error, "[kisakcod-web] Post-sun resolve failed (0x%x).\n", error);
+    return g_renderer.postSunReady;
+}
+
 bool CreatePostProcessTargets(int width, int height)
 {
     if (width <= 0 || height <= 0) return false;
@@ -3577,6 +3777,17 @@ bool CreateRendererResources(bool contextRecovery = false)
         uniform vec4 u_falloff_parms;
         uniform vec4 u_falloff_begin_color;
         uniform vec4 u_falloff_end_color;
+        uniform int u_soft_flags;
+        uniform vec3 u_soft_feather;
+        uniform float u_soft_eye;
+        uniform vec4 u_soft_screen;
+        out vec3 v_soft_screen;
+        out float v_soft_depth;
+        uniform vec2 u_distortion_scale;
+        out vec3 v_distortion_tangent;
+        out vec3 v_distortion_binormal;
+        uniform mat4 u_outdoor_lookup_matrix;
+        out vec3 v_outdoor_lookup;
         out vec4 v_color;
         out vec2 v_texcoord;
         out vec3 v_world_position;
@@ -3617,6 +3828,51 @@ bool CreateRendererResources(bool contextRecovery = false)
             position.y *= min(1.0, 1.0 / u_aspect);
             gl_Position = u_view_projection * vec4(position, 1.0);
             v_color = a_color;
+            v_soft_screen = vec3(gl_Position.xy * u_soft_screen.xy +
+                gl_Position.w * u_soft_screen.zw, gl_Position.w);
+            v_soft_depth = 0.0;
+            v_distortion_tangent = vec3(0.0);
+            v_distortion_binormal = vec3(0.0);
+            v_outdoor_lookup = vec3(0.0);
+            if (u_material_mode == 18)
+                v_outdoor_lookup = (u_outdoor_lookup_matrix *
+                    vec4(a_normal, 1.0)).xyz;
+            if (u_material_mode == 17)
+            {
+                // Keep authored D3D projective lookup coordinates here;
+                // fragment sampling converts only the texture Y origin.
+                v_soft_screen.y = gl_Position.w - v_soft_screen.y;
+                v_soft_depth = (gl_Position.z + gl_Position.w) * 0.5;
+                vec4 tangent = u_view_projection * vec4(model_tangent, 0.0);
+                vec4 binormal = u_view_projection * vec4(cross(model_tangent, model_normal), 0.0);
+                vec3 scale = vec3(u_soft_screen.xy, 1.0);
+                v_distortion_tangent = tangent.xyw * scale * u_distortion_scale.x * a_color.r;
+                v_distortion_binormal = -binormal.xyw * scale * u_distortion_scale.y * a_color.g;
+                v_color.rgb = a_color.bbb;
+            }
+            if (u_material_mode == 14)
+            {
+                // Eye offset is authored in D3D clip space. Convert its Z
+                // condition, then preserve the original projected lookup.
+                if ((u_soft_flags & 8) != 0 &&
+                    (gl_Position.z + gl_Position.w) * 0.5 > u_soft_eye)
+                {
+                    float new_w = gl_Position.w - u_soft_eye;
+                    gl_Position.xy *= new_w / gl_Position.w;
+                    gl_Position.zw -= u_soft_eye;
+                }
+                v_soft_depth = gl_Position.w * u_soft_feather.x;
+                if (u_soft_feather.z > 0.5)
+                    v_color.a *= clamp(v_soft_depth, 0.0, 1.0);
+                if ((u_soft_flags & 4) != 0)
+                {
+                    float angle = dot(normalize(world_position - u_view_origin), model_normal);
+                    float falloff = clamp(angle * angle * u_falloff_parms.z +
+                        u_falloff_parms.w, 0.0, 1.0);
+                    v_color.rgb *= falloff * mix(u_falloff_end_color.rgb,
+                        u_falloff_begin_color.rgb, falloff);
+                }
+            }
             if (u_material_mode == 4)
             {
                 // Exact vertcol_simple_fog_df vertex arithmetic. The native
@@ -3655,6 +3911,18 @@ bool CreateRendererResources(bool contextRecovery = false)
         in float v_binormal_sign;
         in vec3 v_model_lighting_coords;
         in float v_dynamic_fog;
+        in vec3 v_soft_screen;
+        in float v_soft_depth;
+        in vec3 v_distortion_tangent;
+        in vec3 v_distortion_binormal;
+        in vec3 v_outdoor_lookup;
+        uniform sampler2D u_post_sun;
+        uniform sampler2D u_outdoor;
+        uniform int u_soft_flags;
+        uniform vec3 u_soft_feather;
+        uniform vec3 u_soft_fog_color;
+        uniform highp sampler2D u_float_z;
+        uniform float u_depth_sign;
         uniform sampler2D u_texture;
         uniform sampler2D u_detail_map;
         uniform sampler2D u_secondary_lightmap;
@@ -3704,11 +3972,25 @@ bool CreateRendererResources(bool contextRecovery = false)
         uniform vec4 u_water_color;
         out vec4 out_color;
 
+        // D3D's sampler LOD bias has no WebGL sampler parameter. GLSL's
+        // fragment sampling bias preserves implicit derivatives and filtering.
+        uniform float u_mip_bias;
+        // ANGLE lowers sampler parameters to uint in HLSL; distinct names
+        // keep 3D/cube/shadow signatures from colliding on D3D11.
+        vec4 sample_texture(sampler2D image, vec2 uv)
+        { return texture(image, uv, u_mip_bias); }
+        vec4 sample_volume(sampler3D image, vec3 uv)
+        { return texture(image, uv, u_mip_bias); }
+        vec4 sample_cube(samplerCube image, vec3 uv)
+        { return texture(image, uv, u_mip_bias); }
+        float sample_shadow(highp sampler2DShadow image, vec3 uv)
+        { return texture(image, uv, u_mip_bias); }
+
         float water_height(vec2 uv)
         {
-            return texture(u_water_map, uv).r +
-                texture(u_water_map, uv * 3.7).r * 0.6 +
-                texture(u_water_map, uv * 13.69).r * 0.36;
+            return sample_texture(u_water_map, uv).r +
+                sample_texture(u_water_map, uv * 3.7).r * 0.6 +
+                sample_texture(u_water_map, uv * 13.69).r * 0.36;
         }
 
         float sample_near_sun_shadow(vec2 uv, float receiver_depth)
@@ -3719,13 +4001,13 @@ bool CreateRendererResources(bool contextRecovery = false)
             // only one of those taps, leaving a one-texel staircase.
             const vec2 texel = vec2(1.0 / 1024.0);
             float visibility = 0.0;
-            visibility += texture(u_shadow_map, vec3(
+            visibility += sample_shadow(u_shadow_map, vec3(
                 uv + texel * vec2(-0.5, -0.5), receiver_depth));
-            visibility += texture(u_shadow_map, vec3(
+            visibility += sample_shadow(u_shadow_map, vec3(
                 uv + texel * vec2( 0.5, -0.5), receiver_depth));
-            visibility += texture(u_shadow_map, vec3(
+            visibility += sample_shadow(u_shadow_map, vec3(
                 uv + texel * vec2(-0.5,  0.5), receiver_depth));
-            visibility += texture(u_shadow_map, vec3(
+            visibility += sample_shadow(u_shadow_map, vec3(
                 uv + texel * vec2( 0.5,  0.5), receiver_depth));
             return visibility * 0.25;
         }
@@ -3734,13 +4016,13 @@ bool CreateRendererResources(bool contextRecovery = false)
         {
             const vec2 texel = vec2(1.0 / 1024.0);
             float visibility = 0.0;
-            visibility += texture(u_shadow_far_map, vec3(
+            visibility += sample_shadow(u_shadow_far_map, vec3(
                 uv + texel * vec2(-0.5, -0.5), receiver_depth));
-            visibility += texture(u_shadow_far_map, vec3(
+            visibility += sample_shadow(u_shadow_far_map, vec3(
                 uv + texel * vec2( 0.5, -0.5), receiver_depth));
-            visibility += texture(u_shadow_far_map, vec3(
+            visibility += sample_shadow(u_shadow_far_map, vec3(
                 uv + texel * vec2(-0.5,  0.5), receiver_depth));
-            visibility += texture(u_shadow_far_map, vec3(
+            visibility += sample_shadow(u_shadow_far_map, vec3(
                 uv + texel * vec2( 0.5,  0.5), receiver_depth));
             return visibility * 0.25;
         }
@@ -3794,20 +4076,92 @@ bool CreateRendererResources(bool contextRecovery = false)
             // the four lm_spot_sm taps must interpolate binary comparisons;
             // comparing one nearest depth per tap creates the jagged indoor
             // light wedge seen in Killhouse.
-            visibility += texture(u_spot_shadow_map, vec3(
+            visibility += sample_shadow(u_spot_shadow_map, vec3(
                 uv + texel * vec2(-0.5, -0.5), receiver_depth));
-            visibility += texture(u_spot_shadow_map, vec3(
+            visibility += sample_shadow(u_spot_shadow_map, vec3(
                 uv + texel * vec2( 0.5, -0.5), receiver_depth));
-            visibility += texture(u_spot_shadow_map, vec3(
+            visibility += sample_shadow(u_spot_shadow_map, vec3(
                 uv + texel * vec2(-0.5,  0.5), receiver_depth));
-            visibility += texture(u_spot_shadow_map, vec3(
+            visibility += sample_shadow(u_spot_shadow_map, vec3(
                 uv + texel * vec2( 0.5,  0.5), receiver_depth));
             return visibility * 0.25;
         }
 
+        float sample_float_z(vec2 uv)
+        {
+            uvec4 packed = uvec4(round(texture(u_float_z, uv) * 255.0));
+            return uintBitsToFloat(packed.x | (packed.y << 8u) |
+                (packed.z << 16u) | (packed.w << 24u));
+        }
+
         void main()
         {
-            vec4 texel = texture(u_texture, v_texcoord);
+            vec4 texel = sample_texture(u_texture, v_texcoord);
+            if (u_material_mode == 18)
+            {
+                vec4 color = texel * v_color;
+                if (v_outdoor_lookup.z <
+                    texture(u_outdoor, v_outdoor_lookup.xy).r)
+                    color.a = 0.0;
+                out_color = color * u_ui_color;
+                return;
+            }
+            if (u_material_mode == 17)
+            {
+                vec2 normal = texel.rg * 2.0 - 1.0;
+                vec3 displaced = v_soft_screen + normal.x * v_distortion_tangent +
+                    normal.y * v_distortion_binormal;
+                vec2 uv = displaced.xy / displaced.z;
+                uv.y = 1.0 - uv.y;
+                if (abs(sample_float_z(uv)) < v_soft_depth)
+                {
+                    uv = v_soft_screen.xy / v_soft_screen.z;
+                    uv.y = 1.0 - uv.y;
+                }
+                out_color = vec4(texture(u_post_sun, uv).rgb * v_color.rgb,
+                    texel.a * v_color.a) * u_ui_color;
+                return;
+            }
+            if (u_material_mode == 15 || u_material_mode == 16)
+            {
+                if (u_material_mode == 16 && texel.a * v_color.a < 128.0 / 255.0) discard;
+                uint bits = floatBitsToUint(u_depth_sign / gl_FragCoord.w);
+                out_color = vec4(uvec4(bits, bits >> 8u, bits >> 16u, bits >> 24u) & 255u) / 255.0;
+                return;
+            }
+            if (u_material_mode == 14)
+            {
+                vec4 color = texel * v_color;
+                if (u_soft_feather.z > 0.5)
+                {
+                    float depth = sample_float_z(v_soft_screen.xy / v_soft_screen.z);
+                    color.a *= clamp(abs(abs(depth) * u_soft_feather.y - v_soft_depth), 0.0, 1.0);
+                }
+                if ((u_soft_flags & 1) != 0)
+                    color.rgb = mix(u_soft_fog_color, color.rgb, v_dynamic_fog);
+                if ((u_soft_flags & 2) != 0) color.rgb *= color.a;
+                out_color = color * u_ui_color;
+                return;
+            }
+            if (u_material_mode == 12 || u_material_mode == 13)
+            {
+                float y = texel.r;
+                float cr = sample_texture(u_normal_map, v_texcoord).r;
+                float cb = sample_texture(u_detail_map, v_texcoord).r;
+                float alpha = sample_texture(u_specular_map, v_texcoord).r;
+                vec3 rgb;
+                if (u_material_mode == 13)
+                    rgb = vec3(y + 1.402 * (cr - 128.0 / 255.0),
+                        y - 0.344136 * (cb - 128.0 / 255.0) - 0.714136 * (cr - 128.0 / 255.0),
+                        y + 1.772 * (cb - 128.0 / 255.0));
+                else
+                    rgb = vec3(dot(vec3(y, cr, 1.0), vec3(1.164123535, 1.595794678, -0.87065506)),
+                        dot(vec4(y, cr, cb, 1.0), vec4(1.164123535, -0.813476563, -0.391448975, 0.529705048)),
+                        dot(vec3(y, cb, 1.0), vec3(1.164123535, 2.017822266, -1.081668854)));
+                out_color = vec4(rgb, alpha) * v_color * u_ui_color;
+                return;
+            }
+
             // Retail shell_shock(_flashed) sm3 arithmetic. Timing and color
             // packing are supplied by the canonical saved-screen commands.
             if (u_material_mode == 7)
@@ -3826,7 +4180,7 @@ bool CreateRendererResources(bool contextRecovery = false)
             {
                 // Exact d0 arithmetic: detail and color are added, biased by
                 // -0.5, then multiplied by vertex and lighting downstream.
-                texel.rgb += texture(
+                texel.rgb += sample_texture(
                     u_detail_map, v_texcoord * u_detail_scale.xy).rgb - 0.5;
             }
             if (u_material_mode >= 9)
@@ -3840,7 +4194,7 @@ bool CreateRendererResources(bool contextRecovery = false)
                 vec3 normal = normalize(v_model_normal);
                 if (u_normal_map_enabled > 0.5)
                 {
-                    vec4 encoded = texture(u_normal_map, v_texcoord);
+                    vec4 encoded = sample_texture(u_normal_map, v_texcoord);
                     vec2 slope = encoded.ag * vec2(4.08, 4.06451607) - vec2(2.08, 2.06451607);
                     vec3 tangent = normalize(v_model_tangent);
                     vec3 binormal = normalize(cross(normal, tangent)) * v_binormal_sign;
@@ -3852,10 +4206,12 @@ bool CreateRendererResources(bool contextRecovery = false)
                     float amount = clamp(dot(direction, u_primary_light_spot_direction) *
                         u_primary_light_spot_factors.x + u_primary_light_spot_factors.y, 0.0, 1.0);
                     cone = amount > 0.0 ? pow(amount, u_primary_light_spot_factors.z) : 0.0;
+                    cone *= mix(1.0, sample_spot_shadow(v_world_position),
+                        clamp(u_spot_shadow_enabled, 0.0, 1.0));
                 }
                 float alpha = texel.a * v_color.a;
                 if (u_material_mode == 11 && alpha < 0.5) discard;
-                vec3 attenuation = texture(u_secondary_lightmap,
+                vec3 attenuation = sample_texture(u_secondary_lightmap,
                     vec2(clamp(distance_to_light * u_primary_light_position_radius.w, 0.0, 1.0))).rgb;
                 vec3 color = texel.rgb * v_color.rgb * attenuation *
                     u_primary_light_diffuse * max(dot(direction, normal), 0.0) * cone;
@@ -3898,7 +4254,7 @@ bool CreateRendererResources(bool contextRecovery = false)
                 // implementation; this branch owns only the WebGL boundary.
                 vec3 view_direction = normalize(
                     v_world_position - u_view_origin);
-                float parallax_height = texture(
+                float parallax_height = sample_texture(
                     u_water_map, v_texcoord * 0.5).r;
                 vec2 water_uv = v_texcoord +
                     (0.5 - parallax_height) * view_direction.xy *
@@ -3913,7 +4269,7 @@ bool CreateRendererResources(bool contextRecovery = false)
                 float view_normal = dot(view_direction, water_normal);
                 vec3 reflection_direction = view_direction -
                     water_normal * (2.0 * view_normal);
-                vec4 reflection_sample = texture(u_reflection_probe,
+                vec4 reflection_sample = sample_cube(u_reflection_probe,
                     vec3(reflection_direction.xy,
                         abs(reflection_direction.z)));
                 vec3 reflection_color = clamp(
@@ -3963,11 +4319,11 @@ bool CreateRendererResources(bool contextRecovery = false)
                     // lobes; their alpha channels encode the directional
                     // weighting. D3D9 samples these normalized values
                     // directly, without an sRGB sampler conversion.
-                    vec4 secondary_lobe0 = texture(
+                    vec4 secondary_lobe0 = sample_texture(
                         u_secondary_lightmap,
                         vec2(v_lightmap_coord.x,
                             v_lightmap_coord.y * 0.5));
-                    vec4 secondary_lobe1 = texture(
+                    vec4 secondary_lobe1 = sample_texture(
                         u_secondary_lightmap,
                         vec2(v_lightmap_coord.x,
                             v_lightmap_coord.y * 0.5 + 0.5));
@@ -3982,7 +4338,7 @@ bool CreateRendererResources(bool contextRecovery = false)
                         // Native lm_[rt]0c0n0_sm2 decodes DXT5nm AG as
                         // slope-space coordinates. This is deliberately not
                         // the tangent-basis reconstruction used by XModels.
-                        vec4 normal_texel = texture(
+                        vec4 normal_texel = sample_texture(
                             u_normal_map, v_texcoord);
                         vec2 encoded_normal = vec2(
                             normal_texel.a * 4.08 - 2.08,
@@ -4033,12 +4389,12 @@ bool CreateRendererResources(bool contextRecovery = false)
                             u_primary_light_position_radius.w, 0.0, 1.0) *
                             u_primary_light_falloff_placement.x +
                             u_primary_light_falloff_placement.y;
-                        vec3 radial_attenuation = texture(
+                        vec3 radial_attenuation = sample_texture(
                             u_secondary_lightmap,
                             vec2(radial_coordinate, 0.0)).rgb;
                         // The native vertex program forwards the authored
                         // primary-lightmap coordinates unchanged.
-                        float primary_visibility = texture(
+                        float primary_visibility = sample_texture(
                             u_primary_lightmap, v_lightmap_coord).r;
                         // The retail lm_spot_sm program selects the dynamic
                         // comparison when a shadow map is active; without one
@@ -4050,7 +4406,7 @@ bool CreateRendererResources(bool contextRecovery = false)
                         vec3 primary_normal = normalize(v_model_normal);
                         if (u_normal_map_enabled > 0.5)
                         {
-                            vec4 normal_texel = texture(
+                            vec4 normal_texel = sample_texture(
                                 u_normal_map, v_texcoord);
                             vec2 encoded_normal = vec2(
                                 normal_texel.a * 4.08 - 2.08,
@@ -4073,7 +4429,7 @@ bool CreateRendererResources(bool contextRecovery = false)
                         vec3 sun_normal = normalize(v_model_normal);
                         if (u_normal_map_enabled > 0.5)
                         {
-                            vec4 normal_texel = texture(
+                            vec4 normal_texel = sample_texture(
                                 u_normal_map, v_texcoord);
                             vec2 tangent_xy = normal_texel.ag * 2.0 - 1.0;
                             float tangent_z = sqrt(max(
@@ -4088,7 +4444,7 @@ bool CreateRendererResources(bool contextRecovery = false)
                         }
                         float sun_amount = max(dot(
                             normalize(u_sun_direction), sun_normal), 0.0);
-                        float authored_sun_visibility = texture(
+                        float authored_sun_visibility = sample_texture(
                             u_primary_lightmap, v_lightmap_coord).r;
                         lighting += u_sun_color * sun_amount *
                             sample_sun_shadow(v_world_position,
@@ -4106,7 +4462,7 @@ bool CreateRendererResources(bool contextRecovery = false)
                     vec3 world_normal = normalize(v_model_normal);
                     if (u_normal_map_enabled > 0.5)
                     {
-                        vec4 normal_texel = texture(
+                        vec4 normal_texel = sample_texture(
                             u_normal_map, v_texcoord);
                         vec3 tangent = normalize(v_model_tangent);
                         vec3 binormal = normalize(cross(
@@ -4141,13 +4497,13 @@ bool CreateRendererResources(bool contextRecovery = false)
                     float view_normal = dot(view_direction, world_normal);
                     vec3 reflection_direction = view_direction -
                         world_normal * (2.0 * view_normal);
-                    vec4 specular_sample = texture(
+                    vec4 specular_sample = sample_texture(
                         u_specular_map, v_texcoord);
                     float reflection_lod =
                         specular_sample.a * -8.0 + 6.0;
                     vec4 reflection_sample = textureLod(
                         u_reflection_probe, reflection_direction,
-                        reflection_lod);
+                        reflection_lod + u_mip_bias); // D3D texldl also honors sampler bias.
                     float fresnel_power = pow(
                         1.0 - abs(view_normal), u_env_map_parms.z);
                     float reflection_factor = mix(
@@ -4170,7 +4526,7 @@ bool CreateRendererResources(bool contextRecovery = false)
                         // tangent X in alpha, tangent Y in green, and a
                         // reconstructed positive Z. The packed XSurface sign
                         // reconstructs the same binormal handedness as native.
-                        vec4 normal_texel = texture(
+                        vec4 normal_texel = sample_texture(
                             u_normal_map, v_texcoord);
                         vec2 tangent_xy = normal_texel.ag * 2.0 - 1.0;
                         float tangent_z = sqrt(max(
@@ -4187,7 +4543,7 @@ bool CreateRendererResources(bool contextRecovery = false)
                         abs(model_normal.y)), abs(model_normal.z));
                     vec3 lookup_direction = model_normal /
                         max(major_axis, 0.000001);
-                    vec4 model_lighting = texture(
+                    vec4 model_lighting = sample_volume(
                         u_model_lighting,
                         v_model_lighting_coords + lookup_direction *
                             u_model_lighting_lookup_scale);
@@ -4266,6 +4622,7 @@ bool CreateRendererResources(bool contextRecovery = false)
         precision highp float;
         in vec2 v_shadow_texcoord;
         uniform sampler2D u_shadow_depth_texture;
+        uniform float u_mip_bias;
         uniform float u_shadow_depth_texture_enabled;
         uniform int u_shadow_depth_alpha_test;
         void main()
@@ -4274,7 +4631,7 @@ bool CreateRendererResources(bool contextRecovery = false)
                 u_shadow_depth_alpha_test != 0)
             {
                 float alpha = texture(
-                    u_shadow_depth_texture, v_shadow_texcoord).a;
+                    u_shadow_depth_texture, v_shadow_texcoord, u_mip_bias).a;
                 if ((u_shadow_depth_alpha_test == 1 && alpha <= 0.0) ||
                     (u_shadow_depth_alpha_test == 2 &&
                         alpha >= (128.0 / 255.0)) ||
@@ -4303,6 +4660,7 @@ bool CreateRendererResources(bool contextRecovery = false)
         precision highp samplerCube;
         in vec2 v_ndc;
         uniform samplerCube u_sky;
+        uniform float u_mip_bias;
         uniform vec2 u_tan_half_fov;
         uniform vec3 u_forward;
         uniform vec3 u_right;
@@ -4316,7 +4674,7 @@ bool CreateRendererResources(bool contextRecovery = false)
             vec3 direction = normalize(u_forward -
                 v_ndc.x * u_tan_half_fov.x * u_right +
                 v_ndc.y * u_tan_half_fov.y * u_up);
-            out_color = texture(u_sky, direction);
+            out_color = texture(u_sky, direction, u_mip_bias);
         }
     )glsl";
 
@@ -4571,6 +4929,11 @@ bool CreateRendererResources(bool contextRecovery = false)
         glGetUniformLocation(program, "u_color_intensity_alpha");
     const GLint materialModeUniform =
         glGetUniformLocation(program, "u_material_mode");
+    const GLint outdoorLookupMatrixUniform =
+        glGetUniformLocation(program, "u_outdoor_lookup_matrix");
+    const GLint outdoorUniform =
+        glGetUniformLocation(program, "u_outdoor");
+    const GLint mipBiasUniform = glGetUniformLocation(program, "u_mip_bias");
     const GLint falloffParmsUniform =
         glGetUniformLocation(program, "u_falloff_parms");
     const GLint falloffBeginColorUniform =
@@ -4635,6 +4998,7 @@ bool CreateRendererResources(bool contextRecovery = false)
         glGetUniformLocation(shadowProgram, "u_shadow_depth_matrix");
     const GLint shadowDepthTextureUniform =
         glGetUniformLocation(shadowProgram, "u_shadow_depth_texture");
+    const GLint shadowMipBiasUniform = glGetUniformLocation(shadowProgram, "u_mip_bias");
     const GLint shadowDepthTextureEnabledUniform =
         glGetUniformLocation(shadowProgram,
             "u_shadow_depth_texture_enabled");
@@ -4645,6 +5009,7 @@ bool CreateRendererResources(bool contextRecovery = false)
             shadowProgram, "u_shadow_depth_instance_enabled");
     const GLint skyTextureUniform =
         glGetUniformLocation(skyProgram, "u_sky");
+    const GLint skyMipBiasUniform = glGetUniformLocation(skyProgram, "u_mip_bias");
     const GLint skyTanHalfFovUniform =
         glGetUniformLocation(skyProgram, "u_tan_half_fov");
     const GLint skyForwardUniform =
@@ -4778,10 +5143,10 @@ bool CreateRendererResources(bool contextRecovery = false)
         CreateSurfaceObjects(g_renderer.retainedUiVertices,
             g_renderer.retainedUiIndices, uiVertexArray, uiVertexBuffer,
             uiIndexBuffer);
-    const bool uiTexturesReady = uiObjectsReady &&
-        (!g_renderer.uiSceneActive ||
-         CreateWorldTextureObjects(
-             g_renderer.retainedUiImages, imageDecodeReason));
+    // Dynamic code images are also sampled by world/model materials when no
+    // UI scene exists. Their recovery cannot depend on 2D draw submission.
+    const bool uiTexturesReady = uiObjectsReady && CreateWorldTextureObjects(
+        g_renderer.retainedUiImages, imageDecodeReason);
     GLuint shadowFramebuffer = 0u;
     GLuint shadowDepthTexture = 0u;
     GLuint shadowFarFramebuffer = 0u;
@@ -4814,7 +5179,8 @@ bool CreateRendererResources(bool contextRecovery = false)
         modelLightingBaseCoordinatesUniform < 0 ||
         modelLightingLookupScaleUniform < 0 ||
         premultiplyAlphaUniform < 0 || colorIntensityAlphaUniform < 0 ||
-        materialModeUniform < 0 || falloffParmsUniform < 0 ||
+        materialModeUniform < 0 || outdoorLookupMatrixUniform < 0 ||
+        outdoorUniform < 0 || mipBiasUniform < 0 || falloffParmsUniform < 0 ||
         falloffBeginColorUniform < 0 || falloffEndColorUniform < 0 ||
         alphaTestUniform < 0 || instanceEnabledUniform < 0 ||
         uiColorUniform < 0 || fogEnabledUniform < 0 ||
@@ -4834,11 +5200,11 @@ bool CreateRendererResources(bool contextRecovery = false)
         spotShadowEnabledUniform < 0 ||
         waterMapUniform < 0 || reflectionProbeUniform < 0 ||
         envMapParmsUniform < 0 || waterColorUniform < 0 ||
-        shadowDepthMatrixUniform < 0 || shadowDepthTextureUniform < 0 ||
+        shadowDepthMatrixUniform < 0 || shadowDepthTextureUniform < 0 || shadowMipBiasUniform < 0 ||
         shadowDepthTextureEnabledUniform < 0 ||
         shadowDepthAlphaTestUniform < 0 ||
         shadowDepthInstanceEnabledUniform < 0 ||
-        skyTextureUniform < 0 || skyTanHalfFovUniform < 0 ||
+        skyTextureUniform < 0 || skyMipBiasUniform < 0 || skyTanHalfFovUniform < 0 ||
         skyForwardUniform < 0 || skyRightUniform < 0 ||
         skyUpUniform < 0 || postProcessTextureUniform < 0 ||
         postProcessFilmEnabledUniform < 0 ||
@@ -4964,6 +5330,18 @@ bool CreateRendererResources(bool contextRecovery = false)
     g_renderer.premultiplyAlphaUniform = premultiplyAlphaUniform;
     g_renderer.colorIntensityAlphaUniform = colorIntensityAlphaUniform;
     g_renderer.materialModeUniform = materialModeUniform;
+    g_renderer.softFlagsUniform = glGetUniformLocation(program, "u_soft_flags");
+    g_renderer.softFeatherUniform = glGetUniformLocation(program, "u_soft_feather");
+    g_renderer.softEyeUniform = glGetUniformLocation(program, "u_soft_eye");
+    g_renderer.softScreenUniform = glGetUniformLocation(program, "u_soft_screen");
+    g_renderer.softFogUniform = glGetUniformLocation(program, "u_soft_fog_color");
+    g_renderer.floatZUniform = glGetUniformLocation(program, "u_float_z");
+    g_renderer.distortionScaleUniform = glGetUniformLocation(program, "u_distortion_scale");
+    g_renderer.postSunUniform = glGetUniformLocation(program, "u_post_sun");
+    g_renderer.outdoorLookupMatrixUniform = outdoorLookupMatrixUniform;
+    g_renderer.outdoorUniform = outdoorUniform;
+    g_renderer.depthSignUniform = glGetUniformLocation(program, "u_depth_sign");
+    g_renderer.mipBiasUniform = mipBiasUniform;
     g_renderer.falloffParmsUniform = falloffParmsUniform;
     g_renderer.falloffBeginColorUniform = falloffBeginColorUniform;
     g_renderer.falloffEndColorUniform = falloffEndColorUniform;
@@ -5001,12 +5379,14 @@ bool CreateRendererResources(bool contextRecovery = false)
     g_renderer.waterColorUniform = waterColorUniform;
     g_renderer.shadowDepthMatrixUniform = shadowDepthMatrixUniform;
     g_renderer.shadowDepthTextureUniform = shadowDepthTextureUniform;
+    g_renderer.shadowMipBiasUniform = shadowMipBiasUniform;
     g_renderer.shadowDepthTextureEnabledUniform =
         shadowDepthTextureEnabledUniform;
     g_renderer.shadowDepthAlphaTestUniform = shadowDepthAlphaTestUniform;
     g_renderer.shadowDepthInstanceEnabledUniform =
         shadowDepthInstanceEnabledUniform;
     g_renderer.skyTextureUniform = skyTextureUniform;
+    g_renderer.skyMipBiasUniform = skyMipBiasUniform;
     g_renderer.skyTanHalfFovUniform = skyTanHalfFovUniform;
     g_renderer.skyForwardUniform = skyForwardUniform;
     g_renderer.skyRightUniform = skyRightUniform;
@@ -5179,7 +5559,8 @@ bool InspectExternalCanonicalImage(
     const GfxImage *canonical,
     kisak::iwi::Rgba8Layout &layout,
     kisak::iwi::Error &inspectError,
-    std::vector<std::uint8_t> &encodedSource)
+    std::vector<std::uint8_t> &encodedSource,
+    std::uint32_t picmip)
 {
     if (!canonical || canonical->mapType != MAPTYPE_2D ||
         !canonical->name || !canonical->name[0] ||
@@ -5203,7 +5584,7 @@ bool InspectExternalCanonicalImage(
             static_cast<std::uint32_t>(bytes.size()), file);
         if (read == bytes.size()) RecordImageMetadataParse();
         inspectError = read == bytes.size()
-            ? kisak::iwi::InspectRgba8(bytes, layout)
+            ? kisak::iwi::InspectRgba8(bytes, layout, picmip)
             : kisak::iwi::Error::InvalidFileSize;
         if (inspectError == kisak::iwi::Error::None)
             encodedSource = std::move(bytes);
@@ -5279,6 +5660,9 @@ std::uint32_t RetainCanonicalWorldImage(
     WebRendererRetainedWorldImage retained;
     retained.canonicalIdentity = canonical;
     retained.canonicalName = canonical->name ? canonical->name : "<unnamed-image>";
+    Picmip picmip{};
+    Image_GetPicmip(canonical, &picmip);
+    retained.picmip = picmip.platform[0];
     WebDbImageLoadDef loadDef{};
     RecordEncodedImageInspection();
     const bool hasLoadDef = DB_WebGetImageLoadDef(canonical, loadDef);
@@ -5287,7 +5671,7 @@ std::uint32_t RetainCanonicalWorldImage(
     kisak::iwi::Rgba8Layout layout;
     kisak::iwi::Error inspectError = kisak::iwi::Error::None;
     WebRendererImageRecoverySource recoverySource =
-        WebRendererImageRecoverySource::DecodedRgba8;
+        WebRendererImageRecoverySource::DecodedPixels;
     std::vector<std::uint8_t> externalSource;
     bool attemptedInspection = false;
     if (retained.canonicalName == ",$white" ||
@@ -5312,7 +5696,7 @@ std::uint32_t RetainCanonicalWorldImage(
             std::span<const std::uint8_t>(
                 loadDef.data,
                 loadDef.byteLength),
-            layout);
+            layout, retained.picmip);
         if (inspectError == kisak::iwi::Error::None)
             recoverySource = WebRendererImageRecoverySource::LoadDef;
     }
@@ -5323,7 +5707,7 @@ std::uint32_t RetainCanonicalWorldImage(
         kisak::iwi::Rgba8Layout externalLayout;
         kisak::iwi::Error externalError = inspectError;
         if (InspectExternalCanonicalImage(
-                canonical, externalLayout, externalError, externalSource))
+                canonical, externalLayout, externalError, externalSource, retained.picmip))
         {
             attemptedInspection = true;
             inspectError = externalError;
@@ -5434,6 +5818,19 @@ void AttachRetainedWorldReflectionTextures() noexcept
             batch.reflectionTexture = FindRetainedWorldReflectionTexture(
                 batch.reflectionProbeIndex);
     }
+}
+
+std::uint64_t RetainedDrawSortKey(
+    const WebRendererWorldBatchDesc &source) noexcept
+{
+    if (!source.materialIdentity) return 0u;
+    GfxDrawSurf draw = source.materialIdentity->info.drawSurf;
+    draw.fields.objectId = 0u;
+    draw.fields.reflectionProbeIndex = source.reflectionProbeIndex;
+    draw.fields.primaryLightIndex = source.primaryLightIndex;
+    draw.fields.surfType = source.dynamicLightSurfType;
+    if (source.depthHack) --draw.fields.primarySortKey;
+    return draw.packed;
 }
 
 WebRendererSurfaceResult CopyWorldCommand(
@@ -5636,9 +6033,10 @@ WebRendererSurfaceResult CopyWorldCommand(
                 source.indexCount > surface.indexCount - source.firstIndex ||
                 source.firstSurfaceIndex > source.lastSurfaceIndex ||
                 source.technique >
-                    WebRendererWorldTechnique::NativeTechniqueUnavailable ||
+                    WebRendererWorldTechnique::Cinematic ||
                 source.lightingMode >
                     WebRendererWorldLightingMode::ModelLightGrid ||
+                source.dynamicLightSurfType >= 13u ||
                 (primaryLightReferenceCount == 0u
                     ? source.primaryLightIndex != 0u
                     : source.primaryLightIndex >=
@@ -5692,22 +6090,29 @@ WebRendererSurfaceResult CopyWorldCommand(
             batch.techniqueFlags = source.techniqueFlags;
             batch.cameraRegion = source.cameraRegion;
             batch.depthHack = source.depthHack;
+            batch.dynamicLightSurfType = source.dynamicLightSurfType;
+            batch.excludeTransientSpotLight = source.excludeTransientSpotLight;
+            for (float component : source.transientLightSphere)
+                if (!std::isfinite(component)) return WebRendererSurfaceResult::InvalidDescriptor;
+            if (source.transientLightSphere[3] < 0.0f && source.transientLightSphere[3] != -1.0f)
+                return WebRendererSurfaceResult::InvalidDescriptor;
+            std::copy_n(source.transientLightSphere, 4, batch.transientLightSphere);
+            if (source.transientLightBoundsEnabled)
+            {
+                for (unsigned axis = 0; axis < 3; ++axis)
+                    if (!std::isfinite(source.transientLightMins[axis]) ||
+                        !std::isfinite(source.transientLightMaxs[axis]) ||
+                        source.transientLightMins[axis] > source.transientLightMaxs[axis])
+                        return WebRendererSurfaceResult::InvalidDescriptor;
+                std::copy_n(source.transientLightMins, 3, batch.transientLightMins);
+                std::copy_n(source.transientLightMaxs, 3, batch.transientLightMaxs);
+            }
+            batch.transientLightBoundsEnabled = source.transientLightBoundsEnabled;
             batch.ambientProbeLighting = source.ambientProbeLighting;
             batch.castsSunShadow = source.castsSunShadow;
+            batch.castsSpotShadow = source.castsSpotShadow;
             batch.shadowStateBits0 = source.shadowStateBits0;
-            if (source.materialIdentity)
-            {
-                GfxDrawSurf drawSort =
-                    source.materialIdentity->info.drawSurf;
-                drawSort.fields.objectId = 0u;
-                drawSort.fields.reflectionProbeIndex =
-                    source.reflectionProbeIndex;
-                drawSort.fields.primaryLightIndex =
-                    source.primaryLightIndex;
-                if (source.depthHack)
-                    --drawSort.fields.primarySortKey;
-                batch.drawSortKey = drawSort.packed;
-            }
+            batch.drawSortKey = RetainedDrawSortKey(source);
             batch.vertexShaderName = source.vertexShaderName
                 ? source.vertexShaderName : "<unavailable-vertex-shader>";
             batch.vertexShaderProgramHash = source.vertexShaderProgramHash;
@@ -5863,7 +6268,7 @@ WebRendererSurfaceResult CopyWorldCommand(
             }
             else if (source.technique !=
                     WebRendererWorldTechnique::WaterLitSun &&
-                !baseSupported)
+                !baseSupported && source.technique != WebRendererWorldTechnique::Cinematic)
                 batch.technique = WebRendererWorldTechnique::BackendFallback;
             else if (WebRenderer_UsesSecondaryDirectionalLightmap(
                     batch.technique) &&
@@ -6091,6 +6496,7 @@ WebRendererSurfaceResult CopyStaticModelCommand(
                 source.lodIndex >= draw.modelIdentity->numLods ||
                 source.lodIndex >= MAX_LODS ||
                 !staticModelTechnique ||
+                draw.dynamicLightSurfType >= 13u ||
                 draw.lightingMode >
                     WebRendererWorldLightingMode::ModelLightGrid)
             {
@@ -6124,6 +6530,7 @@ WebRendererSurfaceResult CopyStaticModelCommand(
             batch.draw.normalSamplerState = draw.normalSamplerState;
             batch.draw.specularSamplerState = draw.specularSamplerState;
             batch.draw.lightmapIndex = 31u;
+            batch.draw.primaryLightIndex = draw.primaryLightIndex;
             batch.draw.sourceKind = draw.sourceKind;
             batch.draw.technique = draw.technique;
             batch.draw.lightingMode = draw.lightingMode;
@@ -6133,8 +6540,10 @@ WebRendererSurfaceResult CopyStaticModelCommand(
             batch.draw.customSamplerFlags = draw.customSamplerFlags;
             batch.draw.techniqueFlags = draw.techniqueFlags;
             batch.draw.cameraRegion = draw.cameraRegion;
+            batch.draw.dynamicLightSurfType = draw.dynamicLightSurfType;
             batch.draw.ambientProbeLighting = draw.ambientProbeLighting;
             batch.draw.castsSunShadow = draw.castsSunShadow;
+            batch.draw.castsSpotShadow = draw.castsSpotShadow;
             batch.draw.shadowStateBits0 = draw.shadowStateBits0;
             batch.draw.vertexShaderName = draw.vertexShaderName
                 ? draw.vertexShaderName : "<unavailable-vertex-shader>";
@@ -6144,6 +6553,7 @@ WebRendererSurfaceResult CopyStaticModelCommand(
                 ? draw.pixelShaderName : "<unavailable-pixel-shader>";
             batch.draw.pixelShaderProgramHash = draw.pixelShaderProgramHash;
             batch.draw.reflectionProbeIndex = draw.reflectionProbeIndex;
+            batch.draw.drawSortKey = RetainedDrawSortKey(draw);
             batch.draw.reflectionTexture =
                 FindRetainedWorldReflectionTexture(
                     draw.reflectionProbeIndex);
@@ -6165,7 +6575,7 @@ WebRendererSurfaceResult CopyStaticModelCommand(
             const bool baseSupported =
                 batch.draw.baseImageIndex != INVALID_WORLD_IMAGE &&
                 images[batch.draw.baseImageIndex].supported;
-            if (!baseSupported)
+            if (!baseSupported && draw.technique != WebRendererWorldTechnique::Cinematic)
                 batch.draw.technique =
                     WebRendererWorldTechnique::BackendFallback;
             batches.push_back(std::move(batch));
@@ -6356,11 +6766,14 @@ WebRendererSurfaceResult WebRenderer_SetSurface(
     g_renderer.retainedWorldBatches.clear();
     g_renderer.retainedWorldSurfaceRanges.clear();
     g_renderer.worldCameraRanges.clear();
+    for (auto &ranges : g_renderer.worldDynamicLightRanges) ranges.clear();
     g_renderer.worldShadowRanges.clear();
     g_renderer.worldCanonicalSurfaceCount = 0u;
     g_renderer.retainedWorldSpotShadowCasters.clear();
     g_renderer.retainedWorldSpotShadowStaticModels.clear();
     g_renderer.retainedWorldImages.clear();
+    g_renderer.retainedOutdoorImageIndex = INVALID_WORLD_IMAGE;
+    g_renderer.retainedOutdoorLookupMatrix.fill(0.0f);
     g_renderer.retainedPrimaryLights.clear();
     g_renderer.retainedSunPrimaryLightIndex = 0u;
     g_renderer.draw = retainedSurface.draw;
@@ -6410,12 +6823,35 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
     std::vector<WebRendererRetainedSpotShadowStaticModel>
         retainedSpotShadowStaticModels;
     std::uint32_t retainedSunPrimaryLightIndex = 0u;
+    std::uint32_t retainedOutdoorImageIndex = INVALID_WORLD_IMAGE;
+    std::array<float, 16> retainedOutdoorLookupMatrix{};
     const WebRendererSurfaceResult copy = CopyWorldCommand(
         surface, retainedVertices, retainedIndices, retainedBatches,
         retainedImages, retainedPrimaryLights,
         retainedSunPrimaryLightIndex, 0u, &retainedSpotShadowCasters,
         &retainedSpotShadowStaticModels);
     if (copy != WebRendererSurfaceResult::Success) return copy;
+    if (surface.outdoorImage)
+    {
+        for (const auto &row : surface.outdoorLookupMatrix)
+            for (const float component : row)
+                if (!std::isfinite(component))
+                    return WebRendererSurfaceResult::InvalidDescriptor;
+        try
+        {
+            std::size_t retainedPixelBytes =
+                RetainedImageStats(retainedImages).decodedBytes;
+            retainedOutdoorImageIndex = RetainCanonicalWorldImage(
+                surface.outdoorImage, retainedImages, retainedPixelBytes);
+            std::memcpy(retainedOutdoorLookupMatrix.data(),
+                surface.outdoorLookupMatrix,
+                sizeof(surface.outdoorLookupMatrix));
+        }
+        catch (const std::bad_alloc &)
+        {
+            return WebRendererSurfaceResult::AllocationFailed;
+        }
+    }
 
     GLuint replacementVertexArray = 0;
     GLuint replacementVertexBuffer = 0;
@@ -6458,6 +6894,7 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
     g_renderer.retainedWorldBatches = std::move(retainedBatches);
     g_renderer.retainedWorldSurfaceRanges = std::move(retainedSurfaceRanges);
     g_renderer.worldCameraRanges.clear();
+    for (auto &ranges : g_renderer.worldDynamicLightRanges) ranges.clear();
     g_renderer.worldShadowRanges.clear();
     g_renderer.worldCanonicalSurfaceCount = surface.canonicalSurfaceCount;
     g_renderer.retainedWorldSpotShadowCasters =
@@ -6465,6 +6902,8 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
     g_renderer.retainedWorldSpotShadowStaticModels =
         std::move(retainedSpotShadowStaticModels);
     g_renderer.retainedWorldImages = std::move(retainedImages);
+    g_renderer.retainedOutdoorImageIndex = retainedOutdoorImageIndex;
+    g_renderer.retainedOutdoorLookupMatrix = retainedOutdoorLookupMatrix;
     g_renderer.retainedPrimaryLights = std::move(retainedPrimaryLights);
     g_renderer.retainedSunPrimaryLightIndex =
         retainedSunPrimaryLightIndex;
@@ -6581,9 +7020,12 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
 // ownership; the next map publication re-submits them.
 void WebRenderer_UnloadWorldResources()
 {
+    WebCinematic_ReleaseImages();
     WebSaveImage_CancelPending();
     g_renderer.screenshotReady = false;
     g_renderer.dynamicLightCount = 0;
+    g_renderer.dynamicSpotLightIndex = UINT32_MAX;
+    g_renderer.dynamicSpotLightNearPlaneOffset = 0.0f;
     g_renderer.dynamicLightAttenuationIdentity = nullptr;
     g_renderer.dynamicLightAttenuationIndex = INVALID_WORLD_IMAGE;
     if (g_renderer.initialized && !g_renderer.contextLost)
@@ -6668,6 +7110,8 @@ void WebRenderer_UnloadWorldResources()
     decltype(g_renderer.retainedWorldSurfaceRanges){}.swap(
         g_renderer.retainedWorldSurfaceRanges);
     decltype(g_renderer.worldCameraRanges){}.swap(g_renderer.worldCameraRanges);
+    for (auto &ranges : g_renderer.worldDynamicLightRanges)
+        std::vector<WebRendererWorldCameraRange>{}.swap(ranges);
     decltype(g_renderer.worldShadowRanges){}.swap(g_renderer.worldShadowRanges);
     g_renderer.worldCanonicalSurfaceCount = 0u;
     decltype(g_renderer.retainedWorldSpotShadowCasters){}.swap(
@@ -6676,6 +7120,8 @@ void WebRenderer_UnloadWorldResources()
         g_renderer.retainedWorldSpotShadowStaticModels);
     decltype(g_renderer.retainedWorldImages){}.swap(
         g_renderer.retainedWorldImages);
+    g_renderer.retainedOutdoorImageIndex = INVALID_WORLD_IMAGE;
+    g_renderer.retainedOutdoorLookupMatrix.fill(0.0f);
     decltype(g_renderer.retainedPrimaryLights){}.swap(
         g_renderer.retainedPrimaryLights);
     decltype(g_renderer.retainedStaticModelVertices){}.swap(
@@ -6692,8 +7138,8 @@ void WebRenderer_UnloadWorldResources()
         g_renderer.retainedStaticModelShadowBounds);
     decltype(g_renderer.retainedStaticModelSelectedLods){}.swap(
         g_renderer.retainedStaticModelSelectedLods);
-    decltype(g_renderer.staticModelShadowVisibility){}.swap(
-        g_renderer.staticModelShadowVisibility);
+    decltype(g_renderer.staticModelPassVisibility){}.swap(
+        g_renderer.staticModelPassVisibility);
     decltype(g_renderer.retainedStaticModelBatches){}.swap(
         g_renderer.retainedStaticModelBatches);
     decltype(g_renderer.retainedStaticModelImages){}.swap(
@@ -6910,7 +7356,7 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
     g_renderer.retainedStaticModelShadowBounds =
         std::move(retainedShadowBounds);
     g_renderer.retainedStaticModelSelectedLods = std::move(selectedLods);
-    g_renderer.staticModelShadowVisibility = std::move(shadowVisibility);
+    g_renderer.staticModelPassVisibility = std::move(shadowVisibility);
     g_renderer.staticModelVisibility.clear();
     g_renderer.staticModelVisibilityComputed = false;
     g_renderer.staticModelVisibilityChanged = true;
@@ -6929,6 +7375,7 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
         }));
     const auto isFallbackBatch =
         [&](const WebRendererRetainedStaticModelBatch &batch) {
+            if (batch.draw.technique == WebRendererWorldTechnique::Cinematic) return false;
             return batch.draw.technique ==
                     WebRendererWorldTechnique::BackendFallback ||
                 batch.draw.baseImageIndex == INVALID_WORLD_IMAGE ||
@@ -7699,7 +8146,8 @@ bool BuildSunShadowMatrix(
 }
 
 bool BuildSpotShadowMatrix(
-    const WebRendererRetainedPrimaryLight &light,
+    const float origin[3], const float direction[3], float radius,
+    float cosHalfFovOuter, float nearPlane,
     std::array<float, 16> &matrix) noexcept
 {
     auto normalize = [](std::array<float, 3> value) {
@@ -7718,10 +8166,10 @@ bool BuildSpotShadowMatrix(
             a[0] * b[1] - a[1] * b[0]};
     };
     const std::array<float, 3> axis0 = normalize({
-        -light.direction[0], -light.direction[1], -light.direction[2]});
+        -direction[0], -direction[1], -direction[2]});
     if (axis0 == std::array<float, 3>{} ||
-        !(light.cosHalfFovOuter > 0.0f &&
-          light.cosHalfFovOuter < 1.0f) || light.radius <= 1.0f)
+        !(cosHalfFovOuter > 0.0f && cosHalfFovOuter < 1.0f) ||
+        !(nearPlane > 0.0f && nearPlane < radius))
         return false;
     std::size_t perpendicularComponent =
         axis0[0] * axis0[0] > axis0[1] * axis0[1] ? 1u : 0u;
@@ -7736,8 +8184,8 @@ bool BuildSpotShadowMatrix(
     axis2 = normalize(axis2);
     const std::array<float, 3> axis1 = cross(axis2, axis0);
     const float tangent = std::sqrt(std::max(
-        0.0f, 1.0f - light.cosHalfFovOuter * light.cosHalfFovOuter)) /
-        light.cosHalfFovOuter;
+        0.0f, 1.0f - cosHalfFovOuter * cosHalfFovOuter)) /
+        cosHalfFovOuter;
     if (!(tangent > 0.0f) || !std::isfinite(tangent)) return false;
 
     // Preserve the canonical MatrixForViewer axis convention. The row-major
@@ -7747,25 +8195,24 @@ bool BuildSpotShadowMatrix(
     view[0] = -axis1[0]; view[4] = -axis1[1]; view[8] = -axis1[2];
     view[1] = axis2[0]; view[5] = axis2[1]; view[9] = axis2[2];
     view[2] = axis0[0]; view[6] = axis0[1]; view[10] = axis0[2];
-    view[12] = -(light.origin[0] * view[0] +
-        light.origin[1] * view[4] + light.origin[2] * view[8]);
-    view[13] = -(light.origin[0] * view[1] +
-        light.origin[1] * view[5] + light.origin[2] * view[9]);
-    view[14] = -(light.origin[0] * view[2] +
-        light.origin[1] * view[6] + light.origin[2] * view[10]);
+    view[12] = -(origin[0] * view[0] +
+        origin[1] * view[4] + origin[2] * view[8]);
+    view[13] = -(origin[0] * view[1] +
+        origin[1] * view[5] + origin[2] * view[9]);
+    view[14] = -(origin[0] * view[2] +
+        origin[1] * view[6] + origin[2] * view[10]);
     view[15] = 1.0f;
 
-    constexpr float nearPlane = 1.0f;
     std::array<float, 16> projection{};
     projection[0] = 1.0f / tangent;
     projection[5] = 1.0f / tangent;
     // Native uses D3D's [0,1] finite perspective. Convert only its depth
     // coefficients to WebGL's [-1,1] clip range at this backend boundary.
-    projection[10] = (light.radius + nearPlane) /
-        (light.radius - nearPlane);
+    projection[10] = (radius + nearPlane) /
+        (radius - nearPlane);
     projection[11] = 1.0f;
-    projection[14] = (-2.0f * light.radius * nearPlane) /
-        (light.radius - nearPlane);
+    projection[14] = (-2.0f * radius * nearPlane) /
+        (radius - nearPlane);
 
     matrix.fill(0.0f);
     for (std::size_t column = 0u; column < 4u; ++column)
@@ -7782,7 +8229,12 @@ void SelectSpotShadowLights(
     WebRendererDynamicShadowVisibility dynamicShadowVisibility,
     std::uint32_t localClientNum) noexcept
 {
-    struct Candidate { std::uint32_t lightIndex; float score; };
+    struct Candidate
+    {
+        std::uint32_t lightIndex;
+        float score;
+        bool dynamic;
+    };
     std::array<bool, WEB_RENDERER_MAX_PRIMARY_LIGHTS> used{};
     for (const WebRendererRetainedWorldBatch &batch :
          g_renderer.retainedWorldBatches)
@@ -7829,7 +8281,25 @@ void SelectSpotShadowLights(
         const float intensity = light.color[0] * 0.2989f +
             light.color[1] * 0.587f + light.color[2] * 0.114f;
         candidates.push_back({index,
-            light.radius * intensity / (distance + 1.0f)});
+            light.radius * intensity / (distance + 1.0f), false});
+    }
+    if (g_renderer.dynamicSpotLightIndex < g_renderer.dynamicLightCount &&
+        (!sm_spotEnable || sm_spotEnable->current.enabled))
+    {
+        const GfxLight &light =
+            g_renderer.dynamicLights[g_renderer.dynamicSpotLightIndex];
+        float focusDelta[3]{};
+        for (std::size_t component = 0u; component < 3u; ++component)
+            focusDelta[component] = light.origin[component] -
+                eyeReference[component] - light.radius *
+                spotProjectFraction * light.dir[component];
+        const float distance = std::sqrt(focusDelta[0] * focusDelta[0] +
+            focusDelta[1] * focusDelta[1] +
+            focusDelta[2] * focusDelta[2]);
+        const float intensity = light.color[0] * 0.2989f +
+            light.color[1] * 0.587f + light.color[2] * 0.114f;
+        candidates.push_back({g_renderer.dynamicSpotLightIndex,
+            light.radius * intensity / (distance + 1.0f), true});
     }
     std::stable_sort(candidates.begin(), candidates.end(),
         [](const Candidate &left, const Candidate &right) {
@@ -7841,15 +8311,41 @@ void SelectSpotShadowLights(
             static_cast<int>(MAX_SPOT_SHADOWS)))
         : static_cast<std::uint32_t>(MAX_SPOT_SHADOWS);
     g_renderer.sceneSpotShadowCount = 0u;
+    g_renderer.sceneSpotShadowDynamic.fill(false);
     for (const Candidate &candidate : candidates)
     {
         if (g_renderer.sceneSpotShadowCount >= configuredLimit) break;
         const std::size_t slot = g_renderer.sceneSpotShadowCount;
-        if (!BuildSpotShadowMatrix(
-                g_renderer.retainedPrimaryLights[candidate.lightIndex],
+        const float *origin;
+        const float *direction;
+        float radius;
+        float cosHalfFovOuter;
+        float nearPlane = 1.0f;
+        if (candidate.dynamic)
+        {
+            const GfxLight &light =
+                g_renderer.dynamicLights[candidate.lightIndex];
+            origin = light.origin;
+            direction = light.dir;
+            radius = light.radius;
+            cosHalfFovOuter = light.cosHalfFovOuter;
+            nearPlane += g_renderer.dynamicSpotLightNearPlaneOffset;
+        }
+        else
+        {
+            const WebRendererRetainedPrimaryLight &light =
+                g_renderer.retainedPrimaryLights[candidate.lightIndex];
+            origin = light.origin;
+            direction = light.direction;
+            radius = light.radius;
+            cosHalfFovOuter = light.cosHalfFovOuter;
+        }
+        if (!BuildSpotShadowMatrix(origin, direction, radius,
+                cosHalfFovOuter, nearPlane,
                 g_renderer.sceneSpotShadowMatrices[slot]))
             continue;
         g_renderer.sceneSpotShadowLightIndices[slot] = candidate.lightIndex;
+        g_renderer.sceneSpotShadowDynamic[slot] = candidate.dynamic;
         ++g_renderer.sceneSpotShadowCount;
     }
     for (WebRendererDynamicDraw &draw : g_renderer.dynamicDraws)
@@ -7863,7 +8359,8 @@ void SelectSpotShadowLights(
         draw.spotShadowVisibilityMask = 0u;
         for (std::uint32_t slot = 0u;
              slot < g_renderer.sceneSpotShadowCount; ++slot)
-            if (dynamicShadowVisibility(draw.shadowEntityKind,
+            if (g_renderer.sceneSpotShadowDynamic[slot] ||
+                dynamicShadowVisibility(draw.shadowEntityKind,
                     draw.shadowEntityId, localClientNum,
                     g_renderer.sceneSpotShadowLightIndices[slot]))
                 draw.spotShadowVisibilityMask |=
@@ -7874,10 +8371,14 @@ void SelectSpotShadowLights(
     {
         reportedCount = g_renderer.sceneSpotShadowCount;
         Web_Log(WebLogLevel::Info,
-            "[kisakcod-web] Selected %u/%zu eligible primary spot shadow "
-            "maps (configured limit %u, indices=%u/%u/%u/%u).\n",
+            "[kisakcod-web] Selected %u/%zu eligible spot shadow maps "
+            "(configured limit %u, transient=%u, indices=%u/%u/%u/%u).\n",
             g_renderer.sceneSpotShadowCount, candidates.size(),
             configuredLimit,
+            static_cast<unsigned>(std::count(
+                g_renderer.sceneSpotShadowDynamic.begin(),
+                g_renderer.sceneSpotShadowDynamic.begin() +
+                    g_renderer.sceneSpotShadowCount, true)),
             g_renderer.sceneSpotShadowCount > 0u
                 ? g_renderer.sceneSpotShadowLightIndices[0] : 0u,
             g_renderer.sceneSpotShadowCount > 1u
@@ -7894,6 +8395,7 @@ bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
 {
     // No previous view may supply world camera runs after a failed submission.
     g_renderer.worldCameraRanges.clear();
+    for (auto &ranges : g_renderer.worldDynamicLightRanges) ranges.clear();
     if (!view.worldName || !*view.worldName || view.width == 0u ||
         view.height == 0u || view.tanHalfFovX <= 0.0f ||
         view.tanHalfFovY <= 0.0f || view.localClientNum != 0)
@@ -8030,6 +8532,18 @@ bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
             if (!std::isfinite(light.origin[axis]) || !std::isfinite(light.color[axis]) ||
                 !std::isfinite(light.dir[axis])) return false;
     }
+    if (view.dynamicSpotLightIndex != UINT32_MAX)
+    {
+        if (view.dynamicSpotLightIndex >= view.dynamicLightCount ||
+            !std::isfinite(view.dynamicSpotLightNearPlaneOffset) ||
+            view.dynamicSpotLightNearPlaneOffset < 0.0f)
+            return false;
+        const GfxLight &spot =
+            *view.dynamicLights[view.dynamicSpotLightIndex];
+        if (spot.type != 2u || !spot.canUseShadowMap ||
+            !(1.0f + view.dynamicSpotLightNearPlaneOffset < spot.radius))
+            return false;
+    }
     if (view.dynamicLightCount && g_renderer.dynamicLightAttenuationIdentity != view.dynamicLightAttenuation)
     {
         std::size_t bytes = RetainedImageStats(g_renderer.retainedWorldImages).decodedBytes;
@@ -8043,6 +8557,9 @@ bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
     for (std::uint32_t index = 0; index < view.dynamicLightCount; ++index)
         g_renderer.dynamicLights[index] = *view.dynamicLights[index];
     g_renderer.dynamicLightCount = view.dynamicLightCount;
+    g_renderer.dynamicSpotLightIndex = view.dynamicSpotLightIndex;
+    g_renderer.dynamicSpotLightNearPlaneOffset =
+        view.dynamicSpotLightNearPlaneOffset;
 
     if (view.staticModelVisibilityComputed && view.staticModelVisibilityCount &&
         !view.staticModelVisibility) return false;
@@ -8072,6 +8589,16 @@ bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
             view.worldSurfaceVisibility, view.worldSurfaceVisibilityCount,
             view.worldSurfaceVisibilityComputed, g_renderer.worldCameraRanges)))
         return false;
+    for (unsigned i = 0; i < g_renderer.worldDynamicLightRanges.size(); ++i)
+    {
+        auto &ranges = g_renderer.worldDynamicLightRanges[i];
+        ranges.clear();
+        if (i < view.dynamicLightCount && view.geometrySubmitted && g_renderer.worldSurfaceActive &&
+            !WebRenderer_BuildWorldCameraRanges(g_renderer.retainedWorldSurfaceRanges,
+                view.worldSurfaceVisibility, view.worldSurfaceVisibilityCount,
+                view.worldSurfaceVisibilityComputed, ranges, view.dynamicLights[i],
+                view.dynamicSpotLightNearPlaneOffset)) return false;
+    }
     const bool worldChanged = g_renderer.sceneViewWorldName != view.worldName;
     ++g_renderer.sceneViewSubmissionGeneration;
     g_renderer.sceneViewActive = true;
@@ -8251,10 +8778,102 @@ std::int32_t WorldAlphaTestMode(std::uint32_t state0) noexcept
     }
 }
 
+unsigned CameraTechniqueType(const WebRendererRetainedWorldBatch &batch)
+{
+    return batch.sourceKind == WebRendererSceneBatchKind::FxCodeMesh ||
+            batch.sourceKind == WebRendererSceneBatchKind::FxParticleCloud
+        ? 5u : batch.techniqueType;
+}
+
+bool OutdoorParticleCloudForBatch(
+    const WebRendererRetainedWorldBatch &batch)
+{
+    return batch.sourceKind == WebRendererSceneBatchKind::FxParticleCloud &&
+        batch.technique != WebRendererWorldTechnique::BackendFallback &&
+        !WebRenderer_SkipsNativeDraw(batch.technique) &&
+        WebRenderer_IsOutdoorParticleCloud(
+            batch.materialIdentity, CameraTechniqueType(batch));
+}
+
+bool OutdoorLookupReady() noexcept
+{
+    const std::uint32_t index = g_renderer.retainedOutdoorImageIndex;
+    return index != INVALID_WORLD_IMAGE &&
+        index < g_renderer.retainedWorldImages.size() &&
+        g_renderer.retainedWorldImages[index].supported &&
+        g_renderer.retainedWorldImages[index].texture != 0u;
+}
+
+bool SkipUnavailableOutdoorCloud(
+    const WebRendererRetainedWorldBatch &batch)
+{
+    return OutdoorParticleCloudForBatch(batch) && !OutdoorLookupReady();
+}
+
+bool SoftParticleForBatch(const WebRendererRetainedWorldBatch &batch,
+    WebRendererSoftParticle &out)
+{
+    return batch.technique != WebRendererWorldTechnique::BackendFallback &&
+        !WebRenderer_SkipsNativeDraw(batch.technique) &&
+        WebRenderer_GetSoftParticle(batch.materialIdentity,
+            CameraTechniqueType(batch), out);
+}
+
+bool DistortionForBatch(const WebRendererRetainedWorldBatch &batch, float scale[4])
+{
+    return batch.technique != WebRendererWorldTechnique::BackendFallback &&
+        !WebRenderer_SkipsNativeDraw(batch.technique) &&
+        WebRenderer_GetDistortion(batch.materialIdentity, CameraTechniqueType(batch), scale);
+}
+
+bool SkipDistortionBatch(const WebRendererRetainedWorldBatch &batch)
+{
+    return WebRenderer_SkipsDistortion(batch.materialIdentity, CameraTechniqueType(batch),
+        r_distortion && r_distortion->current.enabled);
+}
+
+bool SceneNeedsDistortion()
+{
+    if (!r_distortion || !r_distortion->current.enabled) return false;
+    float scale[4]{};
+    for (const auto &batch : g_renderer.retainedWorldBatches)
+        if (DistortionForBatch(batch, scale)) return true;
+    for (const auto &batch : g_renderer.retainedStaticModelBatches)
+        if (DistortionForBatch(batch.draw, scale)) return true;
+    for (const auto &batch : g_renderer.retainedDynamicModelBatches)
+        if (DistortionForBatch(batch, scale)) return true;
+    return false;
+}
+
+bool HasFloatZTechnique(const WebRendererRetainedWorldBatch &batch)
+{
+    if (WebRenderer_IsSunBillboardBatch(batch.sourceKind)) return false;
+    std::uint32_t state[2]{}; bool alpha = false;
+    return WebRenderer_GetFloatZ(batch.materialIdentity, state, alpha);
+}
+
+bool SceneNeedsFloatZ(bool distortion)
+{
+    if (r_floatz && !r_floatz->current.enabled) return false;
+    if (distortion) return true;
+    if (!r_zFeather || !r_zFeather->current.enabled) return false;
+    WebRendererSoftParticle soft{};
+    for (const auto &batch : g_renderer.retainedWorldBatches)
+        if (SoftParticleForBatch(batch, soft)) return true;
+    for (const auto &batch : g_renderer.retainedStaticModelBatches)
+        if (SoftParticleForBatch(batch.draw, soft)) return true;
+    for (const auto &batch : g_renderer.retainedDynamicModelBatches)
+        if (SoftParticleForBatch(batch, soft)) return true;
+    return false;
+}
+
 void ApplyWorldMaterialState(const WebRendererRetainedWorldBatch &batch)
 {
-    const std::uint32_t state0 = batch.stateBits[0];
-    const std::uint32_t state1 = batch.stateBits[1];
+    std::uint32_t floatState[2]{}; bool floatAlpha = false;
+    const bool floatZ = g_renderer.floatZPass &&
+        WebRenderer_GetFloatZ(batch.materialIdentity, floatState, floatAlpha);
+    const std::uint32_t state0 = floatZ ? floatState[0] : batch.stateBits[0];
+    const std::uint32_t state1 = floatZ ? floatState[1] : batch.stateBits[1];
     const bool hasCanonicalState = batch.materialIdentity != nullptr &&
         (state0 != 0u || state1 != 0u);
     // R_SetAlphaAntiAliasingState enables the selected transparency-AA mode
@@ -8326,7 +8945,9 @@ void ApplyWorldMaterialState(const WebRendererRetainedWorldBatch &batch)
             batch.falloffEndColor);
     }
     glUniform1i(g_renderer.materialModeUniform,
-        batch.sourceKind == WebRendererSceneBatchKind::SunFlare
+        batch.technique == WebRendererWorldTechnique::Cinematic
+            ? (WebCinematic_FullRange() ? 13 : 12)
+            : batch.sourceKind == WebRendererSceneBatchKind::SunFlare
             ? 5
             : batch.ambientProbeLighting
             ? 6
@@ -8361,6 +8982,39 @@ void ApplyWorldMaterialState(const WebRendererRetainedWorldBatch &batch)
         ? GL_TRUE : GL_FALSE);
 
     glUniform1i(g_renderer.alphaTestUniform, WorldAlphaTestMode(state0));
+    if (floatZ)
+    {
+        glDisable(GL_BLEND);
+        glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glUniform1i(g_renderer.materialModeUniform, floatAlpha ? 16 : 15);
+        glUniform1f(g_renderer.depthSignUniform, batch.depthHack ? -1.0f : 1.0f);
+    }
+    else
+    {
+        if (OutdoorLookupReady() && OutdoorParticleCloudForBatch(batch))
+            glUniform1i(g_renderer.materialModeUniform, 18);
+        float distortion[4]{};
+        if (g_renderer.postSunReady && DistortionForBatch(batch, distortion))
+        {
+            glUniform1i(g_renderer.materialModeUniform, 17);
+            glUniform2fv(g_renderer.distortionScaleUniform, 1, distortion);
+        }
+        WebRendererSoftParticle soft{};
+        if (SoftParticleForBatch(batch, soft))
+        {
+            glUniform1i(g_renderer.materialModeUniform, 14);
+            glUniform1i(g_renderer.softFlagsUniform, soft.flags);
+            glUniform3f(g_renderer.softFeatherUniform, soft.feather[0], soft.feather[1],
+                g_renderer.softParticleDepthReady && r_zFeather && r_zFeather->current.enabled ? 1.0f : 0.0f);
+            glUniform1f(g_renderer.softEyeUniform, soft.eyeOffset);
+            glUniform4fv(g_renderer.falloffParmsUniform, 1, soft.falloff);
+            glUniform4fv(g_renderer.falloffBeginColorUniform, 1, soft.beginColor);
+            glUniform4fv(g_renderer.falloffEndColorUniform, 1, soft.endColor);
+            glUniform3fv(g_renderer.softFogUniform, 1,
+                soft.sceneFog ? g_renderer.sceneFogColor.data() : soft.fogColor);
+        }
+    }
 }
 
 void ApplyUiMaterialState(const WebRendererRetainedUiBatch &batch)
@@ -8368,7 +9022,9 @@ void ApplyUiMaterialState(const WebRendererRetainedUiBatch &batch)
     glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
     glUniform1f(g_renderer.detailMapEnabledUniform, 0.0f);
     glUniform1f(g_renderer.colorIntensityAlphaUniform, 0.0f);
-    glUniform1i(g_renderer.materialModeUniform, 0);
+    glUniform1i(g_renderer.materialModeUniform,
+        WebRenderer_IsCinematicMaterial(batch.materialIdentity, 4)
+            ? (WebCinematic_FullRange() ? 13 : 12) : 0);
     glDisable(GL_DEPTH_TEST);
     glDepthMask(GL_FALSE);
     glDisable(GL_CULL_FACE);
@@ -8429,40 +9085,146 @@ void BindWorldTexture(
     GLuint texture,
     std::uint8_t samplerState,
     bool mipmapsAvailable = true,
-    bool bindingUnchanged = false)
+    bool bindingUnchanged = false,
+    GLenum target = GL_TEXTURE_2D)
 {
+    if (!texture)
+    {
+        glActiveTexture(unit);
+        glBindTexture(target, 0);
+        return;
+    }
     const bool updateParameters =
         g_renderer.textureParameters.NeedsUpdate(texture, samplerState, mipmapsAvailable);
     if (bindingUnchanged && !updateParameters) return;
     glActiveTexture(unit);
-    if (!bindingUnchanged) glBindTexture(GL_TEXTURE_2D, texture);
+    if (!bindingUnchanged) glBindTexture(target, texture);
     if (!updateParameters) return;
-    const std::uint8_t filter = samplerState & 7u;
-    const bool linear = filter == 2u || filter == 3u || filter == 4u;
-    const std::uint8_t mipMode = mipmapsAvailable
-        ? samplerState & 0x18u : 0u;
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
+    const auto decoded = R_DecodeSamplerFilter(
+        mipmapsAvailable ? samplerState : samplerState & ~0x18u,
+        r_texFilterMipMode ? r_texFilterMipMode->current.integer : 0,
+        r_texFilterAnisoMin ? r_texFilterAnisoMin->current.integer : 1,
+        std::min(r_texFilterAnisoMax ? r_texFilterAnisoMax->current.integer : 4,
+            g_renderer.textureAnisotropySupported ?
+                static_cast<int>(g_renderer.maxTextureAnisotropy) : 1),
+        r_texFilterDisable && r_texFilterDisable->current.enabled);
+    const bool linear = ((decoded >> 8u) & 0xfu) != 1u;
+    const auto mipMode = decoded >> 16u;
+    glTexParameteri(target, GL_TEXTURE_MAG_FILTER,
         linear ? GL_LINEAR : GL_NEAREST);
     GLint minFilter = linear ? GL_LINEAR : GL_NEAREST;
-    if (mipMode == 0x08u)
+    if (mipMode == 1u)
         minFilter = linear ? GL_LINEAR_MIPMAP_NEAREST
                            : GL_NEAREST_MIPMAP_NEAREST;
-    else if (mipMode == 0x10u)
+    else if (mipMode == 2u)
         minFilter = linear ? GL_LINEAR_MIPMAP_LINEAR
                            : GL_NEAREST_MIPMAP_LINEAR;
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, minFilter);
+    glTexParameteri(target, GL_TEXTURE_MIN_FILTER, minFilter);
     if (g_renderer.textureAnisotropySupported)
     {
-        const float requested = filter == 4u ? 4.0f :
-            (filter == 3u ? 2.0f : 1.0f);
-        glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT,
-            std::min(requested, g_renderer.maxTextureAnisotropy));
+        glTexParameterf(target, GL_TEXTURE_MAX_ANISOTROPY_EXT,
+            static_cast<float>(decoded & 0xffu));
     }
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,
+    glTexParameteri(target, GL_TEXTURE_WRAP_S,
         (samplerState & 0x20u) != 0u ? GL_CLAMP_TO_EDGE : GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,
+    glTexParameteri(target, GL_TEXTURE_WRAP_T,
         (samplerState & 0x40u) != 0u ? GL_CLAMP_TO_EDGE : GL_REPEAT);
+    if (target != GL_TEXTURE_2D)
+        glTexParameteri(target, GL_TEXTURE_WRAP_R,
+            (samplerState & 0x80u) != 0u ? GL_CLAMP_TO_EDGE : GL_REPEAT);
 }
+
+#if KISAK_WEB_DIAGNOSTICS
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestPicmipTexture(
+    int semantic, int noPicmip, int field, int recovery)
+{
+    // Synthetic authored mip colors through the same DB retention and GL
+    // upload boundary as world, model and UI textures. No engine world state.
+    R_RegisterDvars();
+    Dvar_SetInt(r_rendererInUse, 1);
+    R_SetPicmipForMemory(800, 1024);
+    std::vector<std::uint8_t> payload;
+    for (int mip = 0; mip < 6; ++mip)
+    {
+        const int edge = 32 >> mip;
+        for (int texel = 0; texel < edge * edge; ++texel)
+            payload.insert(payload.end(), {static_cast<std::uint8_t>(mip * 40),
+                0, static_cast<std::uint8_t>(255 - mip * 40), 255});
+    }
+    std::vector<std::uint32_t> storage((GFX_IMAGE_LOAD_DEF_DATA_OFFSET + payload.size() + 3) / 4);
+    auto *loadDef = reinterpret_cast<GfxImageLoadDef *>(storage.data());
+    loadDef->levelCount = 6;
+    loadDef->dimensions[0] = loadDef->dimensions[1] = 32;
+    loadDef->dimensions[2] = 1;
+    loadDef->format = kisak::iwi::LOADDEF_FORMAT_A8R8G8B8;
+    loadDef->resourceSize = static_cast<int>(payload.size());
+    std::copy(payload.begin(), payload.end(), loadDef->data);
+    GfxImage canonical{};
+    canonical.name = "__diagnostic_picmip";
+    canonical.mapType = MAPTYPE_2D;
+    canonical.semantic = static_cast<std::uint8_t>(semantic);
+    canonical.noPicmip = noPicmip != 0;
+    canonical.texture.loadDef = loadDef;
+    Load_Texture(&canonical.texture, &canonical);
+    std::vector<WebRendererRetainedWorldImage> images;
+    std::size_t bytes = 0;
+    RetainCanonicalWorldImage(&canonical, images, bytes, true);
+    DB_WebReleaseUnusedImageLoadDefs();
+    if (!CreateWorldTextureObjects(images) || images.empty() || !images[0].supported) return -1;
+    if (recovery)
+    {
+        DeleteWorldTextureObjects(images);
+        if (!CreateWorldTextureObjects(images, WebRendererImageDecodeReason::ContextRecovery)) return -1;
+    }
+    const auto &image = images[0];
+    int result = field == 0 ? image.width : field == 1 ? image.decodedByteLength :
+        field == 2 ? image.uploadByteLength : image.encodedSource.size();
+    if (field == 3)
+    {
+        GLint previous = 0;
+        glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &previous);
+        GLuint framebuffer = 0;
+        glGenFramebuffers(1, &framebuffer);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
+        glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, image.texture, 0);
+        std::uint8_t pixel[4]{};
+        glReadPixels(image.width - 1, image.height - 1, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+        result = pixel[0] | (pixel[1] << 8) | (pixel[2] << 16);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, previous);
+        glDeleteFramebuffers(1, &framebuffer);
+    }
+    DeleteWorldTextureObjects(images);
+    g_renderer.textureParameters.Reset();
+    return glGetError() == GL_NO_ERROR ? result : -1;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestSamplerState(
+    int sampler, int mipmaps, int field)
+{
+    if (!r_texFilterMipMode) R_RegisterDvars();
+    const GLenum target = (field >> 8) == 1 ? GL_TEXTURE_CUBE_MAP :
+        (field >> 8) == 2 ? GL_TEXTURE_3D : GL_TEXTURE_2D;
+    field &= 255;
+    GLuint texture = 0;
+    glGenTextures(1, &texture);
+    g_renderer.textureParameters.Reset();
+    BindWorldTexture(GL_TEXTURE0, texture, static_cast<std::uint8_t>(sampler), mipmaps != 0, false, target);
+    GLint value = 0;
+    if (field < 2)
+        glGetTexParameteriv(target,
+            field ? GL_TEXTURE_MAG_FILTER : GL_TEXTURE_MIN_FILTER, &value);
+    else if (field == 4)
+        glGetTexParameteriv(target, GL_TEXTURE_WRAP_R, &value);
+    else if (field == 3)
+        value = g_renderer.textureAnisotropySupported ? static_cast<int>(g_renderer.maxTextureAnisotropy) : 1;
+    else if (g_renderer.textureAnisotropySupported)
+        glGetTexParameteriv(target, GL_TEXTURE_MAX_ANISOTROPY_EXT, &value);
+    else value = 1;
+    glDeleteTextures(1, &texture);
+    g_renderer.textureParameters.Reset();
+    return glGetError() == GL_NO_ERROR ? value : -1;
+}
+#endif
 
 bool EnsureSavedScreen(int width, int height)
 {
@@ -8535,10 +9297,9 @@ bool BindWaterTextures(WebRendererRetainedWorldBatch &batch, float floatTime)
         glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
         batch.waterTextureTime = floatTime;
     }
-    glActiveTexture(GL_TEXTURE7);
-    glBindTexture(GL_TEXTURE_2D, batch.waterTexture);
-    glActiveTexture(GL_TEXTURE8);
-    glBindTexture(GL_TEXTURE_CUBE_MAP, batch.reflectionTexture);
+    BindWorldTexture(GL_TEXTURE7, batch.waterTexture, batch.waterSamplerState);
+    // Native R_SetReflectionProbe uses linear/trilinear/clamp-UV (0x72).
+    BindWorldTexture(GL_TEXTURE8, batch.reflectionTexture, 0x72, true, false, GL_TEXTURE_CUBE_MAP);
     glActiveTexture(GL_TEXTURE0);
     return glGetError() == GL_NO_ERROR;
 }
@@ -8546,8 +9307,8 @@ bool BindWaterTextures(WebRendererRetainedWorldBatch &batch, float floatTime)
 void BindModelLightingTexture(
     const WebRendererRetainedModelLightingAtlas &atlas)
 {
-    glActiveTexture(GL_TEXTURE3);
-    glBindTexture(GL_TEXTURE_3D, atlas.texture);
+    // RB_InitCodeImages: linear, no mipmaps, clamp all three volume axes.
+    BindWorldTexture(GL_TEXTURE3, atlas.texture, 0xe2, false, false, GL_TEXTURE_3D);
     glUniform3f(g_renderer.modelLightingLookupScaleUniform,
         atlas.width ? 1.5f / static_cast<float>(atlas.width) : 0.0f,
         atlas.height ? 1.5f / static_cast<float>(atlas.height) : 0.0f,
@@ -8563,6 +9324,26 @@ const WebRendererRetainedWorldImage *RetainedImage(
         return nullptr;
     const WebRendererRetainedWorldImage &image = images[index];
     return image.supported && image.texture != 0u ? &image : nullptr;
+}
+
+const WebRendererRetainedWorldImage *CinematicImage(unsigned plane)
+{
+    const GfxImage *identity = WebCinematic_PlaneImage(plane);
+    if (!identity) return nullptr;
+    for (const auto &image : g_renderer.retainedUiImages)
+        if (image.canonicalIdentity == identity && image.supported && image.texture) return &image;
+    return nullptr;
+}
+
+void ResolveCinematicImages(WebRendererWorldTechnique technique,
+    const WebRendererRetainedWorldImage *&base, const WebRendererRetainedWorldImage *&normal,
+    const WebRendererRetainedWorldImage *&detail, const WebRendererRetainedWorldImage *&specular)
+{
+    if (technique != WebRendererWorldTechnique::Cinematic) return;
+    base = CinematicImage(0);
+    normal = CinematicImage(1);
+    detail = CinematicImage(2);
+    specular = CinematicImage(3);
 }
 
 const WebRendererRetainedWorldImage *WorldImage(
@@ -8601,18 +9382,56 @@ void BindDynamicDrawGeometry(const WebRendererDynamicDraw &draw,
     glUniform1f(instanceEnabledUniform, 1.0f);
 }
 
+bool DynamicLightReceiverEligible(
+    const WebRendererRetainedWorldBatch &batch,
+    const GfxLight &light, const float receiverPlanes[6][4],
+    const WebRendererBrushModelInstanceDesc *brush = nullptr) noexcept
+{
+    if (brush && !WebRenderer_BrushReceivesLight(
+            *brush, light, receiverPlanes))
+        return false;
+    if (batch.transientLightBoundsEnabled && !(light.type == 2
+            ? kisak::dynamic_lights::BoxInPlanes(receiverPlanes,
+                batch.transientLightMins, batch.transientLightMaxs)
+            : kisak::dynamic_lights::BoxInSphere(light.origin,
+                light.radius * light.radius, batch.transientLightMins,
+                batch.transientLightMaxs)))
+        return false;
+    if (light.type == 2 && batch.excludeTransientSpotLight) return false;
+    const float *sphere = batch.transientLightSphere;
+    return sphere[3] < 0.0f || (light.type == 2
+        ? kisak::dynamic_lights::SphereInPlanes(
+            receiverPlanes, sphere, sphere[3])
+        : kisak::dynamic_lights::SpheresIntersect(
+            sphere, sphere[3], light.origin, light.radius));
+}
+
 bool DrawShadowPartition(
     GLuint framebuffer,
     const std::array<float, 16> &matrix,
     GLsizei shadowSize,
     bool requireSunCaster,
     std::uint32_t spotPrimaryLightIndex = UINT32_MAX,
-    std::uint32_t spotShadowSlot = UINT32_MAX)
+    std::uint32_t spotShadowSlot = UINT32_MAX,
+    bool transientSpot = false)
 {
     if (g_renderer.shadowProgram == 0u ||
         framebuffer == 0u ||
         !g_renderer.worldSurfaceActive)
         return false;
+
+    const GfxLight *transientLight = nullptr;
+    float transientReceiverPlanes[6][4]{};
+    if (transientSpot)
+    {
+        if (spotPrimaryLightIndex >= g_renderer.dynamicLightCount)
+            return false;
+        transientLight = &g_renderer.dynamicLights[spotPrimaryLightIndex];
+        if (!kisak::dynamic_lights::ReceiverPlanes(*transientLight,
+                g_renderer.dynamicSpotLightNearPlaneOffset,
+                transientReceiverPlanes))
+            return false;
+    }
 
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
     glViewport(0, 0, shadowSize, shadowSize);
@@ -8620,6 +9439,7 @@ bool DrawShadowPartition(
     glUniformMatrix4fv(g_renderer.shadowDepthMatrixUniform, 1, GL_FALSE,
         matrix.data());
     glUniform1i(g_renderer.shadowDepthTextureUniform, 0);
+    glUniform1f(g_renderer.shadowMipBiasUniform, r_texFilterMipBias ? r_texFilterMipBias->current.value : 0.0f);
     glUniform1f(g_renderer.shadowDepthInstanceEnabledUniform, 0.0f);
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
@@ -8692,17 +9512,32 @@ bool DrawShadowPartition(
     double shadowFamilyStarted = shadowProfile
         ? WebFrameProfile_Now() : 0.0;
 #endif
-    if (requireSunCaster)
+    if (requireSunCaster || transientSpot)
     {
-        if (!WebRenderer_BuildWorldShadowRanges(
+        const bool built = transientSpot
+            ? WebRenderer_BuildWorldTransientSpotShadowRanges(
+                g_renderer.retainedWorldSurfaceRanges, *transientLight,
+                g_renderer.dynamicSpotLightNearPlaneOffset,
+                g_renderer.worldShadowRanges)
+            : WebRenderer_BuildWorldShadowRanges(
                 g_renderer.retainedWorldSurfaceRanges, matrix,
-                g_renderer.worldShadowRanges))
+                g_renderer.worldShadowRanges);
+        if (!built)
             return false;
         const auto merged = WebRenderer_ForEachWorldSunShadowRange(
             g_renderer.worldShadowRanges, g_renderer.retainedWorldBatches,
-            [](const auto &batch) { return WorldAlphaTestMode(batch.stateBits[0]) == 0; },
-            [&drawWorldRange](const auto &batch, std::uint32_t first, std::uint32_t count) {
-                drawWorldRange(batch, first, count, batch.stateBits[0]);
+            [transientSpot](const auto &batch) {
+                return transientSpot
+                    ? batch.castsSpotShadow : batch.castsSunShadow;
+            },
+            [requireSunCaster](const auto &batch) {
+                return WorldAlphaTestMode(requireSunCaster
+                    ? batch.stateBits[0] : batch.shadowStateBits0) == 0;
+            },
+            [&drawWorldRange, requireSunCaster](const auto &batch,
+                std::uint32_t first, std::uint32_t count) {
+                drawWorldRange(batch, first, count, requireSunCaster
+                    ? batch.stateBits[0] : batch.shadowStateBits0);
             });
 #if KISAK_WEB_DIAGNOSTICS
         if (auto *profile = WebFrameProfile_Current()) profile->sunShadowMergedRanges += merged;
@@ -8734,21 +9569,38 @@ bool DrawShadowPartition(
 #endif
     if (g_renderer.staticModelSceneActive &&
         g_renderer.staticModelVertexArray != 0u &&
-        g_renderer.staticModelInstanceBuffer != 0u)
+        g_renderer.staticModelInstanceBuffer != 0u &&
+        (!transientSpot || !r_spotLightSModelShadows ||
+            r_spotLightSModelShadows->current.enabled))
     {
         glBindVertexArray(g_renderer.staticModelVertexArray);
         glUniform1f(g_renderer.shadowDepthInstanceEnabledUniform, 1.0f);
-        if (requireSunCaster)
+        if (transientSpot)
+        {
+            const std::size_t instanceCount =
+                g_renderer.retainedStaticModelSourceInstances.size();
+            if (spotPrimaryLightIndex >= g_renderer.dynamicLightCount ||
+                !WebRenderer_BuildStaticModelLightVisibility(
+                    {g_renderer.retainedStaticModelInstances.data(), instanceCount},
+                    g_renderer.retainedStaticModelShadowBounds,
+                    g_renderer.staticModelVisibility,
+                    g_renderer.staticModelVisibilityComputed,
+                    g_renderer.dynamicLights[spotPrimaryLightIndex],
+                    g_renderer.dynamicSpotLightNearPlaneOffset,
+                    g_renderer.staticModelPassVisibility))
+                return false;
+        }
+        else if (requireSunCaster)
         {
             const std::size_t shadowInstanceCount =
                 g_renderer.retainedStaticModelSourceInstances.size();
-            if (g_renderer.staticModelShadowVisibility.size() !=
+            if (g_renderer.staticModelPassVisibility.size() !=
                     shadowInstanceCount ||
                 g_renderer.retainedStaticModelShadowBounds.size() <
                     shadowInstanceCount)
                 return false;
             for (std::size_t index = 0u; index < shadowInstanceCount; ++index)
-                g_renderer.staticModelShadowVisibility[index] =
+                g_renderer.staticModelPassVisibility[index] =
                     WebRenderer_StaticModelIntersectsShadowPartition(
                         g_renderer.retainedStaticModelShadowBounds[index], matrix)
                     ? 1u : 0u;
@@ -8761,9 +9613,9 @@ bool DrawShadowPartition(
             static_cast<std::uint32_t>(
                 g_renderer.retainedWorldSpotShadowStaticModels.size()),
             spotPrimaryLightIndex,
-            g_renderer.staticModelShadowVisibility.data(),
+            g_renderer.staticModelPassVisibility.data(),
             static_cast<std::uint32_t>(
-                g_renderer.staticModelShadowVisibility.size())))
+                g_renderer.staticModelPassVisibility.size())))
         {
             return false;
         }
@@ -8772,6 +9624,7 @@ bool DrawShadowPartition(
         {
             if (batch.instanceCount == 0u) continue;
             if (requireSunCaster && !batch.draw.castsSunShadow) continue;
+            if (transientSpot && !batch.draw.castsSpotShadow) continue;
             if (!requireSunCaster)
                 applySpotShadowCull(batch.draw.shadowStateBits0);
             const WebRendererRetainedWorldImage *base = RetainedImage(
@@ -8795,11 +9648,11 @@ bool DrawShadowPartition(
             while (instanceIndex < instanceEnd)
             {
                 while (instanceIndex < instanceEnd &&
-                    g_renderer.staticModelShadowVisibility[instanceIndex] == 0u)
+                    g_renderer.staticModelPassVisibility[instanceIndex] == 0u)
                     ++instanceIndex;
                 const std::uint32_t runBegin = instanceIndex;
                 while (instanceIndex < instanceEnd &&
-                    g_renderer.staticModelShadowVisibility[instanceIndex] != 0u)
+                    g_renderer.staticModelPassVisibility[instanceIndex] != 0u)
                     ++instanceIndex;
                 if (instanceIndex == runBegin) continue;
                 BindStaticModelInstanceRange(runBegin);
@@ -8822,21 +9675,32 @@ bool DrawShadowPartition(
         shadowFamilyStarted = now;
     }
 #endif
-    if (g_renderer.dynamicModelSceneActive)
+    if (g_renderer.dynamicModelSceneActive &&
+        (!transientSpot || !r_spotLightEntityShadows ||
+            r_spotLightEntityShadows->current.enabled))
     {
         std::uint32_t previousInstance = UINT32_MAX - 1u;
         const auto merged = WebRenderer_ForEachShadowRange(
             g_renderer.dynamicDraws, DynamicDrawBatch,
-            [&matrix, requireSunCaster, spotShadowSlot](
+            [&matrix, requireSunCaster, spotShadowSlot, transientSpot,
+             transientLight, &transientReceiverPlanes](
                 const auto &draw, const auto &batch) {
-                return batch.castsSunShadow && !batch.depthHack &&
+                const auto *brush = draw.brushInstanceIndex == UINT32_MAX
+                    ? nullptr
+                    : &g_renderer.retainedBrushInstances[
+                        draw.brushInstanceIndex];
+                return (transientSpot
+                        ? batch.castsSpotShadow : batch.castsSunShadow) &&
+                    !batch.depthHack &&
                     !WebRenderer_IsFxVertexColorBatch(batch.sourceKind) &&
                     (requireSunCaster ||
                         (spotShadowSlot < MAX_SPOT_SHADOWS &&
                          (draw.spotShadowVisibilityMask &
                             (1u << spotShadowSlot)) != 0u)) &&
-                    WebRenderer_ShadowBoundsIntersectPartition(
-                        draw.shadowBounds, matrix);
+                    (!transientSpot || DynamicLightReceiverEligible(batch,
+                        *transientLight, transientReceiverPlanes, brush)) &&
+                    (transientSpot || WebRenderer_ShadowBoundsIntersectPartition(
+                        draw.shadowBounds, matrix));
             },
             [requireSunCaster](const auto &a, const auto &b) {
                 // One instance means the same VAO, index buffer and placement.
@@ -8924,7 +9788,8 @@ bool DrawSpotShadowMaps()
                 g_renderer.sceneSpotShadowMatrices[slot],
                 SPOT_SHADOW_SIZE, false,
                 g_renderer.sceneSpotShadowLightIndices[slot],
-                static_cast<std::uint32_t>(slot)))
+                static_cast<std::uint32_t>(slot),
+                g_renderer.sceneSpotShadowDynamic[slot]))
             return false;
     }
     return true;
@@ -8940,8 +9805,34 @@ void BindSpotShadowForPrimaryLight(
         for (std::size_t slot = 0u;
              slot < g_renderer.sceneSpotShadowCount; ++slot)
         {
+            if (g_renderer.sceneSpotShadowDynamic[slot]) continue;
             if (g_renderer.sceneSpotShadowLightIndices[slot] !=
                 primaryLightIndex)
+                continue;
+            glUniform1f(g_renderer.spotShadowEnabledUniform, 1.0f);
+            glUniformMatrix4fv(g_renderer.spotShadowMatrixUniform, 1,
+                GL_FALSE, g_renderer.sceneSpotShadowMatrices[slot].data());
+            glActiveTexture(GL_TEXTURE14);
+            glBindTexture(GL_TEXTURE_2D,
+                g_renderer.spotShadowDepthTextures[slot]);
+            glActiveTexture(GL_TEXTURE0);
+            return;
+        }
+    }
+    glUniform1f(g_renderer.spotShadowEnabledUniform, 0.0f);
+}
+
+void BindSpotShadowForDynamicLight(std::uint32_t dynamicLightIndex,
+    bool spotShadowMapsDrawn)
+{
+    if (spotShadowMapsDrawn)
+    {
+        for (std::size_t slot = 0u;
+             slot < g_renderer.sceneSpotShadowCount; ++slot)
+        {
+            if (!g_renderer.sceneSpotShadowDynamic[slot] ||
+                g_renderer.sceneSpotShadowLightIndices[slot] !=
+                    dynamicLightIndex)
                 continue;
             glUniform1f(g_renderer.spotShadowEnabledUniform, 1.0f);
             glUniformMatrix4fv(g_renderer.spotShadowMatrixUniform, 1,
@@ -9282,6 +10173,31 @@ bool IsEmissiveCameraBatch(const WebRendererRetainedWorldBatch &batch)
 
 void BindSceneSamplers()
 {
+    glUniform1i(g_renderer.postSunUniform, 10);
+    glActiveTexture(GL_TEXTURE10);
+    glBindTexture(GL_TEXTURE_2D, g_renderer.postSunReady ? g_renderer.postSunTexture : g_renderer.texture);
+    glUniform1i(g_renderer.floatZUniform, 6);
+    glActiveTexture(GL_TEXTURE6);
+    glBindTexture(GL_TEXTURE_2D, !g_renderer.floatZPass && g_renderer.softParticleDepthReady
+        ? g_renderer.floatZTexture : g_renderer.texture);
+    glUniform1i(g_renderer.outdoorUniform, 11);
+    glActiveTexture(GL_TEXTURE11);
+    const auto *outdoor = OutdoorLookupReady()
+        ? &g_renderer.retainedWorldImages[
+            g_renderer.retainedOutdoorImageIndex]
+        : nullptr;
+    BindWorldTexture(GL_TEXTURE11,
+        outdoor ? outdoor->texture : g_renderer.texture,
+        0x62u, false);
+    glUniformMatrix4fv(g_renderer.outdoorLookupMatrixUniform, 1, GL_FALSE,
+        g_renderer.retainedOutdoorLookupMatrix.data());
+    const float width = static_cast<float>(std::max(g_renderer.floatZWidth, 1));
+    const float height = static_cast<float>(std::max(g_renderer.floatZHeight, 1));
+    glUniform4f(g_renderer.softScreenUniform,
+        0.5f * g_renderer.sceneViewWidth / width, 0.5f * g_renderer.sceneViewHeight / height,
+        (g_renderer.sceneViewX + 0.5f * g_renderer.sceneViewWidth) / width,
+        (g_renderer.canvasHeight - g_renderer.sceneViewY - 0.5f * g_renderer.sceneViewHeight) / height);
+    glUniform1f(g_renderer.mipBiasUniform, r_texFilterMipBias ? r_texFilterMipBias->current.value : 0.0f);
     glUniform1i(g_renderer.textureUniform, 0);
     glUniform1i(g_renderer.detailMapUniform, 4);
     glUniform1i(g_renderer.normalMapUniform, 1);
@@ -9315,18 +10231,66 @@ void ClearDynamicLightMask()
     // R_DrawPointLitSurfsCallback clears destination alpha before each light.
     // Its materials then use ONE_MINUS_DST_ALPHA to avoid lighting a covered
     // pixel twice. RGB and scene depth must survive this clear.
-    // ponytail: clear the full view until native light scissor bounds are shared.
     glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE);
     glClearColor(0, 0, 0, 0);
     glClear(GL_COLOR_BUFFER_BIT);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 }
 
+void SortDynamicLightDrawCommands(
+    std::vector<WebRendererDynamicLightDrawCommand> &commands)
+{
+    std::stable_sort(commands.begin(), commands.end(),
+        [](const WebRendererDynamicLightDrawCommand &left,
+           const WebRendererDynamicLightDrawCommand &right) {
+            return kisak::dynamic_lights::ReceiverDrawSortKey(left.sortKey) <
+                kisak::dynamic_lights::ReceiverDrawSortKey(right.sortKey);
+        });
+}
+
+std::uint64_t ModelReceiverSortKey(
+    const WebRendererRetainedWorldBatch &batch) noexcept
+{
+    if (!batch.materialIdentity) return 0u;
+    return kisak::dynamic_lights::ReceiverDrawSurf(
+        batch.materialIdentity->info.drawSurf, batch.dynamicLightSurfType,
+        0u, batch.depthHack).packed;
+}
+
+void BeginDynamicLightScissor(const GfxLight &light)
+{
+    kisak::dynamic_lights::ScissorRect rect;
+    const auto *axis = reinterpret_cast<const float (*)[3]>(
+        g_renderer.sceneViewAxis.data());
+    const auto *viewProjection = reinterpret_cast<const float (*)[4]>(
+        g_renderer.sceneViewProjection.data());
+    if (!kisak::dynamic_lights::ComputeScissorRect(light,
+            g_renderer.sceneViewOrigin.data(), axis, viewProjection,
+            static_cast<int>(g_renderer.sceneViewX),
+            static_cast<int>(g_renderer.sceneViewY),
+            static_cast<int>(g_renderer.sceneViewWidth),
+            static_cast<int>(g_renderer.sceneViewHeight), rect))
+    {
+        rect.x = static_cast<int>(g_renderer.sceneViewX);
+        rect.y = static_cast<int>(g_renderer.sceneViewY);
+        rect.width = static_cast<int>(g_renderer.sceneViewWidth);
+        rect.height = static_cast<int>(g_renderer.sceneViewHeight);
+    }
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(rect.x,
+        std::max(0, g_renderer.canvasHeight - rect.y - rect.height),
+        rect.width, rect.height);
+    ClearDynamicLightMask();
+}
+
 template <typename Draw>
 std::uint32_t DrawDynamicLightMaterial(const WebRendererRetainedWorldBatch &batch,
     const std::vector<WebRendererRetainedWorldImage> &images, const GfxLight &light,
-    Draw draw)
+    const float receiverPlanes[6][4], Draw draw,
+    const WebRendererBrushModelInstanceDesc *brush = nullptr)
 {
+    if (!DynamicLightReceiverEligible(batch, light, receiverPlanes, brush))
+        return 0;
     const Material *material = batch.materialIdentity;
     if (!material || !material->techniqueSet || !material->stateBitsTable) return 0;
     const auto *set = material->techniqueSet->remappedTechniqueSet
@@ -9347,8 +10311,8 @@ std::uint32_t DrawDynamicLightMaterial(const WebRendererRetainedWorldBatch &batc
         const char *name = pass.pixelShader ? pass.pixelShader->name : nullptr;
         if (!name || (std::strncmp(name, "l_omni_", 7) && std::strncmp(name, "l_spot_", 7)))
             continue;
-        const bool normalMapped = std::strstr(name, "n0") != nullptr;
-        const bool detailMapped = std::strstr(name, "d0") != nullptr;
+        const bool normalMapped = (!r_normal || r_normal->current.enabled) && std::strstr(name, "n0") != nullptr;
+        const bool detailMapped = (!r_detail || r_detail->current.enabled) && std::strstr(name, "d0") != nullptr;
         if ((normalMapped && !normal) || (detailMapped && !detail)) continue;
         WebRendererRetainedWorldBatch state;
         state.materialIdentity = material;
@@ -9382,6 +10346,359 @@ std::uint32_t DrawDynamicLightMaterial(const WebRendererRetainedWorldBatch &batc
 }
 
 #if KISAK_WEB_DIAGNOSTICS
+extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestSoftParticlePixel(int scenario, int field)
+{
+    if (scenario < 0) return field == 0 ? g_renderer.softParticleDepthReady :
+        field == 1 ? g_renderer.floatZWidth : field == 2 ? g_renderer.floatZHeight : g_renderer.postSunReady;
+    if (!g_renderer.initialized || g_renderer.contextLost) return UINT32_MAX;
+    // Isolated shader/target fixture. No GfxWorld, FX system or game state.
+    const bool distortion = scenario >= 20;
+    const int edge = scenario == 31 ? 8 : scenario == 11 || distortion ? 4 : 1;
+    if (!CreateFloatZTarget(edge, edge)) return UINT32_MAX;
+    if (distortion && !CreatePostSunTarget(edge, edge)) return UINT32_MAX;
+    const float sceneDepth = scenario == 1 || scenario == 21 ? 1.0f : 3.0f;
+    const float particleDepth = scenario == 3 ? 0.5f : scenario == 15 ? 0.125f : 2.0f;
+    std::vector<WebRendererSurfaceVertex> vertices(8);
+    const float corners[4][2]{{-1,-1},{1,-1},{1,1},{-1,1}};
+    for (unsigned i = 0; i < 8; ++i)
+    {
+        const float depth = i < 4 ? sceneDepth : particleDepth;
+        vertices[i].position[0] = corners[i % 4][0] * depth;
+        vertices[i].position[1] = corners[i % 4][1] * depth;
+        vertices[i].position[2] = depth;
+        std::fill_n(vertices[i].color, 4, 1.0f);
+        if (i < 4 && scenario == 9) vertices[i].color[3] = 0.5f;
+        if (i < 4 && scenario == 10) vertices[i].color[3] = 0.75f;
+        if (i >= 4 && scenario == 13) vertices[i].color[3] = 0.5f;
+        vertices[i].textureCoordinate[0] = vertices[i].textureCoordinate[1] = 0.5f;
+        vertices[i].normal[2] = 1.0f;
+        vertices[i].tangent[0] = 1.0f;
+        if (distortion && i >= 4)
+        {
+            vertices[i].color[0] = scenario == 24 ? 0 : 1;
+            vertices[i].color[1] = scenario == 25 ? 0 : 1;
+            vertices[i].color[2] = scenario == 26 ? 0.25f : 0.5f;
+            vertices[i].color[3] = scenario == 27 ? 1 : 0.5f;
+            if (scenario == 30) vertices[i].tangent[2] = 1;
+        }
+    }
+    std::vector<std::uint32_t> indices{0,2,1,0,3,2,4,6,5,4,7,6};
+    GLuint vao=0, vbo=0, ibo=0;
+    if (!CreateSurfaceObjects(vertices, indices, vao, vbo, ibo)) return UINT32_MAX;
+    GLuint textures[2]{}, framebuffer=0, colorBuffer=0;
+    glGenTextures(2, textures);
+    std::uint8_t pixels[2][4]{{255,255,255,
+        static_cast<std::uint8_t>(scenario == 8 ? 127 : scenario == 10 ? 192 : 255)}, {64,128,192,255}};
+    if (distortion)
+    {
+        pixels[1][0] = pixels[1][1] = scenario == 23 ? 0 : 255;
+        pixels[1][3] = 128;
+    }
+    glActiveTexture(GL_TEXTURE0);
+    for (unsigned i = 0; i < 2; ++i)
+    {
+        glBindTexture(GL_TEXTURE_2D, textures[i]);
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,1,1,0,GL_RGBA,GL_UNSIGNED_BYTE,pixels[i]);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+    }
+    glGenFramebuffers(1, &framebuffer);
+    glGenRenderbuffers(1, &colorBuffer);
+    glBindRenderbuffer(GL_RENDERBUFFER, colorBuffer);
+    if (scenario == 29) glRenderbufferStorageMultisample(GL_RENDERBUFFER, 4, GL_RGBA8, edge, edge);
+    else glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, edge, edge);
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, colorBuffer);
+    const float projection[16]{1,0,0,0,0,1,0,0,0,0,1,1,0,0,-0.02f,0};
+    Material material{}; MaterialTechniqueSet set{}; GfxStateBits state{{0x18000800u, 0xdu}};
+    material.techniqueSet=&set; material.stateBitsTable=&state; material.stateBitsCount=1;
+    std::fill_n(material.stateBitsEntry,34,255); material.stateBitsEntry[1]=0;
+    MaterialVertexShader depthVs{}; MaterialPixelShader depthPs{}; MaterialTechnique depthTech{};
+    const bool alphaDepth=scenario >= 8 && scenario <= 10;
+    depthVs.name=alphaDepth ? "floatz_build_atest_dtex.hlsl" : "floatz_build.hlsl";
+    depthPs.name=alphaDepth ? "floatz_build_atest.hlsl" : "floatz_build.hlsl";
+    MaterialShaderArgument depthArgs[2]{};
+    depthArgs[0].type=3; depthArgs[0].dest=20; depthArgs[0].u.codeConst.index=54;
+    depthArgs[1].type=2; depthArgs[1].dest=0; depthArgs[1].u.nameHash=0xa0ab1041u;
+    depthTech.passCount=1; depthTech.passArray[0].vertexShader=&depthVs;
+    depthTech.passArray[0].pixelShader=&depthPs; depthTech.passArray[0].args=depthArgs;
+    depthTech.passArray[0].stableArgCount=2; set.techniques[1]=&depthTech;
+    WebRendererRetainedWorldBatch batch{}; batch.materialIdentity=&material;
+    batch.technique=WebRendererWorldTechnique::BaseTexture;
+    batch.depthHack=scenario==2 || scenario==22; batch.sourceKind=WebRendererSceneBatchKind::FxCodeMesh;
+    const bool oldDither=glIsEnabled(GL_DITHER)!=GL_FALSE;
+    glDisable(GL_DITHER); glDisable(GL_SCISSOR_TEST);
+    glViewport(0,0,edge,edge); glDepthRangef(0, batch.depthHack ? 0.015625f : 1.0f);
+    glBindFramebuffer(GL_FRAMEBUFFER,g_renderer.floatZFramebuffer);
+    glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE); glDepthMask(GL_TRUE);
+    glClearColor(1,1,127.0f/255,127.0f/255); glClearDepthf(1);
+    glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+    glUseProgram(g_renderer.program); glBindVertexArray(vao);
+    g_renderer.floatZPass=true; g_renderer.softParticleDepthReady=false;
+    g_renderer.postSunReady=false;
+    BindSceneSamplers();
+    glUniformMatrix4fv(g_renderer.viewProjectionUniform,1,GL_FALSE,projection);
+    glUniform1f(g_renderer.aspectUniform,1); glUniform1f(g_renderer.instanceEnabledUniform,0);
+    glUniform3f(g_renderer.viewOriginUniform,0,0,0);
+    glUniform1f(g_renderer.fogEnabledUniform,1);
+    glUniform2f(g_renderer.fogParamsUniform,0,std::log(2.0f)/std::sqrt(12.0f));
+    glUniform4f(g_renderer.uiColorUniform,1,1,1,1);
+    glBindTexture(GL_TEXTURE_2D,textures[0]);
+    ApplyWorldMaterialState(batch); glDrawElements(GL_TRIANGLES,6,GL_UNSIGNED_INT,nullptr);
+    std::uint8_t depthPixel[4]{}; glReadPixels(0,0,1,1,GL_RGBA,GL_UNSIGNED_BYTE,depthPixel);
+    const std::uint32_t depthBits = depthPixel[0] | (std::uint32_t(depthPixel[1])<<8) |
+        (std::uint32_t(depthPixel[2])<<16) | (std::uint32_t(depthPixel[3])<<24);
+
+    float feather[4]{0.5f,2,0,0}, falloff[4]{0,0,1,0}, begin[4]{1,1,1,1}, end[4]{};
+    float eye[4]{0.5f,0,0,0}, fog[4]{0.1f,0.2f,0.3f,1};
+    MaterialShaderArgument args[9]{};
+    const auto literal=[&](unsigned i,unsigned type,unsigned dest,const float *value) {
+        args[i].type=type; args[i].dest=dest; args[i].u.literalConst=value;
+    };
+    literal(0,1,12,feather); literal(1,7,5,feather);
+    args[2].type=4; args[2].dest=4; args[2].u.codeSampler=static_cast<MaterialTextureSource>(18);
+    args[3].type=2; args[3].dest=0; args[3].u.nameHash=0xa0ab1041u;
+    literal(4,1,13,falloff); literal(5,1,14,begin); literal(6,1,15,end);
+    literal(7,1,16,eye); literal(8,7,0,fog);
+    MaterialVertexShader vs{}; MaterialPixelShader ps{}; MaterialTechnique tech{};
+    vs.name=scenario==5 ? "zfeather_dtex.hlsl" : scenario==6 ? "zfeather_foa_nf_dtex.hlsl" :
+        scenario==7 ? "zfeather_nf_eo_dtex.hlsl" : scenario==14 ? "zfeather_foa_nf_eo_dtex.hlsl" : "zfeather_nf_dtex.hlsl";
+    ps.name=scenario==4 ? "zfeather_add_nf.hlsl" : scenario==5 ? "zfeather.hlsl" : "zfeather_nf.hlsl";
+    tech.passCount=1; tech.passArray[0].vertexShader=&vs; tech.passArray[0].pixelShader=&ps;
+    tech.passArray[0].args=args; tech.passArray[0].stableArgCount=9; set.techniques[5]=&tech;
+    batch.stateBits[0]=0x18000800u; batch.stateBits[1]=2; batch.depthHack=false;
+    if (distortion)
+    {
+        vs.name="distortion_scale_zfeather_dtex.hlsl"; ps.name="distortion_zfeather.hlsl";
+        tech.flags=33; feather[0]=feather[1]=0.5f;
+        args[0].type=3; args[0].dest=0; args[0].u.codeConst.index=80;
+        args[1].type=3; args[1].dest=17; args[1].u.codeConst.index=51;
+        args[2].type=3; args[2].dest=18; args[2].u.codeConst.index=52;
+        literal(3,1,12,feather);
+        args[4].type=2; args[4].dest=4; args[4].u.nameHash=0xa0ab1041u;
+        args[5].type=4; args[5].dest=0; args[5].u.codeSampler=static_cast<MaterialTextureSource>(10);
+        args[6].type=4; args[6].dest=5; args[6].u.codeSampler=static_cast<MaterialTextureSource>(18);
+        tech.passArray[0].stableArgCount=7;
+        glBindFramebuffer(GL_FRAMEBUFFER,framebuffer);
+        glEnable(GL_SCISSOR_TEST);
+        for (int y=0; y<edge; ++y) for (int x=0; x<edge; ++x)
+        {
+            glScissor(x,y,1,1);
+            glClearColor((32+x*64)/255.0f,(32+y*64)/255.0f,192/255.0f,1);
+            glClear(GL_COLOR_BUFFER_BIT);
+        }
+        glDisable(GL_SCISSOR_TEST);
+        if (!ResolvePostSunTarget(framebuffer,edge,edge)) return UINT32_MAX;
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER,framebuffer); glClearColor(0,0,0,0); glClear(GL_COLOR_BUFFER_BIT);
+    g_renderer.floatZPass=false;
+    g_renderer.softParticleDepthReady=distortion || (r_zFeather && r_zFeather->current.enabled);
+    BindSceneSamplers(); glUniform4f(g_renderer.softScreenUniform,0.5f,0.5f,0.5f,0.5f);
+    glBindTexture(GL_TEXTURE_2D,textures[1]);
+    ApplyWorldMaterialState(batch);
+    if (!SkipDistortionBatch(batch))
+        glDrawElements(GL_TRIANGLES,6,GL_UNSIGNED_INT,reinterpret_cast<void *>(6*sizeof(std::uint32_t)));
+    if (scenario==29)
+    {
+        glBindFramebuffer(GL_READ_FRAMEBUFFER,framebuffer);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER,g_renderer.floatZFramebuffer);
+        glBlitFramebuffer(0,0,edge,edge,0,0,edge,edge,GL_COLOR_BUFFER_BIT,GL_NEAREST);
+        glBindFramebuffer(GL_FRAMEBUFFER,g_renderer.floatZFramebuffer);
+    }
+    std::uint8_t pixel[4]{};
+    glReadPixels(distortion ? 1 : 0,distortion ? 1 : 0,1,1,GL_RGBA,GL_UNSIGNED_BYTE,pixel);
+    if (distortion && field == 3)
+    {
+        glBindFramebuffer(GL_FRAMEBUFFER,g_renderer.postSunFramebuffer);
+        glReadPixels(1,1,1,1,GL_RGBA,GL_UNSIGNED_BYTE,pixel);
+    }
+    const bool error=glGetError()!=GL_NO_ERROR;
+    g_renderer.softParticleDepthReady=false;
+    g_renderer.postSunReady=false;
+    glBindFramebuffer(GL_FRAMEBUFFER,0); glDepthRangef(0,1);
+    if(oldDither) glEnable(GL_DITHER);
+    glDeleteFramebuffers(1,&framebuffer); glDeleteRenderbuffers(1,&colorBuffer);
+    glDeleteTextures(2,textures); DeleteSurfaceObjects(vao,vbo,ibo);
+    if(error) return UINT32_MAX;
+    return field==2 ? depthBits : field==1 ? pixel[3] :
+        pixel[0] | (std::uint32_t(pixel[1])<<8) | (std::uint32_t(pixel[2])<<16);
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t
+KisakWeb_TestOutdoorParticleCloudPixel(int scenario, int field)
+{
+    if (!g_renderer.initialized || g_renderer.contextLost ||
+        scenario < 0 || scenario > 3)
+        return UINT32_MAX;
+
+    std::vector<WebRendererSurfaceVertex> vertices(4u);
+    constexpr float positions[4][2] = {
+        {-1.0f, -1.0f}, {1.0f, -1.0f},
+        {1.0f, 1.0f}, {-1.0f, 1.0f},
+    };
+    constexpr float color[4] = {0.5f, 1.0f, 0.25f, 0.5f};
+    for (unsigned index = 0u; index < vertices.size(); ++index)
+    {
+        std::copy_n(positions[index], 2u, vertices[index].position);
+        std::copy_n(color, 4u, vertices[index].color);
+        vertices[index].textureCoordinate[0] = 0.5f;
+        vertices[index].textureCoordinate[1] = 0.5f;
+        vertices[index].normal[0] = 2.0f;
+        vertices[index].normal[1] = 4.0f;
+        vertices[index].normal[2] = 6.0f;
+    }
+    const std::vector<std::uint32_t> indices = {0u, 2u, 1u, 0u, 3u, 2u};
+    GLuint vertexArray = 0u, vertexBuffer = 0u, indexBuffer = 0u;
+    if (!CreateSurfaceObjects(vertices, indices,
+            vertexArray, vertexBuffer, indexBuffer))
+        return UINT32_MAX;
+
+    GLuint textures[2]{};
+    GLuint framebuffer = 0u, colorBuffer = 0u;
+    glGenTextures(2, textures);
+    constexpr std::uint8_t basePixel[4] = {128u, 64u, 192u, 128u};
+    constexpr std::uint8_t outdoorPixels[8] = {
+        64u, 0u, 0u, 255u, 192u, 0u, 0u, 255u,
+    };
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, textures[0]);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0,
+        GL_RGBA, GL_UNSIGNED_BYTE, basePixel);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glBindTexture(GL_TEXTURE_2D, textures[1]);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 2, 1, 0,
+        GL_RGBA, GL_UNSIGNED_BYTE, outdoorPixels);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    glGenFramebuffers(1, &framebuffer);
+    glGenRenderbuffers(1, &colorBuffer);
+    glBindRenderbuffer(GL_RENDERBUFFER, colorBuffer);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, 1, 1);
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+        GL_RENDERBUFFER, colorBuffer);
+    glViewport(0, 0, 1, 1);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    Material material{};
+    MaterialTechniqueSet techniqueSet{};
+    MaterialTechnique technique{};
+    MaterialVertexShader vertexShader{};
+    MaterialPixelShader pixelShader{};
+    MaterialShaderArgument arguments[7]{};
+    vertexShader.name = "particle_cloud_outdoor.hlsl";
+    pixelShader.name = "particle_cloud_outdoor.hlsl";
+    technique.passCount = 1u;
+    technique.passArray[0].vertexShader = &vertexShader;
+    technique.passArray[0].pixelShader = &pixelShader;
+    technique.passArray[0].args = arguments;
+    technique.passArray[0].stableArgCount = 7u;
+    techniqueSet.techniques[5] = &technique;
+    material.techniqueSet = &techniqueSet;
+    arguments[0].type = 2u;
+    arguments[0].dest = 0u;
+    arguments[0].u.nameHash = 0xa0ab1041u;
+    arguments[1].type = 4u;
+    arguments[1].dest = 4u;
+    arguments[1].u.codeSampler = static_cast<MaterialTextureSource>(17u);
+    constexpr unsigned destinations[4] = {4u, 8u, 16u, 24u};
+    constexpr unsigned codeConstants[4] = {72u, 68u, 53u, 88u};
+    for (unsigned index = 0u; index < 4u; ++index)
+    {
+        arguments[index + 2u].type = 3u;
+        arguments[index + 2u].dest = destinations[index];
+        arguments[index + 2u].u.codeConst.index = codeConstants[index];
+    }
+    arguments[6].type = 5u;
+    arguments[6].dest = 3u;
+    arguments[6].u.codeConst.index = 17u;
+
+    WebRendererRetainedWorldBatch batch{};
+    batch.materialIdentity = &material;
+    batch.sourceKind = WebRendererSceneBatchKind::FxParticleCloud;
+    batch.technique = WebRendererWorldTechnique::BaseTexture;
+    batch.stateBits[0] = 0x18000800u;
+    batch.stateBits[1] = 2u;
+
+    const std::uint32_t previousOutdoorIndex =
+        g_renderer.retainedOutdoorImageIndex;
+    const std::array<float, 16> previousOutdoorMatrix =
+        g_renderer.retainedOutdoorLookupMatrix;
+    bool appended = false;
+    try
+    {
+        WebRendererRetainedWorldImage outdoor;
+        outdoor.texture = textures[1];
+        outdoor.width = 2u;
+        outdoor.height = 1u;
+        outdoor.supported = true;
+        outdoor.mipmapsAllowed = false;
+        g_renderer.retainedWorldImages.push_back(std::move(outdoor));
+        appended = true;
+        g_renderer.retainedOutdoorImageIndex = static_cast<std::uint32_t>(
+            g_renderer.retainedWorldImages.size() - 1u);
+    }
+    catch (const std::bad_alloc &)
+    {
+    }
+    g_renderer.retainedOutdoorLookupMatrix.fill(0.0f);
+    g_renderer.retainedOutdoorLookupMatrix[0] = 0.125f;
+    g_renderer.retainedOutdoorLookupMatrix[12] = scenario == 1 ? 0.5f : 0.0f;
+    g_renderer.retainedOutdoorLookupMatrix[13] = 0.5f;
+    g_renderer.retainedOutdoorLookupMatrix[14] = scenario == 2
+        ? 64.0f / 255.0f : scenario == 3 ? 0.24f : 0.5f;
+    g_renderer.retainedOutdoorLookupMatrix[15] = 1.0f;
+
+    std::uint8_t pixel[4]{};
+    GLint selectedMode = -1;
+    const bool recognized = OutdoorParticleCloudForBatch(batch);
+    if (appended)
+    {
+        g_renderer.textureParameters.Reset();
+        glUseProgram(g_renderer.program);
+        BindSceneSamplers();
+        constexpr float identity[16] = {
+            1, 0, 0, 0, 0, 1, 0, 0,
+            0, 0, 1, 0, 0, 0, 0, 1,
+        };
+        glUniformMatrix4fv(g_renderer.viewProjectionUniform, 1, GL_FALSE,
+            identity);
+        glUniform1f(g_renderer.aspectUniform, 1.0f);
+        glUniform1f(g_renderer.instanceEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.fogEnabledUniform, 0.0f);
+        glUniform4f(g_renderer.uiColorUniform, 1.0f, 1.0f, 1.0f, 1.0f);
+        ApplyWorldMaterialState(batch);
+        glGetUniformiv(g_renderer.program, g_renderer.materialModeUniform,
+            &selectedMode);
+        BindWorldTexture(GL_TEXTURE0, textures[0], 0x11u, false);
+        glBindVertexArray(vertexArray);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
+        glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+    }
+    const bool error = !appended || glGetError() != GL_NO_ERROR;
+    if (appended) g_renderer.retainedWorldImages.pop_back();
+    g_renderer.retainedOutdoorImageIndex = previousOutdoorIndex;
+    g_renderer.retainedOutdoorLookupMatrix = previousOutdoorMatrix;
+    g_renderer.textureParameters.Reset();
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glDeleteFramebuffers(1, &framebuffer);
+    glDeleteRenderbuffers(1, &colorBuffer);
+    glDeleteTextures(2, textures);
+    DeleteSurfaceObjects(vertexArray, vertexBuffer, indexBuffer);
+    if (error) return UINT32_MAX;
+    if (field == 1) return recognized ? 1u : 0u;
+    if (field == 2) return static_cast<std::uint32_t>(selectedMode);
+    return pixel[0] | (static_cast<std::uint32_t>(pixel[1]) << 8u) |
+        (static_cast<std::uint32_t>(pixel[2]) << 16u) |
+        (static_cast<std::uint32_t>(pixel[3]) << 24u);
+}
+
 extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestDynamicLightPixel(
     int style, int alphaByte, int repeats, int gradient)
 {
@@ -9393,6 +10710,9 @@ extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestDynamicLightPixel(
         std::copy_n(positions[i], 2, vertices[i].position);
         std::fill_n(vertices[i].color, 4, 1.0f);
         vertices[i].textureCoordinate[0] = vertices[i].textureCoordinate[1] = 0.5f;
+        if (style == 11)
+            for (unsigned axis = 0; axis < 2; ++axis)
+                vertices[i].textureCoordinate[axis] = (positions[i][axis] + 1) / 16;
         vertices[i].normal[2] = 1;
         vertices[i].tangent[0] = 1;
         vertices[i].binormalSign = 1;
@@ -9402,7 +10722,8 @@ extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestDynamicLightPixel(
     GLuint vao=0, vbo=0, ibo=0, textures[2]{};
     if (!CreateSurfaceObjects(vertices, indices, vao, vbo, ibo)) return 0xff000000u;
     glGenTextures(2, textures);
-    const std::uint8_t basePixel[4]{255,255,255,static_cast<std::uint8_t>(alphaByte)};
+    const std::uint8_t value = style == 10 ? 64 : 255;
+    const std::uint8_t basePixel[4]{value,value,value,static_cast<std::uint8_t>(alphaByte)};
     const std::uint8_t radialPixels[16]{0,0,0,255,85,85,85,255,170,170,170,255,255,255,255,255};
     const std::uint8_t white[4]{255,255,255,255};
     for (unsigned i=0; i<2; ++i)
@@ -9417,14 +10738,32 @@ extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestDynamicLightPixel(
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
     }
+    if (style == 11)
+    {
+        // Constant-colour levels isolate LOD selection from texel filtering.
+        constexpr std::uint8_t colors[5][4]{{255,0,0,255},{0,255,0,255},
+            {0,0,255,255},{255,255,0,255},{255,0,255,255}};
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, textures[0]);
+        for (unsigned level = 0; level < 5; ++level)
+        {
+            const unsigned edge = 16u >> level;
+            std::vector<std::uint8_t> bytes(edge * edge * 4);
+            for (unsigned i = 0; i < edge * edge; ++i) std::copy_n(colors[level], 4, bytes.data() + i * 4);
+            glTexImage2D(GL_TEXTURE_2D, level, GL_RGBA8, edge, edge, 0, GL_RGBA, GL_UNSIGNED_BYTE, bytes.data());
+        }
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 4);
+    }
     if (style == 7)
     {
         const auto *attenuation = WorldImage(g_renderer.dynamicLightAttenuationIndex);
         if (attenuation) BindWorldTexture(GL_TEXTURE2, attenuation->texture, 0x62, false);
     }
+    else BindWorldTexture(GL_TEXTURE2, textures[1], 0x62, false);
     MaterialPixelShader shader{};
     shader.name = style == 3 ? "l_omni_b0c0.hlsl" : style == 4 ? "l_omni_t0c0.hlsl" :
-        style == 6 ? "l_omni_r0c0n0.hlsl" : "l_omni_r0c0.hlsl";
+        style == 6 ? "l_omni_r0c0n0.hlsl" :
+        style == 10 ? "l_omni_r0c0d0.hlsl" : "l_omni_r0c0.hlsl";
     MaterialTechnique technique{};
     technique.passCount = 1;
     technique.passArray[0].pixelShader = &shader;
@@ -9441,14 +10780,41 @@ extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestDynamicLightPixel(
     WebRendererRetainedWorldBatch batch;
     batch.materialIdentity = &material;
     batch.baseImageIndex = 0;
+    batch.excludeTransientSpotLight = style == 12 || style == 13;
     if (style == 6) batch.normalImageIndex = 0;
-    batch.samplerState = 0x62;
+    if (style == 10) batch.detailImageIndex = 0;
+    batch.samplerState = style == 11 ? 0x72 : 0x62;
     std::vector<WebRendererRetainedWorldImage> images(1);
     images[0].texture = textures[0];
     images[0].supported = true;
-    images[0].mipmapsAllowed = false;
+    images[0].mipmapsAllowed = style == 11;
     GfxLight light{};
-    light.type = style == 1 || style == 2 ? 2 : 3;
+    light.type = style == 1 || style == 2 || style == 12 || style == 16 ||
+        style == 17 || style == 20 || style == 21 || style == 24 || style == 25 ? 2 : 3;
+    light.origin[2] = 1.0f;
+    light.radius = 2.0f;
+    light.dir[2] = 1.0f;
+    light.cosHalfFovOuter = 0.9f;
+    float receiverPlanes[6][4];
+    kisak::dynamic_lights::ReceiverPlanes(light, 0.0f, receiverPlanes);
+    if (style >= 14 && style <= 17)
+    {
+        batch.transientLightSphere[2] = style == 14 ? 4.01f : style == 15 ? 4.0f : style == 16 ? 1.51f : 1.5f;
+        batch.transientLightSphere[3] = style <= 15 ? 1.0f : 0.5f;
+    }
+    WebRendererBrushModelInstanceDesc brush{};
+    if (style >= 18)
+    {
+        brush.receiverMins[2] = style == 18 ? 3.01f : style == 19 ? 3.0f : style == 20 ? 1.0f : 0.99f;
+        brush.receiverMaxs[2] = brush.receiverMins[2] + 1.0f;
+    }
+    if (style >= 22)
+    {
+        batch.transientLightBoundsEnabled = true;
+        batch.transientLightMins[2] = style == 22 ? 3.01f : style == 23 ? 3.0f :
+            style == 24 ? 1.0f : 0.99f;
+        batch.transientLightMaxs[2] = batch.transientLightMins[2] + 1.0f;
+    }
     const float identity[16]{1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
     // The opaque browser framebuffer has no destination alpha. Use RGBA8,
     // matching the actual scene and multisample render targets.
@@ -9483,7 +10849,8 @@ extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestDynamicLightPixel(
     for (int i=0;i<repeats;++i)
     {
         if (style == 9 && i) ClearDynamicLightMask();
-        DrawDynamicLightMaterial(batch,images,light,[&] { glDrawElements(GL_TRIANGLES,6,GL_UNSIGNED_INT,nullptr); });
+        DrawDynamicLightMaterial(batch,images,light,receiverPlanes,[&] { glDrawElements(GL_TRIANGLES,6,GL_UNSIGNED_INT,nullptr); },
+            style >= 18 && style <= 21 ? &brush : nullptr);
     }
     std::uint8_t pixel[4]{};
     glReadPixels(0,0,1,1,GL_RGBA,GL_UNSIGNED_BYTE,pixel);
@@ -9497,7 +10864,8 @@ extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestDynamicLightPixel(
 }
 #endif
 
-std::uint32_t DrawDynamicLights(bool staticModelsReady)
+std::uint32_t DrawDynamicLights(bool staticModelsReady,
+    bool spotShadowMapsDrawn)
 {
 #if KISAK_WEB_DIAGNOSTICS
     g_renderer.lastDynamicLightDrawCount = 0u;
@@ -9517,7 +10885,11 @@ std::uint32_t DrawDynamicLights(bool staticModelsReady)
     for (unsigned i = 0; i < g_renderer.dynamicLightCount; ++i)
     {
         const auto &light = g_renderer.dynamicLights[i];
-        ClearDynamicLightMask();
+        float receiverPlanes[6][4];
+        if (!kisak::dynamic_lights::ReceiverPlanes(light,
+                g_renderer.dynamicSpotLightNearPlaneOffset, receiverPlanes))
+            continue;
+        BeginDynamicLightScissor(light);
         BindWorldTexture(GL_TEXTURE2, attenuation->texture, light.def->attenuation.samplerState, attenuation->mipmapsAllowed);
         glUniform4f(g_renderer.primaryLightPositionRadiusUniform,
             light.origin[0], light.origin[1], light.origin[2], 1.0f / light.radius);
@@ -9531,44 +10903,165 @@ std::uint32_t DrawDynamicLights(bool staticModelsReady)
             glUniform3f(g_renderer.primaryLightSpotFactorsUniform, coneScale,
                 -coneScale * light.cosHalfFovOuter, static_cast<float>(light.exponent));
         }
-        glDepthRangef(0, 1);
-        glUniformMatrix4fv(g_renderer.viewProjectionUniform, 1, GL_FALSE, g_renderer.sceneViewProjection.data());
-        glUniform1f(g_renderer.instanceEnabledUniform, 0);
-        glBindVertexArray(g_renderer.vertexArray);
-        for (const auto &range : g_renderer.worldCameraRanges)
+        BindSpotShadowForDynamicLight(i, spotShadowMapsDrawn);
+        auto &commands = g_renderer.dynamicLightDrawCommands;
+        commands.clear();
+        try
         {
-            const auto &batch = g_renderer.retainedWorldBatches[range.batchIndex];
-#if KISAK_WEB_DIAGNOSTICS
-            g_frameProfileDrawBucket = FrameProfileDrawBucket::World;
-#endif
-            count += DrawDynamicLightMaterial(batch, g_renderer.retainedWorldImages, light, [&] {
-                glDrawElements(GL_TRIANGLES, range.indexCount, GL_UNSIGNED_INT,
-                    reinterpret_cast<const void *>(static_cast<std::uintptr_t>(range.firstIndex) * 4));
-            });
+            const std::size_t maximumCommandCount =
+                g_renderer.worldDynamicLightRanges[i].size() +
+                g_renderer.retainedStaticModelSourceInstances.size() +
+                g_renderer.dynamicDraws.size();
+            commands.reserve(maximumCommandCount);
+            for (std::uint32_t rangeIndex = 0u;
+                 rangeIndex < g_renderer.worldDynamicLightRanges[i].size();
+                 ++rangeIndex)
+            {
+                const auto &range =
+                    g_renderer.worldDynamicLightRanges[i][rangeIndex];
+                const auto &batch =
+                    g_renderer.retainedWorldBatches[range.batchIndex];
+                commands.push_back({
+                    WebRendererDynamicLightDrawKind::World, rangeIndex, 0u,
+                    0u, batch.drawSortKey});
+            }
+        }
+        catch (const std::bad_alloc &)
+        {
+            Web_Log(WebLogLevel::Error,
+                "[kisakcod-web] Could not allocate the dynamic-light receiver list.\n");
+            glDisable(GL_SCISSOR_TEST);
+            return count;
         }
         if (staticModelsReady && g_renderer.staticModelSceneActive)
         {
-            glBindVertexArray(g_renderer.staticModelVertexArray);
-            glUniform1f(g_renderer.instanceEnabledUniform, 1);
-            for (const auto &batch : g_renderer.retainedStaticModelBatches)
+            const std::size_t instanceCount = g_renderer.retainedStaticModelSourceInstances.size();
+            if (!WebRenderer_BuildStaticModelLightVisibility(
+                    {g_renderer.retainedStaticModelInstances.data(), instanceCount},
+                    g_renderer.retainedStaticModelShadowBounds,
+                    g_renderer.staticModelVisibility, g_renderer.staticModelVisibilityComputed,
+                    light, g_renderer.dynamicSpotLightNearPlaneOffset,
+                    g_renderer.staticModelPassVisibility))
             {
+                Web_Log(WebLogLevel::Error, "[kisakcod-web] Invalid static-model light receiver state.\n");
+                glDisable(GL_SCISSOR_TEST);
+                return count;
+            }
+            for (std::uint32_t batchIndex = 0u;
+                 batchIndex < g_renderer.retainedStaticModelBatches.size();
+                 ++batchIndex)
+            {
+                const auto &batch =
+                    g_renderer.retainedStaticModelBatches[batchIndex];
                 if (!batch.cameraInstanceCount || !WebRenderer_IsCameraVisibleXModelSurface(batch.draw.sourceKind, batch.draw.cameraRegion)) continue;
+                const std::uint32_t end = batch.instanceOffset + batch.instanceCount;
+                std::uint32_t index = batch.instanceOffset;
+                while (index < end)
+                {
+                    while (index < end && !g_renderer.staticModelPassVisibility[index]) ++index;
+                    const std::uint32_t first = index;
+                    while (index < end && g_renderer.staticModelPassVisibility[index]) ++index;
+                    if (first == index) continue;
+                    try
+                    {
+                        commands.push_back({
+                            WebRendererDynamicLightDrawKind::StaticModel,
+                            batchIndex, first, index - first,
+                            ModelReceiverSortKey(batch.draw)});
+                    }
+                    catch (const std::bad_alloc &)
+                    {
+                        Web_Log(WebLogLevel::Error,
+                            "[kisakcod-web] Could not grow the dynamic-light receiver list.\n");
+                        glDisable(GL_SCISSOR_TEST);
+                        return count;
+                    }
+                }
+            }
+        }
+        try
+        {
+            for (std::uint32_t index = 0u;
+                 index < g_renderer.dynamicDraws.size(); ++index)
+            {
+                const auto &draw = g_renderer.dynamicDraws[index];
+                const auto &batch = DynamicDrawBatch(draw);
+                if (!WebRenderer_IsTransientLightReceiver(batch.sourceKind) ||
+                    !WebRenderer_IsCameraVisibleXModelSurface(
+                        batch.sourceKind, batch.cameraRegion))
+                    continue;
+                commands.push_back({
+                    WebRendererDynamicLightDrawKind::Dynamic, index, 0u, 0u,
+                    ModelReceiverSortKey(batch)});
+            }
+            SortDynamicLightDrawCommands(commands);
+        }
+        catch (const std::bad_alloc &)
+        {
+            Web_Log(WebLogLevel::Error,
+                "[kisakcod-web] Could not sort the dynamic-light receiver list.\n");
+            glDisable(GL_SCISSOR_TEST);
+            return count;
+        }
+
+        std::uint32_t previousInstance = UINT32_MAX - 1u;
+        for (const auto &command : commands)
+        {
+            if (command.kind == WebRendererDynamicLightDrawKind::World)
+            {
+                const auto &range =
+                    g_renderer.worldDynamicLightRanges[i][command.sourceIndex];
+                const auto &batch =
+                    g_renderer.retainedWorldBatches[range.batchIndex];
+                previousInstance = UINT32_MAX - 1u;
+                glDepthRangef(0, 1);
+                glUniformMatrix4fv(g_renderer.viewProjectionUniform, 1,
+                    GL_FALSE, g_renderer.sceneViewProjection.data());
+                glUniform1f(g_renderer.instanceEnabledUniform, 0);
+                glBindVertexArray(g_renderer.vertexArray);
+#if KISAK_WEB_DIAGNOSTICS
+                g_frameProfileDrawBucket = FrameProfileDrawBucket::World;
+#endif
+                count += DrawDynamicLightMaterial(batch,
+                    g_renderer.retainedWorldImages, light, receiverPlanes,
+                    [&] {
+                        glDrawElements(GL_TRIANGLES, range.indexCount,
+                            GL_UNSIGNED_INT, reinterpret_cast<const void *>(
+                                static_cast<std::uintptr_t>(range.firstIndex) *
+                                sizeof(std::uint32_t)));
+                    });
+                continue;
+            }
+            if (command.kind ==
+                WebRendererDynamicLightDrawKind::StaticModel)
+            {
+                const auto &batch =
+                    g_renderer.retainedStaticModelBatches[command.sourceIndex];
+                previousInstance = UINT32_MAX - 1u;
+                glDepthRangef(0, 1);
+                glUniformMatrix4fv(g_renderer.viewProjectionUniform, 1,
+                    GL_FALSE, g_renderer.sceneViewProjection.data());
+                glBindVertexArray(g_renderer.staticModelVertexArray);
+                glUniform1f(g_renderer.instanceEnabledUniform, 1);
 #if KISAK_WEB_DIAGNOSTICS
                 g_frameProfileDrawBucket = FrameProfileDrawBucket::StaticModel;
 #endif
-                count += DrawDynamicLightMaterial(batch.draw, g_renderer.retainedStaticModelImages, light, [&] {
-                    BindStaticModelInstanceRange(batch.cameraInstanceOffset);
-                    glDrawElementsInstanced(GL_TRIANGLES, batch.draw.indexCount, GL_UNSIGNED_INT,
-                        reinterpret_cast<const void *>(static_cast<std::uintptr_t>(batch.draw.firstIndex) * 4), batch.cameraInstanceCount);
-                });
+                count += DrawDynamicLightMaterial(batch.draw,
+                    g_renderer.retainedStaticModelImages, light,
+                    receiverPlanes, [&] {
+                        BindStaticModelInstanceRange(command.first);
+                        glDrawElementsInstanced(GL_TRIANGLES,
+                            batch.draw.indexCount, GL_UNSIGNED_INT,
+                            reinterpret_cast<const void *>(
+                                static_cast<std::uintptr_t>(
+                                    batch.draw.firstIndex) *
+                                sizeof(std::uint32_t)), command.count);
+                    });
+                continue;
             }
-        }
-        std::uint32_t previousInstance = UINT32_MAX - 1;
-        for (const auto index : g_renderer.dynamicCameraDrawOrder)
-        {
-            const auto &draw = g_renderer.dynamicDraws[index];
+            const auto &draw =
+                g_renderer.dynamicDraws[command.sourceIndex];
             const auto &batch = DynamicDrawBatch(draw);
-            if (!WebRenderer_IsCameraVisibleXModelSurface(batch.sourceKind, batch.cameraRegion)) continue;
 #if KISAK_WEB_DIAGNOSTICS
             g_frameProfileDrawBucket = ProfileBucketForKind(batch.sourceKind);
 #endif
@@ -9576,11 +11069,14 @@ std::uint32_t DrawDynamicLights(bool staticModelsReady)
             glDepthRangef(0, batch.depthHack ? 0.015625f : 1);
             glUniformMatrix4fv(g_renderer.viewProjectionUniform, 1, GL_FALSE,
                 batch.depthHack ? g_renderer.sceneDepthHackViewProjection.data() : g_renderer.sceneViewProjection.data());
-            count += DrawDynamicLightMaterial(batch, g_renderer.retainedDynamicModelImages, light, [&] {
+            count += DrawDynamicLightMaterial(batch, g_renderer.retainedDynamicModelImages, light, receiverPlanes, [&] {
                 glDrawElements(GL_TRIANGLES, batch.indexCount, GL_UNSIGNED_INT,
                     reinterpret_cast<const void *>(static_cast<std::uintptr_t>(batch.firstIndex) * 4));
-            });
+            }, draw.brushInstanceIndex == UINT32_MAX ? nullptr :
+                &g_renderer.retainedBrushInstances[draw.brushInstanceIndex]);
         }
+        commands.clear();
+        glDisable(GL_SCISSOR_TEST);
     }
     glDepthRangef(0, 1);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -9596,6 +11092,22 @@ extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestTransientLightDraws()
     return g_renderer.dynamicLightCount == 0 ? 0u :
         (g_renderer.dynamicLights[0].type << 24u) |
         (g_renderer.dynamicLightCount << 16u) | std::min(g_renderer.lastDynamicLightDrawCount, 65535u);
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t
+KisakWeb_TestTransientSpotShadowState()
+{
+    std::uint32_t dynamicCount = 0u;
+    std::uint32_t dynamicSlot = 0u;
+    for (std::uint32_t slot = 0u;
+         slot < g_renderer.sceneSpotShadowCount; ++slot)
+        if (g_renderer.sceneSpotShadowDynamic[slot])
+        {
+            ++dynamicCount;
+            dynamicSlot = slot + 1u;
+        }
+    return g_renderer.sceneSpotShadowCount |
+        (dynamicCount << 8u) | (dynamicSlot << 16u);
 }
 #endif
 
@@ -9855,6 +11367,17 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
         postProcessTargetsReady;
     const bool directAaResolveDraw = multisampleDraw &&
         !postProcessDraw && postProcessTargetsReady;
+    const bool distortionRequested = sceneGeometryDraw && SceneNeedsDistortion();
+    const bool floatZRequested = sceneGeometryDraw && SceneNeedsFloatZ(distortionRequested);
+    g_renderer.softParticleDepthReady = false;
+    g_renderer.postSunReady = false;
+    if (distortionRequested && !floatZRequested)
+    {
+        Web_Log(WebLogLevel::Error, "[kisakcod-web] Distortion requires r_floatz; enable it and restart the renderer.\n");
+        return false;
+    }
+    if (distortionRequested && !CreatePostSunTarget(width, height)) return false;
+    if (floatZRequested && !CreateFloatZTarget(width, height)) return false;
 #if KISAK_WEB_DIAGNOSTICS
     double rendererStageStarted = frameProfile
         ? WebFrameProfile_Now() : 0.0;
@@ -9957,6 +11480,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glDisable(GL_BLEND);
         glDisable(GL_CULL_FACE);
         glUniform1i(g_renderer.skyTextureUniform, 4);
+        glUniform1f(g_renderer.skyMipBiasUniform, r_texFilterMipBias ? r_texFilterMipBias->current.value : 0.0f);
         glUniform2fv(g_renderer.skyTanHalfFovUniform, 1,
             g_renderer.sceneTanHalfFov.data());
         glUniform3fv(g_renderer.skyForwardUniform, 1,
@@ -9965,9 +11489,8 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
             g_renderer.sceneViewAxis.data() + 3u);
         glUniform3fv(g_renderer.skyUpUniform, 1,
             g_renderer.sceneViewAxis.data() + 6u);
-        glActiveTexture(GL_TEXTURE4);
-        glBindTexture(GL_TEXTURE_CUBE_MAP,
-            g_renderer.retainedSky.texture);
+        BindWorldTexture(GL_TEXTURE4, g_renderer.retainedSky.texture,
+            g_renderer.retainedSky.samplerState, true, false, GL_TEXTURE_CUBE_MAP);
         glBindVertexArray(g_renderer.vertexArray);
         glDrawArrays(GL_TRIANGLES, 0, 3);
         glActiveTexture(GL_TEXTURE0);
@@ -10001,11 +11524,30 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
     }
     std::uint32_t completedDraws = 0u;
     // Native draws lit/decal receivers, point-light passes, then emissive.
-    // Keep the existing single traversal when no transient light is visible.
-    const bool splitLighting = sceneGeometryDraw && g_renderer.dynamicLightCount;
-    for (unsigned cameraStage = 0; cameraStage < (splitLighting ? 2u : 1u); ++cameraStage)
+    // FloatZ follows native lit/decal prepass ownership, including signed
+    // depth-hacked viewmodels. Emissive draws sample only the completed target.
+    const bool splitLighting = sceneGeometryDraw && (g_renderer.dynamicLightCount || floatZRequested);
+    const unsigned prepassCount = floatZRequested ? 1u : 0u;
+    const bool ditherEnabled = glIsEnabled(GL_DITHER) != GL_FALSE;
+    for (unsigned cameraStage = 0; cameraStage < prepassCount + (splitLighting ? 2u : 1u); ++cameraStage)
     {
-    const bool emissiveCameraPass = cameraStage != 0;
+    const bool floatZPass = floatZRequested && cameraStage == 0;
+    g_renderer.floatZPass = floatZPass;
+    const bool emissiveCameraPass = !floatZPass && cameraStage != prepassCount;
+    glBindFramebuffer(GL_FRAMEBUFFER, floatZPass ? g_renderer.floatZFramebuffer :
+        multisampleDraw ? g_renderer.multisampleFramebuffer : postProcessDraw ? g_renderer.sceneFramebuffer : 0u);
+    if (floatZPass)
+    {
+        glDisable(GL_DITHER);
+        glDisable(GL_SCISSOR_TEST);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glDepthMask(GL_TRUE);
+        // IEEE 0x7f7fffff: finite far depth, never a NaN/Inf sentinel.
+        glClearColor(1.0f, 1.0f, 127.0f / 255.0f, 127.0f / 255.0f);
+        glClearDepthf(1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    }
+    else if (ditherEnabled) glEnable(GL_DITHER);
     glUseProgram(g_renderer.program);
     glUniform1f(
         g_renderer.aspectUniform,
@@ -10081,7 +11623,9 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
             WebRendererRetainedWorldBatch &batch =
                 g_renderer.retainedWorldBatches[range.batchIndex];
             if (splitLighting && IsEmissiveCameraBatch(batch) != emissiveCameraPass) continue;
-            if (WebRenderer_SkipsNativeDraw(batch.technique))
+            if (floatZPass && !HasFloatZTechnique(batch)) continue;
+            if (!floatZPass && SkipDistortionBatch(batch)) continue;
+            if (!floatZPass && WebRenderer_SkipsNativeDraw(batch.technique))
                 continue;
             if (worldDrawState.NeedsMaterial(batch)) ApplyWorldMaterialState(batch);
             const WebRendererRetainedWorldImage *base =
@@ -10096,7 +11640,8 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 WorldImage(batch.normalImageIndex);
             const WebRendererRetainedWorldImage *specular =
                 WorldImage(batch.specularImageIndex);
-            const bool water = batch.technique ==
+            ResolveCinematicImages(batch.technique, base, normal, detail, specular);
+            const bool water = !floatZPass && batch.technique ==
                 WebRendererWorldTechnique::WaterLitSun;
             const bool waterReady = water && BindWaterTextures(
                 batch, g_renderer.sceneViewTimeSeconds);
@@ -10104,16 +11649,16 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 ? !waterReady
                 : batch.technique ==
                         WebRendererWorldTechnique::BackendFallback || !base;
-            const bool detailMapped = !fallback && detail &&
+            const bool detailMapped = (!r_detail || r_detail->current.enabled) && !fallback && detail &&
                 detail->texture != 0u;
             const bool lightmapped = !fallback && secondaryLightmap &&
                 WebRenderer_UsesSecondaryDirectionalLightmap(
                     batch.technique) &&
                 batch.lightingMode ==
                     WebRendererWorldLightingMode::SecondaryDirectional;
-            const bool normalMapped = lightmapped && normal &&
+            const bool normalMapped = (!r_normal || r_normal->current.enabled) && lightmapped && normal &&
                 WebRenderer_UsesWorldNormalMap(batch.technique);
-            const bool specularMapped = lightmapped && specular &&
+            const bool specularMapped = (!r_specular || r_specular->current.enabled) && lightmapped && specular &&
                 batch.reflectionTexture != 0u &&
                 WebRenderer_UsesWorldSpecularMap(batch.technique);
             const WebRendererRetainedPrimaryLight *primaryLight =
@@ -10147,9 +11692,8 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
             {
                 glUniform4fv(g_renderer.envMapParmsUniform, 1,
                     batch.envMapParms);
-                glActiveTexture(GL_TEXTURE8);
-                glBindTexture(GL_TEXTURE_CUBE_MAP,
-                    batch.reflectionTexture);
+                BindWorldTexture(GL_TEXTURE8, batch.reflectionTexture,
+                    0x72, true, false, GL_TEXTURE_CUBE_MAP);
                 glActiveTexture(GL_TEXTURE0);
             }
             else
@@ -10242,7 +11786,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         glActiveTexture(GL_TEXTURE0);
     }
-    else if (primarySurfaceReady && !emissiveCameraPass)
+    else if (primarySurfaceReady && !emissiveCameraPass && !floatZPass)
     {
         glActiveTexture(GL_TEXTURE0);
         glUniform1f(
@@ -10309,6 +11853,8 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
             // before material/texture setup; shadow submission is unchanged.
             if (batch.cameraInstanceCount == 0u) continue;
             if (splitLighting && IsEmissiveCameraBatch(batch.draw) != emissiveCameraPass) continue;
+            if (floatZPass && !HasFloatZTechnique(batch.draw)) continue;
+            if (!floatZPass && SkipDistortionBatch(batch.draw)) continue;
             // R_AddXModelSurfacesCamera reserves camera region 3 for geometry
             // that participates in shadow passes only (tree shadow facades
             // are the common retail example).
@@ -10328,6 +11874,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
             const WebRendererRetainedWorldImage *specular = RetainedImage(
                 g_renderer.retainedStaticModelImages,
                 batch.draw.specularImageIndex);
+            ResolveCinematicImages(batch.draw.technique, base, normal, detail, specular);
             const bool fallback = batch.draw.technique ==
                     WebRendererWorldTechnique::BackendFallback ||
                 !base;
@@ -10335,11 +11882,11 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 batch.draw.lightingMode ==
                     WebRendererWorldLightingMode::ModelLightGrid &&
                 g_renderer.retainedStaticModelLighting.texture != 0u;
-            const bool detailMapped = !fallback && detail &&
+            const bool detailMapped = (!r_detail || r_detail->current.enabled) && !fallback && detail &&
                 detail->texture != 0u;
-            const bool normalMapped = modelLit && normal &&
+            const bool normalMapped = (!r_normal || r_normal->current.enabled) && modelLit && normal &&
                 normal->texture != 0u;
-            const bool specularMapped = modelLit && specular &&
+            const bool specularMapped = (!r_specular || r_specular->current.enabled) && modelLit && specular &&
                 specular->texture != 0u &&
                 batch.draw.reflectionTexture != 0u &&
                 WebRenderer_UsesModelEnvironmentSpecular(
@@ -10372,9 +11919,8 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
             {
                 glUniform4fv(g_renderer.envMapParmsUniform, 1,
                     batch.draw.envMapParms);
-                glActiveTexture(GL_TEXTURE8);
-                glBindTexture(GL_TEXTURE_CUBE_MAP,
-                    batch.draw.reflectionTexture);
+                BindWorldTexture(GL_TEXTURE8, batch.draw.reflectionTexture,
+                    0x72, true, false, GL_TEXTURE_CUBE_MAP);
                 glActiveTexture(GL_TEXTURE0);
             }
             else
@@ -10467,6 +12013,9 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 const auto &draw = g_renderer.dynamicDraws[drawIndex];
                 const auto &batch = DynamicDrawBatch(draw);
                 if (splitLighting && IsEmissiveCameraBatch(batch) != emissiveCameraPass) continue;
+                if (floatZPass && !HasFloatZTechnique(batch)) continue;
+                if (!floatZPass && SkipDistortionBatch(batch)) continue;
+                if (!floatZPass && SkipUnavailableOutdoorCloud(batch)) continue;
                 if (batch.depthHack != depthHackPass) continue;
                 if (!WebRenderer_IsCameraVisibleXModelSurface(
                         batch.sourceKind, batch.cameraRegion))
@@ -10659,6 +12208,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 const WebRendererRetainedWorldImage *specular = RetainedImage(
                     g_renderer.retainedDynamicModelImages,
                     batch.specularImageIndex);
+                ResolveCinematicImages(batch.technique, base, normal, detail, specular);
                 const WebRendererRetainedPrimaryLight *primaryLight =
                     batch.primaryLightIndex <
                             g_renderer.retainedPrimaryLights.size()
@@ -10684,12 +12234,12 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                     batch.lightingMode ==
                         WebRendererWorldLightingMode::ModelLightGrid &&
                     g_renderer.retainedDynamicModelLighting.texture != 0u;
-                const bool detailMapped = !fallback && detail &&
+                const bool detailMapped = (!r_detail || r_detail->current.enabled) && !fallback && detail &&
                     detail->texture != 0u;
-                const bool normalMapped = normal && normal->texture != 0u &&
+                const bool normalMapped = (!r_normal || r_normal->current.enabled) && normal && normal->texture != 0u &&
                     (modelLit || (dynamicLightmapped &&
                         WebRenderer_UsesWorldNormalMap(batch.technique)));
-                const bool specularMapped = modelLit && specular &&
+                const bool specularMapped = (!r_specular || r_specular->current.enabled) && modelLit && specular &&
                     specular->texture != 0u &&
                     batch.reflectionTexture != 0u &&
                     WebRenderer_UsesModelEnvironmentSpecular(
@@ -10740,9 +12290,8 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 {
                     glUniform4fv(g_renderer.envMapParmsUniform, 1,
                         batch.envMapParms);
-                    glActiveTexture(GL_TEXTURE8);
-                    glBindTexture(GL_TEXTURE_CUBE_MAP,
-                        batch.reflectionTexture);
+                    BindWorldTexture(GL_TEXTURE8, batch.reflectionTexture,
+                        0x72, true, false, GL_TEXTURE_CUBE_MAP);
                     glActiveTexture(GL_TEXTURE0);
                 }
                 else
@@ -10847,16 +12396,32 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
     if (frameProfile)
         EndFrameProfileGpuQuery(WebFrameProfileGpuStage::DynamicFx);
 #endif
-    if (splitLighting && !emissiveCameraPass)
+    if (floatZPass)
+    {
+        const GLenum error = glGetError();
+        if (error != GL_NO_ERROR)
+        {
+            g_renderer.floatZPass = false;
+            Web_Log(WebLogLevel::Error, "[kisakcod-web] FloatZ prepass failed (0x%x).\n", error);
+            return false;
+        }
+        g_renderer.softParticleDepthReady = true;
+    }
+    if (splitLighting && !emissiveCameraPass && !floatZPass)
     {
 #if KISAK_WEB_DIAGNOSTICS
         if (frameProfile)
             BeginFrameProfileGpuQuery(*frameProfile, WebFrameProfileGpuStage::DynamicFx);
 #endif
-        completedDraws += DrawDynamicLights(staticModelLodsReady);
+        completedDraws += DrawDynamicLights(
+            staticModelLodsReady, spotShadowMapsDrawn);
 #if KISAK_WEB_DIAGNOSTICS
         EndFrameProfileGpuQuery(WebFrameProfileGpuStage::DynamicFx);
 #endif
+        if (distortionRequested && !ResolvePostSunTarget(
+                multisampleDraw ? g_renderer.multisampleFramebuffer :
+                    postProcessDraw ? g_renderer.sceneFramebuffer : 0u, width, height))
+            return false;
     }
     }
     if (sceneGeometryDraw)
@@ -11062,15 +12627,23 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 if (!batch.hasMaterialState && saved.command == WebRendererUiCommand::ShellShockFlashed)
                     glBlendFunc(GL_ONE, GL_ONE);
             }
-            const WebRendererRetainedWorldImage *image = RetainedImage(
+            const bool cinematic = WebRenderer_IsCinematicMaterial(batch.materialIdentity, 4);
+            const WebRendererRetainedWorldImage *image = cinematic ? CinematicImage(0) : RetainedImage(
                 g_renderer.retainedUiImages, batch.imageIndex);
+            if (cinematic)
+                for (unsigned plane = 1; plane < 4; ++plane)
+                {
+                    const auto *part = CinematicImage(plane);
+                    BindWorldTexture(plane == 1 ? GL_TEXTURE1 : plane == 2 ? GL_TEXTURE4 : GL_TEXTURE5,
+                        part ? part->texture : g_renderer.texture, 0x62, false);
+                }
             glUniform1f(g_renderer.textureEnabledUniform,
                 image || shellShock ? 1.0f : 0.0f);
             glUniform4fv(g_renderer.uiColorUniform, 1, color);
             BindWorldTexture(GL_TEXTURE0,
                 shellShock ? g_renderer.savedScreenTexture :
                     (image ? image->texture : g_renderer.texture),
-                shellShock ? 0x62u : batch.samplerState, !shellShock);
+                shellShock || cinematic ? 0x62u : batch.samplerState, !shellShock && !cinematic);
             const std::uintptr_t indexOffset =
                 static_cast<std::uintptr_t>(batch.firstIndex) *
                 sizeof(std::uint32_t);
@@ -11238,11 +12811,11 @@ bool WebRenderer_SetRawUiImage(const GfxImage *canonical, const std::uint8_t *rg
 }
 
 bool WebRenderer_UpdateUiImage(const GfxImage *canonical, const std::uint8_t *rgba,
-    std::size_t byteLength)
+    std::size_t byteLength, unsigned components)
 {
-    if (!canonical || !canonical->name || !rgba || canonical->mapType != MAPTYPE_2D ||
+    if ((components != 1 && components != 4) || !canonical || !canonical->name || !rgba || canonical->mapType != MAPTYPE_2D ||
         canonical->width < 1 || canonical->height < 1 || canonical->width > 1920 || canonical->height > 1080 ||
-        byteLength != static_cast<std::size_t>(canonical->width) * canonical->height * 4u) return false;
+        byteLength != static_cast<std::size_t>(canonical->width) * canonical->height * components) return false;
     auto &images = g_renderer.retainedUiImages;
     auto found = std::find_if(images.begin(), images.end(), [=](const auto &image) {
         return image.canonicalIdentity == canonical;
@@ -11250,7 +12823,7 @@ bool WebRenderer_UpdateUiImage(const GfxImage *canonical, const std::uint8_t *rg
     const auto previousBytes = found == images.end() ? 0 : found->decodedByteLength;
     if (RetainedImageStats(images).decodedBytes - previousBytes + byteLength >
         WEB_RENDERER_MAX_DECODED_TEXTURE_BYTES) return false;
-    if (found != images.end() && found->width == canonical->width && found->height == canonical->height)
+    if (found != images.end() && found->width == canonical->width && found->height == canonical->height && found->components == components)
     {
         found->pixels.assign(rgba, rgba + byteLength);
         if (!g_renderer.contextLost && found->texture)
@@ -11258,8 +12831,10 @@ bool WebRenderer_UpdateUiImage(const GfxImage *canonical, const std::uint8_t *rg
             GLint binding = 0;
             glGetIntegerv(GL_TEXTURE_BINDING_2D, &binding);
             glBindTexture(GL_TEXTURE_2D, found->texture);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, components == 1 ? 1 : 4);
             glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, canonical->width, canonical->height,
-                GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+                components == 1 ? GL_RED : GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
             glBindTexture(GL_TEXTURE_2D, binding);
         }
         return true;
@@ -11267,6 +12842,7 @@ bool WebRenderer_UpdateUiImage(const GfxImage *canonical, const std::uint8_t *rg
     std::vector<WebRendererRetainedWorldImage> replacement(1);
     auto &image = replacement[0];
     image.canonicalIdentity = canonical;
+    image.components = components;
     image.canonicalName = canonical->name;
     image.width = canonical->width;
     image.height = canonical->height;
@@ -11298,6 +12874,88 @@ void WebRenderer_ReleaseUiImage(const GfxImage *canonical)
 }
 
 #if KISAK_WEB_DIAGNOSTICS
+std::uint32_t WebRenderer_TestCinematicPixel(bool ui, int field)
+{
+    // One pixel through the material state and live code-image boundary.
+    // Native/Wasm frontend tests separately cover canonical world selection.
+    MaterialShaderArgument args[4]{};
+    for (unsigned i = 0; i < 4; ++i)
+    { args[i].type = 4; args[i].dest = 4 + i; args[i].u.codeSampler = static_cast<MaterialTextureSource>(22 + i); }
+    MaterialPixelShader shader{};
+    shader.name = "cinematic.hlsl";
+    MaterialTechnique technique{};
+    technique.passCount = 1;
+    technique.passArray[0].pixelShader = &shader;
+    technique.passArray[0].args = args;
+    technique.passArray[0].stableArgCount = 4;
+    MaterialTechniqueSet set{};
+    set.techniques[4] = &technique;
+    Material material{};
+    material.techniqueSet = &set;
+    WebRendererRetainedWorldBatch batch;
+    batch.materialIdentity = &material;
+    batch.technique = WebRendererWorldTechnique::Cinematic;
+    batch.stateBits[0] = 0x18008800u;
+    batch.stateBits[1] = 2;
+    const WebRendererRetainedWorldImage *y = nullptr, *cr = nullptr, *cb = nullptr, *a = nullptr;
+    ResolveCinematicImages(batch.technique, y, cr, cb, a);
+    if (!y || !cr || !cb || !a) return 0xff000000u;
+    if (field == 2) return y->texture;
+    std::vector<WebRendererSurfaceVertex> vertices(4);
+    const float positions[4][2]{{-1,-1},{1,-1},{1,1},{-1,1}};
+    const float tint[4]{0.5f, 1, 0.25f, 0.5f};
+    for (unsigned i = 0; i < 4; ++i)
+    {
+        std::copy_n(positions[i], 2, vertices[i].position);
+        std::copy_n(tint, 4, vertices[i].color);
+        vertices[i].textureCoordinate[0] = vertices[i].textureCoordinate[1] = 0.5f;
+    }
+    GLuint vao = 0, vbo = 0, ibo = 0;
+    const std::vector<std::uint32_t> indices{0,2,1,0,3,2};
+    if (!CreateSurfaceObjects(vertices, indices, vao, vbo, ibo)) return 0xff000000u;
+    GLuint framebuffer = 0, colorBuffer = 0;
+    glGenFramebuffers(1, &framebuffer);
+    glGenRenderbuffers(1, &colorBuffer);
+    glBindRenderbuffer(GL_RENDERBUFFER, colorBuffer);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, 1, 1);
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, colorBuffer);
+    glViewport(0, 0, 1, 1);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glClearColor(1, 0, 1, 1);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glUseProgram(g_renderer.program);
+    BindSceneSamplers();
+    const float identity[16]{1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
+    glUniformMatrix4fv(g_renderer.viewProjectionUniform, 1, GL_FALSE, identity);
+    glUniform1f(g_renderer.aspectUniform, 1);
+    glUniform1f(g_renderer.instanceEnabledUniform, 0);
+    glUniform4f(g_renderer.uiColorUniform, 1, 1, 1, 1);
+    if (ui)
+    {
+        WebRendererRetainedUiBatch uiBatch;
+        uiBatch.materialIdentity = &material;
+        uiBatch.hasMaterialState = true;
+        uiBatch.stateBits[0] = batch.stateBits[0];
+        ApplyUiMaterialState(uiBatch);
+    }
+    else ApplyWorldMaterialState(batch);
+    BindWorldTexture(GL_TEXTURE0, y->texture, 0x62, false);
+    BindWorldTexture(GL_TEXTURE1, cr->texture, 0x62, false);
+    BindWorldTexture(GL_TEXTURE4, cb->texture, 0x62, false);
+    BindWorldTexture(GL_TEXTURE5, a->texture, 0x62, false);
+    glBindVertexArray(vao);
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
+    std::uint8_t pixel[4]{};
+    glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+    const std::uint32_t failure = glGetError() == GL_NO_ERROR ? 0u : 0xff000000u;
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glDeleteFramebuffers(1, &framebuffer);
+    glDeleteRenderbuffers(1, &colorBuffer);
+    DeleteSurfaceObjects(vao, vbo, ibo);
+    return failure | (field == 1 ? pixel[3] : pixel[0] | (pixel[1] << 8u) | (pixel[2] << 16u));
+}
+
 std::uint32_t WebRenderer_TestDrawPixel(int x, int y)
 {
     WebRenderer_DrawFrame({0u, 0u});

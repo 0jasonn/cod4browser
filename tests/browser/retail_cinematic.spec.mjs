@@ -15,6 +15,15 @@ const test = base.extend({
         });
         try { await use(context.pages()[0] ?? await context.newPage()); }
         finally {
+            if (testInfo.status !== testInfo.expectedStatus) {
+                const page = context.pages()[0];
+                const evidence = await page?.evaluate(() => ({
+                    events: globalThis.__movieEvents,
+                    audio: globalThis.__movieAudio,
+                })).catch(() => null);
+                await testInfo.attach("cinematic-failure", { contentType: "application/json",
+                    body: Buffer.from(JSON.stringify(evidence ?? null)) });
+            }
             try { await context.close(); }
             finally { await rm(profile, { recursive: true, force: true, maxRetries: 5 }); }
         }
@@ -56,6 +65,14 @@ test("owned Killhouse movie renders, pauses, completes and accepts native skip",
         expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.assets.manifest.files
             .some(({ path }) => path === "main/video/killhouse_load.bik"))).toBe(true);
         await page.locator("#game-canvas").click({ position: { x: 5, y: 5 } });
+        // The canvas gesture unlocks audio and also queues native K_MOUSE1.
+        // Consume it before starting a skippable movie; command execution can
+        // otherwise precede IN_Frame after synchronous startup work.
+        await expect(page.locator("#boot-log")).toContainText("Browser mouse button reached canonical input");
+        const bindings = await call(page, 4);
+        expect(bindings).toBe(4);
+        await expect(page.locator("#boot-log")).toContainText(
+            "CINEMATIC_MATERIAL name=cinematic type=4 pass=0 mask=15 tech=cinematic ps=cinematic.hlsl");
         await page.evaluate(() => {
             const driver = globalThis.__KISAKCOD_WEB__.module.audioDriver;
             const original = driver.handleCommand.bind(driver);
@@ -98,16 +115,71 @@ test("owned Killhouse movie renders, pauses, completes and accepts native skip",
             events.find(({ state }) => state === "started").wallTime;
         expect(elapsed).toBeGreaterThan(37_000 + 700);
         expect(elapsed).toBeLessThan(42_000);
+        // Reuse the second playback to exercise actual device delay/suspension.
+        // No movie or game state is invented; only device command delivery waits.
+        await page.evaluate(() => {
+            const driver = globalThis.__KISAKCOD_WEB__.module.audioDriver;
+            const original = driver.handleCommand.bind(driver);
+            globalThis.__deliverMovieAudio = original;
+            driver.handleCommand = (command) => {
+                if (command.op === "source-play" && command.aliasName === "$cinematic") {
+                    globalThis.__heldMovieAudio = command;
+                    return true;
+                }
+                return original(command);
+            };
+        });
         await submit();
+        await page.waitForTimeout(900);
+        expect(await call(page, 0)).toBe(0);
+        expect(await call(page, 3)).toBe(1);
+        await page.evaluate(() => {
+            const driver = globalThis.__KISAKCOD_WEB__.module.audioDriver;
+            driver.handleCommand = globalThis.__deliverMovieAudio;
+            driver.handleCommand(globalThis.__heldMovieAudio);
+        });
         await expect.poll(() => call(page, 0)).toBeGreaterThan(300);
+        await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.audioDriver.context.suspend());
+        // Allow the bounded 25-ms device snapshot and pending frame to arrive.
+        await page.waitForTimeout(200);
+        const devicePausedAt = await call(page, 0);
+        await page.waitForTimeout(900);
+        expect(await call(page, 0)).toBe(devicePausedAt);
+        expect(await call(page, 3)).toBe(1);
+        await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.audioDriver.context.resume());
+        await expect.poll(() => call(page, 0)).toBeGreaterThan(devicePausedAt + 500);
+        const beforeStall = await call(page, 0);
+        await page.evaluate(() => {
+            const until = performance.now() + 900;
+            while (performance.now() < until) { /* simulate a blocked DOM host */ }
+        });
+        // Give queued device feedback time to arrive and several video pumps
+        // to catch up. A wall-time movie jumps about 1050 ms here; a PCM-led
+        // movie consumes its short queued lead, then the resumed 150 ms.
+        await page.waitForTimeout(150);
+        const afterStall = await call(page, 0);
+        expect(afterStall - beforeStall).toBeLessThan(500);
+        await expect.poll(() => call(page, 0)).toBeGreaterThan(afterStall + 500);
+        expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.call(
+            "_KisakWeb_TestLoseWebGLContext"))).toBe(1);
+        await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state)).toBe("renderer-lost");
+        await page.waitForTimeout(300);
+        expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.call(
+            "_KisakWeb_TestRestoreWebGLContext"))).toBe(1);
+        await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state)).toBe("running");
+        const recoveredAt = await call(page, 0);
+        await expect.poll(() => call(page, 0)).toBeGreaterThan(recoveredAt + 500);
+        await page.locator("#game-canvas").screenshot({ path: testInfo.outputPath("movie-recovered.png") });
         await page.locator("#game-canvas").focus();
         await page.keyboard.press("Escape");
         await expect.poll(() => call(page, 3)).toBe(2);
         expect(failures).toEqual([]);
+        const evidence = { events, elapsed, audio, devicePausedAt,
+            stallVideoAdvance: afterStall - beforeStall, browser: testInfo.project.name };
         await writeFile(testInfo.outputPath("cinematic-evidence.json"),
-            JSON.stringify({ events, elapsed, audio, browser: testInfo.project.name }, null, 2));
+            JSON.stringify(evidence, null, 2));
         await testInfo.attach("cinematic-evidence", { contentType: "application/json",
-            body: Buffer.from(JSON.stringify({ events, elapsed, audio, browser: testInfo.project.name })) });
+            body: Buffer.from(JSON.stringify(evidence)) });
     });
 
 test("production movie plays owned frames and completes through the shipped command", {
@@ -128,6 +200,7 @@ test("production movie plays owned frames and completes through the shipped comm
     await expect(page.locator(".asset-control")).toHaveAttribute("data-asset-state", "ready", { timeout: 300_000 });
     await expect(page.locator("#boot-log")).toContainText("canonical runtime started", { timeout: 300_000 });
     await page.locator("#game-canvas").click({ position: { x: 5, y: 5 } });
+    await expect(page.locator("#boot-log")).toContainText("Browser mouse button reached canonical input");
     await page.evaluate(async () => {
         const { WebAudioDriver } = await import("/web_audio_driver.mjs");
         const original = WebAudioDriver.prototype.handleCommand;

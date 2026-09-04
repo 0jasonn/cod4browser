@@ -6,6 +6,7 @@
 #include <array>
 #include <cstdint>
 #include <vector>
+#include <span>
 
 struct GfxWorld;
 
@@ -69,6 +70,15 @@ bool WebRenderer_BuildStaticModelSpotShadowVisibility(
     std::uint32_t primaryLightIndex,
     std::uint8_t *visibility,
     std::uint32_t visibilityCount) noexcept;
+
+// LOD-packed instances and bounds keep matching slots; canonical IDs address
+// camera DPVS. The mask is per-pass scratch, independent of shadow membership.
+bool WebRenderer_BuildStaticModelLightVisibility(
+    std::span<const WebRendererStaticModelInstanceDesc> instances,
+    std::span<const WebRendererStaticModelShadowBounds> bounds,
+    std::span<const std::uint8_t> cameraVisibility, bool cameraVisibilityComputed,
+    const GfxLight &light, float spotNearPlaneOffset,
+    std::span<std::uint8_t> destination) noexcept;
 
 // Backend packing only: canonical indices address DPVS, never group offsets.
 // Destination is separate from the LOD-packed shadow range and has sourceCount capacity.

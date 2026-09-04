@@ -41,7 +41,7 @@ jobs:
           pushd
           mkdir build-${{ matrix.config }}
           cd build-${{ matrix.config }}
-          cmake -G "Visual Studio 17 2022" -A Win32 -DDXSDK_DIR="${{ env.DXSDK_DIR }}" -DCICD=1 -DCMAKE_BUILD_TYPE=${{ matrix.config }} ..
+          cmake -G "Visual Studio 17 2022" -A Win32 -DDXSDK_DIR="${{ env.DXSDK_DIR }}" -DCICD=1 -DKISAK_COPY_RUNTIME_DLLS=OFF -DCMAKE_BUILD_TYPE=${{ matrix.config }} ..
           popd
 
       - name: Build ${{ matrix.config }}
@@ -52,9 +52,5 @@ jobs:
           cmake --build build-${{ matrix.config }} --config ${{ matrix.config }} --target "KisakCOD-dedi"
           popd
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: KisakCOD-${{ matrix.config }}
-          path: ${{ github.workspace }}/bin
-          compression-level: 9
-          retention-days: 1
+      # This native reference job is compile-only. Its inherited bin directory
+      # is not a distributable package; browser releases use web-port.yml.

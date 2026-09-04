@@ -127,19 +127,23 @@ Error Parse(std::span<const std::uint8_t> bytes, Metadata &metadata) noexcept;
 // ARGB by the engine, serialized as BGRA) retains its original strict one-mip
 // boundary. Bitmap formats 2-4, wavelet formats 6-10, DXT1, DXT3, and DXT5
 // accept an exact 2D mip chain in COD4's smallest-to-largest file order and
-// decode only the largest level. The streaming and U/V clamp policy bits do
+// decode the selected firstMip level (zero selects the largest). Native
+// no-picmip/no-mipmap and small-IWI exemptions override that selection;
+// requests otherwise clamp to the stored chain. The streaming and U/V clamp policy bits do
 // not alter that layout and are accepted. Cubemaps, volumes, unknown flags,
 // malformed block layouts, and output above the shared recovery ceiling fail
 // closed. Input and output may alias; output is replaced only after complete
 // validation, allocation, and conversion.
 Error DecodeRgba8(
     std::span<const std::uint8_t> bytes,
-    Rgba8Image &image) noexcept;
+    Rgba8Image &image,
+    std::uint32_t firstMip = 0u) noexcept;
 // Applies the same format, flag, size, and layout validation as DecodeRgba8
 // without allocating or converting pixel storage.
 Error InspectRgba8(
     std::span<const std::uint8_t> bytes,
-    Rgba8Layout &layout) noexcept;
+    Rgba8Layout &layout,
+    std::uint32_t firstMip = 0u) noexcept;
 
 // Decodes the complete authored mip chain of all six faces from a bounded
 // COD4 IWI cubemap.
@@ -152,7 +156,9 @@ Error DecodeCubeRgba8(
 // Decodes the complete authored two-dimensional mip chain from a canonical
 // DB-owned GfxImageLoadDef payload. Unlike an IWI member, this payload has no
 // file header and stores mip levels in native upload order (largest to
-// smallest).
+// smallest). firstMip drops higher authored levels after validating the full
+// encoded layout; the output retains every remaining authored level. Native
+// no-picmip flags override selection, and requests clamp to the stored chain.
 // Canonical L8 and A8L8 load definitions expand luminance into RGBA8 and the
 // output is bounded by MAX_LOADDEF_RGBA8_BYTES for retail lightmap atlases.
 // The scalar arguments mirror GfxImageLoadDef so qcommon remains independent
@@ -164,7 +170,8 @@ Error DecodeLoadDefRgba8(
     std::uint16_t height,
     std::uint16_t depth,
     std::span<const std::uint8_t> payload,
-    Rgba8Image &image) noexcept;
+    Rgba8Image &image,
+    std::uint32_t firstMip = 0u) noexcept;
 // Applies the same canonical load-definition validation as
 // DecodeLoadDefRgba8 without allocating or converting pixel storage.
 Error InspectLoadDefRgba8(
@@ -174,7 +181,8 @@ Error InspectLoadDefRgba8(
     std::uint16_t height,
     std::uint16_t depth,
     std::span<const std::uint8_t> payload,
-    Rgba8Layout &layout) noexcept;
+    Rgba8Layout &layout,
+    std::uint32_t firstMip = 0u) noexcept;
 
 // Decodes the complete authored chain from a canonical DB-owned cubemap load
 // definition. Native Load_Texture stores this payload face-major, with each

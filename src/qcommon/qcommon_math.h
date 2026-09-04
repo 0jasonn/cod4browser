@@ -1,5 +1,14 @@
 #pragma once
 
+// Native packed normal/tangent arithmetic, shared with portable draw adapters.
+inline void Q_UnpackUnitVec(const unsigned char value[4], float out[3])
+{
+    const float scale = (value[3] - -192.0f) / 32385.0f;
+    out[0] = (value[0] - 127.0f) * scale;
+    out[1] = (value[1] - 127.0f) * scale;
+    out[2] = (value[2] - 127.0f) * scale;
+}
+
 #if defined(_WIN32) && (defined(_M_IX86) || defined(_M_X64))
 #include <xmmintrin.h>
 #include <intrin.h>

@@ -3,6 +3,26 @@
 
 struct GfxWorld;
 struct GfxAabbTree;
+struct DynEntityPose;
+struct DynEntityDef;
+
+// Returns false for malformed BSP/bounds; an ordinary miss sets inside=false.
+bool R_QueryBoundsInCell(const GfxWorld &world, unsigned cellIndex,
+    const float mins[3], const float maxs[3], bool &inside) noexcept;
+
+// Native dpvsDyn model/brush banks, indexed by DynEntityDrawType (0/1).
+bool R_DynEntityCellLayoutAvailable(const GfxWorld &world, unsigned kind) noexcept;
+bool R_ClearDynEntityCellLinks(GfxWorld &world, unsigned kind) noexcept;
+bool R_UnlinkDynEntityFromCells(GfxWorld &world, unsigned kind,
+    unsigned entityIndex) noexcept;
+bool R_LinkDynEntityBoundsToCells(GfxWorld &world, unsigned kind,
+    unsigned entityIndex, const float mins[3], const float maxs[3]) noexcept;
+bool R_CullDynEntityCell(const GfxWorld &world, unsigned kind, unsigned cellIndex,
+    const DynEntityPose *poses, const DynEntityDef *definitions,
+    const DpvsPlane *planes, int planeCount, unsigned char *visibility) noexcept;
+
+using DpvsCellObserver = void (*)(void *, const GfxCell *,
+    const DpvsPlane *, unsigned char, unsigned char);
 
 // Canonical DPVS state plus the native frontend dispatch/debug boundary.
 // No device objects or scene-entity buffers are required by static visibility.
@@ -13,6 +33,8 @@ struct DpvsContext
     DpvsGlobals &dpvsGlob;
     unsigned localClientNum;
     float farPlaneDist;
+    DpvsCellObserver observeCell = nullptr;
+    void *observeCellUser = nullptr;
     bool drawSModels = true;
     bool drawWorld = false;
     unsigned char *g_smodelVisData = nullptr;
@@ -128,5 +150,89 @@ void __cdecl R_SetDpvsPlaneSides(DpvsPlane *plane);
 // includeWorldSurfaces adds canonical AABB surfaces and cell cull groups.
 bool R_ComputeStaticCameraVisibility(GfxWorld &world, DpvsGlobals &dpvs,
     const GfxViewParms &viewParms, unsigned localClientNum, float farPlaneDist,
-    bool includeWorldSurfaces = false);
+    bool includeWorldSurfaces = false,
+    DpvsCellObserver observeCell = nullptr,
+    void *observeCellUser = nullptr);
 void R_ClearStaticDpvsView(GfxWorld &world, unsigned viewIndex, bool clearSurfaces);
+
+enum class DpvsSceneEntityKind : std::uint8_t
+{
+    DObj = 0,
+    Brush = 1,
+};
+
+enum class DpvsSceneEntityCellLink : std::uint8_t
+{
+    Unavailable = 0,
+    Unlinked,
+    Linked,
+};
+
+// Browser builds do not compile the native renderer scene buffers, but the
+// canonical world still owns the same fixed sceneEntCellBits layout. These
+// bounded helpers preserve R_FilterEntIntoCells_r linkage without importing
+// the D3D scene frontend.
+bool R_ClearSceneEntityCellLinks(GfxWorld &world,
+    unsigned localClientNum, std::uint32_t entityCount) noexcept;
+bool R_UnlinkSceneEntityFromCells(GfxWorld &world,
+    unsigned localClientNum, std::uint32_t entityCount,
+    std::uint32_t entityNumber) noexcept;
+DpvsSceneEntityCellLink R_LinkSceneEntityBoundsToCells(GfxWorld &world,
+    unsigned localClientNum, std::uint32_t entityCount,
+    std::uint32_t entityNumber, DpvsSceneEntityKind kind,
+    const float mins[3], const float maxs[3]) noexcept;
+DpvsSceneEntityCellLink R_QuerySceneEntityCellLink(const GfxWorld &world,
+    unsigned localClientNum, std::uint32_t entityCount,
+    std::uint32_t entityNumber, std::uint32_t cellIndex,
+    DpvsSceneEntityKind kind) noexcept;
+// Tests canonical BSP cell overlap against the visible-cell mask produced by
+// R_ComputeStaticCameraVisibility. Unavailable or malformed data is admitted
+// conservatively so this helper never turns a validation failure into a
+// disappearing scene object.
+bool R_BoundsTouchVisibleCell(const GfxWorld &world,
+    const std::uint32_t *visibleCellBits,
+    const float mins[3], const float maxs[3]) noexcept;
+bool R_SphereTouchesVisibleCell(const GfxWorld &world,
+    const std::uint32_t *visibleCellBits,
+    const float origin[3], float radius) noexcept;
+
+namespace kisak::dpvs
+{
+// Canonical dynamic-scene plane tests extracted from r_dpvs_sceneent.cpp and
+// r_dpvs_dynmodel.cpp. A non-positive maximum distance is outside, including
+// the tangent case, exactly as the native frontend treats it.
+inline bool CullSphere(const float origin[3], float radius,
+    const DpvsPlane *planes, int planeCount) noexcept
+{
+    if (!origin || !planes || planeCount <= 0 || radius < 0.0f)
+        return true;
+    for (int planeIndex = 0; planeIndex < planeCount; ++planeIndex)
+    {
+        const DpvsPlane &plane = planes[planeIndex];
+        const float distance =
+            plane.coeffs[0] * origin[0] +
+            plane.coeffs[1] * origin[1] +
+            plane.coeffs[2] * origin[2] + plane.coeffs[3];
+        if (distance + radius <= 0.0f) return true;
+    }
+    return false;
+}
+
+inline bool CullBox(const float mins[3], const float maxs[3],
+    const DpvsPlane *planes, int planeCount) noexcept
+{
+    if (!mins || !maxs || !planes || planeCount <= 0)
+        return true;
+    for (int planeIndex = 0; planeIndex < planeCount; ++planeIndex)
+    {
+        const DpvsPlane &plane = planes[planeIndex];
+        float distance = plane.coeffs[3];
+        for (int axis = 0; axis < 3; ++axis)
+            distance += plane.coeffs[axis] >= 0.0f
+                ? plane.coeffs[axis] * maxs[axis]
+                : plane.coeffs[axis] * mins[axis];
+        if (distance <= 0.0f) return true;
+    }
+    return false;
+}
+} // namespace kisak::dpvs

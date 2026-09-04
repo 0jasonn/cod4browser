@@ -1,4 +1,9 @@
 import {
+    acceptFilesystemProgress,
+    armWorkerRequestTimeout,
+    clearRequestTimers,
+    FILESYSTEM_ABSOLUTE_TIMEOUT_MS,
+    validateFilesystemTimeout,
     createFilesystemLeases,
     createRequestIdAllocator,
     rejectWorkerRequests,
@@ -15,8 +20,6 @@ import {
 } from "./product_protocol.mjs";
 
 const FILESYSTEM_STALL_TIMEOUT_MS = 30_000;
-const FILESYSTEM_ABSOLUTE_TIMEOUT_MS = 5 * 60_000;
-const MAX_FILESYSTEM_TIMEOUT_MS = 10 * 60_000;
 
 export const FILESYSTEM_STATES = Object.freeze({
     UNMOUNTED: "unmounted",
@@ -56,7 +59,14 @@ export function createEngineWorkerHost(canvas, {
         type: "module",
         name: "kisakcod-engine",
     });
+    let audioFeedbackPending = false;
     const audioDriver = audioDriverFactory({
+        onPlaybackState: (message) => {
+            if (!workerUnavailable && !audioFeedbackPending) {
+                audioFeedbackPending = true;
+                worker.postMessage(message);
+            }
+        },
         onDiagnostic: (message) => onLog?.(`[kisakcod-web] ${message}`, "warn"),
     });
     audioDriver.attachGestureResume(canvas);
@@ -97,13 +107,6 @@ export function createEngineWorkerHost(canvas, {
         }
     }
 
-    function validateFilesystemTimeout(timeoutMs, name)
-    {
-        if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 ||
-            timeoutMs > MAX_FILESYSTEM_TIMEOUT_MS) {
-            throw new RangeError(`${name} timeout must be 1..${MAX_FILESYSTEM_TIMEOUT_MS} ms.`);
-        }
-    }
     validateFilesystemTimeout(filesystemStallTimeoutMs, "Filesystem stall");
     validateFilesystemTimeout(filesystemAbsoluteTimeoutMs, "Filesystem absolute");
     if (filesystemAbsoluteTimeoutMs < filesystemStallTimeoutMs) {
@@ -111,13 +114,6 @@ export function createEngineWorkerHost(canvas, {
     }
     if (mountTimeoutMs !== undefined) validateFilesystemTimeout(mountTimeoutMs, "Mount stall");
     if (flushTimeoutMs !== undefined) validateFilesystemTimeout(flushTimeoutMs, "Flush stall");
-
-    function clearRequestTimers(request)
-    {
-        clearTimeout(request.timeout);
-        clearTimeout(request.absoluteTimeout);
-    }
-
 
     /**
      * @param {string} type
@@ -176,17 +172,9 @@ export function createEngineWorkerHost(canvas, {
                 resolve, reject, timeout: null, signal, abort,
                 absoluteTimeout: null,
                 stallTimeoutMs,
-                generation: workerGeneration,
+                generation: workerGeneration, operation: type,
             };
-            request.timeout = setTimeout(() => expire(usesProgressWatchdog
-                ? `The engine Worker made no filesystem progress for ${stallTimeoutMs} ms.`
-                : `The engine Worker did not answer within ${timeoutMs} ms.`),
-            usesProgressWatchdog ? stallTimeoutMs : timeoutMs);
-            if (usesProgressWatchdog) {
-                request.absoluteTimeout = setTimeout(() => expire(
-                    `The filesystem operation exceeded its ${absoluteTimeoutMs} ms absolute limit.`),
-                absoluteTimeoutMs);
-            }
+            armWorkerRequestTimeout(request, { timeoutMs, stallTimeoutMs, absoluteTimeoutMs }, expire);
             pending.set(id, request);
             signal?.addEventListener("abort", abort, { once: true });
         });
@@ -221,18 +209,7 @@ export function createEngineWorkerHost(canvas, {
             break;
         case "filesystem-progress": {
             const request = pending.get(message.id);
-            if (!request || request.generation !== workerGeneration ||
-                request.stallTimeoutMs === undefined) break;
-            clearTimeout(request.timeout);
-            request.timeout = setTimeout(() => {
-                if (!pending.delete(message.id)) return;
-                clearRequestTimers(request);
-                request.signal?.removeEventListener("abort", request.abort);
-                request.reject(new EngineWorkerError(protocolError(
-                    "REQUEST_TIMEOUT", message.operation,
-                    `The engine Worker made no filesystem progress for ${request.stallTimeoutMs} ms.`,
-                    true)));
-            }, request.stallTimeoutMs);
+            if (!acceptFilesystemProgress(request, message, workerGeneration)) break;
             onFilesystemProgress?.(message.progress);
             break;
         }
@@ -249,6 +226,9 @@ export function createEngineWorkerHost(canvas, {
                 audioDriver.dispose();
             }
             globalThis.dispatchEvent(new CustomEvent(message.name, { detail: message.detail }));
+            break;
+        case "audio-playback-ack":
+            if (message.version === 1) audioFeedbackPending = false;
             break;
         case "audio-command": audioDriver.handleCommand(message); break;
         case "cursor":
@@ -434,6 +414,9 @@ export function createEngineWorkerHost(canvas, {
                 });
                 return Promise.resolve(true);
             } catch (error) {
+                // A key and its character can arrive in the same DOM callback.
+                // Stop delivery before the rejected promise reaches the host.
+                workerUnavailable = true;
                 return Promise.reject(error);
             }
         },

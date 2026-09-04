@@ -47,7 +47,12 @@ export async function mountWorkerFilesystem(
     try {
         const mounted = await filesystem.mount(manifest, report);
         runtimeMountStarted = true;
-        mountRuntime();
+        const stopReadProgress = filesystem.observeReadProgress(report);
+        try {
+            mountRuntime();
+        } finally {
+            stopReadProgress();
+        }
         await filesystem.checkpoint(report);
         return mounted;
     } catch (error) {
@@ -86,6 +91,21 @@ export function createWorkerSyncFilesystem(faults = null)
     let flushPromise = null;
     let homeBytes = 0;
     let module = null;
+    let readProgress = null;
+
+    // Native bootstrap is synchronous and cannot run a timer heartbeat.
+    // Successful reads report actual work to the host during this scope.
+    function observeReadProgress(report)
+    {
+        const previous = readProgress;
+        let bytesProcessed = 0;
+        readProgress = report ? (bytes) => {
+            bytesProcessed += bytes;
+            report({ phase: "runtime-loading", filesProcessed: 0, bytesProcessed });
+        } : null;
+        report?.({ phase: "runtime-loading", filesProcessed: 0, bytesProcessed });
+        return () => { readProgress = previous; };
+    }
 
     function closeMountedFilesystem()
     {
@@ -740,6 +760,7 @@ export function createWorkerSyncFilesystem(faults = null)
                     module.HEAPU8.subarray(destination, destination + length),
                 );
                 if (bytesRead >= 0) open.position += bytesRead;
+                if (bytesRead > 0) readProgress?.(bytesRead);
                 return bytesRead;
             },
             write(descriptor, source, length) {
@@ -795,5 +816,6 @@ export function createWorkerSyncFilesystem(faults = null)
         checkpoint,
         flushAndUnmount,
         installForModule,
+        observeReadProgress,
     });
 }

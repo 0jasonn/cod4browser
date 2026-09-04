@@ -121,6 +121,38 @@ WebRendererFxModelSubmission Submission(
     return submission;
 }
 
+void TestCanonicalReceiverSphere()
+{
+    Fixture fixture;
+    fixture.model.radius = 7.0f;
+    auto submission = Submission(fixture);
+    submission.placement.scale = 3.0f;
+    submission.placement.base.origin[0] = 13.0f;
+    submission.placement.base.origin[1] = -4.0f;
+    submission.placement.base.origin[2] = 5.0f;
+    WebRendererFxModelSceneCommand command;
+    for (unsigned dynamic = 0; dynamic < 2; ++dynamic)
+    {
+        submission.sourceKind = dynamic ? WebRendererSceneBatchKind::DynamicXModel
+            : WebRendererSceneBatchKind::FxXModel;
+        submission.dynamicEntityRadius = 9.0f;
+        assert(WebRenderer_BuildFxModelSceneCommand(&submission, 1, command) ==
+            WebRendererFxModelSceneResult::Success);
+        for (const auto &batch : command.batches)
+        {
+            assert(batch.transientLightSphere[0] == 13.0f);
+            assert(batch.transientLightSphere[1] == -4.0f);
+            assert(batch.transientLightSphere[2] == 5.0f);
+            assert(batch.transientLightSphere[3] == (dynamic ? 9.0f : 21.0f));
+        }
+    }
+    submission.dynamicEntityRadius = -1.0f;
+    std::uint32_t dropped = 0;
+    assert(WebRenderer_BuildFxModelSceneCommand(&submission, 1, command, &dropped) ==
+        WebRendererFxModelSceneResult::NoFxModel);
+    assert(dropped == 1);
+}
+
 void TestIdentityAndCanonicalSurfaceData()
 {
     Fixture fixture;
@@ -144,6 +176,7 @@ void TestIdentityAndCanonicalSurfaceData()
     assert(command.batches[0].stateBits[0] == 0x18008800u);
     assert(command.batches[0].sourceKind == WebRendererSceneBatchKind::FxXModel);
     assert(!command.batches[0].castsSunShadow);
+    assert(!command.batches[0].castsSpotShadow);
     assert(command.batches[0].technique == WebRendererWorldTechnique::BaseTexture);
     assert(command.vertices[0].normal[2] == 1.0f);
 
@@ -162,6 +195,7 @@ void TestIdentityAndCanonicalSurfaceData()
     assert(command.batches[0].sourceKind ==
         WebRendererSceneBatchKind::DynamicXModel);
     assert(!command.batches[0].castsSunShadow);
+    assert(!command.batches[0].castsSpotShadow);
     fixture.material.info.gameFlags = 0u;
     fixture.shadowTechnique.passCount = 1u;
     fixture.techniqueSet.techniques[
@@ -173,6 +207,7 @@ void TestIdentityAndCanonicalSurfaceData()
         &dynamicSubmission, 1u, command) ==
         WebRendererFxModelSceneResult::Success);
     assert(command.batches[0].castsSunShadow);
+    assert(command.batches[0].castsSpotShadow);
     assert(command.batches[0].shadowStateBits0 == 0x0000c800u);
     assert(command.batches[0].lightingMode ==
         WebRendererWorldLightingMode::ModelLightGrid);
@@ -312,7 +347,7 @@ void TestFailureLeavesDestinationUntouched()
     assert(command.indices == originalIndices);
 
     fixture.indices[1] = 2u;
-    fixture.surfaces[0].deformed = true;
+    fixture.surfaces[0].verts0 = nullptr;
     dropped = 0u;
     assert(WebRenderer_BuildFxModelSceneCommand(&valid, 1u, command,
         &dropped) ==
@@ -326,7 +361,7 @@ void TestFailureLeavesDestinationUntouched()
     Fixture validLater;
     twoSurface.model.lodInfo[0].numsurfs = 2u;
     twoSurface.model.lodInfo[0].surfIndex = 0u;
-    twoSurface.surfaces[1].deformed = true;
+    twoSurface.surfaces[1].verts0 = nullptr;
     const WebRendererFxModelSubmission mixed[2] = {
         Submission(twoSurface), Submission(validLater)};
     dropped = 0u;
@@ -337,6 +372,47 @@ void TestFailureLeavesDestinationUntouched()
     assert(command.surfaceCount == 1u);
     assert(command.batches.size() == 1u);
     assert(command.batches[0].modelIdentity == &validLater.model);
+}
+
+void TestDeformedPlacementOnlyModelsUseAuthoredVertices()
+{
+    Fixture fixture;
+    fixture.model.lodInfo[0].numsurfs = 2u;
+    WebRendererFxModelSubmission submission = Submission(fixture);
+    submission.placement.base.quat[2] = std::sqrt(0.5f);
+    submission.placement.base.quat[3] = std::sqrt(0.5f);
+    submission.placement.base.origin[0] = 10.0f;
+    submission.placement.scale = 2.0f;
+    WebRendererFxModelSceneCommand rigid, deformed;
+    assert(WebRenderer_BuildFxModelSceneCommand(&submission, 1u, rigid) ==
+        WebRendererFxModelSceneResult::Success);
+    // Native R_TessXModelRigidSkinnedDrawSurfList uploads the same verts0
+    // directly. This path has no DObj or bone matrices and must not require
+    // vertInfo.blend weights. Retain mixed rigid/deformed surfaces atomically.
+    fixture.surfaces[1].deformed = true;
+    std::uint32_t dropped = 0u;
+    assert(WebRenderer_BuildFxModelSceneCommand(&submission, 1u, deformed,
+        &dropped) == WebRendererFxModelSceneResult::Success);
+    assert(dropped == 0u);
+    assert(deformed.modelCount == 1u && deformed.surfaceCount == 2u);
+    assert(deformed.vertices.size() == rigid.vertices.size());
+    assert(std::memcmp(deformed.vertices.data(), rigid.vertices.data(),
+        rigid.vertices.size() * sizeof(WebRendererSurfaceVertex)) == 0);
+    assert(deformed.indices == rigid.indices);
+    assert(deformed.batches.size() == 2u);
+    assert(deformed.batches[0].dynamicLightSurfType == 7u);
+    assert(deformed.batches[1].dynamicLightSurfType == 8u);
+    assert(deformed.batches[1].modelIdentity == &fixture.model);
+    assert(deformed.batches[1].materialIdentity == &fixture.material);
+    assert(std::fabs(deformed.vertices[3].position[0] - 10.0f) < 0.0001f);
+    assert(std::fabs(deformed.vertices[3].position[1] - 2.0f) < 0.0001f);
+    submission.sourceKind = WebRendererSceneBatchKind::DynamicXModel;
+    assert(WebRenderer_BuildFxModelSceneCommand(&submission, 1u, deformed) ==
+        WebRendererFxModelSceneResult::Success);
+    assert(deformed.surfaceCount == 2u);
+    assert(deformed.batches[1].sourceKind == WebRendererSceneBatchKind::DynamicXModel);
+    assert(deformed.batches[0].dynamicLightSurfType == 7u);
+    assert(deformed.batches[1].dynamicLightSurfType == 8u);
 }
 
 void TestRetainCopyOverflowAndClear()
@@ -455,6 +531,22 @@ void TestAtomicCompositionAndOutputLimits()
 
 int main()
 {
+    assert(WebRenderer_IsTransientLightReceiver(
+        WebRendererSceneBatchKind::DynamicDObj));
+    assert(WebRenderer_IsTransientLightReceiver(
+        WebRendererSceneBatchKind::DynamicXModel));
+    assert(WebRenderer_IsTransientLightReceiver(
+        WebRendererSceneBatchKind::DynamicBModel));
+    assert(WebRenderer_IsTransientLightReceiver(
+        WebRendererSceneBatchKind::FxXModel));
+    assert(!WebRenderer_IsTransientLightReceiver(
+        WebRendererSceneBatchKind::FxCodeMesh));
+    assert(!WebRenderer_IsTransientLightReceiver(
+        WebRendererSceneBatchKind::FxMarkMesh));
+    assert(!WebRenderer_IsTransientLightReceiver(
+        WebRendererSceneBatchKind::FxParticleCloud));
+    assert(!WebRenderer_IsTransientLightReceiver(
+        WebRendererSceneBatchKind::SunSprite));
     assert(WebRenderer_IsFxVertexColorBatch(
         WebRendererSceneBatchKind::FxCodeMesh));
     assert(WebRenderer_IsFxVertexColorBatch(
@@ -476,10 +568,12 @@ int main()
     assert(!WebRenderer_IsFxVertexColorBatch(
         WebRendererSceneBatchKind::WorldSurface));
     TestIdentityAndCanonicalSurfaceData();
+    TestCanonicalReceiverSphere();
     TestCanonicalMaterialResolutionAndTechniqueRemap();
     TestDeterministicDistanceLodSelection();
     TestQuaternionScaleOriginAndOrder();
     TestFailureLeavesDestinationUntouched();
+    TestDeformedPlacementOnlyModelsUseAuthoredVertices();
     TestRetainCopyOverflowAndClear();
     TestAtomicCompositionAndOutputLimits();
     return 0;

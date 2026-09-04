@@ -1,5 +1,6 @@
 #include <gfx_d3d/r_cinematic_api.h>
 #include <client/client.h>
+#include <database/database.h>
 #include <gfx_d3d/r_material.h>
 #include <gfx_d3d/r_rendercmds.h>
 #include <sound/snd_public.h>
@@ -7,6 +8,7 @@
 #include <universal/dvar.h>
 #include <universal/q_shared.h>
 #include <web/web_cinematic_decoder.h>
+#include <web/web_cinematic.h>
 #include <web/web_openal_proxy.h>
 #include <web/web_renderer.h>
 #include <emscripten.h>
@@ -16,6 +18,8 @@
 #include <cstdio>
 #include <cstring>
 #include <vector>
+
+GfxCmdBufInput gfxCmdBufInput{};
 
 namespace
 {
@@ -32,10 +36,12 @@ char nextName[256]{};
 unsigned nextFlags = 0, playbackFlags = 0;
 bool started = false, finished = true, paused = false, inputEnded = false;
 double startedAt = 0, pausedAt = 0, decodedTime = -1;
+WebCinematicVideo pendingVideo;
+bool hasPendingVideo = false;
+double audioDuration = 0;
 float playbackVolume = 1;
-GfxImage movieImage{};
-Material movieMaterial{};
-MaterialTextureDef movieTexture{};
+std::array<GfxImage, 4> movieImages{};
+bool fullRange = false, videoPublished = false;
 std::vector<std::uint8_t> pixels;
 std::vector<WebCinematicAudio> audioBlocks;
 std::array<ALuint, 1> audioSources{};
@@ -55,6 +61,9 @@ std::int64_t SeekMovie(void *, std::int64_t offset, int whence)
 }
 double Position()
 {
+    double seconds = 0;
+    if (audioSources[0] && WebOpenAL_SourcePlaybackSeconds(audioSources[0], seconds))
+        return seconds;
     return std::max(0.0, ((paused ? pausedAt : emscripten_get_now()) - startedAt) / 1000.0);
 }
 void ReleaseAudio()
@@ -79,6 +88,7 @@ void FailPlayback(const char *reason)
 {
     finished = true;
     ReleaseAudio();
+    WebCinematic_ReleaseImages();
     PublishMovie("failed", currentName, reason);
 }
 bool QueueAudio()
@@ -112,80 +122,107 @@ bool QueueAudio()
         alBufferData(buffer, block.channels == 2 ? AL_FORMAT_STEREO16 : AL_FORMAT_MONO16,
             pcm.data(), static_cast<ALsizei>(pcm.size() * sizeof(ALshort)), block.sampleRate);
         alSourceQueueBuffers(source, 1, &buffer);
+        audioDuration += static_cast<double>(block.samples.size()) / block.channels / block.sampleRate;
     }
     for (const auto source : audioSources)
     {
         if (!source || paused) continue;
         ALint state = 0;
         alGetSourcei(source, AL_SOURCE_STATE, &state);
-        if (state != AL_PLAYING) alSourcePlay(source);
+        ALint queued = 0, processed = 0;
+        alGetSourcei(source, AL_BUFFERS_QUEUED, &queued);
+        alGetSourcei(source, AL_BUFFERS_PROCESSED, &processed);
+        if (state != AL_PLAYING && queued > processed) alSourcePlay(source);
     }
     return true;
 }
-bool UploadVideo(const WebCinematicVideo &video)
+bool UploadVideo(const WebCinematicVideo *video)
 {
-    pixels.resize(static_cast<std::size_t>(video.width) * video.height * 4);
-    // ponytail: CPU conversion uses the existing retained UI image boundary;
-    // move planar conversion to the GPU if measured frame cost requires it.
-    for (int y = 0; y < video.height; ++y)
-        for (int x = 0; x < video.width; ++x)
+    if (video)
+    {
+        if (video->width < 1 || video->width > 1920 || video->height < 1 || video->height > 1080)
+            return false;
+        for (unsigned i = 0; i < (video->alpha ? 4u : 3u); ++i)
         {
-            const float luma = video.planes[0][y * video.strides[0] + x];
-            const float cb = video.planes[1][(y / 2) * video.strides[1] + x / 2];
-            const float cr = video.planes[2][(y / 2) * video.strides[2] + x / 2];
-            float red, green, blue;
-            if (video.fullRange)
-            {
-                red = luma + 1.402f * (cr - 128);
-                green = luma - .344136f * (cb - 128) - .714136f * (cr - 128);
-                blue = luma + 1.772f * (cb - 128);
-            }
-            else
-            {
-                // Same limited-range transform as the native Bink texture shader.
-                const float base = luma * 1.164123535f;
-                red = base + 1.595794678f * cr - .87065506f * 255;
-                green = base - .813476563f * cr - .391448975f * cb + .529705048f * 255;
-                blue = base + 2.017822266f * cb - 1.081668854f * 255;
-            }
-            auto *pixel = &pixels[(static_cast<std::size_t>(y) * video.width + x) * 4];
-            pixel[0] = static_cast<std::uint8_t>(std::clamp(red, 0.0f, 255.0f));
-            pixel[1] = static_cast<std::uint8_t>(std::clamp(green, 0.0f, 255.0f));
-            pixel[2] = static_cast<std::uint8_t>(std::clamp(blue, 0.0f, 255.0f));
-            pixel[3] = video.alpha ? video.planes[3][y * video.strides[3] + x] : 255;
+            const int width = i == 1 || i == 2 ? (video->width + 1) / 2 : video->width;
+            if (!video->planes[i] || video->strides[i] < width) return false;
         }
-    movieImage.name = "$cinematic";
-    movieImage.mapType = MAPTYPE_2D;
-    movieImage.width = video.width;
-    movieImage.height = video.height;
-    movieImage.depth = 1;
-    movieImage.noPicmip = true;
-    return WebRenderer_UpdateUiImage(&movieImage, pixels.data(), pixels.size());
+    }
+    constexpr const char *names[]{"$cinematicY", "$cinematicCr", "$cinematicCb", "$cinematicA"};
+    constexpr unsigned decoderPlanes[]{0, 2, 1, 3};
+    constexpr std::uint8_t blank[]{0, 128, 128, 0};
+    for (unsigned i = 0; i < movieImages.size(); ++i)
+    {
+        const bool constant = !video || (i == 3 && !video->alpha);
+        const bool chroma = i == 1 || i == 2;
+        const int width = constant ? 1 : chroma ? (video->width + 1) / 2 : video->width;
+        const int height = constant ? 1 : chroma ? (video->height + 1) / 2 : video->height;
+        pixels.resize(static_cast<std::size_t>(width) * height);
+        if (constant) pixels[0] = video ? 255 : blank[i];
+        else for (int y = 0; y < height; ++y)
+            std::memcpy(pixels.data() + static_cast<std::size_t>(y) * width,
+                video->planes[decoderPlanes[i]] + y * video->strides[decoderPlanes[i]], width);
+        auto &image = movieImages[i];
+        image.name = names[i];
+        image.mapType = MAPTYPE_2D;
+        image.width = width;
+        image.height = height;
+        image.depth = 1;
+        image.noPicmip = true;
+        if (!WebRenderer_UpdateUiImage(&image, pixels.data(), pixels.size(), 1)) return false;
+    }
+    for (unsigned i = 0; i < movieImages.size(); ++i)
+    {
+        gfxCmdBufInput.codeImages[TEXTURE_SRC_CODE_CINEMATIC_Y + i] = &movieImages[i];
+        gfxCmdBufInput.codeImageSamplerStates[TEXTURE_SRC_CODE_CINEMATIC_Y + i] = 0x62;
+    }
+    fullRange = video && video->fullRange;
+    videoPublished = video != nullptr;
+    return true;
 }
 void DecodeFrame()
 {
-    WebCinematicVideo video;
-    const int result = decoder.ReadFrame(video, audioBlocks);
+    const int result = decoder.ReadFrame(pendingVideo, audioBlocks);
     if (result < 0) { FailPlayback(decoder.Error()); return; }
     if (!result) { inputEnded = true; return; }
-    decodedTime = video.seconds;
-    if (!UploadVideo(video)) { FailPlayback("cinematic-image-upload-failed"); return; }
+    hasPendingVideo = true;
     if (!QueueAudio()) FailPlayback("cinematic-audio-queue-failed");
 }
 }
 
 void WebCinematic_Update()
 {
+    if (!gfxCmdBufInput.codeImages[TEXTURE_SRC_CODE_CINEMATIC_Y] && !UploadVideo(nullptr)) return;
     if (!started || finished || paused) return;
-    const double position = Position();
-    // Bound per-pump work so background throttling cannot block the host loop.
-    for (int count = 0; count < 4 && !inputEnded && !finished &&
-        decodedTime + decoder.FrameSeconds() <= position; ++count) DecodeFrame();
-    if (inputEnded && position >= decoder.Duration())
+    // Keep one decoded frame pending: its audio must be queued before display
+    // time. The decoder owns its planes until the next ReadFrame, so this adds
+    // no copied frame queue. Bound catch-up work after a Worker stall.
+    for (int count = 0; count < 4 && !finished; ++count)
+    {
+        if (!hasPendingVideo && !inputEnded) DecodeFrame();
+        if (finished || !hasPendingVideo || pendingVideo.seconds > Position()) break;
+        if (!UploadVideo(&pendingVideo)) { FailPlayback("cinematic-image-upload-failed"); return; }
+        decodedTime = pendingVideo.seconds;
+        hasPendingVideo = false;
+    }
+    if (!hasPendingVideo && !inputEnded && !finished) DecodeFrame();
+    if (inputEnded && Position() >= std::max(decoder.Duration(), audioDuration))
     {
         if (playbackFlags & 2) R_Cinematic_StartPlayback(currentName, playbackFlags, playbackVolume);
         else { finished = true; PublishMovie("ended", currentName, ""); }
     }
+}
+const GfxImage *WebCinematic_PlaneImage(unsigned plane)
+{
+    return plane < 4 ? gfxCmdBufInput.codeImages[TEXTURE_SRC_CODE_CINEMATIC_Y + plane] : nullptr;
+}
+bool WebCinematic_FullRange() { return fullRange; }
+void WebCinematic_ReleaseImages()
+{
+    for (const auto &image : movieImages) WebRenderer_ReleaseUiImage(&image);
+    std::fill_n(gfxCmdBufInput.codeImages + TEXTURE_SRC_CODE_CINEMATIC_Y, 4, nullptr);
+    fullRange = false;
+    videoPublished = false;
 }
 void __cdecl R_Cinematic_SyncNow() { WebCinematic_Update(); }
 bool R_Cinematic_GetPlaybackInfo(char *name, std::size_t nameSize, std::uint32_t *timeInMsec)
@@ -201,13 +238,20 @@ bool R_Cinematic_IsStarted() { return started && !finished; }
 bool R_Cinematic_IsFinished() { return finished; }
 void R_Cinematic_StopPlayback()
 {
+    // CG_DrawFadeInCinematic calls stop every frame while idle. Keep the
+    // inactive planes instead of recreating four GL textures on every call.
+    if (!started && !movieFile && !currentName[0] && !videoPublished) return;
     ReleaseAudio();
     decoder.Close();
     if (movieFile) FS_FCloseFile(movieFile);
     movieFile = movieSize = 0;
-    WebRenderer_ReleaseUiImage(&movieImage);
+    WebCinematic_ReleaseImages();
+    UploadVideo(nullptr);
     std::vector<std::uint8_t>().swap(pixels);
     audioBlocks.clear();
+    hasPendingVideo = false;
+    pendingVideo = {};
+    audioDuration = 0;
     started = false;
     finished = true;
     currentName[0] = 0;
@@ -246,8 +290,8 @@ void __cdecl R_Cinematic_StartPlayback(char *name, unsigned int flags, float vol
     started = true;
     finished = false;
     decodedTime = -1;
-    DecodeFrame();
     startedAt = emscripten_get_now();
+    WebCinematic_Update();
     if (!finished) PublishMovie("started", currentName, "");
 }
 void R_Cinematic_SetNextPlayback(const char *name, unsigned int flags)
@@ -278,19 +322,14 @@ void __cdecl R_Cinematic_DrawStretchPic_Letterboxed()
     if (!started || finished) return;
     Material *white = Material_RegisterHandle("white", 3);
     if (!white) return;
-    movieMaterial = *white;
-    movieMaterial.info.name = "$cinematic";
-    movieMaterial.textureCount = 1;
-    movieMaterial.textureTable = &movieTexture;
-    movieTexture.semantic = 0;
-    movieTexture.samplerState = 0x62;
-    movieTexture.u.image = &movieImage;
+    Material *cinematic = Material_RegisterHandle("cinematic", 3);
+    if (!cinematic) return;
     const float width = cls.vidConfig.displayWidth, height = cls.vidConfig.displayHeight;
     const float movieHeight = std::min(height, width * cls.vidConfig.aspectRatioDisplayPixel / 1.7777778f);
     const float black[4]{0, 0, 0, 1};
     R_AddCmdDrawStretchPic(0, 0, width, height, 0, 0, 1, 1, black, white);
     R_AddCmdDrawStretchPic(0, (height - movieHeight) * .5f, width, movieHeight,
-        0, 0, 1, 1, colorWhite, &movieMaterial);
+        0, 0, 1, 1, colorWhite, cinematic);
 }
 #if KISAK_WEB_DIAGNOSTICS
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_DiagnosticCinematicOmission()
@@ -301,6 +340,79 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_DiagnosticCinematicOmission()
 }
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestCinematicState(int operation)
 {
+    if ((operation >= 10 && operation <= 13) || operation == 15 || operation == 16)
+    {
+        // Synthetic decoder planes: odd dimensions and padded row strides.
+        // No movie fixture, gameplay state, or extra exported diagnostic API.
+        std::uint8_t y[12], cb[6], cr[6], alpha[12];
+        std::fill_n(y, 12, 0);
+        std::fill_n(cb, 6, 0);
+        std::fill_n(cr, 6, 0);
+        std::fill_n(alpha, 12, 0);
+        for (int row = 0; row < 3; ++row)
+        {
+            std::fill_n(y + row * 4, 3, operation == 10 ? 81 : operation == 11 ? 145 : 128);
+            std::fill_n(alpha + row * 4, 3, operation == 11 ? 128 : 64);
+        }
+        for (int row = 0; row < 2; ++row)
+        {
+            std::fill_n(cb + row * 3, 2, operation == 10 ? 90 : operation == 11 ? 54 : 128);
+            std::fill_n(cr + row * 3, 2, operation == 10 ? 240 : operation == 11 ? 34 : 128);
+        }
+        if (operation == 12)
+        {
+            // The centre sample must interpolate all four chroma texels.
+            cb[0] = cr[0] = cb[4] = cr[4] = 0;
+            cb[1] = cr[1] = cb[3] = cr[3] = 255;
+        }
+        WebCinematicVideo video;
+        video.planes = {y, cb, cr, alpha};
+        video.strides = {4, 3, 3, 4};
+        video.width = video.height = 3;
+        video.alpha = operation != 10;
+        video.fullRange = operation >= 12;
+        if (operation == 15) video.strides[3] = 0;
+        if (operation == 16) video.width = 1921;
+        return UploadVideo(&video);
+    }
+    if (operation == 14) { R_Cinematic_StopPlayback(); return 1; }
+    if (operation >= 20 && operation <= 23)
+        return WebRenderer_TestCinematicPixel(operation >= 22, operation % 2 != 0);
+    if (operation == 24) return WebRenderer_TestCinematicPixel(false, 2);
+    if (operation == 4)
+    {
+        int count = 0;
+        DB_EnumXAssets(ASSET_TYPE_MATERIAL, [](XAssetHeader header, void *context) {
+            const Material *material = header.material;
+            const auto *set = material ? material->techniqueSet : nullptr;
+            if (set && set->remappedTechniqueSet) set = set->remappedTechniqueSet;
+            if (!set) return;
+            for (int type = 0; type < 34; ++type)
+            {
+                const auto *technique = set->techniques[type];
+                if (!technique) continue;
+                for (unsigned p = 0; p < technique->passCount; ++p)
+                {
+                    const auto &pass = technique->passArray[p];
+                    unsigned mask = 0;
+                    const unsigned argCount = pass.perPrimArgCount + pass.perObjArgCount + pass.stableArgCount;
+                    for (unsigned a = 0; pass.args && a < argCount; ++a)
+                        if (pass.args[a].type == MTL_ARG_CODE_PIXEL_SAMPLER &&
+                            pass.args[a].u.codeSampler >= TEXTURE_SRC_CODE_CINEMATIC_Y &&
+                            pass.args[a].u.codeSampler <= TEXTURE_SRC_CODE_CINEMATIC_A)
+                            mask |= 1u << (pass.args[a].u.codeSampler - TEXTURE_SRC_CODE_CINEMATIC_Y);
+                    if (!mask) continue;
+                    ++*static_cast<int *>(context);
+                    Com_Printf(0, "CINEMATIC_MATERIAL name=%s type=%d pass=%u mask=%u tech=%s ps=%s vs=%s\n",
+                        material->info.name, type, p, mask, technique->name,
+                        pass.pixelShader ? pass.pixelShader->name : "<none>",
+                        pass.vertexShader ? pass.vertexShader->name : "<none>");
+
+                }
+            }
+        }, &count, false);
+        return count;
+    }
     if (operation == 1 || operation == 2)
         R_Cinematic_SetPaused(static_cast<CinematicEnum>(operation == 1 ? 1 : 0));
     if (operation == 3) return (R_Cinematic_IsStarted() ? 1 : 0) | (R_Cinematic_IsFinished() ? 2 : 0);

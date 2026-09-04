@@ -30,6 +30,8 @@ struct WebRendererFxModelSubmission
     WebRendererShadowEntityKind shadowEntityKind =
         WebRendererShadowEntityKind::None;
     std::uint32_t shadowEntityId = UINT32_MAX;
+    // DynEntityPose owns this radius; ordinary FX uses XModel radius * scale.
+    float dynamicEntityRadius = 0.0f;
     bool modelLightingEnabled = false;
     float modelLightingCoordinates[3]{};
 };
@@ -71,7 +73,6 @@ enum class WebRendererFxModelSceneResult : std::uint8_t
     InvalidSubmission,
     InvalidPlacement,
     InvalidModel,
-    UnsupportedSurface,
     IndexOutOfRange,
     OutputTooLarge,
     AllocationFailed,
