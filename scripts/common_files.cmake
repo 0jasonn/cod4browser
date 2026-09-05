@@ -248,6 +248,7 @@ set(GFX_D3D
     "${SRC_DIR}/gfx_d3d/r_fog.cpp"
     "${SRC_DIR}/gfx_d3d/r_fog.h"
     "${SRC_DIR}/gfx_d3d/r_text.cpp"
+    "${SRC_DIR}/gfx_d3d/r_material_pick.cpp"
     "${SRC_DIR}/gfx_d3d/r_image_resample.cpp"
     "${SRC_DIR}/gfx_d3d/r_gamma.cpp"
     "${SRC_DIR}/gfx_d3d/r_text_cmds.cpp"

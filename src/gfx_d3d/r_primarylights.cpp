@@ -207,81 +207,13 @@ void __cdecl R_AddShadowedLightToShadowHistory(
     uint32_t shadowableLightIndex,
     float fadeDelta)
 {
-    float v3; // [esp+0h] [ebp-14h]
-    float v4; // [esp+4h] [ebp-10h]
-    float v5; // [esp+8h] [ebp-Ch]
-    float v6; // [esp+Ch] [ebp-8h]
-    uint32_t historyIndex; // [esp+10h] [ebp-4h]
-
-    for (historyIndex = 0; historyIndex != shadowHistory->entryCount; ++historyIndex)
-    {
-        if (shadowHistory->entries[historyIndex].shadowableLightIndex == shadowableLightIndex)
-        {
-            shadowHistory->entries[historyIndex].isFadingOut = 0;
-            v6 = fadeDelta + shadowHistory->entries[historyIndex].fade;
-            v5 = v6 - 1.0;
-            if (v5 < 0.0)
-                v4 = fadeDelta + shadowHistory->entries[historyIndex].fade;
-            else
-                v4 = 1.0;
-            shadowHistory->entries[historyIndex].fade = v4;
-            return;
-        }
-    }
-    if (shadowHistory->entryCount < sm_maxLights->current.integer)
-    {
-        shadowHistory->entries[shadowHistory->entryCount].shadowableLightIndex = shadowableLightIndex;
-        if (shadowHistory->entries[shadowHistory->entryCount].shadowableLightIndex != shadowableLightIndex)
-            MyAssertHandler(
-                ".\\r_primarylights.cpp",
-                117,
-                0,
-                "%s",
-                "shadowHistory->entries[shadowHistory->entryCount].shadowableLightIndex == shadowableLightIndex");
-        shadowHistory->entries[shadowHistory->entryCount].isFadingOut = 0;
-        if (Com_BitCheckAssert(shadowHistory->shadowableLightWasUsed, shadowableLightIndex, 32))
-            v3 = fadeDelta;
-        else
-            v3 = 1.0;
-        shadowHistory->entries[shadowHistory->entryCount++].fade = v3;
-    }
+    R_AddShadowHistory(*shadowHistory, shadowableLightIndex, fadeDelta,
+        sm_maxLights->current.unsignedInt);
 }
 
 void __cdecl R_FadeOutShadowHistoryEntries(GfxShadowedLightHistory *shadowHistory, float fadeDelta)
 {
-    uint32_t v2; // eax
-    int v3; // edx
-    float fade; // eax
-    uint32_t entryIndex; // [esp+4h] [ebp-4h]
-
-    entryIndex = 0;
-    while (entryIndex != shadowHistory->entryCount)
-    {
-        iassert( shadowHistory->entries[entryIndex].fade > 0.0f );
-        if (Com_BitCheckAssert(scene.shadowableLightIsUsed, shadowHistory->entries[entryIndex].shadowableLightIndex, 128))
-        {
-            if (shadowHistory->entries[entryIndex].isFadingOut)
-            {
-                shadowHistory->entries[entryIndex].fade = shadowHistory->entries[entryIndex].fade - fadeDelta;
-                if (shadowHistory->entries[entryIndex].fade < 0.009999999776482582)
-                    goto LABEL_10;
-                ++entryIndex;
-            }
-            else
-            {
-                shadowHistory->entries[entryIndex++].isFadingOut = 1;
-            }
-        }
-        else
-        {
-        LABEL_10:
-            v2 = --shadowHistory->entryCount;
-            v3 = *(uint32_t *)&shadowHistory->entries[v2].shadowableLightIndex;
-            fade = shadowHistory->entries[v2].fade;
-            *(uint32_t *)&shadowHistory->entries[entryIndex].shadowableLightIndex = v3;
-            shadowHistory->entries[entryIndex].fade = fade;
-        }
-    }
+    R_FadeShadowHistory(*shadowHistory, scene.shadowableLightIsUsed, fadeDelta);
 }
 
 void __cdecl R_LinkSphereEntityToPrimaryLights(

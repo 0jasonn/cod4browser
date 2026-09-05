@@ -82,7 +82,7 @@ EM_JS(
                 allocFlags: allocFlags | 0,
                 freeFlags: freeFlags | 0,
                 sync: sync | 0,
-                asyncify: false,
+                asyncify: true,
                 pthreads: false
             }
         }));
@@ -100,7 +100,7 @@ EM_JS(
                 archiveCount: archiveCount >>> 0,
                 searchPaths: UTF8ToString(searchPaths).split("\n").filter(Boolean),
                 canonical: true,
-                asyncify: false,
+                asyncify: true,
                 browserOwnedSearchPaths: false
             }
         }));
@@ -266,6 +266,9 @@ static void MountCanonicalRuntime()
     Web_Log(WebLogLevel::Info,
         "[kisakcod-web] FS_InitFilesystem begin.\n");
     FS_InitFilesystem();
+    // Match Com_Init: register notification channels and their filters before
+    // profile configs and cgame can route objective/subtitle messages.
+    Con_InitChannels();
     std::uint32_t searchPathCount = 0;
     std::uint32_t archiveCount = 0;
     std::string searchPathEvidence;
@@ -503,6 +506,15 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestObjectiveNotification(
 {
     if (!CL_IsCgameInitialized(0))
         return 0;
+    if (state == 7)
+    {
+        CG_GameMessage("Kisak web notification test", 3);
+        return con.messageBuffer[0].gamemsgWindows[0].activeLineCount;
+    }
+    if (state == 8)
+    {
+        return Con_IsGameMessageWindowActive(0, 0);
+    }
     if (state == 6)
     {
         const int oldTime = cgArray[0].time;

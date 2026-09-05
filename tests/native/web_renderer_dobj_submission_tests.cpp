@@ -3,6 +3,7 @@
 #include <gfx_d3d/gfx_dpvs_types.h>
 #include <gfx_d3d/gfx_world_types.h>
 #include <gfx_d3d/r_model_pose_bounds.h>
+#include <gfx_d3d/r_cgame_api.h>
 #include <gfx_d3d/material_types.h>
 #include <universal/q_shared.h>
 #include <xanim/xmodel.h>
@@ -168,6 +169,19 @@ void TestDObjEmissionAndAtomicFailure()
     assert(command.batches[0].firstIndex == 0 && command.batches[1].firstIndex == 3);
     assert(command.batches[0].depthHack && command.batches[1].depthHack);
     assert(command.batches[0].modelIdentity == &model);
+    assert(!command.batches[0].pickupSheen);
+    submission.renderFlags |= GFX_RENDERFX_PICKUP;
+    assert(WebRenderer_BuildDObjSceneCommand(&submission, 1, command, &lodParms) ==
+        WebRendererDObjSceneResult::Success);
+    assert(command.batches[0].pickupSheen && command.batches[1].pickupSheen);
+    assert(command.vertices.size() == 6 && command.indices.size() == 6);
+    submission.renderFlags &= ~GFX_RENDERFX_PICKUP;
+    assert(WebRenderer_PickupSheen(0.0f) == 0.0f);
+    assert(WebRenderer_PickupSheen(0.5f) == 1.0f);
+    assert(std::fabs(WebRenderer_PickupSheen(0.25f) - 0.5f) < 0.000001f);
+    assert(WebRenderer_PickupSheen(1.0f) == 0.0f);
+    assert(WebRenderer_PickupSheen(1.5f) == WebRenderer_PickupSheen(0.5f));
+    assert(WebRenderer_PickupSheen(-0.5f) == WebRenderer_PickupSheen(0.5f));
     assert(command.batches[0].dynamicLightSurfType == 7u);
     assert(command.batches[1].dynamicLightSurfType == 7u);
     for (const auto &batch : command.batches)

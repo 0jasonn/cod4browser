@@ -33,15 +33,6 @@
 #include <sound/snd_public.h>
 #include <server/server.h>
 
-#if defined(KISAK_WEB)
-extern bool cin_skippable;
-namespace
-{
-char s_deferredMapCommand[96]{};
-bool s_skipDeferredLoadingMovie = false;
-}
-#endif
-
 enum MovieToPlayScriptOp : __int32
 {
     MTPSOP_PLUS = 0x0,
@@ -576,34 +567,6 @@ void __cdecl CL_MapLoading_StartCinematic(const char *mapname, float volume)
     R_Cinematic_StartPlayback(movieName, 5, volume);
 }
 
-#if defined(KISAK_WEB)
-bool WebCinematic_DeferMapLoad(const char *command, const char *mapname)
-{
-    char replayCommand[sizeof(s_deferredMapCommand)]{};
-    Com_sprintf(replayCommand, sizeof(replayCommand), "%s %s", command, mapname);
-    if (s_deferredMapCommand[0] && !I_stricmp(s_deferredMapCommand, replayCommand))
-    {
-        s_deferredMapCommand[0] = 0;
-        s_skipDeferredLoadingMovie = true;
-        return false;
-    }
-
-    CL_MapLoading_StartCinematic(
-        mapname,
-        static_cast<float>(
-            snd_cinematicVolumeScale->current.value * snd_volume->current.value));
-    if (R_Cinematic_IsFinished()) return false;
-
-    I_strncpyz(s_deferredMapCommand, replayCommand, sizeof(s_deferredMapCommand));
-    Dvar_SetString(nextmap, replayCommand);
-    cin_skippable = true;
-    if (cls.uiStarted) UI_SetActiveMenu(0, UIMENU_NONE);
-    Con_Close(0);
-    clientUIActives[0].connectionState = CA_CINEMATIC;
-    return true;
-}
-#endif
-
 void __cdecl CL_MapLoading(const char *mapname)
 {
     // KISAKTODO: (SP): could use more touchups
@@ -618,12 +581,7 @@ void __cdecl CL_MapLoading(const char *mapname)
 
     clientUIActives[0].connectionState = CA_LOADING;
 #ifndef KISAK_NO_FASTFILES
-#if defined(KISAK_WEB)
-    if (s_skipDeferredLoadingMovie)
-        s_skipDeferredLoadingMovie = false;
-    else
-#endif
-        CL_MapLoading_StartCinematic(mapname, (float)(snd_cinematicVolumeScale->current.value * snd_volume->current.value));
+    CL_MapLoading_StartCinematic(mapname, (float)(snd_cinematicVolumeScale->current.value * snd_volume->current.value));
 #endif
     UI_DrawConnectScreen();
     //Live_SetCurrentMapname(mapname);

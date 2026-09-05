@@ -314,12 +314,14 @@ void TestCanonicalInstancesShareOneMaterialSurfaceBatch()
     assert(command.vertices[0].normal[2] == 1.0f);
 
     fixture.material.info.gameFlags = 0u;
-    WebRendererStaticModelSceneCommand spotOnlyCommand;
+    // Native R_SkinStaticModelsShadowForLod rejects this material despite
+    // its valid shadow technique, for both directional and spot lights.
+    WebRendererStaticModelSceneCommand noShadowCommand;
     assert(WebRenderer_BuildStaticModelSceneCommand(
-        fixture.world, spotOnlyCommand) ==
+        fixture.world, noShadowCommand) ==
         WebRendererStaticModelSceneResult::Success);
-    assert(!spotOnlyCommand.batches[0].draw.castsSunShadow);
-    assert(spotOnlyCommand.batches[0].draw.castsSpotShadow);
+    assert(!noShadowCommand.batches[0].draw.castsSunShadow);
+    assert(!noShadowCommand.batches[0].draw.castsSpotShadow);
 }
 
 void TestMultiplyFogMaterialSurvivesStaticInstanceBoundary()
@@ -1133,6 +1135,24 @@ void TestCanonicalStaticModelInstancedTechniqueSelection()
     assert(std::strcmp(command.batches[0].draw.pixelShaderName,
         "lp_i_amb_sun_t0c0_sm3.hlsl") == 0);
     assert(command.batches[0].draw.ambientProbeLighting);
+
+    MaterialTechnique local = instanced;
+    MaterialPixelShader localPixel{};
+    localPixel.name = "lp_i_spot_t0c0_sm3.hlsl";
+    local.passArray[0].pixelShader = &localPixel;
+    std::array<WebRendererPrimaryLightDesc, 2> lights{};
+    for (const unsigned type : {2u, 3u})
+    {
+        const unsigned technique = type == 2u ? 17u : 19u;
+        lights[1].type = static_cast<std::uint8_t>(type);
+        fixture.techniqueSet.techniques[technique] = &local;
+        fixture.material.stateBitsEntry[technique] = 0u;
+        assert(WebRenderer_BuildStaticModelSceneCommand(fixture.world,
+            command, nullptr, nullptr, lights) == WebRendererStaticModelSceneResult::Success);
+        assert(command.batches[0].draw.techniqueType == technique);
+        assert(command.batches[0].draw.pixelShaderName == localPixel.name);
+        assert(!command.batches[0].draw.ambientProbeLighting);
+    }
 }
 
 void TestNamedDetailMapAndScaleSurvivePortableBoundary()

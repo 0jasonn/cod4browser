@@ -467,6 +467,225 @@ async function call(page, name, ...arguments_)
     });
 }
 
+test("pickup weapons carry a pulsing warm sheen", { tag: "@retail-pickup" },
+    async ({ retailPage: page }, testInfo) => {
+        test.setTimeout(360_000);
+        await page.addInitScript(() => {
+            globalThis.__objectiveReady = false;
+            globalThis.__objectiveFrames = 0;
+            addEventListener("kisakcod:renderer-scene-frame", ({ detail }) => {
+                ++globalThis.__objectiveFrames;
+                if (detail.geometrySubmitted && detail.worldName?.includes("killhouse"))
+                    globalThis.__objectiveReady = true;
+            });
+        });
+        await page.goto("/");
+        const chooser = page.waitForEvent("filechooser");
+        await page.locator("#portable-install-button").click();
+        await (await chooser).setFiles(retailRoot);
+        await expect.poll(() => page.evaluate(() =>
+            globalThis.__KISAKCOD_WEB__?.module?.filesystemState),
+        { timeout: 300_000 }).toBe("mounted");
+        await page.locator("#game-canvas").click({ position: { x: 5, y: 5 } });
+        await expect(page.locator("#boot-log")).toContainText("Browser mouse button reached canonical input");
+        await page.evaluate(() => globalThis.__KISAKCOD_WEB__
+            .submitCanonicalCommand("devmap killhouse"));
+        await expect.poll(() => page.evaluate(() => globalThis.__objectiveReady),
+            { timeout: 300_000 }).toBe(true);
+
+        const command = text => page.evaluate(text =>
+            globalThis.__KISAKCOD_WEB__.submitCanonicalCommand(text), text);
+        await command("timescale 10");
+        await expect.poll(() => call(page, "_KisakWeb_TestGameplayState", 24, 0),
+            { timeout: 120_000 }).toBeGreaterThan(60_000);
+        await command("timescale 1; centerview");
+        await expect.poll(() => call(page, "_KisakWeb_TestPickupSheen", -2)).toBeGreaterThan(0);
+        const origin = [];
+        for (let axis = 0; axis < 3; ++axis)
+            origin.push(await call(page, "_KisakWeb_TestRendererDvarState", 25 + axis));
+        await command(`cg_ufo; cg_setviewpos ${origin[0] - 70} ${origin[1]} ${origin[2] - 10} 0 35`);
+        const frames = () => page.evaluate(() => globalThis.__objectiveFrames);
+        for (const [time, name] of [[0, "quiet"], [250, "rising"], [500, "sheen"], [1000, "quiet-again"]]) {
+            await call(page, "_KisakWeb_TestPickupSheen", time);
+            const before = await frames();
+            await expect.poll(frames).toBeGreaterThan(before + 2);
+            expect(await call(page, "_KisakWeb_TestPickupSheen", -2)).toBeGreaterThan(0);
+            await page.locator("#game-canvas").screenshot({ path: testInfo.outputPath(`${name}.png`) });
+        }
+        await call(page, "_KisakWeb_TestPickupSheen", -1);
+    });
+
+test("canonical objectives and renderer dvars reach the shipped HUD", { tag: ["@retail-objective", "@retail-dvars", "@retail-shadows"] },
+    async ({ retailPage: page }, testInfo) => {
+        test.setTimeout(360_000);
+        await page.addInitScript(() => {
+            globalThis.__objectiveReady = false;
+            globalThis.__objectiveFrames = 0;
+            addEventListener("kisakcod:renderer-scene-frame", ({ detail }) => {
+                ++globalThis.__objectiveFrames;
+                if (detail.geometrySubmitted && detail.worldName?.includes("killhouse"))
+                    globalThis.__objectiveReady = true;
+            });
+        });
+        await page.goto("/");
+        const chooser = page.waitForEvent("filechooser");
+        await page.locator("#portable-install-button").click();
+        await (await chooser).setFiles(retailRoot);
+        await expect.poll(() => page.evaluate(() =>
+            globalThis.__KISAKCOD_WEB__?.module?.filesystemState),
+        { timeout: 300_000 }).toBe("mounted");
+        await page.locator("#game-canvas").click({ position: { x: 5, y: 5 } });
+        await expect(page.locator("#boot-log")).toContainText("Browser mouse button reached canonical input");
+        await page.evaluate(() => globalThis.__KISAKCOD_WEB__
+            .submitCanonicalCommand("devmap killhouse"));
+        await expect.poll(() => page.evaluate(() => globalThis.__objectiveReady),
+            { timeout: 300_000 }).toBe(true);
+        await call(page, "_KisakWeb_TestResumeGame");
+        expect(await call(page, "_KisakWeb_TestObjectiveNotification", 7)).toBeGreaterThan(0);
+        expect(await call(page, "_KisakWeb_TestObjectiveNotification", 8)).toBe(1);
+        await expect.poll(() => call(page, "_KisakWeb_TestUiTextSeen",
+            nameHash("Kisak web notification test"))).toBe(1);
+        await page.locator("#game-canvas").screenshot({ path: testInfo.outputPath("objective.png") });
+        const command = text => page.evaluate(text =>
+            globalThis.__KISAKCOD_WEB__.submitCanonicalCommand(text), text);
+        const state = field => call(page, "_KisakWeb_TestRendererDvarState", field);
+        const frames = () => page.evaluate(() => globalThis.__objectiveFrames);
+        const nextFrames = async () => {
+            const before = await frames();
+            await expect.poll(frames).toBeGreaterThan(before + 2);
+        };
+        await command("cg_drawFPS 1; cg_drawFPSLabels 1");
+        await expect.poll(() => call(page, "_KisakWeb_TestUiTextSeen", nameHash(" FPS"))).toBe(1);
+        await page.locator("#game-canvas").screenshot({ path: testInfo.outputPath("fps.png") });
+        for (const setting of ["cg_drawFPSLabels", "cg_drawFPS"]) {
+            await command(`${setting} 0`);
+            await nextFrames();
+            await call(page, "_KisakWeb_TestUiTextSeen", 0);
+            await nextFrames();
+            expect(await call(page, "_KisakWeb_TestUiTextSeen", nameHash(" FPS"))).toBe(0);
+            await command(`${setting} 1`);
+            await expect.poll(() => call(page, "_KisakWeb_TestUiTextSeen", nameHash(" FPS"))).toBe(1);
+        }
+        // Finish the scripted aerial intro, then center the player's view:
+        // its final camera pitch otherwise sometimes leaves only floor visible.
+        await command("timescale 10");
+        await expect.poll(() => call(page, "_KisakWeb_TestGameplayState", 24, 0),
+            { timeout: 120_000 }).toBeGreaterThan(60_000);
+        await command("timescale 1; centerview");
+        for (const [setting, field] of [["r_drawWorld", 0], ["r_drawSModels", 1],
+            ["r_drawEntities", 2], ["r_drawXModels", 24]]) {
+            await expect.poll(() => state(field), { message: setting, timeout: 30_000 }).toBeGreaterThan(0);
+            await command(`${setting} 0`);
+            await expect.poll(() => state(field)).toBe(0);
+            await command(`${setting} 1`);
+            await expect.poll(() => state(field)).toBeGreaterThan(0);
+        }
+        await command("cg_drawMaterial 1");
+        await expect.poll(() => state(23)).toBeGreaterThan(0);
+        const materialHash = await state(23);
+        await expect.poll(() => call(page, "_KisakWeb_TestUiTextSeen", materialHash)).toBe(1);
+        await command("cg_drawMaterial 0");
+        await nextFrames();
+        await call(page, "_KisakWeb_TestUiTextSeen", 0);
+        await nextFrames();
+        expect(await call(page, "_KisakWeb_TestUiTextSeen", materialHash)).toBe(0);
+        // Exercise the shared sun-dvar conversion using canonical sunflare_t
+        // outputs, including seconds-to-ms, diameter-to-radius and angle-to-dot.
+        await command("r_sun_from_dvars 1");
+        for (const [setting, value, field, expected] of [
+            ["r_sunsprite_size", 24, 4, 24],
+            ["r_sunflare_min_size", 20, 5, 10],
+            ["r_sunflare_max_size", 80, 6, 40],
+            ["r_sunflare_max_alpha", 0.3, 7, 0.3],
+            ["r_sunflare_fadein", 0.2, 8, 200],
+            ["r_sunflare_fadeout", 0.4, 9, 400],
+            ["r_sunblind_max_darken", 0.2, 10, 0.2],
+            ["r_sunblind_fadein", 0.3, 11, 300],
+            ["r_sunblind_fadeout", 0.5, 12, 500],
+            ["r_sunglare_max_lighten", 0.1, 13, 0.1],
+            ["r_sunglare_fadein", 0.4, 14, 400],
+            ["r_sunglare_fadeout", 0.6, 15, 600],
+            ["r_sun_fx_position", '"0 0 0"', 16, 1],
+            ["r_sunflare_min_angle", 60, 17, 0.5],
+            ["r_sunflare_max_angle", 30, 18, Math.cos(Math.PI / 6)],
+            ["r_sunblind_min_angle", 60, 19, 0.5],
+            ["r_sunblind_max_angle", 30, 20, Math.cos(Math.PI / 6)],
+            ["r_sunglare_min_angle", 60, 21, 0.5],
+            ["r_sunglare_max_angle", 30, 22, Math.cos(Math.PI / 6)],
+        ]) {
+            await command(`${setting} ${value}`);
+            await expect.poll(() => state(field)).toBeCloseTo(expected, 4);
+        }
+        // Reproduce the reported booth view using owned assets. Materials
+        // without the native cast-shadow flag must not darken its floor.
+        await command("r_sun_from_dvars 0; cg_drawFPS 0; cg_draw2D 0; cg_ufo; cg_setviewpos 3568 -929 5 90 36; cg_fov 65; sm_enable 1; sm_sunEnable 1; sm_spotEnable 1");
+        const regionLuminance = async (name, region = [0.48, 0.55, 0.15, 0.15]) => {
+            await nextFrames();
+            const png = await page.locator("#game-canvas").screenshot({
+                path: testInfo.outputPath(`${name}.png`),
+            });
+            return page.evaluate(async ({ encoded, region }) => {
+                const bitmap = await createImageBitmap(new Blob([
+                    Uint8Array.from(atob(encoded), c => c.charCodeAt(0)),
+                ], { type: "image/png" }));
+                const sample = new OffscreenCanvas(32, 32);
+                const context = sample.getContext("2d");
+                context.drawImage(bitmap, bitmap.width * region[0], bitmap.height * region[1],
+                    bitmap.width * region[2], bitmap.height * region[3], 0, 0, 32, 32);
+                bitmap.close();
+                const pixels = context.getImageData(0, 0, 32, 32).data;
+                let total = 0;
+                for (let i = 0; i < pixels.length; i += 4)
+                    total += pixels[i] + pixels[i + 1] + pixels[i + 2];
+                return total / (32 * 32 * 3);
+            }, { encoded: png.toString("base64"), region });
+        };
+        const shadowedFloor = await regionLuminance("booth-shadows-enabled");
+        await command("sm_spotEnable 0");
+        const authoredFloor = await regionLuminance("booth-authored-lighting");
+        expect(authoredFloor).toBeGreaterThan(30);
+        expect(shadowedFloor / authoredFloor).toBeGreaterThan(0.9);
+        await command("sm_spotEnable 1");
+        // Shadow-only BSP blockers above the weapon room must survive the
+        // platform upload even though native camera ranges exclude them.
+        await command("cg_setviewpos 3231 -802 4 96 -9; sm_maxLights 4");
+        const upperWall = [0.35, 0.25, 0.15, 0.08];
+        const shadowedWall = await regionLuminance("weapon-wall-shadows-enabled", upperWall);
+        await command("sm_spotEnable 0");
+        const authoredWall = await regionLuminance("weapon-wall-authored-lighting", upperWall);
+        expect(authoredWall).toBeGreaterThan(10);
+        expect(shadowedWall / authoredWall).toBeLessThan(1.25);
+        expect(shadowedWall / authoredWall).toBeGreaterThan(0.75);
+        await command("sm_spotEnable 1");
+        // The AK's wooden magazine receives its assigned local primary light.
+        // Previously models kept only the ambient volume and stayed dark.
+        const magazine = [0.192, 0.524, 0.01, 0.02];
+        const litMagazine = await regionLuminance("weapon-wall-model-light", magazine);
+        await command("r_diffuseColorScale 0; r_specularColorScale 0");
+        const ambientMagazine = await regionLuminance("weapon-wall-model-ambient", magazine);
+        expect(litMagazine / ambientMagazine).toBeGreaterThan(1.8);
+        await command("r_diffuseColorScale 1; r_specularColorScale 1");
+        // Moving back and turning makes the table's light lose the fourth
+        // shadow slot. Native history must fade it rather than pop it off.
+        const tableShadowFade = () => page.evaluate(async () => {
+            const values = await Promise.all(Array.from({ length: 8 }, (_, i) =>
+                globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestTransientSpotShadowState", i + 1)));
+            const slot = values.slice(0, 4).indexOf(15); // primary light 14 + 1
+            return slot < 0 ? 0 : values[slot + 4];
+        });
+        await command("cg_setviewpos 3280 -1000 4 115 15; sm_spotShadowFadeTime 1");
+        await expect.poll(tableShadowFade).toBe(1000);
+        await command("cg_setviewpos 3280 -1100 4 90 15");
+        const tableFades = [];
+        await expect.poll(async () => {
+            const fade = await tableShadowFade();
+            tableFades.push(fade);
+            return fade;
+        }, { intervals: [16, 32, 64], timeout: 5000 }).toBe(0);
+        expect(tableFades.some(fade => fade > 0 && fade < 1000),
+            "table shadow must have intermediate visibility during camera/distance transition").toBe(true);
+    });
+
 test("canonical console and shipped profile field accept browser typing", { tag: "@retail-text" },
     async ({ retailPage: page }, testInfo) => {
         test.setTimeout(360_000);
@@ -1211,15 +1430,29 @@ test("owned retail transient lights reach native material passes and obey scene 
         { timeout: 240_000 }).toBe("mounted");
     const command = text => page.evaluate(text =>
         globalThis.__KISAKCOD_WEB__.submitCanonicalCommand(text), text);
-    await command("map killhouse");
+    // This is a renderer fixture; skip the campaign opening cinematic and
+    // supply the same canvas gesture as the ordinary owned-data HUD fixture.
+    await page.locator("#game-canvas").click({ position: { x: 5, y: 5 } });
+    await command("devmap killhouse");
     await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.rendererSceneFrame?.worldName),
         { timeout: 60_000 }).toContain("killhouse");
     // Let the authored initial fade finish, then use canonical pause to hold
     // the pose/fog constant for private visual comparisons.
     await page.waitForTimeout(6_000);
+    // Native shadow history advances with scene time. Admit the synthetic
+    // spotlight while running, then freeze its slot for the paused comparisons.
+    await call(page, "_KisakWeb_TestTransientLights", 2);
+    await expect.poll(async () => ((await call(page,
+        "_KisakWeb_TestTransientSpotShadowState")) >>> 8) & 255,
+        { timeout: 10_000 }).toBe(1);
+    await expect.poll(async () => {
+        const slot = (await call(page, "_KisakWeb_TestTransientSpotShadowState")) >>> 16;
+        return slot ? call(page, "_KisakWeb_TestTransientSpotShadowState", slot + 4) : 0;
+    }).toBe(1000);
     await command("set cg_cinematicFullscreen 0; set cl_paused_simple 1");
     await command("pause");
     await expect.poll(() => call(page, "_KisakWeb_TestUiState", 5)).toBe(1);
+    await call(page, "_KisakWeb_TestTransientLights", 0);
     const capture = async name => {
         const png = await page.locator("#game-canvas").screenshot({ path: testInfo.outputPath(`lights-${name}.png`) });
         return page.evaluate(async encoded => {

@@ -213,6 +213,7 @@ globalThis.addEventListener("message", (event) => {
     if (!message || typeof message !== "object") return;
     void (async () => {
         try {
+            while (globalThis.kisakLoadingYield) await globalThis.kisakLoadingYield;
             if (message.protocolVersion !== ENGINE_PROTOCOL_VERSION) {
                 throw Object.assign(new Error("Unsupported engine protocol version."), {
                     code: "PROTOCOL_VERSION",

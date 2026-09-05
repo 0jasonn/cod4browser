@@ -237,6 +237,16 @@ void TestCanonicalOpaqueSurfacesAreBatchedInWorldOrder()
     assert(WebRenderer_BuildWorldSceneCommand(
         fixture.world, MakeView(), command) ==
         WebRendererWorldSceneResult::Success);
+    // Registration prepares the same immutable geometry without inventing a
+    // camera. Per-frame DPVS still selects visible ranges later.
+    WebRendererWorldSceneCommand registered;
+    assert(WebRenderer_BuildWorldSceneCommand(
+        fixture.world, MakeView().sunShadowEnabled, registered) ==
+        WebRendererWorldSceneResult::Success);
+    assert(registered.indices == command.indices);
+    assert(registered.vertices.size() == command.vertices.size());
+    assert(registered.batches.size() == command.batches.size());
+    assert(registered.surfaceCount == command.surfaceCount);
     assert(command.surfaceCount == 3u);
     assert(command.firstSurfaceIndex == 0u);
     assert(command.lastSurfaceIndex == 2u);
@@ -1270,6 +1280,8 @@ void TestSpotShadowCommandPreservesAuthoredCasterMembership()
         static_cast<std::uint32_t>(shadowGeometry.size());
     fixture.world.shadowGeom = shadowGeometry.data();
     fixture.world.dpvs.smodelCount = 5u;
+    std::array<GfxStaticModelDrawInst, 5u> modelInstances{};
+    fixture.world.dpvs.smodelDrawInsts = modelInstances.data();
 
     WebRendererWorldSceneCommand command;
     assert(WebRenderer_BuildWorldSceneCommand(
@@ -1286,6 +1298,33 @@ void TestSpotShadowCommandPreservesAuthoredCasterMembership()
     assert(command.spotShadowStaticModels[0u].primaryLightIndex == 2u);
     assert(command.spotShadowStaticModels[0u].canonicalInstanceIndex == 4u);
     assert(command.spotShadowStaticModels[1u].canonicalInstanceIndex == 1u);
+    modelInstances[4u].flags = 1u;
+    assert(WebRenderer_BuildWorldSceneCommand(
+        fixture.world, MakeView(), command) ==
+        WebRendererWorldSceneResult::Success);
+    assert(command.spotShadowStaticModels.size() == 1u);
+    assert(command.spotShadowStaticModels[0u].canonicalInstanceIndex == 1u);
+
+    // Native authored shadow geometry can live after all camera ranges.
+    // Upload that blocker, but never draw it even when camera PVS marks it.
+    fixture.world.dpvs.litSurfsEnd = 2u;
+    fixture.world.dpvs.decalSurfsBegin = 2u;
+    fixture.world.dpvs.decalSurfsEnd = 2u;
+    fixture.world.dpvs.emissiveSurfsBegin = 2u;
+    fixture.world.dpvs.emissiveSurfsEnd = 2u;
+    assert(WebRenderer_BuildWorldSceneCommand(fixture.world, MakeView(), command) ==
+        WebRendererWorldSceneResult::Success);
+    assert(command.spotShadowCasters.size() == 2u);
+    assert(command.spotShadowCasters[0].firstIndex == 6u);
+    assert(command.surfaceRanges.size() == 3u);
+    assert(!command.surfaceRanges[2].cameraSurface);
+    const std::uint8_t visible[] = {1u, 1u, 1u};
+    std::vector<WebRendererWorldCameraRange> cameraRanges;
+    assert(WebRenderer_BuildWorldCameraRanges(command.surfaceRanges,
+        visible, 3u, true, cameraRanges));
+    assert(cameraRanges.size() == 1u);
+    assert(cameraRanges[0].firstIndex == 0u);
+    assert(cameraRanges[0].indexCount == 6u);
 }
 
 void TestDynamicBrushModelUsesCanonicalSurfaceRangeAndPlacement()

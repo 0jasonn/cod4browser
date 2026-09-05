@@ -1,6 +1,7 @@
 #include "r_dynamiclights_core.h"
 #include <universal/q_shared.h>
 #include "r_scene.h"
+#include "r_scene_api.h"
 #include <qcommon/mem_track.h>
 #include "r_init.h"
 #include "r_debug.h"
@@ -168,6 +169,9 @@ void __cdecl R_AddDObjToScene(
     iassert(pose);
     bcassert(entnum, gfxCfg.entCount);
 
+    // Preserve native special-entity allocation and draw flags. Pickup sheen
+    // is currently implemented by the browser presentation backend only.
+    renderFxFlags &= ~GFX_RENDERFX_PICKUP;
     if (r_drawEntities->current.enabled)
     {
         iassert(scene.dpvs.sceneDObjIndex[entnum] == (65535));

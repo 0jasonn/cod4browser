@@ -199,6 +199,7 @@ globalThis.addEventListener("message", (event) => {
     }
     void (async () => {
         try {
+            while (globalThis.kisakLoadingYield) await globalThis.kisakLoadingYield;
             validateProductRequest(message);
             if (message.type === "init") {
                 globalThis.__KISAKCOD_OFFSCREEN_CANVAS__ = message.canvas;

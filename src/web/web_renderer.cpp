@@ -12,10 +12,12 @@
 #include <web/web_system.h>
 
 #include <qcommon/qcommon.h>
+#include <qcommon/loading_keepalive.h>
 #include <qcommon/com_bsp.h>
 #include <gfx_d3d/gfx_image_types.h>
 #include <gfx_d3d/gfx_light_types.h>
 #include <gfx_d3d/r_dynamiclights_core.h>
+#include <gfx_d3d/r_shadowed_light_history.h>
 #include <gfx_d3d/material_types.h>
 #include <gfx_d3d/r_image_resample.h>
 #include <gfx_d3d/r_image_quality.h>
@@ -167,6 +169,7 @@ struct WebRendererRetainedWorldBatch
     std::uint16_t techniqueFlags = 0u;
     std::uint8_t cameraRegion = 0u;
     bool depthHack = false;
+    bool pickupSheen = false;
     std::uint8_t dynamicLightSurfType = 0u;
     bool excludeTransientSpotLight = false;
     float transientLightSphere[4] = {0.0f, 0.0f, 0.0f, -1.0f};
@@ -207,6 +210,8 @@ struct WebRendererRetainedWorldBatch
 
 struct WebRendererRetainedPrimaryLight
 {
+    std::uint32_t attenuationImageIndex = INVALID_WORLD_IMAGE;
+    std::uint8_t attenuationSamplerState = 0x62u;
     float color[3]{};
     float direction[3]{};
     float origin[3]{};
@@ -397,6 +402,7 @@ struct WebRendererState
     GLint premultiplyAlphaUniform = -1;
     GLint colorIntensityAlphaUniform = -1;
     GLint materialModeUniform = -1;
+    GLint pickupSheenUniform = -1;
     GLint softFlagsUniform = -1, softFeatherUniform = -1;
     GLint softEyeUniform = -1, softScreenUniform = -1, softFogUniform = -1;
     GLint floatZUniform = -1, depthSignUniform = -1;
@@ -417,7 +423,8 @@ struct WebRendererState
     GLint shadowFarMapUniform = -1;
     GLint shadowMatrixUniform = -1;
     GLint shadowFarMatrixUniform = -1;
-    GLint sunShadowEnabledUniform = -1;
+    GLint sunLightingModeUniform = -1;
+    GLint sunSpecularScaleUniform = -1;
     GLint sunDirectionUniform = -1;
     GLint sunColorUniform = -1;
     GLint primaryLightmapUniform = -1;
@@ -425,6 +432,7 @@ struct WebRendererState
     GLint primaryLightEnabledUniform = -1;
     GLint primaryLightPositionRadiusUniform = -1;
     GLint primaryLightDiffuseUniform = -1;
+    GLint primaryLightSpecularUniform = -1;
     GLint primaryLightSpotDirectionUniform = -1;
     GLint primaryLightSpotFactorsUniform = -1;
     GLint spotShadowMapUniform = -1;
@@ -590,6 +598,8 @@ struct WebRendererState
         sceneSpotShadowMatrices{};
     std::array<std::uint32_t, MAX_SPOT_SHADOWS> sceneSpotShadowLightIndices{};
     std::array<bool, MAX_SPOT_SHADOWS> sceneSpotShadowDynamic{};
+    std::array<float, MAX_SPOT_SHADOWS> sceneSpotShadowFades{};
+    std::array<GfxShadowedLightHistory, 4> spotShadowHistories{};
     std::uint32_t sceneSpotShadowCount = 0u;
     std::array<float, 4> sceneColorBias{};
     std::array<float, 4> sceneColorTintBase{};
@@ -1499,6 +1509,14 @@ const char *SurfaceTopologyString(WebRendererPrimitiveTopology topology) noexcep
 }
 
 #if KISAK_WEB_DIAGNOSTICS
+int g_testPickupSheenTime = -1;
+unsigned g_pickupSheenDraws = 0;
+extern "C" EMSCRIPTEN_KEEPALIVE unsigned KisakWeb_TestPickupSheen(int milliseconds)
+{
+    if (milliseconds >= -1) g_testPickupSheenTime = milliseconds;
+    return g_pickupSheenDraws;
+}
+
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestLoseWebGLContext()
 {
     return EM_ASM_INT({
@@ -2253,6 +2271,7 @@ void ResetGpuHandles()
     g_renderer.premultiplyAlphaUniform = -1;
     g_renderer.colorIntensityAlphaUniform = -1;
     g_renderer.materialModeUniform = -1;
+    g_renderer.pickupSheenUniform = -1;
     g_renderer.outdoorLookupMatrixUniform = -1;
     g_renderer.outdoorUniform = -1;
     g_renderer.mipBiasUniform = -1;
@@ -2270,7 +2289,8 @@ void ResetGpuHandles()
     g_renderer.shadowFarMapUniform = -1;
     g_renderer.shadowMatrixUniform = -1;
     g_renderer.shadowFarMatrixUniform = -1;
-    g_renderer.sunShadowEnabledUniform = -1;
+    g_renderer.sunLightingModeUniform = -1;
+    g_renderer.sunSpecularScaleUniform = -1;
     g_renderer.sunDirectionUniform = -1;
     g_renderer.sunColorUniform = -1;
     g_renderer.primaryLightmapUniform = -1;
@@ -2278,6 +2298,7 @@ void ResetGpuHandles()
     g_renderer.primaryLightEnabledUniform = -1;
     g_renderer.primaryLightPositionRadiusUniform = -1;
     g_renderer.primaryLightDiffuseUniform = -1;
+    g_renderer.primaryLightSpecularUniform = -1;
     g_renderer.primaryLightSpotDirectionUniform = -1;
     g_renderer.primaryLightSpotFactorsUniform = -1;
     g_renderer.spotShadowMapUniform = -1;
@@ -2332,6 +2353,7 @@ void ResetGpuHandles()
     g_renderer.aaActiveSamples = 1;
     g_renderer.aaMaxSamples = 1;
     g_renderer.sceneSpotShadowCount = 0u;
+    g_renderer.spotShadowHistories = {};
     g_renderer.sceneSpotShadowLightIndices.fill(0u);
     g_renderer.sceneSpotShadowDynamic.fill(false);
     for (WebRendererRetainedWorldImage &image : g_renderer.retainedWorldImages)
@@ -3165,12 +3187,14 @@ bool CreateWaterTextureObjects(
 bool CreateWorldTextureObjects(
     std::vector<WebRendererRetainedWorldImage> &images,
     WebRendererImageDecodeReason reason =
-        WebRendererImageDecodeReason::InitialUpload)
+        WebRendererImageDecodeReason::InitialUpload,
+    bool loading = false)
 {
     for (WebRendererRetainedWorldImage &image : images)
     {
         if (!image.supported) continue;
         if (image.texture != 0u) continue;
+        if (loading) Sys_LoadingKeepAlive();
         kisak::iwi::Rgba8Image decoded;
         kisak::iwi::Error decodeError = kisak::iwi::Error::None;
         const bool encoded = image.recoverySource !=
@@ -3918,6 +3942,7 @@ bool CreateRendererResources(bool contextRecovery = false)
         in vec3 v_distortion_binormal;
         in vec3 v_outdoor_lookup;
         uniform sampler2D u_post_sun;
+        uniform float u_pickup_sheen;
         uniform sampler2D u_outdoor;
         uniform int u_soft_flags;
         uniform vec3 u_soft_feather;
@@ -3958,12 +3983,15 @@ bool CreateRendererResources(bool contextRecovery = false)
         uniform samplerCube u_reflection_probe;
         uniform mat4 u_shadow_matrix;
         uniform mat4 u_shadow_far_matrix;
-        uniform float u_sun_shadow_enabled;
+        // 0: no sun technique; 1: authored visibility; 2: shadow map.
+        uniform float u_sun_lighting_mode;
+        uniform float u_sun_specular_scale;
         uniform vec3 u_sun_direction;
         uniform vec3 u_sun_color;
         uniform float u_primary_light_enabled;
         uniform vec4 u_primary_light_position_radius;
         uniform vec3 u_primary_light_diffuse;
+        uniform vec3 u_primary_light_specular;
         uniform vec3 u_primary_light_spot_direction;
         uniform vec3 u_primary_light_spot_factors;
         uniform highp sampler2DShadow u_spot_shadow_map;
@@ -4060,7 +4088,7 @@ bool CreateRendererResources(bool contextRecovery = false)
 
         float sample_spot_shadow(vec3 world_position)
         {
-            if (u_spot_shadow_enabled < 0.5) return 1.0;
+            if (u_spot_shadow_enabled <= 0.0) return 1.0;
             vec4 clip = u_spot_shadow_matrix * vec4(world_position, 1.0);
             if (clip.w <= 0.0) return 1.0;
             vec3 projected = clip.xyz / clip.w;
@@ -4242,6 +4270,9 @@ bool CreateRendererResources(bool contextRecovery = false)
                 : texel.a;
             vec4 bootstrap_color = v_color;
             vec3 environment_reflection = vec3(0.0);
+            float sun_visibility = 0.0;
+            vec3 local_light_attenuation = vec3(0.0);
+            vec3 local_light_direction = vec3(0.0);
             if (u_scene_fallback > 0.5)
             {
                 // The canonical world command currently has no compiled
@@ -4432,37 +4463,115 @@ bool CreateRendererResources(bool contextRecovery = false)
                         }
                         float diffuse = max(dot(
                             light_direction, primary_normal), 0.0);
-                        lighting += u_primary_light_diffuse * diffuse *
-                            spot_attenuation * radial_attenuation *
-                            local_visibility;
+                        local_light_attenuation = spot_attenuation * radial_attenuation * local_visibility;
+                        local_light_direction = light_direction;
+                        lighting += u_primary_light_diffuse * diffuse * local_light_attenuation;
                     }
-                    if (u_sun_shadow_enabled > 0.5)
+                    if (u_sun_lighting_mode > 0.5)
                     {
                         vec3 sun_normal = normalize(v_model_normal);
                         if (u_normal_map_enabled > 0.5)
                         {
                             vec4 normal_texel = sample_texture(
                                 u_normal_map, v_texcoord);
-                            vec2 tangent_xy = normal_texel.ag * 2.0 - 1.0;
-                            float tangent_z = sqrt(max(
-                                1.0 - dot(tangent_xy, tangent_xy), 0.0));
+                            vec2 normal_slope = vec2(
+                                normal_texel.a * 4.08 - 2.08,
+                                normal_texel.g * 4.06451607 - 2.06451607);
                             vec3 tangent = normalize(v_model_tangent);
                             vec3 binormal = normalize(cross(
                                 sun_normal, tangent)) * v_binormal_sign;
                             sun_normal = normalize(
-                                tangent * tangent_xy.x +
-                                binormal * tangent_xy.y +
-                                sun_normal * tangent_z);
+                                tangent * normal_slope.x +
+                                binormal * normal_slope.y + sun_normal);
                         }
                         float sun_amount = max(dot(
                             normalize(u_sun_direction), sun_normal), 0.0);
                         float authored_sun_visibility = sample_texture(
                             u_primary_lightmap, v_lightmap_coord).r;
-                        lighting += u_sun_color * sun_amount *
-                            sample_sun_shadow(v_world_position,
-                                authored_sun_visibility);
+                        sun_visibility = u_sun_lighting_mode > 1.5
+                            ? sample_sun_shadow(v_world_position,
+                                authored_sun_visibility)
+                            : authored_sun_visibility;
+                        lighting += u_sun_color * sun_amount * sun_visibility;
                     }
                     bootstrap_color.rgb *= lighting;
+                }
+                if (u_material_mode != 1 &&
+                    u_model_lighting_enabled > 0.5)
+                {
+                    // Native lp_t0c0[_n0]_sm2 cube-projects the world normal
+                    // into the entry's 4x4x4 model-lighting block. D3D9 then
+                    // multiplies base*vertex*lighting by two before fog.
+                    vec3 model_normal = normalize(v_model_normal);
+                    if (u_normal_map_enabled > 0.5)
+                    {
+                        // IW3 PC normal maps use the DXT5nm convention:
+                        // tangent X in alpha, tangent Y in green, and a
+                        // reconstructed positive Z. The packed XSurface sign
+                        // reconstructs the same binormal handedness as native.
+                        vec4 normal_texel = sample_texture(
+                            u_normal_map, v_texcoord);
+                        vec2 tangent_xy = normal_texel.ag * 2.0 - 1.0;
+                        float tangent_z = sqrt(max(
+                            1.0 - dot(tangent_xy, tangent_xy), 0.0));
+                        vec3 tangent = normalize(v_model_tangent);
+                        vec3 binormal = normalize(cross(
+                            model_normal, tangent)) * v_binormal_sign;
+                        model_normal = normalize(
+                            tangent * tangent_xy.x +
+                            binormal * tangent_xy.y +
+                            model_normal * tangent_z);
+                    }
+                    float major_axis = max(max(abs(model_normal.x),
+                        abs(model_normal.y)), abs(model_normal.z));
+                    vec3 lookup_direction = model_normal /
+                        max(major_axis, 0.000001);
+                    vec4 model_lighting = sample_volume(
+                        u_model_lighting,
+                        v_model_lighting_coords + lookup_direction *
+                            u_model_lighting_lookup_scale);
+                    vec3 model_lighting_factor = model_lighting.rgb * 2.0;
+                    if ((u_primary_light_enabled > 0.5 && u_primary_light_enabled < 1.5) ||
+                        u_material_mode == 6)
+                    {
+                        // The model-lighting volume stores canonical primary
+                        // visibility in alpha. Native lp_amb_* adds sunDiffuse
+                        // after doubling ambient model lighting and without a
+                        // normal term; the remaining lp_* programs retain
+                        // their directional N dot L contribution inside x2.
+                        float primary_diffuse = u_material_mode == 6
+                            ? 1.0
+                            : max(dot(normalize(u_sun_direction),
+                                model_normal), 0.0);
+                        vec3 primary_lighting = u_sun_color *
+                            model_lighting.a * primary_diffuse;
+                        model_lighting_factor += u_material_mode == 6
+                            ? primary_lighting
+                            : primary_lighting * 2.0;
+                    }
+                    if (u_primary_light_enabled > 1.5)
+                    {
+                        vec3 delta = u_primary_light_position_radius.xyz - v_world_position;
+                        float distance_to_light = length(delta);
+                        local_light_direction = delta / max(distance_to_light, 0.000001);
+                        float cone = 1.0;
+                        if (u_primary_light_enabled < 2.5)
+                        {
+                            float amount = clamp(dot(local_light_direction, u_primary_light_spot_direction) *
+                                u_primary_light_spot_factors.x + u_primary_light_spot_factors.y, 0.0, 1.0);
+                            cone = amount > 0.0 ? pow(amount, u_primary_light_spot_factors.z) : 0.0;
+                        }
+                        vec3 attenuation = sample_texture(u_secondary_lightmap,
+                            vec2(clamp(distance_to_light * u_primary_light_position_radius.w, 0.0, 1.0))).rgb;
+                        float visibility = mix(model_lighting.a, sample_spot_shadow(v_world_position),
+                            clamp(u_spot_shadow_enabled, 0.0, 1.0));
+                        local_light_attenuation = attenuation * cone * visibility;
+                        // lp_[hsm_]spot: double the ambient volume, then add
+                        // direct diffuse once. Specular shares this attenuation.
+                        model_lighting_factor += local_light_attenuation * u_primary_light_diffuse *
+                            max(dot(local_light_direction, model_normal), 0.0);
+                    }
+                    bootstrap_color.rgb *= model_lighting_factor;
                 }
                 if (u_material_mode != 1 &&
                     u_specular_map_enabled > 0.5)
@@ -4521,64 +4630,28 @@ bool CreateRendererResources(bool contextRecovery = false)
                     float reflection_factor = mix(
                         u_env_map_parms.x, u_env_map_parms.y,
                         fresnel_power);
-                    environment_reflection = reflection_sample.rgb *
-                        reflection_sample.a * specular_sample.rgb *
+                    vec3 reflected_light = reflection_sample.rgb * reflection_sample.a;
+                    if (sun_visibility > 0.0)
+                    {
+                        // lm_[hsm_]sun_* SM3 uses the specular alpha to set
+                        // the exponential lobe, then applies authored/shadow
+                        // visibility before the shared Fresnel/specular tint.
+                        float sharpness = exp2(specular_sample.a * 9.3775177) + 7.0;
+                        float highlight = clamp(exp2((dot(reflection_direction,
+                            u_sun_direction) - 0.99925) * sharpness * 1.44269502), 0.0, 1.0);
+                        reflected_light += sun_visibility * highlight *
+                            u_env_map_parms.w * u_sun_color * u_sun_specular_scale;
+                    }
+                    if (any(greaterThan(local_light_attenuation, vec3(0.0))))
+                    {
+                        float sharpness = exp2(specular_sample.a * 9.3775177) + 7.0;
+                        float highlight = clamp(exp2((dot(reflection_direction,
+                            local_light_direction) - 0.99925) * sharpness * 1.44269502), 0.0, 1.0);
+                        reflected_light += local_light_attenuation * highlight *
+                            u_env_map_parms.w * u_primary_light_specular;
+                    }
+                    environment_reflection = reflected_light * specular_sample.rgb *
                         reflection_factor;
-                }
-                if (u_material_mode != 1 &&
-                    u_model_lighting_enabled > 0.5)
-                {
-                    // Native lp_t0c0[_n0]_sm2 cube-projects the world normal
-                    // into the entry's 4x4x4 model-lighting block. D3D9 then
-                    // multiplies base*vertex*lighting by two before fog.
-                    vec3 model_normal = normalize(v_model_normal);
-                    if (u_normal_map_enabled > 0.5)
-                    {
-                        // IW3 PC normal maps use the DXT5nm convention:
-                        // tangent X in alpha, tangent Y in green, and a
-                        // reconstructed positive Z. The packed XSurface sign
-                        // reconstructs the same binormal handedness as native.
-                        vec4 normal_texel = sample_texture(
-                            u_normal_map, v_texcoord);
-                        vec2 tangent_xy = normal_texel.ag * 2.0 - 1.0;
-                        float tangent_z = sqrt(max(
-                            1.0 - dot(tangent_xy, tangent_xy), 0.0));
-                        vec3 tangent = normalize(v_model_tangent);
-                        vec3 binormal = normalize(cross(
-                            model_normal, tangent)) * v_binormal_sign;
-                        model_normal = normalize(
-                            tangent * tangent_xy.x +
-                            binormal * tangent_xy.y +
-                            model_normal * tangent_z);
-                    }
-                    float major_axis = max(max(abs(model_normal.x),
-                        abs(model_normal.y)), abs(model_normal.z));
-                    vec3 lookup_direction = model_normal /
-                        max(major_axis, 0.000001);
-                    vec4 model_lighting = sample_volume(
-                        u_model_lighting,
-                        v_model_lighting_coords + lookup_direction *
-                            u_model_lighting_lookup_scale);
-                    vec3 model_lighting_factor = model_lighting.rgb * 2.0;
-                    if (u_primary_light_enabled > 0.5 ||
-                        u_material_mode == 6)
-                    {
-                        // The model-lighting volume stores canonical primary
-                        // visibility in alpha. Native lp_amb_* adds sunDiffuse
-                        // after doubling ambient model lighting and without a
-                        // normal term; the remaining lp_* programs retain
-                        // their directional N dot L contribution inside x2.
-                        float primary_diffuse = u_material_mode == 6
-                            ? 1.0
-                            : max(dot(normalize(u_sun_direction),
-                                model_normal), 0.0);
-                        vec3 primary_lighting = u_sun_color *
-                            model_lighting.a * primary_diffuse;
-                        model_lighting_factor += u_material_mode == 6
-                            ? primary_lighting
-                            : primary_lighting * 2.0;
-                    }
-                    bootstrap_color.rgb *= model_lighting_factor;
                 }
                 // Retail lp_* bytecode adds the environment term after
                 // base*vertex*modelLighting*2. World passes have no model
@@ -4586,6 +4659,12 @@ bool CreateRendererResources(bool contextRecovery = false)
                 bootstrap_color.rgb += environment_reflection;
             }
             vec4 final_color = bootstrap_color * u_ui_color;
+            if (u_pickup_sheen > 0.0)
+            {
+                // Reference peak/trough differences preserve texture contrast:
+                // add the warm sheen instead of fading the material to white.
+                final_color.rgb += u_pickup_sheen * vec3(0.46, 0.53, 0.33);
+            }
             if (u_fog_enabled > 0.5 && u_material_mode != 1)
             {
                 // R_SetFrameFog supplies (start, density). Campaign scripts
@@ -4941,6 +5020,7 @@ bool CreateRendererResources(bool contextRecovery = false)
         glGetUniformLocation(program, "u_color_intensity_alpha");
     const GLint materialModeUniform =
         glGetUniformLocation(program, "u_material_mode");
+    const GLint pickupSheenUniform = glGetUniformLocation(program, "u_pickup_sheen");
     const GLint outdoorLookupMatrixUniform =
         glGetUniformLocation(program, "u_outdoor_lookup_matrix");
     const GLint outdoorUniform =
@@ -4972,8 +5052,9 @@ bool CreateRendererResources(bool contextRecovery = false)
         glGetUniformLocation(program, "u_shadow_matrix");
     const GLint shadowFarMatrixUniform =
         glGetUniformLocation(program, "u_shadow_far_matrix");
-    const GLint sunShadowEnabledUniform =
-        glGetUniformLocation(program, "u_sun_shadow_enabled");
+    const GLint sunLightingModeUniform =
+        glGetUniformLocation(program, "u_sun_lighting_mode");
+    const GLint sunSpecularScaleUniform = glGetUniformLocation(program, "u_sun_specular_scale");
     const GLint sunDirectionUniform =
         glGetUniformLocation(program, "u_sun_direction");
     const GLint sunColorUniform =
@@ -4986,6 +5067,7 @@ bool CreateRendererResources(bool contextRecovery = false)
         glGetUniformLocation(program, "u_primary_light_enabled");
     const GLint primaryLightPositionRadiusUniform =
         glGetUniformLocation(program, "u_primary_light_position_radius");
+    const GLint primaryLightSpecularUniform = glGetUniformLocation(program, "u_primary_light_specular");
     const GLint primaryLightDiffuseUniform =
         glGetUniformLocation(program, "u_primary_light_diffuse");
     const GLint primaryLightSpotDirectionUniform =
@@ -5191,7 +5273,7 @@ bool CreateRendererResources(bool contextRecovery = false)
         modelLightingBaseCoordinatesUniform < 0 ||
         modelLightingLookupScaleUniform < 0 ||
         premultiplyAlphaUniform < 0 || colorIntensityAlphaUniform < 0 ||
-        materialModeUniform < 0 || outdoorLookupMatrixUniform < 0 ||
+        materialModeUniform < 0 || pickupSheenUniform < 0 || outdoorLookupMatrixUniform < 0 ||
         outdoorUniform < 0 || mipBiasUniform < 0 || falloffParmsUniform < 0 ||
         falloffBeginColorUniform < 0 || falloffEndColorUniform < 0 ||
         alphaTestUniform < 0 || instanceEnabledUniform < 0 ||
@@ -5199,13 +5281,13 @@ bool CreateRendererResources(bool contextRecovery = false)
         viewOriginUniform < 0 || fogColorUniform < 0 ||
         fogParamsUniform < 0 || shadowMapUniform < 0 ||
         shadowFarMapUniform < 0 || shadowMatrixUniform < 0 ||
-        shadowFarMatrixUniform < 0 || sunShadowEnabledUniform < 0 ||
-        sunDirectionUniform < 0 || sunColorUniform < 0 ||
+        shadowFarMatrixUniform < 0 || sunLightingModeUniform < 0 ||
+        sunDirectionUniform < 0 || sunColorUniform < 0 || sunSpecularScaleUniform < 0 ||
         primaryLightmapUniform < 0 ||
         primaryLightFalloffPlacementUniform < 0 ||
         primaryLightEnabledUniform < 0 ||
         primaryLightPositionRadiusUniform < 0 ||
-        primaryLightDiffuseUniform < 0 ||
+        primaryLightDiffuseUniform < 0 || primaryLightSpecularUniform < 0 ||
         primaryLightSpotDirectionUniform < 0 ||
         primaryLightSpotFactorsUniform < 0 ||
         spotShadowMapUniform < 0 || spotShadowMatrixUniform < 0 ||
@@ -5342,6 +5424,7 @@ bool CreateRendererResources(bool contextRecovery = false)
     g_renderer.premultiplyAlphaUniform = premultiplyAlphaUniform;
     g_renderer.colorIntensityAlphaUniform = colorIntensityAlphaUniform;
     g_renderer.materialModeUniform = materialModeUniform;
+    g_renderer.pickupSheenUniform = pickupSheenUniform;
     g_renderer.softFlagsUniform = glGetUniformLocation(program, "u_soft_flags");
     g_renderer.softFeatherUniform = glGetUniformLocation(program, "u_soft_feather");
     g_renderer.softEyeUniform = glGetUniformLocation(program, "u_soft_eye");
@@ -5368,7 +5451,8 @@ bool CreateRendererResources(bool contextRecovery = false)
     g_renderer.shadowFarMapUniform = shadowFarMapUniform;
     g_renderer.shadowMatrixUniform = shadowMatrixUniform;
     g_renderer.shadowFarMatrixUniform = shadowFarMatrixUniform;
-    g_renderer.sunShadowEnabledUniform = sunShadowEnabledUniform;
+    g_renderer.sunLightingModeUniform = sunLightingModeUniform;
+    g_renderer.sunSpecularScaleUniform = sunSpecularScaleUniform;
     g_renderer.sunDirectionUniform = sunDirectionUniform;
     g_renderer.sunColorUniform = sunColorUniform;
     g_renderer.primaryLightmapUniform = primaryLightmapUniform;
@@ -5378,6 +5462,7 @@ bool CreateRendererResources(bool contextRecovery = false)
     g_renderer.primaryLightPositionRadiusUniform =
         primaryLightPositionRadiusUniform;
     g_renderer.primaryLightDiffuseUniform = primaryLightDiffuseUniform;
+    g_renderer.primaryLightSpecularUniform = primaryLightSpecularUniform;
     g_renderer.primaryLightSpotDirectionUniform =
         primaryLightSpotDirectionUniform;
     g_renderer.primaryLightSpotFactorsUniform =
@@ -5997,6 +6082,9 @@ WebRendererSurfaceResult CopyWorldCommand(
             light.cosHalfFovInner = source.cosHalfFovInner;
             light.falloffScale = source.falloffScale;
             light.falloffShift = source.falloffShift;
+            light.attenuationImageIndex = RetainCanonicalWorldImage(
+                source.attenuationImage, images, retainedPixelBytes);
+            light.attenuationSamplerState = source.attenuationSamplerState;
             std::copy_n(source.color, 3u, light.color);
             std::copy_n(source.direction, 3u, light.direction);
             std::copy_n(source.origin, 3u, light.origin);
@@ -6036,6 +6124,7 @@ WebRendererSurfaceResult CopyWorldCommand(
         std::uint32_t expectedFirstIndex = 0u;
         for (std::uint32_t index = 0u; index < surface.batchCount; ++index)
         {
+            Sys_LoadingKeepAlive();
             const WebRendererWorldBatchDesc &source = surface.batches[index];
             if (source.indexCount == 0u || source.surfaceCount == 0u ||
                 (source.firstIndex % 3u) != 0u ||
@@ -6104,6 +6193,7 @@ WebRendererSurfaceResult CopyWorldCommand(
             batch.techniqueFlags = source.techniqueFlags;
             batch.cameraRegion = source.cameraRegion;
             batch.depthHack = source.depthHack;
+            batch.pickupSheen = source.pickupSheen;
             batch.dynamicLightSurfType = source.dynamicLightSurfType;
             batch.excludeTransientSpotLight = source.excludeTransientSpotLight;
             for (float component : source.transientLightSphere)
@@ -6488,6 +6578,7 @@ WebRendererSurfaceResult CopyStaticModelCommand(
         images.reserve(scene.batchCount);
         for (std::uint32_t index = 0u; index < scene.batchCount; ++index)
         {
+            Sys_LoadingKeepAlive();
             const WebRendererStaticModelBatchDesc &source = scene.batches[index];
             const WebRendererWorldBatchDesc &draw = source.draw;
             const bool staticModelTechnique =
@@ -6598,6 +6689,7 @@ WebRendererSurfaceResult CopyStaticModelCommand(
         // bounded recovery allowance on the new SM3 specular tier.
         for (std::uint32_t index = 0u; index < scene.batchCount; ++index)
         {
+            Sys_LoadingKeepAlive();
             const WebRendererWorldBatchDesc &draw = scene.batches[index].draw;
             if (draw.lightingMode ==
                 WebRendererWorldLightingMode::ModelLightGrid)
@@ -6609,6 +6701,7 @@ WebRendererSurfaceResult CopyStaticModelCommand(
         }
         for (std::uint32_t index = 0u; index < scene.batchCount; ++index)
         {
+            Sys_LoadingKeepAlive();
             const WebRendererWorldBatchDesc &draw = scene.batches[index].draw;
             if (WebRenderer_UsesModelEnvironmentSpecular(draw.technique))
             {
@@ -6877,7 +6970,8 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
     {
         return WebRendererSurfaceResult::BackendFailure;
     }
-    if (hasContext && !CreateWorldTextureObjects(retainedImages))
+    if (hasContext && !CreateWorldTextureObjects(retainedImages,
+        WebRendererImageDecodeReason::InitialUpload, true))
     {
         DeleteSurfaceObjects(replacementVertexArray, replacementVertexBuffer,
             replacementIndexBuffer);
@@ -6906,6 +7000,7 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
     g_renderer.retainedVertices = std::move(retainedVertices);
     g_renderer.retainedWorldIndices = std::move(retainedIndices);
     g_renderer.retainedWorldBatches = std::move(retainedBatches);
+    g_renderer.spotShadowHistories = {};
     g_renderer.retainedWorldSurfaceRanges = std::move(retainedSurfaceRanges);
     g_renderer.worldCameraRanges.clear();
     for (auto &ranges : g_renderer.worldDynamicLightRanges) ranges.clear();
@@ -7332,7 +7427,8 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
     {
         return WebRendererSurfaceResult::BackendFailure;
     }
-    if (hasContext && !CreateWorldTextureObjects(retainedImages))
+    if (hasContext && !CreateWorldTextureObjects(retainedImages,
+        WebRendererImageDecodeReason::InitialUpload, true))
     {
         DeleteStaticModelObjects(
             vertexArray, vertexBuffer, indexBuffer, instanceBuffer);
@@ -7934,6 +8030,7 @@ WebRendererSurfaceResult WebRenderer_SetUiScene(
         std::uint32_t expectedFirstIndex = 0u;
         for (std::uint32_t index = 0u; index < scene.batchCount; ++index)
         {
+            Sys_LoadingKeepAlive();
             const WebRendererUiBatchDesc &source = scene.batches[index];
             const auto &saved = source.savedScreen;
             const bool capture = saved.command == WebRendererUiCommand::SaveScreen;
@@ -8241,7 +8338,7 @@ bool BuildSpotShadowMatrix(
 
 void SelectSpotShadowLights(
     WebRendererDynamicShadowVisibility dynamicShadowVisibility,
-    std::uint32_t localClientNum) noexcept
+    std::uint32_t localClientNum, std::uint32_t sceneTime) noexcept
 {
     struct Candidate
     {
@@ -8250,10 +8347,14 @@ void SelectSpotShadowLights(
         bool dynamic;
     };
     std::array<bool, WEB_RENDERER_MAX_PRIMARY_LIGHTS> used{};
-    for (const WebRendererRetainedWorldBatch &batch :
-         g_renderer.retainedWorldBatches)
+    // R_AddAllBspDrawSurfacesCamera marks lights used by visible surfaces;
+    // off-camera retained geometry must not compete for the shadow budget.
+    for (const auto &range : g_renderer.worldCameraRanges)
+    {
+        const auto &batch = g_renderer.retainedWorldBatches[range.batchIndex];
         if (batch.primaryLightIndex < used.size())
             used[batch.primaryLightIndex] = true;
+    }
     for (const auto &draw : g_renderer.dynamicDraws)
     {
         const auto &batch = DynamicDrawBatch(draw);
@@ -8324,11 +8425,40 @@ void SelectSpotShadowLights(
             sm_maxLights->current.integer, 0,
             static_cast<int>(MAX_SPOT_SHADOWS)))
         : static_cast<std::uint32_t>(MAX_SPOT_SHADOWS);
+    // R_ChooseShadowedLights retains outgoing maps until their native fade
+    // completes. Replacing the fourth-ranked map immediately causes visible
+    // shadows to pop whenever camera position/direction changes the scores.
+    if (localClientNum >= g_renderer.spotShadowHistories.size()) return;
+    auto &history = g_renderer.spotShadowHistories[localClientNum];
+    const unsigned primaryCount = static_cast<unsigned>(g_renderer.retainedPrimaryLights.size());
+    std::uint32_t usedBits[8]{};
+    for (unsigned i = 0u; i < used.size(); ++i)
+        if (used[i]) usedBits[i >> 5u] |= 1u << (i & 31u);
+    // Transient slot zero has the same shadowable index as native: the first
+    // index after the immutable primary lights, not its backend array slot.
+    if (g_renderer.dynamicSpotLightIndex < g_renderer.dynamicLightCount && primaryCount < 256u)
+        usedBits[primaryCount >> 5u] |= 1u << (primaryCount & 31u);
+    const std::uint32_t elapsed = sceneTime - history.lastUpdateTime;
+    if (elapsed)
+    {
+        history.lastUpdateTime = sceneTime;
+        const float seconds = sm_spotShadowFadeTime ? sm_spotShadowFadeTime->current.value : 1.0f;
+        const float fadeDelta = static_cast<float>(elapsed) * 0.001f / seconds;
+        R_FadeShadowHistory(history, usedBits, fadeDelta);
+        for (unsigned i = 0; i < std::min<unsigned>(configuredLimit, candidates.size()); ++i)
+            R_AddShadowHistory(history, candidates[i].dynamic ? primaryCount : candidates[i].lightIndex,
+                fadeDelta, configuredLimit);
+        std::copy_n(usedBits, 8u, history.shadowableLightWasUsed);
+    }
     g_renderer.sceneSpotShadowCount = 0u;
     g_renderer.sceneSpotShadowDynamic.fill(false);
-    for (const Candidate &candidate : candidates)
+    for (unsigned entryIndex = 0u; entryIndex < history.entryCount; ++entryIndex)
     {
-        if (g_renderer.sceneSpotShadowCount >= configuredLimit) break;
+        const auto &entry = history.entries[entryIndex];
+        const bool dynamic = entry.shadowableLightIndex == primaryCount;
+        const Candidate candidate{dynamic ? g_renderer.dynamicSpotLightIndex : entry.shadowableLightIndex, 0.0f, dynamic};
+        if ((dynamic && candidate.lightIndex >= g_renderer.dynamicLightCount) ||
+            (!dynamic && candidate.lightIndex >= primaryCount)) continue;
         const std::size_t slot = g_renderer.sceneSpotShadowCount;
         const float *origin;
         const float *direction;
@@ -8360,6 +8490,7 @@ void SelectSpotShadowLights(
             continue;
         g_renderer.sceneSpotShadowLightIndices[slot] = candidate.lightIndex;
         g_renderer.sceneSpotShadowDynamic[slot] = candidate.dynamic;
+        g_renderer.sceneSpotShadowFades[slot] = entry.fade;
         ++g_renderer.sceneSpotShadowCount;
     }
     for (WebRendererDynamicDraw &draw : g_renderer.dynamicDraws)
@@ -8639,7 +8770,7 @@ bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
         ? WebFrameProfile_Now() : 0.0;
 #endif
     SelectSpotShadowLights(view.dynamicShadowVisibility,
-        static_cast<std::uint32_t>(view.localClientNum));
+        static_cast<std::uint32_t>(view.localClientNum), static_cast<std::uint32_t>(view.time));
 #if KISAK_WEB_DIAGNOSTICS
     if (frameProfile)
         frameProfile->spotShadowPrepareMs +=
@@ -9321,7 +9452,7 @@ bool BindWaterTextures(WebRendererRetainedWorldBatch &batch, float floatTime)
 {
     if (batch.waterTexture == 0u || batch.reflectionTexture == 0u)
         return false;
-    if (batch.waterTextureTime != floatTime)
+    if ((!r_drawWater || r_drawWater->current.enabled) && batch.waterTextureTime != floatTime)
     {
         water_t water{};
         water.H0 = batch.waterH0.data();
@@ -9556,7 +9687,7 @@ bool DrawShadowPartition(
     double shadowFamilyStarted = shadowProfile
         ? WebFrameProfile_Now() : 0.0;
 #endif
-    if (requireSunCaster || transientSpot)
+    if ((!r_drawWorld || r_drawWorld->current.enabled) && (requireSunCaster || transientSpot))
     {
         const bool built = transientSpot
             ? WebRenderer_BuildWorldTransientSpotShadowRanges(
@@ -9589,7 +9720,7 @@ bool DrawShadowPartition(
         (void)merged;
 #endif
     }
-    else
+    else if (!r_drawWorld || r_drawWorld->current.enabled)
     {
         for (const WebRendererRetainedSpotShadowCaster &caster :
              g_renderer.retainedWorldSpotShadowCasters)
@@ -9611,7 +9742,7 @@ bool DrawShadowPartition(
         shadowFamilyStarted = now;
     }
 #endif
-    if (g_renderer.staticModelSceneActive &&
+    if ((!r_drawSModels || r_drawSModels->current.enabled) && g_renderer.staticModelSceneActive &&
         g_renderer.staticModelVertexArray != 0u &&
         g_renderer.staticModelInstanceBuffer != 0u &&
         (!transientSpot || !r_spotLightSModelShadows ||
@@ -9668,7 +9799,7 @@ bool DrawShadowPartition(
         {
             if (batch.instanceCount == 0u) continue;
             if (requireSunCaster && !batch.draw.castsSunShadow) continue;
-            if (transientSpot && !batch.draw.castsSpotShadow) continue;
+            if (!requireSunCaster && !batch.draw.castsSpotShadow) continue;
             if (!requireSunCaster)
                 applySpotShadowCull(batch.draw.shadowStateBits0);
             const WebRendererRetainedWorldImage *base = RetainedImage(
@@ -9839,6 +9970,24 @@ bool DrawSpotShadowMaps()
     return true;
 }
 
+void BindPrimaryLightConstants(const WebRendererRetainedPrimaryLight &light)
+{
+    glUniform4f(g_renderer.primaryLightPositionRadiusUniform,
+        light.origin[0], light.origin[1], light.origin[2], 1.0f / light.radius);
+    const float diffuseScale = r_diffuseColorScale ? r_diffuseColorScale->current.value : 1.0f;
+    const float specularScale = r_specularColorScale ? r_specularColorScale->current.value : 1.0f;
+    glUniform3f(g_renderer.primaryLightDiffuseUniform,
+        light.color[0] * diffuseScale, light.color[1] * diffuseScale, light.color[2] * diffuseScale);
+    glUniform3f(g_renderer.primaryLightSpecularUniform,
+        light.color[0] * specularScale, light.color[1] * specularScale, light.color[2] * specularScale);
+    glUniform3fv(g_renderer.primaryLightSpotDirectionUniform, 1, light.direction);
+    const float spotScale = light.type == 2u
+        ? 1.0f / (light.cosHalfFovInner - light.cosHalfFovOuter) : 0.0f;
+    glUniform3f(g_renderer.primaryLightSpotFactorsUniform,
+        spotScale, -spotScale * light.cosHalfFovOuter, static_cast<float>(light.exponent));
+    glUniform2f(g_renderer.primaryLightFalloffPlacementUniform, light.falloffScale, light.falloffShift);
+}
+
 void BindSpotShadowForPrimaryLight(
     std::uint8_t primaryLightIndex,
     bool primaryLit,
@@ -9853,7 +10002,7 @@ void BindSpotShadowForPrimaryLight(
             if (g_renderer.sceneSpotShadowLightIndices[slot] !=
                 primaryLightIndex)
                 continue;
-            glUniform1f(g_renderer.spotShadowEnabledUniform, 1.0f);
+            glUniform1f(g_renderer.spotShadowEnabledUniform, g_renderer.sceneSpotShadowFades[slot]);
             glUniformMatrix4fv(g_renderer.spotShadowMatrixUniform, 1,
                 GL_FALSE, g_renderer.sceneSpotShadowMatrices[slot].data());
             glActiveTexture(GL_TEXTURE14);
@@ -9878,7 +10027,7 @@ void BindSpotShadowForDynamicLight(std::uint32_t dynamicLightIndex,
                 g_renderer.sceneSpotShadowLightIndices[slot] !=
                     dynamicLightIndex)
                 continue;
-            glUniform1f(g_renderer.spotShadowEnabledUniform, 1.0f);
+            glUniform1f(g_renderer.spotShadowEnabledUniform, g_renderer.sceneSpotShadowFades[slot]);
             glUniformMatrix4fv(g_renderer.spotShadowMatrixUniform, 1,
                 GL_FALSE, g_renderer.sceneSpotShadowMatrices[slot].data());
             glActiveTexture(GL_TEXTURE14);
@@ -11211,8 +11360,14 @@ extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestTransientLightDraws()
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t
-KisakWeb_TestTransientSpotShadowState()
+KisakWeb_TestTransientSpotShadowState(int field)
 {
+    if (field >= 1 && field <= 4)
+        return static_cast<unsigned>(field) <= g_renderer.sceneSpotShadowCount
+            ? g_renderer.sceneSpotShadowLightIndices[field - 1] + 1u : 0u;
+    if (field >= 5 && field <= 8)
+        return static_cast<unsigned>(field - 4) <= g_renderer.sceneSpotShadowCount
+            ? static_cast<unsigned>(g_renderer.sceneSpotShadowFades[field - 5] * 1000.0f) : 0u;
     std::uint32_t dynamicCount = 0u;
     std::uint32_t dynamicSlot = 0u;
     for (std::uint32_t slot = 0u;
@@ -11402,6 +11557,9 @@ bool WebRenderer_SetDisplayGamma(float gamma)
 
 bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
 {
+#if KISAK_WEB_DIAGNOSTICS
+    g_pickupSheenDraws = 0;
+#endif
 #if KISAK_WEB_DIAGNOSTICS
     g_renderer.lastUiDrawCount = 0u;
 #endif
@@ -11689,7 +11847,9 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
         g_renderer.sceneSunDirection.data());
     glUniform3fv(g_renderer.sunColorUniform, 1,
         g_renderer.sceneSunColor.data());
-    glUniform1f(g_renderer.sunShadowEnabledUniform, 0.0f);
+    glUniform1f(g_renderer.sunSpecularScaleUniform,
+        r_specularColorScale ? r_specularColorScale->current.value : 1.0f);
+    glUniform1f(g_renderer.sunLightingModeUniform, 0.0f);
     glUniform1f(g_renderer.primaryLightEnabledUniform, 0.0f);
     glUniform1f(g_renderer.spotShadowEnabledUniform, 0.0f);
     glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
@@ -11835,33 +11995,12 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 normalMapped ? 1.0f : 0.0f);
             glUniform1f(g_renderer.specularMapEnabledUniform,
                 specularMapped ? 1.0f : 0.0f);
-            glUniform1f(g_renderer.sunShadowEnabledUniform,
-                shadowMapDrawn && lightmapped &&
-                        batch.techniqueType == 9u
-                    ? 1.0f : 0.0f);
+            glUniform1f(g_renderer.sunLightingModeUniform,
+                lightmapped && (batch.techniqueType == 8u || batch.techniqueType == 9u)
+                    ? (shadowMapDrawn ? 2.0f : 1.0f) : 0.0f);
             glUniform1f(g_renderer.primaryLightEnabledUniform,
                 primaryLit ? 1.0f : 0.0f);
-            if (primaryLit)
-            {
-                glUniform4f(g_renderer.primaryLightPositionRadiusUniform,
-                    primaryLight->origin[0], primaryLight->origin[1],
-                    primaryLight->origin[2], 1.0f / primaryLight->radius);
-                glUniform3fv(g_renderer.primaryLightDiffuseUniform, 1,
-                    primaryLight->color);
-                glUniform3fv(g_renderer.primaryLightSpotDirectionUniform, 1,
-                    primaryLight->direction);
-                const float spotScale = 1.0f /
-                    (primaryLight->cosHalfFovInner -
-                        primaryLight->cosHalfFovOuter);
-                glUniform3f(g_renderer.primaryLightSpotFactorsUniform,
-                    spotScale,
-                    -spotScale * primaryLight->cosHalfFovOuter,
-                    static_cast<float>(primaryLight->exponent));
-                glUniform2f(
-                    g_renderer.primaryLightFalloffPlacementUniform,
-                    primaryLight->falloffScale,
-                    primaryLight->falloffShift);
-            }
+            if (primaryLit) BindPrimaryLightConstants(*primaryLight);
             BindSpotShadowForPrimaryLight(batch.primaryLightIndex,
                 primaryLit, spotShadowMapsDrawn);
             BindWorldTexture(
@@ -11910,7 +12049,8 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         glActiveTexture(GL_TEXTURE0);
     }
-    else if (primarySurfaceReady && !emissiveCameraPass && !floatZPass)
+    else if (primarySurfaceReady && !g_renderer.worldSurfaceActive &&
+        !emissiveCameraPass && !floatZPass)
     {
         glActiveTexture(GL_TEXTURE0);
         glUniform1f(
@@ -11963,7 +12103,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
         g_renderer.staticModelInstanceBuffer != 0u)
     {
         glBindVertexArray(g_renderer.staticModelVertexArray);
-        glUniform1f(g_renderer.sunShadowEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.sunLightingModeUniform, 0.0f);
         glUniform1f(g_renderer.instanceEnabledUniform, 1.0f);
         glUniform1f(g_renderer.lightmapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
@@ -12026,6 +12166,15 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 : nullptr;
             const bool directionalPrimaryLit = modelLit && primaryLight &&
                 primaryLight->type == 1u;
+            const auto *attenuation = primaryLight ? WorldImage(primaryLight->attenuationImageIndex) : nullptr;
+            const bool localPrimaryLit = modelLit && primaryLight &&
+                (primaryLight->type == 2u || primaryLight->type == 3u) && attenuation && attenuation->texture;
+            if (localPrimaryLit)
+            {
+                BindPrimaryLightConstants(*primaryLight);
+                BindWorldTexture(GL_TEXTURE2, attenuation->texture, primaryLight->attenuationSamplerState, false);
+            }
+            BindSpotShadowForPrimaryLight(batch.draw.primaryLightIndex, localPrimaryLit, spotShadowMapsDrawn);
             glUniform1f(g_renderer.sceneFallbackUniform,
                 fallback ? 1.0f : 0.0f);
             glUniform1f(g_renderer.textureEnabledUniform,
@@ -12041,7 +12190,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
             glUniform1f(g_renderer.specularMapEnabledUniform,
                 specularMapped ? 1.0f : 0.0f);
             glUniform1f(g_renderer.primaryLightEnabledUniform,
-                directionalPrimaryLit ? 1.0f : 0.0f);
+                localPrimaryLit ? static_cast<float>(primaryLight->type) : directionalPrimaryLit ? 1.0f : 0.0f);
             if (specularMapped)
             {
                 glUniform4fv(g_renderer.envMapParmsUniform, 1,
@@ -12103,7 +12252,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
         g_renderer.dynamicModelSceneActive)
     {
         glBindVertexArray(g_renderer.dynamicModelVertexArray);
-        glUniform1f(g_renderer.sunShadowEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.sunLightingModeUniform, 0.0f);
         glUniform1f(g_renderer.instanceEnabledUniform, 0.0f);
         glUniform1f(g_renderer.lightmapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
@@ -12387,6 +12536,12 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                     batch.pixelShaderName.rfind("lm_spot_", 0u) == 0u;
                 const bool directionalPrimaryLit = modelLit && primaryLight &&
                     primaryLight->type == 1u;
+                const auto *attenuation = primaryLight ? WorldImage(primaryLight->attenuationImageIndex) : nullptr;
+                const bool localPrimaryLit = modelLit && primaryLight &&
+                    (primaryLight->type == 2u || primaryLight->type == 3u) && attenuation && attenuation->texture;
+                glUniform1f(g_renderer.sunLightingModeUniform,
+                    dynamicLightmapped && (batch.techniqueType == 8u || batch.techniqueType == 9u)
+                        ? (shadowMapDrawn ? 2.0f : 1.0f) : 0.0f);
                 if (drawState.NeedsFeatures({
                     g_renderer.sceneFogEnabled && !fxSceneGeometry && !sunSprite,
                     fallback && !fxSceneGeometry, !fallback, dynamicLightmapped,
@@ -12416,8 +12571,6 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                         normalMapped ? 1.0f : 0.0f);
                     glUniform1f(g_renderer.specularMapEnabledUniform,
                         specularMapped ? 1.0f : 0.0f);
-                    glUniform1f(g_renderer.primaryLightEnabledUniform,
-                        primaryLit || directionalPrimaryLit ? 1.0f : 0.0f);
                 }
                 if (detailMapped)
                     glUniform4fv(g_renderer.detailScaleUniform, 1, batch.detailScale);
@@ -12432,32 +12585,11 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 else
                     glUniform4f(g_renderer.envMapParmsUniform,
                         0.0f, 0.0f, 0.0f, 0.0f);
-                if (primaryLit)
-                {
-                    glUniform4f(
-                        g_renderer.primaryLightPositionRadiusUniform,
-                        primaryLight->origin[0], primaryLight->origin[1],
-                        primaryLight->origin[2],
-                        1.0f / primaryLight->radius);
-                    glUniform3fv(g_renderer.primaryLightDiffuseUniform, 1,
-                        primaryLight->color);
-                    glUniform3fv(
-                        g_renderer.primaryLightSpotDirectionUniform, 1,
-                        primaryLight->direction);
-                    const float spotScale = 1.0f /
-                        (primaryLight->cosHalfFovInner -
-                            primaryLight->cosHalfFovOuter);
-                    glUniform3f(g_renderer.primaryLightSpotFactorsUniform,
-                        spotScale,
-                        -spotScale * primaryLight->cosHalfFovOuter,
-                        static_cast<float>(primaryLight->exponent));
-                    glUniform2f(
-                        g_renderer.primaryLightFalloffPlacementUniform,
-                        primaryLight->falloffScale,
-                        primaryLight->falloffShift);
-                }
+                if (primaryLit || localPrimaryLit) BindPrimaryLightConstants(*primaryLight);
+                glUniform1f(g_renderer.primaryLightEnabledUniform, localPrimaryLit
+                    ? static_cast<float>(primaryLight->type) : primaryLit || directionalPrimaryLit ? 1.0f : 0.0f);
                 BindSpotShadowForPrimaryLight(batch.primaryLightIndex,
-                    primaryLit, spotShadowMapsDrawn);
+                    primaryLit || localPrimaryLit, spotShadowMapsDrawn);
                 if (modelLit)
                     glUniform3fv(g_renderer.modelLightingBaseCoordinatesUniform,
                         1, batch.modelLightingCoordinates);
@@ -12483,12 +12615,13 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                     normal ? normal->texture : g_renderer.texture,
                     detail ? detail->texture : g_renderer.texture,
                     specular ? specular->texture : g_renderer.texture,
-                    secondaryLightmap ? secondaryLightmap->texture : g_renderer.texture,
+                    localPrimaryLit ? attenuation->texture : secondaryLightmap ? secondaryLightmap->texture : g_renderer.texture,
                     primaryLightmap ? primaryLightmap->texture : g_renderer.texture,
                 }, {
                     batch.samplerState, batch.normalSamplerState,
                     batch.detailSamplerState, batch.specularSamplerState,
-                }}, [](std::uint32_t unit, std::uint32_t texture, std::uint8_t sampler,
+                }, localPrimaryLit ? primaryLight->attenuationSamplerState : std::uint8_t{0x62u}},
+                [](std::uint32_t unit, std::uint32_t texture, std::uint8_t sampler,
                        bool bindingUnchanged) {
                     BindWorldTexture(GL_TEXTURE0 + unit, texture, sampler, true, bindingUnchanged);
                 });
@@ -12508,7 +12641,19 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                         reinterpret_cast<const void *>(indexOffset));
                 };
                 if (materialPass) ApplyMultiplyFogPass(batch);
+                const bool pickupSheen = batch.pickupSheen && !floatZPass && !materialPass;
+                if (pickupSheen)
+                {
+                    float sheenTime = g_renderer.sceneViewTimeSeconds;
+#if KISAK_WEB_DIAGNOSTICS
+                    ++g_pickupSheenDraws;
+                    if (g_testPickupSheenTime >= 0) sheenTime = g_testPickupSheenTime * 0.001f;
+#endif
+                    glUniform1f(g_renderer.pickupSheenUniform,
+                        WebRenderer_PickupSheen(sheenTime));
+                }
                 drawMaterial();
+                if (pickupSheen) glUniform1f(g_renderer.pickupSheenUniform, 0.0f);
 #if KISAK_WEB_DIAGNOSTICS
                 if (profileDynamicModel)
                     frameProfile->dynamicModelDrawMs +=
@@ -12642,7 +12787,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1f(g_renderer.detailMapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.normalMapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.specularMapEnabledUniform, 0.0f);
-        glUniform1f(g_renderer.sunShadowEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.sunLightingModeUniform, 0.0f);
         glUniform1f(g_renderer.primaryLightEnabledUniform, 0.0f);
         glUniform1f(g_renderer.spotShadowEnabledUniform, 0.0f);
         glUniform1f(g_renderer.instanceEnabledUniform, 0.0f);
@@ -12721,7 +12866,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1f(g_renderer.detailMapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.normalMapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.specularMapEnabledUniform, 0.0f);
-        glUniform1f(g_renderer.sunShadowEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.sunLightingModeUniform, 0.0f);
         glUniform1f(g_renderer.instanceEnabledUniform, 0.0f);
         glBindVertexArray(g_renderer.uiVertexArray);
         for (const WebRendererRetainedUiBatch &batch :

@@ -20,9 +20,13 @@ const test = base.extend({
                 const evidence = await page?.evaluate(() => ({
                     events: globalThis.__movieEvents,
                     audio: globalThis.__movieAudio,
+                    mapEvents: globalThis.__mapMovieEvents,
+                    mapLifecycle: globalThis.__mapLifecycleEvents,
+                    mapScenes: globalThis.__mapSceneFrames,
                 })).catch(() => null);
                 await testInfo.attach("cinematic-failure", { contentType: "application/json",
                     body: Buffer.from(JSON.stringify(evidence ?? null)) });
+                await writeFile(testInfo.outputPath("cinematic-failure.json"), JSON.stringify(evidence ?? null));
             }
             try { await context.close(); }
             finally { await rm(profile, { recursive: true, force: true, maxRetries: 5 }); }
@@ -194,7 +198,9 @@ test("owned Killhouse movie renders, pauses, completes and accepts native skip",
             body: Buffer.from(JSON.stringify(evidence)) });
     });
 
-test("map request plays the complete owned cinematic before game initialization and fade", {
+for (const skipIntro of [false, true]) {
+test(skipIntro ? "map loads during its intro and native pregame skip starts the fade"
+    : "map loads during its complete owned intro and transitions without a loading gap", {
     tag: "@retail-cinematic",
 }, async ({ retailPage: page }, testInfo) => {
     test.skip(process.env.KISAK_WEB_PRODUCT_TEST === "1",
@@ -238,7 +244,17 @@ test("map request plays the complete owned cinematic before game initialization 
     await expect.poll(() => page.evaluate(() => globalThis.__mapMovieEvents
         .some((event) => event.state === "started" && event.name === "killhouse_load")),
     { timeout: 10_000 }).toBe(true);
-    expect(await call(page, 0)).toBeLessThan(10_000);
+    // Loading presentation must advance the actual native DB counters before
+    // the synchronous command returns; RPC state queries wait for that return.
+    await expect.poll(() => page.evaluate(() => globalThis.__mapMovieEvents
+        .filter((event) => event.state === "loading" && event.progress > 0 && event.progress < 1).length),
+    { timeout: 30_000 }).toBeGreaterThan(1);
+    const briefingState = () => page.evaluate(() => {
+        let hash = 2166136261;
+        for (const character of "briefing")
+            hash = Math.imul(hash ^ character.codePointAt(0), 16777619) >>> 0;
+        return globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestMenuState", hash);
+    });
     await page.waitForTimeout(1_000);
     const early = await page.locator("#game-canvas").screenshot({
         path: testInfo.outputPath("map-movie-early.png"),
@@ -247,12 +263,56 @@ test("map request plays the complete owned cinematic before game initialization 
     const middle = await page.locator("#game-canvas").screenshot({
         path: testInfo.outputPath("map-movie-middle.png"),
     });
+    // The stock briefing track is below the letterboxed movie while loading.
+    // Native pregame hides it once the map is ready, so inspect the early frame.
+    expect(await page.evaluate(async (encoded) => {
+        const bitmap = await createImageBitmap(new Blob([
+            Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0)),
+        ], { type: "image/png" }));
+        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+        const context = canvas.getContext("2d");
+        context.drawImage(bitmap, 0, 0);
+        const region = context.getImageData(Math.floor(bitmap.width * .4),
+            Math.floor(bitmap.height * .885), Math.floor(bitmap.width * .2),
+            Math.ceil(bitmap.height * .025));
+        bitmap.close();
+        for (let y = 0; y < region.height; ++y) {
+            let visible = 0;
+            for (let x = 0; x < region.width; ++x)
+                if (region.data[(y * region.width + x) * 4] > 8) ++visible;
+            if (visible > region.width * .9) return true;
+        }
+        return false;
+    }, early.toString("base64"))).toBe(true);
     expect(middle.equals(early)).toBe(false);
+    const progress = await page.evaluate(() => globalThis.__mapMovieEvents
+        .filter((event) => event.state === "loading"));
+    expect(progress.some((event) => event.progress === 1)).toBe(true);
+    expect(progress.at(-1).movieTime).toBeGreaterThan(progress[0].movieTime);
+    await expect.poll(() => page.evaluate(() => globalThis.__mapLifecycleEvents
+        .some((event) => event.stage === "CL_InitCGame complete")),
+    { timeout: 60_000 }).toBe(true);
+
     expect(await page.evaluate(() => globalThis.__mapLifecycleEvents
-        .some((event) => event.stage === "SV_SpawnServer"))).toBe(false);
+        .some((event) => event.stage === "SV_SpawnServer"))).toBe(true);
     expect(await page.evaluate(() => globalThis.__mapSceneFrames.length)).toBe(0);
     expect(await page.evaluate(() => globalThis.__mapMovieEvents
         .some((event) => event.state === "started" && event.name === "killhouse_fade"))).toBe(false);
+
+    if (skipIntro) {
+        // Skip through the native pregame menu only once canonical loading
+        // has finished. The map is already ready beneath the intro.
+        await expect.poll(() => page.evaluate(() => globalThis.__mapLifecycleEvents
+            .some((event) => event.stage === "SV_InitGameProgs complete")),
+        { timeout: 60_000 }).toBe(true);
+        await page.locator("#game-canvas").focus();
+        await page.keyboard.press("Escape");
+        await expect.poll(briefingState).toBe(1);
+        await expect.poll(() => page.evaluate(() => globalThis.__mapMovieEvents
+            .some((event) => event.state === "started" && event.name === "killhouse_fade"))).toBe(true);
+        expect(failures).toEqual([]);
+        return;
+    }
 
     await expect.poll(() => page.evaluate(() => globalThis.__mapMovieEvents
         .some((event) => event.state === "ended" && event.name === "killhouse_load")),
@@ -262,6 +322,7 @@ test("map request plays the complete owned cinematic before game initialization 
     { timeout: 30_000 }).toBe(true);
     await expect.poll(() => page.evaluate(() => globalThis.__mapSceneFrames.length),
         { timeout: 30_000 }).toBeGreaterThan(0);
+    expect(await briefingState()).toBe(1);
     const events = await page.evaluate(() => structuredClone(globalThis.__mapMovieEvents));
     const loadingStart = events.find((event) =>
         event.state === "started" && event.name === "killhouse_load");
@@ -269,15 +330,25 @@ test("map request plays the complete owned cinematic before game initialization 
         event.state === "ended" && event.name === "killhouse_load");
     const elapsed = loadingEnd.wallTime - loadingStart.wallTime;
     const firstSceneAt = await page.evaluate(() => globalThis.__mapSceneFrames[0].wallTime);
+    const readyAt = await page.evaluate(() => globalThis.__mapLifecycleEvents
+        .find((event) => event.stage === "CL_InitCGame complete").wallTime);
+    const fadeStart = events.find((event) => event.state === "started" && event.name === "killhouse_fade");
+    expect(readyAt).toBeLessThan(loadingEnd.wallTime);
+    expect(fadeStart.wallTime - loadingEnd.wallTime).toBeLessThan(1_000);
+
     expect(loadingStart.wallTime - commandAt).toBeLessThan(3_000);
     expect(elapsed).toBeGreaterThan(37_000);
     expect(elapsed).toBeLessThan(42_000);
     expect(firstSceneAt).toBeGreaterThanOrEqual(loadingEnd.wallTime);
+    expect(firstSceneAt - loadingEnd.wallTime).toBeLessThan(1_000);
     expect(failures).toEqual([]);
     await writeFile(testInfo.outputPath("map-cinematic-evidence.json"),
         JSON.stringify({ events, elapsed, startDelay: loadingStart.wallTime - commandAt,
-            sceneAfterMovie: firstSceneAt - loadingEnd.wallTime }, null, 2));
+            sceneAfterMovie: firstSceneAt - loadingEnd.wallTime,
+            readyDuringMovie: readyAt - loadingStart.wallTime,
+            fadeAfterMovie: fadeStart.wallTime - loadingEnd.wallTime, progress }, null, 2));
 });
+}
 
 test("production movie plays owned frames and completes through the shipped command", {
     tag: ["@retail-cinematic", "@product"],
@@ -309,8 +380,10 @@ test("production movie plays owned frames and completes through the shipped comm
             return result;
         };
     });
-    await page.locator("#engine-command-input").fill("cinematic killhouse_load");
-    await page.locator("#engine-command-submit").click();
+    await page.locator("#engine-command-input").evaluate((input) => {
+        input.value = "cinematic killhouse_load";
+        input.form.requestSubmit();
+    });
     await expect.poll(() => page.evaluate(() => globalThis.__movieEvents.some(({ state }) => state === "started")))
         .toBe(true);
     await expect.poll(() => page.evaluate(() => globalThis.__movieAudioStarted)).toBe(true);

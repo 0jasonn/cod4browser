@@ -120,6 +120,7 @@ function setState(state, message) {
     runtimeMessage.textContent = message;
 }
 
+let logFrame = 0;
 function appendLog(message, level = "info") {
     const text = String(message);
     globalThis.dispatchEvent(new CustomEvent("kisakcod:log", {
@@ -130,10 +131,14 @@ function appendLog(message, level = "info") {
         runtime.logs.splice(0, runtime.logs.length - 512);
     }
 
-    bootLog.textContent = runtime.logs
-        .map((entry) => `${entry.level === "error" ? "!" : ">"} ${entry.text}`)
-        .join("\n");
-    bootLog.scrollTop = bootLog.scrollHeight;
+    // Loading emits many lines; one layout per line starves movie/audio delivery.
+    if (!logFrame) logFrame = requestAnimationFrame(() => {
+        logFrame = 0;
+        bootLog.textContent = runtime.logs
+            .map((entry) => `${entry.level === "error" ? "!" : ">"} ${entry.text}`)
+            .join("\n");
+        bootLog.scrollTop = bootLog.scrollHeight;
+    });
 
     if (text.startsWith("[kisakcod-web] Renderer:")) {
         rendererStatus.textContent = "WebGL2 initialized";

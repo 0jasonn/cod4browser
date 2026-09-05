@@ -27,11 +27,12 @@ private:
 };
 
 // Backend texture object names, in base/normal/detail/specular/secondary/primary
-// order. The lightmaps always use sampler state 0x62.
+// order. The secondary unit also holds a model's authored light attenuation.
 struct WebRendererDynamicTextureSet
 {
     std::array<std::uint32_t, 6> textures{};
     std::array<std::uint8_t, 4> samplers{};
+    std::uint8_t secondarySampler = 0x62u;
     bool operator==(const WebRendererDynamicTextureSet &) const = default;
 };
 
@@ -51,7 +52,7 @@ public:
         constexpr std::array<std::uint32_t, 6> units{0u, 1u, 4u, 5u, 2u, 9u};
         for (std::size_t i = 0; i < units.size(); ++i)
             bind(units[i], next.textures[i],
-                i < next.samplers.size() ? next.samplers[i] : 0x62u,
+                i < next.samplers.size() ? next.samplers[i] : i == 4u ? next.secondarySampler : 0x62u,
                 valid_ && previous_.textures[i] == next.textures[i]);
         previous_ = next;
         valid_ = true;

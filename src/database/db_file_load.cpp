@@ -519,7 +519,14 @@ void __cdecl DB_LoadXFileInternal()
         {
             g_totalSize = (fileSize + 0x3FFFF) / 0x40000 - g_loadedSize;
             g_loadedSize = 0;
+#if defined(KISAK_WEB)
+            // External IWI pixels are fetched lazily by the renderer, outside
+            // this DB transaction. Report the fastfile bytes actually loaded;
+            // counting native D3D image allocations here leaves the bar at 1%.
+            g_totalExternalBytes = 0;
+#else
             g_totalExternalBytes = file.externalSize - g_loadedExternalBytes;
+#endif
             g_loadedExternalBytes = 0;
         }
     }
@@ -637,6 +644,9 @@ void __cdecl Load_XAssetArrayCustom(int32_t count)
     var = varXAsset;
     for (i = 0; i < count; ++i)
     {
+#if defined(KISAK_WEB)
+        if (g_load.interrupt) g_load.interrupt();
+#endif
         varXAsset = var;
         kisak::database::EnterNativeSemanticTraceAsset(
             static_cast<std::uint32_t>(i), varXAsset->type);

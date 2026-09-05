@@ -35,7 +35,7 @@ char currentName[256]{};
 char nextName[256]{};
 unsigned nextFlags = 0, playbackFlags = 0;
 bool started = false, finished = true, paused = false, inputEnded = false;
-bool clockStarted = false, finishBeforeNext = false;
+bool clockStarted = false;
 double startedAt = 0, pausedAt = 0, decodedTime = -1;
 WebCinematicVideo pendingVideo;
 bool hasPendingVideo = false;
@@ -198,9 +198,8 @@ void WebCinematic_Update()
     if (!started || finished || paused) return;
     if (!clockStarted)
     {
-        // Map loading is synchronous in the engine Worker. Start presentation
-        // only after that command returns to the browser frame pump, otherwise
-        // an unpresentable loading interval consumes the movie clock.
+        // Begin the clock at the first presented frame, including a loading
+        // keepalive while the canonical map command is suspended.
         clockStarted = true;
         startedAt = emscripten_get_now();
         PublishMovie("started", currentName, "");
@@ -263,7 +262,7 @@ void R_Cinematic_StopPlayback()
     hasPendingVideo = false;
     pendingVideo = {};
     audioDuration = 0;
-    clockStarted = finishBeforeNext = false;
+    clockStarted = false;
     started = false;
     finished = true;
     currentName[0] = 0;
@@ -300,10 +299,6 @@ void __cdecl R_Cinematic_StartPlayback(char *name, unsigned int flags, float vol
     playbackVolume = std::isfinite(volume) ? std::clamp(volume, 0.0f, 1.0f) : 0;
     paused = inputEnded = false;
     clockStarted = false;
-    // Native can present the loading movie while its other threads build the
-    // map. The single-threaded Worker cannot. Keep that authored loading movie
-    // until completion before accepting the in-game fade queued during load.
-    finishBeforeNext = clientUIActives[0].connectionState == CA_LOADING;
     started = true;
     finished = false;
     decodedTime = -1;
@@ -315,7 +310,6 @@ void R_Cinematic_SetNextPlayback(const char *name, unsigned int flags)
 }
 void __cdecl R_Cinematic_StartNextPlayback()
 {
-    if (finishBeforeNext && started && !finished) return;
     const float scale = snd_cinematicVolumeScale ? snd_cinematicVolumeScale->current.value : 1;
     R_Cinematic_StartPlayback(nextName, nextFlags, static_cast<float>(SND_GetVolumeNormalized()) * scale);
     nextName[0] = 0;

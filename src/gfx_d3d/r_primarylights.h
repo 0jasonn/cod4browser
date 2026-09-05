@@ -1,6 +1,7 @@
 #pragma once
 #include "gfx_world_types.h"
 #include "r_rendercmds.h"
+#include "r_shadowed_light_history.h"
 
 enum GfxLightType : __int32
 {
@@ -19,22 +20,6 @@ struct GfxCandidateShadowedLight // sizeof=0x8
 {                                       // ...
     uint32_t shadowableLightIndex;  // ...
     float score;
-};
-
-struct GfxShadowedLightEntry // sizeof=0x8
-{                                       // ...
-    uint8_t shadowableLightIndex;
-    bool isFadingOut;
-    // padding byte
-    // padding byte
-    float fade;
-};
-struct GfxShadowedLightHistory // sizeof=0x48
-{                                       // ...
-    uint32_t shadowableLightWasUsed[8];
-    GfxShadowedLightEntry entries[4];
-    uint32_t entryCount;
-    uint32_t lastUpdateTime;
 };
 
 void __cdecl R_ClearShadowedPrimaryLightHistory(int localClientNum);

@@ -43,23 +43,57 @@ waits for both the video duration and queued audio duration. Movies without
 audio, or with a failed audio device, retain the wall-time fallback.
 
 Native runs the loading movie on its cinematic thread while the main thread
-loads the map. The single-threaded browser Worker cannot present successive
-OffscreenCanvas frames inside that synchronous command. The web map boundary
-therefore starts the canonically selected loading movie before `SV_SpawnServer`
-and uses COD4's existing `nextmap` handoff to issue the same requested map
-command when playback ends. That replay suppresses the duplicate loading-movie
-start. The native pregame hold remains enabled, so gameplay, mission sound and
-the HUD cannot begin behind a full-screen loading movie. Map work is serialized
-after the movie on this single-threaded build.
+loads the map. The browser now keeps the native `SV_SpawnServer` ordering:
+`CL_MapLoading` starts the movie and opens `briefing`, then map loading proceeds
+while `Sys_LoadingKeepAlive` presents the movie and native UI between assets
+and compressed-file refills. It never pumps game frames, commands, or input
+inside an unfinished database transaction. Native pregame holds gameplay and
+starts the queued in-game fade when the intro finishes or the player skips.
+The former `nextmap` movie-first replay is removed.
+
+Loading keepalive uses Emscripten Asyncify with one platform-owned
+`emscripten_sleep(0)` yield and a 1 MiB unwind stack. This is a deliberate
+exception to the bootstrap's no-Asyncify preference: the former production
+Killhouse sequence measured 2,722 ms of map loading after the 37,624-ms intro.
+A yield lets OffscreenCanvas present and receives device-played audio feedback
+without splitting canonical DB allocation/publication or adding pthreads.
+The ordinary frame pump is guarded against re-entry; Worker RPCs await the
+suspended stack, while validated audio feedback only updates JS device state.
+No cross-origin-isolation or new browser feature requirement is introduced.
+The measured Release Wasm increases from 3,189,365 to 5,330,129 bytes
+(about 67%; 1,848,062 bytes gzip). This cost includes Asyncify instrumentation
+and the loading/registration fixes; gameplay performance remains a separate
+qualification.
+
+The native map-zone progress reset is restored. The bar reads
+`DB_GetLoadedFraction`, measuring compressed fastfile work. External IWI pixels
+are renderer-registration resources in this port, so the DB denominator excludes the
+native D3D external-image allocation estimate; no guessed completed bytes or
+movie timer is used to fill the bar. A full DB bar precedes the remaining
+canonical game/cgame setup and graphics registration; the pregame gate still
+owns readiness. `R_EndRegistration` prepares the existing world/static-model
+geometry, material images and WebGL objects while the intro plays. This uses
+canonical world lighting without inventing a camera or advancing gameplay.
+Per-frame camera visibility and dynamic geometry remain in `R_RenderScene`.
+Texture uploads yield between completed images while replacement resources
+remain private until atomic publication. Both launchers batch log-panel layout
+once per animation frame so verbose registration cannot starve movie/audio
+delivery on the page thread.
+
+On 2026-09-05 the owned Killhouse map path passed in headless Google Chrome
+152.0.7977.77: the intro started 29 ms after the command, loading plus graphics
+registration finished 7,692 ms into the 37,464-ms movie, the queued fade started
+12 ms after completion, and the first game-driven renderer frame appeared
+56 ms after completion. The early capture shows the stock bar filling from
+native DB progress; pregame hides it when ready. A separate run confirms native
+Escape skip starts the queued fade after loading. This demonstrates loading,
+rendering and transition behavior, not human gameplay or audiovisual fidelity.
 
 Owned Killhouse movie playback now waits through held audio delivery and actual
 AudioContext suspension, resumes, and survives WebGL context loss/restoration
 in Chromium 149. A 900-ms blocked page thread followed by 150 ms of recovery
 advances video by 433 ms in the planar-material run, consuming queued PCM
-before waiting for more delivery. The rebuilt production `map killhouse` path starts `killhouse_load` in 299 ms,
-presents changing movie-only frames for 37,624 ms, then loads the map and starts
-`killhouse_fade` 2,722 ms after the movie ends. The diagnostic path starts in
-375 ms and records no server spawn or game-driven frame during the movie.
+before waiting for more delivery.
 This is platform synchronization/recovery evidence; human
 listening, hardware output latency, arbitrary audio-tail layouts and matched
 native/Steam audiovisual comparison remain unqualified.

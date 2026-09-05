@@ -207,7 +207,7 @@ void __cdecl CG_Item(centity_s *cent)
             lightingOrigin[1] = cent->pose.origin[1];
             lightingOrigin[2] = cent->pose.origin[2];
 
-            RenderFlagForRefEntity = CG_GetRenderFlagForRefEntity(p_nextState->lerp.eFlags);
+            RenderFlagForRefEntity = CG_GetRenderFlagForRefEntity(p_nextState->lerp.eFlags) | GFX_RENDERFX_PICKUP;
             R_AddDObjToScene(obj, &cent->pose, p_nextState->number, RenderFlagForRefEntity, lightingOrigin, 0.0f);
         }
     }

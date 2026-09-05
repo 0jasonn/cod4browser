@@ -2,6 +2,11 @@
 
 #include <client/cl_input.h>
 #include <client/client.h>
+#include <client/cl_scrn.h>
+#include <database/database.h>
+#include <gfx_d3d/r_cinematic_api.h>
+#include <gfx_d3d/r_rendercmds.h>
+#include <web/web_renderer.h>
 #include <qcommon/common_api.h>
 #include <qcommon/qcommon.h>
 #include <universal/q_shared.h>
@@ -28,6 +33,7 @@ constexpr std::size_t CLIPBOARD_CAPACITY = 4096;
 double g_timeBase = 0.0;
 bool g_timeBaseInitialized = false;
 bool g_framePumpStarted = false;
+bool g_frameInProgress = false;
 bool g_quitRequested = false;
 uint32_t g_framePumpTicks = 0;
 WebFrameCallback g_frameCallback = nullptr;
@@ -164,10 +170,13 @@ EM_JS(
 
 void FramePumpTrampoline(void *)
 {
+    if (g_frameInProgress) return;
+    g_frameInProgress = true;
     ++g_framePumpTicks;
     const WebFrameInfo frame{g_framePumpTicks, Sys_Milliseconds()};
     const uint32_t callbackStart = Sys_Milliseconds();
     g_frameCallback(frame, g_frameUserData);
+    g_frameInProgress = false;
     if (g_quitRequested)
     {
         // Unwind the canonical command/UI stack before ending the platform
@@ -224,8 +233,51 @@ uint32_t __cdecl Sys_RawTimerTicks()
 
 void __cdecl Sys_LoadingKeepAlive()
 {
-    // Loading runs synchronously in the engine Worker. The browser main
-    // thread and frame pump stay responsive without a native message pump.
+    static uint32_t lastPresentation = 0;
+    static bool presenting = false;
+    const uint32_t now = Sys_Milliseconds();
+    if (presenting || !g_framePumpStarted || !cls.rendererStarted || !cls.uiStarted ||
+        com_errorEntered || clientUIActives[0].connectionState != CA_LOADING ||
+        now - lastPresentation < 33u)
+        return;
+    lastPresentation = now;
+    presenting = true;
+
+    // Only the loading UI may run inside an unfinished DB/game transaction.
+    // Do not pump commands, input, sound aliases or a partially built world.
+    R_Cinematic_SyncNow();
+    cls.realtime = now;
+    R_BeginFrame();
+    SCR_DrawScreenField(0);
+    R_EndFrame();
+    R_IssueRenderCommands(0xFFFFFFFF);
+    WebRenderer_DrawFrame({g_framePumpTicks, now});
+#if KISAK_WEB_DIAGNOSTICS
+    char movieName[256]{};
+    uint32_t movieTime = 0;
+    R_Cinematic_GetPlaybackInfo(movieName, sizeof(movieName), &movieTime);
+    EM_ASM({
+        globalThis.dispatchEvent(new CustomEvent("kisakcod:cinematic", {
+            detail: { state: "loading", name: UTF8ToString($0),
+                progress: $1, movieTime: $2 }
+        }));
+    }, movieName, DB_GetLoadedFraction(), movieTime);
+#endif
+    EM_ASM({
+        globalThis.kisakLoadingYield = new Promise(resolve => {
+            globalThis.kisakFinishLoadingYield = resolve;
+        });
+    });
+    // Asyncify pauses the normal Emscripten main loop until this stack resumes.
+    // Returning to the event loop presents OffscreenCanvas and accepts audio
+    // device feedback. Worker RPCs wait until canonical work has returned.
+    emscripten_sleep(0);
+    EM_ASM({
+        globalThis.kisakFinishLoadingYield();
+        globalThis.kisakLoadingYield = null;
+    });
+    lastPresentation = Sys_Milliseconds();
+    presenting = false;
 }
 
 uint32_t __cdecl Sys_Milliseconds()

@@ -627,14 +627,24 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
     WebRendererWorldSceneCommand &destination,
     const WebRendererWorldLightTechniqueContext *lightContext)
 {
+    if (!ViewIsValid(view))
+        return WebRendererWorldSceneResult::InvalidView;
+    return WebRenderer_BuildWorldSceneCommand(
+        world, view.sunShadowEnabled, destination, lightContext);
+}
+
+WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
+    const GfxWorld &world,
+    bool sunShadowEnabled,
+    WebRendererWorldSceneCommand &destination,
+    const WebRendererWorldLightTechniqueContext *lightContext)
+{
     if (world.surfaceCount <= 0 || world.vertexCount == 0u ||
         world.indexCount <= 0 || !world.vd.vertices || !world.indices ||
         !world.dpvs.surfaces || world.modelCount <= 0 || !world.models)
     {
         return WebRendererWorldSceneResult::InvalidWorld;
     }
-    if (!ViewIsValid(view))
-        return WebRendererWorldSceneResult::InvalidView;
 
     const GfxBrushModel &worldModel = world.models[0];
     const std::uint32_t modelBegin = worldModel.startSurfIndex;
@@ -705,17 +715,36 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
         };
         std::vector<EmittedSurfaceRange> emittedSurfaces(
             static_cast<std::size_t>(world.surfaceCount));
+        std::vector<bool> authoredShadowSurfaces(world.surfaceCount, false);
+        if (world.shadowGeom)
+            for (std::uint32_t light = 0u; light < world.primaryLightCount; ++light)
+            {
+                const auto &geometry = world.shadowGeom[light];
+                if (geometry.surfaceCount && !geometry.sortedSurfIndex)
+                    return WebRendererWorldSceneResult::InvalidSurfaceRange;
+                for (unsigned i = 0u; i < geometry.surfaceCount; ++i)
+                {
+                    const unsigned index = geometry.sortedSurfIndex[i];
+                    if (index >= authoredShadowSurfaces.size())
+                        return WebRendererWorldSceneResult::InvalidSurfaceRange;
+                    authoredShadowSurfaces[index] = true;
+                }
+            }
         std::vector<std::uint32_t> vertexRemap(
             world.vertexCount, std::numeric_limits<std::uint32_t>::max());
         std::vector<const Material *> waterMaterials;
         replacement.vertices.reserve(world.vertexCount);
         replacement.indices.reserve(static_cast<std::size_t>(world.indexCount));
-        for (std::size_t rangeIndex = 0u;
-             rangeIndex < rangeCount; ++rangeIndex)
+        for (std::uint32_t surfaceIndex = modelBegin;
+             surfaceIndex < modelEnd; ++surfaceIndex)
         {
-          for (std::uint32_t surfaceIndex = ranges[rangeIndex].begin;
-               surfaceIndex < ranges[rangeIndex].end; ++surfaceIndex)
-          {
+            const bool cameraSurface = std::any_of(ranges.begin(),
+                ranges.begin() + rangeCount, [surfaceIndex](const auto &range) {
+                    return surfaceIndex >= range.begin && surfaceIndex < range.end;
+                });
+            // Native spot maps also submit shadow-only BSP surfaces outside
+            // the lit/decal/emissive camera ranges (for example roof blockers).
+            if (!cameraSurface && !authoredShadowSurfaces[surfaceIndex]) continue;
             const GfxSurface &surface = world.dpvs.surfaces[surfaceIndex];
             if (SurfaceUsesSkyPass(surface) ||
                 surface.tris.vertexCount == 0u || surface.tris.triCount == 0u)
@@ -792,7 +821,7 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
                 surface,
                 surfaceIndex,
                 static_cast<std::uint32_t>(replacement.indices.size() - indexCount),
-                view.sunShadowEnabled, lightContext);
+                sunShadowEnabled, lightContext);
             candidate.indexCount = indexCount;
             if (MaterialUsesWater(surface.material))
             {
@@ -831,6 +860,7 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
             WebRendererWorldSurfaceRange range{surfaceIndex,
                 static_cast<std::uint32_t>(replacement.batches.size() - 1u),
                 candidate.firstIndex, candidate.indexCount};
+            range.cameraSurface = cameraSurface;
             std::copy(std::begin(surface.bounds[0]),
                 std::end(surface.bounds[0]), std::begin(range.mins));
             std::copy(std::begin(surface.bounds[1]),
@@ -840,7 +870,6 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
                 replacement.firstSurfaceIndex = surfaceIndex;
             replacement.lastSurfaceIndex = surfaceIndex;
             ++replacement.surfaceCount;
-          }
         }
 
         // Native spot-shadow submission does not render every opaque BSP
@@ -868,8 +897,8 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
                         return WebRendererWorldSceneResult::InvalidSurfaceRange;
                     const EmittedSurfaceRange &emitted =
                         emittedSurfaces[surfaceIndex];
-                    // Shadow geometry can include brush-model or otherwise
-                    // non-world ranges submitted through another scene path.
+                    // Brush-model ranges are submitted through their moving
+                    // scene path; shadow-only world surfaces are uploaded above.
                     if (emitted.firstIndex == UINT32_MAX) continue;
                     const Material *material =
                         world.dpvs.surfaces[surfaceIndex].material;
@@ -901,6 +930,14 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
                         geometry.smodelIndex[modelIndex];
                     if (canonicalInstanceIndex >= world.dpvs.smodelCount)
                         return WebRendererWorldSceneResult::InvalidSurfaceRange;
+                    if (!world.dpvs.smodelDrawInsts)
+                        return WebRendererWorldSceneResult::InvalidSurfaceRange;
+                    // R_AddAllStaticModelSurfacesSpotShadow excludes models
+                    // with the authored no-shadow flag even when shadowGeom
+                    // lists them as potentially affecting this light.
+                    if ((world.dpvs.smodelDrawInsts[
+                            canonicalInstanceIndex].flags & 1u) != 0u)
+                        continue;
                     replacement.spotShadowStaticModels.push_back({
                         lightIndex,
                         canonicalInstanceIndex,
@@ -971,6 +1008,7 @@ static bool BuildWorldLightRanges(
         destination.reserve(surfaces.size());
         for (const auto &surface : surfaces)
         {
+            if (visibility && !surface.cameraSurface) continue;
             if (visibility && surface.canonicalSurfaceIndex >= visibilityCount)
             {
                 destination.clear();

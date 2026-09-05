@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
 #include <vector>
 
 struct WebFrameInfo;
@@ -12,6 +13,15 @@ struct GfxImage;
 struct Material;
 struct XModel;
 struct water_t;
+
+// The reference clip repeats continuously at roughly 1 Hz, without a hold.
+// Use canonical scene time so pause, timescale and saved games remain coherent.
+inline float WebRenderer_PickupSheen(float seconds) noexcept
+{
+    if (!std::isfinite(seconds)) return 0.0f;
+    const float phase = std::fmod(seconds, 1.0f);
+    return 0.5f - 0.5f * std::cos(phase * 6.28318530718f);
+}
 
 struct WebRendererPrimaryLightDesc;
 struct GfxLight;
@@ -161,6 +171,7 @@ struct WebRendererModelLightingAtlasDesc
 // refdef every scene because scripts can animate or disable primary lights.
 struct WebRendererPrimaryLightDesc
 {
+    const GfxImage *attenuationImage = nullptr;
     float color[3];
     float direction[3];
     float origin[3];
@@ -174,7 +185,7 @@ struct WebRendererPrimaryLightDesc
     std::uint8_t type;
     std::uint8_t exponent;
     std::uint8_t canUseShadowMap;
-    std::uint8_t padding;
+    std::uint8_t attenuationSamplerState;
 };
 
 // One canonical BSP surface selected by GfxWorld::shadowGeom for a local
@@ -205,6 +216,7 @@ struct WebRendererWorldSurfaceRange
     std::uint32_t indexCount;
     float mins[3];
     float maxs[3];
+    bool cameraSurface = true;
 };
 
 struct WebRendererWorldSurfaceDesc
@@ -463,6 +475,7 @@ struct WebRendererWorldBatchDesc
     // visible camera pass.
     std::uint8_t cameraRegion;
     bool depthHack;
+    bool pickupSheen = false;
     // Native receiver-list surf type (SF_*). The backend combines this with
     // the canonical material key before R_ReverseSortDrawSurfs-equivalent
     // ordering; it never identifies or owns geometry.

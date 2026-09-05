@@ -2,6 +2,7 @@
 #include <web/web_renderer_dynamic_textures.h>
 #include <web/web_renderer_draw_state.h>
 #include <web/web_renderer.h>
+#include <gfx_d3d/r_shadowed_light_history.h>
 
 #include <array>
 #include <cmath>
@@ -333,6 +334,37 @@ void TestReusableStagedGeometry()
     Require(staging.empty() && stagingIndices.empty(), "empty input clears logical storage");
 }
 
+void TestShadowLightHistory()
+{
+    GfxShadowedLightHistory history{};
+    const std::uint32_t used[8]{0x3eu}; // five visible lights, four map slots
+    for (unsigned light = 1; light <= 4; ++light)
+        R_AddShadowHistory(history, light, 0.1f, 4);
+    std::copy_n(used, 8, history.shadowableLightWasUsed);
+    const auto frame = [&](bool replace) {
+        R_FadeShadowHistory(history, used, 0.1f);
+        for (unsigned light = 1; light <= 3; ++light)
+            R_AddShadowHistory(history, light, 0.1f, 4);
+        R_AddShadowHistory(history, replace ? 5 : 4, 0.1f, 4);
+    };
+    frame(true);
+    Require(history.entries[3].shadowableLightIndex == 4 && history.entries[3].fade == 1.0f,
+        "rank change retains outgoing shadow instead of replacing it");
+    frame(true);
+    Require(std::fabs(history.entries[3].fade - 0.9f) < 0.00001f,
+        "outgoing shadow fades at the canonical rate");
+    frame(false);
+    Require(history.entries[3].shadowableLightIndex == 4 &&
+        std::fabs(history.entries[3].fade - 0.9f) < 0.00001f,
+        "reversing camera movement cancels retirement without a jump");
+    for (unsigned i = 0; i < 12; ++i) frame(true);
+    Require(history.entries[3].shadowableLightIndex == 5 && history.entries[3].fade < 0.5f,
+        "replacement fades in only after outgoing map frees its slot");
+    std::uint32_t hidden[8]{};
+    R_FadeShadowHistory(history, hidden, 0.1f);
+    Require(history.entryCount == 0, "invisible lights release history immediately");
+}
+
 void TestDynamicTextureBindings()
 {
     // Model texture-object sampler state separately from unit bindings, as GL
@@ -356,7 +388,7 @@ void TestDynamicTextureBindings()
         reference.Bind(1, set.textures[1], set.samplers[1]);
         reference.Bind(4, set.textures[2], set.samplers[2]);
         reference.Bind(5, set.textures[3], set.samplers[3]);
-        reference.Bind(2, set.textures[4], 0x62);
+        reference.Bind(2, set.textures[4], set.secondarySampler);
         reference.Bind(9, set.textures[5], 0x62);
         bindings.Apply(set, [&](auto unit, auto texture, auto sampler, bool) {
             actual.Bind(unit, texture, sampler);
@@ -385,6 +417,10 @@ void TestDynamicTextureBindings()
         apply(base);
     }
     const WebRendererDynamicTextureSet aliases{{1, 1, 1, 1, 1, 1}, {1, 2, 3, 4}};
+    auto attenuation = base;
+    attenuation.secondarySampler = 0x61;
+    apply(attenuation);
+    apply(base);
     apply(aliases);
     apply(aliases);
     apply(base);
@@ -551,6 +587,7 @@ int main()
     runner.Run("owned copy and atomic failure", TestOwnedCopyAndAtomicFailure);
     runner.Run("reusable staged geometry", TestReusableStagedGeometry);
     runner.Run("dynamic texture binding equivalence", TestDynamicTextureBindings);
+    runner.Run("canonical shadow light history", TestShadowLightHistory);
     runner.Run("dynamic draw state transitions", TestDynamicDrawState);
     runner.Run("shadow state transitions", TestShadowState);
     runner.Run("surface result strings", TestErrorStrings);

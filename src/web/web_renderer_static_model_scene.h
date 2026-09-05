@@ -43,7 +43,8 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
     const GfxWorld &world,
     WebRendererStaticModelSceneCommand &destination,
     const WebRendererModelLightingCallbacks *lightingCallbacks = nullptr,
-    WebRendererStaticMaterialResolver materialResolver = nullptr);
+    WebRendererStaticMaterialResolver materialResolver = nullptr,
+    std::span<const WebRendererPrimaryLightDesc> primaryLights = {});
 
 const char *WebRenderer_StaticModelSceneResultString(
     WebRendererStaticModelSceneResult result) noexcept;

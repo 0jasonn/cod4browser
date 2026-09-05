@@ -84,7 +84,7 @@ std::uint32_t HashPixelShaderProgram(
 
 bool SelectTechnique(
     const Material *material,
-    bool directionalPrimaryLight,
+    std::uint8_t primaryLightType,
     WebRendererWorldBatchDesc &draw) noexcept
 {
     if (!material || !material->techniqueSet || !material->stateBitsTable)
@@ -94,7 +94,15 @@ bool SelectTechnique(
             ? material->techniqueSet->remappedTechniqueSet
             : material->techniqueSet;
     const std::array<std::uint32_t, 6u> preferredTypes =
-        directionalPrimaryLight
+        primaryLightType == 2u || primaryLightType == 3u
+        ? std::array<std::uint32_t, 6u>{
+            primaryLightType == 2u ? 17u : 19u,
+            primaryLightType == 2u ? 18u : 20u,
+            TECHNIQUE_LIT_INSTANCED_INDEX,
+            TECHNIQUE_LIT_INDEX,
+            TECHNIQUE_UNLIT_INDEX,
+            TECHNIQUE_EMISSIVE_INDEX}
+        : primaryLightType == 1u
         ? std::array<std::uint32_t, 6u>{
             TECHNIQUE_LIT_INSTANCED_SUN_SHADOW_INDEX,
             TECHNIQUE_LIT_INSTANCED_SUN_INDEX,
@@ -225,7 +233,8 @@ WebRendererWorldBatchDesc MakeDraw(
     std::uint32_t firstInstance,
     std::uint32_t lastInstance,
     std::uint8_t reflectionProbeIndex,
-    std::uint8_t primaryLightIndex) noexcept
+    std::uint8_t primaryLightIndex,
+    std::span<const WebRendererPrimaryLightDesc> primaryLights) noexcept
 {
     WebRendererWorldBatchDesc draw{};
     draw.firstIndex = firstIndex;
@@ -246,7 +255,9 @@ WebRendererWorldBatchDesc MakeDraw(
     draw.cameraRegion = material ? material->cameraRegion : 0u;
     draw.castsSunShadow = material &&
         (material->info.gameFlags & 0x40u) != 0u;
-    if (material && material->stateBitsTable)
+    // R_SkinStaticModelsShadowForLod requires gameFlags 0x40 for both
+    // sun and spot passes; a build-shadowmap technique alone is insufficient.
+    if (draw.castsSunShadow && material->stateBitsTable)
     {
         const std::uint8_t shadowStateEntry =
             material->stateBitsEntry[
@@ -268,10 +279,11 @@ WebRendererWorldBatchDesc MakeDraw(
         reflectionProbeIndex < world.reflectionProbeCount)
         draw.reflectionProbeImage =
             world.reflectionProbes[reflectionProbeIndex].reflectionImage;
-    const bool directionalPrimaryLight = primaryLightIndex != 0u &&
-        primaryLightIndex == world.sunPrimaryLightIndex;
+    const std::uint8_t primaryLightType = primaryLightIndex < primaryLights.size()
+        ? primaryLights[primaryLightIndex].type
+        : primaryLightIndex != 0u && primaryLightIndex == world.sunPrimaryLightIndex ? 1u : 0u;
     const bool hasTechnique = SelectTechnique(
-        material, directionalPrimaryLight, draw);
+        material, primaryLightType, draw);
     draw.ambientProbeLighting = draw.pixelShaderName &&
         (std::strncmp(draw.pixelShaderName, "lp_amb_", 7u) == 0 ||
             std::strncmp(draw.pixelShaderName, "lp_i_amb_", 9u) == 0);
@@ -312,7 +324,8 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
     const GfxWorld &world,
     WebRendererStaticModelSceneCommand &destination,
     const WebRendererModelLightingCallbacks *lightingCallbacks,
-    WebRendererStaticMaterialResolver materialResolver)
+    WebRendererStaticMaterialResolver materialResolver,
+    std::span<const WebRendererPrimaryLightDesc> primaryLights)
 {
     if (world.dpvs.smodelCount == 0u)
         return WebRendererStaticModelSceneResult::NoStaticModels;
@@ -575,7 +588,7 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
                         group.instanceIndices.front(),
                         group.instanceIndices.back(),
                         group.reflectionProbeIndex,
-                        group.primaryLightIndex);
+                        group.primaryLightIndex, primaryLights);
                     // WebGL has no native static-model cache. Match
                     // R_GetStaticModelId's non-cache rigid/skinned branch.
                     batch.draw.dynamicLightSurfType =

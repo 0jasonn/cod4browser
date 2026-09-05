@@ -37,7 +37,7 @@ oracle.
 | Frame order | The browser supplies elapsed time; canonical `Com_ModifyMsec`, `SV_Frame`, client frame work and `SCR_UpdateScreen` advance gameplay. Browser startup selects `com_maxFrameTime=5000`, and the platform pump uses the same long-stall ceiling instead of losing time on every frame longer than 100 ms. Script/developer timescales and opt-in `fixedtime` remain canonical. |
 | SP UI | Canonical `CL_StartHunkUsers`, `CL_InitUI`, `UI_Init`, shipped MenuLists, `UI_SetActiveMenu`, `UI_Refresh`, and renderer 2D commands own main/options/profile/load/pause menus. Disconnected browser frames continue through `CL_Frame` and `SCR_UpdateScreen`; UI-only backend frames are valid before any `GfxWorld` exists, so startup presents the shipped main menu rather than a DOM substitute. |
 | Text presentation | `r_text.cpp` and `r_text_cmds.cpp` move native glyph lookup, layout, color codes, shadows, subtitle glow, cursor blinking and reveal/decay logic into sources compiled by native and web targets. Canonical fonts/materials remain authoritative. The browser only provides scene/cursor clocks, SP color lookup and quad submission; console bytes pass through the native ring-copy routine. See [text evidence](evidence/text-presentation-2026-09-02.md). |
-| Objectives | Native server configstrings, `CG_ParseObjectiveChange`, `objectiveInfo_t`, `objectiveinfo`, canonical localization, timed menu visibility, and renderer text/quads own objective notifications. Diagnostics only observe hashed emitted text and inject a freely usable string through the canonical parser. |
+| Objectives | Native server configstrings, `CG_ParseObjectiveChange`, `objectiveInfo_t`, `objectiveinfo`, canonical localization, timed menu visibility, and renderer text/quads own objective display. Typewriter notifications use `CG_GameMessage` and the canonical console message windows; the filesystem continuation calls `Con_InitChannels` before profiles/client startup so notification and subtitle filters can route their messages. Diagnostics exercise both the objective parser and a freely usable game-message string through the shipped HUD. |
 | Fresh-map randomness | Shared `SV_GetMapRandomSeed` serves native and browser spawn paths; optional cheat dvar `sv_mapSeed` defaults to the original clock seed. Game RNG and save/demo restoration remain canonical. |
 | Renderer frontend | Kisak world, model, effect and UI state is translated only at the portable draw-command boundary. Native IW3's bounded 65,536 static-model cardinality is preserved across that seam. |
 | Display gamma | Canonical `r_gamma` owns the setting; unchanged native ramp/correction functions are shared in `r_gamma.cpp`. The WebGL2 final pass implements the display-device boundary after world effects and all 2D, including menu-only frames. Save/feedback captures remain pre-display. Native/Wasm ramps and shipped slider/world pixels pass; Steam monitor-response parity is unverified. See [evidence](evidence/display-gamma-2026-09-03.md). |
@@ -82,6 +82,7 @@ repair, not an owned-effect visual match. Animated DObj skinning is unchanged.
 | `database/db_file_platform.cpp` | Maps DB file operations to the Worker filesystem. |
 | `database/db_generated_image_platform.*` | Retains transient LoadDefs behind opaque `GfxTexture` resource handles at the native upload boundary. Canonical image copies/overrides/defaults own lifetime; completion/unload collects unreferenced handles. The 256 MiB cap rejects admission before copying; live sources are not evicted. |
 | `qcommon/common_runtime_commands.cpp` | Keeps the post-mount common-command continuation canonical and separate from browser hosting. |
+| `game/g_scr_main.cpp` | Typed void callbacks discard C++ helper return values explicitly. This replaces incompatible function-pointer casts that trapped during actor model precaching in Wasm; script results remain owned by the canonical VM stack. |
 | `cgame/cg_servercmds.cpp` | The shared slow-command parser converts decimal scales numerically instead of aliasing `long double` storage as `double`; this preserves normal-speed and scripted scale values in Wasm. |
 | `web_client_server_lifecycle.cpp` | Continues synchronous-looking native startup after the main-thread host mounts user files, including canonical version dvars and diagnostic-only calls through real profile/save UI owners. |
 | `web_main.cpp` | Admits disconnected-but-running client frames so canonical pre-map UI and config work run in native order. Its live frame jump target uses shared native error cleanup, shutdown and UI owners; the browser owns the non-blocking pump and terminal Worker teardown. |
@@ -102,19 +103,38 @@ platform makes that behavior impossible.
 | Input host | Pointer lock, keyboard/mouse normalization, trusted paste snapshot/cache transport, focus release and cursor mode. |
 | Browser controls | User-initiated document fullscreen and an accessible recovery modal own only browser presentation, checkpoint retry and installation management. Canonical mouse mode determines ordinary visibility; Shift+Escape remains available during renderer-only gameplay. Fullscreen preserves canonical resolution/aspect policy. |
 | Audio device | AudioContext policy, buffers/nodes and PCM scheduling. Source offset/completion use `AudioContext.currentTime`; validated generation-tagged feedback replaces the proxy wall clock. Absolute queue ordinals survive unqueue/feedback crossing in flight. One snapshot can be in flight, sampled at 25 ms while the host is available; synchronous Worker work cannot accumulate feedback messages. Startup remains suspended and muted until an intentional canvas gesture resumes it; installation-picker interaction does not unlock sound. |
-| Main loop | Non-blocking Emscripten frame pump; no Asyncify or pthread requirement. |
+| Main loop | Non-blocking Emscripten frame pump with a re-entry guard. Loading keepalive uses a bounded Asyncify yield to present native loading UI and cinematic frames inside synchronous-looking map/DB stacks. Worker RPCs wait for those stacks; no pthread requirement. See [measured rationale and cost](cinematic-codec.md). |
 | Wasm stack | The web linker reserves 1 MiB, matching native Windows scale for canonical nested map/save loading rather than rewriting shared call chains. |
-| Cinematics | Existing `R_Cinematic_*` callers drive the platform FFmpeg Bink decoder, canonical Y/Cr/Cb/A code images, and OpenAL PCM queue. The canonical single-pass `cinematic.hlsl` material uses retained R8 planes with native colour coefficients and filtered chroma; world/brush, static-model, DObj and UI draws bind current planes at draw time. Recovery also works without 2D submission; authored in-world scene fidelity remains unverified. Video follows cumulative device-played PCM, including unqueued buffers; one decoder-owned pending frame feeds audio before presentation. Owned delay/suspension and WebGL recovery pass. Movie identity and subsequent game actions stay in Kisak. See [codec scope and remaining qualification](cinematic-codec.md). |
+| Cinematics | Existing `R_Cinematic_*` callers drive the platform FFmpeg Bink decoder, canonical Y/Cr/Cb/A code images, and OpenAL PCM queue. The canonical single-pass `cinematic.hlsl` material uses retained R8 planes with native colour coefficients and filtered chroma; world/brush, static-model, DObj and UI draws bind current planes at draw time. Recovery also works without 2D submission; authored in-world scene fidelity remains unverified. Video follows cumulative device-played PCM, including unqueued buffers; one decoder-owned pending frame feeds audio before presentation. Owned delay/suspension and WebGL recovery pass. Map loading and immutable world/static-model graphics registration run during the intro; camera visibility and dynamic geometry remain frame-owned. Log-panel layout is batched per animation frame to preserve page-thread audio delivery. Native briefing/pregame paint the DB-backed loading bar and hold gameplay until completion/skip. Movie identity and subsequent game actions stay in Kisak. See [codec scope and remaining qualification](cinematic-codec.md). |
 
 ## Control classification
 
 | Control family | Classification |
 | --- | --- |
 | Reached SP main/options/profile/load/pause controls | Shared canonical dvars and commands. The focused menu trace rejects missing references. |
+| FPS/developer HUD | `R_BeginFrame` feeds shared `CG_CalculateFPS` once per display frame, restoring `cg_drawFPS`, `cg_drawFPSLabels` and the existing developer font/corner controls. `cg_drawFPS 2` still lacks backend triangle/batch statistics; its FPS sampling works. |
+| Material HUD | Shared `r_material_pick.cpp` replaces the web `R_PickMaterial` stub. `cg_drawMaterial 1/2/3` uses native collision masks, material names and surface/content flags; buffer bounds are checked. |
+| Scene visibility | Camera masks honor `r_drawWorld`/`r_drawSModels`, including shadow casters. Native submission gates restore `r_drawEntities`/`r_drawBModels`; `r_drawXModels` controls rigid scene models, FX models and DynEntity models, preserving animated DObjs. `r_drawDecals` also gates generated marks. `r_drawWater` freezes animation, matching its native meaning. |
+| Sun effects | `r_drawSun` gates sprite/flare submission. `r_sun_from_dvars` calls shared `R_SetSunFromDvars`, enabling its 21 sprite/flare/blind/glare/material/direction controls with native units and conversions. |
+| Sun lighting and shadows | The frontend honors both `sm_enable` and `sm_sunEnable` while retaining the canonical sun direction/color when maps are disabled. World and moving-brush sun materials use authored primary-lightmap visibility without a shadow map. Their slope-space normals and SM3 direct specular lobe follow the locally inspected `lm_sun_*` / `lm_hsm_sun_*` shader arithmetic, including `r_specularColorScale`; model DXT5nm decoding remains separate. |
+| Pickup sheen | Shared `CG_Item` marks pickup submissions with `GFX_RENDERFX_PICKUP`; weapon names/materials do not determine eligibility. WebGL2 adds a periodic warm sheen to those model fragments after lighting and before fog, preserving texture contrast, depth/alpha and clearing the uniform after each draw. Canonical scene time drives the pulse; held/decorative instances sharing the material are unaffected. The user-provided 2026-09-05 reference clip has peaks at approximately 0.40, 1.43 and 2.43 seconds and near-additive RGB changes; a continuous 1 Hz cosine replaces the guessed 2.5-second pulse/hold and white view-angle blend. This is a reference-calibrated browser presentation effect, not recovered original-game shader arithmetic. Native D3D ignores the metadata bit. |
 | `ui_sp_unlock` | Deliberate stock-retail dangling menu reference. Native COD4 1.7 emits the same `openmenuondvar` warning; no guessed browser dvar is registered. |
 | D3D9/Win32 renderer controls | Native-only where they configure APIs absent from WebGL2; browser renderer capability controls remain platform-owned and are not aliases pretending to be native dvars. |
 | Miles, Bink, and Steam controls | Native DLL integrations remain unavailable. Web Audio and the source-built FFmpeg codec provide device behavior behind existing sound/cinematic APIs; Steam integration remains omitted. |
 | Multiplayer and dedicated-server controls | Not compiled into the initial offline SP target. They return only with the documented browser transport/server milestone, not as inert SP dvars. |
+
+The owned Killhouse `@retail-pickup` check reaches the real `CG_Item` path and
+captures the same rifle in quiet, rising, bright and quiet-again phases. The sheen is
+visible on the rifle alone; its table retains its normal shading. Portable DObj
+checks also distinguish instances sharing one material and check pulse timing.
+
+The owned Killhouse `@retail-dvars` check exercises FPS/label and material-HUD
+on/off submission, visible world/static/entity/rigid-model counts and shared sun
+unit conversions in Chromium. FPS pixels were also inspected. Native SP and
+Release production/diagnostic Wasm builds pass, along with the 10 browser smoke
+and 60 remainder checks (12 optional checks skipped without retail inputs).
+Authored water/decal/sun visual comparisons and detailed backend statistics
+remain separate evidence gaps.
 
 ## Shared renderer and transport helpers
 
@@ -245,9 +265,84 @@ membership remain authoritative. See
 Authored static spot membership now follows the same packed-mask shape. The
 [spot milestone](evidence/static-spot-membership-26b3dc98.md) translates the
 selected light's sorted `GfxShadowGeometry::smodelIndex` records once, then all
-model surface batches scan the resulting LOD-packed bytes. Camera DPVS, sun
+model surface batches scan the resulting LOD-packed bytes. As in
+`R_AddAllStaticModelSurfacesSpotShadow`, instances with authored flag bit 0
+are excluded even when present in that candidate list. Visible BSP receivers
+determine the competing primary lights, matching native camera submission.
+Static material surfaces also require `gameFlags & 0x40` for spot passes,
+matching `R_SkinStaticModelsShadowForLod`; a shadow technique alone does not
+authorize casting.
+Authored BSP shadow membership also retains shadow-only surfaces outside the
+lit/decal/emissive camera ranges. A portable range flag prevents those blockers
+from entering camera draws, including when PVS marks them visible; index-buffer
+coverage and authored per-light membership remain validated.
+Camera DPVS, sun
 partition bytes, canonical asset identity, and GPU resource ownership remain
 separate.
+
+The owned Killhouse booth comparison at eye position `(3568, -929, 65)`
+isolated the erroneous diagonal floor shadow to static spotlight casters.
+Restoring the material flag check removes it with `sm_enable`, `sm_sunEnable`,
+and `sm_spotEnable` all enabled. The sampled floor region retains 98.9% of its
+authored-lighting brightness, versus 30.6% before the material correction.
+The optional `@retail-shadows` browser check retains this camera and compares
+that region with spot maps on/off; synthetic native tests cover both instance
+and material exclusions. This establishes the shadow correction, not complete
+native/browser pixel parity for every material or highlight.
+Validation passed the three native world/static-model/DObj test executables,
+the Chromium smoke (10) and remainder (60, with 13 optional skips) tiers,
+the owned-data HUD/dvar/booth regression, and the production quit/restart
+check. Both diagnostic and production Release builds completed.
+
+The weapon-room comparison at eye position `(3231, -802, 64)`, yaw 96 and
+pitch -9, exposed two additional platform omissions. The weapon wall's primary
+spotlight (17) referenced two `wc/shadowcaster` BSP surfaces after the camera
+ranges; dropping them erased the upper-wall and beam shadows. Uploading these
+authored blockers restores the pattern with `sm_enable`, `sm_sunEnable` and
+`sm_spotEnable` enabled and `sm_maxLights 4`. The upper-wall sample is now
+99.0% of its baked-lighting brightness, compared with 458% before the correction.
+Static and dynamic XModels now receive local primary diffuse and SM3 specular
+lighting through the existing backend. Canonical light definitions supply the
+attenuation image and sampler; model-volume alpha supplies authored visibility
+until a selected spot map replaces it. Static materials select the canonical
+instanced spot/omni technique. Diffuse and specular scales remain independent,
+and ambient model lighting is doubled before direct lighting is added, matching
+the owned native shader. The sampled AK magazine is 3.0 times its ambient-only
+brightness. World spotlight materials also retain their SM3 direct highlight.
+The optional owned-data regression compares both wall shadows and model lighting;
+synthetic native tests cover shadow-only upload/camera exclusion, local technique
+selection and attenuation sampler changes. These comparisons do not establish
+complete native/browser pixel parity for all materials.
+Validation passed four native renderer test executables, 10 Chromium smoke
+tests, 60 remainder tests (13 optional skips), the owned-data HUD/dvar/booth/
+weapon-wall regression, and production quit/restart. Diagnostic and production
+Release builds both completed.
+
+Spot-map selection now shares `GfxShadowedLightHistory` and the native
+retirement/reselection arithmetic in `r_shadowed_light_history.h`. The four
+slots retain outgoing visible lights while `sm_spotShadowFadeTime` fades them;
+replacement lights fade in after a slot becomes available. Camera-invisible
+lights release their slots immediately, as native does. History is per local
+client and resets with world/context resources. The backend passes each entry's
+fade through the native baked/live visibility interpolation for world and model
+materials, including values below 0.5. This fixes the immediate table-shadow
+switch when light 14 loses its rank as the view moves from `(3280, -1000, 64)`
+toward `(3280, -1100, 64)` and turns from yaw 115 to 90. Synthetic shared-code
+checks cover retirement, reversal and replacement; the owned browser regression
+requires intermediate visibility on that camera path. This restores native
+shadow-budget transitions; it does not increase `sm_maxLights` or permanently
+pin a scene-specific light.
+The owned HUD/dvar/booth/weapon-wall regression, including the table's fade
+transition, passed in Chromium, and the user confirmed the popping was resolved
+after reloading the production build. Native SP Release compilation, the 12-case
+native surface/state executable, 10 browser smoke tests, 60 remainder tests
+(13 optional skips) and production quit/restart also passed.
+The optional transient-light fixture now admits its spotlight while scene time
+is running before freezing visual comparisons, as native history cannot admit a
+new light at a paused timestamp. Its illumination, shadow-toggle, clearing,
+context-recovery and light-limit assertions passed, but the complete test failed
+at the final positive DObj post-pose diagnostic assertion. That separate
+actor-visibility evidence remains unresolved; the assertion is unchanged.
 
 The [BSP sun milestone](evidence/bsp-sun-partitions-a23850aa.md) carries canonical
 `GfxSurface` AABBs with retained spans and builds each cascade's light-space
@@ -326,7 +421,7 @@ caster ranges keep the original index buffer, independent of camera visibility.
 Static-model packing and LOD policy are unchanged.
 
 This is permanent draw-command boundary metadata, not another world model.
-It costs 40 bytes per emitted surface, plus up to 16 bytes per surface for
+It costs 44 bytes per emitted surface, plus up to 16 bytes per surface for
 camera-run capacity and one reused 16-byte-per-range sun scratch vector. Camera
 submission scans emitted surfaces once; sun drawing scans them once per
 cascade. No extra geometry buffer, index upload, mask cache or JS visibility

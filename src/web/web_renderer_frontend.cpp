@@ -5,6 +5,7 @@
 
 #include <client/client.h>
 #include <cgame/cg_local.h>
+#include <cgame/cg_main.h>
 #include <database/database.h>
 #include <database/db_registry_pools.h>
 #include <database/db_registry_publication.h>
@@ -32,8 +33,10 @@
 #include <gfx_d3d/r_runtime_api.h>
 #include <gfx_d3d/r_scene_api.h>
 #include <gfx_d3d/r_statistics.h>
+#include <gfx_d3d/r_sky.h>
 #include <gfx_d3d/r_warning_types.h>
 #include <qcommon/qcommon.h>
+#include <qcommon/loading_keepalive.h>
 #include <qcommon/com_bsp.h>
 #include <qcommon/com_world_types.h>
 #include <qcommon/com_world_runtime.h>
@@ -460,12 +463,10 @@ bool BuildRendererPrimaryLights(
                 frameLight ? frameLight->exponent
                            : static_cast<int>(worldLight.exponent),
                 0, 255));
-            const float diffuseScale = r_diffuseColorScale
-                ? r_diffuseColorScale->current.value : 1.0f;
             for (std::size_t component = 0u; component < 3u; ++component)
                 destination.color[component] =
                     (frameLight ? frameLight->color[component]
-                                : worldLight.color[component]) * diffuseScale;
+                                : worldLight.color[component]);
             std::copy_n(frameLight ? frameLight->dir : worldLight.dir,
                 3u, destination.direction);
             std::copy_n(frameLight ? frameLight->origin : worldLight.origin,
@@ -487,6 +488,8 @@ bool BuildRendererPrimaryLights(
             {
                 const GfxImage *attenuation = ResolveRendererImage(
                     definition->attenuation.image);
+                destination.attenuationImage = attenuation;
+                destination.attenuationSamplerState = definition->attenuation.samplerState;
                 destination.falloffScale = attenuation
                     ? static_cast<float>(attenuation->width) / 512.0f
                     : 0.0f;
@@ -1610,9 +1613,73 @@ void AppendConsoleText(char *pool, int poolSize, int first, int count,
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestUiTextSeen(
     std::uint32_t textHash)
 {
+    if (textHash == 0u)
+    {
+        g_testUiTextHashes.fill(0u);
+        return 0;
+    }
     return std::find(g_testUiTextHashes.begin(), g_testUiTextHashes.end(),
         textHash) != g_testUiTextHashes.end();
 }
+
+extern "C" EMSCRIPTEN_KEEPALIVE double KisakWeb_TestRendererDvarState(int field)
+{
+    // Observe canonical frame outputs, never substitute test scene state.
+    if (!g_rendererWorldReady) return -1;
+    switch (field)
+    {
+    case 0: return std::count(s_world.dpvs.surfaceVisData[0],
+        s_world.dpvs.surfaceVisData[0] + s_world.dpvs.staticSurfaceCount, 1);
+    case 1: return std::count(s_world.dpvs.smodelVisData[0],
+        s_world.dpvs.smodelVisData[0] + s_world.dpvs.smodelCount, 1);
+    case 2: return g_dobjSubmissionCount;
+    case 3: return g_brushModelSubmissionCount;
+    case 4: return s_world.sun.spriteSize;
+    case 5: return s_world.sun.flareMinSize;
+    case 6: return s_world.sun.flareMaxSize;
+    case 7: return s_world.sun.flareMaxAlpha;
+    case 8: return s_world.sun.flareFadeInTime;
+    case 9: return s_world.sun.flareFadeOutTime;
+    case 10: return s_world.sun.blindMaxDarken;
+    case 11: return s_world.sun.blindFadeInTime;
+    case 12: return s_world.sun.blindFadeOutTime;
+    case 13: return s_world.sun.glareMaxLighten;
+    case 14: return s_world.sun.glareFadeInTime;
+    case 15: return s_world.sun.glareFadeOutTime;
+    case 16: return s_world.sun.sunFxPosition[0];
+    case 17: return s_world.sun.flareMinDot;
+    case 18: return s_world.sun.flareMaxDot;
+    case 19: return s_world.sun.blindMinDot;
+    case 20: return s_world.sun.blindMaxDot;
+    case 21: return s_world.sun.glareMinDot;
+    case 22: return s_world.sun.glareMaxDot;
+    case 23:
+    {
+        const auto &view = CG_GetLocalClientGlobals(0)->refdef;
+        char name[MAX_QPATH], flags[4096], contents[4096];
+        return R_PickMaterial(1, view.vieworg, view.viewaxis[0], name,
+            flags, contents, sizeof(flags)) ? HashDiagnosticText(name) : 0;
+    }
+    case 24: return std::count_if(g_dobjSubmissions.begin(),
+        g_dobjSubmissions.begin() + g_dobjSubmissionCount, [](const auto &submission) {
+            return !(submission.renderFlags & 4u) && !DObjGetTree(submission.obj) &&
+                DObjGetNumModels(submission.obj) == 1;
+        });
+    case 25: case 26: case 27:
+        for (unsigned i = 0; i < g_dobjSubmissionCount; ++i)
+            if (g_dobjSubmissions[i].renderFlags & GFX_RENDERFX_PICKUP)
+                return g_dobjSubmissions[i].pose->origin[field - 25];
+        return -1;
+    case 28: return sm_sunEnable->current.enabled;
+    case 29: return sm_enable->current.enabled;
+    case 30: return s_world.sunPrimaryLightIndex;
+    case 31: case 32: case 33:
+        return CG_GetLocalClientGlobals(0)->refdef.vieworg[field - 31];
+    default: return -1;
+    }
+}
+
+
 #endif
 
 void SubmitUiScene()
@@ -1724,6 +1791,11 @@ void R_ShutdownDirect3D() { WebRenderer_Shutdown(); }
 void __cdecl R_SyncRenderThread() {}
 void __cdecl R_BeginFrame()
 {
+    // Native R_ToggleSmpFrame samples once per display frame, even with FPS
+    // drawing disabled. Use the same wall-clock history in the Worker.
+    CG_CalculateFPS();
+    if (g_rendererWorldReady && r_sun_from_dvars && r_sun_from_dvars->current.enabled)
+        R_SetSunFromDvars(&s_world.sun);
     const TechniqueSetRemapStats remaps = ResolveTechniqueSetRemaps();
     if (remaps.changed)
         Web_Log(WebLogLevel::Info,
@@ -1832,9 +1904,25 @@ void __cdecl R_LoadWorld(char *name, int *checksum, int)
     g_worldSceneIndexCount = 0u;
 }
 
+static void PrepareWorldResources(
+    const std::vector<WebRendererPrimaryLightDesc> &framePrimaryLights,
+    std::uint32_t sunPrimaryLightIndex, bool sunShadowEnabled);
+
 void __cdecl R_EndRegistration()
 {
     iassert(g_rendererWorldReady);
+    std::vector<WebRendererPrimaryLightDesc> lights;
+    std::uint32_t sun = 0u;
+    if (!BuildRendererPrimaryLights(nullptr, lights, sun))
+        Com_Error(ERR_DROP, "R_EndRegistration: invalid canonical world lights");
+    const auto started = Sys_Milliseconds();
+    PrepareWorldResources(lights, sun,
+        sm_enable && sm_enable->current.enabled && sun < lights.size() &&
+        lights[sun].type == 1u);
+    Sys_LoadingKeepAlive();
+    Web_Log(WebLogLevel::Info,
+        "[kisakcod-web] World graphics registered during loading in %u ms.\n",
+        Sys_Milliseconds() - started);
 }
 
 Font_s *__cdecl R_RegisterFont(const char *name, int)
@@ -2540,6 +2628,8 @@ void __cdecl R_AddMarkMeshDrawSurf(Material *material,
     const GfxMarkContext *context, std::uint16_t *indices,
     std::uint32_t indexCount)
 {
+    if (!r_drawDecals->current.enabled)
+        return;
     if (!g_processMarkMesh || !material || !context || !indices ||
         indexCount == 0u || indexCount % 3u != 0u)
         return;
@@ -2587,6 +2677,7 @@ void __cdecl R_FilterXModelIntoScene(
     const XModel *model, const GfxScaledPlacement *placement,
     std::uint16_t, std::uint16_t *)
 {
+    if (!r_drawXModels->current.enabled) return;
     const WebRendererFxModelRetainResult retained =
         WebRenderer_RetainFxModelSubmission(
             g_fxModelSubmissions.data(), &g_fxModelSubmissionCount,
@@ -2649,530 +2740,24 @@ void __cdecl R_AddSpotLightToScene(const float *origin, const float *direction,
     iassert(light->cosHalfFovInner > light->cosHalfFovOuter);
 }
 void __cdecl R_SetLodOrigin(const refdef_s *) {}
-void __cdecl R_RenderScene(const refdef_s *refdef)
+// Resource registration has no camera or gameplay side effects. Keep the
+// existing canonical world conversion/upload path ahead of native pregame.
+static void PrepareWorldResources(
+    const std::vector<WebRendererPrimaryLightDesc> &framePrimaryLights,
+    std::uint32_t sunPrimaryLightIndex, bool sunShadowEnabled)
 {
-#if KISAK_WEB_DIAGNOSTICS
-    refdef_s testView;
-    if (g_testDynEntityCamera >= 0 && g_testDynEntityCamera <
-        DynEnt_GetEntityCount(DYNENT_COLL_CLIENT_MODEL))
-    {
-        testView = *refdef;
-        const auto *pose = DynEnt_GetClientPose(g_testDynEntityCamera, DYNENT_DRAW_MODEL);
-        std::copy_n(pose->pose.origin, 3u, testView.vieworg);
-        AxisClear(testView.viewaxis);
-        // Stay inside the linked bounds and face the selected model's centre.
-        testView.vieworg[0] -= std::min(16.0f, pose->radius * 0.25f);
-        refdef = &testView;
-    }
-#endif
-    g_uiSceneTime = refdef->time;
-#if KISAK_WEB_DIAGNOSTICS
-    WebFrameProfileSample *const sceneProfile = WebFrameProfile_Current();
-    const double sceneProfileStarted = sceneProfile
-        ? WebFrameProfile_Now() : 0.0;
-#endif
-    iassert(refdef->tanHalfFovX > 0.0f);
-    iassert(refdef->tanHalfFovY > 0.0f);
-    iassert(refdef->height > 0u);
-    iassert(refdef->width > 0u);
-    iassert(refdef->localClientNum == 0);
-    if (!g_rendererWorldReady || !s_world.name)
-        Com_Error(ERR_DROP, "R_RenderScene: NULL worldmodel");
-
-    // Native R_SetTestLods runs at the render-command boundary before every
-    // scene. Preserve developer overrides as well as authored XModel ranges.
-    if (r_forceLod->current.integer == r_forceLod->reset.integer)
-    {
-        XModelSetTestLods(0u, r_highLodDist->current.value);
-        XModelSetTestLods(1u, r_mediumLodDist->current.value);
-        XModelSetTestLods(2u, r_lowLodDist->current.value);
-        XModelSetTestLods(3u, r_lowestLodDist->current.value);
-    }
-    else
-    {
-        for (std::uint32_t lod = 0u; lod < MAX_LODS; ++lod)
-            XModelSetTestLods(lod,
-                lod == static_cast<std::uint32_t>(
-                    r_forceLod->current.integer) ? 0.0f : 0.001f);
-    }
-    WebRendererLodParms lodParms{};
-    if (!WebRenderer_BuildLodParms(
-            refdef->vieworg,
-            refdef->tanHalfFovY,
-            r_lodScaleRigid->current.value,
-            r_lodBiasRigid->current.value,
-            r_lodScaleSkinned->current.value,
-            r_lodBiasSkinned->current.value,
-            lodParms))
-    {
-        Com_Error(ERR_DROP, "R_RenderScene: invalid canonical LOD parameters");
-        return;
-    }
-    WebRendererSceneViewDesc view{};
-    view.x = refdef->x;
-    view.y = refdef->y;
-    view.width = refdef->width;
-    view.height = refdef->height;
-    view.tanHalfFovX = refdef->tanHalfFovX;
-    view.tanHalfFovY = refdef->tanHalfFovY;
-    std::memcpy(view.viewOrigin, refdef->vieworg, sizeof(view.viewOrigin));
-    std::memcpy(view.viewAxis, refdef->viewaxis, sizeof(view.viewAxis));
-    view.time = refdef->time;
-    view.zNear = refdef->zNear > 0.0f
-        ? refdef->zNear
-        : std::max(0.01f, r_znear ? r_znear->current.value : 4.0f);
-    WebRendererFog frameFog{};
-    view.fogEnabled = WebRenderer_UpdateFrameFog(
-        g_fogs, g_fogIndex, refdef->time, frameFog) &&
-        (!r_fog || r_fog->current.enabled);
-    view.fogStart = frameFog.fogStart;
-    view.fogDensity = frameFog.density;
-    constexpr float BYTE_TO_UNIT = 1.0f / 255.0f;
-    view.fogColor[0] = static_cast<float>(
-        (frameFog.color >> 16u) & 0xffu) * BYTE_TO_UNIT;
-    view.fogColor[1] = static_cast<float>(
-        (frameFog.color >> 8u) & 0xffu) * BYTE_TO_UNIT;
-    view.fogColor[2] = static_cast<float>(
-        frameFog.color & 0xffu) * BYTE_TO_UNIT;
-    view.fogColor[3] = static_cast<float>(
-        (frameFog.color >> 24u) & 0xffu) * BYTE_TO_UNIT;
-
-    WebRendererFilmSettings film{};
-    if (r_filmUseTweaks && r_filmUseTweaks->current.enabled)
-    {
-        film.enabled = r_filmTweakEnable->current.enabled;
-        film.brightness = r_filmTweakBrightness->current.value;
-        film.contrast = r_filmTweakContrast->current.value;
-        film.desaturation = r_filmTweakDesaturation->current.value;
-        film.invert = r_filmTweakInvert->current.enabled;
-        std::copy_n(r_filmTweakDarkTint->current.vector, 3u,
-            film.tintDark);
-        std::copy_n(r_filmTweakLightTint->current.vector, 3u,
-            film.tintLight);
-    }
-    else
-    {
-        film.enabled = refdef->film.enabled;
-        film.brightness = refdef->film.brightness;
-        film.contrast = refdef->film.contrast;
-        film.desaturation = refdef->film.desaturation;
-        film.invert = refdef->film.invert;
-        std::copy_n(refdef->film.tintDark, 3u, film.tintDark);
-        std::copy_n(refdef->film.tintLight, 3u, film.tintLight);
-    }
-    const float globalDesaturation = r_desaturation
-        ? r_desaturation->current.value : 1.0f;
-    const float desaturationScale =
-        (1.0f - film.desaturation) * globalDesaturation +
-        film.desaturation;
-    film.desaturation *= desaturationScale;
-    film.contrast *= r_contrast ? r_contrast->current.value : 1.0f;
-    film.brightness += r_brightness ? r_brightness->current.value : 0.0f;
-    WebRendererColorManipulationConstants colorManipulation{};
-    if (!WebRenderer_CalculateColorManipulationConstants(
-            film, colorManipulation))
-    {
-        Com_Error(ERR_DROP,
-            "R_RenderScene: invalid canonical film color constants");
-        return;
-    }
-    std::copy_n(colorManipulation.colorBias, 4u, view.colorBias);
-    std::copy_n(colorManipulation.colorTintBase, 4u,
-        view.colorTintBase);
-    std::copy_n(colorManipulation.colorTintDelta, 4u,
-        view.colorTintDelta);
-    view.filmEnabled = colorManipulation.enabled;
-    GfxGlow glow = refdef->glow;
-    if (r_glowUseTweaks && r_glowUseTweaks->current.enabled)
-    {
-        glow.enabled = r_glowTweakEnable->current.enabled;
-        glow.radius = r_glowTweakRadius->current.value;
-        glow.bloomIntensity = r_glowTweakBloomIntensity->current.value;
-        glow.bloomCutoff = r_glowTweakBloomCutoff->current.value;
-        glow.bloomDesaturation =
-            r_glowTweakBloomDesaturation->current.value;
-    }
-    const bool glowAllowed =
-        (!r_glow_allowed || r_glow_allowed->current.enabled) ||
-        (r_glow_allowed_script_forced &&
-            r_glow_allowed_script_forced->current.enabled);
-    WebRendererGlowSettings glowSettings{};
-    glowSettings.enabled = glowAllowed && glow.enabled &&
-        (!r_fullbright || !r_fullbright->current.enabled) &&
-        (!r_glow || r_glow->current.enabled) &&
-        glow.bloomIntensity > 0.0f && glow.radius > 0.0f;
-    glowSettings.bloomCutoff = glow.bloomCutoff;
-    glowSettings.bloomDesaturation = glow.bloomDesaturation;
-    glowSettings.bloomIntensity = glow.bloomIntensity;
-    glowSettings.radius = glow.radius;
-    WebRendererGlowConstants glowConstants{};
-    if (!WebRenderer_CalculateGlowConstants(glowSettings, glowConstants))
-    {
-        Com_Error(ERR_DROP,
-            "R_RenderScene: invalid canonical glow constants");
-        return;
-    }
-    view.glowEnabled = glowConstants.enabled;
-    view.glowBloomCutoff = glowConstants.bloomCutoff;
-    view.glowBloomCutoffRescale =
-        glowConstants.bloomCutoffRescale;
-    view.glowBloomDesaturation = glowConstants.bloomDesaturation;
-    view.glowBloomIntensity = glowConstants.bloomIntensity;
-    view.glowRadius = glowConstants.radius;
-    GfxDepthOfField depthOfField{};
-    if (r_dof_tweak && r_dof_tweak->current.enabled)
-    {
-        depthOfField.viewModelStart = r_dof_viewModelStart->current.value;
-        depthOfField.viewModelEnd = r_dof_viewModelEnd->current.value;
-        depthOfField.nearStart = r_dof_nearStart->current.value;
-        depthOfField.nearEnd = r_dof_nearEnd->current.value;
-        depthOfField.farStart = r_dof_farStart->current.value;
-        depthOfField.farEnd = r_dof_farEnd->current.value;
-        depthOfField.nearBlur = r_dof_nearBlur->current.value;
-        depthOfField.farBlur = r_dof_farBlur->current.value;
-    }
-    else if (!r_dof_enable || r_dof_enable->current.enabled)
-    {
-        depthOfField = refdef->dof;
-    }
-    view.depthOfField.viewModelStart = depthOfField.viewModelStart;
-    view.depthOfField.viewModelEnd = depthOfField.viewModelEnd;
-    view.depthOfField.nearStart = depthOfField.nearStart;
-    view.depthOfField.nearEnd = depthOfField.nearEnd;
-    view.depthOfField.farStart = depthOfField.farStart;
-    view.depthOfField.farEnd = depthOfField.farEnd;
-    view.depthOfField.nearBlur = depthOfField.nearBlur;
-    view.depthOfField.farBlur = depthOfField.farBlur;
-    view.depthOfField.enabled =
-        depthOfField.viewModelEnd > depthOfField.viewModelStart + 1.0f ||
-        depthOfField.nearEnd > depthOfField.nearStart + 1.0f ||
-        (depthOfField.farEnd > depthOfField.farStart + 1.0f &&
-            depthOfField.farBlur > 0.0f);
-    if (!WebRenderer_ValidateDepthOfFieldSettings(view.depthOfField))
-    {
-        Com_Error(ERR_DROP,
-            "R_RenderScene: invalid canonical depth-of-field settings");
-        return;
-    }
-    view.depthHackZNear = std::max(0.01f,
-        r_znear_depthhack ? r_znear_depthhack->current.value : 0.1f);
-    view.blurRadius = refdef->blurRadius;
-    if (!g_sceneBlurReported && refdef->blurRadius > 0.0f)
-    {
-        g_sceneBlurReported = true;
-        Web_Log(WebLogLevel::Info,
-            "[kisakcod-web] Canonical resolved-scene blur active: "
-            "radius=%.6f before 2D composition.\n",
-            refdef->blurRadius);
-    }
-    if (!g_visionLightingReported)
-    {
-        g_visionLightingReported = true;
-        DispatchRendererVisionLighting(
-            refdef->film.enabled, refdef->film.brightness,
-            refdef->film.contrast, refdef->film.desaturation,
-            refdef->film.invert, refdef->film.tintDark,
-            refdef->film.tintLight, refdef->glow.enabled,
-            refdef->glow.bloomCutoff,
-            refdef->glow.bloomDesaturation,
-            refdef->glow.bloomIntensity, refdef->glow.radius,
-            r_gamma ? r_gamma->current.value : 0.8f);
-        Web_Log(WebLogLevel::Info,
-            "[kisakcod-web] Canonical vision lighting: film=%d "
-            "brightness=%.6f contrast=%.6f desaturation=%.6f invert=%d "
-            "dark=(%.6f %.6f %.6f) light=(%.6f %.6f %.6f); "
-            "glow=%d cutoff=%.6f desaturation=%.6f intensity=%.6f "
-            "radius=%.6f; blur=%.6f gamma=%.6f; fog=%d start=%.6f density=%.9f "
-            "color=(%.6f %.6f %.6f %.6f).\n",
-            refdef->film.enabled, refdef->film.brightness,
-            refdef->film.contrast, refdef->film.desaturation,
-            refdef->film.invert,
-            refdef->film.tintDark[0], refdef->film.tintDark[1],
-            refdef->film.tintDark[2], refdef->film.tintLight[0],
-            refdef->film.tintLight[1], refdef->film.tintLight[2],
-            refdef->glow.enabled, refdef->glow.bloomCutoff,
-            refdef->glow.bloomDesaturation,
-            refdef->glow.bloomIntensity, refdef->glow.radius,
-            refdef->blurRadius,
-            r_gamma ? r_gamma->current.value : 0.8f,
-            view.fogEnabled, view.fogStart, view.fogDensity,
-            view.fogColor[0], view.fogColor[1], view.fogColor[2],
-            view.fogColor[3]);
-        Web_Log(WebLogLevel::Info,
-            "[kisakcod-web] Canonical glow filter: active=%d "
-            "cutoff=%.6f rescale=%.6f desaturation=%.6f "
-            "intensity=%.6f radius=%.6f, quarter-resolution Gaussian "
-            "before HUD.\n",
-            view.glowEnabled, view.glowBloomCutoff,
-            view.glowBloomCutoffRescale,
-            view.glowBloomDesaturation,
-            view.glowBloomIntensity, view.glowRadius);
-        Web_Log(WebLogLevel::Info,
-            "[kisakcod-web] Canonical depth of field: active=%d "
-            "viewmodel=(%.6f %.6f) near=(%.6f %.6f %.6f) "
-            "far=(%.6f %.6f %.6f), znear=(%.6f %.6f).\n",
-            view.depthOfField.enabled,
-            view.depthOfField.viewModelStart,
-            view.depthOfField.viewModelEnd,
-            view.depthOfField.nearStart,
-            view.depthOfField.nearEnd,
-            view.depthOfField.nearBlur,
-            view.depthOfField.farStart,
-            view.depthOfField.farEnd,
-            view.depthOfField.farBlur,
-            view.zNear, view.depthHackZNear);
-    }
-    view.localClientNum = refdef->localClientNum;
-    view.worldName = s_world.name;
-    std::vector<WebRendererPrimaryLightDesc> framePrimaryLights;
-    std::uint32_t sunPrimaryLightIndex = 0u;
-    if (!BuildRendererPrimaryLights(
-            refdef->primaryLights, framePrimaryLights,
-            sunPrimaryLightIndex))
-    {
-        Com_Error(ERR_DROP,
-            "R_RenderScene: invalid canonical frame primary lights");
-        return;
-    }
-    view.primaryLights = framePrimaryLights.data();
-    view.primaryLightCount = static_cast<std::uint32_t>(
-        framePrimaryLights.size());
-    view.dynamicShadowVisibility =
-        DynamicShadowVisibleToPrimaryLight;
-    view.sunShadowEnabled = sm_enable && sm_enable->current.enabled &&
-        sunPrimaryLightIndex < framePrimaryLights.size() &&
-        framePrimaryLights[sunPrimaryLightIndex].type == 1u;
-    if (view.sunShadowEnabled)
-    {
-        const WebRendererPrimaryLightDesc &sun =
-            framePrimaryLights[sunPrimaryLightIndex];
-        std::copy_n(sun.direction, 3u, view.sunDirection);
-        std::copy_n(sun.color, 3u, view.sunColor);
-        std::copy_n(s_world.mins, 3u, view.worldMins);
-        std::copy_n(s_world.maxs, 3u, view.worldMaxs);
-    }
-
-    mat4x4 viewMatrix{};
-    mat4x4 projectionMatrix{};
-    mat4x4 depthHackProjectionMatrix{};
-    mat4x4 d3dViewProjectionMatrix{};
-    mat4x4 d3dDepthHackViewProjectionMatrix{};
-    mat4x4 depthRangeConversion{};
-    mat4x4 webglViewProjectionMatrix{};
-    mat4x4 webglDepthHackViewProjectionMatrix{};
-    MatrixForViewer(viewMatrix, view.viewOrigin, view.viewAxis);
-    InfinitePerspectiveMatrix(
-        projectionMatrix, view.tanHalfFovX, view.tanHalfFovY, view.zNear);
-    InfinitePerspectiveMatrix(depthHackProjectionMatrix,
-        view.tanHalfFovX, view.tanHalfFovY,
-        view.depthHackZNear);
-    MatrixMultiply44(
-        viewMatrix, projectionMatrix, d3dViewProjectionMatrix);
-    MatrixMultiply44(viewMatrix, depthHackProjectionMatrix,
-        d3dDepthHackViewProjectionMatrix);
-    // Kisak's D3D9 projection emits NDC depth [0, 1], while WebGL clips in
-    // [-1, 1]. Preserve the canonical view/projection and apply only the
-    // graphics-API depth-range conversion at the backend boundary.
-    depthRangeConversion[0][0] = 1.0f;
-    depthRangeConversion[1][1] = 1.0f;
-    depthRangeConversion[2][2] = 2.0f;
-    depthRangeConversion[3][2] = -1.0f;
-    depthRangeConversion[3][3] = 1.0f;
-    MatrixMultiply44(d3dViewProjectionMatrix, depthRangeConversion,
-        webglViewProjectionMatrix);
-    MatrixMultiply44(d3dDepthHackViewProjectionMatrix,
-        depthRangeConversion, webglDepthHackViewProjectionMatrix);
-    std::memcpy(view.viewProjectionMatrix, webglViewProjectionMatrix,
-        sizeof(view.viewProjectionMatrix));
-    std::memcpy(view.depthHackViewProjectionMatrix,
-        webglDepthHackViewProjectionMatrix,
-        sizeof(view.depthHackViewProjectionMatrix));
-
-#if KISAK_WEB_DIAGNOSTICS
-    const double cameraVisibilityStarted =
-        sceneProfile ? WebFrameProfile_Now() : 0.0;
-#endif
-    // Native establishes the camera DPVS before filtering any dynamic scene
-    // family. Do the same here so canonical sphere/box tests can reject work
-    // before pose skinning, material expansion and GPU upload.
-    GfxViewParms cameraParms{};
-    std::memcpy(cameraParms.viewMatrix.m, viewMatrix, sizeof(viewMatrix));
-    std::memcpy(cameraParms.projectionMatrix.m, projectionMatrix,
-        sizeof(projectionMatrix));
-    std::memcpy(cameraParms.viewProjectionMatrix.m,
-        d3dViewProjectionMatrix, sizeof(d3dViewProjectionMatrix));
-    MatrixInverse44(cameraParms.viewProjectionMatrix.m,
-        cameraParms.inverseViewProjectionMatrix.m);
-    std::copy_n(view.viewOrigin, 3u, cameraParms.origin);
-    cameraParms.origin[3] = 1.0f;
-    std::memcpy(cameraParms.axis, view.viewAxis, sizeof(cameraParms.axis));
-    for (unsigned kind = 0; kind < 2u; ++kind)
-    {
-        const unsigned count = DynEnt_GetEntityCount(static_cast<DynEntityCollType>(kind));
-        const unsigned words = s_world.dpvsDyn.dynEntClientWordCount[kind];
-        auto *visibility = s_world.dpvsDyn.dynEntVisData[kind][0];
-        if (!R_DynEntityCellLayoutAvailable(s_world, kind) ||
-            count != s_world.dpvsDyn.dynEntClientCount[kind] ||
-            (words != 0u && !visibility))
-            Com_Error(ERR_DROP, "R_RenderScene: invalid DynEntity camera storage");
-        if (words != 0u) std::memset(visibility, 0, 32u * words);
-    }
-    PortalSceneAdmissionState portalAdmission{};
-    portalAdmission.world = &s_world;
-    portalAdmission.entityCount = Web_RendererEntityCount();
-    portalAdmission.localClientNum = view.localClientNum;
-    portalAdmission.lodParms = &lodParms;
-    portalAdmission.viewOffset = refdef->viewOffset;
-    view.staticModelVisibilityComputed = R_ComputeStaticCameraVisibility(
-        s_world, g_cameraDpvs, cameraParms, view.localClientNum,
-        static_cast<float>(R_GetFarPlaneDist()), true,
-        ObservePortalSceneCell, &portalAdmission);
-    view.staticModelVisibility = s_world.dpvs.smodelVisData[0];
-    view.staticModelVisibilityCount = s_world.dpvs.smodelCount;
-    view.worldSurfaceVisibilityComputed =
-        view.staticModelVisibilityComputed;
-    view.worldSurfaceVisibility = s_world.dpvs.surfaceVisData[0];
-    view.worldSurfaceVisibilityCount = s_world.dpvs.staticSurfaceCount;
-    if (!view.staticModelVisibilityComputed &&
-        (s_world.dpvs.smodelCount || s_world.dpvs.staticSurfaceCount))
-    {
-        Com_Error(ERR_DROP,
-            "R_RenderScene: canonical static camera DPVS unavailable");
-        return;
-    }
-    if ((!view.staticModelVisibilityComputed || !portalAdmission.valid) &&
-        (s_world.dpvsDyn.dynEntClientCount[0] || s_world.dpvsDyn.dynEntClientCount[1]))
-        Com_Error(ERR_DROP, "R_RenderScene: DynEntity portal walk unavailable");
-    const DpvsView &camera =
-        g_cameraDpvs.views[view.localClientNum][0];
-#if KISAK_WEB_DIAGNOSTICS
-    if (!g_gameDrivenFrameReported)
-    {
-        std::uint32_t linkedDObjs = 0u, admittedDObjs = 0u;
-        std::uint32_t linkedBrushes = 0u, admittedBrushes = 0u;
-        for (std::uint32_t i = 0; i < g_dobjSubmissionCount; ++i)
-        {
-            const auto entity = g_dobjSubmissions[i].entityNumber;
-            linkedDObjs += entity < g_dobjCellLinkValid.size() &&
-                g_dobjCellLinkValid[entity];
-            admittedDObjs += portalAdmission.dobjVisible[i] != 0u;
-        }
-        for (std::uint32_t i = 0; i < g_brushModelSubmissionCount; ++i)
-        {
-            const auto entity = g_brushModelSubmissions[i].entityNumber;
-            linkedBrushes += entity < g_brushCellLinkValid.size() &&
-                g_brushCellLinkValid[entity];
-            admittedBrushes += portalAdmission.brushVisible[i] != 0u;
-        }
-        Web_Log(WebLogLevel::Info,
-            "[kisakcod-web] Canonical portal scene admission: valid=%u "
-            "DObj linked=%u admitted=%u brush linked=%u admitted=%u.\n",
-            portalAdmission.valid ? 1u : 0u, linkedDObjs, admittedDObjs,
-            linkedBrushes, admittedBrushes);
-        Web_Log(WebLogLevel::Info,
-            "[kisakcod-web] Canonical DObj post-pose admission: tested=%u "
-            "plane-rejected=%u cell-rejected=%u.\n",
-            portalAdmission.posedTests, portalAdmission.posedPlaneRejects,
-            portalAdmission.posedCellRejects);
-        unsigned admittedDynEntities[2]{};
-        for (unsigned kind = 0; kind < 2u; ++kind)
-            for (unsigned id = 0; id < s_world.dpvsDyn.dynEntClientCount[kind]; ++id)
-                admittedDynEntities[kind] += s_world.dpvsDyn.dynEntVisData[kind][0][id] != 0u;
-        Web_Log(WebLogLevel::Info,
-            "[kisakcod-web] Canonical DynEntity portal admission: models=%u admitted=%u "
-            "brushes=%u admitted=%u.\n",
-            s_world.dpvsDyn.dynEntClientCount[0], admittedDynEntities[0],
-            s_world.dpvsDyn.dynEntClientCount[1], admittedDynEntities[1]);
-    }
-    if (sceneProfile)
-        sceneProfile->sceneCameraVisibilityMs +=
-            WebFrameProfile_Now() - cameraVisibilityStarted;
-#endif
-
-    if (!g_gameDrivenFrameReported)
-    {
-        Web_Log(WebLogLevel::Info,
-            "[kisakcod-web] Cgame view axes: forward=(%.3f %.3f %.3f), "
-            "right=(%.3f %.3f %.3f), up=(%.3f %.3f %.3f).\n",
-            view.viewAxis[0][0], view.viewAxis[0][1], view.viewAxis[0][2],
-            view.viewAxis[1][0], view.viewAxis[1][1], view.viewAxis[1][2],
-            view.viewAxis[2][0], view.viewAxis[2][1], view.viewAxis[2][2]);
-        Web_Log(WebLogLevel::Info,
-            "[kisakcod-web] Renderer world bounds: mins=(%.1f %.1f %.1f), "
-            "maxs=(%.1f %.1f %.1f), surfaces=%d, model surfaces=%u, sky=%d.\n",
-            s_world.mins[0], s_world.mins[1], s_world.mins[2],
-            s_world.maxs[0], s_world.maxs[1], s_world.maxs[2],
-            s_world.surfaceCount,
-            s_world.modelCount > 0 ? s_world.models[0].surfaceCount : 0u,
-            s_world.skySurfCount);
-        Web_Log(WebLogLevel::Info,
-            "[kisakcod-web] Canonical world sun: valid=%u "
-            "fxDirection=(%.6f %.6f %.6f) sprite='%s' flare='%s'.\n",
-            s_world.sun.hasValidData ? 1u : 0u,
-            s_world.sun.sunFxPosition[0],
-            s_world.sun.sunFxPosition[1],
-            s_world.sun.sunFxPosition[2],
-            s_world.sun.spriteMaterial && s_world.sun.spriteMaterial->info.name
-                ? s_world.sun.spriteMaterial->info.name : "<none>",
-            s_world.sun.flareMaterial && s_world.sun.flareMaterial->info.name
-                ? s_world.sun.flareMaterial->info.name : "<none>");
-        Web_Log(WebLogLevel::Info,
-            "[kisakcod-web] Canonical world draw ranges: lit=[%u,%u), "
-            "decal=[%u,%u), emissive=[%u,%u), model-no-decal=%u.\n",
-            s_world.dpvs.litSurfsBegin, s_world.dpvs.litSurfsEnd,
-            s_world.dpvs.decalSurfsBegin, s_world.dpvs.decalSurfsEnd,
-            s_world.dpvs.emissiveSurfsBegin, s_world.dpvs.emissiveSurfsEnd,
-            s_world.modelCount > 0
-                ? s_world.models[0].surfaceCountNoDecal : 0u);
-        std::uint32_t indexedLightmapSurfaces = 0u;
-        std::uint32_t litTechniqueSurfaces = 0u;
-        std::uint32_t primaryLightmapSamplerSurfaces = 0u;
-        std::uint32_t primaryLightmapAnyPassSurfaces = 0u;
-        const std::uint32_t worldSurfaceCount = s_world.modelCount > 0
-            ? std::min<std::uint32_t>(s_world.models[0].surfaceCount,
-                static_cast<std::uint32_t>(s_world.surfaceCount))
-            : 0u;
-        for (std::uint32_t index = 0u; index < worldSurfaceCount; ++index)
-        {
-            const GfxSurface &surface = s_world.dpvs.surfaces[index];
-            if (surface.lightmapIndex != 31u) ++indexedLightmapSurfaces;
-            const MaterialTechnique *lit = surface.material &&
-                surface.material->techniqueSet
-                ? surface.material->techniqueSet->techniques[7] : nullptr;
-            if (!lit) continue;
-            ++litTechniqueSurfaces;
-            if (lit->passCount > 0u &&
-                (lit->passArray[0].customSamplerFlags & 2u) != 0u)
-            {
-                ++primaryLightmapSamplerSurfaces;
-            }
-            bool anyPrimary = false;
-            for (std::uint32_t pass = 0u; pass < lit->passCount; ++pass)
-                anyPrimary = anyPrimary ||
-                    (lit->passArray[pass].customSamplerFlags & 2u) != 0u;
-            if (anyPrimary) ++primaryLightmapAnyPassSurfaces;
-        }
-        Web_Log(WebLogLevel::Info,
-            "[kisakcod-web] Canonical world lightmap inventory: %u/%u indexed, "
-            "%u lit-technique, %u primary-first-pass, %u primary-any-pass, "
-            "%u lightmap pairs.\n",
-            indexedLightmapSurfaces, worldSurfaceCount, litTechniqueSurfaces,
-            primaryLightmapSamplerSurfaces,
-            primaryLightmapAnyPassSurfaces, s_world.lightmapCount);
-    }
-
     if (!g_worldSceneSubmitted)
     {
         const WebRendererWorldLightTechniqueContext lightContext{
             framePrimaryLights.data(),
             static_cast<std::uint32_t>(framePrimaryLights.size()),
             sunPrimaryLightIndex,
-            view.sunShadowEnabled,
+            sunShadowEnabled,
         };
         WebRendererWorldSceneCommand command;
         const WebRendererWorldSceneResult build =
             WebRenderer_BuildWorldSceneCommand(
-                s_world, view, command, &lightContext);
+                s_world, sunShadowEnabled, command, &lightContext);
         if (build == WebRendererWorldSceneResult::NoVisibleSurface)
         {
             g_worldSceneSurfaceCount = 0u;
@@ -3189,7 +2774,10 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         {
             command.sunPrimaryLightIndex = sunPrimaryLightIndex;
             for (WebRendererWorldBatchDesc &batch : command.batches)
+            {
+                Sys_LoadingKeepAlive();
                 ResolveRendererBatchImages(batch);
+            }
             std::array<std::uint32_t, 37u> techniqueBatchCounts{};
             std::array<std::uint32_t, 37u> techniqueSurfaceCounts{};
             std::uint32_t localLightBatchCount = 0u;
@@ -3548,7 +3136,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             Web_Log(WebLogLevel::Info,
                 "[kisakcod-web] Renderer frontend submitted %u canonical world "
                 "surfaces in %zu canonical material/lightmap batches "
-                "(%u vertices, %u indices) from cgame view.\n",
+                "(%u vertices, %u indices) during renderer registration.\n",
                 g_worldSceneSurfaceCount, command.batches.size(),
                 g_worldSceneVertexCount, g_worldSceneIndexCount);
         }
@@ -3563,7 +3151,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         const WebRendererStaticModelSceneResult build =
             WebRenderer_BuildStaticModelSceneCommand(
                 s_world, command, &MODEL_LIGHTING_CALLBACKS,
-                ResolveRendererMaterial);
+                ResolveRendererMaterial, framePrimaryLights);
         if (build == WebRendererStaticModelSceneResult::NoStaticModels)
         {
             g_staticModelSceneSubmitted = true;
@@ -3587,6 +3175,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
 #endif
             for (WebRendererStaticModelBatchDesc &batch : command.batches)
             {
+                Sys_LoadingKeepAlive();
                 ResolveRendererBatchImages(batch.draw);
 #if KISAK_WEB_DIAGNOSTICS
                 ReportMaterialPasses(batch.draw, reportedMaterials);
@@ -3640,6 +3229,531 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                 command.modelLightingFailureCount);
         }
     }
+
+}
+
+void __cdecl R_RenderScene(const refdef_s *refdef)
+{
+#if KISAK_WEB_DIAGNOSTICS
+    refdef_s testView;
+    if (g_testDynEntityCamera >= 0 && g_testDynEntityCamera <
+        DynEnt_GetEntityCount(DYNENT_COLL_CLIENT_MODEL))
+    {
+        testView = *refdef;
+        const auto *pose = DynEnt_GetClientPose(g_testDynEntityCamera, DYNENT_DRAW_MODEL);
+        std::copy_n(pose->pose.origin, 3u, testView.vieworg);
+        AxisClear(testView.viewaxis);
+        // Stay inside the linked bounds and face the selected model's centre.
+        testView.vieworg[0] -= std::min(16.0f, pose->radius * 0.25f);
+        refdef = &testView;
+    }
+#endif
+    g_uiSceneTime = refdef->time;
+#if KISAK_WEB_DIAGNOSTICS
+    WebFrameProfileSample *const sceneProfile = WebFrameProfile_Current();
+    const double sceneProfileStarted = sceneProfile
+        ? WebFrameProfile_Now() : 0.0;
+#endif
+    iassert(refdef->tanHalfFovX > 0.0f);
+    iassert(refdef->tanHalfFovY > 0.0f);
+    iassert(refdef->height > 0u);
+    iassert(refdef->width > 0u);
+    iassert(refdef->localClientNum == 0);
+    if (!g_rendererWorldReady || !s_world.name)
+        Com_Error(ERR_DROP, "R_RenderScene: NULL worldmodel");
+
+    // Native R_SetTestLods runs at the render-command boundary before every
+    // scene. Preserve developer overrides as well as authored XModel ranges.
+    if (r_forceLod->current.integer == r_forceLod->reset.integer)
+    {
+        XModelSetTestLods(0u, r_highLodDist->current.value);
+        XModelSetTestLods(1u, r_mediumLodDist->current.value);
+        XModelSetTestLods(2u, r_lowLodDist->current.value);
+        XModelSetTestLods(3u, r_lowestLodDist->current.value);
+    }
+    else
+    {
+        for (std::uint32_t lod = 0u; lod < MAX_LODS; ++lod)
+            XModelSetTestLods(lod,
+                lod == static_cast<std::uint32_t>(
+                    r_forceLod->current.integer) ? 0.0f : 0.001f);
+    }
+    WebRendererLodParms lodParms{};
+    if (!WebRenderer_BuildLodParms(
+            refdef->vieworg,
+            refdef->tanHalfFovY,
+            r_lodScaleRigid->current.value,
+            r_lodBiasRigid->current.value,
+            r_lodScaleSkinned->current.value,
+            r_lodBiasSkinned->current.value,
+            lodParms))
+    {
+        Com_Error(ERR_DROP, "R_RenderScene: invalid canonical LOD parameters");
+        return;
+    }
+    WebRendererSceneViewDesc view{};
+    view.x = refdef->x;
+    view.y = refdef->y;
+    view.width = refdef->width;
+    view.height = refdef->height;
+    view.tanHalfFovX = refdef->tanHalfFovX;
+    view.tanHalfFovY = refdef->tanHalfFovY;
+    std::memcpy(view.viewOrigin, refdef->vieworg, sizeof(view.viewOrigin));
+    std::memcpy(view.viewAxis, refdef->viewaxis, sizeof(view.viewAxis));
+    view.time = refdef->time;
+    view.zNear = refdef->zNear > 0.0f
+        ? refdef->zNear
+        : std::max(0.01f, r_znear ? r_znear->current.value : 4.0f);
+    WebRendererFog frameFog{};
+    view.fogEnabled = WebRenderer_UpdateFrameFog(
+        g_fogs, g_fogIndex, refdef->time, frameFog) &&
+        (!r_fog || r_fog->current.enabled);
+    view.fogStart = frameFog.fogStart;
+    view.fogDensity = frameFog.density;
+    constexpr float BYTE_TO_UNIT = 1.0f / 255.0f;
+    view.fogColor[0] = static_cast<float>(
+        (frameFog.color >> 16u) & 0xffu) * BYTE_TO_UNIT;
+    view.fogColor[1] = static_cast<float>(
+        (frameFog.color >> 8u) & 0xffu) * BYTE_TO_UNIT;
+    view.fogColor[2] = static_cast<float>(
+        frameFog.color & 0xffu) * BYTE_TO_UNIT;
+    view.fogColor[3] = static_cast<float>(
+        (frameFog.color >> 24u) & 0xffu) * BYTE_TO_UNIT;
+
+    WebRendererFilmSettings film{};
+    if (r_filmUseTweaks && r_filmUseTweaks->current.enabled)
+    {
+        film.enabled = r_filmTweakEnable->current.enabled;
+        film.brightness = r_filmTweakBrightness->current.value;
+        film.contrast = r_filmTweakContrast->current.value;
+        film.desaturation = r_filmTweakDesaturation->current.value;
+        film.invert = r_filmTweakInvert->current.enabled;
+        std::copy_n(r_filmTweakDarkTint->current.vector, 3u,
+            film.tintDark);
+        std::copy_n(r_filmTweakLightTint->current.vector, 3u,
+            film.tintLight);
+    }
+    else
+    {
+        film.enabled = refdef->film.enabled;
+        film.brightness = refdef->film.brightness;
+        film.contrast = refdef->film.contrast;
+        film.desaturation = refdef->film.desaturation;
+        film.invert = refdef->film.invert;
+        std::copy_n(refdef->film.tintDark, 3u, film.tintDark);
+        std::copy_n(refdef->film.tintLight, 3u, film.tintLight);
+    }
+    const float globalDesaturation = r_desaturation
+        ? r_desaturation->current.value : 1.0f;
+    const float desaturationScale =
+        (1.0f - film.desaturation) * globalDesaturation +
+        film.desaturation;
+    film.desaturation *= desaturationScale;
+    film.contrast *= r_contrast ? r_contrast->current.value : 1.0f;
+    film.brightness += r_brightness ? r_brightness->current.value : 0.0f;
+    WebRendererColorManipulationConstants colorManipulation{};
+    if (!WebRenderer_CalculateColorManipulationConstants(
+            film, colorManipulation))
+    {
+        Com_Error(ERR_DROP,
+            "R_RenderScene: invalid canonical film color constants");
+        return;
+    }
+    std::copy_n(colorManipulation.colorBias, 4u, view.colorBias);
+    std::copy_n(colorManipulation.colorTintBase, 4u,
+        view.colorTintBase);
+    std::copy_n(colorManipulation.colorTintDelta, 4u,
+        view.colorTintDelta);
+    view.filmEnabled = colorManipulation.enabled;
+    GfxGlow glow = refdef->glow;
+    if (r_glowUseTweaks && r_glowUseTweaks->current.enabled)
+    {
+        glow.enabled = r_glowTweakEnable->current.enabled;
+        glow.radius = r_glowTweakRadius->current.value;
+        glow.bloomIntensity = r_glowTweakBloomIntensity->current.value;
+        glow.bloomCutoff = r_glowTweakBloomCutoff->current.value;
+        glow.bloomDesaturation =
+            r_glowTweakBloomDesaturation->current.value;
+    }
+    const bool glowAllowed =
+        (!r_glow_allowed || r_glow_allowed->current.enabled) ||
+        (r_glow_allowed_script_forced &&
+            r_glow_allowed_script_forced->current.enabled);
+    WebRendererGlowSettings glowSettings{};
+    glowSettings.enabled = glowAllowed && glow.enabled &&
+        (!r_fullbright || !r_fullbright->current.enabled) &&
+        (!r_glow || r_glow->current.enabled) &&
+        glow.bloomIntensity > 0.0f && glow.radius > 0.0f;
+    glowSettings.bloomCutoff = glow.bloomCutoff;
+    glowSettings.bloomDesaturation = glow.bloomDesaturation;
+    glowSettings.bloomIntensity = glow.bloomIntensity;
+    glowSettings.radius = glow.radius;
+    WebRendererGlowConstants glowConstants{};
+    if (!WebRenderer_CalculateGlowConstants(glowSettings, glowConstants))
+    {
+        Com_Error(ERR_DROP,
+            "R_RenderScene: invalid canonical glow constants");
+        return;
+    }
+    view.glowEnabled = glowConstants.enabled;
+    view.glowBloomCutoff = glowConstants.bloomCutoff;
+    view.glowBloomCutoffRescale =
+        glowConstants.bloomCutoffRescale;
+    view.glowBloomDesaturation = glowConstants.bloomDesaturation;
+    view.glowBloomIntensity = glowConstants.bloomIntensity;
+    view.glowRadius = glowConstants.radius;
+    GfxDepthOfField depthOfField{};
+    if (r_dof_tweak && r_dof_tweak->current.enabled)
+    {
+        depthOfField.viewModelStart = r_dof_viewModelStart->current.value;
+        depthOfField.viewModelEnd = r_dof_viewModelEnd->current.value;
+        depthOfField.nearStart = r_dof_nearStart->current.value;
+        depthOfField.nearEnd = r_dof_nearEnd->current.value;
+        depthOfField.farStart = r_dof_farStart->current.value;
+        depthOfField.farEnd = r_dof_farEnd->current.value;
+        depthOfField.nearBlur = r_dof_nearBlur->current.value;
+        depthOfField.farBlur = r_dof_farBlur->current.value;
+    }
+    else if (!r_dof_enable || r_dof_enable->current.enabled)
+    {
+        depthOfField = refdef->dof;
+    }
+    view.depthOfField.viewModelStart = depthOfField.viewModelStart;
+    view.depthOfField.viewModelEnd = depthOfField.viewModelEnd;
+    view.depthOfField.nearStart = depthOfField.nearStart;
+    view.depthOfField.nearEnd = depthOfField.nearEnd;
+    view.depthOfField.farStart = depthOfField.farStart;
+    view.depthOfField.farEnd = depthOfField.farEnd;
+    view.depthOfField.nearBlur = depthOfField.nearBlur;
+    view.depthOfField.farBlur = depthOfField.farBlur;
+    view.depthOfField.enabled =
+        depthOfField.viewModelEnd > depthOfField.viewModelStart + 1.0f ||
+        depthOfField.nearEnd > depthOfField.nearStart + 1.0f ||
+        (depthOfField.farEnd > depthOfField.farStart + 1.0f &&
+            depthOfField.farBlur > 0.0f);
+    if (!WebRenderer_ValidateDepthOfFieldSettings(view.depthOfField))
+    {
+        Com_Error(ERR_DROP,
+            "R_RenderScene: invalid canonical depth-of-field settings");
+        return;
+    }
+    view.depthHackZNear = std::max(0.01f,
+        r_znear_depthhack ? r_znear_depthhack->current.value : 0.1f);
+    view.blurRadius = refdef->blurRadius;
+    if (!g_sceneBlurReported && refdef->blurRadius > 0.0f)
+    {
+        g_sceneBlurReported = true;
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Canonical resolved-scene blur active: "
+            "radius=%.6f before 2D composition.\n",
+            refdef->blurRadius);
+    }
+    if (!g_visionLightingReported)
+    {
+        g_visionLightingReported = true;
+        DispatchRendererVisionLighting(
+            refdef->film.enabled, refdef->film.brightness,
+            refdef->film.contrast, refdef->film.desaturation,
+            refdef->film.invert, refdef->film.tintDark,
+            refdef->film.tintLight, refdef->glow.enabled,
+            refdef->glow.bloomCutoff,
+            refdef->glow.bloomDesaturation,
+            refdef->glow.bloomIntensity, refdef->glow.radius,
+            r_gamma ? r_gamma->current.value : 0.8f);
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Canonical vision lighting: film=%d "
+            "brightness=%.6f contrast=%.6f desaturation=%.6f invert=%d "
+            "dark=(%.6f %.6f %.6f) light=(%.6f %.6f %.6f); "
+            "glow=%d cutoff=%.6f desaturation=%.6f intensity=%.6f "
+            "radius=%.6f; blur=%.6f gamma=%.6f; fog=%d start=%.6f density=%.9f "
+            "color=(%.6f %.6f %.6f %.6f).\n",
+            refdef->film.enabled, refdef->film.brightness,
+            refdef->film.contrast, refdef->film.desaturation,
+            refdef->film.invert,
+            refdef->film.tintDark[0], refdef->film.tintDark[1],
+            refdef->film.tintDark[2], refdef->film.tintLight[0],
+            refdef->film.tintLight[1], refdef->film.tintLight[2],
+            refdef->glow.enabled, refdef->glow.bloomCutoff,
+            refdef->glow.bloomDesaturation,
+            refdef->glow.bloomIntensity, refdef->glow.radius,
+            refdef->blurRadius,
+            r_gamma ? r_gamma->current.value : 0.8f,
+            view.fogEnabled, view.fogStart, view.fogDensity,
+            view.fogColor[0], view.fogColor[1], view.fogColor[2],
+            view.fogColor[3]);
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Canonical glow filter: active=%d "
+            "cutoff=%.6f rescale=%.6f desaturation=%.6f "
+            "intensity=%.6f radius=%.6f, quarter-resolution Gaussian "
+            "before HUD.\n",
+            view.glowEnabled, view.glowBloomCutoff,
+            view.glowBloomCutoffRescale,
+            view.glowBloomDesaturation,
+            view.glowBloomIntensity, view.glowRadius);
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Canonical depth of field: active=%d "
+            "viewmodel=(%.6f %.6f) near=(%.6f %.6f %.6f) "
+            "far=(%.6f %.6f %.6f), znear=(%.6f %.6f).\n",
+            view.depthOfField.enabled,
+            view.depthOfField.viewModelStart,
+            view.depthOfField.viewModelEnd,
+            view.depthOfField.nearStart,
+            view.depthOfField.nearEnd,
+            view.depthOfField.nearBlur,
+            view.depthOfField.farStart,
+            view.depthOfField.farEnd,
+            view.depthOfField.farBlur,
+            view.zNear, view.depthHackZNear);
+    }
+    view.localClientNum = refdef->localClientNum;
+    view.worldName = s_world.name;
+    std::vector<WebRendererPrimaryLightDesc> framePrimaryLights;
+    std::uint32_t sunPrimaryLightIndex = 0u;
+    if (!BuildRendererPrimaryLights(
+            refdef->primaryLights, framePrimaryLights,
+            sunPrimaryLightIndex))
+    {
+        Com_Error(ERR_DROP,
+            "R_RenderScene: invalid canonical frame primary lights");
+        return;
+    }
+    view.primaryLights = framePrimaryLights.data();
+    view.primaryLightCount = static_cast<std::uint32_t>(
+        framePrimaryLights.size());
+    view.dynamicShadowVisibility =
+        DynamicShadowVisibleToPrimaryLight;
+    view.sunShadowEnabled = sm_enable && sm_enable->current.enabled &&
+        sm_sunEnable && sm_sunEnable->current.enabled &&
+        sunPrimaryLightIndex < framePrimaryLights.size() &&
+        framePrimaryLights[sunPrimaryLightIndex].type == 1u;
+    if (sunPrimaryLightIndex < framePrimaryLights.size() &&
+        framePrimaryLights[sunPrimaryLightIndex].type == 1u)
+    {
+        const WebRendererPrimaryLightDesc &sun =
+            framePrimaryLights[sunPrimaryLightIndex];
+        std::copy_n(sun.direction, 3u, view.sunDirection);
+        std::copy_n(sun.color, 3u, view.sunColor);
+        std::copy_n(s_world.mins, 3u, view.worldMins);
+        std::copy_n(s_world.maxs, 3u, view.worldMaxs);
+    }
+
+    mat4x4 viewMatrix{};
+    mat4x4 projectionMatrix{};
+    mat4x4 depthHackProjectionMatrix{};
+    mat4x4 d3dViewProjectionMatrix{};
+    mat4x4 d3dDepthHackViewProjectionMatrix{};
+    mat4x4 depthRangeConversion{};
+    mat4x4 webglViewProjectionMatrix{};
+    mat4x4 webglDepthHackViewProjectionMatrix{};
+    MatrixForViewer(viewMatrix, view.viewOrigin, view.viewAxis);
+    InfinitePerspectiveMatrix(
+        projectionMatrix, view.tanHalfFovX, view.tanHalfFovY, view.zNear);
+    InfinitePerspectiveMatrix(depthHackProjectionMatrix,
+        view.tanHalfFovX, view.tanHalfFovY,
+        view.depthHackZNear);
+    MatrixMultiply44(
+        viewMatrix, projectionMatrix, d3dViewProjectionMatrix);
+    MatrixMultiply44(viewMatrix, depthHackProjectionMatrix,
+        d3dDepthHackViewProjectionMatrix);
+    // Kisak's D3D9 projection emits NDC depth [0, 1], while WebGL clips in
+    // [-1, 1]. Preserve the canonical view/projection and apply only the
+    // graphics-API depth-range conversion at the backend boundary.
+    depthRangeConversion[0][0] = 1.0f;
+    depthRangeConversion[1][1] = 1.0f;
+    depthRangeConversion[2][2] = 2.0f;
+    depthRangeConversion[3][2] = -1.0f;
+    depthRangeConversion[3][3] = 1.0f;
+    MatrixMultiply44(d3dViewProjectionMatrix, depthRangeConversion,
+        webglViewProjectionMatrix);
+    MatrixMultiply44(d3dDepthHackViewProjectionMatrix,
+        depthRangeConversion, webglDepthHackViewProjectionMatrix);
+    std::memcpy(view.viewProjectionMatrix, webglViewProjectionMatrix,
+        sizeof(view.viewProjectionMatrix));
+    std::memcpy(view.depthHackViewProjectionMatrix,
+        webglDepthHackViewProjectionMatrix,
+        sizeof(view.depthHackViewProjectionMatrix));
+
+#if KISAK_WEB_DIAGNOSTICS
+    const double cameraVisibilityStarted =
+        sceneProfile ? WebFrameProfile_Now() : 0.0;
+#endif
+    // Native establishes the camera DPVS before filtering any dynamic scene
+    // family. Do the same here so canonical sphere/box tests can reject work
+    // before pose skinning, material expansion and GPU upload.
+    GfxViewParms cameraParms{};
+    std::memcpy(cameraParms.viewMatrix.m, viewMatrix, sizeof(viewMatrix));
+    std::memcpy(cameraParms.projectionMatrix.m, projectionMatrix,
+        sizeof(projectionMatrix));
+    std::memcpy(cameraParms.viewProjectionMatrix.m,
+        d3dViewProjectionMatrix, sizeof(d3dViewProjectionMatrix));
+    MatrixInverse44(cameraParms.viewProjectionMatrix.m,
+        cameraParms.inverseViewProjectionMatrix.m);
+    std::copy_n(view.viewOrigin, 3u, cameraParms.origin);
+    cameraParms.origin[3] = 1.0f;
+    std::memcpy(cameraParms.axis, view.viewAxis, sizeof(cameraParms.axis));
+    for (unsigned kind = 0; kind < 2u; ++kind)
+    {
+        const unsigned count = DynEnt_GetEntityCount(static_cast<DynEntityCollType>(kind));
+        const unsigned words = s_world.dpvsDyn.dynEntClientWordCount[kind];
+        auto *visibility = s_world.dpvsDyn.dynEntVisData[kind][0];
+        if (!R_DynEntityCellLayoutAvailable(s_world, kind) ||
+            count != s_world.dpvsDyn.dynEntClientCount[kind] ||
+            (words != 0u && !visibility))
+            Com_Error(ERR_DROP, "R_RenderScene: invalid DynEntity camera storage");
+        if (words != 0u) std::memset(visibility, 0, 32u * words);
+    }
+    PortalSceneAdmissionState portalAdmission{};
+    portalAdmission.world = &s_world;
+    portalAdmission.entityCount = Web_RendererEntityCount();
+    portalAdmission.localClientNum = view.localClientNum;
+    portalAdmission.lodParms = &lodParms;
+    portalAdmission.viewOffset = refdef->viewOffset;
+    view.staticModelVisibilityComputed = R_ComputeStaticCameraVisibility(
+        s_world, g_cameraDpvs, cameraParms, view.localClientNum,
+        static_cast<float>(R_GetFarPlaneDist()), true,
+        ObservePortalSceneCell, &portalAdmission);
+    view.staticModelVisibility = s_world.dpvs.smodelVisData[0];
+    // Retained geometry survives a toggle; only this frame's canonical camera
+    // visibility changes, as in native DpvsContext::drawWorld/drawSModels.
+    if (view.staticModelVisibilityComputed && !r_drawSModels->current.enabled && s_world.dpvs.smodelCount)
+        std::memset(s_world.dpvs.smodelVisData[0], 0, s_world.dpvs.smodelCount);
+    if (view.staticModelVisibilityComputed && !r_drawWorld->current.enabled && s_world.dpvs.staticSurfaceCount)
+        std::memset(s_world.dpvs.surfaceVisData[0], 0, s_world.dpvs.staticSurfaceCount);
+    view.staticModelVisibilityCount = s_world.dpvs.smodelCount;
+    view.worldSurfaceVisibilityComputed =
+        view.staticModelVisibilityComputed;
+    view.worldSurfaceVisibility = s_world.dpvs.surfaceVisData[0];
+    view.worldSurfaceVisibilityCount = s_world.dpvs.staticSurfaceCount;
+    if (!view.staticModelVisibilityComputed &&
+        (s_world.dpvs.smodelCount || s_world.dpvs.staticSurfaceCount))
+    {
+        Com_Error(ERR_DROP,
+            "R_RenderScene: canonical static camera DPVS unavailable");
+        return;
+    }
+    if ((!view.staticModelVisibilityComputed || !portalAdmission.valid) &&
+        (s_world.dpvsDyn.dynEntClientCount[0] || s_world.dpvsDyn.dynEntClientCount[1]))
+        Com_Error(ERR_DROP, "R_RenderScene: DynEntity portal walk unavailable");
+    const DpvsView &camera =
+        g_cameraDpvs.views[view.localClientNum][0];
+#if KISAK_WEB_DIAGNOSTICS
+    if (!g_gameDrivenFrameReported)
+    {
+        std::uint32_t linkedDObjs = 0u, admittedDObjs = 0u;
+        std::uint32_t linkedBrushes = 0u, admittedBrushes = 0u;
+        for (std::uint32_t i = 0; i < g_dobjSubmissionCount; ++i)
+        {
+            const auto entity = g_dobjSubmissions[i].entityNumber;
+            linkedDObjs += entity < g_dobjCellLinkValid.size() &&
+                g_dobjCellLinkValid[entity];
+            admittedDObjs += portalAdmission.dobjVisible[i] != 0u;
+        }
+        for (std::uint32_t i = 0; i < g_brushModelSubmissionCount; ++i)
+        {
+            const auto entity = g_brushModelSubmissions[i].entityNumber;
+            linkedBrushes += entity < g_brushCellLinkValid.size() &&
+                g_brushCellLinkValid[entity];
+            admittedBrushes += portalAdmission.brushVisible[i] != 0u;
+        }
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Canonical portal scene admission: valid=%u "
+            "DObj linked=%u admitted=%u brush linked=%u admitted=%u.\n",
+            portalAdmission.valid ? 1u : 0u, linkedDObjs, admittedDObjs,
+            linkedBrushes, admittedBrushes);
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Canonical DObj post-pose admission: tested=%u "
+            "plane-rejected=%u cell-rejected=%u.\n",
+            portalAdmission.posedTests, portalAdmission.posedPlaneRejects,
+            portalAdmission.posedCellRejects);
+        unsigned admittedDynEntities[2]{};
+        for (unsigned kind = 0; kind < 2u; ++kind)
+            for (unsigned id = 0; id < s_world.dpvsDyn.dynEntClientCount[kind]; ++id)
+                admittedDynEntities[kind] += s_world.dpvsDyn.dynEntVisData[kind][0][id] != 0u;
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Canonical DynEntity portal admission: models=%u admitted=%u "
+            "brushes=%u admitted=%u.\n",
+            s_world.dpvsDyn.dynEntClientCount[0], admittedDynEntities[0],
+            s_world.dpvsDyn.dynEntClientCount[1], admittedDynEntities[1]);
+    }
+    if (sceneProfile)
+        sceneProfile->sceneCameraVisibilityMs +=
+            WebFrameProfile_Now() - cameraVisibilityStarted;
+#endif
+
+    if (!g_gameDrivenFrameReported)
+    {
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Cgame view axes: forward=(%.3f %.3f %.3f), "
+            "right=(%.3f %.3f %.3f), up=(%.3f %.3f %.3f).\n",
+            view.viewAxis[0][0], view.viewAxis[0][1], view.viewAxis[0][2],
+            view.viewAxis[1][0], view.viewAxis[1][1], view.viewAxis[1][2],
+            view.viewAxis[2][0], view.viewAxis[2][1], view.viewAxis[2][2]);
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Renderer world bounds: mins=(%.1f %.1f %.1f), "
+            "maxs=(%.1f %.1f %.1f), surfaces=%d, model surfaces=%u, sky=%d.\n",
+            s_world.mins[0], s_world.mins[1], s_world.mins[2],
+            s_world.maxs[0], s_world.maxs[1], s_world.maxs[2],
+            s_world.surfaceCount,
+            s_world.modelCount > 0 ? s_world.models[0].surfaceCount : 0u,
+            s_world.skySurfCount);
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Canonical world sun: valid=%u "
+            "fxDirection=(%.6f %.6f %.6f) sprite='%s' flare='%s'.\n",
+            s_world.sun.hasValidData ? 1u : 0u,
+            s_world.sun.sunFxPosition[0],
+            s_world.sun.sunFxPosition[1],
+            s_world.sun.sunFxPosition[2],
+            s_world.sun.spriteMaterial && s_world.sun.spriteMaterial->info.name
+                ? s_world.sun.spriteMaterial->info.name : "<none>",
+            s_world.sun.flareMaterial && s_world.sun.flareMaterial->info.name
+                ? s_world.sun.flareMaterial->info.name : "<none>");
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Canonical world draw ranges: lit=[%u,%u), "
+            "decal=[%u,%u), emissive=[%u,%u), model-no-decal=%u.\n",
+            s_world.dpvs.litSurfsBegin, s_world.dpvs.litSurfsEnd,
+            s_world.dpvs.decalSurfsBegin, s_world.dpvs.decalSurfsEnd,
+            s_world.dpvs.emissiveSurfsBegin, s_world.dpvs.emissiveSurfsEnd,
+            s_world.modelCount > 0
+                ? s_world.models[0].surfaceCountNoDecal : 0u);
+        std::uint32_t indexedLightmapSurfaces = 0u;
+        std::uint32_t litTechniqueSurfaces = 0u;
+        std::uint32_t primaryLightmapSamplerSurfaces = 0u;
+        std::uint32_t primaryLightmapAnyPassSurfaces = 0u;
+        const std::uint32_t worldSurfaceCount = s_world.modelCount > 0
+            ? std::min<std::uint32_t>(s_world.models[0].surfaceCount,
+                static_cast<std::uint32_t>(s_world.surfaceCount))
+            : 0u;
+        for (std::uint32_t index = 0u; index < worldSurfaceCount; ++index)
+        {
+            const GfxSurface &surface = s_world.dpvs.surfaces[index];
+            if (surface.lightmapIndex != 31u) ++indexedLightmapSurfaces;
+            const MaterialTechnique *lit = surface.material &&
+                surface.material->techniqueSet
+                ? surface.material->techniqueSet->techniques[7] : nullptr;
+            if (!lit) continue;
+            ++litTechniqueSurfaces;
+            if (lit->passCount > 0u &&
+                (lit->passArray[0].customSamplerFlags & 2u) != 0u)
+            {
+                ++primaryLightmapSamplerSurfaces;
+            }
+            bool anyPrimary = false;
+            for (std::uint32_t pass = 0u; pass < lit->passCount; ++pass)
+                anyPrimary = anyPrimary ||
+                    (lit->passArray[pass].customSamplerFlags & 2u) != 0u;
+            if (anyPrimary) ++primaryLightmapAnyPassSurfaces;
+        }
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Canonical world lightmap inventory: %u/%u indexed, "
+            "%u lit-technique, %u primary-first-pass, %u primary-any-pass, "
+            "%u lightmap pairs.\n",
+            indexedLightmapSurfaces, worldSurfaceCount, litTechniqueSurfaces,
+            primaryLightmapSamplerSurfaces,
+            primaryLightmapAnyPassSurfaces, s_world.lightmapCount);
+    }
+
+    PrepareWorldResources(framePrimaryLights, sunPrimaryLightIndex,
+        view.sunShadowEnabled);
 
     // Native scene-entity DPVS rejects the linked sphere against the camera
     // planes before updating bounds and skinning. Preserve malformed records
@@ -3940,7 +4054,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     try
     {
         const std::uint16_t dynamicModelCount =
-            DynEnt_GetEntityCount(DYNENT_COLL_CLIENT_MODEL);
+            r_drawXModels->current.enabled ? DynEnt_GetEntityCount(DYNENT_COLL_CLIENT_MODEL) : 0;
         dynamicEntityModels.reserve(dynamicModelCount);
         dynamicEntityModelIds.reserve(dynamicModelCount);
         for (std::uint32_t dynEntId = 0u;
@@ -4447,8 +4561,10 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     if (droppedParticleClouds != 0u)
         R_WarnOncePerFrame(R_WARN_MAX_CLOUDS);
 
-    const bool hasSunSprite = AppendSunSprite(dynamicCommand, view, brushVertexCount, brushIndexCount);
-    const bool hasSunFlare = AppendSunFlare(dynamicCommand, view, brushVertexCount, brushIndexCount);
+    const bool hasSunSprite = r_drawSun->current.enabled &&
+        AppendSunSprite(dynamicCommand, view, brushVertexCount, brushIndexCount);
+    const bool hasSunFlare = r_drawSun->current.enabled &&
+        AppendSunFlare(dynamicCommand, view, brushVertexCount, brushIndexCount);
 
 #if KISAK_WEB_DIAGNOSTICS
     const double imageResolveStarted = sceneProfile ? WebFrameProfile_Now() : 0.0;
@@ -4689,6 +4805,8 @@ void __cdecl R_AddBrushModelToSceneFromAngles(
     const GfxBrushModel *model, const float *origin, const float *angles,
     std::uint16_t entityNumber)
 {
+    if (!r_drawEntities->current.enabled || !r_drawBModels->current.enabled)
+        return;
     if (!model || !origin || !angles || model->surfaceCount == 0u ||
         g_brushModelSubmissionCount >= g_brushModelSubmissions.size())
     {
@@ -4711,6 +4829,13 @@ void __cdecl R_AddDObjToScene(const DObj_s *obj, const cpose_t *pose,
     std::uint32_t entityNumber, std::uint32_t renderFlags,
     float *lightingOrigin, float)
 {
+    if (!r_drawEntities->current.enabled)
+        return;
+    // Native sends a single rigid model through sceneModel/XModel culling;
+    // animated, composite and depth-hacked DObjs stay in sceneDObj.
+    if (obj && !r_drawXModels->current.enabled && !(renderFlags & 4u) &&
+        !DObjGetTree(obj) && DObjGetNumModels(obj) == 1)
+        return;
     // Keep the callback identity and pose intact until R_RenderScene consumes
     // it synchronously. Native GfxScene admits ordinary and first-person
     // DObjs through the same fixed 512-entry sceneDObj array.
@@ -5016,8 +5141,6 @@ std::uint32_t R_GetDebugReflectionProbeLocs(
 }
 
 void __cdecl R_CalcCubeMapViewValues(refdef_s *, CubemapShot, int) {}
-int __cdecl R_PickMaterial(int, const float *, const float *, char *, char *,
-    char *, std::uint32_t) { return 0; }
 
 void __cdecl Material_DirtyTechniqueSetOverrides()
 {

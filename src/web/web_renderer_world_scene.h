@@ -99,6 +99,13 @@ WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
     WebRendererWorldSceneCommand &destination,
     const WebRendererWorldLightTechniqueContext *lightContext = nullptr);
 
+// Registration overload: immutable world resources do not depend on a camera.
+WebRendererWorldSceneResult WebRenderer_BuildWorldSceneCommand(
+    const GfxWorld &world,
+    bool sunShadowEnabled,
+    WebRendererWorldSceneCommand &destination,
+    const WebRendererWorldLightTechniqueContext *lightContext = nullptr);
+
 struct WebRendererWorldCameraRange
 {
     std::uint32_t batchIndex;

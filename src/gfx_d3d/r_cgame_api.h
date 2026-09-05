@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <gfx_d3d/gfx_placement_types.h>
+#include <gfx_d3d/r_scene_api.h>
 
 struct DObj_s;
 struct FxCmd;

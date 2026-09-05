@@ -154,6 +154,7 @@ set(KISAK_WEB_CANONICAL_RUNTIME_SOURCES
     "${SRC_DIR}/qcommon/cm_memory.cpp"
     "${SRC_DIR}/qcommon/com_world_runtime.cpp"
     "${SRC_DIR}/gfx_d3d/r_text.cpp"
+    "${SRC_DIR}/gfx_d3d/r_material_pick.cpp"
     "${SRC_DIR}/gfx_d3d/r_light_attachment.cpp"
     "${SRC_DIR}/gfx_d3d/r_image_resample.cpp"
     "${SRC_DIR}/gfx_d3d/r_gamma.cpp"

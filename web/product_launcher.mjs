@@ -139,13 +139,18 @@ closeInstallButton.addEventListener("click", () => {
     gameTextInput.focus({ preventScroll: true });
 });
 
+let logFrame = 0;
 function appendLog(message, level = "info")
 {
     logs.push({ level, message: String(message) });
     if (logs.length > 160) logs.splice(0, logs.length - 160);
-    bootLog.textContent = logs.map(({ level: entryLevel, message: text }) =>
-        `${entryLevel === "error" ? "!" : ">"} ${text}`).join("\n");
-    bootLog.scrollTop = bootLog.scrollHeight;
+    // Loading emits many lines; one layout per line starves movie/audio delivery.
+    if (!logFrame) logFrame = requestAnimationFrame(() => {
+        logFrame = 0;
+        bootLog.textContent = logs.map(({ level: entryLevel, message: text }) =>
+            `${entryLevel === "error" ? "!" : ">"} ${text}`).join("\n");
+        bootLog.scrollTop = bootLog.scrollHeight;
+    });
 }
 
 function renderCheckpointStatus(detail)

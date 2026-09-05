@@ -79,7 +79,7 @@ test("canonical FS_InitFilesystem owns Worker search paths and IWD precedence", 
         structuredClone(globalThis.__canonicalFsEvents.at(-1)));
     expect(evidence).toMatchObject({
         canonical: true,
-        asyncify: false,
+        asyncify: true,
         browserOwnedSearchPaths: false,
         archiveCount: 21,
     });

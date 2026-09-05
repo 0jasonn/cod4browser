@@ -5,6 +5,7 @@
 #include <cgame/cg_pose.h>
 #include <cgame/cg_local.h>
 #include <gfx_d3d/gfx_world_types.h>
+#include <gfx_d3d/r_cgame_api.h>
 #include <gfx_d3d/r_dpvs_core.h>
 #include <gfx_d3d/r_light.h>
 #include <gfx_d3d/r_model_pose_bounds.h>
@@ -1010,6 +1011,8 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                         materialResolver));
                     replacement.batches.back().dynamicLightSurfType =
                         surface.deformed ? 9u : 7u;
+                    replacement.batches.back().pickupSheen =
+                        (submission.renderFlags & GFX_RENDERFX_PICKUP) != 0u;
                     if (!sceneEntity)
                     {
                         auto &draw = replacement.batches.back();

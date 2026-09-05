@@ -12,6 +12,7 @@
 #include <qcommon/engine_lifecycle_trace.h>
 #include <qcommon/qcommon.h>
 #include <qcommon/system.h>
+#include <qcommon/loading_keepalive.h>
 #include <qcommon/threads.h>
 #include <universal/physicalmemory.h>
 #include <universal/q_shared.h>
@@ -206,9 +207,10 @@ std::int32_t DB_TryLoadXFileInternal(char *zoneName, std::int32_t zoneFlags)
     iassert(!(g_zoneAllocType == 1 && g_initializing));
     PMem_BeginAlloc(zone->name, g_zoneAllocType);
     zone->allocType = static_cast<std::int32_t>(g_zoneAllocType);
+    DB_ResetZoneSize((zoneFlags & 8) != 0);
     DB_SetLoadingZoneIndex(g_zoneIndex);
     DB_LoadXFile(filename, DB_PlatformFileToOpaque(zoneFile), zone->name,
-        &zone->mem, nullptr, g_fileBuf.data(), zone->allocType);
+        &zone->mem, Sys_LoadingKeepAlive, g_fileBuf.data(), zone->allocType);
     DB_LoadXFileInternal();
     PMem_EndAlloc(zone->name, g_zoneAllocType);
     iassert(g_loadingZone);

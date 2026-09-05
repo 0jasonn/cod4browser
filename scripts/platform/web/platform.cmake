@@ -48,6 +48,10 @@ function(kisak_configure_web_target TARGET_NAME)
         "-sMIN_WEBGL_VERSION=2"
         "-sMAX_WEBGL_VERSION=2"
         "-sALLOW_MEMORY_GROWTH=1"
+        # Suspend only at the platform loading-screen yield. Canonical DB/game
+        # stacks retain their synchronous ownership while the Worker presents.
+        "-sASYNCIFY=1"
+        "-sASYNCIFY_STACK_SIZE=1048576"
         # Canonical map/save load nests substantially deeper than Emscripten's
         # 64 KiB default. Match the native Windows stack scale at the platform
         # boundary instead of rewriting shared engine call chains.
