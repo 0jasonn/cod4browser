@@ -15,7 +15,7 @@ new intermediate representation. No shader arithmetic or other state changes.
 
 ## Comparison
 
-[Numeric evidence](falloff-uniforms-12ac17e5.json) compares clean source builds
+Numeric evidence (archived in Git) compares clean source builds
 `a646c09c` and `12ac17e5`. Both used Chrome 152.0.7977.64 headless, Ryzen 7
 7800X3D, 1440 x 1000, fresh Playwright-owned persistent profiles, portable local
 installation import and `map cargoship`. Each window collected 120 completed
@@ -77,3 +77,6 @@ Next: measure repeated view/projection setup in the dynamic camera passes
 before deciding whether to move those uploads out of individual draws. Keep
 sun-query/sprite overrides and depth-hack ordering explicit; no global state
 cache is justified by this change.
+
+Retrieve the archived numeric record with
+`git show 3942e819802fbd8f842802ec2c11267def087c14:docs/evidence/falloff-uniforms-12ac17e5.json`.

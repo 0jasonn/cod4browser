@@ -53,4 +53,7 @@ not claim a gameplay FPS gain.
   control.
 
 Numeric results and raw hashes are in
-[the companion record](dobj-lighting-cache-a16fb9f2.json).
+the companion record (archived in Git).
+
+Retrieve the archived numeric record with
+`git show 3942e819802fbd8f842802ec2c11267def087c14:docs/evidence/dobj-lighting-cache-a16fb9f2.json`.

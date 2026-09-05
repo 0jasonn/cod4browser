@@ -70,4 +70,7 @@ animation/model boundary instead of adding WebGL buffer machinery.
   logs remain outside version control.
 
 Numeric results and raw hashes are in
-[the companion record](dynamic-geometry-ownership-af601efe.json).
+the companion record (archived in Git).
+
+Retrieve the archived numeric record with
+`git show 3942e819802fbd8f842802ec2c11267def087c14:docs/evidence/dynamic-geometry-ownership-af601efe.json`.

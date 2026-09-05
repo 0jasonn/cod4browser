@@ -54,11 +54,7 @@ descriptive only; no performance improvement is claimed.
   version control.
 
 Numeric results and raw hashes are in
-[the companion record](dynamic-primary-light-linkage-4ed38a84.json).
+the companion record (archived in Git).
 
-## Recommended next task
-
-Qualify an active-gameplay renderer window and use its attributed profile to
-choose the next bottleneck. The paused renderer audit is complete; further
-optimization should be driven by gameplay measurements rather than another
-speculative port of native D3D machinery.
+Retrieve the archived numeric record with
+`git show 3942e819802fbd8f842802ec2c11267def087c14:docs/evidence/dynamic-primary-light-linkage-4ed38a84.json`.

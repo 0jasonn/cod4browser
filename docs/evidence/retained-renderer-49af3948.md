@@ -95,7 +95,7 @@ telemetry below 16 ms. The corrected checkpoint method measures fast frames
 without changing the engine. The old control is excluded from the paired result
 because its timing method differs, not because of its value. Mixed methods,
 changed cap settings and changed submitted geometry are explicitly rejected.
-All final windows and hashes are in [the numeric record](retained-renderer-49af3948.json).
+All final windows and hashes are in the numeric record (archived in Git).
 
 ## Checks and delivery
 
@@ -118,3 +118,6 @@ Production Wasm SHA-256:
 
 Next: reduce DObj skinning and vertex-assembly cost using canonical pose data and
 this same workload qualification. Avoid caching paused gameplay/pose results.
+
+Retrieve the archived numeric record with
+`git show 3942e819802fbd8f842802ec2c11267def087c14:docs/evidence/retained-renderer-49af3948.json`.

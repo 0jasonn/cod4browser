@@ -31,7 +31,7 @@ intervals followed by 120 profiled CargoShip frames. Both ran in headless Chrome
 152.0.7977.64 on a Ryzen 7 7800X3D, at 1440 x 1000, using fresh browser profiles,
 the same owned local installation, 30 warmup world frames and no gameplay input.
 All sample-count, foreground and nested-interval checks passed, with no page
-errors. The numeric record is [here](dobj-emission-fb596702.json).
+errors. The numeric record is here (archived in Git).
 
 | CPU interval | Before mean, ms | After mean, ms |
 | --- | ---: | ---: |
@@ -117,12 +117,5 @@ site on port 8051. Diagnostic invocations use a run label. Production invocation
 also take `production BUILT_COMMIT`. Local logs and numeric originals remain
 under ignored `build/`; no retail assets, paths or logs enter this evidence.
 
-## Next task
-
-Brush construction plus append is now isolated at 3.436 ms, about 81% of the
-4.221 ms model-assembly interval. Split its geometry conversion, shader/material
-metadata and append costs before changing it. Current brush batches use shader
-hashes in their merge equality, so the earlier DObj hash deletion cannot simply
-be copied here. World-sized vertex remapping and rebuilt geometry are possible
-costs, not proven reasons for a persistent cache. Keep canonical placement,
-material identity, batch order and independent shadows intact.
+Retrieve the archived numeric record with
+`git show 3942e819802fbd8f842802ec2c11267def087c14:docs/evidence/dobj-emission-fb596702.json`.

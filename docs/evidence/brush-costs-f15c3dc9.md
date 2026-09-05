@@ -31,7 +31,7 @@ with a fresh browser profile and the same owned local installation. CargoShip
 warmed for 30 world frames, then supplied 300 profiler-inactive intervals and
 120 profiled frames without gameplay input. All population, foreground,
 callback-continuity and nested-timer checks passed; no page errors occurred.
-The [numeric record](brush-costs-f15c3dc9.json) retains all nine windows.
+The numeric record (archived in Git) retains all nine windows.
 
 | Profiled CPU mean, ms | Baseline | Technique/vertex candidate | Hash-only candidate |
 | --- | ---: | ---: | ---: |
@@ -119,10 +119,5 @@ Set `KISAK_COD4_RETAIL_ROOT` locally. Control and candidate snapshots remain in
 ignored `build/brush-control-f15c3dc9` and `build/brush-candidate-2b86c7c7`.
 Evidence contains no installation paths, assets or retail logs.
 
-## Next task
-
-Make the CargoShip timing workload repeatable before further CPU changes:
-retain both artifacts, control scene position/time and use repeated interleaved
-windows. Remapping and append are small; no new allocation policy is justified.
-Dynamic command batch copying remains a possible later target, but additional
-micro-optimizations should not proceed from a local timer alone.
+Retrieve the archived numeric record with
+`git show 3942e819802fbd8f842802ec2c11267def087c14:docs/evidence/brush-costs-f15c3dc9.json`.

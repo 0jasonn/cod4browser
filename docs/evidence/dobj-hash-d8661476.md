@@ -12,7 +12,7 @@ No cache, new abstraction, dependency or diagnostic interface was added.
 ## Observed comparison
 
 The [baseline](dobj-stages-946dc918.md) and
-[new sanitized aggregates](dobj-hash-d8661476.json) use clean source commits,
+new sanitized aggregates (archived in Git) use clean source commits,
 Chrome 152.0.7977.64 headless, 1440 x 1000, the same Ryzen 7 7800X3D host,
 fresh persistent browser profiles, `map cargoship`, 30 warm-up world frames,
 no gameplay input, and 120 completed gameplay-frame samples. The new capture
@@ -70,3 +70,6 @@ Next task: measure the roughly 20.451 ms of scene construction outside DObj
 building, separating command assembly, resource resolution and submission work
 before selecting another optimization. Do not infer its owner from subtraction
 alone or add pose/geometry caches without evidence.
+
+Retrieve the archived numeric record with
+`git show 3942e819802fbd8f842802ec2c11267def087c14:docs/evidence/dobj-hash-d8661476.json`.

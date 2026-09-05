@@ -2,7 +2,7 @@
 // This class owns only Web Audio resources. Canonical SND channel/alias state
 // remain in the Kisak Worker; device position comes from AudioContext time.
 
-export const WEB_AUDIO_PROTOCOL_VERSION = 1;
+const WEB_AUDIO_PROTOCOL_VERSION = 1;
 const MAX_SOURCES = 54; // 53 canonical SND channels plus one cinematic track.
 const MAX_BUFFERS = 512;
 const MAX_PCM_BYTES = 16 * 1024 * 1024;

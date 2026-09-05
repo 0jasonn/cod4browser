@@ -27,7 +27,7 @@ capacity may change, as it could with the old reserve sequence.
 
 ## Matched short profiles
 
-[Sanitized before/after aggregates](cloud-append-ae37e80c.json) use Chrome
+Sanitized before/after aggregates (archived in Git) use Chrome
 152.0.7977.64 headless on the same Ryzen 7 7800X3D host, 1440 x 1000, a fresh
 Playwright-owned persistent profile per run, and the existing portable import
 of the user-owned installation. Each run issued `map cargoship`, waited for
@@ -117,3 +117,6 @@ separating retained-command validation/copy/allocation from GPU resource
 creation and upload. Check the capacity/memory tradeoff as part of that work
 before choosing another optimization; do not assume the entire increase is
 caused by this change or add a cache based on the total alone.
+
+Retrieve the archived numeric record with
+`git show 3942e819802fbd8f842802ec2c11267def087c14:docs/evidence/cloud-append-ae37e80c.json`.

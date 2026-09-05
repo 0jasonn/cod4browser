@@ -58,7 +58,6 @@ export function getRequiredAssets(language = "english")
 
 // Retain the existing English fixture/profile exports and stored profile IDs.
 export const M12_INSTALL_PROFILE = getInstallProfile();
-export const MAP_ZONE = M12_INSTALL_PROFILE.mapZone;
 export const REQUIRED_ASSETS = getRequiredAssets();
 
 /** @param {string} path */

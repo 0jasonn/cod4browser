@@ -74,11 +74,8 @@ The final production Wasm SHA-256 is
 The final diagnostic Wasm SHA-256 is
 `ab68f36eb1f67f09d989f8279ae84ef4a130c5d9032446cdb23e1c0018fcf137`.
 Numeric results and raw-record hashes are in
-[the companion record](static-sun-partitions-cc4af645.json). Retail data,
+the companion record (archived in Git). Retail data,
 installation paths, and runtime logs remain outside version control.
 
-## Recommended next task
-
-Separate CPU-only shadow bounds from the GPU instance payload and measure the
-moving-camera static upload path. Retain the same canonical bounds, independent
-sun partitions, authored spot membership, and camera DPVS packing.
+Retrieve the archived numeric record with
+`git show 3942e819802fbd8f842802ec2c11267def087c14:docs/evidence/static-sun-partitions-cc4af645.json`.

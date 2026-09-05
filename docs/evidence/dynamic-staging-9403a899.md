@@ -4,7 +4,7 @@ Continuation from `9b36d305`, recorded 2026-08-31. `bbd6edf0` separates dynamic
 copy, geometry upload, texture upload and publication. `a542549f` isolates
 geometry checks, geometry allocation/copy and batch processing inside command
 copy. `9403a899` reuses dynamic vertex/index staging storage. All three profile
-source trees were clean; [numeric evidence](dynamic-staging-9403a899.json)
+source trees were clean; numeric evidence (archived in Git)
 includes the exploratory run as well as the matched comparison.
 
 ## Finding and implementation
@@ -115,3 +115,6 @@ pass, which averaged 6.116 ms in this profile. Preserve draw order, culling and
 independent shadow passes, and use a focused comparison before claiming gains.
 Avoid adding more staging storage or changing GPU allocation policy based on
 the submission total alone.
+
+Retrieve the archived numeric record with
+`git show 3942e819802fbd8f842802ec2c11267def087c14:docs/evidence/dynamic-staging-9403a899.json`.

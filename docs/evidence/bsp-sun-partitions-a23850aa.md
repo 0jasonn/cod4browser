@@ -74,11 +74,7 @@ Final production Wasm SHA-256:
 Final diagnostic Wasm SHA-256:
 `d365cbd008f7dba2213de196e8dd86b5924b89dfc5e9045ace339d86c2d19ff6`.
 Numeric results and raw hashes are in
-[the companion record](bsp-sun-partitions-a23850aa.json).
+the companion record (archived in Git).
 
-## Recommended next task
-
-Bring over dynamic scene-entity sun-partition visibility. Trace Kisak's
-per-partition DObj, model, and brush visibility producers into the existing
-canonical dynamic draw records, keeping camera DPVS and both sun cascades
-independent.
+Retrieve the archived numeric record with
+`git show 3942e819802fbd8f842802ec2c11267def087c14:docs/evidence/bsp-sun-partitions-a23850aa.json`.

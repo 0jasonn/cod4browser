@@ -8,7 +8,7 @@ captures make no timing calls. No cache or new profiling framework was added.
 
 ## Observed CPU intervals
 
-[Sanitized aggregates](scene-stages-2ce03241.json) contain 120 completed
+Sanitized aggregates (archived in Git) contain 120 completed
 gameplay-frame samples after 30 drawn CargoShip world frames. The run used
 Chrome 152.0.7977.64 headless, a fresh Playwright-owned persistent profile,
 1440 x 1000, and the same Ryzen 7 7800X3D host as the prior DObj profiles.
@@ -93,3 +93,6 @@ work, brush/model construction and command appends, then optimize the dominant
 operation with a focused before/after check. Preserve validation, canonical
 ownership, camera culling and independent shadows; do not add pose/geometry
 caches or change DPVS based on this profile.
+
+Retrieve the archived numeric record with
+`git show 3942e819802fbd8f842802ec2c11267def087c14:docs/evidence/scene-stages-2ce03241.json`.

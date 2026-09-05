@@ -80,7 +80,7 @@ improved across the run order and the closest gap was only 0.140 ms. This is
 limited evidence from one host and paused scene, not a statistically established
 general FPS gain. The measured local saving and these production windows support
 retaining the small, allocation-free optimization. All runs and uncertainty are
-preserved in [the numeric record](seeded-brush-hashes-06ad8004.json).
+preserved in the numeric record (archived in Git).
 
 The runner now reuses one command string for execution and metadata. A1
 executed the seed prefix before this metadata correction; its original
@@ -114,3 +114,6 @@ retained candidate, not the earlier rejected name-copy experiment.
 
 Next: inspect DObj lighting setup under this same seeded workload, keeping
 canonical lighting/pose ownership and avoiding a pause-specific result cache.
+
+Retrieve the archived numeric record with
+`git show 3942e819802fbd8f842802ec2c11267def087c14:docs/evidence/seeded-brush-hashes-06ad8004.json`.

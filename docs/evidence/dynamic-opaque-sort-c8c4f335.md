@@ -66,11 +66,7 @@ Final production Wasm SHA-256:
 Final diagnostic Wasm SHA-256:
 `3a1c214e11f7ded2d9ef83fb53f51204584dc73d1b91a730b4897a5945391c4d`.
 Numeric results and raw hashes are in
-[the companion record](dynamic-opaque-sort-c8c4f335.json).
+the companion record (archived in Git).
 
-## Recommended next task
-
-Restore canonical primary-light entity and DynEnt linkage so dynamic spot
-casters consume authored light-region membership before the already-independent
-spot-matrix test. That is the last applicable Partial row in the optimization
-audit.
+Retrieve the archived numeric record with
+`git show 3942e819802fbd8f842802ec2c11267def087c14:docs/evidence/dynamic-opaque-sort-c8c4f335.json`.

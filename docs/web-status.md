@@ -767,7 +767,7 @@ do not establish current campaign performance or new compatibility claims.
 | Historical automated evidence | [the comparison](evidence/retail-profile-93451ec5.md), [the regression record](evidence/retail-six-map-regression-39de3d6d.json) |
 
 The [campaign matrix](campaign-compatibility.md) owns map classifications and
-save/load claim scope. Earlier milestone narratives are in [Git history](history/README.md).
+save/load claim scope. Earlier milestone narratives are in [Git history](../README.md#historical-records).
 
 ## Product boundaries
 

@@ -50,7 +50,7 @@ const PROBE_ERRORS = new Map([
     [43, "A required fastfile does not begin with a supported zlib stream."],
 ]);
 
-export class AssetImportError extends Error
+class AssetImportError extends Error
 {
     constructor(code, message, options = {})
     {
@@ -103,7 +103,7 @@ function retainSupportedEntries(entries, language)
     return supported;
 }
 
-export async function entriesFromFileList(fileList, module)
+async function entriesFromFileList(fileList, module)
 {
     const files = Array.from(fileList ?? []);
     if (files.length === 0) {
@@ -208,7 +208,7 @@ async function getRequiredFileFromDirectory(directory, relativePath, directoryCa
     );
 }
 
-export async function entriesFromDirectoryHandle(directory, module)
+async function entriesFromDirectoryHandle(directory, module)
 {
     if (!directory || typeof directory.getFileHandle !== "function" ||
         typeof directory.getDirectoryHandle !== "function") {

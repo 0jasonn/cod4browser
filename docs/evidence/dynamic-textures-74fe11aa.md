@@ -3,7 +3,7 @@
 Continuation from `eb5f7839`, recorded 2026-08-31. `5cb7ee48` adds three nested
 dynamic-model draw intervals; `74fe11aa` skips consecutive identical texture
 binding sets. Both profile source trees were clean. See the
-[numeric comparison](dynamic-textures-74fe11aa.json).
+numeric comparison (archived in Git).
 
 ## Implementation and boundary
 
@@ -100,3 +100,6 @@ draw loop. Material state alone still averages 1.133 ms. Measure reuse before
 adding another tracker, and retain draw order, canonical culling and independent
 shadows. A global GL-state cache or sampler-object conversion is not required
 by this result.
+
+Retrieve the archived numeric record with
+`git show 3942e819802fbd8f842802ec2c11267def087c14:docs/evidence/dynamic-textures-74fe11aa.json`.

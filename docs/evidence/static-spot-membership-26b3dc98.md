@@ -69,11 +69,7 @@ Final production Wasm SHA-256:
 Final diagnostic Wasm SHA-256:
 `f8ac483291f36a594ebedd9f41c7ca2fc379c4aa1b14446a3606214b0b102030`.
 Numeric results and raw hashes are in
-[the companion record](static-spot-membership-26b3dc98.json).
+the companion record (archived in Git).
 
-## Recommended next task
-
-Bring over native BSP sun-partition visibility. The web backend currently draws
-all retained sun-casting world ranges into both cascades, while Kisak selects
-`surfaceVisData[partition + 1]` before material batching. Preserve world camera
-DPVS, static masks, and dynamic/UI work independently.
+Retrieve the archived numeric record with
+`git show 3942e819802fbd8f842802ec2c11267def087c14:docs/evidence/static-spot-membership-26b3dc98.json`.

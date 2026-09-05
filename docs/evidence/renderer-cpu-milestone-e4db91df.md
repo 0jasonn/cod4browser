@@ -1,7 +1,7 @@
 # Renderer CPU-efficiency milestone
 
 Completed 2026-08-31, from `53804772`. Runtime implementation: `e4db91df`.
-The [numeric record](renderer-cpu-milestone-e4db91df.json) retains every successful
+The numeric record (archived in Git) retains every successful
 window, including intermediate results and separate production measurements.
 
 ## Delivered changes and invariants
@@ -164,3 +164,6 @@ No mission check, broad suite, screenshot, save/death/restart check or retail
 compatibility promotion was performed. Committed evidence contains no retail
 assets, installation paths or asset logs. The renderer-efficiency milestone is
 complete; general offline playability remains a separate objective.
+
+Retrieve the archived numeric record with
+`git show 3942e819802fbd8f842802ec2c11267def087c14:docs/evidence/renderer-cpu-milestone-e4db91df.json`.

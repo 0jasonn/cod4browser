@@ -2,7 +2,7 @@
 
 Recorded 2026-08-31. Runtime `552a468d`; runner `578e2194`. This qualifies a
 **paused renderer benchmark**, not active gameplay performance or display FPS.
-The [numeric record](controlled-renderer-552a468d.json) includes all setup
+The numeric record (archived in Git) includes all setup
 trials, rejected windows, artifact hashes and the two qualified runs.
 
 Follow-up: [diagnostic geometry checks](paused-copy-qualification-cd85e18e.md)
@@ -126,3 +126,6 @@ Next: align diagnostic profiling with this paused window, inspect actual
 dynamic work counts, and only then evaluate a focused command-copy optimization
 using qualified interleaved production runs. Active-gameplay timing still needs
 its own deterministic state/replay solution; this tool does not claim one.
+
+Retrieve the archived numeric record with
+`git show 3942e819802fbd8f842802ec2c11267def087c14:docs/evidence/controlled-renderer-552a468d.json`.

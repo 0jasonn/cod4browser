@@ -19,7 +19,7 @@ const KEY_CODES = /** @type {Readonly<Record<string, number>>} */ (Object.freeze
 }));
 
 /** @param {KeyboardEvent} event */
-export function browserKeyToEngineKey(event)
+function browserKeyToEngineKey(event)
 {
     if (/^Key[A-Z]$/.test(event.code)) return event.code.charCodeAt(3) + 32;
     if (/^Digit[0-9]$/.test(event.code)) return event.code.charCodeAt(5);

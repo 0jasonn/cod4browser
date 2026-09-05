@@ -54,11 +54,7 @@ The final production Wasm SHA-256 is
 The final diagnostic Wasm SHA-256 is
 `03bdfb044d513f5cef76f7447871d357e06be2d507b0d603c21d11836a78898a`.
 Numeric results and raw-record hashes are in
-[the companion record](static-instance-uploads-ac8b00ca.json).
+the companion record (archived in Git).
 
-## Recommended next task
-
-Attribute spot-shadow draw cost to world, static, and dynamic caster families in
-the same controlled workload. Optimize only the dominant family while retaining
-canonical light membership, static camera-culling independence, and current
-recovery behavior.
+Retrieve the archived numeric record with
+`git show 3942e819802fbd8f842802ec2c11267def087c14:docs/evidence/static-instance-uploads-ac8b00ca.json`.

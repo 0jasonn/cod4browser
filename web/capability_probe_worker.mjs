@@ -97,7 +97,7 @@ export async function probeOpfsSyncAccess({
     return failure ?? supported("opfsSyncAccessHandle");
 }
 
-export function probeTransferredCanvas(canvas)
+function probeTransferredCanvas(canvas)
 {
     if (typeof OffscreenCanvas !== "function" || !(canvas instanceof OffscreenCanvas)) {
         return unsupported("offscreenCanvas", "OFFSCREEN_CANVAS_TRANSFER_FAILED",

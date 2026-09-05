@@ -3,7 +3,7 @@
 Recorded 2026-08-31 from clean `946dc91815b7158cd8c9ab67218217cef9b8ddf1`.
 The user requested the next profiling task after world-camera filtering.
 This is measurement and a next-step recommendation, not an optimization.
-[Sanitized numeric evidence](dobj-stages-946dc918.json) contains no installation
+Sanitized numeric evidence (archived in Git) contains no installation
 path, retail file contents, asset names or source data.
 
 ## Result
@@ -72,18 +72,5 @@ retail visuals, playability, compatibility classification or a measured speedup.
 Headless mode, the short opening-scene window and active profiling limit
 comparisons with historical headed 300-frame/60-second captures.
 
-## Recommended next task
-
-First try removing the unused per-surface pixel-shader bytecode hash computation
-from the DObj path. Source inspection shows `MakeDraw` calls `SelectTechnique`,
-which calls `HashPixelShaderProgram` for each surface every frame. The dynamic
-backend copies that hash but does not consume it for drawing, validation or
-batch merging. Keep the separate world/static-model hash behavior: world
-batch matching and static-model tests do consume that identity.
-
-This is a small deletion inside the measured geometry interval, with no pose,
-lighting, geometry or material cache. Its individual cost is **not** established
-by this capture. Preserve material/shader selection, canonical identities,
-vertices/indices, static-model culling and shadow behavior; use one focused
-semantic check and repeat this same short profile to assess the result before
-considering output-buffer reuse or broader changes. No savings are promised.
+Retrieve the archived numeric record with
+`git show 3942e819802fbd8f842802ec2c11267def087c14:docs/evidence/dobj-stages-946dc918.json`.

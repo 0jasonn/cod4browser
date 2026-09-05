@@ -51,4 +51,7 @@ behavior convergence, not a general gameplay FPS improvement.
   control.
 
 Numeric results and raw hashes are in
-[the companion record](dobj-primary-basis-82b4de10.json).
+the companion record (archived in Git).
+
+Retrieve the archived numeric record with
+`git show 3942e819802fbd8f842802ec2c11267def087c14:docs/evidence/dobj-primary-basis-82b4de10.json`.

@@ -52,11 +52,7 @@ Final production Wasm SHA-256:
 Final diagnostic Wasm SHA-256:
 `ded793d8676f8432b6c41409ea34caffaaed46196b87d8999e9a90c5841404bd`.
 Numeric results and raw hashes are in
-[the companion record](dynamic-spot-shadows-9a253c6a.json).
+the companion record (archived in Git).
 
-## Recommended next task
-
-Measure the remaining dynamic opaque sorting opportunity. Reorder only a
-proven-safe subset, or close it with evidence if canonical append/depth-hack
-constraints leave no material gain. Then restore canonical primary-light
-linkage to narrow dynamic spot membership before the matrix test.
+Retrieve the archived numeric record with
+`git show 3942e819802fbd8f842802ec2c11267def087c14:docs/evidence/dynamic-spot-shadows-9a253c6a.json`.

@@ -65,11 +65,10 @@ adapters, input/audio hosts, and the WebGL2 backend. Canonical Kisak code owns
 the engine, assets, game state, filesystem semantics, and renderer frontend.
 
 The authoritative component classification and current blockers are in
-[docs/web-port-convergence.md](docs/web-port-convergence.md). Concise build and
-validation instructions are in [docs/web-port.md](docs/web-port.md). See the
+[docs/web-port-convergence.md](docs/web-port-convergence.md). See the
 [current status](docs/web-status.md), [ordered roadmap](docs/web-roadmap.md),
 [campaign matrix](docs/campaign-compatibility.md) for claim scope and exact
-evidence. [Historical records](docs/history/README.md) are available in Git.
+evidence. Superseded records remain in [Git history](#historical-records).
 
 ## Build
 
@@ -112,35 +111,18 @@ Routine CI runs smoke and remainder once each against the exact diagnostic
 Release artifact. Parser/database semantics stay in the direct native and Wasm
 suites instead of being repeated in a browser.
 
-## Project status
+## Historical records
 
-Demonstrated:
+Current ownership, priorities and compatibility evidence live in the guides
+linked above. Superseded milestones and numeric benchmark dumps remain in Git;
+retained evidence reports include exact retrieval commands. To inspect earlier
+documents without changing the working tree:
 
-- a served Release Wasm site and non-blocking browser frame pump;
-- legal local import, validation, persistence, restore, and Worker-mounted
-  synchronous filesystem access;
-- canonical command/dvar behavior, 128 MiB PMem, DB pools, XFile streaming,
-  completion of all 8,176 ordered assets in the three engine-requested startup
-  prerequisite zones, and normalized native/Wasm traces;
-- a separate opt-in diagnostic artifact for browser-only context, audio,
-  filesystem, input, storage, and failure controls; and
-- synthetic Linux, MSVC x86, Wasm, browser, sanitizer, and fuzz validation.
-
-The real `CM_LoadMap`, script/XAnim/DObj initialization, local-server command
-path, `CL_Init`, `CG_Init`, and normalized x86/Wasm contracts are compiled and
-tested. The Worker mount backs canonical `FS_InitFilesystem`, directory
-enumeration, and Kisak minizip access without duplicating search paths or pack
-state in JavaScript. Browser input and bounded Web Audio are demonstrated.
-Native Bink playback is intentionally omitted with a visible structured skip;
-gamepad support, full cinematics, advanced audio parity, broader campaign
-validation, and remaining material families are outstanding.
-
-Encoded-source recovery is active. At the comparable Killhouse measurement it
-reduced aggregate CPU recovery storage by 64.27% and Wasm capacity by 45.28%,
-with longer but successful context re-decode. Bounded six-map frame profiling,
-one measured shadow optimization, and one canonical Airplane mission
-checkpoint/death/restart/save-reload loop are complete; the next runtime work
-must follow the remaining measured renderer bottleneck.
+```powershell
+git log --all -- docs
+git ls-tree -r --name-only 49d6168cab15181f03744cf07f10b288b673bc0c docs/history
+git show 49d6168cab15181f03744cf07f10b288b673bc0c:docs/history/web-port-milestones.md
+```
 
 ## License
 

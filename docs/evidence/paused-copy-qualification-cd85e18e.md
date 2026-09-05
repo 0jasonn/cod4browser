@@ -3,7 +3,7 @@
 Recorded 2026-08-31. **The workload failed geometry qualification.** Diagnostic
 profiling and comparison checks are delivered; the seven-line name-copy
 optimization was reverted. No production performance improvement is claimed.
-The [numeric record](paused-copy-qualification-cd85e18e.json) retains all three
+The numeric record (archived in Git) retains all three
 runs, aggregate profiles, hashes, counters and rejected comparisons.
 
 ## What is now checked
@@ -99,3 +99,6 @@ or browser-owned game-state substitutes until index and upload workloads match.
 Follow-up: [seeded brush comparison](seeded-brush-hashes-06ad8004.md) locates
 variation in dynamic geometry, adds shared optional map-seed control, and
 matches all 120 measured workload samples before retaining brush hash reuse.
+
+Retrieve the archived numeric record with
+`git show 3942e819802fbd8f842802ec2c11267def087c14:docs/evidence/paused-copy-qualification-cd85e18e.json`.

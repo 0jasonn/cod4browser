@@ -31,7 +31,7 @@ independent sun rendering are unchanged.
 Both control runs use the saved milestone-start production artifact (runtime
 `49af3948`, unchanged by documentation/tool commits through `9c2a3a42`). Both
 candidate runs use the one final Release at `30e34cff`. Exact artifact and raw
-record hashes are in [the numeric evidence](dobj-conversion-30e34cff.json).
+record hashes are in the numeric evidence (archived in Git).
 
 Fresh headless Chrome 152.0.7977.64 profiles on the same Ryzen 7 7800X3D host use
 1440x1000 windows, seed 1, fixedtime 16, the same paused camera and six canonical
@@ -109,9 +109,5 @@ environment, and only the selected generated site served on port 8051. Use
 `tools/renderer_workload.mjs --shadow-ranges` for final diagnostic qualification.
 Retail data, installation paths and runtime logs remain outside version control.
 
-## Recommended next task
-
-Profile remaining sun-shadow static-caster submission versus GPU depth work,
-then optimize the measured cost using canonical bounds. Preserve off-camera
-casters and static-model camera culling; do not infer shadow visibility from
-camera visibility or add a pause-specific cache.
+Retrieve the archived numeric record with
+`git show 3942e819802fbd8f842802ec2c11267def087c14:docs/evidence/dobj-conversion-30e34cff.json`.

@@ -73,10 +73,7 @@ Final production Wasm SHA-256:
 Final diagnostic Wasm SHA-256:
 `21edca25af14c982400e257b79ddde2392de724333da021560099df6d3c81e40`.
 Numeric results and raw hashes are in
-[the companion record](dynamic-sun-partitions-6ece6ee9.json).
+the companion record (archived in Git).
 
-## Recommended next task
-
-Bring over dynamic scene-entity spot-shadow visibility and submission. Reuse
-the retained world-space dynamic bounds against each authored spot matrix, keep
-per-light selection independent, and do not substitute sun or camera bytes.
+Retrieve the archived numeric record with
+`git show 3942e819802fbd8f842802ec2c11267def087c14:docs/evidence/dynamic-sun-partitions-6ece6ee9.json`.
