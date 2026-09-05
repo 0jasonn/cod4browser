@@ -39,6 +39,31 @@ replacement ClipMap and the second exhausts its `MapEnts` pool, both request
 zones retire in one reverse-order release and the pre-request singleton is
 restored. Broader request graphs and non-world device effects remain
 qualification work.
+
+The independent loader oracle now compiles the original, unchanged Win32
+`db_load.cpp` translation unit with native headers and assertions, excluding
+the adapted generated loader translation units. Its GPL synthetic fixtures
+cover Material → Image dependencies and XModel → PhysPreset, including model
+vertices, index and collision-leaf allocation blocks. The original loader,
+adapted Win32 loader and adapted Wasm loader produce the same normalized
+publication trace: every dependency's nine block offsets, active block/stack,
+pool and zone, followed by final stream positions and alias identity. CTest
+compares each with `tests/native/db_asset_oracle_expected.txt`, captured from
+the original loader. Material ends at block 4 offset 248; XModel ends at
+block 4/7/8 offsets 640/32/6. The stronger identity assertion corrected an
+existing synthetic XModel alias which targeted the XAsset type word instead
+of its header.
+
+Each asset family also exercises eight replacement-zone failures after
+publication, followed by successful retry and unload. A deliberately overlong
+trailing RawFile causes the partial-zone failure; canonical DB transactions
+restore published identities, prior geometry or Image resource handles, pools
+and PMem. Image payloads change on retry and retire on unload. This is an
+independent **loader** comparison, using the same canonical registry/PMem/DB
+scheduler and portable bounds/resource services in all three harnesses. It
+does not qualify the native D3D upload path, arbitrary malformed nested assets
+or every native exception boundary. No proprietary fixture or shader bytecode
+is included.
 DB-owned script strings retain one real `scr_stringlist` user while any zone
 or zone-0 default owns them. Releasing one of two zone owners preserves the
 interned identity; releasing the last removes it. The last loaded zone no
@@ -225,6 +250,44 @@ compatibility subset.
 The temporary inspection command is removed from source and rebuilt artifacts;
 owned shader bytes and disassembly remain private under ignored `build/`.
 
+The 2026-09-05 material milestone implements the encountered `vertcol_mul_fog`
+technique. Publication telemetry in owned Killhouse, CargoShip and AC130 found
+it on respectively 4, 11 and 6 distinct stain/decal materials (8, 30 and 6
+material/technique selections). All selected records previously used only
+`mul.hlsl`; the authored second pass is `mul_fog.hlsl`. Native bytecode inspected
+locally specifies a vertex-alpha-controlled framebuffer multiplier followed by
+an additive fog-color correction. Both passes sample the canonical `colorMap`
+at sampler 0; texture alpha is unused. The second vertex program interpolates
+fog color multiplied by `max(1 - exp(-density * (distance - start)), 0)`.
+World/view matrices and fog constants remain canonical renderer inputs.
+
+The boundary recognizes both shader pairs and all exact argument roles,
+including matrix rows, fog registers, image identity and both state entries.
+It reuses the existing uploaded image/sampler and geometry for both draws;
+there is no second material, texture allocation or shader translator. Each
+pass runs over the complete contiguous material group, following
+`R_RenderDrawSurfListMaterial` in `rb_backend.cpp`; visibility holes are
+preserved. World, static instances and moving brush submission share this
+scheduling rule. The existing state decoder applies each pass's authored
+blend, alpha-write, depth and culling state. Material caches reset after the
+second pass, including before a neighboring group. Other multipass families
+and generic texture fallbacks remain unqualified.
+
+Verification uses nine synthetic RGBA samples evaluated by D3D9 HAL with the
+encountered original vertex/pixel programs: first pass alone, half fog, disabled
+fog, fog start, zero/full vertex alpha, overlapping ranges, disabled second-pass
+RGB writes, and changed texture alpha. WebGL2 matches within one UNORM step
+before and after a real `WEBGL_lose_context` loss/restoration. Shader bytes,
+disassembly and the local native runner remain under ignored `build/`; the
+committed fixture contains only repository-authored synthetic data (GPL-3.0).
+Native and Wasm world/static boundary targets pass with assertions enabled.
+This work discovered that the world target had lost its Release assertions;
+its CMake target now explicitly undefines `NDEBUG`. The browser graphics and
+dynamic-light tier passes nine tests. A fresh diagnostic run renders all three
+owned worlds; Killhouse restores resource generation 1 to 2 while preserving
+its 8,475 surfaces and 823,464 indices. Stationary headless observations do not
+establish matched native appearance or campaign acceptance.
+
 The inspected `distortion_scale_zfeather_dtex` pass now projects the canonical
 normal/tangent basis with authored scale and vertex red/green controls; vertex
 blue tints the sampled scene and alpha controls opacity. A separate RGBA8
@@ -284,27 +347,42 @@ The native reference CI job disables runtime DLL copying and retains build
 checks without uploading the inherited `bin` directory. Local native setup
 and its dependencies remain available; it is not a source of release packages.
 
-The current size proposal is **unapproved**; `web_product_size_baseline.json`
-retains its existing budgets. Measured Release sizes at the current parity
-working tree based on `8be61213`, including canonical receiver/caster selection
-native-mount progress reporting and the shipped texture-menu apply bridge,
-are:
+The 2026-09-05 Release gate passes the existing budgets; the prior increase
+proposal is retired. At base `9612ab4c` plus this audit's fullscreen/recovery,
+size and material changes:
 
-| Artifact | Actual bytes | Existing budget | Proposed baseline + 5% |
-| --- | ---: | ---: | ---: |
-| Engine Wasm | 3,757,999 | 3,332,379 | 3,945,899 |
-| All JavaScript | 770,681 | 357,646 | 809,216 |
-| Complete site | 4,627,160 | 3,701,082 | 4,858,518 |
+| Artifact | Actual bytes | Unchanged budget |
+| --- | ---: | ---: |
+| Engine Wasm | 3,189,283 | 3,332,379 |
+| All JavaScript | 313,992 | 357,646 |
+| Complete site | 3,604,419 | 3,701,082 |
 
-This proposal retains the source-built movie decoder and OpenAL reverb.
-`reverb_dsp.mjs` alone is 385,509 B (158,019 B gzip), including its synchronous
-AudioWorklet Wasm payload; the other JavaScript totals 385,172 B. Moving those
-bytes to another extension would not resolve the whole-site failure. The
-engine Wasm is 1,500,266 B gzip, and the sum of individually gzipped site files
-is 1,775,951 B (Python stdlib gzip, level 9, zero mtime). These are packaging
-measurements, not a replacement compressed budget or a claim about server
-compression. License text remains distributed.
-The measured engine SHA-256 is
-`64e706ba671d96e6d93f35bf6760c03b4e39dd7db611c17a67d6b59d1fbe088c`.
-Any accepted revision must pin the tested commit and remeasure it; ongoing
-runtime work can change these sizes. No budget is raised automatically.
+All 24 raw exports, nine exact application exports and 22 allowed files pass.
+The engine SHA-256 is
+`8e8319bedd9b72266f13779ba09ddf45a6c4311505a060583b154382abd6565b`.
+
+The source-built FFmpeg decoder, OpenAL reverb and license texts remain shipped.
+The worklet's native logger imported C++ streams and a second formatter; the
+browser stderr adapter preserves formatted errors and reduces `reverb_dsp.mjs`
+from 385,509 to 59,211 B, retaining its embedded Wasm. The native/Wasm 130-case
+DSP comparison passes. No bytes were moved between size categories.
+
+Non-Debug web compilation and linking now use `-Oz`, retaining the established
+selective LTO and exception handling. Engine Wasm falls from 3,758,563 to
+3,186,181 B before the material expansion. Link-only `-Oz` measured 3,653,764 B; whole-program LTO instead
+increased it to 4,536,299 B and was reverted. The [current foreground production
+measurements](evidence/browser-frame-time-2026-09-02.md#current-production-measurements--2026-09-05)
+verify bounded running, game/audio clocks and recovery; CargoShip remains slow.
+They do not isolate the performance effect of `-Oz` from older workloads.
+Runtime assertions, source ownership and native engine build options are unchanged.
+
+Release builds run pinned Terser 5.39.0 over copied host modules, preserving
+module exports/property names and using no compression transforms. Emscripten's
+engine and DSP output are excluded to preserve exact export inspection. Run
+`npm.cmd ci` before building. Readable corresponding source remains in `web/`;
+the minifier is a build dependency and adds no shipped library.
+
+CI records the boundary outcome, runs independent browser checks, and requires
+the boundary to have succeeded before uploading the production site. A size
+failure still fails the overall job. This workflow change has been inspected
+locally; remote CI execution remains unverified.

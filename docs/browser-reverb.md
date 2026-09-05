@@ -22,6 +22,17 @@ a mixer/event thread, or use Wasm pthreads.
 
 ## Dependency and numeric behavior
 
+The 2026-09-05 size audit replaces OpenAL's native logging device implementation
+only in the Wasm component with `web_audio_log.cpp`. It retains formatted stderr
+errors and level filtering, while omitting unused native file streams and log
+callback registration. The existing logger linked both standard formatting and
+fmt's stream output; the worklet module drops from 385,509 to 59,211 bytes with
+the same embedded Wasm packaging. DSP sources, presets, validation, SIMD and
+memory settings remain unchanged. Native/Wasm comparison again passes all 130
+room/rate cases (40,368,640 samples), maximum absolute error
+7.264316082000732e-8 and maximum relative RMS error 0.000015560795861818597.
+This is signal/device evidence, not authored campaign audio acceptance.
+
 The isolated CMake project at `scripts/web/reverb` pins OpenAL Soft 1.25.2 to
 `b2c48f7718ef3fcf67921a8b6534c4914e328970`, the native reference's current
 dependency. Its upstream source and copyright/license notices remain intact.

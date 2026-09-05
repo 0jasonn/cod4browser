@@ -23,7 +23,7 @@ function(kisak_configure_web_compile_target TARGET_NAME)
         "-sNO_DISABLE_EXCEPTION_CATCHING"
         "$<$<CONFIG:Debug>:-O0>"
         "$<$<CONFIG:Debug>:-g3>"
-        "$<$<NOT:$<CONFIG:Debug>>:-O2>"
+        "$<$<NOT:$<CONFIG:Debug>>:-Oz>"
     )
 endfunction()
 
@@ -38,6 +38,7 @@ function(kisak_configure_web_target TARGET_NAME)
     endif()
 
     target_link_options(${TARGET_NAME} PRIVATE
+        "$<$<NOT:$<CONFIG:Debug>>:-Oz>"
         "-sUSE_ZLIB=1"
         "-sNO_DISABLE_EXCEPTION_CATCHING"
         "-sMODULARIZE=1"

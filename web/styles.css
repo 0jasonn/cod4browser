@@ -28,7 +28,8 @@ body {
     background: #0d0f0c;
 }
 
-#quit-dialog {
+#quit-dialog,
+#browser-dialog {
     width: min(520px, calc(100% - 32px));
     padding: 28px;
     border: 1px solid var(--line);
@@ -37,7 +38,8 @@ body {
     background: var(--surface);
 }
 
-#quit-dialog::backdrop {
+#quit-dialog::backdrop,
+#browser-dialog::backdrop {
     background: rgba(0, 0, 0, 0.85);
 }
 
@@ -394,6 +396,21 @@ body {
 }
 
 html[data-asset-state="checking"] .renderer-only .asset-panel,
-html[data-asset-state="ready"] .renderer-only .asset-panel {
+html[data-asset-state="ready"]:not([data-manage-install="true"]) .renderer-only .asset-panel {
     display: none;
+}
+
+#browser-controls-button {
+    position: fixed;
+    z-index: 2;
+    right: 12px;
+    bottom: 12px;
+    color: var(--ink);
+    background: var(--surface);
+}
+
+#browser-dialog,
+.renderer-only .asset-panel {
+    max-height: calc(100vh - 32px);
+    overflow: auto;
 }

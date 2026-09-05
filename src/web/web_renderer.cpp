@@ -34,6 +34,7 @@
 #if KISAK_WEB_DIAGNOSTICS
 #include <emscripten/heap.h>
 #include <malloc.h>
+#include "../../tests/native/multiply_fog_fixture.h"
 #endif
 #include <emscripten/html5.h>
 #include <webgl/webgl1_ext.h>
@@ -4097,6 +4098,17 @@ bool CreateRendererResources(bool contextRecovery = false)
         void main()
         {
             vec4 texel = sample_texture(u_texture, v_texcoord);
+            if (u_material_mode == 19 || u_material_mode == 20)
+            {
+                // mul_fog's vertex COLOR1 is fogColor * (1 - visibility).
+                // Interpolating visibility is equivalent while the scene
+                // fog color is constant. Texture alpha is unused by both
+                // native programs; vertex alpha controls the multiplication.
+                vec3 removed = (vec3(1.0) - texel.rgb * v_color.rgb) * v_color.a;
+                out_color = vec4(u_material_mode == 19 ? vec3(1.0) - removed :
+                    removed * u_fog_color * (1.0 - v_dynamic_fog), 1.0);
+                return;
+            }
             if (u_material_mode == 18)
             {
                 vec4 color = texel * v_color;
@@ -6033,7 +6045,9 @@ WebRendererSurfaceResult CopyWorldCommand(
                 source.indexCount > surface.indexCount - source.firstIndex ||
                 source.firstSurfaceIndex > source.lastSurfaceIndex ||
                 source.technique >
-                    WebRendererWorldTechnique::Cinematic ||
+                    WebRendererWorldTechnique::VertexColorMultiplyFog ||
+                (source.technique == WebRendererWorldTechnique::VertexColorMultiplyFog &&
+                    !WebRenderer_GetMultiplyFogPass(source.materialIdentity, source.techniqueType)) ||
                 source.lightingMode >
                     WebRendererWorldLightingMode::ModelLightGrid ||
                 source.dynamicLightSurfType >= 13u ||
@@ -8867,13 +8881,16 @@ bool SceneNeedsFloatZ(bool distortion)
     return false;
 }
 
-void ApplyWorldMaterialState(const WebRendererRetainedWorldBatch &batch)
+void ApplyWorldMaterialState(const WebRendererRetainedWorldBatch &batch,
+    const GfxStateBits *passState = nullptr)
 {
     std::uint32_t floatState[2]{}; bool floatAlpha = false;
     const bool floatZ = g_renderer.floatZPass &&
         WebRenderer_GetFloatZ(batch.materialIdentity, floatState, floatAlpha);
-    const std::uint32_t state0 = floatZ ? floatState[0] : batch.stateBits[0];
-    const std::uint32_t state1 = floatZ ? floatState[1] : batch.stateBits[1];
+    const std::uint32_t state0 = floatZ ? floatState[0] :
+        passState ? passState->loadBits[0] : batch.stateBits[0];
+    const std::uint32_t state1 = floatZ ? floatState[1] :
+        passState ? passState->loadBits[1] : batch.stateBits[1];
     const bool hasCanonicalState = batch.materialIdentity != nullptr &&
         (state0 != 0u || state1 != 0u);
     // R_SetAlphaAntiAliasingState enables the selected transparency-AA mode
@@ -8949,6 +8966,8 @@ void ApplyWorldMaterialState(const WebRendererRetainedWorldBatch &batch)
             ? (WebCinematic_FullRange() ? 13 : 12)
             : batch.sourceKind == WebRendererSceneBatchKind::SunFlare
             ? 5
+            : batch.technique == WebRendererWorldTechnique::VertexColorMultiplyFog
+            ? 19
             : batch.ambientProbeLighting
             ? 6
             : batch.technique == WebRendererWorldTechnique::VertexColorMultiply
@@ -9015,6 +9034,31 @@ void ApplyWorldMaterialState(const WebRendererRetainedWorldBatch &batch)
                 soft.sceneFog ? g_renderer.sceneFogColor.data() : soft.fogColor);
         }
     }
+}
+
+bool HasMultiplyFogPass(const WebRendererRetainedWorldBatch &batch)
+{
+    return !g_renderer.floatZPass &&
+        batch.technique == WebRendererWorldTechnique::VertexColorMultiplyFog &&
+        WebRenderer_GetMultiplyFogPass(batch.materialIdentity, batch.techniqueType);
+}
+
+void ApplyMultiplyFogPass(const WebRendererRetainedWorldBatch &batch)
+{
+    ApplyWorldMaterialState(batch,
+        WebRenderer_GetMultiplyFogPass(batch.materialIdentity, batch.techniqueType));
+    glUniform1i(g_renderer.materialModeUniform, 20);
+#if KISAK_WEB_DIAGNOSTICS
+    static std::uint32_t reportedGeneration = 0;
+    if (reportedGeneration != g_renderer.surfaceResourceGeneration)
+    {
+        reportedGeneration = g_renderer.surfaceResourceGeneration;
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Material second pass draw: material='%s' type=%u "
+            "shader='mul_fog.hlsl' resourceGeneration=%u.\n",
+            batch.materialName.c_str(), batch.techniqueType, reportedGeneration);
+    }
+#endif
 }
 
 void ApplyUiMaterialState(const WebRendererRetainedUiBatch &batch)
@@ -10346,6 +10390,78 @@ std::uint32_t DrawDynamicLightMaterial(const WebRendererRetainedWorldBatch &batc
 }
 
 #if KISAK_WEB_DIAGNOSTICS
+extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestMultiplyFogPixel(int scenario)
+{
+    if (!g_renderer.initialized || g_renderer.contextLost || scenario < 0 || scenario > 8)
+        return UINT32_MAX;
+    MultiplyFogFixture fixture;
+    WebRendererRetainedWorldBatch batch{};
+    batch.materialIdentity = &fixture.material;
+    batch.techniqueType = 7;
+    batch.technique = WebRendererWorldTechnique::VertexColorMultiplyFog;
+    std::copy_n(fixture.states[1].loadBits, 2, batch.stateBits);
+    // Disable culling/depth for this isolated 1px framebuffer. Blend and write
+    // states remain canonical, including the second pass's separate alpha.
+    batch.stateBits[0] &= ~0xc000u;
+    batch.stateBits[1] = 2;
+    fixture.states[2].loadBits[0] &= ~0xc000u;
+    fixture.states[2].loadBits[1] = 2;
+    if (scenario == 7) fixture.states[2].loadBits[0] &= ~0x08000000u;
+    std::vector<WebRendererSurfaceVertex> vertices(4);
+    constexpr float positions[4][2]{{-1,-1},{1,-1},{-1,1},{1,1}};
+    for (unsigned i = 0; i < 4; ++i)
+    {
+        vertices[i].position[0] = positions[i][0];
+        vertices[i].position[1] = positions[i][1];
+        vertices[i].position[2] = 0.5f;
+        vertices[i].color[0] = 0.5f; vertices[i].color[1] = 0.75f;
+        vertices[i].color[2] = 0.25f;
+        vertices[i].color[3] = scenario == 4 ? 0.0f : scenario == 5 ? 1.0f : 0.5f;
+    }
+    const std::vector<std::uint32_t> indices{0,1,2,2,1,3};
+    GLuint vao=0, vbo=0, ibo=0, texture=0, framebuffer=0, colorBuffer=0;
+    if (!CreateSurfaceObjects(vertices, indices, vao, vbo, ibo)) return UINT32_MAX;
+    glGenTextures(1, &texture); glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    const std::uint8_t texel[4]{128,64,192, static_cast<std::uint8_t>(scenario == 8 ? 255 : 32)};
+    glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,1,1,0,GL_RGBA,GL_UNSIGNED_BYTE,texel);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+    glGenFramebuffers(1,&framebuffer); glBindFramebuffer(GL_FRAMEBUFFER,framebuffer);
+    glGenRenderbuffers(1,&colorBuffer); glBindRenderbuffer(GL_RENDERBUFFER,colorBuffer);
+    glRenderbufferStorage(GL_RENDERBUFFER,GL_RGBA8,1,1);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_RENDERBUFFER,colorBuffer);
+    glViewport(0,0,1,1); glDisable(GL_SCISSOR_TEST);
+    const bool dither = glIsEnabled(GL_DITHER);
+    glDisable(GL_DITHER); glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
+    glClearColor(153.0f/255,102.0f/255,51.0f/255,77.0f/255); glClear(GL_COLOR_BUFFER_BIT);
+    glUseProgram(g_renderer.program); BindSceneSamplers(); glBindVertexArray(vao);
+    constexpr float identity[16]{1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
+    glUniformMatrix4fv(g_renderer.viewProjectionUniform,1,GL_FALSE,identity);
+    glUniform1f(g_renderer.aspectUniform,1); glUniform1f(g_renderer.instanceEnabledUniform,0);
+    glUniform3f(g_renderer.viewOriginUniform,0,0,0);
+    glUniform1f(g_renderer.fogEnabledUniform,scenario == 2 ? 0 : 1);
+    glUniform2f(g_renderer.fogParamsUniform,scenario == 3 ? 2 : 0,std::log(2.0f)/1.5f);
+    glUniform3f(g_renderer.fogColorUniform,0.1f,0.3f,0.6f);
+    const unsigned count = scenario == 6 ? 2 : 1;
+    WebRenderer_ForEachMaterialPassGroup(count,
+        [&](std::size_t) -> const auto & { return batch; }, HasMultiplyFogPass,
+        [&](std::size_t begin, std::size_t end, unsigned pass) {
+            if (pass && scenario == 0) return;
+            if (pass) ApplyMultiplyFogPass(batch); else ApplyWorldMaterialState(batch);
+            for (auto i = begin; i < end; ++i) glDrawElements(GL_TRIANGLES,6,GL_UNSIGNED_INT,nullptr);
+        });
+    std::uint8_t pixel[4]{};
+    glReadPixels(0,0,1,1,GL_RGBA,GL_UNSIGNED_BYTE,pixel);
+    const bool error = glGetError() != GL_NO_ERROR;
+    if (dither) glEnable(GL_DITHER);
+    glBindFramebuffer(GL_FRAMEBUFFER,0); glDeleteFramebuffers(1,&framebuffer);
+    glDeleteRenderbuffers(1,&colorBuffer); glDeleteTextures(1,&texture);
+    DeleteSurfaceObjects(vao,vbo,ibo); g_renderer.textureParameters.Reset();
+    return error ? UINT32_MAX : pixel[0] | (std::uint32_t(pixel[1])<<8) |
+        (std::uint32_t(pixel[2])<<16) | (std::uint32_t(pixel[3])<<24);
+}
+
 extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestSoftParticlePixel(int scenario, int field)
 {
     if (scenario < 0) return field == 0 ? g_renderer.softParticleDepthReady :
@@ -11618,8 +11734,13 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
     if (worldBatchDraw)
     {
         WebRendererDrawState<WebRendererRetainedWorldBatch> worldDrawState;
-        for (const WebRendererWorldCameraRange &range : g_renderer.worldCameraRanges)
+        WebRenderer_ForEachMaterialPassGroup(g_renderer.worldCameraRanges.size(),
+            [&](std::size_t i) -> const auto & {
+                return g_renderer.retainedWorldBatches[g_renderer.worldCameraRanges[i].batchIndex];
+            }, HasMultiplyFogPass, [&](std::size_t begin, std::size_t end, unsigned materialPass) {
+        for (std::size_t i = begin; i < end; ++i)
         {
+            const auto &range = g_renderer.worldCameraRanges[i];
             WebRendererRetainedWorldBatch &batch =
                 g_renderer.retainedWorldBatches[range.batchIndex];
             if (splitLighting && IsEmissiveCameraBatch(batch) != emissiveCameraPass) continue;
@@ -11772,17 +11893,20 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
             const std::uintptr_t indexOffset =
                 static_cast<std::uintptr_t>(range.firstIndex) *
                 sizeof(std::uint32_t);
-            glDrawElements(
-                GL_TRIANGLES,
-                static_cast<GLsizei>(range.indexCount),
-                GL_UNSIGNED_INT,
-                reinterpret_cast<const void *>(indexOffset));
+            const auto draw = [&] {
+                glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(range.indexCount),
+                    GL_UNSIGNED_INT, reinterpret_cast<const void *>(indexOffset));
+            };
+            if (materialPass) ApplyMultiplyFogPass(batch);
+            draw();
 #if KISAK_WEB_DIAGNOSTICS
             if (frameProfile)
                 frameProfile->worldSurfacesDrawn += range.surfaceCount;
 #endif
             ++completedDraws;
         }
+        if (materialPass) worldDrawState.Reset();
+        });
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         glActiveTexture(GL_TEXTURE0);
     }
@@ -11846,9 +11970,12 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1f(g_renderer.specularMapEnabledUniform, 0.0f);
         BindModelLightingTexture(g_renderer.retainedStaticModelLighting);
         WebRendererDrawState<WebRendererRetainedWorldBatch> staticDrawState;
-        for (const WebRendererRetainedStaticModelBatch &batch :
-             g_renderer.retainedStaticModelBatches)
+        WebRenderer_ForEachMaterialPassGroup(g_renderer.retainedStaticModelBatches.size(),
+            [&](std::size_t i) -> const auto & { return g_renderer.retainedStaticModelBatches[i].draw; },
+            HasMultiplyFogPass, [&](std::size_t begin, std::size_t end, unsigned materialPass) {
+        for (std::size_t i = begin; i < end; ++i)
         {
+            const auto &batch = g_renderer.retainedStaticModelBatches[i];
             // LOD selection can leave an authored batch empty. Reject it
             // before material/texture setup; shadow submission is unchanged.
             if (batch.cameraInstanceCount == 0u) continue;
@@ -11947,14 +12074,18 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
             const std::uintptr_t indexOffset =
                 static_cast<std::uintptr_t>(batch.draw.firstIndex) *
                 sizeof(std::uint32_t);
-            glDrawElementsInstanced(
-                GL_TRIANGLES,
-                static_cast<GLsizei>(batch.draw.indexCount),
-                GL_UNSIGNED_INT,
-                reinterpret_cast<const void *>(indexOffset),
-                static_cast<GLsizei>(batch.cameraInstanceCount));
+            const auto draw = [&] {
+                glDrawElementsInstanced(GL_TRIANGLES,
+                    static_cast<GLsizei>(batch.draw.indexCount), GL_UNSIGNED_INT,
+                    reinterpret_cast<const void *>(indexOffset),
+                    static_cast<GLsizei>(batch.cameraInstanceCount));
+            };
+            if (materialPass) ApplyMultiplyFogPass(batch.draw);
+            draw();
             ++completedDraws;
         }
+        if (materialPass) staticDrawState.Reset();
+        });
         glUniform1f(g_renderer.instanceEnabledUniform, 0.0f);
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         glActiveTexture(GL_TEXTURE0);
@@ -12007,9 +12138,13 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
             WebRendererDrawState<WebRendererRetainedWorldBatch> drawState;
             std::uint32_t previousInstance = UINT32_MAX - 1u;
             glDepthRangef(0.0f, depthHackPass ? 0.015625f : 1.0f);
-            for (const std::uint32_t drawIndex :
-                 g_renderer.dynamicCameraDrawOrder)
+            WebRenderer_ForEachMaterialPassGroup(g_renderer.dynamicCameraDrawOrder.size(),
+                [&](std::size_t i) -> const auto & {
+                    return DynamicDrawBatch(g_renderer.dynamicDraws[g_renderer.dynamicCameraDrawOrder[i]]);
+                }, HasMultiplyFogPass, [&](std::size_t begin, std::size_t end, unsigned materialPass) {
+            for (std::size_t i = begin; i < end; ++i)
             {
+                const auto drawIndex = g_renderer.dynamicCameraDrawOrder[i];
                 const auto &draw = g_renderer.dynamicDraws[drawIndex];
                 const auto &batch = DynamicDrawBatch(draw);
                 if (splitLighting && IsEmissiveCameraBatch(batch) != emissiveCameraPass) continue;
@@ -12367,10 +12502,13 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 const std::uintptr_t indexOffset =
                     static_cast<std::uintptr_t>(batch.firstIndex) *
                     sizeof(std::uint32_t);
-                glDrawElements(GL_TRIANGLES,
-                    static_cast<GLsizei>(batch.indexCount),
-                    GL_UNSIGNED_INT,
-                    reinterpret_cast<const void *>(indexOffset));
+                const auto drawMaterial = [&] {
+                    glDrawElements(GL_TRIANGLES,
+                        static_cast<GLsizei>(batch.indexCount), GL_UNSIGNED_INT,
+                        reinterpret_cast<const void *>(indexOffset));
+                };
+                if (materialPass) ApplyMultiplyFogPass(batch);
+                drawMaterial();
 #if KISAK_WEB_DIAGNOSTICS
                 if (profileDynamicModel)
                     frameProfile->dynamicModelDrawMs +=
@@ -12385,6 +12523,8 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 }
                 ++completedDraws;
             }
+            if (materialPass) drawState.Reset();
+            });
         }
         glDepthRangef(0.0f, 1.0f);
         glUniformMatrix4fv(g_renderer.viewProjectionUniform, 1, GL_FALSE,

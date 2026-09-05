@@ -121,6 +121,9 @@ Kisak behavior or explain why a platform-owned implementation is permanent.
   See `docs/evidence/native-reference-2026-09-02.md` for owned-data launch paths
   and the distinction between native startup and gameplay/reference evidence.
 - Build the production Release target with `tools/build_web.ps1 -Configuration Release`.
+- Run `npm.cmd ci` before Release builds; pinned Terser minifies the generated
+  production host modules. Engine/reverb modules retain Emscripten's output and
+  exact export checks. Native source and diagnostic host modules stay readable.
 - This command also builds the SHA-256-pinned FFmpeg Bink decoder from public
   source using Git for Windows Bash. Codec sources and products stay under
   ignored `.tools/` and `build/ffmpeg-bink/`; see `docs/cinematic-codec.md`.

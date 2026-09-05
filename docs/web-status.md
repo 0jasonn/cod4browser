@@ -1,10 +1,48 @@
 # Web product status
 
-Updated 2026-09-04. This is the single current status page; the
+Updated 2026-09-05. This is the single current status page; the
 [roadmap](web-roadmap.md) owns priorities and the
 [convergence inventory](web-port-convergence.md) owns system classification.
 
 ## Verification and reference baseline
+
+The 2026-09-05 audit at base `9612ab4c` adds user-initiated browser fullscreen and
+accessible save/movie/installation recovery without changing canonical settings.
+Release/runtime-prefix, static checks and 48 production Chromium tests pass for
+that UI milestone. See [display evidence](evidence/display-options-2026-09-03.md).
+The final artifact also passes all 48 production tests and the
+unchanged gate: 3,189,283 B Wasm, 313,992 B JavaScript and 3,604,419 B site,
+with 24 raw/nine application exports and 22 files. Reverb's browser logging
+adapter, size-oriented web compilation and pinned host-module minification
+retain the codec/DSP. Native/Wasm reverb matches across 130 room/rate cases.
+Diagnostics pass ten smoke and 60 remainder tests (ten optional retail skips);
+all 101 Node tests pass. See [build measurements](web-architecture.md#build-products).
+The subsequent material milestone implements the encountered two-pass
+`vertcol_mul_fog` decal technique, including its fog arguments and per-pass
+state/group ordering. Nine synthetic pixel cases match execution of original
+shaders on D3D9 within one UNORM step, including after real WebGL recovery.
+Native and Wasm world/static-model boundary targets pass (two each), with
+Release assertions restored for the world test target. Nine browser graphics
+and dynamic-light tests pass. Fresh headless owned Killhouse, CargoShip and
+AC130 observations render; Killhouse also recovers the same world after real
+context loss. Matched visual acceptance remains open.
+
+The independent original `db_load.cpp` oracle now covers Material/Image and
+XModel/PhysPreset. Its publication-time block trace matches adapted Win32 and
+Wasm, including aliases, identity, eight partial-zone failure/retry cycles per
+family, resource retirement and PMem restoration. All 42 native and 41 direct
+Wasm targets pass. The full Wasm build exposed a missing cinematic service in
+the map-request fixture; its explicit stub now tests deferred spawning and
+successful reissue. See [database ownership](web-architecture.md#runtime-ownership).
+
+Seven current headed production windows pass at 1280×720/1920×1080, with real
+Killhouse context recovery, advancing game/audio clocks and stable 978.5 MiB
+Wasm capacity. CargoShip remains slow at 20.63/17.28 FPS in distinct naturally
+advancing scenes. Killhouse's floor-facing view and near-60 FPS AC130 windows
+do not qualify busy gameplay or thermal fidelity. No further performance
+optimization or pthread change was made without an isolated bottleneck.
+See [current performance evidence](evidence/browser-frame-time-2026-09-02.md#current-production-measurements--2026-09-05)
+for exact settings, memory estimates, responsiveness and limitations.
 
 Browser text now reaches canonical `CL_CharEvent` alongside physical keys.
 The shipped profile field and console accept ordinary/shifted text, repeats,

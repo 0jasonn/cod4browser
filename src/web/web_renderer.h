@@ -267,6 +267,8 @@ enum class WebRendererWorldTechnique : std::uint8_t
     // selection explicitly so the backend does not invent fallback geometry.
     NativeTechniqueUnavailable,
     Cinematic,
+    // mul.hlsl followed by mul_fog.hlsl with per-pass authored state.
+    VertexColorMultiplyFog,
 };
 
 constexpr bool WebRenderer_SkipsNativeDraw(

@@ -40,7 +40,24 @@ geometry failure was resolved by following canonical lit/decal/emissive DPVS
 ranges. See [current status](web-status.md) and the relevant evidence records
 for qualification; historical test counts are not current suite totals.
 
-The source-built cinematic decoder exceeds the existing production size
-baseline. Keep the budgets and raw-export cap unchanged until an explicit
-size/deployment decision; passing file/export checks alone is not a passing
-product size gate.
+The final 2026-09-05 fullscreen/recovery, size and material artifact passes the unchanged
+production budgets and exact export boundary. Its optimized/minified production
+tier passes 48 cases; diagnostics pass 10 smoke and 60 remainder cases with ten
+optional owned-data skips, and Node passes 101. Native CTest passes all 42 and
+direct Wasm all 41, including the original `db_load.cpp` Material/Image/XModel
+oracle and its normalized publication/block expectations. Nine native D3D9
+shader pixel cases match WebGL within one UNORM step before/after actual context
+recovery; the native/Wasm reverb comparison covers 130 room/rate cases.
+Seven foreground production windows and owned three-scene material observations
+add bounded execution evidence. See [architecture](web-architecture.md#build-products)
+and [performance limits](evidence/browser-frame-time-2026-09-02.md#current-production-measurements--2026-09-05).
+
+One Node checkpoint timer assertion failed during concurrent compilation;
+the isolated full 101-test rerun passed with assertions unchanged. The final
+Wasm build required adding the missing cinematic platform stub to the map
+fixture, with defer/reissue assertions. Routine browser runs use an isolated
+port (8254 here) because 8000 was already occupied. An earlier remainder run
+inherited the retail-root environment variable and stopped on an optional
+movie check; the final synthetic tier explicitly clears it. Linux/sanitizer,
+remote CI, exhaustive duplicates, other browsers and manual campaign/native
+visual acceptance were not rerun or promoted by this audit.

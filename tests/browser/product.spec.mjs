@@ -168,6 +168,105 @@ test("production renderer fills the browser viewport @product", async ({ page })
     })).toEqual([0, 0, 1234, 777]);
 });
 
+test("fullscreen and recovery controls preserve renderer-only input ownership @product", async ({ page }, testInfo) => {
+    const directory = await createInstallDirectory(testInfo, "browser-controls-install");
+    await page.goto("/");
+    const chooser = page.waitForEvent("filechooser");
+    await page.locator("#portable-install-button").click();
+    await (await chooser).setFiles(directory);
+    await expect(page.locator("#boot-log")).toContainText("canonical runtime started");
+    await page.keyboard.press("Shift+Escape");
+    await page.getByRole("button", { name: "Enter fullscreen", exact: true }).click();
+    await expect.poll(() => page.evaluate(() => document.fullscreenElement?.tagName)).toBe("HTML");
+    await expect(page.locator("#browser-dialog")).toBeHidden();
+    await expect(page.locator("#game-text-input")).toBeFocused();
+    await page.keyboard.press("Shift+Escape");
+    await expect(page.locator("#browser-dialog")).toBeVisible();
+    await page.getByRole("button", { name: "Exit fullscreen", exact: true }).click();
+    await expect.poll(() => page.evaluate(() => document.fullscreenElement)).toBeNull();
+    await page.setViewportSize({ width: 1000, height: 700 });
+    await expect.poll(() => page.locator("#game-canvas").evaluate((element) =>
+        [element.width, element.height])).toEqual([1000, 700]);
+    await page.evaluate(() => globalThis.dispatchEvent(new CustomEvent("kisakcod:mouse-mode", {
+        detail: { absolute: false },
+    })));
+    await expect(page.locator("#browser-controls-button")).toBeHidden();
+    await page.locator("#game-canvas").click({ position: { x: 10, y: 10 } });
+    await expect.poll(() => page.evaluate(() => document.pointerLockElement?.id)).toBe("game-canvas");
+    await page.keyboard.press("Shift+Escape");
+    await expect(page.locator("#browser-dialog")).toBeVisible();
+    await expect.poll(() => page.evaluate(() => document.pointerLockElement)).toBeNull();
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#browser-dialog")).toBeHidden();
+    await expect(page.locator("#game-text-input")).toBeFocused();
+    await page.evaluate(() => globalThis.dispatchEvent(new CustomEvent("kisakcod:cinematic", {
+        detail: { state: "skipped", name: "missing" },
+    })));
+    await page.getByRole("button", { name: "Recovery actions" }).click();
+    await expect(page.locator("#cinematic-status")).toBeVisible();
+    await page.getByRole("button", { name: "Manage installation" }).click();
+    await expect(page.locator("#select-install-button")).toBeVisible();
+    await expect(page.locator("#select-install-button")).toBeFocused();
+    await expect(page.locator("#portable-install-button")).toBeVisible();
+    await page.locator("#close-install-button").click();
+    await expect(page.locator(".asset-panel")).toBeHidden();
+    await page.getByRole("button", { name: "Recovery actions" }).click();
+    await page.getByRole("button", { name: "Continue without movie" }).click();
+    await expect(page.locator("#browser-dialog")).toBeHidden();
+    await expect(page.locator("#browser-controls-button")).toBeHidden();
+});
+
+test("fullscreen rejection remains actionable @product", async ({ page }) => {
+    await page.addInitScript(() => {
+        Element.prototype.requestFullscreen = async () => { throw new Error("request denied"); };
+    });
+    await page.goto("/");
+    await page.locator("#browser-controls-button").click();
+    await page.locator("#fullscreen-button").click();
+    await expect(page.locator("#fullscreen-status")).toContainText("request denied");
+    await expect(page.locator("#browser-dialog")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#browser-dialog")).toBeHidden();
+});
+
+test("failed profile checkpoint exposes retry through the shipped recovery UI @product", async ({ page }, testInfo) => {
+    const directory = await createInstallDirectory(testInfo, "retry-save-install");
+    await page.addInitScript(() => {
+        const NativeWorker = Worker;
+        globalThis.__failCheckpoint = true;
+        globalThis.Worker = class extends NativeWorker {
+            postMessage(message, transfer) {
+                if (message?.type === "checkpoint" && globalThis.__failCheckpoint) {
+                    queueMicrotask(() => this.dispatchEvent(new MessageEvent("message", { data: {
+                        protocolVersion: message.protocolVersion, type: "reply", id: message.id,
+                        operation: message.type, error: { code: "SAVE_FAILED", message: "storage full" },
+                    } })));
+                    return;
+                }
+                return super.postMessage(message, transfer);
+            }
+        };
+    });
+    await page.goto("/");
+    const chooser = page.waitForEvent("filechooser");
+    await page.locator("#portable-install-button").click();
+    await (await chooser).setFiles(directory);
+    await expect(page.locator("#boot-log")).toContainText("canonical runtime started");
+    await page.evaluate(() => {
+        Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+        document.dispatchEvent(new Event("visibilitychange"));
+        delete document.visibilityState;
+    });
+    await page.getByRole("button", { name: "Recovery actions" }).click();
+    await expect(page.locator("#save-status")).toContainText("Save failed; changes remain pending");
+    await expect(page.locator("#retry-save-button")).toBeVisible();
+    await page.evaluate(() => { globalThis.__failCheckpoint = false; });
+    await page.locator("#retry-save-button").click();
+    await expect(page.locator("#save-status")).toHaveText("Browser profile saved");
+    await expect(page.locator("#retry-save-button")).toBeHidden();
+    await expect(page.locator("html")).toHaveAttribute("data-runtime-state", "running");
+});
+
 test("production JavaScript exposes only named product operations @product", async ({ request }) => {
     const files = [
         "asset_store.mjs",

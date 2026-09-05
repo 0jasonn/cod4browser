@@ -537,6 +537,8 @@ WebRendererWorldBatchDesc MakeBatch(
     else if (canonicalDistanceFalloff)
         batch.technique =
             WebRendererWorldTechnique::VertexColorDistanceFalloff;
+    else if (WebRenderer_GetMultiplyFogPass(surface.material, technique.type))
+        batch.technique = WebRendererWorldTechnique::VertexColorMultiplyFog;
     else if (ShaderNameIs(technique, "mul.hlsl"))
         batch.technique = WebRendererWorldTechnique::VertexColorMultiply;
     else if (ShaderNameIs(

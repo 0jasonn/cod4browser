@@ -293,6 +293,8 @@ WebRendererWorldBatchDesc MakeDraw(
         WebRenderer_CopyMaterialConstant(material, ENV_MAP_PARMS_HASH, draw.envMapParms);
     draw.technique = WebRenderer_IsCinematicMaterial(material, draw.techniqueType)
         ? WebRendererWorldTechnique::Cinematic
+        : WebRenderer_GetMultiplyFogPass(material, draw.techniqueType)
+        ? WebRendererWorldTechnique::VertexColorMultiplyFog
         : !hasTechnique || !draw.baseImage
         ? WebRendererWorldTechnique::BackendFallback
         : environmentSpecular

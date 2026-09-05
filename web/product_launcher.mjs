@@ -53,6 +53,91 @@ let disposePromise = null;
 let quitController = null;
 let assetState = { state: "checking", message: "Waiting for the engine" };
 const logs = [];
+const browserDialog = /** @type {HTMLDialogElement} */ (requiredElement("#browser-dialog"));
+const browserButton = /** @type {HTMLButtonElement} */ (requiredElement("#browser-controls-button"));
+const fullscreenButton = /** @type {HTMLButtonElement} */ (requiredElement("#fullscreen-button"));
+const fullscreenStatus = requiredElement("#fullscreen-status");
+const retrySaveButton = /** @type {HTMLButtonElement} */ (requiredElement("#retry-save-button"));
+const dismissMovieButton = /** @type {HTMLButtonElement} */ (requiredElement("#dismiss-movie-button"));
+const closeInstallButton = /** @type {HTMLButtonElement} */ (requiredElement("#close-install-button"));
+let saveFailed = false;
+let movieUnavailable = false;
+let absoluteMouse = true;
+
+function renderBrowserControls()
+{
+    const attention = saveFailed || movieUnavailable;
+    browserButton.hidden = !absoluteMouse && !attention;
+    browserButton.textContent = attention ? "Recovery actions" : "Browser controls";
+    retrySaveButton.hidden = !saveFailed;
+    dismissMovieButton.hidden = !movieUnavailable;
+}
+
+function openBrowserControls()
+{
+    if (quitController && ["quitting", "stopped", "quit-save-failed"]
+        .includes(document.documentElement.dataset.runtimeState)) return;
+    inputController?.release();
+    browserDialog.showModal();
+}
+
+browserButton.addEventListener("click", openBrowserControls);
+requiredElement("#close-browser-button").addEventListener("click", () => browserDialog.close());
+browserDialog.addEventListener("close", () => {
+    if (document.documentElement.dataset.manageInstall !== "true")
+        gameTextInput.focus({ preventScroll: true });
+});
+// Capture before canonical input so this browser-only shortcut cannot also
+// toggle Kisak's pause menu or leave a held modifier behind.
+globalThis.addEventListener("keydown", (event) => {
+    if (event.code !== "Escape" || !event.shiftKey || event.repeat) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    openBrowserControls();
+}, true);
+fullscreenButton.disabled = !document.fullscreenEnabled;
+fullscreenStatus.textContent = document.fullscreenEnabled ? "" : "Fullscreen is unavailable in this browser.";
+fullscreenButton.addEventListener("click", async () => {
+    try {
+        // Include dialogs, recovery actions and the text sink in fullscreen.
+        if (document.fullscreenElement) await document.exitFullscreen();
+        else await document.documentElement.requestFullscreen();
+        fullscreenStatus.textContent = "";
+        browserDialog.close();
+    } catch (error) {
+        fullscreenStatus.textContent = `Fullscreen unavailable: ${error.message}`;
+    }
+});
+document.addEventListener("fullscreenchange", () => {
+    fullscreenButton.textContent = document.fullscreenElement ? "Exit fullscreen" : "Enter fullscreen";
+    inputController?.release();
+    resizeCanvas();
+    // Reacquiring pointer lock always requires a later intentional canvas press.
+    if (!browserDialog.open) gameTextInput.focus({ preventScroll: true });
+});
+retrySaveButton.addEventListener("click", async () => {
+    retrySaveButton.disabled = true;
+    try { await checkpointController?.request(); }
+    catch (_) { /* The checkpoint owner publishes the actionable failure. */ }
+    finally { retrySaveButton.disabled = false; }
+});
+dismissMovieButton.addEventListener("click", () => {
+    movieUnavailable = false;
+    cinematicStatus.hidden = true;
+    renderBrowserControls();
+    browserDialog.close();
+});
+requiredElement("#manage-install-button").addEventListener("click", () => {
+    browserDialog.close();
+    document.documentElement.dataset.manageInstall = "true";
+    closeInstallButton.hidden = false;
+    selectInstallButton.focus();
+});
+closeInstallButton.addEventListener("click", () => {
+    delete document.documentElement.dataset.manageInstall;
+    closeInstallButton.hidden = true;
+    gameTextInput.focus({ preventScroll: true });
+});
 
 function appendLog(message, level = "info")
 {
@@ -68,6 +153,9 @@ function renderCheckpointStatus(detail)
     saveStatus.hidden = false;
     saveStatus.dataset.state = detail.state;
     saveStatus.textContent = detail.message;
+    if (detail.state === "failed") saveFailed = true;
+    else if (detail.state === "saved") saveFailed = false;
+    renderBrowserControls();
     if (detail.error) {
         appendLog(`[kisakcod-web] Checkpoint: ${detail.error.message}`, "error");
     }
@@ -230,6 +318,8 @@ const handleDatabase = (event) => {
 const handleCinematic = (event) => {
     const { state, name, reason } = event.detail;
     cinematicStatus.hidden = state !== "skipped" && state !== "failed";
+    movieUnavailable = !cinematicStatus.hidden;
+    renderBrowserControls();
     cinematicStatus.textContent = state === "skipped"
         ? "Movie missing from browser storage. Select your installation again to import movies."
         : state === "failed" ? `Movie playback failed: ${reason}` : "";
@@ -389,6 +479,10 @@ try {
         textInput: gameTextInput,
         commandInput,
         sendInput: (event) => engine.input(event),
+        onState(state) {
+            if (typeof state.absoluteMouse === "boolean") absoluteMouse = state.absoluteMouse;
+            renderBrowserControls();
+        },
         onFailure(error) {
             document.documentElement.dataset.runtimeState = "failed";
             appendLog(`[kisakcod-web] Input transport failed: ${

@@ -6,6 +6,7 @@
 #include <web/web_renderer_material_lookup.h>
 #include <web/web_renderer_draw_state.h>
 #include <web/web_renderer_dynamic_textures.h>
+#include "multiply_fog_fixture.h"
 
 #include <algorithm>
 #include <array>
@@ -629,6 +630,64 @@ void TestCinematicCodeImagesSelectCanonicalMaterialWithoutTextureTable()
     shader.name = "cinematic.hlsl";
     technique.passCount = 2;
     assert(!WebRenderer_IsCinematicMaterial(&material, 4));
+}
+
+void TestMultiplyFogUsesCanonicalPassesAndRejectsIncompleteBindings()
+{
+    Fixture world;
+    MultiplyFogFixture fixture;
+    auto &material = fixture.material;
+    for (auto &surface : world.surfaces) surface.material = &material;
+    WebRendererWorldSceneCommand command;
+    assert(WebRenderer_BuildWorldSceneCommand(world.world, MakeView(), command) ==
+        WebRendererWorldSceneResult::Success);
+    const auto &batch = command.batches[0];
+    assert(batch.technique == WebRendererWorldTechnique::VertexColorMultiplyFog);
+    assert(batch.materialIdentity == &material && batch.techniqueType == 7);
+    assert(batch.stateBits[0] == fixture.states[1].loadBits[0]);
+    assert(batch.baseImage == &fixture.image && batch.samplerState == 0x62);
+    assert(!batch.lightmapImage && !batch.secondaryLightmapImage);
+    const auto second = [&] { return WebRenderer_GetMultiplyFogPass(&material, 7); };
+    assert(second() == &fixture.states[2]);
+    assert(!WebRenderer_GetMultiplyFogPass(&material, 34));
+    assert(!WebRenderer_GetMultiplyFogPass(nullptr, 7));
+    material.stateBitsCount = 2; assert(!second()); material.stateBitsCount = 3;
+    fixture.technique.passCount = 1; assert(!second()); fixture.technique.passCount = 2;
+    fixture.ps[1].name = "other.hlsl"; assert(!second()); fixture.ps[1].name = "mul_fog.hlsl";
+    fixture.args[1][4] = fixture.args[1][3]; assert(!second());
+    fixture.args[1][4].dest = 22; fixture.args[1][4].u.codeConst.index = 42;
+    fixture.args[1][4].u.codeConst.firstRow = 1; assert(!second());
+    fixture.args[1][4].u.codeConst.firstRow = 0;
+    fixture.args[0][0].u.codeConst.rowCount = 3; assert(!second());
+    fixture.args[0][0].u.codeConst.rowCount = 4;
+    fixture.texture.nameHash = 0; assert(!second()); fixture.texture.nameHash = 0xa0ab1041u;
+    fixture.technique.passArray[1].customSamplerFlags = 2; assert(!second());
+    fixture.technique.passArray[1].customSamplerFlags = 0;
+    assert(second() == &fixture.states[2]);
+
+    // Native rb_backend.cpp's pass loop surrounds the complete material
+    // sublist. Include visibility holes, neighboring material and technique
+    // changes so a per-range replay cannot pass this check.
+    std::array<WebRendererWorldBatchDesc, 5> batches{batch, batch, batch, batch, batch};
+    batches[2].techniqueType = 9;
+    batches[3].technique = WebRendererWorldTechnique::BaseTexture;
+    std::vector<unsigned> trace;
+    WebRenderer_ForEachMaterialPassGroup(batches.size(),
+        [&](std::size_t i) -> const auto & { return batches[i]; },
+        [](const auto &b) { return b.technique == WebRendererWorldTechnique::VertexColorMultiplyFog; },
+        [&](std::size_t begin, std::size_t end, unsigned pass) {
+            for (auto i = begin; i < end; ++i) trace.push_back(unsigned(i) * 10 + pass);
+        });
+    assert((trace == std::vector<unsigned>{0,10,1,11,20,21,30,40,41}));
+    batches[1].primaryLightIndex = batches[0].primaryLightIndex + 1;
+    trace.clear();
+    WebRenderer_ForEachMaterialPassGroup(batches.size(),
+        [&](std::size_t i) -> const auto & { return batches[i]; },
+        [](const auto &b) { return b.technique == WebRendererWorldTechnique::VertexColorMultiplyFog; },
+        [&](std::size_t begin, std::size_t end, unsigned pass) {
+            for (auto i = begin; i < end; ++i) trace.push_back(unsigned(i) * 10 + pass);
+        });
+    assert((trace == std::vector<unsigned>{0,1,10,11,20,21,30,40,41}));
 }
 
 void TestCanonicalWorldColorAliasUsesLitStateAndLightmaps()
@@ -1841,6 +1900,7 @@ int main()
     TestCanonicalLmTechniqueNameDoesNotInventLightmapSamplers();
     TestRemappedTechniqueSetDrivesPortableSelection();
     TestCinematicCodeImagesSelectCanonicalMaterialWithoutTextureTable();
+    TestMultiplyFogUsesCanonicalPassesAndRejectsIncompleteBindings();
     TestCanonicalWorldColorAliasUsesLitStateAndLightmaps();
     TestNativePixelShaderFamiliesSelectPortableMaterialTechniques();
     TestDistanceFalloffVertexShaderCarriesCanonicalMaterialConstants();

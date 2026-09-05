@@ -7,6 +7,35 @@
 #include <numeric>
 #include <vector>
 
+// R_RenderDrawSurfListMaterial runs each pass over the complete material
+// sublist. Camera visibility can split that sublist into several ranges.
+// Never interleave its two passes per range: overlap makes that observable.
+template<typename BatchFor, typename HasSecondPass, typename DrawGroup>
+void WebRenderer_ForEachMaterialPassGroup(std::size_t count, BatchFor batchFor,
+    HasSecondPass hasSecondPass, DrawGroup drawGroup)
+{
+    for (std::size_t begin = 0; begin < count;)
+    {
+        std::size_t end = begin + 1;
+        const auto &first = batchFor(begin);
+        const bool second = hasSecondPass(first);
+        if (second)
+            while (end < count)
+            {
+                const auto &next = batchFor(end);
+                if (next.materialIdentity != first.materialIdentity ||
+                    next.techniqueType != first.techniqueType ||
+                    next.sourceKind != first.sourceKind ||
+                    next.primaryLightIndex != first.primaryLightIndex ||
+                    next.depthHack != first.depthHack || !hasSecondPass(next)) break;
+                ++end;
+            }
+        drawGroup(begin, end, 0u);
+        if (second) drawGroup(begin, end, 1u);
+        begin = end;
+    }
+}
+
 // Preserve every non-reorderable entry as an anchor. Stable-sort only the
 // contiguous runs that the caller has proved order-independent.
 template<typename Entries, typename BatchFor, typename CanReorder,

@@ -100,6 +100,11 @@ foreach ($requiredOutput in $requiredOutputs) {
     }
 }
 
+if (-not $Diagnostics -and $Configuration -eq 'Release') {
+    & node (Join-Path $PSScriptRoot 'minify_web_product.mjs') $siteDirectory
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to minify the production host modules. Run npm.cmd ci.' }
+}
+
 Write-Host "Browser build ready at $siteDirectory\index.html"
 $totalTimer.Stop()
 Write-Host ("KISAK_TIMING web_build_total_seconds={0:N3}" -f $totalTimer.Elapsed.TotalSeconds)

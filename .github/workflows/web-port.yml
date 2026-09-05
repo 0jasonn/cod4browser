@@ -119,6 +119,8 @@ jobs:
       - name: Install Chromium
         run: npx.cmd playwright install chromium
       - name: Enforce production artifact boundary
+        id: product-boundary
+        continue-on-error: true
         run: npm.cmd run check:web:product
       - name: Test production boot and protocol surface
         run: npm.cmd run test:browser:product
@@ -130,11 +132,16 @@ jobs:
       - name: Run non-duplicated browser remainder
         run: npm.cmd run test:browser:remainder
       - name: Record tested artifact sizes
+        if: ${{ !cancelled() }}
         shell: powershell
         run: |
           Get-ChildItem build/web/site -File | Sort-Object Name | ForEach-Object {
             Write-Host ("KISAK_ARTIFACT {0} bytes={1}" -f $_.Name, $_.Length)
           }
+      - name: Require production release gate
+        if: ${{ !cancelled() && steps.product-boundary.outcome != 'success' }}
+        shell: powershell
+        run: throw 'Production artifact boundary failed; see its independent results above.'
       - name: Upload production site
         uses: actions/upload-artifact@v4
         with:

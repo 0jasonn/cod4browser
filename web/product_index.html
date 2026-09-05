@@ -17,8 +17,6 @@
             <header class="panel-heading">
                 <h1 id="renderer-title">KisakCOD</h1>
                 <span id="frame-counter">Starting engine</span>
-                <span id="save-status" role="status" hidden></span>
-                <span id="cinematic-status" role="status" hidden></span>
             </header>
             <div class="canvas-wrap">
                 <canvas id="game-canvas" width="960" height="540" tabindex="0">
@@ -58,6 +56,7 @@
                     <button id="clear-assets-button" class="secondary-action" type="button" hidden>
                         Remove browser copy
                     </button>
+                    <button id="close-install-button" class="secondary-action" type="button" hidden>Back to game</button>
                 </div>
                 <input id="install-folder-input" type="file" webkitdirectory directory multiple hidden>
             </div>
@@ -79,6 +78,23 @@
             <pre id="boot-log" aria-live="polite"></pre>
         </section>
     </main>
+    <button id="browser-controls-button" class="secondary-action" type="button"
+        aria-haspopup="dialog" aria-keyshortcuts="Shift+Escape">Browser controls</button>
+    <dialog id="browser-dialog" aria-labelledby="browser-title">
+        <h2 id="browser-title">Browser controls</h2>
+        <p>Shift + Escape opens these controls. Escape returns to the game.</p>
+        <button id="fullscreen-button" class="secondary-action" type="button">Enter fullscreen</button>
+        <p id="fullscreen-status" role="status"></p>
+        <p id="save-status" role="status" hidden></p>
+        <button id="retry-save-button" class="primary-action" type="button" hidden>Retry save</button>
+        <p id="cinematic-status" role="status" hidden></p>
+        <button id="dismiss-movie-button" class="secondary-action" type="button" hidden>Continue without movie</button>
+        <div class="asset-actions">
+            <button id="manage-install-button" class="secondary-action" type="button">Manage installation</button>
+            <button id="close-browser-button" class="primary-action" type="button" autofocus>Back to game</button>
+        </div>
+        <p><a href="./licenses.txt">Open-source licenses</a></p>
+    </dialog>
     <dialog id="quit-dialog" aria-labelledby="quit-title">
         <h2 id="quit-title">KisakCOD launcher</h2>
         <p role="status">Saving your browser profile…</p>

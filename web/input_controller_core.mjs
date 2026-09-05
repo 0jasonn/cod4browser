@@ -338,6 +338,11 @@ export function createInputControllerCore({
     textInput?.addEventListener("input", clearTextInput);
 
     return Object.freeze({
+        release() {
+            clearRelativeMovement();
+            releaseHeldInput();
+            releasePointerLock();
+        },
         dispose() {
             if (disposed) return;
             clearRelativeMovement();

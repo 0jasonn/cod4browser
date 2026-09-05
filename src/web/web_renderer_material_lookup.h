@@ -8,6 +8,54 @@
 #include <cstring>
 #include <iterator>
 
+// The encountered vertcol_mul_fog family has exactly two draws. Keep its
+// canonical pass/state identity; this is a shader boundary, not a new asset.
+inline const GfxStateBits *WebRenderer_GetMultiplyFogPass(
+    const Material *material, unsigned type) noexcept
+{
+    const auto *set = material ? material->techniqueSet : nullptr;
+    if (set && set->remappedTechniqueSet) set = set->remappedTechniqueSet;
+    const auto *technique = set && type < 34 ? set->techniques[type] : nullptr;
+    if (!technique || technique->passCount != 2 || !material->stateBitsTable)
+        return nullptr;
+    const unsigned entry = material->stateBitsEntry[type];
+    if (entry == 255 || entry + 1 >= material->stateBitsCount) return nullptr;
+    bool colorMap = false;
+    for (unsigned i = 0; material->textureTable && i < material->textureCount; ++i)
+        colorMap |= material->textureTable[i].nameHash == 0xa0ab1041u &&
+            material->textureTable[i].semantic != 11 && material->textureTable[i].u.image;
+    if (!colorMap) return nullptr;
+    for (unsigned p = 0; p < 2; ++p)
+    {
+        const auto &pass = technique->passArray[p];
+        const char *name = p ? "mul_fog.hlsl" : "mul.hlsl";
+        if (!pass.vertexShader || !pass.vertexShader->name ||
+            std::strcmp(pass.vertexShader->name, name) ||
+            !pass.pixelShader || !pass.pixelShader->name ||
+            std::strcmp(pass.pixelShader->name, name) || pass.customSamplerFlags)
+            return nullptr;
+        const unsigned count = pass.perPrimArgCount + pass.perObjArgCount + pass.stableArgCount;
+        if (!pass.args || count != (p ? 5u : 3u)) return nullptr;
+        unsigned bindings = 0;
+        for (unsigned a = 0; a < count; ++a)
+        {
+            const auto &arg = pass.args[a];
+            if (arg.type == 2 && arg.dest == 0 && arg.u.nameHash == 0xa0ab1041u)
+                bindings |= 1;
+            else if (arg.type == 3 && arg.u.codeConst.firstRow == 0)
+            {
+                const auto &c = arg.u.codeConst;
+                if (arg.dest == 4 && c.index == 60 && c.rowCount == 4) bindings |= 2;
+                if (arg.dest == 0 && c.index == 76 && c.rowCount == 4) bindings |= 4;
+                if (p && arg.dest == 21 && c.index == 41 && c.rowCount == 1) bindings |= 8;
+                if (p && arg.dest == 22 && c.index == 42 && c.rowCount == 1) bindings |= 16;
+            }
+        }
+        if (bindings != (p ? 31u : 7u)) return nullptr;
+    }
+    return &material->stateBitsTable[entry + 1];
+}
+
 inline bool WebRenderer_IsCinematicMaterial(const Material *material, unsigned type) noexcept
 {
     const auto *set = material ? material->techniqueSet : nullptr;

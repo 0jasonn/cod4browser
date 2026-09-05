@@ -362,6 +362,7 @@ struct MaterialFixtureOptions
     std::int32_t imageResourceSize = 4;
     std::uint32_t imagePayload = 0x494D4733u;
     const char *imageName = "images/gate3";
+    bool corruptTrailingRawFile = false;
 };
 
 std::vector<std::uint8_t> MakeMaterialXFile(
@@ -371,7 +372,8 @@ std::vector<std::uint8_t> MakeMaterialXFile(
     const char *imageName = options.imageName;
     const bool inlineAsset = options.assetPointer == UINT32_MAX ||
         options.assetPointer == UINT32_MAX - 1u;
-    const std::uint32_t assetCount = options.includeAliasAsset ? 2u : 1u;
+    const std::uint32_t assetCount = (options.includeAliasAsset ? 2u : 1u) +
+        (options.corruptTrailingRawFile ? 1u : 0u);
 
     std::vector<std::uint8_t> inflated;
     AppendU32(inflated, 16384);
@@ -388,7 +390,11 @@ std::vector<std::uint8_t> MakeMaterialXFile(
     if (options.includeAliasAsset)
     {
         AppendU32(inflated, ASSET_TYPE_MATERIAL);
-        AppendU32(inflated, 0x40000011u);
+        AppendU32(inflated, 0x40000001u + assetCount * sizeof(XAsset));
+    }
+    if (options.corruptTrailingRawFile)
+    {
+        AppendU32(inflated, ASSET_TYPE_RAWFILE); AppendU32(inflated, UINT32_MAX);
     }
     if (!inlineAsset) return CompressXFile(inflated);
 
@@ -558,6 +564,11 @@ std::vector<std::uint8_t> MakeMaterialXFile(
         AppendU32(inflated, 0x55555555u);
         block4Offset += sizeof(GfxStateBits);
     }
+    if (options.corruptTrailingRawFile)
+    {
+        AppendU32(inflated, UINT32_MAX); AppendU32(inflated, 8192); AppendU32(inflated, 1);
+        AppendCString(inflated, "tests/material-oracle-failure");
+    }
     return CompressXFile(inflated);
 }
 
@@ -570,6 +581,8 @@ struct XModelFixtureOptions
     bool terminateName = true;
     bool includeSurfaceVertices = true;
     bool includeSurfaceIndices = true;
+    bool corruptTrailingRawFile = false;
+    float vertexZ = 3.0f;
 };
 
 std::vector<std::uint8_t> MakeXModelXFile(
@@ -577,7 +590,8 @@ std::vector<std::uint8_t> MakeXModelXFile(
 {
     const bool inlineAsset = options.assetPointer == UINT32_MAX ||
         options.assetPointer == UINT32_MAX - 1u;
-    const std::uint32_t assetCount = options.includeAliasAsset ? 2u : 1u;
+    const std::uint32_t assetCount = (options.includeAliasAsset ? 2u : 1u) +
+        (options.corruptTrailingRawFile ? 1u : 0u);
     std::vector<std::uint8_t> inflated;
     AppendU32(inflated, 32768);
     AppendU32(inflated, 0);
@@ -595,7 +609,14 @@ std::vector<std::uint8_t> MakeXModelXFile(
     if (options.includeAliasAsset)
     {
         AppendU32(inflated, ASSET_TYPE_XMODEL);
-        AppendU32(inflated, 0x40000011u);
+        // Block 4: script-string pointer/name occupy 14 bytes, then the
+        // aligned XAsset list starts at 16. Alias its header at 20, not its
+        // type word at 16. The independent oracle checks the final identity.
+        AppendU32(inflated, 0x40000015u);
+    }
+    if (options.corruptTrailingRawFile)
+    {
+        AppendU32(inflated, ASSET_TYPE_RAWFILE); AppendU32(inflated, UINT32_MAX);
     }
     if (!inlineAsset || !options.includeBody) return CompressXFile(inflated);
 
@@ -643,7 +664,7 @@ std::vector<std::uint8_t> MakeXModelXFile(
         GfxPackedVertex vertex{};
         vertex.xyz[0] = 1.0f;
         vertex.xyz[1] = 2.0f;
-        vertex.xyz[2] = 3.0f;
+        vertex.xyz[2] = options.vertexZ;
         vertex.color.packed = 0xff804020u;
         AppendObject(inflated, vertex);
     }
@@ -717,6 +738,11 @@ std::vector<std::uint8_t> MakeXModelXFile(
     cplane_s planes{};
     planes.normal[2] = 1.0f;
     AppendObject(inflated, planes);
+    if (options.corruptTrailingRawFile)
+    {
+        AppendU32(inflated, UINT32_MAX); AppendU32(inflated, 16384); AppendU32(inflated, 1);
+        AppendCString(inflated, "tests/model-oracle-failure");
+    }
     return CompressXFile(inflated);
 }
 
@@ -2500,6 +2526,20 @@ void DB_RuntimeTracePublicationEnd(XAssetType type, const char *name,
     std::uint32_t entryIndex, std::uint32_t poolIndex, std::size_t freeBefore,
     std::size_t freeAfter, std::uint32_t hash, std::uint32_t zoneIndex)
 {
+#if defined(KISAK_DB_ASSET_ORACLE_TEST)
+    // Normalize addresses to stream-block offsets so the original Win32 loader
+    // and adapted Win32/Wasm loaders produce directly comparable evidence.
+    std::printf("oracle-publication type=%d name=%s block=%u depth=%u offsets=",
+        type, name ? name : "", g_streamPosIndex, g_streamPosStackIndex);
+    for (unsigned index = 0; index < 9; ++index)
+    {
+        const auto *position = index == g_streamPosIndex ? g_streamPos : g_streamPosArray[index];
+        const auto *base = g_streamZoneMem->blocks[index].data;
+        std::printf("%s%u", index ? "," : "", position && base && position >= base
+            ? static_cast<unsigned>(position - base) : 0u);
+    }
+    std::printf(" pool=%u free=%zu,%zu zone=%u\n", poolIndex, freeBefore, freeAfter, zoneIndex);
+#endif
     g_publications.emplace_back(type, name ? name : "");
     g_trace.publicationEnd = true;
     g_trace.assetType = type;
@@ -3047,8 +3087,15 @@ int TestZoneRecovery()
 }
 #endif
 
+#if defined(KISAK_DB_ASSET_ORACLE_TEST)
+#include "db_load_asset_oracle_tests.inl"
+#endif
+
 int main(int argc, char **argv)
 {
+#if defined(KISAK_DB_ASSET_ORACLE_TEST)
+    return TestIndependentAssetOracle();
+#endif
 #if defined(KISAK_DB_ZONE_RECOVERY_TEST)
     return TestZoneRecovery();
 #endif

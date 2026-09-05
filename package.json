@@ -29,6 +29,7 @@
   "devDependencies": {
     "@playwright/test": "1.61.1",
     "eslint": "10.9.0",
+    "terser": "5.39.0",
     "typescript": "7.0.2"
   }
 }

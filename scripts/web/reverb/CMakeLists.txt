@@ -50,8 +50,16 @@ if (EMSCRIPTEN)
     # It never initializes OpenAL's CPU-dispatched source mixer. That SSE1
     # implementation imports unsupported MMX intrinsics and is not linked.
     list(FILTER openal_sources EXCLUDE REGEX "(^|/)core/mixer/mixer_sse[.]cpp$")
+    list(LENGTH openal_sources before_logging)
+    list(FILTER openal_sources EXCLUDE REGEX "(^|/)core/logging[.]cpp$")
+    list(LENGTH openal_sources after_logging)
+    math(EXPR expected_logging "${after_logging} + 1")
+    if (NOT before_logging EQUAL expected_logging)
+        message(FATAL_ERROR "OpenAL logging inventory changed; review the worklet adapter")
+    endif()
     set_property(TARGET OpenAL PROPERTY SOURCES "${openal_sources}")
-    target_sources(OpenAL PRIVATE "${KISAK_ROOT}/src/web/web_audio_fpu.cpp")
+    target_sources(OpenAL PRIVATE "${KISAK_ROOT}/src/web/web_audio_fpu.cpp"
+        "${KISAK_ROOT}/src/web/web_audio_log.cpp")
 endif()
 add_library(kisak_reverb OBJECT "${KISAK_ROOT}/src/web/web_reverb.cpp")
 target_compile_features(kisak_reverb PRIVATE cxx_std_20)
@@ -73,6 +81,7 @@ if (EMSCRIPTEN)
     add_executable(reverb_dsp $<TARGET_OBJECTS:kisak_reverb>)
     target_link_libraries(reverb_dsp PRIVATE OpenAL::OpenAL)
     target_link_options(reverb_dsp PRIVATE -Oz -flto --no-entry
+        "-Wl,-Map=${CMAKE_BINARY_DIR}/reverb-dsp.map"
         "-sENVIRONMENT=worklet" "-sMODULARIZE=1" "-sEXPORT_ES6=1"
         "-sSINGLE_FILE=1" "-sWASM_ASYNC_COMPILATION=0" "-sFILESYSTEM=0"
         "-sINITIAL_MEMORY=33554432"

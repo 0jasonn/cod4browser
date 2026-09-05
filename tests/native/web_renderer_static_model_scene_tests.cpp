@@ -12,6 +12,7 @@
 #include <web/web_renderer_world_scene.h>
 #include <xanim/xmodel_types.h>
 #include <xanim/xsurface_types.h>
+#include "multiply_fog_fixture.h"
 
 #include <algorithm>
 #include <array>
@@ -319,6 +320,22 @@ void TestCanonicalInstancesShareOneMaterialSurfaceBatch()
         WebRendererStaticModelSceneResult::Success);
     assert(!spotOnlyCommand.batches[0].draw.castsSunShadow);
     assert(spotOnlyCommand.batches[0].draw.castsSpotShadow);
+}
+
+void TestMultiplyFogMaterialSurvivesStaticInstanceBoundary()
+{
+    Fixture fixture;
+    MultiplyFogFixture material;
+    fixture.materials[0] = &material.material;
+    WebRendererStaticModelSceneCommand command;
+    assert(WebRenderer_BuildStaticModelSceneCommand(fixture.world, command) ==
+        WebRendererStaticModelSceneResult::Success);
+    assert(command.batches.size() == 1 && command.instances.size() == 2);
+    const auto &draw = command.batches[0].draw;
+    assert(draw.technique == WebRendererWorldTechnique::VertexColorMultiplyFog);
+    assert(draw.materialIdentity == &material.material && draw.techniqueType == 7);
+    assert(draw.baseImage == &material.image && draw.samplerState == 0x62);
+    assert(draw.stateBits[0] == material.states[1].loadBits[0]);
 }
 
 void TestSunShadowPartitionUsesCanonicalBounds()
@@ -1331,6 +1348,7 @@ int main()
     TestCanonicalCameraVisibilityAndIndependentPacking();
 #endif
     TestCanonicalInstancesShareOneMaterialSurfaceBatch();
+    TestMultiplyFogMaterialSurvivesStaticInstanceBoundary();
     TestDeformedSiblingSelectsNativeSkinnedReceiverType();
     TestSunShadowPartitionUsesCanonicalBounds();
     TestSpotShadowVisibilityUsesAuthoredCanonicalMembership();

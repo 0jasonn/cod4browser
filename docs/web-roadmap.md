@@ -15,6 +15,22 @@ benchmarks do not qualify current active-campaign performance.
 Work proceeds independently of campaign completion. Address an observed
 engine/platform defect or a named fidelity gap in this order:
 
+The 2026-09-05 audit covered browser fullscreen/recovery,
+production size repair, one encountered authored-material technique, independent
+native Material/Image and model/collision database verification, then current
+foreground production performance. Fullscreen/recovery implementation and its
+48-case production tier pass. The unchanged production size gate is restored.
+The encountered `vertcol_mul_fog` technique now preserves both passes; native
+shader pixel comparisons, native/Wasm boundaries and owned three-scene/context
+observations pass. The original `db_load.cpp` Material/Image and XModel oracle
+matches adapted native/Wasm publication/block traces and rollback/retry/resource
+lifetime assertions. Seven foreground production windows now cover both
+resolutions, transitions, real context recovery, audio, memory and host
+responsiveness. CargoShip remains slow; isolate its current CPU/GPU stages
+before choosing another optimization. The other scenes' capped rates do not
+qualify busy gameplay. See [current measurements](evidence/browser-frame-time-2026-09-02.md#current-production-measurements--2026-09-05).
+The existing priorities below remain the broader fidelity backlog.
+
 1. **Text input:** qualify Windows IME candidate UI, non-Western code pages,
    localized glyphs and clipboard behavior beyond the bounded trusted-paste path.
 2. **Graphics controls:** qualify remaining shipped controls, unknown shader
@@ -31,13 +47,12 @@ engine/platform defect or a named fidelity gap in this order:
    arbitrary audio tails and hardware output latency. See the
    [codec](cinematic-codec.md) and [reverb](browser-reverb.md) boundaries.
 5. **Recovery/imported data:** extend the independent native loader oracle
-   beyond RawFile and bounded alias cases. Qualify larger multi-zone request
+   beyond the verified RawFile, Material/Image and XModel cases. Qualify larger multi-zone request
    graphs, non-world device rollback, image pressure, malformed loads and
    repeated transitions. Retain canonical DB publication and error cleanup;
    do not build a replacement loader.
 6. **Distribution:** retain source/archive and production export boundaries;
-   resolve the existing product size-gate overrun without silently raising its
-   budget. Qualify Firefox and Safari separately from Chrome/Edge. Gamepad
+   keep the restored product size gate within its unchanged budgets. Qualify Firefox and Safari separately from Chrome/Edge. Gamepad
    requirements must follow the product/reference; keyboard/mouse fidelity
    remains required.
 7. **Measured performance:** profile current foreground production gameplay,

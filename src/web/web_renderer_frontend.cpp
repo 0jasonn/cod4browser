@@ -85,6 +85,54 @@ extern GfxWorld s_world;
 
 namespace
 {
+#if KISAK_WEB_DIAGNOSTICS
+// Bounded publication-time observations of canonical assets, not a retained
+// browser material model. Include every pass of each selected technique so a
+// base-texture fallback cannot masquerade as authored material support.
+void ReportMaterialPasses(const WebRendererWorldBatchDesc &draw,
+    std::vector<std::pair<const Material *, unsigned>> &reported)
+{
+    const Material *material = draw.materialIdentity;
+    const auto key = std::pair<const Material *, unsigned>{material, draw.techniqueType};
+    if (!material || reported.size() >= 1024 ||
+        std::find(reported.begin(), reported.end(), key) != reported.end()) return;
+    reported.push_back(key);
+    const auto *set = material->techniqueSet;
+    if (set && set->remappedTechniqueSet) set = set->remappedTechniqueSet;
+    const auto *technique = set && draw.techniqueType < 34
+        ? set->techniques[draw.techniqueType] : nullptr;
+    if (!technique) return;
+    const unsigned entry = material->stateBitsEntry[draw.techniqueType];
+    for (unsigned p = 0; p < technique->passCount; ++p)
+    {
+        const auto &pass = technique->passArray[p];
+        const auto *bits = material->stateBitsTable && entry != 255 &&
+            entry + p < material->stateBitsCount
+            ? &material->stateBitsTable[entry + p] : nullptr;
+        Web_Log(WebLogLevel::Info,
+            "[kisakcod-web] Material pass: material='%s' type=%u backend=%u "
+            "pass=%u/%u technique='%s' vs='%s' ps='%s' samplers=%u "
+            "state=%08x/%08x validState=%u.\n",
+            material->info.name, draw.techniqueType, unsigned(draw.technique),
+            p, technique->passCount, technique->name,
+            pass.vertexShader ? pass.vertexShader->name : "<none>",
+            pass.pixelShader ? pass.pixelShader->name : "<none>",
+            pass.customSamplerFlags, bits ? bits->loadBits[0] : 0,
+            bits ? bits->loadBits[1] : 0, bits != nullptr);
+        for (unsigned a = 0; pass.args && a < unsigned(pass.perPrimArgCount) +
+            pass.perObjArgCount + pass.stableArgCount; ++a)
+        {
+            const auto &arg = pass.args[a];
+            Web_Log(WebLogLevel::Info,
+                "[kisakcod-web] Material arg: material='%s' slot=%u pass=%u "
+                "arg=%u type=%u dest=%u payload=%08x.\n",
+                material->info.name, draw.techniqueType, p, a,
+                arg.type, arg.dest, arg.u.nameHash);
+        }
+    }
+}
+#endif
+
 cmd_function_s g_applyPicmipCommand{};
 bool g_applyPicmipCommandRegistered = false;
 
@@ -3445,8 +3493,14 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                 }
             }
             std::vector<const Material *> unsupportedMaterials;
+#if KISAK_WEB_DIAGNOSTICS
+            std::vector<std::pair<const Material *, unsigned>> reportedMaterials;
+#endif
             for (const WebRendererWorldBatchDesc &batch : command.batches)
             {
+#if KISAK_WEB_DIAGNOSTICS
+                ReportMaterialPasses(batch, reportedMaterials);
+#endif
                 if (batch.technique !=
                         WebRendererWorldTechnique::BackendFallback ||
                     !batch.materialIdentity ||
@@ -3528,8 +3582,16 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                 "resolving material images.\n",
                 command.batches.size(), command.vertices.size(),
                 command.indices.size(), command.instances.size());
+#if KISAK_WEB_DIAGNOSTICS
+            std::vector<std::pair<const Material *, unsigned>> reportedMaterials;
+#endif
             for (WebRendererStaticModelBatchDesc &batch : command.batches)
+            {
                 ResolveRendererBatchImages(batch.draw);
+#if KISAK_WEB_DIAGNOSTICS
+                ReportMaterialPasses(batch.draw, reportedMaterials);
+#endif
+            }
             const WebRendererModelLightingAtlasDesc lightingAtlas{
                 command.modelLightingAtlas.pixels.data(),
                 command.modelLightingAtlas.width,

@@ -7,6 +7,13 @@ or cleanup work.
 
 ## Retail fidelity acceptance — 2026-09-02
 
+The [2026-09-05 production windows](evidence/browser-frame-time-2026-09-02.md#current-production-measurements--2026-09-05)
+add current Killhouse/CargoShip/AC130 rendering, timing, audio and context-recovery
+observations. The encountered two-pass multiply/fog material also has native
+shader and synthetic boundary evidence. Neither changes mission-completion or
+Steam/native visual-fidelity classifications; no automated player route or
+objective success was supplied.
+
 The [2026-09-03 AC130 check](evidence/ac130-rendering-2026-09-03.md) establishes
 **RENDERS** through canonical lifecycle completion and 60 seconds of stationary
 world frames after CargoShip. Production rendering and separate screenshot

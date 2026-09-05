@@ -1,5 +1,33 @@
 # Display options and renderer restart — 2026-09-03
 
+## Browser fullscreen and recovery — 2026-09-05
+
+Production now requests document fullscreen from an explicit button in Browser
+controls. Shift+Escape opens the accessible modal during renderer-only gameplay;
+the button is visible in canonical absolute-mouse mode, or when recovery needs
+attention. Fullscreen includes the canvas, text sink and recovery dialogs.
+Fullscreen changes release held input and pointer lock, resize through the
+existing Worker boundary and restore text focus. A subsequent canvas press
+can reacquire pointer lock. Denied requests remain actionable in the dialog.
+Canonical `r_mode`, aspect, resolution persistence and viewport updates remain
+unchanged; browser fullscreen is not a native exclusive display mode and does
+not change the engine's windowed display policy.
+
+Pending save failures expose Retry save through the existing checkpoint owner.
+Missing/failed movies expose their reason, installation management and dismissal;
+dismissal only closes the browser notice, because canonical cinematic handling
+already decides whether playback continues. Installation management reveals the
+existing validated import/replacement/removal controls. No game settings or
+mission state are copied into the host.
+
+At base `9612ab4c` plus this worktree, pinned Release build/runtime-prefix and
+static checks pass. Chromium production verification passes 48 tests, including
+three new cases covering actual fullscreen entry/exit, resize, pointer lock,
+focus, modal Escape, denial, movie recovery, installation management and a
+failed checkpoint followed by successful retry. These synthetic checks establish
+browser behavior, not campaign or native visual acceptance. Build-size work
+continues separately and requires retesting the final artifact.
+
 The shipped Video Mode control now changes the browser render resolution.
 Automatic follows canvas layout and pixel density; fixed modes retain their
 render size and aspect when the page resizes. Screen Refresh Rate reports

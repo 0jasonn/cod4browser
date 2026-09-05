@@ -1,5 +1,32 @@
 import { expect, test } from "@playwright/test";
 
+test("multiply-fog material preserves native pass pixels and recovers its WebGL context", async ({ page }) => {
+    await page.goto("/");
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state)).toBe("running");
+    const call = (name, ...args) => page.evaluate(({ name, args }) =>
+        globalThis.__KISAKCOD_WEB__.module.call(name, ...args), { name, args });
+    // D3D9 executing the encountered native mul / mul_fog vertex and pixel
+    // programs with synthetic inputs. No proprietary program or image fixture
+    // is shipped. Allow one UNORM quantization step between the two backends.
+    const native = [[95,60,30,255], [100,76,61,255], [95,60,30,255],
+        [95,60,30,255], [153,102,51,255], [48,50,72,255],
+        [69,68,80,255], [95,60,30,255], [100,76,61,255]];
+    const check = async () => {
+        for (const [scenario, expected] of native.entries()) {
+            const pixel = (await call("_KisakWeb_TestMultiplyFogPixel", scenario)) >>> 0;
+            const actual = [pixel & 255, (pixel >>> 8) & 255, (pixel >>> 16) & 255, pixel >>> 24];
+            actual.forEach((value, i) => expect(Math.abs(value - expected[i]),
+                `scenario ${scenario}, channel ${i}: ${actual}`).toBeLessThanOrEqual(1));
+        }
+    };
+    await check();
+    expect(await call("_KisakWeb_TestLoseWebGLContext")).toBe(1);
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state)).toBe("renderer-lost");
+    expect(await call("_KisakWeb_TestRestoreWebGLContext")).toBe(1);
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state)).toBe("running");
+    await check();
+});
+
 test("authored distortion projects its basis, rejects foreground offsets and resolves MSAA", async ({ page }) => {
     await page.goto("/");
     await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state)).toBe("running");
