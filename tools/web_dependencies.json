@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "artifacts": {
+    "kisakcod.wasm": [
+      { "name": "KisakCOD and bundled ODE", "identity": "corresponding source revision", "license": "GPL-3.0; retain bundled notices" },
+      { "name": "zlib", "version": "1.3.2", "provider": "Emscripten 6.0.6 tools/ports/zlib.py", "license": "Zlib" },
+      { "name": "FFmpeg", "version": "8.0.3", "identityFile": "tools/cinematic_codec.json", "scope": "Bink demux/decode and required libavformat/libavcodec/libavutil code", "license": "LGPL-2.1-or-later" },
+      { "name": "Emscripten libc/libc++ and platform glue", "identityFile": "tools/web_toolchain.json", "license": "upstream component notices" }
+    ],
+    "reverb_dsp.mjs": [
+      { "name": "OpenAL Soft", "version": "1.25.2", "commit": "b2c48f7718ef3fcf67921a8b6534c4914e328970", "identityFile": "scripts/web/reverb/CMakeLists.txt", "scope": "reverb DSP and required support; no native device DLL", "license": "LGPL-2.0-or-later" }
+    ],
+    "host JavaScript": [
+      { "name": "Kisak browser host", "identity": "corresponding source revision", "license": "GPL-3.0" }
+    ],
+    "Windows portable tests (not shipped)": [
+      { "name": "zlib", "version": "1.1.4", "provider": "deps/zlib", "license": "Zlib" }
+    ],
+    "Linux portable tests (not shipped)": [
+      { "name": "zlib", "provider": "runner zlib1g-dev; actual version recorded in CI", "license": "Zlib" }
+    ]
+  },
+  "buildOnly": { "javascript": "package-lock.json", "compiler": "tools/web_toolchain.json" },
+  "advisoryReview": {
+    "status": "partial",
+    "reviewedAt": "2026-09-06",
+    "observations": [
+      { "component": "browser zlib 1.3.2", "source": "https://www.zlib.net/", "result": "The linked version includes the upstream 1.3.2 audit fixes. Vendored test zlib 1.1.4 is not the browser library." },
+      { "component": "FFmpeg 8.0.3", "source": "https://www.ffmpeg.org/security.html", "result": "The pinned 8.0.3 release is listed as containing the current 8.0 branch fixes. Individual codec reachability was not audited." },
+      { "component": "OpenAL Soft reverb subset", "source": "https://github.com/kcat/openal-soft/security/advisories", "result": "No published maintainer advisories were listed; this is not proof of absence of vulnerabilities." }
+    ],
+    "scope": "Primary release/advisory comparison only, not a complete vulnerability or license clearance. Kisak, bundled minizip, ODE, libc/libc++, JavaScript build dependencies and native-only test libraries still need review."
+  }
+}

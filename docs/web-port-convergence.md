@@ -98,7 +98,7 @@ platform makes that behavior impossible.
 | Boundary | Implementation |
 | --- | --- |
 | Host/Worker split | DOM, picker and persistent-storage ownership stay on the main thread; Wasm and OffscreenCanvas run in a Worker. |
-| Storage | OPFS/IndexedDB-backed import, validation, atomic replacement and synchronous Worker reads. File System Access is optional. |
+| Storage | OPFS/IndexedDB import and synchronous Worker reads. Canonical temporary-save/rename calls use a serialized platform journal with staged destination publication, bounded persistence queues and restart replay. Raw export preserves invalid homes. A versioned backup envelope and staged, non-overwriting restore own file transport/recovery only; JavaScript does not interpret save formats. File System Access is optional. See [storage ordering and budgets](web-architecture.md#storage-and-shutdown). |
 | Rendering | Exact encountered `vertcol_mul_fog` pass/argument selection retains canonical Material identity and group order, using the existing colorMap and per-pass state decoder. Unknown multipass families remain unqualified. WebGL2 context, buffers, textures, shaders, render targets, context recovery and presentation. GPU handles stay private to the backend. The shared 2D image pools retain the selected canonical encoded source and use the existing image decoder, including canonical IWI wavelet formats, transiently for initial upload and context restoration; this is recovery data at the platform boundary, not a second asset model or parser. |
 | Input host | Pointer lock, keyboard/mouse normalization, trusted paste snapshot/cache transport, focus release and cursor mode. |
 | Browser controls | User-initiated document fullscreen and an accessible recovery modal own only browser presentation, checkpoint retry and installation management. Canonical mouse mode determines ordinary visibility; Shift+Escape remains available during renderer-only gameplay. Fullscreen preserves canonical resolution/aspect policy. |
@@ -693,6 +693,18 @@ map-lifecycle regression. Continue recording this latency rather than treating
 the memory saving as free.
 
 ## Verification scope
+
+The 2026-09-06 remediation strengthens the existing platform seam: shared
+assertion guards keep optimized native/Wasm tests active; canonical 32-bit
+layout tests remain Windows x86/Wasm, and portable primary-light math avoids
+canonical headers. No ABI assertion or engine object model changed. Worker
+messages now validate into discriminated request variants, and the real Wasm
+module contract validates required exports before readiness. Diagnostic frame
+samples include separate live/reserved/queued storage accounting; production
+gains no diagnostic API. Recovery, protocol and packaging tests are synthetic
+platform evidence. Linux/sanitizers, matched active CargoShip performance,
+actual release-version update/rollback, offline campaign acceptance and the
+failing production size/export gate remain open; this is not a qualified alpha.
 
 Use the [test inventory](web-test-inventory.md) for current validation tiers
 and known limits. Native/Wasm parser tests own semantics that do not require a

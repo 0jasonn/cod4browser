@@ -46,6 +46,9 @@ foreach ($requiredPath in @(
 $env:EM_CONFIG = $emscriptenConfig
 $env:EMSDK = $emsdkRoot
 
+& node (Join-Path $PSScriptRoot 'check_toolchain.mjs') --web
+if ($LASTEXITCODE -ne 0) { throw 'Pinned web toolchain preflight failed.' }
+
 & (Join-Path $PSScriptRoot 'bootstrap_cinematic_codec.ps1')
 & (Join-Path $PSScriptRoot 'build_reverb.ps1') -Jobs $buildJobs
 
@@ -103,6 +106,8 @@ foreach ($requiredOutput in $requiredOutputs) {
 if (-not $Diagnostics -and $Configuration -eq 'Release') {
     & node (Join-Path $PSScriptRoot 'minify_web_product.mjs') $siteDirectory
     if ($LASTEXITCODE -ne 0) { throw 'Failed to minify the production host modules. Run npm.cmd ci.' }
+    & python (Join-Path $PSScriptRoot 'qualify_web_release.py') record $siteDirectory (Join-Path $buildDirectory 'build-receipt.json')
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to record production build provenance.' }
 }
 
 Write-Host "Browser build ready at $siteDirectory\index.html"

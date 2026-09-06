@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+    PRODUCT_REQUIRED_EXPORTS,
+    validateProductModule,
     ENGINE_PROTOCOL_VERSION,
     PRODUCT_OPERATIONS,
     PRODUCT_ONE_WAY_OPERATIONS,
@@ -75,6 +77,18 @@ test("the production protocol rejects malformed and diagnostic requests", () => 
     for (const [message, code] of rejects) {
         assert.throws(() => validateProductRequest(message), (error) => error.code === code);
     }
+});
+
+test("production startup rejects missing, malformed and diagnostic Wasm exports", () => {
+    const module = Object.fromEntries(PRODUCT_REQUIRED_EXPORTS.map((name) => [name, () => 0]));
+    module.HEAPU8 = new Uint8Array(1024);
+    assert.doesNotThrow(() => validateProductModule(module));
+    for (const name of PRODUCT_REQUIRED_EXPORTS) {
+        assert.throws(() => validateProductModule({ ...module, [name]: undefined }), { code: "WASM_EXPORT_CONTRACT" });
+        assert.throws(() => validateProductModule({ ...module, [name]: 42 }), { code: "WASM_EXPORT_CONTRACT" });
+    }
+    assert.throws(() => validateProductModule({ ...module, HEAPU8: [] }), { code: "WASM_EXPORT_CONTRACT" });
+    assert.throws(() => validateProductModule({ ...module, _KisakWeb_TestState: () => 0 }), { code: "WASM_EXPORT_CONTRACT" });
 });
 
 test("character transport is bounded to native nonzero bytes", () => {

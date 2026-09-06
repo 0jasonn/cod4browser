@@ -33,10 +33,6 @@ std::int32_t g_zoneSync = -1;
 std::array<char, 64> g_spawnMap{};
 int g_spawnSavegame = -1;
 int g_spawnCount = 0;
-#if defined(KISAK_WEB)
-bool g_deferMapLoad = false;
-unsigned g_cinematicMapRequests = 0;
-#endif
 std::array<const char *, 6> g_clientStages{};
 std::size_t g_clientStageCount = 0;
 struct CapturedLifecycleEvent
@@ -110,16 +106,6 @@ const char *__cdecl MemFile_ReadCString(MemoryFile *) { return ""; }
 void __cdecl MemFile_ReadData(MemoryFile *, int, std::uint8_t *) {}
 
 void DB_InitThread() {}
-#if defined(KISAK_WEB)
-// This coordinator fixture has no movie device. Exercise its explicit
-// platform handoff without linking a decoder or replacing map ownership.
-bool WebCinematic_DeferMapLoad(const char *command, const char *map)
-{
-    assert(std::strcmp(command, "map") == 0 && std::strcmp(map, "killhouse") == 0);
-    ++g_cinematicMapRequests;
-    return g_deferMapLoad;
-}
-#endif
 void DB_LoadXAssets(
     XZoneInfo *zoneInfo, std::uint32_t zoneCount, std::int32_t sync)
 {
@@ -350,15 +336,14 @@ int main()
     assert(g_zoneRequest.allocFlags == 8);
     assert(g_zoneRequest.freeFlags == 8);
 
-#if defined(KISAK_WEB)
-    assert(g_cinematicMapRequests == 1);
-    g_deferMapLoad = true;
+    // SV_Map_f owns immediate command dispatch on both platforms. The retired
+    // WebCinematic_DeferMapLoad hook is no longer a production contract.
     Cbuf_ExecuteBuffer(0, 0, "map KiLlHoUsE");
-    assert(g_cinematicMapRequests == 2 && g_spawnCount == 1);
-    g_deferMapLoad = false;
+    assert(g_spawnCount == 2);
     Cbuf_ExecuteBuffer(0, 0, "map KiLlHoUsE");
-    assert(g_cinematicMapRequests == 3 && g_spawnCount == 2);
-#endif
+    assert(g_spawnCount == 3);
+    assert(std::strcmp(g_spawnMap.data(), "killhouse") == 0);
+    assert(g_spawnSavegame == 0);
 
     std::puts(
         "canonical-client-map stages=Con_Init,CL_InitInput,Campaign_RegisterDvars,"

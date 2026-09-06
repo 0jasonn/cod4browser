@@ -70,6 +70,47 @@ they are excluded. Production recovery is checked through its actual resource
 lifecycle and resumed counters. Manual campaign and native visual acceptance
 remain unchanged.
 
+## Active capture prerequisite — 2026-09-06
+
+No new retail performance result was obtained during audit remediation, and
+no performance optimization was retained. The existing asynchronous GPU query
+path remains disjoint-aware and does not force a GPU wait. Individual CPU,
+submission/upload counters and generation fields remain canonical diagnostics.
+The Worker now appends separate pending-operation/snapshot, open reservation,
+and live-home quantities; aggregation keeps missing measurements unavailable.
+The capture JSON retains all 120 individual frame samples for tail/cause review.
+Do not add these overlapping storage populations to Wasm capacity, allocator
+live bytes, renderer estimates, recovery copies, audio buffers or process memory.
+
+With explicitly authorized owned assets and installed Chrome, use an isolated
+profile and the retained diagnostic site on the capture tool's port 8051:
+
+```powershell
+python tools/serve_web.py --directory build/web-diagnostics/site-diagnostics --port 8051
+# In another shell, set KISAK_COD4_RETAIL_ROOT to the authorized local installation.
+node tools/profile_web_renderer.mjs active-before diagnostics HEAD build/web-diagnostics/site-diagnostics
+```
+
+This names the existing authored, unpaused, no-input scene
+`cargoship-active-no-input-v1`: 30 world-frame warm-up, 300 individual clean
+intervals, then 120 profiled gameplay frames with a 30-second capture deadline.
+It records build hash, dirty revision, browser/CPU metadata, viewport, actual
+capture duration, frame percentiles, stage counters and resource generations.
+Repeat from a fresh profile at identical settings, retain both artifacts and
+record graphics configuration, GPU/driver and camera evidence alongside the
+JSON under ignored `build/`. Reject background/incomplete/disjoint data.
+Profiled frame arrival intervals include bridge delay; CPU per-frame timings
+and clean Worker intervals have different measurement boundaries.
+
+This is an exploratory active workload, **not yet a matched benchmark**:
+authored actors advance, simulation checkpoints and camera/settings evidence
+still need explicit qualification. `activeWorkloadMatched` remains false.
+Shader-compilation stalls, long-session retention, recovery under active play
+and matched production before/after tails remain prerequisites. The optional
+`fixedtime recovery` command path is paused renderer evidence only and cannot
+stand in for active gameplay. Do not remove Asyncify loading yields, change
+optimization policy or claim a CargoShip gain from these unmeasured additions.
+
 ## Historical timing correction
 
 The browser pump previously admitted at most 100 ms per frame, and the native

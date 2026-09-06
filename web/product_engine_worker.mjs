@@ -8,6 +8,7 @@ import {
     PRODUCT_HOST_EVENTS,
     protocolError,
     validateProductRequest,
+    validateProductModule,
 } from "./product_protocol.mjs";
 
 if (typeof globalThis.CustomEvent !== "function") {
@@ -56,6 +57,7 @@ function notifyFilesystemDirty()
 }
 
 const filesystem = createWorkerSyncFilesystem({ onDirty: notifyFilesystemDirty });
+/** @type {import("./kisakcod.mjs").KisakModule | null} */
 let module = null;
 let state = "starting";
 let resolveInitialization;
@@ -163,6 +165,7 @@ function submitCanonicalCommand(command)
     }
 }
 
+/** @param {import("./product_protocol.mjs").ValidatedInput} input */
 function queueInput(input)
 {
     if (input.type === "key") {
@@ -200,7 +203,7 @@ globalThis.addEventListener("message", (event) => {
     void (async () => {
         try {
             while (globalThis.kisakLoadingYield) await globalThis.kisakLoadingYield;
-            validateProductRequest(message);
+            const message = validateProductRequest(event.data);
             if (message.type === "init") {
                 globalThis.__KISAKCOD_OFFSCREEN_CANVAS__ = message.canvas;
                 resolveInitialization();
@@ -270,7 +273,7 @@ globalThis.addEventListener("message", (event) => {
                 state = "stopped";
                 break;
             default:
-                throw Object.assign(new Error(`Unknown Worker operation: ${message.type}.`), {
+                throw Object.assign(new Error("Unhandled validated Worker operation."), {
                     code: "UNKNOWN_OPERATION",
                 });
             }
@@ -307,6 +310,7 @@ try {
         printErr(message) { globalThis.postMessage({ type: "log", level: "error", message }); },
         onAbort(reason) { globalThis.postMessage({ type: "abort", reason: String(reason) }); },
     });
+    validateProductModule(module);
     filesystem.installForModule(module);
     state = "ready";
     globalThis.postMessage({ protocolVersion: ENGINE_PROTOCOL_VERSION, type: "ready" });

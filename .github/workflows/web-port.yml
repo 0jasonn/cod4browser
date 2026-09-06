@@ -5,6 +5,8 @@ on:
     branches: [master, web-port, "codex/**"]
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: "23 3 * * 0"
 
 permissions:
   contents: read
@@ -18,9 +20,11 @@ jobs:
     name: Native portable and trace contract (Linux)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Check patch whitespace
         run: git diff --check
+      - name: Test qualification failure gates
+        run: python3 -m unittest discover -s tests -p test_qualified_release.py -v
       - name: Check distributable browser source
         run: |
           mkdir -p build
@@ -28,6 +32,10 @@ jobs:
           python3 tools/check_source_archive.py build/kisakcod-web-source.zip
       - name: Install native dependencies
         run: sudo apt-get update && sudo apt-get install -y ninja-build zlib1g-dev
+      - name: Record host compiler and zlib identity
+        run: |
+          c++ --version
+          dpkg-query -W zlib1g-dev
       - name: Configure portable tests
         run: cmake -S . -B build/portable -G Ninja -DKISAK_PORTABLE_TESTS_ONLY=ON -DCMAKE_BUILD_TYPE=Release
       - name: Build portable tests
@@ -36,10 +44,11 @@ jobs:
         run: ctest --test-dir build/portable --output-on-failure --parallel 2
 
   parser-fuzz:
-    name: Sanitized parser fuzz smoke
+    name: Sanitized seeded parser fuzz
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install fuzz dependencies
         run: sudo apt-get update && sudo apt-get install -y clang ninja-build zlib1g-dev
       - name: Configure Clang libFuzzer targets
@@ -52,14 +61,33 @@ jobs:
           -DKISAK_BUILD_FUZZERS=ON
       - name: Build fuzz target
         run: cmake --build build/fuzz --target asset_parsers_fuzz --parallel 2
+      - name: Prove sanitizer findings stop execution
+        run: ctest --test-dir build/fuzz --output-on-failure -R '^sanitizer_policy$'
+      - name: Verify synthetic corpus identity and record compiler
+        run: |
+          clang++ --version
+          python3 tests/fuzz/generate_corpus.py tests/fuzz/corpus
+          git diff --exit-code -- tests/fuzz/corpus
       - name: Exercise imported-asset parsers
-        run: ./build/fuzz/tests/native/asset_parsers_fuzz -runs=256 -max_len=262144 -timeout=10
+        env:
+          FUZZ_SECONDS: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '600' || '30' }}
+        run: python3 tools/run_asset_fuzz.py build/fuzz/tests/native/asset_parsers_fuzz build/fuzz-run --seconds "$FUZZ_SECONDS"
+      - name: Retain synthetic failure evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: synthetic-parser-failure
+          path: |
+            build/fuzz-run/fuzz.log
+            build/fuzz-run/failures
+          if-no-files-found: error
+          retention-days: 7
 
   windows-portable:
     name: Native portable (Windows MSVC x86)
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Configure portable tests
         run: cmake -S . -B build/portable-windows -A Win32 -DKISAK_PORTABLE_TESTS_ONLY=ON
       - name: Build portable tests
@@ -74,8 +102,8 @@ jobs:
       KISAK_PLAYWRIGHT_WORKERS: 2
       KISAK_BUILD_JOBS: 2
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24.18.0
           cache: npm
@@ -83,7 +111,7 @@ jobs:
         shell: powershell
         run: tools/bootstrap_web_toolchain.ps1
       - name: Install JavaScript dependencies
-        run: npm.cmd ci
+        run: npm.cmd install --global npm@11.16.0 && npm.cmd ci
       - name: Check JavaScript and protocol types
         run: npm.cmd run check:web:static
       - name: Test protocol validation
@@ -142,10 +170,48 @@ jobs:
         if: ${{ !cancelled() && steps.product-boundary.outcome != 'success' }}
         shell: powershell
         run: throw 'Production artifact boundary failed; see its independent results above.'
-      - name: Upload production site
-        uses: actions/upload-artifact@v4
+      - name: Pair source from this build revision
+        run: |
+          git archive --format=zip --output=build/kisakcod-web-source.zip HEAD
+          python tools/check_source_archive.py build/kisakcod-web-source.zip
+      - name: Upload unqualified build inputs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: kisakcod-web-production
-          path: build/web/site
+          name: kisakcod-web-build
+          path: |
+            build/web/site
+            build/web/build-receipt.json
+            build/kisakcod-web-source.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  qualify-package:
+    name: Qualify exact source and site after all required tiers
+    needs: [native-portable, parser-fuzz, windows-portable, wasm-browser-production]
+    if: ${{ !cancelled() && needs.native-portable.result == 'success' && needs.parser-fuzz.result == 'success' && needs.windows-portable.result == 'success' && needs.wasm-browser-production.result == 'success' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: kisakcod-web-build
+          path: build/qualification-input
+      - name: Record this run's required results
+        env:
+          REQUIRED_RESULTS: ${{ toJSON(needs) }}
+        run: python3 -c 'import os,pathlib; pathlib.Path("build/required-results.json").write_text(os.environ["REQUIRED_RESULTS"])'
+      - name: Verify and pair tested artifacts
+        run: >-
+          python3 tools/qualify_web_release.py qualify
+          build/qualification-input/web/site
+          build/qualification-input/kisakcod-web-source.zip
+          build/qualification-input/web/build-receipt.json
+          build/required-results.json build/qualified-package
+          --revision "${{ github.sha }}"
+      - name: Upload synthetic-platform-qualified package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: kisakcod-web-qualified-source-and-site
+          path: build/qualified-package
           if-no-files-found: error
           retention-days: 7

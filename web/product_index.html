@@ -87,6 +87,7 @@
         <p id="fullscreen-status" role="status"></p>
         <p id="save-status" role="status" hidden></p>
         <button id="retry-save-button" class="primary-action" type="button" hidden>Retry save</button>
+        <button data-home-export class="secondary-action" type="button">Export stored saves</button>
         <p id="cinematic-status" role="status" hidden></p>
         <button id="dismiss-movie-button" class="secondary-action" type="button" hidden>Continue without movie</button>
         <div class="asset-actions">
@@ -99,6 +100,30 @@
         <h2 id="quit-title">KisakCOD launcher</h2>
         <p role="status">Saving your browser profile…</p>
         <button type="button" class="primary-action" disabled>Saving…</button>
+        <button data-home-export class="secondary-action" type="button">Export stored saves</button>
+    </dialog>
+    <dialog id="home-export-dialog" aria-labelledby="home-export-title">
+        <h2 id="home-export-title">Export stored saves</h2>
+        <p>Quit the game and close other game tabs first. Download stored files individually, keeping the displayed paths for restoration. Pending changes from a failed save may not be included.</p>
+        <p id="home-export-status" role="status"></p>
+        <button id="home-backup-download" data-home-recovery type="button" disabled>Download restorable backup</button>
+        <h3>Restore missing files</h3>
+        <p>Restore a .kisak-home backup into this browser profile. Existing paths are never overwritten. Keep your backup until you have checked the restored files.</p>
+        <label for="home-backup-input">Backup file</label>
+        <input id="home-backup-input" data-home-recovery type="file" accept=".kisak-home" disabled>
+        <button id="home-backup-restore" data-home-recovery type="button" disabled>Restore selected backup</button>
+        <button id="home-backup-resume" data-home-recovery type="button" disabled>Resume interrupted recovery</button>
+        <h3>Restore a raw file</h3>
+        <p>For an individually exported file, enter its original home-relative path using lower-case names and / separators.</p>
+        <label for="home-raw-path">Destination path</label>
+        <input id="home-raw-path" data-home-recovery type="text" placeholder="profiles/player/save/slot.svg" disabled>
+        <label for="home-raw-input">Exported file</label>
+        <input id="home-raw-input" data-home-recovery type="file" disabled>
+        <button id="home-raw-restore" data-home-recovery type="button" disabled>Restore selected raw file</button>
+        <h3>Raw files</h3>
+        <ul id="home-export-files"></ul>
+        <button id="home-export-next" type="button" hidden>Next 100 files</button>
+        <form method="dialog"><button type="submit">Close</button></form>
     </dialog>
     <p><a href="./licenses.txt">Open-source licenses</a></p>
     <script type="module" src="./launcher.mjs"></script>

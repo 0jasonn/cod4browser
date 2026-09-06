@@ -131,6 +131,89 @@ open descriptors, awaits the mutation chain, closes imported handles, releases
 leases, closes the asset-store BroadcastChannel and IndexedDB connection,
 removes listeners, and terminates the Worker last.
 
+Canonical `savedevice_pc.cpp` still owns temporary save creation and
+`FS_Rename`. The platform adapter implements recoverable publication without
+interpreting save bytes. With the exclusive home lease held, each queued
+rename performs these durable steps:
+
+1. Finish all earlier operations, including the closed temporary source.
+2. Close `kisakcod-web/home-rename.json` containing version 1 and normalized
+   source/destination paths. This record is outside the home namespace.
+3. Write/truncate/close the destination writable stream, retaining the old
+   destination until close succeeds.
+4. Remove the source, then remove the journal.
+
+There is one serialized journal. A fresh tenure replays it before loading the
+home or applying budgets: copy the surviving source to the destination and
+retire it, or verify the destination when source retirement already happened.
+Retries in the same tenure resume at the failed step. Empty, newly created
+journals precede publication and may be removed; malformed journals stop mount
+with an exportable error. An interrupted rename can temporarily duplicate a
+file, so recovery runs before the 8,191-file count check. Writable-stream
+errors attempt abort; cleanup errors are retained alongside the original error.
+An existing destination is never deleted to make room for its replacement.
+This uses [staged writable-stream close semantics](https://fs.spec.whatwg.org/#api-filesystemwritablefilestream),
+not a cross-file OPFS transaction or a physical power-loss guarantee.
+
+Creation/recovery share limits of 8,191 files, 64 MiB per file, 128 MiB live
+file content, and 8,191 directories. Normalized UTF-8 paths must fit canonical
+`MAX_OSPATH` (259 bytes plus terminator), bounding depth without changing game
+formats. Directory-prefix creation preflights the whole request. Conflicting
+normalized names fail mount rather than silently replacing one another.
+Legacy non-normalized names also require raw export before recovery; accepting
+one would otherwise create a second physical file on the next normalized write.
+The separate persistence budget is 16,384 queued plus reserved operations and
+256 MiB of queued plus reserved immutable snapshots. Open writable handles
+reserve their next close snapshot, with one writer per file. Over-budget
+writes fail before changing bytes, size or reservations. One active drain
+preserves order; failed storage latches until explicit checkpoint retry, and
+automatic checkpoint timers stop after failure. Acceptance into memory is
+not durable completion. `persistenceUsage()` exposes these distinct quantities;
+they exclude unused backing-buffer capacity and are not process-memory totals.
+
+Raw export uses the same exclusive lease, pages through 100 handles at a time,
+and reads each Blob only on download. It bypasses mount, normalization and
+journal replay so legacy oversized or conflicting homes remain accessible.
+Closing during acquisition waits for that tenure's release; stale results
+cannot publish download URLs into a later dialog. Export leaves all stored
+files unchanged.
+
+The restorable `.kisak-home` transport is a platform-owned envelope, not a
+browser save implementation: `KISAKHOME1\n`, a little-endian 32-bit JSON length,
+a UTF-8 `{version:1,files:[{path,size,sha256}]}` manifest, then concatenated opaque
+file bytes in manifest order. The manifest is limited to 4 MiB and the ordinary
+home file/count/byte/path budgets apply. Trailing/truncated data and unsupported
+versions are rejected. Checksums detect damaged payloads; they are not publisher
+signatures. A raw-file restore uses the same publication path with an explicitly
+selected destination. Backups preserve files and required parents, not empty
+directories or installation imports. Canonical C++ owns interpretation and
+compatibility when loading those bytes.
+
+With the home lease held, restore preflights the combined existing and incoming
+inventory, refusing every pre-existing destination and file/directory conflict.
+It copies and hashes one bounded file at a time into flat, numbered entries in
+`kisakcod-web/home-restore`, then closes `home-restore.json` with the validated
+paths/sizes/hashes. Cancellation is accepted before that intent commit. Replay
+verifies all staged sources and already-published destination checksums before
+adding any remaining destinations; a newly created empty entry preceding close
+can be completed from staging. It never replaces a pre-existing user file.
+After all destinations close, it retires the journal, then staging. A crash
+before the journal leaves the original home unchanged; after it, the next
+mount or explicit resume completes the restore. Orphaned uncommitted staging
+is reclaimed on a subsequent explicit restore. Both restore and canonical
+rename journals present together are invalid and remain raw-exportable.
+
+Staging can temporarily require another backup's worth of OPFS space (at most
+128 MiB), separate from the live-home budget. Hash/copy operations read one
+file of at most 64 MiB at a time; metadata and operation counts are bounded.
+Backup creation retains independent immutable byte Blobs, totaling at most
+128 MiB, so later OPFS source edits/deletion cannot invalidate a downloaded
+backup. This is an additional bounded backup snapshot, not live engine memory.
+Quota errors retain committed recovery sources. A dialog tenure keeps its
+writer lease until committed work settles, even if the dialog closes; a stale
+completion cannot affect a later dialog. Raw export also exposes restore
+journals and staging when automatic recovery cannot proceed.
+
 Mount, checkpoint, unmount and shutdown use a progress watchdog: 15 seconds
 without progress in diagnostics, 30 seconds in production, and a separate
 five-minute absolute cap. Successful synchronous file reads during native
@@ -330,6 +413,24 @@ output latency, arbitrary audio-tail layouts and long/background recovery
 remain qualification work.
 
 ## Build products
+
+`tools/qualify_web_release.py` creates a local source/site package only from a
+clean matching build receipt, exact git-archive revision, lockfile, toolchain,
+dependency inventory and site hashes. The aggregation job requires Linux
+portable, sanitized fuzz, Windows portable and Wasm/browser-production success
+from this workflow run. Missing, failed, cancelled or skipped tiers cannot
+qualify. The existing explicit product-boundary failure gate remains required.
+Per-job `kisakcod-web-build` inputs are unqualified. The final package includes
+source.zip, licenses, a Python loopback server, launcher, versioned manifest
+and read-only verifier. Manual campaign acceptance is recorded as omitted and
+`alphaQualified` is false. Hash verification detects mismatches; it is not a
+cryptographic signature authenticating a publisher.
+
+`tools/web_dependencies.json` attributes browser zlib 1.3.2 separately from
+native test zlib 1.1.4 and runner system zlib. Its dated primary-source advisory
+comparison covers zlib, FFmpeg and OpenAL release information only; remaining
+components and codec reachability are not cleared. No dependency upgrade or
+external publication is implied by this inventory.
 
 `KisakCOD-web` and `build/web/site` are production. With
 `KISAK_WEB_DIAGNOSTICS=ON`, `KisakCOD-web-diagnostics` and

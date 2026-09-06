@@ -23,12 +23,14 @@ test("gameplay profile aggregation keeps populations and overhead explicit", () 
         {
             pumpTick: 10, observedMs: 100,
             cpu: { totalMs: 8 }, renderer: { worldMs: 2 },
+            storage: { pendingSnapshotBytes: 40, liveBytes: 10 },
             counters: { worldDrawCalls: 4 },
             gpu: { timingsAvailable: true, queryIssued: true, queryDropped: false },
         },
         {
             pumpTick: 12, observedMs: 120,
             cpu: { totalMs: 12 }, renderer: { worldMs: 6 },
+            storage: { pendingSnapshotBytes: 80, liveBytes: 10 },
             counters: { worldDrawCalls: 8 },
             gpu: { timingsAvailable: true, queryIssued: true, queryDropped: false },
         },
@@ -70,6 +72,9 @@ test("gameplay profile aggregation keeps populations and overhead explicit", () 
         maximum: 12,
     });
     assert.equal(profile.renderer.worldMs.average, 4);
+    assert.equal(profile.storage.pendingSnapshotBytes.maximum, 80);
+    assert.equal(profile.storage.liveBytes.average, 10);
+    assert.equal(profile.storage.pendingOperations, null, "missing storage measurements stay unavailable");
     // Historical samples do not invent zero-valued scene/DObj measurements.
     assert.equal(profile.cpu.sceneSetupMs, null);
     assert.equal(profile.cpu.sceneAssemblyMs, null);

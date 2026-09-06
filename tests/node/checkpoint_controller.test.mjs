@@ -155,3 +155,21 @@ test("dispose cancels a pending dirty checkpoint", async () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(checkpoints, 0);
 });
+
+test("persistent failure cannot spin on an expired dirty deadline", async () => {
+    let attempts = 0;
+    const controller = createVisibilityCheckpoint({
+        documentTarget: new DocumentDouble(), isMounted: () => true,
+        checkpoint: async () => { ++attempts; throw new Error("quota"); },
+        quietDelayMs: 5, maxDirtyAgeMs: 10,
+    });
+    try {
+        controller.markDirty();
+        await assert.rejects(controller.request(), /quota/u);
+        controller.markDirty();
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        assert.equal(attempts, 1);
+        await assert.rejects(controller.request(), /quota/u);
+        assert.equal(attempts, 2);
+    } finally { controller.dispose(); }
+});

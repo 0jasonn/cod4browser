@@ -22,6 +22,7 @@ export function createVisibilityCheckpoint({
     let inFlight = null;
     let checkpointQueued = false;
     let dirty = false;
+    let failed = false;
     let dirtySince = 0;
     /** @type {ReturnType<typeof setTimeout> | null} */
     let timer = null;
@@ -33,7 +34,7 @@ export function createVisibilityCheckpoint({
     };
 
     const schedule = () => {
-        if (disposed || inFlight || !dirty) return;
+        if (disposed || inFlight || !dirty || failed) return;
         clearTimer();
         const now = Date.now();
         const deadline = Math.min(now + quietDelayMs, dirtySince + maxDirtyAgeMs);
@@ -72,8 +73,12 @@ export function createVisibilityCheckpoint({
             } while ((checkpointQueued || dirty) && !disposed && isMounted());
         }).then(() => {
             onStatus({ state: "saved", message: "Browser profile saved" });
+            failed = false;
             return true;
         }, (error) => {
+            // Retry is explicit after a storage error. An expired dirty-age
+            // deadline must not turn quota failure into a zero-delay loop.
+            failed = true;
             onStatus({
                 state: "failed",
                 message: "Save failed; changes remain pending",

@@ -76,6 +76,7 @@ Requirements are bootstrapped into ignored `.tools/` directories:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/bootstrap_web_toolchain.ps1
+npm.cmd ci
 $env:KISAK_BUILD_JOBS = "2" # optional; defaults to a conservative 2
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/build_web.ps1 -Configuration Release
 python tools/serve_web.py --directory build/web/site
@@ -84,6 +85,16 @@ python tools/serve_web.py --directory build/web/site
 The build produces `build/web/site`. Serve it over HTTP; `file://` is not a
 supported runtime. The build keeps strict undefined-symbol checking enabled
 and prints configure, compile, runtime-check, and total timings.
+
+Authoritative JavaScript checks and builds enforce the versions in
+`package.json` and `tools/web_toolchain.json`. Release builds record source,
+tool and site hashes outside the served directory. CI can pair exact source
+and site only after every required tier succeeds; its package is explicitly
+synthetic-platform qualification, not single-player alpha acceptance.
+See [distribution and recovery](docs/browser-support.md#local-package-contract).
+The current 2026-09-06 rebuild fails the unchanged production export/size gate;
+the passing browser suite does not qualify it for distribution. See the
+[test inventory](docs/web-test-inventory.md#current-execution-evidence--2026-09-06).
 
 ## Browser validation
 

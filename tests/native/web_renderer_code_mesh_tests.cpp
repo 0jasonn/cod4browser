@@ -118,9 +118,11 @@ void TestFxBatchHasDistinctRendererIdentity()
     assert(WebRenderer_FxDiagnosticIndex(
         WebRendererSceneBatchKind::FxParticleCloud) == 2u);
     assert(WebRenderer_FxDiagnosticIndex(
-        WebRendererSceneBatchKind::DynamicDObj) == 3u);
+        WebRendererSceneBatchKind::FxMarkMesh) == 3u);
     assert(WebRenderer_FxDiagnosticIndex(
-        WebRendererSceneBatchKind::WorldSurface) == 3u);
+        WebRendererSceneBatchKind::DynamicDObj) == 4u);
+    assert(WebRenderer_FxDiagnosticIndex(
+        WebRendererSceneBatchKind::WorldSurface) == 4u);
 }
 
 void TestCommaMaterialUsesCanonicalLookupName()

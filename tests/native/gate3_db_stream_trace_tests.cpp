@@ -2429,6 +2429,8 @@ void BG_FillInAllWeaponItems() {}
 void EmitEngineLifecycleTrace(EngineLifecycleStage, const char *, std::uint32_t,
     std::int32_t, std::int32_t, std::int32_t) noexcept {}
 void Sys_Error(const char *, ...) { throw std::runtime_error("zone recovery system error"); }
+// This fixture reads synthetic in-memory files without a browser host to ping.
+void Sys_LoadingKeepAlive() {}
 void Sys_OutOfMemErrorInternal(const char *, int) { throw std::runtime_error("zone recovery out of memory"); }
 void *Sys_AllocatePhysicalMemory(std::size_t, std::size_t) { return nullptr; }
 void I_strncpyz(char *dest, const char *source, int size)

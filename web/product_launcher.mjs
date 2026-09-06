@@ -5,6 +5,9 @@ import { createVisibilityCheckpoint } from "./product_checkpoint_controller.mjs"
 import { createInputControllerCore } from "./input_controller_core.mjs";
 import { createLatestMountController } from "./product_mount_controller.mjs";
 import { createBrowserQuit } from "./browser_quit.mjs";
+import { createFilesystemLeases } from "./worker_transport.mjs";
+import { readHomeRecoveryFiles, createHomeBackup, readHomeBackup,
+    restoreHomeFiles, restoreRawHomeFile, resumeHomeRestore } from "./worker_sync_filesystem.mjs";
 
 /** @template {Element} T @param {string} selector @returns {T} */
 function requiredElement(selector)
@@ -53,6 +56,175 @@ let disposePromise = null;
 let quitController = null;
 let assetState = { state: "checking", message: "Waiting for the engine" };
 const logs = [];
+
+const exportDialog = /** @type {HTMLDialogElement} */ (requiredElement("#home-export-dialog"));
+const exportStatus = requiredElement("#home-export-status");
+const exportList = requiredElement("#home-export-files");
+const exportNext = /** @type {HTMLButtonElement} */ (requiredElement("#home-export-next"));
+let exportSession = null;
+let exportFiles = null;
+let exportGeneration = 0;
+const exportUrls = new Set();
+const backupInput = /** @type {HTMLInputElement} */ (requiredElement("#home-backup-input"));
+function setRecoveryEnabled(enabled)
+{
+    for (const element of exportDialog.querySelectorAll("[data-home-recovery]"))
+        /** @type {HTMLButtonElement | HTMLInputElement} */ (element).disabled = !enabled;
+}
+function clearExportPage()
+{
+    for (const url of exportUrls) URL.revokeObjectURL(url);
+    exportUrls.clear();
+    exportList.replaceChildren();
+}
+async function nextExportPage()
+{
+    const generation = exportGeneration;
+    exportNext.disabled = true;
+    clearExportPage();
+    for (let count = 0; count < 100 && exportDialog.open; ++count) {
+        const next = await exportFiles.next();
+        if (generation !== exportGeneration || !exportDialog.open) return;
+        if (next.done) { exportNext.hidden = true; break; }
+        const { path, handle } = next.value;
+        const item = document.createElement("li");
+        const download = document.createElement("button");
+        download.type = "button";
+        download.textContent = `Download ${path}`;
+        let url = null;
+        download.addEventListener("click", async () => {
+            download.disabled = true;
+            try {
+                if (url) { URL.revokeObjectURL(url); exportUrls.delete(url); }
+                const file = await handle.getFile();
+                if (generation !== exportGeneration || !exportDialog.open) return;
+                url = URL.createObjectURL(file);
+                exportUrls.add(url);
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = path.replaceAll("/", "__");
+                link.click();
+            } catch (error) {
+                if (generation === exportGeneration && exportDialog.open)
+                    exportStatus.textContent = `Export failed: ${error.message}`;
+            } finally { download.disabled = false; }
+        });
+        item.append(download);
+        exportList.append(item);
+    }
+    exportStatus.textContent = exportList.childElementCount
+        ? "Stored files are unchanged. Download names use __ for path separators."
+        : "No more stored files.";
+    exportNext.disabled = false;
+}
+for (const button of document.querySelectorAll("[data-home-export]")) {
+    button.addEventListener("click", async () => {
+        if (exportSession) return;
+        const generation = ++exportGeneration;
+        const leases = createFilesystemLeases(navigator.locks, () => {});
+        const session = { leases, ready: leases.acquire(), work: Promise.resolve(),
+            busy: false, abort: new AbortController() };
+        exportSession = session;
+        exportDialog.showModal();
+        exportStatus.textContent = "Opening stored saves…";
+        exportNext.hidden = true;
+        setRecoveryEnabled(false);
+        try {
+            await session.ready;
+            const root = await navigator.storage.getDirectory();
+            if (generation !== exportGeneration || !exportDialog.open) return;
+            exportFiles = readHomeRecoveryFiles(root);
+            exportNext.hidden = false;
+            await nextExportPage();
+            if (generation === exportGeneration && exportDialog.open) setRecoveryEnabled(true);
+        } catch (error) {
+            await releaseExportSession(session);
+            if (generation === exportGeneration && exportDialog.open)
+                exportStatus.textContent = `Cannot export: ${error.message} Quit the game and close other game tabs, then retry.`;
+        }
+    });
+}
+exportNext.addEventListener("click", () => {
+    const generation = exportGeneration;
+    void nextExportPage().catch((error) => {
+        if (generation === exportGeneration && exportDialog.open)
+            exportStatus.textContent = `Export failed: ${error.message}`;
+    });
+});
+async function releaseExportSession(session)
+{
+    // A close during acquisition must wait for that acquisition before release.
+    // Each dialog tenure owns its lease object, so an old close cannot free a new owner.
+    try { await session.ready; } catch { /* Acquisition already reported its error. */ }
+    await session.work;
+    await session.leases.release();
+    if (exportSession === session) exportSession = null;
+}
+exportDialog.addEventListener("close", () => {
+    ++exportGeneration;
+    clearExportPage();
+    if (exportSession) {
+        exportSession.abort.abort();
+        void releaseExportSession(exportSession);
+    }
+});
+
+function runHomeRecovery(action)
+{
+    const session = exportSession;
+    if (!session || session.busy) return;
+    const generation = ++exportGeneration;
+    session.busy = true;
+    clearExportPage();
+    exportNext.hidden = true;
+    setRecoveryEnabled(false);
+    exportStatus.textContent = "Working on the backup… Keep this tab open.";
+    session.work = Promise.resolve().then(async () => {
+        await session.ready;
+        session.abort.signal.throwIfAborted();
+        const root = await navigator.storage.getDirectory();
+        const message = await action(root, session.abort.signal);
+        if (generation === exportGeneration && exportDialog.open) exportStatus.textContent = message;
+    }).catch(error => {
+        if (generation === exportGeneration && exportDialog.open)
+            exportStatus.textContent = `Recovery failed: ${error.message} Existing files are preserved. If interrupted after publication began, use Resume interrupted recovery.`;
+    }).finally(() => {
+        session.busy = false;
+        if (generation === exportGeneration && exportDialog.open) setRecoveryEnabled(true);
+    });
+}
+requiredElement("#home-backup-download").addEventListener("click", () => runHomeRecovery(async (root, signal) => {
+    const backup = await createHomeBackup(root, signal);
+    signal.throwIfAborted();
+    const url = URL.createObjectURL(backup);
+    exportUrls.add(url);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "kisakcod-home.kisak-home";
+    link.click();
+    return "Backup download started. It contains stored home files. Wait for the download to finish before closing this dialog or starting another action.";
+}));
+requiredElement("#home-backup-restore").addEventListener("click", () => runHomeRecovery(async (root, signal) => {
+    const backup = backupInput.files?.[0];
+    if (!backup) throw new Error("Select a .kisak-home backup first.");
+    const files = await readHomeBackup(backup);
+    const result = await restoreHomeFiles(root, files, signal);
+    backupInput.value = "";
+    return `Restored ${result.filesRestored} files (${result.bytesRestored} bytes). Close and reopen this dialog to browse them.`;
+}));
+requiredElement("#home-backup-resume").addEventListener("click", () => runHomeRecovery(async root => {
+    const result = await resumeHomeRestore(root);
+    return result.recovered ? "Recovery finished. Close and reopen this dialog to browse stored files."
+        : "No committed recovery is pending. If an import stopped before publication, select its backup and retry.";
+}));
+requiredElement("#home-raw-restore").addEventListener("click", () => runHomeRecovery(async (root, signal) => {
+    const input = /** @type {HTMLInputElement} */ (requiredElement("#home-raw-input"));
+    const path = /** @type {HTMLInputElement} */ (requiredElement("#home-raw-path"));
+    if (!input.files?.[0]) throw new Error("Select an exported file first.");
+    await restoreRawHomeFile(root, path.value, input.files[0], signal);
+    input.value = "";
+    return `Restored ${path.value}. Close and reopen this dialog to browse stored files.`;
+}));
 const browserDialog = /** @type {HTMLDialogElement} */ (requiredElement("#browser-dialog"));
 const browserButton = /** @type {HTMLButtonElement} */ (requiredElement("#browser-controls-button"));
 const fullscreenButton = /** @type {HTMLButtonElement} */ (requiredElement("#fullscreen-button"));

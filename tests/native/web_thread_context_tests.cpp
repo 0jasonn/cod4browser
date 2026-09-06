@@ -1,4 +1,5 @@
 #include <qcommon/system.h>
+#include <qcommon/thread_context.h>
 
 #include <cassert>
 #include <cstdint>

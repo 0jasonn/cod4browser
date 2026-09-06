@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include "test_assertions.h"
 #include <cassert>
 #include <cmath>
 #include <cstdio>

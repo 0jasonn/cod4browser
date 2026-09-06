@@ -456,3 +456,6 @@ KisakCOD/.idea/*
 build-radiant/
 KisakCOD/
 radiant_artifacts/
+
+# Local home backups may contain private saves and configuration.
+*.kisak-home

@@ -20,6 +20,8 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <cstdio>
+#include <exception>
 #include <vector>
 
 void __cdecl Vec2UnpackTexCoords(PackedTexCoords in, float *out)
@@ -1361,7 +1363,7 @@ void TestMalformedIndexAndPlacementFailAtomically()
 }
 } // namespace
 
-int main()
+int main() try
 {
     TestTransientLightMaskUsesPackedBoundsAndCanonicalCameraIds();
 #if KISAK_TEST_DPVS_CORE
@@ -1385,4 +1387,9 @@ int main()
     TestSm3SpecularRetainsCanonicalProbeAndSplitsProbeGroups();
     TestMalformedIndexAndPlacementFailAtomically();
     return 0;
+}
+catch (const std::exception &error)
+{
+    std::fprintf(stderr, "Static model scene test failed: %s\n", error.what());
+    return 1;
 }

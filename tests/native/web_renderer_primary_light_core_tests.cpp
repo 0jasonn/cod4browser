@@ -1,4 +1,3 @@
-#include <universal/q_shared.h>
 #include <gfx_d3d/r_primarylights_core.h>
 #include <qcommon/com_world_types.h>
 

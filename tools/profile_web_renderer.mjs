@@ -407,6 +407,10 @@ try {
         assert.equal(pageErrors.length, 0);
     }
     const result = { schemaVersion: 1, recovery, cleanTiming, artifactSha256, recordedAtUtc: new Date().toISOString(), source,
+        // Bounded diagnostic samples preserve tails, generations and storage pressure.
+        frameSamples: frames,
+        workloadName: controlled ? 'cargoship-paused-renderer' : 'cargoship-active-no-input-v1',
+        activeWorkloadMatched: false,
         workload, workCounts, workCountSha256: workCounts
             ? createHash('sha256').update(JSON.stringify(workCounts)).digest('hex') : undefined,
         bufferUploadBytesSamples: movingCamera

@@ -7,15 +7,36 @@
 #include <cstdint>
 #include <limits>
 #include <span>
+#include <cassert>
+#include <cstdio>
 
 namespace
 {
+struct Coverage
+{
+    std::uint64_t parsedImages = 0, decodedImages = 0, archives = 0, decodedMembers = 0, rejectedImages = 0;
+    ~Coverage()
+    {
+        std::fprintf(stderr, "KISAK_FUZZ paths=%llu,%llu,%llu,%llu,%llu\n",
+            static_cast<unsigned long long>(parsedImages), static_cast<unsigned long long>(decodedImages),
+            static_cast<unsigned long long>(archives), static_cast<unsigned long long>(decodedMembers),
+            static_cast<unsigned long long>(rejectedImages));
+    }
+} coverage;
+
 void ExerciseIwi(std::span<const std::uint8_t> bytes)
 {
     kisak::iwi::Metadata metadata;
-    (void)kisak::iwi::Parse(bytes, metadata);
+    if (kisak::iwi::Parse(bytes, metadata) == kisak::iwi::Error::None) ++coverage.parsedImages;
     kisak::iwi::Rgba8Image image;
-    (void)kisak::iwi::DecodeRgba8(bytes, image);
+    const auto result = kisak::iwi::DecodeRgba8(bytes, image);
+    if (result == kisak::iwi::Error::None) {
+        ++coverage.decodedImages;
+        assert(image.pixels.size() == std::size_t(image.width) * image.height * 4u);
+    } else {
+        ++coverage.rejectedImages;
+        assert(image.pixels.empty() && image.mipPixels.empty() && image.width == 0 && image.height == 0);
+    }
 }
 
 void ExerciseMember(
@@ -71,12 +92,13 @@ void ExerciseMember(
             113u);
         std::size_t consumed = 0;
         std::size_t produced = 0;
-        if (decoder.Consume(
+        const auto result = decoder.Consume(
                 compressed.subspan(inputOffset, inputLength),
                 output,
                 consumed,
-                produced) != kisak::iwd::Error::None ||
-            consumed > inputLength ||
+                produced);
+        assert(consumed <= inputLength && produced <= output.size());
+        if (result != kisak::iwd::Error::None ||
             (consumed == 0u && produced == 0u))
         {
             return;
@@ -85,7 +107,7 @@ void ExerciseMember(
     }
     if (iterations < MAX_ITERATIONS)
     {
-        (void)decoder.Finish();
+        if (decoder.Finish() == kisak::iwd::Error::None) ++coverage.decodedMembers;
     }
 }
 
@@ -124,6 +146,7 @@ void ExerciseIwd(std::span<const std::uint8_t> archive)
     }
 
     std::size_t exercised = 0;
+    ++coverage.archives;
     for (const kisak::iwd::Entry &entry : index.Entries())
     {
         if (!entry.directory)
@@ -140,7 +163,7 @@ void ExerciseIwd(std::span<const std::uint8_t> archive)
 
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size)
 {
-    if (!data && size != 0u)
+    if ((!data && size != 0u) || size > 262144u)
     {
         return 0;
     }

@@ -1,8 +1,215 @@
-import { expect, test } from "@playwright/test";
+import { chromium, expect, test } from "@playwright/test";
 import { createInstallDirectory } from "./install_fixture.mjs";
 import { createSyntheticIwd } from "./synthetic_iwd.mjs";
 
 test.skip(process.env.KISAK_WEB_PRODUCT_TEST !== "1", "Runs only against the production site.");
+
+test("stored-save export stays read-only and paginates malformed homes @product", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.locator("html")).toHaveAttribute("data-runtime-state", "running");
+    await page.evaluate(async () => {
+        const root = await navigator.storage.getDirectory();
+        const app = await root.getDirectoryHandle("kisakcod-web", { create: true });
+        const home = await app.getDirectoryHandle("home", { create: true });
+        // Deliberately invalid recovery metadata must not block raw export.
+        const journal = await (await app.getFileHandle("home-rename.json", { create: true })).createWritable();
+        await journal.write("synthetic invalid journal");
+        await journal.close();
+        for (let index = 0; index < 101; ++index) {
+            const stream = await (await home.getFileHandle(`synthetic-${index}.svg`, { create: true })).createWritable();
+            await stream.write("synthetic save bytes");
+            await stream.close();
+        }
+    });
+    await page.getByRole("button", { name: "Browser controls", exact: true }).click();
+    await page.locator("#browser-dialog [data-home-export]").click();
+    await expect(page.locator("#home-export-files li")).toHaveCount(100);
+    const download = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Download home-rename.json", exact: true }).click();
+    expect((await download).suggestedFilename()).toBe("home-rename.json");
+    await page.locator("#home-export-next").click();
+    await expect(page.locator("#home-export-files li")).toHaveCount(2);
+    await expect(page.locator("#home-export-next")).toBeHidden();
+    await page.locator("#home-export-dialog").getByRole("button", { name: "Close", exact: true }).click();
+    expect(await page.evaluate(async () => {
+        const root = await navigator.storage.getDirectory();
+        const app = await root.getDirectoryHandle("kisakcod-web");
+        const home = await app.getDirectoryHandle("home");
+        const names = [];
+        for await (const name of home.keys()) names.push(name);
+        return { count: names.length, journal: await (await (await app.getFileHandle("home-rename.json")).getFile()).text() };
+    })).toEqual({ count: 101, journal: "synthetic invalid journal" });
+});
+
+test("closing export during lease acquisition releases that tenure @product", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.locator("html")).toHaveAttribute("data-runtime-state", "running");
+    await page.evaluate(() => {
+        const request = navigator.locks.request.bind(navigator.locks);
+        navigator.locks.request = (name, options, callback) => request(name, options, async lock => {
+            if (name === "kisakcod-web-home-writer-v1") {
+                navigator.locks.request = request;
+                await new Promise(resolve => { globalThis.__resumeExportLease = resolve; });
+            }
+            return callback(lock);
+        });
+    });
+    await page.getByRole("button", { name: "Browser controls", exact: true }).click();
+    await page.locator("#browser-dialog [data-home-export]").click();
+    await expect.poll(() => page.evaluate(() => Boolean(globalThis.__resumeExportLease))).toBe(true);
+    await page.locator("#home-export-dialog").getByRole("button", { name: "Close", exact: true }).click();
+    await page.evaluate(() => globalThis.__resumeExportLease());
+    await expect.poll(() => page.evaluate(async () => (await navigator.locks.query()).held
+        .some(lock => lock.name === "kisakcod-web-home-writer-v1"))).toBe(false);
+    await expect(page.locator("#home-export-files li")).toHaveCount(0);
+    await page.locator("#browser-dialog [data-home-export]").click();
+    await expect(page.locator("#home-export-status")).toHaveText("No more stored files.");
+});
+
+test("a stale raw-export failure cannot replace a reopened dialog status @product", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.locator("html")).toHaveAttribute("data-runtime-state", "running");
+    await page.evaluate(async () => {
+        const root = await navigator.storage.getDirectory();
+        const app = await root.getDirectoryHandle("kisakcod-web", { create: true });
+        const home = await app.getDirectoryHandle("home", { create: true });
+        const stream = await (await home.getFileHandle("synthetic.cfg", { create: true })).createWritable();
+        await stream.write("synthetic configuration");
+        await stream.close();
+        const original = FileSystemFileHandle.prototype.getFile;
+        FileSystemFileHandle.prototype.getFile = function (...args) {
+            if (this.name !== "synthetic.cfg") return original.apply(this, args);
+            FileSystemFileHandle.prototype.getFile = original;
+            return new Promise((_, reject) => { globalThis.__failExportRead = () => reject(new Error("stale synthetic read")); });
+        };
+    });
+    await page.getByRole("button", { name: "Browser controls", exact: true }).click();
+    await page.locator("#browser-dialog [data-home-export]").click();
+    await page.getByRole("button", { name: "Download home/synthetic.cfg", exact: true }).click();
+    await expect.poll(() => page.evaluate(() => Boolean(globalThis.__failExportRead))).toBe(true);
+    await page.locator("#home-export-dialog").getByRole("button", { name: "Close", exact: true }).click();
+    await expect.poll(() => page.evaluate(async () => (await navigator.locks.query()).held
+        .some(lock => lock.name === "kisakcod-web-home-writer-v1"))).toBe(false);
+    await page.locator("#browser-dialog [data-home-export]").click();
+    const currentStatus = "Stored files are unchanged. Download names use __ for path separators.";
+    await expect(page.locator("#home-export-status")).toHaveText(currentStatus);
+    await page.evaluate(async () => {
+        globalThis.__failExportRead();
+        await new Promise(requestAnimationFrame);
+    });
+    await expect(page.locator("#home-export-status")).toHaveText(currentStatus);
+});
+
+test("restorable home backup survives reimport and same-origin offline restart @product", async ({ page, baseURL }, testInfo) => {
+    await page.goto("/");
+    await expect(page.locator("html")).toHaveAttribute("data-runtime-state", "running");
+    await page.evaluate(async () => {
+        const root = await navigator.storage.getDirectory();
+        const app = await root.getDirectoryHandle("kisakcod-web", { create: true });
+        const home = await app.getDirectoryHandle("home", { create: true });
+        const profiles = await home.getDirectoryHandle("profiles", { create: true });
+        const writer = await (await profiles.getFileHandle("synthetic.cfg", { create: true })).createWritable();
+        await writer.write("synthetic configuration bytes");
+        await writer.close();
+    });
+    await page.getByRole("button", { name: "Browser controls", exact: true }).click();
+    await page.locator("#browser-dialog [data-home-export]").click();
+    const download = page.waitForEvent("download");
+    await page.locator("#home-backup-download").click();
+    const backupPath = testInfo.outputPath("synthetic.kisak-home");
+    await (await download).saveAs(backupPath);
+
+    const profile = testInfo.outputPath("restore-profile");
+    const externalRequests = [];
+    for (let launch = 0; launch < 2; ++launch) {
+        const context = await chromium.launchPersistentContext(profile, { headless: true });
+        // Keep loopback reachable while rejecting all external network access.
+        await context.route("**/*", route => {
+            if (new URL(route.request().url()).origin === new URL(baseURL).origin) return route.continue();
+            externalRequests.push(route.request().url());
+            return route.abort();
+        });
+        try {
+            const target = await context.newPage();
+            await target.goto(baseURL);
+            await expect(target.locator("html")).toHaveAttribute("data-runtime-state", "running");
+            await target.getByRole("button", { name: "Browser controls", exact: true }).click();
+            await target.locator("#browser-dialog [data-home-export]").click();
+            await expect(target.locator("#home-backup-input")).toBeEnabled();
+            if (launch === 0) {
+                await target.locator("#home-backup-input").setInputFiles({ name: "bad.kisak-home", mimeType: "application/octet-stream", buffer: Buffer.from("invalid version") });
+                await target.locator("#home-backup-restore").click();
+                await expect(target.locator("#home-export-status")).toContainText("Recovery failed");
+                await target.locator("#home-backup-input").setInputFiles(backupPath);
+                await target.locator("#home-backup-restore").click();
+                await expect(target.locator("#home-export-status")).toContainText("Restored 1 files");
+                await target.locator("#home-raw-path").fill("profiles/recovered.cfg");
+                await target.locator("#home-raw-input").setInputFiles({ name: "home__profiles__recovered.cfg", mimeType: "application/octet-stream", buffer: Buffer.from("synthetic raw recovery") });
+                await target.locator("#home-raw-restore").click();
+                await expect(target.locator("#home-export-status")).toContainText("Restored profiles/recovered.cfg");
+            }
+            expect(await target.evaluate(async () => {
+                const root = await navigator.storage.getDirectory();
+                const app = await root.getDirectoryHandle("kisakcod-web");
+                const home = await app.getDirectoryHandle("home");
+                const profiles = await home.getDirectoryHandle("profiles");
+                return Promise.all(["synthetic.cfg", "recovered.cfg"].map(async name =>
+                    (await (await profiles.getFileHandle(name)).getFile()).text()));
+            })).toEqual(["synthetic configuration bytes", "synthetic raw recovery"]);
+            await target.locator("#home-backup-input").setInputFiles(backupPath);
+            await target.locator("#home-backup-restore").click();
+            await expect(target.locator("#home-export-status")).toContainText("refuses to overwrite");
+        } finally { await context.close(); }
+    }
+    expect(externalRequests).toEqual([]);
+});
+
+test("closing a committed restore retains its writer lease until publication finishes @product", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.locator("html")).toHaveAttribute("data-runtime-state", "running");
+    const bytes = await page.evaluate(async () => {
+        const { createHomeBackup } = await import("/worker_sync_filesystem.mjs");
+        const root = await navigator.storage.getDirectory();
+        const app = await root.getDirectoryHandle("kisakcod-web", { create: true });
+        const home = await app.getDirectoryHandle("home", { create: true });
+        const stream = await (await home.getFileHandle("restored.cfg", { create: true })).createWritable();
+        await stream.write("synthetic restored content");
+        await stream.close();
+        const backup = await createHomeBackup(root);
+        await home.removeEntry("restored.cfg"); // Only this test's disposable synthetic source.
+        const original = FileSystemFileHandle.prototype.createWritable;
+        FileSystemFileHandle.prototype.createWritable = async function (...args) {
+            const writer = await original.apply(this, args);
+            if (this.name !== "restored.cfg") return writer;
+            return {
+                async write(data) {
+                    await new Promise(resolve => { globalThis.__resumeRestoreWrite = resolve; });
+                    await writer.write(data);
+                },
+                truncate: writer.truncate.bind(writer), close: writer.close.bind(writer), abort: writer.abort.bind(writer),
+            };
+        };
+        return Array.from(new Uint8Array(await backup.arrayBuffer()));
+    });
+    await page.getByRole("button", { name: "Browser controls", exact: true }).click();
+    await page.locator("#browser-dialog [data-home-export]").click();
+    await page.locator("#home-backup-input").setInputFiles({ name: "synthetic.kisak-home", mimeType: "application/octet-stream", buffer: Buffer.from(bytes) });
+    await page.locator("#home-backup-restore").click();
+    await expect.poll(() => page.evaluate(() => Boolean(globalThis.__resumeRestoreWrite))).toBe(true);
+    await page.locator("#home-export-dialog").getByRole("button", { name: "Close", exact: true }).click();
+    expect(await page.evaluate(async () => (await navigator.locks.query()).held
+        .some(lock => lock.name === "kisakcod-web-home-writer-v1"))).toBe(true);
+    await page.evaluate(() => globalThis.__resumeRestoreWrite());
+    await expect.poll(() => page.evaluate(async () => (await navigator.locks.query()).held
+        .some(lock => lock.name === "kisakcod-web-home-writer-v1"))).toBe(false);
+    expect(await page.evaluate(async () => {
+        const root = await navigator.storage.getDirectory();
+        const app = await root.getDirectoryHandle("kisakcod-web");
+        const home = await app.getDirectoryHandle("home");
+        return (await (await home.getFileHandle("restored.cfg")).getFile()).text();
+    })).toBe("synthetic restored content");
+    await expect(page.locator("#home-export-files li")).toHaveCount(0);
+});
 
 async function submitCommand(page, text)
 {

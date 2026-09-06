@@ -40,24 +40,101 @@ geometry failure was resolved by following canonical lit/decal/emissive DPVS
 ranges. See [current status](web-status.md) and the relevant evidence records
 for qualification; historical test counts are not current suite totals.
 
-The final 2026-09-05 fullscreen/recovery, size and material artifact passes the unchanged
-production budgets and exact export boundary. Its optimized/minified production
-tier passes 48 cases; diagnostics pass 10 smoke and 60 remainder cases with ten
-optional owned-data skips, and Node passes 101. Native CTest passes all 42 and
-direct Wasm all 41, including the original `db_load.cpp` Material/Image/XModel
-oracle and its normalized publication/block expectations. Nine native D3D9
-shader pixel cases match WebGL within one UNORM step before/after actual context
-recovery; the native/Wasm reverb comparison covers 130 room/rate cases.
-Seven foreground production windows and owned three-scene material observations
-add bounded execution evidence. See [architecture](web-architecture.md#build-products)
-and [performance limits](evidence/browser-frame-time-2026-09-02.md#current-production-measurements--2026-09-05).
+## Optimized assertion and ABI matrix
 
-One Node checkpoint timer assertion failed during concurrent compilation;
-the isolated full 101-test rerun passed with assertions unchanged. The final
-Wasm build required adding the missing cinematic platform stub to the map
-fixture, with defer/reissue assertions. Routine browser runs use an isolated
-port (8254 here) because 8000 was already occupied. An earlier remainder run
-inherited the retail-root environment variable and stopped on an optional
-movie check; the final synthetic tier explicitly clears it. Linux/sanitizer,
-remote CI, exhaustive duplicates, other browsers and manual campaign/native
-visual acceptance were not rerun or promoted by this audit.
+Every target in `tests/native/CMakeLists.txt` inherits `-UNDEBUG` or `/UNDEBUG`
+and a forced `test_assertions.h` compile guard, including future registrations.
+The deliberately failing child is invoked only through a passing parent that
+requires the intended assertion diagnostic and nonzero status. Production
+directories retain their existing optimization/assertion policy. The separate
+reverb test retains its assertion flags and includes the same guard.
+
+| Matrix | Placement |
+| --- | --- |
+| Linux x86-64 host-portable | Portable parser/math/platform calculations. Configure prints explicit exclusions for canonical layouts. Primary-light core no longer includes `q_shared.h`. |
+| Windows x86 canonical | All portable checks plus 32-bit Kisak layouts and native differential/oracle coverage. |
+| Wasm32 | Canonical layouts, portable checks and direct platform/differential coverage; MSVC-only oracle remains native. |
+| Windows x64 supplemental | Portable subset; useful independent host evidence, not Linux qualification. |
+
+`r_gamma_tests`, `ui_savegames_tests`, `r_text_tests` and `r_image_quality_tests`
+require the canonical 32-bit Windows/Wasm boundary. They are deliberately
+registered there; no layout assertions or packing were changed. The static-model
+Wasm fixture has a test-only 256 KiB stack with overflow checks after its default
+64 KiB stack overflow was reproduced; production stack sizing is unchanged.
+
+The supported Linux sequence remains:
+
+```sh
+cmake -S . -B build/audit-portable -G Ninja -DKISAK_PORTABLE_TESTS_ONLY=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build/audit-portable --parallel 2
+ctest --test-dir build/audit-portable --output-on-failure
+```
+
+## Seeded parser defense
+
+`tests/fuzz/generate_corpus.py` reproduces 12 synthetic GPL-3.0 seeds and prints
+their SHA-256 identities; `tests/fuzz/asset_parsers.dict` supplies format tokens.
+The harness reaches valid and malformed IWI parse/decode and IWD member paths,
+checks buffer progress and failed-image publication, and reports seeded path
+families. It does not fuzz fastfiles, saves or cinematics.
+Configure Clang with `KISAK_BUILD_FUZZERS=ON` and `KISAK_PORTABLE_TESTS_ONLY=ON`,
+then build `asset_parsers_fuzz`. Run:
+
+```sh
+python3 tools/run_asset_fuzz.py build/fuzz/tests/native/asset_parsers_fuzz build/fuzz-run --seconds 30
+```
+
+Use a new disposable output directory each time. ASan/UBSan/libFuzzer remain
+enabled; PR runs use 30 seconds, scheduled/manual runs 600. Limits are 256 KiB
+input, 10 seconds per input, 1 GiB RSS, 512 MiB single allocation and a total
+subprocess deadline of budget + 60 seconds. Failure artifacts contain synthetic
+inputs/logs only. A successful process must also reach every seeded
+success/rejection family; exact coverage counters are not cross-platform gates.
+
+## Current execution evidence — 2026-09-06
+
+The remediation uses audited HEAD `4bee744235da2f99dbf09dc0a5118717402758c6`
+plus uncommitted changes. Local tools: Node 24.18.0, npm 11.16.0, TypeScript
+7.0.2, Emscripten 6.0.6, CMake 4.2.0-rc3, Ninja 1.13.2; MSVC toolset directory
+14.51.36231 (compiler 19.51.36256), SDK 10.0.28000.0. Playwright 1.61.1 uses
+Chromium 149.0.7827.55 on Windows. Pinned TS rejects a disposable implicit-any
+probe without explicit `--strict`; the separate runtime tier still explicitly
+uses `--strict false`.
+
+Release native x86 CTest passes 43/43, Wasm 42/42 and supplemental MSVC x64
+25/25. Separate optimized native and Wasm reverb tests also pass with the shared
+assertion guard. Active assertions exposed the missing thread enum, stale FX index,
+missing fixture loading keepalive, retired map-defer expectation and Wasm
+fixture stack overflow; all were repaired against canonical interfaces or
+the audited HEAD's removed hook. No production behavior changed for these fixes.
+Static checks and Node pass 120/120. Production browser passes 53; diagnostic
+smoke passes 10 and remainder 61 with 13 explicit skips. These include real
+OPFS same-profile restart recovery for rename and backup restore after journal
+publication, interrupted partial writes and quota failure, each with two clean
+reopens. Backup/raw-file reimport survives browser restart while external
+requests are blocked. The backup owns its bytes after original-file deletion;
+closing a committed restore retains its writer lease until publication finishes.
+Export lease/pagination and invalid/oversized-home regressions also pass.
+A delayed raw-export read error no longer changes a reopened dialog's status;
+its regression failed before the generation guard and passes afterwards.
+Both Release builds and canonical runtime-prefix checks pass. Packaging tests
+pass eight cases, including all failed/cancelled/skipped/missing required-tier
+combinations, standalone verification and rejection of private home backups.
+Synthetic packages exercise the shipped local server at one loopback origin
+through directory replacement and rollback; incomplete extraction and revision
+mismatch leave the previous package intact. This is platform evidence, not
+cross-version campaign acceptance or qualification of the current build.
+
+The unchanged product gate **fails**: 74 raw Wasm exports exceed 24, and the
+rebuilt Wasm is 5,343,379 bytes versus its 3,332,379-byte budget. The application
+export list remains exact. The audited HEAD added Asyncify; no production
+C++ or linker policy was changed by this remediation. Historical budget-pass
+claims do not qualify this artifact. Gate failure prevents aggregate packaging.
+
+Linux and sanitizer execution were unavailable locally. The SDK Clang 24.0.0git
+Debug fuzz target links, but cannot start because its matching ASan DLL is
+missing (exit `0xc0000135`). RelWithDebInfo also hits the bundled libFuzzer's
+debug-STL link mismatch. CI is configured, not executed evidence. No campaign,
+new performance, physical power-loss, other-browser or exhaustive duplicate
+qualification was performed. Disposable commands, failures and results are in
+`build/audit-remediation/`; the tracker identifies each audit item and next step.

@@ -51,7 +51,9 @@ for (const name of forwardedEvents) {
             protocolVersion: ENGINE_PROTOCOL_VERSION,
             type: "event",
             name,
-            detail: event.detail,
+            detail: name === "kisakcod:frame-profile" && event.detail?.kind === "frame"
+                ? { ...event.detail, storage: filesystem.persistenceUsage() }
+                : event.detail,
         });
     });
 }

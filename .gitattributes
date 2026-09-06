@@ -14,3 +14,4 @@
 *.iwd export-ignore
 *.ff export-ignore
 *.bik export-ignore
+*.kisak-home export-ignore

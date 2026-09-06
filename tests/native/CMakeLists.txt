@@ -6,6 +6,31 @@ endif()
 
 include(CTest)
 
+# Directory policy covers every test and future registration, irrespective of
+# optimization/configuration. It does not alter any production build directory.
+if (MSVC)
+    add_compile_options(/UNDEBUG "/FI${CMAKE_CURRENT_LIST_DIR}/test_assertions.h")
+else()
+    add_compile_options(-UNDEBUG "SHELL:-include ${CMAKE_CURRENT_LIST_DIR}/test_assertions.h")
+endif()
+
+add_executable(test_assertions_failure test_assertions_failure.cpp)
+if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    target_link_options(test_assertions_failure PRIVATE "-sENVIRONMENT=node" "-sEXIT_RUNTIME=1")
+    set_target_properties(test_assertions_failure PROPERTIES SUFFIX ".cjs")
+    find_program(KISAK_ASSERT_NODE NAMES node nodejs REQUIRED)
+else()
+    set(KISAK_ASSERT_NODE "")
+endif()
+add_test(NAME test_assertions_policy COMMAND "${CMAKE_COMMAND}"
+    "-DNODE=${KISAK_ASSERT_NODE}" "-DEXECUTABLE=$<TARGET_FILE:test_assertions_failure>"
+    -P "${CMAKE_CURRENT_LIST_DIR}/check_test_assertions.cmake")
+
+set(KISAK_CANONICAL_TEST_ABI OFF)
+if ((WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4) OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    set(KISAK_CANONICAL_TEST_ABI ON)
+endif()
+
 # Optional native renderer boundary check; portable tests need no DirectX SDK.
 set(KISAK_D3DX_TEST_ROOT "" CACHE PATH "Pinned D3DX build/native directory for native JPEG tests")
 if (WIN32 AND KISAK_D3DX_TEST_ROOT)
@@ -33,18 +58,20 @@ if (WIN32 AND KISAK_D3DX_TEST_ROOT)
 endif()
 
 add_executable(r_image_resample_tests r_image_resample_tests.cpp ../../src/gfx_d3d/r_image_resample.cpp)
-add_executable(r_gamma_tests r_gamma_tests.cpp ../../src/gfx_d3d/r_gamma.cpp)
 add_executable(r_sampler_tests r_sampler_tests.cpp)
 set(_image_quality_tests)
-if (CMAKE_SIZEOF_VOID_P EQUAL 4)
+if (KISAK_CANONICAL_TEST_ABI)
+    add_executable(r_gamma_tests r_gamma_tests.cpp ../../src/gfx_d3d/r_gamma.cpp)
     add_executable(r_image_quality_tests r_image_quality_tests.cpp ../../src/gfx_d3d/r_image_quality.cpp)
     target_compile_definitions(r_image_quality_tests PRIVATE KISAK_WEB=1 dNODEBUG=1 NOMINMAX)
-    set(_image_quality_tests r_image_quality_tests)
+    target_compile_definitions(r_gamma_tests PRIVATE KISAK_WEB=1 dNODEBUG=1 NOMINMAX)
+    add_executable(ui_savegames_tests ui_savegames_tests.cpp ../../src/ui/ui_savegames.cpp)
+    target_compile_definitions(ui_savegames_tests PRIVATE KISAK_SP=1 KISAK_WEB=1 dNODEBUG=1 NOMINMAX)
+    set(_image_quality_tests r_image_quality_tests r_gamma_tests ui_savegames_tests)
+else()
+    message(STATUS "Canonical ABI coverage runs on Windows x86 and Wasm: r_gamma_tests, r_image_quality_tests, ui_savegames_tests, r_text_tests")
 endif()
-target_compile_definitions(r_gamma_tests PRIVATE KISAK_WEB=1 dNODEBUG=1 NOMINMAX)
-add_executable(ui_savegames_tests ui_savegames_tests.cpp ../../src/ui/ui_savegames.cpp)
-target_compile_definitions(ui_savegames_tests PRIVATE KISAK_SP=1 KISAK_WEB=1 dNODEBUG=1 NOMINMAX)
-foreach(target r_image_resample_tests r_gamma_tests r_sampler_tests ${_image_quality_tests} ui_savegames_tests)
+foreach(target r_image_resample_tests r_sampler_tests ${_image_quality_tests})
     target_compile_features(${target} PRIVATE cxx_std_20)
     target_include_directories(${target} PRIVATE ../../src ../../deps)
     target_compile_definitions(${target} PRIVATE RELEASE_ASSERTS=1)
@@ -65,6 +92,7 @@ foreach(target r_image_resample_tests r_gamma_tests r_sampler_tests ${_image_qua
     endif()
 endforeach()
 
+if (KISAK_CANONICAL_TEST_ABI)
 add_executable(r_text_tests r_text_tests.cpp ../../src/gfx_d3d/r_text.cpp)
 target_compile_features(r_text_tests PRIVATE cxx_std_20)
 target_include_directories(r_text_tests PRIVATE ../../src)
@@ -82,6 +110,7 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     add_test(NAME r_text_tests COMMAND "${KISAK_TEXT_NODE_EXECUTABLE}" "$<TARGET_FILE:r_text_tests>")
 else()
     add_test(NAME r_text_tests COMMAND r_text_tests)
+endif()
 endif()
 
 option(KISAK_BUILD_FUZZERS "Build the native imported-asset parser fuzz target" OFF)
@@ -639,6 +668,11 @@ target_compile_features(web_renderer_fx_model_scene_tests PRIVATE cxx_std_20)
 target_include_directories(web_renderer_fx_model_scene_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
 target_compile_features(web_renderer_primary_light_core_tests PRIVATE cxx_std_20)
 target_compile_definitions(web_renderer_primary_light_core_tests PRIVATE KISAK_WEB=1)
+if (NOT MSVC)
+    # com_math's native inline spelling normally comes from q_shared, whose
+    # canonical 32-bit layouts are not part of this portable calculation test.
+    target_compile_definitions(web_renderer_primary_light_core_tests PRIVATE __forceinline=inline)
+endif()
 target_include_directories(web_renderer_primary_light_core_tests PRIVATE
     "${KISAK_REPOSITORY_ROOT}/src")
 if (MSVC)
@@ -769,6 +803,12 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "-sNO_DISABLE_EXCEPTION_CATCHING"
         "-sALLOW_MEMORY_GROWTH=1"
     )
+    # The canonical DPVS fixture plus scene packing exceeds Wasm's 64 KiB
+    # default stack. Keep overflow detection; production uses its own budget.
+    target_compile_options(web_renderer_static_model_scene_tests PRIVATE
+        "-sNO_DISABLE_EXCEPTION_CATCHING")
+    target_link_options(web_renderer_static_model_scene_tests PRIVATE
+        "-sSTACK_OVERFLOW_CHECK=2" "-sSTACK_SIZE=262144")
     # The unchanged 24-cloud rollback fixture exceeds the default 16 MiB heap.
     target_compile_options(web_renderer_particle_cloud_scene_tests PRIVATE
         "-sNO_DISABLE_EXCEPTION_CATCHING")
@@ -997,13 +1037,18 @@ if (KISAK_BUILD_FUZZERS)
     target_compile_definitions(asset_parsers_fuzz PRIVATE
         KISAK_PORTABLE_IWI_WAVELET=1)
     target_include_directories(asset_parsers_fuzz PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
-    target_compile_options(asset_parsers_fuzz PRIVATE
-        -fsanitize=fuzzer,address,undefined
-        -fno-omit-frame-pointer
-    )
-    target_link_options(asset_parsers_fuzz PRIVATE
-        -fsanitize=fuzzer,address,undefined
-    )
+    add_executable(sanitizer_failure sanitizer_failure.cpp)
+    foreach(target asset_parsers_fuzz sanitizer_failure)
+        target_compile_options(${target} PRIVATE
+            -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
+        target_link_options(${target} PRIVATE -fsanitize=address,undefined)
+    endforeach()
+    target_compile_options(asset_parsers_fuzz PRIVATE -fsanitize=fuzzer)
+    target_link_options(asset_parsers_fuzz PRIVATE -fsanitize=fuzzer)
     target_link_libraries(asset_parsers_fuzz PRIVATE ${KISAK_TEST_ZLIB_TARGET})
+    add_dependencies(asset_parsers_fuzz sanitizer_failure)
+    add_test(NAME sanitizer_policy COMMAND "${CMAKE_COMMAND}"
+        "-DEXECUTABLE=$<TARGET_FILE:sanitizer_failure>"
+        -P "${CMAKE_CURRENT_LIST_DIR}/check_sanitizers.cmake")
 
 endif()

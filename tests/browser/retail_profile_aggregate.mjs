@@ -106,6 +106,9 @@ export function aggregateGameplayProfile({
         cpu: summarizeFields(frames, "cpu", CPU_PROFILE_FIELDS),
         renderer: summarizeFields(frames, "renderer", RENDERER_PROFILE_FIELDS),
         counters: summarizeFields(frames, "counters", COUNTER_PROFILE_FIELDS),
+        // These are separate storage populations, never a process-memory total.
+        storage: summarizeFields(frames, "storage", ["pendingOperations", "pendingSnapshotBytes",
+            "reservedOperations", "reservedSnapshotBytes", "liveFiles", "liveBytes"]),
         gpu: {
             gpuStageProfilingAvailable: frames.some(
                 (entry) => entry.gpu?.timingsAvailable === true),

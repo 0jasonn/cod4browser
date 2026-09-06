@@ -4,6 +4,50 @@ const HOME_DIRECTORY = "home";
 const SYNC_GLOBAL = "__KISAKCOD_SYNC_FS__";
 const MAX_HOME_FILE_BYTES = 64 * 1024 * 1024;
 const MAX_HOME_TOTAL_BYTES = 128 * 1024 * 1024;
+const MAX_HOME_FILES = 8191;
+const MAX_HOME_DIRECTORIES = 8191;
+// Canonical MAX_OSPATH is 260 bytes including the terminator.
+function validHomePath(path) { return new TextEncoder().encode(path).byteLength < 260; }
+const RENAME_JOURNAL = "home-rename.json";
+const RESTORE_JOURNAL = "home-restore.json";
+const RESTORE_STAGE = "home-restore";
+const MAX_RECOVERY_HEADER_BYTES = 4 * 1024 * 1024;
+const BACKUP_MAGIC = new TextEncoder().encode("KISAKHOME1\n");
+// Live content and queued immutable copies are separate budgets. Reserve the
+// next close snapshot when accepting an open/write, so close cannot drop data.
+const MAX_PENDING_OPERATIONS = 16384;
+const MAX_PENDING_BYTES = 256 * 1024 * 1024;
+
+// Read-only escape hatch for oversized/conflicting homes. Deliberately does
+// not mount, normalize names, replay journals, or load file contents into RAM.
+// The caller holds the existing home-writer lease while using these handles.
+export async function* readHomeRecoveryFiles(root)
+{
+    let app;
+    try { app = await root.getDirectoryHandle(APP_DIRECTORY); }
+    catch (error) { if (error?.name === "NotFoundError") return; throw error; }
+    for (const name of [RENAME_JOURNAL, RESTORE_JOURNAL]) {
+        const handle = await optionalRecoveryFile(app, name);
+        if (handle) yield { path: name, handle };
+    }
+    let home;
+    try { home = await app.getDirectoryHandle(HOME_DIRECTORY); }
+    catch (error) { if (error?.name !== "NotFoundError") throw error; }
+    const stack = home ? [{ prefix: "home", iterator: home.entries() }] : [];
+    try {
+        const stage = await app.getDirectoryHandle(RESTORE_STAGE);
+        stack.push({ prefix: RESTORE_STAGE, iterator: stage.entries() });
+    } catch (error) { if (error?.name !== "NotFoundError") throw error; }
+    while (stack.length) {
+        const current = stack.at(-1);
+        const next = await current.iterator.next();
+        if (next.done) { stack.pop(); continue; }
+        const [name, handle] = next.value;
+        const path = `${current.prefix}/${name}`;
+        if (handle.kind === "directory") stack.push({ prefix: path, iterator: handle.entries() });
+        else if (handle.kind === "file") yield { path, handle };
+    }
+}
 
 function normalizeLogicalPath(path)
 {
@@ -19,6 +63,243 @@ function normalizeLogicalPath(path)
     return segments.join("/").toLocaleLowerCase("en-US");
 }
 
+function recoveryEntries(value)
+{
+    if (!value || value.version !== 1 || !Array.isArray(value.files) || value.files.length > MAX_HOME_FILES)
+        throw new Error("Unsupported or oversized home backup version.");
+    const names = new Set();
+    let bytes = 0;
+    for (const entry of value.files) {
+        if (!entry || typeof entry.path !== "string" || normalizeLogicalPath(entry.path) !== entry.path ||
+            !validHomePath(entry.path) || names.has(entry.path) ||
+            !Number.isSafeInteger(entry.size) || entry.size < 0 || entry.size > MAX_HOME_FILE_BYTES ||
+            typeof entry.sha256 !== "string" || !/^[a-f0-9]{64}$/u.test(entry.sha256))
+            throw new Error("Home backup contains an invalid path, size, hash or duplicate.");
+        names.add(entry.path);
+        bytes += entry.size;
+    }
+    if (bytes > MAX_HOME_TOTAL_BYTES) throw new Error("Home backup exceeds the storage limit.");
+    const header = JSON.stringify({ version: 1, files: value.files.map(({ path, size, sha256 }) => ({ path, size, sha256 })) });
+    if (new TextEncoder().encode(header).byteLength > MAX_RECOVERY_HEADER_BYTES)
+        throw new Error("Home recovery metadata exceeds its limit.");
+    return value.files.map(({ path, size, sha256 }) => Object.freeze({ path, size, sha256 }));
+}
+
+async function recoveryHash(bytes)
+{
+    return [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))]
+        .map(byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+// Metadata-only inventory. Never normalize a physical name into another file.
+async function inspectRecoveryHome(home)
+{
+    const files = new Map();
+    const directories = new Set([""]);
+    let bytes = 0;
+    const stack = [{ prefix: "", directory: home }];
+    while (stack.length) {
+        const current = stack.pop();
+        for await (const [name, handle] of current.directory.entries()) {
+            const path = current.prefix ? `${current.prefix}/${name}` : name;
+            if (normalizeLogicalPath(path) !== path || !validHomePath(path))
+                throw new Error("Home has invalid or non-normalized paths; use raw export first.");
+            if (handle.kind === "directory") {
+                directories.add(path);
+                if (directories.size - 1 > MAX_HOME_DIRECTORIES) throw new Error("Home exceeds its directory limit; use raw export.");
+                stack.push({ prefix: path, directory: handle });
+            } else if (handle.kind === "file") {
+                const file = await handle.getFile();
+                if (file.size > MAX_HOME_FILE_BYTES || files.size >= MAX_HOME_FILES ||
+                    bytes + file.size > MAX_HOME_TOTAL_BYTES) throw new Error("Home exceeds its storage limit; use raw export.");
+                files.set(path, { file, handle });
+                bytes += file.size;
+            } else throw new Error("Unknown home entry type.");
+        }
+    }
+    return { files, directories, bytes };
+}
+
+function preflightRestore(inventory, entries, replay = false)
+{
+    const files = new Set(inventory.files.keys());
+    const directories = new Set(inventory.directories);
+    let bytes = inventory.bytes;
+    for (const entry of entries) {
+        const existing = inventory.files.get(entry.path);
+        if (existing && !replay) throw new Error(`Restore refuses to overwrite ${entry.path}.`);
+        if (directories.has(entry.path)) throw new Error(`Restore path conflicts with a directory: ${entry.path}.`);
+        files.add(entry.path);
+        bytes += entry.size - (existing?.file.size ?? 0);
+        const segments = entry.path.split("/");
+        segments.pop();
+        let path = "";
+        for (const name of segments) {
+            path = path ? `${path}/${name}` : name;
+            if (files.has(path)) throw new Error(`Restore path conflicts with a file: ${path}.`);
+            directories.add(path);
+        }
+    }
+    for (const path of files) if (directories.has(path)) throw new Error(`Restore has a file/directory conflict: ${path}.`);
+    if (files.size > MAX_HOME_FILES || directories.size - 1 > MAX_HOME_DIRECTORIES || bytes > MAX_HOME_TOTAL_BYTES)
+        throw new Error("Restored home would exceed its file, directory or byte limit.");
+}
+
+async function optionalRecoveryFile(directory, name)
+{
+    try { return await directory.getFileHandle(name); }
+    catch (error) { if (error?.name === "NotFoundError") return null; throw error; }
+}
+
+async function checkRecoveryIdle(app)
+{
+    for (const name of [RENAME_JOURNAL, RESTORE_JOURNAL]) {
+        if (await optionalRecoveryFile(app, name)) throw new Error("Home has a pending recovery. Resume recovery before restoring another backup.");
+    }
+}
+
+// Holds the same home lease as the engine. Backup format is platform transport;
+// files remain canonical opaque save/config bytes, without a second save parser.
+export async function createHomeBackup(root, signal = null)
+{
+    const app = await childDirectory(root, [APP_DIRECTORY], true);
+    await checkRecoveryIdle(app);
+    const home = await childDirectory(app, [HOME_DIRECTORY], true);
+    const inventory = await inspectRecoveryHome(home);
+    const entries = [];
+    const blobs = [];
+    for (const [path, { file }] of inventory.files) {
+        signal?.throwIfAborted();
+        const bytes = await file.arrayBuffer();
+        entries.push({ path, size: file.size, sha256: await recoveryHash(bytes) });
+        // OPFS File snapshots can become unreadable after their source changes.
+        // Own these bounded bytes so the downloaded backup survives lease release.
+        blobs.push(new Blob([bytes]));
+    }
+    const header = new TextEncoder().encode(JSON.stringify({ version: 1, files: entries }));
+    recoveryEntries({ version: 1, files: entries });
+    const length = new Uint8Array(4);
+    new DataView(length.buffer).setUint32(0, header.byteLength, true);
+    return new Blob([BACKUP_MAGIC, length, header, ...blobs], { type: "application/octet-stream" });
+}
+
+export async function readHomeBackup(backup)
+{
+    const prefixSize = BACKUP_MAGIC.byteLength + 4;
+    if (!Number.isSafeInteger(backup?.size) || backup.size < prefixSize ||
+        backup.size > MAX_HOME_TOTAL_BYTES + MAX_RECOVERY_HEADER_BYTES + prefixSize)
+        throw new Error("Home backup is truncated or exceeds the storage limit.");
+    const prefix = new Uint8Array(await backup.slice(0, prefixSize).arrayBuffer());
+    if (!BACKUP_MAGIC.every((byte, index) => prefix[index] === byte)) throw new Error("Unsupported home backup format/version.");
+    const size = new DataView(prefix.buffer).getUint32(BACKUP_MAGIC.byteLength, true);
+    if (size > MAX_RECOVERY_HEADER_BYTES || size > backup.size - prefixSize) throw new Error("Invalid home backup header length.");
+    const entries = recoveryEntries(JSON.parse(new TextDecoder("utf-8", { fatal: true })
+        .decode(await backup.slice(prefixSize, prefixSize + size).arrayBuffer())));
+    let offset = prefixSize + size;
+    const files = entries.map(entry => {
+        const file = backup.slice(offset, offset + entry.size);
+        offset += entry.size;
+        return { ...entry, file };
+    });
+    if (offset !== backup.size) throw new Error("Home backup payload is truncated or has trailing bytes.");
+    return files;
+}
+
+async function cleanRestoreStage(app)
+{
+    try { await app.removeEntry(RESTORE_STAGE, { recursive: true }); }
+    catch (error) { if (error?.name !== "NotFoundError") throw error; }
+}
+
+async function replayHomeRestore(app, home)
+{
+    const handle = await optionalRecoveryFile(app, RESTORE_JOURNAL);
+    if (!handle) return;
+    if (await optionalRecoveryFile(app, RENAME_JOURNAL))
+        throw new Error("Conflicting home recovery records; use raw export before recovery.");
+    const journal = await handle.getFile();
+    if (journal.size === 0) { await removeDurable(app, RESTORE_JOURNAL); return; }
+    if (journal.size > MAX_RECOVERY_HEADER_BYTES) throw new Error("Home restore journal is oversized; use raw export.");
+    const entries = recoveryEntries(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(await journal.arrayBuffer())));
+    const inventory = await inspectRecoveryHome(home);
+    preflightRestore(inventory, entries, true);
+    const stage = await app.getDirectoryHandle(RESTORE_STAGE);
+    // Verify every staged source and any already-published destination first.
+    // A newly created zero-byte destination can precede writable-stream close.
+    for (const [index, entry] of entries.entries()) {
+        const source = await (await stage.getFileHandle(String(index))).getFile();
+        if (source.size !== entry.size || await recoveryHash(await source.arrayBuffer()) !== entry.sha256)
+            throw new Error(`Staged restore is damaged: ${entry.path}. Original home files remain unchanged.`);
+        const existing = inventory.files.get(entry.path)?.file;
+        if (existing?.size && (existing.size !== entry.size || await recoveryHash(await existing.arrayBuffer()) !== entry.sha256))
+            throw new Error(`Restore refuses to overwrite changed file ${entry.path}.`);
+    }
+    for (const [index, entry] of entries.entries()) {
+        const existing = inventory.files.get(entry.path)?.file;
+        if (existing?.size === entry.size) continue;
+        const segments = entry.path.split("/");
+        const name = segments.pop();
+        const directory = await childDirectory(home, segments, true);
+        const bytes = new Uint8Array(await (await (await stage.getFileHandle(String(index))).getFile()).arrayBuffer());
+        await publishBytes(directory, name, bytes);
+    }
+    // Once this record is gone, all destinations are complete. Orphaned staging
+    // is uncommitted scratch and may be reclaimed by a future explicit restore.
+    await removeDurable(app, RESTORE_JOURNAL);
+    try { await cleanRestoreStage(app); }
+    catch (error) {
+        throw Object.assign(new Error("Restored files are complete, but temporary cleanup failed. Use Resume interrupted recovery to retry cleanup."),
+            { code: "RESTORE_COMMITTED_CLEANUP_FAILED", cause: error });
+    }
+}
+
+export async function resumeHomeRestore(root)
+{
+    const app = await childDirectory(root, [APP_DIRECTORY], true);
+    const home = await childDirectory(app, [HOME_DIRECTORY], true);
+    const pending = Boolean(await optionalRecoveryFile(app, RESTORE_JOURNAL) || await optionalRecoveryFile(app, RENAME_JOURNAL));
+    await replayHomeRestore(app, home);
+    await recoverRename(app, home);
+    await cleanRestoreStage(app);
+    return { recovered: pending };
+}
+
+export async function restoreHomeFiles(root, selected, signal = null)
+{
+    const entries = recoveryEntries({ version: 1, files: selected });
+    const sources = selected.map(entry => entry.file);
+    const app = await childDirectory(root, [APP_DIRECTORY], true);
+    await checkRecoveryIdle(app);
+    const home = await childDirectory(app, [HOME_DIRECTORY], true);
+    preflightRestore(await inspectRecoveryHome(home), entries);
+    signal?.throwIfAborted();
+    await cleanRestoreStage(app);
+    const stage = await app.getDirectoryHandle(RESTORE_STAGE, { create: true });
+    for (const [index, entry] of entries.entries()) {
+        signal?.throwIfAborted();
+        if (sources[index]?.size !== entry.size) throw new Error("Restore source size changed.");
+        const bytes = new Uint8Array(await sources[index].arrayBuffer());
+        if (await recoveryHash(bytes) !== entry.sha256) throw new Error(`Backup checksum failed: ${entry.path}.`);
+        await publishBytes(stage, String(index), bytes);
+    }
+    signal?.throwIfAborted();
+    const record = new TextEncoder().encode(JSON.stringify({ version: 1,
+        files: entries.map(({ path, size, sha256 }) => ({ path, size, sha256 })) }));
+    await publishBytes(app, RESTORE_JOURNAL, record);
+    // Cancellation is allowed before intent commits. Afterwards finish/replay;
+    // never abandon a partly published restore or release the writer lease early.
+    await replayHomeRestore(app, home);
+    return { filesRestored: entries.length, bytesRestored: entries.reduce((sum, entry) => sum + entry.size, 0) };
+}
+
+export async function restoreRawHomeFile(root, path, file, signal = null)
+{
+    const [entry] = recoveryEntries({ version: 1, files: [{ path, size: file?.size, sha256: "0".repeat(64) }] });
+    signal?.throwIfAborted();
+    const sha256 = await recoveryHash(await file.arrayBuffer());
+    return restoreHomeFiles(root, [{ ...entry, sha256, file }], signal);
+}
+
 async function childDirectory(root, segments, create = false)
 {
     let current = root;
@@ -27,6 +308,95 @@ async function childDirectory(root, segments, create = false)
     }
     return current;
 }
+
+async function removeDurable(directory, name)
+{
+    try {
+        await directory.removeEntry(name);
+    } catch (error) {
+        if (error?.name !== "NotFoundError") throw error;
+    }
+}
+
+// OPFS writable streams stage changes until close. Preserve the original
+// failure if abort or removal of a newly created empty entry also fails.
+async function publishBytes(directory, name, bytes)
+{
+    let handle;
+    let created = false;
+    try {
+        handle = await directory.getFileHandle(name);
+    } catch (error) {
+        if (error?.name !== "NotFoundError") throw error;
+        handle = await directory.getFileHandle(name, { create: true });
+        created = true;
+    }
+    let writable;
+    try {
+        writable = await handle.createWritable();
+        await writable.write(bytes);
+        await writable.truncate(bytes.byteLength);
+        await writable.close();
+    } catch (error) {
+        const cleanupErrors = [];
+        try { await writable?.abort(); } catch (cleanup) { cleanupErrors.push(cleanup); }
+        if (created) {
+            try { await removeDurable(directory, name); } catch (cleanup) { cleanupErrors.push(cleanup); }
+        }
+        if (cleanupErrors.length) error.cleanupErrors = cleanupErrors;
+        throw error;
+    }
+}
+
+
+async function homeHandle(homeDirectory, path)
+{
+    const segments = path.split("/");
+    const name = segments.pop();
+    const directory = await childDirectory(homeDirectory, segments);
+    return { directory, name };
+}
+
+async function recoverRename(appDirectory, homeDirectory)
+{
+    let journal;
+    try { journal = await appDirectory.getFileHandle(RENAME_JOURNAL); }
+    catch (error) {
+        if (error?.name === "NotFoundError") return;
+        throw error;
+    }
+    const blob = await journal.getFile();
+    // A newly created journal interrupted before close cannot have begun
+    // publication. An existing journal is never truncated in place.
+    if (blob.size === 0) return removeDurable(appDirectory, RENAME_JOURNAL);
+    if (blob.size > 65536) throw new Error("Browser home rename journal is oversized; export home before recovery.");
+    const record = JSON.parse(new TextDecoder().decode(await blob.arrayBuffer()));
+    if (!record || record.version !== 1 || typeof record.source !== "string" ||
+        typeof record.destination !== "string" || normalizeLogicalPath(record.source) !== record.source ||
+        normalizeLogicalPath(record.destination) !== record.destination ||
+        !validHomePath(record.source) || !validHomePath(record.destination) ||
+        record.source === record.destination) {
+        throw new Error("Browser home rename journal is invalid; export home before recovery.");
+    }
+    const source = await homeHandle(homeDirectory, record.source);
+    const destination = await homeHandle(homeDirectory, record.destination);
+    let sourceHandle;
+    try { sourceHandle = await source.directory.getFileHandle(source.name); }
+    catch (error) { if (error?.name !== "NotFoundError") throw error; }
+    if (sourceHandle) {
+        const sourceBlob = await sourceHandle.getFile();
+        if (sourceBlob.size > MAX_HOME_FILE_BYTES) throw new Error("Browser home rename source exceeds its recovery limit.");
+        await publishBytes(destination.directory, destination.name,
+            new Uint8Array(await sourceBlob.arrayBuffer()));
+        await removeDurable(source.directory, source.name);
+    } else {
+        // Source retirement follows destination close, so a missing source
+        // is committed only if the published destination still exists.
+        await destination.directory.getFileHandle(destination.name);
+    }
+    await removeDurable(appDirectory, RENAME_JOURNAL);
+}
+
 
 function mountFailure(code, error, cleanupError = null)
 {
@@ -83,9 +453,14 @@ export function createWorkerSyncFilesystem(faults = null)
     const descriptors = new Map();
     let nextDescriptor = 1;
     let homeDirectory = null;
+    let appDirectory = null;
     let homeLoaded = false;
-    let persistChain = Promise.resolve();
+    let persistChain = null;
+    let persistenceFailure = null;
     const pendingPersistence = [];
+    let pendingPersistenceBytes = 0;
+    const writableReservations = new Map();
+    let reservedSnapshotBytes = 0;
     const persistenceObservers = new Set();
     let acceptingWrites = true;
     let flushPromise = null;
@@ -110,6 +485,8 @@ export function createWorkerSyncFilesystem(faults = null)
     function closeMountedFilesystem()
     {
         descriptors.clear();
+        writableReservations.clear();
+        reservedSnapshotBytes = 0;
         for (const file of files.values()) {
             try {
                 file.access.close();
@@ -133,6 +510,7 @@ export function createWorkerSyncFilesystem(faults = null)
         homeDirectoryEntries.clear();
         homeDirectoryEntries.set("", new Map());
         homeDirectory = null;
+        appDirectory = null;
         homeLoaded = false;
         homeBytes = 0;
     }
@@ -140,21 +518,23 @@ export function createWorkerSyncFilesystem(faults = null)
     function addHomeDirectory(logicalPath)
     {
         if (homeDirectories.has(logicalPath)) return;
-        const segments = logicalPath.split("/");
-        const name = segments.pop();
-        const parent = segments.join("/");
-        addHomeDirectory(parent);
-        if (homeFiles.has(logicalPath) ||
-            homeDirectoryEntries.get(parent).has(name)) {
-            throw new Error(`The browser home path contains a file/directory conflict: ${logicalPath}.`);
+        if (!validHomePath(logicalPath)) throw new Error("The browser home path exceeds canonical MAX_OSPATH.");
+        const missing = [];
+        let parent = "";
+        for (const name of logicalPath.split("/")) {
+            const path = parent ? `${parent}/${name}` : name;
+            if (homeFiles.has(path)) throw new Error(`The browser home path contains a file/directory conflict: ${path}.`);
+            if (!homeDirectories.has(path)) missing.push({ path, parent, name });
+            parent = path;
         }
-        homeDirectories.add(logicalPath);
-        homeDirectoryEntries.set(logicalPath, new Map());
-        homeDirectoryEntries.get(parent).set(name, {
-            name,
-            type: "directory",
-            size: 0,
-        });
+        if (homeDirectories.size - 1 + missing.length > MAX_HOME_DIRECTORIES) {
+            throw new Error("The browser home path exceeds its directory-count limit; export stored saves before recovery.");
+        }
+        for (const { path, parent, name } of missing) {
+            homeDirectories.add(path);
+            homeDirectoryEntries.set(path, new Map());
+            homeDirectoryEntries.get(parent).set(name, { name, type: "directory", size: 0 });
+        }
     }
 
     function publishHomeFile(file)
@@ -178,15 +558,21 @@ export function createWorkerSyncFilesystem(faults = null)
         report = null)
     {
         for await (const [name, handle] of directory.entries()) {
-            const logicalPath = normalizeLogicalPath(
-                relative ? `${relative}/${name}` : name);
-            if (!logicalPath) continue;
+            const storedPath = relative ? `${relative}/${name}` : name;
+            const logicalPath = normalizeLogicalPath(storedPath);
+            if (!logicalPath || !validHomePath(logicalPath)) throw new Error("The browser home contains an invalid path; export stored saves before recovery.");
+            // All live mutations publish normalized names. Accepting a legacy
+            // spelling here would create a second physical file on its next write.
+            if (logicalPath !== storedPath) throw new Error("The browser home contains a normalized path conflict; export stored saves before recovery.");
+            if (homeFiles.has(logicalPath) || homeDirectories.has(logicalPath)) {
+                throw new Error(`The browser home contains a normalized path conflict: ${logicalPath}. Export stored saves before recovery.`);
+            }
             if (handle.kind === "directory") {
                 addHomeDirectory(logicalPath);
                 await loadHomeDirectory(handle, logicalPath, budget, report);
                 continue;
             }
-            if (handle.kind !== "file" || ++budget.files > 8191) {
+            if (handle.kind !== "file" || ++budget.files > MAX_HOME_FILES) {
                 throw new Error("The browser home path exceeds its file-count limit.");
             }
             const blob = await handle.getFile();
@@ -217,8 +603,10 @@ export function createWorkerSyncFilesystem(faults = null)
         if (homeLoaded) return;
         resetHomeCache();
         try {
-            const appDirectory = await childDirectory(root, [APP_DIRECTORY], true);
+            appDirectory = await childDirectory(root, [APP_DIRECTORY], true);
             homeDirectory = await childDirectory(appDirectory, [HOME_DIRECTORY], true);
+            await replayHomeRestore(appDirectory, homeDirectory);
+            await recoverRename(appDirectory, homeDirectory);
             await loadHomeDirectory(homeDirectory, "", { bytes: 0, files: 0 }, report);
             homeLoaded = true;
         } catch (error) {
@@ -234,35 +622,61 @@ export function createWorkerSyncFilesystem(faults = null)
         const segments = logicalPath.split("/");
         const name = segments.pop();
         const directory = await childDirectory(homeDirectory, segments, true);
-        const handle = await directory.getFileHandle(name, { create: true });
-        const writable = await handle.createWritable();
-        await writable.write(bytes);
-        await writable.truncate(bytes.byteLength);
-        await writable.close();
+        await publishBytes(directory, name, bytes);
         const current = homeFiles.get(logicalPath);
         if (current === file && file.logicalPath === logicalPath &&
             current.version === version) current.persistedVersion = version;
     }
 
-    function drainPersistence()
+    function canQueue(bytes = 0, operations = 1)
     {
-        persistChain = persistChain.catch(() => {}).then(async () => {
+        return pendingPersistence.length + writableReservations.size + operations <= MAX_PENDING_OPERATIONS &&
+            pendingPersistenceBytes + reservedSnapshotBytes + bytes <= MAX_PENDING_BYTES;
+    }
+
+    function reserveWritable(file, size)
+    {
+        const previous = writableReservations.get(file);
+        if (!canQueue(size - (previous ?? 0), previous === undefined ? 1 : 0)) return false;
+        reservedSnapshotBytes += size - (previous ?? 0);
+        writableReservations.set(file, size);
+        return true;
+    }
+
+    function releaseWritable(file)
+    {
+        reservedSnapshotBytes -= writableReservations.get(file) ?? 0;
+        writableReservations.delete(file);
+    }
+
+    function drainPersistence(retry = false)
+    {
+        if (persistChain) return persistChain;
+        if (persistenceFailure && !retry) return Promise.reject(persistenceFailure);
+        persistenceFailure = null;
+        const running = Promise.resolve().then(async () => {
             while (pendingPersistence.length > 0) {
                 const operation = pendingPersistence[0];
                 await operation.run();
                 pendingPersistence.shift();
+                pendingPersistenceBytes -= operation.retainedBytes;
                 for (const observer of persistenceObservers) observer(operation.progress);
             }
         });
+        persistChain = running.catch((error) => {
+            persistenceFailure = error;
+            throw error;
+        }).finally(() => { persistChain = null; });
         return persistChain;
     }
 
     function schedulePersistence(run, progress = {
         phase: "persisting", files: 0, bytes: 0,
-    })
+    }, retainedBytes = progress.bytes)
     {
-        const operation = { run, progress };
+        const operation = { run, progress, retainedBytes };
         pendingPersistence.push(operation);
+        pendingPersistenceBytes += retainedBytes;
         const running = drainPersistence();
         void running.catch(() => {});
         return running;
@@ -294,7 +708,7 @@ export function createWorkerSyncFilesystem(faults = null)
         };
         persistenceObservers.add(observer);
         try {
-            await drainPersistence();
+            await drainPersistence(true);
         } finally {
             persistenceObservers.delete(observer);
         }
@@ -485,13 +899,16 @@ export function createWorkerSyncFilesystem(faults = null)
     {
         if (!acceptingWrites) return -1;
         const logicalPath = normalizeLogicalPath(path);
-        if (!logicalPath) return -1;
+        if (!logicalPath || !validHomePath(logicalPath)) return -1;
         const segments = logicalPath.split("/");
         const parent = segments.slice(0, -1).join("/");
         if (!homeDirectories.has(parent) || directories.has(logicalPath) ||
             homeDirectories.has(logicalPath)) return -1;
         let file = homeFiles.get(logicalPath);
+        if (file && [...descriptors.values()].some((open) => open.file === file && open.writable)) return -1;
+        if (!canQueue(append ? file?.size ?? 0 : 0)) return -1;
         if (!file) {
+            if (homeFiles.size >= MAX_HOME_FILES) return -1;
             file = {
                 logicalPath,
                 bytes: new Uint8Array(256),
@@ -507,6 +924,7 @@ export function createWorkerSyncFilesystem(faults = null)
             ++file.version;
             faults?.onDirty?.();
         }
+        reserveWritable(file, file.size);
         const descriptor = nextDescriptor++;
         descriptors.set(descriptor, {
             file,
@@ -518,7 +936,7 @@ export function createWorkerSyncFilesystem(faults = null)
 
     function removeHomePath(path)
     {
-        if (!acceptingWrites) return false;
+        if (!acceptingWrites || !canQueue()) return false;
         const logicalPath = normalizeLogicalPath(path);
         const file = logicalPath ? homeFiles.get(logicalPath) : null;
         if (!file) return false;
@@ -543,7 +961,7 @@ export function createWorkerSyncFilesystem(faults = null)
 
     function removeHomeTree(path)
     {
-        if (!acceptingWrites) return false;
+        if (!acceptingWrites || !canQueue()) return false;
         const logicalPath = normalizeDirectoryPath(path);
         if (!logicalPath || !homeDirectories.has(logicalPath)) return false;
         const prefix = `${logicalPath}/`;
@@ -588,15 +1006,20 @@ export function createWorkerSyncFilesystem(faults = null)
         const sourcePath = normalizeLogicalPath(from);
         const destinationPath = normalizeLogicalPath(to);
         const source = sourcePath ? homeFiles.get(sourcePath) : null;
-        if (!source || !destinationPath || sourcePath === destinationPath ||
+        if (!source || !destinationPath || !validHomePath(destinationPath) || sourcePath === destinationPath ||
             [...descriptors.values()].some((open) => open.file === source)) return false;
         const destinationSegments = destinationPath.split("/");
         destinationSegments.pop();
         const destinationParent = destinationSegments.join("/");
         if (!homeDirectories.has(destinationParent) ||
             homeDirectories.has(destinationPath)) return false;
-        if (homeFiles.has(destinationPath) &&
-            !removeHomePath(destinationPath)) return false;
+        const destination = homeFiles.get(destinationPath);
+        if (destination && [...descriptors.values()].some((open) => open.file === destination)) return false;
+        const journal = new TextEncoder().encode(JSON.stringify({
+            version: 1, source: sourcePath, destination: destinationPath,
+        }));
+        if (journal.byteLength > 65536 || !canQueue(source.size + journal.byteLength)) return false;
+        if (destination) homeBytes -= destination.size;
         const sourceSegments = sourcePath.split("/");
         const sourceName = sourceSegments.pop();
         homeFiles.delete(sourcePath);
@@ -604,18 +1027,29 @@ export function createWorkerSyncFilesystem(faults = null)
         source.logicalPath = destinationPath;
         ++source.version;
         publishHomeFile(source);
-        scheduleHomeFilePersistence(source);
-        // The destination snapshot is durable before the obsolete source is
-        // removed from OPFS because both operations share persistChain.
+        const snapshot = source.bytes.slice(0, source.size);
+        const version = source.version;
+        // One serialized rename owns the journal. Replay runs before recovery
+        // budgets, including the temporary source/destination duplication.
+        // Keep the old destination until close, then retire source and journal.
+        let step = 0;
         void schedulePersistence(async () => {
             if (!homeDirectory) return;
-            try {
-                const directory = await childDirectory(homeDirectory, sourceSegments);
-                await directory.removeEntry(sourceName);
-            } catch (error) {
-                if (error?.name !== "NotFoundError") throw error;
+            if (step === 0) {
+                await publishBytes(appDirectory, RENAME_JOURNAL, journal);
+                step = 1;
             }
-        }, { phase: "removing", files: 1, bytes: 0 });
+            if (step === 1) {
+                await persistHomeFile(source, destinationPath, snapshot, version);
+                step = 2;
+            }
+            if (step === 2) {
+                const directory = await childDirectory(homeDirectory, sourceSegments);
+                await removeDurable(directory, sourceName);
+                step = 3;
+            }
+            await removeDurable(appDirectory, RENAME_JOURNAL);
+        }, { phase: "persisting", files: 1, bytes: snapshot.byteLength }, snapshot.byteLength + journal.byteLength);
         faults?.onDirty?.();
         return true;
     }
@@ -627,6 +1061,10 @@ export function createWorkerSyncFilesystem(faults = null)
             if (open.writable && open.file.version !== open.file.persistedVersion) {
                 dirty.add(open.file);
             }
+        }
+        const bytes = [...dirty].reduce((sum, file) => sum + file.size, 0);
+        if (!canQueue(bytes, dirty.size)) {
+            throw new Error("Browser home persistence is full; checkpoint must be retried after pending writes finish.");
         }
         for (const file of dirty) scheduleHomeFilePersistence(file);
     }
@@ -644,6 +1082,8 @@ export function createWorkerSyncFilesystem(faults = null)
     async function checkpoint(report = null)
     {
         await Promise.all(module?.webImageTasks ?? []);
+        // Drain first: retries do not enqueue another copy of every open file.
+        await drainPersistenceWithProgress(report);
         report?.({ phase: "snapshotting", filesProcessed: 0, bytesProcessed: 0 });
         scheduleDirtyOpenFiles();
         await drainPersistenceWithProgress(report);
@@ -663,6 +1103,7 @@ export function createWorkerSyncFilesystem(faults = null)
         const operation = (async () => {
             await Promise.all(module?.webImageTasks ?? []);
             acceptingWrites = false;
+            await drainPersistenceWithProgress(report);
             report?.({ phase: "snapshotting", filesProcessed: 0, bytesProcessed: 0 });
             scheduleDirtyOpenFiles();
             await drainPersistenceWithProgress(report);
@@ -773,7 +1214,9 @@ export function createWorkerSyncFilesystem(faults = null)
                 const required = open.position + length;
                 const growth = Math.max(0, required - open.file.size);
                 if (homeBytes + growth > MAX_HOME_TOTAL_BYTES ||
+                    !canQueue(Math.max(open.file.size, required) - writableReservations.get(open.file), 0) ||
                     !ensureHomeCapacity(open.file, required)) return -1;
+                reserveWritable(open.file, Math.max(open.file.size, required));
                 open.file.bytes.set(
                     module.HEAPU8.subarray(source, source + length), open.position);
                 open.position = required;
@@ -787,15 +1230,18 @@ export function createWorkerSyncFilesystem(faults = null)
                 const open = descriptors.get(descriptor);
                 if (!open) return false;
                 descriptors.delete(descriptor);
-                if (open.writable) scheduleHomeFilePersistence(open.file);
+                if (open.writable) {
+                    releaseWritable(open.file);
+                    scheduleHomeFilePersistence(open.file);
+                }
                 return true;
             },
             mkdir(path) {
-                if (!acceptingWrites) return false;
+                if (!acceptingWrites || !canQueue()) return false;
                 const logicalPath = normalizeDirectoryPath(path);
                 if (logicalPath === null || files.has(logicalPath) ||
                     homeFiles.has(logicalPath)) return false;
-                addHomeDirectory(logicalPath);
+                try { addHomeDirectory(logicalPath); } catch { return false; }
                 void schedulePersistence(() => childDirectory(
                     homeDirectory,
                     logicalPath ? logicalPath.split("/") : [],
@@ -817,5 +1263,16 @@ export function createWorkerSyncFilesystem(faults = null)
         flushAndUnmount,
         installForModule,
         observeReadProgress,
+        persistenceUsage() {
+            return {
+                pendingOperations: pendingPersistence.length,
+                pendingSnapshotBytes: pendingPersistenceBytes,
+                reservedOperations: writableReservations.size,
+                reservedSnapshotBytes,
+                liveFiles: homeFiles.size,
+                liveBytes: homeBytes,
+                failed: persistenceFailure !== null,
+            };
+        },
     });
 }

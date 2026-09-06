@@ -8,7 +8,7 @@ import zipfile
 def check_archive(path):
     forbidden_roots = ("deps/binklib/", "deps/msslib/", "deps/steamsdk/")
     forbidden_suffixes = {".dll", ".lib", ".exp", ".exe", ".flt", ".asi", ".so",
-                          ".dylib", ".iwd", ".ff", ".bik", ".wasm"}
+                          ".dylib", ".iwd", ".ff", ".bik", ".wasm", ".kisak-home"}
     required = {"LICENSE", "CMakeLists.txt", "tools/web_toolchain.json",
                 "scripts/web/CMakeLists.txt"}
     with zipfile.ZipFile(path) as archive:
