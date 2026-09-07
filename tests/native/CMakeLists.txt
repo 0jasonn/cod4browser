@@ -154,6 +154,21 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     target_link_options(cgame_timescale_tests PRIVATE -Wl,--gc-sections)
 endif()
 
+if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    add_executable(save_rename_tests
+        "${CMAKE_CURRENT_LIST_DIR}/save_rename_tests.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/universal/com_files.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/game/savedevice_pc.cpp")
+    target_compile_features(save_rename_tests PRIVATE cxx_std_20)
+    target_include_directories(save_rename_tests PRIVATE
+        "${KISAK_REPOSITORY_ROOT}/src" "${KISAK_REPOSITORY_ROOT}/deps")
+    target_compile_definitions(save_rename_tests PRIVATE
+        KISAK_SP=1 KISAK_WEB=1 KISAK_OPENAL=1 dNODEBUG=1 RELEASE_ASSERTS=1)
+    target_compile_options(save_rename_tests PRIVATE
+        -ffunction-sections -fdata-sections -fdeclspec)
+    target_link_options(save_rename_tests PRIVATE -Wl,--gc-sections)
+endif()
+
 add_executable(iwi_image_tests
     "${CMAKE_CURRENT_LIST_DIR}/iwi_image_tests.cpp"
     "${KISAK_REPOSITORY_ROOT}/src/qcommon/iwi_image.cpp"
@@ -821,6 +836,7 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         canonical_asset_abi_tests
         qcommon_math_tests
         cgame_timescale_tests
+        save_rename_tests
         fx_emission_math_tests
         fx_archive_callback_tests
         sound_curve_validation_tests
@@ -902,6 +918,7 @@ foreach(target
     web_thread_context_tests
     web_frame_profile_tests
     cgame_timescale_tests
+    save_rename_tests
     canonical_runtime_prefix_tests
     canonical_map_request_tests
     canonical_cm_load_tests

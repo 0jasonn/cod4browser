@@ -535,7 +535,8 @@ void __cdecl LiveStorage_HandleCorruptStats(char *filename)
     iassert(filename);
     Com_sprintf(corruptName, 0x10Eu, "%s.%s", filename, "corrupt");
     FS_DeleteInDir(corruptName, (char*)"players");
-    FS_Rename(filename, (char *)"players", corruptName, (char *)"players");
+    // Corrupt input is deliberately discarded even if quarantine fails.
+    (void)FS_Rename(filename, (char *)"players", corruptName, (char *)"players");
     FS_DeleteInDir(filename, (char *)"players");
     LiveStorage_NoStatsFound();
     Com_Error(ERR_DROP, "PLATFORM_STATSREADERROR");

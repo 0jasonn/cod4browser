@@ -137,7 +137,7 @@ uint32_t __cdecl FS_FOpenFileByMode(char *qpath, int *f, fsMode_t mode);
 void __cdecl FS_Flush(int f);
 void __cdecl FS_FreeFileList(const char **list);
 
-void __cdecl FS_CopyFile(char *fromOSPath, char *toOSPath);
+bool __cdecl FS_CopyFile(char *fromOSPath, char *toOSPath);
 
 void __cdecl FS_Remove(const char *osPath);
 
@@ -181,7 +181,9 @@ int __cdecl FS_TouchFile(const char *name);
 void FS_RegisterDvars();
 void __cdecl FS_Shutdown();
 bool __cdecl FS_DeleteInDir(char *filename, char *dir);
-void __cdecl FS_Rename(char *from, char *fromDir, char *to, char *toDir);
+// Web success means a journaled replacement was admitted, not durably flushed.
+// Web refusal preserves both paths. Native retains its rename/copy fallback.
+bool __cdecl FS_Rename(char *from, char *fromDir, char *to, char *toDir);
 
 extern const dvar_t *fs_remotePCDirectory;
 extern const dvar_t *fs_remotePCName;

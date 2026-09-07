@@ -272,9 +272,13 @@ int __cdecl WriteSaveToDevice(unsigned char *data, struct SaveHeader const *save
 #ifdef KISAK_XBOX
 	g_saveDevice_lastSaveSucceeded = true;
 #else
-	FS_Rename((char*)"save/temp.svg", fs_gamedir,
+	g_saveDevice_lastSaveSucceeded = FS_Rename((char*)"save/temp.svg", fs_gamedir,
 		(char*)saveHeader->filename, (char*)"players");
-	g_saveDevice_lastSaveSucceeded = true;
+	if (!g_saveDevice_lastSaveSucceeded)
+	{
+		Com_PrintError(10, "WriteSaveToDevice: failed to replace '%s'\n", saveHeader->filename);
+		return -1;
+	}
 	if (!saveHeader->internalSave) R_SaveGameThumbnail(*saveHeader);
 #endif
 	return 0;

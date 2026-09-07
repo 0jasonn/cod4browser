@@ -2717,7 +2717,7 @@ int __cdecl FS_SV_FOpenFileWrite(const char *filename)
     return f;
 }
 
-void __cdecl FS_CopyFile(char *fromOSPath, char *toOSPath)
+bool __cdecl FS_CopyFile(char *fromOSPath, char *toOSPath)
 {
     uint8_t *buf; // [esp+0h] [ebp-Ch]
     int len; // [esp+4h] [ebp-8h]
@@ -2742,8 +2742,10 @@ void __cdecl FS_CopyFile(char *fromOSPath, char *toOSPath)
                 Com_Error(ERR_FATAL, "Short write in FS_CopyFile()");
             FS_FileClose(fa);
             free(buf);
+            return true;
         }
     }
+    return false;
 }
 
 void __cdecl FS_Remove(const char *osPath)
@@ -2757,28 +2759,28 @@ void __cdecl FS_Remove(const char *osPath)
 
 void __cdecl FS_SV_Rename(char *from, char *to)
 {
-    char *v2; // [esp+1Ch] [ebp-20Ch]
     char to_ospath[256]; // [esp+20h] [ebp-208h] BYREF
     char from_ospath[260]; // [esp+120h] [ebp-108h] BYREF
 
     FS_CheckFileSystemStarted();
-    FS_BuildOSPath((char *)fs_homepath->current.integer, from, (char *)"", from_ospath);
-    FS_BuildOSPath((char *)fs_homepath->current.integer, to, (char *)"", to_ospath);
-    v2 = from_ospath;
-    v2 += strlen(v2) + 1;
-    to_ospath[v2 - &from_ospath[1] + 255] = 0;
-    to_ospath[&to_ospath[strlen(to_ospath) + 1] - &to_ospath[1] - 1] = 0;
+    FS_BuildOSPath(fs_homepath->current.string, from, "", from_ospath);
+    FS_BuildOSPath(fs_homepath->current.string, to, "", to_ospath);
+    from_ospath[strlen(from_ospath) - 1] = 0;
+    to_ospath[strlen(to_ospath) - 1] = 0;
     if (fs_debug->current.integer)
         Com_Printf(10, "FS_SV_Rename: %s --> %s\n", from_ospath, to_ospath);
 #if defined(KISAK_WEB)
     if (!WebWorkerFS_Rename(from_ospath, to_ospath))
+        Com_PrintError(10, "FS_SV_Rename: failed to rename %s to %s\n", from_ospath, to_ospath);
 #else
     if (rename(from_ospath, to_ospath))
-#endif
     {
-        FS_CopyFile(from_ospath, to_ospath);
-        FS_Remove(from_ospath);
+        if (FS_CopyFile(from_ospath, to_ospath))
+            FS_Remove(from_ospath);
+        else
+            Com_PrintError(10, "FS_SV_Rename: failed to copy %s to %s\n", from_ospath, to_ospath);
     }
+#endif
 }
 
 int __cdecl FS_SV_FileExists(char *file)
@@ -2989,7 +2991,7 @@ bool __cdecl FS_DeleteInDir(char *filename, char *dir)
 #endif
 }
 
-void __cdecl FS_Rename(char *from, char *fromDir, char *to, char *toDir)
+bool __cdecl FS_Rename(char *from, char *fromDir, char *to, char *toDir)
 {
     char to_ospath[256]; // [esp+0h] [ebp-208h] BYREF
     char from_ospath[260]; // [esp+100h] [ebp-108h] BYREF
@@ -3000,24 +3002,19 @@ void __cdecl FS_Rename(char *from, char *fromDir, char *to, char *toDir)
     if (fs_debug->current.integer)
         Com_Printf(10, "FS_Rename: %s --> %s\n", from_ospath, to_ospath);
 #if defined(KISAK_WEB)
-    if (!WebWorkerFS_Rename(from_ospath, to_ospath))
-    {
-        WebWorkerFS_Remove(to_ospath);
-        if (!WebWorkerFS_Rename(from_ospath, to_ospath))
-        {
-            FS_CopyFile(from_ospath, to_ospath);
-            FS_Remove(from_ospath);
-        }
-    }
+    // Admission owns replacement and journaling; refusal must leave both files intact.
+    return WebWorkerFS_Rename(from_ospath, to_ospath);
 #else
     if (rename(from_ospath, to_ospath))
     {
         FS_Remove(to_ospath);
         if (rename(from_ospath, to_ospath))
         {
-            FS_CopyFile(from_ospath, to_ospath);
+            if (!FS_CopyFile(from_ospath, to_ospath))
+                return false;
             FS_Remove(from_ospath);
         }
     }
+    return true;
 #endif
 }

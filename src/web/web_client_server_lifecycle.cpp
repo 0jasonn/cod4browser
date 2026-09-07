@@ -868,8 +868,9 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_CanonicalFsWriteRename(
     FS_FCloseFile(file);
     if (!wrote)
         return 0;
-    FS_Rename(const_cast<char *>(temporaryPath), fs_gamedir,
-        const_cast<char *>(finalPath), fs_gamedir);
+    if (!FS_Rename(const_cast<char *>(temporaryPath), fs_gamedir,
+        const_cast<char *>(finalPath), fs_gamedir))
+        return 0;
     int verify = 0;
     const std::uint32_t size = FS_FOpenFileRead(finalPath, &verify);
     if (verify)
