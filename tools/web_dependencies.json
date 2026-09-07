@@ -21,6 +21,17 @@
     ]
   },
   "buildOnly": { "javascript": "package-lock.json", "compiler": "tools/web_toolchain.json" },
+  "correspondingSource": {
+    "project": { "artifact": "source.zip", "producer": "sanitized git archive of the clean build revision; complete archive SHA-256 and size in receipt" },
+    "dependencies": [
+      { "artifact": "dependency-sources/ffmpeg.tar.xz", "origin": "https://ffmpeg.org/releases/", "pin": "tools/cinematic_codec.json SHA-256", "contents": "Complete pinned release source and upstream notices; extracted build inputs must match" },
+      { "artifact": "dependency-sources/openal.zip", "origin": "https://github.com/kcat/openal-soft.git", "pin": "scripts/web/reverb/CMakeLists.txt GIT_TAG", "contents": "Complete clean pinned Git source, including bundled fmt, GSL, pffft and notices" },
+      { "artifact": "dependency-sources/emscripten-runtime.zip", "origin": "https://github.com/emscripten-core/emscripten.git", "pin": "tools/web_toolchain.json emscriptenCommit", "contents": "Installed system, src, tools, cmake, third_party and root notices, compared byte-for-byte to the pinned public Git tree; excludes prebuilt binaries and Python cache files" },
+      { "artifact": "dependency-sources/zlib.tar.gz", "origin": "https://github.com/madler/zlib", "pin": "Pinned Emscripten tools/ports/zlib.py SHA-512", "contents": "Complete public zlib source and notices; Emscripten zconf.h adaptation is in emscripten-runtime.zip" }
+    ],
+    "integrity": "All four dependency source archive SHA-256 values and sizes are bound in the producer receipt and package inventory. This checks consistency, not cryptographic publisher authentication.",
+    "excluded": "Native SDKs, retail assets, compiler executables and prebuilt libraries. Reproducible compiler/tool acquisition identities and build recipes are in source.zip."
+  },
   "advisoryReview": {
     "status": "partial",
     "reviewedAt": "2026-09-06",

@@ -1,6 +1,6 @@
 # Web product roadmap
 
-Updated 2026-09-06. Target: full offline single-player fidelity with original
+Updated 2026-09-07. Target: full offline single-player fidelity with original
 Steam COD4 (2007). Canonical Kisak owns gameplay and assets; the dedicated
 Worker, synchronous filesystem adapter and WebGL2 backend own browser support.
 Multiplayer remains out of scope.
@@ -16,7 +16,10 @@ The next milestone is a trustworthy, recoverable, reproducible SP alpha.
 The 6 September audit remediation protects optimized test assertions, separates
 host-portable and canonical ABI coverage, journals home replacement, bounds
 live/queued storage, adds raw export and strengthens product/tool contracts.
-See [current execution evidence](web-test-inventory.md#current-execution-evidence--2026-09-06).
+The follow-up fixes canonical save-rename admission and numeric conversions,
+restores the production budget with JSPI/native Wasm exceptions, and binds
+complete project/dependency source archives to the build receipt.
+See [current execution evidence](web-test-inventory.md#current-execution-evidence--2026-09-07).
 Remaining work proceeds in this order:
 
 - Execute the repaired Linux tier and seeded sanitizer CI. Local Windows/Wasm
@@ -27,12 +30,9 @@ Remaining work proceeds in this order:
   actual release-version journeys and authorized campaign save/Continue acceptance.
 - Capture matched active CargoShip stage/resource evidence before retaining a
   performance change. No new performance result was obtained in this remediation.
-- Repair the reproduced production budget/export failure with canonical loading
-  and exception recovery intact. The audited HEAD enables Asyncify; the rebuilt
-  artifact has 74 exports and 5,343,379 Wasm bytes against caps of 24 and
-  3,332,379. Removing loading yields or widening budgets is not a qualification.
 - Exercise aggregate CI from clean committed source. Packaging failure gates
-  pass synthetic tests; no actual package or alpha has been qualified/published.
+  and public-source collection pass locally; no aggregate package or alpha has
+  been qualified/published.
 
 Work proceeds independently of campaign completion. Address an observed
 engine/platform defect or a named fidelity gap in this order:

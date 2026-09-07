@@ -170,10 +170,8 @@ jobs:
         if: ${{ !cancelled() && steps.product-boundary.outcome != 'success' }}
         shell: powershell
         run: throw 'Production artifact boundary failed; see its independent results above.'
-      - name: Pair source from this build revision
-        run: |
-          git archive --format=zip --output=build/kisakcod-web-source.zip HEAD
-          python tools/check_source_archive.py build/kisakcod-web-source.zip
+      - name: Check producer-bound source archive
+        run: python tools/check_source_archive.py build/web/source.zip
       - name: Upload unqualified build inputs
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -181,7 +179,8 @@ jobs:
           path: |
             build/web/site
             build/web/build-receipt.json
-            build/kisakcod-web-source.zip
+            build/web/source.zip
+            build/web/dependency-sources
           if-no-files-found: error
           retention-days: 7
 
@@ -203,10 +202,11 @@ jobs:
       - name: Verify and pair tested artifacts
         run: >-
           python3 tools/qualify_web_release.py qualify
-          build/qualification-input/web/site
-          build/qualification-input/kisakcod-web-source.zip
-          build/qualification-input/web/build-receipt.json
+          build/qualification-input/site
+          build/qualification-input/source.zip
+          build/qualification-input/build-receipt.json
           build/required-results.json build/qualified-package
+          --dependency-sources build/qualification-input/dependency-sources
           --revision "${{ github.sha }}"
       - name: Upload synthetic-platform-qualified package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

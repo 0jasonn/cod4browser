@@ -9,7 +9,7 @@ const expected = { ...readJson("package.json").engines, ...readJson("tools/web_t
 
 export function validateToolVersions(actual, web = false)
 {
-    for (const name of web ? ["node", "npm", "emscripten", "emsdkCommit", "cmake", "ninja"] : ["node", "npm"]) {
+    for (const name of web ? ["node", "npm", "emscripten", "emsdkCommit", "emscriptenCommit", "cmake", "ninja"] : ["node", "npm"]) {
         if (actual[name] !== expected[name]) {
             throw new Error(`Unsupported ${name}: expected ${expected[name]}, found ${actual[name] ?? "missing"}. ` +
                 (name === "node" || name === "npm" ? "Install the versions in package.json and .node-version, then run npm ci."
@@ -28,6 +28,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
             const sdk = join(root, ".tools/emsdk");
             Object.assign(actual, {
                 emscripten: JSON.parse(readFileSync(join(sdk, "upstream/emscripten/emscripten-version.txt"), "utf8")),
+                emscriptenCommit: readFileSync(join(sdk, "upstream/emscripten/emscripten-revision.txt"), "utf8").trim(),
                 emsdkCommit: execFileSync("git", ["-C", sdk, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
                 cmake: execFileSync(join(sdk, `cmake/${expected.cmake}_64bit/bin/cmake.exe`), ["--version"], { encoding: "utf8" }).split(/\s/u)[2],
                 ninja: execFileSync(join(sdk, `ninja/${expected.ninja}_64bit/ninja.exe`), ["--version"], { encoding: "utf8" }).trim(),

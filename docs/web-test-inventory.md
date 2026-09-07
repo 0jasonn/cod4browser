@@ -91,7 +91,50 @@ subprocess deadline of budget + 60 seconds. Failure artifacts contain synthetic
 inputs/logs only. A successful process must also reach every seeded
 success/rejection family; exact coverage counters are not cross-platform gates.
 
-## Current execution evidence — 2026-09-06
+## Current execution evidence — 2026-09-07
+
+The follow-up to `170feb7a` finishes canonical save-rename refusal handling,
+cgame floating-point conversion fixes, JSPI/native-Wasm exception integration,
+and complete source/dependency receipt binding. Local pinned tools remain
+Node 24.18.0, npm 11.16.0, Emscripten 6.0.6, CMake 4.2.0-rc3 and Ninja 1.13.2.
+
+- Native MSVC x86 Release: 43/43 CTest cases and the native SP build/relink pass.
+- Direct Wasm Release: 43/43 CTest cases, including real cgame parsing and
+  canonical save-write/rename refusal, retry and short-write handling.
+- Static checks and Node: pass; 123 Node cases include deterministic absolute
+  watchdog deadlines and the actual embedded frame pump's scheduling/error paths.
+- Production Chromium: 56/56 cases, including rejection of missing JSPI APIs or
+  native exception support before engine/asset storage access.
+- Diagnostic Chromium smoke: 10/10 cases.
+- Diagnostic Chromium remainder with retail disabled: 61 pass, 13 optional skips.
+- Source qualification: 14/14 Python cases and collection of actual pinned
+  FFmpeg, OpenAL, Emscripten runtime and zlib source archives pass. Altered source
+  archives and unexpected runtime source files cannot reuse a build receipt.
+- Release production/diagnostic builds and canonical runtime-prefix checks pass.
+  The unchanged product gate passes: 3,181,796 Wasm bytes, 322,477 JavaScript
+  bytes, 3,607,632 total site bytes, 17 raw and nine application exports.
+- One owned-data complete Killhouse intro/loading test passes in headless Chrome:
+  DB progress advances while suspended, registration finishes during the movie,
+  and world frames resume after completion. It is functional loading evidence,
+  not human playable or performance qualification.
+
+The first routine remainder attempt inherited a local retail-root environment
+setting and selected optional retail cases: the authoritative matrix rejected
+dirty source, and the reduced Gate 3 fixture timed out on its scene-view
+predicate. Its trace retains 8,480 surfaces / 445,595 vertices / 823,896 indices
+and 797 batches; the fixture still expects the camera-only totals from before
+`4bee7442` added shadow-only BSP geometry. Generation reached 53 versus the
+required 120 during that run. The cull conversion does not own registration
+counts; assertions were left intact. That attempt was interrupted; the synthetic tier explicitly clears
+`KISAK_COD4_RETAIL_ROOT` and runs on a separate port. The existing port 8000
+server was left untouched. Logs and private retail traces remain under ignored
+`build/finish-uncommitted/` and `test-results/`.
+
+Linux, sanitizer CI, aggregate package qualification, branded Edge acceptance,
+full campaign save/Continue and actual release-version rollback were not run.
+The targeted Chrome loading pass does not qualify the optional Gate 3 fixture.
+
+## Previous execution evidence — 2026-09-06
 
 The remediation uses audited HEAD `4bee744235da2f99dbf09dc0a5118717402758c6`
 plus uncommitted changes. Local tools: Node 24.18.0, npm 11.16.0, TypeScript

@@ -1,11 +1,14 @@
 """Synthetic packaging contract tests; no game data or external publication."""
 import copy
 import http.client
+import hashlib
+import io
 import json
 import socket
 import subprocess
 import sys
 import tempfile
+import tarfile
 import time
 import unittest
 import zipfile
@@ -14,6 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 from qualify_web_release import REQUIRED_JOBS, digest, files_in, qualify, verify
+from package_web_sources import collect_runtime_sources, file_identity, validate_dependency_sources
 
 
 class QualificationTests(unittest.TestCase):
@@ -26,29 +30,177 @@ class QualificationTests(unittest.TestCase):
         (self.site / "index.html").write_text("Synthetic package test")
         (self.site / "licenses.txt").write_text("GPL-3.0 synthetic test")
         self.revision = "a" * 40
+        self.dependency_sources = self.root / "dependency-sources"
+        self.dependency_sources.mkdir()
+        codec = json.loads((ROOT / "tools/cinematic_codec.json").read_text())
+        toolchain = json.loads((ROOT / "tools/web_toolchain.json").read_text())
+        dependencies = json.loads((ROOT / "tools/web_dependencies.json").read_text())
+        openal = dependencies["artifacts"]["reverb_dsp.mjs"][0]
+        self.tar_source("ffmpeg.tar.xz", f"ffmpeg-{codec['ffmpeg']['version']}",
+                        ("configure", "COPYING.LGPLv2.1", "libavcodec/bink.c", "libavformat/bink.c", "libavutil/avutil.h"))
+        self.tar_source("zlib.tar.gz", "zlib-1.3.2", ("zlib.h", "inflate.c", "deflate.c", "README", "CMakeLists.txt"))
+        codec["ffmpeg"]["sha256"] = file_identity(self.dependency_sources / "ffmpeg.tar.xz")["sha256"]
+        zlib_sha = hashlib.sha512((self.dependency_sources / "zlib.tar.gz").read_bytes()).hexdigest()
+        with zipfile.ZipFile(self.dependency_sources / "openal.zip", "w") as archive:
+            archive.comment = openal["commit"].encode()
+            for name in ("CMakeLists.txt", "COPYING", "LICENSE-pffft", "alc/effects/reverb.cpp", "fmt-11.2.0/LICENSE", "gsl/LICENSE"):
+                archive.writestr(name, "Synthetic public-source packaging fixture")
+        with zipfile.ZipFile(self.dependency_sources / "emscripten-runtime.zip", "w") as archive:
+            archive.comment = toolchain["emscriptenCommit"].encode()
+            for name in ("LICENSE", "AUTHORS", "system/lib/libc/musl/COPYRIGHT", "system/lib/libcxx/LICENSE.TXT",
+                         "system/lib/libcxxabi/LICENSE.TXT", "system/lib/compiler-rt/LICENSE.TXT", "tools/ports/zlib/zconf.h"):
+                archive.writestr(name, "Synthetic public-source packaging fixture")
+            archive.writestr("tools/ports/zlib.py", f"VERSION = '1.3.2'\nHASH = '{zlib_sha}'\n")
         self.source = self.root / "source.zip"
         with zipfile.ZipFile(self.source, "w") as archive:
             archive.comment = self.revision.encode()
-            for name in ("LICENSE", "CMakeLists.txt", "scripts/web/CMakeLists.txt", "package.json",
+            for name in ("LICENSE", "CMakeLists.txt", "scripts/web/CMakeLists.txt", "scripts/web/reverb/CMakeLists.txt", "package.json",
                          "package-lock.json", "tools/web_toolchain.json", "tools/web_dependencies.json",
-                         "tools/serve_web.py", "tools/qualify_web_release.py", "tools/check_source_archive.py"):
+                         "tools/serve_web.py", "tools/qualify_web_release.py", "tools/check_source_archive.py", "tools/package_web_sources.py"):
                 archive.writestr(name, (ROOT / name).read_bytes())
-        self.receipt = {"schemaVersion": 1, "revision": self.revision, "dirty": False,
-                        "site": files_in(self.site),
-                        "toolchain": {**json.loads((ROOT / "tools/web_toolchain.json").read_text()),
-                                      **json.loads((ROOT / "package.json").read_text())["engines"]},
-                        "dependencies": json.loads((ROOT / "tools/web_dependencies.json").read_text()),
+            archive.writestr("tools/cinematic_codec.json", json.dumps(codec))
+            archive.writestr("src/synthetic.cpp", "int synthetic = 1;\n")
+        self.receipt = {"schemaVersion": 2, "revision": self.revision, "dirty": False,
+                        "site": files_in(self.site), "source": file_identity(self.source),
+                        "dependencySources": files_in(self.dependency_sources),
+                        "toolchain": {**toolchain, **json.loads((ROOT / "package.json").read_text())["engines"]},
+                        "dependencies": dependencies,
                         "lockfileSha256": digest((ROOT / "package-lock.json").read_bytes())}
         self.results = {job: {"result": "success"} for job in REQUIRED_JOBS}
         self.output = self.root / "qualified"
 
+    def tar_source(self, filename, prefix, names):
+        with tarfile.open(self.dependency_sources / filename, "w:xz" if filename.endswith(".xz") else "w:gz") as archive:
+            for name in names:
+                data = b"Synthetic public-source packaging fixture"
+                entry = tarfile.TarInfo(prefix + "/" + name)
+                entry.size = len(data)
+                archive.addfile(entry, io.BytesIO(data))
+
+    def rewrite_source(self, name, content):
+        with zipfile.ZipFile(self.source) as archive:
+            entries = {entry.filename: archive.read(entry) for entry in archive.infolist()}
+        if content is None:
+            del entries[name]
+        else:
+            entries[name] = content
+        with zipfile.ZipFile(self.source, "w") as archive:
+            archive.comment = self.revision.encode()
+            for entry, data in entries.items():
+                archive.writestr(entry, data)
+
     def make(self, receipt=None, results=None):
         qualify(receipt or self.receipt, self.results if results is None else results,
-                self.site, self.source, self.revision, self.output)
+                self.site, self.source, self.revision, self.output, self.dependency_sources)
 
     def test_exact_pair_and_standalone_verification(self):
         self.make()
         subprocess.run([sys.executable, str(self.output / "qualify_web_release.py"), "verify", str(self.output)], check=True)
+
+        self.assertEqual(files_in(self.output / "site"), files_in(self.site))
+        self.assertEqual(files_in(self.output / "dependency-sources"), files_in(self.dependency_sources))
+
+    def test_source_body_changes_and_omissions_cannot_reuse_receipt(self):
+        original = self.source.read_bytes()
+        for content in (b"int synthetic = 2;\n", None):
+            with self.subTest(content=content):
+                self.source.write_bytes(original)
+                self.rewrite_source("src/synthetic.cpp", content)
+                with self.assertRaisesRegex(ValueError, "Complete source archive"): self.make()
+                self.assertFalse(self.output.exists())
+
+    def test_missing_and_corrupted_dependency_sources_fail_closed(self):
+        for name in self.receipt["dependencySources"]:
+            path = self.dependency_sources / name
+            original = path.read_bytes()
+            for content in (None, b"corrupted source"):
+                with self.subTest(name=name, content=content):
+                    if content is None: path.unlink()
+                    else: path.write_bytes(content)
+                    with self.assertRaisesRegex(ValueError, "Dependency source hashes"): self.make()
+                    self.assertFalse(self.output.exists())
+                    path.write_bytes(original)
+
+    def test_dependency_pin_cannot_be_replaced_by_receipt_hash(self):
+        for name, message in (("ffmpeg.tar.xz", "FFmpeg source archive"), ("zlib.tar.gz", "zlib source archive")):
+            path = self.dependency_sources / name
+            original = path.read_bytes()
+            path.write_bytes(original + b"changed source archive")
+            self.receipt["dependencySources"] = files_in(self.dependency_sources)
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, message):
+                self.make()
+            path.write_bytes(original)
+        self.assertFalse(self.output.exists())
+
+    def test_updating_outer_manifest_hash_cannot_replace_producer_source(self):
+        self.make()
+        for relative in ("source.zip", "dependency-sources/openal.zip"):
+            path = self.output / relative
+            original = path.read_bytes()
+            with zipfile.ZipFile(path, "a") as archive:
+                archive.writestr("extra-source.cpp", "changed source")
+            manifest_path = self.output / "manifest.json"
+            manifest = json.loads(manifest_path.read_text())
+            manifest["files"][relative] = file_identity(path)
+            manifest_path.write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(ValueError, "source archive|Dependency source hashes"): verify(self.output)
+            path.write_bytes(original)
+            manifest["files"][relative] = file_identity(path)
+            manifest_path.write_text(json.dumps(manifest))
+
+    def test_license_and_version_only_is_not_corresponding_source(self):
+        self.tar_source("ffmpeg.tar.xz", "ffmpeg-8.0.3", ("COPYING.LGPLv2.1", "configure"))
+        with zipfile.ZipFile(self.source) as archive:
+            codec = json.loads(archive.read("tools/cinematic_codec.json"))
+        codec["ffmpeg"]["sha256"] = file_identity(self.dependency_sources / "ffmpeg.tar.xz")["sha256"]
+        self.rewrite_source("tools/cinematic_codec.json", json.dumps(codec))
+        with self.assertRaisesRegex(ValueError, "Incomplete FFmpeg"):
+            validate_dependency_sources(self.source, self.dependency_sources)
+
+    def test_modified_runtime_source_cannot_hide_behind_revision_marker(self):
+        repo = self.root / "runtime-repo"
+        reference = repo / ".tools/emscripten-source.git"
+        reference.mkdir(parents=True)
+        subprocess.run(["git", "init", str(reference)], check=True, stdout=subprocess.DEVNULL)
+        for name in ("LICENSE", "AUTHORS", "system/lib/input.c"):
+            path = reference / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("synthetic runtime source")
+        runtime = self.root / "runtime"
+        for name in ("LICENSE", "AUTHORS", "system/lib/input.c"):
+            path = runtime / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes((reference / name).read_bytes())
+        # Git archive requires each requested root to exist.
+        for name in ("src/input.js", "tools/input.py", "cmake/input.cmake", "third_party/NOTICE"):
+            path = reference / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("synthetic")
+            target = runtime / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(path.read_bytes())
+        subprocess.run(["git", "-C", str(reference), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(reference), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                        "commit", "-m", "runtime roots"], check=True, stdout=subprocess.DEVNULL)
+        commit = subprocess.check_output(["git", "-C", str(reference), "rev-parse", "HEAD"], text=True).strip()
+        (runtime / "emscripten-revision.txt").write_text(commit)
+        for name in ("tools/pylauncher/environment.x64", "tools/pylauncher/pylauncher.obj"):
+            path = runtime / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"Synthetic Windows SDK build artifact")
+        output = self.root / "runtime.zip"
+        collect_runtime_sources(repo, runtime, commit, output)
+        with zipfile.ZipFile(output) as archive:
+            self.assertEqual(archive.read("system/lib/input.c"), b"synthetic runtime source")
+            self.assertFalse(any(name.startswith("tools/pylauncher/") for name in archive.namelist()))
+        unexpected = runtime / "system/lib/extra.c"
+        unexpected.write_text("untracked runtime input")
+        with self.assertRaisesRegex(ValueError, "inventory differs from pinned Git tree"):
+            collect_runtime_sources(repo, runtime, commit, output)
+        unexpected.unlink()
+        (runtime / "system/lib/input.c").write_text("modified after installation")
+        with self.assertRaisesRegex(ValueError, "differs from pinned Git tree"):
+            collect_runtime_sources(repo, runtime, commit, output)
 
     def test_failed_cancelled_skipped_and_missing_jobs_cannot_qualify(self):
         for job in REQUIRED_JOBS:
@@ -92,7 +244,8 @@ class QualificationTests(unittest.TestCase):
         self.revision = "b" * 40
         with zipfile.ZipFile(self.source, "a") as archive: archive.comment = self.revision.encode()
         (self.site / "index.html").write_text("Synthetic replacement package")
-        self.receipt = {**self.receipt, "revision": self.revision, "site": files_in(self.site)}
+        self.receipt = {**self.receipt, "revision": self.revision, "site": files_in(self.site),
+                        "source": file_identity(self.source)}
         self.make()
         manifest_path = self.output / "manifest.json"
         manifest_text = manifest_path.read_text()

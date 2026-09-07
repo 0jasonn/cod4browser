@@ -2,6 +2,7 @@
 
 import argparse
 from pathlib import PurePosixPath
+import stat
 import zipfile
 
 
@@ -12,11 +13,19 @@ def check_archive(path):
     required = {"LICENSE", "CMakeLists.txt", "tools/web_toolchain.json",
                 "scripts/web/CMakeLists.txt"}
     with zipfile.ZipFile(path) as archive:
+        seen = set()
         for entry in archive.infolist():
             name = entry.filename
             parts = PurePosixPath(name).parts
-            if name.startswith("/") or ".." in parts or "\\" in name:
+            if (not parts or name.startswith("/") or ".." in parts or "\\" in name
+                    or ":" in name or "\x00" in name):
                 raise ValueError(f"Invalid archive path: {name}")
+            key = name.rstrip("/").casefold()
+            if key in seen:
+                raise ValueError(f"Duplicate source entry: {name}")
+            seen.add(key)
+            if stat.S_ISLNK(entry.external_attr >> 16):
+                raise ValueError(f"Source symlink is not distributable: {name}")
             if entry.is_dir():
                 continue
             if (name.lower().startswith(forbidden_roots) or

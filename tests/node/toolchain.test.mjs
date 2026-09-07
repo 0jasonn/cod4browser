@@ -9,7 +9,7 @@ test("preflight rejects missing or unsupported tools using versioned pins", () =
         ...JSON.parse(readFileSync(new URL("../../tools/web_toolchain.json", import.meta.url))),
     };
     assert.doesNotThrow(() => validateToolVersions(expected, true));
-    for (const name of ["node", "npm", "emscripten", "emsdkCommit", "cmake", "ninja"]) {
+    for (const name of ["node", "npm", "emscripten", "emsdkCommit", "emscriptenCommit", "cmake", "ninja"]) {
         for (const value of [undefined, "unsupported"]) {
             assert.throws(() => validateToolVersions({ ...expected, [name]: value }, true),
                 new RegExp(`Unsupported ${name}: expected`, "u"));

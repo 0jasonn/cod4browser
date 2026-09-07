@@ -92,9 +92,11 @@ tool and site hashes outside the served directory. CI can pair exact source
 and site only after every required tier succeeds; its package is explicitly
 synthetic-platform qualification, not single-player alpha acceptance.
 See [distribution and recovery](docs/browser-support.md#local-package-contract).
-The current 2026-09-06 rebuild fails the unchanged production export/size gate;
-the passing browser suite does not qualify it for distribution. See the
-[test inventory](docs/web-test-inventory.md#current-execution-evidence--2026-09-06).
+The 2026-09-07 rebuild passes the unchanged production export/size gate with
+JSPI loading suspension and native Wasm exceptions. Release builds also retain
+verified public dependency sources outside the served site. Aggregate CI and
+manual campaign acceptance remain separate qualification requirements. See the
+[test inventory](docs/web-test-inventory.md#current-execution-evidence--2026-09-07).
 
 ## Browser validation
 

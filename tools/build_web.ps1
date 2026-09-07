@@ -106,7 +106,9 @@ foreach ($requiredOutput in $requiredOutputs) {
 if (-not $Diagnostics -and $Configuration -eq 'Release') {
     & node (Join-Path $PSScriptRoot 'minify_web_product.mjs') $siteDirectory
     if ($LASTEXITCODE -ne 0) { throw 'Failed to minify the production host modules. Run npm.cmd ci.' }
-    & python (Join-Path $PSScriptRoot 'qualify_web_release.py') record $siteDirectory (Join-Path $buildDirectory 'build-receipt.json')
+    & python (Join-Path $PSScriptRoot 'qualify_web_release.py') record $siteDirectory (Join-Path $buildDirectory 'build-receipt.json') `
+        --source (Join-Path $buildDirectory 'source.zip') `
+        --dependency-sources (Join-Path $buildDirectory 'dependency-sources')
     if ($LASTEXITCODE -ne 0) { throw 'Failed to record production build provenance.' }
 }
 

@@ -415,14 +415,21 @@ remain qualification work.
 ## Build products
 
 `tools/qualify_web_release.py` creates a local source/site package only from a
-clean matching build receipt, exact git-archive revision, lockfile, toolchain,
-dependency inventory and site hashes. The aggregation job requires Linux
+clean matching build receipt, complete git-archive digest and revision, lockfile,
+toolchain, dependency inventory and site hashes. Release builds collect public
+FFmpeg, OpenAL (including fmt/GSL), Emscripten runtime and zlib source archives
+from verified build inputs into `build/web/dependency-sources`. The installed
+runtime source must match its pinned Git tree; generated SDK launcher products
+are excluded. Version markers alone do not establish source identity.
+The aggregation job requires Linux
 portable, sanitized fuzz, Windows portable and Wasm/browser-production success
 from this workflow run. Missing, failed, cancelled or skipped tiers cannot
 qualify. The existing explicit product-boundary failure gate remains required.
 Per-job `kisakcod-web-build` inputs are unqualified. The final package includes
-source.zip, licenses, a Python loopback server, launcher, versioned manifest
-and read-only verifier. Manual campaign acceptance is recorded as omitted and
+source.zip, dependency-sources, upstream license notices, a Python 3.11+ loopback
+server, launcher, versioned manifest and read-only verifier. Source archives and
+the flat served site have separate inventories; no dependency sources enter the
+served site. Manual campaign acceptance is recorded as omitted and
 `alphaQualified` is false. Hash verification detects mismatches; it is not a
 cryptographic signature authenticating a publisher.
 
@@ -448,7 +455,14 @@ The native reference CI job disables runtime DLL copying and retains build
 checks without uploading the inherited `bin` directory. Local native setup
 and its dependencies remain available; it is not a source of release packages.
 
-The 2026-09-05 Release gate passes the existing budgets; the prior increase
+The 2026-09-07 Release gate passes the unchanged budgets after replacing Asyncify
+with JSPI suspension and native Wasm exceptions: 3,181,796 Wasm bytes,
+322,477 JavaScript bytes and 3,607,632 site bytes, with 17 raw exports, nine
+application exports and 22 allowed files. The feature-gated frame pump still
+awaits loading yields and stops after fatal aborts. This establishes build and
+platform boundaries; aggregate CI and campaign acceptance remain separate.
+
+The historical 2026-09-05 Release gate passed the existing budgets; the prior increase
 proposal is retired. At base `9612ab4c` plus this audit's fullscreen/recovery,
 size and material changes:
 
