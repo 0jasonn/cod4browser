@@ -417,11 +417,11 @@ target_compile_features(KisakCOD-web-runtime-prefix-check PRIVATE cxx_std_20)
 target_include_directories(KisakCOD-web-runtime-prefix-check PRIVATE "${SRC_DIR}" "${DEPS_DIR}")
 target_compile_definitions(KisakCOD-web-runtime-prefix-check PRIVATE
     KISAK_WEB=1 KISAK_SP=1 KISAK_GATE3_COM_INIT_PREFIX=1 dNODEBUG=1)
-target_compile_options(KisakCOD-web-runtime-prefix-check PRIVATE "-sNO_DISABLE_EXCEPTION_CATCHING")
+target_compile_options(KisakCOD-web-runtime-prefix-check PRIVATE "-fwasm-exceptions")
 target_link_options(KisakCOD-web-runtime-prefix-check PRIVATE
     "-sENVIRONMENT=node"
     "-sEXIT_RUNTIME=1"
-    "-sNO_DISABLE_EXCEPTION_CATCHING"
+    "-fwasm-exceptions"
     "-sERROR_ON_UNDEFINED_SYMBOLS=1"
     "-sALLOW_MEMORY_GROWTH=1"
 )

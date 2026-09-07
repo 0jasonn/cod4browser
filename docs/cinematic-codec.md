@@ -51,19 +51,27 @@ inside an unfinished database transaction. Native pregame holds gameplay and
 starts the queued in-game fade when the intro finishes or the player skips.
 The former `nextmap` movie-first replay is removed.
 
-Loading keepalive uses Emscripten Asyncify with one platform-owned
-`emscripten_sleep(0)` yield and a 1 MiB unwind stack. This is a deliberate
-exception to the bootstrap's no-Asyncify preference: the former production
-Killhouse sequence measured 2,722 ms of map loading after the 37,624-ms intro.
+Loading keepalive uses Emscripten JSPI with one platform-owned
+`emscripten_sleep(0)` yield. The `requestAnimationFrame` pump awaits a
+`WebAssembly.promising` wrapper around its Wasm callback before scheduling
+another frame. Native Wasm exception handling (`-fwasm-exceptions`) keeps
+exception recovery and canonical `setjmp`/`longjmp` in Wasm, so suspension does
+not cross emulated JavaScript exception trampolines. The ordinary 1 MiB C stack
+remains; Asyncify instrumentation and its separate unwind stack are removed.
 A yield lets OffscreenCanvas present and receives device-played audio feedback
-without splitting canonical DB allocation/publication or adding pthreads.
-The ordinary frame pump is guarded against re-entry; Worker RPCs await the
+without splitting canonical DB allocation/publication. Worker RPCs await the
 suspended stack, while validated audio feedback only updates JS device state.
-No cross-origin-isolation or new browser feature requirement is introduced.
-The measured Release Wasm increases from 3,189,365 to 5,330,129 bytes
-(about 67%; 1,848,062 bytes gzip). This cost includes Asyncify instrumentation
-and the loading/registration fixes; gameplay performance remains a separate
-qualification.
+No pthreads or cross-origin isolation are required. Startup now requires both
+`WebAssembly.Suspending` and `WebAssembly.promising`, plus `WebAssembly.Tag`;
+the pinned Emscripten toolchain still describes JSPI as experimental. See the
+[browser support policy](browser-support.md).
+
+The previous Asyncify implementation addressed a production Killhouse sequence
+that measured 2,722 ms of map loading after the 37,624-ms intro. Its measured
+Release Wasm increased from 3,189,365 to 5,330,129 bytes (about 67%; 1,848,062
+bytes gzip), including Asyncify instrumentation and the loading/registration
+fixes. These are historical measurements of that implementation, not current
+JSPI size or gameplay-performance qualification.
 
 The native map-zone progress reset is restored. The bar reads
 `DB_GetLoadedFraction`, measuring compressed fastfile work. External IWI pixels
@@ -80,7 +88,8 @@ remain private until atomic publication. Both launchers batch log-panel layout
 once per animation frame so verbose registration cannot starve movie/audio
 delivery on the page thread.
 
-On 2026-09-05 the owned Killhouse map path passed in headless Google Chrome
+On 2026-09-05, using the earlier Asyncify implementation, the owned Killhouse
+map path passed in headless Google Chrome
 152.0.7977.77: the intro started 29 ms after the command, loading plus graphics
 registration finished 7,692 ms into the 37,464-ms movie, the queued fade started
 12 ms after completion, and the first game-driven renderer frame appeared
@@ -88,6 +97,12 @@ registration finished 7,692 ms into the 37,464-ms movie, the queued fade started
 native DB progress; pregame hides it when ready. A separate run confirms native
 Escape skip starts the queued fade after loading. This demonstrates loading,
 rendering and transition behavior, not human gameplay or audiovisual fidelity.
+
+On 2026-09-07 the JSPI build passed the complete-owned-intro regression in
+headless Chrome: native DB progress advanced during loading, registration
+completed before the intro ended, and the first world frame followed movie
+completion by 55 ms. This verifies real loading suspension and resumption;
+the concurrent validation run is not a gameplay-performance comparison.
 
 Owned Killhouse movie playback now waits through held audio delivery and actual
 AudioContext suspension, resumes, and survives WebGL context loss/restoration
@@ -100,7 +115,7 @@ native/Steam audiovisual comparison remain unqualified.
 
 The renderer now uses the canonical `cinematic` material instead of a private
 RGBA material. The observed single-pass `cinematic.hlsl` family binds code
-samplers 22–25 to Y/Cr/Cb/A. World, brush, static-model, DObj and UI draws resolve
+samplers 22â€“25 to Y/Cr/Cb/A. World, brush, static-model, DObj and UI draws resolve
 those images at draw time, so a new movie frame does not rebuild scene geometry.
 Four retained R8 images preserve decoder plane dimensions and linear chroma
 filtering. The shader applies the native limited-range coefficients, or the

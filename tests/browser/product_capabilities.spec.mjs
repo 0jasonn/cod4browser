@@ -206,3 +206,40 @@ test("capability failure stops product startup before asset import @product", as
     expect(await page.evaluate(() => globalThis.__assetStorageAccesses)).toBe(0);
     expect(pageErrors).toEqual([]);
 });
+
+for (const [missing, label] of [
+    ["promising", "WebAssembly Promise Integration (JSPI)"],
+    ["Suspending", "WebAssembly Promise Integration (JSPI)"],
+    ["Tag", "WebAssembly exception handling"],
+]) {
+test(`missing WebAssembly.${missing} rejects startup before opening storage @product`, async ({ page }) => {
+    const pageErrors = [];
+    page.on("pageerror", error => pageErrors.push(error.message));
+    await page.addInitScript(missing => {
+        Object.defineProperty(WebAssembly, missing, { value: undefined, configurable: true });
+        globalThis.__engineWorkers = 0;
+        globalThis.__storageAccesses = 0;
+        const NativeWorker = Worker;
+        globalThis.Worker = class extends NativeWorker {
+            constructor(url, options) {
+                ++globalThis.__engineWorkers;
+                super(url, options);
+            }
+        };
+        const getDirectory = navigator.storage.getDirectory.bind(navigator.storage);
+        navigator.storage.getDirectory = (...args) => {
+            ++globalThis.__storageAccesses;
+            return getDirectory(...args);
+        };
+    }, missing);
+    await page.goto("/");
+    await expect(page.locator("html")).toHaveAttribute("data-runtime-state", "unsupported");
+    await expect(page.locator("#asset-message")).toContainText(label);
+    await expect(page.locator("#select-install-button")).toBeDisabled();
+    expect(await page.evaluate(() => ({
+        workers: globalThis.__engineWorkers,
+        storage: globalThis.__storageAccesses,
+    }))).toEqual({ workers: 0, storage: 0 });
+    expect(pageErrors).toEqual([]);
+});
+}

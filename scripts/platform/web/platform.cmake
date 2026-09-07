@@ -18,9 +18,9 @@ function(kisak_configure_web_compile_target TARGET_NAME)
     target_compile_options(${TARGET_NAME} PRIVATE
         "-fdeclspec"
         "-sUSE_ZLIB=1"
-        # Imported metadata controls several bounded allocations. Keep the
-        # explicit bad_alloc recovery paths live in production builds.
-        "-sNO_DISABLE_EXCEPTION_CATCHING"
+        # Keep allocation recovery and canonical setjmp/longjmp inside Wasm.
+        # JS exception trampolines cannot suspend through a JSPI loading yield.
+        "-fwasm-exceptions"
         "$<$<CONFIG:Debug>:-O0>"
         "$<$<CONFIG:Debug>:-g3>"
         "$<$<NOT:$<CONFIG:Debug>>:-Oz>"
@@ -40,7 +40,7 @@ function(kisak_configure_web_target TARGET_NAME)
     target_link_options(${TARGET_NAME} PRIVATE
         "$<$<NOT:$<CONFIG:Debug>>:-Oz>"
         "-sUSE_ZLIB=1"
-        "-sNO_DISABLE_EXCEPTION_CATCHING"
+        "-fwasm-exceptions"
         "-sMODULARIZE=1"
         "-sEXPORT_ES6=1"
         "-sENVIRONMENT=worker"
@@ -48,10 +48,9 @@ function(kisak_configure_web_target TARGET_NAME)
         "-sMIN_WEBGL_VERSION=2"
         "-sMAX_WEBGL_VERSION=2"
         "-sALLOW_MEMORY_GROWTH=1"
-        # Suspend only at the platform loading-screen yield. Canonical DB/game
-        # stacks retain their synchronous ownership while the Worker presents.
-        "-sASYNCIFY=1"
-        "-sASYNCIFY_STACK_SIZE=1048576"
+        # Native Wasm suspension keeps loading synchronous-looking without
+        # Asyncify instrumentation. The launcher requires JSPI support.
+        "-sJSPI=1"
         # Canonical map/save load nests substantially deeper than Emscripten's
         # 64 KiB default. Match the native Windows stack scale at the platform
         # boundary instead of rewriting shared engine call chains.

@@ -1,8 +1,9 @@
 # Browser support policy
 
 The current product target is a Chromium-class browser profile, determined by
-features rather than the user-agent string. Startup requires WebAssembly,
-WebGL2, dedicated Workers, a transferable OffscreenCanvas, IndexedDB, OPFS,
+features rather than the user-agent string. Startup requires WebAssembly with
+Promise Integration (JSPI) and native exception handling, WebGL2, dedicated
+Workers, a transferable OffscreenCanvas, IndexedDB, OPFS,
 synchronous OPFS access from a Worker, Web Locks, BroadcastChannel, Web Audio,
 and pointer lock. A persistent-storage request is optional; the launcher warns
 when persistence is not granted because the browser may evict imported local
@@ -12,6 +13,15 @@ The launcher checks this profile before creating the engine Worker or opening
 the asset store. Missing requirements produce an explicit unsupported-browser
 state and list the unavailable APIs. The synchronous OPFS check runs in a
 short-lived, non-engine Worker because that API is Worker-scoped.
+
+The Wasm gate requires both `WebAssembly.Suspending` and
+`WebAssembly.promising`, plus `WebAssembly.Tag` for exception handling. The
+pinned Emscripten toolchain still describes JSPI as experimental. Canonical
+map loads remain synchronous-looking while a platform `emscripten_sleep(0)`
+yield presents loading UI and receives audio feedback; the frame pump awaits
+the suspended Wasm callback before scheduling another frame. This requires
+neither pthreads nor cross-origin isolation. See the
+[loading architecture and historical evidence](cinematic-codec.md).
 
 Chrome and Edge should only be called validated when the production browser
 suite has passed in those branded channels. Firefox and Safari are not
@@ -23,8 +33,8 @@ specific release can never satisfy the feature gate.
 The selected distribution milestone is a complete local-server package.
 After extracting it, run `python qualify_web_release.py verify .`, then
 `start-local.cmd` on Windows or `python serve_web.py --directory site --port 8000`.
-Python 3 must already be installed. Open `http://127.0.0.1:8000` in the same
-browser profile on every launch. The server binds loopback and serves only
+Python 3.11 or newer must already be installed. Open `http://127.0.0.1:8000`
+in the same browser profile on every launch. The server binds loopback and serves only
 the generated site; it needs no remote service. Hosted cold-offline startup
 is not supported and there is no service worker.
 

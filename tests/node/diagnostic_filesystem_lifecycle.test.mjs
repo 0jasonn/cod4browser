@@ -255,24 +255,28 @@ test("diagnostic mount rejects duplicate, malformed, and unrelated progress", as
     await host.dispose();
 });
 
-test("diagnostic mount retains its absolute deadline despite progress", async () => {
-    let timer;
+test("diagnostic mount retains its absolute deadline despite progress", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    let started;
+    const requestStarted = new Promise(resolve => { started = resolve; });
     const { host, worker } = createHarness({
         timeout: 35, absoluteTimeout: 100,
         behavior(message, target) {
-            let bytesProcessed = 0;
-            timer = setInterval(() => target.progress(message, {
-                phase: "runtime-loading", filesProcessed: 0, bytesProcessed: ++bytesProcessed,
-            }), 15);
+            for (let step = 1; step <= 6; ++step) target.progress(message, {
+                phase: "runtime-loading", filesProcessed: 0, bytesProcessed: step,
+            }, step * 15);
+            started();
         },
     });
     await host.ready;
-    try {
-        await assert.rejects(host.mount(manifest), error =>
-            error.code === "REQUEST_TIMEOUT" && /absolute limit/u.test(error.message));
-    } finally {
-        clearInterval(timer);
-    }
+    const rejected = assert.rejects(host.mount(manifest), error =>
+        error.code === "REQUEST_TIMEOUT" && /absolute limit/u.test(error.message));
+    await requestStarted;
+    for (let step = 0; step < 6; ++step) t.mock.timers.tick(15);
+    t.mock.timers.tick(9);
+    assert.equal(host.filesystemState, DIAGNOSTIC_FILESYSTEM_STATES.MOUNTING);
+    t.mock.timers.tick(1);
+    await rejected;
     assert.equal(worker.terminated, true);
     await host.dispose();
 });

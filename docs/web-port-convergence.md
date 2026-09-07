@@ -103,7 +103,7 @@ platform makes that behavior impossible.
 | Input host | Pointer lock, keyboard/mouse normalization, trusted paste snapshot/cache transport, focus release and cursor mode. |
 | Browser controls | User-initiated document fullscreen and an accessible recovery modal own only browser presentation, checkpoint retry and installation management. Canonical mouse mode determines ordinary visibility; Shift+Escape remains available during renderer-only gameplay. Fullscreen preserves canonical resolution/aspect policy. |
 | Audio device | AudioContext policy, buffers/nodes and PCM scheduling. Source offset/completion use `AudioContext.currentTime`; validated generation-tagged feedback replaces the proxy wall clock. Absolute queue ordinals survive unqueue/feedback crossing in flight. One snapshot can be in flight, sampled at 25 ms while the host is available; synchronous Worker work cannot accumulate feedback messages. Startup remains suspended and muted until an intentional canvas gesture resumes it; installation-picker interaction does not unlock sound. |
-| Main loop | Non-blocking Emscripten frame pump with a re-entry guard. Loading keepalive uses a bounded Asyncify yield to present native loading UI and cinematic frames inside synchronous-looking map/DB stacks. Worker RPCs wait for those stacks; no pthread requirement. See [measured rationale and cost](cinematic-codec.md). |
+| Main loop | Platform `requestAnimationFrame` pump awaits a `WebAssembly.promising` wrapper around its Wasm callback before scheduling another frame. Loading keepalive uses JSPI through `emscripten_sleep(0)` to present native loading UI and cinematic frames inside synchronous-looking map/DB stacks. Native Wasm exceptions retain canonical recovery and `setjmp`/`longjmp` without JavaScript exception trampolines. Worker RPCs wait for suspended stacks; no pthread requirement. The launcher requires JSPI and native Wasm exception APIs. See [loading architecture and historical evidence](cinematic-codec.md) and [browser requirements](browser-support.md). |
 | Wasm stack | The web linker reserves 1 MiB, matching native Windows scale for canonical nested map/save loading rather than rewriting shared call chains. |
 | Cinematics | Existing `R_Cinematic_*` callers drive the platform FFmpeg Bink decoder, canonical Y/Cr/Cb/A code images, and OpenAL PCM queue. The canonical single-pass `cinematic.hlsl` material uses retained R8 planes with native colour coefficients and filtered chroma; world/brush, static-model, DObj and UI draws bind current planes at draw time. Recovery also works without 2D submission; authored in-world scene fidelity remains unverified. Video follows cumulative device-played PCM, including unqueued buffers; one decoder-owned pending frame feeds audio before presentation. Owned delay/suspension and WebGL recovery pass. Map loading and immutable world/static-model graphics registration run during the intro; camera visibility and dynamic geometry remain frame-owned. Log-panel layout is batched per animation frame to preserve page-thread audio delivery. Native briefing/pregame paint the DB-backed loading bar and hold gameplay until completion/skip. Movie identity and subsequent game actions stay in Kisak. See [codec scope and remaining qualification](cinematic-codec.md). |
 
@@ -694,6 +694,15 @@ the memory saving as free.
 
 ## Verification scope
 
+The 2026-09-07 follow-up removes decompiler-derived `long double` type punning
+from canonical cgame numeric parsing and view cull distance. Direct Wasm tests
+exercise real cgame functions and save-device calls. `FS_Rename` now reports
+admission failure to the save writer: the browser path leaves both files intact,
+and a refused save neither reports success nor queues a thumbnail. The Worker
+continues to own journal publication and durable checkpoints. Native server
+rename trims its own path buffers and preserves its source on copy failure.
+No parallel game or save representation was introduced.
+
 The 2026-09-06 remediation strengthens the existing platform seam: shared
 assertion guards keep optimized native/Wasm tests active; canonical 32-bit
 layout tests remain Windows x86/Wasm, and portable primary-light math avoids
@@ -702,9 +711,11 @@ messages now validate into discriminated request variants, and the real Wasm
 module contract validates required exports before readiness. Diagnostic frame
 samples include separate live/reserved/queued storage accounting; production
 gains no diagnostic API. Recovery, protocol and packaging tests are synthetic
-platform evidence. Linux/sanitizers, matched active CargoShip performance,
-actual release-version update/rollback, offline campaign acceptance and the
-failing production size/export gate remain open; this is not a qualified alpha.
+platform evidence. The follow-up restores the unchanged production size/export
+gate and collects verified public dependency sources alongside the project
+archive. Linux/sanitizers, aggregate CI, matched active CargoShip performance,
+actual release-version update/rollback and offline campaign acceptance remain
+open; this is not a qualified alpha.
 
 Use the [test inventory](web-test-inventory.md) for current validation tiers
 and known limits. Native/Wasm parser tests own semantics that do not require a

@@ -272,8 +272,10 @@ test("filesystem lifecycle: late progress cannot revive a timed-out request", as
     await host.dispose();
 });
 
-test("filesystem lifecycle: absolute watchdog wins despite continued progress", async () => {
-    let timer;
+test("filesystem lifecycle: absolute watchdog wins despite continued progress", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    let started;
+    const requestStarted = new Promise(resolve => { started = resolve; });
     const { host } = createHarness({
         timeout: 30,
         absoluteTimeout: 80,
@@ -282,25 +284,21 @@ test("filesystem lifecycle: absolute watchdog wins despite continued progress", 
                 worker.reply(message, { mounted: false });
                 return;
             }
-            let filesProcessed = 0;
-            timer = setInterval(() => worker.progress(message, {
-                phase: "mounting",
-                filesProcessed: ++filesProcessed,
-                bytesProcessed: filesProcessed * 1024,
-            }, 0, true), 6);
+            for (let step = 1; step <= 13; ++step) worker.progress(message, {
+                phase: "mounting", filesProcessed: step, bytesProcessed: step * 1024,
+            }, step * 6, true);
+            started();
         },
     });
     await host.ready;
-    let timeoutError;
-    try {
-        await host.mountAssets(manifest);
-    } catch (error) {
-        timeoutError = error;
-    } finally {
-        clearInterval(timer);
-    }
-    assert.equal(timeoutError?.code, "REQUEST_TIMEOUT");
-    assert.match(timeoutError?.message ?? "", /absolute limit/u);
+    const rejected = assert.rejects(host.mountAssets(manifest), error =>
+        error.code === "REQUEST_TIMEOUT" && /absolute limit/u.test(error.message));
+    await requestStarted;
+    for (let step = 0; step < 13; ++step) t.mock.timers.tick(6);
+    t.mock.timers.tick(1);
+    assert.equal(host.filesystemState, FILESYSTEM_STATES.MOUNTING);
+    t.mock.timers.tick(1);
+    await rejected;
     assert.equal(host.filesystemState, FILESYSTEM_STATES.TERMINATED);
     await host.dispose();
 });

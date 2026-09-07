@@ -168,6 +168,27 @@ EM_JS(
         }));
     });
 
+EM_JS_DEPS(framePump, "$getWasmTableEntry,$handleException");
+EM_JS(void, StartFramePumpJs, (std::uintptr_t callback), {
+    const runFrame = WebAssembly.promising(getWasmTableEntry(callback));
+    let stopped = false;
+    globalThis.kisakStopFramePump = () => { stopped = true; };
+    const pump = async () => {
+        if (stopped || ABORT) return;
+        try {
+            // No other engine frame may enter while native loading is suspended.
+            await runFrame(0);
+        } catch (error) {
+            stopped = true;
+            // Preserve Worker error delivery rather than an unhandled Promise.
+            setTimeout(() => handleException(error), 0);
+            return;
+        }
+        if (!stopped) requestAnimationFrame(pump);
+    };
+    requestAnimationFrame(pump);
+});
+
 void FramePumpTrampoline(void *)
 {
     if (g_frameInProgress) return;
@@ -182,7 +203,7 @@ void FramePumpTrampoline(void *)
         // Unwind the canonical command/UI stack before ending the platform
         // pump. The host flushes all writable handles before freeing the
         // Worker and its engine heap; a failed flush must remain retryable.
-        emscripten_cancel_main_loop();
+        EM_ASM({ globalThis.kisakStopFramePump(); });
         Com_WriteConfiguration(0);
         Web_EmitRuntimeState("quitting", "Saving before returning to the launcher");
         return;
@@ -268,7 +289,7 @@ void __cdecl Sys_LoadingKeepAlive()
             globalThis.kisakFinishLoadingYield = resolve;
         });
     });
-    // Asyncify pauses the normal Emscripten main loop until this stack resumes.
+    // The JSPI frame pump awaits this stack before scheduling another frame.
     // Returning to the event loop presents OffscreenCanvas and accepts audio
     // device feedback. Worker RPCs wait until canonical work has returned.
     emscripten_sleep(0);
@@ -647,7 +668,7 @@ bool Web_StartFramePump(WebFrameCallback callback, void *userData)
     g_framePumpStarted = true;
     g_framePumpTicks = 0;
     DispatchSystemStatus("ready", Sys_Milliseconds(), 0, 0);
-    emscripten_set_main_loop_arg(FramePumpTrampoline, nullptr, 0, EM_FALSE);
+    StartFramePumpJs(reinterpret_cast<std::uintptr_t>(FramePumpTrampoline));
     return true;
 }
 

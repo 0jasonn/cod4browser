@@ -122,7 +122,11 @@ test("restorable home backup survives reimport and same-origin offline restart @
     const profile = testInfo.outputPath("restore-profile");
     const externalRequests = [];
     for (let launch = 0; launch < 2; ++launch) {
-        const context = await chromium.launchPersistentContext(profile, { headless: true });
+        const context = await chromium.launchPersistentContext(profile, {
+            channel: testInfo.project.use.channel,
+            headless: testInfo.project.use.headless ?? true,
+            viewport: testInfo.project.use.viewport,
+        });
         // Keep loopback reachable while rejecting all external network access.
         await context.route("**/*", route => {
             if (new URL(route.request().url()).origin === new URL(baseURL).origin) return route.continue();

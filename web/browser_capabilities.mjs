@@ -114,8 +114,13 @@ export async function detectBrowserCapabilities()
     const canvas = document.createElement("canvas");
     let webgl2;
     try { webgl2 = Boolean(canvas.getContext("webgl2")); } catch { webgl2 = false; }
+    const wasmSuspension = typeof globalThis.WebAssembly === "object" &&
+        typeof Reflect.get(WebAssembly, "Suspending") === "function" &&
+        typeof Reflect.get(WebAssembly, "promising") === "function";
     const required = [
         ["wasm", "WebAssembly", typeof WebAssembly === "object"], ["webgl2", "WebGL 2", webgl2],
+        ["wasmSuspension", "WebAssembly Promise Integration (JSPI)", wasmSuspension],
+        ["wasmExceptions", "WebAssembly exception handling", typeof globalThis.WebAssembly?.Tag === "function"],
         ["worker", "Worker", typeof Worker === "function"], ["offscreenCanvas", "OffscreenCanvas", typeof OffscreenCanvas === "function" && typeof canvas.transferControlToOffscreen === "function"],
         ["indexedDb", "IndexedDB", typeof indexedDB === "object"], ["opfs", "OPFS", typeof navigator.storage?.getDirectory === "function"],
         ["webLocks", "Web Locks", typeof navigator.locks?.request === "function"],

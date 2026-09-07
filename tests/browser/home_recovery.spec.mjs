@@ -9,7 +9,11 @@ test("OPFS rename and restore recover after browser restart on the same origin a
         const profile = testInfo.outputPath(`profile-${operation}`);
         async function open()
         {
-            const context = await chromium.launchPersistentContext(profile, { headless: true });
+            const context = await chromium.launchPersistentContext(profile, {
+                channel: testInfo.project.use.channel,
+                headless: testInfo.project.use.headless ?? true,
+                viewport: testInfo.project.use.viewport,
+            });
             await context.route("**/home_recovery_worker.mjs", (route) => route.fulfill({
                 contentType: "text/javascript", body: workerSource,
                 headers: { "Cross-Origin-Embedder-Policy": "require-corp", "Cross-Origin-Resource-Policy": "same-origin" },
