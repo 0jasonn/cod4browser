@@ -141,7 +141,8 @@ endif()
 if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     add_executable(cgame_timescale_tests
         "${CMAKE_CURRENT_LIST_DIR}/cgame_timescale_tests.cpp"
-        "${KISAK_REPOSITORY_ROOT}/src/cgame/cg_servercmds.cpp")
+        "${KISAK_REPOSITORY_ROOT}/src/cgame/cg_servercmds.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/cgame/cg_main.cpp")
     target_compile_features(cgame_timescale_tests PRIVATE cxx_std_20)
     target_include_directories(cgame_timescale_tests PRIVATE
         "${KISAK_REPOSITORY_ROOT}/src" "${KISAK_REPOSITORY_ROOT}/deps")
@@ -149,7 +150,7 @@ if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         KISAK_SP=1 KISAK_WEB=1 KISAK_OPENAL=1
         KISAK_DB_REGISTRY_LIFECYCLE_SLICE=1 dNODEBUG=1)
     target_compile_options(cgame_timescale_tests PRIVATE
-        -ffunction-sections -fdata-sections -UNDEBUG -fdeclspec)
+        -ffunction-sections -fdata-sections -fdeclspec)
     target_link_options(cgame_timescale_tests PRIVATE -Wl,--gc-sections)
 endif()
 
