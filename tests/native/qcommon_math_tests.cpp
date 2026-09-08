@@ -3,6 +3,7 @@
 #include <game/g_scr_main_math.h>
 #include <gfx_d3d/r_particle_cloud.h>
 #include <universal/com_random.h>
+#include <EffectsCore/fx_emission_math.h>
 
 #include <array>
 #include <cassert>
@@ -29,6 +30,20 @@ int main()
     assert(GScr_ParseFloatValue("-0.125") == -0.125f);
     assert(GScr_ParseFloatValue("17.25 trailing") == 17.25f);
 
+    // Explicit FX times include negative prewarm timestamps. A zero result
+    // leaves a newly spawned entity untriggered because its initial time is 0.
+    constexpr std::array<std::pair<float, int>, 7> fxTriggerTimes{{
+        {-15.0f, -15000},
+        {-1.25f, -1250},
+        {-0.0015f, -1},
+        {0.0f, 0},
+        {0.00149f, 1},
+        {0.0015f, 2},
+        {1.25f, 1250},
+    }};
+    for (const auto &[seconds, milliseconds] : fxTriggerTimes)
+        assert(GScr_FxTriggerTime(seconds) == milliseconds);
+
     static_assert(Q_RandomToUnitFloat(0u, 32767u) == 0.0f);
     static_assert(Q_RandomToUnitFloat(16384u, 32767u) == 0.5f);
     static_assert(Q_RandomToUnitFloat(32767u, 32767u) ==
@@ -41,6 +56,24 @@ int main()
         2147483647u, 2147483647u) == 1.0f);
     static_assert(Q_RandomToInclusiveUnitDouble(16384u, 32767u) ==
         16384.0 / 32767.0);
+
+    // Preserve every native seed and both edges of each 31-bit CRT bucket.
+    for (std::uint32_t sample = 0u; sample < 32768u; ++sample)
+    {
+        const std::uint32_t expectedSeed = 479u * sample / 32768u;
+        assert(FX_EffectSeedFromRand(sample, 32767u) == expectedSeed);
+        assert(FX_EffectSeedFromRand(sample << 16u, 0x7fffffffu) == expectedSeed);
+        const auto wideSeed = FX_EffectSeedFromRand(
+            (sample << 16u) | 0xffffu, 0x7fffffffu);
+        assert(wideSeed == expectedSeed && wideSeed < 479u);
+    }
+    // The time-based generator wraps before shifting, including prewarm times.
+    static_assert(FX_EffectSeedFromTime(-15000) == 121u);
+    static_assert(FX_EffectSeedFromTime(-1) == 0u);
+    static_assert(FX_EffectSeedFromTime(1000) == 24u);
+    static_assert(FX_EffectSeedFromTime(INT32_MAX) == 239u);
+    static_assert(FX_EffectSeedFromTime(INT32_MIN) == 239u);
+
     constexpr int cells[4][3] = {
         {0, 0, 0}, {7, 7, 15}, {3, 5, 11}, {1, 6, 2}};
     constexpr unsigned samples[4][3] = {

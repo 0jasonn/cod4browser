@@ -45,6 +45,7 @@ struct WebRendererBrushModelSubmission
     std::uint16_t entityNumber = 0u;
     WebRendererShadowEntityKind shadowEntityKind =
         WebRendererShadowEntityKind::SceneEntity;
+    bool cameraVisible = true;
 };
 
 struct WebRendererBrushModelSceneCommand

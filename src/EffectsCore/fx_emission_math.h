@@ -3,6 +3,21 @@
 #include <cstdint>
 
 #include <cstdlib>
+#include <universal/com_random.h>
+
+constexpr std::uint16_t FX_EffectSeedFromTime(std::int32_t msecBegin) noexcept
+{
+    const std::uint32_t random =
+        214013u * static_cast<std::uint32_t>(msecBegin) + 2531011u;
+    return static_cast<std::uint16_t>((479u * (random >> 17u)) >> 15u);
+}
+
+constexpr std::uint16_t FX_EffectSeedFromRand(
+    std::uint32_t sample, std::uint32_t maximum) noexcept
+{
+    return static_cast<std::uint16_t>(
+        479.0f * Q_RandomToUnitFloat(sample, maximum));
+}
 
 // MSVC's rand() contract uses a 15-bit inclusive maximum. Dividing by
 // RAND_MAX + 1 preserves the historical raw * (1 / 32768) expression while

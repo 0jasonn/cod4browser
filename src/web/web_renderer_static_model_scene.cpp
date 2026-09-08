@@ -624,8 +624,10 @@ WebRendererStaticModelSceneResult WebRenderer_BuildStaticModelSceneCommand(
             replacement.instances.size())
     {
         for (WebRendererStaticModelBatchDesc &batch : replacement.batches)
-            batch.draw.lightingMode =
-                WebRendererWorldLightingMode::ModelLightGrid;
+            if (WebRenderer_UsesModelLighting(
+                    batch.draw.materialIdentity, batch.draw.techniqueType))
+                batch.draw.lightingMode =
+                    WebRendererWorldLightingMode::ModelLightGrid;
     }
     else
     {

@@ -453,7 +453,8 @@ void TestDynamicDrawState()
     state.Reset();
     Require(state.NeedsProjection(depthHack.data()), "sun override requires projection restoration");
 
-    const WebRendererWorldBatchDesc base{};
+    WebRendererWorldBatchDesc base{};
+    base.materialIdentity = reinterpret_cast<const Material *>(1);
     Require(state.NeedsMaterial(base), "first material is always applied");
     Require(!state.NeedsMaterial(base), "repeated material needs no state calls");
     const auto requireMaterialChange = [&](auto modify) {
@@ -467,7 +468,11 @@ void TestDynamicDrawState()
         state.Reset(); // Do not retain the local changed batch beyond its lifetime.
     };
     // Identities are opaque and never dereferenced by the backend state helper.
-    requireMaterialChange([](auto &b) { b.materialIdentity = reinterpret_cast<const Material *>(1); });
+    requireMaterialChange([](auto &b) { b.materialIdentity = nullptr; });
+    // Equal blend/depth bits do not imply equal shaders or material constants.
+    requireMaterialChange([](auto &b) { b.materialIdentity = reinterpret_cast<const Material *>(2); });
+    requireMaterialChange([](auto &b) { b.techniqueType = 5; });
+    requireMaterialChange([](auto &b) { b.depthHack = true; });
     for (unsigned word = 0; word < 2; ++word)
         for (unsigned bit = 0; bit < 32; ++bit)
             requireMaterialChange([&](auto &b) { b.stateBits[word] = 1u << bit; });

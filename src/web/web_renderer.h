@@ -370,6 +370,8 @@ struct WebRendererBrushModelInstanceDesc
     WebRendererShadowEntityKind shadowEntityKind =
         WebRendererShadowEntityKind::None;
     std::uint32_t shadowEntityId = UINT32_MAX;
+    // Camera DPVS must not remove a moving brush from light-space passes.
+    bool cameraVisible = true;
 };
 
 constexpr bool WebRenderer_IsCameraVisibleXModelSurface(

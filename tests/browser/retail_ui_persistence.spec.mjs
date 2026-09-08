@@ -665,6 +665,48 @@ test("canonical objectives and renderer dvars reach the shipped HUD", { tag: ["@
         const ambientMagazine = await regionLuminance("weapon-wall-model-ambient", magazine);
         expect(litMagazine / ambientMagazine).toBeGreaterThan(1.8);
         await command("r_diffuseColorScale 1; r_specularColorScale 1");
+        // A vertex-color shader occupies the lamp's lit technique slots.
+        // Applying model-grid shading to it darkens the authored white face.
+        await command("cg_setviewpos 3231 -802 4 135 -74");
+        const lampFace = [0.411, 0.558, 0.03, 0.035];
+        const emissiveLamp = await regionLuminance("lamp-authored-color", lampFace);
+        expect(emissiveLamp).toBeGreaterThan(235);
+        await command("r_diffuseColorScale 0; r_specularColorScale 0");
+        const unlitLamp = await regionLuminance("lamp-without-primary-light", lampFace);
+        expect(unlitLamp / emissiveLamp).toBeCloseTo(1, 2);
+        await command("r_diffuseColorScale 1; r_specularColorScale 1");
+        // Retail adds the lamp haze through authored, prewarmed dust FX.
+        // Freeze the effect so draw toggles compare the same particle state.
+        await expect(page.locator("#boot-log")).toContainText("effect='dust/light_shaft_dust_med'");
+        await command("fx_freeze 1");
+        const haze = [];
+        for (const [name, y, pitch] of [["far", -990, -32], ["near", -797, -79]]) {
+            await command(`cg_setviewpos 3336 ${y} 5 90 ${pitch}; fx_draw 1`);
+            const region = [0.3, 0.2, 0.32, 0.4];
+            const enabled = await regionLuminance(`lamp-haze-${name}`, region);
+            await command("fx_draw 0");
+            const disabled = await regionLuminance(`lamp-haze-${name}-disabled`, region);
+            haze.push(enabled - disabled);
+        }
+        expect(haze[1]).toBeGreaterThan(5);
+        expect(haze[1]).toBeGreaterThan(haze[0] * 2);
+        await command("fx_draw 1; fx_freeze 0");
+        // The closed doorway must block sunlight even when it is outside
+        // the camera frustum. Disabling brushes supplies the open-door
+        // control at each view without moving or rewriting a game entity.
+        for (const [yaw, pitch, floor] of [
+            [180, 20, [0.03, 0.39, 0.08, 0.025]],
+            [200, 10, [0.24, 0.55, 0.08, 0.025]],
+        ]) {
+            await command(`cg_setviewpos 3280 -1000 4 ${yaw} ${pitch}; sm_sunEnable 1; r_drawBModels 1`);
+            const blocked = await regionLuminance(`door-shadow-${yaw}`, floor);
+            await command("r_drawBModels 0");
+            const open = await regionLuminance(`door-control-${yaw}`, floor);
+            expect(open).toBeGreaterThan(100);
+            expect(blocked / open,
+                `closed door must block sunlight at camera yaw ${yaw}`).toBeLessThan(0.75);
+        }
+        await command("r_drawBModels 1");
         // Moving back and turning makes the table's light lose the fourth
         // shadow slot. Native history must fade it rather than pop it off.
         const tableShadowFade = () => page.evaluate(async () => {

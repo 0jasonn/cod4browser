@@ -574,13 +574,10 @@ WebRendererWorldBatchDesc MakeDraw(
                     ? WebRendererWorldTechnique::BaseTextureNormalSpecular
                     : WebRendererWorldTechnique::BaseTextureSpecular)
                 : WebRendererWorldTechnique::BaseTexture;
-    // Only the canonical lit pass consumes the model-light-grid constants.
     if (draw.technique == WebRendererWorldTechnique::Cinematic)
         draw.samplerState = draw.normalSamplerState = draw.detailSamplerState = draw.specularSamplerState = 0x62;
-    // Unlit reflex sights must preserve their emissive color and derived
-    // opacity instead of being darkened by the viewmodel's lighting sample.
     if (modelLightingEnabled &&
-        draw.techniqueType == TECHNIQUE_LIT_INDEX)
+        WebRenderer_UsesModelLighting(material, draw.techniqueType))
     {
         draw.lightingMode = WebRendererWorldLightingMode::ModelLightGrid;
         std::copy_n(modelLightingCoordinates, 3u,

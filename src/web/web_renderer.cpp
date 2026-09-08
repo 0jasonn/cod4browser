@@ -7842,6 +7842,11 @@ WebRendererSurfaceResult SetDynamicModelScene(
             [](const WebRendererRetainedWorldBatch &batch) {
                 return batch.drawSortKey;
             }, dynamicCameraDrawOrder);
+        std::erase_if(dynamicCameraDrawOrder, [&](std::uint32_t index) {
+            const auto &draw = dynamicDraws[index];
+            return draw.brushInstanceIndex != UINT32_MAX &&
+                !retainedBrushInstances[draw.brushInstanceIndex].cameraVisible;
+        });
     }
     catch (const std::bad_alloc &)
     {
@@ -8355,9 +8360,9 @@ void SelectSpotShadowLights(
         if (batch.primaryLightIndex < used.size())
             used[batch.primaryLightIndex] = true;
     }
-    for (const auto &draw : g_renderer.dynamicDraws)
+    for (const auto index : g_renderer.dynamicCameraDrawOrder)
     {
-        const auto &batch = DynamicDrawBatch(draw);
+        const auto &batch = DynamicDrawBatch(g_renderer.dynamicDraws[index]);
         if (batch.primaryLightIndex < used.size())
             used[batch.primaryLightIndex] = true;
     }
@@ -8955,12 +8960,12 @@ bool SkipUnavailableOutdoorCloud(
     return OutdoorParticleCloudForBatch(batch) && !OutdoorLookupReady();
 }
 
-bool SoftParticleForBatch(const WebRendererRetainedWorldBatch &batch,
-    WebRendererSoftParticle &out)
+bool ParticleMaterialForBatch(const WebRendererRetainedWorldBatch &batch,
+    WebRendererParticleMaterial &out)
 {
     return batch.technique != WebRendererWorldTechnique::BackendFallback &&
         !WebRenderer_SkipsNativeDraw(batch.technique) &&
-        WebRenderer_GetSoftParticle(batch.materialIdentity,
+        WebRenderer_GetParticleMaterial(batch.materialIdentity,
             CameraTechniqueType(batch), out);
 }
 
@@ -9002,13 +9007,13 @@ bool SceneNeedsFloatZ(bool distortion)
     if (r_floatz && !r_floatz->current.enabled) return false;
     if (distortion) return true;
     if (!r_zFeather || !r_zFeather->current.enabled) return false;
-    WebRendererSoftParticle soft{};
+    WebRendererParticleMaterial soft{};
     for (const auto &batch : g_renderer.retainedWorldBatches)
-        if (SoftParticleForBatch(batch, soft)) return true;
+        if (ParticleMaterialForBatch(batch, soft) && soft.depthFeather) return true;
     for (const auto &batch : g_renderer.retainedStaticModelBatches)
-        if (SoftParticleForBatch(batch.draw, soft)) return true;
+        if (ParticleMaterialForBatch(batch.draw, soft) && soft.depthFeather) return true;
     for (const auto &batch : g_renderer.retainedDynamicModelBatches)
-        if (SoftParticleForBatch(batch, soft)) return true;
+        if (ParticleMaterialForBatch(batch, soft) && soft.depthFeather) return true;
     return false;
 }
 
@@ -9150,13 +9155,14 @@ void ApplyWorldMaterialState(const WebRendererRetainedWorldBatch &batch,
             glUniform1i(g_renderer.materialModeUniform, 17);
             glUniform2fv(g_renderer.distortionScaleUniform, 1, distortion);
         }
-        WebRendererSoftParticle soft{};
-        if (SoftParticleForBatch(batch, soft))
+        WebRendererParticleMaterial soft{};
+        if (ParticleMaterialForBatch(batch, soft))
         {
             glUniform1i(g_renderer.materialModeUniform, 14);
             glUniform1i(g_renderer.softFlagsUniform, soft.flags);
             glUniform3f(g_renderer.softFeatherUniform, soft.feather[0], soft.feather[1],
-                g_renderer.softParticleDepthReady && r_zFeather && r_zFeather->current.enabled ? 1.0f : 0.0f);
+                soft.depthFeather && g_renderer.softParticleDepthReady &&
+                    r_zFeather && r_zFeather->current.enabled ? 1.0f : 0.0f);
             glUniform1f(g_renderer.softEyeUniform, soft.eyeOffset);
             glUniform4fv(g_renderer.falloffParmsUniform, 1, soft.falloff);
             glUniform4fv(g_renderer.falloffBeginColorUniform, 1, soft.beginColor);
@@ -10622,7 +10628,8 @@ extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestSoftParticlePixel(int
     if (!CreateFloatZTarget(edge, edge)) return UINT32_MAX;
     if (distortion && !CreatePostSunTarget(edge, edge)) return UINT32_MAX;
     const float sceneDepth = scenario == 1 || scenario == 21 ? 1.0f : 3.0f;
-    const float particleDepth = scenario == 3 ? 0.5f : scenario == 15 ? 0.125f : 2.0f;
+    const float particleDepth = scenario == 3 ? 0.5f : scenario == 15 ? 0.125f : scenario == 17 ? 8.0f : 2.0f;
+    const bool angleParticle = scenario >= 16 && scenario <= 19;
     std::vector<WebRendererSurfaceVertex> vertices(8);
     const float corners[4][2]{{-1,-1},{1,-1},{1,1},{-1,1}};
     for (unsigned i = 0; i < 8; ++i)
@@ -10631,10 +10638,15 @@ extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestSoftParticlePixel(int
         vertices[i].position[0] = corners[i % 4][0] * depth;
         vertices[i].position[1] = corners[i % 4][1] * depth;
         vertices[i].position[2] = depth;
+        if (angleParticle && i >= 4)
+        {
+            vertices[i].position[0] = corners[i % 4][0] * 2;
+            vertices[i].position[1] = corners[i % 4][1] * 2;
+        }
         std::fill_n(vertices[i].color, 4, 1.0f);
         if (i < 4 && scenario == 9) vertices[i].color[3] = 0.5f;
         if (i < 4 && scenario == 10) vertices[i].color[3] = 0.75f;
-        if (i >= 4 && scenario == 13) vertices[i].color[3] = 0.5f;
+        if (i >= 4 && (scenario == 13 || scenario == 18)) vertices[i].color[3] = 0.5f;
         vertices[i].textureCoordinate[0] = vertices[i].textureCoordinate[1] = 0.5f;
         vertices[i].normal[2] = 1.0f;
         vertices[i].tangent[0] = 1.0f;
@@ -10729,6 +10741,12 @@ extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestSoftParticlePixel(int
     vs.name=scenario==5 ? "zfeather_dtex.hlsl" : scenario==6 ? "zfeather_foa_nf_dtex.hlsl" :
         scenario==7 ? "zfeather_nf_eo_dtex.hlsl" : scenario==14 ? "zfeather_foa_nf_eo_dtex.hlsl" : "zfeather_nf_dtex.hlsl";
     ps.name=scenario==4 ? "zfeather_add_nf.hlsl" : scenario==5 ? "zfeather.hlsl" : "zfeather_nf.hlsl";
+    if (angleParticle)
+    {
+        vs.name = scenario == 19 ? "vertcol_simple_fog_foa.hlsl" : "vertcol_simple_foa_dtex.hlsl";
+        ps.name = scenario == 19 ? "vertcol_simple_add_fog.hlsl" : "vertcol_simple_add.hlsl";
+        std::fill_n(begin, 3, 2.0f);
+    }
     tech.passCount=1; tech.passArray[0].vertexShader=&vs; tech.passArray[0].pixelShader=&ps;
     tech.passArray[0].args=args; tech.passArray[0].stableArgCount=9; set.techniques[5]=&tech;
     batch.stateBits[0]=0x18000800u; batch.stateBits[1]=2; batch.depthHack=false;
@@ -11250,6 +11268,9 @@ std::uint32_t DrawDynamicLights(bool staticModelsReady,
                  index < g_renderer.dynamicDraws.size(); ++index)
             {
                 const auto &draw = g_renderer.dynamicDraws[index];
+                if (draw.brushInstanceIndex != UINT32_MAX &&
+                    !g_renderer.retainedBrushInstances[draw.brushInstanceIndex].cameraVisible)
+                    continue;
                 const auto &batch = DynamicDrawBatch(draw);
                 if (!WebRenderer_IsTransientLightReceiver(batch.sourceKind) ||
                     !WebRenderer_IsCameraVisibleXModelSurface(

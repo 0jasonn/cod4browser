@@ -186,9 +186,13 @@ public:
         const Batch *previous = material_;
         material_ = &next;
         // All per-batch inputs read by ApplyWorldMaterialState. AA settings
-        // are pass-wide. Compare float bits conservatively, including -0.
+        // are pass-wide. Canonical material/technique identity also owns shader
+        // arguments: equal blend bits can use different flare falloff/eye offset.
+        // Compare float bits conservatively, including -0.
         return !previous ||
-            (previous->materialIdentity != nullptr) != (next.materialIdentity != nullptr) ||
+            previous->materialIdentity != next.materialIdentity ||
+            previous->techniqueType != next.techniqueType ||
+            previous->depthHack != next.depthHack ||
             previous->stateBits[0] != next.stateBits[0] ||
             previous->stateBits[1] != next.stateBits[1] ||
             previous->technique != next.technique ||

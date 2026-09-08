@@ -1,5 +1,6 @@
 #include <universal/q_shared.h>
 #include "fx_system.h"
+#include "fx_emission_math.h"
 
 #include <qcommon/mem_track.h>
 #include <qcommon/threads.h>
@@ -770,9 +771,9 @@ bool __cdecl FX_CullElemForSpawn(const FxCamera *camera, const FxElemDef *elemDe
 void __cdecl FX_SetEffectRandomSeed(FxEffect *effect, const FxEffectDef *remoteDef)
 {
     if (FX_EffectAffectsGameplay(remoteDef))
-        effect->randomSeed = (479 * ((uint32_t)(214013 * effect->msecBegin + 2531011) >> 17)) >> 15; // has to be unsigned
+        effect->randomSeed = FX_EffectSeedFromTime(effect->msecBegin);
     else
-        effect->randomSeed = 479 * rand() / 0x8000;
+        effect->randomSeed = FX_EffectSeedFromRand(rand(), RAND_MAX);
 
     // LWSS ADD - bounds check
     iassert(effect->randomSeed < ARRAY_COUNT(fx_randomTable));

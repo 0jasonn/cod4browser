@@ -8,6 +8,23 @@
 #include <cstring>
 #include <iterator>
 
+inline bool WebRenderer_UsesModelLighting(const Material *material, unsigned type) noexcept
+{
+    const auto *set = material ? material->techniqueSet : nullptr;
+    if (set && set->remappedTechniqueSet) set = set->remappedTechniqueSet;
+    const auto *technique = set && type < 34 ? set->techniques[type] : nullptr;
+    if (!technique || !technique->passCount) return false;
+    const auto &pass = technique->passArray[0];
+    const unsigned count = pass.perPrimArgCount + pass.perObjArgCount + pass.stableArgCount;
+    for (unsigned i = 0; pass.args && i < count; ++i)
+    {
+        // MTL_ARG_CODE_PIXEL_SAMPLER, TEXTURE_SRC_CODE_MODEL_LIGHTING.
+        // Even a lit technique slot can contain an unlit vertex-color shader.
+        if (pass.args[i].type == 4 && pass.args[i].u.codeSampler == 3) return true;
+    }
+    return false;
+}
+
 // The encountered vertcol_mul_fog family has exactly two draws. Keep its
 // canonical pass/state identity; this is a shader boundary, not a new asset.
 inline const GfxStateBits *WebRenderer_GetMultiplyFogPass(
@@ -181,9 +198,10 @@ inline const MaterialTechnique *WebRenderer_MaterialTechnique(
 
 // Transient renderer parameters read from canonical shader arguments. This
 // does not retain another material or change the native technique set.
-struct WebRendererSoftParticle
+struct WebRendererParticleMaterial
 {
     unsigned flags = 0; // 1 fog, 2 premultiply, 4 angle falloff, 8 eye offset
+    bool depthFeather = true;
     float feather[2]{}; // vertex and pixel feather scales
     float eyeOffset = 0;
     float falloff[4]{}, beginColor[4]{}, endColor[4]{}, fogColor[4]{};
@@ -210,8 +228,8 @@ inline bool WebRenderer_ShaderConstant(const Material *material,
     return false;
 }
 
-inline bool WebRenderer_GetSoftParticle(const Material *material, unsigned type,
-    WebRendererSoftParticle &out) noexcept
+inline bool WebRenderer_GetParticleMaterial(const Material *material, unsigned type,
+    WebRendererParticleMaterial &out) noexcept
 {
     const auto *tech = WebRenderer_MaterialTechnique(material, type);
     if (!tech || tech->passCount != 1) return false;
@@ -219,18 +237,29 @@ inline bool WebRenderer_GetSoftParticle(const Material *material, unsigned type,
     if (!pass.pixelShader || !pass.vertexShader || !pass.pixelShader->name ||
         !pass.vertexShader->name) return false;
     const char *pixel = pass.pixelShader->name;
-    WebRendererSoftParticle value{};
+    WebRendererParticleMaterial value{};
     if (!std::strcmp(pixel, "zfeather.hlsl")) value.flags = 1;
     else if (!std::strcmp(pixel, "zfeather_add.hlsl")) value.flags = 3;
     else if (!std::strcmp(pixel, "zfeather_nf.hlsl")) value.flags = 0;
     else if (!std::strcmp(pixel, "zfeather_add_nf.hlsl")) value.flags = 2;
+    else if (!std::strcmp(pixel, "vertcol_simple_add.hlsl") ||
+        !std::strcmp(pixel, "vertcol_simple_add_fog.hlsl"))
+    {
+        value.depthFeather = false;
+        value.flags = !std::strcmp(pixel, "vertcol_simple_add_fog.hlsl") ? 7 : 6;
+    }
     else return false;
     constexpr const char *vertices[] = {"zfeather_dtex.hlsl", "zfeather_nf_dtex.hlsl",
         "zfeather_foa_dtex.hlsl", "zfeather_foa_nf_dtex.hlsl",
         "zfeather_eo_dtex.hlsl", "zfeather_nf_eo_dtex.hlsl", "zfeather_foa_nf_eo_dtex.hlsl"};
     const char *vertex = pass.vertexShader->name;
-    if (std::none_of(std::begin(vertices), std::end(vertices),
-            [vertex](const char *name) { return !std::strcmp(vertex, name); })) return false;
+    if (value.depthFeather)
+    {
+        if (std::none_of(std::begin(vertices), std::end(vertices),
+                [vertex](const char *name) { return !std::strcmp(vertex, name); })) return false;
+    }
+    else if (std::strcmp(vertex, value.flags & 1
+            ? "vertcol_simple_fog_foa.hlsl" : "vertcol_simple_foa_dtex.hlsl")) return false;
     if (std::strstr(vertex, "_foa_")) value.flags |= 4;
     if (std::strstr(vertex, "_eo_")) value.flags |= 8;
     const unsigned count = pass.perPrimArgCount + pass.perObjArgCount + pass.stableArgCount;
@@ -244,10 +273,11 @@ inline bool WebRenderer_GetSoftParticle(const Material *material, unsigned type,
             value.sceneFog = fog = true;
     }
     float vertexFeather[4]{}, pixelFeather[4]{}, eye[4]{};
-    if (!depthSampler || !colorSampler ||
+    if (!colorSampler) return false;
+    if (value.depthFeather && (!depthSampler ||
         !WebRenderer_ShaderConstant(material, pass, 0, 12, vertexFeather) ||
         !WebRenderer_ShaderConstant(material, pass, 6, 5, pixelFeather) ||
-        vertexFeather[0] < 0 || pixelFeather[0] < 0) return false;
+        vertexFeather[0] < 0 || pixelFeather[0] < 0)) return false;
     value.feather[0] = vertexFeather[0]; value.feather[1] = pixelFeather[0];
     if ((value.flags & 4) &&
         (!WebRenderer_ShaderConstant(material, pass, 0, 13, value.falloff) ||

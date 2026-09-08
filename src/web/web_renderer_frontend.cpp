@@ -3791,15 +3791,13 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     }
     g_dobjSubmissionCount = visibleDObjCount;
 
-    // Native scene brushes use the second sceneEntCellBits bank and the same
-    // portal-path inner planes. Compact only records whose canonical link was
-    // rebuilt successfully; malformed or unlinked records retain the existing
-    // conservative BSP-overlap fallback.
-    std::uint32_t visibleBrushCount = 0u;
+    // Native keeps separate sceneBrushVisData for camera and shadow views.
+    // Preserve every submitted brush for light-space selection; camera DPVS
+    // controls only its receiver draws, never whether a closed door casts.
     for (std::uint32_t index = 0u;
          index < g_brushModelSubmissionCount; ++index)
     {
-        const WebRendererBrushModelSubmission &submission =
+        WebRendererBrushModelSubmission &submission =
             g_brushModelSubmissions[index];
         bool culled = false;
         if (submission.model)
@@ -3820,10 +3818,8 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                     submission.model->writable.mins,
                     submission.model->writable.maxs));
         }
-        if (!culled)
-            g_brushModelSubmissions[visibleBrushCount++] = submission;
+        submission.cameraVisible = !culled;
     }
-    g_brushModelSubmissionCount = visibleBrushCount;
 
     WebRendererDObjSceneCommand dynamicCommand;
 #if KISAK_WEB_DIAGNOSTICS
@@ -3880,7 +3876,6 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         for (std::uint32_t dynEntId = 0u;
              dynEntId < dynamicBrushCount; ++dynEntId)
         {
-            if (!s_world.dpvsDyn.dynEntVisData[1][0][dynEntId]) continue;
             const DynEntityClient *client = DynEnt_GetClientEntity(
                 static_cast<std::uint16_t>(dynEntId), DYNENT_DRAW_BRUSH);
             const DynEntityDef *definition = DynEnt_GetEntityDef(
@@ -3896,6 +3891,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                 continue;
             }
             WebRendererBrushModelSubmission submission{};
+            submission.cameraVisible = s_world.dpvsDyn.dynEntVisData[1][0][dynEntId] != 0u;
             submission.model = &s_world.models[definition->brushModel];
             submission.entityNumber = static_cast<std::uint16_t>(dynEntId);
             submission.shadowEntityKind =
@@ -4018,6 +4014,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             std::memcpy(instance.origin, submission.origin, sizeof(instance.origin));
             instance.shadowEntityKind = submission.shadowEntityKind;
             instance.shadowEntityId = submission.entityNumber;
+            instance.cameraVisible = submission.cameraVisible;
             if (!WebRenderer_CopyBrushReceiverBounds(*submission.model, instance))
             {
                 Com_Error(ERR_DROP, "R_RenderScene brush receiver bounds are invalid");
@@ -4030,7 +4027,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                 !R_BoundsTouchVisibleCell(s_world,
                     g_cameraDpvs.cellVisibleBits,
                     instance.receiverMins, instance.receiverMaxs)))
-                continue;
+                instance.cameraVisible = false;
             brushInstances.push_back(instance);
             brushSurfaceCount += resource.surfaces;
             brushBatchCount += resource.batches;

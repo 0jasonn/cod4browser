@@ -1,4 +1,5 @@
 #include <web/web_renderer_fx_model_scene.h>
+#include <web/web_renderer_material_lookup.h>
 
 #include <gfx_d3d/material_types.h>
 #include <xanim/xmodel_types.h>
@@ -192,7 +193,8 @@ WebRendererWorldBatchDesc MakeDraw(
     draw.technique = hasTechnique && draw.baseImage
         ? WebRendererWorldTechnique::BaseTexture
         : WebRendererWorldTechnique::BackendFallback;
-    if (submission.modelLightingEnabled)
+    if (submission.modelLightingEnabled &&
+        WebRenderer_UsesModelLighting(material, draw.techniqueType))
     {
         draw.lightingMode = WebRendererWorldLightingMode::ModelLightGrid;
         std::copy_n(submission.modelLightingCoordinates, 3u,

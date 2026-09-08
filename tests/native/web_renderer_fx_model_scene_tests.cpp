@@ -57,6 +57,7 @@ struct Fixture
     GfxImage image{};
     MaterialTextureDef texture{};
     MaterialTechnique technique{};
+    MaterialShaderArgument lightingSampler{};
     MaterialTechnique shadowTechnique{};
     MaterialTechniqueSet techniqueSet{};
     GfxStateBits stateBits[2]{};
@@ -86,6 +87,10 @@ struct Fixture
         texture.samplerState = 0x42u;
         texture.u.image = &image;
         technique.passCount = 1u;
+        lightingSampler.type = 4;
+        lightingSampler.u.codeSampler = static_cast<MaterialTextureSource>(3);
+        technique.passArray[0].stableArgCount = 1;
+        technique.passArray[0].args = &lightingSampler;
         techniqueSet.techniques[TECHNIQUE_LIT_INDEX] = &technique;
         stateBits[0].loadBits[0] = 0x18008800u;
         stateBits[0].loadBits[1] = 0x0000000du;
@@ -214,6 +219,11 @@ void TestIdentityAndCanonicalSurfaceData()
     assert(command.batches[0].modelLightingCoordinates[0] == 0.25f);
     assert(command.batches[0].modelLightingCoordinates[1] == 0.5f);
     assert(command.batches[0].modelLightingCoordinates[2] == 0.75f);
+
+    fixture.technique.passArray[0].stableArgCount = 0;
+    assert(WebRenderer_BuildFxModelSceneCommand(
+        &dynamicSubmission, 1u, command) == WebRendererFxModelSceneResult::Success);
+    assert(command.batches[0].lightingMode != WebRendererWorldLightingMode::ModelLightGrid);
 
     fixture.material.textureTable = nullptr;
     fixture.material.textureCount = 0u;

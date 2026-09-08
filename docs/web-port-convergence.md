@@ -45,7 +45,7 @@ oracle.
 | Display modes/restart | Platform `web_display.cpp` registers canonical resolution/refresh enums and owns canvas/device sizing. Shared client/UI viewport helpers and `CG_InitViewDimensions` consume native `vidConfig_t`. Shared `CL_Vid_Restart_f` keeps the existing process-owned DB executor; browser registration recreates WebGL resources. Shipped Apply, persistence and native in-game save/restart/load pass in Chrome; mission state stays in Kisak. See [evidence](evidence/display-options-2026-09-03.md). |
 | Saved-screen effects | Canonical cgame owns flashbang/shellshock lifetime and intensities. Ordered renderer commands carry capture, native timer slots and packed colors into the WebGL2 UI pass; a GPU-only feedback texture is platform-owned and invalidated on resize/context loss. Synthetic pixels and a loaded retail material/composite pass are verified; authored effect fidelity remains unverified. See [evidence](evidence/saved-screen-2026-09-02.md). |
 | FX lighting queries | Canonical `FX_CalculatePackedLighting` now receives world light-grid/sun samples through the existing renderer lighting helper, following native average-query selection and quantization. Host-native/Wasm checks pass; original-game visual comparison is pending. This adapted query retires with the portable grid helper when native backend compilation replaces it. See [evidence](evidence/average-lighting-2026-09-02.md). |
-| Transient FX lights | `r_dynamiclights_core.h` shares canonical `GfxLight` construction, importance partitioning and projected tangent-sphere scissor calculation between native and web callers. FX owns emission/lifetime; the frontend clears per-scene submissions, applies camera visibility and `r_dlightLimit`, preserves added-light-zero spot identity and near-plane bias, then passes selected `GfxLight` records to WebGL2. The backend uses retained images, canonical material technique/state tables and destination-alpha coverage. A shadow-capable first spot competes with primary lights for the four existing shadow maps and its dynamic pass samples that map. BSP caster ranges use exact shifted light planes without camera visibility; static casters reuse the canonical camera/light receiver mask; dynamic model and brush casters reuse their exact receiver predicate and DObj exclusions. Static/entity child dvars independently gate those families; sun matrices and authored primary-spot lists remain separate. Dynamic DObj/DynEntity spheres and brush boxes require a portal-visible cell and native camera-plane acceptance before assembly, animated DObjs retest their post-pose box before skinning, and FX models use native direct frustum culling. One per-light receiver list globally follows native reverse material/surface-key order and excludes nonreceiver scene kinds. Synthetic pixels and owned Killhouse shadow-toggle/clear/context-recovery checks pass. Equal-key object-ID order and authored-effect fidelity remain open. See [evidence](evidence/transient-lights-2026-09-02.md). |
+| Transient FX lights | `r_dynamiclights_core.h` shares canonical `GfxLight` construction, importance partitioning and projected tangent-sphere scissor calculation between native and web callers. FX owns emission/lifetime; the frontend clears per-scene submissions, applies camera visibility and `r_dlightLimit`, preserves added-light-zero spot identity and near-plane bias, then passes selected `GfxLight` records to WebGL2. The backend uses retained images, canonical material technique/state tables and destination-alpha coverage. A shadow-capable first spot competes with primary lights for the four existing shadow maps and its dynamic pass samples that map. BSP caster ranges use exact shifted light planes without camera visibility; static casters reuse the canonical camera/light receiver mask; dynamic model and brush casters reuse their exact receiver predicate and DObj exclusions. Static/entity child dvars independently gate those families; sun matrices and authored primary-spot lists remain separate. Dynamic DObj/DynEntity models require a portal-visible cell and native camera-plane acceptance before assembly, animated DObjs retest their post-pose box before skinning, and FX models use native direct frustum culling. Scene/DynEntity brush camera visibility filters receiver draws while their submitted geometry remains available to independent light-space caster selection. One per-light receiver list globally follows native reverse material/surface-key order and excludes nonreceiver scene kinds. Synthetic pixels and owned Killhouse shadow-toggle/clear/context-recovery checks pass. Equal-key object-ID order and authored-effect fidelity remain open. See [evidence](evidence/transient-lights-2026-09-02.md). |
 | Input | Browser events enter canonical key/character/mouse queues, bindings, native paste/edit fields, usercmd creation and movement/weapon code. |
 | Audio | Canonical mixer and OpenAL-facing state feed a browser Web Audio device boundary. Both three-band EQ stages cross that boundary; SND retains parameter/entchannel ownership, while the device computes IIR coefficients and owns filter nodes. Canonical room/wet changes now reach the existing OpenAL reverb DSP in an AudioWorklet with shared native presets. Native/Wasm differential and browser PCM routing tests pass; authored campaign transitions, callback cost and Steam comparison remain open. See [EQ evidence](evidence/browser-eq-2026-09-02.md) and [reverb scope/evidence](browser-reverb.md). |
 | Save/persistence | Canonical game serialization, shared `ui_savegames.cpp`, feeders, menu scripts, Continue, and deletion own saves and gameplay state. Bounded header metadata supplies the Date column and dynamic description. Save commits request 512x512 JPEGs through native shared resampling; the Worker codec owns only temporary pixels/bytes. C++ checks save identity before persistence and publishes one canonical raw `Material`/`GfxImage`, using existing backend UI texture retention/recovery. Captures wait for a frame of the matching map and cancel on unload; shutdown drains admitted codec jobs before closing files. Native decoding uses reserved `rgp.rawImage`, canonical texture accounting and the existing D3DX dependency. Owned Airplane start-level/save capture, reload and menu display plus native decoder/device checks are verified; complete native menu and Steam comparison remain open. See [latest evidence](evidence/save-startup-native-2026-09-02.md). |
@@ -60,6 +60,20 @@ brush geometry in the logical budget. AC130 exceeded the old 250k/500k
 vertex/index capacity; the bounded 500k/1m capacity retains that accounting
 and admits the authored scene. One logical command is bounded at 40 MB,
 excluding other renderer resources and staging/recovery copies.
+
+Moving brushes now carry a per-view camera visibility bit alongside their
+canonical placement. Like native `sceneBrushVisData` camera/shadow slots in
+`r_dpvs.cpp`, camera rejection no longer removes the brush from shadow
+submission. The backend filters camera ordering, visible-light selection and
+transient receiver draws with that bit; sun/spot caster bounds and primary-light
+membership continue to select from all submitted brushes. This applies to
+scene entities and DynEntity brushes, reuses retained geometry, and preserves
+transient receiver ordering. It adds no engine entity or light representation.
+The motivating Killhouse defect was the closed entry door disappearing from
+sun shadows when the camera turned away, letting a bright patch through onto
+the floor. The optional `@retail-shadows` check samples that floor with the door
+inside/outside the view and uses `r_drawBModels 0` as the control; it does not
+move the door or change scripts, lights, shadow budgets or baked visibility.
 
 Sun-depth range joining preserves original triangle order and membership without
 using camera culling. Texture reuse is bounded and resets each frame/pass; it
@@ -210,6 +224,45 @@ storage, target lifetime and WebGL event registration remain platform work.
 The actual loss extension exposed and verifies a repaired OffscreenCanvas event
 mapping; prior directly invoked handlers proved reconstruction only.
 
+The same particle-material path now handles the non-feathered
+`vertcol_simple_foa_dtex.hlsl` and fog variant with their additive pixel shaders.
+Their owned native programs apply squared view/normal angle, authored falloff
+and begin/end colors, then premultiply texture alpha. Previously these draws
+used a plain texture, losing the authored angle response. They share the existing angle arithmetic but
+request no FloatZ prepass and remain independent of `r_zFeather`. Native/Wasm
+binding checks and synthetic browser pixels cover intensity, alpha, fog and
+context recovery. The draw-state cache now keys canonical material and technique
+identity as well as render bits. Equal blend/depth bits could incorrectly reuse
+another material's falloff, feather and eye-offset arguments. Native/Wasm
+state-transition tests cover distinct materials with identical render bits and
+depth-hack transitions. An offscreen D3D9 comparison executes the owned retail
+vertex programs and additive pixel shader with captured browser inputs. The
+isolated lensflare and floodlight layers agree with WebGL within sampling
+differences (mean absolute RGB error below 0.1/255 over the frame); this verifies
+shader translation, not the complete native scene inputs. A browser draw trace
+also confirms that subsequent scene draws do not overwrite the sampled halo.
+Read-only inspection of the live retail backend and its glow predicate confirms
+glow and depth of field are disabled in that reference session. The owned
+Killhouse regression covers the off-camera door shadow and unlit lamp face.
+
+A scripted windowed retail D3D9 capture, replayed headlessly at matched near/far
+camera positions, identifies the additional lamp halo as canonical
+`dust/light_shaft_dust_med` sprites using `gfx_fog_smog_afm_add`. Their feather,
+fog and additive shader arithmetic agrees with the existing browser path.
+The missing contribution originated before rendering: `Scr_TriggerFX` aliased
+Wasm's 16-byte `long double` through `double*`, converting the authored -15-second
+prewarm time to zero and leaving `CG_Fx` untriggered. Typed shared conversion
+restores -15000 milliseconds and real EffectsCore submission. The restored FX
+also exposed a 15-bit CRT assumption in effect seed generation; wider `rand()`
+results now use the existing native bucket conversion, and time-based seed
+arithmetic wraps explicitly as unsigned. Native/Wasm tests cover trigger rounding,
+every native random bucket, wider-CRT boundaries and negative-time seeds.
+These are shared Kisak correctness fixes, with no browser-owned effect model.
+The owned browser regression compares frozen dust on/off at near/far views to
+check the recovered close-range brightness. Capture files and owned shader/asset
+data remain private under ignored `build/`; animated particle phase and complete
+frame pixel parity are not established by this comparison.
+
 The recognized distortion pass reads canonical scale, sampler bindings and
 technique flags, projects the tangent/normal basis and rejects offsets crossing
 foreground depth. A renderer-owned post-lighting colour snapshot supplies native
@@ -318,6 +371,16 @@ Validation passed four native renderer test executables, 10 Chromium smoke
 tests, 60 remainder tests (13 optional skips), the owned-data HUD/dvar/booth/
 weapon-wall regression, and production quit/restart. Diagnostic and production
 Release builds both completed.
+
+Model-grid shading now follows the selected material pass's canonical
+`TEXTURE_SRC_CODE_MODEL_LIGHTING` binding for static, DObj and FX/DynEntity
+models. A lit technique slot alone does not imply a lit shader: Killhouse's
+industrial lamp uses `vertcol_simple_fog.hlsl` in its instanced lit slots.
+Its owned D3D9 program outputs texture times vertex color followed by fog;
+applying the model grid darkened its emissive face. Native/Wasm regressions
+exercise the binding decision, and an owned Chrome capture checks the bright
+lamp face and its independence from primary-light color scales. This corrects
+material shading without changing authored FX or global bloom settings.
 
 Spot-map selection now shares `GfxShadowedLightHistory` and the native
 retirement/reselection arithmetic in `r_shadowed_light_history.h`. The four

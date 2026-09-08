@@ -119,6 +119,12 @@ test("authored soft-particle depth, variants and recovery preserve pixels", asyn
     await check(13, [64, 128, 192, 64]);
     await check(14, [7, 14, 21, 143]);
     await check(15, [64, 128, 192, 16]);
+    // Native angle falloff: f = cos(theta)^2, beginColor = 2, endColor = 0.
+    // These non-feathered additive shaders output texture * (2*f*f) * alpha.
+    await check(16, [14, 28, 43, 255]);
+    await check(17, [101, 202, 255, 255]);
+    await check(18, [7, 14, 21, 128]);
+    await check(19, [20, 40, 60, 255]);
     for (const [scenario, expected] of [[0, 3], [1, 1], [2, -3], [10, 3]]) {
         const bits = await sample(scenario, 2);
         const bytes = new ArrayBuffer(4), view = new DataView(bytes);
@@ -128,11 +134,13 @@ test("authored soft-particle depth, variants and recovery preserve pixels", asyn
     await page.evaluate(() => globalThis.__KISAKCOD_WEB__.submitCanonicalCommand("r_zFeather 0"));
     await expect.poll(() => sample(0, 1)).toBe(255);
     await check(3, [64, 128, 192, 255]);
+    await check(16, [14, 28, 43, 255]);
     await call("_KisakWeb_TestLoseWebGLContext");
     await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state)).toBe("renderer-lost");
     await call("_KisakWeb_TestRestoreWebGLContext");
     await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state)).toBe("running");
     await check(0, [64, 128, 192, 255]);
+    await check(17, [101, 202, 255, 255]);
     await page.evaluate(() => globalThis.__KISAKCOD_WEB__.submitCanonicalCommand("r_zFeather 1"));
     await expect.poll(() => sample(0, 1)).toBe(128);
     await check(11, [64, 128, 192, 128]);

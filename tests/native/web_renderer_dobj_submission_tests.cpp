@@ -397,6 +397,11 @@ void TestCanonicalPoseLightingHandleReusesExactOrigin()
     // used by another, visible DObj in the same command.
     MaterialTechnique lit{};
     lit.passCount = 1u;
+    MaterialShaderArgument lightingSampler{};
+    lightingSampler.type = 4;
+    lightingSampler.u.codeSampler = static_cast<MaterialTextureSource>(3);
+    lit.passArray[0].stableArgCount = 1;
+    lit.passArray[0].args = &lightingSampler;
     MaterialTechniqueSet techniqueSet{};
     techniqueSet.techniques[7] = &lit;
     GfxStateBits stateBits{};
@@ -437,6 +442,13 @@ void TestCanonicalPoseLightingHandleReusesExactOrigin()
         assert(!command.modelLightingAtlas.pixels.empty());
         assert(command.batches[0].lightingMode ==
             WebRendererWorldLightingMode::ModelLightGrid);
+        lit.passArray[0].stableArgCount = 0;
+        assert(WebRenderer_BuildDObjSceneCommand(
+            submissions, 2u, command, &lodParms, &fixture.grid, nullptr, nullptr,
+            nullptr, &cameraPlane, 1) ==
+            WebRendererDObjSceneResult::Success);
+        assert(command.batches[0].lightingMode != WebRendererWorldLightingMode::ModelLightGrid);
+        lit.passArray[0].stableArgCount = 1;
     }
     WebRenderer_ReleaseDObjSceneScratch();
 }

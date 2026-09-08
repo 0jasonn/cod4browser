@@ -7796,8 +7796,6 @@ skipAxes:
 void Scr_TriggerFX()
 {
     gentity_s *Entity; // r31
-    long double v1; // fp2
-    long double v2; // fp2
 
     if (!Scr_GetNumParam() || Scr_GetNumParam() > 2)
         Scr_Error("Incorrect number of parameters");
@@ -7808,9 +7806,7 @@ void Scr_TriggerFX()
         Scr_ParamError(0, "entity wasn't created with 'newFx'");
     if (Scr_GetNumParam() == 2)
     {
-        *(double *)&v1 = (float)((float)(Scr_GetFloat(1) * (float)1000.0) + (float)0.5);
-        v2 = floor(v1);
-        Entity->s.time2 = (int)(float)*(double *)&v2;
+        Entity->s.time2 = GScr_FxTriggerTime(Scr_GetFloat(1));
     }
     else
     {

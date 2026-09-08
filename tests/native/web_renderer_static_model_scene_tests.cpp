@@ -191,6 +191,7 @@ struct Fixture
     GfxImage image{};
     MaterialTextureDef texture{};
     MaterialTechnique technique{};
+    MaterialShaderArgument lightingSampler{};
     MaterialTechniqueSet techniqueSet{};
     GfxStateBits stateBits[1]{};
     Material material{};
@@ -219,6 +220,10 @@ struct Fixture
         texture.samplerState = 0x42u;
         texture.u.image = &image;
         technique.passCount = 1u;
+        lightingSampler.type = 4;
+        lightingSampler.u.codeSampler = static_cast<MaterialTextureSource>(3);
+        technique.passArray[0].stableArgCount = 1;
+        technique.passArray[0].args = &lightingSampler;
         techniqueSet.techniques[TECHNIQUE_LIT_INDEX] = &technique;
         stateBits[0].loadBits[0] = 0x18008800u;
         stateBits[0].loadBits[1] = 0x0000000du;
@@ -1089,11 +1094,37 @@ void TestAmbientProbeShaderIdentitySurvivesPortableBoundary()
         "lp_amb_t0c0_sm3.hlsl") == 0);
 }
 
+void TestModelLightingFollowsSelectedPassBinding()
+{
+    Fixture fixture;
+    WebRendererStaticModelSceneCommand command;
+    MaterialTechniqueSet remapped{};
+    fixture.techniqueSet.remappedTechniqueSet = &remapped;
+    for (const unsigned slot : {4u, 5u, 7u, 14u, 16u, 17u, 19u})
+    {
+        remapped = {};
+        remapped.techniques[slot] = &fixture.technique;
+        fixture.material.stateBitsEntry[slot] = 0;
+        fixture.instances[0].primaryLightIndex = fixture.instances[1].primaryLightIndex = 1;
+        std::array<WebRendererPrimaryLightDesc, 2> lights{};
+        lights[1].type = slot == 17 ? 2 : slot == 19 ? 3 : 1;
+        for (const unsigned sampler : {3u, 1u})
+        {
+            fixture.lightingSampler.u.codeSampler = static_cast<MaterialTextureSource>(sampler);
+            assert(WebRenderer_BuildStaticModelSceneCommand(fixture.world,
+                command, nullptr, nullptr, lights) == WebRendererStaticModelSceneResult::Success);
+            assert(command.batches[0].draw.techniqueType == slot);
+            assert((command.batches[0].draw.lightingMode ==
+                WebRendererWorldLightingMode::ModelLightGrid) == (sampler == 3));
+        }
+    }
+}
+
 void TestCanonicalStaticModelInstancedTechniqueSelection()
 {
     Fixture fixture;
-    MaterialTechnique instanced{};
-    MaterialTechnique instancedSun{};
+    MaterialTechnique instanced = fixture.technique;
+    MaterialTechnique instancedSun = fixture.technique;
     MaterialTechnique instancedSunShadow{};
     MaterialPixelShader ambientPixel{};
     MaterialPixelShader sunPixel{};
@@ -1379,6 +1410,7 @@ int main() try
     TestCanonicalInstanceIndicesSurviveRegroupingAndLods();
     TestAmbientProbeShaderIdentitySurvivesPortableBoundary();
     TestCanonicalStaticModelInstancedTechniqueSelection();
+    TestModelLightingFollowsSelectedPassBinding();
     TestNamedDetailMapAndScaleSurvivePortableBoundary();
     TestLightingAtlasCountsOnlySubmittedCanonicalPlacements();
     TestNativeStaticModelCardinalityIsAccepted();
