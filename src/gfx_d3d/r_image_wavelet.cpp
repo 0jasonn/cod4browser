@@ -14804,6 +14804,13 @@ Error DecodeWaveletPayloadRgba8(
             std::numeric_limits<std::size_t>::max() / height)
         return Error::DecodeUnsupportedDimensions;
     if (firstMip > 15u) return Error::DecodeInvalidLayout;
+    // Native wavelet expansion writes complete 2x2 blocks from each parent
+    // texel. Odd two-dimensional levels have no matching parent/output extent.
+    // One-dimensional levels are raw, so rectangular non-power-of-two images
+    // remain valid when every expanded level has even dimensions.
+    for (unsigned mip = firstMip; (width >> mip) > 1 && (height >> mip) > 1; ++mip)
+        if (((width >> mip) & 1u) || ((height >> mip) & 1u))
+            return Error::DecodeUnsupportedDimensions;
     pixelCount = static_cast<std::size_t>(std::max<unsigned>(width >> firstMip, 1u)) *
         std::max<unsigned>(height >> firstMip, 1u);
     if (pixelCount > MAX_DECODED_RGBA8_BYTES / 4u ||

@@ -436,6 +436,36 @@ void TestWaveletArgbDecodeAndBounds()
             image.pixels == expected.pixels,
         "truncated wavelet failure leaves the destination unchanged");
 
+    // Synthetic sanitizer regressions: 4x6 reaches an odd 2x3 parent;
+    // 1060x1280 reaches an odd width deeper in the pyramid.
+    for (const auto dimensions : {std::pair{4u, 6u}, std::pair{1060u, 1280u}}) {
+        Bytes invalid = MakeIwi(kisak::iwi::FORMAT_WAVELET_L8, 0,
+            dimensions.first, dimensions.second, 1, 32);
+        for (unsigned mip : {0u, 1u}) {
+            RequireError(kisak::iwi::DecodeRgba8(invalid, image, mip),
+                Error::DecodeUnsupportedDimensions,
+                "reject wavelet levels without complete 2x2 parent expansion");
+            Require(image.width == expected.width && image.height == expected.height &&
+                    image.pixels == expected.pixels,
+                "invalid wavelet geometry leaves the destination unchanged");
+        }
+    }
+
+    // Non-power-of-two dimensions are legal when the only expanded level is
+    // even: 6x2 follows raw 1x1, 1x1 and 3x1 levels. Zero Huffman coefficients
+    // preserve the constant 100 parent values.
+    Bytes rectangular = MakeIwi(kisak::iwi::FORMAT_WAVELET_L8, 0, 6, 2, 1, 9);
+    const Bytes rectangularPayload{100, 100, 100, 100, 100, 0xdc, 0x1d, 0, 0};
+    std::copy(rectangularPayload.begin(), rectangularPayload.end(),
+        rectangular.begin() + kisak::iwi::HEADER_SIZE);
+    RequireError(kisak::iwi::DecodeRgba8(rectangular, image), Error::None,
+        "retain valid rectangular wavelet expansion");
+    Require(image.width == 6 && image.height == 2, "rectangular wavelet dimensions");
+    for (unsigned pixel = 0; pixel < image.pixels.size(); pixel += 4)
+        Require(image.pixels[pixel] == 100 && image.pixels[pixel + 1] == 100 &&
+                image.pixels[pixel + 2] == 100 && image.pixels[pixel + 3] == 255,
+            "rectangular wavelet parent values");
+
     // Native alpha/luminance Huffman symbol 1 encodes a zero coefficient.
     // A constant pyramid needs no parent delta and no even/odd parity bit.
     Bytes pyramid{100};
