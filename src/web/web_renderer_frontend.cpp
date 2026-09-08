@@ -54,6 +54,7 @@
 #include <web/web_renderer_image_reference.h>
 #include <web/web_renderer_code_mesh.h>
 #include <web/web_renderer_dobj_scene.h>
+#include <web/web_renderer_material_lookup.h>
 #include <web/web_renderer_fx_model_scene.h>
 #include <web/web_renderer_lighting.h>
 #include <web/web_renderer_mark_mesh.h>
@@ -1667,8 +1668,17 @@ extern "C" EMSCRIPTEN_KEEPALIVE double KisakWeb_TestRendererDvarState(int field)
         });
     case 25: case 26: case 27:
         for (unsigned i = 0; i < g_dobjSubmissionCount; ++i)
-            if (g_dobjSubmissions[i].renderFlags & GFX_RENDERFX_PICKUP)
-                return g_dobjSubmissions[i].pose->origin[field - 25];
+        {
+            const auto &submission = g_dobjSubmissions[i];
+            for (unsigned m = 0; m < DObjGetNumModels(submission.obj); ++m)
+            {
+                const auto *model = DObjGetModel(submission.obj, m);
+                for (unsigned s = 0; model && model->materialHandles && s < model->numsurfs; ++s)
+                    if (WebRenderer_IsObjectiveMaterial(
+                        ResolveRendererMaterial(model->materialHandles[s]), 7u))
+                        return submission.pose->origin[field - 25];
+            }
+        }
         return -1;
     case 28: return sm_sunEnable->current.enabled;
     case 29: return sm_enable->current.enabled;

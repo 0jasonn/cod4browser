@@ -131,16 +131,24 @@ platform makes that behavior impossible.
 | Scene visibility | Camera masks honor `r_drawWorld`/`r_drawSModels`, including shadow casters. Native submission gates restore `r_drawEntities`/`r_drawBModels`; `r_drawXModels` controls rigid scene models, FX models and DynEntity models, preserving animated DObjs. `r_drawDecals` also gates generated marks. `r_drawWater` freezes animation, matching its native meaning. |
 | Sun effects | `r_drawSun` gates sprite/flare submission. `r_sun_from_dvars` calls shared `R_SetSunFromDvars`, enabling its 21 sprite/flare/blind/glare/material/direction controls with native units and conversions. |
 | Sun lighting and shadows | The frontend honors both `sm_enable` and `sm_sunEnable` while retaining the canonical sun direction/color when maps are disabled. World and moving-brush sun materials use authored primary-lightmap visibility without a shadow map. Their slope-space normals and SM3 direct specular lobe follow the locally inspected `lm_sun_*` / `lm_hsm_sun_*` shader arithmetic, including `r_specularColorScale`; model DXT5nm decoding remains separate. |
-| Pickup sheen | Shared `CG_Item` marks pickup submissions with `GFX_RENDERFX_PICKUP`; weapon names/materials do not determine eligibility. WebGL2 adds a periodic warm sheen to those model fragments after lighting and before fog, preserving texture contrast, depth/alpha and clearing the uniform after each draw. Canonical scene time drives the pulse; held/decorative instances sharing the material are unaffected. The user-provided 2026-09-05 reference clip has peaks at approximately 0.40, 1.43 and 2.43 seconds and near-additive RGB changes; a continuous 1 Hz cosine replaces the guessed 2.5-second pulse/hold and white view-angle blend. This is a reference-calibrated browser presentation effect, not recovered original-game shader arithmetic. Native D3D ignores the metadata bit. |
+| Objective sheen | Authored companion XModels and their canonical `objective_base_dtex.hlsl` / `objective_base.hlsl` material passes own the highlight. WebGL2 follows recovered retail bytecode: normalized geometric view-normal Z shifts the game-time sine, texture RGB controls intensity, and texture alpha drives the authored SRCALPHA/ONE blend. The pass bypasses lighting and fog. The guessed flat pickup pulse and browser-only cgame flag are retired; shared `CG_Item` and native submission return to upstream behavior. |
 | `ui_sp_unlock` | Deliberate stock-retail dangling menu reference. Native COD4 1.7 emits the same `openmenuondvar` warning; no guessed browser dvar is registered. |
 | D3D9/Win32 renderer controls | Native-only where they configure APIs absent from WebGL2; browser renderer capability controls remain platform-owned and are not aliases pretending to be native dvars. |
 | Miles, Bink, and Steam controls | Native DLL integrations remain unavailable. Web Audio and the source-built FFmpeg codec provide device behavior behind existing sound/cinematic APIs; Steam integration remains omitted. |
 | Multiplayer and dedicated-server controls | Not compiled into the initial offline SP target. They return only with the documented browser transport/server milestone, not as inert SP dvars. |
 
-The owned Killhouse `@retail-pickup` check reaches the real `CG_Item` path and
-captures the same rifle in quiet, rising, bright and quiet-again phases. The sheen is
-visible on the rifle alone; its table retains its normal shading. Portable DObj
-checks also distinguish instances sharing one material and check pulse timing.
+The owned Killhouse `@retail-pickup` check captures the real objective companion
+model at four animation phases. Read-only retail inspection confirms that
+`weapon_g36_obj` shares the base rifle's geometry while binding objective
+materials. A retail D3D9 draw capture establishes its positive camera-forward
+normal convention and blend state. Synthetic native/Wasm metadata checks reject
+incorrect shader bindings; browser pixels compare controlled normals, texture
+alpha and animation phases with D3D9 executing the recovered pixel program.
+World and UI material state follows `R_ChangeState_0`: an omitted separate
+alpha operation inherits the RGB blend equation and factors, including this
+objective pass. Its eight synthetic RGBA comparisons allow one UNORM8 step
+of platform rounding and repeat after actual WebGL context loss and recovery.
+Owned programs, videos and model data remain private under ignored `build/`.
 
 The owned Killhouse `@retail-dvars` check exercises FPS/label and material-HUD
 on/off submission, visible world/static/entity/rigid-model counts and shared sun
@@ -462,12 +470,18 @@ lower renderer-frontend time. A GPU rigid-placement candidate was rejected
 because it changed shadow partition work and raised total time. Static-model
 camera culling and independent sun/spot shadow selection remain intact.
 
-Dynamic camera submission now mirrors Kisak's material draw-surface ordering
-inside proven-safe opaque runs. Blended, depth-equal/disabled, no-color, FX,
-sun, and other state-sensitive batches remain append-order anchors, and shadow
-draw order is untouched. The platform retains one numeric key per batch and
-one 32-bit camera-order index per dynamic draw; no engine identity or geometry
-copy is added. See
+Static camera batches and contiguous dynamic DObj/DynEntity/brush runs follow
+the canonical camera region and material draw-surface key, including blended
+model surfaces. Treating every translucent surface as an append-order anchor
+drew Killhouse's red range lenses before their opaque housings, which then
+painted them black. Native `R_AddDObjSurfacesCamera` and
+`R_SortAllStaticModelSurfacesCamera` establish the region/key ordering;
+`mc/mtl_emergencylight` remains its authored unlit, alpha-blended fog pass.
+The owned `@retail-range-lights` check samples all eighteen lens faces in a
+fixed view, covering the three dynamic and fifteen static indicators.
+Non-model FX/sun anchors and depth-hacked camera passes remain separate.
+The platform retains one numeric key per batch and one 32-bit camera-order
+index per dynamic draw; no engine identity or geometry copy is added. See
 [the dynamic order evidence](evidence/dynamic-opaque-sort-c8c4f335.md).
 
 World camera visibility now extends that same canonical call through AABB

@@ -467,7 +467,7 @@ async function call(page, name, ...arguments_)
     });
 }
 
-test("pickup weapons carry a pulsing warm sheen", { tag: "@retail-pickup" },
+test("authored weapon objective models render their animated sheen", { tag: "@retail-pickup" },
     async ({ retailPage: page }, testInfo) => {
         test.setTimeout(360_000);
         await page.addInitScript(() => {
@@ -503,9 +503,9 @@ test("pickup weapons carry a pulsing warm sheen", { tag: "@retail-pickup" },
         const origin = [];
         for (let axis = 0; axis < 3; ++axis)
             origin.push(await call(page, "_KisakWeb_TestRendererDvarState", 25 + axis));
-        await command(`cg_ufo; cg_setviewpos ${origin[0] - 70} ${origin[1]} ${origin[2] - 10} 0 35`);
+        await command(`cg_ufo; cg_setviewpos ${origin[0] + 10} ${origin[1] - 45} ${origin[2] - 34} 90 32`);
         const frames = () => page.evaluate(() => globalThis.__objectiveFrames);
-        for (const [time, name] of [[0, "quiet"], [250, "rising"], [500, "sheen"], [1000, "quiet-again"]]) {
+        for (const [time, name] of [[0, "phase-zero"], [250, "phase-quarter"], [500, "phase-half"], [1000, "phase-repeat"]]) {
             await call(page, "_KisakWeb_TestPickupSheen", time);
             const before = await frames();
             await expect.poll(frames).toBeGreaterThan(before + 2);
@@ -513,6 +513,67 @@ test("pickup weapons carry a pulsing warm sheen", { tag: "@retail-pickup" },
             await page.locator("#game-canvas").screenshot({ path: testInfo.outputPath(`${name}.png`) });
         }
         await call(page, "_KisakWeb_TestPickupSheen", -1);
+    });
+
+test("range indicator lenses remain red over their opaque housings", { tag: "@retail-range-lights" },
+    async ({ retailPage: page }, testInfo) => {
+        test.setTimeout(360_000);
+        await page.addInitScript(() => {
+            globalThis.__rangeReady = false;
+            globalThis.__rangeFrames = 0;
+            addEventListener("kisakcod:renderer-scene-frame", ({ detail }) => {
+                ++globalThis.__rangeFrames;
+                if (detail.geometrySubmitted && detail.worldName?.includes("killhouse"))
+                    globalThis.__rangeReady = true;
+            });
+        });
+        await page.goto("/");
+        const chooser = page.waitForEvent("filechooser");
+        await page.locator("#portable-install-button").click();
+        await (await chooser).setFiles(retailRoot);
+        await expect.poll(() => page.evaluate(() =>
+            globalThis.__KISAKCOD_WEB__?.module?.filesystemState),
+        { timeout: 300_000 }).toBe("mounted");
+        await page.locator("#game-canvas").click({ position: { x: 5, y: 5 } });
+        const command = text => page.evaluate(text =>
+            globalThis.__KISAKCOD_WEB__.submitCanonicalCommand(text), text);
+        await command("devmap killhouse");
+        await expect.poll(() => page.evaluate(() => globalThis.__rangeReady),
+            { timeout: 300_000 }).toBe(true);
+        await command("timescale 10");
+        await expect.poll(() => call(page, "_KisakWeb_TestGameplayState", 24, 0),
+            { timeout: 120_000 }).toBeGreaterThan(60_000);
+        await command("timescale 1; cg_ufo; cg_draw2D 0; cg_setviewpos 3769 -600 5 90 0; cg_fov 65");
+        await page.setViewportSize({ width: 1024, height: 768 });
+        await page.evaluate(() => {
+            document.body.classList.add("renderer-only");
+            document.querySelector(".asset-panel").style.display = "none";
+        });
+        const before = await page.evaluate(() => globalThis.__rangeFrames);
+        await expect.poll(() => page.evaluate(() => globalThis.__rangeFrames)).toBeGreaterThan(before + 3);
+        const png = await page.locator("#game-canvas").screenshot({ path: testInfo.outputPath("range-lights.png") });
+        const lenses = await page.evaluate(async encoded => {
+            const bitmap = await createImageBitmap(new Blob([
+                Uint8Array.from(atob(encoded), c => c.charCodeAt(0)),
+            ], { type: "image/png" }));
+            const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+            const context = canvas.getContext("2d");
+            context.drawImage(bitmap, 0, 0);
+            bitmap.close();
+            // Centers of the 18 authored lenses in this fixed camera view.
+            return [327,350,375,405,428,453,480,502,527,558,583,609,636,658,682,714,738,762]
+                .map(x => {
+                    const pixels = context.getImageData(x - 1, 299, 3, 3).data;
+                    const rgb = [0, 0, 0];
+                    for (let i = 0; i < pixels.length; i += 4)
+                        rgb.forEach((_, c) => rgb[c] += pixels[i + c] / 9);
+                    return rgb;
+                });
+        }, png.toString("base64"));
+        for (const [i, [r, g, b]] of lenses.entries()) {
+            expect(r, `range lens ${i + 1} brightness`).toBeGreaterThan(60);
+            expect(r, `range lens ${i + 1} red tint`).toBeGreaterThan(Math.max(g, b) * 1.4);
+        }
     });
 
 test("canonical objectives and renderer dvars reach the shipped HUD", { tag: ["@retail-objective", "@retail-dvars", "@retail-shadows"] },

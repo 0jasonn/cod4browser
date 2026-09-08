@@ -1008,8 +1008,6 @@ WebRendererDObjSceneResult WebRenderer_BuildDObjSceneCommand(
                         materialResolver));
                     replacement.batches.back().dynamicLightSurfType =
                         surface.deformed ? 9u : 7u;
-                    replacement.batches.back().pickupSheen =
-                        (submission.renderFlags & GFX_RENDERFX_PICKUP) != 0u;
                     if (!sceneEntity)
                     {
                         auto &draw = replacement.batches.back();

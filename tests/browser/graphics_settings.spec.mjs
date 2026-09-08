@@ -1,5 +1,31 @@
 import { expect, test } from "@playwright/test";
 
+test("objective sheen matches retail D3D pixels and survives context recovery", async ({ page }) => {
+    await page.goto("/");
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state)).toBe("running");
+    const call = (name, ...args) => page.evaluate(({ name, args }) =>
+        globalThis.__KISAKCOD_WEB__.module.call(name, ...args), { name, args });
+    // D3D9 executing the owned objective pixel program with synthetic inputs:
+    // four phases, two sloped normals, normal normalization and zero alpha.
+    // Bytecode and retail textures remain outside the repository.
+    const native = [[52,66,72,81], [64,80,80,81], [52,66,72,81], [40,53,64,81],
+        [64,80,80,81], [40,53,64,81], [52,66,72,81], [32,48,64,77]];
+    const check = async () => {
+        for (const [scenario, expected] of native.entries()) {
+            const pixel = (await call("_KisakWeb_TestObjectivePixel", scenario)) >>> 0;
+            const actual = [pixel & 255, (pixel >>> 8) & 255, (pixel >>> 16) & 255, pixel >>> 24];
+            actual.forEach((value, i) => expect(Math.abs(value - expected[i]),
+                `objective scenario ${scenario} channel ${i}`).toBeLessThanOrEqual(1));
+        }
+    };
+    await check();
+    expect(await call("_KisakWeb_TestLoseWebGLContext")).toBe(1);
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state)).toBe("renderer-lost");
+    expect(await call("_KisakWeb_TestRestoreWebGLContext")).toBe(1);
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state)).toBe("running");
+    await check();
+});
+
 test("multiply-fog material preserves native pass pixels and recovers its WebGL context", async ({ page }) => {
     await page.goto("/");
     await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state)).toBe("running");

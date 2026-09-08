@@ -1,6 +1,7 @@
 #include <web/web_renderer_surface_storage.h>
 #include <web/web_renderer_dynamic_textures.h>
 #include <web/web_renderer_draw_state.h>
+#include <web/web_renderer_material_lookup.h>
 #include <web/web_renderer.h>
 #include <gfx_d3d/r_shadowed_light_history.h>
 
@@ -532,6 +533,94 @@ void TestShadowState()
         "new shadow partition must restore alpha and culling even for zero state");
 }
 
+void TestObjectiveMaterial()
+{
+    // Synthetic metadata for the captured objective_base pass; no retail data.
+    MaterialVertexShader vertex{"objective_base_dtex.hlsl", {}};
+    MaterialPixelShader pixel{"objective_base.hlsl", {}};
+    MaterialShaderArgument args[5]{};
+    args[0] = {3, 4, {}}; args[0].u.codeConst = {60, 0, 4};
+    args[1] = {3, 8, {}}; args[1].u.codeConst = {71, 0, 3};
+    args[2] = {3, 0, {}}; args[2].u.codeConst = {76, 0, 4};
+    args[3] = {2, 0, {}}; args[3].u.nameHash = 0xa0ab1041u;
+    args[4] = {5, 5, {}}; args[4].u.codeConst = {18, 0, 1};
+    MaterialTechnique technique{};
+    technique.passCount = 1;
+    auto &pass = technique.passArray[0];
+    pass.vertexShader = &vertex;
+    pass.pixelShader = &pixel;
+    pass.perPrimArgCount = 2;
+    pass.perObjArgCount = 1;
+    pass.stableArgCount = 2;
+    pass.args = args;
+    MaterialTechniqueSet remapped{}, original{};
+    original.remappedTechniqueSet = &remapped;
+    Material material{};
+    material.techniqueSet = &original;
+    for (unsigned slot = 7; slot <= 13; ++slot)
+    {
+        remapped.techniques[slot] = &technique;
+        Require(WebRenderer_IsObjectiveMaterial(&material, slot),
+            "objective shader is recognized in each canonical lit slot after remapping");
+    }
+    const auto matches = [&] { return WebRenderer_IsObjectiveMaterial(&material, 7); };
+    Require(!WebRenderer_IsObjectiveMaterial(nullptr, 7) &&
+        !WebRenderer_IsObjectiveMaterial(&material, 4) &&
+        !WebRenderer_IsObjectiveMaterial(&material, 34), "missing objective technique");
+    for (auto &arg : args)
+    {
+        const auto saved = arg;
+        arg.type = 0;
+        Require(!matches(), "objective argument type must match");
+        arg = saved;
+        ++arg.dest;
+        Require(!matches(), "objective argument register must match");
+        arg = saved;
+        if (arg.type == 2)
+        {
+            ++arg.u.nameHash;
+            Require(!matches(), "objective sampler must bind colorMap");
+        }
+        else
+        {
+            ++arg.u.codeConst.index;
+            Require(!matches(), "objective constant identity must match");
+            arg = saved;
+            ++arg.u.codeConst.firstRow;
+            Require(!matches(), "objective matrix must start at the first row");
+            arg = saved;
+            --arg.u.codeConst.rowCount;
+            Require(!matches(), "objective constant must bind every required row");
+        }
+        arg = saved;
+    }
+    args[1] = args[0];
+    Require(!matches(), "duplicate binding cannot replace the normal matrix");
+    args[1] = {3, 8, {}}; args[1].u.codeConst = {71, 0, 3};
+    for (unsigned count : {0u, 1u, 3u, 255u})
+    {
+        pass.stableArgCount = static_cast<std::uint8_t>(count);
+        Require(!matches(), "objective argument count must be exactly five");
+    }
+    pass.stableArgCount = 2;
+    pass.args = nullptr;
+    Require(!matches(), "objective arguments must exist");
+    pass.args = args;
+    pass.customSamplerFlags = 1;
+    Require(!matches(), "objective pass cannot require an unsupported custom sampler");
+    pass.customSamplerFlags = 0;
+    technique.passCount = 2;
+    Require(!matches(), "objective material cannot introduce another pass");
+    technique.passCount = 1;
+    vertex.name = "objective_base.hlsl";
+    Require(!matches(), "objective vertex shader name must match exactly");
+    vertex.name = "objective_base_dtex.hlsl";
+    pixel.name = "objective_base_fog.hlsl";
+    Require(!matches(), "objective pixel shader name must match exactly");
+    pixel.name = "objective_base.hlsl";
+    Require(matches(), "restored authored objective pass is recognized");
+}
+
 void TestErrorStrings()
 {
     for (const WebRendererSurfaceResult result : {
@@ -595,6 +684,7 @@ int main()
     runner.Run("canonical shadow light history", TestShadowLightHistory);
     runner.Run("dynamic draw state transitions", TestDynamicDrawState);
     runner.Run("shadow state transitions", TestShadowState);
+    runner.Run("canonical objective material", TestObjectiveMaterial);
     runner.Run("surface result strings", TestErrorStrings);
     return runner.Result();
 }

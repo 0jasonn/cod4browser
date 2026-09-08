@@ -196,6 +196,41 @@ inline const MaterialTechnique *WebRenderer_MaterialTechnique(
     return set && type < 34 ? set->techniques[type] : nullptr;
 }
 
+// The authored objective surface is a single material pass. Recognize its
+// shader inputs rather than applying a highlight to every pickup surface.
+inline bool WebRenderer_IsObjectiveMaterial(const Material *material, unsigned type) noexcept
+{
+    const auto *tech = WebRenderer_MaterialTechnique(material, type);
+    if (!tech || tech->passCount != 1) return false;
+    const auto &pass = tech->passArray[0];
+    if (!pass.vertexShader || !pass.vertexShader->name ||
+        !pass.pixelShader || !pass.pixelShader->name ||
+        std::strcmp(pass.vertexShader->name, "objective_base_dtex.hlsl") ||
+        std::strcmp(pass.pixelShader->name, "objective_base.hlsl") ||
+        pass.customSamplerFlags) return false;
+    const unsigned count = pass.perPrimArgCount + pass.perObjArgCount + pass.stableArgCount;
+    if (!pass.args || count != 5) return false;
+    unsigned bindings = 0;
+    for (unsigned i = 0; i < count; ++i)
+    {
+        const auto &arg = pass.args[i];
+        if (arg.type == 2 && arg.dest == 0 && arg.u.nameHash == 0xa0ab1041u)
+            bindings |= 1;
+        else if ((arg.type == 3 || arg.type == 5) && arg.u.codeConst.firstRow == 0)
+        {
+            const auto &c = arg.u.codeConst;
+            if (arg.type == 3)
+            {
+                if (arg.dest == 4 && c.index == 60 && c.rowCount == 4) bindings |= 2;
+                if (arg.dest == 8 && c.index == 71 && c.rowCount == 3) bindings |= 4;
+                if (arg.dest == 0 && c.index == 76 && c.rowCount == 4) bindings |= 8;
+            }
+            else if (arg.dest == 5 && c.index == 18 && c.rowCount == 1) bindings |= 16;
+        }
+    }
+    return bindings == 31;
+}
+
 // Transient renderer parameters read from canonical shader arguments. This
 // does not retain another material or change the native technique set.
 struct WebRendererParticleMaterial

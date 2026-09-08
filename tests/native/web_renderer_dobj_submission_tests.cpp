@@ -169,19 +169,6 @@ void TestDObjEmissionAndAtomicFailure()
     assert(command.batches[0].firstIndex == 0 && command.batches[1].firstIndex == 3);
     assert(command.batches[0].depthHack && command.batches[1].depthHack);
     assert(command.batches[0].modelIdentity == &model);
-    assert(!command.batches[0].pickupSheen);
-    submission.renderFlags |= GFX_RENDERFX_PICKUP;
-    assert(WebRenderer_BuildDObjSceneCommand(&submission, 1, command, &lodParms) ==
-        WebRendererDObjSceneResult::Success);
-    assert(command.batches[0].pickupSheen && command.batches[1].pickupSheen);
-    assert(command.vertices.size() == 6 && command.indices.size() == 6);
-    submission.renderFlags &= ~GFX_RENDERFX_PICKUP;
-    assert(WebRenderer_PickupSheen(0.0f) == 0.0f);
-    assert(WebRenderer_PickupSheen(0.5f) == 1.0f);
-    assert(std::fabs(WebRenderer_PickupSheen(0.25f) - 0.5f) < 0.000001f);
-    assert(WebRenderer_PickupSheen(1.0f) == 0.0f);
-    assert(WebRenderer_PickupSheen(1.5f) == WebRenderer_PickupSheen(0.5f));
-    assert(WebRenderer_PickupSheen(-0.5f) == WebRenderer_PickupSheen(0.5f));
     assert(command.batches[0].dynamicLightSurfType == 7u);
     assert(command.batches[1].dynamicLightSurfType == 7u);
     for (const auto &batch : command.batches)
@@ -671,6 +658,20 @@ void TestStableDrawOrderPreservesUnsafeAnchors()
         [](const Batch &batch) { return batch.key; }, order);
     assert((order == std::vector<std::uint32_t>{
         1u, 2u, 0u, 3u, 5u, 4u, 6u, 7u}));
+
+    // Authored model surface order can put a translucent lens before its
+    // opaque housing. Native camera region 0 must complete before region 1,
+    // regardless of material key, while non-model FX keep their anchor.
+    struct CameraBatch { unsigned region, key; bool canonicalModel; };
+    const std::vector<CameraBatch> cameraBatches{
+        {1, 1, true}, {0, 50, true}, {1, 1, true}, {0, 20, true},
+        {0, 0, false}, {1, 1, true}, {0, 30, true},
+    };
+    WebRenderer_BuildStableDrawOrder(cameraBatches,
+        [](const CameraBatch &batch) -> const CameraBatch & { return batch; },
+        [](const CameraBatch &batch) { return batch.canonicalModel; },
+        [](const CameraBatch &batch) { return std::pair{batch.region, batch.key}; }, order);
+    assert((order == std::vector<std::uint32_t>{3, 1, 0, 2, 4, 6, 5}));
 }
 
 void TestLodDelegatesToCanonicalXModelPolicy()

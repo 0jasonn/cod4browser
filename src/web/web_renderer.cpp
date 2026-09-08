@@ -169,7 +169,6 @@ struct WebRendererRetainedWorldBatch
     std::uint16_t techniqueFlags = 0u;
     std::uint8_t cameraRegion = 0u;
     bool depthHack = false;
-    bool pickupSheen = false;
     std::uint8_t dynamicLightSurfType = 0u;
     bool excludeTransientSpotLight = false;
     float transientLightSphere[4] = {0.0f, 0.0f, 0.0f, -1.0f};
@@ -3942,7 +3941,7 @@ bool CreateRendererResources(bool contextRecovery = false)
         in vec3 v_distortion_binormal;
         in vec3 v_outdoor_lookup;
         uniform sampler2D u_post_sun;
-        uniform float u_pickup_sheen;
+        uniform vec4 u_pickup_sheen;
         uniform sampler2D u_outdoor;
         uniform int u_soft_flags;
         uniform vec3 u_soft_feather;
@@ -4126,6 +4125,18 @@ bool CreateRendererResources(bool contextRecovery = false)
         void main()
         {
             vec4 texel = sample_texture(u_texture, v_texcoord);
+            if (u_material_mode == 21)
+            {
+                // objective_base.hlsl: phase depends on the geometric normal
+                // in view space, not on the light or normal map.
+                float nz = dot(normalize(v_model_normal), u_pickup_sheen.xyz);
+                float angle = fract((u_pickup_sheen.w - 0.5 * nz) *
+                    0.999999166 + 0.5) * 6.28318548 - 3.14159274;
+                float pulse = 0.5 - 0.5 * sin(angle);
+                vec3 tint = vec3(0.25, 0.15, 0.0) + pulse * vec3(0.75, 0.85, 0.5);
+                out_color = vec4(tint * (dot(texel.rgb, vec3(0.333000004)) + 0.5), texel.a);
+                return;
+            }
             if (u_material_mode == 19 || u_material_mode == 20)
             {
                 // mul_fog's vertex COLOR1 is fogColor * (1 - visibility).
@@ -4659,12 +4670,6 @@ bool CreateRendererResources(bool contextRecovery = false)
                 bootstrap_color.rgb += environment_reflection;
             }
             vec4 final_color = bootstrap_color * u_ui_color;
-            if (u_pickup_sheen > 0.0)
-            {
-                // Reference peak/trough differences preserve texture contrast:
-                // add the warm sheen instead of fading the material to white.
-                final_color.rgb += u_pickup_sheen * vec3(0.46, 0.53, 0.33);
-            }
             if (u_fog_enabled > 0.5 && u_material_mode != 1)
             {
                 // R_SetFrameFog supplies (start, density). Campaign scripts
@@ -6193,7 +6198,6 @@ WebRendererSurfaceResult CopyWorldCommand(
             batch.techniqueFlags = source.techniqueFlags;
             batch.cameraRegion = source.cameraRegion;
             batch.depthHack = source.depthHack;
-            batch.pickupSheen = source.pickupSheen;
             batch.dynamicLightSurfType = source.dynamicLightSurfType;
             batch.excludeTransientSpotLight = source.excludeTransientSpotLight;
             for (float component : source.transientLightSphere)
@@ -6720,6 +6724,13 @@ WebRendererSurfaceResult CopyStaticModelCommand(
                 }
             }
         }
+        // R_SortAllStaticModelSurfacesCamera orders each camera region by
+        // the material key. Authored XSurface order can put a translucent
+        // lens before its housing; complete all indexed image setup first.
+        std::stable_sort(batches.begin(), batches.end(), [](const auto &a, const auto &b) {
+            return std::pair{a.draw.cameraRegion, a.draw.drawSortKey} <
+                std::pair{b.draw.cameraRegion, b.draw.drawSortKey};
+        });
     }
     catch (const std::bad_alloc &)
     {
@@ -7818,9 +7829,10 @@ WebRendererSurfaceResult SetDynamicModelScene(
             return g_renderer.retainedBrushGeometry[
                 instance.geometryIndex].batches[draw.batchIndex];
         };
-        // Native sorts entity draw surfaces by the canonical material key.
-        // Keep unsafe draws as append-order anchors and sort only opaque,
-        // color/depth-writing model and brush runs between them.
+        // Native separates lit/decal/emissive regions, then sorts every
+        // entity surface by its canonical material key, including blended
+        // lenses. Keeping a lens as an anchor can draw its opaque housing
+        // afterward and overwrite it. Non-model FX retain their append order.
         WebRenderer_BuildStableDrawOrder(dynamicDraws, batchFor,
             [](const WebRendererRetainedWorldBatch &batch) {
                 if (batch.sourceKind !=
@@ -7830,17 +7842,10 @@ WebRendererSurfaceResult SetDynamicModelScene(
                     batch.sourceKind !=
                         WebRendererSceneBatchKind::DynamicBModel)
                     return false;
-                if ((batch.stateBits[0] & 0x700u) != 0u)
-                    return false;
-                if (!batch.materialIdentity) return true;
-                const std::uint32_t depthState = batch.stateBits[1];
-                const std::uint32_t depthFunc = depthState & 0xcu;
-                return (batch.stateBits[0] & 0x08000000u) != 0u &&
-                    (depthState & 3u) == 1u &&
-                    (depthFunc == 4u || depthFunc == 12u);
+                return batch.materialIdentity || (batch.stateBits[0] & 0x700u) == 0u;
             },
             [](const WebRendererRetainedWorldBatch &batch) {
-                return batch.drawSortKey;
+                return std::pair{batch.cameraRegion, batch.drawSortKey};
             }, dynamicCameraDrawOrder);
         std::erase_if(dynamicCameraDrawOrder, [&](std::uint32_t index) {
             const auto &draw = dynamicDraws[index];
@@ -8916,6 +8921,23 @@ GLenum WorldBlendEquation(std::uint32_t operation) noexcept
     }
 }
 
+void ApplyMaterialBlendState(std::uint32_t state0)
+{
+    if ((state0 & 0x700u) == 0u)
+    {
+        glDisable(GL_BLEND);
+        return;
+    }
+    // R_ChangeState_0 copies RGB blending when no alpha operation is authored.
+    const auto alpha = (state0 & 0x7000000u) != 0u ? state0 >> 16u : state0;
+    glEnable(GL_BLEND);
+    glBlendEquationSeparate(WorldBlendEquation((state0 >> 8u) & 7u),
+        WorldBlendEquation((alpha >> 8u) & 7u));
+    glBlendFuncSeparate(WorldBlendFactor(state0 & 0xfu),
+        WorldBlendFactor((state0 >> 4u) & 0xfu),
+        WorldBlendFactor(alpha & 0xfu), WorldBlendFactor((alpha >> 4u) & 0xfu));
+}
+
 std::int32_t WorldAlphaTestMode(std::uint32_t state0) noexcept
 {
     if ((state0 & 0x800u) != 0u) return 0;
@@ -9062,22 +9084,7 @@ void ApplyWorldMaterialState(const WebRendererRetainedWorldBatch &batch,
     const bool alphaWrite = !hasCanonicalState ||
         (state0 & 0x10000000u) != 0u;
     glColorMask(rgbWrite, rgbWrite, rgbWrite, alphaWrite);
-    if ((state0 & 0x700u) != 0u)
-    {
-        glEnable(GL_BLEND);
-        glBlendEquationSeparate(
-            WorldBlendEquation((state0 >> 8u) & 7u),
-            WorldBlendEquation((state0 >> 24u) & 7u));
-        glBlendFuncSeparate(
-            WorldBlendFactor(state0 & 0xfu),
-            WorldBlendFactor((state0 >> 4u) & 0xfu),
-            WorldBlendFactor((state0 >> 16u) & 0xfu),
-            WorldBlendFactor((state0 >> 20u) & 0xfu));
-    }
-    else
-    {
-        glDisable(GL_BLEND);
-    }
+    ApplyMaterialBlendState(state0);
     const bool shaderPremultipliesAlpha =
         batch.technique == WebRendererWorldTechnique::VertexColorAdditive ||
         ((state0 & 0x700u) != 0u &&
@@ -9170,6 +9177,17 @@ void ApplyWorldMaterialState(const WebRendererRetainedWorldBatch &batch,
             glUniform3fv(g_renderer.softFogUniform, 1,
                 soft.sceneFog ? g_renderer.sceneFogColor.data() : soft.fogColor);
         }
+        if (WebRenderer_IsObjectiveMaterial(batch.materialIdentity, CameraTechniqueType(batch)))
+        {
+            float time = g_renderer.sceneViewTimeSeconds;
+#if KISAK_WEB_DIAGNOSTICS
+            if (g_testPickupSheenTime >= 0) time = g_testPickupSheenTime * 0.001f;
+#endif
+            glUniform1i(g_renderer.materialModeUniform, 21);
+            glUniform4f(g_renderer.pickupSheenUniform,
+                g_renderer.sceneViewAxis[0], g_renderer.sceneViewAxis[1],
+                g_renderer.sceneViewAxis[2], time - std::floor(time));
+        }
     }
 }
 
@@ -9224,22 +9242,7 @@ void ApplyUiMaterialState(const WebRendererRetainedUiBatch &batch)
     const bool rgbWrite = (state0 & 0x08000000u) != 0u;
     glColorMask(rgbWrite, rgbWrite, rgbWrite,
         (state0 & 0x10000000u) != 0u);
-    if ((state0 & 0x700u) != 0u)
-    {
-        glEnable(GL_BLEND);
-        glBlendEquationSeparate(
-            WorldBlendEquation((state0 >> 8u) & 7u),
-            WorldBlendEquation((state0 >> 24u) & 7u));
-        glBlendFuncSeparate(
-            WorldBlendFactor(state0 & 0xfu),
-            WorldBlendFactor((state0 >> 4u) & 0xfu),
-            WorldBlendFactor((state0 >> 16u) & 0xfu),
-            WorldBlendFactor((state0 >> 20u) & 0xfu));
-    }
-    else
-    {
-        glDisable(GL_BLEND);
-    }
+    ApplyMaterialBlendState(state0);
     const bool shaderPremultipliesAlpha =
         (state0 & 0x700u) != 0u &&
         (state0 & 0xfu) == 2u &&
@@ -10609,6 +10612,108 @@ extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestMultiplyFogPixel(int 
     std::uint8_t pixel[4]{};
     glReadPixels(0,0,1,1,GL_RGBA,GL_UNSIGNED_BYTE,pixel);
     const bool error = glGetError() != GL_NO_ERROR;
+    if (dither) glEnable(GL_DITHER);
+    glBindFramebuffer(GL_FRAMEBUFFER,0); glDeleteFramebuffers(1,&framebuffer);
+    glDeleteRenderbuffers(1,&colorBuffer); glDeleteTextures(1,&texture);
+    DeleteSurfaceObjects(vao,vbo,ibo); g_renderer.textureParameters.Reset();
+    return error ? UINT32_MAX : pixel[0] | (std::uint32_t(pixel[1])<<8) |
+        (std::uint32_t(pixel[2])<<16) | (std::uint32_t(pixel[3])<<24);
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestObjectivePixel(int scenario)
+{
+    if (!g_renderer.initialized || g_renderer.contextLost || scenario < 0 || scenario > 7)
+        return UINT32_MAX;
+    // Synthetic inputs exercise the production objective shader and its
+    // canonical blend/write state without loading an XModel or retail image.
+    MaterialVertexShader vertex{"objective_base_dtex.hlsl", {}};
+    MaterialPixelShader pixelShader{"objective_base.hlsl", {}};
+    MaterialShaderArgument args[5]{};
+    args[0] = {3, 4, {}}; args[0].u.codeConst = {60, 0, 4};
+    args[1] = {3, 8, {}}; args[1].u.codeConst = {71, 0, 3};
+    args[2] = {3, 0, {}}; args[2].u.codeConst = {76, 0, 4};
+    args[3] = {2, 0, {}}; args[3].u.nameHash = 0xa0ab1041u;
+    args[4] = {5, 5, {}}; args[4].u.codeConst = {18, 0, 1};
+    MaterialTechnique technique{};
+    technique.passCount = 1;
+    auto &pass = technique.passArray[0];
+    pass.vertexShader = &vertex; pass.pixelShader = &pixelShader;
+    pass.perPrimArgCount = 2; pass.perObjArgCount = 1; pass.stableArgCount = 2;
+    pass.args = args;
+    MaterialTechniqueSet set{};
+    GfxStateBits state{{0x18128925u, 0xcu}};
+    GfxImage image{};
+    MaterialTextureDef colorMap{};
+    colorMap.nameHash = 0xa0ab1041u; colorMap.semantic = 2;
+    colorMap.u.image = &image;
+    Material material{};
+    material.techniqueSet = &set; material.cameraRegion = 1;
+    material.stateBitsTable = &state; material.stateBitsCount = 1;
+    material.textureTable = &colorMap; material.textureCount = 1;
+    std::fill_n(material.stateBitsEntry, 34, 255);
+    for (unsigned slot = 7; slot <= 13; ++slot)
+    {
+        set.techniques[slot] = &technique;
+        material.stateBitsEntry[slot] = 0;
+    }
+    WebRendererRetainedWorldBatch batch{};
+    batch.materialIdentity = &material; batch.techniqueType = 7;
+    batch.technique = WebRendererWorldTechnique::BaseTexture;
+    batch.stateBits[0] = state.loadBits[0] & ~0xc000u;
+    batch.stateBits[1] = state.loadBits[1] | 2u;
+    std::vector<WebRendererSurfaceVertex> vertices(4);
+    constexpr float positions[4][2]{{-1,-1},{1,-1},{-1,1},{1,1}};
+    for (unsigned i = 0; i < 4; ++i)
+    {
+        vertices[i].position[0] = positions[i][0];
+        vertices[i].position[1] = positions[i][1];
+        vertices[i].position[2] = 0.5f;
+        std::fill_n(vertices[i].color, 4, 1.0f);
+        vertices[i].textureCoordinate[0] = vertices[i].textureCoordinate[1] = 0.5f;
+        vertices[i].normal[0] = scenario == 4 || scenario == 5 ? std::sqrt(0.75f) : 0;
+        vertices[i].normal[2] = scenario == 4 ? 0.5f : scenario == 5 ? -0.5f :
+            scenario == 6 ? 4.0f : 1.0f;
+        vertices[i].tangent[0] = 1.0f;
+    }
+    const std::vector<std::uint32_t> indices{0,1,2,2,1,3};
+    GLuint vao=0, vbo=0, ibo=0, texture=0, framebuffer=0, colorBuffer=0;
+    if (!CreateSurfaceObjects(vertices, indices, vao, vbo, ibo)) return UINT32_MAX;
+    glGenTextures(1, &texture); glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    const std::uint8_t texel[4]{128,64,192,static_cast<std::uint8_t>(scenario == 7 ? 0 : 32)};
+    glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,1,1,0,GL_RGBA,GL_UNSIGNED_BYTE,texel);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+    glGenFramebuffers(1,&framebuffer); glBindFramebuffer(GL_FRAMEBUFFER,framebuffer);
+    glGenRenderbuffers(1,&colorBuffer); glBindRenderbuffer(GL_RENDERBUFFER,colorBuffer);
+    glRenderbufferStorage(GL_RENDERBUFFER,GL_RGBA8,1,1);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_RENDERBUFFER,colorBuffer);
+    const bool complete = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    const bool dither = glIsEnabled(GL_DITHER);
+    glViewport(0,0,1,1); glDisable(GL_SCISSOR_TEST); glDisable(GL_DITHER);
+    glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
+    glClearColor(32.0f/255,48.0f/255,64.0f/255,77.0f/255); glClear(GL_COLOR_BUFFER_BIT);
+    const float previousTime = g_renderer.sceneViewTimeSeconds;
+    const auto previousAxis = g_renderer.sceneViewAxis;
+    const int previousTestTime = g_testPickupSheenTime;
+    g_renderer.sceneViewTimeSeconds = scenario < 4 ? scenario * 0.25f : 0;
+    g_renderer.sceneViewAxis = {0,0,1,1,0,0,0,1,0};
+    g_testPickupSheenTime = -1;
+    glUseProgram(g_renderer.program); BindSceneSamplers(); glBindVertexArray(vao);
+    constexpr float identity[16]{1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
+    glUniformMatrix4fv(g_renderer.viewProjectionUniform,1,GL_FALSE,identity);
+    glUniform1f(g_renderer.aspectUniform,1); glUniform1f(g_renderer.instanceEnabledUniform,0);
+    glUniform3f(g_renderer.viewOriginUniform,0,0,0);
+    glUniform1f(g_renderer.fogEnabledUniform,0);
+    glUniform4f(g_renderer.uiColorUniform,1,1,1,1);
+    ApplyWorldMaterialState(batch);
+    glDrawElements(GL_TRIANGLES,6,GL_UNSIGNED_INT,nullptr);
+    std::uint8_t pixel[4]{};
+    glReadPixels(0,0,1,1,GL_RGBA,GL_UNSIGNED_BYTE,pixel);
+    const bool error = !complete || glGetError() != GL_NO_ERROR;
+    g_renderer.sceneViewTimeSeconds = previousTime;
+    g_renderer.sceneViewAxis = previousAxis;
+    g_testPickupSheenTime = previousTestTime;
     if (dither) glEnable(GL_DITHER);
     glBindFramebuffer(GL_FRAMEBUFFER,0); glDeleteFramebuffers(1,&framebuffer);
     glDeleteRenderbuffers(1,&colorBuffer); glDeleteTextures(1,&texture);
@@ -12298,9 +12403,9 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 *frameProfile, WebFrameProfileGpuStage::DynamicFx);
 #endif
         // The camera order combines ordinary DObjs, retained moving brushes,
-        // DynEnts, and first-person DObjs. Safe opaque runs follow canonical
-        // material keys; transparent/FX/state-sensitive anchors retain append
-        // order. Depth-hacked first-person surfaces remain in their reserved
+        // DynEnts, and first-person DObjs. Model/brush runs follow canonical
+        // camera regions and material keys; non-model FX retain append order.
+        // Depth-hacked first-person surfaces remain in their reserved
         // camera pass so ordinary geometry cannot overwrite the viewmodel.
         for (std::uint32_t cameraPass = 0u; cameraPass < 2u; ++cameraPass)
         {
@@ -12662,19 +12767,12 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                         reinterpret_cast<const void *>(indexOffset));
                 };
                 if (materialPass) ApplyMultiplyFogPass(batch);
-                const bool pickupSheen = batch.pickupSheen && !floatZPass && !materialPass;
-                if (pickupSheen)
-                {
-                    float sheenTime = g_renderer.sceneViewTimeSeconds;
 #if KISAK_WEB_DIAGNOSTICS
+                if (!floatZPass && !materialPass &&
+                    WebRenderer_IsObjectiveMaterial(batch.materialIdentity, CameraTechniqueType(batch)))
                     ++g_pickupSheenDraws;
-                    if (g_testPickupSheenTime >= 0) sheenTime = g_testPickupSheenTime * 0.001f;
 #endif
-                    glUniform1f(g_renderer.pickupSheenUniform,
-                        WebRenderer_PickupSheen(sheenTime));
-                }
                 drawMaterial();
-                if (pickupSheen) glUniform1f(g_renderer.pickupSheenUniform, 0.0f);
 #if KISAK_WEB_DIAGNOSTICS
                 if (profileDynamicModel)
                     frameProfile->dynamicModelDrawMs +=
