@@ -1,137 +1,85 @@
 # Local retail validation
 
-This validation is local-only. It reads files from a legally owned English
-Call of Duty 4 installation through the browser picker; it does not copy them
-into the repository or CI artifacts. Close other cod4browser tabs first so the
-test can acquire the exclusive writable-home lease.
+Use a legally owned English COD4 installation. Files enter through the browser
+picker and remain local; never package retail data, profiles, screenshots or
+logs for CI. Close other cod4browser tabs to release the exclusive writable-home
+lease. Complete the pinned setup in the [README](../README.md) first.
 
-After installing the pinned toolchain, npm dependencies, and target browsers,
-run the permanent three-map baseline in headed branded Chrome and Edge:
+## Baseline and additional maps
 
-```powershell
-.\tools\validate_web_retail.ps1 `
-    -RetailRoot 'D:\Games\Call of Duty 4' `
-    -Browser chrome
-
-.\tools\validate_web_retail.ps1 `
-    -RetailRoot 'D:\Games\Call of Duty 4' `
-    -Browser msedge
-```
-
-Chrome is the default. `chromium`, `chrome`, and `msedge` are accepted. The
-wrapper is headed unless `-Headless` is supplied; headless runs are functional
-evidence, not the primary performance benchmark. Leave the game window in the
-foreground during each timed window.
-
-The command builds the diagnostic artifact because forced WebGL context loss
-and canonical gameplay-state probes are deliberately unavailable to the
-production protocol. The test otherwise uses the normal importer and
-canonical runtime. It requires `killhouse.ff`, `cargoship.ff`, and
-`blackout.ff`, then runs:
-
-```text
-Killhouse -> CargoShip -> Blackout -> Killhouse
-```
-
-It verifies:
-
-- installation import, persistence, and canonical mount;
-- database completion, ClipMap/world, server, game, cgame, and actual world
-  frames on every map;
-- a foreground 60-second window after `page.bringToFront()`, sampled every
-  second for `document.visibilityState`, focus, and background transitions;
-- actual frame intervals, p50/p95/p99, FPS equivalents, game/wall advancement,
-  renderer identity, browser name/version, and performance-window validity;
-- W/A/S/D movement, jump, mouse look, canonical clip/shot response to MOUSE1,
-  canonical ADS/secondary response to MOUSE2, and canonical wheel selection or
-  `NOT_APPLICABLE_SINGLE_WEAPON`;
-- Escape/menu state, pointer-lock loss and reacquisition, full initial input,
-  and a reduced critical subset after each in-process transition;
-- decoded gameplay audio, config checkpoint duration/bytes, shutdown flush,
-  and config reload;
-- ordered unload begin/end and new-world publication on one WebGL context, with
-  old map-local recovery retired before replacement publication;
-- forced WebGL2 context loss/recovery on CargoShip, Blackout, and returned
-  Killhouse, followed by resumed frames and input; and
-- Wasm allocator/capacity snapshots before load, after database completion,
-  after cgame, after first frame, at steady state, unload/publication, and
-  context recovery, plus logical decoded texture size, actual encoded/source
-  recovery, GPU estimates, geometry, transient upload, programs, and audio.
-
-The result is one non-proprietary schema-v2 `KISAK_RETAIL_RESULT` JSON record.
-If a timed window becomes hidden or unfocused, its performance fields are
-invalidated with `performanceWindowValid: false`; slow background timing must
-not be used to assign or remove `PLAYABLE` status.
-
-The current clean headed Chrome/Edge example is preserved as
-[retail-foreground-f5229806.json](evidence/retail-foreground-f5229806.json).
-It contains selected performance, memory, input, recovery, shutdown, host, and
-renderer fields only; it omits the local installation path and proprietary
-content.
-
-The wrapper sets `KISAK_COD4_RETAIL_ROOT` itself. The Playwright case is
-skipped only when invoked directly without that environment variable. Record
-the exact commit, clean/dirty state, browser version, reference hardware,
-foreground validity, result, and renderer-memory events before changing the
-recovery budget or compatibility matrix.
-
-## Additional campaign maps
-
-Validate one discovered single-player zone at a time after the baseline is
-green:
+From the repository root, run the diagnostic baseline in headed Chrome and Edge:
 
 ```powershell
-.\tools\validate_web_campaign_map.ps1 `
-    -RetailRoot 'D:\Games\Call of Duty 4' `
-    -Map airplane `
-    -Browser chrome
+.\tools\validate_web_retail.ps1 -RetailRoot 'D:\Games\Call of Duty 4' -Browser chrome
+.\tools\validate_web_retail.ps1 -RetailRoot 'D:\Games\Call of Duty 4' -Browser msedge
 ```
 
-The wrapper accepts a lowercase zone name containing letters, numbers, or
-underscores, rejects `mp_*` and `*_mp`, and requires the selected fastfile in
-the supplied installation. It starts with a fresh browser profile, reaches a
-CargoShip world frame, transitions into the target, verifies its full
-canonical lifecycle, runs a foreground 60-second window, exercises canonical
-gameplay input/audio/config persistence, records memory, forces WebGL2 context
-recovery, and transitions to Killhouse before clean shutdown and reload.
+The wrapper builds Release diagnostics and runs
+`Killhouse -> CargoShip -> Blackout -> Killhouse` against a temporary browser
+profile. It requires the three map fastfiles plus the startup files. Chrome is
+the default; `chromium`, `chrome` and `msedge` are accepted. `-Port` selects an
+isolated server (default 8030); `-Headless` disables the visible window.
+Keep headed timed windows focused and visible, with no concurrent build.
 
-It emits one non-proprietary `KISAK_RETAIL_PHASE3_RESULT` JSON record. The
-opt-in campaign case is skipped without an explicit target, so routine browser
-suites and the permanent Killhouse -> CargoShip -> Blackout -> Killhouse
-baseline remain separate.
+The baseline checks import/mount/persistence; canonical DB, ClipMap/world,
+server/game and client/cgame startup; actual world frames; movement, mouse,
+fire/ammo, ADS, weapon selection, menus and pointer lock; decoded audio and
+configuration persistence; map retirement/publication; forced WebGL2 recovery
+with resumed input; and shutdown/reload. A weapon-selection check can report
+`NOT_APPLICABLE_SINGLE_WEAPON`.
 
-Use these compatibility results:
+Each map has a 60-second window measuring frame intervals, p50/p95/p99,
+game/wall advancement, focus and visibility. Diagnostics collect a separate
+300-completed-frame profile and bounded lifecycle/memory observations.
+`decodedTextureRecoveryBytes` is logical decoded size, not retained storage;
+encoded recovery, GPU estimates and Wasm capacity are distinct populations and
+must not be added into a process-memory total. Profiling and context-loss probes
+use the diagnostic artifact because production does not expose those APIs.
 
-- `FUNCTIONAL` for a passing sustained runtime with core gameplay/input/audio;
-- `PLAYABLE` only when `FUNCTIONAL` and a valid foreground window meets the
-  current reference of average >=30 FPS, p95 <=50 ms, and game/wall ratio
-  >=0.90; and
-- `BLOCKED` only for a deterministic compatibility failure at an identified
-  canonical boundary.
-
-The threshold describes the recorded reference hardware/browser, not a
-universal user requirement. Discovery alone remains `UNTESTED`.
-
-For an observation-only stationary probe, add `-ObserveOnly`:
+Validate another single-player zone after the baseline passes:
 
 ```powershell
-.\tools\validate_web_campaign_map.ps1 `
-    -RetailRoot 'D:\Games\Call of Duty 4' `
-    -Map scoutsniper `
-    -Browser chrome `
-    -ObserveOnly `
-    -Headless
+.\tools\validate_web_campaign_map.ps1 -RetailRoot 'D:\Games\Call of Duty 4' -Map airplane -Browser chrome
 ```
 
-This uses the same canonical database/lifecycle, memory, renderer, and profile
-collectors, but exits after the bounded stationary window. It injects no
-keyboard, mouse, firing, waypoint, coordinate, objective, or synthetic gameplay
-state and skips config persistence, forced context loss, and transition-out.
-Headless evidence can establish `RENDERS` and stationary stability only; visual
-correctness requires separate headed/manual inspection.
+This starts a fresh profile, loads CargoShip, transitions to the target, runs
+lifecycle/gameplay/timing/recovery checks, then transitions to Killhouse and
+checks shutdown/reload. Names must contain lowercase letters, numbers or
+underscores; `mp_*` and `*_mp` are rejected. The selected fastfile must exist.
+Its default port is 8031.
 
-The former mission-route author/replay workflow is retired. Do not replace it
-with another controller, waypoint format, replay abstraction, or player-state
-simulator. Ordinary mission/save validation remains available through
-`-Mission`; it continues to use short canonical input actions rather than route
-files.
+## Stationary and mission probes
+
+```powershell
+.\tools\validate_web_campaign_map.ps1 -RetailRoot 'D:\Games\Call of Duty 4' -Map scoutsniper -Browser chrome -ObserveOnly -Headless
+```
+
+`-ObserveOnly` stops after the stationary window and profile. It injects no
+keyboard/mouse/gameplay state, and skips config persistence, forced recovery
+and transition-out. It can establish world frames and stationary stability;
+headless observations do not qualify visual correctness or playable gameplay.
+
+The optional `-Mission` collector uses bounded canonical input actions and
+checks progression/combat plus save/death/reload boundaries;
+`-MissionStage progression` stops before the later save checks. It cannot combine with
+`-ObserveOnly`. Passing an automated collector is not authored mission
+completion. Route/replay automation is retired; use ordinary observed gameplay
+for the acceptance defined in [campaign compatibility](campaign-compatibility.md).
+
+## Results and qualification
+
+Collectors emit `KISAK_RETAIL_RESULT`, `KISAK_RETAIL_PHASE3_RESULT` or
+`KISAK_RETAIL_MISSION_RESULT` JSON. The wrappers set `KISAK_COD4_RETAIL_ROOT`;
+direct Playwright invocation skips retail cases without it. Additional map,
+mission and decode-chain cases require their explicit opt-in variables.
+Keep disposable runs under ignored `build/` and sanitize anything shared.
+
+Authoritative runs require a clean source commit. `KISAK_RETAIL_ALLOW_DIRTY=1`
+permits exploratory work, including an optional shortened stability window;
+it does not provide release qualification. Record commit/artifact hashes,
+clean/dirty state, date, browser/version, reference hardware, renderer identity,
+foreground validity, results and the earliest failure boundary. A hidden or
+unfocused window sets `performanceWindowValid: false`; such timing cannot
+promote or demote the [compatibility levels](campaign-compatibility.md).
+Configuration checkpoints are not gameplay saves. Runtime loading, rendering,
+playability, authored completion and native/Steam fidelity remain separate claims.

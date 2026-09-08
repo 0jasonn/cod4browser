@@ -21,7 +21,7 @@ map loads remain synchronous-looking while a platform `emscripten_sleep(0)`
 yield presents loading UI and receives audio feedback; the frame pump awaits
 the suspended Wasm callback before scheduling another frame. This requires
 neither pthreads nor cross-origin isolation. See the
-[loading architecture and historical evidence](cinematic-codec.md).
+[loading behavior and qualification](cinematic-codec.md).
 
 Chrome and Edge should only be called validated when the production browser
 suite has passed in those branded channels. Firefox and Safari are not

@@ -1,189 +1,217 @@
-# Retained renderer resources
+# Renderer resources and qualification
 
-The major milestone is delivered in runtime `49af3948`: fresh production
-A/B/B/A controls show 21.175 -> 14.731 ms with only the benchmark cap lifted,
-a 30.43% reduction, alongside 29.67% fewer buffer-upload bytes. The default-cap
-comparison is 21.469 -> 16.843 ms. The initial 25% throughput target is met
-against current controls; the historical 26.027 ms mean is not used to claim
-a gain across changing host conditions. This remains a local paused-renderer
-result, not gameplay FPS. See [the evidence](evidence/retained-renderer-49af3948.md).
+Kisak owns `GfxWorld`, materials, poses, LODs, visibility, FX and draw ordering.
+The Worker frontend translates those records into portable commands; WebGL2 owns
+GPU objects, upload/recovery storage and device state. This guide records current
+constraints and bounded evidence, not complete native/browser visual parity.
 
-The previous brush path expanded `GfxBrushModel` vertices through every placement,
-rebuilt material batches, appended them to the DObj/FX command, then copied and
-uploaded that geometry again. Native brush submission instead keeps geometry and
-placement separate. The WebGL shaders already support rigid instance placement
-for position, normal, tangent and shadow depth.
+## Resource lifetime and command publication
 
-The implementation moves that separation through the existing draw-command boundary:
+- World/static geometry and identity-placement brush meshes live within the
+  canonical world; entity/DynEntity placements update per frame. Retained brushes
+  consume logical scene capacity before optional FX, marks, clouds and sun quads;
+  physical streamed indices account only for uploaded vertices.
+- Validate descriptors, finite values, indices, bounds, material references and
+  resource budgets before atomic publication. Failed dynamic submission returns
+  caller vector ownership and preserves the previous published command. Context
+  recovery reads published geometry, never unpublished staging or empty frontend
+  scratch. World unload releases mesh, lighting and decoded-attribute caches.
+- `web_renderer.h` bounds one dynamic command to 500,000 vertices and 1,000,000
+  indices: at 72/four bytes, 40,000,000 logical geometry bytes. This neither
+  preallocates the maximum nor caps the entire renderer/heap at 40 MB.
+- Encoded images decode for upload/recovery without a retained second RGBA copy.
+  DB `GfxTexture` handles preserve copy/override/default identity. The 256 MiB
+  DB-source budget rejects before copying and cannot evict live sources; the
+  separate 800 MiB image-pool limit measures decoded admission, not total recovery.
+- Feature technique remaps run after publication and when relevant dvars change.
+  Retained material snapshots must be invalidated when their dependencies change;
+  do not assume remapping happens only at `R_LoadWorld`. World registration clears
+  brush retention. Primary-light types stay validated while animated values arrive
+  per frame; canonical material/image identity is never a GL object name.
 
-- Keep canonical `GfxBrushModel`, entity/DynEntity placement and admission in
-  Kisak. Do not cache pose, visibility or gameplay state in JavaScript.
-- Lazily validate/retain a brush mesh at first use, keyed by its canonical model
-  within the current world. Reuse the existing brush builder at identity
-  placement; retain only backend geometry and material resources, as for world
-  and static-model geometry. Material-remap lifetime is documented below.
-- Submit current rigid placements every frame and preserve the existing
-  DObj/brush/FX draw order. Reuse the existing instance shader inputs; avoid
-  changing static-model packing or canonical camera DPVS.
-- Route brush references through the independent sun-shadow pass as well as
-  the camera pass. Preserve existing authored spot-shadow membership.
-- World retirement must release resources, and context loss must rebuild their
-  GPU objects from retained CPU data. Failed submissions must not publish
-  partially updated draw lists.
+## Geometry and DObj conversion
 
-Verification uses an independent comparison against the existing transformed
-brush output, changing placements and shader inputs, invalid-input atomicity,
-logical draw/index/shadow equality, reduced upload work, targeted renderer
-recovery, and interleaved production timing. Keep the strict existing workload
-comparator: any intended physical-upload change needs explicitly justified
-logical-work comparison, not silently relaxed assertions.
+Completed dynamic vectors transfer into backend staging; only empty numeric
+capacity returns to the frontend. Standard vector growth replaces per-cloud exact
+reservations; failure restores logical contents/counts, though capacity may change.
+Staging/frontend capacity is separate from recovery data and its counters;
+no total-memory saving is implied.
 
-Brush retention alone was followed by shadow-range and texture-state work to
-reach the major target. No mission checks, broad suites or mandatory captures
-were required.
+[The DObj adapter](../src/web/web_renderer_dobj_scene.cpp) emits final skinned
+vertices and one index span per surface from canonical `CG_DObjCalcPose`,
+LOD/hide masks and materials. Weighted positions blend every influence; their
+basis follows the primary bone. Rigid transforms preserve authored basis lengths,
+including nonunit reflex tangents, with finite/nonzero validation. Immutable
+attributes cache by packed-vertex identity/count within the world and vertex cap;
+transforms and poses are evaluated afresh.
 
-The sun-depth backend joins only contiguous opaque world-index ranges. Cutouts,
-non-casters and non-contiguous ranges break a run. It does not consult camera
-visibility, change static instance selection, or alter authored spot membership.
-`sunShadowMergedRanges` records saved submissions separately from actual shadow
-caster draws; their sum preserves the previous logical range count.
+`cpose_t::lightingHandle` reuses numeric samples only on exact origin/primary-light
+matches; movement recomputes, unload clears, and stale handles rebind. The atlas
+follows current submission order and handles reach marks. Pose rejection precedes
+lighting, preserving culled handles and other DObjs' atlases. Selective web LTO
+exposes existing packing/quaternion helpers with exceptions and validation intact.
 
-Texture parameters use a bounded frame-local table keyed by GL object name.
-Collisions conservatively repeat writes. Dynamic passes also omit known unchanged
-bindings, but still reconcile aliased object parameters in the original unit
-order. Uploads/context recovery cannot leave stale entries because each draw
-frame resets the table. No sampler object ownership or persistent GL cache was
-introduced.
+Inactive GPU buffer sets added memory without upload benefit; rigid GPU placement
+changed shadow work and increased time; shader-side static sun culling kept vertex
+work and increased CPU cost. Reconsider only with current qualified measurements.
 
-Technique remapping currently runs only at `R_LoadWorld`, before brush retention.
-The same world lifetime already owns world/static material resources. A future
-runtime material-remap path must invalidate all affected retained renderer
-resources. Primary-light type is stable and checked by `SetSceneView`; animated
-color, direction, radius and attenuation continue to arrive each frame.
+## Camera visibility, ordering and shadows
 
-The focused world/brush native fixture covers rigid placement and overflow,
-opaque-shadow triangle order/cutouts, texture aliases, collisions and reset.
-The controlled browser workload caught and fixed logical geometry admission:
-retained brushes still occupy the original scene budget before optional FX and
-clouds. A diagnostic context-loss/restoration run then matched twelve resumed
-work samples. Production timing qualification passed both interleaved sequences.
+[Shared DPVS](../src/gfx_d3d/r_dpvs_core.cpp) runs native view reset, portal/cell
+and AABB/cull-group traversal synchronously. Recompute slot 0 per view: all-zero
+means empty; invalid/missing producer data is an error. World commands preserve
+canonical surface IDs/index spans and merge visible runs only within a batch.
+Holes may increase draws; flattened dynamic bounds need a per-submission indexed
+scan. Retire this metadata when canonical frontend commands supply the ranges.
 
-Production timing uses six existing canonical view checkpoints (240, 300, 360,
-420, 480, 540): five contiguous 60-frame spans cover 300 frames. The old
-callback-event method is unsuitable below 16 ms because `FramePumpTrampoline`
-suppresses most fast callback telemetry. Baseline and candidate must both use
-the checkpoint method. Report the total elapsed time divided by 300; percentiles
-of the five span means are not per-frame latency percentiles. No production
-profiler or high-frequency telemetry was added.
+Static instances preserve canonical IDs: shadow LOD packing is the first buffer
+half, camera packing the second. Visibility changes upload only the camera half;
+LOD changes update both. GPU instances are 72 bytes; 24-byte AABBs stay in CPU
+source/shadow arrays. World spans retain authored AABBs too. Each sun cascade
+rebuilds its light-space mask independently of camera visibility.
 
-The optional `uncapped` production benchmark argument queues `com_maxfps 0`
-through the canonical console after view 180, once the paused scene is selected.
-It leaves the product's default 60 FPS setting unchanged and retains the web
-125 Hz safety ceiling. Record this override in the workload; compare only runs
-with the same setting. This is measurement of a paused renderer, not gameplay.
+Primary spots preserve authored `GfxShadowGeometry` and canonical entity/DynEntity
+linkage. Dynamic linkage uses the SP 2,208-entity stride, native cone/radius tests,
+`GfxLightRegion` hulls and nearest model light; absent canonical arrays fall back
+conservatively to matrix-only selection. Static instance flag bit 0 excludes
+casters and static materials require `gameFlags & 0x40`; dynamic families use
+the remap-aware build-shadowmap technique and its alpha/cull state. Shadow-only
+BSP surfaces remain uploaded outside camera ranges. FX XModels and depth-hack
+DObjs retain their primary-spot exclusions.
 
-## Dynamic geometry ownership
+Opaque sun ranges merge only across contiguous indices with matching buffer,
+placement and state; gaps, cutouts and non-casters break runs. Physical shadow
+draws plus `sunShadowMergedRanges` preserve logical caster counts.
+[Native shadow history](../src/gfx_d3d/r_shadowed_light_history.h) owns four-slot
+retirement/reselection and fades. Invisible lights release immediately; world/
+context retirement resets history, and scenes cannot pin their own lights.
 
-Runtime `af601efe` transfers the completed per-frame dynamic vertex and index
-vectors into backend staging. It does not change retained brush geometry or add
-another persistent engine representation. The backend validates the same
-descriptor and command metadata, uploads the same bytes, and publishes the new
-draw command only after all work succeeds. Failure restores the caller's vector
-ownership. The first scene retains its existing one-time geometry diagnostic.
+Camera models, including translucency, follow canonical region/key order.
+Emissive world/static/entity/FX lists merge by primary key with family-order ties;
+FX AUTO/DECAL bands 48/24 preserve append order. Sun visibility and depth hack
+retain separate passes. Primary keys use `Material::info.sortKey` when serialized
+`drawSurf` is unset; full native material-table sorting remains uncompiled.
 
-The exact paused workload removes the attributed command geometry copy, while a
-follow-up inactive GPU-buffer set failed to reduce upload time and was reverted.
-See [the ownership evidence](evidence/dynamic-geometry-ownership-af601efe.md).
-This marks the end of platform geometry-handoff optimization; the next measured
-work belongs to canonical DObj pose, lighting and skinning.
+## Transient lighting and material state
 
-## Canonical weighted DObj basis
+[Shared light math](../src/gfx_d3d/r_dynamiclights_core.h) owns `GfxLight`
+construction, importance, spot planes and tangent-sphere scissors. FX owns
+lifetime; per-scene reset, 32/four ceilings, `r_dlightLimit` and `r_fullbright`
+remain native. The first eligible added spot preserves near-plane bias and
+competes for 512x512 slots. Admit test lights while time advances before pausing:
+native shadow history cannot admit at a frozen timestamp.
 
-Runtime `82b4de10` brings the platform weighted skinner back to Kisak's native
-behavior: it blends position across all influences and transforms normal and
-tangent with the primary bone only. Removing the web-only secondary basis
-blends reduced the exact-work DObj skinning interval by an observed 10.8%.
-All existing normalization, validation, pose, LOD, material, culling and shadow
-decisions remain in place. See
-[the focused evidence](evidence/dobj-primary-basis-82b4de10.md).
+| Transient family | Receiver/caster contract |
+| --- | --- |
+| BSP | Receiver: camera DPVS and original AABB against exact spot/omni bounds. Caster: shifted spot planes without camera DPVS. |
+| Static models | Canonical ID/bounds after LOD packing select contiguous receiver runs; transient casters reuse the native camera/light receiver mask. |
+| Rigid DObj / FX / DynEntity models | Preserve each native pose/XModel/scaled-FX sphere owner. Spot uses sphere/planes; omni uses radius sums. |
+| Animated DObj | Selected-LOD bone masks and `XBoneInfo` transforms preserve scalar order and `viewOffset`; post-pose boxes retest full cell planes and BSP membership before skinning. |
+| Scene / DynEntity brushes | Copy canonical writable world bounds before physics; do not transform them twice or infer them from retained geometry. |
 
-## Canonical DObj lighting handles
+Cgame/DynEntity keep native cell-bit banks and link identities. Bounded BSP walks
+publish links atomically; invalid walks preserve prior bits. Repeated portal
+paths OR admission, including native zero-plane and non-positive tangent rules.
+`CG_UsedDObjCalcPose`/`CG_CullIn` preserve evaluated/visible status. FX attachment
+and render flag 8 exclude scene DObj spots, retaining the rigid exception and
+omni behavior. Transient caster child dvars are independent of sun/primary spots.
 
-Runtime `a16fb9f2` restores native-shaped model-lighting reuse through
-`cpose_t::lightingHandle`. Exact origin and primary-light matches reuse a
-numeric light-grid sample; movement recomputes it, and world unload clears the
-cache. No canonical pointers are retained, and the current per-frame atlas
-ordering and upload remain unchanged. Exact-work diagnostics observed 87.3%
-lower DObj lighting time and 30.0% lower total DObj build time. See
-[the lighting-handle evidence](evidence/dobj-lighting-cache-a16fb9f2.md).
+Loaded techniques 21/22 use authored images, attenuation, fog and render bits.
+Clear destination alpha per light without changing RGB/depth, then scissor both
+clear and receiver draws: `ONE_MINUS_DST_ALPHA` requires RGBA8 scene targets.
+One list combines receiver families, excluding code meshes, marks, clouds and
+sun billboards. Reverse-sort complements bits 54-59 before ascending comparison;
+non-BSP keys inherit material light/probe fields rather than camera overrides.
+Native low-bit object IDs are transient draw-buffer offsets absent at this seam;
+equal-key stable frontend order does not establish exact native tie ordering.
 
-## DObj conversion and dynamic sun ranges
+State reuse stays local to each frame/pass/partition; complete texture-set changes
+reapply original unit order to preserve aliased object parameters. Reset after
+outside changes/direct overrides. Material keys include material/technique identity,
+both state words, source/ambient mode and bitwise shader arguments; extend equality
+for every consumed input. Matching blend bits alone cannot reuse feather/falloff/
+eye offsets. Required uniforms always upload; no global GL/sampler-object cache.
 
-Delivered in `30e34cff`: the final diagnostic comparison observes 41.1% lower
-DObj build time and 59.1% lower combined skinning/geometry time. Fresh production
-A/B/B/A pair means are 15.461 -> 14.296 ms (7.54% lower), with 1,374 additional
-sun draw submissions avoided. Control drift and other limits are recorded in
-[the DObj evidence](evidence/dobj-conversion-30e34cff.md).
+## Presentation and fidelity boundaries
 
-DObj skinning now writes position, normal, tangent and decoded attributes directly
-into the final vertex span. Indices are constructed as one span per surface.
-The three intermediate float arrays and separate vertex-copy pass are removed.
-After synchronous backend submission, the frontend recycles only numeric vertex
-and index capacity; the builder also returns failed, unpublished geometry to that
-workspace. World unload releases it. This trades retained CPU capacity for fewer
-allocations and growth copies; it does not retain canonical asset pointers,
-poses, lighting, visibility, materials or completed draw commands. All of those
-inputs are consumed anew each frame. Backend context recovery still uses its
-own published CPU geometry, never this empty frontend workspace.
-Existing backend memory counters do not include this frontend capacity; no
-total-memory saving is claimed.
+- [Native particle-cloud policy](../src/gfx_d3d/r_particle_cloud.h) preserves view-X
+  sign, directed stretching, epsilon and `UV - 0.5` corners. Placement affects
+  centers, not billboard dimensions. The 8x8x16 lattice consumes three random
+  samples per cell in native x/y/z order; CRT bucket adaptation preserves range
+  and lifecycle, not identical sequences. Outdoor masking uses the canonical
+  image/matrix and inclusive height test; absent lookup skips that outdoor pass.
+- Soft particles use authored bindings and signed FloatZ from lit/decal depth,
+  including alpha rejection. Non-feathered angle falloff remains independent of
+  `r_zFeather`. Distortion resolves post-lighting colour before emissive draws,
+  rejects offsets crossing foreground depth, and honors `r_distortion` separately.
+  The observed MSAA source-reuse case requires `glFlush`, not a GPU completion wait.
+- Saved screens retain one RGB8 feedback texture/four native timer slots, the
+  0.99 blur cap and authored flash blend. Resize/context loss invalidates history;
+  unload/shutdown releases it. Lost prior-frame pixels cannot be recovered.
+  Save/feedback reads precede display gamma (`1 / r_gamma`) to avoid double correction.
+- [Shared text](../src/gfx_d3d/r_text.cpp) owns glyph/style/glow/cursor timing and
+  native half-pixel placement; the adapter only submits quads and converts BGRA.
+  [Shared gamma](../src/gfx_d3d/r_gamma.cpp) supplies native arithmetic; WebGL cannot
+  install a monitor gamma ramp. AC130 accepts only native's precise empty-grid
+  representation, not malformed missing storage; FX average lighting follows
+  native's sun-selection/56-sample policy rather than the model-lighting query.
 
-Selective Emscripten LTO covers the DObj builder, lighting adapter and existing
-Kisak `com_pack.cpp`/`com_math.cpp` helpers. This exposes helper bodies to the
-optimizer instead of copying their implementations into the web renderer.
-Exception catching, allocation-failure handling and finite-input checks remain
-enabled. Native target behavior and browser capability requirements are unchanged.
-The diagnostic skinning interval now includes final vertex construction and
-attributes; the old separate vertex-emission interval is zero. Compare the sum
-of skinning and geometry, or total DObj build, across this boundary.
+## Validation and reproduction
 
-The existing sun-range helper also accepts dynamic draw references. Adjacent
-opaque ranges merge only within the same brush instance or shared skinned buffer.
-Non-casters, depth-hack/FX exclusions, cutouts, gaps and instance changes break
-the run. Camera visibility never enters the decision. Static-model culling,
-static shadow instance selection and authored spot membership are unchanged.
-`sunShadowMergedRanges` includes these additional avoided submissions.
+Native/Wasm fixtures retain atomicity, placement, visibility and shadow checks.
+Differentials cover 4,096 spot directions/98,304 coefficients and bounds cases,
+4,096 posed-box/sort and 1,024 culling/key cases, not the full native renderer.
+Actual `WEBGL_lose_context` tests cover browser events; earlier direct hooks
+proved resource reconstruction only.
 
-Use `renderer_workload.mjs --shadow-ranges` for this physical-draw change. It
-requires exact logical caster totals and exact equality of all other work,
-including uploaded bytes and submitted indices, across all 120 samples. The
-ordinary `--profiles` comparator remains strict.
+Known limits remain: installed Chrome/D3D11 recorded three unchanged one-byte
+exact-pixel discrepancies (127 versus 128), despite default Chromium passes.
+The late transient-light test passed illumination, shadows, clearing, recovery
+and limits but failed its final positive DObj post-pose diagnostic; do not report
+the complete fixture as passing. Its DynEntity-brush path has synthetic evidence
+only. Stationary AC130 emitted no particle cloud, so authored cloud/thermal
+fidelity remains open. Matched native/Steam lighting, translucency, moving marks,
+all shader families and full scene parity require separate observations.
 
-## Static sun-shadow partitions
+For sampler changes run installed Chrome/D3D11 on an isolated port; WebGL link
+success alone cannot expose ANGLE's first-draw shader compiler failures:
 
-Delivered in `cc4af645`: the backend now mirrors native's distinct sun-shadow
-visibility step for static XModels. The portable instance record carries the
-canonical `GfxStaticModelInst` AABB. Once LOD packing is current, each near/far
-pass computes a light-matrix visibility byte for every retained shadow instance
-and submits contiguous visible runs from the existing instance buffer.
+```powershell
+$env:KISAK_BROWSER_CHANNEL = 'chrome'
+$env:KISAK_WEB_TEST_PORT = '8052'
+npx.cmd playwright test tests/browser/dynamic_lights.spec.mjs
+node --test tests/node/renderer_workload.test.mjs tests/node/retail_profile_aggregate.test.mjs
+```
 
-This mask belongs to the WebGL draw boundary. It stores no pose, asset, gameplay,
-or camera state; it is overwritten independently for each partition. Camera DPVS
-packing remains in the buffer's second half and never enters caster selection.
-Authored spot-shadow membership keeps its existing canonical-index lookup.
-Unload releases the mask, and context recovery reuses canonical retained bounds.
+For authorized local assets, serve only the selected built site on port 8051,
+set `KISAK_COD4_RETAIL_ROOT` locally, and capture with the existing runner:
 
-The explicit `--static-shadow-partitions` comparator normalizes only the intended
-caster-instance and submitted-index reductions before requiring every other work
-field and workload checkpoint to match. The final diagnostic candidate removes
-9,706 caster instances and 1,897,368 indices per frame; sun CPU falls 65.0%.
-Production A/B/B/A pair means fall 14.947 -> 12.732 ms (14.82%). See
-[the full evidence](evidence/static-sun-partitions-cc4af645.md).
+```powershell
+python tools/serve_web.py --directory build/web-diagnostics/site-diagnostics --port 8051
+# Run in a second shell; source revision and directory must match the served artifact.
+node tools/profile_web_renderer.mjs active-before diagnostics HEAD build/web-diagnostics/site-diagnostics
+node tools/profile_web_renderer.mjs paused-before diagnostics HEAD build/web-diagnostics/site-diagnostics fixedtime recovery
+```
 
-The [static-instance upload follow-up](evidence/static-instance-uploads-ac8b00ca.md)
-keeps those 24-byte bounds in aligned CPU source and shadow-packed vectors. The
-GPU instance record is again 72 bytes, and a visibility-only change uploads only
-the camera half. LOD changes still upload both halves because both packings move.
-No geometry buffer, camera-derived caster selection, or non-atomic publication
-was added. Eleven controlled camera transitions save 7,861,920 transfer bytes;
-no timing or gameplay-FPS improvement is inferred.
+Active capture uses 30 warm-up frames, 300 clean intervals and 120 profiled frames;
+`activeWorkloadMatched` stays false pending settings/view/work qualification.
+Record GPU/driver, source/artifact hashes and duration; reject incomplete,
+background/disjoint data. Preserve frame tails and distinct CPU/GPU/arrival
+boundaries; overlapping memory estimates cannot be added together.
+Paused diagnostics compare all 120 views 601-720 exactly with
+`node tools/renderer_workload.mjs --profiles BEFORE.json AFTER.json`.
+Use explicit `--retained`, `--shadow-ranges`, `--static-shadow-partitions`,
+`--world-shadow-partitions`, `--dynamic-shadow-partitions` or
+`--dynamic-spot-shadows` only for the corresponding intended work change.
+
+Paused production uses `production BUILT_COMMIT SITE fixedtime uncapped`, fresh
+A/B/B/A controls and checkpoints 240-540 over 300 frames. Report elapsed/300;
+five span percentiles are not per-frame p95. Keep timing methods/caps identical
+and builds separate. `com_maxfps 0` is benchmark-only; the 125 Hz safety bound remains.
+Paused gains do not establish campaign FPS. Headed CargoShip measured 20.63/17.28
+FPS on 2026-09-05 in different scenes, not an isolated resolution comparison.
+Current active stages and tails still need profiling.
+
+Historical experiments, shader hashes and failures remain in
+[Git history](../README.md#historical-records). Current suite results and optional
+fixture failures belong in the [test inventory](web-test-inventory.md).

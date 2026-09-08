@@ -90,7 +90,7 @@ COD4 fastfile
   ownership. If no such boundary exists, prefer compiling or adapting the
   Kisak implementation.
 
-Maintain `docs/web-port-convergence.md` as a current inventory of shared,
+Maintain `docs/architecture.md` as a current inventory of shared,
 modified, platform, temporary, native-only, and uncompiled systems. Every
 substantial milestone should move at least one relevant system toward shared
 Kisak behavior or explain why a platform-owned implementation is permanent.
@@ -118,7 +118,7 @@ Kisak behavior or explain why a platform-owned implementation is permanent.
 - Bootstrap the local pinned toolchain with `tools/bootstrap_web_toolchain.ps1`.
 - Build the native SP reference with `tools/build_native_sp.ps1`; its pinned
   MSVC/SDK configuration uses existing OpenAL and disables runtime DLL copying.
-  See `docs/evidence/native-reference-2026-09-02.md` for owned-data launch paths
+  See `docs/native-reference.md` for owned-data launch paths
   and the distinction between native startup and gameplay/reference evidence.
 - Build the production Release target with `tools/build_web.ps1 -Configuration Release`.
 - Run `npm.cmd ci` before Release builds; pinned Terser minifies the generated
@@ -171,7 +171,8 @@ Kisak behavior or explain why a platform-owned implementation is permanent.
 - Update existing documentation instead of adding agent completion reports or
   milestone snapshots. Put disposable run reports under ignored `build/`; keep
   durable architectural decisions and compatibility evidence in the existing
-  guides and `docs/evidence/`. Use Git for superseded documentation.
+  guides under `docs/`. Use Git for dated reports and superseded documentation;
+  do not recreate evidence/history folders.
 - Preserve unrelated user changes and avoid destructive Git operations.
 - Document architectural choices and browser limitations in the repository when they become real, especially renderer selection, asset storage, transport, memory sizing, and cross-origin isolation.
 - Update this file when verified setup or test commands replace the bootstrap assumptions above.

@@ -1,69 +1,52 @@
-# Browser reverb device boundary
+# Browser audio: reverb and EQ
 
-Status: the existing OpenAL Soft reverb DSP now runs in an AudioWorklet connected
-to browser game playback. `SND_SetRoomtype` and `SND_ApplyReverbSend` carry the
-canonical room and wet send through the current Web Audio device. Native/Wasm
-differential checks and browser PCM checks pass. Campaign or Steam audio parity
-is not claimed.
+Canonical SND owns aliases, channels, room selection, wet levels, EQ parameters,
+fades and game timing. The Worker OpenAL proxy carries bounded device state to
+Web Audio. Loaded and queued PCM share the same output graph. Device-played
+position, source generations and queue ordinals own completion; see
+[cinematic synchronization](cinematic-codec.md).
 
-`src/web/web_reverb.cpp` directly calls OpenAL Soft's `ReverbState` and stereo
-`BFormatDec`, using the same 26 EAX presets as the native Kisak sound driver.
-The preset array now lives in `src/sound/snd_reverb_presets.h`; native room
-selection and parameters are unchanged. This component owns audio buffers and
-effect history only. SND continues to own aliases, room selection, wet levels,
-fades, channels, and game timing.
+## Reverb ownership and dependency
 
-The device ABI accepts four planar ACN/N3D wet channels and returns two planar
-stereo channels. Each channel has a 1024-float stride; processing admits 1–1024
-frames. Initialization admits 8000–192000 Hz, invalid room indices are rejected,
-and non-finite input is rejected before it reaches the feedback network. The
-process call allocates no new buffers. It does not open an OpenAL device, start
-a mixer/event thread, or use Wasm pthreads.
+`src/web/web_reverb.cpp` calls OpenAL Soft's `ReverbState` and stereo
+`BFormatDec` in an AudioWorklet. Native and browser use the same 26 EAX presets
+in `src/sound/snd_reverb_presets.h`; `SND_SetRoomtype` and
+`SND_ApplyReverbSend` retain canonical behavior. This component owns buffers and
+effect history only, with no native mixer/event thread or Wasm pthreads.
 
-## Dependency and numeric behavior
+The ABI accepts four planar ACN/N3D wet channels and returns planar stereo,
+with a 1024-float channel stride, 1–1024 frames and 8000–192000 Hz. Invalid
+rooms and nonfinite input fail before entering the feedback network. Processing
+allocates no new buffers. The worklet reserves a separate 32 MiB memory.
 
-The 2026-09-05 size audit replaces OpenAL's native logging device implementation
-only in the Wasm component with `web_audio_log.cpp`. It retains formatted stderr
-errors and level filtering, while omitting unused native file streams and log
-callback registration. The existing logger linked both standard formatting and
-fmt's stream output; the worklet module drops from 385,509 to 59,211 bytes with
-the same embedded Wasm packaging. DSP sources, presets, validation, SIMD and
-memory settings remain unchanged. Native/Wasm comparison again passes all 130
-room/rate cases (40,368,640 samples), maximum absolute error
-7.264316082000732e-8 and maximum relative RMS error 0.000015560795861818597.
-This is signal/device evidence, not authored campaign audio acceptance.
+`scripts/web/reverb` pins OpenAL Soft 1.25.2 to
+`b2c48f7718ef3fcf67921a8b6534c4914e328970`. It is LGPL-2.0-or-later;
+retain its source, copyright and license notices. Generated `licenses.txt`
+includes attribution, license and source/build instructions alongside Kisak's
+GPL distribution. Distribute corresponding dependency sources and build scripts;
+a link alone does not replace source obligations. No Miles binary is used.
 
-The isolated CMake project at `scripts/web/reverb` pins OpenAL Soft 1.25.2 to
-`b2c48f7718ef3fcf67921a8b6534c4914e328970`, the native reference's current
-dependency. Its upstream source and copyright/license notices remain intact.
-OpenAL Soft is LGPL-2.0-or-later. The generated site's `licenses.txt` includes
-its license, attribution and source/build instructions alongside Kisak's GPL
-distribution. No proprietary Miles or other game binary is used.
+`tools/build_web.ps1` invokes `tools/build_reverb.ps1` to produce
+`reverb_dsp.mjs` with embedded Wasm because the worklet has no fetch API.
+The Wasm-only `web_audio_log.cpp` retains formatted stderr and level filtering
+without unused native streams/callback registration. Current aggregate product
+size results belong in the [test inventory](web-test-inventory.md#current-execution-evidence).
 
-The first scalar Wasm comparison failed in modulated presets. OpenAL's
-`fastf2u` deliberately allows platform rounding differences: native x86 uses
-round-to-nearest, whereas the generic path truncates. This changes the reverb
-LFO step and audibly relevant sample output. The isolated Wasm component uses
-Emscripten's supported SSE2 compatibility path (`-msimd128 -msse2`) to retain
-the native numeric behavior. See the official
-[Emscripten SIMD documentation](https://emscripten.org/docs/porting/simd).
-This requires Wasm SIMD support for this audio component. Failed module or
-processor initialization reports a diagnostic and leaves existing dry playback
-available.
+The DSP uses `-msimd128 -msse2` to preserve native x86 `fastf2u` round-to-nearest;
+the generic scalar path truncates and changes modulated reverb output.
+Wasm SIMD is required for this component. `web_audio_fpu.cpp` replaces host
+floating-point control-register handling: Wasm preserves IEEE subnormals, while
+native OpenAL disables them. Both comparison probes use `Mix_C` for effect
+output; the unused SSE1/MMX source mixer is excluded. Optional Clang 24
+function-effects analysis is disabled for its consteval `_uz` false positive;
+checked conversions, hardening and assertions remain enabled.
 
-`web_audio_fpu.cpp` replaces only OpenAL's host floating-point control-register
-save/restore: WebAssembly has no writable SSE control register. Native tests
-retain the upstream implementation. Wasm keeps IEEE subnormal behavior;
-native OpenAL disables subnormals. The differential tolerance covers numeric
-variation, not different effect parameters. The unused SSE1/MMX source mixer
-is excluded from this dedicated component; both probes use OpenAL's default
-`Mix_C` for the effect output. This library configuration is not a general
-browser replacement for the full OpenAL device API.
-
-Clang 24's function-effects analysis reports the consteval checked 64-to-32-bit
-`_uz` literal conversion as a potential blocking call. The dependency's
-optional analysis flag is disabled for this build. Checked conversions, STL
-hardening, and test assertions remain enabled as before.
+Source PCM branches after EQ into the shared reverb processor. Positional mono
+and non-spatial stereo use native OpenAL Pairwise encoding. Wet gains and room
+index are k-rate AudioParams so delivery is ordered with the audio graph;
+MessagePort carries startup/error/shutdown only. Reset discards the tail and
+prevents stale initialization from reconnecting. Initialization failure reports
+a diagnostic and leaves dry playback available.
 
 ## Reproduce the differential check
 
@@ -86,114 +69,56 @@ $reverbNativeCmake = 'C:/Program Files/Microsoft Visual Studio/18/Community/Comm
 node tools/compare_reverb.mjs build/reverb-native/impulse.f32 build/reverb-wasm/impulse.f32
 ```
 
-The recorded run reused the already checked-out public dependency via
-`-DFETCHCONTENT_SOURCE_DIR_OPENAL=<absolute build/native-sp-text/_deps/openal-src>`
-after verifying its exact Git commit. A clean checkout otherwise uses CMake
-FetchContent. All sources, binaries, and synthetic sample traces stay in
-ignored build directories. The fresh-fetch path has not been exercised here.
+CMake FetchContent obtains the pinned public dependency on a clean checkout.
+Bootstrap the tools first using the [README](../README.md#build). Sources,
+binaries and synthetic traces belong in ignored build directories.
 
-## Standalone DSP evidence, 2026-09-02
+## Parametric EQ
 
-- Native Win32 MSVC 14.51.36231 and Wasm Emscripten 6.0.6 Release tests passed
-  all 26 presets at 8000, 44100, 48000, 96000, and 192000 Hz. Node 24.18.0 ran
-  the Wasm test, not a browser.
-- Tests cover initialization/shutdown, invalid rates/rooms/block sizes,
-  non-finite input rejection, live room changes, stable buffer addresses,
-  and block sizes 1, 17, 127, 128, and 1024.
-- 130 impulse cases, 40,368,640 samples: largest absolute sample difference
-  `7.264316082000732e-8`; largest per-case relative RMS error
-  `0.000015560795861818597`. The original limits remained `2e-6` absolute
-  and `1e-4` relative RMS throughout diagnosis.
-- Native test executable SHA-256:
-  `c50752fc68096eea7c4662dce55caca2c4e4077c4bfc8acf0a7cf58d20094ddc`.
-  Wasm test SHA-256:
-  `4dccc1a77e6583402718a30132fb049e84669947f84db8c788c196cdf6a33640`.
-- Native `KisakCOD-sp` rebuilt successfully with the shared preset header.
-- Existing diagnostic browser smoke: 12 passed on isolated port 8171, using
-  bundled Chromium 149.0.7827.55 headless.
-  Remainder: 45 passed, six optional retail skips on port 8172. Retail
-  environment variables were cleared. These test the existing game artifact;
-  they do not establish browser reverb playback.
-  Diagnostic Wasm SHA-256:
-  `a1b6ff63c8e30eef3b4386a0de21e7fa6f0988b5f1257243c18530085c2b92b1`.
-  The production artifact was not changed in this milestone; its previously
-  reported cinematic size-budget failure remains open.
+`MSS_ApplyEqFilter` forwards two canonical stages of three bands each in native
+order. Unchanged snapshots send no updates. SND retains enable flags, type,
+gain, frequency, Q, save state and command/script updates; no parallel mixer or
+engine EQ representation is introduced.
 
-Logs: `build/goal-reverb-{native,wasm}-test.log`,
-`build/goal-reverb-comparison.log`, `build/goal-reverb-native-sp-build.log`,
-`build/goal-reverb-smoke.log`, and `build/goal-reverb-remainder.log`.
+The device applies lowpass, highpass, lowshelf, highshelf and bell filters before
+spatialization/gain and the reverb wet branch. Coefficients use the Q form of the
+[W3C/RBJ cookbook](https://www.w3.org/TR/audio-eq-cookbook/), with gain in dB and
+frequency in Hz at the AudioContext sample rate. IIRFilterNode preserves shelf
+Q, which BiquadFilterNode ignores. Zero/Nyquist limits use constant gain.
+Malformed snapshots and nonfinite/unstable coefficients fail atomically.
+Signed PCM conversion divides both signs by 32768 to retain stereo symmetry.
 
-## Browser integration
+Updates replace filters without restarting/rescheduling PCM; changed filters
+reset their history. Pause/restart retains parameters, while stop, natural end,
+source deletion and reset release nodes. `snd_enableEq=0` bypasses the chain;
+its inherited disabled default remains unchanged. Native OpenAL has no EQ
+implementation and cannot serve as its reference. Exact Miles coefficients and
+update transients are unverified. Both PC Miles and this port retain `eqLerp`
+without Xbox crossfade behavior; do not infer Xbox semantics for Steam.
 
-`tools/build_web.ps1` invokes `tools/build_reverb.ps1`, using the pinned public
-dependency and Emscripten toolchain. It produces `reverb_dsp.mjs` with embedded
-Wasm for the worklet, which has no fetch API. The component reserves 32 MiB,
-separately reported by audio telemetry; it adds no game-thread shared memory.
+## Recorded checks and remaining work
 
-The existing source PCM branches after its EQ filters into a shared reverb
-processor. Mono positional encoding and non-spatial stereo encoding follow the
-native OpenAL Pairwise convention. Per-source device gains and the room index
-use k-rate AudioParams so their delivery is ordered with the audio graph. An
-earlier MessagePort implementation could render offline PCM before receiving
-its wet gain; the regression exposed that ordering defect. MessagePort now
-carries only startup/error/shutdown messages. Reset closes the processor and
-discards its tail; stale asynchronous initialization cannot reconnect it.
+- Native/Wasm impulse comparisons cover all 26 presets at five rates: 130 cases,
+  40,368,640 samples. Maximum absolute difference was `7.264316082000732e-8`,
+  relative RMS `0.000015560795861818597`, within unchanged `2e-6` absolute and
+  `1e-4` relative RMS limits. Validation also covers malformed input, room
+  changes, stable buffers and block sizes 1, 17, 127, 128 and 1024.
+- `tests/browser/audio_reverb.spec.mjs` covers real offline PCM, dry preservation,
+  wet scaling, preset tails, stereo/positional/queued input, EQ-before-wet,
+  live updates, stale generations and initialization/reset failures.
+- Owned Killhouse selected `mountains`/0.3 naturally. The canonical console
+  selected `cave` and faded wet to 0.75 with nonzero measured wet PCM, then
+  restored the original room. This verifies device controls, not an authored
+  room transition; one stream underrun was observed in the short check.
+- Native/Wasm OpenAL-proxy and browser offline EQ checks cover all five filter
+  families, six bands in series, Q, stereo symmetry, queued/live updates,
+  32/44.1/48 kHz rates, endpoints, stale commands and atomic rejection.
+  An owned Killhouse check explicitly enabled a -6 dB bell at 1 kHz on a playing
+  source and verified bypass. Injected EQ settings do not qualify authored audio.
 
-`tests/browser/audio_reverb.spec.mjs` checks real offline browser output: dry
-preservation, wet scaling, distinct preset tails, stereo anti-phase preservation,
-positional input, queued PCM, EQ before the wet send, live wet changes without
-restarting PCM, generation rejection, failed module loading and reset during
-startup. All three cases passed three repeated runs in Chromium 149.0.7827.55
-on isolated port 8175 (`build/goal-reverb-browser-narrow-3.log`).
-
-Owned Killhouse passed the production test `@retail-reverb` in headless Chrome
-152.0.7977.65 on port 8179. The real level selected `mountains` (index 17), with
-wet level 0.3 on dialogue and environmental sources; excluded ambient/cinematic
-sources retained zero wet. The existing `snd_setEnvironmentEffects level`
-console command selected `cave` and faded wet to 0.75, with intermediate SND
-updates observed. A separate analyser on the wet output measured nonzero PCM
-energy (`0.007347049202795963` across 2048 samples). The test then restored
-`mountains`/0.3 and verified that state. No alias, PCM or mission was injected.
-This qualifies device controls, not an authored room transition or audible
-Steam comparison. The run reported 6,052,008 decoded PCM bytes, 33,554,432 DSP
-memory bytes, one stream underrun, zero overruns/evictions and no reverb or page
-errors. Callback cost and the stream underrun remain outside this short check.
-
-The original test incorrectly used the reserved `shellshock` priority;
-`EndShellShockSound` clears it every frame without an active shock. The fixture
-now uses the level console API. A subsequent restoration check caught a wrong
-preset name (`forest` is index 15); it was corrected to `mountains`, index 17.
-Canonical sound behavior and assertions were preserved.
-
-Retail log: `build/goal-reverb-retail-4.log`; private observations:
-`test-results/8179/retail_ui_persistence-prod-942ec-ect-playing-Killhouse-audio-chromium/reverb-evidence.json`.
-The final fixture also passed on isolated port 8183, explicitly requiring a
-wet value strictly between the starting 0.3 and target 0.75; see
-`build/goal-reverb-retail-final.log` and the corresponding `test-results/8183`
-observations. This is a repeated device check, not additional campaign coverage.
-Production Wasm SHA-256:
-`feb8f46646b67e38177dd505bc517ca707b761dfd96087177cffde08a9153209`.
-Diagnostic Wasm SHA-256:
-`02f781a2236a0241c56b4ac81aafb2534299356c20c3ae11b03061775cb9d69d`.
-Both sites use reverb module SHA-256:
-`b38ba0db7efe17c84a010b49667073dbd5888931e40b1910374666fb25ff71be`.
-
-The unchanged production size gate **fails**: main Wasm 3,708,294 bytes against
-3,332,379; all JavaScript (including embedded DSP Wasm) 759,076 against 357,646;
-site 4,565,437 against 3,701,082. The DSP module accounts for 385,509 bytes.
-The exact product file and application-export checks passed before the size
-failure. No budget was raised. See `build/goal-reverb-product-boundary.log`.
-
-Integration verification also passed native and Wasm OpenAL-proxy tests, the
-native SP rebuild, production/diagnostic Release builds, static checks and
-83 Node protocol tests. Routine browser checks used bundled Chromium
-149.0.7827.55: smoke 12 passed (port 8180); remainder 48 passed, six optional
-retail skips (8181); production 43 passed (8182). Retail environment variables
-were cleared for those runs. Logs are `build/goal-reverb-integrated-{smoke,
-remainder,product,protocol}.log` and `build/goal-reverb-static-final.log`.
-The exhaustive browser duplicates were not rerun.
-
-The next fidelity checks are authored room/shellshock transitions during actual
-gameplay, callback cost under load, and audible comparison with native Kisak and
-the original Steam game. Native OpenAL DSP agreement does not establish Miles
-parity or completed campaign behavior.
+These are historical signal/device observations, not campaign or Steam audio
+acceptance. Still needed: authored room/shellshock transitions, EQ activation
+and audible update transients, callback cost under load, output latency and
+matched native/Steam listening. DSP agreement with OpenAL does not prove Miles
+parity. Dated runs and artifact identities remain in
+[Git history](../README.md#historical-records).

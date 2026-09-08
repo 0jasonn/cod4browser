@@ -30,7 +30,10 @@ English PC installation have zero or one audio track. Surround-track mixing is
 rejected. Previously imported profiles need a new folder selection to add movies.
 Header admission is not a promise that damaged frame data will decode.
 
-The OpenAL proxy now receives actual Web Audio source position and processed
+## Device clock and loading
+
+The device has 54 sources: 53 canonical game channels and one movie track.
+The OpenAL proxy receives actual Web Audio source position and processed
 buffer counts instead of estimating them from Worker wall time. Static and
 queued synthetic PCM waits through delayed delivery and AudioContext suspension
 in served Chromium. Feedback carries source generations and absolute queue
@@ -66,13 +69,6 @@ No pthreads or cross-origin isolation are required. Startup now requires both
 the pinned Emscripten toolchain still describes JSPI as experimental. See the
 [browser support policy](browser-support.md).
 
-The previous Asyncify implementation addressed a production Killhouse sequence
-that measured 2,722 ms of map loading after the 37,624-ms intro. Its measured
-Release Wasm increased from 3,189,365 to 5,330,129 bytes (about 67%; 1,848,062
-bytes gzip), including Asyncify instrumentation and the loading/registration
-fixes. These are historical measurements of that implementation, not current
-JSPI size or gameplay-performance qualification.
-
 The native map-zone progress reset is restored. The bar reads
 `DB_GetLoadedFraction`, measuring compressed fastfile work. External IWI pixels
 are renderer-registration resources in this port, so the DB denominator excludes the
@@ -88,15 +84,7 @@ remain private until atomic publication. Both launchers batch log-panel layout
 once per animation frame so verbose registration cannot starve movie/audio
 delivery on the page thread.
 
-On 2026-09-05, using the earlier Asyncify implementation, the owned Killhouse
-map path passed in headless Google Chrome
-152.0.7977.77: the intro started 29 ms after the command, loading plus graphics
-registration finished 7,692 ms into the 37,464-ms movie, the queued fade started
-12 ms after completion, and the first game-driven renderer frame appeared
-56 ms after completion. The early capture shows the stock bar filling from
-native DB progress; pregame hides it when ready. A separate run confirms native
-Escape skip starts the queued fade after loading. This demonstrates loading,
-rendering and transition behavior, not human gameplay or audiovisual fidelity.
+## Recorded checks and limits
 
 On 2026-09-07 the JSPI build passed the complete-owned-intro regression in
 headless Chrome: native DB progress advanced during loading, registration
@@ -113,7 +101,9 @@ This is platform synchronization/recovery evidence; human
 listening, hardware output latency, arbitrary audio-tail layouts and matched
 native/Steam audiovisual comparison remain unqualified.
 
-The renderer now uses the canonical `cinematic` material instead of a private
+## Cinematic materials
+
+The renderer uses the canonical `cinematic` material instead of a private
 RGBA material. The observed single-pass `cinematic.hlsl` family binds code
 samplers 22–25 to Y/Cr/Cb/A. World, brush, static-model, DObj and UI draws resolve
 those images at draw time, so a new movie frame does not rebuild scene geometry.
@@ -135,7 +125,12 @@ native/Steam colour comparison, authored in-world movie surfaces and campaign
 transitions. The targeted material/backend evidence does not qualify a TV or
 other authored in-world scene. Manual gameplay acceptance remains with the user.
 
+## Decoder check
+
 The optional `KisakCOD-web-cinematic-check` CMake target builds the standalone
 Wasm decoder check. Run its `.cjs` output with Node for synthetic rejection tests;
 an optional local filename additionally decodes a caller-owned movie completely.
 No retail input is copied into fixtures.
+
+Current suite/size results are in the [test inventory](web-test-inventory.md);
+dated movie experiments remain in [Git history](../README.md#historical-records).

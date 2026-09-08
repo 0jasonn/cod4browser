@@ -38,6 +38,7 @@ as the binary, with the versioned `.gitattributes` exclusions, and pass
 `python tools/check_source_archive.py <archive.zip>`. For example:
 
 ```powershell
+New-Item -ItemType Directory -Path build -Force | Out-Null
 git archive --format=zip --output=build/kisakcod-web-source.zip HEAD
 python tools/check_source_archive.py build/kisakcod-web-source.zip
 ```
@@ -64,11 +65,24 @@ OPFS and Worker filesystem host, page/Worker lifecycle, Emscripten system
 adapters, input/audio hosts, and the WebGL2 backend. Canonical Kisak code owns
 the engine, assets, game state, filesystem semantics, and renderer frontend.
 
-The authoritative component classification and current blockers are in
-[docs/web-port-convergence.md](docs/web-port-convergence.md). See the
-[current status](docs/web-status.md), [ordered roadmap](docs/web-roadmap.md),
-[campaign matrix](docs/campaign-compatibility.md) for claim scope and exact
-evidence. Superseded records remain in [Git history](#historical-records).
+## Documentation
+
+These guides explain how to build and maintain the port; the game does not read
+them. Keep current decisions, commands and known limits here. Use Git for dated
+reports and superseded plans.
+
+| Guide | Purpose |
+| --- | --- |
+| [Status and priorities](docs/web-status.md) | What works, what is unqualified and what to do next. |
+| [Architecture and ownership](docs/architecture.md) | Which systems use shared Kisak code and which belong to the browser platform. |
+| [Campaign compatibility](docs/campaign-compatibility.md) | Map-by-map observations and limits on gameplay claims. |
+| [Browser support and recovery](docs/browser-support.md) | Required APIs, local packages, updates and save backups. |
+| [Tests](docs/web-test-inventory.md) | Validation tiers, commands and the latest recorded results. |
+| [Local retail validation](docs/local-retail-validation.md) | Optional checks with a legally owned installation. |
+| [Native reference](docs/native-reference.md) | Build and launch the native comparison target. |
+| [Renderer resources](docs/renderer-retained-resources.md) | GPU ownership, rendering constraints and recovery. |
+| [Browser audio](docs/browser-reverb.md) | Reverb/EQ ownership, dependency licensing and signal checks. |
+| [Cinematics](docs/cinematic-codec.md) | Bink decoder build/licensing, loading and synchronization. |
 
 ## Build
 
@@ -92,11 +106,11 @@ tool and site hashes outside the served directory. CI can pair exact source
 and site only after every required tier succeeds; its package is explicitly
 synthetic-platform qualification, not single-player alpha acceptance.
 See [distribution and recovery](docs/browser-support.md#local-package-contract).
-The 2026-09-07 rebuild passes the unchanged production export/size gate with
-JSPI loading suspension and native Wasm exceptions. Release builds also retain
-verified public dependency sources outside the served site. Aggregate CI and
-manual campaign acceptance remain separate qualification requirements. See the
-[test inventory](docs/web-test-inventory.md#current-execution-evidence).
+Release uses JSPI loading suspension and native Wasm exceptions, and retains
+verified public dependency sources outside the served site. The
+[test inventory](docs/web-test-inventory.md#current-execution-evidence) records
+the latest local checks; aggregate CI and manual campaign acceptance remain
+separate qualification requirements.
 
 ## Browser validation
 
@@ -126,16 +140,19 @@ suites instead of being repeated in a browser.
 
 ## Historical records
 
-Current ownership, priorities and compatibility evidence live in the guides
-linked above. Superseded milestones and numeric benchmark dumps remain in Git;
-retained evidence reports include exact retrieval commands. To inspect earlier
-documents without changing the working tree:
+The dated evidence reports, original architecture and roadmap are archived in
+commit `15c316606281e4de63cbf3c06626ee60a307498d`. They record results for their
+stated revisions; they do not qualify later code. Inspect them without changing
+the working tree:
 
 ```powershell
-git log --all -- docs
-git ls-tree -r --name-only 49d6168cab15181f03744cf07f10b288b673bc0c docs/history
-git show 49d6168cab15181f03744cf07f10b288b673bc0c:docs/history/web-port-milestones.md
+git ls-tree -r --name-only 15c316606281e4de63cbf3c06626ee60a307498d docs
+git show 15c316606281e4de63cbf3c06626ee60a307498d:docs/evidence/native-reference-2026-09-02.md
 ```
+
+Substitute any listed path in the second command. For documents removed earlier,
+use `git log --all -- docs` to find their revision. Disposable build logs and
+captures were recycled during cleanup; Git retains committed reports only.
 
 ## License
 

@@ -35,7 +35,7 @@ not establish native/browser fidelity or justify weakening assertions.
 
 Optional retail tiers are not qualified by synthetic passes. A later transient-
 light run passed illumination/shadows/clearing/recovery but failed the final
-positive DObj post-pose diagnostic; see [the light record](evidence/transient-lights-2026-09-02.md).
+positive DObj post-pose diagnostic; see the [renderer guide](renderer-retained-resources.md).
 The 2026-09-07 Gate 3 attempt still expected camera-only geometry from before
 `4bee7442` added shadow-only BSP surfaces. Its trace contains 8,480 surfaces,
 445,595 vertices, 823,896 indices and 797 batches, reaching generation 53
@@ -113,17 +113,14 @@ unused platform/fixture APIs; archived superseded reports in Git. The remaining
 | Product boundary | Pass: 3,191,265 Wasm bytes, 322,498 JavaScript bytes, 3,617,122 site bytes; 17 raw / nine application exports, 22 files. |
 | Source/package checks | 14/14 Python cases and generated source archive validation pass. |
 
-Commands and disposable logs are under ignored `build/repo-cleanup/`. Tests
-used default Playwright Chromium on Windows; the running user's server on port
-8000 was preserved. Native SP was built, not launched for gameplay. The source
-receipt records `dirty=True`; this is local synthetic platform evidence.
+Tests used default Playwright Chromium on Windows. Native SP was built, not
+launched for gameplay. The original disposable `build/repo-cleanup/` logs were
+recycled during cleanup. The source receipt records `dirty=True`; this is local synthetic platform evidence.
 Linux/hosted CI, sanitizer fuzz, native MP, owned campaign acceptance, installed
 Chrome fidelity, exhaustive browser duplicates and aggregate release
 qualification were not rerun for this cleanup.
 
-The earlier 30-second Windows sanitizer pass, owned loading check, precise
-historical tool versions and superseded execution records remain available:
-
-```powershell
-git show 4bca1760f95edb60c362926fa944e96dbcae3f2a:docs/web-test-inventory.md
-```
+The earlier 30-second Windows sanitizer pass, owned loading check and superseded
+execution records remain in [Git history](../README.md#historical-records).
+The documentation consolidation only ran reference and whitespace checks; it did
+not recreate the recycled toolchain or rerun runtime suites.
