@@ -13,6 +13,7 @@
 #include <xanim/xmodel_types.h>
 #include <xanim/xsurface_types.h>
 #include "multiply_fog_fixture.h"
+#include "reflex_sight_fixture.h"
 
 #include <algorithm>
 #include <array>
@@ -1220,6 +1221,14 @@ void TestNamedDetailMapAndScaleSurvivePortableBoundary()
     assert(draw.detailSamplerState == 0x13u);
     assert(draw.detailScale[0] == 8.0f);
     assert(draw.detailScale[1] == 16.0f);
+    ReflexSightFixture reflex;
+    fixture.materials[0] = &reflex.material;
+    assert(WebRenderer_BuildStaticModelSceneCommand(fixture.world, command) ==
+        WebRendererStaticModelSceneResult::Success);
+    const auto &sight = command.batches[0].draw;
+    assert(sight.baseImage == &reflex.base && sight.detailImage == &reflex.detail);
+    assert(sight.samplerState == 0x62 && sight.detailSamplerState == 0x11);
+    assert(sight.detailScale[0] == 10 && sight.detailScale[1] == 25);
 }
 
 void TestLightingAtlasCountsOnlySubmittedCanonicalPlacements()

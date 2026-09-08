@@ -399,7 +399,6 @@ struct WebRendererState
     GLint modelLightingBaseCoordinatesUniform = -1;
     GLint modelLightingLookupScaleUniform = -1;
     GLint premultiplyAlphaUniform = -1;
-    GLint colorIntensityAlphaUniform = -1;
     GLint materialModeUniform = -1;
     GLint pickupSheenUniform = -1;
     GLint softFlagsUniform = -1, softFeatherUniform = -1;
@@ -2268,7 +2267,6 @@ void ResetGpuHandles()
     g_renderer.modelLightingBaseCoordinatesUniform = -1;
     g_renderer.modelLightingLookupScaleUniform = -1;
     g_renderer.premultiplyAlphaUniform = -1;
-    g_renderer.colorIntensityAlphaUniform = -1;
     g_renderer.materialModeUniform = -1;
     g_renderer.pickupSheenUniform = -1;
     g_renderer.outdoorLookupMatrixUniform = -1;
@@ -3814,6 +3812,8 @@ bool CreateRendererResources(bool contextRecovery = false)
         out vec3 v_outdoor_lookup;
         out vec4 v_color;
         out vec2 v_texcoord;
+        uniform vec4 u_detail_scale;
+        out vec2 v_reflex_coord;
         out vec3 v_world_position;
         out vec2 v_lightmap_coord;
         out vec3 v_model_normal;
@@ -3848,6 +3848,16 @@ bool CreateRendererResources(bool contextRecovery = false)
                     a_instance_model_lighting_coords;
             }
             vec3 world_position = position;
+            v_reflex_coord = vec2(0.0);
+            if (u_material_mode == 22)
+            {
+                // reflexsight.hlsl computes the reticle lookup per vertex.
+                // Dot products are unchanged by the rigid view rotation.
+                vec3 view = normalize(world_position - u_view_origin);
+                vec3 binormal = cross(model_normal, model_tangent) * a_binormal_sign;
+                v_reflex_coord = vec2(dot(binormal, view), dot(model_tangent, view)) *
+                    u_detail_scale.xy + 0.5;
+            }
             position.x *= min(1.0, u_aspect);
             position.y *= min(1.0, 1.0 / u_aspect);
             gl_Position = u_view_projection * vec4(position, 1.0);
@@ -3928,6 +3938,7 @@ bool CreateRendererResources(bool contextRecovery = false)
         precision highp sampler3D;
         in vec4 v_color;
         in vec2 v_texcoord;
+        in vec2 v_reflex_coord;
         in vec3 v_world_position;
         in vec2 v_lightmap_coord;
         in vec3 v_model_normal;
@@ -3964,7 +3975,6 @@ bool CreateRendererResources(bool contextRecovery = false)
         uniform float u_specular_map_enabled;
         uniform vec3 u_model_lighting_lookup_scale;
         uniform float u_premultiply_alpha;
-        uniform float u_color_intensity_alpha;
         uniform int u_material_mode;
         uniform vec4 u_falloff_parms;
         uniform float u_scene_fallback;
@@ -4124,6 +4134,13 @@ bool CreateRendererResources(bool contextRecovery = false)
 
         void main()
         {
+            if (u_material_mode == 22)
+            {
+                float q = sample_texture(u_texture, v_reflex_coord).r *
+                    sample_texture(u_detail_map, v_texcoord).r;
+                out_color = vec4(2.0 * q, 1.2 * (q - 0.2), 1.2 * (q - 0.2), 1.2 * q);
+                return;
+            }
             vec4 texel = sample_texture(u_texture, v_texcoord);
             if (u_material_mode == 21)
             {
@@ -4276,9 +4293,7 @@ bool CreateRendererResources(bool contextRecovery = false)
                 out_color = vec4(mix(fog, color, visibility), u_material_mode == 10 ? alpha : 1.0);
                 return;
             }
-            float source_alpha = u_color_intensity_alpha > 0.5
-                ? max(texel.r, max(texel.g, texel.b))
-                : texel.a;
+            float source_alpha = texel.a;
             vec4 bootstrap_color = v_color;
             vec3 environment_reflection = vec3(0.0);
             float sun_visibility = 0.0;
@@ -5021,8 +5036,6 @@ bool CreateRendererResources(bool contextRecovery = false)
         glGetUniformLocation(program, "u_model_lighting_lookup_scale");
     const GLint premultiplyAlphaUniform =
         glGetUniformLocation(program, "u_premultiply_alpha");
-    const GLint colorIntensityAlphaUniform =
-        glGetUniformLocation(program, "u_color_intensity_alpha");
     const GLint materialModeUniform =
         glGetUniformLocation(program, "u_material_mode");
     const GLint pickupSheenUniform = glGetUniformLocation(program, "u_pickup_sheen");
@@ -5277,7 +5290,7 @@ bool CreateRendererResources(bool contextRecovery = false)
         modelLightingUniform < 0 || modelLightingEnabledUniform < 0 ||
         modelLightingBaseCoordinatesUniform < 0 ||
         modelLightingLookupScaleUniform < 0 ||
-        premultiplyAlphaUniform < 0 || colorIntensityAlphaUniform < 0 ||
+        premultiplyAlphaUniform < 0 ||
         materialModeUniform < 0 || pickupSheenUniform < 0 || outdoorLookupMatrixUniform < 0 ||
         outdoorUniform < 0 || mipBiasUniform < 0 || falloffParmsUniform < 0 ||
         falloffBeginColorUniform < 0 || falloffEndColorUniform < 0 ||
@@ -5427,7 +5440,6 @@ bool CreateRendererResources(bool contextRecovery = false)
     g_renderer.modelLightingLookupScaleUniform =
         modelLightingLookupScaleUniform;
     g_renderer.premultiplyAlphaUniform = premultiplyAlphaUniform;
-    g_renderer.colorIntensityAlphaUniform = colorIntensityAlphaUniform;
     g_renderer.materialModeUniform = materialModeUniform;
     g_renderer.pickupSheenUniform = pickupSheenUniform;
     g_renderer.softFlagsUniform = glGetUniformLocation(program, "u_soft_flags");
@@ -9092,8 +9104,6 @@ void ApplyWorldMaterialState(const WebRendererRetainedWorldBatch &batch,
             ((state0 >> 4u) & 0xfu) == 6u);
     glUniform1f(g_renderer.premultiplyAlphaUniform,
         shaderPremultipliesAlpha ? 1.0f : 0.0f);
-    glUniform1f(g_renderer.colorIntensityAlphaUniform,
-        WebRenderer_UsesColorIntensityOpacity(batch.technique) ? 1.0f : 0.0f);
     // Only vertex material mode 4 reads these constants. Upload on every
     // distance-falloff draw so technique transitions cannot reuse stale data.
     if (batch.technique == WebRendererWorldTechnique::VertexColorDistanceFalloff)
@@ -9188,6 +9198,12 @@ void ApplyWorldMaterialState(const WebRendererRetainedWorldBatch &batch,
                 g_renderer.sceneViewAxis[0], g_renderer.sceneViewAxis[1],
                 g_renderer.sceneViewAxis[2], time - std::floor(time));
         }
+        float reflexScale[4];
+        if (WebRenderer_GetReflexSightMaterial(batch.materialIdentity, CameraTechniqueType(batch), reflexScale))
+        {
+            glUniform1i(g_renderer.materialModeUniform, 22);
+            glUniform4fv(g_renderer.detailScaleUniform, 1, reflexScale);
+        }
     }
 }
 
@@ -9220,7 +9236,6 @@ void ApplyUiMaterialState(const WebRendererRetainedUiBatch &batch)
 {
     glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
     glUniform1f(g_renderer.detailMapEnabledUniform, 0.0f);
-    glUniform1f(g_renderer.colorIntensityAlphaUniform, 0.0f);
     glUniform1i(g_renderer.materialModeUniform,
         WebRenderer_IsCinematicMaterial(batch.materialIdentity, 4)
             ? (WebCinematic_FullRange() ? 13 : 12) : 0);
@@ -10722,6 +10737,97 @@ extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestObjectivePixel(int sc
         (std::uint32_t(pixel[2])<<16) | (std::uint32_t(pixel[3])<<24);
 }
 
+extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestReflexPixel(int scenario)
+{
+    if (!g_renderer.initialized || g_renderer.contextLost || scenario < 0 || scenario > 7)
+        return UINT32_MAX;
+    MaterialVertexShader vertex{"reflexsight.hlsl", {}};
+    MaterialPixelShader pixelShader{"reflexsight.hlsl", {}};
+    MaterialShaderArgument args[6]{};
+    args[0] = {3, 0, {}}; args[0].u.codeConst = {80, 0, 4};
+    args[1] = {3, 4, {}}; args[1].u.codeConst = {72, 0, 3};
+    args[2] = {3, 8, {}}; args[2].u.codeConst = {71, 0, 3};
+    args[3] = {0, 12, {}}; args[3].u.nameHash = 0x08d36a09u;
+    args[4] = {2, 0, {}}; args[4].u.nameHash = 0xa0ab1041u;
+    args[5] = {2, 4, {}}; args[5].u.nameHash = 0xeb529b4du;
+    MaterialTechnique technique{};
+    technique.passCount = 1;
+    auto &pass = technique.passArray[0];
+    pass.vertexShader = &vertex; pass.pixelShader = &pixelShader;
+    pass.perPrimArgCount = 3; pass.stableArgCount = 3; pass.args = args;
+    MaterialTechniqueSet set{}; set.techniques[4] = &technique;
+    MaterialConstantDef scale{}; scale.nameHash = 0x08d36a09u;
+    scale.literal[0] = 1; scale.literal[1] = scenario == 7 ? 2 : 1;
+    GfxStateBits state{{0x19288962u, 0xcu}};
+    Material material{};
+    material.techniqueSet = &set; material.cameraRegion = 2;
+    material.constantTable = &scale; material.constantCount = 1;
+    material.stateBitsTable = &state; material.stateBitsCount = 1;
+    WebRendererRetainedWorldBatch batch{};
+    batch.materialIdentity = &material; batch.techniqueType = 4;
+    batch.stateBits[0] = state.loadBits[0] & ~0xc000u;
+    batch.stateBits[1] = state.loadBits[1] | 2u;
+    const float center[3]{scenario == 6 ? 1.0f/3 : scenario == 7 ? 1.0f/6 : 0,
+        scenario == 4 || scenario == 5 ? 1.0f/3 : 0,
+        scenario >= 4 && scenario <= 6 ? std::sqrt(8.0f/9) : scenario == 7 ? std::sqrt(35.0f/36) : 1};
+    constexpr float edge = 0.0001f;
+    std::vector<WebRendererSurfaceVertex> vertices(4);
+    for (unsigned i = 0; i < 4; ++i)
+    {
+        auto &v = vertices[i];
+        v.position[0] = center[0] + (i & 1 ? edge : -edge);
+        v.position[1] = center[1] + (i & 2 ? edge : -edge);
+        v.position[2] = center[2]; v.normal[2] = 1; v.tangent[0] = 1;
+        v.binormalSign = scenario == 5 ? -1 : 1;
+        v.textureCoordinate[0] = v.textureCoordinate[1] = scenario == 7 ? 1.0f/6 : 0.5f;
+        v.color[1] = v.color[3] = 1; // Reflex shader does not use vertex color.
+    }
+    const std::vector<std::uint32_t> indices{0,1,2,2,1,3};
+    GLuint vao=0,vbo=0,ibo=0,textures[2]{},framebuffer=0,colorBuffer=0;
+    if (!CreateSurfaceObjects(vertices,indices,vao,vbo,ibo)) return UINT32_MAX;
+    glGenTextures(2,textures);
+    for (unsigned t=0;t<2;++t)
+    {
+        glActiveTexture(t ? GL_TEXTURE4 : GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D,textures[t]);
+        std::uint8_t pixels[36]{};
+        for (unsigned i=0;i<9;++i)
+        {
+            pixels[i*4] = t ? (scenario == 2 ? 192 : scenario == 7 && i == 0 ? 64 : 255) :
+                scenario >= 4 ? 16*(i+1) : scenario == 0 ? 0 : scenario == 1 ? 32 : scenario == 2 ? 128 : 255;
+            pixels[i*4+1] = 210; pixels[i*4+2] = 37; pixels[i*4+3] = 81;
+        }
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,3,3,0,GL_RGBA,GL_UNSIGNED_BYTE,pixels);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+    }
+    glGenFramebuffers(1,&framebuffer); glBindFramebuffer(GL_FRAMEBUFFER,framebuffer);
+    glGenRenderbuffers(1,&colorBuffer); glBindRenderbuffer(GL_RENDERBUFFER,colorBuffer);
+    glRenderbufferStorage(GL_RENDERBUFFER,GL_RGBA8,1,1);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_RENDERBUFFER,colorBuffer);
+    const bool complete=glCheckFramebufferStatus(GL_FRAMEBUFFER)==GL_FRAMEBUFFER_COMPLETE;
+    const bool dither=glIsEnabled(GL_DITHER);
+    glDisable(GL_DITHER); glDisable(GL_SCISSOR_TEST); glViewport(0,0,1,1);
+    glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
+    glClearColor(32.0f/255,48.0f/255,64.0f/255,77.0f/255); glClear(GL_COLOR_BUFFER_BIT);
+    const float projection[16]{1/edge,0,0,0,0,1/edge,0,0,0,0,0,0,-center[0]/edge,-center[1]/edge,0,1};
+    glUseProgram(g_renderer.program); BindSceneSamplers(); glBindVertexArray(vao);
+    glUniformMatrix4fv(g_renderer.viewProjectionUniform,1,GL_FALSE,projection);
+    glUniform1f(g_renderer.aspectUniform,1); glUniform1f(g_renderer.instanceEnabledUniform,0);
+    glUniform3f(g_renderer.viewOriginUniform,0,0,0);
+    ApplyWorldMaterialState(batch);
+    glDrawElements(GL_TRIANGLES,6,GL_UNSIGNED_INT,nullptr);
+    std::uint8_t pixel[4]{}; glReadPixels(0,0,1,1,GL_RGBA,GL_UNSIGNED_BYTE,pixel);
+    const bool error=!complete || glGetError()!=GL_NO_ERROR;
+    if (dither) glEnable(GL_DITHER);
+    glBindFramebuffer(GL_FRAMEBUFFER,0); glDeleteFramebuffers(1,&framebuffer);
+    glDeleteRenderbuffers(1,&colorBuffer); glDeleteTextures(2,textures);
+    DeleteSurfaceObjects(vao,vbo,ibo); g_renderer.textureParameters.Reset();
+    return error ? UINT32_MAX : pixel[0] | (std::uint32_t(pixel[1])<<8) |
+        (std::uint32_t(pixel[2])<<16) | (std::uint32_t(pixel[3])<<24);
+}
+
 extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestSoftParticlePixel(int scenario, int field)
 {
     if (scenario < 0) return field == 0 ? g_renderer.softParticleDepthReady :
@@ -11990,7 +12096,6 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
     glUniform3f(g_renderer.modelLightingLookupScaleUniform,
         0.0f, 0.0f, 0.0f);
     glUniform1f(g_renderer.premultiplyAlphaUniform, 0.0f);
-    glUniform1f(g_renderer.colorIntensityAlphaUniform, 0.0f);
     glUniform1i(g_renderer.materialModeUniform, 0);
     glUniform4f(g_renderer.envMapParmsUniform,
         0.0f, 0.0f, 0.0f, 0.0f);

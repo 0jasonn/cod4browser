@@ -576,6 +576,85 @@ test("range indicator lenses remain red over their opaque housings", { tag: "@re
         }
     });
 
+test("G36 reflex sight retains its red reticle with detail textures disabled", { tag: "@retail-reflex-sight" },
+    async ({ retailPage: page }, testInfo) => {
+        test.setTimeout(360_000);
+        await page.addInitScript(() => {
+            globalThis.__reflexReady = false;
+            globalThis.__reflexFrames = 0;
+            addEventListener("kisakcod:renderer-scene-frame", ({ detail }) => {
+                ++globalThis.__reflexFrames;
+                if (detail.geometrySubmitted && detail.worldName?.includes("killhouse"))
+                    globalThis.__reflexReady = true;
+            });
+        });
+        await page.goto("/");
+        const chooser = page.waitForEvent("filechooser");
+        await page.locator("#portable-install-button").click();
+        await (await chooser).setFiles(retailRoot);
+        await expect.poll(() => page.evaluate(() =>
+            globalThis.__KISAKCOD_WEB__?.module?.filesystemState),
+        { timeout: 300_000 }).toBe("mounted");
+        await page.locator("#game-canvas").click({ position: { x: 5, y: 5 } });
+        const command = text => page.evaluate(text =>
+            globalThis.__KISAKCOD_WEB__.submitCanonicalCommand(text), text);
+        await command("devmap killhouse");
+        await expect.poll(() => page.evaluate(() => globalThis.__reflexReady),
+            { timeout: 300_000 }).toBe(true);
+        await command("timescale 10");
+        await expect.poll(() => call(page, "_KisakWeb_TestGameplayState", 24, 0),
+            { timeout: 120_000 }).toBeGreaterThan(60_000);
+        await command("timescale 1");
+        await command("give g36c; cg_drawGun 1; cg_draw2D 0; setviewpos 3568 -929 65 90 0; cg_fov 65; r_gamma 0.962963");
+        await expect.poll(() => call(page, "_KisakWeb_TestGameplayState", 4, 0)).toBe(5);
+        await expect.poll(() => call(page, "_KisakWeb_TestGameplayState", 13, 0)).toBe(0);
+        await page.setViewportSize({ width: 1024, height: 768 });
+        await page.evaluate(() => {
+            document.body.classList.add("renderer-only");
+            document.querySelector(".asset-panel").style.display = "none";
+        });
+        const frames = () => page.evaluate(() => globalThis.__reflexFrames);
+        await command("leaveads");
+        const before = await frames();
+        await expect.poll(frames).toBeGreaterThan(before + 2);
+        await command("toggleads");
+        for (const detail of [1, 0]) {
+            await command(`r_detail ${detail}`);
+            const before = await frames();
+            await expect.poll(frames, { timeout: 15_000 }).toBeGreaterThan(before + 12);
+            const png = await page.locator("#game-canvas").screenshot({
+                path: testInfo.outputPath(`reflex-reticle-detail-${detail}.png`),
+            });
+            const reticle = await page.evaluate(async encoded => {
+                const bitmap = await createImageBitmap(new Blob([
+                    Uint8Array.from(atob(encoded), c => c.charCodeAt(0)),
+                ], { type: "image/png" }));
+                const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+                const context = canvas.getContext("2d");
+                context.drawImage(bitmap, 0, 0);
+                bitmap.close();
+                // Fixed camera: the sight is centered inside this 64-pixel square.
+                const pixels = context.getImageData(480, 352, 64, 64).data;
+                let count = 0, minX = 64, minY = 64, maxX = -1, maxY = -1;
+                for (let i = 0; i < pixels.length; i += 4) {
+                    if (pixels[i] <= 90 || pixels[i] <= Math.max(pixels[i + 1], pixels[i + 2]) * 1.5)
+                        continue;
+                    const x = (i / 4) % 64, y = Math.floor(i / 256);
+                    ++count;
+                    minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+                    minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+                }
+                return { size: [canvas.width, canvas.height], count,
+                    width: maxX - minX + 1, height: maxY - minY + 1 };
+            }, png.toString("base64"));
+            expect(reticle.size).toEqual([1024, 768]);
+            expect(reticle.count, `red reticle pixels with r_detail ${detail}`).toBeGreaterThan(40);
+            expect(reticle.count).toBeLessThan(1000);
+            expect(reticle.width).toBeLessThan(40);
+            expect(reticle.height).toBeLessThan(40);
+        }
+    });
+
 test("canonical objectives and renderer dvars reach the shipped HUD", { tag: ["@retail-objective", "@retail-dvars", "@retail-shadows"] },
     async ({ retailPage: page }, testInfo) => {
         test.setTimeout(360_000);

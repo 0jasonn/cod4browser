@@ -50,22 +50,6 @@ bool PlacementIsValid(const GfxScaledPlacement &placement) noexcept
         std::fabs(lengthSquared - 1.0f) <= 0.002f;
 }
 
-const GfxImage *FindBaseImage(
-    const Material *material, std::uint8_t &sampler) noexcept
-{
-    if (!material || !material->textureTable) return nullptr;
-    for (std::uint32_t index = 0u; index < material->textureCount; ++index)
-    {
-        const MaterialTextureDef &texture = material->textureTable[index];
-        if (texture.semantic == 2u && texture.u.image)
-        {
-            sampler = texture.samplerState;
-            return texture.u.image;
-        }
-    }
-    return nullptr;
-}
-
 const GfxImage *FindNormalImage(
     const Material *material, std::uint8_t &sampler) noexcept
 {
@@ -183,10 +167,12 @@ WebRendererWorldBatchDesc MakeDraw(
                 material->stateBitsTable[shadowStateEntry].loadBits[0];
         }
     }
-    draw.baseImage = FindBaseImage(material, draw.samplerState);
+    draw.baseImage = WebRenderer_FindBaseImage(material, draw.samplerState);
     draw.normalImage = FindNormalImage(material, draw.normalSamplerState);
     const bool hasTechnique = SelectTechnique(material, draw.stateBits,
         draw.techniqueName, draw.techniqueType);
+    if (WebRenderer_GetReflexSightMaterial(material, draw.techniqueType, draw.detailScale))
+        draw.detailImage = WebRenderer_FindDetailImage(material, draw.detailSamplerState);
     if (!draw.techniqueName ||
         std::strstr(draw.techniqueName, "n0") == nullptr)
         draw.normalImage = nullptr;

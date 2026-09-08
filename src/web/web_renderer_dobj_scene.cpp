@@ -356,10 +356,16 @@ bool SkinRigidSurface(
             TransformPosition(source->position, *matrix, output.position);
             TransformDirection(source->normal, *matrix, output.normal);
             TransformDirection(source->tangent, *matrix, output.tangent);
-            if (!Finite3(output.position) ||
-                !NormalizeDirection(output.normal) ||
-                !NormalizeDirection(output.tangent))
-                return false;
+            if (!Finite3(output.position)) return false;
+            // Native rigid draws transform the authored basis without
+            // normalizing it. Reflex lookup coordinates depend on its length.
+            for (const float *direction : {output.normal, output.tangent})
+            {
+                const float lengthSquared = direction[0] * direction[0] +
+                    direction[1] * direction[1] + direction[2] * direction[2];
+                if (!std::isfinite(lengthSquared) || lengthSquared <= 0.000001f)
+                    return false;
+            }
         }
     }
     return vertexIndex == surface.vertCount;
@@ -547,9 +553,10 @@ WebRendererWorldBatchDesc MakeDraw(
     SelectTechnique(material, draw);
     draw.ambientProbeLighting = draw.pixelShaderName &&
         std::strncmp(draw.pixelShaderName, "lp_amb_", 7u) == 0;
-    if (draw.pixelShaderName &&
+    if (WebRenderer_GetReflexSightMaterial(material, draw.techniqueType, draw.detailScale) ||
+        (draw.pixelShaderName &&
         std::strstr(draw.pixelShaderName, "d0") != nullptr &&
-        WebRenderer_CopyMaterialConstant(material, DETAIL_SCALE_HASH, draw.detailScale))
+        WebRenderer_CopyMaterialConstant(material, DETAIL_SCALE_HASH, draw.detailScale)))
     {
         draw.detailImage = WebRenderer_FindDetailImage(
             material, draw.detailSamplerState);
@@ -567,13 +574,11 @@ WebRendererWorldBatchDesc MakeDraw(
         ? WebRendererWorldTechnique::Cinematic
         : !draw.baseImage
         ? WebRendererWorldTechnique::BackendFallback
-        : WebRenderer_IsReflexSightTechnique(draw.techniqueName)
-            ? WebRendererWorldTechnique::ReflexSight
-            : environmentSpecular
-                ? (normalMapped
-                    ? WebRendererWorldTechnique::BaseTextureNormalSpecular
-                    : WebRendererWorldTechnique::BaseTextureSpecular)
-                : WebRendererWorldTechnique::BaseTexture;
+        : environmentSpecular
+            ? (normalMapped
+                ? WebRendererWorldTechnique::BaseTextureNormalSpecular
+                : WebRendererWorldTechnique::BaseTextureSpecular)
+            : WebRendererWorldTechnique::BaseTexture;
     if (draw.technique == WebRendererWorldTechnique::Cinematic)
         draw.samplerState = draw.normalSamplerState = draw.detailSamplerState = draw.specularSamplerState = 0x62;
     if (modelLightingEnabled &&

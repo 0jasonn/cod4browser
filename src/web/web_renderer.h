@@ -261,9 +261,6 @@ enum class WebRendererWorldTechnique : std::uint8_t
     // Canonical water_l_sun pass: animated FFT height field, reflection
     // probe, Fresnel water color, sun specular, and fog.
     WaterLitSun,
-    // Portable subset of IW3's reflexsight shader. Its DXT1 color texture is
-    // intentionally opaque; source opacity is reconstructed from intensity.
-    ReflexSight,
     // Native R_SetupMaterial skips the complete material group when the
     // primary-light-selected technique is absent. Retain that negative
     // selection explicitly so the backend does not invent fallback geometry.
@@ -314,12 +311,6 @@ constexpr bool WebRenderer_UsesModelEnvironmentSpecular(
 {
     return technique == WebRendererWorldTechnique::BaseTextureSpecular ||
         technique == WebRendererWorldTechnique::BaseTextureNormalSpecular;
-}
-
-constexpr bool WebRenderer_UsesColorIntensityOpacity(
-    WebRendererWorldTechnique technique) noexcept
-{
-    return technique == WebRendererWorldTechnique::ReflexSight;
 }
 
 // Portable description of the native pixel-lighting path selected by the

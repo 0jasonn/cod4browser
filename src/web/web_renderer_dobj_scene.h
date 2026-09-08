@@ -5,7 +5,6 @@
 #include <web/web_renderer_lod.h>
 
 #include <cstdint>
-#include <string_view>
 #include <vector>
 
 struct DObj_s;
@@ -22,13 +21,6 @@ inline Material *WebRenderer_ResolveDObjMaterial(
     if (!resolver) return material;
     Material *canonical = resolver(material);
     return canonical ? canonical : material;
-}
-
-inline bool WebRenderer_IsReflexSightTechnique(
-    const char *techniqueName) noexcept
-{
-    return techniqueName &&
-        std::string_view(techniqueName).starts_with("reflexsight");
 }
 
 struct WebRendererDObjSubmission

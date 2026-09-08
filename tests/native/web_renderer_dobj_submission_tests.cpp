@@ -11,6 +11,7 @@
 #include <xanim/xsurface_types.h>
 #include <xanim/xanim.h>
 #include <EffectsCore/fx_system.h>
+#include "reflex_sight_fixture.h"
 
 #include <algorithm>
 #include <array>
@@ -176,6 +177,15 @@ void TestDObjEmissionAndAtomicFailure()
         assert(batch.transientLightSphere[0] == 12.0f);
         assert(batch.transientLightSphere[3] == 7.0f);
     }
+    ReflexSightFixture reflex;
+    materials[0] = &reflex.material;
+    assert(WebRenderer_BuildDObjSceneCommand(&submission, 1, command, &lodParms) ==
+        WebRendererDObjSceneResult::Success);
+    assert(command.batches[0].baseImage == &reflex.base);
+    assert(command.batches[0].detailImage == &reflex.detail);
+    assert(command.batches[0].detailSamplerState == 0x11);
+    assert(command.batches[0].detailScale[0] == 10 && command.batches[0].detailScale[1] == 25);
+    materials[0] = nullptr;
     // Real native attachment lookup feeds the portable receiver flag each frame.
     DObj_s otherObj{};
     for (unsigned scenario = 0; scenario < 6; ++scenario)
@@ -300,6 +310,15 @@ void TestDObjEmissionAndAtomicFailure()
     assert(command.batches[0].dynamicLightSurfType == 9u);
     assert(command.batches[1].dynamicLightSurfType == 9u);
     unchanged();
+    // Rigid submission preserves authored basis lengths for reflex UVs.
+    vertices[0].normal.packed = 3;
+    vertices[0].tangent.packed = 4;
+    for (auto &surface : surfaces) surface.deformed = false;
+    WebRenderer_ReleaseDObjSceneScratch();
+    assert(WebRenderer_BuildDObjSceneCommand(&submission, 1, command, &lodParms) ==
+        WebRendererDObjSceneResult::Success);
+    assert(command.vertices[0].normal[2] == 0.75f &&
+        command.vertices[0].tangent[2] == 1.25f);
 }
 
 Material *ResolveMaterial(Material *) noexcept
@@ -782,16 +801,46 @@ void TestDObjMaterialResolutionPreservesCanonicalFallback()
     assert(WebRenderer_ResolveDObjMaterial(&alias, nullptr) == &alias);
 }
 
-void TestReflexSightTechniqueSelectsIntensityOpacitySubset()
+void TestReflexSightRequiresAuthoredBindings()
 {
-    assert(WebRenderer_IsReflexSightTechnique("reflexsight_dtex"));
-    assert(WebRenderer_IsReflexSightTechnique("reflexsight"));
-    assert(!WebRenderer_IsReflexSightTechnique("lp_t0c0_sm2"));
-    assert(!WebRenderer_IsReflexSightTechnique(nullptr));
-    assert(WebRenderer_UsesColorIntensityOpacity(
-        WebRendererWorldTechnique::ReflexSight));
-    assert(!WebRenderer_UsesColorIntensityOpacity(
-        WebRendererWorldTechnique::BaseTexture));
+    ReflexSightFixture fixture;
+    float scale[4]{};
+    const auto matches = [&] { return WebRenderer_GetReflexSightMaterial(&fixture.material, 4, scale); };
+    assert(matches() && scale[0] == 10 && scale[1] == 25);
+    for (auto &arg : fixture.args)
+    {
+        const auto saved = arg;
+        ++arg.dest; assert(!matches()); arg = saved;
+        arg.type = 7; assert(!matches()); arg = saved;
+        if (arg.type == 3)
+        {
+            ++arg.u.codeConst.firstRow; assert(!matches()); arg = saved;
+            --arg.u.codeConst.rowCount; assert(!matches()); arg = saved;
+            ++arg.u.codeConst.index; assert(!matches()); arg = saved;
+        }
+        else
+        {
+            ++arg.u.nameHash; assert(!matches()); arg = saved;
+        }
+    }
+    fixture.scale.literal[0] = std::numeric_limits<float>::infinity();
+    assert(!matches() && scale[0] == 10);
+    fixture.scale.literal[0] = 25;
+    fixture.args[3].type = 1; fixture.args[3].u.literalConst = fixture.scale.literal;
+    assert(matches() && scale[0] == 25);
+    fixture.pixel.name = "reflexsight_other.hlsl"; assert(!matches());
+    fixture.pixel.name = "reflexsight.hlsl";
+    fixture.vertex.name = "reflexsight_dtex.hlsl"; assert(!matches());
+    fixture.vertex.name = "reflexsight.hlsl";
+    fixture.technique.passCount = 2; assert(!matches());
+    fixture.technique.passCount = 1;
+    fixture.technique.passArray[0].stableArgCount = 255; assert(!matches());
+    fixture.technique.passArray[0].stableArgCount = 3;
+    fixture.technique.passArray[0].customSamplerFlags = 1; assert(!matches());
+    fixture.technique.passArray[0].customSamplerFlags = 0;
+    assert(matches());
+    assert(!WebRenderer_GetReflexSightMaterial(nullptr, 4, scale));
+    assert(!WebRenderer_GetReflexSightMaterial(&fixture.material, 34, scale));
     assert(WebRenderer_UsesModelEnvironmentSpecular(
         WebRendererWorldTechnique::BaseTextureSpecular));
     assert(WebRenderer_UsesModelEnvironmentSpecular(
@@ -911,7 +960,7 @@ int main()
     TestNativeSunShadowCullBitIsPreservedAtPortableBoundary();
     TestInvalidAndCapacityAdmissionIsDeterministic();
     TestDObjMaterialResolutionPreservesCanonicalFallback();
-    TestReflexSightTechniqueSelectsIntensityOpacitySubset();
+    TestReflexSightRequiresAuthoredBindings();
     TestAnimatedReceiverBoundsUseSelectedBonesAndViewOffset();
     TestSharedPoseBoundsMatchNativeScalarOrder();
     TestDObjEmissionAndAtomicFailure();
@@ -985,5 +1034,6 @@ void __cdecl Vec2UnpackTexCoords(PackedTexCoords in, float *out)
 void __cdecl Vec3UnpackUnitVec(PackedUnitVec in, float *out)
 {
     out[0] = out[1] = out[2] = 0.0f;
-    out[in.packed == 1 ? 0 : in.packed == 2 ? 1 : 2] = 1.0f;
+    out[in.packed == 1 ? 0 : in.packed == 2 ? 1 : 2] =
+        in.packed == 3 ? 0.75f : in.packed == 4 ? 1.25f : 1.0f;
 }

@@ -263,6 +263,40 @@ inline bool WebRenderer_ShaderConstant(const Material *material,
     return false;
 }
 
+inline bool WebRenderer_GetReflexSightMaterial(const Material *material, unsigned type,
+    float detailScale[4]) noexcept
+{
+    const auto *tech = WebRenderer_MaterialTechnique(material, type);
+    if (!tech || tech->passCount != 1) return false;
+    const auto &pass = tech->passArray[0];
+    if (!pass.vertexShader || !pass.vertexShader->name ||
+        !pass.pixelShader || !pass.pixelShader->name ||
+        std::strcmp(pass.vertexShader->name, "reflexsight.hlsl") ||
+        std::strcmp(pass.pixelShader->name, "reflexsight.hlsl") ||
+        pass.customSamplerFlags) return false;
+    const unsigned count = pass.perPrimArgCount + pass.perObjArgCount + pass.stableArgCount;
+    if (!pass.args || count != 6) return false;
+    unsigned bindings = 0;
+    for (unsigned i = 0; i < count; ++i)
+    {
+        const auto &arg = pass.args[i];
+        if (arg.type == 2 && arg.dest == 0 && arg.u.nameHash == 0xa0ab1041u) bindings |= 1;
+        if (arg.type == 2 && arg.dest == 4 && arg.u.nameHash == 0xeb529b4du) bindings |= 2;
+        if (arg.type == 3 && arg.u.codeConst.firstRow == 0)
+        {
+            const auto &c = arg.u.codeConst;
+            if (arg.dest == 0 && c.index == 80 && c.rowCount == 4) bindings |= 4;
+            if (arg.dest == 4 && c.index == 72 && c.rowCount == 3) bindings |= 8;
+            if (arg.dest == 8 && c.index == 71 && c.rowCount == 3) bindings |= 16;
+        }
+    }
+    float scale[4]{};
+    if (bindings != 31 || !WebRenderer_ShaderConstant(material, pass, 0, 12, scale))
+        return false;
+    std::copy_n(scale, 4, detailScale);
+    return true;
+}
+
 inline bool WebRenderer_GetParticleMaterial(const Material *material, unsigned type,
     WebRendererParticleMaterial &out) noexcept
 {

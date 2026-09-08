@@ -1,5 +1,31 @@
 import { expect, test } from "@playwright/test";
 
+test("reflex sight matches retail vertex and pixel programs after context recovery", async ({ page }) => {
+    await page.goto("/");
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state)).toBe("running");
+    const call = (name, ...args) => page.evaluate(({ name, args }) =>
+        globalThis.__KISAKCOD_WEB__.module.call(name, ...args), { name, args });
+    // D3D9 executes both recovered programs using synthetic textures and
+    // packed N/T attributes. Covers intensity, detail masking, view direction,
+    // binormal sign and authored scale. No retail bytecode/assets are fixtures.
+    const native = [[32,48,64,77], [91,41,54,104], [210,80,89,158], [255,245,245,255],
+        [210,80,89,157], [150,50,61,131], [255,111,117,184], [91,41,54,104]];
+    const check = async () => {
+        for (const [scenario, expected] of native.entries()) {
+            const pixel = (await call("_KisakWeb_TestReflexPixel", scenario)) >>> 0;
+            const actual = [pixel & 255, (pixel >>> 8) & 255, (pixel >>> 16) & 255, pixel >>> 24];
+            actual.forEach((value, c) => expect(Math.abs(value - expected[c]),
+                `reflex scenario ${scenario} channel ${c}`).toBeLessThanOrEqual(1));
+        }
+    };
+    await check();
+    expect(await call("_KisakWeb_TestLoseWebGLContext")).toBe(1);
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state)).toBe("renderer-lost");
+    expect(await call("_KisakWeb_TestRestoreWebGLContext")).toBe(1);
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state)).toBe("running");
+    await check();
+});
+
 test("objective sheen matches retail D3D pixels and survives context recovery", async ({ page }) => {
     await page.goto("/");
     await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state)).toBe("running");

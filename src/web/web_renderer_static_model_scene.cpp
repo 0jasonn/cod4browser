@@ -287,9 +287,10 @@ WebRendererWorldBatchDesc MakeDraw(
     draw.ambientProbeLighting = draw.pixelShaderName &&
         (std::strncmp(draw.pixelShaderName, "lp_amb_", 7u) == 0 ||
             std::strncmp(draw.pixelShaderName, "lp_i_amb_", 9u) == 0);
-    if (draw.pixelShaderName &&
+    if (WebRenderer_GetReflexSightMaterial(material, draw.techniqueType, draw.detailScale) ||
+        (draw.pixelShaderName &&
         std::strstr(draw.pixelShaderName, "d0") != nullptr &&
-        WebRenderer_CopyMaterialConstant(material, DETAIL_SCALE_HASH, draw.detailScale))
+        WebRenderer_CopyMaterialConstant(material, DETAIL_SCALE_HASH, draw.detailScale)))
     {
         draw.detailImage = WebRenderer_FindDetailImage(
             material, draw.detailSamplerState);

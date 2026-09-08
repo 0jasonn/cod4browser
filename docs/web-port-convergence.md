@@ -132,6 +132,7 @@ platform makes that behavior impossible.
 | Sun effects | `r_drawSun` gates sprite/flare submission. `r_sun_from_dvars` calls shared `R_SetSunFromDvars`, enabling its 21 sprite/flare/blind/glare/material/direction controls with native units and conversions. |
 | Sun lighting and shadows | The frontend honors both `sm_enable` and `sm_sunEnable` while retaining the canonical sun direction/color when maps are disabled. World and moving-brush sun materials use authored primary-lightmap visibility without a shadow map. Their slope-space normals and SM3 direct specular lobe follow the locally inspected `lm_sun_*` / `lm_hsm_sun_*` shader arithmetic, including `r_specularColorScale`; model DXT5nm decoding remains separate. |
 | Objective sheen | Authored companion XModels and their canonical `objective_base_dtex.hlsl` / `objective_base.hlsl` material passes own the highlight. WebGL2 follows recovered retail bytecode: normalized geometric view-normal Z shifts the game-time sine, texture RGB controls intensity, and texture alpha drives the authored SRCALPHA/ONE blend. The pass bypasses lighting and fog. The guessed flat pickup pulse and browser-only cgame flag are retired; shared `CG_Item` and native submission return to upstream behavior. |
+| Reflex sights | Exact single-pass `reflexsight.hlsl` vertex/pixel bindings select the backend path. Canonical `colorMap`, `detailMap`, sampler states and authored `detailScale` survive DObj, static-model and FX-model submission. Per-vertex view-dependent reticle UV and two red-channel samples follow recovered retail bytecode; native material state owns blending and depth. |
 | `ui_sp_unlock` | Deliberate stock-retail dangling menu reference. Native COD4 1.7 emits the same `openmenuondvar` warning; no guessed browser dvar is registered. |
 | D3D9/Win32 renderer controls | Native-only where they configure APIs absent from WebGL2; browser renderer capability controls remain platform-owned and are not aliases pretending to be native dvars. |
 | Miles, Bink, and Steam controls | Native DLL integrations remain unavailable. Web Audio and the source-built FFmpeg codec provide device behavior behind existing sound/cinematic APIs; Steam integration remains omitted. |
@@ -149,6 +150,29 @@ alpha operation inherits the RGB blend equation and factors, including this
 objective pass. Its eight synthetic RGBA comparisons allow one UNORM8 step
 of platform rounding and repeat after actual WebGL context loss and recovery.
 Owned programs, videos and model data remain private under ignored `build/`.
+
+The reflex binding match requires vertex `c0..3` world-view-projection,
+`c4..6` world-view, `c8..10` inverse-transpose world-view, `c12` detail scale,
+and pixel `s0` colorMap / `s4` detailMap. The vertex shader computes reticle UV
+from normalized camera-to-vertex direction and the tangent/binormal basis,
+including binormal sign; detailMap keeps the authored mesh UV. With
+`q = colorMap.r * detailMap.r`, the pixel output is
+`(2q, 1.2(q - 0.2), 1.2(q - 0.2), 1.2q)`, without lighting, fog or an extra
+premultiply. Native RGB blending is ONE/INVSRCALPHA, separate alpha is
+INVDESTALPHA/ONE, and depth is LEQUAL without writes. Eight synthetic browser
+GPU cases match offscreen D3D9 executing both recovered shaders within one
+UNORM8 step, including real WebGL context loss/recovery. They cover channel
+selection, masking, clamping, blend alpha, view direction, sign and scale.
+Owned Killhouse captures in headless Chrome show a compact red reticle while
+aiming, with `r_detail 0`, and after a 90-degree camera turn. The corresponding
+`@retail-reflex-sight` regression passes with both detail settings; complete
+native/browser renderer parity remains unqualified.
+
+Rigid DObj submission preserves decoded basis lengths through the bone
+rotation, matching native's rigid GPU path. The owned G36C reticle has nonunit
+packed tangents; normalizing them before the vertex shader changes its UVs.
+Synthetic rigid-basis checks cover preservation; finite/nonzero validation
+remains in the adapter.
 
 The owned Killhouse `@retail-dvars` check exercises FPS/label and material-HUD
 on/off submission, visible world/static/entity/rigid-model counts and shared sun

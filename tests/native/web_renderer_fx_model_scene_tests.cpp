@@ -4,6 +4,7 @@
 #include <web/web_renderer_fx_model_scene.h>
 #include <xanim/xmodel_types.h>
 #include <xanim/xsurface_types.h>
+#include "reflex_sight_fixture.h"
 
 #include <array>
 #include <cassert>
@@ -253,6 +254,15 @@ void TestCanonicalMaterialResolutionAndTechniqueRemap()
     assert(command.batches[0].baseImage == &canonical.image);
     assert(command.batches[0].technique ==
         WebRendererWorldTechnique::BaseTexture);
+    ReflexSightFixture reflex;
+    g_resolvedMaterial = &reflex.material;
+    assert(WebRenderer_BuildFxModelSceneCommand(
+        &submission, 1u, command, nullptr, ResolveMaterial) ==
+        WebRendererFxModelSceneResult::Success);
+    assert(command.batches[0].baseImage == &reflex.base);
+    assert(command.batches[0].detailImage == &reflex.detail);
+    assert(command.batches[0].samplerState == 0x62 && command.batches[0].detailSamplerState == 0x11);
+    assert(command.batches[0].detailScale[0] == 10 && command.batches[0].detailScale[1] == 25);
     g_resolvedMaterial = nullptr;
 
     source.techniqueSet.techniques[TECHNIQUE_LIT_INDEX] = nullptr;
