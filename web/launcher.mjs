@@ -22,7 +22,6 @@ const assetProgress = document.querySelector("#asset-progress");
 const assetManifest = document.querySelector("#asset-manifest");
 const assetControl = document.querySelector(".asset-control");
 const assetRetention = document.querySelector("#asset-retention");
-const engineAssetStatus = document.querySelector("#engine-asset-status");
 const engineCommandForm = document.querySelector("#engine-command-form");
 const engineCommandInput = document.querySelector("#engine-command-input");
 const engineCommandSubmit = document.querySelector("#engine-command-submit");

@@ -44,7 +44,8 @@ There is no heap allocation, global cache, GPU-buffer policy or persistent asset
 pointer. Static-model culling and independent sun/spot rendering are untouched.
 
 This re-evaluates the hash-only idea previously reverted in
-[the uncontrolled brush investigation](brush-costs-f15c3dc9.md), now with
+the uncontrolled `f15c3dc9` brush investigation
+([Git retrieval](../web-port-convergence.md#historical-renderer-records)), now with
 matching measured workloads. The geometry rewrite and unused-name experiment
 remain reverted.
 

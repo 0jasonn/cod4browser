@@ -33,12 +33,15 @@ The 2026-09-04 Chrome graphics run recorded three exact-pixel failures
 cases passed. Default Chromium routine tiers passed. These observations do
 not establish native/browser fidelity or justify weakening assertions.
 
-Historical owned remainder failures included a clean-source guard rejecting
-uncommitted changes, cinematic mounting observing a terminated Worker, and a
-transient-omni brightness delta below its assertion. The separate Gate 3
-geometry failure was resolved by following canonical lit/decal/emissive DPVS
-ranges. See [current status](web-status.md) and the relevant evidence records
-for qualification; historical test counts are not current suite totals.
+Optional retail tiers are not qualified by synthetic passes. A later transient-
+light run passed illumination/shadows/clearing/recovery but failed the final
+positive DObj post-pose diagnostic; see [the light record](evidence/transient-lights-2026-09-02.md).
+The 2026-09-07 Gate 3 attempt still expected camera-only geometry from before
+`4bee7442` added shadow-only BSP surfaces. Its trace contains 8,480 surfaces,
+445,595 vertices, 823,896 indices and 797 batches, reaching generation 53
+versus the required 120 before timeout. Assertions remain unchanged; the
+optional fixture is unqualified. Clear inherited retail settings for synthetic
+tiers; authoritative retail checks also require clean committed source.
 
 ## Optimized assertion and ABI matrix
 
@@ -91,125 +94,36 @@ subprocess deadline of budget + 60 seconds. Failure artifacts contain synthetic
 inputs/logs only. A successful process must also reach every seeded
 success/rejection family; exact coverage counters are not cross-platform gates.
 
-## Current execution evidence — 2026-09-08
+## Current execution evidence
 
-The working tree at `779cf2d0` consolidates native/browser common runtime
-implementations and production/diagnostic Worker RPC bookkeeping. It also
-rejects wavelet mip chains whose two-dimensional levels cannot expand complete
-2x2 blocks, preserving valid rectangular chains and failed-decode atomicity.
-Redundant per-target assertion flags are removed; the directory-wide forced
-assertion guard remains active.
+Recorded 2026-09-09 on the cleanup working tree based on
+`4bca1760f95edb60c362926fa944e96dbcae3f2a`. Removed compiler duplicates and
+unused platform/fixture APIs; archived superseded reports in Git. The remaining
+11 captured fixture outputs have identical lengths and SHA-256 hashes.
 
-- Native MSVC x86 Release: 43/43 CTest cases and native SP build/relink pass.
-- Direct Wasm Release: 43/43 CTest cases pass, including shared config writes,
-  failure paths, startup execution order and console-event payload release.
-- Pinned `npm.cmd ci`, static checks and all 124 Node cases pass. Worker RPC
-  coverage includes stale replies, aborts, timeout validation, retirement and
-  failed `postMessage` cleanup.
-- Production Chromium: 56/56 cases pass. Diagnostic Chromium: 10/10 smoke and
-  61 remainder cases pass, with 13 optional skips and retail inputs disabled.
-- Release production/diagnostic builds and runtime-prefix checks pass. The
-  unchanged product gate passes: 3,181,857 Wasm bytes, 322,498 JavaScript bytes,
-  3,607,714 total site bytes, 17 raw and nine application exports, 22 files.
-- Local Windows x64 Clang 24 ASan/UBSan/libFuzzer with the existing matched
-  compiler-rt runtime passes the sanitizer-enforcement check and the original
-  wavelet heap-buffer-overflow input. A fresh 30-second seeded run completes
-  2,388,966 executions in 31 seconds, reaches all five required parser families,
-  and reports no finding (527 MiB peak RSS). Synthetic regression tests reject
-  4x6 and 1060x1280 chains and retain a decoded constant 6x2 image.
+| Check | Result |
+| --- | --- |
+| Pinned `npm.cmd ci`, syntax, lint and types | Pass; Node 24.18.0 / npm 11.16.0. |
+| Native MSVC x86 Release | 44/44 CTest cases; pinned native SP build/relink passes. |
+| Direct Wasm Release | 43/43 CTest cases pass. |
+| Node protocol/platform | 124/124 cases pass. |
+| Production Chromium | 56/56 cases pass. |
+| Diagnostic Chromium | 10/10 smoke; 64 remainder pass, 16 optional skips; retail inputs disabled. |
+| Release builds | Production and diagnostics pass, including both canonical runtime-prefix checks. |
+| Product boundary | Pass: 3,191,265 Wasm bytes, 322,498 JavaScript bytes, 3,617,122 site bytes; 17 raw / nine application exports, 22 files. |
+| Source/package checks | 14/14 Python cases and generated source archive validation pass. |
 
-Logs are under ignored `build/resume-consolidation/`. This is local synthetic
-build and browser-platform evidence; Linux/hosted sanitizer CI, aggregate release
-qualification, owned campaign acceptance and native MP were not run. Validation
-used uncommitted source and the production receipt records `dirty=True`.
+Commands and disposable logs are under ignored `build/repo-cleanup/`. Tests
+used default Playwright Chromium on Windows; the running user's server on port
+8000 was preserved. Native SP was built, not launched for gameplay. The source
+receipt records `dirty=True`; this is local synthetic platform evidence.
+Linux/hosted CI, sanitizer fuzz, native MP, owned campaign acceptance, installed
+Chrome fidelity, exhaustive browser duplicates and aggregate release
+qualification were not rerun for this cleanup.
 
-## Previous execution evidence — 2026-09-07
+The earlier 30-second Windows sanitizer pass, owned loading check, precise
+historical tool versions and superseded execution records remain available:
 
-The follow-up to `170feb7a` finishes canonical save-rename refusal handling,
-cgame floating-point conversion fixes, JSPI/native-Wasm exception integration,
-and complete source/dependency receipt binding. Local pinned tools remain
-Node 24.18.0, npm 11.16.0, Emscripten 6.0.6, CMake 4.2.0-rc3 and Ninja 1.13.2.
-
-- Native MSVC x86 Release: 43/43 CTest cases and the native SP build/relink pass.
-- Direct Wasm Release: 43/43 CTest cases, including real cgame parsing and
-  canonical save-write/rename refusal, retry and short-write handling.
-- Static checks and Node: pass; 123 Node cases include deterministic absolute
-  watchdog deadlines and the actual embedded frame pump's scheduling/error paths.
-- Production Chromium: 56/56 cases, including rejection of missing JSPI APIs or
-  native exception support before engine/asset storage access.
-- Diagnostic Chromium smoke: 10/10 cases.
-- Diagnostic Chromium remainder with retail disabled: 61 pass, 13 optional skips.
-- Source qualification: 14/14 Python cases and collection of actual pinned
-  FFmpeg, OpenAL, Emscripten runtime and zlib source archives pass. Altered source
-  archives and unexpected runtime source files cannot reuse a build receipt.
-- Release production/diagnostic builds and canonical runtime-prefix checks pass.
-  The unchanged product gate passes: 3,181,796 Wasm bytes, 322,477 JavaScript
-  bytes, 3,607,632 total site bytes, 17 raw and nine application exports.
-- One owned-data complete Killhouse intro/loading test passes in headless Chrome:
-  DB progress advances while suspended, registration finishes during the movie,
-  and world frames resume after completion. It is functional loading evidence,
-  not human playable or performance qualification.
-
-The first routine remainder attempt inherited a local retail-root environment
-setting and selected optional retail cases: the authoritative matrix rejected
-dirty source, and the reduced Gate 3 fixture timed out on its scene-view
-predicate. Its trace retains 8,480 surfaces / 445,595 vertices / 823,896 indices
-and 797 batches; the fixture still expects the camera-only totals from before
-`4bee7442` added shadow-only BSP geometry. Generation reached 53 versus the
-required 120 during that run. The cull conversion does not own registration
-counts; assertions were left intact. That attempt was interrupted; the synthetic tier explicitly clears
-`KISAK_COD4_RETAIL_ROOT` and runs on a separate port. The existing port 8000
-server was left untouched. Logs and private retail traces remain under ignored
-`build/finish-uncommitted/` and `test-results/`.
-
-Linux, sanitizer CI, aggregate package qualification, branded Edge acceptance,
-full campaign save/Continue and actual release-version rollback were not run.
-The targeted Chrome loading pass does not qualify the optional Gate 3 fixture.
-
-## Previous execution evidence — 2026-09-06
-
-The remediation uses audited HEAD `4bee744235da2f99dbf09dc0a5118717402758c6`
-plus uncommitted changes. Local tools: Node 24.18.0, npm 11.16.0, TypeScript
-7.0.2, Emscripten 6.0.6, CMake 4.2.0-rc3, Ninja 1.13.2; MSVC toolset directory
-14.51.36231 (compiler 19.51.36256), SDK 10.0.28000.0. Playwright 1.61.1 uses
-Chromium 149.0.7827.55 on Windows. Pinned TS rejects a disposable implicit-any
-probe without explicit `--strict`; the separate runtime tier still explicitly
-uses `--strict false`.
-
-Release native x86 CTest passes 43/43, Wasm 42/42 and supplemental MSVC x64
-25/25. Separate optimized native and Wasm reverb tests also pass with the shared
-assertion guard. Active assertions exposed the missing thread enum, stale FX index,
-missing fixture loading keepalive, retired map-defer expectation and Wasm
-fixture stack overflow; all were repaired against canonical interfaces or
-the audited HEAD's removed hook. No production behavior changed for these fixes.
-Static checks and Node pass 120/120. Production browser passes 53; diagnostic
-smoke passes 10 and remainder 61 with 13 explicit skips. These include real
-OPFS same-profile restart recovery for rename and backup restore after journal
-publication, interrupted partial writes and quota failure, each with two clean
-reopens. Backup/raw-file reimport survives browser restart while external
-requests are blocked. The backup owns its bytes after original-file deletion;
-closing a committed restore retains its writer lease until publication finishes.
-Export lease/pagination and invalid/oversized-home regressions also pass.
-A delayed raw-export read error no longer changes a reopened dialog's status;
-its regression failed before the generation guard and passes afterwards.
-Both Release builds and canonical runtime-prefix checks pass. Packaging tests
-pass eight cases, including all failed/cancelled/skipped/missing required-tier
-combinations, standalone verification and rejection of private home backups.
-Synthetic packages exercise the shipped local server at one loopback origin
-through directory replacement and rollback; incomplete extraction and revision
-mismatch leave the previous package intact. This is platform evidence, not
-cross-version campaign acceptance or qualification of the current build.
-
-The unchanged product gate **fails**: 74 raw Wasm exports exceed 24, and the
-rebuilt Wasm is 5,343,379 bytes versus its 3,332,379-byte budget. The application
-export list remains exact. The audited HEAD added Asyncify; no production
-C++ or linker policy was changed by this remediation. Historical budget-pass
-claims do not qualify this artifact. Gate failure prevents aggregate packaging.
-
-Linux and sanitizer execution were unavailable locally. The SDK Clang 24.0.0git
-Debug fuzz target links, but cannot start because its matching ASan DLL is
-missing (exit `0xc0000135`). RelWithDebInfo also hits the bundled libFuzzer's
-debug-STL link mismatch. CI is configured, not executed evidence. No campaign,
-new performance, physical power-loss, other-browser or exhaustive duplicate
-qualification was performed. Disposable commands, failures and results are in
-`build/audit-remediation/`; the tracker identifies each audit item and next step.
+```powershell
+git show 4bca1760f95edb60c362926fa944e96dbcae3f2a:docs/web-test-inventory.md
+```

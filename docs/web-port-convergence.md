@@ -357,7 +357,12 @@ primitives. The unused bootstrap texture/substitution APIs and shader decoder
 are also retired. Canonical material rendering, fallback resources and context
 recovery remain platform-owned. The uncompiled `dvar_core.cpp` copy is removed;
 `dvar.cpp` remains the dvar implementation. These removals add no replacement
-engine model. See [test inventory](web-test-inventory.md) for retained coverage.
+engine model. The uncompiled `scr_compiler.cpp` and `scr_yacc.cpp` duplicates
+are retired; `scripts/common_files.cmake` retains canonical `scr_compiler2.cpp`
+and `scr_yacc2.cpp`. The unused `WebWorkerFS_Stat` API/record and
+`WebRenderer_BuildParticleCloudSceneCommand` batch wrapper are also removed;
+the active filesystem operations and per-cloud command builder remain the
+platform seam. See [test inventory](web-test-inventory.md) for retained coverage.
 
 The single-surface proof is retired. Its relevant finite lightmap-coordinate
 check lives in `WebRenderer_BuildWorldSceneCommand`; canonical vertex layout
@@ -660,31 +665,15 @@ remain shared inputs; validation and whole-command publication are preserved.
 Focused execution covers emitted values and rejection without publication.
 This prompted the brush construction/append measurement below.
 
-The [brush cost investigation](evidence/brush-costs-f15c3dc9.md) retained diagnostic
-attribution and a world/brush output oracle. Both proposed runtime changes were
-reverted after production timing failed to support them. At that milestone,
-geometry, hashing, technique selection and batch merge policy were unchanged;
-no new cache, allocation policy or engine representation was added. Retained artifacts now
-support interleaved comparisons before further optimization.
-
-The [controlled timing follow-up](evidence/controlled-renderer-552a468d.md)
-moves `Com_ModifyMsec` outside the temporary common.cpp compile gate and calls
-it in the browser pump at the native pre-server boundary. Its single native
-body owns fixedtime, time scaling and clamping for both paths; the browser
-still owns only nonblocking callback admission. No prefix function was copied.
-Canonical pause/free-move commands and existing refdef events now qualify a
-paused renderer benchmark. The Node runner owns only test orchestration and
-comparison; it does not own game state or a replay format. Exact sampled camera,
-time and world-count matching is demonstrated, not complete dynamic state or
-active-gameplay determinism. Culling and independent shadow paths are unchanged.
-
-The [paused-copy follow-up](evidence/paused-copy-qualification-cd85e18e.md)
-aligns diagnostic profiling with that scene and records actual geometry work.
-It reproduced different index/upload totals across fresh loads of the same
-Wasm, despite matching camera and draw counts. The name-copy experiment was
-reverted; this milestone adds test orchestration and qualification only, with
-no net engine/renderer changes. Resolving the remaining variation belongs in
-canonical model/LOD and seed/save/replay behavior, not a browser game-state copy.
+The retained renderer runner qualifies paused comparisons with canonical
+`Com_ModifyMsec`, pause/free-move commands and existing refdef events. The
+browser pump uses the single native body for fixedtime, time scaling and
+clamping before server work; only callback admission is platform-owned.
+The runner owns orchestration and comparison, never game or replay state.
+Exact camera/time and draw counts alone proved insufficient: fresh loads of
+the same Wasm had different dynamic index/upload totals. Unqualified brush and
+name-copy candidates were reverted; the output oracle and strict geometry-work
+comparison remain. The superseded investigations are [archived below](#historical-renderer-records).
 
 The [seeded brush follow-up](evidence/seeded-brush-hashes-06ad8004.md) partitions
 accepted dynamic/UI geometry using four diagnostic-only counters. Variation was
@@ -695,6 +684,23 @@ The brush draw-command builder now reuses only the preceding shader hashes in
 a stack record scoped to one synchronous build. This adds no persistent pointer,
 heap allocation or global cache. Technique/material selection, output geometry,
 atomic publication, canonical culling and independent shadows are unchanged.
+
+## Historical renderer records
+
+Superseded task reports and an unexecuted campaign plan remain in Git rather
+than the current inventory. Their implementation decisions are summarized above;
+current qualification belongs to the test inventory and retained evidence.
+Retrieve individual originals without modifying the checkout:
+
+```powershell
+git show 4bca1760f95edb60c362926fa944e96dbcae3f2a:docs/evidence/cleanup-renderer-2026-08-31.md
+git show 4bca1760f95edb60c362926fa944e96dbcae3f2a:docs/evidence/renderer-efficiency-2026-08-31.md
+git show 4bca1760f95edb60c362926fa944e96dbcae3f2a:docs/evidence/brush-costs-f15c3dc9.md
+git show 4bca1760f95edb60c362926fa944e96dbcae3f2a:docs/evidence/controlled-renderer-552a468d.md
+git show 4bca1760f95edb60c362926fa944e96dbcae3f2a:docs/evidence/paused-copy-qualification-cd85e18e.md
+git show 4bca1760f95edb60c362926fa944e96dbcae3f2a:docs/evidence/verification-repair-2026-09-02.md
+git show 4bca1760f95edb60c362926fa944e96dbcae3f2a:docs/evidence/next-campaign-batch-bad1e7b9.json
+```
 
 ## Temporary compatibility seams
 
@@ -766,6 +772,22 @@ window; it makes no visual, functional, or playable claim. See
 Historical map classifications and their sources are consolidated in
 [web-status.md](web-status.md) and [the campaign matrix](campaign-compatibility.md).
 They were not rerun during this cleanup. Mission progression is not a prerequisite.
+
+### Decode-once comparison
+
+The historical `92a93e39` → `919f8c27` seven-stop decode/recovery comparison
+replaced initial pixel decoding for validation with shared layout inspection.
+Initial decoder calls fell from 12,046 to 6,033, with zero immediate duplicate
+decodes after the change. All seven stops produced world frames before and
+after context recovery. This is the recorded source-validation optimization,
+not a current load-time or campaign-performance claim. Full methodology,
+measurements and source-cache/recovery limits remain in Git:
+
+```powershell
+git show 4bca1760f95edb60c362926fa944e96dbcae3f2a:docs/evidence/retail-decode-919f8c27.md
+git show 4bca1760f95edb60c362926fa944e96dbcae3f2a:docs/evidence/retail-decode-919f8c27.json
+git show 4bca1760f95edb60c362926fa944e96dbcae3f2a:docs/evidence/retail-decode-92a93e39.json
+```
 
 ### Encoded recovery sources
 

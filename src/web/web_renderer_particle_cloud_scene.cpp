@@ -401,50 +401,6 @@ WebRendererParticleCloudSceneResult WebRenderer_BuildParticleCloudCommand(
     return result;
 }
 
-WebRendererParticleCloudSceneResult
-WebRenderer_BuildParticleCloudSceneCommand(
-    const WebRendererParticleCloudSubmission *submissions,
-    std::uint32_t submissionCount,
-    const WebRendererParticleCloudView &view,
-    WebRendererParticleCloudSceneCommand &destination,
-    std::uint32_t *droppedCount)
-{
-    if (droppedCount) *droppedCount = 0u;
-    if (submissionCount == 0u) return WebRendererParticleCloudSceneResult::NoCloud;
-    if (!submissions) return WebRendererParticleCloudSceneResult::InvalidSubmission;
-    WebRendererParticleCloudSceneCommand replacement;
-    try
-    {
-        for (std::uint32_t index = 0u; index < submissionCount; ++index)
-        {
-            WebRendererParticleCloudSceneCommand one;
-            const WebRendererParticleCloudSceneResult result = BuildOne(
-                submissions[index], view, one);
-            if (result == WebRendererParticleCloudSceneResult::Success)
-            {
-                const WebRendererParticleCloudAppendResult append =
-                    WebRenderer_AppendParticleCloudCommand(
-                        one, replacement.vertices, replacement.indices,
-                        replacement.batches, replacement.surfaceCount);
-                if (append == WebRendererParticleCloudAppendResult::Success)
-                {
-                    ++replacement.cloudCount;
-                    continue;
-                }
-            }
-            if (droppedCount && *droppedCount != UINT32_MAX) ++*droppedCount;
-        }
-    }
-    catch (const std::bad_alloc &)
-    {
-        return WebRendererParticleCloudSceneResult::AllocationFailed;
-    }
-    if (replacement.batches.empty())
-        return WebRendererParticleCloudSceneResult::NoCloud;
-    destination = std::move(replacement);
-    return WebRendererParticleCloudSceneResult::Success;
-}
-
 WebRendererParticleCloudAppendResult WebRenderer_AppendParticleCloudCommand(
     const WebRendererParticleCloudSceneCommand &source,
     std::vector<WebRendererSurfaceVertex> &vertices,

@@ -76,13 +76,6 @@ WebRendererParticleCloudSceneResult WebRenderer_BuildParticleCloudCommand(
     const WebRendererParticleCloudView &view,
     WebRendererParticleCloudSceneCommand &destination);
 
-WebRendererParticleCloudSceneResult WebRenderer_BuildParticleCloudSceneCommand(
-    const WebRendererParticleCloudSubmission *submissions,
-    std::uint32_t submissionCount,
-    const WebRendererParticleCloudView &view,
-    WebRendererParticleCloudSceneCommand &destination,
-    std::uint32_t *droppedCount = nullptr);
-
 WebRendererParticleCloudAppendResult WebRenderer_AppendParticleCloudCommand(
     const WebRendererParticleCloudSceneCommand &source,
     std::vector<WebRendererSurfaceVertex> &vertices,

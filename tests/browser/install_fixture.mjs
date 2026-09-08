@@ -243,44 +243,6 @@ function createSyntheticShaderProgram(vertex)
     return words;
 }
 
-function appendWorldMaterialTechnique(inflated, name, invalidVertexProgram = false)
-{
-    appendU32(inflated, 0xffff_ffff);
-    appendU16(inflated, 0);
-    appendU16(inflated, 1);
-
-    appendU32(inflated, 0xffff_ffff);
-    appendU32(inflated, 0xffff_ffff);
-    appendU32(inflated, 0xffff_ffff);
-    inflated.push(0, 0, 1, 0);
-    appendU32(inflated, 0xffff_ffff);
-
-    const declaration = new Array(100).fill(0);
-    declaration[0] = 1;
-    inflated.push(...declaration);
-
-    const vertexProgram = createSyntheticShaderProgram(true);
-    if (invalidVertexProgram) vertexProgram[0] = 0;
-    appendU32(inflated, 0xffff_ffff);
-    appendU32(inflated, 0);
-    appendU32(inflated, 0xffff_ffff);
-    appendU32(inflated, vertexProgram.length);
-    inflated.push(...Buffer.from(`${name}_vs`, "ascii"), 0);
-    for (const word of vertexProgram) appendU32(inflated, word);
-
-    const pixelProgram = createSyntheticShaderProgram(false);
-    appendU32(inflated, 0xffff_ffff);
-    appendU32(inflated, 0);
-    appendU32(inflated, 0xffff_ffff);
-    appendU32(inflated, pixelProgram.length);
-    inflated.push(...Buffer.from(`${name}_ps`, "ascii"), 0);
-    for (const word of pixelProgram) appendU32(inflated, word);
-
-    appendU32(inflated, 2);
-    appendU32(inflated, 0);
-    inflated.push(...Buffer.from(name, "ascii"), 0);
-}
-
 // Freely generated structural fixture for the M20 material/image path.
 export function createSyntheticRetailCensusFastfile()
 {
@@ -426,46 +388,12 @@ export function createSyntheticRetailCensusFastfile()
 
 // Freely generated fixture for the M21 table inventory through the M33 second
 // XModel surface prefix. It contains no retail bytes.
-export function createSyntheticWorldInventoryFastfile({
-    includeWorld = true,
-    invalidTechniqueSet = false,
-    invalidSecondTechniqueSet = false,
-    secondTechniqueDependency = false,
-    invalidXModelBounds = false,
-    unsupportedXModelBoneNames = false,
-    invalidXModelBoneString = false,
-    invalidXSurfaceLayout = false,
-    invalidXSurfaceCollision = false,
-    invalidXModelMaterialAlias = false,
-    invalidXModelCollisionBounds = false,
-    invalidXModelBoneInfo = false,
-    xModelPhysPreset = false,
-    sharedXModelPhysPreset = false,
-    invalidXModelPhysPresetValues = false,
-    invalidXModelPhysPresetSoundAlias = false,
-    invalidPostXModelTechniqueSet = false,
-    postXModelTechniqueDependency = false,
-    completePostXModelTechniqueDependencies = false,
-    invalidSecondPostXModelTechnique = false,
-    invalidLaterPostXModelTechniqueSet = false,
-    laterPostXModelTechniqueDependency = false,
-    invalidSecondXModelBounds = false,
-    unsupportedSecondXModelBoneNames = false,
-    invalidSecondXSurfaceLayout = false,
-    invalidSecondXModelMaterialAlias = false,
-    invalidSecondXModelImageAlias = false,
-    externalColorMap = true,
-    colorMapName = "synthetic_engine_asset",
-    secondExternalColorMap = false,
-    secondColorMapName = "synthetic_engine_asset_second",
-} = {})
+export function createSyntheticWorldInventoryFastfile()
 {
     const inflated = [];
     appendU32(inflated, 2_000_000);
     appendU32(inflated, 1_000_000);
-    for (const size of [4096, 0, 0, 0,
-        completePostXModelTechniqueDependencies ? 16_384 : 4096,
-        0, 0, 4096, 4096]) {
+    for (const size of [4096, 0, 0, 0, 4096, 0, 0, 4096, 4096]) {
         appendU32(inflated, size);
     }
     appendU32(inflated, 1);
@@ -474,17 +402,11 @@ export function createSyntheticWorldInventoryFastfile({
         [5, 0xffff_ffff],
         [5, 0xffff_ffff],
         [3, 0xffff_ffff],
-        [xModelPhysPreset ? 16 : 5, 0xffff_ffff],
+        [5, 0xffff_ffff],
         [5, 0xffff_ffff],
         [3, 0xffff_ffff],
-        [completePostXModelTechniqueDependencies
-            ? 5 : includeWorld ? 16 : 32,
-        completePostXModelTechniqueDependencies || includeWorld
-            ? 0xffff_ffff : 0],
+        [16, 0xffff_ffff],
     ];
-    if (completePostXModelTechniqueDependencies) {
-        assets.push([includeWorld ? 16 : 32, includeWorld ? 0xffff_ffff : 0]);
-    }
     appendU32(inflated, assets.length);
     appendU32(inflated, 0xffff_ffff);
     appendU32(inflated, 0xffff_ffff);
@@ -495,7 +417,6 @@ export function createSyntheticWorldInventoryFastfile({
     }
     const firstTechniqueSet = new Array(148).fill(0);
     setU32(firstTechniqueSet, 0, 0xffff_ffff);
-    if (invalidTechniqueSet) firstTechniqueSet[5] = 1;
     inflated.push(
         ...firstTechniqueSet,
         ...Buffer.from(",web/mc_l_sm_r0c0s0", "ascii"),
@@ -503,10 +424,6 @@ export function createSyntheticWorldInventoryFastfile({
     );
     const secondTechniqueSet = new Array(148).fill(0);
     setU32(secondTechniqueSet, 0, 0xffff_ffff);
-    if (invalidSecondTechniqueSet) secondTechniqueSet[5] = 1;
-    if (secondTechniqueDependency) {
-        setU32(secondTechniqueSet, 12 + 4 * 4, 0xffff_ffff);
-    }
     inflated.push(
         ...secondTechniqueSet,
         ...Buffer.from(",web/mc_l_sm_r0c0s1", "ascii"),
@@ -517,7 +434,7 @@ export function createSyntheticWorldInventoryFastfile({
     xmodel[4] = 1;
     xmodel[5] = 1;
     xmodel[6] = 6;
-    setU32(xmodel, 8, unsupportedXModelBoneNames ? 0x4000_0001 : 0xffff_ffff);
+    setU32(xmodel, 8, 0xffff_ffff);
     setU32(xmodel, 24, 0xffff_ffff);
     setU32(xmodel, 28, 0xffff_ffff);
     setU32(xmodel, 32, 0xffff_ffff);
@@ -531,7 +448,7 @@ export function createSyntheticWorldInventoryFastfile({
     setU32(xmodel, 156, 1);
     setU32(xmodel, 164, 0xffff_ffff);
     setF32(xmodel, 168, 10);
-    setF32(xmodel, 172, invalidXModelBounds ? 2 : -1);
+    setF32(xmodel, 172, -1);
     setF32(xmodel, 176, -2);
     setF32(xmodel, 180, -3);
     setF32(xmodel, 184, 1);
@@ -540,12 +457,8 @@ export function createSyntheticWorldInventoryFastfile({
     setU16(xmodel, 196, 1);
     setU16(xmodel, 198, 0);
     setU32(xmodel, 204, 100);
-    if (xModelPhysPreset) {
-        setU32(xmodel, 212,
-            sharedXModelPhysPreset ? 0xffff_fffe : 0xffff_ffff);
-    }
     inflated.push(...xmodel, ...Buffer.from("web/xmodel_wall", "ascii"), 0);
-    appendU16(inflated, invalidXModelBoneString ? 1 : 0);
+    appendU16(inflated, 0);
     inflated.push(0);
     const baseMat = new Array(32).fill(0);
     setF32(baseMat, 12, 1);
@@ -560,8 +473,7 @@ export function createSyntheticWorldInventoryFastfile({
         setU16(surface, 4, triangleCount);
         setU16(surface, 8, index === 0 ? 0 : index + 1);
         setU16(surface, 10, index === 0 ? 0 : 4 + (index - 1) * 3);
-        setU32(surface, 12,
-            invalidXSurfaceLayout && index === 0 ? 0 : 0xffff_ffff);
+        setU32(surface, 12, 0xffff_ffff);
         setU32(surface, 28, 0xffff_ffff);
         setU32(surface, 32, 1);
         setU32(surface, 36, 0xffff_ffff);
@@ -619,7 +531,7 @@ export function createSyntheticWorldInventoryFastfile({
         if (index === 0) {
             for (let axis = 0; axis < 3; ++axis) appendU32(inflated, 0);
             const collisionTree = new Array(12).fill(0);
-            setF32(collisionTree, 0, invalidXSurfaceCollision ? 0 : 1);
+            setF32(collisionTree, 0, 1);
             setF32(collisionTree, 4, 1);
             setF32(collisionTree, 8, 1);
             inflated.push(...collisionTree);
@@ -651,8 +563,6 @@ export function createSyntheticWorldInventoryFastfile({
         imageReference,
         includeImage,
         includeConstant,
-        imageName = colorMapName,
-        imageExternal = externalColorMap,
     }) => {
         const material = new Array(80).fill(0);
         setU32(material, 0, 0xffff_ffff);
@@ -671,30 +581,23 @@ export function createSyntheticWorldInventoryFastfile({
         appendU32(inflated, imageReference);
         if (includeImage) {
             const image = new Array(36).fill(0);
-            if (imageExternal) {
-                setU32(image, 0, 3);
-                setU32(image, 4, 0xffff_fffe);
-                setU16(image, 24, 4);
-                setU16(image, 26, 4);
-                setU16(image, 28, 1);
-            }
+            setU32(image, 0, 3);
+            setU32(image, 4, 0xffff_fffe);
+            setU16(image, 24, 4);
+            setU16(image, 26, 4);
+            setU16(image, 28, 1);
             setU32(image, 32, 0xffff_ffff);
             inflated.push(
                 ...image,
-                ...Buffer.from(
-                    imageExternal ? imageName : ",$identitynormalmap",
-                    "ascii",
-                ),
+                ...Buffer.from("synthetic_engine_asset", "ascii"),
                 0,
             );
-            if (imageExternal) {
-                appendU16(inflated, 0);
-                appendU16(inflated, 4);
-                appendU16(inflated, 4);
-                appendU16(inflated, 1);
-                appendU32(inflated, 0x3154_5844);
-                appendU32(inflated, 0);
-            }
+            appendU16(inflated, 0);
+            appendU16(inflated, 4);
+            appendU16(inflated, 4);
+            appendU16(inflated, 1);
+            appendU32(inflated, 0x3154_5844);
+            appendU32(inflated, 0);
         }
         if (includeConstant) {
             const constant = new Array(32).fill(0);
@@ -717,19 +620,15 @@ export function createSyntheticWorldInventoryFastfile({
     appendMaterial({
         name: "web/material_b",
         techniqueAlias: 0x4000_001d,
-        imageReference: invalidXModelMaterialAlias
-            ? 0x4000_0001
-            : secondExternalColorMap ? 0xffff_ffff : 0x4000_02b1,
-        includeImage: secondExternalColorMap,
+        imageReference: 0x4000_02b1,
+        includeImage: false,
         includeConstant: false,
-        imageName: secondColorMapName,
-        imageExternal: secondExternalColorMap,
     });
 
     const collisionSurface = new Array(44).fill(0);
     setU32(collisionSurface, 0, 0xffff_ffff);
     setU32(collisionSurface, 4, 1);
-    setF32(collisionSurface, 8, invalidXModelCollisionBounds ? 2 : -1);
+    setF32(collisionSurface, 8, -1);
     setF32(collisionSurface, 12, -1);
     setF32(collisionSurface, 16, -1);
     setF32(collisionSurface, 20, 1);
@@ -741,7 +640,7 @@ export function createSyntheticWorldInventoryFastfile({
         appendU32(inflated, index === 0 ? 0x3f80_0000 : 0);
     }
     const boneInfo = new Array(40).fill(0);
-    setF32(boneInfo, 0, invalidXModelBoneInfo ? 2 : -1);
+    setF32(boneInfo, 0, -1);
     setF32(boneInfo, 4, -1);
     setF32(boneInfo, 8, -1);
     setF32(boneInfo, 12, 1);
@@ -749,37 +648,8 @@ export function createSyntheticWorldInventoryFastfile({
     setF32(boneInfo, 20, 1);
     setF32(boneInfo, 36, 3);
     inflated.push(...boneInfo);
-    if (xModelPhysPreset) {
-        const preset = new Array(44).fill(0);
-        setU32(preset, 0, 0xffff_ffff);
-        setF32(preset, 8,
-            invalidXModelPhysPresetValues ? Number.NaN : 100);
-        setF32(preset, 12, 0.25);
-        setF32(preset, 16, 0.5);
-        setF32(preset, 20, 1);
-        setF32(preset, 24, 2);
-        setU32(preset, 28, 0xffff_ffff);
-        setF32(preset, 32, 0.4);
-        setF32(preset, 36, 12);
-        preset[40] = 1;
-        inflated.push(
-            ...preset,
-            ...Buffer.from("web/phys_sandbag", "ascii"),
-            0,
-            ...Buffer.from(
-                invalidXModelPhysPresetSoundAlias
-                    ? "bad sound" : "sandbag",
-                "ascii",
-            ),
-            0,
-        );
-    }
     const postXModelTechniqueSet = new Array(148).fill(0);
     setU32(postXModelTechniqueSet, 0, 0xffff_ffff);
-    if (invalidPostXModelTechniqueSet) postXModelTechniqueSet[5] = 1;
-    if (postXModelTechniqueDependency) {
-        setU32(postXModelTechniqueSet, 12 + 4 * 4, 0xffff_ffff);
-    }
     inflated.push(
         ...postXModelTechniqueSet,
         ...Buffer.from(",web/mc_l_sm_r0c0n0s0", "ascii"),
@@ -787,12 +657,6 @@ export function createSyntheticWorldInventoryFastfile({
     );
     const laterPostXModelTechniqueSet = new Array(148).fill(0);
     setU32(laterPostXModelTechniqueSet, 0, 0xffff_ffff);
-    if (invalidLaterPostXModelTechniqueSet) {
-        laterPostXModelTechniqueSet[5] = 1;
-    }
-    if (laterPostXModelTechniqueDependency) {
-        setU32(laterPostXModelTechniqueSet, 12 + 7 * 4, 0xffff_ffff);
-    }
     inflated.push(
         ...laterPostXModelTechniqueSet,
         ...Buffer.from(",web/mc_l_sm_r0c0n0s1", "ascii"),
@@ -803,8 +667,7 @@ export function createSyntheticWorldInventoryFastfile({
     secondXModel[4] = 1;
     secondXModel[5] = 1;
     secondXModel[6] = 3;
-    setU32(secondXModel, 8,
-        unsupportedSecondXModelBoneNames ? 0x4000_0001 : 0xffff_ffff);
+    setU32(secondXModel, 8, 0xffff_ffff);
     setU32(secondXModel, 24, 0xffff_ffff);
     setU32(secondXModel, 28, 0xffff_ffff);
     setU32(secondXModel, 32, 0xffff_ffff);
@@ -816,7 +679,7 @@ export function createSyntheticWorldInventoryFastfile({
     setU32(secondXModel, 156, 1);
     setU32(secondXModel, 164, 0xffff_ffff);
     setF32(secondXModel, 168, 20);
-    setF32(secondXModel, 172, invalidSecondXModelBounds ? 3 : -2);
+    setF32(secondXModel, 172, -2);
     setF32(secondXModel, 176, -3);
     setF32(secondXModel, 180, -4);
     setF32(secondXModel, 184, 2);
@@ -842,9 +705,7 @@ export function createSyntheticWorldInventoryFastfile({
         setU16(surface, 4, 1);
         setU16(surface, 8, index);
         setU16(surface, 10, index * 3);
-        setU32(surface, 12,
-            invalidSecondXSurfaceLayout && index === 0
-                ? 0 : 0xffff_ffff);
+        setU32(surface, 12, 0xffff_ffff);
         setU32(surface, 28, 0xffff_ffff);
         setU32(surface, 32, 1);
         setU32(surface, 36, 0xffff_ffff);
@@ -879,8 +740,7 @@ export function createSyntheticWorldInventoryFastfile({
         appendU16(inflated, 1);
         appendU16(inflated, 2);
     }
-    const secondMaterialHandleAlias = secondExternalColorMap
-        ? 0x4000_04f5 : 0x4000_04f1;
+    const secondMaterialHandleAlias = 0x4000_04f1;
     appendU32(inflated, 0xffff_ffff);
     appendU32(inflated, secondMaterialHandleAlias);
     appendU32(inflated, secondMaterialHandleAlias);
@@ -888,8 +748,7 @@ export function createSyntheticWorldInventoryFastfile({
     setU32(secondMaterial, 0, 0xffff_ffff);
     secondMaterial.fill(0xff, 24, 58);
     secondMaterial[58] = 1;
-    setU32(secondMaterial, 64,
-        invalidSecondXModelMaterialAlias ? 0x4000_0001 : 0x4000_0015);
+    setU32(secondMaterial, 64, 0x4000_0015);
     setU32(secondMaterial, 68, 0xffff_ffff);
     inflated.push(
         ...secondMaterial,
@@ -898,8 +757,7 @@ export function createSyntheticWorldInventoryFastfile({
     );
     appendU32(inflated, 0x1234_5678);
     inflated.push("c".charCodeAt(0), "p".charCodeAt(0), 1, 2);
-    appendU32(inflated,
-        invalidSecondXModelImageAlias ? 0x4000_0001 : 0x4000_02b1);
+    appendU32(inflated, 0x4000_02b1);
     const secondCollisionSurface = new Array(44).fill(0);
     setU32(secondCollisionSurface, 0, 0xffff_ffff);
     setU32(secondCollisionSurface, 4, 1);
@@ -922,67 +780,6 @@ export function createSyntheticWorldInventoryFastfile({
     setF32(secondBoneInfo, 20, 1);
     setF32(secondBoneInfo, 36, 3);
     inflated.push(...secondBoneInfo);
-    if (completePostXModelTechniqueDependencies) {
-        const trailingTechniqueSet = new Array(148).fill(0);
-        setU32(trailingTechniqueSet, 0, 0xffff_ffff);
-        setU32(trailingTechniqueSet, 12 + 4 * 4, 0xffff_ffff);
-        setU32(trailingTechniqueSet, 12 + 28 * 4, 0xffff_ffff);
-        inflated.push(
-            ...trailingTechniqueSet,
-            ...Buffer.from(",web/reusable_xmodel_loader_tail", "ascii"),
-            0,
-        );
-        appendWorldMaterialTechnique(inflated, "web/reusable_first");
-        appendWorldMaterialTechnique(inflated, "web/reusable_second",
-            invalidSecondPostXModelTechnique);
-    }
-    const compressed = deflateSync(Uint8Array.from(inflated), { level: 9 });
-    return Uint8Array.from([
-        0x49, 0x57, 0x66, 0x66, 0x75, 0x31, 0x30, 0x30,
-        0x05, 0x00, 0x00, 0x00,
-        ...compressed,
-    ]);
-}
-
-export function createSyntheticFxInventoryFastfile()
-{
-    const inflated = [];
-    appendU32(inflated, 4096);
-    appendU32(inflated, 0);
-    for (const size of [1024 * 1024, 0, 0, 0, 1024 * 1024, 0, 0, 0, 0]) {
-        appendU32(inflated, size);
-    }
-    appendU32(inflated, 0);
-    appendU32(inflated, 0);
-    appendU32(inflated, 3);
-    appendU32(inflated, 0xffff_ffff);
-    for (const type of [5, 25, 16]) {
-        appendU32(inflated, type);
-        appendU32(inflated, 0xffff_ffff);
-    }
-    const techniqueSet = new Array(148).fill(0);
-    setU32(techniqueSet, 0, 0xffff_ffff);
-    inflated.push(
-        ...techniqueSet,
-        ...Buffer.from(",web/fx_prefix", "ascii"),
-        0,
-    );
-    for (const value of [0xffff_ffff, 0, 512, 0, 0, 1, 0, 0xffff_ffff]) {
-        appendU32(inflated, value);
-    }
-    inflated.push(...Buffer.from("web/fx_mark", "ascii"), 0);
-    const elem = new Array(252).fill(0);
-    elem[176] = 9;
-    elem[177] = 1;
-    setU32(elem, 188, 0xffff_ffff);
-    inflated.push(...elem);
-    appendU32(inflated, 0xffff_ffff);
-    appendU32(inflated, 0xffff_ffff);
-    for (const name of [",web/fx_mark_world", ",web/fx_mark_model"]) {
-        const material = new Array(80).fill(0);
-        setU32(material, 0, 0xffff_ffff);
-        inflated.push(...material, ...Buffer.from(name, "ascii"), 0);
-    }
     const compressed = deflateSync(Uint8Array.from(inflated), { level: 9 });
     return Uint8Array.from([
         0x49, 0x57, 0x66, 0x66, 0x75, 0x31, 0x30, 0x30,

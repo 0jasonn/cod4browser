@@ -2,13 +2,6 @@ import { crc32, deflateRawSync } from "node:zlib";
 
 export const ZIP_METHOD_STORE = 0;
 export const ZIP_METHOD_DEFLATE = 8;
-export const IWI_HEADER_SIZE = 28;
-export const IWI_VERSION_COD4 = 6;
-export const IWI_FORMAT_ARGB = 1;
-export const IWI_FORMAT_DXT1 = 11;
-export const IWI_FORMAT_DXT3 = 12;
-export const IWI_FORMAT_DXT5 = 13;
-export const IWI_FLAG_NO_MIPMAPS = 0x02;
 
 const ZIP_LOCAL_SIGNATURE = 0x04034b50;
 const ZIP_CENTRAL_SIGNATURE = 0x02014b50;
@@ -41,79 +34,6 @@ function requireUint32(value, label)
         throw new RangeError(`${label} must be an unsigned 32-bit integer.`);
     }
     return value;
-}
-
-function requireUint8(value, label)
-{
-    if (!Number.isInteger(value) || value < 0 || value > 0xff) {
-        throw new RangeError(`${label} must be an unsigned 8-bit integer.`);
-    }
-    return value;
-}
-
-function requireInt16(value, label)
-{
-    if (!Number.isInteger(value) || value < -0x8000 || value > 0x7fff) {
-        throw new RangeError(`${label} must be a signed 16-bit integer.`);
-    }
-    return value;
-}
-
-function requireInt32(value, label)
-{
-    if (!Number.isInteger(value) || value < -0x8000_0000 || value > 0x7fff_ffff) {
-        throw new RangeError(`${label} must be a signed 32-bit integer.`);
-    }
-    return value;
-}
-
-// The fixture mirrors the 28-byte GfxImageFileHeader consumed by COD4's
-// load-from-file image path. Pixel bytes are entirely caller-provided synthetic
-// data; the helper never reads or derives content from a game installation.
-export function createSyntheticIwi({
-    tag = "IWi",
-    version = IWI_VERSION_COD4,
-    format = IWI_FORMAT_ARGB,
-    flags = IWI_FLAG_NO_MIPMAPS,
-    width = 2,
-    height = 2,
-    depth = 1,
-    payload = Buffer.from([
-        0xff, 0x20, 0x40, 0x60,
-        0xff, 0x80, 0xa0, 0xc0,
-        0xff, 0xe0, 0x30, 0x50,
-        0xff, 0x70, 0x90, 0xb0,
-    ]),
-    fileSizeForPicmip = undefined,
-} = {})
-{
-    const tagBytes = asBuffer(tag, "Synthetic IWI tag");
-    if (tagBytes.length !== 3) {
-        throw new RangeError("Synthetic IWI tags must contain exactly three bytes.");
-    }
-    const imagePayload = asBuffer(payload, "Synthetic IWI payload");
-    const totalSize = IWI_HEADER_SIZE + imagePayload.length;
-    if (totalSize > 0x7fff_ffff) {
-        throw new RangeError("Synthetic IWI size must fit a signed 32-bit header field.");
-    }
-
-    const picmipSizes = fileSizeForPicmip ?? [totalSize, totalSize, totalSize, totalSize];
-    if (!Array.isArray(picmipSizes) || picmipSizes.length !== 4) {
-        throw new TypeError("Synthetic IWI fileSizeForPicmip must contain four values.");
-    }
-
-    const header = Buffer.alloc(IWI_HEADER_SIZE);
-    tagBytes.copy(header, 0);
-    header.writeUInt8(requireUint8(version, "Synthetic IWI version"), 3);
-    header.writeUInt8(requireUint8(format, "Synthetic IWI format"), 4);
-    header.writeUInt8(requireUint8(flags, "Synthetic IWI flags"), 5);
-    header.writeInt16LE(requireInt16(width, "Synthetic IWI width"), 6);
-    header.writeInt16LE(requireInt16(height, "Synthetic IWI height"), 8);
-    header.writeInt16LE(requireInt16(depth, "Synthetic IWI depth"), 10);
-    picmipSizes.forEach((size, index) => {
-        header.writeInt32LE(requireInt32(size, `Synthetic IWI picmip size ${index}`), 12 + index * 4);
-    });
-    return Buffer.concat([header, imagePayload]);
 }
 
 function normalizeMethod(method)

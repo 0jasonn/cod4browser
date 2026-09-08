@@ -19,7 +19,7 @@ live/queued storage, adds raw export and strengthens product/tool contracts.
 The follow-up fixes canonical save-rename admission and numeric conversions,
 restores the production budget with JSPI/native Wasm exceptions, and binds
 complete project/dependency source archives to the build receipt.
-See [current execution evidence](web-test-inventory.md#current-execution-evidence--2026-09-08).
+See [current execution evidence](web-test-inventory.md#current-execution-evidence).
 Remaining work proceeds in this order:
 
 - Execute the repaired Linux tier and seeded sanitizer CI. The local Windows

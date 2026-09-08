@@ -334,10 +334,16 @@ void TestDirectedAxisAndMultiCloudOrdering()
         firstFixture.submission, secondFixture.submission};
     const WebRendererParticleCloudView view = IdentityView();
     WebRendererParticleCloudSceneCommand command;
-    std::uint32_t dropped = 0u;
-    assert(WebRenderer_BuildParticleCloudSceneCommand(submissions, 2u, view,
-        command, &dropped) == WebRendererParticleCloudSceneResult::Success);
-    assert(dropped == 0u && command.cloudCount == 2u);
+    for (const auto &submission : submissions)
+    {
+        WebRendererParticleCloudSceneCommand one;
+        assert(WebRenderer_BuildParticleCloudCommand(submission, view, one) ==
+            WebRendererParticleCloudSceneResult::Success);
+        assert(WebRenderer_AppendParticleCloudCommand(one, command.vertices,
+            command.indices, command.batches, command.surfaceCount) ==
+            WebRendererParticleCloudAppendResult::Success);
+    }
+    assert(command.surfaceCount == 2u);
     assert(command.vertices.size() == 2u * WEB_RENDERER_PARTICLE_CLOUD_VERTICES);
     assert(command.indices.size() == 2u * WEB_RENDERER_PARTICLE_CLOUD_INDICES);
     assert(command.batches.size() == 2u);

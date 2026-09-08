@@ -459,3 +459,8 @@ radiant_artifacts/
 
 # Local home backups may contain private saves and configuration.
 *.kisak-home
+
+# Standalone Miles EQ build products; native import libraries live in deps/.
+/milesEq/*.exp
+/milesEq/*.lib
+/milesEq/*.flt

@@ -96,7 +96,7 @@ The 2026-09-07 rebuild passes the unchanged production export/size gate with
 JSPI loading suspension and native Wasm exceptions. Release builds also retain
 verified public dependency sources outside the served site. Aggregate CI and
 manual campaign acceptance remain separate qualification requirements. See the
-[test inventory](docs/web-test-inventory.md#current-execution-evidence--2026-09-08).
+[test inventory](docs/web-test-inventory.md#current-execution-evidence).
 
 ## Browser validation
 

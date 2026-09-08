@@ -4,8 +4,11 @@ This evidence was captured from clean commit
 `e31d62ac640e42135b510b5a469396cf8c15978d` with Chrome 152.0.7977.64,
 headed and foreground on Windows 11, an AMD Ryzen 7 7800X3D, 32 GiB of
 system memory, and an NVIDIA GeForce RTX 3070 Ti through ANGLE D3D11. The
-complete sanitized aggregates are in
-[`retail-profile-e31d62ac.json`](retail-profile-e31d62ac.json).
+complete sanitized aggregates remain in Git:
+
+```powershell
+git show 4bca1760f95edb60c362926fa944e96dbcae3f2a:docs/evidence/retail-profile-e31d62ac.json
+```
 
 Each map used a profiling-disabled 60-second clean window for classification,
 followed by exactly 300 completed gameplay/render samples. Rotating,

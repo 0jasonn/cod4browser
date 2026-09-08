@@ -16,12 +16,6 @@ enum class WebWorkerFileType : std::uint32_t
     Directory = 2,
 };
 
-struct WebWorkerFileStat
-{
-    WebWorkerFileType type = WebWorkerFileType::Missing;
-    std::uint32_t size = 0;
-};
-
 struct WebWorkerDirectoryEntry
 {
     char name[WEB_WORKER_MAX_ENTRY_NAME_BYTES + 1]{};
@@ -44,6 +38,5 @@ bool WebWorkerFS_Remove(const char *logicalPath);
 bool WebWorkerFS_RemoveTree(const char *logicalPath);
 bool WebWorkerFS_Rename(const char *from, const char *to);
 
-bool WebWorkerFS_Stat(const char *logicalPath, WebWorkerFileStat &stat);
 bool WebWorkerFS_ListDirectory(
     const char *logicalPath, std::vector<WebWorkerDirectoryEntry> &entries);

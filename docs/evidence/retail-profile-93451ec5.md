@@ -4,9 +4,12 @@ Commit `93451ec52d011c226a0134ae963601e9822588c3` makes the one renderer
 optimization selected by the corrected profile: the C++ DObj scene builder
 reuses numeric skinning scratch capacity across surfaces and frames. It does
 not retain canonical pointers or change scene, visibility, material, geometry,
-or WebGL semantics. The complete post-change aggregates are in
-[`retail-profile-93451ec5.json`](retail-profile-93451ec5.json); the baseline is
-[`retail-profile-e31d62ac.json`](retail-profile-e31d62ac.json).
+or WebGL semantics. Complete post-change and baseline aggregates remain in Git:
+
+```powershell
+git show 4bca1760f95edb60c362926fa944e96dbcae3f2a:docs/evidence/retail-profile-93451ec5.json
+git show 4bca1760f95edb60c362926fa944e96dbcae3f2a:docs/evidence/retail-profile-e31d62ac.json
+```
 
 Both captures used the same headed Chrome 152.0.7977.64 installation and the
 same Windows 11 / Ryzen 7 7800X3D / 32 GiB / RTX 3070 Ti reference host. Each

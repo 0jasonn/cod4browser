@@ -74,21 +74,6 @@ EM_JS(int, WebWorkerFS_RenameJs, (const char *from, const char *to), {
         fs.rename(UTF8ToString(from), UTF8ToString(to)) ? 1 : 0;
 });
 
-EM_JS(int, WebWorkerFS_StatJs,
-    (const char *path, std::uint32_t *type, std::uint32_t *size), {
-        const fs = globalThis.__KISAKCOD_SYNC_FS__;
-        if (!fs || typeof fs.stat !== "function") return -1;
-        const result = fs.stat(UTF8ToString(path));
-        if (!result) return 0;
-        const encodedType = result.type === "file" ? 1 :
-            result.type === "directory" ? 2 : 0;
-        if (!encodedType || !Number.isSafeInteger(result.size) ||
-            result.size < 0 || result.size > 0xffff_ffff) return -1;
-        HEAPU32[type >>> 2] = encodedType;
-        HEAPU32[size >>> 2] = result.size >>> 0;
-        return 1;
-    });
-
 EM_JS(int, WebWorkerFS_ListDirectoryJs,
     (const char *path, WebWorkerDirectoryEntry *output, std::uint32_t capacity), {
         const fs = globalThis.__KISAKCOD_SYNC_FS__;
@@ -179,22 +164,6 @@ bool WebWorkerFS_RemoveTree(const char *logicalPath)
 bool WebWorkerFS_Rename(const char *from, const char *to)
 {
     return from && to && WebWorkerFS_RenameJs(from, to) != 0;
-}
-
-bool WebWorkerFS_Stat(const char *logicalPath, WebWorkerFileStat &stat)
-{
-    stat = {};
-    if (!logicalPath)
-        return false;
-    std::uint32_t type = 0;
-    std::uint32_t size = 0;
-    const int result = WebWorkerFS_StatJs(logicalPath, &type, &size);
-    if (result <= 0)
-        return false;
-    stat.type = static_cast<WebWorkerFileType>(type);
-    stat.size = size;
-    return stat.type == WebWorkerFileType::File ||
-        stat.type == WebWorkerFileType::Directory;
 }
 
 bool WebWorkerFS_ListDirectory(

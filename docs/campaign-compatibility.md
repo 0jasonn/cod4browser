@@ -134,8 +134,8 @@ These are independent profiling-disabled 60-second foreground windows from
 the clean six-map rerun at `93451ec5` in headed Chrome 152.0.7977.64 on the
 Windows 11 / Ryzen 7 7800X3D / RTX 3070 Ti reference host. The paired
 diagnostic capture collected exactly 300 completed gameplay/render samples per
-map and is not used for the compatibility label. Full aggregates are in
-[retail-profile-93451ec5.json](evidence/retail-profile-93451ec5.json).
+map and is not used for the compatibility label. Full aggregates remain in Git:
+`git show 4bca1760f95edb60c362926fa944e96dbcae3f2a:docs/evidence/retail-profile-93451ec5.json`.
 
 Airplane proves substantial canonical save/reload continuity, but the record
 at `da1e592c` shows no objective hash, active/done objective count, or mission
