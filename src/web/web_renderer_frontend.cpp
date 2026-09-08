@@ -2507,7 +2507,8 @@ void __cdecl R_AddCodeMeshDrawSurf(Material *material,
         batch.modelName = "<fx-code-mesh>";
         batch.firstInstanceIndex = UINT32_MAX;
         batch.lastInstanceIndex = UINT32_MAX;
-        batch.sourceKind = WebRendererSceneBatchKind::FxCodeMesh;
+        WebRenderer_SetFxCameraMetadata(batch,
+            WebRendererSceneBatchKind::FxCodeMesh);
         batch.samplerState = 0u;
         if (material->textureTable)
         {

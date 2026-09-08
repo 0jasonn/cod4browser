@@ -109,6 +109,16 @@ void TestFallbackStateWritesAndBlends()
 
 void TestFxBatchHasDistinctRendererIdentity()
 {
+    Material material{};
+    material.cameraRegion = 0u;
+    WebRendererWorldBatchDesc batch{};
+    batch.materialIdentity = &material;
+    WebRenderer_SetFxCameraMetadata(batch,
+        WebRendererSceneBatchKind::FxCodeMesh);
+    assert(batch.materialIdentity == &material);
+    assert(batch.sourceKind == WebRendererSceneBatchKind::FxCodeMesh);
+    assert(batch.cameraRegion == 2u && batch.techniqueType == 5u);
+    assert(batch.dynamicLightSurfType == 10u); // SF_CODE_MESH
     assert(WebRendererSceneBatchKind::FxCodeMesh !=
         WebRendererSceneBatchKind::DynamicDObj);
     assert(WebRenderer_FxDiagnosticIndex(

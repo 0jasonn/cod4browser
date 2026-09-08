@@ -1784,6 +1784,73 @@ void TestBrushMatchesWorldSelectionAndRejectsAtomically()
 }
 } // namespace
 
+void TestBlendedModelSpecularBindings()
+{
+    Material material{}; MaterialTechniqueSet set{}, remapped{}; MaterialTechnique tech{};
+    MaterialVertexShader vs{}; MaterialPixelShader ps{};
+    MaterialShaderArgument args[17]{};
+    material.techniqueSet=&set; set.remappedTechniqueSet=&remapped;
+    remapped.techniques[7]=&tech; tech.passCount=1;
+    auto &pass=tech.passArray[0];
+    pass.vertexShader=&vs; pass.pixelShader=&ps; pass.args=args; pass.customSamplerFlags=1;
+    constexpr const char *pixels[]{"lp_b0c0s0_sm3.hlsl", "lp_sun_b0c0s0_sm3.hlsl",
+        "lp_hsm_sun_b0c0s0_sm3.hlsl", "lp_spot_b0c0s0_sm3.hlsl"};
+    constexpr const char *vertices[]{"lp_s_tc0_dtex_sm3.hlsl", "lp_sun_s_tc0_dtex_sm3.hlsl",
+        "lp_hsm_sun_s_tc0_dtex_sm3.hlsl", "lp_omni_s_tc0_dtex_sm3.hlsl"};
+    for (unsigned variant=0; variant<4; ++variant)
+    {
+        unsigned count=0;
+        const auto code=[&](unsigned type,unsigned dest,unsigned index,unsigned rows=1) {
+            auto &arg=args[count++]; arg={}; arg.type=type; arg.dest=dest;
+            arg.u.codeConst={static_cast<std::uint16_t>(index),0,static_cast<std::uint8_t>(rows)};
+        };
+        const auto value=[&](unsigned type,unsigned dest,unsigned data) {
+            auto &arg=args[count++]; arg={}; arg.type=type; arg.dest=dest;
+            arg.u.nameHash=data;
+        };
+        code(3,4,60,4); code(3,0,76,4); code(3,8,57); code(3,21,41);
+        code(5,0,42); code(5,5,38);
+        value(2,0,0xa0ab1041u); value(2,variant==2 ? 6 : 5,0x34ecccb3u);
+        value(4,4,3); value(6,variant==3 ? 11 : 6,0x3d9994dcu);
+        if (variant==1 || variant==2)
+            for (unsigned i=0;i<3;++i) code(5,17+i,35+i);
+        if (variant==2)
+        {
+            code(3,24,84,4); code(5,2,32); code(5,4,33); value(4,5,7);
+        }
+        if (variant==3)
+        {
+            value(4,6,15);
+            for (unsigned i=0;i<5;++i) code(5,6+i,i);
+        }
+        vs.name=vertices[variant]; ps.name=pixels[variant]; pass.stableArgCount=count;
+        if (variant==2)
+        {
+            // HSM requires its own shadow visibility path, not the volume alpha.
+            assert(!WebRenderer_IsBlendedModelSpecularMaterial(&material,7));
+            continue;
+        }
+        assert(WebRenderer_IsBlendedModelSpecularMaterial(&material,7));
+        for (unsigned i=0;i<count;++i)
+        {
+            const auto saved=args[i]; args[i].dest=99;
+            assert(!WebRenderer_IsBlendedModelSpecularMaterial(&material,7));
+            args[i]=saved;
+        }
+        args[0].u.codeConst.firstRow=1;
+        assert(!WebRenderer_IsBlendedModelSpecularMaterial(&material,7));
+        args[0].u.codeConst.firstRow=0;
+        vs.name="unknown_lp_s_tc0_dtex_sm3.hlsl";
+        assert(!WebRenderer_IsBlendedModelSpecularMaterial(&material,7));
+        vs.name=vertices[variant]; ps.name="lp_t0c0s0_sm3.hlsl";
+        assert(!WebRenderer_IsBlendedModelSpecularMaterial(&material,7));
+    }
+    ps.name=pixels[3]; pass.customSamplerFlags=0;
+    assert(!WebRenderer_IsBlendedModelSpecularMaterial(&material,7));
+    assert(!WebRenderer_IsBlendedModelSpecularMaterial(nullptr,7));
+    assert(!WebRenderer_IsBlendedModelSpecularMaterial(&material,34));
+}
+
 void TestAuthoredSoftParticleBindings()
 {
     Material material{}; MaterialTechniqueSet set{}, remapped{}; MaterialTechnique tech{};
@@ -1820,6 +1887,24 @@ void TestAuthoredSoftParticleBindings()
     vs.name="vertcol_simple_fog_foa.hlsl"; ps.name="vertcol_simple_add_fog.hlsl";
     assert(WebRenderer_GetParticleMaterial(&material,5,soft));
     assert(soft.flags==7 && !soft.depthFeather && soft.fogColor[1]==0.2f);
+    // The model lens uses additive fog without angle falloff or depth feathering.
+    float lensFog[4]{};
+    MaterialShaderArgument lensArgs[5]{};
+    lensArgs[0]={3,4,{}}; lensArgs[0].u.codeConst={60,0,4};
+    lensArgs[1]={3,0,{}}; lensArgs[1].u.codeConst={76,0,4};
+    lensArgs[2]={2,0,{}}; lensArgs[2].u.nameHash=0xa0ab1041u;
+    lensArgs[3]={3,21,{}}; lensArgs[3].u.codeConst={41,0,1};
+    lensArgs[4]={7,0,{}}; lensArgs[4].u.literalConst=lensFog;
+    tech.passArray[0].args=lensArgs; tech.passArray[0].stableArgCount=5;
+    assert(!WebRenderer_GetParticleMaterial(&material,5,soft)); // FOA still requires falloff.
+    vs.name="vertcol_simple_fog_dtex.hlsl";
+    assert(WebRenderer_GetParticleMaterial(&material,5,soft));
+    assert(soft.flags==3 && !soft.depthFeather && !soft.sceneFog && soft.fogColor[0]==0);
+    for (const char *name : {"unknown_vertcol_simple_fog_dtex.hlsl", "vertcol_simple_fog_dtex"})
+    {
+        vs.name=name;
+        assert(!WebRenderer_GetParticleMaterial(&material,5,soft));
+    }
     tech.passArray[0].args=args; tech.passArray[0].stableArgCount=9;
     vs.name="zfeather_foa_dtex.hlsl"; ps.name="zfeather.hlsl";
     assert(WebRenderer_GetParticleMaterial(&material,5,soft));
@@ -1943,6 +2028,7 @@ int main()
     TestTechniqueSetFeatureNameRemap();
     TestAuthoredDistortionBindings();
     TestAuthoredSoftParticleBindings();
+    TestBlendedModelSpecularBindings();
     TestCommaPrefixedImageReferenceResolvesAtRendererBoundary();
     TestCanonicalOpaqueSurfacesAreBatchedInWorldOrder();
     TestCanonicalOutdoorLookupIsCarriedAtomically();

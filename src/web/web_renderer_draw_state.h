@@ -1,11 +1,40 @@
 #pragma once
 
+#include <gfx_d3d/gfx_draw_surf_types.h>
+
 #include <array>
 #include <algorithm>
+#include <bit>
 #include <cstdint>
 #include <cstring>
 #include <numeric>
 #include <vector>
+
+inline unsigned WebRenderer_PrimarySortKey(std::uint64_t packed) noexcept
+{
+    GfxDrawSurf draw{};
+    draw.packed = packed;
+    return draw.fields.primarySortKey;
+}
+
+inline bool WebRenderer_MatchesPrimarySortKey(
+    std::uint64_t packed, unsigned key) noexcept
+{
+    return WebRenderer_PrimarySortKey(packed) == key;
+}
+
+// R_MergeAndEmitDrawSurfLists merges families by primary key only. Each
+// callback emits that key in BSP/static/entity/FX order; the lists retain
+// their own full-key or AUTO/DECAL append ordering within the band.
+template<typename DrawBand>
+void WebRenderer_ForEachPrimarySortKey(std::uint64_t keys, DrawBand drawBand)
+{
+    while (keys)
+    {
+        drawBand(static_cast<unsigned>(std::countr_zero(keys)));
+        keys &= keys - 1u;
+    }
+}
 
 // R_RenderDrawSurfListMaterial runs each pass over the complete material
 // sublist. Camera visibility can split that sublist into several ranges.
@@ -37,7 +66,7 @@ void WebRenderer_ForEachMaterialPassGroup(std::size_t count, BatchFor batchFor,
 }
 
 // Preserve every non-reorderable entry as an anchor. Stable-sort only the
-// contiguous runs that the caller has proved order-independent.
+// contiguous runs in the same caller-selected sort group (zero is an anchor).
 template<typename Entries, typename BatchFor, typename CanReorder,
     typename SortKey>
 void WebRenderer_BuildStableDrawOrder(
@@ -49,14 +78,15 @@ void WebRenderer_BuildStableDrawOrder(
     std::size_t runBegin = 0u;
     while (runBegin < order.size())
     {
-        if (!canReorder(batchFor(entries[order[runBegin]])))
+        const auto group = canReorder(batchFor(entries[order[runBegin]]));
+        if (!group)
         {
             ++runBegin;
             continue;
         }
         std::size_t runEnd = runBegin + 1u;
         while (runEnd < order.size() &&
-            canReorder(batchFor(entries[order[runEnd]])))
+            canReorder(batchFor(entries[order[runEnd]])) == group)
             ++runEnd;
         std::stable_sort(order.begin() + runBegin, order.begin() + runEnd,
             [&](std::uint32_t left, std::uint32_t right) {

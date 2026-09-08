@@ -681,16 +681,31 @@ void TestStableDrawOrderPreservesUnsafeAnchors()
     // Authored model surface order can put a translucent lens before its
     // opaque housing. Native camera region 0 must complete before region 1,
     // regardless of material key, while non-model FX keep their anchor.
-    struct CameraBatch { unsigned region, key; bool canonicalModel; };
+    struct CameraBatch { unsigned region, key, sortGroup; };
     const std::vector<CameraBatch> cameraBatches{
         {1, 1, true}, {0, 50, true}, {1, 1, true}, {0, 20, true},
         {0, 0, false}, {1, 1, true}, {0, 30, true},
     };
     WebRenderer_BuildStableDrawOrder(cameraBatches,
         [](const CameraBatch &batch) -> const CameraBatch & { return batch; },
-        [](const CameraBatch &batch) { return batch.canonicalModel; },
+        [](const CameraBatch &batch) { return batch.sortGroup; },
         [](const CameraBatch &batch) { return std::pair{batch.region, batch.key}; }, order);
     assert((order == std::vector<std::uint32_t>{3, 1, 0, 2, 4, 6, 5}));
+
+    // Model (1) and FX (2) runs must remain separate even when adjacent.
+    // Distortion sorts before AUTO haze, equal-key haze stays back-to-front,
+    // and zero-group anchors stop both runs regardless of their keys.
+    const std::vector<CameraBatch> groupedBatches{
+        {0, 0, 0}, {1, 1, 1}, {0, 50, 1},
+        {2, 48, 2}, {2, 0, 2}, {2, 48, 2},
+        {0, 20, 1}, {0, 10, 1}, {0, 0, 0},
+        {2, 24, 2}, {2, 0, 2}, {0, 0, 0}, {2, 0, 2},
+    };
+    WebRenderer_BuildStableDrawOrder(groupedBatches,
+        [](const CameraBatch &batch) -> const CameraBatch & { return batch; },
+        [](const CameraBatch &batch) { return batch.sortGroup; },
+        [](const CameraBatch &batch) { return std::pair{batch.region, batch.key}; }, order);
+    assert((order == std::vector<std::uint32_t>{0, 2, 1, 4, 3, 5, 7, 6, 8, 10, 9, 11, 12}));
 }
 
 void TestLodDelegatesToCanonicalXModelPolicy()

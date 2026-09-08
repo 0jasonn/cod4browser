@@ -168,6 +168,31 @@ aiming, with `r_detail 0`, and after a 90-degree camera turn. The corresponding
 `@retail-reflex-sight` regression passes with both detail settings; complete
 native/browser renderer parity remains unqualified.
 
+The M4 Grenadier's separate `mc/mtl_weapon_lens_glow` uses the existing
+additive shader path for `vertcol_simple_fog_dtex.hlsl` plus
+`vertcol_simple_add_fog.hlsl`, without angle falloff. Its RGB is multiplied by
+texture and vertex alpha after fog; the pass keeps its literal black fog color
+and native INVDESTCOLOR/ONE blend. This matters because the authored texture
+contains full red even where alpha is zero. Synthetic D3D9 comparisons cover
+transparent, faint, opaque and fogged texels. The owned sight regression checks
+both the G36C reticle and the M4 ring without a broad red fill at the lens edges.
+
+The G36C glass uses the separate `lp_*_b0c0s0_sm3.hlsl` blended specular family.
+Recovered retail programs multiply diffuse colour by combined texture/vertex
+alpha before adding the orange specular reflection; multiplying that reflection
+by the glass texture's fixed 0.2 alpha again loses its warm tint. Specular
+strength and vertex alpha also control reflection tint, gloss/LOD and Fresnel
+endpoints/exponent; zero combined base alpha suppresses the entire output.
+Native ONE/INVSRCALPHA RGB and INVDESTALPHA/ONE alpha blending remain authored
+material state. Sixteen synthetic GPU comparisons use measured D3D9 outputs
+from the actual base and sun pixel programs, covering opacity, vertex alpha,
+view angle, weak specular and fog, with one UNORM8 step of tolerance and context
+recovery. These pass in Chromium; owned Chrome captures show the warm coating
+at hip and in ADS. The sight regression compares the glass interior with
+specular enabled/disabled in both poses. Recognition covers base, unshadowed
+sun and spot programs; the shadowed-sun variant retains its prior path until
+its distinct shadow visibility is implemented and validated.
+
 Rigid DObj submission preserves decoded basis lengths through the bone
 rotation, matching native's rigid GPU path. The owned G36C reticle has nonunit
 packed tangents; normalizing them before the vertex shader changes its UVs.
@@ -303,6 +328,28 @@ with the other GL targets. Native material-group disabling follows `r_distortion
 Snapshot submission needs `glFlush` for the observed Chromium MSAA reuse case;
 there is no production readback or new engine asset. Unknown distortion variants
 and arbitrary material passes remain unimplemented.
+
+Code-mesh and particle-cloud camera submissions now carry native emissive
+ownership and surface types. Their ordinary emissive draws sort by material
+key before rendering, while AUTO/DECAL sort bands 48/24 retain their authored
+append order. Retained keys initialize the primary
+sort field from `Material::info.sortKey`, as `Material_SortInternal` does;
+some imported FX still have an uninitialized serialized `drawSurf`. Complete
+native material-table sorting remains uncompiled. A synthetic GPU regression
+submits two haze layers ahead of distortion and verifies both survive, including
+zero serialized primary keys and stable AUTO ordering.
+
+Emissive camera submission merges world, static models, entities and FX by
+native primary sort key, preserving family order on ties as
+`R_MergeAndEmitDrawSurfLists` does. Sorting only FX fixed disappearing smoke
+but left the USP distortion ring overwriting model-owned lamp glows with the
+pre-emissive snapshot. Merging the active primary-key bands puts both the lamp
+glows and haze after distortion. Sun visibility anchors retain their existing
+pre-resolve/final-pass ownership. The synthetic GPU check covers cross-family
+glow; an optional owned-data regression pauses the actual USP muzzle effect and
+compares lamp brightness with distortion enabled, disabled and enabled again.
+The Chrome capture retains 99.8% of the sampled lamp brightness with distortion,
+versus 54.3% before the cross-family merge.
 
 The unused asynchronous filesystem adapters and completion exports are retired;
 canonical filesystem calls use `web_worker_filesystem` and synchronous Worker

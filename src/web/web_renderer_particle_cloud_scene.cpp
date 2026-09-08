@@ -163,7 +163,8 @@ WebRendererWorldBatchDesc MakeDraw(Material *material) noexcept
     draw.firstInstanceIndex = UINT32_MAX;
     draw.lastInstanceIndex = UINT32_MAX;
     draw.lightmapIndex = 31u;
-    draw.sourceKind = WebRendererSceneBatchKind::FxParticleCloud;
+    WebRenderer_SetFxCameraMetadata(draw,
+        WebRendererSceneBatchKind::FxParticleCloud);
     draw.baseImage = FindBaseImage(material, draw.samplerState);
     const bool hasTechnique = SelectTechnique(material, draw.stateBits);
     if (!hasTechnique)

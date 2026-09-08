@@ -18,6 +18,18 @@ constexpr std::uint32_t WEB_RENDERER_MAX_CODE_MESH_INDICES = 131'072u;
 constexpr std::uint32_t WEB_RENDERER_FX_FALLBACK_STATE_BITS0 = 0x19650165u;
 constexpr std::uint32_t WEB_RENDERER_FX_FALLBACK_STATE_BITS1 = 0x0000000cu;
 
+inline void WebRenderer_SetFxCameraMetadata(WebRendererWorldBatchDesc &batch,
+    WebRendererSceneBatchKind kind) noexcept
+{
+    // R_AddCodeMeshDrawSurf and R_AddParticleCloudDrawSurf submit to the
+    // emissive camera lists, independently of Material::cameraRegion.
+    batch.sourceKind = kind;
+    batch.cameraRegion = 2u;
+    batch.techniqueType = 5u; // TECHNIQUE_EMISSIVE
+    batch.dynamicLightSurfType = kind == WebRendererSceneBatchKind::FxParticleCloud
+        ? 12u : 10u; // SF_PARTICLE_CLOUD / SF_CODE_MESH
+}
+
 enum class WebRendererCodeMeshResult : std::uint8_t
 {
     Success = 0,

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("reflex sight matches retail vertex and pixel programs after context recovery", async ({ page }) => {
+test("reflex reticles and lens glow match retail shaders after context recovery", async ({ page }) => {
     await page.goto("/");
     await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state)).toBe("running");
     const call = (name, ...args) => page.evaluate(({ name, args }) =>
@@ -9,13 +9,45 @@ test("reflex sight matches retail vertex and pixel programs after context recove
     // packed N/T attributes. Covers intensity, detail masking, view direction,
     // binormal sign and authored scale. No retail bytecode/assets are fixtures.
     const native = [[32,48,64,77], [91,41,54,104], [210,80,89,158], [255,245,245,255],
-        [210,80,89,157], [150,50,61,131], [255,111,117,184], [91,41,54,104]];
+        [210,80,89,157], [150,50,61,131], [255,111,117,184], [91,41,54,104],
+        // Separate M4 lens-glow pass: texture alpha 0/32/255 and fog visibility
+        // 1/1/1/.25, with native INVDESTCOLOR/ONE blending and literal black fog.
+        [32,48,64,77], [38,51,64,88], [81,72,67,166], [44,54,65,166]];
     const check = async () => {
         for (const [scenario, expected] of native.entries()) {
             const pixel = (await call("_KisakWeb_TestReflexPixel", scenario)) >>> 0;
             const actual = [pixel & 255, (pixel >>> 8) & 255, (pixel >>> 16) & 255, pixel >>> 24];
             actual.forEach((value, c) => expect(Math.abs(value - expected[c]),
-                `reflex scenario ${scenario} channel ${c}`).toBeLessThanOrEqual(1));
+                `reflex scenario ${scenario} channel ${c}: ${actual}`).toBeLessThanOrEqual(1));
+        }
+    };
+    await check();
+    expect(await call("_KisakWeb_TestLoseWebGLContext")).toBe(1);
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state)).toBe("renderer-lost");
+    expect(await call("_KisakWeb_TestRestoreWebGLContext")).toBe(1);
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state)).toBe("running");
+    await check();
+});
+
+test("blended specular glass matches retail D3D pixels after context recovery", async ({ page }) => {
+    await page.goto("/");
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state)).toBe("running");
+    const call = (name, ...args) => page.evaluate(({ name, args }) =>
+        globalThis.__KISAKCOD_WEB__.module.call(name, ...args), { name, args });
+    // Actual lp_b0c0s0_sm3 / lp_sun_b0c0s0_sm3 pixel programs in D3D9,
+    // with synthetic 2D, volume and cube textures plus controlled varyings.
+    // Eight cases per program: base/vertex alpha, view angle, weak specular
+    // and fog. Proprietary bytecode and images remain outside the fixtures.
+    const native = [[65,61,59,113], [32,48,64,77], [78,48,8,255], [43,51,60,94],
+        [32,48,64,77], [36,44,51,113], [37,45,51,113], [39,50,61,113],
+        [140,103,77,113], [32,48,64,77], [152,90,27,255], [55,58,63,94],
+        [32,48,64,77], [36,44,51,113], [38,46,51,113], [58,60,66,113]];
+    const check = async () => {
+        for (const [scenario, expected] of native.entries()) {
+            const pixel = (await call("_KisakWeb_TestBlendedSpecularPixel", scenario)) >>> 0;
+            const actual = [pixel & 255, (pixel >>> 8) & 255, (pixel >>> 16) & 255, pixel >>> 24];
+            actual.forEach((value, c) => expect(Math.abs(value - expected[c]),
+                `blended specular scenario ${scenario} channel ${c}: ${actual}`).toBeLessThanOrEqual(1));
         }
     };
     await check();
@@ -120,6 +152,9 @@ test("authored distortion projects its basis, rejects foreground offsets and res
     await command("r_distortion 1");
     await expect.poll(() => sample(20, 1)).toBe(64);
     await check(29, [64, 32, 96, 64]);
+    await check(32, [80, 64, 72, 255]); // Sorted distortion must preserve both haze draws.
+    await check(33, [128, 80, 80, 255]); // World/static lamp glow joins the same primary-key merge.
+    expect(await sample(33, 3)).toBe(0x403020); // Emissive never contaminates the pre-emissive snapshot.
 });
 
 test("authored outdoor particle clouds use the world lookup and inclusive height mask", async ({ page }) => {

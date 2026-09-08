@@ -138,6 +138,9 @@ void TestDeterministicLayoutAndMaterialData()
     assert(first.batches[0].indexCount == WEB_RENDERER_PARTICLE_CLOUD_INDICES);
     assert(first.batches[0].sourceKind ==
         WebRendererSceneBatchKind::FxParticleCloud);
+    assert(first.batches[0].cameraRegion == 2u);
+    assert(first.batches[0].techniqueType == TECHNIQUE_EMISSIVE_INDEX);
+    assert(first.batches[0].dynamicLightSurfType == 12u); // SF_PARTICLE_CLOUD
     assert(first.batches[0].materialIdentity == &fixture.material);
     assert(first.batches[0].baseImage == &fixture.image);
     assert(first.batches[0].samplerState == 0x42u);

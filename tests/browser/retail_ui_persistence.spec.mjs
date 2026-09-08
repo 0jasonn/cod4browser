@@ -515,6 +515,76 @@ test("authored weapon objective models render their animated sheen", { tag: "@re
         await call(page, "_KisakWeb_TestPickupSheen", -1);
     });
 
+test("USP distortion preserves lamp model glow while firing", { tag: "@retail-usp-lights" },
+    async ({ retailPage: page }, testInfo) => {
+        test.setTimeout(360_000);
+        await page.addInitScript(() => {
+            globalThis.__uspScene = null;
+            globalThis.__uspFrames = 0;
+            addEventListener("kisakcod:renderer-scene-frame", ({ detail }) => {
+                globalThis.__uspScene = detail;
+                ++globalThis.__uspFrames;
+            });
+        });
+        await page.goto("/");
+        const chooser = page.waitForEvent("filechooser");
+        await page.locator("#portable-install-button").click();
+        await (await chooser).setFiles(retailRoot);
+        await expect.poll(() => page.evaluate(() =>
+            globalThis.__KISAKCOD_WEB__?.module?.filesystemState),
+        { timeout: 300_000 }).toBe("mounted");
+        await page.locator("#game-canvas").click({ position: { x: 5, y: 5 } });
+        const command = text => page.evaluate(text =>
+            globalThis.__KISAKCOD_WEB__.submitCanonicalCommand(text), text);
+        await command("devmap killhouse");
+        await expect.poll(() => page.evaluate(() => globalThis.__uspScene?.worldName),
+            { timeout: 300_000 }).toContain("killhouse");
+        await command("timescale 10");
+        await expect.poll(() => call(page, "_KisakWeb_TestGameplayState", 24, 0),
+            { timeout: 120_000 }).toBeGreaterThan(60_000);
+        await command("timescale 1; give usp; cg_drawGun 1; cg_draw2D 0; setviewpos 3300 -1090 65 15 -10; cg_fov 65; r_gamma 0.962963");
+        await expect.poll(() => call(page, "_KisakWeb_TestGameplayState", 4, 0)).toBe(4);
+        await expect.poll(() => call(page, "_KisakWeb_TestGameplayState", 13, 0)).toBe(0);
+        await page.setViewportSize({ width: 1024, height: 768 });
+        await page.evaluate(() => {
+            document.body.classList.add("renderer-only");
+            document.querySelector(".asset-panel").style.display = "none";
+        });
+        await page.waitForTimeout(2000);
+        // Pause the actual muzzle effect, including its distortion geometry.
+        // Simple pause keeps the scene visible and lets render dvars change.
+        await command("cl_paused_simple 1; timescale 0.1; +attack");
+        await page.waitForTimeout(350);
+        await command("-attack; pause");
+        await expect.poll(() => call(page, "_KisakWeb_TestUiState", 5)).toBe(1);
+        await expect.poll(() => call(page, "_KisakWeb_TestSoftParticlePixel", -1, 3)).toBe(1);
+        const brightness = [];
+        for (const enabled of [1, 0, 1]) {
+            await command(`r_distortion ${enabled}`);
+            const before = await page.evaluate(() => globalThis.__uspFrames);
+            await expect.poll(() => page.evaluate(() => globalThis.__uspFrames)).toBeGreaterThan(before + 2);
+            const png = await page.locator("#game-canvas").screenshot({
+                path: testInfo.outputPath(`usp-lamps-${brightness.length}-${enabled}.png`),
+            });
+            brightness.push(await page.evaluate(async encoded => {
+                const bitmap = await createImageBitmap(new Blob([
+                    Uint8Array.from(atob(encoded), c => c.charCodeAt(0)),
+                ], { type: "image/png" }));
+                const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+                const context = canvas.getContext("2d");
+                context.drawImage(bitmap, 0, 0); bitmap.close();
+                const pixels = context.getImageData(330, 380, 170, 75).data;
+                let total = 0;
+                for (let i = 0; i < pixels.length; i += 4)
+                    total += pixels[i] + pixels[i + 1] + pixels[i + 2];
+                return total / (pixels.length / 4 * 3);
+            }, png.toString("base64")));
+        }
+        expect(brightness[1], "owned lamp glow is visible").toBeGreaterThan(50);
+        for (const i of [0, 2])
+            expect(brightness[i] / brightness[1], "distortion retains the lamp glow").toBeGreaterThan(0.9);
+    });
+
 test("range indicator lenses remain red over their opaque housings", { tag: "@retail-range-lights" },
     async ({ retailPage: page }, testInfo) => {
         test.setTimeout(360_000);
@@ -576,7 +646,7 @@ test("range indicator lenses remain red over their opaque housings", { tag: "@re
         }
     });
 
-test("G36 reflex sight retains its red reticle with detail textures disabled", { tag: "@retail-reflex-sight" },
+test("reflex sights retain coated glass and red reticles without lens-edge spill", { tag: "@retail-reflex-sight" },
     async ({ retailPage: page }, testInfo) => {
         test.setTimeout(360_000);
         await page.addInitScript(() => {
@@ -615,9 +685,34 @@ test("G36 reflex sight retains its red reticle with detail textures disabled", {
         });
         const frames = () => page.evaluate(() => globalThis.__reflexFrames);
         await command("leaveads");
-        const before = await frames();
-        await expect.poll(frames).toBeGreaterThan(before + 2);
-        await command("toggleads");
+        for (const [pose, region] of [["hip", [710,375,23,37]], ["ads", [435,345,35,80]]]) {
+            if (pose === "ads") await command("toggleads");
+            const warmth = [];
+            for (const specular of [1, 0]) {
+                await command(`r_specular ${specular}`);
+                const before = await frames();
+                await expect.poll(frames, { timeout: 15_000 }).toBeGreaterThan(before + 12);
+                const png = await page.locator("#game-canvas").screenshot({
+                    path: testInfo.outputPath(`g36-glass-${pose}-specular-${specular}.png`),
+                });
+                warmth.push(await page.evaluate(async ({ encoded, region }) => {
+                    const bitmap = await createImageBitmap(new Blob([
+                        Uint8Array.from(atob(encoded), c => c.charCodeAt(0)),
+                    ], { type: "image/png" }));
+                    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+                    const context = canvas.getContext("2d");
+                    context.drawImage(bitmap, 0, 0); bitmap.close();
+                    // Fixed-camera glass interior, clear of the reticle and housing.
+                    const pixels = context.getImageData(...region).data;
+                    let warm = 0;
+                    for (let i = 0; i < pixels.length; i += 4) warm += pixels[i] - pixels[i + 2];
+                    return warm / (pixels.length / 4);
+                }, { encoded: png.toString("base64"), region }));
+            }
+            expect(warmth[0] - warmth[1], `${pose} glass retains its warm reflection`)
+                .toBeGreaterThan(pose === "hip" ? 6 : 20);
+            await command("r_specular 1");
+        }
         for (const detail of [1, 0]) {
             await command(`r_detail ${detail}`);
             const before = await frames();
@@ -653,6 +748,39 @@ test("G36 reflex sight retains its red reticle with detail textures disabled", {
             expect(reticle.width).toBeLessThan(40);
             expect(reticle.height).toBeLessThan(40);
         }
+        await command("leaveads; give m4_grenadier; r_detail 1");
+        await expect.poll(() => call(page, "_KisakWeb_TestGameplayState", 4, 0)).not.toBe(5);
+        await expect.poll(() => call(page, "_KisakWeb_TestGameplayState", 13, 0)).toBe(0);
+        const equipped = await frames();
+        await expect.poll(frames).toBeGreaterThan(equipped + 3);
+        await command("toggleads");
+        const aiming = await frames();
+        await expect.poll(frames, { timeout: 15_000 }).toBeGreaterThan(aiming + 12);
+        const m4Png = await page.locator("#game-canvas").screenshot({
+            path: testInfo.outputPath("m4-reflex-reticle.png"),
+        });
+        const m4Reticle = await page.evaluate(async encoded => {
+            const bitmap = await createImageBitmap(new Blob([
+                Uint8Array.from(atob(encoded), c => c.charCodeAt(0)),
+            ], { type: "image/png" }));
+            const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+            const context = canvas.getContext("2d");
+            context.drawImage(bitmap, 0, 0);
+            bitmap.close();
+            const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+            let center = 0, outside = 0;
+            for (let i = 0; i < pixels.length; i += 4) {
+                if (pixels[i] <= 100 || pixels[i] <= Math.max(pixels[i + 1], pixels[i + 2]) * 1.5)
+                    continue;
+                const x = (i / 4) % canvas.width - canvas.width / 2;
+                const y = Math.floor(i / 4 / canvas.width) - canvas.height / 2;
+                if (x * x + y * y <= 100 * 100) ++center;
+                else ++outside;
+            }
+            return { center, outside };
+        }, m4Png.toString("base64"));
+        expect(m4Reticle.center, "M4 red ring remains visible").toBeGreaterThan(40);
+        expect(m4Reticle.outside, "M4 lens edges do not fill with red").toBeLessThan(10_000);
     });
 
 test("canonical objectives and renderer dvars reach the shipped HUD", { tag: ["@retail-objective", "@retail-dvars", "@retail-shadows"] },

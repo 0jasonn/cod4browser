@@ -297,6 +297,58 @@ inline bool WebRenderer_GetReflexSightMaterial(const Material *material, unsigne
     return true;
 }
 
+// Recovered blended lp_*s0 programs premultiply diffuse before adding reflection.
+inline bool WebRenderer_IsBlendedModelSpecularMaterial(const Material *material, unsigned type) noexcept
+{
+    const auto *tech = WebRenderer_MaterialTechnique(material, type);
+    if (!tech || tech->passCount != 1) return false;
+    const auto &pass = tech->passArray[0];
+    if (!pass.vertexShader || !pass.vertexShader->name || !pass.pixelShader ||
+        !pass.pixelShader->name || pass.customSamplerFlags != 1) return false;
+    constexpr const char *pixels[]{"lp_b0c0s0_sm3.hlsl", "lp_sun_b0c0s0_sm3.hlsl",
+        "lp_spot_b0c0s0_sm3.hlsl"};
+    constexpr const char *vertices[]{"lp_s_tc0_dtex_sm3.hlsl", "lp_sun_s_tc0_dtex_sm3.hlsl",
+        "lp_omni_s_tc0_dtex_sm3.hlsl"};
+    unsigned variant = 0;
+    while (variant < 3 && std::strcmp(pass.pixelShader->name, pixels[variant])) ++variant;
+    if (variant == 3 || std::strcmp(pass.vertexShader->name, vertices[variant])) return false;
+    const bool sun = variant == 1, spot = variant == 2;
+    const unsigned count = pass.perPrimArgCount + pass.perObjArgCount + pass.stableArgCount;
+    const unsigned requiredCount = spot ? 16 : sun ? 13 : 10;
+    if (!pass.args || count != requiredCount) return false;
+    unsigned bindings = 0;
+    for (unsigned i = 0; i < count; ++i)
+    {
+        const auto &arg = pass.args[i];
+        if ((arg.type == 3 || arg.type == 5) && arg.u.codeConst.firstRow == 0)
+        {
+            const auto &c = arg.u.codeConst;
+            if (arg.type == 3)
+            {
+                if (arg.dest == 4 && c.index == 60 && c.rowCount == 4) bindings |= 1;
+                if (arg.dest == 0 && c.index == 76 && c.rowCount == 4) bindings |= 2;
+                if (arg.dest == 8 && c.index == 57 && c.rowCount == 1) bindings |= 4;
+                if (arg.dest == 21 && c.index == 41 && c.rowCount == 1) bindings |= 8;
+            }
+            else if (c.rowCount == 1)
+            {
+                if (arg.dest == 0 && c.index == 42) bindings |= 16;
+                if (arg.dest == 5 && c.index == 38) bindings |= 32;
+                if (sun && arg.dest >= 17 && arg.dest <= 19 && c.index == arg.dest + 18)
+                    bindings |= 1u << (arg.dest - 7);
+                if (spot && arg.dest >= 6 && arg.dest <= 10 && c.index == arg.dest - 6)
+                    bindings |= 1u << (arg.dest + 5);
+            }
+        }
+        if (arg.type == 2 && arg.dest == 0 && arg.u.nameHash == 0xa0ab1041u) bindings |= 64;
+        if (arg.type == 2 && arg.dest == 5 && arg.u.nameHash == 0x34ecccb3u) bindings |= 128;
+        if (arg.type == 4 && arg.dest == 4 && arg.u.codeSampler == 3) bindings |= 256;
+        if (arg.type == 6 && arg.dest == (spot ? 11 : 6) && arg.u.nameHash == 0x3d9994dcu) bindings |= 512;
+        if (spot && arg.type == 4 && arg.dest == 6 && arg.u.codeSampler == 15) bindings |= 1u << 10;
+    }
+    return bindings == (1u << requiredCount) - 1;
+}
+
 inline bool WebRenderer_GetParticleMaterial(const Material *material, unsigned type,
     WebRendererParticleMaterial &out) noexcept
 {
@@ -327,6 +379,8 @@ inline bool WebRenderer_GetParticleMaterial(const Material *material, unsigned t
         if (std::none_of(std::begin(vertices), std::end(vertices),
                 [vertex](const char *name) { return !std::strcmp(vertex, name); })) return false;
     }
+    else if ((value.flags & 1) && !std::strcmp(vertex, "vertcol_simple_fog_dtex.hlsl"))
+        value.flags &= ~4u;
     else if (std::strcmp(vertex, value.flags & 1
             ? "vertcol_simple_fog_foa.hlsl" : "vertcol_simple_foa_dtex.hlsl")) return false;
     if (std::strstr(vertex, "_foa_")) value.flags |= 4;
