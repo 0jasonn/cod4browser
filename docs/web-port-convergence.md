@@ -1,6 +1,6 @@
 # Web port convergence inventory
 
-Updated 2026-09-05. This page owns system classification; see
+Updated 2026-09-08. This page owns system classification; see
 [current status](web-status.md) and [the active roadmap](web-roadmap.md) for
 evidence and priorities. Earlier chronology is available in
 [Git history](../README.md#historical-records).
@@ -28,6 +28,7 @@ oracle.
 | System | Current ownership |
 | --- | --- |
 | Common startup | Canonical `Dvar_Init` and the strict `Com_Init` prefix run in native order; the host mounts browser storage at the filesystem boundary, then the continuation restores canonical common-command and version-dvar registration before script/server/client startup. |
+| Common runtime | Native and web compile the same `common_runtime_commands.cpp` and `common_runtime_continuation.cpp` owners for configuration commands, startup configs, safe mode, events, script settings, localization helpers and time controls. Duplicate implementations are removed from `common.cpp`; browser startup globals, error-boundary handling and the debugger frame fallback remain in `web_client_server_lifecycle.cpp`. Native/Wasm runtime tests exercise config failure paths, startup ordering and console-event payload release. |
 | Dvars/config | Canonical dvar types, domains, reset/current/latched values, flags, command handlers, key bindings, `Com_WriteConfigToFile`, and profile-relative `config.cfg` own settings. The Worker continuation restores `CL_InitKeyCommands` before filesystem/profile config execution; the browser frame pump only calls the shared `Com_WriteConfiguration` owner. |
 | Profiles | Canonical `Com_*PlayerProfile` and `UI_*PlayerProfile` functions own profile identity, active-marker parsing, list/feeder selection, config replay, and deletion. Browser diagnostics only select fixed synthetic entries through those owners. |
 | Filesystem | Canonical search paths, IWD/minizip behavior, config/profile calls and synchronous engine-facing operations use Worker file primitives. Recursive profile deletion maps to one durable Worker/OPFS tree-removal primitive. |
@@ -81,7 +82,6 @@ repair, not an owned-effect visual match. Animated DObj skinning is unchanged.
 | --- | --- |
 | `database/db_file_platform.cpp` | Maps DB file operations to the Worker filesystem. |
 | `database/db_generated_image_platform.*` | Retains transient LoadDefs behind opaque `GfxTexture` resource handles at the native upload boundary. Canonical image copies/overrides/defaults own lifetime; completion/unload collects unreferenced handles. The 256 MiB cap rejects admission before copying; live sources are not evicted. |
-| `qcommon/common_runtime_commands.cpp` | Keeps the post-mount common-command continuation canonical and separate from browser hosting. |
 | `game/g_scr_main.cpp` | Typed void callbacks discard C++ helper return values explicitly. This replaces incompatible function-pointer casts that trapped during actor model precaching in Wasm; script results remain owned by the canonical VM stack. |
 | `cgame/cg_servercmds.cpp` | The shared slow-command parser converts decimal scales numerically instead of aliasing `long double` storage as `double`; this preserves normal-speed and scripted scale values in Wasm. |
 | `web_client_server_lifecycle.cpp` | Continues synchronous-looking native startup after the main-thread host mounts user files, including canonical version dvars and diagnostic-only calls through real profile/save UI owners. |
@@ -151,10 +151,11 @@ through a future shared native surface packer or a smaller demonstrated seam.
 
 `web_renderer_material_lookup.h` shares identical image/constant table searches
 across world, static-model, and DObj rendering. Technique selection and water
-handling remain local. `worker_transport.mjs` shares request bookkeeping and
-filesystem lease acquisition/release, progress validation and bounded request
-watchdogs. Production and diagnostic protocols, timeout defaults and recovery
-policy remain host-owned. Both hosts enforce the same shared import lease and
+handling remain local. Both hosts use `worker_transport.mjs`'s `createWorkerRpc`
+for request IDs, generation tagging, timeout validation, aborts and timer/listener
+cleanup. It also shares filesystem lease acquisition/release, progress validation
+and bounded request watchdogs. Production and diagnostic protocols, timeout
+defaults and recovery policy remain host-owned. Both hosts enforce the same shared import lease and
 exclusive writable-profile lease. Native runtime mount reports actual reads
 through a scoped synchronous filesystem observer, preserving canonical loader
 ownership while distinguishing active loading from a stalled Worker.

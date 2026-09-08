@@ -1,6 +1,6 @@
 # Web product roadmap
 
-Updated 2026-09-07. Target: full offline single-player fidelity with original
+Updated 2026-09-08. Target: full offline single-player fidelity with original
 Steam COD4 (2007). Canonical Kisak owns gameplay and assets; the dedicated
 Worker, synchronous filesystem adapter and WebGL2 backend own browser support.
 Multiplayer remains out of scope.
@@ -19,11 +19,13 @@ live/queued storage, adds raw export and strengthens product/tool contracts.
 The follow-up fixes canonical save-rename admission and numeric conversions,
 restores the production budget with JSPI/native Wasm exceptions, and binds
 complete project/dependency source archives to the build receipt.
-See [current execution evidence](web-test-inventory.md#current-execution-evidence--2026-09-07).
+See [current execution evidence](web-test-inventory.md#current-execution-evidence--2026-09-08).
 Remaining work proceeds in this order:
 
-- Execute the repaired Linux tier and seeded sanitizer CI. Local Windows/Wasm
-  results do not substitute for either; the local Clang ASan runtime is missing.
+- Execute the repaired Linux tier and seeded sanitizer CI. The local Windows
+  Clang harness now passes sanitizer enforcement, the wavelet crash replay and
+  a 30-second seeded run after rejecting incomplete 2x2 mip expansion. These
+  local results do not substitute for Linux or hosted CI qualification.
 - Validated non-overwriting backup/raw-file reimport and same-origin restart
   with external network blocked now have synthetic evidence. Synthetic packages
   also exercise server replacement/rollback and failed-update isolation. Complete

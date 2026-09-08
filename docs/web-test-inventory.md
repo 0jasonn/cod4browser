@@ -91,7 +91,39 @@ subprocess deadline of budget + 60 seconds. Failure artifacts contain synthetic
 inputs/logs only. A successful process must also reach every seeded
 success/rejection family; exact coverage counters are not cross-platform gates.
 
-## Current execution evidence — 2026-09-07
+## Current execution evidence — 2026-09-08
+
+The working tree at `779cf2d0` consolidates native/browser common runtime
+implementations and production/diagnostic Worker RPC bookkeeping. It also
+rejects wavelet mip chains whose two-dimensional levels cannot expand complete
+2x2 blocks, preserving valid rectangular chains and failed-decode atomicity.
+Redundant per-target assertion flags are removed; the directory-wide forced
+assertion guard remains active.
+
+- Native MSVC x86 Release: 43/43 CTest cases and native SP build/relink pass.
+- Direct Wasm Release: 43/43 CTest cases pass, including shared config writes,
+  failure paths, startup execution order and console-event payload release.
+- Pinned `npm.cmd ci`, static checks and all 124 Node cases pass. Worker RPC
+  coverage includes stale replies, aborts, timeout validation, retirement and
+  failed `postMessage` cleanup.
+- Production Chromium: 56/56 cases pass. Diagnostic Chromium: 10/10 smoke and
+  61 remainder cases pass, with 13 optional skips and retail inputs disabled.
+- Release production/diagnostic builds and runtime-prefix checks pass. The
+  unchanged product gate passes: 3,181,857 Wasm bytes, 322,498 JavaScript bytes,
+  3,607,714 total site bytes, 17 raw and nine application exports, 22 files.
+- Local Windows x64 Clang 24 ASan/UBSan/libFuzzer with the existing matched
+  compiler-rt runtime passes the sanitizer-enforcement check and the original
+  wavelet heap-buffer-overflow input. A fresh 30-second seeded run completes
+  2,388,966 executions in 31 seconds, reaches all five required parser families,
+  and reports no finding (527 MiB peak RSS). Synthetic regression tests reject
+  4x6 and 1060x1280 chains and retain a decoded constant 6x2 image.
+
+Logs are under ignored `build/resume-consolidation/`. This is local synthetic
+build and browser-platform evidence; Linux/hosted sanitizer CI, aggregate release
+qualification, owned campaign acceptance and native MP were not run. Validation
+used uncommitted source and the production receipt records `dirty=True`.
+
+## Previous execution evidence — 2026-09-07
 
 The follow-up to `170feb7a` finishes canonical save-rename refusal handling,
 cgame floating-point conversion fixes, JSPI/native-Wasm exception integration,

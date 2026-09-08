@@ -1,6 +1,5 @@
-// Canonical common.cpp ownership after the temporary Gate 3 Com_Init prefix.
-// Keep this translation unit free of browser policy: it exists only because
-// KISAK_GATE3_COM_INIT_PREFIX currently excludes the remainder of common.cpp.
+// Common runtime behavior shared by native and browser targets.
+// Startup suspension and frame scheduling remain platform-owned.
 
 #include <qcommon/qcommon.h>
 #include <qcommon/cmd.h>
@@ -8,38 +7,35 @@
 #include <qcommon/system.h>
 #include <qcommon/sys_event_types.h>
 #include <client/client.h>
+#ifdef KISAK_MP
+#include <client_mp/client_mp.h>
+#endif
 #include <stringed/stringed_hooks.h>
 #include <universal/com_memory.h>
 #include <universal/dvar.h>
 #include <universal/q_parse.h>
+#include <universal/profile.h>
 #include <script/scr_vm_runtime.h>
 
-#include <csetjmp>
 #include <cstdio>
 #include <cstring>
-#include <algorithm>
-
-int com_fixedConsolePosition;
-int com_consoleLogOpenFailed;
-int com_missingAssetOpenFailed;
-int com_lastFrameTime[4];
-int com_fullyInitialized;
-float com_timescaleValue = 1.0f;
-int com_frameTime;
-const dvar_t *com_recommendedSet;
-const dvar_t *version;
-const dvar_t *shortversion;
-float com_codeTimeScale = 1.0f;
-int com_safemode;
 
 extern int com_numConsoleLines;
 extern char *com_consoleLines[32];
+extern int com_safemode;
+#ifdef KISAK_SP
+extern int com_lastFrameTime[4];
+extern float com_codeTimeScale;
+#endif
 
 void __cdecl Com_RunAutoExec(int localClientNum, int controllerIndex)
 {
     Dvar_SetInAutoExec(1);
-    Cmd_ExecuteSingleCommand(localClientNum, controllerIndex,
-        const_cast<char *>("exec autoexec_dev.cfg"));
+#ifdef KISAK_MP
+    Cmd_ExecuteSingleCommand(localClientNum, controllerIndex, (char*)"exec autoexec_dev_mp.cfg");
+#elif KISAK_SP
+    Cmd_ExecuteSingleCommand(localClientNum, controllerIndex, (char*)"exec autoexec_dev.cfg");
+#endif
     Dvar_SetInAutoExec(0);
 }
 
@@ -60,19 +56,31 @@ int __cdecl Com_SafeMode()
     return com_safemode;
 }
 
-void __cdecl Com_ExecStartupConfigs(int localClientNum, const char *configFile)
+void __cdecl Com_ExecStartupConfigs(int localClientNum, const char* configFile)
 {
+#ifdef KISAK_MP
+    Cbuf_AddText(localClientNum, "exec default_mp.cfg\n");
+#elif KISAK_SP
     Cbuf_AddText(localClientNum, "exec default.cfg\n");
+#endif
     Cbuf_AddText(localClientNum, "exec language.cfg\n");
-    if (configFile)
-        Cbuf_AddText(localClientNum, va("exec %s\n", configFile));
 
-    const int controllerIndex = CL_ControllerIndexFromClientNum(localClientNum);
-    Cbuf_Execute(localClientNum, controllerIndex);
-    Com_RunAutoExec(localClientNum, controllerIndex);
+    if (configFile)
+    {
+        Cbuf_AddText(localClientNum, va("exec %s\n", configFile));
+    }
+
+    Cbuf_Execute(localClientNum, CL_ControllerIndexFromClientNum(localClientNum));
+    Com_RunAutoExec(localClientNum, CL_ControllerIndexFromClientNum(localClientNum));
+
     if (Com_SafeMode())
+#ifdef KISAK_MP
+        Cbuf_AddText(localClientNum, "exec safemode_mp.cfg\n");
+#elif KISAK_SP
         Cbuf_AddText(localClientNum, "exec safemode.cfg\n");
-    Cbuf_Execute(localClientNum, controllerIndex);
+#endif
+
+    Cbuf_Execute(localClientNum, CL_ControllerIndexFromClientNum(localClientNum));
 }
 
 void __cdecl Com_WriteConfiguration(int localClientNum)
@@ -83,7 +91,11 @@ void __cdecl Com_WriteConfiguration(int localClientNum)
     dvar_modifiedFlags &= ~DVAR_ARCHIVE;
     if (!Com_HasPlayerProfile())
         return;
+#ifdef KISAK_MP
+    Com_BuildPlayerProfilePath(configFile, 64, "config_mp.cfg");
+#elif KISAK_SP
     Com_BuildPlayerProfilePath(configFile, 64, "config.cfg");
+#endif
     Com_WriteConfigToFile(localClientNum, configFile);
 }
 
@@ -136,6 +148,7 @@ void __cdecl Com_FreeEvent(char *ptr)
 
 void __cdecl Com_EventLoop()
 {
+    PROF_SCOPED("Com_EventLoop");
     sysEvent_t storage{};
     for (;;)
     {
@@ -144,6 +157,10 @@ void __cdecl Com_EventLoop()
         {
         case SE_NONE:
             iassert(!event.evPtr);
+#ifdef KISAK_MP
+            Com_ClientPacketEvent();
+            Com_ServerPacketEvent();
+#endif
             return;
         case SE_KEY:
             iassert(!event.evPtr);
@@ -176,6 +193,7 @@ void __cdecl Com_SetScriptSettings()
         com_developer_script_abort_on_error->current.integer);
 }
 
+#ifdef KISAK_SP
 void Com_ResetFrametime()
 {
     const int now = static_cast<int>(Sys_Milliseconds());
@@ -184,33 +202,9 @@ void Com_ResetFrametime()
     com_lastFrameTime[2] = now;
 }
 
-void Com_CheckError()
-{
-    Sys_EnterCriticalSection(CRITSECT_COM_ERROR);
-    const int entered = com_errorEntered;
-    Sys_LeaveCriticalSection(CRITSECT_COM_ERROR);
-    if (entered)
-    {
-        if (auto *errorBoundary = static_cast<jmp_buf *>(Sys_GetValue(2)))
-            longjmp(*errorBoundary, -1);
-    }
-}
-
 void Com_SetTimeScale(float timescale)
 {
     iassert(timescale > 0.0f);
     com_codeTimeScale = timescale;
 }
-
-void __cdecl Debug_Frame(int)
-{
-    // Remote native script-debugger transport is not present in browsers.
-    // Preserve the ordinary input/time/sound portion of the debug frame.
-    IN_Frame();
-    const int now = static_cast<int>(Sys_Milliseconds());
-    const int elapsed = std::max(0, now - com_frameTime);
-    com_frameTime = now;
-    cls.realFrametime = elapsed;
-    cls.realtime += elapsed;
-    CL_UpdateSound();
-}
+#endif

@@ -400,6 +400,8 @@ set(PHYSICS_ODE
 set(QCOMMON
     "${SRC_DIR}/qcommon/engine_lifecycle_trace.cpp"
     "${SRC_DIR}/qcommon/common_runtime_state.cpp"
+    "${SRC_DIR}/qcommon/common_runtime_commands.cpp"
+    "${SRC_DIR}/qcommon/common_runtime_continuation.cpp"
     "${SRC_DIR}/qcommon/engine_lifecycle_trace.h"
     "${SRC_DIR}/qcommon/bitarray.h"
     "${SRC_DIR}/qcommon/cmd.cpp"

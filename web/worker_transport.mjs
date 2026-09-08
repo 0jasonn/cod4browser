@@ -2,20 +2,25 @@
 // operation/event allowlists, timeout policy, and recovery.
 export const ENGINE_PROTOCOL_VERSION = 1;
 export const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
+export const MAX_REQUEST_TIMEOUT_MS = 120_000;
 
 export const FILESYSTEM_ABSOLUTE_TIMEOUT_MS = 5 * 60_000;
 
-/** @param {number} timeoutMs @param {string} name */
+/**
+ * @param {unknown} timeoutMs
+ * @param {string} name
+ * @returns {asserts timeoutMs is number}
+ */
 export function validateFilesystemTimeout(timeoutMs, name)
 {
     const maximum = 10 * 60_000;
-    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > maximum) {
+    if (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > maximum) {
         throw new RangeError(`${name} timeout must be 1..${maximum} ms.`);
     }
 }
 
 /** @param {any} request */
-export function clearRequestTimers(request)
+function clearRequestTimers(request)
 {
     clearTimeout(request.timeout);
     clearTimeout(request.absoluteTimeout);
@@ -26,7 +31,7 @@ export function clearRequestTimers(request)
  * @param {{timeoutMs: number, stallTimeoutMs?: number, absoluteTimeoutMs?: number}} options
  * @param {(message: string) => void} expire
  */
-export function armWorkerRequestTimeout(request, options, expire)
+function armWorkerRequestTimeout(request, options, expire)
 {
     const { timeoutMs, stallTimeoutMs, absoluteTimeoutMs } = options;
     request.stallTimeoutMs = stallTimeoutMs;
@@ -119,7 +124,7 @@ export class EngineWorkerError extends Error
  * @typedef {object} PendingRequest
  * @property {number} generation
  * @property {(value: any) => void} resolve
- * @property {(error: Error) => void} reject
+ * @property {(error: unknown) => void} reject
  * @property {ReturnType<typeof setTimeout> | null} timeout
  * @property {ReturnType<typeof setTimeout> | null} [absoluteTimeout]
  * @property {AbortSignal} [signal]
@@ -127,7 +132,7 @@ export class EngineWorkerError extends Error
  */
 
 /** @param {Map<number, PendingRequest>} pending */
-export function createRequestIdAllocator(pending)
+function createRequestIdAllocator(pending)
 {
     let nextRequestId = 1;
     return () => {
@@ -146,6 +151,88 @@ function releaseRequest(request)
 {
     clearRequestTimers(request);
     request.signal?.removeEventListener("abort", request.abort);
+}
+
+/**
+ * Hosts retain lifecycle guards and recovery; this owns request bookkeeping only.
+ * @param {Pick<Worker, "postMessage">} worker
+ * @param {Map<number, PendingRequest>} pending
+ * @param {number} requestTimeoutMs
+ * @param {() => number} getGeneration
+ */
+export function createWorkerRpc(worker, pending, requestTimeoutMs, getGeneration)
+{
+    const allocateRequestId = createRequestIdAllocator(pending);
+    /**
+     * @param {string} type
+     * @param {object} [payload]
+     * @param {Transferable[]} [transfer]
+     * @param {{timeoutMs?: number, signal?: AbortSignal,
+     *   stallTimeoutMs?: number, absoluteTimeoutMs?: number}} [options]
+     */
+    return function rpc(type, payload = {}, transfer = [], {
+        timeoutMs = requestTimeoutMs,
+        signal,
+        stallTimeoutMs,
+        absoluteTimeoutMs,
+    } = {})
+    {
+        const usesProgressWatchdog = stallTimeoutMs !== undefined;
+        if (!usesProgressWatchdog && (!Number.isFinite(timeoutMs) || timeoutMs <= 0 ||
+            timeoutMs > MAX_REQUEST_TIMEOUT_MS)) {
+            return Promise.reject(new RangeError(
+                `Worker request timeout must be 1..${MAX_REQUEST_TIMEOUT_MS} ms.`));
+        }
+        if (usesProgressWatchdog) {
+            try {
+                validateFilesystemTimeout(stallTimeoutMs, "Filesystem stall");
+                validateFilesystemTimeout(absoluteTimeoutMs, "Filesystem absolute");
+            } catch (error) {
+                return Promise.reject(error);
+            }
+            if (absoluteTimeoutMs < stallTimeoutMs) {
+                return Promise.reject(new RangeError(
+                    "Filesystem absolute timeout must be at least the stall timeout."));
+            }
+        }
+        if (signal?.aborted) {
+            return Promise.reject(new DOMException("The Worker request was aborted.", "AbortError"));
+        }
+        const id = allocateRequestId();
+        const promise = new Promise((resolve, reject) => {
+            const expire = (/** @type {string} */ message) => {
+                if (!pending.delete(id)) return;
+                releaseRequest(request);
+                reject(new EngineWorkerError(protocolError(
+                    "REQUEST_TIMEOUT", type, message, true)));
+            };
+            const abort = () => {
+                if (!pending.delete(id)) return;
+                releaseRequest(request);
+                reject(new DOMException("The Worker request was aborted.", "AbortError"));
+            };
+            const request = {
+                resolve, reject, timeout: null, signal, abort,
+                absoluteTimeout: null,
+                stallTimeoutMs,
+                generation: getGeneration(), operation: type,
+            };
+            armWorkerRequestTimeout(request, { timeoutMs, stallTimeoutMs, absoluteTimeoutMs }, expire);
+            pending.set(id, request);
+            signal?.addEventListener("abort", abort, { once: true });
+        });
+        try {
+            worker.postMessage({ protocolVersion: ENGINE_PROTOCOL_VERSION, type, id, ...payload }, transfer);
+        } catch (error) {
+            const request = pending.get(id);
+            pending.delete(id);
+            if (request) {
+                releaseRequest(request);
+                request.reject(error);
+            }
+        }
+        return promise;
+    };
 }
 
 /**

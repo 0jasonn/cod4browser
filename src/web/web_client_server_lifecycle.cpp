@@ -46,11 +46,51 @@
 #include <emscripten.h>
 
 #include <array>
+#include <algorithm>
 #include <csetjmp>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <string>
+
+// Remaining common.cpp globals while browser startup stops at the mount boundary.
+int com_fixedConsolePosition;
+int com_consoleLogOpenFailed;
+int com_missingAssetOpenFailed;
+int com_lastFrameTime[4];
+int com_fullyInitialized;
+float com_timescaleValue = 1.0f;
+int com_frameTime;
+const dvar_t *com_recommendedSet;
+const dvar_t *version;
+const dvar_t *shortversion;
+float com_codeTimeScale = 1.0f;
+int com_safemode;
+
+void Com_CheckError()
+{
+    Sys_EnterCriticalSection(CRITSECT_COM_ERROR);
+    const int entered = com_errorEntered;
+    Sys_LeaveCriticalSection(CRITSECT_COM_ERROR);
+    if (entered)
+    {
+        if (auto *errorBoundary = static_cast<jmp_buf *>(Sys_GetValue(2)))
+            longjmp(*errorBoundary, -1);
+    }
+}
+
+void __cdecl Debug_Frame(int)
+{
+    // Remote native script-debugger transport is not present in browsers.
+    // Preserve the ordinary input/time/sound portion of the debug frame.
+    IN_Frame();
+    const int now = static_cast<int>(Sys_Milliseconds());
+    const int elapsed = std::max(0, now - com_frameTime);
+    com_frameTime = now;
+    cls.realFrametime = elapsed;
+    cls.realtime += elapsed;
+    CL_UpdateSound();
+}
 
 namespace
 {

@@ -683,34 +683,6 @@ void __cdecl Com_ParseCommandLine(char* commandLine)
     }
 }
 
-int __cdecl Com_SafeMode()
-{
-    const char* v0; // eax
-    const char* v1; // eax
-    bool v3; // [esp+0h] [ebp-Ch]
-    int i; // [esp+8h] [ebp-4h]
-
-    for (i = 0; i < com_numConsoleLines; ++i)
-    {
-        Cmd_TokenizeString(com_consoleLines[i]);
-        v0 = Cmd_Argv(0);
-        v3 = 1;
-        if (I_stricmp(v0, "safe"))
-        {
-            v1 = Cmd_Argv(0);
-            if (I_stricmp(v1, "dvar_restart"))
-                v3 = 0;
-        }
-        Cmd_EndTokenizedString();
-        if (v3)
-        {
-            *com_consoleLines[i] = 0;
-            return 1;
-        }
-    }
-    return com_safemode;
-}
-
 void __cdecl Com_ForceSafeMode()
 {
     com_safemode = 1;
@@ -849,113 +821,6 @@ void __cdecl Com_ServerPacketEvent()
 }
 #endif
 
-void __cdecl Com_EventLoop()
-{
-    sysEvent_t result; // [esp+4h] [ebp-48h] BYREF
-    sysEvent_t ev; // [esp+34h] [ebp-18h]
-
-    PROF_SCOPED("Com_EventLoop");
-
-    while (1)
-    {
-        ev = *Sys_GetEvent(&result);
-
-        switch (ev.evType)
-        {
-        case SE_NONE:
-        {
-            iassert(!ev.evPtr);
-#ifdef KISAK_MP
-            Com_ClientPacketEvent();
-            Com_ServerPacketEvent();
-#endif
-            goto END;
-        }
-        case SE_KEY:
-        {
-            iassert(!ev.evPtr);
-            CL_KeyEvent(0, ev.evValue, ev.evValue2, ev.evTime);
-            break;
-        }
-        case SE_CHAR:
-        {
-            iassert(!ev.evPtr);
-            CL_CharEvent(0, ev.evValue);
-            break;
-        }
-        case SE_CONSOLE:
-        {
-            iassert(ev.evPtr);
-            Cbuf_AddText(0, (const char *)ev.evPtr);
-            Com_FreeEvent((char *)ev.evPtr);
-            Cbuf_AddText(0, "\n");
-            break;
-        }
-
-        default:
-            iassert(!ev.evPtr);
-            Com_Error(ERR_FATAL, "Com_EventLoop: bad event type %i", ev.evType);
-            break;
-        }
-    }
-
-END:
-    return;
-}
-
-void __cdecl Com_SetScriptSettings()
-{
-    //Scr_Settings(
-    //    (com_developer->current.integer || com_logfile->current.integer), 
-    //    com_developer_script->current.integer,
-    //    com_developer->current.integer
-    //);
-
-    Scr_Settings(
-        (com_developer->current.integer || com_logfile->current.integer),
-        com_developer_script->current.integer,
-        com_developer_script_abort_on_error->current.integer
-    );
-}
-
-void __cdecl Com_RunAutoExec(int localClientNum, int controllerIndex)
-{
-    Dvar_SetInAutoExec(1);
-#ifdef KISAK_MP
-    Cmd_ExecuteSingleCommand(localClientNum, controllerIndex, (char*)"exec autoexec_dev_mp.cfg");
-#elif KISAK_SP
-    Cmd_ExecuteSingleCommand(localClientNum, controllerIndex, (char*)"exec autoexec_dev.cfg");
-#endif
-    Dvar_SetInAutoExec(0);
-}
-
-void __cdecl Com_ExecStartupConfigs(int localClientNum, const char* configFile)
-{
-#ifdef KISAK_MP
-    Cbuf_AddText(localClientNum, "exec default_mp.cfg\n");
-#elif KISAK_SP
-    Cbuf_AddText(localClientNum, "exec default.cfg\n");
-#endif
-    Cbuf_AddText(localClientNum, "exec language.cfg\n");
-
-    if (configFile)
-    {
-        Cbuf_AddText(localClientNum, va("exec %s\n", configFile));
-    }
-
-    Cbuf_Execute(localClientNum, CL_ControllerIndexFromClientNum(localClientNum));
-    Com_RunAutoExec(localClientNum, CL_ControllerIndexFromClientNum(localClientNum));
-
-    if (Com_SafeMode())
-#ifdef KISAK_MP
-        Cbuf_AddText(localClientNum, "exec safemode_mp.cfg\n");
-#elif KISAK_SP
-        Cbuf_AddText(localClientNum, "exec safemode.cfg\n");
-#endif
-
-    Cbuf_Execute(localClientNum, CL_ControllerIndexFromClientNum(localClientNum));
-}
-
 void __cdecl Com_Init(char* commandLine)
 {
     jmp_buf* Value; // eax
@@ -1017,9 +882,6 @@ cmd_function_s Com_Error_f_VAR;
 cmd_function_s Com_Crash_f_VAR;
 cmd_function_s Com_Freeze_f_VAR;
 cmd_function_s Com_Assert_f_VAR;
-cmd_function_s Com_Quit_f_VAR;
-cmd_function_s Com_WriteConfig_f_VAR;
-cmd_function_s Com_WriteDefaults_f_VAR;
 
 static const char* comInitAllocName = "$init";
 void __cdecl Com_Init_Try_Block_Function(char* commandLine)
@@ -1091,9 +953,7 @@ void __cdecl Com_Init_Try_Block_Function(char* commandLine)
         Cmd_AddCommandInternal("freeze", Com_Freeze_f, &Com_Freeze_f_VAR);
         Cmd_AddCommandInternal("assert", Com_Assert_f, &Com_Assert_f_VAR);
     }
-    Cmd_AddCommandInternal("quit", Com_Quit_f, &Com_Quit_f_VAR);
-    Cmd_AddCommandInternal("writeconfig", Com_WriteConfig_f, &Com_WriteConfig_f_VAR);
-    Cmd_AddCommandInternal("writedefaults", Com_WriteDefaults_f, &Com_WriteDefaults_f_VAR);
+    Com_RegisterRuntimeCommands();
 #ifdef KISAK_MP
     s = va("%s %s build %s %s", "CoD4 MP", "1.0", getBuildNumber(), CPUSTRING);
 #elif KISAK_SP
@@ -1371,84 +1231,6 @@ void __cdecl Com_StartupConfigs(int localClientNum)
 void Com_InitXAssets()
 {
     DB_InitThread();
-}
-
-void __cdecl Com_WriteDefaultsToFile(char* filename)
-{
-    int file = FS_FOpenFileWrite(filename);
-    if (file)
-    {
-        FS_Printf(file, "// generated by Call of Duty, do not modify\n");
-        Dvar_WriteDefaults(file);
-        FS_FCloseFile(file);
-    }
-    else
-    {
-        Com_Printf(16, "Couldn't write %s.\n", filename);
-    }
-}
-
-void __cdecl Com_WriteConfig_f()
-{
-    char* v0; // eax
-    char filename[68]; // [esp+0h] [ebp-48h] BYREF
-
-    if (Cmd_Argc() == 2)
-    {
-        v0 = (char*)Cmd_Argv(1);
-        I_strncpyz(filename, v0, 64);
-        Com_DefaultExtension(filename, 0x40u, ".cfg");
-        Com_Printf(0, "Writing %s.\n", filename);
-        Com_WriteConfigToFile(0, filename);
-    }
-    else
-    {
-        Com_Printf(0, "Usage: writeconfig <filename>\n");
-    }
-}
-
-void __cdecl Com_WriteConfigToFile(int localClientNum, char* filename)
-{
-    int file = FS_FOpenFileWriteToDir(filename, (char*)"players");
-    if (file)
-    {
-        FS_Printf(file, "// generated by Call of Duty, do not modify\n");
-        FS_Printf(file, "unbindall\n");
-        Key_WriteBindings(localClientNum, file);
-        Dvar_WriteVariables(file);
-        Con_WriteFilterConfigString(file);
-        FS_FCloseFile(file);
-    }
-    else
-    {
-        Com_Printf(16, "Couldn't write %s.\n", filename);
-    }
-}
-
-void __cdecl Com_WriteDefaults_f()
-{
-    char* v0; // eax
-    char filename[68]; // [esp+0h] [ebp-48h] BYREF
-
-    if (Cmd_Argc() == 2)
-    {
-        v0 = (char*)Cmd_Argv(1);
-        I_strncpyz(filename, v0, 64);
-        Com_DefaultExtension(filename, 0x40u, ".cfg");
-        Com_Printf(0, "Writing %s.\n", filename);
-        Com_WriteDefaultsToFile(filename);
-    }
-    else
-    {
-        Com_Printf(0, "Usage: writedefaults <filename>\n");
-    }
-}
-
-double __cdecl Com_GetTimescaleForSnd()
-{
-    if (com_fixedtime->current.integer)
-        return (double)com_fixedtime->current.integer;
-    return (float)(com_timescale->current.value * dev_timescale->current.value);
 }
 
 void __cdecl Com_AdjustMaxFPS(int* maxFPS)
@@ -1743,25 +1525,6 @@ void __cdecl Com_Frame_Try_Block_Function()
 #endif
 }
 
-void __cdecl Com_WriteConfiguration(int localClientNum)
-{
-    char configFile[68]; // [esp+0h] [ebp-48h] BYREF
-
-    if (com_fullyInitialized && (dvar_modifiedFlags & 1) != 0)
-    {
-        dvar_modifiedFlags &= ~1u;
-        if (Com_HasPlayerProfile())
-        {
-#ifdef KISAK_MP
-            Com_BuildPlayerProfilePath(configFile, 64, "config_mp.cfg");
-#elif KISAK_SP
-            Com_BuildPlayerProfilePath(configFile, 64, "config.cfg");
-#endif
-            Com_WriteConfigToFile(localClientNum, configFile);
-        }
-    }
-}
-
 void Com_Statmon()
 {
     int timePrevFrame; // [esp+0h] [ebp-4h]
@@ -1899,14 +1662,6 @@ void __cdecl Com_Close()
     Hunk_ShutdownDebugMemory();
 }
 
-void __cdecl Field_Clear(field_t* edit)
-{
-    memset((uint8_t*)edit->buffer, 0, sizeof(edit->buffer));
-    edit->cursor = 0;
-    edit->scroll = 0;
-    edit->drawWidth = 256;
-}
-
 void __cdecl Com_Restart()
 {
     CL_ShutdownHunkUsers();
@@ -1967,38 +1722,6 @@ int __cdecl Com_AddToString(const char* add, char* msg, int len, int maxlen, int
     return len;
 }
 
-char __cdecl Com_GetDecimalDelimiter()
-{
-    int lang; // [esp+0h] [ebp-4h]
-
-    lang = loc_language->current.integer;
-    if (lang == 1 || lang == 2 || lang == 3 || lang == 4 || lang == 6 || lang == 7 || lang == 14)
-        return 44;
-    else
-        return 46;
-}
-
-void __cdecl Com_LocalizedFloatToString(float f, char* buffer, uint32_t maxlen, uint32_t numDecimalPlaces)
-{
-    uint32_t charPos; // [esp+8h] [ebp-8h]
-    char delimiter; // [esp+Fh] [ebp-1h]
-
-    _snprintf(buffer, maxlen - 1, "%.*f", numDecimalPlaces, f);
-    buffer[maxlen - 1] = 0;
-    delimiter = Com_GetDecimalDelimiter();
-    if (delimiter != 46)
-    {
-        for (charPos = 0; charPos < maxlen; ++charPos)
-        {
-            if (buffer[charPos] == 46)
-            {
-                buffer[charPos] = delimiter;
-                return;
-            }
-        }
-    }
-}
-
 void __cdecl Com_SyncThreads()
 {
 #ifndef KISAK_SP // called from Debug_Frame for script debugger
@@ -2010,11 +1733,6 @@ void __cdecl Com_SyncThreads()
         SV_WaitServer();
 #endif
     R_WaitWorkerCmds();
-}
-
-void __cdecl Com_FreeEvent(char* ptr)
-{
-    Z_Free(ptr, 10);
 }
 
 void Com_CheckError()
@@ -2032,24 +1750,6 @@ void Com_CheckError()
         longjmp((int*)value, -1);
     }
 }
-
-#ifdef KISAK_SP
-#include <script/scr_memorytree.h>
-
-void Com_ResetFrametime()
-{
-    com_lastFrameTime[0] = Sys_Milliseconds();
-    com_lastFrameTime[1] = com_lastFrameTime[0];
-    com_lastFrameTime[2] = com_lastFrameTime[0];
-}
-
-void Com_SetTimeScale(float timescale)
-{
-    iassert(timescale > 0);
-    com_codeTimeScale = timescale;
-}
-
-#endif // KISAK_SP
 
 #endif // KISAK_GATE3_COM_INIT_PREFIX
 

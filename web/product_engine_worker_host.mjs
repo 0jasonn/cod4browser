@@ -1,11 +1,9 @@
 import {
     acceptFilesystemProgress,
-    armWorkerRequestTimeout,
-    clearRequestTimers,
     FILESYSTEM_ABSOLUTE_TIMEOUT_MS,
     validateFilesystemTimeout,
     createFilesystemLeases,
-    createRequestIdAllocator,
+    createWorkerRpc,
     rejectWorkerRequests,
     settleWorkerReply,
 } from "./worker_transport.mjs";
@@ -14,7 +12,6 @@ import {
     DEFAULT_REQUEST_TIMEOUT_MS,
     ENGINE_PROTOCOL_VERSION,
     EngineWorkerError,
-    MAX_REQUEST_TIMEOUT_MS,
     PRODUCT_HOST_EVENTS,
     protocolError,
 } from "./product_protocol.mjs";
@@ -72,7 +69,7 @@ export function createEngineWorkerHost(canvas, {
     audioDriver.attachGestureResume(canvas);
 
     const pending = new Map();
-    const allocateRequestId = createRequestIdAllocator(pending);
+    const sendRequest = createWorkerRpc(worker, pending, requestTimeoutMs, () => workerGeneration);
     const leases = createFilesystemLeases(lockManager, emitFilesystemLifecycle);
     let filesystemMutation = Promise.resolve();
     let checkpointPromise = null;
@@ -122,72 +119,13 @@ export function createEngineWorkerHost(canvas, {
      * @param {{timeoutMs?: number, signal?: AbortSignal,
      *   stallTimeoutMs?: number, absoluteTimeoutMs?: number}} [options]
      */
-    function rpc(type, payload = {}, transfer = [], {
-        timeoutMs = requestTimeoutMs,
-        signal,
-        stallTimeoutMs,
-        absoluteTimeoutMs,
-    } = {})
+    function rpc(type, payload = {}, transfer = [], options = {})
     {
         if ((shuttingDown && type !== "shutdown") || disposed || workerUnavailable) {
             return Promise.reject(new EngineWorkerError(protocolError(
                 "WORKER_SHUTTING_DOWN", type, "The engine Worker is shutting down.")));
         }
-        const usesProgressWatchdog = stallTimeoutMs !== undefined;
-        if (!usesProgressWatchdog && (!Number.isFinite(timeoutMs) || timeoutMs <= 0 ||
-            timeoutMs > MAX_REQUEST_TIMEOUT_MS)) {
-            return Promise.reject(new RangeError(
-                `Worker request timeout must be 1..${MAX_REQUEST_TIMEOUT_MS} ms.`));
-        }
-        if (usesProgressWatchdog) {
-            try {
-                validateFilesystemTimeout(stallTimeoutMs, "Filesystem stall");
-                validateFilesystemTimeout(absoluteTimeoutMs, "Filesystem absolute");
-            } catch (error) {
-                return Promise.reject(error);
-            }
-            if (absoluteTimeoutMs < stallTimeoutMs) {
-                return Promise.reject(new RangeError(
-                    "Filesystem absolute timeout must be at least the stall timeout."));
-            }
-        }
-        if (signal?.aborted) {
-            return Promise.reject(new DOMException("The Worker request was aborted.", "AbortError"));
-        }
-        const id = allocateRequestId();
-        const promise = new Promise((resolve, reject) => {
-            const expire = (message) => {
-                if (!pending.delete(id)) return;
-                clearRequestTimers(request);
-                signal?.removeEventListener("abort", abort);
-                reject(new EngineWorkerError(protocolError(
-                    "REQUEST_TIMEOUT", type, message, true)));
-            };
-            const abort = () => {
-                if (!pending.delete(id)) return;
-                clearRequestTimers(request);
-                reject(new DOMException("The Worker request was aborted.", "AbortError"));
-            };
-            const request = {
-                resolve, reject, timeout: null, signal, abort,
-                absoluteTimeout: null,
-                stallTimeoutMs,
-                generation: workerGeneration, operation: type,
-            };
-            armWorkerRequestTimeout(request, { timeoutMs, stallTimeoutMs, absoluteTimeoutMs }, expire);
-            pending.set(id, request);
-            signal?.addEventListener("abort", abort, { once: true });
-        });
-        try {
-            worker.postMessage({ protocolVersion: ENGINE_PROTOCOL_VERSION, type, id, ...payload }, transfer);
-        } catch (error) {
-            const request = pending.get(id);
-            pending.delete(id);
-            if (request) clearRequestTimers(request);
-            request?.signal?.removeEventListener("abort", request.abort);
-            request?.reject(error);
-        }
-        return promise;
+        return sendRequest(type, payload, transfer, options);
     }
 
     const handleMessage = (event) => {

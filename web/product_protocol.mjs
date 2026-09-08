@@ -3,9 +3,9 @@ export {
     DEFAULT_REQUEST_TIMEOUT_MS,
     ENGINE_PROTOCOL_VERSION,
     EngineWorkerError,
+    MAX_REQUEST_TIMEOUT_MS,
     protocolError,
 } from "./worker_transport.mjs";
-export const MAX_REQUEST_TIMEOUT_MS = 120_000;
 
 export const PRODUCT_REQUIRED_EXPORTS = Object.freeze([
     "_malloc", "_free", "_KisakWeb_MountCanonicalRuntime", "_KisakWeb_ProbeLocalization",

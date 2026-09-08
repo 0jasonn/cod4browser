@@ -1,6 +1,4 @@
-// Canonical common.cpp command ownership after the temporary Gate 3 prefix.
-// Keep these implementations in sync with the native common.cpp tail until
-// that file can compile without KISAK_GATE3_COM_INIT_PREFIX.
+// Common configuration commands shared by native and browser targets.
 
 #include <qcommon/cmd.h>
 #include <qcommon/qcommon.h>
