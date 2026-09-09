@@ -23,6 +23,9 @@ export const RENDERER_PROFILE_FIELDS = [
     "dynamicModelMaterialMs", "dynamicModelParametersMs",
     "dynamicModelTexturesMs", "dynamicModelDrawMs", "fxModelsMs", "particlesMs",
     "marksMs", "uiMs", "postProcessMs", "bufferUploadMs", "textureUploadMs",
+    // Overlapping subcosts: do not add these to renderer or CPU totals.
+    "waterGenerationMs", "waterUploadMs", "retainedImageLookupMs",
+    "dynamicDrawBuildMs", "gpuResourceCreationMs",
 ];
 
 export const COUNTER_PROFILE_FIELDS = [
@@ -36,6 +39,10 @@ export const COUNTER_PROFILE_FIELDS = [
     "submittedIndices", "submittedTriangles", "textureBindCalls",
     "programSwitches", "bufferUploadBytes", "textureUploadBytes",
     "unmeasuredTextureUploads", "lodChanges", "shadowCasterDraws", "sunShadowMergedRanges",
+    "waterUpdateRequests", "waterGenerations", "waterUploads", "waterUploadBytes",
+    "retainedImageLookups", "retainedImageLookupHits", "retainedImageComparisons",
+    "dynamicDrawsBuilt", "gpuBuffersCreated", "gpuTexturesCreated", "gpuVertexArraysCreated",
+    "gpuFramebuffersCreated", "gpuRenderbuffersCreated",
     "dynamicCommandVertices", "dynamicCommandIndices", "uiCommandVertices", "uiCommandIndices",
 ];
 
@@ -72,6 +79,7 @@ export function aggregateGameplayProfile({
     gpuResults,
     capture,
     cleanAverageFrameIntervalMs,
+    cleanWorkloadMatched = true,
 })
 {
     const framePumpTicks = new Set(frames.map(({ pumpTick }) => pumpTick));
@@ -91,7 +99,7 @@ export function aggregateGameplayProfile({
         ? frameIntervals.reduce((sum, value) => sum + value, 0) /
             frameIntervals.length
         : null;
-    const profilerOverheadPercent = cleanAverageFrameIntervalMs > 0 &&
+    const profilerOverheadPercent = cleanWorkloadMatched && cleanAverageFrameIntervalMs > 0 &&
         profiledAverageFrameIntervalMs !== null
         ? (profiledAverageFrameIntervalMs / cleanAverageFrameIntervalMs - 1) * 100
         : null;
@@ -133,6 +141,9 @@ export function aggregateGameplayProfile({
             cleanAverageFrameIntervalMs,
             profiledAverageFrameIntervalMs,
             profilerOverheadPercent,
+            ...(cleanWorkloadMatched ? {} : {
+                unavailableReason: "Clean and profiled windows contain different canonical frames; interval differences are not profiler overhead.",
+            }),
         },
     };
 }

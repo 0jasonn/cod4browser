@@ -2770,7 +2770,7 @@ void __cdecl FS_SV_Rename(char *from, char *to)
     if (fs_debug->current.integer)
         Com_Printf(10, "FS_SV_Rename: %s --> %s\n", from_ospath, to_ospath);
 #if defined(KISAK_WEB)
-    if (!WebWorkerFS_Rename(from_ospath, to_ospath))
+    if (FS_CreatePath(to_ospath) || !WebWorkerFS_Rename(from_ospath, to_ospath))
         Com_PrintError(10, "FS_SV_Rename: failed to rename %s to %s\n", from_ospath, to_ospath);
 #else
     if (rename(from_ospath, to_ospath))
@@ -3002,6 +3002,9 @@ bool __cdecl FS_Rename(char *from, char *fromDir, char *to, char *toDir)
     if (fs_debug->current.integer)
         Com_Printf(10, "FS_Rename: %s --> %s\n", from_ospath, to_ospath);
 #if defined(KISAK_WEB)
+    // Native's copy fallback creates missing parents, including the first
+    // profile save/autosave directory. Prepare those before atomic admission.
+    if (FS_CreatePath(to_ospath)) return false;
     // Admission owns replacement and journaling; refusal must leave both files intact.
     return WebWorkerFS_Rename(from_ospath, to_ospath);
 #else

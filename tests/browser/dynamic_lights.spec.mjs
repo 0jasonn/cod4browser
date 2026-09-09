@@ -42,3 +42,18 @@ test("transient light material passes preserve additive, cone, alpha and attenua
     expect(await pixel(24)).toEqual([0, 0, 0]); // DObj box/spot contact rejected.
     close(await pixel(25), [64, 128, 191]); // DObj crosses the spot near plane.
 });
+
+
+test("shadow groups detect real GL errors before readiness and recover", async ({ page }) => {
+    await page.goto("/");
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state)).toBe("running");
+    for (const failure of [0, 1, 2, 3, 4]) {
+        const result = await page.evaluate(failure =>
+            globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestShadowErrorBoundary", failure), failure);
+        const batched = Boolean(result & (1 << 24));
+        const submitted = failure === 2 || failure === 4 || (!batched && failure !== 0) ? 2 : 4;
+        const checks = batched ? 1 : submitted;
+        expect(result >>> 0).toBe((batched ? 1 << 24 : 0) | (checks << 16) |
+            (submitted << 8) | 6 | (failure === 0 ? 1 : 0));
+    }
+});

@@ -7,6 +7,10 @@
 #include <deque>
 #include <string>
 
+#ifndef KISAK_WEB_SUPPRESS_AUDIO_EQUALITY
+#define KISAK_WEB_SUPPRESS_AUDIO_EQUALITY 1
+#endif
+
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
 #endif
@@ -411,6 +415,9 @@ void alSource3f(ALuint id, ALenum parameter, ALfloat x, ALfloat y, ALfloat z)
         return;
     }
     auto &source = g_sources[id];
+    // The first position also enables spatialization, including at the origin.
+    if (KISAK_WEB_SUPPRESS_AUDIO_EQUALITY && source.spatialized && source.position[0] == x &&
+        source.position[1] == y && source.position[2] == z) return;
     source.position[0] = x;
     source.position[1] = y;
     source.position[2] = z;
@@ -434,9 +441,15 @@ void alSourcef(ALuint id, ALenum parameter, ALfloat value)
     refresh_state(source);
     switch (parameter)
     {
-    case AL_GAIN: source.gain = std::max(0.0f, value); break;
+    case AL_GAIN:
+        value = std::max(0.0f, value);
+        if (KISAK_WEB_SUPPRESS_AUDIO_EQUALITY && source.gain == value) return;
+        source.gain = value;
+        break;
     case AL_PITCH:
-        source.pitch = std::max(0.001f, value);
+        value = std::max(0.001f, value);
+        if (KISAK_WEB_SUPPRESS_AUDIO_EQUALITY && source.pitch == value) return;
+        source.pitch = value;
         break;
     case AL_SEC_OFFSET:
         source.offset = std::max(0.0f, value);
@@ -467,7 +480,10 @@ void alSourcei(ALuint id, ALenum parameter, ALint value)
         source.buffer = static_cast<ALuint>(value);
         source.offset = 0.0f;
         break;
-    case AL_LOOPING: source.looping = value != AL_FALSE; break;
+    case AL_LOOPING:
+        if (KISAK_WEB_SUPPRESS_AUDIO_EQUALITY && source.looping == (value != AL_FALSE)) return;
+        source.looping = value != AL_FALSE;
+        break;
     case AL_SEC_OFFSET:
         source.offset = std::max(0, value);
         break;

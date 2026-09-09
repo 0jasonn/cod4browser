@@ -76,6 +76,15 @@ WebRendererParticleCloudSceneResult WebRenderer_BuildParticleCloudCommand(
     const WebRendererParticleCloudView &view,
     WebRendererParticleCloudSceneCommand &destination);
 
+// Expand directly into the admitted scene; any failure restores its contents.
+WebRendererParticleCloudSceneResult WebRenderer_BuildAndAppendParticleCloudCommand(
+    const WebRendererParticleCloudSubmission &submission,
+    const WebRendererParticleCloudView &view,
+    std::vector<WebRendererSurfaceVertex> &vertices,
+    std::vector<std::uint32_t> &indices,
+    std::vector<WebRendererWorldBatchDesc> &batches,
+    std::uint32_t &surfaceCount);
+
 WebRendererParticleCloudAppendResult WebRenderer_AppendParticleCloudCommand(
     const WebRendererParticleCloudSceneCommand &source,
     std::vector<WebRendererSurfaceVertex> &vertices,

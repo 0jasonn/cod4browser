@@ -168,6 +168,35 @@ EM_JS(
         }));
     });
 
+EM_JS(double, FrameTimingNowJs, (int beginFrame), {
+    const capture = globalThis.kisakFrameTiming;
+    if (!capture) return 0;
+    if (beginFrame) capture.scene = null;
+    return performance.now();
+});
+
+EM_JS(bool, FrameTimingActiveJs, (), {
+    return Boolean(globalThis.kisakFrameTiming);
+});
+
+EM_JS(void, RecordFrameSceneJs,
+    (const char *world, uint32_t generation, int32_t time, bool geometry,
+     uint32_t contextGeneration, uint32_t worldGeneration), {
+    if (globalThis.kisakFrameTiming) globalThis.kisakFrameTiming.scene = {
+        world: UTF8ToString(world), generation, time, geometry: Boolean(geometry),
+        contextGeneration, worldGeneration };
+});
+
+EM_JS(void, RecordFrameTimingJs,
+    (uint32_t pumpTick, uint32_t monotonicMilliseconds, double started,
+     double simulationStarted, double submissionStarted, int wallMilliseconds,
+     int simulationMilliseconds), {
+    globalThis.kisakFrameTiming?.record({ pumpTick, monotonicMilliseconds,
+        started, simulationStarted, submissionStarted, completed: performance.now(),
+        wallMilliseconds, simulationMilliseconds, wasmHeapCapacityBytes: HEAPU8.byteLength,
+        scene: globalThis.kisakFrameTiming.scene });
+});
+
 EM_JS_DEPS(framePump, "$getWasmTableEntry,$handleException");
 EM_JS(void, StartFramePumpJs, (std::uintptr_t callback), {
     const runFrame = WebAssembly.promising(getWasmTableEntry(callback));
@@ -256,10 +285,11 @@ void __cdecl Sys_LoadingKeepAlive()
 {
     static uint32_t lastPresentation = 0;
     static bool presenting = false;
-    const uint32_t now = Sys_Milliseconds();
     if (presenting || !g_framePumpStarted || !cls.rendererStarted || !cls.uiStarted ||
-        com_errorEntered || clientUIActives[0].connectionState != CA_LOADING ||
-        now - lastPresentation < 33u)
+        com_errorEntered || clientUIActives[0].connectionState != CA_LOADING)
+        return;
+    const uint32_t now = Sys_Milliseconds();
+    if (now - lastPresentation < 33u)
         return;
     lastPresentation = now;
     presenting = true;
@@ -653,6 +683,33 @@ void Web_Log(WebLogLevel level, const char *format, ...)
     va_start(arguments, format);
     PrintFormatted(level == WebLogLevel::Error ? stderr : stdout, format, arguments);
     va_end(arguments);
+}
+
+double Web_FrameTimingNow(bool beginFrame)
+{
+    return FrameTimingNowJs(beginFrame);
+}
+
+bool Web_FrameTimingActive()
+{
+    return FrameTimingActiveJs();
+}
+
+void Web_RecordFrameScene(const char *world, std::uint32_t generation,
+    std::int32_t time, bool geometry, std::uint32_t contextGeneration,
+    std::uint32_t worldGeneration)
+{
+    RecordFrameSceneJs(world, generation, time, geometry, contextGeneration,
+        worldGeneration);
+}
+
+void Web_RecordFrameTiming(const WebFrameInfo &frame, double started,
+    double simulationStarted, double submissionStarted, int wallMilliseconds,
+    int simulationMilliseconds)
+{
+    RecordFrameTimingJs(frame.pumpTick, frame.monotonicMilliseconds, started,
+        simulationStarted, submissionStarted, wallMilliseconds,
+        simulationMilliseconds);
 }
 
 bool Web_StartFramePump(WebFrameCallback callback, void *userData)

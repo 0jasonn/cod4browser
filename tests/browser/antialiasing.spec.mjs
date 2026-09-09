@@ -183,3 +183,39 @@ test("falls down to the highest WebGL2-supported sample count", async ({ page })
             .map((operation) => operation.samples));
     expect(samples).toEqual([2, 2]);
 });
+
+test("failed MSAA resolve stops publication and post effects, then rebuilds", async ({ page }) => {
+    await observeAntiAliasing(page);
+    await page.goto("/");
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state)).toBe("running");
+    const call = (name, ...args) => page.evaluate(({ name, args }) =>
+        globalThis.__KISAKCOD_WEB__.module.call(name, ...args), { name, args });
+    const control = values => page.evaluate(values =>
+        globalThis.__KISAKCOD_WEB__.module.testControl(values), values);
+    await submitTestSurface(page);
+    expect(await call("_KisakWeb_TestSetAaSamples", 4)).toBe(4);
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.rendererAa?.activeSamples)).toBe(4);
+    const generationBefore = await page.evaluate(() => globalThis.__KISAKCOD_WEB__.rendererAa.resourceGeneration);
+    await control({ failAaResolve: true });
+    // New surface generation must remain unpublished while every resolve fails.
+    await submitTestSurface(page);
+    expect(await call("_KisakWeb_TestAaFrameCompletion")).toBe(0);
+    const failed = await page.evaluate(() => ({
+        failures: globalThis.__kisakcodAaLifecycle.filter(event => event.state === "failed"),
+        invalidBlit: globalThis.__kisakcodAaGlOperations.some(operation =>
+            operation.operation === "blit-framebuffer" && operation.filter === 0),
+        downstreamDraws: globalThis.__kisakcodAaGlOperations.filter(operation =>
+            operation.operation === "draw-after-failed-resolve"),
+    }));
+    expect(failed.failures.length).toBeGreaterThan(0);
+    expect(failed.failures.at(-1)).toMatchObject({ resident: false, activeSamples: 1 });
+    expect(failed.invalidBlit).toBe(true);
+    expect(failed.downstreamDraws).toEqual([]);
+    await control({ failAaResolve: false });
+    // Bootstrap returns no canonical scene (bit 0), but the next draw completes,
+    // retains its rebuilt MSAA target and publishes the pending surface.
+    expect(await call("_KisakWeb_TestAaFrameCompletion")).toBe(2 | 8 | 16);
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.rendererAa?.state)).toBe("ready");
+    expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.rendererAa.resourceGeneration))
+        .toBeGreaterThan(generationBefore);
+});

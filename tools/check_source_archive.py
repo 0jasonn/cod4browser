@@ -6,10 +6,15 @@ import stat
 import zipfile
 
 
-def check_archive(path):
+def source_path_allowed(name):
     forbidden_roots = ("deps/binklib/", "deps/msslib/", "deps/steamsdk/")
     forbidden_suffixes = {".dll", ".lib", ".exp", ".exe", ".flt", ".asi", ".so",
                           ".dylib", ".iwd", ".ff", ".bik", ".wasm", ".kisak-home"}
+    return not (name.lower().startswith(forbidden_roots) or
+                PurePosixPath(name).suffix.lower() in forbidden_suffixes)
+
+
+def check_archive(path):
     required = {"LICENSE", "CMakeLists.txt", "tools/web_toolchain.json",
                 "scripts/web/CMakeLists.txt"}
     with zipfile.ZipFile(path) as archive:
@@ -28,8 +33,7 @@ def check_archive(path):
                 raise ValueError(f"Source symlink is not distributable: {name}")
             if entry.is_dir():
                 continue
-            if (name.lower().startswith(forbidden_roots) or
-                    PurePosixPath(name).suffix.lower() in forbidden_suffixes):
+            if not source_path_allowed(name):
                 raise ValueError(f"Non-distributable source entry: {name}")
             with archive.open(entry) as source:
                 signature = source.read(4)

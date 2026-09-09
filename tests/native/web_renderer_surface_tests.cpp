@@ -16,6 +16,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace
 {
@@ -366,7 +367,7 @@ void TestShadowLightHistory()
     Require(history.entryCount == 0, "invisible lights release history immediately");
 }
 
-void TestDynamicTextureBindings()
+void TestPassTextureBindings()
 {
     // Model texture-object sampler state separately from unit bindings, as GL
     // does. Compare each draw against unconditional ordered binding, including
@@ -374,64 +375,114 @@ void TestDynamicTextureBindings()
     struct State
     {
         std::array<std::uint32_t, 10> units{};
-        std::array<std::uint8_t, 8> textureSamplers{};
+        std::array<std::uint16_t, 8> textureSamplers{};
         unsigned calls = 0;
-        void Bind(std::uint32_t unit, std::uint32_t texture, std::uint8_t sampler)
+        void Bind(std::uint32_t unit, std::uint32_t texture, std::uint8_t sampler, bool mipmaps)
         {
             units.at(unit) = texture;
-            textureSamplers.at(texture) = sampler;
+            textureSamplers.at(texture) = sampler | (mipmaps ? 0x100u : 0u);
             ++calls;
         }
-    } actual, reference;
-    WebRendererDynamicTextures bindings;
-    const auto apply = [&](const WebRendererDynamicTextureSet &set) {
-        reference.Bind(0, set.textures[0], set.samplers[0]);
-        reference.Bind(1, set.textures[1], set.samplers[1]);
-        reference.Bind(4, set.textures[2], set.samplers[2]);
-        reference.Bind(5, set.textures[3], set.samplers[3]);
-        reference.Bind(2, set.textures[4], set.secondarySampler);
-        reference.Bind(9, set.textures[5], 0x62);
-        bindings.Apply(set, [&](auto unit, auto texture, auto sampler, bool) {
-            actual.Bind(unit, texture, sampler);
-        });
-        Require(actual.units == reference.units &&
-            actual.textureSamplers == reference.textureSamplers,
-            "draw sees unchanged texture bindings and object sampler state");
     };
-    const WebRendererDynamicTextureSet base{{1, 2, 3, 4, 5, 6}, {1, 2, 3, 4}};
-    apply(base);
-    Require(actual.calls == 6, "first set binds every unit");
-    apply(base);
-    Require(actual.calls == 6, "identical set needs no GL calls");
-    for (std::size_t i = 0; i < base.textures.size(); ++i)
-    {
-        auto changed = base;
-        changed.textures[i] = 7;
-        apply(changed);
+    const auto testFamily = [&]<std::size_t Count>(
+        const std::array<WebRendererPassTexture, Count> &base) {
+        State actual, reference;
+        WebRendererPassTextures<Count> bindings;
+        WebRendererPassTextures<Count> uncached;
+        const auto apply = [&](const std::array<WebRendererPassTexture, Count> &set) {
+            unsigned unconditionalCalls = 0;
+            uncached.template Apply<false>(set, [&](auto, auto, auto, bool, bool unchanged) {
+                Require(!unchanged, "the A/B baseline must unconditionally bind every enabled unit");
+                ++unconditionalCalls;
+            });
+            Require(unconditionalCalls == std::count_if(set.begin(), set.end(),
+                [](const auto &entry) { return entry.enabled; }),
+                "the A/B baseline cannot omit repeated texture sets");
+            for (const auto &entry : set)
+                if (entry.enabled)
+                    reference.Bind(entry.unit, entry.texture, entry.sampler, entry.mipmaps);
+            bindings.Apply(set, [&](auto unit, auto texture, auto sampler, bool mipmaps, bool unchanged) {
+                Require(!unchanged || actual.units.at(unit) == texture,
+                    "a skipped bind must refer to the texture actually bound to this unit");
+                actual.Bind(unit, texture, sampler, mipmaps);
+            });
+            Require(actual.units == reference.units &&
+                actual.textureSamplers == reference.textureSamplers,
+                "draw sees unchanged texture bindings and object sampler state");
+        };
         apply(base);
-    }
-    for (std::size_t i = 0; i < base.samplers.size(); ++i)
-    {
-        auto changed = base;
-        changed.samplers[i] = 0x62;
-        apply(changed);
+        Require(actual.calls == Count, "first set binds every unit");
         apply(base);
-    }
-    const WebRendererDynamicTextureSet aliases{{1, 1, 1, 1, 1, 1}, {1, 2, 3, 4}};
-    auto attenuation = base;
-    attenuation.secondarySampler = 0x61;
-    apply(attenuation);
-    apply(base);
-    apply(aliases);
-    apply(aliases);
-    apply(base);
-    bindings = {}; // Another pass/frame/context must bind afresh.
-    const unsigned before = actual.calls;
-    apply(base);
-    Require(actual.calls == before + 6, "new pass cannot reuse old GL state");
-    bindings = {};
-    apply({});
-    Require(actual.calls == before + 12, "zero-valued first set still binds");
+        Require(actual.calls == Count, "identical set needs no GL calls");
+        for (std::size_t i = 0; i < base.size(); ++i)
+        {
+            auto changed = base;
+            changed[i].texture = 7;
+            apply(changed);
+            apply(base);
+            changed = base;
+            changed[i].sampler = 0x61;
+            apply(changed);
+            apply(base);
+            changed = base;
+            changed[i].mipmaps = !changed[i].mipmaps;
+            apply(changed);
+            apply(base);
+            changed = base;
+            changed[i].enabled = false;
+            apply(changed);
+            apply(changed);
+            apply(base);
+        }
+        auto aliases = base;
+        for (std::size_t i = 0; i < aliases.size(); ++i)
+        {
+            aliases[i].texture = 1u;
+            aliases[i].mipmaps = (i % 2u) != 0u;
+        }
+        apply(aliases);
+        apply(aliases);
+        std::swap(aliases.front(), aliases.back());
+        apply(aliases); // Different family ordering changes an aliased object's last sampler.
+        apply(aliases);
+        apply(base);
+        // A direct upload/binding override and a new pass/context both invalidate.
+        actual.Bind(base[0].unit, 7u, 0u, false);
+        reference.Bind(base[0].unit, 7u, 0u, false);
+        bindings.Reset();
+        const unsigned before = actual.calls;
+        apply(base);
+        Require(actual.calls == before + Count, "new pass cannot reuse old GL state");
+        bindings = {};
+        auto zero = base;
+        for (auto &entry : zero) { entry.texture = 0u; entry.sampler = 0u; }
+        apply(zero);
+        Require(actual.calls == before + 2 * Count, "zero-valued first set still binds");
+    };
+    // Exact backend order: world differs from dynamic at secondary/specular;
+    // static attenuation precedes the base texture and has no mipmaps.
+    testFamily(std::array<WebRendererPassTexture, 6>{{
+        {0, 1, 1}, {1, 2, 2}, {4, 3, 3}, {2, 5, 0x62}, {5, 4, 4}, {9, 6, 0x62}}});
+    testFamily(std::array<WebRendererPassTexture, 5>{{
+        {2, 5, 0x62, false}, {0, 1, 1, false}, {1, 2, 2}, {4, 3, 3}, {5, 4, 4}}});
+    testFamily(std::array<WebRendererPassTexture, 6>{{
+        {0, 1, 1}, {1, 2, 2}, {4, 3, 3}, {5, 4, 4}, {2, 5, 0x62}, {9, 6, 0x62}}});
+}
+
+void TestStaticInstanceState()
+{
+    WebRendererInstanceState state;
+    unsigned pointerUpdates = 0u;
+    for (const auto offset : {0u, 0u, 4u, 4u, 0u})
+        if (state.NeedsRange(1u, 2u, offset)) ++pointerUpdates;
+    Require(pointerUpdates == 3u, "only identical first-instance attributes can be reused");
+    Require(state.NeedsRange(3u, 2u, 0u), "different VAO requires complete attribute setup");
+    Require(state.NeedsRange(3u, 4u, 0u), "replacement instance buffer requires complete attribute setup");
+    Require(!state.NeedsRange(3u, 4u, 0u), "draw count may change without replacing attribute pointers");
+    state.Reset(); // A brush VAO/direct placement override occurred between draws.
+    Require(state.NeedsRange(3u, 4u, 0u), "binding or direct attribute override invalidates reuse");
+    state = {}; // Pass boundary and context recovery may reuse GL object names.
+    Require(state.NeedsRange(3u, 4u, 0u), "new pass restores attributes even with reused GL names");
 }
 
 void TestDynamicDrawState()
@@ -531,6 +582,81 @@ void TestShadowState()
     state = {}; // Every sun near/far and spot partition starts unknown.
     Require(state.NeedsAlpha(0, false) && state.NeedsCull(0),
         "new shadow partition must restore alpha and culling even for zero state");
+}
+
+void TestDynamicShadowBoundsEligibility()
+{
+    for (const auto kind : {WebRendererSceneBatchKind::DynamicDObj,
+        WebRendererSceneBatchKind::DynamicXModel, WebRendererSceneBatchKind::DynamicBModel})
+    {
+        Require(WebRenderer_IsDynamicShadowCaster(kind, true, false),
+            "partition casters still build bounds, regardless of camera visibility");
+        Require(!WebRenderer_IsDynamicShadowCaster(kind, false, false) &&
+            !WebRenderer_IsDynamicShadowCaster(kind, true, true),
+            "non-casters and depth-hack surfaces never consume partition bounds");
+    }
+    for (const auto kind : {WebRendererSceneBatchKind::FxCodeMesh,
+        WebRendererSceneBatchKind::FxXModel, WebRendererSceneBatchKind::FxParticleCloud,
+        WebRendererSceneBatchKind::FxMarkMesh, WebRendererSceneBatchKind::SunSprite,
+        WebRendererSceneBatchKind::SunFlare})
+        Require(!WebRenderer_IsDynamicShadowCaster(kind, true, false),
+            "every excluded FX family skips bounds even with a casting material");
+}
+
+void TestShadowFamilyErrors()
+{
+    const auto exercise = []<bool batchErrors>() {
+        unsigned draws = 0u, checks = 0u;
+        bool pendingError = false;
+        const auto check = [&] {
+            ++checks;
+            const bool ready = !pendingError;
+            pendingError = false;
+            return ready;
+        };
+        const auto cleanDraw = [&](std::size_t partition) {
+            Require(partition == draws++, "shadow partition order is unchanged");
+            return true;
+        };
+        Require(!WebRenderer_DrawShadowFamily<batchErrors>(0u, cleanDraw, check) &&
+            draws == 0u && checks == 0u, "absent shadow families do no GL work");
+        for (std::size_t count : {2u, 4u})
+        {
+            draws = checks = 0u;
+            Require(WebRenderer_DrawShadowFamily<batchErrors>(count, cleanDraw, check),
+                "every submitted shadow partition must pass before sampling");
+            Require(draws == count && checks == (batchErrors ? 1u : count),
+                "sun and spot families only change error-check frequency");
+        }
+        for (bool glFailure : {false, true})
+        {
+            draws = checks = 0u;
+            const auto failedDraw = [&](std::size_t partition) {
+                ++draws;
+                if (partition == 1u) pendingError = glFailure;
+                return partition != 1u;
+            };
+            Require(!WebRenderer_DrawShadowFamily<batchErrors>(4u, failedDraw, check),
+                "CPU failure keeps the entire shadow family unavailable");
+            Require(draws == 2u && checks == (batchErrors ? 1u : 2u) && !pendingError,
+                "CPU failure must still check earlier GL work before returning");
+        }
+        draws = checks = 0u;
+        const auto gpuFailure = [&](std::size_t) {
+            ++draws;
+            pendingError = true;
+            return true;
+        };
+        Require(!WebRenderer_DrawShadowFamily<batchErrors>(4u, gpuFailure, check),
+            "GL failure prevents shadow-family readiness");
+        Require(draws == (batchErrors ? 4u : 1u) && checks == 1u && !pendingError,
+            "failed GL work is consumed at the selected boundary");
+        draws = checks = 0u;
+        Require(WebRenderer_DrawShadowFamily<batchErrors>(2u, cleanDraw, check),
+            "a failed family must not leave a pending error or poison the next family");
+    };
+    exercise.template operator()<false>();
+    exercise.template operator()<true>();
 }
 
 void TestObjectiveMaterial()
@@ -680,10 +806,13 @@ int main()
     runner.Run("vertex and index validation", TestVertexAndIndexValidation);
     runner.Run("owned copy and atomic failure", TestOwnedCopyAndAtomicFailure);
     runner.Run("reusable staged geometry", TestReusableStagedGeometry);
-    runner.Run("dynamic texture binding equivalence", TestDynamicTextureBindings);
+    runner.Run("ordered pass texture binding equivalence", TestPassTextureBindings);
+    runner.Run("static instance state transitions", TestStaticInstanceState);
     runner.Run("canonical shadow light history", TestShadowLightHistory);
     runner.Run("dynamic draw state transitions", TestDynamicDrawState);
     runner.Run("shadow state transitions", TestShadowState);
+    runner.Run("shadow family error boundaries", TestShadowFamilyErrors);
+    runner.Run("dynamic shadow bounds eligibility", TestDynamicShadowBoundsEligibility);
     runner.Run("canonical objective material", TestObjectiveMaterial);
     runner.Run("surface result strings", TestErrorStrings);
     return runner.Result();

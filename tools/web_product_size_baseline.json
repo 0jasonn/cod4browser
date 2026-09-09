@@ -1,6 +1,6 @@
 {
-  "approvedCommit": "658e778784da6a13dcfbde8189f5c98d48f17334",
-  "reason": "Foreground retail validation, encoded renderer recovery sources, and production diagnostic-payload cleanup.",
+  "approvedCommit": "3a1aa20acb84895b9a758d3f4f6a34ba0d666b22",
+  "reason": "Local dirty working tree based on the recorded commit: retained -O2/full-LTO speed priority. Repeated 1080p production Cargoship realtime runs improve from 39.78-39.97 to 51.91-51.93 FPS; the 60 FPS target remains unmet. Artifact sizes describe this working tree, not the base commit.",
   "toolchain": {
     "emscripten": "6.0.6",
     "cmake": "4.2.0-rc3",
@@ -9,16 +9,16 @@
   "headroomPercent": 5,
   "artifacts": {
     "wasm": {
-      "baselineBytes": 3173694,
-      "budgetBytes": 3332379
+      "baselineBytes": 4564302,
+      "budgetBytes": 4792518
     },
     "javascript": {
-      "baselineBytes": 340615,
-      "budgetBytes": 357646
+      "baselineBytes": 324103,
+      "budgetBytes": 340309
     },
     "site": {
-      "baselineBytes": 3524840,
-      "budgetBytes": 3701082
+      "baselineBytes": 4991764,
+      "budgetBytes": 5241353
     }
   },
   "rawWasmExportCap": 24,

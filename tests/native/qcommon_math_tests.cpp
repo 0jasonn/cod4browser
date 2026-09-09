@@ -10,8 +10,78 @@
 #include <cmath>
 #include <utility>
 
+#if KISAK_TEST_HELICOPTER_JITTER
+#include <universal/q_shared.h>
+#include <game/game_public.h>
+#include <game/g_main.h>
+#include <cstdlib>
+
+level_locals_t level{};
+const dvar_t *vehHelicopterJitterJerkyness;
+namespace { unsigned jitterRandomCalls; float previousJitterRange; }
+void MyAssertHandler(const char *, int, int, const char *, ...) { std::abort(); }
+int G_irand(int minimum, int maximum)
+{
+    assert(jitterRandomCalls++ == 0 && minimum == 100 && maximum == 100);
+    previousJitterRange = 0.0f;
+    return 100;
+}
+float G_flrand(float minimum, float maximum)
+{
+    assert(jitterRandomCalls > 0 && minimum == -maximum);
+    assert(maximum > previousJitterRange); // Enabled axes retain their RNG order.
+    previousJitterRange = maximum;
+    ++jitterRandomCalls;
+    return maximum;
+}
+
+static void TestHelicopterJitter()
+{
+    dvar_t jerkiness{};
+    jerkiness.current.value = 20.0f;
+    vehHelicopterJitterJerkyness = &jerkiness;
+    // Link the real game function and math. Only RNG/time/dvar inputs are
+    // synthetic; disabled axes must target zero and consume no random value.
+    for (unsigned mask = 0; mask < 8; ++mask)
+    {
+        VehicleJitter jitter{};
+        jitter.jitterPeriodMin = jitter.jitterPeriodMax = 100;
+        unsigned enabled = 0;
+        for (unsigned axis = 0; axis < 3; ++axis)
+        {
+            if (mask & (1u << axis))
+            {
+                jitter.jitterOffsetRange[axis] = 2.0f * (axis + 1u);
+                ++enabled;
+            }
+            jitter.jitterAccel[axis] = 2.0f;
+        }
+        level.time = 1000;
+        jitterRandomCalls = 0;
+        HELI_UpdateJitter(&jitter);
+        assert(jitterRandomCalls == enabled + 1u && jitter.jitterEndTime == 1100);
+        for (unsigned axis = 0; axis < 3; ++axis)
+        {
+            assert(jitter.jitterDeltaAccel[axis] == (jitter.jitterOffsetRange[axis] - 2.0f) * 0.5f);
+            assert(jitter.jitterAccel[axis] == 1.0f + jitter.jitterOffsetRange[axis] * 0.5f);
+            assert(jitter.jitterPos[axis] == jitter.jitterAccel[axis]);
+        }
+        HELI_UpdateJitter(&jitter);
+        assert(jitterRandomCalls == enabled + 1u); // No expired period: no new RNG.
+    }
+    VehicleJitter disabled{};
+    jitterRandomCalls = 0;
+    HELI_UpdateJitter(&disabled);
+    assert(jitterRandomCalls == 0);
+    vehHelicopterJitterJerkyness = nullptr;
+}
+#endif
+
 int main()
 {
+#if KISAK_TEST_HELICOPTER_JITTER
+    TestHelicopterJitter();
+#endif
     const float quarterTurn[4]{0.0f, 0.0f, std::sqrt(0.5f), std::sqrt(0.5f)};
     float axis[3][3]{};
     Q_UnitQuatToAxis(quarterTurn, axis);

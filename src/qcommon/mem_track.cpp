@@ -745,6 +745,9 @@ void __cdecl track_shutdown(int project)
 
 void __cdecl track_getbasicinfo(meminfo_t* info)
 {
+    iassert(info);
+    // Tracking is disabled below; callers still require initialized counters.
+    *info = {};
 #if 0
     int MinSpecImageMemory; // eax
 

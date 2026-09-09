@@ -294,10 +294,18 @@ int main()
     assert(Dvar_FindVar("sv_mapSeed")->flags & DVAR_CHEAT);
     Cbuf_ExecuteBuffer(0, 0, "set sv_mapSeed 1");
     assert(SV_GetMapRandomSeed() == 1u);
+    const int firstClientRandom = std::rand();
+    std::rand();
+    assert(SV_GetMapRandomSeed() == 1u);
+    assert(std::rand() == firstClientRandom);
     Cbuf_ExecuteBuffer(0, 0, "set sv_mapSeed 0");
     assert(SV_GetMapRandomSeed() == 0u);
     Cbuf_ExecuteBuffer(0, 0, "set sv_mapSeed -1");
+    std::srand(19u);
+    const int untouchedClientRandom = std::rand();
+    std::srand(19u);
     assert(SV_GetMapRandomSeed() == 7u);
+    assert(std::rand() == untouchedClientRandom);
 
     Cbuf_ExecuteBuffer(0, 0, "map KiLlHoUsE");
 

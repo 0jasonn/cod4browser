@@ -10,6 +10,38 @@
 #include <numeric>
 #include <vector>
 
+#ifndef KISAK_WEB_BATCH_SHADOW_ERRORS
+#define KISAK_WEB_BATCH_SHADOW_ERRORS 1
+#endif
+
+// A family publishes one readiness flag, so none of its partitions may be
+// sampled until both CPU submission and the GL check succeed. No GL allocation
+// or other error-consuming operation may run between these draws and check.
+template<bool BatchErrors, typename Draw, typename Check>
+bool WebRenderer_DrawShadowFamily(std::size_t count, Draw draw, Check check)
+{
+    if (count == 0u) return false;
+    bool submitted = true;
+    for (std::size_t partition = 0u; partition < count; ++partition)
+    {
+        submitted = draw(partition);
+        if constexpr (!BatchErrors)
+        {
+            const bool checked = check();
+            if (!checked) return false;
+        }
+        if (!submitted) break;
+    }
+    if constexpr (BatchErrors)
+    {
+        // Even a failed CPU submission can follow earlier GL work. Do not
+        // short-circuit this check or leak that error into the next family.
+        const bool checked = check();
+        return submitted && checked;
+    }
+    return submitted;
+}
+
 inline unsigned WebRenderer_PrimarySortKey(std::uint64_t packed) noexcept
 {
     GfxDrawSurf draw{};
@@ -248,6 +280,30 @@ private:
     const Batch *material_ = nullptr;
     std::array<bool, 9> features_{};
     bool featuresKnown_ = false;
+};
+
+// One pass, with immutable VAO attribute enables/divisors. Reset after binding
+// another VAO or directly overriding instance attributes. A changed count
+// changes the draw, not the attribute pointers; only its first instance matters.
+class WebRendererInstanceState
+{
+public:
+    void Reset() noexcept { valid_ = false; }
+    bool NeedsRange(std::uint32_t vertexArray, std::uint32_t buffer,
+        std::uint32_t offset) noexcept
+    {
+        if (valid_ && vertexArray_ == vertexArray && buffer_ == buffer && offset_ == offset)
+            return false;
+        vertexArray_ = vertexArray;
+        buffer_ = buffer;
+        offset_ = offset;
+        valid_ = true;
+        return true;
+    }
+
+private:
+    std::uint32_t vertexArray_ = 0u, buffer_ = 0u, offset_ = 0u;
+    bool valid_ = false;
 };
 
 // One shadow partition. Texture binding, instance ranges and caster membership

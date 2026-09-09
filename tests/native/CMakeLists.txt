@@ -83,9 +83,19 @@ foreach(target r_image_resample_tests r_sampler_tests ${_image_quality_tests})
 endforeach()
 
 if (KISAK_CANONICAL_TEST_ABI)
-add_executable(r_text_tests r_text_tests.cpp ../../src/gfx_d3d/r_text.cpp)
+add_executable(r_text_tests r_text_tests.cpp ../../src/gfx_d3d/r_text.cpp
+    ../../src/universal/com_math.cpp ../../src/universal/com_math_anglevectors.cpp
+    ../../src/qcommon/mem_track.cpp)
 target_compile_features(r_text_tests PRIVATE cxx_std_20)
-target_include_directories(r_text_tests PRIVATE ../../src)
+target_include_directories(r_text_tests PRIVATE ../../src ../../deps)
+target_compile_definitions(r_text_tests PRIVATE KISAK_SP=1 KISAK_OPENAL=1 dNODEBUG=1)
+if (MSVC)
+    target_compile_options(r_text_tests PRIVATE /Gy /Gw /Zc:inline)
+    target_link_options(r_text_tests PRIVATE /OPT:REF /OPT:ICF)
+else()
+    target_compile_options(r_text_tests PRIVATE -ffunction-sections -fdata-sections)
+    target_link_options(r_text_tests PRIVATE -Wl,--gc-sections)
+endif()
 if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     target_compile_options(r_text_tests PRIVATE -fdeclspec)
     target_compile_definitions(r_text_tests PRIVATE KISAK_WEB=1 __int16=short __int32=int "__int64=long long" __forceinline=inline)
@@ -546,6 +556,21 @@ target_compile_features(canonical_asset_abi_tests PRIVATE cxx_std_20)
 target_include_directories(canonical_asset_abi_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
 target_compile_features(qcommon_math_tests PRIVATE cxx_std_20)
 target_include_directories(qcommon_math_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
+# Emscripten can discard the unrelated engine dependencies in this translation
+# unit before resolving symbols. MSVC requires those dependencies even with
+# /OPT:REF; keep the portable math tests available there without fake game code.
+if (EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    target_sources(qcommon_math_tests PRIVATE
+        "${KISAK_REPOSITORY_ROOT}/src/game/g_helicopter.cpp"
+        "${KISAK_REPOSITORY_ROOT}/src/universal/com_math.cpp")
+    target_include_directories(qcommon_math_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/deps")
+    target_compile_definitions(qcommon_math_tests PRIVATE
+        KISAK_TEST_HELICOPTER_JITTER=1 KISAK_SP=1 KISAK_OPENAL=1 dNODEBUG=1 KISAK_WEB=1)
+    # Poison the formerly uninitialized target so this regression is reliable.
+    target_compile_options(qcommon_math_tests PRIVATE
+        -fdeclspec -ffunction-sections -fdata-sections -ftrivial-auto-var-init=pattern)
+    target_link_options(qcommon_math_tests PRIVATE -Wl,--gc-sections)
+endif()
 target_compile_features(fx_emission_math_tests PRIVATE cxx_std_20)
 target_include_directories(fx_emission_math_tests PRIVATE "${KISAK_REPOSITORY_ROOT}/src")
 if (TARGET web_renderer_mark_fragments_tests)

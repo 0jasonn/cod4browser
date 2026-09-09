@@ -837,7 +837,7 @@ void __cdecl HELI_UpdateJitter(VehicleJitter *jitter)
     float min; // [esp+8h] [ebp-20h]
     float v4; // [esp+10h] [ebp-18h]
     int jitterDelay; // [esp+14h] [ebp-14h]
-    float newOffset[3]; // [esp+18h] [ebp-10h] BYREF
+    float newOffset[3]{}; // Disabled jitter axes target zero without consuming RNG.
     int i; // [esp+24h] [ebp-4h]
 
     if (jitter->jitterPeriodMin || jitter->jitterPeriodMax)

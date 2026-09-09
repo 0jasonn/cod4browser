@@ -218,6 +218,12 @@ test("authored soft-particle depth, variants and recovery preserve pixels", asyn
         view.setUint32(0, bits, true);
         expect(view.getFloat32(0, true)).toBeCloseTo(expected, 6);
     }
+    // Field 4 runs the same depth/alpha fixture with poisoned unused
+    // lighting, validates the real guarded helpers in both A/B modes, then
+    // draws model-lit color after returning from FloatZ. It returns the
+    // original particle pixel only if the state/depth/lit-pixel checks pass.
+    for (const scenario of [0, 2, 8, 9, 10])
+        expect(await sample(scenario, 4)).toBe(await sample(scenario));
     await page.evaluate(() => globalThis.__KISAKCOD_WEB__.submitCanonicalCommand("r_zFeather 0"));
     await expect.poll(() => sample(0, 1)).toBe(255);
     await check(3, [64, 128, 192, 255]);
@@ -228,6 +234,8 @@ test("authored soft-particle depth, variants and recovery preserve pixels", asyn
     await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state)).toBe("running");
     await check(0, [64, 128, 192, 255]);
     await check(17, [101, 202, 255, 255]);
+    for (const scenario of [0, 2, 8, 9, 10])
+        expect(await sample(scenario, 4)).toBe(await sample(scenario));
     await page.evaluate(() => globalThis.__KISAKCOD_WEB__.submitCanonicalCommand("r_zFeather 1"));
     await expect.poll(() => sample(0, 1)).toBe(128);
     await check(11, [64, 128, 192, 128]);

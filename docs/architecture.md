@@ -45,6 +45,15 @@ own frame order and game clocks. The platform supplies elapsed time with a
 random state and save restoration remain canonical. Disconnected initialized
 clients still run UI/config frames before a world exists.
 
+Frame admission carries fractional cap remainder separately from elapsed game
+time. Zero-duration callbacks do not invent simulation steps; changing the cap
+does not replay admission debt as game time. The default dvar and uncapped
+125 Hz safety ceiling remain unchanged, as does the non-reentrant JSPI pump.
+The local benchmark installs a bounded Worker timing sink for every completed
+submission, separating canonical/frontend CPU work from later WebGL submission.
+GPU timer queries measure execution separately; main-thread animation callbacks
+are presentation opportunities, not proof of displayed frames or physical scanout.
+
 ## Ownership inventory
 
 CMake inventories are authoritative: `scripts/common_files.cmake`,
@@ -68,6 +77,8 @@ A source file existing in the repository does not mean the browser compiles it.
 Production and diagnostics compile the same runtime sources. Diagnostics add
 controls and telemetry with `KISAK_WEB_DIAGNOSTICS`; they have no second loader,
 world, renderer oracle or scheduler. Remove telemetry once it has no consumer.
+Loading keepalive returns before its browser-clock read outside `CA_LOADING`;
+the existing 33 ms loading-only presentation and reentrancy rules are unchanged.
 
 ## Database publication and resource lifetime
 
@@ -126,6 +137,9 @@ destination; remove the source; remove the journal. Never delete an existing
 destination to make room. A fresh tenure replays the journal before home loading
 and budget checks; malformed intent remains exportable. Writable-stream close
 provides staged publication, not a cross-file transaction or power-loss guarantee.
+Web `FS_Rename` and `FS_SV_Rename` first use the existing checked `FS_CreatePath`
+for destination parents, including a fresh profile's save/autosave directories.
+The Worker rename primitive continues to require valid existing parents.
 
 The `.kisak-home` envelope contains `KISAKHOME1\n`, a little-endian JSON length,
 a versioned path/size/SHA-256 manifest and opaque file bytes. It preserves files
@@ -187,6 +201,13 @@ most 4,095 first-line bytes, then canonical `Field_Paste` owns insertion/freeing
 Native fields are not UTF-8 fields; real IME candidate UI and other code pages
 remain unqualified. Shared `r_text.cpp`/`r_text_cmds.cpp` own glyph layout, color,
 shadow/glow, cursor and reveal/decay; the web adapter supplies clocks and quads.
+The shared text-effect RNG explicitly wraps its LCG arithmetic to 32 bits before
+native signed division. Optimized tests link that production helper instead of
+substituting a second implementation; signed overflow must not let compiler
+settings change text effects.
+Disabled native memory tracking initializes its output counters. Debug text must
+not display uninitialized stack values as memory usage; measured Wasm capacity
+comes from the Worker timing capture, not those disabled tracking counters.
 
 `web_display.cpp` supplies canonical resolution enums and `vidConfig_t`.
 Automatic follows canvas density; fixed modes preserve size/aspect. Refresh is
@@ -201,8 +222,21 @@ placement and validated numeric data. Camera DPVS and each sun/spot caster selec
 remain independent; off-camera objects may still cast shadows. Backend resources
 and recovery copies never become world/entity/pose state. Publication is atomic,
 failed ownership transfers return storage, and unload releases map resources.
+GPU context recovery preserves CPU spotlight history, selected slots and static
+visibility. Reset those fields at world retirement/publication: clearing them on
+device loss changes paused shadow selection when the same scene is resubmitted.
+Shadow families publish readiness after all submissions and a complete GL error
+drain; early failure still cleans up and prevents sampling. Staged dynamic
+geometry/model-lighting uploads share a check only when the persistent image pool
+needs no upload; failure preserves publication, recovery and caller ownership.
+Canonical cloud slots expand directly through the existing scalar builder into
+admitted scene vectors, retaining brush priority, RNG lifetime, order and atomic
+rollback. Standalone controls share its geometric resize policy; expanded cloud
+geometry does not become cached engine state.
 
 WebGL2 implements encountered authored shader families and pass/state ordering.
+Context creation requests the high-performance adapter; the benchmark records
+the actual GL/ANGLE adapter and driver instead of assuming the request was honored.
 It does not translate arbitrary D3D shaders. Most 2D image pools retain encoded
 LoadDef/IWI sources and decode transiently for upload/recovery; cubes, lighting,
 water and other supplemental resources have separate policies. The 800 MiB limit
@@ -213,6 +247,9 @@ Canonical SND/OpenAL owns channels, aliases and room/EQ parameters; the device o
 AudioContext policy and PCM scheduling. Generation-tagged feedback follows device
 time, with one snapshot in flight, rather than a Worker wall clock. Deliberate canvas
 interaction unlocks sound. [Reverb](browser-reverb.md) owns DSP/device details.
+The existing OpenAL proxy suppresses equal normalized gain, pitch, position and
+looping commands while preserving state refresh, initial spatialization, seeks,
+source generations and playback/buffer ordering.
 [The cinematic codec](cinematic-codec.md) keeps `R_Cinematic_*` identity and game
 actions canonical while FFmpeg supplies decode, WebGL supplies planes and audio
 feedback supplies movie timing. Missing/failed movies report an explicit omission.
@@ -230,6 +267,27 @@ Corresponding source and public dependency archives accompany the flat served si
 legacy native SDKs/binaries and proprietary assets are excluded. Exact export/file
 and size gates remain required. Hashes detect mismatches; publisher authentication
 and campaign acceptance remain separate. The product is not a qualified alpha.
+
+Local performance builds additionally snapshot tracked and non-ignored source
+inputs before compilation and reject edits during the build. Their receipts bind
+that snapshot, compile commands, CMake/Ninja configuration, dependency sources
+and every served file. `qualify_web_release.py verify-build` verifies those local
+inputs; it does not replace the clean-source release qualification above.
+The ZIP applies the same native-SDK/binary exclusions as browser source releases,
+including local snapshots. Excluded native-only inputs remain hash metadata in
+the full input inventory; their bytes never belong in the browser source archive.
+Repeated matched Cargoship measurements select `-O2` and full web-engine LTO for
+Release. `-O3` and ordinary Wasm SIMD did not improve reliably enough to retain;
+SIMD stays opt-in. Native targets, exceptions, validation and floating-point
+semantics are unchanged. The larger product budget retains its 5% headroom and
+exact export restrictions; see the [measured results](renderer-retained-resources.md#measured-optimization-results).
+Chrome 153 continuation measurements separately retain shadow readiness grouping,
+direct cloud expansion and narrow staged-upload checks. Pre-import page-rAF
+selection admits comparable launches without changing scheduling or assertions.
+Cloud assembly improves while total FPS remains inconclusive; upload waits move
+between stages, yielding only about 0.07 ms combined. These results cannot be
+combined with the prior Chrome 152 phase. Production realtime and final delivery
+qualification remain pending; the diagnostic gains do not establish 60 FPS.
 
 Remaining work is canonical gameplay/material qualification, measured scene/streaming
 costs and authored audio/video fidelity. Full native draw packing/material sorting,

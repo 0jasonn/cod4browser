@@ -32,6 +32,19 @@
 #include <universal/com_files.h>
 
 #include <GLES3/gl3.h>
+
+#ifndef KISAK_WEB_SKIP_FLOATZ_LIGHTING
+#define KISAK_WEB_SKIP_FLOATZ_LIGHTING 1
+#endif
+
+#ifndef KISAK_WEB_BATCH_DYNAMIC_UPLOAD_ERRORS
+#define KISAK_WEB_BATCH_DYNAMIC_UPLOAD_ERRORS 1
+#endif
+
+#ifndef KISAK_WEB_SKIP_UNUSED_SHADOW_BOUNDS
+#define KISAK_WEB_SKIP_UNUSED_SHADOW_BOUNDS 1
+#endif
+
 #include <emscripten.h>
 #if KISAK_WEB_DIAGNOSTICS
 #include <emscripten/heap.h>
@@ -644,7 +657,12 @@ void DeleteSurfaceObjects(
 void DeleteStaticModelObjects(
     GLuint vertexArray, GLuint vertexBuffer, GLuint indexBuffer,
     GLuint instanceBuffer);
-void BindStaticModelInstanceRange(std::uint32_t instanceOffset);
+// Compile-time A/B control; the dynamic draw cache predates this optimization.
+#ifndef KISAK_WEB_REUSE_WORLD_STATIC_STATE
+#define KISAK_WEB_REUSE_WORLD_STATIC_STATE 1
+#endif
+void BindStaticModelInstanceRange(std::uint32_t instanceOffset,
+    WebRendererInstanceState &state);
 void DeleteBrushModelObjects();
 bool CreateBrushModelObjects();
 const WebRendererRetainedWorldBatch &DynamicDrawBatch(const WebRendererDynamicDraw &draw);
@@ -987,6 +1005,21 @@ void ProfileUseProgram(GLuint program)
     }
 }
 
+template<void (*Generate)(GLsizei, GLuint *),
+    std::uint64_t WebFrameProfileSample::*Created>
+void ProfileGenerateObjects(GLsizei count, GLuint *objects)
+{
+    WebFrameProfileSample *const profile = WebFrameProfile_Current();
+    const double started = profile ? WebFrameProfile_Now() : 0.0;
+    Generate(count, objects);
+    if (profile)
+    {
+        profile->gpuResourceCreationMs += WebFrameProfile_Now() - started;
+        for (GLsizei index = 0; index < count; ++index)
+            if (objects[index]) ++(profile->*Created);
+    }
+}
+
 void ProfileBufferData(
     GLenum target, GLsizeiptr size, const void *data, GLenum usage)
 {
@@ -1131,6 +1164,11 @@ void ProfileBlitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1,
 
 #define glBindTexture ProfileBindTexture
 #define glUseProgram ProfileUseProgram
+#define glGenBuffers ProfileGenerateObjects<glGenBuffers, &WebFrameProfileSample::gpuBuffersCreated>
+#define glGenTextures ProfileGenerateObjects<glGenTextures, &WebFrameProfileSample::gpuTexturesCreated>
+#define glGenVertexArrays ProfileGenerateObjects<glGenVertexArrays, &WebFrameProfileSample::gpuVertexArraysCreated>
+#define glGenFramebuffers ProfileGenerateObjects<glGenFramebuffers, &WebFrameProfileSample::gpuFramebuffersCreated>
+#define glGenRenderbuffers ProfileGenerateObjects<glGenRenderbuffers, &WebFrameProfileSample::gpuRenderbuffersCreated>
 #define glBufferData ProfileBufferData
 #define glBufferSubData ProfileBufferSubData
 #define glTexImage2D ProfileTexImage2D
@@ -1231,11 +1269,12 @@ bool CopyModelLightingAtlas(
 }
 
 bool CreateModelLightingTexture(
-    WebRendererRetainedModelLightingAtlas &atlas)
+    WebRendererRetainedModelLightingAtlas &atlas,
+    bool deferErrors = false)
 {
     if (atlas.pixels.empty()) return true;
     if (atlas.texture != 0u) return true;
-    while (glGetError() != GL_NO_ERROR)
+    while (!deferErrors && glGetError() != GL_NO_ERROR)
     {
     }
     GLuint texture = 0u;
@@ -1253,7 +1292,7 @@ bool CreateModelLightingTexture(
         static_cast<GLsizei>(atlas.height),
         static_cast<GLsizei>(atlas.depth),
         0, GL_RGBA, GL_UNSIGNED_BYTE, atlas.pixels.data());
-    const GLenum error = glGetError();
+    const GLenum error = deferErrors ? GL_NO_ERROR : glGetError();
     if (texture == 0u || error != GL_NO_ERROR)
     {
         if (texture != 0u) glDeleteTextures(1, &texture);
@@ -1537,6 +1576,25 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestRestoreWebGLContext()
         extension.restoreContext();
         return 1;
     });
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestAaFrameCompletion()
+{
+    if (!g_renderer.initialized || g_renderer.contextLost || g_renderer.sceneViewActive)
+        return UINT32_MAX;
+    const auto before = g_renderer.frameNumber;
+    const bool previousScreenshotReady = g_renderer.screenshotReady;
+    // Sentinel for a previously completed screenshot: failed presentation
+    // must invalidate it even when the bootstrap has no canonical scene.
+    g_renderer.screenshotReady = true;
+    const bool submitted = WebRenderer_DrawFrame({0u, 0u});
+    const std::uint32_t result = (submitted ? 1u : 0u) |
+        (g_renderer.frameNumber != before ? 2u : 0u) |
+        (g_renderer.screenshotReady ? 4u : 0u) |
+        (g_renderer.multisampleFramebuffer != 0u ? 8u : 0u) |
+        (g_renderer.surfaceDrawnSubmissionGeneration == g_renderer.surfaceSubmissionGeneration ? 16u : 0u);
+    g_renderer.screenshotReady = previousScreenshotReady;
+    return result;
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestSetAaSamples(int samples)
@@ -2178,6 +2236,8 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestUiDrawCount()
 
 void ResetGpuHandles()
 {
+    // Keep CPU visibility, packed instances and shadow selection/history. A
+    // paused frame may reuse them without another canonical view submission.
     g_renderer.savedScreenTexture = 0u;
     g_renderer.savedScreenWidth = g_renderer.savedScreenHeight = 0;
     g_renderer.savedScreenValid.fill(false);
@@ -2236,9 +2296,6 @@ void ResetGpuHandles()
     g_renderer.staticModelVertexBuffer = 0u;
     g_renderer.staticModelIndexBuffer = 0u;
     g_renderer.staticModelInstanceBuffer = 0u;
-    decltype(g_renderer.staticModelVisibility){}.swap(g_renderer.staticModelVisibility);
-    g_renderer.staticModelVisibilityComputed = false;
-    g_renderer.staticModelVisibilityChanged = true;
     g_renderer.dynamicModelVertexArray = 0u;
     g_renderer.dynamicModelVertexBuffer = 0u;
     g_renderer.dynamicModelIndexBuffer = 0u;
@@ -2350,10 +2407,6 @@ void ResetGpuHandles()
     g_renderer.aaRequestedSamples = 1;
     g_renderer.aaActiveSamples = 1;
     g_renderer.aaMaxSamples = 1;
-    g_renderer.sceneSpotShadowCount = 0u;
-    g_renderer.spotShadowHistories = {};
-    g_renderer.sceneSpotShadowLightIndices.fill(0u);
-    g_renderer.sceneSpotShadowDynamic.fill(false);
     for (WebRendererRetainedWorldImage &image : g_renderer.retainedWorldImages)
         image.texture = 0u;
     for (WebRendererRetainedWorldImage &image :
@@ -2718,9 +2771,10 @@ bool CreateSurfaceObjects(
     const std::vector<Index> &indices,
     GLuint &vertexArrayOut,
     GLuint &vertexBufferOut,
-    GLuint &indexBufferOut)
+    GLuint &indexBufferOut,
+    bool deferErrors = false)
 {
-    while (glGetError() != GL_NO_ERROR)
+    while (!deferErrors && glGetError() != GL_NO_ERROR)
     {
     }
 
@@ -2804,7 +2858,7 @@ bool CreateSurfaceObjects(
         reinterpret_cast<const void *>(
             offsetof(WebRendererSurfaceVertex, binormalSign)));
 
-    const GLenum error = glGetError();
+    const GLenum error = deferErrors ? GL_NO_ERROR : glGetError();
     if (vertexArray == 0 || vertexBuffer == 0 || indexBuffer == 0 ||
         error != GL_NO_ERROR)
     {
@@ -5788,8 +5842,31 @@ std::uint32_t RetainCanonicalWorldImage(
     bool retainAuthoredMipChain = false)
 {
     if (!canonical) return INVALID_WORLD_IMAGE;
+#if KISAK_WEB_DIAGNOSTICS
+    WebFrameProfileSample *const profile = WebFrameProfile_Current();
+    const double started = profile ? WebFrameProfile_Now() : 0.0;
+    if (profile) ++profile->retainedImageLookups;
+#endif
     for (std::uint32_t index = 0u; index < images.size(); ++index)
-        if (images[index].canonicalIdentity == canonical) return index;
+        if (images[index].canonicalIdentity == canonical)
+        {
+#if KISAK_WEB_DIAGNOSTICS
+            if (profile)
+            {
+                profile->retainedImageLookupMs += WebFrameProfile_Now() - started;
+                profile->retainedImageComparisons += index + 1u;
+                ++profile->retainedImageLookupHits;
+            }
+#endif
+            return index;
+        }
+#if KISAK_WEB_DIAGNOSTICS
+    if (profile)
+    {
+        profile->retainedImageLookupMs += WebFrameProfile_Now() - started;
+        profile->retainedImageComparisons += images.size();
+    }
+#endif
 
     WebRendererRetainedWorldImage retained;
     retained.canonicalIdentity = canonical;
@@ -7416,6 +7493,10 @@ void WebRenderer_UnloadWorldResources()
     g_renderer.sceneFilmEnabled = false;
     g_renderer.sceneGlowEnabled = false;
     g_renderer.sceneSunShadowEnabled = false;
+    g_renderer.spotShadowHistories = {};
+    g_renderer.sceneSpotShadowCount = 0u;
+    g_renderer.sceneSpotShadowLightIndices.fill(0u);
+    g_renderer.sceneSpotShadowDynamic.fill(false);
     std::fill_n(g_renderer.sunVisibilityQueries, 2u, 0u);
     std::fill_n(g_renderer.sunVisibilityQueryIssued, 2u, false);
     g_renderer.sunVisibilityQueryIndex = 0u;
@@ -7846,15 +7927,23 @@ WebRendererSurfaceResult SetDynamicModelScene(
     if (dynamicNeedsLighting && retainedLighting.pixels.empty())
         return WebRendererSurfaceResult::InvalidDescriptor;
 
+#if KISAK_WEB_DIAGNOSTICS
+    const double drawBuildStarted = dynamicProfile ? WebFrameProfile_Now() : 0.0;
+#endif
     try
     {
         std::uint64_t logicalVertices = scene.vertexCount;
         std::uint64_t logicalIndices = scene.indexCount;
         const auto appendIndexedDraw = [&](std::uint32_t batchIndex) {
             WebRendererDynamicDraw draw{batchIndex};
-            if (batchIndex >= retainedBatches.size() ||
-                !BuildIndexedShadowBounds(retainedVertices, retainedIndices,
-                    retainedBatches[batchIndex], draw.shadowBounds))
+            if (batchIndex >= retainedBatches.size()) return false;
+            const auto &batch = retainedBatches[batchIndex];
+            // CopyWorldCommand has validated every vertex, index and batch
+            // range. Only eligible partition casters consume these bounds.
+            if ((!KISAK_WEB_SKIP_UNUSED_SHADOW_BOUNDS ||
+                    WebRenderer_IsDynamicShadowCaster(batch.sourceKind,
+                        batch.castsSunShadow, batch.depthHack)) &&
+                !BuildIndexedShadowBounds(retainedVertices, retainedIndices, batch, draw.shadowBounds))
                 return false;
             draw.shadowEntityKind =
                 retainedBatches[batchIndex].shadowEntityKind;
@@ -7927,32 +8016,57 @@ WebRendererSurfaceResult SetDynamicModelScene(
 #if KISAK_WEB_DIAGNOSTICS
     const double geometryStarted = dynamicProfile ? WebFrameProfile_Now() : 0.0;
     if (dynamicProfile)
+    {
         dynamicProfile->dynamicCopyMs += geometryStarted - copyStarted;
+        dynamicProfile->dynamicDrawBuildMs += geometryStarted - drawBuildStarted;
+        dynamicProfile->dynamicDrawsBuilt += dynamicDraws.size();
+    }
 #endif
     GLuint vertexArray = 0u;
     GLuint vertexBuffer = 0u;
     GLuint indexBuffer = 0u;
     const bool hasContext = g_renderer.initialized && !g_renderer.contextLost;
-    if (hasContext && !empty && !CreateSurfaceObjects(
-        retainedVertices, retainedIndices,
-        vertexArray, vertexBuffer, indexBuffer))
+    // Geometry and lighting are staged until this command publishes. Batch
+    // their error checks only while the persistent image pool needs no upload:
+    // its helpers own separate cleanup and must not clear a pending error.
+    const bool deferErrors = KISAK_WEB_BATCH_DYNAMIC_UPLOAD_ERRORS && hasContext && !empty &&
+        !retainedLighting.pixels.empty() &&
+        std::none_of(g_renderer.retainedDynamicModelImages.begin(),
+            g_renderer.retainedDynamicModelImages.end(),
+            [](const WebRendererRetainedWorldImage &image) {
+                return image.supported && image.texture == 0u;
+            });
+    while (deferErrors && glGetError() != GL_NO_ERROR)
     {
-        return WebRendererSurfaceResult::BackendFailure;
     }
+    const bool geometryReady = !hasContext || empty || CreateSurfaceObjects(
+        retainedVertices, retainedIndices,
+        vertexArray, vertexBuffer, indexBuffer, deferErrors);
+    if (!geometryReady && !deferErrors)
+        return WebRendererSurfaceResult::BackendFailure;
 #if KISAK_WEB_DIAGNOSTICS
     const double texturesStarted = dynamicProfile ? WebFrameProfile_Now() : 0.0;
     if (dynamicProfile)
         dynamicProfile->dynamicGeometryUploadMs += texturesStarted - geometryStarted;
 #endif
-    if (hasContext && !CreateWorldTextureObjects(
+    if (hasContext && !deferErrors && !CreateWorldTextureObjects(
         g_renderer.retainedDynamicModelImages))
     {
         DeleteSurfaceObjects(vertexArray, vertexBuffer, indexBuffer);
         return WebRendererSurfaceResult::BackendFailure;
     }
-    if (hasContext && !CreateModelLightingTexture(retainedLighting))
+    const bool lightingReady = !hasContext || (geometryReady &&
+        CreateModelLightingTexture(retainedLighting, deferErrors));
+    // Always consume the transaction result, including a zero object name.
+    const GLenum uploadError = deferErrors ? glGetError() : GL_NO_ERROR;
+    if (!geometryReady || !lightingReady || uploadError != GL_NO_ERROR)
     {
         DeleteSurfaceObjects(vertexArray, vertexBuffer, indexBuffer);
+        DeleteModelLightingTexture(retainedLighting);
+        if (deferErrors)
+            Web_Log(WebLogLevel::Error,
+                "[kisakcod-web] WebGL2 dynamic command upload failed (0x%x).\n",
+                static_cast<unsigned int>(uploadError));
         return WebRendererSurfaceResult::BackendFailure;
     }
 #if KISAK_WEB_DIAGNOSTICS
@@ -8056,6 +8170,169 @@ WebRendererSurfaceResult WebRenderer_SetDynamicModelSceneOwned(
     return SetDynamicModelScene(scene, brushInstances, brushInstanceCount,
         brushInsertBatch, &vertices, &indices);
 }
+
+#if KISAK_WEB_DIAGNOSTICS
+extern "C" EMSCRIPTEN_KEEPALIVE unsigned KisakWeb_TestDynamicUploadAtomicity(
+    int fault, int variant)
+{
+    if (!g_renderer.initialized || g_renderer.contextLost ||
+        g_renderer.worldSurfaceActive)
+        return 0x8000u;
+    const auto resident = [] {
+        return glIsVertexArray(g_renderer.dynamicModelVertexArray) &&
+            glIsBuffer(g_renderer.dynamicModelVertexBuffer) &&
+            glIsBuffer(g_renderer.dynamicModelIndexBuffer) &&
+            glIsTexture(g_renderer.retainedDynamicModelLighting.texture) &&
+            g_renderer.retainedDynamicModelVertices.size() == 3u &&
+            g_renderer.retainedDynamicModelVertices[0].position[0] == 0.25f &&
+            g_renderer.retainedDynamicModelBatches.size() == 1u &&
+            g_renderer.retainedDynamicModelBatches[0].materialName == "upload-after" &&
+            g_renderer.retainedDynamicModelImages.size() == 1u &&
+            glIsTexture(g_renderer.retainedDynamicModelImages[0].texture);
+    };
+    if (fault == -1) return resident() && glGetError() == GL_NO_ERROR ? 0u : 1u;
+    if (fault < 0 || fault > 5 || variant < 0 || variant > 2) return 0x8000u;
+    WebRenderer_SetDynamicModelScene({});
+    DeleteWorldTextureObjects(g_renderer.retainedDynamicModelImages);
+    g_renderer.retainedDynamicModelImages.clear();
+    const auto appendImage = [] {
+        WebRendererRetainedWorldImage image;
+        image.canonicalName = "__diagnostic_dynamic_upload";
+        image.width = image.height = 1u;
+        image.pixels = {64u, 128u, 192u, 255u};
+        image.supported = true;
+        image.mipmapsAllowed = false;
+        image.decodedByteLength = image.uploadByteLength = 4u;
+        g_renderer.retainedDynamicModelImages.push_back(std::move(image));
+    };
+    appendImage();
+    std::vector<WebRendererSurfaceVertex> vertices(3);
+    vertices[0].position[0] = -0.5f;
+    vertices[1].position[0] = 0.5f;
+    vertices[2].position[1] = 0.5f;
+    std::vector<std::uint32_t> indices{0u, 1u, 2u};
+    std::vector<std::uint8_t> pixels(256u * 4u * 4u * 4u, 64u);
+    const WebRendererModelLightingAtlasDesc lighting{
+        pixels.data(), 256u, 4u, 4u, 1u, pixels.size()};
+    WebRendererWorldBatchDesc batch{};
+    batch.indexCount = 3u;
+    batch.surfaceCount = 1u;
+    batch.sourceKind = WebRendererSceneBatchKind::DynamicDObj;
+    batch.materialName = "upload-before";
+    WebRendererWorldSurfaceDesc scene{
+        vertices.data(), 3u, indices.data(), 3u, &batch, 1u, &lighting};
+    if (WebRenderer_SetDynamicModelScene(scene) != WebRendererSurfaceResult::Success)
+        return 0x8000u;
+    const GLuint oldVao = g_renderer.dynamicModelVertexArray;
+    const GLuint oldVbo = g_renderer.dynamicModelVertexBuffer;
+    const GLuint oldIbo = g_renderer.dynamicModelIndexBuffer;
+    const GLuint oldLighting = g_renderer.retainedDynamicModelLighting.texture;
+    const GLuint oldImage = g_renderer.retainedDynamicModelImages[0].texture;
+    const auto *oldVertices = g_renderer.retainedDynamicModelVertices.data();
+    const auto *oldIndices = g_renderer.retainedDynamicModelIndices.data();
+    const auto *oldBatches = g_renderer.retainedDynamicModelBatches.data();
+    const auto *oldDraws = g_renderer.dynamicDraws.data();
+    const auto *oldOrder = g_renderer.dynamicCameraDrawOrder.data();
+    if (variant == 1) appendImage();
+    if (variant == 2) scene.modelLightingAtlas = nullptr;
+    vertices[0].position[0] = 0.25f;
+    std::fill(pixels.begin(), pixels.end(), 192u);
+    batch.materialName = "upload-after";
+    const auto candidateVertices = vertices;
+    const auto candidateIndices = indices;
+    // Wrap the actual Worker context only for this synchronous submission.
+    // Faults reach the browser's GL error state; no renderer result is mocked.
+    EM_ASM({
+        const gl = GL.currentContext.GLctx;
+        const fault = $0;
+        const state = ({ gl, saved: {}, created: [], images: new Set(), checks: 0, used: false });
+        Module.kisakUploadFault = state;
+        for (const kind of ["Buffer", "VertexArray", "Texture"]) {
+            const name = "create" + kind;
+            const original = state.saved[name] = gl[name];
+            gl[name] = function() {
+                if (fault === 3 && kind === "Buffer" && !state.used) {
+                    state.used = true;
+                    return null;
+                }
+                const object = original.call(this);
+                if (object) state.created.push([kind, object]);
+                return object;
+            };
+        }
+        for (const name of ["bufferData", "texImage3D", "texImage2D"]) {
+            const original = state.saved[name] = gl[name];
+            gl[name] = function(...args) {
+                if (name === "texImage2D")
+                    state.images.add(this.getParameter(this.TEXTURE_BINDING_2D));
+                if (!state.used && ((fault === 1 && name === "bufferData") ||
+                    (fault === 2 && name === "texImage3D") ||
+                    (fault === 5 && name === "texImage2D"))) {
+                    state.used = true;
+                    if (name === "bufferData") return original.call(this, args[0], -1, args[2]);
+                    args[3] = -1;
+                }
+                return original.apply(this, args);
+            };
+        }
+        state.saved.getError = gl.getError;
+        gl.getError = function() {
+            ++state.checks;
+            return state.saved.getError.call(this);
+        };
+        if (fault === 4) { gl.bindBuffer(-1, null); state.used = true; }
+    }, fault);
+    const auto result = WebRenderer_SetDynamicModelSceneOwned(scene, vertices, indices);
+    const bool expectedFailure = fault != 0 && fault != 4;
+    const unsigned glEvidence = EM_ASM_INT({
+        const state = Module.kisakUploadFault;
+        const gl = state.gl;
+        for (const [name, original] of Object.entries(state.saved)) gl[name] = original;
+        delete Module.kisakUploadFault;
+        const clean = !$0 || state.created.every(([kind, object]) =>
+            !gl["is" + kind](object) || ($1 && state.images.has(object)));
+        return (state.checks << 16) | (clean ? 0 : 64) | ($2 && !state.used ? 128 : 0);
+    }, expectedFailure, variant == 1 && fault == 2, fault != 0);
+    unsigned evidence = glEvidence;
+    if ((result == WebRendererSurfaceResult::BackendFailure) != expectedFailure ||
+        (!expectedFailure && result != WebRendererSurfaceResult::Success)) evidence |= 1u;
+    if (expectedFailure)
+    {
+        if (vertices.size() != candidateVertices.size() || indices != candidateIndices ||
+            std::memcmp(vertices.data(), candidateVertices.data(),
+                vertices.size() * sizeof(WebRendererSurfaceVertex)) != 0) evidence |= 2u;
+        if (g_renderer.dynamicModelVertexArray != oldVao ||
+            g_renderer.dynamicModelVertexBuffer != oldVbo ||
+            g_renderer.dynamicModelIndexBuffer != oldIbo ||
+            g_renderer.retainedDynamicModelLighting.texture != oldLighting ||
+            g_renderer.retainedDynamicModelVertices.data() != oldVertices ||
+            g_renderer.retainedDynamicModelIndices.data() != oldIndices ||
+            g_renderer.retainedDynamicModelBatches.data() != oldBatches ||
+            g_renderer.dynamicDraws.data() != oldDraws ||
+            g_renderer.dynamicCameraDrawOrder.data() != oldOrder ||
+            g_renderer.retainedDynamicModelVertices[0].position[0] != -0.5f ||
+            g_renderer.retainedDynamicModelBatches[0].materialName != "upload-before" ||
+            g_renderer.retainedDynamicModelLighting.pixels[0] != 64u ||
+            !glIsVertexArray(oldVao) || !glIsBuffer(oldVbo) || !glIsBuffer(oldIbo) ||
+            !glIsTexture(oldLighting)) evidence |= 4u;
+        // A failed new image retains its existing delete-the-pool behavior.
+        if (fault == 5 ? glIsTexture(oldImage) :
+            (!glIsTexture(oldImage) || g_renderer.retainedDynamicModelImages[0].texture != oldImage))
+            evidence |= 8u;
+        if (WebRenderer_SetDynamicModelSceneOwned(scene, vertices, indices) !=
+            WebRendererSurfaceResult::Success) evidence |= 16u;
+    }
+    if (!vertices.empty() || !indices.empty() || glIsVertexArray(oldVao) ||
+        glIsBuffer(oldVbo) || glIsBuffer(oldIbo) || glIsTexture(oldLighting) ||
+        g_renderer.retainedDynamicModelVertices[0].position[0] != 0.25f ||
+        g_renderer.retainedDynamicModelBatches[0].materialName != "upload-after" ||
+        (variant == 2 ? g_renderer.retainedDynamicModelLighting.texture != 0u :
+            (!glIsTexture(g_renderer.retainedDynamicModelLighting.texture) ||
+                g_renderer.retainedDynamicModelLighting.pixels[0] != 192u))) evidence |= 32u;
+    if (glGetError() != GL_NO_ERROR) evidence |= 256u;
+    return evidence | (KISAK_WEB_BATCH_DYNAMIC_UPLOAD_ERRORS ? 0x40000000u : 0u);
+}
+#endif
 
 WebRendererSurfaceResult WebRenderer_SetUiScene(
     const WebRendererUiSceneDesc &scene)
@@ -8903,6 +9180,9 @@ bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
         g_renderer.sceneViewWaitReported = false;
         g_renderer.sceneViewDrawnSubmissionGeneration = 0u;
     }
+    Web_RecordFrameScene(view.worldName, g_renderer.sceneViewSubmissionGeneration,
+        view.time, view.geometrySubmitted, g_renderer.contextGeneration,
+        g_renderer.sceneViewSurfaceSubmissionGeneration);
     const bool firstSceneViewSubmission =
         g_renderer.sceneViewSubmissionGeneration == 1u;
     const bool firstGeometryViewSubmission =
@@ -8911,7 +9191,7 @@ bool WebRenderer_SubmitSceneView(const WebRendererSceneViewDesc &view)
 #if KISAK_WEB_DIAGNOSTICS
         true;
 #else
-        g_renderer.sceneViewSubmissionGeneration == 30u ||
+        Web_FrameTimingActive() || g_renderer.sceneViewSubmissionGeneration == 30u ||
         g_renderer.sceneViewSubmissionGeneration % 60u == 0u;
 #endif
     if (firstSceneViewSubmission || firstGeometryViewSubmission ||
@@ -9389,6 +9669,12 @@ void BindWorldTexture(
             (samplerState & 0x80u) != 0u ? GL_CLAMP_TO_EDGE : GL_REPEAT);
 }
 
+void BindPassTexture(std::uint32_t unit, std::uint32_t texture,
+    std::uint8_t sampler, bool mipmaps, bool bindingUnchanged)
+{
+    BindWorldTexture(GL_TEXTURE0 + unit, texture, sampler, mipmaps, bindingUnchanged);
+}
+
 #if KISAK_WEB_DIAGNOSTICS
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestPicmipTexture(
     int semantic, int noPicmip, int field, int recovery)
@@ -9532,16 +9818,33 @@ bool BindWaterTextures(WebRendererRetainedWorldBatch &batch, float floatTime)
 {
     if (batch.waterTexture == 0u || batch.reflectionTexture == 0u)
         return false;
+#if KISAK_WEB_DIAGNOSTICS
+    WebFrameProfileSample *const profile = WebFrameProfile_Current();
+    if (profile) ++profile->waterUpdateRequests;
+#endif
     if ((!r_drawWater || r_drawWater->current.enabled) && batch.waterTextureTime != floatTime)
     {
+#if KISAK_WEB_DIAGNOSTICS
+        const double generationStarted = profile ? WebFrameProfile_Now() : 0.0;
+#endif
         water_t water{};
         water.H0 = batch.waterH0.data();
         water.wTerm = batch.waterWTerm.data();
         water.M = batch.waterM;
         water.N = batch.waterN;
-        if (!R_GenerateWaterPixelsR8(&water, floatTime,
-                batch.waterPixels.data(), batch.waterPixels.size()))
-            return false;
+        const bool generated = R_GenerateWaterPixelsR8(&water, floatTime,
+            batch.waterPixels.data(), batch.waterPixels.size());
+#if KISAK_WEB_DIAGNOSTICS
+        if (profile)
+        {
+            profile->waterGenerationMs += WebFrameProfile_Now() - generationStarted;
+            ++profile->waterGenerations;
+        }
+#endif
+        if (!generated) return false;
+#if KISAK_WEB_DIAGNOSTICS
+        const double uploadStarted = profile ? WebFrameProfile_Now() : 0.0;
+#endif
         glActiveTexture(GL_TEXTURE7);
         glBindTexture(GL_TEXTURE_2D, batch.waterTexture);
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -9551,6 +9854,14 @@ bool BindWaterTextures(WebRendererRetainedWorldBatch &batch, float floatTime)
         glGenerateMipmap(GL_TEXTURE_2D);
         glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
         batch.waterTextureTime = floatTime;
+#if KISAK_WEB_DIAGNOSTICS
+        if (profile)
+        {
+            profile->waterUploadMs += WebFrameProfile_Now() - uploadStarted;
+            ++profile->waterUploads;
+            profile->waterUploadBytes += batch.waterPixels.size();
+        }
+#endif
     }
     BindWorldTexture(GL_TEXTURE7, batch.waterTexture, batch.waterSamplerState);
     // Native R_SetReflectionProbe uses linear/trilinear/clamp-UV (0x72).
@@ -9559,9 +9870,18 @@ bool BindWaterTextures(WebRendererRetainedWorldBatch &batch, float floatTime)
     return glGetError() == GL_NO_ERROR;
 }
 
+// FloatZ modes 15/16 return signed depth (and base alpha) before lighting.
+// Keep sampler-unit initialization and the ordered material texture sets;
+// their validation and texture-object aliases still matter for these draws.
+bool NeedsCameraLighting() noexcept
+{
+    return !KISAK_WEB_SKIP_FLOATZ_LIGHTING || !g_renderer.floatZPass;
+}
+
 void BindModelLightingTexture(
     const WebRendererRetainedModelLightingAtlas &atlas)
 {
+    if (!NeedsCameraLighting()) return;
     // RB_InitCodeImages: linear, no mipmaps, clamp all three volume axes.
     BindWorldTexture(GL_TEXTURE3, atlas.texture, 0xe2, false, false, GL_TEXTURE_3D);
     glUniform3f(g_renderer.modelLightingLookupScaleUniform,
@@ -9691,6 +10011,13 @@ bool DrawShadowPartition(
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
     glViewport(0, 0, shadowSize, shadowSize);
     glUseProgram(g_renderer.shadowProgram);
+    const auto finish = [](bool submitted) {
+        glUniform1f(g_renderer.shadowDepthInstanceEnabledUniform, 0.0f);
+        glDisable(GL_POLYGON_OFFSET_FILL);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glActiveTexture(GL_TEXTURE0);
+        return submitted;
+    };
     glUniformMatrix4fv(g_renderer.shadowDepthMatrixUniform, 1, GL_FALSE,
         matrix.data());
     glUniform1i(g_renderer.shadowDepthTextureUniform, 0);
@@ -9778,7 +10105,7 @@ bool DrawShadowPartition(
                 g_renderer.retainedWorldSurfaceRanges, matrix,
                 g_renderer.worldShadowRanges);
         if (!built)
-            return false;
+            return finish(false);
         const auto merged = WebRenderer_ForEachWorldSunShadowRange(
             g_renderer.worldShadowRanges, g_renderer.retainedWorldBatches,
             [transientSpot](const auto &batch) {
@@ -9830,6 +10157,7 @@ bool DrawShadowPartition(
     {
         glBindVertexArray(g_renderer.staticModelVertexArray);
         glUniform1f(g_renderer.shadowDepthInstanceEnabledUniform, 1.0f);
+        WebRendererInstanceState instanceState;
         if (transientSpot)
         {
             const std::size_t instanceCount =
@@ -9843,7 +10171,7 @@ bool DrawShadowPartition(
                     g_renderer.dynamicLights[spotPrimaryLightIndex],
                     g_renderer.dynamicSpotLightNearPlaneOffset,
                     g_renderer.staticModelPassVisibility))
-                return false;
+                return finish(false);
         }
         else if (requireSunCaster)
         {
@@ -9853,7 +10181,7 @@ bool DrawShadowPartition(
                     shadowInstanceCount ||
                 g_renderer.retainedStaticModelShadowBounds.size() <
                     shadowInstanceCount)
-                return false;
+                return finish(false);
             for (std::size_t index = 0u; index < shadowInstanceCount; ++index)
                 g_renderer.staticModelPassVisibility[index] =
                     WebRenderer_StaticModelIntersectsShadowPartition(
@@ -9872,7 +10200,7 @@ bool DrawShadowPartition(
             static_cast<std::uint32_t>(
                 g_renderer.staticModelPassVisibility.size())))
         {
-            return false;
+            return finish(false);
         }
         for (const WebRendererRetainedStaticModelBatch &batch :
              g_renderer.retainedStaticModelBatches)
@@ -9910,7 +10238,7 @@ bool DrawShadowPartition(
                     g_renderer.staticModelPassVisibility[instanceIndex] != 0u)
                     ++instanceIndex;
                 if (instanceIndex == runBegin) continue;
-                BindStaticModelInstanceRange(runBegin);
+                BindStaticModelInstanceRange(runBegin, instanceState);
                 glDrawElementsInstanced(GL_TRIANGLES,
                     static_cast<GLsizei>(batch.draw.indexCount),
                     GL_UNSIGNED_INT,
@@ -9944,10 +10272,9 @@ bool DrawShadowPartition(
                     ? nullptr
                     : &g_renderer.retainedBrushInstances[
                         draw.brushInstanceIndex];
-                return (transientSpot
-                        ? batch.castsSpotShadow : batch.castsSunShadow) &&
-                    !batch.depthHack &&
-                    !WebRenderer_IsFxVertexColorBatch(batch.sourceKind) &&
+                return WebRenderer_IsDynamicShadowCaster(batch.sourceKind,
+                    transientSpot ? batch.castsSpotShadow : batch.castsSunShadow,
+                    batch.depthHack) &&
                     (requireSunCaster ||
                         (spotShadowSlot < MAX_SPOT_SHADOWS &&
                          (draw.spotShadowVisibilityMask &
@@ -10011,11 +10338,16 @@ bool DrawShadowPartition(
             : shadowProfile->spotShadowDynamicModelsMs) +=
             WebFrameProfile_Now() - shadowFamilyStarted;
 #endif
-    glUniform1f(g_renderer.shadowDepthInstanceEnabledUniform, 0.0f);
-    glDisable(GL_POLYGON_OFFSET_FILL);
-    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-    glActiveTexture(GL_TEXTURE0);
-    return glGetError() == GL_NO_ERROR;
+    return finish(true);
+}
+
+bool CheckShadowDrawErrors()
+{
+    bool ready = true;
+    // Several partitions can set distinct error flags. Latch failure while
+    // draining them so none is misattributed to the next shadow family.
+    while (glGetError() != GL_NO_ERROR) ready = false;
+    return ready;
 }
 
 bool DrawSunShadowMaps()
@@ -10024,34 +10356,56 @@ bool DrawSunShadowMaps()
         g_renderer.shadowDepthTexture == 0u ||
         g_renderer.shadowFarDepthTexture == 0u)
         return false;
-    return DrawShadowPartition(
-            g_renderer.shadowFramebuffer,
-            g_renderer.sceneSunShadowMatrix, SUN_SHADOW_SIZE, true) &&
-        DrawShadowPartition(
-            g_renderer.shadowFarFramebuffer,
-            g_renderer.sceneSunShadowFarMatrix, SUN_SHADOW_SIZE, true);
+    return WebRenderer_DrawShadowFamily<KISAK_WEB_BATCH_SHADOW_ERRORS>(2u,
+        [](std::size_t partition) {
+            return DrawShadowPartition(
+                partition == 0u ? g_renderer.shadowFramebuffer : g_renderer.shadowFarFramebuffer,
+                partition == 0u ? g_renderer.sceneSunShadowMatrix : g_renderer.sceneSunShadowFarMatrix,
+                SUN_SHADOW_SIZE, true);
+        }, CheckShadowDrawErrors);
 }
 
 bool DrawSpotShadowMaps()
 {
-    if (g_renderer.sceneSpotShadowCount == 0u) return false;
-    for (std::size_t slot = 0u;
-         slot < g_renderer.sceneSpotShadowCount; ++slot)
-    {
-        if (g_renderer.spotShadowDepthTextures[slot] == 0u ||
-            !DrawShadowPartition(g_renderer.spotShadowFramebuffers[slot],
+    return WebRenderer_DrawShadowFamily<KISAK_WEB_BATCH_SHADOW_ERRORS>(
+        g_renderer.sceneSpotShadowCount, [](std::size_t slot) {
+            return g_renderer.spotShadowDepthTextures[slot] != 0u &&
+                DrawShadowPartition(g_renderer.spotShadowFramebuffers[slot],
                 g_renderer.sceneSpotShadowMatrices[slot],
                 SPOT_SHADOW_SIZE, false,
                 g_renderer.sceneSpotShadowLightIndices[slot],
                 static_cast<std::uint32_t>(slot),
-                g_renderer.sceneSpotShadowDynamic[slot]))
-            return false;
-    }
-    return true;
+                g_renderer.sceneSpotShadowDynamic[slot]);
+        }, CheckShadowDrawErrors);
 }
+
+#if KISAK_WEB_DIAGNOSTICS
+extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestShadowErrorBoundary(int failure)
+{
+    if (failure < 0 || failure > 4 || !g_renderer.initialized || g_renderer.contextLost)
+        return UINT32_MAX;
+    CheckShadowDrawErrors();
+    std::uint32_t submitted = 0u;
+    std::uint32_t checks = 0u;
+    const bool ready = WebRenderer_DrawShadowFamily<KISAK_WEB_BATCH_SHADOW_ERRORS>(4u,
+        [&](std::size_t partition) {
+            ++submitted;
+            if (partition == 1u && failure != 0 && failure != 4)
+                glDrawElements(GL_TRIANGLES, -1, GL_UNSIGNED_INT, nullptr);
+            if (partition == 1u && failure == 3) glEnable(0); // A second error flag.
+            return (failure != 2 && failure != 4) || partition != 1u;
+        }, [&] { ++checks; return CheckShadowDrawErrors(); });
+    const bool clean = glGetError() == GL_NO_ERROR;
+    const bool recovered = WebRenderer_DrawShadowFamily<KISAK_WEB_BATCH_SHADOW_ERRORS>(2u,
+        [](std::size_t) { return true; }, CheckShadowDrawErrors);
+    return (ready ? 1u : 0u) | (clean ? 2u : 0u) | (recovered ? 4u : 0u) |
+        (submitted << 8u) | (checks << 16u) | (KISAK_WEB_BATCH_SHADOW_ERRORS ? 1u << 24u : 0u);
+}
+#endif
 
 void BindPrimaryLightConstants(const WebRendererRetainedPrimaryLight &light)
 {
+    if (!NeedsCameraLighting()) return;
     glUniform4f(g_renderer.primaryLightPositionRadiusUniform,
         light.origin[0], light.origin[1], light.origin[2], 1.0f / light.radius);
     const float diffuseScale = r_diffuseColorScale ? r_diffuseColorScale->current.value : 1.0f;
@@ -10073,6 +10427,7 @@ void BindSpotShadowForPrimaryLight(
     bool primaryLit,
     bool spotShadowMapsDrawn)
 {
+    if (!NeedsCameraLighting()) return;
     if (primaryLit && spotShadowMapsDrawn)
     {
         for (std::size_t slot = 0u;
@@ -10120,8 +10475,12 @@ void BindSpotShadowForDynamicLight(std::uint32_t dynamicLightIndex,
     glUniform1f(g_renderer.spotShadowEnabledUniform, 0.0f);
 }
 
-void BindStaticModelInstanceRange(std::uint32_t instanceOffset)
+void BindStaticModelInstanceRange(std::uint32_t instanceOffset,
+    WebRendererInstanceState &state)
 {
+    if (KISAK_WEB_REUSE_WORLD_STATIC_STATE && !state.NeedsRange(
+            g_renderer.staticModelVertexArray,
+            g_renderer.staticModelInstanceBuffer, instanceOffset)) return;
     glBindBuffer(GL_ARRAY_BUFFER, g_renderer.staticModelInstanceBuffer);
     const std::size_t base = static_cast<std::size_t>(instanceOffset) *
         sizeof(WebRendererStaticModelInstanceDesc);
@@ -11133,6 +11492,58 @@ extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestSoftParticlePixel(int
     glUniform1f(g_renderer.fogEnabledUniform,1);
     glUniform2f(g_renderer.fogParamsUniform,0,std::log(2.0f)/std::sqrt(12.0f));
     glUniform4f(g_renderer.uiColorUniform,1,1,1,1);
+    const bool lightingProbe = field == 4 && !distortion;
+    bool lightingTransitionValid = true;
+    WebRendererRetainedModelLightingAtlas probeLighting;
+    GLint previousModelTexture = 0;
+    WebRendererRetainedPrimaryLight probeLight;
+    probeLight.type = 3u;
+    probeLight.radius = 2.0f;
+    probeLight.origin[0] = 5.0f;
+    const auto checkLightingState = [&](bool enabled) {
+        float position[4]{}, lookup[3]{}, spot = 0.0f;
+        glGetUniformfv(g_renderer.program, g_renderer.primaryLightPositionRadiusUniform, position);
+        glGetUniformfv(g_renderer.program, g_renderer.modelLightingLookupScaleUniform, lookup);
+        glGetUniformfv(g_renderer.program, g_renderer.spotShadowEnabledUniform, &spot);
+        GLint texture = 0;
+        glActiveTexture(GL_TEXTURE3);
+        glGetIntegerv(GL_TEXTURE_BINDING_3D, &texture);
+        glActiveTexture(GL_TEXTURE0);
+        return position[0] == (enabled ? 5.0f : 9.0f) &&
+            position[3] == (enabled ? 0.5f : 9.0f) &&
+            lookup[0] == (enabled ? 1.5f : 9.0f) &&
+            spot == (enabled ? 0.0f : 0.75f) &&
+            texture == (enabled ? static_cast<GLint>(probeLighting.texture) : previousModelTexture);
+    };
+    if (lightingProbe)
+    {
+        probeLighting.width = probeLighting.height = probeLighting.depth = 1u;
+        glActiveTexture(GL_TEXTURE3);
+        glGetIntegerv(GL_TEXTURE_BINDING_3D, &previousModelTexture);
+        glGenTextures(1, &probeLighting.texture);
+        glBindTexture(GL_TEXTURE_3D, probeLighting.texture);
+        constexpr std::uint8_t ambient[]{64u, 32u, 16u, 255u};
+        glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA8, 1, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, ambient);
+        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glBindTexture(GL_TEXTURE_3D, static_cast<GLuint>(previousModelTexture));
+        glUniform4f(g_renderer.primaryLightPositionRadiusUniform, 9, 9, 9, 9);
+        glUniform3f(g_renderer.modelLightingLookupScaleUniform, 9, 9, 9);
+        glUniform1f(g_renderer.spotShadowEnabledUniform, 0.75f);
+        BindPrimaryLightConstants(probeLight);
+        BindModelLightingTexture(probeLighting);
+        BindSpotShadowForPrimaryLight(0u, false, false);
+        lightingTransitionValid &= checkLightingState(!KISAK_WEB_SKIP_FLOATZ_LIGHTING);
+        // Poison flags that FloatZ cannot consume, without touching its base
+        // sampler, alpha, projection, instance transform or signed depth.
+        glUniform1f(g_renderer.lightmapEnabledUniform, 1.0f);
+        glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 1.0f);
+        glUniform1f(g_renderer.modelLightingEnabledUniform, 1.0f);
+        glUniform1f(g_renderer.normalMapEnabledUniform, 1.0f);
+        glUniform1f(g_renderer.specularMapEnabledUniform, 1.0f);
+        glUniform1f(g_renderer.detailMapEnabledUniform, 1.0f);
+        glActiveTexture(GL_TEXTURE0);
+    }
     glBindTexture(GL_TEXTURE_2D,textures[0]);
     ApplyWorldMaterialState(batch); glDrawElements(GL_TRIANGLES,6,GL_UNSIGNED_INT,nullptr);
     std::uint8_t depthPixel[4]{}; glReadPixels(0,0,1,1,GL_RGBA,GL_UNSIGNED_BYTE,depthPixel);
@@ -11302,7 +11713,53 @@ extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestSoftParticlePixel(int
         glBindFramebuffer(GL_FRAMEBUFFER,g_renderer.postSunFramebuffer);
         glReadPixels(1,1,1,1,GL_RGBA,GL_UNSIGNED_BYTE,pixel);
     }
-    const bool error=glGetError()!=GL_NO_ERROR || !orderValid;
+    if (lightingProbe)
+    {
+        // The earlier draw must still consume alpha and signed depth, despite
+        // the poisoned lighting. These scenarios use synthetic solid texels.
+        const float expectedDepth = scenario == 8 || scenario == 9
+            ? std::numeric_limits<float>::max()
+            : (scenario == 2 ? -sceneDepth : sceneDepth);
+        std::uint32_t expectedBits = 0u;
+        std::memcpy(&expectedBits, &expectedDepth, sizeof(expectedBits));
+        lightingTransitionValid &= depthBits == expectedBits;
+        BindPrimaryLightConstants(probeLight);
+        BindModelLightingTexture(probeLighting);
+        BindSpotShadowForPrimaryLight(0u, false, false);
+        lightingTransitionValid &= checkLightingState(true);
+        glUniform1i(g_renderer.materialModeUniform, 0);
+        glUniform1i(g_renderer.alphaTestUniform, 0);
+        glUniform1f(g_renderer.textureEnabledUniform, 1.0f);
+        glUniform1f(g_renderer.sceneFallbackUniform, 0.0f);
+        glUniform1f(g_renderer.lightmapEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.modelLightingEnabledUniform, 1.0f);
+        glUniform1f(g_renderer.normalMapEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.specularMapEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.detailMapEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.primaryLightEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.sunLightingModeUniform, 0.0f);
+        glUniform1f(g_renderer.fogEnabledUniform, 0.0f);
+        glUniform1f(g_renderer.premultiplyAlphaUniform, 0.0f);
+        glUniform3f(g_renderer.modelLightingBaseCoordinatesUniform, 0.5f, 0.5f, 0.5f);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, textures[1]);
+        glDisable(GL_BLEND);
+        glDisable(GL_DEPTH_TEST);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, reinterpret_cast<void *>(6 * sizeof(std::uint32_t)));
+        std::uint8_t litPixel[4]{};
+        glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, litPixel);
+        constexpr int expectedLit[]{32, 32, 24}; // Base * ambient volume * 2.
+        for (unsigned component = 0u; component < 3u; ++component)
+            lightingTransitionValid &= std::abs(static_cast<int>(litPixel[component]) - expectedLit[component]) <= 2;
+        glActiveTexture(GL_TEXTURE3);
+        glBindTexture(GL_TEXTURE_3D, static_cast<GLuint>(previousModelTexture));
+        DeleteModelLightingTexture(probeLighting);
+        glActiveTexture(GL_TEXTURE0);
+        g_renderer.textureParameters.Reset();
+    }
+    const bool error=glGetError()!=GL_NO_ERROR || !orderValid || !lightingTransitionValid;
     g_renderer.softParticleDepthReady=false;
     g_renderer.postSunReady=false;
     glBindFramebuffer(GL_FRAMEBUFFER,0); glDepthRangef(0,1);
@@ -11798,10 +12255,12 @@ std::uint32_t DrawDynamicLights(bool staticModelsReady,
         }
 
         std::uint32_t previousInstance = UINT32_MAX - 1u;
+        WebRendererInstanceState instanceState;
         for (const auto &command : commands)
         {
             if (command.kind == WebRendererDynamicLightDrawKind::World)
             {
+                instanceState.Reset();
                 const auto &range =
                     g_renderer.worldDynamicLightRanges[i][command.sourceIndex];
                 const auto &batch =
@@ -11842,7 +12301,7 @@ std::uint32_t DrawDynamicLights(bool staticModelsReady,
                 count += DrawDynamicLightMaterial(batch.draw,
                     g_renderer.retainedStaticModelImages, light,
                     receiverPlanes, [&] {
-                        BindStaticModelInstanceRange(command.first);
+                        BindStaticModelInstanceRange(command.first, instanceState);
                         glDrawElementsInstanced(GL_TRIANGLES,
                             batch.draw.indexCount, GL_UNSIGNED_INT,
                             reinterpret_cast<const void *>(
@@ -11854,6 +12313,7 @@ std::uint32_t DrawDynamicLights(bool staticModelsReady,
             }
             const auto &draw =
                 g_renderer.dynamicDraws[command.sourceIndex];
+            instanceState.Reset();
             const auto &batch = DynamicDrawBatch(draw);
 #if KISAK_WEB_DIAGNOSTICS
             g_frameProfileDrawBucket = ProfileBucketForKind(batch.sourceKind);
@@ -12348,6 +12808,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
     {
     const bool floatZPass = floatZRequested && cameraStage == 0;
     g_renderer.floatZPass = floatZPass;
+    const bool cameraLighting = NeedsCameraLighting();
     const bool emissiveCameraPass = !floatZPass && cameraStage != prepassCount;
     glBindFramebuffer(GL_FRAMEBUFFER, floatZPass ? g_renderer.floatZFramebuffer :
         multisampleDraw ? g_renderer.multisampleFramebuffer : postProcessDraw ? g_renderer.sceneFramebuffer : 0u);
@@ -12450,6 +12911,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
     if (worldBatchDraw)
     {
         WebRendererDrawState<WebRendererRetainedWorldBatch> worldDrawState;
+        WebRendererPassTextures<6> worldTextures;
         WebRenderer_ForEachMaterialPassGroup(g_renderer.worldCameraRanges.size(),
             [&](std::size_t i) -> const auto & {
                 return g_renderer.retainedWorldBatches[g_renderer.worldCameraRanges[i].batchIndex];
@@ -12510,10 +12972,31 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 primaryLight->falloffScale > 0.0f &&
                 batch.techniqueType == 10u &&
                 batch.pixelShaderName.rfind("lm_spot_", 0u) == 0u;
-            glUniform1f(g_renderer.sceneFallbackUniform,
-                fallback ? 1.0f : 0.0f);
-            glUniform1f(g_renderer.textureEnabledUniform,
-                fallback || water ? 0.0f : 1.0f);
+            if (!KISAK_WEB_REUSE_WORLD_STATIC_STATE || worldDrawState.NeedsFeatures({
+                    g_renderer.sceneFogEnabled, fallback, !fallback && !water,
+                    lightmapped, false, detailMapped, normalMapped, specularMapped, primaryLit }))
+            {
+                glUniform1f(g_renderer.sceneFallbackUniform,
+                    fallback ? 1.0f : 0.0f);
+                glUniform1f(g_renderer.textureEnabledUniform,
+                    fallback || water ? 0.0f : 1.0f);
+                if (cameraLighting)
+                {
+                    glUniform1f(g_renderer.lightmapEnabledUniform,
+                        lightmapped ? 1.0f : 0.0f);
+                    glUniform1f(g_renderer.secondaryLightmapEnabledUniform,
+                        lightmapped ? 1.0f : 0.0f);
+                    glUniform1f(g_renderer.modelLightingEnabledUniform, 0.0f);
+                    glUniform1f(g_renderer.detailMapEnabledUniform,
+                        detailMapped ? 1.0f : 0.0f);
+                    glUniform1f(g_renderer.normalMapEnabledUniform,
+                        normalMapped ? 1.0f : 0.0f);
+                    glUniform1f(g_renderer.specularMapEnabledUniform,
+                        specularMapped ? 1.0f : 0.0f);
+                    glUniform1f(g_renderer.primaryLightEnabledUniform,
+                        primaryLit ? 1.0f : 0.0f);
+                }
+            }
             if (waterReady)
             {
                 glUniform4fv(g_renderer.envMapParmsUniform, 1,
@@ -12528,64 +13011,36 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
             }
             else if (specularMapped)
             {
-                glUniform4fv(g_renderer.envMapParmsUniform, 1,
-                    batch.envMapParms);
+                if (cameraLighting)
+                    glUniform4fv(g_renderer.envMapParmsUniform, 1,
+                        batch.envMapParms);
                 BindWorldTexture(GL_TEXTURE8, batch.reflectionTexture,
                     0x72, true, false, GL_TEXTURE_CUBE_MAP);
                 glActiveTexture(GL_TEXTURE0);
             }
-            else
+            else if (cameraLighting)
             {
                 glUniform4f(g_renderer.envMapParmsUniform,
                     0.0f, 0.0f, 0.0f, 0.0f);
             }
-            glUniform1f(g_renderer.lightmapEnabledUniform,
-                lightmapped ? 1.0f : 0.0f);
-            glUniform1f(g_renderer.secondaryLightmapEnabledUniform,
-                lightmapped ? 1.0f : 0.0f);
-            glUniform1f(g_renderer.modelLightingEnabledUniform, 0.0f);
-            glUniform1f(g_renderer.detailMapEnabledUniform,
-                detailMapped ? 1.0f : 0.0f);
-            if (detailMapped)
+            if (cameraLighting && detailMapped)
                 glUniform4fv(g_renderer.detailScaleUniform, 1, batch.detailScale);
-            glUniform1f(g_renderer.normalMapEnabledUniform,
-                normalMapped ? 1.0f : 0.0f);
-            glUniform1f(g_renderer.specularMapEnabledUniform,
-                specularMapped ? 1.0f : 0.0f);
-            glUniform1f(g_renderer.sunLightingModeUniform,
-                lightmapped && (batch.techniqueType == 8u || batch.techniqueType == 9u)
-                    ? (shadowMapDrawn ? 2.0f : 1.0f) : 0.0f);
-            glUniform1f(g_renderer.primaryLightEnabledUniform,
-                primaryLit ? 1.0f : 0.0f);
+            if (cameraLighting)
+                glUniform1f(g_renderer.sunLightingModeUniform,
+                    lightmapped && (batch.techniqueType == 8u || batch.techniqueType == 9u)
+                        ? (shadowMapDrawn ? 2.0f : 1.0f) : 0.0f);
             if (primaryLit) BindPrimaryLightConstants(*primaryLight);
             BindSpotShadowForPrimaryLight(batch.primaryLightIndex,
                 primaryLit, spotShadowMapsDrawn);
-            BindWorldTexture(
-                GL_TEXTURE0,
-                base ? base->texture : g_renderer.texture,
-                batch.samplerState);
-            BindWorldTexture(
-                GL_TEXTURE1,
-                normal ? normal->texture : g_renderer.texture,
-                batch.normalSamplerState);
-            BindWorldTexture(
-                GL_TEXTURE4,
-                detail ? detail->texture : g_renderer.texture,
-                batch.detailSamplerState);
-            BindWorldTexture(
-                GL_TEXTURE2,
-                secondaryLightmap
-                    ? secondaryLightmap->texture : g_renderer.texture,
-                0x62u);
-            BindWorldTexture(
-                GL_TEXTURE5,
-                specular ? specular->texture : g_renderer.texture,
-                batch.specularSamplerState);
-            BindWorldTexture(
-                GL_TEXTURE9,
-                primaryLightmap
-                    ? primaryLightmap->texture : g_renderer.texture,
-                0x62u);
+            if (water) worldTextures.Reset();
+            worldTextures.Apply<KISAK_WEB_REUSE_WORLD_STATIC_STATE>({{
+                {0u, base ? base->texture : g_renderer.texture, batch.samplerState},
+                {1u, normal ? normal->texture : g_renderer.texture, batch.normalSamplerState},
+                {4u, detail ? detail->texture : g_renderer.texture, batch.detailSamplerState},
+                {2u, secondaryLightmap ? secondaryLightmap->texture : g_renderer.texture, 0x62u},
+                {5u, specular ? specular->texture : g_renderer.texture, batch.specularSamplerState},
+                {9u, primaryLightmap ? primaryLightmap->texture : g_renderer.texture, 0x62u},
+            }}, BindPassTexture);
             const std::uintptr_t indexOffset =
                 static_cast<std::uintptr_t>(range.firstIndex) *
                 sizeof(std::uint32_t);
@@ -12667,6 +13122,8 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
         glUniform1f(g_renderer.specularMapEnabledUniform, 0.0f);
         BindModelLightingTexture(g_renderer.retainedStaticModelLighting);
         WebRendererDrawState<WebRendererRetainedWorldBatch> staticDrawState;
+        WebRendererPassTextures<5> staticTextures;
+        WebRendererInstanceState instanceState;
         WebRenderer_ForEachMaterialPassGroup(g_renderer.retainedStaticModelBatches.size(),
             [&](std::size_t i) -> const auto & { return g_renderer.retainedStaticModelBatches[i].draw; },
             HasMultiplyFogPass, [&](std::size_t begin, std::size_t end, unsigned materialPass) {
@@ -12730,54 +13187,56 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
             if (localPrimaryLit)
             {
                 BindPrimaryLightConstants(*primaryLight);
-                BindWorldTexture(GL_TEXTURE2, attenuation->texture, primaryLight->attenuationSamplerState, false);
             }
             BindSpotShadowForPrimaryLight(batch.draw.primaryLightIndex, localPrimaryLit, spotShadowMapsDrawn);
-            glUniform1f(g_renderer.sceneFallbackUniform,
-                fallback ? 1.0f : 0.0f);
-            glUniform1f(g_renderer.textureEnabledUniform,
-                fallback ? 0.0f : 1.0f);
-            glUniform1f(g_renderer.modelLightingEnabledUniform,
-                modelLit ? 1.0f : 0.0f);
-            glUniform1f(g_renderer.detailMapEnabledUniform,
-                detailMapped ? 1.0f : 0.0f);
-            if (detailMapped)
+            if (!KISAK_WEB_REUSE_WORLD_STATIC_STATE || staticDrawState.NeedsFeatures({
+                    g_renderer.sceneFogEnabled, fallback, !fallback, false,
+                    modelLit, detailMapped, normalMapped, specularMapped, false }))
+            {
+                glUniform1f(g_renderer.sceneFallbackUniform,
+                    fallback ? 1.0f : 0.0f);
+                glUniform1f(g_renderer.textureEnabledUniform,
+                    fallback ? 0.0f : 1.0f);
+                if (cameraLighting)
+                {
+                    glUniform1f(g_renderer.modelLightingEnabledUniform,
+                        modelLit ? 1.0f : 0.0f);
+                    glUniform1f(g_renderer.detailMapEnabledUniform,
+                        detailMapped ? 1.0f : 0.0f);
+                    glUniform1f(g_renderer.normalMapEnabledUniform,
+                        normalMapped ? 1.0f : 0.0f);
+                    glUniform1f(g_renderer.specularMapEnabledUniform,
+                        specularMapped ? 1.0f : 0.0f);
+                }
+            }
+            if (cameraLighting && detailMapped)
                 glUniform4fv(g_renderer.detailScaleUniform, 1, batch.draw.detailScale);
-            glUniform1f(g_renderer.normalMapEnabledUniform,
-                normalMapped ? 1.0f : 0.0f);
-            glUniform1f(g_renderer.specularMapEnabledUniform,
-                specularMapped ? 1.0f : 0.0f);
-            glUniform1f(g_renderer.primaryLightEnabledUniform,
-                localPrimaryLit ? static_cast<float>(primaryLight->type) : directionalPrimaryLit ? 1.0f : 0.0f);
+            if (cameraLighting)
+                glUniform1f(g_renderer.primaryLightEnabledUniform,
+                    localPrimaryLit ? static_cast<float>(primaryLight->type) : directionalPrimaryLit ? 1.0f : 0.0f);
             if (specularMapped)
             {
-                glUniform4fv(g_renderer.envMapParmsUniform, 1,
-                    batch.draw.envMapParms);
+                if (cameraLighting)
+                    glUniform4fv(g_renderer.envMapParmsUniform, 1,
+                        batch.draw.envMapParms);
                 BindWorldTexture(GL_TEXTURE8, batch.draw.reflectionTexture,
                     0x72, true, false, GL_TEXTURE_CUBE_MAP);
                 glActiveTexture(GL_TEXTURE0);
             }
-            else
+            else if (cameraLighting)
                 glUniform4f(g_renderer.envMapParmsUniform,
                     0.0f, 0.0f, 0.0f, 0.0f);
-            BindWorldTexture(
-                GL_TEXTURE0,
-                base ? base->texture : g_renderer.texture,
-                batch.draw.samplerState,
-                base && base->mipmapsAllowed);
-            BindWorldTexture(
-                GL_TEXTURE1,
-                normal ? normal->texture : g_renderer.texture,
-                batch.draw.normalSamplerState);
-            BindWorldTexture(
-                GL_TEXTURE4,
-                detail ? detail->texture : g_renderer.texture,
-                batch.draw.detailSamplerState);
-            BindWorldTexture(
-                GL_TEXTURE5,
-                specular ? specular->texture : g_renderer.texture,
-                batch.draw.specularSamplerState);
-            BindStaticModelInstanceRange(batch.cameraInstanceOffset);
+            staticTextures.Apply<KISAK_WEB_REUSE_WORLD_STATIC_STATE>({{
+                {2u, localPrimaryLit ? attenuation->texture : 0u,
+                    localPrimaryLit ? primaryLight->attenuationSamplerState : std::uint8_t{0u},
+                    false, localPrimaryLit},
+                {0u, base ? base->texture : g_renderer.texture, batch.draw.samplerState,
+                    base && base->mipmapsAllowed},
+                {1u, normal ? normal->texture : g_renderer.texture, batch.draw.normalSamplerState},
+                {4u, detail ? detail->texture : g_renderer.texture, batch.draw.detailSamplerState},
+                {5u, specular ? specular->texture : g_renderer.texture, batch.draw.specularSamplerState},
+            }}, BindPassTexture);
+            BindStaticModelInstanceRange(batch.cameraInstanceOffset, instanceState);
             const std::uintptr_t indexOffset =
                 static_cast<std::uintptr_t>(batch.draw.firstIndex) *
                 sizeof(std::uint32_t);
@@ -12818,7 +13277,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
         BindModelLightingTexture(g_renderer.retainedDynamicModelLighting);
         // Sun queries do not bind textures; reflection/spot-shadow setup uses
         // units 8/14. These six bindings remain owned by this local pass.
-        WebRendererDynamicTextures dynamicTextures;
+        WebRendererPassTextures<6> dynamicTextures;
 #if KISAK_WEB_DIAGNOSTICS
         const WebRendererRetainedWorldBatch *lastSunVisibilityBatch = nullptr;
         for (const WebRendererRetainedWorldBatch &batch :
@@ -13103,9 +13562,10 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 const auto *attenuation = primaryLight ? WorldImage(primaryLight->attenuationImageIndex) : nullptr;
                 const bool localPrimaryLit = modelLit && primaryLight &&
                     (primaryLight->type == 2u || primaryLight->type == 3u) && attenuation && attenuation->texture;
-                glUniform1f(g_renderer.sunLightingModeUniform,
-                    dynamicLightmapped && (batch.techniqueType == 8u || batch.techniqueType == 9u)
-                        ? (shadowMapDrawn ? 2.0f : 1.0f) : 0.0f);
+                if (cameraLighting)
+                    glUniform1f(g_renderer.sunLightingModeUniform,
+                        dynamicLightmapped && (batch.techniqueType == 8u || batch.techniqueType == 9u)
+                            ? (shadowMapDrawn ? 2.0f : 1.0f) : 0.0f);
                 if (drawState.NeedsFeatures({
                     g_renderer.sceneFogEnabled && !fxSceneGeometry && !sunSprite,
                     fallback && !fxSceneGeometry, !fallback, dynamicLightmapped,
@@ -13123,38 +13583,43 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                         fallback && !fxSceneGeometry ? 1.0f : 0.0f);
                     glUniform1f(g_renderer.textureEnabledUniform,
                         fallback ? 0.0f : 1.0f);
-                    glUniform1f(g_renderer.lightmapEnabledUniform,
-                        dynamicLightmapped ? 1.0f : 0.0f);
-                    glUniform1f(g_renderer.secondaryLightmapEnabledUniform,
-                        dynamicLightmapped ? 1.0f : 0.0f);
-                    glUniform1f(g_renderer.modelLightingEnabledUniform,
-                        modelLit ? 1.0f : 0.0f);
-                    glUniform1f(g_renderer.detailMapEnabledUniform,
-                        detailMapped ? 1.0f : 0.0f);
-                    glUniform1f(g_renderer.normalMapEnabledUniform,
-                        normalMapped ? 1.0f : 0.0f);
-                    glUniform1f(g_renderer.specularMapEnabledUniform,
-                        specularMapped ? 1.0f : 0.0f);
+                    if (cameraLighting)
+                    {
+                        glUniform1f(g_renderer.lightmapEnabledUniform,
+                            dynamicLightmapped ? 1.0f : 0.0f);
+                        glUniform1f(g_renderer.secondaryLightmapEnabledUniform,
+                            dynamicLightmapped ? 1.0f : 0.0f);
+                        glUniform1f(g_renderer.modelLightingEnabledUniform,
+                            modelLit ? 1.0f : 0.0f);
+                        glUniform1f(g_renderer.detailMapEnabledUniform,
+                            detailMapped ? 1.0f : 0.0f);
+                        glUniform1f(g_renderer.normalMapEnabledUniform,
+                            normalMapped ? 1.0f : 0.0f);
+                        glUniform1f(g_renderer.specularMapEnabledUniform,
+                            specularMapped ? 1.0f : 0.0f);
+                    }
                 }
-                if (detailMapped)
+                if (cameraLighting && detailMapped)
                     glUniform4fv(g_renderer.detailScaleUniform, 1, batch.detailScale);
                 if (specularMapped)
                 {
-                    glUniform4fv(g_renderer.envMapParmsUniform, 1,
-                        batch.envMapParms);
+                    if (cameraLighting)
+                        glUniform4fv(g_renderer.envMapParmsUniform, 1,
+                            batch.envMapParms);
                     BindWorldTexture(GL_TEXTURE8, batch.reflectionTexture,
                         0x72, true, false, GL_TEXTURE_CUBE_MAP);
                     glActiveTexture(GL_TEXTURE0);
                 }
-                else
+                else if (cameraLighting)
                     glUniform4f(g_renderer.envMapParmsUniform,
                         0.0f, 0.0f, 0.0f, 0.0f);
                 if (primaryLit || localPrimaryLit) BindPrimaryLightConstants(*primaryLight);
-                glUniform1f(g_renderer.primaryLightEnabledUniform, localPrimaryLit
-                    ? static_cast<float>(primaryLight->type) : primaryLit || directionalPrimaryLit ? 1.0f : 0.0f);
+                if (cameraLighting)
+                    glUniform1f(g_renderer.primaryLightEnabledUniform, localPrimaryLit
+                        ? static_cast<float>(primaryLight->type) : primaryLit || directionalPrimaryLit ? 1.0f : 0.0f);
                 BindSpotShadowForPrimaryLight(batch.primaryLightIndex,
                     primaryLit || localPrimaryLit, spotShadowMapsDrawn);
-                if (modelLit)
+                if (cameraLighting && modelLit)
                     glUniform3fv(g_renderer.modelLightingBaseCoordinatesUniform,
                         1, batch.modelLightingCoordinates);
                 if (sunSprite)
@@ -13175,20 +13640,14 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                     frameProfile->dynamicModelParametersMs += texturesStarted - parametersStarted;
 #endif
                 dynamicTextures.Apply({{
-                    base ? base->texture : g_renderer.texture,
-                    normal ? normal->texture : g_renderer.texture,
-                    detail ? detail->texture : g_renderer.texture,
-                    specular ? specular->texture : g_renderer.texture,
-                    localPrimaryLit ? attenuation->texture : secondaryLightmap ? secondaryLightmap->texture : g_renderer.texture,
-                    primaryLightmap ? primaryLightmap->texture : g_renderer.texture,
-                }, {
-                    batch.samplerState, batch.normalSamplerState,
-                    batch.detailSamplerState, batch.specularSamplerState,
-                }, localPrimaryLit ? primaryLight->attenuationSamplerState : std::uint8_t{0x62u}},
-                [](std::uint32_t unit, std::uint32_t texture, std::uint8_t sampler,
-                       bool bindingUnchanged) {
-                    BindWorldTexture(GL_TEXTURE0 + unit, texture, sampler, true, bindingUnchanged);
-                });
+                    {0u, base ? base->texture : g_renderer.texture, batch.samplerState},
+                    {1u, normal ? normal->texture : g_renderer.texture, batch.normalSamplerState},
+                    {4u, detail ? detail->texture : g_renderer.texture, batch.detailSamplerState},
+                    {5u, specular ? specular->texture : g_renderer.texture, batch.specularSamplerState},
+                    {2u, localPrimaryLit ? attenuation->texture : secondaryLightmap ? secondaryLightmap->texture : g_renderer.texture,
+                        localPrimaryLit ? primaryLight->attenuationSamplerState : std::uint8_t{0x62u}},
+                    {9u, primaryLightmap ? primaryLightmap->texture : g_renderer.texture, 0x62u},
+                }}, BindPassTexture);
 #if KISAK_WEB_DIAGNOSTICS
                 const double drawStarted = profileDynamicModel
                     ? WebFrameProfile_Now() : 0.0;
@@ -13281,12 +13740,22 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
     {
         // Native COD4 resolves the multisampled 3D scene into a texture before
         // post effects and draws 2D afterward. Preserve depth for the DOF pass.
-        ResolveMultisampleTarget(
+        if (!ResolveMultisampleTarget(
             (postProcessDraw || directAaResolveDraw)
                 ? g_renderer.sceneFramebuffer : 0u,
             width,
             height,
-            postProcessDraw);
+            postProcessDraw))
+        {
+            g_renderer.screenshotReady = false;
+#if KISAK_WEB_DIAGNOSTICS
+            if (frameProfile)
+                frameProfile->postProcessMs += WebFrameProfile_Now() - postProfileStarted;
+            EndFrameProfileGpuQuery(WebFrameProfileGpuStage::UiPost);
+            g_frameProfileDrawBucket = FrameProfileDrawBucket::None;
+#endif
+            return false;
+        }
     }
     if (directAaResolveDraw)
     {

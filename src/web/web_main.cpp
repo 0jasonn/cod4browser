@@ -21,6 +21,7 @@
 #include <ui/ui.h>
 #include <web/web_client_server_lifecycle.h>
 #include <web/web_frame_profile.h>
+#include <web/web_frame_timing.h>
 #include <web/web_renderer.h>
 #include <web/web_display.h>
 #include <web/web_system.h>
@@ -97,12 +98,19 @@ EM_JS(void, DispatchFrameProfile,
      double resolveBlits, double submittedIndices, double submittedTriangles,
      double textureBindCalls, double programSwitches,
      double bufferUploadBytes, double textureUploadBytes,
-     double unmeasuredTextureUploads, double lodChanges,
+     double unmeasuredTextureUploads, double waterGenerationMs, double waterUploadMs,
+     double retainedImageLookupMs, double dynamicDrawBuildMs, double gpuResourceCreationMs,
+     double waterUpdateRequests, double waterGenerations, double waterUploads,
+     double waterUploadBytes, double retainedImageLookups, double retainedImageLookupHits,
+     double retainedImageComparisons, double dynamicDrawsBuilt, double gpuBuffersCreated,
+     double gpuTexturesCreated, double gpuVertexArraysCreated, double gpuFramebuffersCreated,
+     double gpuRenderbuffersCreated, double lodChanges,
      double shadowCasterDraws, double sunShadowMergedRanges, double dynamicCommandVertices,
      double dynamicCommandIndices, double uiCommandVertices, double uiCommandIndices), {
         globalThis.dispatchEvent(new CustomEvent("kisakcod:frame-profile", {
             detail: {
                 kind: "frame",
+                observedMs: performance.now(),
                 pumpTick: pumpTick >>> 0,
                 contextGeneration: contextGeneration >>> 0,
                 worldGeneration: worldGeneration >>> 0,
@@ -140,7 +148,8 @@ EM_JS(void, DispatchFrameProfile,
                     dynamicModelParametersMs,
                     dynamicModelTexturesMs, dynamicModelDrawMs,
                     fxModelsMs, particlesMs, marksMs,
-                    uiMs, postProcessMs, bufferUploadMs, textureUploadMs
+                    uiMs, postProcessMs, bufferUploadMs, textureUploadMs,
+                    waterGenerationMs, waterUploadMs, retainedImageLookupMs, dynamicDrawBuildMs, gpuResourceCreationMs
                 },
                 gpu: {
                     timingsAvailable: Boolean(gpuTimingsAvailable),
@@ -159,7 +168,11 @@ EM_JS(void, DispatchFrameProfile,
                     postProcessDrawCalls, queryDrawCalls, resolveBlits,
                     submittedIndices, submittedTriangles, textureBindCalls,
                     programSwitches, bufferUploadBytes, textureUploadBytes,
-                    unmeasuredTextureUploads, lodChanges, shadowCasterDraws, sunShadowMergedRanges,
+                    unmeasuredTextureUploads, waterUpdateRequests, waterGenerations, waterUploads,
+                    waterUploadBytes, retainedImageLookups, retainedImageLookupHits,
+                    retainedImageComparisons, dynamicDrawsBuilt, gpuBuffersCreated,
+                    gpuTexturesCreated, gpuVertexArraysCreated, gpuFramebuffersCreated,
+                    gpuRenderbuffersCreated, lodChanges, shadowCasterDraws, sunShadowMergedRanges,
                     dynamicCommandVertices, dynamicCommandIndices, uiCommandVertices, uiCommandIndices
                 }
             }
@@ -340,6 +353,24 @@ void WebFrameProfile_EndPump(bool gameplayFrame, bool rendererSubmitted)
         static_cast<double>(s.bufferUploadBytes),
         static_cast<double>(s.textureUploadBytes),
         static_cast<double>(s.unmeasuredTextureUploads),
+        s.waterGenerationMs,
+        s.waterUploadMs,
+        s.retainedImageLookupMs,
+        s.dynamicDrawBuildMs,
+        s.gpuResourceCreationMs,
+        static_cast<double>(s.waterUpdateRequests),
+        static_cast<double>(s.waterGenerations),
+        static_cast<double>(s.waterUploads),
+        static_cast<double>(s.waterUploadBytes),
+        static_cast<double>(s.retainedImageLookups),
+        static_cast<double>(s.retainedImageLookupHits),
+        static_cast<double>(s.retainedImageComparisons),
+        static_cast<double>(s.dynamicDrawsBuilt),
+        static_cast<double>(s.gpuBuffersCreated),
+        static_cast<double>(s.gpuTexturesCreated),
+        static_cast<double>(s.gpuVertexArraysCreated),
+        static_cast<double>(s.gpuFramebuffersCreated),
+        static_cast<double>(s.gpuRenderbuffersCreated),
         static_cast<double>(s.lodChanges),
         static_cast<double>(s.shadowCasterDraws),
         static_cast<double>(s.sunShadowMergedRanges),
@@ -370,8 +401,9 @@ void WebFrameProfile_PublishGpuResult(
 
 namespace
 {
-std::uint32_t g_lastCGameFrameMilliseconds = 0u;
-std::uint32_t g_cgameFrameAccumulatorMilliseconds = 0u;
+WebFrameTiming g_cgameTiming;
+int g_frameWallMilliseconds = 0;
+int g_frameSimulationMilliseconds = 0;
 bool g_reentrantCommandPumpReported = false;
 #if KISAK_WEB_DIAGNOSTICS
 std::uint32_t g_testSlowCommandMilliseconds = 0u;
@@ -432,47 +464,14 @@ bool RunCGameFrame(const WebFrameInfo &frame)
     // can ever be built.
     if (!clientUIActives[0].isRunning)
     {
-        g_lastCGameFrameMilliseconds = 0u;
-        g_cgameFrameAccumulatorMilliseconds = 0u;
+        g_cgameTiming = {};
         return false;
     }
 
-    int frameMilliseconds = 16;
-    if (g_lastCGameFrameMilliseconds != 0u)
-    {
-        const std::uint32_t elapsed =
-            frame.monotonicMilliseconds - g_lastCGameFrameMilliseconds;
-        g_lastCGameFrameMilliseconds = frame.monotonicMilliseconds;
-
-        // An Emscripten main loop in an OffscreenCanvas Worker is not
-        // guaranteed to be display-vsynced. It can run several callbacks in
-        // one millisecond. Never invent a 1 ms engine step for those calls:
-        // doing so advances the authoritative SP clock faster than wall time,
-        // and the canonical integer velocity snap can then preserve small
-        // components indefinitely. Accumulate real time without blocking the
-        // browser and honor the canonical com_maxfps dvar. An uncapped value
-        // retains the web safety ceiling of 125 Hz.
-        // Only bound long suspension gaps here. The former 100 ms cap lost
-        // real time on every slow frame, producing continuous slow motion.
-        // Com_ModifyMsec still owns the canonical dvar/script time adjustment.
-        g_cgameFrameAccumulatorMilliseconds += std::min(elapsed, 5000u);
-        const int configuredMaxFps = com_maxfps
-            ? com_maxfps->current.integer : 0;
-        const std::uint32_t minimumFrameMilliseconds = configuredMaxFps > 0
-            ? static_cast<std::uint32_t>(
-                std::max(1, 1000 / configuredMaxFps))
-            : 8u;
-        if (g_cgameFrameAccumulatorMilliseconds < minimumFrameMilliseconds)
-            return false;
-
-        frameMilliseconds = static_cast<int>(
-            std::min(g_cgameFrameAccumulatorMilliseconds, 5000u));
-        g_cgameFrameAccumulatorMilliseconds = 0u;
-    }
-    else
-    {
-        g_lastCGameFrameMilliseconds = frame.monotonicMilliseconds;
-    }
+    int frameMilliseconds = g_cgameTiming.Advance(frame.monotonicMilliseconds,
+        com_maxfps ? com_maxfps->current.integer : 0);
+    if (!frameMilliseconds) return false;
+    g_frameWallMilliseconds = frameMilliseconds;
     Com_WriteConfiguration(0);
     // Native Com_Frame refreshes this clock before the server/client frame.
     // CL_CreateNewCommands derives frame_msec from it; leaving it unchanged
@@ -491,6 +490,7 @@ bool RunCGameFrame(const WebFrameInfo &frame)
     // Match Com_Frame: fixedtime and script/developer timescales are applied
     // after wall-clock frame admission and before the authoritative server.
     frameMilliseconds = Com_ModifyMsec(frameMilliseconds);
+    g_frameSimulationMilliseconds = frameMilliseconds;
     frameMilliseconds = SV_Frame(frameMilliseconds);
     #if KISAK_WEB_DIAGNOSTICS
     if (profile)
@@ -579,14 +579,14 @@ void RecoverFrameError()
     CL_InitRenderer();
     Com_AssetLoadUI();
     UI_SetActiveMenu(0, static_cast<uiMenuCommand_t>(UI_GetMenuScreen()));
-    g_lastCGameFrameMilliseconds = 0u;
-    g_cgameFrameAccumulatorMilliseconds = 0u;
+    g_cgameTiming = {};
 }
 
 // Keep the setjmp wrapper small: Emscripten otherwise emits jump handling for
 // every call in the frame body. The extra call occurs only once per frame.
 [[gnu::noinline]] void RenderFrameInternal(const WebFrameInfo &frame)
 {
+    const double timingStarted = Web_FrameTimingNow(true);
     WebDisplay_Update();
     #if KISAK_WEB_DIAGNOSTICS
     const bool profiling = WebFrameProfile_BeginPump(frame.pumpTick);
@@ -610,7 +610,9 @@ void RecoverFrameError()
     }
     #endif
     WebCinematic_Update();
+    const double simulationStarted = timingStarted ? Web_FrameTimingNow() : 0.0;
     const bool gameplayFrame = RunCGameFrame(frame);
+    const double submissionStarted = timingStarted ? Web_FrameTimingNow() : 0.0;
     // Before a local game is active the renderer remains responsible for the
     // launcher/bootstrap surface. During gameplay, presentation follows the
     // same non-blocking com_maxfps admission decision as the engine frame.
@@ -623,6 +625,10 @@ void RecoverFrameError()
     const bool rendererSubmitted = rendererScheduled &&
         WebRenderer_DrawFrame(frame);
     if (rendererSubmitted) WebSaveImage_CapturePending();
+    if (timingStarted && gameplayFrame && rendererSubmitted)
+        Web_RecordFrameTiming(frame, timingStarted, simulationStarted,
+            submissionStarted, g_frameWallMilliseconds,
+            g_frameSimulationMilliseconds);
     #if KISAK_WEB_DIAGNOSTICS
     if (profiling)
     {

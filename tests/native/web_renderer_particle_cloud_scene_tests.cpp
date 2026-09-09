@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <new>
 #include <vector>
 
@@ -215,6 +216,18 @@ void TestNativeRandomizedCenterLayout()
     WebRendererParticleCloudSceneCommand first;
     assert(WebRenderer_BuildParticleCloudCommand(fixture.submission,
         IdentityView(), first) == WebRendererParticleCloudSceneResult::Success);
+    std::srand(71u);
+    const int nextWithoutBuild = std::rand();
+    std::srand(71u);
+    WebRendererParticleCloudSceneCommand direct;
+    assert(WebRenderer_BuildAndAppendParticleCloudCommand(fixture.submission,
+        IdentityView(), direct.vertices, direct.indices, direct.batches,
+        direct.surfaceCount) == WebRendererParticleCloudSceneResult::Success);
+    assert(std::rand() == nextWithoutBuild);
+    assert(direct.vertices.size() == first.vertices.size());
+    assert(std::memcmp(direct.vertices.data(), first.vertices.data(),
+        first.vertices.size() * sizeof(WebRendererSurfaceVertex)) == 0);
+    assert(direct.indices == first.indices && direct.surfaceCount == first.surfaceCount);
 
     for (std::uint32_t particleId = 0u;
          particleId < WEB_RENDERER_PARTICLE_CLOUD_PARTICLES; ++particleId)
@@ -442,6 +455,25 @@ void TestNativeCloudAxisCases()
             WebRendererParticleCloudSceneCommand command;
             assert(WebRenderer_BuildParticleCloudCommand(fixture.submission,
                 view, command) == WebRendererParticleCloudSceneResult::Success);
+            auto direct = command;
+            assert(WebRenderer_BuildAndAppendParticleCloudCommand(fixture.submission,
+                view, direct.vertices, direct.indices, direct.batches,
+                direct.surfaceCount) == WebRendererParticleCloudSceneResult::Success);
+            assert(direct.vertices.size() == 2u * command.vertices.size());
+            for (std::size_t copy = 0u; copy < 2u; ++copy)
+                assert(std::memcmp(direct.vertices.data() + copy * command.vertices.size(),
+                    command.vertices.data(), command.vertices.size() *
+                        sizeof(WebRendererSurfaceVertex)) == 0);
+            assert(direct.indices.size() == 2u * command.indices.size());
+            for (std::size_t index = 0u; index < command.indices.size(); ++index)
+            {
+                assert(direct.indices[index] == command.indices[index]);
+                assert(direct.indices[command.indices.size() + index] ==
+                    command.vertices.size() + command.indices[index]);
+            }
+            assert(direct.surfaceCount == 2u && direct.batches.size() == 2u);
+            assert(direct.batches[0].firstIndex == 0u &&
+                direct.batches[1].firstIndex == command.indices.size());
             for (std::size_t particle = 0; particle < command.vertices.size(); particle += 4u)
             {
                 float center[3]{};
@@ -529,8 +561,15 @@ void TestRepeatedAppendAndAllocationRollback()
     std::vector<WebRendererWorldBatchDesc> batches(1u);
     batches[0].sourceKind = WebRendererSceneBatchKind::DynamicDObj;
     std::uint32_t surfaceCount = 1u;
+    auto directVertices = vertices;
+    auto directIndices = indices;
+    auto directBatches = batches;
+    std::uint32_t directSurfaces = surfaceCount;
     for (std::uint32_t cloud = 0u; cloud < 24u; ++cloud)
     {
+        assert(WebRenderer_BuildAndAppendParticleCloudCommand(fixture.submission,
+            IdentityView(), directVertices, directIndices, directBatches,
+            directSurfaces) == WebRendererParticleCloudSceneResult::Success);
         assert(WebRenderer_AppendParticleCloudCommand(source, vertices,
             indices, batches, surfaceCount) ==
             WebRendererParticleCloudAppendResult::Success);
@@ -538,6 +577,20 @@ void TestRepeatedAppendAndAllocationRollback()
         assert(batches.size() == cloud + 2u);
         assert(vertices.size() == 3u + (cloud + 1u) * source.vertices.size());
         assert(indices.size() == 6u + (cloud + 1u) * source.indices.size());
+        assert(directSurfaces == surfaceCount && directVertices.size() == vertices.size());
+        assert(directIndices == indices && directBatches.size() == batches.size());
+        assert(std::memcmp(directVertices.data(), vertices.data(),
+            vertices.size() * sizeof(WebRendererSurfaceVertex)) == 0);
+        for (std::size_t batch = 0u; batch < batches.size(); ++batch)
+        {
+            assert(directBatches[batch].firstIndex == batches[batch].firstIndex);
+            assert(directBatches[batch].indexCount == batches[batch].indexCount);
+            assert(directBatches[batch].sourceKind == batches[batch].sourceKind);
+            assert(directBatches[batch].materialIdentity == batches[batch].materialIdentity);
+            assert(directBatches[batch].baseImage == batches[batch].baseImage);
+            assert(directBatches[batch].stateBits[0] == batches[batch].stateBits[0]);
+            assert(directBatches[batch].stateBits[1] == batches[batch].stateBits[1]);
+        }
     }
     assert(std::memcmp(vertices.data(), prefixVertices.data(),
         prefixVertices.size() * sizeof(WebRendererSurfaceVertex)) == 0);
@@ -562,32 +615,83 @@ void TestRepeatedAppendAndAllocationRollback()
 
     // Fail each successive allocation until an append succeeds, covering
     // failures after earlier vectors have already grown or received elements.
-    bool completed = false;
-    for (int failAfter = 0; failAfter < 32; ++failAfter)
+    for (bool direct : {false, true})
     {
-        auto failureVertices = prefixVertices;
-        auto failureIndices = prefixIndices;
-        std::vector<WebRendererWorldBatchDesc> failureBatches(1u);
-        failureBatches[0].sourceKind = WebRendererSceneBatchKind::DynamicDObj;
-        std::uint32_t failureSurfaces = 1u;
-        allocationsUntilFailure = failAfter;
-        const auto result = WebRenderer_AppendParticleCloudCommand(source,
-            failureVertices, failureIndices, failureBatches, failureSurfaces);
-        allocationsUntilFailure = -1;
-        if (result == WebRendererParticleCloudAppendResult::Success)
+        bool completed = false;
+        for (int failAfter = 0; failAfter < 32; ++failAfter)
         {
-            completed = true;
-            break;
+            auto failureVertices = prefixVertices;
+            auto failureIndices = prefixIndices;
+            std::vector<WebRendererWorldBatchDesc> failureBatches(1u);
+            failureBatches[0].sourceKind = WebRendererSceneBatchKind::DynamicDObj;
+            std::uint32_t failureSurfaces = 1u;
+            allocationsUntilFailure = failAfter;
+            bool success = false;
+            if (direct)
+            {
+                const auto result = WebRenderer_BuildAndAppendParticleCloudCommand(
+                    fixture.submission, IdentityView(), failureVertices, failureIndices,
+                    failureBatches, failureSurfaces);
+                success = result == WebRendererParticleCloudSceneResult::Success;
+                assert(success || result == WebRendererParticleCloudSceneResult::AllocationFailed);
+            }
+            else
+            {
+                const auto result = WebRenderer_AppendParticleCloudCommand(source,
+                    failureVertices, failureIndices, failureBatches, failureSurfaces);
+                success = result == WebRendererParticleCloudAppendResult::Success;
+                assert(success || result == WebRendererParticleCloudAppendResult::AllocationFailed);
+            }
+            allocationsUntilFailure = -1;
+            if (success)
+            {
+                completed = true;
+                break;
+            }
+            assert(failureVertices.size() == prefixVertices.size());
+            assert(std::memcmp(failureVertices.data(), prefixVertices.data(),
+                prefixVertices.size() * sizeof(WebRendererSurfaceVertex)) == 0);
+            assert(failureIndices == prefixIndices);
+            assert(failureBatches.size() == 1u && failureSurfaces == 1u);
+            assert(failureBatches[0].sourceKind == WebRendererSceneBatchKind::DynamicDObj);
         }
-        assert(result == WebRendererParticleCloudAppendResult::AllocationFailed);
-        assert(failureVertices.size() == prefixVertices.size());
-        assert(std::memcmp(failureVertices.data(), prefixVertices.data(),
-            prefixVertices.size() * sizeof(WebRendererSurfaceVertex)) == 0);
-        assert(failureIndices == prefixIndices);
-        assert(failureBatches.size() == 1u && failureSurfaces == 1u);
-        assert(failureBatches[0].sourceKind == WebRendererSceneBatchKind::DynamicDObj);
+        assert(completed);
     }
-    assert(completed);
+
+    const auto savedVertices = directVertices;
+    const auto savedIndices = directIndices;
+    const auto savedBatchCount = directBatches.size();
+    const auto savedSurfaces = directSurfaces;
+    const auto unchanged = [&]() {
+        assert(directVertices.size() == savedVertices.size());
+        assert(std::memcmp(directVertices.data(), savedVertices.data(),
+            savedVertices.size() * sizeof(WebRendererSurfaceVertex)) == 0);
+        assert(directIndices == savedIndices && directBatches.size() == savedBatchCount);
+        assert(directSurfaces == savedSurfaces);
+    };
+    directSurfaces = UINT32_MAX;
+    assert(WebRenderer_BuildAndAppendParticleCloudCommand(fixture.submission,
+        IdentityView(), directVertices, directIndices, directBatches,
+        directSurfaces) == WebRendererParticleCloudSceneResult::OutputTooLarge);
+    assert(directSurfaces == UINT32_MAX);
+    directSurfaces = savedSurfaces;
+    unchanged();
+    fixture.submission.cloud.radius[0] = -1.0f;
+    assert(WebRenderer_BuildAndAppendParticleCloudCommand(fixture.submission,
+        IdentityView(), directVertices, directIndices, directBatches,
+        directSurfaces) == WebRendererParticleCloudSceneResult::InvalidSubmission);
+    unchanged();
+    // Valid inputs may still overflow while expanding a corner, after the
+    // scene spans have grown; roll back that path as well as bad allocations.
+    fixture.submission.cloud.radius[0] = fixture.submission.cloud.radius[1] =
+        std::numeric_limits<float>::max();
+    fixture.submission.cloud.placement.base.origin[1] =
+        std::numeric_limits<float>::max();
+    fixture.submission.cloud.endpos[1] = std::numeric_limits<float>::max();
+    assert(WebRenderer_BuildAndAppendParticleCloudCommand(fixture.submission,
+        IdentityView(), directVertices, directIndices, directBatches,
+        directSurfaces) == WebRendererParticleCloudSceneResult::InvalidSubmission);
+    unchanged();
 }
 } // namespace
 

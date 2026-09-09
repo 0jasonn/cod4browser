@@ -34,6 +34,7 @@ bool WebRendererContext_Create(
     attributes.antialias = EM_FALSE;
     attributes.premultipliedAlpha = EM_FALSE;
     attributes.preserveDrawingBuffer = EM_FALSE;
+    attributes.powerPreference = EM_WEBGL_POWER_PREFERENCE_HIGH_PERFORMANCE;
     attributes.enableExtensionsByDefault = EM_TRUE;
     attributes.majorVersion = 2;
     attributes.minorVersion = 0;

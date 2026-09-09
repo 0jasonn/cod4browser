@@ -178,5 +178,22 @@ int main()
     assert(!SaveDevice_IsSaveSuccessful());
     assert(Get(destination) == savedBytes && !Exists(temporary));
     assert(thumbnails == 1);
+
+    // A fresh profile has no save/autosave directories yet. Native FS_Rename's
+    // copy fallback created these; web must prepare them before atomic rename.
+    refuseWrite = false;
+    std::strcpy(header.filename, "profiles/fresh/save/autosave/checkpoint.svg");
+    std::memcpy(savedBytes.data(), &header, sizeof(header));
+    assert(WriteSaveToDevice(body, &header, false) == 0);
+    assert(SaveDevice_IsSaveSuccessful());
+    assert(Get("save-rename-tests/players/profiles/fresh/save/autosave/checkpoint.svg") == savedBytes);
+    assert(!Exists(temporary) && thumbnails == 2);
+
+    // The home-relative server rename has the same missing-parent contract.
+    Put(temporary, newBytes);
+    char freshServerDestination[] = "main/downloads/new/checkpoint.svg";
+    FS_SV_Rename(serverTemporary, freshServerDestination);
+    assert(Get("save-rename-tests/main/downloads/new/checkpoint.svg") == newBytes);
+    assert(!Exists(temporary));
     std::puts("canonical save rename refusal, retry, and short-write handling passed");
 }

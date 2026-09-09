@@ -196,6 +196,8 @@ struct WebFrameProfileSample
     double dynamicGeometryUploadMs = 0.0;
     double dynamicTextureUploadMs = 0.0;
     double dynamicPublishMs = 0.0;
+    // Nested in dynamicCopyMs: shadow bounds, draw lists and camera ordering.
+    double dynamicDrawBuildMs = 0.0;
     // CopyWorldCommand substages (world publication or dynamic submission).
     double commandGeometryCheckMs = 0.0;
     double commandGeometryCopyMs = 0.0;
@@ -252,6 +254,14 @@ struct WebFrameProfileSample
     double postProcessMs = 0.0;
     double bufferUploadMs = 0.0;
     double textureUploadMs = 0.0;
+    // Overlapping subcosts, never additional CPU totals. Water is inside its
+    // draw pass; upload includes mipmap generation and overlaps textureUploadMs.
+    // Lookup only measures retained-identity search, excluding decode/retention.
+    // Resource creation only measures glGen calls, excluding storage/uploads.
+    double waterGenerationMs = 0.0;
+    double waterUploadMs = 0.0;
+    double retainedImageLookupMs = 0.0;
+    double gpuResourceCreationMs = 0.0;
 
     std::uint64_t worldSurfacesSubmitted = 0u;
     std::uint64_t worldSurfacesDrawn = 0u;
@@ -280,6 +290,19 @@ struct WebFrameProfileSample
     std::uint64_t bufferUploadBytes = 0u;
     std::uint64_t textureUploadBytes = 0u;
     std::uint64_t unmeasuredTextureUploads = 0u;
+    std::uint64_t waterUpdateRequests = 0u;
+    std::uint64_t waterGenerations = 0u;
+    std::uint64_t waterUploads = 0u;
+    std::uint64_t waterUploadBytes = 0u;
+    std::uint64_t retainedImageLookups = 0u;
+    std::uint64_t retainedImageLookupHits = 0u;
+    std::uint64_t retainedImageComparisons = 0u;
+    std::uint64_t dynamicDrawsBuilt = 0u;
+    std::uint64_t gpuBuffersCreated = 0u;
+    std::uint64_t gpuTexturesCreated = 0u;
+    std::uint64_t gpuVertexArraysCreated = 0u;
+    std::uint64_t gpuFramebuffersCreated = 0u;
+    std::uint64_t gpuRenderbuffersCreated = 0u;
     std::uint64_t lodChanges = 0u;
     std::uint64_t shadowCasterDraws = 0u;
     std::uint64_t sunShadowMergedRanges = 0u;

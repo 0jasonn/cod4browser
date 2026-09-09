@@ -1414,26 +1414,25 @@ void TestTextureParameterMemoPreservesAliasedObjectState()
     memo.Reset();
     assert(memo.NeedsUpdate(1, 0x62, true)); // name reused after upload/recovery
 
-    WebRendererDynamicTextures dynamic;
+    WebRendererPassTextures<6> dynamic;
     std::array<std::uint32_t, 10> expectedUnits{}, actualUnits{};
-    const std::array<WebRendererDynamicTextureSet, 4> sets{{
-        {{1, 2, 3, 4, 5, 6}, {1, 2, 3, 4}},
-        {{1, 2, 3, 4, 5, 7}, {1, 2, 3, 4}},
-        {{1, 1, 1, 1, 1, 1}, {1, 2, 3, 4}},
-        {{1, 2, 3, 4, 5, 6}, {1, 2, 3, 4}}}};
+    const std::array<std::array<WebRendererPassTexture, 6>, 4> sets{{
+        {{{0, 1, 1}, {1, 2, 2}, {4, 3, 3}, {5, 4, 4}, {2, 5, 0x62}, {9, 6, 0x62}}},
+        {{{0, 1, 1}, {1, 2, 2}, {4, 3, 3}, {5, 4, 4}, {2, 5, 0x62}, {9, 7, 0x62}}},
+        {{{0, 1, 1}, {1, 1, 2}, {4, 1, 3}, {5, 1, 4}, {2, 1, 0x62}, {9, 1, 0x62}}},
+        {{{0, 1, 1}, {1, 2, 2}, {4, 3, 3}, {5, 4, 4}, {2, 5, 0x62}, {9, 6, 0x62}}}}};
     for (const auto &set : sets)
     {
-        constexpr std::array<unsigned, 6> units{0, 1, 4, 5, 2, 9};
-        for (unsigned i = 0; i < units.size(); ++i)
+        for (const auto &entry : set)
         {
-            expectedUnits[units[i]] = set.textures[i];
-            original[set.textures[i]] = {i < 4 ? set.samplers[i] : 0x62, true};
+            expectedUnits[entry.unit] = entry.texture;
+            original[entry.texture] = {entry.sampler, entry.mipmaps};
         }
-        dynamic.Apply(set, [&](auto unit, auto texture, auto sampler, bool unchanged) {
+        dynamic.Apply(set, [&](auto unit, auto texture, auto sampler, bool mipmaps, bool unchanged) {
             if (unchanged) assert(actualUnits[unit] == texture);
             else actualUnits[unit] = texture;
-            if (memo.NeedsUpdate(texture, sampler, true))
-                cached[texture] = {sampler, true};
+            if (memo.NeedsUpdate(texture, sampler, mipmaps))
+                cached[texture] = {sampler, mipmaps};
         });
         assert(expectedUnits == actualUnits && original == cached);
     }

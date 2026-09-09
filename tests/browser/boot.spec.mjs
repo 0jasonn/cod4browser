@@ -326,3 +326,32 @@ test("shows a useful failure when the generated module is missing", { tag: "@smo
         "The WebAssembly module could not start");
     await expect(page.locator("#boot-log")).toContainText("kisakcod.mjs");
 });
+
+test("dynamic upload errors preserve the published command and release staged objects", async ({ page }) => {
+    await boot(page);
+    const probe = (fault, variant = 0) => page.evaluate(args =>
+        globalThis.__KISAKCOD_WEB__.module.call(
+            "_KisakWeb_TestDynamicUploadAtomicity", ...args), [fault, variant]);
+    // Real WebGL errors: vertex upload, lighting upload, null buffer creation,
+    // stale pre-transaction error, and a new image's slow upload path.
+    for (const [fault, variant, batchedChecks, separateChecks] of [
+        [0, 0, 2, 4], [1, 0], [2, 0], [3, 0], [4, 0, 3, 5],
+        [1, 1], [2, 1], [5, 1], [0, 2, 2, 2],
+    ]) {
+        const result = await probe(fault, variant);
+        expect(result & 0xffff, `fault=${fault}, variant=${variant}`).toBe(0);
+        if (batchedChecks !== undefined)
+            expect((result >>> 16) & 0x3fff, `error-query ownership: fault=${fault}, variant=${variant}`)
+                .toBe(result & 0x40000000 ? batchedChecks : separateChecks);
+    }
+    expect((await probe(0)) & 0xffff).toBe(0);
+    expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.call(
+        "_KisakWeb_TestLoseWebGLContext"))).toBe(1);
+    await expect.poll(() => page.evaluate(() =>
+        globalThis.__KISAKCOD_WEB__?.state)).toBe("renderer-lost");
+    expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.call(
+        "_KisakWeb_TestRestoreWebGLContext"))).toBe(1);
+    await expect.poll(() => page.evaluate(() =>
+        globalThis.__KISAKCOD_WEB__?.state)).toBe("running");
+    expect(await probe(-1)).toBe(0);
+});

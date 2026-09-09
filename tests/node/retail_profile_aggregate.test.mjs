@@ -135,3 +135,40 @@ test("scene and DObj intervals survive profile aggregation", () => {
         assert.equal(profile.cpu[field].p95, value * 2);
     }
 });
+
+test("resource subcosts remain separate from parent totals and missing samples", () => {
+    const timers = ["waterGenerationMs", "waterUploadMs", "retainedImageLookupMs",
+        "dynamicDrawBuildMs", "gpuResourceCreationMs"];
+    const counters = ["waterUpdateRequests", "waterGenerations", "waterUploads", "waterUploadBytes",
+        "retainedImageLookups", "retainedImageLookupHits", "retainedImageComparisons",
+        "dynamicDrawsBuilt", "gpuBuffersCreated", "gpuTexturesCreated", "gpuVertexArraysCreated",
+        "gpuFramebuffersCreated", "gpuRenderbuffersCreated"];
+    const profile = aggregateGameplayProfile({
+        frames: [{ pumpTick: 1, cpu: { totalMs: 10 }, renderer: { worldMs: 5 } }, {
+            pumpTick: 2, cpu: { totalMs: 12 },
+            renderer: { worldMs: 7, ...Object.fromEntries(timers.map(field => [field, 1])) },
+            counters: Object.fromEntries(counters.map(field => [field, 2])),
+        }],
+        gpuResults: [], capture: {},
+    });
+    for (const field of timers) {
+        assert.equal(profile.renderer[field].sampleCount, 1);
+        assert.equal(profile.renderer[field].average, 1);
+    }
+    for (const field of counters) {
+        assert.equal(profile.counters[field].sampleCount, 1);
+        assert.equal(profile.counters[field].maximum, 2);
+    }
+    assert.equal(profile.renderer.worldMs.average, 6);
+    assert.equal(profile.cpu.totalMs.average, 11);
+});
+
+
+test("different canonical scene windows cannot estimate profiler overhead", () => {
+    const profile = aggregateGameplayProfile({ frames: [{ pumpTick: 1, observedMs: 10 },
+        { pumpTick: 2, observedMs: 20 }], gpuResults: [], capture: { profileComplete: true },
+        cleanAverageFrameIntervalMs: 20, cleanWorkloadMatched: false });
+    assert.equal(profile.overhead.profiledAverageFrameIntervalMs, 10);
+    assert.equal(profile.overhead.profilerOverheadPercent, null);
+    assert.match(profile.overhead.unavailableReason, /different canonical frames/);
+});

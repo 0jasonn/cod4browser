@@ -83,6 +83,10 @@
 #include <utility>
 #include <vector>
 
+#ifndef KISAK_WEB_DIRECT_CLOUD_APPEND
+#define KISAK_WEB_DIRECT_CLOUD_APPEND 1
+#endif
+
 enum CubemapShot : int;
 
 extern GfxWorld s_world;
@@ -4531,6 +4535,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     for (std::uint32_t index = 0u;
          index < g_particleCloudSubmissionCount; ++index)
     {
+#if !KISAK_WEB_DIRECT_CLOUD_APPEND
         WebRendererParticleCloudSceneCommand cloudCommand;
         const WebRendererParticleCloudSceneResult build =
             WebRenderer_BuildParticleCloudCommand(
@@ -4541,6 +4546,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             if (droppedParticleClouds != UINT32_MAX) ++droppedParticleClouds;
             continue;
         }
+#endif
 #if KISAK_WEB_DIAGNOSTICS
         const double cloudAppendStarted = sceneProfile ? WebFrameProfile_Now() : 0.0;
 #endif
@@ -4549,6 +4555,18 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
             dynamicCommand.indices.size() + brushIndexCount,
             dynamicCommand.batches.size() + brushBatchCount,
             dynamicCommand.surfaceCount + brushSurfaceCount);
+#if KISAK_WEB_DIRECT_CLOUD_APPEND
+        const WebRendererParticleCloudSceneResult append =
+            admission == WebRendererParticleCloudAppendResult::Success
+            ? WebRenderer_BuildAndAppendParticleCloudCommand(
+                g_particleCloudSubmissions[index], particleCloudView,
+                dynamicCommand.vertices,
+                dynamicCommand.indices,
+                dynamicCommand.batches,
+                dynamicCommand.surfaceCount)
+            : WebRendererParticleCloudSceneResult::OutputTooLarge;
+        const bool appended = append == WebRendererParticleCloudSceneResult::Success;
+#else
         const WebRendererParticleCloudAppendResult append =
             admission == WebRendererParticleCloudAppendResult::Success
             ? WebRenderer_AppendParticleCloudCommand(
@@ -4557,11 +4575,15 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
                 dynamicCommand.indices,
                 dynamicCommand.batches,
                 dynamicCommand.surfaceCount) : admission;
+        const bool appended = append == WebRendererParticleCloudAppendResult::Success;
+#endif
 #if KISAK_WEB_DIAGNOSTICS
+        // Direct append includes expansion; the control starts timing after
+        // standalone construction. Compare total sceneCommandAppendMs.
         if (sceneProfile)
             sceneProfile->sceneCloudAppendMs += WebFrameProfile_Now() - cloudAppendStarted;
 #endif
-        if (append == WebRendererParticleCloudAppendResult::Success)
+        if (appended)
             hasParticleCloud = true;
         else if (droppedParticleClouds != UINT32_MAX)
             ++droppedParticleClouds;

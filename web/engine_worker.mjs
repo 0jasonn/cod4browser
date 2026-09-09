@@ -158,8 +158,11 @@ function installWorkerTestControls()
         return renderbufferStorageMultisample.call(
             this, target, samples, internalFormat, width, height);
     };
+    let failedAaResolve = false;
     const blitFramebuffer = prototype.blitFramebuffer;
     prototype.blitFramebuffer = function(...arguments_) {
+        failedAaResolve = testControl.failAaResolve === true;
+        if (failedAaResolve) arguments_[9] = 0; // Invalid filter generates a real GL error.
         if (testControl.observeAa) {
             globalThis.dispatchEvent(new CustomEvent("kisakcod:test-webgl-aa", {
                 detail: {
@@ -172,6 +175,15 @@ function installWorkerTestControls()
             }));
         }
         return blitFramebuffer.apply(this, arguments_);
+    };
+    const drawArrays = prototype.drawArrays;
+    prototype.drawArrays = function(...arguments_) {
+        if (testControl.observeAa && failedAaResolve) {
+            globalThis.dispatchEvent(new CustomEvent("kisakcod:test-webgl-aa", {
+                detail: { operation: "draw-after-failed-resolve" },
+            }));
+        }
+        return drawArrays.apply(this, arguments_);
     };
     const getParameter = prototype.getParameter;
     prototype.getParameter = function(parameter) {

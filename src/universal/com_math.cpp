@@ -240,7 +240,8 @@ void __cdecl GaussianRandom(float *f0, float *f1)
 
 uint32_t __cdecl RandWithSeed(int *seed)
 {
-    *seed = 1103515245 * *seed + 12345;
+    // Native wraps the LCG to 32 bits; keep the following division signed.
+    *seed = static_cast<int>(1103515245u * static_cast<uint32_t>(*seed) + 12345u);
     return *seed / 0x10000 % 0x8000u;
 }
 

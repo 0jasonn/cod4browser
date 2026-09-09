@@ -4,6 +4,136 @@
 #include <cstdint>
 #include <limits>
 
+#if defined(__EMSCRIPTEN__)
+#include <emscripten/emscripten.h>
+#include <initializer_list>
+
+static void expect_commands(std::initializer_list<const char *> operations)
+{
+    assert(EM_ASM_INT({ return globalThis.__openalCommands.length; }) == operations.size());
+    for (const char *operation : operations)
+        assert(EM_ASM_INT({
+            return globalThis.__openalCommands.shift().op === UTF8ToString($0);
+        }, operation));
+}
+
+static void test_source_commands()
+{
+    // Capture the actual Wasm postMessage boundary without adding a production
+    // test hook. All PCM here is synthetic silence; no AudioContext is needed.
+    EM_ASM({
+        globalThis.__openalCommands = [];
+        globalThis.self = { postMessage(command) { globalThis.__openalCommands.push(command); } };
+    });
+    ALuint source = 0;
+    alGenSources(1, &source);
+    expect_commands({"source-create"});
+    const auto createdGeneration = WebOpenAL_SourceGeneration(source);
+    alSourcef(source, AL_GAIN, 1);
+    alSourcef(source, AL_PITCH, 1);
+    alSourcei(source, AL_LOOPING, AL_FALSE);
+    expect_commands({});
+
+    alSource3f(source, AL_POSITION, 0, 0, 0);
+    assert(EM_ASM_INT({ return globalThis.__openalCommands[0].spatialized; }));
+    expect_commands({"source-property"});
+    alSource3f(source, AL_POSITION, -0.0f, 0, -0.0f);
+    expect_commands({});
+
+    alSourcef(source, AL_GAIN, 0.25f);
+    alSourcef(source, AL_GAIN, 0.25f);
+    alSourcef(source, AL_PITCH, 1.5f);
+    alSourcef(source, AL_PITCH, 1.5f);
+    alSource3f(source, AL_POSITION, 1, 2, 3);
+    alSource3f(source, AL_POSITION, 1, 2, 3);
+    alSourcei(source, AL_LOOPING, AL_TRUE);
+    alSourcei(source, AL_LOOPING, 2);
+    assert(EM_ASM_INT({
+        const c = globalThis.__openalCommands;
+        return c[0].gain === 0.25 && c[0].pitch === 1 &&
+            c[1].gain === 0.25 && c[1].pitch === 1.5 &&
+            c[2].x === 1 && c[2].y === 2 && c[2].z === 3 &&
+            !c[2].looping && c[3].looping &&
+            c.every(command => command.sourceId === $0 && command.generation === $1);
+    }, source, createdGeneration));
+    expect_commands({"source-property", "source-property", "source-property", "source-property"});
+
+    // Compare normalized values, including the existing non-finite handling.
+    alSourcef(source, AL_GAIN, -1);
+    alSourcef(source, AL_GAIN, -2);
+    alSourcef(source, AL_GAIN, std::numeric_limits<float>::quiet_NaN());
+    alSourcef(source, AL_PITCH, 0);
+    alSourcef(source, AL_PITCH, -1);
+    alSourcef(source, AL_PITCH, std::numeric_limits<float>::quiet_NaN());
+    alSourcei(source, AL_LOOPING, AL_FALSE);
+    alSourcei(source, AL_LOOPING, AL_FALSE);
+    expect_commands({"source-property", "source-property", "source-property"});
+
+    ALuint buffer = 0;
+    alGenBuffers(1, &buffer);
+    const ALshort silence[8]{};
+    alBufferData(buffer, AL_FORMAT_MONO16, silence, sizeof(silence), 8);
+    alSourcei(source, AL_BUFFER, buffer);
+    alSourcePlay(source);
+    expect_commands({"buffer-upload", "source-property", "source-play"});
+    const auto generation = WebOpenAL_SourceGeneration(source);
+    assert(generation != createdGeneration);
+
+    // Suppressed float/integer setters must still consume fresh device state.
+    // Position setters have no refresh, so their next emitted snapshot proves it.
+    for (int property = 0; property < 3; ++property)
+    {
+        EM_ASM({
+            globalThis.__KISAKCOD_AUDIO_PLAYBACK__ = ({
+                [$0]: {generation: $1, processed: 0, offset: ($2 + 1) / 4, state: $3}
+            });
+        }, source, generation, property, AL_PLAYING);
+        if (property == 0) alSourcef(source, AL_GAIN, 0);
+        else if (property == 1) alSourcef(source, AL_PITCH, 0.001f);
+        else alSourcei(source, AL_LOOPING, AL_FALSE);
+        expect_commands({});
+        alSource3f(source, AL_POSITION, property, 0, 0);
+        assert(EM_ASM_INT({
+            return globalThis.__openalCommands[0].offset === ($0 + 1) / 4;
+        }, property));
+        expect_commands({"source-property"});
+        assert(WebOpenAL_SourceGeneration(source) == generation);
+    }
+    EM_ASM({ delete globalThis.__KISAKCOD_AUDIO_PLAYBACK__; });
+
+    // Equal seeks still advance generations; repeated buffer assignments still
+    // reset the offset and preserve their place before the next playback command.
+    alSourcef(source, AL_SEC_OFFSET, 0);
+    const auto firstSeek = WebOpenAL_SourceGeneration(source);
+    alSourcef(source, AL_SEC_OFFSET, 0);
+    assert(WebOpenAL_SourceGeneration(source) > firstSeek);
+    alSourcei(source, AL_SEC_OFFSET, 0);
+    alSourcei(source, AL_BUFFER, buffer);
+    alSourcei(source, AL_BUFFER, buffer);
+    alSourcePause(source);
+    alSourcePlay(source);
+    alSourceStop(source);
+    assert(EM_ASM_INT({
+        const c = globalThis.__openalCommands;
+        return c[0].generation < c[1].generation && c[1].generation < c[2].generation &&
+            c[3].bufferId === $0 && c[4].bufferId === $0 &&
+            c[3].offset === 0 && c[4].offset === 0;
+    }, buffer));
+    expect_commands({"source-seek", "source-seek", "source-seek", "source-property",
+        "source-property", "source-pause", "source-resume", "source-stop"});
+    alDeleteSources(1, &source);
+    alGenSources(1, &source);
+    alSource3f(source, AL_POSITION, 0, 0, 0);
+    assert(!WebOpenAL_ApplyPlayback(source, generation, 0, 0, AL_STOPPED));
+    assert(EM_ASM_INT({ return globalThis.__openalCommands[2].spatialized; }));
+    expect_commands({"source-delete", "source-create", "source-property"});
+    alDeleteSources(1, &source);
+    alDeleteBuffers(1, &buffer);
+    assert(alGetError() == AL_NONE);
+    EM_ASM({ delete globalThis.self; delete globalThis.__openalCommands; });
+}
+#endif
+
 int main()
 {
     ALuint source = 0;
@@ -207,5 +337,8 @@ int main()
     assert(!WebOpenAL_SourcePlaybackSeconds(clockSource, movieSeconds));
     alDeleteSources(1, &clockSource);
     alDeleteBuffers(3, clockBuffers);
+#if defined(__EMSCRIPTEN__)
+    test_source_commands();
+#endif
     return 0;
 }

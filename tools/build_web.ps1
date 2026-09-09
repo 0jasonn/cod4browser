@@ -4,7 +4,19 @@
 param(
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release',
-    [switch]$Diagnostics
+    [switch]$Diagnostics,
+    [ValidateSet('Oz', 'O2', 'O3')]
+    [string]$Optimization = 'O2',
+    [switch]$DisableFullLto,
+    [switch]$DisableFloatZLightingSkip,
+    [switch]$DisableDynamicUploadErrorBatching,
+    [switch]$Simd,
+    [switch]$DisableRendererStateReuse,
+    [switch]$DisableAudioEquality,
+    [switch]$DisableShadowBoundsSkip,
+    [switch]$DisableShadowErrorBatching,
+    [switch]$DisableDirectCloudAppend,
+    [string]$BuildDirectory
 )
 
 $ErrorActionPreference = 'Stop'
@@ -25,11 +37,14 @@ $emscriptenConfig = Join-Path $emsdkRoot '.emscripten'
 $cmakeExecutable = Join-Path $emsdkRoot "cmake\$($webToolchain.cmake)_64bit\bin\cmake.exe"
 $ninjaExecutable = Join-Path $emsdkRoot "ninja\$($webToolchain.ninja)_64bit\ninja.exe"
 $emscriptenToolchain = Join-Path $emsdkRoot 'upstream\emscripten\cmake\Modules\Platform\Emscripten.cmake'
-$buildDirectory = Join-Path $repositoryRoot $(if ($Diagnostics) {
+$buildDirectory = if ($BuildDirectory) {
+    if ([IO.Path]::IsPathRooted($BuildDirectory)) { [IO.Path]::GetFullPath($BuildDirectory) }
+    else { [IO.Path]::GetFullPath((Join-Path $repositoryRoot $BuildDirectory)) }
+} else { Join-Path $repositoryRoot $(if ($Diagnostics) {
     'build\web-diagnostics'
 } else {
     'build\web'
-})
+}) }
 $target = if ($Diagnostics) { 'KisakCOD-web-diagnostics' } else { 'KisakCOD-web' }
 
 foreach ($requiredPath in @(
@@ -53,6 +68,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Pinned web toolchain preflight failed.' }
 & (Join-Path $PSScriptRoot 'build_reverb.ps1') -Jobs $buildJobs
 
 $totalTimer = [Diagnostics.Stopwatch]::StartNew()
+$inputManifest = Join-Path $buildDirectory 'build-inputs.json'
+& python (Join-Path $PSScriptRoot 'qualify_web_release.py') inputs $repositoryRoot $inputManifest
+if ($LASTEXITCODE -ne 0) { throw 'Failed to capture web build inputs.' }
 $stepTimer = [Diagnostics.Stopwatch]::StartNew()
 & $cmakeExecutable `
     -S $repositoryRoot `
@@ -61,6 +79,17 @@ $stepTimer = [Diagnostics.Stopwatch]::StartNew()
     "-DCMAKE_TOOLCHAIN_FILE=$emscriptenToolchain" `
     "-DCMAKE_MAKE_PROGRAM=$ninjaExecutable" `
     '-DKISAK_PLATFORM=web' `
+    '-DCMAKE_EXPORT_COMPILE_COMMANDS=ON' `
+    "-DKISAK_WEB_OPTIMIZATION=$Optimization" `
+    "-DKISAK_WEB_SKIP_FLOATZ_LIGHTING=$((!$DisableFloatZLightingSkip.IsPresent).ToString().ToUpperInvariant())" `
+    "-DKISAK_WEB_BATCH_DYNAMIC_UPLOAD_ERRORS=$((!$DisableDynamicUploadErrorBatching.IsPresent).ToString().ToUpperInvariant())" `
+    "-DKISAK_WEB_FULL_LTO=$((!$DisableFullLto.IsPresent).ToString().ToUpperInvariant())" `
+    "-DKISAK_WEB_SIMD=$($Simd.IsPresent.ToString().ToUpperInvariant())" `
+    "-DKISAK_WEB_REUSE_WORLD_STATIC_STATE=$((!$DisableRendererStateReuse.IsPresent).ToString().ToUpperInvariant())" `
+    "-DKISAK_WEB_SUPPRESS_AUDIO_EQUALITY=$((!$DisableAudioEquality.IsPresent).ToString().ToUpperInvariant())" `
+    "-DKISAK_WEB_SKIP_UNUSED_SHADOW_BOUNDS=$((!$DisableShadowBoundsSkip.IsPresent).ToString().ToUpperInvariant())" `
+    "-DKISAK_WEB_BATCH_SHADOW_ERRORS=$((!$DisableShadowErrorBatching.IsPresent).ToString().ToUpperInvariant())" `
+    "-DKISAK_WEB_DIRECT_CLOUD_APPEND=$((!$DisableDirectCloudAppend.IsPresent).ToString().ToUpperInvariant())" `
     "-DKISAK_WEB_DIAGNOSTICS=$($Diagnostics.IsPresent.ToString().ToUpperInvariant())" `
     "-DCMAKE_BUILD_TYPE=$Configuration"
 if ($LASTEXITCODE -ne 0) {
@@ -106,10 +135,13 @@ foreach ($requiredOutput in $requiredOutputs) {
 if (-not $Diagnostics -and $Configuration -eq 'Release') {
     & node (Join-Path $PSScriptRoot 'minify_web_product.mjs') $siteDirectory
     if ($LASTEXITCODE -ne 0) { throw 'Failed to minify the production host modules. Run npm.cmd ci.' }
+}
+if ($Configuration -eq 'Release') {
     & python (Join-Path $PSScriptRoot 'qualify_web_release.py') record $siteDirectory (Join-Path $buildDirectory 'build-receipt.json') `
         --source (Join-Path $buildDirectory 'source.zip') `
-        --dependency-sources (Join-Path $buildDirectory 'dependency-sources')
-    if ($LASTEXITCODE -ne 0) { throw 'Failed to record production build provenance.' }
+        --dependency-sources (Join-Path $buildDirectory 'dependency-sources') `
+        --inputs $inputManifest
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to record web build provenance.' }
 }
 
 Write-Host "Browser build ready at $siteDirectory\index.html"

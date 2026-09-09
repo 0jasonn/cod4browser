@@ -15,6 +15,7 @@
 
 #include <cstring>
 #include <climits>
+#include <cstdlib>
 
 extern const dvar_t *sv_cheats;
 
@@ -27,8 +28,13 @@ unsigned int SV_GetMapRandomSeed()
     // restoration still replaces this seed through the canonical game path.
     const dvar_t *const seed = Dvar_RegisterInt("sv_mapSeed", -1, -1, INT_MAX,
         DVAR_CHEAT, "Fresh-map random seed; -1 uses the system clock");
-    return seed->current.integer < 0 ? Sys_MillisecondsRaw()
-        : static_cast<unsigned int>(seed->current.integer);
+    if (seed->current.integer < 0) return Sys_MillisecondsRaw();
+    const auto value = static_cast<unsigned int>(seed->current.integer);
+    // Camera shake and EffectsCore also consume the client CRT random stream.
+    // Seed it only for the explicit developer workload; normal startup keeps
+    // CL_Init's clock seed and save/demo restoration remains canonical.
+    std::srand(value);
+    return value;
 }
 
 void SV_Map_f()

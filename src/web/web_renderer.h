@@ -375,6 +375,14 @@ constexpr bool WebRenderer_IsFxVertexColorBatch(
         kind == WebRendererSceneBatchKind::SunFlare;
 }
 
+// Shared static eligibility for dynamic shadow submission and bounds building.
+// Transient spot shadows use receiver planes instead of partition bounds.
+constexpr bool WebRenderer_IsDynamicShadowCaster(
+    WebRendererSceneBatchKind kind, bool castsShadow, bool depthHack) noexcept
+{
+    return castsShadow && !depthHack && !WebRenderer_IsFxVertexColorBatch(kind);
+}
+
 constexpr bool WebRenderer_IsTransientLightReceiver(
     WebRendererSceneBatchKind kind) noexcept
 {

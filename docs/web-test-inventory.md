@@ -96,31 +96,49 @@ success/rejection family; exact coverage counters are not cross-platform gates.
 
 ## Current execution evidence
 
-Recorded 2026-09-09 on the cleanup working tree based on
-`4bca1760f95edb60c362926fa944e96dbcae3f2a`. Removed compiler duplicates and
-unused platform/fixture APIs; archived superseded reports in Git. The remaining
-11 captured fixture outputs have identical lengths and SHA-256 hashes.
+Recorded 2026-09-09 on the local dirty performance working tree based on
+`3a1aa20acb84895b9a758d3f4f6a34ba0d666b22`. Release now selects `-O2` with
+full LTO and SIMD disabled. Tests cover shared arithmetic fixes, renderer state
+reuse, shadow-bound eligibility, water simulation and audio command suppression.
+These results qualify the exercised local paths, not a committed release.
 
 | Check | Result |
 | --- | --- |
-| Pinned `npm.cmd ci`, syntax, lint and types | Pass; Node 24.18.0 / npm 11.16.0. |
-| Native MSVC x86 Release | 44/44 CTest cases; pinned native SP build/relink passes. |
-| Direct Wasm Release | 43/43 CTest cases pass. |
-| Node protocol/platform | 124/124 cases pass. |
+| Syntax, lint and types | Pass; pinned Node 24.18.0 / npm 11.16.0. |
+| Native MSVC x86 Release | 43/43 CTest cases pass. |
+| Direct Wasm Release | 43/43 CTest cases pass with `-O2` and full LTO. |
+| Node protocol/platform | 131/131 cases pass, including the final realtime warmup and clock-validation changes. |
 | Production Chromium | 56/56 cases pass. |
 | Diagnostic Chromium | 10/10 smoke; 64 remainder pass, 16 optional skips; retail inputs disabled. |
-| Release builds | Production and diagnostics pass, including both canonical runtime-prefix checks. |
-| Product boundary | Pass: 3,191,265 Wasm bytes, 322,498 JavaScript bytes, 3,617,122 site bytes; 17 raw / nine application exports, 22 files. |
-| Source/package checks | 14/14 Python cases and generated source archive validation pass. |
+| Installed Chrome/D3D11 | `dynamic_lights.spec.mjs`: 1/1 case passes, including actual shader draws. |
+| Source/package checks | 16/16 Python cases pass, including native-SDK exclusion from local input ZIPs and rejection even when an outer hash is refreshed. |
+| Owned Cargoship context recovery | Actual `WEBGL_lose_context` loss/restoration passes; all 12 resumed paused samples match the original canonical work counts. |
+| Product boundary | Pass: 4,564,302 Wasm bytes, 324,103 JavaScript bytes, 4,991,764 site bytes; 18 raw / nine application exports, 22 files, 5% size headroom. |
+| Release builds | Production and diagnostics pass their canonical runtime-prefix checks; delivery uses the same measured engine binaries. |
+| Headed production realtime | Repeated 1080p Cargoship: 39.78-39.97 to 51.91-51.93 FPS, target unmet. Defined idle Killhouse: 87.18-87.20 controls, 87.24-87.37 selected, cadence target passes with the documented tail increase. |
 
-Tests used default Playwright Chromium on Windows. Native SP was built, not
-launched for gameplay. The original disposable `build/repo-cleanup/` logs were
-recycled during cleanup. The source receipt records `dirty=True`; this is local synthetic platform evidence.
-Linux/hosted CI, sanitizer fuzz, native MP, owned campaign acceptance, installed
-Chrome fidelity, exhaustive browser duplicates and aggregate release
-qualification were not rerun for this cleanup.
+Logs are retained locally under ignored `build/performance/`: `node-final.log`,
+`static-final.log`, `native-final.log`, `wasm-final.log`, `provenance-final2.log`,
+`product-final.log`, `smoke-final.log`, `remainder-final.log`,
+`chrome-sampler-final.log` and `final-recovery.log`. The recovery capture is
+`build/renderer-efficiency-3a1aa20a-final-recovery.json`.
+Final Node/static/package reruns are `node-delivery.log`, `static-delivery.log`,
+`provenance-delivery.log` and `product-boundary-delivery.log`.
+The subsequent snapshot-boundary correction passes `provenance-sanitized.log`;
+`snapshot-sanitization.log` records 40 corrected local archives, with native-only
+inputs retained as hash metadata. Original measurement JSON is preserved.
+
+Routine browser tests used default Playwright Chromium on Windows; the sampler
+check and owned Cargoship recovery used installed Chrome/D3D11. Paused recovery
+does not establish active campaign performance or native/browser scene fidelity.
+The optional transient-light retail fixture gained matching recovery-state
+assertions but was not rerun; its earlier final DObj diagnostic failure remains
+documented in the [renderer guide](renderer-retained-resources.md#validation-and-reproduction).
+Realtime results and their scene limits are in the
+[renderer guide](renderer-retained-resources.md#realtime-cadence-results).
+Linux/hosted CI,
+sanitizer fuzz, native SP gameplay, native MP, owned campaign acceptance,
+exhaustive browser duplicates and aggregate release qualification were not rerun.
 
 The earlier 30-second Windows sanitizer pass, owned loading check and superseded
 execution records remain in [Git history](../README.md#historical-records).
-The documentation consolidation only ran reference and whitespace checks; it did
-not recreate the recycled toolchain or rerun runtime suites.

@@ -100,6 +100,14 @@ The build produces `build/web/site`. Serve it over HTTP; `file://` is not a
 supported runtime. The build keeps strict undefined-symbol checking enabled
 and prints configure, compile, runtime-check, and total timings.
 
+Release defaults to `-O2` with full LTO; SIMD stays disabled. Compiler comparisons
+use `-Optimization Oz|O2|O3`, `-DisableFullLto` and opt-in `-Simd`, with
+`-BuildDirectory` keeping each artifact separate. The switches
+`-DisableRendererStateReuse`, `-DisableAudioEquality` and
+`-DisableShadowBoundsSkip` provide controls for the retained optimizations.
+See [renderer measurement and reproduction](docs/renderer-retained-resources.md#validation-and-reproduction)
+for matching workloads, production timing and context recovery checks.
+
 Authoritative JavaScript checks and builds enforce the versions in
 `package.json` and `tools/web_toolchain.json`. Release builds record source,
 tool and site hashes outside the served directory. CI can pair exact source

@@ -228,7 +228,10 @@ bool BuildCloudAxes(
 WebRendererParticleCloudSceneResult BuildOne(
     const WebRendererParticleCloudSubmission &submission,
     const WebRendererParticleCloudView &view,
-    WebRendererParticleCloudSceneCommand &destination)
+    std::vector<WebRendererSurfaceVertex> &vertices,
+    std::vector<std::uint32_t> &indices,
+    std::vector<WebRendererWorldBatchDesc> &batches,
+    std::uint32_t &surfaceCount)
 {
     const GfxParticleCloud &cloud = submission.cloud;
     if (!submission.material || !PlacementIsValid(cloud.placement) ||
@@ -246,34 +249,28 @@ WebRendererParticleCloudSceneResult BuildOne(
     if (!BuildCloudAxes(cloud, view, cloudAxis0, cloudAxis1))
         return WebRendererParticleCloudSceneResult::InvalidSubmission;
 
-    if (destination.vertices.size() >
-            WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES -
-                WEB_RENDERER_PARTICLE_CLOUD_VERTICES ||
-        destination.indices.size() > WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES -
-            WEB_RENDERER_PARTICLE_CLOUD_INDICES ||
-        destination.batches.size() > WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES - 1u)
+    if (WebRenderer_ValidateParticleCloudAppendCounts(vertices.size(),
+            indices.size(), batches.size(), surfaceCount) !=
+        WebRendererParticleCloudAppendResult::Success)
         return WebRendererParticleCloudSceneResult::OutputTooLarge;
 
-    const std::size_t vertexStart = destination.vertices.size();
-    const std::size_t indexStart = destination.indices.size();
-    const std::size_t batchStart = destination.batches.size();
-    const std::uint32_t cloudStart = destination.cloudCount;
-    const std::uint32_t surfaceStart = destination.surfaceCount;
+    const std::size_t vertexStart = vertices.size();
+    const std::size_t indexStart = indices.size();
+    const std::size_t batchStart = batches.size();
+    const std::uint32_t surfaceStart = surfaceCount;
     const auto rollback = [&]() {
-        destination.vertices.resize(vertexStart);
-        destination.indices.resize(indexStart);
-        destination.batches.resize(batchStart);
-        destination.cloudCount = cloudStart;
-        destination.surfaceCount = surfaceStart;
+        vertices.resize(vertexStart);
+        indices.resize(indexStart);
+        batches.resize(batchStart);
+        surfaceCount = surfaceStart;
     };
     try
     {
         if (!g_particleCloudLayoutReady) GenerateParticleCloudLayout();
-        destination.vertices.reserve(vertexStart +
-            WEB_RENDERER_PARTICLE_CLOUD_VERTICES);
-        destination.indices.reserve(indexStart +
-            WEB_RENDERER_PARTICLE_CLOUD_INDICES);
-        destination.batches.reserve(batchStart + 1u);
+        // Resize once with geometric vector growth, then fill the admitted
+        // spans directly. Exact per-cloud reserves copy the whole prefix.
+        vertices.resize(vertexStart + WEB_RENDERER_PARTICLE_CLOUD_VERTICES);
+        indices.resize(indexStart + WEB_RENDERER_PARTICLE_CLOUD_INDICES);
         const float color[4] = {
             static_cast<float>((cloud.color.packed >> 16u) & 0xffu) *
                 BYTE_TO_UNIT,
@@ -335,20 +332,19 @@ WebRendererParticleCloudSceneResult BuildOne(
                             return WebRendererParticleCloudSceneResult::
                                 InvalidSubmission;
                         }
-                        destination.vertices.push_back(vertex);
+                        vertices[vertexBase + particleId * 4u + corner] = vertex;
                     }
-                    for (const std::uint32_t index : quadIndices)
-                        destination.indices.push_back(vertexBase +
-                            particleId * 4u + index);
+                    for (std::uint32_t index = 0u; index < 6u; ++index)
+                        indices[indexBase + particleId * 6u + index] =
+                            vertexBase + particleId * 4u + quadIndices[index];
                 }
             }
         }
         WebRendererWorldBatchDesc batch = MakeDraw(submission.material);
         batch.firstIndex = indexBase;
         batch.indexCount = WEB_RENDERER_PARTICLE_CLOUD_INDICES;
-        destination.batches.push_back(batch);
-        ++destination.cloudCount;
-        ++destination.surfaceCount;
+        batches.push_back(batch);
+        ++surfaceCount;
         return WebRendererParticleCloudSceneResult::Success;
     }
     catch (const std::bad_alloc &)
@@ -395,10 +391,25 @@ WebRendererParticleCloudSceneResult WebRenderer_BuildParticleCloudCommand(
 {
     WebRendererParticleCloudSceneCommand replacement;
     const WebRendererParticleCloudSceneResult result =
-        BuildOne(submission, view, replacement);
+        BuildOne(submission, view, replacement.vertices, replacement.indices,
+            replacement.batches, replacement.surfaceCount);
     if (result == WebRendererParticleCloudSceneResult::Success)
+    {
+        replacement.cloudCount = 1u;
         destination = std::move(replacement);
+    }
     return result;
+}
+
+WebRendererParticleCloudSceneResult WebRenderer_BuildAndAppendParticleCloudCommand(
+    const WebRendererParticleCloudSubmission &submission,
+    const WebRendererParticleCloudView &view,
+    std::vector<WebRendererSurfaceVertex> &vertices,
+    std::vector<std::uint32_t> &indices,
+    std::vector<WebRendererWorldBatchDesc> &batches,
+    std::uint32_t &surfaceCount)
+{
+    return BuildOne(submission, view, vertices, indices, batches, surfaceCount);
 }
 
 WebRendererParticleCloudAppendResult WebRenderer_AppendParticleCloudCommand(

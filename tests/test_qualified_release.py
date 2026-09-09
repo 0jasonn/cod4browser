@@ -16,7 +16,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
-from qualify_web_release import REQUIRED_JOBS, digest, files_in, qualify, verify
+from qualify_web_release import REQUIRED_JOBS, capture_inputs, digest, files_in, qualify, verify, verify_build
+from check_source_archive import check_archive
 from package_web_sources import collect_runtime_sources, file_identity, validate_dependency_sources
 
 
@@ -301,6 +302,63 @@ class QualificationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Site contents"): self.make()
         (self.site / "index.html").unlink()
         with self.assertRaisesRegex(ValueError, "Site contents"): self.make()
+
+    def test_local_benchmark_receipt_checks_all_inputs_without_qualifying_dirty_release(self):
+        snapshot = self.root / "build-inputs.zip"
+        snapshot.write_bytes(self.source.read_bytes())
+        with zipfile.ZipFile(snapshot) as archive:
+            source_files = {name: {"bytes": len(data), "sha256": digest(data)}
+                            for name in archive.namelist() for data in [archive.read(name)]}
+        # Native-only inputs remain hash metadata; their bytes must not enter the ZIP.
+        source_files["deps/msslib/synthetic.h"] = {"bytes": 9, "sha256": digest(b"synthetic")}
+        receipt = copy.deepcopy(self.receipt)
+        receipt["dirty"] = True
+        receipt["buildInputs"] = {"files": source_files, "archive": file_identity(snapshot)}
+        receipt["buildConfiguration"] = {}
+        for name in ("CMakeCache.txt", "compile_commands.json", "build.ninja"):
+            (self.root / name).write_text("synthetic configuration")
+            receipt["buildConfiguration"][name] = file_identity(self.root / name)
+        verify_build(receipt, self.site, self.root)
+        original_snapshot = snapshot.read_bytes()
+        with zipfile.ZipFile(snapshot, "a") as archive:
+            archive.writestr("deps/msslib/synthetic.h", b"synthetic")
+        receipt["buildInputs"]["archive"] = file_identity(snapshot)
+        with self.assertRaisesRegex(ValueError, "Non-distributable"):
+            verify_build(receipt, self.site, self.root)
+        snapshot.write_bytes(original_snapshot)
+        receipt["buildInputs"]["archive"] = file_identity(snapshot)
+        incomplete = copy.deepcopy(receipt)
+        incomplete["buildConfiguration"].pop("compile_commands.json")
+        with self.assertRaisesRegex(ValueError, "Incomplete"): verify_build(incomplete, self.site, self.root)
+        with self.assertRaisesRegex(ValueError, "clean source"): self.make(receipt)
+        (self.root / "build.ninja").write_text("different flags")
+        with self.assertRaisesRegex(ValueError, "configuration"): verify_build(receipt, self.site, self.root)
+        (self.root / "build.ninja").write_text("synthetic configuration")
+        (self.site / "launcher.mjs").write_text("unexpected host file")
+        with self.assertRaisesRegex(ValueError, "site"): verify_build(receipt, self.site, self.root)
+        (self.site / "launcher.mjs").unlink()
+        snapshot.write_bytes(b"different source")
+        with self.assertRaisesRegex(ValueError, "snapshot"): verify_build(receipt, self.site, self.root)
+
+    def test_local_input_capture_omits_native_sdk_and_binary_bytes(self):
+        repo = self.root / "capture-repo"
+        repo.mkdir()
+        with zipfile.ZipFile(self.source) as archive:
+            archive.extractall(repo)
+        for name in ("deps/binklib/synthetic.h", "deps/msslib/synthetic.dll",
+                     "deps/steamsdk/synthetic.h", "accidental.KISAK-HOME"):
+            path = repo / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"synthetic excluded fixture")
+        subprocess.run(["git", "init", str(repo)], check=True, stdout=subprocess.DEVNULL)
+        manifest = self.root / "captured-inputs.json"
+        capture_inputs(repo, manifest)
+        inputs = json.loads(manifest.read_text())
+        self.assertIn("deps/binklib/synthetic.h", inputs["files"])
+        check_archive(manifest.with_suffix(".zip"))
+        with zipfile.ZipFile(manifest.with_suffix(".zip")) as archive:
+            self.assertNotIn("deps/binklib/synthetic.h", archive.namelist())
+            self.assertIn("CMakeLists.txt", archive.namelist())
 
     def test_verifier_rejects_modified_artifact_and_unrun_tier(self):
         self.make()

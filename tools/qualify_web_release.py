@@ -11,7 +11,7 @@ from pathlib import Path
 
 # Verification must be read-only, including imports beside a shipped manifest.
 sys.dont_write_bytecode = True
-from check_source_archive import check_archive
+from check_source_archive import check_archive, source_path_allowed
 from package_web_sources import collect_dependency_sources, file_identity, validate_dependency_sources
 
 REQUIRED_JOBS = ("native-portable", "parser-fuzz", "windows-portable", "wasm-browser-production")
@@ -31,7 +31,74 @@ def files_in(root):
     return result
 
 
-def record(repo, site, output, source, dependency_sources):
+def source_inputs(repo):
+    names = subprocess.check_output(["git", "-C", str(repo), "ls-files", "-z",
+                                     "--cached", "--others", "--exclude-standard"]).decode().split("\0")
+    return {name: file_identity(repo / name) for name in sorted(set(names))
+            if name and (repo / name).is_file()}
+
+
+def capture_inputs(repo, output):
+    inputs = source_inputs(repo)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    archive_path = output.with_suffix(".zip")
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name in inputs:
+            # Keep a complete hash inventory, but never package native SDKs or
+            # binaries, even in a private local performance snapshot.
+            if source_path_allowed(name):
+                archive.write(repo / name, name)
+    try:
+        check_archive(archive_path)
+    except ValueError:
+        archive_path.unlink()
+        raise
+    if source_inputs(repo) != inputs:
+        raise ValueError("Source changed while capturing build inputs; retry after edits finish")
+    output.write_text(json.dumps({"files": inputs, "archive": file_identity(archive_path)}, indent=2) + "\n")
+
+
+def build_options(build):
+    return dict(re.findall(r"^(KISAK_WEB_[A-Z_]+|CMAKE_BUILD_TYPE):[^=]+=(.*)$",
+                           (build / "CMakeCache.txt").read_text(), re.MULTILINE))
+
+
+def verify_build(receipt, site, build):
+    """Verify local performance inputs; this does not relax release qualification."""
+    if receipt.get("schemaVersion") != 2 or files_in(site) != receipt.get("site"):
+        raise ValueError("Complete site differs from its build receipt")
+    inputs = receipt["buildInputs"]
+    if file_identity(build / "build-inputs.zip") != inputs["archive"]:
+        raise ValueError("Build source snapshot differs from receipt")
+    check_archive(build / "build-inputs.zip")
+    with zipfile.ZipFile(build / "build-inputs.zip") as archive:
+        files = {name: {"bytes": len(data), "sha256": digest(data)}
+                 for name in archive.namelist() for data in [archive.read(name)]}
+        archived_inputs = {name: identity for name, identity in inputs["files"].items()
+                           if source_path_allowed(name)}
+        if len(archive.namelist()) != len(files) or files != archived_inputs:
+            raise ValueError("Build source inventory differs from receipt")
+        if digest(archive.read("package-lock.json")) != receipt["lockfileSha256"]:
+            raise ValueError("Build lockfile differs from receipt")
+        toolchain = {**json.loads(archive.read("tools/web_toolchain.json")),
+                     **json.loads(archive.read("package.json"))["engines"]}
+        if toolchain != receipt["toolchain"]:
+            raise ValueError("Build toolchain differs from receipt")
+    configuration = receipt["buildConfiguration"]
+    if set(configuration) != {"CMakeCache.txt", "compile_commands.json", "build.ninja"}:
+        raise ValueError("Incomplete build configuration receipt")
+    for name, identity in configuration.items():
+        if file_identity(build / name) != identity:
+            raise ValueError(f"Build configuration differs from receipt: {name}")
+    if receipt.get("buildOptions", {}) != build_options(build):
+        raise ValueError("Reported build options differ from recorded configuration")
+    if file_identity(build / "source.zip") != receipt["source"]:
+        raise ValueError("Baseline source archive differs from receipt")
+    validate_dependency_sources(build / "build-inputs.zip", build / "dependency-sources",
+                                receipt["dependencySources"])
+
+
+def record(repo, site, output, source, dependency_sources, inputs_path=None):
     def git(*args):
         return subprocess.check_output(["git", "-C", str(repo), *args], text=True).strip()
     actual = subprocess.check_output(["node", str(repo / "tools/check_toolchain.mjs"), "--web"], text=True)
@@ -51,6 +118,16 @@ def record(repo, site, output, source, dependency_sources):
                "dependencySources": dependencies,
                "lockfileSha256": digest((repo / "package-lock.json").read_bytes()),
                "dependencies": json.loads((repo / "tools/web_dependencies.json").read_text())}
+    if inputs_path:
+        inputs = json.loads(inputs_path.read_text())
+        if inputs["files"] != source_inputs(repo):
+            raise ValueError("Source changed during the build; rebuild before benchmarking")
+        receipt["buildInputs"] = inputs
+        receipt["buildConfiguration"] = {
+            name: file_identity(output.parent / name)
+            for name in ("CMakeCache.txt", "compile_commands.json", "build.ninja")}
+        receipt["buildOptions"] = build_options(output.parent)
+        verify_build(receipt, site, output.parent)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf8")
     print(f"Build receipt recorded (dirty={receipt['dirty']}): {output}")
@@ -148,6 +225,13 @@ def main():
     record_parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[1])
     record_parser.add_argument("--source", required=True, type=Path)
     record_parser.add_argument("--dependency-sources", required=True, type=Path)
+    record_parser.add_argument("--inputs", type=Path)
+    inputs_parser = commands.add_parser("inputs")
+    inputs_parser.add_argument("repo", type=Path)
+    inputs_parser.add_argument("output", type=Path)
+    build_parser = commands.add_parser("verify-build")
+    build_parser.add_argument("receipt", type=Path)
+    build_parser.add_argument("site", type=Path)
     verify_parser = commands.add_parser("verify")
     verify_parser.add_argument("package", type=Path)
     qualify_parser = commands.add_parser("qualify")
@@ -156,7 +240,11 @@ def main():
     qualify_parser.add_argument("--revision", required=True)
     qualify_parser.add_argument("--dependency-sources", required=True, type=Path)
     args = parser.parse_args()
-    if args.command == "record": record(args.repo, args.site, args.output, args.source, args.dependency_sources)
+    if args.command == "record": record(args.repo, args.site, args.output, args.source, args.dependency_sources, args.inputs)
+    elif args.command == "inputs": capture_inputs(args.repo, args.output)
+    elif args.command == "verify-build":
+        verify_build(json.loads(args.receipt.read_text()), args.site, args.receipt.parent)
+        print("Verified public build sources, input hash inventory, configuration, dependencies and site; not release qualification")
     elif args.command == "verify": verify(args.package)
     else:
         qualify(json.loads(args.receipt.read_text()), json.loads(args.results.read_text()),

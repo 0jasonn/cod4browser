@@ -1818,14 +1818,22 @@ test("owned retail transient lights reach native material passes and obey scene 
                 expect(Math.abs(clearedBeforeRecovery[channel] - baseline[channel])).toBeLessThan(0.1);
             await call(page, "_KisakWeb_TestTransientLights", 2);
             await expect.poll(async () => ((await shadowState()) >>> 8) & 255).toBe(1);
+            const retainedShadowSelection = () => page.evaluate(() => Promise.all(
+                Array.from({ length: 9 }, (_, field) => globalThis.__KISAKCOD_WEB__.module.call(
+                    "_KisakWeb_TestTransientSpotShadowState", field))));
+            const pausedShadowSelection = await retainedShadowSelection();
+            // GPU loss must retain the paused CPU light selection and fades.
             expect(await call(page, "_KisakWeb_TestLoseWebGLContext")).toBe(1);
             await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state)).toBe("renderer-lost");
+            expect(await retainedShadowSelection()).toEqual(pausedShadowSelection);
             expect(await call(page, "_KisakWeb_TestRestoreWebGLContext")).toBe(1);
             await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state), { timeout: 60_000 }).toBe("running");
             await expect.poll(async () => (await state()) & 65535,
                 { timeout: 60_000 }).toBeGreaterThan(0);
             await expect.poll(async () => ((await shadowState()) >>> 8) & 255,
                 { timeout: 60_000 }).toBe(1);
+            expect(await retainedShadowSelection()).toEqual(pausedShadowSelection);
+            expect(await call(page, "_KisakWeb_TestUiState", 5)).toBe(1);
             // A paused client has no new cgame view to submit after context
             // recreation. Pump one frame, then freeze the recovered image.
             await command("pause");

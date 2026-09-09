@@ -26,39 +26,48 @@ private:
     std::array<Entry, 256> entries_{};
 };
 
-// Backend texture object names, in base/normal/detail/specular/secondary/primary
-// order. The secondary unit also holds a model's authored light attenuation.
-struct WebRendererDynamicTextureSet
+struct WebRendererPassTexture
 {
-    std::array<std::uint32_t, 6> textures{};
-    std::array<std::uint8_t, 4> samplers{};
-    std::uint8_t secondarySampler = 0x62u;
-    bool operator==(const WebRendererDynamicTextureSet &) const = default;
+    std::uint32_t unit = 0u;
+    std::uint32_t texture = 0u;
+    std::uint8_t sampler = 0u;
+    bool mipmaps = true;
+    bool enabled = true;
+    bool operator==(const WebRendererPassTexture &) const = default;
 };
 
-// One dynamic draw pass only. Nothing between Apply calls may change these
-// six 2D bindings or their texture parameters. Compare the entire set: sampler
+// One draw pass only. Nothing between Apply calls may change these
+// 2D bindings or their texture parameters without Reset. Each unit occurs
+// once, in its original draw-family order. Compare the entire set: sampler
 // parameters belong to texture objects, so aliases across units must retain
 // their original last-write order. Per-unit skipping would be incorrect.
-// The callback's fourth argument only suppresses a known texture binding;
+// The callback's last argument only suppresses a known texture binding;
 // it must still reconcile object parameters in the original unit order.
-class WebRendererDynamicTextures
+template<std::size_t Count>
+class WebRendererPassTextures
 {
 public:
-    template<typename BindTexture>
-    void Apply(const WebRendererDynamicTextureSet &next, BindTexture bind)
+    void Reset() noexcept { valid_ = false; }
+
+    // A/B builds compile out cache reads, equality checks and state copies.
+    template<bool Reuse = true, typename BindTexture>
+    void Apply(const std::array<WebRendererPassTexture, Count> &next, BindTexture bind)
     {
-        if (valid_ && next == previous_) return;
-        constexpr std::array<std::uint32_t, 6> units{0u, 1u, 4u, 5u, 2u, 9u};
-        for (std::size_t i = 0; i < units.size(); ++i)
-            bind(units[i], next.textures[i],
-                i < next.samplers.size() ? next.samplers[i] : i == 4u ? next.secondarySampler : 0x62u,
-                valid_ && previous_.textures[i] == next.textures[i]);
-        previous_ = next;
-        valid_ = true;
+        if constexpr (Reuse)
+            if (valid_ && next == previous_) return;
+        for (std::size_t i = 0; i < next.size(); ++i)
+            if (next[i].enabled)
+                bind(next[i].unit, next[i].texture, next[i].sampler, next[i].mipmaps,
+                    Reuse && valid_ && previous_[i].enabled && previous_[i].unit == next[i].unit &&
+                        previous_[i].texture == next[i].texture);
+        if constexpr (Reuse)
+        {
+            previous_ = next;
+            valid_ = true;
+        }
     }
 
 private:
-    WebRendererDynamicTextureSet previous_{};
+    std::array<WebRendererPassTexture, Count> previous_{};
     bool valid_ = false;
 };

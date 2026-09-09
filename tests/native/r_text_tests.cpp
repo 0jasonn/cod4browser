@@ -1,7 +1,11 @@
+#include <universal/q_shared.h>
+#include <universal/com_math.h>
+#include <qcommon/mem_track.h>
 #include <gfx_d3d/r_text.h>
 #include <gfx_d3d/material_types.h>
 #include <gfx_d3d/r_warning_types.h>
 #include <array>
+#include <bit>
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -37,16 +41,59 @@ int SEH_PrintStrlen(const char *text)
     }
     return count;
 }
-std::uint32_t RandWithSeed(int *seed)
-{
-    // Same wrap and signed division as the canonical CRT-independent RNG.
-    *seed = static_cast<int>(1103515245u * static_cast<unsigned>(*seed) + 12345u);
-    return *seed / 0x10000 % 0x8000u;
-}
 bool Near(float a, float b) { return std::fabs(a - b) < 0.0001f; }
+
+void TestSeededRandom()
+{
+    // Include negative quotients around the signed-division boundaries.
+    constexpr int vectors[][3] = {
+        {2, -2087924461, 909}, {-1, -1103502900, 15930},
+        {INT32_MIN, -2147471303, 1},
+        {576240414, -65537, 32767}, {286434947, -65536, 32767},
+        {-3370520, -65535, 0}, {230538014, -1, 0}, {-59267453, 0, 0},
+        {-349072920, 1, 0}, {-115164386, 65535, 0},
+        {-404969853, 65536, 1}, {-694775320, 65537, 1},
+        {2088216195, INT32_MIN, 0}, {-1916945634, INT32_MAX, 32767},
+    };
+    for (const auto &values : vectors)
+    {
+        int seed = values[0];
+        assert(RandWithSeed(&seed) == static_cast<unsigned>(values[2]));
+        assert(seed == values[1]);
+    }
+    assert(R_FontGetRandomLetter(nullptr, 2) == 'p');
+    assert(R_FontGetRandomLetter(nullptr, -1) == '7');
+    // Native x86 wraps the LCG to 32 bits, then divides the signed result
+    // toward zero. Widen the oracle arithmetic so it cannot overflow.
+    for (const int initial : {0, 1, 2, -1, INT32_MIN, INT32_MAX})
+    {
+        int seed = initial;
+        std::int64_t expected = initial;
+        for (unsigned step = 0; step < 4096; ++step)
+        {
+            const auto wrapped = static_cast<std::uint32_t>(1103515245ll * expected + 12345);
+            expected = wrapped <= INT32_MAX ? wrapped : static_cast<std::int64_t>(wrapped) - 0x100000000ll;
+            const auto result = RandWithSeed(&seed);
+            if (seed != expected)
+                std::fprintf(stderr, "RNG seed %d step %u: got %d, expected %lld\n",
+                    initial, step, seed, static_cast<long long>(expected));
+            assert(seed == expected);
+            assert(result == static_cast<std::uint32_t>(expected / 65536) % 32768u);
+        }
+    }
+}
 
 int main()
 {
+    // The debug text caller supplies stack storage. Disabled tracking must
+    // report defined counters rather than rendering prior stack contents.
+    meminfo_t memoryInfo;
+    memoryInfo.total = memoryInfo.nonSwapTotal = memoryInfo.nonSwapMinSpecTotal = 12345;
+    for (auto &total : memoryInfo.typeTotal) total = 12345;
+    track_getbasicinfo(&memoryInfo);
+    assert(memoryInfo.total == 0 && memoryInfo.nonSwapTotal == 0 && memoryInfo.nonSwapMinSpecTotal == 0);
+    for (auto total : memoryInfo.typeTotal) assert(total == 0);
+    TestSeededRandom();
     Material base{}, glow{}, fx{};
     MaterialTechniqueSet tech{};
     base.info.name = "synthetic-font";
@@ -65,11 +112,11 @@ int main()
     glyphs['o' - 32].dx = 12;
     Font_s font{"synthetic", 12, 96, &base, &glow, glyphs.data()};
     const auto draw = [&](const char *text, int flags = 0, int cursor = -1,
-        float sine = 0, float cosine = 1) {
+        float sine = 0, float cosine = 1, int birthTime = 100) {
         quads.clear();
         DrawText2D(text, 20, 30, &font, 1, 1, sine, cosine, GfxColor(0xffffffffu),
             99, static_cast<short>(flags), cursor, '|', 0, GfxColor(0xff030201u),
-            100, 100, 1000, 1000, &fx, &fx);
+            birthTime, 100, 1000, 1000, &fx, &fx);
     };
     draw("AB");
     assert(quads.size() == 2 && Near(quads[0].x, 19.5f) && Near(quads[0].y, 19.5f));
@@ -122,6 +169,32 @@ int main()
     GetDecayingLetterInfo('A', &font, &seed, 264, 100, 1000, 128,
         &skip, &alpha, &letter, &extra);
     assert(skip);
+    // Record real text output across reveal, decay and expiry for many seeds.
+    // Exact binary-fraction glyph UVs expose changed random letters as well
+    // as changed quad counts, without retail assets or platform rendering.
+    for (unsigned i = 0; i < glyphs.size(); ++i) glyphs[i].s0 = i / 128.0f;
+    std::uint32_t trace = 2166136261u;
+    std::uint64_t quadCount = 0;
+    const auto record = [&](std::uint32_t word) { trace = (trace ^ word) * 16777619u; };
+    for (int birthTime = 1; birthTime < 64000; birthTime += 997)
+        for (int elapsed = 0; elapsed <= 2048; elapsed += 16)
+            for (int flags : {0xc0, 0xd0})
+            {
+                sceneTime = birthTime + elapsed;
+                draw("Crew Expendable", flags, -1, 0, 1, birthTime);
+                record(static_cast<std::uint32_t>(quads.size()));
+                quadCount += quads.size();
+                for (const auto &quad : quads)
+                {
+                    record(quad.material == &base ? 0u : quad.material == &glow ? 1u : 2u);
+                    for (float value : {quad.x, quad.y, quad.w, quad.h, quad.s, quad.t})
+                        record(std::bit_cast<std::uint32_t>(value));
+                    record(quad.color);
+                }
+            }
+    std::printf("text effects trace: %08x, %llu quads\n", trace,
+        static_cast<unsigned long long>(quadCount));
+    assert(trace == 0x2d6524e5u && quadCount == 334932u);
     std::puts("native text: position/rotation, colors, styles, subtitle glow, cursor, reveal/expiry passed");
 }
 
