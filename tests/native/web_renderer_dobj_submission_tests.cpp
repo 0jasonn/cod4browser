@@ -706,6 +706,44 @@ void TestStableDrawOrderPreservesUnsafeAnchors()
         [](const CameraBatch &batch) { return batch.sortGroup; },
         [](const CameraBatch &batch) { return std::pair{batch.region, batch.key}; }, order);
     assert((order == std::vector<std::uint32_t>{0, 2, 1, 4, 3, 5, 7, 6, 8, 10, 9, 11, 12}));
+
+    // Compare the complete order with the original stable-sort policy,
+    // including long equal-key runs, anchors and adjacent distinct groups.
+    std::uint32_t seed = 0x51a7u;
+    for (unsigned sample = 0; sample < 512; ++sample)
+    {
+        std::vector<CameraBatch> input(sample * 4u);
+        for (auto &batch : input)
+        {
+            seed = seed * 1664525u + 1013904223u;
+            batch = {seed % 3u, (seed >> 8u) % 5u,
+                sample % 2u ? 1u : (seed >> 16u) % 3u};
+        }
+        std::vector<std::uint32_t> expected(input.size());
+        std::iota(expected.begin(), expected.end(), 0u);
+        for (std::size_t begin = 0; begin < input.size();)
+        {
+            const auto group = input[begin].sortGroup;
+            if (!group) { ++begin; continue; }
+            std::size_t end = begin + 1;
+            while (end < input.size() && input[end].sortGroup == group) ++end;
+            std::stable_sort(expected.begin() + begin, expected.begin() + end,
+                [&](auto a, auto b) {
+                    return std::pair{input[a].region, input[a].key} <
+                        std::pair{input[b].region, input[b].key};
+                });
+            begin = end;
+        }
+        std::size_t keyReads = 0;
+        WebRenderer_BuildStableDrawOrder(input,
+            [](const auto &batch) -> const auto & { return batch; },
+            [](const auto &batch) { return batch.sortGroup; },
+            [&](const auto &batch) {
+                ++keyReads;
+                return std::pair{batch.region, batch.key};
+            }, order);
+        assert(order == expected && keyReads <= input.size());
+    }
 }
 
 void TestLodDelegatesToCanonicalXModelPolicy()

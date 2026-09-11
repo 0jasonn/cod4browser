@@ -2231,6 +2231,8 @@ extern "C" EMSCRIPTEN_KEEPALIVE double KisakWeb_TestDisplayGamma(
     return static_cast<double>(expected) * 4294967296.0 + pixel;
 }
 
+extern "C" int KisakWeb_TestUiDrawCount();
+
 extern "C" EMSCRIPTEN_KEEPALIVE double KisakWeb_TestTextDraw(
     int scenario, int time, int field, int index)
 {
@@ -2286,8 +2288,9 @@ extern "C" EMSCRIPTEN_KEEPALIVE double KisakWeb_TestTextDraw(
         if (field >= 3 && field <= 6) result = std::round(batch.color[field - 3] * 255);
     }
     R_EndFrame();
-    if (field == 100)
+    if (field == 100 || field == 101)
         result = WebRenderer_TestDrawPixel(21, cls.vidConfig.displayHeight - 22);
+    if (field == 101) result = KisakWeb_TestUiDrawCount();
     WebRenderer_SetUiScene({});
     return result;
 }
@@ -4520,7 +4523,7 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         }
     }
 
-    // EffectsCore remains the sole producer of particle-cloud state. Expand
+    // EffectsCore remains the sole producer of particle-cloud state. Admit
     // each retained canonical slot at this renderer boundary only after the
     // required DObj, FX-model, and code-mesh families have been admitted.
     // Each cloud is an all-or-nothing 1024-quad batch, so optional clouds can
@@ -4531,6 +4534,8 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
     std::memcpy(particleCloudView.axis, refdef->viewaxis,
         sizeof(particleCloudView.axis));
     bool hasParticleCloud = false;
+    std::array<WebRendererParticleCloudDrawDesc, WEB_RENDERER_MAX_PARTICLE_CLOUD_SUBMISSIONS> cloudDraws;
+    std::uint32_t cloudLogicalVertices = 0, cloudLogicalIndices = 0;
     std::uint32_t droppedParticleClouds = 0u;
     for (std::uint32_t index = 0u;
          index < g_particleCloudSubmissionCount; ++index)
@@ -4551,21 +4556,30 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         const double cloudAppendStarted = sceneProfile ? WebFrameProfile_Now() : 0.0;
 #endif
         const auto admission = WebRenderer_ValidateParticleCloudAppendCounts(
-            dynamicCommand.vertices.size() + brushVertexCount,
-            dynamicCommand.indices.size() + brushIndexCount,
+            dynamicCommand.vertices.size() + brushVertexCount + cloudLogicalVertices,
+            dynamicCommand.indices.size() + brushIndexCount + cloudLogicalIndices,
             dynamicCommand.batches.size() + brushBatchCount,
             dynamicCommand.surfaceCount + brushSurfaceCount);
 #if KISAK_WEB_DIRECT_CLOUD_APPEND
+        WebRendererWorldBatchDesc cloudBatch{};
         const WebRendererParticleCloudSceneResult append =
             admission == WebRendererParticleCloudAppendResult::Success
-            ? WebRenderer_BuildAndAppendParticleCloudCommand(
-                g_particleCloudSubmissions[index], particleCloudView,
-                dynamicCommand.vertices,
-                dynamicCommand.indices,
-                dynamicCommand.batches,
-                dynamicCommand.surfaceCount)
+            ? WebRenderer_BuildParticleCloudDraw(g_particleCloudSubmissions[index],
+                particleCloudView, cloudDraws[index], cloudBatch)
             : WebRendererParticleCloudSceneResult::OutputTooLarge;
-        const bool appended = append == WebRendererParticleCloudSceneResult::Success;
+        bool appended = append == WebRendererParticleCloudSceneResult::Success;
+        if (appended)
+        {
+            cloudBatch.firstIndex = static_cast<std::uint32_t>(dynamicCommand.indices.size());
+            try { dynamicCommand.batches.push_back(cloudBatch); }
+            catch (const std::bad_alloc &) { appended = false; }
+            if (appended)
+            {
+                ++dynamicCommand.surfaceCount;
+                cloudLogicalVertices += WEB_RENDERER_PARTICLE_CLOUD_VERTICES;
+                cloudLogicalIndices += WEB_RENDERER_PARTICLE_CLOUD_INDICES;
+            }
+        }
 #else
         const WebRendererParticleCloudAppendResult append =
             admission == WebRendererParticleCloudAppendResult::Success
@@ -4578,8 +4592,8 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         const bool appended = append == WebRendererParticleCloudAppendResult::Success;
 #endif
 #if KISAK_WEB_DIAGNOSTICS
-        // Direct append includes expansion; the control starts timing after
-        // standalone construction. Compare total sceneCommandAppendMs.
+        // Compact submission includes constant construction; the expanded
+        // control starts timing afterward. Compare total sceneCommandAppendMs.
         if (sceneProfile)
             sceneProfile->sceneCloudAppendMs += WebFrameProfile_Now() - cloudAppendStarted;
 #endif
@@ -4592,9 +4606,9 @@ void __cdecl R_RenderScene(const refdef_s *refdef)
         R_WarnOncePerFrame(R_WARN_MAX_CLOUDS);
 
     const bool hasSunSprite = r_drawSun->current.enabled &&
-        AppendSunSprite(dynamicCommand, view, brushVertexCount, brushIndexCount);
+        AppendSunSprite(dynamicCommand, view, brushVertexCount + cloudLogicalVertices, brushIndexCount + cloudLogicalIndices);
     const bool hasSunFlare = r_drawSun->current.enabled &&
-        AppendSunFlare(dynamicCommand, view, brushVertexCount, brushIndexCount);
+        AppendSunFlare(dynamicCommand, view, brushVertexCount + cloudLogicalVertices, brushIndexCount + cloudLogicalIndices);
 
 #if KISAK_WEB_DIAGNOSTICS
     const double imageResolveStarted = sceneProfile ? WebFrameProfile_Now() : 0.0;

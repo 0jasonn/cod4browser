@@ -13,7 +13,7 @@ export const ACTIVE_WORKLOAD_TIMES = Object.freeze({ first: 4139, last: 8939,
 export const KILLHOUSE_REALTIME_CAMERA = Object.freeze({ atCanonicalTime: 30000,
     command: 'setviewpos 3072 -1155 64.125 100.9 0' });
 
-// Executed directly in the engine Worker by the local headed benchmark.
+// Executed directly in the engine Worker by the local benchmark.
 // Engine state and input remain canonical; this only retains completed timings.
 export function installFrameTimingCapture({ map, realtime = false, timeWindow = null, capacity = 16384 }) {
     if (!Number.isInteger(capacity) || capacity < 301 || capacity > 32768)
@@ -231,7 +231,13 @@ export function validatePreImportCadence(cadence, target) {
 }
 
 export function validateBenchmarkEnvironment(environment) {
-    assert.equal(environment.headless, false, 'headed Chrome is required');
+    if (environment.executionMode === 'headless-muted') {
+        assert.equal(environment.headless, true, 'background measurements must not open windows');
+        assert.equal(environment.audioMuted, true, 'background measurements must be muted');
+    } else {
+        assert.equal(environment.executionMode, undefined, 'unknown browser execution mode');
+        assert.equal(environment.headless, false, 'unlabelled headless measurement');
+    }
     assert.equal(environment.renderSize.width, 1920);
     assert.equal(environment.renderSize.height, 1080);
     assert.equal(environment.foreground.performanceWindowValid, true, 'background window');

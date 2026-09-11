@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 struct WebFrameInfo;
@@ -415,6 +416,15 @@ constexpr std::size_t WebRenderer_FxDiagnosticIndex(
 // Callback-scoped canonical identity and portable first-pass state for one
 // contiguous world draw. WebRenderer_SetWorldSurface copies names/state and
 // consumes the DB-owned image load definitions before returning.
+struct WebRendererParticleCloudDrawDesc
+{
+    float origin[3]{};
+    float axis[3][3]{};
+    float scale = 1.0f;
+    float billboardAxis[2][3]{};
+    float color[4]{};
+};
+
 struct WebRendererWorldBatchDesc
 {
     std::uint32_t firstIndex;
@@ -502,6 +512,9 @@ struct WebRendererWorldBatchDesc
     // CONST_SRC_CODE_BASE_LIGHTING_COORDS for non-instanced DObj draws.
     // Static XModels carry the same value per instance below.
     float modelLightingCoordinates[3];
+    // Callback-scoped cloud constants reference the native shared lattice,
+    // rather than a range in the frame's streamed vertex/index buffers.
+    const WebRendererParticleCloudDrawDesc *particleCloud = nullptr;
 };
 
 // Static XModel geometry remains shared per canonical XModel/LOD. Placements
@@ -584,6 +597,23 @@ struct WebRendererUiBatchDesc
     std::uint32_t stateBits[2];
     float color[4];
 };
+
+// Native RB_SetTessTechnique batches adjacent 2D primitives. Preserve order,
+// complete triangles and every shader input; framebuffer commands are barriers.
+inline bool WebRenderer_CanMergeUiDraws(const WebRendererUiBatchDesc &a,
+    const WebRendererUiBatchDesc &b) noexcept
+{
+    return a.savedScreen.command == WebRendererUiCommand::Draw &&
+        b.savedScreen.command == WebRendererUiCommand::Draw &&
+        a.indexCount && b.indexCount && a.indexCount % 3u == 0u &&
+        b.indexCount % 3u == 0u &&
+        std::uint64_t(a.firstIndex) + a.indexCount == b.firstIndex &&
+        a.materialIdentity == b.materialIdentity && a.image == b.image &&
+        a.samplerState == b.samplerState &&
+        a.hasMaterialState == b.hasMaterialState &&
+        a.stateBits[0] == b.stateBits[0] && a.stateBits[1] == b.stateBits[1] &&
+        std::memcmp(a.color, b.color, sizeof(a.color)) == 0;
+}
 
 struct WebRendererUiSceneDesc
 {

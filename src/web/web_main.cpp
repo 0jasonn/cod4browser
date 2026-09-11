@@ -36,6 +36,7 @@
 
 extern errorParm_t errorcode;
 extern char com_errorMessage[4096];
+extern int com_lastFrameTime[4];
 void WebCinematic_Update();
 
 #if KISAK_WEB_DIAGNOSTICS
@@ -455,7 +456,7 @@ void RunCommands()
     }
 }
 
-bool RunCGameFrame(const WebFrameInfo &frame)
+bool RunCGameFrame()
 {
     static std::uint32_t activeFrameCount = 0u;
     // Native Com_Frame keeps pumping the client and screen while disconnected;
@@ -468,15 +469,19 @@ bool RunCGameFrame(const WebFrameInfo &frame)
         return false;
     }
 
-    int frameMilliseconds = g_cgameTiming.Advance(frame.monotonicMilliseconds,
-        com_maxfps ? com_maxfps->current.integer : 0);
+    // Commands can suspend for map loading after the callback timestamp was
+    // sampled. Use the current clock and honor native load/restart resets.
+    const auto now = Sys_Milliseconds();
+    int frameMilliseconds = g_cgameTiming.Advance(now,
+        com_maxfps ? com_maxfps->current.integer : 0,
+        static_cast<std::uint32_t>(com_lastFrameTime[0]));
     if (!frameMilliseconds) return false;
     g_frameWallMilliseconds = frameMilliseconds;
     Com_WriteConfiguration(0);
     // Native Com_Frame refreshes this clock before the server/client frame.
     // CL_CreateNewCommands derives frame_msec from it; leaving it unchanged
     // makes the canonical mouse path discard motion as a zero-duration sample.
-    com_frameTime = static_cast<int>(frame.monotonicMilliseconds);
+    com_frameTime = static_cast<int>(now);
 
     // The browser pump owns only timing. Preserve the native SP frame order.
     // SV_Frame consumes the command produced by the previous cgame frame;
@@ -611,7 +616,7 @@ void RecoverFrameError()
     #endif
     WebCinematic_Update();
     const double simulationStarted = timingStarted ? Web_FrameTimingNow() : 0.0;
-    const bool gameplayFrame = RunCGameFrame(frame);
+    const bool gameplayFrame = RunCGameFrame();
     const double submissionStarted = timingStarted ? Web_FrameTimingNow() : 0.0;
     // Before a local game is active the renderer remains responsible for the
     // launcher/bootstrap surface. During gameplay, presentation follows the

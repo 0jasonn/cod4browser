@@ -108,6 +108,11 @@ test('GPU drain and hardware checks reject incomplete or incomparable windows', 
         systemGpu: { devices: [{ driverVersion: '1' }] }, displayCadence: { sampleCount: 240 },
         graphicsSettings: Object.fromEntries(Array.from({ length: 10 }, (_, index) => [`r_${index}`, '1'])) };
     validateBenchmarkEnvironment(environment);
+    const background = { ...environment, headless: true, executionMode: 'headless-muted', audioMuted: true };
+    validateBenchmarkEnvironment(background);
+    assert.throws(() => validateBenchmarkEnvironment({ ...background, headless: false }));
+    assert.throws(() => validateBenchmarkEnvironment({ ...background, audioMuted: false }));
+    assert.throws(() => validateBenchmarkEnvironment({ ...environment, executionMode: 'unknown' }));
     for (const mutate of [e => { e.headless = true; }, e => { e.gpu.renderer = 'ANGLE SwiftShader'; },
         e => { e.renderSize.width = 1440; }, e => { e.foreground.performanceWindowValid = false; },
         e => { e.systemGpu.devices = []; }, e => { e.displayCadence.sampleCount = 3; },
@@ -198,6 +203,10 @@ test('fixed active work aligns exact canonical times while preserving raw genera
     const a = makeRun(first);
     const b = makeRun(delayed);
     assert.equal(compareMeasuredWorkloads([a, b]).length, 2);
+    const background = structuredClone(b);
+    Object.assign(background.environment, { headless: true, executionMode: 'headless-muted', audioMuted: true });
+    assert.equal(compareMeasuredWorkloads([background, background]).length, 2);
+    assert.throws(() => compareMeasuredWorkloads([a, background]), /environment differs/);
     assert.deepEqual(normalizeActiveViews(a.workload.trace), normalizeActiveViews(b.workload.trace));
     assert.equal(b.profileViews[0].submissionGeneration, 602, 'raw profile generations must remain available');
     for (const mutate of [r => { r.workload.trace[2].viewOrigin[0]++; },

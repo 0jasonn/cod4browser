@@ -4,6 +4,8 @@
 #include <web/web_renderer.h>
 
 #include <cstdint>
+#include <array>
+#include <span>
 #include <vector>
 
 constexpr std::uint32_t WEB_RENDERER_MAX_PARTICLE_CLOUD_SUBMISSIONS = 256u;
@@ -62,6 +64,16 @@ enum class WebRendererParticleCloudAppendResult : std::uint8_t
 // the renderer lifetime. Call this after CL_Init seeds the CRT stream and on a
 // renderer restart; command construction reuses the retained centers.
 void WebRenderer_InitializeParticleCloudLayout() noexcept;
+
+std::span<const std::array<float, 3>> WebRenderer_ParticleCloudLayout() noexcept;
+std::uint32_t WebRenderer_ParticleCloudLayoutGeneration() noexcept;
+bool WebRenderer_ParticleCloudDrawIsFinite(
+    const WebRendererParticleCloudDrawDesc &draw) noexcept;
+WebRendererParticleCloudSceneResult WebRenderer_BuildParticleCloudDraw(
+    const WebRendererParticleCloudSubmission &submission,
+    const WebRendererParticleCloudView &view,
+    WebRendererParticleCloudDrawDesc &draw,
+    WebRendererWorldBatchDesc &batch);
 
 WebRendererParticleCloudRetainResult WebRenderer_RetainParticleCloudSubmission(
     WebRendererParticleCloudSubmission *storage,

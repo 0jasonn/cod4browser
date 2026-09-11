@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstring>
 #include <limits>
 #include <utility>
 
@@ -282,10 +283,8 @@ void DecodeDxtBlock(
             }
             const std::size_t destination =
                 (static_cast<std::size_t>(y) * width + x) * RGBA_BYTES_PER_PIXEL;
-            rgba[destination] = color.red;
-            rgba[destination + 1u] = color.green;
-            rgba[destination + 2u] = color.blue;
-            rgba[destination + 3u] = color.alpha;
+            static_assert(sizeof(color) == RGBA_BYTES_PER_PIXEL);
+            std::memcpy(rgba.data() + destination, &color, sizeof(color));
         }
     }
 }

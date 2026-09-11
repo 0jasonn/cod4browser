@@ -123,6 +123,7 @@ test("restorable home backup survives reimport and same-origin offline restart @
     const externalRequests = [];
     for (let launch = 0; launch < 2; ++launch) {
         const context = await chromium.launchPersistentContext(profile, {
+            ...testInfo.project.use.launchOptions,
             channel: testInfo.project.use.channel,
             headless: testInfo.project.use.headless ?? true,
             viewport: testInfo.project.use.viewport,

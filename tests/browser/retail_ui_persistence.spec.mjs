@@ -11,6 +11,7 @@ const test = base.extend({
     retailPage: async ({}, use, testInfo) => {
         const profile = await mkdtemp(join(tmpdir(), "kisakcod-ui-"));
         const context = await chromium.launchPersistentContext(profile, {
+            ...testInfo.project.use.launchOptions,
             baseURL: testInfo.project.use.baseURL,
             headless: testInfo.project.use.headless ?? true,
             viewport: testInfo.project.use.viewport,

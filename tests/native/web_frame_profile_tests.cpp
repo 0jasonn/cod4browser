@@ -58,6 +58,23 @@ int main()
         assert(timing.Advance(12u, 60) == 20); // monotonic uint32 wrap
     }
 
+    {
+        WebFrameTiming timing;
+        timing.Advance(100u, 125);
+        assert(timing.Advance(105u, 125) == 0);
+        // Loading ends after six seconds, with five milliseconds of admission
+        // debt before it. Neither belongs to the new map's simulation.
+        assert(timing.Advance(6100u, 125, 6100u) == 0);
+        assert(timing.Advance(6107u, 125, 6100u) == 0);
+        assert(timing.Advance(6108u, 125, 6100u) == 8);
+        assert(timing.Advance(8108u, 125, 6100u) == 2000);
+        // A restart resets the same clock; keep time spent after its reset.
+        assert(timing.Advance(12020u, 125, 12000u) == 20);
+        assert(timing.Advance(12020u, 125, 12000u) == 0);
+        assert(timing.Advance(UINT32_MAX - 7u, 125, UINT32_MAX - 7u) == 0);
+        assert(timing.Advance(12u, 125, UINT32_MAX - 7u) == 20);
+    }
+
     constexpr WebFrameProfileGpuStage stages[] = {
         WebFrameProfileGpuStage::World,
         WebFrameProfileGpuStage::StaticModels,

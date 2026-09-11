@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <new>
+#include <limits>
 #include <utility>
 
 namespace
@@ -25,6 +26,7 @@ constexpr std::uint32_t TECHNIQUE_EMISSIVE_INDEX = 5u;
 std::array<std::array<float, 3u>, WEB_RENDERER_PARTICLE_CLOUD_PARTICLES>
     g_particleCloudLayout{};
 bool g_particleCloudLayoutReady = false;
+std::uint32_t g_particleCloudLayoutGeneration = 0;
 
 void GenerateParticleCloudLayout() noexcept
 {
@@ -52,6 +54,7 @@ void GenerateParticleCloudLayout() noexcept
         }
     }
     g_particleCloudLayoutReady = true;
+    if (++g_particleCloudLayoutGeneration == 0) ++g_particleCloudLayoutGeneration;
 }
 
 bool Finite3(const float value[3]) noexcept
@@ -358,6 +361,85 @@ WebRendererParticleCloudSceneResult BuildOne(
 void WebRenderer_InitializeParticleCloudLayout() noexcept
 {
     GenerateParticleCloudLayout();
+}
+
+std::span<const std::array<float, 3>> WebRenderer_ParticleCloudLayout() noexcept
+{
+    if (!g_particleCloudLayoutReady) GenerateParticleCloudLayout();
+    return g_particleCloudLayout;
+}
+
+std::uint32_t WebRenderer_ParticleCloudLayoutGeneration() noexcept
+{
+    WebRenderer_ParticleCloudLayout();
+    return g_particleCloudLayoutGeneration;
+}
+
+bool WebRenderer_ParticleCloudDrawIsFinite(
+    const WebRendererParticleCloudDrawDesc &draw) noexcept
+{
+    if (!Finite3(draw.origin) || !FiniteAxis(draw.axis) ||
+        !std::isfinite(draw.scale) || draw.scale <= 0 ||
+        !Finite3(draw.billboardAxis[0]) || !Finite3(draw.billboardAxis[1])) return false;
+    for (float component : draw.color)
+        if (!std::isfinite(component) || component < 0 || component > 1) return false;
+    // Lattice centers lie within [-1, 1]. Bound every intermediate addition
+    // with ample rounding headroom. Extreme finite inputs use the exact old
+    // per-corner arithmetic, retaining its acceptance/overflow behavior.
+    bool bounded = true;
+    for (unsigned row = 0; row < 3; ++row)
+    {
+        const double axes = std::fabs(double(draw.axis[0][row])) +
+            std::fabs(double(draw.axis[1][row])) + std::fabs(double(draw.axis[2][row]));
+        const double bound = std::fabs(double(draw.origin[row])) + axes * draw.scale +
+            0.5 * (std::fabs(double(draw.billboardAxis[0][row])) +
+                std::fabs(double(draw.billboardAxis[1][row])));
+        bounded &= std::max(axes, bound) < double(std::numeric_limits<float>::max()) * 0.25;
+    }
+    if (bounded) return true;
+    for (const auto &local : WebRenderer_ParticleCloudLayout())
+        for (unsigned corner = 0; corner < 4; ++corner)
+            for (unsigned row = 0; row < 3; ++row)
+            {
+                const float transformed = draw.axis[0][row] * local[0] +
+                    draw.axis[1][row] * local[1] + draw.axis[2][row] * local[2];
+                float position = draw.origin[row] + transformed * draw.scale;
+                position += draw.billboardAxis[0][row] * (corner >= 2 ? 0.5f : -0.5f);
+                position += draw.billboardAxis[1][row] * (corner & 1 ? 0.5f : -0.5f);
+                if (!std::isfinite(position)) return false;
+            }
+    return true;
+}
+
+WebRendererParticleCloudSceneResult WebRenderer_BuildParticleCloudDraw(
+    const WebRendererParticleCloudSubmission &submission,
+    const WebRendererParticleCloudView &view,
+    WebRendererParticleCloudDrawDesc &draw,
+    WebRendererWorldBatchDesc &batch)
+{
+    const auto &cloud = submission.cloud;
+    std::uint32_t state[2];
+    if (!submission.material || !PlacementIsValid(cloud.placement) ||
+        !Finite3(cloud.endpos) || !Finite3(view.origin) || !FiniteAxis(view.axis) ||
+        !SelectTechnique(submission.material, state))
+        return WebRendererParticleCloudSceneResult::InvalidSubmission;
+    WebRendererParticleCloudDrawDesc candidate;
+    std::copy_n(cloud.placement.base.origin, 3, candidate.origin);
+    Q_UnitQuatToAxis(cloud.placement.base.quat, candidate.axis);
+    candidate.scale = cloud.placement.scale;
+    if (!BuildCloudAxes(cloud, view, candidate.billboardAxis[0], candidate.billboardAxis[1]))
+        return WebRendererParticleCloudSceneResult::InvalidSubmission;
+    candidate.color[0] = float((cloud.color.packed >> 16u) & 0xffu) * BYTE_TO_UNIT;
+    candidate.color[1] = float((cloud.color.packed >> 8u) & 0xffu) * BYTE_TO_UNIT;
+    candidate.color[2] = float(cloud.color.packed & 0xffu) * BYTE_TO_UNIT;
+    candidate.color[3] = float((cloud.color.packed >> 24u) & 0xffu) * BYTE_TO_UNIT;
+    if (!WebRenderer_ParticleCloudDrawIsFinite(candidate))
+        return WebRendererParticleCloudSceneResult::InvalidSubmission;
+    draw = candidate;
+    batch = MakeDraw(submission.material);
+    batch.indexCount = WEB_RENDERER_PARTICLE_CLOUD_INDICES;
+    batch.particleCloud = &draw;
+    return WebRendererParticleCloudSceneResult::Success;
 }
 
 WebRendererParticleCloudRetainResult

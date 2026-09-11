@@ -442,6 +442,17 @@ void TestPassTextureBindings()
         }
         apply(aliases);
         apply(aliases);
+        for (std::size_t i = 0; i < aliases.size(); ++i)
+        {
+            auto disabled = aliases;
+            disabled[i].enabled = false;
+            apply(disabled);
+            apply(aliases);
+            auto split = aliases;
+            split[i].texture = 7u;
+            apply(split);
+            apply(aliases);
+        }
         std::swap(aliases.front(), aliases.back());
         apply(aliases); // Different family ordering changes an aliased object's last sampler.
         apply(aliases);
@@ -483,6 +494,44 @@ void TestStaticInstanceState()
     Require(state.NeedsRange(3u, 4u, 0u), "binding or direct attribute override invalidates reuse");
     state = {}; // Pass boundary and context recovery may reuse GL object names.
     Require(state.NeedsRange(3u, 4u, 0u), "new pass restores attributes even with reused GL names");
+}
+
+void TestUiDrawMerging()
+{
+    WebRendererUiBatchDesc a{};
+    a.indexCount = 6u;
+    a.materialIdentity = reinterpret_cast<const Material *>(1);
+    a.image = reinterpret_cast<const GfxImage *>(1);
+    auto b = a;
+    b.firstIndex = 6u;
+    Require(WebRenderer_CanMergeUiDraws(a, b), "adjacent identical UI quads batch");
+    const auto barrier = [&](auto change) {
+        auto next = b;
+        change(next);
+        Require(!WebRenderer_CanMergeUiDraws(a, next), "changed UI state breaks the batch");
+    };
+    barrier([](auto &v) { v.firstIndex = 9u; });
+    barrier([](auto &v) { v.indexCount = 0u; });
+    barrier([](auto &v) { v.indexCount = 4u; });
+    barrier([](auto &v) { v.materialIdentity = nullptr; });
+    barrier([](auto &v) { v.image = nullptr; });
+    barrier([](auto &v) { ++v.samplerState; });
+    barrier([](auto &v) { v.hasMaterialState = true; });
+    for (unsigned word = 0; word < 2; ++word)
+        barrier([&](auto &v) { ++v.stateBits[word]; });
+    for (unsigned component = 0; component < 4; ++component)
+        barrier([&](auto &v) { v.color[component] = 0.5f; });
+    for (const auto command : {WebRendererUiCommand::SaveScreen,
+            WebRendererUiCommand::ShellShockBlurred, WebRendererUiCommand::ShellShockFlashed})
+    {
+        barrier([&](auto &v) { v.savedScreen.command = command; });
+        auto previous = a;
+        previous.savedScreen.command = command;
+        Require(!WebRenderer_CanMergeUiDraws(previous, b), "feedback also breaks the following batch");
+    }
+    a.firstIndex = UINT32_MAX - 5u;
+    b.firstIndex = 0u;
+    Require(!WebRenderer_CanMergeUiDraws(a, b), "index wrap is not adjacency");
 }
 
 void TestDynamicDrawState()
@@ -556,11 +605,35 @@ void TestDynamicDrawState()
         Require(!state.NeedsFeatures(enabled), "repeated feature group can be omitted");
         Require(state.NeedsFeatures(disabled), "disabling a feature must upload");
     }
+    // Disabled, directional, local spot/omni and shadowed/unshadowed sun
+    // transitions must all reach GL; only identical consecutive keys reuse it.
+    for (const auto &key : std::array<std::array<std::uint8_t, 3>, 9>{{
+        {0, 0, 0}, {0, 1, 0}, {2, 1, 0}, {3, 1, 0}, {3, 2, 0},
+        {3, 3, 0}, {0, 0, 1}, {0, 0, 2}, {0, 0, 0}}})
+    {
+        Require(state.NeedsLighting(key[0], key[1], key[2]), "lighting transition uploads");
+        Require(!state.NeedsLighting(key[0], key[1], key[2]), "repeated light reuses uniforms and shadow binding");
+    }
+    Require(state.NeedsRaster(0, 0, false, false), "initial fallback raster state applies");
+    Require(!state.NeedsRaster(0, 0, false, false), "identical raster state reuses GL state");
+    Require(state.NeedsRaster(0, 0, true, false), "canonical zero bits differ from fallback defaults");
+    Require(state.NeedsRaster(0, 0, true, true), "FloatZ enforces its blend and color masks");
+    for (unsigned word = 0; word < 2; ++word)
+        for (unsigned bit = 0; bit < 32; ++bit)
+        {
+            const auto a = word == 0 ? 1u << bit : 0u;
+            const auto b = word == 1 ? 1u << bit : 0u;
+            Require(state.NeedsRaster(a, b, true, false), "authored raster transition applies");
+            Require(!state.NeedsRaster(a, b, true, false), "unchanged authored state reuses GL state");
+        }
+    Require(state.NeedsRaster(0, 0, false, false), "fallback state restores after authored state");
     // Sun sprite depth overrides and a new camera pass/frame/context invalidate
-    // all three groups even when the requested values are identical.
+    // every group even when the requested values are identical.
     state.Reset();
     Require(state.NeedsProjection(depthHack.data()) && state.NeedsMaterial(differentDraw) &&
-        state.NeedsFeatures(disabled), "reset cannot retain any stale GL state");
+        state.NeedsFeatures(disabled) && state.NeedsLighting(0, 0, 0) &&
+        state.NeedsRaster(0, 0, false, false),
+        "reset cannot retain any stale GL state");
 }
 
 void TestShadowState()
@@ -657,6 +730,17 @@ void TestShadowFamilyErrors()
     };
     exercise.template operator()<false>();
     exercise.template operator()<true>();
+    for (bool submittedSun : {false, true})
+        for (bool submittedSpot : {false, true})
+            for (bool clean : {false, true})
+            {
+                bool sun = submittedSun, spot = submittedSpot;
+                unsigned checks = 0;
+                WebRenderer_CompleteShadowMaps(sun, spot, [&] { ++checks; return clean; });
+                Require(checks == 1 && sun == (submittedSun && clean) &&
+                    spot == (submittedSpot && clean),
+                    "shadow phase drains once and never publishes failed or absent maps");
+            }
 }
 
 void TestObjectiveMaterial()
@@ -810,6 +894,7 @@ int main()
     runner.Run("static instance state transitions", TestStaticInstanceState);
     runner.Run("canonical shadow light history", TestShadowLightHistory);
     runner.Run("dynamic draw state transitions", TestDynamicDrawState);
+    runner.Run("ordered UI draw merging", TestUiDrawMerging);
     runner.Run("shadow state transitions", TestShadowState);
     runner.Run("shadow family error boundaries", TestShadowFamilyErrors);
     runner.Run("dynamic shadow bounds eligibility", TestDynamicShadowBoundsEligibility);

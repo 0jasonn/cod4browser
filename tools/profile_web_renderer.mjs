@@ -49,7 +49,8 @@ const provenance = { verified: true, receiptSha256: sha256(await readFile(receip
 const baseUrl = process.env.KISAK_PROFILE_URL ?? 'http://127.0.0.1:8051/';
 assert(process.env.KISAK_COD4_RETAIL_ROOT, 'owned installation root is required');
 const context = await chromium.launchPersistentContext('', {
-    channel: 'chrome', headless: false, viewport: { width: 1920, height: 1080 },
+    channel: 'chrome', headless: true, args: ['--mute-audio'],
+    viewport: { width: 1920, height: 1080 },
     deviceScaleFactor: 1,
 });
 const browser = context.browser();
@@ -85,8 +86,10 @@ try {
     await page.addInitScript(() => {
         Object.defineProperty(globalThis, 'showDirectoryPicker', { configurable: true, value: undefined });
         globalThis.__dobj = { frames: [], profiles: [], logs: [], memory: [], foreground: [],
+            lifecycle: [], movies: [],
             collecting: false, presentation: [], presentationOverflow: false, graphicsSnapshots: {}, graphicsPhase: null };
-        for (const [name, key] of [['renderer-scene-frame', 'frames'], ['frame-profile', 'profiles'],
+        for (const [name, key] of [['engine-lifecycle', 'lifecycle'], ['cinematic', 'movies'],
+            ['renderer-scene-frame', 'frames'], ['frame-profile', 'profiles'],
             ['renderer-memory', 'memory']]) addEventListener(`kisakcod:${name}`, event => {
             const list = __dobj[key];
             list.push({ ...structuredClone(event.detail), hostObservedMs: performance.now() });
@@ -151,7 +154,6 @@ try {
     const cdp = await browser.newBrowserCDPSession();
     const { gpu: systemGpu, modelName, modelVersion } = await cdp.send('SystemInfo.getInfo');
     await cdp.detach();
-    await page.bringToFront();
     const display = await page.evaluate(async () => {
         const times = [];
         await new Promise(resolve => {
@@ -235,16 +237,21 @@ try {
                 __profileViews.push(structuredClone(detail));
         });
     }, { production, paused, realtime, map, movingCamera: option === 'moving-camera', timeWindow, realtimeCamera });
-    await page.bringToFront();
     await page.evaluate(() => {
         __dobj.collecting = true;
         __dobj.foreground = [{ observedMs: performance.now(), visibilityState: document.visibilityState, pageFocused: document.hasFocus() }];
         __dobj.profiles = [];
         __dobj.presentation = [];
     });
-    const mapCommand = `${water === '1' ? 'r_drawWater 1; ' : ''}com_maxfps ${maxFps}; set sv_mapSeed 1; devmap ${map}; fixedtime ${realtime ? 0 : 16}${realtime ? '' : '; cg_drawFPS 0'}`;
+    const mapCommand = `${water === '1' ? 'r_drawWater 1; ' : ''}com_maxfps ${maxFps}; set sv_mapSeed 1; set ui_autoContinue 1; devmap ${map}; fixedtime ${realtime ? 0 : 16}${realtime ? '' : '; cg_drawFPS 0'}`;
     stage = `${map} ${mode} window`;
     await command(mapCommand);
+    // Canonical UI_AutoContinue releases pregame only when loading finishes.
+    // An asynchronous Escape can arrive after that transition and open pause.
+    await page.waitForFunction(() =>
+        ['CL_InitCGame complete', 'SV_InitGameProgs complete'].every(stage =>
+            __dobj.lifecycle.some(event => event.stage === stage)), null, { timeout: 300000 });
+    stage = `${map} ${mode} window`;
     let observedPauseState;
     if (paused && !production) {
         stage = 'canonical pause admission';
@@ -266,7 +273,8 @@ try {
         workload = validateActiveWorkload(views, frameTiming);
     } else workload = { mode: 'realtime', requestedMapSeed: 1, fixedtime: 0,
         minimumCanonicalStartTime: 45000, durationMilliseconds: 60000 };
-    workload = { ...workload, map, requestedMaxFps: maxFps, movingCamera: option === 'moving-camera',
+    workload = { ...workload, map, requestedMaxFps: maxFps, requestedIntroSkip: true, introSkipMethod: 'ui_autoContinue',
+        movingCamera: option === 'moving-camera',
         ...(!realtime ? { requestedFpsOverlay: 0 } : {}),
         ...(paused ? { requestedCinematicFullscreen: 0, observedPauseState } : {}),
         ...(realtimeCamera ? { requestedCamera: realtimeCamera, trace: views } : {}),
@@ -351,7 +359,8 @@ try {
         scope: 'Renderer counters are separate overlapping populations; Wasm capacity is sampled on every completed clean frame. No summed process-memory total.' };
 
     const renderSize = await engineWorker.evaluate(() => ({ width: __KISAKCOD_OFFSCREEN_CANVAS__.width, height: __KISAKCOD_OFFSCREEN_CANVAS__.height }));
-    const environment = { buildKind, browser: 'Chrome', version: browser.version(), headless: false,
+    const environment = { buildKind, browser: 'Chrome', version: browser.version(), headless: true,
+        executionMode: 'headless-muted', audioMuted: true,
         processor: cpus()[0].model, totalSystemMemoryBytes: totalmem(), gpu, systemGpu, modelName, modelVersion,
         viewport: { width: 1920, height: 1080 }, renderSize, screen: display.screen,
         displayCadence: summarizeProfileSamples(display.intervals), displayCadenceTargetMs: cadenceTarget ?? null,
@@ -403,6 +412,7 @@ try {
             windowStartEpochMs: windowStart, windowEndEpochMs: windowEnd,
             intervals: summarizeProfileSamples(presentationTimes.slice(1).map((at, index) => at - presentationTimes[index])) },
         methodology: { command: mapCommand, warmupWorldFrames: frameTiming.samples[0].scene.generation,
+            introSkipMethod: 'canonical UI_AutoContinue',
             canonicalWorkWindow: timeWindow, engineWorker: true,
             simulation: 'canonical fixedtime 16 for matched work; fixedtime 0 for realtime qualification',
             canonicalFrameCpuScope: 'canonical server/client frame including scene/frontend, uploads and sound; rendererSubmissionCpu measures the later WebGL draw submission separately',

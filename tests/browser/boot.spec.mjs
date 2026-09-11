@@ -337,6 +337,7 @@ test("dynamic upload errors preserve the published command and release staged ob
     for (const [fault, variant, batchedChecks, separateChecks] of [
         [0, 0, 2, 4], [1, 0], [2, 0], [3, 0], [4, 0, 3, 5],
         [1, 1], [2, 1], [5, 1], [0, 2, 2, 2],
+        [0, 3, 2, 4], [1, 3], [2, 3], [4, 3, 3, 5],
     ]) {
         const result = await probe(fault, variant);
         expect(result & 0xffff, `fault=${fault}, variant=${variant}`).toBe(0);
@@ -354,4 +355,68 @@ test("dynamic upload errors preserve the published command and release staged ob
     await expect.poll(() => page.evaluate(() =>
         globalThis.__KISAKCOD_WEB__?.state)).toBe("running");
     expect(await probe(-1)).toBe(0);
+});
+
+test("renderer memory identity is cached only within a live context generation", async ({ page }) => {
+    await page.addInitScript(() => {
+        globalThis.__KISAKCOD_WORKER_TEST_CONFIG__ = { observeRendererIdentity: true };
+        globalThis.addEventListener("kisakcod:renderer-memory", event => {
+            globalThis.__identityMemory = structuredClone(event.detail);
+        });
+    });
+    await boot(page);
+    await submitTestSurface(page);
+    const control = values => page.evaluate(values =>
+        globalThis.__KISAKCOD_WEB__.module.testControl(values), values);
+    const call = (name) => page.evaluate(name => globalThis.__KISAKCOD_WEB__.module.call(name), name);
+    const snapshot = async () => {
+        await call("_KisakWeb_TestEmitRendererMemory");
+        return page.evaluate(() => globalThis.__identityMemory.webglRendererIdentity);
+    };
+    const counters = () => control({ snapshotRendererIdentity: true });
+    const original = await snapshot();
+    expect(original.version).toContain("WebGL");
+    const before = await counters();
+    expect(await snapshot()).toEqual(original);
+    await call("_KisakWeb_TestUnloadWorldResources");
+    expect(await snapshot()).toEqual(original);
+    expect(await counters()).toEqual(before);
+
+    // A new generation can retain the same JavaScript WebGL object. Exercise
+    // ordinary identity, missing extension, and an exception that must retry.
+    for (const [revision, missing, failing] of [[1, false, false], [2, true, false], [3, false, true]]) {
+        await submitTestSurface(page);
+        const queriesBeforeLoss = await counters();
+        expect(await call("_KisakWeb_TestLoseWebGLContext")).toBe(1);
+        await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state)).toBe("renderer-lost");
+        expect(await snapshot()).toBeNull();
+        expect(await counters()).toEqual(queriesBeforeLoss);
+        await control({ rendererIdentityRevision: revision,
+            hideRendererIdentityExtension: missing, failRendererIdentityQuery: failing });
+        expect(await call("_KisakWeb_TestRestoreWebGLContext")).toBe(1);
+        await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state)).toBe("running");
+        const restored = await snapshot();
+        if (failing) {
+            expect(restored).toBeNull();
+            await control({ failRendererIdentityQuery: false });
+            expect((await snapshot()).unmaskedRenderer).toBe(`ANGLE test GPU ${revision}`);
+        } else if (missing) {
+            expect(restored).toMatchObject({ unmaskedVendor: null, unmaskedRenderer: null,
+                angleBackend: null, hardwareSoftwareIndication: "unknown" });
+            expect(restored.vendor).toEqual(expect.any(String));
+            expect(restored.renderer).toEqual(expect.any(String));
+            expect(restored.version).toContain("WebGL");
+        } else {
+            expect(restored.unmaskedRenderer).toBe(`ANGLE test GPU ${revision}`);
+        }
+        const refreshed = await counters();
+        expect(refreshed.queries).toBeGreaterThan(queriesBeforeLoss.queries);
+        expect(refreshed.contexts).toBe(before.contexts);
+        await snapshot();
+        expect(await counters()).toEqual(refreshed);
+    }
+    const beforeShutdown = await counters();
+    expect(await call("_KisakWeb_TestShutdownRendererMemory")).toBe(1);
+    expect(await snapshot()).toBeNull();
+    expect(await counters()).toEqual(beforeShutdown);
 });

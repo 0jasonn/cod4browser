@@ -8,8 +8,18 @@
 // Keep fractional admission phase without replaying it as simulation time.
 struct WebFrameTiming
 {
-    int Advance(std::uint32_t now, int maximumFps) noexcept
+    int Advance(std::uint32_t now, int maximumFps,
+        std::uint32_t resetTime = 0u) noexcept
     {
+        // Com_ResetFrametime excludes map loading from the native frame clock.
+        // Preserve elapsed time after that reset, including real gameplay stalls.
+        if (resetTime != canonicalResetTime)
+        {
+            *this = {};
+            canonicalResetTime = resetTime;
+            initialized = true;
+            previous = resetTime;
+        }
         if (!initialized)
         {
             initialized = true;
@@ -36,6 +46,7 @@ struct WebFrameTiming
     }
 
     bool initialized = false;
+    std::uint32_t canonicalResetTime = 0u;
     std::uint32_t previous = 0u;
     std::uint32_t simulationElapsed = 0u;
     double admissionRemainder = 0.0;

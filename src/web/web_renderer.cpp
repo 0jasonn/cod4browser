@@ -1,4 +1,5 @@
 #include <web/web_renderer_static_model_scene.h>
+#include <web/web_renderer_particle_cloud_scene.h>
 #include <web/web_renderer.h>
 #include <web/web_frame_profile.h>
 #include <web/web_renderer_surface_storage.h>
@@ -61,6 +62,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <new>
 #include <span>
 #include <string>
@@ -143,6 +145,7 @@ struct WebRendererRetainedSkyImage
 
 struct WebRendererRetainedWorldBatch
 {
+    std::shared_ptr<const WebRendererParticleCloudDrawDesc> particleCloud;
     std::uint32_t firstIndex = 0u;
     std::uint32_t indexCount = 0u;
     std::uint32_t surfaceCount = 0u;
@@ -195,10 +198,7 @@ struct WebRendererRetainedWorldBatch
     // Canonical material draw-surface key with current light/probe/depth-hack
     // inputs and no object ID. Camera ordering owns only this numeric copy.
     std::uint64_t drawSortKey = 0u;
-    std::string vertexShaderName;
-    std::uint32_t vertexShaderProgramHash = 0u;
-    std::string pixelShaderName;
-    std::uint32_t pixelShaderProgramHash = 0u;
+    bool spotLightmapShader = false;
     float modelLightingCoordinates[3]{};
     std::vector<complex_s> waterH0;
     std::vector<float> waterWTerm;
@@ -303,6 +303,14 @@ struct WebRendererDynamicDraw
     std::uint8_t spotShadowVisibilityMask = 0xffu;
 };
 
+struct WebRendererRetainedCloudGeometry
+{
+    std::uint32_t generation = 0;
+    GLuint vertexArray = 0, vertexBuffer = 0, indexBuffer = 0;
+    std::vector<WebRendererSurfaceVertex> vertices;
+    std::vector<std::uint32_t> indices;
+};
+
 enum class WebRendererDynamicLightDrawKind : std::uint8_t
 {
     World,
@@ -319,8 +327,79 @@ struct WebRendererDynamicLightDrawCommand
     std::uint64_t sortKey;
 };
 
-struct WebRendererState
+struct WebRendererCameraProgram
 {
+    GLuint program = 0;
+    GLint aspectUniform = -1;
+    GLint textureUniform = -1;
+    GLint textureEnabledUniform = -1;
+    GLint detailMapUniform = -1;
+    GLint detailMapEnabledUniform = -1;
+    GLint detailScaleUniform = -1;
+    GLint normalMapUniform = -1;
+    GLint normalMapEnabledUniform = -1;
+    GLint specularMapUniform = -1;
+    GLint specularMapEnabledUniform = -1;
+    GLint viewProjectionUniform = -1;
+    GLint sceneFallbackUniform = -1;
+    GLint lightmapEnabledUniform = -1;
+    GLint secondaryLightmapUniform = -1;
+    GLint secondaryLightmapEnabledUniform = -1;
+    GLint modelLightingUniform = -1;
+    GLint modelLightingEnabledUniform = -1;
+    GLint modelLightingBaseCoordinatesUniform = -1;
+    GLint modelLightingLookupScaleUniform = -1;
+    GLint premultiplyAlphaUniform = -1;
+    GLint materialModeUniform = -1;
+    GLint pickupSheenUniform = -1;
+    GLint softFlagsUniform = -1, softFeatherUniform = -1;
+    GLint softEyeUniform = -1, softScreenUniform = -1, softFogUniform = -1;
+    GLint floatZUniform = -1, depthSignUniform = -1;
+    GLint distortionScaleUniform = -1, postSunUniform = -1;
+    GLint outdoorLookupMatrixUniform = -1, outdoorUniform = -1;
+    GLint mipBiasUniform = -1;
+    GLint falloffParmsUniform = -1;
+    GLint falloffBeginColorUniform = -1;
+    GLint falloffEndColorUniform = -1;
+    GLint alphaTestUniform = -1;
+    GLint instanceEnabledUniform = -1;
+    GLint instanceTextureUniform = -1;
+    GLint instanceBaseUniform = -1;
+    GLint cloudScaleUniform = -1;
+    GLint cloudAxesUniform = -1;
+    GLint uiColorUniform = -1;
+    GLint fogEnabledUniform = -1;
+    GLint viewOriginUniform = -1;
+    GLint fogColorUniform = -1;
+    GLint fogParamsUniform = -1;
+    GLint shadowMapUniform = -1;
+    GLint shadowFarMapUniform = -1;
+    GLint shadowMatrixUniform = -1;
+    GLint shadowFarMatrixUniform = -1;
+    GLint sunLightingModeUniform = -1;
+    GLint sunSpecularScaleUniform = -1;
+    GLint sunDirectionUniform = -1;
+    GLint sunColorUniform = -1;
+    GLint primaryLightmapUniform = -1;
+    GLint primaryLightFalloffPlacementUniform = -1;
+    GLint primaryLightEnabledUniform = -1;
+    GLint primaryLightPositionRadiusUniform = -1;
+    GLint primaryLightDiffuseUniform = -1;
+    GLint primaryLightSpecularUniform = -1;
+    GLint primaryLightSpotDirectionUniform = -1;
+    GLint primaryLightSpotFactorsUniform = -1;
+    GLint spotShadowMapUniform = -1;
+    GLint spotShadowMatrixUniform = -1;
+    GLint spotShadowEnabledUniform = -1;
+    GLint waterMapUniform = -1;
+    GLint reflectionProbeUniform = -1;
+    GLint envMapParmsUniform = -1;
+    GLint waterColorUniform = -1;
+};
+
+struct WebRendererState : WebRendererCameraProgram
+{
+    WebRendererCameraProgram floatZProgram;
     std::array<GfxLight, 4> dynamicLights{};
     std::array<std::vector<WebRendererWorldCameraRange>, 4> worldDynamicLightRanges;
     std::uint32_t dynamicLightCount = 0;
@@ -332,7 +411,6 @@ struct WebRendererState
     float maxTextureAnisotropy = 1.0f;
     bool textureAnisotropySupported = false;
     WebRendererTextureParameters textureParameters;
-    GLuint program = 0;
     GLuint skyProgram = 0;
     GLuint postProcessProgram = 0;
     GLuint glowProgram = 0;
@@ -392,73 +470,14 @@ struct WebRendererState
     GLuint vertexBuffer = 0;
     GLuint indexBuffer = 0;
     GLuint texture = 0;
-    GLint aspectUniform = -1;
-    GLint textureUniform = -1;
-    GLint textureEnabledUniform = -1;
-    GLint detailMapUniform = -1;
-    GLint detailMapEnabledUniform = -1;
-    GLint detailScaleUniform = -1;
-    GLint normalMapUniform = -1;
-    GLint normalMapEnabledUniform = -1;
-    GLint specularMapUniform = -1;
-    GLint specularMapEnabledUniform = -1;
-    GLint viewProjectionUniform = -1;
-    GLint sceneFallbackUniform = -1;
-    GLint lightmapEnabledUniform = -1;
-    GLint secondaryLightmapUniform = -1;
-    GLint secondaryLightmapEnabledUniform = -1;
-    GLint modelLightingUniform = -1;
-    GLint modelLightingEnabledUniform = -1;
-    GLint modelLightingBaseCoordinatesUniform = -1;
-    GLint modelLightingLookupScaleUniform = -1;
-    GLint premultiplyAlphaUniform = -1;
-    GLint materialModeUniform = -1;
-    GLint pickupSheenUniform = -1;
-    GLint softFlagsUniform = -1, softFeatherUniform = -1;
-    GLint softEyeUniform = -1, softScreenUniform = -1, softFogUniform = -1;
-    GLint floatZUniform = -1, depthSignUniform = -1;
-    GLint distortionScaleUniform = -1, postSunUniform = -1;
-    GLint outdoorLookupMatrixUniform = -1, outdoorUniform = -1;
-    GLint mipBiasUniform = -1;
-    GLint falloffParmsUniform = -1;
-    GLint falloffBeginColorUniform = -1;
-    GLint falloffEndColorUniform = -1;
-    GLint alphaTestUniform = -1;
-    GLint instanceEnabledUniform = -1;
-    GLint uiColorUniform = -1;
-    GLint fogEnabledUniform = -1;
-    GLint viewOriginUniform = -1;
-    GLint fogColorUniform = -1;
-    GLint fogParamsUniform = -1;
-    GLint shadowMapUniform = -1;
-    GLint shadowFarMapUniform = -1;
-    GLint shadowMatrixUniform = -1;
-    GLint shadowFarMatrixUniform = -1;
-    GLint sunLightingModeUniform = -1;
-    GLint sunSpecularScaleUniform = -1;
-    GLint sunDirectionUniform = -1;
-    GLint sunColorUniform = -1;
-    GLint primaryLightmapUniform = -1;
-    GLint primaryLightFalloffPlacementUniform = -1;
-    GLint primaryLightEnabledUniform = -1;
-    GLint primaryLightPositionRadiusUniform = -1;
-    GLint primaryLightDiffuseUniform = -1;
-    GLint primaryLightSpecularUniform = -1;
-    GLint primaryLightSpotDirectionUniform = -1;
-    GLint primaryLightSpotFactorsUniform = -1;
-    GLint spotShadowMapUniform = -1;
-    GLint spotShadowMatrixUniform = -1;
-    GLint spotShadowEnabledUniform = -1;
-    GLint waterMapUniform = -1;
-    GLint reflectionProbeUniform = -1;
-    GLint envMapParmsUniform = -1;
-    GLint waterColorUniform = -1;
     GLint shadowDepthMatrixUniform = -1;
     GLint shadowDepthTextureUniform = -1;
     GLint shadowMipBiasUniform = -1;
     GLint shadowDepthTextureEnabledUniform = -1;
     GLint shadowDepthAlphaTestUniform = -1;
     GLint shadowDepthInstanceEnabledUniform = -1;
+    GLint shadowInstanceTextureUniform = -1;
+    GLint shadowInstanceBaseUniform = -1;
     GLint skyTextureUniform = -1;
     GLint skyMipBiasUniform = -1;
     GLint skyTanHalfFovUniform = -1;
@@ -523,7 +542,7 @@ struct WebRendererState
     GLuint staticModelVertexArray = 0u;
     GLuint staticModelVertexBuffer = 0u;
     GLuint staticModelIndexBuffer = 0u;
-    GLuint staticModelInstanceBuffer = 0u;
+    GLuint staticModelInstanceTexture = 0u;
     std::vector<WebRendererSurfaceVertex> retainedStaticModelVertices;
     std::vector<std::uint32_t> retainedStaticModelIndices;
     std::vector<WebRendererStaticModelInstanceDesc>
@@ -548,6 +567,10 @@ struct WebRendererState
     GLuint dynamicModelVertexArray = 0u;
     GLuint dynamicModelVertexBuffer = 0u;
     GLuint dynamicModelIndexBuffer = 0u;
+    // Spare GPU objects are never the published command. Uploads may replace
+    // their storage; a failed transaction destroys them and preserves the front.
+    std::array<GLuint, 3> dynamicModelSurfaceStaging{};
+    std::size_t dynamicModelGpuStagingBytes = 0u;
     std::vector<WebRendererSurfaceVertex> retainedDynamicModelVertices;
     std::vector<std::uint32_t> retainedDynamicModelIndices;
     // Reuse the previous frame's storage while the current command stays live.
@@ -555,6 +578,7 @@ struct WebRendererState
     std::vector<std::uint32_t> dynamicModelIndexStaging;
     std::vector<WebRendererRetainedWorldBatch> retainedDynamicModelBatches;
     std::vector<WebRendererRetainedBrushGeometry> retainedBrushGeometry;
+    WebRendererRetainedCloudGeometry cloudGeometry;
     std::vector<WebRendererBrushModelInstanceDesc> retainedBrushInstances;
     std::vector<WebRendererDynamicDraw> dynamicDraws;
     std::vector<std::uint32_t> dynamicCameraDrawOrder;
@@ -645,6 +669,26 @@ struct WebRendererState
 };
 
 WebRendererState g_renderer;
+
+// Uniform locations belong to a program. The camera traversal stays shared;
+// a depth pass selects its complete location set, then restores it on all exits.
+class ScopedFloatZProgram
+{
+public:
+    explicit ScopedFloatZProgram(bool enabled) : enabled_(enabled)
+    {
+        if (enabled_) std::swap(static_cast<WebRendererCameraProgram &>(g_renderer),
+            g_renderer.floatZProgram);
+    }
+    ~ScopedFloatZProgram()
+    {
+        if (!enabled_) return;
+        std::swap(static_cast<WebRendererCameraProgram &>(g_renderer), g_renderer.floatZProgram);
+        glUseProgram(g_renderer.program);
+    }
+private:
+    bool enabled_;
+};
 constexpr std::uint8_t FALLBACK_TEXTURE_RGBA[] = {255u, 255u, 255u, 255u};
 bool HandleWebGLContextLost(int, const void *, void *);
 bool HandleWebGLContextRestored(int, const void *, void *);
@@ -656,13 +700,13 @@ void DeleteSurfaceObjects(
     GLuint vertexArray, GLuint vertexBuffer, GLuint indexBuffer);
 void DeleteStaticModelObjects(
     GLuint vertexArray, GLuint vertexBuffer, GLuint indexBuffer,
-    GLuint instanceBuffer);
+    GLuint instanceTexture);
 // Compile-time A/B control; the dynamic draw cache predates this optimization.
 #ifndef KISAK_WEB_REUSE_WORLD_STATIC_STATE
 #define KISAK_WEB_REUSE_WORLD_STATIC_STATE 1
 #endif
 void BindStaticModelInstanceRange(std::uint32_t instanceOffset,
-    WebRendererInstanceState &state);
+    GLint baseUniform, WebRendererInstanceState &state);
 void DeleteBrushModelObjects();
 bool CreateBrushModelObjects();
 const WebRendererRetainedWorldBatch &DynamicDrawBatch(const WebRendererDynamicDraw &draw);
@@ -1711,6 +1755,7 @@ void EmitSurfaceDraw()
 #if KISAK_WEB_DIAGNOSTICS
 EM_JS(void, DispatchRendererMemory, (
     const char *state,
+    std::uint32_t contextGeneration, bool contextAvailable, double gpuStagingGeometryBytes,
     double worldImageRecoveryBytes,
     double staticModelImageRecoveryBytes,
     double dynamicModelImageRecoveryBytes,
@@ -1765,7 +1810,15 @@ EM_JS(void, DispatchRendererMemory, (
         try {
             const gl = (typeof GL !== "undefined" && GL.currentContext)
                 ? GL.currentContext.GLctx : Module.ctx;
-            if (gl) {
+            // Restoration can reuse the WebGL object; the native generation must match too.
+            const cached = Module.kisakRendererMemoryIdentity;
+            if (!contextAvailable || !gl || gl.isContextLost()) {
+                delete Module.kisakRendererMemoryIdentity;
+            } else if (cached?.gl === gl &&
+                cached.generation === contextGeneration) {
+                webglRendererIdentity = { ...cached.identity };
+            } else {
+                delete Module.kisakRendererMemoryIdentity;
                 const extension = gl.getExtension("WEBGL_debug_renderer_info");
                 const unmaskedVendor = extension
                     ? gl.getParameter(extension.UNMASKED_VENDOR_WEBGL) : null;
@@ -1783,6 +1836,9 @@ EM_JS(void, DispatchRendererMemory, (
                     hardwareSoftwareIndication:
                         /swiftshader|llvmpipe|software|basic render/i.test(identity)
                             ? "software" : (unmaskedRenderer ? "hardware-or-driver" : "unknown"),
+                };
+                Module.kisakRendererMemoryIdentity = {
+                    gl, generation: contextGeneration, identity: { ...webglRendererIdentity },
                 };
             }
         } catch (_) {}
@@ -1856,13 +1912,14 @@ EM_JS(void, DispatchRendererMemory, (
                     duplicateDecodeCount,
                     cpuMilliseconds: imageDecodeCpuMilliseconds,
                 },
-                webglRendererIdentity
+                webglRendererIdentity, gpuStagingGeometryBytes
             }
         }));
     });
 #else
 EM_JS(void, DispatchRendererMemory, (
     const char *state,
+    std::uint32_t contextGeneration, bool contextAvailable, double gpuStagingGeometryBytes,
     double worldImageRecoveryBytes,
     double staticModelImageRecoveryBytes,
     double dynamicModelImageRecoveryBytes,
@@ -1879,7 +1936,15 @@ EM_JS(void, DispatchRendererMemory, (
         try {
             const gl = (typeof GL !== "undefined" && GL.currentContext)
                 ? GL.currentContext.GLctx : Module.ctx;
-            if (gl) {
+            // Restoration can reuse the WebGL object; the native generation must match too.
+            const cached = Module.kisakRendererMemoryIdentity;
+            if (!contextAvailable || !gl || gl.isContextLost()) {
+                delete Module.kisakRendererMemoryIdentity;
+            } else if (cached?.gl === gl &&
+                cached.generation === contextGeneration) {
+                webglRendererIdentity = { ...cached.identity };
+            } else {
+                delete Module.kisakRendererMemoryIdentity;
                 const extension = gl.getExtension("WEBGL_debug_renderer_info");
                 const unmaskedVendor = extension
                     ? gl.getParameter(extension.UNMASKED_VENDOR_WEBGL) : null;
@@ -1898,6 +1963,9 @@ EM_JS(void, DispatchRendererMemory, (
                         /swiftshader|llvmpipe|software|basic render/i.test(identity)
                             ? "software" : (unmaskedRenderer ? "hardware-or-driver" : "unknown"),
                 };
+                Module.kisakRendererMemoryIdentity = {
+                    gl, generation: contextGeneration, identity: { ...webglRendererIdentity },
+                };
             }
         } catch (_) {}
         globalThis.dispatchEvent(new CustomEvent("kisakcod:renderer-memory", {
@@ -1915,7 +1983,7 @@ EM_JS(void, DispatchRendererMemory, (
                 shaderProgramCacheEstimateBytes,
                 temporaryUploadBytes,
                 recoveryBudgetBytes,
-                webglRendererIdentity
+                webglRendererIdentity, gpuStagingGeometryBytes
             }
         }));
     });
@@ -2025,6 +2093,10 @@ std::size_t EmitRendererMemory(const char *state, bool sampleAllocator = true)
     for (const auto &geometry : g_renderer.retainedBrushGeometry)
         geometryBytes += geometry.vertices.size() * sizeof(WebRendererSurfaceVertex) +
             geometry.indices.size() * sizeof(std::uint32_t);
+    geometryBytes += g_renderer.cloudGeometry.vertices.size() * sizeof(WebRendererSurfaceVertex) +
+        g_renderer.cloudGeometry.indices.size() * sizeof(std::uint32_t);
+    for (const auto &batch : g_renderer.retainedDynamicModelBatches)
+        if (batch.particleCloud) geometryBytes += sizeof(WebRendererParticleCloudDrawDesc);
     geometryBytes += g_renderer.retainedBrushInstances.size() *
         sizeof(WebRendererBrushModelInstanceDesc) +
         g_renderer.dynamicDraws.size() * sizeof(WebRendererDynamicDraw) +
@@ -2146,6 +2218,9 @@ std::size_t EmitRendererMemory(const char *state, bool sampleAllocator = true)
     }
     DispatchRendererMemory(
         state,
+        g_renderer.contextGeneration,
+        g_renderer.initialized && !g_renderer.contextLost && g_renderer.context > 0,
+        static_cast<double>(g_renderer.dynamicModelGpuStagingBytes),
         static_cast<double>(worldImages.recoveryBytes),
         static_cast<double>(staticModelImages.recoveryBytes),
         static_cast<double>(dynamicModelImages.recoveryBytes),
@@ -2206,6 +2281,9 @@ std::size_t EmitRendererMemory(const char *state, bool sampleAllocator = true)
     (void)sampleAllocator;
     DispatchRendererMemory(
         state,
+        g_renderer.contextGeneration,
+        g_renderer.initialized && !g_renderer.contextLost && g_renderer.context > 0,
+        static_cast<double>(g_renderer.dynamicModelGpuStagingBytes),
         static_cast<double>(worldImages.recoveryBytes),
         static_cast<double>(staticModelImages.recoveryBytes),
         static_cast<double>(dynamicModelImages.recoveryBytes),
@@ -2228,6 +2306,12 @@ extern "C" EMSCRIPTEN_KEEPALIVE double KisakWeb_TestEmitRendererMemory()
     return static_cast<double>(EmitRendererMemory("diagnostic-snapshot"));
 }
 
+extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestShutdownRendererMemory()
+{
+    WebRenderer_Shutdown();
+    return 1;
+}
+
 extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestUiDrawCount()
 {
     return static_cast<int>(g_renderer.lastUiDrawCount);
@@ -2242,6 +2326,7 @@ void ResetGpuHandles()
     g_renderer.savedScreenWidth = g_renderer.savedScreenHeight = 0;
     g_renderer.savedScreenValid.fill(false);
     g_renderer.program = 0;
+    g_renderer.floatZProgram = {};
     g_renderer.skyProgram = 0;
     g_renderer.postProcessProgram = 0;
     g_renderer.glowProgram = 0;
@@ -2295,12 +2380,16 @@ void ResetGpuHandles()
     g_renderer.staticModelVertexArray = 0u;
     g_renderer.staticModelVertexBuffer = 0u;
     g_renderer.staticModelIndexBuffer = 0u;
-    g_renderer.staticModelInstanceBuffer = 0u;
+    g_renderer.staticModelInstanceTexture = 0u;
     g_renderer.dynamicModelVertexArray = 0u;
     g_renderer.dynamicModelVertexBuffer = 0u;
     g_renderer.dynamicModelIndexBuffer = 0u;
+    g_renderer.dynamicModelSurfaceStaging = {};
+    g_renderer.dynamicModelGpuStagingBytes = 0u;
     for (auto &geometry : g_renderer.retainedBrushGeometry)
         geometry.vertexArray = geometry.vertexBuffer = geometry.indexBuffer = 0u;
+    g_renderer.cloudGeometry.vertexArray = g_renderer.cloudGeometry.vertexBuffer =
+        g_renderer.cloudGeometry.indexBuffer = 0;
     g_renderer.uiVertexArray = 0u;
     g_renderer.uiVertexBuffer = 0u;
     g_renderer.uiIndexBuffer = 0u;
@@ -2335,6 +2424,7 @@ void ResetGpuHandles()
     g_renderer.falloffEndColorUniform = -1;
     g_renderer.alphaTestUniform = -1;
     g_renderer.instanceEnabledUniform = -1;
+    g_renderer.instanceTextureUniform = g_renderer.instanceBaseUniform = -1;
     g_renderer.uiColorUniform = -1;
     g_renderer.fogEnabledUniform = -1;
     g_renderer.viewOriginUniform = -1;
@@ -2369,6 +2459,7 @@ void ResetGpuHandles()
     g_renderer.shadowDepthTextureEnabledUniform = -1;
     g_renderer.shadowDepthAlphaTestUniform = -1;
     g_renderer.shadowDepthInstanceEnabledUniform = -1;
+    g_renderer.shadowInstanceTextureUniform = g_renderer.shadowInstanceBaseUniform = -1;
     g_renderer.skyTextureUniform = -1;
     g_renderer.skyMipBiasUniform = -1;
     g_renderer.skyTanHalfFovUniform = -1;
@@ -2438,10 +2529,19 @@ void ResetGpuHandles()
     g_renderer.retainedDynamicModelLighting.texture = 0u;
 }
 
-GLuint CompileShader(GLenum type, const char *source)
+GLuint CompileShader(GLenum type, const char *source, const char *defines)
 {
     const GLuint shader = glCreateShader(type);
-    glShaderSource(shader, 1, &source, nullptr);
+    if (defines)
+    {
+        // All renderer sources start with their GLSL version line. Definitions
+        // must follow it; retain the same shader body for both camera programs.
+        const char *body = std::strchr(source, '\n') + 1;
+        const char *parts[]{source, defines, body};
+        const GLint lengths[]{static_cast<GLint>(body - source), -1, -1};
+        glShaderSource(shader, 3, parts, lengths);
+    }
+    else glShaderSource(shader, 1, &source, nullptr);
     glCompileShader(shader);
 
     GLint compiled = GL_FALSE;
@@ -2462,10 +2562,11 @@ bool LinkProgram(
     const char *label,
     const char *vertexSource,
     const char *fragmentSource,
-    GLuint &programOut)
+    GLuint &programOut,
+    const char *defines = nullptr)
 {
-    const GLuint vertexShader = CompileShader(GL_VERTEX_SHADER, vertexSource);
-    const GLuint fragmentShader = CompileShader(GL_FRAGMENT_SHADER, fragmentSource);
+    const GLuint vertexShader = CompileShader(GL_VERTEX_SHADER, vertexSource, defines);
+    const GLuint fragmentShader = CompileShader(GL_FRAGMENT_SHADER, fragmentSource, defines);
     if (vertexShader == 0 || fragmentShader == 0)
     {
         glDeleteShader(vertexShader);
@@ -2636,6 +2737,7 @@ void DestroyWebGLContext()
 
     if (WebRendererContext_MakeCurrent(g_renderer.context))
     {
+        glDeleteProgram(g_renderer.floatZProgram.program);
         glDeleteTextures(1, &g_renderer.savedScreenTexture);
         DeleteBrushModelObjects();
         DeleteWorldTextureObjects(g_renderer.retainedWorldImages);
@@ -2648,8 +2750,8 @@ void DestroyWebGLContext()
         g_renderer.retainedSky.texture = 0u;
         DeleteModelLightingTexture(g_renderer.retainedStaticModelLighting);
         DeleteModelLightingTexture(g_renderer.retainedDynamicModelLighting);
-        if (g_renderer.staticModelInstanceBuffer != 0u)
-            glDeleteBuffers(1, &g_renderer.staticModelInstanceBuffer);
+        if (g_renderer.staticModelInstanceTexture != 0u)
+            glDeleteTextures(1, &g_renderer.staticModelInstanceTexture);
         DeleteSurfaceObjects(
             g_renderer.staticModelVertexArray,
             g_renderer.staticModelVertexBuffer,
@@ -2658,6 +2760,8 @@ void DestroyWebGLContext()
             g_renderer.dynamicModelVertexArray,
             g_renderer.dynamicModelVertexBuffer,
             g_renderer.dynamicModelIndexBuffer);
+        DeleteSurfaceObjects(g_renderer.dynamicModelSurfaceStaging[0],
+            g_renderer.dynamicModelSurfaceStaging[1], g_renderer.dynamicModelSurfaceStaging[2]);
         DeleteSurfaceObjects(g_renderer.uiVertexArray,
             g_renderer.uiVertexBuffer, g_renderer.uiIndexBuffer);
         DeletePostProcessTargetObjects(
@@ -2731,10 +2835,10 @@ void DeleteStaticModelObjects(
     GLuint vertexArray,
     GLuint vertexBuffer,
     GLuint indexBuffer,
-    GLuint instanceBuffer)
+    GLuint instanceTexture)
 {
-    if (instanceBuffer != 0u)
-        glDeleteBuffers(1, &instanceBuffer);
+    if (instanceTexture != 0u)
+        glDeleteTextures(1, &instanceTexture);
     DeleteSurfaceObjects(vertexArray, vertexBuffer, indexBuffer);
 }
 
@@ -2772,25 +2876,28 @@ bool CreateSurfaceObjects(
     GLuint &vertexArrayOut,
     GLuint &vertexBufferOut,
     GLuint &indexBufferOut,
-    bool deferErrors = false)
+    bool deferErrors = false,
+    std::array<GLuint, 3> *reusable = nullptr)
 {
     while (!deferErrors && glGetError() != GL_NO_ERROR)
     {
     }
 
-    GLuint vertexArray = 0;
-    GLuint vertexBuffer = 0;
-    GLuint indexBuffer = 0;
-    glGenVertexArrays(1, &vertexArray);
+    const auto previous = reusable ? std::exchange(*reusable, {}) : std::array<GLuint, 3>{};
+    GLuint vertexArray = previous[0];
+    GLuint vertexBuffer = previous[1];
+    GLuint indexBuffer = previous[2];
+    iassert((vertexArray == 0) == (vertexBuffer == 0) && (vertexArray == 0) == (indexBuffer == 0));
+    if (!vertexArray) glGenVertexArrays(1, &vertexArray);
     glBindVertexArray(vertexArray);
-    glGenBuffers(1, &vertexBuffer);
+    if (!vertexBuffer) glGenBuffers(1, &vertexBuffer);
     glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
     glBufferData(
         GL_ARRAY_BUFFER,
         static_cast<GLsizeiptr>(vertices.size() * sizeof(WebRendererSurfaceVertex)),
         vertices.data(),
         GL_STATIC_DRAW);
-    glGenBuffers(1, &indexBuffer);
+    if (!indexBuffer) glGenBuffers(1, &indexBuffer);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
     glBufferData(
         GL_ELEMENT_ARRAY_BUFFER,
@@ -2798,65 +2905,68 @@ bool CreateSurfaceObjects(
         indices.data(),
         GL_STATIC_DRAW);
 
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(
-        0,
-        3,
-        GL_FLOAT,
-        GL_FALSE,
-        sizeof(WebRendererSurfaceVertex),
-        reinterpret_cast<const void *>(offsetof(WebRendererSurfaceVertex, position)));
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(
-        1,
-        4,
-        GL_FLOAT,
-        GL_FALSE,
-        sizeof(WebRendererSurfaceVertex),
-        reinterpret_cast<const void *>(offsetof(WebRendererSurfaceVertex, color)));
-    glEnableVertexAttribArray(2);
-    glVertexAttribPointer(
-        2,
-        2,
-        GL_FLOAT,
-        GL_FALSE,
-        sizeof(WebRendererSurfaceVertex),
-        reinterpret_cast<const void *>(offsetof(WebRendererSurfaceVertex, textureCoordinate)));
-    glEnableVertexAttribArray(3);
-    glVertexAttribPointer(
-        3,
-        2,
-        GL_FLOAT,
-        GL_FALSE,
-        sizeof(WebRendererSurfaceVertex),
-        reinterpret_cast<const void *>(offsetof(WebRendererSurfaceVertex, lightmapCoordinate)));
-    glEnableVertexAttribArray(8);
-    glVertexAttribPointer(
-        8,
-        3,
-        GL_FLOAT,
-        GL_FALSE,
-        sizeof(WebRendererSurfaceVertex),
-        reinterpret_cast<const void *>(
-            offsetof(WebRendererSurfaceVertex, normal)));
-    glEnableVertexAttribArray(10);
-    glVertexAttribPointer(
-        10,
-        3,
-        GL_FLOAT,
-        GL_FALSE,
-        sizeof(WebRendererSurfaceVertex),
-        reinterpret_cast<const void *>(
-            offsetof(WebRendererSurfaceVertex, tangent)));
-    glEnableVertexAttribArray(11);
-    glVertexAttribPointer(
-        11,
-        1,
-        GL_FLOAT,
-        GL_FALSE,
-        sizeof(WebRendererSurfaceVertex),
-        reinterpret_cast<const void *>(
-            offsetof(WebRendererSurfaceVertex, binormalSign)));
+    if (!previous[0])
+    {
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(
+            0,
+            3,
+            GL_FLOAT,
+            GL_FALSE,
+            sizeof(WebRendererSurfaceVertex),
+            reinterpret_cast<const void *>(offsetof(WebRendererSurfaceVertex, position)));
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(
+            1,
+            4,
+            GL_FLOAT,
+            GL_FALSE,
+            sizeof(WebRendererSurfaceVertex),
+            reinterpret_cast<const void *>(offsetof(WebRendererSurfaceVertex, color)));
+        glEnableVertexAttribArray(2);
+        glVertexAttribPointer(
+            2,
+            2,
+            GL_FLOAT,
+            GL_FALSE,
+            sizeof(WebRendererSurfaceVertex),
+            reinterpret_cast<const void *>(offsetof(WebRendererSurfaceVertex, textureCoordinate)));
+        glEnableVertexAttribArray(3);
+        glVertexAttribPointer(
+            3,
+            2,
+            GL_FLOAT,
+            GL_FALSE,
+            sizeof(WebRendererSurfaceVertex),
+            reinterpret_cast<const void *>(offsetof(WebRendererSurfaceVertex, lightmapCoordinate)));
+        glEnableVertexAttribArray(8);
+        glVertexAttribPointer(
+            8,
+            3,
+            GL_FLOAT,
+            GL_FALSE,
+            sizeof(WebRendererSurfaceVertex),
+            reinterpret_cast<const void *>(
+                offsetof(WebRendererSurfaceVertex, normal)));
+        glEnableVertexAttribArray(10);
+        glVertexAttribPointer(
+            10,
+            3,
+            GL_FLOAT,
+            GL_FALSE,
+            sizeof(WebRendererSurfaceVertex),
+            reinterpret_cast<const void *>(
+                offsetof(WebRendererSurfaceVertex, tangent)));
+        glEnableVertexAttribArray(11);
+        glVertexAttribPointer(
+            11,
+            1,
+            GL_FLOAT,
+            GL_FALSE,
+            sizeof(WebRendererSurfaceVertex),
+            reinterpret_cast<const void *>(
+                offsetof(WebRendererSurfaceVertex, binormalSign)));
+    }
 
     const GLenum error = deferErrors ? GL_NO_ERROR : glGetError();
     if (vertexArray == 0 || vertexBuffer == 0 || indexBuffer == 0 ||
@@ -2878,6 +2988,10 @@ bool CreateSurfaceObjects(
 
 void DeleteBrushModelObjects()
 {
+    DeleteSurfaceObjects(g_renderer.cloudGeometry.vertexArray,
+        g_renderer.cloudGeometry.vertexBuffer, g_renderer.cloudGeometry.indexBuffer);
+    g_renderer.cloudGeometry.vertexArray = g_renderer.cloudGeometry.vertexBuffer =
+        g_renderer.cloudGeometry.indexBuffer = 0;
     for (auto &geometry : g_renderer.retainedBrushGeometry)
     {
         DeleteSurfaceObjects(geometry.vertexArray, geometry.vertexBuffer,
@@ -2888,6 +3002,14 @@ void DeleteBrushModelObjects()
 
 bool CreateBrushModelObjects()
 {
+    auto &cloud = g_renderer.cloudGeometry;
+    if (!cloud.vertices.empty())
+    {
+        if (!CreateSurfaceObjects(cloud.vertices, cloud.indices,
+                cloud.vertexArray, cloud.vertexBuffer, cloud.indexBuffer)) return false;
+        glBindVertexArray(cloud.vertexArray);
+        glDisableVertexAttribArray(1); // Cloud color is constant across the lattice.
+    }
     for (auto &geometry : g_renderer.retainedBrushGeometry)
     {
         if (!CreateSurfaceObjects(geometry.vertices, geometry.indices,
@@ -2900,6 +3022,75 @@ bool CreateBrushModelObjects()
     return true;
 }
 
+bool BuildCloudGeometry(WebRendererRetainedCloudGeometry &geometry, bool hasContext)
+{
+    try
+    {
+        const auto layout = WebRenderer_ParticleCloudLayout();
+        geometry.generation = WebRenderer_ParticleCloudLayoutGeneration();
+        geometry.vertices.resize(WEB_RENDERER_PARTICLE_CLOUD_VERTICES);
+        geometry.indices.resize(WEB_RENDERER_PARTICLE_CLOUD_INDICES);
+        constexpr unsigned quad[6] = {0, 1, 2, 2, 1, 3};
+        for (unsigned particle = 0; particle < layout.size(); ++particle)
+        {
+            for (unsigned corner = 0; corner < 4; ++corner)
+            {
+                auto &vertex = geometry.vertices[particle * 4 + corner];
+                std::copy_n(layout[particle].data(), 3, vertex.position);
+                vertex.textureCoordinate[0] = corner >= 2 ? 1.0f : 0.0f;
+                vertex.textureCoordinate[1] = corner & 1 ? 1.0f : 0.0f;
+            }
+            for (unsigned index = 0; index < 6; ++index)
+                geometry.indices[particle * 6 + index] = particle * 4 + quad[index];
+        }
+        if (!hasContext) return true;
+        if (!CreateSurfaceObjects(geometry.vertices, geometry.indices,
+                geometry.vertexArray, geometry.vertexBuffer, geometry.indexBuffer)) return false;
+        glBindVertexArray(geometry.vertexArray);
+        glDisableVertexAttribArray(1);
+        return glGetError() == GL_NO_ERROR;
+    }
+    catch (const std::bad_alloc &) { return false; }
+}
+
+// Four RGBA32F texels preserve the 15 placement/lighting floats exactly.
+// 64 instances per row also fits the maximum doubled packing in WebGL2's
+// guaranteed 2048 texture height. No image sampling or mip policy applies.
+bool UploadStaticModelInstances(GLuint texture,
+    const std::vector<WebRendererStaticModelInstanceDesc> &instances,
+    std::size_t offset, bool allocate)
+{
+    static_assert(offsetof(WebRendererStaticModelInstanceDesc, origin) == 9u * sizeof(float));
+    static_assert(offsetof(WebRendererStaticModelInstanceDesc, modelLightingCoordinates) == 12u * sizeof(float));
+    if (!texture || instances.empty() || offset >= instances.size() || (allocate && offset != 0u) ||
+        instances.size() > 2u * WEB_RENDERER_MAX_STATIC_MODEL_INSTANCES)
+        return false;
+    constexpr std::size_t perRow = 64u;
+    const std::size_t firstRow = offset / perRow;
+    const std::size_t endRow = (instances.size() + perRow - 1u) / perRow;
+    std::vector<std::array<float, 16>> packed;
+    try { packed.resize((endRow - firstRow) * perRow); }
+    catch (const std::bad_alloc &) { return false; }
+    for (std::size_t i = firstRow * perRow; i < instances.size(); ++i)
+        std::memcpy(packed[i - firstRow * perRow].data(), &instances[i], 15u * sizeof(float));
+    glActiveTexture(GL_TEXTURE16);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    if (allocate)
+    {
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 256, static_cast<GLsizei>(endRow),
+            0, GL_RGBA, GL_FLOAT, packed.data());
+    }
+    else
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, static_cast<GLint>(firstRow), 256,
+            static_cast<GLsizei>(endRow - firstRow), GL_RGBA, GL_FLOAT, packed.data());
+    glActiveTexture(GL_TEXTURE0);
+    return true;
+}
+
 bool CreateStaticModelObjects(
     const std::vector<WebRendererSurfaceVertex> &vertices,
     const std::vector<std::uint32_t> &indices,
@@ -2907,7 +3098,7 @@ bool CreateStaticModelObjects(
     GLuint &vertexArrayOut,
     GLuint &vertexBufferOut,
     GLuint &indexBufferOut,
-    GLuint &instanceBufferOut)
+    GLuint &instanceTextureOut)
 {
     GLuint vertexArray = 0u;
     GLuint vertexBuffer = 0u;
@@ -2917,68 +3108,22 @@ bool CreateStaticModelObjects(
     {
         return false;
     }
-    glBindVertexArray(vertexArray);
-    GLuint instanceBuffer = 0u;
-    glGenBuffers(1, &instanceBuffer);
-    glBindBuffer(GL_ARRAY_BUFFER, instanceBuffer);
-    glBufferData(
-        GL_ARRAY_BUFFER,
-        static_cast<GLsizeiptr>(
-            instances.size() * sizeof(WebRendererStaticModelInstanceDesc)),
-        instances.data(),
-        GL_DYNAMIC_DRAW);
-    constexpr std::size_t AXIS_OFFSET =
-        offsetof(WebRendererStaticModelInstanceDesc, axis);
-    for (GLuint row = 0u; row < 3u; ++row)
-    {
-        const GLuint location = 4u + row;
-        glEnableVertexAttribArray(location);
-        glVertexAttribPointer(
-            location,
-            3,
-            GL_FLOAT,
-            GL_FALSE,
-            sizeof(WebRendererStaticModelInstanceDesc),
-            reinterpret_cast<const void *>(
-                AXIS_OFFSET + row * 3u * sizeof(float)));
-        glVertexAttribDivisor(location, 1u);
-    }
-    glEnableVertexAttribArray(7u);
-    glVertexAttribPointer(
-        7u,
-        3,
-        GL_FLOAT,
-        GL_FALSE,
-        sizeof(WebRendererStaticModelInstanceDesc),
-        reinterpret_cast<const void *>(
-            offsetof(WebRendererStaticModelInstanceDesc, origin)));
-    glVertexAttribDivisor(7u, 1u);
-    glEnableVertexAttribArray(9u);
-    glVertexAttribPointer(
-        9u,
-        3,
-        GL_FLOAT,
-        GL_FALSE,
-        sizeof(WebRendererStaticModelInstanceDesc),
-        reinterpret_cast<const void *>(offsetof(
-            WebRendererStaticModelInstanceDesc,
-            modelLightingCoordinates)));
-    glVertexAttribDivisor(9u, 1u);
+    GLuint instanceTexture = 0u;
+    glGenTextures(1, &instanceTexture);
+    const bool uploaded = UploadStaticModelInstances(instanceTexture, instances, 0u, true);
     const GLenum error = glGetError();
-    if (instanceBuffer == 0u || error != GL_NO_ERROR)
+    if (!uploaded || instanceTexture == 0u || error != GL_NO_ERROR)
     {
         Web_Log(WebLogLevel::Error,
-            "[kisakcod-web] WebGL2 static XModel instance-buffer creation "
-            "failed (0x%x).\n",
-            static_cast<unsigned int>(error));
-        DeleteStaticModelObjects(
-            vertexArray, vertexBuffer, indexBuffer, instanceBuffer);
+            "[kisakcod-web] WebGL2 static XModel instance-texture creation "
+            "failed (0x%x).\n", static_cast<unsigned int>(error));
+        DeleteStaticModelObjects(vertexArray, vertexBuffer, indexBuffer, instanceTexture);
         return false;
     }
     vertexArrayOut = vertexArray;
     vertexBufferOut = vertexBuffer;
     indexBufferOut = indexBuffer;
-    instanceBufferOut = instanceBuffer;
+    instanceTextureOut = instanceTexture;
     return true;
 }
 
@@ -3848,6 +3993,10 @@ bool CreateRendererResources(bool contextRecovery = false)
         uniform mat4 u_view_projection;
         uniform float u_scene_fallback;
         uniform float u_instance_enabled;
+        uniform highp sampler2D u_instance_texture;
+        uniform int u_instance_base;
+        uniform float u_cloud_scale;
+        uniform vec3 u_cloud_axes[2];
         uniform vec3 u_model_lighting_base_coords;
         uniform int u_material_mode;
         uniform vec3 u_view_origin;
@@ -3881,26 +4030,53 @@ bool CreateRendererResources(bool contextRecovery = false)
 
         void main()
         {
+            vec3 instance_axis0 = a_instance_axis0;
+            vec3 instance_axis1 = a_instance_axis1;
+            vec3 instance_axis2 = a_instance_axis2;
+            vec3 instance_origin = a_instance_origin;
+            vec3 instance_model_lighting_coords = a_instance_model_lighting_coords;
+            if (u_instance_enabled > 2.5)
+            {
+                int index = u_instance_base + gl_InstanceID;
+                ivec2 p = ivec2((index % 64) * 4, index / 64);
+                vec4 t0 = texelFetch(u_instance_texture, p, 0);
+                vec4 t1 = texelFetch(u_instance_texture, p + ivec2(1, 0), 0);
+                vec4 t2 = texelFetch(u_instance_texture, p + ivec2(2, 0), 0);
+                instance_axis0 = t0.xyz;
+                instance_axis1 = vec3(t0.w, t1.xy);
+                instance_axis2 = vec3(t1.zw, t2.x);
+                instance_origin = t2.yzw;
+                instance_model_lighting_coords = texelFetch(u_instance_texture, p + ivec2(3, 0), 0).xyz;
+            }
             vec3 position = a_position;
             vec3 model_normal = a_normal;
             vec3 model_tangent = a_tangent;
+            vec3 cloud_center = a_normal;
             v_model_lighting_coords = u_model_lighting_base_coords;
-            if (u_instance_enabled > 0.5)
+            if (u_instance_enabled > 1.5 && u_instance_enabled < 2.5)
             {
-                position = a_instance_origin +
-                    a_position.x * a_instance_axis0 +
-                    a_position.y * a_instance_axis1 +
-                    a_position.z * a_instance_axis2;
+                cloud_center = instance_origin + (a_position.x * instance_axis0 +
+                    a_position.y * instance_axis1 + a_position.z * instance_axis2) * u_cloud_scale;
+                position = cloud_center + u_cloud_axes[0] * (a_texcoord.x - 0.5);
+                position += u_cloud_axes[1] * (a_texcoord.y - 0.5);
+                model_normal = cloud_center;
+            }
+            else if (u_instance_enabled > 0.5)
+            {
+                position = instance_origin +
+                    a_position.x * instance_axis0 +
+                    a_position.y * instance_axis1 +
+                    a_position.z * instance_axis2;
                 model_normal =
-                    a_normal.x * a_instance_axis0 +
-                    a_normal.y * a_instance_axis1 +
-                    a_normal.z * a_instance_axis2;
+                    a_normal.x * instance_axis0 +
+                    a_normal.y * instance_axis1 +
+                    a_normal.z * instance_axis2;
                 model_tangent =
-                    a_tangent.x * a_instance_axis0 +
-                    a_tangent.y * a_instance_axis1 +
-                    a_tangent.z * a_instance_axis2;
+                    a_tangent.x * instance_axis0 +
+                    a_tangent.y * instance_axis1 +
+                    a_tangent.z * instance_axis2;
                 v_model_lighting_coords =
-                    a_instance_model_lighting_coords;
+                    instance_model_lighting_coords;
             }
             vec3 world_position = position;
             v_reflex_coord = vec2(0.0);
@@ -3917,6 +4093,16 @@ bool CreateRendererResources(bool contextRecovery = false)
             position.y *= min(1.0, 1.0 / u_aspect);
             gl_Position = u_view_projection * vec4(position, 1.0);
             v_color = a_color;
+#ifdef KISAK_FLOATZ_ONLY
+            if (true)
+#else
+            if (u_material_mode == 15 || u_material_mode == 16)
+#endif
+            {
+                // Native FloatZ consumes only clip depth and optional base alpha.
+                v_texcoord = a_texcoord;
+                return;
+            }
             v_soft_screen = vec3(gl_Position.xy * u_soft_screen.xy +
                 gl_Position.w * u_soft_screen.zw, gl_Position.w);
             v_soft_depth = 0.0;
@@ -3925,7 +4111,7 @@ bool CreateRendererResources(bool contextRecovery = false)
             v_outdoor_lookup = vec3(0.0);
             if (u_material_mode == 18)
                 v_outdoor_lookup = (u_outdoor_lookup_matrix *
-                    vec4(a_normal, 1.0)).xyz;
+                    vec4(cloud_center, 1.0)).xyz;
             if (u_material_mode == 17)
             {
                 // Keep authored D3D projective lookup coordinates here;
@@ -4189,6 +4375,18 @@ bool CreateRendererResources(bool contextRecovery = false)
 
         void main()
         {
+#ifdef KISAK_FLOATZ_ONLY
+            if (true)
+#else
+            if (u_material_mode == 15 || u_material_mode == 16)
+#endif
+            {
+                if (u_material_mode == 16 &&
+                    sample_texture(u_texture, v_texcoord).a * v_color.a < 128.0 / 255.0) discard;
+                uint bits = floatBitsToUint(u_depth_sign / gl_FragCoord.w);
+                out_color = vec4(uvec4(bits, bits >> 8u, bits >> 16u, bits >> 24u) & 255u) / 255.0;
+                return;
+            }
             if (u_material_mode == 22)
             {
                 float q = sample_texture(u_texture, v_reflex_coord).r *
@@ -4243,13 +4441,6 @@ bool CreateRendererResources(bool contextRecovery = false)
                 }
                 out_color = vec4(texture(u_post_sun, uv).rgb * v_color.rgb,
                     texel.a * v_color.a) * u_ui_color;
-                return;
-            }
-            if (u_material_mode == 15 || u_material_mode == 16)
-            {
-                if (u_material_mode == 16 && texel.a * v_color.a < 128.0 / 255.0) discard;
-                uint bits = floatBitsToUint(u_depth_sign / gl_FragCoord.w);
-                out_color = vec4(uvec4(bits, bits >> 8u, bits >> 16u, bits >> 24u) & 255u) / 255.0;
                 return;
             }
             if (u_material_mode == 14)
@@ -4788,16 +4979,34 @@ bool CreateRendererResources(bool contextRecovery = false)
         layout(location = 7) in vec3 a_instance_origin;
         uniform mat4 u_shadow_depth_matrix;
         uniform float u_shadow_depth_instance_enabled;
+        uniform highp sampler2D u_instance_texture;
+        uniform int u_instance_base;
         out vec2 v_shadow_texcoord;
         void main()
         {
+            vec3 instance_axis0 = a_instance_axis0;
+            vec3 instance_axis1 = a_instance_axis1;
+            vec3 instance_axis2 = a_instance_axis2;
+            vec3 instance_origin = a_instance_origin;
+            if (u_shadow_depth_instance_enabled > 2.5)
+            {
+                int index = u_instance_base + gl_InstanceID;
+                ivec2 p = ivec2((index % 64) * 4, index / 64);
+                vec4 t0 = texelFetch(u_instance_texture, p, 0);
+                vec4 t1 = texelFetch(u_instance_texture, p + ivec2(1, 0), 0);
+                vec4 t2 = texelFetch(u_instance_texture, p + ivec2(2, 0), 0);
+                instance_axis0 = t0.xyz;
+                instance_axis1 = vec3(t0.w, t1.xy);
+                instance_axis2 = vec3(t1.zw, t2.x);
+                instance_origin = t2.yzw;
+            }
             vec3 position = a_position;
             if (u_shadow_depth_instance_enabled > 0.5)
             {
-                position = a_instance_origin +
-                    a_position.x * a_instance_axis0 +
-                    a_position.y * a_instance_axis1 +
-                    a_position.z * a_instance_axis2;
+                position = instance_origin +
+                    a_position.x * instance_axis0 +
+                    a_position.y * instance_axis1 +
+                    a_position.z * instance_axis2;
             }
             gl_Position = u_shadow_depth_matrix * vec4(position, 1.0);
             v_shadow_texcoord = a_texcoord;
@@ -5068,11 +5277,39 @@ bool CreateRendererResources(bool contextRecovery = false)
         return false;
     }
 
+    WebRendererCameraProgram floatZProgram;
+    if (!LinkProgram("canonical FloatZ", vertexSource, fragmentSource,
+            floatZProgram.program, "#define KISAK_FLOATZ_ONLY\n"))
+    {
+        glDeleteProgram(program);
+        glDeleteProgram(skyProgram);
+        glDeleteProgram(shadowProgram);
+        glDeleteProgram(postProcessProgram);
+        glDeleteProgram(glowProgram);
+        return false;
+    }
+
     while (glGetError() != GL_NO_ERROR)
     {
     }
 
     const GLint aspectUniform = glGetUniformLocation(program, "u_aspect");
+    floatZProgram.aspectUniform = glGetUniformLocation(floatZProgram.program, "u_aspect");
+    floatZProgram.viewProjectionUniform = glGetUniformLocation(floatZProgram.program, "u_view_projection");
+    floatZProgram.instanceEnabledUniform = glGetUniformLocation(floatZProgram.program, "u_instance_enabled");
+    floatZProgram.instanceTextureUniform = glGetUniformLocation(floatZProgram.program, "u_instance_texture");
+    floatZProgram.instanceBaseUniform = glGetUniformLocation(floatZProgram.program, "u_instance_base");
+    floatZProgram.materialModeUniform = glGetUniformLocation(floatZProgram.program, "u_material_mode");
+    floatZProgram.depthSignUniform = glGetUniformLocation(floatZProgram.program, "u_depth_sign");
+    floatZProgram.mipBiasUniform = glGetUniformLocation(floatZProgram.program, "u_mip_bias");
+    floatZProgram.textureUniform = glGetUniformLocation(floatZProgram.program, "u_texture");
+    floatZProgram.cloudScaleUniform = glGetUniformLocation(floatZProgram.program, "u_cloud_scale");
+    floatZProgram.cloudAxesUniform = glGetUniformLocation(floatZProgram.program, "u_cloud_axes[0]");
+    // Some drivers retain pre-return vertex outputs even when the depth
+    // fragment cannot consume them. Bind their original inputs when present.
+    floatZProgram.modelLightingBaseCoordinatesUniform = glGetUniformLocation(floatZProgram.program, "u_model_lighting_base_coords");
+    floatZProgram.viewOriginUniform = glGetUniformLocation(floatZProgram.program, "u_view_origin");
+    floatZProgram.detailScaleUniform = glGetUniformLocation(floatZProgram.program, "u_detail_scale");
     const GLint textureUniform = glGetUniformLocation(program, "u_texture");
     const GLint textureEnabledUniform =
         glGetUniformLocation(program, "u_texture_enabled");
@@ -5125,8 +5362,12 @@ bool CreateRendererResources(bool contextRecovery = false)
     const GLint falloffEndColorUniform =
         glGetUniformLocation(program, "u_falloff_end_color");
     const GLint alphaTestUniform = glGetUniformLocation(program, "u_alpha_test");
+    const GLint instanceTextureUniform = glGetUniformLocation(program, "u_instance_texture");
+    const GLint instanceBaseUniform = glGetUniformLocation(program, "u_instance_base");
     const GLint instanceEnabledUniform =
         glGetUniformLocation(program, "u_instance_enabled");
+    const GLint cloudScaleUniform = glGetUniformLocation(program, "u_cloud_scale");
+    const GLint cloudAxesUniform = glGetUniformLocation(program, "u_cloud_axes[0]");
     const GLint uiColorUniform = glGetUniformLocation(program, "u_ui_color");
     const GLint fogEnabledUniform =
         glGetUniformLocation(program, "u_fog_enabled");
@@ -5190,6 +5431,8 @@ bool CreateRendererResources(bool contextRecovery = false)
             "u_shadow_depth_texture_enabled");
     const GLint shadowDepthAlphaTestUniform =
         glGetUniformLocation(shadowProgram, "u_shadow_depth_alpha_test");
+    const GLint shadowInstanceTextureUniform = glGetUniformLocation(shadowProgram, "u_instance_texture");
+    const GLint shadowInstanceBaseUniform = glGetUniformLocation(shadowProgram, "u_instance_base");
     const GLint shadowDepthInstanceEnabledUniform =
         glGetUniformLocation(
             shadowProgram, "u_shadow_depth_instance_enabled");
@@ -5284,7 +5527,7 @@ bool CreateRendererResources(bool contextRecovery = false)
     GLuint staticModelVertexArray = 0u;
     GLuint staticModelVertexBuffer = 0u;
     GLuint staticModelIndexBuffer = 0u;
-    GLuint staticModelInstanceBuffer = 0u;
+    GLuint staticModelInstanceTexture = 0u;
     const bool staticModelObjectsReady = !g_renderer.staticModelSceneActive ||
         CreateStaticModelObjects(
             g_renderer.retainedStaticModelVertices,
@@ -5293,7 +5536,7 @@ bool CreateRendererResources(bool contextRecovery = false)
             staticModelVertexArray,
             staticModelVertexBuffer,
             staticModelIndexBuffer,
-            staticModelInstanceBuffer);
+            staticModelInstanceTexture);
     const bool staticModelTexturesReady = staticModelObjectsReady &&
         (!g_renderer.staticModelSceneActive ||
          CreateWorldTextureObjects(
@@ -5352,7 +5595,15 @@ bool CreateRendererResources(bool contextRecovery = false)
             SPOT_SHADOW_SIZE, "spot",
             spotShadowFramebuffers[index], spotShadowDepthTextures[index]);
     }
-    if (aspectUniform < 0 || textureUniform < 0 || textureEnabledUniform < 0 ||
+    if (floatZProgram.instanceTextureUniform < 0 || floatZProgram.instanceBaseUniform < 0 ||
+        instanceTextureUniform < 0 || instanceBaseUniform < 0 ||
+        shadowInstanceTextureUniform < 0 || shadowInstanceBaseUniform < 0 ||
+        floatZProgram.aspectUniform < 0 || floatZProgram.viewProjectionUniform < 0 ||
+        floatZProgram.instanceEnabledUniform < 0 || floatZProgram.materialModeUniform < 0 ||
+        floatZProgram.depthSignUniform < 0 || floatZProgram.mipBiasUniform < 0 ||
+        floatZProgram.textureUniform < 0 || floatZProgram.cloudScaleUniform < 0 ||
+        floatZProgram.cloudAxesUniform < 0 ||
+        aspectUniform < 0 || textureUniform < 0 || textureEnabledUniform < 0 ||
         detailMapUniform < 0 || detailMapEnabledUniform < 0 ||
         detailScaleUniform < 0 ||
         normalMapUniform < 0 || normalMapEnabledUniform < 0 ||
@@ -5369,6 +5620,7 @@ bool CreateRendererResources(bool contextRecovery = false)
         outdoorUniform < 0 || mipBiasUniform < 0 || falloffParmsUniform < 0 ||
         falloffBeginColorUniform < 0 || falloffEndColorUniform < 0 ||
         alphaTestUniform < 0 || instanceEnabledUniform < 0 ||
+        cloudScaleUniform < 0 || cloudAxesUniform < 0 ||
         uiColorUniform < 0 || fogEnabledUniform < 0 ||
         viewOriginUniform < 0 || fogColorUniform < 0 ||
         fogParamsUniform < 0 || shadowMapUniform < 0 ||
@@ -5425,6 +5677,7 @@ bool CreateRendererResources(bool contextRecovery = false)
         !spotShadowTargetsReady)
     {
         DeleteBrushModelObjects();
+        glDeleteProgram(floatZProgram.program);
         Web_Log(
             WebLogLevel::Error,
             "[kisakcod-web] WebGL2 resource creation failed (0x%x).\n",
@@ -5459,7 +5712,7 @@ bool CreateRendererResources(bool contextRecovery = false)
             staticModelVertexArray,
             staticModelVertexBuffer,
             staticModelIndexBuffer,
-            staticModelInstanceBuffer);
+            staticModelInstanceTexture);
         DeleteSurfaceObjects(dynamicModelVertexArray,
             dynamicModelVertexBuffer, dynamicModelIndexBuffer);
         DeleteSurfaceObjects(uiVertexArray, uiVertexBuffer, uiIndexBuffer);
@@ -5467,6 +5720,7 @@ bool CreateRendererResources(bool contextRecovery = false)
     }
 
     g_renderer.program = program;
+    g_renderer.floatZProgram = floatZProgram;
     g_renderer.skyProgram = skyProgram;
     g_renderer.postProcessProgram = postProcessProgram;
     g_renderer.glowProgram = glowProgram;
@@ -5477,7 +5731,7 @@ bool CreateRendererResources(bool contextRecovery = false)
     g_renderer.staticModelVertexArray = staticModelVertexArray;
     g_renderer.staticModelVertexBuffer = staticModelVertexBuffer;
     g_renderer.staticModelIndexBuffer = staticModelIndexBuffer;
-    g_renderer.staticModelInstanceBuffer = staticModelInstanceBuffer;
+    g_renderer.staticModelInstanceTexture = staticModelInstanceTexture;
     g_renderer.dynamicModelVertexArray = dynamicModelVertexArray;
     g_renderer.dynamicModelVertexBuffer = dynamicModelVertexBuffer;
     g_renderer.dynamicModelIndexBuffer = dynamicModelIndexBuffer;
@@ -5533,6 +5787,10 @@ bool CreateRendererResources(bool contextRecovery = false)
     g_renderer.falloffEndColorUniform = falloffEndColorUniform;
     g_renderer.alphaTestUniform = alphaTestUniform;
     g_renderer.instanceEnabledUniform = instanceEnabledUniform;
+    g_renderer.instanceTextureUniform = instanceTextureUniform;
+    g_renderer.instanceBaseUniform = instanceBaseUniform;
+    g_renderer.cloudScaleUniform = cloudScaleUniform;
+    g_renderer.cloudAxesUniform = cloudAxesUniform;
     g_renderer.uiColorUniform = uiColorUniform;
     g_renderer.fogEnabledUniform = fogEnabledUniform;
     g_renderer.viewOriginUniform = viewOriginUniform;
@@ -5573,6 +5831,8 @@ bool CreateRendererResources(bool contextRecovery = false)
     g_renderer.shadowDepthAlphaTestUniform = shadowDepthAlphaTestUniform;
     g_renderer.shadowDepthInstanceEnabledUniform =
         shadowDepthInstanceEnabledUniform;
+    g_renderer.shadowInstanceTextureUniform = shadowInstanceTextureUniform;
+    g_renderer.shadowInstanceBaseUniform = shadowInstanceBaseUniform;
     g_renderer.skyTextureUniform = skyTextureUniform;
     g_renderer.skyMipBiasUniform = skyMipBiasUniform;
     g_renderer.skyTanHalfFovUniform = skyTanHalfFovUniform;
@@ -5743,6 +6003,21 @@ bool CreateWebGLContext()
     return true;
 }
 
+// Pools own independent GPU textures but may retain the same complete IWI.
+// World unload clears every source; identity and name must both still match.
+const std::vector<std::uint8_t> *FindRetainedIwiSource(const GfxImage &canonical)
+{
+    for (const auto *pool : {&g_renderer.retainedWorldImages,
+            &g_renderer.retainedStaticModelImages, &g_renderer.retainedDynamicModelImages,
+            &g_renderer.retainedUiImages})
+        for (const auto &image : *pool)
+            if (image.canonicalIdentity == &canonical && image.supported &&
+                image.canonicalName == canonical.name &&
+                image.recoverySource == WebRendererImageRecoverySource::IwiMember)
+                return &image.encodedSource;
+    return nullptr;
+}
+
 bool InspectExternalCanonicalImage(
     const GfxImage *canonical,
     kisak::iwi::Rgba8Layout &layout,
@@ -5758,6 +6033,13 @@ bool InspectExternalCanonicalImage(
     }
 
     RecordEncodedImageInspection();
+    if (const auto *source = FindRetainedIwiSource(*canonical))
+    {
+        RecordImageMetadataParse();
+        inspectError = kisak::iwi::InspectRgba8(*source, layout, picmip);
+        if (inspectError == kisak::iwi::Error::None) encodedSource = *source;
+        return true;
+    }
     const std::string path =
         std::string("images/") + canonical->name + ".iwi";
     int file = 0;
@@ -5847,6 +6129,28 @@ std::uint32_t RetainCanonicalWorldImage(
     const double started = profile ? WebFrameProfile_Now() : 0.0;
     if (profile) ++profile->retainedImageLookups;
 #endif
+    // Pools contain one entry per canonical image. Hints own no identity or
+    // resources: validate against the current pool after any move/clear/growth.
+    // ponytail: collisions fall back to the scan; grow only if profiling warrants it.
+    static std::array<std::uint32_t, 1024> indexHints{};
+    auto &hint = indexHints[(reinterpret_cast<std::uintptr_t>(canonical) >> 4u) % indexHints.size()];
+    if (hint < images.size())
+    {
+#if KISAK_WEB_DIAGNOSTICS
+        if (profile) ++profile->retainedImageComparisons;
+#endif
+        if (images[hint].canonicalIdentity == canonical)
+        {
+#if KISAK_WEB_DIAGNOSTICS
+            if (profile)
+            {
+                profile->retainedImageLookupMs += WebFrameProfile_Now() - started;
+                ++profile->retainedImageLookupHits;
+            }
+#endif
+            return hint;
+        }
+    }
     for (std::uint32_t index = 0u; index < images.size(); ++index)
         if (images[index].canonicalIdentity == canonical)
         {
@@ -5858,7 +6162,7 @@ std::uint32_t RetainCanonicalWorldImage(
                 ++profile->retainedImageLookupHits;
             }
 #endif
-            return index;
+            return hint = index;
         }
 #if KISAK_WEB_DIAGNOSTICS
     if (profile)
@@ -5992,7 +6296,7 @@ std::uint32_t RetainCanonicalWorldImage(
             static_cast<unsigned int>(loadDef.format));
     }
     images.push_back(std::move(retained));
-    return static_cast<std::uint32_t>(images.size() - 1u);
+    return hint = static_cast<std::uint32_t>(images.size() - 1u);
 }
 
 GLuint FindRetainedWorldReflectionTexture(
@@ -6103,10 +6407,12 @@ WebRendererSurfaceResult CopyWorldCommand(
     std::vector<WebRendererRetainedSpotShadowCaster> *spotShadowCasters,
     std::vector<WebRendererRetainedSpotShadowStaticModel> *
         spotShadowStaticModels,
-    bool geometryAlreadyStaged = false)
+    bool geometryAlreadyStaged = false, bool allowParticleClouds = false)
 {
-    if (!surface.vertices || !surface.indices || !surface.batches ||
-        surface.vertexCount == 0u || surface.indexCount == 0u ||
+    const bool noStreamedGeometry = allowParticleClouds &&
+        surface.vertexCount == 0 && surface.indexCount == 0;
+    if ((!noStreamedGeometry && (!surface.vertices || !surface.indices ||
+        surface.vertexCount == 0u || surface.indexCount == 0u)) || !surface.batches ||
         surface.batchCount == 0u ||
         surface.vertexCount > WEB_RENDERER_MAX_WORLD_VERTICES ||
         surface.indexCount > WEB_RENDERER_MAX_WORLD_INDICES)
@@ -6287,12 +6593,20 @@ WebRendererSurfaceResult CopyWorldCommand(
         {
             Sys_LoadingKeepAlive();
             const WebRendererWorldBatchDesc &source = surface.batches[index];
+            const bool cloud = source.particleCloud != nullptr;
+            if (cloud && (!allowParticleClouds ||
+                source.sourceKind != WebRendererSceneBatchKind::FxParticleCloud ||
+                source.indexCount != WEB_RENDERER_PARTICLE_CLOUD_INDICES ||
+                source.castsSunShadow || source.castsSpotShadow ||
+                source.lightingMode != WebRendererWorldLightingMode::None ||
+                !WebRenderer_ParticleCloudDrawIsFinite(*source.particleCloud)))
+                return WebRendererSurfaceResult::InvalidDescriptor;
             if (source.indexCount == 0u || source.surfaceCount == 0u ||
                 (source.firstIndex % 3u) != 0u ||
                 (source.indexCount % 3u) != 0u ||
                 source.firstIndex != expectedFirstIndex ||
-                source.firstIndex > surface.indexCount ||
-                source.indexCount > surface.indexCount - source.firstIndex ||
+                (!cloud && (source.firstIndex > surface.indexCount ||
+                source.indexCount > surface.indexCount - source.firstIndex)) ||
                 source.firstSurfaceIndex > source.lastSurfaceIndex ||
                 source.technique >
                     WebRendererWorldTechnique::VertexColorMultiplyFog ||
@@ -6319,19 +6633,25 @@ WebRendererSurfaceResult CopyWorldCommand(
                     source.primaryLightIndex, primaryLightReferenceCount);
                 return WebRendererSurfaceResult::InvalidDescriptor;
             }
-            expectedFirstIndex += source.indexCount;
+            if (!cloud) expectedFirstIndex += source.indexCount;
             WebRendererRetainedWorldBatch batch;
-            batch.firstIndex = source.firstIndex;
+            if (cloud) batch.particleCloud =
+                std::make_shared<const WebRendererParticleCloudDrawDesc>(*source.particleCloud);
+            batch.firstIndex = cloud ? 0u : source.firstIndex;
             batch.indexCount = source.indexCount;
             batch.surfaceCount = source.surfaceCount;
             batch.firstSurfaceIndex = source.firstSurfaceIndex;
             batch.lastSurfaceIndex = source.lastSurfaceIndex;
             batch.materialIdentity = source.materialIdentity;
-            batch.materialName = source.materialName
-                ? source.materialName : "<null-material>";
+            // Other world/dynamic material labels are read only by diagnostics.
+            if (KISAK_WEB_DIAGNOSTICS || source.sourceKind == WebRendererSceneBatchKind::SunFlare)
+                batch.materialName = source.materialName
+                    ? source.materialName : "<null-material>";
             batch.modelIdentity = source.modelIdentity;
+#if KISAK_WEB_DIAGNOSTICS
             batch.modelName = source.modelName
                 ? source.modelName : "<world>";
+#endif
             batch.firstInstanceIndex = source.firstInstanceIndex;
             batch.lastInstanceIndex = source.lastInstanceIndex;
             batch.stateBits[0] = source.stateBits[0];
@@ -6347,8 +6667,10 @@ WebRendererSurfaceResult CopyWorldCommand(
             batch.shadowEntityId = source.shadowEntityId;
             batch.technique = source.technique;
             batch.lightingMode = source.lightingMode;
+#if KISAK_WEB_DIAGNOSTICS
             batch.techniqueName = source.techniqueName
                 ? source.techniqueName : "<unsupported-technique>";
+#endif
             batch.techniqueType = source.techniqueType;
             batch.customSamplerFlags = source.customSamplerFlags;
             batch.techniqueFlags = source.techniqueFlags;
@@ -6377,12 +6699,8 @@ WebRendererSurfaceResult CopyWorldCommand(
             batch.castsSpotShadow = source.castsSpotShadow;
             batch.shadowStateBits0 = source.shadowStateBits0;
             batch.drawSortKey = RetainedDrawSortKey(source);
-            batch.vertexShaderName = source.vertexShaderName
-                ? source.vertexShaderName : "<unavailable-vertex-shader>";
-            batch.vertexShaderProgramHash = source.vertexShaderProgramHash;
-            batch.pixelShaderName = source.pixelShaderName
-                ? source.pixelShaderName : "<unavailable-pixel-shader>";
-            batch.pixelShaderProgramHash = source.pixelShaderProgramHash;
+            batch.spotLightmapShader = source.pixelShaderName &&
+                std::string_view(source.pixelShaderName).starts_with("lm_spot_");
             std::copy_n(source.modelLightingCoordinates, 3u,
                 batch.modelLightingCoordinates);
             batch.waterSamplerState = source.waterSamplerState;
@@ -6810,13 +7128,8 @@ WebRendererSurfaceResult CopyStaticModelCommand(
             batch.draw.castsSunShadow = draw.castsSunShadow;
             batch.draw.castsSpotShadow = draw.castsSpotShadow;
             batch.draw.shadowStateBits0 = draw.shadowStateBits0;
-            batch.draw.vertexShaderName = draw.vertexShaderName
-                ? draw.vertexShaderName : "<unavailable-vertex-shader>";
-            batch.draw.vertexShaderProgramHash =
-                draw.vertexShaderProgramHash;
-            batch.draw.pixelShaderName = draw.pixelShaderName
-                ? draw.pixelShaderName : "<unavailable-pixel-shader>";
-            batch.draw.pixelShaderProgramHash = draw.pixelShaderProgramHash;
+            batch.draw.spotLightmapShader = draw.pixelShaderName &&
+                std::string_view(draw.pixelShaderName).starts_with("lm_spot_");
             batch.draw.reflectionProbeIndex = draw.reflectionProbeIndex;
             batch.draw.drawSortKey = RetainedDrawSortKey(draw);
             batch.draw.reflectionTexture =
@@ -7262,7 +7575,7 @@ WebRendererSurfaceResult WebRenderer_SetWorldSurface(
             g_renderer.retainedWorldBatches.end(),
             [](const WebRendererRetainedWorldBatch &batch) {
                 if (batch.techniqueType != 10u ||
-                    batch.pixelShaderName.rfind("lm_spot_", 0u) != 0u ||
+                    !batch.spotLightmapShader ||
                     batch.lightmapImageIndex == INVALID_WORLD_IMAGE ||
                     batch.secondaryLightmapImageIndex ==
                         INVALID_WORLD_IMAGE ||
@@ -7335,11 +7648,13 @@ void WebRenderer_UnloadWorldResources()
             g_renderer.staticModelVertexArray,
             g_renderer.staticModelVertexBuffer,
             g_renderer.staticModelIndexBuffer,
-            g_renderer.staticModelInstanceBuffer);
+            g_renderer.staticModelInstanceTexture);
         DeleteSurfaceObjects(
             g_renderer.dynamicModelVertexArray,
             g_renderer.dynamicModelVertexBuffer,
             g_renderer.dynamicModelIndexBuffer);
+        DeleteSurfaceObjects(g_renderer.dynamicModelSurfaceStaging[0],
+            g_renderer.dynamicModelSurfaceStaging[1], g_renderer.dynamicModelSurfaceStaging[2]);
         DeleteSurfaceObjects(
             g_renderer.uiVertexArray,
             g_renderer.uiVertexBuffer,
@@ -7358,13 +7673,15 @@ void WebRenderer_UnloadWorldResources()
     g_renderer.staticModelVertexArray = 0u;
     g_renderer.staticModelVertexBuffer = 0u;
     g_renderer.staticModelIndexBuffer = 0u;
-    g_renderer.staticModelInstanceBuffer = 0u;
+    g_renderer.staticModelInstanceTexture = 0u;
     decltype(g_renderer.staticModelVisibility){}.swap(g_renderer.staticModelVisibility);
     g_renderer.staticModelVisibilityComputed = false;
     g_renderer.staticModelVisibilityChanged = true;
     g_renderer.dynamicModelVertexArray = 0u;
     g_renderer.dynamicModelVertexBuffer = 0u;
     g_renderer.dynamicModelIndexBuffer = 0u;
+    g_renderer.dynamicModelSurfaceStaging = {};
+    g_renderer.dynamicModelGpuStagingBytes = 0u;
     g_renderer.uiVertexArray = 0u;
     g_renderer.uiVertexBuffer = 0u;
     g_renderer.uiIndexBuffer = 0u;
@@ -7431,6 +7748,7 @@ void WebRenderer_UnloadWorldResources()
     decltype(g_renderer.retainedDynamicModelBatches){}.swap(
         g_renderer.retainedDynamicModelBatches);
     decltype(g_renderer.retainedBrushGeometry){}.swap(g_renderer.retainedBrushGeometry);
+    g_renderer.cloudGeometry = {};
     decltype(g_renderer.retainedBrushInstances){}.swap(g_renderer.retainedBrushInstances);
     decltype(g_renderer.dynamicDraws){}.swap(g_renderer.dynamicDraws);
     decltype(g_renderer.dynamicCameraDrawOrder){}.swap(
@@ -7585,7 +7903,7 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
     GLuint vertexArray = 0u;
     GLuint vertexBuffer = 0u;
     GLuint indexBuffer = 0u;
-    GLuint instanceBuffer = 0u;
+    GLuint instanceTexture = 0u;
     const bool hasContext = g_renderer.initialized && !g_renderer.contextLost;
     if (hasContext && !CreateStaticModelObjects(
         retainedVertices,
@@ -7594,7 +7912,7 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
         vertexArray,
         vertexBuffer,
         indexBuffer,
-        instanceBuffer))
+        instanceTexture))
     {
         return WebRendererSurfaceResult::BackendFailure;
     }
@@ -7602,14 +7920,14 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
         WebRendererImageDecodeReason::InitialUpload, true))
     {
         DeleteStaticModelObjects(
-            vertexArray, vertexBuffer, indexBuffer, instanceBuffer);
+            vertexArray, vertexBuffer, indexBuffer, instanceTexture);
         return WebRendererSurfaceResult::BackendFailure;
     }
     if (hasContext && !CreateModelLightingTexture(retainedLighting))
     {
         DeleteWorldTextureObjects(retainedImages);
         DeleteStaticModelObjects(
-            vertexArray, vertexBuffer, indexBuffer, instanceBuffer);
+            vertexArray, vertexBuffer, indexBuffer, instanceTexture);
         return WebRendererSurfaceResult::BackendFailure;
     }
     if (hasContext)
@@ -7619,13 +7937,13 @@ WebRendererSurfaceResult WebRenderer_SetStaticModelScene(
             g_renderer.staticModelVertexArray,
             g_renderer.staticModelVertexBuffer,
             g_renderer.staticModelIndexBuffer,
-            g_renderer.staticModelInstanceBuffer);
+            g_renderer.staticModelInstanceTexture);
         DeleteModelLightingTexture(
             g_renderer.retainedStaticModelLighting);
         g_renderer.staticModelVertexArray = vertexArray;
         g_renderer.staticModelVertexBuffer = vertexBuffer;
         g_renderer.staticModelIndexBuffer = indexBuffer;
-        g_renderer.staticModelInstanceBuffer = instanceBuffer;
+        g_renderer.staticModelInstanceTexture = instanceTexture;
     }
     g_renderer.retainedStaticModelVertices = std::move(retainedVertices);
     g_renderer.retainedStaticModelIndices = std::move(retainedIndices);
@@ -7913,7 +8231,7 @@ WebRendererSurfaceResult SetDynamicModelScene(
         ignoredSunPrimaryLightIndex,
         static_cast<std::uint32_t>(
             g_renderer.retainedPrimaryLights.size()), nullptr, nullptr,
-        adoptsGeometry);
+        adoptsGeometry, true);
     if (copy != WebRendererSurfaceResult::Success) return copy;
     if (!CopyModelLightingAtlas(
             scene.modelLightingAtlas, retainedLighting))
@@ -7938,9 +8256,16 @@ WebRendererSurfaceResult SetDynamicModelScene(
             WebRendererDynamicDraw draw{batchIndex};
             if (batchIndex >= retainedBatches.size()) return false;
             const auto &batch = retainedBatches[batchIndex];
+            if (batch.particleCloud)
+            {
+                logicalVertices += WEB_RENDERER_PARTICLE_CLOUD_VERTICES;
+                logicalIndices += WEB_RENDERER_PARTICLE_CLOUD_INDICES;
+                if (logicalVertices > WEB_RENDERER_MAX_DYNAMIC_MODEL_VERTICES ||
+                    logicalIndices > WEB_RENDERER_MAX_DYNAMIC_MODEL_INDICES) return false;
+            }
             // CopyWorldCommand has validated every vertex, index and batch
             // range. Only eligible partition casters consume these bounds.
-            if ((!KISAK_WEB_SKIP_UNUSED_SHADOW_BOUNDS ||
+            if (!batch.particleCloud && (!KISAK_WEB_SKIP_UNUSED_SHADOW_BOUNDS ||
                     WebRenderer_IsDynamicShadowCaster(batch.sourceKind,
                         batch.castsSunShadow, batch.depthHack)) &&
                 !BuildIndexedShadowBounds(retainedVertices, retainedIndices, batch, draw.shadowBounds))
@@ -8026,6 +8351,19 @@ WebRendererSurfaceResult SetDynamicModelScene(
     GLuint vertexBuffer = 0u;
     GLuint indexBuffer = 0u;
     const bool hasContext = g_renderer.initialized && !g_renderer.contextLost;
+    const bool hasCloud = std::any_of(retainedBatches.begin(), retainedBatches.end(),
+        [](const auto &batch) { return batch.particleCloud != nullptr; });
+    WebRendererRetainedCloudGeometry stagedCloud;
+    struct CloudRollback
+    {
+        WebRendererRetainedCloudGeometry &geometry;
+        ~CloudRollback() { DeleteSurfaceObjects(geometry.vertexArray, geometry.vertexBuffer, geometry.indexBuffer); }
+    } cloudRollback{stagedCloud};
+    const bool replaceCloud = hasCloud && (g_renderer.cloudGeometry.generation !=
+        WebRenderer_ParticleCloudLayoutGeneration() ||
+        (hasContext && g_renderer.cloudGeometry.vertexArray == 0));
+    if (replaceCloud && !BuildCloudGeometry(stagedCloud, hasContext))
+        return WebRendererSurfaceResult::BackendFailure;
     // Geometry and lighting are staged until this command publishes. Batch
     // their error checks only while the persistent image pool needs no upload:
     // its helpers own separate cleanup and must not clear a pending error.
@@ -8039,9 +8377,10 @@ WebRendererSurfaceResult SetDynamicModelScene(
     while (deferErrors && glGetError() != GL_NO_ERROR)
     {
     }
-    const bool geometryReady = !hasContext || empty || CreateSurfaceObjects(
+    if (hasContext && !empty) g_renderer.dynamicModelGpuStagingBytes = 0u;
+    const bool geometryReady = !hasContext || retainedVertices.empty() || CreateSurfaceObjects(
         retainedVertices, retainedIndices,
-        vertexArray, vertexBuffer, indexBuffer, deferErrors);
+        vertexArray, vertexBuffer, indexBuffer, deferErrors, &g_renderer.dynamicModelSurfaceStaging);
     if (!geometryReady && !deferErrors)
         return WebRendererSurfaceResult::BackendFailure;
 #if KISAK_WEB_DIAGNOSTICS
@@ -8076,10 +8415,21 @@ WebRendererSurfaceResult SetDynamicModelScene(
 #endif
     if (hasContext)
     {
-        DeleteSurfaceObjects(
-            g_renderer.dynamicModelVertexArray,
-            g_renderer.dynamicModelVertexBuffer,
-            g_renderer.dynamicModelIndexBuffer);
+        DeleteSurfaceObjects(g_renderer.dynamicModelSurfaceStaging[0],
+            g_renderer.dynamicModelSurfaceStaging[1], g_renderer.dynamicModelSurfaceStaging[2]);
+        g_renderer.dynamicModelSurfaceStaging = {};
+        g_renderer.dynamicModelGpuStagingBytes = 0u;
+        if (empty)
+            DeleteSurfaceObjects(g_renderer.dynamicModelVertexArray,
+                g_renderer.dynamicModelVertexBuffer, g_renderer.dynamicModelIndexBuffer);
+        else
+        {
+            g_renderer.dynamicModelSurfaceStaging = {g_renderer.dynamicModelVertexArray,
+                g_renderer.dynamicModelVertexBuffer, g_renderer.dynamicModelIndexBuffer};
+            g_renderer.dynamicModelGpuStagingBytes =
+                g_renderer.retainedDynamicModelVertices.size() * sizeof(WebRendererSurfaceVertex) +
+                g_renderer.retainedDynamicModelIndices.size() * sizeof(std::uint32_t);
+        }
         DeleteModelLightingTexture(
             g_renderer.retainedDynamicModelLighting);
         g_renderer.dynamicModelVertexArray = vertexArray;
@@ -8091,6 +8441,13 @@ WebRendererSurfaceResult SetDynamicModelScene(
     retainedVertices.clear();
     retainedIndices.clear();
     g_renderer.retainedDynamicModelBatches = std::move(retainedBatches);
+    if (replaceCloud)
+    {
+        auto &old = g_renderer.cloudGeometry;
+        if (hasContext) DeleteSurfaceObjects(old.vertexArray, old.vertexBuffer, old.indexBuffer);
+        old = std::move(stagedCloud);
+        stagedCloud.vertexArray = stagedCloud.vertexBuffer = stagedCloud.indexBuffer = 0;
+    }
     g_renderer.retainedBrushInstances = std::move(retainedBrushInstances);
     g_renderer.dynamicDraws = std::move(dynamicDraws);
     g_renderer.dynamicCameraDrawOrder =
@@ -8191,7 +8548,7 @@ extern "C" EMSCRIPTEN_KEEPALIVE unsigned KisakWeb_TestDynamicUploadAtomicity(
             glIsTexture(g_renderer.retainedDynamicModelImages[0].texture);
     };
     if (fault == -1) return resident() && glGetError() == GL_NO_ERROR ? 0u : 1u;
-    if (fault < 0 || fault > 5 || variant < 0 || variant > 2) return 0x8000u;
+    if (fault < 0 || fault > 5 || variant < 0 || variant > 3) return 0x8000u;
     WebRenderer_SetDynamicModelScene({});
     DeleteWorldTextureObjects(g_renderer.retainedDynamicModelImages);
     g_renderer.retainedDynamicModelImages.clear();
@@ -8223,6 +8580,9 @@ extern "C" EMSCRIPTEN_KEEPALIVE unsigned KisakWeb_TestDynamicUploadAtomicity(
         vertices.data(), 3u, indices.data(), 3u, &batch, 1u, &lighting};
     if (WebRenderer_SetDynamicModelScene(scene) != WebRendererSurfaceResult::Success)
         return 0x8000u;
+    if (variant == 3 && WebRenderer_SetDynamicModelScene(scene) != WebRendererSurfaceResult::Success)
+        return 0x8000u;
+    const auto spare = g_renderer.dynamicModelSurfaceStaging;
     const GLuint oldVao = g_renderer.dynamicModelVertexArray;
     const GLuint oldVbo = g_renderer.dynamicModelVertexBuffer;
     const GLuint oldIbo = g_renderer.dynamicModelIndexBuffer;
@@ -8291,13 +8651,24 @@ extern "C" EMSCRIPTEN_KEEPALIVE unsigned KisakWeb_TestDynamicUploadAtomicity(
         delete Module.kisakUploadFault;
         const clean = !$0 || state.created.every(([kind, object]) =>
             !gl["is" + kind](object) || ($1 && state.images.has(object)));
-        return (state.checks << 16) | (clean ? 0 : 64) | ($2 && !state.used ? 128 : 0);
-    }, expectedFailure, variant == 1 && fault == 2, fault != 0);
+        const reused = !$3 || state.created.every(([kind]) => kind === "Texture");
+        return (state.checks << 16) | (clean ? 0 : 64) | ($2 && !state.used ? 128 : 0) | (reused ? 0 : 512);
+    }, expectedFailure, variant == 1 && fault == 2, fault != 0, variant == 3);
     unsigned evidence = glEvidence;
     if ((result == WebRendererSurfaceResult::BackendFailure) != expectedFailure ||
         (!expectedFailure && result != WebRendererSurfaceResult::Success)) evidence |= 1u;
     if (expectedFailure)
     {
+        if (spare[0] && (glIsVertexArray(spare[0]) || glIsBuffer(spare[1]) || glIsBuffer(spare[2])))
+            evidence |= 512u;
+        // A reused spare must not overwrite the still-published GPU bytes.
+        if (!EM_ASM_INT({
+            const gl = GL.currentContext.GLctx;
+            const values = new Float32Array(1);
+            gl.bindBuffer(gl.ARRAY_BUFFER, GL.buffers[$0]);
+            gl.getBufferSubData(gl.ARRAY_BUFFER, 0, values);
+            return values[0] === -0.5;
+        }, oldVbo)) evidence |= 1024u;
         if (vertices.size() != candidateVertices.size() || indices != candidateIndices ||
             std::memcmp(vertices.data(), candidateVertices.data(),
                 vertices.size() * sizeof(WebRendererSurfaceVertex)) != 0) evidence |= 2u;
@@ -8322,8 +8693,12 @@ extern "C" EMSCRIPTEN_KEEPALIVE unsigned KisakWeb_TestDynamicUploadAtomicity(
         if (WebRenderer_SetDynamicModelSceneOwned(scene, vertices, indices) !=
             WebRendererSurfaceResult::Success) evidence |= 16u;
     }
-    if (!vertices.empty() || !indices.empty() || glIsVertexArray(oldVao) ||
-        glIsBuffer(oldVbo) || glIsBuffer(oldIbo) || glIsTexture(oldLighting) ||
+    if (!vertices.empty() || !indices.empty() || !glIsVertexArray(oldVao) ||
+        !glIsBuffer(oldVbo) || !glIsBuffer(oldIbo) ||
+        g_renderer.dynamicModelSurfaceStaging != std::array<GLuint, 3>{oldVao, oldVbo, oldIbo} ||
+        g_renderer.dynamicModelGpuStagingBytes != 3u * sizeof(WebRendererSurfaceVertex) + 3u * sizeof(std::uint32_t) ||
+        (!expectedFailure && spare[0] && g_renderer.dynamicModelVertexArray != spare[0]) ||
+        glIsTexture(oldLighting) ||
         g_renderer.retainedDynamicModelVertices[0].position[0] != 0.25f ||
         g_renderer.retainedDynamicModelBatches[0].materialName != "upload-after" ||
         (variant == 2 ? g_renderer.retainedDynamicModelLighting.texture != 0u :
@@ -8403,6 +8778,15 @@ WebRendererSurfaceResult WebRenderer_SetUiScene(
             if (saved.region[0] + saved.region[2] > 1.0f ||
                 saved.region[1] + saved.region[3] > 1.0f)
                 return WebRendererSurfaceResult::InvalidDescriptor;
+            for (const float component : source.color)
+                if (!std::isfinite(component))
+                    return WebRendererSurfaceResult::NonFiniteVertex;
+            expectedFirstIndex += source.indexCount;
+            if (index && WebRenderer_CanMergeUiDraws(scene.batches[index - 1u], source))
+            {
+                batches.back().indexCount += source.indexCount;
+                continue;
+            }
             WebRendererRetainedUiBatch batch;
             batch.savedScreen = saved;
             batch.firstIndex = source.firstIndex;
@@ -8416,14 +8800,8 @@ WebRendererSurfaceResult WebRenderer_SetUiScene(
             batch.hasMaterialState = source.hasMaterialState;
             batch.stateBits[0] = source.stateBits[0];
             batch.stateBits[1] = source.stateBits[1];
-            for (std::size_t component = 0u; component < 4u; ++component)
-            {
-                if (!std::isfinite(source.color[component]))
-                    return WebRendererSurfaceResult::NonFiniteVertex;
-                batch.color[component] = source.color[component];
-            }
+            std::copy_n(source.color, 4u, batch.color);
             batches.push_back(std::move(batch));
-            expectedFirstIndex += source.indexCount;
         }
         if (expectedFirstIndex != scene.indexCount)
             return WebRendererSurfaceResult::InvalidDescriptor;
@@ -9385,18 +9763,9 @@ bool SceneNeedsFloatZ(bool distortion)
     return false;
 }
 
-void ApplyWorldMaterialState(const WebRendererRetainedWorldBatch &batch,
-    const GfxStateBits *passState = nullptr)
+void ApplyWorldRasterState(std::uint32_t state0, std::uint32_t state1,
+    bool hasCanonicalState, bool floatZ)
 {
-    std::uint32_t floatState[2]{}; bool floatAlpha = false;
-    const bool floatZ = g_renderer.floatZPass &&
-        WebRenderer_GetFloatZ(batch.materialIdentity, floatState, floatAlpha);
-    const std::uint32_t state0 = floatZ ? floatState[0] :
-        passState ? passState->loadBits[0] : batch.stateBits[0];
-    const std::uint32_t state1 = floatZ ? floatState[1] :
-        passState ? passState->loadBits[1] : batch.stateBits[1];
-    const bool hasCanonicalState = batch.materialIdentity != nullptr &&
-        (state0 != 0u || state1 != 0u);
     // R_SetAlphaAntiAliasingState enables the selected transparency-AA mode
     // only for opaque alpha-tested state when the scene target is
     // multisampled. SAMPLE_ALPHA_TO_COVERAGE is the WebGL2 boundary for that
@@ -9431,6 +9800,47 @@ void ApplyWorldMaterialState(const WebRendererRetainedWorldBatch &batch,
         (state0 & 0x10000000u) != 0u;
     glColorMask(rgbWrite, rgbWrite, rgbWrite, alphaWrite);
     ApplyMaterialBlendState(state0);
+    if (hasCanonicalState && (state1 & 2u) != 0u)
+    {
+        glDisable(GL_DEPTH_TEST);
+    }
+    else
+    {
+        glEnable(GL_DEPTH_TEST);
+        switch (hasCanonicalState ? (state1 & 0xcu) : 12u)
+        {
+        case 4u: glDepthFunc(GL_LESS); break;
+        case 8u: glDepthFunc(GL_EQUAL); break;
+        case 12u: glDepthFunc(GL_LEQUAL); break;
+        default: glDepthFunc(GL_ALWAYS); break;
+        }
+    }
+    glDepthMask(!hasCanonicalState || (state1 & 1u) != 0u
+        ? GL_TRUE : GL_FALSE);
+
+    if (floatZ)
+    {
+        glDisable(GL_BLEND);
+        glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    }
+}
+
+void ApplyWorldMaterialState(const WebRendererRetainedWorldBatch &batch,
+    const GfxStateBits *passState = nullptr,
+    WebRendererDrawState<WebRendererRetainedWorldBatch> *drawState = nullptr)
+{
+    std::uint32_t floatState[2]{}; bool floatAlpha = false;
+    const bool floatZ = g_renderer.floatZPass &&
+        WebRenderer_GetFloatZ(batch.materialIdentity, floatState, floatAlpha);
+    const std::uint32_t state0 = floatZ ? floatState[0] :
+        passState ? passState->loadBits[0] : batch.stateBits[0];
+    const std::uint32_t state1 = floatZ ? floatState[1] :
+        passState ? passState->loadBits[1] : batch.stateBits[1];
+    const bool hasCanonicalState = batch.materialIdentity != nullptr &&
+        (state0 != 0u || state1 != 0u);
+    if (!drawState || drawState->NeedsRaster(state0, state1, hasCanonicalState, floatZ))
+        ApplyWorldRasterState(state0, state1, hasCanonicalState, floatZ);
     const bool shaderPremultipliesAlpha =
         batch.technique == WebRendererWorldTechnique::VertexColorAdditive ||
         ((state0 & 0x700u) != 0u &&
@@ -9469,30 +9879,9 @@ void ApplyWorldMaterialState(const WebRendererRetainedWorldBatch &batch,
                             VertexColorDistanceFalloff
                         ? 4 : 0))));
 
-    if (hasCanonicalState && (state1 & 2u) != 0u)
-    {
-        glDisable(GL_DEPTH_TEST);
-    }
-    else
-    {
-        glEnable(GL_DEPTH_TEST);
-        switch (hasCanonicalState ? (state1 & 0xcu) : 12u)
-        {
-        case 4u: glDepthFunc(GL_LESS); break;
-        case 8u: glDepthFunc(GL_EQUAL); break;
-        case 12u: glDepthFunc(GL_LEQUAL); break;
-        default: glDepthFunc(GL_ALWAYS); break;
-        }
-    }
-    glDepthMask(!hasCanonicalState || (state1 & 1u) != 0u
-        ? GL_TRUE : GL_FALSE);
-
     glUniform1i(g_renderer.alphaTestUniform, WorldAlphaTestMode(state0));
     if (floatZ)
     {
-        glDisable(GL_BLEND);
-        glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE);
-        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         glUniform1i(g_renderer.materialModeUniform, floatAlpha ? 16 : 15);
         glUniform1f(g_renderer.depthSignUniform, batch.depthHack ? -1.0f : 1.0f);
     }
@@ -9684,6 +10073,94 @@ extern "C" EMSCRIPTEN_KEEPALIVE int KisakWeb_TestPicmipTexture(
     R_RegisterDvars();
     Dvar_SetInt(r_rendererInUse, 1);
     R_SetPicmipForMemory(800, 1024);
+    if (field == 6)
+    {
+        // No backing archive exists for this synthetic identity. Successful
+        // inspection must use retained bytes; rejected identities cannot do so.
+        GfxImage canonical{};
+        canonical.name = "__diagnostic_shared_iwi";
+        canonical.mapType = MAPTYPE_2D;
+        WebRendererRetainedWorldImage source;
+        source.canonicalIdentity = &canonical;
+        source.canonicalName = canonical.name;
+        source.supported = true;
+        source.recoverySource = WebRendererImageRecoverySource::IwiMember;
+        source.encodedSource.resize(44, 0);
+        const std::uint8_t header[]{'I','W','i',6,1,2,2,0,2,0,1,0};
+        std::copy(std::begin(header), std::end(header), source.encodedSource.begin());
+        for (unsigned i = 12; i < 28; i += 4) source.encodedSource[i] = 44;
+        const auto expected = source.encodedSource;
+        std::vector<WebRendererRetainedWorldImage> saved;
+        saved.swap(g_renderer.retainedWorldImages);
+        g_renderer.retainedWorldImages.push_back(std::move(source));
+        const bool passed = [&] {
+            auto &cached = g_renderer.retainedWorldImages[0];
+            kisak::iwi::Rgba8Layout layout{};
+            kisak::iwi::Error error{};
+            std::vector<std::uint8_t> bytes;
+            const auto inspect = [&](const GfxImage *image) {
+                return InspectExternalCanonicalImage(image, layout, error, bytes, 0);
+            };
+            if (!inspect(&canonical) || error != kisak::iwi::Error::None ||
+                bytes != expected || layout.width != 2 || layout.height != 2) return false;
+            GfxImage other = canonical;
+            if (FindRetainedIwiSource(other)) return false;
+            canonical.name = "__diagnostic_different_iwi";
+            if (FindRetainedIwiSource(canonical)) return false;
+            canonical.name = "__diagnostic_shared_iwi";
+            cached.supported = false;
+            if (FindRetainedIwiSource(canonical)) return false;
+            cached.supported = true;
+            cached.recoverySource = WebRendererImageRecoverySource::LoadDef;
+            if (FindRetainedIwiSource(canonical)) return false;
+            cached.recoverySource = WebRendererImageRecoverySource::IwiMember;
+            cached.encodedSource.pop_back();
+            if (!inspect(&canonical) || error == kisak::iwi::Error::None || bytes != expected)
+                return false;
+            g_renderer.retainedWorldImages.clear();
+            return !FindRetainedIwiSource(canonical);
+        }();
+        g_renderer.retainedWorldImages = std::move(saved);
+        return passed ? 1 : -1;
+    }
+    if (field == 5)
+    {
+        // More identities than hint slots guarantees collisions. Compare the
+        // original first-match policy across distinct pools and stale indices.
+        std::array<GfxImage, 1025> canonical{};
+        for (auto &image : canonical) image.name = "$white";
+        std::vector<WebRendererRetainedWorldImage> a, b;
+        std::size_t aBytes = 0, bBytes = 0;
+        const auto check = [](const GfxImage *image, auto &pool, auto &bytes)
+        {
+            const auto found = std::find_if(pool.begin(), pool.end(),
+                [image](const auto &entry) { return entry.canonicalIdentity == image; });
+            const auto expected = static_cast<std::uint32_t>(found - pool.begin());
+            const auto size = pool.size() + (found == pool.end());
+            const auto index = RetainCanonicalWorldImage(image, pool, bytes);
+            return index == expected && pool.size() == size &&
+                pool[index].canonicalIdentity == image && pool[index].supported &&
+                pool[index].pixels == std::vector<std::uint8_t>({255, 255, 255, 255}) &&
+                bytes == pool.size() * 4u;
+        };
+        for (std::size_t i = 0; i < canonical.size(); ++i)
+            if (!check(&canonical[i], a, aBytes) ||
+                !check(&canonical[canonical.size() - 1u - i], b, bBytes)) return -1;
+        std::reverse(a.begin(), a.end());
+        for (const auto &image : canonical)
+            if (!check(&image, a, aBytes) || !check(&image, b, bBytes)) return -1;
+        a.resize(7);
+        aBytes = a.size() * 4u;
+        for (const auto &image : canonical)
+            if (!check(&image, a, aBytes)) return -1;
+        b.clear();
+        bBytes = 0;
+        if (RetainCanonicalWorldImage(nullptr, b, bBytes) != INVALID_WORLD_IMAGE ||
+            !b.empty() || bBytes != 0) return -1;
+        for (const auto &image : canonical)
+            if (!check(&image, b, bBytes)) return -1;
+        return 1;
+    }
     std::vector<std::uint8_t> payload;
     for (int mip = 0; mip < 6; ++mip)
     {
@@ -9938,6 +10415,18 @@ const WebRendererRetainedWorldBatch &DynamicDrawBatch(const WebRendererDynamicDr
 void BindDynamicDrawGeometry(const WebRendererDynamicDraw &draw,
     GLint instanceEnabledUniform, std::uint32_t &previousInstance)
 {
+    if (const auto &cloud = DynamicDrawBatch(draw).particleCloud)
+    {
+        glBindVertexArray(g_renderer.cloudGeometry.vertexArray);
+        for (GLuint axis = 0; axis < 3; ++axis) glVertexAttrib3fv(4 + axis, cloud->axis[axis]);
+        glVertexAttrib3fv(7, cloud->origin);
+        glVertexAttrib4fv(1, cloud->color);
+        glUniform1f(instanceEnabledUniform, 2.0f);
+        glUniform1f(g_renderer.cloudScaleUniform, cloud->scale);
+        glUniform3fv(g_renderer.cloudAxesUniform, 2, cloud->billboardAxis[0]);
+        previousInstance = UINT32_MAX - 2u;
+        return;
+    }
     if (previousInstance == draw.brushInstanceIndex) return;
     previousInstance = draw.brushInstanceIndex;
     if (draw.brushInstanceIndex == UINT32_MAX)
@@ -10011,6 +10500,11 @@ bool DrawShadowPartition(
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
     glViewport(0, 0, shadowSize, shadowSize);
     glUseProgram(g_renderer.shadowProgram);
+    glUniform1i(g_renderer.shadowInstanceTextureUniform, 16);
+    glActiveTexture(GL_TEXTURE16);
+    glBindTexture(GL_TEXTURE_2D, g_renderer.staticModelInstanceTexture
+        ? g_renderer.staticModelInstanceTexture : g_renderer.texture);
+    glActiveTexture(GL_TEXTURE0);
     const auto finish = [](bool submitted) {
         glUniform1f(g_renderer.shadowDepthInstanceEnabledUniform, 0.0f);
         glDisable(GL_POLYGON_OFFSET_FILL);
@@ -10151,12 +10645,12 @@ bool DrawShadowPartition(
 #endif
     if ((!r_drawSModels || r_drawSModels->current.enabled) && g_renderer.staticModelSceneActive &&
         g_renderer.staticModelVertexArray != 0u &&
-        g_renderer.staticModelInstanceBuffer != 0u &&
+        g_renderer.staticModelInstanceTexture != 0u &&
         (!transientSpot || !r_spotLightSModelShadows ||
             r_spotLightSModelShadows->current.enabled))
     {
         glBindVertexArray(g_renderer.staticModelVertexArray);
-        glUniform1f(g_renderer.shadowDepthInstanceEnabledUniform, 1.0f);
+        glUniform1f(g_renderer.shadowDepthInstanceEnabledUniform, 3.0f);
         WebRendererInstanceState instanceState;
         if (transientSpot)
         {
@@ -10208,6 +10702,14 @@ bool DrawShadowPartition(
             if (batch.instanceCount == 0u) continue;
             if (requireSunCaster && !batch.draw.castsSunShadow) continue;
             if (!requireSunCaster && !batch.draw.castsSpotShadow) continue;
+            const std::uint32_t instanceEnd =
+                batch.instanceOffset + batch.instanceCount;
+            std::uint32_t instanceIndex = batch.instanceOffset;
+            while (instanceIndex < instanceEnd &&
+                g_renderer.staticModelPassVisibility[instanceIndex] == 0u)
+                ++instanceIndex;
+            // Material setup is needed only when this partition has a caster.
+            if (instanceIndex == instanceEnd) continue;
             if (!requireSunCaster)
                 applySpotShadowCull(batch.draw.shadowStateBits0);
             const WebRendererRetainedWorldImage *base = RetainedImage(
@@ -10225,9 +10727,6 @@ bool DrawShadowPartition(
             const std::uintptr_t indexOffset =
                 static_cast<std::uintptr_t>(batch.draw.firstIndex) *
                 sizeof(std::uint32_t);
-            const std::uint32_t instanceEnd =
-                batch.instanceOffset + batch.instanceCount;
-            std::uint32_t instanceIndex = batch.instanceOffset;
             while (instanceIndex < instanceEnd)
             {
                 while (instanceIndex < instanceEnd &&
@@ -10238,7 +10737,7 @@ bool DrawShadowPartition(
                     g_renderer.staticModelPassVisibility[instanceIndex] != 0u)
                     ++instanceIndex;
                 if (instanceIndex == runBegin) continue;
-                BindStaticModelInstanceRange(runBegin, instanceState);
+                BindStaticModelInstanceRange(runBegin, g_renderer.shadowInstanceBaseUniform, instanceState);
                 glDrawElementsInstanced(GL_TRIANGLES,
                     static_cast<GLsizei>(batch.draw.indexCount),
                     GL_UNSIGNED_INT,
@@ -10350,7 +10849,7 @@ bool CheckShadowDrawErrors()
     return ready;
 }
 
-bool DrawSunShadowMaps()
+bool DrawSunShadowMaps(bool deferErrors)
 {
     if (!g_renderer.sceneSunShadowEnabled ||
         g_renderer.shadowDepthTexture == 0u ||
@@ -10362,10 +10861,10 @@ bool DrawSunShadowMaps()
                 partition == 0u ? g_renderer.shadowFramebuffer : g_renderer.shadowFarFramebuffer,
                 partition == 0u ? g_renderer.sceneSunShadowMatrix : g_renderer.sceneSunShadowFarMatrix,
                 SUN_SHADOW_SIZE, true);
-        }, CheckShadowDrawErrors);
+        }, [deferErrors] { return deferErrors || CheckShadowDrawErrors(); });
 }
 
-bool DrawSpotShadowMaps()
+bool DrawSpotShadowMaps(bool deferErrors)
 {
     return WebRenderer_DrawShadowFamily<KISAK_WEB_BATCH_SHADOW_ERRORS>(
         g_renderer.sceneSpotShadowCount, [](std::size_t slot) {
@@ -10376,15 +10875,25 @@ bool DrawSpotShadowMaps()
                 g_renderer.sceneSpotShadowLightIndices[slot],
                 static_cast<std::uint32_t>(slot),
                 g_renderer.sceneSpotShadowDynamic[slot]);
-        }, CheckShadowDrawErrors);
+        }, [deferErrors] { return deferErrors || CheckShadowDrawErrors(); });
 }
 
 #if KISAK_WEB_DIAGNOSTICS
 extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestShadowErrorBoundary(int failure)
 {
-    if (failure < 0 || failure > 4 || !g_renderer.initialized || g_renderer.contextLost)
+    if (failure < 0 || failure > 8 || !g_renderer.initialized || g_renderer.contextLost)
         return UINT32_MAX;
     CheckShadowDrawErrors();
+    if (failure >= 5)
+    {
+        bool sun = failure != 7, spot = failure != 8;
+        unsigned checks = 0;
+        if (failure == 6) { glEnable(0); glDrawElements(GL_TRIANGLES, -1, GL_UNSIGNED_INT, nullptr); }
+        WebRenderer_CompleteShadowMaps(sun, spot,
+            [&] { ++checks; return CheckShadowDrawErrors(); });
+        return (sun ? 1u : 0u) | (spot ? 2u : 0u) |
+            (glGetError() == GL_NO_ERROR ? 4u : 0u) | (checks << 8u);
+    }
     std::uint32_t submitted = 0u;
     std::uint32_t checks = 0u;
     const bool ready = WebRenderer_DrawShadowFamily<KISAK_WEB_BATCH_SHADOW_ERRORS>(4u,
@@ -10476,50 +10985,18 @@ void BindSpotShadowForDynamicLight(std::uint32_t dynamicLightIndex,
 }
 
 void BindStaticModelInstanceRange(std::uint32_t instanceOffset,
-    WebRendererInstanceState &state)
+    GLint baseUniform, WebRendererInstanceState &state)
 {
     if (KISAK_WEB_REUSE_WORLD_STATIC_STATE && !state.NeedsRange(
             g_renderer.staticModelVertexArray,
-            g_renderer.staticModelInstanceBuffer, instanceOffset)) return;
-    glBindBuffer(GL_ARRAY_BUFFER, g_renderer.staticModelInstanceBuffer);
-    const std::size_t base = static_cast<std::size_t>(instanceOffset) *
-        sizeof(WebRendererStaticModelInstanceDesc);
-    constexpr std::size_t AXIS_OFFSET =
-        offsetof(WebRendererStaticModelInstanceDesc, axis);
-    for (GLuint row = 0u; row < 3u; ++row)
-    {
-        glVertexAttribPointer(
-            4u + row,
-            3,
-            GL_FLOAT,
-            GL_FALSE,
-            sizeof(WebRendererStaticModelInstanceDesc),
-            reinterpret_cast<const void *>(
-                base + AXIS_OFFSET + row * 3u * sizeof(float)));
-    }
-    glVertexAttribPointer(
-        7u,
-        3,
-        GL_FLOAT,
-        GL_FALSE,
-        sizeof(WebRendererStaticModelInstanceDesc),
-        reinterpret_cast<const void *>(
-            base + offsetof(WebRendererStaticModelInstanceDesc, origin)));
-    glVertexAttribPointer(
-        9u,
-        3,
-        GL_FLOAT,
-        GL_FALSE,
-        sizeof(WebRendererStaticModelInstanceDesc),
-        reinterpret_cast<const void *>(base + offsetof(
-            WebRendererStaticModelInstanceDesc,
-            modelLightingCoordinates)));
+            g_renderer.staticModelInstanceTexture, instanceOffset)) return;
+    glUniform1i(baseUniform, static_cast<GLint>(instanceOffset));
 }
 
 bool UpdateStaticModelLods()
 {
     if (!g_renderer.staticModelSceneActive ||
-        g_renderer.staticModelInstanceBuffer == 0u ||
+        g_renderer.staticModelInstanceTexture == 0u ||
         g_renderer.retainedStaticModelSourceInstances.empty())
         return true;
 
@@ -10689,18 +11166,11 @@ bool UpdateStaticModelLods()
         profile->lodChanges += changedLodCount;
 #endif
 
-    glBindBuffer(GL_ARRAY_BUFFER, g_renderer.staticModelInstanceBuffer);
     const std::size_t uploadOffset = shadowPackingChanged
         ? 0u : g_renderer.retainedStaticModelSourceInstances.size();
-    glBufferSubData(
-        GL_ARRAY_BUFFER,
-        static_cast<GLintptr>(
-            uploadOffset * sizeof(WebRendererStaticModelInstanceDesc)),
-        static_cast<GLsizeiptr>(
-            (g_renderer.retainedStaticModelInstances.size() - uploadOffset) *
-            sizeof(WebRendererStaticModelInstanceDesc)),
-        g_renderer.retainedStaticModelInstances.data() + uploadOffset);
-    glBindBuffer(GL_ARRAY_BUFFER, 0u);
+    if (!UploadStaticModelInstances(g_renderer.staticModelInstanceTexture,
+            g_renderer.retainedStaticModelInstances, uploadOffset, false))
+        return false;
     if (glGetError() != GL_NO_ERROR) return false;
     g_renderer.staticModelVisibilityChanged = false;
     return true;
@@ -10813,6 +11283,10 @@ void AddEmissiveSortKey(const WebRendererRetainedWorldBatch &batch,
 
 void BindSceneSamplers()
 {
+    glUniform1i(g_renderer.instanceTextureUniform, 16);
+    glActiveTexture(GL_TEXTURE16);
+    glBindTexture(GL_TEXTURE_2D, g_renderer.staticModelInstanceTexture
+        ? g_renderer.staticModelInstanceTexture : g_renderer.texture);
     glUniform1i(g_renderer.postSunUniform, 10);
     glActiveTexture(GL_TEXTURE10);
     glBindTexture(GL_TEXTURE_2D, g_renderer.postSunReady ? g_renderer.postSunTexture : g_renderer.texture);
@@ -10927,7 +11401,8 @@ template <typename Draw>
 std::uint32_t DrawDynamicLightMaterial(const WebRendererRetainedWorldBatch &batch,
     const std::vector<WebRendererRetainedWorldImage> &images, const GfxLight &light,
     const float receiverPlanes[6][4], Draw draw,
-    const WebRendererBrushModelInstanceDesc *brush = nullptr)
+    const WebRendererBrushModelInstanceDesc *brush = nullptr,
+    WebRendererDrawState<WebRendererRetainedWorldBatch> *drawState = nullptr)
 {
     if (!DynamicLightReceiverEligible(batch, light, receiverPlanes, brush))
         return 0;
@@ -10957,7 +11432,7 @@ std::uint32_t DrawDynamicLightMaterial(const WebRendererRetainedWorldBatch &batc
         WebRendererRetainedWorldBatch state;
         state.materialIdentity = material;
         std::copy_n(material->stateBitsTable[entry + passIndex].loadBits, 2, state.stateBits);
-        ApplyWorldMaterialState(state);
+        ApplyWorldMaterialState(state, nullptr, drawState);
         glUniform1i(g_renderer.materialModeUniform,
             std::strstr(name, "b0") ? 10 : std::strstr(name, "t0") ? 11 : 9);
         glUniform1f(g_renderer.normalMapEnabledUniform, normalMapped);
@@ -11394,6 +11869,10 @@ extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestSoftParticlePixel(int
         field == 1 ? g_renderer.floatZWidth : field == 2 ? g_renderer.floatZHeight : g_renderer.postSunReady;
     if (!g_renderer.initialized || g_renderer.contextLost) return UINT32_MAX;
     // Isolated shader/target fixture. No GfxWorld, FX system or game state.
+    const bool specializedDepth = (field & 8) != 0;
+    const bool textureDepth = (field & 32) != 0;
+    const bool instancedDepth = (field & (16 | 32)) != 0;
+    field &= 7;
     const bool distortion = scenario >= 20;
     const int edge = scenario == 31 ? 8 : scenario == 11 || distortion ? 4 : 1;
     if (!CreateFloatZTarget(edge, edge)) return UINT32_MAX;
@@ -11545,7 +12024,48 @@ extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestSoftParticlePixel(int
         glActiveTexture(GL_TEXTURE0);
     }
     glBindTexture(GL_TEXTURE_2D,textures[0]);
-    ApplyWorldMaterialState(batch); glDrawElements(GL_TRIANGLES,6,GL_UNSIGNED_INT,nullptr);
+    GLuint instanceTexture = 0u;
+    bool instanceUploadValid = true;
+    if (textureDepth)
+    {
+        std::vector<WebRendererStaticModelInstanceDesc> instances(129);
+        instances[63].origin[0] = 1000.0f;
+        instances[64].origin[0] = 1000.0f;
+        glGenTextures(1, &instanceTexture);
+        instanceUploadValid = UploadStaticModelInstances(instanceTexture, instances, 0u, true);
+        instances[64].axis[0][1] = 1.0f;
+        instances[64].axis[1][0] = -1.0f;
+        instances[64].axis[2][2] = 1.0f;
+        instances[64].origin[0] = 0.125f;
+        instances[64].origin[1] = 0.25f;
+        instanceUploadValid &= UploadStaticModelInstances(instanceTexture, instances, 64u, false);
+        // Invalid updates must leave the previously uploaded rows intact.
+        instanceUploadValid &= !UploadStaticModelInstances(instanceTexture, instances, instances.size(), false);
+        instanceUploadValid &= !UploadStaticModelInstances(instanceTexture, {}, 0u, false);
+    }
+    {
+        const ScopedFloatZProgram depthProgram(specializedDepth);
+        glUseProgram(g_renderer.program);
+        BindSceneSamplers();
+        glUniformMatrix4fv(g_renderer.viewProjectionUniform,1,GL_FALSE,projection);
+        glUniform1f(g_renderer.aspectUniform,1);
+        glUniform1f(g_renderer.instanceEnabledUniform, textureDepth ? 3 : instancedDepth ? 1 : 0);
+        if (instancedDepth)
+        {
+            glVertexAttrib3f(4,0,1,0); glVertexAttrib3f(5,-1,0,0);
+            glVertexAttrib3f(6,0,0,1); glVertexAttrib3f(7,0.125f,0.25f,0);
+        }
+        ApplyWorldMaterialState(batch);
+        if (textureDepth)
+        {
+            glActiveTexture(GL_TEXTURE16); glBindTexture(GL_TEXTURE_2D, instanceTexture);
+            glActiveTexture(GL_TEXTURE0);
+            glUniform1i(g_renderer.instanceBaseUniform, 63);
+            glDrawElementsInstanced(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr, 2);
+        }
+        else glDrawElements(GL_TRIANGLES,6,GL_UNSIGNED_INT,nullptr);
+    }
+    glUniform1f(g_renderer.instanceEnabledUniform,0);
     std::uint8_t depthPixel[4]{}; glReadPixels(0,0,1,1,GL_RGBA,GL_UNSIGNED_BYTE,depthPixel);
     const std::uint32_t depthBits = depthPixel[0] | (std::uint32_t(depthPixel[1])<<8) |
         (std::uint32_t(depthPixel[2])<<16) | (std::uint32_t(depthPixel[3])<<24);
@@ -11759,7 +12279,9 @@ extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestSoftParticlePixel(int
         glActiveTexture(GL_TEXTURE0);
         g_renderer.textureParameters.Reset();
     }
-    const bool error=glGetError()!=GL_NO_ERROR || !orderValid || !lightingTransitionValid;
+    const bool error=glGetError()!=GL_NO_ERROR || !orderValid ||
+        !lightingTransitionValid || !instanceUploadValid;
+    if (instanceTexture) glDeleteTextures(1, &instanceTexture);
     g_renderer.softParticleDepthReady=false;
     g_renderer.postSunReady=false;
     glBindFramebuffer(GL_FRAMEBUFFER,0); glDepthRangef(0,1);
@@ -11775,8 +12297,10 @@ extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t
 KisakWeb_TestOutdoorParticleCloudPixel(int scenario, int field)
 {
     if (!g_renderer.initialized || g_renderer.contextLost ||
-        scenario < 0 || scenario > 3)
+        scenario < 0 || scenario > 7)
         return UINT32_MAX;
+    const bool compact = scenario >= 4;
+    scenario %= 4;
 
     std::vector<WebRendererSurfaceVertex> vertices(4u);
     constexpr float positions[4][2] = {
@@ -11793,6 +12317,12 @@ KisakWeb_TestOutdoorParticleCloudPixel(int scenario, int field)
         vertices[index].normal[0] = 2.0f;
         vertices[index].normal[1] = 4.0f;
         vertices[index].normal[2] = 6.0f;
+        if (compact)
+        {
+            std::fill_n(vertices[index].position, 3, 0.0f);
+            vertices[index].textureCoordinate[0] = (positions[index][0] + 1) * 0.5f;
+            vertices[index].textureCoordinate[1] = (positions[index][1] + 1) * 0.5f;
+        }
     }
     const std::vector<std::uint32_t> indices = {0u, 2u, 1u, 0u, 3u, 2u};
     GLuint vertexArray = 0u, vertexBuffer = 0u, indexBuffer = 0u;
@@ -11925,6 +12455,21 @@ KisakWeb_TestOutdoorParticleCloudPixel(int scenario, int field)
             &selectedMode);
         BindWorldTexture(GL_TEXTURE0, textures[0], 0x11u, false);
         glBindVertexArray(vertexArray);
+        if (compact)
+        {
+            float projection[16];
+            std::copy_n(identity, 16, projection);
+            projection[12] = -2; projection[13] = -4; projection[14] = -6;
+            glUniformMatrix4fv(g_renderer.viewProjectionUniform, 1, GL_FALSE, projection);
+            glVertexAttrib3f(4, 1, 0, 0); glVertexAttrib3f(5, 0, 1, 0); glVertexAttrib3f(6, 0, 0, 1);
+            glVertexAttrib3f(7, 2, 4, 6);
+            glDisableVertexAttribArray(1);
+            glVertexAttrib4fv(1, color);
+            constexpr float axes[6] = {2, 0, 0, 0, 2, 0};
+            glUniform1f(g_renderer.instanceEnabledUniform, 2);
+            glUniform1f(g_renderer.cloudScaleUniform, 3);
+            glUniform3fv(g_renderer.cloudAxesUniform, 2, axes);
+        }
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
         glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
     }
@@ -11944,6 +12489,76 @@ KisakWeb_TestOutdoorParticleCloudPixel(int scenario, int field)
     return pixel[0] | (static_cast<std::uint32_t>(pixel[1]) << 8u) |
         (static_cast<std::uint32_t>(pixel[2]) << 16u) |
         (static_cast<std::uint32_t>(pixel[3]) << 24u);
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE unsigned KisakWeb_TestRetainedCloudGeometry(int action)
+{
+    if (!g_renderer.initialized || g_renderer.contextLost || g_renderer.worldSurfaceActive) return 0x8000;
+    if (action == 1)
+        return glIsVertexArray(g_renderer.cloudGeometry.vertexArray) &&
+            glIsBuffer(g_renderer.cloudGeometry.vertexBuffer) &&
+            glIsBuffer(g_renderer.cloudGeometry.indexBuffer) &&
+            g_renderer.retainedDynamicModelBatches.size() == 2 &&
+            g_renderer.retainedDynamicModelVertices.empty() &&
+            g_renderer.retainedDynamicModelIndices.empty() ? 0 : 1;
+    if (action == 2)
+    {
+        WebRenderer_UnloadWorldResources();
+        return g_renderer.cloudGeometry.vertexArray == 0 &&
+            g_renderer.cloudGeometry.vertices.empty() ? 0 : 1;
+    }
+    WebRendererParticleCloudDrawDesc cloud;
+    for (unsigned axis = 0; axis < 3; ++axis) cloud.axis[axis][axis] = 1;
+    cloud.color[3] = 1;
+    cloud.billboardAxis[0][0] = cloud.billboardAxis[1][1] = 2;
+    WebRendererWorldBatchDesc batches[2]{};
+    for (auto &batch : batches)
+    {
+        batch.particleCloud = &cloud;
+        batch.indexCount = WEB_RENDERER_PARTICLE_CLOUD_INDICES;
+        batch.surfaceCount = 1;
+        batch.sourceKind = WebRendererSceneBatchKind::FxParticleCloud;
+        batch.cameraRegion = 2;
+        batch.technique = WebRendererWorldTechnique::BackendFallback;
+        batch.stateBits[0] = 0x18000800;
+        batch.stateBits[1] = 2;
+    }
+    WebRendererWorldSurfaceDesc scene{nullptr, 0, nullptr, 0, batches, 2, nullptr};
+    if (WebRenderer_SetDynamicModelScene(scene) != WebRendererSurfaceResult::Success) return 1;
+    const auto vao = g_renderer.cloudGeometry.vertexArray;
+    const auto vbo = g_renderer.cloudGeometry.vertexBuffer;
+    const auto generation = g_renderer.cloudGeometry.generation;
+    unsigned failures = 0;
+    EM_ASM({
+        const gl = GL.currentContext.GLctx;
+        Module.cloudUploads = ({ saved: gl.bufferData, calls: 0 });
+        gl.bufferData = function(...args) { ++Module.cloudUploads.calls; return Module.cloudUploads.saved.apply(this, args); };
+    });
+    if (WebRenderer_SetDynamicModelScene(scene) != WebRendererSurfaceResult::Success) failures |= 2;
+    failures |= EM_ASM_INT({
+        const state = Module.cloudUploads; GL.currentContext.GLctx.bufferData = state.saved;
+        delete Module.cloudUploads; return state.calls ? 4 : 0;
+    });
+    cloud.scale = std::numeric_limits<float>::infinity();
+    if (WebRenderer_SetDynamicModelScene(scene) != WebRendererSurfaceResult::InvalidDescriptor) failures |= 8;
+    if (g_renderer.cloudGeometry.vertexArray != vao || g_renderer.cloudGeometry.vertexBuffer != vbo ||
+        g_renderer.cloudGeometry.generation != generation) failures |= 16;
+    // Force a new lattice upload and a real WebGL error. Previous geometry
+    // and published constants must survive this failed transaction.
+    cloud.scale = 1;
+    WebRenderer_InitializeParticleCloudLayout();
+    EM_ASM({
+        const gl = GL.currentContext.GLctx;
+        Module.cloudBufferData = gl.bufferData;
+        gl.bufferData = function(target, size, usage) { return Module.cloudBufferData.call(this, target, -1, usage); };
+    });
+    const auto failure = WebRenderer_SetDynamicModelScene(scene);
+    EM_ASM({ GL.currentContext.GLctx.bufferData = Module.cloudBufferData; delete Module.cloudBufferData; });
+    if (failure != WebRendererSurfaceResult::BackendFailure ||
+        g_renderer.cloudGeometry.vertexArray != vao || !glIsBuffer(vbo) ||
+        g_renderer.cloudGeometry.generation != generation) failures |= 32;
+    if (glGetError() != GL_NO_ERROR) failures |= 64;
+    return failures;
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE std::uint32_t KisakWeb_TestDynamicLightPixel(
@@ -12256,6 +12871,14 @@ std::uint32_t DrawDynamicLights(bool staticModelsReady,
 
         std::uint32_t previousInstance = UINT32_MAX - 1u;
         WebRendererInstanceState instanceState;
+        WebRendererDrawState<WebRendererRetainedWorldBatch> drawState;
+        const auto bindProjection = [&](bool depthHack) {
+            const float *matrix = depthHack ? g_renderer.sceneDepthHackViewProjection.data()
+                                           : g_renderer.sceneViewProjection.data();
+            if (!drawState.NeedsProjection(matrix)) return;
+            glDepthRangef(0, depthHack ? 0.015625f : 1);
+            glUniformMatrix4fv(g_renderer.viewProjectionUniform, 1, GL_FALSE, matrix);
+        };
         for (const auto &command : commands)
         {
             if (command.kind == WebRendererDynamicLightDrawKind::World)
@@ -12266,9 +12889,7 @@ std::uint32_t DrawDynamicLights(bool staticModelsReady,
                 const auto &batch =
                     g_renderer.retainedWorldBatches[range.batchIndex];
                 previousInstance = UINT32_MAX - 1u;
-                glDepthRangef(0, 1);
-                glUniformMatrix4fv(g_renderer.viewProjectionUniform, 1,
-                    GL_FALSE, g_renderer.sceneViewProjection.data());
+                bindProjection(false);
                 glUniform1f(g_renderer.instanceEnabledUniform, 0);
                 glBindVertexArray(g_renderer.vertexArray);
 #if KISAK_WEB_DIAGNOSTICS
@@ -12281,7 +12902,7 @@ std::uint32_t DrawDynamicLights(bool staticModelsReady,
                             GL_UNSIGNED_INT, reinterpret_cast<const void *>(
                                 static_cast<std::uintptr_t>(range.firstIndex) *
                                 sizeof(std::uint32_t)));
-                    });
+                    }, nullptr, &drawState);
                 continue;
             }
             if (command.kind ==
@@ -12290,25 +12911,23 @@ std::uint32_t DrawDynamicLights(bool staticModelsReady,
                 const auto &batch =
                     g_renderer.retainedStaticModelBatches[command.sourceIndex];
                 previousInstance = UINT32_MAX - 1u;
-                glDepthRangef(0, 1);
-                glUniformMatrix4fv(g_renderer.viewProjectionUniform, 1,
-                    GL_FALSE, g_renderer.sceneViewProjection.data());
+                bindProjection(false);
                 glBindVertexArray(g_renderer.staticModelVertexArray);
-                glUniform1f(g_renderer.instanceEnabledUniform, 1);
+                glUniform1f(g_renderer.instanceEnabledUniform, 3);
 #if KISAK_WEB_DIAGNOSTICS
                 g_frameProfileDrawBucket = FrameProfileDrawBucket::StaticModel;
 #endif
                 count += DrawDynamicLightMaterial(batch.draw,
                     g_renderer.retainedStaticModelImages, light,
                     receiverPlanes, [&] {
-                        BindStaticModelInstanceRange(command.first, instanceState);
+                        BindStaticModelInstanceRange(command.first, g_renderer.instanceBaseUniform, instanceState);
                         glDrawElementsInstanced(GL_TRIANGLES,
                             batch.draw.indexCount, GL_UNSIGNED_INT,
                             reinterpret_cast<const void *>(
                                 static_cast<std::uintptr_t>(
                                     batch.draw.firstIndex) *
                                 sizeof(std::uint32_t)), command.count);
-                    });
+                    }, nullptr, &drawState);
                 continue;
             }
             const auto &draw =
@@ -12319,14 +12938,12 @@ std::uint32_t DrawDynamicLights(bool staticModelsReady,
             g_frameProfileDrawBucket = ProfileBucketForKind(batch.sourceKind);
 #endif
             BindDynamicDrawGeometry(draw, g_renderer.instanceEnabledUniform, previousInstance);
-            glDepthRangef(0, batch.depthHack ? 0.015625f : 1);
-            glUniformMatrix4fv(g_renderer.viewProjectionUniform, 1, GL_FALSE,
-                batch.depthHack ? g_renderer.sceneDepthHackViewProjection.data() : g_renderer.sceneViewProjection.data());
+            bindProjection(batch.depthHack);
             count += DrawDynamicLightMaterial(batch, g_renderer.retainedDynamicModelImages, light, receiverPlanes, [&] {
                 glDrawElements(GL_TRIANGLES, batch.indexCount, GL_UNSIGNED_INT,
                     reinterpret_cast<const void *>(static_cast<std::uintptr_t>(batch.firstIndex) * 4));
             }, draw.brushInstanceIndex == UINT32_MAX ? nullptr :
-                &g_renderer.retainedBrushInstances[draw.brushInstanceIndex]);
+                &g_renderer.retainedBrushInstances[draw.brushInstanceIndex], &drawState);
         }
         commands.clear();
         glDisable(GL_SCISSOR_TEST);
@@ -12674,8 +13291,8 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
         BeginFrameProfileGpuQuery(
             *frameProfile, WebFrameProfileGpuStage::SunShadows);
 #endif
-    const bool shadowMapDrawn = sceneGeometryDraw && staticModelLodsReady &&
-        DrawSunShadowMaps();
+    bool shadowMapDrawn = sceneGeometryDraw && staticModelLodsReady &&
+        DrawSunShadowMaps(KISAK_WEB_BATCH_SHADOW_ERRORS);
 #if KISAK_WEB_DIAGNOSTICS
     if (frameProfile)
     {
@@ -12690,8 +13307,13 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
         BeginFrameProfileGpuQuery(
             *frameProfile, WebFrameProfileGpuStage::SpotShadows);
 #endif
-    const bool spotShadowMapsDrawn = sceneGeometryDraw &&
-        staticModelLodsReady && DrawSpotShadowMaps();
+    bool spotShadowMapsDrawn = sceneGeometryDraw &&
+        staticModelLodsReady && DrawSpotShadowMaps(KISAK_WEB_BATCH_SHADOW_ERRORS);
+    if (KISAK_WEB_BATCH_SHADOW_ERRORS && sceneGeometryDraw && staticModelLodsReady &&
+        (g_renderer.sceneSpotShadowCount || (g_renderer.sceneSunShadowEnabled &&
+            g_renderer.shadowDepthTexture && g_renderer.shadowFarDepthTexture)))
+        WebRenderer_CompleteShadowMaps(shadowMapDrawn, spotShadowMapsDrawn,
+            CheckShadowDrawErrors);
 #if KISAK_WEB_DIAGNOSTICS
     if (frameProfile)
     {
@@ -12807,6 +13429,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
     for (unsigned cameraStage = 0; cameraStage < prepassCount + (splitLighting ? 2u : 1u); ++cameraStage)
     {
     const bool floatZPass = floatZRequested && cameraStage == 0;
+    const ScopedFloatZProgram depthProgram(floatZPass);
     g_renderer.floatZPass = floatZPass;
     const bool cameraLighting = NeedsCameraLighting();
     const bool emissiveCameraPass = !floatZPass && cameraStage != prepassCount;
@@ -12927,7 +13550,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
             if (!floatZPass && SkipDistortionBatch(batch)) continue;
             if (!floatZPass && WebRenderer_SkipsNativeDraw(batch.technique))
                 continue;
-            if (worldDrawState.NeedsMaterial(batch)) ApplyWorldMaterialState(batch);
+            if (worldDrawState.NeedsMaterial(batch)) ApplyWorldMaterialState(batch, nullptr, &worldDrawState);
             const WebRendererRetainedWorldImage *base =
                 WorldImage(batch.baseImageIndex);
             const WebRendererRetainedWorldImage *detail =
@@ -12971,7 +13594,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 primaryLight && primaryLight->type == 2u &&
                 primaryLight->falloffScale > 0.0f &&
                 batch.techniqueType == 10u &&
-                batch.pixelShaderName.rfind("lm_spot_", 0u) == 0u;
+                batch.spotLightmapShader;
             if (!KISAK_WEB_REUSE_WORLD_STATIC_STATE || worldDrawState.NeedsFeatures({
                     g_renderer.sceneFogEnabled, fallback, !fallback && !water,
                     lightmapped, false, detailMapped, normalMapped, specularMapped, primaryLit }))
@@ -12993,8 +13616,6 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                         normalMapped ? 1.0f : 0.0f);
                     glUniform1f(g_renderer.specularMapEnabledUniform,
                         specularMapped ? 1.0f : 0.0f);
-                    glUniform1f(g_renderer.primaryLightEnabledUniform,
-                        primaryLit ? 1.0f : 0.0f);
                 }
             }
             if (waterReady)
@@ -13025,13 +13646,18 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
             }
             if (cameraLighting && detailMapped)
                 glUniform4fv(g_renderer.detailScaleUniform, 1, batch.detailScale);
-            if (cameraLighting)
-                glUniform1f(g_renderer.sunLightingModeUniform,
-                    lightmapped && (batch.techniqueType == 8u || batch.techniqueType == 9u)
-                        ? (shadowMapDrawn ? 2.0f : 1.0f) : 0.0f);
-            if (primaryLit) BindPrimaryLightConstants(*primaryLight);
-            BindSpotShadowForPrimaryLight(batch.primaryLightIndex,
-                primaryLit, spotShadowMapsDrawn);
+            const std::uint8_t sunMode = lightmapped &&
+                (batch.techniqueType == 8u || batch.techniqueType == 9u)
+                    ? (shadowMapDrawn ? 2u : 1u) : 0u;
+            if (cameraLighting && worldDrawState.NeedsLighting(
+                    primaryLit ? batch.primaryLightIndex : 0u, primaryLit, sunMode))
+            {
+                glUniform1f(g_renderer.sunLightingModeUniform, sunMode);
+                glUniform1f(g_renderer.primaryLightEnabledUniform, primaryLit);
+                if (primaryLit) BindPrimaryLightConstants(*primaryLight);
+                BindSpotShadowForPrimaryLight(batch.primaryLightIndex,
+                    primaryLit, spotShadowMapsDrawn);
+            }
             if (water) worldTextures.Reset();
             worldTextures.Apply<KISAK_WEB_REUSE_WORLD_STATIC_STATE>({{
                 {0u, base ? base->texture : g_renderer.texture, batch.samplerState},
@@ -13112,11 +13738,11 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
     if (staticBand && sceneGeometryDraw && staticModelLodsReady &&
         g_renderer.staticModelSceneActive &&
         g_renderer.staticModelVertexArray != 0u &&
-        g_renderer.staticModelInstanceBuffer != 0u)
+        g_renderer.staticModelInstanceTexture != 0u)
     {
         glBindVertexArray(g_renderer.staticModelVertexArray);
         glUniform1f(g_renderer.sunLightingModeUniform, 0.0f);
-        glUniform1f(g_renderer.instanceEnabledUniform, 1.0f);
+        glUniform1f(g_renderer.instanceEnabledUniform, 3.0f);
         glUniform1f(g_renderer.lightmapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.secondaryLightmapEnabledUniform, 0.0f);
         glUniform1f(g_renderer.specularMapEnabledUniform, 0.0f);
@@ -13143,7 +13769,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
             if (!WebRenderer_IsCameraVisibleXModelSurface(
                     batch.draw.sourceKind, batch.draw.cameraRegion))
                 continue;
-            if (staticDrawState.NeedsMaterial(batch.draw)) ApplyWorldMaterialState(batch.draw);
+            if (staticDrawState.NeedsMaterial(batch.draw)) ApplyWorldMaterialState(batch.draw, nullptr, &staticDrawState);
             const WebRendererRetainedWorldImage *base = RetainedImage(
                 g_renderer.retainedStaticModelImages,
                 batch.draw.baseImageIndex);
@@ -13184,11 +13810,6 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
             const auto *attenuation = primaryLight ? WorldImage(primaryLight->attenuationImageIndex) : nullptr;
             const bool localPrimaryLit = modelLit && primaryLight &&
                 (primaryLight->type == 2u || primaryLight->type == 3u) && attenuation && attenuation->texture;
-            if (localPrimaryLit)
-            {
-                BindPrimaryLightConstants(*primaryLight);
-            }
-            BindSpotShadowForPrimaryLight(batch.draw.primaryLightIndex, localPrimaryLit, spotShadowMapsDrawn);
             if (!KISAK_WEB_REUSE_WORLD_STATIC_STATE || staticDrawState.NeedsFeatures({
                     g_renderer.sceneFogEnabled, fallback, !fallback, false,
                     modelLit, detailMapped, normalMapped, specularMapped, false }))
@@ -13211,9 +13832,16 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
             }
             if (cameraLighting && detailMapped)
                 glUniform4fv(g_renderer.detailScaleUniform, 1, batch.draw.detailScale);
-            if (cameraLighting)
-                glUniform1f(g_renderer.primaryLightEnabledUniform,
-                    localPrimaryLit ? static_cast<float>(primaryLight->type) : directionalPrimaryLit ? 1.0f : 0.0f);
+            const std::uint8_t primaryMode = localPrimaryLit
+                ? primaryLight->type : directionalPrimaryLit ? 1u : 0u;
+            if (cameraLighting && staticDrawState.NeedsLighting(
+                    localPrimaryLit ? batch.draw.primaryLightIndex : 0u, primaryMode, 0u))
+            {
+                glUniform1f(g_renderer.primaryLightEnabledUniform, primaryMode);
+                if (localPrimaryLit) BindPrimaryLightConstants(*primaryLight);
+                BindSpotShadowForPrimaryLight(batch.draw.primaryLightIndex,
+                    localPrimaryLit, spotShadowMapsDrawn);
+            }
             if (specularMapped)
             {
                 if (cameraLighting)
@@ -13236,7 +13864,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 {4u, detail ? detail->texture : g_renderer.texture, batch.draw.detailSamplerState},
                 {5u, specular ? specular->texture : g_renderer.texture, batch.draw.specularSamplerState},
             }}, BindPassTexture);
-            BindStaticModelInstanceRange(batch.cameraInstanceOffset, instanceState);
+            BindStaticModelInstanceRange(batch.cameraInstanceOffset, g_renderer.instanceBaseUniform, instanceState);
             const std::uintptr_t indexOffset =
                 static_cast<std::uintptr_t>(batch.draw.firstIndex) *
                 sizeof(std::uint32_t);
@@ -13485,7 +14113,7 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
 #endif
                 if (drawState.NeedsMaterial(batch))
                 {
-                    ApplyWorldMaterialState(batch);
+                    ApplyWorldMaterialState(batch, nullptr, &drawState);
 #if KISAK_WEB_DIAGNOSTICS
                     if (profileDynamicModel) ++frameProfile->dynamicMaterialUpdates;
 #endif
@@ -13556,16 +14184,12 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                     primaryLight->type == 2u &&
                     primaryLight->falloffScale > 0.0f &&
                     batch.techniqueType == 10u &&
-                    batch.pixelShaderName.rfind("lm_spot_", 0u) == 0u;
+                    batch.spotLightmapShader;
                 const bool directionalPrimaryLit = modelLit && primaryLight &&
                     primaryLight->type == 1u;
                 const auto *attenuation = primaryLight ? WorldImage(primaryLight->attenuationImageIndex) : nullptr;
                 const bool localPrimaryLit = modelLit && primaryLight &&
                     (primaryLight->type == 2u || primaryLight->type == 3u) && attenuation && attenuation->texture;
-                if (cameraLighting)
-                    glUniform1f(g_renderer.sunLightingModeUniform,
-                        dynamicLightmapped && (batch.techniqueType == 8u || batch.techniqueType == 9u)
-                            ? (shadowMapDrawn ? 2.0f : 1.0f) : 0.0f);
                 if (drawState.NeedsFeatures({
                     g_renderer.sceneFogEnabled && !fxSceneGeometry && !sunSprite,
                     fallback && !fxSceneGeometry, !fallback, dynamicLightmapped,
@@ -13613,12 +14237,21 @@ bool WebRenderer_DrawFrame(const WebFrameInfo &frame)
                 else if (cameraLighting)
                     glUniform4f(g_renderer.envMapParmsUniform,
                         0.0f, 0.0f, 0.0f, 0.0f);
-                if (primaryLit || localPrimaryLit) BindPrimaryLightConstants(*primaryLight);
-                if (cameraLighting)
-                    glUniform1f(g_renderer.primaryLightEnabledUniform, localPrimaryLit
-                        ? static_cast<float>(primaryLight->type) : primaryLit || directionalPrimaryLit ? 1.0f : 0.0f);
-                BindSpotShadowForPrimaryLight(batch.primaryLightIndex,
-                    primaryLit || localPrimaryLit, spotShadowMapsDrawn);
+                const std::uint8_t primaryMode = localPrimaryLit
+                    ? primaryLight->type : primaryLit || directionalPrimaryLit ? 1u : 0u;
+                const std::uint8_t sunMode = dynamicLightmapped &&
+                    (batch.techniqueType == 8u || batch.techniqueType == 9u)
+                        ? (shadowMapDrawn ? 2u : 1u) : 0u;
+                if (cameraLighting && drawState.NeedsLighting(
+                        primaryLit || localPrimaryLit ? batch.primaryLightIndex : 0u,
+                        primaryMode, sunMode))
+                {
+                    glUniform1f(g_renderer.sunLightingModeUniform, sunMode);
+                    glUniform1f(g_renderer.primaryLightEnabledUniform, primaryMode);
+                    if (primaryLit || localPrimaryLit) BindPrimaryLightConstants(*primaryLight);
+                    BindSpotShadowForPrimaryLight(batch.primaryLightIndex,
+                        primaryLit || localPrimaryLit, spotShadowMapsDrawn);
+                }
                 if (cameraLighting && modelLit)
                     glUniform3fv(g_renderer.modelLightingBaseCoordinatesUniform,
                         1, batch.modelLightingCoordinates);

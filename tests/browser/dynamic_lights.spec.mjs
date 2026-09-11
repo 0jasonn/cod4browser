@@ -56,4 +56,9 @@ test("shadow groups detect real GL errors before readiness and recover", async (
         expect(result >>> 0).toBe((batched ? 1 << 24 : 0) | (checks << 16) |
             (submitted << 8) | 6 | (failure === 0 ? 1 : 0));
     }
+    for (const [scenario, flags] of [[5, 7], [6, 4], [7, 6], [8, 5]]) {
+        const result = await page.evaluate(scenario =>
+            globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestShadowErrorBoundary", scenario), scenario);
+        expect(result).toBe(256 | flags); // One complete drain before either map is ready.
+    }
 });

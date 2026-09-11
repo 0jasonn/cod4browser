@@ -695,8 +695,80 @@ void TestRepeatedAppendAndAllocationRollback()
 }
 } // namespace
 
+void TestCompactCloudMatchesExpandedGeometry()
+{
+    Fixture fixture;
+    auto view = IdentityView();
+    for (unsigned variant = 0; variant < 8; ++variant)
+    {
+        auto &cloud = fixture.submission.cloud;
+        cloud.placement.base.origin[0] = float(variant) * 150;
+        cloud.placement.base.origin[2] = -float(variant) * 17;
+        cloud.placement.scale = 1 + float(variant) * 11;
+        cloud.radius[0] = float(variant) * 3;
+        cloud.radius[1] = float(variant) * 7;
+        cloud.endpos[0] = cloud.placement.base.origin[0] + 12;
+        cloud.endpos[2] = cloud.placement.base.origin[2] - 16;
+        cloud.placement.base.quat[2] = std::sin(float(variant) * 0.2f);
+        cloud.placement.base.quat[3] = std::cos(float(variant) * 0.2f);
+        WebRendererParticleCloudSceneCommand expanded;
+        assert(WebRenderer_BuildParticleCloudCommand(fixture.submission, view, expanded) ==
+            WebRendererParticleCloudSceneResult::Success);
+        WebRendererParticleCloudDrawDesc compact;
+        WebRendererWorldBatchDesc batch;
+        assert(WebRenderer_BuildParticleCloudDraw(fixture.submission, view, compact, batch) ==
+            WebRendererParticleCloudSceneResult::Success);
+        assert(batch.particleCloud == &compact && batch.materialIdentity == expanded.batches[0].materialIdentity);
+        const auto layout = WebRenderer_ParticleCloudLayout();
+        for (unsigned particle = 0; particle < layout.size(); ++particle)
+            for (unsigned corner = 0; corner < 4; ++corner)
+            {
+                const auto &vertex = expanded.vertices[particle * 4 + corner];
+                for (unsigned channel = 0; channel < 4; ++channel)
+                    assert(compact.color[channel] == vertex.color[channel]);
+                for (unsigned row = 0; row < 3; ++row)
+                {
+                    const auto &local = layout[particle];
+                    const float transformed = compact.axis[0][row] * local[0] +
+                        compact.axis[1][row] * local[1] + compact.axis[2][row] * local[2];
+                    const float center = compact.origin[row] + transformed * compact.scale;
+                    float position = center + compact.billboardAxis[0][row] * (corner >= 2 ? 0.5f : -0.5f);
+                    position += compact.billboardAxis[1][row] * (corner & 1 ? 0.5f : -0.5f);
+                    assert(center == vertex.normal[row]);
+                    assert(position == vertex.position[row]);
+                }
+            }
+        const auto original = compact;
+        for (float bad : {std::numeric_limits<float>::infinity(),
+            std::numeric_limits<float>::quiet_NaN()})
+        {
+            compact.scale = bad;
+            assert(!WebRenderer_ParticleCloudDrawIsFinite(compact));
+            compact = original;
+            compact.billboardAxis[1][2] = bad;
+            assert(!WebRenderer_ParticleCloudDrawIsFinite(compact));
+            compact = original;
+        }
+    }
+    // Check the extreme-input slow path against the existing expansion oracle.
+    Fixture extreme;
+    for (float origin : {0.0f, std::numeric_limits<float>::max()})
+    {
+        extreme.submission.cloud.placement.base.origin[1] = origin;
+        extreme.submission.cloud.endpos[1] = origin;
+        extreme.submission.cloud.radius[0] = extreme.submission.cloud.radius[1] =
+            std::numeric_limits<float>::max();
+        WebRendererParticleCloudSceneCommand expanded;
+        WebRendererParticleCloudDrawDesc compact;
+        WebRendererWorldBatchDesc batch;
+        assert(WebRenderer_BuildParticleCloudDraw(extreme.submission, view, compact, batch) ==
+            WebRenderer_BuildParticleCloudCommand(extreme.submission, view, expanded));
+    }
+}
+
 int main()
 {
+    TestCompactCloudMatchesExpandedGeometry();
     TestAuthoredOutdoorCloudBindings();
     TestRetentionCopySlotsAndClear();
     TestDeterministicLayoutAndMaterialData();

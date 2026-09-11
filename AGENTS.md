@@ -115,6 +115,11 @@ Kisak behavior or explain why a platform-owned implementation is permanent.
 - Keep native and browser target selection explicit. Do not make the web toolchain silently change native target behavior.
 - Prefer source-built, browser-compatible dependencies with licenses suitable for GPL-3.0 distribution. Record replacements for every removed native library.
 - Serve browser builds over HTTP for testing; do not rely on `file://` behavior.
+- Start automated browser sessions headless and muted (`--mute-audio`), without
+  opening or focusing desktop windows. Performance runs skip loading intros
+  through native `ui_autoContinue 1` after loading completes. Keep cinematics
+  playing when a test specifically validates them. Compare fresh captures in
+  the same browser execution mode; never mix headless and headed timings.
 - Bootstrap the local pinned toolchain with `tools/bootstrap_web_toolchain.ps1`.
 - Build the native SP reference with `tools/build_native_sp.ps1`; its pinned
   MSVC/SDK configuration uses existing OpenAL and disables runtime DLL copying.

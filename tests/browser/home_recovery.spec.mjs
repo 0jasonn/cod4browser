@@ -10,6 +10,7 @@ test("OPFS rename and restore recover after browser restart on the same origin a
         async function open()
         {
             const context = await chromium.launchPersistentContext(profile, {
+                ...testInfo.project.use.launchOptions,
                 channel: testInfo.project.use.channel,
                 headless: testInfo.project.use.headless ?? true,
                 viewport: testInfo.project.use.viewport,

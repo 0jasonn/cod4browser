@@ -60,6 +60,16 @@ Direct3D9 window and executed the main menu. Remaining missing-dvar and
 owned reference inventory; recorded config values and hashes establish neither
 difficulty nor visible fidelity.
 
+The current pinned build also completes from a fresh `build/native-sp` directory.
+A quiet startup experiment launches it on a separate, non-visible Windows
+desktop, with an isolated home directory, muted volume and intro skipping.
+It reads the owned installation and reaches `R_Init`, but Direct3D9 reports
+`GetDeviceCaps failed: Not available` before creating the device. The harness
+stops its process after 55 seconds and never switches desktops. This mode
+provides no native gameplay or performance baseline. Its build/startup records
+use `cargo-native-reference-*` under ignored `build/performance/`, with the
+engine log in `native-cargo-profile/main/console.log` there.
+
 The Miles target links but this installation's `mss32.dll` lacks five imported
 functions, so the runnable reference uses OpenAL. Its pre-existing cinematic
 audio limitation prevents treating native OpenAL as a complete retail audio

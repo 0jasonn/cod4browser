@@ -185,8 +185,33 @@ function installWorkerTestControls()
         }
         return drawArrays.apply(this, arguments_);
     };
+    let rendererIdentityContext = null;
+    const getExtension = prototype.getExtension;
+    prototype.getExtension = function(name) {
+        if (testControl.observeRendererIdentity && Number.isInteger(testControl.rendererIdentityRevision) &&
+            name === "WEBGL_debug_renderer_info") {
+            return testControl.hideRendererIdentityExtension ? null : {
+                UNMASKED_VENDOR_WEBGL: 0x9245, UNMASKED_RENDERER_WEBGL: 0x9246,
+            };
+        }
+        return getExtension.call(this, name);
+    };
     const getParameter = prototype.getParameter;
     prototype.getParameter = function(parameter) {
+        if (testControl.observeRendererIdentity &&
+            [0x1F00, 0x1F01, 0x1F02, 0x9245, 0x9246].includes(parameter)) {
+            testControl.rendererIdentityQueries = (testControl.rendererIdentityQueries ?? 0) + 1;
+            if (rendererIdentityContext !== this) {
+                rendererIdentityContext = this;
+                testControl.rendererIdentityContexts = (testControl.rendererIdentityContexts ?? 0) + 1;
+            }
+            if (testControl.failRendererIdentityQuery && parameter === 0x9245)
+                throw new Error("Injected identity query failure");
+            if (Number.isInteger(testControl.rendererIdentityRevision)) {
+                if (parameter === 0x9245) return "Test GPU vendor";
+                if (parameter === 0x9246) return `ANGLE test GPU ${testControl.rendererIdentityRevision}`;
+            }
+        }
         if (parameter === 0x8D57 && Number.isInteger(testControl.maxAaSamples)) {
             return Math.max(1, testControl.maxAaSamples);
         }
@@ -273,7 +298,10 @@ globalThis.addEventListener("message", (event) => {
             }
             case "test-control":
                 Object.assign(testControl, message.values ?? {});
-                reply(message.id, message.type, true);
+                reply(message.id, message.type, message.values?.snapshotRendererIdentity ? {
+                    queries: testControl.rendererIdentityQueries ?? 0,
+                    contexts: testControl.rendererIdentityContexts ?? 0,
+                } : true);
                 break;
             case "resize":
                 if (!Number.isInteger(message.width) || !Number.isInteger(message.height) ||

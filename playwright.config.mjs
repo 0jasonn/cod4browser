@@ -21,6 +21,7 @@ export default defineConfig({
     },
     use: {
         baseURL,
+        launchOptions: { args: ["--mute-audio"] },
         trace: "retain-on-failure",
         viewport: { width: 1440, height: 1000 },
     },

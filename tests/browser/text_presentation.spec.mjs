@@ -10,6 +10,9 @@ test("native text commands retain styles, subtitle glow, console rings and timed
         args => globalThis.__KISAKCOD_WEB__.module.call("_KisakWeb_TestTextDraw", ...args),
         [scenario, time, field, index]);
     expect(await sample(0)).toBe(2);
+    expect(await sample(0, 501, 101)).toBe(1); // Same-color glyphs share one backend draw.
+    expect(await sample(1, 501, 101)).toBe(4); // Alternating shadow/color order stays intact.
+    expect(await sample(6, 501, 101)).toBe(1); // Console ring glyphs batch too.
     expect(await sample(0, 501, 1)).toBeCloseTo(19.5, 3);
     expect(await sample(0, 501, 2)).toBeCloseTo(19.5, 3);
     expect(await sample(1)).toBe(4);

@@ -175,6 +175,8 @@ test("authored outdoor particle clouds use the world lookup and inclusive height
     expect(await rgba(1)).toEqual([64, 64, 48, 0]);
     expect(await rgba(2)).toEqual([64, 64, 48, 64]);
     expect(await rgba(3)).toEqual([64, 64, 48, 0]);
+    for (let scenario = 0; scenario < 4; ++scenario)
+        expect(await rgba(scenario + 4)).toEqual(await rgba(scenario));
     expect(await page.evaluate(() => globalThis.__KISAKCOD_WEB__.module.call(
         "_KisakWeb_TestLoseWebGLContext"))).toBe(1);
     await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state)).toBe("renderer-lost");
@@ -182,6 +184,23 @@ test("authored outdoor particle clouds use the world lookup and inclusive height
         "_KisakWeb_TestRestoreWebGLContext"))).toBe(1);
     await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state)).toBe("running");
     expect(await rgba(0)).toEqual([64, 64, 48, 64]);
+    for (let scenario = 0; scenario < 4; ++scenario)
+        expect(await rgba(scenario + 4)).toEqual(await rgba(scenario));
+});
+
+test("particle clouds retain one lattice across frames, failed uploads and recovery", async ({ page }) => {
+    await page.goto("/");
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state)).toBe("running");
+    const call = (name, ...args) => page.evaluate(({ name, args }) =>
+        globalThis.__KISAKCOD_WEB__.module.call(name, ...args), { name, args });
+    expect(await call("_KisakWeb_TestRetainedCloudGeometry", 0)).toBe(0);
+    expect(await call("_KisakWeb_TestRetainedCloudGeometry", 1)).toBe(0);
+    expect(await call("_KisakWeb_TestLoseWebGLContext")).toBe(1);
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state)).toBe("renderer-lost");
+    expect(await call("_KisakWeb_TestRestoreWebGLContext")).toBe(1);
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state)).toBe("running");
+    expect(await call("_KisakWeb_TestRetainedCloudGeometry", 1)).toBe(0);
+    expect(await call("_KisakWeb_TestRetainedCloudGeometry", 2)).toBe(0);
 });
 
 test("authored soft-particle depth, variants and recovery preserve pixels", async ({ page }) => {
@@ -239,6 +258,32 @@ test("authored soft-particle depth, variants and recovery preserve pixels", asyn
     await page.evaluate(() => globalThis.__KISAKCOD_WEB__.submitCanonicalCommand("r_zFeather 1"));
     await expect.poll(() => sample(0, 1)).toBe(128);
     await check(11, [64, 128, 192, 128]);
+});
+
+test("specialized FloatZ preserves depth, alpha, soft particles and distortion after recovery", async ({ page }) => {
+    await page.goto("/");
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state)).toBe("running");
+    const call = (name, ...args) => page.evaluate(({ name, args }) =>
+        __KISAKCOD_WEB__.module.call(name, ...args), { name, args });
+    const check = async () => {
+        for (const scenario of [0, 1, 2, 3, 8, 9, 10, 11, 20, 21, 22, 23, 29, 32, 33]) {
+            for (const field of [0, 1, 2, 16, 17, 18]) {
+                const original = await call("_KisakWeb_TestSoftParticlePixel", scenario, field);
+                expect(original >>> 0).not.toBe(0xffffffff);
+                expect(await call("_KisakWeb_TestSoftParticlePixel", scenario, field | 8)).toBe(original);
+                if (field & 16) {
+                    expect(await call("_KisakWeb_TestSoftParticlePixel", scenario, (field & 7) | 32)).toBe(original);
+                    expect(await call("_KisakWeb_TestSoftParticlePixel", scenario, (field & 7) | 40)).toBe(original);
+                }
+            }
+        }
+    };
+    await check();
+    expect(await call("_KisakWeb_TestLoseWebGLContext")).toBe(1);
+    await expect.poll(() => page.evaluate(() => __KISAKCOD_WEB__.state)).toBe("renderer-lost");
+    expect(await call("_KisakWeb_TestRestoreWebGLContext")).toBe(1);
+    await expect.poll(() => page.evaluate(() => __KISAKCOD_WEB__.state)).toBe("running");
+    await check();
 });
 
 test("cinematic code images preserve plane colour, alpha, interpolation and recovery", async ({ page }) => {
@@ -310,6 +355,21 @@ test("native texture quality selects authored mip pixels and reduces GL upload r
     await command("r_picmip_manual 0");
     await expect.poll(() => texture()).toBe(32);
     expect(await texture(2, 3)).toBe(255);
+});
+
+test("retained texture lookup preserves identity through collisions and pool replacement", async ({ page }) => {
+    await page.goto("/");
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__?.state)).toBe("running");
+    const call = (name, ...args) => page.evaluate(({ name, args }) =>
+        globalThis.__KISAKCOD_WEB__.module.call(name, ...args), { name, args });
+    expect(await call("_KisakWeb_TestPicmipTexture", 2, 0, 5, 0)).toBe(1);
+    expect(await call("_KisakWeb_TestPicmipTexture", 2, 0, 6, 0)).toBe(1);
+    expect(await call("_KisakWeb_TestLoseWebGLContext")).toBe(1);
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state)).toBe("renderer-lost");
+    expect(await call("_KisakWeb_TestRestoreWebGLContext")).toBe(1);
+    await expect.poll(() => page.evaluate(() => globalThis.__KISAKCOD_WEB__.state)).toBe("running");
+    expect(await call("_KisakWeb_TestPicmipTexture", 2, 0, 5, 0)).toBe(1);
+    expect(await call("_KisakWeb_TestPicmipTexture", 2, 0, 6, 0)).toBe(1);
 });
 
 test("canonical filtering and normal settings affect WebGL state and light pixels", async ({ page }) => {

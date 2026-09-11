@@ -1393,10 +1393,10 @@ void TestTextureParameterMemoPreservesAliasedObjectState()
     struct Bind { std::uint32_t texture; std::uint8_t sampler; bool mipmaps; };
     const std::array<Bind, 9> bindings{{
         {1, 0x62, true}, {2, 0x62, true}, {1, 0x62, true},
-        {1, 0x23, true}, {1, 0x23, false}, {257, 0x62, true},
+        {1, 0x23, true}, {1, 0x23, false}, {4097, 0x62, true},
         {1, 0x23, false}, {2, 0x62, true}, {1, 0x62, true}}};
     WebRendererTextureParameters memo;
-    std::array<std::pair<std::uint8_t, bool>, 258> original{}, cached{};
+    std::vector<std::pair<std::uint8_t, bool>> original(4098), cached(4098);
     std::uint32_t writes = 0;
     for (const auto &bind : bindings)
     {
@@ -1436,6 +1436,16 @@ void TestTextureParameterMemoPreservesAliasedObjectState()
         });
         assert(expectedUnits == actualUnits && original == cached);
     }
+
+    // The draw sees one final sampler on this shared object. Intermediate
+    // changes between unit binds cannot be observed and need no GPU writes.
+    dynamic.Reset();
+    memo.Reset();
+    std::uint32_t aliasedWrites = 0;
+    dynamic.Apply(sets[2], [&](auto, auto texture, auto sampler, bool mipmaps, bool) {
+        if (memo.NeedsUpdate(texture, sampler, mipmaps)) ++aliasedWrites;
+    });
+    assert(aliasedWrites == 1u);
 }
 
 void TestSunShadowRangesPreserveTriangleOrderAndCutouts()

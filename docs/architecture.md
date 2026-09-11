@@ -49,6 +49,10 @@ Frame admission carries fractional cap remainder separately from elapsed game
 time. Zero-duration callbacks do not invent simulation steps; changing the cap
 does not replay admission debt as game time. The default dvar and uncapped
 125 Hz safety ceiling remain unchanged, as does the non-reentrant JSPI pump.
+The browser reads the current clock after commands return from loading and
+consumes canonical `Com_ResetFrametime` timestamps for load/restart admission.
+Pre-load elapsed time and admission debt are discarded at that native reset;
+time spent after it, including slow gameplay frames, remains simulation time.
 The local benchmark installs a bounded Worker timing sink for every completed
 submission, separating canonical/frontend CPU work from later WebGL submission.
 GPU timer queries measure execution separately; main-thread animation callbacks
@@ -219,28 +223,92 @@ presentation after 2D; saved-screen feedback and thumbnails remain pre-display.
 
 Portable commands retain canonical material/image identity, surface spans, current
 placement and validated numeric data. Camera DPVS and each sun/spot caster selection
-remain independent; off-camera objects may still cast shadows. Backend resources
-and recovery copies never become world/entity/pose state. Publication is atomic,
+remain independent; off-camera objects may still cast shadows. Static-model
+shadow batches skip material setup when their existing partition visibility
+contains no instance; caster selection and draw order are unchanged. Backend
+resources and recovery copies never become world/entity/pose state. Publication is atomic,
 failed ownership transfers return storage, and unload releases map resources.
 GPU context recovery preserves CPU spotlight history, selected slots and static
 visibility. Reset those fields at world retirement/publication: clearing them on
 device loss changes paused shadow selection when the same scene is resubmitted.
-Shadow families publish readiness after all submissions and a complete GL error
-drain; early failure still cleans up and prevents sampling. Staged dynamic
+Sun and spot shadows share one complete GL error drain after both families
+submit, before either is sampled. CPU submission failure keeps that family
+unavailable; a GL error suppresses both for the frame. No GL allocation or
+error-consuming operation intervenes. Early failure still cleans up. Staged dynamic
 geometry/model-lighting uploads share a check only when the persistent image pool
 needs no upload; failure preserves publication, recovery and caller ownership.
-Canonical cloud slots expand directly through the existing scalar builder into
-admitted scene vectors, retaining brush priority, RNG lifetime, order and atomic
-rollback. Standalone controls share its geometric resize policy; expanded cloud
-geometry does not become cached engine state.
+Dynamic-buffer reuse keeps one unpublished spare VAO/buffer set.
+Its storage is replaced on upload; failure destroys the spare and preserves the
+published geometry. Loss, unload and shutdown clear both sets. Extra GPU storage
+is reported separately. A repeated saved-bridge comparison reduces mean frame
+time by 2.0% and CPU time by 6.0%; opening/deck timing remains provisional.
+World/dynamic command copies retain labels only for diagnostics, apart from
+material names needed by the production sun-flare message. Canonical identities
+remain available to draw code; the separate static-model loader retains its
+production fallback labels.
+Retained image lookup uses 4 KiB of index hints, checking each against current
+pool bounds and canonical `GfxImage` identity before reuse. Pool construction
+deduplicates identities; UI replacement preserves that identity and index.
+Hints own no assets or GPU resources. Collisions and stale indices after pool
+replacement, growth or clearing fall back to the existing linear lookup.
+Camera command sorting computes keys once into temporary contiguous storage,
+using original indices to preserve stable ties within the existing model/FX
+runs. Canonical keys, non-reorderable anchors and GPU submission stay unchanged.
+Canonical cloud slots submit placement, billboard axes and color to one retained
+GPU lattice, following native `R_CreateParticleCloudBuffer`. EffectsCore still
+owns the FX state and the canonical renderer initialization owns its RNG lifetime.
+The backend owns GPU expansion and recovery; no camera-dependent geometry is
+cached. Logical admission still charges every 4,096-vertex/6,144-index cloud,
+preserving brush priority, native order, validation and atomic publication.
+The expanded scalar builder remains a native/Wasm oracle and control path.
+At the isolated Cargoship deck checkpoint, the matched paused comparison removes
+147,456 streamed vertices per frame and reduces buffer uploads from 13.85 to
+2.35 MB/frame. Draw counts and submitted triangles match; captured images differ
+by at most one color level on 21 pixels. This developer-assisted checkpoint
+does not establish full-mission or native parity; see the renderer guide for
+timing and recovery evidence.
+
+The 2D backend joins only adjacent complete triangle ranges with identical
+material, image, sampler, state and color, matching native tessellation batching
+without changing frontend glyph commands. Saved-screen and shellshock operations
+remain ordering barriers. FloatZ compiles a depth-only variant of the shared
+camera shader body; opaque depth avoids base-texture sampling while alpha-tested
+depth keeps its threshold. Program-owned uniform locations switch for the
+existing prepass traversal and restore on scope exit, including failure. Context
+recovery recreates both programs; no canonical material/geometry state is copied.
+Pass-local backend state suppresses repeated lighting constants, shadow bindings,
+and raster settings without changing material shader arguments or receiver order.
+Transient-light receivers use the same projection/raster tracking. The bounded
+texture-parameter memo uses 4096 slots after measured Cargoship collisions; it
+resets each frame. Pass binding keeps unit order and applies each aliased
+texture's final sampler immediately, preserving the state visible to the draw
+without repeated intermediate writes.
+An optional `WEBGL_multi_draw` experiment preserved camera-range gaps, pass
+order and recovery, but showed no consistent additional performance benefit.
+It is excluded from the retained backend; ordinary indexed draws remain in use.
+Per-frame memory reports cache immutable GPU identity by WebGL object and native
+context generation, while retaining current resource accounting. Loss/shutdown
+clears it; restoration and failed-query retries refresh it.
+Retained backend batches keep only the `lm_spot_` shader-family flag used by
+lighting selection; unused copied shader names and hashes have been removed.
+Canonical material/technique shader metadata stays in the frontend and database.
 
 WebGL2 implements encountered authored shader families and pass/state ordering.
 Context creation requests the high-performance adapter; the benchmark records
 the actual GL/ANGLE adapter and driver instead of assuming the request was honored.
 It does not translate arbitrary D3D shaders. Most 2D image pools retain encoded
-LoadDef/IWI sources and decode transiently for upload/recovery; cubes, lighting,
+LoadDef/IWI sources and decode transiently for upload/recovery. Separate pools
+reuse complete IWI bytes only for matching canonical identity/name and revalidate
+current picmip; GPU ownership and admission remain separate, and world unload
+retires every source. Shared DXT conversion uses a four-byte RGBA copy without
+changing decode arithmetic. Cubes, lighting,
 water and other supplemental resources have separate policies. The 800 MiB limit
 is per-pool decoded admission, not aggregate retained memory or measured VRAM.
+Static-model placement and lighting keep their canonical CPU descriptors; the
+WebGL backend stores their 15 consumed floats in four RGBA32F texels per instance.
+This replaces per-range attribute pointers with a base-instance uniform, using
+core WebGL2 vertex texture fetch. Visibility/LOD packing and world ownership are
+unchanged; transient packing bytes do not become a second engine object model.
 See [renderer ownership and limits](renderer-retained-resources.md) for the boundary.
 
 Canonical SND/OpenAL owns channels, aliases and room/EQ parameters; the device owns

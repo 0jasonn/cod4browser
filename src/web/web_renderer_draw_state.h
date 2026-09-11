@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstring>
 #include <numeric>
+#include <utility>
 #include <vector>
 
 #ifndef KISAK_WEB_BATCH_SHADOW_ERRORS
@@ -40,6 +41,16 @@ bool WebRenderer_DrawShadowFamily(std::size_t count, Draw draw, Check check)
         return submitted && checked;
     }
     return submitted;
+}
+
+// Sun and spot maps have no consumers between their submissions. Validate
+// the whole shadow phase before either becomes sampleable by the camera.
+template<typename Check>
+void WebRenderer_CompleteShadowMaps(bool &sunReady, bool &spotReady, Check check)
+{
+    const bool clean = check(); // Drain even when CPU submission failed.
+    sunReady &= clean;
+    spotReady &= clean;
 }
 
 inline unsigned WebRenderer_PrimarySortKey(std::uint64_t packed) noexcept
@@ -107,6 +118,10 @@ void WebRenderer_BuildStableDrawOrder(
 {
     order.resize(entries.size());
     std::iota(order.begin(), order.end(), 0u);
+    // Read each key once into contiguous storage. The original index breaks
+    // ties, preserving stable order without sorting through batch pointers.
+    using Key = decltype(sortKey(batchFor(entries[0])));
+    std::vector<std::pair<Key, std::uint32_t>> keyed;
     std::size_t runBegin = 0u;
     while (runBegin < order.size())
     {
@@ -120,11 +135,16 @@ void WebRenderer_BuildStableDrawOrder(
         while (runEnd < order.size() &&
             canReorder(batchFor(entries[order[runEnd]])) == group)
             ++runEnd;
-        std::stable_sort(order.begin() + runBegin, order.begin() + runEnd,
-            [&](std::uint32_t left, std::uint32_t right) {
-                return sortKey(batchFor(entries[left])) <
-                    sortKey(batchFor(entries[right]));
-            });
+        if (runEnd - runBegin > 1u)
+        {
+            keyed.clear();
+            keyed.reserve(runEnd - runBegin);
+            for (std::size_t i = runBegin; i < runEnd; ++i)
+                keyed.emplace_back(sortKey(batchFor(entries[i])), static_cast<std::uint32_t>(i));
+            std::sort(keyed.begin(), keyed.end());
+            for (std::size_t i = 0; i < keyed.size(); ++i)
+                order[runBegin + i] = keyed[i].second;
+        }
         runBegin = runEnd;
     }
 }
@@ -275,11 +295,41 @@ public:
         return true;
     }
 
+    // Light records, shadow slots/fades and lighting dvars are immutable for
+    // this pass. Index zero denotes no local-light constants. Material setup
+    // never writes these uniforms or the spot-shadow texture unit.
+    bool NeedsLighting(std::uint8_t index, std::uint8_t primaryMode,
+        std::uint8_t sunMode) noexcept
+    {
+        const std::array<std::uint8_t, 3> next{index, primaryMode, sunMode};
+        if (lightingKnown_ && lighting_ == next) return false;
+        lighting_ = next;
+        lightingKnown_ = true;
+        return true;
+    }
+
+    // Different materials still upload their shader arguments, but can share
+    // the same raster state. AA settings are immutable within this pass.
+    bool NeedsRaster(std::uint32_t state0, std::uint32_t state1,
+        bool canonical, bool floatZ) noexcept
+    {
+        const std::array<std::uint32_t, 3> next{state0, state1,
+            std::uint32_t(canonical) | (std::uint32_t(floatZ) << 1u)};
+        if (rasterKnown_ && raster_ == next) return false;
+        raster_ = next;
+        rasterKnown_ = true;
+        return true;
+    }
+
 private:
     const float *projection_ = nullptr;
     const Batch *material_ = nullptr;
     std::array<bool, 9> features_{};
     bool featuresKnown_ = false;
+    std::array<std::uint8_t, 3> lighting_{};
+    bool lightingKnown_ = false;
+    std::array<std::uint32_t, 3> raster_{};
+    bool rasterKnown_ = false;
 };
 
 // One pass, with immutable VAO attribute enables/divisors. Reset after binding
